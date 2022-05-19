@@ -3,6 +3,7 @@ add_executable(
     unit
     unit.cpp
     test_file.cpp
+    test_page.cpp
     test_utils.cpp
     ${TEST_TOOLS}
 )

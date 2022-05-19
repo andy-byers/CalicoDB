@@ -1,5 +1,5 @@
-#ifndef CUB_FILE_H
-#define CUB_FILE_H
+#ifndef CUB_STORAGE_FILE_H
+#define CUB_STORAGE_FILE_H
 
 #include "common.h"
 #include "interface.h"
@@ -93,4 +93,4 @@ private:
 
 } // cub
 
-#endif // CUB_FILE_H
+#endif // CUB_STORAGE_FILE_H

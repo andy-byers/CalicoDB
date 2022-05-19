@@ -1,5 +1,5 @@
-#ifndef CUB_SYSTEM_H
-#define CUB_SYSTEM_H
+#ifndef CUB_STORAGE_SYSTEM_H
+#define CUB_STORAGE_SYSTEM_H
 
 #include "common.h"
 #include "utils/slice.h"
@@ -24,4 +24,4 @@ auto resize(int, Size) -> void;
 
 } // cub::system
 
-#endif // CUB_SYSTEM_H
+#endif // CUB_STORAGE_SYSTEM_H

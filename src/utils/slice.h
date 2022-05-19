@@ -6,8 +6,8 @@
 * (1) https://github.com/google/leveldb/blob/main/include/leveldb/slice.h
 */
 
-#ifndef CUB_SLICE_H
-#define CUB_SLICE_H
+#ifndef CUB_UTILS_SLICE_H
+#define CUB_UTILS_SLICE_H
 
 #include <cstring>
 #include <string>
@@ -38,7 +38,7 @@ namespace impl {
 
        template<class Q> Slice(Q data, Size size) noexcept
            : m_data{data}
-             , m_size{size} {}
+           , m_size{size} {}
 
        auto operator[](Index index) const noexcept -> const Value&
        {
@@ -81,16 +81,14 @@ namespace impl {
            return range(offset, m_size - offset);
        }
 
-       [[nodiscard]] auto data(Index index = 0) const noexcept -> ConstPointer
+       [[nodiscard]] auto data() const noexcept -> ConstPointer
        {
-           CUB_EXPECT_LE(index, m_size);
-           return m_data + index;
+           return m_data;
        }
 
-       auto data(Index index = 0) noexcept -> UnqualifiedPointer
+       auto data() noexcept -> UnqualifiedPointer
        {
-           CUB_EXPECT_LE(index, m_size);
-           return m_data + index;
+           return m_data;
        }
 
        auto clear() noexcept -> void
@@ -194,6 +192,20 @@ inline auto mem_clear(MutBytes mem) noexcept -> void*
     return mem_clear(mem, mem.size());
 }
 
+inline auto mem_move(MutBytes dst, RefBytes src, Size n) noexcept -> void*
+{
+    CUB_EXPECT_LE(n, src.size());
+    CUB_EXPECT_LE(n, dst.size());
+    return std::memmove(dst.data(), src.data(), n);
+}
+
+inline auto mem_move(MutBytes dst, RefBytes src) noexcept -> void*
+{
+    CUB_EXPECT_LE(src.size(), dst.size());
+    return mem_move(dst, src, src.size());
+}
+
+
 } // cub
 
-#endif // CUB_SLICE_H
+#endif // CUB_UTILS_SLICE_H

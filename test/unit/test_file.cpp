@@ -198,7 +198,7 @@ TEST_F(FaultyMemoryTests, CanWriteNormally)
     mem->write(to_bytes(TEST_STRING));
 }
 
-TEST_F(FaultyMemoryTests, HasReadFault)
+TEST_F(FaultyMemoryTests, GeneratesReadFault)
 {
     auto mem = std::make_unique<FaultyReadOnlyMemory>();
     auto controls = mem->controls();
@@ -206,7 +206,7 @@ TEST_F(FaultyMemoryTests, HasReadFault)
     ASSERT_THROW(mem->read(to_bytes(test_buffer)), IOError);
 }
 
-TEST_F(FaultyMemoryTests, HasWriteFault)
+TEST_F(FaultyMemoryTests, GeneratesWriteFault)
 {
     auto mem = std::make_unique<FaultyWriteOnlyMemory>();
     auto controls = mem->controls();

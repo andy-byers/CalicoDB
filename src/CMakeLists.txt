@@ -1,12 +1,34 @@
 
 set(
     CUB_FILES
-        storage/file.cpp
-        storage/file.h
-        storage/interface.h
-        storage/system.cpp
-        storage/system.h
-    ./utils/slice.h
+
+    pool/frame.cpp
+    pool/frame.h
+    pool/interface.h
+
+    page/cell.cpp
+    page/cell.h
+    page/link.cpp
+    page/link.h
+    page/node.cpp
+    page/node.h
+    page/page.cpp
+    page/page.h
+
+    storage/file.cpp
+    storage/file.h
+    storage/interface.h
+    storage/system.cpp
+    storage/system.h
+
+    utils/assert.h
+    utils/encoding.h
+    utils/layout.h
+    utils/scratch.cpp
+    utils/scratch.h
+    utils/types.cpp
+    utils/types.h
+    utils/slice.h
 )
 
 # Build the core static library.

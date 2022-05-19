@@ -1,6 +1,11 @@
 
 Cub DB is an embedded key-value database written in C++17.
 
+**NOTE:** 
+I have most of the code for this library already written. 
+Since I suck at git and am also very new to writing libraries, the history I had before was total trash.
+Now that I have a better understanding of project planning and this particular project's requirements (and hopefully git), I'm starting over.
+
 ### Tentative Public API
 
 Classes:
@@ -73,8 +78,8 @@ CubDB
   ┣━╸examples
   ┣━╸include
   ┣━╸src
-  ┃  ┣━╸file
   ┃  ┣━╸pool
+  ┃  ┣━╸storage
   ┃  ┣━╸tree
   ┃  ┣━╸utils
   ┃  ┗━╸wal

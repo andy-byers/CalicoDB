@@ -1,5 +1,5 @@
-#ifndef CUB_INTERFACE_H
-#define CUB_INTERFACE_H
+#ifndef CUB_STORAGE_INTERFACE_H
+#define CUB_STORAGE_INTERFACE_H
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -72,7 +72,6 @@ private:
 
 class ReadWriteStorage {
 public:
-    friend class Fs;
     virtual ~ReadWriteStorage() = default;
     virtual auto resize(Size) -> void = 0;
     virtual auto seek(long, Seek) -> Index = 0;
@@ -101,7 +100,6 @@ private:
 
 class LogStorage {
 public:
-    friend class Fs;
     virtual ~LogStorage() = default;
     virtual auto resize(Size) -> void = 0;
     virtual auto write(RefBytes) -> Size = 0;
@@ -158,4 +156,4 @@ public:
 
 } // cub
 
-#endif //CUB_INTERFACE_H
+#endif //CUB_STORAGE_INTERFACE_H

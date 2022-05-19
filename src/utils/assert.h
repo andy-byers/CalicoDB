@@ -1,5 +1,5 @@
-#ifndef CUB_ASSERT_H
-#define CUB_ASSERT_H
+#ifndef CUB_UTILS_ASSERT_H
+#define CUB_UTILS_ASSERT_H
 
 #include <cstdio>
 #include <cstdlib>
@@ -37,4 +37,4 @@ inline auto handle_expect(bool expectation, const char *repr, const char *file, 
 
 } // cub
 
-#endif // CUB_ASSERT_H
+#endif // CUB_UTILS_ASSERT_H
