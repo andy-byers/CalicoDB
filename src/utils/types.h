@@ -16,6 +16,7 @@ namespace cub {
 
 class Node;
 
+// TODO: Put somewhere else!
 class FileHeader {
 public:
     // Identifies the file as a CubDB_ database.
@@ -71,6 +72,14 @@ template<class Value> struct Unique {
     }
 
     Value value;
+};
+
+enum class PageType: uint16_t {
+    NULL_PAGE     = 0x0000,
+    INTERNAL_NODE = 0x494E, // "IN"
+    EXTERNAL_NODE = 0x4558, // "EX"
+    OVERFLOW_LINK = 0x4F56, // "OV"
+    FREELIST_LINK = 0x4652, // "FR"
 };
 
 } // Cub

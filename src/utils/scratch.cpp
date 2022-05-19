@@ -4,14 +4,12 @@
 namespace cub {
 
 Scratch::Scratch(Index id, MutBytes data, ScratchManager *parent)
-    : m_internal {Internal {data, id, parent}} {std::cout<<"con:"<<id<<" @ "<<(uintptr_t)data.data()<<" --> "<<(int)m_internal.value.data[0]<<'\n';}
+    : m_internal {Internal {data, id, parent}} {}
 
 Scratch::~Scratch()
 {
-    if (m_internal.value.parent) {
-    std::cout<<"des:"<<m_internal.value.id<<" @ "<<(uintptr_t)m_internal.value.data.data()<<" --> "<<(int)m_internal.value.data[0]<<'\n';
+    if (m_internal.value.parent)
         m_internal.value.parent->on_scratch_release(*this);
-    }
 }
 
 auto Scratch::id() const -> Index

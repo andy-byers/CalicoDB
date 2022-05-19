@@ -1,4 +1,6 @@
 #include "fakes.h"
+#include "wal/wal_reader.h"
+#include "wal/wal_writer.h"
 
 namespace cub {
 
@@ -54,23 +56,9 @@ namespace {
 
 } // <anonymous>
 
-// Overloads for Fs utility class static methods.
-template<> auto Fs::use_direct_io(const ReadOnlyMemory&) {}
-template<> auto Fs::use_direct_io(const WriteOnlyMemory&) {}
-template<> auto Fs::use_direct_io(const ReadWriteMemory&) {}
-template<> auto Fs::use_direct_io(const LogMemory&) {}
-template<> auto Fs::size(const ReadOnlyMemory &store) {return store.m_memory.memory().size();}
-template<> auto Fs::size(const WriteOnlyMemory &store) {return store.m_memory.memory().size();}
-template<> auto Fs::size(const ReadWriteMemory &store) {return store.m_memory.memory().size();}
-template<> auto Fs::size(const LogMemory &store) {return store.m_memory.memory().size();}
-template<> auto Fs::sync(const ReadOnlyMemory&) {}
-template<> auto Fs::sync(const WriteOnlyMemory&) {}
-template<> auto Fs::sync(const ReadWriteMemory&) {}
-template<> auto Fs::sync(const LogMemory&) {}
-
 auto ReadOnlyMemory::seek(long offset, Seek whence) -> Index
 {
-    m_cursor = do_seek(m_cursor, Fs::size(*this), offset, whence);
+    m_cursor = do_seek(m_cursor, size(), offset, whence);
     return m_cursor;
 }
 
@@ -83,7 +71,7 @@ auto ReadOnlyMemory::read(MutBytes out) -> Size
 
 auto WriteOnlyMemory::seek(long offset, Seek whence) -> Index
 {
-    m_cursor = do_seek(m_cursor, Fs::size(*this), offset, whence);
+    m_cursor = do_seek(m_cursor, size(), offset, whence);
     return m_cursor;
 }
 
@@ -96,7 +84,7 @@ auto WriteOnlyMemory::write(RefBytes in) -> Size
 
 auto ReadWriteMemory::seek(long offset, Seek whence) -> Index
 {
-    m_cursor = do_seek(m_cursor, Fs::size(*this), offset, whence);
+    m_cursor = do_seek(m_cursor, size(), offset, whence);
     return m_cursor;
 }
 
@@ -150,5 +138,16 @@ auto FaultyLogMemory::write(RefBytes in) -> Size
     maybe_throw_write_error();
     return LogMemory::write(in);
 }
+
+WALHarness::WALHarness(Size block_size)
+{
+    auto writer_file = std::make_unique<FaultyLogMemory>();
+    backing = writer_file->memory();
+    auto reader_file = std::make_unique<FaultyReadOnlyMemory>(backing);
+    writer = std::make_unique<WALWriter>(std::move(writer_file), block_size);
+    reader = std::make_unique<WALReader>(std::move(reader_file), block_size);
+}
+
+WALHarness::~WALHarness() = default;
 
 } // cub

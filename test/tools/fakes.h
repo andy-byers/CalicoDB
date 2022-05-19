@@ -2,7 +2,7 @@
 #define CUB_FAKES_H
 
 #include "common.h"
-#include "storage/interface.h"
+#include "file/interface.h"
 #include "utils/slice.h"
 #include "random.h"
 
@@ -18,14 +18,16 @@ private:
     std::shared_ptr<std::string> m_memory;
 };
 
-class ReadOnlyMemory: public ReadOnlyStorage {
+class ReadOnlyMemory: public IReadOnlyFile {
 public:
     ReadOnlyMemory() = default;
     explicit ReadOnlyMemory(SharedMemory memory)
         : m_memory{std::move(memory)} {}
     ~ReadOnlyMemory() override = default;
     auto memory() -> SharedMemory {return m_memory;}
-
+    [[nodiscard]] auto size() const -> Size override {return m_memory.memory().size();}
+    auto use_direct_io() -> void override {}
+    auto sync() -> void override {}
     auto seek(long, Seek) -> Index override;
     auto read(MutBytes) -> Size override;
 
@@ -35,14 +37,16 @@ private:
     Index m_cursor{};
 };
 
-class WriteOnlyMemory: public WriteOnlyStorage {
+class WriteOnlyMemory: public IWriteOnlyFile {
 public:
     WriteOnlyMemory() = default;
     explicit WriteOnlyMemory(SharedMemory memory)
         : m_memory{std::move(memory)} {}
     ~WriteOnlyMemory() override = default;
     auto memory() -> SharedMemory {return m_memory;}
-
+    [[nodiscard]] auto size() const -> Size override {return m_memory.memory().size();}
+    auto use_direct_io() -> void override {}
+    auto sync() -> void override {}
     auto resize(Size size) -> void override {m_memory.memory().resize(size);}
     auto seek(long, Seek) -> Index override;
     auto write(RefBytes) -> Size override;
@@ -53,14 +57,16 @@ private:
     Index m_cursor{};
 };
 
-class ReadWriteMemory: public ReadWriteStorage {
+class ReadWriteMemory: public IReadWriteFile {
 public:
     ReadWriteMemory() = default;
     explicit ReadWriteMemory(SharedMemory memory)
         : m_memory{std::move(memory)} {}
     ~ReadWriteMemory() override = default;
     auto memory() -> SharedMemory {return m_memory;}
-
+    [[nodiscard]] auto size() const -> Size override {return m_memory.memory().size();}
+    auto use_direct_io() -> void override {}
+    auto sync() -> void override {}
     auto resize(Size size) -> void override {m_memory.memory().resize(size);}
     auto seek(long, Seek) -> Index override;
     auto read(MutBytes) -> Size override;
@@ -72,14 +78,16 @@ private:
     Index m_cursor{};
 };
 
-class LogMemory: public LogStorage {
+class LogMemory: public ILogFile {
 public:
     LogMemory() = default;
     explicit LogMemory(SharedMemory memory)
         : m_memory{std::move(memory)} {}
     ~LogMemory() override = default;
     auto memory() -> SharedMemory {return m_memory;}
-
+    [[nodiscard]] auto size() const -> Size override {return m_memory.memory().size();}
+    auto use_direct_io() -> void override {}
+    auto sync() -> void override {}
     auto resize(Size size) -> void override {m_memory.memory().resize(size);}
     auto write(RefBytes) -> Size override;
 
@@ -236,6 +244,17 @@ public:
 
 private:
     friend class Fs;
+};
+
+class IWALReader;
+class IWALWriter;
+
+struct WALHarness final {
+    explicit WALHarness(Size);
+    ~WALHarness();
+    SharedMemory backing;
+    std::unique_ptr<IWALReader> reader;
+    std::unique_ptr<IWALWriter> writer;
 };
 
 } // cub

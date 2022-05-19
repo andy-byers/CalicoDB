@@ -10,14 +10,6 @@
 
 namespace cub {
 
-enum class PageType: uint16_t {
-    NULL_PAGE     = 0x0000,
-    INTERNAL_NODE = 0x494E, // "IN"
-    EXTERNAL_NODE = 0x4558, // "EX"
-    OVERFLOW_LINK = 0x4F56, // "OV"
-    FREELIST_LINK = 0x4652, // "FR"
-};
-
 inline auto is_page_type_valid(PageType type) -> bool
 {
     return type == PageType::INTERNAL_NODE ||
@@ -39,24 +31,14 @@ struct PageUpdate {
     LSN lsn{};
 };
 
-class PageHeader {
-public:
-    PageHeader(PID, MutBytes);
-    [[nodiscard]] auto type() const -> PageType;
-    [[nodiscard]] auto lsn() const -> LSN;
-    auto set_type(PageType) -> void;
-    auto set_lsn(LSN) -> void;
-
-private:
-    MutBytes m_header;
-};
-
-class BufferPool;
+class IBufferPool;
 
 class Page final {
 public:
-    Page(PID, MutBytes, BufferPool*);
+    Page(PID, MutBytes, IBufferPool *);
     ~Page();
+
+    [[nodiscard]] auto is_dirty() const -> bool {return m_is_dirty;}
 
     [[nodiscard]] auto type() const -> PageType;
     [[nodiscard]] auto lsn() const -> LSN;
@@ -90,8 +72,7 @@ private:
     auto do_change(Index, Size) -> void;
     auto header_offset() const -> Index;
 
-    PageHeader m_header;
-    Unique<BufferPool*> m_pool;
+    Unique<IBufferPool *> m_pool;
     std::optional<Scratch> m_snapshot;
     std::vector<ChangedRegion> m_changes;
     MutBytes m_data;

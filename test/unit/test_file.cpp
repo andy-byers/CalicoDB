@@ -5,8 +5,8 @@
 
 #include "common.h"
 #include "random.h"
-#include "storage/file.h"
-#include "storage/interface.h"
+#include "file/file.h"
+#include "file/interface.h"
 #include "fakes.h"
 #include "unit.h"
 
@@ -23,7 +23,7 @@ template<class S> auto read_string(S &store, std::string &buffer) -> Size
 
 template<class S> auto read_exact_string(S &store, std::string &buffer) -> void
 {
-    Fs::read_exact(store, to_bytes(buffer));
+    read_exact(store, to_bytes(buffer));
 }
 
 template<class S> auto write_string(S &store, const std::string &buffer) -> Size
@@ -33,10 +33,10 @@ template<class S> auto write_string(S &store, const std::string &buffer) -> Size
 
 template<class S> auto write_exact_string(S &store, const std::string &buffer) -> void
 {
-    Fs::write_exact(store, to_bytes(buffer));
+    write_exact(store, to_bytes(buffer));
 }
 
-auto test_random_reads_and_writes(ReadWriteStorage &store) -> void
+auto test_random_reads_and_writes(IReadWriteFile &store) -> void
 {
     static constexpr auto payload_size {1'000};
     Random random {0};
@@ -72,22 +72,22 @@ public:
 
     ~StorageTests() override = default;
 
-    static auto open_ro(const std::string &name, Mode mode) -> std::unique_ptr<ReadOnlyStorage>
+    static auto open_ro(const std::string &name, Mode mode) -> std::unique_ptr<IReadOnlyFile>
     {
         return open_store<ReadOnlyFile>(name, mode);
     }
 
-    static auto open_wo(const std::string &name, Mode mode) -> std::unique_ptr<WriteOnlyStorage>
+    static auto open_wo(const std::string &name, Mode mode) -> std::unique_ptr<IWriteOnlyFile>
     {
         return open_store<WriteOnlyFile>(name, mode);
     }
 
-    static auto open_rw(const std::string &name, Mode mode) -> std::unique_ptr<ReadWriteStorage>
+    static auto open_rw(const std::string &name, Mode mode) -> std::unique_ptr<IReadWriteFile>
     {
         return open_store<ReadWriteFile>(name, mode);
     }
 
-    static auto open_log(const std::string &name, Mode mode) -> std::unique_ptr<LogStorage>
+    static auto open_log(const std::string &name, Mode mode) -> std::unique_ptr<ILogFile>
     {
         return open_store<LogFile>(name, mode);
     }

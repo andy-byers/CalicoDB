@@ -25,69 +25,62 @@ namespace {
 
 } // <anonymous>
 
-class ReadOnlyFile: public ReadOnlyStorage {
+class ReadOnlyFile: public IReadOnlyFile {
 public:
     ReadOnlyFile(const std::string&, Mode, int);
     ~ReadOnlyFile() override;
+    [[nodiscard]] auto size() const -> Size override;
+    auto use_direct_io() -> void override;
+    auto sync() -> void override;
     auto seek(long, Seek) -> Index override;
     auto read(MutBytes) -> Size override;
 
 private:
-    [[nodiscard]] auto fd() const -> int override
-    {
-        return m_resource.fd();
-    }
     Resource m_resource;
 };
 
-class WriteOnlyFile: public WriteOnlyStorage {
+class WriteOnlyFile: public IWriteOnlyFile {
 public:
     WriteOnlyFile(const std::string&, Mode, int);
     ~WriteOnlyFile() override;
+    [[nodiscard]] auto size() const -> Size override;
+    auto use_direct_io() -> void override;
+    auto sync() -> void override;
     auto resize(Size) -> void override;
     auto seek(long, Seek) -> Index override;
     auto write(RefBytes) -> Size override;
 
 private:
-    [[nodiscard]] auto fd() const -> int override
-    {
-        return m_resource.fd();
-    }
-
     Resource m_resource;
 };
 
-class ReadWriteFile: public ReadWriteStorage {
+class ReadWriteFile: public IReadWriteFile {
 public:
     ReadWriteFile(const std::string&, Mode, int);
     ~ReadWriteFile() override;
+    [[nodiscard]] auto size() const -> Size override;
+    auto use_direct_io() -> void override;
+    auto sync() -> void override;
     auto resize(Size) -> void override;
     auto seek(long, Seek) -> Index override;
     auto read(MutBytes) -> Size override;
     auto write(RefBytes) -> Size override;
 
 private:
-    [[nodiscard]] auto fd() const -> int override
-    {
-        return m_resource.fd();
-    }
-
     Resource m_resource;
 };
 
-class LogFile: public LogStorage {
+class LogFile: public ILogFile {
 public:
     LogFile(const std::string&, Mode, int);
     ~LogFile() override;
+    [[nodiscard]] auto size() const -> Size override;
+    auto use_direct_io() -> void override;
+    auto sync() -> void override;
     auto resize(Size) -> void override;
     auto write(RefBytes) -> Size override;
 
 private:
-    [[nodiscard]] auto fd() const -> int override
-    {
-        return m_resource.fd();
-    }
-
     Resource m_resource;
 };
 

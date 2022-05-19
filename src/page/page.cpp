@@ -4,40 +4,16 @@
 
 namespace cub {
 
-PageHeader::PageHeader(PID id, MutBytes data)
-    : m_header{data.range(PageLayout::header_offset(id), PageLayout::HEADER_SIZE)} {}
-
-auto PageHeader::type() const -> PageType
-{
-    return static_cast<PageType>(get_uint16(m_header.range(PageLayout::TYPE_OFFSET)));
-}
-
-auto PageHeader::lsn() const -> LSN
-{
-    return LSN{get_uint32(m_header.range(PageLayout::LSN_OFFSET))};
-}
-
-auto PageHeader::set_type(PageType type) -> void
-{
-    CUB_EXPECT_TRUE(is_page_type_valid(type));
-    put_uint16(m_header.range(PageLayout::TYPE_OFFSET), static_cast<uint16_t>(type));
-}
-
-auto PageHeader::set_lsn(LSN lsn) -> void
-{
-    put_uint32(m_header.range(PageLayout::LSN_OFFSET), lsn.value);
-}
-
-Page::Page(PID id, MutBytes data, BufferPool *pool)
-    : m_header{id, data}
-    , m_pool{pool}
-    , m_data{data} {}
+Page::Page(PID id, MutBytes data, IBufferPool *source)
+    : m_pool {source}
+    , m_data {data}
+    , m_id {id} {}
 
 Page::~Page()
 {
     try {
         if (m_pool.value)
-            m_pool.value->on_page_release(m_id, m_is_dirty);
+            m_pool.value->on_page_release(*this);
     } catch (...) {
         CUB_EXPECT_TRUE(!!m_pool.value);
         m_pool.value->on_page_error();

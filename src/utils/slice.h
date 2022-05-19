@@ -34,11 +34,11 @@ namespace impl {
 
        // Allow this implicit conversion for convenience.
        template<class Q> Slice(Slice<Q> rhs) noexcept
-           : Slice{rhs.data(), rhs.size()} {}
+           : Slice {rhs.data(), rhs.size()} {}
 
        template<class Q> Slice(Q data, Size size) noexcept
-           : m_data{data}
-           , m_size{size} {}
+           : m_data {data}
+           , m_size {size} {}
 
        auto operator[](Index index) const noexcept -> const Value&
        {
@@ -139,8 +139,8 @@ inline auto to_string(RefBytes data) -> std::string
 
 inline auto compare_three_way(RefBytes lhs, RefBytes rhs) noexcept -> ThreeWayComparison
 {
-   const auto min_length{lhs.size() < rhs.size() ? lhs.size() : rhs.size()};
-   auto r{std::memcmp(lhs.data(), rhs.data(), min_length)};
+   const auto min_length = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
+   auto r = std::memcmp(lhs.data(), rhs.data(), min_length);
    if (r == 0) {
        if (lhs.size() < rhs.size()) {
            r = -1;
@@ -177,7 +177,7 @@ inline auto mem_copy(MutBytes dst, RefBytes src, size_t n) noexcept -> void*
 
 inline auto mem_copy(MutBytes dst, RefBytes src) noexcept -> void*
 {
-    CUB_EXPECT_EQ(src.size(), dst.size());
+    CUB_EXPECT_LE(src.size(), dst.size());
     return mem_copy(dst, src, src.size());
 }
 

@@ -4,6 +4,12 @@ set(
 
     pool/frame.cpp
     pool/frame.h
+    pool/pager.cpp
+    pool/pager.h
+        pool/cache.cpp
+        pool/cache.h
+        pool/buffer_pool.cpp
+        pool/buffer_pool.h
     pool/interface.h
 
     page/cell.cpp
@@ -15,13 +21,14 @@ set(
     page/page.cpp
     page/page.h
 
-    storage/file.cpp
-    storage/file.h
-    storage/interface.h
-    storage/system.cpp
-    storage/system.h
+        file/file.cpp
+        file/file.h
+        file/interface.h
+        file/system.cpp
+        file/system.h
 
     utils/assert.h
+    utils/crc.h
     utils/encoding.h
     utils/layout.h
     utils/scratch.cpp
@@ -29,6 +36,14 @@ set(
     utils/types.cpp
     utils/types.h
     utils/slice.h
+
+    wal/interface.h
+    wal/wal_reader.cpp
+    wal/wal_reader.h
+    wal/wal_record.cpp
+    wal/wal_record.h
+    wal/wal_writer.cpp
+    wal/wal_writer.h
 )
 
 # Build the core static library.
