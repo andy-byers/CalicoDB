@@ -30,14 +30,15 @@ public:
     auto data() -> MutBytes;
     auto clean() -> void;
     auto reset(PID) -> void;
-    auto borrow(IBufferPool *) -> Page;
-    auto synchronize(bool) -> void;
+    auto borrow(IBufferPool*, bool) -> Page;
+    auto synchronize(Page&) -> void;
 
 private:
     std::unique_ptr<Byte[]> m_data;
     PID m_page_id {};
     Size m_ref_count {};
     Size m_size {};
+    bool m_is_writable {};
     bool m_is_dirty {};
 };
 

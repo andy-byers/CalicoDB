@@ -24,7 +24,7 @@ public:
     auto get_page(PID id) -> Page
     {
         m_backing.emplace(id, std::string(page_size, '\x00'));
-        Page page {id, to_bytes(m_backing[id]), nullptr};
+        Page page {{id, to_bytes(m_backing[id]), nullptr, true, false}};
         page.enable_tracking(m_scratch.get());
         return page;
     }

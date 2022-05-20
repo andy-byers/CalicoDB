@@ -13,12 +13,11 @@
 #include "common.h"
 #include "interface.h"
 #include "wal_record.h"
-#include "utils/types.h"
-#include "utils/utils.h"
 
 namespace cub {
 
 class IReadOnlyFile;
+struct LSN;
 
 class WALReader: public IWALReader {
 public:

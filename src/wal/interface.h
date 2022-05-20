@@ -2,12 +2,11 @@
 #define CUB_WAL_INTERFACE_H
 
 #include "common.h"
-#include "utils/layout.h"
 
 namespace cub {
 
-class LogStorage;
 class WALRecord;
+struct LSN;
 
 class IWALWriter {
 public:

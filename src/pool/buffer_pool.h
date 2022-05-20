@@ -53,9 +53,8 @@ private:
     auto log_update(Page&) -> void;
     auto roll_forward() -> bool;
     auto roll_backward() -> void;
-    auto do_acquire(PID) -> Page;
+    auto do_acquire(PID, bool) -> Page;
     auto fetch_frame(PID) -> Frame;
-    auto maybe_propagate_fault() -> void;
 
     std::unordered_map<PID, Frame, PID::Hasher> m_pinned;
     std::unique_ptr<IWALReader> m_wal_reader;

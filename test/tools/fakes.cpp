@@ -1,6 +1,4 @@
 #include "fakes.h"
-#include "wal/wal_reader.h"
-#include "wal/wal_writer.h"
 
 namespace cub {
 

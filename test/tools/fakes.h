@@ -1,10 +1,12 @@
-#ifndef CUB_FAKES_H
-#define CUB_FAKES_H
+#ifndef CUB_TEST_TOOLS_FAKES_H
+#define CUB_TEST_TOOLS_FAKES_H
 
 #include "common.h"
+#include "random.h"
 #include "file/interface.h"
 #include "utils/slice.h"
-#include "random.h"
+#include "wal/wal_reader.h"
+#include "wal/wal_writer.h"
 
 namespace cub {
 
@@ -257,6 +259,27 @@ struct WALHarness final {
     std::unique_ptr<IWALWriter> writer;
 };
 
+class StubWALWriter: public IWALWriter {
+public:
+    ~StubWALWriter() override = default;
+    [[nodiscard]] virtual auto block_size() const -> Size override {return 0;}
+    [[nodiscard]] virtual auto has_pending() const -> bool override {return false;}
+    [[nodiscard]] virtual auto has_committed() const -> bool override {return false;}
+    virtual auto write(WALRecord) -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
+    virtual auto truncate() -> void override {}
+    virtual auto flush() -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
+};
+
+
+class StubWALReader: public IWALReader {
+public:
+    virtual ~StubWALReader() override = default;
+    [[nodiscard]] virtual auto record() const -> std::optional<WALRecord> override {return std::nullopt;}
+    virtual auto increment() -> bool override {return false;}
+    virtual auto decrement() -> bool override {return false;}
+    virtual auto reset() -> void override {}
+};
+
 } // cub
 
-#endif // CUB_FAKES_H
+#endif // CUB_TEST_TOOLS_FAKES_H

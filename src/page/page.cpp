@@ -4,16 +4,39 @@
 
 namespace cub {
 
-Page::Page(PID id, MutBytes data, IBufferPool *source)
-    : m_pool {source}
-    , m_data {data}
-    , m_id {id} {}
+Page::Page(const Parameters &param)
+    : m_pool {param.source}
+    , m_data {param.data}
+    , m_id {param.id}
+    , m_is_writable {param.is_writable}
+    , m_is_dirty {param.is_dirty} {}
 
 Page::~Page()
+{
+    do_release();
+}
+
+auto Page::operator=(Page &&rhs) noexcept -> Page&
+{
+    if (this != &rhs) {
+        do_release();
+        m_snapshot.reset();
+        m_pool = std::move(rhs.m_pool);
+        m_snapshot = std::exchange(rhs.m_snapshot, {});
+        m_changes = std::move(rhs.m_changes);
+        m_data = std::exchange(rhs.m_data, {});
+        m_id = std::exchange(rhs.m_id, {});
+        m_is_dirty = std::exchange(rhs.m_is_dirty, false);
+    }
+    return *this;
+}
+
+auto Page::do_release() noexcept -> void
 {
     try {
         if (m_pool.value)
             m_pool.value->on_page_release(*this);
+
     } catch (...) {
         CUB_EXPECT_TRUE(!!m_pool.value);
         m_pool.value->on_page_error();
@@ -151,6 +174,7 @@ auto Page::redo_changes(LSN next_lsn, const std::vector<ChangedRegion> &changes)
 
 auto Page::do_change(Index offset, Size size) -> void
 {
+    CUB_EXPECT_TRUE(m_is_writable);
     CUB_EXPECT_GT(size, 0);
     CUB_EXPECT_LE(offset + size, Page::size());
 

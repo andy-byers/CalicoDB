@@ -83,10 +83,8 @@ auto WALWriter::flush() -> LSN
         auto block = to_bytes(m_block);
         mem_clear(block.range(m_cursor));
 
-        m_has_fault = true;
         m_file->write(block);
         m_file->sync();
-        m_has_fault = false;
 
         m_cursor = 0;
         return m_last_lsn;

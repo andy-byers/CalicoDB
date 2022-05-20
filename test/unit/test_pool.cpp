@@ -61,6 +61,11 @@ public:
     ~BufferPoolTests() override = default;
 };
 
+TEST_F(BufferPoolTests, FreshBufferPoolIsEmpty)
+{
+    ASSERT_EQ(m_pool->page_count(), 0);
+}
+
 TEST_F(BufferPoolTests, AllocatesPage)
 {
     auto page = m_pool->allocate(PageType::EXTERNAL_NODE);
@@ -72,10 +77,36 @@ TEST_F(BufferPoolTests, AllocatesPage)
 TEST_F(BufferPoolTests, AcquiresPage)
 {
     (void)m_pool->allocate(PageType::EXTERNAL_NODE);
-    
     auto page = m_pool->acquire(PID::root(), true);
     ASSERT_EQ(page.id(), PID::root());
     ASSERT_EQ(page.type(), PageType::EXTERNAL_NODE);
+}
+
+TEST_F(BufferPoolTests, OldPageGetsReleasedUponMoveInto)
+{
+    (void)m_pool->allocate(PageType::EXTERNAL_NODE);
+    (void)m_pool->allocate(PageType::EXTERNAL_NODE);
+
+    auto page = m_pool->acquire(PID {1}, true);
+
+    // This should cause page 1 to be released.
+    page = m_pool->acquire(PID {2}, true);
+    puts("start now!");
+
+    // We should be okay to acquire page 1 again. If it wasn't released, this will fail.
+    (void)m_pool->acquire(PID {1}, true);
+}
+
+TEST_F(BufferPoolTests, AcquireMultipleWritablePagesDeathTest)
+{
+    auto page = m_pool->allocate(PageType::EXTERNAL_NODE);
+    ASSERT_DEATH(Page unused {m_pool->acquire(PID::root(), true)}, "Expect");
+}
+
+TEST_F(BufferPoolTests, AcquireReadableAndWritablePagesDeathTest)
+{
+    auto page = m_pool->allocate(PageType::EXTERNAL_NODE);
+    ASSERT_DEATH(Page unused {m_pool->acquire(PID::root(), false)}, "Expect");
 }
 
 TEST_F(BufferPoolTests, PageDataPersistsAfterRelease)

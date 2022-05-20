@@ -21,14 +21,25 @@ public:
     [[nodiscard]] auto size() const -> Size;
     auto data() -> MutBytes;
 
+    // TODO: Should be noexcept, along with operator=().
     Scratch(Scratch&&) = default;
-    auto operator=(Scratch&&) -> Scratch& = default;
+
+    auto operator=(Scratch &&rhs) -> Scratch&
+    {
+        if (this != &rhs) {
+            do_release();
+            m_internal = std::move(rhs.m_internal);
+        }
+        return *this;
+    }
 
 private:
+    auto do_release() -> void;
+
     struct Internal {
         MutBytes data;
+        ScratchManager *source{};
         Index id{};
-        ScratchManager *parent{};
     };
     Unique<Internal> m_internal;
 };

@@ -24,9 +24,9 @@ public:
         frame.reset(page_id);
 
         if (!page_lsn.is_null()) {
-            auto page = frame.borrow(nullptr);
+            auto page = frame.borrow(nullptr, true);
             page.set_lsn(page_lsn);
-            frame.synchronize(page.is_dirty());
+            frame.synchronize(page);
         }
         return frame;
     }
@@ -67,9 +67,9 @@ TEST_F(PageCacheTests, OnlyEvictsFlushedDirtyPages)
 {
     const auto make_dirty_frame = [&](Index i) {
         auto frame = make_frame(PID {i}, LSN {i});
-        auto page = frame.borrow(nullptr);
+        auto page = frame.borrow(nullptr, true);
         page.mut_range(0)[0] = page.range(0)[0];
-        frame.synchronize(page.is_dirty());
+        frame.synchronize(page);
         EXPECT_TRUE(frame.is_dirty());
         return frame;
     };

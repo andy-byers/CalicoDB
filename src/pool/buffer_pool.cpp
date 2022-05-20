@@ -53,15 +53,22 @@ auto BufferPool::allocate(PageType type) -> Page
     return page;
 }
 
-auto BufferPool::acquire(PID id, bool enable_tracking) -> Page
+auto BufferPool::acquire(PID id, bool is_writable) -> Page
+{
+    CUB_EXPECT_FALSE(id.is_null());
+    auto page = do_acquire(id, is_writable);
+    if (is_writable)
+        page.enable_tracking(m_scratch.get());
+    return page;
+}
+
+auto BufferPool::do_acquire(PID id, bool is_writable) -> Page
 {
     CUB_EXPECT_FALSE(id.is_null());
     const auto try_acquire = [&]() -> std::optional<Page> {
         if (auto itr = m_pinned.find(id); itr != m_pinned.end()) {
-            auto page = itr->second.borrow(this);
+            auto page = itr->second.borrow(this, is_writable);
             m_ref_sum++;
-            if (enable_tracking)
-                page.enable_tracking(m_scratch.get());
             return page;
         }
         return std::nullopt;
@@ -124,7 +131,7 @@ auto BufferPool::on_page_release(Page &page) -> void
         log_update(page);
 
     auto &frame = itr->second;
-    frame.synchronize(page.is_dirty());
+    frame.synchronize(page);
 
     if (!frame.ref_count()) {
         m_cache.put(std::move(frame));
@@ -154,7 +161,7 @@ auto BufferPool::roll_forward() -> bool
             break;
         }
         const auto update = record.payload().decode();
-        auto page = acquire(update.page_id, false);
+        auto page = do_acquire(update.page_id, true);
 
         if (page.lsn().value < record.lsn().value)
             page.redo_changes(record.lsn(), update.changes);
@@ -179,7 +186,7 @@ auto BufferPool::roll_backward() -> void
     do {
         const auto record = *m_wal_reader->record();
         const auto update = record.payload().decode();
-        auto page = acquire(update.page_id, false);
+        auto page = do_acquire(update.page_id, true);
 
         if (page.lsn().value >= record.lsn().value)
             page.undo_changes(update.previous_lsn, update.changes);

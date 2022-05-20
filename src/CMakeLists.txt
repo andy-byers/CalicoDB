@@ -6,10 +6,10 @@ set(
     pool/frame.h
     pool/pager.cpp
     pool/pager.h
-        pool/cache.cpp
-        pool/cache.h
-        pool/buffer_pool.cpp
-        pool/buffer_pool.h
+    pool/cache.cpp
+    pool/cache.h
+    pool/buffer_pool.cpp
+    pool/buffer_pool.h
     pool/interface.h
 
     page/cell.cpp
@@ -21,11 +21,18 @@ set(
     page/page.cpp
     page/page.h
 
-        file/file.cpp
-        file/file.h
-        file/interface.h
-        file/system.cpp
-        file/system.h
+    file/file.cpp
+    file/file.h
+    file/interface.h
+    file/system.cpp
+    file/system.h
+
+    tree/free_list.cpp
+    tree/free_list.h
+    tree/interface.h
+    tree/rw_lock.h
+    tree/tree.cpp
+    tree/tree.h
 
     utils/assert.h
     utils/crc.h

@@ -10,26 +10,12 @@ namespace cub {
 
 class NodeHeader {
 public:
-    NodeHeader(PID, MutBytes);
-    [[nodiscard]] auto parent_id() const -> PID;
-    [[nodiscard]] auto right_sibling_id() const -> PID;
-    [[nodiscard]] auto rightmost_child_id() const -> PID;
-    [[nodiscard]] auto cell_count() const -> Size;
-    [[nodiscard]] auto free_count() const -> Size;
-    [[nodiscard]] auto cell_start() const -> Index;
-    [[nodiscard]] auto free_start() const -> Index;
-    [[nodiscard]] auto frag_count() const -> Size;
-    auto set_parent_id(PID) -> void;
-    auto set_right_sibling_id(PID) -> void;
-    auto set_rightmost_child_id(PID) -> void;
-    auto set_cell_count(Size) -> void;
-    auto set_free_count(Size) -> void;
-    auto set_cell_start(Index) -> void;
-    auto set_free_start(Index) -> void;
-    auto set_frag_count(Size) -> void;
+    explicit NodeHeader(Page*);
+
 
 private:
-    MutBytes m_header;
+    Page *m_page {};
+    Size m_offset {};
 };
 
 class Node final {
@@ -53,6 +39,21 @@ public:
         return m_page;
     }
 
+    auto id() const -> PID
+    {
+        return m_page.id();
+    }
+
+    auto size() const -> Size
+    {
+        return m_page.size();
+    }
+
+    auto type() const -> PageType
+    {
+        return m_page.type();
+    }
+
     auto read_key(Index) const -> RefBytes;
     auto read_cell(Index) const -> Cell;
     auto detach_cell(Index, Scratch) const -> Cell;
@@ -71,13 +72,13 @@ public:
     auto is_overflowing() const -> bool;
     auto is_underflowing() const -> bool;
     auto is_external() const -> bool;
+    auto child_id(Index) const -> PID;
 
     // Public header fields.
-    auto cell_count() const -> Size;
-    auto parent_id() const -> PID;
-    auto right_sibling_id() const -> PID;
-    auto child_id(Index) const -> PID;
-    auto rightmost_child_id() const -> PID;
+    [[nodiscard]] auto parent_id() const -> PID;
+    [[nodiscard]] auto right_sibling_id() const -> PID;
+    [[nodiscard]] auto rightmost_child_id() const -> PID;
+    [[nodiscard]] auto cell_count() const -> Size;
     auto set_parent_id(PID) -> void;
     auto set_right_sibling_id(PID) -> void;
     auto set_rightmost_child_id(PID) -> void;
@@ -93,6 +94,16 @@ public:
     auto operator=(Node&&) -> Node& = default;
 
 private:
+    [[nodiscard]] auto free_count() const -> Size;
+    [[nodiscard]] auto cell_start() const -> Index;
+    [[nodiscard]] auto free_start() const -> Index;
+    [[nodiscard]] auto frag_count() const -> Size;
+    auto set_cell_count(Size) -> void;
+    auto set_free_count(Size) -> void;
+    auto set_cell_start(Index) -> void;
+    auto set_free_start(Index) -> void;
+    auto set_frag_count(Size) -> void;
+
     auto recompute_usable_space() -> void;
     auto gap_size() const -> Size;
     auto cell_pointer(Index) const -> Index;
@@ -106,7 +117,6 @@ private:
     auto take_free_space(Index, Index, Size) -> Index;
     auto give_free_space(Index, Size) -> void;
 
-    NodeHeader m_header;
     Page m_page;
     std::optional<Cell> m_overflow{};
     Size m_usable_space{};

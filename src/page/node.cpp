@@ -3,92 +3,98 @@
 
 namespace cub {
 
-NodeHeader::NodeHeader(PID id, MutBytes data)
-    : m_header{data.range(NodeLayout::header_offset(id), NodeLayout::HEADER_SIZE)} {}
 
-auto NodeHeader::parent_id() const -> PID
+auto Node::parent_id() const -> PID
 {
-    return PID{get_uint32(m_header.range(NodeLayout::PARENT_ID_OFFSET))};
+    return PID{get_uint32(m_page.range(header_offset() + NodeLayout::PARENT_ID_OFFSET))};
 }
 
-auto NodeHeader::right_sibling_id() const -> PID
+auto Node::right_sibling_id() const -> PID
 {
-    return PID{get_uint32(m_header.range(NodeLayout::RIGHT_SIBLING_ID_OFFSET))};
+    CUB_EXPECT_TRUE(is_external());
+    return PID{get_uint32(m_page.range(header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET))};
 }
 
-auto NodeHeader::rightmost_child_id() const -> PID
+auto Node::rightmost_child_id() const -> PID
 {
-    return PID{get_uint32(m_header.range(NodeLayout::RIGHTMOST_CHILD_ID_OFFSET))};
+    CUB_EXPECT_FALSE(is_external());
+    return PID{get_uint32(m_page.range(header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET))};
 }
 
-auto NodeHeader::cell_count() const -> Size
+auto Node::cell_count() const -> Size
 {
-    return get_uint16(m_header.range(NodeLayout::CELL_COUNT_OFFSET));
+    return get_uint16(m_page.range(header_offset() + NodeLayout::CELL_COUNT_OFFSET));
 }
 
-auto NodeHeader::free_count() const -> Size
+auto Node::free_count() const -> Size
 {
-    return get_uint16(m_header.range(NodeLayout::FREE_COUNT_OFFSET));
+    return get_uint16(m_page.range(header_offset() + NodeLayout::FREE_COUNT_OFFSET));
 }
 
-auto NodeHeader::cell_start() const -> Index
+auto Node::cell_start() const -> Index
 {
-    return get_uint16(m_header.range(NodeLayout::CELL_START_OFFSET));
+    return get_uint16(m_page.range(header_offset() + NodeLayout::CELL_START_OFFSET));
 }
 
-auto NodeHeader::free_start() const -> Index
+auto Node::free_start() const -> Index
 {
-    return get_uint16(m_header.range(NodeLayout::FREE_START_OFFSET));
+    return get_uint16(m_page.range(header_offset() + NodeLayout::FREE_START_OFFSET));
 }
 
-auto NodeHeader::frag_count() const -> Size
+auto Node::frag_count() const -> Size
 {
-    return get_uint16(m_header.range(NodeLayout::FRAG_COUNT_OFFSET));
+    return get_uint16(m_page.range(header_offset() + NodeLayout::FRAG_COUNT_OFFSET));
 }
 
-auto NodeHeader::set_parent_id(PID parent_id) -> void
+auto Node::set_parent_id(PID parent_id) -> void
 {
-    put_uint32(m_header.range(NodeLayout::PARENT_ID_OFFSET), parent_id.value);
+    CUB_EXPECT_NE(id(), PID::root());
+    const auto offset = header_offset() + NodeLayout::PARENT_ID_OFFSET;
+    put_uint32(m_page.mut_range(offset), parent_id.value);
 }
 
-auto NodeHeader::set_right_sibling_id(PID right_sibling_id) -> void
+auto Node::set_right_sibling_id(PID right_sibling_id) -> void
 {
-    put_uint32(m_header.range(NodeLayout::RIGHT_SIBLING_ID_OFFSET), right_sibling_id.value);
+    CUB_EXPECT_TRUE(is_external());
+    const auto offset = header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
+    put_uint32(m_page.mut_range(offset), right_sibling_id.value);
 }
 
-auto NodeHeader::set_rightmost_child_id(PID rightmost_child_id) -> void
+auto Node::set_rightmost_child_id(PID rightmost_child_id) -> void
 {
-    put_uint32(m_header.range(NodeLayout::RIGHTMOST_CHILD_ID_OFFSET), rightmost_child_id.value);
+    CUB_EXPECT_FALSE(is_external());
+    const auto offset = header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET;
+    put_uint32(m_page.mut_range(offset), rightmost_child_id.value);
 }
 
-auto NodeHeader::set_cell_count(Size cell_count) -> void
+auto Node::set_cell_count(Size cell_count) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, cell_count);
-    put_uint16(m_header.range(NodeLayout::CELL_COUNT_OFFSET), static_cast<uint16_t>(cell_count));
+    put_uint16(m_page.mut_range(header_offset() + NodeLayout::CELL_COUNT_OFFSET), static_cast<uint16_t>(cell_count));
 }
 
-auto NodeHeader::set_free_count(Size free_count) -> void
+auto Node::set_free_count(Size free_count) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, free_count);
-    put_uint16(m_header.range(NodeLayout::FREE_COUNT_OFFSET), static_cast<uint16_t>(free_count));
+    put_uint16(m_page.mut_range(header_offset() + NodeLayout::FREE_COUNT_OFFSET), static_cast<uint16_t>(free_count));
 }
 
-auto NodeHeader::set_cell_start(Index cell_start) -> void
+auto Node::set_cell_start(Index cell_start) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, cell_start);
-    put_uint16(m_header.range(NodeLayout::CELL_START_OFFSET), static_cast<uint16_t>(cell_start));
+    put_uint16(m_page.mut_range(header_offset() + NodeLayout::CELL_START_OFFSET), static_cast<uint16_t>(cell_start));
 }
 
-auto NodeHeader::set_free_start(Index free_start) -> void
+auto Node::set_free_start(Index free_start) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, free_start);
-    put_uint16(m_header.range(NodeLayout::FREE_START_OFFSET), static_cast<uint16_t>(free_start));
+    put_uint16(m_page.mut_range(header_offset() + NodeLayout::FREE_START_OFFSET), static_cast<uint16_t>(free_start));
 }
 
-auto NodeHeader::set_frag_count(Size frag_count) -> void
+auto Node::set_frag_count(Size frag_count) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, frag_count);
-    put_uint16(m_header.range(NodeLayout::FRAG_COUNT_OFFSET), static_cast<uint16_t>(frag_count));
+    put_uint16(m_page.mut_range(header_offset() + NodeLayout::FRAG_COUNT_OFFSET), static_cast<uint16_t>(frag_count));
 }
 
 auto Node::usable_space() const -> Size
@@ -97,8 +103,7 @@ auto Node::usable_space() const -> Size
 }
 
 Node::Node(Page page, bool reset_header)
-    : m_header{page.id(), page.raw_data()}
-    , m_page{std::move(page)}
+    : m_page {std::move(page)}
 {
     reset(reset_header);
     recompute_usable_space();
@@ -109,28 +114,6 @@ auto Node::is_external() const -> bool
     return m_page.type() == PageType::EXTERNAL_NODE;
 }
 
-auto Node::cell_count() const -> Size
-{
-    return m_header.cell_count();
-}
-
-auto Node::parent_id() const -> PID
-{
-    return m_header.parent_id();
-}
-
-auto Node::right_sibling_id() const -> PID
-{
-    CUB_EXPECT_TRUE(is_external());
-    return m_header.right_sibling_id();
-}
-
-auto Node::rightmost_child_id() const -> PID
-{
-    CUB_EXPECT_FALSE(is_external());
-    return m_header.rightmost_child_id();
-}
-
 auto Node::child_id(Index index) const -> PID
 {
     CUB_EXPECT_FALSE(is_external());
@@ -138,21 +121,6 @@ auto Node::child_id(Index index) const -> PID
     if (index < cell_count())
         return read_cell(index).left_child_id();
     return rightmost_child_id();
-}
-
-auto Node::set_parent_id(PID id) -> void
-{
-    m_header.set_parent_id(id);
-}
-
-auto Node::set_right_sibling_id(PID id) -> void
-{
-    m_header.set_right_sibling_id(id);
-}
-
-auto Node::set_rightmost_child_id(PID id) -> void
-{
-    m_header.set_rightmost_child_id(id);
 }
 
 auto Node::read_key(Index index) const -> RefBytes
@@ -220,8 +188,8 @@ auto Node::header_offset() const -> Index
 
 auto Node::recompute_usable_space() -> void
 {
-    auto usable_space = gap_size() + m_header.frag_count();
-    for (Index i{}, ptr{m_header.free_start()}; i < m_header.free_count(); ++i) {
+    auto usable_space = gap_size() + frag_count();
+    for (Index i{}, ptr{free_start()}; i < free_count(); ++i) {
         usable_space += m_page.get_u16(ptr + CELL_POINTER_SIZE);
         ptr = m_page.get_u16(ptr);
     }
@@ -231,7 +199,7 @@ auto Node::recompute_usable_space() -> void
 
 auto Node::gap_size() const -> Size
 {
-    const auto top = m_header.cell_start();
+    const auto top = cell_start();
     const auto bottom = cell_area_offset();
     CUB_EXPECT_GE(top, bottom);
     return top - bottom;
@@ -245,7 +213,7 @@ auto Node::cell_pointer(Index index) const -> Index
 
 auto Node::set_cell_pointer(Index index, Index cell_pointer) -> void
 {
-    CUB_EXPECT_LT(index, m_header.cell_count());
+    CUB_EXPECT_LT(index, cell_count());
     CUB_EXPECT_LE(cell_pointer, m_page.size());
     m_page.put_u16(cell_pointers_offset() + index*CELL_POINTER_SIZE, static_cast<uint16_t>(cell_pointer));
 }
@@ -274,8 +242,7 @@ auto Node::set_overflow_cell(Cell cell) -> void
 auto Node::take_overflow_cell() -> Cell
 {
     auto cell = std::move(*m_overflow);
-    CUB_EXPECT_EQ(m_overflow, std::nullopt); // TODO: Will this work? If so, move out in the return statement and avoid the temporary.
-    m_overflow.reset(); // TODO: Or just move out like above?? probably will be necessary honestly...
+    m_overflow.reset();
     return cell;
 }
 
@@ -283,13 +250,13 @@ auto Node::insert_cell_pointer(Index cid, Index cell_pointer) -> void
 {
     CUB_EXPECT_GE(cell_pointer, cell_area_offset());
     CUB_EXPECT_LT(cell_pointer, m_page.size());
-    CUB_EXPECT_LE(cid, m_header.cell_count());
+    CUB_EXPECT_LE(cid, cell_count());
     const auto start = NodeLayout::content_offset(m_page.id());
     const auto offset = start + CELL_POINTER_SIZE*cid;
     const auto size = (cell_count()-cid) * CELL_POINTER_SIZE;
     auto chunk = m_page.mut_range(offset, size + CELL_POINTER_SIZE);
     mem_move(chunk.range(CELL_POINTER_SIZE), chunk, size);//todo:changed checkme
-    m_header.set_cell_count(cell_count() + 1);
+    set_cell_count(cell_count() + 1);
     set_cell_pointer(cid, cell_pointer);
     m_usable_space -= CELL_POINTER_SIZE;
 }
@@ -297,21 +264,21 @@ auto Node::insert_cell_pointer(Index cid, Index cell_pointer) -> void
 auto Node::remove_cell_pointer(Index cid) -> void
 {
     CUB_EXPECT_GT(cell_count(), 0);
-    CUB_EXPECT_LT(cid, m_header.cell_count());
+    CUB_EXPECT_LT(cid, cell_count());
     const auto start = NodeLayout::header_offset(m_page.id()) + NodeLayout::HEADER_SIZE;
     const auto offset = start + CELL_POINTER_SIZE*cid;
     const auto size = (cell_count()-cid-1) * CELL_POINTER_SIZE;
     auto chunk = m_page.mut_range(offset, size + CELL_POINTER_SIZE);
     mem_move(chunk, chunk.range(CELL_POINTER_SIZE), size);//todo:changed checkme
-    m_header.set_cell_count(cell_count() - 1);
+    set_cell_count(cell_count() - 1);
     m_usable_space += CELL_POINTER_SIZE;
 }
 
 auto Node::set_child_id(Index index, PID child_id) -> void
 {
     CUB_EXPECT_FALSE(is_external());
-    CUB_EXPECT_LE(index, m_header.cell_count());
-    if (index < m_header.cell_count()) {
+    CUB_EXPECT_LE(index, cell_count());
+    if (index < cell_count()) {
         m_page.put_u32(cell_pointer(index), child_id.value);
     } else {
         set_rightmost_child_id(child_id);
@@ -322,9 +289,9 @@ auto Node::allocate_from_free(Size needed_size) -> Index
 {
     // NOTE: We use a value of zero to indicate that there is no previous pointer.
     Index prev_ptr{};
-    auto curr_ptr = m_header.free_start();
+    auto curr_ptr = free_start();
 
-    for (Index i{}; i < m_header.free_count(); ++i) {
+    for (Index i{}; i < free_count(); ++i) {
         if (needed_size <= m_page.get_u16(curr_ptr + sizeof(uint16_t)))
             return take_free_space(prev_ptr, curr_ptr, needed_size);
         prev_ptr = curr_ptr;
@@ -337,8 +304,8 @@ auto Node::allocate_from_gap(Size needed_size) -> Index
 {
     if (needed_size <= gap_size()) {
         m_usable_space -= needed_size;
-        const auto top = m_header.cell_start() - needed_size;
-        m_header.set_cell_start(top);
+        const auto top = cell_start() - needed_size;
+        set_cell_start(top);
         return top;
     }
     return 0;
@@ -375,10 +342,10 @@ auto Node::take_free_space(Index ptr0, Index ptr1, Size needed_size) -> Index
     CUB_EXPECT_BOUNDED_BY(uint16_t, diff);
 
     if (diff < 4) {
-        m_header.set_frag_count(m_header.frag_count() + diff);
-        m_header.set_free_count(m_header.free_count() - 1);
+        set_frag_count(frag_count() + diff);
+        set_free_count(free_count() - 1);
         if (is_first) {
-            m_header.set_free_start(ptr2);
+            set_free_start(ptr2);
         } else {
             m_page.put_u16(ptr0, ptr2);
         }
@@ -395,12 +362,12 @@ auto Node::give_free_space(Index ptr, Size size) -> void
     CUB_EXPECT_LE(ptr + size, m_page.size());
     CUB_EXPECT_GE(ptr, NodeLayout::content_offset(m_page.id()));
     if (size < 4) {
-        m_header.set_frag_count(m_header.frag_count() + size);
+        set_frag_count(frag_count() + size);
     } else {
-        m_page.put_u16(ptr, uint16_t(m_header.free_start()));
+        m_page.put_u16(ptr, uint16_t(free_start()));
         m_page.put_u16(ptr + CELL_POINTER_SIZE, uint16_t(size));
-        m_header.set_free_count(m_header.free_count() + 1);
-        m_header.set_free_start(ptr);
+        set_free_count(free_count() + 1);
+        set_free_start(ptr);
     }
     m_usable_space += size;
 }
@@ -412,7 +379,7 @@ auto Node::defragment() -> void
 
 auto Node::defragment(std::optional<Index> skipped_cid) -> void
 {
-    const auto n = m_header.cell_count();
+    const auto n = cell_count();
     const auto to_skip = skipped_cid ? *skipped_cid : n;
     auto end = m_page.size();
     std::string temp(end, '\x00');
@@ -432,9 +399,9 @@ auto Node::defragment(std::optional<Index> skipped_cid) -> void
     }
     const auto offset = cell_area_offset();
     m_page.write(to_bytes(temp).range(offset, m_page.size() - offset), offset);
-    m_header.set_cell_start(end);
-    m_header.set_frag_count(0);
-    m_header.set_free_count(0);
+    set_cell_start(end);
+    set_frag_count(0);
+    set_free_count(0);
 }
 
 auto Node::insert(Cell cell) -> void
@@ -448,12 +415,12 @@ auto Node::insert(Cell cell) -> void
 auto Node::insert_at(Index index, Cell cell) -> void
 {
     CUB_EXPECT_FALSE(is_overflowing());
-    CUB_EXPECT_LE(index, m_header.cell_count());
+    CUB_EXPECT_LE(index, cell_count());
 
     const auto local_size = cell.size();
 
     // We don't have room to insert the cell pointer.
-    if (cell_area_offset() + CELL_POINTER_SIZE > m_header.cell_start()) {
+    if (cell_area_offset() + CELL_POINTER_SIZE > cell_start()) {
         if (m_usable_space >= local_size + CELL_POINTER_SIZE) {
             defragment(std::nullopt);
             return insert_at(index, std::move(cell));
@@ -478,8 +445,8 @@ auto Node::insert_at(Index index, Cell cell) -> void
     cell.write(m_page.mut_range(offset, cell.size()));
 
     // Adjust the start of the cell content area.
-    if (offset < m_header.cell_start())
-        m_header.set_cell_start(offset);
+    if (offset < cell_start())
+        set_cell_start(offset);
 }
 
 auto Node::remove(RefBytes key) -> bool
@@ -496,7 +463,7 @@ auto Node::remove_at(Index index, Size local_size) -> void
     // TODO: Allow keys of zero size? Current comparison routine should still work. Assertion allows this currently.
     CUB_EXPECT_GE(local_size, Cell::MIN_HEADER_SIZE);
     CUB_EXPECT_LE(local_size, max_local(m_page.size()) + Cell::MAX_HEADER_SIZE);
-    CUB_EXPECT_LT(index, m_header.cell_count());
+    CUB_EXPECT_LT(index, cell_count());
     CUB_EXPECT_FALSE(is_overflowing());
     give_free_space(cell_pointer(index), local_size);
     remove_cell_pointer(index);
@@ -507,9 +474,9 @@ auto Node::reset(bool reset_header) -> void
     if (reset_header) {
         auto chunk = m_page.mut_range(header_offset(), NodeLayout::HEADER_SIZE);
         mem_clear(chunk, chunk.size());
-        m_header.set_cell_start(m_page.size());
+        set_cell_start(m_page.size());
     }
-    m_overflow = std::nullopt;
+    m_overflow.reset();
     recompute_usable_space();
 }
 

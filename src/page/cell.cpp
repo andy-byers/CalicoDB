@@ -55,6 +55,8 @@ auto Cell::overflow_id() const -> PID
 
 auto Cell::write(MutBytes out) const -> void
 {
+    // TODO: This is weird. We should store the page type and use that to determine if
+    //       we should write a left child ID.
     if (!m_left_child_id.is_null()) {
         put_uint32(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);

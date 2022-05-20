@@ -7,10 +7,10 @@ option(CUB_BUILD_TESTS "Build the tests" ON)
 option(CUB_BUILD_DEBUG "Build in debug mode" OFF)
 
 #if (CUB_BUILD_DEBUG)
-    add_compile_options(-Wall -Wconversion -Werror -Wextra -Wpedantic -g3 -O0 -ftrapv)
+#    add_compile_options(-Wall -Wconversion -Werror -Wextra -Wpedantic -g3 -O0 -ftrapv)
 #else()
 #    add_compile_definitions(CUB_NDEBUG=1)
-#    add_compile_options(-O3)
+    add_compile_options(-O3)
 #endif()
 
 set(CUB_NAME cubdb)

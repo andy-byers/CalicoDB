@@ -35,9 +35,17 @@ class IBufferPool;
 
 class Page final {
 public:
-    Page(PID, MutBytes, IBufferPool *);
+    struct Parameters {
+        PID id;
+        MutBytes data;
+        IBufferPool *source {};
+        bool is_writable {};
+        bool is_dirty {};
+    };
+    Page(const Parameters&); // TODO: Parameters struct.
     ~Page();
 
+    [[nodiscard]] auto is_writable() const -> bool {return m_is_writable;}
     [[nodiscard]] auto is_dirty() const -> bool {return m_is_dirty;}
 
     [[nodiscard]] auto type() const -> PageType;
@@ -64,11 +72,11 @@ public:
     auto redo_changes(LSN, const std::vector<ChangedRegion>&) -> void;
     auto raw_data() -> MutBytes;
 
-    // TODO: Necessary?
-    Page(Page&&) = default;
-    auto operator=(Page&&) -> Page& = default;
+    Page(Page&&) noexcept = default;
+    auto operator=(Page&&) noexcept -> Page&;
 
 private:
+    auto do_release() noexcept -> void;
     auto do_change(Index, Size) -> void;
     auto header_offset() const -> Index;
 
@@ -77,6 +85,7 @@ private:
     std::vector<ChangedRegion> m_changes;
     MutBytes m_data;
     PID m_id;
+    bool m_is_writable{};
     bool m_is_dirty{};
 };
 

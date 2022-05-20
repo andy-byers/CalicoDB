@@ -9,11 +9,14 @@ enable_testing()
 
 set(
     TEST_TOOLS
-    ${PROJECT_SOURCE_DIR}/test/tools/random.cpp
-    ${PROJECT_SOURCE_DIR}/test/tools/random.h
     ${PROJECT_SOURCE_DIR}/test/tools/fakes.cpp
     ${PROJECT_SOURCE_DIR}/test/tools/fakes.h
+    ${PROJECT_SOURCE_DIR}/test/tools/random.cpp
+    ${PROJECT_SOURCE_DIR}/test/tools/random.h
+    ${PROJECT_SOURCE_DIR}/test/tools/tools.cpp
+    ${PROJECT_SOURCE_DIR}/test/tools/tools.h
 )
 
 add_subdirectory(integration)
 add_subdirectory(unit)
+

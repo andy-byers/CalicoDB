@@ -52,24 +52,31 @@ auto Frame::reset(PID page_id) -> void
     m_is_dirty = false;
 }
 
-auto Frame::borrow(IBufferPool *parent) -> Page
+auto Frame::borrow(IBufferPool *parent, bool is_writable) -> Page
 {
+    CUB_EXPECT_FALSE(m_is_writable);
+
+    if (is_writable) {
+        CUB_EXPECT_EQ(m_ref_count, 0);
+        m_is_writable = true;
+    }
     m_ref_count++;
-    return {m_page_id, data(), parent};
+    return {{m_page_id, data(), parent, is_writable, m_is_dirty}};
 }
 
-auto Frame::synchronize(bool was_dirty) -> void
+auto Frame::synchronize(Page &page) -> void
 {
     CUB_EXPECT_GT(m_ref_count, 0);
-    m_ref_count--;
 
-    // TODO: Currently Page doesn't accept the current dirty flag state in its
-    //       constructor, so we can only tell if the page was made dirty since
-    //       it was last acquired by looking at the Page instance. We won't know
-    //       if the page was already dirty. This is okay right now, but may need
-    //       to be changed.
-    if (was_dirty)
+    if (page.is_writable()) {
+        CUB_EXPECT_EQ(m_ref_count, 1);
+        m_is_writable = false;
+    }
+
+    if (page.is_dirty())
         m_is_dirty = true;
+
+    m_ref_count--;
 }
 
 auto Frame::page_lsn() const -> LSN

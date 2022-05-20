@@ -16,11 +16,11 @@
 #define CUB_WAL_WAL_WRITER_H
 
 #include "interface.h"
-#include "wal_record.h"
 
 namespace cub {
 
 class ILogFile;
+class WALRecord;
 
 class WALWriter: public IWALWriter {
 public:
@@ -38,7 +38,6 @@ private:
     std::string m_block;              ///< Log tail buffer
     Index m_cursor{};                 ///< Position in the tail buffer
     LSN m_last_lsn;
-    bool m_has_fault{};
 };
 
 } // Cub

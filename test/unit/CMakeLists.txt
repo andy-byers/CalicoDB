@@ -6,6 +6,7 @@ add_executable(
     test_file.cpp
     test_page.cpp
     test_pool.cpp
+    test_tree.cpp
     test_utils.cpp
     test_wal.cpp
     ${TEST_TOOLS}

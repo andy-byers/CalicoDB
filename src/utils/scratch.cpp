@@ -1,32 +1,37 @@
 #include "scratch.h"
-#include <iostream>
 
 namespace cub {
 
-Scratch::Scratch(Index id, MutBytes data, ScratchManager *parent)
-    : m_internal {Internal {data, id, parent}} {}
+Scratch::Scratch(Index id, MutBytes data, ScratchManager *source)
+    : m_internal {Internal {data, source, id}} {}
 
 Scratch::~Scratch()
 {
-    if (m_internal.value.parent)
-        m_internal.value.parent->on_scratch_release(*this);
+    do_release();
+}
+
+auto Scratch::do_release() -> void
+{
+    if (m_internal.value.source)
+        m_internal.value.source->on_scratch_release(*this);
+    // TODO: NULL out m_internal, and do the same in Page.
 }
 
 auto Scratch::id() const -> Index
 {
-    CUB_EXPECT_NOT_NULL(m_internal.value.parent);
+    CUB_EXPECT_NOT_NULL(m_internal.value.source);
     return m_internal.value.id;
 }
 
 auto Scratch::size() const -> Size
 {
-    CUB_EXPECT_NOT_NULL(m_internal.value.parent);
+    CUB_EXPECT_NOT_NULL(m_internal.value.source);
     return m_internal.value.data.size();
 }
 
 auto Scratch::data() -> MutBytes
 {
-    CUB_EXPECT_NOT_NULL(m_internal.value.parent);
+    CUB_EXPECT_NOT_NULL(m_internal.value.source);
     return m_internal.value.data;
 }
 

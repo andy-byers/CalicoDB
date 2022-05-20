@@ -11,6 +11,17 @@ public:
     explicit Link(Page);
     ~Link() = default;
 
+
+    auto id() const -> PID
+    {
+        return m_page.id();
+    }
+
+    auto size() const -> Size
+    {
+        return m_page.size();
+    }
+
     [[nodiscard]] auto next_id() const -> PID;
     auto set_next_id(PID) -> void;
 
@@ -20,6 +31,9 @@ public:
     auto take() -> Page {return std::move(m_page);}
     auto page() const -> const Page& {return m_page;}
     auto page() -> Page& {return m_page;}
+
+    Link(Link&&) = default;
+    auto operator=(Link&&) -> Link& = default;
 
 private:
     Page m_page;
