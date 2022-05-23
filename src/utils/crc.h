@@ -56,14 +56,13 @@ static constexpr uint32_t crc_table[]{
     0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d,
 };
 
+// TODO: This is pretty slow, a clear bottleneck for writes.
 inline auto crc_32(BytesView data) noexcept
 {
-    auto crc{0xFFFFFFFFU};
-
-    while (data.size()) {
-        const auto index{(crc ^ static_cast<uint8_t>(data[0])) & 0xFF};
+    uint32_t crc {0xFFFFFFFF};
+    for (auto itr = data.data(); itr != data.data() + data.size(); ++itr) {
+        const auto index = (crc ^ static_cast<uint8_t>(*itr)) & 0xFF;
         crc = crc_table[index] ^ (crc >> 8);
-        data.advance();
     }
     return ~crc;
 }

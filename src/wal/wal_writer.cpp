@@ -1,4 +1,5 @@
 
+#include <optional>
 #include "exception.h"
 #include "wal_reader.h"
 #include "wal_writer.h"
@@ -37,8 +38,8 @@ auto WALWriter::has_committed() const -> bool
 
 auto WALWriter::write(WALRecord record)  -> LSN
 {
-    std::optional<WALRecord> temp {record};
-    const auto lsn = record.lsn();
+    std::optional<WALRecord> temp {std::move(record)};
+    const auto lsn = temp->lsn();
     auto flushed = false;
 
     while (temp) {
@@ -49,7 +50,7 @@ auto WALWriter::write(WALRecord record)  -> LSN
         const auto can_fit_all = remaining >= temp->size();
 
         if (can_fit_some) {
-            std::optional<WALRecord> rest;
+            WALRecord rest;
 
             if (!can_fit_all)
                 rest = temp->split(remaining - WALRecord::HEADER_SIZE);
@@ -58,7 +59,12 @@ auto WALWriter::write(WALRecord record)  -> LSN
             temp->write(destination);
 
             m_cursor += temp->size();
-            temp = rest;
+
+            if (can_fit_all) {
+                temp.reset();
+            } else {
+                temp = rest;
+            }
             continue;
         }
         flush();

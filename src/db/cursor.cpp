@@ -297,7 +297,10 @@ auto Cursor::Impl::move_cursor(PID pid) -> void
     }
 }
 
+Cursor::Cursor() = default;
 Cursor::~Cursor() = default;
+Cursor::Cursor(Cursor&&) noexcept = default;
+auto Cursor::operator=(Cursor&&) noexcept -> Cursor& = default;
 
 auto Cursor::has_record() const -> bool
 {

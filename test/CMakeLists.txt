@@ -17,7 +17,19 @@ set(
     ${PROJECT_SOURCE_DIR}/test/tools/tools.h
 )
 
-add_subdirectory(fuzz)
+function(build_test NAME)
+    set(TEST_FILES "")
+    file(GLOB_RECURSE TEST_FILES "*.cpp" "*.h")
+    add_executable(${NAME} ${TEST_FILES} ${TEST_TOOLS})
+    target_link_libraries(${NAME} ${CUB_NAME} gmock gtest pthread)
+    target_include_directories(${NAME} PRIVATE "${PROJECT_SOURCE_DIR}/test/tools")
+    target_include_directories(${NAME} PRIVATE "${CUB_SOURCE_DIR}")
+    target_include_directories(${NAME} PUBLIC "${CUB_INCLUDE_DIR}")
+    set_target_properties(${NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CUB_TEST_DIR}/build")
+endfunction()
+
+add_subdirectory(benchmark)
+#add_subdirectory(fuzz)
 add_subdirectory(integration)
 add_subdirectory(unit)
 

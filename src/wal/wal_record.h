@@ -45,6 +45,7 @@ public:
     };
 
     WALPayload() = default;
+    ~WALPayload() = default;
     explicit WALPayload(const Parameters&);
     [[nodiscard]] auto is_commit() const -> bool;
     [[nodiscard]] auto decode() const -> PageUpdate;
@@ -71,7 +72,7 @@ public:
 
     WALRecord() = default;
     explicit WALRecord(const Parameters&);
-    virtual ~WALRecord() = default;
+    ~WALRecord() = default;
     [[nodiscard]] auto is_consistent() const -> bool;
     [[nodiscard]] auto is_commit() const -> bool;
     [[nodiscard]] auto lsn() const -> LSN;

@@ -31,10 +31,12 @@ public:
     };
 
     explicit Impl(Parameters);
-    ~Impl() = default;
+    ~Impl();
     auto lookup(BytesView, std::string&) -> bool;
     auto insert(BytesView, BytesView) -> void;
     auto remove(BytesView) -> bool;
+    auto commit() -> void;
+    auto abort() -> void;
     auto get_cursor() -> Cursor;
     auto get_info() -> Info;
 

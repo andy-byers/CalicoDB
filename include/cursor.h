@@ -18,23 +18,21 @@ public:
     [[nodiscard]] auto has_record() const -> bool;
     [[nodiscard]] auto key() const -> BytesView;
     [[nodiscard]] auto value() const -> std::string;
-    auto release() -> void;
     auto reset() -> void;
     auto increment() -> bool;
     auto increment(Size) -> Size;
     auto decrement() -> bool;
     auto decrement(Size) -> Size;
     auto find(BytesView) -> bool;
-    auto find_median() -> void;
     auto find_minimum() -> void;
     auto find_maximum() -> void;
 
-    Cursor(Cursor&&) = default;
-    Cursor &operator=(Cursor&&) = default;
+    Cursor(Cursor&&) noexcept;
+    Cursor &operator=(Cursor&&) noexcept;
 
 private:
     friend class Database;
-    Cursor() = default;
+    Cursor();
 
     class Impl;
     std::unique_ptr<Impl> m_impl;

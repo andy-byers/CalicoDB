@@ -2,14 +2,15 @@
 
 FROM ubuntu:latest
 
+ARG DEBIAN_FRONTEND=noninteractives
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        vim \
-        git \
         build-essential \
         clang-8 clang-format-8 \
-        pkg-config \
         cmake \
+        gdb \
+        pkg-config \
         valgrind && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists
@@ -24,5 +25,10 @@ RUN mkdir CubDB
 
 COPY . ./CubDB
 
-#RUN cmake . && \
-#    cmake --build .
+RUN cd ./CubDB && \
+    cmake . && \
+    cmake --build . \
+RUN #./test/build/fuzz && \
+    ./test/build/unit #&& \
+#    ./test/build/integration && \
+#    ./test/build/benchmark

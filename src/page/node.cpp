@@ -1,8 +1,6 @@
-
 #include "node.h"
 
 namespace cub {
-
 
 auto Node::parent_id() const -> PID
 {
@@ -153,7 +151,7 @@ auto Node::extract_cell(Index index, Scratch scratch) -> Cell
 
 auto Node::find_ge(BytesView key) const -> SearchResult
 {
-    long lower{};
+    long lower {};
     auto upper = static_cast<long>(cell_count()) - 1;
     
     while (lower <= upper) {
@@ -189,7 +187,7 @@ auto Node::header_offset() const -> Index
 auto Node::recompute_usable_space() -> void
 {
     auto usable_space = gap_size() + frag_count();
-    for (Index i{}, ptr{free_start()}; i < free_count(); ++i) {
+    for (Index i {}, ptr{free_start()}; i < free_count(); ++i) {
         usable_space += m_page.get_u16(ptr + CELL_POINTER_SIZE);
         ptr = m_page.get_u16(ptr);
     }
@@ -288,10 +286,10 @@ auto Node::set_child_id(Index index, PID child_id) -> void
 auto Node::allocate_from_free(Size needed_size) -> Index
 {
     // NOTE: We use a value of zero to indicate that there is no previous pointer.
-    Index prev_ptr{};
+    Index prev_ptr {};
     auto curr_ptr = free_start();
 
-    for (Index i{}; i < free_count(); ++i) {
+    for (Index i {}; i < free_count(); ++i) {
         if (needed_size <= m_page.get_u16(curr_ptr + sizeof(uint16_t)))
             return take_free_space(prev_ptr, curr_ptr, needed_size);
         prev_ptr = curr_ptr;
@@ -385,7 +383,7 @@ auto Node::defragment(std::optional<Index> skipped_cid) -> void
     std::string temp(end, '\x00');
     std::vector<Size> ptrs(n);
 
-    for (Index index{}; index < n; ++index) {
+    for (Index index {}; index < n; ++index) {
         if (index == to_skip)
             continue;
         const auto cell = read_cell(index);

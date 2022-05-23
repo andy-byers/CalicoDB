@@ -19,6 +19,8 @@
 
 namespace cub {
 
+Database::Impl::~Impl() = default;
+
 Database::Impl::Impl(Parameters param)
 {
     auto wal_reader = std::make_unique<WALReader>(
@@ -61,6 +63,16 @@ Database::Impl::Impl(Parameters param)
         root.reset();
         m_pool->commit();
     }
+}
+
+auto Database::Impl::commit() -> void
+{
+    m_pool->commit();
+}
+
+auto Database::Impl::abort() -> void
+{
+    m_pool->abort();
 }
 
 auto Database::Impl::get_info() -> Info
@@ -139,7 +151,10 @@ auto Database::open(const std::string &path, const Options &options) -> Database
     return db;
 }
 
+Database::Database() = default;
 Database::~Database() = default;
+Database::Database(Database&&) noexcept = default;
+auto Database::operator=(Database&&) noexcept -> Database& = default;
 
 auto Database::lookup(BytesView key, std::string &result) -> bool
 {
@@ -156,11 +171,20 @@ auto Database::remove(BytesView key) -> bool
     return m_impl->remove(key);
 }
 
+auto Database::commit() -> void
+{
+    m_impl->commit();
+}
+
+auto Database::abort() -> void
+{
+    m_impl->abort();
+}
+
 auto Database::get_cursor() -> Cursor
 {
     return m_impl->get_cursor();
 }
-
 
 auto Database::get_info() -> Info
 {

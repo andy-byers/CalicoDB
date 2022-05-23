@@ -49,6 +49,7 @@ auto BufferPool::allocate(PageType type) -> Page
     auto page = acquire(PID {ROOT_ID_VALUE + m_page_count}, true);
     page.set_type(type);
     m_page_count++;
+
     return page;
 }
 

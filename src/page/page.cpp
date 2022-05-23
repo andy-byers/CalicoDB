@@ -4,6 +4,8 @@
 
 namespace cub {
 
+static constexpr auto MAX_CHANGES = 50;
+
 Page::Page(const Parameters &param)
     : m_pool {param.source}
     , m_data {param.data}
@@ -148,7 +150,13 @@ auto Page::has_changes() const -> bool
 
 auto Page::collect_changes() -> std::vector<ChangedRegion>
 {
-    return std::exchange(m_changes, {});
+    std::vector<ChangedRegion> changes {};
+    if (m_snapshot) {
+        changes = std::exchange(m_changes, {});
+        if (m_changes.size() == MAX_CHANGES)
+            changes = {{0, m_snapshot->data(), m_data}};
+    }
+    return changes;
 }
 
 auto Page::enable_tracking(Scratch scratch) -> void
@@ -180,7 +188,7 @@ auto Page::do_change(Index offset, Size size) -> void
 
     m_is_dirty = true;
 
-    if (m_snapshot) {
+    if (m_snapshot && m_changes.size() < MAX_CHANGES) {
         const auto before = m_snapshot->data().range(offset, size);
         const auto after = range(offset, size);
         m_changes.emplace_back(ChangedRegion{offset, before, after});

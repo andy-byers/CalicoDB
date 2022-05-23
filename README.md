@@ -4,10 +4,11 @@ Cub DB is an embedded key-value database written in C++17.
 ## Disclaimer
 This library, in its current form, should **not** be used in production.
 Writing a reliable, ACID-compliant database is certainly far from trivial, and I have zero professional software development experience at this time.
-Also, Cub DB uses exceptions, which may not be desirable for this type of library.
+Furthermore, this library is under active development: I'm just putting it out there now so that others can help out.
+Also, Cub DB uses exceptions, which may not be desirable for some potential users.
 I initially began working on this project to better learn modern C++ and exception handling, so some design decisions reflect that goal rather than that of producing a general-purpose DBMS.
 I am, however, open to refactoring the project to rely on other forms of error handling, as it would be nice to support embedded systems.
-Please see the `Contributions` section if you are interested in helping out!
+Please see the `Contributions` section if you are interested in working on Cub DB!
 
 ## TODO
 1. Get the fuzz testing up and running. 
@@ -20,6 +21,8 @@ Maybe.
 I'm definitely open to suggestions on this one.
 4. Write some real documentation.
 5. Work on this README
+6. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
+7. Better freelist that uses trunk pages (see SQLite 3)
 
 ## API
 
@@ -149,6 +152,7 @@ CubDB
   ┃  ┣━╸utils
   ┃  ┗━╸wal
   ┗━╸test
+      ┣━╸benchmark
       ┣━╸fuzz
       ┣━╸integration
       ┣━╸tools
@@ -162,6 +166,7 @@ CubDB
 + `/src/tree`: B-tree module
 + `/src/utils`: Utility module
 + `/src/wal`: Write-ahead logging module
++ `/test/benchmark`: Performance benchmarks
 + `/test/fuzz`: Fuzz tests
 + `/test/integration`: Integration tests
 + `/test/tools`: Test tools
@@ -170,4 +175,4 @@ CubDB
 ## Contributions
 Contributions are welcomed!
 The `TODO` section contains a few things that need to be addressed.
-Feel free to create a pull request!
+Feel free to create a pull request.

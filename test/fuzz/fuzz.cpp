@@ -33,9 +33,17 @@ auto run_test(BytesView data)
     while (cursor.increment());
 }
 
-extern "C" int LLVMFuzzerTestOneInput(const Byte *data, Size size)
+//extern "C" int LLVMFuzzerTestOneInput(const Byte *data, Size size)
+//{
+//    puts("hi");
+//    run_test({data, size});
+//    return 0;
+//}
+
+
+auto main(int, const char*[]) -> int
 {
-    puts("hi");
-    run_test({data, size});
+    using namespace cub;
+    run_test(_b("hello"));
     return 0;
 }

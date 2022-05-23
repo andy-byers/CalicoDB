@@ -1,10 +1,10 @@
 #ifndef CUB_TEST_TOOLS_FAKES_H
 #define CUB_TEST_TOOLS_FAKES_H
 
+#include "bytes.h"
 #include "common.h"
 #include "random.h"
 #include "file/interface.h"
-#include "bytes.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
 
@@ -99,16 +99,6 @@ private:
     Index m_cursor{};
 };
 
-
-
-
-
-
-
-
-
-
-
 class FaultControls {
 public:
     struct Controls {
@@ -182,7 +172,7 @@ class FaultyReadOnlyMemory
 public:
     explicit FaultyReadOnlyMemory(Random::Seed seed = 0)
         : FaultyBase{seed} {}
-    FaultyReadOnlyMemory(SharedMemory memory, Random::Seed seed = 0)
+    explicit FaultyReadOnlyMemory(SharedMemory memory, Random::Seed seed = 0)
         : ReadOnlyMemory{std::move(memory)}
         , FaultyBase{seed} {}
     ~FaultyReadOnlyMemory() override = default;
@@ -200,15 +190,12 @@ class FaultyWriteOnlyMemory
 public:
     explicit FaultyWriteOnlyMemory(Random::Seed seed = 0)
         : FaultyBase{seed} {}
-    FaultyWriteOnlyMemory(SharedMemory memory, Random::Seed seed = 0)
+    explicit FaultyWriteOnlyMemory(SharedMemory memory, Random::Seed seed = 0)
         : WriteOnlyMemory{std::move(memory)}
         , FaultyBase{seed} {}
     ~FaultyWriteOnlyMemory() override = default;
 
     auto write(BytesView) -> Size override;
-
-private:
-    friend class Fs;
 };
 
 class FaultyReadWriteMemory
@@ -218,16 +205,13 @@ class FaultyReadWriteMemory
 public:
     explicit FaultyReadWriteMemory(Random::Seed seed = 0)
         : FaultyBase{seed} {}
-    FaultyReadWriteMemory(SharedMemory memory, Random::Seed seed = 0)
+    explicit FaultyReadWriteMemory(SharedMemory memory, Random::Seed seed = 0)
         : ReadWriteMemory{std::move(memory)}
         , FaultyBase{seed} {}
     ~FaultyReadWriteMemory() override = default;
 
     auto read(Bytes) -> Size override;
     auto write(BytesView) -> Size override;
-
-private:
-    friend class Fs;
 };
 
 class FaultyLogMemory
@@ -237,15 +221,12 @@ class FaultyLogMemory
 public:
     explicit FaultyLogMemory(Random::Seed seed = 0)
         : FaultyBase{seed} {}
-    FaultyLogMemory(SharedMemory memory, Random::Seed seed = 0)
+    explicit FaultyLogMemory(SharedMemory memory, Random::Seed seed = 0)
         : LogMemory{std::move(memory)}
         , FaultyBase{seed} {}
     ~FaultyLogMemory() override = default;
 
     auto write(BytesView) -> Size override;
-
-private:
-    friend class Fs;
 };
 
 class IWALReader;
@@ -262,22 +243,22 @@ struct WALHarness final {
 class StubWALWriter: public IWALWriter {
 public:
     ~StubWALWriter() override = default;
-    [[nodiscard]] virtual auto block_size() const -> Size override {return 0;}
-    [[nodiscard]] virtual auto has_pending() const -> bool override {return false;}
-    [[nodiscard]] virtual auto has_committed() const -> bool override {return false;}
-    virtual auto write(WALRecord) -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
-    virtual auto truncate() -> void override {}
-    virtual auto flush() -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
+    [[nodiscard]] auto block_size() const -> Size override {return 0;}
+    [[nodiscard]] auto has_pending() const -> bool override {return false;}
+    [[nodiscard]] auto has_committed() const -> bool override {return false;}
+    auto write(WALRecord) -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
+    auto truncate() -> void override {}
+    auto flush() -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
 };
 
 
 class StubWALReader: public IWALReader {
 public:
-    virtual ~StubWALReader() override = default;
-    [[nodiscard]] virtual auto record() const -> std::optional<WALRecord> override {return std::nullopt;}
-    virtual auto increment() -> bool override {return false;}
-    virtual auto decrement() -> bool override {return false;}
-    virtual auto reset() -> void override {}
+    ~StubWALReader() override = default;
+    [[nodiscard]] auto record() const -> std::optional<WALRecord> override {return std::nullopt;}
+    auto increment() -> bool override {return false;}
+    auto decrement() -> bool override {return false;}
+    auto reset() -> void override {}
 };
 
 } // db

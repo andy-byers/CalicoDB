@@ -20,7 +20,6 @@
 #include "utils/layout.h"
 #include "tree/tree.h"
 
-#include "fakes.h"
 #include "random.h"
 #include "tools.h"
 
@@ -47,7 +46,7 @@ TEST(DatabaseTest, TestReaders)
 
     auto db = Database::open(TEST_PATH, {});
 
-    for (const auto &[key, value]: RecordGenerator::generate(100, {}))
+    for (const auto &[key, value]: RecordGenerator::generate(1000, {}))
         db.insert(_b(key), _b(value));
 
     std::vector<std::thread> readers;
