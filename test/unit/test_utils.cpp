@@ -5,7 +5,7 @@
 #include "utils/assert.h"
 #include "utils/encoding.h"
 #include "utils/scratch.h"
-#include "utils/slice.h"
+#include "bytes.h"
 #include "utils/utils.h"
 #include "unit.h"
 
@@ -41,7 +41,7 @@ TEST(TestEncoding, ReadsAndWrites)
 class SliceTests: public testing::Test {
 protected:
     std::string test_string {"Hello, world!"};
-    MutBytes bytes {to_bytes(test_string)};
+    Bytes bytes {_b(test_string)};
 };
 
 TEST_F(SliceTests, EqualsSelf)
@@ -51,12 +51,12 @@ TEST_F(SliceTests, EqualsSelf)
 
 TEST_F(SliceTests, ShorterSlicesCompareAsLessThan)
 {
-    ASSERT_TRUE(to_bytes(test_string.substr(0, test_string.size() - 1)) < bytes);
+    ASSERT_TRUE(_b(test_string.substr(0, test_string.size() - 1)) < bytes);
 }
 
 TEST_F(SliceTests, CanGetPartialRange)
 {
-    ASSERT_TRUE(bytes.range(7, 5) == to_bytes("world"));
+    ASSERT_TRUE(bytes.range(7, 5) == _b("world"));
 }
 
 TEST_F(SliceTests, CanGetEntireRange)
@@ -72,7 +72,7 @@ TEST_F(SliceTests, EmptyRangesAreEmpty)
 
 TEST_F(SliceTests, RangeDeathTest)
 {
-    RefBytes discard;
+    BytesView discard;
     ASSERT_DEATH(discard = bytes.range(bytes.size() + 1), EXPECTATION_MATCHER);
     ASSERT_DEATH(discard = bytes.range(bytes.size(), 1), EXPECTATION_MATCHER);
     ASSERT_DEATH(discard = bytes.range(0, bytes.size() + 1), EXPECTATION_MATCHER);
@@ -131,7 +131,7 @@ TEST_F(SliceTests, CanAdvanceAndTruncate)
     bytes.truncate(bytes.size() - 2);
     bytes.advance(4);
     bytes.truncate(bytes.size() - 3);
-    ASSERT_EQ(to_string(bytes), "w");
+    ASSERT_EQ(_s(bytes), "w");
 }
 
 TEST(UtilsTest, ZeroIsNotAPowerOfTwo)

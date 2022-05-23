@@ -10,7 +10,7 @@
 
 #include "common.h"
 #include "layout.h"
-#include "slice.h"
+#include "bytes.h"
 
 namespace cub {
 
@@ -22,9 +22,9 @@ public:
     // Identifies the file as a CubDB_ database.
     static constexpr auto MAGIC_CODE{0xB11924E1U};
 
-    explicit FileHeader(MutBytes);
+    explicit FileHeader(Bytes);
     explicit FileHeader(Node&);
-    auto data() const -> RefBytes;
+    auto data() const -> BytesView;
     auto magic_code() const -> Index;
     auto page_count() const -> Size;
     auto node_count() const -> Size;
@@ -45,9 +45,9 @@ public:
     auto set_flushed_lsn(LSN) -> void;
 
 private:
-    auto data() -> MutBytes;
+    auto data() -> Bytes;
 
-    MutBytes m_header;
+    Bytes m_header;
 };
 
 template<class Value> struct Unique {

@@ -6,7 +6,7 @@
 #include "page/page.h"
 #include "utils/assert.h"
 #include "utils/scratch.h"
-#include "utils/slice.h"
+#include "bytes.h"
 #include "unit.h"
 
 namespace {
@@ -24,7 +24,7 @@ public:
     auto get_page(PID id) -> Page
     {
         m_backing.emplace(id, std::string(page_size, '\x00'));
-        Page page {{id, to_bytes(m_backing[id]), nullptr, true, false}};
+        Page page {{id, _b(m_backing[id]), nullptr, true, false}};
         page.enable_tracking(m_scratch.get());
         return page;
     }
@@ -38,7 +38,7 @@ TEST_F(PageTests, FreshPagesAreEmpty)
 {
     auto page = get_page(PID::root());
     ASSERT_FALSE(page.has_changes());
-    ASSERT_TRUE(page.range(0) == to_bytes(std::string(page_size, '\x00')));
+    ASSERT_TRUE(page.range(0) == _b(std::string(page_size, '\x00')));
 }
 
 TEST_F(PageTests, RegistersHeaderChange)
@@ -88,16 +88,18 @@ TEST_F(PageTests, RedoChanges)
     ASSERT_EQ(page.get_u32(halfway_point), 42);
 }
 
-auto make_cell(Node &node, const std::string &key, std::string &value)
+auto make_cell(Node &node, const std::string &key, std::string &value, Scratch scratch)
 {
     auto builder = CellBuilder{node.page().size()}
-        .set_key(to_bytes(key))
-        .set_value(to_bytes(value));
+        .set_key(_b(key))
+        .set_value(_b(value));
 
     if (const auto overflow = builder.overflow(); !overflow.is_empty())
         value.resize(value.size() - overflow.size());
 
-    return builder.build();
+    auto cell = builder.build();
+    cell.detach(std::move(scratch));
+    return cell;
 }
 
 class NodeTests: public PageTests {
@@ -112,9 +114,10 @@ public:
         return node;
     }
 
-    PID arbitrary_pid {2};
+    ScratchManager scratch {page_size};
     std::string normal_value {"world"};
     std::string overflow_value;
+    PID arbitrary_pid {2};
 };
 
 TEST_F(NodeTests, NodeAllocationCausesPageChanges)
@@ -138,7 +141,7 @@ TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto [index, found_eq] = node.find_ge(to_bytes("hello"));
+    auto [index, found_eq] = node.find_ge(_b("hello"));
     ASSERT_FALSE(found_eq);
 
     // We would insert "hello" at this index.
@@ -148,7 +151,7 @@ TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 TEST_F(NodeTests, UsableSpaceIsUpdatedOnInsert)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto cell = make_cell(node, "hello", normal_value);
+    auto cell = make_cell(node, "hello", normal_value, scratch.get());
     const auto usable_space_after = node.usable_space() - cell.size() - CELL_POINTER_SIZE;
     node.insert(std::move(cell));
     ASSERT_EQ(node.usable_space(), usable_space_after);
@@ -158,7 +161,7 @@ auto get_node_with_one_cell(NodeTests &test, bool has_overflow = false)
 {
     auto value = has_overflow ? test.overflow_value : test.normal_value;
     auto node = test.make_node(PID::root(), PageType::INTERNAL_NODE);
-    auto cell = make_cell(node, "hello", value);
+    auto cell = make_cell(node, "hello", value, test.scratch.get());
 
     if (has_overflow)
         cell.set_overflow_id(test.arbitrary_pid);
@@ -177,7 +180,7 @@ TEST_F(NodeTests, InsertingCellIncrementsCellCount)
 TEST_F(NodeTests, FindExact)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(to_bytes("hello"));
+    auto [index, found_eq] = node.find_ge(_b("hello"));
     ASSERT_TRUE(found_eq);
     ASSERT_EQ(index, 0);
 }
@@ -185,7 +188,7 @@ TEST_F(NodeTests, FindExact)
 TEST_F(NodeTests, FindLessThan)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(to_bytes("helln"));
+    auto [index, found_eq] = node.find_ge(_b("helln"));
     ASSERT_FALSE(found_eq);
     ASSERT_EQ(index, 0);
 }
@@ -193,7 +196,7 @@ TEST_F(NodeTests, FindLessThan)
 TEST_F(NodeTests, FindGreaterThan)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(to_bytes("hellp"));
+    auto [index, found_eq] = node.find_ge(_b("hellp"));
     ASSERT_FALSE(found_eq);
     ASSERT_EQ(index, 1);
 }
@@ -204,8 +207,8 @@ TEST_F(NodeTests, ReadCell)
     auto cell = node.read_cell(0);
     ASSERT_EQ(cell.left_child_id(), arbitrary_pid);
     ASSERT_EQ(cell.overflow_id(), PID::null());
-    ASSERT_TRUE(cell.key() == to_bytes("hello"));
-    ASSERT_TRUE(cell.local_value() == to_bytes("world"));
+    ASSERT_TRUE(cell.key() == _b("hello"));
+    ASSERT_TRUE(cell.local_value() == _b("world"));
 }
 
 TEST_F(NodeTests, ReadCellWithOverflow)
@@ -219,32 +222,32 @@ TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
 {
     std::string value {"world"};
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto cell = make_cell(node, "hello", value);
-    node.insert(make_cell(node, "hello", value));
-    ASSERT_DEATH(node.insert(make_cell(node, "hello", value)), EXPECTATION_MATCHER);
+    auto cell = make_cell(node, "hello", value, scratch.get());
+    node.insert(make_cell(node, "hello", value, scratch.get()));
+    ASSERT_DEATH(node.insert(make_cell(node, "hello", value, scratch.get())), EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeTests, RemovingNonexistentCellDoesNothing)
 {
     auto node = get_node_with_one_cell(*this);
-    ASSERT_FALSE(node.remove(to_bytes("not_found")));
+    ASSERT_FALSE(node.remove(_b("not_found")));
     ASSERT_EQ(node.cell_count(), 1);
 }
 
 TEST_F(NodeTests, RemovingCellDecrementsCellCount)
 {
     auto node = get_node_with_one_cell(*this);
-    node.remove(to_bytes("hello"));
+    node.remove(_b("hello"));
     ASSERT_EQ(node.cell_count(), 0);
 }
 
 TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto cell = make_cell(node, "hello", normal_value);
+    auto cell = make_cell(node, "hello", normal_value, scratch.get());
     const auto usable_space_before = node.usable_space();
     node.insert(std::move(cell));
-    node.remove(to_bytes("hello"));
+    node.remove(_b("hello"));
     ASSERT_EQ(node.usable_space(), usable_space_before);
 }
 

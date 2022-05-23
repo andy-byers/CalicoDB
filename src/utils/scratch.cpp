@@ -2,7 +2,7 @@
 
 namespace cub {
 
-Scratch::Scratch(Index id, MutBytes data, ScratchManager *source)
+Scratch::Scratch(Index id, Bytes data, ScratchManager *source)
     : m_internal {Internal {data, source, id}} {}
 
 Scratch::~Scratch()
@@ -29,7 +29,7 @@ auto Scratch::size() const -> Size
     return m_internal.value.data.size();
 }
 
-auto Scratch::data() -> MutBytes
+auto Scratch::data() -> Bytes
 {
     CUB_EXPECT_NOT_NULL(m_internal.value.source);
     return m_internal.value.data;
@@ -53,7 +53,7 @@ auto ScratchManager::get() -> Scratch
     //       of moving the old one, and the slice will be invalidated. If we increase
     //       the string size, the compiler stops performing this optimization and the
     //       problem goes away.
-    return {id, to_bytes(m_pinned[id]), this};
+    return {id, _b(m_pinned[id]), this};
 }
 
 auto ScratchManager::on_scratch_release(Scratch &scratch) -> void
@@ -65,4 +65,4 @@ auto ScratchManager::on_scratch_release(Scratch &scratch) -> void
     m_pinned.erase(scratch.id());
 }
 
-} // cub
+} // db

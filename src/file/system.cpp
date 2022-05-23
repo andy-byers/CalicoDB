@@ -48,7 +48,7 @@ auto rename(const std::string &old_name, const std::string &new_name) -> void
         throw SystemError("rename");
 }
 
-auto read(int fd, MutBytes data) -> Size
+auto read(int fd, Bytes data) -> Size
 {
     for (Index i{}; i < data.size(); ++i) {
         if (auto read_size{::read(fd, data.data(), data.size())}; read_size != FAILURE) {
@@ -60,7 +60,7 @@ auto read(int fd, MutBytes data) -> Size
     throw SystemError("read");
 }
 
-auto write(int fd, RefBytes data) -> Size
+auto write(int fd, BytesView data) -> Size
 {
     for (Index i{}; i < data.size(); ++i) {
         if (auto write_size{::write(fd, data.data(), data.size())}; write_size != FAILURE) {

@@ -18,30 +18,30 @@ const std::string TEST_STRING = "TEST_STRING";
 
 template<class S> auto read_string(S &store, std::string &buffer) -> Size
 {
-    return store.read(to_bytes(buffer));
+    return store.read(_b(buffer));
 }
 
 template<class S> auto read_exact_string(S &store, std::string &buffer) -> void
 {
-    read_exact(store, to_bytes(buffer));
+    read_exact(store, _b(buffer));
 }
 
 template<class S> auto write_string(S &store, const std::string &buffer) -> Size
 {
-    return store.write(to_bytes(buffer));
+    return store.write(_b(buffer));
 }
 
 template<class S> auto write_exact_string(S &store, const std::string &buffer) -> void
 {
-    write_exact(store, to_bytes(buffer));
+    write_exact(store, _b(buffer));
 }
 
 auto test_random_reads_and_writes(IReadWriteFile &store) -> void
 {
-    static constexpr auto payload_size {1'000};
+    static constexpr Size payload_size = 1'000;
     Random random {0};
     const auto payload_out = random.next_string(payload_size);
-    auto out = to_bytes(payload_out);
+    auto out = _b(payload_out);
 
     // Write out the string in random-sized chunks.
     while (!out.is_empty()) {
@@ -52,7 +52,7 @@ auto test_random_reads_and_writes(IReadWriteFile &store) -> void
     ASSERT_EQ(store.seek(0, Seek::BEGIN), 0);
 
     std::string payload_in(payload_size, '\x00');
-    auto in = to_bytes(payload_in);
+    auto in = _b(payload_in);
 
     // Read back the string in random-sized chunks.
     while (!in.is_empty()) {
@@ -176,8 +176,8 @@ TEST_F(MemoryTests, SharesMemory)
 {
     auto a = std::make_unique<WriteOnlyMemory>();
     auto b = std::make_unique<ReadOnlyMemory>(a->memory());
-    ASSERT_EQ(a->write(to_bytes(TEST_STRING)), TEST_STRING.size());
-    ASSERT_EQ(b->read(to_bytes(test_buffer)), test_buffer.size());
+    ASSERT_EQ(a->write(_b(TEST_STRING)), TEST_STRING.size());
+    ASSERT_EQ(b->read(_b(test_buffer)), test_buffer.size());
     ASSERT_EQ(test_buffer, TEST_STRING);
 }
 
@@ -189,13 +189,13 @@ protected:
 TEST_F(FaultyMemoryTests, CanReadNormally)
 {
     auto mem = std::make_unique<FaultyReadOnlyMemory>();
-    mem->read(to_bytes(test_buffer));
+    mem->read(_b(test_buffer));
 }
 
 TEST_F(FaultyMemoryTests, CanWriteNormally)
 {
     auto mem = std::make_unique<FaultyWriteOnlyMemory>();
-    mem->write(to_bytes(TEST_STRING));
+    mem->write(_b(TEST_STRING));
 }
 
 TEST_F(FaultyMemoryTests, GeneratesReadFault)
@@ -203,7 +203,7 @@ TEST_F(FaultyMemoryTests, GeneratesReadFault)
     auto mem = std::make_unique<FaultyReadOnlyMemory>();
     auto controls = mem->controls();
     controls.set_read_fault_rate(100);
-    ASSERT_THROW(mem->read(to_bytes(test_buffer)), IOError);
+    ASSERT_THROW(mem->read(_b(test_buffer)), IOError);
 }
 
 TEST_F(FaultyMemoryTests, GeneratesWriteFault)
@@ -211,7 +211,7 @@ TEST_F(FaultyMemoryTests, GeneratesWriteFault)
     auto mem = std::make_unique<FaultyWriteOnlyMemory>();
     auto controls = mem->controls();
     controls.set_write_fault_rate(100);
-    ASSERT_THROW(mem->write(to_bytes(TEST_STRING)), IOError);
+    ASSERT_THROW(mem->write(_b(TEST_STRING)), IOError);
 }
 
 } // <anonymous>

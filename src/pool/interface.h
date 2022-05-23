@@ -2,7 +2,7 @@
 #define CUB_POOL_INTERFACE_H
 
 #include "common.h"
-#include "utils/slice.h"
+#include "bytes.h"
 #include "utils/types.h"
 
 namespace cub {
@@ -33,6 +33,6 @@ public:
     virtual auto on_page_error() -> void = 0;
 };
 
-} // cub
+} // db
 
 #endif // CUB_POOL_INTERFACE_H

@@ -123,7 +123,7 @@ auto Node::child_id(Index index) const -> PID
     return rightmost_child_id();
 }
 
-auto Node::read_key(Index index) const -> RefBytes
+auto Node::read_key(Index index) const -> BytesView
 {
     CUB_EXPECT_LT(index, cell_count());
     return read_cell(index).key();
@@ -132,7 +132,7 @@ auto Node::read_key(Index index) const -> RefBytes
 auto Node::read_cell(Index index) const -> Cell
 {
     CUB_EXPECT_LT(index, cell_count());
-    return CellReader{m_page.type(), m_page.range(0)}.read(cell_pointer(index));
+    return CellReader {m_page.type(), m_page.range(0)}.read(cell_pointer(index));
 }
 
 auto Node::detach_cell(Index index, Scratch scratch) const -> Cell
@@ -151,7 +151,7 @@ auto Node::extract_cell(Index index, Scratch scratch) -> Cell
     return cell;
 }
 
-auto Node::find_ge(RefBytes key) const -> SearchResult
+auto Node::find_ge(BytesView key) const -> SearchResult
 {
     long lower{};
     auto upper = static_cast<long>(cell_count()) - 1;
@@ -398,7 +398,7 @@ auto Node::defragment(std::optional<Index> skipped_cid) -> void
             set_cell_pointer(cid, ptrs.at(cid));
     }
     const auto offset = cell_area_offset();
-    m_page.write(to_bytes(temp).range(offset, m_page.size() - offset), offset);
+    m_page.write(_b(temp).range(offset, m_page.size() - offset), offset);
     set_cell_start(end);
     set_frag_count(0);
     set_free_count(0);
@@ -449,7 +449,7 @@ auto Node::insert_at(Index index, Cell cell) -> void
         set_cell_start(offset);
 }
 
-auto Node::remove(RefBytes key) -> bool
+auto Node::remove(BytesView key) -> bool
 {
     if (auto [index, found_eq] = find_ge(key); found_eq) {
         remove_at(index, read_cell(index).size());
@@ -480,4 +480,4 @@ auto Node::reset(bool reset_header) -> void
     recompute_usable_space();
 }
 
-} // cub
+} // db

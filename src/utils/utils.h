@@ -22,6 +22,6 @@ inline auto compose_wal_path(const std::string &db_path) -> std::string
     return db_path + ".wal";
 }
 
-} // cub
+} // db
 
 #endif // CUB_UTILS_UTILS_H

@@ -37,7 +37,7 @@ public:
     {
         const auto offset = PageLayout::content_offset(page.id());
         CUB_EXPECT_LE(offset + message.size(), page.size());
-        page.write(to_bytes(message), offset);
+        page.write(_b(message), offset);
     }
 
     template<class Page> static auto read_from_page(const Page &page, Size size) -> std::string
@@ -45,7 +45,7 @@ public:
         const auto offset = PageLayout::content_offset(page.id());
         CUB_EXPECT_LE(offset + size, page.size());
         auto message = std::string(size, '\x00');
-        page.read(to_bytes(message), offset);
+        page.read(_b(message), offset);
         return message;
     }
     

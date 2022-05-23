@@ -1,8 +1,11 @@
 #ifndef CUB_EXCEPTION_H
 #define CUB_EXCEPTION_H
 
+#include <cerrno>
+#include <cstring>
 #include <exception>
 #include <system_error>
+#include <utility>
 
 #include "common.h"
 
@@ -58,12 +61,12 @@ class IOError: public SystemError {
 public:
     static auto partial_read() -> IOError
     {
-        return IOError{SystemError{"read", 0}};
+        return IOError{SystemError{"read", std::make_error_code(std::errc::io_error).value()}}; // TODO: Better way?
     }
 
     static auto partial_write() -> IOError
     {
-        return IOError{SystemError{"write", 0}};
+        return IOError{SystemError{"write", std::make_error_code(std::errc::io_error).value()}};
     }
 
     explicit IOError(const SystemError &error)
@@ -96,6 +99,6 @@ public:
     ~InvalidOperationError() override = default;
 };
 
-} // cub
+} // db
 
 #endif // CUB_EXCEPTION_H

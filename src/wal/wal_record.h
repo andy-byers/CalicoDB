@@ -48,7 +48,7 @@ public:
     explicit WALPayload(const Parameters&);
     [[nodiscard]] auto is_commit() const -> bool;
     [[nodiscard]] auto decode() const -> PageUpdate;
-    [[nodiscard]] auto data() const -> RefBytes {return to_bytes(m_data);}
+    [[nodiscard]] auto data() const -> BytesView {return _b(m_data);}
     auto append(const WALPayload &rhs) -> void {m_data += rhs.m_data;}
 
 private:
@@ -79,8 +79,8 @@ public:
     [[nodiscard]] auto type() const -> Type;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto payload() const -> const WALPayload&;
-    auto read(RefBytes) -> void;
-    auto write(MutBytes) const noexcept -> void;
+    auto read(BytesView) -> void;
+    auto write(Bytes) const noexcept -> void;
     auto split(Index) -> WALRecord;
     auto merge(WALRecord) -> void;
 
@@ -91,6 +91,6 @@ private:
     Type m_type {Type::EMPTY};
 };
 
-} // cub
+} // db
 
 #endif // CUB_WAL_WAL_RECORD_H

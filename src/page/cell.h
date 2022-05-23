@@ -18,16 +18,16 @@ public:
                                             PAGE_ID_SIZE;      // Overflow ID    (4B)
 
     ~Cell() = default;
-    [[nodiscard]] auto key() const -> RefBytes;
+    [[nodiscard]] auto key() const -> BytesView;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto value_size() const -> Size;
     [[nodiscard]] auto overflow_size() const -> Size;
-    [[nodiscard]] auto local_value() const -> RefBytes;
+    [[nodiscard]] auto local_value() const -> BytesView;
     [[nodiscard]] auto overflow_id() const -> PID;
     [[nodiscard]] auto left_child_id() const -> PID;
     auto set_left_child_id(PID) -> void;
     auto set_overflow_id(PID) -> void;
-    auto write(MutBytes) const -> void;
+    auto write(Bytes) const -> void;
     auto detach(Scratch) -> void;
 
     Cell(Cell&&) = default;
@@ -39,14 +39,14 @@ private:
     Cell() = default;
 
     std::optional<Scratch> m_scratch;
-    RefBytes m_key;
-    RefBytes m_local_value;
+    BytesView m_key;
+    BytesView m_local_value;
     PID m_left_child_id;
     PID m_overflow_id;
     Size m_value_size{};
 };
 
-inline constexpr auto min_local(Size page_size) -> Size
+inline auto min_local(Size page_size)
 {
     CUB_EXPECT_GT(page_size, 0);
     CUB_EXPECT_TRUE(is_power_of_two(page_size));
@@ -54,7 +54,7 @@ inline constexpr auto min_local(Size page_size) -> Size
            Cell::MAX_HEADER_SIZE - CELL_POINTER_SIZE;
 }
 
-inline constexpr auto max_local(Size page_size) -> Size
+inline auto max_local(Size page_size)
 {
     CUB_EXPECT_GT(page_size, 0);
     CUB_EXPECT_TRUE(is_power_of_two(page_size));
@@ -66,23 +66,23 @@ class CellBuilder {
 public:
     explicit CellBuilder(Size);
     [[nodiscard]] auto build() const -> Cell;
-    [[nodiscard]] auto overflow() const -> RefBytes;
-    auto set_key(RefBytes) -> CellBuilder&;
-    auto set_value(RefBytes) -> CellBuilder&;
+    [[nodiscard]] auto overflow() const -> BytesView;
+    auto set_key(BytesView) -> CellBuilder&;
+    auto set_value(BytesView) -> CellBuilder&;
 
 private:
-    RefBytes m_key;
-    RefBytes m_value;
+    BytesView m_key;
+    BytesView m_value;
     Size m_page_size{};
 };
 
 class CellReader {
 public:
-    CellReader(PageType, RefBytes);
+    CellReader(PageType, BytesView);
     [[nodiscard]] auto read(Index) const -> Cell;
 
 private:
-    RefBytes m_page;
+    BytesView m_page;
     PageType m_page_type{};
 };
 

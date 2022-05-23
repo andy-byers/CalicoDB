@@ -54,7 +54,7 @@ auto WALWriter::write(WALRecord record)  -> LSN
             if (!can_fit_all)
                 rest = temp->split(remaining - WALRecord::HEADER_SIZE);
 
-            auto destination = to_bytes(m_block).range(m_cursor, temp->size());
+            auto destination = _b(m_block).range(m_cursor, temp->size());
             temp->write(destination);
 
             m_cursor += temp->size();
@@ -80,7 +80,7 @@ auto WALWriter::flush() -> LSN
 {
     if (m_cursor) {
         // The unused part of the block should be zero-filled.
-        auto block = to_bytes(m_block);
+        auto block = _b(m_block);
         mem_clear(block.range(m_cursor));
 
         m_file->write(block);

@@ -4,13 +4,13 @@
 #include "exception.h"
 #include "file.h"
 #include "system.h"
-#include "utils/slice.h"
+#include "bytes.h"
 
 namespace cub {
 
 namespace {
 
-    auto robust_read(const Resource &resource, MutBytes out)
+    auto robust_read(const Resource &resource, Bytes out)
     {
         const auto target_size = out.size();
 
@@ -31,7 +31,7 @@ namespace {
         return target_size - out.size();
     }
 
-    auto robust_write(const Resource &resource, RefBytes in)
+    auto robust_write(const Resource &resource, BytesView in)
     {
         const auto target_size = in.size();
 
@@ -88,7 +88,7 @@ auto ReadOnlyFile::seek(long offset, Seek whence) -> Index
     return system::seek(m_resource.fd(), offset, static_cast<int>(whence));
 }
 
-auto ReadOnlyFile::read(MutBytes out) -> Size
+auto ReadOnlyFile::read(Bytes out) -> Size
 {
     return robust_read(m_resource, out);
 }
@@ -123,7 +123,7 @@ auto WriteOnlyFile::seek(long offset, Seek whence) -> Index
     return system::seek(m_resource.fd(), offset, static_cast<int>(whence));
 }
 
-auto WriteOnlyFile::write(RefBytes in) -> Size
+auto WriteOnlyFile::write(BytesView in) -> Size
 {
     return robust_write(m_resource, in);
 }
@@ -158,12 +158,12 @@ auto ReadWriteFile::seek(long offset, Seek whence) -> Index
     return system::seek(m_resource.fd(), offset, static_cast<int>(whence));
 }
 
-auto ReadWriteFile::read(MutBytes out) -> Size
+auto ReadWriteFile::read(Bytes out) -> Size
 {
     return robust_read(m_resource, out);
 }
 
-auto ReadWriteFile::write(RefBytes in) -> Size
+auto ReadWriteFile::write(BytesView in) -> Size
 {
     return robust_write(m_resource, in);
 }
@@ -193,7 +193,7 @@ auto LogFile::resize(Size size) -> void
     system::resize(m_resource.fd(), size);
 }
 
-auto LogFile::write(RefBytes in) -> Size
+auto LogFile::write(BytesView in) -> Size
 {
     return robust_write(m_resource, in);
 }

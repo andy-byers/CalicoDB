@@ -4,7 +4,7 @@
 #include "cell.h"
 #include "common.h"
 #include "page.h"
-#include "utils/slice.h"
+#include "bytes.h"
 
 namespace cub {
 
@@ -54,14 +54,14 @@ public:
         return m_page.type();
     }
 
-    auto read_key(Index) const -> RefBytes;
+    auto read_key(Index) const -> BytesView;
     auto read_cell(Index) const -> Cell;
     auto detach_cell(Index, Scratch) const -> Cell;
     auto extract_cell(Index, Scratch) -> Cell;
-    auto find_ge(RefBytes) const -> SearchResult;
+    auto find_ge(BytesView) const -> SearchResult;
     auto insert(Cell) -> void;
     auto insert_at(Index, Cell) -> void;
-    auto remove(RefBytes) -> bool;
+    auto remove(BytesView) -> bool;
     auto remove_at(Index, Size) -> void;
     auto defragment() -> void;
 
@@ -122,6 +122,6 @@ private:
     Size m_usable_space{};
 };
 
-} // cub
+} // db
 
 #endif // CUB_PAGE_NODE_H

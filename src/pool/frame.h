@@ -3,11 +3,12 @@
 #define CUB_POOL_FRAME_H
 
 #include <limits>
+#include <memory>
 
 #include "common.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
-#include "utils/slice.h"
+#include "bytes.h"
 
 namespace cub {
 
@@ -26,8 +27,8 @@ public:
     [[nodiscard]] auto page_id() const -> PID;
     [[nodiscard]] auto ref_count() const -> Size;
     [[nodiscard]] auto is_dirty() const -> bool;
-    [[nodiscard]] auto data() const -> RefBytes;
-    auto data() -> MutBytes;
+    [[nodiscard]] auto data() const -> BytesView;
+    auto data() -> Bytes;
     auto clean() -> void;
     auto reset(PID) -> void;
     auto borrow(IBufferPool*, bool) -> Page;
@@ -42,6 +43,6 @@ private:
     bool m_is_dirty {};
 };
 
-} // cub
+} // db
 
 #endif // CUB_POOL_FRAME_H

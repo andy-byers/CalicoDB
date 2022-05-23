@@ -17,12 +17,12 @@ auto Link::set_next_id(PID id) -> void
     put_uint32(m_page.mut_range(offset), id.value);
 }
 
-auto Link::ref_content() const -> RefBytes
+auto Link::ref_content() const -> BytesView
 {
     return m_page.range(LinkLayout::content_offset());
 }
 
-auto Link::mut_content() -> MutBytes
+auto Link::mut_content() -> Bytes
 {
     return m_page.mut_range(LinkLayout::content_offset());
 }

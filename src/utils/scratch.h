@@ -6,7 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include "common.h"
-#include "slice.h"
+#include "bytes.h"
 #include "types.h"
 
 namespace cub {
@@ -15,11 +15,11 @@ class ScratchManager;
 
 class Scratch final {
 public:
-    Scratch(Index, MutBytes, ScratchManager*);
+    Scratch(Index, Bytes, ScratchManager*);
     ~Scratch();
     [[nodiscard]] auto id() const -> Index;
     [[nodiscard]] auto size() const -> Size;
-    auto data() -> MutBytes;
+    auto data() -> Bytes;
 
     // TODO: Should be noexcept, along with operator=().
     Scratch(Scratch&&) = default;
@@ -37,7 +37,7 @@ private:
     auto do_release() -> void;
 
     struct Internal {
-        MutBytes data;
+        Bytes data;
         ScratchManager *source{};
         Index id{};
     };
@@ -60,6 +60,6 @@ private:
     Size m_id_counter{MIN_SCRATCH_ID};
 };
 
-} // cub
+} // db
 
 #endif // CUB_UTILS_SCRATCH_H

@@ -20,8 +20,8 @@ inline auto is_page_type_valid(PageType type) -> bool
 
 struct ChangedRegion {
     Index offset{};  ///< Offset of the region from the start of the page
-    RefBytes before; ///< Contents of the region pre-update
-    RefBytes after;  ///< Contents of the region post-update
+    BytesView before; ///< Contents of the region pre-update
+    BytesView after;  ///< Contents of the region post-update
 };
 
 struct PageUpdate {
@@ -37,7 +37,7 @@ class Page final {
 public:
     struct Parameters {
         PID id;
-        MutBytes data;
+        Bytes data;
         IBufferPool *source {};
         bool is_writable {};
         bool is_dirty {};
@@ -55,22 +55,22 @@ public:
 
     [[nodiscard]] auto id() const -> PID;
     [[nodiscard]] auto size() const -> Size;
-    [[nodiscard]] auto range(Index) const -> RefBytes;
-    [[nodiscard]] auto range(Index, Size) const -> RefBytes;
+    [[nodiscard]] auto range(Index) const -> BytesView;
+    [[nodiscard]] auto range(Index, Size) const -> BytesView;
     [[nodiscard]] auto get_u16(Index) const -> uint16_t;
     [[nodiscard]] auto get_u32(Index) const -> uint32_t;
-    auto read(MutBytes, Index) const -> void;
-    auto mut_range(Index) -> MutBytes;
-    auto mut_range(Index, Size) -> MutBytes;
+    auto read(Bytes, Index) const -> void;
+    auto mut_range(Index) -> Bytes;
+    auto mut_range(Index, Size) -> Bytes;
     auto put_u16(Index, uint16_t) -> void;
     auto put_u32(Index, uint32_t) -> void;
-    auto write(RefBytes, Index) -> void;
+    auto write(BytesView, Index) -> void;
     [[nodiscard]] auto has_changes() const -> bool;
     auto collect_changes() -> std::vector<ChangedRegion>;
     auto enable_tracking(Scratch) -> void;
     auto undo_changes(LSN, const std::vector<ChangedRegion>&) -> void;
     auto redo_changes(LSN, const std::vector<ChangedRegion>&) -> void;
-    auto raw_data() -> MutBytes;
+    auto raw_data() -> Bytes;
 
     Page(Page&&) noexcept = default;
     auto operator=(Page&&) noexcept -> Page&;
@@ -83,12 +83,12 @@ private:
     Unique<IBufferPool *> m_pool;
     std::optional<Scratch> m_snapshot;
     std::vector<ChangedRegion> m_changes;
-    MutBytes m_data;
+    Bytes m_data;
     PID m_id;
     bool m_is_writable{};
     bool m_is_dirty{};
 };
 
-} // cub
+} // db
 
 #endif // CUB_PAGE_PAGE_H

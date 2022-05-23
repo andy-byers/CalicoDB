@@ -1,17 +1,13 @@
 /*
-* slice.h: Implementation of the slice data types and their associated free functions. A slice represents an unowned,
-*          contiguous subset of the elements of an array: essentially a pointer and a length. This code was inspired
-*          by the slice class found in LevelDB (1).
-*
-* (1) https://github.com/google/leveldb/blob/main/include/leveldb/slice.h
-*/
+ * (1) https://github.com/google/leveldb/blob/main/include/leveldb/slice.h
+ */
 
-#ifndef CUB_UTILS_SLICE_H
-#define CUB_UTILS_SLICE_H
+#ifndef CUB_BYTES_H
+#define CUB_BYTES_H
 
 #include <cstring>
 #include <string>
-#include "assert.h"
+#include "utils/assert.h"
 #include "common.h"
 
 namespace cub {
@@ -119,25 +115,25 @@ namespace impl {
 
 } // impl
 
-using MutBytes = impl::Slice<Byte*>;
-using RefBytes = impl::Slice<const Byte*>;
+using Bytes = impl::Slice<Byte*>;
+using BytesView = impl::Slice<const Byte*>;
 
-inline auto to_bytes(const std::string &data) noexcept -> RefBytes
+inline auto _b(const std::string &data) noexcept -> BytesView
 {
    return {data.data(), data.size()};
 }
 
-inline auto to_bytes(std::string &data) noexcept -> MutBytes
+inline auto _b(std::string &data) noexcept -> Bytes
 {
    return {data.data(), data.size()};
 }
 
-inline auto to_string(RefBytes data) -> std::string
+inline auto _s(BytesView data) -> std::string
 {
    return {data.data(), data.size()};
 }
 
-inline auto compare_three_way(RefBytes lhs, RefBytes rhs) noexcept -> ThreeWayComparison
+inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> ThreeWayComparison
 {
    const auto min_length = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
    auto r = std::memcmp(lhs.data(), rhs.data(), min_length);
@@ -153,59 +149,58 @@ inline auto compare_three_way(RefBytes lhs, RefBytes rhs) noexcept -> ThreeWayCo
    return r < 0 ? ThreeWayComparison::LT : ThreeWayComparison::GT;
 }
 
-inline auto operator<(RefBytes lhs,  RefBytes rhs) noexcept -> bool
+inline auto operator<(BytesView lhs, BytesView rhs) noexcept -> bool
 {
    return compare_three_way(lhs, rhs) == ThreeWayComparison::LT;
 }
 
-inline auto operator==(RefBytes lhs,  RefBytes rhs) noexcept -> bool
+inline auto operator==(BytesView lhs, BytesView rhs) noexcept -> bool
 {
    return compare_three_way(lhs, rhs) == ThreeWayComparison::EQ;
 }
 
-inline auto operator!=(RefBytes lhs,  RefBytes rhs) noexcept -> bool
+inline auto operator!=(BytesView lhs, BytesView rhs) noexcept -> bool
 {
-   return compare_three_way(lhs, rhs) == ThreeWayComparison::EQ;
+   return compare_three_way(lhs, rhs) != ThreeWayComparison::EQ;
 }
 
-inline auto mem_copy(MutBytes dst, RefBytes src, size_t n) noexcept -> void*
+inline auto mem_copy(Bytes dst, BytesView src, size_t n) noexcept -> void*
 {
     CUB_EXPECT_LE(n, src.size());
     CUB_EXPECT_LE(n, dst.size());
     return std::memcpy(dst.data(), src.data(), n);
 }
 
-inline auto mem_copy(MutBytes dst, RefBytes src) noexcept -> void*
+inline auto mem_copy(Bytes dst, BytesView src) noexcept -> void*
 {
     CUB_EXPECT_LE(src.size(), dst.size());
     return mem_copy(dst, src, src.size());
 }
 
-inline auto mem_clear(MutBytes mem, size_t n) noexcept -> void*
+inline auto mem_clear(Bytes mem, size_t n) noexcept -> void*
 {
     CUB_EXPECT_LE(n, mem.size());
     return std::memset(mem.data(), 0, n);
 }
 
-inline auto mem_clear(MutBytes mem) noexcept -> void*
+inline auto mem_clear(Bytes mem) noexcept -> void*
 {
     return mem_clear(mem, mem.size());
 }
 
-inline auto mem_move(MutBytes dst, RefBytes src, Size n) noexcept -> void*
+inline auto mem_move(Bytes dst, BytesView src, Size n) noexcept -> void*
 {
     CUB_EXPECT_LE(n, src.size());
     CUB_EXPECT_LE(n, dst.size());
     return std::memmove(dst.data(), src.data(), n);
 }
 
-inline auto mem_move(MutBytes dst, RefBytes src) noexcept -> void*
+inline auto mem_move(Bytes dst, BytesView src) noexcept -> void*
 {
     CUB_EXPECT_LE(src.size(), dst.size());
     return mem_move(dst, src, src.size());
 }
 
+} // db
 
-} // cub
-
-#endif // CUB_UTILS_SLICE_H
+#endif // CUB_BYTES_H

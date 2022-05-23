@@ -29,6 +29,6 @@ public:
     virtual auto reset() -> void = 0;
 };
 
-} // cub
+} // db
 
 #endif //CUB_WAL_INTERFACE_H

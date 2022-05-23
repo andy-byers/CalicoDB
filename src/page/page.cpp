@@ -82,12 +82,12 @@ auto Page::size() const -> Size
     return m_data.size();
 }
 
-auto Page::range(Index offset) const -> RefBytes
+auto Page::range(Index offset) const -> BytesView
 {
     return m_data.range(offset);
 }
 
-auto Page::range(Index offset, Size size) const -> RefBytes
+auto Page::range(Index offset, Size size) const -> BytesView
 {
     return m_data.range(offset, size);
 }
@@ -102,18 +102,18 @@ auto Page::get_u32(Index offset) const -> uint32_t
     return get_uint32(m_data.range(offset, sizeof(uint32_t)));
 }
 
-auto Page::read(MutBytes out, Index offset) const -> void
+auto Page::read(Bytes out, Index offset) const -> void
 {
     mem_copy(out, m_data.range(offset, out.size()));
 }
 
-auto Page::mut_range(Index offset) -> MutBytes
+auto Page::mut_range(Index offset) -> Bytes
 {
     do_change(offset, size() - offset);
     return m_data.range(offset);
 }
 
-auto Page::mut_range(Index offset, Size size) -> MutBytes
+auto Page::mut_range(Index offset, Size size) -> Bytes
 {
     do_change(offset, size);
     return m_data.range(offset, size);
@@ -131,12 +131,12 @@ auto Page::put_u32(Index offset, uint32_t value) -> void
     put_uint32(m_data.range(offset, sizeof(value)), value);
 }
 
-auto Page::write(RefBytes in, Index offset) -> void
+auto Page::write(BytesView in, Index offset) -> void
 {
     mem_copy(m_data.range(offset, in.size()), in);
 }
 
-auto Page::raw_data() -> MutBytes
+auto Page::raw_data() -> Bytes
 {
     return m_data;
 }
@@ -187,4 +187,4 @@ auto Page::do_change(Index offset, Size size) -> void
     }
 }
 
-} // cub
+} // db

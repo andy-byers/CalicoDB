@@ -6,7 +6,7 @@
 
 namespace cub {
 
-FileHeader::FileHeader(MutBytes data)
+FileHeader::FileHeader(Bytes data)
     : m_header{data.range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)} {}
 
 FileHeader::FileHeader(Node &root)
@@ -16,12 +16,12 @@ FileHeader::FileHeader(Node &root)
     CUB_EXPECT_TRUE(root.page().id().is_root());
 }
 
-auto FileHeader::data() -> MutBytes
+auto FileHeader::data() -> Bytes
 {
     return m_header;
 }
 
-auto FileHeader::data() const -> RefBytes
+auto FileHeader::data() const -> BytesView
 {
     return m_header;
 }
@@ -122,4 +122,4 @@ auto FileHeader::set_flushed_lsn(LSN flushed_lsn) -> void
     put_uint32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET), flushed_lsn.value);
 }
 
-} // cub
+} // db

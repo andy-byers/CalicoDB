@@ -5,7 +5,7 @@
 #define CUB_UTILS_ENCODING_H
 
 #include "common.h"
-#include "slice.h"
+#include "bytes.h"
 
 namespace cub {
 
@@ -15,7 +15,7 @@ inline auto get_uint16(const Byte *in) noexcept
     return static_cast<uint16_t>(src[1] | (src[0] << 8));
 }
 
-inline auto get_uint16(RefBytes in) noexcept
+inline auto get_uint16(BytesView in) noexcept
 {
     return get_uint16(in.data());
 }
@@ -29,7 +29,7 @@ inline auto get_uint32(const Byte *in) noexcept
            (static_cast<uint32_t>(src[0]) << 24);
 }
 
-inline auto get_uint32(RefBytes in) noexcept
+inline auto get_uint32(BytesView in) noexcept
 {
     return get_uint32(in.data());
 }
@@ -47,7 +47,7 @@ inline auto get_uint64(const Byte *in) noexcept
            (static_cast<uint64_t>(src[0]) << 56);
 }
 
-inline auto get_uint64(RefBytes in) noexcept
+inline auto get_uint64(BytesView in) noexcept
 {
     return get_uint64(in.data());
 }
@@ -59,7 +59,7 @@ inline auto put_uint16(Byte *out, uint16_t value) noexcept
     dst[0] = static_cast<uint8_t>(value >> 8);
 }
 
-inline auto put_uint16(MutBytes out, uint16_t value) noexcept
+inline auto put_uint16(Bytes out, uint16_t value) noexcept
 {
     put_uint16(out.data(), value);
 }
@@ -73,7 +73,7 @@ inline auto put_uint32(Byte *out, uint32_t value) noexcept
     dst[0] = static_cast<uint8_t>(value >> 24);
 }
 
-inline auto put_uint32(MutBytes out, uint32_t value) noexcept
+inline auto put_uint32(Bytes out, uint32_t value) noexcept
 {
     put_uint32(out.data(), value);
 }
@@ -91,11 +91,11 @@ inline auto put_uint64(Byte *out, uint64_t value) noexcept
     dst[0] = static_cast<uint8_t>(value >> 56);
 }
 
-inline auto put_uint64(MutBytes out, uint64_t value) noexcept
+inline auto put_uint64(Bytes out, uint64_t value) noexcept
 {
     put_uint64(out.data(), value);
 }
 
-} // cub
+} // db
 
 #endif // CUB_UTILS_ENCODING_H

@@ -29,8 +29,8 @@ public:
     auto truncate(Size) -> void;
 
 private:
-    [[nodiscard]] auto try_read_page_from_file(PID, MutBytes) const -> bool;
-    auto write_page_to_file(PID, RefBytes) const -> void;
+    [[nodiscard]] auto try_read_page_from_file(PID, Bytes) const -> bool;
+    auto write_page_to_file(PID, BytesView) const -> void;
 
     std::list<Frame> m_available;             ///< List of available frames
     std::unique_ptr<IReadWriteFile> m_file; ///< Read/write database file handle
@@ -38,6 +38,6 @@ private:
     Size m_page_size{};
 };
 
-} // cub
+} // db
 
 #endif // CUB_POOL_PAGER_H

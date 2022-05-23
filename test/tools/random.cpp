@@ -56,7 +56,7 @@ auto Random::next_string(Size size) -> std::string
     constexpr char chars[]{"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                            "abcdefghijklmnopqrstuvwxyz"
                            "0123456789"};
-    auto result{std::string(static_cast<size_t>(size), '\x00')};
+    auto result = std::string(static_cast<size_t>(size), '\x00');
 
     std::generate_n(result.begin(), size, [&]() -> char {
         // We need "sizeof(chars) - 2" to account for the '\0'. next_int() is
@@ -67,4 +67,4 @@ auto Random::next_string(Size size) -> std::string
     return result;
 }
 
-} // cub
+} // db

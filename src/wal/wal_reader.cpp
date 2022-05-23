@@ -1,7 +1,3 @@
-//
-// Created by Andrew Byers on 3/11/22.
-//
-
 #include "exception.h"
 #include "wal_reader.h"
 #include "wal_record.h"
@@ -70,7 +66,7 @@ auto WALReader::read_next() -> std::optional<WALRecord>
     push_position();
 
     while (record.type() != WALRecord::Type::FULL) {
-        // Merge partial records until we have a full record.
+        // Merge partial values until we have a full record.
         if (auto maybe_partial = read_record()) {
             record.merge(*maybe_partial);
         // We just hit EOF. Note that we discard_handlers `record`, which may contain a non-FULL record.
@@ -119,7 +115,7 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
     CUB_EXPECT_GT(m_block.size() - offset, WALRecord::HEADER_SIZE);
 
     WALRecord record;
-    auto buffer = to_bytes(m_block);
+    auto buffer = _b(m_block);
     buffer.advance(offset);
     record.read(buffer);
 
@@ -171,7 +167,7 @@ auto WALReader::read_block() -> bool
 {
     try {
         const auto block_start = m_block_id * m_block.size();;
-        if (const auto bytes_read = m_file->read_at(to_bytes(m_block), block_start)) {
+        if (const auto bytes_read = m_file->read_at(_b(m_block), block_start)) {
             if (bytes_read != m_block.size())
                 throw IOError::partial_read();
             m_has_block = true;
@@ -188,4 +184,4 @@ auto WALReader::read_block() -> bool
     }
 }
 
-} // cub
+} // db

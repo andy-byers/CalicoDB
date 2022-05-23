@@ -1,5 +1,5 @@
 
-#include <gtest/gtest.h>
+#include <unordered_set>
 
 #include "tools.h"
 #include "page/page.h"
@@ -26,7 +26,7 @@ auto TreeValidator::validate_sibling_connections() -> void
     std::optional<std::string> prev{};
     while (true) {
         for (Index cid{}; cid < node.cell_count(); ++cid) {
-            const auto key = to_string(node.read_key(cid));
+            const auto key = _s(node.read_key(cid));
             // Strict ordering.
             if (prev)
                 CUB_EXPECT_LT(*prev, key);
@@ -68,7 +68,7 @@ auto TreeValidator::collect_keys() -> std::vector<std::string>
 {
     auto keys = std::vector<std::string>{};
     traverse_inorder([&keys](Node &node, Index cid) -> void {
-        keys.push_back(to_string(node.read_key(cid)));
+        keys.push_back(_s(node.read_key(cid)));
     });
     return keys;
 }
@@ -101,7 +101,7 @@ auto TreeValidator::is_reachable(std::string key) -> bool
     auto success = true;
 
     // Traverse down to the node containing key using the child pointers.
-    auto [node, index, found_eq] = m_tree.find_ge(to_bytes(key), false);
+    auto [node, index, found_eq] = m_tree.find_ge(_b(key), false);
     if (!found_eq)
         return false;
 
@@ -166,7 +166,7 @@ auto TreePrinter::print_aux(Node node, Index level) -> void
         print_aux(m_tree.acquire_node(node.rightmost_child_id(), false), level + 1);
 }
 
-auto TreePrinter::add_key_to_level(RefBytes key, Index level) -> void
+auto TreePrinter::add_key_to_level(BytesView key, Index level) -> void
 {
     const auto key_token = make_key_token(key);
     m_levels[level] += key_token;
@@ -194,9 +194,9 @@ auto TreePrinter::add_node_end_to_level(Index level) -> void
     add_spaces_to_other_levels(node_end_token.size(), level);
 }
 
-auto TreePrinter::make_key_token(RefBytes key) -> std::string
+auto TreePrinter::make_key_token(BytesView key) -> std::string
 {
-    return to_string(key);
+    return _s(key);
 }
 
 auto TreePrinter::make_key_separator_token() -> std::string
@@ -221,4 +221,19 @@ auto TreePrinter::ensure_level_exists(Index level) -> void
     CUB_EXPECT_GT(m_levels.size(), level);
 }
 
-} // cub
+auto RecordGenerator::generate(Size n, Parameters param) -> std::vector<Record>
+{
+    const auto [ks0, ks1, vs0, vs1, _, should_sort] = param;
+    std::vector<Record> records(n);
+    Random random {param.seed};
+
+    for (auto &[key, value]: records) {
+        key = random_string(random, ks0, ks1);
+        value = random_string(random, vs0, vs1);
+    }
+    if (should_sort)
+        std::sort(records.begin(), records.end());
+    return records;
+}
+
+} // db

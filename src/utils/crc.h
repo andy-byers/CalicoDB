@@ -6,7 +6,7 @@
 #define CUB_UTILS_CRC_H
 
 #include "common.h"
-#include "slice.h"
+#include "bytes.h"
 
 namespace cub {
 
@@ -56,7 +56,7 @@ static constexpr uint32_t crc_table[]{
     0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d,
 };
 
-inline auto crc_32(RefBytes data) noexcept
+inline auto crc_32(BytesView data) noexcept
 {
     auto crc{0xFFFFFFFFU};
 
@@ -68,6 +68,6 @@ inline auto crc_32(RefBytes data) noexcept
     return ~crc;
 }
 
-} // cub
+} // db
 
 #endif // CUB_UTILS_CRC_H

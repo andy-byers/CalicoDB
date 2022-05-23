@@ -22,7 +22,7 @@ namespace {
 WALPayload::WALPayload(const Parameters &param)
 {
     m_data.resize(HEADER_SIZE);
-    auto bytes = to_bytes(m_data);;
+    auto bytes = _b(m_data);;
 
     put_uint32(bytes, param.previous_lsn.value);
     bytes.advance(sizeof(uint32_t));
@@ -36,7 +36,7 @@ WALPayload::WALPayload(const Parameters &param)
         const auto size = change.before.size();;
         CUB_EXPECT_EQ(size, change.after.size());
         auto chunk = std::string(UPDATE_HEADER_SIZE + 2*size, '\x00');;
-        bytes = to_bytes(chunk);
+        bytes = _b(chunk);
 
         put_uint16(bytes, static_cast<uint16_t>(change.offset));
         bytes.advance(sizeof(uint16_t));
@@ -61,7 +61,7 @@ auto WALPayload::is_commit() const -> bool
 auto WALPayload::decode() const -> PageUpdate
 {
     auto update = PageUpdate{};;
-    auto bytes = to_bytes(m_data);;
+    auto bytes = _b(m_data);;
 
     update.previous_lsn.value = get_uint32(bytes);
     bytes.advance(sizeof(uint32_t));
@@ -119,13 +119,13 @@ auto WALRecord::payload() const -> const WALPayload&
     return m_payload;
 }
 
-auto WALRecord::read(RefBytes in) -> void
+auto WALRecord::read(BytesView in) -> void
 {
     // lsn (4B)
     m_lsn.value = get_uint32(in.data());
     in.advance(sizeof(uint32_t));
 
-    // No more records in the buffer (empty space in the buffer must be zeroed and LSNs
+    // No more values in the buffer (empty space in the buffer must be zeroed and LSNs
     // start with 1).
     if (m_lsn.is_null())
         return;
@@ -147,10 +147,10 @@ auto WALRecord::read(RefBytes in) -> void
     in.advance(sizeof(uint16_t));
 
     // payload (xB)
-    mem_copy(to_bytes(m_payload.m_data), in, payload_size);
+    mem_copy(_b(m_payload.m_data), in, payload_size);
 }
 
-auto WALRecord::write(MutBytes out) const noexcept -> void
+auto WALRecord::write(Bytes out) const noexcept -> void
 {
     CUB_EXPECT_GE(out.size(), size());
 
@@ -172,7 +172,7 @@ auto WALRecord::write(MutBytes out) const noexcept -> void
     out.advance(sizeof(uint16_t));
 
     // payload (xB)
-    mem_copy(out, to_bytes(m_payload.m_data), payload_size);
+    mem_copy(out, _b(m_payload.m_data), payload_size);
 }
 
 auto WALRecord::is_consistent() const -> bool
@@ -253,4 +253,4 @@ auto WALRecord::merge(WALRecord rhs) -> void
     }
 }
 
-} // cub
+} // db

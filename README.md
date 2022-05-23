@@ -1,105 +1,173 @@
 
 Cub DB is an embedded key-value database written in C++17.
 
-**NOTE:** 
-I have most of the code for this library already written. 
-Since I suck at git and am also very new to writing libraries, the history I had before was total trash.
-Now that I have a better understanding of project planning and this particular project's requirements (and hopefully git), I'm starting over.
+## Disclaimer
+This library, in its current form, should **not** be used in production.
+Writing a reliable, ACID-compliant database is certainly far from trivial, and I have zero professional software development experience at this time.
+Also, Cub DB uses exceptions, which may not be desirable for this type of library.
+I initially began working on this project to better learn modern C++ and exception handling, so some design decisions reflect that goal rather than that of producing a general-purpose DBMS.
+I am, however, open to refactoring the project to rely on other forms of error handling, as it would be nice to support embedded systems.
+Please see the `Contributions` section if you are interested in helping out!
 
-### Tentative Public API
+## TODO
+1. Get the fuzz testing up and running. 
+We would like to be able to accept arbitrary database and WAL files as input without crashing.
+2. Update the B-tree merge routine to be more proactive.
+This shouldn't be terribly difficult since most of the unit tests don't rely on the specific tree structure.
+They just make sure the tree is correctly ordered and all connections are consistent.
+3. Look into blocking writers until all cursors are closed. 
+Maybe. 
+I'm definitely open to suggestions on this one.
+4. Write some real documentation.
+5. Work on this README
 
-Classes:
-+ `Database`: Top-level database connection
-  + `Reader get_reader()`:
-  + `Writer get_writer()`:
-+ `Handle`: Handle for interacting with the database
-  + `bool increment()`:
-  + `bool decrement()`:
-  + `RefBytes key()`:
-  + `std::string value()`:
-  + `bool find(const std::string&)`:
-  + `void find_min()`:
-  + `void find_max()`:
-  + `Reader`: Handle for performing database queries
-  + `Writer`: Handle for performing database updates
-    + `void modify(const std::string&)`: Modify the record that the cursor is over, leaving the cursor position unchanged.
-    + `bool insert(const std::string&, const std::string&)`: Insert a new record, returning true if the key already exists in the database, leaving the cursor on the just-inserted record.
-    + `bool remove()`: Remove the record that the cursor is over, leaving the cursor on the proceeding record.
+## API
 
-### Internals
+### Creating/Opening a Database
+Cub DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
+The entry point to an application using Cub DB might look something like:
 
-### Features
-
-+ Durability provided through write-ahead logging
-+ Multiple readers or a single writer can be active concurrently
-+ Readers and writers can be interconverted
-+ Uses a dynamic-order B-tree to store the whole database in a single file (excluding the WAL)
-
-```
-using namespace cub;
-Options options;
-options.page_size = 0x2000;
-options.frame_count = 100;
-auto db = Database::open("example_db", options);
-
-// TASK: We have N I/O events to complete. Actions include searching (single elements or ranges), inserting, removing,
-//       or modifying. We should be able to run a loop on the main thread and spawn readers or writers as necessary,
-//       dispatching them to other threads from a thread pool.
-
-while (!events.is_empty()) {
-    auto event = event.dequeue();
-    if (event.is_read) {
-        if (event.type == Event::FIND) {
-            get_thread_and_find(db.get_reader());
-        } else if (event.type == Event::FIND_RANGE) {
-            get_thread_and_find_range(db.get_reader());
-        }
-    } else {
-        if (event.type == Event::INSERT) {
-            get_thread_and_insert(db.get_writer());
-        } else if (event.type == Event::REMOVE) {
-            get_thread_and_remove(db.get_writer());
-        }
-    }
+```C++
+try {
+    cub::Options options;
+    auto db = cub::Database::open("/tmp/cub", options);
+    // <Run the application!>
+} catch (const cub::SystemError &error) {
+    // ...
+} catch (const cub::CorruptionError &error) {
+    // ...
+} catch (const cub::Exception &error) {
+    // ...
+} catch (...) {
+    // ...
 }
-
-auto token = db.get_reader();
-<read some stuff>
-token.upgrade();
-<write some stuff and maybe commit>
-token.downgrade();
-<read more stuff!>
 ```
 
-### Project Source Tree Overview
+### Closing a Database
+Cub DB uses RAII, so closing a database is as simple as letting it go out of scope.
+
+### `Bytes` Objects
+Cub DB uses slices to refer to unowned byte sequences.
+Slices are realized in the `Bytes` and `BytesView` classes.
+`Bytes` instances can modify the contents of the underlying array, while `BytesView` instances cannot.
+
+```C++
+std::string data {"Hello, world!"};
+
+// Construct two equivalent `Bytes` instances.
+cub::Bytes b1 {data.data(), data.size()};
+auto b2 = cub::_b(data);
+assert(b1 == b2);
+
+// Construct two equivalent `BytesView` instances.
+BytesView v1 {data.data(), data.size()};
+auto v2 = cub::_b(data);
+assert(v1 == v2);
+
+// Convert back to a std::string;
+assert(data == cub::_s(b1));
+
+// Implicit conversions from `Bytes` to `BytesView` are allowed.
+function_taking_a_bytes_view(b1);
+
+// Comparisons.
+assert(cub::compare_three_way(b1, v2) == cub::ThreeWayComparison::EQ);
+assert((b1 < v2) == false);
+```
+
+### Modifying a Database
+
+```C++
+// Insert a new record.
+db.insert(cub::_b("a"), cub::_b("1"));
+
+// Modify an existing record (keys are always unique).
+db.insert(cub::_b("a"), cub::_b("2"));
+
+// Remove a record.
+assert(db.remove(cub::_b("a")));
+```
+
+### Querying a Database
+Querying a Cub DB database is performed either through the `lookup()` convenience method, or using a `Cursor` object.
+It is possible to have many cursors active at once (with support for multithreading), however, any modifications to the database will cause invalidation of all active cursors.
+*Actually, this is something I'm working on right now. Maybe a reader-writer lock? - Andy*
+
+```C++
+auto cursor = db.get_cursor();
+cursor.find_minimum();
+cursor.find_maximum();
+
+// Reverse traversal.
+assert(cursor.decrement());
+assert(cursor.decrement(3) == 3);
+
+// Key and value access.
+cursor.key();
+cursor.value();
+
+// Forward traversal.
+assert(cursor.increment());
+assert(cursor.increment(3) == 3);
+```
+
+### Transactions
+Every modification to a Cub DB database occurs within a transaction.
+The first transaction begins when the database is opened, and the last one commits when the database is closed.
+Otherwise, transaction boundaries are defined by calls to either `commit()` or `abort()`.
+
+```C++
+db.insert(cub::_b("a"), cub::_b("1"));
+db.insert(cub::_b("b"), cub::_b("2"));
+db.insert(cub::_b("c"), cub::_b("3"));
+db.commit();
+
+assert(db.remove(cub::_b("a")));
+assert(db.remove(cub::_b("b")));
+assert(db.remove(cub::_b("c")));
+db.abort();
+
+// Database still contains "a", "b", and "c".
+```
+
+## Features
++ Durability provided through write-ahead logging
++ Uses a dynamic-order B-tree to store the whole database in a single file (excluding the WAL)
++ Supports multiple cursors running concurrently
+
+## Project Source Tree Overview
 
 ```
 CubDB
   ┣━╸examples
   ┣━╸include
   ┣━╸src
+  ┃  ┣━╸db
+  ┃  ┣━╸file
   ┃  ┣━╸pool
-  ┃  ┣━╸storage
   ┃  ┣━╸tree
   ┃  ┣━╸utils
   ┃  ┗━╸wal
   ┗━╸test
+      ┣━╸fuzz
       ┣━╸integration
       ┣━╸tools
       ┗━╸unit
 ```
 
 + `/include`: Public API
++ `/src/db`: API implementation
 + `/src/file`: OS file module
 + `/src/pool`: Buffer pool module
 + `/src/tree`: B-tree module
 + `/src/utils`: Utility module
 + `/src/wal`: Write-ahead logging module
++ `/test/fuzz`: Fuzz tests
 + `/test/integration`: Integration tests
 + `/test/tools`: Test tools
 + `/test/unit`: Unit tests
 
-Read-only sequential file handle to read the file header [temporary]
-Read-write random-access file handle for the database pager
-Read-only random-access file handle for the WALReader
-Write-only log file handle for the WALWriter
+## Contributions
+Contributions are welcomed!
+The `TODO` section contains a few things that need to be addressed.
+Feel free to create a pull request!

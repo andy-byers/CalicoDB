@@ -31,6 +31,6 @@ private:
     Size m_free_count{};
 };
 
-} // cub
+} // db
 
 #endif // CUB_TREE_FREELIST_H

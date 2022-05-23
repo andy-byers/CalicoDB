@@ -15,6 +15,7 @@
 #ifndef CUB_WAL_WAL_WRITER_H
 #define CUB_WAL_WAL_WRITER_H
 
+#include <memory>
 #include "interface.h"
 
 namespace cub {

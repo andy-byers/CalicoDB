@@ -4,7 +4,7 @@
 #include "common.h"
 #include "random.h"
 #include "file/interface.h"
-#include "utils/slice.h"
+#include "bytes.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
 
@@ -31,7 +31,7 @@ public:
     auto use_direct_io() -> void override {}
     auto sync() -> void override {}
     auto seek(long, Seek) -> Index override;
-    auto read(MutBytes) -> Size override;
+    auto read(Bytes) -> Size override;
 
 private:
     friend class Fs;
@@ -51,7 +51,7 @@ public:
     auto sync() -> void override {}
     auto resize(Size size) -> void override {m_memory.memory().resize(size);}
     auto seek(long, Seek) -> Index override;
-    auto write(RefBytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     friend class Fs;
@@ -71,8 +71,8 @@ public:
     auto sync() -> void override {}
     auto resize(Size size) -> void override {m_memory.memory().resize(size);}
     auto seek(long, Seek) -> Index override;
-    auto read(MutBytes) -> Size override;
-    auto write(RefBytes) -> Size override;
+    auto read(Bytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     friend class Fs;
@@ -91,7 +91,7 @@ public:
     auto use_direct_io() -> void override {}
     auto sync() -> void override {}
     auto resize(Size size) -> void override {m_memory.memory().resize(size);}
-    auto write(RefBytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     friend class Fs;
@@ -187,7 +187,7 @@ public:
         , FaultyBase{seed} {}
     ~FaultyReadOnlyMemory() override = default;
 
-    auto read(MutBytes) -> Size override;
+    auto read(Bytes) -> Size override;
 
 private:
     friend class Fs; // TODO: Necessary?
@@ -205,7 +205,7 @@ public:
         , FaultyBase{seed} {}
     ~FaultyWriteOnlyMemory() override = default;
 
-    auto write(RefBytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     friend class Fs;
@@ -223,8 +223,8 @@ public:
         , FaultyBase{seed} {}
     ~FaultyReadWriteMemory() override = default;
 
-    auto read(MutBytes) -> Size override;
-    auto write(RefBytes) -> Size override;
+    auto read(Bytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     friend class Fs;
@@ -242,7 +242,7 @@ public:
         , FaultyBase{seed} {}
     ~FaultyLogMemory() override = default;
 
-    auto write(RefBytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     friend class Fs;
@@ -280,6 +280,6 @@ public:
     virtual auto reset() -> void override {}
 };
 
-} // cub
+} // db
 
 #endif // CUB_TEST_TOOLS_FAKES_H

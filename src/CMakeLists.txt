@@ -2,6 +2,18 @@
 set(
     CUB_FILES
 
+    ${CUB_INCLUDE_DIR}/bytes.h
+    ${CUB_INCLUDE_DIR}/common.h
+    ${CUB_INCLUDE_DIR}/cub.h
+    ${CUB_INCLUDE_DIR}/cursor.h
+    ${CUB_INCLUDE_DIR}/database.h
+    ${CUB_INCLUDE_DIR}/exception.h
+
+    db/database.cpp
+    db/database_impl.h
+    db/cursor.cpp
+    db/cursor_impl.h
+
     pool/frame.cpp
     pool/frame.h
     pool/pager.cpp
@@ -30,7 +42,6 @@ set(
     tree/free_list.cpp
     tree/free_list.h
     tree/interface.h
-    tree/rw_lock.h
     tree/tree.cpp
     tree/tree.h
 
@@ -42,7 +53,6 @@ set(
     utils/scratch.h
     utils/types.cpp
     utils/types.h
-    utils/slice.h
 
     wal/interface.h
     wal/wal_reader.cpp

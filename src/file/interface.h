@@ -3,10 +3,9 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include "bytes.h"
 #include "common.h"
 #include "exception.h"
-#include "system.h"
-#include "utils/slice.h"
 
 namespace cub {
 
@@ -21,7 +20,12 @@ enum class Mode: int {
     EXCLUSIVE = O_EXCL,
     SYNCHRONOUS = O_SYNC,
     TRUNCATE = O_TRUNC,
+
+#if CUB_HAS_O_DIRECT
     DIRECT = O_DIRECT,
+#else
+    DIRECT = 0,
+#endif
 };
 
 inline auto operator|(const Mode &lhs, const Mode &rhs)
@@ -36,9 +40,9 @@ public:
     virtual auto use_direct_io() -> void = 0;
     virtual auto sync() -> void = 0;
     virtual auto seek(long, Seek) -> Index = 0;
-    virtual auto read(MutBytes) -> Size = 0;
+    virtual auto read(Bytes) -> Size = 0;
 
-    auto read_at(MutBytes out, Index offset) -> Size
+    auto read_at(Bytes out, Index offset) -> Size
     {
         seek(static_cast<long>(offset), Seek::BEGIN);
         return read(out);
@@ -53,9 +57,9 @@ public:
     virtual auto sync() -> void = 0;
     virtual auto resize(Size) -> void = 0;
     virtual auto seek(long, Seek) -> Index = 0;
-    virtual auto write(RefBytes) -> Size = 0;
+    virtual auto write(BytesView) -> Size = 0;
 
-    auto write_at(RefBytes in, Index offset) -> Size
+    auto write_at(BytesView in, Index offset) -> Size
     {
         seek(static_cast<long>(offset), Seek::BEGIN);
         return write(in);
@@ -70,16 +74,16 @@ public:
     virtual auto sync() -> void = 0;
     virtual auto resize(Size) -> void = 0;
     virtual auto seek(long, Seek) -> Index = 0;
-    virtual auto read(MutBytes) -> Size = 0;
-    virtual auto write(RefBytes) -> Size = 0;
+    virtual auto read(Bytes) -> Size = 0;
+    virtual auto write(BytesView) -> Size = 0;
 
-    auto read_at(MutBytes out, Index offset) -> Size
+    auto read_at(Bytes out, Index offset) -> Size
     {
         seek(static_cast<long>(offset), Seek::BEGIN);
         return read(out);
     }
 
-    auto write_at(RefBytes in, Index offset) -> Size
+    auto write_at(BytesView in, Index offset) -> Size
     {
         seek(static_cast<long>(offset), Seek::BEGIN);
         return write(in);
@@ -93,28 +97,28 @@ public:
     virtual auto use_direct_io() -> void = 0;
     virtual auto sync() -> void = 0;
     virtual auto resize(Size) -> void = 0;
-    virtual auto write(RefBytes) -> Size = 0;
+    virtual auto write(BytesView) -> Size = 0;
 };
 
-template<class R> static auto read_exact(R &readable_store, MutBytes out)
+template<class R> static auto read_exact(R &readable_store, Bytes out)
 {
     if (readable_store.read(out) != out.size())
         throw IOError::partial_read();
 }
 
-template<class R> static auto read_exact_at(R &readable_store, MutBytes out, Index offset)
+template<class R> static auto read_exact_at(R &readable_store, Bytes out, Index offset)
 {
     if (readable_store.read_at(out, offset) != out.size())
         throw IOError::partial_read();
 }
 
-template<class W> static auto write_exact(W &writable_store, RefBytes in)
+template<class W> static auto write_exact(W &writable_store, BytesView in)
 {
     if (writable_store.write(in) != in.size())
         throw IOError::partial_write();
 }
 
-template<class W> static auto write_exact_at(W &writable_store, RefBytes in, Index offset)
+template<class W> static auto write_exact_at(W &writable_store, BytesView in, Index offset)
 {
     if (writable_store.write_at(in, offset) != in.size())
         throw IOError::partial_write();
@@ -122,4 +126,4 @@ template<class W> static auto write_exact_at(W &writable_store, RefBytes in, Ind
 
 } // cub
 
-#endif //CUB_STORAGE_INTERFACE_H
+#endif // CUB_STORAGE_INTERFACE_H

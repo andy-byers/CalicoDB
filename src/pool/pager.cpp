@@ -82,7 +82,7 @@ auto Pager::unpin(Frame frame) -> void
         write_page_to_file(id, data);
 }
 
-auto Pager::try_read_page_from_file(PID id, MutBytes out) const -> bool
+auto Pager::try_read_page_from_file(PID id, Bytes out) const -> bool
 {
     CUB_EXPECT_FALSE(id.is_null());
     CUB_EXPECT_EQ(page_size(), out.size());
@@ -95,7 +95,7 @@ auto Pager::try_read_page_from_file(PID id, MutBytes out) const -> bool
     return true;
 }
 
-auto Pager::write_page_to_file(PID id, RefBytes in) const -> void
+auto Pager::write_page_to_file(PID id, BytesView in) const -> void
 {
     CUB_EXPECT_FALSE(id.is_null());
     CUB_EXPECT_EQ(page_size(), in.size());
@@ -103,4 +103,4 @@ auto Pager::write_page_to_file(PID id, RefBytes in) const -> void
     write_exact_at(*m_file, in, offset);
 }
 
-} // cub
+} // db

@@ -1,10 +1,12 @@
 #ifndef CUB_POOL_PERSISTENT_POOL_H
 #define CUB_POOL_PERSISTENT_POOL_H
 
-#include <unordered_map>
+#include <mutex>
 #include <list>
+#include <unordered_map>
 
 #include "common.h"
+#include "frame.h"
 #include "interface.h"
 #include "pager.h"
 #include "cache.h"
@@ -53,9 +55,10 @@ private:
     auto log_update(Page&) -> void;
     auto roll_forward() -> bool;
     auto roll_backward() -> void;
-    auto do_acquire(PID, bool) -> Page;
+    auto fetch_page(PID, bool) -> Page;
     auto fetch_frame(PID) -> Frame;
 
+    mutable std::mutex m_mutex;
     std::unordered_map<PID, Frame, PID::Hasher> m_pinned;
     std::unique_ptr<IWALReader> m_wal_reader;
     std::unique_ptr<IWALWriter> m_wal_writer;
@@ -66,10 +69,8 @@ private:
     LSN m_next_lsn{};
     Size m_page_count{};
     Size m_ref_sum{};
-    int m_fault{};
-    bool m_has_fault{};
 };
 
-} // cub
+} // db
 
 #endif // CUB_POOL_PERSISTENT_POOL_H

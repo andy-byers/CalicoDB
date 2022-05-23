@@ -25,8 +25,8 @@ public:
     [[nodiscard]] auto next_id() const -> PID;
     auto set_next_id(PID) -> void;
 
-    [[nodiscard]] auto ref_content() const -> RefBytes;
-    auto mut_content() -> MutBytes;
+    [[nodiscard]] auto ref_content() const -> BytesView;
+    auto mut_content() -> Bytes;
 
     auto take() -> Page {return std::move(m_page);}
     auto page() const -> const Page& {return m_page;}
@@ -39,6 +39,6 @@ private:
     Page m_page;
 };
 
-} // cub
+} // db
 
 #endif // CUB_PAGE_LINK_H

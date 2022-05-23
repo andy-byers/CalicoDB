@@ -1,9 +1,9 @@
 #ifndef CUB_STORAGE_FILE_H
 #define CUB_STORAGE_FILE_H
 
+#include "bytes.h"
 #include "common.h"
 #include "interface.h"
-#include "utils/slice.h"
 
 namespace cub {
 
@@ -33,7 +33,7 @@ public:
     auto use_direct_io() -> void override;
     auto sync() -> void override;
     auto seek(long, Seek) -> Index override;
-    auto read(MutBytes) -> Size override;
+    auto read(Bytes) -> Size override;
 
 private:
     Resource m_resource;
@@ -48,7 +48,7 @@ public:
     auto sync() -> void override;
     auto resize(Size) -> void override;
     auto seek(long, Seek) -> Index override;
-    auto write(RefBytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     Resource m_resource;
@@ -63,8 +63,8 @@ public:
     auto sync() -> void override;
     auto resize(Size) -> void override;
     auto seek(long, Seek) -> Index override;
-    auto read(MutBytes) -> Size override;
-    auto write(RefBytes) -> Size override;
+    auto read(Bytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     Resource m_resource;
@@ -78,7 +78,7 @@ public:
     auto use_direct_io() -> void override;
     auto sync() -> void override;
     auto resize(Size) -> void override;
-    auto write(RefBytes) -> Size override;
+    auto write(BytesView) -> Size override;
 
 private:
     Resource m_resource;

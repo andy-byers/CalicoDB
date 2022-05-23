@@ -1,6 +1,7 @@
 #ifndef CUB_TEST_TOOLS_RANDOM_H
 #define CUB_TEST_TOOLS_RANDOM_H
 
+#include <algorithm>
 #include <random>
 #include "common.h"
 #include "utils/assert.h"
@@ -100,6 +101,6 @@ inline auto random_string(Random &random, Size max_size) -> std::string
 
 // TODO: Function for building a random string from a choice of characters.
 
-} // cub
+} // db
 
 #endif // CUB_TEST_TOOLS_RANDOM_H

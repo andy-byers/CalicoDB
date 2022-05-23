@@ -1,20 +1,20 @@
 #ifndef CUB_STORAGE_SYSTEM_H
 #define CUB_STORAGE_SYSTEM_H
 
-#include "common.h"
-#include "utils/slice.h"
+#include    "common.h"
+#include "bytes.h"
 
 namespace cub::system {
 
-constexpr auto SUCCESS{0};
-constexpr auto FAILURE{-1};
+static constexpr int SUCCESS = 0;
+static constexpr int FAILURE = -1;
 
 auto use_direct_io(int) -> void;
 auto size(int) -> Size;
 auto access(const std::string&, int) -> bool;
 auto unlink(const std::string&) -> void;
-auto read(int, MutBytes) -> Size;
-auto write(int, RefBytes) -> Size;
+auto read(int, Bytes) -> Size;
+auto write(int, BytesView) -> Size;
 auto seek(int, long, int) -> Index;
 auto open(const std::string&, int, int) -> int;
 auto close(int) -> void;

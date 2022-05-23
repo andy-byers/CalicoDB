@@ -1,7 +1,5 @@
 #include <optional>
-//#include "cursor.h"
 #include "exception.h"
-#include "free_list.h"
 #include "tree.h"
 #include "page/cell.h"
 #include "page/link.h"
@@ -9,7 +7,7 @@
 #include "page/page.h"
 #include "pool/interface.h"
 #include "utils/layout.h" // TODO: Use of the page and node layouts should be restricted to 'lower-level' components and has no place in Tree.
-#include "utils/slice.h"
+#include "bytes.h"
 
 namespace cub {
 
@@ -27,17 +25,12 @@ Tree::Tree(Parameters param)
     , m_node_count {param.node_count}
     , m_cell_count {param.cell_count} {}
 
-auto Tree::on_cursor_close(bool) -> void
-{
-
-}
-
 auto Tree::find_root(bool is_writable) -> Node
 {
     return acquire_node(PID::root(), is_writable);
 }
 
-auto Tree::find_ge(RefBytes key, bool is_writable) -> SearchResult
+auto Tree::find_ge(BytesView key, bool is_writable) -> Result
 {
     auto node = find_root(is_writable);
     Node::SearchResult result;
@@ -56,7 +49,7 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
     auto cell = node.read_cell(index);
     const auto local = cell.local_value();
     std::string result(cell.value_size(), '\x00');
-    auto out = to_bytes(result);
+    auto out = _b(result);
 
     // Note that it is possible to have no value stored locally but have an overflow page. The happens when
     // the key is of maximal length (i.e. max_local(m_header->page_size())).
@@ -71,76 +64,99 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
     return result;
 }
 
-auto Tree::insert(Position position, RefBytes key, RefBytes value) -> Position
+auto Tree::lookup(BytesView key, std::string &result) -> bool
+{
+    auto [node, index, found_eq] = find_ge(key, true);
+    if (found_eq)
+        result = collect_value(node, index);
+    return found_eq;
+}
+
+auto Tree::insert(BytesView key, BytesView value) -> void
+{
+    auto [node, index, found_eq] = find_ge(key, true);
+
+    if (key.size() > max_local(node.size()))
+        throw InvalidArgumentError {"Key exceeds maximum allowed length"};
+
+    if (found_eq) {
+        positioned_modify({std::move(node), index}, value);
+    } else {
+        positioned_insert({std::move(node), index}, key, value);
+    }
+}
+
+//  Cursor remove() Procedure
+// ===========================
+//
+//
+// if (has_record())
+//     auto is_external = node.is_external();
+//     <remove the record>
+//     if (is_external)
+//         CUB_EXPECT_LE(index, m_node->cell_count());
+//         if (index == m_node->cell_count())
+//             index -= m_node->cell_count() > 0;
+//             increment();
+//     else
+//         increment();
+
+/**
+ * Remove the pointed-to key-value pair.
+ *
+ * @returns Whether or not the key-value pair was removed
+ */
+auto Tree::remove(BytesView key) -> bool
+{
+    auto [node, index, found_eq] = find_ge(key, true);
+
+    if (found_eq) {
+        positioned_remove({std::move(node), index});
+        return true;
+    }
+    return false;
+}
+
+auto Tree::positioned_insert(Position position, BytesView key, BytesView value) -> void
 {
     CUB_EXPECT_LE(key.size(), max_local(m_pool->page_size()));
     auto [node, index] = std::move(position);
     auto cell = make_cell(node, key, value);
-
-    if (do_insert(node, index, std::move(cell))) {
+    node.insert_at(index, std::move(cell));
+    m_cell_count++;
+    
+    if (node.is_overflowing())
         balance_after_overflow(std::move(node));
-        
-        // Get the node and cell index back.
-//        auto [node2, index2, should_be_true] = find_ge(key, true);
-//        CUB_EXPECT_TRUE(should_be_true);
-//        node = std::move(node2);
-//        index = index2;
-    }
-    return {std::move(node), index};
 }
 
-auto Tree::modify(Position position, RefBytes value) -> Position
+auto Tree::positioned_modify(Position position, BytesView value) -> void
 {
     auto [node, index] = std::move(position);
     auto old_cell = node.read_cell(index);
     // Make a copy of the key. The data backing the old key slice will be written over when we call
-    // remove_at on the old cell.
-    const auto key = to_string(old_cell.key());
-    auto new_cell = make_cell(node, to_bytes(key), value);
+    // remove_at() on the old cell.
+    const auto key = _s(old_cell.key());
+    auto new_cell = make_cell(node, _b(key), value);
 
     if (old_cell.overflow_size())
         destroy_overflow_chain(old_cell.overflow_id(), old_cell.overflow_size());
 
     node.remove_at(index, old_cell.size());
-    m_cell_count--;
 
-    if (!node.is_external())
+    if (!node.is_external()) // TODO: Move up above remove_at().
         new_cell.set_left_child_id(old_cell.left_child_id());
+    
+    node.insert_at(index, std::move(new_cell));
 
-    if (do_insert(node, index, std::move(new_cell))) {
+    if (node.is_overflowing())
         balance_after_overflow(std::move(node));
-        
-//        // Get the node and cell index back.
-//        auto [node2, index2, should_be_true] = find_ge(to_bytes(key), true);
-//        CUB_EXPECT_TRUE(should_be_true);
-//        node = std::move(node2);
-//        index = index2;
-    }
-    return {std::move(node), index};
 }
 
-auto Tree::remove(Position position) -> Position
+auto Tree::positioned_remove(Position position) -> void
 {
     auto [node, index] = std::move(position);
-//    const auto id = node.id();
-    // As far as I can tell, we need to store an "anchor" key to make our way back up the tree when resolving
-    // merges. We cannot use the traversal stack from a cursor because we may have to split the tree in
-    // do_remove(), which would invalidate those values.
-    auto anchor = to_string(node.read_key(index));
-
-    auto [swapped, had_overflow] = do_remove(std::move(node), anchor, index);
-    if (swapped.is_underflowing())
-        balance_after_underflow(std::move(swapped), to_bytes(anchor));
-
-//    if (had_overflow) {
-//        // Get the node and cell index back.
-//        auto [node2, index2, unchecked] = find_ge(to_bytes(anchor_str), true);
-//        node = std::move(node2);
-//        index = index2;
-//    } else {
-//        node = acquire_node(id, true);
-//    }
-    return {std::move(node), index};
+    CUB_EXPECT_LT(index, node.cell_count());
+    do_remove(std::move(node), index);
 }
 
 auto Tree::find_local_min(Node root) -> Position
@@ -158,32 +174,21 @@ auto Tree::find_local_max(Node root) -> Position
     return {std::move(root), index};
 }
 
-auto Tree::do_insert(Node &node, Index index, Cell new_cell) -> bool
-{
-    // This should be safe since we can only have one read-write cursor out at any given time.
-    // If this rule wasn't enforced, we could end up reusing scratch memory lent out to a
-    // live node.
-    node.insert_at(index, std::move(new_cell));
-    m_cell_count++;
-    return node.is_overflowing();
-}
-
-auto Tree::do_remove(Node node, std::string &anchor, Index index) -> RemoveResult
+auto Tree::do_remove(Node node, Index index) -> void
 {
     m_cell_count--;
 
     auto cell = node.read_cell(index);
+    auto anchor = _s(cell.key());
     if (cell.overflow_size())
         destroy_overflow_chain(cell.overflow_id(), cell.overflow_size());
-
-    bool had_overflow {};
 
     // Here, we swap the cell to be removed with its inorder predecessor (always exists
     // if the node is internal).
     if (!node.is_external()) {
         auto [other, other_index] = find_local_max(acquire_node(node.child_id(index), true));
         auto other_cell = other.extract_cell(other_index, m_scratch.get());
-        anchor = to_string(other_cell.key());
+        anchor = _s(other_cell.key());
         other_cell.set_left_child_id(node.child_id(index));
         node.remove_at(index, node.read_cell(index).size());
 
@@ -194,14 +199,15 @@ auto Tree::do_remove(Node node, std::string &anchor, Index index) -> RemoveResul
             other.take();
             balance_after_overflow(std::move(node));
             node = acquire_node(id, true);
-            had_overflow = true;
         } else {
             node = std::move(other);
         }
     } else {
         node.remove_at(index, node.read_cell(index).size());
     }
-    return {std::move(node), had_overflow};
+
+    if (node.is_underflowing())
+        balance_after_underflow(std::move(node), _b(anchor));
 }
 
 auto Tree::allocate_node(PageType type) -> Node
@@ -240,7 +246,7 @@ auto Tree::balance_after_overflow(Node node) -> void
     }
 }
 
-auto Tree::balance_after_underflow(Node node, RefBytes anchor) -> void
+auto Tree::balance_after_underflow(Node node, BytesView anchor) -> void
 {
     CUB_EXPECT(node.is_underflowing());
     while (node.is_underflowing()) {
@@ -323,7 +329,7 @@ auto Tree::maybe_fix_child_parent_connections(Node &node) -> void
  * Note that the key and value must exist until the cell is safely embedded in the B-Tree. If
  * the tree is balanced and there are no overflow cells then this is guaranteed to be true.
  */
-auto Tree::make_cell(Node &node, RefBytes key, RefBytes value) -> Cell
+auto Tree::make_cell(Node &node, BytesView key, BytesView value) -> Cell
 {
     auto builder = CellBuilder{node.size()}
         .set_key(key)
@@ -337,11 +343,11 @@ auto Tree::make_cell(Node &node, RefBytes key, RefBytes value) -> Cell
     return cell;
 }
 
-auto Tree::allocate_overflow_chain(RefBytes overflow) -> PID
+auto Tree::allocate_overflow_chain(BytesView overflow) -> PID
 {
     CUB_EXPECT_FALSE(overflow.is_empty());
     std::optional<Link> prev;
-    PID head {};
+    auto head = PID::root();
 
     while (!overflow.is_empty()) {
         auto page = m_free_list.free_count()
@@ -365,7 +371,7 @@ auto Tree::allocate_overflow_chain(RefBytes overflow) -> PID
     return head;
 }
 
-auto Tree::collect_overflow_chain(PID id, MutBytes out) const -> void
+auto Tree::collect_overflow_chain(PID id, Bytes out) const -> void
 {
     while (!out.is_empty()) {
         auto page = m_pool->acquire(id, false);

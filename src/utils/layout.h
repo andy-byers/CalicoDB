@@ -1,7 +1,3 @@
-//
-// Created by Andrew Byers on 5/18/22.
-//
-
 #ifndef CUB_UTILS_LAYOUT_H
 #define CUB_UTILS_LAYOUT_H
 
@@ -11,19 +7,19 @@
 
 namespace cub {
 
-constexpr Size PAGE_ID_SIZE{sizeof(uint32_t)};
-constexpr Size CELL_POINTER_SIZE{sizeof(uint16_t)};
-constexpr Index NULL_ID_VALUE{0};
-constexpr Index ROOT_ID_VALUE{1};
+static constexpr Size PAGE_ID_SIZE {sizeof(uint32_t)};
+static constexpr Size CELL_POINTER_SIZE {sizeof(uint16_t)};
+static constexpr Index NULL_ID_VALUE {0};
+static constexpr Index ROOT_ID_VALUE {1};
 
 struct IdentifierHash;
 
 struct Identifier {
     using Hasher = IdentifierHash;
 
-    constexpr Identifier() noexcept = default;
+    Identifier() noexcept = default;
 
-    template<class Id> constexpr explicit Identifier(Id id) noexcept
+    template<class Id> explicit Identifier(Id id) noexcept
         : value{static_cast<uint32_t>(id)}
     {
         using Unsigned = std::make_unsigned_t<Id>;
@@ -40,17 +36,17 @@ struct Identifier {
         return value != rhs.value;
     }
 
-    [[nodiscard]] constexpr auto is_null() const noexcept -> bool
+    [[nodiscard]] auto is_null() const noexcept -> bool
     {
         return value == 0;
     }
 
-    [[nodiscard]] constexpr auto is_root() const noexcept -> bool
+    [[nodiscard]] auto is_root() const noexcept -> bool
     {
         return value == ROOT_ID_VALUE;
     }
 
-    [[nodiscard]] constexpr auto as_index() const noexcept -> Index
+    [[nodiscard]] auto as_index() const noexcept -> Index
     {
         CUB_EXPECT_GE(value, ROOT_ID_VALUE);
         return value - ROOT_ID_VALUE;
@@ -67,34 +63,34 @@ struct IdentifierHash {
 };
 
 struct PID final: public Identifier {
-    constexpr PID() noexcept = default;
+    PID() noexcept = default;
 
-    template<class T> constexpr explicit PID(T id) noexcept
+    template<class T> explicit PID(T id) noexcept
         : Identifier{id} {}
 
-    static constexpr auto null() noexcept -> PID
+    static auto null() noexcept -> PID
     {
         return PID{NULL_ID_VALUE};
     }
 
-    static constexpr auto root() noexcept -> PID
+    static auto root() noexcept -> PID
     {
         return PID{ROOT_ID_VALUE};
     }
 };
 
 struct LSN final: public Identifier {
-    constexpr LSN() noexcept = default;
+    LSN() noexcept = default;
 
-    template<class T> constexpr explicit LSN(T id) noexcept
+    template<class T> explicit LSN(T id) noexcept
         : Identifier{id} {}
 
-    static constexpr auto null() noexcept -> LSN
+    static auto null() noexcept -> LSN
     {
         return LSN{NULL_ID_VALUE};
     }
 
-    static constexpr auto base() noexcept -> LSN
+    static auto base() noexcept -> LSN
     {
         return LSN{ROOT_ID_VALUE};
     }
@@ -120,28 +116,28 @@ struct LSN final: public Identifier {
 
 class FileLayout {
 public:
-    static constexpr Size MAGIC_CODE_OFFSET = 0;
-    static constexpr Size PAGE_COUNT_OFFSET = 4;
-    static constexpr Size NODE_COUNT_OFFSET = 8;
-    static constexpr Size FREE_COUNT_OFFSET = 12;
-    static constexpr Size FREE_START_OFFSET = 16;
-    static constexpr Size PAGE_SIZE_OFFSET = 20;
-    static constexpr Size BLOCK_SIZE_OFFSET = 22;
-    static constexpr Size KEY_COUNT_OFFSET = 24;
-    static constexpr Size FLUSHED_LSN_OFFSET = 28;
-    static constexpr Size HEADER_SIZE = 32;
+    static const Size MAGIC_CODE_OFFSET = 0;
+    static const Size PAGE_COUNT_OFFSET = 4;
+    static const Size NODE_COUNT_OFFSET = 8;
+    static const Size FREE_COUNT_OFFSET = 12;
+    static const Size FREE_START_OFFSET = 16;
+    static const Size PAGE_SIZE_OFFSET = 20;
+    static const Size BLOCK_SIZE_OFFSET = 22;
+    static const Size KEY_COUNT_OFFSET = 24;
+    static const Size FLUSHED_LSN_OFFSET = 28;
+    static const Size HEADER_SIZE = 32;
 
-    static constexpr auto header_offset() noexcept -> Index
+    static auto header_offset() noexcept -> Index
     {
         return 0UL;
     }
 
-    static constexpr auto content_offset() noexcept -> Index
+    static auto content_offset() noexcept -> Index
     {
         return header_offset() + HEADER_SIZE;
     }
 
-    static constexpr auto page_offset(PID page_id, Size page_size) noexcept -> Index
+    static auto page_offset(PID page_id, Size page_size) noexcept -> Index
     {
         return page_id.as_index() * page_size;
     }
@@ -179,16 +175,16 @@ public:
 
 class PageLayout {
 public:
-    static constexpr Size LSN_OFFSET = 0;
-    static constexpr Size TYPE_OFFSET = 4;
-    static constexpr Size HEADER_SIZE = 6;
+    static const Size LSN_OFFSET = 0;
+    static const Size TYPE_OFFSET = 4;
+    static const Size HEADER_SIZE = 6;
 
-    static constexpr auto header_offset(PID page_id) noexcept -> Size
+    static auto header_offset(PID page_id) noexcept -> Size
     {
         return page_id.is_root() * FileLayout::HEADER_SIZE;
     }
 
-    static constexpr auto content_offset(PID page_id) noexcept -> Size
+    static auto content_offset(PID page_id) noexcept -> Size
     {
         return header_offset(page_id) + HEADER_SIZE;
     }
@@ -217,22 +213,22 @@ public:
 
 class NodeLayout {
 public:
-    static constexpr Size PARENT_ID_OFFSET = 0;
-    static constexpr Size RIGHTMOST_CHILD_ID_OFFSET = 4;
-    static constexpr Size RIGHT_SIBLING_ID_OFFSET = 4;
-    static constexpr Size CELL_COUNT_OFFSET = 8;
-    static constexpr Size FREE_COUNT_OFFSET = 10;
-    static constexpr Size CELL_START_OFFSET = 12;
-    static constexpr Size FREE_START_OFFSET = 14;
-    static constexpr Size FRAG_COUNT_OFFSET = 16;
-    static constexpr Size HEADER_SIZE = 18;
+    static const Size PARENT_ID_OFFSET = 0;
+    static const Size RIGHTMOST_CHILD_ID_OFFSET = 4;
+    static const Size RIGHT_SIBLING_ID_OFFSET = 4;
+    static const Size CELL_COUNT_OFFSET = 8;
+    static const Size FREE_COUNT_OFFSET = 10;
+    static const Size CELL_START_OFFSET = 12;
+    static const Size FREE_START_OFFSET = 14;
+    static const Size FRAG_COUNT_OFFSET = 16;
+    static const Size HEADER_SIZE = 18;
 
-    static constexpr auto header_offset(PID page_id) noexcept -> Size
+    static auto header_offset(PID page_id) noexcept -> Size
     {
         return PageLayout::content_offset(page_id);
     }
 
-    static constexpr auto content_offset(PID page_id) noexcept -> Size
+    static auto content_offset(PID page_id) noexcept -> Size
     {
         return header_offset(page_id) + HEADER_SIZE;
     }
@@ -249,10 +245,10 @@ public:
 
 class LinkLayout {
 public:
-    static constexpr Size NEXT_ID_OFFSET = 0;
-    static constexpr Size HEADER_SIZE = 4;
+    static const Size NEXT_ID_OFFSET = 0;
+    static const Size HEADER_SIZE = 4;
 
-    static constexpr auto header_offset() noexcept -> Size
+    static auto header_offset() noexcept -> Size
     {
         // The root page can never become a link page, so this value is the same for
         // all pages.
@@ -261,13 +257,13 @@ public:
         return PageLayout::content_offset(non_root);
     }
 
-    static constexpr auto content_offset() noexcept -> Size
+    static auto content_offset() noexcept -> Size
     {
         return header_offset() + HEADER_SIZE;
     }
 };
 
 
-} // cub
+} // db
 
 #endif // CUB_UTILS_LAYOUT_H

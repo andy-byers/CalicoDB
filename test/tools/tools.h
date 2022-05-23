@@ -6,7 +6,8 @@
 #include <iostream>
 #include <vector>
 #include "common.h"
-#include "utils/slice.h"
+#include "random.h"
+#include "bytes.h"
 #include "utils/utils.h"
 
 namespace cub {
@@ -40,11 +41,11 @@ private:
     auto add_spaces_to_level(Size, Index) -> void;
     auto add_spaces_to_other_levels(Size, Index) -> void;
     auto print_aux(Node, Index) -> void;
-    auto add_key_to_level(RefBytes, Index) -> void;
+    auto add_key_to_level(BytesView, Index) -> void;
     auto add_key_separator_to_level(Index) -> void;
     auto add_node_start_to_level(Index, Index) -> void;
     auto add_node_end_to_level(Index) -> void;
-    auto make_key_token(RefBytes) -> std::string;
+    auto make_key_token(BytesView) -> std::string;
     static auto make_key_separator_token() -> std::string;
     static auto make_node_start_token(Index) -> std::string;
     static auto make_node_end_token() -> std::string;
@@ -106,6 +107,32 @@ struct MoveOnly {
     auto operator=(MoveOnly&&) -> MoveOnly& = default;
 };
 
-} // cub
+struct Record {
+    auto operator<(const Record &rhs) const -> bool
+    {
+        // NOTE: Could probably just use std::string::operator<(), but this works for strings containing
+        //       weird data, like '\0' in the middle.
+        return compare_three_way(_b(key), _b(rhs.key)) == ThreeWayComparison::LT;
+    }
+
+    std::string key;
+    std::string value;
+};
+
+class RecordGenerator {
+public:
+    struct Parameters {
+        Size min_key_size {5};
+        Size max_key_size {10};
+        Size min_value_size {5};
+        Size max_value_size {10};
+        unsigned seed {};
+        bool are_batches_sorted {};
+    };
+
+    static auto generate(Size, Parameters) -> std::vector<Record>;
+};
+
+} // db
 
 #endif // CUB_TEST_TOOLS_TOOLS_H

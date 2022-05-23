@@ -1,6 +1,7 @@
 
 #include <array>
 #include <filesystem>
+#include <thread>
 #include <unordered_map>
 
 #include <gtest/gtest.h>
@@ -11,6 +12,7 @@
 #include "page/cell.h"
 #include "common.h"
 #include "utils/layout.h"
+#include "db/cursor_impl.h"
 #include "tree/tree.h"
 
 #include "fakes.h"
@@ -51,27 +53,16 @@ public:
         return false;
     }
 
-    auto lookup(RefBytes key, std::string &result) -> bool
-    {
-        if (const auto itr = m_payloads.find(to_string(key)); itr != m_payloads.end()) {
-            auto [node, index, found_eq] = find_ge(key, false);
-            EXPECT_TRUE(found_eq);
-            result = collect_value(node, index);
-            return true;
-        }
-        return false;
-    }
-
     auto node_contains(PID id, const std::string &key) -> bool
     {
-        auto [node, index, found_eq] = find_ge(to_bytes(key), false);
+        auto [node, index, found_eq] = find_ge(_b(key), false);
         return found_eq && node.id() == id;
     }
 
     auto tree_contains(const std::string &key) -> bool
     {
         std::string temp;
-        if (lookup(to_bytes(key), temp)) {
+        if (lookup(_b(key), temp)) {
             const auto itr {m_payloads.find(key)};
             EXPECT_NE(itr, m_payloads.end()) << "Key " << key << " hasn't been added to the tree";
             const auto same {temp == itr->second};
@@ -95,34 +86,18 @@ template<std::size_t Length = 6> auto make_key(Index key) -> std::string
 
 auto tree_insert(TestTree &tree, const std::string &key, const std::string &value) -> void
 {
-    auto [node, index, found_eq] = tree.find_ge(to_bytes(key), true);
-    if (found_eq) {
-        tree.modify({std::move(node), index}, to_bytes(value));
-    } else {
-        tree.insert({std::move(node), index}, to_bytes(key), to_bytes(value));
-    }
+    tree.insert(_b(key), _b(value));
     tree.set_payload(key, value);
 }
 
 [[maybe_unused]] auto tree_lookup(TestTree &tree, const std::string &key, std::string &result) -> bool
 {
-    auto [node, index, found_eq] = tree.find_ge(to_bytes(key), false);
-    if (found_eq) {
-        result = tree.collect_value(node, index);
-        return true;
-    }
-    return false;
+    return tree.lookup(_b(key), result);
 }
 
 [[maybe_unused]] auto tree_remove(TestTree &tree, const std::string &key) -> bool
 {
-    auto [node, index, found_eq] = tree.find_ge(to_bytes(key), true);
-    if (found_eq) {
-        tree.remove({std::move(node), index});
-        EXPECT_TRUE(tree.delete_payload(key));
-        return true;
-    }
-    return false;
+    return tree.remove(_b(key));
 }
 
 class TreeBuilder {
@@ -179,7 +154,7 @@ public:
     auto node_insert(PID id, const std::string &key, const std::string &value) -> void
     {
         auto node = m_tree.acquire_node(id, true);
-        auto cell = m_tree.make_cell(node, to_bytes(key), to_bytes(value));
+        auto cell = m_tree.make_cell(node, _b(key), _b(value));
 
         if (!node.is_external())
             cell.set_left_child_id(PID{std::numeric_limits<uint32_t>::max()});
@@ -347,9 +322,9 @@ TEST_F(TreeTests, InsertBetween)
 TEST_F(TreeTests, OverflowChains)
 {
     // These three inserts should need overflow chains.
-    tree_insert(tree(), "key_a", random_string(m_random, m_max_local, m_max_local * 2));
-    tree_insert(tree(), "key_b", random_string(m_random, m_max_local, m_max_local * 3));
-    tree_insert(tree(), "key_c", random_string(m_random, m_max_local, m_max_local * 4));
+    tree_insert(tree(), "key_a", random_string(m_random, m_max_local, m_max_local * 10));
+    tree_insert(tree(), "key_b", random_string(m_random, m_max_local, m_max_local * 20));
+    tree_insert(tree(), "key_c", random_string(m_random, m_max_local, m_max_local * 30));
 
     // We should be able to get all our data back.
     ASSERT_TRUE(tree().tree_contains("key_a"));
@@ -558,7 +533,7 @@ TEST_F(TreeTests, LookupPastEnd)
     random_tree(m_random, builder, 100);
     std::string result;
     const auto key = make_key(101);
-    ASSERT_EQ(tree().lookup(to_bytes(key), result), false);
+    ASSERT_EQ(tree().lookup(_b(key), result), false);
 }
 
 TEST_F(TreeTests, LookupBeforeBeginning)
@@ -567,7 +542,7 @@ TEST_F(TreeTests, LookupBeforeBeginning)
     random_tree(m_random, builder, 100);
     std::string result;
     const auto key = make_key(0);
-    ASSERT_EQ(tree().lookup(to_bytes(key), result), false);
+    ASSERT_EQ(tree().lookup(_b(key), result), false);
 }
 
 TEST_F(TreeTests, InsertSanityCheck)
@@ -893,11 +868,11 @@ auto run_internal_overflow_after_modify_test(TestTree &tree, Index key_index) ->
     TreeBuilder builder {tree};
     setup_remove_special_cases_test(builder);
 
-    auto [node, index, found_eq] = tree.find_ge(to_bytes(key), true);
+    auto [node, index, found_eq] = tree.find_ge(_b(key), true);
     const auto space_in_node = node.usable_space();
     auto value = tree.collect_value(node, index) + std::string(space_in_node + 15, 'x');
-    tree.modify({std::move(node), index}, to_bytes(value));
-
+    node.take();
+    tree.insert(_b(key), _b(value));
     TreeValidator {tree}.validate();
 }
 
@@ -956,7 +931,7 @@ TEST_F(TreeTests, SanityCheck)
             key = random_string(m_random, 5, 20);
         }
         // Value may need one or more overflow pages.
-        const auto value = random_string(m_random, 5, 20);//tree().page_size() * 3);
+        const auto value = random_string(m_random, 5, m_max_local * 3);
 
         // Insert a key-value pair.
         tree_insert(tree(), key, value);
@@ -969,7 +944,7 @@ TEST_F(TreeTests, SanityCheck)
 
             ASSERT_TRUE(tree_remove(tree(), itr->first))
                 << "Unable to remove '" << itr->first << "': "
-                << tree().cell_count() << " records remaining ";
+                << tree().cell_count() << " values remaining ";
             payloads.erase(itr);
         }
     }
@@ -988,8 +963,8 @@ TEST_F(TreeTests, SanityCheck)
 TEST_F(TreeTests, RemoveEverythingRepeatedly)
 {
     std::unordered_map<std::string, std::string> records;
-    static constexpr Size num_iterations = 100;
-    static constexpr Size cutoff = 50;
+    static constexpr Size num_iterations = 20;
+    static constexpr Size cutoff = 100;
 
     for (Index i {}; i < num_iterations; ++i) {
         while (m_tree->cell_count() < cutoff) {
@@ -1004,5 +979,204 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
         records.clear();
     }
 }
+//
+//class CursorTests: public TreeTests {
+//public:
+//    CursorTests() = default;
+//    ~CursorTests() override = default;
+//
+//    auto does_cursor_match_record(const Cursor &cursor, const Record &record)
+//    {
+//        if (!cursor.has_record())
+//            return false;
+//        const auto &[key, value] = record;
+//        if (cursor.key() != _b(key))
+//            return false;
+//        return _b(cursor.value()) == _b(value);
+//    }
+//};
+//
+//TEST_F(CursorTests, EmptyTreeBehavior)
+//{
+//    Cursor cursor {m_tree.get()};
+//    ASSERT_FALSE(cursor.has_record());
+//    ASSERT_FALSE(cursor.increment());
+//    ASSERT_FALSE(cursor.decrement());
+//
+//    cursor.find_minimum();
+//    ASSERT_FALSE(cursor.has_record());
+//    cursor.find_maximum();
+//    ASSERT_FALSE(cursor.has_record());
+//}
+//
+//TEST_F(CursorTests, CursorIsLeftOnInsertedRecord)
+//{
+//    Record record_1 {"a", "1"};
+//    Record record_2 {"b", "2"};
+//    Cursor cursor {m_tree.get(), true};
+//    cursor.insert(_b(record_1.key), _b(record_1.value));
+//    ASSERT_TRUE(does_cursor_match_record(cursor, record_1));
+//    cursor.insert(_b(record_2.key), _b(record_2.value));
+//    ASSERT_TRUE(does_cursor_match_record(cursor, record_2));
+//}
+//
+//TEST_F(CursorTests, CursorIsLeftOnModifiedRecord)
+//{
+//    Record record_1 {"a", "1"};
+//    Record record_2 {"b", "2"};
+//    Cursor cursor {m_tree.get(), true};
+//    cursor.insert(_b(record_1.key), _b(record_1.value));
+//    cursor.insert(_b(record_2.key), _b(record_2.value));
+//
+//    record_1.value = "3";
+//    cursor.insert(_b(record_1.key), _b(record_1.value));
+//    ASSERT_TRUE(does_cursor_match_record(cursor, record_1));
+//}
+//
+//TEST_F(CursorTests, CursorStaysOnValidRecordDuringRemove)
+//{
+//    Record record_1 {"a", "1"};
+//    Record record_2 {"b", "2"};
+//    Record record_3 {"c", "3"};
+//    Cursor cursor {m_tree.get(), true};
+//    cursor.insert(_b(record_1.key), _b(record_1.value));
+//    cursor.insert(_b(record_2.key), _b(record_2.value));
+//    cursor.insert(_b(record_3.key), _b(record_3.value));
+//
+//    cursor.remove();
+//    ASSERT_TRUE(does_cursor_match_record(cursor, record_2));
+//    cursor.remove();
+//    ASSERT_TRUE(does_cursor_match_record(cursor, record_1));
+//    cursor.remove();
+//}
+//
+//template<Size NumRecords> class WithConstructedTree {
+//public:
+//    static constexpr Size NUM_RECORDS = NumRecords;
+//
+//    WithConstructedTree(TestTree &tree, unsigned seed)
+//        : random {seed}
+//    {
+//        std::string unused;
+//        records.reserve(NumRecords);
+//        while (tree.cell_count() < NumRecords) {
+//            const auto key = random_string(random, 9, 12);
+//            const auto value = random_string(random, 15, 20);
+//            if (!tree_lookup(tree, key, unused)) {
+//                tree_insert(tree, key, value);
+//                records.emplace_back(Record {key, value});
+//            }
+//        }
+//        std::sort(records.begin(), records.end());
+//    }
+//
+//    ~WithConstructedTree() = default;
+//
+//    std::vector<Record> records;
+//    Random random;
+//};
+//
+//class CursorTraversalTests
+//    : public CursorTests
+//    , public WithConstructedTree<1'000>
+//{
+//public:
+//    CursorTraversalTests()
+//        : WithConstructedTree {tree(), 0} {}
+//
+//    ~CursorTraversalTests() override = default;
+//};
+//
+//TEST_F(CursorTraversalTests, FindsMinimumRecord)
+//{
+//    Cursor cursor {m_tree.get(), false};
+//    cursor.find_minimum();
+//    ASSERT_TRUE(does_cursor_match_record(cursor, records.front()));
+//}
+//
+//TEST_F(CursorTraversalTests, FindsMaximumRecord)
+//{
+//    Cursor cursor {m_tree.get(), false};
+//    cursor.find_maximum();
+//    ASSERT_TRUE(does_cursor_match_record(cursor, records.back()));
+//}
+//
+//TEST_F(CursorTraversalTests, FindsSpecificRecord)
+//{
+//    Cursor cursor {m_tree.get(), false};
+//    ASSERT_TRUE(cursor.find(_b(records.at(NUM_RECORDS / 3).key)));
+//    ASSERT_TRUE(does_cursor_match_record(cursor, records.at(NUM_RECORDS / 3)));
+//}
+//
+//TEST_F(CursorTraversalTests, ForwardTraversal)
+//{
+//    Cursor cursor {m_tree.get(), false};
+//    cursor.find_minimum();
+//
+//    for (const auto &record: records) {
+//        ASSERT_TRUE(does_cursor_match_record(cursor, record));
+//        cursor.increment();
+//    }
+//    ASSERT_FALSE(cursor.increment());
+//}
+//
+//TEST_F(CursorTraversalTests, ReverseTraversal)
+//{
+//    Cursor cursor {m_tree.get(), false};
+//    cursor.find_maximum();
+//
+//    for (auto itr = records.crbegin(); itr != records.crend(); itr++) {
+//        ASSERT_TRUE(does_cursor_match_record(cursor, *itr));
+//        cursor.decrement();
+//    }
+//    ASSERT_FALSE(cursor.decrement());
+//}
+//
+//TEST_F(CursorTraversalTests, PartialForwardTraversal)
+//{
+//    const auto diff = static_cast<long>(records.size() / 3);
+//
+//    Cursor cursor {m_tree.get(), false};
+//    auto itr = records.cbegin() + diff;
+//    cursor.find(_b(itr->key));
+//
+//    for (; itr != records.cend() - diff; itr++) {
+//        ASSERT_TRUE(does_cursor_match_record(cursor, *itr));
+//        cursor.increment();
+//    }
+//}
+//
+//TEST_F(CursorTraversalTests, PartialReverseTraversal)
+//{
+//    const auto diff = static_cast<long>(records.size() / 3);
+//
+//    Cursor cursor {m_tree.get(), false};
+//    auto itr = records.crbegin() + diff;
+//    cursor.find(_b(itr->key));
+//
+//    for (; itr != records.crend() - diff; itr++) {
+//        ASSERT_TRUE(does_cursor_match_record(cursor, *itr));
+//        cursor.decrement();
+//    }
+//}
+//
+//auto reader(Cursor cursor)
+//{
+//    cursor.find_minimum();
+//    const auto value = cursor.value();
+//    while (cursor.increment())
+//        CUB_EXPECT_EQ(cursor.value(), value);
+//    return nullptr;
+//}
+//
+//TEST_F(CursorTraversalTests, MultipleReaders)
+//{
+//    static constexpr Size num_readers = 10;
+//    std::vector<std::thread> threads;
+//    for (Index i {}; i < num_readers; ++i)
+//        threads.emplace_back(reader, Cursor {m_tree.get()});
+//    for (auto &thread: threads)
+//        thread.join();
+//}
 
 } // <anonymous>

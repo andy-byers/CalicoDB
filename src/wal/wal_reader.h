@@ -7,9 +7,9 @@
 #ifndef CUB_WAL_WAL_READER_H
 #define CUB_WAL_WAL_READER_H
 
+#include <memory>
 #include <optional>
 #include <stack>
-
 #include "common.h"
 #include "interface.h"
 #include "wal_record.h"
@@ -21,8 +21,6 @@ struct LSN;
 
 class WALReader: public IWALReader {
 public:
-    friend class WALManager;
-
     WALReader(std::unique_ptr<IReadOnlyFile>, Size);
     ~WALReader() override = default;
     [[nodiscard]] auto record() const -> std::optional<WALRecord> override;
@@ -48,6 +46,6 @@ private:
     bool m_has_block{};
 };
 
-} // cub
+} // db
 
 #endif // CUB_WAL_WAL_READER_H

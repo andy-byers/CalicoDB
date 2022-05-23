@@ -30,12 +30,12 @@ auto Frame::is_dirty() const -> bool
     return m_is_dirty;
 }
 
-auto Frame::data() const -> RefBytes
+auto Frame::data() const -> BytesView
 {
     return {m_data.get(), m_size};
 }
 
-auto Frame::data() -> MutBytes
+auto Frame::data() -> Bytes
 {
     return {m_data.get(), m_size};
 }
@@ -85,4 +85,4 @@ auto Frame::page_lsn() const -> LSN
     return LSN {get_uint32(data().range(offset))};
 }
 
-} // cub
+} // db

@@ -17,6 +17,7 @@ set(
     ${PROJECT_SOURCE_DIR}/test/tools/tools.h
 )
 
+add_subdirectory(fuzz)
 add_subdirectory(integration)
 add_subdirectory(unit)
 

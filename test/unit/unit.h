@@ -9,6 +9,6 @@ namespace cub {
 
 static constexpr const char *EXPECTATION_MATCHER = "Expect";
 
-} // cub
+} // db
 
 #endif //CUB_UNIT_H

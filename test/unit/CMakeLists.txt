@@ -3,6 +3,7 @@ add_executable(
     unit
     unit.cpp
     test_cache.cpp
+    test_db.cpp
     test_file.cpp
     test_page.cpp
     test_pool.cpp

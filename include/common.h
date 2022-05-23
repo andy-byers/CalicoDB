@@ -8,10 +8,6 @@
 
 #include <cstdlib>
 
-#if !CUB_HAS_O_DIRECT
-#   define O_DIRECT 0
-#endif
-
 #if (!defined(_WIN32) && !defined(_WIN64)) && (defined(__unix__) || defined(__unix) || defined(__APPLE__))
 #    define CUB_UNIX
 #    ifdef __APPLE__
@@ -46,6 +42,6 @@ struct Options {
     int permissions{DEFAULT_PERMISSIONS};
 };
 
-} // cub
+} // db
 
 #endif // CUB_COMMON_H

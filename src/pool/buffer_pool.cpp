@@ -2,7 +2,6 @@
 #include "buffer_pool.h"
 #include "common.h"
 #include "exception.h"
-#include "frame.h"
 #include "page/page.h"
 #include "file/interface.h"
 #include "wal/interface.h"
@@ -56,16 +55,18 @@ auto BufferPool::allocate(PageType type) -> Page
 auto BufferPool::acquire(PID id, bool is_writable) -> Page
 {
     CUB_EXPECT_FALSE(id.is_null());
-    auto page = do_acquire(id, is_writable);
+    auto page = fetch_page(id, is_writable);
     if (is_writable)
         page.enable_tracking(m_scratch.get());
     return page;
 }
 
-auto BufferPool::do_acquire(PID id, bool is_writable) -> Page
+auto BufferPool::fetch_page(PID id, bool is_writable) -> Page
 {
     CUB_EXPECT_FALSE(id.is_null());
-    const auto try_acquire = [&]() -> std::optional<Page> {
+    std::lock_guard lock {m_mutex};
+
+    const auto try_fetch = [id, is_writable, this]() -> std::optional<Page> {
         if (auto itr = m_pinned.find(id); itr != m_pinned.end()) {
             auto page = itr->second.borrow(this, is_writable);
             m_ref_sum++;
@@ -75,12 +76,12 @@ auto BufferPool::do_acquire(PID id, bool is_writable) -> Page
     };
     
     // Frame is already pinned.
-    if (auto page{try_acquire()})
+    if (auto page{try_fetch()})
         return std::move(*page);
 
     // Get page from cache or disk.
     m_pinned.emplace(id, fetch_frame(id));
-    return *try_acquire();
+    return *try_fetch();
 }
 
 auto BufferPool::log_update(Page &page) -> void
@@ -122,6 +123,7 @@ auto BufferPool::fetch_frame(PID id) -> Frame
 
 auto BufferPool::on_page_release(Page &page) -> void
 {
+    std::lock_guard lock {m_mutex}; // TODO: We can definitely reduce the size of most of these critical sections. Work on that!
     CUB_EXPECT_GT(m_ref_sum, 0);
 
     auto itr = m_pinned.find(page.id());
@@ -142,8 +144,8 @@ auto BufferPool::on_page_release(Page &page) -> void
 
 auto BufferPool::on_page_error() -> void
 {
-    m_has_fault = true;
-    m_fault = errno;
+//    m_has_fault = true;
+//    m_fault = errno;
 }
 
 auto BufferPool::roll_forward() -> bool
@@ -161,7 +163,7 @@ auto BufferPool::roll_forward() -> bool
             break;
         }
         const auto update = record.payload().decode();
-        auto page = do_acquire(update.page_id, true);
+        auto page = fetch_page(update.page_id, true);
 
         if (page.lsn().value < record.lsn().value)
             page.redo_changes(record.lsn(), update.changes);
@@ -186,7 +188,7 @@ auto BufferPool::roll_backward() -> void
     do {
         const auto record = *m_wal_reader->record();
         const auto update = record.payload().decode();
-        auto page = do_acquire(update.page_id, true);
+        auto page = fetch_page(update.page_id, true);
 
         if (page.lsn().value >= record.lsn().value)
             page.undo_changes(update.previous_lsn, update.changes);

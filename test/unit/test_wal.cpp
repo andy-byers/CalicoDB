@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "common.h"
-#include "utils/slice.h"
+#include "bytes.h"
 #include "utils/utils.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_record.h"
@@ -61,8 +61,8 @@ public:
 
             update.emplace_back();
             update.back().offset = offset;
-            update.back().before = to_bytes(m_snapshots_before.back()).range(offset, size);
-            update.back().after = to_bytes(m_snapshots_after.back()).range(offset, size);
+            update.back().before = _b(m_snapshots_before.back()).range(offset, size);
+            update.back().after = _b(m_snapshots_after.back()).range(offset, size);
         }
         WALRecord record {{
             std::move(update),
@@ -70,7 +70,7 @@ public:
             LSN::null(),
             LSN {static_cast<uint32_t>(m_payloads.size() + ROOT_ID_VALUE)},
         }};
-        m_payloads.push_back(to_string(record.payload().data()));
+        m_payloads.push_back(_s(record.payload().data()));
         return record;
     }
 
@@ -81,7 +81,7 @@ public:
         const auto payload = retrieve_payload(target_lsn);
         ASSERT_EQ(record.type(), WALRecord::Type::FULL)
             << "Record is incomplete";
-        ASSERT_TRUE(record.payload().data() == to_bytes(payload))
+        ASSERT_TRUE(record.payload().data() == _b(payload))
             << "Record payload was corrupted";
         ASSERT_TRUE(record.is_consistent())
             << "Record has an inconsistent CRC";
@@ -181,14 +181,14 @@ TEST_F(WALTests, SingleMerge)
     auto left = generator.generate(0x10, 10);
     const auto lsn = left.lsn();
     const auto crc = left.crc();
-    const auto payload = to_string(left.payload().data());
+    const auto payload = _s(left.payload().data());
     auto right = left.split(left.payload().data().size() / 2);
 
     left.merge(right);
     ASSERT_EQ(left.lsn(), lsn);
     ASSERT_EQ(left.crc(), crc);
     ASSERT_EQ(left.type(), WALRecord::Type::FULL);
-    ASSERT_EQ(to_string(left.payload().data()), payload);
+    ASSERT_EQ(_s(left.payload().data()), payload);
 }
 
 TEST_F(WALTests, MultipleMerges)
@@ -197,7 +197,7 @@ TEST_F(WALTests, MultipleMerges)
     auto left = generator.generate(0x10, 10);
     const auto lsn = left.lsn();
     const auto crc = left.crc();
-    const auto payload = to_string(left.payload().data());
+    const auto payload = _s(left.payload().data());
     auto middle = left.split(payload.size() / 3);
     auto right = middle.split(payload.size() / 3);
 
@@ -206,7 +206,7 @@ TEST_F(WALTests, MultipleMerges)
     ASSERT_EQ(left.lsn(), lsn);
     ASSERT_EQ(left.crc(), crc);
     ASSERT_EQ(left.type(), WALRecord::Type::FULL);
-    ASSERT_EQ(to_string(left.payload().data()), payload);
+    ASSERT_EQ(_s(left.payload().data()), payload);
 }
 
 TEST_F(WALTests, EmptyFileBehavior)
@@ -224,7 +224,7 @@ TEST_F(WALTests, WritesRecordCorrectly)
 
     const auto &memory = m_wal_backing.memory();
     WALRecord record;
-    record.read(to_bytes(memory));
+    record.read(_b(memory));
     generator.validate_record(record, LSN::base());
 }
 
