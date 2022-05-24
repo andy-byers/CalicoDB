@@ -1,3 +1,4 @@
+**This library is under active development and is probably broken right now!**
 
 Cub DB is an embedded key-value database written in C++17.
 
