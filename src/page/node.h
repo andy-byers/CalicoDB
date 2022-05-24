@@ -27,7 +27,10 @@ public:
     Node(Page, bool);
     ~Node() = default;
 
-    auto take() -> Page {return std::move(m_page);}
+    auto take() -> Page
+    {
+        return std::move(m_page);
+    }
 
     [[nodiscard]] auto page() const -> const Page&
     {
@@ -75,10 +78,12 @@ public:
     auto child_id(Index) const -> PID;
 
     // Public header fields.
+    [[nodiscard]] auto header_crc() const -> Index;
     [[nodiscard]] auto parent_id() const -> PID;
     [[nodiscard]] auto right_sibling_id() const -> PID;
     [[nodiscard]] auto rightmost_child_id() const -> PID;
     [[nodiscard]] auto cell_count() const -> Size;
+    auto update_header_crc() -> void;
     auto set_parent_id(PID) -> void;
     auto set_right_sibling_id(PID) -> void;
     auto set_rightmost_child_id(PID) -> void;

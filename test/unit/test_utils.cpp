@@ -1,13 +1,14 @@
 #include <gtest/gtest.h>
 
+#include "bytes.h"
 #include "common.h"
 #include "random.h"
+#include "unit.h"
 #include "utils/assert.h"
 #include "utils/encoding.h"
+#include "utils/identifier.h"
 #include "utils/scratch.h"
-#include "bytes.h"
 #include "utils/utils.h"
-#include "unit.h"
 
 namespace {
 
@@ -139,6 +140,14 @@ TEST(UtilsTest, ZeroIsNotAPowerOfTwo)
     ASSERT_FALSE(is_power_of_two(0));
 }
 
+TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
+{
+    ASSERT_TRUE(is_power_of_two(1 << 1));
+    ASSERT_TRUE(is_power_of_two(1 << 2));
+    ASSERT_TRUE(is_power_of_two(1 << 10));
+    ASSERT_TRUE(is_power_of_two(1 << 20));
+}
+
 TEST(ScratchTest, ScratchesAreUnique)
 {
     ScratchManager manager {1};
@@ -151,6 +160,78 @@ TEST(ScratchTest, ScratchesAreUnique)
     ASSERT_EQ(s1.data()[0], 1);
     ASSERT_EQ(s2.data()[0], 2);
     ASSERT_EQ(s3.data()[0], 3);
+}
+
+template<class Id> auto run_comparisons()
+{
+    Id a {1};
+    Id b {2};
+
+    ASSERT_EQ(a, a);
+    CUB_EXPECT_EQ(a, a);
+    CUB_EXPECT_TRUE(a == a);
+
+    ASSERT_NE(a, b);
+    CUB_EXPECT_NE(a, b);
+    CUB_EXPECT_TRUE(a != b);
+
+    ASSERT_LT(a, b);
+    CUB_EXPECT_LT(a, b);
+    CUB_EXPECT_TRUE(a < b);
+
+    ASSERT_LE(a, a);
+    ASSERT_LE(a, b);
+    CUB_EXPECT_LE(a, a);
+    CUB_EXPECT_LE(a, b);
+    CUB_EXPECT_TRUE(a <= a);
+    CUB_EXPECT_TRUE(a <= b);
+
+    ASSERT_GT(b, a);
+    CUB_EXPECT_GT(b, a);
+    CUB_EXPECT_TRUE(b > a);
+
+    ASSERT_GE(a, a);
+    ASSERT_GE(b, a);
+    CUB_EXPECT_GE(a, a);
+    CUB_EXPECT_GE(b, a);
+    CUB_EXPECT_TRUE(a >= a);
+    CUB_EXPECT_TRUE(b >= a);
+}
+
+TEST(IdentifierTest, PIDsAreComparable)
+{
+    run_comparisons<PID>();
+}
+
+TEST(IdentifierTest, LSNsAreComparable)
+{
+    run_comparisons<LSN>();
+}
+
+template<class Id> auto run_addition()
+{
+    const auto res = Id {1} + Id {2};
+    ASSERT_EQ(res.value, 3);
+}
+
+TEST(IdentifierTest, PIDsCanBeAdded)
+{
+    run_comparisons<PID>();
+}
+
+TEST(IdentifierTest, LSNsCanBeAdded)
+{
+    run_comparisons<LSN>();
+}
+
+TEST(IdentifierTest, LSNsCanBeIncremented)
+{
+    LSN lsn {0};
+    ASSERT_EQ(lsn.value, 0);
+    lsn++;
+    ASSERT_EQ(lsn.value, 1);
+    ++lsn;
+    ASSERT_EQ(lsn.value, 2);
 }
 
 } // <anonymous>

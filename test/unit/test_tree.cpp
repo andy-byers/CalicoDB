@@ -222,12 +222,12 @@ public:
 
     auto tree() -> TestTree&
     {
-        return dynamic_cast<TestTree&>(*m_tree.get());
+        return dynamic_cast<TestTree&>(*m_tree);
     }
 
     auto tree() const -> const TestTree&
     {
-        return dynamic_cast<const TestTree&>(*m_tree.get());
+        return dynamic_cast<const TestTree&>(*m_tree);
     }
 
     auto validate() -> void
@@ -268,21 +268,8 @@ TEST_F(TreeTests, InsertNonOverflowingRecord)
 
 TEST_F(TreeTests, InsertOverflowingRecord)
 {
-    tree_insert(tree(), "a", m_random.next_string(max_local(m_page_size)));
+    m_tree->insert(_b("a"), _b(m_random.next_string(max_local(m_page_size))));
     ASSERT_EQ(m_pool->page_count(), 2);
-}
-
-TEST_F(TreeTests, NodesFitAtLeastFourRecords)
-{
-    // The root node has the smallest amount of available space due to the file header.
-    // The other nodes should be able to fit at least 4 nodes as well.
-    tree_insert(tree(), "a", m_random.next_string(max_local(m_page_size) - 1));
-    tree_insert(tree(), "b", m_random.next_string(max_local(m_page_size) - 1));
-    tree_insert(tree(), "c", m_random.next_string(max_local(m_page_size) - 1));
-    tree_insert(tree(), "d", m_random.next_string(max_local(m_page_size) - 1));
-    ASSERT_EQ(m_pool->page_count(), 1);
-    tree_insert(tree(), "e", m_random.next_string(max_local(m_page_size) - 1));
-    ASSERT_EQ(m_pool->page_count(), 3);
 }
 
 TEST_F(TreeTests, RemoveRecord)
@@ -334,18 +321,19 @@ TEST_F(TreeTests, OverflowChains)
 
 auto external_root_overflow_test(TestTree &tree, Index excluded) -> void
 {
+    // TODO: This test is pretty fragile. I just had to fuss with the value size below after changing the node and file header sizes.
     ASSERT_LT(excluded, 5L);
-    auto builder = TreeBuilder{tree};
-    const auto keys = std::vector<Index>{10, 20, 30, 40, 50};
+    TreeBuilder builder {tree};
+    const std::vector<Index> keys {10, 20, 30, 40, 50};
     const auto id = PID::root();
 
     for (Index i{}; i < keys.size(); ++i) {
         if (i != excluded)
-            builder.node_insert(id, make_key(keys[i]));
+            builder.node_insert(id, make_key(keys[i]), max_local(tree.page_size()) / 3 * 2);
     }
     // Cause the overflow.
     const auto key = make_key(keys[excluded]);
-    auto value = std::string{"Hello"};
+    std::string value {"value"};
     value.resize(max_local(tree.page_size()) - key.size());
     tree_insert(tree, key, value);
 
@@ -480,7 +468,7 @@ TEST_F(TreeTests, InternalRootOverflowD)
 
 TEST_F(TreeTests, SequentialInserts)
 {
-    TreeBuilder builder{tree()};
+    TreeBuilder builder {tree()};
     for (Index i{}; i < 500; ++i)
         builder.tree_insert(make_key(i));
     validate();

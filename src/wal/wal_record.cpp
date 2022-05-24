@@ -88,6 +88,16 @@ auto WALPayload::decode() const -> PageUpdate
     return update;
 }
 
+auto WALRecord::commit(LSN commit_lsn) -> WALRecord
+{
+    return WALRecord{{
+        {},
+        PID::null(),
+        LSN::null(),
+        commit_lsn,
+    }};
+}
+
 WALRecord::WALRecord(const Parameters &param)
     : m_payload{param}
     , m_lsn{param.lsn}

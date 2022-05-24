@@ -43,12 +43,11 @@ private:
     BytesView m_local_value;
     PID m_left_child_id;
     PID m_overflow_id;
-    Size m_value_size{};
+    Size m_value_size {};
 };
 
 inline auto min_local(Size page_size)
 {
-    CUB_EXPECT_GT(page_size, 0);
     CUB_EXPECT_TRUE(is_power_of_two(page_size));
     return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 32 / 255 -
            Cell::MAX_HEADER_SIZE - CELL_POINTER_SIZE;
@@ -56,7 +55,6 @@ inline auto min_local(Size page_size)
 
 inline auto max_local(Size page_size)
 {
-    CUB_EXPECT_GT(page_size, 0);
     CUB_EXPECT_TRUE(is_power_of_two(page_size));
     return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 64 / 255 -
            Cell::MAX_HEADER_SIZE - CELL_POINTER_SIZE;

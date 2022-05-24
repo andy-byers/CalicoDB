@@ -26,6 +26,8 @@ set(
 
     page/cell.cpp
     page/cell.h
+    page/file_header.cpp
+    page/file_header.h
     page/link.cpp
     page/link.h
     page/node.cpp
@@ -48,10 +50,10 @@ set(
     utils/assert.h
     utils/crc.h
     utils/encoding.h
+    utils/identifier.h
     utils/layout.h
     utils/scratch.cpp
     utils/scratch.h
-    utils/types.cpp
     utils/types.h
 
     wal/interface.h

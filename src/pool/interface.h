@@ -4,6 +4,7 @@
 #include "common.h"
 #include "bytes.h"
 #include "utils/types.h"
+#include "utils/utils.h"
 
 namespace cub {
 
@@ -23,6 +24,7 @@ public:
     [[nodiscard]] virtual auto flushed_lsn() const -> LSN = 0;
     [[nodiscard]] virtual auto allocate(PageType) -> Page = 0;
     [[nodiscard]] virtual auto acquire(PID, bool) -> Page = 0;
+    [[nodiscard]] virtual auto can_commit() const -> bool = 0;
     virtual auto commit() -> void = 0;
     virtual auto abort() -> void = 0;
     virtual auto flush() -> void = 0;

@@ -70,6 +70,7 @@ public:
 
     using Parameters = WALPayload::Parameters;
 
+    static auto commit(LSN) -> WALRecord;
     WALRecord() = default;
     explicit WALRecord(const Parameters&);
     ~WALRecord() = default;

@@ -48,13 +48,6 @@ private:
     auto find_local_min() -> void;
     auto find_local_max() -> void;
     auto move_cursor(PID) -> void;
-    auto take() -> Node
-    {
-        CUB_EXPECT_TRUE(has_node());
-        auto node = std::move(*m_node);
-        m_node.reset();
-        return node;
-    }
 
     Unique<ITree*> m_source;        ///< Tree that the cursor belongs to
     std::vector<Index> m_traversal; ///< Cell IDs encountered on the current traversal

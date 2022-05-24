@@ -12,25 +12,38 @@ public:
     ~Link() = default;
 
 
-    auto id() const -> PID
+    [[nodiscard]] auto id() const -> PID
     {
         return m_page.id();
     }
 
-    auto size() const -> Size
+    [[nodiscard]] auto size() const -> Size
     {
         return m_page.size();
+    }
+
+
+    [[nodiscard]] auto page() const -> const Page&
+    {
+        return m_page;
+    }
+
+    auto page() -> Page&
+    {
+        return m_page;
+    }
+
+    auto take() -> Page
+    {
+        return std::move(m_page);
     }
 
     [[nodiscard]] auto next_id() const -> PID;
     auto set_next_id(PID) -> void;
 
+    [[nodiscard]] auto content_size() const -> Size;
     [[nodiscard]] auto ref_content() const -> BytesView;
-    auto mut_content() -> Bytes;
-
-    auto take() -> Page {return std::move(m_page);}
-    auto page() const -> const Page& {return m_page;}
-    auto page() -> Page& {return m_page;}
+    auto mut_content(Size) -> Bytes;
 
     Link(Link&&) = default;
     auto operator=(Link&&) -> Link& = default;

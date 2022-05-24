@@ -2,6 +2,7 @@
 #include "exception.h"
 #include "tree.h"
 #include "page/cell.h"
+#include "page/file_header.h"
 #include "page/link.h"
 #include "page/node.h"
 #include "page/page.h"
@@ -355,13 +356,12 @@ auto Tree::allocate_overflow_chain(BytesView overflow) -> PID
             : m_pool->allocate(PageType::OVERFLOW_LINK);
         page.set_type(PageType::OVERFLOW_LINK);
         Link link {std::move(page)};
-        auto content = link.mut_content();
-        const auto chunk = std::min(overflow.size(), content.size());
-        mem_copy(content, overflow.range(0, chunk), chunk);
-        overflow.advance(chunk);
+        auto content = link.mut_content(std::min(overflow.size(), link.content_size()));
+        mem_copy(content, overflow, content.size());
+        overflow.advance(content.size());
 
         if (prev) {
-            prev->set_next_id(PID{uint32_t(link.id().value)});
+            prev->set_next_id(link.id());
             prev.reset();
         } else {
             head = link.id();

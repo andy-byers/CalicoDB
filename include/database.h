@@ -7,10 +7,6 @@
 
 namespace cub {
 
-class ITree;
-class IBufferPool;
-class Tree;
-class BufferPool;
 class Cursor;
 class Info;
 

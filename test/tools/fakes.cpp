@@ -148,4 +148,59 @@ WALHarness::WALHarness(Size block_size)
 
 WALHarness::~WALHarness() = default;
 
+auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
+{
+    std::string header_backing(page_size, '\x00');
+    FileHeader header {_b(header_backing)};
+    FaultyDatabase db;
+
+    header.set_page_size(page_size);
+    header.set_block_size(page_size);
+
+    auto tree_file = std::make_unique<FaultyReadWriteMemory>();
+    db.tree_backing = tree_file->memory();
+    auto wal_reader_file = std::make_unique<FaultyReadOnlyMemory>();
+    db.wal_backing = wal_reader_file->memory();
+    auto wal_writer_file = std::make_unique<FaultyLogMemory>(db.wal_backing);
+
+    db.tree_faults = tree_file->controls();
+    db.wal_reader_faults = wal_reader_file->controls();
+    db.wal_writer_faults = wal_writer_file->controls();
+    db.db = std::make_unique<Database::Impl>(Database::Impl::Parameters{
+        std::move(tree_file),
+        std::move(wal_reader_file),
+        std::move(wal_writer_file),
+        header,
+        DEFAULT_FRAME_COUNT,
+    });
+    db.page_size = page_size;
+    return db;
+}
+
+auto FaultyDatabase::clone() -> FaultyDatabase
+{
+    auto root_page = _b(tree_backing.memory()).truncate(page_size);
+    FileHeader header {root_page};
+    FaultyDatabase new_db;
+
+    auto tree_file = std::make_unique<FaultyReadWriteMemory>(tree_backing);
+    auto wal_reader_file = std::make_unique<FaultyReadOnlyMemory>(wal_backing);
+    auto wal_writer_file = std::make_unique<FaultyLogMemory>(wal_backing);
+    new_db.tree_backing = tree_backing;
+    new_db.wal_backing = wal_backing;
+    new_db.tree_faults = tree_file->controls();
+    new_db.wal_reader_faults = wal_reader_file->controls();
+    new_db.wal_writer_faults = wal_writer_file->controls();
+    new_db.db = std::make_unique<Database::Impl>(Database::Impl::Parameters{
+        std::move(tree_file),
+        std::move(wal_reader_file),
+        std::move(wal_writer_file),
+        header,
+        DEFAULT_FRAME_COUNT,
+    });
+    new_db.page_size = page_size;
+    return new_db;
+}
+
 } // db
+

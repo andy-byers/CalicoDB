@@ -101,7 +101,6 @@ namespace {
     inline auto compute_lvs(Size key_size, Size value_size, Size page_size) -> Size
     {
         CUB_EXPECT_GT(key_size, 0);
-        CUB_EXPECT_GT(page_size, 0);
         CUB_EXPECT_TRUE(is_power_of_two(page_size));
 
         /* Cases:

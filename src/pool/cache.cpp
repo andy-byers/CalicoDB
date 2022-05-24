@@ -1,7 +1,5 @@
-
 #include "frame.h"
 #include "cache.h"
-#include "utils/utils.h"
 
 namespace cub {
 
@@ -38,7 +36,7 @@ auto PageCache::put(Frame frame) -> void
 auto PageCache::evict(LSN flushed_lsn) -> std::optional<Frame>
 {
     const auto can_evict = [flushed_lsn](const Frame &frame) {
-        return !frame.is_dirty() || frame.page_lsn().value <= flushed_lsn.value;
+        return !frame.is_dirty() || frame.page_lsn() <= flushed_lsn;
     };
     for (auto itr = m_list.begin(); itr != m_list.end(); ++itr) {
         if (auto &frame = *itr; can_evict(frame)) {

@@ -4,13 +4,9 @@
 #include "exception.h"
 #include "cursor.h"
 #include "file/file.h"
-#include "page/node.h"
-#include "page/page.h"
+#include "page/file_header.h"
 #include "pool/buffer_pool.h"
-#include "pool/frame.h"
-#include "pool/interface.h"
 #include "cursor_impl.h"
-#include "tree/interface.h"
 #include "tree/tree.h"
 #include "utils/layout.h"
 #include "utils/utils.h"
@@ -19,7 +15,12 @@
 
 namespace cub {
 
-Database::Impl::~Impl() = default;
+Database::Impl::~Impl()
+{
+    // TODO: We could try to abort if the commit() fails. For now we leave any recovery to the next startup.
+    if (m_pool->can_commit())
+        try {commit();} catch (...) {}
+}
 
 Database::Impl::Impl(Parameters param)
 {
@@ -56,17 +57,22 @@ Database::Impl::Impl(Parameters param)
     } else {
         auto root = m_tree->allocate_node(PageType::EXTERNAL_NODE);
         FileHeader header {root};
-        header.set_magic_code();
-        header.set_page_count(m_pool->page_count());
+        header.update_magic_code();
         header.set_page_size(param.file_header.page_size());
         header.set_block_size(param.file_header.block_size());
-        root.reset();
-        m_pool->commit();
+        root.take();
+        commit();
     }
 }
 
 auto Database::Impl::commit() -> void
 {
+    auto root = m_tree->find_root(true);
+    FileHeader header {root};
+    m_pool->save_header(header);
+    m_tree->save_header(header);
+    header.update_header_crc();
+    root.reset();
     m_pool->commit();
 }
 
@@ -112,18 +118,32 @@ auto Database::open(const std::string &path, const Options &options) -> Database
 
     try {
         ReadOnlyFile file {path, {}, options.permissions};
+
+        if (file.size() < FileLayout::HEADER_SIZE)
+            throw CorruptionError {"Database is too small to read the file header"};
+
         read_exact(file, _b(backing));
+
+        if (!header.is_magic_code_consistent())
+            throw InvalidArgumentError {"Path does not point to a Cub DB database file"};
+
+        // TODO: Check for a WAL and try to recover. Put this whole method in another method and catch CorruptionErrors?
+        if (!header.is_header_crc_consistent())
+            throw CorruptionError {"Database has a corrupted file header"};
+
+        if (file.size() < header.page_size())
+            throw CorruptionError {"Database size is invalid"};
 
     } catch (const SystemError &error) {
         if (error.code() != std::errc::no_such_file_or_directory)
             throw;
 
-        header.set_magic_code();
+        header.update_magic_code();
         header.set_page_size(options.page_size);
         header.set_block_size(options.block_size);
     }
 
-    const auto mode =  Mode::CREATE | Mode::DIRECT | Mode::SYNCHRONOUS;
+    const auto mode = Mode::CREATE | Mode::DIRECT | Mode::SYNCHRONOUS;
     auto database_file = std::make_unique<ReadWriteFile>(path, mode, options.permissions);
     auto wal_reader_file = std::make_unique<ReadOnlyFile>(compose_wal_path(path), mode, options.permissions);
     auto wal_writer_file = std::make_unique<LogFile>(compose_wal_path(path), mode, options.permissions);

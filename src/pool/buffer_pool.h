@@ -1,8 +1,9 @@
-#ifndef CUB_POOL_PERSISTENT_POOL_H
-#define CUB_POOL_PERSISTENT_POOL_H
+#ifndef CUB_POOL_BUFFER_POOL_H
+#define CUB_POOL_BUFFER_POOL_H
 
-#include <mutex>
 #include <list>
+#include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "common.h"
@@ -42,6 +43,7 @@ public:
     [[nodiscard]] auto hit_ratio() const -> double override;
     [[nodiscard]] auto allocate(PageType) -> Page override;
     [[nodiscard]] auto acquire(PID, bool) -> Page override;
+    [[nodiscard]] auto can_commit() const -> bool override;
     auto flush() -> void override;
     auto commit() -> void override;
     auto abort() -> void override;
@@ -52,6 +54,7 @@ public:
     auto on_page_error() -> void override;
 
 private:
+    auto propagate_page_error() -> void;
     auto log_update(Page&) -> void;
     auto roll_forward() -> bool;
     auto roll_backward() -> void;
@@ -62,6 +65,7 @@ private:
     std::unordered_map<PID, Frame, PID::Hasher> m_pinned;
     std::unique_ptr<IWALReader> m_wal_reader;
     std::unique_ptr<IWALWriter> m_wal_writer;
+    std::exception_ptr m_error;
     ScratchManager m_scratch;
     PageCache m_cache;
     Pager m_pager;
@@ -71,6 +75,6 @@ private:
     Size m_ref_sum{};
 };
 
-} // db
+} // cub
 
-#endif // CUB_POOL_PERSISTENT_POOL_H
+#endif // CUB_POOL_BUFFER_POOL_H

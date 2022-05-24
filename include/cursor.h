@@ -9,7 +9,6 @@
 
 namespace cub {
 
-class ITree;
 struct PID;
 
 class Cursor {

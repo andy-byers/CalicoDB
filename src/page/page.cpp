@@ -1,5 +1,6 @@
 #include "page.h"
 #include "pool/interface.h"
+#include "utils/encoding.h"
 #include "utils/layout.h"
 
 namespace cub {
@@ -182,6 +183,11 @@ auto Page::redo_changes(LSN next_lsn, const std::vector<ChangedRegion> &changes)
 
 auto Page::do_change(Index offset, Size size) -> void
 {
+    if(size>10000){
+
+    }
+
+
     CUB_EXPECT_TRUE(m_is_writable);
     CUB_EXPECT_GT(size, 0);
     CUB_EXPECT_LE(offset + size, Page::size());

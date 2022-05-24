@@ -3,9 +3,8 @@
 
 #include <list>
 #include <unordered_map>
-
 #include "common.h"
-#include "utils/layout.h"
+#include "utils/identifier.h"
 
 namespace cub {
 

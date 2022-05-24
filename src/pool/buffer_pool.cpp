@@ -2,6 +2,7 @@
 #include "buffer_pool.h"
 #include "common.h"
 #include "exception.h"
+#include "page/file_header.h"
 #include "page/page.h"
 #include "file/interface.h"
 #include "wal/interface.h"
@@ -15,8 +16,13 @@ BufferPool::BufferPool(Parameters param)
     , m_scratch {param.page_size}
     , m_pager {{std::move(param.database_storage), param.page_size, param.frame_count}}
     , m_flushed_lsn {param.flushed_lsn}
-    , m_next_lsn {LSN{param.flushed_lsn.value + 1}}
+    , m_next_lsn {param.flushed_lsn + LSN {1}}
     , m_page_count {param.page_count} {}
+
+auto BufferPool::can_commit() const -> bool
+{
+    return m_wal_writer->has_committed() || m_wal_writer->has_pending();
+}
 
 auto BufferPool::page_count() const -> Size
 {
@@ -49,7 +55,6 @@ auto BufferPool::allocate(PageType type) -> Page
     auto page = acquire(PID {ROOT_ID_VALUE + m_page_count}, true);
     page.set_type(type);
     m_page_count++;
-
     return page;
 }
 
@@ -67,6 +72,9 @@ auto BufferPool::fetch_page(PID id, bool is_writable) -> Page
     CUB_EXPECT_FALSE(id.is_null());
     std::lock_guard lock {m_mutex};
 
+    // Propagate exceptions from the Page destructor (likely I/O errors from the WALWriter).
+    propagate_page_error();
+
     const auto try_fetch = [id, is_writable, this]() -> std::optional<Page> {
         if (auto itr = m_pinned.find(id); itr != m_pinned.end()) {
             auto page = itr->second.borrow(this, is_writable);
@@ -77,12 +85,18 @@ auto BufferPool::fetch_page(PID id, bool is_writable) -> Page
     };
     
     // Frame is already pinned.
-    if (auto page{try_fetch()})
+    if (auto page = try_fetch())
         return std::move(*page);
 
     // Get page from cache or disk.
     m_pinned.emplace(id, fetch_frame(id));
     return *try_fetch();
+}
+
+auto BufferPool::propagate_page_error() -> void
+{
+    if (m_error)
+        std::rethrow_exception(std::exchange(m_error, {}));
 }
 
 auto BufferPool::log_update(Page &page) -> void
@@ -104,13 +118,13 @@ auto BufferPool::log_update(Page &page) -> void
 
 auto BufferPool::fetch_frame(PID id) -> Frame
 {
-    if (auto frame{m_cache.extract(id)})
+    if (auto frame = m_cache.extract(id))
         return std::move(*frame);
 
-    if (auto frame{m_pager.pin(id)})
+    if (auto frame = m_pager.pin(id))
         return std::move(*frame);
 
-    if (auto frame{m_cache.evict(m_flushed_lsn)}) {
+    if (auto frame = m_cache.evict(m_flushed_lsn)) {
         m_pager.unpin(std::move(*frame));
         frame = m_pager.pin(id);
         return std::move(*frame);
@@ -124,7 +138,8 @@ auto BufferPool::fetch_frame(PID id) -> Frame
 
 auto BufferPool::on_page_release(Page &page) -> void
 {
-    std::lock_guard lock {m_mutex}; // TODO: We can definitely reduce the size of most of these critical sections. Work on that!
+    // TODO: We can definitely reduce the size of most of these critical sections. Work on that!
+    std::lock_guard lock {m_mutex};
     CUB_EXPECT_GT(m_ref_sum, 0);
 
     auto itr = m_pinned.find(page.id());
@@ -145,8 +160,8 @@ auto BufferPool::on_page_release(Page &page) -> void
 
 auto BufferPool::on_page_error() -> void
 {
-//    m_has_fault = true;
-//    m_fault = errno;
+    // This method should only be called from Page::~Page().
+    m_error = std::current_exception();
 }
 
 auto BufferPool::roll_forward() -> bool
@@ -166,12 +181,12 @@ auto BufferPool::roll_forward() -> bool
         const auto update = record.payload().decode();
         auto page = fetch_page(update.page_id, true);
 
-        if (page.lsn().value < record.lsn().value)
+        if (page.lsn() < record.lsn())
             page.redo_changes(record.lsn(), update.changes);
 
     } while (m_wal_reader->increment());
 
-    if (m_flushed_lsn.value < m_wal_reader->record()->lsn().value)
+    if (m_flushed_lsn < m_wal_reader->record()->lsn())
         m_flushed_lsn = m_wal_reader->record()->lsn();
 
     return found_commit;
@@ -191,7 +206,7 @@ auto BufferPool::roll_backward() -> void
         const auto update = record.payload().decode();
         auto page = fetch_page(update.page_id, true);
 
-        if (page.lsn().value >= record.lsn().value)
+        if (page.lsn() >= record.lsn())
             page.undo_changes(update.previous_lsn, update.changes);
 
     } while (m_wal_reader->decrement());
@@ -199,14 +214,8 @@ auto BufferPool::roll_backward() -> void
 
 auto BufferPool::commit() -> void
 {
-    // Write the commit record.
-    m_wal_writer->write(WALRecord {{
-        {},
-        PID::null(),
-        LSN::null(),
-        m_next_lsn,
-    }});
-    m_next_lsn.value++;
+    m_wal_writer->write(WALRecord::commit(m_next_lsn));
+    m_next_lsn++;
 
     m_flushed_lsn = m_wal_writer->flush();
     flush();
@@ -244,7 +253,7 @@ auto BufferPool::recover() -> void
 auto BufferPool::flush() -> void
 {
     while (!m_cache.is_empty()) {
-        if (auto frame{m_cache.evict(m_flushed_lsn)}) {
+        if (auto frame = m_cache.evict(m_flushed_lsn)) {
             m_pager.unpin(std::move(*frame));
         } else {
             break;
@@ -254,7 +263,7 @@ auto BufferPool::flush() -> void
 
 auto BufferPool::purge() -> void
 {
-    const auto max_lsn = LSN {std::numeric_limits<uint32_t>::max()};
+    const LSN max_lsn {std::numeric_limits<uint32_t>::max()};
     CUB_EXPECT_EQ(m_ref_sum, 0);
 
     while (!m_cache.is_empty()) {
@@ -270,6 +279,5 @@ auto BufferPool::save_header(FileHeader &header) -> void
     header.set_flushed_lsn(m_flushed_lsn);
     header.set_page_count(m_page_count);
 }
-
 
 } // Cub
