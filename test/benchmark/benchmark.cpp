@@ -24,13 +24,13 @@ auto run_benchmark(Database db, Size n)
     using namespace std::chrono;
     const auto t0 = system_clock::now();
     for (const auto &[key, value]: records) {
-        printf("insert size = %zu\n", key.size()+value.size()+Cell::MAX_HEADER_SIZE+CELL_POINTER_SIZE);
+//        printf("insert size = %zu\n", key.size()+value.size()+Cell::MAX_HEADER_SIZE+CELL_POINTER_SIZE);
         db.insert(_b(key), _b(value));
     }
     db.commit();
     const auto t1 = system_clock::now();
     const std::chrono::duration<double> dt = t1 - t0;
-    printf("%lf", /*static_cast<double>(n) /*/ dt.count());
+    printf("%lf", static_cast<double>(n) / dt.count());
 }
 
 } // <anonymous>

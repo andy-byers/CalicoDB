@@ -1,8 +1,10 @@
 #ifndef CUB_PAGE_PAGE_H
 #define CUB_PAGE_PAGE_H
 
+#include <optional>
 #include <vector>
 #include "common.h"
+#include "update.h"
 #include "utils/layout.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
@@ -16,19 +18,6 @@ inline auto is_page_type_valid(PageType type) -> bool
            type == PageType::OVERFLOW_LINK ||
            type == PageType::FREELIST_LINK;
 }
-
-struct ChangedRegion {
-    Index offset {};  ///< Offset of the region from the start of the page
-    BytesView before; ///< Contents of the region pre-update
-    BytesView after;  ///< Contents of the region post-update
-};
-
-struct PageUpdate {
-    std::vector<ChangedRegion> changes;
-    PID page_id {NULL_ID_VALUE};
-    LSN previous_lsn {};
-    LSN lsn {};
-};
 
 class IBufferPool;
 
@@ -87,8 +76,7 @@ private:
     auto do_change(Index, Size) -> void;
 
     Unique<IBufferPool *> m_pool;
-    std::optional<Scratch> m_snapshot;
-    std::vector<ChangedRegion> m_changes;
+    std::optional<UpdateManager> m_updates;
     Bytes m_data;
     PID m_id;
     bool m_is_writable{};

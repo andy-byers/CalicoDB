@@ -29,6 +29,12 @@ auto Scratch::size() const -> Size
     return m_internal.value.data.size();
 }
 
+auto Scratch::data() const -> BytesView
+{
+    CUB_EXPECT_NOT_NULL(m_internal.value.source);
+    return m_internal.value.data;
+}
+
 auto Scratch::data() -> Bytes
 {
     CUB_EXPECT_NOT_NULL(m_internal.value.source);

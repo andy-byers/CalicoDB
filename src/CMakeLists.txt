@@ -34,6 +34,8 @@ set(
     page/node.h
     page/page.cpp
     page/page.h
+    page/update.cpp
+    page/update.h
 
     file/file.cpp
     file/file.h

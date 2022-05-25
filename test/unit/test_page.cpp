@@ -8,13 +8,108 @@
 #include "page/file_header.h"
 #include "page/node.h"
 #include "page/page.h"
+#include "page/update.h"
 #include "utils/assert.h"
 #include "utils/scratch.h"
-
 
 namespace {
 
 using namespace cub;
+using Range = UpdateManager::Range;
+
+[[maybe_unused]] auto show_ranges(const std::vector<Range> &ranges)
+{
+    static constexpr Size step = 3;
+    std::vector<std::string> display;
+    Index max_index {};
+    for (const auto &[x, dx]: ranges)
+        max_index = std::max(max_index, x + dx);
+
+    for (const auto &[x, dx]: ranges) {
+        std::string line;
+        const auto y = x + dx;
+        for (Index i {}; i <= max_index; ++i) {
+            if (i >= x && i < y) {
+                line += std::string(step, '=');
+            } else if (i == y) {
+                line += '=' + std::string(step - 1, ' ');
+            } else {
+                line += '.' + std::string(step - 1, ' ');
+            }
+        }
+        display.emplace_back(line);
+    }
+
+    std::ostringstream oss;
+    for (Index i {}; i <= max_index; ++i)
+        oss << std::left << std::setw(3) << i;
+    oss << '\n';
+
+    auto output = oss.str();
+    for (const auto &line: display)
+        output += line + '\n';
+    return output;
+}
+
+TEST(UpdateTests, BasicAssertions)
+{
+    test::update_basic_assertions();
+}
+
+class UpdateManagerTests: public testing::Test {
+private:
+    ScratchManager m_scratch {page_size};
+
+public:
+    static constexpr Size page_size = 0x400;
+
+    UpdateManagerTests()
+        : manager {m_scratch.get()}
+        , scratch {m_scratch.get()}
+        , snapshot {scratch.data()} {}
+
+    UpdateManager manager;
+    Scratch scratch;
+    BytesView snapshot;
+};
+
+TEST_F(UpdateManagerTests, FreshUpdateManagerHasNoChanges)
+{
+    ASSERT_FALSE(manager.has_changes());
+}
+
+TEST_F(UpdateManagerTests, RegistersChange)
+{
+    manager.indicate_change(1, 2);
+    ASSERT_TRUE(manager.has_changes());
+    const auto changes = manager.collect_changes(snapshot);
+    const auto change = changes.at(0);
+    ASSERT_EQ(change.offset, 1);
+    ASSERT_EQ(change.before.size(), 2);
+    ASSERT_EQ(change.after.size(), 2);
+}
+
+TEST_F(UpdateManagerTests, DoesNotMergeDisjointChanges)
+{
+    manager.indicate_change(0, 1);
+    manager.indicate_change(2, 1);
+    manager.indicate_change(4, 1);
+    const auto changes = manager.collect_changes(snapshot);
+    for (const auto [offset, before, after]: changes) {
+        printf("%zu, %zu\n", offset, before.size());
+        CUB_EXPECT_EQ(before.size(), after.size());
+    }
+    ASSERT_EQ(changes.size(), 3);
+}
+
+TEST_F(UpdateManagerTests, MergesIntersectingChanges)
+{
+    manager.indicate_change(0, 1);
+    manager.indicate_change(1, 1);
+    manager.indicate_change(2, 1);
+    const auto changes = manager.collect_changes(snapshot);
+    ASSERT_EQ(changes.size(), 1);
+}
 
 class PageTests: public testing::Test {
 public:

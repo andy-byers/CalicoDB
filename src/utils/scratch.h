@@ -19,6 +19,7 @@ public:
     ~Scratch();
     [[nodiscard]] auto id() const -> Index;
     [[nodiscard]] auto size() const -> Size;
+    [[nodiscard]] auto data() const -> BytesView;
     auto data() -> Bytes;
 
     // TODO: Should be noexcept, along with operator=().
