@@ -9,7 +9,7 @@ namespace cub {
 
 WALReader::WALReader(std::unique_ptr<IReadOnlyFile> file, Size block_size)
     : m_block(block_size, '\x00')
-    , m_file{std::move(file)} {}
+    , m_file {std::move(file)} {}
 
 auto WALReader::reset() -> void
 {

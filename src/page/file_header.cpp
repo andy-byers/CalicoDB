@@ -84,7 +84,8 @@ auto FileHeader::update_magic_code() -> void
 
 auto FileHeader::update_header_crc() -> void
 {
-    put_uint32(m_header.range(FileLayout::HEADER_CRC_OFFSET), crc_32(data()));
+    const auto offset = FileLayout::HEADER_CRC_OFFSET;
+    put_uint32(m_header.range(offset), crc_32(m_header.range(offset + sizeof(uint32_t))));
 }
 
 auto FileHeader::set_page_count(Size page_count) -> void
@@ -140,7 +141,8 @@ auto FileHeader::is_magic_code_consistent() const -> bool
 
 auto FileHeader::is_header_crc_consistent() const -> bool
 {
-    return header_crc() == crc_32(data());
+    const auto offset = FileLayout::HEADER_CRC_OFFSET + sizeof(uint32_t);
+    return header_crc() == crc_32(m_header.range(offset));
 }
 
 } // cub

@@ -29,7 +29,7 @@ function(build_test NAME)
 endfunction()
 
 add_subdirectory(benchmark)
-#add_subdirectory(fuzz)
+add_subdirectory(fuzz)
 add_subdirectory(integration)
 add_subdirectory(unit)
 

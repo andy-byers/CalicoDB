@@ -54,7 +54,7 @@ TEST(DatabaseTest, TestReaders)
         reader.join();
 }
 
-auto collect_records(Database &db)
+template<class Db> auto collect_records(Db &db)
 {
     std::vector<Record> records;
     auto cursor = db.get_cursor();
@@ -83,29 +83,44 @@ TEST(DatabaseTests, DataPersists)
     auto db = Database::open(TEST_PATH, {});
     auto cursor = db.get_cursor();
     for (const auto &[key, value]: records) {
+        ASSERT_TRUE(cursor.find(_b(key)));
         ASSERT_EQ(key, _s(cursor.key()));
         ASSERT_EQ(value, cursor.value());
     }
 }
 
-//TEST(DatabaseTests, TestRecovery)
-//{
-//    FaultyDatabase db;
-//    {
-//        auto faulty = FaultyDatabase::create(0x200);
-//        insert_random_records(*faulty.db, 500);
-//        faulty.db->commit();
-//        faulty.tree_faults.set_read_fault_rate(100);
-//
-//        try {
-//            auto cursor = faulty.db->get_cursor();
-//            while (cursor.increment());
-//            ADD_FAILURE() << "Reading from the database file should have thrown";
-//        } catch (const IOError&) {
-//            faulty.tree_faults.set_read_fault_rate(0);
-//        }
-//        db = faulty.clone();
-//    }
-//}
+TEST(DatabaseTests, TestRecovery)
+{
+    std::vector<Record> records;
+    FaultyDatabase db;
+    {
+        auto faulty = FaultyDatabase::create(0x200);
+        insert_random_records(*faulty.db, 10000);
+        faulty.db->commit();
+
+        // Only these records should be in the database after we recover.
+        records = collect_records(*faulty.db);
+
+        // These records should be lost.
+        insert_random_records(*faulty.db, 10000);
+
+        try {
+            faulty.tree_faults.set_read_fault_rate(100);
+            faulty.tree_faults.set_write_fault_rate(100);
+            faulty.db->commit();
+            ADD_FAILURE() << "commit() should have thrown";
+        } catch (const IOError&) {
+            faulty.tree_faults.set_read_fault_rate(0);
+            faulty.tree_faults.set_write_fault_rate(0);
+        }
+        db = faulty.clone();
+        auto cursor = db.db->get_cursor();
+        for (const auto &[key, value]: records) {
+            ASSERT_TRUE(cursor.find(_b(key)));
+            ASSERT_EQ(_s(cursor.key()), key);
+            ASSERT_EQ(cursor.value(), value);
+        }
+    }
+}
 
 } // <anonymous>

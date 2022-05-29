@@ -174,9 +174,11 @@ auto BufferPool::roll_forward() -> bool
 
     do {
         const auto record = *m_wal_reader->record();
+
         if (record.payload().is_commit()) {
-            found_commit = true;
-            break;
+            CUB_EXPECT_LT(m_flushed_lsn, record.lsn());
+            m_flushed_lsn = record.lsn();
+            return true;
         }
         const auto update = record.payload().decode();
         auto page = fetch_page(update.page_id, true);
@@ -186,10 +188,7 @@ auto BufferPool::roll_forward() -> bool
 
     } while (m_wal_reader->increment());
 
-    if (m_flushed_lsn < m_wal_reader->record()->lsn())
-        m_flushed_lsn = m_wal_reader->record()->lsn();
-
-    return found_commit;
+    return false;
 }
 
 auto BufferPool::roll_backward() -> void
@@ -214,10 +213,9 @@ auto BufferPool::roll_backward() -> void
 
 auto BufferPool::commit() -> void
 {
-    m_wal_writer->write(WALRecord::commit(m_next_lsn));
-    m_next_lsn++;
-
+    m_wal_writer->write(WALRecord::commit(m_next_lsn++));
     m_flushed_lsn = m_wal_writer->flush();
+    CUB_EXPECT_EQ(m_next_lsn, m_flushed_lsn + LSN {1});
     flush();
     m_wal_writer->truncate();
 }
@@ -280,4 +278,4 @@ auto BufferPool::save_header(FileHeader &header) -> void
     header.set_page_count(m_page_count);
 }
 
-} // Cub
+} // cub

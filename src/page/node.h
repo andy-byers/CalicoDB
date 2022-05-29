@@ -8,16 +8,6 @@
 
 namespace cub {
 
-class NodeHeader {
-public:
-    explicit NodeHeader(Page*);
-
-
-private:
-    Page *m_page {};
-    Size m_offset {};
-};
-
 class Node final {
 public:
     struct SearchResult {

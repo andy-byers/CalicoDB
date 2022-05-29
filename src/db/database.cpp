@@ -67,12 +67,14 @@ Database::Impl::Impl(Parameters param)
 
 auto Database::Impl::commit() -> void
 {
-    auto root = m_tree->find_root(true);
-    FileHeader header {root};
-    m_pool->save_header(header);
-    m_tree->save_header(header);
-    header.update_header_crc();
-    root.reset();
+    {
+        auto root = m_tree->find_root(true);
+        FileHeader header {root};
+        m_pool->save_header(header);
+        m_tree->save_header(header);
+        header.update_header_crc();
+    }
+
     m_pool->commit();
 }
 

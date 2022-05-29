@@ -21,6 +21,14 @@ auto run_benchmark(Database db, Size n)
     param.max_value_size = MEAN_VALUE_SIZE + MEAN_VALUE_SIZE/2;
     auto records = RecordGenerator::generate(n, param);
 
+    Index i {};
+    for (auto &r: records){
+        auto x = std::to_string(i);
+        auto d = 16 - x.size();
+        r.key = std::string(d, '0') + x;
+        i++;
+    }
+
     using namespace std::chrono;
     const auto t0 = system_clock::now();
     for (const auto &[key, value]: records) {
