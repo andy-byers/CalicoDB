@@ -131,8 +131,40 @@ public:
     };
 
     static auto generate(Size, Parameters) -> std::vector<Record>;
+    static auto generate_unique(Size) -> std::vector<Record>;
 };
 
-} // db
+template<class Db> auto insert_random_records(Db &db, Size n, RecordGenerator::Parameters param)
+{
+    for (const auto &[key, value]: RecordGenerator::generate(n, param))
+        db.insert(_b(key), _b(value));
+}
+
+template<class Db> auto insert_random_unique_records(Db &db, Size n)
+{
+    for (const auto &[key, value]: RecordGenerator::generate_unique(n))
+        db.insert(_b(key), _b(value));
+}
+
+template<class Db, class F> auto traverse_db(Db &db, F &&f)
+{
+    if (auto cursor = db.get_cursor(); cursor.has_record()) {
+        cursor.find_minimum();
+        do {
+            f(_s(cursor.key()), cursor.value());
+        } while (cursor.increment());
+    }
+}
+
+template<class Db> auto collect_records(Db &db) -> std::vector<Record>
+{
+    std::vector<Record> out;
+    traverse_db(db, [&out](const std::string &key, const std::string &value) {
+        out.emplace_back(Record {key, value});
+    });
+    return out;
+}
+
+} // cub
 
 #endif // CUB_TEST_TOOLS_TOOLS_H

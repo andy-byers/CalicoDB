@@ -37,6 +37,6 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // db
+} // cub
 
 #endif // CUB_CURSOR_H

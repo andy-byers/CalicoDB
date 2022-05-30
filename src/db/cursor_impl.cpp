@@ -6,8 +6,9 @@
 
 namespace cub {
 
-Cursor::Impl::Impl(ITree *source)
-    : m_source {source}
+Cursor::Impl::Impl(ITree *source, std::shared_mutex &mutex)
+    : m_lock {mutex}
+    , m_source {source}
 {
     reset();
 }

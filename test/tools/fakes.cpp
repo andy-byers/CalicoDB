@@ -167,6 +167,7 @@ auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
     db.wal_reader_faults = wal_reader_file->controls();
     db.wal_writer_faults = wal_writer_file->controls();
     db.db = std::make_unique<Database::Impl>(Database::Impl::Parameters{
+        "FaultyDatabase",
         std::move(tree_file),
         std::move(wal_reader_file),
         std::move(wal_writer_file),
@@ -192,6 +193,7 @@ auto FaultyDatabase::clone() -> FaultyDatabase
     new_db.wal_reader_faults = wal_reader_file->controls();
     new_db.wal_writer_faults = wal_writer_file->controls();
     new_db.db = std::make_unique<Database::Impl>(Database::Impl::Parameters{
+        "FaultyDatabase",
         std::move(tree_file),
         std::move(wal_reader_file),
         std::move(wal_writer_file),

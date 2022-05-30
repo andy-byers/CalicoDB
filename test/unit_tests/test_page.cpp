@@ -95,10 +95,6 @@ TEST_F(UpdateManagerTests, DoesNotMergeDisjointChanges)
     manager.indicate_change(2, 1);
     manager.indicate_change(4, 1);
     const auto changes = manager.collect_changes(snapshot);
-    for (const auto [offset, before, after]: changes) {
-        printf("%zu, %zu\n", offset, before.size());
-        CUB_EXPECT_EQ(before.size(), after.size());
-    }
     ASSERT_EQ(changes.size(), 3);
 }
 
@@ -177,9 +173,9 @@ TEST_F(PageTests, UndoChanges)
 {
     auto page = get_page(PID::root());
     auto changes = perform_basic_changes_and_collect(page);
-    ASSERT_EQ(page.lsn(), LSN::null());
-    page.undo_changes(LSN::base(), changes);
-    ASSERT_EQ(page.lsn(), LSN::base()) << "Page LSN should have been updated";
+    page.set_lsn(LSN::base());
+    page.undo_changes(LSN::null(), changes);
+    ASSERT_EQ(page.lsn(), LSN::null()) << "Page LSN should have been updated";
     ASSERT_EQ(page.type(), PageType::NULL_PAGE);
     ASSERT_EQ(page.get_u32(halfway_point), 0);
 }

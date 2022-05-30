@@ -11,14 +11,6 @@
 
 namespace cub {
 
-inline auto is_page_type_valid(PageType type) -> bool
-{
-    return type == PageType::INTERNAL_NODE ||
-           type == PageType::EXTERNAL_NODE ||
-           type == PageType::OVERFLOW_LINK ||
-           type == PageType::FREELIST_LINK;
-}
-
 class IBufferPool;
 
 class Page final {
@@ -75,7 +67,7 @@ private:
     auto do_release() noexcept -> void;
     auto do_change(Index, Size) -> void;
 
-    Unique<IBufferPool *> m_pool;
+    Unique<IBufferPool*> m_pool;
     std::optional<UpdateManager> m_updates;
     Bytes m_data;
     PID m_id;

@@ -63,52 +63,52 @@ auto test_random_reads_and_writes(IReadWriteFile &store) -> void
     ASSERT_EQ(payload_in, payload_out);
 }
 
-class StorageTests: public testing::Test {
+class FileTests: public testing::Test {
 public:
-    const std::string PATH = "/tmp/cub_test_storage";
+    const std::string PATH = "/tmp/cub_test_file";
 
-    StorageTests()
+    FileTests()
         : test_buffer(TEST_STRING.size(), '\x00') {}
 
-    ~StorageTests() override = default;
+    ~FileTests() override = default;
 
     static auto open_ro(const std::string &name, Mode mode) -> std::unique_ptr<IReadOnlyFile>
     {
-        return open_store<ReadOnlyFile>(name, mode);
+        return open_file<ReadOnlyFile>(name, mode);
     }
 
     static auto open_wo(const std::string &name, Mode mode) -> std::unique_ptr<IWriteOnlyFile>
     {
-        return open_store<WriteOnlyFile>(name, mode);
+        return open_file<WriteOnlyFile>(name, mode);
     }
 
     static auto open_rw(const std::string &name, Mode mode) -> std::unique_ptr<IReadWriteFile>
     {
-        return open_store<ReadWriteFile>(name, mode);
+        return open_file<ReadWriteFile>(name, mode);
     }
 
     static auto open_log(const std::string &name, Mode mode) -> std::unique_ptr<ILogFile>
     {
-        return open_store<LogFile>(name, mode);
+        return open_file<LogFile>(name, mode);
     }
 
     std::string test_buffer;
 
 private:
-    template<class S> static auto open_store(const std::string &name, Mode mode) -> std::unique_ptr<S>
+    template<class S> static auto open_file(const std::string &name, Mode mode) -> std::unique_ptr<S>
     {
         return std::make_unique<S>(name, mode, 0666);
     }
 };
 
-TEST_F(StorageTests, ExistsAfterClose)
+TEST_F(FileTests, ExistsAfterClose)
 {
     // File is closed in the destructor.
     open_ro(PATH, Mode::CREATE);
     ASSERT_TRUE(std::filesystem::exists(PATH));
 }
 
-TEST_F(StorageTests, ReadFromFile)
+TEST_F(FileTests, ReadFromFile)
 {
     {
         auto ofs = std::ofstream{PATH};
@@ -119,7 +119,7 @@ TEST_F(StorageTests, ReadFromFile)
     ASSERT_EQ(test_buffer, TEST_STRING);
 }
 
-TEST_F(StorageTests, WriteToFile)
+TEST_F(FileTests, WriteToFile)
 {
     auto file = open_wo(PATH, Mode::CREATE | Mode::TRUNCATE);
     write_string(*file, TEST_STRING);
@@ -129,7 +129,7 @@ TEST_F(StorageTests, WriteToFile)
     ASSERT_EQ(result, TEST_STRING);
 }
 
-TEST_F(StorageTests, ReportsEOFDuringRead)
+TEST_F(FileTests, ReportsEOFDuringRead)
 {
     auto file = open_rw("a", Mode::CREATE | Mode::TRUNCATE);
     write_exact_string(*file, TEST_STRING);
@@ -141,13 +141,13 @@ TEST_F(StorageTests, ReportsEOFDuringRead)
     ASSERT_EQ(test_buffer, TEST_STRING);
 }
 
-TEST_F(StorageTests, RandomReadsAndWrites)
+TEST_F(FileTests, RandomReadsAndWrites)
 {
     auto file = open_rw("a", Mode::CREATE | Mode::TRUNCATE);
     test_random_reads_and_writes(*file);
 }
 
-class MemoryTests: public StorageTests {
+class MemoryTests: public FileTests {
 protected:
     ~MemoryTests() override = default;
 };
@@ -181,7 +181,7 @@ TEST_F(MemoryTests, SharesMemory)
     ASSERT_EQ(test_buffer, TEST_STRING);
 }
 
-class FaultyMemoryTests: public StorageTests {
+class FaultyMemoryTests: public FileTests {
 protected:
     ~FaultyMemoryTests() override = default;
 };

@@ -69,10 +69,10 @@ private:
     ScratchManager m_scratch;
     PageCache m_cache;
     Pager m_pager;
-    LSN m_flushed_lsn{};
-    LSN m_next_lsn{};
-    Size m_page_count{};
-    Size m_ref_sum{};
+    LSN m_flushed_lsn;
+    LSN m_next_lsn;
+    Size m_page_count {};
+    Size m_ref_sum {};
 };
 
 } // cub

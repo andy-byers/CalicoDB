@@ -91,7 +91,6 @@ TEST_F(BufferPoolTests, OldPageGetsReleasedUponMoveInto)
 
     // This should cause page 1 to be released.
     page = m_pool->acquire(PID {2}, true);
-    puts("start now!");
 
     // We should be okay to acquire page 1 again. If it wasn't released, this will fail.
     (void)m_pool->acquire(PID {1}, true);

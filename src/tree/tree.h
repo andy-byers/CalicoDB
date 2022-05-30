@@ -36,7 +36,7 @@ public:
     auto find_local_min(Node) -> Position override;
     auto find_local_max(Node) -> Position override;
     auto save_header(FileHeader&) -> void override;
-    auto lookup(BytesView, std::string&) -> bool override;
+    auto lookup(BytesView, bool) -> std::optional<std::string> override;
     auto insert(BytesView, BytesView) -> void override;
     auto remove(BytesView) -> bool override;
     auto allocate_node(PageType) -> Node override;

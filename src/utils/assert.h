@@ -35,6 +35,6 @@ inline auto handle_expect(bool expectation, const char *repr, const char *file, 
     }
 }
 
-} // db
+} // cub::impl
 
 #endif // CUB_UTILS_ASSERT_H

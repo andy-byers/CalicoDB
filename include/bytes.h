@@ -201,6 +201,6 @@ inline auto mem_move(Bytes dst, BytesView src) noexcept -> void*
     return mem_move(dst, src, src.size());
 }
 
-} // db
+} // cub
 
 #endif // CUB_BYTES_H

@@ -65,12 +65,20 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
     return result;
 }
 
-auto Tree::lookup(BytesView key, std::string &result) -> bool
+auto Tree::lookup(BytesView key, bool exact) -> std::optional<std::string>
 {
-    auto [node, index, found_eq] = find_ge(key, true);
-    if (found_eq)
-        result = collect_value(node, index);
-    return found_eq;
+    auto [node, index, found_eq] = find_ge(key, false);
+
+    // key is greater than any in the tree.
+    if (index >= node.cell_count()) {
+        CUB_EXPECT_EQ(index, node.cell_count());
+        CUB_EXPECT_EQ(node.right_sibling_id(), PID::null());
+        CUB_EXPECT_TRUE(node.is_external());
+        return std::nullopt;
+    }
+    if (exact && !found_eq)
+        return std::nullopt;
+    return collect_value(node, index);
 }
 
 auto Tree::insert(BytesView key, BytesView value) -> void

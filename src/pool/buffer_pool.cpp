@@ -113,7 +113,7 @@ auto BufferPool::log_update(Page &page) -> void
     if (const auto lsn = m_wal_writer->write(WALRecord {param}); !lsn.is_null())
         m_flushed_lsn = lsn;
 
-    m_next_lsn.value++;
+    m_next_lsn++;
 }
 
 auto BufferPool::fetch_frame(PID id) -> Frame
@@ -138,15 +138,15 @@ auto BufferPool::fetch_frame(PID id) -> Frame
 
 auto BufferPool::on_page_release(Page &page) -> void
 {
-    // TODO: We can definitely reduce the size of most of these critical sections. Work on that!
+    // If we have changes, we must be a writer. The shared mutex in Database::Impl should protect us.
+    if (page.has_changes())
+        log_update(page);
+
     std::lock_guard lock {m_mutex};
     CUB_EXPECT_GT(m_ref_sum, 0);
 
     auto itr = m_pinned.find(page.id());
     CUB_EXPECT_NE(itr, m_pinned.end());
-
-    if (page.has_changes())
-        log_update(page);
 
     auto &frame = itr->second;
     frame.synchronize(page);
@@ -166,7 +166,6 @@ auto BufferPool::on_page_error() -> void
 
 auto BufferPool::roll_forward() -> bool
 {
-    auto found_commit = false;
     m_wal_reader->reset();
 
     if (!m_wal_reader->record())
@@ -175,11 +174,14 @@ auto BufferPool::roll_forward() -> bool
     do {
         const auto record = *m_wal_reader->record();
 
-        if (record.payload().is_commit()) {
-            CUB_EXPECT_LT(m_flushed_lsn, record.lsn());
+        if (m_next_lsn < record.lsn()) {
             m_flushed_lsn = record.lsn();
-            return true;
+            m_next_lsn = m_flushed_lsn;
+            m_next_lsn++;
         }
+        if (record.payload().is_commit())
+            return true;
+
         const auto update = record.payload().decode();
         auto page = fetch_page(update.page_id, true);
 
@@ -191,16 +193,44 @@ auto BufferPool::roll_forward() -> bool
     return false;
 }
 
+//auto BufferPool::roll_forward() -> bool
+//{
+//    m_wal_reader->reset();
+//
+//    if (!m_wal_reader->record())
+//        return false;
+//
+//    do {
+//        CUB_EXPECT_NE(m_wal_reader->record(), std::nullopt);
+//
+//        if (const auto record = *m_wal_reader->record(); record.payload().is_commit()) {
+//            CUB_EXPECT_LT(m_flushed_lsn, record.lsn());
+//            m_flushed_lsn = record.lsn();
+//            return true;
+//        } else {
+//            const auto update = record.payload().decode();
+//            auto page = fetch_page(update.page_id, true);
+//
+//            if (page.lsn() < record.lsn())
+//                page.redo_changes(record.lsn(), update.changes);
+//        }
+//    } while (m_wal_reader->increment());
+//
+//    return false;
+//}
+
 auto BufferPool::roll_backward() -> void
 {
+    // Make sure the WAL reader is at the end of the log.
     while (m_wal_reader->increment());
 
     if (!m_wal_reader->record())
         return;
 
+    // Shouldn't be rolling back if there is a commit record.
     CUB_EXPECT_FALSE(m_wal_reader->record()->is_commit());
 
-    do {
+    for (; ; ) {
         const auto record = *m_wal_reader->record();
         const auto update = record.payload().decode();
         auto page = fetch_page(update.page_id, true);
@@ -208,7 +238,12 @@ auto BufferPool::roll_backward() -> void
         if (page.lsn() >= record.lsn())
             page.undo_changes(update.previous_lsn, update.changes);
 
-    } while (m_wal_reader->decrement());
+        if (!m_wal_reader->decrement()) {
+            CUB_EXPECT_GT(m_next_lsn, record.lsn());
+//            m_next_lsn = record.lsn(); TODO: I don't think we should ever really decrement the next LSN.
+            break;
+        }
+    }
 }
 
 auto BufferPool::commit() -> void
@@ -242,6 +277,7 @@ auto BufferPool::recover() -> void
     if (!m_wal_writer->has_committed())
         return;
 
+//    const auto saved = m_next_lsn;
     if (!roll_forward())
         roll_backward();
     flush();

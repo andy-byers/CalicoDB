@@ -99,6 +99,6 @@ public:
     ~InvalidOperationError() override = default;
 };
 
-} // db
+} // cub
 
 #endif // CUB_EXCEPTION_H

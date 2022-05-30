@@ -253,6 +253,8 @@ auto WALRecord::merge(WALRecord rhs) -> void
         m_lsn = rhs.lsn();
         m_crc = rhs.crc();
     } else {
+        if (m_crc != rhs.crc())
+            printf("%zu %zu\n", m_crc, rhs.crc());
         CUB_EXPECT_EQ(m_lsn, rhs.lsn());
         CUB_EXPECT_EQ(m_crc, rhs.crc());
         CUB_EXPECT_EQ(m_type, Type::FIRST);
@@ -263,4 +265,4 @@ auto WALRecord::merge(WALRecord rhs) -> void
     }
 }
 
-} // db
+} // cub

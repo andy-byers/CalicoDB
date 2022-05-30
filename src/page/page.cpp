@@ -147,8 +147,9 @@ auto Page::has_changes() const -> bool
 
 auto Page::collect_changes() -> std::vector<ChangedRegion>
 {
-    CUB_EXPECT_NE(m_updates, std::nullopt);
-    return m_updates->collect_changes(m_data);
+    if (m_updates)
+        return m_updates->collect_changes(m_data);
+    return {};
 }
 
 auto Page::enable_tracking(Scratch scratch) -> void
@@ -160,6 +161,7 @@ auto Page::enable_tracking(Scratch scratch) -> void
 
 auto Page::undo_changes(LSN previous_lsn, const std::vector<ChangedRegion> &changes) -> void
 {
+    CUB_EXPECT_GE(lsn(), previous_lsn);
     for (const auto &region: changes)
         mem_copy(m_data.range(region.offset), region.before, region.before.size());
     set_lsn(previous_lsn);
@@ -167,6 +169,7 @@ auto Page::undo_changes(LSN previous_lsn, const std::vector<ChangedRegion> &chan
 
 auto Page::redo_changes(LSN next_lsn, const std::vector<ChangedRegion> &changes) -> void
 {
+    CUB_EXPECT_LT(lsn(), next_lsn);
     for (const auto &region: changes)
         mem_copy(m_data.range(region.offset), region.after, region.after.size());
     set_lsn(next_lsn);
@@ -184,4 +187,4 @@ auto Page::do_change(Index offset, Size size) -> void
         m_updates->indicate_change(offset, size);
 }
 
-} // db
+} // cub

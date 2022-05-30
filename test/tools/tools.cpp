@@ -236,4 +236,19 @@ auto RecordGenerator::generate(Size n, Parameters param) -> std::vector<Record>
     return records;
 }
 
+auto RecordGenerator::generate_unique(Size n) -> std::vector<Record>
+{
+    std::unordered_set<std::string> keys;
+    std::vector<Record> records(n);
+    Random random {0};
+
+    for (auto &[key, value]: records) {
+        // Virtually impossible for duplicates at this length.
+        key = random_string(random, 12, 20);
+        value = random_string(random, 12, 20);
+        CUB_EXPECT_EQ(keys.find(key), keys.end());
+    }
+    return records;
+}
+
 } // db

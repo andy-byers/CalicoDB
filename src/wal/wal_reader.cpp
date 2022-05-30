@@ -76,7 +76,7 @@ auto WALReader::read_next() -> std::optional<WALRecord>
         }
     }
     if (!record.is_consistent())
-        throw CorruptionError{"Record has an invalid CRC"};
+        throw CorruptionError {"Record has an invalid CRC"};
     return record;
 }
 
@@ -128,7 +128,7 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
         case WALRecord::Type::EMPTY:
             return std::nullopt;
         default:
-            throw CorruptionError{"WAL record type is invalid"};
+            throw CorruptionError {"WAL record type is invalid"};
     }
 }
 
@@ -184,4 +184,4 @@ auto WALReader::read_block() -> bool
     }
 }
 
-} // db
+} // cub

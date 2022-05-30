@@ -35,6 +35,6 @@ public:
     virtual auto on_page_error() -> void = 0;
 };
 
-} // db
+} // cub
 
 #endif // CUB_POOL_INTERFACE_H

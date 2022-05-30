@@ -9,20 +9,10 @@ set(
     ${CUB_INCLUDE_DIR}/database.h
     ${CUB_INCLUDE_DIR}/exception.h
 
-    db/database.cpp
+        db/database_impl.cpp
     db/database_impl.h
-    db/cursor.cpp
+        db/cursor_impl.cpp
     db/cursor_impl.h
-
-    pool/frame.cpp
-    pool/frame.h
-    pool/pager.cpp
-    pool/pager.h
-    pool/cache.cpp
-    pool/cache.h
-    pool/buffer_pool.cpp
-    pool/buffer_pool.h
-    pool/interface.h
 
     page/cell.cpp
     page/cell.h
@@ -36,6 +26,18 @@ set(
     page/page.h
     page/update.cpp
     page/update.h
+
+    pool/frame.cpp
+    pool/frame.h
+    pool/pager.cpp
+    pool/pager.h
+    pool/cache.cpp
+    pool/cache.h
+    pool/buffer_pool.cpp
+    pool/buffer_pool.h
+    pool/in_memory.cpp
+    pool/in_memory.h
+    pool/interface.h
 
     file/file.cpp
     file/file.h

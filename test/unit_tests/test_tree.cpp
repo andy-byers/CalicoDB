@@ -61,8 +61,7 @@ public:
 
     auto tree_contains(const std::string &key) -> bool
     {
-        std::string temp;
-        if (lookup(_b(key), temp)) {
+        if (const auto temp = lookup(_b(key), true)) {
             const auto itr {m_payloads.find(key)};
             EXPECT_NE(itr, m_payloads.end()) << "Key " << key << " hasn't been added to the tree";
             const auto same {temp == itr->second};
@@ -92,7 +91,11 @@ auto tree_insert(TestTree &tree, const std::string &key, const std::string &valu
 
 [[maybe_unused]] auto tree_lookup(TestTree &tree, const std::string &key, std::string &result) -> bool
 {
-    return tree.lookup(_b(key), result);
+    if (const auto temp = tree.lookup(_b(key), true)) {
+        result = *temp;
+        return true;
+    }
+    return false;
 }
 
 [[maybe_unused]] auto tree_remove(TestTree &tree, const std::string &key) -> bool
@@ -521,7 +524,7 @@ TEST_F(TreeTests, LookupPastEnd)
     random_tree(m_random, builder, 100);
     std::string result;
     const auto key = make_key(101);
-    ASSERT_EQ(tree().lookup(_b(key), result), false);
+    ASSERT_EQ(tree().lookup(_b(key), true), std::nullopt);
 }
 
 TEST_F(TreeTests, LookupBeforeBeginning)
@@ -530,7 +533,7 @@ TEST_F(TreeTests, LookupBeforeBeginning)
     random_tree(m_random, builder, 100);
     std::string result;
     const auto key = make_key(0);
-    ASSERT_EQ(tree().lookup(_b(key), result), false);
+    ASSERT_EQ(tree().lookup(_b(key), true), std::nullopt);
 }
 
 TEST_F(TreeTests, InsertSanityCheck)

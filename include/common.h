@@ -41,6 +41,6 @@ struct Options {
     int permissions {DEFAULT_PERMISSIONS};
 };
 
-} // db
+} // cub
 
 #endif // CUB_COMMON_H
