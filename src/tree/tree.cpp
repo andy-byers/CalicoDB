@@ -7,7 +7,7 @@
 #include "page/node.h"
 #include "page/page.h"
 #include "pool/interface.h"
-#include "utils/layout.h" // TODO: Use of the page and node layouts should be restricted to 'lower-level' components and has no place in Tree.
+#include "utils/layout.h"
 #include "bytes.h"
 
 namespace cub {
@@ -65,25 +65,12 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
     return result;
 }
 
-auto Tree::lookup(BytesView key, bool exact) -> std::optional<std::string>
-{
-    auto [node, index, found_eq] = find_ge(key, false);
-
-    // key is greater than any in the tree.
-    if (index >= node.cell_count()) {
-        CUB_EXPECT_EQ(index, node.cell_count());
-        CUB_EXPECT_EQ(node.right_sibling_id(), PID::null());
-        CUB_EXPECT_TRUE(node.is_external());
-        return std::nullopt;
-    }
-    if (exact && !found_eq)
-        return std::nullopt;
-    return collect_value(node, index);
-}
-
 auto Tree::insert(BytesView key, BytesView value) -> void
 {
     auto [node, index, found_eq] = find_ge(key, true);
+
+    if (key.is_empty())
+        throw InvalidArgumentError {"Key cannot be empty"};
 
     if (key.size() > max_local(node.size()))
         throw InvalidArgumentError {"Key exceeds maximum allowed length"};
@@ -94,21 +81,6 @@ auto Tree::insert(BytesView key, BytesView value) -> void
         positioned_insert({std::move(node), index}, key, value);
     }
 }
-
-//  Cursor remove() Procedure
-// ===========================
-//
-//
-// if (has_record())
-//     auto is_external = node.is_external();
-//     <remove the record>
-//     if (is_external)
-//         CUB_EXPECT_LE(index, m_node->cell_count());
-//         if (index == m_node->cell_count())
-//             index -= m_node->cell_count() > 0;
-//             increment();
-//     else
-//         increment();
 
 /**
  * Remove the pointed-to key-value pair.
@@ -165,26 +137,6 @@ auto Tree::positioned_remove(Position position) -> void
 {
     auto [node, index] = std::move(position);
     CUB_EXPECT_LT(index, node.cell_count());
-    do_remove(std::move(node), index);
-}
-
-auto Tree::find_local_min(Node root) -> Position
-{
-    while (!root.is_external())
-        root = acquire_node(root.child_id(0), true);
-    return {std::move(root), 0};
-}
-
-auto Tree::find_local_max(Node root) -> Position
-{
-    while (!root.is_external())
-        root = acquire_node(root.rightmost_child_id(), true);
-    const auto index = root.cell_count() - 1;
-    return {std::move(root), index};
-}
-
-auto Tree::do_remove(Node node, Index index) -> void
-{
     m_cell_count--;
 
     auto cell = node.read_cell(index);
@@ -217,6 +169,21 @@ auto Tree::do_remove(Node node, Index index) -> void
 
     if (node.is_underflowing())
         balance_after_underflow(std::move(node), _b(anchor));
+}
+
+auto Tree::find_local_min(Node root) -> Position
+{
+    while (!root.is_external())
+        root = acquire_node(root.child_id(0), true);
+    return {std::move(root), 0};
+}
+
+auto Tree::find_local_max(Node root) -> Position
+{
+    while (!root.is_external())
+        root = acquire_node(root.rightmost_child_id(), true);
+    const auto index = root.cell_count() - 1;
+    return {std::move(root), index};
 }
 
 auto Tree::allocate_node(PageType type) -> Node
@@ -359,7 +326,7 @@ auto Tree::allocate_overflow_chain(BytesView overflow) -> PID
     auto head = PID::root();
 
     while (!overflow.is_empty()) {
-        auto page = m_free_list.free_count()
+        auto page = !m_free_list.is_empty()
             ? *m_free_list.pop()
             : m_pool->allocate(PageType::OVERFLOW_LINK);
         page.set_type(PageType::OVERFLOW_LINK);
@@ -436,7 +403,7 @@ auto Tree::merge_left(Node &parent, Node &Lc, Node rc, Index index) -> void
         separator.set_left_child_id(Lc.rightmost_child_id()); // (1)
     } else {
         // TODO: NULL-ing out the left child ID causes it to not be written. See cell.h
-        //       for another TODO concerning this weirdness. It's not causing any bugs
+        //       for another TOD0 concerning this weirdness. It's not causing any bugs
         //       that I know of, it's just an awful API that will likely cause bugs if
         //       anything is changed. Should fix.
         separator.set_left_child_id(PID::null());
@@ -758,9 +725,9 @@ auto Tree::do_split_root(Node &root, Node &child) -> void
     child.page().write(root.page().range(offset).truncate(size), offset);
 
     // Copy the header and cell pointers.
-    offset = NodeLayout::header_offset(child.id());
+    offset = child.header_offset();
     size = NodeLayout::HEADER_SIZE + root.cell_count()*CELL_POINTER_SIZE;
-    child.page().write(root.page().range(NodeLayout::header_offset(root.id())).truncate(size), offset);
+    child.page().write(root.page().range(root.header_offset()).truncate(size), offset);
 
     CUB_EXPECT(root.is_overflowing());
     child.set_overflow_cell(root.take_overflow_cell());
@@ -785,7 +752,7 @@ auto Tree::do_merge_root(Node &root, Node child) -> void
     // Copy the header and cell pointers.
     offset = root.header_offset();
     size = NodeLayout::HEADER_SIZE + child.cell_count()*CELL_POINTER_SIZE;
-    root.page().write(child.page().range(NodeLayout::header_offset(child.id())).truncate(size), offset);
+    root.page().write(child.page().range(child.header_offset()).truncate(size), offset);
     root.page().set_type(child.type());
     destroy_node(std::move(child));
 }
@@ -794,22 +761,14 @@ auto Tree::save_header(FileHeader &header) -> void
 {
     header.set_node_count(m_node_count);
     header.set_key_count(m_cell_count);
-    header.set_free_start(m_free_list.free_start());
-    header.set_free_count(m_free_list.free_count());
+    m_free_list.save_header(header);
 }
 
-//auto Tree::get_reader() -> Reader
-//{
-//    Reader reader;
-//    reader.m_impl = std::make_unique<Reader::Impl>(this, PID::root(), m_rw_lock.r_lock());
-//    return reader;
-//}
-//
-//auto Tree::get_writer() -> Writer
-//{
-//    Writer writer;
-//    writer.m_impl = std::make_unique<Writer::Impl>(this, m_rw_lock.w_lock());
-//    return writer;
-//}
+auto Tree::load_header(const FileHeader &header) -> void
+{
+    m_node_count = header.node_count();
+    m_cell_count = header.key_count();
+    m_free_list.load_header(header);
+}
 
-} // Cub
+} // cub

@@ -30,6 +30,6 @@ private:
     Size m_miss_count{};
 };
 
-} // db
+} // cub
 
 #endif // CUB_POOL_PAGE_CACHE_H

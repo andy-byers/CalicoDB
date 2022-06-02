@@ -117,6 +117,6 @@ private:
     Size m_usable_space{};
 };
 
-} // db
+} // cub
 
 #endif // CUB_PAGE_NODE_H

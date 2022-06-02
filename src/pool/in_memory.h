@@ -2,9 +2,9 @@
 #define CUB_POOL_IN_MEMORY_H
 
 #include <mutex>
-#include <stack>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include "common.h"
 #include "interface.h"
 #include "utils/identifier.h"
@@ -14,7 +14,10 @@ namespace cub {
 
 class InMemory: public IBufferPool {
 public:
-    explicit InMemory(Size);
+    explicit InMemory(Size page_size)
+        : m_scratch {page_size}
+        , m_page_size {page_size} {}
+
     virtual ~InMemory() = default;
 
     [[nodiscard]] auto hit_ratio() const -> double override
@@ -24,7 +27,7 @@ public:
 
     [[nodiscard]] auto page_count() const -> Size override
     {
-        return m_data.size() / m_page_size;
+        return m_frames.size();
     }
 
     [[nodiscard]] auto page_size() const -> Size override
@@ -47,20 +50,29 @@ public:
         return !m_stack.empty();
     }
 
-    [[nodiscard]] auto allocate(PageType) -> Page override;
-    [[nodiscard]] auto acquire(PID, bool) -> Page override;
-
-    auto commit() -> void override
+    auto recover() -> bool override
     {
-        while (!m_stack.empty())
-            m_stack.pop();
+        return true;
     }
 
-    auto abort() -> void override {}
-    auto flush() -> void override {}
+    auto try_flush() -> bool override
+    {
+        return true;
+    }
+
+    auto try_flush_wal() -> bool override
+    {
+        return true;
+    }
+
     auto purge() -> void override {}
-    auto recover() -> void override {}
-    auto save_header(FileHeader&) -> void override {}
+
+    [[nodiscard]] auto allocate(PageType) -> Page override;
+    [[nodiscard]] auto acquire(PID, bool) -> Page override;
+    auto commit() -> void override;
+    auto abort() -> void override;
+    auto save_header(FileHeader&) -> void override;
+    auto load_header(const FileHeader&) -> void override;
     auto on_page_release(Page&) -> void override;
     auto on_page_error() -> void override;
 
@@ -74,10 +86,10 @@ private:
     auto propagate_page_error() -> void;
 
     mutable std::mutex m_mutex;
-    std::stack<UndoInfo> m_stack;
+    std::vector<UndoInfo> m_stack;
+    std::vector<Frame> m_frames;
     std::exception_ptr m_error;
     ScratchManager m_scratch;
-    std::string m_data;
     Size m_page_size {};
 };
 

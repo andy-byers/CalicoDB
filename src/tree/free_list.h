@@ -3,10 +3,11 @@
 
 #include <optional>
 #include "common.h"
-#include "utils/layout.h"
+#include "utils/identifier.h"
 
 namespace cub {
 
+class FileHeader;
 class IBufferPool;
 class Page;
 
@@ -20,10 +21,15 @@ public:
 
     explicit FreeList(const Parameters&);
     ~FreeList() = default;
-    [[nodiscard]] auto free_start() const -> PID;
-    [[nodiscard]] auto free_count() const -> Size;
     auto push(Page) -> void;
     auto pop() -> std::optional<Page>;
+    auto save_header(FileHeader&) const -> void;
+    auto load_header(const FileHeader&) -> void;
+
+    [[nodiscard]] auto is_empty() const -> bool
+    {
+        return m_free_count == 0;
+    }
 
 private:
     IBufferPool *m_pool;
@@ -31,6 +37,6 @@ private:
     Size m_free_count{};
 };
 
-} // db
+} // cub
 
 #endif // CUB_TREE_FREELIST_H

@@ -132,6 +132,7 @@ auto Page::put_u32(Index offset, uint32_t value) -> void
 
 auto Page::write(BytesView in, Index offset) -> void
 {
+    do_change(offset, in.size());
     mem_copy(m_data.range(offset, in.size()), in);
 }
 

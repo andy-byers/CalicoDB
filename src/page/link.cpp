@@ -1,5 +1,6 @@
 #include "link.h"
 #include "utils/encoding.h"
+#include "utils/layout.h"
 
 namespace cub {
 
@@ -36,4 +37,4 @@ auto Link::mut_content(Size size) -> Bytes
     return m_page.mut_range(LinkLayout::content_offset(), size);
 }
 
-} // Cub
+} // cub

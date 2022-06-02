@@ -36,6 +36,6 @@ private:
     Size m_page_size{};
 };
 
-} // db
+} // cub
 
 #endif // CUB_POOL_PAGER_H

@@ -199,4 +199,4 @@ auto CellReader::read(Index offset) const -> Cell
     return cell;
 }
 
-} // db
+} // cub

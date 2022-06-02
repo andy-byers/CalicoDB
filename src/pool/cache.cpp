@@ -58,7 +58,7 @@ auto PageCache::evict(LSN flushed_lsn) -> std::optional<Frame>
  */
 auto PageCache::purge() -> void
 {
-//    CUB_EXPECT_EQ(size(), m_frame_count);
+//    CUB_EXPECT_EQ(size(), frame_count);
 //    for (auto &page: m_list)
 //        frame->reset(PID{});
 //    m_map.clear();
@@ -77,4 +77,4 @@ auto PageCache::extract(PID id) -> std::optional<Frame>
     return std::nullopt;
 }
 
-} // db
+} // cub

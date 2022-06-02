@@ -24,14 +24,20 @@ class Page;
 class BufferPool: public IBufferPool {
 public:
     struct Parameters {
-        std::unique_ptr<IReadWriteFile> database_storage;
+        std::unique_ptr<IReadWriteFile> pool_file;
         std::unique_ptr<IWALReader> wal_reader;
         std::unique_ptr<IWALWriter> wal_writer;
         LSN flushed_lsn;
-        Size frame_count{};
-        Size page_count{};
-        Size page_size{};
+        Size frame_count {};
+        Size page_count {};
+        Size page_size {};
     };
+
+//    enum PageMode {
+//        QUERY,
+//        UPDATE,
+//        TRACKED,
+//    };
 
     explicit BufferPool(Parameters);
     ~BufferPool() override = default;
@@ -44,12 +50,14 @@ public:
     [[nodiscard]] auto allocate(PageType) -> Page override;
     [[nodiscard]] auto acquire(PID, bool) -> Page override;
     [[nodiscard]] auto can_commit() const -> bool override;
-    auto flush() -> void override;
+    auto try_flush() -> bool override;
+    auto try_flush_wal() -> bool override;
     auto commit() -> void override;
     auto abort() -> void override;
     auto purge() -> void override;
-    auto recover() -> void override;
+    auto recover() -> bool override;
     auto save_header(FileHeader&) -> void override;
+    auto load_header(const FileHeader&) -> void override;
     auto on_page_release(Page&) -> void override;
     auto on_page_error() -> void override;
 

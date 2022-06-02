@@ -7,6 +7,7 @@
 #define CUB_COMMON_H
 
 #include <cstdlib>
+#include <string>
 
 #if (!defined(_WIN32) && !defined(_WIN64)) && (defined(__unix__) || defined(__unix) || defined(__APPLE__))
 #    define CUB_UNIX
@@ -39,6 +40,13 @@ struct Options {
     Size block_size {DEFAULT_BLOCK_SIZE};
     Size frame_count {DEFAULT_FRAME_COUNT};
     int permissions {DEFAULT_PERMISSIONS};
+};
+
+struct Record {
+    auto operator<(const Record&) const -> bool;
+
+    std::string key;
+    std::string value;
 };
 
 } // cub

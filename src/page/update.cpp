@@ -10,9 +10,9 @@ namespace {
     auto can_merge(const Range &lhs, const Range &rhs)
     {
         // TODO: Could eliminate the first check and perhaps rename the function to
-        //       reflect the precondition. We only call this on two ranges that are
-        //       already ordered by the `x` field. Maybe we could call it
-        //       `can_merge_ordered()` or something.
+        //       reflect the precondition `lhs.x <= rhs.x`. We only call this on two
+        //       ranges that are already ordered by the `x` field. Maybe we could call
+        //       it `can_merge_ordered()` or something.
         return lhs.x <= rhs.x && rhs.x <= lhs.x + lhs.dx;
     }
 

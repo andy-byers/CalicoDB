@@ -6,6 +6,7 @@
 #include "file/system.h"
 #include "page/file_header.h"
 #include "pool/buffer_pool.h"
+#include "pool/in_memory.h"
 #include "tree/tree.h"
 #include "utils/layout.h"
 #include "utils/utils.h"
@@ -14,8 +15,13 @@
 
 namespace cub {
 
+auto Record::operator<(const Record &rhs) const -> bool
+{
+    return compare_three_way(_b(key), _b(rhs.key)) == ThreeWayComparison::LT;
+}
+
 Info::Info(Database::Impl *db)
-    : m_db {db} {}
+    : m_db{db} {}
 
 auto Info::cache_hit_ratio() const -> double
 {
@@ -37,7 +43,6 @@ auto Info::transaction_size() const -> Size
     return m_db->transaction_size();
 }
 
-
 Database::Impl::~Impl()
 {
     try {
@@ -51,17 +56,15 @@ Database::Impl::~Impl()
 }
 
 Database::Impl::Impl(Parameters param)
-    : m_path {param.path}
+    : m_path{param.path}
 {
     auto wal_reader = std::make_unique<WALReader>(
         std::move(param.wal_reader_file),
-        param.file_header.block_size()
-    );
+        param.file_header.block_size());
 
     auto wal_writer = std::make_unique<WALWriter>(
         std::move(param.wal_writer_file),
-        param.file_header.block_size()
-    );
+        param.file_header.block_size());
 
     m_pool = std::make_unique<BufferPool>(BufferPool::Parameters{
         std::move(param.database_file),
@@ -85,7 +88,7 @@ Database::Impl::Impl(Parameters param)
         m_pool->recover();
     } else {
         auto root = m_tree->allocate_node(PageType::EXTERNAL_NODE);
-        FileHeader header {root};
+        FileHeader header{root};
         header.update_magic_code();
         header.set_page_size(param.file_header.page_size());
         header.set_block_size(param.file_header.block_size());
@@ -94,32 +97,62 @@ Database::Impl::Impl(Parameters param)
     }
 }
 
+Database::Impl::Impl(Size page_size)
+    : m_path {"<Temp DB>"}
+{
+    m_pool = std::make_unique<InMemory>(page_size);
+    m_tree = std::make_unique<Tree>(Tree::Parameters{m_pool.get(), PID::null(), 0, 0, 0});
+    m_tree->allocate_node(PageType::EXTERNAL_NODE);
+    save_header();
+    commit();
+}
+
+auto Database::Impl::recover() -> void
+{
+    if (m_pool->recover())
+        load_header();
+}
+
 auto Database::Impl::commit() -> void
 {
-    std::unique_lock lock {m_mutex};
+    std::unique_lock lock{m_mutex};
     if (m_pool->can_commit()) {
-        {
-            auto root = m_tree->find_root(true);
-            FileHeader header {root};
-            m_pool->save_header(header);
-            m_tree->save_header(header);
-            header.update_header_crc();
-        }
+        save_header();
         m_pool->commit();
         m_transaction_size = 0;
     }
 }
 
+auto Database::Impl::save_header() -> void
+{
+    auto root = m_tree->find_root(true);
+    FileHeader header{root};
+    m_pool->save_header(header);
+    m_tree->save_header(header);
+    header.update_header_crc();
+}
+
+auto Database::Impl::load_header() -> void
+{
+    auto root = m_tree->find_root(true);
+    FileHeader header{root};
+    m_pool->load_header(header);
+    m_tree->load_header(header);
+}
+
 auto Database::Impl::abort() -> void
 {
-    std::unique_lock lock {m_mutex};
-    m_pool->abort();
-    m_transaction_size = 0;
+    std::unique_lock lock{m_mutex};
+    if (m_pool->can_commit()) {
+        m_pool->abort();
+        m_transaction_size = 0;
+        load_header();
+    }
 }
 
 auto Database::Impl::get_info() -> Info
 {
-    return Info {this};
+    return Info{this};
 }
 
 auto Database::Impl::get_cursor() -> Cursor
@@ -129,40 +162,46 @@ auto Database::Impl::get_cursor() -> Cursor
     return cursor;
 }
 
-auto Database::Impl::lookup(BytesView key, bool exact) -> std::optional<std::string>
+auto Database::Impl::lookup(BytesView key, bool exact) -> std::optional<Record>
 {
-    std::shared_lock lock {m_mutex};
-    return m_tree->lookup(key, exact);
+    auto cursor = get_cursor();
+    const auto found_exact = cursor.find(key);
+    const auto found_greater = !cursor.is_maximum();
+    if (found_exact || (found_greater && !exact))
+        return Record {_s(cursor.key()), cursor.value()};
+    return std::nullopt;
 }
 
-auto Database::Impl::lookup_minimum() -> std::optional<std::string>
+auto Database::Impl::lookup_minimum() -> std::optional<Record>
 {
-    std::shared_lock lock {m_mutex};
+    std::shared_lock lock{m_mutex};
     if (!m_tree->cell_count())
         return std::nullopt;
-    auto [node, index] = m_tree->find_local_min(m_tree->find_root(false));
-    return m_tree->collect_value(node, index);
+    auto cursor = get_cursor();
+    cursor.find_minimum();
+    return Record {_s(cursor.key()), cursor.value()};
 }
 
-auto Database::Impl::lookup_maximum() -> std::optional<std::string>
+auto Database::Impl::lookup_maximum() -> std::optional<Record>
 {
-    std::shared_lock lock {m_mutex};
+    std::shared_lock lock{m_mutex};
     if (!m_tree->cell_count())
         return std::nullopt;
-    auto [node, index] = m_tree->find_local_max(m_tree->find_root(false));
-    return m_tree->collect_value(node, index);
+    auto cursor = get_cursor();
+    cursor.find_maximum();
+    return Record {_s(cursor.key()), cursor.value()};
 }
 
 auto Database::Impl::insert(BytesView key, BytesView value) -> void
 {
-    std::unique_lock lock {m_mutex};
+    std::unique_lock lock{m_mutex};
     m_tree->insert(key, value);
     m_transaction_size++;
 }
 
 auto Database::Impl::remove(BytesView key) -> bool
 {
-    std::unique_lock lock {m_mutex};
+    std::unique_lock lock{m_mutex};
     if (m_tree->remove(key)) {
         m_transaction_size++;
         return true;
@@ -193,27 +232,27 @@ auto Database::Impl::transaction_size() const -> Size
 auto Database::open(const std::string &path, const Options &options) -> Database
 {
     if (path.empty())
-        throw InvalidArgumentError {"Path argument cannot be empty"};
+        throw InvalidArgumentError{"Path argument cannot be empty"};
 
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {_b(backing)};
+    FileHeader header{_b(backing)};
 
     try {
-        ReadOnlyFile file {path, {}, options.permissions};
+        ReadOnlyFile file{path, {}, options.permissions};
 
         if (file.size() < FileLayout::HEADER_SIZE)
-            throw CorruptionError {"Database is too small to read the file header"};
+            throw CorruptionError{"Database is too small to read the file header"};
 
         read_exact(file, _b(backing));
 
         if (!header.is_magic_code_consistent())
-            throw InvalidArgumentError {"Path does not point to a Cub DB database file"};
+            throw InvalidArgumentError{"Path does not point to a Cub DB database file"};
 
         if (!header.is_header_crc_consistent())
-            throw CorruptionError {"Database has a corrupted file header"};
+            throw CorruptionError{"Database has a corrupted file header"};
 
         if (file.size() < header.page_size())
-            throw CorruptionError {"Database size is invalid"};
+            throw CorruptionError{"Database size is invalid"};
 
     } catch (const SystemError &error) {
         if (error.code() != std::errc::no_such_file_or_directory)
@@ -253,22 +292,29 @@ auto Database::open(const std::string &path, const Options &options) -> Database
     return db;
 }
 
+auto Database::temp(Size page_size) -> Database
+{
+    Database db;
+    db.m_impl = std::make_unique<Impl>(page_size);
+    return db;
+}
+
 Database::Database() = default;
 Database::~Database() = default;
 Database::Database(Database&&) noexcept = default;
 auto Database::operator=(Database&&) noexcept -> Database& = default;
 
-auto Database::lookup(BytesView key, bool exact) -> std::optional<std::string>
+auto Database::lookup(BytesView key, bool exact) -> std::optional<Record>
 {
     return m_impl->lookup(key, exact);
 }
 
-auto Database::lookup_minimum() -> std::optional<std::string>
+auto Database::lookup_minimum() -> std::optional<Record>
 {
     return m_impl->lookup_minimum();
 }
 
-auto Database::lookup_maximum() -> std::optional<std::string>
+auto Database::lookup_maximum() -> std::optional<Record>
 {
     return m_impl->lookup_maximum();
 }

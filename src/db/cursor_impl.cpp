@@ -18,6 +18,16 @@ auto Cursor::Impl::has_record() const -> bool
     return has_node() && m_index < m_node->cell_count();
 }
 
+auto Cursor::Impl::is_minimum() const -> bool
+{
+    return has_record() && !can_decrement();
+}
+
+auto Cursor::Impl::is_maximum() const -> bool
+{
+    return has_record() && !can_increment();
+}
+
 /**
  * Determine if the cursor is on the first entry in the tree.
  *
@@ -306,6 +316,16 @@ auto Cursor::operator=(Cursor&&) noexcept -> Cursor& = default;
 auto Cursor::has_record() const -> bool
 {
     return m_impl->has_record();
+}
+
+auto Cursor::is_minimum() const -> bool
+{
+    return m_impl->is_minimum();
+}
+
+auto Cursor::is_maximum() const -> bool
+{
+    return m_impl->is_maximum();
 }
 
 auto Cursor::key() const -> BytesView

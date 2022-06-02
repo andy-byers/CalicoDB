@@ -19,6 +19,8 @@ public:
     explicit Impl(ITree*, std::shared_mutex&);
     ~Impl() = default;
     [[nodiscard]] auto has_record() const -> bool;
+    [[nodiscard]] auto is_minimum() const -> bool;
+    [[nodiscard]] auto is_maximum() const -> bool;
     [[nodiscard]] auto key() const -> BytesView;
     [[nodiscard]] auto value() const -> std::string;
     auto reset() -> void;

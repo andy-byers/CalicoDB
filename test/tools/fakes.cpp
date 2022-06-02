@@ -148,6 +148,18 @@ WALHarness::WALHarness(Size block_size)
 
 WALHarness::~WALHarness() = default;
 
+FakeFilesHarness::FakeFilesHarness(Options) // TODO
+{
+    tree_file = std::make_unique<FaultyReadWriteMemory>();
+    tree_backing = tree_file->memory();
+    wal_reader_file = std::make_unique<FaultyReadOnlyMemory>();
+    wal_backing = wal_reader_file->memory();
+    wal_writer_file = std::make_unique<FaultyLogMemory>(wal_backing);
+    tree_faults = tree_file->controls();
+    wal_reader_faults = wal_reader_file->controls();
+    wal_writer_faults = wal_writer_file->controls();
+}
+
 auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
 {
     std::string header_backing(page_size, '\x00');
@@ -204,5 +216,5 @@ auto FaultyDatabase::clone() -> FaultyDatabase
     return new_db;
 }
 
-} // db
+} // cub
 

@@ -25,11 +25,12 @@ public:
         Size frame_count{};
     };
 
+    explicit Impl(Size);
     explicit Impl(Parameters);
     ~Impl();
-    auto lookup(BytesView, bool) -> std::optional<std::string>;
-    auto lookup_minimum() -> std::optional<std::string>;
-    auto lookup_maximum() -> std::optional<std::string>;
+    auto lookup(BytesView, bool) -> std::optional<Record>;
+    auto lookup_minimum() -> std::optional<Record>;
+    auto lookup_maximum() -> std::optional<Record>;
     auto insert(BytesView, BytesView) -> void;
     auto remove(BytesView) -> bool;
     auto commit() -> void;
@@ -43,6 +44,10 @@ public:
     auto transaction_size() const -> Size;
 
 private:
+    auto recover() -> void;
+    auto save_header() -> void;
+    auto load_header() -> void;
+
     std::string m_path;
     mutable std::shared_mutex m_mutex;
     std::unique_ptr<IBufferPool> m_pool;

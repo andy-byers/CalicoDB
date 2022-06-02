@@ -3,7 +3,7 @@
 #include "bytes.h"
 #include "common.h"
 #include "random.h"
-#include "unit.h"
+#include "unit_tests.h"
 #include "utils/assert.h"
 #include "utils/encoding.h"
 #include "utils/identifier.h"
@@ -50,9 +50,10 @@ TEST_F(SliceTests, EqualsSelf)
     ASSERT_TRUE(bytes == bytes);
 }
 
-TEST_F(SliceTests, ShorterSlicesCompareAsLessThan)
+TEST_F(SliceTests, ShorterSlicesAreLessThan)
 {
-    ASSERT_TRUE(_b(test_string.substr(0, test_string.size() - 1)) < bytes);
+    const auto shorter = bytes.range(0, bytes.size() - 1);
+    ASSERT_TRUE(shorter < bytes);
 }
 
 TEST_F(SliceTests, CanGetPartialRange)
@@ -87,7 +88,7 @@ TEST_F(SliceTests, AdvanceByZeroDoesNothing)
     ASSERT_TRUE(bytes == copy);
 }
 
-TEST_F(SliceTests, CanAdvanceToEnd)
+TEST_F(SliceTests, AdvancingByOwnLengthProducesEmptySlice)
 {
     bytes.advance(bytes.size());
     ASSERT_TRUE(bytes.is_empty());
@@ -98,14 +99,14 @@ TEST_F(SliceTests, AdvanceDeathTest)
     ASSERT_DEATH(bytes.advance(bytes.size() + 1), EXPECTATION_MATCHER);
 }
 
-TEST_F(SliceTests, TruncateToSameSizeDoesNothing)
+TEST_F(SliceTests, TruncatingToOwnLengthDoesNothing)
 {
     auto copy = bytes;
     bytes.truncate(bytes.size());
     ASSERT_TRUE(bytes == copy);
 }
 
-TEST_F(SliceTests, CanTruncateToEmpty)
+TEST_F(SliceTests, TruncatingToZeroLengthProducesEmptySlice)
 {
     bytes.truncate(0);
     ASSERT_TRUE(bytes.is_empty());
@@ -124,15 +125,6 @@ TEST_F(SliceTests, TruncateDeathTest)
     ASSERT_DEATH(bytes.truncate(bytes.size() + 1), EXPECTATION_MATCHER);
     bytes.truncate(0);
     ASSERT_DEATH(bytes.truncate(1), EXPECTATION_MATCHER);
-}
-
-TEST_F(SliceTests, CanAdvanceAndTruncate)
-{
-    bytes.advance(3);
-    bytes.truncate(bytes.size() - 2);
-    bytes.advance(4);
-    bytes.truncate(bytes.size() - 3);
-    ASSERT_EQ(_s(bytes), "w");
 }
 
 TEST(UtilsTest, ZeroIsNotAPowerOfTwo)

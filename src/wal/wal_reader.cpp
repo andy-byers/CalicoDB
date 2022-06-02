@@ -16,6 +16,7 @@ auto WALReader::reset() -> void
     m_file->seek(0, Seek::BEGIN);
     m_has_block = false;
     m_cursor = 0;
+    m_block_id = 0;
     m_positions.clear();
     m_record.reset();
     increment();
@@ -30,6 +31,7 @@ auto WALReader::increment() -> bool
 {
     if (auto record = read_next()) {
         m_record = std::move(record);
+
         return true;
     }
     return false;

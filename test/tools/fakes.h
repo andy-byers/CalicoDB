@@ -1,6 +1,7 @@
 #ifndef CUB_TEST_TOOLS_FAKES_H
 #define CUB_TEST_TOOLS_FAKES_H
 
+#include <gmock/gmock.h>
 #include "bytes.h"
 #include "common.h"
 #include "random.h"
@@ -51,7 +52,9 @@ public:
     }
 
     auto use_direct_io() -> void override {}
+
     auto sync() -> void override {}
+
     auto seek(long, Seek) -> Index override;
     auto read(Bytes) -> Size override;
 
@@ -166,7 +169,6 @@ public:
     auto write(BytesView) -> Size override;
 
 private:
-    friend class Fs;
     SharedMemory m_memory;
     Index m_cursor{};
 };
@@ -177,6 +179,8 @@ public:
         // TODO: Corrupted reads and writes.
         unsigned read_fault_rate {};
         unsigned write_fault_rate {};
+        int read_fault_counter {-1};
+        int write_fault_counter {-1};
     };
 
     FaultControls()
@@ -200,6 +204,16 @@ public:
         return m_controls->write_fault_rate;
     }
 
+    [[nodiscard]] auto read_fault_counter() const
+    {
+        return m_controls->read_fault_counter;
+    }
+
+    [[nodiscard]] auto write_fault_counter() const
+    {
+        return m_controls->write_fault_counter;
+    }
+
     auto set_read_fault_rate(unsigned rate)
     {
         CUB_EXPECT_LE(rate, 100);
@@ -210,6 +224,18 @@ public:
     {
         CUB_EXPECT_LE(rate, 100);
         m_controls->write_fault_rate = rate;
+    }
+
+    auto set_read_fault_counter(int value)
+    {
+        CUB_EXPECT_GE(value, -1);
+        m_controls->read_fault_counter = value;
+    }
+
+    auto set_write_fault_counter(int value)
+    {
+        CUB_EXPECT_GE(value, -1);
+        m_controls->write_fault_counter = value;
     }
 
 private:
@@ -234,14 +260,22 @@ public:
 protected:
     auto maybe_throw_read_error()
     {
-        if (m_random.next_int(99U) < m_controls->read_fault_rate)
+        // If the counter is positive, we tick down until we hit 0, at which point we throw an exception.
+        // Afterward, further reads will be subject to the normal read fault rate mechanism. If the counter
+        // is never set, it stays at -1 and doesn't contribute to the faults generated.
+        auto &counter = m_controls->read_fault_counter;
+        if (!counter || m_random.next_int(99U) < m_controls->read_fault_rate)
             throw IOError {SystemError {"read", EIO}};
+        // Counter should settle on -1.
+        counter -= counter >= 0;
     }
 
     auto maybe_throw_write_error()
     {
-        if (m_random.next_int(99U) < m_controls->write_fault_rate)
+        auto &counter = m_controls->write_fault_counter;
+        if (!counter || m_random.next_int(99U) < m_controls->write_fault_rate)
             throw IOError {SystemError {"write", EIO}};
+        counter -= counter >= 0;
     }
 
 private:
@@ -350,6 +384,24 @@ public:
     auto reset() -> void override {}
 };
 
+struct FakeFilesHarness {
+
+    explicit FakeFilesHarness(Options);
+    ~FakeFilesHarness() = default;
+    FakeFilesHarness(FakeFilesHarness&&) = default;
+    auto operator=(FakeFilesHarness&&) -> FakeFilesHarness& = default;
+
+    std::unique_ptr<FaultyReadWriteMemory> tree_file;
+    std::unique_ptr<FaultyReadOnlyMemory> wal_reader_file;
+    std::unique_ptr<FaultyLogMemory> wal_writer_file;
+    SharedMemory tree_backing;
+    SharedMemory wal_backing;
+    FaultControls tree_faults;
+    FaultControls wal_reader_faults;
+    FaultControls wal_writer_faults;
+    Options options;
+};
+
 struct FaultyDatabase {
 
     static auto create(Size) -> FaultyDatabase;
@@ -368,6 +420,188 @@ struct FaultyDatabase {
     Size page_size {}; // TODO: Remove when we get the 'info' construct working.
 };
 
-} // db
+
+class MockReadOnlyMemory: public IReadOnlyFile {
+public:
+    MockReadOnlyMemory() = default;
+
+    explicit MockReadOnlyMemory(SharedMemory memory)
+        : m_fake {std::move(memory)} {}
+
+    ~MockReadOnlyMemory() override = default;
+
+    auto memory() -> SharedMemory
+    {
+        return m_fake.memory();
+    }
+
+    auto size() const -> Size override
+    {
+        return m_fake.size();
+    }
+
+    auto use_direct_io() -> void override {}
+
+    MOCK_METHOD(void, sync, (), (override));
+    MOCK_METHOD(Index, seek, (long, Seek), (override));
+    MOCK_METHOD(Size, read, (Bytes), (override));
+
+    auto delegate_to_fake() -> void
+    {
+        ON_CALL(*this, seek)
+            .WillByDefault([this](long offset, Seek whence) {
+                return m_fake.seek(offset, whence);
+            });
+        ON_CALL(*this, read)
+            .WillByDefault([this](Bytes out) {
+                return m_fake.read(out);
+            });
+    }
+
+private:
+    ReadOnlyMemory m_fake;
+};
+
+
+class MockWriteOnlyMemory: public IWriteOnlyFile {
+public:
+    MockWriteOnlyMemory() = default;
+
+    explicit MockWriteOnlyMemory(SharedMemory memory)
+        : m_fake {std::move(memory)} {}
+
+    ~MockWriteOnlyMemory() override = default;
+
+    auto memory() -> SharedMemory
+    {
+        return m_fake.memory();
+    }
+
+    auto size() const -> Size override
+    {
+        return m_fake.size();
+    }
+
+    auto use_direct_io() -> void override {}
+
+    MOCK_METHOD(void, resize, (Size), (override));
+    MOCK_METHOD(void, sync, (), (override));
+    MOCK_METHOD(Index, seek, (long, Seek), (override));
+    MOCK_METHOD(Size, write, (BytesView), (override));
+
+    auto delegate_to_fake() -> void
+    {
+        ON_CALL(*this, resize)
+            .WillByDefault([this](Size size) {
+                return m_fake.resize(size);
+            });
+        ON_CALL(*this, seek)
+            .WillByDefault([this](long offset, Seek whence) {
+                return m_fake.seek(offset, whence);
+            });
+        ON_CALL(*this, write)
+            .WillByDefault([this](BytesView in) {
+                return m_fake.write(in);
+            });
+    }
+
+private:
+    WriteOnlyMemory m_fake;
+};
+
+class MockReadWriteMemory: public IReadWriteFile {
+public:
+    MockReadWriteMemory() = default;
+
+    explicit MockReadWriteMemory(SharedMemory memory)
+        : m_fake {std::move(memory)} {}
+
+    ~MockReadWriteMemory() override = default;
+
+    auto memory() -> SharedMemory
+    {
+        return m_fake.memory();
+    }
+
+    auto size() const -> Size override
+    {
+        return m_fake.size();
+    }
+
+    auto use_direct_io() -> void override {}
+
+    MOCK_METHOD(void, sync, (), (override));
+    MOCK_METHOD(void, resize, (Size), (override));
+    MOCK_METHOD(Index, seek, (long, Seek), (override));
+    MOCK_METHOD(Size, read, (Bytes), (override));
+    MOCK_METHOD(Size, write, (BytesView), (override));
+
+    auto delegate_to_fake() -> void
+    {
+        ON_CALL(*this, resize)
+            .WillByDefault([this](Size size) {
+                return m_fake.resize(size);
+            });
+        ON_CALL(*this, seek)
+            .WillByDefault([this](long offset, Seek whence) {
+                return m_fake.seek(offset, whence);
+            });
+        ON_CALL(*this, read)
+            .WillByDefault([this](Bytes out) {
+                return m_fake.read(out);
+            });
+        ON_CALL(*this, write)
+            .WillByDefault([this](BytesView in) {
+                return m_fake.write(in);
+            });
+    }
+
+private:
+    ReadWriteMemory m_fake;
+};
+
+class MockLogMemory: public ILogFile {
+public:
+    MockLogMemory() = default;
+
+    explicit MockLogMemory(SharedMemory memory)
+        : m_fake {std::move(memory)} {}
+
+    ~MockLogMemory() override = default;
+
+    auto memory() -> SharedMemory
+    {
+        return m_fake.memory();
+    }
+
+    auto size() const -> Size override
+    {
+        return m_fake.size();
+    }
+
+    auto use_direct_io() -> void override {}
+
+    MOCK_METHOD(void, sync, (), (override));
+    MOCK_METHOD(void, resize, (Size), (override));
+    MOCK_METHOD(Size, write, (BytesView), (override));
+
+    auto delegate_to_fake() -> void
+    {
+        ON_CALL(*this, resize)
+            .WillByDefault([this](Size size) {
+                return m_fake.resize(size);
+            });
+        ON_CALL(*this, write)
+            .WillByDefault([this](BytesView in) {
+                return m_fake.write(in);
+            });
+    }
+
+private:
+
+    LogMemory m_fake;
+};
+
+} // cub
 
 #endif // CUB_TEST_TOOLS_FAKES_H

@@ -23,3 +23,10 @@ set(
 )
 build_test(test_recovery "${RECOVERY_TEST_FILES}")
 
+set(
+    LOGGING_TEST_FILES
+    ${INTEGRATION_DIR}/test_logging.cpp
+    ${COMMON_FILES}
+)
+build_test(test_logging "${LOGGING_TEST_FILES}")
+

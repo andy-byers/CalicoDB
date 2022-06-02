@@ -14,7 +14,7 @@ BufferPool::BufferPool(Parameters param)
     : m_wal_reader {std::move(param.wal_reader)}
     , m_wal_writer {std::move(param.wal_writer)}
     , m_scratch {param.page_size}
-    , m_pager {{std::move(param.database_storage), param.page_size, param.frame_count}}
+    , m_pager {{std::move(param.pool_file), param.page_size, param.frame_count}}
     , m_flushed_lsn {param.flushed_lsn}
     , m_next_lsn {param.flushed_lsn + LSN {1}}
     , m_page_count {param.page_count} {}
@@ -90,7 +90,9 @@ auto BufferPool::fetch_page(PID id, bool is_writable) -> Page
 
     // Get page from cache or disk.
     m_pinned.emplace(id, fetch_frame(id));
-    return *try_fetch();
+    auto page = try_fetch();
+    CUB_EXPECT_NE(page, std::nullopt);
+    return std::move(*page);
 }
 
 auto BufferPool::propagate_page_error() -> void
@@ -118,22 +120,30 @@ auto BufferPool::log_update(Page &page) -> void
 
 auto BufferPool::fetch_frame(PID id) -> Frame
 {
+    const auto try_evict_and_pin = [id, this]() -> std::optional<Frame> {
+        if (auto frame = m_cache.evict(m_flushed_lsn)) {
+            m_pager.unpin(std::move(*frame));
+            frame = m_pager.pin(id);
+            return frame;
+        }
+        return std::nullopt;
+    };
     if (auto frame = m_cache.extract(id))
         return std::move(*frame);
 
     if (auto frame = m_pager.pin(id))
         return std::move(*frame);
 
-    if (auto frame = m_cache.evict(m_flushed_lsn)) {
-        m_pager.unpin(std::move(*frame));
-        frame = m_pager.pin(id);
+    if (auto frame = try_evict_and_pin())
         return std::move(*frame);
-    }
 
-    CUB_EXPECT_TRUE(m_wal_writer->has_pending());
-    m_flushed_lsn = m_wal_writer->flush();
-    CUB_EXPECT_FALSE(m_flushed_lsn.is_null());
-    return fetch_frame(id);
+    if (!try_flush_wal()) {
+        m_pager.unpin(Frame {m_pager.page_size()});
+        return *m_pager.pin(id);
+    }
+    auto frame = try_evict_and_pin();
+    CUB_EXPECT_NE(frame, std::nullopt);
+    return std::move(*frame);
 }
 
 auto BufferPool::on_page_release(Page &page) -> void
@@ -179,10 +189,13 @@ auto BufferPool::roll_forward() -> bool
             m_next_lsn = m_flushed_lsn;
             m_next_lsn++;
         }
-        if (record.payload().is_commit())
+        // Stop at the first commit record.
+        if (record.is_commit()) {
+//            puts("commit found?"); // TODO
             return true;
+        }
 
-        const auto update = record.payload().decode();
+        const auto update = record.decode();
         auto page = fetch_page(update.page_id, true);
 
         if (page.lsn() < record.lsn())
@@ -224,41 +237,39 @@ auto BufferPool::roll_backward() -> void
     // Make sure the WAL reader is at the end of the log.
     while (m_wal_reader->increment());
 
-    if (!m_wal_reader->record())
-        return;
+    CUB_EXPECT_NE(m_wal_reader->record(), std::nullopt);
 
-    // Shouldn't be rolling back if there is a commit record.
-    CUB_EXPECT_FALSE(m_wal_reader->record()->is_commit());
+    // Skip commit record(s) at the end. These can arise from exceptions during commit(), i.e. we write the commit record,
+    // but get an I/O error while flushing dirty database pages.
+    while (m_wal_reader->record()->is_commit()) {
+        if (!m_wal_reader->decrement())
+            throw CorruptionError {"WAL contains an empty commit"};
+    }
 
-    for (; ; ) {
+    do {
         const auto record = *m_wal_reader->record();
-        const auto update = record.payload().decode();
+        CUB_EXPECT_FALSE(record.is_commit());
+        const auto update = record.decode();
         auto page = fetch_page(update.page_id, true);
 
         if (page.lsn() >= record.lsn())
             page.undo_changes(update.previous_lsn, update.changes);
 
-        if (!m_wal_reader->decrement()) {
-            CUB_EXPECT_GT(m_next_lsn, record.lsn());
-//            m_next_lsn = record.lsn(); TODO: I don't think we should ever really decrement the next LSN.
-            break;
-        }
-    }
+    } while (m_wal_reader->decrement());
 }
 
 auto BufferPool::commit() -> void
 {
     m_wal_writer->write(WALRecord::commit(m_next_lsn++));
-    m_flushed_lsn = m_wal_writer->flush();
-    CUB_EXPECT_EQ(m_next_lsn, m_flushed_lsn + LSN {1});
-    flush();
+    try_flush_wal();
+    try_flush();
     m_wal_writer->truncate();
 }
 
 auto BufferPool::abort() -> void
 {
     try {
-        m_wal_writer->flush();
+        try_flush_wal();
     } catch (const IOError &error) {
         // TODO: Ignored for now.
     }
@@ -267,33 +278,51 @@ auto BufferPool::abort() -> void
 
     // Throw away in-memory updates.
     purge();
+    m_wal_reader->reset();
     roll_backward();
-    flush();
+    try_flush();
     m_wal_writer->truncate();
 }
 
-auto BufferPool::recover() -> void
+auto BufferPool::recover() -> bool
 {
     if (!m_wal_writer->has_committed())
-        return;
+        return false;
 
-//    const auto saved = m_next_lsn;
     if (!roll_forward())
         roll_backward();
-    flush();
+    try_flush();
     m_wal_writer->truncate();
+    return true;
 }
 
-auto BufferPool::flush() -> void
+auto BufferPool::try_flush() -> bool
 {
-    while (!m_cache.is_empty()) {
+    CUB_EXPECT_TRUE(m_pinned.empty());
+
+    if (m_cache.is_empty())
+        return false;
+
+    for (; ; ) {
         if (auto frame = m_cache.evict(m_flushed_lsn)) {
             m_pager.unpin(std::move(*frame));
         } else {
             break;
         }
     }
+    return m_cache.is_empty();
 }
+
+auto BufferPool::try_flush_wal() -> bool
+{
+    if (const auto lsn = m_wal_writer->flush(); !lsn.is_null()) {
+        CUB_EXPECT_EQ(m_next_lsn, lsn + LSN {1});
+        m_flushed_lsn = lsn;
+        return true;
+    }
+    return false;
+}
+
 
 auto BufferPool::purge() -> void
 {
@@ -312,6 +341,12 @@ auto BufferPool::save_header(FileHeader &header) -> void
 {
     header.set_flushed_lsn(m_flushed_lsn);
     header.set_page_count(m_page_count);
+}
+
+auto BufferPool::load_header(const FileHeader &header) -> void
+{
+    m_flushed_lsn = header.flushed_lsn();
+    m_page_count = header.page_count();
 }
 
 } // cub

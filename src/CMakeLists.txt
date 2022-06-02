@@ -9,10 +9,16 @@ set(
     ${CUB_INCLUDE_DIR}/database.h
     ${CUB_INCLUDE_DIR}/exception.h
 
-        db/database_impl.cpp
+    db/database_impl.cpp
     db/database_impl.h
-        db/cursor_impl.cpp
+    db/cursor_impl.cpp
     db/cursor_impl.h
+
+    file/file.cpp
+    file/file.h
+    file/interface.h
+    file/system.cpp
+    file/system.h
 
     page/cell.cpp
     page/cell.h
@@ -38,12 +44,6 @@ set(
     pool/in_memory.cpp
     pool/in_memory.h
     pool/interface.h
-
-    file/file.cpp
-    file/file.h
-    file/interface.h
-    file/system.cpp
-    file/system.h
 
     tree/free_list.cpp
     tree/free_list.h

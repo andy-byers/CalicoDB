@@ -3,7 +3,7 @@
 #include "bytes.h"
 #include "common.h"
 #include "random.h"
-#include "unit.h"
+#include "unit_tests.h"
 #include "page/cell.h"
 #include "page/file_header.h"
 #include "page/node.h"

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <thread>
 #include <vector>
+#include <unordered_set>
 
 #include <gtest/gtest.h>
 
@@ -25,27 +26,103 @@ using namespace cub;
 
 constexpr auto TEST_PATH = "/tmp/cub_test";
 
+template<class Db> auto database_contains_exact(Db &db, const std::vector<Record> &records)
+{
+    if (db.get_info().record_count() != records.size())
+        return false;
+
+    auto cursor = db.get_cursor();
+    for (const auto &[key, value]: records) {
+        if (!cursor.find(_b(key)))
+            return false;
+        if (cursor.key() != _b(key))
+            return false;
+        if (cursor.value() != value)
+            return false;
+    }
+    return true;
+}
+
+template<class Db> auto setup_database_with_committed_records(Db &db, Size n)
+{
+    insert_random_unique_records(db, n);
+    db.commit();
+    return collect_records(db);
+}
+
 TEST(DatabaseTests, DataPersists)
 {
     std::vector<Record> records;
     std::filesystem::remove(TEST_PATH);
+    std::filesystem::remove(get_wal_path(TEST_PATH));
 
     {
         auto db = Database::open(TEST_PATH, {});
-        insert_random_records(db, 500, {});
-        records = collect_records(db);
-        ASSERT_EQ(db.get_info().record_count(), records.size());
+        records = setup_database_with_committed_records(db, 500);
     }
 
     auto db = Database::open(TEST_PATH, {});
-    ASSERT_EQ(db.get_info().record_count(), records.size());
-    auto cursor = db.get_cursor();
-    for (const auto &[key, value]: records) {
-        ASSERT_TRUE(cursor.find(_b(key)));
-        ASSERT_EQ(key, _s(cursor.key()));
-        ASSERT_EQ(value, cursor.value());
-    }
+    ASSERT_TRUE(database_contains_exact(db, records));
 }
+
+TEST(DatabaseTests, AbortRestoresState)
+{
+    std::filesystem::remove(TEST_PATH);
+    std::filesystem::remove(get_wal_path(TEST_PATH));
+
+    auto db = Database::open(TEST_PATH, {});
+    db.insert(_b("a"), _b("1"));
+    db.insert(_b("b"), _b("2"));
+    db.commit();
+
+    db.insert(_b("c"), _b("3"));
+    CUB_EXPECT_TRUE(db.remove(_b("a")));
+    CUB_EXPECT_TRUE(db.remove(_b("b")));
+    db.abort();
+
+    CUB_EXPECT_EQ(db.lookup(_b("a"), true)->value, "1");
+    CUB_EXPECT_EQ(db.lookup(_b("b"), true)->value, "2");
+    CUB_EXPECT_EQ(db.lookup(_b("c"), true), std::nullopt);
+
+    const auto info = db.get_info();
+    CUB_EXPECT_EQ(info.record_count(), 2);
+}
+
+TEST(TempDBTests, FreshDatabaseIsEmpty)
+{
+    auto temp = Database::temp(0x100);
+    auto records = collect_records(temp);
+    ASSERT_TRUE(collect_records(temp).empty());
+    ASSERT_EQ(temp.get_info().record_count(), 0);
+}
+
+TEST(TempDBTests, CanInsertRecords)
+{
+    auto temp = Database::temp(0x100);
+    const auto records = setup_database_with_committed_records(temp, 500);
+    ASSERT_TRUE(database_contains_exact(temp, records));
+}
+
+TEST(TempDBTests, AbortClearsRecords)
+{
+    auto temp = Database::temp(0x100);
+    insert_random_unique_records(temp, 500);
+    temp.abort();
+    ASSERT_TRUE(database_contains_exact(temp, {}));
+}
+
+//TEST(TempDBTests, AbortKeepsRecordsFromPreviousCommit)
+//{
+//    static constexpr auto num_committed = 500;
+//    auto temp = Database::temp(0x100);
+//    const auto committed = setup_database_with_committed_records(temp, num_committed);
+//    insert_random_unique_records(temp, num_committed);
+//
+//    // TODO: TempDB stuff is messed up. Whoops. I'll be working on it.
+//    temp.abort();
+//
+//    ASSERT_TRUE(database_contains_exact(temp, committed));
+//}
 
 TEST(DatabaseTests, TestRecovery)
 {
@@ -60,8 +137,8 @@ TEST(DatabaseTests, TestRecovery)
         insert_random_records(*faulty.db, n, {});
 
         try {
-            // Sketchy way to attempt to delay the exception for a few reads/writes.
-            faulty.tree_faults.set_write_fault_rate(10);
+            // Fail in the middle of the commit.
+            faulty.tree_faults.set_write_fault_counter(10);
             faulty.db->commit();
             ADD_FAILURE() << "commit() should have thrown";
         } catch (const IOError&) {
@@ -69,12 +146,60 @@ TEST(DatabaseTests, TestRecovery)
         }
         db = faulty.clone();
     }
-    auto cursor = db.db->get_cursor();
-    for (const auto &[key, value]: records) {
-        ASSERT_TRUE(cursor.find(_b(key)));
-        ASSERT_EQ(_s(cursor.key()), key);
-        ASSERT_EQ(cursor.value(), value);
+    ASSERT_TRUE(database_contains_exact(*db.db, records));
+}
+
+TEST(DatabaseTests, AbortIsReentrant)
+{
+    static constexpr Size page_size = 0x200;
+    static constexpr Size batch_size = 100;
+    static constexpr Size num_tries = 5;
+    auto db = FaultyDatabase::create(page_size);
+    // Cause overflow pages to occupy cache space. This leads to more evictions and writes to the database disk
+    // that must be undone in abort().
+    RecordGenerator::Parameters param;
+    param.min_value_size = page_size;
+    param.max_value_size = page_size * 2;
+
+    // This batch of inserts should be persisted.
+    insert_random_records(*db.db, batch_size, param);
+    const auto records = collect_records(*db.db);
+    db.db->commit();
+
+    // This batch of inserts should be undone.
+    insert_random_records(*db.db, batch_size, param);
+
+    for (Index i {}; i < num_tries; ++i) {
+        try {
+            db.tree_faults.set_write_fault_counter(3);
+            db.db->abort();
+            ADD_FAILURE() << "abort() should have thrown";
+        } catch (const IOError&) {
+            db.tree_faults.set_write_fault_counter(-1);
+        }
     }
+    // Perform a successful abort.
+    db.db->abort();
+    ASSERT_TRUE(database_contains_exact(*db.db, records));
+}
+
+TEST(DatabaseTests, CanAbortAfterFailingToCommit)
+{
+    static constexpr Size num_records = 1000;
+    Random random {0};
+    auto db = FaultyDatabase::create(0x200);
+    insert_random_records(*db.db, num_records, {});
+    const auto records = collect_records(*db.db);
+
+    try {
+        db.tree_faults.set_write_fault_counter(3);
+        db.db->commit();
+        ADD_FAILURE() << "commit() should have thrown";
+    } catch (const IOError&) {
+        db.tree_faults.set_write_fault_counter(-1);
+    }
+    db.db->abort();
+    ASSERT_TRUE(database_contains_exact(*db.db, {}));
 }
 
 } // <anonymous>

@@ -13,17 +13,14 @@ Please see the `Contributions` section if you are interested in working on Cub D
 
 ## TODO
 1. Get the fuzz testing up and running. 
-We would like to be able to accept arbitrary database and WAL files as input without crashing.
 2. Update the B-tree merge routine to be more proactive.
 This shouldn't be terribly difficult since most of the unit tests don't rely on the specific tree structure.
 They just make sure the tree is correctly ordered and all connections are consistent.
-3. Look into blocking writers until all cursors are closed. 
-Maybe. 
 I'm definitely open to suggestions on this one.
-4. Write some real documentation.
-5. Work on this README
-6. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
-7. Better freelist that uses trunk pages (see SQLite 3)
+3. Write some real documentation.
+4. Work on this README
+5. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
+6. Better freelist that uses trunk pages (see SQLite 3)
 
 ## API
 
@@ -93,26 +90,38 @@ assert(db.remove(cub::_b("a")));
 ```
 
 ### Querying a Database
-Querying a Cub DB database is performed either through the `lookup()` convenience method, or using a `Cursor` object.
-It is possible to have many cursors active at once (with support for multithreading), however, any modifications to the database will cause invalidation of all active cursors.
-*Actually, this is something I'm working on right now. Maybe a reader-writer lock? - Andy*
+Querying a Cub DB database is performed either through the `lookup*()` convenience methods, or using a `Cursor` object.
+It is possible to have many cursors active at once (with support for multithreading).
+Any modifications to the database will block until all the open cursors have been closed.
 
 ```C++
+auto record = db.lookup("key", true);
+assert(record->value == "vvv");
+
+record = db.lookup_minimum();
+assert(record->key == "aaa");
+
+record = db.lookup_maximum();
+assert(record->key == "zzz");
+
 auto cursor = db.get_cursor();
-cursor.find_minimum();
-cursor.find_maximum();
+assert(cursor.has_record());
+
+// Forward traversal.
+assert(cursor.increment());
+assert(cursor.increment(3) == 3);
 
 // Reverse traversal.
 assert(cursor.decrement());
 assert(cursor.decrement(3) == 3);
 
+// Search for extrema.
+cursor.find_minimum();
+cursor.find_maximum();
+
 // Key and value access.
 cursor.key();
 cursor.value();
-
-// Forward traversal.
-assert(cursor.increment());
-assert(cursor.increment(3) == 3);
 ```
 
 ### Transactions
@@ -123,15 +132,14 @@ Otherwise, transaction boundaries are defined by calls to either `commit()` or `
 ```C++
 db.insert(cub::_b("a"), cub::_b("1"));
 db.insert(cub::_b("b"), cub::_b("2"));
-db.insert(cub::_b("c"), cub::_b("3"));
 db.commit();
 
+db.insert(cub::_b("c"), cub::_b("3"));
 assert(db.remove(cub::_b("a")));
 assert(db.remove(cub::_b("b")));
-assert(db.remove(cub::_b("c")));
 db.abort();
 
-// Database still contains "a", "b", and "c".
+// Database still contains {"a", "1"} and {"b", "2"}.
 ```
 
 ## Features

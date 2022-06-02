@@ -201,7 +201,7 @@ auto Node::header_offset() const -> Index
 auto Node::recompute_usable_space() -> void
 {
     auto usable_space = gap_size() + frag_count();
-    for (Index i {}, ptr{free_start()}; i < free_count(); ++i) {
+    for (Index i {}, ptr {free_start()}; i < free_count(); ++i) {
         usable_space += m_page.get_u16(ptr + CELL_POINTER_SIZE);
         ptr = m_page.get_u16(ptr);
     }
@@ -492,4 +492,4 @@ auto Node::reset(bool reset_header) -> void
     recompute_usable_space();
 }
 
-} // db
+} // cub

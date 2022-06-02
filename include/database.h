@@ -16,10 +16,11 @@ public:
     class Impl;
 
     static auto open(const std::string&, const Options&) -> Database;
+    static auto temp(Size) -> Database;
     virtual ~Database();
-    auto lookup(BytesView, bool) -> std::optional<std::string>; // TODO: Make const
-    auto lookup_minimum() -> std::optional<std::string>;
-    auto lookup_maximum() -> std::optional<std::string>;
+    auto lookup(BytesView, bool) -> std::optional<Record>; // TODO: Make const
+    auto lookup_minimum() -> std::optional<Record>;
+    auto lookup_maximum() -> std::optional<Record>;
     auto insert(BytesView, BytesView) -> void;
     auto remove(BytesView) -> bool;
     auto commit() -> void;

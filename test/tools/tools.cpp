@@ -1,9 +1,13 @@
 
 #include <unordered_set>
 
+#include "fakes.h"
 #include "tools.h"
 #include "page/page.h"
 #include "tree/tree.h"
+#include "file/file.h"
+#include "wal/wal_reader.h"
+#include "wal/wal_record.h"
 
 namespace cub {
 
@@ -221,6 +225,8 @@ auto TreePrinter::ensure_level_exists(Index level) -> void
     CUB_EXPECT_GT(m_levels.size(), level);
 }
 
+unsigned RecordGenerator::default_seed = 0;
+
 auto RecordGenerator::generate(Size n, Parameters param) -> std::vector<Record>
 {
     const auto [ks0, ks1, vs0, vs1, _, should_sort] = param;
@@ -240,15 +246,52 @@ auto RecordGenerator::generate_unique(Size n) -> std::vector<Record>
 {
     std::unordered_set<std::string> keys;
     std::vector<Record> records(n);
-    Random random {0};
+    Random random {default_seed++};
 
     for (auto &[key, value]: records) {
         // Virtually impossible for duplicates at this length.
-        key = random_string(random, 12, 20);
-        value = random_string(random, 12, 20);
+        key = random.next_string(16);
+        value = random_string(random, 50, 100);
         CUB_EXPECT_EQ(keys.find(key), keys.end());
     }
     return records;
 }
 
-} // db
+auto WALPrinter::print(const WALRecord &record) -> void
+{
+    std::cout << "Record<LSN=" << record.lsn().value
+              << ", CRC=" << record.crc() << ", ";
+    if (record.is_commit()) {
+        std::cout << "COMMIT";
+    } else {
+        const auto update = record.payload().decode();
+        std::cout << "UPDATE(pid:" << update.page_id.value << ", n=" << update.changes.size() << ')';
+    }
+    std::cout << ">\n";
+}
+
+
+auto WALPrinter::print(const std::string &path, Size block_size) -> void
+{
+    auto file = std::make_unique<ReadOnlyFile>(path, Mode::DIRECT, 0666);
+    WALReader reader {std::move(file), block_size};
+    print(reader);
+}
+
+auto WALPrinter::print(SharedMemory data, Size block_size) -> void
+{
+    auto file = std::make_unique<ReadOnlyMemory>(std::move(data));
+    WALReader reader {std::move(file), block_size};
+    print(reader);
+}
+
+auto WALPrinter::print(WALReader &reader) -> void
+{
+    reader.reset();
+    do {
+        CUB_EXPECT_NE(reader.record(), std::nullopt);
+        print(*reader.record());
+    } while (reader.increment());
+}
+
+} // cub

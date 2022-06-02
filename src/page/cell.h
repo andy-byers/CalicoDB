@@ -1,10 +1,9 @@
-#ifndef CUB_CELL_H
-#define CUB_CELL_H
+#ifndef CUB_PAGE_CELL_H
+#define CUB_PAGE_CELL_H
 
 #include <optional>
-#include "common.h"
 #include "page.h"
-#include "utils/types.h"
+#include "utils/layout.h"
 
 namespace cub {
 
@@ -84,6 +83,6 @@ private:
     PageType m_page_type{};
 };
 
-} // Cub
+} // cub
 
-#endif // CUB_CELL_H
+#endif // CUB_PAGE_CELL_H

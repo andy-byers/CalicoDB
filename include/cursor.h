@@ -15,6 +15,8 @@ class Cursor {
 public:
     virtual ~Cursor();
     [[nodiscard]] auto has_record() const -> bool;
+    [[nodiscard]] auto is_minimum() const -> bool;
+    [[nodiscard]] auto is_maximum() const -> bool;
     [[nodiscard]] auto key() const -> BytesView;
     [[nodiscard]] auto value() const -> std::string;
     auto reset() -> void;

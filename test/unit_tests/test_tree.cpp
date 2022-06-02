@@ -23,6 +23,26 @@ namespace {
 
 using namespace cub;
 
+template<class T> auto tree_insert(T &tree, const std::string &key, const std::string &value) -> void
+{
+    tree.insert(_b(key), _b(value));
+    tree.set_payload(key, value);
+}
+
+template<class T> auto tree_lookup(T &tree, const std::string &key, std::string &result) -> bool
+{
+    if (const auto [node, index, found_eq] = tree.find_ge(_b(key), false); found_eq) {
+        result = tree.collect_value(node, index);
+        return true;
+    }
+    return false;
+}
+
+template<class T>  auto tree_remove(T &tree, const std::string &key) -> bool
+{
+    return tree.remove(_b(key));
+}
+
 class TestTree: public Tree {
 public:
     friend class TreeTests;
@@ -61,10 +81,11 @@ public:
 
     auto tree_contains(const std::string &key) -> bool
     {
-        if (const auto temp = lookup(_b(key), true)) {
-            const auto itr {m_payloads.find(key)};
+        std::string result;
+        if (tree_lookup(*this, key, result)) {
+            const auto itr = m_payloads.find(key);
             EXPECT_NE(itr, m_payloads.end()) << "Key " << key << " hasn't been added to the tree";
-            const auto same {temp == itr->second};
+            const auto same = result == itr->second;
             EXPECT_TRUE(same) << "Payload mismatch at key " << key;
             return same;
         }
@@ -81,26 +102,6 @@ template<std::size_t Length = 6> auto make_key(Index key) -> std::string
 {
     auto key_string = std::to_string(key);
     return std::string(Length - key_string.size(), '0') + key_string;
-}
-
-auto tree_insert(TestTree &tree, const std::string &key, const std::string &value) -> void
-{
-    tree.insert(_b(key), _b(value));
-    tree.set_payload(key, value);
-}
-
-[[maybe_unused]] auto tree_lookup(TestTree &tree, const std::string &key, std::string &result) -> bool
-{
-    if (const auto temp = tree.lookup(_b(key), true)) {
-        result = *temp;
-        return true;
-    }
-    return false;
-}
-
-[[maybe_unused]] auto tree_remove(TestTree &tree, const std::string &key) -> bool
-{
-    return tree.remove(_b(key));
 }
 
 class TreeBuilder {
@@ -220,7 +221,7 @@ public:
 
     ~TreeTests() override
     {
-        m_pool->flush();
+        m_pool->try_flush();
     }
 
     auto tree() -> TestTree&
@@ -524,7 +525,7 @@ TEST_F(TreeTests, LookupPastEnd)
     random_tree(m_random, builder, 100);
     std::string result;
     const auto key = make_key(101);
-    ASSERT_EQ(tree().lookup(_b(key), true), std::nullopt);
+    ASSERT_FALSE(tree_lookup(tree(), key, result));
 }
 
 TEST_F(TreeTests, LookupBeforeBeginning)
@@ -533,7 +534,7 @@ TEST_F(TreeTests, LookupBeforeBeginning)
     random_tree(m_random, builder, 100);
     std::string result;
     const auto key = make_key(0);
-    ASSERT_EQ(tree().lookup(_b(key), true), std::nullopt);
+    ASSERT_FALSE(tree_lookup(tree(), key, result));
 }
 
 TEST_F(TreeTests, InsertSanityCheck)

@@ -27,10 +27,12 @@ public:
     [[nodiscard]] virtual auto can_commit() const -> bool = 0;
     virtual auto commit() -> void = 0;
     virtual auto abort() -> void = 0;
-    virtual auto flush() -> void = 0;
+    virtual auto try_flush() -> bool = 0;
+    virtual auto try_flush_wal() -> bool = 0;
     virtual auto purge() -> void = 0;
-    virtual auto recover() -> void = 0;
+    virtual auto recover() -> bool = 0;
     virtual auto save_header(FileHeader&) -> void = 0;
+    virtual auto load_header(const FileHeader&) -> void = 0;
     virtual auto on_page_release(Page&) -> void = 0; // TODO
     virtual auto on_page_error() -> void = 0;
 };

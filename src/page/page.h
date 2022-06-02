@@ -3,9 +3,7 @@
 
 #include <optional>
 #include <vector>
-#include "common.h"
 #include "update.h"
-#include "utils/layout.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
 
@@ -71,10 +69,10 @@ private:
     std::optional<UpdateManager> m_updates;
     Bytes m_data;
     PID m_id;
-    bool m_is_writable{};
-    bool m_is_dirty{};
+    bool m_is_writable {};
+    bool m_is_dirty {};
 };
 
-} // db
+} // cub
 
 #endif // CUB_PAGE_PAGE_H

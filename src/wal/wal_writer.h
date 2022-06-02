@@ -41,6 +41,6 @@ private:
     LSN m_last_lsn;
 };
 
-} // Cub
+} // cub
 
 #endif // CUB_WAL_WAL_WRITER_H

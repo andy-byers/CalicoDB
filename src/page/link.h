@@ -52,6 +52,6 @@ private:
     Page m_page;
 };
 
-} // db
+} // cub
 
 #endif // CUB_PAGE_LINK_H

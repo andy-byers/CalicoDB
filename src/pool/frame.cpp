@@ -85,4 +85,4 @@ auto Frame::page_lsn() const -> LSN
     return LSN {get_uint32(data().range(offset))};
 }
 
-} // db
+} // cub

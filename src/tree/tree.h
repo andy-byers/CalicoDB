@@ -28,15 +28,24 @@ public:
     
     explicit Tree(Parameters);
     ~Tree() override = default;
-    [[nodiscard]] auto node_count() const -> Size override {return m_node_count;}
-    [[nodiscard]] auto cell_count() const -> Size override {return m_cell_count;}
+
+    [[nodiscard]] auto node_count() const -> Size override
+    {
+        return m_node_count;
+    }
+
+    [[nodiscard]] auto cell_count() const -> Size override
+    {
+        return m_cell_count;
+    }
+
     [[nodiscard]] auto collect_value(const Node&, Index) const -> std::string override;
     auto find_root(bool) -> Node override;
     auto find_ge(BytesView, bool) -> Result override;
     auto find_local_min(Node) -> Position override;
     auto find_local_max(Node) -> Position override;
     auto save_header(FileHeader&) -> void override;
-    auto lookup(BytesView, bool) -> std::optional<std::string> override;
+    auto load_header(const FileHeader&) -> void override;
     auto insert(BytesView, BytesView) -> void override;
     auto remove(BytesView) -> bool override;
     auto allocate_node(PageType) -> Node override;
@@ -45,13 +54,9 @@ public:
     auto make_cell(Node&, BytesView, BytesView) -> Cell;
 
 protected: // TODO
-    auto on_cursor_close(bool) -> void;
-
     auto positioned_insert(Position, BytesView, BytesView) -> void;
     auto positioned_modify(Position, BytesView) -> void;
     auto positioned_remove(Position) -> void;
-    auto do_insert(Node&, Index, Cell) -> void;
-    auto do_remove(Node, Index) -> void;
 
     // Overflow chains.
     auto allocate_overflow_chain(BytesView) -> PID;

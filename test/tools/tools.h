@@ -8,7 +8,9 @@
 #include "common.h"
 #include "random.h"
 #include "bytes.h"
+#include "utils/identifier.h"
 #include "utils/utils.h"
+#include "wal/wal_record.h"
 
 namespace cub {
 
@@ -55,6 +57,21 @@ private:
     ITree &m_tree;
 };
 
+class WALReader;
+class WALRecord;
+class SharedMemory;
+
+class WALPrinter {
+public:
+    WALPrinter() = default;
+    virtual ~WALPrinter() = default;
+
+    auto print(const WALRecord&) -> void;
+    auto print(WALReader&) -> void;
+    auto print(const std::string&, Size) -> void;
+    auto print(SharedMemory, Size) -> void;
+};
+
 [[maybe_unused]] inline auto hexdump(const Byte *data, Size size, Size indent = 0) -> void
 {
     CUB_EXPECT_GE(size, 0);
@@ -97,30 +114,10 @@ private:
     emit_line(i, rest_size);
 }
 
-struct MoveOnly {
-    MoveOnly() = default;
-
-    MoveOnly(const MoveOnly&) = delete;
-    auto operator=(const MoveOnly&) -> MoveOnly& = delete;
-
-    MoveOnly(MoveOnly&&) = default;
-    auto operator=(MoveOnly&&) -> MoveOnly& = default;
-};
-
-struct Record {
-    auto operator<(const Record &rhs) const -> bool
-    {
-        // NOTE: Could probably just use std::string::operator<(), but this works for strings containing
-        //       weird data, like '\0' in the middle.
-        return compare_three_way(_b(key), _b(rhs.key)) == ThreeWayComparison::LT;
-    }
-
-    std::string key;
-    std::string value;
-};
-
 class RecordGenerator {
 public:
+    static unsigned default_seed;
+
     struct Parameters {
         Size min_key_size {5};
         Size max_key_size {10};
@@ -142,8 +139,16 @@ template<class Db> auto insert_random_records(Db &db, Size n, RecordGenerator::P
 
 template<class Db> auto insert_random_unique_records(Db &db, Size n)
 {
-    for (const auto &[key, value]: RecordGenerator::generate_unique(n))
-        db.insert(_b(key), _b(value));
+    while (n) {
+        Size num_inserted {};
+        for (const auto &[key, value]: RecordGenerator::generate_unique(n)) {
+            if (!db.lookup(_b(key), true)) {
+                db.insert(_b(key), _b(value));
+                num_inserted++;
+            }
+        }
+        n -= num_inserted;
+    }
 }
 
 template<class Db, class F> auto traverse_db(Db &db, F &&f)
@@ -164,6 +169,88 @@ template<class Db> auto collect_records(Db &db) -> std::vector<Record>
     });
     return out;
 }
+
+class WALRecordGenerator {
+public:
+    explicit WALRecordGenerator(Size block_size)
+        : m_block_size {block_size}
+    {
+        CUB_EXPECT_GE(block_size, 0);
+        CUB_EXPECT_TRUE(is_power_of_two(block_size));
+    }
+
+    auto generate_small() -> WALRecord
+    {
+        const auto small_size = m_block_size / 0x10;
+        const auto total_update_size = random.next_int(small_size, small_size * 2);
+        const auto update_count = random.next_int(1UL, 5UL);
+        const auto mean_update_size = total_update_size / update_count;
+        return generate(mean_update_size, update_count);
+    }
+
+    auto generate_large() -> WALRecord
+    {
+        const auto large_size = m_block_size / 3 * 2;
+        const auto total_update_size = random.next_int(large_size, large_size * 2);
+        const auto update_count = random.next_int(1UL, 5UL);
+        const auto mean_update_size = total_update_size / update_count;
+        return generate(mean_update_size, update_count);
+    }
+
+    auto generate(Size mean_update_size, Size update_count) -> WALRecord
+    {
+        CUB_EXPECT_GT(mean_update_size, 0);
+        constexpr Size page_count = 0x1000;
+        const auto lower_bound = mean_update_size - mean_update_size/3;
+        const auto upper_bound = mean_update_size + mean_update_size/3;
+        const auto page_size = upper_bound;
+        CUB_EXPECT_LE(page_size, std::numeric_limits<uint16_t>::max());
+
+        m_snapshots_before.emplace_back(random.next_string(page_size));
+        m_snapshots_after.emplace_back(random.next_string(page_size));
+        std::vector<ChangedRegion> update {};
+
+        for (Index i {}; i < update_count; ++i) {
+            const auto size = random.next_int(lower_bound, upper_bound);
+            const auto offset = random.next_int(page_size - size);
+
+            update.emplace_back();
+            update.back().offset = offset;
+            update.back().before = _b(m_snapshots_before.back()).range(offset, size);
+            update.back().after = _b(m_snapshots_after.back()).range(offset, size);
+        }
+        WALRecord record {{
+            std::move(update),
+            PID {static_cast<uint32_t>(random.next_int(page_count))},
+            LSN::null(),
+            LSN {static_cast<uint32_t>(m_payloads.size() + ROOT_ID_VALUE)},
+        }};
+        m_payloads.push_back(_s(record.payload().data()));
+        return record;
+    }
+
+    auto validate_record(const WALRecord &record, LSN target_lsn) const -> void
+    {
+        CUB_EXPECT_EQ(record.lsn(), target_lsn);
+        const auto payload = retrieve_payload(target_lsn);
+        CUB_EXPECT_EQ(record.type(), WALRecord::Type::FULL);
+        CUB_EXPECT_TRUE(record.payload().data() == _b(payload));
+        CUB_EXPECT_TRUE(record.is_consistent());
+    }
+
+    [[nodiscard]] auto retrieve_payload(LSN lsn) const -> const std::string&
+    {
+        return m_payloads.at(lsn.as_index());
+    }
+
+    Random random {0};
+
+private:
+    std::vector<std::string> m_payloads;
+    std::vector<std::string> m_snapshots_before;
+    std::vector<std::string> m_snapshots_after;
+    Size m_block_size;
+};
 
 } // cub
 
