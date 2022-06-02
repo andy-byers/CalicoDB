@@ -3,9 +3,8 @@
 
 #include <list>
 #include <unordered_map>
-
 #include "common.h"
-#include "utils/layout.h"
+#include "utils/identifier.h"
 
 namespace cub {
 
@@ -31,6 +30,6 @@ private:
     Size m_miss_count{};
 };
 
-} // db
+} // cub
 
 #endif // CUB_POOL_PAGE_CACHE_H

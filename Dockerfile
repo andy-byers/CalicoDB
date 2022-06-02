@@ -27,8 +27,9 @@ COPY . ./CubDB
 
 RUN cd ./CubDB && \
     cmake . && \
-    cmake --build . \
+    cmake --build .
+
 RUN #./test/build/fuzz && \
-    ./test/build/unit #&& \
+    ./test/build/unit_tests #&& \
 #    ./test/build/integration && \
 #    ./test/build/benchmark

@@ -8,16 +8,6 @@
 
 namespace cub {
 
-class NodeHeader {
-public:
-    explicit NodeHeader(Page*);
-
-
-private:
-    Page *m_page {};
-    Size m_offset {};
-};
-
 class Node final {
 public:
     struct SearchResult {
@@ -27,7 +17,10 @@ public:
     Node(Page, bool);
     ~Node() = default;
 
-    auto take() -> Page {return std::move(m_page);}
+    auto take() -> Page
+    {
+        return std::move(m_page);
+    }
 
     [[nodiscard]] auto page() const -> const Page&
     {
@@ -75,10 +68,12 @@ public:
     auto child_id(Index) const -> PID;
 
     // Public header fields.
+    [[nodiscard]] auto header_crc() const -> Index;
     [[nodiscard]] auto parent_id() const -> PID;
     [[nodiscard]] auto right_sibling_id() const -> PID;
     [[nodiscard]] auto rightmost_child_id() const -> PID;
     [[nodiscard]] auto cell_count() const -> Size;
+    auto update_header_crc() -> void;
     auto set_parent_id(PID) -> void;
     auto set_right_sibling_id(PID) -> void;
     auto set_rightmost_child_id(PID) -> void;
@@ -122,6 +117,6 @@ private:
     Size m_usable_space{};
 };
 
-} // db
+} // cub
 
 #endif // CUB_PAGE_NODE_H

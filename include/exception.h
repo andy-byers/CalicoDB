@@ -6,7 +6,6 @@
 #include <exception>
 #include <system_error>
 #include <utility>
-
 #include "common.h"
 
 namespace cub {
@@ -17,7 +16,7 @@ public:
     //       Could just store a const char* for `what` instead, but it makes it difficult to assemble nice error messages.
     //       Maybe look into fmt library?
     explicit Exception(std::string what)
-        : m_what{std::move(what)} {}
+        : m_what {std::move(what)} {}
 
     ~Exception() override = default;
 
@@ -34,11 +33,11 @@ class SystemError: public Exception {
 public:
     SystemError(const std::string &name, int code)
         : Exception(name + ": " + strerror(code))
-          , m_code{code, std::system_category()} {}
+          , m_code {code, std::system_category()} {}
 
     explicit SystemError(const std::string &name)
         : Exception(name + ": " + strerror(errno))
-          , m_code{std::exchange(errno, 0), std::system_category()} {}
+          , m_code {std::exchange(errno, 0), std::system_category()} {}
 
     ~SystemError() override = default;
 
@@ -61,16 +60,16 @@ class IOError: public SystemError {
 public:
     static auto partial_read() -> IOError
     {
-        return IOError{SystemError{"read", std::make_error_code(std::errc::io_error).value()}}; // TODO: Better way?
+        return IOError {SystemError {"read (partial)", std::make_error_code(std::errc::io_error).value()}}; // TODO: Better way?
     }
 
     static auto partial_write() -> IOError
     {
-        return IOError{SystemError{"write", std::make_error_code(std::errc::io_error).value()}};
+        return IOError {SystemError {"write (partial)", std::make_error_code(std::errc::io_error).value()}};
     }
 
     explicit IOError(const SystemError &error)
-        : SystemError{error} {}
+        : SystemError {error} {}
 
     ~IOError() override = default;
 };
@@ -78,7 +77,7 @@ public:
 class CorruptionError: public Exception {
 public:
     explicit CorruptionError(const std::string &what)
-        : Exception{what} {}
+        : Exception {what} {}
 
     ~CorruptionError() override = default;
 };
@@ -86,7 +85,7 @@ public:
 class InvalidArgumentError: public Exception {
 public:
     explicit InvalidArgumentError(const std::string &what)
-        : Exception{what} {}
+        : Exception {what} {}
 
     ~InvalidArgumentError() override = default;
 };
@@ -94,11 +93,11 @@ public:
 class InvalidOperationError: public Exception {
 public:
     explicit InvalidOperationError(const std::string &what)
-        : Exception{what} {}
+        : Exception {what} {}
 
     ~InvalidOperationError() override = default;
 };
 
-} // db
+} // cub
 
 #endif // CUB_EXCEPTION_H

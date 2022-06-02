@@ -11,7 +11,7 @@ using namespace cub;
 
 class PageCacheTests: public testing::Test {
 public:
-    const LSN LARGE_LSN{1'000'000'000};
+    const LSN LARGE_LSN {1'000'000'000};
 
     ~PageCacheTests() override = default;
 

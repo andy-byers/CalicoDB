@@ -12,6 +12,12 @@ Pager::Pager(Parameters param)
     , m_frame_count{param.frame_count}
     , m_page_size{param.page_size}
 {
+    if (m_frame_count < MIN_FRAME_COUNT)
+        throw InvalidArgumentError {"Frame count is too small"};
+
+    if (m_frame_count > MAX_FRAME_COUNT)
+        throw InvalidArgumentError {"Frame count is too large"};
+
     CUB_EXPECT_NOT_NULL(m_file);
     while (m_available.size() < m_frame_count)
         m_available.emplace_back(m_page_size);
@@ -37,8 +43,8 @@ auto Pager::truncate(Size page_count) -> void
  * Pin a database page.
  *
  * Guarantees that if an exception is thrown, the caller will see no change to this object's
- * state. That is, the frame we tried to use will still be available, given that the exception
- * is caught by the caller.
+ * state. That is, the frame we tried to use will still be available after the exception is
+ * handled.
  *
  * @param id Page ID of the page we want to pin.
  * @return A frame with the requested database page contents pinned.
@@ -50,7 +56,6 @@ auto Pager::pin(PID id) -> std::optional<Frame>
         return std::nullopt;
 
     auto &frame = m_available.back();
-    // Frame is still in the list, so we are safe if this throws.
     if (!try_read_page_from_file(id, frame.data()))
         mem_clear(frame.data());
 
@@ -69,15 +74,14 @@ auto Pager::discard(Frame frame) -> void
 auto Pager::unpin(Frame frame) -> void
 {
     CUB_EXPECT_EQ(frame.ref_count(), 0);
-    // Save some state before we lose the frame reference.
     const auto needs_write = frame.is_dirty();
     const auto id = frame.page_id();
     const auto data = frame.data();
 
     frame.reset(PID::null());
-    m_available.emplace_back(std::move(frame));
+    if (m_available.size() < m_frame_count)
+        m_available.emplace_back(std::move(frame));
 
-    // Frame is already put back in the list, so we are safe if this throws.
     if (needs_write)
         write_page_to_file(id, data);
 }
@@ -103,4 +107,4 @@ auto Pager::write_page_to_file(PID id, BytesView in) const -> void
     write_exact_at(*m_file, in, offset);
 }
 
-} // db
+} // cub

@@ -38,6 +38,8 @@ auto WALWriter::has_committed() const -> bool
 
 auto WALWriter::write(WALRecord record)  -> LSN
 {
+//    printf("%u: ic? %d\n", record.lsn().value, record.is_commit());
+
     std::optional<WALRecord> temp {std::move(record)};
     const auto lsn = temp->lsn();
     auto flushed = false;
@@ -98,4 +100,4 @@ auto WALWriter::flush() -> LSN
     return LSN::null();
 }
 
-} // Cub
+} // cub

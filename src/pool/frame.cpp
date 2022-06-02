@@ -61,7 +61,7 @@ auto Frame::borrow(IBufferPool *parent, bool is_writable) -> Page
         m_is_writable = true;
     }
     m_ref_count++;
-    return {{m_page_id, data(), parent, is_writable, m_is_dirty}};
+    return Page{{m_page_id, data(), parent, is_writable, m_is_dirty}};
 }
 
 auto Frame::synchronize(Page &page) -> void
@@ -85,4 +85,4 @@ auto Frame::page_lsn() const -> LSN
     return LSN {get_uint32(data().range(offset))};
 }
 
-} // db
+} // cub

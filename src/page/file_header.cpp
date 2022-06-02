@@ -1,8 +1,9 @@
-#include "encoding.h"
-#include "layout.h"
-#include "page/page.h"
+#include "file_header.h"
+#include "utils/crc.h"
+#include "utils/encoding.h"
+#include "utils/identifier.h"
+#include "utils/layout.h"
 #include "page/node.h"
-#include "types.h"
 
 namespace cub {
 
@@ -13,7 +14,7 @@ FileHeader::FileHeader(Node &root)
     // Causes the whole file header region to be written to the WAL.
     : m_header{root.page().mut_range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)}
 {
-    CUB_EXPECT_TRUE(root.page().id().is_root());
+    CUB_EXPECT_TRUE(root.id().is_root());
 }
 
 auto FileHeader::data() -> Bytes
@@ -29,6 +30,11 @@ auto FileHeader::data() const -> BytesView
 auto FileHeader::magic_code() const -> Index
 {
     return get_uint32(m_header.range(FileLayout::MAGIC_CODE_OFFSET));
+}
+
+auto FileHeader::header_crc() const -> Index
+{
+    return get_uint32(m_header.range(FileLayout::HEADER_CRC_OFFSET));
 }
 
 auto FileHeader::page_count() const -> Size
@@ -48,7 +54,7 @@ auto FileHeader::free_count() const -> Size
 
 auto FileHeader::free_start() const -> PID
 {
-    return PID{get_uint32(m_header.range(FileLayout::FREE_START_OFFSET))};
+    return PID {get_uint32(m_header.range(FileLayout::FREE_START_OFFSET))};
 }
 
 auto FileHeader::page_size() const -> Size
@@ -68,12 +74,18 @@ auto FileHeader::key_count() const -> Size
 
 auto FileHeader::flushed_lsn() const -> LSN
 {
-    return LSN{get_uint32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET))};
+    return LSN {get_uint32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET))};
 }
 
-auto FileHeader::set_magic_code() -> void
+auto FileHeader::update_magic_code() -> void
 {
     put_uint32(m_header.range(FileLayout::MAGIC_CODE_OFFSET), MAGIC_CODE);
+}
+
+auto FileHeader::update_header_crc() -> void
+{
+    const auto offset = FileLayout::HEADER_CRC_OFFSET;
+    put_uint32(m_header.range(offset), crc_32(m_header.range(offset + sizeof(uint32_t))));
 }
 
 auto FileHeader::set_page_count(Size page_count) -> void
@@ -122,4 +134,15 @@ auto FileHeader::set_flushed_lsn(LSN flushed_lsn) -> void
     put_uint32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET), flushed_lsn.value);
 }
 
-} // db
+auto FileHeader::is_magic_code_consistent() const -> bool
+{
+    return magic_code() == MAGIC_CODE;
+}
+
+auto FileHeader::is_header_crc_consistent() const -> bool
+{
+    const auto offset = FileLayout::HEADER_CRC_OFFSET + sizeof(uint32_t);
+    return header_crc() == crc_32(m_header.range(offset));
+}
+
+} // cub

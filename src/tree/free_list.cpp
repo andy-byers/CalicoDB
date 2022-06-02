@@ -1,5 +1,5 @@
-#include "common.h"
 #include "free_list.h"
+#include "page/file_header.h"
 #include "page/link.h"
 #include "page/page.h"
 #include "pool/interface.h"
@@ -11,14 +11,16 @@ FreeList::FreeList(const Parameters &param)
     , m_free_start {param.free_start}
     , m_free_count {param.free_count} {}
 
-auto FreeList::free_start() const -> PID
+auto FreeList::save_header(FileHeader &header) const-> void
 {
-    return m_free_start;
+    header.set_free_start(m_free_start);
+    header.set_free_count(m_free_count);
 }
 
-auto FreeList::free_count() const -> Size
+auto FreeList::load_header(const FileHeader &header) -> void
 {
-    return m_free_count;
+    m_free_start = header.free_start();
+    m_free_count = header.free_count();
 }
 
 auto FreeList::push(Page page) -> void
@@ -42,4 +44,4 @@ auto FreeList::pop() -> std::optional<Page>
     return std::nullopt;
 }
 
-} // Cub
+} // cub

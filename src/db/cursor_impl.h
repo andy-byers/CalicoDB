@@ -2,6 +2,7 @@
 #define CUB_DB_CURSOR_IMPL_H
 
 #include <optional>
+#include <shared_mutex>
 #include "common.h"
 #include "cursor.h"
 #include "page/node.h"
@@ -15,9 +16,11 @@ struct PID;
 
 class Cursor::Impl {
 public:
-    explicit Impl(ITree*);
+    explicit Impl(ITree*, std::shared_mutex&);
     ~Impl() = default;
     [[nodiscard]] auto has_record() const -> bool;
+    [[nodiscard]] auto is_minimum() const -> bool;
+    [[nodiscard]] auto is_maximum() const -> bool;
     [[nodiscard]] auto key() const -> BytesView;
     [[nodiscard]] auto value() const -> std::string;
     auto reset() -> void;
@@ -48,20 +51,14 @@ private:
     auto find_local_min() -> void;
     auto find_local_max() -> void;
     auto move_cursor(PID) -> void;
-    auto take() -> Node
-    {
-        CUB_EXPECT_TRUE(has_node());
-        auto node = std::move(*m_node);
-        m_node.reset();
-        return node;
-    }
 
+    std::shared_lock<std::shared_mutex> m_lock;
     Unique<ITree*> m_source;        ///< Tree that the cursor belongs to
     std::vector<Index> m_traversal; ///< Cell IDs encountered on the current traversal
     std::optional<Node> m_node;     ///< Node that the cursor is over
     Index m_index {};               ///< Position in the current node
 };
 
-} // db
+} // cub
 
 #endif // CUB_DB_CURSOR_IMPL_H

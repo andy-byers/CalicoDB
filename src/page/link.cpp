@@ -1,4 +1,6 @@
 #include "link.h"
+#include "utils/encoding.h"
+#include "utils/layout.h"
 
 namespace cub {
 
@@ -8,23 +10,31 @@ Link::Link(Page page)
 auto Link::next_id() const -> PID
 {
     const auto offset = LinkLayout::header_offset() + LinkLayout::NEXT_ID_OFFSET;
-    return PID{get_uint32(m_page.range(offset))};
+    return PID {m_page.get_u32(offset)};
 }
 
 auto Link::set_next_id(PID id) -> void
 {
     const auto offset = LinkLayout::header_offset() + LinkLayout::NEXT_ID_OFFSET;
-    put_uint32(m_page.mut_range(offset), id.value);
+    m_page.put_u32(offset, id.value);
+}
+
+auto Link::content_size() const -> Size
+{
+    return m_page.size() - LinkLayout::content_offset();
 }
 
 auto Link::ref_content() const -> BytesView
 {
-    return m_page.range(LinkLayout::content_offset());
+    const auto offset = LinkLayout::content_offset();
+    return m_page.range(offset, m_page.size() - offset);
 }
 
-auto Link::mut_content() -> Bytes
+auto Link::mut_content(Size size) -> Bytes
 {
-    return m_page.mut_range(LinkLayout::content_offset());
+    // Takes a size parameter to avoid updating more of the page than is necessary. See
+    // Page::do_change() in page.cpp.
+    return m_page.mut_range(LinkLayout::content_offset(), size);
 }
 
-} // Cub
+} // cub

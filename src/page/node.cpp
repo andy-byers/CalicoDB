@@ -1,6 +1,13 @@
 #include "node.h"
+#include "utils/crc.h"
+#include "utils/encoding.h"
 
 namespace cub {
+
+auto Node::header_crc() const -> Index
+{
+    return m_page.get_u32(header_offset() + NodeLayout::HEADER_CRC_OFFSET);
+}
 
 auto Node::parent_id() const -> PID
 {
@@ -10,89 +17,96 @@ auto Node::parent_id() const -> PID
 auto Node::right_sibling_id() const -> PID
 {
     CUB_EXPECT_TRUE(is_external());
-    return PID{get_uint32(m_page.range(header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET))};
+    return PID {get_uint32(m_page.range(header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET))};
 }
 
 auto Node::rightmost_child_id() const -> PID
 {
     CUB_EXPECT_FALSE(is_external());
-    return PID{get_uint32(m_page.range(header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET))};
+    return PID {get_uint32(m_page.range(header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET))};
 }
 
 auto Node::cell_count() const -> Size
 {
-    return get_uint16(m_page.range(header_offset() + NodeLayout::CELL_COUNT_OFFSET));
+    return m_page.get_u16(header_offset() + NodeLayout::CELL_COUNT_OFFSET);
 }
 
 auto Node::free_count() const -> Size
 {
-    return get_uint16(m_page.range(header_offset() + NodeLayout::FREE_COUNT_OFFSET));
+    return m_page.get_u16(header_offset() + NodeLayout::FREE_COUNT_OFFSET);
 }
 
 auto Node::cell_start() const -> Index
 {
-    return get_uint16(m_page.range(header_offset() + NodeLayout::CELL_START_OFFSET));
+    return m_page.get_u16(header_offset() + NodeLayout::CELL_START_OFFSET);
 }
 
 auto Node::free_start() const -> Index
 {
-    return get_uint16(m_page.range(header_offset() + NodeLayout::FREE_START_OFFSET));
+    return m_page.get_u16(header_offset() + NodeLayout::FREE_START_OFFSET);
 }
 
 auto Node::frag_count() const -> Size
 {
-    return get_uint16(m_page.range(header_offset() + NodeLayout::FRAG_COUNT_OFFSET));
+    return m_page.get_u16(header_offset() + NodeLayout::FRAG_COUNT_OFFSET);
+}
+
+auto Node::update_header_crc() -> void
+{
+    const auto offset = header_offset() + NodeLayout::HEADER_CRC_OFFSET;
+    // This includes the old crc value in the new one.
+    m_page.put_u32(offset, crc_32(m_page.range(header_offset(), NodeLayout::HEADER_SIZE)));
 }
 
 auto Node::set_parent_id(PID parent_id) -> void
 {
     CUB_EXPECT_NE(id(), PID::root());
     const auto offset = header_offset() + NodeLayout::PARENT_ID_OFFSET;
-    put_uint32(m_page.mut_range(offset), parent_id.value);
+    m_page.put_u32(offset, parent_id.value);
 }
 
 auto Node::set_right_sibling_id(PID right_sibling_id) -> void
 {
     CUB_EXPECT_TRUE(is_external());
     const auto offset = header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
-    put_uint32(m_page.mut_range(offset), right_sibling_id.value);
+    m_page.put_u32(offset, right_sibling_id.value);
 }
 
 auto Node::set_rightmost_child_id(PID rightmost_child_id) -> void
 {
     CUB_EXPECT_FALSE(is_external());
     const auto offset = header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET;
-    put_uint32(m_page.mut_range(offset), rightmost_child_id.value);
+    m_page.put_u32(offset, rightmost_child_id.value);
 }
 
 auto Node::set_cell_count(Size cell_count) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, cell_count);
-    put_uint16(m_page.mut_range(header_offset() + NodeLayout::CELL_COUNT_OFFSET), static_cast<uint16_t>(cell_count));
+    m_page.put_u16(header_offset() + NodeLayout::CELL_COUNT_OFFSET, static_cast<uint16_t>(cell_count));
 }
 
 auto Node::set_free_count(Size free_count) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, free_count);
-    put_uint16(m_page.mut_range(header_offset() + NodeLayout::FREE_COUNT_OFFSET), static_cast<uint16_t>(free_count));
+    m_page.put_u16(header_offset() + NodeLayout::FREE_COUNT_OFFSET, static_cast<uint16_t>(free_count));
 }
 
 auto Node::set_cell_start(Index cell_start) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, cell_start);
-    put_uint16(m_page.mut_range(header_offset() + NodeLayout::CELL_START_OFFSET), static_cast<uint16_t>(cell_start));
+    m_page.put_u16(header_offset() + NodeLayout::CELL_START_OFFSET, static_cast<uint16_t>(cell_start));
 }
 
 auto Node::set_free_start(Index free_start) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, free_start);
-    put_uint16(m_page.mut_range(header_offset() + NodeLayout::FREE_START_OFFSET), static_cast<uint16_t>(free_start));
+    m_page.put_u16(header_offset() + NodeLayout::FREE_START_OFFSET, static_cast<uint16_t>(free_start));
 }
 
 auto Node::set_frag_count(Size frag_count) -> void
 {
     CUB_EXPECT_BOUNDED_BY(uint16_t, frag_count);
-    put_uint16(m_page.mut_range(header_offset() + NodeLayout::FRAG_COUNT_OFFSET), static_cast<uint16_t>(frag_count));
+    m_page.put_u16(header_offset() + NodeLayout::FRAG_COUNT_OFFSET, static_cast<uint16_t>(frag_count));
 }
 
 auto Node::usable_space() const -> Size
@@ -187,7 +201,7 @@ auto Node::header_offset() const -> Index
 auto Node::recompute_usable_space() -> void
 {
     auto usable_space = gap_size() + frag_count();
-    for (Index i {}, ptr{free_start()}; i < free_count(); ++i) {
+    for (Index i {}, ptr {free_start()}; i < free_count(); ++i) {
         usable_space += m_page.get_u16(ptr + CELL_POINTER_SIZE);
         ptr = m_page.get_u16(ptr);
     }
@@ -478,4 +492,4 @@ auto Node::reset(bool reset_header) -> void
     recompute_usable_space();
 }
 
-} // db
+} // cub

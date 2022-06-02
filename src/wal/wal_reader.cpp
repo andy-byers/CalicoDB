@@ -9,13 +9,14 @@ namespace cub {
 
 WALReader::WALReader(std::unique_ptr<IReadOnlyFile> file, Size block_size)
     : m_block(block_size, '\x00')
-    , m_file{std::move(file)} {}
+    , m_file {std::move(file)} {}
 
 auto WALReader::reset() -> void
 {
     m_file->seek(0, Seek::BEGIN);
     m_has_block = false;
     m_cursor = 0;
+    m_block_id = 0;
     m_positions.clear();
     m_record.reset();
     increment();
@@ -30,6 +31,7 @@ auto WALReader::increment() -> bool
 {
     if (auto record = read_next()) {
         m_record = std::move(record);
+
         return true;
     }
     return false;
@@ -76,7 +78,7 @@ auto WALReader::read_next() -> std::optional<WALRecord>
         }
     }
     if (!record.is_consistent())
-        throw CorruptionError{"Record has an invalid CRC"};
+        throw CorruptionError {"Record has an invalid CRC"};
     return record;
 }
 
@@ -128,7 +130,7 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
         case WALRecord::Type::EMPTY:
             return std::nullopt;
         default:
-            throw CorruptionError{"WAL record type is invalid"};
+            throw CorruptionError {"WAL record type is invalid"};
     }
 }
 
@@ -184,4 +186,4 @@ auto WALReader::read_block() -> bool
     }
 }
 
-} // db
+} // cub

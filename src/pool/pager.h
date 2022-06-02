@@ -2,10 +2,8 @@
 #define CUB_POOL_PAGER_H
 
 #include <list>
-#include <unordered_map>
-
+#include <optional>
 #include "common.h"
-#include "interface.h"
 
 namespace cub {
 
@@ -38,6 +36,6 @@ private:
     Size m_page_size{};
 };
 
-} // db
+} // cub
 
 #endif // CUB_POOL_PAGER_H

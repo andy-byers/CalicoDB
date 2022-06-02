@@ -1,10 +1,9 @@
 #include "page.h"
 #include "pool/interface.h"
+#include "utils/encoding.h"
 #include "utils/layout.h"
 
 namespace cub {
-
-static constexpr auto MAX_CHANGES = 50;
 
 Page::Page(const Parameters &param)
     : m_pool {param.source}
@@ -22,10 +21,8 @@ auto Page::operator=(Page &&rhs) noexcept -> Page&
 {
     if (this != &rhs) {
         do_release();
-        m_snapshot.reset();
         m_pool = std::move(rhs.m_pool);
-        m_snapshot = std::exchange(rhs.m_snapshot, {});
-        m_changes = std::move(rhs.m_changes);
+        m_updates = std::exchange(rhs.m_updates, {});
         m_data = std::exchange(rhs.m_data, {});
         m_id = std::exchange(rhs.m_id, {});
         m_is_dirty = std::exchange(rhs.m_is_dirty, false);
@@ -135,6 +132,7 @@ auto Page::put_u32(Index offset, uint32_t value) -> void
 
 auto Page::write(BytesView in, Index offset) -> void
 {
+    do_change(offset, in.size());
     mem_copy(m_data.range(offset, in.size()), in);
 }
 
@@ -145,29 +143,26 @@ auto Page::raw_data() -> Bytes
 
 auto Page::has_changes() const -> bool
 {
-    return !m_changes.empty();
+    return m_updates && m_updates->has_changes();
 }
 
 auto Page::collect_changes() -> std::vector<ChangedRegion>
 {
-    std::vector<ChangedRegion> changes {};
-    if (m_snapshot) {
-        changes = std::exchange(m_changes, {});
-        if (m_changes.size() == MAX_CHANGES)
-            changes = {{0, m_snapshot->data(), m_data}};
-    }
-    return changes;
+    if (m_updates)
+        return m_updates->collect_changes(m_data);
+    return {};
 }
 
 auto Page::enable_tracking(Scratch scratch) -> void
 {
     CUB_EXPECT_EQ(scratch.size(), m_data.size());
     mem_copy(scratch.data(), m_data);
-    m_snapshot = std::move(scratch);
+    m_updates = UpdateManager {std::move(scratch)};
 }
 
 auto Page::undo_changes(LSN previous_lsn, const std::vector<ChangedRegion> &changes) -> void
 {
+    CUB_EXPECT_GE(lsn(), previous_lsn);
     for (const auto &region: changes)
         mem_copy(m_data.range(region.offset), region.before, region.before.size());
     set_lsn(previous_lsn);
@@ -175,6 +170,7 @@ auto Page::undo_changes(LSN previous_lsn, const std::vector<ChangedRegion> &chan
 
 auto Page::redo_changes(LSN next_lsn, const std::vector<ChangedRegion> &changes) -> void
 {
+    CUB_EXPECT_LT(lsn(), next_lsn);
     for (const auto &region: changes)
         mem_copy(m_data.range(region.offset), region.after, region.after.size());
     set_lsn(next_lsn);
@@ -188,11 +184,8 @@ auto Page::do_change(Index offset, Size size) -> void
 
     m_is_dirty = true;
 
-    if (m_snapshot && m_changes.size() < MAX_CHANGES) {
-        const auto before = m_snapshot->data().range(offset, size);
-        const auto after = range(offset, size);
-        m_changes.emplace_back(ChangedRegion{offset, before, after});
-    }
+    if (m_updates)
+        m_updates->indicate_change(offset, size);
 }
 
-} // db
+} // cub

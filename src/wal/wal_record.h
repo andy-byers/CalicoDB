@@ -70,16 +70,48 @@ public:
 
     using Parameters = WALPayload::Parameters;
 
+    static auto commit(LSN) -> WALRecord;
     WALRecord() = default;
     explicit WALRecord(const Parameters&);
     ~WALRecord() = default;
+
+    [[nodiscard]] auto lsn() const -> LSN
+    {
+        return m_lsn;
+    }
+
+    [[nodiscard]] auto crc() const -> Index
+    {
+        return m_crc;
+    }
+
+    [[nodiscard]] auto type() const -> Type
+    {
+        return m_type;
+    }
+
+    [[nodiscard]] auto size() const -> Size
+    {
+        return m_payload.m_data.size() + HEADER_SIZE;
+    }
+
+    [[nodiscard]] auto payload() const -> const WALPayload&
+    {
+        return m_payload;
+    }
+
+    [[nodiscard]] auto is_commit() const -> bool
+    {
+        CUB_EXPECT_EQ(m_type, Type::FULL);
+        return m_payload.is_commit();
+    }
+
+    [[nodiscard]] auto decode() const -> PageUpdate
+    {
+        return m_payload.decode();
+    }
+
     [[nodiscard]] auto is_consistent() const -> bool;
-    [[nodiscard]] auto is_commit() const -> bool;
-    [[nodiscard]] auto lsn() const -> LSN;
-    [[nodiscard]] auto crc() const -> Index;
-    [[nodiscard]] auto type() const -> Type;
-    [[nodiscard]] auto size() const -> Size;
-    [[nodiscard]] auto payload() const -> const WALPayload&;
     auto read(BytesView) -> void;
     auto write(Bytes) const noexcept -> void;
     auto split(Index) -> WALRecord;
@@ -92,6 +124,6 @@ private:
     Type m_type {Type::EMPTY};
 };
 
-} // db
+} // cub
 
 #endif // CUB_WAL_WAL_RECORD_H

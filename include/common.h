@@ -7,6 +7,7 @@
 #define CUB_COMMON_H
 
 #include <cstdlib>
+#include <string>
 
 #if (!defined(_WIN32) && !defined(_WIN64)) && (defined(__unix__) || defined(__unix) || defined(__APPLE__))
 #    define CUB_UNIX
@@ -41,6 +42,13 @@ struct Options {
     int permissions {DEFAULT_PERMISSIONS};
 };
 
-} // db
+struct Record {
+    auto operator<(const Record&) const -> bool;
+
+    std::string key;
+    std::string value;
+};
+
+} // cub
 
 #endif // CUB_COMMON_H

@@ -43,6 +43,6 @@ private:
     bool m_is_dirty {};
 };
 
-} // db
+} // cub
 
 #endif // CUB_POOL_FRAME_H

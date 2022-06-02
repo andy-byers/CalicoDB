@@ -2,15 +2,12 @@
 #define CUB_DATABASE_H
 
 #include <memory>
+#include <optional>
 #include "bytes.h"
 #include "common.h"
 
 namespace cub {
 
-class ITree;
-class IBufferPool;
-class Tree;
-class BufferPool;
 class Cursor;
 class Info;
 
@@ -19,8 +16,11 @@ public:
     class Impl;
 
     static auto open(const std::string&, const Options&) -> Database;
+    static auto temp(Size) -> Database;
     virtual ~Database();
-    auto lookup(BytesView, std::string&) -> bool; // TODO: Make const
+    auto lookup(BytesView, bool) -> std::optional<Record>; // TODO: Make const
+    auto lookup_minimum() -> std::optional<Record>;
+    auto lookup_maximum() -> std::optional<Record>;
     auto insert(BytesView, BytesView) -> void;
     auto remove(BytesView) -> bool;
     auto commit() -> void;
@@ -37,6 +37,18 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // db
+class Info {
+public:
+    explicit Info(Database::Impl*);
+    auto cache_hit_ratio() const -> double;
+    auto record_count() const -> Size;
+    auto page_count() const -> Size;
+    auto transaction_size() const -> Size;
+
+private:
+    Database::Impl *m_db;
+};
+
+} // cub
 
 #endif // CUB_DATABASE_H

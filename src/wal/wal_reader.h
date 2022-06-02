@@ -46,6 +46,6 @@ private:
     bool m_has_block{};
 };
 
-} // db
+} // cub
 
 #endif // CUB_WAL_WAL_READER_H

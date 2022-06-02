@@ -1,8 +1,9 @@
-#ifndef CUB_POOL_PERSISTENT_POOL_H
-#define CUB_POOL_PERSISTENT_POOL_H
+#ifndef CUB_POOL_BUFFER_POOL_H
+#define CUB_POOL_BUFFER_POOL_H
 
-#include <mutex>
 #include <list>
+#include <mutex>
+#include <stdexcept>
 #include <unordered_map>
 
 #include "common.h"
@@ -23,14 +24,20 @@ class Page;
 class BufferPool: public IBufferPool {
 public:
     struct Parameters {
-        std::unique_ptr<IReadWriteFile> database_storage;
+        std::unique_ptr<IReadWriteFile> pool_file;
         std::unique_ptr<IWALReader> wal_reader;
         std::unique_ptr<IWALWriter> wal_writer;
         LSN flushed_lsn;
-        Size frame_count{};
-        Size page_count{};
-        Size page_size{};
+        Size frame_count {};
+        Size page_count {};
+        Size page_size {};
     };
+
+//    enum PageMode {
+//        QUERY,
+//        UPDATE,
+//        TRACKED,
+//    };
 
     explicit BufferPool(Parameters);
     ~BufferPool() override = default;
@@ -42,16 +49,20 @@ public:
     [[nodiscard]] auto hit_ratio() const -> double override;
     [[nodiscard]] auto allocate(PageType) -> Page override;
     [[nodiscard]] auto acquire(PID, bool) -> Page override;
-    auto flush() -> void override;
+    [[nodiscard]] auto can_commit() const -> bool override;
+    auto try_flush() -> bool override;
+    auto try_flush_wal() -> bool override;
     auto commit() -> void override;
     auto abort() -> void override;
     auto purge() -> void override;
-    auto recover() -> void override;
+    auto recover() -> bool override;
     auto save_header(FileHeader&) -> void override;
+    auto load_header(const FileHeader&) -> void override;
     auto on_page_release(Page&) -> void override;
     auto on_page_error() -> void override;
 
 private:
+    auto propagate_page_error() -> void;
     auto log_update(Page&) -> void;
     auto roll_forward() -> bool;
     auto roll_backward() -> void;
@@ -62,15 +73,16 @@ private:
     std::unordered_map<PID, Frame, PID::Hasher> m_pinned;
     std::unique_ptr<IWALReader> m_wal_reader;
     std::unique_ptr<IWALWriter> m_wal_writer;
+    std::exception_ptr m_error;
     ScratchManager m_scratch;
     PageCache m_cache;
     Pager m_pager;
-    LSN m_flushed_lsn{};
-    LSN m_next_lsn{};
-    Size m_page_count{};
-    Size m_ref_sum{};
+    LSN m_flushed_lsn;
+    LSN m_next_lsn;
+    Size m_page_count {};
+    Size m_ref_sum {};
 };
 
-} // db
+} // cub
 
-#endif // CUB_POOL_PERSISTENT_POOL_H
+#endif // CUB_POOL_BUFFER_POOL_H

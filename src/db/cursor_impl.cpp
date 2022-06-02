@@ -6,8 +6,9 @@
 
 namespace cub {
 
-Cursor::Impl::Impl(ITree *source)
-    : m_source {source}
+Cursor::Impl::Impl(ITree *source, std::shared_mutex &mutex)
+    : m_lock {mutex}
+    , m_source {source}
 {
     reset();
 }
@@ -15,6 +16,16 @@ Cursor::Impl::Impl(ITree *source)
 auto Cursor::Impl::has_record() const -> bool
 {
     return has_node() && m_index < m_node->cell_count();
+}
+
+auto Cursor::Impl::is_minimum() const -> bool
+{
+    return has_record() && !can_decrement();
+}
+
+auto Cursor::Impl::is_maximum() const -> bool
+{
+    return has_record() && !can_increment();
 }
 
 /**
@@ -305,6 +316,16 @@ auto Cursor::operator=(Cursor&&) noexcept -> Cursor& = default;
 auto Cursor::has_record() const -> bool
 {
     return m_impl->has_record();
+}
+
+auto Cursor::is_minimum() const -> bool
+{
+    return m_impl->is_minimum();
+}
+
+auto Cursor::is_maximum() const -> bool
+{
+    return m_impl->is_maximum();
 }
 
 auto Cursor::key() const -> BytesView

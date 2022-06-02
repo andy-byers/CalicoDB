@@ -88,36 +88,21 @@ auto WALPayload::decode() const -> PageUpdate
     return update;
 }
 
+auto WALRecord::commit(LSN commit_lsn) -> WALRecord
+{
+    return WALRecord{{
+        {},
+        PID::null(),
+        LSN::null(),
+        commit_lsn,
+    }};
+}
+
 WALRecord::WALRecord(const Parameters &param)
     : m_payload{param}
     , m_lsn{param.lsn}
     , m_crc{crc_32(m_payload.data())}
     , m_type{Type::FULL} {}
-
-auto WALRecord::lsn() const -> LSN
-{
-    return m_lsn;
-}
-
-auto WALRecord::crc() const -> Index
-{
-    return m_crc;
-}
-
-auto WALRecord::type() const -> Type
-{
-    return m_type;
-}
-
-auto WALRecord::size() const -> Size
-{
-    return m_payload.m_data.size() + HEADER_SIZE;
-}
-
-auto WALRecord::payload() const -> const WALPayload&
-{
-    return m_payload;
-}
 
 auto WALRecord::read(BytesView in) -> void
 {
@@ -181,12 +166,6 @@ auto WALRecord::is_consistent() const -> bool
     return m_crc == crc_32(m_payload.data());
 }
 
-auto WALRecord::is_commit() const -> bool
-{
-    CUB_EXPECT_EQ(m_type, Type::FULL);
-    return m_payload.is_commit();
-}
-
 /*
  * Valid Splits:
  *     .-------------------------------.
@@ -233,24 +212,27 @@ auto WALRecord::split(Index offset_in_payload) -> WALRecord
 auto WALRecord::merge(WALRecord rhs) -> void
 {
     CUB_EXPECT_NE(rhs.type(), Type::EMPTY);
-    m_payload.append(rhs.payload());
+    m_payload.append(rhs.m_payload);
 
     if (m_type == Type::EMPTY) {
-        CUB_EXPECT_NE(rhs.type(), Type::MIDDLE);
-        CUB_EXPECT_NE(rhs.type(), Type::LAST);
+        CUB_EXPECT_NE(rhs.m_type, Type::MIDDLE);
+        CUB_EXPECT_NE(rhs.m_type, Type::LAST);
 
-        m_type = rhs.type();
-        m_lsn = rhs.lsn();
-        m_crc = rhs.crc();
+        m_type = rhs.m_type;
+        m_lsn = rhs.m_lsn;
+        m_crc = rhs.m_crc;
     } else {
-        CUB_EXPECT_EQ(m_lsn, rhs.lsn());
-        CUB_EXPECT_EQ(m_crc, rhs.crc());
         CUB_EXPECT_EQ(m_type, Type::FIRST);
 
+        if (m_lsn != rhs.m_lsn)
+            throw CorruptionError {"WAL records have mismatched LSNs"};
+        if (m_crc != rhs.m_crc)
+            throw CorruptionError {"WAL records have mismatched CRCs"};
+
         // We have just completed a record.
-        if (rhs.type() == Type::LAST)
+        if (rhs.m_type == Type::LAST)
             m_type = Type::FULL;
     }
 }
 
-} // db
+} // cub
