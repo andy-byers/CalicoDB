@@ -51,7 +51,7 @@ public:
     auto allocate_node(PageType) -> Node override;
     auto acquire_node(PID, bool) -> Node override;
     auto destroy_node(Node) -> void override;
-    auto make_cell(Node&, BytesView, BytesView) -> Cell;
+    auto make_cell(BytesView, BytesView) -> Cell;
 
 protected: // TODO
     auto positioned_insert(Position, BytesView, BytesView) -> void;
@@ -70,20 +70,13 @@ protected: // TODO
 
     // Underflow handling.
     auto balance_after_underflow(Node, BytesView) -> void;
-    auto merge_left(Node&, Node&, Node, Index) -> void;
-    auto merge_right(Node&, Node&, Node, Index) -> void;
     auto rotate_left(Node&, Node&, Node&, Index) -> void;
     auto rotate_right(Node&, Node&, Node&, Index) -> void;
     auto fix_non_root(Node, Node&, Index) -> void;
     auto fix_root(Node) -> void;
 
     // Helpers.
-    auto do_split_non_root(Node&, Node&, Scratch) -> Cell;
-    auto do_split_root(Node&, Node&) -> void;
-    auto do_merge_root(Node&, Node) -> void;
     auto maybe_fix_child_parent_connections(Node &node) -> void;
-    auto transfer_cell(Node&, Node&, Index) -> void;
-    auto can_merge_siblings(const Node&, const Node&, const Node&, Index) -> bool;
 
     ScratchManager m_scratch;
     FreeList m_free_list;
@@ -92,6 +85,10 @@ protected: // TODO
     Size m_cell_count{};
 };
 
-} // db
+auto do_split_root(Node&, Node&) -> void;
+auto do_split_non_root(Node&, Node&, Scratch) -> Cell;
+auto do_merge_root(Node&, Node&) -> void;
+
+} // cub
 
 #endif // CUB_TREE_TREE_H

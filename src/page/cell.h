@@ -4,17 +4,20 @@
 #include <optional>
 #include "page.h"
 #include "utils/layout.h"
+#include "utils/utils.h"
 
 namespace cub {
 
 class Cell {
 public:
-    static constexpr Size MIN_HEADER_SIZE = sizeof(uint16_t) + // Key size       (2B)
-                                            sizeof(uint32_t);  // Value size     (4B)
+    struct Parameters {
+        BytesView key;
+        BytesView local_value;
+        PID overflow_id;
+        Size value_size {};
+    };
 
-    static constexpr Size MAX_HEADER_SIZE = MIN_HEADER_SIZE +
-                                            PAGE_ID_SIZE +     // Left child ID  (4B)
-                                            PAGE_ID_SIZE;      // Overflow ID    (4B)
+    explicit Cell(const Parameters&);
 
     ~Cell() = default;
     [[nodiscard]] auto key() const -> BytesView;
@@ -44,20 +47,6 @@ private:
     PID m_overflow_id;
     Size m_value_size {};
 };
-
-inline auto min_local(Size page_size)
-{
-    CUB_EXPECT_TRUE(is_power_of_two(page_size));
-    return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 32 / 255 -
-           Cell::MAX_HEADER_SIZE - CELL_POINTER_SIZE;
-}
-
-inline auto max_local(Size page_size)
-{
-    CUB_EXPECT_TRUE(is_power_of_two(page_size));
-    return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 64 / 255 -
-           Cell::MAX_HEADER_SIZE - CELL_POINTER_SIZE;
-}
 
 class CellBuilder {
 public:

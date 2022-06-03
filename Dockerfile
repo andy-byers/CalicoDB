@@ -23,13 +23,17 @@ RUN update-alternatives --install /usr/bin/cc cc /usr/bin/clang-8 100 && \
 
 RUN mkdir CubDB
 
-COPY . ./CubDB
+COPY . CubDB
 
-RUN cd ./CubDB && \
-    cmake . && \
+RUN cd CubDB && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
     cmake --build .
 
-RUN #./test/build/fuzz && \
-    ./test/build/unit_tests #&& \
-#    ./test/build/integration && \
-#    ./test/build/benchmark
+#RUN ls -a
+#RUN ls -a ./test
+#RUN ls -a ./test/fuzz
+#RUN ./test/fuzz/fuzz # && \
+#    ./test/build/unit_tests #&& \
+#    ./test/build/integration

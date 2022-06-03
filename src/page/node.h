@@ -117,6 +117,11 @@ private:
     Size m_usable_space{};
 };
 
+auto transfer_cell(Node&, Node&, Index) -> void;
+auto can_merge_siblings(const Node&, const Node&, const Cell&) -> bool;
+auto merge_left(Node&, Node&, Node&, Index) -> void;
+auto merge_right(Node&, Node&, Node&, Index) -> void;
+
 } // cub
 
 #endif // CUB_PAGE_NODE_H

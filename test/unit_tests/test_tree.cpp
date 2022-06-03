@@ -52,7 +52,7 @@ public:
     TestTree(const Tree::Parameters &param)
         : Tree{param}
         , m_page_size{param.buffer_pool->page_size()}
-        , m_max_local{max_local(m_page_size)} {}
+        , m_max_local{get_max_local(m_page_size)} {}
 
     auto page_size() const -> Size
     {
@@ -158,7 +158,7 @@ public:
     auto node_insert(PID id, const std::string &key, const std::string &value) -> void
     {
         auto node = m_tree.acquire_node(id, true);
-        auto cell = m_tree.make_cell(node, _b(key), _b(value));
+        auto cell = m_tree.make_cell(_b(key), _b(value));
 
         if (!node.is_external())
             cell.set_left_child_id(PID{std::numeric_limits<uint32_t>::max()});
@@ -196,7 +196,7 @@ public:
 
     TreeTests()
     {
-        m_max_local = max_local(m_page_size);
+        m_max_local = get_max_local(m_page_size);
         std::filesystem::remove(m_path);
         auto file = std::make_unique<FaultyReadWriteMemory>();
         m_pool = std::make_unique<BufferPool>(BufferPool::Parameters{
@@ -266,13 +266,13 @@ TEST_F(TreeTests, InsertRecord)
 
 TEST_F(TreeTests, InsertNonOverflowingRecord)
 {
-    tree_insert(tree(), "a", m_random.next_string(max_local(m_page_size) - 1));
+    tree_insert(tree(), "a", m_random.next_string(get_max_local(m_page_size) - 1));
     ASSERT_EQ(m_pool->page_count(), 1);
 }
 
 TEST_F(TreeTests, InsertOverflowingRecord)
 {
-    m_tree->insert(_b("a"), _b(m_random.next_string(max_local(m_page_size))));
+    m_tree->insert(_b("a"), _b(m_random.next_string(get_max_local(m_page_size))));
     ASSERT_EQ(m_pool->page_count(), 2);
 }
 
@@ -333,12 +333,12 @@ auto external_root_overflow_test(TestTree &tree, Index excluded) -> void
 
     for (Index i{}; i < keys.size(); ++i) {
         if (i != excluded)
-            builder.node_insert(id, make_key(keys[i]), max_local(tree.page_size()) / 3 * 2);
+            builder.node_insert(id, make_key(keys[i]), get_max_local(tree.page_size()) / 3 * 2);
     }
     // Cause the overflow.
     const auto key = make_key(keys[excluded]);
     std::string value {"value"};
-    value.resize(max_local(tree.page_size()) - key.size());
+    value.resize(get_max_local(tree.page_size()) - key.size());
     tree_insert(tree, key, value);
 
     // We should always end up with this structure:
@@ -511,7 +511,7 @@ auto random_tree(Random &random, TreeBuilder &builder, Size n) -> void
     std::vector<Index> keys(n);
     std::iota(keys.begin(), keys.end(), 1);
     random.shuffle(keys);
-    const auto max_size = 2 * max_local(builder.page_size());
+    const auto max_size = 2 * get_max_local(builder.page_size());
     int i {};
     for (auto key: keys) {
         builder.tree_insert(make_key(key), random_string(random, 10L, max_size));
@@ -747,7 +747,7 @@ auto setup_remove_special_cases_test(TreeBuilder &builder) -> void
     //                    1:[4,                 8,                   12,                    16,                    20]
     //          2:[2]                3:[6]              4:[10]                 5:[14]                 6:[18]                7:[22]
     //     8:[1]     9:[3]     10:[5]     11:[7]  12:[9]      13:[11]   14:[13]      15:[15]   16:[17]      17:[19]  18:[21]      19:[23]
-    const auto small_size = max_local(builder.page_size()) / 7 * 3 + 4;
+    const auto small_size = get_max_local(builder.page_size()) / 7 * 3 + 4;
     for (Index i {}; i < 6; ++i)
         builder.allocate_node(PageType::INTERNAL_NODE);
     for (Index i {}; i < 12; ++i)

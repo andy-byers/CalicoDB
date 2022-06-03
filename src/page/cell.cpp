@@ -4,6 +4,12 @@
 
 namespace cub {
 
+Cell::Cell(const Parameters &param)
+    : m_key {param.key}
+    , m_local_value {param.local_value}
+    , m_overflow_id {param.overflow_id}
+    , m_value_size {param.value_size} {}
+
 auto Cell::size() const -> Size
 {
     constexpr auto KEY_AND_VALUE_SIZES = sizeof(uint16_t) + sizeof(uint32_t);
@@ -55,8 +61,6 @@ auto Cell::overflow_id() const -> PID
 
 auto Cell::write(Bytes out) const -> void
 {
-    // TODO: This is weird. We should store the page type and use that to determine if
-    //       we should write a left child ID.
     if (!m_left_child_id.is_null()) {
         put_uint32(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);
@@ -96,75 +100,6 @@ auto Cell::detach(Scratch scratch) -> void
     m_scratch = std::move(scratch);
 }
 
-namespace {
-
-    inline auto compute_lvs(Size key_size, Size value_size, Size page_size) -> Size
-    {
-        CUB_EXPECT_GT(key_size, 0);
-        CUB_EXPECT_TRUE(is_power_of_two(page_size));
-
-        /* Cases:
-         *              Byte 0     min_local(...)  max_local(...)
-         *                   |                  |               |
-         *                   |                  |               |
-         *                   v                  v               v
-         *     (1)  ::H::::: ::K::::::: ::V::::::::::::::::::::::
-         *     (2)  ::H::::: ::K::::::::::::::::::::::: ::V::::::
-         *     (3)  ::H::::: ::K::::::: ::V::::::**************************
-         *     (4)  ::H::::: ::K::::::::::::::::::::::::::::::::: **V******
-         *     (5)  ::H::::: ::K::::::::::::::::::::::: **V****************
-         *
-         * Everything shown as a '*' is stored on an overflow page.
-         *
-         * In (1) and (2), the entire value is stored in the cell. In (3), (4), and (5), part of V is
-         * written to an overflow page. In (3), V is truncated such that the local payload is min_local(...)
-         * in length. In (4) and (5), we try to truncate the local payload to min_local(...), but we never
-         * remove any of the key.
-        */
-        if (const auto total = key_size + value_size; total > max_local(page_size)) {
-            const auto nonlocal_value_size = total - std::max(key_size, min_local(page_size));
-            return value_size - nonlocal_value_size;
-        }
-        return value_size;
-    }
-
-} // <anonymous>
-
-CellBuilder::CellBuilder(Size page_size)
-    : m_page_size{page_size} {}
-
-auto CellBuilder::build() const -> Cell
-{
-    CUB_EXPECT_FALSE(m_key.is_empty());
-    const auto local_value_size = compute_lvs(m_key.size(), m_value.size(), m_page_size);
-
-    Cell cell;
-    cell.m_key = m_key;
-    cell.m_local_value = m_value.range(0, local_value_size);
-    cell.m_value_size = m_value.size();
-    return cell;
-}
-
-auto CellBuilder::set_key(BytesView key) -> CellBuilder &
-{
-    m_key = key;
-    return *this;
-}
-
-auto CellBuilder::set_value(BytesView value) -> CellBuilder &
-{
-    m_value = value;
-    return *this;
-}
-
-auto CellBuilder::overflow() const -> BytesView
-{
-    const auto local_value_size = compute_lvs(m_key.size(), m_value.size(), m_page_size);
-    if (local_value_size < m_value.size())
-        return m_value.range(local_value_size);
-    return {nullptr, 0};
-}
-
 CellReader::CellReader(PageType page_type, BytesView page)
     : m_page{page}
     , m_page_type{page_type} {}
@@ -188,7 +123,7 @@ auto CellReader::read(Index offset) const -> Cell
     cell.m_key.truncate(key_size);
     in.advance(cell.m_key.size());
 
-    const auto local_value_size = compute_lvs(key_size, cell.m_value_size, m_page.size());
+    const auto local_value_size = get_local_value_size(key_size, cell.m_value_size, m_page.size());
     cell.m_local_value = in;
     cell.m_local_value.truncate(local_value_size);
 

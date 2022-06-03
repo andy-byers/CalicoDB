@@ -107,25 +107,42 @@ TEST_F(UpdateManagerTests, MergesIntersectingChanges)
     ASSERT_EQ(changes.size(), 1);
 }
 
+class PageBacking {
+public:
+    explicit PageBacking(Size page_size)
+        : m_map {page_size}
+        , m_scratch {page_size}
+        , m_page_size {page_size} {}
+
+    auto get_page(PID id) -> Page
+    {
+        m_map.emplace(id, std::string(m_page_size, '\x00'));
+        Page page {{id, _b(m_map[id]), nullptr, true, false}};
+        page.enable_tracking(m_scratch.get());
+        return page;
+    }
+
+private:
+    std::unordered_map<PID, std::string, PID::Hasher> m_map;
+    ScratchManager m_scratch;
+    Size m_page_size {};
+};
+
 class PageTests: public testing::Test {
 public:
     static constexpr Size page_size = 0x100;
     static constexpr Size halfway_point = page_size / 2;
 
     PageTests()
-        : m_scratch{page_size} {}
+        : m_backing {page_size} {}
 
     auto get_page(PID id) -> Page
     {
-        m_backing.emplace(id, std::string(page_size, '\x00'));
-        Page page {{id, _b(m_backing[id]), nullptr, true, false}};
-        page.enable_tracking(m_scratch.get());
-        return page;
+        return m_backing.get_page(id);
     }
 
 private:
-    std::unordered_map<PID, std::string, PID::Hasher> m_backing;
-    ScratchManager m_scratch;
+    PageBacking m_backing;
 };
 
 TEST_F(PageTests, HeaderFields)
@@ -191,33 +208,60 @@ TEST_F(PageTests, RedoChanges)
     ASSERT_EQ(page.get_u32(halfway_point), 42);
 }
 
-auto make_cell(Node &node, const std::string &key, std::string &value, Scratch scratch)
-{
-    auto builder = CellBuilder{node.page().size()}
-        .set_key(_b(key))
-        .set_value(_b(value));
-
-    if (const auto overflow = builder.overflow(); !overflow.is_empty())
-        value.resize(value.size() - overflow.size());
-
-    auto cell = builder.build();
-    cell.detach(std::move(scratch));
-    return cell;
-}
-
-class NodeTests: public PageTests {
+class CellBacking {
 public:
-    NodeTests()
-        : overflow_value(0x100, 'x') {}
+    explicit CellBacking(Size page_size)
+        : scratch {page_size}
+        , page_size {page_size} {}
 
-    auto make_node(PID id, PageType type)
+    auto get_cell(const std::string &key, const std::string &value, PID overflow_id = PID::null()) -> Cell
+    {
+        const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
+        Cell::Parameters param;
+        param.key = _b(key);
+        param.local_value = _b(value);
+        param.value_size = value.size();
+
+        if (local_value_size != value.size()) {
+            CUB_EXPECT_LT(local_value_size, value.size());
+            param.local_value.truncate(local_value_size);
+            param.overflow_id = overflow_id;
+        }
+        return Cell {param};
+    }
+
+    ScratchManager scratch;
+    Size page_size {};
+};
+
+class NodeBacking: public PageBacking {
+public:
+    explicit NodeBacking(Size page_size)
+        : PageBacking {page_size} {}
+
+    auto get_node(PID id, PageType type) -> Node
     {
         Node node {get_page(id), true};
         node.page().set_type(type);
         return node;
     }
+};
 
-    ScratchManager scratch {page_size};
+class NodeTests: public PageTests {
+public:
+    NodeTests()
+        : node_backing {page_size}
+        , cell_backing {page_size}
+        , overflow_value(page_size, 'x') {}
+
+    auto make_node(PID id, PageType type)
+    {
+        return node_backing.get_node(id, type);
+    }
+
+    Random random {0};
+    NodeBacking node_backing;
+    CellBacking cell_backing;
     std::string normal_value {"world"};
     std::string overflow_value;
     PID arbitrary_pid {2};
@@ -275,7 +319,7 @@ TEST_F(NodeTests, FreshNodesAreEmpty)
 TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    ASSERT_DEATH(node.remove_at(0, Cell::MAX_HEADER_SIZE), EXPECTATION_MATCHER);
+    ASSERT_DEATH(node.remove_at(0, MAX_CELL_HEADER_SIZE), EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
@@ -291,26 +335,31 @@ TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 TEST_F(NodeTests, UsableSpaceIsUpdatedOnInsert)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto cell = make_cell(node, "hello", normal_value, scratch.get());
+    auto cell = cell_backing.get_cell("hello", normal_value);
     const auto usable_space_after = node.usable_space() - cell.size() - CELL_POINTER_SIZE;
     node.insert(std::move(cell));
     ASSERT_EQ(node.usable_space(), usable_space_after);
 }
 
+auto get_maximally_sized_cell(NodeTests &test)
+{
+    // The largest possible cell is one that has a key of length get_max_local(page_size), a non-empty value, and
+    // resides in an internal node. We cannot store part of the key on an overflow page in the current design,
+    // so we have an embedded payload of size get_max_local(page_size), an overflow ID, and a left child ID.
+    const auto max_key_length = get_max_local(NodeTests::page_size);
+
+    auto cell = test.cell_backing.get_cell(test.random.next_string(max_key_length), "value", test.arbitrary_pid);
+    cell.set_left_child_id(test.arbitrary_pid);
+    return cell;
+}
+
 auto run_maximally_sized_cell_test(NodeTests &test, PID id, Size max_records_before_overflow)
 {
     Random random {0};
-    // The largest possible cell is one that has a key of length max_local(page_size), a non-empty value, and
-    // resides in an internal node. We cannot store part of the key on an overflow page in the current design,
-    // so we have an embedded payload of size max_local(page_size), an overflow ID, and a left child ID.
-    const auto max_key_length = max_local(NodeTests::page_size);
     auto node = test.make_node(id, PageType::INTERNAL_NODE);
-    std::vector<std::string> values(max_records_before_overflow + 1, "value");
 
-    for (auto &value: values) {
-        auto cell = make_cell(node, random.next_string(max_key_length), value, test.scratch.get());
-        cell.set_overflow_id(test.arbitrary_pid);
-        cell.set_left_child_id(test.arbitrary_pid);
+    for (Index i {}; i <= max_records_before_overflow; ++i) {
+        auto cell = get_maximally_sized_cell(test);
         ASSERT_FALSE(node.is_overflowing());
         node.insert(std::move(cell));
     }
@@ -327,11 +376,13 @@ TEST_F(NodeTests, NonRootFitsAtLeastFourRecords)
     run_maximally_sized_cell_test(*this, PID {ROOT_ID_VALUE + 1}, 4);
 }
 
-auto get_node_with_one_cell(NodeTests &test, bool has_overflow = false)
+template<class Test>auto get_node_with_one_cell(Test &test, bool has_overflow = false)
 {
+    static PID next_id {2};
     auto value = has_overflow ? test.overflow_value : test.normal_value;
-    auto node = test.make_node(PID::root(), PageType::INTERNAL_NODE);
-    auto cell = make_cell(node, "hello", value, test.scratch.get());
+    auto node = test.node_backing.get_node(next_id, PageType::INTERNAL_NODE);
+    auto cell = test.cell_backing.get_cell("hello", value);
+    next_id.value++;
 
     if (has_overflow)
         cell.set_overflow_id(test.arbitrary_pid);
@@ -392,9 +443,9 @@ TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
 {
     std::string value {"world"};
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto cell = make_cell(node, "hello", value, scratch.get());
-    node.insert(make_cell(node, "hello", value, scratch.get()));
-    ASSERT_DEATH(node.insert(make_cell(node, "hello", value, scratch.get())), EXPECTATION_MATCHER);
+    auto cell = cell_backing.get_cell("hello", value);
+    node.insert(cell_backing.get_cell("hello", value));
+    ASSERT_DEATH(node.insert(cell_backing.get_cell("hello", value)), EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeTests, RemovingNonexistentCellDoesNothing)
@@ -414,11 +465,88 @@ TEST_F(NodeTests, RemovingCellDecrementsCellCount)
 TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto cell = make_cell(node, "hello", normal_value, scratch.get());
+    auto cell = cell_backing.get_cell("hello", normal_value);
     const auto usable_space_before = node.usable_space();
     node.insert(std::move(cell));
     node.remove(_b("hello"));
     ASSERT_EQ(node.usable_space(), usable_space_before);
 }
+
+class NodesCanMergeTests: public testing::TestWithParam<PageType> {
+public:
+    static constexpr Size page_size = 0x200;
+
+    NodesCanMergeTests()
+        : overflow_value(page_size, 'x')
+        , node_backing {page_size}
+        , cell_backing {page_size}
+        , lhs {node_backing.get_node(PID {2}, GetParam())}
+        , rhs {node_backing.get_node(PID {3}, GetParam())} {}
+
+    auto make_node(PID id, PageType type)
+    {
+        return node_backing.get_node(id, type);
+    }
+
+    auto make_cell(const std::string &key, const std::string &value, PID overflow_id = PID::root())
+    {
+        return cell_backing.get_cell(key, value, overflow_id);
+    }
+
+    PID arbitrary_pid {123};
+    std::string overflow_value;
+    std::string normal_value {"value"};
+    NodeBacking node_backing;
+    CellBacking cell_backing;
+    Node lhs;
+    Node rhs;
+};
+
+TEST_P(NodesCanMergeTests, CanMergeDifferentlyTypedNodesDeathTest)
+{
+    std::string value {"v"};
+    auto lhs = make_node(PID {2}, PageType::EXTERNAL_NODE);
+    auto rhs = make_node(PID {3}, PageType::INTERNAL_NODE);
+    const auto cell = make_cell("k", value);
+    ASSERT_DEATH(can_merge_siblings(lhs, rhs, cell), EXPECTATION_MATCHER);
+}
+
+TEST_P(NodesCanMergeTests, CanMergeOverflowingNodesDeathTest)
+{
+    std::string value {"v"};
+    auto lhs = make_node(PID {2}, PageType::EXTERNAL_NODE);
+    auto rhs = make_node(PID {3}, PageType::INTERNAL_NODE);
+    const auto cell = make_cell("k", value);
+    lhs.set_overflow_cell(make_cell("k", value));
+    ASSERT_DEATH(can_merge_siblings(lhs, rhs, cell), EXPECTATION_MATCHER);
+}
+
+TEST_P(NodesCanMergeTests, MostlyEmptyNodesCanMerge)
+{
+    auto lhs = get_node_with_one_cell(*this);
+    auto rhs = get_node_with_one_cell(*this);
+    const auto cell = make_cell("k", "v");
+    ASSERT_TRUE(can_merge_siblings(lhs, rhs, cell));
+}
+
+//TEST_P(NodesCanMergeTests, MostlyEmptyNodesCanMergea)
+//{
+//    auto lhs = make_node(PID {2}, PageType::INTERNAL_NODE);
+//    auto rhs = make_node(PID {3}, PageType::INTERNAL_NODE);
+//    lhs.insert(make_sized_cell(lhs, "a", get_max_local(lhs.size()) - 1));
+//    lhs.insert(make_sized_cell(lhs, "b", get_max_local(lhs.size()) - 1));
+//    rhs.insert(make_sized_cell(rhs, "c", get_max_local(rhs.size()) - 1));
+//    rhs.insert(make_sized_cell(rhs, "d", get_max_local(rhs.size()) - 1));
+//    const auto cell = make_sized_cell(lhs, "d", get_max_local(rhs.size()) - 1);
+//    ASSERT_TRUE(can_merge_siblings(lhs, rhs, cell));
+//}
+
+INSTANTIATE_TEST_SUITE_P(
+    NodesCanMerge,
+    NodesCanMergeTests,
+    testing::Values(
+        PageType::EXTERNAL_NODE,
+        PageType::INTERNAL_NODE)
+);
 
 } // <anonymous>

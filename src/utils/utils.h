@@ -12,6 +12,13 @@ static constexpr Size CELL_POINTER_SIZE {sizeof(uint16_t)};
 static constexpr Index NULL_ID_VALUE {0};
 static constexpr Index ROOT_ID_VALUE {1};
 
+static constexpr Size MIN_CELL_HEADER_SIZE = sizeof(uint16_t) + // Key size       (2B)
+                                             sizeof(uint32_t);  // Value size     (4B)
+
+static constexpr Size MAX_CELL_HEADER_SIZE = MIN_CELL_HEADER_SIZE +
+                                             PAGE_ID_SIZE +     // Left child ID  (4B)
+                                             PAGE_ID_SIZE;      // Overflow ID    (4B)
+
 enum class PageType: uint16_t {
     NULL_PAGE     = 0x0000,
     INTERNAL_NODE = 0x494E, // "IN"

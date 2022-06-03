@@ -19,7 +19,7 @@ file(
 function(build_test NAME SOURCES)
     add_executable("${NAME}" "${SOURCES}" "${TEST_TOOLS}")
     target_link_libraries("${NAME}" "${CUB_NAME}" gmock gtest_main pthread)
-    target_include_directories("${NAME}" PRIVATE "${PROJECT_SOURCE_DIR}/test/tools")
+    target_include_directories("${NAME}" PRIVATE "${CUB_TEST_DIR}/tools")
     target_include_directories("${NAME}" PRIVATE "${CUB_SOURCE_DIR}")
     target_include_directories("${NAME}" PUBLIC "${CUB_INCLUDE_DIR}")
 endfunction()

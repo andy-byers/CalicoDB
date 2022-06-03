@@ -42,7 +42,7 @@ public:
 
     static auto header_offset() noexcept -> Index
     {
-        return 0UL;
+        return 0;
     }
 
     static auto content_offset() noexcept -> Index
@@ -179,6 +179,50 @@ public:
 };
 
 
-} // db
+inline auto get_min_local(Size page_size)
+{
+    CUB_EXPECT_TRUE(is_power_of_two(page_size));
+    return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 32 / 255 -
+           MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
+}
+
+inline auto get_max_local(Size page_size)
+{
+    CUB_EXPECT_TRUE(is_power_of_two(page_size));
+    return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 64 / 255 -
+           MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
+}
+
+inline auto get_local_value_size(Size key_size, Size value_size, Size page_size) -> Size
+{
+    CUB_EXPECT_GT(key_size, 0);
+    CUB_EXPECT_TRUE(is_power_of_two(page_size));
+
+    /* Cases:
+         *              Byte 0     min_local(...)  get_max_local(...)
+         *                   |                  |               |
+         *                   |                  |               |
+         *                   v                  v               v
+         *     (1)  ::H::::: ::K::::::: ::V::::::::::::::::::::::
+         *     (2)  ::H::::: ::K::::::::::::::::::::::: ::V::::::
+         *     (3)  ::H::::: ::K::::::: ::V::::::**************************
+         *     (4)  ::H::::: ::K::::::::::::::::::::::::::::::::: **V******
+         *     (5)  ::H::::: ::K::::::::::::::::::::::: **V****************
+         *
+         * Everything shown as a '*' is stored on an overflow page.
+         *
+         * In (1) and (2), the entire value is stored in the cell. In (3), (4), and (5), part of V is
+         * written to an overflow page. In (3), V is truncated such that the local payload is min_local(...)
+         * in length. In (4) and (5), we try to truncate the local payload to get_min_local(...), but we never
+         * remove any of the key.
+        */
+    if (const auto total = key_size + value_size; total > get_max_local(page_size)) {
+        const auto nonlocal_value_size = total - std::max(key_size, get_min_local(page_size));
+        return value_size - nonlocal_value_size;
+    }
+    return value_size;
+}
+
+} // cub
 
 #endif // CUB_UTILS_LAYOUT_H
