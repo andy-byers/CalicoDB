@@ -179,17 +179,19 @@ public:
 };
 
 
-inline auto get_min_local(Size page_size)
+inline constexpr auto get_min_local(Size page_size)
 {
     CUB_EXPECT_TRUE(is_power_of_two(page_size));
-    return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 32 / 255 -
+    // NOTE: This computation was adapted from a similar one in SQLite3.
+    return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 32 / 256 -
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
 }
 
-inline auto get_max_local(Size page_size)
+inline constexpr auto get_max_local(Size page_size)
 {
     CUB_EXPECT_TRUE(is_power_of_two(page_size));
-    return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 64 / 255 -
+    // NOTE: This computation was adapted from a similar one in SQLite3.
+    return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 64 / 256 -
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
 }
 

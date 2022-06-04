@@ -413,13 +413,13 @@ auto Tree::fix_non_root(Node node, Node &parent, Index index) -> void
     }
     if (index > 0) {
         auto Lc = acquire_node(parent.child_id(index - 1), true);
-        merge_right(parent, Lc, node, index);
+        merge_right(Lc, node, parent, index);
         maybe_fix_child_parent_connections(Lc);
         destroy_node(std::move(node));
         node = std::move(Lc); // Needed for the post-conditions.
     } else {
         auto temp = acquire_node(parent.child_id(index + 1), true);
-        merge_left(parent, node, temp, index);
+        merge_left(node, temp, parent, index);
         maybe_fix_child_parent_connections(node);
         destroy_node(std::move(temp));
     }

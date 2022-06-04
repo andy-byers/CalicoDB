@@ -68,7 +68,7 @@ namespace impl {
            CUB_EXPECT_LE(size, m_size);
            CUB_EXPECT_LE(offset, m_size);
            CUB_EXPECT_LE(offset + size, m_size);
-           return Slice{m_data + offset, size};
+           return Slice {m_data + offset, size};
        }
 
        [[nodiscard]] auto range(Index offset) const noexcept -> Slice

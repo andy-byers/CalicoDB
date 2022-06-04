@@ -227,7 +227,9 @@ public:
             param.local_value.truncate(local_value_size);
             param.overflow_id = overflow_id;
         }
-        return Cell {param};
+        Cell cell {param};
+        cell.detach(scratch.get());
+        return cell;
     }
 
     ScratchManager scratch;
@@ -472,81 +474,313 @@ TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
     ASSERT_EQ(node.usable_space(), usable_space_before);
 }
 
-class NodesCanMergeTests: public testing::TestWithParam<PageType> {
+class NodesCanMergeTests
+    : public testing::TestWithParam<std::tuple<PageType, Size>>
+{
 public:
-    static constexpr Size page_size = 0x200;
-
     NodesCanMergeTests()
-        : overflow_value(page_size, 'x')
+        : page_type {std::get<0>(GetParam())}
+        , page_size {std::get<1>(GetParam())}
+        , scratch {page_size}
+        , overflow_value(page_size, 'x')
         , node_backing {page_size}
         , cell_backing {page_size}
-        , lhs {node_backing.get_node(PID {2}, GetParam())}
-        , rhs {node_backing.get_node(PID {3}, GetParam())} {}
+        , max_value_size {get_max_local(page_size) - 1}
+        , lhs {make_node(PID {2}, page_type)}
+        , rhs {make_node(PID {3}, page_type)} {}
 
-    auto make_node(PID id, PageType type)
+    auto make_node(PID id, PageType type) -> Node
     {
-        return node_backing.get_node(id, type);
+        auto node = node_backing.get_node(id, type);
+        // Nodes get their rightmost child ID during the splitting procedure, so we have to fake it here.
+        if (page_type == PageType::INTERNAL_NODE)
+            node.set_rightmost_child_id(arbitrary_pid);
+        return node;
     }
 
     auto make_cell(const std::string &key, const std::string &value, PID overflow_id = PID::root())
     {
-        return cell_backing.get_cell(key, value, overflow_id);
+        auto cell = cell_backing.get_cell(key, value, overflow_id);
+        if (page_type == PageType::INTERNAL_NODE)
+            cell.set_left_child_id(arbitrary_pid);
+        return cell;
     }
-
+    
+    Random random {0};
+    PageType page_type;
+    Size page_size;
     PID arbitrary_pid {123};
+    ScratchManager scratch;
     std::string overflow_value;
     std::string normal_value {"value"};
     NodeBacking node_backing;
     CellBacking cell_backing;
+    Size max_value_size {};
     Node lhs;
     Node rhs;
 };
 
+TEST_P(NodesCanMergeTests, EmptyNodeIsUnderflowing)
+{
+    ASSERT_TRUE(lhs.is_underflowing_());
+}
+
+TEST_P(NodesCanMergeTests, NodeWithTwoMaximalCellsIsUnderflowing)
+{
+    lhs.insert(make_cell("a", random.next_string(max_value_size)));
+    lhs.insert(make_cell("b", random.next_string(max_value_size)));
+    ASSERT_TRUE(lhs.is_underflowing_());
+}
+
+TEST_P(NodesCanMergeTests, NodeWithMoreThanTwoMaximalCellsIsNotUnderflowing)
+{
+    lhs.insert(make_cell("a", random.next_string(max_value_size)));
+    lhs.insert(make_cell("b", random.next_string(max_value_size)));
+    lhs.insert(make_cell("c", random.next_string(10)));
+    ASSERT_FALSE(lhs.is_underflowing_());
+}
+
+TEST_P(NodesCanMergeTests, MostlyEmptyNodesCanMerge)
+{
+    lhs.insert(make_cell("a", random.next_string(max_value_size)));
+    lhs.insert(make_cell("b", random.next_string(max_value_size)));
+    rhs.insert(make_cell("c", random.next_string(max_value_size)));
+    const auto cell = make_cell("d", random.next_string(max_value_size));
+    ASSERT_TRUE(can_merge_siblings(lhs, rhs, cell));
+}
+
+TEST_P(NodesCanMergeTests, MostlyFullNodesCannotMerge)
+{
+    lhs.insert(make_cell("a", random.next_string(max_value_size)));
+    lhs.insert(make_cell("b", random.next_string(max_value_size)));
+    rhs.insert(make_cell("c", random.next_string(max_value_size)));
+    rhs.insert(make_cell("d", random.next_string(max_value_size)));
+    const auto cell = make_cell("e", random.next_string(max_value_size));
+    ASSERT_FALSE(can_merge_siblings(lhs, rhs, cell));
+}
+
+template<class Test> auto make_barely_underflowing_node(Test &test, Node &node, char base_key)
+{
+    static constexpr Size room_for_third_cell {10};
+    const auto underflow_limit = node.usable_space() / 2;
+    ASSERT_EQ(underflow_limit, node.max_usable_space() / 2);
+    node.insert(test.make_cell(std::string(1, base_key++), test.random.next_string(test.max_value_size)));
+    node.insert(test.make_cell(std::string(1, base_key++), test.random.next_string(test.max_value_size - room_for_third_cell)));
+    ASSERT_GT(node.usable_space(), underflow_limit);
+    const auto diff = node.usable_space() - underflow_limit;
+    ASSERT_GT(diff, CELL_POINTER_SIZE + MAX_CELL_HEADER_SIZE + 1);
+    const auto adjust = !node.is_external() * PAGE_ID_SIZE;
+    static constexpr Size key_size {1};
+    const auto value_size = diff - CELL_POINTER_SIZE - MIN_CELL_HEADER_SIZE - key_size - adjust;
+    auto cell = test.make_cell(std::string(1, base_key++), test.random.next_string(value_size));
+    ASSERT_EQ(cell.size() + CELL_POINTER_SIZE, diff);
+    node.insert(std::move(cell));
+    ASSERT_EQ(node.usable_space(), underflow_limit);
+    ASSERT_TRUE(node.is_underflowing_());
+}
+
+TEST_P(NodesCanMergeTests, BarelyUnderflowingNodesCanMerge)
+{
+    make_barely_underflowing_node(*this, lhs, '1');
+    make_barely_underflowing_node(*this, rhs, '5');
+    auto separator = lhs.extract_cell(lhs.cell_count() - 1, scratch.get());
+    separator.set_left_child_id(arbitrary_pid);
+    ASSERT_TRUE(can_merge_siblings(lhs, rhs, separator));
+}
+
+TEST_P(NodesCanMergeTests, BarelyNotUnderflowingNodesCannotMerge)
+{
+    make_barely_underflowing_node(*this, lhs, '1');
+    make_barely_underflowing_node(*this, rhs, '5');
+    auto last = lhs.extract_cell(lhs.cell_count() - 1, scratch.get());
+    // Add one to the cell size.
+    auto separator = make_cell(_s(last.key()), _s(last.local_value()) + "!");
+    separator.set_left_child_id(arbitrary_pid);
+    ASSERT_EQ(separator.size(), last.size() + 1 + PAGE_ID_SIZE*lhs.is_external());
+    ASSERT_FALSE(can_merge_siblings(lhs, rhs, separator));
+}
+
+TEST_P(NodesCanMergeTests, NodeCanFitFourMaximallySizedCells)
+{
+    lhs.insert(make_cell("a", random.next_string(max_value_size)));
+    lhs.insert(make_cell("b", random.next_string(max_value_size)));
+    lhs.insert(make_cell("c", random.next_string(max_value_size)));
+    auto cell = make_cell("d", random.next_string(max_value_size));
+    lhs.insert(std::move(cell));
+    ASSERT_FALSE(lhs.is_overflowing());
+}
+
 TEST_P(NodesCanMergeTests, CanMergeDifferentlyTypedNodesDeathTest)
 {
     std::string value {"v"};
-    auto lhs = make_node(PID {2}, PageType::EXTERNAL_NODE);
-    auto rhs = make_node(PID {3}, PageType::INTERNAL_NODE);
+    rhs.page().set_type(rhs.is_external() ? PageType::INTERNAL_NODE : PageType::EXTERNAL_NODE);
     const auto cell = make_cell("k", value);
     ASSERT_DEATH(can_merge_siblings(lhs, rhs, cell), EXPECTATION_MATCHER);
 }
 
 TEST_P(NodesCanMergeTests, CanMergeOverflowingNodesDeathTest)
 {
-    std::string value {"v"};
-    auto lhs = make_node(PID {2}, PageType::EXTERNAL_NODE);
-    auto rhs = make_node(PID {3}, PageType::INTERNAL_NODE);
-    const auto cell = make_cell("k", value);
-    lhs.set_overflow_cell(make_cell("k", value));
+    const auto cell = make_cell("a", "1");
+    lhs.set_overflow_cell(make_cell("b", "2"));
     ASSERT_DEATH(can_merge_siblings(lhs, rhs, cell), EXPECTATION_MATCHER);
 }
 
-TEST_P(NodesCanMergeTests, MostlyEmptyNodesCanMerge)
+TEST_P(NodesCanMergeTests, NodeShouldFitFourMaximallySizedCells)
 {
-    auto lhs = get_node_with_one_cell(*this);
-    auto rhs = get_node_with_one_cell(*this);
-    const auto cell = make_cell("k", "v");
-    ASSERT_TRUE(can_merge_siblings(lhs, rhs, cell));
+    const auto max_occupied_by_cell = MAX_CELL_HEADER_SIZE + get_max_local(page_size) + CELL_POINTER_SIZE;
+    ASSERT_LT(max_occupied_by_cell * 4, page_size);
 }
 
-//TEST_P(NodesCanMergeTests, MostlyEmptyNodesCanMergea)
-//{
-//    auto lhs = make_node(PID {2}, PageType::INTERNAL_NODE);
-//    auto rhs = make_node(PID {3}, PageType::INTERNAL_NODE);
-//    lhs.insert(make_sized_cell(lhs, "a", get_max_local(lhs.size()) - 1));
-//    lhs.insert(make_sized_cell(lhs, "b", get_max_local(lhs.size()) - 1));
-//    rhs.insert(make_sized_cell(rhs, "c", get_max_local(rhs.size()) - 1));
-//    rhs.insert(make_sized_cell(rhs, "d", get_max_local(rhs.size()) - 1));
-//    const auto cell = make_sized_cell(lhs, "d", get_max_local(rhs.size()) - 1);
-//    ASSERT_TRUE(can_merge_siblings(lhs, rhs, cell));
-//}
+const auto external_node_parameter_combinations = testing::Values(
+    std::tuple<PageType, Size> {PageType::EXTERNAL_NODE, 0x100},
+    std::tuple<PageType, Size> {PageType::EXTERNAL_NODE, 0x1000},
+    std::tuple<PageType, Size> {PageType::EXTERNAL_NODE, 0x8000});
+
+const auto internal_node_parameter_combinations = testing::Values(
+    std::tuple<PageType, Size> {PageType::INTERNAL_NODE, 0x100},
+    std::tuple<PageType, Size> {PageType::INTERNAL_NODE, 0x1000},
+    std::tuple<PageType, Size> {PageType::INTERNAL_NODE, 0x8000});
 
 INSTANTIATE_TEST_SUITE_P(
-    NodesCanMerge,
+    ExternalNodesCanMerge,
     NodesCanMergeTests,
-    testing::Values(
-        PageType::EXTERNAL_NODE,
-        PageType::INTERNAL_NODE)
+    external_node_parameter_combinations
+);
+
+INSTANTIATE_TEST_SUITE_P(
+    InternalNodesCanMerge,
+    NodesCanMergeTests,
+    internal_node_parameter_combinations
+);
+
+class NodeMergeTests: public NodesCanMergeTests {
+public:
+    NodeMergeTests()
+        : parent {make_node(PID::root(), PageType::INTERNAL_NODE)}
+    {
+        while (values.size() < 5)
+            values.emplace_back(random.next_string(max_value_size / 2));
+
+        auto cell = make_cell("c", values.at(2));
+        parent.set_rightmost_child_id(rhs.id());
+        cell.set_left_child_id(lhs.id());
+        parent.insert(std::move(cell));
+
+        Index i {};
+        for (const auto c: std::string {"abde"}) {
+            // Skip index 2, which will belong to the separator.
+            i += i == 2;
+            auto child_cell = make_cell(std::string(1, c), values.at(i));
+            if (!lhs.is_external())
+                child_cell.set_left_child_id(PID {(i+1) * 10});
+            if (i < 2) {
+                lhs.insert(std::move(child_cell));
+            } else {
+                rhs.insert(std::move(child_cell));
+            }
+            ++i;
+        }
+    }
+
+    ~NodeMergeTests() override = default;
+
+    auto check_merged_node(const Node &node)
+    {
+        Index i {};
+        EXPECT_EQ(node.cell_count(), values.size());
+        for (const auto c: std::string {"abcde"}) {
+            EXPECT_EQ(_s(node.read_key(i)), std::string(1, c));
+            EXPECT_EQ(_s(node.read_cell(i).local_value()), values.at(i));
+            ++i;
+        }
+    }
+
+    std::vector<std::string> values;
+    Node parent;
+};
+
+class NodeMergeLeftTests: public NodeMergeTests {
+public:
+    NodeMergeLeftTests()
+    {
+        merge_left(lhs, rhs, parent, 0);
+    }
+    ~NodeMergeLeftTests() override = default;
+};
+
+TEST_P(NodeMergeLeftTests, MergeLeft)
+{
+    ASSERT_EQ(parent.child_id(0), lhs.id());
+    ASSERT_EQ(parent.rightmost_child_id(), lhs.id());
+    ASSERT_EQ(parent.cell_count(), 0);
+
+    ASSERT_EQ(lhs.cell_count(), 5);
+    check_merged_node(lhs);
+
+    if (!lhs.is_external()) {
+        ASSERT_EQ(lhs.child_id(0), PID {10});
+        ASSERT_EQ(lhs.child_id(1), PID {20});
+        ASSERT_EQ(lhs.child_id(2), arbitrary_pid);
+        ASSERT_EQ(lhs.child_id(3), PID {40});
+        ASSERT_EQ(lhs.child_id(4), PID {50});
+        ASSERT_EQ(lhs.child_id(5), arbitrary_pid);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ExternalMergeLeft,
+    NodeMergeLeftTests,
+    external_node_parameter_combinations
+);
+
+INSTANTIATE_TEST_SUITE_P(
+    InternalMergeLeft,
+    NodeMergeLeftTests,
+    internal_node_parameter_combinations
+);
+
+class NodeMergeRightTests: public NodeMergeTests {
+public:
+    NodeMergeRightTests()
+    {
+        // TODO: We use an index of 1 here for reasons. Fix that. `index` should refer to the index of lhs in parent.
+        //       We'll have to correct the call sites in Tree too.
+        merge_right(lhs, rhs, parent, 1);
+    }
+    ~NodeMergeRightTests() override = default;
+};
+
+TEST_P(NodeMergeRightTests, MergeRight)
+{
+    // Note that merge_right() actually merges into the left node. This is so that we don't have to potentially recur back up
+    // the tree and back down in order to update the right sibling ID of the node's left sibling (if it is an external node).
+    ASSERT_EQ(parent.child_id(0), lhs.id());
+    ASSERT_EQ(parent.rightmost_child_id(), lhs.id());
+    ASSERT_EQ(parent.cell_count(), 0);
+
+    ASSERT_EQ(lhs.cell_count(), 5);
+    check_merged_node(lhs);
+
+    if (!lhs.is_external()) {
+        ASSERT_EQ(lhs.child_id(0), PID {10});
+        ASSERT_EQ(lhs.child_id(1), PID {20});
+        ASSERT_EQ(lhs.child_id(2), arbitrary_pid);
+        ASSERT_EQ(lhs.child_id(3), PID {40});
+        ASSERT_EQ(lhs.child_id(4), PID {50});
+        ASSERT_EQ(lhs.child_id(5), arbitrary_pid);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ExternalMergeRight,
+    NodeMergeRightTests,
+    external_node_parameter_combinations
+);
+
+INSTANTIATE_TEST_SUITE_P(
+    InternalMergeRight,
+    NodeMergeRightTests,
+    internal_node_parameter_combinations
 );
 
 } // <anonymous>
