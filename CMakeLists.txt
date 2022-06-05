@@ -1,7 +1,6 @@
 
 cmake_minimum_required(VERSION 3.14)
 
-message(${CMAKE_BUILD_TYPE})
 set(CUB_DEBUG_FLAGS "-Wall -Wconversion -Werror -Wextra -Wpedantic -g3 -O0")
 set(CMAKE_CXX_FLAGS_DEBUG ${CUB_DEBUG_FLAGS} CACHE STRING "")
 
@@ -10,9 +9,6 @@ set(CMAKE_CXX_STANDARD 17)
 
 option(CUB_BUILD_ASSERTIONS "Build with assertions" ON)
 option(CUB_BUILD_TESTS "Build the tests" ON)
-
-add_compile_options(-fsanitize=address)#TODO
-add_link_options(-fsanitize=address)#TODO
 
 if (NOT ${CUB_BUILD_ASSERTIONS})
     add_compile_definitions(CUB_NDEBUG=1)
