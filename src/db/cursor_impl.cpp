@@ -1,7 +1,7 @@
 #include <algorithm>
 
 #include "cursor_impl.h"
-#include "exception.h"
+#include "cub/exception.h"
 #include "tree/tree.h"
 
 namespace cub {

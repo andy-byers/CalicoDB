@@ -1,6 +1,6 @@
 #include <optional>
-#include "exception.h"
 #include "tree.h"
+#include "cub/exception.h"
 #include "page/cell.h"
 #include "page/file_header.h"
 #include "page/link.h"
@@ -8,7 +8,6 @@
 #include "page/page.h"
 #include "pool/interface.h"
 #include "utils/layout.h"
-#include "bytes.h"
 
 namespace cub {
 
@@ -386,7 +385,6 @@ auto Tree::fix_non_root(Node node, Node &parent, Index index) -> bool
 
     auto maybe_fix_parent = [&] {
         if (parent.is_overflowing()) {
-            const auto id = parent.id();
             node.take();
             balance_after_overflow(std::move(parent));
 

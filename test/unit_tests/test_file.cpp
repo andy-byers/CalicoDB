@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "common.h"
+#include "cub/common.h"
 #include "random.h"
 #include "file/file.h"
 #include "file/interface.h"

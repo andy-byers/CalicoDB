@@ -11,6 +11,9 @@ set(CMAKE_CXX_STANDARD 17)
 option(CUB_BUILD_ASSERTIONS "Build with assertions" ON)
 option(CUB_BUILD_TESTS "Build the tests" ON)
 
+add_compile_options(-fsanitize=address)#TODO
+add_link_options(-fsanitize=address)#TODO
+
 if (NOT ${CUB_BUILD_ASSERTIONS})
     add_compile_definitions(CUB_NDEBUG=1)
 endif()

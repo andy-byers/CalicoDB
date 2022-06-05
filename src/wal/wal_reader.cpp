@@ -1,4 +1,4 @@
-#include "exception.h"
+#include "cub/exception.h"
 #include "wal_reader.h"
 #include "wal_record.h"
 #include "file/interface.h"

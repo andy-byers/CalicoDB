@@ -10,7 +10,7 @@
 #include "pool/frame.h"
 #include "pool/interface.h"
 #include "page/cell.h"
-#include "common.h"
+#include "cub/common.h"
 #include "utils/layout.h"
 #include "db/cursor_impl.h"
 #include "tree/tree.h"
@@ -403,12 +403,6 @@ auto internal_root_overflow_test(TestTree &tree, Index child_index) -> void
     constexpr Index keys[] {5, 11, 17, 23};
     const auto key = make_key(keys[child_index]);
     builder.tree_insert(key);
-
-    for (Index i {1}; i <= 5; ++i){
-        auto node = tree.acquire_node(PID {i + 1}, false);
-        ASSERT_FALSE(node.is_overflowing());
-        ASSERT_FALSE(node.is_underflowing());
-    }
 }
 
 TEST_F(TreeTests, ExternalRootOverflowA)
@@ -962,7 +956,7 @@ TEST_F(TreeTests, SanityCheck)
 {
     std::unordered_map<std::string, std::string> payloads;
     constexpr Size max_size = 100;
-    constexpr Size n = 1000;
+    constexpr Size n = 1'000;
 
     for (Index i {}; i < n; ++i) {
         const auto r = m_random.next_int(5);

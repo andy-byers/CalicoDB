@@ -2,8 +2,7 @@
 #define CUB_DB_DATABASE_IMPL_H
 
 #include <shared_mutex>
-#include "bytes.h"
-#include "database.h"
+#include "cub/database.h"
 
 namespace cub {
 

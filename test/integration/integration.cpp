@@ -1,7 +1,7 @@
 
 #include "integration.h"
-#include "cursor.h"
-#include "database.h"
+#include "cub/cursor.h"
+#include "cub/database.h"
 
 namespace cub {
 

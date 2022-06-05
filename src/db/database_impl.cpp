@@ -1,7 +1,7 @@
 
 #include "database_impl.h"
 #include "cursor_impl.h"
-#include "exception.h"
+#include "cub/exception.h"
 #include "file/file.h"
 #include "file/system.h"
 #include "page/file_header.h"

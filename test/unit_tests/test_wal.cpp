@@ -1,8 +1,8 @@
 
 #include <gtest/gtest.h>
 
-#include "common.h"
-#include "bytes.h"
+#include "cub/common.h"
+#include "cub/bytes.h"
 #include "utils/utils.h"
 #include "file/file.h"
 #include "wal/wal_reader.h"

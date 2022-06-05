@@ -2,9 +2,9 @@
 #define CUB_PAGE_NODE_H
 
 #include "cell.h"
-#include "common.h"
+#include "cub/common.h"
 #include "page.h"
-#include "bytes.h"
+#include "cub/bytes.h"
 
 namespace cub {
 

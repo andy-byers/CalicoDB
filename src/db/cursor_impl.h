@@ -3,10 +3,9 @@
 
 #include <optional>
 #include <shared_mutex>
-#include "common.h"
-#include "cursor.h"
+#include <vector>
+#include "cub/cursor.h"
 #include "page/node.h"
-#include "bytes.h"
 #include "utils/types.h"
 
 namespace cub {

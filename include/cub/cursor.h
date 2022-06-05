@@ -2,10 +2,7 @@
 #define CUB_CURSOR_H
 
 #include <memory>
-#include "common.h"
-#include "page/node.h"
 #include "bytes.h"
-#include "utils/types.h"
 
 namespace cub {
 

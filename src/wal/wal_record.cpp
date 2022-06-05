@@ -1,5 +1,5 @@
 
-#include "exception.h"
+#include "cub/exception.h"
 #include "wal_record.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"

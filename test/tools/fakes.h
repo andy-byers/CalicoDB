@@ -2,8 +2,8 @@
 #define CUB_TEST_TOOLS_FAKES_H
 
 #include <gmock/gmock.h>
-#include "bytes.h"
-#include "common.h"
+#include "cub/bytes.h"
+#include "cub/common.h"
 #include "random.h"
 #include "db/database_impl.h"
 #include "file/interface.h"

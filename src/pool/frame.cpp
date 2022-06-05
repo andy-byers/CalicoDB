@@ -2,6 +2,7 @@
 #include "frame.h"
 #include "interface.h"
 #include "page/page.h"
+#include "utils/encoding.h"
 #include "utils/layout.h"
 
 namespace cub {

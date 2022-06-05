@@ -1,7 +1,7 @@
 #ifndef CUB_PAGE_FILE_HEADER_H
 #define CUB_PAGE_FILE_HEADER_H
 
-#include "bytes.h"
+#include "cub/bytes.h"
 
 namespace cub {
 

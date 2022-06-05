@@ -1,6 +1,6 @@
 
 #include <optional>
-#include "exception.h"
+#include "cub/exception.h"
 #include "wal_reader.h"
 #include "wal_writer.h"
 #include "file/interface.h"

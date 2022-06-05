@@ -5,7 +5,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include "common.h"
 #include "interface.h"
 #include "utils/scratch.h"
 
@@ -17,7 +16,7 @@ public:
         : m_scratch {page_size}
         , m_page_size {page_size} {}
 
-    virtual ~InMemory() = default;
+    ~InMemory() override = default;
 
     [[nodiscard]] auto hit_ratio() const -> double override
     {

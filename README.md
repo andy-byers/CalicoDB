@@ -13,14 +13,10 @@ Please see the `Contributions` section if you are interested in working on Cub D
 
 ## TODO
 1. Get the fuzz testing up and running. 
-2. Update the B-tree merge routine to be more proactive.
-This shouldn't be terribly difficult since most of the unit tests don't rely on the specific tree structure.
-They just make sure the tree is correctly ordered and all connections are consistent.
-I'm definitely open to suggestions on this one.
-3. Write some real documentation.
-4. Work on this README
-5. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
-6. Better freelist that uses trunk pages (see SQLite 3)
+2. Write some real documentation.
+3. Work on this README
+4. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
+5. Better freelist that uses trunk pages (see SQLite 3)
 
 ## API
 
@@ -144,60 +140,100 @@ db.abort();
 
 ## Features
 + Durability provided through write-ahead logging
-+ Uses a dynamic-order B-tree to store the whole database in a single file (excluding the WAL)
-+ Supports multiple cursors running concurrently
++ Uses a dynamic-order B-tree to store all the data in a single file
++ Supports forward and reverse traversal using a cursor, as well as multiple concurrent cursors
+
+## Design
+
+### Architecture
+The `include/cub` folder contains the public API:
+```
+include/cub
+┣━╸bytes.h
+┣━╸common.h
+┣━╸cub.h
+┣━╸cursor.h
+┣━╸database.h
+┗━╸exception.h
+```
++ `bytes.h`: Slices for holding contiguous sequences of bytes
++ `common.h`: Common types and constants
++ `cub.h`: `#include`s the rest of the API
++ `cursor.h`: Cursor for traversing the database
++ `database.h`: Database connection object
++ `exception.h`: Public-facing exceptions
+
+Internally, Cub DB is broken down into 7 submodules.
+Each submodule is represented by a directory in `src`, as shown below.
+```
+src
+┣╸db
+┣╸file
+┣╸page
+┣╸pool
+┣╸tree
+┣╸utils
+┗╸wal
+```
++ `db`: API implementation
++ `file`: OS file module
++ `pool`: Buffer pool module
++ `tree`: B-tree module
++ `utils`: Utility module
++ `wal`: Write-ahead logging module
+
+#### `db`
+[//]: # (TODO)
+
+#### `file`
+[//]: # (TODO)
+
+#### `pool`
+[//]: # (TODO)
+
+#### `tree`
+[//]: # (TODO)
+
+#### `utils`
+[//]: # (TODO)
+
+#### `wal`
+[//]: # (TODO)
+
+### B-Tree Rules
+Insertion and removal are similar to many B-trees.
+The main difference is the definitions of "overflowing" and "underflowing" with respect to nodes.
+We consider a node to be overflowing when it doesn't have room for the record we are inserting.
+The definition for underflowing is a little more tricky.
+See `node.cpp` for the exact computation used.
+A node must not be overflowing when we are done operating on it, however it can be underflowing.
+The underflowing state is really more of a heuristic that governs when we will try to merge or rotate.
+Each time we remove a record, we attempt to move up the tree to the root, proactively merging nodes as we go.
+This helps keep the tree from growing too high, reducing the average number of disk accesses needed by tree operations.
 
 ## Project Source Tree Overview
-
 ```
 CubDB
-  ┣━╸examples
-  ┣━╸include
-  ┣━╸src
-  ┃  ┣━╸db
-  ┃  ┣━╸file
-  ┃  ┣━╸pool
-  ┃  ┣━╸tree
-  ┃  ┣━╸utils
-  ┃  ┗━╸wal
-  ┗━╸test
-      ┣━╸benchmark
-      ┣━╸fuzz
-      ┣━╸integration
-      ┣━╸tools
-      ┗━╸unit
+┣╸examples
+┣╸include
+┃ ┗╸cub
+┣╸src
+┗╸test
+  ┣╸benchmark
+  ┣╸fuzz
+  ┣╸integration
+  ┣╸tools
+  ┗╸unit_tests
 ```
-
-+ `/include`: Public API
-+ `/src/db`: API implementation
-+ `/src/file`: OS file module
-+ `/src/pool`: Buffer pool module
-+ `/src/tree`: B-tree module
-+ `/src/utils`: Utility module
-+ `/src/wal`: Write-ahead logging module
++ `/include/cub`: Public API
++ `/src`: Source code modules
 + `/test/benchmark`: Performance benchmarks
 + `/test/fuzz`: Fuzz tests
 + `/test/integration`: Integration tests
 + `/test/tools`: Test tools
-+ `/test/unit`: Unit tests
++ `/test/unit_tests`: Unit tests
 
 ## Contributions
 Contributions are welcomed!
 The `TODO` section contains a few things that need to be addressed.
 Feel free to create a pull request.
-
-
-# B-Tree Rules
-Insertion and removal are similar to many B-trees.
-The main difference is the definitions of "overflowing" and "underflowing" with respect to nodes.
-We consider a node to be overflowing when it doesn't have room for the record we are inserting.
-The definition for underflowing is a little different.
-See `node.cpp` for the exact computation used.
-
-[//]: # (TODO: We may need to eliminate the underflowing state and instead try to 
-               rebalance nodes each time we remove. We'll maybe need a redistribution 
-               algorithm that hits the nodes' neighbors, or the next 2 from the end if
-               it is either the leftmost or rightmost child in its parent, rather than 
-               using rotations.)
-
-Right now, nodes may be left underflowing after a rebalance, so it's really more of a heuristic that governs when we will try to merge or rotate, rather than an explicitly-enforced rule.

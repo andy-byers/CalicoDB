@@ -7,12 +7,12 @@
 
 #include <gtest/gtest.h>
 
-#include "database.h"
-#include "cursor.h"
+#include "cub/database.h"
+#include "cub/cursor.h"
 #include "db/database_impl.h"
 #include "db/cursor_impl.h"
 #include "pool/interface.h"
-#include "common.h"
+#include "cub/common.h"
 #include "tree/tree.h"
 
 #include "fakes.h"

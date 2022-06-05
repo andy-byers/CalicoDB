@@ -2,8 +2,8 @@
 #include <filesystem>
 #include <thread>
 #include <vector>
-#include "cursor.h"
-#include "database.h"
+#include "cub/cursor.h"
+#include "cub/database.h"
 #include "integration.h"
 
 namespace {

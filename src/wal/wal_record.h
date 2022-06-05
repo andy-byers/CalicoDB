@@ -7,7 +7,6 @@
 #ifndef CUB_WAL_WAL_RECORD_H
 #define CUB_WAL_WAL_RECORD_H
 
-#include "common.h"
 #include "page/page.h"
 #include "utils/types.h"
 #include "utils/utils.h"

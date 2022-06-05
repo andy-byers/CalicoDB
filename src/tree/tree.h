@@ -9,7 +9,6 @@
 namespace cub {
 
 class Cell;
-class FreeList;
 class IBufferPool;
 class Node;
 

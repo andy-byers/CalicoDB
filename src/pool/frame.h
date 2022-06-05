@@ -2,13 +2,9 @@
 #ifndef CUB_POOL_FRAME_H
 #define CUB_POOL_FRAME_H
 
-#include <limits>
 #include <memory>
-
-#include "common.h"
-#include "utils/encoding.h"
-#include "utils/layout.h"
-#include "bytes.h"
+#include "cub/bytes.h"
+#include "utils/identifier.h"
 
 namespace cub {
 
@@ -18,11 +14,10 @@ class Page;
 /**
  * Represents in-memory file for a single database page.
  */
-class Frame {
+class Frame final {
 public:
-    friend class FrameReference;
-
     explicit Frame(Size);
+    ~Frame() = default;
     [[nodiscard]] auto page_lsn() const -> LSN;
     [[nodiscard]] auto page_id() const -> PID;
     [[nodiscard]] auto ref_count() const -> Size;
@@ -33,6 +28,9 @@ public:
     auto reset(PID) -> void;
     auto borrow(IBufferPool*, bool) -> Page;
     auto synchronize(Page&) -> void;
+
+    auto operator=(Frame&&) -> Frame& = default;
+    Frame(Frame&&) = default;
 
 private:
     std::unique_ptr<Byte[]> m_data;

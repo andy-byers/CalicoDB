@@ -3,7 +3,7 @@
 
 #include <filesystem>
 #include <string>
-#include "common.h"
+#include "cub/common.h"
 
 namespace cub {
 

@@ -5,9 +5,9 @@
 #include <iomanip>
 #include <iostream>
 #include <vector>
-#include "common.h"
+#include "cub/common.h"
 #include "random.h"
-#include "bytes.h"
+#include "cub/bytes.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 #include "wal/wal_record.h"

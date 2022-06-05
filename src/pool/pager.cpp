@@ -1,9 +1,10 @@
-#include "exception.h"
+#include "cub/exception.h"
 #include "frame.h"
 #include "pager.h"
 #include "page/page.h"
 #include "file/interface.h"
 #include "utils/assert.h"
+#include "utils/layout.h"
 
 namespace cub {
 

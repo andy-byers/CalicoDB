@@ -27,5 +27,8 @@ COPY . CubDB
 
 RUN mkdir test && \
     cd test && \
-    cmake -DCMAKE_BUILD_TYPE=Debug ../CubDB && \
+    cmake -E env \
+        CXXFLAGS="-fsanitize=address" \
+        LDFLAGS="-fsanitize=address" \
+      cmake -DCMAKE_BUILD_TYPE=Debug ../CubDB && \
     cmake --build .

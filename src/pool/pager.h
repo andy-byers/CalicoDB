@@ -3,14 +3,14 @@
 
 #include <list>
 #include <optional>
-#include "common.h"
+#include "cub/common.h"
 
 namespace cub {
 
 class Frame;
 class IReadWriteFile;
 
-class Pager {
+class Pager final {
 public:
     struct Parameters {
         std::unique_ptr<IReadWriteFile> database_file;

@@ -1,8 +1,6 @@
 #ifndef CUB_UTILS_LAYOUT_H
 #define CUB_UTILS_LAYOUT_H
 
-#include "assert.h"
-#include "common.h"
 #include "identifier.h"
 #include "utils.h"
 

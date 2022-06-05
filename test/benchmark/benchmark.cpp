@@ -3,7 +3,7 @@
 #include <locale>
 #include <chrono>
 #include <thread> 
-#include "cub.h"
+#include "cub/cub.h"
 #include "tools.h"
 
 namespace {
@@ -237,7 +237,7 @@ auto main(int argc, const char *argv[]) -> int
         [](Database&) {},
         [](Database &db) {run_baseline(db);},
         "<baseline>",
-        1,
+        num_elements,
     };
 
     std::vector<InstanceParameters> instances {
@@ -352,6 +352,7 @@ auto main(int argc, const char *argv[]) -> int
     if (show_baseline) {
         instances.insert(instances.begin(), baseline);
         instances.emplace_back(baseline);
+        std::cout << "Baseline should be <= " << num_elements * BASELINE_MULTIPLIER << "\n\n";
     }
 
     if (!temp_only)
