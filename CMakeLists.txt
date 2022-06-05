@@ -1,17 +1,15 @@
 
 cmake_minimum_required(VERSION 3.14)
-project(CubDB)
+
+message(${CMAKE_BUILD_TYPE})
+set(CUB_DEBUG_FLAGS "-Wall -Wconversion -Werror -Wextra -Wpedantic -g3 -O0")
+set(CMAKE_CXX_FLAGS_DEBUG ${CUB_DEBUG_FLAGS} CACHE STRING "")
+
+project(CubDB CXX)
 set(CMAKE_CXX_STANDARD 17)
 
 option(CUB_BUILD_ASSERTIONS "Build with assertions" ON)
-option(CUB_BUILD_RELEASE "Build in release mode" ON)
 option(CUB_BUILD_TESTS "Build the tests" ON)
-
-if (${CUB_BUILD_RELEASE})
-    add_compile_options(-O3)
-else()
-    add_compile_options(-Wall -Wconversion -Werror -Wextra -Wpedantic -g3 -O0 -ftrapv)
-endif()
 
 if (NOT ${CUB_BUILD_ASSERTIONS})
     add_compile_definitions(CUB_NDEBUG=1)

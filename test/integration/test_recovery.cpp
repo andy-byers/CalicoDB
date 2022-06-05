@@ -76,9 +76,6 @@ auto setup(Options options, Size num_records)
 
     old_db.~Database();
 
-//    WALPrinter printer;
-//    printer.print(get_wal_path(PATH), options.block_size);
-
     // Now we can open a new database and recover.
     return SetupResults {Database::open(PATH, options), records};
 }

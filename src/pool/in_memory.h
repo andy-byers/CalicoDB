@@ -7,7 +7,6 @@
 #include <vector>
 #include "common.h"
 #include "interface.h"
-#include "utils/identifier.h"
 #include "utils/scratch.h"
 
 namespace cub {

@@ -185,3 +185,19 @@ CubDB
 Contributions are welcomed!
 The `TODO` section contains a few things that need to be addressed.
 Feel free to create a pull request.
+
+
+# B-Tree Rules
+Insertion and removal are similar to many B-trees.
+The main difference is the definitions of "overflowing" and "underflowing" with respect to nodes.
+We consider a node to be overflowing when it doesn't have room for the record we are inserting.
+The definition for underflowing is a little different.
+See `node.cpp` for the exact computation used.
+
+[//]: # (TODO: We may need to eliminate the underflowing state and instead try to 
+               rebalance nodes each time we remove. We'll maybe need a redistribution 
+               algorithm that hits the nodes' neighbors, or the next 2 from the end if
+               it is either the leftmost or rightmost child in its parent, rather than 
+               using rotations.)
+
+Right now, nodes may be left underflowing after a rebalance, so it's really more of a heuristic that governs when we will try to merge or rotate, rather than an explicitly-enforced rule.

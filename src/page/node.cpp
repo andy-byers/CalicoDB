@@ -242,12 +242,21 @@ auto Node::is_overflowing() const -> bool
 
 auto Node::is_underflowing() const -> bool
 {
-    return !cell_count();
+    if (id().is_root())
+        return cell_count() == 0;
+    // Note that the maximally-sized cell has no overflow, which is why we subtract PAGE_ID_SIZE.
+    const auto max_cell_size = MAX_CELL_HEADER_SIZE +
+                               get_max_local(size()) +
+                               CELL_POINTER_SIZE -
+                               PAGE_ID_SIZE;
+    return m_usable_space >= max_usable_space()/2 + max_cell_size;
 }
 
 auto Node::is_underflowing_() const -> bool
 {
-    return m_usable_space >= max_usable_space() / 2;
+    if (id().is_root())
+        return !cell_count();
+    return m_usable_space >= max_usable_space() / 2; // TODO: removeme
 }
 
 auto Node::overflow_cell() const -> const Cell&
@@ -633,7 +642,7 @@ auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
         Lc.set_right_sibling_id(rc.right_sibling_id());
 
     // Move the separator from the source to the left child node.
-    auto separator = parent.read_cell(index - 1);
+    auto separator = parent.read_cell(index);
     if (!Lc.is_external()) {
         separator.set_left_child_id(Lc.rightmost_child_id());
         Lc.set_rightmost_child_id(rc.rightmost_child_id());
@@ -642,9 +651,9 @@ auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
     }
     const auto separator_size = separator.size();
     Lc.insert(std::move(separator));
-    CUB_EXPECT_EQ(parent.child_id(index), rc.id());
-    parent.set_child_id(index, Lc.id());
-    parent.remove_at(index - 1, separator_size);
+    CUB_EXPECT_EQ(parent.child_id(index + 1), rc.id());
+    parent.set_child_id(index + 1, Lc.id());
+    parent.remove_at(index, separator_size);
 
     // Transfer the rest of the cells. Lc shouldn't overflow.
     while (rc.cell_count()) {

@@ -17,6 +17,7 @@ public:
         Size page_size{};
         Size frame_count{};
     };
+
     explicit Pager(Parameters);
     ~Pager() = default;
     [[nodiscard]] auto available() const -> Size;

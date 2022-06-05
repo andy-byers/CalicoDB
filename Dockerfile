@@ -25,15 +25,7 @@ RUN mkdir CubDB
 
 COPY . CubDB
 
-RUN cd CubDB && \
-    mkdir build && \
-    cd build && \
-    cmake .. && \
+RUN mkdir test && \
+    cd test && \
+    cmake -DCMAKE_BUILD_TYPE=Debug ../CubDB && \
     cmake --build .
-
-#RUN ls -a
-#RUN ls -a ./test
-#RUN ls -a ./test/fuzz
-#RUN ./test/fuzz/fuzz # && \
-#    ./test/build/unit_tests #&& \
-#    ./test/build/integration

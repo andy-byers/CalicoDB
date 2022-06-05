@@ -743,9 +743,7 @@ class NodeMergeRightTests: public NodeMergeTests {
 public:
     NodeMergeRightTests()
     {
-        // TODO: We use an index of 1 here for reasons. Fix that. `index` should refer to the index of lhs in parent.
-        //       We'll have to correct the call sites in Tree too.
-        merge_right(lhs, rhs, parent, 1);
+        merge_right(lhs, rhs, parent, 0);
     }
     ~NodeMergeRightTests() override = default;
 };
