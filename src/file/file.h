@@ -5,23 +5,19 @@
 
 namespace cub {
 
-namespace {
+class Resource {
+public:
+    Resource(const std::string&, int, Mode, int);
+    virtual ~Resource();
 
-    class Resource {
-    public:
-        Resource(const std::string&, int, Mode, int);
-        virtual ~Resource();
+    [[nodiscard]] auto fd() const -> int
+    {
+        return m_fd;
+    }
 
-        [[nodiscard]] auto fd() const -> int
-        {
-            return m_fd;
-        }
-
-    private:
-        int m_fd{};
-    };
-
-} // <anonymous>
+private:
+    int m_fd{};
+};
 
 class ReadOnlyFile: public IReadOnlyFile {
 public:
