@@ -48,20 +48,6 @@ private:
     Size m_value_size {};
 };
 
-class CellBuilder {
-public:
-    explicit CellBuilder(Size);
-    [[nodiscard]] auto build() const -> Cell;
-    [[nodiscard]] auto overflow() const -> BytesView;
-    auto set_key(BytesView) -> CellBuilder&;
-    auto set_value(BytesView) -> CellBuilder&;
-
-private:
-    BytesView m_key;
-    BytesView m_value;
-    Size m_page_size{};
-};
-
 class CellReader {
 public:
     CellReader(PageType, BytesView);

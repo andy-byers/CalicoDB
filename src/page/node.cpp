@@ -548,12 +548,6 @@ auto can_merge_siblings(const Node &Ln, const Node &rn, const Cell &separator) -
 
 auto merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
 {
-    /* Transformation:
-     *      1:[x..,        b,        y..]   -->   1:[x..,                 y..]
-     *     X       3:[a..]    2:[c..]    Y  -->  X       3:[a.., b.., c..]    Y
-     *            A       B  C       D      -->         A       B    C    D
-     */
-
     if (Lc.is_external())
         Lc.set_right_sibling_id(rc.right_sibling_id());
 
@@ -562,10 +556,6 @@ auto merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
     if (!Lc.is_external()) {
         separator.set_left_child_id(Lc.rightmost_child_id()); // (1)
     } else {
-        // TODO: NULL-ing out the left child ID causes it to not be written. See cell.h
-        //       for another TOD0 concerning this weirdness. It's not causing any bugs
-        //       that I know of, it's just an awful API that will likely cause bugs if
-        //       anything is changed. Should fix.
         separator.set_left_child_id(PID::null());
     }
     const auto separator_size = separator.size();
@@ -582,62 +572,10 @@ auto merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
     parent.set_child_id(index, Lc.id());
     if (parent.rightmost_child_id() == rc.id())
         parent.set_rightmost_child_id(Lc.id()); // (3)
-
-    /* Transformation:
-     *         1:[a]        -->   1:[]
-     *     3:[]     2:[b]   -->       3:[a, b]
-     *         A   B     C  -->      A     B  C
-     *
-     * Pointers:
-     *     (1) a.left_child_id      : 3 --> A  (Internal nodes only)
-     *     (2) 3.rightmost_child_id : A --> C  (Internal nodes only)
-     *     (3) 1.rightmost_child_id : 2 --> 3
-     */
-
-//    if (Lc.is_external())
-//        Lc.set_right_sibling_id(rc.right_sibling_id());
-//
-//    // Move the separator from the parent to the left child node.
-//    auto separator = parent.read_cell(index);
-//    if (!Lc.is_external()) {
-//        separator.set_left_child_id(Lc.rightmost_child_id()); // (1)
-//    } else {
-//        // TODO: NULL-ing out the left child ID causes it to not be written. See cell.h
-//        //       for another TOD0 concerning this weirdness. It's not causing any bugs
-//        //       that I know of, it's just an awful API that will likely cause bugs if
-//        //       anything is changed. Should fix.
-//        separator.set_left_child_id(PID::null());
-//    }
-//    const auto separator_size = separator.size();
-//    Lc.insert(std::move(separator));
-//    parent.remove_at(index, separator_size);
-//
-//    // Transfer the rest of the cells. Lc shouldn't overflow.
-//    while (rc.cell_count()) {
-//        transfer_cell(rc, Lc, 0);
-//        CUB_EXPECT_FALSE(Lc.is_overflowing());
-//    }
-//    if (!Lc.is_external())
-//        Lc.set_rightmost_child_id(rc.rightmost_child_id()); // (2)
-//    parent.set_child_id(index, Lc.id());
-//    if (parent.rightmost_child_id() == rc.id())
-//        parent.set_rightmost_child_id(Lc.id()); // (3)
 }
 
 auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
 {
-    /* Transformation:
-     *      1:[x..,        b,        y..]   -->   1:[x..,                 y..]
-     *     X       3:[a..]    2:[c..]    Y  -->  X       3:[a.., b.., c..]    Y
-     *            A       B  C       D      -->         A       B    C    D
-     */
-
-    /* Transformation:
-     *         1:[a]        -->   1:[]
-     *     3:[]     2:[b]   -->       3:[a, b]
-     *         A   B     C  -->      A     B  C
-     */
-
     if (Lc.is_external())
         Lc.set_right_sibling_id(rc.right_sibling_id());
 
@@ -660,40 +598,6 @@ auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
         transfer_cell(rc, Lc, 0);
         CUB_EXPECT_FALSE(Lc.is_overflowing());
     }
-
-//    /* Transformation:
-//     *         1:[a]        -->   1:[]
-//     *     3:[]     2:[b]   -->       3:[a, b]
-//     *         A   B     C  -->      A     B  C
-//     *
-//     * Pointers:
-//     *     (1) a.left_child_id      : 3 --> A  (Internal nodes only)
-//     *     (2) 3.rightmost_child_id : A --> C  (Internal nodes only)
-//     *     (3) 1.rightmost_child_id : 2 --> 3
-//     */
-//
-//    if (Lc.is_external())
-//        Lc.set_right_sibling_id(rc.right_sibling_id());
-//
-//    // Move the separator from the source to the left child node.
-//    auto separator = parent.read_cell(index - 1);
-//    if (!Lc.is_external()) {
-//        separator.set_left_child_id(Lc.rightmost_child_id());
-//        Lc.set_rightmost_child_id(rc.rightmost_child_id());
-//    } else {
-//        separator.set_left_child_id(PID::null());
-//    }
-//    const auto separator_size = separator.size();
-//    Lc.insert(std::move(separator));
-//    CUB_EXPECT_EQ(parent.child_id(index), rc.id());
-//    parent.set_child_id(index, Lc.id());
-//    parent.remove_at(index - 1, separator_size);
-//
-//    // Transfer the rest of the cells. Lc shouldn't overflow.
-//    while (rc.cell_count()) {
-//        transfer_cell(rc, Lc, 0);
-//        CUB_EXPECT_FALSE(Lc.is_overflowing());
-//    }
 }
 
 } // cub

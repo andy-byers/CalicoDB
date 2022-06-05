@@ -168,6 +168,21 @@ auto Tree::find_local_max(Node root) -> Position
     return {std::move(root), index};
 }
 
+auto Tree::find_local_min(Node root) -> Position
+{
+    while (!root.is_external())
+        root = acquire_node(root.child_id(0), true);
+    return {std::move(root), 0};
+}
+
+auto Tree::find_local_max(Node root) -> Position
+{
+    while (!root.is_external())
+        root = acquire_node(root.rightmost_child_id(), true);
+    const auto index = root.cell_count() - 1;
+    return {std::move(root), index};
+}
+
 auto Tree::allocate_node(PageType type) -> Node
 {
     auto page = m_free_list.pop();

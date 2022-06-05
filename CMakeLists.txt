@@ -29,7 +29,7 @@ check_cxx_symbol_exists(O_DIRECT "fcntl.h" CUB_HAS_O_DIRECT)
 # Build the static library.
 add_subdirectory(src)
 
-# Build the unit and integration tests.
+# Build the unit_tests and integration tests.
 if(CUB_BUILD_TESTS)
     add_subdirectory(${CUB_TEST_DIR})
 endif()
