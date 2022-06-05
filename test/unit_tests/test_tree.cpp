@@ -962,7 +962,7 @@ TEST_F(TreeTests, SanityCheck)
 {
     std::unordered_map<std::string, std::string> payloads;
     constexpr Size max_size = 100;
-    constexpr Size n = 1'000;
+    constexpr Size n = 1000;
 
     for (Index i {}; i < n; ++i) {
         const auto r = m_random.next_int(5);

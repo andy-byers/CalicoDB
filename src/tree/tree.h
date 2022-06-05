@@ -72,7 +72,7 @@ protected: // TODO
     auto maybe_balance_after_underflow(Node, BytesView) -> void;
     auto rotate_left(Node&, Node&, Node&, Index) -> void;
     auto rotate_right(Node&, Node&, Node&, Index) -> void;
-    auto fix_non_root(Node, Node&, Index) -> void;
+    auto fix_non_root(Node, Node&, Index) -> bool;
     auto fix_root(Node) -> void;
 
     // Helpers.
