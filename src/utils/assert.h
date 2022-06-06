@@ -6,7 +6,7 @@
 #include <limits>
 #include <type_traits>
 
-#ifdef CUB_NDEBUG
+#ifdef NDEBUG
 #  define CUB_EXPECT(cc)
 #else
 #  define CUB_EXPECT_(cc, file, line) impl::handle_expect(cc, #cc, file, line)

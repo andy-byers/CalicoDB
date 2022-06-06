@@ -11,49 +11,89 @@
 #include "page/update.h"
 #include "utils/assert.h"
 #include "utils/scratch.h"
+#include "utils/utils.h"
 
 namespace {
 
 using namespace cub;
 using Range = UpdateManager::Range;
 
-[[maybe_unused]] auto show_ranges(const std::vector<Range> &ranges)
-{
-    static constexpr Size step = 3;
-    std::vector<std::string> display;
-    Index max_index {};
-    for (const auto &[x, dx]: ranges)
-        max_index = std::max(max_index, x + dx);
-
-    for (const auto &[x, dx]: ranges) {
-        std::string line;
-        const auto y = x + dx;
-        for (Index i {}; i <= max_index; ++i) {
-            if (i >= x && i < y) {
-                line += std::string(step, '=');
-            } else if (i == y) {
-                line += '=' + std::string(step - 1, ' ');
-            } else {
-                line += '.' + std::string(step - 1, ' ');
-            }
-        }
-        display.emplace_back(line);
-    }
-
-    std::ostringstream oss;
-    for (Index i {}; i <= max_index; ++i)
-        oss << std::left << std::setw(3) << i;
-    oss << '\n';
-
-    auto output = oss.str();
-    for (const auto &line: display)
-        output += line + '\n';
-    return output;
-}
 
 TEST(UpdateTests, BasicAssertions)
 {
-    test::update_basic_assertions();
+    using namespace impl;
+
+    // 0  1  2  3  4
+    // |--------|
+    // |--------|
+    CUB_EXPECT_TRUE(can_merge({0, 3}, {0, 3}));
+    const auto res_1 = merge({0, 3}, {0, 3});
+    CUB_EXPECT_EQ(res_1.x, 0);
+    CUB_EXPECT_EQ(res_1.dx, 3);
+
+    // 0  1  2  3  4
+    // |--------|
+    // |-----|
+    CUB_EXPECT_TRUE(can_merge({0, 3}, {0, 2}));
+    const auto res_2 = merge({0, 3}, {0, 2});
+    CUB_EXPECT_EQ(res_2.x, 0);
+    CUB_EXPECT_EQ(res_2.dx, 3);
+
+    // 0  1  2  3  4
+    // |--------|
+    // |-----------|
+    CUB_EXPECT_TRUE(can_merge({0, 3}, {0, 4}));
+    const auto res_3 = merge({0, 3}, {0, 4});
+    CUB_EXPECT_EQ(res_3.x, 0);
+    CUB_EXPECT_EQ(res_3.dx, 4);
+
+    // 0  1  2  3  4
+    // |--------|
+    //    |--|
+    CUB_EXPECT_TRUE(can_merge({0, 3}, {1, 1}));
+    const auto res_4 = merge({0, 3}, {1, 1});
+    CUB_EXPECT_EQ(res_4.x, 0);
+    CUB_EXPECT_EQ(res_4.dx, 3);
+
+    // 0  1  2  3  4
+    // |--------|
+    //    |-----|
+    CUB_EXPECT_TRUE(can_merge({0, 3}, {1, 2}));
+    const auto res_5 = merge({0, 3}, {1, 2});
+    CUB_EXPECT_EQ(res_5.x, 0);
+    CUB_EXPECT_EQ(res_5.dx, 3);
+
+    // 0  1  2  3  4
+    // |--------|
+    //    |--------|
+    CUB_EXPECT_TRUE(can_merge({0, 3}, {1, 3}));
+    const auto res_6 = merge({0, 3}, {1, 3});
+    CUB_EXPECT_EQ(res_6.x, 0);
+    CUB_EXPECT_EQ(res_6.dx, 4);
+
+    // 0  1  2  3  4
+    // |--------|
+    //          |--|
+    CUB_EXPECT_TRUE(can_merge({0, 3}, {3, 1}));
+    const auto res_7 = merge({0, 3}, {3, 1});
+    CUB_EXPECT_EQ(res_7.x, 0);
+    CUB_EXPECT_EQ(res_7.dx, 4);
+
+    std::vector<Range> v {
+        {0, 2},
+        {4, 2},
+        {7, 1},
+        {8, 3},
+    };
+
+    // 0  1  2  3  4  5  6  7  8  9
+    // |--------|
+    //                |-----|
+    //                         |--|
+
+    const Range r {3, 1};
+    insert_range(v, r);
+    compress_ranges(v);
 }
 
 class UpdateManagerTests: public testing::Test {

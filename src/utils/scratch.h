@@ -5,8 +5,8 @@
 #include <list>
 #include <string>
 #include <unordered_map>
-#include "cub/bytes.h"
 #include "types.h"
+#include "cub/bytes.h"
 
 namespace cub {
 

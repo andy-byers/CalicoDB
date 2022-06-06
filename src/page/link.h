@@ -1,7 +1,6 @@
 #ifndef CUB_PAGE_LINK_H
 #define CUB_PAGE_LINK_H
 
-#include "cub/common.h"
 #include "page.h"
 
 namespace cub {

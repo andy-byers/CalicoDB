@@ -74,8 +74,6 @@ public:
 
 [[maybe_unused]] inline auto hexdump(const Byte *data, Size size, Size indent = 0) -> void
 {
-    CUB_EXPECT_GE(size, 0);
-    CUB_EXPECT_GE(indent, 0);
     constexpr auto chunk_size{0x10UL};
     const auto chunk_count{size / chunk_size};
     const auto rest_size{size % chunk_size};
@@ -175,7 +173,6 @@ public:
     explicit WALRecordGenerator(Size block_size)
         : m_block_size {block_size}
     {
-        CUB_EXPECT_GE(block_size, 0);
         CUB_EXPECT_TRUE(is_power_of_two(block_size));
     }
 

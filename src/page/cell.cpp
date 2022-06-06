@@ -1,8 +1,40 @@
 #include "cell.h"
+#include "node.h"
 #include "utils/assert.h"
 #include "utils/encoding.h"
+#include "utils/layout.h"
 
 namespace cub {
+
+auto Cell::read_at(const Node &node, Index offset) -> Cell
+{
+    auto in = node.page().range(offset);
+    Cell cell;
+
+    if (!node.is_external()) {
+        cell.m_left_child_id.value = get_uint32(in);
+        in.advance(PAGE_ID_SIZE);
+    }
+    const auto key_size = get_uint16(in);
+    in.advance(sizeof(uint16_t));
+
+    cell.m_value_size = get_uint32(in);
+    in.advance(sizeof(uint32_t));
+
+    cell.m_key = in;
+    cell.m_key.truncate(key_size);
+    in.advance(cell.m_key.size());
+
+    const auto local_value_size = get_local_value_size(key_size, cell.m_value_size, node.size());
+    cell.m_local_value = in;
+    cell.m_local_value.truncate(local_value_size);
+
+    if (local_value_size < cell.m_value_size) {
+        in.advance(local_value_size);
+        cell.m_overflow_id.value = get_uint32(in);
+    }
+    return cell;
+}
 
 Cell::Cell(const Parameters &param)
     : m_key {param.key}
