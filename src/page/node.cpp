@@ -1,6 +1,7 @@
 #include "node.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
+#include "utils/layout.h"
 
 namespace cub {
 
@@ -144,7 +145,7 @@ auto Node::read_key(Index index) const -> BytesView
 auto Node::read_cell(Index index) const -> Cell
 {
     CUB_EXPECT_LT(index, cell_count());
-    return CellReader {m_page.type(), m_page.range(0)}.read(cell_pointer(index));
+    return Cell::read_at(*this, cell_pointer(index));
 }
 
 auto Node::detach_cell(Index index, Scratch scratch) const -> Cell

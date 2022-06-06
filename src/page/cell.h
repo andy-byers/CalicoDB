@@ -48,16 +48,6 @@ private:
     Size m_value_size {};
 };
 
-class CellReader {
-public:
-    CellReader(PageType, BytesView);
-    [[nodiscard]] auto read(Index) const -> Cell;
-
-private:
-    BytesView m_page;
-    PageType m_page_type{};
-};
-
 } // cub
 
 #endif // CUB_PAGE_CELL_H

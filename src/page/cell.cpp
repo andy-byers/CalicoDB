@@ -132,38 +132,4 @@ auto Cell::detach(Scratch scratch) -> void
     m_scratch = std::move(scratch);
 }
 
-CellReader::CellReader(PageType page_type, BytesView page)
-    : m_page{page}
-    , m_page_type{page_type} {}
-
-auto CellReader::read(Index offset) const -> Cell
-{
-    auto in = m_page.range(offset);
-    Cell cell;
-
-    if (m_page_type == PageType::INTERNAL_NODE) {
-        cell.m_left_child_id.value = get_uint32(in);
-        in.advance(PAGE_ID_SIZE);
-    }
-    const auto key_size = get_uint16(in);
-    in.advance(sizeof(uint16_t));
-
-    cell.m_value_size = get_uint32(in);
-    in.advance(sizeof(uint32_t));
-
-    cell.m_key = in;
-    cell.m_key.truncate(key_size);
-    in.advance(cell.m_key.size());
-
-    const auto local_value_size = get_local_value_size(key_size, cell.m_value_size, m_page.size());
-    cell.m_local_value = in;
-    cell.m_local_value.truncate(local_value_size);
-
-    if (local_value_size < cell.m_value_size) {
-        in.advance(local_value_size);
-        cell.m_overflow_id.value = get_uint32(in);
-    }
-    return cell;
-}
-
 } // cub
