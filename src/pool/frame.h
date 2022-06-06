@@ -40,7 +40,7 @@ private:
 
         auto operator()(Byte *ptr) const -> void
         {
-            operator delete(ptr, align);
+            operator delete[](ptr, align);
         }
 
         std::align_val_t align;
