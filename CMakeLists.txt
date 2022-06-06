@@ -18,7 +18,7 @@ project(CubDB CXX)
 set(CMAKE_CXX_STANDARD 17)
 
 option(CUB_BUILD_TESTS "Build the tests" ON)
-option(CUB_BUILD_ASSERTIONS "Build with assertions enabled" ON)
+option(CUB_BUILD_FUZZERS "Build the fuzz tests" OFF)
 
 set(CUB_NAME cub)
 set(CUB_EXAMPLES_DIR "${PROJECT_SOURCE_DIR}/examples")
@@ -34,7 +34,6 @@ check_cxx_symbol_exists(O_DIRECT "fcntl.h" CUB_HAS_O_DIRECT)
 # Build the unit and integration tests.
 if(CUB_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    set(CUB_BUILD_ASSERTIONS ON)
 
     include(FetchContent)
     FetchContent_Declare(
