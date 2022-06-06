@@ -1,17 +1,3 @@
-// Startup Conditions:
-//     WAL file not found
-//     WAL file found:
-//         WAL file empty
-//         WAL file not empty:
-//             (a) Commit record found
-//             (b) Commit record not found
-//
-// In (a), we have enough information in the WAL to complete the failed transaction. We roll
-// the log forward until all updates are saved in the database. In (b), we must have failed
-// before some part of the transaction was flushed to the WAL. In this case we must roll the
-// log backward until the beginning. This will make the database consistent with its state
-// after the last commit.
-
 #ifndef CUB_WAL_WAL_WRITER_H
 #define CUB_WAL_WAL_WRITER_H
 

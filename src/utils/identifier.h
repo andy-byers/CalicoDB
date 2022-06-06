@@ -16,8 +16,7 @@ struct Identifier {
     template<class Id> explicit Identifier(Id id) noexcept
         : value {static_cast<uint32_t>(id)}
     {
-        using Unsigned = std::make_unsigned_t<Id>;
-        CUB_EXPECT_BOUNDED_BY(uint32_t, static_cast<Unsigned>(id));
+        CUB_EXPECT_BOUNDED_BY(uint32_t, static_cast<std::make_unsigned_t<Id>>(id));
     }
 
     auto operator==(const Identifier &rhs) const noexcept -> bool

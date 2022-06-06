@@ -1,12 +1,10 @@
 #include <filesystem>
 #include <vector>
-#include "cursor.h"
-#include "database.h"
+#include "cub/cursor.h"
+#include "cub/database.h"
 #include "integration.h"
 #include "tools.h"
-#include "file/file.h"
 #include "file/system.h"
-#include "wal/wal_reader.h"
 #include "wal/wal_record.h"
 #include "wal/wal_writer.h"
 
@@ -75,9 +73,6 @@ auto setup(Options options, Size num_records)
     }
 
     old_db.~Database();
-
-//    WALPrinter printer;
-//    printer.print(get_wal_path(PATH), options.block_size);
 
     // Now we can open a new database and recover.
     return SetupResults {Database::open(PATH, options), records};

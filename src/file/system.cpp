@@ -1,8 +1,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#include "exception.h"
+#include "cub/exception.h"
 #include "system.h"
 
 namespace cub::system {

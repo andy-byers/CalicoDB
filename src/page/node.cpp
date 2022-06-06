@@ -1,6 +1,7 @@
 #include "node.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
+#include "utils/layout.h"
 
 namespace cub {
 
@@ -144,7 +145,7 @@ auto Node::read_key(Index index) const -> BytesView
 auto Node::read_cell(Index index) const -> Cell
 {
     CUB_EXPECT_LT(index, cell_count());
-    return CellReader {m_page.type(), m_page.range(0)}.read(cell_pointer(index));
+    return Cell::read_at(*this, cell_pointer(index));
 }
 
 auto Node::detach_cell(Index index, Scratch scratch) const -> Cell
@@ -223,6 +224,11 @@ auto Node::cell_pointer(Index index) const -> Index
     return m_page.get_u16(cell_pointers_offset() + index*CELL_POINTER_SIZE);
 }
 
+auto Node::max_usable_space() const -> Size
+{
+    return size() - NodeLayout::HEADER_SIZE - PageLayout::HEADER_SIZE;
+}
+
 auto Node::set_cell_pointer(Index index, Index cell_pointer) -> void
 {
     CUB_EXPECT_LT(index, cell_count());
@@ -237,7 +243,21 @@ auto Node::is_overflowing() const -> bool
 
 auto Node::is_underflowing() const -> bool
 {
-    return !cell_count();
+    if (id().is_root())
+        return cell_count() == 0;
+    // Note that the maximally-sized cell has no overflow, which is why we subtract PAGE_ID_SIZE.
+    const auto max_cell_size = MAX_CELL_HEADER_SIZE +
+                               get_max_local(size()) +
+                               CELL_POINTER_SIZE -
+                               PAGE_ID_SIZE;
+    return m_usable_space >= max_usable_space()/2 + max_cell_size;
+}
+
+auto Node::is_underflowing_() const -> bool
+{
+    if (id().is_root())
+        return !cell_count();
+    return m_usable_space >= max_usable_space() / 2; // TODO: removeme
 }
 
 auto Node::overflow_cell() const -> const Cell&
@@ -472,9 +492,10 @@ auto Node::remove(BytesView key) -> bool
 
 auto Node::remove_at(Index index, Size local_size) -> void
 {
-    // TODO: Allow keys of zero size? Current comparison routine should still work. Assertion allows this currently.
-    CUB_EXPECT_GE(local_size, Cell::MIN_HEADER_SIZE);
-    CUB_EXPECT_LE(local_size, max_local(m_page.size()) + Cell::MAX_HEADER_SIZE);
+    // TODO: Allow keys of zero size? Current comparison routine should still work. Assertion allows this currently, although we could
+    //       only have 1 zero-length key in the DB.
+    CUB_EXPECT_GE(local_size, MIN_CELL_HEADER_SIZE);
+    CUB_EXPECT_LE(local_size, get_max_local(m_page.size()) + MAX_CELL_HEADER_SIZE);
     CUB_EXPECT_LT(index, cell_count());
     CUB_EXPECT_FALSE(is_overflowing());
     give_free_space(cell_pointer(index), local_size);
@@ -490,6 +511,190 @@ auto Node::reset(bool reset_header) -> void
     }
     m_overflow.reset();
     recompute_usable_space();
+}
+
+auto transfer_cell(Node &src, Node &dst, Index index) -> void
+{
+    CUB_EXPECT_EQ(src.type(), dst.type());
+    auto cell = src.read_cell(index);
+    const auto cell_size = cell.size();
+    dst.insert(std::move(cell));
+    src.remove_at(index, cell_size);
+}
+
+auto can_merge_siblings(const Node &Ln, const Node &rn, const Cell &separator) -> bool
+{
+    CUB_EXPECT_FALSE(Ln.is_overflowing());
+    CUB_EXPECT_FALSE(rn.is_overflowing());
+    CUB_EXPECT_FALSE(Ln.id().is_root());
+    CUB_EXPECT_FALSE(rn.id().is_root());
+    const auto page_size = Ln.size();
+    CUB_EXPECT_EQ(page_size, rn.size());
+    CUB_EXPECT_EQ(Ln.type(), rn.type());
+
+    Size total {};
+
+    // Size contributed by the separator cell and cell pointer. Note that the separator must be from an internal
+    // node, so it has a left child ID. If Ln/rn are external, the left child ID will be discarded.
+    total += separator.size() - Ln.is_external()*PAGE_ID_SIZE + CELL_POINTER_SIZE;
+
+    // Occupied space in each node, including the headers.
+    total += page_size - Ln.usable_space();
+    total += page_size - rn.usable_space();
+
+    // Disregard one of the sets of headers.
+    total -= PageLayout::HEADER_SIZE + NodeLayout::HEADER_SIZE;
+    return total <= page_size;
+}
+
+auto merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
+{
+    /* Transformation:
+     *      1:[x..,        b,        y..]   -->   1:[x..,                 y..]
+     *     X       3:[a..]    2:[c..]    Y  -->  X       3:[a.., b.., c..]    Y
+     *            A       B  C       D      -->         A       B    C    D
+     */
+
+    if (Lc.is_external())
+        Lc.set_right_sibling_id(rc.right_sibling_id());
+
+    // Move the separator from the parent to the left child node.
+    auto separator = parent.read_cell(index);
+    if (!Lc.is_external()) {
+        separator.set_left_child_id(Lc.rightmost_child_id()); // (1)
+    } else {
+        // TODO: NULL-ing out the left child ID causes it to not be written. See cell.h
+        //       for another TOD0 concerning this weirdness. It's not causing any bugs
+        //       that I know of, it's just an awful API that will likely cause bugs if
+        //       anything is changed. Should fix.
+        separator.set_left_child_id(PID::null());
+    }
+    const auto separator_size = separator.size();
+    Lc.insert(std::move(separator));
+    parent.remove_at(index, separator_size);
+
+    // Transfer the rest of the cells. Lc shouldn't overflow.
+    while (rc.cell_count()) {
+        transfer_cell(rc, Lc, 0);
+        CUB_EXPECT_FALSE(Lc.is_overflowing());
+    }
+    if (!Lc.is_external())
+        Lc.set_rightmost_child_id(rc.rightmost_child_id()); // (2)
+    parent.set_child_id(index, Lc.id());
+    if (parent.rightmost_child_id() == rc.id())
+        parent.set_rightmost_child_id(Lc.id()); // (3)
+
+    /* Transformation:
+     *         1:[a]        -->   1:[]
+     *     3:[]     2:[b]   -->       3:[a, b]
+     *         A   B     C  -->      A     B  C
+     *
+     * Pointers:
+     *     (1) a.left_child_id      : 3 --> A  (Internal nodes only)
+     *     (2) 3.rightmost_child_id : A --> C  (Internal nodes only)
+     *     (3) 1.rightmost_child_id : 2 --> 3
+     */
+
+//    if (Lc.is_external())
+//        Lc.set_right_sibling_id(rc.right_sibling_id());
+//
+//    // Move the separator from the parent to the left child node.
+//    auto separator = parent.read_cell(index);
+//    if (!Lc.is_external()) {
+//        separator.set_left_child_id(Lc.rightmost_child_id()); // (1)
+//    } else {
+//        // TODO: NULL-ing out the left child ID causes it to not be written. See cell.h
+//        //       for another TOD0 concerning this weirdness. It's not causing any bugs
+//        //       that I know of, it's just an awful API that will likely cause bugs if
+//        //       anything is changed. Should fix.
+//        separator.set_left_child_id(PID::null());
+//    }
+//    const auto separator_size = separator.size();
+//    Lc.insert(std::move(separator));
+//    parent.remove_at(index, separator_size);
+//
+//    // Transfer the rest of the cells. Lc shouldn't overflow.
+//    while (rc.cell_count()) {
+//        transfer_cell(rc, Lc, 0);
+//        CUB_EXPECT_FALSE(Lc.is_overflowing());
+//    }
+//    if (!Lc.is_external())
+//        Lc.set_rightmost_child_id(rc.rightmost_child_id()); // (2)
+//    parent.set_child_id(index, Lc.id());
+//    if (parent.rightmost_child_id() == rc.id())
+//        parent.set_rightmost_child_id(Lc.id()); // (3)
+}
+
+auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
+{
+    /* Transformation:
+     *      1:[x..,        b,        y..]   -->   1:[x..,                 y..]
+     *     X       3:[a..]    2:[c..]    Y  -->  X       3:[a.., b.., c..]    Y
+     *            A       B  C       D      -->         A       B    C    D
+     */
+
+    /* Transformation:
+     *         1:[a]        -->   1:[]
+     *     3:[]     2:[b]   -->       3:[a, b]
+     *         A   B     C  -->      A     B  C
+     */
+
+    if (Lc.is_external())
+        Lc.set_right_sibling_id(rc.right_sibling_id());
+
+    // Move the separator from the source to the left child node.
+    auto separator = parent.read_cell(index);
+    if (!Lc.is_external()) {
+        separator.set_left_child_id(Lc.rightmost_child_id());
+        Lc.set_rightmost_child_id(rc.rightmost_child_id());
+    } else {
+        separator.set_left_child_id(PID::null());
+    }
+    const auto separator_size = separator.size();
+    Lc.insert(std::move(separator));
+    CUB_EXPECT_EQ(parent.child_id(index + 1), rc.id());
+    parent.set_child_id(index + 1, Lc.id());
+    parent.remove_at(index, separator_size);
+
+    // Transfer the rest of the cells. Lc shouldn't overflow.
+    while (rc.cell_count()) {
+        transfer_cell(rc, Lc, 0);
+        CUB_EXPECT_FALSE(Lc.is_overflowing());
+    }
+
+//    /* Transformation:
+//     *         1:[a]        -->   1:[]
+//     *     3:[]     2:[b]   -->       3:[a, b]
+//     *         A   B     C  -->      A     B  C
+//     *
+//     * Pointers:
+//     *     (1) a.left_child_id      : 3 --> A  (Internal nodes only)
+//     *     (2) 3.rightmost_child_id : A --> C  (Internal nodes only)
+//     *     (3) 1.rightmost_child_id : 2 --> 3
+//     */
+//
+//    if (Lc.is_external())
+//        Lc.set_right_sibling_id(rc.right_sibling_id());
+//
+//    // Move the separator from the source to the left child node.
+//    auto separator = parent.read_cell(index - 1);
+//    if (!Lc.is_external()) {
+//        separator.set_left_child_id(Lc.rightmost_child_id());
+//        Lc.set_rightmost_child_id(rc.rightmost_child_id());
+//    } else {
+//        separator.set_left_child_id(PID::null());
+//    }
+//    const auto separator_size = separator.size();
+//    Lc.insert(std::move(separator));
+//    CUB_EXPECT_EQ(parent.child_id(index), rc.id());
+//    parent.set_child_id(index, Lc.id());
+//    parent.remove_at(index - 1, separator_size);
+//
+//    // Transfer the rest of the cells. Lc shouldn't overflow.
+//    while (rc.cell_count()) {
+//        transfer_cell(rc, Lc, 0);
+//        CUB_EXPECT_FALSE(Lc.is_overflowing());
+//    }
 }
 
 } // cub

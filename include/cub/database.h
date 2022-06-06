@@ -4,7 +4,6 @@
 #include <memory>
 #include <optional>
 #include "bytes.h"
-#include "common.h"
 
 namespace cub {
 

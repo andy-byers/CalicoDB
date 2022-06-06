@@ -2,9 +2,7 @@
 #define CUB_PAGE_NODE_H
 
 #include "cell.h"
-#include "common.h"
 #include "page.h"
-#include "bytes.h"
 
 namespace cub {
 
@@ -47,25 +45,26 @@ public:
         return m_page.type();
     }
 
-    auto read_key(Index) const -> BytesView;
-    auto read_cell(Index) const -> Cell;
-    auto detach_cell(Index, Scratch) const -> Cell;
+    [[nodiscard]] auto read_key(Index) const -> BytesView;
+    [[nodiscard]] auto read_cell(Index) const -> Cell;
+    [[nodiscard]] auto detach_cell(Index, Scratch) const -> Cell;
+    [[nodiscard]] auto find_ge(BytesView) const -> SearchResult;
     auto extract_cell(Index, Scratch) -> Cell;
-    auto find_ge(BytesView) const -> SearchResult;
     auto insert(Cell) -> void;
     auto insert_at(Index, Cell) -> void;
     auto remove(BytesView) -> bool;
     auto remove_at(Index, Size) -> void;
     auto defragment() -> void;
 
-    auto overflow_cell() const -> const Cell&;
+    [[nodiscard]] auto overflow_cell() const -> const Cell&;
     auto set_overflow_cell(Cell) -> void;
     auto take_overflow_cell() -> Cell;
 
-    auto is_overflowing() const -> bool;
-    auto is_underflowing() const -> bool;
-    auto is_external() const -> bool;
-    auto child_id(Index) const -> PID;
+    [[nodiscard]] auto is_overflowing() const -> bool;
+    [[nodiscard]] auto is_underflowing() const -> bool;
+    [[nodiscard]] auto is_underflowing_() const -> bool; // TODO: Prep for `proactive_merges`
+    [[nodiscard]] auto is_external() const -> bool;
+    [[nodiscard]] auto child_id(Index) const -> PID;
 
     // Public header fields.
     [[nodiscard]] auto header_crc() const -> Index;
@@ -79,11 +78,12 @@ public:
     auto set_rightmost_child_id(PID) -> void;
     auto set_child_id(Index, PID) -> void;
 
+    [[nodiscard]] auto usable_space() const -> Size;
+    [[nodiscard]] auto max_usable_space() const -> Size;
+    [[nodiscard]] auto cell_area_offset() const -> Size;
+    [[nodiscard]] auto cell_pointers_offset() const -> Size;
+    [[nodiscard]] auto header_offset() const -> Index;
     auto reset(bool = false) -> void;
-    auto usable_space() const -> Size;
-    auto cell_area_offset() const -> Size;
-    auto cell_pointers_offset() const -> Size;
-    auto header_offset() const -> Index;
 
     Node(Node&&) = default;
     auto operator=(Node&&) -> Node& = default;
@@ -99,9 +99,9 @@ private:
     auto set_free_start(Index) -> void;
     auto set_frag_count(Size) -> void;
 
+    [[nodiscard]] auto gap_size() const -> Size;
+    [[nodiscard]] auto cell_pointer(Index) const -> Index;
     auto recompute_usable_space() -> void;
-    auto gap_size() const -> Size;
-    auto cell_pointer(Index) const -> Index;
     auto set_cell_pointer(Index, Index) -> void;
     auto insert_cell_pointer(Index, Index) -> void;
     auto remove_cell_pointer(Index) -> void;
@@ -116,6 +116,11 @@ private:
     std::optional<Cell> m_overflow{};
     Size m_usable_space{};
 };
+
+auto transfer_cell(Node&, Node&, Index) -> void;
+auto can_merge_siblings(const Node&, const Node&, const Cell&) -> bool;
+auto merge_left(Node&, Node&, Node&, Index) -> void;
+auto merge_right(Node&, Node&, Node&, Index) -> void;
 
 } // cub
 

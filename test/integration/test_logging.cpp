@@ -1,7 +1,7 @@
 #include <filesystem>
 #include <vector>
-#include "cursor.h"
-#include "database.h"
+#include "cub/cursor.h"
+#include "cub/database.h"
 #include "integration.h"
 #include "fakes.h"
 #include "tools.h"
@@ -12,6 +12,8 @@
 #include "wal/wal_record.h"
 #include "wal/wal_writer.h"
 #include "utils/crc.h"
+#include "utils/encoding.h"
+#include "utils/layout.h"
 
 namespace {
 using namespace cub;

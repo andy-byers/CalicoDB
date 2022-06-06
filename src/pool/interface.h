@@ -1,9 +1,7 @@
 #ifndef CUB_POOL_INTERFACE_H
 #define CUB_POOL_INTERFACE_H
 
-#include "common.h"
-#include "bytes.h"
-#include "utils/types.h"
+#include "cub/bytes.h"
 #include "utils/utils.h"
 
 namespace cub {
@@ -33,7 +31,7 @@ public:
     virtual auto recover() -> bool = 0;
     virtual auto save_header(FileHeader&) -> void = 0;
     virtual auto load_header(const FileHeader&) -> void = 0;
-    virtual auto on_page_release(Page&) -> void = 0; // TODO
+    virtual auto on_page_release(Page&) -> void = 0;
     virtual auto on_page_error() -> void = 0;
 };
 

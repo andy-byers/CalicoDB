@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "bytes.h"
-#include "common.h"
+#include "cub/bytes.h"
+#include "cub/common.h"
 #include "random.h"
 #include "unit_tests.h"
 #include "utils/assert.h"

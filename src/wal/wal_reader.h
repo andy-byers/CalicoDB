@@ -10,7 +10,6 @@
 #include <memory>
 #include <optional>
 #include <stack>
-#include "common.h"
 #include "interface.h"
 #include "wal_record.h"
 

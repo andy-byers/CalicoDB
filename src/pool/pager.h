@@ -3,20 +3,21 @@
 
 #include <list>
 #include <optional>
-#include "common.h"
+#include "cub/common.h"
 
 namespace cub {
 
 class Frame;
 class IReadWriteFile;
 
-class Pager {
+class Pager final {
 public:
     struct Parameters {
         std::unique_ptr<IReadWriteFile> database_file;
         Size page_size{};
         Size frame_count{};
     };
+
     explicit Pager(Parameters);
     ~Pager() = default;
     [[nodiscard]] auto available() const -> Size;

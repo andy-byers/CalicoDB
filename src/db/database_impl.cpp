@@ -1,7 +1,7 @@
 
 #include "database_impl.h"
 #include "cursor_impl.h"
-#include "exception.h"
+#include "cub/exception.h"
 #include "file/file.h"
 #include "file/system.h"
 #include "page/file_header.h"
@@ -274,8 +274,7 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         wal_reader_file->use_direct_io();
         wal_writer_file->use_direct_io();
     } catch (const SystemError &error) {
-        // We don't need to have kernel page caching turned off, but it can greatly
-        // boost performance. TODO: Log, or otherwise notify the user? Maybe a flag in Options to control whether we fail here?
+        // TODO: Log, or otherwise notify the user? Maybe a flag in Options to control whether we fail here?
         throw; // TODO: Rethrowing for now.
     }
 #endif

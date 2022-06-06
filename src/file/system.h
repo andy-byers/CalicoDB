@@ -1,8 +1,7 @@
 #ifndef CUB_STORAGE_SYSTEM_H
 #define CUB_STORAGE_SYSTEM_H
 
-#include    "common.h"
-#include "bytes.h"
+#include "cub/bytes.h"
 
 namespace cub::system {
 

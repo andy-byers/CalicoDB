@@ -2,7 +2,6 @@
 #define CUB_TREE_FREELIST_H
 
 #include <optional>
-#include "common.h"
 #include "utils/identifier.h"
 
 namespace cub {

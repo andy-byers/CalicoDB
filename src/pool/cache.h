@@ -3,14 +3,13 @@
 
 #include <list>
 #include <unordered_map>
-#include "common.h"
 #include "utils/identifier.h"
 
 namespace cub {
 
 class Frame;
 
-class PageCache {
+class PageCache final {
 public:
     PageCache() = default;
     ~PageCache() = default;

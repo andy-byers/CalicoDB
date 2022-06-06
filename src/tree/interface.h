@@ -2,8 +2,6 @@
 #define CUB_TREE_INTERFACE_H
 
 #include <optional>
-
-#include "common.h"
 #include "page/node.h"
 
 namespace cub {

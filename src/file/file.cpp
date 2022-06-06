@@ -1,10 +1,6 @@
 #include <fcntl.h>
-#include <unistd.h>
-
-#include "exception.h"
 #include "file.h"
 #include "system.h"
-#include "bytes.h"
 
 namespace cub {
 
@@ -47,21 +43,21 @@ namespace {
         return target_size - in.size();
     }
 
-    Resource::Resource(const std::string &name, int type_bits, Mode mode, int permissions)
-        : m_fd{system::open(name, type_bits | static_cast<int>(mode), permissions)} {}
-
-    Resource::~Resource()
-    {
-        // TODO: Log.
-        try {system::close(m_fd);} catch (...) {}
-    }
-
     constexpr auto APPEND = O_APPEND;
     constexpr auto READ_ONLY = O_RDONLY;
     constexpr auto READ_WRITE = O_RDWR;
     constexpr auto WRITE_ONLY = O_WRONLY;
 
 } // <anonymous>
+
+Resource::Resource(const std::string &name, int type_bits, Mode mode, int permissions)
+    : m_fd{system::open(name, type_bits | static_cast<int>(mode), permissions)} {}
+
+Resource::~Resource()
+{
+    // TODO: Log.
+    try {system::close(m_fd);} catch (...) {}
+}
 
 ReadOnlyFile::ReadOnlyFile(const std::string &path, Mode mode, int permissions)
     : m_resource{path, READ_ONLY, mode, permissions} {}

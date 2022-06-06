@@ -5,8 +5,6 @@
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
-
-#include "common.h"
 #include "frame.h"
 #include "interface.h"
 #include "pager.h"

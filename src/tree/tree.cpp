@@ -1,6 +1,6 @@
 #include <optional>
-#include "exception.h"
 #include "tree.h"
+#include "cub/exception.h"
 #include "page/cell.h"
 #include "page/file_header.h"
 #include "page/link.h"
@@ -8,19 +8,11 @@
 #include "page/page.h"
 #include "pool/interface.h"
 #include "utils/layout.h"
-#include "bytes.h"
 
 namespace cub {
 
-namespace {
-    auto get_median_index(Size num_elements)
-    {
-        return num_elements / 2;
-    }
-} // anonymous;
-
 Tree::Tree(Parameters param)
-    : m_scratch {max_local(param.buffer_pool->page_size())}
+    : m_scratch {get_max_local(param.buffer_pool->page_size())}
     , m_free_list {{param.buffer_pool, param.free_start, param.free_count}}
     , m_pool {param.buffer_pool}
     , m_node_count {param.node_count}
@@ -53,7 +45,7 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
     auto out = _b(result);
 
     // Note that it is possible to have no value stored locally but have an overflow page. The happens when
-    // the key is of maximal length (i.e. max_local(m_header->page_size())).
+    // the key is of maximal length (i.e. get_max_local(m_header->page_size())).
     if (!local.is_empty())
         mem_copy(out, local, local.size());
 
@@ -67,12 +59,12 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
 
 auto Tree::insert(BytesView key, BytesView value) -> void
 {
-    auto [node, index, found_eq] = find_ge(key, true);
-
     if (key.is_empty())
         throw InvalidArgumentError {"Key cannot be empty"};
 
-    if (key.size() > max_local(node.size()))
+    auto [node, index, found_eq] = find_ge(key, true);
+
+    if (key.size() > get_max_local(node.size()))
         throw InvalidArgumentError {"Key exceeds maximum allowed length"};
 
     if (found_eq) {
@@ -82,27 +74,19 @@ auto Tree::insert(BytesView key, BytesView value) -> void
     }
 }
 
-/**
- * Remove the pointed-to key-value pair.
- *
- * @returns Whether or not the key-value pair was removed
- */
 auto Tree::remove(BytesView key) -> bool
 {
     auto [node, index, found_eq] = find_ge(key, true);
-
-    if (found_eq) {
+    if (found_eq)
         positioned_remove({std::move(node), index});
-        return true;
-    }
-    return false;
+    return found_eq;
 }
 
 auto Tree::positioned_insert(Position position, BytesView key, BytesView value) -> void
 {
-    CUB_EXPECT_LE(key.size(), max_local(m_pool->page_size()));
+    CUB_EXPECT_LE(key.size(), get_max_local(m_pool->page_size()));
     auto [node, index] = std::move(position);
-    auto cell = make_cell(node, key, value);
+    auto cell = make_cell(key, value);
     node.insert_at(index, std::move(cell));
     m_cell_count++;
     
@@ -117,16 +101,15 @@ auto Tree::positioned_modify(Position position, BytesView value) -> void
     // Make a copy of the key. The data backing the old key slice will be written over when we call
     // remove_at() on the old cell.
     const auto key = _s(old_cell.key());
-    auto new_cell = make_cell(node, _b(key), value);
+    auto new_cell = make_cell(_b(key), value);
 
     if (old_cell.overflow_size())
         destroy_overflow_chain(old_cell.overflow_id(), old_cell.overflow_size());
 
-    node.remove_at(index, old_cell.size());
-
-    if (!node.is_external()) // TODO: Move up above remove_at().
+    if (!node.is_external())
         new_cell.set_left_child_id(old_cell.left_child_id());
-    
+
+    node.remove_at(index, old_cell.size());
     node.insert_at(index, std::move(new_cell));
 
     if (node.is_overflowing())
@@ -149,7 +132,7 @@ auto Tree::positioned_remove(Position position) -> void
     if (!node.is_external()) {
         auto [other, other_index] = find_local_max(acquire_node(node.child_id(index), true));
         auto other_cell = other.extract_cell(other_index, m_scratch.get());
-        anchor = _s(other_cell.key());
+        anchor = _s(other_cell.key()); // TODO: Avoid this if possible. Seems unnecessary?
         other_cell.set_left_child_id(node.child_id(index));
         node.remove_at(index, node.read_cell(index).size());
 
@@ -166,9 +149,7 @@ auto Tree::positioned_remove(Position position) -> void
     } else {
         node.remove_at(index, node.read_cell(index).size());
     }
-
-    if (node.is_underflowing())
-        balance_after_underflow(std::move(node), _b(anchor));
+    maybe_balance_after_underflow(std::move(node), _b(anchor));
 }
 
 auto Tree::find_local_min(Node root) -> Position
@@ -222,21 +203,21 @@ auto Tree::balance_after_overflow(Node node) -> void
     }
 }
 
-auto Tree::balance_after_underflow(Node node, BytesView anchor) -> void
+auto Tree::maybe_balance_after_underflow(Node node, BytesView anchor) -> void
 {
-    CUB_EXPECT(node.is_underflowing());
-    while (node.is_underflowing()) {
-        if (node.id().is_root()) {
-            fix_root(std::move(node));
-            return;
-        }
+    // We always attempt to rebalance up to the root.
+    while (!node.id().is_root()) {
         auto parent = acquire_node(node.parent_id(), true);
         // NOTE: Searching for the anchor key from the node we removed a cell from should
         //       always give us the correct cell ID due to the B-Tree ordering rules.
         const auto [index, found_eq] = parent.find_ge(anchor);
-        fix_non_root(std::move(node), parent, index);
+        if (!fix_non_root(std::move(node), parent, index))
+            return;
         node = std::move(parent);
     }
+    CUB_EXPECT_TRUE(node.id().is_root());
+    if (!node.cell_count())
+        fix_root(std::move(node));
 }
 
 /**
@@ -305,18 +286,21 @@ auto Tree::maybe_fix_child_parent_connections(Node &node) -> void
  * Note that the key and value must exist until the cell is safely embedded in the B-Tree. If
  * the tree is balanced and there are no overflow cells then this is guaranteed to be true.
  */
-auto Tree::make_cell(Node &node, BytesView key, BytesView value) -> Cell
+auto Tree::make_cell(BytesView key, BytesView value) -> Cell
 {
-    auto builder = CellBuilder{node.size()}
-        .set_key(key)
-        .set_value(value);
+    CUB_EXPECT_FALSE(key.is_empty());
+    const auto local_value_size = get_local_value_size(key.size(), value.size(), m_pool->page_size());
+    Cell::Parameters param;
+    param.key = key;
+    param.local_value = value;
+    param.value_size = value.size();
 
-    auto cell = builder.build();
-
-    if (const auto overflow = builder.overflow(); !overflow.is_empty())
-        cell.set_overflow_id(allocate_overflow_chain(overflow));
-
-    return cell;
+    if (local_value_size != value.size()) {
+        CUB_EXPECT_LT(local_value_size, value.size());
+        param.local_value.truncate(local_value_size);
+        param.overflow_id = allocate_overflow_chain(value.range(local_value_size));
+    }
+    return Cell {param};
 }
 
 auto Tree::allocate_overflow_chain(BytesView overflow) -> PID
@@ -372,133 +356,142 @@ auto Tree::destroy_overflow_chain(PID id, Size size) -> void
     }
 }
 
-auto Tree::transfer_cell(Node &src, Node &dst, Index index) -> void
+auto Tree::fix_non_root(Node node, Node &parent, Index index) -> bool
 {
-    CUB_EXPECT_EQ(src.type(), dst.type());
-    auto cell = src.read_cell(index);
-    const auto cell_size = cell.size();
-    dst.insert(std::move(cell));
-    src.remove_at(index, cell_size);
+    CUB_EXPECT_FALSE(node.id().is_root());
+    CUB_EXPECT_FALSE(node.is_overflowing());
+    CUB_EXPECT_FALSE(parent.is_overflowing());
+    if (index > 0) {
+        auto Lc = acquire_node(parent.child_id(index - 1), true);
+        if (can_merge_siblings(Lc, node, parent.read_cell(index - 1))) {
+            merge_right(Lc, node, parent, index - 1);
+            maybe_fix_child_parent_connections(Lc);
+            destroy_node(std::move(node));
+            return true;
+        }
+    }
+    if (index < parent.cell_count()) {
+        auto rc = acquire_node(parent.child_id(index + 1), true);
+        if (can_merge_siblings(node, rc, parent.read_cell(index))) {
+            merge_left(node, rc, parent, index);
+            maybe_fix_child_parent_connections(node);
+            destroy_node(std::move(rc));
+            return true;
+        }
+    }
+    // Skip the rotation but keep on rebalancing.
+    if (!node.is_underflowing())
+        return true;
+
+    auto maybe_fix_parent = [&] {
+        if (parent.is_overflowing()) {
+            node.take();
+            balance_after_overflow(std::move(parent));
+
+            // This may not actually be the correct parent, depending on whether index
+            // was before or after the median. Either way, both new nodes resulting from
+            // the split are more-or-less balanced, so we'll stop rebalancing here.
+            return false;
+        }
+        return true;
+    };
+    struct SiblingInfo {
+        std::optional<Node> node;
+        Size cell_count {};
+    };
+    SiblingInfo siblings[2] {};
+
+    if (index > 0) {
+        auto left_sibling = acquire_node(parent.child_id(index - 1), true);
+        const auto cell_count = left_sibling.cell_count();
+        siblings[0] = {std::move(left_sibling), cell_count};
+    }
+    if (index < parent.cell_count()) {
+        auto right_sibling = acquire_node(parent.child_id(index + 1), true);
+        const auto cell_count = right_sibling.cell_count();
+        siblings[1] = {std::move(right_sibling), cell_count};
+    }
+    // For now, we'll skip rotation if it wouldn't yield us more balanced results with respect to
+    // the cell counts. TODO: Maybe look into incorporating the usable space of each node, and maybe the size of the separators, to make a better-informed decision.
+    const auto left_has_enough_cells = siblings[0].cell_count > node.cell_count() + 1;
+    const auto right_has_enough_cells = siblings[1].cell_count > node.cell_count() + 1;
+    if (!left_has_enough_cells && !right_has_enough_cells)
+        return true;
+
+    // Note that we are guaranteed at least one sibling (unless we are in the root, which is
+    // handled by fix_root() anyway).
+    if (siblings[0].cell_count > siblings[1].cell_count) {
+        auto [left_sibling, cell_count] = std::move(siblings[0]);
+        CUB_EXPECT_NE(left_sibling, std::nullopt);
+        siblings[1].node.reset();
+        rotate_right(parent, *left_sibling, node, index - 1);
+        CUB_EXPECT_FALSE(node.is_overflowing());
+        left_sibling.reset();
+        return maybe_fix_parent();
+    } else {
+        auto [right_sibling, cell_count] = std::move(siblings[1]);
+        CUB_EXPECT_NE(right_sibling, std::nullopt);
+        siblings[0].node.reset();
+        rotate_left(parent, node, *right_sibling, index);
+        CUB_EXPECT_FALSE(node.is_overflowing());
+        right_sibling.reset();
+        return maybe_fix_parent();
+    }
+    return true;
 }
 
-auto Tree::merge_left(Node &parent, Node &Lc, Node rc, Index index) -> void
+auto Tree::fix_root(Node node) -> void
 {
-    /* Transformation:
-     *         1:[a]        -->   1:[]
-     *     3:[]     2:[b]   -->       3:[a, b]
-     *         A   B     C  -->      A     B  C
-     *
-     * Pointers:
-     *     (1) a.left_child_id      : 3 --> A  (Internal nodes only)
-     *     (2) 3.rightmost_child_id : A --> C  (Internal nodes only)
-     *     (3) 1.rightmost_child_id : 2 --> 3
-     */
+    CUB_EXPECT_TRUE(node.id().is_root());
+    CUB_EXPECT_TRUE(node.is_underflowing());
 
-    if (Lc.is_external())
-        Lc.set_right_sibling_id(rc.right_sibling_id());
+    // If the root is external here, the whole tree must be empty.
+    if (!node.is_external()) {
+        auto child = acquire_node(node.rightmost_child_id(), true);
 
-    // Move the separator from the parent to the left child node.
-    auto separator = parent.read_cell(index);
-    if (!Lc.is_external()) {
-        separator.set_left_child_id(Lc.rightmost_child_id()); // (1)
-    } else {
-        // TODO: NULL-ing out the left child ID causes it to not be written. See cell.h
-        //       for another TOD0 concerning this weirdness. It's not causing any bugs
-        //       that I know of, it's just an awful API that will likely cause bugs if
-        //       anything is changed. Should fix.
-        separator.set_left_child_id(PID::null());
+        // We don't have enough room to transfer the child contents into the root, due to the file header. In
+        // this case, we'll just split the child and let the median cell be inserted into the root. Note that
+        // the child needs an overflow cell for the split routine to work. We'll just fake it by extracting an
+        // arbitrary cell and making it the overflow cell.
+        if (child.usable_space() < node.header_offset()) {
+            child.set_overflow_cell(child.extract_cell(0, m_scratch.get()));
+            node.take();
+            split_non_root(std::move(child));
+            node = find_root(true);
+        } else {
+            do_merge_root(node, child);
+            destroy_node(std::move(child));
+        }
+        maybe_fix_child_parent_connections(node);
     }
-    const auto separator_size = separator.size();
-    Lc.insert(std::move(separator));
-    parent.remove_at(index, separator_size);
-
-    // Transfer the rest of the cells. Lc shouldn't overflow.
-    while (rc.cell_count()) {
-        transfer_cell(rc, Lc, 0);
-        CUB_EXPECT_FALSE(Lc.is_overflowing());
-    }
-    if (!Lc.is_external())
-        Lc.set_rightmost_child_id(rc.rightmost_child_id()); // (2)
-    parent.set_child_id(index, Lc.id());
-    if (parent.rightmost_child_id() == rc.id())
-        parent.set_rightmost_child_id(Lc.id()); // (3)
-    maybe_fix_child_parent_connections(Lc);
-    destroy_node(std::move(rc));
 }
 
-/**
- * Merge an empty node with its right sibling.
- *
- * This method actually transfers cells from rc into Lc and destroys rc. This is so that we don't have to
- * worry about finding the left sibling of Lc to update its right sibling pointer.
- *
- * @param parent Parent of Lc and rc
- * @param Lc Left child of source
- * @param rc Pointer to right child of source (gets destroyed)
- * @param index Index of the separator between Lc and rc (cell ID of Lc)
- */
-auto Tree::merge_right(Node &parent, Node &Lc, Node rc, Index index) -> void
+auto Tree::save_header(FileHeader &header) -> void
 {
-    /* Transformation:
-     *         1:[a]        -->   1:[]
-     *     3:[]     2:[b]   -->       3:[a, b]
-     *         A   B     C  -->      A     B  C
-     *
-     * Pointers:
-     *     (1) a.left_child_id      : 3 --> A  (Internal nodes only)
-     *     (2) 3.rightmost_child_id : A --> C  (Internal nodes only)
-     *     (3) 1.rightmost_child_id : 2 --> 3
-     */
+    header.set_node_count(m_node_count);
+    header.set_key_count(m_cell_count);
+    m_free_list.save_header(header);
+}
 
-    if (Lc.is_external())
-        Lc.set_right_sibling_id(rc.right_sibling_id());
-
-    // Move the separator from the source to the left child node.
-    auto separator = parent.read_cell(index - 1);
-    if (!Lc.is_external()) {
-        separator.set_left_child_id(Lc.rightmost_child_id());
-        Lc.set_rightmost_child_id(rc.rightmost_child_id());
-    } else {
-        separator.set_left_child_id(PID::null());
-    }
-    const auto separator_size = separator.size();
-    Lc.insert(std::move(separator));
-    CUB_EXPECT_EQ(parent.child_id(index), rc.id());
-    parent.set_child_id(index, Lc.id());
-    parent.remove_at(index - 1, separator_size);
-
-    // Transfer the rest of the cells. Lc shouldn't overflow.
-    while (rc.cell_count()) {
-        transfer_cell(rc, Lc, 0);
-        CUB_EXPECT_FALSE(Lc.is_overflowing());
-    }
-    maybe_fix_child_parent_connections(Lc);
-    destroy_node(std::move(rc));
+auto Tree::load_header(const FileHeader &header) -> void
+{
+    m_node_count = header.node_count();
+    m_cell_count = header.key_count();
+    m_free_list.load_header(header);
 }
 
 auto Tree::rotate_left(Node &parent, Node &Lc, Node &rc, Index index) -> void
 {
-    /* Transformation:
-     *         1:[a]           -->       1:[b]
-     *     3:[]     2:[b, c]   -->   3:[a]    2:[c]
-     *         A   B     C  D  -->  A     B  C     D
-     *
-     * Pointers:
-     *     (1) a.left_child_id      : 3 -> A  (Internal only)
-     *     (2) 3.rightmost_child_id : A -> B  (Internal only)
-     *     (3) B.parent_id          : 2 -> 3  (Internal only)
-     *     (4) b.left_child_id      : B -> 3
-     */
     CUB_EXPECT_FALSE(parent.is_external());
     CUB_EXPECT_GT(parent.cell_count(), 0);
     CUB_EXPECT_GT(rc.cell_count(), 1);
 
-    auto separator = parent.extract_cell(index, m_scratch.get()); // a
+    auto separator = parent.extract_cell(index, m_scratch.get());
     if (!Lc.is_external()) {
         auto child = acquire_node(rc.child_id(0), true);
-        separator.set_left_child_id(Lc.rightmost_child_id()); // (1)
-        Lc.set_rightmost_child_id(child.id()); // (2)
-        child.set_parent_id(Lc.id()); // (3)
+        separator.set_left_child_id(Lc.rightmost_child_id());
+        Lc.set_rightmost_child_id(child.id());
+        child.set_parent_id(Lc.id());
     } else {
         separator.set_left_child_id(PID{});
     }
@@ -506,30 +499,14 @@ auto Tree::rotate_left(Node &parent, Node &Lc, Node &rc, Index index) -> void
     Lc.insert_at(Lc.cell_count(), std::move(separator));
     CUB_EXPECT_FALSE(Lc.is_overflowing());
 
-    auto lowest = rc.extract_cell(0, m_scratch.get()); // b
-    lowest.set_left_child_id(Lc.id()); // (4)
+    auto lowest = rc.extract_cell(0, m_scratch.get());
+    lowest.set_left_child_id(Lc.id());
     // Parent might overflow.
     parent.insert_at(index, std::move(lowest));
 }
 
-/**
- *
- *
- */
 auto Tree::rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
 {
-    /* Transformation:
-     *
-     *                   1:[c]       -->             1:[b]
-     *      3:[..., a, b]     2:[]   -->   3:[..., a]     2:[c]
-     *     X  ...  A  B  C        D  -->  X  ...  A  B   C     D
-     *
-     * Pointers:
-     *     (1) c.left_child_id      : 3 -> C  (Internal nodes only)
-     *     (2) 3.rightmost_child_id : C -> B  (Internal nodes only)
-     *     (3) C.parent_id          : 3 -> 2  (Internal nodes only)
-     *     (4) b.left_child_id      : B -> 3
-     */
     CUB_EXPECT_FALSE(parent.is_external());
     CUB_EXPECT_GT(parent.cell_count(), 0);
     CUB_EXPECT_GT(Lc.cell_count(), 1);
@@ -537,9 +514,9 @@ auto Tree::rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
     if (!rc.is_external()) {
         CUB_EXPECT_FALSE(Lc.is_external());
         auto child = acquire_node(Lc.rightmost_child_id(), true);
-        separator.set_left_child_id(child.id()); // (1)
-        Lc.set_rightmost_child_id(Lc.child_id(Lc.cell_count() - 1)); // (2)
-        child.set_parent_id(rc.id()); // (3)
+        separator.set_left_child_id(child.id());
+        Lc.set_rightmost_child_id(Lc.child_id(Lc.cell_count() - 1));
+        child.set_parent_id(rc.id());
     } else {
         separator.set_left_child_id(PID{});
     }
@@ -548,110 +525,52 @@ auto Tree::rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
     CUB_EXPECT_FALSE(rc.is_overflowing());
 
     auto highest = Lc.extract_cell(Lc.cell_count() - 1, m_scratch.get());
-    highest.set_left_child_id(Lc.id()); // (4)
-    // NOTE: The parent might overflow.
+    highest.set_left_child_id(Lc.id());
+    // The parent might overflow.
     parent.insert_at(index, std::move(highest));
 }
 
-
-auto Tree::fix_non_root(Node node, Node &parent, Index index) -> void
+auto do_split_root(Node &root, Node &child) -> void
 {
-    auto maybe_fix_parent = [&] {
-        if (parent.is_overflowing()) {
-            // We need to release node before we rebalance parent, otherwise we'll end
-            // up acquiring the same page twice with the writable flag set, which is
-            // not allowed.
-            node.take();
+    // Copy the cells.
+    auto offset = root.cell_area_offset();
+    auto size = root.size() - offset;
+    child.page().write(root.page().range(offset).truncate(size), offset);
 
-            const auto id = parent.id();
-            balance_after_overflow(std::move(parent));
+    // Copy the header and cell pointers.
+    offset = child.header_offset();
+    size = NodeLayout::HEADER_SIZE + root.cell_count()*CELL_POINTER_SIZE;
+    child.page().write(root.page().range(root.header_offset()).truncate(size), offset);
 
-            // This may not actually be the correct parent, depending on whether index
-            // was before or after the median. Either way, both new siblings resulting
-            // from the split are guaranteed to be neither overflowing, nor underflowing.
-            // The rebalancing will stop regardless.
-            parent = acquire_node(id, true);
-            return true;
-        }
-        return false;
-    };
+    CUB_EXPECT_TRUE(root.is_overflowing());
+    child.set_overflow_cell(root.take_overflow_cell());
 
-    CUB_EXPECT_TRUE(node.is_underflowing());
-    CUB_EXPECT_FALSE(node.id().is_root());
-    constexpr Size minimum = 2;
-
-    if (index > 0) {
-        auto left = acquire_node(parent.child_id(index - 1), true);
-        if (left.cell_count() >= minimum) {
-            rotate_right(parent, left, node, index - 1);
-            left.take(); // Release the page.
-            maybe_fix_parent();
-            return;
-        }
-    }
-    if (index < parent.cell_count()) {
-        auto right = acquire_node(parent.child_id(index + 1), true);
-        if (right.cell_count() >= minimum) {
-            rotate_left(parent, node, right, index);
-            right.take(); // Release the page.
-            maybe_fix_parent();
-            return;
-        }
-    }
-    if (index) {
-        auto Lc = acquire_node(parent.child_id(index - 1), true);
-        merge_right(parent, Lc, std::move(node), index);
-        node = std::move(Lc); // Needed for the post-conditions.
-    } else {
-        merge_left(parent, node, acquire_node(parent.child_id(index + 1), true), index);
-    }
-    CUB_EXPECT_FALSE(parent.is_overflowing());
-    CUB_EXPECT_FALSE(node.is_overflowing());
+    root.reset(true);
+    root.page().set_type(PageType::INTERNAL_NODE);
+    root.set_rightmost_child_id(child.id());
+    child.set_parent_id(PID::root());
 }
 
-auto Tree::fix_root(Node node) -> void
+auto do_merge_root(Node &root, Node &child) -> void
 {
-    CUB_EXPECT_TRUE(node.id().is_root());
-    CUB_EXPECT_EQ(node.cell_count(), 0);
+    CUB_EXPECT(root.rightmost_child_id() == child.id());
+    child.defragment();
 
-    if (!node.is_external()) {
-        auto child = acquire_node(node.rightmost_child_id(), true);
+    // Copy the cell content area.
+    auto offset = child.cell_area_offset();
+    auto size = child.size() - offset;
+    root.page().write(child.page().range(offset).truncate(size), offset);
 
-        // TODO: Needs testing...
-        if (child.usable_space() < node.header_offset()) {
-            split_non_root(std::move(child));
-        } else {
-            do_merge_root(node, std::move(child));
-        }
-        maybe_fix_child_parent_connections(node);
-    }
+    // Copy the header and cell pointers.
+    offset = root.header_offset();
+    size = NodeLayout::HEADER_SIZE + child.cell_count()*CELL_POINTER_SIZE;
+    root.page().write(child.page().range(child.header_offset()).truncate(size), offset);
+    root.page().set_type(child.type());
 }
 
-auto Tree::can_merge_siblings(const Node &Ln, const Node &rn, const Node &pt, Index index) -> bool
+auto do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 {
-    const auto separator = pt.read_cell(index);
-    const auto page_size = Ln.size();
-    CUB_EXPECT_EQ(page_size, rn.size());
-    CUB_EXPECT_EQ(Ln.type(), rn.type());
-
-    Size total {};
-
-    // Size contributed by the separator cell and cell pointer.
-    total += separator.size() - Ln.is_external()*PAGE_ID_SIZE + CELL_POINTER_SIZE;
-
-    // Occupied space in each node, including the headers.
-    total += page_size - Ln.usable_space();
-    total += page_size - rn.usable_space();
-
-    // Disregard one of the sets of headers to get the total space needed to hold the
-    // merged content.
-    total -= PageLayout::HEADER_SIZE + NodeLayout::HEADER_SIZE;
-    return total < page_size;
-}
-
-auto Tree::do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
-{
-    // get the overflow cell. The caller should make sure the node is is_overflowing
+    // get the overflow cell. The caller should make sure the node is overflowing
     // before calling this method.
     CUB_EXPECT_TRUE(Ln.is_overflowing());
     auto overflow = Ln.take_overflow_cell();
@@ -667,7 +586,7 @@ auto Tree::do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     // TODO: Get rid of the optional(s). It's a hack from when Cell was changed to be non-copyable.
     std::optional<Cell> median {};
     std::optional<Cell> temp {std::move(overflow)};
-    auto median_index = get_median_index(n);
+    auto median_index = n / 2;
     if (overflow_idx == median_index) {
         median = std::move(*temp);
     } else {
@@ -714,61 +633,6 @@ auto Tree::do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
             break;
     }
     return std::move(*median);
-}
-
-// TODO: Move to Node class.
-auto Tree::do_split_root(Node &root, Node &child) -> void
-{
-    // Copy the cells.
-    auto offset = root.cell_area_offset();
-    auto size = root.size() - offset;
-    child.page().write(root.page().range(offset).truncate(size), offset);
-
-    // Copy the header and cell pointers.
-    offset = child.header_offset();
-    size = NodeLayout::HEADER_SIZE + root.cell_count()*CELL_POINTER_SIZE;
-    child.page().write(root.page().range(root.header_offset()).truncate(size), offset);
-
-    CUB_EXPECT(root.is_overflowing());
-    child.set_overflow_cell(root.take_overflow_cell());
-
-    root.reset(true);
-    root.page().set_type(PageType::INTERNAL_NODE);
-    root.set_rightmost_child_id(child.id());
-    child.set_parent_id(PID::root());
-}
-
-// TODO: Move to Node class.
-auto Tree::do_merge_root(Node &root, Node child) -> void
-{
-    CUB_EXPECT(root.rightmost_child_id() == child.id());
-    child.defragment();
-
-    // Copy the cell content area.
-    auto offset = child.cell_area_offset();
-    auto size = child.size() - offset;
-    root.page().write(child.page().range(offset).truncate(size), offset);
-
-    // Copy the header and cell pointers.
-    offset = root.header_offset();
-    size = NodeLayout::HEADER_SIZE + child.cell_count()*CELL_POINTER_SIZE;
-    root.page().write(child.page().range(child.header_offset()).truncate(size), offset);
-    root.page().set_type(child.type());
-    destroy_node(std::move(child));
-}
-
-auto Tree::save_header(FileHeader &header) -> void
-{
-    header.set_node_count(m_node_count);
-    header.set_key_count(m_cell_count);
-    m_free_list.save_header(header);
-}
-
-auto Tree::load_header(const FileHeader &header) -> void
-{
-    m_node_count = header.node_count();
-    m_cell_count = header.key_count();
-    m_free_list.load_header(header);
 }
 
 } // cub

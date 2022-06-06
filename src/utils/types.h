@@ -3,10 +3,10 @@
  * (1) https://en.cppreference.com/w/cpp/utility/exchange
  */
 
-#ifndef CUB_TYPES_H
-#define CUB_TYPES_H
+#ifndef CUB_UTILS_TYPES_H
+#define CUB_UTILS_TYPES_H
 
-#include "common.h"
+#include "cub/common.h"
 
 namespace cub {
 
@@ -26,7 +26,7 @@ template<class Value> struct Unique {
     auto operator=(Unique &&rhs) noexcept -> Unique &
     {
         // TODO: std::exchange() is not noexcept until C++23, but (1) doesn't specify
-        //       any exceptions it could throw.
+        //       any exceptions it could throw. Depends on `Value`?
         value = std::exchange(rhs.value, {});
         return *this;
     }
@@ -36,4 +36,4 @@ template<class Value> struct Unique {
 
 } // cub
 
-#endif // CUB_TYPES_H
+#endif // CUB_UTILS_TYPES_H

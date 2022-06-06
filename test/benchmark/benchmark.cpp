@@ -3,7 +3,7 @@
 #include <locale>
 #include <chrono>
 #include <thread> 
-#include "cub.h"
+#include "cub/cub.h"
 #include "tools.h"
 
 namespace {
@@ -12,6 +12,7 @@ using namespace cub;
 
 constexpr auto PATH = "/tmp/cub_benchmark";
 constexpr Size FIELD_WIDTH {20};
+constexpr Size BASELINE_MULTIPLIER {10};
 
 struct BenchmarkParameters {
     Size num_replicants {};
@@ -55,13 +56,6 @@ auto create_temp(Size page_size)
     return Database::temp(page_size);
 }
 
-auto report(const InstanceResults &results)
-{
-    const auto ops = static_cast<double>(results.num_elements) / results.mean_elapsed;
-    std::cout << "| " << std::setw(FIELD_WIDTH) << std::left << results.name
-              << " | " << std::setw(FIELD_WIDTH) << std::right << static_cast<Size>(ops) << " |\n";
-}
-
 auto build_common(Work &records, bool is_sequential)
 {
     if (is_sequential)
@@ -88,10 +82,10 @@ auto build_erases(Database &db, Work &records, bool is_sequential)
     db.commit();
 }
 
-auto run_baseline(Database &db)
+auto run_baseline(Database&)
 {
     // Sleep for 1/10 seconds. The benchmark should report a little less than num_elements*10 operations per second.
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000 / BASELINE_MULTIPLIER));
 }
 
 auto run_writes(Database &db, const Work &work)
@@ -119,7 +113,8 @@ auto run_read_seq(Database &db, const Work &work)
 {
     auto cursor = db.get_cursor();
     cursor.find_minimum();
-    for (const auto &_: work) {
+    for (const auto &w: work) {
+        (void)w;
         (void)cursor.value();
         cursor.increment();
     }
@@ -129,7 +124,8 @@ auto run_read_rev(Database &db, const Work &work)
 {
     auto cursor = db.get_cursor();
     cursor.find_maximum();
-    for (const auto &_: work) {
+    for (const auto &w: work) {
+        (void)w;
         (void)cursor.value();
         cursor.decrement();
     }
@@ -171,11 +167,59 @@ private:
     BenchmarkParameters m_param;
 };
 
+auto make_row(char cap)
+{
+    return std::string(1, cap) + '\n';
+}
+
+template<class ...Rest> auto make_row(char left_cap, const std::string &field, char separator, Rest ...rest)
+{
+    return left_cap + field + make_row(separator, rest...);
+}
+
+auto report(const InstanceResults &results)
+{
+    const auto ops = static_cast<double>(results.num_elements) / results.mean_elapsed;
+    std::cout << "| " << std::setw(FIELD_WIDTH) << std::left << results.name
+              << " | " << std::setw(FIELD_WIDTH) << std::right << static_cast<Size>(ops) << " |\n";
+}
+
 } // <anonymous>
+
+auto show_usage()
+{
+    std::cout << "usage: benchmark [-rt]\n";
+    std::cout << "\n";
+    std::cout << " Parameters\n";
+    std::cout << "============\n";
+    std::cout << "  -r: Show only the database benchmarks\n";
+    std::cout << "  -t: Show only the in-memory database benchmarks\n";
+    std::cout << "  -b: Show the baselines\n";
+}
 
 auto main(int argc, const char *argv[]) -> int
 {
     using namespace cub;
+
+    bool real_only {};
+    bool temp_only {};
+    bool show_baseline {};
+
+    for (int i {1}; i < argc; ++i) {
+        const std::string arg {argv[i]};
+        if (arg == "-r") {
+            real_only = true;
+        } else if (arg == "-t") {
+            temp_only = true;
+        } else if (arg == "-b") {
+            show_baseline = true;
+        }
+    }
+    if (real_only && temp_only) {
+        std::cerr << "Error: '-r' and 't' arguments are mutually exclusive\n";
+        show_usage();
+        return 1;
+    }
 
     static constexpr auto num_warmup_rounds = 2;
     static constexpr auto num_replicants = 8;
@@ -184,68 +228,82 @@ auto main(int argc, const char *argv[]) -> int
 
     auto records = RecordGenerator::generate_unique(num_elements);
 
+    // We only erase half of the records for one group of tests. The remove() routine gets faster when the tree is small,
+    // so we expect those tests to produce less operations per second than their counterparts that empty out the tree.
+    const std::vector<Record> half_records {records.begin(), records.begin() + num_elements/2};
+
     const InstanceParameters baseline {
         [](Database&) {},
         [](Database&) {},
         [](Database &db) {run_baseline(db);},
-        "baseline (<200,000)",
+        "<baseline>",
         num_elements,
     };
 
-    const InstanceParameters write_rand {
-        [](Database&) {},
-        [](Database &db) {setup_common(db);},
-        [&records](Database &db) {run_writes(db, records);},
-        "write_random",
-        num_elements,
-    };
-
-    const InstanceParameters write_seq {
-        [&records](Database&) {build_common(records, true);},
-        [](Database &db) {setup_common(db);},
-        [&records](Database &db) {run_writes(db, records);},
-        "write_sequential",
-        num_elements,
-    };
-
-    const InstanceParameters erase_rand {
-        [&records](Database &db) {build_erases(db, records, false);},
-        [](Database &db) {setup_common(db);},
-        [&records](Database &db) {run_erases(db, records);},
-        "erase_rand",
-        num_elements,
-    };
-
-    const InstanceParameters erase_seq {
-        [&records](Database &db) {build_erases(db, records, true);},
-        [](Database &db) {setup_common(db);},
-        [&records](Database &db) {run_erases(db, records);},
-        "erase_seq",
-        num_elements,
-    };
-
-    const InstanceParameters read_rand {
-        [&records](Database &db) {build_reads(db, records, false, false);},
-        [](Database&) {},
-        [&records](Database &db) {run_read_rand(db, records);},
-        "read_rand",
-        num_elements,
-    };
-
-    const InstanceParameters read_seq {
-        [&records](Database &db) {build_reads(db, records, true, false);},
-        [](Database&) {},
-        [&records](Database &db) {run_read_seq(db, records);},
-        "read_seq",
-        num_elements,
-    };
-
-    const InstanceParameters read_rev {
-        [&records](Database &db) {build_reads(db, records, true, true);},
-        [](Database&) {},
-        [&records](Database &db) {run_read_rev(db, records);},
-        "read_rev",
-        num_elements,
+    std::vector<InstanceParameters> instances {
+        {
+            [](Database&) {},
+            [](Database &db) {setup_common(db);},
+            [&records](Database &db) {run_writes(db, records);},
+            "write_random",
+            num_elements,
+        },
+        {
+            [&records](Database&) {build_common(records, true);},
+            [](Database &db) {setup_common(db);},
+            [&records](Database &db) {run_writes(db, records);},
+            "write_sequential",
+            num_elements,
+        },
+        {
+            [&records](Database &db) {build_reads(db, records, false, false);},
+            [](Database&) {},
+            [&records](Database &db) {run_read_rand(db, records);},
+            "read_rand",
+            num_elements,
+        },
+        {
+            [&records](Database &db) {build_reads(db, records, true, false);},
+            [](Database&) {},
+            [&records](Database &db) {run_read_seq(db, records);},
+            "read_seq",
+            num_elements,
+        },
+        {
+            [&records](Database &db) {build_reads(db, records, true, true);},
+            [](Database&) {},
+            [&records](Database &db) {run_read_rev(db, records);},
+            "read_rev",
+            num_elements,
+        },
+        {
+            [&records](Database &db) {build_erases(db, records, false);},
+            [](Database &db) {setup_common(db);},
+            [&records](Database &db) {run_erases(db, records);},
+            "erase_all_rand",
+            num_elements,
+        },
+        {
+            [&records](Database &db) {build_erases(db, records, true);},
+            [](Database &db) {setup_common(db);},
+            [&records](Database &db) {run_erases(db, records);},
+            "erase_all_seq",
+            num_elements,
+        },
+        {
+            [&records](Database &db) {build_erases(db, records, false);},
+            [](Database &db) {setup_common(db);},
+            [&half_records](Database &db) {run_erases(db, half_records);},
+            "erase_half_rand",
+            half_records.size(),
+        },
+        {
+            [&records](Database &db) {build_erases(db, records, true);},
+            [](Database &db) {setup_common(db);},
+            [&half_records](Database &db) {run_erases(db, half_records);},
+            "erase_half_seq",
+            half_records.size(),
+        },
     };
 
     BenchmarkParameters param {
@@ -257,29 +315,51 @@ auto main(int argc, const char *argv[]) -> int
     Comma facet {};
     std::cout.imbue(std::locale(std::cout.getloc(), &facet));
 
-    std::cout << "| Benchmark (Real DB)  | Result (ops/second)  |\n";
-    std::cout << "|----------------------|----------------------|\n";
+    static constexpr auto make_field_name = [](const std::string &name) {
+        CUB_EXPECT_LT(name.size(), FIELD_WIDTH);
+        return " " + name + std::string(FIELD_WIDTH - name.size() + 1, ' ');
+    };
+    const auto field_1a {make_field_name("Name")};
+    const auto field_1b {make_field_name("Name (In-Memory DB)")};
+    const auto field_2 {make_field_name("Result (ops/second)")};
 
-    report(runner.run(create(options), baseline));
-    report(runner.run(create(options), write_rand));
-    report(runner.run(create(options), write_seq));
-    report(runner.run(create(options), read_rand));
-    report(runner.run(create(options), read_seq));
-    report(runner.run(create(options), read_rev));
-    report(runner.run(create(options), erase_rand));
-    report(runner.run(create(options), erase_seq));
+    const auto make_filler_row = [&field_2](const std::string &first, char c) {
+        return make_row(c, std::string(first.size(), '-'), c, std::string(field_2.size(), '-'), c);
+    };
 
-    std::cout << '\n';
-    std::cout << "| Benchmark (Temp DB)  | Result (ops/second)  |\n";
-    std::cout << "|----------------------|----------------------|\n";
+    const auto make_header_row = [&field_2](const std::string &first) {
+        return make_row('|', first, '|', field_2, '|');
+    };
 
-    report(runner.run(create_temp(options.page_size), write_rand));
-    report(runner.run(create_temp(options.page_size), write_seq));
-    report(runner.run(create_temp(options.page_size), read_rand));
-    report(runner.run(create_temp(options.page_size), read_seq));
-    report(runner.run(create_temp(options.page_size), read_rev));
-    report(runner.run(create_temp(options.page_size), erase_rand));
-    report(runner.run(create_temp(options.page_size), erase_seq));
+    const auto show_real_db_benchmarks = [&] {
+        std::cout << make_filler_row(field_1a, '.');
+        std::cout << make_header_row(field_1a);
+        std::cout << make_filler_row(field_1a, '|');
+        for (const auto &instance: instances)
+            report(runner.run(create(options), instance));
+        std::cout << make_filler_row(field_1a, '\'') << '\n';
+    };
+
+    const auto show_temp_db_benchmarks = [&] {
+        std::cout << make_filler_row(field_1b, '.');
+        std::cout << make_header_row(field_1b);
+        std::cout << make_filler_row(field_1b, '|');
+        for (const auto &instance: instances)
+            report(runner.run(create_temp(options.page_size), instance));
+        std::cout << make_filler_row(field_1a, '\'') << '\n';
+    };
+
+    if (show_baseline) {
+        instances.insert(instances.begin(), baseline);
+        instances.emplace_back(baseline);
+        std::cout << "Baseline should be <= " << num_elements * BASELINE_MULTIPLIER << "\n\n";
+    }
+
+    if (!temp_only)
+        show_real_db_benchmarks();
+
+    if (!real_only)
+        show_temp_db_benchmarks();
 
     return 0;
 }

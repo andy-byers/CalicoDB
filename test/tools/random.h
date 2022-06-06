@@ -3,7 +3,7 @@
 
 #include <algorithm>
 #include <random>
-#include "common.h"
+#include "cub/common.h"
 #include "utils/assert.h"
 
 namespace cub {

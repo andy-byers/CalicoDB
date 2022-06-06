@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
-#include "common.h"
+#include "cub/common.h"
 #include "tools.h"
 
 namespace cub {

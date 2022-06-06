@@ -23,13 +23,12 @@ RUN update-alternatives --install /usr/bin/cc cc /usr/bin/clang-8 100 && \
 
 RUN mkdir CubDB
 
-COPY . ./CubDB
+COPY . CubDB
 
-RUN cd ./CubDB && \
-    cmake . && \
+RUN mkdir test && \
+    cd test && \
+    cmake -E env \
+        CXXFLAGS="-fsanitize=address" \
+        LDFLAGS="-fsanitize=address" \
+      cmake -DCMAKE_BUILD_TYPE=Debug ../CubDB && \
     cmake --build .
-
-RUN #./test/build/fuzz && \
-    ./test/build/unit_tests #&& \
-#    ./test/build/integration && \
-#    ./test/build/benchmark

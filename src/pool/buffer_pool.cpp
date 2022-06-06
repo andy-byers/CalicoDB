@@ -1,7 +1,7 @@
 
 #include "buffer_pool.h"
-#include "common.h"
-#include "exception.h"
+#include "cub/common.h"
+#include "cub/exception.h"
 #include "page/file_header.h"
 #include "page/page.h"
 #include "file/interface.h"
@@ -190,10 +190,8 @@ auto BufferPool::roll_forward() -> bool
             m_next_lsn++;
         }
         // Stop at the first commit record.
-        if (record.is_commit()) {
-//            puts("commit found?"); // TODO
+        if (record.is_commit())
             return true;
-        }
 
         const auto update = record.decode();
         auto page = fetch_page(update.page_id, true);
@@ -206,36 +204,10 @@ auto BufferPool::roll_forward() -> bool
     return false;
 }
 
-//auto BufferPool::roll_forward() -> bool
-//{
-//    m_wal_reader->reset();
-//
-//    if (!m_wal_reader->record())
-//        return false;
-//
-//    do {
-//        CUB_EXPECT_NE(m_wal_reader->record(), std::nullopt);
-//
-//        if (const auto record = *m_wal_reader->record(); record.payload().is_commit()) {
-//            CUB_EXPECT_LT(m_flushed_lsn, record.lsn());
-//            m_flushed_lsn = record.lsn();
-//            return true;
-//        } else {
-//            const auto update = record.payload().decode();
-//            auto page = fetch_page(update.page_id, true);
-//
-//            if (page.lsn() < record.lsn())
-//                page.redo_changes(record.lsn(), update.changes);
-//        }
-//    } while (m_wal_reader->increment());
-//
-//    return false;
-//}
-
 auto BufferPool::roll_backward() -> void
 {
     // Make sure the WAL reader is at the end of the log.
-    while (m_wal_reader->increment());
+    while (m_wal_reader->increment()) {}
 
     CUB_EXPECT_NE(m_wal_reader->record(), std::nullopt);
 

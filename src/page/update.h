@@ -3,8 +3,6 @@
 
 #include <optional>
 #include <vector>
-#include "bytes.h"
-#include "common.h"
 #include "utils/identifier.h"
 #include "utils/scratch.h"
 
@@ -40,11 +38,16 @@ private:
     Scratch m_snapshot;
 };
 
-namespace test {
+namespace impl {
 
-    auto update_basic_assertions() -> int;
+    using Range = UpdateManager::Range;
 
-} // test
+    auto can_merge(const Range &lhs, const Range &rhs) -> bool;
+    auto merge(const Range &lhs, const Range &rhs) -> Range;
+    auto compress_ranges(std::vector<Range> &ranges) -> void;
+    auto insert_range(std::vector<Range> &ranges, Range) -> void;
+
+} // impl
 
 } // cub
 

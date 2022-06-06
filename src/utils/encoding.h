@@ -4,8 +4,8 @@
 #ifndef CUB_UTILS_ENCODING_H
 #define CUB_UTILS_ENCODING_H
 
-#include "common.h"
-#include "bytes.h"
+#include "cub/common.h"
+#include "cub/bytes.h"
 
 namespace cub {
 
