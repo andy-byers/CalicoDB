@@ -52,7 +52,6 @@ auto Random::set_seed(Seed seed) -> void
  */
 auto Random::next_string(Size size) -> std::string
 {
-    CUB_EXPECT_GE(size, 0);
     constexpr char chars[]{"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                            "abcdefghijklmnopqrstuvwxyz"
                            "0123456789"};
