@@ -154,6 +154,50 @@ TEST(ScratchTest, ScratchesAreUnique)
     ASSERT_EQ(s3.data()[0], 3);
 }
 
+TEST(NonPrintableSliceTests, UsesStringSize)
+{
+    // We can construct a string holding non-printable bytes by specifying its size along with
+    // a string literal that is not null-terminated.
+    std::string u {"\x00\x01", 2};
+    ASSERT_EQ(_b(u).size(), 2);
+}
+
+TEST(NonPrintableSliceTests, NullBytesAreEqual)
+{
+    std::string u {"\x00", 1};
+    std::string v {"\x00", 1};
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::EQ);
+}
+
+TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
+{
+    std::string u {"\x00\x00", 2};
+    std::string v {"\x00\x01", 2};
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::LT);
+}
+
+TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
+{
+    std::string u {"\x0F", 1};
+    std::string v {"\x00", 1};
+    v[0] = static_cast<char>(0xF0);
+
+    // Signed comparison. 0xF0 overflows a signed byte and becomes negative.
+    ASSERT_LT(v[0], u[0]);
+
+    // Unsigned comparison should come out the other way.
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::LT);
+}
+
+TEST(NonPrintableSliceTests, Conversions)
+{
+    std::string u {"\x00\x01", 2};
+    const auto s = _s(_b(u));
+    ASSERT_EQ(s.size(), 2);
+    ASSERT_EQ(s[0], '\x00');
+    ASSERT_EQ(s[1], '\x01');
+}
+
 template<class Id> auto run_comparisons()
 {
     Id a {1};
