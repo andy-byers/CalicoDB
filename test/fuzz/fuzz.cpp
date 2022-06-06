@@ -1,4 +1,3 @@
-
 #include "cub/cub.h"
 #include "../tools/tools.h"
 
@@ -72,4 +71,3 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, Size size)
     }
     return 0;
 }
-
