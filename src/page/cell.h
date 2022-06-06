@@ -37,7 +37,6 @@ public:
     auto operator=(Cell&&) -> Cell& = default;
 
 private:
-    friend class CellReader;
     Cell() = default;
 
     std::optional<Scratch> m_scratch;
