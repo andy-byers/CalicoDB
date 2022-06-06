@@ -30,7 +30,7 @@ public:
     template<class T> auto next_real(T, T) -> T;
 
 protected:
-    Seed m_seed;  ///< Seed for the random number generator.
+    Seed m_seed {};  ///< Seed for the random number generator.
     Engine m_rng; ///< STL random number generation engine.
 };
 
@@ -101,6 +101,6 @@ inline auto random_string(Random &random, Size max_size) -> std::string
 
 // TODO: Function for building a random string from a choice of characters.
 
-} // db
+} // cub
 
 #endif // CUB_TEST_TOOLS_RANDOM_H

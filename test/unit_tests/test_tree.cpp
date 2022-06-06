@@ -18,6 +18,7 @@
 #include "fakes.h"
 #include "random.h"
 #include "tools.h"
+#include "unit_tests.h"
 
 namespace {
 
@@ -276,6 +277,12 @@ TEST_F(TreeTests, InsertOverflowingRecord)
     ASSERT_EQ(m_pool->page_count(), 2);
 }
 
+TEST_F(TreeTests, OnlyAcceptsValidKeySizes)
+{
+    ASSERT_THROW(tree_insert(tree(), "", "value"), InvalidArgumentError);
+    ASSERT_THROW(tree_insert(tree(), std::string(m_max_local + 1, 'x'), "value"), InvalidArgumentError);
+}
+
 TEST_F(TreeTests, RemoveRecord)
 {
     std::string unused;
@@ -468,6 +475,24 @@ TEST_F(TreeTests, InternalRootOverflowD)
     //     2:[1, 2, 3, 4]     3:[7, 8, 9, 10]   4:[13, 14, 15, 16]      5:[19, 20]      6:[22, 23]
     internal_root_overflow_test(tree(), 3);
     validate();
+}
+
+TEST_F(TreeTests, CanLookupMinimum)
+{
+    TreeBuilder builder {tree()};
+    for (Index i {}; i < 500; ++i)
+        builder.tree_insert(make_key(i));
+    auto [node, index] = m_tree->find_local_min(m_tree->find_root(false));
+    ASSERT_EQ(_s(node.read_key(index)), make_key(0));
+}
+
+TEST_F(TreeTests, CanLookupMaximum)
+{
+    TreeBuilder builder {tree()};
+    for (Index i {}; i < 500; ++i)
+        builder.tree_insert(make_key(i));
+    auto [node, index] = m_tree->find_local_max(m_tree->find_root(false));
+    ASSERT_EQ(_s(node.read_key(index)), make_key(499));
 }
 
 TEST_F(TreeTests, SequentialInserts)
@@ -910,22 +935,12 @@ auto run_internal_overflow_after_modify_test(TestTree &tree, Index key_index) ->
 
     auto [node, index, found_eq] = tree.find_ge(_b(key), true);
     const auto space_in_node = node.usable_space();
-    auto value = tree.collect_value(node, index) + std::string(space_in_node + 15, 'x');
+    const auto value = tree.collect_value(node, index) +
+                       std::string(space_in_node + 1, 'x');
     node.take();
     tree.insert(_b(key), _b(value));
     TreeValidator {tree}.validate();
 }
-
-// Tree Structure:
-//                    1:[4,                 8,                   12,                    16,                    20]
-//          2:[2]                3:[6]              4:[10]                 5:[14]                 6:[18]                7:[22]
-//     8:[1]     9:[3]     10:[5]     11:[7]  12:[9]      13:[11]   14:[13]      15:[15]   16:[17]      17:[19]  18:[21]      19:[23]
-
-//                                                                1:[12]
-//                    20:[4,                 8]                                             21:[16,                    20]
-//          2:[2]                3:[6]               4:[10]                    5:[14]                     6:[18]                 7:[22]
-//     8:[1]     9:[3]     10:[5]     11:[7]   12:[9]      13:[11]      14:[13]      15:[15]       16:[17]      17:[19]   18:[21]      19:[23]
-
 
 TEST_F(TreeTests, InternalOverflowAfterModifyA)
 {
@@ -1003,8 +1018,8 @@ TEST_F(TreeTests, SanityCheck)
 TEST_F(TreeTests, RemoveEverythingRepeatedly)
 {
     std::unordered_map<std::string, std::string> records;
-    static constexpr Size num_iterations = 20;
-    static constexpr Size cutoff = 100;
+    static constexpr Size num_iterations = 3;
+    static constexpr Size cutoff = 1500;
 
     for (Index i {}; i < num_iterations; ++i) {
         while (m_tree->cell_count() < cutoff) {
@@ -1019,6 +1034,7 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
         records.clear();
     }
 }
+
 //
 //class CursorTests: public TreeTests {
 //public:

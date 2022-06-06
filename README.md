@@ -137,11 +137,11 @@ db.abort();
 ```
 
 ## TODO
-1. Get the fuzz testing up and running. 
-2. Write some real documentation.
-3. Work on this README
-4. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
-5. Better freelist that uses trunk pages (see SQLite 3)
+1. Write some real documentation.
+2. Work on this README
+3. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
+4. Better freelist that uses trunk pages (see SQLite 3)
+5. Get unit test coverage up way higher
 
 ## Design
 

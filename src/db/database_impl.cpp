@@ -164,11 +164,14 @@ auto Database::Impl::get_cursor() -> Cursor
 
 auto Database::Impl::lookup(BytesView key, bool exact) -> std::optional<Record>
 {
-    auto cursor = get_cursor();
-    const auto found_exact = cursor.find(key);
-    const auto found_greater = !cursor.is_maximum();
-    if (found_exact || (found_greater && !exact))
-        return Record {_s(cursor.key()), cursor.value()};
+    if (auto cursor = get_cursor(); cursor.has_record()) {
+        const auto found_exact = cursor.find(key);
+        const auto found_greater = !cursor.is_maximum();
+        if (found_exact || (found_greater && !exact))
+            return Record {_s(cursor.key()), cursor.value()};
+        return std::nullopt;
+    }
+    CUB_EXPECT_EQ(m_tree->cell_count(), 0);
     return std::nullopt;
 }
 

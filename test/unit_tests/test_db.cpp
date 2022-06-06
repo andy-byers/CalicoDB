@@ -50,12 +50,20 @@ template<class Db> auto setup_database_with_committed_records(Db &db, Size n)
     return collect_records(db);
 }
 
-TEST(DatabaseTests, DataPersists)
+class DatabaseTests: public testing::Test {
+public:
+    DatabaseTests()
+    {
+        std::filesystem::remove(TEST_PATH);
+        std::filesystem::remove(get_wal_path(TEST_PATH));
+    }
+
+    ~DatabaseTests() override = default;
+};
+
+TEST_F(DatabaseTests, DataPersists)
 {
     std::vector<Record> records;
-    std::filesystem::remove(TEST_PATH);
-    std::filesystem::remove(get_wal_path(TEST_PATH));
-
     {
         auto db = Database::open(TEST_PATH, {});
         records = setup_database_with_committed_records(db, 500);
@@ -65,11 +73,8 @@ TEST(DatabaseTests, DataPersists)
     ASSERT_TRUE(database_contains_exact(db, records));
 }
 
-TEST(DatabaseTests, AbortRestoresState)
+TEST_F(DatabaseTests, AbortRestoresState)
 {
-    std::filesystem::remove(TEST_PATH);
-    std::filesystem::remove(get_wal_path(TEST_PATH));
-
     auto db = Database::open(TEST_PATH, {});
     db.insert(_b("a"), _b("1"));
     db.insert(_b("b"), _b("2"));
@@ -86,6 +91,19 @@ TEST(DatabaseTests, AbortRestoresState)
 
     const auto info = db.get_info();
     CUB_EXPECT_EQ(info.record_count(), 2);
+}
+
+TEST_F(DatabaseTests, SubsequentAbortsHaveNoEffect)
+{
+    std::vector<Record> records;
+    auto db = Database::open(TEST_PATH, {});
+    records = setup_database_with_committed_records(db, 500);
+    insert_random_unique_records(db, 100);
+
+    db.abort();
+    ASSERT_TRUE(database_contains_exact(db, records));
+    db.abort();
+    ASSERT_TRUE(database_contains_exact(db, records));
 }
 
 TEST(TempDBTests, FreshDatabaseIsEmpty)
@@ -111,20 +129,18 @@ TEST(TempDBTests, AbortClearsRecords)
     ASSERT_TRUE(database_contains_exact(temp, {}));
 }
 
-//TEST(TempDBTests, AbortKeepsRecordsFromPreviousCommit)
-//{
-//    static constexpr auto num_committed = 500;
-//    auto temp = Database::temp(0x100);
-//    const auto committed = setup_database_with_committed_records(temp, num_committed);
-//    insert_random_unique_records(temp, num_committed);
-//
-//    // TODO: TempDB stuff is messed up. Whoops. I'll be working on it.
-//    temp.abort();
-//
-//    ASSERT_TRUE(database_contains_exact(temp, committed));
-//}
+TEST(TempDBTests, AbortKeepsRecordsFromPreviousCommit)
+{
+    static constexpr auto num_committed = 500;
+    auto temp = Database::temp(0x100);
+    const auto committed = setup_database_with_committed_records(temp, num_committed);
+    insert_random_unique_records(temp, num_committed);
+    temp.abort();
 
-TEST(DatabaseTests, TestRecovery)
+    ASSERT_TRUE(database_contains_exact(temp, committed));
+}
+
+TEST_F(DatabaseTests, TestRecovery)
 {
     static constexpr Size n = 1000;
     std::vector<Record> records;
@@ -149,7 +165,7 @@ TEST(DatabaseTests, TestRecovery)
     ASSERT_TRUE(database_contains_exact(*db.db, records));
 }
 
-TEST(DatabaseTests, AbortIsReentrant)
+TEST_F(DatabaseTests, AbortIsReentrant)
 {
     static constexpr Size page_size = 0x200;
     static constexpr Size batch_size = 100;
@@ -183,7 +199,7 @@ TEST(DatabaseTests, AbortIsReentrant)
     ASSERT_TRUE(database_contains_exact(*db.db, records));
 }
 
-TEST(DatabaseTests, CanAbortAfterFailingToCommit)
+TEST_F(DatabaseTests, CanAbortAfterFailingToCommit)
 {
     static constexpr Size num_records = 1000;
     Random random {0};

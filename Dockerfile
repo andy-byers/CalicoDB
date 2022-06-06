@@ -21,6 +21,8 @@ RUN update-alternatives --install /usr/bin/cc cc /usr/bin/clang-8 100 && \
     update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-8 100 && \
     update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-8 100
 
+ENV ASAN_OPTIONS log_path=/tmp/cub_log
+
 RUN mkdir CubDB
 
 COPY . CubDB
@@ -31,4 +33,4 @@ RUN mkdir test && \
         CXXFLAGS="-fsanitize=address" \
         LDFLAGS="-fsanitize=address" \
       cmake -DCMAKE_BUILD_TYPE=Debug ../CubDB && \
-    cmake --build .
+    cmake --build . --config Debug

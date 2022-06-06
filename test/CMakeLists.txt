@@ -22,6 +22,9 @@ function(build_test NAME SOURCES)
 endfunction()
 
 add_subdirectory(benchmark)
-add_subdirectory(fuzz)
 add_subdirectory(integration)
 add_subdirectory(unit_tests)
+
+if(CUB_BUILD_FUZZERS)
+    add_subdirectory(fuzz)
+endif()
