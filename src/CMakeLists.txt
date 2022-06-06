@@ -27,3 +27,4 @@ target_include_directories("${CUB_NAME}" SYSTEM INTERFACE "${CUB_INCLUDE_DIR}")
 
 # Always compile the library with warnings.
 target_compile_options("${CUB_NAME}" PRIVATE "${CUB_WARNINGS}")
+

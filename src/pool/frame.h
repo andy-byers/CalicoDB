@@ -33,7 +33,20 @@ public:
     Frame(Frame&&) = default;
 
 private:
-    std::unique_ptr<Byte[]> m_data;
+    struct AlignedDeleter {
+
+        explicit AlignedDeleter(std::align_val_t alignment)
+            : align {alignment} {}
+
+        auto operator()(Byte *ptr) const -> void
+        {
+            operator delete(ptr, align);
+        }
+
+        std::align_val_t align;
+    };
+
+    std::unique_ptr<Byte[], AlignedDeleter> m_data;
     PID m_page_id {};
     Size m_ref_count {};
     Size m_size {};

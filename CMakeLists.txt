@@ -1,6 +1,19 @@
 
 cmake_minimum_required(VERSION 3.14)
 
+SET(
+    CMAKE_CXX_FLAGS_RELWITHASSERTIONS
+    "-O3"
+    CACHE STRING "C++ compiler flags for a RelWithAssertions build"
+    FORCE
+)
+SET(
+    CMAKE_C_FLAGS_RELWITHASSERTIONS
+    "-O3"
+    CACHE STRING "C compiler flags for a RelWithAssertions build"
+    FORCE
+)
+
 project(CubDB CXX)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -18,17 +31,6 @@ set(CUB_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic
 include(CheckCXXSymbolExists)
 check_cxx_symbol_exists(O_DIRECT "fcntl.h" CUB_HAS_O_DIRECT)
 
-# BUILD_TYPE=Debug
-# mkdir build && \
-# cd ./build && \
-# cmake -S . -B ./build "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
-# cmake --build ./build --config "${BUILD_TYPE}"
-# (cd ./build && ctest -VV -C "${BUILD_TYPE}")
-
-#add_compile_definitions(
-#    $<$<CONFIG:Debug>:-DDEBUG_LEVEL=2>
-#    $<$<CONFIG:Release>:-DDEBUG_LEVEL=0>
-#)
 # Build the unit and integration tests.
 if(CUB_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -37,8 +39,7 @@ if(CUB_BUILD_TESTS)
     include(FetchContent)
     FetchContent_Declare(
         googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG        release-1.11.0
+        URL https://github.com/google/googletest/archive/609281088cfefc76f9d0ce82e1ff6c30cc3591e5.zip
     )
     FetchContent_MakeAvailable(googletest)
     include(GoogleTest)
@@ -48,14 +49,8 @@ if(CUB_BUILD_TESTS)
     add_subdirectory(${CUB_TEST_DIR})
 endif()
 
-if(CUB_BUILD_ASSERTIONS)
-    add_compile_definitions(CUB_BUILD_ASSERTIONS)
-endif()
-
 # Build the static library.
 add_subdirectory(src)
-
-
 
 # Build the examples/use cases.
 if(CUB_BUILD_EXAMPLES)

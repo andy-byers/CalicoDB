@@ -8,8 +8,10 @@
 namespace cub {
 
 Frame::Frame(Size size)
-    : m_data{std::unique_ptr<Byte[]>{new(static_cast<std::align_val_t>(size)) Byte[size]}}
-    , m_size{size}
+    : m_data {std::unique_ptr<Byte[], AlignedDeleter> {
+          new(static_cast<std::align_val_t>(size)) Byte[size],
+          AlignedDeleter {static_cast<std::align_val_t>(size)}}}
+    , m_size {size}
 {
     CUB_EXPECT_TRUE(is_power_of_two(size));
     CUB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_data.get()) % size, 0);

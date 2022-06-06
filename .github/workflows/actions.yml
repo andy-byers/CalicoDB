@@ -21,7 +21,7 @@ jobs:
             CXX: g++
     env:
       CMAKE_BUILD_DIR: ${{ github.workspace }}/build
-      CMAKE_BUILD_TYPE: Release
+      CMAKE_BUILD_TYPE: RelWithAssertions
       CC: ${{ matrix.CC }}
       CXX: ${{ matrix.CXX }}
       BINARY_PATH: ${{ github.workspace }}/build

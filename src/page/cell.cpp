@@ -44,7 +44,7 @@ Cell::Cell(const Parameters &param)
 
 auto Cell::size() const -> Size
 {
-    constexpr auto KEY_AND_VALUE_SIZES = sizeof(uint16_t) + sizeof(uint32_t);
+    static constexpr Size KEY_AND_VALUE_SIZES {sizeof(uint16_t) + sizeof(uint32_t)};
     const auto is_internal = !m_left_child_id.is_null();
     const auto has_overflow_id = !m_overflow_id.is_null();
     return PAGE_ID_SIZE * (is_internal + has_overflow_id) +
