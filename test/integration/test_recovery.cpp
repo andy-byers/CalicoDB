@@ -4,9 +4,7 @@
 #include "cub/database.h"
 #include "integration.h"
 #include "tools.h"
-#include "file/file.h"
 #include "file/system.h"
-#include "wal/wal_reader.h"
 #include "wal/wal_record.h"
 #include "wal/wal_writer.h"
 

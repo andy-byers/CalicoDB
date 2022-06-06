@@ -13,13 +13,14 @@ set(
 build_test(test_rw "${RW_TEST_FILES}")
 add_test(NAME test_rw COMMAND test_rw)
 
-set(
-    RECOVERY_TEST_FILES
-    ${INTEGRATION_DIR}/test_recovery.cpp
-    ${COMMON_FILES}
-)
-build_test(test_recovery "${RECOVERY_TEST_FILES}")
-add_test(NAME test_recovery COMMAND test_recovery)
+# TODO: This test relies on stuff that cannot be relied on. Needs to be rewritten.
+#set(
+#    RECOVERY_TEST_FILES
+#    ${INTEGRATION_DIR}/test_recovery.cpp
+#    ${COMMON_FILES}
+#)
+#build_test(test_recovery "${RECOVERY_TEST_FILES}")
+#add_test(NAME test_recovery COMMAND test_recovery)
 
 set(
     LOGGING_TEST_FILES
