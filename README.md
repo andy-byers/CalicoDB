@@ -11,12 +11,10 @@ I initially began working on this project to better learn modern C++ and excepti
 I am, however, open to refactoring the project to rely on other forms of error handling, as it would be nice to support embedded systems.
 Please see the `Contributions` section if you are interested in working on Cub DB!
 
-## TODO
-1. Get the fuzz testing up and running. 
-2. Write some real documentation.
-3. Work on this README
-4. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
-5. Better freelist that uses trunk pages (see SQLite 3)
+## Features
++ Durability provided through write-ahead logging
++ Uses a dynamic-order B-tree to store all the data in a single file
++ Supports forward and reverse traversal using a cursor, as well as multiple concurrent cursors
 
 ## API
 
@@ -138,10 +136,12 @@ db.abort();
 // Database still contains {"a", "1"} and {"b", "2"}.
 ```
 
-## Features
-+ Durability provided through write-ahead logging
-+ Uses a dynamic-order B-tree to store all the data in a single file
-+ Supports forward and reverse traversal using a cursor, as well as multiple concurrent cursors
+## TODO
+1. Get the fuzz testing up and running. 
+2. Write some real documentation.
+3. Work on this README
+4. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
+5. Better freelist that uses trunk pages (see SQLite 3)
 
 ## Design
 
