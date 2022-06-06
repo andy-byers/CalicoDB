@@ -1,4 +1,6 @@
-**This library is under active development and is probably broken right now!**
+![CI status badge](https://github.com/andy-byers/CubDB/actions/workflows/actions.yml/badge.svg)
+
+**This library is under active development**
 
 Cub DB is an embedded key-value database written in C++17.
 
