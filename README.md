@@ -201,15 +201,15 @@ src
 [//]: # (TODO)
 
 ### B-Tree Rules
-Insertion and removal are similar to many B-trees.
-The main difference is the definitions of "overflowing" and "underflowing" with respect to nodes.
-We consider a node to be overflowing when it doesn't have room for the record we are inserting.
+The record insertion and removal routines are similar to those found in many in-memory B-tree implementations.
+The main differences are the definitions of "overflowing" and "underflowing" with respect to B-treenodes.
+We consider a node to be overflowing when it doesn't have enough physical space for the record we are trying to insert, as opposed to overflowing on a fixed order.
 The definition for underflowing is a little more tricky.
 See `node.cpp` for the exact computation used.
 A node must not be overflowing when we are done operating on it, however it can be underflowing.
 The underflowing state is really more of a heuristic that governs when we will try to merge or rotate.
 Each time we remove a record, we attempt to move up the tree to the root, proactively merging nodes as we go.
-This helps keep the tree from growing too high, reducing the average number of disk accesses needed by tree operations.
+This helps keep the tree from growing too high, reducing the average number of disk accesses needed by subsequent tree operations.
 
 ## Project Source Tree Overview
 ```
