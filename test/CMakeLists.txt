@@ -23,6 +23,7 @@ endfunction()
 
 add_subdirectory(benchmark)
 add_subdirectory(integration)
+add_subdirectory(recovery)
 add_subdirectory(unit_tests)
 
 if(CUB_BUILD_FUZZERS)
