@@ -1,24 +1,36 @@
-**This library is under active development and is probably broken right now!**
+> **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
 Cub DB is an embedded key-value database written in C++17.
 
++ [Disclaimer](#disclaimer)
++ [Features](#features)
++ [API](#api)
+  + [Opening a Database](#opening-a-database)
+  + [Closing a Database](#opening-a-database)
+  + [Slices](#opening-a-database)
+  + [Modifying a Database](#modifying-a-database)
+  + [Querying a Database](#querying-a-database)
+  + [Transactions](#transactions)
++ [Design](#design)
+  + [Architecture](#architecture)
++ [TODO](#todo)
++ [Source Tree Overview](#source-tree-overview)
++ [Contributions](#contributions)
+
 ## Disclaimer
-This library, in its current form, should **not** be used in production.
-Writing a reliable, ACID-compliant database is certainly far from trivial, and I have zero professional software development experience at this time.
-Furthermore, this library is under active development: I'm just putting it out there now so that others can help out.
-Also, Cub DB uses exceptions, which may not be desirable for some potential users.
-I initially began working on this project to better learn modern C++ and exception handling, so some design decisions reflect that goal rather than that of producing a general-purpose DBMS.
-I am, however, open to refactoring the project to rely on other forms of error handling, as it would be nice to support embedded systems.
-Please see the `Contributions` section if you are interested in working on Cub DB!
+I am not, nor have I ever been, a professional software developer.
+I'm just a student who is writing a library: both for fun, and as a way to better learn modern C++.
+With that being said, I do intend on bringing this library to fruition eventually.
+Check out the `Contributions` section if you are interested in working on Cub DB!
 
 ## Features
 + Durability provided through write-ahead logging
 + Uses a dynamic-order B-tree to store all the data in a single file
-+ Supports forward and reverse traversal using a cursor, as well as multiple concurrent cursors
++ Supports forward and reverse traversal using cursors
 
 ## API
 
-### Creating/Opening a Database
+### Opening a Database
 Cub DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
 The entry point to an application using Cub DB might look something like:
 
@@ -41,7 +53,7 @@ try {
 ### Closing a Database
 Cub DB uses RAII, so closing a database is as simple as letting it go out of scope.
 
-### `Bytes` Objects
+### Slices
 Cub DB uses slices to refer to unowned byte sequences.
 Slices are realized in the `Bytes` and `BytesView` classes.
 `Bytes` instances can modify the contents of the underlying array, while `BytesView` instances cannot.
@@ -145,42 +157,8 @@ db.abort();
 
 ## Design
 
-### Architecture
-The `include/cub` folder contains the public API:
-```
-include/cub
-┣━╸bytes.h
-┣━╸common.h
-┣━╸cub.h
-┣━╸cursor.h
-┣━╸database.h
-┗━╸exception.h
-```
-+ `bytes.h`: Slices for holding contiguous sequences of bytes
-+ `common.h`: Common types and constants
-+ `cub.h`: `#include`s the rest of the API
-+ `cursor.h`: Cursor for traversing the database
-+ `database.h`: Database connection object
-+ `exception.h`: Public-facing exceptions
-
 Internally, Cub DB is broken down into 7 submodules.
-Each submodule is represented by a directory in `src`, as shown below.
-```
-src
-┣╸db
-┣╸file
-┣╸page
-┣╸pool
-┣╸tree
-┣╸utils
-┗╸wal
-```
-+ `db`: API implementation
-+ `file`: OS file module
-+ `pool`: Buffer pool module
-+ `tree`: B-tree module
-+ `utils`: Utility module
-+ `wal`: Write-ahead logging module
+Each submodule is represented by a directory in `src`, as shown in the [source tree overview](#source-tree-overview).
 
 #### `db`
 [//]: # (TODO)
@@ -200,38 +178,32 @@ src
 #### `wal`
 [//]: # (TODO)
 
-### B-Tree Rules
-Insertion and removal are similar to many B-trees.
-The main difference is the definitions of "overflowing" and "underflowing" with respect to nodes.
-We consider a node to be overflowing when it doesn't have room for the record we are inserting.
-The definition for underflowing is a little more tricky.
-See `node.cpp` for the exact computation used.
-A node must not be overflowing when we are done operating on it, however it can be underflowing.
-The underflowing state is really more of a heuristic that governs when we will try to merge or rotate.
-Each time we remove a record, we attempt to move up the tree to the root, proactively merging nodes as we go.
-This helps keep the tree from growing too high, reducing the average number of disk accesses needed by tree operations.
-
-## Project Source Tree Overview
+## Source Tree Overview
 ```
 CubDB
-┣╸examples
-┣╸include
-┃ ┗╸cub
+┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
+┣╸include/cub 
+┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Slices for holding contiguous sequences of bytes
+┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
+┃ ┣╸cub.h ┄┄┄┄┄┄┄┄┄┄ Pulls in the rest of the API
+┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
+┃ ┣╸database.h ┄┄┄┄┄ Database connection object
+┃ ┗╸exception.h ┄┄┄┄ Public-facing exceptions
 ┣╸src
+┃ ┣╸db ┄┄┄┄┄┄┄┄┄┄┄┄┄ API implementation
+┃ ┣╸file ┄┄┄┄┄┄┄┄┄┄┄ OS file module
+┃ ┣╸pool ┄┄┄┄┄┄┄┄┄┄┄ Buffer pool module
+┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ B-tree module
+┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Utility module
+┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging module
 ┗╸test
-  ┣╸benchmark
-  ┣╸fuzz
-  ┣╸integration
-  ┣╸tools
-  ┗╸unit_tests
+  ┣╸benchmark ┄┄┄┄┄┄ Performance benchmarks
+  ┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄ Fuzz tests
+  ┣╸integration ┄┄┄┄ Integration tests
+  ┣╸recovery ┄┄┄┄┄┄┄ Test database failure and recovery
+  ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Test tools
+  ┗╸unit_tests ┄┄┄┄┄ Unit tests
 ```
-+ `/include/cub`: Public API
-+ `/src`: Source code modules
-+ `/test/benchmark`: Performance benchmarks
-+ `/test/fuzz`: Fuzz tests
-+ `/test/integration`: Integration tests
-+ `/test/tools`: Test tools
-+ `/test/unit_tests`: Unit tests
 
 ## Contributions
 Contributions are welcomed!

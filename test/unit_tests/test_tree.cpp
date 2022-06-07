@@ -99,12 +99,6 @@ public:
     Size m_max_local {};
 };
 
-template<std::size_t Length = 6> auto make_key(Index key) -> std::string
-{
-    auto key_string = std::to_string(key);
-    return std::string(Length - key_string.size(), '0') + key_string;
-}
-
 class TreeBuilder {
 public:
     explicit TreeBuilder(TestTree &tree)
