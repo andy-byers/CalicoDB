@@ -1,5 +1,5 @@
-#ifndef CUB_STORAGE_SYSTEM_H
-#define CUB_STORAGE_SYSTEM_H
+#ifndef CUB_FILE_SYSTEM_H
+#define CUB_FILE_SYSTEM_H
 
 #include "cub/bytes.h"
 
@@ -23,4 +23,4 @@ auto resize(int, Size) -> void;
 
 } // cub::system
 
-#endif // CUB_STORAGE_SYSTEM_H
+#endif // CUB_FILE_SYSTEM_H

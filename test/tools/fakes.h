@@ -369,7 +369,7 @@ public:
     [[nodiscard]] auto block_size() const -> Size override {return 0;}
     [[nodiscard]] auto has_pending() const -> bool override {return false;}
     [[nodiscard]] auto has_committed() const -> bool override {return false;}
-    auto write(WALRecord) -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
+    auto append(WALRecord) -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
     auto truncate() -> void override {}
     auto flush() -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
 };

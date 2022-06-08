@@ -218,4 +218,24 @@ TEST_F(DatabaseTests, CanAbortAfterFailingToCommit)
     ASSERT_TRUE(database_contains_exact(*db.db, {}));
 }
 
+TEST_F(DatabaseTests, FindsMinimumRecord)
+{
+    auto db = Database::open(TEST_PATH, {});
+    const auto records = setup_database_with_committed_records(db, 500);
+    ASSERT_EQ(db.lookup_minimum()->value, records.front().value);
+}
+
+TEST_F(DatabaseTests, FindsMaximumRecord)
+{
+    auto db = Database::open(TEST_PATH, {});
+    const auto records = setup_database_with_committed_records(db, 500);
+    ASSERT_EQ(db.lookup_maximum()->value, records.back().value);
+}
+
+TEST_F(DatabaseTests, DatabaseIsMovable)
+{
+    auto db_1 = Database::open(TEST_PATH, {});
+    [[maybe_unused]] auto db_2 = std::move(db_1);
+}
+
 } // <anonymous>

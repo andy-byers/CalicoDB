@@ -18,43 +18,6 @@ Frame::Frame(Size size)
     mem_clear(data());
 }
 
-auto Frame::page_id() const -> PID
-{
-    return m_page_id;
-}
-
-auto Frame::ref_count() const -> Size
-{
-    return m_ref_count;
-}
-
-auto Frame::is_dirty() const -> bool
-{
-    return m_is_dirty;
-}
-
-auto Frame::data() const -> BytesView
-{
-    return {m_data.get(), m_size};
-}
-
-auto Frame::data() -> Bytes
-{
-    return {m_data.get(), m_size};
-}
-
-auto Frame::clean() -> void
-{
-    m_is_dirty = false;
-}
-
-auto Frame::reset(PID page_id) -> void
-{
-    CUB_EXPECT_EQ(m_ref_count, 0);
-    m_page_id = page_id;
-    m_is_dirty = false;
-}
-
 auto Frame::borrow(IBufferPool *parent, bool is_writable) -> Page
 {
     CUB_EXPECT_FALSE(m_is_writable);

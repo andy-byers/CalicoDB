@@ -1,5 +1,5 @@
-#ifndef CUB_STORAGE_INTERFACE_H
-#define CUB_STORAGE_INTERFACE_H
+#ifndef CUB_FILE_INTERFACE_H
+#define CUB_FILE_INTERFACE_H
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -99,30 +99,30 @@ public:
     virtual auto write(BytesView) -> Size = 0;
 };
 
-template<class R> static auto read_exact(R &readable_store, Bytes out)
+template<class R> static auto read_exact(R &readable_file, Bytes out)
 {
-    if (readable_store.read(out) != out.size())
+    if (readable_file.read(out) != out.size())
         throw IOError::partial_read();
 }
 
-template<class R> static auto read_exact_at(R &readable_store, Bytes out, Index offset)
+template<class R> static auto read_exact_at(R &readable_file, Bytes out, Index offset)
 {
-    if (readable_store.read_at(out, offset) != out.size())
+    if (readable_file.read_at(out, offset) != out.size())
         throw IOError::partial_read();
 }
 
-template<class W> static auto write_exact(W &writable_store, BytesView in)
+template<class W> static auto write_exact(W &writable_file, BytesView in)
 {
-    if (writable_store.write(in) != in.size())
+    if (writable_file.write(in) != in.size())
         throw IOError::partial_write();
 }
 
-template<class W> static auto write_exact_at(W &writable_store, BytesView in, Index offset)
+template<class W> static auto write_exact_at(W &writable_file, BytesView in, Index offset)
 {
-    if (writable_store.write_at(in, offset) != in.size())
+    if (writable_file.write_at(in, offset) != in.size())
         throw IOError::partial_write();
 }
 
 } // cub
 
-#endif // CUB_STORAGE_INTERFACE_H
+#endif // CUB_FILE_INTERFACE_H

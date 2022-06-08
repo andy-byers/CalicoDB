@@ -13,23 +13,97 @@
 
 namespace cub {
 
+TEST(PagerSetupTests, ReportsOutOfRangeFrameCount)
+{
+    ASSERT_THROW(Pager({std::make_unique<ReadWriteMemory>(), 0x100, MIN_FRAME_COUNT - 1}), InvalidArgumentError);
+    ASSERT_THROW(Pager({std::make_unique<ReadWriteMemory>(), 0x100, MAX_FRAME_COUNT + 1}), InvalidArgumentError);
+}
+
+class PagerTests: public testing::Test {
+public:
+    static constexpr Size frame_count {32};
+    static constexpr Size page_size {0x100};
+
+    explicit PagerTests()
+    {
+        auto file = std::make_unique<ReadWriteMemory>();
+        memory = file->memory();
+        pager = std::make_unique<Pager>(Pager::Parameters{
+            std::move(file),
+            page_size,
+            frame_count,
+        });
+    }
+
+    ~PagerTests() override = default;
+
+    Random random {0};
+    SharedMemory memory;
+    std::unique_ptr<Pager> pager;
+};
+
+TEST_F(PagerTests, FreshPagerHasAllFramesAvailable)
+{
+    ASSERT_EQ(pager->available(), frame_count);
+}
+
+TEST_F(PagerTests, FreshPagerIsSetUpCorrectly)
+{
+    ASSERT_EQ(pager->page_size(), page_size);
+}
+
+TEST_F(PagerTests, PagerKeepsTrackOfAvailableCount)
+{
+    auto frame = pager->pin(PID::root());
+    ASSERT_EQ(pager->available(), frame_count - 1);
+    pager->discard(std::move(*frame));
+    ASSERT_EQ(pager->available(), frame_count);
+}
+
+TEST_F(PagerTests, CannotPinMorePagesThanAvailable)
+{
+    Index i {ROOT_ID_VALUE};
+    for (; i <= frame_count; )
+        (void)pager->pin(PID {i++});
+    ASSERT_EQ(pager->pin(PID {i}), std::nullopt);
+}
+
+TEST_F(PagerTests, TruncateResizesUnderlyingFile)
+{
+    pager->unpin(*pager->pin(PID::root()));
+    ASSERT_NE(memory.memory().size(), page_size);
+    pager->truncate(0);
+    ASSERT_EQ(memory.memory().size(), 0);
+}
+
+//    [[nodiscard]] auto available() const -> Size;
+//    [[nodiscard]] auto page_size() const -> Size;
+//    [[nodiscard]] auto pin(PID) -> std::optional<Frame>;
+//    auto unpin(Frame) -> void;
+//    auto discard(Frame) -> void;
+//    auto truncate(Size) -> void;
+
 class BufferPoolTestsBase: public testing::Test {
 public:
     static constexpr Size frame_count {32};
+    static constexpr Size page_size {0x100};
+
+    // We use a stub WAL so the LSN will always be this value.
+    LSN static_lsn {1'000};
 
     explicit BufferPoolTestsBase(std::unique_ptr<ReadWriteMemory> file)
     {
         memory = file->memory();
-        WALHarness harness {0x100};
+        WALHarness harness {page_size};
 
         pool = std::make_unique<BufferPool>(BufferPool::Parameters{
             std::move(file),
             std::move(harness.reader),
             std::move(harness.writer),
-            LSN {1'000},
-            0x10,
+            static_lsn,
+            frame_count,
             0,
-            0x100,
+            page_size,
         });
     }
 
@@ -52,6 +126,14 @@ TEST_F(BufferPoolTests, FreshBufferPoolIsEmpty)
     ASSERT_EQ(pool->page_count(), 0);
 }
 
+TEST_F(BufferPoolTests, FreshPoolIsSetUpCorrectly)
+{
+    ASSERT_EQ(pool->page_size(), page_size);
+    ASSERT_EQ(pool->block_size(), page_size);
+    ASSERT_EQ(pool->hit_ratio(), 0.0);
+    ASSERT_EQ(pool->flushed_lsn(), static_lsn);
+}
+
 TEST_F(BufferPoolTests, AllocationInceasesPageCount)
 {
     (void)pool->allocate(PageType::EXTERNAL_NODE);
@@ -62,6 +144,28 @@ TEST_F(BufferPoolTests, AllocationInceasesPageCount)
     ASSERT_EQ(pool->page_count(), 3);
 }
 
+TEST_F(BufferPoolTests, LoadsFileHeaderFields)
+{
+    std::string backing(FileLayout::HEADER_SIZE, '\x00');
+    FileHeader header {_b(backing)};
+    header.set_page_count(123);
+    header.set_flushed_lsn(LSN {456});
+    pool->load_header(header);
+
+    ASSERT_EQ(pool->page_count(), 123);
+    ASSERT_EQ(pool->flushed_lsn(), LSN {456});
+}
+
+TEST_F(BufferPoolTests, SavesFileHeaderFields)
+{
+    std::string backing(FileLayout::HEADER_SIZE, '\x00');
+    FileHeader header {_b(backing)};
+
+    (void)pool->allocate(PageType::EXTERNAL_NODE);
+    pool->save_header(header);
+    ASSERT_EQ(header.page_count(), 1);
+    ASSERT_EQ(header.flushed_lsn(), static_lsn);
+}
 
 TEST_F(BufferPoolTests, AllocateReturnsCorrectPage)
 {
@@ -145,24 +249,33 @@ TEST_F(BufferPoolTests, PageDataPersistsAfterEviction)
     }
 }
 
-template<class Test> auto run_sanity_check(Test &test, Size num_iterations)
+template<class Test> auto run_sanity_check(Test &test, Size num_iterations) -> Size
 {
+    Size num_updates {};
     for (Index i {}; i < num_iterations; ++i) {
-        if (const auto r = test.random.next_int(1); r == 0) {
+        if (test.random.next_int(1) == 0) {
             auto page = test.pool->allocate(PageType::EXTERNAL_NODE);
             write_to_page(page, std::to_string(page.id().value));
+            num_updates++;
         } else if (test.pool->page_count()) {
             const auto id = test.random.next_int(1UL, test.pool->page_count());
             const auto result = std::to_string(id);
             auto page = test.pool->acquire(PID {id}, false);
-            ASSERT_EQ(read_from_page(page, result.size()), result);
+            EXPECT_EQ(read_from_page(page, result.size()), result);
         }
     }
+    return num_updates;
 }
 
 TEST_F(BufferPoolTests, SanityCheck)
 {
     run_sanity_check(*this, 1'000);
+}
+
+TEST_F(BufferPoolTests, KeepsTrackOfHitRatio)
+{
+    run_sanity_check(*this, 10);
+    ASSERT_NE(pool->hit_ratio(), 0.0);
 }
 
 class InMemoryTests: public testing::Test {
@@ -176,14 +289,65 @@ public:
     std::unique_ptr<InMemory> pool;
 };
 
-TEST_F(InMemoryTests, FreshPoolIsEmpty)
+TEST_F(InMemoryTests, FreshInMemoryPoolIsEmpty)
 {
     ASSERT_EQ(pool->page_count(), 0);
+}
+
+TEST_F(InMemoryTests, FreshInMemoryPoolIsSetUpCorrectly)
+{
+    ASSERT_EQ(pool->page_size(), page_size);
+    ASSERT_EQ(pool->block_size(), page_size);
+    ASSERT_EQ(pool->hit_ratio(), 1.0);
+    ASSERT_EQ(pool->flushed_lsn(), LSN::null());
+}
+
+TEST_F(InMemoryTests, StubMethodsDoNothing)
+{
+    ASSERT_TRUE(pool->recover());
+    ASSERT_TRUE(pool->try_flush());
+    ASSERT_TRUE(pool->try_flush_wal());
+    pool->purge();
+}
+
+TEST_F(InMemoryTests, LoadsRequiredFileHeaderFields)
+{
+    std::string backing(FileLayout::HEADER_SIZE, '\x00');
+    FileHeader header {_b(backing)};
+    header.set_page_count(123);
+    header.set_flushed_lsn(LSN {456});
+    pool->load_header(header);
+
+    ASSERT_EQ(pool->page_count(), 123);
+    ASSERT_EQ(pool->flushed_lsn(), LSN::null());
+}
+
+TEST_F(InMemoryTests, SavesRequiredFileHeaderFields)
+{
+    std::string backing(FileLayout::HEADER_SIZE, '\x00');
+    FileHeader header {_b(backing)};
+
+    (void)pool->allocate(PageType::EXTERNAL_NODE);
+    pool->save_header(header);
+    ASSERT_EQ(header.page_count(), 1);
+    ASSERT_EQ(header.flushed_lsn(), LSN::null());
 }
 
 TEST_F(InMemoryTests, SanityCheck)
 {
     run_sanity_check(*this, 1'000);
+}
+
+TEST_F(InMemoryTests, HitRatioIsAlwaysOne)
+{
+    run_sanity_check(*this, 10);
+    ASSERT_EQ(pool->hit_ratio(), 1.0);
+}
+
+TEST_F(InMemoryTests, FlushedLSNIsAlwaysNull)
+{
+    run_sanity_check(*this, 10);
+    ASSERT_TRUE(pool->flushed_lsn().is_null());
 }
 
 TEST_F(InMemoryTests, AbortDiscardsChangesSincePreviousCommit)

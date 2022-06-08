@@ -135,7 +135,7 @@ TEST_F(WALTests, EmptyFileBehavior)
 TEST_F(WALTests, WritesRecordCorrectly)
 {
     WALRecordGenerator generator {BLOCK_SIZE};
-    writer->write(generator.generate_small());
+    writer->append(generator.generate_small());
     writer->flush();
 
     const auto &memory = m_wal_backing.memory();
@@ -147,11 +147,11 @@ TEST_F(WALTests, WritesRecordCorrectly)
 TEST_F(WALTests, FlushedLSNReflectsLastFullRecord)
 {
     WALRecordGenerator generator {BLOCK_SIZE};
-    writer->write(generator.generate_small());
+    writer->append(generator.generate_small());
 
     // Writing this record should cause a try_flush after the FIRST part is written. The last record we wrote should
     // then be on disk, and the LAST part of the current record should be in the tail buffer.
-    ASSERT_EQ(writer->write(generator.generate(BLOCK_SIZE / 2 * 3, 1)), LSN::base());
+    ASSERT_EQ(writer->append(generator.generate(BLOCK_SIZE / 2 * 3, 1)), LSN::base());
     ASSERT_EQ(writer->flush(), LSN {ROOT_ID_VALUE + 1});
 }
 
@@ -160,7 +160,7 @@ auto test_writes_then_reads(WALTests &test, const std::vector<Size> &sizes) -> v
     WALRecordGenerator generator {WALTests::BLOCK_SIZE};
 
     for (auto size: sizes)
-        test.writer->write(generator.generate(size, 10));
+        test.writer->append(generator.generate(size, 10));
     test.writer->flush();
     test.reader->reset();
 
@@ -195,9 +195,9 @@ TEST_F(WALTests, MultipleLargeRecords)
 TEST_F(WALTests, CursorStopsAtLastRecord)
 {
     WALRecordGenerator generator {BLOCK_SIZE};
-    writer->write(generator.generate_small());
-    writer->write(generator.generate_small());
-    writer->write(generator.generate_small());
+    writer->append(generator.generate_small());
+    writer->append(generator.generate_small());
+    writer->append(generator.generate_small());
     writer->flush();
 
     reader->reset();
@@ -213,16 +213,16 @@ TEST_F(WALTests, TraversesIncompleteBlocks)
 {
     WALRecordGenerator generator {BLOCK_SIZE};
 
-    writer->write(generator.generate_small());
+    writer->append(generator.generate_small());
     writer->flush();
 
-    writer->write(generator.generate_small());
-    writer->write(generator.generate_small());
+    writer->append(generator.generate_small());
+    writer->append(generator.generate_small());
     writer->flush();
 
-    writer->write(generator.generate_small());
-    writer->write(generator.generate_small());
-    writer->write(generator.generate_small());
+    writer->append(generator.generate_small());
+    writer->append(generator.generate_small());
+    writer->append(generator.generate_small());
     writer->flush();
 
     reader->reset();
@@ -243,9 +243,9 @@ TEST_F(WALTests, TraversesIncompleteBlocks)
 TEST_F(WALTests, TraverseBackwardWithinBlock)
 {
     WALRecordGenerator generator {BLOCK_SIZE};
-    writer->write(generator.generate_small());
-    writer->write(generator.generate_small());
-    writer->write(generator.generate_small());
+    writer->append(generator.generate_small());
+    writer->append(generator.generate_small());
+    writer->append(generator.generate_small());
     writer->flush();
 
     reader->reset();
@@ -272,9 +272,9 @@ TEST_F(WALTests, TraverseBackwardWithinBlock)
 TEST_F(WALTests, TraverseBackwardBetweenBlocks)
 {
     WALRecordGenerator generator {BLOCK_SIZE};
-    writer->write(generator.generate_large());
-    writer->write(generator.generate_large());
-    writer->write(generator.generate_large());
+    writer->append(generator.generate_large());
+    writer->append(generator.generate_large());
+    writer->append(generator.generate_large());
     writer->flush();
 
     reader->reset();
@@ -302,9 +302,9 @@ template<class Test> auto test_write_records_and_traverse(Test &test, Size num_r
     };
 
     for (Index i {}; i < num_records; ++i) {
-        test.writer->write(make_choice(large_fraction)
-            ? generator.generate_large()
-            : generator.generate_small());
+        test.writer->append(make_choice(large_fraction)
+                            ? generator.generate_large()
+                            : generator.generate_small());
         // Always flush on the last round.
         if (make_choice(flush_fraction) || i == num_records - 1)
             test.writer->flush();
@@ -360,7 +360,7 @@ TEST_F(WALTests, WriteAndTraverseMixedRecordsInIncompleteBlocks)
 
 class RealWALTests: public testing::Test {
 public:
-    static constexpr Size BLOCK_SIZE = 0x400;
+    static constexpr Size BLOCK_SIZE = 0x200;
     static constexpr auto DB_PATH = "/tmp/cub_test_wal";
 
     RealWALTests()

@@ -19,29 +19,15 @@ BufferPool::BufferPool(Parameters param)
     , m_next_lsn {param.flushed_lsn + LSN {1}}
     , m_page_count {param.page_count} {}
 
+/**
+ * Determine if the current transaction can be committed.
+ *
+ * @return True if the current transaction can be committed, i.e. there have been updates since the last commit,
+ *         otherwise false
+ */
 auto BufferPool::can_commit() const -> bool
 {
     return m_wal_writer->has_committed() || m_wal_writer->has_pending();
-}
-
-auto BufferPool::page_count() const -> Size
-{
-    return m_page_count;
-}
-    
-auto BufferPool::flushed_lsn() const -> LSN
-{
-    return m_flushed_lsn;
-}
-
-auto BufferPool::hit_ratio() const -> double
-{
-    return m_cache.hit_ratio();
-}
-
-auto BufferPool::page_size() const -> Size
-{
-    return m_pager.page_size();
 }
 
 auto BufferPool::block_size() const -> Size
@@ -112,7 +98,7 @@ auto BufferPool::log_update(Page &page) -> void
         m_next_lsn,
     };
 
-    if (const auto lsn = m_wal_writer->write(WALRecord {param}); !lsn.is_null())
+    if (const auto lsn = m_wal_writer->append(WALRecord{param}); !lsn.is_null())
         m_flushed_lsn = lsn;
 
     m_next_lsn++;
@@ -232,7 +218,8 @@ auto BufferPool::roll_backward() -> void
 
 auto BufferPool::commit() -> void
 {
-    m_wal_writer->write(WALRecord::commit(m_next_lsn++));
+    CUB_EXPECT_TRUE(m_pinned.empty());
+    m_wal_writer->append(WALRecord::commit(m_next_lsn++));
     try_flush_wal();
     try_flush();
     m_wal_writer->truncate();
@@ -240,6 +227,7 @@ auto BufferPool::commit() -> void
 
 auto BufferPool::abort() -> void
 {
+    CUB_EXPECT_TRUE(m_pinned.empty());
     try {
         try_flush_wal();
     } catch (const IOError &error) {
@@ -261,7 +249,13 @@ auto BufferPool::recover() -> bool
     if (!m_wal_writer->has_committed())
         return false;
 
-    if (!roll_forward())
+    bool found_commit {};
+    try {
+        found_commit = roll_forward();
+    } catch (const CorruptionError&) {
+
+    }
+    if (!found_commit)
         roll_backward();
     try_flush();
     m_wal_writer->truncate();

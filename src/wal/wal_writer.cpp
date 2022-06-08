@@ -21,25 +21,19 @@ WALWriter::WALWriter(std::unique_ptr<ILogFile> file, Size block_size)
         throw InvalidArgumentError{"WAL block size is too large"};
 }
 
-auto WALWriter::block_size() const -> Size 
-{
-    return m_block.size();
-}
-
-auto WALWriter::has_pending() const -> bool
-{
-    return m_cursor > 0;
-}
-
+/**
+ * Determine if there is data already in the WAL file on disk.
+ *
+ * @return True if there is data in the WAL file, false otherwise.
+ */
 auto WALWriter::has_committed() const -> bool
 {
     return m_file->size() > 0;
 }
 
-auto WALWriter::write(WALRecord record)  -> LSN
-{
-//    printf("%u: ic? %d\n", record.lsn().value, record.is_commit());
 
+auto WALWriter::append(WALRecord record)  -> LSN
+{
     std::optional<WALRecord> temp {std::move(record)};
     const auto lsn = temp->lsn();
     auto flushed = false;
