@@ -9,8 +9,15 @@ namespace cub {
 
 WALReader::WALReader(std::unique_ptr<IReadOnlyFile> file, Size block_size)
     : m_block(block_size, '\x00')
-    , m_file {std::move(file)} {}
+    , m_file {std::move(file)}
+{
+    // Start out on the first record, if it exists.
+    m_record = read_next();
+}
 
+/**
+ * Move the cursor to the beginning of the WAL file.
+ */
 auto WALReader::reset() -> void
 {
     m_file->seek(0, Seek::BEGIN);
@@ -22,21 +29,35 @@ auto WALReader::reset() -> void
     increment();
 }
 
+/**
+ * Get the WAL record that the cursor is currently over.
+ *
+ * @return The record if the WAL file is not empty, std::nullopt otherwise
+ */
 auto WALReader::record() const -> std::optional<WALRecord>
 {
     return m_record;
 }
 
+/**
+ * Move the cursor toward the end of the WAL.
+ *
+ * @return True if the cursor was successfully moved, false otherwise
+ */
 auto WALReader::increment() -> bool
 {
     if (auto record = read_next()) {
         m_record = std::move(record);
-
         return true;
     }
     return false;
 }
 
+/**
+ * Move the cursor toward the beginning of the WAL.
+ *
+ * @return True if the cursor was successfully moved, false otherwise
+ */
 auto WALReader::decrement() -> bool
 {
     if (auto record = read_previous()) {
@@ -46,19 +67,11 @@ auto WALReader::decrement() -> bool
     return false;
 }
 
-// WALReader::increment() Routine:
-//   (1) If we have a record already, push the cursor to the traversal stack and increment it by the record size.
-//   (2) Read the next record. If it is a FULL record, stop. Otherwise, keep reading until we reach a LAST record.
-//       If we reach EOF before a LAST record, we must roll back the cursor back to the start of the last complete record.
-//
-// WALReader Behavior:
-//
-//
-// Incomplete WAL Records
-// A WAL record is incomplete if it is not a FULL record and does not end with a LAST record. If the record in question is
-// not the last record in the WAL file, then the WAL is considered corrupted. Otherwise, this indicates that there was a
-// system failure before the LAST record could be flushed.
-
+/**
+ * Read the next WAL record, advancing the cursor.
+ *
+ * @return The next WAL record if we are not already at the end, std::nullopt otherwise
+ */
 auto WALReader::read_next() -> std::optional<WALRecord>
 {
     WALRecord record;
@@ -82,6 +95,28 @@ auto WALReader::read_next() -> std::optional<WALRecord>
     return record;
 }
 
+/**
+ * Read the previous WAL record, moving the cursor backward.
+ *
+ * @return The previous WAL record if we are not already at the beginning, std::nullopt otherwise
+ */
+auto WALReader::read_previous() -> std::optional<WALRecord>
+{
+    if (m_positions.size() >= 2) {
+        pop_position_and_seek();
+        pop_position_and_seek();
+        return read_next();
+    }
+    return std::nullopt;
+}
+
+/**
+ * Read the WAL record at the current cursor position.
+ *
+ * This method causes the next block of the WAL file to be read, once the cursor reaches the end of the current one.
+ *
+ * @return The WAL record at the specified offset if it exists, std::nullopt otherwise
+ */
 auto WALReader::read_record() -> std::optional<WALRecord>
 {
     const auto out_of_space = m_block.size() - m_cursor <= WALRecord::HEADER_SIZE;;
@@ -106,9 +141,10 @@ auto WALReader::read_record() -> std::optional<WALRecord>
 }
 
 /**
+ * Helper for reading WAL records out of the tail buffer.
  *
- * @param offset
- * @return
+ * @param offset Offset at which to read the record
+ * @return WAL record at the specified offset
  */
 auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
 {
@@ -132,16 +168,6 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
         default:
             throw CorruptionError {"WAL record type is invalid"};
     }
-}
-
-auto WALReader::read_previous() -> std::optional<WALRecord>
-{
-    if (m_positions.size() >= 2) {
-        pop_position_and_seek();
-        pop_position_and_seek();
-        return read_next();
-    }
-    return std::nullopt;
 }
 
 auto WALReader::push_position() -> void
@@ -171,7 +197,7 @@ auto WALReader::read_block() -> bool
         const auto block_start = m_block_id * m_block.size();;
         if (const auto bytes_read = m_file->read_at(_b(m_block), block_start)) {
             if (bytes_read != m_block.size())
-                throw IOError::partial_read();
+                throw CorruptionError {"WAL contains an incomplete block"};
             m_has_block = true;
             return true;
         }

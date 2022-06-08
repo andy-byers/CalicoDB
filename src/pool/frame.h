@@ -18,14 +18,45 @@ class Frame final {
 public:
     explicit Frame(Size);
     ~Frame() = default;
+
+    [[nodiscard]] auto page_id() const -> PID
+    {
+        return m_page_id;
+    }
+
+    [[nodiscard]] auto ref_count() const -> Size
+    {
+        return m_ref_count;
+    }
+
+    [[nodiscard]] auto is_dirty() const -> bool
+    {
+        return m_is_dirty;
+    }
+
+    [[nodiscard]] auto data() const -> BytesView
+    {
+        return {m_data.get(), m_size};
+    }
+
+    auto data() -> Bytes
+    {
+        return {m_data.get(), m_size};
+    }
+
+    auto clean() -> void
+    {
+        m_is_dirty = false;
+    }
+
+    auto reset(PID page_id) -> void
+    {
+        CUB_EXPECT_EQ(m_ref_count, 0);
+        m_page_id = page_id;
+        m_is_dirty = false;
+    }
+
     [[nodiscard]] auto page_lsn() const -> LSN;
-    [[nodiscard]] auto page_id() const -> PID;
-    [[nodiscard]] auto ref_count() const -> Size;
-    [[nodiscard]] auto is_dirty() const -> bool;
-    [[nodiscard]] auto data() const -> BytesView;
-    auto data() -> Bytes;
-    auto clean() -> void;
-    auto reset(PID) -> void;
     auto borrow(IBufferPool*, bool) -> Page;
     auto synchronize(Page&) -> void;
 

@@ -73,9 +73,10 @@ auto InMemory::save_header(FileHeader &header) -> void
 
 auto InMemory::load_header(const FileHeader &header) -> void
 {
-    CUB_EXPECT_GE(page_count(), header.page_count());
     while (page_count() > header.page_count())
         m_frames.pop_back();
+    while (page_count() < header.page_count())
+        m_frames.emplace_back(m_page_size);
 }
 
 } // cub

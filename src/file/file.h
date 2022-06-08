@@ -1,5 +1,5 @@
-#ifndef CUB_STORAGE_FILE_H
-#define CUB_STORAGE_FILE_H
+#ifndef CUB_FILE_FILE_H
+#define CUB_FILE_FILE_H
 
 #include "interface.h"
 
@@ -80,4 +80,4 @@ private:
 
 } // cub
 
-#endif // CUB_STORAGE_FILE_H
+#endif // CUB_FILE_FILE_H

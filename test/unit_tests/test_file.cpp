@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 #include <gtest/gtest.h>
 
@@ -7,6 +8,7 @@
 #include "random.h"
 #include "file/file.h"
 #include "file/interface.h"
+#include "file/system.h"
 #include "fakes.h"
 #include "unit_tests.h"
 
@@ -145,6 +147,106 @@ TEST_F(FileTests, RandomReadsAndWrites)
 {
     auto file = open_rw("a", Mode::CREATE | Mode::TRUNCATE);
     test_random_reads_and_writes(*file);
+}
+
+class FileFailureTests: public testing::Test {
+public:
+    static constexpr auto PATH = "/tmp/cub_file_failure";
+    static constexpr Size OVERFLOW_SIZE {std::numeric_limits<Size>::max()};
+
+    FileFailureTests()
+        : file {std::make_unique<ReadWriteFile>(PATH, Mode::CREATE | Mode::TRUNCATE, 0666)} {}
+
+    ~FileFailureTests() override = default;
+
+    std::unique_ptr<IReadWriteFile> file;
+    Byte *fake_ptr {reinterpret_cast<Byte*>(123)};
+    Bytes large_slice {fake_ptr, OVERFLOW_SIZE};
+};
+
+TEST_F(FileFailureTests, FailsWhenFileExistsButShouldNot)
+{
+    ASSERT_THROW(ReadWriteFile(PATH, Mode::CREATE | Mode::EXCLUSIVE, 0666), SystemError);
+}
+
+TEST_F(FileFailureTests, FailsWhenFileDoesNotExistButShould)
+{
+    file.reset();
+    std::filesystem::remove(PATH);
+    ASSERT_THROW(ReadWriteFile(PATH, Mode {}, 0666), SystemError);
+}
+
+TEST_F(FileFailureTests, ThrowsWhenReadSizeIsTooLarge)
+{
+    ASSERT_THROW(file->read(large_slice), SystemError);
+}
+
+TEST_F(FileFailureTests, ThrowsWhenWriteSizeIsTooLarge)
+{
+    ASSERT_THROW(file->write(large_slice), SystemError);
+}
+
+TEST_F(FileFailureTests, ThrowsWhenSeekOffsetIsTooLarge)
+{
+    ASSERT_THROW(file->seek(static_cast<long>(OVERFLOW_SIZE), Seek::BEGIN), SystemError);
+}
+
+TEST_F(FileFailureTests, ThrowsWhenNewSizeIsTooLarge)
+{
+    ASSERT_THROW(file->resize(OVERFLOW_SIZE), SystemError);
+}
+
+class SystemTests: public testing::Test {
+public:
+    static constexpr auto PATH = "/tmp/cub_system";
+
+    SystemTests()
+    {
+        closed_fd = system::open(PATH, O_CREAT | O_TRUNC, 0666);
+
+        // system::open() should throw rather than returning -1.
+        CUB_EXPECT_NE(closed_fd, -1);
+        system::close(closed_fd);
+    }
+
+    ~SystemTests() override
+    {
+        try {
+            system::unlink(PATH);
+        } catch (const SystemError&) {
+            // File may not exist after some tests.
+        }
+    }
+
+    int closed_fd {-1};
+};
+
+#ifdef CUB_OSX
+
+TEST_F(SystemTests, CannotCallUseDirectIoOnUnopenedFile)
+{
+    ASSERT_THROW(system::use_direct_io(closed_fd), SystemError);
+}
+
+#endif // CUB_OSX
+
+TEST_F(SystemTests, CannotUseUnopenedFile)
+{
+    Bytes b;
+    ASSERT_THROW(system::size(closed_fd), SystemError);
+    ASSERT_THROW(system::read(closed_fd, b), SystemError);
+    ASSERT_THROW(system::write(closed_fd, b), SystemError);
+    ASSERT_THROW(system::seek(closed_fd, 1, SEEK_SET), SystemError);
+    ASSERT_THROW(system::close(closed_fd), SystemError);
+    ASSERT_THROW(system::sync(closed_fd), SystemError);
+    ASSERT_THROW(system::resize(closed_fd, 1), SystemError);
+}
+
+TEST_F(SystemTests, CannotRenameNonexistentFile)
+{
+    puts(PATH);
+    system::unlink(PATH);
+    ASSERT_THROW(system::rename(PATH, "/tmp/should_have_failed"), SystemError);
 }
 
 class MemoryTests: public FileTests {

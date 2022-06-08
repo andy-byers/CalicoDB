@@ -3,28 +3,6 @@
 
 namespace cub {
 
-auto PageCache::is_empty() const -> Size 
-{
-    return size() == 0;
-}
-
-auto PageCache::size() const -> Size 
-{
-    return m_list.size();
-}
-
-auto PageCache::contains(PID id) const -> bool 
-{
-    return m_map.find(id) != m_map.end();
-}
-
-auto PageCache::hit_ratio() const -> double
-{
-    if (const auto total = static_cast<double>(m_hit_count + m_miss_count); total != 0.0)
-        return static_cast<double>(m_hit_count) / total;
-    return 0.0;
-}
-
 auto PageCache::put(Frame frame) -> void
 {
     const auto page_id = frame.page_id();

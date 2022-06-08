@@ -13,6 +13,11 @@
 
 namespace cub {
 
+// Incomplete WAL Records
+// A WAL record is incomplete if it is not a FULL record and does not end with a LAST record. If the record in question is
+// not the last record in the WAL file, then the WAL is considered corrupted. Otherwise, this indicates that there was a
+// system failure before the LAST record could be flushed.
+
 // WAL record format, modified from (1):
 //
 //   .-------------- Record Header -------------.
@@ -23,13 +28,16 @@ namespace cub {
 //
 // WAL payload format:
 //
-//   .-------------- Payload Header -------------.   .------------------ PageUpdate Header ----------------.
+//   .-------------- Payload Header -------------.   .------------------ Update Header ----------------.
 //   .-------------------.--------------.--------.   .-------------.--------.-------------.------------.
 //   | previous_lsn (4B) | page_id (4B) | N (2B) |   | offset (2B) | y (2B) | before (yB) | after (yB) | (x N)
 //   '-------------------'--------------'--------'   '-------------'--------'-------------'------------'
 //   0                   4              8        10  s             s+2      s+4           s+y+4        s+y*2+4
 //
 
+/**
+ * The variable-length payload field of a WAL record.
+ */
 class WALPayload {
 public:
     friend class WALRecord;
@@ -48,13 +56,24 @@ public:
     explicit WALPayload(const Parameters&);
     [[nodiscard]] auto is_commit() const -> bool;
     [[nodiscard]] auto decode() const -> PageUpdate;
-    [[nodiscard]] auto data() const -> BytesView {return _b(m_data);}
-    auto append(const WALPayload &rhs) -> void {m_data += rhs.m_data;}
+
+    [[nodiscard]] auto data() const -> BytesView
+    {
+        return _b(m_data);
+    }
+
+    auto append(const WALPayload &rhs) -> void
+    {
+        m_data += rhs.m_data;
+    }
 
 private:
-    std::string m_data;
+    std::string m_data; ///< Payload contents
 };
 
+/**
+ * A container that makes data compatible with the WAL file format.
+ */
 class WALRecord {
 public:
     static constexpr Size HEADER_SIZE = 11;
@@ -114,7 +133,7 @@ public:
     auto read(BytesView) -> void;
     auto write(Bytes) const noexcept -> void;
     auto split(Index) -> WALRecord;
-    auto merge(WALRecord) -> void;
+    auto merge(const WALRecord&) -> void;
 
 private:
     WALPayload m_payload;

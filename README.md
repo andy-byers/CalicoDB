@@ -4,10 +4,11 @@ Cub DB is an embedded key-value database written in C++17.
 
 + [Disclaimer](#disclaimer)
 + [Features](#features)
++ [Caveats](#caveats)
 + [API](#api)
   + [Opening a Database](#opening-a-database)
-  + [Closing a Database](#opening-a-database)
-  + [Slices](#opening-a-database)
+  + [Closing a Database](#closing-a-database)
+  + [Slices](#slices)
   + [Modifying a Database](#modifying-a-database)
   + [Querying a Database](#querying-a-database)
   + [Transactions](#transactions)
@@ -27,6 +28,15 @@ Check out the `Contributions` section if you are interested in working on Cub DB
 + Durability provided through write-ahead logging
 + Uses a dynamic-order B-tree to store all the data in a single file
 + Supports forward and reverse traversal using cursors
+
+## Caveats
++ Uses a single WAL file, which can grow quite large in a long-running transaction
++ Current reader-writer lock (`<std::shared_mutex`) does not give preference to writers
+  + Each time we perform a modifying operation, an exclusive lock is taken on the database
+  + Each time a cursor is opened, a shared lock is taken on the database
+  + The lock is held for the lifetime of the cursor, so that the tree structure does not change during traversal
+  + This means that an open cursor can cause an update to block indefinitely, so care must be taken when coordinating
+  + For this reason, it's generally a good idea to keep cursors open for just as long as they are needed
 
 ## API
 

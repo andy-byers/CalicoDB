@@ -41,11 +41,10 @@ auto Pager::truncate(Size page_count) -> void
 }
 
 /**
- * Pin a database page.
+ * Pin a database page to an available frame.
  *
- * Guarantees that if an exception is thrown, the caller will see no change to this object's
- * state. That is, the frame we tried to use will still be available after the exception is
- * handled.
+ * Provides the strong guarantee concerning exceptions thrown by the file object during the read. Also makes sure that
+ * newly allocated pages are zeroed out.
  *
  * @param id Page ID of the page we want to pin.
  * @return A frame with the requested database page contents pinned.
@@ -57,6 +56,9 @@ auto Pager::pin(PID id) -> std::optional<Frame>
         return std::nullopt;
 
     auto &frame = m_available.back();
+
+    // This can throw. If it does, we haven't done anything yet, so we should be okay. Also, when we hit EOF we make
+    // sure to clear the frame, since we are essentially allocating a new page.
     if (!try_read_page_from_file(id, frame.data()))
         mem_clear(frame.data());
 

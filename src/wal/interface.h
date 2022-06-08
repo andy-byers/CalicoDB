@@ -14,7 +14,7 @@ public:
     [[nodiscard]] virtual auto block_size() const -> Size = 0;
     [[nodiscard]] virtual auto has_pending() const -> bool = 0;
     [[nodiscard]] virtual auto has_committed() const -> bool = 0;
-    virtual auto write(WALRecord) -> LSN = 0;
+    virtual auto append(WALRecord) -> LSN = 0;
     virtual auto truncate() -> void = 0;
     virtual auto flush() -> LSN = 0;
 };

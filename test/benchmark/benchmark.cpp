@@ -330,22 +330,28 @@ auto main(int argc, const char *argv[]) -> int
     const auto make_header_row = [&field_2](const std::string &first) {
         return make_row('|', first, '|', field_2, '|');
     };
+    const auto seed = Clock::now().time_since_epoch().count();
+    Random random {static_cast<unsigned>(seed)};
 
-    const auto show_real_db_benchmarks = [&] {
+    const auto run_real_db_benchmarks = [&] {
         std::cout << make_filler_row(field_1a, '.');
         std::cout << make_header_row(field_1a);
         std::cout << make_filler_row(field_1a, '|');
-        for (const auto &instance: instances)
+        for (const auto &instance: instances) {
             report(runner.run(create(options), instance));
+            random.shuffle(records); // Attempt to mess up branch prediction.
+        }
         std::cout << make_filler_row(field_1a, '\'') << '\n';
     };
 
-    const auto show_temp_db_benchmarks = [&] {
+    const auto run_temp_db_benchmarks = [&] {
         std::cout << make_filler_row(field_1b, '.');
         std::cout << make_header_row(field_1b);
         std::cout << make_filler_row(field_1b, '|');
-        for (const auto &instance: instances)
+        for (const auto &instance: instances) {
             report(runner.run(create_temp(options.page_size), instance));
+            random.shuffle(records);
+        }
         std::cout << make_filler_row(field_1a, '\'') << '\n';
     };
 
@@ -356,10 +362,10 @@ auto main(int argc, const char *argv[]) -> int
     }
 
     if (!temp_only)
-        show_real_db_benchmarks();
+        run_real_db_benchmarks();
 
     if (!real_only)
-        show_temp_db_benchmarks();
+        run_temp_db_benchmarks();
 
     return 0;
 }

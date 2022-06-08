@@ -5,10 +5,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include "cache.h"
 #include "frame.h"
 #include "interface.h"
 #include "pager.h"
-#include "cache.h"
 #include "utils/scratch.h"
 
 namespace cub {
@@ -40,11 +40,27 @@ public:
     explicit BufferPool(Parameters);
     ~BufferPool() override = default;
 
-    [[nodiscard]] auto page_count() const -> Size override;
-    [[nodiscard]] auto flushed_lsn() const -> LSN override;
-    [[nodiscard]] auto page_size() const -> Size override;
+    [[nodiscard]] auto page_count() const -> Size override
+    {
+        return m_page_count;
+    }
+
+    [[nodiscard]] auto flushed_lsn() const -> LSN override
+    {
+        return m_flushed_lsn;
+    }
+
+    [[nodiscard]] auto hit_ratio() const -> double override
+    {
+        return m_cache.hit_ratio();
+    }
+
+    [[nodiscard]] auto page_size() const -> Size override
+    {
+        return m_pager.page_size();
+    }
+
     [[nodiscard]] auto block_size() const -> Size override;
-    [[nodiscard]] auto hit_ratio() const -> double override;
     [[nodiscard]] auto allocate(PageType) -> Page override;
     [[nodiscard]] auto acquire(PID, bool) -> Page override;
     [[nodiscard]] auto can_commit() const -> bool override;
