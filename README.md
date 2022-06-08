@@ -1,3 +1,5 @@
+![CI status badge](https://github.com/andy-byers/CubDB/actions/workflows/actions.yml/badge.svg)
+
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
 Cub DB is an embedded key-value database written in C++17.
