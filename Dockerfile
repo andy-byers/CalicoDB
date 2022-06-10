@@ -30,6 +30,9 @@ COPY . CubDB
 RUN mkdir test && \
     cd test && \
     cmake -E env \
-      CXXFLAGS="-fsanitize=address" LDFLAGS="-fsanitize=address" \
-      cmake -DCMAKE_BUILD_TYPE=Debug -DCUB_BUILD_FUZZERS=ON ../CubDB && \
-    cmake --build . --config Debug
+      CXXFLAGS="-fsanitize=fuzzer,address" \
+      cmake -DCMAKE_BUILD_TYPE=Debug \
+            -DCUB_BUILD_FUZZERS=ON \
+            -DCUB_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" \
+            ../CubDB && \
+    cmake --build . --config Debug --target all_fuzzers

@@ -13,6 +13,7 @@ SET(
     CACHE STRING "C compiler flags for a RelWithAssertions build"
     FORCE
 )
+set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
 project(CubDB CXX)
 set(CMAKE_CXX_STANDARD 17)
