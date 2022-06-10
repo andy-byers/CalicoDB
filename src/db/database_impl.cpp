@@ -101,7 +101,6 @@ Database::Impl::Impl(Size page_size)
     : m_path {"<Temp DB>"}
     , m_pool {std::make_unique<InMemory>(page_size)}
     , m_tree {std::make_unique<Tree>(Tree::Parameters{m_pool.get(), PID::null(), 0, 0, 0})}
-    , m_is_temp {true}
 {
     m_tree->allocate_node(PageType::EXTERNAL_NODE);
     save_header();
