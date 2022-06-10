@@ -33,10 +33,10 @@ Check out the `Contributions` section if you are interested in working on Cub DB
 
 ## Caveats
 + Uses a single WAL file, which can grow quite large in a long-running transaction
-+ Current reader-writer lock (`<std::shared_mutex`) does not give preference to writers
++ Current reader-writer lock implementation (just using `std::shared_mutex`) does not give preference to writers
   + Each time we perform a modifying operation, an exclusive lock is taken on the database
   + Each time a cursor is opened, a shared lock is taken on the database
-  + The lock is held for the lifetime of the cursor, so that the tree structure does not change during traversal
+  + The shared lock is held for the lifetime of the cursor, so that the tree structure does not change during traversal
   + This means that an open cursor can cause an update to block indefinitely, so care must be taken when coordinating
   + For this reason, it's generally a good idea to keep cursors open for just as long as they are needed
 
