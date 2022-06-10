@@ -192,9 +192,12 @@ auto BufferPool::roll_forward() -> bool
 
 auto BufferPool::roll_backward() -> void
 {
-    // Make sure the WAL reader is at the end of the log.
-    while (m_wal_reader->increment()) {}
+    // Make sure the WAL reader is at the end of the log. TODO: Maybe not necessary. If the WAL has junk at the end, this will throw.
+    try {
+        while (m_wal_reader->increment()) {}
+    } catch (const CorruptionError&) {
 
+    }
     CUB_EXPECT_NE(m_wal_reader->record(), std::nullopt);
 
     // Skip commit record(s) at the end. These can arise from exceptions during commit(), i.e. we write the commit record,

@@ -46,9 +46,10 @@ auto WALReader::record() const -> std::optional<WALRecord>
  */
 auto WALReader::increment() -> bool
 {
+    m_incremented = true;
     if (auto record = read_next()) {
         m_record = std::move(record);
-        return true;
+        return m_record && m_incremented;
     }
     return false;
 }
@@ -80,19 +81,28 @@ auto WALReader::read_next() -> std::optional<WALRecord>
         read_block();
     push_position();
 
-    while (record.type() != WALRecord::Type::FULL) {
-        // Merge partial values until we have a full record.
-        if (auto maybe_partial = read_record()) {
-            record.merge(*maybe_partial);
-        // We just hit EOF. Note that we discard_handlers `record`, which may contain a non-FULL record.
-        } else {
-            pop_position_and_seek();
-            return std::nullopt;
+    try {
+        while (record.type() != WALRecord::Type::FULL) {
+            // Merge partial values until we have a full record.
+            if (auto maybe_partial = read_record()) {
+                record.merge(*maybe_partial);
+                // We just hit EOF. Note that we discard `record`, which may contain a non-FULL record.
+            } else {
+                pop_position_and_seek();
+                return std::nullopt;
+            }
         }
+        if (!record.is_consistent())
+            throw CorruptionError {"Record has an invalid CRC"};
+        return record;
+
+    } catch (const CorruptionError&) {
+        m_incremented = false;
+        if (auto previous = read_previous())
+            return previous;
+        pop_position_and_seek();
+        return std::nullopt;
     }
-    if (!record.is_consistent())
-        throw CorruptionError {"Record has an invalid CRC"};
-    return record;
 }
 
 /**
@@ -119,8 +129,8 @@ auto WALReader::read_previous() -> std::optional<WALRecord>
  */
 auto WALReader::read_record() -> std::optional<WALRecord>
 {
-    const auto out_of_space = m_block.size() - m_cursor <= WALRecord::HEADER_SIZE;;
-    const auto needs_new_block = out_of_space || !m_has_block;;
+    const auto out_of_space = m_block.size() - m_cursor <= WALRecord::HEADER_SIZE;
+    const auto needs_new_block = out_of_space || !m_has_block;
 
     if (needs_new_block) {
         if (out_of_space) {
@@ -172,15 +182,15 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
 
 auto WALReader::push_position() -> void
 {
-    const auto absolute = m_block.size()*m_block_id + m_cursor;;
+    const auto absolute = m_block.size()*m_block_id + m_cursor;
     m_positions.push_back(absolute);
 }
 
 auto WALReader::pop_position_and_seek() -> void
 {
-    const auto absolute = m_positions.back();;
-    const auto block_id = absolute / m_block.size();;
-    const auto needs_new_block = m_block_id != block_id;;
+    const auto absolute = m_positions.back();
+    const auto block_id = absolute / m_block.size();
+    const auto needs_new_block = m_block_id != block_id;
 
     m_block_id = block_id;
     m_cursor = absolute % m_block.size();
@@ -194,7 +204,7 @@ auto WALReader::pop_position_and_seek() -> void
 auto WALReader::read_block() -> bool
 {
     try {
-        const auto block_start = m_block_id * m_block.size();;
+        const auto block_start = m_block_id * m_block.size();
         if (const auto bytes_read = m_file->read_at(_b(m_block), block_start)) {
             if (bytes_read != m_block.size())
                 throw CorruptionError {"WAL contains an incomplete block"};
