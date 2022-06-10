@@ -1,4 +1,5 @@
 #include "scratch.h"
+#include "utils/expect.h"
 
 namespace cub {
 

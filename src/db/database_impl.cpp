@@ -1,6 +1,5 @@
 
 #include "database_impl.h"
-
 #include "cursor_impl.h"
 #include "cub/exception.h"
 #include "file/file.h"

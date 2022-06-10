@@ -4,7 +4,7 @@
 #include "cub/common.h"
 #include "random.h"
 #include "unit_tests.h"
-#include "utils/assert.h"
+#include "utils/expect.h"
 #include "utils/encoding.h"
 #include "utils/identifier.h"
 #include "utils/scratch.h"
@@ -75,10 +75,10 @@ TEST_F(SliceTests, EmptyRangesAreEmpty)
 TEST_F(SliceTests, RangeDeathTest)
 {
     BytesView discard;
-    ASSERT_DEATH(discard = bytes.range(bytes.size() + 1), EXPECTATION_MATCHER);
-    ASSERT_DEATH(discard = bytes.range(bytes.size(), 1), EXPECTATION_MATCHER);
-    ASSERT_DEATH(discard = bytes.range(0, bytes.size() + 1), EXPECTATION_MATCHER);
-    ASSERT_DEATH(discard = bytes.range(5, bytes.size()), EXPECTATION_MATCHER);
+    ASSERT_DEATH(discard = bytes.range(bytes.size() + 1), "Assert");
+    ASSERT_DEATH(discard = bytes.range(bytes.size(), 1), "Assert");
+    ASSERT_DEATH(discard = bytes.range(0, bytes.size() + 1), "Assert");
+    ASSERT_DEATH(discard = bytes.range(5, bytes.size()), "Assert");
 }
 
 TEST_F(SliceTests, AdvanceByZeroDoesNothing)
@@ -96,7 +96,7 @@ TEST_F(SliceTests, AdvancingByOwnLengthProducesEmptySlice)
 
 TEST_F(SliceTests, AdvanceDeathTest)
 {
-    ASSERT_DEATH(bytes.advance(bytes.size() + 1), EXPECTATION_MATCHER);
+    ASSERT_DEATH(bytes.advance(bytes.size() + 1), "Assert");
 }
 
 TEST_F(SliceTests, TruncatingToOwnLengthDoesNothing)
@@ -122,9 +122,9 @@ TEST_F(SliceTests, TruncatingEmptySliceDoesNothing)
 
 TEST_F(SliceTests, TruncateDeathTest)
 {
-    ASSERT_DEATH(bytes.truncate(bytes.size() + 1), EXPECTATION_MATCHER);
+    ASSERT_DEATH(bytes.truncate(bytes.size() + 1), "Assert");
     bytes.truncate(0);
-    ASSERT_DEATH(bytes.truncate(1), EXPECTATION_MATCHER);
+    ASSERT_DEATH(bytes.truncate(1), "Assert");
 }
 
 TEST(UtilsTest, ZeroIsNotAPowerOfTwo)

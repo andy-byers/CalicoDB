@@ -1,6 +1,6 @@
 
-#include "cub/exception.h"
 #include "wal_record.h"
+#include "cub/exception.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
 

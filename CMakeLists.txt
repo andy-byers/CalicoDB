@@ -17,9 +17,6 @@ SET(
 project(CubDB CXX)
 set(CMAKE_CXX_STANDARD 17)
 
-option(CUB_BUILD_TESTS "Build the tests" ON)
-option(CUB_BUILD_FUZZERS "Build the fuzz tests" OFF)
-
 set(CUB_NAME cub)
 set(CUB_EXAMPLES_DIR "${PROJECT_SOURCE_DIR}/examples")
 set(CUB_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
@@ -30,6 +27,8 @@ set(CUB_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic
 # Check if we have O_DIRECT, which turns off kernel page caching.
 include(CheckCXXSymbolExists)
 check_cxx_symbol_exists(O_DIRECT "fcntl.h" CUB_HAS_O_DIRECT)
+
+option(CUB_BUILD_TESTS "Build the tests" ON)
 
 # Build the unit and integration tests.
 if(CUB_BUILD_TESTS)

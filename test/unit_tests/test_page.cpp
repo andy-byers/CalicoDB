@@ -9,7 +9,7 @@
 #include "page/node.h"
 #include "page/page.h"
 #include "page/update.h"
-#include "utils/assert.h"
+#include "utils/expect.h"
 #include "utils/layout.h"
 #include "utils/scratch.h"
 

@@ -1,6 +1,7 @@
 #ifndef CUB_WAL_INTERFACE_H
 #define CUB_WAL_INTERFACE_H
 
+#include <optional>
 #include "cub/common.h"
 
 namespace cub {

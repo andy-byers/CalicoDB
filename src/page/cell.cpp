@@ -1,7 +1,7 @@
 #include "cell.h"
 
 #include "node.h"
-#include "utils/assert.h"
+#include "utils/expect.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
 

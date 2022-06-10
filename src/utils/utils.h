@@ -2,7 +2,6 @@
 #define CUB_UTILS_UTILS_H
 
 #include <filesystem>
-#include <string>
 #include "cub/common.h"
 
 namespace cub {

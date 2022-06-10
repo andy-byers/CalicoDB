@@ -2,6 +2,7 @@
 
 #include "cub/database.h"
 #include "cub/cursor.h"
+#include "utils/expect.h"
 
 #ifdef NDEBUG
 #  error "This test must run with assertions enabled"

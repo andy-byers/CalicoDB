@@ -1,7 +1,7 @@
 #ifndef CUB_UTILS_IDENTIFIER_H
 #define CUB_UTILS_IDENTIFIER_H
 
-#include "assert.h"
+#include "expect.h"
 #include "utils.h"
 
 namespace cub {

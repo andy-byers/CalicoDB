@@ -1,11 +1,6 @@
-#include <filesystem>
 #include <vector>
-#include "cub/cursor.h"
-#include "cub/database.h"
-#include "integration.h"
 #include "fakes.h"
 #include "tools.h"
-#include "file/file.h"
 #include "file/system.h"
 #include "pool/buffer_pool.h"
 #include "wal/wal_reader.h"
@@ -17,8 +12,6 @@
 
 namespace {
 using namespace cub;
-
-//constexpr auto PATH = "/tmp/cub_recovery";
 
 class LoggingTests: public testing::Test {
 public:

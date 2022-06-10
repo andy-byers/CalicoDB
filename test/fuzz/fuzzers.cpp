@@ -1,7 +1,7 @@
 #include <filesystem>
 #include "fuzzers.h"
 #include "validators.h"
-#include "utils/assert.h"
+#include "utils/expect.h"
 #include "utils/utils.h"
 #include "../tools/random.h"
 #include "../tools/tools.h"

@@ -6,8 +6,6 @@
 #define CUB_BYTES_H
 
 #include <cstring>
-#include <string>
-#include "utils/assert.h"
 #include "common.h"
 
 namespace cub {
@@ -38,13 +36,13 @@ namespace impl {
 
        auto operator[](Index index) const noexcept -> const Value&
        {
-           CUB_EXPECT_LT(index, m_size);
+           assert(index < m_size);
            return m_data[index];
        }
 
        auto operator[](Index index) noexcept -> Value&
        {
-           CUB_EXPECT_LT(index, m_size);
+           assert(index < m_size);
            return m_data[index];
        }
 
@@ -65,15 +63,15 @@ namespace impl {
 
        [[nodiscard]] auto range(Index offset, Size size) const noexcept -> Slice
        {
-           CUB_EXPECT_LE(size, m_size);
-           CUB_EXPECT_LE(offset, m_size);
-           CUB_EXPECT_LE(offset + size, m_size);
+           assert(size <= m_size);
+           assert(offset <= m_size);
+           assert(offset + size <= m_size);
            return Slice {m_data + offset, size};
        }
 
        [[nodiscard]] auto range(Index offset) const noexcept -> Slice
        {
-           CUB_EXPECT_GE(m_size, offset);
+           assert(m_size >= offset);
            return range(offset, m_size - offset);
        }
 
@@ -95,7 +93,7 @@ namespace impl {
 
        auto advance(Size n = 1) noexcept -> Slice
        {
-           CUB_EXPECT_LE(n, m_size);
+           assert(n <= m_size);
            m_data += n;
            m_size -= n;
            return *this;
@@ -103,7 +101,7 @@ namespace impl {
 
        auto truncate(Size size) noexcept -> Slice
        {
-           CUB_EXPECT_LE(size, m_size);
+           assert(size <= m_size);
            m_size = size;
            return *this;
        }
@@ -166,20 +164,20 @@ inline auto operator!=(BytesView lhs, BytesView rhs) noexcept -> bool
 
 inline auto mem_copy(Bytes dst, BytesView src, size_t n) noexcept -> void*
 {
-    CUB_EXPECT_LE(n, src.size());
-    CUB_EXPECT_LE(n, dst.size());
+    assert(n <= src.size());
+    assert(n <= dst.size());
     return std::memcpy(dst.data(), src.data(), n);
 }
 
 inline auto mem_copy(Bytes dst, BytesView src) noexcept -> void*
 {
-    CUB_EXPECT_LE(src.size(), dst.size());
+    assert(src.size() <= dst.size());
     return mem_copy(dst, src, src.size());
 }
 
 inline auto mem_clear(Bytes mem, size_t n) noexcept -> void*
 {
-    CUB_EXPECT_LE(n, mem.size());
+    assert(n <= mem.size());
     return std::memset(mem.data(), 0, n);
 }
 
@@ -190,14 +188,14 @@ inline auto mem_clear(Bytes mem) noexcept -> void*
 
 inline auto mem_move(Bytes dst, BytesView src, Size n) noexcept -> void*
 {
-    CUB_EXPECT_LE(n, src.size());
-    CUB_EXPECT_LE(n, dst.size());
+    assert(n <= src.size());
+    assert(n <= dst.size());
     return std::memmove(dst.data(), src.data(), n);
 }
 
 inline auto mem_move(Bytes dst, BytesView src) noexcept -> void*
 {
-    CUB_EXPECT_LE(src.size(), dst.size());
+    assert(src.size() <= dst.size());
     return mem_move(dst, src, src.size());
 }
 

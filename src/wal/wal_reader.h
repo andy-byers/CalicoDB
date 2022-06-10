@@ -8,7 +8,6 @@
 #define CUB_WAL_WAL_READER_H
 
 #include <memory>
-#include <optional>
 #include <stack>
 #include "interface.h"
 #include "wal_record.h"

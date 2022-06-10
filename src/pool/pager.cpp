@@ -4,7 +4,7 @@
 #include "cub/exception.h"
 #include "file/interface.h"
 #include "page/page.h"
-#include "utils/assert.h"
+#include "utils/expect.h"
 #include "utils/layout.h"
 
 namespace cub {

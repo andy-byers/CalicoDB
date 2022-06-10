@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <random>
 #include "cub/common.h"
-#include "utils/assert.h"
+#include "utils/expect.h"
 
 namespace cub {
 

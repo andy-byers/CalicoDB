@@ -3,6 +3,7 @@
 
 #include <memory>
 #include "interface.h"
+#include "utils/identifier.h"
 
 namespace cub {
 
