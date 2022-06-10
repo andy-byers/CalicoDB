@@ -1,17 +1,18 @@
-#include "cub/exception.h"
-#include "frame.h"
 #include "pager.h"
-#include "page/page.h"
+
+#include "frame.h"
+#include "cub/exception.h"
 #include "file/interface.h"
-#include "utils/assert.h"
+#include "page/page.h"
+#include "utils/expect.h"
 #include "utils/layout.h"
 
 namespace cub {
 
 Pager::Pager(Parameters param)
-    : m_file{std::move(param.database_file)}
-    , m_frame_count{param.frame_count}
-    , m_page_size{param.page_size}
+    : m_file {std::move(param.file)}
+    , m_frame_count {param.frame_count}
+    , m_page_size {param.page_size}
 {
     if (m_frame_count < MIN_FRAME_COUNT)
         throw InvalidArgumentError {"Frame count is too small"};

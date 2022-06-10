@@ -1,4 +1,5 @@
 #include "node.h"
+
 #include "utils/crc.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"

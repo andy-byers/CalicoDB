@@ -8,7 +8,7 @@
 #define CUB_WAL_WAL_RECORD_H
 
 #include "page/page.h"
-#include "utils/types.h"
+#include "utils/identifier.h"
 #include "utils/utils.h"
 
 namespace cub {

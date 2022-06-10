@@ -1,6 +1,5 @@
-#include <algorithm>
-
 #include "cursor_impl.h"
+#include <algorithm>
 #include "cub/exception.h"
 #include "tree/tree.h"
 

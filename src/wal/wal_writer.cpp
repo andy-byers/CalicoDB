@@ -1,9 +1,10 @@
 
-#include <optional>
-#include "cub/exception.h"
-#include "wal_reader.h"
 #include "wal_writer.h"
+#include <optional>
+#include "wal_reader.h"
+#include "cub/exception.h"
 #include "file/interface.h"
+#include "utils/identifier.h"
 
 namespace cub {
 
@@ -32,7 +33,7 @@ auto WALWriter::has_committed() const -> bool
 }
 
 
-auto WALWriter::append(WALRecord record)  -> LSN
+auto WALWriter::append(WALRecord record) -> LSN
 {
     std::optional<WALRecord> temp {std::move(record)};
     const auto lsn = temp->lsn();

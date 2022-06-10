@@ -8,7 +8,6 @@
 #define CUB_WAL_WAL_READER_H
 
 #include <memory>
-#include <optional>
 #include <stack>
 #include "interface.h"
 #include "wal_record.h"
@@ -46,6 +45,7 @@ private:
     Index m_block_id {};                   ///< Index of the current block in the WAL file
     Index m_cursor {};                     ///< Offset of the current record in the tail buffer
     bool m_has_block {};                   ///< True if the tail buffer contains a block, false otherwise
+    bool m_incremented {};
 };
 
 } // cub

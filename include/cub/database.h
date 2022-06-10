@@ -39,10 +39,10 @@ private:
 class Info {
 public:
     explicit Info(Database::Impl*);
-    auto cache_hit_ratio() const -> double;
-    auto record_count() const -> Size;
-    auto page_count() const -> Size;
-    auto transaction_size() const -> Size;
+    [[nodiscard]] auto cache_hit_ratio() const -> double;
+    [[nodiscard]] auto record_count() const -> Size;
+    [[nodiscard]] auto page_count() const -> Size;
+    [[nodiscard]] auto transaction_size() const -> Size;
 
 private:
     Database::Impl *m_db;

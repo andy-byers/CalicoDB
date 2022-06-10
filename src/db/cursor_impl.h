@@ -1,10 +1,10 @@
 #ifndef CUB_DB_CURSOR_IMPL_H
 #define CUB_DB_CURSOR_IMPL_H
 
+#include "cub/cursor.h"
 #include <optional>
 #include <shared_mutex>
 #include <vector>
-#include "cub/cursor.h"
 #include "page/node.h"
 #include "utils/types.h"
 

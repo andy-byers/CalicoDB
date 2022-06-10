@@ -11,7 +11,7 @@
 
 using namespace cub;
 
-static constexpr Size KEY_WIDTH {6};
+static constexpr Size KEY_WIDTH {12};
 
 auto show_usage()
 {
@@ -44,24 +44,26 @@ auto main(int argc, const char *argv[]) -> int
     }
 
     auto db = Database::open(path, {});
+    const auto info = db.get_info();
     auto cursor = db.get_cursor();
-    CUB_EXPECT_TRUE(cursor.has_record());
-
-    cursor.find_minimum();
     Index key_counter {};
-    auto itr = values.begin();
-    do {
-        const auto k = make_key<KEY_WIDTH>(key_counter++);
-        CUB_EXPECT_EQ(_s(cursor.key()), k);
-        CUB_EXPECT_EQ(cursor.value(), *itr);
-        itr++;
-    } while (cursor.increment());
 
     // The database should contain exactly `num_committed` records.
-    CUB_EXPECT_EQ(key_counter, num_committed);
-    const auto message = "[PASS] " + path;
-    puts(message.c_str());
+    CUB_EXPECT_EQ(info.record_count(), num_committed);
+    CUB_EXPECT_EQ(cursor.has_record(), num_committed != 0);
 
+    if (num_committed > 0) {
+        cursor.find_minimum();
+        auto itr = values.begin();
+        do {
+            const auto k = make_key<KEY_WIDTH>(key_counter++);
+            CUB_EXPECT_EQ(_s(cursor.key()), k);
+            CUB_EXPECT_EQ(cursor.value(), *itr);
+            itr++;
+        } while (cursor.increment());
+    }
+    // All records should have been reached.
+    CUB_EXPECT_EQ(key_counter, num_committed);
     std::filesystem::remove(path);
     std::filesystem::remove(get_wal_path(path));
     std::filesystem::remove(value_path);

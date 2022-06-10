@@ -1,9 +1,10 @@
 #include "file_header.h"
+
+#include "page/node.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
 #include "utils/identifier.h"
 #include "utils/layout.h"
-#include "page/node.h"
 
 namespace cub {
 

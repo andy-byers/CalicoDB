@@ -7,18 +7,14 @@ file(
     "${CUB_TEST_DIR}/tools/*.h"
 )
 add_library(test_tools "${TEST_TOOLS_FILES}")
-target_link_libraries(test_tools "${CUB_NAME}" gmock gtest_main pthread)
-target_include_directories(test_tools PRIVATE "${CUB_SOURCE_DIR}")
-target_include_directories(test_tools PRIVATE "${CUB_INCLUDE_DIR}")
-target_compile_options(test_tools PRIVATE "${CUB_WARNINGS}")
+target_link_libraries(test_tools PUBLIC "${CUB_NAME}" gmock gtest pthread)
+target_include_directories(test_tools PUBLIC "${CUB_SOURCE_DIR}")
+target_compile_options(test_tools PUBLIC "${CUB_WARNINGS}")
 
 function(build_test NAME SOURCES)
     add_executable("${NAME}" "${SOURCES}")
-    target_link_libraries("${NAME}" "${CUB_NAME}" test_tools gmock gtest_main pthread)
+    target_link_libraries("${NAME}" test_tools gtest_main)
     target_include_directories("${NAME}" PRIVATE "${CUB_TEST_DIR}/tools")
-    target_include_directories("${NAME}" PRIVATE "${CUB_SOURCE_DIR}")
-    target_include_directories("${NAME}" PRIVATE "${CUB_INCLUDE_DIR}")
-    target_compile_options("${NAME}" PRIVATE "${CUB_WARNINGS}")
 endfunction()
 
 add_subdirectory(benchmark)

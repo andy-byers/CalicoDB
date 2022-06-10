@@ -1,11 +1,6 @@
-#include <filesystem>
 #include <vector>
-#include "cub/cursor.h"
-#include "cub/database.h"
-#include "integration.h"
 #include "fakes.h"
 #include "tools.h"
-#include "file/file.h"
 #include "file/system.h"
 #include "pool/buffer_pool.h"
 #include "wal/wal_reader.h"
@@ -17,8 +12,6 @@
 
 namespace {
 using namespace cub;
-
-//constexpr auto PATH = "/tmp/cub_recovery";
 
 class LoggingTests: public testing::Test {
 public:
@@ -156,6 +149,34 @@ TEST_F(LoggingTests, AbortDiscardsChangesSincePreviousCommit)
 
     auto page = pool->acquire(PID::root(), false);
     ASSERT_EQ(crc, page_crc(page));
+}
+
+TEST_F(LoggingTests, IncompleteWAL)
+{
+    static constexpr auto NUM_RECORDS {1'000};
+    for (Index i {}; i < NUM_RECORDS; ++i)
+        (void)pool->allocate(PageType::INTERNAL_NODE);
+
+    pool->commit();
+
+    for (Index i {}; i < NUM_RECORDS; ++i) {
+        auto page = pool->acquire(PID {i + 1}, true);
+        page.set_type(PageType::EXTERNAL_NODE);
+    }
+    pool->try_flush_wal();
+
+    // Add some random bytes to the end of the WAL and get rid of all but the root page of the database.
+    // This forces us to use the WAL to recover
+    wal_backing.memory() += random.next_string(pool->block_size());
+    pool_backing.memory().resize(pool->page_size());
+
+    // This should cause us to roll back to when all the pages were of external node type.
+    pool->recover();
+
+    for (Index i {}; i < NUM_RECORDS; ++i) {
+        auto page = pool->acquire(PID {i + 1}, true);
+        ASSERT_EQ(page.type(), PageType::INTERNAL_NODE);
+    }
 }
 
 } // <anonymous>

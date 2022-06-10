@@ -1,5 +1,6 @@
-#include <optional>
 #include "tree.h"
+
+#include <optional>
 #include "cub/exception.h"
 #include "page/cell.h"
 #include "page/file_header.h"
