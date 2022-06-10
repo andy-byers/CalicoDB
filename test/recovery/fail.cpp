@@ -10,7 +10,7 @@
 
 using namespace cub;
 
-static constexpr Size KEY_WIDTH {6};
+static constexpr Size KEY_WIDTH {12};
 static constexpr Size LIMIT {10'000'000};
 
 auto show_usage()
@@ -26,6 +26,8 @@ auto show_usage()
 auto main(int argc, const char *argv[]) -> int
 {
     using namespace cub;
+    printf("hello\n\n");
+
     if (argc != 4) {
         show_usage();
         return 1;
@@ -58,6 +60,7 @@ auto main(int argc, const char *argv[]) -> int
 
     db.commit();
     puts(value_path.c_str());
+    fflush(stdout);
 
     // Modify the database until we receive a signal or hit the operation limit.
     for (Index i {}; i < LIMIT; ++i) {
@@ -75,6 +78,5 @@ auto main(int argc, const char *argv[]) -> int
         }
     }
     // We should never get here.
-    puts("<error>");
-    return 0;
+    return 1;
 }

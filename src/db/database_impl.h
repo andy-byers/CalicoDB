@@ -52,6 +52,7 @@ private:
     std::unique_ptr<IBufferPool> m_pool;
     std::unique_ptr<ITree> m_tree;
     Size m_transaction_size {};
+    [[maybe_unused]] bool m_is_temp {}; // TODO: For functionality specific to an in-memory DB.
 };
 
 } // cub

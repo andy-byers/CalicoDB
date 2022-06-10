@@ -1,5 +1,5 @@
-
 #include "integration.h"
+
 #include "cub/cursor.h"
 #include "cub/database.h"
 

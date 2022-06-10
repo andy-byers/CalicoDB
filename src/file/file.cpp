@@ -1,5 +1,6 @@
-#include <fcntl.h>
 #include "file.h"
+
+#include <fcntl.h>
 #include "system.h"
 
 namespace cub {

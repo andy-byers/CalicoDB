@@ -21,10 +21,9 @@ public:
     [[nodiscard]] auto data() const -> BytesView;
     auto data() -> Bytes;
 
-    // TODO: Should be noexcept, along with operator=().
-    Scratch(Scratch&&) = default;
+    Scratch(Scratch&&) noexcept = default;
 
-    auto operator=(Scratch &&rhs) -> Scratch&
+    auto operator=(Scratch &&rhs) noexcept -> Scratch&
     {
         if (this != &rhs) {
             do_release();
@@ -57,9 +56,9 @@ private:
     std::unordered_map<Index, std::string> m_pinned;
     std::list<std::string> m_available;
     Size m_scratch_size;
-    Size m_id_counter{MIN_SCRATCH_ID};
+    Size m_id_counter {MIN_SCRATCH_ID};
 };
 
-} // db
+} // cub
 
 #endif // CUB_UTILS_SCRATCH_H

@@ -1,6 +1,6 @@
+#include "in_memory.h"
 
 #include "frame.h"
-#include "in_memory.h"
 #include "page/file_header.h"
 #include "page/page.h"
 
@@ -19,10 +19,11 @@ auto InMemory::acquire(PID id, bool is_writable) -> Page
     CUB_EXPECT_FALSE(id.is_null());
     propagate_page_error();
 
-    while (page_count() <= id.as_index())
+    while (page_count() <= id.as_index()) {
         m_frames.emplace_back(m_page_size);
+        m_frames.back().reset(PID {m_frames.size()});
+    }
     auto &frame = m_frames[id.as_index()];
-    frame.reset(id);
     auto page = frame.borrow(this, is_writable);
     if (is_writable)
         page.enable_tracking(m_scratch.get());
@@ -40,7 +41,7 @@ auto InMemory::abort() -> void
         const auto [before, id, offset] = std::move(m_stack.back());
         m_stack.pop_back();
         auto page = acquire(id, true);
-        mem_copy(page.raw_data().range(offset), _b(before)); // TODO: Doesn't make the page dirty. We'll probably lose the updates...
+        mem_copy(page.raw_data().range(offset), _b(before));
     }
 }
 
@@ -75,6 +76,7 @@ auto InMemory::load_header(const FileHeader &header) -> void
 {
     while (page_count() > header.page_count())
         m_frames.pop_back();
+
     while (page_count() < header.page_count())
         m_frames.emplace_back(m_page_size);
 }

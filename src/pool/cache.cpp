@@ -1,5 +1,6 @@
-#include "frame.h"
 #include "cache.h"
+
+#include "frame.h"
 
 namespace cub {
 

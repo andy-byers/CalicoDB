@@ -7,7 +7,7 @@ file(
     "${CUB_TEST_DIR}/tools/*.h"
 )
 add_library(test_tools "${TEST_TOOLS_FILES}")
-target_link_libraries(test_tools "${CUB_NAME}" gmock gtest_main pthread)
+target_link_libraries(test_tools "${CUB_NAME}" gmock gtest pthread)
 target_include_directories(test_tools PRIVATE "${CUB_SOURCE_DIR}")
 target_include_directories(test_tools PRIVATE "${CUB_INCLUDE_DIR}")
 target_compile_options(test_tools PRIVATE "${CUB_WARNINGS}")

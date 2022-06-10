@@ -1,5 +1,6 @@
-#include <algorithm>
 #include "update.h"
+
+#include <algorithm>
 
 namespace cub {
 

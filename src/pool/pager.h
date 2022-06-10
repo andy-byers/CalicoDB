@@ -2,18 +2,20 @@
 #define CUB_POOL_PAGER_H
 
 #include <list>
+#include <memory>
 #include <optional>
-#include "cub/common.h"
+#include "cub/bytes.h"
 
 namespace cub {
 
 class Frame;
 class IReadWriteFile;
+struct PID;
 
 class Pager final {
 public:
     struct Parameters {
-        std::unique_ptr<IReadWriteFile> database_file;
+        std::unique_ptr<IReadWriteFile> file;
         Size page_size{};
         Size frame_count{};
     };
@@ -31,7 +33,7 @@ private:
     [[nodiscard]] auto try_read_page_from_file(PID, Bytes) const -> bool;
     auto write_page_to_file(PID, BytesView) const -> void;
 
-    std::list<Frame> m_available;             ///< List of available frames
+    std::list<Frame> m_available;           ///< List of available frames
     std::unique_ptr<IReadWriteFile> m_file; ///< Read/write database file handle
     Size m_frame_count{};
     Size m_page_size{};
