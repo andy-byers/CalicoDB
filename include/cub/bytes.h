@@ -5,6 +5,7 @@
 #ifndef CUB_BYTES_H
 #define CUB_BYTES_H
 
+#include <cassert>
 #include <cstring>
 #include "common.h"
 
