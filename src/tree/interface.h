@@ -34,7 +34,7 @@ public:
     virtual auto allocate_node(PageType) -> Node = 0;
     virtual auto acquire_node(PID, bool) -> Node = 0;
     virtual auto destroy_node(Node) -> void = 0;
-    virtual auto insert(BytesView, BytesView) -> void = 0;
+    virtual auto insert(BytesView, BytesView) -> bool = 0;
     virtual auto remove(BytesView) -> bool = 0;
 };
 

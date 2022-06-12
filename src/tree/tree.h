@@ -45,7 +45,7 @@ public:
     auto find_local_max(Node) -> Position override;
     auto save_header(FileHeader&) -> void override;
     auto load_header(const FileHeader&) -> void override;
-    auto insert(BytesView, BytesView) -> void override;
+    auto insert(BytesView, BytesView) -> bool override;
     auto remove(BytesView) -> bool override;
     auto allocate_node(PageType) -> Node override;
     auto acquire_node(PID, bool) -> Node override;

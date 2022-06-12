@@ -6,8 +6,6 @@
 
 namespace cub {
 
-struct PID;
-
 class Cursor {
 public:
     virtual ~Cursor();
@@ -25,8 +23,8 @@ public:
     auto find_minimum() -> void;
     auto find_maximum() -> void;
 
-    Cursor(Cursor&&) noexcept;
-    Cursor &operator=(Cursor&&) noexcept;
+    Cursor(Cursor &&) noexcept;
+    Cursor &operator=(Cursor &&) noexcept;
 
 private:
     friend class Database;

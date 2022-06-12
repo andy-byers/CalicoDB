@@ -22,7 +22,7 @@ public:
     [[nodiscard]] auto free_start() const -> PID;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto block_size() const -> Size;
-    [[nodiscard]] auto key_count() const -> Size;
+    [[nodiscard]] auto record_count() const -> Size;
     [[nodiscard]] auto flushed_lsn() const -> LSN;
     auto update_magic_code() -> void;
     auto update_header_crc() -> void;

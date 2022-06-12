@@ -5,9 +5,9 @@
 #include <iomanip>
 #include <iostream>
 #include <vector>
-#include "cub/common.h"
 #include "random.h"
 #include "cub/bytes.h"
+#include "cub/batch.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 #include "wal/wal_record.h"
@@ -123,37 +123,69 @@ public:
     static unsigned default_seed;
 
     struct Parameters {
-        Size min_key_size {5};
-        Size max_key_size {10};
-        Size min_value_size {5};
-        Size max_value_size {10};
-        unsigned seed {};
-        bool are_batches_sorted {};
+        Size mean_key_size {12};
+        Size mean_value_size {18};
+        Size spread {4};
+        bool is_sequential {};
     };
 
-    static auto generate(Size, Parameters) -> std::vector<Record>;
-    static auto generate_unique(Size) -> std::vector<Record>;
+    explicit RecordGenerator(Parameters);
+    auto generate(Random&, Size) -> std::vector<Record>;
+
+private:
+    Parameters m_param;
 };
 
-template<class Db> auto insert_random_records(Db &db, Size n, RecordGenerator::Parameters param)
-{
-    for (const auto &[key, value]: RecordGenerator::generate(n, param))
-        db.insert(_b(key), _b(value));
-}
+template<class Db> class DatabaseBuilder {
+public:
+    DatabaseBuilder(Db *db, unsigned seed = 0)
+        : m_random {seed}
+        , m_db {db} {}
 
-template<class Db> auto insert_random_unique_records(Db &db, Size n)
-{
-    while (n) {
-        Size num_inserted {};
-        for (const auto &[key, value]: RecordGenerator::generate_unique(n)) {
-            if (!db.lookup(_b(key), true)) {
-                db.insert(_b(key), _b(value));
-                num_inserted++;
-            }
-        }
-        n -= num_inserted;
+    auto write_records(Size num_records, RecordGenerator::Parameters param)
+    {
+        auto writer = m_db->get_batch();
+        RecordGenerator generator {param};
+        for (const auto &[k, v]: generator.generate(m_random, num_records))
+            writer.write(_b(k), _b(v));
     }
-}
+
+    auto write_unique_records(Size num_records, RecordGenerator::Parameters param)
+    {
+        auto counter = static_cast<ssize_t>(num_records);
+
+        while (counter > 0) {
+            RecordGenerator generator {param};
+            decltype(counter) num_written {};
+
+            for (const auto &[k, v]: generator.generate(m_random, static_cast<Size>(counter))) {
+                if (!m_db->read(_b(k), true)) {
+                    m_db->write(_b(k), _b(v));
+                    num_written++;
+                }
+            }
+            counter -= num_written;
+        }
+        m_db->commit();
+    }
+
+    [[nodiscard]] auto collect_records() const -> std::vector<Record>
+    {
+        std::vector<Record> records;
+        auto reader = m_db->get_cursor();
+        if (!reader.has_record())
+            return {};
+        reader.find_minimum();
+        do {
+            records.emplace_back(Record {_s(reader.key()), reader.value()});
+        } while (reader.increment());
+        return records;
+    }
+
+private:
+    Random m_random;
+    Db *m_db;
+};
 
 template<class Db, class F> auto traverse_db(Db &db, F &&f)
 {

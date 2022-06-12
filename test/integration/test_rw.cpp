@@ -1,8 +1,12 @@
-#include <gtest/gtest.h>
+/*
+* test_rw.cpp: Reader/writer synchronization tests. These should be run with TSan.
+*/
+
 #include <chrono>
 #include <filesystem>
 #include <thread>
 #include <vector>
+#include <gtest/gtest.h>
 #include "cub/cursor.h"
 #include "cub/database.h"
 #include "utils/expect.h"
@@ -17,35 +21,31 @@ auto reader_task(Database *db) -> void*
 {
     auto cursor = db->get_cursor();
     const auto expected_size = db->get_info().record_count();
+    CUB_EXPECT_GT(expected_size, 1);
     cursor.find_minimum();
-
-    Size counter {};
-    do {
-        (void)cursor.value();
+    const auto value = cursor.value();
+    Size counter {1};
+    while (cursor.increment()) {
+        CUB_EXPECT_EQ(cursor.value(), value);
         counter++;
-    } while (cursor.increment());
+    }
     CUB_EXPECT_EQ(counter, expected_size);
     return nullptr;
 }
 
-auto writer_task(Database *db, Size n, Size _0_to_10) -> void*
+auto writer_task(Database *db, const std::vector<Record> &original) -> void*
 {
-    using namespace std::chrono_literals;
-    CUB_EXPECT_LE(_0_to_10, 10);
-    RecordGenerator::Parameters param;
-    param.seed = static_cast<unsigned>(std::chrono::system_clock::now().time_since_epoch().count());
-    for (const auto &[key, value]: RecordGenerator::generate(n, param))
-        db->insert(_b(key), _b(value));
-    if (_0_to_10 == 0)
-        db->commit();
+    auto writer = db->get_batch();
+    const auto value = std::to_string(rand());
+    for (const auto &[key, unused]: original)
+        writer.write(_b(key), _b(value));
     return nullptr;
 }
 
 TEST(ReaderWriterTests, ManyReadersAndWriters)
 {
     using namespace std::chrono_literals;
-    static constexpr Size NUM_RECORDS_AT_START = 1000;
-    static constexpr Size NUM_RECORDS_PER_ROUND = 20;
+    static constexpr Size NUM_RECORDS_AT_START = 500;
     static constexpr Size NUM_READERS = 50;
     static constexpr Size NUM_WRITERS = 50;
 
@@ -56,8 +56,12 @@ TEST(ReaderWriterTests, ManyReadersAndWriters)
 
     std::filesystem::remove(TEST_PATH);
     auto db = Database::open(TEST_PATH, {});
+    DatabaseBuilder builder {&db};
+    builder.write_unique_records(NUM_RECORDS_AT_START, {});
+    const auto records = builder.collect_records();
 
-    insert_random_records(db, NUM_RECORDS_AT_START, {});
+    // Run once to make all values the same.
+    writer_task(&db, records);
 
     std::vector<std::thread> threads;
     for (auto choice: choices) {
@@ -66,7 +70,7 @@ TEST(ReaderWriterTests, ManyReadersAndWriters)
         if (choice == 'r') {
             threads.emplace_back(reader_task, &db);
         } else {
-            threads.emplace_back(writer_task, &db, NUM_RECORDS_PER_ROUND, random.next_int(10));
+            threads.emplace_back(writer_task, &db, records);
         }
     }
 

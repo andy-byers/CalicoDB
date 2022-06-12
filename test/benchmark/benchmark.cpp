@@ -11,8 +11,9 @@ namespace {
 using namespace cub;
 
 constexpr auto PATH = "/tmp/cub_benchmark";
-constexpr Size FIELD_WIDTH {20};
+constexpr Size FIELD_WIDTH {24};
 constexpr Size BASELINE_MULTIPLIER {10};
+constexpr Options options;
 
 struct BenchmarkParameters {
     Size num_replicants {};
@@ -44,7 +45,7 @@ struct Comma: public std::numpunct<char>
     }
 };
 
-auto create(Options options)
+auto create()
 {
     std::filesystem::remove(PATH);
     std::filesystem::remove(get_wal_path(PATH));
@@ -71,15 +72,15 @@ auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
 
     if (is_reversed)
         std::reverse(records.begin(), records.end());
-
+    
+    auto batch = db.get_batch();
     for (const auto &[key, value]: records)
-        db.insert(_b(key), _b(value));
+        batch.write(_b(key), _b(value));
 }
 
 auto build_erases(Database &db, Work &records, bool is_sequential)
 {
     build_reads(db, records, is_sequential, false);
-    db.commit();
 }
 
 auto run_baseline(Database&)
@@ -90,14 +91,16 @@ auto run_baseline(Database&)
 
 auto run_writes(Database &db, const Work &work)
 {
+    auto batch = db.get_batch();
     for (const auto &[key, value]: work)
-        db.insert(_b(key), _b(value));
+        batch.write(_b(key), _b(value));
 }
 
 auto run_erases(Database &db, const Work &work)
 {
+    auto batch = db.get_batch();
     for (const auto &[key, value]: work)
-        db.remove(_b(key));
+        batch.erase(_b(key));
 }
 
 auto run_read_rand(Database &db, const Work &work)
@@ -133,7 +136,8 @@ auto run_read_rev(Database &db, const Work &work)
 
 auto setup_common(Database &db)
 {
-    db.abort();
+    db.~Database();
+    db = create();
 }
 
 class Runner {
@@ -224,9 +228,17 @@ auto main(int argc, const char *argv[]) -> int
     static constexpr auto num_warmup_rounds = 2;
     static constexpr auto num_replicants = 8;
     static constexpr auto num_elements = 20'000;
-    Options options;
 
-    auto records = RecordGenerator::generate_unique(num_elements);
+    const auto seed = Clock::now().time_since_epoch().count();
+    Random random {static_cast<unsigned>(seed)};
+
+    RecordGenerator::Parameters generator_param;
+    generator_param.mean_key_size = 15;
+    generator_param.mean_value_size = 100;
+    generator_param.spread = 5;
+    RecordGenerator generator {generator_param};
+    auto records = generator.generate(random, num_elements);
+
 
     // We only erase half of the records for one group of tests. The remove() routine gets faster when the tree is small,
     // so we expect those tests to produce less operations per second than their counterparts that empty out the tree.
@@ -245,14 +257,14 @@ auto main(int argc, const char *argv[]) -> int
             [](Database&) {},
             [](Database &db) {setup_common(db);},
             [&records](Database &db) {run_writes(db, records);},
-            "write_random",
+            "batch_write_random",
             num_elements,
         },
         {
             [&records](Database&) {build_common(records, true);},
             [](Database &db) {setup_common(db);},
             [&records](Database &db) {run_writes(db, records);},
-            "write_sequential",
+            "batch_write_seq",
             num_elements,
         },
         {
@@ -280,28 +292,28 @@ auto main(int argc, const char *argv[]) -> int
             [&records](Database &db) {build_erases(db, records, false);},
             [](Database &db) {setup_common(db);},
             [&records](Database &db) {run_erases(db, records);},
-            "erase_all_rand",
+            "batch_erase_all_rand",
             num_elements,
         },
         {
             [&records](Database &db) {build_erases(db, records, true);},
             [](Database &db) {setup_common(db);},
             [&records](Database &db) {run_erases(db, records);},
-            "erase_all_seq",
+            "batch_erase_all_seq",
             num_elements,
         },
         {
             [&records](Database &db) {build_erases(db, records, false);},
             [](Database &db) {setup_common(db);},
             [&half_records](Database &db) {run_erases(db, half_records);},
-            "erase_half_rand",
+            "batch_erase_half_rand",
             half_records.size(),
         },
         {
             [&records](Database &db) {build_erases(db, records, true);},
             [](Database &db) {setup_common(db);},
             [&half_records](Database &db) {run_erases(db, half_records);},
-            "erase_half_seq",
+            "batch_erase_half_seq",
             half_records.size(),
         },
     };
@@ -330,15 +342,13 @@ auto main(int argc, const char *argv[]) -> int
     const auto make_header_row = [&field_2](const std::string &first) {
         return make_row('|', first, '|', field_2, '|');
     };
-    const auto seed = Clock::now().time_since_epoch().count();
-    Random random {static_cast<unsigned>(seed)};
 
     const auto run_real_db_benchmarks = [&] {
         std::cout << make_filler_row(field_1a, '.');
         std::cout << make_header_row(field_1a);
         std::cout << make_filler_row(field_1a, '|');
         for (const auto &instance: instances) {
-            report(runner.run(create(options), instance));
+            report(runner.run(create(), instance));
             random.shuffle(records); // Attempt to mess up branch prediction.
         }
         std::cout << make_filler_row(field_1a, '\'') << '\n';

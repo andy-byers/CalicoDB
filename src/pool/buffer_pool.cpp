@@ -245,6 +245,7 @@ auto BufferPool::abort() -> void
     roll_backward();
     try_flush();
     m_wal_writer->truncate();
+    return;
 }
 
 auto BufferPool::recover() -> bool

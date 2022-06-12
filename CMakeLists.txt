@@ -30,6 +30,7 @@ include(CheckCXXSymbolExists)
 check_cxx_symbol_exists(O_DIRECT "fcntl.h" CUB_HAS_O_DIRECT)
 
 option(CUB_BUILD_TESTS "Build the tests" ON)
+option(CUB_BUILD_EXAMPLES "Build the examples" ON)
 
 # Build the unit and integration tests.
 if(CUB_BUILD_TESTS)
@@ -49,7 +50,7 @@ if(CUB_BUILD_TESTS)
 endif()
 
 # Build the static library.
-add_subdirectory(src)
+add_subdirectory(${CUB_SOURCE_DIR})
 
 # Build the examples/use cases.
 if(CUB_BUILD_EXAMPLES)

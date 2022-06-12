@@ -1,7 +1,8 @@
-#ifndef CUB_DB_CURSOR_IMPL_H
-#define CUB_DB_CURSOR_IMPL_H
+#ifndef CUB_DB_READER_IMPL_H
+#define CUB_DB_READER_IMPL_H
 
 #include "cub/cursor.h"
+#include "tree/iterator.h"
 #include <optional>
 #include <shared_mutex>
 #include <vector>
@@ -33,31 +34,10 @@ public:
     Impl &operator=(Impl&&) = default;
 
 private:
-    [[nodiscard]] auto can_decrement() const -> bool;
-    [[nodiscard]] auto can_increment() const -> bool;
-    [[nodiscard]] auto is_end_of_tree() const -> bool;
-    [[nodiscard]] auto is_end_of_node() const -> bool;
-    [[nodiscard]] auto has_node() const -> bool {return m_node != std::nullopt;}
-    auto find_aux(BytesView key) -> bool;
-    auto increment_external() -> void;
-    auto increment_internal() -> void;
-    auto decrement_internal() -> void;
-    auto decrement_external() -> void;
-    auto goto_inorder_successor() -> void;
-    auto goto_inorder_predecessor() -> void;
-    auto goto_child(Index) -> void;
-    auto goto_parent() -> void;
-    auto find_local_min() -> void;
-    auto find_local_max() -> void;
-    auto move_cursor(PID) -> void;
-
     std::shared_lock<std::shared_mutex> m_lock;
-    Unique<ITree*> m_source;        ///< Tree that the cursor belongs to
-    std::vector<Index> m_traversal; ///< Cell IDs encountered on the current traversal
-    std::optional<Node> m_node;     ///< Node that the cursor is over
-    Index m_index {};               ///< Position in the current node
+    Iterator m_cursor;
 };
 
 } // cub
 
-#endif // CUB_DB_CURSOR_IMPL_H
+#endif // CUB_DB_READER_IMPL_H

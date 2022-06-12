@@ -342,7 +342,7 @@ TEST_F(NodeTests, FileHeaderFields)
     ASSERT_EQ(header.free_start(), PID {123});
     ASSERT_EQ(header.page_size(), 4);
     ASSERT_EQ(header.block_size(), 5);
-    ASSERT_EQ(header.key_count(), 6);
+    ASSERT_EQ(header.record_count(), 6);
     ASSERT_EQ(header.flushed_lsn(), LSN {456});
 }
 
