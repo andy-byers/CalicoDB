@@ -31,11 +31,8 @@ jobs:
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.CMAKE_BUILD_DIR }}" 
           -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }}
-          -DCMAKE_CXXFLAGS="-fsanitize=fuzzer,address"
-          -DCMAKE_LDFLAGS=-fsanitize=fuzzer,address
-          -DCUB_FUZZER_LDFLAGS=-fsanitize=fuzzer,address
+          -DCMAKE_LDFLAGS=-fsanitize=address,thread,undefined
           -DCUB_BUILD_EXAMPLES=ON
-          -DCUB_BUILD_FUZZERS=ON
           -DCUB_BUILD_TESTS=ON
       - name: Build
         run: >-
