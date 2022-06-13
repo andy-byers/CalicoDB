@@ -273,8 +273,8 @@ TEST_F(TreeTests, InsertOverflowingRecord)
 
 TEST_F(TreeTests, OnlyAcceptsValidKeySizes)
 {
-    ASSERT_THROW(tree_insert(tree(), "", "value"), InvalidArgumentError);
-    ASSERT_THROW(tree_insert(tree(), std::string(m_max_local + 1, 'x'), "value"), InvalidArgumentError);
+    ASSERT_THROW(tree_insert(tree(), "", "value"), std::invalid_argument);
+    ASSERT_THROW(tree_insert(tree(), std::string(m_max_local + 1, 'x'), "value"), std::invalid_argument);
 }
 
 TEST_F(TreeTests, RemoveRecord)

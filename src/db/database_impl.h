@@ -6,15 +6,16 @@
 
 namespace cub {
 
-class Iterator;
+class Batch;
+class Cursor;
 class FileHeader;
+class Iterator;
 class IBufferPool;
 class ILogFile;
 class IReadOnlyFile;
 class IReadWriteFile;
 class ITree;
-class Cursor;
-class Batch;
+class LogSink;
 
 class Database::Impl final {
 public:
@@ -64,6 +65,7 @@ private:
     mutable std::shared_mutex m_mutex;
     std::unique_ptr<IBufferPool> m_pool;
     std::unique_ptr<ITree> m_tree;
+    std::unique_ptr<LogSink> m_log;
 };
 
 } // cub

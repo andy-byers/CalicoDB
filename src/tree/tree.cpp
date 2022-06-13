@@ -61,12 +61,12 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
 auto Tree::insert(BytesView key, BytesView value) -> bool
 {
     if (key.is_empty())
-        throw InvalidArgumentError {"Key cannot be empty"};
+        throw std::invalid_argument {"Key cannot be empty"};
 
     auto [node, index, found_eq] = find_ge(key, true);
 
     if (key.size() > get_max_local(node.size()))
-        throw InvalidArgumentError {"Key exceeds maximum allowed length"};
+        throw std::invalid_argument {"Key exceeds maximum allowed length"};
 
     if (found_eq) {
         positioned_modify({std::move(node), index}, value);

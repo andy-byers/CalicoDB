@@ -117,14 +117,18 @@ auto main(int, const char*[]) -> int
         querying_a_database(db);
         batch_updates(db);
         transactions(db);
-    } catch (const SystemError &error) {
-        printf("SystemError: %s\n", error.what());
     } catch (const CorruptionError &error) {
         printf("CorruptionError: %s\n", error.what());
-    } catch (const Exception &error) {
-        printf("Exception: %s\n", error.what());
+    } catch (const IOError &error) {
+        printf("IOError: %s\n", error.what());
+    } catch (const std::invalid_argument &error) {
+        printf("std::invalid_argument: %s\n", error.what());
+    } catch (const std::system_error &error) {
+        printf("std::system_error: %s\n", error.what());
+    } catch (const std::exception &error) {
+        printf("std::exception: %s\n", error.what());
     } catch (...) {
-        puts("Unknown Error\n");
+        puts("\n");
     }
     return 0;
 }

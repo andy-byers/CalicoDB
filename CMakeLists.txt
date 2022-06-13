@@ -49,6 +49,9 @@ if(CUB_BUILD_TESTS)
     add_subdirectory(${CUB_TEST_DIR})
 endif()
 
+# Build libfmt.
+add_subdirectory(lib/fmt)
+
 # Build the static library.
 add_subdirectory(${CUB_SOURCE_DIR})
 

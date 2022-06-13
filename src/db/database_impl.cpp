@@ -11,6 +11,7 @@
 #include "pool/in_memory.h"
 #include "tree/tree.h"
 #include "utils/layout.h"
+#include "utils/logger.h"
 #include "utils/utils.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
@@ -52,6 +53,7 @@ Database::Impl::~Impl()
 
 Database::Impl::Impl(Parameters param)
     : m_path {param.path}
+    , m_log {Logger::instance().get_sink("Database")}
 {
     auto wal_reader = std::make_unique<WALReader>(
         std::move(param.wal_reader_file),
@@ -269,7 +271,7 @@ auto Database::Impl::page_count() const -> Size
 auto Database::open(const std::string &path, const Options &options) -> Database
 {
     if (path.empty())
-        throw InvalidArgumentError {"Path argument cannot be empty"};
+        throw std::invalid_argument {"Path argument cannot be empty"};
 
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
     FileHeader header {_b(backing)};
@@ -284,7 +286,7 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         read_exact(file, _b(backing));
 
         if (!header.is_magic_code_consistent())
-            throw InvalidArgumentError {"Path does not point to a Cub DB database file"};
+            throw std::invalid_argument {"Path does not point to a Cub DB database, or the file is corrupted"};
 
         if (!header.is_header_crc_consistent())
             throw CorruptionError {"Database has an inconsistent header CRC"};
@@ -292,7 +294,7 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         if (file_size < header.page_size())
             throw CorruptionError {"Database cannot be less than one page in size"};
 
-    } catch (const SystemError &error) {
+    } catch (const std::system_error &error) {
         if (error.code() != std::errc::no_such_file_or_directory)
             throw;
 
@@ -311,7 +313,7 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         database_file->use_direct_io();
         wal_reader_file->use_direct_io();
         wal_writer_file->use_direct_io();
-    } catch (const SystemError &error) {
+    } catch (const std::system_error &error) {
         // TODO: Log, or otherwise notify the user? Maybe a flag in Options to control whether we fail here?
         throw; // TODO: Rethrowing for now.
     }

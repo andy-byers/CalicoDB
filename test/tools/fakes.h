@@ -265,7 +265,7 @@ protected:
         // is never set, it stays at -1 and doesn't contribute to the faults generated.
         auto &counter = m_controls->read_fault_counter;
         if (!counter || m_random.next_int(99U) < m_controls->read_fault_rate)
-            throw IOError {SystemError {"read", EIO}};
+            throw IOError {"read"};
         // Counter should settle on -1.
         counter -= counter >= 0;
     }
@@ -274,7 +274,7 @@ protected:
     {
         auto &counter = m_controls->write_fault_counter;
         if (!counter || m_random.next_int(99U) < m_controls->write_fault_rate)
-            throw IOError {SystemError {"write", EIO}};
+            throw IOError {"write"};
         counter -= counter >= 0;
     }
 
