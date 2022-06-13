@@ -7,6 +7,7 @@ Cub DB is an embedded key-value database written in C++17.
 + [Disclaimer](#disclaimer)
 + [Features](#features)
 + [Caveats](#caveats)
++ [Build](#build)
 + [API](#api)
   + [Opening a Database](#opening-a-database)
   + [Closing a Database](#closing-a-database)
@@ -38,6 +39,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Supports forward and reverse traversal using cursors
 
 ## Caveats
++ Currently only supports 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
 + Current reader-writer lock implementation (just using `std::shared_mutex`) does not give preference to writers
   + Each time we perform a modifying operation, an exclusive lock is taken on the database
@@ -45,6 +47,29 @@ Check out the [Contributions](#contributions) section if you are interested in w
   + The shared lock is held for the lifetime of the cursor, so that the tree structure does not change during traversal
   + This means that an open cursor can cause an update to block indefinitely, so care must be taken when coordinating
   + For this reason, it's generally a good idea to keep cursors open for just as long as they are needed
+
+## Build
+Cub DB is built using CMake.
+In the project root directory, run
+```bash
+mkdir -p build && cd ./build
+```
+
+to set up an out-of-source build.
+Then
+```bash
+cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
+```
+
+to build the library and tests.
+Note that the tests must be built with assertions, hence the "RelWithAssertions".
+To build the library in release mode, the last command would look like:
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -DCUB_BUILD_TESTS=Off .. && cmake --build .
+```
+
+While not yet part of CI, some basic fuzzers (using libFuzzer) are also included.
+See the `Dockerfile` for details on how to build them.
 
 ## API
 
