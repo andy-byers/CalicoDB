@@ -7,6 +7,7 @@ Cub DB is an embedded key-value database written in C++17.
 + [Disclaimer](#disclaimer)
 + [Features](#features)
 + [Caveats](#caveats)
++ [Build](#build)
 + [API](#api)
   + [Opening a Database](#opening-a-database)
   + [Closing a Database](#closing-a-database)
@@ -26,18 +27,22 @@ Cub DB is an embedded key-value database written in C++17.
 + [Contributions](#contributions)
 
 ## Disclaimer
-I am not, nor have I ever been, a professional software developer.
-I'm just a student who is writing a library: both for fun, and as a way to better learn modern C++.
-With that being said, I do intend on bringing this library to fruition eventually.
-Check out the `Contributions` section if you are interested in working on Cub DB!
+None of this code has been reviewed, and I am not a professional software developer.
+I started writing this library so that I could get better at writing modern C++, since I would like to pursue a career in C++ development.
+I've really had a fun time working on Cub DB, and have ended up putting quite a bit of time and effort into it.
+Still, it is a work in progress and needs to have some issues addressed before I feel comfortable declaring it usable.
+Check out the [Contributions](#contributions) section if you are interested in working on Cub DB!
 
 ## Features
 + Durability provided through write-ahead logging
-+ Uses a dynamic-order B-tree to store all the data in a single file
++ Uses a dynamic-order B-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
++ Supports arbitrarily-sized values
 
 ## Caveats
++ Currently only supports 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
++ Has a limit on key length, equal to roughly 1/4 of the page size
 + Current reader-writer lock implementation (just using `std::shared_mutex`) does not give preference to writers
   + Each time we perform a modifying operation, an exclusive lock is taken on the database
   + Each time a cursor is opened, a shared lock is taken on the database
@@ -45,25 +50,55 @@ Check out the `Contributions` section if you are interested in working on Cub DB
   + This means that an open cursor can cause an update to block indefinitely, so care must be taken when coordinating
   + For this reason, it's generally a good idea to keep cursors open for just as long as they are needed
 
+## Build
+Cub DB is built using CMake.
+In the project root directory, run
+```bash
+mkdir -p build && cd ./build
+```
+
+to set up an out-of-source build.
+Then
+```bash
+cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
+```
+
+to build the library and tests.
+Note that the tests must be built with assertions, hence the "RelWithAssertions".
+To build the library in release mode, the last command would look like:
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release -DCUB_BUILD_TESTS=Off .. && cmake --build .
+```
+
+While not yet part of CI, some basic fuzzers (using libFuzzer) are also included.
+See the `Dockerfile` for details on how to build them.
+
 ## API
 
-### Opening a Database
+### Exceptions
 Cub DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
+
+
+### Opening a Database
 The entry point to an application using Cub DB might look something like:
 
 ```C++
 try {
     cub::Options options;
     auto db = cub::Database::open("/tmp/cub", options);
-    // <Run the application!>
-} catch (const cub::SystemError &error) {
-    // ...
-} catch (const cub::CorruptionError &error) {
-    // ...
-} catch (const cub::Exception &error) {
-    // ...
+    // Run the application!
+} catch (const CorruptionError &error) {
+    // This is thrown if corruption is detected in a file.
+} catch (const IOError &error) {
+    // This is thrown if we were unable to perform I/O on a file.
+} catch (const std::invalid_argument &error) {
+    // This is thrown if invalid arguments were passed to a Cub DB function.
+} catch (const std::system_error &error) {
+    // This propagates up from failed non-I/O system calls.
+} catch (const std::exception &error) {
+    // This catches any Cub DB exception.
 } catch (...) {
-    // ...
+    // So does this...
 }
 ```
 
@@ -210,16 +245,16 @@ assert(db.read(cub::_b("b"), true)->value == "2");
 ```
 
 ## TODO
-1. Write some real documentation.
-2. Work on this README
-3. 'Reverse pointer map' structure to support 'vacuuming' the database file (see SQLite 3)
-4. Better freelist that uses trunk pages (see SQLite 3)
-5. Get unit test coverage up way higher
+1. Get everything code reviewed!
+2. Get unit test coverage up
+3. Write some documentation
+4. Work on the this document
+5. Work on performance
 
 ## Design
 
 Internally, Cub DB is broken down into 7 submodules.
-Each submodule is represented by a directory in `src`, as shown in the [source tree overview](#source-tree-overview).
+Each submodule is represented by a directory in `src`, as shown in [source tree overview](#source-tree-overview).
 
 #### `db`
 [//]: # (TODO)
@@ -269,5 +304,7 @@ CubDB
 
 ## Contributions
 Contributions are welcomed!
-The `TODO` section contains a few things that need to be addressed.
+Pull requests that fix bugs or address correctness issues will always be considered.
+There are also some things we could try to improve performance, however, I think robustness and guarantee of ACID properties should come first.
+The `TODO` section contains a list of things that need to be addressed.
 Feel free to create a pull request.
