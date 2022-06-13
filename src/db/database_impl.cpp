@@ -11,7 +11,6 @@
 #include "pool/in_memory.h"
 #include "tree/tree.h"
 #include "utils/layout.h"
-#include "utils/logger.h"
 #include "utils/utils.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
@@ -53,7 +52,6 @@ Database::Impl::~Impl()
 
 Database::Impl::Impl(Parameters param)
     : m_path {param.path}
-    , m_log {Logger::instance().get_sink("Database")}
 {
     auto wal_reader = std::make_unique<WALReader>(
         std::move(param.wal_reader_file),
@@ -97,7 +95,7 @@ Database::Impl::Impl(Parameters param)
 Database::Impl::Impl(Size page_size)
     : m_path {"<Temp DB>"}
     , m_pool {std::make_unique<InMemory>(page_size)}
-    , m_tree {std::make_unique<Tree>(Tree::Parameters{m_pool.get(), PID::null(), 0, 0, 0})}
+    , m_tree {std::make_unique<Tree>(Tree::Parameters {m_pool.get(), PID::null(), 0, 0, 0})}
 {
     m_tree->allocate_node(PageType::EXTERNAL_NODE);
     unlocked_commit();
