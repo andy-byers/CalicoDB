@@ -151,19 +151,42 @@ TEST_F(LoggingTests, AbortDiscardsChangesSincePreviousCommit)
     ASSERT_EQ(crc, page_crc(page));
 }
 
+auto setup_tests(IBufferPool &pool, Size num_records)
+{
+    for (Index i {}; i < num_records; ++i)
+        (void)pool.allocate(PageType::INTERNAL_NODE);
+
+    pool.commit();
+
+    for (Index i {}; i < num_records; ++i) {
+        auto page = pool.acquire(PID {i + 1}, true);
+        page.set_type(PageType::EXTERNAL_NODE);
+    }
+    pool.try_flush_wal();
+}
+
 TEST_F(LoggingTests, IncompleteWAL)
 {
     static constexpr auto NUM_RECORDS {1'000};
-    for (Index i {}; i < NUM_RECORDS; ++i)
-        (void)pool->allocate(PageType::INTERNAL_NODE);
+    setup_tests(*pool, NUM_RECORDS);
 
-    pool->commit();
+    // Get rid of all but the root page of the database. This forces us to use the WAL to recover,
+    // but since we won't find a commit record, we will roll back.
+    pool_backing.memory().resize(pool->page_size());
+
+    // This should cause us to roll back to when all the pages were of external node type.
+    pool->recover();
 
     for (Index i {}; i < NUM_RECORDS; ++i) {
         auto page = pool->acquire(PID {i + 1}, true);
-        page.set_type(PageType::EXTERNAL_NODE);
+        ASSERT_EQ(page.type(), PageType::INTERNAL_NODE);
     }
-    pool->try_flush_wal();
+}
+
+TEST_F(LoggingTests, IncompleteAndCorruptedWAL)
+{
+    static constexpr auto NUM_RECORDS {1'000};
+    setup_tests(*pool, NUM_RECORDS);
 
     // Add some random bytes to the end of the WAL and get rid of all but the root page of the database.
     // This forces us to use the WAL to recover

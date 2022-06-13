@@ -1,7 +1,7 @@
 #include "validators.h"
 
 #include "cub/database.h"
-#include "cub/reader.h"
+#include "cub/cursor.h"
 #include "utils/expect.h"
 
 #ifdef NDEBUG

@@ -14,8 +14,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, Size size)
         WALReader reader {std::move(file), BLOCK_SIZE};
         while (reader.increment()) {}
         while (reader.decrement()) {}
-    } catch (const CorruptionError &error) {
+    } catch (const CorruptionError&) {
 
+    } catch (const Exception &error) {
+        puts(error.what());
+        throw;
     }
     return 0;
 }

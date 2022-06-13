@@ -31,6 +31,7 @@ if(CUB_BUILD_FUZZERS)
         target_link_libraries(${NAME} PRIVATE fuzz)
         target_compile_options("${NAME}" PRIVATE "${CUB_WARNINGS}")
         add_dependencies(all_fuzzers ${NAME})
+        add_test(NAME "${NAME}" COMMAND "${NAME}" -max_total_time=20)
     endfunction()
 
     build_fuzzer(fuzz_ops)
