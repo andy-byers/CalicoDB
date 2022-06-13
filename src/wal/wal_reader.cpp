@@ -61,6 +61,8 @@ auto WALReader::increment() -> bool
  */
 auto WALReader::decrement() -> bool
 {
+    if (!m_record)
+        return false;
     if (auto record = read_previous()) {
         m_record = std::move(record);
         return true;
@@ -100,7 +102,8 @@ auto WALReader::read_next() -> std::optional<WALRecord>
         m_incremented = false;
         if (auto previous = read_previous())
             return previous;
-        pop_position_and_seek();
+        if (!m_positions.empty())
+            pop_position_and_seek();
         return std::nullopt;
     }
 }
@@ -145,7 +148,6 @@ auto WALReader::read_record() -> std::optional<WALRecord>
         CUB_EXPECT_LE(m_cursor, m_block.size());
         return std::move(*record);
     }
-    // Read an empty record. Try again in the next block, if it exists.
     m_cursor = m_block.size();
     return read_record();
 }

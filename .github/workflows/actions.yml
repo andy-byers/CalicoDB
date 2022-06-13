@@ -28,9 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Setup
-        run: cmake -S "${{ github.workspace }}" -B "${{ env.CMAKE_BUILD_DIR }}" -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }}
+        run: >-
+          cmake -S "${{ github.workspace }}" -B "${{ env.CMAKE_BUILD_DIR }}" 
+          -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }}
+          -DCMAKE_LDFLAGS=-fsanitize=address,thread,undefined
+          -DCUB_BUILD_EXAMPLES=ON
+          -DCUB_BUILD_TESTS=ON
       - name: Build
-        run: cmake --build "${{ env.CMAKE_BUILD_DIR }}" --config "${{ env.CMAKE_BUILD_TYPE }}"
+        run: >-
+          cmake --build "${{ env.CMAKE_BUILD_DIR }}" 
+          --config "${{ env.CMAKE_BUILD_TYPE }}"
       - name: Test
         working-directory: ${{ github.workspace }}/build
         run: ctest -V -C "${{ env.CMAKE_BUILD_TYPE }}"

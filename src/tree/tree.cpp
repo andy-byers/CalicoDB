@@ -58,7 +58,7 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
     return result;
 }
 
-auto Tree::insert(BytesView key, BytesView value) -> void
+auto Tree::insert(BytesView key, BytesView value) -> bool
 {
     if (key.is_empty())
         throw InvalidArgumentError {"Key cannot be empty"};
@@ -70,8 +70,10 @@ auto Tree::insert(BytesView key, BytesView value) -> void
 
     if (found_eq) {
         positioned_modify({std::move(node), index}, value);
+        return false;
     } else {
         positioned_insert({std::move(node), index}, key, value);
+        return true;
     }
 }
 
@@ -477,7 +479,7 @@ auto Tree::save_header(FileHeader &header) -> void
 auto Tree::load_header(const FileHeader &header) -> void
 {
     m_node_count = header.node_count();
-    m_cell_count = header.key_count();
+    m_cell_count = header.record_count();
     m_free_list.load_header(header);
 }
 

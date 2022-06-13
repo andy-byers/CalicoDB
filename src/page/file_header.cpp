@@ -68,7 +68,7 @@ auto FileHeader::block_size() const -> Size
     return get_uint16(m_header.range(FileLayout::BLOCK_SIZE_OFFSET));
 }
 
-auto FileHeader::key_count() const -> Size
+auto FileHeader::record_count() const -> Size
 {
     return get_uint32(m_header.range(FileLayout::KEY_COUNT_OFFSET));
 }

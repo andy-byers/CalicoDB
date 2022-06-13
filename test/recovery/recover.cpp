@@ -45,22 +45,22 @@ auto main(int argc, const char *argv[]) -> int
 
     auto db = Database::open(path, {});
     const auto info = db.get_info();
-    auto cursor = db.get_cursor();
+    auto reader = db.get_cursor();
     Index key_counter {};
 
     // The database should contain exactly `num_committed` records.
     CUB_EXPECT_EQ(info.record_count(), num_committed);
-    CUB_EXPECT_EQ(cursor.has_record(), num_committed != 0);
+    CUB_EXPECT_EQ(reader.has_record(), num_committed != 0);
 
     if (num_committed > 0) {
-        cursor.find_minimum();
+        reader.find_minimum();
         auto itr = values.begin();
         do {
             const auto k = make_key<KEY_WIDTH>(key_counter++);
-            CUB_EXPECT_EQ(_s(cursor.key()), k);
-            CUB_EXPECT_EQ(cursor.value(), *itr);
+            CUB_EXPECT_EQ(_s(reader.key()), k);
+            CUB_EXPECT_EQ(reader.value(), *itr);
             itr++;
-        } while (cursor.increment());
+        } while (reader.increment());
     }
     // All records should have been reached.
     CUB_EXPECT_EQ(key_counter, num_committed);
