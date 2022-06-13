@@ -15,6 +15,8 @@ class ILogFile;
 class IReadOnlyFile;
 class IReadWriteFile;
 class ITree;
+class Cursor;
+class Batch;
 
 class Database::Impl final {
 public:
