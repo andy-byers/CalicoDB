@@ -37,10 +37,12 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Durability provided through write-ahead logging
 + Uses a dynamic-order B-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
++ Supports arbitrarily-sized values
 
 ## Caveats
 + Currently only supports 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
++ Has a limit on key length, equal to roughly 1/4 of the page size
 + Current reader-writer lock implementation (just using `std::shared_mutex`) does not give preference to writers
   + Each time we perform a modifying operation, an exclusive lock is taken on the database
   + Each time a cursor is opened, a shared lock is taken on the database
