@@ -6,7 +6,6 @@
 #include <exception>
 #include <system_error>
 #include <utility>
-#include <fmt/format.h>
 #include "common.h"
 
 namespace cub {

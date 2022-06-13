@@ -25,7 +25,6 @@ add_library("${CUB_NAME}" STATIC "${CUB_FILES}")
 target_include_directories("${CUB_NAME}" PRIVATE "${CUB_SOURCE_DIR}")
 target_include_directories("${CUB_NAME}" PRIVATE "${CUB_INCLUDE_DIR}")
 target_include_directories("${CUB_NAME}" SYSTEM INTERFACE "${CUB_INCLUDE_DIR}")
-target_link_libraries("${CUB_NAME}" PUBLIC fmt::fmt)
 
 # Always compile the library with warnings.
 target_compile_options("${CUB_NAME}" PRIVATE "${CUB_WARNINGS}")
