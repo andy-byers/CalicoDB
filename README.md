@@ -30,12 +30,12 @@ Cub DB is an embedded key-value database written in C++17.
 None of this code has been reviewed, and I am not a professional software developer.
 I started writing this library so that I could get better at writing modern C++, since I would like to pursue a career in C++ development.
 I've really had a fun time working on Cub DB, and have ended up putting quite a bit of time and effort into it.
-Still, it is still a work in progress and needs to have some issues addressed before I would feel comfortable declaring it usable.
+Still, it is a work in progress and needs to have some issues addressed before I feel comfortable declaring it usable.
 Check out the [Contributions](#contributions) section if you are interested in working on Cub DB!
 
 ## Features
 + Durability provided through write-ahead logging
-+ Uses a dynamic-order B-tree to store all the data in a single file
++ Uses a dynamic-order B-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
 
 ## Caveats
