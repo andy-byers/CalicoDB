@@ -16,7 +16,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, Size size)
         while (reader.decrement()) {}
     } catch (const CorruptionError&) {
 
-    } catch (const Exception &error) {
+    } catch (const std::exception &error) {
         puts(error.what());
         throw;
     }

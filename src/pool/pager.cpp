@@ -15,10 +15,10 @@ Pager::Pager(Parameters param)
     , m_page_size {param.page_size}
 {
     if (m_frame_count < MIN_FRAME_COUNT)
-        throw InvalidArgumentError {"Frame count is too small"};
+        throw std::invalid_argument {"Frame count is too small"};
 
     if (m_frame_count > MAX_FRAME_COUNT)
-        throw InvalidArgumentError {"Frame count is too large"};
+        throw std::invalid_argument {"Frame count is too large"};
 
     CUB_EXPECT_NOT_NULL(m_file);
     while (m_available.size() < m_frame_count)
@@ -98,7 +98,7 @@ auto Pager::try_read_page_from_file(PID id, Bytes out) const -> bool
     if (const auto read_size = m_file->read_at(out, offset); !read_size) {
         return false;
     } else if (read_size != out.size()) {
-        throw IOError::partial_read();
+        throw IOError {"partial read"};
     }
     return true;
 }

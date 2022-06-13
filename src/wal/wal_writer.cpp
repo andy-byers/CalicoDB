@@ -13,13 +13,13 @@ WALWriter::WALWriter(std::unique_ptr<ILogFile> file, Size block_size)
     , m_block(block_size, '\x00')
 {
     if (!is_power_of_two(block_size))
-        throw InvalidArgumentError{"WAL block size must be a power of 2"};
+        throw std::invalid_argument {"WAL block size must be a power of 2"};
 
     if (block_size < MIN_BLOCK_SIZE)
-        throw InvalidArgumentError{"WAL block size is too small"};
+        throw std::invalid_argument {"WAL block size is too small"};
 
     if (block_size > MAX_BLOCK_SIZE)
-        throw InvalidArgumentError{"WAL block size is too large"};
+        throw std::invalid_argument {"WAL block size is too large"};
 }
 
 /**

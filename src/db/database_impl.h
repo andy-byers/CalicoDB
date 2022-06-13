@@ -6,8 +6,10 @@
 
 namespace cub {
 
-class Iterator;
+class Batch;
+class Cursor;
 class FileHeader;
+class Iterator;
 class IBufferPool;
 class ILogFile;
 class IReadOnlyFile;

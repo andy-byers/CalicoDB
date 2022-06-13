@@ -20,8 +20,8 @@ namespace {
                 } else {
                     break;
                 }
-            } catch (const SystemError &error) {
-                throw IOError{error};
+            } catch (const std::system_error &error) {
+                throw IOError {error};
             }
         }
         return target_size - out.size();
@@ -36,8 +36,8 @@ namespace {
             try {
                 if (const auto n = system::write(resource.fd(), in))
                     in.advance(n);
-            } catch (const SystemError &error) {
-                throw IOError{error};
+            } catch (const std::system_error &error) {
+                throw IOError {error};
             }
         }
         return target_size - in.size();

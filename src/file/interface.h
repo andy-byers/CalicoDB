@@ -102,25 +102,25 @@ public:
 template<class R> static auto read_exact(R &readable_file, Bytes out)
 {
     if (readable_file.read(out) != out.size())
-        throw IOError::partial_read();
+        throw IOError {"partial read"};
 }
 
 template<class R> static auto read_exact_at(R &readable_file, Bytes out, Index offset)
 {
     if (readable_file.read_at(out, offset) != out.size())
-        throw IOError::partial_read();
+        throw IOError {"partial read"};
 }
 
 template<class W> static auto write_exact(W &writable_file, BytesView in)
 {
     if (writable_file.write(in) != in.size())
-        throw IOError::partial_write();
+        throw IOError {"partial write"};
 }
 
 template<class W> static auto write_exact_at(W &writable_file, BytesView in, Index offset)
 {
     if (writable_file.write_at(in, offset) != in.size())
-        throw IOError::partial_write();
+        throw IOError {"partial write"};
 }
 
 } // cub

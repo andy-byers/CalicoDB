@@ -166,34 +166,34 @@ public:
 
 TEST_F(FileFailureTests, FailsWhenFileExistsButShouldNot)
 {
-    ASSERT_THROW(ReadWriteFile(PATH, Mode::CREATE | Mode::EXCLUSIVE, 0666), SystemError);
+    ASSERT_THROW(ReadWriteFile(PATH, Mode::CREATE | Mode::EXCLUSIVE, 0666), std::system_error);
 }
 
 TEST_F(FileFailureTests, FailsWhenFileDoesNotExistButShould)
 {
     file.reset();
     std::filesystem::remove(PATH);
-    ASSERT_THROW(ReadWriteFile(PATH, Mode {}, 0666), SystemError);
+    ASSERT_THROW(ReadWriteFile(PATH, Mode {}, 0666), std::system_error);
 }
 
 TEST_F(FileFailureTests, ThrowsWhenReadSizeIsTooLarge)
 {
-    ASSERT_THROW(file->read(large_slice), SystemError);
+    ASSERT_THROW(file->read(large_slice), IOError);
 }
 
 TEST_F(FileFailureTests, ThrowsWhenWriteSizeIsTooLarge)
 {
-    ASSERT_THROW(file->write(large_slice), SystemError);
+    ASSERT_THROW(file->write(large_slice), IOError);
 }
 
 TEST_F(FileFailureTests, ThrowsWhenSeekOffsetIsTooLarge)
 {
-    ASSERT_THROW(file->seek(static_cast<long>(OVERFLOW_SIZE), Seek::BEGIN), SystemError);
+    ASSERT_THROW(file->seek(static_cast<long>(OVERFLOW_SIZE), Seek::BEGIN), std::system_error);
 }
 
 TEST_F(FileFailureTests, ThrowsWhenNewSizeIsTooLarge)
 {
-    ASSERT_THROW(file->resize(OVERFLOW_SIZE), SystemError);
+    ASSERT_THROW(file->resize(OVERFLOW_SIZE), std::system_error);
 }
 
 class SystemTests: public testing::Test {
@@ -213,7 +213,7 @@ public:
     {
         try {
             system::unlink(PATH);
-        } catch (const SystemError&) {
+        } catch (const std::system_error&) {
             // File may not exist after some tests.
         }
     }
@@ -225,7 +225,7 @@ public:
 
 TEST_F(SystemTests, CannotCallUseDirectIoOnUnopenedFile)
 {
-    ASSERT_THROW(system::use_direct_io(closed_fd), SystemError);
+    ASSERT_THROW(system::use_direct_io(closed_fd), std::system_error);
 }
 
 #endif // CUB_OSX
@@ -233,20 +233,20 @@ TEST_F(SystemTests, CannotCallUseDirectIoOnUnopenedFile)
 TEST_F(SystemTests, CannotUseUnopenedFile)
 {
     Bytes b;
-    ASSERT_THROW(system::size(closed_fd), SystemError);
-    ASSERT_THROW(system::read(closed_fd, b), SystemError);
-    ASSERT_THROW(system::write(closed_fd, b), SystemError);
-    ASSERT_THROW(system::seek(closed_fd, 1, SEEK_SET), SystemError);
-    ASSERT_THROW(system::close(closed_fd), SystemError);
-    ASSERT_THROW(system::sync(closed_fd), SystemError);
-    ASSERT_THROW(system::resize(closed_fd, 1), SystemError);
+    ASSERT_THROW(system::size(closed_fd), std::system_error);
+    ASSERT_THROW(system::read(closed_fd, b), std::system_error);
+    ASSERT_THROW(system::write(closed_fd, b), std::system_error);
+    ASSERT_THROW(system::seek(closed_fd, 1, SEEK_SET), std::system_error);
+    ASSERT_THROW(system::close(closed_fd), std::system_error);
+    ASSERT_THROW(system::sync(closed_fd), std::system_error);
+    ASSERT_THROW(system::resize(closed_fd, 1), std::system_error);
 }
 
 TEST_F(SystemTests, CannotRenameNonexistentFile)
 {
     puts(PATH);
     system::unlink(PATH);
-    ASSERT_THROW(system::rename(PATH, "/tmp/should_have_failed"), SystemError);
+    ASSERT_THROW(system::rename(PATH, "/tmp/should_have_failed"), std::system_error);
 }
 
 class MemoryTests: public FileTests {
