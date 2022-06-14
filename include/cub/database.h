@@ -9,8 +9,6 @@ namespace cub {
 
 class Info;
 class Cursor;
-class Batch;
-class Lock;
 
 class Database {
 public:
@@ -68,19 +66,10 @@ public:
      */
     auto write(BytesView, BytesView) -> bool;
     auto erase(BytesView) -> bool;
-    auto commit() -> void;
-    auto abort() -> void;
+    auto commit() -> bool;
+    auto abort() -> bool;
     auto get_cursor() -> Cursor;
-    auto get_lock() -> Lock;
     auto get_info() -> Info;
-
-    [[nodiscard]] auto read(Lock&, BytesView key, Comparison relation = Comparison::EQ) const -> std::optional<Record>;
-    [[nodiscard]] auto read_minimum(Lock&) const -> std::optional<Record>;
-    [[nodiscard]] auto read_maximum(Lock&) const -> std::optional<Record>;
-    auto write(Lock&, BytesView, BytesView) -> bool;
-    auto erase(Lock&, BytesView) -> bool;
-    auto commit(Lock&) -> void;
-    auto abort(Lock&) -> void;
 
     class Impl;
     virtual ~Database();

@@ -76,9 +76,8 @@ auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
     if (is_reversed)
         std::reverse(records.begin(), records.end());
 
-    auto batch = db.get_batch();
     for (const auto &[key, value]: records)
-        batch.write(_b(key), _b(value));
+        db.write(_b(key), _b(value));
 }
 
 auto build_erases(Database &db, Work &records, bool is_sequential)
@@ -99,25 +98,11 @@ auto run_writes(Database &db, const Work &work)
     db.commit();
 }
 
-auto run_batch_writes(Database &db, const Work &work)
-{
-    auto batch = db.get_batch();
-    for (const auto &[key, value]: work)
-        CUB_EXPECT_TRUE(batch.write(_b(key), _b(value)));
-}
-
 auto run_erases(Database &db, const Work &work)
 {
     for (const auto &[key, value]: work)
         CUB_EXPECT_TRUE(db.erase(_b(key)));
     db.commit();
-}
-
-auto run_batch_erases(Database &db, const Work &work)
-{
-    auto batch = db.get_batch();
-    for (const auto &[key, value]: work)
-        CUB_EXPECT_TRUE(batch.erase(_b(key)));
 }
 
 auto run_read_rand(Database &db, const Work &work)
@@ -284,20 +269,6 @@ auto main(int argc, const char *argv[]) -> int
             num_elements,
         },
         {
-            [](Database&) {},
-            [](Database &db) {setup_common(db);},
-            [&records](Database &db) {run_batch_writes(db, records);},
-            "batch_write_rand",
-            num_elements,
-        },
-        {
-            [&records](Database&) {build_common(records, true);},
-            [](Database &db) {setup_common(db);},
-            [&records](Database &db) {run_batch_writes(db, records);},
-            "batch_write_seq",
-            num_elements,
-        },
-        {
             [&records](Database &db) {build_reads(db, records, false, false);},
             [](Database&) {},
             [&records](Database &db) {run_read_rand(db, records);},
@@ -344,34 +315,6 @@ auto main(int argc, const char *argv[]) -> int
             [&records](Database &db) {build_erases(db, records, true);},
             [&half_records](Database &db) {run_erases(db, half_records);},
             "erase_half_seq",
-            half_records.size(),
-        },
-        {
-            [](Database&) {},
-            [&records](Database &db) {build_erases(db, records, false);},
-            [&records](Database &db) {run_batch_erases(db, records);},
-            "batch_erase_all_rand",
-            num_elements,
-        },
-        {
-            [](Database&) {},
-            [&records](Database &db) {build_erases(db, records, true);},
-            [&records](Database &db) {run_batch_erases(db, records);},
-            "batch_erase_all_seq",
-            num_elements,
-        },
-        {
-            [](Database&) {},
-            [&records](Database &db) {build_erases(db, records, false);},
-            [&half_records](Database &db) {run_batch_erases(db, half_records);},
-            "batch_erase_half_rand",
-            half_records.size(),
-        },
-        {
-            [](Database&) {},
-            [&records](Database &db) {build_erases(db, records, true);},
-            [&half_records](Database &db) {run_batch_erases(db, half_records);},
-            "batch_erase_half_seq",
             half_records.size(),
         },
     };

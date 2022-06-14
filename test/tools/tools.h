@@ -7,7 +7,6 @@
 #include <vector>
 #include "random.h"
 #include "cub/bytes.h"
-#include "cub/lock.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 #include "wal/wal_record.h"
@@ -144,7 +143,6 @@ public:
 
     auto write_records(Size num_records, RecordGenerator::Parameters param)
     {
-        const auto lock = m_db->get_lock();
         RecordGenerator generator {param};
         for (const auto &[k, v]: generator.generate(m_random, num_records))
             m_db->write(_b(k), _b(v));

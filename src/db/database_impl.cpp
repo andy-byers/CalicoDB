@@ -1,9 +1,7 @@
 
 #include "database_impl.h"
 #include "cursor_impl.h"
-#include "lock_impl.h"
 #include "cub/exception.h"
-#include "cub/lock.h"
 #include "file/file.h"
 #include "file/system.h"
 #include "page/file_header.h"
@@ -43,7 +41,7 @@ auto Info::page_count() const -> Size
 Database::Impl::~Impl()
 {
     try {
-        unlocked_commit();
+        commit();
         system::unlink(get_wal_path(m_path));
     } catch (...) {
         // Leave recovery to the next startup.
@@ -88,7 +86,7 @@ Database::Impl::Impl(Parameters param)
         header.set_page_size(param.file_header.page_size());
         header.set_block_size(param.file_header.block_size());
         root.take();
-        unlocked_commit();
+        commit();
     }
 }
 
@@ -98,7 +96,7 @@ Database::Impl::Impl(Size page_size)
     , m_tree {std::make_unique<Tree>(Tree::Parameters {m_pool.get(), PID::null(), 0, 0, 0})}
 {
     m_tree->allocate_node(PageType::EXTERNAL_NODE);
-    unlocked_commit();
+    commit();
 }
 
 auto Database::Impl::recover() -> void
@@ -107,130 +105,75 @@ auto Database::Impl::recover() -> void
         load_header();
 }
 
-auto Database::Impl::read(BytesView key, Comparison comparison) -> std::optional<Record>
-{
-    return m_has_lock ? unlocked_read(key, comparison) : locked_read(key, comparison);
-}
-
-auto Database::Impl::read_minimum() -> std::optional<Record>
-{
-    return m_has_lock ? unlocked_read_minimum() : locked_read_minimum();
-}
-
-auto Database::Impl::read_maximum() -> std::optional<Record>
-{
-    return m_has_lock ? unlocked_read_maximum() : locked_read_maximum();
-}
-
-auto Database::Impl::write(BytesView key, BytesView value) -> bool
-{
-    return m_has_lock ? unlocked_write(key, value) : locked_write(key, value);
-}
-
-auto Database::Impl::erase(BytesView key) -> bool
-{
-    return m_has_lock ? unlocked_erase(key) : locked_erase(key);
-}
-
-auto Database::Impl::commit() -> void
-{
-    if (m_has_lock) {
-        unlocked_commit();
-    } else {
-        locked_commit();
-    }
-}
-
-auto Database::Impl::abort() -> void
-{
-    if (m_has_lock) {
-        unlocked_abort();
-    } else {
-        locked_abort();
-    }
-}
-
 auto Database::Impl::get_info() -> Info
 {
     return Info {this};
 }
 
-auto Database::Impl::get_iterator() -> Iterator
-{
-    return Iterator {m_tree.get()};
-}
-
 auto Database::Impl::get_cursor() -> Cursor
 {
     Cursor reader;
-    reader.m_impl = std::make_unique<Cursor::Impl>(m_tree.get(), m_mutex);
+    reader.m_impl = std::make_unique<Cursor::Impl>(m_tree.get());
     return reader;
 }
 
-auto Database::Impl::get_lock() -> Lock
+auto Database::Impl::read(BytesView key, Comparison comparison) -> std::optional<Record>
 {
-    Lock lock;
-    lock.m_impl = std::make_unique<Lock::Impl>(this);
-    return lock;
-}
-
-auto Database::Impl::unlocked_read(BytesView key, Comparison comparison) -> std::optional<Record>
-{
-    if (auto itr = get_iterator(); itr.has_record()) {
-        const auto found_exact = itr.find(key);
+    if (auto cursor = get_cursor(); cursor.has_record()) {
+        const auto found_exact = cursor.find(key);
         switch (comparison) {
             case Comparison::EQ:
                 if (!found_exact)
                     return std::nullopt;
                 break;
             case Comparison::GT:
-                if (itr.is_maximum() && (found_exact || itr.key() < key))
+                if (cursor.is_maximum() && (found_exact || cursor.key() < key))
                     return std::nullopt;
-                if (found_exact && !itr.increment())
+                if (found_exact && !cursor.increment())
                     return std::nullopt;
                 break;
             case Comparison::LT:
-                if (itr.is_maximum() && itr.key() < key)
+                if (cursor.is_maximum() && cursor.key() < key)
                     break;
-                if (!itr.decrement())
+                if (!cursor.decrement())
                     return std::nullopt;
                 break;
         }
-        return Record {_s(itr.key()), itr.value()};
+        return Record {_s(cursor.key()), cursor.value()};
     }
     CUB_EXPECT_EQ(m_tree->cell_count(), 0);
     return std::nullopt;
 }
 
-auto Database::Impl::unlocked_read_minimum() -> std::optional<Record>
+auto Database::Impl::read_minimum() -> std::optional<Record>
 {
-    if (auto cursor = get_iterator(); cursor.has_record()) {
+    if (auto cursor = get_cursor(); cursor.has_record()) {
         cursor.find_minimum();
         return Record {_s(cursor.key()), cursor.value()};
     }
     return std::nullopt;
 }
 
-auto Database::Impl::unlocked_read_maximum() -> std::optional<Record>
+auto Database::Impl::read_maximum() -> std::optional<Record>
 {
-    if (auto cursor = get_iterator(); cursor.has_record()) {
+    if (auto cursor = get_cursor(); cursor.has_record()) {
         cursor.find_maximum();
         return Record {_s(cursor.key()), cursor.value()};
     }
     return std::nullopt;
 }
 
-auto Database::Impl::unlocked_write(BytesView key, BytesView value) -> bool
+auto Database::Impl::write(BytesView key, BytesView value) -> bool
 {
     return m_tree->insert(key, value);
 }
 
-auto Database::Impl::unlocked_erase(BytesView key) -> bool
+auto Database::Impl::erase(BytesView key) -> bool
 {
     return m_tree->remove(key);
 }
 
-auto Database::Impl::unlocked_commit() -> bool
+auto Database::Impl::commit() -> bool
 {
     if (m_pool->can_commit()) {
         save_header();
@@ -240,7 +183,7 @@ auto Database::Impl::unlocked_commit() -> bool
     return false;
 }
 
-auto Database::Impl::unlocked_abort() -> bool
+auto Database::Impl::abort() -> bool
 {
     if (m_pool->can_commit()) {
         m_pool->abort();
@@ -248,48 +191,6 @@ auto Database::Impl::unlocked_abort() -> bool
         return true;
     }
     return false;
-}
-
-auto Database::Impl::locked_read(BytesView key, Comparison comparison) -> std::optional<Record>
-{
-    std::shared_lock lock {m_mutex};
-    return unlocked_read(key, comparison);
-}
-
-auto Database::Impl::locked_read_minimum() -> std::optional<Record>
-{
-    std::shared_lock lock {m_mutex};
-    return unlocked_read_minimum();
-}
-
-auto Database::Impl::locked_read_maximum() -> std::optional<Record>
-{
-    std::shared_lock lock {m_mutex};
-    return unlocked_read_maximum();
-}
-
-auto Database::Impl::locked_write(BytesView key, BytesView value) -> bool
-{
-    std::unique_lock lock {m_mutex};
-    return unlocked_write(key, value);
-}
-
-auto Database::Impl::locked_erase(BytesView key) -> bool
-{
-    std::unique_lock lock {m_mutex};
-    return unlocked_erase(key);
-}
-
-auto Database::Impl::locked_commit() -> bool
-{
-    std::unique_lock lock {m_mutex};
-    return unlocked_commit();
-}
-
-auto Database::Impl::locked_abort() -> bool
-{
-    std::unique_lock lock {m_mutex};
-    return unlocked_abort();
 }
 
 auto Database::Impl::save_header() -> void
@@ -427,24 +328,19 @@ auto Database::erase(BytesView key) -> bool
     return m_impl->erase(key);
 }
 
-auto Database::commit() -> void
+auto Database::commit() -> bool
 {
-    m_impl->commit();
+    return m_impl->commit();
 }
 
-auto Database::abort() -> void
+auto Database::abort() -> bool
 {
-    m_impl->abort();
+    return m_impl->abort();
 }
 
 auto Database::get_cursor() -> Cursor
 {
     return m_impl->get_cursor();
-}
-
-auto Database::get_lock() -> Lock
-{
-    return m_impl->get_lock();
 }
 
 auto Database::get_info() -> Info

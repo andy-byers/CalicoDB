@@ -11,9 +11,10 @@ Cub DB is an embedded key-value database written in C++17.
 + [API](#api)
   + [Opening a Database](#opening-a-database)
   + [Closing a Database](#closing-a-database)
-  + [Slices](#slices)
+  + [Slice Objects](#slice-objects)
   + [Updating a Database](#updating-a-database)
   + [Querying a Database](#querying-a-database)
+  + [Cursor Objects](#cursor-objects)
   + [Transactions](#transactions)
 + [Design](#design)
   + [db](#db)
@@ -40,15 +41,10 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Supports arbitrarily-sized values
 
 ## Caveats
-+ Currently only supports 64-bit Ubuntu and OSX
++ Currently, Cub DB only runs on 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
 + Has a limit on key length, equal to roughly 1/4 of the page size
-+ Current reader-writer lock implementation (just using `std::shared_mutex`) does not give preference to writers
-  + Each time we perform a modifying operation, an exclusive lock is taken on the database
-  + Each time a cursor is opened, a shared lock is taken on the database
-  + The shared lock is held for the lifetime of the cursor, so that the tree structure does not change during traversal
-  + This means that an open cursor can cause an update to block indefinitely, so care must be taken when coordinating
-  + For this reason, it's generally a good idea to keep cursors open for just as long as they are needed
++ Does not provide internal synchronization past multiple readers, however external synchronization can be used to allow writes (see `/test/integration/test_rw.cpp`)
 
 ## Build
 Cub DB is built using CMake.
@@ -78,7 +74,6 @@ See the `Dockerfile` for details on how to build them.
 ### Exceptions
 Cub DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
 
-
 ### Opening a Database
 The entry point to an application using Cub DB might look something like:
 
@@ -103,9 +98,9 @@ try {
 ```
 
 ### Closing a Database
-Cub DB uses RAII, so closing a database is as simple as letting it go out of scope.
+Cub DB uses RAII, so databases are closed by letting them go out of scope.
 
-### Slices
+### Slice Objects
 Cub DB uses `Bytes` and `BytesView` objects to refer to unowned byte sequences.
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
@@ -134,7 +129,6 @@ assert(b == v);
 
 ### Updating a Database
 Records and be added or removed using methods on the `Database` object.
-For better performance updates, see [Batch Updates](#batch-updates).
 
 ```C++
 // Insert some records.
@@ -153,22 +147,30 @@ assert(db.erase(cub::_b("grizzly bear")));
 ```
 
 ### Querying a Database
-Querying a Cub DB database is performed either through the `read*()` convenience methods, or using a `Cursor` object.
-It is possible to have multiple cursors active at once, in multiple threads.
-Any updates to the database will block until all cursors have been closed.
+The `read*()` methods are provided for querying the database.
 
 ```C++
-static constexpr bool require_exact {};
+// We can require an exact match.
+const auto record = db.read(cub::_b("sun bear"), cub::Comparison::EQ);
+assert(record->value == "respectable");
 
-// We can require an exact match, or find the first record with a key greater than the given key.
-const auto record = db.read(cub::_b("kodiak bear"), require_exact);
-assert(record->value == "awesome");
+// Or, we can look for the first record with a key less than or greater than the given key.
+const auto less_than = db.read(cub::_b("sun bear"), cub::Comparison::LT);
+const auto greater_than = db.read(cub::_b("sun bear"), cub::Comparison::GT);
+assert(less_than->value == "cool");
 
-// We can also search for the extrema.
+// Whoops, there isn't a key greater than "sun bear".
+assert(greater_than == std::nullopt);
+
+// We can also search for the minimum and maximum.
 const auto smallest = db.read_minimum();
 const auto largest = db.read_maximum();
+```
 
-// The database will be immutable until this cursor is closed.
+### Cursor Objects
+Cursors can be used to find records and traverse the database.
+
+```C++
 auto cursor = db.get_cursor();
 assert(cursor.has_record());
 
@@ -190,44 +192,10 @@ const auto value = cursor.value();
 printf("Record {%s, %s}\n", key.c_str(), value.c_str()); // Record {black bear, lovable}
 ```
 
-### Batch Updates
-Cub DB only supports single writers, so each time we update the database, we incur the overhead of ensuring exclusive access.
-To address this issue, we support batch updates through `Batch` objects.
-A `Batch` instance will acquire the lock only once, during construction, and hold it until it is destroyed.
-
-```C++
-// Create a new batch.
-auto batch = db.get_batch();
-batch.write(cub::_b("hello"), cub::_b("1"));
-batch.write(cub::_b("bears"), cub::_b("2"));
-batch.write(cub::_b("world"), cub::_b("3"));
-
-// Checkpoint our changes.
-batch.commit();
-
-batch.erase(cub::_b("bears"));
-
-// Discard all changes since the last commit/abort.
-batch.abort();
-
-// We can also read from the database using a batch object. This can be useful when we need some read access during an
-// atomic update routine.
-assert(batch.read(cub::_b("hello"), true)->value == "1");
-assert(batch.read(cub::_b("bears"), true)->value == "2");
-assert(batch.read(cub::_b("world"), true)->value == "3");
-const auto minimum = batch.read_minimum();
-const auto maximum = batch.read_maximum();
-
-// Batches automatically commit when they go out of scope. When this one is destroyed, only {"bears", "2"} will be
-// persisted.
-batch.erase(cub::_b(minimum->key));
-batch.erase(cub::_b(maximum->key));
-```
-
 ### Transactions
 Every modification to a Cub DB database occurs within a transaction.
 The first transaction begins when the database is opened, and the last one commits when the database is closed.
-Otherwise, transaction boundaries are either defined by calls to either `commit()` or `abort()`, or governed by the lifetime of a `Batch` object.
+Otherwise, transaction boundaries are defined by calls to either `commit()` or `abort()`.
 
 ```C++
 db.write(cub::_b("a"), cub::_b("1"));
@@ -248,12 +216,12 @@ assert(db.read(cub::_b("b"), true)->value == "2");
 1. Get everything code reviewed!
 2. Get unit test coverage up
 3. Write some documentation
-4. Work on the this document
+4. Work on this README
 5. Work on performance
 
 ## Design
 
-Internally, Cub DB is broken down into 7 submodules.
+Internally, Cub DB is broken down into 6 submodules.
 Each submodule is represented by a directory in `src`, as shown in [source tree overview](#source-tree-overview).
 
 #### `db`
@@ -279,7 +247,6 @@ Each submodule is represented by a directory in `src`, as shown in [source tree 
 CubDB
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/cub 
-┃ ┣╸batch.h ┄┄┄┄┄┄┄┄ Provides batch update functionality 
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Slices for holding contiguous sequences of bytes
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cub.h ┄┄┄┄┄┄┄┄┄┄ Pulls in the rest of the API

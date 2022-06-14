@@ -25,8 +25,6 @@ auto updating_a_database(cub::Database &db)
 
 auto querying_a_database(cub::Database &db)
 {
-    static constexpr bool require_exact{};
-
     // We can require an exact match.
     const auto record = db.read(cub::_b("sun bear"), cub::Comparison::EQ);
     assert(record->value == "respectable");
@@ -46,7 +44,6 @@ auto querying_a_database(cub::Database &db)
 
 auto cursor_objects(cub::Database &db)
 {
-    // The database will remain immutable until all cursors are closed.
     auto cursor = db.get_cursor();
     assert(cursor.has_record());
 
@@ -66,40 +63,6 @@ auto cursor_objects(cub::Database &db)
     const auto key = cub::_s(cursor.key());
     const auto value = cursor.value();
     printf("Record {%s, %s}\n", key.c_str(), value.c_str()); // Record {black bear, lovable}
-}
-
-auto lock_objects(cub::Database &db)
-{
-    // Create a new lock object. We can pass it in as the first argument to overloads of various database
-    // methods. When we do so, the database will not acquire any locks internally. This gives us the ability
-    // to make changes to the database state that appear atomic to other threads.
-    const auto lock = db.get_lock();
-    db.write(lock, cub::_b("hello"), cub::_b("1"));
-    db.write(lock, cub::_b("bears"), cub::_b("2"));
-    db.write(lock, cub::_b("world"), cub::_b("3"));
-
-    // Checkpoint our changes.
-    db.commit(lock);
-
-    // Erase a record.
-    db.erase(lock, cub::_b("bears"));
-
-    // Roll back to the last commit.
-    db.abort(lock);
-
-    // We can also read from the database under this type of lock. In fact, if we have a live lock, we must
-    // use this overload set, otherwise we will hang when we acquire the same lock twice (once exclusively)
-    // from the same thread.
-    assert(db.read(lock, cub::_b("hello"), cub::Comparison::EQ)->value == "1");
-    assert(db.read(lock, cub::_b("bears"), cub::Comparison::EQ)->value == "2");
-    assert(db.read(lock, cub::_b("world"), cub::Comparison::EQ)->value == "3");
-    const auto minimum = db.read_minimum(lock);
-    const auto maximum = db.read_maximum(lock);
-
-    // When this lock goes out of scope, other threads will see that {"bears", "2"} has been added to the
-    // database. They won't know anything about {"hello", "1"} or {"world", "3"}.
-    db.erase(lock, cub::_b(minimum->key));
-    db.erase(lock, cub::_b(maximum->key));
 }
 
 auto transactions(cub::Database &db)
@@ -130,7 +93,6 @@ auto main(int, const char*[]) -> int
         auto db = Database::open(PATH, options);
         updating_a_database(db);
         querying_a_database(db);
-        lock_objects(db);
         cursor_objects(db);
         transactions(db);
     } catch (const CorruptionError &error) {
