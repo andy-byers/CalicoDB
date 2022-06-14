@@ -13,11 +13,6 @@
 
 namespace cub {
 
-// Incomplete WAL Records
-// A WAL record is incomplete if it is not a FULL record and does not end with a LAST record. If the record in question is
-// not the last record in the WAL file, then the WAL is considered corrupted. Otherwise, this indicates that there was a
-// system failure before the LAST record could be flushed.
-
 // WAL record format, modified from (1):
 //
 //   .-------------- Record Header -------------.

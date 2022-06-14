@@ -7,7 +7,6 @@
 #include <vector>
 #include "random.h"
 #include "cub/bytes.h"
-#include "cub/batch.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 #include "wal/wal_record.h"
@@ -138,16 +137,16 @@ private:
 
 template<class Db> class DatabaseBuilder {
 public:
-    DatabaseBuilder(Db *db, unsigned seed = 0)
+    explicit DatabaseBuilder(Db *db, unsigned seed = 0)
         : m_random {seed}
         , m_db {db} {}
 
     auto write_records(Size num_records, RecordGenerator::Parameters param)
     {
-        auto writer = m_db->get_batch();
         RecordGenerator generator {param};
         for (const auto &[k, v]: generator.generate(m_random, num_records))
-            writer.write(_b(k), _b(v));
+            m_db->write(_b(k), _b(v));
+        m_db->commit();
     }
 
     auto write_unique_records(Size num_records, RecordGenerator::Parameters param)
@@ -159,7 +158,7 @@ public:
             decltype(counter) num_written {};
 
             for (const auto &[k, v]: generator.generate(m_random, static_cast<Size>(counter))) {
-                if (!m_db->read(_b(k), true)) {
+                if (!m_db->read(_b(k), Comparison::EQ)) {
                     m_db->write(_b(k), _b(v));
                     num_written++;
                 }

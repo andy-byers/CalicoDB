@@ -11,7 +11,7 @@
 
 namespace cub {
 
-enum class ThreeWayComparison {
+enum class Comparison {
    LT = -1,
    EQ =  0,
    GT =  1,
@@ -132,7 +132,7 @@ inline auto _s(BytesView data) -> std::string
    return {data.data(), data.size()};
 }
 
-inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> ThreeWayComparison
+inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> Comparison
 {
    const auto min_length = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
    auto r = std::memcmp(lhs.data(), rhs.data(), min_length);
@@ -142,25 +142,10 @@ inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> ThreeWay
        } else if (lhs.size() > rhs.size()) {
            r = 1;
        } else {
-           return ThreeWayComparison::EQ;
+           return Comparison::EQ;
        }
    }
-   return r < 0 ? ThreeWayComparison::LT : ThreeWayComparison::GT;
-}
-
-inline auto operator<(BytesView lhs, BytesView rhs) noexcept -> bool
-{
-   return compare_three_way(lhs, rhs) == ThreeWayComparison::LT;
-}
-
-inline auto operator==(BytesView lhs, BytesView rhs) noexcept -> bool
-{
-   return compare_three_way(lhs, rhs) == ThreeWayComparison::EQ;
-}
-
-inline auto operator!=(BytesView lhs, BytesView rhs) noexcept -> bool
-{
-   return compare_three_way(lhs, rhs) != ThreeWayComparison::EQ;
+   return r < 0 ? Comparison::LT : Comparison::GT;
 }
 
 inline auto mem_copy(Bytes dst, BytesView src, size_t n) noexcept -> void*
@@ -201,5 +186,35 @@ inline auto mem_move(Bytes dst, BytesView src) noexcept -> void*
 }
 
 } // cub
+
+inline auto operator<(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
+{
+    return cub::compare_three_way(lhs, rhs) == cub::Comparison::LT;
+}
+
+inline auto operator<=(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
+{
+    return cub::compare_three_way(lhs, rhs) != cub::Comparison::GT;
+}
+
+inline auto operator>(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
+{
+    return cub::compare_three_way(lhs, rhs) == cub::Comparison::GT;
+}
+
+inline auto operator>=(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
+{
+    return cub::compare_three_way(lhs, rhs) != cub::Comparison::LT;
+}
+
+inline auto operator==(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
+{
+    return cub::compare_three_way(lhs, rhs) == cub::Comparison::EQ;
+}
+
+inline auto operator!=(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
+{
+    return !(lhs == rhs);
+}
 
 #endif // CUB_BYTES_H

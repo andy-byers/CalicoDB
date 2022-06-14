@@ -11,7 +11,6 @@ file(
 list(
     APPEND
     CUB_FILES
-    ${CUB_INCLUDE_DIR}/cub/batch.h
     ${CUB_INCLUDE_DIR}/cub/bytes.h
     ${CUB_INCLUDE_DIR}/cub/common.h
     ${CUB_INCLUDE_DIR}/cub/cub.h

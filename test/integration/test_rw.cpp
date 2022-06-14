@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <shared_mutex>
 #include <thread>
 #include <vector>
 #include <gtest/gtest.h>
@@ -33,44 +34,85 @@ auto reader_task(Database *db) -> void*
     return nullptr;
 }
 
-auto writer_task(Database *db, const std::vector<Record> &original) -> void*
+auto locked_reader_task(Database *db, std::shared_mutex *mutex) -> void*
 {
-    auto writer = db->get_batch();
+    std::shared_lock lock {*mutex};
+    return reader_task(db);
+}
+
+auto writer_task(Database *db, std::shared_mutex *mutex, const std::vector<Record> &original) -> void*
+{
+    std::unique_lock lock {*mutex};
     const auto value = std::to_string(rand());
     for (const auto &[key, unused]: original)
-        writer.write(_b(key), _b(value));
+        db->write(_b(key), _b(value));
     return nullptr;
 }
 
-TEST(ReaderWriterTests, ManyReadersAndWriters)
-{
-    using namespace std::chrono_literals;
-    static constexpr Size NUM_RECORDS_AT_START = 500;
-    static constexpr Size NUM_READERS = 50;
-    static constexpr Size NUM_WRITERS = 50;
+struct SetupResults {
+    std::string choices;
+    Database db;
+    std::vector<Record> records;
+};
 
+auto setup(Size num_readers, Size num_writers)
+{
+    static constexpr Size NUM_RECORDS_AT_START = 1'000;
     Random random {0};
-    auto choices = std::string(NUM_READERS, 'r') +
-                   std::string(NUM_WRITERS, 'w');
+
+    auto choices = std::string(num_readers, 'r') +
+                   std::string(num_writers, 'w');
     random.shuffle(choices);
 
     std::filesystem::remove(TEST_PATH);
     auto db = Database::open(TEST_PATH, {});
     DatabaseBuilder builder {&db};
     builder.write_unique_records(NUM_RECORDS_AT_START, {});
-    const auto records = builder.collect_records();
+    auto records = builder.collect_records();
 
     // Run once to make all values the same.
-    writer_task(&db, records);
+    std::shared_mutex mutex;
+    writer_task(&db, &mutex, records);
 
+    return SetupResults {
+        std::move(choices),
+        std::move(db),
+        std::move(records),
+    };
+}
+
+TEST(ReaderWriterTests, ManyReaders)
+{
+    static constexpr Size NUM_READERS = 250;
+    using namespace std::chrono_literals;
+    auto [choices, db, records] = setup(NUM_READERS, 0);
+
+    std::vector<std::thread> threads;
+    for (auto choice: choices) {
+        threads.emplace_back(reader_task, &db);
+        CUB_EXPECT_EQ(choice, 'r');
+    }
+
+    for (auto &thread: threads)
+        thread.join();
+}
+
+TEST(ReaderWriterTests, ManyReadersAndWriters)
+{
+    static constexpr Size NUM_READERS = 50;
+    static constexpr Size NUM_WRITERS = 50;
+    using namespace std::chrono_literals;
+    auto [choices, db, records] = setup(NUM_READERS, NUM_WRITERS);
+
+    std::shared_mutex mutex;
     std::vector<std::thread> threads;
     for (auto choice: choices) {
         std::this_thread::sleep_for(2ms);
 
         if (choice == 'r') {
-            threads.emplace_back(reader_task, &db);
+            threads.emplace_back(locked_reader_task, &db, &mutex);
         } else {
-            threads.emplace_back(writer_task, &db, records);
+            threads.emplace_back(writer_task, &db, &mutex, records);
         }
     }
 

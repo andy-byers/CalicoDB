@@ -12,12 +12,23 @@ public:
         Index index{};
         bool found_eq{};
     };
+
     Node(Page, bool);
     ~Node() = default;
 
-    auto take() -> Page
+    [[nodiscard]] auto id() const -> PID
     {
-        return std::move(m_page);
+        return m_page.id();
+    }
+
+    [[nodiscard]] auto size() const -> Size
+    {
+        return m_page.size();
+    }
+
+    [[nodiscard]] auto type() const -> PageType
+    {
+        return m_page.type();
     }
 
     [[nodiscard]] auto page() const -> const Page&
@@ -30,19 +41,9 @@ public:
         return m_page;
     }
 
-    auto id() const -> PID
+    auto take() -> Page
     {
-        return m_page.id();
-    }
-
-    auto size() const -> Size
-    {
-        return m_page.size();
-    }
-
-    auto type() const -> PageType
-    {
-        return m_page.type();
+        return std::move(m_page);
     }
 
     [[nodiscard]] auto read_key(Index) const -> BytesView;

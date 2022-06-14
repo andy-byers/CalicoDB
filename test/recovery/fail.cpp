@@ -49,31 +49,30 @@ auto main(int argc, const char *argv[]) -> int
     {
         std::ofstream ofs {value_path, std::ios::trunc};
         CUB_EXPECT_TRUE(ofs.is_open());
-        auto batch = db.get_batch();
         for (Index key {}; key < num_committed; ++key) {
             const auto k = make_key<KEY_WIDTH>(key);
             const auto v = random_string(random, 2, 15);
-            batch.write(_b(k), _b(v));
+            db.write(_b(k), _b(v));
             ofs << v << '\n';
         }
+        db.commit();
     }
 
     puts(value_path.c_str());
     fflush(stdout);
 
     // Modify the database until we receive a signal or hit the operation limit.
-    auto batch = db.get_batch();
     for (Index i {}; i < LIMIT; ++i) {
         const auto key = std::to_string(random.next_int(num_committed * 2));
         const auto value = random_string(random, 0, options.page_size / 2);
-        batch.write(_b(key), _b(value));
+        db.write(_b(key), _b(value));
 
         // Keep the database from getting too large.
         if (const auto info = db.get_info(); info.record_count() > max_database_size) {
             while (info.record_count() >= max_database_size / 2) {
-                const auto record = batch.read_minimum();
+                const auto record = db.read_minimum();
                 CUB_EXPECT_NE(record, std::nullopt);
-                batch.erase(_b(record->key));
+                db.erase(_b(record->key));
             }
         }
     }
