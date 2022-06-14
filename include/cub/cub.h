@@ -6,6 +6,6 @@
 #include "database.h"
 #include "exception.h"
 #include "cursor.h"
-#include "batch.h"
+#include "lock.h"
 
 #endif // CUB_CUB_H

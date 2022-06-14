@@ -17,7 +17,7 @@ class IReadWriteFile;
 class ITree;
 class Cursor;
 class Batch;
-class Token;
+class Lock;
 
 class Database::Impl final {
 public:
@@ -42,7 +42,6 @@ public:
     auto abort() -> void;
     auto get_iterator() -> Iterator;
     auto get_cursor() -> Cursor;
-    auto get_batch() -> Batch;
     auto get_info() -> Info;
 
     auto cache_hit_ratio() const -> double;
@@ -60,6 +59,25 @@ public:
     auto unlocked_commit() -> bool;
     auto unlocked_abort() -> bool;
 
+    auto locked_read(BytesView, Comparison) -> std::optional<Record>;
+    auto locked_read_minimum() -> std::optional<Record>;
+    auto locked_read_maximum() -> std::optional<Record>;
+    auto locked_write(BytesView, BytesView) -> bool;
+    auto locked_erase(BytesView) -> bool;
+    auto locked_commit() -> bool;
+    auto locked_abort() -> bool;
+
+    auto unlock() -> void
+    {
+        m_has_lock = false;
+    }
+
+    auto lock() -> std::shared_mutex&
+    {
+        m_has_lock = true;
+        return m_mutex;
+    }
+
 private:
     auto recover() -> void;
 
@@ -67,6 +85,7 @@ private:
     mutable std::shared_mutex m_mutex;
     std::unique_ptr<IBufferPool> m_pool;
     std::unique_ptr<ITree> m_tree;
+    bool m_has_lock{};
 };
 
 } // cub

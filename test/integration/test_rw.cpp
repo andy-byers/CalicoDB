@@ -35,10 +35,10 @@ auto reader_task(Database *db) -> void*
 
 auto writer_task(Database *db, const std::vector<Record> &original) -> void*
 {
-    auto writer = db->get_batch();
+    auto lock = db->get_lock();
     const auto value = std::to_string(rand());
     for (const auto &[key, unused]: original)
-        writer.write(_b(key), _b(value));
+        db->write(_b(key), _b(value));
     return nullptr;
 }
 

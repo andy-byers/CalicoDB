@@ -1,9 +1,9 @@
 
 #include "database_impl.h"
 #include "cursor_impl.h"
-#include "batch_impl.h"
+#include "lock_impl.h"
 #include "cub/exception.h"
-#include "cub/batch.h"
+#include "cub/lock.h"
 #include "file/file.h"
 #include "file/system.h"
 #include "page/file_header.h"
@@ -109,44 +109,45 @@ auto Database::Impl::recover() -> void
 
 auto Database::Impl::read(BytesView key, Comparison comparison) -> std::optional<Record>
 {
-    std::shared_lock lock {m_mutex};
-    return unlocked_read(key, comparison);
+    return m_has_lock ? unlocked_read(key, comparison) : locked_read(key, comparison);
 }
 
 auto Database::Impl::read_minimum() -> std::optional<Record>
 {
-    std::shared_lock lock {m_mutex};
-    return unlocked_read_minimum();
+    return m_has_lock ? unlocked_read_minimum() : locked_read_minimum();
 }
 
 auto Database::Impl::read_maximum() -> std::optional<Record>
 {
-    std::shared_lock lock {m_mutex};
-    return unlocked_read_maximum();
+    return m_has_lock ? unlocked_read_maximum() : locked_read_maximum();
 }
 
 auto Database::Impl::write(BytesView key, BytesView value) -> bool
 {
-    std::unique_lock lock {m_mutex};
-    return unlocked_write(key, value);
+    return m_has_lock ? unlocked_write(key, value) : locked_write(key, value);
 }
 
 auto Database::Impl::erase(BytesView key) -> bool
 {
-    std::unique_lock lock {m_mutex};
-    return unlocked_erase(key);
+    return m_has_lock ? unlocked_erase(key) : locked_erase(key);
 }
 
 auto Database::Impl::commit() -> void
 {
-    std::unique_lock lock {m_mutex};
-    unlocked_commit();
+    if (m_has_lock) {
+        unlocked_commit();
+    } else {
+        locked_commit();
+    }
 }
 
 auto Database::Impl::abort() -> void
 {
-    std::unique_lock lock {m_mutex};
-    unlocked_abort();
+    if (m_has_lock) {
+        unlocked_abort();
+    } else {
+        locked_abort();
+    }
 }
 
 auto Database::Impl::get_info() -> Info
@@ -156,7 +157,7 @@ auto Database::Impl::get_info() -> Info
 
 auto Database::Impl::get_iterator() -> Iterator
 {
-    return Iterator{m_tree.get()};
+    return Iterator {m_tree.get()};
 }
 
 auto Database::Impl::get_cursor() -> Cursor
@@ -166,11 +167,11 @@ auto Database::Impl::get_cursor() -> Cursor
     return reader;
 }
 
-auto Database::Impl::get_batch() -> Batch
+auto Database::Impl::get_lock() -> Lock
 {
-    Batch writer;
-    writer.m_impl = std::make_unique<Batch::Impl>(this, m_mutex);
-    return writer;
+    Lock lock;
+    lock.m_impl = std::make_unique<Lock::Impl>(this);
+    return lock;
 }
 
 auto Database::Impl::unlocked_read(BytesView key, Comparison comparison) -> std::optional<Record>
@@ -247,6 +248,48 @@ auto Database::Impl::unlocked_abort() -> bool
         return true;
     }
     return false;
+}
+
+auto Database::Impl::locked_read(BytesView key, Comparison comparison) -> std::optional<Record>
+{
+    std::shared_lock lock {m_mutex};
+    return unlocked_read(key, comparison);
+}
+
+auto Database::Impl::locked_read_minimum() -> std::optional<Record>
+{
+    std::shared_lock lock {m_mutex};
+    return unlocked_read_minimum();
+}
+
+auto Database::Impl::locked_read_maximum() -> std::optional<Record>
+{
+    std::shared_lock lock {m_mutex};
+    return unlocked_read_maximum();
+}
+
+auto Database::Impl::locked_write(BytesView key, BytesView value) -> bool
+{
+    std::unique_lock lock {m_mutex};
+    return unlocked_write(key, value);
+}
+
+auto Database::Impl::locked_erase(BytesView key) -> bool
+{
+    std::unique_lock lock {m_mutex};
+    return unlocked_erase(key);
+}
+
+auto Database::Impl::locked_commit() -> bool
+{
+    std::unique_lock lock {m_mutex};
+    return unlocked_commit();
+}
+
+auto Database::Impl::locked_abort() -> bool
+{
+    std::unique_lock lock {m_mutex};
+    return unlocked_abort();
 }
 
 auto Database::Impl::save_header() -> void
@@ -399,9 +442,9 @@ auto Database::get_cursor() -> Cursor
     return m_impl->get_cursor();
 }
 
-auto Database::get_batch() -> Batch
+auto Database::get_lock() -> Lock
 {
-    return m_impl->get_batch();
+    return m_impl->get_lock();
 }
 
 auto Database::get_info() -> Info

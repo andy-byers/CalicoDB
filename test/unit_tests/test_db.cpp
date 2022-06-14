@@ -163,18 +163,14 @@ TEST_F(DatabaseTests, DataPersists)
 TEST_F(DatabaseTests, AbortRestoresState)
 {
     auto db = Database::open(TEST_PATH, {});
-    {
-        auto writer = db.get_batch();
-        writer.write(_b("a"), _b("1"));
-        writer.write(_b("b"), _b("2"));
-    }
-    {
-        auto writer = db.get_batch();
-        writer.write(_b("c"), _b("3"));
-        CUB_EXPECT_TRUE(writer.erase(_b("a")));
-        CUB_EXPECT_TRUE(writer.erase(_b("b")));
-        writer.abort();
-    }
+    db.write(_b("a"), _b("1"));
+    db.write(_b("b"), _b("2"));
+    db.commit();
+
+    db.write(_b("c"), _b("3"));
+    CUB_EXPECT_TRUE(db.erase(_b("a")));
+    CUB_EXPECT_TRUE(db.erase(_b("b")));
+    db.abort();
 
     CUB_EXPECT_EQ(db.read(_b("a"), Comparison::EQ)->value, "1");
     CUB_EXPECT_EQ(db.read(_b("b"), Comparison::EQ)->value, "2");
@@ -189,13 +185,12 @@ TEST_F(DatabaseTests, SubsequentAbortsHaveNoEffect)
     auto db = Database::open(TEST_PATH, {});
     const auto info = db.get_info();
     const auto records = setup_database_with_committed_records(db, 500);
-    auto writer = db.get_batch();
     for (const auto &[k, v]: records)
-        writer.erase(_b(k));
+        db.erase(_b(k));
     ASSERT_EQ(info.record_count(), 0);
-    writer.abort();
+    db.abort();
     ASSERT_EQ(info.record_count(), records.size());
-    writer.abort();
+    db.abort();
     ASSERT_EQ(info.record_count(), records.size());
 }
 
@@ -217,13 +212,10 @@ TEST(TempDBTests, CanInsertRecords)
 TEST(TempDBTests, AbortClearsRecords)
 {
     auto temp = Database::temp(0x100);
-    {
-        auto writer = temp.get_batch();
-        writer.write(_b("a"), _b("1"));
-        writer.write(_b("b"), _b("2"));
-        writer.write(_b("c"), _b("3"));
-        writer.abort();
-    }
+    temp.write(_b("a"), _b("1"));
+    temp.write(_b("b"), _b("2"));
+    temp.write(_b("c"), _b("3"));
+    temp.abort();
     ASSERT_TRUE(database_contains_exact(temp, {}));
 }
 
@@ -232,13 +224,10 @@ TEST(TempDBTests, AbortKeepsRecordsFromPreviousCommit)
     static constexpr auto num_committed = 500;
     auto temp = Database::temp(0x100);
     const auto committed = setup_database_with_committed_records(temp, num_committed);
-    {
-        auto writer = temp.get_batch();
-        writer.write(_b("a"), _b("1"));
-        writer.write(_b("b"), _b("2"));
-        writer.write(_b("c"), _b("3"));
-        writer.abort();
-    }
+    temp.write(_b("a"), _b("1"));
+    temp.write(_b("b"), _b("2"));
+    temp.write(_b("c"), _b("3"));
+    temp.abort();
     ASSERT_TRUE(database_contains_exact(temp, committed));
 }
 
@@ -253,16 +242,15 @@ TEST_F(DatabaseTests, TestRecovery)
         records = collect_records(*faulty.db);
 
         // Modify the database by concatenating each value to itself.
-        auto writer = faulty.db->get_batch();
         for (const auto &[k, v]: records)
-            writer.write(_b(k), _b(v + v));
+            faulty.db->write(_b(k), _b(v + v));
 
         try {
             // Fail in the middle of the commit. We fail when flushing the buffer pool, but we have
             // already committed and flushed the WAL. When we reopen the database, we should roll
             // forward.
             faulty.tree_faults.set_write_fault_counter(10);
-            writer.commit();
+            faulty.db->commit();
             ADD_FAILURE() << "commit() should have thrown";
         } catch (const IOError&) {
 
@@ -292,23 +280,21 @@ TEST_F(DatabaseTests, AbortIsReentrant)
     builder.write_records(batch_size, param);
     const auto records = builder.collect_records();
     {
-        auto writer = db.db->get_batch();
-
         // This batch of writes should be undone eventually.
         for (const auto &[k, v]: records)
-            writer.write(_b(k), _b(v + v));
+            db.db->write(_b(k), _b(v + v));
 
         for (Index i {}; i < num_tries; ++i) {
             try {
                 db.tree_faults.set_write_fault_counter(3);
-                writer.abort();
+                db.db->abort();
                 ADD_FAILURE() << "abort() should have thrown";
             } catch (const IOError&) {
                 db.tree_faults.set_write_fault_counter(-1);
             }
         }
         // Perform a successful abort.
-        writer.abort();
+        db.db->abort();
     }
     ASSERT_TRUE(database_contains_exact(*db.db, records));
 }
@@ -321,18 +307,17 @@ TEST_F(DatabaseTests, CanAbortAfterFailingToCommit)
     builder.write_records(num_records, {});
     const auto records = builder.collect_records();
     {
-        auto writer = db.db->get_batch();
         for (const auto &[k, v]: records)
-            writer.write(_b(k), _b(v + v));
+            db.db->write(_b(k), _b(v + v));
 
         try {
             db.tree_faults.set_write_fault_counter(3);
-            writer.commit();
+            db.db->commit();
             ADD_FAILURE() << "commit() should have thrown";
         } catch (const IOError&) {
             db.tree_faults.set_write_fault_counter(-1);
         }
-        writer.abort();
+        db.db->abort();
     }
     ASSERT_TRUE(database_contains_exact(*db.db, records));
 }

@@ -192,7 +192,7 @@ auto BufferPool::roll_forward() -> bool
 
 auto BufferPool::roll_backward() -> void
 {
-    // Make sure the WAL reader is at the end of the log. TODO: Maybe not necessary. If the WAL has junk at the end, this will throw.
+    // Make sure the WAL reader is at the end of the log.
     try {
         while (m_wal_reader->increment()) {}
     } catch (const CorruptionError&) {
@@ -245,7 +245,6 @@ auto BufferPool::abort() -> void
     roll_backward();
     try_flush();
     m_wal_writer->truncate();
-    return;
 }
 
 auto BufferPool::recover() -> bool
