@@ -625,13 +625,13 @@ auto do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
         target.insert_at(index, std::move(cell));
     };
     switch (compare_three_way(overflow_key, median->key())) {
-        case ThreeWayComparison::EQ:
+        case Comparison::EQ:
             // No transfer. The median/overflow key is returned.
             break;
-        case ThreeWayComparison::LT:
+        case Comparison::LT:
             do_transfer(Ln, std::move(*temp));
             break;
-        case ThreeWayComparison::GT:
+        case Comparison::GT:
             do_transfer(rn, std::move(*temp));
             break;
     }

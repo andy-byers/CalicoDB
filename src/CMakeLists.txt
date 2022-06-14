@@ -18,6 +18,7 @@ list(
     ${CUB_INCLUDE_DIR}/cub/cursor.h
     ${CUB_INCLUDE_DIR}/cub/database.h
     ${CUB_INCLUDE_DIR}/cub/exception.h
+    ${CUB_INCLUDE_DIR}/cub/token.h
 )
 
 # Build the core static library.

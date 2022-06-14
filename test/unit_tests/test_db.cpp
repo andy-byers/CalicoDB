@@ -1,7 +1,6 @@
 
 #include <array>
 #include <filesystem>
-#include <thread>
 #include <vector>
 #include <unordered_set>
 
@@ -23,6 +22,94 @@
 namespace {
 
 using namespace cub;
+
+
+class DatabaseReadTests: public testing::Test {
+public:
+    static constexpr Size PAGE_SIZE {0x100};
+
+    // Keys used in this test.
+    static constexpr auto K0 = "1";
+    static constexpr auto K1 = "3";
+    static constexpr auto K2 = "5";
+
+    // Keys "minus 1".
+    static constexpr auto K0_m1 = "0";
+    static constexpr auto K1_m1 = "2";
+    static constexpr auto K2_m1 = "4";
+
+    // Keys "plus 1".
+    static constexpr auto K0_p1 = "2";
+    static constexpr auto K1_p1 = "4";
+    static constexpr auto K2_p1 = "6";
+
+    DatabaseReadTests()
+        : db {Database::temp(PAGE_SIZE)}
+    {
+        const auto write = [this](const std::string &key) {
+            db.write(_b(key), _b(key));
+        };
+
+        write(K0);
+        write(K1);
+        write(K2);
+    }
+
+    ~DatabaseReadTests() override = default;
+
+    auto read_and_compare(const std::string &key, Comparison comparison, const std::string &target)
+    {
+        if (const auto record = db.read(_b(key), comparison))
+            return record->key == target;
+        return false;
+    }
+
+    Database db;
+};
+
+TEST_F(DatabaseReadTests, ReadsExact)
+{
+    ASSERT_TRUE(read_and_compare(K0, Comparison::EQ, K0));
+    ASSERT_TRUE(read_and_compare(K1, Comparison::EQ, K1));
+    ASSERT_TRUE(read_and_compare(K2, Comparison::EQ, K2));
+}
+
+TEST_F(DatabaseReadTests, ReadsLessThan)
+{
+    ASSERT_TRUE(read_and_compare(K0_p1, Comparison::LT, K0));
+    ASSERT_TRUE(read_and_compare(K1_p1, Comparison::LT, K1));
+    ASSERT_TRUE(read_and_compare(K2_p1, Comparison::LT, K2));
+    ASSERT_TRUE(read_and_compare(K1, Comparison::LT, K0));
+    ASSERT_TRUE(read_and_compare(K2, Comparison::LT, K1));
+}
+
+TEST_F(DatabaseReadTests, ReadsGreaterThan)
+{
+    ASSERT_TRUE(read_and_compare(K0_m1, Comparison::GT, K0));
+    ASSERT_TRUE(read_and_compare(K1_m1, Comparison::GT, K1));
+    ASSERT_TRUE(read_and_compare(K2_m1, Comparison::GT, K2));
+    ASSERT_TRUE(read_and_compare(K0, Comparison::GT, K1));
+    ASSERT_TRUE(read_and_compare(K1, Comparison::GT, K2));
+}
+
+TEST_F(DatabaseReadTests, CannotReadNonexistentRecords)
+{
+    ASSERT_EQ(db.read(_b(K0_m1), Comparison::EQ), std::nullopt);
+    ASSERT_EQ(db.read(_b(K1_m1), Comparison::EQ), std::nullopt);
+    ASSERT_EQ(db.read(_b(K2_m1), Comparison::EQ), std::nullopt);
+}
+
+TEST_F(DatabaseReadTests, CannotReadLessThanMinimum)
+{
+    ASSERT_EQ(db.read(_b(K0), Comparison::LT), std::nullopt);
+    ASSERT_EQ(db.read(_b(K0_m1), Comparison::LT), std::nullopt);
+}
+
+TEST_F(DatabaseReadTests, CannotReadGreaterThanMaximum)
+{
+    ASSERT_EQ(db.read(_b(K2), Comparison::GT), std::nullopt);
+    ASSERT_EQ(db.read(_b(K2_p1), Comparison::GT), std::nullopt);
+}
 
 constexpr auto TEST_PATH = "/tmp/cub_test";
 
@@ -89,9 +176,9 @@ TEST_F(DatabaseTests, AbortRestoresState)
         writer.abort();
     }
 
-    CUB_EXPECT_EQ(db.read(_b("a"), true)->value, "1");
-    CUB_EXPECT_EQ(db.read(_b("b"), true)->value, "2");
-    CUB_EXPECT_EQ(db.read(_b("c"), true), std::nullopt);
+    CUB_EXPECT_EQ(db.read(_b("a"), Comparison::EQ)->value, "1");
+    CUB_EXPECT_EQ(db.read(_b("b"), Comparison::EQ)->value, "2");
+    CUB_EXPECT_EQ(db.read(_b("c"), Comparison::EQ), std::nullopt);
 
     const auto info = db.get_info();
     CUB_EXPECT_EQ(info.record_count(), 2);

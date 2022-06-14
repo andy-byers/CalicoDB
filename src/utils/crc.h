@@ -55,7 +55,6 @@ static constexpr uint32_t crc_table[]{
     0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d,
 };
 
-// TODO: This is pretty slow, a clear bottleneck for writes.
 inline auto crc_32(BytesView data) noexcept
 {
     uint32_t crc {0xFFFFFFFF};
@@ -66,6 +65,6 @@ inline auto crc_32(BytesView data) noexcept
     return ~crc;
 }
 
-} // db
+} // cub
 
 #endif // CUB_UTILS_CRC_H

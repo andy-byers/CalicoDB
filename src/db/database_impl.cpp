@@ -19,7 +19,7 @@ namespace cub {
 
 auto Record::operator<(const Record &rhs) const -> bool
 {
-    return compare_three_way(_b(key), _b(rhs.key)) == ThreeWayComparison::LT;
+    return compare_three_way(_b(key), _b(rhs.key)) == Comparison::LT;
 }
 
 Info::Info(Database::Impl *db)
@@ -107,10 +107,10 @@ auto Database::Impl::recover() -> void
         load_header();
 }
 
-auto Database::Impl::read(BytesView key, bool exact) -> std::optional<Record>
+auto Database::Impl::read(BytesView key, Comparison comparison) -> std::optional<Record>
 {
     std::shared_lock lock {m_mutex};
-    return unlocked_read(key, exact);
+    return unlocked_read(key, comparison);
 }
 
 auto Database::Impl::read_minimum() -> std::optional<Record>
@@ -173,14 +173,29 @@ auto Database::Impl::get_batch() -> Batch
     return writer;
 }
 
-auto Database::Impl::unlocked_read(BytesView key, bool require_exact) -> std::optional<Record>
+auto Database::Impl::unlocked_read(BytesView key, Comparison comparison) -> std::optional<Record>
 {
-    if (auto cursor = get_iterator(); cursor.has_record()) {
-        const auto found_exact = cursor.find(key);
-        const auto found_greater = !cursor.is_maximum();
-        if (found_exact || (found_greater && !require_exact))
-            return Record {_s(cursor.key()), cursor.value()};
-        return std::nullopt;
+    if (auto itr = get_iterator(); itr.has_record()) {
+        const auto found_exact = itr.find(key);
+        switch (comparison) {
+            case Comparison::EQ:
+                if (!found_exact)
+                    return std::nullopt;
+                break;
+            case Comparison::GT:
+                if (itr.is_maximum() && (found_exact || itr.key() < key))
+                    return std::nullopt;
+                if (found_exact && !itr.increment())
+                    return std::nullopt;
+                break;
+            case Comparison::LT:
+                if (itr.is_maximum() && itr.key() < key)
+                    break;
+                if (!itr.decrement())
+                    return std::nullopt;
+                break;
+        }
+        return Record {_s(itr.key()), itr.value()};
     }
     CUB_EXPECT_EQ(m_tree->cell_count(), 0);
     return std::nullopt;
@@ -344,9 +359,9 @@ Database::Database(Database&&) noexcept = default;
 
 auto Database::operator=(Database&&) noexcept -> Database& = default;
 
-auto Database::read(BytesView key, bool exact) const -> std::optional<Record>
+auto Database::read(BytesView key, Comparison comparison) const -> std::optional<Record>
 {
-    return m_impl->read(key, exact);
+    return m_impl->read(key, comparison);
 }
 
 auto Database::read_minimum() const -> std::optional<Record>

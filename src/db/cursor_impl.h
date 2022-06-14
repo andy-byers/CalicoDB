@@ -30,8 +30,8 @@ public:
     auto find_minimum() -> void;
     auto find_maximum() -> void;
 
-    Impl(Impl&&) = default;
-    Impl &operator=(Impl&&) = default;
+//    Impl(Impl&&) = default;
+//    Impl &operator=(Impl&&) = default;
 
 private:
     std::shared_lock<std::shared_mutex> m_lock;

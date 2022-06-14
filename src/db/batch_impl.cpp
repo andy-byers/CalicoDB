@@ -20,9 +20,9 @@ Batch::Impl::~Impl()
     }
 }
 
-auto Batch::Impl::read(BytesView key, bool require_exact) const -> std::optional<Record>
+auto Batch::Impl::read(BytesView key, Comparison comparison) const -> std::optional<Record>
 {
-    return m_db.value->unlocked_read(key, require_exact);
+    return m_db.value->unlocked_read(key, comparison);
 }
 
 auto Batch::Impl::read_minimum() const -> std::optional<Record>
@@ -62,9 +62,9 @@ Batch::~Batch() = default;
 Batch::Batch(Batch &&) noexcept = default;
 auto Batch::operator=(Batch &&) noexcept -> Batch & = default;
 
-auto Batch::read(BytesView key, bool require_exact) const -> std::optional<Record>
+auto Batch::read(BytesView key, Comparison comparison) const -> std::optional<Record>
 {
-    return m_impl->read(key, require_exact);
+    return m_impl->read(key, comparison);
 }
 
 auto Batch::read_minimum() const -> std::optional<Record>

@@ -25,17 +25,28 @@ auto updating_a_database(cub::Database &db)
 
 auto querying_a_database(cub::Database &db)
 {
-    static constexpr bool require_exact {};
+    static constexpr bool require_exact{};
 
-    // We can require an exact match, or find the first record with a key greater than the given key.
-    const auto record = db.read(cub::_b("kodiak bear"), require_exact);
-    assert(record->value == "awesome");
+    // We can require an exact match.
+    const auto record = db.read(cub::_b("sun bear"), cub::Comparison::EQ);
+    assert(record->value == "respectable");
 
-    // We can also search for the extrema.
+    // Or, we can look for the first record with a key less than or greater than the given key.
+    const auto less_than = db.read(cub::_b("sun bear"), cub::Comparison::LT);
+    const auto greater_than = db.read(cub::_b("sun bear"), cub::Comparison::GT);
+    assert(less_than->value == "cool");
+
+    // Whoops, there isn't a key greater than "sun bear".
+    assert(greater_than == std::nullopt);
+
+    // We can also search for the minimum and maximum.
     const auto smallest = db.read_minimum();
     const auto largest = db.read_maximum();
+}
 
-    // The database will be immutable until this cursor is closed.
+auto cursor_objects(cub::Database &db)
+{
+    // The database will remain immutable until all cursors are closed.
     auto cursor = db.get_cursor();
     assert(cursor.has_record());
 
@@ -57,7 +68,7 @@ auto querying_a_database(cub::Database &db)
     printf("Record {%s, %s}\n", key.c_str(), value.c_str()); // Record {black bear, lovable}
 }
 
-auto batch_updates(cub::Database &db)
+auto batch_objects(cub::Database &db)
 {
     // Create a new batch.
     auto batch = db.get_batch();
@@ -75,9 +86,9 @@ auto batch_updates(cub::Database &db)
 
     // We can also read from the database using a batch object. This can be useful when we need some read access during an
     // atomic update routine.
-    assert(batch.read(cub::_b("hello"), true)->value == "1");
-    assert(batch.read(cub::_b("bears"), true)->value == "2");
-    assert(batch.read(cub::_b("world"), true)->value == "3");
+    assert(batch.read(cub::_b("hello"), cub::Comparison::EQ)->value == "1");
+    assert(batch.read(cub::_b("bears"), cub::Comparison::EQ)->value == "2");
+    assert(batch.read(cub::_b("world"), cub::Comparison::EQ)->value == "3");
     const auto minimum = batch.read_minimum();
     const auto maximum = batch.read_maximum();
 
@@ -99,8 +110,8 @@ auto transactions(cub::Database &db)
     db.abort();
 
     // Database still contains {"a", "1"} and {"b", "2"}.
-    assert(db.read(cub::_b("a"), true)->value == "1");
-    assert(db.read(cub::_b("b"), true)->value == "2");
+    assert(db.read(cub::_b("a"), cub::Comparison::EQ)->value == "1");
+    assert(db.read(cub::_b("b"), cub::Comparison::EQ)->value == "2");
 }
 
 } // <anonymous>
@@ -115,7 +126,8 @@ auto main(int, const char*[]) -> int
         auto db = Database::open(PATH, options);
         updating_a_database(db);
         querying_a_database(db);
-        batch_updates(db);
+        batch_objects(db);
+        cursor_objects(db);
         transactions(db);
     } catch (const CorruptionError &error) {
         printf("CorruptionError: %s\n", error.what());

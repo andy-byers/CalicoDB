@@ -166,14 +166,14 @@ TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
     std::string u {"\x00", 1};
     std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::EQ);
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), Comparison::EQ);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), Comparison::LT);
 }
 
 TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
@@ -186,7 +186,7 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), Comparison::LT);
 }
 
 TEST(NonPrintableSliceTests, Conversions)

@@ -17,6 +17,7 @@ class IReadWriteFile;
 class ITree;
 class Cursor;
 class Batch;
+class Token;
 
 class Database::Impl final {
 public:
@@ -32,7 +33,7 @@ public:
     explicit Impl(Size);
     explicit Impl(Parameters);
     ~Impl();
-    auto read(BytesView, bool) -> std::optional<Record>;
+    auto read(BytesView, Comparison) -> std::optional<Record>;
     auto read_minimum() -> std::optional<Record>;
     auto read_maximum() -> std::optional<Record>;
     auto write(BytesView, BytesView) -> bool;
@@ -51,7 +52,7 @@ public:
     auto save_header() -> void;
     auto load_header() -> void;
 
-    auto unlocked_read(BytesView, bool) -> std::optional<Record>; // TODO: Make const
+    auto unlocked_read(BytesView, Comparison) -> std::optional<Record>;
     auto unlocked_read_minimum() -> std::optional<Record>;
     auto unlocked_read_maximum() -> std::optional<Record>;
     auto unlocked_write(BytesView, BytesView) -> bool;

@@ -19,9 +19,9 @@ class Batch::Impl {
 public:
     Impl(Database::Impl*, std::shared_mutex&);
     ~Impl();
-    auto read(BytesView, bool) const -> std::optional<Record>;
-    auto read_minimum() const -> std::optional<Record>;
-    auto read_maximum() const -> std::optional<Record>;
+    [[nodiscard]] auto read(BytesView, Comparison) const -> std::optional<Record>;
+    [[nodiscard]] auto read_minimum() const -> std::optional<Record>;
+    [[nodiscard]] auto read_maximum() const -> std::optional<Record>;
     auto write(BytesView, BytesView) -> bool;
     auto erase(BytesView) -> bool;
     auto commit() -> void;

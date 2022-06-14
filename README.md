@@ -128,7 +128,7 @@ assert(cub::_s(from_string) == data);
 function_taking_a_bytes_view(b);
 
 // Comparisons.
-assert(cub::compare_three_way(b, v) == cub::ThreeWayComparison::EQ);
+assert(cub::compare_three_way(b, v) == cub::Comparison::EQ);
 assert(b == v);
 ```
 
