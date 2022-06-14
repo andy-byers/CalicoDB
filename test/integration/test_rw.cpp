@@ -26,7 +26,10 @@ auto reader_task(Database *db) -> void*
     cursor.find_minimum();
     const auto value = cursor.value();
     Size counter {1};
+
     while (cursor.increment()) {
+        // We should be able to call the read*() methods from many threads.
+        CUB_EXPECT_EQ(db->read(cursor.key(), Comparison::EQ)->value, value);
         CUB_EXPECT_EQ(cursor.value(), value);
         counter++;
     }

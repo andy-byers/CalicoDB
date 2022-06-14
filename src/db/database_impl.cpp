@@ -260,18 +260,19 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         header.set_block_size(options.block_size);
     }
 
-    const auto mode = Mode::CREATE | Mode::DIRECT | Mode::SYNCHRONOUS;
+    const auto mode = Mode::CREATE | (options.use_direct_io ? Mode::DIRECT : Mode {});
     auto database_file = std::make_unique<ReadWriteFile>(path, mode, options.permissions);
     auto wal_reader_file = std::make_unique<ReadOnlyFile>(get_wal_path(path), mode, options.permissions);
     auto wal_writer_file = std::make_unique<LogFile>(get_wal_path(path), mode, options.permissions);
 
 #if !CUB_HAS_O_DIRECT
     try {
-        database_file->use_direct_io();
-        wal_reader_file->use_direct_io();
-        wal_writer_file->use_direct_io();
+        if (options.use_direct_io) {
+            database_file->use_direct_io();
+            wal_reader_file->use_direct_io();
+            wal_writer_file->use_direct_io();
+        }
     } catch (const std::system_error &error) {
-        // TODO: Log, or otherwise notify the user? Maybe a flag in Options to control whether we fail here?
         throw; // TODO: Rethrowing for now.
     }
 #endif

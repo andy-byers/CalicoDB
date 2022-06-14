@@ -111,4 +111,9 @@ auto Pager::write_page_to_file(PID id, BytesView in) const -> void
     write_exact_at(*m_file, in, offset);
 }
 
+auto Pager::sync() -> void
+{
+    m_file->sync();
+}
+
 } // cub

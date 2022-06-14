@@ -16,6 +16,7 @@ Cub DB is an embedded key-value database written in C++17.
   + [Querying a Database](#querying-a-database)
   + [Cursor Objects](#cursor-objects)
   + [Transactions](#transactions)
++ [Performance](#performance)
 + [Design](#design)
   + [db](#db)
   + [file](#file)
@@ -212,12 +213,52 @@ assert(db.read(cub::_b("a"), true)->value == "1");
 assert(db.read(cub::_b("b"), true)->value == "2");
 ```
 
+## Performance
+The benchmark suite (still in-progress) prints out each benchmark result in units of operations per second.
+Each database is opened without using direct I/O, as this usually seems to hurt performance (still working on that one).
+We use 16-byte keys and 100-byte values with a 4MB cache (similar to http://www.lmdb.tech/bench/microbench/benchmark.html).
+We still have a ways to go performance-wise, however, it seems that the cursors provide pretty fast sequential and reverse-sequential reads.
+
+```
+.--------------------------.--------------------------.
+| Name                     | Result (ops/second)      |
+|--------------------------|--------------------------|
+| write_rand               |                   37,185 |
+| write_seq                |                   57,079 |
+| read_rand                |                  161,717 |
+| read_seq                 |                3,611,615 |
+| read_rev                 |                4,429,556 |
+| erase_all_rand           |                   25,911 |
+| erase_all_seq            |                   26,941 |
+| erase_half_rand          |                   22,306 |
+| erase_half_seq           |                   22,230 |
+'--------------------------'--------------------------'
+
+.--------------------------.--------------------------.
+| Name (In-Memory DB)      | Result (ops/second)      |
+|--------------------------|--------------------------|
+| write_rand               |                   36,368 |
+| write_seq                |                   55,883 |
+| read_rand                |                  335,235 |
+| read_seq                 |                4,156,060 |
+| read_rev                 |                4,672,760 |
+| erase_all_rand           |                   53,372 |
+| erase_all_seq            |                   70,807 |
+| erase_half_rand          |                   58,205 |
+| erase_half_seq           |                   50,895 |
+'--------------------------'--------------------------'
+```
+
 ## TODO
 1. Get everything code reviewed!
 2. Get unit test coverage up
 3. Write some documentation
 4. Work on this README
 5. Work on performance
+6. Work on the benchmark suite
+   + Results may not be all that accurate
+   + Need to test large (100,000 B) values
+   + Code is very messy/difficult to change
 
 ## Design
 

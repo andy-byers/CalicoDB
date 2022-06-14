@@ -40,6 +40,7 @@ struct Options {
     Size block_size {DEFAULT_BLOCK_SIZE};
     Size frame_count {DEFAULT_FRAME_COUNT};
     int permissions {DEFAULT_PERMISSIONS};
+    bool use_direct_io {};
 };
 
 struct Record {
