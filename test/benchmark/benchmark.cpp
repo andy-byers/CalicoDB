@@ -22,7 +22,9 @@ constexpr Options options {
     PAGE_SIZE,              // Page size
     PAGE_SIZE,              // Block size
     CACHE_SIZE / PAGE_SIZE, // Frame count
-    0666,
+    0666,                   // Permissions
+    false,                  // Use direct I/O
+    false,                  // Use transactions TODO: This should be an option.
 };
 
 struct BenchmarkParameters {

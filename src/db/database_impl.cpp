@@ -45,6 +45,11 @@ auto Info::maximum_key_size() const -> Size
     return get_max_local(page_size());
 }
 
+auto Info::uses_transactions() const -> bool
+{
+    return m_db->uses_transactions();
+}
+
 Database::Impl::~Impl()
 {
     try {
@@ -58,13 +63,19 @@ Database::Impl::~Impl()
 Database::Impl::Impl(Parameters param)
     : m_path {param.path}
 {
-    auto wal_reader = std::make_unique<WALReader>(
-        std::move(param.wal_reader_file),
-        param.file_header.block_size());
+    std::unique_ptr<WALReader> wal_reader;
+    std::unique_ptr<WALWriter> wal_writer;
 
-    auto wal_writer = std::make_unique<WALWriter>(
-        std::move(param.wal_writer_file),
-        param.file_header.block_size());
+    if (param.use_transactions) {
+        CUB_EXPECT_NOT_NULL(param.wal_reader_file);
+        wal_reader = std::make_unique<WALReader>(
+            std::move(param.wal_reader_file),
+            param.file_header.block_size());
+        CUB_EXPECT_NOT_NULL(param.wal_writer_file);
+        wal_writer = std::make_unique<WALWriter>(
+            std::move(param.wal_writer_file),
+            param.file_header.block_size());
+    }
 
     m_pool = std::make_unique<BufferPool>(BufferPool::Parameters {
         std::move(param.database_file),
@@ -74,6 +85,7 @@ Database::Impl::Impl(Parameters param)
         param.frame_count,
         param.file_header.page_count(),
         param.file_header.page_size(),
+        param.use_transactions,
     });
 
     m_tree = std::make_unique<Tree>(Tree::Parameters {
@@ -85,7 +97,9 @@ Database::Impl::Impl(Parameters param)
     });
 
     if (m_pool->page_count()) {
-        m_pool->recover();
+        // This will do nothing if the WAL is empty.
+        if (param.use_transactions)
+            m_pool->recover();
     } else {
         auto root = m_tree->allocate_node(PageType::EXTERNAL_NODE);
         FileHeader header {root};
@@ -97,12 +111,13 @@ Database::Impl::Impl(Parameters param)
     }
 }
 
-Database::Impl::Impl(Size page_size)
-    : m_pool {std::make_unique<InMemory>(page_size)}
+Database::Impl::Impl(Size page_size, bool use_transactions)
+    : m_pool {std::make_unique<InMemory>(page_size, use_transactions)}
     , m_tree {std::make_unique<Tree>(Tree::Parameters {m_pool.get(), PID::null(), 0, 0, 0})}
 {
     m_tree->allocate_node(PageType::EXTERNAL_NODE);
-    commit();
+    if (use_transactions)
+        commit();
 }
 
 auto Database::Impl::recover() -> void
@@ -203,6 +218,9 @@ auto Database::Impl::commit() -> bool
 
 auto Database::Impl::abort() -> bool
 {
+    if (!m_pool->uses_transactions())
+        throw std::logic_error {"Transactions are not enabled"};
+
     if (m_pool->can_commit()) {
         m_pool->abort();
         load_header();
@@ -248,11 +266,17 @@ auto Database::Impl::page_size() const -> Size
     return m_pool->page_size();
 }
 
+auto Database::Impl::uses_transactions() const -> Size
+{
+    return m_pool->uses_transactions();
+}
+
 auto Database::open(const std::string &path, const Options &options) -> Database
 {
     if (path.empty())
         throw std::invalid_argument {"Path argument cannot be empty"};
 
+    auto use_transactions = options.use_transactions;
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
     FileHeader header {_b(backing)};
 
@@ -274,6 +298,9 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         if (file_size < header.page_size())
             throw CorruptionError {"Database cannot be less than one page in size"};
 
+        // If the database does not use transactions, this field will always be 0.
+        use_transactions = !header.flushed_lsn().is_null();
+
     } catch (const std::system_error &error) {
         if (error.code() != std::errc::no_such_file_or_directory)
             throw;
@@ -285,8 +312,13 @@ auto Database::open(const std::string &path, const Options &options) -> Database
 
     const auto mode = Mode::CREATE | (options.use_direct_io ? Mode::DIRECT : Mode {});
     auto database_file = std::make_unique<ReadWriteFile>(path, mode, options.permissions);
-    auto wal_reader_file = std::make_unique<ReadOnlyFile>(get_wal_path(path), mode, options.permissions);
-    auto wal_writer_file = std::make_unique<LogFile>(get_wal_path(path), mode, options.permissions);
+    std::unique_ptr<ReadOnlyFile> wal_reader_file;
+    std::unique_ptr<LogFile> wal_writer_file;
+
+    if (use_transactions) {
+        wal_reader_file = std::make_unique<ReadOnlyFile>(get_wal_path(path), mode, options.permissions);
+        wal_writer_file = std::make_unique<LogFile>(get_wal_path(path), mode, options.permissions);
+    }
 
 #if !CUB_HAS_O_DIRECT
     try {
@@ -308,14 +340,15 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         std::move(wal_writer_file),
         header,
         options.frame_count,
+        options.use_transactions,
     });
     return db;
 }
 
-auto Database::temp(Size page_size) -> Database
+auto Database::temp(Size page_size, bool use_transactions) -> Database
 {
     Database db;
-    db.m_impl = std::make_unique<Impl>(page_size);
+    db.m_impl = std::make_unique<Impl>(page_size, use_transactions);
     return db;
 }
 

@@ -196,12 +196,13 @@ public:
         auto file = std::make_unique<FaultyReadWriteMemory>();
         m_pool = std::make_unique<BufferPool>(BufferPool::Parameters{
             std::move(file),
-            std::make_unique<StubWALReader>(),
-            std::make_unique<StubWALWriter>(),
+            nullptr,
+            nullptr,
             LSN::null(),
             32,
             0,
             m_page_size,
+            false,
         });
         m_tree = std::make_unique<TestTree>(Tree::Parameters{
             m_pool.get(),

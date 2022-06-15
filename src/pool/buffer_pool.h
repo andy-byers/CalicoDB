@@ -29,6 +29,7 @@ public:
         Size frame_count {};
         Size page_count {};
         Size page_size {};
+        bool use_transactions {};
     };
 
 //    enum PageMode {
@@ -58,6 +59,11 @@ public:
     [[nodiscard]] auto page_size() const -> Size override
     {
         return m_pager.page_size();
+    }
+
+    [[nodiscard]] auto uses_transactions() const -> bool override
+    {
+        return m_uses_transactions;
     }
 
     [[nodiscard]] auto block_size() const -> Size override;
@@ -95,6 +101,7 @@ private:
     LSN m_next_lsn;
     Size m_page_count {};
     Size m_ref_sum {};
+    bool m_uses_transactions {};
 };
 
 } // cub

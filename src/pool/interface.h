@@ -15,6 +15,7 @@ struct LSN;
 class IBufferPool {
 public:
     virtual ~IBufferPool() = default;
+    [[nodiscard]] virtual auto uses_transactions() const -> bool = 0;
     [[nodiscard]] virtual auto hit_ratio() const -> double = 0;
     [[nodiscard]] virtual auto page_count() const -> Size = 0;
     [[nodiscard]] virtual auto page_size() const -> Size = 0;

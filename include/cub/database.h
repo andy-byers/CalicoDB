@@ -40,9 +40,10 @@ public:
      * Create an in-memory Cub DB database.
      *
      * @param page_size Size of a page of memory in bytes (must be a power of two).
+     * @param use_transactions True if the database should use transactions, false otherwise.
      * @return An in-memory Cub DB database.
      */
-    static auto temp(Size page_size) -> Database;
+    static auto temp(Size page_size, bool use_transactions = true) -> Database;
 
     /**
      * Destroy a database.
@@ -182,6 +183,13 @@ public:
      * @return The maximal key length in characters.
      */
     [[nodiscard]] auto maximum_key_size() const -> Size;
+
+    /**
+     * Determine if the database uses transactions.
+     *
+     * @return True if the database uses transactions, false otherwise.
+     */
+    [[nodiscard]] auto uses_transactions() const -> bool;
 
 private:
     friend class Database;

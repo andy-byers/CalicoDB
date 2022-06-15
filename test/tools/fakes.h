@@ -363,27 +363,6 @@ struct WALHarness final {
     std::unique_ptr<IWALWriter> writer;
 };
 
-class StubWALWriter: public IWALWriter {
-public:
-    ~StubWALWriter() override = default;
-    [[nodiscard]] auto block_size() const -> Size override {return 0;}
-    [[nodiscard]] auto has_pending() const -> bool override {return false;}
-    [[nodiscard]] auto has_committed() const -> bool override {return false;}
-    auto append(WALRecord) -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
-    auto truncate() -> void override {}
-    auto flush() -> LSN override {return LSN {std::numeric_limits<uint32_t>::max()};}
-};
-
-
-class StubWALReader: public IWALReader {
-public:
-    ~StubWALReader() override = default;
-    [[nodiscard]] auto record() const -> std::optional<WALRecord> override {return std::nullopt;}
-    auto increment() -> bool override {return false;}
-    auto decrement() -> bool override {return false;}
-    auto reset() -> void override {}
-};
-
 struct FakeFilesHarness {
 
     explicit FakeFilesHarness(Options);

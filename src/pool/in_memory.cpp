@@ -25,19 +25,20 @@ auto InMemory::acquire(PID id, bool is_writable) -> Page
     }
     auto &frame = m_frames[id.as_index()];
     auto page = frame.borrow(this, is_writable);
-    if (is_writable)
+    if (m_uses_transactions && is_writable)
         page.enable_tracking(m_scratch.get());
     return page;
 }
 
 auto InMemory::commit() -> void
 {
-    m_stack.clear();
+    if (can_commit())
+        m_stack.clear();
 }
 
 auto InMemory::abort() -> void
 {
-    while (!m_stack.empty()) {
+    while (can_commit()) {
         const auto [before, id, offset] = std::move(m_stack.back());
         m_stack.pop_back();
         auto page = acquire(id, true);

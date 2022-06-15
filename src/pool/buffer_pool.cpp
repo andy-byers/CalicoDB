@@ -17,22 +17,24 @@ BufferPool::BufferPool(Parameters param)
     , m_pager {{std::move(param.pool_file), param.page_size, param.frame_count}}
     , m_flushed_lsn {param.flushed_lsn}
     , m_next_lsn {param.flushed_lsn + LSN {1}}
-    , m_page_count {param.page_count} {}
+    , m_page_count {param.page_count}
+    , m_uses_transactions {param.use_transactions}
+{
+    CUB_EXPECT_EQ(m_uses_transactions, m_wal_reader && m_wal_writer);
+}
 
-/**
- * Determine if the current transaction can be committed.
- *
- * @return True if the current transaction can be committed, i.e. there have been updates since the last commit,
- *         otherwise false
- */
 auto BufferPool::can_commit() const -> bool
 {
-    return m_wal_writer->has_committed() || m_wal_writer->has_pending();
+    if (m_uses_transactions) {
+        return m_wal_writer->has_committed() || m_wal_writer->has_pending();
+    } else {
+        return m_cache.dirty_count() > 0;
+    }
 }
 
 auto BufferPool::block_size() const -> Size
 {
-    return m_wal_writer->block_size();
+    return m_uses_transactions ? m_wal_writer->block_size() : 0;
 }
 
 auto BufferPool::allocate(PageType type) -> Page
@@ -48,7 +50,7 @@ auto BufferPool::acquire(PID id, bool is_writable) -> Page
 {
     CUB_EXPECT_FALSE(id.is_null());
     auto page = fetch_page(id, is_writable);
-    if (is_writable)
+    if (m_uses_transactions && is_writable)
         page.enable_tracking(m_scratch.get());
     return page;
 }
@@ -89,6 +91,7 @@ auto BufferPool::propagate_page_error() -> void
 
 auto BufferPool::log_update(Page &page) -> void
 {
+    CUB_EXPECT_TRUE(m_uses_transactions);
     page.set_lsn(m_next_lsn);
 
     const WALRecord::Parameters param {
@@ -134,7 +137,6 @@ auto BufferPool::fetch_frame(PID id) -> Frame
 
 auto BufferPool::on_page_release(Page &page) -> void
 {
-    // If we have changes, we must be a writer. The shared mutex in Database::Impl should protect us.
     if (page.has_changes())
         log_update(page);
 
@@ -162,6 +164,7 @@ auto BufferPool::on_page_error() -> void
 
 auto BufferPool::roll_forward() -> bool
 {
+    CUB_EXPECT_TRUE(uses_transactions());
     m_wal_reader->reset();
 
     if (!m_wal_reader->record())
@@ -192,6 +195,7 @@ auto BufferPool::roll_forward() -> bool
 
 auto BufferPool::roll_backward() -> void
 {
+    CUB_EXPECT_TRUE(uses_transactions());
     // Make sure the WAL reader is at the end of the log.
     try {
         while (m_wal_reader->increment()) {}
@@ -222,16 +226,27 @@ auto BufferPool::roll_backward() -> void
 auto BufferPool::commit() -> void
 {
     CUB_EXPECT_TRUE(m_pinned.empty());
-    m_wal_writer->append(WALRecord::commit(m_next_lsn++));
-    try_flush_wal();
+
+    if (m_uses_transactions) {
+        m_wal_writer->append(WALRecord::commit(m_next_lsn++));
+        try_flush_wal();
+    }
+    // Flush all dirty database pages to disk.
     try_flush();
+    CUB_EXPECT_EQ(m_cache.dirty_count(), 0);
+
     m_pager.sync();
-    m_wal_writer->truncate();
+
+    // Don't do this until we have succeeded sync'ing the database file.
+    if (m_uses_transactions)
+        m_wal_writer->truncate();
 }
 
 auto BufferPool::abort() -> void
 {
     CUB_EXPECT_TRUE(m_pinned.empty());
+    CUB_EXPECT_TRUE(m_uses_transactions);
+
     try {
         try_flush_wal();
     } catch (const IOError &error) {
@@ -250,6 +265,7 @@ auto BufferPool::abort() -> void
 
 auto BufferPool::recover() -> bool
 {
+    CUB_EXPECT_TRUE(m_uses_transactions);
     if (!m_wal_writer->has_committed())
         return false;
 
@@ -273,8 +289,11 @@ auto BufferPool::try_flush() -> bool
     if (m_cache.is_empty())
         return false;
 
+    // If we aren't using transactions, we want to allow all dirty pages to be flushed to disk.
+    const auto limit = m_uses_transactions ? m_flushed_lsn : LSN::max();
+
     for (; ; ) {
-        if (auto frame = m_cache.evict(m_flushed_lsn)) {
+        if (auto frame = m_cache.evict(limit)) {
             m_pager.unpin(std::move(*frame));
         } else {
             break;

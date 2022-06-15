@@ -160,18 +160,6 @@ TEST_F(DatabaseTests, DatabaseDoesNotExistAfterItIsDestroyed)
     ASSERT_FALSE(system::exists(TEST_PATH));
 }
 
-TEST_F(DatabaseTests, DataPersists)
-{
-    std::vector<Record> records;
-    {
-        auto db = Database::open(TEST_PATH, {});
-        records = setup_database_with_committed_records(db, 500);
-    }
-
-    auto db = Database::open(TEST_PATH, {});
-    ASSERT_TRUE(database_contains_exact(db, records));
-}
-
 TEST_F(DatabaseTests, AbortRestoresState)
 {
     auto db = Database::open(TEST_PATH, {});
@@ -192,6 +180,73 @@ TEST_F(DatabaseTests, AbortRestoresState)
     CUB_EXPECT_EQ(info.record_count(), 2);
 }
 
+TEST_F(DatabaseTests, CannotAbortIfNotUsingTransactions)
+{
+    Options options;
+    options.use_transactions = false;
+    auto db = Database::open(TEST_PATH, options);
+    ASSERT_THROW(db.abort(), std::logic_error);
+}
+
+TEST_F(DatabaseTests, WALIsNotOpenedIfNotUsingTransactions)
+{
+    Options options;
+    options.use_transactions = false;
+
+    // The second time the database is opened, we should use the file header to determine that we are not
+    // using transactions for this database.
+    for (int i {}; i < 2; ++i) {
+        [[maybe_unused]] auto db = Database::open(TEST_PATH, options);
+        ASSERT_FALSE(system::exists(get_wal_path(TEST_PATH)));
+    }
+}
+
+auto run_persistence_test(const Options &options)
+{
+    static constexpr Size ROUND_SIZE {200};
+    static constexpr Size NUM_ROUNDS {10};
+
+    RecordGenerator::Parameters param;
+    param.mean_key_size = 16;
+    param.mean_value_size = 100;
+    RecordGenerator generator {param};
+    Random random {0};
+    const auto records = generator.generate(random, ROUND_SIZE * NUM_ROUNDS);
+    auto itr = std::cbegin(records);
+
+    for (Index round {}; round < NUM_ROUNDS; ++round) {
+        auto db = Database::open(TEST_PATH, options);
+        for (Index i {}; i < ROUND_SIZE; ++i) {
+            db.write(_b(itr->key), _b(itr->value));
+            itr++;
+        }
+    }
+
+    itr = std::cbegin(records);
+
+    for (Index round {}; round < NUM_ROUNDS; ++round) {
+        auto db = Database::open(TEST_PATH, options);
+        for (Index i {}; i < ROUND_SIZE; ++i) {
+            const auto record = db.read(_b(itr->key));
+            ASSERT_NE(record, std::nullopt);
+            ASSERT_EQ(record->value, itr->value);
+            itr++;
+        }
+    }
+}
+
+TEST_F(DatabaseTests, DataPersists)
+{
+    run_persistence_test({});
+}
+
+TEST_F(DatabaseTests, DataPersistsWhenNotUsingTransactions)
+{
+    Options options;
+    options.use_transactions = false;
+    run_persistence_test(options);
+}
+
 TEST_F(DatabaseTests, SubsequentAbortsHaveNoEffect)
 {
     auto db = Database::open(TEST_PATH, {});
@@ -204,6 +259,12 @@ TEST_F(DatabaseTests, SubsequentAbortsHaveNoEffect)
     ASSERT_EQ(info.record_count(), records.size());
     db.abort();
     ASSERT_EQ(info.record_count(), records.size());
+}
+
+TEST(TempDBTests, CannotAbortIfNotUsingTransactions)
+{
+    auto temp = Database::temp(0x100, false);
+    ASSERT_THROW(temp.abort(), std::logic_error);
 }
 
 TEST(TempDBTests, FreshDatabaseIsEmpty)
