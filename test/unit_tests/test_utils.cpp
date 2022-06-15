@@ -50,10 +50,18 @@ TEST_F(SliceTests, EqualsSelf)
     ASSERT_TRUE(bytes == bytes);
 }
 
-TEST_F(SliceTests, ShorterSlicesAreLessThan)
+TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
 {
     const auto shorter = bytes.range(0, bytes.size() - 1);
     ASSERT_TRUE(shorter < bytes);
+}
+
+TEST_F(SliceTests, FirstByteIsMostSignificant)
+{
+    ASSERT_TRUE(_b("10") > _b("01"));
+    ASSERT_TRUE(_b("01") < _b("10"));
+    ASSERT_TRUE(_b("10") >= _b("01"));
+    ASSERT_TRUE(_b("01") <= _b("10"));
 }
 
 TEST_F(SliceTests, CanGetPartialRange)
@@ -166,14 +174,14 @@ TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
     std::string u {"\x00", 1};
     std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), Comparison::EQ);
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::EQ);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), Comparison::LT);
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::LT);
 }
 
 TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
@@ -186,7 +194,7 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), Comparison::LT);
+    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::LT);
 }
 
 TEST(NonPrintableSliceTests, Conversions)

@@ -16,6 +16,8 @@ Cub DB is an embedded key-value database written in C++17.
   + [Querying a Database](#querying-a-database)
   + [Cursor Objects](#cursor-objects)
   + [Transactions](#transactions)
+  + [Deleting a Database](#deleting-a-database)
++ [Performance](#performance)
 + [Design](#design)
   + [db](#db)
   + [file](#file)
@@ -38,13 +40,15 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Durability provided through write-ahead logging
 + Uses a dynamic-order B-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
++ Allows creation of in-memory databases
 + Supports arbitrarily-sized values
++ API only exposes objects (no pointers to deal with)
 
 ## Caveats
 + Currently, Cub DB only runs on 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
 + Has a limit on key length, equal to roughly 1/4 of the page size
-+ Does not provide internal synchronization past multiple readers, however external synchronization can be used to allow writes (see `/test/integration/test_rw.cpp`)
++ Does not provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
 
 ## Build
 Cub DB is built using CMake.
@@ -123,7 +127,7 @@ assert(cub::_s(from_string) == data);
 function_taking_a_bytes_view(b);
 
 // Comparisons.
-assert(cub::compare_three_way(b, v) == cub::Comparison::EQ);
+assert(cub::compare_three_way(b, v) == cub::ThreeWayComparison::EQ);
 assert(b == v);
 ```
 
@@ -151,12 +155,12 @@ The `read*()` methods are provided for querying the database.
 
 ```C++
 // We can require an exact match.
-const auto record = db.read(cub::_b("sun bear"), cub::Comparison::EQ);
+const auto record = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::EQ);
 assert(record->value == "respectable");
 
 // Or, we can look for the first record with a key less than or greater than the given key.
-const auto less_than = db.read(cub::_b("sun bear"), cub::Comparison::LT);
-const auto greater_than = db.read(cub::_b("sun bear"), cub::Comparison::GT);
+const auto less_than = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::LT);
+const auto greater_than = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::GT);
 assert(less_than->value == "cool");
 
 // Whoops, there isn't a key greater than "sun bear".
@@ -212,12 +216,59 @@ assert(db.read(cub::_b("a"), true)->value == "1");
 assert(db.read(cub::_b("b"), true)->value == "2");
 ```
 
+### Deleting a Database
+
+```C++
+// We can delete a database by passing ownership to the following static method.
+cub::Database::destroy(std::move(db));
+```
+
+## Performance
+The benchmark suite (still in-progress) prints out each benchmark result in units of operations per second.
+Each database is opened without using direct I/O, as this usually seems to hurt performance (still working on that one).
+We use 16-byte keys and 100-byte values with a 4MB cache (similar to http://www.lmdb.tech/bench/microbench/benchmark.html).
+We still have a ways to go performance-wise, however, it seems that the cursors provide pretty fast sequential and reverse-sequential reads.
+
+```
+.--------------------------.--------------------------.
+| Name                     | Result (ops/second)      |
+|--------------------------|--------------------------|
+| write_rand               |                   37,185 |
+| write_seq                |                   57,079 |
+| read_rand                |                  161,717 |
+| read_seq                 |                3,611,615 |
+| read_rev                 |                4,429,556 |
+| erase_all_rand           |                   25,911 |
+| erase_all_seq            |                   26,941 |
+| erase_half_rand          |                   22,306 |
+| erase_half_seq           |                   22,230 |
+'--------------------------'--------------------------'
+
+.--------------------------.--------------------------.
+| Name (In-Memory DB)      | Result (ops/second)      |
+|--------------------------|--------------------------|
+| write_rand               |                   36,368 |
+| write_seq                |                   55,883 |
+| read_rand                |                  335,235 |
+| read_seq                 |                4,156,060 |
+| read_rev                 |                4,672,760 |
+| erase_all_rand           |                   53,372 |
+| erase_all_seq            |                   70,807 |
+| erase_half_rand          |                   58,205 |
+| erase_half_seq           |                   50,895 |
+'--------------------------'--------------------------'
+```
+
 ## TODO
 1. Get everything code reviewed!
 2. Get unit test coverage up
 3. Write some documentation
 4. Work on this README
 5. Work on performance
+6. Work on the benchmark suite
+   + Results may not be all that accurate
+   + Need to test large (100,000 B) values
+   + Code is very messy/difficult to change
 
 ## Design
 

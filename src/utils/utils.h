@@ -2,7 +2,7 @@
 #define CUB_UTILS_UTILS_H
 
 #include <filesystem>
-#include "cub/common.h"
+#include "cub/bytes.h"
 
 namespace cub {
 
@@ -44,6 +44,43 @@ inline auto get_wal_path(const std::string &path) -> std::string
 {
     std::filesystem::path full {path};
     return full.parent_path() / std::filesystem::path {"." + full.filename().string() + ".wal"};
+}
+
+inline auto mem_copy(Bytes dst, BytesView src, size_t n) noexcept -> void*
+{
+    assert(n <= src.size());
+    assert(n <= dst.size());
+    return std::memcpy(dst.data(), src.data(), n);
+}
+
+inline auto mem_copy(Bytes dst, BytesView src) noexcept -> void*
+{
+    assert(src.size() <= dst.size());
+    return mem_copy(dst, src, src.size());
+}
+
+inline auto mem_clear(Bytes mem, size_t n) noexcept -> void*
+{
+    assert(n <= mem.size());
+    return std::memset(mem.data(), 0, n);
+}
+
+inline auto mem_clear(Bytes mem) noexcept -> void*
+{
+    return mem_clear(mem, mem.size());
+}
+
+inline auto mem_move(Bytes dst, BytesView src, Size n) noexcept -> void*
+{
+    assert(n <= src.size());
+    assert(n <= dst.size());
+    return std::memmove(dst.data(), src.data(), n);
+}
+
+inline auto mem_move(Bytes dst, BytesView src) noexcept -> void*
+{
+    assert(src.size() <= dst.size());
+    return mem_move(dst, src, src.size());
 }
 
 } // cub

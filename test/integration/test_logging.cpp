@@ -70,7 +70,7 @@ public:
             switch (random.next_int(2)) {
                 case 0: page.put_u16(offset, random.next_int(std::numeric_limits<uint16_t>::max())); break;
                 case 1: page.put_u32(offset, random.next_int(std::numeric_limits<uint32_t>::max())); break;
-                case 2: page.write(_b(random_string(random, random.next_int(1UL, page.size() - offset))), offset); break;
+                case 2: page.write(_b(random_string(random, random.next_int(Size {1}, page.size() - offset))), offset); break;
             }
         }
     }

@@ -184,7 +184,7 @@ auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
         std::move(wal_reader_file),
         std::move(wal_writer_file),
         header,
-        DEFAULT_FRAME_COUNT,
+        0x10, // Use a small number of frames to force a lot of I/O.
     });
     db.page_size = page_size;
     return db;

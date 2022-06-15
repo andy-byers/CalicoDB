@@ -13,7 +13,17 @@ using namespace cub;
 constexpr auto PATH = "/tmp/cub_benchmark";
 constexpr Size FIELD_WIDTH {24};
 constexpr Size BASELINE_MULTIPLIER {10};
-Options options;
+constexpr Size PAGE_SIZE {0x8000};
+constexpr Size CACHE_SIZE {0x400000};
+constexpr Size KEY_SIZE {16};
+constexpr Size VALUE_SIZE {100};
+constexpr Size LARGE_VALUE_SIZE {100'000};
+constexpr Options options {
+    PAGE_SIZE,              // Page size
+    PAGE_SIZE,              // Block size
+    CACHE_SIZE / PAGE_SIZE, // Frame count
+    0666,
+};
 
 struct BenchmarkParameters {
     Size num_replicants {};
@@ -49,9 +59,6 @@ auto create()
 {
     std::filesystem::remove(PATH);
     std::filesystem::remove(get_wal_path(PATH));
-    options.frame_count = 128;
-    options.page_size = 0x4000;
-    options.block_size = options.page_size * 2;
     return Database::open(PATH, options);
 }
 
@@ -63,7 +70,7 @@ auto create_temp(Size page_size)
 auto build_common(Work &records, bool is_sequential)
 {
     if (is_sequential)
-        std::sort(records.begin(), records.end());
+        std::sort(begin(records), end(records));
 }
 
 auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
@@ -74,7 +81,7 @@ auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
     build_common(records, is_sorted);
 
     if (is_reversed)
-        std::reverse(records.begin(), records.end());
+        std::reverse(begin(records), end(records));
 
     for (const auto &[key, value]: records)
         db.write(_b(key), _b(value));
@@ -107,31 +114,36 @@ auto run_erases(Database &db, const Work &work)
 
 auto run_read_rand(Database &db, const Work &work)
 {
+    std::string v;
     auto cursor = db.get_cursor();
     for (const auto &[key, value]: work) {
         CUB_EXPECT_TRUE(cursor.find(_b(key)));
-        (void)cursor.value();
+        v = cursor.value();
     }
 }
 
 auto run_read_seq(Database &db, const Work &work)
 {
+    std::string k, v;
     auto cursor = db.get_cursor();
     cursor.find_minimum();
     for (const auto &w: work) {
         (void)w;
-        (void)cursor.value();
+        k = _s(cursor.key());
+        v = cursor.value();
         cursor.increment();
     }
 }
 
 auto run_read_rev(Database &db, const Work &work)
 {
+    std::string k, v;
     auto cursor = db.get_cursor();
     cursor.find_maximum();
     for (const auto &w: work) {
         (void)w;
-        (void)cursor.value();
+        k = _s(cursor.key());
+        v = cursor.value();
         cursor.decrement();
     }
 }
@@ -229,17 +241,29 @@ auto main(int argc, const char *argv[]) -> int
 
     static constexpr auto num_warmup_rounds = 2;
     static constexpr auto num_replicants = 8;
-    static constexpr auto num_elements = 10'000;
+    static constexpr auto num_elements = 40'000;
+//    static constexpr auto num_large_elements = 1'000;
+
+    CUB_EXPECT_STATIC(num_elements * (KEY_SIZE+VALUE_SIZE) > CACHE_SIZE,
+                      "Use more or larger records. Benchmark is unfair.");
 
     const auto seed = Clock::now().time_since_epoch().count();
     Random random {static_cast<unsigned>(seed)};
 
     RecordGenerator::Parameters generator_param;
-    generator_param.mean_key_size = 15;
-    generator_param.mean_value_size = 100;
-    generator_param.spread = 5;
+    generator_param.mean_key_size = KEY_SIZE;
+    generator_param.mean_value_size = VALUE_SIZE;
+    generator_param.spread = 0;
     RecordGenerator generator {generator_param};
     auto records = generator.generate(random, num_elements);
+
+//    generator_param.mean_key_size = KEY_SIZE;
+//    generator_param.mean_value_size = LARGE_VALUE_SIZE;
+//    generator_param.spread = 0;
+//    RecordGenerator large_generator {generator_param};
+//    auto large_records = generator.generate(random, num_large_elements);
+//    (void)large_records;
+    (void)LARGE_VALUE_SIZE;
 
     // We only erase half of the records for one group of tests. The remove() routine gets faster when the tree is small,
     // so we expect those tests to produce less operations per second than their counterparts that empty out the tree.

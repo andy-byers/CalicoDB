@@ -11,128 +11,248 @@
 
 namespace cub {
 
-enum class Comparison {
-   LT = -1,
-   EQ =  0,
-   GT =  1,
+/**
+ * An enum for specifying a three-way comparison.
+ */
+enum class ThreeWayComparison {
+   LT = -1, ///< Less than
+   EQ = 0, ///< Equal to
+   GT = 1, ///< Greater than
 };
 
 namespace impl {
 
-   template<class Pointer> class Slice {
-   public:
-       using UnqualifiedPointer = std::remove_const_t<Pointer>;
-       using ConstPointer = std::add_const_t<UnqualifiedPointer>;
-       using Value = std::remove_pointer_t<UnqualifiedPointer>;
+    /**
+     * An internal class representing an unowned sequence of primitives.
+     *
+     * This class should be used indirectly through the Bytes and BytesView aliases.
+     *
+     * @see Bytes
+     * @see BytesView
+     * @tparam Pointer The underlying pointer type.
+     */
+    template<class Pointer> class Slice {
+    public:
+        using UnqualifiedPointer = std::remove_const_t<Pointer>;
+        using ConstPointer = std::add_const_t<UnqualifiedPointer>;
+        using Value = std::remove_pointer_t<UnqualifiedPointer>;
 
-       Slice() noexcept = default;
+        Slice() noexcept = default;
 
-       // Allow this implicit conversion for convenience.
-       template<class Q> Slice(Slice<Q> rhs) noexcept
-           : Slice {rhs.data(), rhs.size()} {}
+        /**
+         * Create a slice from another slice.
+         *
+         * This constructor exists to allow implicit conversions from Bytes to BytesView.
+         *
+         * @tparam Q The other slice pointer type.
+         * @param rhs The other slice.
+         */
+        template<class Q> Slice(Slice<Q> rhs) noexcept
+            : Slice {rhs.data(), rhs.size()} {}
 
-       template<class Q> Slice(Q data, Size size) noexcept
-           : m_data {data}
-           , m_size {size} {}
+        /**
+         * Create a slice from a pointer and a length.
+         *
+         * @tparam Q The pointer type.
+         * @param data A pointer to the start of a sequence.
+         * @param size The length of the sequence.
+         */
+        template<class Q> Slice(Q data, Size size) noexcept
+            : m_data {data}
+            , m_size {size} {}
 
-       auto operator[](Index index) const noexcept -> const Value&
-       {
-           assert(index < m_size);
-           return m_data[index];
-       }
+        /**
+         * Reference an element from the slice.
+         *
+         * @param index The index of the element.
+         * @return A const reference to the element.
+         */
+        auto operator[](Index index) const noexcept -> const Value&
+        {
+            assert(index < m_size);
+            return m_data[index];
+        }
 
-       auto operator[](Index index) noexcept -> Value&
-       {
-           assert(index < m_size);
-           return m_data[index];
-       }
+        /**
+         * Reference an element from the slice.
+         *
+         * @param index The index of the element.
+         * @return A reference to the element.
+         */
+        auto operator[](Index index) noexcept -> Value&
+        {
+            assert(index < m_size);
+            return m_data[index];
+        }
 
-       [[nodiscard]] auto is_empty() const noexcept -> bool
-       {
-           return m_size == 0;
-       }
+        /**
+         * Determine if the slice is empty.
+         *
+         * @return True if the slice has zero length, false otherwise.
+         */
+        [[nodiscard]] auto is_empty() const noexcept -> bool
+        {
+            return m_size == 0;
+        }
 
-       [[nodiscard]] auto size() const noexcept -> Size
-       {
-           return m_size;
-       }
+        /**
+         * Get the length of the slice.
+         *
+         * @return The length in elements.
+         */
+        [[nodiscard]] auto size() const noexcept -> Size
+        {
+            return m_size;
+        }
 
-       [[nodiscard]] auto copy() const -> Slice
-       {
-           return *this;
-       }
+        /**
+         * Get a copy of the slice.
+         *
+         * @return A copy of the slice.
+         */
+        [[nodiscard]] auto copy() const -> Slice
+        {
+            return *this;
+        }
 
-       [[nodiscard]] auto range(Index offset, Size size) const noexcept -> Slice
-       {
-           assert(size <= m_size);
-           assert(offset <= m_size);
-           assert(offset + size <= m_size);
-           return Slice {m_data + offset, size};
-       }
+        /**
+         * Create another slice out of a sub-section of this slice.
+         *
+         * @param offset The offset of the range in elements.
+         * @param size The size of the range in elements.
+         * @return The new slice.
+         */
+        [[nodiscard]] auto range(Index offset, Size size) const noexcept -> Slice
+        {
+            assert(size <= m_size);
+            assert(offset <= m_size);
+            assert(offset + size <= m_size);
+            return Slice {m_data + offset, size};
+        }
 
-       [[nodiscard]] auto range(Index offset) const noexcept -> Slice
-       {
-           assert(m_size >= offset);
-           return range(offset, m_size - offset);
-       }
+        /**
+         * Create another slice out of a sub-section of this slice.
+         *
+         * @param offset The offset of the range in elements.
+         * @return The new slice, spanning from the given offset to the end.
+         */
+        [[nodiscard]] auto range(Index offset) const noexcept -> Slice
+        {
+            assert(m_size >= offset);
+            return range(offset, m_size - offset);
+        }
 
-       [[nodiscard]] auto data() const noexcept -> ConstPointer
-       {
-           return m_data;
-       }
+        /**
+         * Get the underlying pointer.
+         *
+         * @return The underlying pointer.
+         */
+        [[nodiscard]] auto data() const noexcept -> ConstPointer
+        {
+            return m_data;
+        }
 
-       auto data() noexcept -> UnqualifiedPointer
-       {
-           return m_data;
-       }
+        /**
+         * Get the underlying pointer.
+         *
+         * @return The underlying pointer.
+         */
+        auto data() noexcept -> UnqualifiedPointer
+        {
+            return m_data;
+        }
 
-       auto clear() noexcept -> void
-       {
-           m_data = nullptr;
-           m_size = 0;
-       }
+        /**
+         * Invalidate the slice.
+         */
+        auto clear() noexcept -> void
+        {
+            m_data = nullptr;
+            m_size = 0;
+        }
 
-       auto advance(Size n = 1) noexcept -> Slice
-       {
-           assert(n <= m_size);
-           m_data += n;
-           m_size -= n;
-           return *this;
-       }
+        /**
+         * Move the beginning of the slice forward.
+         *
+         * @param n The number of elements to advance by.
+         * @return A copy of this slice for chaining.
+         */
+        auto advance(Size n = 1) noexcept -> Slice
+        {
+            assert(n <= m_size);
+            m_data += n;
+            m_size -= n;
+            return *this;
+        }
 
-       auto truncate(Size size) noexcept -> Slice
-       {
-           assert(size <= m_size);
-           m_size = size;
-           return *this;
-       }
+        /**
+         * Reduce the length of the slice.
+         *
+         * @param n The number of elements to reduce the length by.
+         * @return A copy of this slice for chaining.
+         */
+        auto truncate(Size size) noexcept -> Slice
+        {
+            assert(size <= m_size);
+            m_size = size;
+            return *this;
+        }
 
-   private:
-       Pointer m_data{};
-       Size m_size{};
-   };
+    private:
+        Pointer m_data {}; ///< Pointer to the beginning of the data.
+        Size m_size {}; ///< Number of elements in the slice.
+    };
 
 } // impl
 
+/**
+ * Represents an unowned, mutable sequence of bytes.
+ */
 using Bytes = impl::Slice<Byte*>;
+
+/**
+ * Represents an unowned, immutable sequence of bytes.
+ */
 using BytesView = impl::Slice<const Byte*>;
 
+/**
+ * Take an immutable slice of a string.
+ * @param data The string.
+ * @return The immutable slice.
+ */
 inline auto _b(const std::string &data) noexcept -> BytesView
 {
    return {data.data(), data.size()};
 }
 
+/**
+ * Take a mutable slice of a string.
+ * @param data The string.
+ * @return The mutable slice.
+ */
 inline auto _b(std::string &data) noexcept -> Bytes
 {
    return {data.data(), data.size()};
 }
 
+/**
+ * Create an owned string out of a slice.
+ * @param data The slice.
+ * @return The owned string.
+ */
 inline auto _s(BytesView data) -> std::string
 {
    return {data.data(), data.size()};
 }
 
-inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> Comparison
+/**
+ * Determine if one slice is less than, equal to, or greater than, another slice.
+ *
+ * @param lhs The first slice.
+ * @param rhs The second slice.
+ * @return An enum value representing the order between the two slices.
+ */
+inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> ThreeWayComparison
 {
    const auto min_length = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
    auto r = std::memcmp(lhs.data(), rhs.data(), min_length);
@@ -142,74 +262,37 @@ inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> Comparis
        } else if (lhs.size() > rhs.size()) {
            r = 1;
        } else {
-           return Comparison::EQ;
+           return ThreeWayComparison::EQ;
        }
    }
-   return r < 0 ? Comparison::LT : Comparison::GT;
-}
-
-inline auto mem_copy(Bytes dst, BytesView src, size_t n) noexcept -> void*
-{
-    assert(n <= src.size());
-    assert(n <= dst.size());
-    return std::memcpy(dst.data(), src.data(), n);
-}
-
-inline auto mem_copy(Bytes dst, BytesView src) noexcept -> void*
-{
-    assert(src.size() <= dst.size());
-    return mem_copy(dst, src, src.size());
-}
-
-inline auto mem_clear(Bytes mem, size_t n) noexcept -> void*
-{
-    assert(n <= mem.size());
-    return std::memset(mem.data(), 0, n);
-}
-
-inline auto mem_clear(Bytes mem) noexcept -> void*
-{
-    return mem_clear(mem, mem.size());
-}
-
-inline auto mem_move(Bytes dst, BytesView src, Size n) noexcept -> void*
-{
-    assert(n <= src.size());
-    assert(n <= dst.size());
-    return std::memmove(dst.data(), src.data(), n);
-}
-
-inline auto mem_move(Bytes dst, BytesView src) noexcept -> void*
-{
-    assert(src.size() <= dst.size());
-    return mem_move(dst, src, src.size());
+   return r < 0 ? ThreeWayComparison::LT : ThreeWayComparison::GT;
 }
 
 } // cub
 
 inline auto operator<(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
 {
-    return cub::compare_three_way(lhs, rhs) == cub::Comparison::LT;
+    return cub::compare_three_way(lhs, rhs) == cub::ThreeWayComparison::LT;
 }
 
 inline auto operator<=(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
 {
-    return cub::compare_three_way(lhs, rhs) != cub::Comparison::GT;
+    return cub::compare_three_way(lhs, rhs) != cub::ThreeWayComparison::GT;
 }
 
 inline auto operator>(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
 {
-    return cub::compare_three_way(lhs, rhs) == cub::Comparison::GT;
+    return cub::compare_three_way(lhs, rhs) == cub::ThreeWayComparison::GT;
 }
 
 inline auto operator>=(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
 {
-    return cub::compare_three_way(lhs, rhs) != cub::Comparison::LT;
+    return cub::compare_three_way(lhs, rhs) != cub::ThreeWayComparison::LT;
 }
 
 inline auto operator==(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool
 {
-    return cub::compare_three_way(lhs, rhs) == cub::Comparison::EQ;
+    return cub::compare_three_way(lhs, rhs) == cub::ThreeWayComparison::EQ;
 }
 
 inline auto operator!=(cub::BytesView lhs, cub::BytesView rhs) noexcept -> bool

@@ -28,6 +28,7 @@ public:
     auto unpin(Frame) -> void;
     auto discard(Frame) -> void;
     auto truncate(Size) -> void;
+    auto sync() -> void;
 
 private:
     [[nodiscard]] auto try_read_page_from_file(PID, Bytes) const -> bool;

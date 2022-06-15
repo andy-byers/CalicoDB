@@ -17,11 +17,8 @@ namespace cub {
 
 auto Record::operator<(const Record &rhs) const -> bool
 {
-    return compare_three_way(_b(key), _b(rhs.key)) == Comparison::LT;
+    return _b(key) < _b(rhs.key);
 }
-
-Info::Info(Database::Impl *db)
-    : m_db {db} {}
 
 auto Info::cache_hit_ratio() const -> double
 {
@@ -36,6 +33,16 @@ auto Info::record_count() const -> Size
 auto Info::page_count() const -> Size
 {
     return m_db->page_count();
+}
+
+auto Info::page_size() const -> Size
+{
+    return m_db->page_size();
+}
+
+auto Info::maximum_key_size() const -> Size
+{
+    return get_max_local(page_size());
 }
 
 Database::Impl::~Impl()
@@ -91,8 +98,7 @@ Database::Impl::Impl(Parameters param)
 }
 
 Database::Impl::Impl(Size page_size)
-    : m_path {"<Temp DB>"}
-    , m_pool {std::make_unique<InMemory>(page_size)}
+    : m_pool {std::make_unique<InMemory>(page_size)}
     , m_tree {std::make_unique<Tree>(Tree::Parameters {m_pool.get(), PID::null(), 0, 0, 0})}
 {
     m_tree->allocate_node(PageType::EXTERNAL_NODE);
@@ -107,7 +113,9 @@ auto Database::Impl::recover() -> void
 
 auto Database::Impl::get_info() -> Info
 {
-    return Info {this};
+    Info info;
+    info.m_db = this;
+    return info;
 }
 
 auto Database::Impl::get_cursor() -> Cursor
@@ -117,27 +125,37 @@ auto Database::Impl::get_cursor() -> Cursor
     return reader;
 }
 
-auto Database::Impl::read(BytesView key, Comparison comparison) -> std::optional<Record>
+auto Database::Impl::read(BytesView key, Ordering ordering) -> std::optional<Record>
 {
     if (auto cursor = get_cursor(); cursor.has_record()) {
         const auto found_exact = cursor.find(key);
-        switch (comparison) {
-            case Comparison::EQ:
+        switch (ordering) {
+            case Ordering::EQ:
                 if (!found_exact)
                     return std::nullopt;
                 break;
-            case Comparison::GT:
+            case Ordering::GE:
+                if (found_exact)
+                    break;
+                [[fallthrough]];
+            case Ordering::GT:
                 if (cursor.is_maximum() && (found_exact || cursor.key() < key))
                     return std::nullopt;
                 if (found_exact && !cursor.increment())
                     return std::nullopt;
                 break;
-            case Comparison::LT:
+            case Ordering::LE:
+                if (found_exact)
+                    break;
+                [[fallthrough]];
+            case Ordering::LT:
                 if (cursor.is_maximum() && cursor.key() < key)
                     break;
                 if (!cursor.decrement())
                     return std::nullopt;
                 break;
+            default:
+                throw std::invalid_argument {"Unknown ordering"};
         }
         return Record {_s(cursor.key()), cursor.value()};
     }
@@ -225,6 +243,11 @@ auto Database::Impl::page_count() const -> Size
     return m_pool->page_count();
 }
 
+auto Database::Impl::page_size() const -> Size
+{
+    return m_pool->page_size();
+}
+
 auto Database::open(const std::string &path, const Options &options) -> Database
 {
     if (path.empty())
@@ -260,18 +283,19 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         header.set_block_size(options.block_size);
     }
 
-    const auto mode = Mode::CREATE | Mode::DIRECT | Mode::SYNCHRONOUS;
+    const auto mode = Mode::CREATE | (options.use_direct_io ? Mode::DIRECT : Mode {});
     auto database_file = std::make_unique<ReadWriteFile>(path, mode, options.permissions);
     auto wal_reader_file = std::make_unique<ReadOnlyFile>(get_wal_path(path), mode, options.permissions);
     auto wal_writer_file = std::make_unique<LogFile>(get_wal_path(path), mode, options.permissions);
 
 #if !CUB_HAS_O_DIRECT
     try {
-        database_file->use_direct_io();
-        wal_reader_file->use_direct_io();
-        wal_writer_file->use_direct_io();
+        if (options.use_direct_io) {
+            database_file->use_direct_io();
+            wal_reader_file->use_direct_io();
+            wal_writer_file->use_direct_io();
+        }
     } catch (const std::system_error &error) {
-        // TODO: Log, or otherwise notify the user? Maybe a flag in Options to control whether we fail here?
         throw; // TODO: Rethrowing for now.
     }
 #endif
@@ -295,6 +319,14 @@ auto Database::temp(Size page_size) -> Database
     return db;
 }
 
+auto Database::destroy(Database db) -> void
+{
+    if (const auto &path = db.m_impl->path(); !path.empty()) {
+        system::unlink(path);
+        system::unlink(get_wal_path(path));
+    }
+}
+
 Database::Database() = default;
 
 Database::~Database() = default;
@@ -303,9 +335,9 @@ Database::Database(Database&&) noexcept = default;
 
 auto Database::operator=(Database&&) noexcept -> Database& = default;
 
-auto Database::read(BytesView key, Comparison comparison) const -> std::optional<Record>
+auto Database::read(BytesView key, Ordering ordering) const -> std::optional<Record>
 {
-    return m_impl->read(key, comparison);
+    return m_impl->read(key, ordering);
 }
 
 auto Database::read_minimum() const -> std::optional<Record>
@@ -323,6 +355,12 @@ auto Database::write(BytesView key, BytesView value) -> bool
     return m_impl->write(key, value);
 }
 
+auto Database::write(const Record &record) -> bool
+{
+    const auto &[key, value] = record;
+    return m_impl->write(_b(key), _b(value));
+}
+
 auto Database::erase(BytesView key) -> bool
 {
     return m_impl->erase(key);
@@ -338,14 +376,44 @@ auto Database::abort() -> bool
     return m_impl->abort();
 }
 
-auto Database::get_cursor() -> Cursor
+auto Database::get_cursor() const -> Cursor
 {
     return m_impl->get_cursor();
 }
 
-auto Database::get_info() -> Info
+auto Database::get_info() const -> Info
 {
     return m_impl->get_info();
 }
 
 } // cub
+
+auto operator<(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) < cub::_b(rhs.key);
+}
+
+auto operator>(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) > cub::_b(rhs.key);
+}
+
+auto operator<=(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) <= cub::_b(rhs.key);
+}
+
+auto operator>=(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) >= cub::_b(rhs.key);
+}
+
+auto operator==(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) == cub::_b(rhs.key);
+}
+
+auto operator!=(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) != cub::_b(rhs.key);
+}

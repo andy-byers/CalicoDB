@@ -17,10 +17,9 @@ auto use_direct_io([[maybe_unused]] int fd) -> void
 #endif
 }
 
-// TODO
-auto access(const std::string &name, int mode) -> bool
+auto exists(const std::string &name) -> bool
 {
-    return ::access(name.c_str(), mode) == 0;
+    return ::access(name.c_str(), F_OK) == SUCCESS;
 }
 
 auto open(const std::string &name, int mode, int permissions) -> int
@@ -90,13 +89,6 @@ auto size(int file) -> Size
     if (struct stat st {}; fstat(file, &st) != FAILURE)
         return static_cast<Size>(st.st_size);
     throw std::system_error {errno, std::system_category(), "fstat"};
-}
-
-// TODO
-auto exists(const std::string &path) -> bool
-{
-    struct stat unused {};
-    return stat(path.c_str(), &unused) == SUCCESS;
 }
 
 auto resize(int file, Size size) -> void

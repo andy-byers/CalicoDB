@@ -225,6 +225,7 @@ auto BufferPool::commit() -> void
     m_wal_writer->append(WALRecord::commit(m_next_lsn++));
     try_flush_wal();
     try_flush();
+    m_pager.sync();
     m_wal_writer->truncate();
 }
 
