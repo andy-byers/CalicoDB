@@ -172,9 +172,16 @@ public:
     /**
      * Get the database page size.
      *
-     * @return The page size.
+     * @return The page size in bytes.
      */
     [[nodiscard]] auto page_size() const -> Size;
+
+    /**
+     * Get the maximum allowed key size.
+     *
+     * @return The maximal key length in characters.
+     */
+    [[nodiscard]] auto maximum_key_size() const -> Size;
 
 private:
     friend class Database;

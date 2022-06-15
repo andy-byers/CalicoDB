@@ -1,7 +1,6 @@
 #include "tree.h"
 
 #include <optional>
-#include "cub/exception.h"
 #include "page/cell.h"
 #include "page/file_header.h"
 #include "page/link.h"
@@ -135,7 +134,7 @@ auto Tree::positioned_remove(Position position) -> void
     if (!node.is_external()) {
         auto [other, other_index] = find_local_max(acquire_node(node.child_id(index), true));
         auto other_cell = other.extract_cell(other_index, m_scratch.get());
-        anchor = _s(other_cell.key()); // TODO: Avoid this if possible. Seems unnecessary?
+        anchor = _s(other_cell.key());
         other_cell.set_left_child_id(node.child_id(index));
         node.remove_at(index, node.read_cell(index).size());
 
@@ -580,40 +579,36 @@ auto do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 
     // Include the overflow cell in our count.
     const auto n = Ln.cell_count() + 1;
-    const auto overflow_key = overflow.key();
 
     // Figure out where the overflow cell should go.
-    const auto [overflow_idx, should_be_false]{Ln.find_ge(overflow.key())};
+    const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
     CUB_EXPECT_FALSE(should_be_false);
-
-//    const auto select_median = []() {
-//
-//    };
-
-    // TODO: Get rid of the optional(s). It's a hack from when Cell was changed to be non-copyable.
-    std::optional<Cell> median {};
-    std::optional<Cell> temp {std::move(overflow)};
+    auto where = ThreeWayComparison::EQ;
     auto median_index = n / 2;
-    if (overflow_idx == median_index) {
-        median = std::move(*temp);
-    } else {
-        median_index -= overflow_idx < median_index;
-        median = Ln.extract_cell(median_index, std::move(scratch));
-    }
+
+    const auto select_median = [&](Index index) {
+        if (index == median_index) {
+            return std::move(overflow);
+        } else {
+            const auto is_right_of_median = index > median_index;
+            median_index -= !is_right_of_median;
+            // Since `is_left_of_median` is either 0 or 1, this will produce either -1 or 1, i.e. LT or
+            // GT to indicate the position of the overflow cell relative to the median.
+            where = static_cast<ThreeWayComparison>(2*is_right_of_median - 1);
+            return Ln.extract_cell(median_index, std::move(scratch));
+        }
+    };
+    auto median = select_median(overflow_idx);
+
     if (Ln.is_external()) {
         rn.set_right_sibling_id(Ln.right_sibling_id());
         Ln.set_right_sibling_id(rn.id());
     } else {
         rn.set_rightmost_child_id(Ln.rightmost_child_id());
-        Ln.set_rightmost_child_id(median->left_child_id());
+        Ln.set_rightmost_child_id(median.left_child_id());
     }
     rn.set_parent_id(Ln.parent_id());
-    median->set_left_child_id(Ln.id());
-
-    // Transformation:
-    //    P:[...]                            P:[...,         c,         ...]
-    // ...       L:[a, b, c, d, e]   -->  ...       L:[a, b]    R:[d, e]
-    //          A     B  C  D  E  F                A     B  C  D     E  F
+    median.set_left_child_id(Ln.id());
 
     // Transfer cells after the median cell to the right sibling node.
     const auto cell_count = Ln.cell_count();
@@ -628,18 +623,18 @@ auto do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
         CUB_EXPECT_FALSE(found_eq);
         target.insert_at(index, std::move(cell));
     };
-    switch (compare_three_way(overflow_key, median->key())) {
-        case ThreeWayComparison::EQ:
-            // No transfer. The median/overflow key is returned.
-            break;
+    switch (where) {
         case ThreeWayComparison::LT:
-            do_transfer(Ln, std::move(*temp));
+            do_transfer(Ln, std::move(overflow));
             break;
         case ThreeWayComparison::GT:
-            do_transfer(rn, std::move(*temp));
+            do_transfer(rn, std::move(overflow));
+            break;
+        case ThreeWayComparison::EQ:
+            // No transfer. The median/overflow cell is returned.
             break;
     }
-    return std::move(*median);
+    return median;
 }
 
 } // cub

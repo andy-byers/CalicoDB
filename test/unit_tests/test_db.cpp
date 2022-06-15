@@ -354,6 +354,59 @@ TEST_F(DatabaseTests, DatabaseIsMovable)
     [[maybe_unused]] auto dst = std::move(src);
 }
 
+class InfoTests: public testing::Test {
+public:
+    static constexpr Size PAGE_SIZE {0x200};
+    static constexpr Size NUM_RECORDS {250};
+
+    InfoTests()
+        : db {FaultyDatabase::create(PAGE_SIZE)} {}
+
+    auto add_records()
+    {
+        DatabaseBuilder builder {db.db.get()};
+        builder.write_unique_records(NUM_RECORDS, {});
+    }
+
+    FaultyDatabase db;
+};
+
+TEST_F(InfoTests, FreshDatabaseIsEmpty)
+{
+    const auto info = db.db->get_info();
+    ASSERT_EQ(info.record_count(), 0);
+}
+
+TEST_F(InfoTests, FreshDatabaseHasOnePage)
+{
+    const auto info = db.db->get_info();
+    ASSERT_EQ(info.page_count(), 1);
+}
+
+TEST_F(InfoTests, InsertMaximalKey)
+{
+    const auto info = db.db->get_info();
+    const auto max_size = info.maximum_key_size();
+    const std::string key(max_size, 'X');
+    db.db->write(_b(key), _b(key));
+    ASSERT_EQ(db.db->read(_b(key), Ordering::EQ)->value, key);
+}
+
+TEST_F(InfoTests, InsertOverMaximalKeyDeathTest)
+{
+    const auto info = db.db->get_info();
+    const auto max_size_plus_1 = info.maximum_key_size() + 1;
+    const std::string key(max_size_plus_1, 'X');
+    ASSERT_THROW(db.db->write(_b(key), _b(key)), std::invalid_argument);
+}
+
+TEST_F(InfoTests, ReportsRecordCountCorrectly)
+{
+    const auto info = db.db->get_info();
+    add_records();
+    ASSERT_EQ(info.record_count(), NUM_RECORDS);
+}
+
 class CursorTests: public testing::Test {
 public:
     CursorTests()
@@ -365,9 +418,7 @@ public:
         param.mean_key_size = 16;
         // Use large values and small pages so that the cursor has to move between nodes around a lot.
         param.mean_value_size = 100;
-        param.is_sequential = true;
-        builder.write_records(num_records, {});
-        // Already sorted by the record generator since we passed true for is_sequential.
+        builder.write_records(num_records, param);
         records = builder.collect_records();
     }
 

@@ -40,7 +40,9 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Durability provided through write-ahead logging
 + Uses a dynamic-order B-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
++ Allows creation of in-memory databases
 + Supports arbitrarily-sized values
++ API only exposes objects (no pointers to deal with)
 
 ## Caveats
 + Currently, Cub DB only runs on 64-bit Ubuntu and OSX

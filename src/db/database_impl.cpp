@@ -40,6 +40,11 @@ auto Info::page_size() const -> Size
     return m_db->page_size();
 }
 
+auto Info::maximum_key_size() const -> Size
+{
+    return get_max_local(page_size());
+}
+
 Database::Impl::~Impl()
 {
     try {

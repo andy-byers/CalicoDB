@@ -6,24 +6,6 @@
 
 namespace cub {
 
-/*
- * File Header Layout:
- *     .--------------------.-------.--------.
- *     | Field Name         | Size  | Offset |
- *     :--------------------:-------:--------:
- *     | magic_code         | 4     | 0      |
- *     | header_crc         | 4     | 4      |
- *     | page_count         | 4     | 8      |
- *     | node_count         | 4     | 12     |
- *     | free_count         | 4     | 16     |
- *     | free_start         | 4     | 20     |
- *     | page_size          | 2     | 24     |
- *     | block_size         | 2     | 26     |
- *     | key_count          | 4     | 28     |
- *     | flushed_lsn        | 4     | 32     |
- *     '--------------------'-------'--------'
- */
-
 class FileLayout {
 public:
     static const Size MAGIC_CODE_OFFSET = 0;
@@ -74,16 +56,6 @@ public:
  *     '----'-------------------------------------------------'
  */
 
-/*
- * Page Header Layout:
- *     .--------------------.-------.--------.
- *     | Field Name         | Size  | Offset |
- *     :--------------------:-------:--------:
- *     | lsn                | 4     | 0      |
- *     | type               | 2     | 4      |
- *     '--------------------'-------'--------'
- */
-
 class PageLayout {
 public:
     static const Size LSN_OFFSET = 0;
@@ -100,28 +72,6 @@ public:
         return header_offset(page_id) + HEADER_SIZE;
     }
 };
-
-/*
- * Node Header Layout:
- *     .--------------------.-------.--------.
- *     | Field Name         | Size  | Offset |
- *     :--------------------:-------:--------:
- *     | header_crc         | 4     | 0      |
- *     | parent_id          | 4     | 4      |
- *     | rightmost_child_id | 4     | 8      |
- *     | right_sibling_id¹  | 4     | 8      |
- *     | cell_count (n)     | 2     | 12     |
- *     | free_count         | 2     | 14     |
- *     | cell_start         | 2     | 16     |
- *     | free_start         | 2     | 18     |
- *     | frag_count         | 2     | 20     |
- *     :--------------------:-------:--------:
- *     | cell_pointers      | n * 2 | 22     |
- *     '--------------------'-------'--------'
- *
- *     ¹ rightmost_child_id and right_sibling_id refer to the same data location. One should access rightmost_child_id
- *       in internal nodes and right_sibling_id in external nodes.
- */
 
 class NodeLayout {
 public:
@@ -147,15 +97,6 @@ public:
     }
 };
 
-/*
- * Link Header Layout:
- *     .--------------------.-------.--------.
- *     | Field Name         | Size  | Offset |
- *     :--------------------:-------:--------:
- *     | next_id            | 4     | 0      |
- *     '--------------------'-------'--------'
- */
-
 class LinkLayout {
 public:
     static const Size NEXT_ID_OFFSET = 0;
@@ -175,7 +116,6 @@ public:
         return header_offset() + HEADER_SIZE;
     }
 };
-
 
 inline auto get_min_local(Size page_size)
 {
