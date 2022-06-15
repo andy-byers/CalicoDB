@@ -137,6 +137,7 @@ auto Database::Impl::read(BytesView key, Ordering ordering) -> std::optional<Rec
             case Ordering::GE:
                 if (found_exact)
                     break;
+                [[fallthrough]];
             case Ordering::GT:
                 if (cursor.is_maximum() && (found_exact || cursor.key() < key))
                     return std::nullopt;
@@ -146,6 +147,7 @@ auto Database::Impl::read(BytesView key, Ordering ordering) -> std::optional<Rec
             case Ordering::LE:
                 if (found_exact)
                     break;
+                [[fallthrough]];
             case Ordering::LT:
                 if (cursor.is_maximum() && cursor.key() < key)
                     break;
