@@ -45,7 +45,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Currently, Cub DB only runs on 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
 + Has a limit on key length, equal to roughly 1/4 of the page size
-+ Does not provide internal synchronization past multiple readers, however external synchronization can be used to allow writes (see `/test/integration/test_rw.cpp`)
++ Does not provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
 
 ## Build
 Cub DB is built using CMake.

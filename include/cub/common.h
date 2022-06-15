@@ -6,6 +6,7 @@
 #ifndef CUB_COMMON_H
 #define CUB_COMMON_H
 
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 
@@ -21,11 +22,11 @@
 namespace cub {
 
 using Byte = char;
-using Size = size_t;
-using Index = size_t;
+using Size = std::uint64_t;
+using Index = std::uint64_t;
 
 static constexpr Size MIN_FRAME_COUNT = 0x8;
-static constexpr Size MAX_FRAME_COUNT = 0x400;
+static constexpr Size MAX_FRAME_COUNT = 0x1000;
 static constexpr Size MIN_PAGE_SIZE = 0x100;
 static constexpr Size MAX_PAGE_SIZE = 1 << 15;
 static constexpr Size MIN_BLOCK_SIZE = MIN_PAGE_SIZE;
@@ -35,21 +36,33 @@ static constexpr Size DEFAULT_PAGE_SIZE = 0x4000;
 static constexpr Size DEFAULT_BLOCK_SIZE = 0x8000;
 static constexpr int DEFAULT_PERMISSIONS = 0666;
 
+/**
+ * Options to use when opening a database.
+ */
 struct Options {
-    Size page_size {DEFAULT_PAGE_SIZE};
-    Size block_size {DEFAULT_BLOCK_SIZE};
-    Size frame_count {DEFAULT_FRAME_COUNT};
-    int permissions {DEFAULT_PERMISSIONS};
-    bool use_direct_io {};
+    Size page_size {DEFAULT_PAGE_SIZE}; ///< Size of a database page in bytes.
+    Size block_size {DEFAULT_BLOCK_SIZE}; ///< Size of a WAL block in bytes.
+    Size frame_count {DEFAULT_FRAME_COUNT}; ///< Number of frames to allow the buffer pool.
+    int permissions {DEFAULT_PERMISSIONS}; ///< Permissions with which to open files.
+    bool use_direct_io {}; ///< True if we should use direct I/O, false otherwise.
 };
 
+/**
+ * Representation of a database record.
+ */
 struct Record {
-    auto operator<(const Record&) const -> bool;
-
-    std::string key;
-    std::string value;
+    auto operator<(const cub::Record&) const -> bool;  // TODO: Seems to be necessary for std::sort()...
+    std::string key; ///< The key by which records are ordered.
+    std::string value; ///< The record value.
 };
 
 } // cub
+
+auto operator<(const cub::Record&, const cub::Record&) -> bool;
+auto operator>(const cub::Record&, const cub::Record&) -> bool;
+auto operator<=(const cub::Record&, const cub::Record&) -> bool;
+auto operator>=(const cub::Record&, const cub::Record&) -> bool;
+auto operator==(const cub::Record&, const cub::Record&) -> bool;
+auto operator!=(const cub::Record&, const cub::Record&) -> bool;
 
 #endif // CUB_COMMON_H

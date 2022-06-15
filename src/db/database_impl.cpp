@@ -17,11 +17,8 @@ namespace cub {
 
 auto Record::operator<(const Record &rhs) const -> bool
 {
-    return compare_three_way(_b(key), _b(rhs.key)) == Comparison::LT;
+    return _b(key) < _b(rhs.key);
 }
-
-Info::Info(Database::Impl *db)
-    : m_db {db} {}
 
 auto Info::cache_hit_ratio() const -> double
 {
@@ -36,6 +33,11 @@ auto Info::record_count() const -> Size
 auto Info::page_count() const -> Size
 {
     return m_db->page_count();
+}
+
+auto Info::page_size() const -> Size
+{
+    return m_db->page_size();
 }
 
 Database::Impl::~Impl()
@@ -107,7 +109,9 @@ auto Database::Impl::recover() -> void
 
 auto Database::Impl::get_info() -> Info
 {
-    return Info {this};
+    Info info;
+    info.m_db = this;
+    return info;
 }
 
 auto Database::Impl::get_cursor() -> Cursor
@@ -225,6 +229,11 @@ auto Database::Impl::page_count() const -> Size
     return m_pool->page_count();
 }
 
+auto Database::Impl::page_size() const -> Size
+{
+    return m_pool->page_size();
+}
+
 auto Database::open(const std::string &path, const Options &options) -> Database
 {
     if (path.empty())
@@ -324,6 +333,12 @@ auto Database::write(BytesView key, BytesView value) -> bool
     return m_impl->write(key, value);
 }
 
+auto Database::write(const Record &record) -> bool
+{
+    const auto &[key, value] = record;
+    return m_impl->write(_b(key), _b(value));
+}
+
 auto Database::erase(BytesView key) -> bool
 {
     return m_impl->erase(key);
@@ -339,14 +354,44 @@ auto Database::abort() -> bool
     return m_impl->abort();
 }
 
-auto Database::get_cursor() -> Cursor
+auto Database::get_cursor() const -> Cursor
 {
     return m_impl->get_cursor();
 }
 
-auto Database::get_info() -> Info
+auto Database::get_info() const -> Info
 {
     return m_impl->get_info();
 }
 
 } // cub
+
+auto operator<(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) < cub::_b(rhs.key);
+}
+
+auto operator>(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) > cub::_b(rhs.key);
+}
+
+auto operator<=(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) <= cub::_b(rhs.key);
+}
+
+auto operator>=(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) >= cub::_b(rhs.key);
+}
+
+auto operator==(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) == cub::_b(rhs.key);
+}
+
+auto operator!=(const cub::Record &lhs, const cub::Record &rhs) -> bool
+{
+    return cub::_b(lhs.key) != cub::_b(rhs.key);
+}

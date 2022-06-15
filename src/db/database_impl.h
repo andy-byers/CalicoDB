@@ -36,6 +36,7 @@ public:
     [[nodiscard]] auto cache_hit_ratio() const -> double;
     [[nodiscard]] auto record_count() const -> Size;
     [[nodiscard]] auto page_count() const -> Size;
+    [[nodiscard]] auto page_size() const -> Size;
     auto read(BytesView, Comparison) -> std::optional<Record>;
     auto read_minimum() -> std::optional<Record>;
     auto read_maximum() -> std::optional<Record>;

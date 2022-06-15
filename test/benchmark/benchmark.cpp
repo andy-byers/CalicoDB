@@ -70,7 +70,7 @@ auto create_temp(Size page_size)
 auto build_common(Work &records, bool is_sequential)
 {
     if (is_sequential)
-        std::sort(records.begin(), records.end());
+        std::sort(begin(records), end(records));
 }
 
 auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
@@ -81,7 +81,7 @@ auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
     build_common(records, is_sorted);
 
     if (is_reversed)
-        std::reverse(records.begin(), records.end());
+        std::reverse(begin(records), end(records));
 
     for (const auto &[key, value]: records)
         db.write(_b(key), _b(value));
