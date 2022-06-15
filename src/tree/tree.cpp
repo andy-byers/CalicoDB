@@ -586,6 +586,10 @@ auto do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     const auto [overflow_idx, should_be_false]{Ln.find_ge(overflow.key())};
     CUB_EXPECT_FALSE(should_be_false);
 
+//    const auto select_median = []() {
+//
+//    };
+
     // TODO: Get rid of the optional(s). It's a hack from when Cell was changed to be non-copyable.
     std::optional<Cell> median {};
     std::optional<Cell> temp {std::move(overflow)};
@@ -625,13 +629,13 @@ auto do_split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
         target.insert_at(index, std::move(cell));
     };
     switch (compare_three_way(overflow_key, median->key())) {
-        case Comparison::EQ:
+        case ThreeWayComparison::EQ:
             // No transfer. The median/overflow key is returned.
             break;
-        case Comparison::LT:
+        case ThreeWayComparison::LT:
             do_transfer(Ln, std::move(*temp));
             break;
-        case Comparison::GT:
+        case ThreeWayComparison::GT:
             do_transfer(rn, std::move(*temp));
             break;
     }

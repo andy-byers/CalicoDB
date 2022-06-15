@@ -173,12 +173,12 @@ auto Node::find_ge(BytesView key) const -> SearchResult
     while (lower <= upper) {
         const auto middle = (lower + upper) / 2;
         switch (compare_three_way(key, read_key(static_cast<Index>(middle)))) {
-            case Comparison::EQ:
+            case ThreeWayComparison::EQ:
                 return {static_cast<Index>(middle), true};
-            case Comparison::LT:
+            case ThreeWayComparison::LT:
                 upper = middle - 1;
                 break;
-            case Comparison::GT:
+            case ThreeWayComparison::GT:
                 lower = middle + 1;
         }
     }

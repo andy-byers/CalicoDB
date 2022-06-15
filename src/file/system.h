@@ -10,7 +10,7 @@ static constexpr int FAILURE = -1;
 
 auto use_direct_io(int) -> void;
 auto size(int) -> Size;
-auto access(const std::string&, int) -> bool;
+auto exists(const std::string&) -> bool;
 auto unlink(const std::string&) -> void;
 auto read(int, Bytes) -> Size;
 auto write(int, BytesView) -> Size;

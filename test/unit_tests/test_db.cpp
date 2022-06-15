@@ -6,12 +6,10 @@
 
 #include <gtest/gtest.h>
 
-#include "cub/database.h"
-#include "cub/cursor.h"
 #include "db/database_impl.h"
 #include "db/cursor_impl.h"
+#include "file/system.h"
 #include "pool/interface.h"
-#include "cub/common.h"
 #include "tree/tree.h"
 
 #include "fakes.h"
@@ -57,7 +55,7 @@ public:
 
     ~DatabaseReadTests() override = default;
 
-    auto read_and_compare(const std::string &key, Comparison comparison, const std::string &target)
+    auto read_and_compare(const std::string &key, Ordering comparison, const std::string &target)
     {
         if (const auto record = db.read(_b(key), comparison))
             return record->key == target;
@@ -69,46 +67,52 @@ public:
 
 TEST_F(DatabaseReadTests, ReadsExact)
 {
-    ASSERT_TRUE(read_and_compare(K0, Comparison::EQ, K0));
-    ASSERT_TRUE(read_and_compare(K1, Comparison::EQ, K1));
-    ASSERT_TRUE(read_and_compare(K2, Comparison::EQ, K2));
+    ASSERT_TRUE(read_and_compare(K0, Ordering::EQ, K0));
+    ASSERT_TRUE(read_and_compare(K1, Ordering::EQ, K1));
+    ASSERT_TRUE(read_and_compare(K2, Ordering::EQ, K2));
+    ASSERT_TRUE(read_and_compare(K0, Ordering::LE, K0));
+    ASSERT_TRUE(read_and_compare(K1, Ordering::LE, K1));
+    ASSERT_TRUE(read_and_compare(K2, Ordering::LE, K2));
+    ASSERT_TRUE(read_and_compare(K0, Ordering::GE, K0));
+    ASSERT_TRUE(read_and_compare(K1, Ordering::GE, K1));
+    ASSERT_TRUE(read_and_compare(K2, Ordering::GE, K2));
 }
 
 TEST_F(DatabaseReadTests, ReadsLessThan)
 {
-    ASSERT_TRUE(read_and_compare(K0_p1, Comparison::LT, K0));
-    ASSERT_TRUE(read_and_compare(K1_p1, Comparison::LT, K1));
-    ASSERT_TRUE(read_and_compare(K2_p1, Comparison::LT, K2));
-    ASSERT_TRUE(read_and_compare(K1, Comparison::LT, K0));
-    ASSERT_TRUE(read_and_compare(K2, Comparison::LT, K1));
+    ASSERT_TRUE(read_and_compare(K0_p1, Ordering::LT, K0));
+    ASSERT_TRUE(read_and_compare(K1_p1, Ordering::LT, K1));
+    ASSERT_TRUE(read_and_compare(K2_p1, Ordering::LT, K2));
+    ASSERT_TRUE(read_and_compare(K1, Ordering::LT, K0));
+    ASSERT_TRUE(read_and_compare(K2, Ordering::LT, K1));
 }
 
 TEST_F(DatabaseReadTests, ReadsGreaterThan)
 {
-    ASSERT_TRUE(read_and_compare(K0_m1, Comparison::GT, K0));
-    ASSERT_TRUE(read_and_compare(K1_m1, Comparison::GT, K1));
-    ASSERT_TRUE(read_and_compare(K2_m1, Comparison::GT, K2));
-    ASSERT_TRUE(read_and_compare(K0, Comparison::GT, K1));
-    ASSERT_TRUE(read_and_compare(K1, Comparison::GT, K2));
+    ASSERT_TRUE(read_and_compare(K0_m1, Ordering::GT, K0));
+    ASSERT_TRUE(read_and_compare(K1_m1, Ordering::GT, K1));
+    ASSERT_TRUE(read_and_compare(K2_m1, Ordering::GT, K2));
+    ASSERT_TRUE(read_and_compare(K0, Ordering::GT, K1));
+    ASSERT_TRUE(read_and_compare(K1, Ordering::GT, K2));
 }
 
 TEST_F(DatabaseReadTests, CannotReadNonexistentRecords)
 {
-    ASSERT_EQ(db.read(_b(K0_m1), Comparison::EQ), std::nullopt);
-    ASSERT_EQ(db.read(_b(K1_m1), Comparison::EQ), std::nullopt);
-    ASSERT_EQ(db.read(_b(K2_m1), Comparison::EQ), std::nullopt);
+    ASSERT_EQ(db.read(_b(K0_m1), Ordering::EQ), std::nullopt);
+    ASSERT_EQ(db.read(_b(K1_m1), Ordering::EQ), std::nullopt);
+    ASSERT_EQ(db.read(_b(K2_m1), Ordering::EQ), std::nullopt);
 }
 
 TEST_F(DatabaseReadTests, CannotReadLessThanMinimum)
 {
-    ASSERT_EQ(db.read(_b(K0), Comparison::LT), std::nullopt);
-    ASSERT_EQ(db.read(_b(K0_m1), Comparison::LT), std::nullopt);
+    ASSERT_EQ(db.read(_b(K0), Ordering::LT), std::nullopt);
+    ASSERT_EQ(db.read(_b(K0_m1), Ordering::LT), std::nullopt);
 }
 
 TEST_F(DatabaseReadTests, CannotReadGreaterThanMaximum)
 {
-    ASSERT_EQ(db.read(_b(K2), Comparison::GT), std::nullopt);
-    ASSERT_EQ(db.read(_b(K2_p1), Comparison::GT), std::nullopt);
+    ASSERT_EQ(db.read(_b(K2), Ordering::GT), std::nullopt);
+    ASSERT_EQ(db.read(_b(K2_p1), Ordering::GT), std::nullopt);
 }
 
 constexpr auto TEST_PATH = "/tmp/cub_test";
@@ -148,6 +152,14 @@ public:
     ~DatabaseTests() override = default;
 };
 
+TEST_F(DatabaseTests, DatabaseDoesNotExistAfterItIsDestroyed)
+{
+    auto db = Database::open(TEST_PATH, {});
+    ASSERT_TRUE(system::exists(TEST_PATH));
+    Database::destroy(std::move(db));
+    ASSERT_FALSE(system::exists(TEST_PATH));
+}
+
 TEST_F(DatabaseTests, DataPersists)
 {
     std::vector<Record> records;
@@ -172,9 +184,9 @@ TEST_F(DatabaseTests, AbortRestoresState)
     CUB_EXPECT_TRUE(db.erase(_b("b")));
     db.abort();
 
-    CUB_EXPECT_EQ(db.read(_b("a"), Comparison::EQ)->value, "1");
-    CUB_EXPECT_EQ(db.read(_b("b"), Comparison::EQ)->value, "2");
-    CUB_EXPECT_EQ(db.read(_b("c"), Comparison::EQ), std::nullopt);
+    CUB_EXPECT_EQ(db.read(_b("a"), Ordering::EQ)->value, "1");
+    CUB_EXPECT_EQ(db.read(_b("b"), Ordering::EQ)->value, "2");
+    CUB_EXPECT_EQ(db.read(_b("c"), Ordering::EQ), std::nullopt);
 
     const auto info = db.get_info();
     CUB_EXPECT_EQ(info.record_count(), 2);
@@ -340,6 +352,215 @@ TEST_F(DatabaseTests, DatabaseIsMovable)
 {
     auto src = Database::open(TEST_PATH, {});
     [[maybe_unused]] auto dst = std::move(src);
+}
+
+class CursorTests: public testing::Test {
+public:
+    CursorTests()
+        : db {FaultyDatabase::create(0x200)}
+    {
+        static constexpr Size num_records = 250;
+        DatabaseBuilder builder {db.db.get()};
+        RecordGenerator::Parameters param;
+        param.mean_key_size = 16;
+        // Use large values and small pages so that the cursor has to move between nodes around a lot.
+        param.mean_value_size = 100;
+        param.is_sequential = true;
+        builder.write_records(num_records, {});
+        // Already sorted by the record generator since we passed true for is_sequential.
+        records = builder.collect_records();
+    }
+
+    FaultyDatabase db;
+    std::vector<Record> records;
+};
+
+TEST_F(CursorTests, CursorDoesNotHaveRecordWhenDatabaseIsEmpty)
+{
+    auto empty = FaultyDatabase::create(0x200);
+    auto cursor = empty.db->get_cursor();
+    ASSERT_FALSE(cursor.has_record());
+}
+
+TEST_F(CursorTests, ResettingEmptyCursorDoesNothing)
+{
+    auto empty = FaultyDatabase::create(0x200);
+    auto cursor = empty.db->get_cursor();
+    cursor.reset();
+    ASSERT_FALSE(cursor.has_record());
+}
+
+TEST_F(CursorTests, CursorHasRecordWhenDatabaseIsNotEmpty)
+{
+    auto cursor = db.db->get_cursor();
+    ASSERT_TRUE(cursor.has_record());
+}
+
+TEST_F(CursorTests, FindsSpecificRecord)
+{
+    auto dummy = db.db->get_cursor();
+    dummy.find_minimum();
+    dummy.increment(records.size() / 5);
+    const auto record = dummy.record();
+
+    auto cursor = db.db->get_cursor();
+    ASSERT_TRUE(cursor.find(_b(record.key)));
+    ASSERT_EQ(_s(cursor.key()), record.key);
+    ASSERT_EQ(cursor.value(), record.value);
+}
+
+TEST_F(CursorTests, FindsMinimumRecord)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find_minimum();
+    ASSERT_TRUE(cursor.is_minimum());
+    ASSERT_EQ(_s(cursor.key()), records.front().key);
+}
+
+TEST_F(CursorTests, FindsMaximumRecord)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find_maximum();
+    ASSERT_TRUE(cursor.is_maximum());
+    ASSERT_EQ(_s(cursor.key()), records.back().key);
+}
+
+TEST_F(CursorTests, CannotFindNonexistentRecord)
+{
+    auto cursor = db.db->get_cursor();
+    ASSERT_FALSE(cursor.find(_b("abc")));
+    ASSERT_FALSE(cursor.find(_b("123")));
+}
+
+TEST_F(CursorTests, IsLeftOnGreaterThanRecordWhenCannotFind)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find(_b("abc"));
+    ASSERT_TRUE(cursor.key() > _b("abc"));
+    cursor.find(_b("123"));
+    ASSERT_TRUE(cursor.key() > _b("123"));
+}
+
+TEST_F(CursorTests, IsLeftOnFirstRecordWhenKeyIsLow)
+{
+    auto cursor = db.db->get_cursor();
+    ASSERT_FALSE(cursor.find(_b("\x01")));
+    ASSERT_EQ(_s(cursor.key()), records.front().key);
+}
+
+TEST_F(CursorTests, IsLeftOnLastRecordWhenKeyIsHigh)
+{
+    auto cursor = db.db->get_cursor();
+    ASSERT_FALSE(cursor.find(_b("\xFF")));
+    ASSERT_EQ(_s(cursor.key()), records.back().key);
+}
+
+TEST_F(CursorTests, CanTraverseFullRangeForward)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find_minimum();
+    for (const auto &record: records) {
+        ASSERT_TRUE(cursor.record() == record);
+        cursor.increment();
+    }
+}
+
+TEST_F(CursorTests, CanTraversePartialRangeForward)
+{
+    const auto one_third = records.size() / 3;
+    const auto diff = static_cast<ssize_t>(one_third);
+    auto cursor = db.db->get_cursor();
+    ASSERT_TRUE(cursor.find(_b(records[one_third].key)));
+    const auto success = std::all_of(cbegin(records) + diff, cend(records) - diff, [&cursor](const Record &record) {
+        const auto is_equal = cursor.record() == record;
+        cursor.increment();
+        return is_equal;
+    });
+    ASSERT_TRUE(success);
+}
+
+TEST_F(CursorTests, CanTraverseFullRangeBackward)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find_maximum();
+    const auto success = std::all_of(crbegin(records), crend(records), [&cursor](const Record &record) {
+        const auto is_equal = cursor.record() == record;
+        cursor.decrement();
+        return is_equal;
+    });
+    ASSERT_TRUE(success);
+}
+
+TEST_F(CursorTests, CanTraversePartialRangeBackward)
+{
+    const auto one_third = records.size() / 3;
+    const auto diff = static_cast<ssize_t>(one_third);
+    auto cursor = db.db->get_cursor();
+    auto start = std::crbegin(records) + diff;
+    ASSERT_TRUE(cursor.find(_b(start->key)));
+    const auto success = std::all_of(start, crend(records) - diff, [&cursor](const Record &record) {
+        const auto is_equal = cursor.record() == record;
+        cursor.decrement();
+        return is_equal;
+    });
+    ASSERT_TRUE(success);
+}
+
+TEST_F(CursorTests, StopsAtEnd)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find_minimum();
+    ASSERT_EQ(cursor.increment(records.size() * 2), records.size() - 1);
+    ASSERT_FALSE(cursor.increment());
+}
+
+TEST_F(CursorTests, StopsAtBeginning)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find_maximum();
+    ASSERT_EQ(cursor.decrement(records.size() * 2), records.size() - 1);
+    ASSERT_FALSE(cursor.decrement());
+}
+
+TEST_F(CursorTests, ResettingFreshCursorDoesNothing)
+{
+    auto cursor = db.db->get_cursor();
+    const auto record = cursor.record();
+    cursor.reset();
+    ASSERT_TRUE(cursor.record() == record);
+}
+
+TEST_F(CursorTests, CursorIsMovable)
+{
+    const auto sink = [](Cursor) {};
+    auto src = db.db->get_cursor();
+    auto dst = std::move(src);
+    sink(std::move(dst));
+    sink(db.db->get_cursor());
+}
+
+TEST_F(CursorTests, CursorHasNoRecordAfterThrow)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find_minimum();
+    db.tree_faults.set_read_fault_rate(100);
+    ASSERT_THROW(while (cursor.increment()) {}, IOError);
+    ASSERT_FALSE(cursor.has_record());
+}
+
+TEST_F(CursorTests, CursorCanBeResetAfterFailure)
+{
+    auto cursor = db.db->get_cursor();
+    cursor.find_minimum();
+    db.tree_faults.set_read_fault_rate(100);
+    ASSERT_THROW(while (cursor.increment()) {}, IOError);
+
+    // If we can somehow fix whatever what causing the I/O errors, we can try to call reset().
+    // If it succeeds, we should be able to use the cursor like normal.
+    db.tree_faults.set_read_fault_rate(0);
+    cursor.reset();
+    cursor.find_minimum();
+    ASSERT_EQ(_s(cursor.key()), records.front().key);
 }
 
 } // <anonymous>

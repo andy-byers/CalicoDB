@@ -29,7 +29,7 @@ auto reader_task(Database *db) -> void*
 
     while (cursor.increment()) {
         // We should be able to call the read*() methods from many threads.
-        CUB_EXPECT_EQ(db->read(cursor.key(), Comparison::EQ)->value, value);
+        CUB_EXPECT_EQ(db->read(cursor.key(), Ordering::EQ)->value, value);
         CUB_EXPECT_EQ(cursor.value(), value);
         counter++;
     }
@@ -46,7 +46,7 @@ auto locked_reader_task(Database *db, std::shared_mutex *mutex) -> void*
 auto writer_task(Database *db, std::shared_mutex *mutex, const std::vector<Record> &original) -> void*
 {
     std::unique_lock lock {*mutex};
-    const auto value = std::to_string(rand());
+    const auto value = db->read_minimum()->value;
     for (const auto &[key, unused]: original)
         db->write(_b(key), _b(value));
     return nullptr;

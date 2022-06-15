@@ -37,7 +37,13 @@ public:
     [[nodiscard]] auto record_count() const -> Size;
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
-    auto read(BytesView, Comparison) -> std::optional<Record>;
+
+    [[nodiscard]] auto path() const -> const std::string&
+    {
+        return m_path;
+    }
+
+    auto read(BytesView, Ordering) -> std::optional<Record>;
     auto read_minimum() -> std::optional<Record>;
     auto read_maximum() -> std::optional<Record>;
     auto write(BytesView, BytesView) -> bool;

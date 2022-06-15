@@ -300,12 +300,11 @@ auto Cursor::Impl::move_cursor(PID pid) -> void
         m_node = m_tree.value->acquire_node(pid, false);
     } catch (...) {
         CUB_EXPECT_EQ(m_node, std::nullopt);
-        m_traversal.clear(); // TODO: Catch and rethrow in the method that affects these two variables. It's weird to do it here where we don't already modify or read them (IMHO).
+        m_traversal.clear();
         m_index = 0;
         throw;
     }
 }
-
 
 Cursor::Cursor() = default;
 Cursor::~Cursor() = default;
@@ -335,6 +334,11 @@ auto Cursor::key() const -> BytesView
 auto Cursor::value() const -> std::string
 {
     return m_impl->value();
+}
+
+auto Cursor::record() const -> Record
+{
+    return {_s(m_impl->key()), m_impl->value()};
 }
 
 auto Cursor::reset() -> void

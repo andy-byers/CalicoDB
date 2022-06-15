@@ -242,9 +242,15 @@ TEST_F(SystemTests, CannotUseUnopenedFile)
     ASSERT_THROW(system::resize(closed_fd, 1), std::system_error);
 }
 
+TEST_F(SystemTests, FileDoesNotExistAfterUnlink)
+{
+    ASSERT_TRUE(system::exists(PATH));
+    system::unlink(PATH);
+    ASSERT_FALSE(system::exists(PATH));
+}
+
 TEST_F(SystemTests, CannotRenameNonexistentFile)
 {
-    puts(PATH);
     system::unlink(PATH);
     ASSERT_THROW(system::rename(PATH, "/tmp/should_have_failed"), std::system_error);
 }

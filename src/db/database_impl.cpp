@@ -93,8 +93,7 @@ Database::Impl::Impl(Parameters param)
 }
 
 Database::Impl::Impl(Size page_size)
-    : m_path {"<Temp DB>"}
-    , m_pool {std::make_unique<InMemory>(page_size)}
+    : m_pool {std::make_unique<InMemory>(page_size)}
     , m_tree {std::make_unique<Tree>(Tree::Parameters {m_pool.get(), PID::null(), 0, 0, 0})}
 {
     m_tree->allocate_node(PageType::EXTERNAL_NODE);
@@ -121,27 +120,35 @@ auto Database::Impl::get_cursor() -> Cursor
     return reader;
 }
 
-auto Database::Impl::read(BytesView key, Comparison comparison) -> std::optional<Record>
+auto Database::Impl::read(BytesView key, Ordering ordering) -> std::optional<Record>
 {
     if (auto cursor = get_cursor(); cursor.has_record()) {
         const auto found_exact = cursor.find(key);
-        switch (comparison) {
-            case Comparison::EQ:
+        switch (ordering) {
+            case Ordering::EQ:
                 if (!found_exact)
                     return std::nullopt;
                 break;
-            case Comparison::GT:
+            case Ordering::GE:
+                if (found_exact)
+                    break;
+            case Ordering::GT:
                 if (cursor.is_maximum() && (found_exact || cursor.key() < key))
                     return std::nullopt;
                 if (found_exact && !cursor.increment())
                     return std::nullopt;
                 break;
-            case Comparison::LT:
+            case Ordering::LE:
+                if (found_exact)
+                    break;
+            case Ordering::LT:
                 if (cursor.is_maximum() && cursor.key() < key)
                     break;
                 if (!cursor.decrement())
                     return std::nullopt;
                 break;
+            default:
+                throw std::invalid_argument {"Unknown ordering"};
         }
         return Record {_s(cursor.key()), cursor.value()};
     }
@@ -305,6 +312,14 @@ auto Database::temp(Size page_size) -> Database
     return db;
 }
 
+auto Database::destroy(Database db) -> void
+{
+    if (const auto &path = db.m_impl->path(); !path.empty()) {
+        system::unlink(path);
+        system::unlink(get_wal_path(path));
+    }
+}
+
 Database::Database() = default;
 
 Database::~Database() = default;
@@ -313,9 +328,9 @@ Database::Database(Database&&) noexcept = default;
 
 auto Database::operator=(Database&&) noexcept -> Database& = default;
 
-auto Database::read(BytesView key, Comparison comparison) const -> std::optional<Record>
+auto Database::read(BytesView key, Ordering ordering) const -> std::optional<Record>
 {
-    return m_impl->read(key, comparison);
+    return m_impl->read(key, ordering);
 }
 
 auto Database::read_minimum() const -> std::optional<Record>

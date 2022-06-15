@@ -26,12 +26,12 @@ auto updating_a_database(cub::Database &db)
 auto querying_a_database(cub::Database &db)
 {
     // We can require an exact match.
-    const auto record = db.read(cub::_b("sun bear"), cub::Comparison::EQ);
+    const auto record = db.read(cub::_b("sun bear"), cub::Ordering::EQ);
     assert(record->value == "respectable");
 
     // Or, we can look for the first record with a key less than or greater than the given key.
-    const auto less_than = db.read(cub::_b("sun bear"), cub::Comparison::LT);
-    const auto greater_than = db.read(cub::_b("sun bear"), cub::Comparison::GT);
+    const auto less_than = db.read(cub::_b("sun bear"), cub::Ordering::LT);
+    const auto greater_than = db.read(cub::_b("sun bear"), cub::Ordering::GT);
     assert(less_than->value == "cool");
 
     // Whoops, there isn't a key greater than "sun bear".
@@ -77,8 +77,14 @@ auto transactions(cub::Database &db)
     db.abort();
 
     // Database still contains {"a", "1"} and {"b", "2"}.
-    assert(db.read(cub::_b("a"), cub::Comparison::EQ)->value == "1");
-    assert(db.read(cub::_b("b"), cub::Comparison::EQ)->value == "2");
+    assert(db.read(cub::_b("a"), cub::Ordering::EQ)->value == "1");
+    assert(db.read(cub::_b("b"), cub::Ordering::EQ)->value == "2");
+}
+
+auto deleting_a_database(cub::Database db)
+{
+    // We can delete a database by passing ownership to the following static method.
+    cub::Database::destroy(std::move(db));
 }
 
 } // <anonymous>
@@ -95,6 +101,7 @@ auto main(int, const char*[]) -> int
         querying_a_database(db);
         cursor_objects(db);
         transactions(db);
+        deleting_a_database(std::move(db));
     } catch (const CorruptionError &error) {
         printf("CorruptionError: %s\n", error.what());
     } catch (const IOError &error) {

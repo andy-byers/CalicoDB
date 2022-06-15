@@ -20,7 +20,12 @@ public:
     /**
      * Check if the cursor is positioned on a record.
      *
-     * @return True if the cursor is on a record, i.e. the database is not empty, false otherwise.
+     * This method should only return false if the database is empty. The getter methods (key(), value(), and
+     * record()) rely on the cursor being positioned over a valid record. If this method returns false and one
+     * of them is called, the result is unspecified. If compiling with assertions, an assertion will be
+     * triggered, otherwise, we'll likely crash or receive garbage results.
+     *
+     * @return True if the cursor is on a record, false otherwise.
      */
     [[nodiscard]] auto has_record() const -> bool;
 
@@ -41,6 +46,7 @@ public:
     /**
      * Get the current record's key.
      *
+     * @see has_record()
      * @return The current record's key.
      */
     [[nodiscard]] auto key() const -> BytesView;
@@ -48,12 +54,23 @@ public:
     /**
      * Get the current record's value.
      *
+     * @see has_record()
      * @return The current record's value.
      */
     [[nodiscard]] auto value() const -> std::string;
 
     /**
+     * Get the current record.
+     *
+     * @see has_record()
+     * @return The current record.
+     */
+    [[nodiscard]] auto record() const -> Record;
+
+    /**
      * Move the cursor back to its starting position.
+     *
+     * In terms of the underlying B-tree, this method moves the cursor to the first record in the root node.
      */
     auto reset() -> void;
 

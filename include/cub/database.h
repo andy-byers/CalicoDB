@@ -11,6 +11,17 @@ class Info;
 class Cursor;
 
 /**
+ * Represents an ordering between two keys.
+ */
+enum class Ordering {
+    LT, ///< Less than
+    LE, ///< Less than or equal to
+    EQ, ///< Equal to
+    GE, ///< Greater than or equal to
+    GT, ///< Greater than
+};
+
+/**
  * An object that represents a Cub DB database.
  */
 class Database {
@@ -34,17 +45,27 @@ public:
     static auto temp(Size page_size) -> Database;
 
     /**
+     * Destroy a database.
+     *
+     * Warning: this method is dangerous. It deletes the database and WAL files and cannot be undone. Use
+     * at your own risk.
+     *
+     * @param db The database to destroy.
+     */
+    static auto destroy(Database db) -> void;
+
+    /**
      * Read a record from the database.
      *
      * This method will search for a record with a key that is either less than, equal to, or greater than,
      * the given key, depending on the value of the second parameter.
      *
      * @param key The given key.
-     * @param relation Relationship of the target record key to the given key.
+     * @param ordering Relationship between the target record key and the given key.
      * @return The record with the desired relationship to the given key, or std::nullopt if that record
      *         does not exist.
      */
-    [[nodiscard]] auto read(BytesView key, Comparison relation = Comparison::EQ) const -> std::optional<Record>;
+    [[nodiscard]] auto read(BytesView key, Ordering ordering = Ordering::EQ) const -> std::optional<Record>;
 
     /**
      * Read the record with the smallest key.

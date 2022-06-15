@@ -16,6 +16,7 @@ Cub DB is an embedded key-value database written in C++17.
   + [Querying a Database](#querying-a-database)
   + [Cursor Objects](#cursor-objects)
   + [Transactions](#transactions)
+  + [Deleting a Database](#deleting-a-database)
 + [Performance](#performance)
 + [Design](#design)
   + [db](#db)
@@ -124,7 +125,7 @@ assert(cub::_s(from_string) == data);
 function_taking_a_bytes_view(b);
 
 // Comparisons.
-assert(cub::compare_three_way(b, v) == cub::Comparison::EQ);
+assert(cub::compare_three_way(b, v) == cub::ThreeWayComparison::EQ);
 assert(b == v);
 ```
 
@@ -152,12 +153,12 @@ The `read*()` methods are provided for querying the database.
 
 ```C++
 // We can require an exact match.
-const auto record = db.read(cub::_b("sun bear"), cub::Comparison::EQ);
+const auto record = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::EQ);
 assert(record->value == "respectable");
 
 // Or, we can look for the first record with a key less than or greater than the given key.
-const auto less_than = db.read(cub::_b("sun bear"), cub::Comparison::LT);
-const auto greater_than = db.read(cub::_b("sun bear"), cub::Comparison::GT);
+const auto less_than = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::LT);
+const auto greater_than = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::GT);
 assert(less_than->value == "cool");
 
 // Whoops, there isn't a key greater than "sun bear".
@@ -211,6 +212,13 @@ db.abort();
 // Database still contains {"a", "1"} and {"b", "2"}.
 assert(db.read(cub::_b("a"), true)->value == "1");
 assert(db.read(cub::_b("b"), true)->value == "2");
+```
+
+### Deleting a Database
+
+```C++
+// We can delete a database by passing ownership to the following static method.
+cub::Database::destroy(std::move(db));
 ```
 
 ## Performance

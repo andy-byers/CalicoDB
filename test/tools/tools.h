@@ -158,7 +158,7 @@ public:
             decltype(counter) num_written {};
 
             for (const auto &[k, v]: generator.generate(m_random, static_cast<Size>(counter))) {
-                if (!m_db->read(_b(k), Comparison::EQ)) {
+                if (!m_db->read(_b(k), Ordering::EQ)) {
                     m_db->write(_b(k), _b(v));
                     num_written++;
                 }
