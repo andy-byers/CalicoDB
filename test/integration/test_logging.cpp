@@ -33,6 +33,7 @@ public:
             CACHE_SIZE,
             0,
             options.page_size,
+            true,
         });
         pool_backing = harness.tree_backing;
         wal_backing = harness.wal_backing;
@@ -59,6 +60,7 @@ public:
             CACHE_SIZE,
             0,
             BLOCK_SIZE,
+            true,
         });
     }
 
