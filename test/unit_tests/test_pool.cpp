@@ -258,7 +258,7 @@ template<class Test> auto run_sanity_check(Test &test, Size num_iterations) -> S
             write_to_page(page, std::to_string(page.id().value));
             num_updates++;
         } else if (test.pool->page_count()) {
-            const auto id = test.random.next_int(1ULL, test.pool->page_count());
+            const auto id = test.random.next_int(Size {1}, test.pool->page_count());
             const auto result = std::to_string(id);
             auto page = test.pool->acquire(PID {id}, false);
             EXPECT_EQ(read_from_page(page, result.size()), result);
