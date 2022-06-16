@@ -58,16 +58,6 @@ public:
     static auto destroy(Database db) -> void;
 
     /**
-     * Destroy a database.
-     *
-     * Warning: this method is dangerous. It deletes the database and WAL files and cannot be undone. Use
-     * at your own risk.
-     *
-     * @param db The database to destroy.
-     */
-    static auto destroy(Database db) -> void;
-
-    /**
      * Read a record from the database.
      *
      * This method will search for the first record with a key with the given relationship to the provided

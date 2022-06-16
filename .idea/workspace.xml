@@ -5,54 +5,48 @@
   </component>
   <component name="CMakeRunConfigurationManager" shouldGenerate="true" shouldDeleteObsolete="true">
     <generated>
-      <config projectName="CubDB" targetName="ContinuousUpdate" />
-      <config projectName="CubDB" targetName="ExperimentalBuild" />
-      <config projectName="CubDB" targetName="fuzz_ops" />
-      <config projectName="CubDB" targetName="NightlyMemCheck" />
-      <config projectName="CubDB" targetName="example" />
-      <config projectName="CubDB" targetName="NightlySubmit" />
-      <config projectName="CubDB" targetName="ExperimentalConfigure" />
-      <config projectName="CubDB" targetName="ExperimentalStart" />
-      <config projectName="CubDB" targetName="unit_tests" />
-      <config projectName="CubDB" targetName="corpus_generator" />
-      <config projectName="CubDB" targetName="Nightly" />
-      <config projectName="CubDB" targetName="cub" />
-      <config projectName="CubDB" targetName="ExperimentalSubmit" />
-      <config projectName="CubDB" targetName="NightlyConfigure" />
-      <config projectName="CubDB" targetName="Experimental" />
-      <config projectName="CubDB" targetName="all_fuzzers" />
-      <config projectName="CubDB" targetName="fuzz" />
-      <config projectName="CubDB" targetName="ExperimentalCoverage" />
-      <config projectName="CubDB" targetName="NightlyStart" />
-      <config projectName="CubDB" targetName="gmock_main" />
-      <config projectName="CubDB" targetName="ExperimentalUpdate" />
-      <config projectName="CubDB" targetName="NightlyBuild" />
-      <config projectName="CubDB" targetName="NightlyUpdate" />
-      <config projectName="CubDB" targetName="ContinuousConfigure" />
-      <config projectName="CubDB" targetName="Continuous" />
-      <config projectName="CubDB" targetName="ContinuousSubmit" />
-      <config projectName="CubDB" targetName="ContinuousTest" />
-      <config projectName="CubDB" targetName="NightlyCoverage" />
-      <config projectName="CubDB" targetName="test_tools" />
-      <config projectName="CubDB" targetName="test_logging" />
-      <config projectName="CubDB" targetName="usage" />
-      <config projectName="CubDB" targetName="fmt" />
-      <config projectName="CubDB" targetName="fuzz_wal" />
-      <config projectName="CubDB" targetName="gtest_main" />
-      <config projectName="CubDB" targetName="ExperimentalTest" />
-      <config projectName="CubDB" targetName="ContinuousCoverage" />
-      <config projectName="CubDB" targetName="ContinuousBuild" />
-      <config projectName="CubDB" targetName="NightlyTest" />
-      <config projectName="CubDB" targetName="benchmark" />
-      <config projectName="CubDB" targetName="recover" />
-      <config projectName="CubDB" targetName="test_rw" />
-      <config projectName="CubDB" targetName="gmock" />
-      <config projectName="CubDB" targetName="fail" />
-      <config projectName="CubDB" targetName="ContinuousMemCheck" />
-      <config projectName="CubDB" targetName="ExperimentalMemCheck" />
-      <config projectName="CubDB" targetName="NightlyMemoryCheck" />
-      <config projectName="CubDB" targetName="ContinuousStart" />
-      <config projectName="CubDB" targetName="gtest" />
+      <config projectName="Project" targetName="NightlyStart" />
+      <config projectName="Project" targetName="benchmark" />
+      <config projectName="Project" targetName="cub" />
+      <config projectName="Project" targetName="ContinuousTest" />
+      <config projectName="Project" targetName="NightlyMemoryCheck" />
+      <config projectName="Project" targetName="NightlyBuild" />
+      <config projectName="Project" targetName="ContinuousMemCheck" />
+      <config projectName="Project" targetName="ContinuousSubmit" />
+      <config projectName="Project" targetName="NightlyMemCheck" />
+      <config projectName="Project" targetName="gtest" />
+      <config projectName="Project" targetName="ContinuousUpdate" />
+      <config projectName="Project" targetName="ContinuousStart" />
+      <config projectName="Project" targetName="gmock" />
+      <config projectName="Project" targetName="ExperimentalStart" />
+      <config projectName="Project" targetName="ExperimentalSubmit" />
+      <config projectName="Project" targetName="NightlySubmit" />
+      <config projectName="Project" targetName="Nightly" />
+      <config projectName="Project" targetName="Experimental" />
+      <config projectName="Project" targetName="usage" />
+      <config projectName="Project" targetName="ExperimentalConfigure" />
+      <config projectName="Project" targetName="ExperimentalBuild" />
+      <config projectName="Project" targetName="fail" />
+      <config projectName="Project" targetName="ContinuousCoverage" />
+      <config projectName="Project" targetName="NightlyTest" />
+      <config projectName="Project" targetName="fuzz_wal" />
+      <config projectName="Project" targetName="recover" />
+      <config projectName="Project" targetName="test_tools" />
+      <config projectName="Project" targetName="NightlyCoverage" />
+      <config projectName="Project" targetName="ExperimentalMemCheck" />
+      <config projectName="Project" targetName="test_logging" />
+      <config projectName="Project" targetName="gmock_main" />
+      <config projectName="Project" targetName="fmt" />
+      <config projectName="Project" targetName="NightlyConfigure" />
+      <config projectName="Project" targetName="gtest_main" />
+      <config projectName="Project" targetName="ContinuousConfigure" />
+      <config projectName="Project" targetName="Continuous" />
+      <config projectName="Project" targetName="example" />
+      <config projectName="Project" targetName="ContinuousBuild" />
+      <config projectName="Project" targetName="ExperimentalCoverage" />
+      <config projectName="Project" targetName="ExperimentalUpdate" />
+      <config projectName="Project" targetName="ExperimentalTest" />
+      <config projectName="Project" targetName="NightlyUpdate" />
     </generated>
   </component>
   <component name="CMakeSettings">
@@ -66,25 +60,18 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="85ac517d-820f-4580-aabc-fdaa72544c70" name="Changes" comment="Forgot to update logging test. Fixed.">
-      <change beforePath="$PROJECT_DIR$/DESIGN.md" beforeDir="false" afterPath="$PROJECT_DIR$/DESIGN.md" afterDir="false" />
+    <list default="true" id="85ac517d-820f-4580-aabc-fdaa72544c70" name="Changes" comment="Fixed the fuzzers and added to DESIGN.md. Also added some reserved space to the file header so we don't have to change the layout if we want to add fields in the future.">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/include/cub/database.h" beforeDir="false" afterPath="$PROJECT_DIR$/include/cub/database.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/include/cub/exception.h" beforeDir="false" afterPath="$PROJECT_DIR$/include/cub/exception.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils/layout.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/layout.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/benchmark/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/benchmark/CMakeLists.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/benchmark/benchmark.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/benchmark/main.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/fuzz/fuzzers.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/fuzz/fuzzers.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/recovery/fail.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/recovery/fail.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/recovery/recover.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/recovery/recover.cpp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/unit_tests/test_tree.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/unit_tests/test_tree.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
-  <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:RelWithAssertions" />
+  <component name="ClangdSettings">
+    <option name="formatViaClangd" value="false" />
+  </component>
   <component name="Git.Merge.Settings">
     <option name="BRANCH" value="origin/main" />
   </component>
@@ -117,6 +104,7 @@
     <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
     <property name="RunOnceActivity.cidr.known.project.marker" value="true" />
     <property name="WebServerToolWindowFactoryState" value="true" />
+    <property name="cf.advertisement.text.has.clang-format" value="true" />
     <property name="cf.advertisement.text.overridden" value="true" />
     <property name="cf.first.check.clang-format" value="false" />
     <property name="cidr.known.project.marker" value="true" />
@@ -143,7 +131,12 @@
       <recent name="$PROJECT_DIR$/test/fuzz/wal_corpus" />
     </key>
   </component>
-  <component name="RunManager" selected="Google Test.unit_tests">
+  <component name="RunManager" selected="CMake Application.cub">
+    <configuration default="true" type="CLionExternalRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true">
+      <method v="2">
+        <option name="CLION.EXTERNAL.BUILD" enabled="true" />
+      </method>
+    </configuration>
     <configuration name="DatabaseTests.DataPersists" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_CLASS="DatabaseTests" TEST_METHOD="DataPersists" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
@@ -162,19 +155,13 @@
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
-    <configuration name="TreeTests.InsertSanityCheck" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_CLASS="TreeTests" TEST_METHOD="InsertSanityCheck" TEST_MODE="SUITE_TEST">
+    <configuration name="TreeTests.InsertSanityCheck" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_CLASS="TreeTests" TEST_METHOD="InsertSanityCheck" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
       </method>
     </configuration>
     <configuration name="test_rw" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="test_rw" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="test_rw" TEST_MODE="SUITE_TEST">
-      <method v="2">
-        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
-        <option name="BeforeTestRunTask" enabled="true" />
-      </method>
-    </configuration>
-    <configuration name="unit_tests" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_MODE="SUITE_TEST">
       <method v="2">
         <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
         <option name="BeforeTestRunTask" enabled="true" />
@@ -293,7 +280,6 @@
       <item itemvalue="CMake Application.recover" />
       <item itemvalue="CTest Application.All CTest" />
       <item itemvalue="Google Test.test_rw" />
-      <item itemvalue="Google Test.unit_tests" />
       <item itemvalue="Google Test.DatabaseTests.WALIsNotOpenedIfNotUsingTransactions" />
       <item itemvalue="Google Test.DatabaseTests.DataPersists" />
       <item itemvalue="Google Test.DatabaseTests.DataPersistsWhenNotUsingTransactions" />
@@ -319,7 +305,8 @@
       <option name="presentableId" value="Default" />
       <updated>1654961596516</updated>
       <workItem from="1654961602848" duration="8575000" />
-      <workItem from="1654985969891" duration="149752000" />
+      <workItem from="1654985969891" duration="150476000" />
+      <workItem from="1655400508335" duration="76000" />
     </task>
     <task id="LOCAL-00001" summary="Preliminary work on removing exceptions">
       <created>1654986044278</created>
@@ -489,7 +476,14 @@
       <option name="project" value="LOCAL" />
       <updated>1655324992884</updated>
     </task>
-    <option name="localTasksCounter" value="25" />
+    <task id="LOCAL-00025" summary="Fixed the fuzzers and added to DESIGN.md. Also added some reserved space to the file header so we don't have to change the layout if we want to add fields in the future.">
+      <created>1655399484256</created>
+      <option name="number" value="00025" />
+      <option name="presentableId" value="LOCAL-00025" />
+      <option name="project" value="LOCAL" />
+      <updated>1655399484256</updated>
+    </task>
+    <option name="localTasksCounter" value="26" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -542,7 +536,8 @@
     <MESSAGE value="Removed examples.cpp." />
     <MESSAGE value="Added option to turn off transaction support, which can dramatically improve performance at the cost of losing the protection provided by write-ahead logging." />
     <MESSAGE value="Forgot to update logging test. Fixed." />
-    <option name="LAST_COMMIT_MESSAGE" value="Forgot to update logging test. Fixed." />
+    <MESSAGE value="Fixed the fuzzers and added to DESIGN.md. Also added some reserved space to the file header so we don't have to change the layout if we want to add fields in the future." />
+    <option name="LAST_COMMIT_MESSAGE" value="Fixed the fuzzers and added to DESIGN.md. Also added some reserved space to the file header so we don't have to change the layout if we want to add fields in the future." />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -593,18 +588,13 @@
           <option name="timeStamp" value="32" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
-          <url>file://$PROJECT_DIR$/examples/usage.cpp</url>
-          <line>79</line>
-          <option name="timeStamp" value="37" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/test/unit_tests/test_db.cpp</url>
           <line>392</line>
           <option name="timeStamp" value="38" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
           <url>file://$PROJECT_DIR$/src/pool/buffer_pool.cpp</url>
-          <line>223</line>
+          <line>222</line>
           <option name="timeStamp" value="41" />
         </line-breakpoint>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
