@@ -1,0 +1,656 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="CMakeRunConfigurationManager" shouldGenerate="true" shouldDeleteObsolete="true">
+    <generated>
+      <config projectName="CubDB" targetName="ContinuousUpdate" />
+      <config projectName="CubDB" targetName="ExperimentalBuild" />
+      <config projectName="CubDB" targetName="fuzz_ops" />
+      <config projectName="CubDB" targetName="NightlyMemCheck" />
+      <config projectName="CubDB" targetName="example" />
+      <config projectName="CubDB" targetName="NightlySubmit" />
+      <config projectName="CubDB" targetName="ExperimentalConfigure" />
+      <config projectName="CubDB" targetName="ExperimentalStart" />
+      <config projectName="CubDB" targetName="unit_tests" />
+      <config projectName="CubDB" targetName="corpus_generator" />
+      <config projectName="CubDB" targetName="Nightly" />
+      <config projectName="CubDB" targetName="cub" />
+      <config projectName="CubDB" targetName="ExperimentalSubmit" />
+      <config projectName="CubDB" targetName="NightlyConfigure" />
+      <config projectName="CubDB" targetName="Experimental" />
+      <config projectName="CubDB" targetName="all_fuzzers" />
+      <config projectName="CubDB" targetName="fuzz" />
+      <config projectName="CubDB" targetName="ExperimentalCoverage" />
+      <config projectName="CubDB" targetName="NightlyStart" />
+      <config projectName="CubDB" targetName="gmock_main" />
+      <config projectName="CubDB" targetName="ExperimentalUpdate" />
+      <config projectName="CubDB" targetName="NightlyBuild" />
+      <config projectName="CubDB" targetName="NightlyUpdate" />
+      <config projectName="CubDB" targetName="ContinuousConfigure" />
+      <config projectName="CubDB" targetName="Continuous" />
+      <config projectName="CubDB" targetName="ContinuousSubmit" />
+      <config projectName="CubDB" targetName="ContinuousTest" />
+      <config projectName="CubDB" targetName="NightlyCoverage" />
+      <config projectName="CubDB" targetName="test_tools" />
+      <config projectName="CubDB" targetName="test_logging" />
+      <config projectName="CubDB" targetName="usage" />
+      <config projectName="CubDB" targetName="fmt" />
+      <config projectName="CubDB" targetName="fuzz_wal" />
+      <config projectName="CubDB" targetName="gtest_main" />
+      <config projectName="CubDB" targetName="ExperimentalTest" />
+      <config projectName="CubDB" targetName="ContinuousCoverage" />
+      <config projectName="CubDB" targetName="ContinuousBuild" />
+      <config projectName="CubDB" targetName="NightlyTest" />
+      <config projectName="CubDB" targetName="benchmark" />
+      <config projectName="CubDB" targetName="recover" />
+      <config projectName="CubDB" targetName="test_rw" />
+      <config projectName="CubDB" targetName="gmock" />
+      <config projectName="CubDB" targetName="fail" />
+      <config projectName="CubDB" targetName="ContinuousMemCheck" />
+      <config projectName="CubDB" targetName="ExperimentalMemCheck" />
+      <config projectName="CubDB" targetName="NightlyMemoryCheck" />
+      <config projectName="CubDB" targetName="ContinuousStart" />
+      <config projectName="CubDB" targetName="gtest" />
+    </generated>
+  </component>
+  <component name="CMakeSettings">
+    <configurations>
+      <configuration PROFILE_NAME="Debug" ENABLED="true" CONFIG_NAME="Debug" GENERATION_OPTIONS="-DCUB_BUILD_EXAMPLES=On" />
+      <configuration PROFILE_NAME="RelWithAssertions" ENABLED="true" CONFIG_NAME="RelWithAssertions" GENERATION_OPTIONS="-DCUB_BUILD_EXAMPLES=On" />
+      <configuration PROFILE_NAME="DebWithFuzzers" ENABLED="true" CONFIG_NAME="Debug" GENERATION_OPTIONS="-DCUB_BUILD_FUZZERS=ON -DCUB_FUZZER_LINK_MAIN=ON -DCMAKE_CXX_FLAGS=-fsanitize=address -DCUB_BUILD_EXAMPLES=On" />
+      <configuration PROFILE_NAME="Debug-TSan" ENABLED="true" CONFIG_NAME="Debug" GENERATION_OPTIONS="-DCUB_BUILD_EXAMPLES=On -DCMAKE_CXX_FLAGS=-fsanitize=thread" />
+      <configuration PROFILE_NAME="Default" ENABLED="true" />
+      <configuration PROFILE_NAME="Default-Coverage" ENABLED="true" GENERATION_OPTIONS="-DCMAKE_CXX_FLAGS=&quot;-fprofile-instr-generate -fcoverage-mapping&quot; -DCMAKE_C_FLAGS=&quot;-fprofile-instr-generate -fcoverage-mapping&quot;" />
+    </configurations>
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="85ac517d-820f-4580-aabc-fdaa72544c70" name="Changes" comment="Forgot to update logging test. Fixed.">
+      <change beforePath="$PROJECT_DIR$/DESIGN.md" beforeDir="false" afterPath="$PROJECT_DIR$/DESIGN.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/include/cub/database.h" beforeDir="false" afterPath="$PROJECT_DIR$/include/cub/database.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/include/cub/exception.h" beforeDir="false" afterPath="$PROJECT_DIR$/include/cub/exception.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/layout.h" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/layout.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/benchmark/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/test/benchmark/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/benchmark/benchmark.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/benchmark/main.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/fuzz/fuzzers.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/fuzz/fuzzers.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/recovery/fail.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/recovery/fail.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/recovery/recover.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/recovery/recover.cpp" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/unit_tests/test_tree.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/test/unit_tests/test_tree.cpp" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ExecutionTargetManager" SELECTED_TARGET="CMakeBuildProfile:RelWithAssertions" />
+  <component name="Git.Merge.Settings">
+    <option name="BRANCH" value="origin/main" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="simplify_exception_classes" />
+      </map>
+    </option>
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+    <option name="ROOT_SYNC" value="DONT_SYNC" />
+  </component>
+  <component name="MarkdownSettingsMigration">
+    <option name="stateVersion" value="1" />
+  </component>
+  <component name="ProjectApplicationVersion">
+    <option name="ide" value="CLion" />
+    <option name="majorVersion" value="2021" />
+    <option name="minorVersion" value="3" />
+  </component>
+  <component name="ProjectId" id="2AR9aWwGWpeeMtty26Iycckvsdx" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">
+    <property name="ASKED_ADD_EXTERNAL_FILES" value="true" />
+    <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
+    <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
+    <property name="RunOnceActivity.cidr.known.project.marker" value="true" />
+    <property name="WebServerToolWindowFactoryState" value="true" />
+    <property name="cf.advertisement.text.overridden" value="true" />
+    <property name="cf.first.check.clang-format" value="false" />
+    <property name="cidr.known.project.marker" value="true" />
+    <property name="cmake.loaded.for.project" value="true" />
+    <property name="ctest.advertisement.all.test.configuration.is.created" value="true" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/cmake-build-debwithfuzzers/test/fuzz" />
+    <property name="node.js.detected.package.eslint" value="true" />
+    <property name="node.js.detected.package.tslint" value="true" />
+    <property name="node.js.selected.package.eslint" value="(autodetect)" />
+    <property name="node.js.selected.package.tslint" value="(autodetect)" />
+    <property name="nodejs_package_manager_path" value="npm" />
+    <property name="settings.editor.selected.configurable" value="CMakeSettings" />
+  </component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/cmake-build-debwithfuzzers/test/fuzz" />
+      <recent name="$PROJECT_DIR$/examples" />
+      <recent name="$PROJECT_DIR$/src/tree" />
+      <recent name="$PROJECT_DIR$/src/db" />
+      <recent name="$PROJECT_DIR$/include/cub" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/src/utils" />
+      <recent name="$PROJECT_DIR$/test/fuzz/wal_corpus" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Google Test.unit_tests">
+    <configuration name="DatabaseTests.DataPersists" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_CLASS="DatabaseTests" TEST_METHOD="DataPersists" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="DatabaseTests.DataPersistsWhenNotUsingTransactions" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_CLASS="DatabaseTests" TEST_METHOD="DataPersistsWhenNotUsingTransactions" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="DatabaseTests.WALIsNotOpenedIfNotUsingTransactions" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_CLASS="DatabaseTests" TEST_METHOD="WALIsNotOpenedIfNotUsingTransactions" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="TreeTests.InsertSanityCheck" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" temporary="true" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_CLASS="TreeTests" TEST_METHOD="InsertSanityCheck" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="test_rw" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="test_rw" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="test_rw" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="unit_tests" type="CMakeGoogleTestRunConfigurationType" factoryName="Google Test" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="CubDB" TARGET_NAME="unit_tests" CONFIG_NAME="Debug" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="unit_tests" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration default="true" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="all_fuzzers" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="benchmark" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="benchmark" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="corpus_generator" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="corpus_generator" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="cub" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="example" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="example" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="fail" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="fail" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="fmt" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="fuzz" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="fuzz_ops" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="fuzz_ops" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="fuzz_wal" type="CMakeRunConfiguration" factoryName="Application" PROGRAM_PARAMS="./wal_corpus/crash" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="fuzz_wal" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="recover" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="recover" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="test_logging" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="test_logging" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="test_tools" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="usage" type="CMakeRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_TARGET_PROJECT_NAME="CubDB" RUN_TARGET_NAME="usage" EXPLICIT_BUILD_TARGET_NAME="all">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="All CTest" type="CTestRunConfiguration" factoryName="CTestRun" PROGRAM_PARAMS="--extra-verbose" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" WORKING_DIR="file://$CMakeCurrentLocalGenerationDir$" PASS_PARENT_ENVS_2="true" CONFIG_NAME="DebWithFuzzers" RUN_PATH="$CTestCurrentExecutableName$" EXPLICIT_BUILD_TARGET_NAME="all" TEST_MODE="SUITE_TEST">
+      <method v="2">
+        <option name="com.jetbrains.cidr.execution.CidrBuildBeforeRunTaskProvider$BuildBeforeRunTask" enabled="true" />
+        <option name="BeforeTestRunTask" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="run.sh" type="ShConfigurationType" temporary="true">
+      <option name="SCRIPT_TEXT" value="" />
+      <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+      <option name="SCRIPT_PATH" value="$PROJECT_DIR$/cmake-build-relwithassertions/test/recovery/run.sh" />
+      <option name="SCRIPT_OPTIONS" value="" />
+      <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
+      <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$/cmake-build-relwithassertions/test/recovery" />
+      <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+      <option name="INTERPRETER_PATH" value="/usr/local/bin/bash" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="EXECUTE_IN_TERMINAL" value="true" />
+      <option name="EXECUTE_SCRIPT_FILE" value="true" />
+      <envs />
+      <method v="2" />
+    </configuration>
+    <list>
+      <item itemvalue="CMake Application.example" />
+      <item itemvalue="CMake Application.usage" />
+      <item itemvalue="CMake Application.fmt" />
+      <item itemvalue="CMake Application.cub" />
+      <item itemvalue="CMake Application.test_tools" />
+      <item itemvalue="CMake Application.benchmark" />
+      <item itemvalue="CMake Application.all_fuzzers" />
+      <item itemvalue="CMake Application.corpus_generator" />
+      <item itemvalue="CMake Application.fuzz" />
+      <item itemvalue="CMake Application.fuzz_ops" />
+      <item itemvalue="CMake Application.fuzz_wal" />
+      <item itemvalue="CMake Application.test_logging" />
+      <item itemvalue="CMake Application.fail" />
+      <item itemvalue="CMake Application.recover" />
+      <item itemvalue="CTest Application.All CTest" />
+      <item itemvalue="Google Test.test_rw" />
+      <item itemvalue="Google Test.unit_tests" />
+      <item itemvalue="Google Test.DatabaseTests.WALIsNotOpenedIfNotUsingTransactions" />
+      <item itemvalue="Google Test.DatabaseTests.DataPersists" />
+      <item itemvalue="Google Test.DatabaseTests.DataPersistsWhenNotUsingTransactions" />
+      <item itemvalue="Google Test.TreeTests.InsertSanityCheck" />
+      <item itemvalue="Shell Script.run.sh" />
+    </list>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Shell Script.run.sh" />
+        <item itemvalue="Google Test.TreeTests.InsertSanityCheck" />
+        <item itemvalue="Google Test.DatabaseTests.DataPersistsWhenNotUsingTransactions" />
+        <item itemvalue="Google Test.DatabaseTests.DataPersists" />
+        <item itemvalue="Google Test.DatabaseTests.WALIsNotOpenedIfNotUsingTransactions" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="85ac517d-820f-4580-aabc-fdaa72544c70" name="Changes" comment="" />
+      <created>1654961596516</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1654961596516</updated>
+      <workItem from="1654961602848" duration="8575000" />
+      <workItem from="1654985969891" duration="149752000" />
+    </task>
+    <task id="LOCAL-00001" summary="Preliminary work on removing exceptions">
+      <created>1654986044278</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1654986044278</updated>
+    </task>
+    <task id="LOCAL-00002" summary="Added `Batch` object and changed the API. Working on CI.">
+      <created>1655066286507</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1655066286507</updated>
+    </task>
+    <task id="LOCAL-00003" summary="Working on CI.">
+      <created>1655066477227</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1655066477227</updated>
+    </task>
+    <task id="LOCAL-00004" summary="Adding fuzzers to CI.">
+      <created>1655079638135</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1655079638135</updated>
+    </task>
+    <task id="LOCAL-00005" summary="Added some flags to CI build.">
+      <created>1655079937081</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1655079937081</updated>
+    </task>
+    <task id="LOCAL-00006" summary="Added some flags to CI build.">
+      <created>1655080189477</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1655080189477</updated>
+    </task>
+    <task id="LOCAL-00007" summary="Actually, we may have to skip fuzzing on OSX. Not sure how to make that work right now.">
+      <created>1655080653159</created>
+      <option name="number" value="00007" />
+      <option name="presentableId" value="LOCAL-00007" />
+      <option name="project" value="LOCAL" />
+      <updated>1655080653159</updated>
+    </task>
+    <task id="LOCAL-00008" summary="Working on implicit conversions for Bytes and BytesView.">
+      <created>1655083887137</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1655083887137</updated>
+    </task>
+    <task id="LOCAL-00009" summary="Added logger singleton.">
+      <created>1655134373133</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1655134373133</updated>
+    </task>
+    <task id="LOCAL-00010" summary="Removed some exception classes. Relying more on those provided by the STL.">
+      <created>1655135028590</created>
+      <option name="number" value="00010" />
+      <option name="presentableId" value="LOCAL-00010" />
+      <option name="project" value="LOCAL" />
+      <updated>1655135028590</updated>
+    </task>
+    <task id="LOCAL-00011" summary="Bringing in libfmt as a dependency.">
+      <created>1655135409200</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1655135409200</updated>
+    </task>
+    <task id="LOCAL-00012" summary="Scratch that, will postpone libfmt dependence until later.">
+      <created>1655135977248</created>
+      <option name="number" value="00012" />
+      <option name="presentableId" value="LOCAL-00012" />
+      <option name="project" value="LOCAL" />
+      <updated>1655135977248</updated>
+    </task>
+    <task id="LOCAL-00013" summary="Preparing to remove Batch and add Token. Having Batch is pretty redundant.">
+      <created>1655219309286</created>
+      <option name="number" value="00013" />
+      <option name="presentableId" value="LOCAL-00013" />
+      <option name="project" value="LOCAL" />
+      <updated>1655219309286</updated>
+    </task>
+    <task id="LOCAL-00014" summary="Preparing to remove Token/Lock/whole reader/writer lock thing. It doesn't make sense to me to cause users to hang for calling the wrong overload or having the added complication of internal synchronization (especially when multithreading might not be used). It's still possible to use std::shared_mutex to externally coordinate multiple Cursors and one writer (who calls methods on Database).">
+      <created>1655223511502</created>
+      <option name="number" value="00014" />
+      <option name="presentableId" value="LOCAL-00014" />
+      <option name="project" value="LOCAL" />
+      <updated>1655223511502</updated>
+    </task>
+    <task id="LOCAL-00015" summary="Removed the reader/writer lock stuff, greatly simplifying the API.">
+      <created>1655229300635</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1655229300635</updated>
+    </task>
+    <task id="LOCAL-00016" summary="Worked on the README and benchmarks. Made using direct I/O optional.">
+      <created>1655239174474</created>
+      <option name="number" value="00016" />
+      <option name="presentableId" value="LOCAL-00016" />
+      <option name="project" value="LOCAL" />
+      <updated>1655239174474</updated>
+    </task>
+    <task id="LOCAL-00017" summary="Added some documentation.">
+      <created>1655251926133</created>
+      <option name="number" value="00017" />
+      <option name="presentableId" value="LOCAL-00017" />
+      <option name="project" value="LOCAL" />
+      <updated>1655251926133</updated>
+    </task>
+    <task id="LOCAL-00018" summary="Worked on docs and coverage.">
+      <created>1655307144153</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1655307144153</updated>
+    </task>
+    <task id="LOCAL-00019" summary="Removed the use of std::optional, and an unnecessary key comparison, from Tree::split_non_root(). Moved some comment diagrams to tables in DESIGN.md.">
+      <created>1655315754427</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1655315754427</updated>
+    </task>
+    <task id="LOCAL-00020" summary="Needed to specify &quot;[[fallthrough]]&quot; on switch.">
+      <created>1655316091764</created>
+      <option name="number" value="00020" />
+      <option name="presentableId" value="LOCAL-00020" />
+      <option name="project" value="LOCAL" />
+      <updated>1655316091764</updated>
+    </task>
+    <task id="LOCAL-00021" summary="Fixed a narrowing conversion error.">
+      <created>1655316366759</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1655316366759</updated>
+    </task>
+    <task id="LOCAL-00022" summary="Removed examples.cpp.">
+      <created>1655316560475</created>
+      <option name="number" value="00022" />
+      <option name="presentableId" value="LOCAL-00022" />
+      <option name="project" value="LOCAL" />
+      <updated>1655316560475</updated>
+    </task>
+    <task id="LOCAL-00023" summary="Added option to turn off transaction support, which can dramatically improve performance at the cost of losing the protection provided by write-ahead logging.">
+      <created>1655324689769</created>
+      <option name="number" value="00023" />
+      <option name="presentableId" value="LOCAL-00023" />
+      <option name="project" value="LOCAL" />
+      <updated>1655324689769</updated>
+    </task>
+    <task id="LOCAL-00024" summary="Forgot to update logging test. Fixed.">
+      <created>1655324992884</created>
+      <option name="number" value="00024" />
+      <option name="presentableId" value="LOCAL-00024" />
+      <option name="project" value="LOCAL" />
+      <updated>1655324992884</updated>
+    </task>
+    <option name="localTasksCounter" value="25" />
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="main" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="Preliminary work on removing exceptions" />
+    <MESSAGE value="Added `Batch` object and changed the API. Working on CI." />
+    <MESSAGE value="Working on CI." />
+    <MESSAGE value="Adding fuzzers to CI." />
+    <MESSAGE value="Added some flags to CI build." />
+    <MESSAGE value="Actually, we may have to skip fuzzing on OSX. Not sure how to make that work right now." />
+    <MESSAGE value="Working on implicit conversions for Bytes and BytesView." />
+    <MESSAGE value="Added logger singleton." />
+    <MESSAGE value="Removed some exception classes. Relying more on those provided by the STL." />
+    <MESSAGE value="Bringing in libfmt as a dependency." />
+    <MESSAGE value="Scratch that, will postpone libfmt dependence until later." />
+    <MESSAGE value="Preparing to remove Batch and add Token. Having Batch is pretty redundant." />
+    <MESSAGE value="Preparing to remove Token/Lock/whole reader/writer lock thing. It doesn't make sense to me to cause users to hang for calling the wrong overload or having the added complication of internal synchronization (especially when multithreading might not be used). It's still possible to use std::shared_mutex to externally coordinate multiple Cursors and one writer (who calls methods on Database)." />
+    <MESSAGE value="Removed the reader/writer lock stuff, greatly simplifying the API." />
+    <MESSAGE value="Worked on the README and benchmarks. Made using direct I/O optional." />
+    <MESSAGE value="Added some documentation." />
+    <MESSAGE value="Worked on docs and coverage." />
+    <MESSAGE value="Removed the use of std::optional, and an unnecessary key comparison, from Tree::split_non_root(). Moved some comment diagrams to tables in DESIGN.md." />
+    <MESSAGE value="Needed to specify &quot;[[fallthrough]]&quot; on switch." />
+    <MESSAGE value="Fixed a narrowing conversion error." />
+    <MESSAGE value="Removed examples.cpp." />
+    <MESSAGE value="Added option to turn off transaction support, which can dramatically improve performance at the cost of losing the protection provided by write-ahead logging." />
+    <MESSAGE value="Forgot to update logging test. Fixed." />
+    <option name="LAST_COMMIT_MESSAGE" value="Forgot to update logging test. Fixed." />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/integration/test_rw.cpp</url>
+          <line>22</line>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/integration/test_rw.cpp</url>
+          <line>35</line>
+          <option name="timeStamp" value="3" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/unit_tests/test_db.cpp</url>
+          <line>281</line>
+          <option name="timeStamp" value="9" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/fuzz/fuzz_wal.cpp</url>
+          <line>17</line>
+          <option name="timeStamp" value="20" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/fuzz/fuzz_wal.cpp</url>
+          <line>15</line>
+          <option name="timeStamp" value="21" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/benchmark/main.cpp</url>
+          <line>94</line>
+          <option name="timeStamp" value="24" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/benchmark/main.cpp</url>
+          <line>222</line>
+          <option name="timeStamp" value="27" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/benchmark/main.cpp</url>
+          <line>80</line>
+          <option name="timeStamp" value="30" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/benchmark/main.cpp</url>
+          <line>95</line>
+          <option name="timeStamp" value="32" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/examples/usage.cpp</url>
+          <line>79</line>
+          <option name="timeStamp" value="37" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/unit_tests/test_db.cpp</url>
+          <line>392</line>
+          <option name="timeStamp" value="38" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/src/pool/buffer_pool.cpp</url>
+          <line>223</line>
+          <option name="timeStamp" value="41" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/unit_tests/test_db.cpp</url>
+          <line>394</line>
+          <option name="timeStamp" value="42" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/benchmark/main.cpp</url>
+          <line>269</line>
+          <option name="timeStamp" value="43" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/unit_tests/test_db.cpp</url>
+          <line>330</line>
+          <option name="timeStamp" value="44" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/src/db/database_impl.cpp</url>
+          <line>101</line>
+          <option name="timeStamp" value="45" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/src/db/database_impl.cpp</url>
+          <line>100</line>
+          <option name="timeStamp" value="46" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/tools/fakes.cpp</url>
+          <line>200</line>
+          <option name="timeStamp" value="47" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/src/db/database_impl.cpp</url>
+          <line>65</line>
+          <option name="timeStamp" value="48" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/test/unit_tests/test_pool.cpp</url>
+          <line>132</line>
+          <option name="timeStamp" value="50" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
+  </component>
+  <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="../../../../Desktop/git/CubDB/cmake-build-default-coverage" NAME="unit_tests Coverage Results" MODIFIED="1655306656670" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="gcov/llvm" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" />
+  </component>
+</project>
