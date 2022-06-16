@@ -229,35 +229,57 @@ Each database is opened without using direct I/O, as this usually seems to hurt 
 We use 16-byte keys and 100-byte values with a 4MB cache (similar to http://www.lmdb.tech/bench/microbench/benchmark.html).
 We still have a ways to go performance-wise, however, it seems that the cursors provide pretty fast sequential and reverse-sequential reads.
 
-```
-.--------------------------.--------------------------.
-| Name                     | Result (ops/second)      |
-|--------------------------|--------------------------|
-| write_rand               |                   37,185 |
-| write_seq                |                   57,079 |
-| read_rand                |                  161,717 |
-| read_seq                 |                3,611,615 |
-| read_rev                 |                4,429,556 |
-| erase_all_rand           |                   25,911 |
-| erase_all_seq            |                   26,941 |
-| erase_half_rand          |                   22,306 |
-| erase_half_seq           |                   22,230 |
-'--------------------------'--------------------------'
+### Benchmark Results
+| Name            | Result (ops/second) |
+|:----------------|--------------------:|
+| write_rand      |              37,185 |
+| write_seq       |              57,079 |
+| read_rand       |             161,717 |
+| read_seq        |           3,611,615 |
+| read_rev        |           4,429,556 |
+| erase_all_rand  |              25,911 |
+| erase_all_seq   |              26,941 |
+| erase_half_rand |              22,306 |
+| erase_half_seq  |              22,230 |
 
-.--------------------------.--------------------------.
-| Name (In-Memory DB)      | Result (ops/second)      |
-|--------------------------|--------------------------|
-| write_rand               |                   36,368 |
-| write_seq                |                   55,883 |
-| read_rand                |                  335,235 |
-| read_seq                 |                4,156,060 |
-| read_rev                 |                4,672,760 |
-| erase_all_rand           |                   53,372 |
-| erase_all_seq            |                   70,807 |
-| erase_half_rand          |                   58,205 |
-| erase_half_seq           |                   50,895 |
-'--------------------------'--------------------------'
-```
+### Benchmark Results (In-Memory Database)
+| Name            | Result (ops/second) |
+|:----------------|--------------------:|
+| write_rand      |              36,368 |
+| write_seq       |              55,883 |
+| read_rand       |             335,235 |
+| read_seq        |           4,156,060 |
+| read_rev        |           4,672,760 |
+| erase_all_rand  |              53,372 |
+| erase_all_seq   |              70,807 |
+| erase_half_rand |              58,205 |
+| erase_half_seq  |              50,895 |
+
+### Benchmark Results (w/o Transactions)
+| Name            | Result (ops/second) |
+|:----------------|--------------------:|
+| write_rand      |             184,132 |
+| write_seq       |             315,690 |
+| read_rand       |             168,048 |
+| read_seq        |           2,952,982 |
+| read_rev        |           3,442,488 |
+| erase_all_rand  |              68,815 |
+| erase_all_seq   |              97,796 |
+| erase_half_rand |              57,002 |
+| erase_half_seq  |              52,994 |
+
+### Benchmark Results (In-Memory Database w/o Transactions)
+| Name            | Result (ops/second) |
+|:----------------|--------------------:|
+| write_rand      |             208,627 |
+| write_seq       |             289,995 |
+| read_rand       |             520,930 |
+| read_seq        |           3,670,945 |
+| read_rev        |           4,365,084 |
+| erase_all_rand  |              63,816 |
+| erase_all_seq   |              72,470 |
+| erase_half_rand |              68,437 |
+| erase_half_seq  |              65,273 |
 
 ## TODO
 1. Get everything code reviewed!
@@ -297,7 +319,7 @@ Each submodule is represented by a directory in `src`, as shown in [source tree 
 ```
 CubDB
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
-┣╸include/cub 
+┣╸include/cub
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Slices for holding contiguous sequences of bytes
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cub.h ┄┄┄┄┄┄┄┄┄┄ Pulls in the rest of the API

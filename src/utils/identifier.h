@@ -11,6 +11,16 @@ struct IdentifierHash;
 struct Identifier {
     using Hasher = IdentifierHash;
 
+    [[nodiscard]] static auto min() noexcept -> Identifier
+    {
+        return Identifier {std::numeric_limits<decltype(value)>::min()};
+    }
+
+    [[nodiscard]] static auto max() noexcept -> Identifier
+    {
+        return Identifier {std::numeric_limits<decltype(value)>::max()};
+    }
+
     Identifier() noexcept = default;
 
     template<class Id> explicit Identifier(Id id) noexcept
@@ -80,6 +90,9 @@ struct IdentifierHash {
 struct PID final: public Identifier {
     PID() noexcept = default;
 
+    PID(Identifier id) noexcept
+        : Identifier {id.value} {}
+
     template<class T> explicit PID(T id) noexcept
         : Identifier {id} {}
 
@@ -101,6 +114,9 @@ struct PID final: public Identifier {
 
 struct LSN final: public Identifier {
     LSN() noexcept = default;
+
+    LSN(Identifier id) noexcept
+        : Identifier {id.value} {}
 
     template<class T> explicit LSN(T id) noexcept
         : Identifier {id} {}

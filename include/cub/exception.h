@@ -12,13 +12,9 @@ namespace cub {
 
 class IOError: public std::runtime_error {
 public:
-    IOError(std::error_code code, const char *what)
-        : std::runtime_error {what}
-        , m_code {code} {}
-
     explicit IOError(const char *what)
         : std::runtime_error {what}
-          , m_code {std::make_error_code(std::errc::io_error)} {}
+        , m_code {std::make_error_code(std::errc::io_error)} {}
 
     explicit IOError(const std::system_error &error)
         : std::runtime_error {error.what()}

@@ -24,6 +24,12 @@ public:
         return m_list.size();
     }
 
+    [[nodiscard]] auto dirty_count() const -> Size
+    {
+        CUB_EXPECT_LE(m_dirty_count, size());
+        return m_dirty_count;
+    }
+
     [[nodiscard]] auto contains(PID id) const -> bool
     {
         return m_map.find(id) != m_map.end();
@@ -39,13 +45,13 @@ public:
     auto put(Frame) -> void;
     auto extract(PID) -> std::optional<Frame>;
     auto evict(LSN) -> std::optional<Frame>;
-    auto purge() -> void;
 
 private:
     std::unordered_map<PID, std::list<Frame>::iterator, PID::Hasher> m_map;
     std::list<Frame> m_list;
-    Size m_hit_count{};
-    Size m_miss_count{};
+    Size m_dirty_count {};
+    Size m_hit_count {};
+    Size m_miss_count {};
 };
 
 } // cub

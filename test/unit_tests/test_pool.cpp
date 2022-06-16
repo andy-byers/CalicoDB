@@ -94,16 +94,15 @@ public:
     explicit BufferPoolTestsBase(std::unique_ptr<ReadWriteMemory> file)
     {
         memory = file->memory();
-        WALHarness harness {page_size};
-
         pool = std::make_unique<BufferPool>(BufferPool::Parameters{
             std::move(file),
-            std::move(harness.reader),
-            std::move(harness.writer),
+            nullptr,
+            nullptr,
             static_lsn,
             frame_count,
             0,
             page_size,
+            false,
         });
     }
 
@@ -129,7 +128,7 @@ TEST_F(BufferPoolTests, FreshBufferPoolIsEmpty)
 TEST_F(BufferPoolTests, FreshPoolIsSetUpCorrectly)
 {
     ASSERT_EQ(pool->page_size(), page_size);
-    ASSERT_EQ(pool->block_size(), page_size);
+    ASSERT_EQ(pool->block_size(), 0);
     ASSERT_EQ(pool->hit_ratio(), 0.0);
     ASSERT_EQ(pool->flushed_lsn(), static_lsn);
 }
@@ -283,7 +282,7 @@ public:
     static constexpr Size page_size = 0x200;
 
     InMemoryTests()
-        : pool {std::make_unique<InMemory>(page_size)} {}
+        : pool {std::make_unique<InMemory>(page_size, true)} {}
 
     Random random {0};
     std::unique_ptr<InMemory> pool;

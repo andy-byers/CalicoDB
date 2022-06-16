@@ -185,6 +185,7 @@ auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
         std::move(wal_writer_file),
         header,
         0x10, // Use a small number of frames to force a lot of I/O.
+        true,
     });
     db.page_size = page_size;
     return db;
@@ -211,10 +212,10 @@ auto FaultyDatabase::clone() -> FaultyDatabase
         std::move(wal_writer_file),
         header,
         DEFAULT_FRAME_COUNT,
+        true,
     });
     new_db.page_size = page_size;
     return new_db;
 }
 
 } // cub
-

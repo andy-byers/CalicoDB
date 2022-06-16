@@ -13,9 +13,10 @@ namespace cub {
 
 class InMemory: public IBufferPool {
 public:
-    explicit InMemory(Size page_size)
+    InMemory(Size page_size, bool use_transactions)
         : m_scratch {page_size}
-        , m_page_size {page_size} {}
+        , m_page_size {page_size}
+        , m_uses_transactions {use_transactions} {}
 
     ~InMemory() override = default;
 
@@ -46,7 +47,15 @@ public:
 
     [[nodiscard]] auto can_commit() const -> bool override
     {
+        if (!m_uses_transactions)
+            throw std::logic_error {"Transactions are not enabled"};
+
         return !m_stack.empty();
+    }
+
+    [[nodiscard]] auto uses_transactions() const -> bool override
+    {
+        return m_uses_transactions;
     }
 
     auto recover() -> bool override
@@ -90,6 +99,7 @@ private:
     std::exception_ptr m_error;
     ScratchManager m_scratch;
     Size m_page_size {};
+    bool m_uses_transactions {};
 };
 
 } // cub

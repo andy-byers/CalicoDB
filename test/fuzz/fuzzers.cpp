@@ -57,7 +57,7 @@ auto OperationFuzzer::fuzzer_action(const uint8_t *data, Size size) -> void
                 break;
             case Operation::REMOVE:
                 // Remove the first record with a key > `key`.
-                if (const auto record = m_db.read(_b(key), ThreeWayComparison::GT))
+                if (const auto record = m_db.read(_b(key), Ordering::GT))
                     m_db.erase(_b(record->key));
                 break;
             case Operation::COMMIT:

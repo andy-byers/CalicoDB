@@ -11,7 +11,9 @@ class Info;
 class Cursor;
 
 /**
- * Represents an ordering between two keys.
+ * Represents a relationship between two keys.
+ *
+ * @see Database::read()
  */
 enum class Ordering {
     LT, ///< Less than
@@ -40,9 +42,20 @@ public:
      * Create an in-memory Cub DB database.
      *
      * @param page_size Size of a page of memory in bytes (must be a power of two).
+     * @param use_transactions True if the database should use transactions, false otherwise.
      * @return An in-memory Cub DB database.
      */
-    static auto temp(Size page_size) -> Database;
+    static auto temp(Size page_size, bool use_transactions = true) -> Database;
+
+    /**
+     * Destroy a database.
+     *
+     * Warning: this method is dangerous. It deletes the database and WAL files and cannot be undone. Use
+     * at your own risk.
+     *
+     * @param db The database to destroy.
+     */
+    static auto destroy(Database db) -> void;
 
     /**
      * Destroy a database.
@@ -57,10 +70,10 @@ public:
     /**
      * Read a record from the database.
      *
-     * This method will search for a record with a key that is either less than, equal to, or greater than,
-     * the given key, depending on the value of the second parameter.
+     * This method will search for the first record with a key with the given relationship to the provided
+     * key. For example, if Ordering::GT is used, we look for the first key greater than the given key.
      *
-     * @param key The given key.
+     * @param key The key to search for.
      * @param ordering Relationship between the target record key and the given key.
      * @return The record with the desired relationship to the given key, or std::nullopt if that record
      *         does not exist.
@@ -182,6 +195,13 @@ public:
      * @return The maximal key length in characters.
      */
     [[nodiscard]] auto maximum_key_size() const -> Size;
+
+    /**
+     * Determine if the database uses transactions.
+     *
+     * @return True if the database uses transactions, false otherwise.
+     */
+    [[nodiscard]] auto uses_transactions() const -> bool;
 
 private:
     friend class Database;

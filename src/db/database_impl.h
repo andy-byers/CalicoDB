@@ -28,15 +28,17 @@ public:
         std::unique_ptr<ILogFile> wal_writer_file;
         const FileHeader &file_header;
         Size frame_count{};
+        bool use_transactions {};
     };
 
-    explicit Impl(Size);
+    explicit Impl(Size, bool);
     explicit Impl(Parameters);
     ~Impl();
     [[nodiscard]] auto cache_hit_ratio() const -> double;
     [[nodiscard]] auto record_count() const -> Size;
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
+    [[nodiscard]] auto uses_transactions() const -> Size;
 
     [[nodiscard]] auto path() const -> const std::string&
     {

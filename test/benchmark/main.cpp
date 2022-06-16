@@ -2,14 +2,13 @@
 #include <filesystem>
 #include <locale>
 #include <chrono>
-#include <thread> 
+#include <thread>
 #include "cub/cub.h"
 #include "tools.h"
 
 namespace {
 
 using namespace cub;
-
 constexpr auto PATH = "/tmp/cub_benchmark";
 constexpr Size FIELD_WIDTH {24};
 constexpr Size BASELINE_MULTIPLIER {10};
@@ -22,7 +21,9 @@ constexpr Options options {
     PAGE_SIZE,              // Page size
     PAGE_SIZE,              // Block size
     CACHE_SIZE / PAGE_SIZE, // Frame count
-    0666,
+    0666,                   // Permissions
+    false,                  // Use direct I/O
+    false,                  // Use transactions TODO: This should be an option.
 };
 
 struct BenchmarkParameters {
@@ -316,29 +317,15 @@ auto main(int argc, const char *argv[]) -> int
         {
             [](Database&) {},
             [&records](Database &db) {build_erases(db, records, false);},
-            [&records](Database &db) {run_erases(db, records);},
-            "erase_all_rand",
-            num_elements,
-        },
-        {
-            [](Database&) {},
-            [&records](Database &db) {build_erases(db, records, true);},
-            [&records](Database &db) {run_erases(db, records);},
-            "erase_all_seq",
-            num_elements,
-        },
-        {
-            [](Database&) {},
-            [&records](Database &db) {build_erases(db, records, false);},
             [&half_records](Database &db) {run_erases(db, half_records);},
-            "erase_half_rand",
+            "erase_rand",
             half_records.size(),
         },
         {
             [](Database&) {},
             [&records](Database &db) {build_erases(db, records, true);},
             [&half_records](Database &db) {run_erases(db, half_records);},
-            "erase_half_seq",
+            "erase_seq",
             half_records.size(),
         },
     };

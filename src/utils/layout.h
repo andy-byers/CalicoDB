@@ -18,7 +18,7 @@ public:
     static const Size BLOCK_SIZE_OFFSET = 26;
     static const Size KEY_COUNT_OFFSET = 28;
     static const Size FLUSHED_LSN_OFFSET = 32;
-    static const Size HEADER_SIZE = 36;
+    static const Size HEADER_SIZE = 48;
 
     static auto header_offset() noexcept -> Index
     {
