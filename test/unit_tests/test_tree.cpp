@@ -809,7 +809,7 @@ auto setup_remove_special_cases_test(TreeBuilder &builder) -> void
     //                    1:[4,                 8,                   12,                    16,                    20]
     //          2:[2]                3:[6]              4:[10]                 5:[14]                 6:[18]                7:[22]
     //     8:[1]     9:[3]     10:[5]     11:[7]  12:[9]      13:[11]   14:[13]      15:[15]   16:[17]      17:[19]  18:[21]      19:[23]
-    const auto small_size = get_max_local(builder.page_size()) / 7 * 3 + 4;
+    const auto small_size = get_max_local(builder.page_size()) / 7 * 3 + 2;
     for (Index i {}; i < 6; ++i)
         builder.allocate_node(PageType::INTERNAL_NODE);
     for (Index i {}; i < 12; ++i)

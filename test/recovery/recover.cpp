@@ -45,25 +45,23 @@ auto main(int argc, const char *argv[]) -> int
 
     auto db = Database::open(path, {});
     const auto info = db.get_info();
-    auto reader = db.get_cursor();
-    Index key_counter {};
 
     // The database should contain exactly `num_committed` records.
     CUB_EXPECT_EQ(info.record_count(), num_committed);
-    CUB_EXPECT_EQ(reader.has_record(), num_committed != 0);
 
-    if (num_committed > 0) {
-        reader.find_minimum();
-        auto itr = values.begin();
-        do {
-            const auto k = make_key<KEY_WIDTH>(key_counter++);
-            CUB_EXPECT_EQ(_s(reader.key()), k);
-            CUB_EXPECT_EQ(reader.value(), *itr);
-            itr++;
-        } while (reader.increment());
+    Index key_counter {};
+    for (const auto &value: values) {
+        const auto key = make_key<KEY_WIDTH>(key_counter++);
+        const auto record = db.read(_b(key));
+        CUB_EXPECT_NE(record, std::nullopt);
+        CUB_EXPECT_EQ(record->key, key);
+        CUB_EXPECT_EQ(record->value, value);
+        CUB_EXPECT_TRUE(db.erase(_b(key)));
     }
-    // All records should have been reached.
+
+    // All records should have been reached and removed.
     CUB_EXPECT_EQ(key_counter, num_committed);
+    CUB_EXPECT_EQ(info.record_count(), 0);
     std::filesystem::remove(path);
     std::filesystem::remove(get_wal_path(path));
     std::filesystem::remove(value_path);

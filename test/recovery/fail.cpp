@@ -49,11 +49,11 @@ auto main(int argc, const char *argv[]) -> int
     {
         std::ofstream ofs {value_path, std::ios::trunc};
         CUB_EXPECT_TRUE(ofs.is_open());
-        for (Index key {}; key < num_committed; ++key) {
-            const auto k = make_key<KEY_WIDTH>(key);
-            const auto v = random_string(random, 2, 15);
-            db.write(_b(k), _b(v));
-            ofs << v << '\n';
+        for (Index i {}; i < num_committed; ++i) {
+            const auto key = make_key<KEY_WIDTH>(i);
+            const auto value = random_string(random, 2, 15);
+            db.write(_b(key), _b(value));
+            ofs << value << '\n';
         }
         db.commit();
     }
