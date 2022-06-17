@@ -33,9 +33,8 @@ namespace impl {
      */
     template<class Pointer> class Slice {
     public:
-        using UnqualifiedPointer = std::remove_const_t<Pointer>;
-        using ConstPointer = std::add_const_t<UnqualifiedPointer>;
-        using Value = std::remove_pointer_t<UnqualifiedPointer>;
+        using ConstPointer = std::add_const_t<Pointer>;
+        using Value = std::remove_pointer_t<Pointer>;
 
         Slice() noexcept = default;
 
@@ -147,7 +146,7 @@ namespace impl {
          *
          * @return The underlying pointer.
          */
-        [[nodiscard]] auto data() const noexcept -> ConstPointer
+        [[nodiscard]] auto data() const noexcept -> Pointer
         {
             return m_data;
         }
@@ -157,7 +156,7 @@ namespace impl {
          *
          * @return The underlying pointer.
          */
-        auto data() noexcept -> UnqualifiedPointer
+        auto data() noexcept -> Pointer
         {
             return m_data;
         }

@@ -23,6 +23,7 @@ public:
     auto seed() const -> Seed;
     auto set_seed(Seed) -> void;
     auto next_string(Size) -> std::string;
+    auto next_binary(Size) -> std::string;
     template<class C> auto shuffle(C&) -> void;
     template<class T> auto next_int(T) -> T;
     template<class T> auto next_int(T, T) -> T;
@@ -97,6 +98,16 @@ inline auto random_string(Random &random, Size min_size, Size max_size) -> std::
 inline auto random_string(Random &random, Size max_size) -> std::string
 {
     return random_string(random, 0, max_size);
+}
+
+inline auto random_binary(Random &random, Size min_size, Size max_size) -> std::string
+{
+    return random.next_binary(random.next_int(min_size, max_size));
+}
+
+inline auto random_binary(Random &random, Size max_size) -> std::string
+{
+    return random_binary(random, 0, max_size);
 }
 
 // TODO: Function for building a random string from a choice of characters.

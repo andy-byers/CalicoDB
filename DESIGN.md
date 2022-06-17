@@ -1,11 +1,10 @@
+# Cub DB Design
 
-### Glossary
-+ **internal node**: A B-tree node that has children, a.k.a. a branch node
-+ **external node**: A B-tree node that has no children, a.k.a. a leaf node
-+ **page**: A fixed-sized chunk of data read from the database file (see [Pages](#pages))
-+ **block**: A fixed-sized chunk of data read from the WAL file
-+ **cell**: The basic unit of storage in the B-tree (see [Cells](#cells))
-+ **overflow cell**: A cell that cannot fit in a node and must be stored elsewhere temporarily
+## B-Tree
+Cub DB uses a B-tree to maintain an ordered collection of keys and values.
+The B-tree is made up of two types of nodes: internal and external.
+Nodes that have children are internal nodes, while those that do not are external nodes.
+External nodes make up the lowest level of the B-tree and are connected as a singly-linked list.
 
 ### Database Header
 | Size | Offset | Name        | 
@@ -25,7 +24,7 @@
 ### Pages
 Pages are the basic unit of storage that make up the database file.
 Every time we access the database file, it is to either read or write an entire page of data.
-The page size is chosen at the time a database is created and must be a power of two.
+The page size is chosen at the time the database is created and must be a power of two.
 Note that pages are similar to, but not the same as, blocks.
 When we talk about blocks, we are referring the same concept, but with respect to the WAL file rather than the databasee file.
 All pages begin with a page header, except for the root page, which places the file header first.
@@ -40,7 +39,7 @@ Pages can be one of two types, links or nodes, depending on the value of the `Ty
 
 ### Links
 A link is a page that holds a single pointer to another page.
-They are used for both the freelist and to hold overflow values.
+They are used to form singly-linked lists for the freelist and overflow values.
 
 #### Link Header
 | Size | Offset | Name    | 

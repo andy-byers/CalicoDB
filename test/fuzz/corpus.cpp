@@ -1,16 +1,57 @@
 
 #include <filesystem>
+#include <fstream>
 #include "fuzzers.h"
+
+using namespace cub;
+using namespace cub::fuzz;
+
+auto generate_operation_seed(const std::string &path, Size num_operations)
+{
+    static constexpr Size LIMIT {80};
+    OperationEncoder<LIMIT> encoder;
+    Random random;
+
+    decltype(encoder)::Decoded inputs(num_operations);
+    for (auto &[key, value_size, operation]: inputs) {
+        key = random.next_binary(random.next_int(1ULL, 255ULL));
+        if (random.next_int(99ULL) < LIMIT) {
+            operation = Operation::WRITE;
+            value_size = random.next_int(0ULL, 255ULL);
+        } else {
+            operation = Operation::ERASE;
+        }
+    }
+
+    std::ofstream ofs(path, std::ios::trunc);
+    ofs << encoder(inputs);
+}
+
+auto generate_wal_reader_seed(const std::string &path, Size block_size, Size num_records)
+{
+    const auto database_path = path + "_";
+    {
+        Options options;
+        options.page_size = block_size;
+        options.block_size = block_size;
+        auto db = Database::open(database_path, options);
+        for (Index i {}; i < num_records; ++i) {
+            const auto data = std::to_string(i);
+            db.write(_b(data), _b(data + data));
+        }
+        std::filesystem::copy(get_wal_path(database_path), path);
+    }
+    std::filesystem::remove(database_path);
+}
 
 auto main(int, const char*[]) -> int
 {
-    static constexpr auto PREFIX = "/tmp/cub_corpus/";
-    using namespace cub;
-    fuzz::OperationFuzzer fuzzer;
-    std::filesystem::create_directory(PREFIX);
-
-    // TODO: This generates random databases files and WALs. We can use the WALs to seed `fuzz_wal`, but we need
-    //       to generate seeds for `fuzz_ops` as well.
-    for (Index n {}; n < 20; ++n)
-        fuzzer.generate_seed(PREFIX + std::to_string(n), 1'000);
+    const std::string OPERATION_DIR {"operation_corpus"};
+    const std::string WAL_READER_DIR {"wal_reader_corpus"};
+    std::filesystem::create_directory(OPERATION_DIR);
+    std::filesystem::create_directory(WAL_READER_DIR);
+    for (int i {}; i < 100; ++i) {
+        generate_operation_seed(OPERATION_DIR + "/" + std::to_string(i), 500);
+        generate_wal_reader_seed(WAL_READER_DIR + "/" + std::to_string(i), 0x200, 500);
+    }
 }
