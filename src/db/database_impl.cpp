@@ -142,6 +142,9 @@ auto Database::Impl::get_cursor() -> Cursor
 
 auto Database::Impl::read(BytesView key, Ordering ordering) -> std::optional<Record>
 {
+    if (key.is_empty())
+        throw std::invalid_argument {"Key must not be empty"};
+
     if (auto cursor = get_cursor(); cursor.has_record()) {
         const auto found_exact = cursor.find(key);
         switch (ordering) {

@@ -2,7 +2,9 @@
 
 FROM ubuntu:latest
 
-ARG DEBIAN_FRONTEND=noninteractives
+# https://askubuntu.com/questions/909277 (Terentev Maksim's answer)
+ENV TZ=America/Chicago
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -23,15 +25,13 @@ RUN update-alternatives --install /usr/bin/cc cc /usr/bin/clang-8 100 && \
 
 ENV ASAN_OPTIONS log_path=/tmp/asan_log
 
-RUN mkdir CubDB
+WORKDIR /CubDB
+COPY . .
 
-COPY . CubDB
+WORKDIR ./build
 
-RUN mkdir test && \
-    cd test && \
-    cmake -E env \
-      CXXFLAGS="-fsanitize=fuzzer,address" \
-      cmake -DCMAKE_BUILD_TYPE=Debug -DCUB_BUILD_FUZZERS=ON \
-            -DCUB_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" ../CubDB && \
-    cmake --build . --config Debug --target all_fuzzers
+RUN cmake -E env CXXFLAGS="-fsanitize=fuzzer,address" \
+    cmake -DCMAKE_BUILD_TYPE=RelWithAssertions -DCUB_BUILD_FUZZERS=ON \
+          -DCUB_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" .. && \
+    cmake --build . --config RelWithAssertions --target all_fuzzers
 

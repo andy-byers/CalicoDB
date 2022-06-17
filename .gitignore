@@ -19,4 +19,4 @@ _deps
 # CLion TODO: Should .idea file go here?
 cmake-build-debug/**
 
-test/build
+test/fuzz/corpus/
