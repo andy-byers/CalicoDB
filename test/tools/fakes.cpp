@@ -34,7 +34,7 @@ namespace {
     auto do_read(const std::string &memory, Index cursor, Bytes out)
     {
         auto read_size = Size{};
-        if (auto buffer = _b(memory); cursor < buffer.size()) {
+        if (auto buffer = stob(memory); cursor < buffer.size()) {
             const auto diff = buffer.size() - cursor;
             read_size = std::min(out.size(), diff);
             buffer.advance(cursor);
@@ -48,7 +48,7 @@ namespace {
     {
         if (const auto write_end = in.size() + cursor; memory.size() < write_end)
             memory.resize(write_end);
-        mem_copy(_b(memory).range(cursor), in);
+        mem_copy(stob(memory).range(cursor), in);
         return IOResult {cursor + in.size(), in.size()};
     }
 
@@ -163,7 +163,7 @@ FakeFilesHarness::FakeFilesHarness(Options) // TODO
 auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
 {
     std::string header_backing(page_size, '\x00');
-    FileHeader header {_b(header_backing)};
+    FileHeader header {stob(header_backing)};
     FaultyDatabase db;
 
     header.set_page_size(page_size);
@@ -193,7 +193,7 @@ auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
 
 auto FaultyDatabase::clone() -> FaultyDatabase
 {
-    auto root_page = _b(tree_backing.memory()).truncate(page_size);
+    auto root_page = stob(tree_backing.memory()).truncate(page_size);
     FileHeader header {root_page};
     FaultyDatabase new_db;
 

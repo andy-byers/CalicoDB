@@ -54,7 +54,7 @@ public:
 
     [[nodiscard]] auto data() const -> BytesView
     {
-        return _b(m_data);
+        return stob(m_data);
     }
 
     auto append(const WALPayload &rhs) -> void

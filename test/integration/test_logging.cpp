@@ -72,7 +72,7 @@ public:
             switch (random.next_int(2)) {
                 case 0: page.put_u16(offset, random.next_int(std::numeric_limits<uint16_t>::max())); break;
                 case 1: page.put_u32(offset, random.next_int(std::numeric_limits<uint32_t>::max())); break;
-                case 2: page.write(_b(random_string(random, random.next_int(Size {1}, page.size() - offset))), offset); break;
+                case 2: page.write(stob(random_string(random, random.next_int(Size{1}, page.size() - offset))), offset); break;
             }
         }
     }
@@ -81,9 +81,9 @@ public:
     {
         const auto content_offset = PageLayout::content_offset(page.id());
         const auto lsn_offset = PageLayout::header_offset(page.id()) + PageLayout::LSN_OFFSET;
-        auto temp = _s(page.range(0));
-        put_uint32(_b(temp).range(lsn_offset), 0);
-        return crc_32(_b(temp).range(content_offset));
+        auto temp = btos(page.range(0));
+        put_uint32(stob(temp).range(lsn_offset), 0);
+        return crc_32(stob(temp).range(content_offset));
     }
 
     Random random {0};

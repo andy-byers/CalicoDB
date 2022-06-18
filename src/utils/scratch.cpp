@@ -60,7 +60,7 @@ auto ScratchManager::get() -> Scratch
     //       of moving the old one, and the slice will be invalidated. If we increase
     //       the string size, the compiler stops performing this optimization and the
     //       problem goes away.
-    return {id, _b(m_pinned[id]), this};
+    return {id, stob(m_pinned[id]), this};
 }
 
 auto ScratchManager::on_scratch_release(Scratch &scratch) -> void

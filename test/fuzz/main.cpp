@@ -21,7 +21,7 @@ auto main(int argc, char **argv) -> int
 
         ReadOnlyFile file {argv[i], {}, 0666};
         std::string buffer(file.size(), '\x00');
-        read_exact(file, _b(buffer));
+        read_exact(file, stob(buffer));
         const auto *data = reinterpret_cast<uint8_t*>(buffer.data());
 
         LLVMFuzzerTestOneInput(data, buffer.size());

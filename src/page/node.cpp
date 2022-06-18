@@ -431,7 +431,7 @@ auto Node::defragment(std::optional<Index> skipped_cid) -> void
             set_cell_pointer(cid, ptrs.at(cid));
     }
     const auto offset = cell_area_offset();
-    m_page.write(_b(temp).range(offset, m_page.size() - offset), offset);
+    m_page.write(stob(temp).range(offset, m_page.size() - offset), offset);
     set_cell_start(end);
     set_frag_count(0);
     set_free_count(0);

@@ -31,9 +31,3 @@ auto validate_ordering(Database &db) -> void
 }
 
 } // cub::fuzz
-
-//int main()
-//{
-//
-//    return 0;
-//}

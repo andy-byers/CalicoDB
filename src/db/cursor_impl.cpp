@@ -338,7 +338,7 @@ auto Cursor::value() const -> std::string
 
 auto Cursor::record() const -> Record
 {
-    return {_s(m_impl->key()), m_impl->value()};
+    return {btos(m_impl->key()), m_impl->value()};
 }
 
 auto Cursor::reset() -> void

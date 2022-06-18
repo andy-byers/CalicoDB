@@ -26,13 +26,13 @@ using namespace cub;
 
 template<class T> auto tree_insert(T &tree, const std::string &key, const std::string &value) -> void
 {
-    tree.insert(_b(key), _b(value));
+    tree.insert(stob(key), stob(value));
     tree.set_payload(key, value);
 }
 
 template<class T> auto tree_lookup(T &tree, const std::string &key, std::string &result) -> bool
 {
-    if (const auto [node, index, found_eq] = tree.find_ge(_b(key), false); found_eq) {
+    if (const auto [node, index, found_eq] = tree.find_ge(stob(key), false); found_eq) {
         result = tree.collect_value(node, index);
         return true;
     }
@@ -41,7 +41,7 @@ template<class T> auto tree_lookup(T &tree, const std::string &key, std::string 
 
 template<class T>  auto tree_remove(T &tree, const std::string &key) -> bool
 {
-    return tree.remove(_b(key));
+    return tree.remove(stob(key));
 }
 
 class TestTree: public Tree {
@@ -76,7 +76,7 @@ public:
 
     auto node_contains(PID id, const std::string &key) -> bool
     {
-        auto [node, index, found_eq] = find_ge(_b(key), false);
+        auto [node, index, found_eq] = find_ge(stob(key), false);
         return found_eq && node.id() == id;
     }
 
@@ -153,7 +153,7 @@ public:
     auto node_insert(PID id, const std::string &key, const std::string &value) -> void
     {
         auto node = m_tree.acquire_node(id, true);
-        auto cell = m_tree.make_cell(_b(key), _b(value));
+        auto cell = m_tree.make_cell(stob(key), stob(value));
 
         if (!node.is_external())
             cell.set_left_child_id(PID{std::numeric_limits<uint32_t>::max()});
@@ -268,7 +268,7 @@ TEST_F(TreeTests, InsertNonOverflowingRecord)
 
 TEST_F(TreeTests, InsertOverflowingRecord)
 {
-    m_tree->insert(_b("a"), _b(m_random.next_string(get_max_local(m_page_size))));
+    m_tree->insert(stob("a"), stob(m_random.next_string(get_max_local(m_page_size))));
     ASSERT_EQ(m_pool->page_count(), 2);
 }
 
@@ -478,7 +478,7 @@ TEST_F(TreeTests, CanLookupMinimum)
     for (Index i {}; i < 500; ++i)
         builder.tree_insert(make_key(i));
     auto [node, index] = m_tree->find_local_min(m_tree->find_root(false));
-    ASSERT_EQ(_s(node.read_key(index)), make_key(0));
+    ASSERT_EQ(btos(node.read_key(index)), make_key(0));
 }
 
 TEST_F(TreeTests, CanLookupMaximum)
@@ -487,7 +487,7 @@ TEST_F(TreeTests, CanLookupMaximum)
     for (Index i {}; i < 500; ++i)
         builder.tree_insert(make_key(i));
     auto [node, index] = m_tree->find_local_max(m_tree->find_root(false));
-    ASSERT_EQ(_s(node.read_key(index)), make_key(499));
+    ASSERT_EQ(btos(node.read_key(index)), make_key(499));
 }
 
 TEST_F(TreeTests, SequentialInserts)
@@ -928,12 +928,12 @@ auto run_internal_overflow_after_modify_test(TestTree &tree, Index key_index) ->
     TreeBuilder builder {tree};
     setup_remove_special_cases_test(builder);
 
-    auto [node, index, found_eq] = tree.find_ge(_b(key), true);
+    auto [node, index, found_eq] = tree.find_ge(stob(key), true);
     const auto space_in_node = node.usable_space();
     const auto value = tree.collect_value(node, index) +
                        std::string(space_in_node + 1, 'x');
     node.take();
-    tree.insert(_b(key), _b(value));
+    tree.insert(stob(key), stob(value));
     TreeValidator {tree}.validate();
 }
 

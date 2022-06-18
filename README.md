@@ -106,31 +106,32 @@ try {
 ### Closing a Database
 Cub DB uses RAII, so databases are closed by letting them go out of scope.
 
-### Slice Objects
-Cub DB uses `Bytes` and `BytesView` objects to refer to unowned byte sequences.
+### Bytes Objects
+Cub DB uses `Bytes` and `BytesView` objects to represent unowned byte sequences, a.k.a. slices.
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
 std::string data {"Hello, bears!"};
 
-// Construct a `Bytes` object.
+// Construct slices from a string. The string still owns the memory, the slices just refer to it.
 cub::Bytes b {data.data(), data.size()};
-
-// Construct a `BytesView` object.
 cub::BytesView v {data.data(), data.size()};
 
-// Convenience conversion from std::string.
-const auto from_string = cub::_b(data);
+// Convenience conversion from a string.
+const auto from_string = cub::stob(data);
 
-// Convenience conversion back to std::string;
-assert(cub::_s(from_string) == data);
+// Convenience conversion back to a string. This operation must allocate a new string.
+assert(cub::btos(from_string) == data);
 
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
 function_taking_a_bytes_view(b);
 
+// Advance and truncate with chaining.
+b.advance(7).truncate(5);
+
 // Comparisons.
 assert(cub::compare_three_way(b, v) == cub::ThreeWayComparison::EQ);
-assert(b == v);
+assert(b == cub::stob("bears"));
 ```
 
 ### Updating a Database
@@ -138,18 +139,18 @@ Records and be added or removed using methods on the `Database` object.
 
 ```C++
 // Insert some records.
-assert(db.write(cub::_b("grizzly bear"), cub::_b("big")));
-assert(db.write(cub::_b("kodiak bear"), cub::_b("awesome")));
-assert(db.write(cub::_b("polar bear"), cub::_b("cool")));
-assert(db.write(cub::_b("sun bear"), cub::_b("respectable")));
-assert(db.write(cub::_b("panda bear"), cub::_b("rare")));
-assert(db.write(cub::_b("black bear"), cub::_b("lovable")));
+assert(db.write(cub::stob("grizzly bear"), cub::stob("big")));
+assert(db.write(cub::stob("kodiak bear"), cub::stob("awesome")));
+assert(db.write(cub::stob("polar bear"), cub::stob("cool")));
+assert(db.write({"sun bear", "respectable"}));
+assert(db.write({"panda bear", "rare"}));
+assert(db.write({"black bear", "lovable"}));
 
 // Update an existing record (keys are always unique). write() returns false if the record was already in the database.
-assert(!db.write(cub::_b("grizzly bear"), cub::_b("huge")));
+assert(!db.write(cub::stob("grizzly bear"), cub::stob("huge")));
 
 // Erase a record.
-assert(db.erase(cub::_b("grizzly bear")));
+assert(db.erase(cub::stob("grizzly bear")));
 ```
 
 ### Querying a Database
@@ -157,12 +158,12 @@ The `read*()` methods are provided for querying the database.
 
 ```C++
 // We can require an exact match.
-const auto record = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::EQ);
+const auto record = db.read(cub::stob("sun bear"), cub::ThreeWayComparison::EQ);
 assert(record->value == "respectable");
 
 // Or, we can look for the first record with a key less than or greater than the given key.
-const auto less_than = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::LT);
-const auto greater_than = db.read(cub::_b("sun bear"), cub::ThreeWayComparison::GT);
+const auto less_than = db.read(cub::stob("sun bear"), cub::ThreeWayComparison::LT);
+const auto greater_than = db.read(cub::stob("sun bear"), cub::ThreeWayComparison::GT);
 assert(less_than->value == "cool");
 
 // Whoops, there isn't a key greater than "sun bear".
@@ -193,7 +194,7 @@ assert(cursor.decrement());
 assert(cursor.decrement(2) == 2);
 
 // Key and value access. For the key, we first convert to std::string, since key() returns a BytesView.
-const auto key = cub::_s(cursor.key());
+const auto key = cub::btos(cursor.key());
 const auto value = cursor.value();
 printf("Record {%s, %s}\n", key.c_str(), value.c_str()); // Record {black bear, lovable}
 ```
@@ -204,18 +205,18 @@ The first transaction begins when the database is opened, and the last one commi
 Otherwise, transaction boundaries are defined by calls to either `commit()` or `abort()`.
 
 ```C++
-db.write(cub::_b("a"), cub::_b("1"));
-db.write(cub::_b("b"), cub::_b("2"));
+db.write(cub::stob("a"), cub::stob("1"));
+db.write(cub::stob("b"), cub::stob("2"));
 db.commit();
 
-db.write(cub::_b("c"), cub::_b("3"));
-assert(db.erase(cub::_b("a")));
-assert(db.erase(cub::_b("b")));
+db.write(cub::stob("c"), cub::stob("3"));
+assert(db.erase(cub::stob("a")));
+assert(db.erase(cub::stob("b")));
 db.abort();
 
 // Database still contains {"a", "1"} and {"b", "2"}.
-assert(db.read(cub::_b("a"), true)->value == "1");
-assert(db.read(cub::_b("b"), true)->value == "2");
+assert(db.read(cub::stob("a"), true)->value == "1");
+assert(db.read(cub::stob("b"), true)->value == "2");
 ```
 
 ### Deleting a Database

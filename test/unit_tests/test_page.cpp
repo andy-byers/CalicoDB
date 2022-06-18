@@ -157,7 +157,7 @@ public:
     auto get_page(PID id) -> Page
     {
         m_map.emplace(id, std::string(m_page_size, '\x00'));
-        Page page {{id, _b(m_map[id]), nullptr, true, false}};
+        Page page {{id, stob(m_map[id]), nullptr, true, false}};
         page.enable_tracking(m_scratch.get());
         return page;
     }
@@ -198,7 +198,7 @@ TEST_F(PageTests, FreshPagesAreEmpty)
 {
     auto page = get_page(PID::root());
     ASSERT_FALSE(page.has_changes());
-    ASSERT_TRUE(page.range(0) == _b(std::string(page_size, '\x00')));
+    ASSERT_TRUE(page.range(0) == stob(std::string(page_size, '\x00')));
 }
 
 TEST_F(PageTests, RegistersHeaderChange)
@@ -258,8 +258,8 @@ public:
     {
         const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
         Cell::Parameters param;
-        param.key = _b(key);
-        param.local_value = _b(value);
+        param.key = stob(key);
+        param.local_value = stob(value);
         param.value_size = value.size();
 
         if (local_value_size != value.size()) {
@@ -367,7 +367,7 @@ TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto [index, found_eq] = node.find_ge(_b("hello"));
+    auto [index, found_eq] = node.find_ge(stob("hello"));
     ASSERT_FALSE(found_eq);
 
     // We would insert "hello" at this index.
@@ -443,7 +443,7 @@ TEST_F(NodeTests, InsertingCellIncrementsCellCount)
 TEST_F(NodeTests, FindExact)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(_b("hello"));
+    auto [index, found_eq] = node.find_ge(stob("hello"));
     ASSERT_TRUE(found_eq);
     ASSERT_EQ(index, 0);
 }
@@ -451,7 +451,7 @@ TEST_F(NodeTests, FindExact)
 TEST_F(NodeTests, FindLessThan)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(_b("helln"));
+    auto [index, found_eq] = node.find_ge(stob("helln"));
     ASSERT_FALSE(found_eq);
     ASSERT_EQ(index, 0);
 }
@@ -459,7 +459,7 @@ TEST_F(NodeTests, FindLessThan)
 TEST_F(NodeTests, FindGreaterThan)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(_b("hellp"));
+    auto [index, found_eq] = node.find_ge(stob("hellp"));
     ASSERT_FALSE(found_eq);
     ASSERT_EQ(index, 1);
 }
@@ -470,8 +470,8 @@ TEST_F(NodeTests, ReadCell)
     auto cell = node.read_cell(0);
     ASSERT_EQ(cell.left_child_id(), arbitrary_pid);
     ASSERT_EQ(cell.overflow_id(), PID::null());
-    ASSERT_TRUE(cell.key() == _b("hello"));
-    ASSERT_TRUE(cell.local_value() == _b("world"));
+    ASSERT_TRUE(cell.key() == stob("hello"));
+    ASSERT_TRUE(cell.local_value() == stob("world"));
 }
 
 TEST_F(NodeTests, ReadCellWithOverflow)
@@ -493,14 +493,14 @@ TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
 TEST_F(NodeTests, RemovingNonexistentCellDoesNothing)
 {
     auto node = get_node_with_one_cell(*this);
-    ASSERT_FALSE(node.remove(_b("not_found")));
+    ASSERT_FALSE(node.remove(stob("not_found")));
     ASSERT_EQ(node.cell_count(), 1);
 }
 
 TEST_F(NodeTests, RemovingCellDecrementsCellCount)
 {
     auto node = get_node_with_one_cell(*this);
-    node.remove(_b("hello"));
+    node.remove(stob("hello"));
     ASSERT_EQ(node.cell_count(), 0);
 }
 
@@ -510,7 +510,7 @@ TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
     auto cell = cell_backing.get_cell("hello", normal_value);
     const auto usable_space_before = node.usable_space();
     node.insert(std::move(cell));
-    node.remove(_b("hello"));
+    node.remove(stob("hello"));
     ASSERT_EQ(node.usable_space(), usable_space_before);
 }
 
@@ -634,7 +634,7 @@ TEST_P(NodesCanMergeTests, BarelyNotUnderflowingNodesCannotMerge)
     make_barely_underflowing_node(*this, rhs, '5');
     auto last = lhs.extract_cell(lhs.cell_count() - 1, scratch.get());
     // Add one to the cell size.
-    auto separator = make_cell(_s(last.key()), _s(last.local_value()) + "!");
+    auto separator = make_cell(btos(last.key()), btos(last.local_value()) + "!");
     separator.set_left_child_id(arbitrary_pid);
     ASSERT_EQ(separator.size(), last.size() + 1 + PAGE_ID_SIZE*lhs.is_external());
     ASSERT_FALSE(can_merge_siblings(lhs, rhs, separator));
@@ -729,8 +729,8 @@ public:
         Index i {};
         EXPECT_EQ(node.cell_count(), values.size());
         for (const auto c: std::string {"abcde"}) {
-            EXPECT_EQ(_s(node.read_key(i)), std::string(1, c));
-            EXPECT_EQ(_s(node.read_cell(i).local_value()), values.at(i));
+            EXPECT_EQ(btos(node.read_key(i)), std::string(1, c));
+            EXPECT_EQ(btos(node.read_cell(i).local_value()), values.at(i));
             ++i;
         }
     }

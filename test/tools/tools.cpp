@@ -30,7 +30,7 @@ auto TreeValidator::validate_sibling_connections() -> void
     std::optional<std::string> prev{};
     while (true) {
         for (Index cid{}; cid < node.cell_count(); ++cid) {
-            const auto key = _s(node.read_key(cid));
+            const auto key = btos(node.read_key(cid));
             // Strict ordering.
             if (prev)
                 CUB_EXPECT_LT(*prev, key);
@@ -72,7 +72,7 @@ auto TreeValidator::collect_keys() -> std::vector<std::string>
 {
     auto keys = std::vector<std::string>{};
     traverse_inorder([&keys](Node &node, Index cid) -> void {
-        keys.push_back(_s(node.read_key(cid)));
+        keys.push_back(btos(node.read_key(cid)));
     });
     return keys;
 }
@@ -105,7 +105,7 @@ auto TreeValidator::is_reachable(std::string key) -> bool
     auto success = true;
 
     // Traverse down to the node containing key using the child pointers.
-    auto [node, index, found_eq] = m_tree.find_ge(_b(key), false);
+    auto [node, index, found_eq] = m_tree.find_ge(stob(key), false);
     if (!found_eq)
         return false;
 
@@ -200,7 +200,7 @@ auto TreePrinter::add_node_end_to_level(Index level) -> void
 
 auto TreePrinter::make_key_token(BytesView key) -> std::string
 {
-    return _s(key);
+    return btos(key);
 }
 
 auto TreePrinter::make_key_separator_token() -> std::string

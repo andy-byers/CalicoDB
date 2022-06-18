@@ -165,7 +165,7 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
     CUB_EXPECT_GT(m_block.size() - offset, WALRecord::HEADER_SIZE);
 
     WALRecord record;
-    auto buffer = _b(m_block);
+    auto buffer = stob(m_block);
     buffer.advance(offset);
     record.read(buffer);
 
@@ -207,7 +207,7 @@ auto WALReader::read_block() -> bool
 {
     try {
         const auto block_start = m_block_id * m_block.size();
-        if (const auto bytes_read = m_file->read_at(_b(m_block), block_start)) {
+        if (const auto bytes_read = m_file->read_at(stob(m_block), block_start)) {
             if (bytes_read != m_block.size())
                 throw CorruptionError {"WAL contains an incomplete block"};
             m_has_block = true;

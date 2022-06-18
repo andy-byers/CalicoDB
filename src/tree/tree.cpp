@@ -42,7 +42,7 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
     auto cell = node.read_cell(index);
     const auto local = cell.local_value();
     std::string result(cell.value_size(), '\x00');
-    auto out = _b(result);
+    auto out = stob(result);
 
     // Note that it is possible to have no value stored locally but have an overflow page. The happens when
     // the key is of maximal length (i.e. get_max_local(m_header->page_size())).
@@ -102,8 +102,8 @@ auto Tree::positioned_modify(Position position, BytesView value) -> void
     auto old_cell = node.read_cell(index);
     // Make a copy of the key. The data backing the old key slice will be written over when we call
     // remove_at() on the old cell.
-    const auto key = _s(old_cell.key());
-    auto new_cell = make_cell(_b(key), value);
+    const auto key = btos(old_cell.key());
+    auto new_cell = make_cell(stob(key), value);
 
     if (old_cell.overflow_size())
         destroy_overflow_chain(old_cell.overflow_id(), old_cell.overflow_size());
@@ -125,7 +125,7 @@ auto Tree::positioned_remove(Position position) -> void
     m_cell_count--;
 
     auto cell = node.read_cell(index);
-    auto anchor = _s(cell.key());
+    auto anchor = btos(cell.key());
     if (cell.overflow_size())
         destroy_overflow_chain(cell.overflow_id(), cell.overflow_size());
 
@@ -134,7 +134,7 @@ auto Tree::positioned_remove(Position position) -> void
     if (!node.is_external()) {
         auto [other, other_index] = find_local_max(acquire_node(node.child_id(index), true));
         auto other_cell = other.extract_cell(other_index, m_scratch.get());
-        anchor = _s(other_cell.key());
+        anchor = btos(other_cell.key());
         other_cell.set_left_child_id(node.child_id(index));
         node.remove_at(index, node.read_cell(index).size());
 
@@ -151,7 +151,7 @@ auto Tree::positioned_remove(Position position) -> void
     } else {
         node.remove_at(index, node.read_cell(index).size());
     }
-    maybe_balance_after_underflow(std::move(node), _b(anchor));
+    maybe_balance_after_underflow(std::move(node), stob(anchor));
 }
 
 auto Tree::find_local_min(Node root) -> Position

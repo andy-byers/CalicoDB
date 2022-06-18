@@ -33,9 +33,7 @@ namespace impl {
      */
     template<class Pointer> class Slice {
     public:
-        using UnqualifiedPointer = std::remove_const_t<Pointer>;
-        using ConstPointer = std::add_const_t<UnqualifiedPointer>;
-        using Value = std::remove_pointer_t<UnqualifiedPointer>;
+        using Value = std::remove_pointer_t<Pointer>;
 
         Slice() noexcept = default;
 
@@ -62,7 +60,7 @@ namespace impl {
             , m_size {size} {}
 
         /**
-         * Reference an element from the slice.
+         * Get a reference to the element at a specified index.
          *
          * @param index The index of the element.
          * @return A const reference to the element.
@@ -74,7 +72,7 @@ namespace impl {
         }
 
         /**
-         * Reference an element from the slice.
+         * Get a reference to the element at a specified index.
          *
          * @param index The index of the element.
          * @return A reference to the element.
@@ -147,7 +145,7 @@ namespace impl {
          *
          * @return The underlying pointer.
          */
-        [[nodiscard]] auto data() const noexcept -> ConstPointer
+        [[nodiscard]] auto data() const noexcept -> Pointer
         {
             return m_data;
         }
@@ -157,7 +155,7 @@ namespace impl {
          *
          * @return The underlying pointer.
          */
-        auto data() noexcept -> UnqualifiedPointer
+        auto data() noexcept -> Pointer
         {
             return m_data;
         }
@@ -177,7 +175,7 @@ namespace impl {
          * @param n The number of elements to advance by.
          * @return A copy of this slice for chaining.
          */
-        auto advance(Size n = 1) noexcept -> Slice
+        auto advance(Size n = 1) noexcept -> Slice&
         {
             assert(n <= m_size);
             m_data += n;
@@ -191,7 +189,7 @@ namespace impl {
          * @param n The number of elements to reduce the length by.
          * @return A copy of this slice for chaining.
          */
-        auto truncate(Size size) noexcept -> Slice
+        auto truncate(Size size) noexcept -> Slice&
         {
             assert(size <= m_size);
             m_size = size;
@@ -220,7 +218,7 @@ using BytesView = impl::Slice<const Byte*>;
  * @param data The string.
  * @return The immutable slice.
  */
-inline auto _b(const std::string &data) noexcept -> BytesView
+inline auto stob(const std::string &data) noexcept -> BytesView
 {
    return {data.data(), data.size()};
 }
@@ -230,9 +228,20 @@ inline auto _b(const std::string &data) noexcept -> BytesView
  * @param data The string.
  * @return The mutable slice.
  */
-inline auto _b(std::string &data) noexcept -> Bytes
+inline auto stob(std::string &data) noexcept -> Bytes
 {
    return {data.data(), data.size()};
+}
+
+/**
+ * Take an immutable slice of a C-style string.
+ *
+ * @param data The C-style string.
+ * @return The immutable slice.
+ */
+inline auto stob(const char *data) noexcept -> BytesView
+{
+    return {data, std::strlen(data)};
 }
 
 /**
@@ -240,7 +249,7 @@ inline auto _b(std::string &data) noexcept -> Bytes
  * @param data The slice.
  * @return The owned string.
  */
-inline auto _s(BytesView data) -> std::string
+inline auto btos(BytesView data) -> std::string
 {
    return {data.data(), data.size()};
 }
