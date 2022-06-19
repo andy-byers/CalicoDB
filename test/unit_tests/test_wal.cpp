@@ -97,14 +97,14 @@ TEST_F(WALTests, SingleMerge)
     auto left = generator.generate(0x10, 10);
     const auto lsn = left.lsn();
     const auto crc = left.crc();
-    const auto payload = _s(left.payload().data());
+    const auto payload = btos(left.payload().data());
     auto right = left.split(left.payload().data().size() / 2);
 
     left.merge(right);
     ASSERT_EQ(left.lsn(), lsn);
     ASSERT_EQ(left.crc(), crc);
     ASSERT_EQ(left.type(), WALRecord::Type::FULL);
-    ASSERT_EQ(_s(left.payload().data()), payload);
+    ASSERT_EQ(btos(left.payload().data()), payload);
 }
 
 TEST_F(WALTests, MultipleMerges)
@@ -113,7 +113,7 @@ TEST_F(WALTests, MultipleMerges)
     auto left = generator.generate(0x10, 10);
     const auto lsn = left.lsn();
     const auto crc = left.crc();
-    const auto payload = _s(left.payload().data());
+    const auto payload = btos(left.payload().data());
     auto middle = left.split(payload.size() / 3);
     auto right = middle.split(payload.size() / 3);
 
@@ -122,7 +122,7 @@ TEST_F(WALTests, MultipleMerges)
     ASSERT_EQ(left.lsn(), lsn);
     ASSERT_EQ(left.crc(), crc);
     ASSERT_EQ(left.type(), WALRecord::Type::FULL);
-    ASSERT_EQ(_s(left.payload().data()), payload);
+    ASSERT_EQ(btos(left.payload().data()), payload);
 }
 
 TEST_F(WALTests, EmptyFileBehavior)
@@ -140,7 +140,7 @@ TEST_F(WALTests, WritesRecordCorrectly)
 
     const auto &memory = m_wal_backing.memory();
     WALRecord record;
-    record.read(_b(memory));
+    record.read(stob(memory));
     generator.validate_record(record, LSN::base());
 }
 

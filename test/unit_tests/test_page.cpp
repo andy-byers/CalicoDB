@@ -5,7 +5,6 @@
 #include "random.h"
 #include "unit_tests.h"
 #include "page/cell.h"
-#include "page/file_header.h"
 #include "page/node.h"
 #include "page/page.h"
 #include "page/update.h"
@@ -157,7 +156,7 @@ public:
     auto get_page(PID id) -> Page
     {
         m_map.emplace(id, std::string(m_page_size, '\x00'));
-        Page page {{id, _b(m_map[id]), nullptr, true, false}};
+        Page page {{id, stob(m_map[id]), nullptr, true, false}};
         page.enable_tracking(m_scratch.get());
         return page;
     }
@@ -198,7 +197,7 @@ TEST_F(PageTests, FreshPagesAreEmpty)
 {
     auto page = get_page(PID::root());
     ASSERT_FALSE(page.has_changes());
-    ASSERT_TRUE(page.range(0) == _b(std::string(page_size, '\x00')));
+    ASSERT_TRUE(page.range(0) == stob(std::string(page_size, '\x00')));
 }
 
 TEST_F(PageTests, RegistersHeaderChange)
@@ -258,8 +257,8 @@ public:
     {
         const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
         Cell::Parameters param;
-        param.key = _b(key);
-        param.local_value = _b(value);
+        param.key = stob(key);
+        param.local_value = stob(value);
         param.value_size = value.size();
 
         if (local_value_size != value.size()) {
@@ -275,6 +274,268 @@ public:
     ScratchManager scratch;
     Size page_size {};
 };
+
+class NodeComponentBacking: public PageBacking {
+public:
+    explicit NodeComponentBacking(Size page_size)
+        : PageBacking {page_size}
+        , backing {get_page(PID {2})}
+        , header {backing}
+        , directory {header}
+        , allocator {header}
+    {
+        header.set_cell_start(backing.size());
+        allocator.reset();
+    }
+
+    Page backing;
+    NodeHeader header;
+    CellDirectory directory;
+    BlockAllocator allocator;
+};
+
+class NodeComponentTests: public testing::Test {
+public:
+    static constexpr Size PAGE_SIZE {0x100};
+    NodeComponentTests()
+        : backing {PAGE_SIZE} {}
+
+    NodeComponentBacking backing;
+};
+
+class NodeHeaderTests: public NodeComponentTests {
+public:
+    auto header() -> NodeHeader&
+    {
+        return backing.header;
+    }
+};
+
+TEST_F(NodeHeaderTests, SetChildOfExternalNodeDeathTest)
+{
+    backing.backing.set_type(PageType::EXTERNAL_NODE);
+    ASSERT_DEATH(header().set_rightmost_child_id(PID {123}), EXPECTATION_MATCHER);
+}
+
+TEST_F(NodeHeaderTests, SetSiblingOfInternalNodeDeathTest)
+{
+    backing.backing.set_type(PageType::INTERNAL_NODE);
+    ASSERT_DEATH(header().set_right_sibling_id(PID {123}), EXPECTATION_MATCHER);
+}
+
+TEST_F(NodeHeaderTests, FieldsAreConsistent)
+{
+    backing.backing.set_type(PageType::EXTERNAL_NODE);
+    header().set_parent_id(PID {1});
+    header().set_right_sibling_id(PID {2});
+    header().set_cell_start(3);
+    header().set_free_start(4);
+    header().set_free_count(5);
+    header().set_frag_count(6);
+    header().set_cell_count(7);
+    ASSERT_EQ(header().parent_id(), PID {1});
+    ASSERT_EQ(header().right_sibling_id(), PID {2});
+    ASSERT_EQ(header().cell_start(), 3);
+    ASSERT_EQ(header().free_start(), 4);
+    ASSERT_EQ(header().free_count(), 5);
+    ASSERT_EQ(header().frag_count(), 6);
+    ASSERT_EQ(header().cell_count(), 7);
+}
+
+class CellDirectoryTests: public NodeComponentTests {
+public:
+    auto directory() -> CellDirectory&
+    {
+        return backing.directory;
+    }
+
+    [[nodiscard]] auto cell_count() const -> Size
+    {
+        return backing.header.cell_count();
+    }
+};
+
+TEST_F(CellDirectoryTests, FreshDirectoryIsEmpty)
+{
+    ASSERT_EQ(cell_count(), 0);
+}
+
+TEST_F(CellDirectoryTests, RemoveFromEmptyDirectoryDeathTest)
+{
+    ASSERT_DEATH(directory().remove_pointer(0), EXPECTATION_MATCHER);
+}
+
+TEST_F(CellDirectoryTests, AccessNonexistentPointerDeathTest)
+{
+    ASSERT_DEATH(directory().set_pointer(0, {100}), EXPECTATION_MATCHER);
+    ASSERT_DEATH((void)directory().get_pointer(0), EXPECTATION_MATCHER);
+}
+
+TEST_F(CellDirectoryTests, ModifyingDirectoryChangesCellCount)
+{
+    directory().insert_pointer(0, {100});
+    ASSERT_EQ(cell_count(), 1);
+    directory().remove_pointer(0);
+    ASSERT_EQ(cell_count(), 0);
+}
+
+TEST_F(CellDirectoryTests, InsertedPointersCanBeRead)
+{
+    directory().insert_pointer(0, {120});
+    directory().insert_pointer(0, {110});
+    directory().insert_pointer(0, {100});
+    ASSERT_EQ(directory().get_pointer(0).value, 100);
+    ASSERT_EQ(directory().get_pointer(1).value, 110);
+    ASSERT_EQ(directory().get_pointer(2).value, 120);
+}
+
+class BlockAllocatorTests: public NodeComponentTests {
+public:
+    auto allocator() -> BlockAllocator&
+    {
+        return backing.allocator;
+    }
+
+    [[nodiscard]] auto free_count() const -> Size
+    {
+        return backing.header.free_count();
+    }
+
+    [[nodiscard]] auto free_start() const -> Index
+    {
+        return backing.header.free_start();
+    }
+
+    [[nodiscard]] auto frag_count() const -> Size
+    {
+        return backing.header.frag_count();
+    }
+
+    [[nodiscard]] auto max_usable_space() const -> Size
+    {
+        return backing.header.max_usable_space();
+    }
+};
+
+TEST_F(BlockAllocatorTests, FreshAllocatorIsEmpty)
+{
+    // `free_start()` should be ignored if `free_count()` is zero.
+    ASSERT_EQ(free_count(), 0);
+    ASSERT_EQ(frag_count(), 0);
+    ASSERT_EQ(allocator().usable_space(), max_usable_space());
+}
+
+TEST_F(BlockAllocatorTests, AllocatingBlockFromGapReducesUsableSpace)
+{
+    allocator().allocate(10);
+    ASSERT_EQ(allocator().usable_space(), max_usable_space() - 10);
+}
+
+TEST_F(BlockAllocatorTests, FreeingBlockIncreasesUsableSpace)
+{
+    allocator().free(allocator().allocate(10), 10);
+    ASSERT_EQ(allocator().usable_space(), max_usable_space());
+}
+
+TEST_F(BlockAllocatorTests, FreedMemoryIsMaintained)
+{
+    const auto a = allocator().allocate(10);
+    const auto b = allocator().allocate(10);
+    const auto c = allocator().allocate(3);
+    ASSERT_EQ(allocator().usable_space(), max_usable_space() - 23);
+
+    allocator().free(a, 10);
+    ASSERT_EQ(free_count(), 1);
+    ASSERT_EQ(free_start(), a);
+
+    allocator().free(b, 10);
+    ASSERT_EQ(free_count(), 2);
+    ASSERT_EQ(free_start(), b);
+
+    allocator().free(c, 3);
+    ASSERT_EQ(free_count(), 2);
+    ASSERT_EQ(free_start(), b);
+    ASSERT_EQ(frag_count(), 3);
+    ASSERT_EQ(allocator().usable_space(), max_usable_space());
+}
+
+TEST_F(BlockAllocatorTests, SanityCheck)
+{
+    static constexpr Size NUM_ITERATIONS {10};
+    static constexpr Size MIN_SIZE {MIN_CELL_HEADER_SIZE + 1};
+    static constexpr Size MAX_SIZE {MIN_SIZE * 3};
+    std::unordered_map<Index, Size> allocations;
+    auto usable_space = max_usable_space();
+    Random random {0};
+
+    for (Index i {}; i < NUM_ITERATIONS; ++i) {
+        for (; ; ) {
+            const auto size = random.next_int(MIN_SIZE, MAX_SIZE);
+            if (const auto ptr = allocator().allocate(size)) {
+                auto itr = allocations.find(ptr);
+                ASSERT_EQ(itr, allocations.end());
+                allocations.emplace(ptr, size);
+                usable_space -= size;
+                ASSERT_EQ(allocator().usable_space(), usable_space);
+            } else {
+                break;
+            }
+        }
+        for (const auto &[index, size]: allocations) {
+            allocator().free(index, size);
+            usable_space += size;
+            ASSERT_EQ(allocator().usable_space(), usable_space);
+        }
+        allocations.clear();
+    }
+}
+
+class FreeBlockTests: public BlockAllocatorTests {
+public:
+    static constexpr Size NUM_BLOCKS {3};
+    static constexpr Size BLOCK_TOTAL {28};
+    static constexpr Size BLOCK_SIZES[] {16, 8, 4};
+
+    FreeBlockTests()
+    {
+        // free_start() -> c -> b -> a -> NULL
+        const auto a = allocator().allocate(BLOCK_SIZES[0]);
+        const auto b = allocator().allocate(BLOCK_SIZES[1]);
+        const auto c = allocator().allocate(BLOCK_SIZES[2]);
+        EXPECT_EQ(allocator().usable_space(), max_usable_space() - BLOCK_TOTAL);
+        allocator().free(a, BLOCK_SIZES[0]);
+        allocator().free(b, BLOCK_SIZES[1]);
+        allocator().free(c, BLOCK_SIZES[2]);
+        EXPECT_EQ(free_count(), NUM_BLOCKS);
+        EXPECT_EQ(free_start(), c);
+        EXPECT_EQ(allocator().usable_space(), max_usable_space());
+    }
+};
+
+TEST_F(FreeBlockTests, TakeWholeBlock)
+{
+    // Take all of block `a`.
+    allocator().allocate(BLOCK_SIZES[0]);
+    ASSERT_EQ(free_count(), NUM_BLOCKS - 1);
+    ASSERT_EQ(allocator().usable_space(), max_usable_space() - BLOCK_SIZES[0]);
+}
+
+TEST_F(FreeBlockTests, TakePartialBlock)
+{
+    // Take 3/4 of block `a`, which remains a free block.
+    allocator().allocate(3 * BLOCK_SIZES[0] / 4);
+    ASSERT_EQ(free_count(), NUM_BLOCKS);
+    ASSERT_EQ(allocator().usable_space(), max_usable_space() - 3*BLOCK_SIZES[0]/4);
+}
+
+TEST_F(FreeBlockTests, ReduceBlockToFragments)
+{
+    // Take most of block `a`, which becomes 3 fragment bytes.
+    allocator().allocate(BLOCK_SIZES[0]  - 3);
+    ASSERT_EQ(free_count(), NUM_BLOCKS - 1);
+    ASSERT_EQ(frag_count(), 3);
+    ASSERT_EQ(allocator().usable_space(), max_usable_space() - BLOCK_SIZES[0] + 3);
+}
 
 class NodeBacking: public PageBacking {
 public:
@@ -309,43 +570,6 @@ public:
     PID arbitrary_pid {2};
 };
 
-TEST_F(NodeTests, NodeHeaderFields)
-{
-    auto node = make_node(PID {2}, PageType::EXTERNAL_NODE);
-    node.page().set_lsn(LSN::base());
-    node.set_parent_id(PID {123});
-    node.set_right_sibling_id(PID {456});
-    node.update_header_crc();
-    ASSERT_EQ(node.page().type(), PageType::EXTERNAL_NODE);
-    ASSERT_EQ(node.page().lsn(), LSN::base());
-    ASSERT_EQ(node.parent_id(), PID {123});
-    ASSERT_EQ(node.right_sibling_id(), PID {456});
-}
-
-TEST_F(NodeTests, FileHeaderFields)
-{
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    FileHeader header {node};
-    header.update_magic_code();
-    header.set_page_count(1);
-    header.set_node_count(2);
-    header.set_free_count(3);
-    header.set_free_start(PID {123});
-    header.set_page_size(4);
-    header.set_block_size(5);
-    header.set_key_count(6);
-    header.set_flushed_lsn(LSN {456});
-    header.update_header_crc();
-    ASSERT_EQ(header.page_count(), 1);
-    ASSERT_EQ(header.node_count(), 2);
-    ASSERT_EQ(header.free_count(), 3);
-    ASSERT_EQ(header.free_start(), PID {123});
-    ASSERT_EQ(header.page_size(), 4);
-    ASSERT_EQ(header.block_size(), 5);
-    ASSERT_EQ(header.record_count(), 6);
-    ASSERT_EQ(header.flushed_lsn(), LSN {456});
-}
-
 TEST_F(NodeTests, NodeAllocationCausesPageChanges)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
@@ -367,7 +591,7 @@ TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    auto [index, found_eq] = node.find_ge(_b("hello"));
+    auto [index, found_eq] = node.find_ge(stob("hello"));
     ASSERT_FALSE(found_eq);
 
     // We would insert "hello" at this index.
@@ -381,6 +605,50 @@ TEST_F(NodeTests, UsableSpaceIsUpdatedOnInsert)
     const auto usable_space_after = node.usable_space() - cell.size() - CELL_POINTER_SIZE;
     node.insert(std::move(cell));
     ASSERT_EQ(node.usable_space(), usable_space_after);
+}
+
+TEST_F(NodeTests, CellChangesSizeCorrectly)
+{
+    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    auto cell = cell_backing.get_cell("hello", normal_value);
+    ASSERT_EQ(cell.left_child_id(), PID::null());
+    ASSERT_EQ(cell.overflow_id(), PID::null());
+    const auto size = cell.size();
+    cell.set_left_child_id(PID {123});
+    ASSERT_EQ(cell.size(), size + PAGE_ID_SIZE);
+    cell.set_overflow_id(PID {123});
+    ASSERT_EQ(cell.size(), size + PAGE_ID_SIZE*2);
+    cell.set_left_child_id(PID::null());
+    ASSERT_EQ(cell.size(), size + PAGE_ID_SIZE);
+    cell.set_overflow_id(PID::null());
+    ASSERT_EQ(cell.size(), size);
+}
+
+TEST_F(NodeTests, SanityCheck)
+{
+    static constexpr Size NUM_ITERATIONS {10};
+    Random random {0};
+    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    for (Index i {}; i < NUM_ITERATIONS; ++i) {
+        while (!node.is_overflowing()) {
+            const auto key = random_string(random, 2, 5);
+            const auto value = random_string(random, 0, 2 * overflow_value.size());
+            if (const auto [index, found_eq] = node.find_ge(stob(key)); !found_eq) {
+                auto cell = cell_backing.get_cell(key, value);
+                if (cell.local_value().size() != value.size())
+                    cell.set_overflow_id(arbitrary_pid);
+                node.insert(std::move(cell));
+            }
+        }
+        (void)node.take_overflow_cell();
+        while (node.cell_count()) {
+            const auto key = random_string(random, 2, 5);
+            const auto [index, found_eq] = node.find_ge(stob(key));
+            const auto to_remove = index - (index == node.cell_count());
+            node.remove_at(to_remove, node.read_cell(to_remove).size());
+        }
+        ASSERT_EQ(node.usable_space(), node.max_usable_space());
+    }
 }
 
 auto get_maximally_sized_cell(NodeTests &test)
@@ -443,7 +711,7 @@ TEST_F(NodeTests, InsertingCellIncrementsCellCount)
 TEST_F(NodeTests, FindExact)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(_b("hello"));
+    auto [index, found_eq] = node.find_ge(stob("hello"));
     ASSERT_TRUE(found_eq);
     ASSERT_EQ(index, 0);
 }
@@ -451,7 +719,7 @@ TEST_F(NodeTests, FindExact)
 TEST_F(NodeTests, FindLessThan)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(_b("helln"));
+    auto [index, found_eq] = node.find_ge(stob("helln"));
     ASSERT_FALSE(found_eq);
     ASSERT_EQ(index, 0);
 }
@@ -459,7 +727,7 @@ TEST_F(NodeTests, FindLessThan)
 TEST_F(NodeTests, FindGreaterThan)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(_b("hellp"));
+    auto [index, found_eq] = node.find_ge(stob("hellp"));
     ASSERT_FALSE(found_eq);
     ASSERT_EQ(index, 1);
 }
@@ -470,8 +738,8 @@ TEST_F(NodeTests, ReadCell)
     auto cell = node.read_cell(0);
     ASSERT_EQ(cell.left_child_id(), arbitrary_pid);
     ASSERT_EQ(cell.overflow_id(), PID::null());
-    ASSERT_TRUE(cell.key() == _b("hello"));
-    ASSERT_TRUE(cell.local_value() == _b("world"));
+    ASSERT_TRUE(cell.key() == stob("hello"));
+    ASSERT_TRUE(cell.local_value() == stob("world"));
 }
 
 TEST_F(NodeTests, ReadCellWithOverflow)
@@ -493,14 +761,14 @@ TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
 TEST_F(NodeTests, RemovingNonexistentCellDoesNothing)
 {
     auto node = get_node_with_one_cell(*this);
-    ASSERT_FALSE(node.remove(_b("not_found")));
+    ASSERT_FALSE(node.remove(stob("not_found")));
     ASSERT_EQ(node.cell_count(), 1);
 }
 
 TEST_F(NodeTests, RemovingCellDecrementsCellCount)
 {
     auto node = get_node_with_one_cell(*this);
-    node.remove(_b("hello"));
+    node.remove(stob("hello"));
     ASSERT_EQ(node.cell_count(), 0);
 }
 
@@ -510,7 +778,7 @@ TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
     auto cell = cell_backing.get_cell("hello", normal_value);
     const auto usable_space_before = node.usable_space();
     node.insert(std::move(cell));
-    node.remove(_b("hello"));
+    node.remove(stob("hello"));
     ASSERT_EQ(node.usable_space(), usable_space_before);
 }
 
@@ -538,7 +806,7 @@ public:
         return node;
     }
 
-    auto make_cell(const std::string &key, const std::string &value, PID overflow_id = PID::root())
+    auto make_cell(const std::string &key, const std::string &value, PID overflow_id = PID::null())
     {
         auto cell = cell_backing.get_cell(key, value, overflow_id);
         if (page_type == PageType::INTERNAL_NODE)
@@ -562,22 +830,7 @@ public:
 
 TEST_P(NodesCanMergeTests, EmptyNodeIsUnderflowing)
 {
-    ASSERT_TRUE(lhs.is_underflowing_());
-}
-
-TEST_P(NodesCanMergeTests, NodeWithTwoMaximalCellsIsUnderflowing)
-{
-    lhs.insert(make_cell("a", random.next_string(max_value_size)));
-    lhs.insert(make_cell("b", random.next_string(max_value_size)));
-    ASSERT_TRUE(lhs.is_underflowing_());
-}
-
-TEST_P(NodesCanMergeTests, NodeWithMoreThanTwoMaximalCellsIsNotUnderflowing)
-{
-    lhs.insert(make_cell("a", random.next_string(max_value_size)));
-    lhs.insert(make_cell("b", random.next_string(max_value_size)));
-    lhs.insert(make_cell("c", random.next_string(10)));
-    ASSERT_FALSE(lhs.is_underflowing_());
+    ASSERT_TRUE(lhs.is_underflowing());
 }
 
 TEST_P(NodesCanMergeTests, MostlyEmptyNodesCanMerge)
@@ -593,51 +846,12 @@ TEST_P(NodesCanMergeTests, MostlyFullNodesCannotMerge)
 {
     lhs.insert(make_cell("a", random.next_string(max_value_size)));
     lhs.insert(make_cell("b", random.next_string(max_value_size)));
-    rhs.insert(make_cell("c", random.next_string(max_value_size)));
-    rhs.insert(make_cell("d", random.next_string(max_value_size)));
-    const auto cell = make_cell("e", random.next_string(max_value_size));
+    lhs.insert(make_cell("c", random.next_string(max_value_size)));
+    rhs.insert(make_cell("e", random.next_string(max_value_size)));
+    rhs.insert(make_cell("f", random.next_string(max_value_size)));
+    rhs.insert(make_cell("g", random.next_string(max_value_size)));
+    const auto cell = make_cell("d", random.next_string(max_value_size));
     ASSERT_FALSE(can_merge_siblings(lhs, rhs, cell));
-}
-
-template<class Test> auto make_barely_underflowing_node(Test &test, Node &node, char base_key)
-{
-    static constexpr Size room_for_third_cell {10};
-    const auto underflow_limit = node.usable_space() / 2;
-    ASSERT_EQ(underflow_limit, node.max_usable_space() / 2);
-    node.insert(test.make_cell(std::string(1, base_key++), test.random.next_string(test.max_value_size)));
-    node.insert(test.make_cell(std::string(1, base_key++), test.random.next_string(test.max_value_size - room_for_third_cell)));
-    ASSERT_GT(node.usable_space(), underflow_limit);
-    const auto diff = node.usable_space() - underflow_limit;
-    ASSERT_GT(diff, CELL_POINTER_SIZE + MAX_CELL_HEADER_SIZE + 1);
-    const auto adjust = !node.is_external() * PAGE_ID_SIZE;
-    static constexpr Size key_size {1};
-    const auto value_size = diff - CELL_POINTER_SIZE - MIN_CELL_HEADER_SIZE - key_size - adjust;
-    auto cell = test.make_cell(std::string(1, base_key++), test.random.next_string(value_size));
-    ASSERT_EQ(cell.size() + CELL_POINTER_SIZE, diff);
-    node.insert(std::move(cell));
-    ASSERT_EQ(node.usable_space(), underflow_limit);
-    ASSERT_TRUE(node.is_underflowing_());
-}
-
-TEST_P(NodesCanMergeTests, BarelyUnderflowingNodesCanMerge)
-{
-    make_barely_underflowing_node(*this, lhs, '1');
-    make_barely_underflowing_node(*this, rhs, '5');
-    auto separator = lhs.extract_cell(lhs.cell_count() - 1, scratch.get());
-    separator.set_left_child_id(arbitrary_pid);
-    ASSERT_TRUE(can_merge_siblings(lhs, rhs, separator));
-}
-
-TEST_P(NodesCanMergeTests, BarelyNotUnderflowingNodesCannotMerge)
-{
-    make_barely_underflowing_node(*this, lhs, '1');
-    make_barely_underflowing_node(*this, rhs, '5');
-    auto last = lhs.extract_cell(lhs.cell_count() - 1, scratch.get());
-    // Add one to the cell size.
-    auto separator = make_cell(_s(last.key()), _s(last.local_value()) + "!");
-    separator.set_left_child_id(arbitrary_pid);
-    ASSERT_EQ(separator.size(), last.size() + 1 + PAGE_ID_SIZE*lhs.is_external());
-    ASSERT_FALSE(can_merge_siblings(lhs, rhs, separator));
 }
 
 TEST_P(NodesCanMergeTests, NodeCanFitFourMaximallySizedCells)
@@ -663,12 +877,6 @@ TEST_P(NodesCanMergeTests, CanMergeOverflowingNodesDeathTest)
     const auto cell = make_cell("a", "1");
     lhs.set_overflow_cell(make_cell("b", "2"));
     ASSERT_DEATH(can_merge_siblings(lhs, rhs, cell), EXPECTATION_MATCHER);
-}
-
-TEST_P(NodesCanMergeTests, NodeShouldFitFourMaximallySizedCells)
-{
-    const auto max_occupied_by_cell = MAX_CELL_HEADER_SIZE + get_max_local(page_size) + CELL_POINTER_SIZE;
-    ASSERT_LT(max_occupied_by_cell * 4, page_size);
 }
 
 const auto external_node_parameter_combinations = testing::Values(
@@ -729,8 +937,8 @@ public:
         Index i {};
         EXPECT_EQ(node.cell_count(), values.size());
         for (const auto c: std::string {"abcde"}) {
-            EXPECT_EQ(_s(node.read_key(i)), std::string(1, c));
-            EXPECT_EQ(_s(node.read_cell(i).local_value()), values.at(i));
+            EXPECT_EQ(btos(node.read_key(i)), std::string(1, c));
+            EXPECT_EQ(btos(node.read_cell(i).local_value()), values.at(i));
             ++i;
         }
     }
@@ -790,7 +998,7 @@ public:
 
 TEST_P(NodeMergeRightTests, MergeRight)
 {
-    // Note that merge_right() actually merges into the left node. This is so that we don't have to potentially recur back up
+    // Note that merge_right() actually merges into the left node. This is so that we don't have to potentially recur up
     // the tree and back down in order to update the right sibling ID of the node's left sibling (if it is an external node).
     ASSERT_EQ(parent.child_id(0), lhs.id());
     ASSERT_EQ(parent.rightmost_child_id(), lhs.id());

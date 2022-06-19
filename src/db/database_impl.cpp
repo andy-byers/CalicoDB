@@ -17,7 +17,7 @@ namespace cub {
 
 auto Record::operator<(const Record &rhs) const -> bool
 {
-    return _b(key) < _b(rhs.key);
+    return stob(key) < stob(rhs.key);
 }
 
 auto Info::cache_hit_ratio() const -> double
@@ -175,7 +175,7 @@ auto Database::Impl::read(BytesView key, Ordering ordering) -> std::optional<Rec
             default:
                 throw std::invalid_argument {"Unknown ordering"};
         }
-        return Record {_s(cursor.key()), cursor.value()};
+        return Record {btos(cursor.key()), cursor.value()};
     }
     CUB_EXPECT_EQ(m_tree->cell_count(), 0);
     return std::nullopt;
@@ -185,7 +185,7 @@ auto Database::Impl::read_minimum() -> std::optional<Record>
 {
     if (auto cursor = get_cursor(); cursor.has_record()) {
         cursor.find_minimum();
-        return Record {_s(cursor.key()), cursor.value()};
+        return Record {btos(cursor.key()), cursor.value()};
     }
     return std::nullopt;
 }
@@ -194,7 +194,7 @@ auto Database::Impl::read_maximum() -> std::optional<Record>
 {
     if (auto cursor = get_cursor(); cursor.has_record()) {
         cursor.find_maximum();
-        return Record {_s(cursor.key()), cursor.value()};
+        return Record {btos(cursor.key()), cursor.value()};
     }
     return std::nullopt;
 }
@@ -281,7 +281,7 @@ auto Database::open(const std::string &path, const Options &options) -> Database
 
     auto use_transactions = options.use_transactions;
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {_b(backing)};
+    FileHeader header {stob(backing)};
 
     try {
         ReadOnlyFile file {path, {}, options.permissions};
@@ -290,7 +290,7 @@ auto Database::open(const std::string &path, const Options &options) -> Database
         if (file_size < FileLayout::HEADER_SIZE)
             throw CorruptionError {"Database is too small to read the file header"};
 
-        read_exact(file, _b(backing));
+        read_exact(file, stob(backing));
 
         if (!header.is_magic_code_consistent())
             throw std::invalid_argument {"Path does not point to a Cub DB database, or the file is corrupted"};
@@ -394,7 +394,7 @@ auto Database::write(BytesView key, BytesView value) -> bool
 auto Database::write(const Record &record) -> bool
 {
     const auto &[key, value] = record;
-    return m_impl->write(_b(key), _b(value));
+    return m_impl->write(stob(key), stob(value));
 }
 
 auto Database::erase(BytesView key) -> bool
@@ -426,30 +426,30 @@ auto Database::get_info() const -> Info
 
 auto operator<(const cub::Record &lhs, const cub::Record &rhs) -> bool
 {
-    return cub::_b(lhs.key) < cub::_b(rhs.key);
+    return cub::stob(lhs.key) < cub::stob(rhs.key);
 }
 
 auto operator>(const cub::Record &lhs, const cub::Record &rhs) -> bool
 {
-    return cub::_b(lhs.key) > cub::_b(rhs.key);
+    return cub::stob(lhs.key) > cub::stob(rhs.key);
 }
 
 auto operator<=(const cub::Record &lhs, const cub::Record &rhs) -> bool
 {
-    return cub::_b(lhs.key) <= cub::_b(rhs.key);
+    return cub::stob(lhs.key) <= cub::stob(rhs.key);
 }
 
 auto operator>=(const cub::Record &lhs, const cub::Record &rhs) -> bool
 {
-    return cub::_b(lhs.key) >= cub::_b(rhs.key);
+    return cub::stob(lhs.key) >= cub::stob(rhs.key);
 }
 
 auto operator==(const cub::Record &lhs, const cub::Record &rhs) -> bool
 {
-    return cub::_b(lhs.key) == cub::_b(rhs.key);
+    return cub::stob(lhs.key) == cub::stob(rhs.key);
 }
 
 auto operator!=(const cub::Record &lhs, const cub::Record &rhs) -> bool
 {
-    return cub::_b(lhs.key) != cub::_b(rhs.key);
+    return cub::stob(lhs.key) != cub::stob(rhs.key);
 }

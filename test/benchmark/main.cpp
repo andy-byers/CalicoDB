@@ -85,7 +85,7 @@ auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
         std::reverse(begin(records), end(records));
 
     for (const auto &[key, value]: records)
-        db.write(_b(key), _b(value));
+        db.write(stob(key), stob(value));
 }
 
 auto build_erases(Database &db, Work &records, bool is_sequential)
@@ -102,14 +102,14 @@ auto run_baseline(Database&)
 auto run_writes(Database &db, const Work &work)
 {
     for (const auto &[key, value]: work)
-        CUB_EXPECT_TRUE(db.write(_b(key), _b(value)));
+        CUB_EXPECT_TRUE(db.write(stob(key), stob(value)));
     db.commit();
 }
 
 auto run_erases(Database &db, const Work &work)
 {
     for (const auto &[key, value]: work)
-        CUB_EXPECT_TRUE(db.erase(_b(key)));
+        CUB_EXPECT_TRUE(db.erase(stob(key)));
     db.commit();
 }
 
@@ -118,7 +118,7 @@ auto run_read_rand(Database &db, const Work &work)
     std::string v;
     auto cursor = db.get_cursor();
     for (const auto &[key, value]: work) {
-        CUB_EXPECT_TRUE(cursor.find(_b(key)));
+        CUB_EXPECT_TRUE(cursor.find(stob(key)));
         v = cursor.value();
     }
 }
@@ -130,7 +130,7 @@ auto run_read_seq(Database &db, const Work &work)
     cursor.find_minimum();
     for (const auto &w: work) {
         (void)w;
-        k = _s(cursor.key());
+        k = btos(cursor.key());
         v = cursor.value();
         cursor.increment();
     }
@@ -143,7 +143,7 @@ auto run_read_rev(Database &db, const Work &work)
     cursor.find_maximum();
     for (const auto &w: work) {
         (void)w;
-        k = _s(cursor.key());
+        k = btos(cursor.key());
         v = cursor.value();
         cursor.decrement();
     }

@@ -6,7 +6,7 @@
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     using Fuzzer = cub::fuzz::InMemoryOpsFuzzer;
-    Fuzzer fuzzer {Fuzzer::Decoder {}};
+    Fuzzer fuzzer {Fuzzer::Transformer {}};
 
     try {
         fuzzer(data, size);

@@ -146,7 +146,7 @@ TEST_F(BufferPoolTests, AllocationInceasesPageCount)
 TEST_F(BufferPoolTests, LoadsFileHeaderFields)
 {
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {_b(backing)};
+    FileHeader header {stob(backing)};
     header.set_page_count(123);
     header.set_flushed_lsn(LSN {456});
     pool->load_header(header);
@@ -158,7 +158,7 @@ TEST_F(BufferPoolTests, LoadsFileHeaderFields)
 TEST_F(BufferPoolTests, SavesFileHeaderFields)
 {
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {_b(backing)};
+    FileHeader header {stob(backing)};
 
     (void)pool->allocate(PageType::EXTERNAL_NODE);
     pool->save_header(header);
@@ -212,7 +212,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = PageLayout::content_offset(page.id());
     CUB_EXPECT_LE(offset + message.size(), page.size());
-    page.write(_b(message), offset);
+    page.write(stob(message), offset);
 }
 
 template<class Page> auto read_from_page(const Page &page, Size size) -> std::string
@@ -220,7 +220,7 @@ template<class Page> auto read_from_page(const Page &page, Size size) -> std::st
     const auto offset = PageLayout::content_offset(page.id());
     CUB_EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
-    page.read(_b(message), offset);
+    page.read(stob(message), offset);
     return message;
 }
 
@@ -312,7 +312,7 @@ TEST_F(InMemoryTests, StubMethodsDoNothing)
 TEST_F(InMemoryTests, LoadsRequiredFileHeaderFields)
 {
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {_b(backing)};
+    FileHeader header {stob(backing)};
     header.set_page_count(123);
     header.set_flushed_lsn(LSN {456});
     pool->load_header(header);
@@ -324,7 +324,7 @@ TEST_F(InMemoryTests, LoadsRequiredFileHeaderFields)
 TEST_F(InMemoryTests, SavesRequiredFileHeaderFields)
 {
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {_b(backing)};
+    FileHeader header {stob(backing)};
 
     (void)pool->allocate(PageType::EXTERNAL_NODE);
     pool->save_header(header);

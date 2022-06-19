@@ -6,7 +6,7 @@
 #include <iostream>
 #include <vector>
 #include "random.h"
-#include "cub/bytes.h"
+#include "cub/cub.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 #include "wal/wal_record.h"
@@ -145,7 +145,7 @@ public:
     {
         RecordGenerator generator {param};
         for (const auto &[k, v]: generator.generate(m_random, num_records))
-            m_db->write(_b(k), _b(v));
+            m_db->write(stob(k), stob(v));
         m_db->commit();
     }
 
@@ -158,8 +158,8 @@ public:
             decltype(counter) num_written {};
 
             for (const auto &[k, v]: generator.generate(m_random, static_cast<Size>(counter))) {
-                if (!m_db->read(_b(k), Ordering::EQ)) {
-                    m_db->write(_b(k), _b(v));
+                if (!m_db->read(stob(k), Ordering::EQ)) {
+                    m_db->write(stob(k), stob(v));
                     num_written++;
                 }
             }
@@ -176,7 +176,7 @@ public:
             return {};
         reader.find_minimum();
         do {
-            records.emplace_back(Record {_s(reader.key()), reader.value()});
+            records.emplace_back(Record {btos(reader.key()), reader.value()});
         } while (reader.increment());
         return records;
     }
@@ -191,7 +191,7 @@ template<class Db, class F> auto traverse_db(Db &db, F &&f)
     if (auto cursor = db.get_cursor(); cursor.has_record()) {
         cursor.find_minimum();
         do {
-            f(_s(cursor.key()), cursor.value());
+            f(btos(cursor.key()), cursor.value());
         } while (cursor.increment());
     }
 }
@@ -250,8 +250,8 @@ public:
 
             update.emplace_back();
             update.back().offset = offset;
-            update.back().before = _b(m_snapshots_before.back()).range(offset, size);
-            update.back().after = _b(m_snapshots_after.back()).range(offset, size);
+            update.back().before = stob(m_snapshots_before.back()).range(offset, size);
+            update.back().after = stob(m_snapshots_after.back()).range(offset, size);
         }
         WALRecord record {{
             std::move(update),
@@ -259,7 +259,7 @@ public:
             LSN::null(),
             LSN {static_cast<uint32_t>(m_payloads.size() + ROOT_ID_VALUE)},
         }};
-        m_payloads.push_back(_s(record.payload().data()));
+        m_payloads.push_back(btos(record.payload().data()));
         return record;
     }
 
@@ -268,7 +268,7 @@ public:
         CUB_EXPECT_EQ(record.lsn(), target_lsn);
         const auto payload = retrieve_payload(target_lsn);
         CUB_EXPECT_EQ(record.type(), WALRecord::Type::FULL);
-        CUB_EXPECT_TRUE(record.payload().data() == _b(payload));
+        CUB_EXPECT_TRUE(record.payload().data() == stob(payload));
         CUB_EXPECT_TRUE(record.is_consistent());
     }
 

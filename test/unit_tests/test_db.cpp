@@ -45,7 +45,7 @@ public:
         : db {Database::temp(PAGE_SIZE)}
     {
         const auto write = [this](const std::string &key) {
-            db.write(_b(key), _b(key));
+            db.write(stob(key), stob(key));
         };
 
         write(K0);
@@ -57,7 +57,7 @@ public:
 
     auto read_and_compare(const std::string &key, Ordering comparison, const std::string &target)
     {
-        if (const auto record = db.read(_b(key), comparison))
+        if (const auto record = db.read(stob(key), comparison))
             return record->key == target;
         return false;
     }
@@ -98,21 +98,21 @@ TEST_F(DatabaseReadTests, ReadsGreaterThan)
 
 TEST_F(DatabaseReadTests, CannotReadNonexistentRecords)
 {
-    ASSERT_EQ(db.read(_b(K0_m1), Ordering::EQ), std::nullopt);
-    ASSERT_EQ(db.read(_b(K1_m1), Ordering::EQ), std::nullopt);
-    ASSERT_EQ(db.read(_b(K2_m1), Ordering::EQ), std::nullopt);
+    ASSERT_EQ(db.read(stob(K0_m1), Ordering::EQ), std::nullopt);
+    ASSERT_EQ(db.read(stob(K1_m1), Ordering::EQ), std::nullopt);
+    ASSERT_EQ(db.read(stob(K2_m1), Ordering::EQ), std::nullopt);
 }
 
 TEST_F(DatabaseReadTests, CannotReadLessThanMinimum)
 {
-    ASSERT_EQ(db.read(_b(K0), Ordering::LT), std::nullopt);
-    ASSERT_EQ(db.read(_b(K0_m1), Ordering::LT), std::nullopt);
+    ASSERT_EQ(db.read(stob(K0), Ordering::LT), std::nullopt);
+    ASSERT_EQ(db.read(stob(K0_m1), Ordering::LT), std::nullopt);
 }
 
 TEST_F(DatabaseReadTests, CannotReadGreaterThanMaximum)
 {
-    ASSERT_EQ(db.read(_b(K2), Ordering::GT), std::nullopt);
-    ASSERT_EQ(db.read(_b(K2_p1), Ordering::GT), std::nullopt);
+    ASSERT_EQ(db.read(stob(K2), Ordering::GT), std::nullopt);
+    ASSERT_EQ(db.read(stob(K2_p1), Ordering::GT), std::nullopt);
 }
 
 constexpr auto TEST_PATH = "/tmp/cub_test";
@@ -124,9 +124,9 @@ template<class Db> auto database_contains_exact(Db &db, const std::vector<Record
 
     auto cursor = db.get_cursor();
     for (const auto &[key, value]: records) {
-        if (!cursor.find(_b(key)))
+        if (!cursor.find(stob(key)))
             return false;
-        if (cursor.key() != _b(key))
+        if (cursor.key() != stob(key))
             return false;
         if (cursor.value() != value)
             return false;
@@ -163,18 +163,18 @@ TEST_F(DatabaseTests, DatabaseDoesNotExistAfterItIsDestroyed)
 TEST_F(DatabaseTests, AbortRestoresState)
 {
     auto db = Database::open(TEST_PATH, {});
-    db.write(_b("a"), _b("1"));
-    db.write(_b("b"), _b("2"));
+    db.write(stob("a"), stob("1"));
+    db.write(stob("b"), stob("2"));
     db.commit();
 
-    db.write(_b("c"), _b("3"));
-    CUB_EXPECT_TRUE(db.erase(_b("a")));
-    CUB_EXPECT_TRUE(db.erase(_b("b")));
+    db.write(stob("c"), stob("3"));
+    CUB_EXPECT_TRUE(db.erase(stob("a")));
+    CUB_EXPECT_TRUE(db.erase(stob("b")));
     db.abort();
 
-    CUB_EXPECT_EQ(db.read(_b("a"), Ordering::EQ)->value, "1");
-    CUB_EXPECT_EQ(db.read(_b("b"), Ordering::EQ)->value, "2");
-    CUB_EXPECT_EQ(db.read(_b("c"), Ordering::EQ), std::nullopt);
+    CUB_EXPECT_EQ(db.read(stob("a"), Ordering::EQ)->value, "1");
+    CUB_EXPECT_EQ(db.read(stob("b"), Ordering::EQ)->value, "2");
+    CUB_EXPECT_EQ(db.read(stob("c"), Ordering::EQ), std::nullopt);
 
     const auto info = db.get_info();
     CUB_EXPECT_EQ(info.record_count(), 2);
@@ -217,7 +217,7 @@ auto run_persistence_test(const Options &options)
     for (Index round {}; round < NUM_ROUNDS; ++round) {
         auto db = Database::open(TEST_PATH, options);
         for (Index i {}; i < ROUND_SIZE; ++i) {
-            db.write(_b(itr->key), _b(itr->value));
+            db.write(stob(itr->key), stob(itr->value));
             itr++;
         }
     }
@@ -227,7 +227,7 @@ auto run_persistence_test(const Options &options)
     for (Index round {}; round < NUM_ROUNDS; ++round) {
         auto db = Database::open(TEST_PATH, options);
         for (Index i {}; i < ROUND_SIZE; ++i) {
-            const auto record = db.read(_b(itr->key));
+            const auto record = db.read(stob(itr->key));
             ASSERT_NE(record, std::nullopt);
             ASSERT_EQ(record->value, itr->value);
             itr++;
@@ -253,7 +253,7 @@ TEST_F(DatabaseTests, SubsequentAbortsHaveNoEffect)
     const auto info = db.get_info();
     const auto records = setup_database_with_committed_records(db, 500);
     for (const auto &[k, v]: records)
-        db.erase(_b(k));
+        db.erase(stob(k));
     ASSERT_EQ(info.record_count(), 0);
     db.abort();
     ASSERT_EQ(info.record_count(), records.size());
@@ -285,9 +285,9 @@ TEST(TempDBTests, CanInsertRecords)
 TEST(TempDBTests, AbortClearsRecords)
 {
     auto temp = Database::temp(0x100);
-    temp.write(_b("a"), _b("1"));
-    temp.write(_b("b"), _b("2"));
-    temp.write(_b("c"), _b("3"));
+    temp.write(stob("a"), stob("1"));
+    temp.write(stob("b"), stob("2"));
+    temp.write(stob("c"), stob("3"));
     temp.abort();
     ASSERT_TRUE(database_contains_exact(temp, {}));
 }
@@ -297,9 +297,9 @@ TEST(TempDBTests, AbortKeepsRecordsFromPreviousCommit)
     static constexpr auto num_committed = 500;
     auto temp = Database::temp(0x100);
     const auto committed = setup_database_with_committed_records(temp, num_committed);
-    temp.write(_b("a"), _b("1"));
-    temp.write(_b("b"), _b("2"));
-    temp.write(_b("c"), _b("3"));
+    temp.write(stob("a"), stob("1"));
+    temp.write(stob("b"), stob("2"));
+    temp.write(stob("c"), stob("3"));
     temp.abort();
     ASSERT_TRUE(database_contains_exact(temp, committed));
 }
@@ -316,7 +316,7 @@ TEST_F(DatabaseTests, TestRecovery)
 
         // Modify the database by concatenating each value to itself.
         for (const auto &[k, v]: records)
-            faulty.db->write(_b(k), _b(v + v));
+            faulty.db->write(stob(k), stob(v + v));
 
         try {
             // Fail in the middle of the commit. We fail when flushing the buffer pool, but we have
@@ -355,7 +355,7 @@ TEST_F(DatabaseTests, AbortIsReentrant)
     {
         // This batch of writes should be undone eventually.
         for (const auto &[k, v]: records)
-            db.db->write(_b(k), _b(v + v));
+            db.db->write(stob(k), stob(v + v));
 
         for (Index i {}; i < num_tries; ++i) {
             try {
@@ -381,7 +381,7 @@ TEST_F(DatabaseTests, CanAbortAfterFailingToCommit)
     const auto records = builder.collect_records();
     {
         for (const auto &[k, v]: records)
-            db.db->write(_b(k), _b(v + v));
+            db.db->write(stob(k), stob(v + v));
 
         try {
             db.tree_faults.set_write_fault_counter(3);
@@ -449,8 +449,8 @@ TEST_F(InfoTests, InsertMaximalKey)
     const auto info = db.db->get_info();
     const auto max_size = info.maximum_key_size();
     const std::string key(max_size, 'X');
-    db.db->write(_b(key), _b(key));
-    ASSERT_EQ(db.db->read(_b(key), Ordering::EQ)->value, key);
+    db.db->write(stob(key), stob(key));
+    ASSERT_EQ(db.db->read(stob(key), Ordering::EQ)->value, key);
 }
 
 TEST_F(InfoTests, InsertOverMaximalKeyDeathTest)
@@ -458,7 +458,7 @@ TEST_F(InfoTests, InsertOverMaximalKeyDeathTest)
     const auto info = db.db->get_info();
     const auto max_size_plus_1 = info.maximum_key_size() + 1;
     const std::string key(max_size_plus_1, 'X');
-    ASSERT_THROW(db.db->write(_b(key), _b(key)), std::invalid_argument);
+    ASSERT_THROW(db.db->write(stob(key), stob(key)), std::invalid_argument);
 }
 
 TEST_F(InfoTests, ReportsRecordCountCorrectly)
@@ -516,8 +516,8 @@ TEST_F(CursorTests, FindsSpecificRecord)
     const auto record = dummy.record();
 
     auto cursor = db.db->get_cursor();
-    ASSERT_TRUE(cursor.find(_b(record.key)));
-    ASSERT_EQ(_s(cursor.key()), record.key);
+    ASSERT_TRUE(cursor.find(stob(record.key)));
+    ASSERT_EQ(btos(cursor.key()), record.key);
     ASSERT_EQ(cursor.value(), record.value);
 }
 
@@ -526,7 +526,7 @@ TEST_F(CursorTests, FindsMinimumRecord)
     auto cursor = db.db->get_cursor();
     cursor.find_minimum();
     ASSERT_TRUE(cursor.is_minimum());
-    ASSERT_EQ(_s(cursor.key()), records.front().key);
+    ASSERT_EQ(btos(cursor.key()), records.front().key);
 }
 
 TEST_F(CursorTests, FindsMaximumRecord)
@@ -534,37 +534,37 @@ TEST_F(CursorTests, FindsMaximumRecord)
     auto cursor = db.db->get_cursor();
     cursor.find_maximum();
     ASSERT_TRUE(cursor.is_maximum());
-    ASSERT_EQ(_s(cursor.key()), records.back().key);
+    ASSERT_EQ(btos(cursor.key()), records.back().key);
 }
 
 TEST_F(CursorTests, CannotFindNonexistentRecord)
 {
     auto cursor = db.db->get_cursor();
-    ASSERT_FALSE(cursor.find(_b("abc")));
-    ASSERT_FALSE(cursor.find(_b("123")));
+    ASSERT_FALSE(cursor.find(stob("abc")));
+    ASSERT_FALSE(cursor.find(stob("123")));
 }
 
 TEST_F(CursorTests, IsLeftOnGreaterThanRecordWhenCannotFind)
 {
     auto cursor = db.db->get_cursor();
-    cursor.find(_b("abc"));
-    ASSERT_TRUE(cursor.key() > _b("abc"));
-    cursor.find(_b("123"));
-    ASSERT_TRUE(cursor.key() > _b("123"));
+    cursor.find(stob("abc"));
+    ASSERT_TRUE(cursor.key() > stob("abc"));
+    cursor.find(stob("123"));
+    ASSERT_TRUE(cursor.key() > stob("123"));
 }
 
 TEST_F(CursorTests, IsLeftOnFirstRecordWhenKeyIsLow)
 {
     auto cursor = db.db->get_cursor();
-    ASSERT_FALSE(cursor.find(_b("\x01")));
-    ASSERT_EQ(_s(cursor.key()), records.front().key);
+    ASSERT_FALSE(cursor.find(stob("\x01")));
+    ASSERT_EQ(btos(cursor.key()), records.front().key);
 }
 
 TEST_F(CursorTests, IsLeftOnLastRecordWhenKeyIsHigh)
 {
     auto cursor = db.db->get_cursor();
-    ASSERT_FALSE(cursor.find(_b("\xFF")));
-    ASSERT_EQ(_s(cursor.key()), records.back().key);
+    ASSERT_FALSE(cursor.find(stob("\xFF")));
+    ASSERT_EQ(btos(cursor.key()), records.back().key);
 }
 
 TEST_F(CursorTests, CanTraverseFullRangeForward)
@@ -582,7 +582,7 @@ TEST_F(CursorTests, CanTraversePartialRangeForward)
     const auto one_third = records.size() / 3;
     const auto diff = static_cast<ssize_t>(one_third);
     auto cursor = db.db->get_cursor();
-    ASSERT_TRUE(cursor.find(_b(records[one_third].key)));
+    ASSERT_TRUE(cursor.find(stob(records[one_third].key)));
     const auto success = std::all_of(cbegin(records) + diff, cend(records) - diff, [&cursor](const Record &record) {
         const auto is_equal = cursor.record() == record;
         cursor.increment();
@@ -609,7 +609,7 @@ TEST_F(CursorTests, CanTraversePartialRangeBackward)
     const auto diff = static_cast<ssize_t>(one_third);
     auto cursor = db.db->get_cursor();
     auto start = std::crbegin(records) + diff;
-    ASSERT_TRUE(cursor.find(_b(start->key)));
+    ASSERT_TRUE(cursor.find(stob(start->key)));
     const auto success = std::all_of(start, crend(records) - diff, [&cursor](const Record &record) {
         const auto is_equal = cursor.record() == record;
         cursor.decrement();
@@ -672,7 +672,7 @@ TEST_F(CursorTests, CursorCanBeResetAfterFailure)
     db.tree_faults.set_read_fault_rate(0);
     cursor.reset();
     cursor.find_minimum();
-    ASSERT_EQ(_s(cursor.key()), records.front().key);
+    ASSERT_EQ(btos(cursor.key()), records.front().key);
 }
 
 } // <anonymous>

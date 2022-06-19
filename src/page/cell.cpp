@@ -133,4 +133,22 @@ auto Cell::detach(Scratch scratch) -> void
     m_scratch = std::move(scratch);
 }
 
+auto make_cell(BytesView key, BytesView value, Size page_size) -> Cell
+{
+    CUB_EXPECT_FALSE(key.is_empty());
+    const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
+    Cell::Parameters param;
+    param.key = key;
+    param.local_value = value;
+    param.value_size = value.size();
+
+    if (local_value_size != value.size()) {
+        CUB_EXPECT_LT(local_value_size, value.size());
+        param.local_value.truncate(local_value_size);
+        // Set to an arbitrary value.
+        param.overflow_id = PID::root();
+    }
+    return Cell {param};
+}
+
 } // cub

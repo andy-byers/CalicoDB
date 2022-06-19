@@ -52,11 +52,11 @@ auto main(int argc, const char *argv[]) -> int
     Index key_counter {};
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
-        const auto record = db.read(_b(key));
+        const auto record = db.read(stob(key));
         CUB_EXPECT_NE(record, std::nullopt);
         CUB_EXPECT_EQ(record->key, key);
         CUB_EXPECT_EQ(record->value, value);
-        CUB_EXPECT_TRUE(db.erase(_b(key)));
+        CUB_EXPECT_TRUE(db.erase(stob(key)));
     }
 
     // All records should have been reached and removed.

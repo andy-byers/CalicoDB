@@ -52,7 +52,7 @@ auto main(int argc, const char *argv[]) -> int
         for (Index i {}; i < num_committed; ++i) {
             const auto key = make_key<KEY_WIDTH>(i);
             const auto value = random_string(random, 2, 15);
-            db.write(_b(key), _b(value));
+            db.write(stob(key), stob(value));
             ofs << value << '\n';
         }
         db.commit();
@@ -65,14 +65,14 @@ auto main(int argc, const char *argv[]) -> int
     for (Index i {}; i < LIMIT; ++i) {
         const auto key = std::to_string(random.next_int(num_committed * 2));
         const auto value = random_string(random, 0, options.page_size / 2);
-        db.write(_b(key), _b(value));
+        db.write(stob(key), stob(value));
 
         // Keep the database from getting too large.
         if (const auto info = db.get_info(); info.record_count() > max_database_size) {
             while (info.record_count() >= max_database_size / 2) {
                 const auto record = db.read_minimum();
                 CUB_EXPECT_NE(record, std::nullopt);
-                db.erase(_b(record->key));
+                db.erase(stob(record->key));
             }
         }
     }

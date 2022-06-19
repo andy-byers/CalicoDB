@@ -21,7 +21,7 @@ auto InMemory::acquire(PID id, bool is_writable) -> Page
 
     while (page_count() <= id.as_index()) {
         m_frames.emplace_back(m_page_size);
-        m_frames.back().reset(PID {m_frames.size()});
+        m_frames.back().reset(PID::from_index(m_frames.size() - 1));
     }
     auto &frame = m_frames[id.as_index()];
     auto page = frame.borrow(this, is_writable);
@@ -42,7 +42,7 @@ auto InMemory::abort() -> void
         const auto [before, id, offset] = std::move(m_stack.back());
         m_stack.pop_back();
         auto page = acquire(id, true);
-        mem_copy(page.raw_data().range(offset), _b(before));
+        mem_copy(page.raw_data().range(offset), stob(before));
     }
 }
 
@@ -53,7 +53,7 @@ auto InMemory::on_page_release(Page &page) -> void
     CUB_EXPECT_LT(index, m_frames.size());
     m_frames[index].synchronize(page);
     for (const auto &change: page.collect_changes())
-        m_stack.emplace_back(UndoInfo {_s(change.before), page.id(), change.offset});
+        m_stack.emplace_back(UndoInfo {btos(change.before), page.id(), change.offset});
 }
 
 auto InMemory::on_page_error() -> void

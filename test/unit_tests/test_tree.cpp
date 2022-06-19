@@ -26,13 +26,13 @@ using namespace cub;
 
 template<class T> auto tree_insert(T &tree, const std::string &key, const std::string &value) -> void
 {
-    tree.insert(_b(key), _b(value));
+    tree.insert(stob(key), stob(value));
     tree.set_payload(key, value);
 }
 
 template<class T> auto tree_lookup(T &tree, const std::string &key, std::string &result) -> bool
 {
-    if (const auto [node, index, found_eq] = tree.find_ge(_b(key), false); found_eq) {
+    if (const auto [node, index, found_eq] = tree.find_ge(stob(key), false); found_eq) {
         result = tree.collect_value(node, index);
         return true;
     }
@@ -41,7 +41,7 @@ template<class T> auto tree_lookup(T &tree, const std::string &key, std::string 
 
 template<class T>  auto tree_remove(T &tree, const std::string &key) -> bool
 {
-    return tree.remove(_b(key));
+    return tree.remove(stob(key));
 }
 
 class TestTree: public Tree {
@@ -76,7 +76,7 @@ public:
 
     auto node_contains(PID id, const std::string &key) -> bool
     {
-        auto [node, index, found_eq] = find_ge(_b(key), false);
+        auto [node, index, found_eq] = find_ge(stob(key), false);
         return found_eq && node.id() == id;
     }
 
@@ -153,7 +153,7 @@ public:
     auto node_insert(PID id, const std::string &key, const std::string &value) -> void
     {
         auto node = m_tree.acquire_node(id, true);
-        auto cell = m_tree.make_cell(_b(key), _b(value));
+        auto cell = m_tree.make_cell(stob(key), stob(value));
 
         if (!node.is_external())
             cell.set_left_child_id(PID{std::numeric_limits<uint32_t>::max()});
@@ -268,7 +268,7 @@ TEST_F(TreeTests, InsertNonOverflowingRecord)
 
 TEST_F(TreeTests, InsertOverflowingRecord)
 {
-    m_tree->insert(_b("a"), _b(m_random.next_string(get_max_local(m_page_size))));
+    m_tree->insert(stob("a"), stob(m_random.next_string(get_max_local(m_page_size))));
     ASSERT_EQ(m_pool->page_count(), 2);
 }
 
@@ -478,7 +478,7 @@ TEST_F(TreeTests, CanLookupMinimum)
     for (Index i {}; i < 500; ++i)
         builder.tree_insert(make_key(i));
     auto [node, index] = m_tree->find_local_min(m_tree->find_root(false));
-    ASSERT_EQ(_s(node.read_key(index)), make_key(0));
+    ASSERT_EQ(btos(node.read_key(index)), make_key(0));
 }
 
 TEST_F(TreeTests, CanLookupMaximum)
@@ -487,7 +487,7 @@ TEST_F(TreeTests, CanLookupMaximum)
     for (Index i {}; i < 500; ++i)
         builder.tree_insert(make_key(i));
     auto [node, index] = m_tree->find_local_max(m_tree->find_root(false));
-    ASSERT_EQ(_s(node.read_key(index)), make_key(499));
+    ASSERT_EQ(btos(node.read_key(index)), make_key(499));
 }
 
 TEST_F(TreeTests, SequentialInserts)
@@ -588,17 +588,54 @@ auto setup_external_merge_test(TreeBuilder &builder) -> void
     builder.connect_siblings(cc, rc);
 }
 
+TEST_F(TreeTests, X)
+{
+    //     1:[2,     4]
+    // 2:[]     3:[3]  4:[5]
+    TreeBuilder builder {tree()};
+    setup_external_merge_test(builder);
+
+    auto node_1 = m_tree->acquire_node(PID {1}, true);
+    auto node_2 = m_tree->acquire_node(PID {2}, true);
+    auto node_3 = m_tree->acquire_node(PID {3}, true);
+
+    node_2.remove(stob(make_key<1>(1)));
+    node_2.validate();
+
+    ASSERT_EQ(node_2.cell_count(), 0);
+    auto separator = node_1.read_cell(0);
+    auto other = node_3.read_cell(0);
+    separator.set_left_child_id(PID::null());
+    node_2.insert(std::move(separator));
+    node_2.insert(std::move(other));
+}
+
 TEST_F(TreeTests, LeftMergeExternal)
 {
     //     1:[2,     4]       -->          1:[4]
     // 2:[]     3:[3]  4:[5]       2:[2, 3]     4:[5]
-    TreeBuilder builder{tree()};
+    TreeBuilder builder {tree()};
+    setup_external_merge_test(builder);
+
+    ASSERT_TRUE(tree_remove(tree(), make_key<1>(1)));
+    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<1>(4)));
+    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<1>(2)));
+    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<1>(3)));
+    ASSERT_TRUE(tree().node_contains(PID {4}, make_key<1>(5)));
+    validate();
+}
+
+TEST_F(TreeTests, LeftMergeExternal2)
+{
+    //     1:[2,     4]       -->          1:[4]
+    // 2:[]     3:[3]  4:[5]       2:[2, 3]     4:[5]
+    TreeBuilder builder {tree()};
     setup_external_merge_test(builder);
     ASSERT_TRUE(tree_remove(tree(), make_key<1>(1)));
-    ASSERT_TRUE(tree().node_contains(PID{1}, make_key<1>(4)));
-    ASSERT_TRUE(tree().node_contains(PID{2}, make_key<1>(2)));
-    ASSERT_TRUE(tree().node_contains(PID{2}, make_key<1>(3)));
-    ASSERT_TRUE(tree().node_contains(PID{4}, make_key<1>(5)));
+    ASSERT_TRUE(tree_remove(tree(), make_key<1>(2)));
+    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<1>(3)));
+    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<1>(4)));
+    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<1>(5)));
     validate();
 }
 
@@ -606,14 +643,27 @@ TEST_F(TreeTests, RightMergeExternal)
 {
     //      1:[2,     4]      -->       1:[2]
     // 2:[1]     3:[3]  4:[]       2:[1]     3:[3, 4]
-    TreeBuilder builder{tree()};
+    TreeBuilder builder {tree()};
     setup_external_merge_test(builder);
     ASSERT_TRUE(tree_remove(tree(), make_key<1>(5)));
+    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<1>(2)));
+    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<1>(1)));
+    ASSERT_TRUE(tree().node_contains(PID {3}, make_key<1>(3)));
+    ASSERT_TRUE(tree().node_contains(PID {3}, make_key<1>(4)));
+    validate();
+}
 
+TEST_F(TreeTests, RightMergeExternal2)
+{
+    //      1:[2,     4]      -->       1:[2]
+    // 2:[1]     3:[3]  4:[]       2:[1]     3:[3, 4]
+    TreeBuilder builder {tree()};
+    setup_external_merge_test(builder);
+    ASSERT_TRUE(tree_remove(tree(), make_key<1>(5)));
+    ASSERT_TRUE(tree_remove(tree(), make_key<1>(4)));
+    ASSERT_TRUE(tree().node_contains(PID{1}, make_key<1>(1)));
     ASSERT_TRUE(tree().node_contains(PID{1}, make_key<1>(2)));
-    ASSERT_TRUE(tree().node_contains(PID{2}, make_key<1>(1)));
-    ASSERT_TRUE(tree().node_contains(PID{3}, make_key<1>(3)));
-    ASSERT_TRUE(tree().node_contains(PID{3}, make_key<1>(4)));
+    ASSERT_TRUE(tree().node_contains(PID{1}, make_key<1>(3)));
     validate();
 }
 
@@ -774,9 +824,18 @@ TEST_F(TreeTests, LeftMergeInternal)
     // 4:[]     5:[3]  6:[5]     7:[7]           4:[2, 3]  6:[5]     7:[7]
     TreeBuilder builder{tree()};
     setup_internal_merge_test(builder);
+
     ASSERT_TRUE(tree_remove(tree(), make_key(1)));
     validate();
 }
+
+//              1:[4]
+//    2:[2]               3:[6]
+//4:[]     5:[3]     6:[5]     7:[7]
+
+//               1:[4]
+//    2:[]                 3:[6]
+//        5:[2,3]     6:[5]     7:[7]
 
 TEST_F(TreeTests, RightMergeInternal)
 {
@@ -928,12 +987,12 @@ auto run_internal_overflow_after_modify_test(TestTree &tree, Index key_index) ->
     TreeBuilder builder {tree};
     setup_remove_special_cases_test(builder);
 
-    auto [node, index, found_eq] = tree.find_ge(_b(key), true);
+    auto [node, index, found_eq] = tree.find_ge(stob(key), true);
     const auto space_in_node = node.usable_space();
     const auto value = tree.collect_value(node, index) +
                        std::string(space_in_node + 1, 'x');
     node.take();
-    tree.insert(_b(key), _b(value));
+    tree.insert(stob(key), stob(value));
     TreeValidator {tree}.validate();
 }
 
@@ -987,6 +1046,8 @@ TEST_F(TreeTests, SanityCheck)
         tree_insert(tree(), key, value);
         payloads[key] = value;
 
+        TreeValidator {tree()}.validate();
+
         // Remove a key-value pair.
         const auto too_many_records = tree().cell_count() > max_size;
         if (too_many_records || (m_random.next_int(5) < 3 && !payloads.empty())) {
@@ -997,6 +1058,8 @@ TEST_F(TreeTests, SanityCheck)
                 << tree().cell_count() << " values remaining ";
             payloads.erase(itr);
         }
+
+        TreeValidator {tree()}.validate();
     }
     for (const auto &[key, value]: payloads) {
         std::string result;
@@ -1014,7 +1077,7 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
 {
     std::unordered_map<std::string, std::string> records;
     static constexpr Size num_iterations = 3;
-    static constexpr Size cutoff = 1500;
+    static constexpr Size cutoff = 1'500;
 
     for (Index i {}; i < num_iterations; ++i) {
         while (m_tree->cell_count() < cutoff) {

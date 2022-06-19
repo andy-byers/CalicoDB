@@ -42,7 +42,7 @@ TEST(TestEncoding, ReadsAndWrites)
 class SliceTests: public testing::Test {
 protected:
     std::string test_string {"Hello, world!"};
-    Bytes bytes {_b(test_string)};
+    Bytes bytes {stob(test_string)};
 };
 
 TEST_F(SliceTests, EqualsSelf)
@@ -58,15 +58,15 @@ TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
 
 TEST_F(SliceTests, FirstByteIsMostSignificant)
 {
-    ASSERT_TRUE(_b("10") > _b("01"));
-    ASSERT_TRUE(_b("01") < _b("10"));
-    ASSERT_TRUE(_b("10") >= _b("01"));
-    ASSERT_TRUE(_b("01") <= _b("10"));
+    ASSERT_TRUE(stob("10") > stob("01"));
+    ASSERT_TRUE(stob("01") < stob("10"));
+    ASSERT_TRUE(stob("10") >= stob("01"));
+    ASSERT_TRUE(stob("01") <= stob("10"));
 }
 
 TEST_F(SliceTests, CanGetPartialRange)
 {
-    ASSERT_TRUE(bytes.range(7, 5) == _b("world"));
+    ASSERT_TRUE(bytes.range(7, 5) == stob("world"));
 }
 
 TEST_F(SliceTests, CanGetEntireRange)
@@ -167,21 +167,21 @@ TEST(NonPrintableSliceTests, UsesStringSize)
     // We can construct a string holding non-printable bytes by specifying its size along with
     // a string literal that is not null-terminated.
     std::string u {"\x00\x01", 2};
-    ASSERT_EQ(_b(u).size(), 2);
+    ASSERT_EQ(stob(u).size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
     std::string u {"\x00", 1};
     std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::EQ);
+    ASSERT_EQ(compare_three_way(stob(u), stob(v)), ThreeWayComparison::EQ);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(stob(u), stob(v)), ThreeWayComparison::LT);
 }
 
 TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
@@ -194,13 +194,13 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_EQ(compare_three_way(_b(u), _b(v)), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(stob(u), stob(v)), ThreeWayComparison::LT);
 }
 
 TEST(NonPrintableSliceTests, Conversions)
 {
     std::string u {"\x00\x01", 2};
-    const auto s = _s(_b(u));
+    const auto s = btos(stob(u));
     ASSERT_EQ(s.size(), 2);
     ASSERT_EQ(s[0], '\x00');
     ASSERT_EQ(s[1], '\x01');

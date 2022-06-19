@@ -21,7 +21,7 @@ namespace {
 WALPayload::WALPayload(const Parameters &param)
 {
     m_data.resize(HEADER_SIZE);
-    auto bytes = _b(m_data);
+    auto bytes = stob(m_data);
 
     put_uint32(bytes, param.previous_lsn.value);
     bytes.advance(sizeof(uint32_t));
@@ -35,7 +35,7 @@ WALPayload::WALPayload(const Parameters &param)
         const auto size = change.before.size();
         CUB_EXPECT_EQ(size, change.after.size());
         auto chunk = std::string(UPDATE_HEADER_SIZE + 2*size, '\x00');
-        bytes = _b(chunk);
+        bytes = stob(chunk);
 
         put_uint16(bytes, static_cast<uint16_t>(change.offset));
         bytes.advance(sizeof(uint16_t));
@@ -60,7 +60,7 @@ auto WALPayload::is_commit() const -> bool
 auto WALPayload::decode() const -> PageUpdate
 {
     auto update = PageUpdate{};
-    auto bytes = _b(m_data);
+    auto bytes = stob(m_data);
 
     update.previous_lsn.value = get_uint32(bytes);
     bytes.advance(sizeof(uint32_t));
@@ -136,7 +136,7 @@ auto WALRecord::read(BytesView in) -> void
     m_payload.m_data.resize(payload_size);
 
     // payload (xB)
-    mem_copy(_b(m_payload.m_data), in, payload_size);
+    mem_copy(stob(m_payload.m_data), in, payload_size);
 }
 
 auto WALRecord::write(Bytes out) const noexcept -> void
@@ -163,7 +163,7 @@ auto WALRecord::write(Bytes out) const noexcept -> void
     out.advance(sizeof(uint16_t));
 
     // payload (xB)
-    mem_copy(out, _b(m_payload.m_data), payload_size);
+    mem_copy(out, stob(m_payload.m_data), payload_size);
 }
 
 auto WALRecord::is_consistent() const -> bool

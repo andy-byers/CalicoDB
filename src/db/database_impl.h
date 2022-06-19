@@ -6,7 +6,6 @@
 
 namespace cub {
 
-class Batch;
 class Cursor;
 class FileHeader;
 class Iterator;
@@ -16,7 +15,6 @@ class IReadOnlyFile;
 class IReadWriteFile;
 class ITree;
 class Cursor;
-class Batch;
 class Lock;
 
 class Database::Impl final {

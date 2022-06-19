@@ -42,7 +42,7 @@ auto Tree::collect_value(const Node &node, Index index) const -> std::string
     auto cell = node.read_cell(index);
     const auto local = cell.local_value();
     std::string result(cell.value_size(), '\x00');
-    auto out = _b(result);
+    auto out = stob(result);
 
     // Note that it is possible to have no value stored locally but have an overflow page. The happens when
     // the key is of maximal length (i.e. get_max_local(m_header->page_size())).
@@ -102,8 +102,8 @@ auto Tree::positioned_modify(Position position, BytesView value) -> void
     auto old_cell = node.read_cell(index);
     // Make a copy of the key. The data backing the old key slice will be written over when we call
     // remove_at() on the old cell.
-    const auto key = _s(old_cell.key());
-    auto new_cell = make_cell(_b(key), value);
+    const auto key = btos(old_cell.key());
+    auto new_cell = make_cell(stob(key), value);
 
     if (old_cell.overflow_size())
         destroy_overflow_chain(old_cell.overflow_id(), old_cell.overflow_size());
@@ -125,7 +125,7 @@ auto Tree::positioned_remove(Position position) -> void
     m_cell_count--;
 
     auto cell = node.read_cell(index);
-    auto anchor = _s(cell.key());
+    auto anchor = btos(cell.key());
     if (cell.overflow_size())
         destroy_overflow_chain(cell.overflow_id(), cell.overflow_size());
 
@@ -134,7 +134,7 @@ auto Tree::positioned_remove(Position position) -> void
     if (!node.is_external()) {
         auto [other, other_index] = find_local_max(acquire_node(node.child_id(index), true));
         auto other_cell = other.extract_cell(other_index, m_scratch.get());
-        anchor = _s(other_cell.key());
+        anchor = btos(other_cell.key());
         other_cell.set_left_child_id(node.child_id(index));
         node.remove_at(index, node.read_cell(index).size());
 
@@ -151,7 +151,7 @@ auto Tree::positioned_remove(Position position) -> void
     } else {
         node.remove_at(index, node.read_cell(index).size());
     }
-    maybe_balance_after_underflow(std::move(node), _b(anchor));
+    maybe_balance_after_underflow(std::move(node), stob(anchor));
 }
 
 auto Tree::find_local_min(Node root) -> Position
@@ -225,13 +225,13 @@ auto Tree::maybe_balance_after_underflow(Node node, BytesView anchor) -> void
 /**
  * Balancing routine for fixing an over-full root node.
  */
-auto Tree::split_root(Node node) -> Node
+auto Tree::split_root(Node root) -> Node
 {
-    CUB_EXPECT_TRUE(node.id().is_root());
-    CUB_EXPECT_TRUE(node.is_overflowing());
+    CUB_EXPECT_TRUE(root.id().is_root());
+    CUB_EXPECT_TRUE(root.is_overflowing());
 
-    auto child = allocate_node(node.type());
-    do_split_root(node, child);
+    auto child = allocate_node(root.type());
+    do_split_root(root, child);
 
     maybe_fix_child_parent_connections(child);
     CUB_EXPECT_TRUE(child.is_overflowing());
@@ -290,19 +290,12 @@ auto Tree::maybe_fix_child_parent_connections(Node &node) -> void
  */
 auto Tree::make_cell(BytesView key, BytesView value) -> Cell
 {
-    CUB_EXPECT_FALSE(key.is_empty());
-    const auto local_value_size = get_local_value_size(key.size(), value.size(), m_pool->page_size());
-    Cell::Parameters param;
-    param.key = key;
-    param.local_value = value;
-    param.value_size = value.size();
-
-    if (local_value_size != value.size()) {
-        CUB_EXPECT_LT(local_value_size, value.size());
-        param.local_value.truncate(local_value_size);
-        param.overflow_id = allocate_overflow_chain(value.range(local_value_size));
+    auto cell = ::cub::make_cell(key, value, m_pool->page_size());
+    if (not cell.overflow_id().is_null()) {
+        const auto overflow_value = value.range(cell.local_value().size());
+        cell.set_overflow_id(allocate_overflow_chain(overflow_value));
     }
-    return Cell {param};
+    return cell;
 }
 
 auto Tree::allocate_overflow_chain(BytesView overflow) -> PID

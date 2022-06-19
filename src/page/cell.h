@@ -47,6 +47,8 @@ private:
     Size m_value_size {};
 };
 
+auto make_cell(BytesView, BytesView, Size) -> Cell;
+
 } // cub
 
 #endif // CUB_PAGE_CELL_H

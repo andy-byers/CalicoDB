@@ -9,10 +9,10 @@ using namespace cub::fuzz;
 auto generate_operation_seed(const std::string &path, Size num_operations)
 {
     static constexpr Size LIMIT {80};
-    OperationEncoder<LIMIT> encoder;
+    OperationTransformer<LIMIT> transformer;
     Random random;
 
-    decltype(encoder)::Decoded inputs(num_operations);
+    decltype(transformer)::Decoded inputs(num_operations);
     for (auto &[key, value_size, operation]: inputs) {
         key = random.next_binary(random.next_int(1ULL, 255ULL));
         if (random.next_int(99ULL) < LIMIT) {
@@ -24,7 +24,7 @@ auto generate_operation_seed(const std::string &path, Size num_operations)
     }
 
     std::ofstream ofs(path, std::ios::trunc);
-    ofs << encoder(inputs);
+    ofs << transformer.encode(inputs);
 }
 
 auto generate_wal_reader_seed(const std::string &path, Size block_size, Size num_records)
@@ -37,7 +37,7 @@ auto generate_wal_reader_seed(const std::string &path, Size block_size, Size num
         auto db = Database::open(database_path, options);
         for (Index i {}; i < num_records; ++i) {
             const auto data = std::to_string(i);
-            db.write(_b(data), _b(data + data));
+            db.write(stob(data), stob(data + data));
         }
         std::filesystem::copy(get_wal_path(database_path), path);
     }

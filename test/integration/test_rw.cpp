@@ -48,7 +48,7 @@ auto writer_task(Database *db, std::shared_mutex *mutex, const std::vector<Recor
     std::unique_lock lock {*mutex};
     const auto value = db->read_minimum()->value;
     for (const auto &[key, unused]: original)
-        db->write(_b(key), _b(value));
+        db->write(stob(key), stob(value));
     return nullptr;
 }
 

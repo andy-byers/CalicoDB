@@ -6,31 +6,35 @@
 #include "validators.h"
 #include "cub/cub.h"
 #include "cub/database.h"
+#include "page/cell.h"
+#include "page/node.h"
+#include "page/page.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
+#include "utils/layout.h"
 #include "../tools/fakes.h"
 #include "../tools/tools.h"
 
 namespace cub::fuzz {
 
-template<class D, class R> class Fuzzer {
+template<class T, class R> class Fuzzer {
 public:
-    using Decoder = D;
+    using Transformer = T;
     using Runner = R;
 
-    explicit Fuzzer(Decoder &&decoder)
-        : m_decoder {std::forward<Decoder>(decoder)} {}
+    explicit Fuzzer(Transformer &&transformer)
+        : m_transformer{std::forward<Transformer>(transformer)} {}
 
     virtual ~Fuzzer() = default;
 
     auto operator()(const uint8_t *data, Size size) -> void
     {
         const BytesView bytes {reinterpret_cast<const Byte*>(data), size};
-        m_runner(m_decoder(bytes));
+        m_runner(m_transformer.decode(bytes));
     }
 
 private:
-    Decoder m_decoder;
+    Transformer m_transformer;
     Runner m_runner;
 };
 
@@ -39,7 +43,6 @@ enum class Operation: unsigned {
     ERASE,
 };
 
-static constexpr Size OPERATION_CHANCES[4] {80, 10, 5, 5};
 static constexpr Size VALUE_MULTIPLIER {3};
 
 struct OperationInput {
@@ -48,12 +51,14 @@ struct OperationInput {
     Operation operation {};
 };
 
-template<uint8_t Ratio> class OperationDecoder {
-public:
+template<Size Ratio = 80> struct OperationTransformer {
     using Decoded = std::vector<OperationInput>;
+    using Encoded = std::string;
 
-    auto operator()(BytesView in) -> Decoded
+    [[nodiscard]] auto decode(BytesView in) const -> Decoded
     {
+        CUB_EXPECT_STATIC(50 <= Ratio && Ratio <= 100, "Ratio must be in [50, 100]");
+
         static constexpr Size MIN_INFO_SIZE {2};
         static constexpr Size MAX_INFO_SIZE {3};
         Decoded decoded;
@@ -69,24 +74,19 @@ public:
             if (in.size() < key_size)
                 break;
 
-            const auto key = _s(in.range(0, key_size));
+            const auto key = btos(in.range(0, key_size));
             decoded.emplace_back(OperationInput {key, value_size, operation});
             in.advance(key_size);
         }
         return decoded;
     }
-};
 
-template<unsigned Ratio> class OperationEncoder {
-public:
-    using Decoded = std::vector<OperationInput>;
-
-    auto operator()(const Decoded &decoded) -> std::string
+    [[nodiscard]] auto encode(const Decoded &decoded) const -> Encoded
     {
         CUB_EXPECT_STATIC(50 <= Ratio && Ratio <= 100, "Ratio must be in [50, 100]");
 
-        Random random {0};
         std::string encoded;
+        Random random;
 
         for (const auto &[key, value_size, operation]: decoded) {
             CUB_EXPECT_LT(value_size, 0x100);
@@ -95,7 +95,7 @@ public:
                 info_byte = static_cast<Byte>(random.next_int(Ratio - 1));
                 size_byte = static_cast<Byte>(value_size / VALUE_MULTIPLIER);
             } else {
-                info_byte = static_cast<Byte>(random.next_int(Ratio, 99U));
+                info_byte = static_cast<Byte>(random.next_int(Ratio, Size {99}));
             }
             encoded += info_byte;
             encoded += static_cast<Byte>(key.size());
@@ -104,12 +104,13 @@ public:
         }
         return encoded;
     }
+
 };
 
 template<Size PageSize, bool IsInMemory> struct DatabaseProvider {
     static constexpr auto PATH = "/tmp/cub_fuzz_database";
 
-    auto operator()() -> Database
+    auto operator()() const -> Database
     {
         if constexpr (IsInMemory) {
             return Database::temp(PageSize, true);
@@ -127,7 +128,7 @@ template<Size PageSize, bool IsInMemory> struct DatabaseProvider {
 
 template<class Provider> class OperationRunner {
 public:
-    using Input = std::vector<OperationInput>;
+    using Input = OperationTransformer<>::Decoded;
 
     OperationRunner()
         : m_db {Provider()()} {}
@@ -136,10 +137,10 @@ public:
     {
         for (const auto &[key, value_size, operation]: input) {
             if (operation == Operation::WRITE) {
-                const auto value = std::string(value_size, '*');
-                m_db.write(_b(key), _b(value));
-            } else if (const auto record = m_db.read(_b(key), Ordering::GE)) {
-                m_db.erase(_b(record->key));
+                std::string value(value_size, '*');
+                m_db.write(stob(key), stob(value));
+            } else if (const auto record = m_db.read(stob(key), Ordering::GE)) {
+                m_db.erase(stob(record->key));
             }
         }
         m_db.commit();
@@ -156,40 +157,40 @@ private:
 };
 
 using InMemoryOpsFuzzer = Fuzzer<
-    OperationDecoder<80>,
+    OperationTransformer<80>,
     OperationRunner<DatabaseProvider<0x200, true>>
 >;
 
 using OpsFuzzer = Fuzzer<
-    OperationDecoder<80>,
+    OperationTransformer<80>,
     OperationRunner<DatabaseProvider<0x200, false>>
 >;
 
-class PassThroughDecoder {
+class PassThroughTransformer {
 public:
-    auto operator()(BytesView in) -> BytesView
+    using Decoded = BytesView;
+    using Encoded = std::string;
+    
+    [[nodiscard]] auto decode(BytesView in) const -> Decoded
     {
         return in;
     }
-};
-
-class PassThroughEncoder {
-public:
-    auto operator()(BytesView in) -> std::string
+    
+    [[nodiscard]] auto encode(Decoded in) const -> Encoded
     {
-        return _s(in);
+        return btos(in);
     }
 };
 
 template<Size BlockSize> class WALReaderRunner {
 public:
-    using Input = BytesView;
+    using Input = PassThroughTransformer::Decoded;
 
     auto operator()(Input &&input) -> void
     {
         auto file = std::make_unique<ReadOnlyMemory>();
         auto backing = file->memory();
-        backing.memory() = _s(input);
+        backing.memory() = btos(input);
 
         WALReader reader {std::move(file), BlockSize};
         while (reader.increment()) {}
@@ -206,8 +207,80 @@ private:
 };
 
 using WALReaderFuzzer = Fuzzer<
-    PassThroughDecoder,
+    PassThroughTransformer,
     WALReaderRunner<0x100>
+>;
+
+struct FuzzerNode {
+    std::string backing;
+    Node node;
+};
+
+template<Index PageID> struct NodeProvider {
+
+    auto operator()(std::string &backing) const -> Node
+    {
+        Page page {{
+            PID {PageID},
+            stob(backing),
+            nullptr,
+            true,
+            false,
+        }};
+        page.set_type(PageType::EXTERNAL_NODE);
+        return Node {std::move(page), true};
+    }
+};
+
+template<class Provider> class NodeOperationRunner {
+public:
+    static constexpr Size PAGE_SIZE {0x200};
+    using Input = OperationTransformer<>::Decoded;
+
+    NodeOperationRunner()
+        : m_backing(PAGE_SIZE, '\x00')
+        , m_node {Provider {}(m_backing)} {}
+
+    auto operator()(Input&& input) -> void
+    {
+        for (const auto &[key, value_size, operation]: input) {
+            // Nodes use assertions for invalid keys. We don't want to trip them. TODO: Only generate valid keys?
+            if (!is_key_valid(key))
+                continue;
+            const auto [index, found_eq] = m_node.find_ge(stob(key));
+
+            if (found_eq)
+                m_node.remove(stob(key));
+
+            if (operation == Operation::WRITE) {
+                std::string value(value_size, '*');
+                m_node.insert(make_cell(stob(key), stob(value), PAGE_SIZE));
+                if (m_node.is_overflowing())
+                    (void)m_node.take_overflow_cell();
+            } else if (!found_eq && index < m_node.cell_count()) {
+                m_node.remove(stob(key));
+            }
+        }
+    }
+
+    auto node() -> Node&
+    {
+        return m_node;
+    }
+
+private:
+    auto is_key_valid(const std::string &key)
+    {
+        return !key.empty() && key.size() <= get_max_local(PAGE_SIZE);
+    }
+
+    std::string m_backing;
+    Node m_node;
+};
+
+using NodeOpsFuzzer = Fuzzer<
+    OperationTransformer<80>,
+    NodeOperationRunner<NodeProvider<2>>
 >;
 
 } // cub::fuzz
