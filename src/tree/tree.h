@@ -12,9 +12,6 @@ class Cell;
 class IBufferPool;
 class Node;
 
-/**
- *
- */
 class Tree: public ITree {
 public:
     struct Parameters {
@@ -83,10 +80,6 @@ protected: // TODO
     Size m_node_count{};
     Size m_cell_count{};
 };
-
-auto do_split_root(Node&, Node&) -> void;
-auto do_split_non_root(Node&, Node&, Scratch) -> Cell;
-auto do_merge_root(Node&, Node&) -> void;
 
 } // cub
 

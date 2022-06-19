@@ -57,7 +57,7 @@ public:
     };
     explicit CellDirectory(NodeHeader &header)
         : m_page {&header.page()}
-        , m_header {&header} {}
+          , m_header {&header} {}
 
     [[nodiscard]] auto get_pointer(Index) const -> Pointer;
     auto set_pointer(Index, Pointer) -> void;
@@ -104,9 +104,9 @@ public:
 
     Node(Page page, bool reset_header)
         : m_page {std::move(page)}
-        , m_header {m_page}
-        , m_directory {m_header}
-        , m_allocator {m_header}
+          , m_header {m_page}
+          , m_directory {m_header}
+          , m_allocator {m_header}
     {
         reset(reset_header);
         m_allocator.recompute_usable_space();
@@ -114,10 +114,10 @@ public:
 
     Node(Node &&rhs) noexcept
         : m_page {std::move(rhs.m_page)}
-        , m_header {m_page}
-        , m_directory {m_header}
-        , m_allocator {m_header}
-        , m_overflow {std::move(rhs.m_overflow)}
+          , m_header {m_page}
+          , m_directory {m_header}
+          , m_allocator {m_header}
+          , m_overflow {std::move(rhs.m_overflow)}
     {
         m_allocator.recompute_usable_space();
     }
@@ -229,6 +229,9 @@ auto transfer_cell(Node&, Node&, Index) -> void;
 auto can_merge_siblings(const Node&, const Node&, const Cell&) -> bool;
 auto merge_left(Node&, Node&, Node&, Index) -> void;
 auto merge_right(Node&, Node&, Node&, Index) -> void;
+auto merge_root(Node&, Node&) -> void;
+auto split_root(Node&, Node&) -> void;
+[[nodiscard]] auto split_non_root(Node&, Node&, Scratch) -> Cell;
 
 } // cub
 

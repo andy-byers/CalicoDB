@@ -181,7 +181,7 @@ auto CellDirectory::remove_pointer(Index index) -> void
 
 BlockAllocator::BlockAllocator(NodeHeader &header)
     : m_page {&header.page()}
-    , m_header {&header}
+      , m_header {&header}
 {
     // Don't compute the free block total yet. If the page is from the freelist, the header may contain junk.
 }
@@ -413,7 +413,7 @@ auto Node::extract_cell(Index index, Scratch scratch) -> Cell
 
 auto Node::validate() const -> void
 {
-//    m_allocator.validate();
+    //    m_allocator.validate();
 
     // The usable space is the total of all the free blocks, fragments, and the gap space.
     const auto usable_space = m_allocator.usable_space();
@@ -723,6 +723,111 @@ auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
         transfer_cell(rc, Lc, 0);
         CUB_EXPECT_FALSE(Lc.is_overflowing());
     }
+}
+
+auto split_root(Node &root, Node &child) -> void
+{
+    // Copy the cells.
+    auto offset = root.cell_area_offset();
+    auto size = root.size() - offset;
+    child.page().write(root.page().range(offset).truncate(size), offset);
+
+    // Copy the header and cell pointers.
+    offset = child.header_offset();
+    size = NodeLayout::HEADER_SIZE + root.cell_count()*CELL_POINTER_SIZE;
+    child.page().write(root.page().range(root.header_offset()).truncate(size), offset);
+
+    CUB_EXPECT_TRUE(root.is_overflowing());
+    child.set_overflow_cell(root.take_overflow_cell());
+
+    root.reset(true);
+    root.page().set_type(PageType::INTERNAL_NODE);
+    root.set_rightmost_child_id(child.id());
+    child.set_parent_id(PID::root());
+}
+
+auto merge_root(Node &root, Node &child) -> void
+{
+    CUB_EXPECT(root.rightmost_child_id() == child.id());
+    child.defragment();
+
+    // Copy the cell content area.
+    auto offset = child.cell_area_offset();
+    auto size = child.size() - offset;
+    root.page().write(child.page().range(offset).truncate(size), offset);
+
+    // Copy the header and cell pointers.
+    offset = root.header_offset();
+    size = NodeLayout::HEADER_SIZE + child.cell_count()*CELL_POINTER_SIZE;
+    root.page().write(child.page().range(child.header_offset()).truncate(size), offset);
+    root.page().set_type(child.type());
+}
+
+auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+{
+    // get the overflow cell. The caller should make sure the node is overflowing
+    // before calling this method.
+    CUB_EXPECT_TRUE(Ln.is_overflowing());
+    auto overflow = Ln.take_overflow_cell();
+
+    // Include the overflow cell in our count.
+    const auto n = Ln.cell_count() + 1;
+
+    // Figure out where the overflow cell should go.
+    const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
+    CUB_EXPECT_FALSE(should_be_false);
+    auto where = ThreeWayComparison::EQ;
+    auto median_index = n / 2;
+
+    const auto select_median = [&](Index index) {
+        if (index == median_index) {
+            return std::move(overflow);
+        } else {
+            const auto is_right_of_median = index > median_index;
+            median_index -= !is_right_of_median;
+            // Since `is_left_of_median` is either 0 or 1, this will produce either -1 or 1, i.e. LT or
+            // GT to indicate the position of the overflow cell relative to the median.
+            where = static_cast<ThreeWayComparison>(2*is_right_of_median - 1);
+            return Ln.extract_cell(median_index, std::move(scratch));
+        }
+    };
+    auto median = select_median(overflow_idx);
+
+    if (Ln.is_external()) {
+        rn.set_right_sibling_id(Ln.right_sibling_id());
+        Ln.set_right_sibling_id(rn.id());
+    } else {
+        rn.set_rightmost_child_id(Ln.rightmost_child_id());
+        Ln.set_rightmost_child_id(median.left_child_id());
+    }
+    rn.set_parent_id(Ln.parent_id());
+    median.set_left_child_id(Ln.id());
+
+    // Transfer cells after the median cell to the right sibling node.
+    const auto cell_count = Ln.cell_count();
+    for (auto index = median_index; index < cell_count; ++index) {
+        auto cell = Ln.read_cell(median_index);
+        const auto cell_size = cell.size();
+        rn.insert_at(rn.cell_count(), std::move(cell));
+        Ln.remove_at(median_index, cell_size);
+    }
+    const auto do_transfer = [](Node &target, Cell cell) {
+        const auto [index, found_eq]{target.find_ge(cell.key())};
+        CUB_EXPECT_FALSE(found_eq);
+        target.insert_at(index, std::move(cell));
+    };
+    switch (where) {
+        case ThreeWayComparison::LT:
+            do_transfer(Ln, std::move(overflow));
+            break;
+        case ThreeWayComparison::GT:
+            do_transfer(rn, std::move(overflow));
+            break;
+        case ThreeWayComparison::EQ:
+            // No transfer. The median/overflow cell is returned.
+            break;
+    }
+    return median;
 }
 
 } // cub
