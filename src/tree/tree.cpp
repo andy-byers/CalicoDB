@@ -225,13 +225,13 @@ auto Tree::maybe_balance_after_underflow(Node node, BytesView anchor) -> void
 /**
  * Balancing routine for fixing an over-full root node.
  */
-auto Tree::split_root(Node node) -> Node
+auto Tree::split_root(Node root) -> Node
 {
-    CUB_EXPECT_TRUE(node.id().is_root());
-    CUB_EXPECT_TRUE(node.is_overflowing());
+    CUB_EXPECT_TRUE(root.id().is_root());
+    CUB_EXPECT_TRUE(root.is_overflowing());
 
-    auto child = allocate_node(node.type());
-    do_split_root(node, child);
+    auto child = allocate_node(root.type());
+    do_split_root(root, child);
 
     maybe_fix_child_parent_connections(child);
     CUB_EXPECT_TRUE(child.is_overflowing());
@@ -290,19 +290,12 @@ auto Tree::maybe_fix_child_parent_connections(Node &node) -> void
  */
 auto Tree::make_cell(BytesView key, BytesView value) -> Cell
 {
-    CUB_EXPECT_FALSE(key.is_empty());
-    const auto local_value_size = get_local_value_size(key.size(), value.size(), m_pool->page_size());
-    Cell::Parameters param;
-    param.key = key;
-    param.local_value = value;
-    param.value_size = value.size();
-
-    if (local_value_size != value.size()) {
-        CUB_EXPECT_LT(local_value_size, value.size());
-        param.local_value.truncate(local_value_size);
-        param.overflow_id = allocate_overflow_chain(value.range(local_value_size));
+    auto cell = ::cub::make_cell(key, value, m_pool->page_size());
+    if (not cell.overflow_id().is_null()) {
+        const auto overflow_value = value.range(cell.local_value().size());
+        cell.set_overflow_id(allocate_overflow_chain(overflow_value));
     }
-    return Cell {param};
+    return cell;
 }
 
 auto Tree::allocate_overflow_chain(BytesView overflow) -> PID

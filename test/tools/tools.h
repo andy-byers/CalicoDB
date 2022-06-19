@@ -6,7 +6,7 @@
 #include <iostream>
 #include <vector>
 #include "random.h"
-#include "cub/bytes.h"
+#include "cub/cub.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 #include "wal/wal_record.h"

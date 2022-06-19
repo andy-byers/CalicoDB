@@ -34,6 +34,7 @@ if(CUB_BUILD_FUZZERS)
         add_test(NAME "${NAME}" COMMAND "${NAME}" -max_total_time=20)
     endfunction()
 
+    build_fuzzer(fuzz_node_ops)
     build_fuzzer(fuzz_mem_ops)
     build_fuzzer(fuzz_ops)
     build_fuzzer(fuzz_wal_reader)

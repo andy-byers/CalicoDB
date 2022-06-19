@@ -21,7 +21,7 @@ auto InMemory::acquire(PID id, bool is_writable) -> Page
 
     while (page_count() <= id.as_index()) {
         m_frames.emplace_back(m_page_size);
-        m_frames.back().reset(PID {m_frames.size()});
+        m_frames.back().reset(PID::from_index(m_frames.size() - 1));
     }
     auto &frame = m_frames[id.as_index()];
     auto page = frame.borrow(this, is_writable);

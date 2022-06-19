@@ -6,8 +6,12 @@
 #include "validators.h"
 #include "cub/cub.h"
 #include "cub/database.h"
+#include "page/cell.h"
+#include "page/node.h"
+#include "page/page.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
+#include "utils/layout.h"
 #include "../tools/fakes.h"
 #include "../tools/tools.h"
 
@@ -91,7 +95,7 @@ template<Size Ratio = 80> struct OperationTransformer {
                 info_byte = static_cast<Byte>(random.next_int(Ratio - 1));
                 size_byte = static_cast<Byte>(value_size / VALUE_MULTIPLIER);
             } else {
-                info_byte = static_cast<Byte>(random.next_int(Ratio, 99ULL));
+                info_byte = static_cast<Byte>(random.next_int(Ratio, Size {99}));
             }
             encoded += info_byte;
             encoded += static_cast<Byte>(key.size());
@@ -205,6 +209,78 @@ private:
 using WALReaderFuzzer = Fuzzer<
     PassThroughTransformer,
     WALReaderRunner<0x100>
+>;
+
+struct FuzzerNode {
+    std::string backing;
+    Node node;
+};
+
+template<Index PageID> struct NodeProvider {
+
+    auto operator()(std::string &backing) const -> Node
+    {
+        Page page {{
+            PID {PageID},
+            stob(backing),
+            nullptr,
+            true,
+            false,
+        }};
+        page.set_type(PageType::EXTERNAL_NODE);
+        return Node {std::move(page), true};
+    }
+};
+
+template<class Provider> class NodeOperationRunner {
+public:
+    static constexpr Size PAGE_SIZE {0x200};
+    using Input = OperationTransformer<>::Decoded;
+
+    NodeOperationRunner()
+        : m_backing(PAGE_SIZE, '\x00')
+        , m_node {Provider {}(m_backing)} {}
+
+    auto operator()(Input&& input) -> void
+    {
+        for (const auto &[key, value_size, operation]: input) {
+            // Nodes use assertions for invalid keys. We don't want to trip them. TODO: Only generate valid keys?
+            if (!is_key_valid(key))
+                continue;
+            const auto [index, found_eq] = m_node.find_ge(stob(key));
+
+            if (found_eq)
+                m_node.remove(stob(key));
+
+            if (operation == Operation::WRITE) {
+                std::string value(value_size, '*');
+                m_node.insert(make_cell(stob(key), stob(value), PAGE_SIZE));
+                if (m_node.is_overflowing())
+                    (void)m_node.take_overflow_cell();
+            } else if (!found_eq && index < m_node.cell_count()) {
+                m_node.remove(stob(key));
+            }
+        }
+    }
+
+    auto node() -> Node&
+    {
+        return m_node;
+    }
+
+private:
+    auto is_key_valid(const std::string &key)
+    {
+        return !key.empty() && key.size() <= get_max_local(PAGE_SIZE);
+    }
+
+    std::string m_backing;
+    Node m_node;
+};
+
+using NodeOpsFuzzer = Fuzzer<
+    OperationTransformer<80>,
+    NodeOperationRunner<NodeProvider<2>>
 >;
 
 } // cub::fuzz

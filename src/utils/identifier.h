@@ -21,6 +21,11 @@ struct Identifier {
         return Identifier {std::numeric_limits<decltype(value)>::max()};
     }
 
+    [[nodiscard]] static auto from_index(Index index) noexcept -> Identifier
+    {
+        return Identifier {index + ROOT_ID_VALUE};
+    }
+
     Identifier() noexcept = default;
 
     template<class Id> explicit Identifier(Id id) noexcept
