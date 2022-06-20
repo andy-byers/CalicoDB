@@ -588,28 +588,6 @@ auto setup_external_merge_test(TreeBuilder &builder) -> void
     builder.connect_siblings(cc, rc);
 }
 
-TEST_F(TreeTests, X)
-{
-    //     1:[2,     4]
-    // 2:[]     3:[3]  4:[5]
-    TreeBuilder builder {tree()};
-    setup_external_merge_test(builder);
-
-    auto node_1 = m_tree->acquire_node(PID {1}, true);
-    auto node_2 = m_tree->acquire_node(PID {2}, true);
-    auto node_3 = m_tree->acquire_node(PID {3}, true);
-
-    node_2.remove(stob(make_key<1>(1)));
-    node_2.validate();
-
-    ASSERT_EQ(node_2.cell_count(), 0);
-    auto separator = node_1.read_cell(0);
-    auto other = node_3.read_cell(0);
-    separator.set_left_child_id(PID::null());
-    node_2.insert(std::move(separator));
-    node_2.insert(std::move(other));
-}
-
 TEST_F(TreeTests, LeftMergeExternal)
 {
     //     1:[2,     4]       -->          1:[4]

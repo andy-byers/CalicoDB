@@ -8,12 +8,17 @@
 
 #ifdef NDEBUG
 #  define CUB_EXPECT(cc)
-#  define CUB_CHECK(validator)
+#  define CUB_VALIDATE(validator)
 #else
 #  define CUB_EXPECT_(cc, file, line) impl::handle_expect(cc, #cc, file, line)
 #  define CUB_EXPECT(cc) CUB_EXPECT_(cc, __FILE__, __LINE__)
-#  define CUB_CHECK(validator) validator
-#endif
+#  ifdef CUB_USE_VALIDATORS
+#    define CUB_VALIDATE(validator) validator
+#  else
+#    define CUB_VALIDATE(validator)
+#  endif // CUB_USE_VALIDATORS
+#endif // NDEBUG
+
 #define CUB_EXPECT_TRUE(cc) CUB_EXPECT(cc)
 #define CUB_EXPECT_FALSE(cc) CUB_EXPECT_TRUE(!(cc))
 #define CUB_EXPECT_EQ(t1, t2) CUB_EXPECT((t1) == (t2))

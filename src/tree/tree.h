@@ -49,6 +49,8 @@ public:
     auto destroy_node(Node) -> void override;
     auto make_cell(BytesView, BytesView) -> Cell;
 
+//    auto validate_children(const Node&, const Node&, const Node&, Index);
+
 protected: // TODO
     auto positioned_insert(Position, BytesView, BytesView) -> void;
     auto positioned_modify(Position, BytesView) -> void;

@@ -10,6 +10,9 @@
 
 namespace cub {
 
+/**
+ * An exception that is thrown when an I/O event fails.
+ */
 class IOError: public std::runtime_error {
 public:
     explicit IOError(const char *what)

@@ -1,11 +1,8 @@
 #include "tree.h"
-
-#include <optional>
 #include "page/cell.h"
 #include "page/file_header.h"
 #include "page/link.h"
 #include "page/node.h"
-#include "page/page.h"
 #include "pool/interface.h"
 #include "utils/layout.h"
 
@@ -13,10 +10,10 @@ namespace cub {
 
 Tree::Tree(Parameters param)
     : m_scratch {get_max_local(param.buffer_pool->page_size())}
-      , m_free_list {{param.buffer_pool, param.free_start, param.free_count}}
-      , m_pool {param.buffer_pool}
-      , m_node_count {param.node_count}
-      , m_cell_count {param.cell_count} {}
+    , m_free_list {{param.buffer_pool, param.free_start, param.free_count}}
+    , m_pool {param.buffer_pool}
+    , m_node_count {param.node_count}
+    , m_cell_count {param.cell_count} {}
 
 auto Tree::find_root(bool is_writable) -> Node
 {
@@ -524,5 +521,25 @@ auto Tree::rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
     // The parent might overflow.
     parent.insert_at(index, std::move(highest));
 }
+//
+//auto Tree::validate_children(const Node &Lc, const Node &rc, const Node &pt, Index index)
+//{
+//    CUB_EXPECT_FALSE(pt.is_external());
+//    CUB_EXPECT_EQ(Lc.type(), rc.type());
+//    CUB_EXPECT_GT(pt.cell_count(), 1);
+//
+//    const auto [Lc_index, found_eq] = pt.find_ge(Lc.read_key(0));
+//    CUB_EXPECT_LT(Lc_index, pt.cell_count());
+//    const auto separator_key = pt.read_key(Lc_index);
+//
+//    for (Index i {}; i < Lc.cell_count(); ++i)
+//        CUB_EXPECT_TRUE(Lc.read_key(i) < separator_key);
+//
+//    for (Index i {}; i < rc.cell_count(); ++i)
+//        CUB_EXPECT_TRUE(rc.read_key(i) > separator_key);
+//
+//    if (Lc.is_external())
+//        CUB_EXPECT_EQ(Lc.right_sibling_id(), rc.id());
+//}
 
 } // cub

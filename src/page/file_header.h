@@ -39,7 +39,7 @@ public:
     [[nodiscard]] auto is_header_crc_consistent() const -> bool;
 
 private:
-    // Identifies the file as a CubDB_ database.
+    // Identifies the file as a Cub DB database.
     static constexpr uint32_t MAGIC_CODE = 0xB11924E1;
 
     auto data() -> Bytes;

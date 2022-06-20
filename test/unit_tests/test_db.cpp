@@ -468,6 +468,14 @@ TEST_F(InfoTests, ReportsRecordCountCorrectly)
     ASSERT_EQ(info.record_count(), NUM_RECORDS);
 }
 
+TEST_F(InfoTests, ReportsOtherInfo)
+{
+    const auto info = db.db->get_info();
+    add_records();
+    ASSERT_NE(info.cache_hit_ratio(), 0.0);
+    ASSERT_TRUE(info.uses_transactions());
+}
+
 class CursorTests: public testing::Test {
 public:
     CursorTests()

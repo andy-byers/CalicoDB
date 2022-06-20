@@ -11,12 +11,12 @@
 #include <string>
 
 #if (!defined(_WIN32) && !defined(_WIN64)) && (defined(__unix__) || defined(__unix) || defined(__APPLE__))
-#    define CUB_UNIX
-#    ifdef __APPLE__
-#        define CUB_OSX
-#    endif
+#  define CUB_UNIX
+#  ifdef __APPLE__
+#    define CUB_OSX
+#  endif
 #else
-#    error "Error: This platform is currently unsupported"
+#  error "Error: This platform is currently unsupported"
 #endif
 
 namespace cub {

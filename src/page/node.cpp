@@ -413,18 +413,16 @@ auto Node::extract_cell(Index index, Scratch scratch) -> Cell
 
 auto Node::validate() const -> void
 {
-    //    m_allocator.validate();
-
     // The usable space is the total of all the free blocks, fragments, and the gap space.
-    const auto usable_space = m_allocator.usable_space();
+    [[maybe_unused]] const auto usable_space = m_allocator.usable_space();
 
     // The used space is the total of the header, cell pointers list, and the cells.
-    auto used_space = cell_area_offset();
+    [[maybe_unused]] auto used_space = cell_area_offset();
     for (Index i {}; i < cell_count(); ++i) {
         const auto lhs = read_cell(i);
         used_space += lhs.size();
         if (i < cell_count() - 1) {
-            const auto rhs = read_cell(i + 1);
+            [[maybe_unused]] const auto rhs = read_cell(i + 1);
             CUB_EXPECT_TRUE(lhs.key() < rhs.key());
         }
     }
@@ -601,7 +599,7 @@ auto Node::insert_at(Index index, Cell cell) -> void
     if (offset < m_header.cell_start())
         m_header.set_cell_start(offset);
 
-    CUB_CHECK(validate());
+    CUB_VALIDATE(validate());
 }
 
 auto Node::remove(BytesView key) -> bool
@@ -615,7 +613,7 @@ auto Node::remove(BytesView key) -> bool
 
 auto Node::remove_at(Index index, Size local_size) -> void
 {
-    CUB_CHECK(validate());
+    CUB_VALIDATE(validate());
 
     CUB_EXPECT_GE(local_size, MIN_CELL_HEADER_SIZE);
     CUB_EXPECT_LE(local_size, get_max_local(m_page.size()) + MAX_CELL_HEADER_SIZE);
@@ -623,7 +621,7 @@ auto Node::remove_at(Index index, Size local_size) -> void
     CUB_EXPECT_FALSE(is_overflowing());
     m_allocator.free(m_directory.get_pointer(index).value, local_size);
     m_directory.remove_pointer(index);
-    CUB_CHECK(validate());
+    CUB_VALIDATE(validate());
 }
 
 auto Node::reset(bool reset_header) -> void

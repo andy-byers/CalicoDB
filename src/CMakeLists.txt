@@ -26,3 +26,6 @@ target_include_directories("${CUB_NAME}" PRIVATE "${CUB_INCLUDE_DIR}")
 target_include_directories("${CUB_NAME}" SYSTEM INTERFACE "${CUB_INCLUDE_DIR}")
 target_compile_options("${CUB_NAME}" PRIVATE "${CUB_WARNINGS}")
 
+if(CUB_USE_VALIDATORS)
+    target_compile_definitions("${CUB_NAME}" PRIVATE CUB_USE_VALIDATORS)
+endif()

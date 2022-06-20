@@ -29,8 +29,9 @@ set(CUB_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic
 include(CheckCXXSymbolExists)
 check_cxx_symbol_exists(O_DIRECT "fcntl.h" CUB_HAS_O_DIRECT)
 
-option(CUB_BUILD_TESTS "Build the tests" ON)
-option(CUB_BUILD_EXAMPLES "Build the examples" ON)
+option(CUB_BUILD_TESTS "Build the tests" On)
+option(CUB_BUILD_EXAMPLES "Build the examples" On)
+option(CUB_USE_VALIDATORS "Use extra validation assertions" Off)
 
 # Build the unit and integration tests.
 if(CUB_BUILD_TESTS)

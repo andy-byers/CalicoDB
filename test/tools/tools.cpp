@@ -84,7 +84,7 @@ auto TreeValidator::traverse_inorder(const std::function<void(Node&, Index)> &ca
 
 auto TreeValidator::traverse_inorder_helper(Node node, const std::function<void(Node&, Index)> &callback) -> void
 {
-    node.validate();
+    CUB_VALIDATE(node.validate());
 
     const auto id = node.id();
     for (Index index{}; index <= node.cell_count(); ++index) {

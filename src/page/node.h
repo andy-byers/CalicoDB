@@ -55,6 +55,7 @@ public:
     struct Pointer {
         Index value;
     };
+
     explicit CellDirectory(NodeHeader &header)
         : m_page {&header.page()}
           , m_header {&header} {}
