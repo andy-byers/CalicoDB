@@ -1,30 +1,41 @@
 
+#include <filesystem>
 #include <vector>
-#include <cub/cub.h>
+#include "calico/calico.h"
+#include "../src/utils/utils.h"
 
-using namespace cub;
+using namespace calico;
 static constexpr Size PAGE_SIZE {0x200};
-static constexpr Size NUM_RECORDS {20'000};
+static constexpr Size NUM_RECORDS {50'000};
 
-auto run(Database db, const std::vector<Record> &records)
+auto run(Database db)
 {
-    for (const auto &record: records)
-        db.write(record);
+    for (Index i {}; i < NUM_RECORDS; ++i) {
+        const auto s = std::to_string(i);
+        db.write(stob(s), stob(s + s));
+//        if (i % 25'000 == 0)
+//            db.commit();
+    }
+//    for (Index i {}; i < NUM_RECORDS; ++i) {
+//        const auto s = std::to_string(i);
+//        db.erase(stob(s));
+//        if (i % 25'000 == 0)
+//            db.commit();
+//    }
+//    assert(db.get_info().record_count() == 0);
 }
 
 auto main(int, const char*[]) -> int
 {
-    std::vector<Record> records(NUM_RECORDS);
-    for (auto &[key, value]: records) {
-        key = std::to_string(rand());
-        value = key;
-        for (Index i {}; i < 10; ++i)
-            value += key;
-    }
     try {
         Options options;
-        auto db = Database::temp(PAGE_SIZE);
-        run(std::move(db), records);
+        options.use_transactions = false;
+        options.log_path = "/tmp/calico_logger";
+        options.log_level = 1;
+        std::filesystem::remove("/tmp/calico_example");
+        std::filesystem::remove(get_wal_path("/tmp/calico_example"));
+        auto db = Database::open("/tmp/calico_example", options);
+        run(std::move(db));
     } catch (const CorruptionError &error) {
         printf("CorruptionError: %s\n", error.what());
     } catch (const IOError &error) {

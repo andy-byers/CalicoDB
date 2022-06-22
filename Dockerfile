@@ -31,7 +31,7 @@ COPY . .
 WORKDIR ./build
 
 RUN cmake -E env CXXFLAGS="-fsanitize=fuzzer,address" \
-    cmake -DCMAKE_BUILD_TYPE=RelWithAssertions -DCUB_USE_VALIDATORS=On \
-          -DCUB_BUILD_FUZZERS=ON -DCUB_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" .. && \
+    cmake -DCMAKE_BUILD_TYPE=RelWithAssertions -DCALICO_USE_VALIDATORS=On \
+          -DCALICO_BUILD_FUZZERS=ON -DCALICO_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" .. && \
     cmake --build . --config RelWithAssertions --target all_fuzzers
 

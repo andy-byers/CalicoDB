@@ -1,12 +1,12 @@
-#ifndef CUB_POOL_PAGER_H
-#define CUB_POOL_PAGER_H
+#ifndef CALICO_POOL_PAGER_H
+#define CALICO_POOL_PAGER_H
 
 #include <list>
 #include <memory>
 #include <optional>
-#include "cub/bytes.h"
+#include "calico/bytes.h"
 
-namespace cub {
+namespace calico {
 
 class Frame;
 class IReadWriteFile;
@@ -40,6 +40,6 @@ private:
     Size m_page_size{};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_POOL_PAGER_H
+#endif // CALICO_POOL_PAGER_H

@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 
-#include "cub/common.h"
+#include "calico/options.h"
 #include "random.h"
 #include "file/file.h"
 #include "file/interface.h"
@@ -14,7 +14,7 @@
 
 namespace {
 
-using namespace cub;
+using namespace calico;
 
 const std::string TEST_STRING = "TEST_STRING";
 
@@ -67,7 +67,7 @@ auto test_random_reads_and_writes(IReadWriteFile &store) -> void
 
 class FileTests: public testing::Test {
 public:
-    const std::string PATH = "/tmp/cub_test_file";
+    const std::string PATH = "/tmp/calico_test_file";
 
     FileTests()
         : test_buffer(TEST_STRING.size(), '\x00') {}
@@ -151,7 +151,7 @@ TEST_F(FileTests, RandomReadsAndWrites)
 
 class FileFailureTests: public testing::Test {
 public:
-    static constexpr auto PATH = "/tmp/cub_file_failure";
+    static constexpr auto PATH = "/tmp/calico_file_failure";
     static constexpr Size OVERFLOW_SIZE {std::numeric_limits<Size>::max()};
 
     FileFailureTests()
@@ -198,14 +198,14 @@ TEST_F(FileFailureTests, ThrowsWhenNewSizeIsTooLarge)
 
 class SystemTests: public testing::Test {
 public:
-    static constexpr auto PATH = "/tmp/cub_system";
+    static constexpr auto PATH = "/tmp/calico_system";
 
     SystemTests()
     {
         closed_fd = system::open(PATH, O_CREAT | O_TRUNC, 0666);
 
         // system::open() should throw rather than returning -1.
-        CUB_EXPECT_NE(closed_fd, -1);
+        CALICO_EXPECT_NE(closed_fd, -1);
         system::close(closed_fd);
     }
 
@@ -221,14 +221,14 @@ public:
     int closed_fd {-1};
 };
 
-#ifdef CUB_OSX
+#ifdef CALICO_OSX
 
 TEST_F(SystemTests, CannotCallUseDirectIoOnUnopenedFile)
 {
     ASSERT_THROW(system::use_direct_io(closed_fd), std::system_error);
 }
 
-#endif // CUB_OSX
+#endif // CALICO_OSX
 
 TEST_F(SystemTests, CannotUseUnopenedFile)
 {

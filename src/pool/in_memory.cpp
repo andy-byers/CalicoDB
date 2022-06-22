@@ -1,14 +1,20 @@
 #include "in_memory.h"
-
 #include "frame.h"
 #include "page/file_header.h"
 #include "page/page.h"
+#include "utils/logging.h"
 
-namespace cub {
+namespace calico {
+
+InMemory::InMemory(Size page_size, bool use_transactions, spdlog::sink_ptr log_sink)
+    : m_scratch {page_size}
+    , m_logger {logging::create_logger(log_sink, "BufferPool")}
+    , m_page_size {page_size}
+    , m_uses_transactions {use_transactions} {}
 
 auto InMemory::allocate(PageType type) -> Page
 {
-    CUB_EXPECT_TRUE(is_page_type_valid(type));
+    CALICO_EXPECT_TRUE(is_page_type_valid(type));
     auto page = acquire(PID {ROOT_ID_VALUE + page_count()}, true);
     page.set_type(type);
     return page;
@@ -16,7 +22,7 @@ auto InMemory::allocate(PageType type) -> Page
 
 auto InMemory::acquire(PID id, bool is_writable) -> Page
 {
-    CUB_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_FALSE(id.is_null());
     propagate_page_error();
 
     while (page_count() <= id.as_index()) {
@@ -50,7 +56,7 @@ auto InMemory::on_page_release(Page &page) -> void
 {
     std::lock_guard lock {m_mutex};
     const auto index = page.id().as_index();
-    CUB_EXPECT_LT(index, m_frames.size());
+    CALICO_EXPECT_LT(index, m_frames.size());
     m_frames[index].synchronize(page);
     for (const auto &change: page.collect_changes())
         m_stack.emplace_back(UndoInfo {btos(change.before), page.id(), change.offset});
@@ -82,4 +88,4 @@ auto InMemory::load_header(const FileHeader &header) -> void
         m_frames.emplace_back(m_page_size);
 }
 
-} // cub
+} // calico

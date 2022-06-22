@@ -9,9 +9,10 @@
 #include "utils/crc.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
+#include "utils/logging.h"
 
 namespace {
-using namespace cub;
+using namespace calico;
 
 class LoggingTests: public testing::Test {
 public:
@@ -24,11 +25,12 @@ public:
         options.page_size = BLOCK_SIZE;
         options.block_size = BLOCK_SIZE;
         FakeFilesHarness harness {options};
-
+        auto sink = logging::create_sink("", 0);
         pool = std::make_unique<BufferPool>(BufferPool::Parameters{
             std::move(harness.tree_file),
-            std::make_unique<WALReader>(std::move(harness.wal_reader_file), options.block_size),
-            std::make_unique<WALWriter>(std::move(harness.wal_writer_file), options.block_size),
+            std::make_unique<WALReader>(WALReader::Parameters {"", std::move(harness.wal_reader_file), sink, options.block_size}),
+            std::make_unique<WALWriter>(WALWriter::Parameters {"", std::move(harness.wal_writer_file), sink, options.block_size}),
+            logging::create_sink("", 0),
             LSN::base(),
             CACHE_SIZE,
             0,
@@ -50,12 +52,13 @@ public:
 
         wal_reader_faults = reader_file->controls();
         wal_writer_faults = writer_file->controls();
-
+        auto sink = logging::create_sink("", 0);
         pool.reset();
         pool = std::make_unique<BufferPool>(BufferPool::Parameters{
             std::move(pool_file),
-            std::make_unique<WALReader>(std::move(reader_file), BLOCK_SIZE),
-            std::make_unique<WALWriter>(std::move(writer_file), BLOCK_SIZE),
+            std::make_unique<WALReader>(WALReader::Parameters {"", std::move(reader_file), sink, BLOCK_SIZE}),
+            std::make_unique<WALWriter>(WALWriter::Parameters {"", std::move(writer_file), sink, BLOCK_SIZE}),
+            logging::create_sink("", 0),
             LSN::base(),
             CACHE_SIZE,
             0,

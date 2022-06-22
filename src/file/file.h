@@ -1,9 +1,9 @@
-#ifndef CUB_FILE_FILE_H
-#define CUB_FILE_FILE_H
+#ifndef CALICO_FILE_FILE_H
+#define CALICO_FILE_FILE_H
 
 #include "interface.h"
 
-namespace cub {
+namespace calico {
 
 class Resource {
 public:
@@ -78,6 +78,6 @@ private:
     Resource m_resource;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_FILE_FILE_H
+#endif // CALICO_FILE_FILE_H

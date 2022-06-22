@@ -1,9 +1,9 @@
-#ifndef CUB_FUZZ_VALIDATORS_H
-#define CUB_FUZZ_VALIDATORS_H
+#ifndef CALICO_FUZZ_VALIDATORS_H
+#define CALICO_FUZZ_VALIDATORS_H
 
-#include "cub/common.h"
+#include "calico/options.h"
 
-namespace cub {
+namespace calico {
 
 class Database;
 
@@ -11,8 +11,8 @@ namespace fuzz {
 
 auto validate_ordering(Database&) -> void;
 
-} // cub
+} // calico
 
 } // fuzz
 
-#endif // CUB_FUZZ_VALIDATORS_H
+#endif // CALICO_FUZZ_VALIDATORS_H

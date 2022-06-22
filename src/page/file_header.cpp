@@ -6,16 +6,20 @@
 #include "utils/identifier.h"
 #include "utils/layout.h"
 
-namespace cub {
+namespace calico {
+
+FileHeader::FileHeader()
+    : m_backing(FileLayout::HEADER_SIZE, '\x00')
+    , m_header {stob(m_backing)} {}
 
 FileHeader::FileHeader(Bytes data)
     : m_header{data.range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)} {}
 
 FileHeader::FileHeader(Node &root)
     // Causes the whole file header region to be written to the WAL.
-    : m_header{root.page().mut_range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)}
+    : m_header {root.page().mut_range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)}
 {
-    CUB_EXPECT_TRUE(root.id().is_root());
+    CALICO_EXPECT_TRUE(root.id().is_root());
 }
 
 auto FileHeader::data() -> Bytes
@@ -91,19 +95,19 @@ auto FileHeader::update_header_crc() -> void
 
 auto FileHeader::set_page_count(Size page_count) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint32_t, page_count);
+    CALICO_EXPECT_BOUNDED_BY(uint32_t, page_count);
     put_uint32(m_header.range(FileLayout::PAGE_COUNT_OFFSET), static_cast<uint32_t>(page_count));
 }
 
 auto FileHeader::set_node_count(Size node_count) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint32_t, node_count);
+    CALICO_EXPECT_BOUNDED_BY(uint32_t, node_count);
     put_uint32(m_header.range(FileLayout::NODE_COUNT_OFFSET), static_cast<uint32_t>(node_count));
 }
 
 auto FileHeader::set_free_count(Size free_count) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint32_t, free_count);
+    CALICO_EXPECT_BOUNDED_BY(uint32_t, free_count);
     put_uint32(m_header.range(FileLayout::FREE_COUNT_OFFSET), static_cast<uint32_t>(free_count));
 }
 
@@ -114,19 +118,19 @@ auto FileHeader::set_free_start(PID free_start) -> void
 
 auto FileHeader::set_page_size(Size page_size) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint16_t, page_size);
+    CALICO_EXPECT_BOUNDED_BY(uint16_t, page_size);
     put_uint16(m_header.range(FileLayout::PAGE_SIZE_OFFSET), static_cast<uint16_t>(page_size));
 }
 
 auto FileHeader::set_block_size(Size block_size) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint16_t, block_size);
+    CALICO_EXPECT_BOUNDED_BY(uint16_t, block_size);
     put_uint16(m_header.range(FileLayout::BLOCK_SIZE_OFFSET), static_cast<uint16_t>(block_size));
 }
 
 auto FileHeader::set_key_count(Size key_count) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint32_t, key_count);
+    CALICO_EXPECT_BOUNDED_BY(uint32_t, key_count);
     put_uint32(m_header.range(FileLayout::KEY_COUNT_OFFSET), static_cast<uint32_t>(key_count));
 }
 
@@ -146,4 +150,4 @@ auto FileHeader::is_header_crc_consistent() const -> bool
     return header_crc() == crc_32(m_header.range(offset));
 }
 
-} // cub
+} // calico

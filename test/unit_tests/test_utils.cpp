@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "cub/bytes.h"
-#include "cub/common.h"
+#include "calico/bytes.h"
+#include "calico/options.h"
 #include "random.h"
 #include "unit_tests.h"
 #include "utils/expect.h"
@@ -12,11 +12,11 @@
 
 namespace {
 
-using namespace cub;
+using namespace calico;
 
 TEST(AssertionDeathTest, Assert)
 {
-    ASSERT_DEATH(CUB_EXPECT(false), EXPECTATION_MATCHER);
+    ASSERT_DEATH(CALICO_EXPECT(false), EXPECTATION_MATCHER);
 }
 
 TEST(TestEncoding, ReadsAndWrites)
@@ -212,34 +212,34 @@ template<class Id> auto run_comparisons()
     Id b {2};
 
     ASSERT_EQ(a, a);
-    CUB_EXPECT_EQ(a, a);
-    CUB_EXPECT_TRUE(a == a);
+    CALICO_EXPECT_EQ(a, a);
+    CALICO_EXPECT_TRUE(a == a);
 
     ASSERT_NE(a, b);
-    CUB_EXPECT_NE(a, b);
-    CUB_EXPECT_TRUE(a != b);
+    CALICO_EXPECT_NE(a, b);
+    CALICO_EXPECT_TRUE(a != b);
 
     ASSERT_LT(a, b);
-    CUB_EXPECT_LT(a, b);
-    CUB_EXPECT_TRUE(a < b);
+    CALICO_EXPECT_LT(a, b);
+    CALICO_EXPECT_TRUE(a < b);
 
     ASSERT_LE(a, a);
     ASSERT_LE(a, b);
-    CUB_EXPECT_LE(a, a);
-    CUB_EXPECT_LE(a, b);
-    CUB_EXPECT_TRUE(a <= a);
-    CUB_EXPECT_TRUE(a <= b);
+    CALICO_EXPECT_LE(a, a);
+    CALICO_EXPECT_LE(a, b);
+    CALICO_EXPECT_TRUE(a <= a);
+    CALICO_EXPECT_TRUE(a <= b);
 
     ASSERT_GT(b, a);
-    CUB_EXPECT_GT(b, a);
-    CUB_EXPECT_TRUE(b > a);
+    CALICO_EXPECT_GT(b, a);
+    CALICO_EXPECT_TRUE(b > a);
 
     ASSERT_GE(a, a);
     ASSERT_GE(b, a);
-    CUB_EXPECT_GE(a, a);
-    CUB_EXPECT_GE(b, a);
-    CUB_EXPECT_TRUE(a >= a);
-    CUB_EXPECT_TRUE(b >= a);
+    CALICO_EXPECT_GE(a, a);
+    CALICO_EXPECT_GE(b, a);
+    CALICO_EXPECT_TRUE(a >= a);
+    CALICO_EXPECT_TRUE(b >= a);
 }
 
 TEST(IdentifierTest, PIDsAreComparable)

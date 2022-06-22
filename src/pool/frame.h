@@ -1,12 +1,12 @@
 
-#ifndef CUB_POOL_FRAME_H
-#define CUB_POOL_FRAME_H
+#ifndef CALICO_POOL_FRAME_H
+#define CALICO_POOL_FRAME_H
 
 #include <memory>
-#include "cub/bytes.h"
+#include "calico/bytes.h"
 #include "utils/identifier.h"
 
-namespace cub {
+namespace calico {
 
 class IBufferPool;
 class Page;
@@ -51,7 +51,7 @@ public:
 
     auto reset(PID page_id) -> void
     {
-        CUB_EXPECT_EQ(m_ref_count, 0);
+        CALICO_EXPECT_EQ(m_ref_count, 0);
         m_page_id = page_id;
         m_is_dirty = false;
     }
@@ -85,6 +85,6 @@ private:
     bool m_is_dirty {};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_POOL_FRAME_H
+#endif // CALICO_POOL_FRAME_H

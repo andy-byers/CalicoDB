@@ -1,13 +1,14 @@
 
 #include <gtest/gtest.h>
 
-#include "cub/common.h"
-#include "cub/bytes.h"
-#include "utils/utils.h"
+#include "calico/options.h"
+#include "calico/bytes.h"
 #include "file/file.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_record.h"
 #include "wal/wal_writer.h"
+#include "utils/logging.h"
+#include "utils/utils.h"
 
 #include "fakes.h"
 #include "random.h"
@@ -15,7 +16,7 @@
 
 namespace {
 
-using namespace cub;
+using namespace calico;
 
 struct TestWALOptions {
     std::string path;
@@ -361,15 +362,16 @@ TEST_F(WALTests, WriteAndTraverseMixedRecordsInIncompleteBlocks)
 class RealWALTests: public testing::Test {
 public:
     static constexpr Size BLOCK_SIZE = 0x200;
-    static constexpr auto DB_PATH = "/tmp/cub_test_wal";
+    static constexpr auto DB_PATH = "/tmp/calico_test_wal";
 
     RealWALTests()
     {
         const auto path = get_wal_path(DB_PATH);
         const auto mode = Mode::DIRECT | Mode::SYNCHRONOUS;
         std::filesystem::remove(path);
-        writer = std::make_unique<WALWriter>(std::make_unique<LogFile>(path, Mode::CREATE | mode, 0666), BLOCK_SIZE);
-        reader = std::make_unique<WALReader>(std::make_unique<ReadOnlyFile>(path, mode, 0666), BLOCK_SIZE);
+        auto sink = logging::create_sink("", 0);
+        writer = std::make_unique<WALWriter>(WALWriter::Parameters {path, std::make_unique<LogFile>(path, Mode::CREATE | mode, 0666), sink, BLOCK_SIZE});
+        reader = std::make_unique<WALReader>(WALReader::Parameters {path, std::make_unique<ReadOnlyFile>(path, mode, 0666), sink, BLOCK_SIZE});
     }
 
     ~RealWALTests() override = default;

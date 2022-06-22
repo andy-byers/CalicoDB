@@ -3,15 +3,16 @@
 
 #include <gtest/gtest.h>
 
-#include "utils/layout.h"
 #include "page/page.h"
 #include "pool/buffer_pool.h"
 #include "pool/frame.h"
 #include "pool/in_memory.h"
+#include "utils/layout.h"
+#include "utils/logging.h"
 #include "wal/interface.h"
 #include "fakes.h"
 
-namespace cub {
+namespace calico {
 
 TEST(PagerSetupTests, ReportsOutOfRangeFrameCount)
 {
@@ -98,6 +99,7 @@ public:
             std::move(file),
             nullptr,
             nullptr,
+            logging::create_sink("", 0),
             static_lsn,
             frame_count,
             0,
@@ -211,14 +213,14 @@ TEST_F(BufferPoolTests, AcquireReadableAndWritablePagesDeathTest)
 auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = PageLayout::content_offset(page.id());
-    CUB_EXPECT_LE(offset + message.size(), page.size());
+    CALICO_EXPECT_LE(offset + message.size(), page.size());
     page.write(stob(message), offset);
 }
 
 template<class Page> auto read_from_page(const Page &page, Size size) -> std::string
 {
     const auto offset = PageLayout::content_offset(page.id());
-    CUB_EXPECT_LE(offset + size, page.size());
+    CALICO_EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
     page.read(stob(message), offset);
     return message;
@@ -282,7 +284,7 @@ public:
     static constexpr Size page_size = 0x200;
 
     InMemoryTests()
-        : pool {std::make_unique<InMemory>(page_size, true)} {}
+        : pool {std::make_unique<InMemory>(page_size, true, logging::create_sink("", 0))} {}
 
     Random random {0};
     std::unique_ptr<InMemory> pool;
@@ -376,4 +378,4 @@ TEST_F(InMemoryTests, AbortDiscardsChangesSincePreviousCommit)
     ASSERT_NE(read_from_page(page_4, 1), "4");
 }
 
-} // cub
+} // calico

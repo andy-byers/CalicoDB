@@ -1,10 +1,10 @@
-#ifndef CUB_UTILS_LAYOUT_H
-#define CUB_UTILS_LAYOUT_H
+#ifndef CALICO_UTILS_LAYOUT_H
+#define CALICO_UTILS_LAYOUT_H
 
 #include "identifier.h"
 #include "utils.h"
 
-namespace cub {
+namespace calico {
 
 class FileLayout {
 public:
@@ -107,7 +107,7 @@ public:
         // The root page can never become a link page, so this value is the same for
         // all pages.
         const PID non_root{2};
-        CUB_EXPECT_FALSE(non_root.is_root());
+        CALICO_EXPECT_FALSE(non_root.is_root());
         return PageLayout::content_offset(non_root);
     }
 
@@ -119,7 +119,7 @@ public:
 
 inline auto get_min_local(Size page_size)
 {
-    CUB_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
     return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 32 / 256 -
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
@@ -127,7 +127,7 @@ inline auto get_min_local(Size page_size)
 
 inline auto get_max_local(Size page_size)
 {
-    CUB_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
     return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 64 / 256 -
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
@@ -135,8 +135,8 @@ inline auto get_max_local(Size page_size)
 
 inline auto get_local_value_size(Size key_size, Size value_size, Size page_size) -> Size
 {
-    CUB_EXPECT_GT(key_size, 0);
-    CUB_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICO_EXPECT_GT(key_size, 0);
+    CALICO_EXPECT_TRUE(is_power_of_two(page_size));
 
     /* Cases:
          *              Byte 0     min_local(...)  get_max_local(...)
@@ -163,6 +163,6 @@ inline auto get_local_value_size(Size key_size, Size value_size, Size page_size)
     return value_size;
 }
 
-} // cub
+} // calico
 
-#endif // CUB_UTILS_LAYOUT_H
+#endif // CALICO_UTILS_LAYOUT_H

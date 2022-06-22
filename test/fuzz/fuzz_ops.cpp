@@ -5,7 +5,7 @@
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-   using Fuzzer = cub::fuzz::OpsFuzzer;
+   using Fuzzer = calico::fuzz::OpsFuzzer;
    Fuzzer fuzzer {Fuzzer::Transformer {}};
 
    try {

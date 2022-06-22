@@ -1,12 +1,12 @@
 #include "cache.h"
 #include "frame.h"
 
-namespace cub {
+namespace calico {
 
 auto PageCache::put(Frame frame) -> void
 {
     const auto page_id = frame.page_id();
-    CUB_EXPECT_FALSE(contains(page_id));
+    CALICO_EXPECT_FALSE(contains(page_id));
     m_dirty_count += frame.is_dirty();
     m_list.push_back(std::move(frame));
     m_map.emplace(page_id, std::prev(m_list.end()));
@@ -43,4 +43,4 @@ auto PageCache::extract(PID id) -> std::optional<Frame>
     return std::nullopt;
 }
 
-} // cub
+} // calico

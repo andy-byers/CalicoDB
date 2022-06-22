@@ -3,13 +3,17 @@
 #include <locale>
 #include <chrono>
 #include <thread>
-#include "cub/cub.h"
+#include "calico/calico.h"
 #include "tools.h"
+
+#ifdef CALICO_USE_VALIDATORS
+#  error "Validators make performance very bad. Compile without them."
+#endif
 
 namespace {
 
-using namespace cub;
-constexpr auto PATH = "/tmp/cub_benchmark";
+using namespace calico;
+constexpr auto PATH = "/tmp/calico_benchmark";
 constexpr Size FIELD_WIDTH {24};
 constexpr Size BASELINE_MULTIPLIER {10};
 constexpr Size PAGE_SIZE {0x8000};
@@ -17,13 +21,15 @@ constexpr Size CACHE_SIZE {0x400000};
 constexpr Size KEY_SIZE {16};
 constexpr Size VALUE_SIZE {100};
 constexpr Size LARGE_VALUE_SIZE {100'000};
-constexpr Options options {
+const Options options {
     PAGE_SIZE,              // Page size
     PAGE_SIZE,              // Block size
     CACHE_SIZE / PAGE_SIZE, // Frame count
     0666,                   // Permissions
+    true,                   // Use transactions TODO: This should be an option.
     false,                  // Use direct I/O
-    false,                  // Use transactions TODO: This should be an option.
+    "/dev/null",
+    0,
 };
 
 struct BenchmarkParameters {
@@ -63,9 +69,10 @@ auto create()
     return Database::open(PATH, options);
 }
 
-auto create_temp(Size page_size)
+// TODO: Changed Database::temp().
+auto create_temp(Size)
 {
-    return Database::temp(page_size);
+    return Database::temp(options);
 }
 
 auto build_common(Work &records, bool is_sequential)
@@ -102,14 +109,14 @@ auto run_baseline(Database&)
 auto run_writes(Database &db, const Work &work)
 {
     for (const auto &[key, value]: work)
-        CUB_EXPECT_TRUE(db.write(stob(key), stob(value)));
+        CALICO_EXPECT_TRUE(db.write(stob(key), stob(value)));
     db.commit();
 }
 
 auto run_erases(Database &db, const Work &work)
 {
     for (const auto &[key, value]: work)
-        CUB_EXPECT_TRUE(db.erase(stob(key)));
+        CALICO_EXPECT_TRUE(db.erase(stob(key)));
     db.commit();
 }
 
@@ -118,7 +125,7 @@ auto run_read_rand(Database &db, const Work &work)
     std::string v;
     auto cursor = db.get_cursor();
     for (const auto &[key, value]: work) {
-        CUB_EXPECT_TRUE(cursor.find(stob(key)));
+        CALICO_EXPECT_TRUE(cursor.find(stob(key)));
         v = cursor.value();
     }
 }
@@ -218,7 +225,7 @@ auto show_usage()
 
 auto main(int argc, const char *argv[]) -> int
 {
-    using namespace cub;
+    using namespace calico;
 
     bool real_only {};
     bool temp_only {};
@@ -245,7 +252,7 @@ auto main(int argc, const char *argv[]) -> int
     static constexpr auto num_elements = 40'000;
 //    static constexpr auto num_large_elements = 1'000;
 
-    CUB_EXPECT_STATIC(num_elements * (KEY_SIZE+VALUE_SIZE) > CACHE_SIZE,
+    CALICO_EXPECT_STATIC(num_elements * (KEY_SIZE+VALUE_SIZE) > CACHE_SIZE,
                       "Use more or larger records. Benchmark is unfair.");
 
     const auto seed = Clock::now().time_since_epoch().count();
@@ -340,7 +347,7 @@ auto main(int argc, const char *argv[]) -> int
     std::cout.imbue(std::locale(std::cout.getloc(), &facet));
 
     static constexpr auto make_field_name = [](const std::string &name) {
-        CUB_EXPECT_LT(name.size(), FIELD_WIDTH);
+        CALICO_EXPECT_LT(name.size(), FIELD_WIDTH);
         return " " + name + std::string(FIELD_WIDTH - name.size() + 1, ' ');
     };
     const auto field_1a {make_field_name("Name")};

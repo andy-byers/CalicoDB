@@ -15,45 +15,112 @@ SET(
 )
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
-project(CubDB CXX)
+project(
+    CalicoDB
+    LANGUAGES CXX
+    VERSION 0.0.1
+)
 set(CMAKE_CXX_STANDARD 17)
 
-set(CUB_NAME cub)
-set(CUB_EXAMPLES_DIR "${PROJECT_SOURCE_DIR}/examples")
-set(CUB_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
-set(CUB_SOURCE_DIR "${PROJECT_SOURCE_DIR}/src")
-set(CUB_TEST_DIR "${PROJECT_SOURCE_DIR}/test")
-set(CUB_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic)
+set(CALICO_NAME calico)
+set(CALICO_EXAMPLES_DIR "${PROJECT_SOURCE_DIR}/examples")
+set(CALICO_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
+set(CALICO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/src")
+set(CALICO_TEST_DIR "${PROJECT_SOURCE_DIR}/test")
+set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic -Wpointer-arith -Wstrict-prototypes)
 
 # Check if we have O_DIRECT, which turns off kernel page caching.
 include(CheckCXXSymbolExists)
-check_cxx_symbol_exists(O_DIRECT "fcntl.h" CUB_HAS_O_DIRECT)
+check_cxx_symbol_exists(O_DIRECT "fcntl.h" CALICO_HAS_O_DIRECT)
 
-option(CUB_BUILD_TESTS "Build the tests" On)
-option(CUB_BUILD_EXAMPLES "Build the examples" On)
-option(CUB_USE_VALIDATORS "Use extra validation assertions" Off)
+#option(CALICO_INSTALL "Install the library and headers" On)
+option(CALICO_BUILD_TESTS "Build the tests" On)
+option(CALICO_BUILD_EXAMPLES "Build the examples" On)
+option(CALICO_USE_VALIDATORS "Use extra validation assertions" Off)
 
-# Build the unit and integration tests.
-if(CUB_BUILD_TESTS)
+set(CALICO_SOURCES '')
+set(CALICO_HEADERS '')
+file(GLOB_RECURSE CALICO_SOURCES "${CALICO_SOURCE_DIR}/*/*.cpp" "${CALICO_SOURCE_DIR}/*/*.h")
+file(GLOB_RECURSE CALICO_HEADERS "${CALICO_INCLUDE_DIR}/calico/*.h")
+list(APPEND CALICO_SOURCES ${CALICO_HEADERS})
+
+include(GNUInstallDirs)
+
+find_package(ZLIB)
+add_subdirectory(lib/spdlog)
+
+# Build the static library.
+add_library("${CALICO_NAME}" STATIC "${CALICO_SOURCES}")
+target_include_directories("${CALICO_NAME}" PRIVATE "${CALICO_SOURCE_DIR}" "${ZLIB_INCLUDE_DIRS}")
+target_include_directories(
+    "${CALICO_NAME}"
+    PUBLIC $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
+           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_compile_options("${CALICO_NAME}" PRIVATE "${CALICO_WARNINGS}")
+target_link_libraries("${CALICO_NAME}" PUBLIC spdlog::spdlog ZLIB::ZLIB)
+
+if(CALICO_USE_VALIDATORS)
+    target_compile_definitions("${CALICO_NAME}" PRIVATE CALICO_USE_VALIDATORS)
+endif()
+
+# Build the examples/use cases.
+if(CALICO_BUILD_EXAMPLES)
+    add_subdirectory(${CALICO_EXAMPLES_DIR})
+endif()
+
+#if(CALICO_INSTALL)
+#    set(TARGETS_NAME ${PROJECT_NAME}Targets)
+#    set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+#    set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
+#    set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
+#    set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
+#
+#    install(
+#        TARGETS "${CALICO_NAME}"
+#        EXPORT "${TARGETS_NAME}"
+#        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+#        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+#        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+#    )
+#    install(
+#        FILES "${CALICO_HEADERS}"
+#        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/calico"
+#    )
+#
+#    include(CMakePackageConfigHelpers)
+#    configure_package_config_file(
+#        "${CONFIG_FILE_IN}"
+#        "${CONFIG_FILE_OUT}"
+#        INSTALL_DESTINATION "${INSTALL_DIR}"
+#    )
+#    write_basic_package_version_file(
+#        "${VERSION_FILE}"
+#        COMPATIBILITY SameMajorVersion
+#    )
+#    install(
+#        EXPORT "${TARGETS_NAME}"
+#        NAMESPACE "${PROJECT_NAME}::"
+#        DESTINATION "${INSTALL_DIR}"
+#    )
+#    install(
+#        FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
+#        DESTINATION "${INSTALL_DIR}"
+#    )
+#endif()
+
+if(CALICO_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
     include(FetchContent)
     FetchContent_Declare(
-        googletest
-        URL https://github.com/google/googletest/archive/609281088cfefc76f9d0ce82e1ff6c30cc3591e5.zip
+            googletest
+            URL https://github.com/google/googletest/archive/609281088cfefc76f9d0ce82e1ff6c30cc3591e5.zip
     )
     FetchContent_MakeAvailable(googletest)
     include(GoogleTest)
     include(CTest)
     enable_testing()
 
-    add_subdirectory(${CUB_TEST_DIR})
-endif()
-
-# Build the static library.
-add_subdirectory(${CUB_SOURCE_DIR})
-
-# Build the examples/use cases.
-if(CUB_BUILD_EXAMPLES)
-    add_subdirectory(${CUB_EXAMPLES_DIR})
+    add_subdirectory(${CALICO_TEST_DIR})
 endif()

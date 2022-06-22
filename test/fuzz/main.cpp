@@ -5,10 +5,10 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
-#include "cub/cub.h"
+#include "calico/calico.h"
 #include "file/file.h"
 
-using namespace cub;
+using namespace calico;
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t*, size_t);
 

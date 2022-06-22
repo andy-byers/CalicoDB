@@ -7,7 +7,7 @@
 
 namespace {
 
-using namespace cub;
+using namespace calico;
 
 class PageCacheTests: public testing::Test {
 public:

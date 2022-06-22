@@ -1,21 +1,22 @@
-#ifndef CUB_TEST_FUZZ_FUZZERS_H
-#define CUB_TEST_FUZZ_FUZZERS_H
+#ifndef CALICO_TEST_FUZZ_FUZZERS_H
+#define CALICO_TEST_FUZZ_FUZZERS_H
 
 #include <array>
 #include <vector>
 #include "validators.h"
-#include "cub/cub.h"
-#include "cub/database.h"
+#include "calico/calico.h"
+#include "calico/database.h"
 #include "page/cell.h"
 #include "page/node.h"
 #include "page/page.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
 #include "utils/layout.h"
+#include "utils/logging.h"
 #include "../tools/fakes.h"
 #include "../tools/tools.h"
 
-namespace cub::fuzz {
+namespace calico::fuzz {
 
 template<class T, class R> class Fuzzer {
 public:
@@ -57,7 +58,7 @@ template<Size Ratio = 80> struct OperationTransformer {
 
     [[nodiscard]] auto decode(BytesView in) const -> Decoded
     {
-        CUB_EXPECT_STATIC(50 <= Ratio && Ratio <= 100, "Ratio must be in [50, 100]");
+        CALICO_EXPECT_STATIC(50 <= Ratio && Ratio <= 100, "Ratio must be in [50, 100]");
 
         static constexpr Size MIN_INFO_SIZE {2};
         static constexpr Size MAX_INFO_SIZE {3};
@@ -83,13 +84,13 @@ template<Size Ratio = 80> struct OperationTransformer {
 
     [[nodiscard]] auto encode(const Decoded &decoded) const -> Encoded
     {
-        CUB_EXPECT_STATIC(50 <= Ratio && Ratio <= 100, "Ratio must be in [50, 100]");
+        CALICO_EXPECT_STATIC(50 <= Ratio && Ratio <= 100, "Ratio must be in [50, 100]");
 
         std::string encoded;
         Random random;
 
         for (const auto &[key, value_size, operation]: decoded) {
-            CUB_EXPECT_LT(value_size, 0x100);
+            CALICO_EXPECT_LT(value_size, 0x100);
             Byte info_byte, size_byte {};
             if (operation == Operation::WRITE) {
                 info_byte = static_cast<Byte>(random.next_int(Ratio - 1));
@@ -108,19 +109,20 @@ template<Size Ratio = 80> struct OperationTransformer {
 };
 
 template<Size PageSize, bool IsInMemory> struct DatabaseProvider {
-    static constexpr auto PATH = "/tmp/cub_fuzz_database";
+    static constexpr auto PATH = "/tmp/calico_fuzz_database";
 
     auto operator()() const -> Database
     {
+        Options options;
+        options.page_size = PageSize;
+        options.block_size = PageSize;
+        options.use_transactions = true;
+
         if constexpr (IsInMemory) {
-            return Database::temp(PageSize, true);
+            return Database::temp(options);
         } else {
             std::filesystem::remove(PATH);
             std::filesystem::remove(get_wal_path(PATH));
-            Options options;
-            options.page_size = PageSize;
-            options.block_size = PageSize;
-            options.use_transactions = true;
             return Database::open(PATH, options);
         }
     }
@@ -192,7 +194,7 @@ public:
         auto backing = file->memory();
         backing.memory() = btos(input);
 
-        WALReader reader {std::move(file), BlockSize};
+        WALReader reader {{"", std::move(file), logging::create_sink("", 0), BlockSize}};
         while (reader.increment()) {}
         while (reader.decrement()) {}
     }
@@ -283,6 +285,6 @@ using NodeOpsFuzzer = Fuzzer<
     NodeOperationRunner<NodeProvider<2>>
 >;
 
-} // cub::fuzz
+} // calico::fuzz
 
-#endif // CUB_TEST_FUZZ_FUZZERS_H
+#endif // CALICO_TEST_FUZZ_FUZZERS_H

@@ -19,9 +19,9 @@ PASS_LABEL="[$(tput setaf 2)PASS$(tput sgr0)]"
 FAIL_LABEL="[$(tput setaf 1)FAIL$(tput sgr0)]"
 TOPLEVEL_PREFIX='> recovery.sh:'
 INSTANCE_PREFIX='> '
-DONE_PREFIX=/tmp/cub_recovery_done_
-FILE_PREFIX=/tmp/cub_recovery_file_
-TEMP_PREFIX=/tmp/cub_recovery_out_
+DONE_PREFIX=/tmp/calico_recovery_done_
+FILE_PREFIX=/tmp/calico_recovery_file_
+TEMP_PREFIX=/tmp/calico_recovery_out_
 OUTPUT_SINK=/dev/null
 
 NUM_INSTANCES=10

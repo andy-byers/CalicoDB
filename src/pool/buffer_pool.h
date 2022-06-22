@@ -1,17 +1,18 @@
-#ifndef CUB_POOL_BUFFER_POOL_H
-#define CUB_POOL_BUFFER_POOL_H
+#ifndef CALICO_POOL_BUFFER_POOL_H
+#define CALICO_POOL_BUFFER_POOL_H
 
 #include <list>
 #include <mutex>
 #include <stdexcept>
 #include <unordered_map>
+#include <spdlog/logger.h>
 #include "cache.h"
 #include "frame.h"
 #include "interface.h"
 #include "pager.h"
 #include "utils/scratch.h"
 
-namespace cub {
+namespace calico {
 
 class ILogFile;
 class IReadWriteFile;
@@ -25,6 +26,7 @@ public:
         std::unique_ptr<IReadWriteFile> pool_file;
         std::unique_ptr<IWALReader> wal_reader;
         std::unique_ptr<IWALWriter> wal_writer;
+        spdlog::sink_ptr log_sink;
         LSN flushed_lsn;
         Size frame_count {};
         Size page_count {};
@@ -93,6 +95,7 @@ private:
     std::unordered_map<PID, Frame, PID::Hasher> m_pinned;
     std::unique_ptr<IWALReader> m_wal_reader;
     std::unique_ptr<IWALWriter> m_wal_writer;
+    std::shared_ptr<spdlog::logger> m_logger;
     std::exception_ptr m_error;
     ScratchManager m_scratch;
     PageCache m_cache;
@@ -104,6 +107,6 @@ private:
     bool m_uses_transactions {};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_POOL_BUFFER_POOL_H
+#endif // CALICO_POOL_BUFFER_POOL_H

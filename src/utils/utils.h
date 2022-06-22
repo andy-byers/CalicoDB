@@ -1,10 +1,10 @@
-#ifndef CUB_UTILS_UTILS_H
-#define CUB_UTILS_UTILS_H
+#ifndef CALICO_UTILS_UTILS_H
+#define CALICO_UTILS_UTILS_H
 
 #include <filesystem>
-#include "cub/bytes.h"
+#include "calico/bytes.h"
 
-namespace cub {
+namespace calico {
 
 static constexpr Size PAGE_ID_SIZE {sizeof(uint32_t)};
 static constexpr Size CELL_POINTER_SIZE {sizeof(uint16_t)};
@@ -83,6 +83,20 @@ inline auto mem_move(Bytes dst, BytesView src) noexcept -> void*
     return mem_move(dst, src, src.size());
 }
 
-} // cub
+inline auto mem_clear_safe(Bytes data, Size n) noexcept -> void*
+{
+    assert(n <= data.size());
+    volatile auto *p = data.data();
+    for (Index i {}; i < n; ++i)
+        *p++ = 0;
+    return data.data();
+}
 
-#endif // CUB_UTILS_UTILS_H
+inline auto mem_clear_safe(Bytes data) noexcept -> void*
+{
+    return mem_clear_safe(data, data.size());
+}
+
+} // calico
+
+#endif // CALICO_UTILS_UTILS_H

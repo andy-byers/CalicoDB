@@ -1,12 +1,13 @@
 
-#ifndef CUB_TREE_TREE_H
-#define CUB_TREE_TREE_H
+#ifndef CALICO_TREE_TREE_H
+#define CALICO_TREE_TREE_H
 
+#include <spdlog/spdlog.h>
 #include "free_list.h"
 #include "interface.h"
 #include "utils/scratch.h"
 
-namespace cub {
+namespace calico {
 
 class Cell;
 class IBufferPool;
@@ -15,11 +16,12 @@ class Node;
 class Tree: public ITree {
 public:
     struct Parameters {
-        IBufferPool *buffer_pool{};
-        PID free_start{};
-        Size free_count{};
-        Size cell_count{};
-        Size node_count{};
+        IBufferPool *buffer_pool {};
+        spdlog::sink_ptr log_sink;
+        PID free_start {};
+        Size free_count {};
+        Size cell_count {};
+        Size node_count {};
     };
     
     explicit Tree(Parameters);
@@ -56,33 +58,30 @@ protected: // TODO
     auto positioned_modify(Position, BytesView) -> void;
     auto positioned_remove(Position) -> void;
 
-    // Overflow chains.
     auto allocate_overflow_chain(BytesView) -> PID;
     auto destroy_overflow_chain(PID, Size) -> void;
     auto collect_overflow_chain(PID, Bytes) const -> void;
 
-    // Overflow handling.
     auto balance_after_overflow(Node) -> void;
     auto split_non_root(Node) -> Node;
     auto split_root(Node) -> Node;
 
-    // Underflow handling.
     auto maybe_balance_after_underflow(Node, BytesView) -> void;
     auto rotate_left(Node&, Node&, Node&, Index) -> void;
     auto rotate_right(Node&, Node&, Node&, Index) -> void;
     auto fix_non_root(Node, Node&, Index) -> bool;
     auto fix_root(Node) -> void;
 
-    // Helpers.
     auto maybe_fix_child_parent_connections(Node &node) -> void;
 
     ScratchManager m_scratch;
     FreeList m_free_list;
-    IBufferPool *m_pool{};
-    Size m_node_count{};
-    Size m_cell_count{};
+    std::shared_ptr<spdlog::logger> m_logger;
+    IBufferPool *m_pool {};
+    Size m_node_count {};
+    Size m_cell_count {};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_TREE_TREE_H
+#endif // CALICO_TREE_TREE_H

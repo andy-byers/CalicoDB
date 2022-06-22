@@ -1,9 +1,9 @@
-#ifndef CUB_TEST_TOOLS_FAKES_H
-#define CUB_TEST_TOOLS_FAKES_H
+#ifndef CALICO_TEST_TOOLS_FAKES_H
+#define CALICO_TEST_TOOLS_FAKES_H
 
 #include <gmock/gmock.h>
-#include "cub/bytes.h"
-#include "cub/common.h"
+#include "calico/bytes.h"
+#include "calico/options.h"
 #include "random.h"
 #include "db/database_impl.h"
 #include "file/interface.h"
@@ -11,7 +11,7 @@
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
 
-namespace cub {
+namespace calico {
 
 class SharedMemory {
 public:
@@ -216,25 +216,25 @@ public:
 
     auto set_read_fault_rate(unsigned rate)
     {
-        CUB_EXPECT_LE(rate, 100);
+        CALICO_EXPECT_LE(rate, 100);
         m_controls->read_fault_rate = rate;
     }
 
     auto set_write_fault_rate(unsigned rate)
     {
-        CUB_EXPECT_LE(rate, 100);
+        CALICO_EXPECT_LE(rate, 100);
         m_controls->write_fault_rate = rate;
     }
 
     auto set_read_fault_counter(int value)
     {
-        CUB_EXPECT_GE(value, -1);
+        CALICO_EXPECT_GE(value, -1);
         m_controls->read_fault_counter = value;
     }
 
     auto set_write_fault_counter(int value)
     {
-        CUB_EXPECT_GE(value, -1);
+        CALICO_EXPECT_GE(value, -1);
         m_controls->write_fault_counter = value;
     }
 
@@ -581,6 +581,6 @@ private:
     LogMemory m_fake;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_TEST_TOOLS_FAKES_H
+#endif // CALICO_TEST_TOOLS_FAKES_H

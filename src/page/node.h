@@ -1,10 +1,10 @@
-#ifndef CUB_PAGE_NODE_H
-#define CUB_PAGE_NODE_H
+#ifndef CALICO_PAGE_NODE_H
+#define CALICO_PAGE_NODE_H
 
 #include "cell.h"
 #include "page.h"
 
-namespace cub {
+namespace calico {
 
 class NodeHeader {
 public:
@@ -234,6 +234,6 @@ auto merge_root(Node&, Node&) -> void;
 auto split_root(Node&, Node&) -> void;
 [[nodiscard]] auto split_non_root(Node&, Node&, Scratch) -> Cell;
 
-} // cub
+} // calico
 
-#endif // CUB_PAGE_NODE_H
+#endif // CALICO_PAGE_NODE_H

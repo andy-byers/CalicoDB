@@ -4,7 +4,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cub {
+namespace calico {
 
 auto NodeHeader::header_crc() const -> Index
 {
@@ -18,13 +18,13 @@ auto NodeHeader::parent_id() const -> PID
 
 auto NodeHeader::right_sibling_id() const -> PID
 {
-    CUB_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
+    CALICO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
     return PID {get_uint32(m_page->range(header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET))};
 }
 
 auto NodeHeader::rightmost_child_id() const -> PID
 {
-    CUB_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
+    CALICO_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
     return PID {get_uint32(m_page->range(header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET))};
 }
 
@@ -62,52 +62,52 @@ auto NodeHeader::update_header_crc() -> void
 
 auto NodeHeader::set_parent_id(PID parent_id) -> void
 {
-    CUB_EXPECT_NE(m_page->id(), PID::root());
+    CALICO_EXPECT_NE(m_page->id(), PID::root());
     const auto offset = header_offset() + NodeLayout::PARENT_ID_OFFSET;
     m_page->put_u32(offset, parent_id.value);
 }
 
 auto NodeHeader::set_right_sibling_id(PID right_sibling_id) -> void
 {
-    CUB_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
+    CALICO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
     m_page->put_u32(offset, right_sibling_id.value);
 }
 
 auto NodeHeader::set_rightmost_child_id(PID rightmost_child_id) -> void
 {
-    CUB_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
+    CALICO_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET;
     m_page->put_u32(offset, rightmost_child_id.value);
 }
 
 auto NodeHeader::set_cell_count(Size cell_count) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint16_t, cell_count);
+    CALICO_EXPECT_BOUNDED_BY(uint16_t, cell_count);
     m_page->put_u16(header_offset() + NodeLayout::CELL_COUNT_OFFSET, static_cast<uint16_t>(cell_count));
 }
 
 auto NodeHeader::set_free_count(Size free_count) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint16_t, free_count);
+    CALICO_EXPECT_BOUNDED_BY(uint16_t, free_count);
     m_page->put_u16(header_offset() + NodeLayout::FREE_COUNT_OFFSET, static_cast<uint16_t>(free_count));
 }
 
 auto NodeHeader::set_cell_start(Index cell_start) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint16_t, cell_start);
+    CALICO_EXPECT_BOUNDED_BY(uint16_t, cell_start);
     m_page->put_u16(header_offset() + NodeLayout::CELL_START_OFFSET, static_cast<uint16_t>(cell_start));
 }
 
 auto NodeHeader::set_free_start(Index free_start) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint16_t, free_start);
+    CALICO_EXPECT_BOUNDED_BY(uint16_t, free_start);
     m_page->put_u16(header_offset() + NodeLayout::FREE_START_OFFSET, static_cast<uint16_t>(free_start));
 }
 
 auto NodeHeader::set_frag_count(Size frag_count) -> void
 {
-    CUB_EXPECT_BOUNDED_BY(uint16_t, frag_count);
+    CALICO_EXPECT_BOUNDED_BY(uint16_t, frag_count);
     m_page->put_u16(header_offset() + NodeLayout::FRAG_COUNT_OFFSET, static_cast<uint16_t>(frag_count));
 }
 
@@ -131,7 +131,7 @@ auto NodeHeader::gap_size() const -> Size
 {
     const auto top = cell_start();
     const auto bottom = cell_area_offset();
-    CUB_EXPECT_GE(top, bottom);
+    CALICO_EXPECT_GE(top, bottom);
     return top - bottom;
 }
 
@@ -142,22 +142,22 @@ auto NodeHeader::max_usable_space() const -> Size
 
 auto CellDirectory::get_pointer(Index index) const -> Pointer
 {
-    CUB_EXPECT_LT(index, m_header->cell_count());
+    CALICO_EXPECT_LT(index, m_header->cell_count());
     return {m_page->get_u16(m_header->cell_pointers_offset() + index * CELL_POINTER_SIZE)};
 }
 
 auto CellDirectory::set_pointer(Index index, Pointer pointer) -> void
 {
-    CUB_EXPECT_LT(index, m_header->cell_count());
-    CUB_EXPECT_LE(pointer.value, m_page->size());
+    CALICO_EXPECT_LT(index, m_header->cell_count());
+    CALICO_EXPECT_LE(pointer.value, m_page->size());
     m_page->put_u16(m_header->cell_pointers_offset() + index*CELL_POINTER_SIZE, static_cast<uint16_t>(pointer.value));
 }
 
 auto CellDirectory::insert_pointer(Index index, Pointer pointer) -> void
 {
-    CUB_EXPECT_GE(pointer.value, m_header->cell_area_offset());
-    CUB_EXPECT_LT(pointer.value, m_page->size());
-    CUB_EXPECT_LE(index, m_header->cell_count());
+    CALICO_EXPECT_GE(pointer.value, m_header->cell_area_offset());
+    CALICO_EXPECT_LT(pointer.value, m_page->size());
+    CALICO_EXPECT_LE(index, m_header->cell_count());
     const auto start = NodeLayout::content_offset(m_page->id());
     const auto offset = start + CELL_POINTER_SIZE*index;
     const auto size = (m_header->cell_count()-index) * CELL_POINTER_SIZE;
@@ -169,8 +169,8 @@ auto CellDirectory::insert_pointer(Index index, Pointer pointer) -> void
 
 auto CellDirectory::remove_pointer(Index index) -> void
 {
-    CUB_EXPECT_GT(m_header->cell_count(), 0);
-    CUB_EXPECT_LT(index, m_header->cell_count());
+    CALICO_EXPECT_GT(m_header->cell_count(), 0);
+    CALICO_EXPECT_LT(index, m_header->cell_count());
     const auto start = NodeLayout::header_offset(m_page->id()) + NodeLayout::HEADER_SIZE;
     const auto offset = start + CELL_POINTER_SIZE*index;
     const auto size = (m_header->cell_count()-index-1) * CELL_POINTER_SIZE;
@@ -200,7 +200,7 @@ auto BlockAllocator::compute_free_total() const -> Size
         usable_space += get_block_size(ptr);
         ptr = get_next_pointer(ptr);
     }
-    CUB_EXPECT_LE(usable_space, m_page->size() - m_header->cell_pointers_offset());
+    CALICO_EXPECT_LE(usable_space, m_page->size() - m_header->cell_pointers_offset());
     return usable_space;
 }
 
@@ -226,14 +226,14 @@ auto BlockAllocator::get_block_size(Index offset) const -> Size
 
 auto BlockAllocator::set_next_pointer(Index offset, Index next_pointer) -> void
 {
-    CUB_EXPECT_LT(next_pointer, m_page->size());
+    CALICO_EXPECT_LT(next_pointer, m_page->size());
     return m_page->put_u16(offset, static_cast<uint16_t>(next_pointer));
 }
 
 auto BlockAllocator::set_block_size(Index offset, Size block_size) -> void
 {
-    CUB_EXPECT_GE(block_size, CELL_POINTER_SIZE + sizeof(uint16_t));
-    CUB_EXPECT_LT(block_size, m_header->max_usable_space());
+    CALICO_EXPECT_GE(block_size, CELL_POINTER_SIZE + sizeof(uint16_t));
+    CALICO_EXPECT_LT(block_size, m_header->max_usable_space());
     return m_page->put_u16(offset + CELL_POINTER_SIZE, static_cast<uint16_t>(block_size));
 }
 
@@ -264,7 +264,7 @@ auto BlockAllocator::allocate_from_gap(Size needed_size) -> Index
 
 auto BlockAllocator::allocate(Size needed_size) -> Index
 {
-    CUB_EXPECT_LT(needed_size, m_page->size() - NodeLayout::content_offset(m_page->id()));
+    CALICO_EXPECT_LT(needed_size, m_page->size() - NodeLayout::content_offset(m_page->id()));
 
     if (needed_size > usable_space())
         return 0;
@@ -280,13 +280,13 @@ auto BlockAllocator::allocate(Size needed_size) -> Index
  */
 auto BlockAllocator::take_free_space(Index ptr0, Index ptr1, Size needed_size) -> Index
 {
-    CUB_EXPECT_LT(ptr0, m_page->size());
-    CUB_EXPECT_LT(ptr1, m_page->size());
-    CUB_EXPECT_LT(needed_size, m_page->size());
+    CALICO_EXPECT_LT(ptr0, m_page->size());
+    CALICO_EXPECT_LT(ptr1, m_page->size());
+    CALICO_EXPECT_LT(needed_size, m_page->size());
     const auto is_first = !ptr0;
     const auto ptr2 = get_next_pointer(ptr1);
     const auto free_size = get_block_size(ptr1);
-    CUB_EXPECT_GE(free_size, needed_size);
+    CALICO_EXPECT_GE(free_size, needed_size);
     const auto diff = free_size - needed_size;
 
     if (diff < 4) {
@@ -306,8 +306,8 @@ auto BlockAllocator::take_free_space(Index ptr0, Index ptr1, Size needed_size) -
 
 auto BlockAllocator::free(Index ptr, Size size) -> void
 {
-    CUB_EXPECT_LE(ptr + size, m_page->size());
-    CUB_EXPECT_GE(ptr, NodeLayout::content_offset(m_page->id()));
+    CALICO_EXPECT_LE(ptr + size, m_page->size());
+    CALICO_EXPECT_GE(ptr, NodeLayout::content_offset(m_page->id()));
     if (size < 4) {
         m_header->set_frag_count(m_header->frag_count() + size);
     } else {
@@ -376,8 +376,8 @@ auto Node::is_external() const -> bool
 
 auto Node::child_id(Index index) const -> PID
 {
-    CUB_EXPECT_FALSE(is_external());
-    CUB_EXPECT_LE(index, cell_count());
+    CALICO_EXPECT_FALSE(is_external());
+    CALICO_EXPECT_LE(index, cell_count());
     if (index < cell_count())
         return read_cell(index).left_child_id();
     return rightmost_child_id();
@@ -385,19 +385,19 @@ auto Node::child_id(Index index) const -> PID
 
 auto Node::read_key(Index index) const -> BytesView
 {
-    CUB_EXPECT_LT(index, cell_count());
+    CALICO_EXPECT_LT(index, cell_count());
     return read_cell(index).key();
 }
 
 auto Node::read_cell(Index index) const -> Cell
 {
-    CUB_EXPECT_LT(index, cell_count());
+    CALICO_EXPECT_LT(index, cell_count());
     return Cell::read_at(*this, m_directory.get_pointer(index).value);
 }
 
 auto Node::detach_cell(Index index, Scratch scratch) const -> Cell
 {
-    CUB_EXPECT_LT(index, cell_count());
+    CALICO_EXPECT_LT(index, cell_count());
     auto cell = read_cell(index);
     cell.detach(std::move(scratch));
     return cell;
@@ -405,7 +405,7 @@ auto Node::detach_cell(Index index, Scratch scratch) const -> Cell
 
 auto Node::extract_cell(Index index, Scratch scratch) -> Cell
 {
-    CUB_EXPECT_LT(index, cell_count());
+    CALICO_EXPECT_LT(index, cell_count());
     auto cell = detach_cell(index, std::move(scratch));
     remove_at(index, cell.size());
     return cell;
@@ -423,10 +423,10 @@ auto Node::validate() const -> void
         used_space += lhs.size();
         if (i < cell_count() - 1) {
             [[maybe_unused]] const auto rhs = read_cell(i + 1);
-            CUB_EXPECT_TRUE(lhs.key() < rhs.key());
+            CALICO_EXPECT_TRUE(lhs.key() < rhs.key());
         }
     }
-    CUB_EXPECT_EQ(used_space + usable_space, size());
+    CALICO_EXPECT_EQ(used_space + usable_space, size());
 }
 
 auto Node::find_ge(BytesView key) const -> SearchResult
@@ -478,17 +478,12 @@ auto Node::is_underflowing() const -> bool
 {
     if (id().is_root())
         return cell_count() == 0;
-    // Note that the maximally-sized cell has no overflow ID.
-    const auto max_cell_size = MAX_CELL_HEADER_SIZE +
-                               get_max_local(size()) +
-                               CELL_POINTER_SIZE;
-
-    return m_allocator.usable_space() > (max_usable_space()+max_cell_size) / 2;
+    return m_allocator.usable_space() > max_usable_space() / 2;
 }
 
 auto Node::overflow_cell() const -> const Cell&
 {
-    CUB_EXPECT_TRUE(is_overflowing());
+    CALICO_EXPECT_TRUE(is_overflowing());
     return *m_overflow;
 }
 
@@ -506,8 +501,8 @@ auto Node::take_overflow_cell() -> Cell
 
 auto Node::set_child_id(Index index, PID child_id) -> void
 {
-    CUB_EXPECT_FALSE(is_external());
-    CUB_EXPECT_LE(index, cell_count());
+    CALICO_EXPECT_FALSE(is_external());
+    CALICO_EXPECT_LE(index, cell_count());
     if (index < cell_count()) {
         m_page.put_u32(m_directory.get_pointer(index).value, child_id.value);
     } else {
@@ -544,9 +539,9 @@ auto Node::defragment(std::optional<Index> skipped_cid) -> void
         cell.write({temp.data() + end, temp.size() - end});
         ptrs.at(index) = end;
     }
-    for (Index cid{}; cid < n; ++cid) {
-        if (cid != to_skip)
-            m_directory.set_pointer(cid, {ptrs.at(cid)});
+    for (Index index {}; index < n; ++index) {
+        if (index != to_skip)
+            m_directory.set_pointer(index, {ptrs.at(index)});
     }
     const auto offset = cell_area_offset();
     m_page.write(stob(temp).range(offset, m_page.size() - offset), offset);
@@ -558,15 +553,15 @@ auto Node::insert(Cell cell) -> void
 {
     const auto [index, should_be_false] = find_ge(cell.key());
     // Keys should be unique.
-    CUB_EXPECT_FALSE(should_be_false);
+    CALICO_EXPECT_FALSE(should_be_false);
     insert_at(index, std::move(cell));
 }
 
 auto Node::insert_at(Index index, Cell cell) -> void
 {
-    CUB_EXPECT_FALSE(is_overflowing());
-    CUB_EXPECT_LE(index, cell_count());
-    CUB_EXPECT_EQ(is_external(), cell.left_child_id().is_null());
+    CALICO_EXPECT_FALSE(is_overflowing());
+    CALICO_EXPECT_LE(index, cell_count());
+    CALICO_EXPECT_EQ(is_external(), cell.left_child_id().is_null());
 
     const auto local_size = cell.size();
 
@@ -599,7 +594,7 @@ auto Node::insert_at(Index index, Cell cell) -> void
     if (offset < m_header.cell_start())
         m_header.set_cell_start(offset);
 
-    CUB_VALIDATE(validate());
+    CALICO_VALIDATE(validate());
 }
 
 auto Node::remove(BytesView key) -> bool
@@ -613,15 +608,13 @@ auto Node::remove(BytesView key) -> bool
 
 auto Node::remove_at(Index index, Size local_size) -> void
 {
-    CUB_VALIDATE(validate());
-
-    CUB_EXPECT_GE(local_size, MIN_CELL_HEADER_SIZE);
-    CUB_EXPECT_LE(local_size, get_max_local(m_page.size()) + MAX_CELL_HEADER_SIZE);
-    CUB_EXPECT_LT(index, cell_count());
-    CUB_EXPECT_FALSE(is_overflowing());
+    CALICO_EXPECT_GE(local_size, MIN_CELL_HEADER_SIZE);
+    CALICO_EXPECT_LE(local_size, get_max_local(m_page.size()) + MAX_CELL_HEADER_SIZE);
+    CALICO_EXPECT_LT(index, cell_count());
+    CALICO_EXPECT_FALSE(is_overflowing());
     m_allocator.free(m_directory.get_pointer(index).value, local_size);
     m_directory.remove_pointer(index);
-    CUB_VALIDATE(validate());
+    CALICO_VALIDATE(validate());
 }
 
 auto Node::reset(bool reset_header) -> void
@@ -637,7 +630,7 @@ auto Node::reset(bool reset_header) -> void
 
 auto transfer_cell(Node &src, Node &dst, Index index) -> void
 {
-    CUB_EXPECT_EQ(src.type(), dst.type());
+    CALICO_EXPECT_EQ(src.type(), dst.type());
     auto cell = src.read_cell(index);
     const auto cell_size = cell.size();
     dst.insert(std::move(cell));
@@ -646,13 +639,13 @@ auto transfer_cell(Node &src, Node &dst, Index index) -> void
 
 auto can_merge_siblings(const Node &Ln, const Node &rn, const Cell &separator) -> bool
 {
-    CUB_EXPECT_FALSE(Ln.is_overflowing());
-    CUB_EXPECT_FALSE(rn.is_overflowing());
-    CUB_EXPECT_FALSE(Ln.id().is_root());
-    CUB_EXPECT_FALSE(rn.id().is_root());
+    CALICO_EXPECT_FALSE(Ln.is_overflowing());
+    CALICO_EXPECT_FALSE(rn.is_overflowing());
+    CALICO_EXPECT_FALSE(Ln.id().is_root());
+    CALICO_EXPECT_FALSE(rn.id().is_root());
     const auto page_size = Ln.size();
-    CUB_EXPECT_EQ(page_size, rn.size());
-    CUB_EXPECT_EQ(Ln.type(), rn.type());
+    CALICO_EXPECT_EQ(page_size, rn.size());
+    CALICO_EXPECT_EQ(Ln.type(), rn.type());
 
     Size total {};
 
@@ -688,7 +681,7 @@ auto merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
     // Transfer the rest of the cells. Lc shouldn't overflow.
     while (rc.cell_count()) {
         transfer_cell(rc, Lc, 0);
-        CUB_EXPECT_FALSE(Lc.is_overflowing());
+        CALICO_EXPECT_FALSE(Lc.is_overflowing());
     }
     if (!Lc.is_external())
         Lc.set_rightmost_child_id(rc.rightmost_child_id());
@@ -712,14 +705,14 @@ auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
         separator.set_left_child_id(PID::null());
     }
     Lc.insert(std::move(separator));
-    CUB_EXPECT_EQ(parent.child_id(index + 1), rc.id());
+    CALICO_EXPECT_EQ(parent.child_id(index + 1), rc.id());
     parent.set_child_id(index + 1, Lc.id());
     parent.remove_at(index, separator_size);
 
     // Transfer the rest of the cells. Lc shouldn't overflow.
     while (rc.cell_count()) {
         transfer_cell(rc, Lc, 0);
-        CUB_EXPECT_FALSE(Lc.is_overflowing());
+        CALICO_EXPECT_FALSE(Lc.is_overflowing());
     }
 }
 
@@ -735,7 +728,7 @@ auto split_root(Node &root, Node &child) -> void
     size = NodeLayout::HEADER_SIZE + root.cell_count()*CELL_POINTER_SIZE;
     child.page().write(root.page().range(root.header_offset()).truncate(size), offset);
 
-    CUB_EXPECT_TRUE(root.is_overflowing());
+    CALICO_EXPECT_TRUE(root.is_overflowing());
     child.set_overflow_cell(root.take_overflow_cell());
 
     root.reset(true);
@@ -746,7 +739,7 @@ auto split_root(Node &root, Node &child) -> void
 
 auto merge_root(Node &root, Node &child) -> void
 {
-    CUB_EXPECT(root.rightmost_child_id() == child.id());
+    CALICO_EXPECT(root.rightmost_child_id() == child.id());
     child.defragment();
 
     // Copy the cell content area.
@@ -765,7 +758,7 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 {
     // get the overflow cell. The caller should make sure the node is overflowing
     // before calling this method.
-    CUB_EXPECT_TRUE(Ln.is_overflowing());
+    CALICO_EXPECT_TRUE(Ln.is_overflowing());
     auto overflow = Ln.take_overflow_cell();
 
     // Include the overflow cell in our count.
@@ -773,7 +766,7 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 
     // Figure out where the overflow cell should go.
     const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
-    CUB_EXPECT_FALSE(should_be_false);
+    CALICO_EXPECT_FALSE(should_be_false);
     auto where = ThreeWayComparison::EQ;
     auto median_index = n / 2;
 
@@ -811,7 +804,7 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     }
     const auto do_transfer = [](Node &target, Cell cell) {
         const auto [index, found_eq]{target.find_ge(cell.key())};
-        CUB_EXPECT_FALSE(found_eq);
+        CALICO_EXPECT_FALSE(found_eq);
         target.insert_at(index, std::move(cell));
     };
     switch (where) {
@@ -828,4 +821,4 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     return median;
 }
 
-} // cub
+} // calico

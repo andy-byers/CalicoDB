@@ -1,12 +1,12 @@
-#ifndef CUB_FILE_INTERFACE_H
-#define CUB_FILE_INTERFACE_H
+#ifndef CALICO_FILE_INTERFACE_H
+#define CALICO_FILE_INTERFACE_H
 
 #include <fcntl.h>
 #include <unistd.h>
-#include "cub/bytes.h"
-#include "cub/exception.h"
+#include "calico/bytes.h"
+#include "calico/exception.h"
 
-namespace cub {
+namespace calico {
 
 enum class Seek: int {
     BEGIN   = SEEK_SET,
@@ -20,7 +20,7 @@ enum class Mode: int {
     SYNCHRONOUS = O_SYNC,
     TRUNCATE = O_TRUNC,
 
-#if CUB_HAS_O_DIRECT
+#if CALICO_HAS_O_DIRECT
     DIRECT = O_DIRECT,
 #else
     DIRECT = 0,
@@ -123,6 +123,6 @@ template<class W> static auto write_exact_at(W &writable_file, BytesView in, Ind
         throw IOError {"partial write"};
 }
 
-} // cub
+} // calico
 
-#endif // CUB_FILE_INTERFACE_H
+#endif // CALICO_FILE_INTERFACE_H

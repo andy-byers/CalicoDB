@@ -10,8 +10,9 @@
 #include "pool/frame.h"
 #include "pool/interface.h"
 #include "page/cell.h"
-#include "cub/common.h"
+#include "calico/options.h"
 #include "utils/layout.h"
+#include "utils/logging.h"
 #include "db/cursor_impl.h"
 #include "tree/tree.h"
 
@@ -22,7 +23,7 @@
 
 namespace {
 
-using namespace cub;
+using namespace calico;
 
 template<class T> auto tree_insert(T &tree, const std::string &key, const std::string &value) -> void
 {
@@ -191,6 +192,7 @@ public:
 
     TreeTests()
     {
+        auto sink = logging::create_sink("", 0);
         m_max_local = get_max_local(m_page_size);
         std::filesystem::remove(m_path);
         auto file = std::make_unique<FaultyReadWriteMemory>();
@@ -198,6 +200,7 @@ public:
             std::move(file),
             nullptr,
             nullptr,
+            sink,
             LSN::null(),
             32,
             0,
@@ -206,6 +209,7 @@ public:
         });
         m_tree = std::make_unique<TestTree>(Tree::Parameters{
             m_pool.get(),
+            sink,
             PID::null(),
             0,
             0,

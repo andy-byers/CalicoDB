@@ -1,11 +1,11 @@
-#ifndef CUB_DATABASE_H
-#define CUB_DATABASE_H
+#ifndef CALICO_DATABASE_H
+#define CALICO_DATABASE_H
 
 #include <memory>
 #include <optional>
 #include "bytes.h"
 
-namespace cub {
+namespace calico {
 
 class Info;
 class Cursor;
@@ -15,12 +15,12 @@ class Cursor;
  *
  * @see Database::read()
  */
-enum class Ordering {
-    LT, ///< Less than
-    LE, ///< Less than or equal to
-    EQ, ///< Equal to
-    GE, ///< Greater than or equal to
-    GT, ///< Greater than
+enum class Ordering: unsigned {
+    LT = 1, ///< Less than
+    LE = 2, ///< Less than or equal to
+    EQ = 3, ///< Equal to
+    GE = 4, ///< Greater than or equal to
+    GT = 5, ///< Greater than
 };
 
 /**
@@ -33,19 +33,18 @@ public:
      * Open or create a Cub DB database.
      *
      * @param path The path to the database file.
-     * @param options The options to apply to the database.
+     * @param options Options to apply to the database.
      * @return A Cub DB database, located at the provided path on disk.
      */
-    static auto open(const std::string &path, const Options &options) -> Database;
+    static auto open(const std::string &path, Options options) -> Database;
 
     /**
      * Create an in-memory Cub DB database.
      *
-     * @param page_size Size of a page of memory in bytes (must be a power of two).
-     * @param use_transactions True if the database should use transactions, false otherwise.
+     * @param options Options to apply to the database.
      * @return An in-memory Cub DB database.
      */
-    static auto temp(Size page_size, bool use_transactions = true) -> Database;
+    static auto temp(Options options) -> Database;
 
     /**
      * Destroy a database.
@@ -199,6 +198,6 @@ private:
     Database::Impl *m_db {}; ///< Pointer to the database this object was opened on.
 };
 
-} // cub
+} // calico
 
-#endif // CUB_DATABASE_H
+#endif // CALICO_DATABASE_H

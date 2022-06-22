@@ -4,14 +4,14 @@
 *   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
 */
 
-#ifndef CUB_WAL_WAL_RECORD_H
-#define CUB_WAL_WAL_RECORD_H
+#ifndef CALICO_WAL_WAL_RECORD_H
+#define CALICO_WAL_WAL_RECORD_H
 
 #include "page/page.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 
-namespace cub {
+namespace calico {
 
 // WAL record format, modified from (1):
 //
@@ -115,7 +115,7 @@ public:
 
     [[nodiscard]] auto is_commit() const -> bool
     {
-        CUB_EXPECT_EQ(m_type, Type::FULL);
+        CALICO_EXPECT_EQ(m_type, Type::FULL);
         return m_payload.is_commit();
     }
 
@@ -137,6 +137,6 @@ private:
     Type m_type {Type::EMPTY};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_WAL_WAL_RECORD_H
+#endif // CALICO_WAL_WAL_RECORD_H

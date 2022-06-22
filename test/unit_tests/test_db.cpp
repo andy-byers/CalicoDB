@@ -16,10 +16,11 @@
 #include "tools.h"
 
 #include "file/file.h"
+#include "utils/logging.h"
 
 namespace {
 
-using namespace cub;
+using namespace calico;
 
 
 class DatabaseReadTests: public testing::Test {
@@ -41,8 +42,19 @@ public:
     static constexpr auto K1_p1 = "4";
     static constexpr auto K2_p1 = "6";
 
+    const Options options {
+        PAGE_SIZE,              // Page size
+        PAGE_SIZE,              // Block size
+        0x10,                   // Frame count
+        0666,                   // Permissions
+        true,                   // Use transactions
+        false,                  // Use direct I/O
+        "",
+        0,
+    };
+
     DatabaseReadTests()
-        : db {Database::temp(PAGE_SIZE)}
+        : db {Database::temp(options)}
     {
         const auto write = [this](const std::string &key) {
             db.write(stob(key), stob(key));
@@ -115,7 +127,7 @@ TEST_F(DatabaseReadTests, CannotReadGreaterThanMaximum)
     ASSERT_EQ(db.read(stob(K2_p1), Ordering::GT), std::nullopt);
 }
 
-constexpr auto TEST_PATH = "/tmp/cub_test";
+constexpr auto TEST_PATH = "/tmp/calico_test";
 
 template<class Db> auto database_contains_exact(Db &db, const std::vector<Record> &records)
 {
@@ -168,16 +180,16 @@ TEST_F(DatabaseTests, AbortRestoresState)
     db.commit();
 
     db.write(stob("c"), stob("3"));
-    CUB_EXPECT_TRUE(db.erase(stob("a")));
-    CUB_EXPECT_TRUE(db.erase(stob("b")));
+    CALICO_EXPECT_TRUE(db.erase(stob("a")));
+    CALICO_EXPECT_TRUE(db.erase(stob("b")));
     db.abort();
 
-    CUB_EXPECT_EQ(db.read(stob("a"), Ordering::EQ)->value, "1");
-    CUB_EXPECT_EQ(db.read(stob("b"), Ordering::EQ)->value, "2");
-    CUB_EXPECT_EQ(db.read(stob("c"), Ordering::EQ), std::nullopt);
+    CALICO_EXPECT_EQ(db.read(stob("a"), Ordering::EQ)->value, "1");
+    CALICO_EXPECT_EQ(db.read(stob("b"), Ordering::EQ)->value, "2");
+    CALICO_EXPECT_EQ(db.read(stob("c"), Ordering::EQ), std::nullopt);
 
     const auto info = db.get_info();
-    CUB_EXPECT_EQ(info.record_count(), 2);
+    CALICO_EXPECT_EQ(info.record_count(), 2);
 }
 
 TEST_F(DatabaseTests, CannotAbortIfNotUsingTransactions)
@@ -263,13 +275,18 @@ TEST_F(DatabaseTests, SubsequentAbortsHaveNoEffect)
 
 TEST(TempDBTests, CannotAbortIfNotUsingTransactions)
 {
-    auto temp = Database::temp(0x100, false);
+    Options options;
+    options.page_size = 0x100;
+    options.use_transactions = false;
+    auto temp = Database::temp(options);
     ASSERT_THROW(temp.abort(), std::logic_error);
 }
 
 TEST(TempDBTests, FreshDatabaseIsEmpty)
 {
-    auto temp = Database::temp(0x100);
+    Options options;
+    options.page_size = 0x100;
+    auto temp = Database::temp(options);
     auto reader = temp.get_cursor();
     ASSERT_FALSE(reader.has_record());
     ASSERT_EQ(temp.get_info().record_count(), 0);
@@ -277,14 +294,18 @@ TEST(TempDBTests, FreshDatabaseIsEmpty)
 
 TEST(TempDBTests, CanInsertRecords)
 {
-    auto temp = Database::temp(0x100);
+    Options options;
+    options.page_size = 0x100;
+    auto temp = Database::temp(options);
     const auto records = setup_database_with_committed_records(temp, 500);
     ASSERT_TRUE(database_contains_exact(temp, records));
 }
 
 TEST(TempDBTests, AbortClearsRecords)
 {
-    auto temp = Database::temp(0x100);
+    Options options;
+    options.page_size = 0x100;
+    auto temp = Database::temp(options);
     temp.write(stob("a"), stob("1"));
     temp.write(stob("b"), stob("2"));
     temp.write(stob("c"), stob("3"));
@@ -295,7 +316,9 @@ TEST(TempDBTests, AbortClearsRecords)
 TEST(TempDBTests, AbortKeepsRecordsFromPreviousCommit)
 {
     static constexpr auto num_committed = 500;
-    auto temp = Database::temp(0x100);
+    Options options;
+    options.page_size = 0x100;
+    auto temp = Database::temp(options);
     const auto committed = setup_database_with_committed_records(temp, num_committed);
     temp.write(stob("a"), stob("1"));
     temp.write(stob("b"), stob("2"));

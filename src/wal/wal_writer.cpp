@@ -1,37 +1,38 @@
 
 #include "wal_writer.h"
-#include <optional>
-#include "wal_reader.h"
-#include "cub/exception.h"
+#include "calico/exception.h"
 #include "file/interface.h"
 #include "utils/identifier.h"
+#include "utils/logging.h"
+#include "wal_reader.h"
+#include <optional>
 
-namespace cub {
+namespace calico {
 
-WALWriter::WALWriter(std::unique_ptr<ILogFile> file, Size block_size)
-    : m_file{std::move(file)}
-    , m_block(block_size, '\x00')
+WALWriter::WALWriter(Parameters param)
+    : m_file {std::move(param.wal_file)},
+      m_logger {logging::create_logger(param.log_sink, "WALWriter")},
+      m_block(param.block_size, '\x00')
 {
-    if (!is_power_of_two(block_size))
-        throw std::invalid_argument {"WAL block size must be a power of 2"};
+    m_logger->trace("starting WALWriter");
 
-    if (block_size < MIN_BLOCK_SIZE)
-        throw std::invalid_argument {"WAL block size is too small"};
+    const auto is_block_size_valid = is_power_of_two(param.block_size) &&
+                                     param.block_size >= MIN_BLOCK_SIZE &&
+                                     param.block_size <= MAX_BLOCK_SIZE;
 
-    if (block_size > MAX_BLOCK_SIZE)
-        throw std::invalid_argument {"WAL block size is too large"};
+    if (!is_block_size_valid) {
+        logging::MessageGroup group;
+        group.set_primary("cannot open WAL writer");
+        group.set_detail("WAL block size {} is invalid", param.block_size);
+        group.set_hint("must be a power of 2 in [{}, {}]", MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
+        group.log_and_throw<std::invalid_argument>(*m_logger);
+    }
 }
 
-/**
- * Determine if there is data already in the WAL file on disk.
- *
- * @return True if there is data in the WAL file, false otherwise.
- */
 auto WALWriter::has_committed() const -> bool
 {
     return m_file->size() > 0;
 }
-
 
 auto WALWriter::append(WALRecord record) -> LSN
 {
@@ -95,4 +96,4 @@ auto WALWriter::flush() -> LSN
     return LSN::null();
 }
 
-} // cub
+} // namespace calico

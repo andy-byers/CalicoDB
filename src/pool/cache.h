@@ -1,11 +1,11 @@
-#ifndef CUB_POOL_PAGE_CACHE_H
-#define CUB_POOL_PAGE_CACHE_H
+#ifndef CALICO_POOL_PAGE_CACHE_H
+#define CALICO_POOL_PAGE_CACHE_H
 
 #include <list>
 #include <unordered_map>
 #include "utils/identifier.h"
 
-namespace cub {
+namespace calico {
 
 class Frame;
 
@@ -26,7 +26,7 @@ public:
 
     [[nodiscard]] auto dirty_count() const -> Size
     {
-        CUB_EXPECT_LE(m_dirty_count, size());
+        CALICO_EXPECT_LE(m_dirty_count, size());
         return m_dirty_count;
     }
 
@@ -54,6 +54,6 @@ private:
     Size m_miss_count {};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_POOL_PAGE_CACHE_H
+#endif // CALICO_POOL_PAGE_CACHE_H

@@ -2,14 +2,14 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include "cub/cub.h"
+#include "calico/calico.h"
 #include "tools.h"
 
 #ifdef NDEBUG
 #  error "This test must run with assertions enabled"
 #endif
 
-using namespace cub;
+using namespace calico;
 
 static constexpr Size KEY_WIDTH {12};
 
@@ -24,7 +24,7 @@ auto show_usage()
 
 auto main(int argc, const char *argv[]) -> int
 {
-    using namespace cub;
+    using namespace calico;
 
     if (argc != 3) {
         show_usage();
@@ -38,7 +38,7 @@ auto main(int argc, const char *argv[]) -> int
     {
         std::string line;
         std::ifstream ifs {value_path};
-        CUB_EXPECT_TRUE(ifs.is_open());
+        CALICO_EXPECT_TRUE(ifs.is_open());
         while (std::getline(ifs, line))
             values.emplace_back(line);
     }
@@ -47,23 +47,22 @@ auto main(int argc, const char *argv[]) -> int
     const auto info = db.get_info();
 
     // The database should contain exactly `num_committed` records.
-    CUB_EXPECT_EQ(info.record_count(), num_committed);
+    CALICO_EXPECT_EQ(info.record_count(), num_committed);
 
     Index key_counter {};
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
         const auto record = db.read(stob(key));
-        CUB_EXPECT_NE(record, std::nullopt);
-        CUB_EXPECT_EQ(record->key, key);
-        CUB_EXPECT_EQ(record->value, value);
-        CUB_EXPECT_TRUE(db.erase(stob(key)));
+        CALICO_EXPECT_NE(record, std::nullopt);
+        CALICO_EXPECT_EQ(record->key, key);
+        CALICO_EXPECT_EQ(record->value, value);
+        CALICO_EXPECT_TRUE(db.erase(stob(key)));
     }
 
     // All records should have been reached and removed.
-    CUB_EXPECT_EQ(key_counter, num_committed);
-    CUB_EXPECT_EQ(info.record_count(), 0);
-    std::filesystem::remove(path);
-    std::filesystem::remove(get_wal_path(path));
+    CALICO_EXPECT_EQ(key_counter, num_committed);
+    CALICO_EXPECT_EQ(info.record_count(), 0);
     std::filesystem::remove(value_path);
+    Database::destroy(std::move(db));
     return 0;
 }

@@ -1,14 +1,14 @@
-#ifndef CUB_DB_READER_IMPL_H
-#define CUB_DB_READER_IMPL_H
+#ifndef CALICO_DB_READER_IMPL_H
+#define CALICO_DB_READER_IMPL_H
 
-#include "cub/cursor.h"
+#include "calico/cursor.h"
 #include <optional>
 #include <shared_mutex>
 #include <vector>
 #include "page/node.h"
 #include "utils/types.h"
 
-namespace cub {
+namespace calico {
 
 class ITree;
 struct PID;
@@ -57,6 +57,6 @@ private:
     Index m_index {};               ///< Position in the current node
 };
 
-} // cub
+} // calico
 
-#endif // CUB_DB_READER_IMPL_H
+#endif // CALICO_DB_READER_IMPL_H

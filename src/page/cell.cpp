@@ -5,7 +5,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cub {
+namespace calico {
 
 auto Cell::read_at(const Node &node, Index offset) -> Cell
 {
@@ -111,7 +111,7 @@ auto Cell::write(Bytes out) const -> void
     mem_copy(out, local, local.size());
 
     if (!m_overflow_id.is_null()) {
-        CUB_EXPECT_LT(local.size(), m_value_size);
+        CALICO_EXPECT_LT(local.size(), m_value_size);
         out.advance(local.size());
         put_uint32(out, m_overflow_id.value);
     }
@@ -135,7 +135,7 @@ auto Cell::detach(Scratch scratch) -> void
 
 auto make_cell(BytesView key, BytesView value, Size page_size) -> Cell
 {
-    CUB_EXPECT_FALSE(key.is_empty());
+    CALICO_EXPECT_FALSE(key.is_empty());
     const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
     Cell::Parameters param;
     param.key = key;
@@ -143,7 +143,7 @@ auto make_cell(BytesView key, BytesView value, Size page_size) -> Cell
     param.value_size = value.size();
 
     if (local_value_size != value.size()) {
-        CUB_EXPECT_LT(local_value_size, value.size());
+        CALICO_EXPECT_LT(local_value_size, value.size());
         param.local_value.truncate(local_value_size);
         // Set to an arbitrary value.
         param.overflow_id = PID::root();
@@ -151,4 +151,4 @@ auto make_cell(BytesView key, BytesView value, Size page_size) -> Cell
     return Cell {param};
 }
 
-} // cub
+} // calico

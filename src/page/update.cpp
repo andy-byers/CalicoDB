@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace cub {
+namespace calico {
 
 namespace impl {
     auto can_merge(const Range &lhs, const Range &rhs) -> bool
@@ -102,7 +102,7 @@ auto UpdateManager::collect_changes(BytesView snapshot) -> std::vector<ChangedRe
     return update;
 }
 
-} // cub
+} // calico
 
 
 

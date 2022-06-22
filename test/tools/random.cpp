@@ -1,6 +1,6 @@
 #include "random.h"
 
-namespace cub {
+namespace calico {
 
 /**
  * Create a random number generator with a default seed.
@@ -79,4 +79,4 @@ auto Random::next_binary(Size size) -> std::string
     return result;
 }
 
-} // cub
+} // calico

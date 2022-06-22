@@ -1,10 +1,10 @@
-#ifndef CUB_PAGE_CELL_H
-#define CUB_PAGE_CELL_H
+#ifndef CALICO_PAGE_CELL_H
+#define CALICO_PAGE_CELL_H
 
 #include <optional>
 #include "page.h"
 
-namespace cub {
+namespace calico {
 
 class Node;
 
@@ -49,6 +49,6 @@ private:
 
 auto make_cell(BytesView, BytesView, Size) -> Cell;
 
-} // cub
+} // calico
 
-#endif // CUB_PAGE_CELL_H
+#endif // CALICO_PAGE_CELL_H

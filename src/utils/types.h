@@ -3,12 +3,12 @@
  * (1) https://en.cppreference.com/w/cpp/utility/exchange
  */
 
-#ifndef CUB_UTILS_TYPES_H
-#define CUB_UTILS_TYPES_H
+#ifndef CALICO_UTILS_TYPES_H
+#define CALICO_UTILS_TYPES_H
 
-#include "cub/common.h"
+#include "calico/options.h"
 
-namespace cub {
+namespace calico {
 
 template<class Value> struct Unique {
 
@@ -34,6 +34,6 @@ template<class Value> struct Unique {
     Value value;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_UTILS_TYPES_H
+#endif // CALICO_UTILS_TYPES_H

@@ -1,10 +1,10 @@
 
 #include "wal_record.h"
-#include "cub/exception.h"
+#include "calico/exception.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
 
-namespace cub {
+namespace calico {
 
 namespace {
 
@@ -33,7 +33,7 @@ WALPayload::WALPayload(const Parameters &param)
 
     for (const auto &change: param.changes) {
         const auto size = change.before.size();
-        CUB_EXPECT_EQ(size, change.after.size());
+        CALICO_EXPECT_EQ(size, change.after.size());
         auto chunk = std::string(UPDATE_HEADER_SIZE + 2*size, '\x00');
         bytes = stob(chunk);
 
@@ -141,7 +141,7 @@ auto WALRecord::read(BytesView in) -> void
 
 auto WALRecord::write(Bytes out) const noexcept -> void
 {
-    CUB_EXPECT_GE(out.size(), size());
+    CALICO_EXPECT_GE(out.size(), size());
 
     // lsn (4B)
     put_uint32(out, static_cast<uint32_t>(m_lsn.value));
@@ -152,13 +152,13 @@ auto WALRecord::write(Bytes out) const noexcept -> void
     out.advance(sizeof(uint32_t));
 
     // type (1B)
-    CUB_EXPECT_TRUE(is_record_type_valid(m_type));
+    CALICO_EXPECT_TRUE(is_record_type_valid(m_type));
     out[0] = static_cast<Byte>(m_type);
     out.advance(sizeof(Type));
 
     // x (2B)
     const auto payload_size = m_payload.m_data.size();
-    CUB_EXPECT_NE(payload_size, 0);
+    CALICO_EXPECT_NE(payload_size, 0);
     put_uint16(out, static_cast<uint16_t>(payload_size));
     out.advance(sizeof(uint16_t));
 
@@ -168,7 +168,7 @@ auto WALRecord::write(Bytes out) const noexcept -> void
 
 auto WALRecord::is_consistent() const -> bool
 {
-    CUB_EXPECT_EQ(m_type, Type::FULL);
+    CALICO_EXPECT_EQ(m_type, Type::FULL);
     return m_crc == crc_32(m_payload.data());
 }
 
@@ -183,7 +183,7 @@ auto WALRecord::is_consistent() const -> bool
  */
 auto WALRecord::split(Index offset_in_payload) -> WALRecord
 {
-    CUB_EXPECT_LT(offset_in_payload, m_payload.m_data.size());
+    CALICO_EXPECT_LT(offset_in_payload, m_payload.m_data.size());
     WALRecord rhs;
 
     rhs.m_payload.m_data = m_payload.m_data.substr(offset_in_payload);
@@ -193,12 +193,12 @@ auto WALRecord::split(Index offset_in_payload) -> WALRecord
     rhs.m_crc = m_crc;
     rhs.m_type = Type::LAST;
 
-    CUB_EXPECT_NE(m_type, Type::EMPTY);
-    CUB_EXPECT_NE(m_type, Type::FIRST);
+    CALICO_EXPECT_NE(m_type, Type::EMPTY);
+    CALICO_EXPECT_NE(m_type, Type::FIRST);
     if (m_type == Type::FULL) {
         m_type = Type::FIRST;
     } else {
-        CUB_EXPECT_EQ(m_type, Type::LAST);
+        CALICO_EXPECT_EQ(m_type, Type::LAST);
         m_type = Type::MIDDLE;
     }
     return rhs;
@@ -217,7 +217,7 @@ auto WALRecord::split(Index offset_in_payload) -> WALRecord
  */
 auto WALRecord::merge(const WALRecord &rhs) -> void
 {
-    CUB_EXPECT_TRUE(is_record_type_valid(rhs.m_type));
+    CALICO_EXPECT_TRUE(is_record_type_valid(rhs.m_type));
     m_payload.append(rhs.m_payload);
 
     if (m_type == Type::EMPTY) {
@@ -229,7 +229,7 @@ auto WALRecord::merge(const WALRecord &rhs) -> void
         m_crc = rhs.m_crc;
 
     } else {
-        CUB_EXPECT_EQ(m_type, Type::FIRST);
+        CALICO_EXPECT_EQ(m_type, Type::FIRST);
 
         if (m_lsn != rhs.m_lsn)
             throw CorruptionError {"WAL records have mismatched LSNs"};
@@ -243,4 +243,4 @@ auto WALRecord::merge(const WALRecord &rhs) -> void
     }
 }
 
-} // cub
+} // calico

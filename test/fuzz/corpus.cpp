@@ -3,8 +3,8 @@
 #include <fstream>
 #include "fuzzers.h"
 
-using namespace cub;
-using namespace cub::fuzz;
+using namespace calico;
+using namespace calico::fuzz;
 
 auto generate_operation_seed(const std::string &path, Size num_operations)
 {

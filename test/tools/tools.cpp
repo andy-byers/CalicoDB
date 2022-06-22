@@ -8,8 +8,9 @@
 #include "file/file.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_record.h"
+#include "utils/logging.h"
 
-namespace cub {
+namespace calico {
 
 TreeValidator::TreeValidator(ITree &tree)
     : m_tree{tree} { }
@@ -33,7 +34,7 @@ auto TreeValidator::validate_sibling_connections() -> void
             const auto key = btos(node.read_key(cid));
             // Strict ordering.
             if (prev)
-                CUB_EXPECT_LT(*prev, key);
+                CALICO_EXPECT_LT(*prev, key);
             prev = key;
         }
         const auto next_id = node.right_sibling_id();
@@ -47,10 +48,10 @@ auto TreeValidator::validate_parent_child_connections() -> void
 {
     auto check_connection = [&](Node &node, Index index) -> void {
         auto child = m_tree.acquire_node(node.child_id(index), false);
-        CUB_EXPECT_EQ(child.parent_id(), node.id());
+        CALICO_EXPECT_EQ(child.parent_id(), node.id());
     };
     traverse_inorder([&](Node &node, Index cid) -> void {
-        CUB_EXPECT_LT(cid, node.cell_count());
+        CALICO_EXPECT_LT(cid, node.cell_count());
         if (!node.is_external()) {
             check_connection(node, cid);
             // Rightmost child.
@@ -65,7 +66,7 @@ auto TreeValidator::validate_ordering() -> void
     const auto keys = collect_keys();
     auto sorted = keys;
     std::sort(sorted.begin(), sorted.end());
-    CUB_EXPECT_EQ(keys, sorted);
+    CALICO_EXPECT_EQ(keys, sorted);
 }
 
 auto TreeValidator::collect_keys() -> std::vector<std::string>
@@ -84,7 +85,7 @@ auto TreeValidator::traverse_inorder(const std::function<void(Node&, Index)> &ca
 
 auto TreeValidator::traverse_inorder_helper(Node node, const std::function<void(Node&, Index)> &callback) -> void
 {
-    CUB_VALIDATE(node.validate());
+    CALICO_VALIDATE(node.validate());
 
     const auto id = node.id();
     for (Index index{}; index <= node.cell_count(); ++index) {
@@ -142,7 +143,7 @@ auto TreePrinter::add_spaces_to_level(Size n, Index level) -> void
 auto TreePrinter::add_spaces_to_other_levels(Size n, Index excluded) -> void
 {
     // If excluded is equal to m_levels.size(), add spaces to all levels.
-    CUB_EXPECT_LE(excluded, m_levels.size());
+    CALICO_EXPECT_LE(excluded, m_levels.size());
     for (Index level{}; level < m_levels.size(); ++level) {
         if (level != excluded)
             add_spaces_to_level(n, level);
@@ -224,7 +225,7 @@ auto TreePrinter::ensure_level_exists(Index level) -> void
 {
     while (level >= m_levels.size())
         m_levels.emplace_back();
-    CUB_EXPECT_GT(m_levels.size(), level);
+    CALICO_EXPECT_GT(m_levels.size(), level);
 }
 
 unsigned RecordGenerator::default_seed = 0;
@@ -268,14 +269,14 @@ auto WALPrinter::print(const WALRecord &record) -> void
 auto WALPrinter::print(const std::string &path, Size block_size) -> void
 {
     auto file = std::make_unique<ReadOnlyFile>(path, Mode::DIRECT, 0666);
-    WALReader reader {std::move(file), block_size};
+    WALReader reader {{path, std::move(file), logging::create_sink("", 0), block_size}};
     print(reader);
 }
 
 auto WALPrinter::print(SharedMemory data, Size block_size) -> void
 {
     auto file = std::make_unique<ReadOnlyMemory>(std::move(data));
-    WALReader reader {std::move(file), block_size};
+    WALReader reader {{"FakeWALReader", std::move(file), logging::create_sink("", 0), block_size}};
     print(reader);
 }
 
@@ -283,9 +284,9 @@ auto WALPrinter::print(WALReader &reader) -> void
 {
     reader.reset();
     do {
-        CUB_EXPECT_NE(reader.record(), std::nullopt);
+        CALICO_EXPECT_NE(reader.record(), std::nullopt);
         print(*reader.record());
     } while (reader.increment());
 }
 
-} // cub
+} // calico

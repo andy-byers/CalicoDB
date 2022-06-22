@@ -1,28 +1,29 @@
 #include <limits>
 #include "fakes.h"
+#include "utils/logging.h"
 
-namespace cub {
+namespace calico {
 
 namespace {
 
     auto do_seek(Index cursor, Size file_size, long offset, Seek whence)
     {
-        CUB_EXPECT_BOUNDED_BY(long, cursor);
+        CALICO_EXPECT_BOUNDED_BY(long, cursor);
         const auto position = static_cast<long>(cursor);
 
         if (whence == Seek::BEGIN) {
-            CUB_EXPECT_GE(offset, 0);
+            CALICO_EXPECT_GE(offset, 0);
             cursor = static_cast<Size>(offset);
         } else if (whence == Seek::CURRENT) {
-            CUB_EXPECT_GE(position + offset, 0);
+            CALICO_EXPECT_GE(position + offset, 0);
             cursor = static_cast<Size>(position + offset);
         } else {
             const auto end = static_cast<long>(file_size);
-            CUB_EXPECT_EQ(whence, Seek::END);
-            CUB_EXPECT_GE(end + offset, 0);
+            CALICO_EXPECT_EQ(whence, Seek::END);
+            CALICO_EXPECT_GE(end + offset, 0);
             cursor = static_cast<Size>(end + offset);
         }
-        CUB_EXPECT_GE(static_cast<off_t>(cursor), 0);
+        CALICO_EXPECT_GE(static_cast<off_t>(cursor), 0);
         return cursor;
     }
 
@@ -142,8 +143,9 @@ WALHarness::WALHarness(Size block_size)
     auto writer_file = std::make_unique<FaultyLogMemory>();
     backing = writer_file->memory();
     auto reader_file = std::make_unique<FaultyReadOnlyMemory>(backing);
-    writer = std::make_unique<WALWriter>(std::move(writer_file), block_size);
-    reader = std::make_unique<WALReader>(std::move(reader_file), block_size);
+    auto sink = logging::create_sink("", 0);
+    writer = std::make_unique<WALWriter>(WALWriter::Parameters {"", std::move(writer_file), sink, block_size});
+    reader = std::make_unique<WALReader>(WALReader::Parameters {"", std::move(reader_file), sink, block_size});
 }
 
 WALHarness::~WALHarness() = default;
@@ -165,7 +167,12 @@ auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
     std::string header_backing(page_size, '\x00');
     FileHeader header {stob(header_backing)};
     FaultyDatabase db;
+    Options options;
 
+    options.use_transactions = true;
+    options.log_path = "";
+    options.log_level = 0;
+    options.frame_count = 0x10;
     header.set_page_size(page_size);
     header.set_block_size(page_size);
 
@@ -184,8 +191,7 @@ auto FaultyDatabase::create(Size page_size) -> FaultyDatabase
         std::move(wal_reader_file),
         std::move(wal_writer_file),
         header,
-        0x10, // Use a small number of frames to force a lot of I/O.
-        true,
+        options,
     });
     db.page_size = page_size;
     return db;
@@ -196,6 +202,12 @@ auto FaultyDatabase::clone() -> FaultyDatabase
     auto root_page = stob(tree_backing.memory()).truncate(page_size);
     FileHeader header {root_page};
     FaultyDatabase new_db;
+    Options options;
+
+    options.use_transactions = true;
+    options.log_path = "";
+    options.log_level = 0;
+    options.frame_count = 0x10;
 
     auto tree_file = std::make_unique<FaultyReadWriteMemory>(tree_backing);
     auto wal_reader_file = std::make_unique<FaultyReadOnlyMemory>(wal_backing);
@@ -211,11 +223,10 @@ auto FaultyDatabase::clone() -> FaultyDatabase
         std::move(wal_reader_file),
         std::move(wal_writer_file),
         header,
-        DEFAULT_FRAME_COUNT,
-        true,
+        options,
     });
     new_db.page_size = page_size;
     return new_db;
 }
 
-} // cub
+} // calico

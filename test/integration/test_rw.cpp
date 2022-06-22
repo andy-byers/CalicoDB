@@ -8,32 +8,32 @@
 #include <thread>
 #include <vector>
 #include <gtest/gtest.h>
-#include "cub/cursor.h"
-#include "cub/database.h"
+#include "calico/cursor.h"
+#include "calico/database.h"
 #include "utils/expect.h"
 #include "tools.h"
 
 namespace {
-using namespace cub;
+using namespace calico;
 
-constexpr auto TEST_PATH = "/tmp/cub_test";
+constexpr auto TEST_PATH = "/tmp/calico_test";
 
 auto reader_task(Database *db) -> void*
 {
     auto cursor = db->get_cursor();
     const auto expected_size = db->get_info().record_count();
-    CUB_EXPECT_GT(expected_size, 1);
+    CALICO_EXPECT_GT(expected_size, 1);
     cursor.find_minimum();
     const auto value = cursor.value();
     Size counter {1};
 
     while (cursor.increment()) {
         // We should be able to call the read*() methods from many threads.
-        CUB_EXPECT_EQ(db->read(cursor.key(), Ordering::EQ)->value, value);
-        CUB_EXPECT_EQ(cursor.value(), value);
+        CALICO_EXPECT_EQ(db->read(cursor.key(), Ordering::EQ)->value, value);
+        CALICO_EXPECT_EQ(cursor.value(), value);
         counter++;
     }
-    CUB_EXPECT_EQ(counter, expected_size);
+    CALICO_EXPECT_EQ(counter, expected_size);
     return nullptr;
 }
 
@@ -93,7 +93,7 @@ TEST(ReaderWriterTests, ManyReaders)
     std::vector<std::thread> threads;
     for (auto choice: choices) {
         threads.emplace_back(reader_task, &db);
-        CUB_EXPECT_EQ(choice, 'r');
+        CALICO_EXPECT_EQ(choice, 'r');
     }
 
     for (auto &thread: threads)

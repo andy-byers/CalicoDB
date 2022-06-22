@@ -1,10 +1,10 @@
-#ifndef CUB_UTILS_IDENTIFIER_H
-#define CUB_UTILS_IDENTIFIER_H
+#ifndef CALICO_UTILS_IDENTIFIER_H
+#define CALICO_UTILS_IDENTIFIER_H
 
 #include "expect.h"
 #include "utils.h"
 
-namespace cub {
+namespace calico {
 
 struct IdentifierHash;
 
@@ -31,7 +31,7 @@ struct Identifier {
     template<class Id> explicit Identifier(Id id) noexcept
         : value {static_cast<uint32_t>(id)}
     {
-        CUB_EXPECT_BOUNDED_BY(uint32_t, static_cast<std::make_unsigned_t<Id>>(id));
+        CALICO_EXPECT_BOUNDED_BY(uint32_t, static_cast<std::make_unsigned_t<Id>>(id));
     }
 
     auto operator==(const Identifier &rhs) const noexcept -> bool
@@ -71,7 +71,7 @@ struct Identifier {
 
     [[nodiscard]] auto as_index() const noexcept -> Index
     {
-        CUB_EXPECT_GE(value, ROOT_ID_VALUE);
+        CALICO_EXPECT_GE(value, ROOT_ID_VALUE);
         return value - ROOT_ID_VALUE;
     }
 
@@ -155,6 +155,6 @@ struct LSN final: public Identifier {
     }
 };
 
-} // cub
+} // calico
 
-#endif // CUB_UTILS_IDENTIFIER_H
+#endif // CALICO_UTILS_IDENTIFIER_H
