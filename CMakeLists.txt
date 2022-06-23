@@ -1,16 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 
 SET(
-    CMAKE_CXX_FLAGS_RELWITHASSERTIONS
-    "-O3"
-    CACHE STRING "C++ compiler flags for a RelWithAssertions build"
-    FORCE
+    CMAKE_CXX_FLAGS_RELWITHASSERTIONS "-O3"
+    CACHE STRING "C++ compiler flags for a RelWithAssertions build" FORCE
 )
 SET(
-    CMAKE_C_FLAGS_RELWITHASSERTIONS
-    "-O3"
-    CACHE STRING "C compiler flags for a RelWithAssertions build"
-    FORCE
+    CMAKE_C_FLAGS_RELWITHASSERTIONS "-O3"
+    CACHE STRING "C compiler flags for a RelWithAssertions build" FORCE
 )
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
@@ -70,7 +66,7 @@ target_include_directories("${CALICO_NAME}"
         PUBLIC $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_options("${CALICO_NAME}" PRIVATE "${CALICO_WARNINGS}")
-target_link_libraries("${CALICO_NAME}" PUBLIC spdlog::spdlog zlib)
+target_link_libraries("${CALICO_NAME}" PUBLIC pthread spdlog::spdlog zlib)
 
 if(CALICO_USE_VALIDATORS)
     target_compile_definitions("${CALICO_NAME}" PRIVATE CALICO_USE_VALIDATORS)
