@@ -83,8 +83,9 @@ public:
     static const Size FREE_COUNT_OFFSET = 14;
     static const Size CELL_START_OFFSET = 16;
     static const Size FREE_START_OFFSET = 18;
-    static const Size FRAG_COUNT_OFFSET = 20;
-    static const Size HEADER_SIZE = 22;
+    static const Size FRAG_TOTAL_OFFSET = 20;
+    static const Size FREE_TOTAL_OFFSET = 22;
+    static const Size HEADER_SIZE = 24;
 
     static auto header_offset(PID page_id) noexcept -> Size
     {

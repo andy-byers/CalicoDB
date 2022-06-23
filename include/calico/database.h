@@ -192,6 +192,13 @@ public:
      */
     [[nodiscard]] auto uses_transactions() const -> bool;
 
+    /**
+     * Determine if the database exists only in-memory.
+     *
+     * @return True if the database is an in-memory database, false otherwise.
+     */
+    [[nodiscard]] auto is_temp() const -> bool;
+
 private:
     friend class Database;
     Info() = default;

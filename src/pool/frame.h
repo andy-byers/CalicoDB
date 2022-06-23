@@ -16,6 +16,9 @@ class Page;
  */
 class Frame final {
 public:
+    using Reference = std::reference_wrapper<Frame>;
+    using ConstReference = std::reference_wrapper<const Frame>;
+
     explicit Frame(Size);
     ~Frame() = default;
 

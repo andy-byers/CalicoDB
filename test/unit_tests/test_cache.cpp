@@ -3,7 +3,7 @@
 
 #include "page/page.h"
 #include "pool/frame.h"
-#include "pool/cache.h"
+#include "pool/page_cache.h"
 
 namespace {
 

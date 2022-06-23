@@ -45,10 +45,7 @@ public:
 
     [[nodiscard]] auto can_commit() const -> bool override
     {
-        if (!m_uses_transactions)
-            throw std::logic_error {"Transactions are not enabled"};
-
-        return !m_stack.empty();
+        return m_uses_transactions && !m_stack.empty();
     }
 
     [[nodiscard]] auto uses_transactions() const -> bool override

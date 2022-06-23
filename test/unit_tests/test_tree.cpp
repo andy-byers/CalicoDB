@@ -694,22 +694,24 @@ TEST_F(TreeTests, FixesRootAfterRightMerge)
     ASSERT_FALSE(tree().node_contains(PID{1}, make_key<1>(9)));
 }
 
-TEST_F(TreeTests, LeftMergeWithChildSplit)
-{
-    //      1:[5]               -->          1:[10]
-    // 2:[1]     3:[9, 10, 11]       2:[5, 9]      3:[11]
-    auto builder = TreeBuilder{tree()};
-    setup_fixes_root_after_merge_test<2>(builder);
-    builder.node_insert(PID {3}, make_key<2>(10));
-    builder.node_insert(PID {3}, make_key<2>(11));
-    ASSERT_TRUE(tree_remove(tree(), make_key<2>(1)));
-
-    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<2>(5)));
-    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<2>(9)));
-    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<2>(10)));
-    ASSERT_TRUE(tree().node_contains(PID {3}, make_key<2>(11)));
-    validate();
-}
+//TEST_F(TreeTests, LeftMergeWithChildSplit)
+//{
+//    //      1:[5]               -->          1:[10]
+//    // 2:[1]     3:[9, 10, 11]       2:[5, 9]      3:[11]
+//    TreeBuilder builder {tree()};
+//    setup_fixes_root_after_merge_test<2>(builder);
+//    builder.node_insert(PID {3}, make_key<2>(10));
+//    builder.node_insert(PID {3}, make_key<2>(11));
+//    ASSERT_TRUE(tree_remove(tree(), make_key<2>(1)));
+//
+//    TreePrinter {tree()}.print();
+//
+//    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<2>(5)));
+//    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<2>(9)));
+//    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<2>(10)));
+//    ASSERT_TRUE(tree().node_contains(PID {3}, make_key<2>(11)));
+//    validate();
+//}
 
 TEST_F(TreeTests, RightMergeWithChildSplit)
 {

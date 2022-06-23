@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <spdlog/logger.h>
-#include "cache.h"
+#include "page_cache.h"
 #include "frame.h"
 #include "interface.h"
 #include "pager.h"
@@ -93,7 +93,6 @@ private:
     auto try_evict_frame() -> bool;
 
     mutable std::mutex m_mutex;
-    std::unordered_map<PID, Frame, PID::Hasher> m_pinned;
     std::unique_ptr<IWALReader> m_wal_reader;
     std::unique_ptr<IWALWriter> m_wal_writer;
     std::shared_ptr<spdlog::logger> m_logger;

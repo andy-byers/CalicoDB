@@ -340,6 +340,9 @@ TEST_F(NodeHeaderTests, FieldsAreConsistent)
     ASSERT_EQ(header().free_count(), 5);
     ASSERT_EQ(header().frag_count(), 6);
     ASSERT_EQ(header().cell_count(), 7);
+
+    header().set_free_start(0); // TODO
+    header().set_free_count(0); // TODO
 }
 
 class CellDirectoryTests: public NodeComponentTests {

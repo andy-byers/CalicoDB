@@ -37,6 +37,7 @@ public:
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto uses_transactions() const -> Size;
+    [[nodiscard]] auto is_temp() const -> bool;
     auto read(BytesView, Ordering) -> std::optional<Record>;
     auto read_minimum() -> std::optional<Record>;
     auto read_maximum() -> std::optional<Record>;

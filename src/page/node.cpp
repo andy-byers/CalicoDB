@@ -50,7 +50,12 @@ auto NodeHeader::free_start() const -> Index
 
 auto NodeHeader::frag_count() const -> Size
 {
-    return m_page->get_u16(header_offset() + NodeLayout::FRAG_COUNT_OFFSET);
+    return m_page->get_u16(header_offset() + NodeLayout::FRAG_TOTAL_OFFSET);
+}
+
+auto NodeHeader::free_total() const -> Size
+{
+    return m_page->get_u16(header_offset() + NodeLayout::FREE_TOTAL_OFFSET);
 }
 
 auto NodeHeader::update_header_crc() -> void
@@ -108,7 +113,13 @@ auto NodeHeader::set_free_start(Index free_start) -> void
 auto NodeHeader::set_frag_count(Size frag_count) -> void
 {
     CALICO_EXPECT_BOUNDED_BY(uint16_t, frag_count);
-    m_page->put_u16(header_offset() + NodeLayout::FRAG_COUNT_OFFSET, static_cast<uint16_t>(frag_count));
+    m_page->put_u16(header_offset() + NodeLayout::FRAG_TOTAL_OFFSET, static_cast<uint16_t>(frag_count));
+}
+
+auto NodeHeader::set_free_total(Size free_total) -> void
+{
+    CALICO_EXPECT_BOUNDED_BY(uint16_t, free_total);
+    m_page->put_u16(header_offset() + NodeLayout::FREE_TOTAL_OFFSET, static_cast<uint16_t>(free_total));
 }
 
 auto NodeHeader::cell_pointers_offset() const -> Size
@@ -180,38 +191,31 @@ auto CellDirectory::remove_pointer(Index index) -> void
 }
 
 BlockAllocator::BlockAllocator(NodeHeader &header)
-    : m_page {&header.page()}
-      , m_header {&header}
+    : m_page {&header.page()},
+      m_header {&header} {}
+
+auto BlockAllocator::usable_space() const -> Size
 {
-    // Don't compute the free block total yet. If the page is from the freelist, the header may contain junk.
+    return m_header->free_total() + m_header->gap_size();
 }
 
 auto BlockAllocator::reset() -> void
 {
+    CALICO_EXPECT_TRUE(m_page->is_writable());
     m_header->set_frag_count(0);
     m_header->set_free_count(0);
-    recompute_usable_space();
+    m_header->set_free_total(0);
 }
 
 auto BlockAllocator::compute_free_total() const -> Size
 {
-    auto usable_space = m_header->frag_count();
+    auto free_total = m_header->frag_count();
     for (Index i {}, ptr {m_header->free_start()}; i < m_header->free_count(); ++i) {
-        usable_space += get_block_size(ptr);
+        free_total += get_block_size(ptr);
         ptr = get_next_pointer(ptr);
     }
-    CALICO_EXPECT_LE(usable_space, m_page->size() - m_header->cell_pointers_offset());
-    return usable_space;
-}
-
-auto BlockAllocator::recompute_usable_space() -> void
-{
-    m_free_total = compute_free_total();
-}
-
-auto BlockAllocator::usable_space() const -> Size
-{
-    return m_free_total + m_header->gap_size();
+    CALICO_EXPECT_LE(free_total, m_page->size() - m_header->cell_pointers_offset());
+    return free_total;
 }
 
 auto BlockAllocator::get_next_pointer(Index offset) const -> Index
@@ -264,6 +268,7 @@ auto BlockAllocator::allocate_from_gap(Size needed_size) -> Index
 
 auto BlockAllocator::allocate(Size needed_size) -> Index
 {
+    CALICO_EXPECT_TRUE(m_page->is_writable());
     CALICO_EXPECT_LT(needed_size, m_page->size() - NodeLayout::content_offset(m_page->id()));
 
     if (needed_size > usable_space())
@@ -300,7 +305,9 @@ auto BlockAllocator::take_free_space(Index ptr0, Index ptr1, Size needed_size) -
     } else {
         set_block_size(ptr1, diff);
     }
-    m_free_total -= needed_size;
+    const auto free_total = m_header->free_total();
+    CALICO_EXPECT_GE(free_total, needed_size);
+    m_header->set_free_total(free_total - needed_size);
     return ptr1 + diff;
 }
 
@@ -316,7 +323,7 @@ auto BlockAllocator::free(Index ptr, Size size) -> void
         m_header->set_free_count(m_header->free_count() + 1);
         m_header->set_free_start(ptr);
     }
-    m_free_total += size;
+    m_header->set_free_total(m_header->free_total() + size);
 }
 
 auto Node::header_crc() const -> Index
@@ -620,12 +627,12 @@ auto Node::remove_at(Index index, Size local_size) -> void
 auto Node::reset(bool reset_header) -> void
 {
     if (reset_header) {
+        CALICO_EXPECT_TRUE(m_page.is_writable());
         auto chunk = m_page.mut_range(header_offset(), NodeLayout::HEADER_SIZE);
         mem_clear(chunk, chunk.size());
         m_header.set_cell_start(m_page.size());
     }
     m_overflow.reset();
-    m_allocator.recompute_usable_space();
 }
 
 auto transfer_cell(Node &src, Node &dst, Index index) -> void

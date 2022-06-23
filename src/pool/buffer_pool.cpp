@@ -71,8 +71,8 @@ auto BufferPool::fetch_page(PID id, bool is_writable) -> Page
     propagate_page_error();
 
     const auto try_fetch = [id, is_writable, this]() -> std::optional<Page> {
-        if (auto itr = m_pinned.find(id); itr != m_pinned.end()) {
-            auto page = itr->second.borrow(this, is_writable);
+        if (auto ref = m_cache.get(id)) {
+            auto page = ref->get().borrow(this, is_writable);
             m_ref_sum++;
             return page;
         }
@@ -84,7 +84,7 @@ auto BufferPool::fetch_page(PID id, bool is_writable) -> Page
         return std::move(*page);
 
     // Get page from cache or disk.
-    m_pinned.emplace(id, fetch_frame(id));
+    m_cache.put(id, fetch_frame(id));
     auto page = try_fetch();
     CALICO_EXPECT_NE(page, std::nullopt);
     return std::move(*page);
@@ -131,6 +131,7 @@ auto BufferPool::fetch_frame(PID id) -> Frame
         return std::move(*frame);
 
     if (!try_flush_wal()) {
+        // TODO: Make sure we get rid of excess frames when we don't need them anymore.
         m_pager.unpin(Frame {m_pager.page_size()});
         return *m_pager.pin(id);
     }
@@ -147,18 +148,12 @@ auto BufferPool::on_page_release(Page &page) -> void
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_ref_sum, 0);
 
-    auto itr = m_pinned.find(page.id());
-    CALICO_EXPECT_NE(itr, m_pinned.end());
+    auto ref = m_cache.get(page.id());
+    CALICO_EXPECT_NE(ref, std::nullopt);
+    auto &frame = ref->get();
 
-    auto &frame = itr->second;
     m_dirty_count += !frame.is_dirty() && page.is_dirty();
     frame.synchronize(page);
-
-    if (!frame.ref_count()) {
-        const auto id = frame.page_id();
-        m_cache.put(id, std::move(frame));
-        m_pinned.erase(itr);
-    }
     m_ref_sum--;
 }
 
@@ -235,7 +230,7 @@ auto BufferPool::roll_backward() -> void
 
 auto BufferPool::commit() -> void
 {
-    CALICO_EXPECT_TRUE(m_pinned.empty());
+    CALICO_EXPECT_EQ(m_ref_sum, 0);
     m_logger->trace("starting commit");
 
     if (m_uses_transactions) {
@@ -255,7 +250,7 @@ auto BufferPool::commit() -> void
 
 auto BufferPool::abort() -> void
 {
-    CALICO_EXPECT_TRUE(m_pinned.empty());
+    CALICO_EXPECT_EQ(m_ref_sum, 0);
     CALICO_EXPECT_TRUE(m_uses_transactions);
     m_logger->trace("starting abort");
 
@@ -309,8 +304,7 @@ auto BufferPool::recover() -> bool
 
 auto BufferPool::try_flush() -> bool
 {
-    CALICO_EXPECT_TRUE(m_pinned.empty());
-
+    CALICO_EXPECT_EQ(m_ref_sum, 0);
     if (m_cache.is_empty())
         return false;
     std::optional<Frame> frame;
@@ -323,7 +317,9 @@ auto BufferPool::try_evict_frame() -> bool
     for (Index i {}; i < m_cache.size(); ++i) {
         auto frame = m_cache.evict();
         CALICO_EXPECT_NE(frame, std::nullopt);
-        if (!frame->is_dirty() || frame->page_lsn() <= m_flushed_lsn) {
+        const auto not_pinned = frame->ref_count() == 0;
+        const auto is_safe = !frame->is_dirty() || frame->page_lsn() <= m_flushed_lsn;
+        if (not_pinned && is_safe) {
             m_dirty_count -= frame->is_dirty();
             m_pager.unpin(std::move(*frame));
             return true;

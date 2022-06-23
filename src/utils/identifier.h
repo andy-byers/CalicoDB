@@ -88,7 +88,7 @@ inline auto operator+(const Identifier &lhs, const Identifier &rhs) noexcept -> 
 struct IdentifierHash {
     auto operator()(const Identifier &id) const -> size_t
     {
-        return std::hash<uint32_t> {}(id.value);
+        return id.value;
     }
 };
 

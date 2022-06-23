@@ -57,6 +57,11 @@ auto Info::uses_transactions() const -> bool
     return m_db->uses_transactions();
 }
 
+auto Info::is_temp() const -> bool
+{
+    return m_db->is_temp();
+}
+
 Database::Impl::~Impl()
 {
     auto committed = true;
@@ -323,6 +328,11 @@ auto Database::Impl::page_size() const -> Size
 auto Database::Impl::uses_transactions() const -> Size
 {
     return m_pool->uses_transactions();
+}
+
+auto Database::Impl::is_temp() const -> bool
+{
+    return m_is_temp;
 }
 
 auto get_initial_state(const std::string &path, const Options &options) -> InitialState
