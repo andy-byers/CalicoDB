@@ -1,6 +1,7 @@
 #ifndef CALICO_UTILS_CACHE_H
 #define CALICO_UTILS_CACHE_H
 
+#include <functional>
 #include <list>
 #include <unordered_map>
 #include "calico/common.h"
