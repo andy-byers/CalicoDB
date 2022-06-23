@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include "cub/bytes.h"
-#include "cub/common.h"
+#include "calico/bytes.h"
+#include "calico/options.h"
 #include "random.h"
 #include "unit_tests.h"
 #include "page/cell.h"
@@ -14,7 +14,7 @@
 
 namespace {
 
-using namespace cub;
+using namespace calico;
 using Range = UpdateManager::Range;
 
 
@@ -25,58 +25,58 @@ TEST(UpdateTests, BasicAssertions)
     // 0  1  2  3  4
     // |--------|
     // |--------|
-    CUB_EXPECT_TRUE(can_merge({0, 3}, {0, 3}));
+    CALICO_EXPECT_TRUE(can_merge({0, 3}, {0, 3}));
     const auto res_1 = merge({0, 3}, {0, 3});
-    CUB_EXPECT_EQ(res_1.x, 0);
-    CUB_EXPECT_EQ(res_1.dx, 3);
+    CALICO_EXPECT_EQ(res_1.x, 0);
+    CALICO_EXPECT_EQ(res_1.dx, 3);
 
     // 0  1  2  3  4
     // |--------|
     // |-----|
-    CUB_EXPECT_TRUE(can_merge({0, 3}, {0, 2}));
+    CALICO_EXPECT_TRUE(can_merge({0, 3}, {0, 2}));
     const auto res_2 = merge({0, 3}, {0, 2});
-    CUB_EXPECT_EQ(res_2.x, 0);
-    CUB_EXPECT_EQ(res_2.dx, 3);
+    CALICO_EXPECT_EQ(res_2.x, 0);
+    CALICO_EXPECT_EQ(res_2.dx, 3);
 
     // 0  1  2  3  4
     // |--------|
     // |-----------|
-    CUB_EXPECT_TRUE(can_merge({0, 3}, {0, 4}));
+    CALICO_EXPECT_TRUE(can_merge({0, 3}, {0, 4}));
     const auto res_3 = merge({0, 3}, {0, 4});
-    CUB_EXPECT_EQ(res_3.x, 0);
-    CUB_EXPECT_EQ(res_3.dx, 4);
+    CALICO_EXPECT_EQ(res_3.x, 0);
+    CALICO_EXPECT_EQ(res_3.dx, 4);
 
     // 0  1  2  3  4
     // |--------|
     //    |--|
-    CUB_EXPECT_TRUE(can_merge({0, 3}, {1, 1}));
+    CALICO_EXPECT_TRUE(can_merge({0, 3}, {1, 1}));
     const auto res_4 = merge({0, 3}, {1, 1});
-    CUB_EXPECT_EQ(res_4.x, 0);
-    CUB_EXPECT_EQ(res_4.dx, 3);
+    CALICO_EXPECT_EQ(res_4.x, 0);
+    CALICO_EXPECT_EQ(res_4.dx, 3);
 
     // 0  1  2  3  4
     // |--------|
     //    |-----|
-    CUB_EXPECT_TRUE(can_merge({0, 3}, {1, 2}));
+    CALICO_EXPECT_TRUE(can_merge({0, 3}, {1, 2}));
     const auto res_5 = merge({0, 3}, {1, 2});
-    CUB_EXPECT_EQ(res_5.x, 0);
-    CUB_EXPECT_EQ(res_5.dx, 3);
+    CALICO_EXPECT_EQ(res_5.x, 0);
+    CALICO_EXPECT_EQ(res_5.dx, 3);
 
     // 0  1  2  3  4
     // |--------|
     //    |--------|
-    CUB_EXPECT_TRUE(can_merge({0, 3}, {1, 3}));
+    CALICO_EXPECT_TRUE(can_merge({0, 3}, {1, 3}));
     const auto res_6 = merge({0, 3}, {1, 3});
-    CUB_EXPECT_EQ(res_6.x, 0);
-    CUB_EXPECT_EQ(res_6.dx, 4);
+    CALICO_EXPECT_EQ(res_6.x, 0);
+    CALICO_EXPECT_EQ(res_6.dx, 4);
 
     // 0  1  2  3  4
     // |--------|
     //          |--|
-    CUB_EXPECT_TRUE(can_merge({0, 3}, {3, 1}));
+    CALICO_EXPECT_TRUE(can_merge({0, 3}, {3, 1}));
     const auto res_7 = merge({0, 3}, {3, 1});
-    CUB_EXPECT_EQ(res_7.x, 0);
-    CUB_EXPECT_EQ(res_7.dx, 4);
+    CALICO_EXPECT_EQ(res_7.x, 0);
+    CALICO_EXPECT_EQ(res_7.dx, 4);
 
     std::vector<Range> v {
         {0, 2},
@@ -262,7 +262,7 @@ public:
         param.value_size = value.size();
 
         if (local_value_size != value.size()) {
-            CUB_EXPECT_LT(local_value_size, value.size());
+            CALICO_EXPECT_LT(local_value_size, value.size());
             param.local_value.truncate(local_value_size);
             param.overflow_id = overflow_id;
         }
@@ -340,6 +340,9 @@ TEST_F(NodeHeaderTests, FieldsAreConsistent)
     ASSERT_EQ(header().free_count(), 5);
     ASSERT_EQ(header().frag_count(), 6);
     ASSERT_EQ(header().cell_count(), 7);
+
+    header().set_free_start(0); // TODO
+    header().set_free_count(0); // TODO
 }
 
 class CellDirectoryTests: public NodeComponentTests {

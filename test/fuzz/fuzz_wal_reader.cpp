@@ -5,12 +5,12 @@
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    using Fuzzer = cub::fuzz::WALReaderFuzzer;
+    using Fuzzer = calico::fuzz::WALReaderFuzzer;
     Fuzzer fuzzer {Fuzzer::Transformer{}};
 
     try {
         fuzzer(data, size);
-    } catch (const cub::CorruptionError&) {
+    } catch (const calico::CorruptionError&) {
 
     }
     return 0;

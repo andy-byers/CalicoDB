@@ -25,13 +25,13 @@ RUN update-alternatives --install /usr/bin/cc cc /usr/bin/clang-8 100 && \
 
 ENV ASAN_OPTIONS log_path=/tmp/asan_log
 
-WORKDIR /CubDB
+WORKDIR /CalicoDB
 COPY . .
 
 WORKDIR ./build
 
 RUN cmake -E env CXXFLAGS="-fsanitize=fuzzer,address" \
-    cmake -DCMAKE_BUILD_TYPE=RelWithAssertions -DCUB_BUILD_FUZZERS=ON \
-          -DCUB_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" .. && \
-    cmake --build . --config RelWithAssertions --target all_fuzzers
+    cmake -DCMAKE_BUILD_TYPE=RelWithAssertions -DCALICO_USE_VALIDATORS=On \
+          -DCALICO_BUILD_FUZZERS=ON -DCALICO_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" .. && \
+    cmake --build . --config RelWithAssertions --target calico all_fuzzers
 

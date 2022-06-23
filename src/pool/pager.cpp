@@ -1,13 +1,13 @@
 #include "pager.h"
 
 #include "frame.h"
-#include "cub/exception.h"
+#include "calico/exception.h"
 #include "file/interface.h"
 #include "page/page.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
 
-namespace cub {
+namespace calico {
 
 Pager::Pager(Parameters param)
     : m_file {std::move(param.file)}
@@ -20,7 +20,7 @@ Pager::Pager(Parameters param)
     if (m_frame_count > MAX_FRAME_COUNT)
         throw std::invalid_argument {"Frame count is too large"};
 
-    CUB_EXPECT_NOT_NULL(m_file);
+    CALICO_EXPECT_NOT_NULL(m_file);
     while (m_available.size() < m_frame_count)
         m_available.emplace_back(m_page_size);
 }
@@ -37,7 +37,7 @@ auto Pager::page_size() const -> Size
 
 auto Pager::truncate(Size page_count) -> void
 {
-    CUB_EXPECT_EQ(m_available.size(), m_frame_count);
+    CALICO_EXPECT_EQ(m_available.size(), m_frame_count);
     m_file->resize(page_count * page_size());
 }
 
@@ -52,7 +52,7 @@ auto Pager::truncate(Size page_count) -> void
  */
 auto Pager::pin(PID id) -> std::optional<Frame>
 {
-    CUB_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_FALSE(id.is_null());
     if (m_available.empty())
         return std::nullopt;
 
@@ -77,7 +77,7 @@ auto Pager::discard(Frame frame) -> void
 
 auto Pager::unpin(Frame frame) -> void
 {
-    CUB_EXPECT_EQ(frame.ref_count(), 0);
+    CALICO_EXPECT_EQ(frame.ref_count(), 0);
     const auto needs_write = frame.is_dirty();
     const auto id = frame.page_id();
     const auto data = frame.data();
@@ -92,8 +92,8 @@ auto Pager::unpin(Frame frame) -> void
 
 auto Pager::try_read_page_from_file(PID id, Bytes out) const -> bool
 {
-    CUB_EXPECT_FALSE(id.is_null());
-    CUB_EXPECT_EQ(page_size(), out.size());
+    CALICO_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_EQ(page_size(), out.size());
     const auto offset = FileLayout::page_offset(id, out.size());
     if (const auto read_size = m_file->read_at(out, offset); !read_size) {
         return false;
@@ -105,8 +105,8 @@ auto Pager::try_read_page_from_file(PID id, Bytes out) const -> bool
 
 auto Pager::write_page_to_file(PID id, BytesView in) const -> void
 {
-    CUB_EXPECT_FALSE(id.is_null());
-    CUB_EXPECT_EQ(page_size(), in.size());
+    CALICO_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_EQ(page_size(), in.size());
     const auto offset = FileLayout::page_offset(id, in.size());
     write_exact_at(*m_file, in, offset);
 }
@@ -116,4 +116,4 @@ auto Pager::sync() -> void
     m_file->sync();
 }
 
-} // cub
+} // calico

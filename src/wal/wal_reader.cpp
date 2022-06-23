@@ -1,16 +1,18 @@
-#include "cub/exception.h"
+#include "calico/exception.h"
 #include "wal_reader.h"
 #include "wal_record.h"
 #include "file/interface.h"
 #include "page/page.h"
-#include "utils/crc.h"
+#include "utils/logging.h"
 
-namespace cub {
+namespace calico {
 
-WALReader::WALReader(std::unique_ptr<IReadOnlyFile> file, Size block_size)
-    : m_block(block_size, '\x00')
-    , m_file {std::move(file)}
+WALReader::WALReader(Parameters param)
+    : m_block(param.block_size, '\x00'),
+      m_file {std::move(param.wal_file)},
+      m_logger {logging::create_logger(std::move(param.log_sink), "WALReader")}
 {
+    m_logger->trace("constructing WAL reader");
     // Start out on the first record, if it exists.
     m_record = read_next();
 }
@@ -20,6 +22,8 @@ WALReader::WALReader(std::unique_ptr<IReadOnlyFile> file, Size block_size)
  */
 auto WALReader::reset() -> void
 {
+    m_logger->trace("moving cursor to the beginning of the WAL file");
+
     m_file->seek(0, Seek::BEGIN);
     m_has_block = false;
     m_cursor = 0;
@@ -95,7 +99,8 @@ auto WALReader::read_next() -> std::optional<WALRecord>
             }
         }
         if (!record.is_consistent())
-            throw CorruptionError {"Record has an invalid CRC"};
+            throw CorruptionError {"cannot read record: record is corrupted"};
+
         return record;
 
     } catch (const CorruptionError&) {
@@ -145,7 +150,7 @@ auto WALReader::read_record() -> std::optional<WALRecord>
     }
     if (auto record = read_record_aux(m_cursor)) {
         m_cursor += record->size();
-        CUB_EXPECT_LE(m_cursor, m_block.size());
+        CALICO_EXPECT_LE(m_cursor, m_block.size());
         return std::move(*record);
     }
     m_cursor = m_block.size();
@@ -161,8 +166,8 @@ auto WALReader::read_record() -> std::optional<WALRecord>
 auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
 {
     // There should be enough space for a minimally-sized record in the tail buffer.
-    CUB_EXPECT_TRUE(m_has_block);
-    CUB_EXPECT_GT(m_block.size() - offset, WALRecord::HEADER_SIZE);
+    CALICO_EXPECT_TRUE(m_has_block);
+    CALICO_EXPECT_GT(m_block.size() - offset, WALRecord::HEADER_SIZE);
 
     WALRecord record;
     auto buffer = stob(m_block);
@@ -178,7 +183,10 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
         case WALRecord::Type::EMPTY:
             return std::nullopt;
         default:
-            throw CorruptionError {"WAL record type is invalid"};
+            logging::MessageGroup group;
+            group.set_primary("cannot read record");
+            group.set_detail("WAL record type {} is not recognized", static_cast<unsigned>(record.type()));
+            throw CorruptionError {group.err(*m_logger)};
     }
 }
 
@@ -208,8 +216,13 @@ auto WALReader::read_block() -> bool
     try {
         const auto block_start = m_block_id * m_block.size();
         if (const auto bytes_read = m_file->read_at(stob(m_block), block_start)) {
-            if (bytes_read != m_block.size())
-                throw CorruptionError {"WAL contains an incomplete block"};
+            if (bytes_read != m_block.size()) {
+                logging::MessageGroup group;
+                group.set_primary("cannot read block");
+                group.set_detail("WAL contains an incomplete block of size {} B", bytes_read);
+                group.set_hint("block size is {} B", m_block.size());
+                throw CorruptionError {group.err(*m_logger)};
+            }
             m_has_block = true;
             return true;
         }
@@ -224,4 +237,4 @@ auto WALReader::read_block() -> bool
     }
 }
 
-} // cub
+} // calico

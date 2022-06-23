@@ -1,10 +1,10 @@
-#ifndef CUB_TREE_FREELIST_H
-#define CUB_TREE_FREELIST_H
+#ifndef CALICO_TREE_FREELIST_H
+#define CALICO_TREE_FREELIST_H
 
 #include <optional>
 #include "utils/identifier.h"
 
-namespace cub {
+namespace calico {
 
 class FileHeader;
 class IBufferPool;
@@ -36,6 +36,6 @@ private:
     Size m_free_count{};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_TREE_FREELIST_H
+#endif // CALICO_TREE_FREELIST_H

@@ -1,10 +1,10 @@
-#ifndef CUB_WAL_INTERFACE_H
-#define CUB_WAL_INTERFACE_H
+#ifndef CALICO_WAL_INTERFACE_H
+#define CALICO_WAL_INTERFACE_H
 
 #include <optional>
-#include "cub/common.h"
+#include "calico/options.h"
 
-namespace cub {
+namespace calico {
 
 class WALRecord;
 struct LSN;
@@ -30,6 +30,6 @@ public:
     virtual auto reset() -> void = 0;
 };
 
-} // cub
+} // calico
 
-#endif //CUB_WAL_INTERFACE_H
+#endif //CALICO_WAL_INTERFACE_H

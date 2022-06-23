@@ -1,12 +1,12 @@
-#ifndef CUB_TEST_TOOLS_RANDOM_H
-#define CUB_TEST_TOOLS_RANDOM_H
+#ifndef CALICO_TEST_TOOLS_RANDOM_H
+#define CALICO_TEST_TOOLS_RANDOM_H
 
 #include <algorithm>
 #include <random>
-#include "cub/common.h"
+#include "calico/options.h"
 #include "utils/expect.h"
 
-namespace cub {
+namespace calico {
 
 /**
 ** Helper class for generating random numbers.
@@ -60,7 +60,7 @@ template<class T> auto Random::next_int(T v_max) -> T
 */
 template<class T> auto Random::next_int(T v_min, T v_max) -> T
 {
-    CUB_EXPECT_LE(v_min, v_max);
+    CALICO_EXPECT_LE(v_min, v_max);
     std::uniform_int_distribution<T> dist(v_min, v_max);
     return dist(m_rng);
 }
@@ -85,7 +85,7 @@ template<class T> auto Random::next_real(T v_max) -> T
 */
 template<class T> auto Random::next_real(T v_min, T v_max) -> T
 {
-    CUB_EXPECT_LE(v_min, v_max);
+    CALICO_EXPECT_LE(v_min, v_max);
     std::uniform_real_distribution<T> dist(v_min, v_max);
     return dist(m_rng);
 }
@@ -112,6 +112,6 @@ inline auto random_binary(Random &random, Size max_size) -> std::string
 
 // TODO: Function for building a random string from a choice of characters.
 
-} // cub
+} // calico
 
-#endif // CUB_TEST_TOOLS_RANDOM_H
+#endif // CALICO_TEST_TOOLS_RANDOM_H

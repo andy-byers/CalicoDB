@@ -1,10 +1,10 @@
-#ifndef CUB_CURSOR_H
-#define CUB_CURSOR_H
+#ifndef CALICO_CURSOR_H
+#define CALICO_CURSOR_H
 
 #include <memory>
 #include "bytes.h"
 
-namespace cub {
+namespace calico {
 
 /**
  * A cursor object for finding records and traversing the database.
@@ -131,6 +131,6 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_CURSOR_H
+#endif // CALICO_CURSOR_H

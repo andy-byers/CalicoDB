@@ -2,7 +2,7 @@
 #include <fcntl.h>
 #include "system.h"
 
-namespace cub {
+namespace calico {
 
 namespace {
 
@@ -194,4 +194,4 @@ auto LogFile::write(BytesView in) -> Size
     return robust_write(m_resource, in);
 }
 
-} // cub
+} // calico

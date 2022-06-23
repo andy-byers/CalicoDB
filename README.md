@@ -1,8 +1,8 @@
-![CI status badge](https://github.com/andy-byers/CubDB/actions/workflows/actions.yml/badge.svg)
+![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
-Cub DB is an embedded key-value database written in C++17.
+Calico DB is an embedded key-value database written in C++17.
 
 + [Disclaimer](#disclaimer)
 + [Features](#features)
@@ -11,7 +11,7 @@ Cub DB is an embedded key-value database written in C++17.
 + [API](#api)
   + [Opening a Database](#opening-a-database)
   + [Closing a Database](#closing-a-database)
-  + [Slice Objects](#slice-objects)
+  + [Bytes Objects](#bytes-objects)
   + [Updating a Database](#updating-a-database)
   + [Querying a Database](#querying-a-database)
   + [Cursor Objects](#cursor-objects)
@@ -19,12 +19,6 @@ Cub DB is an embedded key-value database written in C++17.
   + [Deleting a Database](#deleting-a-database)
 + [Performance](#performance)
 + [Design](#design)
-  + [db](#db)
-  + [file](#file)
-  + [pool](#pool)
-  + [tree](#tree)
-  + [utils](#utils)
-  + [wal](#wal)
 + [TODO](#todo)
 + [Source Tree Overview](#source-tree-overview)
 + [Contributions](#contributions)
@@ -32,20 +26,20 @@ Cub DB is an embedded key-value database written in C++17.
 ## Disclaimer
 None of this code has been reviewed, and I am not a professional software developer.
 I started writing this library so that I could get better at writing modern C++, since I would like to pursue a career in C++ development.
-I've really had a fun time working on Cub DB, and have ended up putting quite a bit of time and effort into it.
+I've really had a fun time working on Calico DB, and have ended up putting quite a bit of time and effort into it.
 Still, it is a work in progress and needs to have some issues addressed before I feel comfortable declaring it usable.
-Check out the [Contributions](#contributions) section if you are interested in working on Cub DB!
+Check out the [Contributions](#contributions) section if you are interested in working on Calico DB!
 
 ## Features
 + Durability provided through write-ahead logging
 + Uses a dynamic-order B-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
 + Allows creation of in-memory databases
-+ Supports arbitrarily-sized values
++ Supports arbitrary value sizes
 + API only exposes objects (no pointers to deal with)
 
 ## Caveats
-+ Currently, Cub DB only runs on 64-bit Ubuntu and OSX
++ Currently, Calico DB only runs on 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
 + WAL is only used to ensure ACID properties on the current transaction and is truncated afterward
 + Has a limit on key length, equal to roughly 1/4 of the page size
@@ -53,7 +47,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Doesn't provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
 
 ## Build
-Cub DB is built using CMake.
+Calico DB is built using CMake.
 In the project root directory, run
 ```bash
 mkdir -p build && cd ./build
@@ -69,7 +63,7 @@ to build the library and tests.
 Note that the tests must be built with assertions, hence the "RelWithAssertions".
 To build the library in release mode, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCUB_BUILD_TESTS=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
 While not yet part of CI, some basic fuzzers (using libFuzzer) are also included.
@@ -78,50 +72,50 @@ See the `Dockerfile` for details on how to build them.
 ## API
 
 ### Exceptions
-Cub DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
+Calico DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
 
 ### Opening a Database
-The entry point to an application using Cub DB might look something like:
+The entry point to an application using Calico DB might look something like:
 
 ```C++
 try {
-    cub::Options options;
-    auto db = cub::Database::open("/tmp/cub", options);
+    calico::Options options;
+    auto db = calico::Database::open("/tmp/calico", options);
     // Run the application!
 } catch (const CorruptionError &error) {
     // This is thrown if corruption is detected in a file.
 } catch (const IOError &error) {
     // This is thrown if we were unable to perform I/O on a file.
 } catch (const std::invalid_argument &error) {
-    // This is thrown if invalid arguments were passed to a Cub DB function.
+    // This is thrown if invalid arguments were passed to a Calico DB function.
 } catch (const std::system_error &error) {
     // This propagates up from failed non-I/O system calls.
 } catch (const std::exception &error) {
-    // This catches any Cub DB exception.
+    // This catches any Calico DB exception.
 } catch (...) {
     // So does this...
 }
 ```
 
 ### Closing a Database
-Cub DB uses RAII, so databases are closed by letting them go out of scope.
+Calico DB uses RAII, so databases are closed by letting them go out of scope.
 
 ### Bytes Objects
-Cub DB uses `Bytes` and `BytesView` objects to represent unowned byte sequences, a.k.a. slices.
+Calico DB uses `Bytes` and `BytesView` objects to represent unowned byte sequences, a.k.a. slices.
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
 std::string data {"Hello, bears!"};
 
 // Construct slices from a string. The string still owns the memory, the slices just refer to it.
-cub::Bytes b {data.data(), data.size()};
-cub::BytesView v {data.data(), data.size()};
+calico::Bytes b {data.data(), data.size()};
+calico::BytesView v {data.data(), data.size()};
 
 // Convenience conversion from a string.
-const auto from_string = cub::stob(data);
+const auto from_string = calico::stob(data);
 
 // Convenience conversion back to a string. This operation must allocate a new string.
-assert(cub::btos(from_string) == data);
+assert(calico::btos(from_string) == data);
 
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
 function_taking_a_bytes_view(b);
@@ -130,8 +124,8 @@ function_taking_a_bytes_view(b);
 b.advance(7).truncate(5);
 
 // Comparisons.
-assert(cub::compare_three_way(b, v) == cub::ThreeWayComparison::EQ);
-assert(b == cub::stob("bears"));
+assert(calico::compare_three_way(b, v) == calico::ThreeWayComparison::EQ);
+assert(b == calico::stob("bears"));
 ```
 
 ### Updating a Database
@@ -139,18 +133,18 @@ Records and be added or removed using methods on the `Database` object.
 
 ```C++
 // Insert some records.
-assert(db.write(cub::stob("grizzly bear"), cub::stob("big")));
-assert(db.write(cub::stob("kodiak bear"), cub::stob("awesome")));
-assert(db.write(cub::stob("polar bear"), cub::stob("cool")));
+assert(db.write(calico::stob("grizzly bear"), calico::stob("big")));
+assert(db.write(calico::stob("kodiak bear"), calico::stob("awesome")));
+assert(db.write(calico::stob("polar bear"), calico::stob("cool")));
 assert(db.write({"sun bear", "respectable"}));
 assert(db.write({"panda bear", "rare"}));
 assert(db.write({"black bear", "lovable"}));
 
 // Update an existing record (keys are always unique). write() returns false if the record was already in the database.
-assert(!db.write(cub::stob("grizzly bear"), cub::stob("huge")));
+assert(!db.write(calico::stob("grizzly bear"), calico::stob("huge")));
 
 // Erase a record.
-assert(db.erase(cub::stob("grizzly bear")));
+assert(db.erase(calico::stob("grizzly bear")));
 ```
 
 ### Querying a Database
@@ -158,12 +152,12 @@ The `read*()` methods are provided for querying the database.
 
 ```C++
 // We can require an exact match.
-const auto record = db.read(cub::stob("sun bear"), cub::ThreeWayComparison::EQ);
+const auto record = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::EQ);
 assert(record->value == "respectable");
 
 // Or, we can look for the first record with a key less than or greater than the given key.
-const auto less_than = db.read(cub::stob("sun bear"), cub::ThreeWayComparison::LT);
-const auto greater_than = db.read(cub::stob("sun bear"), cub::ThreeWayComparison::GT);
+const auto less_than = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::LT);
+const auto greater_than = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::GT);
 assert(less_than->value == "cool");
 
 // Whoops, there isn't a key greater than "sun bear".
@@ -194,36 +188,35 @@ assert(cursor.decrement());
 assert(cursor.decrement(2) == 2);
 
 // Key and value access. For the key, we first convert to std::string, since key() returns a BytesView.
-const auto key = cub::btos(cursor.key());
+const auto key = calico::btos(cursor.key());
 const auto value = cursor.value();
 printf("Record {%s, %s}\n", key.c_str(), value.c_str()); // Record {black bear, lovable}
 ```
 
 ### Transactions
-Every modification to a Cub DB database occurs within a transaction.
+Every modification to a Calico DB database occurs within a transaction.
 The first transaction begins when the database is opened, and the last one commits when the database is closed.
 Otherwise, transaction boundaries are defined by calls to either `commit()` or `abort()`.
 
 ```C++
-db.write(cub::stob("a"), cub::stob("1"));
-db.write(cub::stob("b"), cub::stob("2"));
+db.write(calico::stob("a"), calico::stob("1"));
+db.write(calico::stob("b"), calico::stob("2"));
 db.commit();
 
-db.write(cub::stob("c"), cub::stob("3"));
-assert(db.erase(cub::stob("a")));
-assert(db.erase(cub::stob("b")));
+db.write(calico::stob("c"), calico::stob("3"));
+assert(db.erase(calico::stob("a")));
+assert(db.erase(calico::stob("b")));
 db.abort();
 
 // Database still contains {"a", "1"} and {"b", "2"}.
-assert(db.read(cub::stob("a"), true)->value == "1");
-assert(db.read(cub::stob("b"), true)->value == "2");
+assert(db.read(calico::stob("a"), true)->value == "1");
+assert(db.read(calico::stob("b"), true)->value == "2");
 ```
 
 ### Deleting a Database
-
 ```C++
 // We can delete a database by passing ownership to the following static method.
-cub::Database::destroy(std::move(db));
+calico::Database::destroy(std::move(db));
 ```
 
 ## Performance
@@ -233,56 +226,48 @@ We use 16-byte keys and 100-byte values with a 4MB cache (similar to http://www.
 We still have a ways to go performance-wise, however, it seems that the cursors provide pretty fast sequential and reverse-sequential reads.
 
 ### Benchmark Results
-| Name            | Result (ops/second) |
-|:----------------|--------------------:|
-| write_rand      |              37,185 |
-| write_seq       |              57,079 |
-| read_rand       |             161,717 |
-| read_seq        |           3,611,615 |
-| read_rev        |           4,429,556 |
-| erase_all_rand  |              25,911 |
-| erase_all_seq   |              26,941 |
-| erase_half_rand |              22,306 |
-| erase_half_seq  |              22,230 |
+| Name        | Result (ops/sec) |
+|:------------|-----------------:|
+| write_rand  |           37,853 |
+| write_seq   |           40,014 |
+| read_rand   |          214,133 |
+| read_seq    |        3,622,860 |
+| read_rev    |        4,400,077 |
+| erase_rand  |           21,290 |
+| erase_seq   |           20,449 |
 
 ### Benchmark Results (In-Memory Database)
-| Name            | Result (ops/second) |
-|:----------------|--------------------:|
-| write_rand      |              36,368 |
-| write_seq       |              55,883 |
-| read_rand       |             335,235 |
-| read_seq        |           4,156,060 |
-| read_rev        |           4,672,760 |
-| erase_all_rand  |              53,372 |
-| erase_all_seq   |              70,807 |
-| erase_half_rand |              58,205 |
-| erase_half_seq  |              50,895 |
+| Name (In-Memory DB) | Result (ops/sec) |
+|:--------------------|-----------------:|
+| write_rand          |          184,074 |
+| write_seq           |          215,414 |
+| read_rand           |        1,057,665 |
+| read_seq            |        5,052,099 |
+| read_rev            |        5,559,223 |
+| erase_rand          |           67,573 |
+| erase_seq           |           77,081 |
 
 ### Benchmark Results (w/o Transactions)
-| Name            | Result (ops/second) |
-|:----------------|--------------------:|
-| write_rand      |             184,132 |
-| write_seq       |             315,690 |
-| read_rand       |             168,048 |
-| read_seq        |           2,952,982 |
-| read_rev        |           3,442,488 |
-| erase_all_rand  |              68,815 |
-| erase_all_seq   |              97,796 |
-| erase_half_rand |              57,002 |
-| erase_half_seq  |              52,994 |
+| Name        | Result (ops/sec) |
+|:------------|-----------------:|
+| write_rand  |          234,945 |
+| write_seq   |          384,419 |
+| read_rand   |          173,517 |
+| read_seq    |        3,610,230 |
+| read_rev    |        3,317,678 |
+| erase_rand  |           63,421 |
+| erase_seq   |           65,919 |
 
 ### Benchmark Results (In-Memory Database w/o Transactions)
-| Name            | Result (ops/second) |
-|:----------------|--------------------:|
-| write_rand      |             208,627 |
-| write_seq       |             289,995 |
-| read_rand       |             520,930 |
-| read_seq        |           3,670,945 |
-| read_rev        |           4,365,084 |
-| erase_all_rand  |              63,816 |
-| erase_all_seq   |              72,470 |
-| erase_half_rand |              68,437 |
-| erase_half_seq  |              65,273 |
+| Name (In-Memory DB) | Result (ops/sec) |
+|:--------------------|-----------------:|
+| write_rand          |          609,501 |
+| write_seq           |          587,153 |
+| read_rand           |          882,593 |
+| read_seq            |        4,504,567 |
+| read_rev            |        5,249,257 |
+| erase_rand          |          365,165 |
+| erase_seq           |          333,536 |
 
 ## TODO
 1. Get everything code reviewed!
@@ -296,39 +281,22 @@ We still have a ways to go performance-wise, however, it seems that the cursors 
    + Code is very messy/difficult to change
 
 ## Design
-
-Internally, Cub DB is broken down into 6 submodules.
+Internally, Calico DB is broken down into 6 submodules.
 Each submodule is represented by a directory in `src`, as shown in [source tree overview](#source-tree-overview).
-
-#### `db`
-[//]: # (TODO)
-
-#### `file`
-[//]: # (TODO)
-
-#### `pool`
-[//]: # (TODO)
-
-#### `tree`
-[//]: # (TODO)
-
-#### `utils`
-[//]: # (TODO)
-
-#### `wal`
-[//]: # (TODO)
+See `DESIGN.md` for more information about the design of Calico DB.
 
 ## Source Tree Overview
 ```
-CubDB
+CalicoDB
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
-┣╸include/cub
+┣╸include/calico
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Slices for holding contiguous sequences of bytes
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
-┃ ┣╸cub.h ┄┄┄┄┄┄┄┄┄┄ Pulls in the rest of the API
+┃ ┣╸calico.h ┄┄┄┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
-┃ ┣╸database.h ┄┄┄┄┄ Database connection object
-┃ ┗╸exception.h ┄┄┄┄ Public-facing exceptions
+┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
+┃ ┣╸exception.h ┄┄┄┄ Public-facing exceptions
+┃ ┗╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┣╸src
 ┃ ┣╸db ┄┄┄┄┄┄┄┄┄┄┄┄┄ API implementation
 ┃ ┣╸file ┄┄┄┄┄┄┄┄┄┄┄ OS file module
@@ -346,7 +314,7 @@ CubDB
 ```
 
 ## Contributions
-Contributions are welcomed!
+Contributions are welcome!
 Pull requests that fix bugs or address correctness issues will always be considered.
 There are also some things we could try to improve performance, however, I think robustness and guarantee of ACID properties should come first.
 The `TODO` section contains a list of things that need to be addressed.

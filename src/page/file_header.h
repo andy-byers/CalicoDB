@@ -1,9 +1,9 @@
-#ifndef CUB_PAGE_FILE_HEADER_H
-#define CUB_PAGE_FILE_HEADER_H
+#ifndef CALICO_PAGE_FILE_HEADER_H
+#define CALICO_PAGE_FILE_HEADER_H
 
-#include "cub/bytes.h"
+#include "calico/bytes.h"
 
-namespace cub {
+namespace calico {
 
 class Node;
 struct LSN;
@@ -11,6 +11,7 @@ struct PID;
 
 class FileHeader {
 public:
+    FileHeader();
     explicit FileHeader(Bytes);
     explicit FileHeader(Node&);
     [[nodiscard]] auto data() const -> BytesView;
@@ -24,6 +25,7 @@ public:
     [[nodiscard]] auto block_size() const -> Size;
     [[nodiscard]] auto record_count() const -> Size;
     [[nodiscard]] auto flushed_lsn() const -> LSN;
+    auto data() -> Bytes;
     auto update_magic_code() -> void;
     auto update_header_crc() -> void;
     auto set_page_count(Size) -> void;
@@ -39,14 +41,13 @@ public:
     [[nodiscard]] auto is_header_crc_consistent() const -> bool;
 
 private:
-    // Identifies the file as a CubDB_ database.
+    // Identifies the file as a Calico DB database.
     static constexpr uint32_t MAGIC_CODE = 0xB11924E1;
 
-    auto data() -> Bytes;
-
+    std::string m_backing;
     Bytes m_header;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_PAGE_FILE_HEADER_H
+#endif // CALICO_PAGE_FILE_HEADER_H

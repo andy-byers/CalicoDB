@@ -3,27 +3,33 @@
 #include <locale>
 #include <chrono>
 #include <thread>
-#include "cub/cub.h"
+#include <spdlog/fmt/fmt.h>
+#include "calico/calico.h"
 #include "tools.h"
+
+#ifdef CALICO_USE_VALIDATORS
+#  error "Validators make performance very bad. Compile without them."
+#endif
 
 namespace {
 
-using namespace cub;
-constexpr auto PATH = "/tmp/cub_benchmark";
-constexpr Size FIELD_WIDTH {24};
+using namespace calico;
+constexpr auto PATH = "/tmp/calico_benchmark";
 constexpr Size BASELINE_MULTIPLIER {10};
 constexpr Size PAGE_SIZE {0x8000};
 constexpr Size CACHE_SIZE {0x400000};
 constexpr Size KEY_SIZE {16};
 constexpr Size VALUE_SIZE {100};
 constexpr Size LARGE_VALUE_SIZE {100'000};
-constexpr Options options {
+Options options {
     PAGE_SIZE,              // Page size
     PAGE_SIZE,              // Block size
     CACHE_SIZE / PAGE_SIZE, // Frame count
     0666,                   // Permissions
+    false,                  // Use transactions (can be changed commandline)
     false,                  // Use direct I/O
-    false,                  // Use transactions TODO: This should be an option.
+    "/dev/null",
+    0,
 };
 
 struct BenchmarkParameters {
@@ -48,14 +54,6 @@ struct InstanceResults {
     Size num_elements {};
 };
 
-struct Comma: public std::numpunct<char>
-{
-    [[nodiscard]] auto do_grouping() const -> std::string override
-    {
-        return "\003";
-    }
-};
-
 auto create()
 {
     std::filesystem::remove(PATH);
@@ -63,9 +61,9 @@ auto create()
     return Database::open(PATH, options);
 }
 
-auto create_temp(Size page_size)
+auto create_temp()
 {
-    return Database::temp(page_size);
+    return Database::temp(options);
 }
 
 auto build_common(Work &records, bool is_sequential)
@@ -102,14 +100,14 @@ auto run_baseline(Database&)
 auto run_writes(Database &db, const Work &work)
 {
     for (const auto &[key, value]: work)
-        CUB_EXPECT_TRUE(db.write(stob(key), stob(value)));
+        CALICO_EXPECT_TRUE(db.write(stob(key), stob(value)));
     db.commit();
 }
 
 auto run_erases(Database &db, const Work &work)
 {
     for (const auto &[key, value]: work)
-        CUB_EXPECT_TRUE(db.erase(stob(key)));
+        CALICO_EXPECT_TRUE(db.erase(stob(key)));
     db.commit();
 }
 
@@ -118,7 +116,7 @@ auto run_read_rand(Database &db, const Work &work)
     std::string v;
     auto cursor = db.get_cursor();
     for (const auto &[key, value]: work) {
-        CUB_EXPECT_TRUE(cursor.find(stob(key)));
+        CALICO_EXPECT_TRUE(cursor.find(stob(key)));
         v = cursor.value();
     }
 }
@@ -151,8 +149,9 @@ auto run_read_rev(Database &db, const Work &work)
 
 auto setup_common(Database &db)
 {
+    const auto is_temp = db.get_info().is_temp();
     db.~Database();
-    db = create();
+    db = is_temp ? create_temp() : create();
 }
 
 class Runner {
@@ -186,56 +185,49 @@ private:
     BenchmarkParameters m_param;
 };
 
-auto make_row(char cap)
-{
-    return std::string(1, cap) + '\n';
-}
-
-template<class ...Rest> auto make_row(char left_cap, const std::string &field, char separator, Rest ...rest)
-{
-    return left_cap + field + make_row(separator, rest...);
-}
-
 auto report(const InstanceResults &results)
 {
     const auto ops = static_cast<double>(results.num_elements) / results.mean_elapsed;
-    std::cout << "| " << std::setw(FIELD_WIDTH) << std::left << results.name
-              << " | " << std::setw(FIELD_WIDTH) << std::right << static_cast<Size>(ops) << " |\n";
+    fmt::print("| {:<32} | {:>32d} |\n", results.name, static_cast<Size>(ops));
 }
 
 } // <anonymous>
 
 auto show_usage()
 {
-    std::cout << "usage: benchmark [-rt]\n";
-    std::cout << "\n";
-    std::cout << " Parameters\n";
-    std::cout << "============\n";
-    std::cout << "  -r: Show only the database benchmarks\n";
-    std::cout << "  -t: Show only the in-memory database benchmarks\n";
-    std::cout << "  -b: Show the baselines\n";
+    fmt::print("usage: benchmark [-rt]\n");
+    fmt::print("\n");
+    fmt::print(" Parameters\n");
+    fmt::print("============\n");
+    fmt::print("  -r: Show only the database benchmarks\n");
+    fmt::print("  -t: Show only the in-memory database benchmarks\n");
+    fmt::print("  -b: Show the baselines\n");
 }
 
 auto main(int argc, const char *argv[]) -> int
 {
-    using namespace cub;
+    using namespace calico;
 
     bool real_only {};
     bool temp_only {};
+    bool uses_xact {};
     bool show_baseline {};
 
     for (int i {1}; i < argc; ++i) {
         const std::string arg {argv[i]};
-        if (arg == "-r") {
+        if (arg == "-b") {
+            show_baseline = true;
+        } else if (arg == "-r") {
             real_only = true;
         } else if (arg == "-t") {
             temp_only = true;
-        } else if (arg == "-b") {
-            show_baseline = true;
+        } else if (arg == "-T") {
+            options.use_transactions = true;
+            uses_xact = true;
         }
     }
     if (real_only && temp_only) {
-        std::cerr << "Error: '-r' and 't' arguments are mutually exclusive\n";
+        fmt::print(stderr, "Error: '-r' and 't' arguments are mutually exclusive\n");
         show_usage();
         return 1;
     }
@@ -245,7 +237,7 @@ auto main(int argc, const char *argv[]) -> int
     static constexpr auto num_elements = 40'000;
 //    static constexpr auto num_large_elements = 1'000;
 
-    CUB_EXPECT_STATIC(num_elements * (KEY_SIZE+VALUE_SIZE) > CACHE_SIZE,
+    CALICO_EXPECT_STATIC(num_elements * (KEY_SIZE+VALUE_SIZE) > CACHE_SIZE,
                       "Use more or larger records. Benchmark is unfair.");
 
     const auto seed = Clock::now().time_since_epoch().count();
@@ -336,58 +328,54 @@ auto main(int argc, const char *argv[]) -> int
     };
     Runner runner {param};
 
-    Comma facet {};
-    std::cout.imbue(std::locale(std::cout.getloc(), &facet));
+    const auto field_1a = "Name";
+    const auto field_1b = "Name (In-Memory DB)";
 
-    static constexpr auto make_field_name = [](const std::string &name) {
-        CUB_EXPECT_LT(name.size(), FIELD_WIDTH);
-        return " " + name + std::string(FIELD_WIDTH - name.size() + 1, ' ');
-    };
-    const auto field_1a {make_field_name("Name")};
-    const auto field_1b {make_field_name("Name (In-Memory DB)")};
-    const auto field_2 {make_field_name("Result (ops/second)")};
-
-    const auto make_filler_row = [&field_2](const std::string &first, char c) {
-        return make_row(c, std::string(first.size(), '-'), c, std::string(field_2.size(), '-'), c);
+    const auto print_filler_row = []() {
+        return fmt::print("|{:-<34}|{:->34}|\n", ':', ':');
     };
 
-    const auto make_header_row = [&field_2](const std::string &first) {
-        return make_row('|', first, '|', field_2, '|');
+    const auto print_header_row = [&field_1a, &field_1b](bool is_temp) {
+        return fmt::print("| {:<32} | {:>32} |\n", is_temp ? field_1b : field_1a, "Result (ops/sec)");
     };
 
     const auto run_real_db_benchmarks = [&] {
-        std::cout << make_filler_row(field_1a, '.');
-        std::cout << make_header_row(field_1a);
-        std::cout << make_filler_row(field_1a, '|');
+        print_header_row(false);
+        print_filler_row();
         for (const auto &instance: instances) {
             report(runner.run(create(), instance));
-            random.shuffle(records); // Attempt to mess up branch prediction.
+
+            // Attempt to mess up branch prediction.
+            random.shuffle(records);
         }
-        std::cout << make_filler_row(field_1a, '\'') << '\n';
     };
 
     const auto run_temp_db_benchmarks = [&] {
-        std::cout << make_filler_row(field_1b, '.');
-        std::cout << make_header_row(field_1b);
-        std::cout << make_filler_row(field_1b, '|');
+        print_header_row(true);
+        print_filler_row();
         for (const auto &instance: instances) {
-            report(runner.run(create_temp(options.page_size), instance));
+            report(runner.run(create_temp(), instance));
             random.shuffle(records);
         }
-        std::cout << make_filler_row(field_1a, '\'') << '\n';
     };
 
     if (show_baseline) {
         instances.insert(instances.begin(), baseline);
         instances.emplace_back(baseline);
-        std::cout << "Baseline should be <= " << num_elements * BASELINE_MULTIPLIER << "\n\n";
+        fmt::print("Baseline should be <= {}\n", num_elements * BASELINE_MULTIPLIER);
     }
 
-    if (!temp_only)
+    if (!temp_only) {
+        fmt::print("### Benchmark Results {}\n", uses_xact ? "" : "(w/o Transactions)");
         run_real_db_benchmarks();
+        putchar('\n');
+    }
 
-    if (!real_only)
+    if (!real_only) {
+        fmt::print("### Benchmark Results (In-Memory Database{})\n", uses_xact ? "" : " w/o Transactions");
         run_temp_db_benchmarks();
+        putchar('\n');
+    }
 
     return 0;
 }

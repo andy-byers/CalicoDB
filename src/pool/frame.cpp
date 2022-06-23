@@ -5,7 +5,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cub {
+namespace calico {
 
 Frame::Frame(Size size)
     : m_data {std::unique_ptr<Byte[], AlignedDeleter> {
@@ -13,17 +13,17 @@ Frame::Frame(Size size)
           AlignedDeleter {static_cast<std::align_val_t>(size)}}}
     , m_size {size}
 {
-    CUB_EXPECT_TRUE(is_power_of_two(size));
-    CUB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_data.get()) % size, 0);
+    CALICO_EXPECT_TRUE(is_power_of_two(size));
+    CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_data.get()) % size, 0);
     mem_clear(data());
 }
 
 auto Frame::borrow(IBufferPool *parent, bool is_writable) -> Page
 {
-    CUB_EXPECT_FALSE(m_is_writable);
+    CALICO_EXPECT_FALSE(m_is_writable);
 
     if (is_writable) {
-        CUB_EXPECT_EQ(m_ref_count, 0);
+        CALICO_EXPECT_EQ(m_ref_count, 0);
         m_is_writable = true;
     }
     m_ref_count++;
@@ -32,10 +32,10 @@ auto Frame::borrow(IBufferPool *parent, bool is_writable) -> Page
 
 auto Frame::synchronize(Page &page) -> void
 {
-    CUB_EXPECT_GT(m_ref_count, 0);
+    CALICO_EXPECT_GT(m_ref_count, 0);
 
     if (page.is_writable()) {
-        CUB_EXPECT_EQ(m_ref_count, 1);
+        CALICO_EXPECT_EQ(m_ref_count, 1);
         m_is_writable = false;
     }
 
@@ -51,4 +51,4 @@ auto Frame::page_lsn() const -> LSN
     return LSN {get_uint32(data().range(offset))};
 }
 
-} // cub
+} // calico

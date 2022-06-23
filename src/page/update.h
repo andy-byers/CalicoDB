@@ -1,12 +1,12 @@
-#ifndef CUB_PAGE_UPDATE_H
-#define CUB_PAGE_UPDATE_H
+#ifndef CALICO_PAGE_UPDATE_H
+#define CALICO_PAGE_UPDATE_H
 
 #include <optional>
 #include <vector>
 #include "utils/identifier.h"
 #include "utils/scratch.h"
 
-namespace cub {
+namespace calico {
 
 struct ChangedRegion {
     Index offset {};  ///< Offset of the region from the start of the page
@@ -49,6 +49,6 @@ namespace impl {
 
 } // impl
 
-} // cub
+} // calico
 
-#endif // CUB_PAGE_UPDATE_H
+#endif // CALICO_PAGE_UPDATE_H

@@ -4,15 +4,16 @@
  *   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
  */
 
-#ifndef CUB_WAL_WAL_READER_H
-#define CUB_WAL_WAL_READER_H
+#ifndef CALICO_WAL_WAL_READER_H
+#define CALICO_WAL_WAL_READER_H
 
 #include <memory>
 #include <stack>
+#include <spdlog/logger.h>
 #include "interface.h"
 #include "wal_record.h"
 
-namespace cub {
+namespace calico {
 
 class IReadOnlyFile;
 struct LSN;
@@ -22,7 +23,13 @@ struct LSN;
  */
 class WALReader: public IWALReader {
 public:
-    WALReader(std::unique_ptr<IReadOnlyFile>, Size);
+    struct Parameters {
+        std::string wal_path;
+        std::unique_ptr<IReadOnlyFile> wal_file;
+        spdlog::sink_ptr log_sink;
+        Size block_size {};
+    };
+    explicit WALReader(Parameters);
     ~WALReader() override = default;
     [[nodiscard]] auto record() const -> std::optional<WALRecord> override;
     auto increment() -> bool override;
@@ -41,6 +48,7 @@ private:
     std::vector<Index> m_positions;        ///< Stack containing the absolute offset of each record we have read so far
     std::string m_block;                   ///< Tail buffer for caching WAL block contents
     std::unique_ptr<IReadOnlyFile> m_file; ///< Read-only WAL file handle
+    std::shared_ptr<spdlog::logger> m_logger;
     std::optional<WALRecord> m_record;     ///< Record that the cursor is currently over
     Index m_block_id {};                   ///< Index of the current block in the WAL file
     Index m_cursor {};                     ///< Offset of the current record in the tail buffer
@@ -48,6 +56,6 @@ private:
     bool m_incremented {};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_WAL_WAL_READER_H
+#endif // CALICO_WAL_WAL_READER_H

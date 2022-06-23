@@ -1,12 +1,12 @@
-#ifndef CUB_PAGE_NODE_H
-#define CUB_PAGE_NODE_H
+#ifndef CALICO_PAGE_NODE_H
+#define CALICO_PAGE_NODE_H
 
 #include "cell.h"
 #include "page.h"
 
-namespace cub {
+namespace calico {
 
-class NodeHeader {
+class NodeHeader final {
 public:
     [[nodiscard]] auto header_crc() const -> Index;
     [[nodiscard]] auto parent_id() const -> PID;
@@ -17,6 +17,7 @@ public:
     [[nodiscard]] auto frag_count() const -> Size;
     [[nodiscard]] auto free_count() const -> Size;
     [[nodiscard]] auto free_start() const -> Index;
+    [[nodiscard]] auto free_total() const -> Size;
     auto update_header_crc() -> void;
     auto set_parent_id(PID) -> void;
     auto set_right_sibling_id(PID) -> void;
@@ -26,6 +27,7 @@ public:
     auto set_frag_count(Size) -> void;
     auto set_free_count(Size) -> void;
     auto set_free_start(Index) -> void;
+    auto set_free_total(Size) -> void;
 
     [[nodiscard]] auto gap_size() const -> Size;
     [[nodiscard]] auto max_usable_space() const -> Size;
@@ -50,14 +52,15 @@ private:
     Page *m_page {};
 };
 
-class CellDirectory {
+class CellDirectory final {
 public:
     struct Pointer {
         Index value;
     };
+
     explicit CellDirectory(NodeHeader &header)
-        : m_page {&header.page()}
-        , m_header {&header} {}
+        : m_page {&header.page()},
+          m_header {&header} {}
 
     [[nodiscard]] auto get_pointer(Index) const -> Pointer;
     auto set_pointer(Index, Pointer) -> void;
@@ -69,17 +72,17 @@ private:
     NodeHeader *m_header {};
 };
 
-class BlockAllocator {
+class BlockAllocator final {
 public:
     explicit BlockAllocator(NodeHeader&);
+    ~BlockAllocator() = default;
     [[nodiscard]] auto usable_space() const -> Size;
-    auto recompute_usable_space() -> void;
+    [[nodiscard]] auto compute_free_total() const -> Size;
     auto allocate(Size) -> Index;
     auto free(Index, Size) -> void;
     auto reset() -> void;
 
 private:
-    [[nodiscard]] auto compute_free_total() const -> Size;
     [[nodiscard]] auto get_next_pointer(Index) const -> Index;
     [[nodiscard]] auto get_block_size(Index) const -> Size;
     auto set_next_pointer(Index, Index) -> void;
@@ -88,7 +91,6 @@ private:
     auto allocate_from_free(Size) -> Index;
     auto take_free_space(Index, Index, Size) -> Index;
 
-    Size m_free_total {};
     Page *m_page {};
     NodeHeader *m_header {};
 };
@@ -100,27 +102,26 @@ public:
         bool found_eq{};
     };
 
-    ~Node() = default;
+    ~Node()
+    {
+
+    }
 
     Node(Page page, bool reset_header)
-        : m_page {std::move(page)}
-        , m_header {m_page}
-        , m_directory {m_header}
-        , m_allocator {m_header}
+        : m_page {std::move(page)},
+          m_header {m_page},
+          m_directory {m_header},
+          m_allocator {m_header}
     {
         reset(reset_header);
-        m_allocator.recompute_usable_space();
     }
 
     Node(Node &&rhs) noexcept
-        : m_page {std::move(rhs.m_page)}
-        , m_header {m_page}
-        , m_directory {m_header}
-        , m_allocator {m_header}
-        , m_overflow {std::move(rhs.m_overflow)}
-    {
-        m_allocator.recompute_usable_space();
-    }
+        : m_page {std::move(rhs.m_page)},
+          m_header {NodeHeader {m_page}},
+          m_directory {CellDirectory {m_header}},
+          m_allocator {BlockAllocator {m_header}},
+          m_overflow {std::move(rhs.m_overflow)} {}
 
     auto operator=(Node &&rhs) noexcept -> Node&
     {
@@ -130,7 +131,6 @@ public:
             m_directory = CellDirectory {m_header};
             m_allocator = BlockAllocator {m_header};
             m_overflow = std::move(rhs.m_overflow);
-            m_allocator.recompute_usable_space();
         }
         return *this;
     }
@@ -229,7 +229,10 @@ auto transfer_cell(Node&, Node&, Index) -> void;
 auto can_merge_siblings(const Node&, const Node&, const Cell&) -> bool;
 auto merge_left(Node&, Node&, Node&, Index) -> void;
 auto merge_right(Node&, Node&, Node&, Index) -> void;
+auto merge_root(Node&, Node&) -> void;
+auto split_root(Node&, Node&) -> void;
+[[nodiscard]] auto split_non_root(Node&, Node&, Scratch) -> Cell;
 
-} // cub
+} // calico
 
-#endif // CUB_PAGE_NODE_H
+#endif // CALICO_PAGE_NODE_H

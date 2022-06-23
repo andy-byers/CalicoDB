@@ -5,7 +5,7 @@
 #include "page/page.h"
 #include "pool/interface.h"
 
-namespace cub {
+namespace calico {
 
 FreeList::FreeList(const Parameters &param)
     : m_pool {param.buffer_pool}
@@ -26,8 +26,8 @@ auto FreeList::load_header(const FileHeader &header) -> void
 
 auto FreeList::push(Page page) -> void
 {
-    CUB_EXPECT_FALSE(page.id().is_root());
-    CUB_EXPECT_EQ(m_free_count == 0, m_free_start.is_null());
+    CALICO_EXPECT_FALSE(page.id().is_root());
+    CALICO_EXPECT_EQ(m_free_count == 0, m_free_start.is_null());
     page.set_type(PageType::FREELIST_LINK);
     Link link {std::move(page)};
     link.set_next_id(m_free_start);
@@ -38,14 +38,14 @@ auto FreeList::push(Page page) -> void
 auto FreeList::pop() -> std::optional<Page>
 {
     if (m_free_count) {
-        CUB_EXPECT_FALSE(m_free_start.is_null());
+        CALICO_EXPECT_FALSE(m_free_start.is_null());
         Link link {m_pool->acquire(m_free_start, true)};
         m_free_start = link.next_id();
         m_free_count--;
         return link.take();
     }
-    CUB_EXPECT_TRUE(m_free_start.is_null());
+    CALICO_EXPECT_TRUE(m_free_start.is_null());
     return std::nullopt;
 }
 
-} // cub
+} // calico

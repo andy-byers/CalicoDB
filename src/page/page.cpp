@@ -4,7 +4,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cub {
+namespace calico {
 
 Page::Page(const Parameters &param)
     : m_pool {param.source}
@@ -38,7 +38,7 @@ auto Page::do_release() noexcept -> void
             m_pool.value->on_page_release(*this);
 
     } catch (...) {
-        CUB_EXPECT_TRUE(!!m_pool.value);
+        CALICO_EXPECT_TRUE(!!m_pool.value);
         m_pool.value->on_page_error();
     }
 }
@@ -156,14 +156,14 @@ auto Page::collect_changes() -> std::vector<ChangedRegion>
 
 auto Page::enable_tracking(Scratch scratch) -> void
 {
-    CUB_EXPECT_EQ(scratch.size(), m_data.size());
+    CALICO_EXPECT_EQ(scratch.size(), m_data.size());
     mem_copy(scratch.data(), m_data);
     m_updates = UpdateManager {std::move(scratch)};
 }
 
 auto Page::undo_changes(LSN previous_lsn, const std::vector<ChangedRegion> &changes) -> void
 {
-    CUB_EXPECT_GE(lsn(), previous_lsn);
+    CALICO_EXPECT_GE(lsn(), previous_lsn);
     for (const auto &region: changes)
         mem_copy(m_data.range(region.offset), region.before, region.before.size());
     set_lsn(previous_lsn);
@@ -171,7 +171,7 @@ auto Page::undo_changes(LSN previous_lsn, const std::vector<ChangedRegion> &chan
 
 auto Page::redo_changes(LSN next_lsn, const std::vector<ChangedRegion> &changes) -> void
 {
-    CUB_EXPECT_LT(lsn(), next_lsn);
+    CALICO_EXPECT_LT(lsn(), next_lsn);
     for (const auto &region: changes)
         mem_copy(m_data.range(region.offset), region.after, region.after.size());
     set_lsn(next_lsn);
@@ -179,9 +179,9 @@ auto Page::redo_changes(LSN next_lsn, const std::vector<ChangedRegion> &changes)
 
 auto Page::do_change(Index offset, Size size) -> void
 {
-    CUB_EXPECT_TRUE(m_is_writable);
-    CUB_EXPECT_GT(size, 0);
-    CUB_EXPECT_LE(offset + size, Page::size());
+    CALICO_EXPECT_TRUE(m_is_writable);
+    CALICO_EXPECT_GT(size, 0);
+    CALICO_EXPECT_LE(offset + size, Page::size());
 
     m_is_dirty = true;
 
@@ -189,4 +189,4 @@ auto Page::do_change(Index offset, Size size) -> void
         m_updates->indicate_change(offset, size);
 }
 
-} // cub
+} // calico

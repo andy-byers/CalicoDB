@@ -1,15 +1,15 @@
 #include "system.h"
-
+#include <filesystem>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "cub/exception.h"
+#include "calico/exception.h"
 
-namespace cub::system {
+namespace calico::system {
 
 auto use_direct_io([[maybe_unused]] int fd) -> void
 {
-#if defined(CUB_OSX) && !CUB_HAS_O_DIRECT
+#if defined(CALICO_OSX) && !CALICO_HAS_O_DIRECT
     // Turn off kernel page caching. OSX (at least my platform) doesn't use O_DIRECT but provides
     // an API for turning off page caching via fcntl().
     if (fcntl(fd, F_NOCACHE) == FAILURE)
@@ -17,9 +17,9 @@ auto use_direct_io([[maybe_unused]] int fd) -> void
 #endif
 }
 
-auto exists(const std::string &name) -> bool
+auto exists(const std::string &path) -> bool
 {
-    return ::access(name.c_str(), F_OK) == SUCCESS;
+    return std::filesystem::exists(path);
 }
 
 auto open(const std::string &name, int mode, int permissions) -> int
@@ -97,4 +97,4 @@ auto resize(int file, Size size) -> void
         throw std::system_error {errno, std::system_category(), "ftruncate"};
 }
 
-} // cub::system
+} // calico::system

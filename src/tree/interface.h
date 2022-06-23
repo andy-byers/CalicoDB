@@ -1,10 +1,10 @@
-#ifndef CUB_TREE_INTERFACE_H
-#define CUB_TREE_INTERFACE_H
+#ifndef CALICO_TREE_INTERFACE_H
+#define CALICO_TREE_INTERFACE_H
 
 #include <optional>
 #include "page/node.h"
 
-namespace cub {
+namespace calico {
 
 class FileHeader;
 
@@ -38,6 +38,6 @@ public:
     virtual auto remove(BytesView) -> bool = 0;
 };
 
-} // cub
+} // calico
 
-#endif //CUB_TREE_INTERFACE_H
+#endif //CALICO_TREE_INTERFACE_H

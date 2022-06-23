@@ -1,14 +1,14 @@
 
-#ifndef CUB_UTILS_SCRATCH_H
-#define CUB_UTILS_SCRATCH_H
+#ifndef CALICO_UTILS_SCRATCH_H
+#define CALICO_UTILS_SCRATCH_H
 
 #include <list>
 #include <string>
 #include <unordered_map>
 #include "types.h"
-#include "cub/bytes.h"
+#include "calico/bytes.h"
 
-namespace cub {
+namespace calico {
 
 class ScratchManager;
 
@@ -59,6 +59,6 @@ private:
     Size m_id_counter {MIN_SCRATCH_ID};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_UTILS_SCRATCH_H
+#endif // CALICO_UTILS_SCRATCH_H

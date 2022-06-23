@@ -3,7 +3,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cub {
+namespace calico {
 
 Link::Link(Page page)
     : m_page{std::move(page)} {}
@@ -38,4 +38,4 @@ auto Link::mut_content(Size size) -> Bytes
     return m_page.mut_range(LinkLayout::content_offset(), size);
 }
 
-} // cub
+} // calico

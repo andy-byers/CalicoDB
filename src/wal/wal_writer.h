@@ -1,11 +1,12 @@
-#ifndef CUB_WAL_WAL_WRITER_H
-#define CUB_WAL_WAL_WRITER_H
+#ifndef CALICO_WAL_WAL_WRITER_H
+#define CALICO_WAL_WAL_WRITER_H
 
 #include <memory>
+#include <spdlog/logger.h>
 #include "interface.h"
 #include "utils/identifier.h"
 
-namespace cub {
+namespace calico {
 
 class ILogFile;
 class WALRecord;
@@ -15,7 +16,13 @@ class WALRecord;
  */
 class WALWriter: public IWALWriter {
 public:
-    WALWriter(std::unique_ptr<ILogFile>, Size);
+    struct Parameters {
+        std::string wal_path;
+        std::unique_ptr<ILogFile> wal_file;
+        spdlog::sink_ptr log_sink;
+        Size block_size {};
+    };
+    explicit WALWriter(Parameters);
     ~WALWriter() override = default;
     [[nodiscard]] auto has_committed() const -> bool override;
 
@@ -45,11 +52,12 @@ public:
 
 private:
     std::unique_ptr<ILogFile> m_file; ///< Write-only WAL file handle
+    std::shared_ptr<spdlog::logger> m_logger;
     std::string m_block;              ///< Tail buffer for holding the current block
     Index m_cursor {};                ///< Position in the tail buffer
     LSN m_last_lsn;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_WAL_WAL_WRITER_H
+#endif // CALICO_WAL_WAL_WRITER_H

@@ -1,13 +1,13 @@
 /* 
  * encoding.h: Simple serialization/deserialization procedures based on those found in LevelDB.
  */
-#ifndef CUB_UTILS_ENCODING_H
-#define CUB_UTILS_ENCODING_H
+#ifndef CALICO_UTILS_ENCODING_H
+#define CALICO_UTILS_ENCODING_H
 
-#include "cub/common.h"
-#include "cub/bytes.h"
+#include "calico/options.h"
+#include "calico/bytes.h"
 
-namespace cub {
+namespace calico {
 
 inline auto get_uint16(const Byte *in) noexcept
 {
@@ -98,4 +98,4 @@ inline auto put_uint64(Bytes out, uint64_t value) noexcept
 
 } // db
 
-#endif // CUB_UTILS_ENCODING_H
+#endif // CALICO_UTILS_ENCODING_H

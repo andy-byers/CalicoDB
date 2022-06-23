@@ -1,9 +1,9 @@
-#ifndef CUB_PAGE_LINK_H
-#define CUB_PAGE_LINK_H
+#ifndef CALICO_PAGE_LINK_H
+#define CALICO_PAGE_LINK_H
 
 #include "page.h"
 
-namespace cub {
+namespace calico {
 
 class Link {
 public:
@@ -51,6 +51,6 @@ private:
     Page m_page;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_PAGE_LINK_H
+#endif // CALICO_PAGE_LINK_H

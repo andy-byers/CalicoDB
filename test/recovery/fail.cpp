@@ -1,14 +1,14 @@
 
 #include <filesystem>
 #include <fstream>
-#include "cub/cub.h"
+#include "calico/calico.h"
 #include "tools.h"
 
 #ifdef NDEBUG
 #  error "This test must run with assertions enabled"
 #endif
 
-using namespace cub;
+using namespace calico;
 
 static constexpr Size KEY_WIDTH {12};
 static constexpr Size LIMIT {10'000'000};
@@ -25,7 +25,7 @@ auto show_usage()
 
 auto main(int argc, const char *argv[]) -> int
 {
-    using namespace cub;
+    using namespace calico;
 
     if (argc != 4) {
         show_usage();
@@ -48,7 +48,7 @@ auto main(int argc, const char *argv[]) -> int
     auto db = Database::open(path, options);
     {
         std::ofstream ofs {value_path, std::ios::trunc};
-        CUB_EXPECT_TRUE(ofs.is_open());
+        CALICO_EXPECT_TRUE(ofs.is_open());
         for (Index i {}; i < num_committed; ++i) {
             const auto key = make_key<KEY_WIDTH>(i);
             const auto value = random_string(random, 2, 15);
@@ -71,7 +71,7 @@ auto main(int argc, const char *argv[]) -> int
         if (const auto info = db.get_info(); info.record_count() > max_database_size) {
             while (info.record_count() >= max_database_size / 2) {
                 const auto record = db.read_minimum();
-                CUB_EXPECT_NE(record, std::nullopt);
+                CALICO_EXPECT_NE(record, std::nullopt);
                 db.erase(stob(record->key));
             }
         }

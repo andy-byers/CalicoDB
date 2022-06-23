@@ -1,9 +1,9 @@
 #include "cursor_impl.h"
 #include <algorithm>
-#include "cub/exception.h"
+#include "calico/exception.h"
 #include "tree/tree.h"
 
-namespace cub {
+namespace calico {
 
 Cursor::Impl::Impl(ITree *tree)
     : m_tree {tree}
@@ -33,7 +33,7 @@ auto Cursor::Impl::is_maximum() const -> bool
  */
 auto Cursor::Impl::can_decrement() const -> bool
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
     if (!m_index && m_node->is_external()) {
         // The tree is empty.
         if (!m_node->cell_count() && m_traversal.empty())
@@ -52,7 +52,7 @@ auto Cursor::Impl::can_decrement() const -> bool
  */
 auto Cursor::Impl::can_increment() const -> bool
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
     if (is_end_of_tree())
         return false;
     return !m_node->is_external() ||
@@ -67,7 +67,7 @@ auto Cursor::Impl::can_increment() const -> bool
  */
 auto Cursor::Impl::is_end_of_tree() const -> bool
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
     return is_end_of_node() &&
            m_node->is_external() &&
            m_node->right_sibling_id().is_null();
@@ -75,7 +75,7 @@ auto Cursor::Impl::is_end_of_tree() const -> bool
 
 auto Cursor::Impl::is_end_of_node() const -> bool
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
     return m_index == m_node->cell_count();
 }
 
@@ -88,7 +88,7 @@ auto Cursor::Impl::reset() -> void
 
 auto Cursor::Impl::find(BytesView key) -> bool
 {
-    CUB_EXPECT_FALSE(key.is_empty());
+    CALICO_EXPECT_FALSE(key.is_empty());
     reset();
 
     if (!find_aux(key)) {
@@ -109,7 +109,7 @@ auto Cursor::Impl::find_minimum() -> void
 
 auto Cursor::Impl::find_local_min() -> void
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
 
     if (has_record()) {
         while (true) {
@@ -129,7 +129,7 @@ auto Cursor::Impl::find_maximum() -> void
 
 auto Cursor::Impl::find_local_max() -> void
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
 
     if (has_record()) {
         while (true) {
@@ -143,7 +143,7 @@ auto Cursor::Impl::find_local_max() -> void
 
 auto Cursor::Impl::find_aux(BytesView key) -> bool
 {
-    CUB_EXPECT_FALSE(key.is_empty());
+    CALICO_EXPECT_FALSE(key.is_empty());
     while (true) {
         const auto [index, found_eq] = m_node->find_ge(key);
         m_index = index;
@@ -157,7 +157,7 @@ auto Cursor::Impl::find_aux(BytesView key) -> bool
 
 auto Cursor::Impl::increment() -> bool
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
     if (can_increment()) {
         if (m_node->is_external()) {
             increment_external();
@@ -171,8 +171,8 @@ auto Cursor::Impl::increment() -> bool
 
 auto Cursor::Impl::increment_external() -> void
 {
-    CUB_EXPECT_TRUE(has_node());
-    CUB_EXPECT_EQ(m_node->type(), PageType::EXTERNAL_NODE);
+    CALICO_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_EQ(m_node->type(), PageType::EXTERNAL_NODE);
 
     if (m_index < m_node->cell_count())
         m_index++;
@@ -184,8 +184,8 @@ auto Cursor::Impl::increment_external() -> void
 
 auto Cursor::Impl::increment_internal() -> void
 {
-    CUB_EXPECT_TRUE(has_node());
-    CUB_EXPECT_EQ(m_node->type(), PageType::INTERNAL_NODE);
+    CALICO_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_EQ(m_node->type(), PageType::INTERNAL_NODE);
 
     // m_index should never equal the cell count here. We handle this case when we traverse toward the root
     // from an external node.
@@ -195,7 +195,7 @@ auto Cursor::Impl::increment_internal() -> void
 
 auto Cursor::Impl::decrement() -> bool
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
     if (can_decrement()) {
         if (m_node->is_external()) {
             decrement_external();
@@ -209,21 +209,21 @@ auto Cursor::Impl::decrement() -> bool
 
 auto Cursor::Impl::decrement_internal() -> void
 {
-    CUB_EXPECT_TRUE(has_node());
-    CUB_EXPECT_EQ(m_node->type(), PageType::INTERNAL_NODE);
+    CALICO_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_EQ(m_node->type(), PageType::INTERNAL_NODE);
     goto_inorder_predecessor();
 }
 
 auto Cursor::Impl::decrement_external() -> void
 {
-    CUB_EXPECT_TRUE(has_node());
-    CUB_EXPECT_EQ(m_node->type(), PageType::EXTERNAL_NODE);
+    CALICO_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_EQ(m_node->type(), PageType::EXTERNAL_NODE);
 
     if (m_index) {
         m_index--;
 
         // This method should leave us on the last cell if we were one past.
-        CUB_EXPECT_FALSE(is_end_of_tree());
+        CALICO_EXPECT_FALSE(is_end_of_tree());
         return;
     }
     while (!m_node->parent_id().is_null()) {
@@ -263,9 +263,9 @@ auto Cursor::Impl::goto_inorder_predecessor() -> void
  */
 auto Cursor::Impl::goto_child(Index index) -> void
 {
-    CUB_EXPECT_TRUE(has_node());
-    CUB_EXPECT_FALSE(m_node->is_external());
-    CUB_EXPECT_LE(index, m_node->cell_count());
+    CALICO_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_FALSE(m_node->is_external());
+    CALICO_EXPECT_LE(index, m_node->cell_count());
     const auto child_id = m_node->child_id(index);
     move_cursor(child_id);
     m_traversal.push_back(index);
@@ -273,9 +273,9 @@ auto Cursor::Impl::goto_child(Index index) -> void
 
 auto Cursor::Impl::goto_parent() -> void
 {
-    CUB_EXPECT_TRUE(has_node());
+    CALICO_EXPECT_TRUE(has_node());
     const auto parent_id = m_node->parent_id();
-    CUB_EXPECT_FALSE(parent_id.is_null());
+    CALICO_EXPECT_FALSE(parent_id.is_null());
     move_cursor(parent_id);
     m_index = m_traversal.back();
     m_traversal.pop_back();
@@ -283,13 +283,13 @@ auto Cursor::Impl::goto_parent() -> void
 
 auto Cursor::Impl::key() const -> BytesView
 {
-    CUB_EXPECT_TRUE(has_record());
+    CALICO_EXPECT_TRUE(has_record());
     return m_node->read_key(m_index);
 }
 
 auto Cursor::Impl::value() const -> std::string
 {
-    CUB_EXPECT_TRUE(has_record());
+    CALICO_EXPECT_TRUE(has_record());
     return m_tree.value->collect_value(*m_node, m_index);
 }
 
@@ -299,92 +299,11 @@ auto Cursor::Impl::move_cursor(PID pid) -> void
         m_node.reset();
         m_node = m_tree.value->acquire_node(pid, false);
     } catch (...) {
-        CUB_EXPECT_EQ(m_node, std::nullopt);
+        CALICO_EXPECT_EQ(m_node, std::nullopt);
         m_traversal.clear();
         m_index = 0;
         throw;
     }
 }
 
-Cursor::Cursor() = default;
-Cursor::~Cursor() = default;
-Cursor::Cursor(Cursor &&) noexcept = default;
-auto Cursor::operator=(Cursor &&) noexcept -> Cursor & = default;
-
-auto Cursor::has_record() const -> bool
-{
-    return m_impl->has_record();
-}
-
-auto Cursor::is_minimum() const -> bool
-{
-    return m_impl->is_minimum();
-}
-
-auto Cursor::is_maximum() const -> bool
-{
-    return m_impl->is_maximum();
-}
-
-auto Cursor::key() const -> BytesView
-{
-    return m_impl->key();
-}
-
-auto Cursor::value() const -> std::string
-{
-    return m_impl->value();
-}
-
-auto Cursor::record() const -> Record
-{
-    return {btos(m_impl->key()), m_impl->value()};
-}
-
-auto Cursor::reset() -> void
-{
-    m_impl->reset();
-}
-
-auto Cursor::increment() -> bool
-{
-    return m_impl->increment();
-}
-
-auto Cursor::increment(Size n) -> Size
-{
-    Size count {};
-    while (count < n && m_impl->increment())
-        count++;
-    return count;
-}
-
-auto Cursor::decrement() -> bool
-{
-    return m_impl->decrement();
-}
-
-auto Cursor::decrement(Size n) -> Size
-{
-    Size count {};
-    while (count < n && m_impl->decrement())
-        count++;
-    return count;
-}
-
-auto Cursor::find(BytesView key) -> bool
-{
-    return m_impl->find(key);
-}
-
-auto Cursor::find_minimum() -> void
-{
-    m_impl->find_minimum();
-}
-
-auto Cursor::find_maximum() -> void
-{
-    m_impl->find_maximum();
-}
-
-} // cub
+} // calico

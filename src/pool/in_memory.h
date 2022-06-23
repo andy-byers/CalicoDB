@@ -1,22 +1,20 @@
-#ifndef CUB_POOL_IN_MEMORY_H
-#define CUB_POOL_IN_MEMORY_H
+#ifndef CALICO_POOL_IN_MEMORY_H
+#define CALICO_POOL_IN_MEMORY_H
 
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <spdlog/logger.h>
 #include "interface.h"
 #include "utils/identifier.h"
 #include "utils/scratch.h"
 
-namespace cub {
+namespace calico {
 
 class InMemory: public IBufferPool {
 public:
-    InMemory(Size page_size, bool use_transactions)
-        : m_scratch {page_size}
-        , m_page_size {page_size}
-        , m_uses_transactions {use_transactions} {}
+    InMemory(Size, bool, spdlog::sink_ptr);
 
     ~InMemory() override = default;
 
@@ -47,10 +45,7 @@ public:
 
     [[nodiscard]] auto can_commit() const -> bool override
     {
-        if (!m_uses_transactions)
-            throw std::logic_error {"Transactions are not enabled"};
-
-        return !m_stack.empty();
+        return m_uses_transactions && !m_stack.empty();
     }
 
     [[nodiscard]] auto uses_transactions() const -> bool override
@@ -94,14 +89,15 @@ private:
     auto propagate_page_error() -> void;
 
     mutable std::mutex m_mutex;
+    ScratchManager m_scratch;
     std::vector<UndoInfo> m_stack;
     std::vector<Frame> m_frames;
+    std::shared_ptr<spdlog::logger> m_logger;
     std::exception_ptr m_error;
-    ScratchManager m_scratch;
     Size m_page_size {};
     bool m_uses_transactions {};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_POOL_IN_MEMORY_H
+#endif // CALICO_POOL_IN_MEMORY_H

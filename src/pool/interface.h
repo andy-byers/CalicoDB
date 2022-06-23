@@ -1,10 +1,10 @@
-#ifndef CUB_POOL_INTERFACE_H
-#define CUB_POOL_INTERFACE_H
+#ifndef CALICO_POOL_INTERFACE_H
+#define CALICO_POOL_INTERFACE_H
 
-#include "cub/bytes.h"
+#include "calico/bytes.h"
 #include "utils/utils.h"
 
-namespace cub {
+namespace calico {
 
 class FileHeader;
 class Frame;
@@ -36,6 +36,6 @@ public:
     virtual auto on_page_error() -> void = 0;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_POOL_INTERFACE_H
+#endif // CALICO_POOL_INTERFACE_H

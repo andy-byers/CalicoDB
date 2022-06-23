@@ -10,8 +10,9 @@
 #include "pool/frame.h"
 #include "pool/interface.h"
 #include "page/cell.h"
-#include "cub/common.h"
+#include "calico/options.h"
 #include "utils/layout.h"
+#include "utils/logging.h"
 #include "db/cursor_impl.h"
 #include "tree/tree.h"
 
@@ -22,7 +23,7 @@
 
 namespace {
 
-using namespace cub;
+using namespace calico;
 
 template<class T> auto tree_insert(T &tree, const std::string &key, const std::string &value) -> void
 {
@@ -191,6 +192,7 @@ public:
 
     TreeTests()
     {
+        auto sink = logging::create_sink("", 0);
         m_max_local = get_max_local(m_page_size);
         std::filesystem::remove(m_path);
         auto file = std::make_unique<FaultyReadWriteMemory>();
@@ -198,6 +200,7 @@ public:
             std::move(file),
             nullptr,
             nullptr,
+            sink,
             LSN::null(),
             32,
             0,
@@ -206,6 +209,7 @@ public:
         });
         m_tree = std::make_unique<TestTree>(Tree::Parameters{
             m_pool.get(),
+            sink,
             PID::null(),
             0,
             0,
@@ -588,28 +592,6 @@ auto setup_external_merge_test(TreeBuilder &builder) -> void
     builder.connect_siblings(cc, rc);
 }
 
-TEST_F(TreeTests, X)
-{
-    //     1:[2,     4]
-    // 2:[]     3:[3]  4:[5]
-    TreeBuilder builder {tree()};
-    setup_external_merge_test(builder);
-
-    auto node_1 = m_tree->acquire_node(PID {1}, true);
-    auto node_2 = m_tree->acquire_node(PID {2}, true);
-    auto node_3 = m_tree->acquire_node(PID {3}, true);
-
-    node_2.remove(stob(make_key<1>(1)));
-    node_2.validate();
-
-    ASSERT_EQ(node_2.cell_count(), 0);
-    auto separator = node_1.read_cell(0);
-    auto other = node_3.read_cell(0);
-    separator.set_left_child_id(PID::null());
-    node_2.insert(std::move(separator));
-    node_2.insert(std::move(other));
-}
-
 TEST_F(TreeTests, LeftMergeExternal)
 {
     //     1:[2,     4]       -->          1:[4]
@@ -712,22 +694,24 @@ TEST_F(TreeTests, FixesRootAfterRightMerge)
     ASSERT_FALSE(tree().node_contains(PID{1}, make_key<1>(9)));
 }
 
-TEST_F(TreeTests, LeftMergeWithChildSplit)
-{
-    //      1:[5]               -->          1:[10]
-    // 2:[1]     3:[9, 10, 11]       2:[5, 9]      3:[11]
-    auto builder = TreeBuilder{tree()};
-    setup_fixes_root_after_merge_test<2>(builder);
-    builder.node_insert(PID {3}, make_key<2>(10));
-    builder.node_insert(PID {3}, make_key<2>(11));
-    ASSERT_TRUE(tree_remove(tree(), make_key<2>(1)));
-
-    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<2>(5)));
-    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<2>(9)));
-    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<2>(10)));
-    ASSERT_TRUE(tree().node_contains(PID {3}, make_key<2>(11)));
-    validate();
-}
+//TEST_F(TreeTests, LeftMergeWithChildSplit)
+//{
+//    //      1:[5]               -->          1:[10]
+//    // 2:[1]     3:[9, 10, 11]       2:[5, 9]      3:[11]
+//    TreeBuilder builder {tree()};
+//    setup_fixes_root_after_merge_test<2>(builder);
+//    builder.node_insert(PID {3}, make_key<2>(10));
+//    builder.node_insert(PID {3}, make_key<2>(11));
+//    ASSERT_TRUE(tree_remove(tree(), make_key<2>(1)));
+//
+//    TreePrinter {tree()}.print();
+//
+//    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<2>(5)));
+//    ASSERT_TRUE(tree().node_contains(PID {2}, make_key<2>(9)));
+//    ASSERT_TRUE(tree().node_contains(PID {1}, make_key<2>(10)));
+//    ASSERT_TRUE(tree().node_contains(PID {3}, make_key<2>(11)));
+//    validate();
+//}
 
 TEST_F(TreeTests, RightMergeWithChildSplit)
 {

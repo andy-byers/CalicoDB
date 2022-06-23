@@ -1,5 +1,5 @@
-#ifndef CUB_PAGE_PAGE_H
-#define CUB_PAGE_PAGE_H
+#ifndef CALICO_PAGE_PAGE_H
+#define CALICO_PAGE_PAGE_H
 
 #include <optional>
 #include <vector>
@@ -7,7 +7,7 @@
 #include "utils/scratch.h"
 #include "utils/types.h"
 
-namespace cub {
+namespace calico {
 
 class IBufferPool;
 
@@ -73,6 +73,6 @@ private:
     bool m_is_dirty {};
 };
 
-} // cub
+} // calico
 
-#endif // CUB_PAGE_PAGE_H
+#endif // CALICO_PAGE_PAGE_H

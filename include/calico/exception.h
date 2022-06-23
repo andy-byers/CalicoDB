@@ -1,15 +1,18 @@
-#ifndef CUB_EXCEPTION_H
-#define CUB_EXCEPTION_H
+#ifndef CALICO_EXCEPTION_H
+#define CALICO_EXCEPTION_H
 
 #include <cerrno>
 #include <cstring>
 #include <exception>
 #include <system_error>
 #include <utility>
-#include "common.h"
+#include "options.h"
 
-namespace cub {
+namespace calico {
 
+/**
+ * An exception that is thrown when an I/O event fails.
+ */
 class IOError: public std::runtime_error {
 public:
     explicit IOError(const char *what)
@@ -39,6 +42,6 @@ public:
     ~CorruptionError() override = default;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_EXCEPTION_H
+#endif // CALICO_EXCEPTION_H

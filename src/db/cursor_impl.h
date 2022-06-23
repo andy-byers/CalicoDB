@@ -1,21 +1,21 @@
-#ifndef CUB_DB_READER_IMPL_H
-#define CUB_DB_READER_IMPL_H
+#ifndef CALICO_DB_READER_IMPL_H
+#define CALICO_DB_READER_IMPL_H
 
-#include "cub/cursor.h"
+#include "calico/cursor.h"
 #include <optional>
 #include <shared_mutex>
 #include <vector>
 #include "page/node.h"
 #include "utils/types.h"
 
-namespace cub {
+namespace calico {
 
 class ITree;
 struct PID;
 
 class Cursor::Impl {
 public:
-    explicit Impl(ITree*);
+    Impl(ITree*);
     ~Impl() = default;
     [[nodiscard]] auto has_record() const -> bool;
     [[nodiscard]] auto is_minimum() const -> bool;
@@ -37,7 +37,6 @@ private:
     [[nodiscard]] auto can_increment() const -> bool;
     [[nodiscard]] auto is_end_of_tree() const -> bool;
     [[nodiscard]] auto is_end_of_node() const -> bool;
-    [[nodiscard]] auto has_node() const -> bool {return m_node != std::nullopt;}
     auto find_aux(BytesView key) -> bool;
     auto increment_external() -> void;
     auto increment_internal() -> void;
@@ -51,12 +50,17 @@ private:
     auto find_local_max() -> void;
     auto move_cursor(PID) -> void;
 
+    [[nodiscard]] auto has_node() const -> bool
+    {
+        return m_node != std::nullopt;
+    }
+
     Unique<ITree*> m_tree;          ///< Tree that the cursor belongs to
     std::vector<Index> m_traversal; ///< Cell IDs encountered on the current traversal
     std::optional<Node> m_node;     ///< Node that the cursor is over
     Index m_index {};               ///< Position in the current node
 };
 
-} // cub
+} // calico
 
-#endif // CUB_DB_READER_IMPL_H
+#endif // CALICO_DB_READER_IMPL_H

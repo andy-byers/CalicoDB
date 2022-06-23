@@ -1,9 +1,9 @@
-#ifndef CUB_FILE_SYSTEM_H
-#define CUB_FILE_SYSTEM_H
+#ifndef CALICO_FILE_SYSTEM_H
+#define CALICO_FILE_SYSTEM_H
 
-#include "cub/bytes.h"
+#include "calico/bytes.h"
 
-namespace cub::system {
+namespace calico::system {
 
 static constexpr int SUCCESS = 0;
 static constexpr int FAILURE = -1;
@@ -21,6 +21,6 @@ auto rename(const std::string&, const std::string&) -> void;
 auto sync(int) -> void;
 auto resize(int, Size) -> void;
 
-} // cub::system
+} // calico::system
 
-#endif // CUB_FILE_SYSTEM_H
+#endif // CALICO_FILE_SYSTEM_H

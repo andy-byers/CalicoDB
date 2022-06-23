@@ -1,17 +1,17 @@
 
-#ifndef CUB_TEST_TOOLS_TOOLS_H
-#define CUB_TEST_TOOLS_TOOLS_H
+#ifndef CALICO_TEST_TOOLS_TOOLS_H
+#define CALICO_TEST_TOOLS_TOOLS_H
 
 #include <iomanip>
 #include <iostream>
 #include <vector>
 #include "random.h"
-#include "cub/cub.h"
+#include "calico/calico.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 #include "wal/wal_record.h"
 
-namespace cub {
+namespace calico {
 
 class ITree;
 class Node;
@@ -210,7 +210,7 @@ public:
     explicit WALRecordGenerator(Size block_size)
         : m_block_size {block_size}
     {
-        CUB_EXPECT_TRUE(is_power_of_two(block_size));
+        CALICO_EXPECT_TRUE(is_power_of_two(block_size));
     }
 
     auto generate_small() -> WALRecord
@@ -233,12 +233,12 @@ public:
 
     auto generate(Size mean_update_size, Size update_count) -> WALRecord
     {
-        CUB_EXPECT_GT(mean_update_size, 0);
+        CALICO_EXPECT_GT(mean_update_size, 0);
         constexpr Size page_count = 0x1000;
         const auto lower_bound = mean_update_size - mean_update_size/3;
         const auto upper_bound = mean_update_size + mean_update_size/3;
         const auto page_size = upper_bound;
-        CUB_EXPECT_LE(page_size, std::numeric_limits<uint16_t>::max());
+        CALICO_EXPECT_LE(page_size, std::numeric_limits<uint16_t>::max());
 
         m_snapshots_before.emplace_back(random.next_string(page_size));
         m_snapshots_after.emplace_back(random.next_string(page_size));
@@ -265,11 +265,11 @@ public:
 
     auto validate_record(const WALRecord &record, LSN target_lsn) const -> void
     {
-        CUB_EXPECT_EQ(record.lsn(), target_lsn);
+        CALICO_EXPECT_EQ(record.lsn(), target_lsn);
         const auto payload = retrieve_payload(target_lsn);
-        CUB_EXPECT_EQ(record.type(), WALRecord::Type::FULL);
-        CUB_EXPECT_TRUE(record.payload().data() == stob(payload));
-        CUB_EXPECT_TRUE(record.is_consistent());
+        CALICO_EXPECT_EQ(record.type(), WALRecord::Type::FULL);
+        CALICO_EXPECT_TRUE(record.payload().data() == stob(payload));
+        CALICO_EXPECT_TRUE(record.is_consistent());
     }
 
     [[nodiscard]] auto retrieve_payload(LSN lsn) const -> const std::string&
@@ -286,6 +286,6 @@ private:
     Size m_block_size;
 };
 
-} // cub
+} // calico
 
-#endif // CUB_TEST_TOOLS_TOOLS_H
+#endif // CALICO_TEST_TOOLS_TOOLS_H
