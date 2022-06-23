@@ -16,7 +16,7 @@ _deps
 *_include.cmake
 *_tests.cmake
 
-# CLion TODO: Should .idea file go here?
-cmake-build-debug/**
-
-test/fuzz/corpus/
+.idea
+cmake-build-*
+build
+test/fuzz/corpus

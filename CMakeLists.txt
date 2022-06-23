@@ -1,4 +1,3 @@
-
 cmake_minimum_required(VERSION 3.14)
 
 SET(
@@ -45,20 +44,33 @@ file(GLOB_RECURSE CALICO_HEADERS "${CALICO_INCLUDE_DIR}/calico/*.h")
 list(APPEND CALICO_SOURCES ${CALICO_HEADERS})
 
 include(GNUInstallDirs)
+include(FetchContent)
 
-find_package(ZLIB)
-add_subdirectory(lib/spdlog)
+set(SPDLOG_URL https://github.com/gabime/spdlog/archive/refs/tags/v1.10.0.zip)
+set(ZLIB_URL https://github.com/madler/zlib/archive/refs/tags/v1.2.12.zip)
+
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG        v1.10.0
+)
+FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG        v1.2.12
+)
+FetchContent_MakeAvailable(spdlog zlib)
 
 # Build the static library.
-add_library("${CALICO_NAME}" STATIC "${CALICO_SOURCES}")
-target_include_directories("${CALICO_NAME}" PRIVATE "${CALICO_SOURCE_DIR}" "${ZLIB_INCLUDE_DIRS}")
-target_include_directories(
-    "${CALICO_NAME}"
-    PUBLIC $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
-           $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
+add_library("${CALICO_NAME}"
+        STATIC "${CALICO_SOURCES}")
+target_include_directories("${CALICO_NAME}"
+        PRIVATE "${CALICO_SOURCE_DIR}" "${ZLIB_INCLUDE_DIRS}")
+target_include_directories("${CALICO_NAME}"
+        PUBLIC $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
+               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_options("${CALICO_NAME}" PRIVATE "${CALICO_WARNINGS}")
-target_link_libraries("${CALICO_NAME}" PUBLIC spdlog::spdlog ZLIB::ZLIB)
+target_link_libraries("${CALICO_NAME}" PUBLIC spdlog::spdlog zlib)
 
 if(CALICO_USE_VALIDATORS)
     target_compile_definitions("${CALICO_NAME}" PRIVATE CALICO_USE_VALIDATORS)
@@ -111,11 +123,10 @@ endif()
 
 if(CALICO_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-
-    include(FetchContent)
     FetchContent_Declare(
-            googletest
-            URL https://github.com/google/googletest/archive/609281088cfefc76f9d0ce82e1ff6c30cc3591e5.zip
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        release-1.11.0
     )
     FetchContent_MakeAvailable(googletest)
     include(GoogleTest)
