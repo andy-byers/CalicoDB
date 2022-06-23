@@ -26,7 +26,7 @@ set(CALICO_EXAMPLES_DIR "${PROJECT_SOURCE_DIR}/examples")
 set(CALICO_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
 set(CALICO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/src")
 set(CALICO_TEST_DIR "${PROJECT_SOURCE_DIR}/test")
-set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic -Wpointer-arith -Wstrict-prototypes)
+set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic -Wpointer-arith)
 
 # Check if we have O_DIRECT, which turns off kernel page caching.
 include(CheckCXXSymbolExists)
