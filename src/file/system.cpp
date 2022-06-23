@@ -1,4 +1,5 @@
 #include "system.h"
+#include <filesystem>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -16,9 +17,9 @@ auto use_direct_io([[maybe_unused]] int fd) -> void
 #endif
 }
 
-auto exists(const std::string &name) -> bool
+auto exists(const std::string &path) -> bool
 {
-    return ::access(name.c_str(), F_OK) == SUCCESS;
+    return std::filesystem::exists(path);
 }
 
 auto open(const std::string &name, int mode, int permissions) -> int

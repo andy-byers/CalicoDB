@@ -10,14 +10,11 @@
 namespace calico {
 
 class Cursor;
-class Iterator;
 class IBufferPool;
 class ILogFile;
 class IReadOnlyFile;
 class IReadWriteFile;
 class ITree;
-class Cursor;
-class Lock;
 
 class Database::Impl final {
 public:
@@ -40,12 +37,6 @@ public:
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto uses_transactions() const -> Size;
-
-    [[nodiscard]] auto path() const -> const std::string&
-    {
-        return m_path;
-    }
-
     auto read(BytesView, Ordering) -> std::optional<Record>;
     auto read_minimum() -> std::optional<Record>;
     auto read_maximum() -> std::optional<Record>;
@@ -55,6 +46,11 @@ public:
     auto abort() -> bool;
     auto get_cursor() -> Cursor;
     auto get_info() -> Info;
+
+    [[nodiscard]] auto path() const -> const std::string&
+    {
+        return m_path;
+    }
 
 private:
     auto save_header() -> void;

@@ -15,7 +15,7 @@ struct PID;
 
 class Cursor::Impl {
 public:
-    explicit Impl(ITree*);
+    Impl(ITree*);
     ~Impl() = default;
     [[nodiscard]] auto has_record() const -> bool;
     [[nodiscard]] auto is_minimum() const -> bool;
@@ -37,7 +37,6 @@ private:
     [[nodiscard]] auto can_increment() const -> bool;
     [[nodiscard]] auto is_end_of_tree() const -> bool;
     [[nodiscard]] auto is_end_of_node() const -> bool;
-    [[nodiscard]] auto has_node() const -> bool {return m_node != std::nullopt;}
     auto find_aux(BytesView key) -> bool;
     auto increment_external() -> void;
     auto increment_internal() -> void;
@@ -50,6 +49,11 @@ private:
     auto find_local_min() -> void;
     auto find_local_max() -> void;
     auto move_cursor(PID) -> void;
+
+    [[nodiscard]] auto has_node() const -> bool
+    {
+        return m_node != std::nullopt;
+    }
 
     Unique<ITree*> m_tree;          ///< Tree that the cursor belongs to
     std::vector<Index> m_traversal; ///< Cell IDs encountered on the current traversal

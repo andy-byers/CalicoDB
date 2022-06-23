@@ -1,8 +1,6 @@
 
 #include <numeric>
-
 #include <gtest/gtest.h>
-
 #include "page/page.h"
 #include "pool/buffer_pool.h"
 #include "pool/frame.h"
@@ -77,20 +75,12 @@ TEST_F(PagerTests, TruncateResizesUnderlyingFile)
     ASSERT_EQ(memory.memory().size(), 0);
 }
 
-//    [[nodiscard]] auto available() const -> Size;
-//    [[nodiscard]] auto page_size() const -> Size;
-//    [[nodiscard]] auto pin(PID) -> std::optional<Frame>;
-//    auto unpin(Frame) -> void;
-//    auto discard(Frame) -> void;
-//    auto truncate(Size) -> void;
-
 class BufferPoolTestsBase: public testing::Test {
 public:
     static constexpr Size frame_count {32};
     static constexpr Size page_size {0x100};
 
-    // We use a stub WAL so the LSN will always be this value.
-    LSN static_lsn {1'000};
+    LSN static_lsn {LSN::max()};
 
     explicit BufferPoolTestsBase(std::unique_ptr<ReadWriteMemory> file)
     {
@@ -154,7 +144,6 @@ TEST_F(BufferPoolTests, LoadsFileHeaderFields)
     pool->load_header(header);
 
     ASSERT_EQ(pool->page_count(), 123);
-    ASSERT_EQ(pool->flushed_lsn(), LSN {456});
 }
 
 TEST_F(BufferPoolTests, SavesFileHeaderFields)
@@ -165,7 +154,6 @@ TEST_F(BufferPoolTests, SavesFileHeaderFields)
     (void)pool->allocate(PageType::EXTERNAL_NODE);
     pool->save_header(header);
     ASSERT_EQ(header.page_count(), 1);
-    ASSERT_EQ(header.flushed_lsn(), static_lsn);
 }
 
 TEST_F(BufferPoolTests, AllocateReturnsCorrectPage)

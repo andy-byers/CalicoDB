@@ -67,7 +67,7 @@ Database::Impl::~Impl()
         logging::MessageGroup group;
         group.set_primary("cannot commit");
         group.set_detail("{}", error.what());
-        group.log(*m_logger, spdlog::level::err);
+        group.err(*m_logger);
         committed = false;
     }
 
@@ -78,7 +78,7 @@ Database::Impl::~Impl()
         logging::MessageGroup group;
         group.set_primary("cannot unlink WAL");
         group.set_detail("{}", error.what());
-        group.log(*m_logger, spdlog::level::err);
+        group.err(*m_logger);
     }
 }
 

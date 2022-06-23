@@ -90,6 +90,7 @@ private:
     auto roll_backward() -> void;
     auto fetch_page(PID, bool) -> Page;
     auto fetch_frame(PID) -> Frame;
+    auto try_evict_frame() -> bool;
 
     mutable std::mutex m_mutex;
     std::unordered_map<PID, Frame, PID::Hasher> m_pinned;
@@ -103,6 +104,7 @@ private:
     LSN m_flushed_lsn;
     LSN m_next_lsn;
     Size m_page_count {};
+    Size m_dirty_count {};
     Size m_ref_sum {};
     bool m_uses_transactions {};
 };

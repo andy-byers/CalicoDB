@@ -23,6 +23,11 @@ BufferPool::BufferPool(Parameters param)
 {
     CALICO_EXPECT_EQ(m_uses_transactions, m_wal_reader && m_wal_writer);
     m_logger->trace("Constructing BufferPool object");
+
+    if (!m_uses_transactions) {
+        m_flushed_lsn = LSN::max();
+        m_next_lsn = LSN::max();
+    }
 }
 
 auto BufferPool::can_commit() const -> bool
@@ -30,7 +35,7 @@ auto BufferPool::can_commit() const -> bool
     if (m_uses_transactions) {
         return m_wal_writer->has_committed() || m_wal_writer->has_pending();
     } else {
-        return m_cache.dirty_count() > 0;
+        return m_dirty_count > 0;
     }
 }
 
@@ -112,11 +117,8 @@ auto BufferPool::log_update(Page &page) -> void
 auto BufferPool::fetch_frame(PID id) -> Frame
 {
     const auto try_evict_and_pin = [id, this]() -> std::optional<Frame> {
-        if (auto frame = m_cache.evict(m_flushed_lsn)) {
-            m_pager.unpin(std::move(*frame));
-            frame = m_pager.pin(id);
-            return frame;
-        }
+        if (try_evict_frame())
+            return m_pager.pin(id);
         return std::nullopt;
     };
     if (auto frame = m_cache.extract(id))
@@ -149,10 +151,12 @@ auto BufferPool::on_page_release(Page &page) -> void
     CALICO_EXPECT_NE(itr, m_pinned.end());
 
     auto &frame = itr->second;
+    m_dirty_count += !frame.is_dirty() && page.is_dirty();
     frame.synchronize(page);
 
     if (!frame.ref_count()) {
-        m_cache.put(std::move(frame));
+        const auto id = frame.page_id();
+        m_cache.put(id, std::move(frame));
         m_pinned.erase(itr);
     }
     m_ref_sum--;
@@ -239,7 +243,7 @@ auto BufferPool::commit() -> void
         try_flush_wal();
     }
     try_flush();
-    CALICO_EXPECT_EQ(m_cache.dirty_count(), 0);
+    CALICO_EXPECT_EQ(m_dirty_count, 0);
 
     m_pager.sync();
 
@@ -261,8 +265,7 @@ auto BufferPool::abort() -> void
         m_logger->error("unable to flush WAL: {}", error.what());
     }
     if (!m_wal_writer->has_committed()) {
-        m_logger->trace("(1/2) stopping abort");
-        m_logger->trace("(2/2) transaction is empty");
+        m_logger->trace("stopping abort: transaction is empty");
         return;
     }
 
@@ -310,18 +313,25 @@ auto BufferPool::try_flush() -> bool
 
     if (m_cache.is_empty())
         return false;
-
-    // If we aren't using transactions, we want to allow all dirty pages to be flushed to disk.
-    const auto limit = m_uses_transactions ? m_flushed_lsn : LSN::max();
-
-    for (; ; ) {
-        if (auto frame = m_cache.evict(limit)) {
-            m_pager.unpin(std::move(*frame));
-        } else {
-            break;
-        }
-    }
+    std::optional<Frame> frame;
+    while (try_evict_frame()) {}
     return m_cache.is_empty();
+}
+
+auto BufferPool::try_evict_frame() -> bool
+{
+    for (Index i {}; i < m_cache.size(); ++i) {
+        auto frame = m_cache.evict();
+        CALICO_EXPECT_NE(frame, std::nullopt);
+        if (!frame->is_dirty() || frame->page_lsn() <= m_flushed_lsn) {
+            m_dirty_count -= frame->is_dirty();
+            m_pager.unpin(std::move(*frame));
+            return true;
+        }
+        const auto id = frame->page_id();
+        m_cache.put(id, std::move(*frame));
+    }
+    return false;
 }
 
 auto BufferPool::try_flush_wal() -> bool
@@ -334,15 +344,13 @@ auto BufferPool::try_flush_wal() -> bool
     return false;
 }
 
-
 auto BufferPool::purge() -> void
 {
-    const LSN max_lsn {std::numeric_limits<uint32_t>::max()};
     CALICO_EXPECT_EQ(m_ref_sum, 0);
-
     while (!m_cache.is_empty()) {
-        auto frame = m_cache.evict(max_lsn);
+        auto frame = m_cache.evict();
         CALICO_EXPECT_NE(frame, std::nullopt);
+        m_dirty_count -= frame->is_dirty();
         frame->clean();
         m_pager.unpin(std::move(*frame));
     }
@@ -350,13 +358,14 @@ auto BufferPool::purge() -> void
 
 auto BufferPool::save_header(FileHeader &header) -> void
 {
-    header.set_flushed_lsn(m_flushed_lsn);
+    header.set_flushed_lsn(m_uses_transactions ? m_flushed_lsn : LSN::null());
     header.set_page_count(m_page_count);
 }
 
 auto BufferPool::load_header(const FileHeader &header) -> void
 {
-    m_flushed_lsn = header.flushed_lsn();
+    if (m_uses_transactions)
+        m_flushed_lsn = header.flushed_lsn();
     m_page_count = header.page_count();
 }
 
