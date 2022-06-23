@@ -31,12 +31,11 @@ public:
         return set_text(HINT, format, std::forward<Args>(args)...);
     }
 
-    template<class Exception>
-    auto log_and_throw(spdlog::logger &logger) -> void
+    auto err(spdlog::logger &logger) -> std::string
     {
         auto message = assemble_message();
         logger.error(message);
-        throw Exception {message};
+        return message;
     }
 
     auto log(spdlog::logger &logger, spdlog::level::level_enum level = spdlog::level::trace) const -> void

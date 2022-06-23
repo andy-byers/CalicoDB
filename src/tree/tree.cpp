@@ -17,7 +17,7 @@ Tree::Tree(Parameters param)
     , m_node_count {param.node_count}
     , m_cell_count {param.cell_count}
 {
-    m_logger->trace("Constructing Tree object");
+    m_logger->trace("constructing Tree object");
 }
 
 auto Tree::find_root(bool is_writable) -> Node
@@ -65,7 +65,7 @@ auto Tree::insert(BytesView key, BytesView value) -> bool
         logging::MessageGroup group;
         group.set_primary("cannot write record");
         group.set_detail("key is empty");
-        group.log_and_throw<std::invalid_argument>(*m_logger);
+        throw std::invalid_argument {group.err(*m_logger)};
     }
 
     auto [node, index, found_eq] = find_ge(key, true);
@@ -75,7 +75,7 @@ auto Tree::insert(BytesView key, BytesView value) -> bool
         group.set_primary("cannot write record");
         group.set_detail("key of length {} B is too long", key.size());
         group.set_hint("maximum key length is {} B", get_max_local(m_pool->page_size()));
-        group.log_and_throw<std::invalid_argument>(*m_logger);
+        throw std::invalid_argument {group.err(*m_logger)};
     }
 
     if (found_eq) {

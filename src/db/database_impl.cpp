@@ -186,7 +186,7 @@ auto Database::Impl::read(BytesView key, Ordering ordering) -> std::optional<Rec
         logging::MessageGroup group;
         group.set_primary("cannot read record");
         group.set_detail("key cannot be empty");
-        group.log_and_throw<std::invalid_argument>(*m_logger);
+        throw std::invalid_argument {group.err(*m_logger)};
     }
 
     if (auto cursor = get_cursor(); cursor.has_record()) {
@@ -220,7 +220,7 @@ auto Database::Impl::read(BytesView key, Ordering ordering) -> std::optional<Rec
                 logging::MessageGroup group;
                 group.set_primary("cannot read record {}", 1);
                 group.set_detail("Ordering enum cannot have value {}", static_cast<unsigned>(ordering));
-                group.log_and_throw<std::invalid_argument>(*m_logger);
+                throw std::invalid_argument {group.err(*m_logger)};
         }
         return Record {btos(cursor.key()), cursor.value()};
     }
@@ -272,7 +272,7 @@ auto Database::Impl::abort() -> bool
         logging::MessageGroup group;
         group.set_primary("cannot abort transaction");
         group.set_detail("transactions are disabled");
-        group.log_and_throw<std::logic_error>(*m_logger);
+        throw std::logic_error {group.err(*m_logger)};
     }
 
     if (m_pool->can_commit()) {

@@ -25,7 +25,7 @@ WALWriter::WALWriter(Parameters param)
         group.set_primary("cannot open WAL writer");
         group.set_detail("WAL block size {} is invalid", param.block_size);
         group.set_hint("must be a power of 2 in [{}, {}]", MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
-        group.log_and_throw<std::invalid_argument>(*m_logger);
+        throw std::invalid_argument {group.err(*m_logger)};
     }
 }
 

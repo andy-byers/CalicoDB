@@ -213,7 +213,7 @@ auto BufferPool::roll_backward() -> void
             logging::MessageGroup group;
             group.set_primary("could not roll back");
             group.set_detail("transaction is empty");
-            group.log_and_throw<CorruptionError>(*m_logger);
+            throw CorruptionError {group.err(*m_logger)};
         }
     }
 

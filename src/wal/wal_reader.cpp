@@ -182,12 +182,11 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
             return record;
         case WALRecord::Type::EMPTY:
             return std::nullopt;
-        default: {
+        default:
             logging::MessageGroup group;
             group.set_primary("cannot read record");
             group.set_detail("WAL record type {} is not recognized", static_cast<unsigned>(record.type()));
-            group.log_and_throw<CorruptionError>(*m_logger);
-        }
+            throw CorruptionError {group.err(*m_logger)};
     }
 }
 
@@ -222,7 +221,7 @@ auto WALReader::read_block() -> bool
                 group.set_primary("cannot read block");
                 group.set_detail("WAL contains an incomplete block of size {} B", bytes_read);
                 group.set_hint("block size is {} B", m_block.size());
-                group.log_and_throw<CorruptionError>(*m_logger);
+                throw CorruptionError {group.err(*m_logger)};
             }
             m_has_block = true;
             return true;
