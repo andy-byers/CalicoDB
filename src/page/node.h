@@ -102,10 +102,7 @@ public:
         bool found_eq{};
     };
 
-    ~Node()
-    {
-
-    }
+    ~Node() = default;
 
     Node(Page page, bool reset_header)
         : m_page {std::move(page)},

@@ -1,5 +1,5 @@
-#ifndef CALICO_DB_READER_IMPL_H
-#define CALICO_DB_READER_IMPL_H
+#ifndef CALICO_DB_CURSOR_IMPL_H
+#define CALICO_DB_CURSOR_IMPL_H
 
 #include "calico/cursor.h"
 #include <optional>
@@ -13,9 +13,16 @@ namespace calico {
 class ITree;
 struct PID;
 
+// TODO: Since we're using a B+-tree now, the cursor simply seeks to an external node and follows the sibling chain.
+/**
+ * Implementation of a cursor for iterating over the database and finding specific records.
+ *
+ * This cursor will always be pointing at a specific record, unless the database is empty. It cannot increment or
+ * decrement off the end of the key range, and any
+ */
 class Cursor::Impl {
 public:
-    Impl(ITree*);
+    explicit Impl(ITree*);
     ~Impl() = default;
     [[nodiscard]] auto has_record() const -> bool;
     [[nodiscard]] auto is_minimum() const -> bool;
@@ -29,8 +36,8 @@ public:
     auto find_minimum() -> void;
     auto find_maximum() -> void;
 
-//    Impl(Impl&&) = default;
-//    Impl &operator=(Impl&&) = default;
+    Impl(Impl&&) = default;
+    Impl &operator=(Impl&&) = default;
 
 private:
     [[nodiscard]] auto can_decrement() const -> bool;
@@ -63,4 +70,4 @@ private:
 
 } // calico
 
-#endif // CALICO_DB_READER_IMPL_H
+#endif // CALICO_DB_CURSOR_IMPL_H

@@ -41,14 +41,14 @@ private:
 
 class TreePrinter {
 public:
-    explicit TreePrinter(ITree&);
-    auto print() -> void;
+    explicit TreePrinter(ITree&, bool = true);
+    auto print(Size = 0) -> void;
 
 private:
     auto add_spaces_to_level(Size, Index) -> void;
     auto add_spaces_to_other_levels(Size, Index) -> void;
     auto print_aux(Node, Index) -> void;
-    auto add_key_to_level(BytesView, Index) -> void;
+    auto add_key_to_level(BytesView, Index, bool) -> void;
     auto add_key_separator_to_level(Index) -> void;
     auto add_node_start_to_level(Index, Index) -> void;
     auto add_node_end_to_level(Index) -> void;
@@ -60,6 +60,7 @@ private:
 
     std::vector<std::string> m_levels;
     ITree &m_tree;
+    bool m_has_integer_keys {};
 };
 
 class WALReader;

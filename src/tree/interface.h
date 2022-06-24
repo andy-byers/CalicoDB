@@ -25,6 +25,7 @@ public:
     virtual auto node_count() const -> Size = 0;
     virtual auto cell_count() const -> Size = 0;
     virtual auto find_root(bool) -> Node = 0;
+    virtual auto find_external(BytesView, bool) -> Result = 0;
     virtual auto find_ge(BytesView, bool) -> Result = 0;
     virtual auto find_local_min(Node) -> Position = 0;
     virtual auto find_local_max(Node) -> Position = 0;

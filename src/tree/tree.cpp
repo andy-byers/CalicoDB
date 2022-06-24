@@ -25,18 +25,41 @@ auto Tree::find_root(bool is_writable) -> Node
     return acquire_node(PID::root(), is_writable);
 }
 
-auto Tree::find_ge(BytesView key, bool is_writable) -> Result
+auto Tree::find(BytesView key, const Predicate &predicate, bool is_writable) -> Result
 {
     auto node = find_root(is_writable);
     Node::SearchResult result;
     while (true) {
         result = node.find_ge(key);
-        if (result.found_eq || node.is_external())
+        if (predicate(node, result))
             break;
         node = acquire_node(node.child_id(result.index), is_writable);
     }
     const auto [index, found_eq] = result;
     return {std::move(node), index, found_eq};
+}
+
+auto Tree::find_external(BytesView key, bool is_writable) -> Result
+{
+    auto node = find_root(is_writable);
+    Node::SearchResult result;
+    while (true) {
+        result = node.find_ge(key);
+        if (node.is_external())
+            break;
+        result.index += result.found_eq;
+        node = acquire_node(node.child_id(result.index), is_writable);
+    }
+    const auto [index, found_eq] = result;
+    return {std::move(node), index, found_eq};
+}
+
+auto Tree::find_ge(BytesView key, bool is_writable) -> Result
+{
+    const auto predicate = [](const Node &node, const Node::SearchResult &result) {
+        return node.is_external() || result.found_eq;
+    };
+    return find(key, predicate, is_writable);
 }
 
 auto Tree::collect_value(const Node &node, Index index) const -> std::string
@@ -68,7 +91,7 @@ auto Tree::insert(BytesView key, BytesView value) -> bool
         throw std::invalid_argument {group.err(*m_logger)};
     }
 
-    auto [node, index, found_eq] = find_ge(key, true);
+    auto [node, index, found_eq] = find_external(key, true);
 
     if (key.size() > get_max_local(node.size())) {
         logging::MessageGroup group;
@@ -89,7 +112,7 @@ auto Tree::insert(BytesView key, BytesView value) -> bool
 
 auto Tree::remove(BytesView key) -> bool
 {
-    auto [node, index, found_eq] = find_ge(key, true);
+    auto [node, index, found_eq] = find_external(key, true);
     if (found_eq)
         positioned_remove({std::move(node), index});
     return found_eq;
@@ -99,7 +122,7 @@ auto Tree::positioned_insert(Position position, BytesView key, BytesView value) 
 {
     CALICO_EXPECT_LE(key.size(), get_max_local(m_pool->page_size()));
     auto [node, index] = std::move(position);
-    auto cell = make_cell(key, value);
+    auto cell = make_cell(key, value, true);
     node.insert_at(index, std::move(cell));
     m_cell_count++;
     
@@ -114,13 +137,10 @@ auto Tree::positioned_modify(Position position, BytesView value) -> void
     // Make a copy of the key. The data backing the old key slice may be written over when we call
     // remove_at() on the old cell.
     const auto key = btos(old_cell.key());
-    auto new_cell = make_cell(stob(key), value);
+    auto new_cell = make_cell(stob(key), value, true);
 
     if (old_cell.overflow_size())
         destroy_overflow_chain(old_cell.overflow_id(), old_cell.overflow_size());
-
-    if (!node.is_external())
-        new_cell.set_left_child_id(old_cell.left_child_id());
 
     node.remove_at(index, old_cell.size());
     node.insert_at(index, std::move(new_cell));
@@ -292,14 +312,18 @@ auto Tree::maybe_fix_child_parent_connections(Node &node) -> void
  * Note that the key and value must exist until the cell is safely embedded in the B-Tree. If
  * the tree is balanced and there are no overflow cells then this is guaranteed to be true.
  */
-auto Tree::make_cell(BytesView key, BytesView value) -> Cell
+auto Tree::make_cell(BytesView key, BytesView value, bool is_external) -> Cell
 {
-    auto cell = ::calico::make_cell(key, value, m_pool->page_size());
-    if (not cell.overflow_id().is_null()) {
-        const auto overflow_value = value.range(cell.local_value().size());
-        cell.set_overflow_id(allocate_overflow_chain(overflow_value));
+    if (is_external) {
+        auto cell = ::calico::make_external_cell(key, value, m_pool->page_size());
+        if (!cell.overflow_id().is_null()) {
+            const auto overflow_value = value.range(cell.local_value().size());
+            cell.set_overflow_id(allocate_overflow_chain(overflow_value));
+        }
+        return cell;
+    } else {
+        return ::calico::make_internal_cell(key, m_pool->page_size());
     }
-    return cell;
 }
 
 auto Tree::allocate_overflow_chain(BytesView overflow) -> PID

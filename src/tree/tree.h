@@ -37,8 +37,12 @@ public:
         return m_cell_count;
     }
 
+    using Predicate = std::function<bool(const Node&, const Node::SearchResult&)>;
+
     [[nodiscard]] auto collect_value(const Node&, Index) const -> std::string override;
     auto find_root(bool) -> Node override;
+    auto find(BytesView, const Predicate&, bool) -> Result;
+    auto find_external(BytesView, bool) -> Result override;
     auto find_ge(BytesView, bool) -> Result override;
     auto find_local_min(Node) -> Position override;
     auto find_local_max(Node) -> Position override;
@@ -49,7 +53,7 @@ public:
     auto allocate_node(PageType) -> Node override;
     auto acquire_node(PID, bool) -> Node override;
     auto destroy_node(Node) -> void override;
-    auto make_cell(BytesView, BytesView) -> Cell;
+    auto make_cell(BytesView, BytesView, bool) -> Cell;
 
 //    auto validate_children(const Node&, const Node&, const Node&, Index);
 

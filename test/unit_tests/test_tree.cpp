@@ -81,6 +81,27 @@ public:
         return found_eq && node.id() == id;
     }
 
+    auto contains_separator(PID id, const std::string &key) -> bool
+    {
+        auto [node, index, found_eq] = find_ge(stob(key), false);
+        return found_eq && node.id() == id;
+    }
+
+    auto contains_record(PID id, const std::string &key) -> bool
+    {
+        auto [node, index, found_eq] = find_external(stob(key), false);
+        if (found_eq && node.id() == id) {
+            if (const auto itr = m_payloads.find(key); itr != m_payloads.end()) {
+                EXPECT_EQ(itr->second, collect_value(node, index));
+                return true;
+            }
+            ADD_FAILURE() << "unable to find \"" << key << "\" in bookkeeping map";
+            return false;
+        }
+        EXPECT_EQ(found_eq, node.id() == id) << "Found the key in the wrong node";
+        return false;
+    }
+
     auto tree_contains(const std::string &key) -> bool
     {
         std::string result;
@@ -154,7 +175,8 @@ public:
     auto node_insert(PID id, const std::string &key, const std::string &value) -> void
     {
         auto node = m_tree.acquire_node(id, true);
-        auto cell = m_tree.make_cell(stob(key), stob(value));
+        ASSERT_TRUE(node.is_external());
+        auto cell = m_tree.make_cell(stob(key), stob(value), true);
 
         if (!node.is_external())
             cell.set_left_child_id(PID{std::numeric_limits<uint32_t>::max()});
@@ -329,153 +351,6 @@ TEST_F(TreeTests, OverflowChains)
     ASSERT_TRUE(tree().tree_contains("key_c"));
 }
 
-auto external_root_overflow_test(TestTree &tree, Index excluded) -> void
-{
-    // TODO: This test is pretty fragile. I just had to fuss with the value size below after changing the node and file header sizes.
-    ASSERT_LT(excluded, 5L);
-    TreeBuilder builder {tree};
-    const std::vector<Index> keys {10, 20, 30, 40, 50};
-    const auto id = PID::root();
-
-    for (Index i{}; i < keys.size(); ++i) {
-        if (i != excluded)
-            builder.node_insert(id, make_key(keys[i]), get_max_local(tree.page_size()) / 3 * 2);
-    }
-    // Cause the overflow.
-    const auto key = make_key(keys[excluded]);
-    std::string value {"value"};
-    value.resize(get_max_local(tree.page_size()) - key.size());
-    tree_insert(tree, key, value);
-
-    // We should always end up with this structure:
-    //             1:[c]
-    //     2:[a, b]     3:[d, e]
-    ASSERT_TRUE(tree.node_contains(PID{1}, make_key(keys[2])));
-    ASSERT_TRUE(tree.node_contains(PID{2}, make_key(keys[0])));
-    ASSERT_TRUE(tree.node_contains(PID{2}, make_key(keys[1])));
-    ASSERT_TRUE(tree.node_contains(PID{3}, make_key(keys[3])));
-    ASSERT_TRUE(tree.node_contains(PID{3}, make_key(keys[4])));
-    TreeValidator {tree}.validate();
-}
-
-auto internal_root_overflow_test(TestTree &tree, Index child_index) -> void
-{
-    ASSERT_LT(child_index, 4L);
-    TreeBuilder builder {tree};
-    const auto pt = PID::root();
-    const auto LL = builder.allocate_node(PageType::EXTERNAL_NODE);
-    const auto cL = builder.allocate_node(PageType::EXTERNAL_NODE);
-    const auto cr = builder.allocate_node(PageType::EXTERNAL_NODE);
-    const auto rr = builder.allocate_node(PageType::EXTERNAL_NODE);
-
-    builder.make_root_internal();
-    builder.node_insert(pt, make_key(6));
-    builder.node_insert(pt, make_key(12));
-    builder.node_insert(pt, make_key(18));
-
-    builder.node_insert(LL, make_key(1));
-    builder.node_insert(LL, make_key(2));
-    builder.node_insert(LL, make_key(3));
-    builder.node_insert(LL, make_key(4));
-
-    builder.node_insert(cL, make_key(7));
-    builder.node_insert(cL, make_key(8));
-    builder.node_insert(cL, make_key(9));
-    builder.node_insert(cL, make_key(10));
-
-    builder.node_insert(cr, make_key(13));
-    builder.node_insert(cr, make_key(14));
-    builder.node_insert(cr, make_key(15));
-    builder.node_insert(cr, make_key(16));
-
-    builder.node_insert(rr, make_key(19));
-    builder.node_insert(rr, make_key(20));
-    builder.node_insert(rr, make_key(21));
-    builder.node_insert(rr, make_key(22));
-
-    builder.connect_parent_child(pt, LL, 0);
-    builder.connect_parent_child(pt, cL, 1);
-    builder.connect_parent_child(pt, cr, 2);
-    builder.connect_parent_child(pt, rr, 3);
-    builder.connect_siblings(LL, cL);
-    builder.connect_siblings(cL, cr);
-    builder.connect_siblings(cr, rr);
-
-    // Before the overflow:
-    //                   1:[6,               12,                  18]
-    //     2:[1, 2, 3, 4]     3:[7, 8, 9, 10]   4:[13, 14, 15, 16]   5:[19, 20, 21, 22]
-
-    // Cause the overflow.
-    constexpr Index keys[] {5, 11, 17, 23};
-    const auto key = make_key(keys[child_index]);
-    builder.tree_insert(key);
-}
-
-TEST_F(TreeTests, ExternalRootOverflowA)
-{
-    external_root_overflow_test(tree(), 0);
-}
-
-TEST_F(TreeTests, ExternalRootOverflowB)
-{
-    external_root_overflow_test(tree(), 1);
-}
-
-TEST_F(TreeTests, ExternalRootOverflowC)
-{
-    external_root_overflow_test(tree(), 2);
-}
-
-TEST_F(TreeTests, ExternalRootOverflowD)
-{
-    external_root_overflow_test(tree(), 3);
-}
-
-TEST_F(TreeTests, ExternalRootOverflowE)
-{
-    external_root_overflow_test(tree(), 4);
-}
-
-TEST_F(TreeTests, InternalRootOverflowA)
-{
-    // After this overflow:
-    //                            1:[            12                  ]
-    //             7:[3,        6]                                    8:[18]
-    //     2:[1, 2]     6:[4, 5]  3:[7, 8, 9, 10]   4:[13, 14, 15, 16]      5:[19, 20, 21, 22]
-    internal_root_overflow_test(tree(), 0);
-    validate();
-}
-
-TEST_F(TreeTests, InternalRootOverflowB)
-{
-    // After this overflow:
-    //                                  1:[            12            ]
-    //                   7:[6,        9]                              8:[18]
-    //     2:[1, 2, 3, 4]     3:[7, 8]  6:[10, 11]  4:[13, 14, 15, 16]      5:[19, 20, 21, 22]
-    internal_root_overflow_test(tree(), 1);
-    validate();
-}
-
-TEST_F(TreeTests, InternalRootOverflowC)
-{
-    // After this overflow:
-    //                                          1:[        15        ]
-    //                   7:[6,               12]                      8:[18]
-    //     2:[1, 2, 3, 4]     3:[7, 8, 9, 10]   4:[13, 14]  6:[16, 17]      5:[19, 20, 21, 22]
-    internal_root_overflow_test(tree(), 2);
-    validate();
-}
-
-TEST_F(TreeTests, InternalRootOverflowD)
-{
-    // After this overflow:
-    //                                                            1:[18]
-    //                   7:[6,               12]                                  8:[21]
-    //     2:[1, 2, 3, 4]     3:[7, 8, 9, 10]   4:[13, 14, 15, 16]      5:[19, 20]      6:[22, 23]
-    internal_root_overflow_test(tree(), 3);
-    validate();
-}
-
 TEST_F(TreeTests, CanLookupMinimum)
 {
     TreeBuilder builder {tree()};
@@ -538,7 +413,7 @@ auto random_tree(Random &random, TreeBuilder &builder, Size n) -> void
     const auto max_size = 2 * get_max_local(builder.page_size());
     int i {};
     for (auto key: keys) {
-        builder.tree_insert(make_key(key), random_string(random, 10L, max_size));
+        builder.tree_insert(make_key<30>(key), random_string(random, 10L, max_size));
         i++;
     }
 }
@@ -564,7 +439,7 @@ TEST_F(TreeTests, LookupBeforeBeginning)
 TEST_F(TreeTests, InsertSanityCheck)
 {
     TreeBuilder builder {tree()};
-    random_tree(m_random, builder, 1'000);
+    random_tree(m_random, builder, 50'000);
     validate();
 }
 

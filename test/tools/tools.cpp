@@ -1,6 +1,6 @@
 
 #include <unordered_set>
-
+#include <spdlog/fmt/fmt.h>
 #include "fakes.h"
 #include "tools.h"
 #include "page/page.h"
@@ -124,15 +124,16 @@ auto TreeValidator::is_reachable(std::string key) -> bool
     return success;
 }
 
-TreePrinter::TreePrinter(ITree &tree)
-    : m_tree{tree} {}
+TreePrinter::TreePrinter(ITree &tree, bool has_integer_keys)
+    : m_tree{tree},
+      m_has_integer_keys {has_integer_keys} {}
 
-auto TreePrinter::print() -> void
+auto TreePrinter::print(Size indentation) -> void
 {
     print_aux(m_tree.acquire_node(PID::root(), false), 0);
 
     for (auto &level: m_levels)
-        std::cout << level << '\n';
+        fmt::print("{}{}\n", std::string(indentation, ' '), level);
 }
 
 auto TreePrinter::add_spaces_to_level(Size n, Index level) -> void
@@ -161,8 +162,10 @@ auto TreePrinter::print_aux(Node node, Index level) -> void
             print_aux(m_tree.acquire_node(cell.left_child_id(), false), level + 1);
         if (is_first)
             add_node_start_to_level(node.id().value, level);
-
-        add_key_to_level(cell.key(), level);
+        auto key = btos(cell.key());
+        if (m_has_integer_keys)
+            key = std::to_string(std::stoi(key));
+        add_key_to_level(stob(key), level, node.is_external());
         if (not_last) {
             add_key_separator_to_level(level);
         } else {
@@ -173,11 +176,12 @@ auto TreePrinter::print_aux(Node node, Index level) -> void
         print_aux(m_tree.acquire_node(node.rightmost_child_id(), false), level + 1);
 }
 
-auto TreePrinter::add_key_to_level(BytesView key, Index level) -> void
+auto TreePrinter::add_key_to_level(BytesView key, Index level, bool has_value) -> void
 {
     const auto key_token = make_key_token(key);
-    m_levels[level] += key_token;
-    add_spaces_to_other_levels(key_token.size(), level);
+    const std::string value_token {has_value ? "*" : ""};
+    m_levels[level] += key_token + value_token;
+    add_spaces_to_other_levels(key_token.size() + value_token.size(), level);
 }
 
 auto TreePrinter::add_key_separator_to_level(Index level) -> void
@@ -213,7 +217,7 @@ auto TreePrinter::make_key_separator_token() -> std::string
 
 auto TreePrinter::make_node_start_token(Index id) -> std::string
 {
-    return std::to_string(id) + ":[";
+    return fmt::format("{}:[", id);
 }
 
 auto TreePrinter::make_node_end_token() -> std::string
@@ -254,15 +258,8 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 
 auto WALPrinter::print(const WALRecord &record) -> void
 {
-    std::cout << "Record<LSN=" << record.lsn().value
-              << ", CRC=" << record.crc() << ", ";
-    if (record.is_commit()) {
-        std::cout << "COMMIT";
-    } else {
-        const auto update = record.payload().decode();
-        std::cout << "UPDATE(pid:" << update.page_id.value << ", n=" << update.changes.size() << ')';
-    }
-    std::cout << ">\n";
+    const auto action = record.is_commit() ? "COMMIT" : fmt::format("UPDATE(pid:{}, n:{})");
+    fmt::print("Record<LSN={}, CRC={}, {}>\n", record.lsn().value, record.crc(), action);
 }
 
 

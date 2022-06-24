@@ -128,13 +128,6 @@ auto main(int, const char *[]) -> int
         querying_a_database(db);
         cursor_objects(db);
         transactions(db);
-
-        for (int i = 0; i < 10000; ++i)
-            db.write(calico::stob(std::to_string(i)), calico::stob(std::to_string(i)));
-
-        for (int i = 0; i < 10000; ++i)
-            db.erase(calico::stob(std::to_string(i)));
-
         deleting_a_database(std::move(db));
     } catch (const calico::CorruptionError &error) {
         printf("CorruptionError: %s\n", error.what());

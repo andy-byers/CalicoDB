@@ -28,6 +28,7 @@ public:
      * @return True if the cursor is on a record, false otherwise.
      */
     [[nodiscard]] auto has_record() const -> bool;
+    [[nodiscard]] auto is_one_past() const -> bool;
 
     /**
      * Check if the cursor is positioned on the record with the smallest key.

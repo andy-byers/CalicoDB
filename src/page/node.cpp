@@ -313,6 +313,10 @@ auto BlockAllocator::take_free_space(Index ptr0, Index ptr1, Size needed_size) -
 
 auto BlockAllocator::free(Index ptr, Size size) -> void
 {
+    if (ptr + size > m_page->size()) {
+        printf("block_allocator: %llu <= %llu\n\n", ptr + size, m_page->size());
+    }
+
     CALICO_EXPECT_LE(ptr + size, m_page->size());
     CALICO_EXPECT_GE(ptr, NodeLayout::content_offset(m_page->id()));
     if (size < 4) {
@@ -568,7 +572,7 @@ auto Node::insert_at(Index index, Cell cell) -> void
 {
     CALICO_EXPECT_FALSE(is_overflowing());
     CALICO_EXPECT_LE(index, cell_count());
-    CALICO_EXPECT_EQ(is_external(), cell.left_child_id().is_null());
+    CALICO_EXPECT_EQ(is_external(), cell.is_external());
 
     const auto local_size = cell.size();
 
@@ -761,11 +765,8 @@ auto merge_root(Node &root, Node &child) -> void
     root.page().set_type(child.type());
 }
 
-auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+auto split_external_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 {
-    // get the overflow cell. The caller should make sure the node is overflowing
-    // before calling this method.
-    CALICO_EXPECT_TRUE(Ln.is_overflowing());
     auto overflow = Ln.take_overflow_cell();
 
     // Include the overflow cell in our count.
@@ -777,27 +778,25 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     auto where = ThreeWayComparison::EQ;
     auto median_index = n / 2;
 
-    const auto select_median = [&](Index index) {
+    const auto create_median = [&](Index index) {
         if (index == median_index) {
-            return std::move(overflow);
+            auto median = make_internal_cell(overflow.key(), Ln.size());
+            median.detach(std::move(scratch), Ln.is_external());
+            return median;
         } else {
             const auto is_right_of_median = index > median_index;
             median_index -= !is_right_of_median;
             // Since `is_left_of_median` is either 0 or 1, this will produce either -1 or 1, i.e. LT or
             // GT to indicate the position of the overflow cell relative to the median.
             where = static_cast<ThreeWayComparison>(2*is_right_of_median - 1);
-            return Ln.extract_cell(median_index, std::move(scratch));
+            auto median = Ln.read_cell(median_index);
+            median.detach(std::move(scratch), Ln.is_external());
+            return median;
         }
     };
-    auto median = select_median(overflow_idx);
-
-    if (Ln.is_external()) {
-        rn.set_right_sibling_id(Ln.right_sibling_id());
-        Ln.set_right_sibling_id(rn.id());
-    } else {
-        rn.set_rightmost_child_id(Ln.rightmost_child_id());
-        Ln.set_rightmost_child_id(median.left_child_id());
-    }
+    auto median = create_median(overflow_idx);
+    rn.set_right_sibling_id(Ln.right_sibling_id());
+    Ln.set_right_sibling_id(rn.id());
     rn.set_parent_id(Ln.parent_id());
     median.set_left_child_id(Ln.id());
 
@@ -814,18 +813,73 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
         CALICO_EXPECT_FALSE(found_eq);
         target.insert_at(index, std::move(cell));
     };
-    switch (where) {
-        case ThreeWayComparison::LT:
-            do_transfer(Ln, std::move(overflow));
-            break;
-        case ThreeWayComparison::GT:
-            do_transfer(rn, std::move(overflow));
-            break;
-        case ThreeWayComparison::EQ:
-            // No transfer. The median/overflow cell is returned.
-            break;
+    if (where == ThreeWayComparison::LT) {
+        do_transfer(Ln, std::move(overflow));
+    } else {
+        do_transfer(rn, std::move(overflow));
     }
     return median;
+}
+
+auto split_internal_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+{
+    auto overflow = Ln.take_overflow_cell();
+
+    // Include the overflow cell in our count.
+    const auto n = Ln.cell_count() + 1;
+
+    // Figure out where the overflow cell should go.
+    const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
+    CALICO_EXPECT_FALSE(should_be_false);
+    auto where = ThreeWayComparison::EQ;
+    auto median_index = n / 2;
+
+    const auto create_median = [&](Index index) {
+        if (index == median_index) {
+            return std::move(overflow);
+        } else {
+            const auto is_right_of_median = index > median_index;
+            median_index -= !is_right_of_median;
+            // Since `is_left_of_median` is either 0 or 1, this will produce either -1 or 1, i.e. LT or
+            // GT to indicate the position of the overflow cell relative to the median.
+            where = static_cast<ThreeWayComparison>(2*is_right_of_median - 1);
+            return Ln.extract_cell(median_index, std::move(scratch));
+        }
+    };
+    auto median = create_median(overflow_idx);
+    rn.set_rightmost_child_id(Ln.rightmost_child_id());
+    Ln.set_rightmost_child_id(median.left_child_id());
+    rn.set_parent_id(Ln.parent_id());
+    median.set_left_child_id(Ln.id());
+
+    // Transfer cells after the median cell to the right sibling node.
+    const auto cell_count = Ln.cell_count();
+    for (auto index = median_index; index < cell_count; ++index) {
+        auto cell = Ln.read_cell(median_index);
+        const auto cell_size = cell.size();
+        rn.insert_at(rn.cell_count(), std::move(cell));
+        Ln.remove_at(median_index, cell_size);
+    }
+    const auto do_transfer = [](Node &target, Cell cell) {
+        const auto [index, found_eq]{target.find_ge(cell.key())};
+        CALICO_EXPECT_FALSE(found_eq);
+        target.insert_at(index, std::move(cell));
+    };
+    if (where == ThreeWayComparison::LT) {
+        do_transfer(Ln, std::move(overflow));
+    } else if (where == ThreeWayComparison::GT) {
+        do_transfer(rn, std::move(overflow));
+    }
+    return median;
+}
+
+auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+{
+    CALICO_EXPECT_TRUE(Ln.is_overflowing());
+    CALICO_EXPECT_EQ(Ln.is_external(), rn.is_external());
+    if (Ln.is_external())
+        return split_external_non_root(Ln, rn, std::move(scratch));
+    return split_internal_non_root(Ln, rn, std::move(scratch));
 }
 
 } // calico
