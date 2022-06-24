@@ -12,6 +12,11 @@ InMemory::InMemory(Size page_size, bool use_transactions, spdlog::sink_ptr log_s
     , m_page_size {page_size}
     , m_uses_transactions {use_transactions} {}
 
+auto InMemory::page_count() const -> Size
+{
+    return m_frames.size();
+}
+
 auto InMemory::allocate(PageType type) -> Page
 {
     CALICO_EXPECT_TRUE(is_page_type_valid(type));

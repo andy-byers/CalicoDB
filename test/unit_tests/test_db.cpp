@@ -438,6 +438,22 @@ TEST_F(DatabaseTests, DatabaseIsMovable)
     [[maybe_unused]] auto dst = std::move(src);
 }
 
+TEST_F(DatabaseTests, ModificationSanityCheck)
+{
+    Options options;
+    options.log_level = 1;
+    options.log_path = "/tmp/loggg";
+    auto db = Database::open(TEST_PATH, options);
+    const auto records = setup_database_with_committed_records(db, 500);
+    for (Index i {}; i < 50; ++i) {
+        for (const auto &[key, original]: records) {
+            auto record = db.read(stob(key));
+            CALICO_EXPECT_NE(record, std::nullopt);
+            db.write({key, record->value + original});
+        }
+    }
+}
+
 class InfoTests: public testing::Test {
 public:
     static constexpr Size PAGE_SIZE {0x200};

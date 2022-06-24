@@ -7,8 +7,8 @@
 
 namespace calico {
 
-class Info;
 class Cursor;
+class Info;
 
 /**
  * Represents a relationship between two keys.

@@ -196,6 +196,11 @@ namespace impl {
             return *this;
         }
 
+        [[nodiscard]] auto starts_with(const Slice<const Pointer> &rhs) const -> bool
+        {
+            return m_size >= rhs.m_size && std::memcmp(m_data, rhs.m_data, rhs.m_size) == 0;
+        }
+
     private:
         Pointer m_data {}; ///< Pointer to the beginning of the data.
         Size m_size {}; ///< Number of elements in the slice.

@@ -18,7 +18,6 @@ public:
     PageCache() = default;
     ~PageCache() = default;
 
-
     [[nodiscard]] auto is_empty() const -> Size
     {
         return m_cold.is_empty() && m_hot.is_empty();

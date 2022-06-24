@@ -46,14 +46,18 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
 
+## Dependencies
++ spdlog
++ zlib
+
 ## Build
-Calico DB is built using CMake.
+We use CMake to gather dependencies and build the project.
 In the project root directory, run
 ```bash
 mkdir -p build && cd ./build
 ```
 
-to set up an out-of-source build.
+
 Then
 ```bash
 cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
@@ -133,12 +137,12 @@ Records and be added or removed using methods on the `Database` object.
 
 ```C++
 // Insert some records.
-assert(db.write(calico::stob("grizzly bear"), calico::stob("big")));
-assert(db.write(calico::stob("kodiak bear"), calico::stob("awesome")));
-assert(db.write(calico::stob("polar bear"), calico::stob("cool")));
-assert(db.write({"sun bear", "respectable"}));
-assert(db.write({"panda bear", "rare"}));
-assert(db.write({"black bear", "lovable"}));
+assert(db.write(calico::stob("chartreux"), calico::stob("grey-blue")));
+assert(db.write(calico::stob("manx"), calico::stob("awesome")));
+assert(db.write(calico::stob("abyssinian"), calico::stob("cool")));
+assert(db.write({"egyptian mau", "respectable"}));
+assert(db.write({"ocicat", "rare"}));
+assert(db.write({"si-siwat", "lovable"}));
 
 // Update an existing record (keys are always unique). write() returns false if the record was already in the database.
 assert(!db.write(calico::stob("grizzly bear"), calico::stob("huge")));

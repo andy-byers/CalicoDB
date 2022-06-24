@@ -10,7 +10,7 @@ auto bytes_objects()
 {
     auto function_taking_a_bytes_view = [](calico::BytesView) {};
 
-    std::string data {"Hello, bears!"};
+    std::string data {"Hello, world!"};
 
     // Construct slices from a string. The string still owns the memory, the slices just refer to it.
     calico::Bytes b {data.data(), data.size()};
@@ -30,24 +30,24 @@ auto bytes_objects()
 
     // Comparisons.
     assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
-    assert(b == calico::stob("bears"));
+    assert(b == calico::stob("world"));
 }
 
 auto updating_a_database(calico::Database &db)
 {
     // Insert some records.
-    assert(db.write(calico::stob("grizzly bear"), calico::stob("big")));
-    assert(db.write(calico::stob("kodiak bear"), calico::stob("awesome")));
-    assert(db.write(calico::stob("polar bear"), calico::stob("cool")));
-    assert(db.write({"sun bear", "respectable"}));
-    assert(db.write({"panda bear", "rare"}));
-    assert(db.write({"black bear", "lovable"}));
+    assert(db.write(calico::stob(""), calico::stob("")));
+    assert(db.write(calico::stob(""), calico::stob("")));
+    assert(db.write(calico::stob(""), calico::stob("")));
+    assert(db.write({"", ""}));
+    assert(db.write({"", ""}));
+    assert(db.write({"", ""}));
 
     // Update an existing record (keys are always unique). write() returns false if the record was already in the database.
-    assert(!db.write(calico::stob("grizzly bear"), calico::stob("huge")));
+    assert(!db.write(calico::stob(""), calico::stob("huge")));
 
     // Erase a record.
-    assert(db.erase(calico::stob("grizzly bear")));
+    assert(db.erase(calico::stob("")));
 }
 
 auto querying_a_database(calico::Database &db)

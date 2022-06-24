@@ -4,7 +4,6 @@
 #include "file/file.h"
 #include "file/system.h"
 #include "page/file_header.h"
-#include "pool/frame.h"
 #include "pool/in_memory.h"
 #include "utils/logging.h"
 
