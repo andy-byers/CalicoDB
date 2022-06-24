@@ -4,6 +4,27 @@
 
 Calico DB is an embedded key-value database written in C++17.
 
+### Note (06/24)
+So far, Calico DB works okay, but is far from complete.
+Here are some changes I'm proposing to make before the release of the first version:
+
+1. Store all "value" data in the external nodes.
+We're suffering from poor fanout at the moment, and plus it would allow better concurrency control algorithms to be used.
+Essentially, we would be converting the B-tree into a B<sup>+</sup>-tree.
+2. Better concurrency control.
+This one will probably be difficult.
+Luckily, this area is well understood and there is much research available about it.
+We'll have to decide on a specific construct that is adequately performant/compatible with the current design once *#1* is done.
+3. An STL container-like API.
+This may involve changing names, e.g. making the `Database` a `tree` and the `Cursor` a `tree::iterator/tree::const_iterator`, and providing methods like `tree::end()` and functions like `calico::begin(tree&)`.
+Methods like `tree::erase(tree::iterator &begin, tree::iterator &end)` need some additional consideration since, in the current implementation, changes to the tree structure invalidate existing cursors.
+
+I believe that these changes will make Calico DB really nice to use.
+Plus, sequential reads are way simpler, and likely way faster, in a B<sup>+</sup>-tree.
+I'm thinking that work on *#2* depends on progress made on *#1*, but *#3* is independent of the other two.
+I'll make two branches, `bplus_tree` and `stl_like_api`, on which to develop these changes.
+Check out [Contributions](#contributions) if you're interested in working on this project, it's kinda lonely here by myself 😿!
+
 + [Disclaimer](#disclaimer)
 + [Features](#features)
 + [Caveats](#caveats)
@@ -46,18 +67,14 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
 
-## Dependencies
-+ spdlog
-+ zlib
-
 ## Build
-We use CMake to gather dependencies and build the project.
+Calico DB is built using CMake.
 In the project root directory, run
 ```bash
 mkdir -p build && cd ./build
 ```
 
-
+to set up an out-of-source build.
 Then
 ```bash
 cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
@@ -137,12 +154,12 @@ Records and be added or removed using methods on the `Database` object.
 
 ```C++
 // Insert some records.
-assert(db.write(calico::stob("chartreux"), calico::stob("grey-blue")));
-assert(db.write(calico::stob("manx"), calico::stob("awesome")));
-assert(db.write(calico::stob("abyssinian"), calico::stob("cool")));
-assert(db.write({"egyptian mau", "respectable"}));
-assert(db.write({"ocicat", "rare"}));
-assert(db.write({"si-siwat", "lovable"}));
+assert(db.write(calico::stob("grizzly bear"), calico::stob("big")));
+assert(db.write(calico::stob("kodiak bear"), calico::stob("awesome")));
+assert(db.write(calico::stob("polar bear"), calico::stob("cool")));
+assert(db.write({"sun bear", "respectable"}));
+assert(db.write({"panda bear", "rare"}));
+assert(db.write({"black bear", "lovable"}));
 
 // Update an existing record (keys are always unique). write() returns false if the record was already in the database.
 assert(!db.write(calico::stob("grizzly bear"), calico::stob("huge")));
@@ -320,6 +337,5 @@ CalicoDB
 ## Contributions
 Contributions are welcome!
 Pull requests that fix bugs or address correctness issues will always be considered.
-There are also some things we could try to improve performance, however, I think robustness and guarantee of ACID properties should come first.
 The `TODO` section contains a list of things that need to be addressed.
 Feel free to create a pull request.
