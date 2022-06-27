@@ -31,6 +31,7 @@ public:
     [[nodiscard]] auto local_value() const -> BytesView;
     [[nodiscard]] auto overflow_id() const -> PID;
     [[nodiscard]] auto left_child_id() const -> PID;
+    auto set_is_external(bool) -> void;
     auto set_left_child_id(PID) -> void;
     auto set_overflow_id(PID) -> void;
     auto write(Bytes) const -> void;

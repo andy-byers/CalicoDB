@@ -1,6 +1,5 @@
 
 #include <filesystem>
-#include <locale>
 #include <chrono>
 #include <thread>
 #include <spdlog/fmt/fmt.h>
@@ -71,25 +70,25 @@ auto build_common(Work &records, bool is_sequential)
     if (is_sequential)
         std::sort(begin(records), end(records));
 }
-//
-//auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
-//{
-//    if (db.get_info().record_count() == records.size())
-//        return;
-//
-//    build_common(records, is_sorted);
-//
-//    if (is_reversed)
-//        std::reverse(begin(records), end(records));
-//
-//    for (const auto &[key, value]: records)
-//        db.write(stob(key), stob(value));
-//}
-//
-//auto build_erases(Database &db, Work &records, bool is_sequential)
-//{
-//    build_reads(db, records, is_sequential, false);
-//}
+
+auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
+{
+    if (db.get_info().record_count() == records.size())
+        return;
+
+    build_common(records, is_sorted);
+
+    if (is_reversed)
+        std::reverse(begin(records), end(records));
+
+    for (const auto &[key, value]: records)
+        db.write(stob(key), stob(value));
+}
+
+auto build_erases(Database &db, Work &records, bool is_sequential)
+{
+    build_reads(db, records, is_sequential, false);
+}
 
 auto run_baseline(Database&)
 {
@@ -103,49 +102,49 @@ auto run_writes(Database &db, const Work &work)
         CALICO_EXPECT_TRUE(db.write(stob(key), stob(value)));
     db.commit();
 }
-//
-//auto run_erases(Database &db, const Work &work)
-//{
-//    for (const auto &[key, value]: work)
-//        CALICO_EXPECT_TRUE(db.erase(stob(key)));
-//    db.commit();
-//}
-//
-//auto run_read_rand(Database &db, const Work &work)
-//{
-//    std::string v;
-//    auto cursor = db.get_cursor();
-//    for (const auto &[key, value]: work) {
-//        CALICO_EXPECT_TRUE(cursor.find(stob(key)));
-//        v = cursor.value();
-//    }
-//}
-//
-//auto run_read_seq(Database &db, const Work &work)
-//{
-//    std::string k, v;
-//    auto cursor = db.get_cursor();
-//    cursor.find_minimum();
-//    for (const auto &w: work) {
-//        (void)w;
-//        k = btos(cursor.key());
-//        v = cursor.value();
-//        cursor.increment();
-//    }
-//}
-//
-//auto run_read_rev(Database &db, const Work &work)
-//{
-//    std::string k, v;
-//    auto cursor = db.get_cursor();
-//    cursor.find_maximum();
-//    for (const auto &w: work) {
-//        (void)w;
-//        k = btos(cursor.key());
-//        v = cursor.value();
-//        cursor.decrement();
-//    }
-//}
+
+auto run_erases(Database &db, const Work &work)
+{
+    for (const auto &[key, value]: work)
+        CALICO_EXPECT_TRUE(db.erase(stob(key)));
+    db.commit();
+}
+
+auto run_read_rand(Database &db, const Work &work)
+{
+    std::string v;
+    auto cursor = db.get_cursor();
+    for (const auto &[key, value]: work) {
+        CALICO_EXPECT_TRUE(cursor.find(stob(key)));
+        v = cursor.value();
+    }
+}
+
+auto run_read_seq(Database &db, const Work &work)
+{
+    std::string k, v;
+    auto cursor = db.get_cursor();
+    cursor.find_minimum();
+    for (const auto &w: work) {
+        (void)w;
+        k = btos(cursor.key());
+        v = cursor.value();
+        cursor.increment();
+    }
+}
+
+auto run_read_rev(Database &db, const Work &work)
+{
+    std::string k, v;
+    auto cursor = db.get_cursor();
+    cursor.find_maximum();
+    for (const auto &w: work) {
+        (void)w;
+        k = btos(cursor.key());
+        v = cursor.value();
+        cursor.decrement();
+    }
+}
 
 auto setup_common(Database &db)
 {
@@ -285,41 +284,41 @@ auto main(int argc, const char *argv[]) -> int
             "write_seq",
             num_elements,
         },
-//        {
-//            [&records](Database &db) {build_reads(db, records, false, false);},
-//            [](Database&) {},
-//            [&records](Database &db) {run_read_rand(db, records);},
-//            "read_rand",
-//            num_elements,
-//        },
-//        {
-//            [&records](Database &db) {build_reads(db, records, true, false);},
-//            [](Database&) {},
-//            [&records](Database &db) {run_read_seq(db, records);},
-//            "read_seq",
-//            num_elements,
-//        },
-//        {
-//            [&records](Database &db) {build_reads(db, records, true, true);},
-//            [](Database&) {},
-//            [&records](Database &db) {run_read_rev(db, records);},
-//            "read_rev",
-//            num_elements,
-//        },
-//        {
-//            [](Database&) {},
-//            [&records](Database &db) {build_erases(db, records, false);},
-//            [&half_records](Database &db) {run_erases(db, half_records);},
-//            "erase_rand",
-//            half_records.size(),
-//        },
-//        {
-//            [](Database&) {},
-//            [&records](Database &db) {build_erases(db, records, true);},
-//            [&half_records](Database &db) {run_erases(db, half_records);},
-//            "erase_seq",
-//            half_records.size(),
-//        },
+        {
+            [&records](Database &db) {build_reads(db, records, false, false);},
+            [](Database&) {},
+            [&records](Database &db) {run_read_rand(db, records);},
+            "read_rand",
+            num_elements,
+        },
+        {
+            [&records](Database &db) {build_reads(db, records, true, false);},
+            [](Database&) {},
+            [&records](Database &db) {run_read_seq(db, records);},
+            "read_seq",
+            num_elements,
+        },
+        {
+            [&records](Database &db) {build_reads(db, records, true, true);},
+            [](Database&) {},
+            [&records](Database &db) {run_read_rev(db, records);},
+            "read_rev",
+            num_elements,
+        },
+        {
+            [](Database&) {},
+            [&records](Database &db) {build_erases(db, records, false);},
+            [&half_records](Database &db) {run_erases(db, half_records);},
+            "erase_rand",
+            half_records.size(),
+        },
+        {
+            [](Database&) {},
+            [&records](Database &db) {build_erases(db, records, true);},
+            [&half_records](Database &db) {run_erases(db, half_records);},
+            "erase_seq",
+            half_records.size(),
+        },
     };
 
     BenchmarkParameters param {

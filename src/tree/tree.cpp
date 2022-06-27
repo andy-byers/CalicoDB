@@ -10,7 +10,7 @@
 namespace calico {
 
 Tree::Tree(Parameters param)
-    : m_scratch {get_max_local(param.buffer_pool->page_size())}
+    : m_scratch {get_max_local(param.buffer_pool->page_size()) * 2}
     , m_free_list {{param.buffer_pool, param.free_start, param.free_count}}
     , m_logger {logging::create_logger(param.log_sink, "Tree")}
     , m_pool {param.buffer_pool}
@@ -23,6 +23,17 @@ Tree::Tree(Parameters param)
 auto Tree::find_root(bool is_writable) -> Node
 {
     return acquire_node(PID::root(), is_writable);
+}
+
+auto Tree::step(const Stepper &stepper, bool is_writable) -> Node
+{
+    for (auto node = find_root(is_writable); ; ) {
+        if (auto result = stepper(node); result.should_stop) {
+            return node;
+        } else {
+            node = acquire_node(result.next_id, is_writable);
+        }
+    }
 }
 
 auto Tree::find(BytesView key, const Predicate &predicate, bool is_writable) -> Result
@@ -41,6 +52,14 @@ auto Tree::find(BytesView key, const Predicate &predicate, bool is_writable) -> 
 
 auto Tree::find_external(BytesView key, bool is_writable) -> Result
 {
+//    const auto stepper = [key](Node &node) -> NextStep {
+//        auto result = node.find_ge(key);
+//        if (node.is_external())
+//            return {{}, true};
+//        return {node.child_id(result.index + result.found_eq)};
+//    };
+//    auto node = step(stepper, is_writable);
+
     auto node = find_root(is_writable);
     Node::SearchResult result;
     while (true) {
@@ -149,10 +168,17 @@ auto Tree::positioned_modify(Position position, BytesView value) -> void
         balance_after_overflow(std::move(node));
 }
 
+auto Tree::find_for_remove(BytesView) -> void
+{
+
+}
+
 auto Tree::positioned_remove(Position position) -> void
 {
     auto [node, index] = std::move(position);
+    CALICO_EXPECT_TRUE(node.is_external());
     CALICO_EXPECT_LT(index, node.cell_count());
+    CALICO_EXPECT_GT(m_cell_count, 0);
     m_cell_count--;
 
     auto cell = node.read_cell(index);
@@ -160,29 +186,8 @@ auto Tree::positioned_remove(Position position) -> void
     if (cell.overflow_size())
         destroy_overflow_chain(cell.overflow_id(), cell.overflow_size());
 
-    // Here, we swap the cell to be removed with its inorder predecessor (always exists
-    // if the node is internal).
-    if (!node.is_external()) {
-        auto [other, other_index] = find_local_max(acquire_node(node.child_id(index), true));
-        auto other_cell = other.extract_cell(other_index, m_scratch.get());
-        anchor = btos(other_cell.key());
-        other_cell.set_left_child_id(node.child_id(index));
-        node.remove_at(index, node.read_cell(index).size());
-
-        // The current node can overflow here. We may have to rebalance before proceeding.
-        node.insert_at(index, std::move(other_cell));
-        if (node.is_overflowing()) {
-            const auto id = other.id();
-            other.take();
-            balance_after_overflow(std::move(node));
-            node = acquire_node(id, true);
-        } else {
-            node = std::move(other);
-        }
-    } else {
-        node.remove_at(index, node.read_cell(index).size());
-    }
-    maybe_balance_after_underflow(std::move(node), stob(anchor));
+    node.remove_at(index, node.read_cell(index).size());
+    maybe_balance_after_underflow(std::move(node), stob(anchor)); // TODO: Don't need to store the anchor!
 }
 
 auto Tree::find_local_min(Node root) -> Position
@@ -244,7 +249,7 @@ auto Tree::maybe_balance_after_underflow(Node node, BytesView anchor) -> void
         // NOTE: Searching for the anchor key from the node we removed a cell from should
         //       always give us the correct cell ID due to the B-Tree ordering rules.
         const auto [index, found_eq] = parent.find_ge(anchor);
-        if (!fix_non_root(std::move(node), parent, index))
+        if (!fix_non_root(std::move(node), parent, index + found_eq))
             return;
         node = std::move(parent);
     }
@@ -281,6 +286,11 @@ auto Tree::split_non_root(Node node) -> Node
     auto median = ::calico::split_non_root(node, sibling, m_scratch.get());
     auto [index, found_eq] = parent.find_ge(median.key());
     CALICO_EXPECT_FALSE(found_eq);
+
+//    if (node.is_external() && !sibling.right_sibling_id().is_null()) {
+//        auto right = acquire_node(sibling.right_sibling_id(), true);
+//        right.set_left_sibling_id(sibling.id());
+//    }
 
     parent.insert_at(index, std::move(median));
     CALICO_EXPECT_FALSE(node.is_overflowing());
@@ -501,20 +511,74 @@ auto Tree::load_header(const FileHeader &header) -> void
 
 auto Tree::rotate_left(Node &parent, Node &Lc, Node &rc, Index index) -> void
 {
+    if (Lc.is_external()) {
+        external_rotate_left(parent, Lc, rc, index);
+    } else {
+        internal_rotate_left(parent, Lc, rc, index);
+    }
+}
+
+auto Tree::rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
+{
+    if (Lc.is_external()) {
+        external_rotate_right(parent, Lc, rc, index);
+    } else {
+        internal_rotate_right(parent, Lc, rc, index);
+    }
+}
+
+auto Tree::external_rotate_left(Node &parent, Node &Lc, Node &rc, Index index) -> void
+{
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_GT(parent.cell_count(), 0);
     CALICO_EXPECT_GT(rc.cell_count(), 1);
 
+    auto old_separator = parent.read_cell(index);
+    auto lowest = rc.extract_cell(0, m_scratch.get());
+    auto new_separator = make_cell(rc.read_key(0), {}, false);
+    new_separator.set_left_child_id(Lc.id());
+
+    // Parent might overflow.
+    parent.remove_at(index, old_separator.size());
+    parent.insert_at(index, std::move(new_separator));
+
+    Lc.insert_at(Lc.cell_count(), std::move(lowest));
+    CALICO_EXPECT_FALSE(Lc.is_overflowing());
+
+}
+
+auto Tree::external_rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
+{
+    CALICO_EXPECT_FALSE(parent.is_external());
+    CALICO_EXPECT_GT(parent.cell_count(), 0);
+    CALICO_EXPECT_GT(Lc.cell_count(), 1);
+
+    auto separator = parent.read_cell(index);
+    auto highest = Lc.extract_cell(Lc.cell_count() - 1, m_scratch.get());
+    auto new_separator = make_cell(highest.key(), {}, false);
+    new_separator.set_left_child_id(Lc.id());
+
+    // Parent might overflow.
+    parent.remove_at(index, separator.size());
+    parent.insert_at(index, std::move(new_separator));
+
+    rc.insert_at(0, std::move(highest));
+    CALICO_EXPECT_FALSE(rc.is_overflowing());
+}
+
+auto Tree::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Index index) -> void
+{
+    CALICO_EXPECT_FALSE(parent.is_external());
+    CALICO_EXPECT_FALSE(Lc.is_external());
+    CALICO_EXPECT_EQ(Lc.type(), rc.type());
+    CALICO_EXPECT_GT(parent.cell_count(), 0);
+    CALICO_EXPECT_GT(rc.cell_count(), 1);
+
     auto separator = parent.extract_cell(index, m_scratch.get());
-    if (!Lc.is_external()) {
-        auto child = acquire_node(rc.child_id(0), true);
-        separator.set_left_child_id(Lc.rightmost_child_id());
-        Lc.set_rightmost_child_id(child.id());
-        child.set_parent_id(Lc.id());
-    } else {
-        separator.set_left_child_id(PID{});
-    }
-    // Lc was deficient so it cannot overflow here.
+    auto child = acquire_node(rc.child_id(0), true);
+    separator.set_left_child_id(Lc.rightmost_child_id());
+    child.set_parent_id(Lc.id());
+    Lc.set_rightmost_child_id(child.id());
     Lc.insert_at(Lc.cell_count(), std::move(separator));
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
 
@@ -524,22 +588,19 @@ auto Tree::rotate_left(Node &parent, Node &Lc, Node &rc, Index index) -> void
     parent.insert_at(index, std::move(lowest));
 }
 
-auto Tree::rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
+auto Tree::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
 {
     CALICO_EXPECT_FALSE(parent.is_external());
+    CALICO_EXPECT_FALSE(Lc.is_external());
+    CALICO_EXPECT_EQ(Lc.type(), rc.type());
     CALICO_EXPECT_GT(parent.cell_count(), 0);
     CALICO_EXPECT_GT(Lc.cell_count(), 1);
+
     auto separator = parent.extract_cell(index, m_scratch.get());
-    if (!rc.is_external()) {
-        CALICO_EXPECT_FALSE(Lc.is_external());
-        auto child = acquire_node(Lc.rightmost_child_id(), true);
-        separator.set_left_child_id(child.id());
-        Lc.set_rightmost_child_id(Lc.child_id(Lc.cell_count() - 1));
-        child.set_parent_id(rc.id());
-    } else {
-        separator.set_left_child_id(PID::null());
-    }
-    // Rc was deficient so it cannot overflow here.
+    auto child = acquire_node(Lc.rightmost_child_id(), true);
+    separator.set_left_child_id(child.id());
+    child.set_parent_id(rc.id());
+    Lc.set_rightmost_child_id(Lc.child_id(Lc.cell_count() - 1));
     rc.insert_at(0, std::move(separator));
     CALICO_EXPECT_FALSE(rc.is_overflowing());
 
@@ -548,7 +609,7 @@ auto Tree::rotate_right(Node &parent, Node &Lc, Node &rc, Index index) -> void
     // The parent might overflow.
     parent.insert_at(index, std::move(highest));
 }
-//
+
 //auto Tree::validate_children(const Node &Lc, const Node &rc, const Node &pt, Index index)
 //{
 //    CALICO_EXPECT_FALSE(pt.is_external());

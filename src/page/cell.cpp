@@ -89,7 +89,7 @@ auto Cell::key() const -> BytesView
 
 auto Cell::local_value() const -> BytesView
 {
-    CALICO_EXPECT_TRUE(m_is_external);
+//    CALICO_EXPECT_TRUE(m_is_external);
     return m_local_value;
 }
 
@@ -105,13 +105,14 @@ auto Cell::overflow_size() const -> Size
 
 auto Cell::overflow_id() const -> PID
 {
-    CALICO_EXPECT_TRUE(m_is_external);
+//    CALICO_EXPECT_TRUE(m_is_external);
     return m_overflow_id;
 }
 
 auto Cell::write(Bytes out) const -> void
 {
     if (!m_is_external) {
+        CALICO_EXPECT_FALSE(m_left_child_id.is_root());
         put_uint32(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);
     }
@@ -131,6 +132,7 @@ auto Cell::write(Bytes out) const -> void
         mem_copy(out, local, local.size());
 
         if (!m_overflow_id.is_null()) {
+            CALICO_EXPECT_FALSE(m_left_child_id.is_root());
             CALICO_EXPECT_LT(local.size(), m_value_size);
             out.advance(local.size());
             put_uint32(out, m_overflow_id.value);
@@ -152,6 +154,14 @@ auto Cell::detach(Scratch scratch, bool ensure_internal) -> void
     write(data);
     *this = read_at(data, m_page_size, m_is_external);
     m_scratch = std::move(scratch);
+}
+
+auto Cell::set_is_external(bool is_external) -> void
+{
+    m_is_external = is_external;
+    if (is_external) {
+
+    }
 }
 
 auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell

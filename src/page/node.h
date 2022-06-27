@@ -12,6 +12,8 @@ public:
     [[nodiscard]] auto parent_id() const -> PID;
     [[nodiscard]] auto right_sibling_id() const -> PID;
     [[nodiscard]] auto rightmost_child_id() const -> PID;
+    [[nodiscard]] auto left_sibling_id() const -> PID;
+    [[nodiscard]] auto reserved() const -> uint32_t;
     [[nodiscard]] auto cell_count() const -> Size;
     [[nodiscard]] auto cell_start() const -> Index;
     [[nodiscard]] auto frag_count() const -> Size;
@@ -22,6 +24,8 @@ public:
     auto set_parent_id(PID) -> void;
     auto set_right_sibling_id(PID) -> void;
     auto set_rightmost_child_id(PID) -> void;
+    auto set_left_sibling_id(PID) -> void;
+    auto set_reserved(uint32_t) -> void;
     auto set_cell_count(Size) -> void;
     auto set_cell_start(Index) -> void;
     auto set_frag_count(Size) -> void;
@@ -83,6 +87,8 @@ public:
     auto reset() -> void;
 
 private:
+    static constexpr Size FREE_BLOCK_HEADER_SIZE {2 * sizeof(uint16_t)};
+
     [[nodiscard]] auto get_next_pointer(Index) const -> Index;
     [[nodiscard]] auto get_block_size(Index) const -> Size;
     auto set_next_pointer(Index, Index) -> void;
@@ -196,11 +202,16 @@ public:
     [[nodiscard]] auto header_crc() const -> Index;
     [[nodiscard]] auto parent_id() const -> PID;
     [[nodiscard]] auto right_sibling_id() const -> PID;
+    [[nodiscard]] auto left_sibling_id() const -> PID;
     [[nodiscard]] auto rightmost_child_id() const -> PID;
     [[nodiscard]] auto cell_count() const -> Size;
     auto update_header_crc() -> void;
     auto set_parent_id(PID) -> void;
     auto set_right_sibling_id(PID) -> void;
+    auto set_left_sibling_id(PID id) -> void
+    {
+        return m_header.set_left_sibling_id(id);
+    }
     auto set_rightmost_child_id(PID) -> void;
     auto set_child_id(Index, PID) -> void;
 

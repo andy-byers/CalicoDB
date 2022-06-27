@@ -3,7 +3,7 @@
 #define CALICO_TREE_TREE_H
 
 #include <spdlog/spdlog.h>
-#include "free_list.h"
+#include "node_pool.h"
 #include "interface.h"
 #include "utils/scratch.h"
 
@@ -29,7 +29,7 @@ public:
 
     [[nodiscard]] auto node_count() const -> Size override
     {
-        return m_node_count;
+        return m_pool.node_count();
     }
 
     [[nodiscard]] auto cell_count() const -> Size override
@@ -55,6 +55,15 @@ public:
     auto destroy_node(Node) -> void override;
     auto make_cell(BytesView, BytesView, bool) -> Cell;
 
+    struct NextStep {
+        PID next_id;
+        bool should_stop {};
+    };
+    using Stepper = std::function<NextStep(Node&)>;
+    auto step(const Stepper&, bool) -> Node;
+    auto find_for_remove(BytesView) -> void;
+
+
 //    auto validate_children(const Node&, const Node&, const Node&, Index);
 
 protected: // TODO
@@ -70,19 +79,23 @@ protected: // TODO
     auto split_non_root(Node) -> Node;
     auto split_root(Node) -> Node;
 
-    auto maybe_balance_after_underflow(Node, BytesView) -> void;
+
     auto rotate_left(Node&, Node&, Node&, Index) -> void;
     auto rotate_right(Node&, Node&, Node&, Index) -> void;
+    auto external_rotate_left(Node&, Node&, Node&, Index) -> void;
+    auto external_rotate_right(Node&, Node&, Node&, Index) -> void;
+    auto internal_rotate_left(Node&, Node&, Node&, Index) -> void;
+    auto internal_rotate_right(Node&, Node&, Node&, Index) -> void;
+
+    auto maybe_balance_after_underflow(Node, BytesView) -> void;
     auto fix_non_root(Node, Node&, Index) -> bool;
     auto fix_root(Node) -> void;
 
     auto maybe_fix_child_parent_connections(Node &node) -> void;
 
     ScratchManager m_scratch;
-    FreeList m_free_list;
+    NodePool m_pool {};
     std::shared_ptr<spdlog::logger> m_logger;
-    IBufferPool *m_pool {};
-    Size m_node_count {};
     Size m_cell_count {};
 };
 
