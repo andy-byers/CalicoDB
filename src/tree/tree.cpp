@@ -11,8 +11,7 @@ namespace calico {
 Tree::Tree(Parameters param)
     : m_pool {{param.buffer_pool, param.free_start, param.free_count, param.node_count}},
       m_internal {{&m_pool, param.cell_count}},
-      m_logger {logging::create_logger(param.log_sink, "Tree")},
-      m_cell_count {param.cell_count}
+      m_logger {logging::create_logger(param.log_sink, "Tree")}
 {
     m_logger->trace("constructing Tree object");
 
@@ -44,7 +43,6 @@ auto Tree::insert(BytesView key, BytesView value) -> bool
         return false;
     } else {
         m_internal.positioned_insert({std::move(node), index}, key, value);
-        m_cell_count++;
         return true;
     }
 }
@@ -56,7 +54,6 @@ auto Tree::remove(Cursor cursor) -> bool
             m_pool.acquire(PID {cursor.id()}, true),
             cursor.index(),
         });
-        m_cell_count--;
         return true;
     }
     return false;

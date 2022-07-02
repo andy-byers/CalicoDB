@@ -378,6 +378,7 @@ auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Index inde
     auto lowest = rc.extract_cell(0, m_scratch.get());
     auto new_separator = make_cell(rc.read_key(0), {}, false);
     new_separator.set_left_child_id(Lc.id());
+    new_separator.detach(m_scratch.get(), true);
 
     // Parent might overflow.
     parent.remove_at(index, old_separator.size());
@@ -397,6 +398,7 @@ auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Index ind
     auto highest = Lc.extract_cell(Lc.cell_count() - 1, m_scratch.get());
     auto new_separator = make_cell(highest.key(), {}, false);
     new_separator.set_left_child_id(Lc.id());
+    new_separator.detach(m_scratch.get(), true);
 
     // Parent might overflow.
     parent.remove_at(index, separator.size());

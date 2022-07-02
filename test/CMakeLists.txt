@@ -7,7 +7,7 @@ file(
     "${CALICO_TEST_DIR}/tools/*.h"
 )
 add_library(test_tools "${TEST_TOOLS_FILES}")
-target_link_libraries(test_tools PUBLIC "${CALICO_NAME}" pthread)
+target_link_libraries(test_tools PUBLIC "${CALICO_NAME}" pthread zlib)
 target_include_directories(test_tools PUBLIC "${CALICO_SOURCE_DIR}" "${CALICO_TEST_DIR}/tools")
 target_compile_options(test_tools PUBLIC "${CALICO_WARNINGS}")
 

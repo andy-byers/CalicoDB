@@ -791,7 +791,7 @@ TEST_F(NodeTests, A)
     for (const auto &key: keys)
         node.insert(cell_backing.get_cell(key, "", false));
     auto [index, found_eq] = node.find_ge(stob("WamfVthwD2"));
-    printf("%llu, %d\n", index, found_eq);
+    printf("%lu, %d\n", index, found_eq);
 //    for (Index i {}; i < keys.size(); ++i)
 //        printf("%s\n", btos(node.read_key(i)).c_str());
 }

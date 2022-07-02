@@ -1,5 +1,6 @@
 
 #include <array>
+#include <map>
 #include <unordered_map>
 
 #include <gtest/gtest.h>
@@ -22,11 +23,11 @@ namespace {
 
 using namespace calico;
 
-class TreeHarnass: public testing::Test {
+class TreeHarness: public testing::Test {
 public:
     static constexpr Size PAGE_SIZE = 0x100;
 
-    TreeHarnass()
+    TreeHarness()
     {
         auto sink = logging::create_sink("", 0);
         auto file = std::make_unique<FaultyReadWriteMemory>();
@@ -47,7 +48,7 @@ public:
     std::unique_ptr<IBufferPool> buffer_pool;
 };
 
-class NodePoolTests: public TreeHarnass {
+class NodePoolTests: public TreeHarness {
 public:
     NodePoolTests()
         : pool {{buffer_pool.get(), PID::null(), 0, 0}} {}
@@ -113,7 +114,7 @@ auto tree_contains(ITree &tree, const std::string &key, const std::string &value
     return false;
 }
 
-class TreeTests: public TreeHarnass {
+class TreeTests: public TreeHarness {
 public:
     static constexpr Size PAGE_SIZE = 0x100;
 
@@ -138,6 +139,8 @@ public:
     auto validate() const
     {
         validate_ordering(*tree);
+        validate_siblings(*tree);
+        validate_links(*tree);
     }
 
     std::unique_ptr<ITree> tree;
@@ -542,7 +545,7 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
 {
     std::unordered_map<std::string, std::string> records;
     static constexpr Size num_iterations = 3;
-    static constexpr Size cutoff = 10'500;
+    static constexpr Size cutoff = 1'000;
 
     for (Index i {}; i < num_iterations; ++i) {
         while (tree->cell_count() < cutoff) {
@@ -604,64 +607,50 @@ TEST_F(TreeTests, ReverseBoundedIteration)
     for (; upper.is_valid() && upper != lower; upper--)
         ASSERT_EQ(btos(upper.key()), make_key(tree->cell_count() - i++ - 1));
 }
-//
-//TEST_F(TreeTests, SanityCheck)
-//{
-//    static constexpr Size MIN_SIZE {500};
-//    static constexpr Size MAX_SIZE {1'000};
-//    RecordGenerator::Parameters param;
-//    param.mean_key_size = 10;
-//    param.mean_value_size = 10;
-//    param.spread = 8;
-//    RecordGenerator generator {param};
-//    Random random {0};
-//
-//    const auto remove_one = [&random, this](const std::string &key) {
-//        if (auto c = tree_find(*tree, key, true); c.is_valid()) {
-//            tree_remove(*tree, c);
-//        } else if (random.next_int(1) == 0) {
-//            tree_remove(*tree, tree->find_minimum());
-//        } else {
-//            tree_remove(*tree, tree->find_maximum());
-//        }
-//    };
-//
-//    for (Index iteration {}; iteration < 3; ++iteration) {
-//        for (const auto &[key, value]: generator.generate(random, 50'000)) {
-//            if(key=="bJstyTUNqNbfafKlDv"){
-//                TreePrinter {*tree, false}.print();
-//                puts("");
-//            }
-//            if (tree->cell_count() > MAX_SIZE) {
-//                remove_one(key);
-//            } else if (tree->cell_count() < MIN_SIZE) {
-//                tree_insert(*tree, key, value);
-//            } else if (random.next_int(5) == 0) {
-//                tree_insert(*tree, key, value);
-//            } else {
-////                if (key == "feZFyT6yCmxdty") {
-////                    TreePrinter {*tree, false}.print();
-////                    puts("");
-////                }
-//
-//                remove_one(key);
-//
-////                if (key == "feZFyT6yCmxdty") {
-////                    TreePrinter {*tree, false}.print();
-////                    validate();
-////                }
-//            }
-//            if(key=="bJstyTUNqNbfafKlDv"){
-//                TreePrinter {*tree, false}.print();
-//                validate();
-//            }
-////            fmt::print("<k>:{}",key);
-////            validate();
-////            fmt::print(":</k>\n");
-//        }
-//        while (tree->cell_count())
-//            remove_one(random_string(random, 1, 30));
-//    }
-//}
+
+TEST_F(TreeTests, SanityCheck)
+{
+    static constexpr Size MIN_SIZE {50000};
+    static constexpr Size MAX_SIZE {100'000};
+    std::map<std::string, std::string> map;
+    RecordGenerator::Parameters param;
+    param.mean_key_size = 10;
+    param.mean_value_size = 10;
+    param.spread = 8;
+    RecordGenerator generator {param};
+    Random random {0};
+
+    const auto remove_one = [&map, &random, this](const std::string &key) {
+        if (auto c = tree_find(*tree, key, true); c.is_valid()) {
+            ASSERT_EQ(map.erase(btos(c.key())), 1);
+            tree_remove(*tree, c);
+        } else if (random.next_int(1) == 0) {
+            map.erase(begin(map));
+            tree_remove(*tree, tree->find_minimum());
+        } else {
+            map.erase(prev(end(map)));
+            tree_remove(*tree, tree->find_maximum());
+        }
+    };
+
+    for (Index iteration {}; iteration < 5; ++iteration) {
+        for (const auto &[key, value]: generator.generate(random, 1'000)) {
+            if (tree->cell_count() > MAX_SIZE) {
+                remove_one(key);
+            } else if (tree->cell_count() < MIN_SIZE) {
+                map[key] = value;
+                tree_insert(*tree, key, value);
+            } else if (random.next_int(5) != 0) {
+                map[key] = value;
+                tree_insert(*tree, key, value);
+            } else {
+                remove_one(key);
+            }
+            ASSERT_EQ(map.size(), tree->cell_count());
+        }
+        while (tree->cell_count())
+            remove_one(random_string(random, 1, 30));
+    }
+}
 
 } // <anonymous>

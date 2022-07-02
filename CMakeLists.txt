@@ -50,30 +50,33 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG        v1.10.0
 )
-FetchContent_Declare(
-    zlib
-    GIT_REPOSITORY https://github.com/madler/zlib.git
-    GIT_TAG        v1.2.12
-)
 FetchContent_MakeAvailable(spdlog)
-FetchContent_GetProperties(zlib)
-if(NOT zlib_POPULATED)
-    FetchContent_Populate(zlib)
-    # TODO: Set cache variables and policy to fix warnings for zlib?
-    add_subdirectory(${zlib_SOURCE_DIR} ${zlib_BINARY_DIR})
+
+find_package(zlib)
+if (NOT zlib_FOUND)
+    FetchContent_Declare(
+            zlib
+            GIT_REPOSITORY https://github.com/madler/zlib.git
+            GIT_TAG        v1.2.12
+    )
+    FetchContent_MakeAvailable(zlib)
 endif()
 
 # Build the static library.
-add_library("${CALICO_NAME}"
+add_library(
+    "${CALICO_NAME}"
     STATIC "${CALICO_SOURCES}")
-target_include_directories("${CALICO_NAME}"
+target_include_directories(
+    "${CALICO_NAME}"
     PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE "${CALICO_SOURCE_DIR}"
-            "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
-target_compile_options("${CALICO_NAME}"
+    PUBLIC  "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
+target_compile_options(
+    "${CALICO_NAME}"
     PRIVATE "${CALICO_WARNINGS}")
-target_link_libraries("${CALICO_NAME}"
+target_link_libraries(
+    "${CALICO_NAME}"
     PUBLIC  spdlog::spdlog
     PRIVATE pthread zlib)
 
@@ -82,6 +85,7 @@ if(CALICO_BUILD_EXAMPLES)
     add_subdirectory(${CALICO_EXAMPLES_DIR})
 endif()
 
+# TODO
 #if(CALICO_INSTALL)
 #    set(TARGETS_NAME ${PROJECT_NAME}Targets)
 #    set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")

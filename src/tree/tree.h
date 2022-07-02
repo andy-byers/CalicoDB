@@ -24,7 +24,6 @@ public:
         Size node_count {};
     };
     
-    explicit Tree(Parameters);
     ~Tree() override = default;
 
     [[nodiscard]] auto node_count() const -> Size override
@@ -34,7 +33,7 @@ public:
 
     [[nodiscard]] auto cell_count() const -> Size override
     {
-        return m_cell_count;
+        return m_internal.cell_count();
     }
 
     [[nodiscard]] auto internal() const -> const Internal& override
@@ -57,6 +56,7 @@ public:
         return m_pool;
     }
 
+    explicit Tree(Parameters);
     auto save_header(FileHeader&) const -> void override;
     auto load_header(const FileHeader&) -> void override;
     auto insert(BytesView, BytesView) -> bool override;
@@ -70,7 +70,6 @@ private:
     NodePool m_pool;
     Internal m_internal;
     std::shared_ptr<spdlog::logger> m_logger;
-    Size m_cell_count {};
 };
 
 } // calico

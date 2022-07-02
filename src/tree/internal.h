@@ -28,7 +28,6 @@ public:
 
     explicit Internal(Parameters);
     ~Internal() = default;
-
     [[nodiscard]] auto collect_value(const Node&, Index) const -> std::string;
     auto find_root(bool) -> Node;
     auto find_external(BytesView, bool) -> Result;
@@ -40,6 +39,11 @@ public:
     auto positioned_remove(Position) -> void;
     auto save_header(FileHeader&) const -> void;
     auto load_header(const FileHeader&) -> void;
+
+    [[nodiscard]] auto cell_count() const -> Size
+    {
+        return m_cell_count;
+    }
 
 private:
     auto balance_after_overflow(Node) -> void;

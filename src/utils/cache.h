@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <list>
+#include <optional>
 #include <unordered_map>
 #include "calico/common.h"
 #include "utils/expect.h"

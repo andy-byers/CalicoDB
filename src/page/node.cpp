@@ -937,7 +937,7 @@ auto split_internal_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
         Ln.remove_at(median_index, cell_size);
     }
     const auto do_transfer = [](Node &target, Cell cell) {
-        const auto [index, found_eq]{target.find_ge(cell.key())};
+        const auto [index, found_eq] = target.find_ge(cell.key());
         CALICO_EXPECT_FALSE(found_eq);
         target.insert_at(index, std::move(cell));
     };
