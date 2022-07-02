@@ -57,56 +57,63 @@ public:
     static auto destroy(Database db) -> void;
 
     /**
-     * Read a record from the database.
-     *
-     * This method will search for the first record with a key with the given relationship to the provided
-     * key. For example, if Ordering::GT is used, we look for the first key greater than the given key.
+     * Search for a record.
      *
      * @param key The key to search for.
-     * @param ordering Relationship between the target record key and the given key.
-     * @return The record with the desired relationship to the given key, or std::nullopt if that record
-     *         does not exist.
+     * @param allow_greater True if we should return a cursor pointing to the next record if we cannot find the key,
+     *                      false otherwise.
+     * @return A valid cursor positioned on the record with the desired relationship to the given key, or an
+     *         invalid cursor if that record does not exist.
      */
-    [[nodiscard]] auto read(BytesView key, Ordering ordering = Ordering::EQ) const -> std::optional<Record>;
+    [[nodiscard]] auto find(BytesView key, bool allow_greater = false) const -> Cursor;
+
 
     /**
-     * Read the record with the smallest key.
+     * Search for the smallest key.
      *
-     * @return The record with the smallest key, or std::nullopt if the database is empty.
+     * @return A cursor positioned on the record with the smallest key, or std::nullopt if the database is empty.
      */
-    [[nodiscard]] auto read_minimum() const -> std::optional<Record>;
+    [[nodiscard]] auto find_minimum() const -> Cursor;
 
     /**
-     * Read the record with the largest key.
+     * Search for the largest key.
      *
      * @return The record with the largest key, or std::nullopt if the database is empty.
      */
-    [[nodiscard]] auto read_maximum() const -> std::optional<Record>;
+    [[nodiscard]] auto find_maximum() const -> Cursor;
 
     /**
-     * Write a new record, or update an existing one.
+     * Insert a new record or update an existing one.
      *
      * @param key The key to write.
      * @param value The value to write.
      * @return True if the record was not already in the database, false otherwise.
      */
-    auto write(BytesView, BytesView) -> bool;
+    auto insert(BytesView, BytesView) -> bool;
 
     /**
-     * Write a new record, or update an existing one.
+     * Insert a new record or update an existing one.
      *
      * @param record The record to write.
      * @return True if the record was not already in the database, false otherwise.
      */
-    auto write(const Record&) -> bool;
+    auto insert(const Record&) -> bool;
 
     /**
-     * Erase a record.
+     * Erase a record given its key.
      *
      * @param key The key of the record to erase.
      * @return True if the record was found (and thus erased), false otherwise.
      */
-    auto erase(BytesView) -> bool;
+    auto erase(BytesView key) -> bool;
+
+    /**
+     * Erase a record given a cursor pointing to it.
+     *
+     * @param cursor A cursor pointing to the record to erase.
+     * @return True if the record was found (and thus erased), false otherwise.
+     */
+    auto erase(Cursor cursor) -> bool;
 
     /**
      * Commit the current transaction.
@@ -123,18 +130,11 @@ public:
     auto abort() -> bool;
 
     /**
-     * Open a cursor.
-     *
-     * @return An open cursor.
-     */
-    [[nodiscard]] auto get_cursor() const -> Cursor;
-
-    /**
      * Open an object that can be used to get information about this database.
      *
      * @return A database information object.
      */
-    [[nodiscard]] auto get_info() const -> Info;
+    [[nodiscard]] auto info() const -> Info;
 
     class Impl;
     virtual ~Database();

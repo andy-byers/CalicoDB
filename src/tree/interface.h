@@ -2,43 +2,34 @@
 #define CALICO_TREE_INTERFACE_H
 
 #include <optional>
+#include "calico/database.h"
 #include "page/node.h"
 
 namespace calico {
 
 class FileHeader;
+class Internal;
+class NodePool;
 
 class ITree {
 public:
-    struct Position {
-        Node node;
-        Index index {};
-    };
-
-    struct Result {
-        Node node;
-        Index index {};
-        bool flag {};
-    };
-
     virtual ~ITree() = default;
-    virtual auto node_count() const -> Size = 0;
-    virtual auto cell_count() const -> Size = 0;
-    virtual auto find_root(bool) -> Node = 0;
-    virtual auto find_external(BytesView, bool) -> Result = 0;
-    virtual auto find_ge(BytesView, bool) -> Result = 0;
-    virtual auto find_local_min(Node) -> Position = 0;
-    virtual auto find_local_max(Node) -> Position = 0;
-    virtual auto collect_value(const Node&, Index) const -> std::string = 0;
-    virtual auto save_header(FileHeader&) -> void = 0;
+    [[nodiscard]] virtual auto cell_count() const -> Size = 0;
+    [[nodiscard]] virtual auto node_count() const -> Size = 0;
+    [[nodiscard]] virtual auto internal() const -> const Internal& = 0;
+    [[nodiscard]] virtual auto pool() const -> const NodePool& = 0;
+    virtual auto internal() -> Internal& = 0;
+    virtual auto pool() -> NodePool& = 0;
+    virtual auto save_header(FileHeader&) const -> void = 0;
     virtual auto load_header(const FileHeader&) -> void = 0;
-    virtual auto allocate_node(PageType) -> Node = 0;
-    virtual auto acquire_node(PID, bool) -> Node = 0;
-    virtual auto destroy_node(Node) -> void = 0;
     virtual auto insert(BytesView, BytesView) -> bool = 0;
-    virtual auto remove(BytesView) -> bool = 0;
+    virtual auto remove(Cursor) -> bool = 0;
+    virtual auto find(BytesView, bool) -> Cursor = 0;
+    virtual auto find_minimum() -> Cursor = 0;
+    virtual auto find_maximum() -> Cursor = 0;
+    virtual auto root(bool) -> Node = 0;
 };
 
 } // calico
 
-#endif //CALICO_TREE_INTERFACE_H
+#endif // CALICO_TREE_INTERFACE_H

@@ -1,4 +1,5 @@
-add_executable(benchmark main.cpp)
-target_link_libraries(benchmark ${CALICO_NAME} test_tools pthread)
-target_include_directories(benchmark PRIVATE ${CALICO_TEST_DIR}/tools)
-
+set(BENCHMARK_FILES "")
+file(GLOB_RECURSE BENCHMARK_FILES "*.cpp" "*.h")
+add_executable(benchmark "${BENCHMARK_FILES}")
+target_link_libraries(benchmark PRIVATE test_tools gtest_main)
+add_test(NAME benchmark COMMAND benchmark)

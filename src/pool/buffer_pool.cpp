@@ -53,6 +53,16 @@ auto BufferPool::allocate(PageType type) -> Page
     return page;
 }
 
+/**
+ * Get a page object containing data from the database file.
+ *
+ * This method should only be used to acquire existing pages (unless the page count will be updated subsequently,
+ * such as in the case of the "roll-forward" procedure).
+ *
+ * @param id Page ID of the page to retrieve.
+ * @param is_writable True if the page object should allow modification, false otherwise.
+ * @return A page object containing the page with the specified page ID.
+ */
 auto BufferPool::acquire(PID id, bool is_writable) -> Page
 {
     CALICO_EXPECT_FALSE(id.is_null());
@@ -131,7 +141,6 @@ auto BufferPool::fetch_frame(PID id) -> Frame
         return std::move(*frame);
 
     if (!try_flush_wal()) {
-        // TODO: Make sure we get rid of excess frames when we don't need them anymore.
         m_pager.unpin(Frame {m_pager.page_size()});
         return *m_pager.pin(id);
     }

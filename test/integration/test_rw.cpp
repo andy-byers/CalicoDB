@@ -20,16 +20,15 @@ constexpr auto TEST_PATH = "/tmp/calico_test";
 
 auto reader_task(Database *db) -> void*
 {
-    auto cursor = db->get_cursor();
-    const auto expected_size = db->get_info().record_count();
+    const auto expected_size = db->info().record_count();
     CALICO_EXPECT_GT(expected_size, 1);
-    cursor.find_minimum();
+    auto cursor = db->find_minimum();
     const auto value = cursor.value();
     Size counter {1};
 
     while (cursor.increment()) {
         // We should be able to call the read*() methods from many threads.
-        CALICO_EXPECT_EQ(db->read(cursor.key(), Ordering::EQ)->value, value);
+        CALICO_EXPECT_EQ(db->find(cursor.key()).value(), value);
         CALICO_EXPECT_EQ(cursor.value(), value);
         counter++;
     }
@@ -46,9 +45,9 @@ auto locked_reader_task(Database *db, std::shared_mutex *mutex) -> void*
 auto writer_task(Database *db, std::shared_mutex *mutex, const std::vector<Record> &original) -> void*
 {
     std::unique_lock lock {*mutex};
-    const auto value = db->read_minimum()->value;
-    for (const auto &[key, unused]: original)
-        db->write(stob(key), stob(value));
+    const auto value = db->find_minimum().value();
+    for (const auto &record: original)
+        db->insert(record);
     return nullptr;
 }
 
@@ -69,9 +68,15 @@ auto setup(Size num_readers, Size num_writers)
 
     std::filesystem::remove(TEST_PATH);
     auto db = Database::open(TEST_PATH, {});
-    DatabaseBuilder builder {&db};
-    builder.write_unique_records(NUM_RECORDS_AT_START, {});
-    auto records = builder.collect_records();
+    for (Index i {}; i < NUM_RECORDS_AT_START; ++i) {
+        const auto key = std::to_string(i);
+        const auto value = key + key;
+        db.insert({key, value});
+    }
+    std::vector<Record> records;
+    records.reserve(db.info().record_count());
+    for (auto c = db.find_minimum(); c.is_valid(); c++)
+        records.emplace_back(c.record());
 
     // Run once to make all values the same.
     std::shared_mutex mutex;

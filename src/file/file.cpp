@@ -60,7 +60,7 @@ Resource::~Resource()
 }
 
 ReadOnlyFile::ReadOnlyFile(const std::string &path, Mode mode, int permissions)
-    : m_resource{path, READ_ONLY, mode, permissions} {}
+    : m_resource {path, READ_ONLY, mode, permissions} {}
 
 ReadOnlyFile::~ReadOnlyFile() = default;
 
@@ -90,7 +90,7 @@ auto ReadOnlyFile::read(Bytes out) -> Size
 }
 
 WriteOnlyFile::WriteOnlyFile(const std::string &path, Mode mode, int permissions)
-    : m_resource{path, WRITE_ONLY, mode, permissions} {}
+    : m_resource {path, WRITE_ONLY, mode, permissions} {}
 
 WriteOnlyFile::~WriteOnlyFile() = default;
 
@@ -125,7 +125,7 @@ auto WriteOnlyFile::write(BytesView in) -> Size
 }
 
 ReadWriteFile::ReadWriteFile(const std::string &path, Mode mode, int permissions)
-    : m_resource{path, READ_WRITE, mode, permissions} {}
+    : m_resource {path, READ_WRITE, mode, permissions} {}
 
 ReadWriteFile::~ReadWriteFile() = default;
 
@@ -165,7 +165,7 @@ auto ReadWriteFile::write(BytesView in) -> Size
 }
 
 LogFile::LogFile(const std::string &path, Mode mode, int permissions)
-    : m_resource{path, WRITE_ONLY | APPEND, mode, permissions} {}
+    : m_resource {path, WRITE_ONLY | APPEND, mode, permissions} {}
 
 LogFile::~LogFile() = default;
 

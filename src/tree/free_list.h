@@ -1,5 +1,5 @@
-#ifndef CALICO_TREE_FREELIST_H
-#define CALICO_TREE_FREELIST_H
+#ifndef CALICO_TREE_FREE_LIST_H
+#define CALICO_TREE_FREE_LIST_H
 
 #include <optional>
 #include "utils/identifier.h"
@@ -38,4 +38,4 @@ private:
 
 } // calico
 
-#endif // CALICO_TREE_FREELIST_H
+#endif // CALICO_TREE_FREE_LIST_H

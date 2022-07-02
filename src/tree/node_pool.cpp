@@ -14,27 +14,12 @@ NodePool::NodePool(Parameters param)
       m_pool {param.buffer_pool},
       m_node_count {param.node_count} {}
 
-auto NodePool::collect_value(const Node &node, Index index) const -> std::string
+auto NodePool::page_size() const -> Size
 {
-    auto cell = node.read_cell(index);
-    const auto local = cell.local_value();
-    std::string result(cell.value_size(), '\x00');
-    auto out = stob(result);
-
-    // Note that it is possible to have no value stored locally but have an overflow page. The happens when
-    // the key is of maximal length (i.e. get_max_local(m_header->page_size())).
-    if (!local.is_empty())
-        mem_copy(out, local, local.size());
-
-    if (!cell.overflow_id().is_null()) {
-        CALICO_EXPECT_GT(cell.value_size(), cell.local_value().size());
-        out.advance(local.size());
-        collect_overflow_chain(cell.overflow_id(), out);
-    }
-    return result;
+    return m_pool->page_size();
 }
 
-auto NodePool::allocate_node(PageType type) -> Node
+auto NodePool::allocate(PageType type) -> Node
 {
     auto page = m_free_list.pop();
     if (page) {
@@ -46,12 +31,12 @@ auto NodePool::allocate_node(PageType type) -> Node
     return {std::move(*page), true};
 }
 
-auto NodePool::acquire_node(PID id, bool is_writable) -> Node
+auto NodePool::acquire(PID id, bool is_writable) -> Node
 {
     return {m_pool->acquire(id, is_writable), false};
 }
 
-auto NodePool::destroy_node(Node node) -> void
+auto NodePool::destroy(Node node) -> void
 {
     CALICO_EXPECT_FALSE(node.is_overflowing());
     m_free_list.push(node.take());
@@ -122,6 +107,5 @@ auto NodePool::load_header(const FileHeader &header) -> void
     m_node_count = header.node_count();
     m_free_list.load_header(header);
 }
-
 
 } // calico

@@ -27,6 +27,7 @@ auto Page::operator=(Page &&rhs) noexcept -> Page&
         m_data = std::exchange(rhs.m_data, {});
         m_id = std::exchange(rhs.m_id, {});
         m_is_dirty = std::exchange(rhs.m_is_dirty, false);
+        m_is_writable = std::exchange(rhs.m_is_writable, false);
     }
     return *this;
 }

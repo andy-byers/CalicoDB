@@ -3,29 +3,7 @@
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
 Calico DB is an embedded key-value database written in C++17.
-
-### Note (06/24)
-So far, Calico DB works okay, but is far from complete.
-Here are some changes I'm proposing to make before the release of the first version:
-
-1. Store all "value" data in the external nodes.
-We're suffering from poor fanout at the moment, and plus it would allow better concurrency control algorithms to be used.
-Essentially, we would be converting the B-tree into a B<sup>+</sup>-tree.
-2. Better concurrency control.
-This one will probably be difficult.
-Luckily, this area is well understood and there is much research available about it.
-We'll have to decide on a specific construct that is adequately performant/compatible with the current design once *#1* is done.
-3. An STL container-like API.
-This may involve changing names, e.g. making the `Database` a `tree` and the `Cursor` a `tree::iterator/tree::const_iterator`, and providing methods like `tree::end()` and functions like `calico::begin(tree&)`.
-Methods like `tree::erase(tree::iterator &begin, tree::iterator &end)` need some additional consideration since, in the current implementation, changes to the tree structure invalidate existing cursors.
-
-I believe that these changes will make Calico DB really nice to use.
-Plus, sequential reads are way simpler, and likely way faster, in a B<sup>+</sup>-tree.
-I'm thinking that work on *#2* depends on progress made on *#1*, but *#3* is independent of the other two.
-I'll make two branches, `bplus_tree` and `stl_like_api`, on which to develop these changes.
-Check out [Contributions](#contributions) if you're interested in working on this project, it's kinda lonely here by myself 😿!
-
-
+It exposes a small API that allows storage and retrieval of (nearly) arbitrary byte sequences.
 
 + [Disclaimer](#disclaimer)
 + [Features](#features)
@@ -55,7 +33,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 
 ## Features
 + Durability provided through write-ahead logging
-+ Uses a dynamic-order B-tree to store the data in a single file
++ Uses a dynamic-order B<sup>+</sup>-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
 + Allows creation of in-memory databases
 + Supports arbitrary value sizes
@@ -65,7 +43,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Currently, Calico DB only runs on 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
 + WAL is only used to ensure ACID properties on the current transaction and is truncated afterward
-+ Has a limit on key length, equal to roughly 1/4 of the page size
++ Has a hard limit on key length, equal to roughly 1/4 of the page size
 + Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
 
@@ -128,16 +106,17 @@ Calico DB uses `Bytes` and `BytesView` objects to represent unowned byte sequenc
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
-std::string data {"Hello, bears!"};
+std::string data {"Hello, world!"};
 
-// Construct slices from a string. The string still owns the memory, the slices just refer to it.
+// Construct slices from a string. The string still owns the memory, the slices just refer 
+// to it.
 calico::Bytes b {data.data(), data.size()};
 calico::BytesView v {data.data(), data.size()};
 
 // Convenience conversion from a string.
 const auto from_string = calico::stob(data);
 
-// Convenience conversion back to a string. This operation must allocate a new string.
+// Convenience conversion back to a string. This operation may allocate heap memory.
 assert(calico::btos(from_string) == data);
 
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
@@ -147,8 +126,9 @@ function_taking_a_bytes_view(b);
 b.advance(7).truncate(5);
 
 // Comparisons.
-assert(calico::compare_three_way(b, v) == calico::ThreeWayComparison::EQ);
-assert(b == calico::stob("bears"));
+assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
+assert(b == calico::stob("world"));
+assert(calico::stob(data).starts_with(calico::stob("Hello")));
 ```
 
 ### Updating a Database
@@ -171,7 +151,7 @@ assert(db.erase(calico::stob("grizzly bear")));
 ```
 
 ### Querying a Database
-The `read*()` methods are provided for querying the database.
+The `find*()` methods are provided for querying the database.
 
 ```C++
 // We can require an exact match.
@@ -189,31 +169,6 @@ assert(greater_than == std::nullopt);
 // We can also search for the minimum and maximum.
 const auto smallest = db.read_minimum();
 const auto largest = db.read_maximum();
-```
-
-### Cursor Objects
-Cursors can be used to find records and traverse the database.
-
-```C++
-auto cursor = db.get_cursor();
-assert(cursor.has_record());
-
-// Seek to extrema.
-cursor.find_maximum();
-cursor.find_minimum();
-
-// Forward traversal.
-assert(cursor.increment());
-assert(cursor.increment(2) == 2);
-
-// Reverse traversal.
-assert(cursor.decrement());
-assert(cursor.decrement(2) == 2);
-
-// Key and value access. For the key, we first convert to std::string, since key() returns a BytesView.
-const auto key = calico::btos(cursor.key());
-const auto value = cursor.value();
-printf("Record {%s, %s}\n", key.c_str(), value.c_str()); // Record {black bear, lovable}
 ```
 
 ### Transactions
@@ -258,6 +213,7 @@ We still have a ways to go performance-wise, however, it seems that the cursors 
 | read_rev    |        4,400,077 |
 | erase_rand  |           21,290 |
 | erase_seq   |           20,449 |
+
 
 ### Benchmark Results (In-Memory Database)
 | Name (In-Memory DB) | Result (ops/sec) |
@@ -305,7 +261,7 @@ We still have a ways to go performance-wise, however, it seems that the cursors 
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.
-Each submodule is represented by a directory in `src`, as shown in [source tree overview](#source-tree-overview).
+Each submodule is represented by a directory in `src`, as shown in the [source tree overview](#source-tree-overview).
 See `DESIGN.md` for more information about the design of Calico DB.
 
 ## Source Tree Overview
@@ -314,8 +270,8 @@ CalicoDB
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Slices for holding contiguous sequences of bytes
+┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
-┃ ┣╸calico.h ┄┄┄┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
 ┃ ┣╸exception.h ┄┄┄┄ Public-facing exceptions

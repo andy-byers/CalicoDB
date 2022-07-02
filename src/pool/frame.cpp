@@ -38,7 +38,9 @@ auto Frame::synchronize(Page &page) -> void
         CALICO_EXPECT_EQ(m_ref_count, 1);
         m_is_writable = false;
     }
+if (m_is_writable){
 
+}
     if (page.is_dirty())
         m_is_dirty = true;
 

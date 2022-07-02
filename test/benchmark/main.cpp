@@ -6,9 +6,6 @@
 #include "calico/calico.h"
 #include "tools.h"
 
-#ifdef CALICO_USE_VALIDATORS
-#  error "Validators make performance very bad. Compile without them."
-#endif
 
 namespace {
 
@@ -73,7 +70,7 @@ auto build_common(Work &records, bool is_sequential)
 
 auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
 {
-    if (db.get_info().record_count() == records.size())
+    if (db.info().record_count() == records.size())
         return;
 
     build_common(records, is_sorted);
@@ -82,7 +79,7 @@ auto build_reads(Database &db, Work &records, bool is_sorted, bool is_reversed)
         std::reverse(begin(records), end(records));
 
     for (const auto &[key, value]: records)
-        db.write(stob(key), stob(value));
+        db.insert(stob(key), stob(value));
 }
 
 auto build_erases(Database &db, Work &records, bool is_sequential)
@@ -99,7 +96,7 @@ auto run_baseline(Database&)
 auto run_writes(Database &db, const Work &work)
 {
     for (const auto &[key, value]: work)
-        CALICO_EXPECT_TRUE(db.write(stob(key), stob(value)));
+        CALICO_EXPECT_TRUE(db.insert(stob(key), stob(value)));
     db.commit();
 }
 
@@ -112,10 +109,11 @@ auto run_erases(Database &db, const Work &work)
 
 auto run_read_rand(Database &db, const Work &work)
 {
-    std::string v;
-    auto cursor = db.get_cursor();
+    std::string k, v;
     for (const auto &[key, value]: work) {
-        CALICO_EXPECT_TRUE(cursor.find(stob(key)));
+        auto cursor = db.find(stob(key));
+        CALICO_EXPECT_TRUE(cursor.is_valid());
+        k = btos(cursor.key());
         v = cursor.value();
     }
 }
@@ -123,8 +121,7 @@ auto run_read_rand(Database &db, const Work &work)
 auto run_read_seq(Database &db, const Work &work)
 {
     std::string k, v;
-    auto cursor = db.get_cursor();
-    cursor.find_minimum();
+    auto cursor = db.find_minimum();
     for (const auto &w: work) {
         (void)w;
         k = btos(cursor.key());
@@ -136,8 +133,7 @@ auto run_read_seq(Database &db, const Work &work)
 auto run_read_rev(Database &db, const Work &work)
 {
     std::string k, v;
-    auto cursor = db.get_cursor();
-    cursor.find_maximum();
+    auto cursor = db.find_maximum();
     for (const auto &w: work) {
         (void)w;
         k = btos(cursor.key());
@@ -148,7 +144,7 @@ auto run_read_rev(Database &db, const Work &work)
 
 auto setup_common(Database &db)
 {
-    const auto is_temp = db.get_info().is_temp();
+    const auto is_temp = db.info().is_temp();
     db.~Database();
     db = is_temp ? create_temp() : create();
 }

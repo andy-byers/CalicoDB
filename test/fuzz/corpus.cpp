@@ -37,7 +37,7 @@ auto generate_wal_reader_seed(const std::string &path, Size block_size, Size num
         auto db = Database::open(database_path, options);
         for (Index i {}; i < num_records; ++i) {
             const auto data = std::to_string(i);
-            db.write(stob(data), stob(data + data));
+            db.insert({data, data + data});
         }
         std::filesystem::copy(get_wal_path(database_path), path);
     }

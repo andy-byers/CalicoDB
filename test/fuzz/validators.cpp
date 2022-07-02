@@ -12,21 +12,17 @@ namespace calico::fuzz {
 
 auto validate_ordering(Database &db) -> void
 {
-    auto left = db.get_cursor();
-    auto right = db.get_cursor();
+    auto lhs = db.find_minimum();
+    auto rhs = db.find_minimum();
 
-    if (!left.has_record())
+    if (!lhs.is_valid())
         return;
+    CALICO_EXPECT_TRUE(rhs.is_valid());
+    CALICO_EXPECT_TRUE(rhs.increment());
 
-    CALICO_EXPECT_TRUE(right.has_record());
-    if (!right.increment())
-        return;
-
-    for (; ; ) {
-        CALICO_EXPECT_TRUE(left.key() < right.key());
-        CALICO_EXPECT_TRUE(left.increment());
-        if (!right.increment())
-            return;
+    for (; rhs.is_valid(); lhs++, rhs++) {
+        CALICO_EXPECT_TRUE(lhs.is_valid());
+        CALICO_EXPECT_TRUE(lhs.key() < rhs.key());
     }
 }
 

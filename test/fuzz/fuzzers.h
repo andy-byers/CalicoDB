@@ -140,9 +140,9 @@ public:
         for (const auto &[key, value_size, operation]: input) {
             if (operation == Operation::WRITE) {
                 std::string value(value_size, '*');
-                m_db.write(stob(key), stob(value));
-            } else if (const auto record = m_db.read(stob(key), Ordering::GE)) {
-                m_db.erase(stob(record->key));
+                m_db.insert({key, value});
+            } else if (auto c = m_db.find(stob(key), true); c.is_valid()) {
+                m_db.erase(c);
             }
         }
         m_db.commit();
@@ -256,7 +256,7 @@ public:
 
             if (operation == Operation::WRITE) {
                 std::string value(value_size, '*');
-                m_node.insert(make_cell(stob(key), stob(value), PAGE_SIZE));
+                m_node.insert(make_external_cell(stob(key), stob(value), PAGE_SIZE));
                 if (m_node.is_overflowing())
                     (void)m_node.take_overflow_cell();
             } else if (!found_eq && index < m_node.cell_count()) {

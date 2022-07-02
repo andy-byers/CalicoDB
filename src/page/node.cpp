@@ -632,7 +632,7 @@ auto Node::insert_at(Index index, Cell cell) -> void
     if (offset < m_header.cell_start())
         m_header.set_cell_start(offset);
 
-    CALICO_VALIDATE(validate());
+//    CALICO_VALIDATE(validate());
 }
 
 auto Node::remove(BytesView key) -> bool
@@ -652,7 +652,7 @@ auto Node::remove_at(Index index, Size local_size) -> void
     CALICO_EXPECT_FALSE(is_overflowing());
     m_allocator.free(m_directory.get_pointer(index).value, local_size);
     m_directory.remove_pointer(index);
-    CALICO_VALIDATE(validate());
+//    CALICO_VALIDATE(validate());
 }
 
 auto Node::reset(bool reset_header) -> void

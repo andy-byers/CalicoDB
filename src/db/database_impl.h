@@ -38,15 +38,15 @@ public:
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto uses_transactions() const -> Size;
     [[nodiscard]] auto is_temp() const -> bool;
-    auto read(BytesView, Ordering) -> std::optional<Record>;
-    auto read_minimum() -> std::optional<Record>;
-    auto read_maximum() -> std::optional<Record>;
-    auto write(BytesView, BytesView) -> bool;
+    auto find(BytesView, bool) -> Cursor;
+    auto find_minimum() -> Cursor;
+    auto find_maximum() -> Cursor;
+    auto insert(BytesView, BytesView) -> bool;
     auto erase(BytesView) -> bool;
+    auto erase(Cursor) -> bool;
     auto commit() -> bool;
     auto abort() -> bool;
-    auto get_cursor() -> Cursor;
-    auto get_info() -> Info;
+    auto info() -> Info;
 
     [[nodiscard]] auto path() const -> const std::string&
     {

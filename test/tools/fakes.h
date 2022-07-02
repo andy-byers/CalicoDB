@@ -1,7 +1,6 @@
 #ifndef CALICO_TEST_TOOLS_FAKES_H
 #define CALICO_TEST_TOOLS_FAKES_H
 
-#include <gmock/gmock.h>
 #include "calico/bytes.h"
 #include "calico/options.h"
 #include "random.h"
@@ -380,206 +379,206 @@ struct FakeFilesHarness {
     FaultControls wal_writer_faults;
     Options options;
 };
-
-struct FaultyDatabase {
-
-    static auto create(Size) -> FaultyDatabase;
-    auto clone() -> FaultyDatabase;
-
-    FaultyDatabase() = default;
-    FaultyDatabase(FaultyDatabase&&) = default;
-    auto operator=(FaultyDatabase&&) -> FaultyDatabase& = default;
-
-    std::unique_ptr<Database::Impl> db;
-    SharedMemory tree_backing;
-    SharedMemory wal_backing;
-    FaultControls tree_faults;
-    FaultControls wal_reader_faults;
-    FaultControls wal_writer_faults;
-    Size page_size {}; // TODO: Remove when we get the 'info' construct working.
-};
-
-
-class MockReadOnlyMemory: public IReadOnlyFile {
-public:
-    MockReadOnlyMemory() = default;
-
-    explicit MockReadOnlyMemory(SharedMemory memory)
-        : m_fake {std::move(memory)} {}
-
-    ~MockReadOnlyMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_fake.memory();
-    }
-
-    auto size() const -> Size override
-    {
-        return m_fake.size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    MOCK_METHOD(void, sync, (), (override));
-    MOCK_METHOD(Index, seek, (long, Seek), (override));
-    MOCK_METHOD(Size, read, (Bytes), (override));
-
-    auto delegate_to_fake() -> void
-    {
-        ON_CALL(*this, seek)
-            .WillByDefault([this](long offset, Seek whence) {
-                return m_fake.seek(offset, whence);
-            });
-        ON_CALL(*this, read)
-            .WillByDefault([this](Bytes out) {
-                return m_fake.read(out);
-            });
-    }
-
-private:
-    ReadOnlyMemory m_fake;
-};
-
-
-class MockWriteOnlyMemory: public IWriteOnlyFile {
-public:
-    MockWriteOnlyMemory() = default;
-
-    explicit MockWriteOnlyMemory(SharedMemory memory)
-        : m_fake {std::move(memory)} {}
-
-    ~MockWriteOnlyMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_fake.memory();
-    }
-
-    auto size() const -> Size override
-    {
-        return m_fake.size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    MOCK_METHOD(void, resize, (Size), (override));
-    MOCK_METHOD(void, sync, (), (override));
-    MOCK_METHOD(Index, seek, (long, Seek), (override));
-    MOCK_METHOD(Size, write, (BytesView), (override));
-
-    auto delegate_to_fake() -> void
-    {
-        ON_CALL(*this, resize)
-            .WillByDefault([this](Size size) {
-                return m_fake.resize(size);
-            });
-        ON_CALL(*this, seek)
-            .WillByDefault([this](long offset, Seek whence) {
-                return m_fake.seek(offset, whence);
-            });
-        ON_CALL(*this, write)
-            .WillByDefault([this](BytesView in) {
-                return m_fake.write(in);
-            });
-    }
-
-private:
-    WriteOnlyMemory m_fake;
-};
-
-class MockReadWriteMemory: public IReadWriteFile {
-public:
-    MockReadWriteMemory() = default;
-
-    explicit MockReadWriteMemory(SharedMemory memory)
-        : m_fake {std::move(memory)} {}
-
-    ~MockReadWriteMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_fake.memory();
-    }
-
-    auto size() const -> Size override
-    {
-        return m_fake.size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    MOCK_METHOD(void, sync, (), (override));
-    MOCK_METHOD(void, resize, (Size), (override));
-    MOCK_METHOD(Index, seek, (long, Seek), (override));
-    MOCK_METHOD(Size, read, (Bytes), (override));
-    MOCK_METHOD(Size, write, (BytesView), (override));
-
-    auto delegate_to_fake() -> void
-    {
-        ON_CALL(*this, resize)
-            .WillByDefault([this](Size size) {
-                return m_fake.resize(size);
-            });
-        ON_CALL(*this, seek)
-            .WillByDefault([this](long offset, Seek whence) {
-                return m_fake.seek(offset, whence);
-            });
-        ON_CALL(*this, read)
-            .WillByDefault([this](Bytes out) {
-                return m_fake.read(out);
-            });
-        ON_CALL(*this, write)
-            .WillByDefault([this](BytesView in) {
-                return m_fake.write(in);
-            });
-    }
-
-private:
-    ReadWriteMemory m_fake;
-};
-
-class MockLogMemory: public ILogFile {
-public:
-    MockLogMemory() = default;
-
-    explicit MockLogMemory(SharedMemory memory)
-        : m_fake {std::move(memory)} {}
-
-    ~MockLogMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_fake.memory();
-    }
-
-    auto size() const -> Size override
-    {
-        return m_fake.size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    MOCK_METHOD(void, sync, (), (override));
-    MOCK_METHOD(void, resize, (Size), (override));
-    MOCK_METHOD(Size, write, (BytesView), (override));
-
-    auto delegate_to_fake() -> void
-    {
-        ON_CALL(*this, resize)
-            .WillByDefault([this](Size size) {
-                return m_fake.resize(size);
-            });
-        ON_CALL(*this, write)
-            .WillByDefault([this](BytesView in) {
-                return m_fake.write(in);
-            });
-    }
-
-private:
-
-    LogMemory m_fake;
-};
+//
+//struct FaultyDatabase {
+//
+//    static auto create(Size) -> FaultyDatabase;
+//    auto clone() -> FaultyDatabase;
+//
+//    FaultyDatabase() = default;
+//    FaultyDatabase(FaultyDatabase&&) = default;
+//    auto operator=(FaultyDatabase&&) -> FaultyDatabase& = default;
+//
+//    std::unique_ptr<Database::Impl> db;
+//    SharedMemory tree_backing;
+//    SharedMemory wal_backing;
+//    FaultControls tree_faults;
+//    FaultControls wal_reader_faults;
+//    FaultControls wal_writer_faults;
+//    Size page_size {}; // TODO: Remove when we get the 'info' construct working.
+//};
+//
+//
+//class MockReadOnlyMemory: public IReadOnlyFile {
+//public:
+//    MockReadOnlyMemory() = default;
+//
+//    explicit MockReadOnlyMemory(SharedMemory memory)
+//        : m_fake {std::move(memory)} {}
+//
+//    ~MockReadOnlyMemory() override = default;
+//
+//    auto memory() -> SharedMemory
+//    {
+//        return m_fake.memory();
+//    }
+//
+//    auto size() const -> Size override
+//    {
+//        return m_fake.size();
+//    }
+//
+//    auto use_direct_io() -> void override {}
+//
+//    MOCK_METHOD(void, sync, (), (override));
+//    MOCK_METHOD(Index, seek, (long, Seek), (override));
+//    MOCK_METHOD(Size, read, (Bytes), (override));
+//
+//    auto delegate_to_fake() -> void
+//    {
+//        ON_CALL(*this, seek)
+//            .WillByDefault([this](long offset, Seek whence) {
+//                return m_fake.seek(offset, whence);
+//            });
+//        ON_CALL(*this, read)
+//            .WillByDefault([this](Bytes out) {
+//                return m_fake.read(out);
+//            });
+//    }
+//
+//private:
+//    ReadOnlyMemory m_fake;
+//};
+//
+//
+//class MockWriteOnlyMemory: public IWriteOnlyFile {
+//public:
+//    MockWriteOnlyMemory() = default;
+//
+//    explicit MockWriteOnlyMemory(SharedMemory memory)
+//        : m_fake {std::move(memory)} {}
+//
+//    ~MockWriteOnlyMemory() override = default;
+//
+//    auto memory() -> SharedMemory
+//    {
+//        return m_fake.memory();
+//    }
+//
+//    auto size() const -> Size override
+//    {
+//        return m_fake.size();
+//    }
+//
+//    auto use_direct_io() -> void override {}
+//
+//    MOCK_METHOD(void, resize, (Size), (override));
+//    MOCK_METHOD(void, sync, (), (override));
+//    MOCK_METHOD(Index, seek, (long, Seek), (override));
+//    MOCK_METHOD(Size, write, (BytesView), (override));
+//
+//    auto delegate_to_fake() -> void
+//    {
+//        ON_CALL(*this, resize)
+//            .WillByDefault([this](Size size) {
+//                return m_fake.resize(size);
+//            });
+//        ON_CALL(*this, seek)
+//            .WillByDefault([this](long offset, Seek whence) {
+//                return m_fake.seek(offset, whence);
+//            });
+//        ON_CALL(*this, write)
+//            .WillByDefault([this](BytesView in) {
+//                return m_fake.write(in);
+//            });
+//    }
+//
+//private:
+//    WriteOnlyMemory m_fake;
+//};
+//
+//class MockReadWriteMemory: public IReadWriteFile {
+//public:
+//    MockReadWriteMemory() = default;
+//
+//    explicit MockReadWriteMemory(SharedMemory memory)
+//        : m_fake {std::move(memory)} {}
+//
+//    ~MockReadWriteMemory() override = default;
+//
+//    auto memory() -> SharedMemory
+//    {
+//        return m_fake.memory();
+//    }
+//
+//    auto size() const -> Size override
+//    {
+//        return m_fake.size();
+//    }
+//
+//    auto use_direct_io() -> void override {}
+//
+//    MOCK_METHOD(void, sync, (), (override));
+//    MOCK_METHOD(void, resize, (Size), (override));
+//    MOCK_METHOD(Index, seek, (long, Seek), (override));
+//    MOCK_METHOD(Size, read, (Bytes), (override));
+//    MOCK_METHOD(Size, write, (BytesView), (override));
+//
+//    auto delegate_to_fake() -> void
+//    {
+//        ON_CALL(*this, resize)
+//            .WillByDefault([this](Size size) {
+//                return m_fake.resize(size);
+//            });
+//        ON_CALL(*this, seek)
+//            .WillByDefault([this](long offset, Seek whence) {
+//                return m_fake.seek(offset, whence);
+//            });
+//        ON_CALL(*this, read)
+//            .WillByDefault([this](Bytes out) {
+//                return m_fake.read(out);
+//            });
+//        ON_CALL(*this, write)
+//            .WillByDefault([this](BytesView in) {
+//                return m_fake.write(in);
+//            });
+//    }
+//
+//private:
+//    ReadWriteMemory m_fake;
+//};
+//
+//class MockLogMemory: public ILogFile {
+//public:
+//    MockLogMemory() = default;
+//
+//    explicit MockLogMemory(SharedMemory memory)
+//        : m_fake {std::move(memory)} {}
+//
+//    ~MockLogMemory() override = default;
+//
+//    auto memory() -> SharedMemory
+//    {
+//        return m_fake.memory();
+//    }
+//
+//    auto size() const -> Size override
+//    {
+//        return m_fake.size();
+//    }
+//
+//    auto use_direct_io() -> void override {}
+//
+//    MOCK_METHOD(void, sync, (), (override));
+//    MOCK_METHOD(void, resize, (Size), (override));
+//    MOCK_METHOD(Size, write, (BytesView), (override));
+//
+//    auto delegate_to_fake() -> void
+//    {
+//        ON_CALL(*this, resize)
+//            .WillByDefault([this](Size size) {
+//                return m_fake.resize(size);
+//            });
+//        ON_CALL(*this, write)
+//            .WillByDefault([this](BytesView in) {
+//                return m_fake.write(in);
+//            });
+//    }
+//
+//private:
+//
+//    LogMemory m_fake;
+//};
 
 } // calico
 

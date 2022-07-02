@@ -44,7 +44,7 @@ auto main(int argc, const char *argv[]) -> int
     }
 
     auto db = Database::open(path, {});
-    const auto info = db.get_info();
+    const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.
     CALICO_EXPECT_EQ(info.record_count(), num_committed);
@@ -52,10 +52,10 @@ auto main(int argc, const char *argv[]) -> int
     Index key_counter {};
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
-        const auto record = db.read(stob(key));
-        CALICO_EXPECT_NE(record, std::nullopt);
-        CALICO_EXPECT_EQ(record->key, key);
-        CALICO_EXPECT_EQ(record->value, value);
+        const auto cursor = db.find(stob(key));
+        CALICO_EXPECT_TRUE(cursor.is_valid());
+        CALICO_EXPECT_EQ(btos(cursor.key()), key);
+        CALICO_EXPECT_EQ(cursor.value(), value);
         CALICO_EXPECT_TRUE(db.erase(stob(key)));
     }
 

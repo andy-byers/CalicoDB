@@ -1,6 +1,6 @@
 
 #include "database_impl.h"
-#include "cursor_impl.h"
+#include "calico/cursor.h"
 #include "file/file.h"
 #include "file/system.h"
 #include "page/file_header.h"
@@ -61,35 +61,40 @@ Database::Database(Database&&) noexcept = default;
 
 auto Database::operator=(Database&&) noexcept -> Database& = default;
 
-auto Database::read(BytesView key, Ordering ordering) const -> std::optional<Record>
+auto Database::find(BytesView key, bool allow_greater) const -> Cursor
 {
-    return m_impl->read(key, ordering);
+    return m_impl->find(key, !allow_greater);
 }
 
-auto Database::read_minimum() const -> std::optional<Record>
+auto Database::find_minimum() const -> Cursor
 {
-    return m_impl->read_minimum();
+    return m_impl->find_minimum();
 }
 
-auto Database::read_maximum() const -> std::optional<Record>
+auto Database::find_maximum() const -> Cursor
 {
-    return m_impl->read_maximum();
+    return m_impl->find_maximum();
 }
 
-auto Database::write(BytesView key, BytesView value) -> bool
+auto Database::insert(BytesView key, BytesView value) -> bool
 {
-    return m_impl->write(key, value);
+    return m_impl->insert(key, value);
 }
 
-auto Database::write(const Record &record) -> bool
+auto Database::insert(const Record &record) -> bool
 {
     const auto &[key, value] = record;
-    return m_impl->write(stob(key), stob(value));
+    return m_impl->insert(stob(key), stob(value));
 }
 
 auto Database::erase(BytesView key) -> bool
 {
     return m_impl->erase(key);
+}
+
+auto Database::erase(Cursor cursor) -> bool
+{
+    return m_impl->erase(cursor);
 }
 
 auto Database::commit() -> bool
@@ -102,14 +107,9 @@ auto Database::abort() -> bool
     return m_impl->abort();
 }
 
-auto Database::get_cursor() const -> Cursor
+auto Database::info() const -> Info
 {
-    return m_impl->get_cursor();
-}
-
-auto Database::get_info() const -> Info
-{
-    return m_impl->get_info();
+    return m_impl->info();
 }
 
 } // calico

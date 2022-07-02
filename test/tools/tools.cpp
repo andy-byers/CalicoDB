@@ -11,118 +11,118 @@
 #include "utils/logging.h"
 
 namespace calico {
-
-TreeValidator::TreeValidator(ITree &tree)
-    : m_tree{tree} { }
-    
-auto TreeValidator::validate() -> void
-{
-    validate_parent_child_connections();
-    validate_sibling_connections();
-    validate_ordering();
-}
-
-auto TreeValidator::validate_sibling_connections() -> void
-{
-    // First node in the sibling chain.
-    auto node = m_tree.find_root(false);
-    while (!node.is_external())
-        node = m_tree.acquire_node(node.child_id(0), false);
-    std::optional<std::string> prev{};
-    while (true) {
-        for (Index cid{}; cid < node.cell_count(); ++cid) {
-            const auto key = btos(node.read_key(cid));
-            // Strict ordering.
-            if (prev)
-                CALICO_EXPECT_LT(*prev, key);
-            prev = key;
-        }
-        const auto next_id = node.right_sibling_id();
-        if (next_id.is_null())
-            break;
-        node = m_tree.acquire_node(next_id, false);
-    }
-}
-
-auto TreeValidator::validate_parent_child_connections() -> void
-{
-    auto check_connection = [&](Node &node, Index index) -> void {
-        auto child = m_tree.acquire_node(node.child_id(index), false);
-        CALICO_EXPECT_EQ(child.parent_id(), node.id());
-    };
-    traverse_inorder([&](Node &node, Index cid) -> void {
-        CALICO_EXPECT_LT(cid, node.cell_count());
-        if (!node.is_external()) {
-            check_connection(node, cid);
-            // Rightmost child.
-            if (cid == node.cell_count() - 1)
-                check_connection(node, cid + 1);
-        }
-    });
-}
-
-auto TreeValidator::validate_ordering() -> void
-{
-    const auto keys = collect_keys();
-    auto sorted = keys;
-    std::sort(sorted.begin(), sorted.end());
-    CALICO_EXPECT_EQ(keys, sorted);
-}
-
-auto TreeValidator::collect_keys() -> std::vector<std::string>
-{
-    auto keys = std::vector<std::string>{};
-    traverse_inorder([&keys](Node &node, Index cid) -> void {
-        keys.push_back(btos(node.read_key(cid)));
-    });
-    return keys;
-}
-
-auto TreeValidator::traverse_inorder(const std::function<void(Node&, Index)> &callback) -> void
-{
-    traverse_inorder_helper(m_tree.acquire_node(PID::root(), false), callback);
-}
-
-auto TreeValidator::traverse_inorder_helper(Node node, const std::function<void(Node&, Index)> &callback) -> void
-{
-    CALICO_VALIDATE(node.validate());
-
-    const auto id = node.id();
-    for (Index index{}; index <= node.cell_count(); ++index) {
-        std::optional<Cell> cell {};
-        if (index != node.cell_count())
-            cell = node.read_cell(index);
-        if (!node.is_external()) {
-            const auto next_id = node.child_id(index);
-            traverse_inorder_helper(m_tree.acquire_node(next_id, false), callback);
-            node = m_tree.acquire_node(id, false);
-        }
-        if (cell)
-            callback(node, index);
-    }
-}
-
-auto TreeValidator::is_reachable(std::string key) -> bool
-{
-    std::string temp;
-    auto success = true;
-
-    // Traverse down to the node containing key using the child pointers.
-    auto [node, index, found_eq] = m_tree.find_ge(stob(key), false);
-    if (!found_eq)
-        return false;
-
-    // Try to go back up to the root using the source pointers.
-    while (!node.id().is_root()) {
-        auto parent_id = node.parent_id();
-        if (parent_id.is_null()) {
-            success = false;
-            break;
-        }
-        node = m_tree.acquire_node(parent_id, false);
-    }
-    return success;
-}
+//
+//TreeValidator::TreeValidator(ITree &tree)
+//    : m_tree{tree} { }
+//
+//auto TreeValidator::validate() -> void
+//{
+//    validate_parent_child_connections();
+//    validate_sibling_connections();
+//    validate_ordering();
+//}
+//
+//auto TreeValidator::validate_sibling_connections() -> void
+//{
+//    // First node in the sibling chain.
+//    auto node = m_tree.find_root(false);
+//    while (!node.is_external())
+//        node = m_tree.acquire_node(node.child_id(0), false);
+//    std::optional<std::string> prev{};
+//    while (true) {
+//        for (Index cid{}; cid < node.cell_count(); ++cid) {
+//            const auto key = btos(node.read_key(cid));
+//            // Strict ordering.
+//            if (prev)
+//                CALICO_EXPECT_LT(*prev, key);
+//            prev = key;
+//        }
+//        const auto next_id = node.right_sibling_id();
+//        if (next_id.is_null())
+//            break;
+//        node = m_tree.acquire_node(next_id, false);
+//    }
+//}
+//
+//auto TreeValidator::validate_parent_child_connections() -> void
+//{
+//    auto check_connection = [&](Node &node, Index index) -> void {
+//        auto child = m_tree.acquire_node(node.child_id(index), false);
+//        CALICO_EXPECT_EQ(child.parent_id(), node.id());
+//    };
+//    traverse_inorder([&](Node &node, Index cid) -> void {
+//        CALICO_EXPECT_LT(cid, node.cell_count());
+//        if (!node.is_external()) {
+//            check_connection(node, cid);
+//            // Rightmost child.
+//            if (cid == node.cell_count() - 1)
+//                check_connection(node, cid + 1);
+//        }
+//    });
+//}
+//
+//auto TreeValidator::validate_ordering() -> void
+//{
+//    const auto keys = collect_keys();
+//    auto sorted = keys;
+//    std::sort(sorted.begin(), sorted.end());
+//    CALICO_EXPECT_EQ(keys, sorted);
+//}
+//
+//auto TreeValidator::collect_keys() -> std::vector<std::string>
+//{
+//    auto keys = std::vector<std::string>{};
+//    traverse_inorder([&keys](Node &node, Index cid) -> void {
+//        keys.push_back(btos(node.read_key(cid)));
+//    });
+//    return keys;
+//}
+//
+//auto TreeValidator::traverse_inorder(const std::function<void(Node&, Index)> &callback) -> void
+//{
+//    traverse_inorder_helper(m_tree.acquire_node(PID::root(), false), callback);
+//}
+//
+//auto TreeValidator::traverse_inorder_helper(Node node, const std::function<void(Node&, Index)> &callback) -> void
+//{
+//    CALICO_VALIDATE(node.validate());
+//
+//    const auto id = node.id();
+//    for (Index index{}; index <= node.cell_count(); ++index) {
+//        std::optional<Cell> cell {};
+//        if (index != node.cell_count())
+//            cell = node.read_cell(index);
+//        if (!node.is_external()) {
+//            const auto next_id = node.child_id(index);
+//            traverse_inorder_helper(m_tree.acquire_node(next_id, false), callback);
+//            node = m_tree.acquire_node(id, false);
+//        }
+//        if (cell)
+//            callback(node, index);
+//    }
+//}
+//
+//auto TreeValidator::is_reachable(std::string key) -> bool
+//{
+//    std::string temp;
+//    auto success = true;
+//
+//    // Traverse down to the node containing key using the child pointers.
+//    auto [node, index, found_eq] = m_tree.find_ge(stob(key), false);
+//    if (!found_eq)
+//        return false;
+//
+//    // Try to go back up to the root using the parent pointers.
+//    while (!node.id().is_root()) {
+//        auto parent_id = node.parent_id();
+//        if (parent_id.is_null()) {
+//            success = false;
+//            break;
+//        }
+//        node = m_tree.acquire_node(parent_id, false);
+//    }
+//    return success;
+//}
 
 TreePrinter::TreePrinter(ITree &tree, bool has_integer_keys)
     : m_tree{tree},
@@ -130,7 +130,7 @@ TreePrinter::TreePrinter(ITree &tree, bool has_integer_keys)
 
 auto TreePrinter::print(Size indentation) -> void
 {
-    print_aux(m_tree.acquire_node(PID::root(), false), 0);
+    print_aux(m_tree.pool().acquire(PID::root(), false), 0);
 
     for (auto &level: m_levels)
         fmt::print("{}{}\n", std::string(indentation, ' '), level);
@@ -159,7 +159,7 @@ auto TreePrinter::print_aux(Node node, Index level) -> void
         const auto not_last = cid < node.cell_count() - 1;
         auto cell = node.read_cell(cid);
         if (!node.is_external())
-            print_aux(m_tree.acquire_node(cell.left_child_id(), false), level + 1);
+            print_aux(m_tree.pool().acquire(cell.left_child_id(), false), level + 1);
         if (is_first)
             add_node_start_to_level(node.id().value, level);
         auto key = btos(cell.key());
@@ -173,7 +173,7 @@ auto TreePrinter::print_aux(Node node, Index level) -> void
         }
     }
     if (!node.is_external())
-        print_aux(m_tree.acquire_node(node.rightmost_child_id(), false), level + 1);
+        print_aux(m_tree.pool().acquire(node.rightmost_child_id(), false), level + 1);
 }
 
 auto TreePrinter::add_key_to_level(BytesView key, Index level, bool has_value) -> void

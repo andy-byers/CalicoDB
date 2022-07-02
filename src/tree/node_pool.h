@@ -13,7 +13,7 @@ class Cell;
 class IBufferPool;
 class Node;
 
-class NodePool final: public INodePool {
+class NodePool final {
 public:
     struct Parameters {
         IBufferPool *buffer_pool {};
@@ -25,12 +25,12 @@ public:
     explicit NodePool(Parameters);
     ~NodePool() = default;
 
-    [[nodiscard]] auto collect_value(const Node&, Index) const -> std::string;
+    [[nodiscard]] auto page_size() const -> Size;
     auto save_header(FileHeader&) -> void;
     auto load_header(const FileHeader&) -> void;
-    auto allocate_node(PageType) -> Node;
-    auto acquire_node(PID, bool) -> Node;
-    auto destroy_node(Node) -> void;
+    auto allocate(PageType) -> Node;
+    auto acquire(PID, bool) -> Node;
+    auto destroy(Node) -> void;
     auto allocate_overflow_chain(BytesView) -> PID;
     auto destroy_overflow_chain(PID, Size) -> void;
     auto collect_overflow_chain(PID, Bytes) const -> void;
