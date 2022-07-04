@@ -3,7 +3,7 @@
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
 Calico DB is an embedded key-value database written in C++17.
-It exposes a small API that allows storage and retrieval of (nearly) arbitrary byte sequences.
+It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 
 + [Disclaimer](#disclaimer)
 + [Features](#features)
@@ -15,7 +15,6 @@ It exposes a small API that allows storage and retrieval of (nearly) arbitrary b
   + [Bytes Objects](#bytes-objects)
   + [Updating a Database](#updating-a-database)
   + [Querying a Database](#querying-a-database)
-  + [Cursor Objects](#cursor-objects)
   + [Transactions](#transactions)
   + [Deleting a Database](#deleting-a-database)
 + [Performance](#performance)
@@ -106,9 +105,11 @@ Calico DB uses `Bytes` and `BytesView` objects to represent unowned byte sequenc
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
+auto function_taking_a_bytes_view = [](calico::BytesView) {};
+
 std::string data {"Hello, world!"};
 
-// Construct slices from a string. The string still owns the memory, the slices just refer 
+// Construct slices from a string. The string still owns the memory, the slices just refer
 // to it.
 calico::Bytes b {data.data(), data.size()};
 calico::BytesView v {data.data(), data.size()};
@@ -128,47 +129,55 @@ b.advance(7).truncate(5);
 // Comparisons.
 assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
 assert(b == calico::stob("world"));
-assert(calico::stob(data).starts_with(calico::stob("Hello")));
 ```
 
 ### Updating a Database
 Records and be added or removed using methods on the `Database` object.
 
 ```C++
-// Insert some records.
-assert(db.write(calico::stob("grizzly bear"), calico::stob("big")));
-assert(db.write(calico::stob("kodiak bear"), calico::stob("awesome")));
-assert(db.write(calico::stob("polar bear"), calico::stob("cool")));
-assert(db.write({"sun bear", "respectable"}));
-assert(db.write({"panda bear", "rare"}));
-assert(db.write({"black bear", "lovable"}));
+// Insert some records. If a record is already in the database, insert() will return false.
+assert(db.insert(calico::stob("bengal"), calico::stob("short;spotted,marbled,rosetted")));
+assert(db.insert(calico::stob("turkish vankedisi"), calico::stob("long;white")));
+assert(db.insert(calico::stob("abyssinian"), calico::stob("short;ticked tabby")));
+assert(db.insert({"russian blue", "short;blue"}));
+assert(db.insert({"american shorthair", "short;all"}));
+assert(db.insert({"badger", "???"}));
+assert(db.insert({"manx", "short,long;all"}));
+assert(db.insert({"chantilly-tiffany", "long;solid,tabby"}));
+assert(db.insert({"cyprus", "all;all"}));
 
-// Update an existing record (keys are always unique). write() returns false if the record was already in the database.
-assert(!db.write(calico::stob("grizzly bear"), calico::stob("huge")));
-
-// Erase a record.
-assert(db.erase(calico::stob("grizzly bear")));
+// Erase a record by key.
+assert(db.erase(calico::stob("badger")));
 ```
 
 ### Querying a Database
-The `find*()` methods are provided for querying the database.
+The database is queried using cursors returned by the `find*()` methods.
 
 ```C++
-// We can require an exact match.
-const auto record = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::EQ);
-assert(record->value == "respectable");
+static constexpr auto target = "russian blue";
+const auto key = calico::stob(target);
 
-// Or, we can look for the first record with a key less than or greater than the given key.
-const auto less_than = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::LT);
-const auto greater_than = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::GT);
-assert(less_than->value == "cool");
+// By default, find() looks for the first record with a key equal to the given key and
+// returns a cursor pointing to it.
+auto cursor = db.find(key);
+assert(cursor.is_valid());
+assert(cursor.key() == key);
 
-// Whoops, there isn't a key greater than "sun bear".
-assert(greater_than == std::nullopt);
+// We can use the second parameter to leave the cursor on the next record, if the target
+// key does not exist.
+const auto prefix = key.copy().truncate(key.size() / 2);
+assert(db.find(prefix, true).value() == cursor.value());
 
-// We can also search for the minimum and maximum.
-const auto smallest = db.read_minimum();
-const auto largest = db.read_maximum();
+// Cursors returned from the find*() methods can be used for range queries. They can
+// traverse the database in sequential order, or in reverse sequential order.
+for (auto c = db.find_minimum(); c.is_valid(); c++) {}
+for (auto c = db.find_maximum(); c.is_valid(); c--) {}
+
+// They also support equality comparison.
+if (const auto boundary = db.find(key); boundary.is_valid()) {
+    for (auto c = db.find_minimum(); c.is_valid() && c != boundary; c++) {}
+    for (auto c = db.find_maximum(); c.is_valid() && c != boundary; c--) {}
+}
 ```
 
 ### Transactions
@@ -177,18 +186,19 @@ The first transaction begins when the database is opened, and the last one commi
 Otherwise, transaction boundaries are defined by calls to either `commit()` or `abort()`.
 
 ```C++
-db.write(calico::stob("a"), calico::stob("1"));
-db.write(calico::stob("b"), calico::stob("2"));
+// Commit all the updates we made in the previous examples.
 db.commit();
 
-db.write(calico::stob("c"), calico::stob("3"));
-assert(db.erase(calico::stob("a")));
-assert(db.erase(calico::stob("b")));
+// Make some changes and abort the transaction.
+db.insert({"opossum", "pretty cute"});
+assert(db.erase(db.find_minimum()));
+assert(db.erase(db.find_maximum()));
 db.abort();
 
-// Database still contains {"a", "1"} and {"b", "2"}.
-assert(db.read(calico::stob("a"), true)->value == "1");
-assert(db.read(calico::stob("b"), true)->value == "2");
+// All updates since the last call to commit() have been reverted.
+assert(not db.find(calico::stob("opposum")).is_valid());
+assert(db.find_minimum().key() == calico::stob("abyssinian"));
+assert(db.find_maximum().key() == calico::stob("turkish vankedisi"));
 ```
 
 ### Deleting a Database
@@ -258,6 +268,7 @@ We still have a ways to go performance-wise, however, it seems that the cursors 
    + Results may not be all that accurate
    + Need to test large (100,000 B) values
    + Code is very messy/difficult to change
+   + Need to benchmark against other databases
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.

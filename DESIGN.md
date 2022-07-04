@@ -57,19 +57,19 @@ Nodes are made up of three main regions: the header, the cell pointer list, and 
 #### Node Header
 The node header contains information about the node's layout and its connections to surrounding nodes.
 
-| Size | Offset | Name                |
-|-----:|-------:|:--------------------|
-|    4 |      0 | Header CRC          |
-|    4 |      4 | Parent ID           |
-|    4 |      8 | Rightmost child ID¹ |
-|    4 |      8 | Right sibling ID¹   |
-|    2 |     12 | Cell count          |
-|    2 |     14 | Free block count    |
-|    2 |     16 | Cell start          |
-|    2 |     18 | Free block start    |
-|    2 |     20 | Fragment count      |
+| Size | Offset | Name                           |
+|-----:|-------:|:-------------------------------|
+|    4 |      0 | Header CRC                     |
+|    4 |      4 | Parent ID                      |
+|    4 |      8 | Rightmost child ID<sup>1</sup> |
+|    4 |      8 | Right sibling ID<sup>1</sup>   |
+|    2 |     12 | Cell count                     |
+|    2 |     14 | Free block count               |
+|    2 |     16 | Cell start                     |
+|    2 |     18 | Free block start               |
+|    2 |     20 | Fragment count                 |
 
-¹ The rightmost child ID and right sibling ID fields refer to the same data location.
+<sup>1</sup> The rightmost child ID and right sibling ID fields refer to the same data location.
 Use the rightmost child ID name in internal nodes and the right sibling ID name in external nodes.
 
 #### Cell Directory
@@ -88,17 +88,17 @@ If so, the new cell is allocated from the free block.
 Otherwise, the cell is allocated from the gap region between the cell directory and the existing cell content.
 
 ### Cell Layout
-| Size |     Offset | Name           |
-|-----:|-----------:|:---------------|
-|    4 |          0 | Left child ID¹ |
-|    2 |          4 | Key size (K)   |
-|    4 |          6 | Value size (V) |
-|    K |         10 | Key            |
-|    L |     10 + K | Local value²   |
-|    4 | 10 + K + L | Overflow ID²   |
+| Size |     Offset | Name                      |
+|-----:|-----------:|:--------------------------|
+|    4 |          0 | Left child ID<sup>1</sup> |
+|    2 |          4 | Key size (K)              |
+|    4 |          6 | Value size (V)            |
+|    K |         10 | Key                       |
+|    L |     10 + K | Local value<sup>2</sup>   |
+|    4 | 10 + K + L | Overflow ID<sup>2</sup>   |
 
-¹ This field is only present in internal cells.
-² `Local value` (length = `L`) refers to the portion of the value stored directly in the node.
+<sup>1</sup> This field is only present in internal cells. <br>
+<sup>2</sup> `Local value` (length = `L`) refers to the portion of the value stored directly in the node.
 `L` depends on the combined size of the key and value and may or may not be equal to `V`.
 See [Overflow Chains](#overflow-chains) for details.
 
@@ -107,10 +107,14 @@ TODO
 
 ## Overflow Chains
 Currently, Calico DB allows insertion of arbitrary values, but places a limit on the key size.
-If a record has total payload size that is greater than what is allowed, the excess portion of the value field is copied to one or more overflow pages.
+If a record has total payload size that is too large, the excess portion of the value field is copied to one or more overflow pages.
 The cell made from this record will then store the first page ID in the overflow chain in its `Overflow ID` header field.
 Note that no part of the key is ever transferred to an overflow page: every key must be entirely embedded in the node that it belongs to.
-This makes traversing the B-tree easier (we don't have to read additional pages to find keys) and doesn't mess up the page cache.
+This makes traversing the B<sup>+</sup>-tree easier (we don't have to read additional pages to find keys) and doesn't mess up the page cache.
+
+[//]: # (TODO: Now that we're using a simplified 2Q page cache, the cache won't get messed up unless we read the page 
+               again while it is in the FIFO queue. We should be able to have arbitrary length keys, potentially spanning
+               multiple overflow pages, without affecting the cache too much.)
 
 ## Write-Ahead Log (WAL)
 TODO

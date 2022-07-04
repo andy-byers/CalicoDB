@@ -610,43 +610,33 @@ TEST_F(TreeTests, ReverseBoundedIteration)
 
 TEST_F(TreeTests, SanityCheck)
 {
-    static constexpr Size MIN_SIZE {50000};
-    static constexpr Size MAX_SIZE {100'000};
-    std::map<std::string, std::string> map;
+    static constexpr Size NUM_ITERATIONS {5};
+    static constexpr Size NUM_RECORDS {5'000};
+    static constexpr Size MIN_SIZE {1'000};
     RecordGenerator::Parameters param;
-    param.mean_key_size = 10;
+    param.mean_key_size = 20;
     param.mean_value_size = 10;
-    param.spread = 8;
+    param.spread = 10;
     RecordGenerator generator {param};
     Random random {0};
 
-    const auto remove_one = [&map, &random, this](const std::string &key) {
+    const auto remove_one = [&random, this](const std::string &key) {
         if (auto c = tree_find(*tree, key, true); c.is_valid()) {
-            ASSERT_EQ(map.erase(btos(c.key())), 1);
             tree_remove(*tree, c);
         } else if (random.next_int(1) == 0) {
-            map.erase(begin(map));
             tree_remove(*tree, tree->find_minimum());
         } else {
-            map.erase(prev(end(map)));
             tree_remove(*tree, tree->find_maximum());
         }
     };
 
-    for (Index iteration {}; iteration < 5; ++iteration) {
-        for (const auto &[key, value]: generator.generate(random, 1'000)) {
-            if (tree->cell_count() > MAX_SIZE) {
-                remove_one(key);
-            } else if (tree->cell_count() < MIN_SIZE) {
-                map[key] = value;
-                tree_insert(*tree, key, value);
-            } else if (random.next_int(5) != 0) {
-                map[key] = value;
+    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
+        for (const auto &[key, value]: generator.generate(random, NUM_RECORDS)) {
+            if (tree->cell_count() < MIN_SIZE || random.next_int(5) != 0) {
                 tree_insert(*tree, key, value);
             } else {
                 remove_one(key);
             }
-            ASSERT_EQ(map.size(), tree->cell_count());
         }
         while (tree->cell_count())
             remove_one(random_string(random, 1, 30));

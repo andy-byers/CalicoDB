@@ -1,6 +1,7 @@
 
 #include "calico/calico.h"
 #include <filesystem>
+#include <spdlog/fmt/fmt.h>
 
 namespace {
 
@@ -36,40 +37,39 @@ auto bytes_objects()
 
 auto updating_a_database(calico::Database &db)
 {
-    // Insert some records.
-    assert(db.insert(calico::stob(""), calico::stob("")));
-    assert(db.insert(calico::stob(""), calico::stob("")));
-    assert(db.insert(calico::stob(""), calico::stob("")));
-    assert(db.insert({"", ""}));
-    assert(db.insert({"", ""}));
-    assert(db.insert({"", ""}));
+    // Insert some records. If a record is already in the database, insert() will return false.
+    assert(db.insert(calico::stob("bengal"), calico::stob("short;spotted,marbled,rosetted")));
+    assert(db.insert(calico::stob("turkish vankedisi"), calico::stob("long;white")));
+    assert(db.insert(calico::stob("abyssinian"), calico::stob("short;ticked tabby")));
+    assert(db.insert({"russian blue", "short;blue"}));
+    assert(db.insert({"american shorthair", "short;all"}));
+    assert(db.insert({"badger", "???"}));
+    assert(db.insert({"manx", "short,long;all"}));
+    assert(db.insert({"chantilly-tiffany", "long;solid,tabby"}));
+    assert(db.insert({"cyprus", "all;all"}));
 
-    // Update an existing record (keys are unique). write() returns false if the record was
-    // already in the database.
-    assert(!db.insert(calico::stob(""), calico::stob("")));
-
-    // Erase a record.
-    assert(db.erase(calico::stob("")));
+    // Erase a record by key.
+    assert(db.erase(calico::stob("badger")));
 }
 
 auto querying_a_database(calico::Database &db)
 {
-    static constexpr auto target = "sun bear";
+    static constexpr auto target = "russian blue";
     const auto key = calico::stob(target);
 
-    // By default, find() looks for the first record with a key equal to the given key, and
+    // By default, find() looks for the first record with a key equal to the given key and
     // returns a cursor pointing to it.
     auto cursor = db.find(key);
     assert(cursor.is_valid());
     assert(cursor.key() == key);
 
-    // We can use the second parameter to leave the cursor on the next record if the provided
+    // We can use the second parameter to leave the cursor on the next record, if the target
     // key does not exist.
-    const auto prefix = key.range(0, key.size() / 2);
-    assert(db.find(prefix, true).value() == "a");
+    const auto prefix = key.copy().truncate(key.size() / 2);
+    assert(db.find(prefix, true).value() == cursor.value());
 
-    // Cursors returned from the find*() methods can be used for range queries. They can be used
-    // to traverse the database in sequential order, or in reverse sequential order.
+    // Cursors returned from the find*() methods can be used for range queries. They can
+    // traverse the database in sequential order, or in reverse sequential order.
     for (auto c = db.find_minimum(); c.is_valid(); c++) {}
     for (auto c = db.find_maximum(); c.is_valid(); c--) {}
 
@@ -82,18 +82,19 @@ auto querying_a_database(calico::Database &db)
 
 auto transactions(calico::Database &db)
 {
-    db.insert({"a", "1"});
-    db.insert({"b", "2"});
+    // Commit all the updates we made in the previous examples.
     db.commit();
 
-    db.insert({"c", "3"});
-    assert(db.erase(calico::stob("a")));
-    assert(db.erase(calico::stob("b")));
+    // Make some changes and abort the transaction.
+    db.insert({"opossum", "pretty cute"});
+    assert(db.erase(db.find_minimum()));
+    assert(db.erase(db.find_maximum()));
     db.abort();
 
-    // Database still contains {"a", "1"} and {"b", "2"}.
-    assert(db.find(calico::stob("a")).value() == "1");
-    assert(db.find(calico::stob("b")).value() == "2");
+    // All updates since the last call to commit() have been reverted.
+    assert(not db.find(calico::stob("opposum")).is_valid());
+    assert(db.find_minimum().key() == calico::stob("abyssinian"));
+    assert(db.find_maximum().key() == calico::stob("turkish vankedisi"));
 }
 
 auto deleting_a_database(calico::Database db)

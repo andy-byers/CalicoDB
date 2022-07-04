@@ -33,7 +33,7 @@ option(CALICO_BUILD_TESTS "Build the tests" On)
 option(CALICO_BUILD_EXAMPLES "Build the examples" On)
 option(CALICO_USE_VALIDATORS "Use extra validation assertions" Off)
 
-set(CALICO_SOURCES '')
+set(CALICO_SOURCES '' src/file/directory.cpp src/file/directory.h)
 set(CALICO_HEADERS '')
 file(GLOB_RECURSE CALICO_SOURCES "${CALICO_SOURCE_DIR}/*/*.cpp" "${CALICO_SOURCE_DIR}/*/*.h")
 file(GLOB_RECURSE CALICO_HEADERS "${CALICO_INCLUDE_DIR}/calico/*.h")
@@ -44,23 +44,32 @@ include(FetchContent)
 
 set(SPDLOG_URL https://github.com/gabime/spdlog/archive/refs/tags/v1.10.0.zip)
 set(ZLIB_URL https://github.com/madler/zlib/archive/refs/tags/v1.2.12.zip)
-
+FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG        v1.2.12
+)
 FetchContent_Declare(
     spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG        v1.10.0
 )
 FetchContent_MakeAvailable(spdlog)
-
-find_package(zlib)
-if (NOT zlib_FOUND)
-    FetchContent_Declare(
-            zlib
-            GIT_REPOSITORY https://github.com/madler/zlib.git
-            GIT_TAG        v1.2.12
-    )
-    FetchContent_MakeAvailable(zlib)
+FetchContent_GetProperties(zlib)
+if (NOT zlib_POPULATED)
+    FetchContent_Populate(zlib)
+    # TODO: Fix zlib compilation. Currently, zlib registers some CTest tests which don't compile. It looks like a
+    #       target_include_directories() is needed for their example program, otherwise it cannot find zlib.h
+    #       which is in a different directory. Or just find a different compression lib altogether...
+    add_subdirectory(${zlib_SOURCE_DIR} ${zlib_BINARY_DIR})
 endif()
+
+#add_custom_command(
+#    OUTPUT ${zlib_BINARY_DIR}/CMakeLists.txt
+#    COMMAND ${CMAKE_COMMAND}
+#    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/ApplyPatch.cmake
+#    DEPENDS ${zlib_BINARY_DIR}/CMakeLists.txt
+#)
 
 # Build the static library.
 add_library(
