@@ -97,17 +97,18 @@ auto transactions(calico::Database &db)
     assert(db.find_maximum().key() == calico::stob("turkish vankedisi"));
 }
 
-auto deleting_a_database(calico::Database db)
-{
-    // We can delete a database by passing ownership to the following static method.
-    calico::Database::destroy(std::move(db));
-}
+//auto deleting_a_database(calico::Database db)
+//{
+//    // We can delete a database by passing ownership to the following static method.
+//    calico::Database::destroy(std::move(db));
+//}
 
 } // namespace
 
 auto main(int, const char *[]) -> int
 {
-    std::filesystem::remove(PATH);
+    std::error_code error;
+    std::filesystem::remove_all(PATH, error);
 
     try {
         calico::Options options;
@@ -116,7 +117,7 @@ auto main(int, const char *[]) -> int
         updating_a_database(db);
         querying_a_database(db);
         transactions(db);
-        deleting_a_database(std::move(db));
+//        deleting_a_database(std::move(db));
     } catch (const calico::CorruptionError &error) {
         printf("CorruptionError: %s\n", error.what());
     } catch (const calico::IOError &error) {

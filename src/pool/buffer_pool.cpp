@@ -3,7 +3,8 @@
 #include "calico/exception.h"
 #include "page/file_header.h"
 #include "page/page.h"
-#include "file/interface.h"
+#include "storage/directory.h"
+#include "storage/file.h"
 #include "utils/logging.h"
 #include "wal/interface.h"
 #include "wal/wal_record.h"
@@ -11,15 +12,16 @@
 namespace calico {
 
 BufferPool::BufferPool(Parameters param)
-    : m_wal_reader {std::move(param.wal_reader)}
-    , m_wal_writer {std::move(param.wal_writer)}
-    , m_logger {logging::create_logger(param.log_sink, "BufferPool")}
-    , m_scratch {param.page_size}
-    , m_pager {{std::move(param.pool_file), param.page_size, param.frame_count}}
-    , m_flushed_lsn {param.flushed_lsn}
-    , m_next_lsn {param.flushed_lsn + LSN {1}}
-    , m_page_count {param.page_count}
-    , m_uses_transactions {param.use_transactions}
+    : m_wal_reader {std::move(param.wal_reader)},
+      m_wal_writer {std::move(param.wal_writer)},
+      m_file {param.directory.open_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666)},
+      m_logger {logging::create_logger(param.log_sink, "BufferPool")},
+      m_scratch {param.page_size},
+      m_pager {{m_file->open_reader(), m_file->open_writer(), param.page_size, param.frame_count}},
+      m_flushed_lsn {param.flushed_lsn},
+      m_next_lsn {param.flushed_lsn + LSN {1}},
+      m_page_count {param.page_count},
+      m_uses_transactions {param.use_transactions}
 {
     CALICO_EXPECT_EQ(m_uses_transactions, m_wal_reader && m_wal_writer);
     m_logger->trace("Constructing BufferPool object");
@@ -54,7 +56,7 @@ auto BufferPool::allocate(PageType type) -> Page
 }
 
 /**
- * Get a page object containing data from the database file.
+ * Get a page object containing data from the database storage.
  *
  * This method should only be used to acquire existing pages (unless the page count will be updated subsequently,
  * such as in the case of the "roll-forward" procedure).
@@ -251,7 +253,7 @@ auto BufferPool::commit() -> void
 
     m_pager.sync();
 
-    // Don't do this until we have succeeded sync'ing the database file.
+    // Don't do this until we have succeeded sync'ing the database storage.
     if (m_uses_transactions)
         m_wal_writer->truncate();
     m_logger->trace("finished commit");

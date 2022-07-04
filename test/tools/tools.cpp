@@ -1,14 +1,15 @@
 
-#include <unordered_set>
-#include <spdlog/fmt/fmt.h>
-#include "fakes.h"
 #include "tools.h"
+#include "fakes.h"
 #include "page/page.h"
+#include "storage/directory.h"
+#include "storage/file.h"
 #include "tree/tree.h"
-#include "file/file.h"
+#include "utils/logging.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_record.h"
-#include "utils/logging.h"
+#include <spdlog/fmt/fmt.h>
+#include <unordered_set>
 
 namespace calico {
 
@@ -153,16 +154,22 @@ auto WALPrinter::print(const WALRecord &record) -> void
 
 auto WALPrinter::print(const std::string &path, Size block_size) -> void
 {
-    auto file = std::make_unique<ReadOnlyFile>(path, Mode::DIRECT, 0666);
-    WALReader reader {{path, std::move(file), logging::create_sink("", 0), block_size}};
+    const auto base = std::filesystem::path {path}.parent_path();
+    auto directory = std::make_unique<Directory>(base); // Could be /tmp.
+    WALReader reader {{*directory, logging::create_sink("", 0), block_size}};
     print(reader);
 }
 
 auto WALPrinter::print(SharedMemory data, Size block_size) -> void
 {
-    auto file = std::make_unique<ReadOnlyMemory>(std::move(data));
-    WALReader reader {{"FakeWALReader", std::move(file), logging::create_sink("", 0), block_size}};
-    print(reader);
+    // TODO: Hacky...
+    auto file = std::make_unique<File>();
+    file->open("/tmp/calico_print_wal", Mode::CREATE | Mode::WRITE_ONLY | Mode::TRUNCATE, 0666);
+    auto writer = file->open_writer();
+    writer->write(stob(data.memory()));
+    writer->sync();
+    print(file->path(), block_size);
+    file->remove();
 }
 
 auto WALPrinter::print(WALReader &reader) -> void

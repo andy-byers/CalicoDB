@@ -23,7 +23,6 @@ public:
         return 1.0;
     }
 
-
     [[nodiscard]] auto page_size() const -> Size override
     {
         return m_page_size;

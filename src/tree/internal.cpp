@@ -103,14 +103,14 @@ auto Internal::positioned_remove(Position position) -> void
 auto Internal::find_local_min(Node root) -> Position
 {
     while (!root.is_external())
-        root = m_pool->acquire(root.child_id(0), true);
+        root = m_pool->acquire(root.child_id(0), root.page().is_writable());
     return {std::move(root), 0};
 }
 
 auto Internal::find_local_max(Node root) -> Position
 {
     while (!root.is_external())
-        root = m_pool->acquire(root.rightmost_child_id(), true);
+        root = m_pool->acquire(root.rightmost_child_id(), root.page().is_writable());
     const auto index = root.cell_count() - 1;
     return {std::move(root), index};
 }
@@ -321,7 +321,7 @@ auto Internal::fix_root(Node node) -> void
     if (!node.is_external()) {
         auto child = m_pool->acquire(node.rightmost_child_id(), true);
 
-        // We don't have enough room to transfer the child contents into the root, due to the file header. In
+        // We don't have enough room to transfer the child contents into the root, due to the storage header. In
         // this case, we'll just split the child and let the median cell be inserted into the root. Note that
         // the child needs an overflow cell for the split routine to work. We'll just fake it by extracting an
         // arbitrary cell and making it the overflow cell.

@@ -34,6 +34,9 @@ private:
     std::error_code m_code {};
 };
 
+/**
+ * An exception that is thrown when corruption is detected.
+ */
 class CorruptionError: public std::runtime_error {
 public:
     explicit CorruptionError(const std::string &what)

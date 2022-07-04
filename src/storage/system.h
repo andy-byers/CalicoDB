@@ -1,26 +1,21 @@
-#ifndef CALICO_FILE_SYSTEM_H
-#define CALICO_FILE_SYSTEM_H
+#ifndef CALICO_STORAGE_SYSTEM_H
+#define CALICO_STORAGE_SYSTEM_H
 
-#include "calico/bytes.h"
+#include "interface.h"
 
 namespace calico::system {
 
 static constexpr int SUCCESS = 0;
 static constexpr int FAILURE = -1;
 
-auto use_direct_io(int) -> void;
 auto size(int) -> Size;
-auto exists(const std::string&) -> bool;
-auto unlink(const std::string&) -> void;
 auto read(int, Bytes) -> Size;
 auto write(int, BytesView) -> Size;
 auto seek(int, long, int) -> Index;
 auto open(const std::string&, int, int) -> int;
 auto close(int) -> void;
-auto rename(const std::string&, const std::string&) -> void;
 auto sync(int) -> void;
-auto resize(int, Size) -> void;
 
 } // calico::system
 
-#endif // CALICO_FILE_SYSTEM_H
+#endif // CALICO_STORAGE_SYSTEM_H

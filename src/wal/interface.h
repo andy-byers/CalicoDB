@@ -9,6 +9,11 @@ namespace calico {
 class WALRecord;
 struct LSN;
 
+constexpr auto WAL_NAME = "wal";
+
+// TODO: WAL segmentation.
+// constexpr auto WAL_PREFIX = "wal-";
+
 class IWALWriter {
 public:
     virtual ~IWALWriter() = default;

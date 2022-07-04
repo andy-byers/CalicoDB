@@ -1,26 +1,29 @@
 
 #include "database_impl.h"
-#include <spdlog/sinks/basic_file_sink.h>
+#include <filesystem>
 #include "calico/cursor.h"
-#include "file/file.h"
-#include "file/system.h"
+#include "calico/exception.h"
 #include "pool/buffer_pool.h"
 #include "pool/in_memory.h"
-#include "tree/node_pool.h"
+#include "storage/directory.h"
+#include "storage/file.h"
+#include "storage/io.h"
 #include "tree/tree.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
-#include "utils/utils.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
 
 namespace calico {
 
-auto initialize_log(spdlog::logger &logger, const Database::Impl::Parameters &param)
+namespace fs = std::filesystem;
+
+auto initialize_log(spdlog::logger &logger, const std::string &base)
 {
-    logger.info("starting CalicoDB v{} at \"{}\"", VERSION_NAME, param.path);
-    logger.info("WAL is located at \"{}\"", get_wal_path(param.path));
-    logger.info("log is located at \"{}\"", param.options.log_path);
+    logger.info("starting CalicoDB v{} at \"{}\"", VERSION_NAME, base);
+    logger.info("tree is located at \"{}/{}\"", base, DATA_NAME);
+    logger.info("WAL is located at \"{}/{}\"", base, WAL_NAME);
+    logger.info("log is located at \"{}/{}\"", base, logging::LOG_NAME);
 }
 
 auto Record::operator<(const Record &rhs) const -> bool
@@ -78,8 +81,10 @@ Database::Impl::~Impl()
     }
 
     try {
-        if (uses_transactions() && committed && !m_is_temp)
-            system::unlink(get_wal_path(m_path));
+        if (uses_transactions() && committed && !m_is_temp) {
+            const fs::path base {m_directory->path()};
+            fs::resize_file(base / WAL_NAME, 0);
+        }
     } catch (const std::exception &error) {
         logging::MessageGroup group;
         group.set_primary("cannot unlink WAL");
@@ -89,80 +94,80 @@ Database::Impl::~Impl()
 }
 
 Database::Impl::Impl(Parameters param)
-    : m_sink {logging::create_sink(param.options.log_path, param.options.log_level)}
-    , m_logger {logging::create_logger(m_sink, "Database")}
-    , m_path {param.path}
+    : m_sink {logging::create_sink(param.directory->path(), param.options.log_level)},
+      m_logger {logging::create_logger(m_sink, "Database")},
+      m_directory {std::move(param.directory)}
 {
-    initialize_log(*m_logger, param);
+    initialize_log(*m_logger, m_directory->path());
     m_logger->trace("constructing Database object");
-
+    auto [state, revised, is_new] = setup(m_directory->path(), param.options);
     std::unique_ptr<WALReader> wal_reader;
     std::unique_ptr<WALWriter> wal_writer;
 
-    if (param.options.use_transactions) {
-        CALICO_EXPECT_NOT_NULL(param.wal_reader_file);
-        const auto wal_path = get_wal_path(m_path);
+    if (revised.use_transactions) {
         wal_reader = std::make_unique<WALReader>(WALReader::Parameters {
-            wal_path,
-            std::move(param.wal_reader_file),
+            *m_directory,
             m_sink,
-            param.header.block_size(),
+            state.block_size(),
         });
-        CALICO_EXPECT_NOT_NULL(param.wal_writer_file);
         wal_writer = std::make_unique<WALWriter>(WALWriter::Parameters {
-            wal_path,
-            std::move(param.wal_writer_file),
+            *m_directory,
             m_sink,
-            param.header.block_size(),
+            state.block_size(),
         });
     }
 
     m_pool = std::make_unique<BufferPool>(BufferPool::Parameters {
-        std::move(param.database_file),
+        *m_directory,
         std::move(wal_reader),
         std::move(wal_writer),
         m_sink,
-        param.header.flushed_lsn(),
-        param.options.frame_count,
-        param.header.page_count(),
-        param.header.page_size(),
-        param.options.use_transactions,
+        state.flushed_lsn(),
+        revised.frame_count,
+        state.page_count(),
+        state.page_size(),
+        revised.permissions,
+        revised.use_transactions,
     });
 
     m_tree = std::make_unique<Tree>(Tree::Parameters {
         m_pool.get(),
         m_sink,
-        param.header.free_start(),
-        param.header.free_count(),
-        param.header.record_count(),
-        param.header.node_count(),
+        state.free_start(),
+        state.free_count(),
+        state.record_count(),
+        state.node_count(),
     });
 
-    if (m_pool->page_count()) {
-        // This will do nothing if the WAL is empty.
-        if (param.options.use_transactions)
-            m_pool->recover();
-    } else {
-        auto root = m_tree->root(true);
-        FileHeader header {root};
-        header.update_magic_code();
-        header.set_page_size(param.header.page_size());
-        header.set_block_size(param.header.block_size());
-        root.take();
+    if (is_new) {
+        {
+            auto root = m_tree->root(true);
+            FileHeader header {root};
+            header.update_magic_code();
+            header.set_page_size(state.page_size());
+            header.set_block_size(state.block_size());
+        }
         commit();
+    } else if (revised.use_transactions) {
+        // This will do nothing if the WAL is empty.
+        m_pool->recover();
     }
 }
 
 Database::Impl::Impl(Parameters param, InMemoryTag)
-    : m_sink {logging::create_sink(param.options.log_path, param.options.log_level)}
-    , m_logger {logging::create_logger(m_sink, "Database")}
-    , m_is_temp {true}
+    : m_sink {logging::create_sink("", 0)},
+      m_logger {logging::create_logger(m_sink, "Database")},
+      m_pool {std::make_unique<InMemory>(param.options.page_size, param.options.use_transactions, m_sink)},
+      m_tree {std::make_unique<Tree>(Tree::Parameters {m_pool.get(), m_sink, PID::null(), 0, 0, 0})},
+      m_is_temp {true}
 {
-    initialize_log(*m_logger, param);
-    m_pool = std::make_unique<InMemory>(param.options.page_size, param.options.use_transactions, m_sink);
-    m_tree = std::make_unique<Tree>(Tree::Parameters {m_pool.get(), m_sink, PID::null(), 0, 0, 0});
     if (param.options.use_transactions)
         commit();
+}
+
+auto Database::Impl::path() const -> std::string
+{
+    return m_directory->path();
 }
 
 auto Database::Impl::recover() -> void
@@ -211,7 +216,7 @@ auto Database::Impl::erase(BytesView key) -> bool
 
 auto Database::Impl::erase(Cursor cursor) -> bool
 {
-    return m_tree->remove(cursor);
+    return m_tree->erase(cursor);
 }
 
 auto Database::Impl::commit() -> bool
@@ -288,34 +293,39 @@ auto Database::Impl::is_temp() const -> bool
     return m_is_temp;
 }
 
-auto get_initial_state(const std::string &path, const Options &options) -> InitialState
+auto setup(const std::string &path, const Options &options) -> InitialState
 {
     if (path.empty())
-        throw std::invalid_argument {"could not open database: path argument cannot be empty"};
+        throw std::invalid_argument {"cannot open database: path argument cannot be empty"};
 
-    auto use_transactions = options.use_transactions;
+    auto directory = std::make_unique<Directory>(path);
+    const auto perm = options.permissions;
+    auto revised = options;
     FileHeader header;
+    bool is_new {};
 
     try {
-        ReadOnlyFile file {path, {}, options.permissions};
-        const auto file_size = file.size();
+        auto file = directory->open_file(DATA_NAME, Mode::READ_ONLY, perm);
+        auto reader = file->open_reader();
+        const auto file_size = file->size();
 
         if (file_size < FileLayout::HEADER_SIZE)
-            throw CorruptionError {"could not read file header: database is too small"};
+            throw CorruptionError {"cannot read file header: database is too small"};
 
-        read_exact(file, header.data());
+        if (!read_exact(*reader, header.data()))
+            throw CorruptionError {"cannot read file header"};
+
+        if (file_size < header.page_size())
+            throw CorruptionError {"cannot setup database: database is smaller than the minimum valid size"};
 
         if (!header.is_magic_code_consistent())
-            throw std::invalid_argument {"cannot read file header: path does not point to a Cub DB database"};
+            throw std::invalid_argument {"cannot read file header: path does not point to a Calico DB database"};
 
         if (!header.is_header_crc_consistent())
             throw CorruptionError {"cannot read file header: header has an inconsistent CRC"};
 
-        if (file_size < header.page_size())
-            throw CorruptionError {"cannot read file header: database is less than one page in size"};
-
         // If the database does not use transactions, this field will always be 0.
-        use_transactions = !header.flushed_lsn().is_null();
+        revised.use_transactions = !header.flushed_lsn().is_null();
 
     } catch (const std::system_error &error) {
         if (error.code() != std::errc::no_such_file_or_directory)
@@ -325,26 +335,13 @@ auto get_initial_state(const std::string &path, const Options &options) -> Initi
         header.set_page_size(options.page_size);
         header.set_block_size(options.block_size);
         header.update_header_crc();
-    }
-    return {std::move(header), use_transactions};
-}
-
-auto get_open_files(const std::string &path, const Options &options) -> OpenFiles
-{
-    const auto mode = Mode::CREATE | (options.use_direct_io ? Mode::DIRECT : Mode {});
-    auto database_file = std::make_unique<ReadWriteFile>(path, mode, options.permissions);
-    std::unique_ptr<ReadOnlyFile> wal_reader_file;
-    std::unique_ptr<LogFile> wal_writer_file;
-
-    if (options.use_transactions) {
-        wal_reader_file = std::make_unique<ReadOnlyFile>(get_wal_path(path), mode, options.permissions);
-        wal_writer_file = std::make_unique<LogFile>(get_wal_path(path), mode, options.permissions);
+        is_new = true;
     }
 
     return {
-        std::move(database_file),
-        std::move(wal_reader_file),
-        std::move(wal_writer_file),
+        std::move(header),
+        revised,
+        is_new,
     };
 }
 

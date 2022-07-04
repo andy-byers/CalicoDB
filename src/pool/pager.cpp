@@ -2,17 +2,19 @@
 
 #include "frame.h"
 #include "calico/exception.h"
-#include "file/interface.h"
 #include "page/page.h"
+#include "storage/file.h"
+#include "storage/interface.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
 
 namespace calico {
 
 Pager::Pager(Parameters param)
-    : m_file {std::move(param.file)}
-    , m_frame_count {param.frame_count}
-    , m_page_size {param.page_size}
+    : m_reader {std::move(param.reader)},
+      m_writer {std::move(param.writer)},
+      m_frame_count {param.frame_count},
+      m_page_size {param.page_size}
 {
     if (m_frame_count < MIN_FRAME_COUNT)
         throw std::invalid_argument {"Frame count is too small"};
@@ -20,7 +22,6 @@ Pager::Pager(Parameters param)
     if (m_frame_count > MAX_FRAME_COUNT)
         throw std::invalid_argument {"Frame count is too large"};
 
-    CALICO_EXPECT_NOT_NULL(m_file);
     while (m_available.size() < m_frame_count)
         m_available.emplace_back(m_page_size);
 }
@@ -38,13 +39,13 @@ auto Pager::page_size() const -> Size
 auto Pager::truncate(Size page_count) -> void
 {
     CALICO_EXPECT_EQ(m_available.size(), m_frame_count);
-    m_file->resize(page_count * page_size());
+    m_writer->resize(page_count * page_size());
 }
 
 /**
  * Pin a database page to an available frame.
  *
- * Provides the strong guarantee concerning exceptions thrown by the file object during the read. Also makes sure that
+ * Provides the strong guarantee concerning exceptions thrown by the storage object during the read. Also makes sure that
  * newly allocated pages are zeroed out.
  *
  * @param id Page ID of the page we want to pin.
@@ -95,7 +96,7 @@ auto Pager::try_read_page_from_file(PID id, Bytes out) const -> bool
     CALICO_EXPECT_FALSE(id.is_null());
     CALICO_EXPECT_EQ(page_size(), out.size());
     const auto offset = FileLayout::page_offset(id, out.size());
-    if (const auto read_size = m_file->read_at(out, offset); !read_size) {
+    if (const auto read_size = m_reader->read_at(out, offset); !read_size) {
         return false;
     } else if (read_size != out.size()) {
         throw IOError {"partial read"};
@@ -108,12 +109,12 @@ auto Pager::write_page_to_file(PID id, BytesView in) const -> void
     CALICO_EXPECT_FALSE(id.is_null());
     CALICO_EXPECT_EQ(page_size(), in.size());
     const auto offset = FileLayout::page_offset(id, in.size());
-    write_exact_at(*m_file, in, offset);
+    write_all_at(*m_writer, in, offset);
 }
 
 auto Pager::sync() -> void
 {
-    m_file->sync();
+    m_writer->sync();
 }
 
 } // calico

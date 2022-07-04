@@ -121,8 +121,8 @@ template<Size PageSize, bool IsInMemory> struct DatabaseProvider {
         if constexpr (IsInMemory) {
             return Database::temp(options);
         } else {
-            std::filesystem::remove(PATH);
-            std::filesystem::remove(get_wal_path(PATH));
+            std::error_code ignore;
+            std::filesystem::remove_all(PATH, ignore);
             return Database::open(PATH, options);
         }
     }
@@ -188,13 +188,16 @@ template<Size BlockSize> class WALReaderRunner {
 public:
     using Input = PassThroughTransformer::Decoded;
 
+    WALReaderRunner()
+        : m_bank {std::make_unique<MemoryBank>("FuzzWALReader")},
+          m_file {m_bank->open_memory("fuzzer", Mode::READ_ONLY, 0666)} {}
+
     auto operator()(Input &&input) -> void
     {
-        auto file = std::make_unique<ReadOnlyMemory>();
-        auto backing = file->memory();
+        auto backing = m_file->shared_memory();
         backing.memory() = btos(input);
 
-        WALReader reader {{"", std::move(file), logging::create_sink("", 0), BlockSize}};
+        WALReader reader {{*m_bank, logging::create_sink("", 0), BlockSize}};
         while (reader.increment()) {}
         while (reader.decrement()) {}
     }
@@ -205,6 +208,8 @@ public:
     }
 
 private:
+    std::unique_ptr<MemoryBank> m_bank;
+    std::unique_ptr<Memory> m_file;
     std::unique_ptr<WALReader> m_wal_reader;
 };
 

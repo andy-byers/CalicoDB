@@ -105,7 +105,7 @@ RC=0
 for (( I=0; I<NUM_INSTANCES; I++ )); do
   TEMP_PATH="$TEMP_PREFIX$I"
 
-  # When an instance fails, it will write to stderr, which is redirected to this file. If it passes, it won't
+  # When an instance fails, it will write to stderr, which is redirected to this storage. If it passes, it won't
   # output anything.
   if [ -s "$TEMP_PATH" ]; then
     inner_echo "$I" "$FAIL_LABEL"

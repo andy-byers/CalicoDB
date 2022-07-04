@@ -41,7 +41,7 @@ public:
     [[nodiscard]] auto is_header_crc_consistent() const -> bool;
 
 private:
-    // Identifies the file as a Calico DB database.
+    // Identifies the storage as a Calico DB database.
     static constexpr uint32_t MAGIC_CODE = 0xB11924E1;
 
     std::string m_backing;

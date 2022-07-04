@@ -3,12 +3,13 @@
 
 #include "calico/options.h"
 #include "calico/bytes.h"
-#include "file/file.h"
+#include "storage/directory.h"
+#include "storage/file.h"
+#include "utils/logging.h"
+#include "utils/utils.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_record.h"
 #include "wal/wal_writer.h"
-#include "utils/logging.h"
-#include "utils/utils.h"
 
 #include "fakes.h"
 #include "random.h"
@@ -362,20 +363,22 @@ TEST_F(WALTests, WriteAndTraverseMixedRecordsInIncompleteBlocks)
 class RealWALTests: public testing::Test {
 public:
     static constexpr Size BLOCK_SIZE = 0x200;
-    static constexpr auto DB_PATH = "/tmp/calico_test_wal";
+    static constexpr auto BASE_PATH = "/tmp/calico_test_wal";
 
     RealWALTests()
     {
-        const auto path = get_wal_path(DB_PATH);
-        const auto mode = Mode::DIRECT | Mode::SYNCHRONOUS;
-        std::filesystem::remove(path);
+        std::error_code ignore;
+        std::filesystem::remove_all(BASE_PATH, ignore);
         auto sink = logging::create_sink("", 0);
-        writer = std::make_unique<WALWriter>(WALWriter::Parameters {path, std::make_unique<LogFile>(path, Mode::CREATE | mode, 0666), sink, BLOCK_SIZE});
-        reader = std::make_unique<WALReader>(WALReader::Parameters {path, std::make_unique<ReadOnlyFile>(path, mode, 0666), sink, BLOCK_SIZE});
+
+        directory = std::make_unique<Directory>(BASE_PATH);
+        writer = std::make_unique<WALWriter>(WALWriter::Parameters {*directory, sink, BLOCK_SIZE});
+        reader = std::make_unique<WALReader>(WALReader::Parameters {*directory, sink, BLOCK_SIZE});
     }
 
     ~RealWALTests() override = default;
 
+    std::unique_ptr<IDirectory> directory;
     std::unique_ptr<IWALReader> reader;
     std::unique_ptr<IWALWriter> writer;
 };

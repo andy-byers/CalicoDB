@@ -1,7 +1,7 @@
 
 #include "wal_writer.h"
 #include "calico/exception.h"
-#include "file/interface.h"
+#include "storage/interface.h"
 #include "utils/identifier.h"
 #include "utils/logging.h"
 #include "wal_reader.h"
@@ -10,7 +10,8 @@
 namespace calico {
 
 WALWriter::WALWriter(Parameters param)
-    : m_file {std::move(param.wal_file)},
+    : m_file {param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::WRITE_ONLY, 0666)},
+      m_writer {m_file->open_writer()},
       m_logger {logging::create_logger(param.log_sink, "WALWriter")},
       m_block(param.block_size, '\x00')
 {
@@ -76,8 +77,8 @@ auto WALWriter::append(WALRecord record) -> LSN
 
 auto WALWriter::truncate() -> void
 {
-    m_file->resize(0);
-    m_file->sync();
+    m_writer->resize(0);
+    m_writer->sync();
 }
 
 auto WALWriter::flush() -> LSN
@@ -87,8 +88,8 @@ auto WALWriter::flush() -> LSN
         auto block = stob(m_block);
         mem_clear(block.range(m_cursor));
 
-        m_file->write(block);
-        m_file->sync();
+        m_writer->write(block);
+        m_writer->sync();
 
         m_cursor = 0;
         return m_last_lsn;

@@ -83,9 +83,9 @@ try {
     auto db = calico::Database::open("/tmp/calico", options);
     // Run the application!
 } catch (const CorruptionError &error) {
-    // This is thrown if corruption is detected in a file.
+    // This is thrown if corruption is detected in a storage.
 } catch (const IOError &error) {
-    // This is thrown if we were unable to perform I/O on a file.
+    // This is thrown if we were unable to perform I/O on a storage.
 } catch (const std::invalid_argument &error) {
     // This is thrown if invalid arguments were passed to a Calico DB function.
 } catch (const std::system_error &error) {

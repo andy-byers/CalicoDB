@@ -18,14 +18,12 @@ constexpr Size KEY_SIZE {16};
 constexpr Size VALUE_SIZE {100};
 constexpr Size LARGE_VALUE_SIZE {100'000};
 Options options {
-    PAGE_SIZE,              // Page size
-    PAGE_SIZE,              // Block size
+    PAGE_SIZE,                // Page size
+    PAGE_SIZE,                // Block size
     CACHE_SIZE / PAGE_SIZE, // Frame count
-    0666,                   // Permissions
-    false,                  // Use transactions (can be changed commandline)
-    false,                  // Use direct I/O
-    "/dev/null",
     0,
+    0666,                    // Permissions
+    false,               // Use transactions (can be changed commandline)
 };
 
 struct BenchmarkParameters {
@@ -52,8 +50,8 @@ struct InstanceResults {
 
 auto create()
 {
-    std::filesystem::remove(PATH);
-    std::filesystem::remove(get_wal_path(PATH));
+    std::error_code ignore;
+    std::filesystem::remove_all(PATH, ignore);
     return Database::open(PATH, options);
 }
 

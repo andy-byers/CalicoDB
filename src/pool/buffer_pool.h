@@ -14,8 +14,10 @@
 
 namespace calico {
 
-class ILogFile;
-class IReadWriteFile;
+constexpr auto DATA_NAME = "data";
+
+class IDirectory;
+class IFile;
 class IWALReader;
 class IWALWriter;
 class Page;
@@ -23,7 +25,7 @@ class Page;
 class BufferPool: public IBufferPool {
 public:
     struct Parameters {
-        std::unique_ptr<IReadWriteFile> pool_file;
+        IDirectory &directory;
         std::unique_ptr<IWALReader> wal_reader;
         std::unique_ptr<IWALWriter> wal_writer;
         spdlog::sink_ptr log_sink;
@@ -31,6 +33,7 @@ public:
         Size frame_count {};
         Size page_count {};
         Size page_size {};
+        int permissions {};
         bool use_transactions {};
     };
 
@@ -95,6 +98,7 @@ private:
     mutable std::mutex m_mutex;
     std::unique_ptr<IWALReader> m_wal_reader;
     std::unique_ptr<IWALWriter> m_wal_writer;
+    std::shared_ptr<IFile> m_file;
     std::shared_ptr<spdlog::logger> m_logger;
     std::exception_ptr m_error;
     ScratchManager m_scratch;

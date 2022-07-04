@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <spdlog/fmt/fmt.h>
 #include "calico/calico.h"
 #include "tools.h"
 
@@ -25,14 +26,20 @@ auto show_usage()
 auto main(int argc, const char *argv[]) -> int
 {
     using namespace calico;
+    namespace fs = std::filesystem;
 
     if (argc != 3) {
         show_usage();
         return 1;
     }
-    const std::string path {argv[1]};
-    const auto value_path = path + "_values";
+    const fs::path path {argv[1]};
+    const auto value_path = path / "values";
     const auto num_committed = std::stoul(argv[2]);
+
+    if (!fs::exists(value_path)) {
+        fmt::print("cannot run recovery: database from `fail` does not exist (run `fail` first)\n");
+        return 1;
+    }
 
     std::vector<std::string> values;
     {
@@ -62,7 +69,6 @@ auto main(int argc, const char *argv[]) -> int
     // All records should have been reached and removed.
     CALICO_EXPECT_EQ(key_counter, num_committed);
     CALICO_EXPECT_EQ(info.record_count(), 0);
-    std::filesystem::remove(value_path);
     Database::destroy(std::move(db));
     return 0;
 }

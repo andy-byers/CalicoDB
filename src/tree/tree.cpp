@@ -47,7 +47,7 @@ auto Tree::insert(BytesView key, BytesView value) -> bool
     }
 }
 
-auto Tree::remove(Cursor cursor) -> bool
+auto Tree::erase(Cursor cursor) -> bool
 {
     if (cursor.is_valid()) {
         m_internal.positioned_remove({

@@ -1,9 +1,12 @@
 #include "logging.h"
-#include "expect.h"
+#include <filesystem>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/null_sink.h>
+#include "expect.h"
 
 namespace calico::logging {
+
+namespace fs = std::filesystem;
 
 auto create_logger(spdlog::sink_ptr sink, const std::string &name) -> std::shared_ptr<spdlog::logger>
 {
@@ -11,13 +14,13 @@ auto create_logger(spdlog::sink_ptr sink, const std::string &name) -> std::share
     return std::make_shared<spdlog::logger>(name, std::move(sink));
 }
 
-auto create_sink(const std::string &path, unsigned level) -> spdlog::sink_ptr
+auto create_sink(const std::string &base, unsigned level) -> spdlog::sink_ptr
 {
     spdlog::sink_ptr sink;
-    if (path.empty()) {
+    if (base.empty()) {
         sink = std::make_shared<spdlog::sinks::null_sink_mt>();
     } else {
-        sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path);
+        sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(fs::path {base} / LOG_NAME);
     }
     sink->set_level(static_cast<spdlog::level::level_enum>(level));
     return sink;

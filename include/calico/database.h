@@ -32,7 +32,7 @@ public:
     /**
      * Open or create a Cub DB database.
      *
-     * @param path The path to the database file.
+     * @param path The path to the database storage.
      * @param options Options to apply to the database.
      * @return A Cub DB database, located at the provided path on disk.
      */

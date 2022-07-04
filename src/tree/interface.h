@@ -23,7 +23,10 @@ public:
     virtual auto save_header(FileHeader&) const -> void = 0;
     virtual auto load_header(const FileHeader&) -> void = 0;
     virtual auto insert(BytesView, BytesView) -> bool = 0;
-    virtual auto remove(Cursor) -> bool = 0;
+    virtual auto erase(Cursor) -> bool = 0;
+/* TODO:
+    virtual auto erase(Cursor lower, Cursor one_past_upper) -> Size;
+*/
     virtual auto find(BytesView, bool) -> Cursor = 0;
     virtual auto find_minimum() -> Cursor = 0;
     virtual auto find_maximum() -> Cursor = 0;

@@ -67,7 +67,7 @@ private:
 };
 
 /**
- * A container that makes data compatible with the WAL file format.
+ * A container that makes data compatible with the WAL storage format.
  */
 class WALRecord {
 public:

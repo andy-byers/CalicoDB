@@ -16,7 +16,7 @@ FileHeader::FileHeader(Bytes data)
     : m_header{data.range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)} {}
 
 FileHeader::FileHeader(Node &root)
-    // Causes the whole file header region to be written to the WAL.
+    // Causes the whole storage header region to be written to the WAL.
     : m_header {root.page().mut_range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)}
 {
     CALICO_EXPECT_TRUE(root.id().is_root());

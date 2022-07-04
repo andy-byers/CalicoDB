@@ -26,19 +26,20 @@ auto show_usage()
 auto main(int argc, const char *argv[]) -> int
 {
     using namespace calico;
+    namespace fs = std::filesystem;
 
     if (argc != 4) {
         show_usage();
         return 1;
     }
-    const std::string path {argv[1]};
-    const auto value_path = path + "_values";
+    const fs::path path {argv[1]};
+    const auto value_path = path / "values";
     const auto num_committed = std::stoul(argv[2]);
     const auto max_database_size = num_committed * 5;
     Random random {static_cast<Random::Seed>(std::stoi(argv[3]))};
 
-    std::filesystem::remove(path);
-    std::filesystem::remove(get_wal_path(path));
+    std::error_code ignore;
+    std::filesystem::remove_all(path, ignore);
 
     // Use small pages and few frames to cause lots of stealing.
     Options options;

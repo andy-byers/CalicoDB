@@ -60,7 +60,7 @@ public:
     auto save_header(FileHeader&) const -> void override;
     auto load_header(const FileHeader&) -> void override;
     auto insert(BytesView, BytesView) -> bool override;
-    auto remove(Cursor) -> bool override;
+    auto erase(Cursor) -> bool override;
     auto find(BytesView, bool) -> Cursor override;
     auto find_minimum() -> Cursor override;
     auto find_maximum() -> Cursor override;
