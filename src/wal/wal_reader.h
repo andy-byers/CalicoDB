@@ -15,17 +15,18 @@
 
 namespace calico {
 
-class IReadOnlyFile;
+class IDirectory;
+class IFile;
+class IFileReader;
 struct LSN;
 
 /**
- * A cursor-like object for traversing the WAL file.
+ * A cursor-like object for traversing the WAL storage.
  */
 class WALReader: public IWALReader {
 public:
     struct Parameters {
-        std::string wal_path;
-        std::unique_ptr<IReadOnlyFile> wal_file;
+        IDirectory &directory;
         spdlog::sink_ptr log_sink;
         Size block_size {};
     };
@@ -47,10 +48,11 @@ private:
 
     std::vector<Index> m_positions;        ///< Stack containing the absolute offset of each record we have read so far
     std::string m_block;                   ///< Tail buffer for caching WAL block contents
-    std::unique_ptr<IReadOnlyFile> m_file; ///< Read-only WAL file handle
+    std::unique_ptr<IFile> m_file;
+    std::unique_ptr<IFileReader> m_reader;
     std::shared_ptr<spdlog::logger> m_logger;
     std::optional<WALRecord> m_record;     ///< Record that the cursor is currently over
-    Index m_block_id {};                   ///< Index of the current block in the WAL file
+    Index m_block_id {};                   ///< Index of the current block in the WAL storage
     Index m_cursor {};                     ///< Offset of the current record in the tail buffer
     bool m_has_block {};                   ///< True if the tail buffer contains a block, false otherwise
     bool m_incremented {};

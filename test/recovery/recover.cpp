@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <spdlog/fmt/fmt.h>
 #include "calico/calico.h"
 #include "tools.h"
 
@@ -25,14 +26,20 @@ auto show_usage()
 auto main(int argc, const char *argv[]) -> int
 {
     using namespace calico;
+    namespace fs = std::filesystem;
 
     if (argc != 3) {
         show_usage();
         return 1;
     }
-    const std::string path {argv[1]};
-    const auto value_path = path + "_values";
+    const fs::path path {argv[1]};
+    const auto value_path = path / "values";
     const auto num_committed = std::stoul(argv[2]);
+
+    if (!fs::exists(value_path)) {
+        fmt::print("cannot run recovery: database from `fail` does not exist (run `fail` first)\n");
+        return 1;
+    }
 
     std::vector<std::string> values;
     {
@@ -44,7 +51,7 @@ auto main(int argc, const char *argv[]) -> int
     }
 
     auto db = Database::open(path, {});
-    const auto info = db.get_info();
+    const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.
     CALICO_EXPECT_EQ(info.record_count(), num_committed);
@@ -52,17 +59,16 @@ auto main(int argc, const char *argv[]) -> int
     Index key_counter {};
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
-        const auto record = db.read(stob(key));
-        CALICO_EXPECT_NE(record, std::nullopt);
-        CALICO_EXPECT_EQ(record->key, key);
-        CALICO_EXPECT_EQ(record->value, value);
+        const auto cursor = db.find(stob(key));
+        CALICO_EXPECT_TRUE(cursor.is_valid());
+        CALICO_EXPECT_EQ(btos(cursor.key()), key);
+        CALICO_EXPECT_EQ(cursor.value(), value);
         CALICO_EXPECT_TRUE(db.erase(stob(key)));
     }
 
     // All records should have been reached and removed.
     CALICO_EXPECT_EQ(key_counter, num_committed);
     CALICO_EXPECT_EQ(info.record_count(), 0);
-    std::filesystem::remove(value_path);
     Database::destroy(std::move(db));
     return 0;
 }

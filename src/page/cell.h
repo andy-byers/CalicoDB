@@ -15,8 +15,11 @@ public:
         BytesView local_value;
         PID overflow_id;
         Size value_size {};
+        Size page_size {};
+        bool is_external {};
     };
 
+    static auto read_at(BytesView, Size, bool) -> Cell;
     static auto read_at(const Node&, Index) -> Cell;
     explicit Cell(const Parameters&);
 
@@ -28,13 +31,24 @@ public:
     [[nodiscard]] auto local_value() const -> BytesView;
     [[nodiscard]] auto overflow_id() const -> PID;
     [[nodiscard]] auto left_child_id() const -> PID;
+    auto set_is_external(bool) -> void;
     auto set_left_child_id(PID) -> void;
     auto set_overflow_id(PID) -> void;
     auto write(Bytes) const -> void;
-    auto detach(Scratch) -> void;
+    auto detach(Scratch, bool = false) -> void;
 
     Cell(Cell&&) = default;
     auto operator=(Cell&&) -> Cell& = default;
+
+    [[nodiscard]] auto is_external() const -> bool
+    {
+        return m_is_external;
+    }
+
+    [[nodiscard]] auto is_attached() const -> bool
+    {
+        return m_scratch == std::nullopt;
+    }
 
 private:
     Cell() = default;
@@ -45,9 +59,12 @@ private:
     PID m_left_child_id;
     PID m_overflow_id;
     Size m_value_size {};
+    Size m_page_size {};
+    bool m_is_external {};
 };
 
-auto make_cell(BytesView, BytesView, Size) -> Cell;
+auto make_external_cell(BytesView, BytesView, Size) -> Cell;
+auto make_internal_cell(BytesView, Size) -> Cell;
 
 } // calico
 

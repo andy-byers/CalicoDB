@@ -8,6 +8,8 @@
 
 namespace calico::logging {
 
+constexpr auto LOG_NAME = "log";
+
 auto create_logger(spdlog::sink_ptr, const std::string&) -> std::shared_ptr<spdlog::logger>;
 auto create_sink(const std::string&, unsigned) -> spdlog::sink_ptr;
 

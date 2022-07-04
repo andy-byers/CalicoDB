@@ -214,9 +214,10 @@ using Bytes = impl::Slice<Byte*>;
 using BytesView = impl::Slice<const Byte*>;
 
 /**
- * Take an immutable slice of a string.
+ * Create an immutable slice from a string.
+ *
  * @param data The string.
- * @return The immutable slice.
+ * @return The resulting immutable slice.
  */
 inline auto stob(const std::string &data) noexcept -> BytesView
 {
@@ -224,9 +225,10 @@ inline auto stob(const std::string &data) noexcept -> BytesView
 }
 
 /**
- * Take a mutable slice of a string.
+ * Create a mutable slice from a string.
+ *
  * @param data The string.
- * @return The mutable slice.
+ * @return The resulting mutable slice.
  */
 inline auto stob(std::string &data) noexcept -> Bytes
 {
@@ -234,10 +236,10 @@ inline auto stob(std::string &data) noexcept -> Bytes
 }
 
 /**
- * Take an immutable slice of a C-style string.
+ * Create an immutable slice from a C-style string.
  *
  * @param data The C-style string.
- * @return The immutable slice.
+ * @return The resulting immutable slice.
  */
 inline auto stob(const char *data) noexcept -> BytesView
 {
@@ -245,9 +247,10 @@ inline auto stob(const char *data) noexcept -> BytesView
 }
 
 /**
- * Create an owned string out of a slice.
+ * Create a string out of a slice.
+ *
  * @param data The slice.
- * @return The owned string.
+ * @return The resulting string.
  */
 inline auto btos(BytesView data) -> std::string
 {

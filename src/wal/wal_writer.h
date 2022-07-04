@@ -8,17 +8,18 @@
 
 namespace calico {
 
-class ILogFile;
+class IDirectory;
+class IFile;
+class IFileWriter;
 class WALRecord;
 
 /**
- * A writer that appends records to the WAL file.
+ * A writer that appends records to the WAL storage.
  */
 class WALWriter: public IWALWriter {
 public:
     struct Parameters {
-        std::string wal_path;
-        std::unique_ptr<ILogFile> wal_file;
+        IDirectory &directory;
         spdlog::sink_ptr log_sink;
         Size block_size {};
     };
@@ -51,7 +52,8 @@ public:
     auto flush() -> LSN override;
 
 private:
-    std::unique_ptr<ILogFile> m_file; ///< Write-only WAL file handle
+    std::unique_ptr<IFile> m_file;
+    std::unique_ptr<IFileWriter> m_writer;
     std::shared_ptr<spdlog::logger> m_logger;
     std::string m_block;              ///< Tail buffer for holding the current block
     Index m_cursor {};                ///< Position in the tail buffer

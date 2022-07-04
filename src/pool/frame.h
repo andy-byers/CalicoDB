@@ -12,7 +12,7 @@ class IBufferPool;
 class Page;
 
 /**
- * Represents in-memory file for a single database page.
+ * Represents in-memory storage for a single database page.
  */
 class Frame final {
 public:

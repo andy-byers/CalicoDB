@@ -1,13 +1,11 @@
 #ifndef CALICO_TEST_TOOLS_FAKES_H
 #define CALICO_TEST_TOOLS_FAKES_H
 
-#include <gmock/gmock.h>
-#include "calico/bytes.h"
-#include "calico/options.h"
-#include "random.h"
+#include "calico/calico.h"
 #include "db/database_impl.h"
-#include "file/interface.h"
 #include "page/file_header.h"
+#include "random.h"
+#include "storage/interface.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
 
@@ -18,7 +16,7 @@ public:
     SharedMemory()
         : m_memory {std::make_shared<std::string>()} {}
 
-    auto memory() -> std::string&
+    [[nodiscard]] auto memory() -> std::string&
     {
         return *m_memory;
     }
@@ -32,146 +30,6 @@ private:
     std::shared_ptr<std::string> m_memory;
 };
 
-class ReadOnlyMemory: public IReadOnlyFile {
-public:
-    ReadOnlyMemory() = default;
-
-    explicit ReadOnlyMemory(SharedMemory memory)
-        : m_memory{std::move(memory)} {}
-
-    ~ReadOnlyMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_memory;
-    }
-
-    [[nodiscard]] auto size() const -> Size override
-    {
-        return m_memory.memory().size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    auto sync() -> void override {}
-
-    auto seek(long, Seek) -> Index override;
-    auto read(Bytes) -> Size override;
-
-private:
-    SharedMemory m_memory;
-    Index m_cursor{};
-};
-
-class WriteOnlyMemory: public IWriteOnlyFile {
-public:
-    WriteOnlyMemory() = default;
-
-    explicit WriteOnlyMemory(SharedMemory memory)
-        : m_memory {std::move(memory)} {}
-
-    ~WriteOnlyMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_memory;
-    }
-
-    [[nodiscard]] auto size() const -> Size override
-    {
-        return m_memory.memory().size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    auto sync() -> void override {}
-
-    auto resize(Size size) -> void override
-    {
-        m_memory.memory().resize(size);
-    }
-
-    auto seek(long, Seek) -> Index override;
-    auto write(BytesView) -> Size override;
-
-private:
-    friend class Fs;
-    SharedMemory m_memory;
-    Index m_cursor{};
-};
-
-class ReadWriteMemory: public IReadWriteFile {
-public:
-    ReadWriteMemory() = default;
-
-    explicit ReadWriteMemory(SharedMemory memory)
-        : m_memory {std::move(memory)} {}
-
-    ~ReadWriteMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_memory;
-    }
-
-    [[nodiscard]] auto size() const -> Size override
-    {
-        return m_memory.memory().size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    auto sync() -> void override {}
-
-    auto resize(Size size) -> void override
-    {
-        m_memory.memory().resize(size);
-    }
-
-    auto seek(long, Seek) -> Index override;
-    auto read(Bytes) -> Size override;
-    auto write(BytesView) -> Size override;
-
-private:
-    friend class Fs;
-    SharedMemory m_memory;
-    Index m_cursor{};
-};
-
-class LogMemory: public ILogFile {
-public:
-    LogMemory() = default;
-
-    explicit LogMemory(SharedMemory memory)
-        : m_memory {std::move(memory)} {}
-
-    ~LogMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_memory;
-    }
-
-    [[nodiscard]] auto size() const -> Size override
-    {
-        return m_memory.memory().size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    auto sync() -> void override {}
-
-    auto resize(Size size) -> void override
-    {
-        m_memory.memory().resize(size);
-    }
-
-    auto write(BytesView) -> Size override;
-
-private:
-    SharedMemory m_memory;
-    Index m_cursor{};
-};
 
 class FaultControls {
 public:
@@ -189,9 +47,14 @@ public:
     explicit FaultControls(std::shared_ptr<Controls> controls)
         : m_controls {std::move(controls)} {}
 
-    auto controls() -> std::shared_ptr<Controls>
+    [[nodiscard]] auto controls() -> Controls&
     {
-        return m_controls;
+        return *m_controls;
+    }
+
+    [[nodiscard]] auto controls() const -> const Controls&
+    {
+        return *m_controls;
     }
 
     [[nodiscard]] auto read_fault_rate() const
@@ -242,114 +105,186 @@ private:
     std::shared_ptr<Controls> m_controls;
 };
 
-class FaultyBase {
+class Memory;
+
+class MemoryBank: public IDirectory {
 public:
-    explicit FaultyBase(Random::Seed seed)
-        : m_controls {std::make_shared<FaultControls::Controls>()}
-        , m_random {seed} {}
+    ~MemoryBank() override = default;
+    explicit MemoryBank(const std::string&);
+    [[nodiscard]] auto path() const -> std::string override;
+    [[nodiscard]] auto name() const -> std::string override;
+    [[nodiscard]] auto children() const -> std::vector<std::string> override;
+    auto open_directory(const std::string&) -> std::unique_ptr<IDirectory> override;
+    auto open_file(const std::string&, Mode, int) -> std::unique_ptr<IFile> override;
+    auto remove() -> void override;
+    auto sync() -> void override {}
 
-    FaultyBase(FaultControls &controls, Random::Seed seed)
-        : m_controls {controls.controls()}
-        , m_random {seed} {}
+    auto open_memory_bank(const std::string&) -> std::unique_ptr<MemoryBank>;
+    auto open_memory(const std::string&, Mode, int) -> std::unique_ptr<Memory>;
 
-    auto controls() -> FaultControls
+private:
+    std::unordered_map<std::string, SharedMemory> m_shared;
+    std::unordered_map<std::string, FaultControls> m_faults;
+    std::filesystem::path m_path;
+};
+
+class Memory: public IFile {
+public:
+    ~Memory() override = default;
+
+    explicit Memory(const std::string &path)
+        : m_path {path} {}
+
+    Memory(const std::string &path, SharedMemory memory, FaultControls faults)
+        : m_faults {std::move(faults)},
+          m_memory {std::move(memory)},
+          m_path {path} {}
+
+    [[nodiscard]] auto is_open() const -> bool override
     {
-        return FaultControls {m_controls};
+        return m_is_open;
     }
 
-protected:
-    auto maybe_throw_read_error()
+    [[nodiscard]] auto is_readable() const -> bool override
     {
-        // If the counter is positive, we tick down until we hit 0, at which point we throw an exception.
-        // Afterward, further reads will be subject to the normal read fault rate mechanism. If the counter
-        // is never set, it stays at -1 and doesn't contribute to the faults generated.
-        auto &counter = m_controls->read_fault_counter;
-        if (!counter || m_random.next_int(99U) < m_controls->read_fault_rate)
-            throw IOError {"read"};
-        // Counter should settle on -1.
-        counter -= counter >= 0;
+        return m_is_readable;
     }
 
-    auto maybe_throw_write_error()
+    [[nodiscard]] auto is_writable() const -> bool override
     {
-        auto &counter = m_controls->write_fault_counter;
-        if (!counter || m_random.next_int(99U) < m_controls->write_fault_rate)
-            throw IOError {"write"};
-        counter -= counter >= 0;
+        return m_is_writable;
+    }
+
+    [[nodiscard]] auto is_append() const -> bool override
+    {
+        return m_is_append;
+    }
+
+    [[nodiscard]] auto permissions() const -> int override
+    {
+        return m_permissions;
+    }
+
+    [[nodiscard]] auto file() const -> int override
+    {
+        return -1;
+    }
+
+    [[nodiscard]] auto path() const -> std::string override
+    {
+        return m_path;
+    }
+
+    [[nodiscard]] auto name() const -> std::string override
+    {
+        return m_path.filename();
+    }
+
+    [[nodiscard]] auto size() const -> Size override
+    {
+        return memory().size();
+    }
+
+    [[nodiscard]] auto open_reader() -> std::unique_ptr<IFileReader> override;
+    [[nodiscard]] auto open_writer() -> std::unique_ptr<IFileWriter> override;
+
+    [[nodiscard]] auto faults() -> FaultControls
+    {
+        return m_faults;
+    }
+
+    [[nodiscard]] auto shared_memory() -> SharedMemory
+    {
+        return m_memory;
+    }
+
+    [[nodiscard]] auto random() -> Random&
+    {
+        return m_random;
+    }
+
+    [[nodiscard]] auto memory() const -> const std::string&
+    {
+        return m_memory.memory();
+    }
+
+    [[nodiscard]] auto memory() -> std::string&
+    {
+        return m_memory.memory();
+    }
+
+    [[nodiscard]] auto cursor() const -> const Index&
+    {
+        return m_cursor;
+    }
+
+    [[nodiscard]] auto cursor() -> Index&
+    {
+        return m_cursor;
+    }
+
+    auto open(const std::string &path, Mode mode, int permissions) -> void override
+    {
+        m_is_open = true;
+        m_path = path;
+        m_permissions = permissions;
+        m_is_readable = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_ONLY)) == static_cast<unsigned>(Mode::READ_ONLY) ||
+                        (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_WRITE)) == static_cast<unsigned>(Mode::READ_WRITE);
+        m_is_writable = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::WRITE_ONLY)) == static_cast<unsigned>(Mode::WRITE_ONLY) ||
+                        (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_WRITE)) == static_cast<unsigned>(Mode::READ_WRITE);
+        m_is_append = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::APPEND)) == static_cast<unsigned>(Mode::APPEND);
+    }
+
+    auto close() -> void override
+    {
+        m_is_open = false;
+    }
+
+    // TODO: Shared memory filename?
+    auto rename(const std::string&) -> void override {}
+
+    auto remove() -> void override
+    {
+        m_path.clear();
     }
 
 private:
-    std::shared_ptr<FaultControls::Controls> m_controls;
+    FaultControls m_faults;
+    SharedMemory m_memory;
     Random m_random;
+    std::filesystem::path m_path;
+    Index m_cursor {};
+    int m_permissions {};
+    bool m_is_readable {};
+    bool m_is_writable {};
+    bool m_is_append {};
+    bool m_is_open {};
 };
 
-class FaultyReadOnlyMemory
-    : public ReadOnlyMemory
-    , public FaultyBase
-{
+class MemoryReader: public IFileReader {
 public:
-    explicit FaultyReadOnlyMemory(Random::Seed seed = 0)
-        : FaultyBase {seed} {}
-
-    explicit FaultyReadOnlyMemory(SharedMemory memory, Random::Seed seed = 0)
-        : ReadOnlyMemory {std::move(memory)}
-        , FaultyBase {seed} {}
-
-    ~FaultyReadOnlyMemory() override = default;
-
+    ~MemoryReader() override = default;
+    explicit MemoryReader(Memory&);
+    auto seek(long, Seek) -> void override;
     auto read(Bytes) -> Size override;
+    auto read_at(Bytes, Index) -> Size override;
+
+private:
+    Memory *m_memory {};
 };
 
-class FaultyWriteOnlyMemory
-    : public WriteOnlyMemory
-    , public FaultyBase
-{
+class MemoryWriter: public IFileWriter {
 public:
-    explicit FaultyWriteOnlyMemory(Random::Seed seed = 0)
-        : FaultyBase{seed} {}
-
-    explicit FaultyWriteOnlyMemory(SharedMemory memory, Random::Seed seed = 0)
-        : WriteOnlyMemory{std::move(memory)}
-        , FaultyBase{seed} {}
-
-    ~FaultyWriteOnlyMemory() override = default;
-
+    ~MemoryWriter() override = default;
+    explicit MemoryWriter(Memory&);
+    auto seek(long, Seek) -> void override;
     auto write(BytesView) -> Size override;
-};
+    auto write_at(BytesView, Index) -> Size override;
+    auto sync() -> void override {}
+    auto resize(Size) -> void override;
 
-class FaultyReadWriteMemory
-    : public ReadWriteMemory
-    , public FaultyBase
-{
-public:
-    explicit FaultyReadWriteMemory(Random::Seed seed = 0)
-        : FaultyBase{seed} {}
-
-    explicit FaultyReadWriteMemory(SharedMemory memory, Random::Seed seed = 0)
-        : ReadWriteMemory{std::move(memory)}
-        , FaultyBase{seed} {}
-
-    ~FaultyReadWriteMemory() override = default;
-
-    auto read(Bytes) -> Size override;
-    auto write(BytesView) -> Size override;
-};
-
-class FaultyLogMemory
-    : public LogMemory
-    , public FaultyBase
-{
-public:
-    explicit FaultyLogMemory(Random::Seed seed = 0)
-        : FaultyBase{seed} {}
-
-    explicit FaultyLogMemory(SharedMemory memory, Random::Seed seed = 0)
-        : LogMemory{std::move(memory)}
-        , FaultyBase{seed} {}
-
-    ~FaultyLogMemory() override = default;
-
-    auto write(BytesView) -> Size override;
+private:
+    Memory *m_memory {};
 };
 
 class IWALReader;
@@ -359,6 +294,7 @@ struct WALHarness final {
     explicit WALHarness(Size);
     ~WALHarness();
     SharedMemory backing;
+    std::unique_ptr<MemoryBank> bank;
     std::unique_ptr<IWALReader> reader;
     std::unique_ptr<IWALWriter> writer;
 };
@@ -370,215 +306,16 @@ struct FakeFilesHarness {
     FakeFilesHarness(FakeFilesHarness&&) = default;
     auto operator=(FakeFilesHarness&&) -> FakeFilesHarness& = default;
 
-    std::unique_ptr<FaultyReadWriteMemory> tree_file;
-    std::unique_ptr<FaultyReadOnlyMemory> wal_reader_file;
-    std::unique_ptr<FaultyLogMemory> wal_writer_file;
+    std::unique_ptr<MemoryBank> bank;
+    std::unique_ptr<Memory> tree_file;
+    std::unique_ptr<Memory> wal_reader_file;
+    std::unique_ptr<Memory> wal_writer_file;
     SharedMemory tree_backing;
     SharedMemory wal_backing;
     FaultControls tree_faults;
     FaultControls wal_reader_faults;
     FaultControls wal_writer_faults;
     Options options;
-};
-
-struct FaultyDatabase {
-
-    static auto create(Size) -> FaultyDatabase;
-    auto clone() -> FaultyDatabase;
-
-    FaultyDatabase() = default;
-    FaultyDatabase(FaultyDatabase&&) = default;
-    auto operator=(FaultyDatabase&&) -> FaultyDatabase& = default;
-
-    std::unique_ptr<Database::Impl> db;
-    SharedMemory tree_backing;
-    SharedMemory wal_backing;
-    FaultControls tree_faults;
-    FaultControls wal_reader_faults;
-    FaultControls wal_writer_faults;
-    Size page_size {}; // TODO: Remove when we get the 'info' construct working.
-};
-
-
-class MockReadOnlyMemory: public IReadOnlyFile {
-public:
-    MockReadOnlyMemory() = default;
-
-    explicit MockReadOnlyMemory(SharedMemory memory)
-        : m_fake {std::move(memory)} {}
-
-    ~MockReadOnlyMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_fake.memory();
-    }
-
-    auto size() const -> Size override
-    {
-        return m_fake.size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    MOCK_METHOD(void, sync, (), (override));
-    MOCK_METHOD(Index, seek, (long, Seek), (override));
-    MOCK_METHOD(Size, read, (Bytes), (override));
-
-    auto delegate_to_fake() -> void
-    {
-        ON_CALL(*this, seek)
-            .WillByDefault([this](long offset, Seek whence) {
-                return m_fake.seek(offset, whence);
-            });
-        ON_CALL(*this, read)
-            .WillByDefault([this](Bytes out) {
-                return m_fake.read(out);
-            });
-    }
-
-private:
-    ReadOnlyMemory m_fake;
-};
-
-
-class MockWriteOnlyMemory: public IWriteOnlyFile {
-public:
-    MockWriteOnlyMemory() = default;
-
-    explicit MockWriteOnlyMemory(SharedMemory memory)
-        : m_fake {std::move(memory)} {}
-
-    ~MockWriteOnlyMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_fake.memory();
-    }
-
-    auto size() const -> Size override
-    {
-        return m_fake.size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    MOCK_METHOD(void, resize, (Size), (override));
-    MOCK_METHOD(void, sync, (), (override));
-    MOCK_METHOD(Index, seek, (long, Seek), (override));
-    MOCK_METHOD(Size, write, (BytesView), (override));
-
-    auto delegate_to_fake() -> void
-    {
-        ON_CALL(*this, resize)
-            .WillByDefault([this](Size size) {
-                return m_fake.resize(size);
-            });
-        ON_CALL(*this, seek)
-            .WillByDefault([this](long offset, Seek whence) {
-                return m_fake.seek(offset, whence);
-            });
-        ON_CALL(*this, write)
-            .WillByDefault([this](BytesView in) {
-                return m_fake.write(in);
-            });
-    }
-
-private:
-    WriteOnlyMemory m_fake;
-};
-
-class MockReadWriteMemory: public IReadWriteFile {
-public:
-    MockReadWriteMemory() = default;
-
-    explicit MockReadWriteMemory(SharedMemory memory)
-        : m_fake {std::move(memory)} {}
-
-    ~MockReadWriteMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_fake.memory();
-    }
-
-    auto size() const -> Size override
-    {
-        return m_fake.size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    MOCK_METHOD(void, sync, (), (override));
-    MOCK_METHOD(void, resize, (Size), (override));
-    MOCK_METHOD(Index, seek, (long, Seek), (override));
-    MOCK_METHOD(Size, read, (Bytes), (override));
-    MOCK_METHOD(Size, write, (BytesView), (override));
-
-    auto delegate_to_fake() -> void
-    {
-        ON_CALL(*this, resize)
-            .WillByDefault([this](Size size) {
-                return m_fake.resize(size);
-            });
-        ON_CALL(*this, seek)
-            .WillByDefault([this](long offset, Seek whence) {
-                return m_fake.seek(offset, whence);
-            });
-        ON_CALL(*this, read)
-            .WillByDefault([this](Bytes out) {
-                return m_fake.read(out);
-            });
-        ON_CALL(*this, write)
-            .WillByDefault([this](BytesView in) {
-                return m_fake.write(in);
-            });
-    }
-
-private:
-    ReadWriteMemory m_fake;
-};
-
-class MockLogMemory: public ILogFile {
-public:
-    MockLogMemory() = default;
-
-    explicit MockLogMemory(SharedMemory memory)
-        : m_fake {std::move(memory)} {}
-
-    ~MockLogMemory() override = default;
-
-    auto memory() -> SharedMemory
-    {
-        return m_fake.memory();
-    }
-
-    auto size() const -> Size override
-    {
-        return m_fake.size();
-    }
-
-    auto use_direct_io() -> void override {}
-
-    MOCK_METHOD(void, sync, (), (override));
-    MOCK_METHOD(void, resize, (Size), (override));
-    MOCK_METHOD(Size, write, (BytesView), (override));
-
-    auto delegate_to_fake() -> void
-    {
-        ON_CALL(*this, resize)
-            .WillByDefault([this](Size size) {
-                return m_fake.resize(size);
-            });
-        ON_CALL(*this, write)
-            .WillByDefault([this](BytesView in) {
-                return m_fake.write(in);
-            });
-    }
-
-private:
-
-    LogMemory m_fake;
 };
 
 } // calico

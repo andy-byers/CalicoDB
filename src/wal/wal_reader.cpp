@@ -1,15 +1,16 @@
 #include "calico/exception.h"
 #include "wal_reader.h"
 #include "wal_record.h"
-#include "file/interface.h"
 #include "page/page.h"
+#include "storage/interface.h"
 #include "utils/logging.h"
 
 namespace calico {
 
 WALReader::WALReader(Parameters param)
     : m_block(param.block_size, '\x00'),
-      m_file {std::move(param.wal_file)},
+      m_file {param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::READ_ONLY, 0666)},
+      m_reader {m_file->open_reader()},
       m_logger {logging::create_logger(std::move(param.log_sink), "WALReader")}
 {
     m_logger->trace("constructing WAL reader");
@@ -18,13 +19,13 @@ WALReader::WALReader(Parameters param)
 }
 
 /**
- * Move the cursor to the beginning of the WAL file.
+ * Move the cursor to the beginning of the WAL storage.
  */
 auto WALReader::reset() -> void
 {
-    m_logger->trace("moving cursor to the beginning of the WAL file");
+    m_logger->trace("moving cursor to the beginning of the WAL storage");
 
-    m_file->seek(0, Seek::BEGIN);
+    m_reader->seek(0, Seek::BEGIN);
     m_has_block = false;
     m_cursor = 0;
     m_block_id = 0;
@@ -36,7 +37,7 @@ auto WALReader::reset() -> void
 /**
  * Get the WAL record that the cursor is currently over.
  *
- * @return The record if the WAL file is not empty, std::nullopt otherwise
+ * @return The record if the WAL storage is not empty, std::nullopt otherwise
  */
 auto WALReader::record() const -> std::optional<WALRecord>
 {
@@ -131,7 +132,7 @@ auto WALReader::read_previous() -> std::optional<WALRecord>
 /**
  * Read the WAL record at the current cursor position.
  *
- * This method causes the next block of the WAL file to be read, once the cursor reaches the end of the current one.
+ * This method causes the next block of the WAL storage to be read, once the cursor reaches the end of the current one.
  *
  * @return The WAL record at the specified offset if it exists, std::nullopt otherwise
  */
@@ -215,7 +216,7 @@ auto WALReader::read_block() -> bool
 {
     try {
         const auto block_start = m_block_id * m_block.size();
-        if (const auto bytes_read = m_file->read_at(stob(m_block), block_start)) {
+        if (const auto bytes_read = m_reader->read_at(stob(m_block), block_start)) {
             if (bytes_read != m_block.size()) {
                 logging::MessageGroup group;
                 group.set_primary("cannot read block");

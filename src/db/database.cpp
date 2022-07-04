@@ -1,39 +1,18 @@
 
 #include "database_impl.h"
-#include "cursor_impl.h"
-#include "file/file.h"
-#include "file/system.h"
-#include "page/file_header.h"
-#include "pool/frame.h"
-#include "pool/in_memory.h"
-#include "utils/logging.h"
+#include "calico/cursor.h"
+#include "storage/directory.h"
 
 namespace calico {
 
+namespace fs = std::filesystem;
+
 auto Database::open(const std::string &path, Options options) -> Database
 {
-    auto state = get_initial_state(path, options);
-    options.use_transactions = state.uses_transactions;
-    auto files = get_open_files(path, options);
-
-#if not CALICO_HAS_O_DIRECT
-    if (options.use_direct_io) {
-        files.tree_file->use_direct_io();
-        if (options.use_transactions) {
-            files.wal_reader_file->use_direct_io();
-            files.wal_writer_file->use_direct_io();
-        }
-    }
-#endif // not CALICO_HAS_O_DIRECT
-
     Database db;
     db.m_impl = std::make_unique<Impl>(Impl::Parameters {
-        path,
-        std::move(files.tree_file),
-        std::move(files.wal_reader_file),
-        std::move(files.wal_writer_file),
-        std::move(state.header),
-        std::move(options),
+        std::make_unique<Directory>(path),
+        options,
     });
     return db;
 }
@@ -41,8 +20,7 @@ auto Database::open(const std::string &path, Options options) -> Database
 auto Database::temp(Options options) -> Database
 {
     Impl::Parameters param;
-    param.options = std::move(options);
-
+    param.options = options;
     Database db;
     db.m_impl = std::make_unique<Impl>(std::move(param), Impl::InMemoryTag {});
     return db;
@@ -51,7 +29,7 @@ auto Database::temp(Options options) -> Database
 auto Database::destroy(Database db) -> void
 {
     if (const auto &path = db.m_impl->path(); !path.empty())
-        system::unlink(path);
+        fs::remove_all(path);
 }
 
 Database::Database() = default;
@@ -62,35 +40,40 @@ Database::Database(Database&&) noexcept = default;
 
 auto Database::operator=(Database&&) noexcept -> Database& = default;
 
-auto Database::read(BytesView key, Ordering ordering) const -> std::optional<Record>
+auto Database::find(BytesView key, bool allow_greater) const -> Cursor
 {
-    return m_impl->read(key, ordering);
+    return m_impl->find(key, !allow_greater);
 }
 
-auto Database::read_minimum() const -> std::optional<Record>
+auto Database::find_minimum() const -> Cursor
 {
-    return m_impl->read_minimum();
+    return m_impl->find_minimum();
 }
 
-auto Database::read_maximum() const -> std::optional<Record>
+auto Database::find_maximum() const -> Cursor
 {
-    return m_impl->read_maximum();
+    return m_impl->find_maximum();
 }
 
-auto Database::write(BytesView key, BytesView value) -> bool
+auto Database::insert(BytesView key, BytesView value) -> bool
 {
-    return m_impl->write(key, value);
+    return m_impl->insert(key, value);
 }
 
-auto Database::write(const Record &record) -> bool
+auto Database::insert(const Record &record) -> bool
 {
     const auto &[key, value] = record;
-    return m_impl->write(stob(key), stob(value));
+    return m_impl->insert(stob(key), stob(value));
 }
 
 auto Database::erase(BytesView key) -> bool
 {
     return m_impl->erase(key);
+}
+
+auto Database::erase(Cursor cursor) -> bool
+{
+    return m_impl->erase(cursor);
 }
 
 auto Database::commit() -> bool
@@ -103,14 +86,9 @@ auto Database::abort() -> bool
     return m_impl->abort();
 }
 
-auto Database::get_cursor() const -> Cursor
+auto Database::info() const -> Info
 {
-    return m_impl->get_cursor();
-}
-
-auto Database::get_info() const -> Info
-{
-    return m_impl->get_info();
+    return m_impl->info();
 }
 
 } // calico

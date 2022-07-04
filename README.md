@@ -3,27 +3,7 @@
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
 Calico DB is an embedded key-value database written in C++17.
-
-### Note (06/24)
-So far, Calico DB works okay, but is far from complete.
-Here are some changes I'm proposing to make before the release of the first version:
-
-1. Store all "value" data in the external nodes.
-We're suffering from poor fanout at the moment, and plus it would allow better concurrency control algorithms to be used.
-Essentially, we would be converting the B-tree into a B<sup>+</sup>-tree.
-2. Better concurrency control.
-This one will probably be difficult.
-Luckily, this area is well understood and there is much research available about it.
-We'll have to decide on a specific construct that is adequately performant/compatible with the current design once *#1* is done.
-3. An STL container-like API.
-This may involve changing names, e.g. making the `Database` a `tree` and the `Cursor` a `tree::iterator/tree::const_iterator`, and providing methods like `tree::end()` and functions like `calico::begin(tree&)`.
-Methods like `tree::erase(tree::iterator &begin, tree::iterator &end)` need some additional consideration since, in the current implementation, changes to the tree structure invalidate existing cursors.
-
-I believe that these changes will make Calico DB really nice to use.
-Plus, sequential reads are way simpler, and likely way faster, in a B<sup>+</sup>-tree.
-I'm thinking that work on *#2* depends on progress made on *#1*, but *#3* is independent of the other two.
-I'll make two branches, `bplus_tree` and `stl_like_api`, on which to develop these changes.
-Check out [Contributions](#contributions) if you're interested in working on this project, it's kinda lonely here by myself 😿!
+It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 
 + [Disclaimer](#disclaimer)
 + [Features](#features)
@@ -35,7 +15,6 @@ Check out [Contributions](#contributions) if you're interested in working on thi
   + [Bytes Objects](#bytes-objects)
   + [Updating a Database](#updating-a-database)
   + [Querying a Database](#querying-a-database)
-  + [Cursor Objects](#cursor-objects)
   + [Transactions](#transactions)
   + [Deleting a Database](#deleting-a-database)
 + [Performance](#performance)
@@ -53,7 +32,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 
 ## Features
 + Durability provided through write-ahead logging
-+ Uses a dynamic-order B-tree to store the data in a single file
++ Uses a dynamic-order B<sup>+</sup>-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
 + Allows creation of in-memory databases
 + Supports arbitrary value sizes
@@ -63,7 +42,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Currently, Calico DB only runs on 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
 + WAL is only used to ensure ACID properties on the current transaction and is truncated afterward
-+ Has a limit on key length, equal to roughly 1/4 of the page size
++ Has a hard limit on key length, equal to roughly 1/4 of the page size
 + Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
 
@@ -104,9 +83,9 @@ try {
     auto db = calico::Database::open("/tmp/calico", options);
     // Run the application!
 } catch (const CorruptionError &error) {
-    // This is thrown if corruption is detected in a file.
+    // This is thrown if corruption is detected in a storage.
 } catch (const IOError &error) {
-    // This is thrown if we were unable to perform I/O on a file.
+    // This is thrown if we were unable to perform I/O on a storage.
 } catch (const std::invalid_argument &error) {
     // This is thrown if invalid arguments were passed to a Calico DB function.
 } catch (const std::system_error &error) {
@@ -126,16 +105,19 @@ Calico DB uses `Bytes` and `BytesView` objects to represent unowned byte sequenc
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
-std::string data {"Hello, bears!"};
+auto function_taking_a_bytes_view = [](calico::BytesView) {};
 
-// Construct slices from a string. The string still owns the memory, the slices just refer to it.
+std::string data {"Hello, world!"};
+
+// Construct slices from a string. The string still owns the memory, the slices just refer
+// to it.
 calico::Bytes b {data.data(), data.size()};
 calico::BytesView v {data.data(), data.size()};
 
 // Convenience conversion from a string.
 const auto from_string = calico::stob(data);
 
-// Convenience conversion back to a string. This operation must allocate a new string.
+// Convenience conversion back to a string. This operation may allocate heap memory.
 assert(calico::btos(from_string) == data);
 
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
@@ -145,73 +127,57 @@ function_taking_a_bytes_view(b);
 b.advance(7).truncate(5);
 
 // Comparisons.
-assert(calico::compare_three_way(b, v) == calico::ThreeWayComparison::EQ);
-assert(b == calico::stob("bears"));
+assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
+assert(b == calico::stob("world"));
 ```
 
 ### Updating a Database
 Records and be added or removed using methods on the `Database` object.
 
 ```C++
-// Insert some records.
-assert(db.write(calico::stob("grizzly bear"), calico::stob("big")));
-assert(db.write(calico::stob("kodiak bear"), calico::stob("awesome")));
-assert(db.write(calico::stob("polar bear"), calico::stob("cool")));
-assert(db.write({"sun bear", "respectable"}));
-assert(db.write({"panda bear", "rare"}));
-assert(db.write({"black bear", "lovable"}));
+// Insert some records. If a record is already in the database, insert() will return false.
+assert(db.insert(calico::stob("bengal"), calico::stob("short;spotted,marbled,rosetted")));
+assert(db.insert(calico::stob("turkish vankedisi"), calico::stob("long;white")));
+assert(db.insert(calico::stob("abyssinian"), calico::stob("short;ticked tabby")));
+assert(db.insert({"russian blue", "short;blue"}));
+assert(db.insert({"american shorthair", "short;all"}));
+assert(db.insert({"badger", "???"}));
+assert(db.insert({"manx", "short,long;all"}));
+assert(db.insert({"chantilly-tiffany", "long;solid,tabby"}));
+assert(db.insert({"cyprus", "all;all"}));
 
-// Update an existing record (keys are always unique). write() returns false if the record was already in the database.
-assert(!db.write(calico::stob("grizzly bear"), calico::stob("huge")));
-
-// Erase a record.
-assert(db.erase(calico::stob("grizzly bear")));
+// Erase a record by key.
+assert(db.erase(calico::stob("badger")));
 ```
 
 ### Querying a Database
-The `read*()` methods are provided for querying the database.
+The database is queried using cursors returned by the `find*()` methods.
 
 ```C++
-// We can require an exact match.
-const auto record = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::EQ);
-assert(record->value == "respectable");
+static constexpr auto target = "russian blue";
+const auto key = calico::stob(target);
 
-// Or, we can look for the first record with a key less than or greater than the given key.
-const auto less_than = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::LT);
-const auto greater_than = db.read(calico::stob("sun bear"), calico::ThreeWayComparison::GT);
-assert(less_than->value == "cool");
+// By default, find() looks for the first record with a key equal to the given key and
+// returns a cursor pointing to it.
+auto cursor = db.find(key);
+assert(cursor.is_valid());
+assert(cursor.key() == key);
 
-// Whoops, there isn't a key greater than "sun bear".
-assert(greater_than == std::nullopt);
+// We can use the second parameter to leave the cursor on the next record, if the target
+// key does not exist.
+const auto prefix = key.copy().truncate(key.size() / 2);
+assert(db.find(prefix, true).value() == cursor.value());
 
-// We can also search for the minimum and maximum.
-const auto smallest = db.read_minimum();
-const auto largest = db.read_maximum();
-```
+// Cursors returned from the find*() methods can be used for range queries. They can
+// traverse the database in sequential order, or in reverse sequential order.
+for (auto c = db.find_minimum(); c.is_valid(); c++) {}
+for (auto c = db.find_maximum(); c.is_valid(); c--) {}
 
-### Cursor Objects
-Cursors can be used to find records and traverse the database.
-
-```C++
-auto cursor = db.get_cursor();
-assert(cursor.has_record());
-
-// Seek to extrema.
-cursor.find_maximum();
-cursor.find_minimum();
-
-// Forward traversal.
-assert(cursor.increment());
-assert(cursor.increment(2) == 2);
-
-// Reverse traversal.
-assert(cursor.decrement());
-assert(cursor.decrement(2) == 2);
-
-// Key and value access. For the key, we first convert to std::string, since key() returns a BytesView.
-const auto key = calico::btos(cursor.key());
-const auto value = cursor.value();
-printf("Record {%s, %s}\n", key.c_str(), value.c_str()); // Record {black bear, lovable}
+// They also support equality comparison.
+if (const auto boundary = db.find(key); boundary.is_valid()) {
+    for (auto c = db.find_minimum(); c.is_valid() && c != boundary; c++) {}
+    for (auto c = db.find_maximum(); c.is_valid() && c != boundary; c--) {}
+}
 ```
 
 ### Transactions
@@ -220,18 +186,19 @@ The first transaction begins when the database is opened, and the last one commi
 Otherwise, transaction boundaries are defined by calls to either `commit()` or `abort()`.
 
 ```C++
-db.write(calico::stob("a"), calico::stob("1"));
-db.write(calico::stob("b"), calico::stob("2"));
+// Commit all the updates we made in the previous examples.
 db.commit();
 
-db.write(calico::stob("c"), calico::stob("3"));
-assert(db.erase(calico::stob("a")));
-assert(db.erase(calico::stob("b")));
+// Make some changes and abort the transaction.
+db.insert({"opossum", "pretty cute"});
+assert(db.erase(db.find_minimum()));
+assert(db.erase(db.find_maximum()));
 db.abort();
 
-// Database still contains {"a", "1"} and {"b", "2"}.
-assert(db.read(calico::stob("a"), true)->value == "1");
-assert(db.read(calico::stob("b"), true)->value == "2");
+// All updates since the last call to commit() have been reverted.
+assert(not db.find(calico::stob("opposum")).is_valid());
+assert(db.find_minimum().key() == calico::stob("abyssinian"));
+assert(db.find_maximum().key() == calico::stob("turkish vankedisi"));
 ```
 
 ### Deleting a Database
@@ -256,6 +223,7 @@ We still have a ways to go performance-wise, however, it seems that the cursors 
 | read_rev    |        4,400,077 |
 | erase_rand  |           21,290 |
 | erase_seq   |           20,449 |
+
 
 ### Benchmark Results (In-Memory Database)
 | Name (In-Memory DB) | Result (ops/sec) |
@@ -300,10 +268,11 @@ We still have a ways to go performance-wise, however, it seems that the cursors 
    + Results may not be all that accurate
    + Need to test large (100,000 B) values
    + Code is very messy/difficult to change
+   + Need to benchmark against other databases
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.
-Each submodule is represented by a directory in `src`, as shown in [source tree overview](#source-tree-overview).
+Each submodule is represented by a directory in `src`, as shown in the [source tree overview](#source-tree-overview).
 See `DESIGN.md` for more information about the design of Calico DB.
 
 ## Source Tree Overview
@@ -312,8 +281,8 @@ CalicoDB
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Slices for holding contiguous sequences of bytes
+┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
-┃ ┣╸calico.h ┄┄┄┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
 ┃ ┣╸exception.h ┄┄┄┄ Public-facing exceptions

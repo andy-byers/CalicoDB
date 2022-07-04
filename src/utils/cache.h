@@ -3,12 +3,12 @@
 
 #include <functional>
 #include <list>
+#include <optional>
 #include <unordered_map>
 #include "calico/common.h"
 #include "utils/expect.h"
 
 namespace calico {
-
 
 template<class Key, class Value, class Hash = std::hash<Key>>
 class FifoCache {

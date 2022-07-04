@@ -7,63 +7,78 @@
 
 namespace calico {
 
-auto Cell::read_at(const Node &node, Index offset) -> Cell
+auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 {
-    auto in = node.page().range(offset);
     Cell cell;
+    cell.m_page_size = page_size;
 
-    if (!node.is_external()) {
+    if (!is_external) {
         cell.m_left_child_id.value = get_uint32(in);
         in.advance(PAGE_ID_SIZE);
     }
     const auto key_size = get_uint16(in);
     in.advance(sizeof(uint16_t));
 
-    cell.m_value_size = get_uint32(in);
-    in.advance(sizeof(uint32_t));
+    if (is_external) {
+        cell.m_value_size = get_uint32(in);
+        in.advance(sizeof(uint32_t));
+    }
 
     cell.m_key = in;
     cell.m_key.truncate(key_size);
-    in.advance(cell.m_key.size());
 
-    const auto local_value_size = get_local_value_size(key_size, cell.m_value_size, node.size());
-    cell.m_local_value = in;
-    cell.m_local_value.truncate(local_value_size);
+    if (is_external) {
+        in.advance(cell.m_key.size());
+        const auto local_value_size = get_local_value_size(key_size, cell.m_value_size, page_size);
+        cell.m_local_value = in;
+        cell.m_local_value.truncate(local_value_size);
 
-    if (local_value_size < cell.m_value_size) {
-        in.advance(local_value_size);
-        cell.m_overflow_id.value = get_uint32(in);
+        if (local_value_size < cell.m_value_size) {
+            in.advance(local_value_size);
+            cell.m_overflow_id.value = get_uint32(in);
+        }
     }
+    cell.m_is_external = is_external;
     return cell;
 }
 
+auto Cell::read_at(const Node &node, Index offset) -> Cell
+{
+    return read_at(node.page().range(offset), node.size(), node.is_external());
+}
+
 Cell::Cell(const Parameters &param)
-    : m_key {param.key}
-    , m_local_value {param.local_value}
-    , m_overflow_id {param.overflow_id}
-    , m_value_size {param.value_size} {}
+    : m_key {param.key},
+      m_local_value {param.local_value},
+      m_overflow_id {param.overflow_id},
+      m_value_size {param.value_size},
+      m_page_size {param.page_size},
+      m_is_external {param.is_external} {}
 
 auto Cell::size() const -> Size
 {
-    static constexpr Size KEY_AND_VALUE_SIZES {sizeof(uint16_t) + sizeof(uint32_t)};
-    const auto is_internal = !m_left_child_id.is_null();
+    const auto is_internal = !m_is_external;
+    const auto size_fields {sizeof(uint16_t) + sizeof(uint32_t)*m_is_external};
     const auto has_overflow_id = !m_overflow_id.is_null();
     return PAGE_ID_SIZE * static_cast<Size>(is_internal + has_overflow_id) +
-           KEY_AND_VALUE_SIZES + m_key.size() + m_local_value.size();
+           size_fields + m_key.size() + m_local_value.size();
 }
 
 auto Cell::left_child_id() const -> PID
 {
+    CALICO_EXPECT_FALSE(m_is_external);
     return m_left_child_id;
 }
 
 auto Cell::set_left_child_id(PID left_child_id) -> void
 {
+    CALICO_EXPECT_FALSE(m_is_external);
     m_left_child_id = left_child_id;
 }
 
 auto Cell::set_overflow_id(PID id) -> void
 {
+    CALICO_EXPECT_TRUE(m_is_external);
     m_overflow_id = id;
 }
 
@@ -74,6 +89,7 @@ auto Cell::key() const -> BytesView
 
 auto Cell::local_value() const -> BytesView
 {
+//    CALICO_EXPECT_TRUE(m_is_external);
     return m_local_value;
 }
 
@@ -89,51 +105,66 @@ auto Cell::overflow_size() const -> Size
 
 auto Cell::overflow_id() const -> PID
 {
+//    CALICO_EXPECT_TRUE(m_is_external);
     return m_overflow_id;
 }
 
 auto Cell::write(Bytes out) const -> void
 {
-    if (!m_left_child_id.is_null()) {
+    if (!m_is_external) {
+        CALICO_EXPECT_FALSE(m_left_child_id.is_root());
         put_uint32(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);
     }
     put_uint16(out, static_cast<uint16_t>(m_key.size()));
     out.advance(sizeof(uint16_t));
 
-    put_uint32(out, static_cast<uint32_t>(m_value_size));
-    out.advance(sizeof(uint32_t));
+    if (m_is_external) {
+        put_uint32(out, static_cast<uint32_t>(m_value_size));
+        out.advance(sizeof(uint32_t));
+    }
 
     mem_copy(out, m_key, m_key.size());
     out.advance(m_key.size());
 
-    const auto local = local_value();
-    mem_copy(out, local, local.size());
+    if (m_is_external) {
+        const auto local = local_value();
+        mem_copy(out, local, local.size());
 
-    if (!m_overflow_id.is_null()) {
-        CALICO_EXPECT_LT(local.size(), m_value_size);
-        out.advance(local.size());
-        put_uint32(out, m_overflow_id.value);
+        if (!m_overflow_id.is_null()) {
+            CALICO_EXPECT_FALSE(m_left_child_id.is_root());
+            CALICO_EXPECT_LT(local.size(), m_value_size);
+            out.advance(local.size());
+            put_uint32(out, m_overflow_id.value);
+        }
     }
 }
 
-auto Cell::detach(Scratch scratch) -> void
+auto Cell::detach(Scratch scratch, bool ensure_internal) -> void
 {
-    const auto key_size = m_key.size();
-    const auto local_value_size = m_local_value.size();
     auto data = scratch.data();
 
-    mem_copy(data, m_key, key_size);
-    mem_copy(data.range(key_size), m_local_value, local_value_size);
+    if (ensure_internal && m_is_external) {
+        m_is_external = false;
+        m_local_value.clear();
+        m_value_size = 0;
+        m_overflow_id = PID::null();
+    }
 
-    m_key = data;
-    m_key.truncate(key_size);
-    m_local_value = data.range(key_size);
-    m_local_value.truncate(local_value_size);
+    write(data);
+    *this = read_at(data, m_page_size, m_is_external);
     m_scratch = std::move(scratch);
 }
 
-auto make_cell(BytesView key, BytesView value, Size page_size) -> Cell
+auto Cell::set_is_external(bool is_external) -> void
+{
+    m_is_external = is_external;
+    if (is_external) {
+
+    }
+}
+
+auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
 {
     CALICO_EXPECT_FALSE(key.is_empty());
     const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
@@ -141,6 +172,8 @@ auto make_cell(BytesView key, BytesView value, Size page_size) -> Cell
     param.key = key;
     param.local_value = value;
     param.value_size = value.size();
+    param.page_size = page_size;
+    param.is_external = true;
 
     if (local_value_size != value.size()) {
         CALICO_EXPECT_LT(local_value_size, value.size());
@@ -148,6 +181,16 @@ auto make_cell(BytesView key, BytesView value, Size page_size) -> Cell
         // Set to an arbitrary value.
         param.overflow_id = PID::root();
     }
+    return Cell {param};
+}
+
+auto make_internal_cell(BytesView key, Size page_size) -> Cell
+{
+    CALICO_EXPECT_FALSE(key.is_empty());
+    Cell::Parameters param;
+    param.key = key;
+    param.page_size = page_size;
+    param.is_external = false;
     return Cell {param};
 }
 

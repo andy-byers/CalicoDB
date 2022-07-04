@@ -23,11 +23,6 @@ public:
         return 1.0;
     }
 
-    [[nodiscard]] auto page_count() const -> Size override
-    {
-        return m_frames.size();
-    }
-
     [[nodiscard]] auto page_size() const -> Size override
     {
         return m_page_size;
@@ -70,6 +65,7 @@ public:
 
     auto purge() -> void override {}
 
+    [[nodiscard]] auto page_count() const -> Size override;
     [[nodiscard]] auto allocate(PageType) -> Page override;
     [[nodiscard]] auto acquire(PID, bool) -> Page override;
     auto commit() -> void override;

@@ -16,7 +16,53 @@ namespace calico {
 class ITree;
 class Node;
 
-template<std::size_t Length = 6> auto make_key(Index key) -> std::string
+namespace tools {
+
+    template<class T>
+    auto find(T &t, const std::string &key, bool allow_greater = false) -> Cursor
+    {
+        return t.find(stob(key), allow_greater);
+    }
+
+    template<class T>
+    auto contains(T &t, const std::string &key) -> bool
+    {
+        return find(t, key).is_valid();
+    }
+
+    template<class T>
+    auto contains(T &t, const std::string &key, const std::string &value) -> bool
+    {
+        if (auto c = find(t, key); c.is_valid())
+            return c.value() == value;
+        return false;
+    }
+
+    template<class T>
+    auto insert(T &t, const std::string &key, const std::string &value) -> bool
+    {
+        return t.insert(stob(key), stob(value));
+    }
+
+    template<class T>
+    auto erase(T &t, const std::string &key) -> bool
+    {
+        return t.erase(find(t, key));
+    }
+
+    template<class T>
+    auto erase_one(T &t, const std::string &key) -> bool
+    {
+        if (t.erase(find(t, key)))
+            return true;
+        return t.erase(t.find_minimum());
+    }
+
+} // tools
+
+
+
+template<std::size_t Length = 20> auto make_key(Index key) -> std::string
 {
     auto key_string = std::to_string(key);
     return std::string(Length - key_string.size(), '0') + key_string;
@@ -41,14 +87,14 @@ private:
 
 class TreePrinter {
 public:
-    explicit TreePrinter(ITree&);
-    auto print() -> void;
+    explicit TreePrinter(ITree&, bool = true);
+    auto print(Size = 0) -> void;
 
 private:
     auto add_spaces_to_level(Size, Index) -> void;
     auto add_spaces_to_other_levels(Size, Index) -> void;
     auto print_aux(Node, Index) -> void;
-    auto add_key_to_level(BytesView, Index) -> void;
+    auto add_key_to_level(BytesView, Index, bool) -> void;
     auto add_key_separator_to_level(Index) -> void;
     auto add_node_start_to_level(Index, Index) -> void;
     auto add_node_end_to_level(Index) -> void;
@@ -60,6 +106,7 @@ private:
 
     std::vector<std::string> m_levels;
     ITree &m_tree;
+    bool m_has_integer_keys {};
 };
 
 class WALReader;
@@ -128,6 +175,7 @@ public:
         bool is_sequential {};
     };
 
+    RecordGenerator() = default;
     explicit RecordGenerator(Parameters);
     auto generate(Random&, Size) -> std::vector<Record>;
 
@@ -135,72 +183,17 @@ private:
     Parameters m_param;
 };
 
-template<class Db> class DatabaseBuilder {
-public:
-    explicit DatabaseBuilder(Db *db, unsigned seed = 0)
-        : m_random {seed}
-        , m_db {db} {}
-
-    auto write_records(Size num_records, RecordGenerator::Parameters param)
-    {
-        RecordGenerator generator {param};
-        for (const auto &[k, v]: generator.generate(m_random, num_records))
-            m_db->write(stob(k), stob(v));
-        m_db->commit();
-    }
-
-    auto write_unique_records(Size num_records, RecordGenerator::Parameters param)
-    {
-        auto counter = static_cast<ssize_t>(num_records);
-
-        while (counter > 0) {
-            RecordGenerator generator {param};
-            decltype(counter) num_written {};
-
-            for (const auto &[k, v]: generator.generate(m_random, static_cast<Size>(counter))) {
-                if (!m_db->read(stob(k), Ordering::EQ)) {
-                    m_db->write(stob(k), stob(v));
-                    num_written++;
-                }
-            }
-            counter -= num_written;
-        }
-        m_db->commit();
-    }
-
-    [[nodiscard]] auto collect_records() const -> std::vector<Record>
-    {
-        std::vector<Record> records;
-        auto reader = m_db->get_cursor();
-        if (!reader.has_record())
-            return {};
-        reader.find_minimum();
-        do {
-            records.emplace_back(Record {btos(reader.key()), reader.value()});
-        } while (reader.increment());
-        return records;
-    }
-
-private:
-    Random m_random;
-    Db *m_db;
-};
-
 template<class Db, class F> auto traverse_db(Db &db, F &&f)
 {
-    if (auto cursor = db.get_cursor(); cursor.has_record()) {
-        cursor.find_minimum();
-        do {
-            f(btos(cursor.key()), cursor.value());
-        } while (cursor.increment());
-    }
+    for (auto c = db.find_minimum(); c.is_valid(); c++)
+        f(c.record());
 }
 
 template<class Db> auto collect_records(Db &db) -> std::vector<Record>
 {
     std::vector<Record> out;
-    traverse_db(db, [&out](const std::string &key, const std::string &value) {
-        out.emplace_back(Record {key, value});
+    traverse_db(db, [&out](const Record &record) {
+        out.emplace_back(record);
     });
     return out;
 }

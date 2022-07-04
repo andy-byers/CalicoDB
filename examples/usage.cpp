@@ -1,6 +1,7 @@
 
 #include "calico/calico.h"
 #include <filesystem>
+#include <spdlog/fmt/fmt.h>
 
 namespace {
 
@@ -10,16 +11,17 @@ auto bytes_objects()
 {
     auto function_taking_a_bytes_view = [](calico::BytesView) {};
 
-    std::string data {"Hello, bears!"};
+    std::string data {"Hello, world!"};
 
-    // Construct slices from a string. The string still owns the memory, the slices just refer to it.
+    // Construct slices from a string. The string still owns the memory, the slices just refer
+    // to it.
     calico::Bytes b {data.data(), data.size()};
     calico::BytesView v {data.data(), data.size()};
 
     // Convenience conversion from a string.
     const auto from_string = calico::stob(data);
 
-    // Convenience conversion back to a string. This operation must allocate a new string.
+    // Convenience conversion back to a string. This operation may allocate heap memory.
     assert(calico::btos(from_string) == data);
 
     // Implicit conversions from `Bytes` to `BytesView` are allowed.
@@ -30,95 +32,83 @@ auto bytes_objects()
 
     // Comparisons.
     assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
-    assert(b == calico::stob("bears"));
+    assert(b == calico::stob("world"));
 }
 
 auto updating_a_database(calico::Database &db)
 {
-    // Insert some records.
-    assert(db.write(calico::stob("grizzly bear"), calico::stob("big")));
-    assert(db.write(calico::stob("kodiak bear"), calico::stob("awesome")));
-    assert(db.write(calico::stob("polar bear"), calico::stob("cool")));
-    assert(db.write({"sun bear", "respectable"}));
-    assert(db.write({"panda bear", "rare"}));
-    assert(db.write({"black bear", "lovable"}));
+    // Insert some records. If a record is already in the database, insert() will return false.
+    assert(db.insert(calico::stob("bengal"), calico::stob("short;spotted,marbled,rosetted")));
+    assert(db.insert(calico::stob("turkish vankedisi"), calico::stob("long;white")));
+    assert(db.insert(calico::stob("abyssinian"), calico::stob("short;ticked tabby")));
+    assert(db.insert({"russian blue", "short;blue"}));
+    assert(db.insert({"american shorthair", "short;all"}));
+    assert(db.insert({"badger", "???"}));
+    assert(db.insert({"manx", "short,long;all"}));
+    assert(db.insert({"chantilly-tiffany", "long;solid,tabby"}));
+    assert(db.insert({"cyprus", "all;all"}));
 
-    // Update an existing record (keys are always unique). write() returns false if the record was already in the database.
-    assert(!db.write(calico::stob("grizzly bear"), calico::stob("huge")));
-
-    // Erase a record.
-    assert(db.erase(calico::stob("grizzly bear")));
+    // Erase a record by key.
+    assert(db.erase(calico::stob("badger")));
 }
 
 auto querying_a_database(calico::Database &db)
 {
-    // We can require an exact match.
-    const auto record = db.read(calico::stob("sun bear"), calico::Ordering::EQ);
-    assert(record->value == "respectable");
+    static constexpr auto target = "russian blue";
+    const auto key = calico::stob(target);
 
-    // Or, we can look for the first record with a key less than or greater than the given key.
-    const auto less_than = db.read(calico::stob("sun bear"), calico::Ordering::LT);
-    const auto greater_than = db.read(calico::stob("sun bear"), calico::Ordering::GT);
-    assert(less_than->value == "cool");
+    // By default, find() looks for the first record with a key equal to the given key and
+    // returns a cursor pointing to it.
+    auto cursor = db.find(key);
+    assert(cursor.is_valid());
+    assert(cursor.key() == key);
 
-    // Whoops, there isn't a key greater than "sun bear".
-    assert(greater_than == std::nullopt);
+    // We can use the second parameter to leave the cursor on the next record, if the target
+    // key does not exist.
+    const auto prefix = key.copy().truncate(key.size() / 2);
+    assert(db.find(prefix, true).value() == cursor.value());
 
-    // We can also search for the minimum and maximum.
-    const auto smallest = db.read_minimum();
-    const auto largest = db.read_maximum();
-}
+    // Cursors returned from the find*() methods can be used for range queries. They can
+    // traverse the database in sequential order, or in reverse sequential order.
+    for (auto c = db.find_minimum(); c.is_valid(); c++) {}
+    for (auto c = db.find_maximum(); c.is_valid(); c--) {}
 
-auto cursor_objects(calico::Database &db)
-{
-    auto cursor = db.get_cursor();
-    assert(cursor.has_record());
-
-    // Seek to extrema.
-    cursor.find_maximum();
-    cursor.find_minimum();
-
-    // Forward traversal.
-    assert(cursor.increment());
-    assert(cursor.increment(2) == 2);
-
-    // Reverse traversal.
-    assert(cursor.decrement());
-    assert(cursor.decrement(2) == 2);
-
-    // Key and value access. For the key, we first convert to std::string, since key() returns a BytesView.
-    const auto key = calico::btos(cursor.key());
-    const auto value = cursor.value();
-    printf("Record {%s, %s}\n", key.c_str(), value.c_str()); // Record {black bear, lovable}
+    // They also support equality comparison.
+    if (const auto boundary = db.find(key); boundary.is_valid()) {
+        for (auto c = db.find_minimum(); c.is_valid() && c != boundary; c++) {}
+        for (auto c = db.find_maximum(); c.is_valid() && c != boundary; c--) {}
+    }
 }
 
 auto transactions(calico::Database &db)
 {
-    db.write(calico::stob("a"), calico::stob("1"));
-    db.write(calico::stob("b"), calico::stob("2"));
+    // Commit all the updates we made in the previous examples.
     db.commit();
 
-    db.write(calico::stob("c"), calico::stob("3"));
-    assert(db.erase(calico::stob("a")));
-    assert(db.erase(calico::stob("b")));
+    // Make some changes and abort the transaction.
+    db.insert({"opossum", "pretty cute"});
+    assert(db.erase(db.find_minimum()));
+    assert(db.erase(db.find_maximum()));
     db.abort();
 
-    // Database still contains {"a", "1"} and {"b", "2"}.
-    assert(db.read(calico::stob("a"), calico::Ordering::EQ)->value == "1");
-    assert(db.read(calico::stob("b"), calico::Ordering::EQ)->value == "2");
+    // All updates since the last call to commit() have been reverted.
+    assert(not db.find(calico::stob("opposum")).is_valid());
+    assert(db.find_minimum().key() == calico::stob("abyssinian"));
+    assert(db.find_maximum().key() == calico::stob("turkish vankedisi"));
 }
 
-auto deleting_a_database(calico::Database db)
-{
-    // We can delete a database by passing ownership to the following static method.
-    calico::Database::destroy(std::move(db));
-}
+//auto deleting_a_database(calico::Database db)
+//{
+//    // We can delete a database by passing ownership to the following static method.
+//    calico::Database::destroy(std::move(db));
+//}
 
 } // namespace
 
 auto main(int, const char *[]) -> int
 {
-    std::filesystem::remove(PATH);
+    std::error_code error;
+    std::filesystem::remove_all(PATH, error);
 
     try {
         calico::Options options;
@@ -126,16 +116,8 @@ auto main(int, const char *[]) -> int
         bytes_objects();
         updating_a_database(db);
         querying_a_database(db);
-        cursor_objects(db);
         transactions(db);
-
-        for (int i = 0; i < 10000; ++i)
-            db.write(calico::stob(std::to_string(i)), calico::stob(std::to_string(i)));
-
-        for (int i = 0; i < 10000; ++i)
-            db.erase(calico::stob(std::to_string(i)));
-
-        deleting_a_database(std::move(db));
+//        deleting_a_database(std::move(db));
     } catch (const calico::CorruptionError &error) {
         printf("CorruptionError: %s\n", error.what());
     } catch (const calico::IOError &error) {

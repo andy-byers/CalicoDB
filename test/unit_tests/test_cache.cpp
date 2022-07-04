@@ -9,33 +9,15 @@ namespace {
 
 using namespace calico;
 
-TEST(CacheTests, FreshCacheIsEmpty)
+TEST(CacheTests, NewCacheIsEmpty)
 {
     LruCache<int, int> cache;
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
 }
 
-TEST(CacheTests, a)
-{
-    LruCache<int, int> cache;
-    cache.put(1, 1);
-    cache.put(2, 2);
-    cache.put(3, 3);
-    auto a = cache.evict();
-    auto b = cache.evict();
-    auto c = cache.evict();
-    auto d = cache.evict();
-    ASSERT_EQ(*a, 1);
-    ASSERT_EQ(*b, 2);
-    ASSERT_EQ(*c, 3);
-    ASSERT_EQ(d, std::nullopt);
-}
-
 class PageCacheTests: public testing::Test {
 public:
-    const LSN LARGE_LSN {1'000'000'000};
-
     ~PageCacheTests() override = default;
 
     auto cache_put(Frame frame)

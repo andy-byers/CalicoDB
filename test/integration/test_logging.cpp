@@ -1,8 +1,10 @@
+#include <gtest/gtest.h>
 #include <vector>
 #include "fakes.h"
 #include "tools.h"
-#include "file/system.h"
 #include "pool/buffer_pool.h"
+#include "storage/directory.h"
+#include "storage/system.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_record.h"
 #include "wal/wal_writer.h"
@@ -26,15 +28,17 @@ public:
         options.block_size = BLOCK_SIZE;
         FakeFilesHarness harness {options};
         auto sink = logging::create_sink("", 0);
+        bank = std::move(harness.bank);
         pool = std::make_unique<BufferPool>(BufferPool::Parameters{
-            std::move(harness.tree_file),
-            std::make_unique<WALReader>(WALReader::Parameters {"", std::move(harness.wal_reader_file), sink, options.block_size}),
-            std::make_unique<WALWriter>(WALWriter::Parameters {"", std::move(harness.wal_writer_file), sink, options.block_size}),
-            logging::create_sink("", 0),
+            *bank,
+            std::make_unique<WALReader>(WALReader::Parameters {*bank, sink, options.block_size}),
+            std::make_unique<WALWriter>(WALWriter::Parameters {*bank, sink, options.block_size}),
+            sink,
             LSN::base(),
             CACHE_SIZE,
             0,
             options.page_size,
+            0666,
             true,
         });
         pool_backing = harness.tree_backing;
@@ -46,18 +50,14 @@ public:
 
     auto recreate_components() -> void
     {
-        auto pool_file = std::make_unique<FaultyReadWriteMemory>(pool_backing);
-        auto reader_file = std::make_unique<FaultyReadOnlyMemory>(wal_backing);
-        auto writer_file = std::make_unique<FaultyLogMemory>(wal_backing);
-
-        wal_reader_faults = reader_file->controls();
-        wal_writer_faults = writer_file->controls();
-        auto sink = logging::create_sink("", 0);
+        wal_reader_faults = bank->open_memory(WAL_NAME, Mode::READ_ONLY, 0666)->faults();
+        wal_writer_faults = bank->open_memory(WAL_NAME, Mode::READ_ONLY, 0666)->faults();
         pool.reset();
+        auto sink = logging::create_sink("", 0);
         pool = std::make_unique<BufferPool>(BufferPool::Parameters{
-            std::move(pool_file),
-            std::make_unique<WALReader>(WALReader::Parameters {"", std::move(reader_file), sink, BLOCK_SIZE}),
-            std::make_unique<WALWriter>(WALWriter::Parameters {"", std::move(writer_file), sink, BLOCK_SIZE}),
+            *bank,
+            std::make_unique<WALReader>(WALReader::Parameters {*bank, sink, BLOCK_SIZE}),
+            std::make_unique<WALWriter>(WALWriter::Parameters {*bank, sink, BLOCK_SIZE}),
             logging::create_sink("", 0),
             LSN::base(),
             CACHE_SIZE,
@@ -96,6 +96,7 @@ public:
     FaultControls wal_reader_faults;
     FaultControls wal_writer_faults;
     std::unique_ptr<BufferPool> pool;
+    std::unique_ptr<MemoryBank> bank;
 };
 
 TEST_F(LoggingTests, FreshBufferPoolIsEmpty)

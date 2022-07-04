@@ -1,4 +1,4 @@
-# Modified from LevelDB's GitHub workflows file.
+# Modified from LevelDB's GitHub workflows storage.
 name: CI
 on: [pull_request, push]
 permissions:

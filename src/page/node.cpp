@@ -22,6 +22,18 @@ auto NodeHeader::right_sibling_id() const -> PID
     return PID {get_uint32(m_page->range(header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET))};
 }
 
+auto NodeHeader::reserved() const -> uint32_t
+{
+    CALICO_EXPECT_EQ(m_page->type(), PageType::INTERNAL_NODE);
+    return get_uint32(m_page->range(header_offset() + NodeLayout::RESERVED_OFFSET));
+}
+
+auto NodeHeader::left_sibling_id() const -> PID
+{
+    CALICO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
+    return PID {get_uint32(m_page->range(header_offset() + NodeLayout::LEFT_SIBLING_ID_OFFSET))};
+}
+
 auto NodeHeader::rightmost_child_id() const -> PID
 {
     CALICO_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
@@ -77,6 +89,20 @@ auto NodeHeader::set_right_sibling_id(PID right_sibling_id) -> void
     CALICO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
     m_page->put_u32(offset, right_sibling_id.value);
+}
+
+auto NodeHeader::set_reserved(uint32_t reserved) -> void
+{
+    CALICO_EXPECT_EQ(m_page->type(), PageType::INTERNAL_NODE);
+    const auto offset = header_offset() + NodeLayout::RESERVED_OFFSET;
+    m_page->put_u32(offset, reserved);
+}
+
+auto NodeHeader::set_left_sibling_id(PID left_sibling_id) -> void
+{
+    CALICO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
+    const auto offset = header_offset() + NodeLayout::LEFT_SIBLING_ID_OFFSET;
+    m_page->put_u32(offset, left_sibling_id.value);
 }
 
 auto NodeHeader::set_rightmost_child_id(PID rightmost_child_id) -> void
@@ -315,7 +341,7 @@ auto BlockAllocator::free(Index ptr, Size size) -> void
 {
     CALICO_EXPECT_LE(ptr + size, m_page->size());
     CALICO_EXPECT_GE(ptr, NodeLayout::content_offset(m_page->id()));
-    if (size < 4) {
+    if (size < FREE_BLOCK_HEADER_SIZE) {
         m_header->set_frag_count(m_header->frag_count() + size);
     } else {
         set_next_pointer(ptr, m_header->free_start());
@@ -339,6 +365,11 @@ auto Node::parent_id() const -> PID
 auto Node::right_sibling_id() const -> PID
 {
     return m_header.right_sibling_id();
+}
+
+auto Node::left_sibling_id() const -> PID
+{
+    return m_header.left_sibling_id();
 }
 
 auto Node::rightmost_child_id() const -> PID
@@ -568,7 +599,7 @@ auto Node::insert_at(Index index, Cell cell) -> void
 {
     CALICO_EXPECT_FALSE(is_overflowing());
     CALICO_EXPECT_LE(index, cell_count());
-    CALICO_EXPECT_EQ(is_external(), cell.left_child_id().is_null());
+    CALICO_EXPECT_EQ(is_external(), cell.is_external());
 
     const auto local_size = cell.size();
 
@@ -601,7 +632,7 @@ auto Node::insert_at(Index index, Cell cell) -> void
     if (offset < m_header.cell_start())
         m_header.set_cell_start(offset);
 
-    CALICO_VALIDATE(validate());
+//    CALICO_VALIDATE(validate());
 }
 
 auto Node::remove(BytesView key) -> bool
@@ -621,7 +652,7 @@ auto Node::remove_at(Index index, Size local_size) -> void
     CALICO_EXPECT_FALSE(is_overflowing());
     m_allocator.free(m_directory.get_pointer(index).value, local_size);
     m_directory.remove_pointer(index);
-    CALICO_VALIDATE(validate());
+//    CALICO_VALIDATE(validate());
 }
 
 auto Node::reset(bool reset_header) -> void
@@ -644,73 +675,96 @@ auto transfer_cell(Node &src, Node &dst, Index index) -> void
     src.remove_at(index, cell_size);
 }
 
-auto can_merge_siblings(const Node &Ln, const Node &rn, const Cell &separator) -> bool
+auto accumulate_occupied_space(const Node &Ln, const Node &rn)
 {
+    const auto page_size = Ln.size();
+    CALICO_EXPECT_EQ(page_size, rn.size());
+    CALICO_EXPECT_EQ(Ln.type(), rn.type());
     CALICO_EXPECT_FALSE(Ln.is_overflowing());
     CALICO_EXPECT_FALSE(rn.is_overflowing());
     CALICO_EXPECT_FALSE(Ln.id().is_root());
     CALICO_EXPECT_FALSE(rn.id().is_root());
-    const auto page_size = Ln.size();
-    CALICO_EXPECT_EQ(page_size, rn.size());
-    CALICO_EXPECT_EQ(Ln.type(), rn.type());
-
     Size total {};
-
-    // Size contributed by the separator cell and cell pointer. Note that the separator must be from an internal
-    // node, so it has a left child ID. If Ln/rn are external, the left child ID will be discarded.
-    total += separator.size() - Ln.is_external()*PAGE_ID_SIZE + CELL_POINTER_SIZE;
 
     // Occupied space in each node, including the headers.
     total += page_size - Ln.usable_space();
     total += page_size - rn.usable_space();
 
     // Disregard one of the sets of headers.
-    total -= PageLayout::HEADER_SIZE + NodeLayout::HEADER_SIZE;
-    return total <= page_size;
+    return total - PageLayout::HEADER_SIZE + NodeLayout::HEADER_SIZE;
 }
 
-auto merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
+auto can_merge_internal_siblings(const Node &Ln, const Node &rn, const Cell &separator) -> bool
 {
-    if (Lc.is_external())
-        Lc.set_right_sibling_id(rc.right_sibling_id());
+    const auto total = accumulate_occupied_space(Ln, rn) +
+                       separator.size() + CELL_POINTER_SIZE;
+    return total <= Ln.size();
+}
 
+auto can_merge_external_siblings(const Node &Ln, const Node &rn) -> bool
+{
+    return accumulate_occupied_space(Ln, rn) <= Ln.size();
+}
+
+auto can_merge_siblings(const Node &Ln, const Node &rn, const Cell &separator) -> bool
+{
+    if (Ln.is_external())
+        return can_merge_external_siblings(Ln, rn);
+    return can_merge_internal_siblings(Ln, rn, separator);
+}
+
+auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
+{
     // Move the separator from the parent to the left child node.
     auto separator = parent.read_cell(index);
     const auto separator_size = separator.size();
-    if (!Lc.is_external()) {
-        separator.set_left_child_id(Lc.rightmost_child_id());
-    } else {
-        separator.set_left_child_id(PID::null());
-    }
+    separator.set_left_child_id(Lc.rightmost_child_id());
     Lc.insert(std::move(separator));
     parent.remove_at(index, separator_size);
 
     // Transfer the rest of the cells. Lc shouldn't overflow.
-    while (rc.cell_count()) {
+    while (rc.cell_count())
         transfer_cell(rc, Lc, 0);
-        CALICO_EXPECT_FALSE(Lc.is_overflowing());
-    }
-    if (!Lc.is_external())
-        Lc.set_rightmost_child_id(rc.rightmost_child_id());
+    CALICO_EXPECT_FALSE(Lc.is_overflowing());
+
+    Lc.set_rightmost_child_id(rc.rightmost_child_id());
     parent.set_child_id(index, Lc.id());
-    if (parent.rightmost_child_id() == rc.id())
+    if (parent.rightmost_child_id() == rc.id()) // TODO: Necessary???
         parent.set_rightmost_child_id(Lc.id());
 }
 
-auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
+auto external_merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
 {
-    if (Lc.is_external())
-        Lc.set_right_sibling_id(rc.right_sibling_id());
+    Lc.set_right_sibling_id(rc.right_sibling_id());
 
+    // Move the separator from the parent to the left child node.
+    auto separator = parent.read_cell(index);
+    parent.remove_at(index, separator.size());
+
+    while (rc.cell_count())
+        transfer_cell(rc, Lc, 0);
+    CALICO_EXPECT_FALSE(Lc.is_overflowing());
+    parent.set_child_id(index, Lc.id());
+    if (parent.rightmost_child_id() == rc.id()) // TODO: Necessary???
+        parent.set_rightmost_child_id(Lc.id());
+}
+
+auto merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
+{
+    if (Lc.is_external()) {
+        external_merge_left(Lc, rc, parent, index);
+    } else {
+        internal_merge_left(Lc, rc, parent, index);
+    }
+}
+
+auto internal_merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
+{
     // Move the separator from the source to the left child node.
     auto separator = parent.read_cell(index);
     const auto separator_size = separator.size();
-    if (!Lc.is_external()) {
-        separator.set_left_child_id(Lc.rightmost_child_id());
-        Lc.set_rightmost_child_id(rc.rightmost_child_id());
-    } else {
-        separator.set_left_child_id(PID::null());
-    }
+    separator.set_left_child_id(Lc.rightmost_child_id());
+    Lc.set_rightmost_child_id(rc.rightmost_child_id());
     Lc.insert(std::move(separator));
     CALICO_EXPECT_EQ(parent.child_id(index + 1), rc.id());
     parent.set_child_id(index + 1, Lc.id());
@@ -720,6 +774,29 @@ auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
     while (rc.cell_count()) {
         transfer_cell(rc, Lc, 0);
         CALICO_EXPECT_FALSE(Lc.is_overflowing());
+    }
+}
+
+auto external_merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
+{
+    Lc.set_right_sibling_id(rc.right_sibling_id());
+
+    auto separator = parent.read_cell(index);
+    CALICO_EXPECT_EQ(parent.child_id(index + 1), rc.id());
+    parent.set_child_id(index + 1, Lc.id());
+    parent.remove_at(index, separator.size());
+
+    while (rc.cell_count())
+        transfer_cell(rc, Lc, 0);
+    CALICO_EXPECT_FALSE(Lc.is_overflowing());
+}
+
+auto merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
+{
+    if (Lc.is_external()) {
+        external_merge_right(Lc, rc, parent, index);
+    } else {
+        internal_merge_right(Lc, rc, parent, index);
     }
 }
 
@@ -761,11 +838,8 @@ auto merge_root(Node &root, Node &child) -> void
     root.page().set_type(child.type());
 }
 
-auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+auto split_external_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 {
-    // get the overflow cell. The caller should make sure the node is overflowing
-    // before calling this method.
-    CALICO_EXPECT_TRUE(Ln.is_overflowing());
     auto overflow = Ln.take_overflow_cell();
 
     // Include the overflow cell in our count.
@@ -777,27 +851,28 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     auto where = ThreeWayComparison::EQ;
     auto median_index = n / 2;
 
-    const auto select_median = [&](Index index) {
+    const auto create_median = [&](Index index) {
         if (index == median_index) {
-            return std::move(overflow);
+            auto median = make_internal_cell(overflow.key(), Ln.size());
+            median.detach(std::move(scratch), Ln.is_external());
+            return median;
         } else {
             const auto is_right_of_median = index > median_index;
             median_index -= !is_right_of_median;
             // Since `is_left_of_median` is either 0 or 1, this will produce either -1 or 1, i.e. LT or
             // GT to indicate the position of the overflow cell relative to the median.
             where = static_cast<ThreeWayComparison>(2*is_right_of_median - 1);
-            return Ln.extract_cell(median_index, std::move(scratch));
+            auto median = Ln.read_cell(median_index);
+            median.detach(std::move(scratch), Ln.is_external());
+            return median;
         }
     };
-    auto median = select_median(overflow_idx);
-
-    if (Ln.is_external()) {
-        rn.set_right_sibling_id(Ln.right_sibling_id());
-        Ln.set_right_sibling_id(rn.id());
-    } else {
-        rn.set_rightmost_child_id(Ln.rightmost_child_id());
-        Ln.set_rightmost_child_id(median.left_child_id());
-    }
+    auto median = create_median(overflow_idx);
+    rn.set_right_sibling_id(Ln.right_sibling_id());
+    Ln.set_right_sibling_id(rn.id());
+    rn.set_left_sibling_id(Ln.id());
+    // Warning: We don't have access to the former right sibling of Ln, but we need to set its left child ID.
+    //          We need to make sure to do that in the caller.
     rn.set_parent_id(Ln.parent_id());
     median.set_left_child_id(Ln.id());
 
@@ -814,18 +889,73 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
         CALICO_EXPECT_FALSE(found_eq);
         target.insert_at(index, std::move(cell));
     };
-    switch (where) {
-        case ThreeWayComparison::LT:
-            do_transfer(Ln, std::move(overflow));
-            break;
-        case ThreeWayComparison::GT:
-            do_transfer(rn, std::move(overflow));
-            break;
-        case ThreeWayComparison::EQ:
-            // No transfer. The median/overflow cell is returned.
-            break;
+    if (where == ThreeWayComparison::LT) {
+        do_transfer(Ln, std::move(overflow));
+    } else {
+        do_transfer(rn, std::move(overflow));
     }
     return median;
+}
+
+auto split_internal_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+{
+    auto overflow = Ln.take_overflow_cell();
+
+    // Include the overflow cell in our count.
+    const auto n = Ln.cell_count() + 1;
+
+    // Figure out where the overflow cell should go.
+    const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
+    CALICO_EXPECT_FALSE(should_be_false);
+    auto where = ThreeWayComparison::EQ;
+    auto median_index = n / 2;
+
+    const auto create_median = [&](Index index) {
+        if (index == median_index) {
+            return std::move(overflow);
+        } else {
+            const auto is_right_of_median = index > median_index;
+            median_index -= !is_right_of_median;
+            // Since `is_left_of_median` is either 0 or 1, this will produce either -1 or 1, i.e. LT or
+            // GT to indicate the position of the overflow cell relative to the median.
+            where = static_cast<ThreeWayComparison>(2*is_right_of_median - 1);
+            return Ln.extract_cell(median_index, std::move(scratch));
+        }
+    };
+    auto median = create_median(overflow_idx);
+    rn.set_rightmost_child_id(Ln.rightmost_child_id());
+    Ln.set_rightmost_child_id(median.left_child_id());
+    rn.set_parent_id(Ln.parent_id());
+    median.set_left_child_id(Ln.id());
+
+    // Transfer cells after the median cell to the right sibling node.
+    const auto cell_count = Ln.cell_count();
+    for (auto index = median_index; index < cell_count; ++index) {
+        auto cell = Ln.read_cell(median_index);
+        const auto cell_size = cell.size();
+        rn.insert_at(rn.cell_count(), std::move(cell));
+        Ln.remove_at(median_index, cell_size);
+    }
+    const auto do_transfer = [](Node &target, Cell cell) {
+        const auto [index, found_eq] = target.find_ge(cell.key());
+        CALICO_EXPECT_FALSE(found_eq);
+        target.insert_at(index, std::move(cell));
+    };
+    if (where == ThreeWayComparison::LT) {
+        do_transfer(Ln, std::move(overflow));
+    } else if (where == ThreeWayComparison::GT) {
+        do_transfer(rn, std::move(overflow));
+    }
+    return median;
+}
+
+auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+{
+    CALICO_EXPECT_TRUE(Ln.is_overflowing());
+    CALICO_EXPECT_EQ(Ln.is_external(), rn.is_external());
+    if (Ln.is_external())
+        return split_external_non_root(Ln, rn, std::move(scratch));
+    return split_internal_non_root(Ln, rn, std::move(scratch));
 }
 
 } // calico

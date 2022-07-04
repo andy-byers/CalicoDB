@@ -28,10 +28,9 @@ set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedan
 include(CheckCXXSymbolExists)
 check_cxx_symbol_exists(O_DIRECT "fcntl.h" CALICO_HAS_O_DIRECT)
 
-#option(CALICO_INSTALL "Install the library and headers" On)
+option(CALICO_INSTALL "Install the library and headers" On)
 option(CALICO_BUILD_TESTS "Build the tests" On)
 option(CALICO_BUILD_EXAMPLES "Build the examples" On)
-option(CALICO_USE_VALIDATORS "Use extra validation assertions" Off)
 
 set(CALICO_SOURCES '')
 set(CALICO_HEADERS '')
@@ -42,41 +41,50 @@ list(APPEND CALICO_SOURCES ${CALICO_HEADERS})
 include(GNUInstallDirs)
 include(FetchContent)
 
-set(SPDLOG_URL https://github.com/gabime/spdlog/archive/refs/tags/v1.10.0.zip)
-set(ZLIB_URL https://github.com/madler/zlib/archive/refs/tags/v1.2.12.zip)
-
-FetchContent_Declare(
-    spdlog
-    GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG        v1.10.0
-)
 FetchContent_Declare(
     zlib
     GIT_REPOSITORY https://github.com/madler/zlib.git
     GIT_TAG        v1.2.12
 )
-FetchContent_MakeAvailable(spdlog zlib)
+FetchContent_Declare(
+    spdlog
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG        v1.10.0
+)
+FetchContent_MakeAvailable(spdlog)
+FetchContent_GetProperties(zlib)
+if (NOT zlib_POPULATED)
+    FetchContent_Populate(zlib)
+    # TODO: Fix zlib compilation. Currently, zlib registers some CTest tests which don't compile. It looks like a
+    #       target_include_directories() is needed for their example program, otherwise it cannot find zlib.h
+    #       which is in a different directory. Or just find a different compression lib altogether...
+    add_subdirectory(${zlib_SOURCE_DIR} ${zlib_BINARY_DIR})
+endif()
 
 # Build the static library.
-add_library("${CALICO_NAME}"
-        STATIC "${CALICO_SOURCES}")
-target_include_directories("${CALICO_NAME}"
-        PRIVATE "${CALICO_SOURCE_DIR}" "${ZLIB_INCLUDE_DIRS}")
-target_include_directories("${CALICO_NAME}"
-        PUBLIC $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
-               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_compile_options("${CALICO_NAME}" PRIVATE "${CALICO_WARNINGS}")
-target_link_libraries("${CALICO_NAME}" PUBLIC pthread spdlog::spdlog zlib)
-
-if(CALICO_USE_VALIDATORS)
-    target_compile_definitions("${CALICO_NAME}" PRIVATE CALICO_USE_VALIDATORS)
-endif()
+add_library(
+    "${CALICO_NAME}"
+    STATIC "${CALICO_SOURCES}")
+target_include_directories(
+    "${CALICO_NAME}"
+    PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE "${CALICO_SOURCE_DIR}"
+    PUBLIC  "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
+target_compile_options(
+    "${CALICO_NAME}"
+    PRIVATE "${CALICO_WARNINGS}")
+target_link_libraries(
+    "${CALICO_NAME}"
+    PUBLIC  spdlog::spdlog
+    PRIVATE pthread zlib)
 
 # Build the examples/use cases.
 if(CALICO_BUILD_EXAMPLES)
     add_subdirectory(${CALICO_EXAMPLES_DIR})
 endif()
 
+# TODO
 #if(CALICO_INSTALL)
 #    set(TARGETS_NAME ${PROJECT_NAME}Targets)
 #    set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")

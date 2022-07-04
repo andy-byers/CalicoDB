@@ -79,13 +79,15 @@ public:
     static const Size PARENT_ID_OFFSET = 4;
     static const Size RIGHTMOST_CHILD_ID_OFFSET = 8;
     static const Size RIGHT_SIBLING_ID_OFFSET = 8;
-    static const Size CELL_COUNT_OFFSET = 12;
-    static const Size FREE_COUNT_OFFSET = 14;
-    static const Size CELL_START_OFFSET = 16;
-    static const Size FREE_START_OFFSET = 18;
-    static const Size FRAG_TOTAL_OFFSET = 20;
-    static const Size FREE_TOTAL_OFFSET = 22;
-    static const Size HEADER_SIZE = 24;
+    static const Size RESERVED_OFFSET = 12;
+    static const Size LEFT_SIBLING_ID_OFFSET = 12;
+    static const Size CELL_COUNT_OFFSET = 16;
+    static const Size FREE_COUNT_OFFSET = 18;
+    static const Size CELL_START_OFFSET = 20;
+    static const Size FREE_START_OFFSET = 22;
+    static const Size FRAG_TOTAL_OFFSET = 24;
+    static const Size FREE_TOTAL_OFFSET = 26;
+    static const Size HEADER_SIZE = 28;
 
     static auto header_offset(PID page_id) noexcept -> Size
     {

@@ -9,13 +9,15 @@
 namespace calico {
 
 class Frame;
-class IReadWriteFile;
+class IFileReader;
+class IFileWriter;
 struct PID;
 
 class Pager final {
 public:
     struct Parameters {
-        std::unique_ptr<IReadWriteFile> file;
+        std::unique_ptr<IFileReader> reader;
+        std::unique_ptr<IFileWriter> writer;
         Size page_size{};
         Size frame_count{};
     };
@@ -35,7 +37,8 @@ private:
     auto write_page_to_file(PID, BytesView) const -> void;
 
     std::list<Frame> m_available;           ///< List of available frames
-    std::unique_ptr<IReadWriteFile> m_file; ///< Read/write database file handle
+    std::unique_ptr<IFileReader> m_reader;
+    std::unique_ptr<IFileWriter> m_writer;
     Size m_frame_count{};
     Size m_page_size{};
 };

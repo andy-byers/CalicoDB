@@ -1,138 +1,28 @@
 
-#include <unordered_set>
-
-#include "fakes.h"
 #include "tools.h"
+#include "fakes.h"
 #include "page/page.h"
+#include "storage/directory.h"
+#include "storage/file.h"
 #include "tree/tree.h"
-#include "file/file.h"
+#include "utils/logging.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_record.h"
-#include "utils/logging.h"
+#include <spdlog/fmt/fmt.h>
+#include <unordered_set>
 
 namespace calico {
 
-TreeValidator::TreeValidator(ITree &tree)
-    : m_tree{tree} { }
-    
-auto TreeValidator::validate() -> void
+TreePrinter::TreePrinter(ITree &tree, bool has_integer_keys)
+    : m_tree{tree},
+      m_has_integer_keys {has_integer_keys} {}
+
+auto TreePrinter::print(Size indentation) -> void
 {
-    validate_parent_child_connections();
-    validate_sibling_connections();
-    validate_ordering();
-}
-
-auto TreeValidator::validate_sibling_connections() -> void
-{
-    // First node in the sibling chain.
-    auto node = m_tree.find_root(false);
-    while (!node.is_external())
-        node = m_tree.acquire_node(node.child_id(0), false);
-    std::optional<std::string> prev{};
-    while (true) {
-        for (Index cid{}; cid < node.cell_count(); ++cid) {
-            const auto key = btos(node.read_key(cid));
-            // Strict ordering.
-            if (prev)
-                CALICO_EXPECT_LT(*prev, key);
-            prev = key;
-        }
-        const auto next_id = node.right_sibling_id();
-        if (next_id.is_null())
-            break;
-        node = m_tree.acquire_node(next_id, false);
-    }
-}
-
-auto TreeValidator::validate_parent_child_connections() -> void
-{
-    auto check_connection = [&](Node &node, Index index) -> void {
-        auto child = m_tree.acquire_node(node.child_id(index), false);
-        CALICO_EXPECT_EQ(child.parent_id(), node.id());
-    };
-    traverse_inorder([&](Node &node, Index cid) -> void {
-        CALICO_EXPECT_LT(cid, node.cell_count());
-        if (!node.is_external()) {
-            check_connection(node, cid);
-            // Rightmost child.
-            if (cid == node.cell_count() - 1)
-                check_connection(node, cid + 1);
-        }
-    });
-}
-
-auto TreeValidator::validate_ordering() -> void
-{
-    const auto keys = collect_keys();
-    auto sorted = keys;
-    std::sort(sorted.begin(), sorted.end());
-    CALICO_EXPECT_EQ(keys, sorted);
-}
-
-auto TreeValidator::collect_keys() -> std::vector<std::string>
-{
-    auto keys = std::vector<std::string>{};
-    traverse_inorder([&keys](Node &node, Index cid) -> void {
-        keys.push_back(btos(node.read_key(cid)));
-    });
-    return keys;
-}
-
-auto TreeValidator::traverse_inorder(const std::function<void(Node&, Index)> &callback) -> void
-{
-    traverse_inorder_helper(m_tree.acquire_node(PID::root(), false), callback);
-}
-
-auto TreeValidator::traverse_inorder_helper(Node node, const std::function<void(Node&, Index)> &callback) -> void
-{
-    CALICO_VALIDATE(node.validate());
-
-    const auto id = node.id();
-    for (Index index{}; index <= node.cell_count(); ++index) {
-        std::optional<Cell> cell {};
-        if (index != node.cell_count())
-            cell = node.read_cell(index);
-        if (!node.is_external()) {
-            const auto next_id = node.child_id(index);
-            traverse_inorder_helper(m_tree.acquire_node(next_id, false), callback);
-            node = m_tree.acquire_node(id, false);
-        }
-        if (cell)
-            callback(node, index);
-    }
-}
-
-auto TreeValidator::is_reachable(std::string key) -> bool
-{
-    std::string temp;
-    auto success = true;
-
-    // Traverse down to the node containing key using the child pointers.
-    auto [node, index, found_eq] = m_tree.find_ge(stob(key), false);
-    if (!found_eq)
-        return false;
-
-    // Try to go back up to the root using the source pointers.
-    while (!node.id().is_root()) {
-        auto parent_id = node.parent_id();
-        if (parent_id.is_null()) {
-            success = false;
-            break;
-        }
-        node = m_tree.acquire_node(parent_id, false);
-    }
-    return success;
-}
-
-TreePrinter::TreePrinter(ITree &tree)
-    : m_tree{tree} {}
-
-auto TreePrinter::print() -> void
-{
-    print_aux(m_tree.acquire_node(PID::root(), false), 0);
+    print_aux(m_tree.pool().acquire(PID::root(), false), 0);
 
     for (auto &level: m_levels)
-        std::cout << level << '\n';
+        fmt::print("{}{}\n", std::string(indentation, ' '), level);
 }
 
 auto TreePrinter::add_spaces_to_level(Size n, Index level) -> void
@@ -158,11 +48,13 @@ auto TreePrinter::print_aux(Node node, Index level) -> void
         const auto not_last = cid < node.cell_count() - 1;
         auto cell = node.read_cell(cid);
         if (!node.is_external())
-            print_aux(m_tree.acquire_node(cell.left_child_id(), false), level + 1);
+            print_aux(m_tree.pool().acquire(cell.left_child_id(), false), level + 1);
         if (is_first)
             add_node_start_to_level(node.id().value, level);
-
-        add_key_to_level(cell.key(), level);
+        auto key = btos(cell.key());
+        if (m_has_integer_keys)
+            key = std::to_string(std::stoi(key));
+        add_key_to_level(stob(key), level, node.is_external());
         if (not_last) {
             add_key_separator_to_level(level);
         } else {
@@ -170,14 +62,15 @@ auto TreePrinter::print_aux(Node node, Index level) -> void
         }
     }
     if (!node.is_external())
-        print_aux(m_tree.acquire_node(node.rightmost_child_id(), false), level + 1);
+        print_aux(m_tree.pool().acquire(node.rightmost_child_id(), false), level + 1);
 }
 
-auto TreePrinter::add_key_to_level(BytesView key, Index level) -> void
+auto TreePrinter::add_key_to_level(BytesView key, Index level, bool has_value) -> void
 {
     const auto key_token = make_key_token(key);
-    m_levels[level] += key_token;
-    add_spaces_to_other_levels(key_token.size(), level);
+    const std::string value_token {has_value ? "*" : ""};
+    m_levels[level] += key_token + value_token;
+    add_spaces_to_other_levels(key_token.size() + value_token.size(), level);
 }
 
 auto TreePrinter::add_key_separator_to_level(Index level) -> void
@@ -213,7 +106,7 @@ auto TreePrinter::make_key_separator_token() -> std::string
 
 auto TreePrinter::make_node_start_token(Index id) -> std::string
 {
-    return std::to_string(id) + ":[";
+    return fmt::format("{}:[", id);
 }
 
 auto TreePrinter::make_node_end_token() -> std::string
@@ -254,30 +147,29 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 
 auto WALPrinter::print(const WALRecord &record) -> void
 {
-    std::cout << "Record<LSN=" << record.lsn().value
-              << ", CRC=" << record.crc() << ", ";
-    if (record.is_commit()) {
-        std::cout << "COMMIT";
-    } else {
-        const auto update = record.payload().decode();
-        std::cout << "UPDATE(pid:" << update.page_id.value << ", n=" << update.changes.size() << ')';
-    }
-    std::cout << ">\n";
+    const auto action = record.is_commit() ? "COMMIT" : fmt::format("UPDATE(pid:{}, n:{})");
+    fmt::print("Record<LSN={}, CRC={}, {}>\n", record.lsn().value, record.crc(), action);
 }
 
 
 auto WALPrinter::print(const std::string &path, Size block_size) -> void
 {
-    auto file = std::make_unique<ReadOnlyFile>(path, Mode::DIRECT, 0666);
-    WALReader reader {{path, std::move(file), logging::create_sink("", 0), block_size}};
+    const auto base = std::filesystem::path {path}.parent_path();
+    auto directory = std::make_unique<Directory>(base); // Could be /tmp.
+    WALReader reader {{*directory, logging::create_sink("", 0), block_size}};
     print(reader);
 }
 
 auto WALPrinter::print(SharedMemory data, Size block_size) -> void
 {
-    auto file = std::make_unique<ReadOnlyMemory>(std::move(data));
-    WALReader reader {{"FakeWALReader", std::move(file), logging::create_sink("", 0), block_size}};
-    print(reader);
+    // TODO: Hacky...
+    auto file = std::make_unique<File>();
+    file->open("/tmp/calico_print_wal", Mode::CREATE | Mode::WRITE_ONLY | Mode::TRUNCATE, 0666);
+    auto writer = file->open_writer();
+    writer->write(stob(data.memory()));
+    writer->sync();
+    print(file->path(), block_size);
+    file->remove();
 }
 
 auto WALPrinter::print(WALReader &reader) -> void

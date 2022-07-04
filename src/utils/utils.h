@@ -40,12 +40,6 @@ template<class T> auto is_power_of_two(T v) noexcept -> bool
     return v && !(v & (v-1));
 }
 
-inline auto get_wal_path(const std::string &path) -> std::string
-{
-    std::filesystem::path full {path};
-    return full.parent_path() / std::filesystem::path {"." + full.filename().string() + ".wal"};
-}
-
 inline auto mem_copy(Bytes dst, BytesView src, size_t n) noexcept -> void*
 {
     assert(n <= src.size());
