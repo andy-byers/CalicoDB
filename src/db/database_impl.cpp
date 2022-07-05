@@ -338,6 +338,22 @@ auto setup(const std::string &path, const Options &options) -> InitialState
         is_new = true;
     }
 
+    const auto choose_error = [is_new](std::string message) {
+        message = "cannot setup database: " + message;
+        if (is_new)
+            throw std::invalid_argument {message};
+        return CorruptionError {message};
+    };
+
+    if (header.page_size() < MINIMUM_PAGE_SIZE)
+        choose_error(fmt::format("page size is too small (must be larger than {})", MINIMUM_PAGE_SIZE));
+
+    if (header.page_size() < MINIMUM_PAGE_SIZE)
+        choose_error(fmt::format("page size is too large (must be smaller than {})", MAXIMUM_PAGE_SIZE));
+
+    if (header.page_size() < MINIMUM_PAGE_SIZE)
+        choose_error("page size is invalid (must be a power of 2)");
+
     return {
         std::move(header),
         revised,

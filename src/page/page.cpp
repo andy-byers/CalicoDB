@@ -11,7 +11,12 @@ Page::Page(const Parameters &param)
     , m_data {param.data}
     , m_id {param.id}
     , m_is_writable {param.is_writable}
-    , m_is_dirty {param.is_dirty} {}
+    , m_is_dirty {param.is_dirty}
+{
+    CALICO_EXPECT_TRUE(is_power_of_two(m_data.size()));
+    CALICO_EXPECT_GE(m_data.size(), MINIMUM_PAGE_SIZE);
+    CALICO_EXPECT_LE(m_data.size(), MAXIMUM_PAGE_SIZE);
+}
 
 Page::~Page()
 {

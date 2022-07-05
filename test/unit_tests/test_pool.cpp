@@ -14,8 +14,8 @@ namespace calico {
 
 //TEST(PagerSetupTests, ReportsOutOfRangeFrameCount)
 //{
-//    ASSERT_THROW(Pager({std::make_unique<ReadWriteMemory>(), 0x100, MIN_FRAME_COUNT - 1}), std::invalid_argument);
-//    ASSERT_THROW(Pager({std::make_unique<ReadWriteMemory>(), 0x100, MAX_FRAME_COUNT + 1}), std::invalid_argument);
+//    ASSERT_THROW(Pager({std::make_unique<ReadWriteMemory>(), 0x100, MINIMUM_FRAME_COUNT - 1}), std::invalid_argument);
+//    ASSERT_THROW(Pager({std::make_unique<ReadWriteMemory>(), 0x100, MAXIMUM_FRAME_COUNT + 1}), std::invalid_argument);
 //}
 
 class PagerTests: public testing::Test {

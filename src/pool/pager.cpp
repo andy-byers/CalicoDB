@@ -4,7 +4,6 @@
 #include "calico/exception.h"
 #include "page/page.h"
 #include "storage/file.h"
-#include "storage/interface.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
 
@@ -16,10 +15,10 @@ Pager::Pager(Parameters param)
       m_frame_count {param.frame_count},
       m_page_size {param.page_size}
 {
-    if (m_frame_count < MIN_FRAME_COUNT)
+    if (m_frame_count < MINIMUM_FRAME_COUNT)
         throw std::invalid_argument {"Frame count is too small"};
 
-    if (m_frame_count > MAX_FRAME_COUNT)
+    if (m_frame_count > MAXIMUM_FRAME_COUNT)
         throw std::invalid_argument {"Frame count is too large"};
 
     while (m_available.size() < m_frame_count)
@@ -45,7 +44,7 @@ auto Pager::truncate(Size page_count) -> void
 /**
  * Pin a database page to an available frame.
  *
- * Provides the strong guarantee concerning exceptions thrown by the storage object during the read. Also makes sure that
+ * Provides the strong guarantee concerning exceptions thrown by the file object during the read. Also makes sure that
  * newly allocated pages are zeroed out.
  *
  * @param id Page ID of the page we want to pin.

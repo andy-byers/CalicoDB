@@ -8,7 +8,7 @@ namespace calico {
 
 InMemory::InMemory(Size page_size, bool use_transactions, spdlog::sink_ptr log_sink)
     : m_scratch {page_size}
-    , m_logger {logging::create_logger(log_sink, "BufferPool")}
+    , m_logger {logging::create_logger(std::move(log_sink), "BufferPool")}
     , m_page_size {page_size}
     , m_uses_transactions {use_transactions} {}
 

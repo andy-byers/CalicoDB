@@ -8,6 +8,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + [Disclaimer](#disclaimer)
 + [Features](#features)
 + [Caveats](#caveats)
++ [Dependencies](#dependencies)
 + [Build](#build)
 + [API](#api)
   + [Opening a Database](#opening-a-database)
@@ -35,16 +36,21 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Uses a dynamic-order B<sup>+</sup>-tree to store the data in a single file
 + Supports forward and reverse traversal using cursors
 + Allows creation of in-memory databases
-+ Supports arbitrary value sizes
++ Supports nearly arbitrary values (up to 4 GB)
 + API only exposes objects (no pointers to deal with)
++ Allows tuning of various parameters (page size, block size, cache size, etc.)
 
 ## Caveats
 + Currently, Calico DB only runs on 64-bit Ubuntu and OSX
 + Uses a single WAL file, which can grow quite large in a long-running transaction
 + WAL is only used to ensure ACID properties on the current transaction and is truncated afterward
-+ Has a hard limit on key length, equal to roughly 1/4 of the page size
++ Has a hard limit on key length, equal to roughly 1/4 of the page size (anywhere from ~64 B to ~8 KB)
 + Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
+
+## Dependencies
+Calico DB depends on `spdlog` for logging, and `zlib` for compression (***NOT IMPLEMENTED YET***).
+Both libraries are downloaded during the build using CMake's FetchContent API.
 
 ## Build
 Calico DB is built using CMake.
@@ -83,9 +89,9 @@ try {
     auto db = calico::Database::open("/tmp/calico", options);
     // Run the application!
 } catch (const CorruptionError &error) {
-    // This is thrown if corruption is detected in a storage.
+    // This is thrown if corruption is detected in a file.
 } catch (const IOError &error) {
-    // This is thrown if we were unable to perform I/O on a storage.
+    // This is thrown if we were unable to perform I/O on a file.
 } catch (const std::invalid_argument &error) {
     // This is thrown if invalid arguments were passed to a Calico DB function.
 } catch (const std::system_error &error) {
@@ -262,13 +268,22 @@ We still have a ways to go performance-wise, however, it seems that the cursors 
 1. Get everything code reviewed!
 2. Get unit test coverage up
 3. Write some documentation
-4. Work on this README
-5. Work on performance
-6. Work on the benchmark suite
-   + Results may not be all that accurate
-   + Need to test large (100,000 B) values
-   + Code is very messy/difficult to change
-   + Need to benchmark against other databases
+4. Add more logging
+5. Work on this README
+6. Work on the design document
+7. Implement optional compression of record values
+8. Work on performance
+9. Work on the benchmark suite
+    + Results may not be all that accurate (really need to benchmark against other databases)
+    + Need to test large (100,000 B) values
+    + Code is very messy/difficult to change
+10. Get the CMake installation to work
+11. Implement WAL segmentation
+    + WAL should be segmented after it reaches a user-provided size
+    + Similar to `spdlog`s rotating file sink
+    + This should improve the performance of long-running transactions
+12. Consider allowing multiple independent trees in a single database
+13. 
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.
@@ -280,7 +295,7 @@ See `DESIGN.md` for more information about the design of Calico DB.
 CalicoDB
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
-┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Slices for holding contiguous sequences of bytes
+┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Constructs for holding contiguous sequences of bytes
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
@@ -289,9 +304,9 @@ CalicoDB
 ┃ ┗╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┣╸src
 ┃ ┣╸db ┄┄┄┄┄┄┄┄┄┄┄┄┄ API implementation
-┃ ┣╸file ┄┄┄┄┄┄┄┄┄┄┄ OS file module
 ┃ ┣╸pool ┄┄┄┄┄┄┄┄┄┄┄ Buffer pool module
-┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ B-tree module
+┃ ┣╸storage ┄┄┄┄┄┄┄┄ Persistent storage module
+┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization module
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Utility module
 ┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging module
 ┗╸test
