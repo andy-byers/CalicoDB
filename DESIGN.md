@@ -1,6 +1,6 @@
 # Calico DB Design
 
-## Glossary
+## Terms
 + **block**: The basic unit of storage in the `wal` file (see **page**).
 + **cell**: An structure embedded within a **node** that contains a **key** and optionally a **value**.
   **Cells** can be either internal cells or external cells, depending on what type of node they belong to.
@@ -220,3 +220,29 @@ Holds a region of a database page before and after some modification.
 |    Y |      4 | Before   |
 |    Y |  4 + Y | After    |
 
+## Cursors
+A cursor acts much like an STL iterator, allowing traversal of the database in-order.
+Since we are using a B<sup>+</sup>-tree, all records are stored in external nodes.
+Thus, cursors are confined to bottom row of the tree and move around using sibling node links.
+A valid cursor is one that is positioned on an existing database record.
+An invalid cursor is one that is not.
+Invalid cursors make no distinction between "end" (one past the last element) and the "rend" (one before the first element) positions.
+When a cursor moves out of range, it is marked invalid and cannot be restored.
+This is achieved by letting the cursor stay on the first or last element, and setting a boolean flag to mark invalid-ness.
+While this prohibits us from achieving an ordering between any two cursors, we can still use equality comparison (with the caveat that all invalid cursors compare the same).
+This means that iterating toward an invalid cursor is equivalent to iterating to the end of the database.
+For example, the following snippet will iterate through the whole database.
+```C++
+namespace cco = calico;
+
+// Here we assume that the database is nonempty and does not contain "xyz", or anything that compares 
+// greater than it.
+const auto bounds = db.find(cco::stob("xyz"), true);
+assert(not bounds.is_valid());
+
+for (auto c = db.find_minimum(); c != bounds; c++) {
+    // Do something with c.key() and/or c.value().
+}
+```
+
+This is effectively the same as iterating while `c.is_valid()`.

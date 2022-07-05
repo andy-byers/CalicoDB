@@ -25,7 +25,7 @@ namespace impl {
     /**
      * An internal class representing an unowned sequence of primitives.
      *
-     * This class should be used indirectly through the Bytes and BytesView aliases.
+     * This class should only be used through the Bytes and BytesView aliases.
      *
      * @see Bytes
      * @see BytesView
@@ -35,6 +35,9 @@ namespace impl {
     public:
         using Value = std::remove_pointer_t<Pointer>;
 
+        /**
+         * Create an empty slice.
+         */
         Slice() noexcept = default;
 
         /**

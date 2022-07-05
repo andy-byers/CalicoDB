@@ -19,9 +19,21 @@ class Node;
 namespace tools {
 
     template<class T>
-    auto find(T &t, const std::string &key, bool allow_greater = false) -> Cursor
+    auto find(T &t, const std::string &key) -> Cursor
     {
-        return t.find(stob(key), allow_greater);
+        return t.find(stob(key));
+    }
+
+    template<class T>
+    auto lower_bound(T &t, const std::string &key) -> Cursor
+    {
+        return t.lower_bound(stob(key));
+    }
+
+    template<class T>
+    auto upper_bound(T &t, const std::string &key) -> Cursor
+    {
+        return t.upper_bound(stob(key));
     }
 
     template<class T>

@@ -19,7 +19,6 @@ public:
     Random();
     explicit Random(Seed);
     virtual ~Random() = default;
-    auto engine() -> Engine;
     auto seed() const -> Seed;
     auto set_seed(Seed) -> void;
     auto next_string(Size) -> std::string;
@@ -32,12 +31,12 @@ public:
 
 protected:
     Seed m_seed {};  ///< Seed for the random number generator.
-    Engine m_rng; ///< STL random number generation engine.
+    std::default_random_engine m_rng; ///< STL random number generation engine.
 };
 
 template<class Container> auto Random::shuffle(Container &data) -> void
 {
-    std::shuffle(data.begin(), data.end(), m_rng);
+    std::shuffle(begin(data), end(data), m_rng);
 }
 
 /**
@@ -48,7 +47,7 @@ template<class Container> auto Random::shuffle(Container &data) -> void
 */
 template<class T> auto Random::next_int(T v_max) -> T
 {
-    return next_int(static_cast<T>(0), v_max);
+    return next_int(T {}, v_max);
 }
 
 /**
@@ -73,7 +72,7 @@ template<class T> auto Random::next_int(T v_min, T v_max) -> T
 */
 template<class T> auto Random::next_real(T v_max) -> T
 {
-    return next_real(T{}, v_max);
+    return next_real(T {}, v_max);
 }
 
 /**

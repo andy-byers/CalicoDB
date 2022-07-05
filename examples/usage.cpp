@@ -57,19 +57,23 @@ auto querying_a_database(calico::Database &db)
     static constexpr auto target = "russian blue";
     const auto key = calico::stob(target);
 
-    // By default, find() looks for the first record with a key equal to the given key and
-    // returns a cursor pointing to it.
+    // find() looks for a record that compares equal to the given key and returns a cursor
+    // pointing to it.
     auto cursor = db.find(key);
     assert(cursor.is_valid());
     assert(cursor.key() == key);
 
-    // We can use the second parameter to leave the cursor on the next record, if the target
-    // key does not exist.
+    // We can use lower_bound() to find the first record that does not compare less than
+    // the given key...
     const auto prefix = key.copy().truncate(key.size() / 2);
-    assert(db.find(prefix, true).value() == cursor.value());
+    assert(db.lower_bound(prefix).key() == cursor.key());
 
-    // Cursors returned from the find*() methods can be used for range queries. They can
-    // traverse the database in sequential order, or in reverse sequential order.
+    // ...and upper_bound() to find the first record that compares greater (the same
+    // record in this case).
+    assert(db.upper_bound(prefix).key() == cursor.key());
+
+    // Cursors returned from the find*() and *_bound() methods can be used for range queries.
+    // They can traverse the database in sequential order, or in reverse sequential order.
     for (auto c = db.find_minimum(); c.is_valid(); c++) {}
     for (auto c = db.find_maximum(); c.is_valid(); c--) {}
 
@@ -131,5 +135,17 @@ auto main(int, const char *[]) -> int
     } catch (...) {
         puts("...");
     }
+    namespace co = calico;
+
+    co::Options options;
+    options.page_size = 0x2000;
+    options.use_transactions = false;
+
+    auto store = co::Database::temp(options);
+
+    for (auto c = store.find_minimum(); c.is_valid(); c++)
+        fmt::print("{}, {}\n", co::btos(c.key()), c.value());
+
+    co::Database::destroy(std::move(store));
     return 0;
 }

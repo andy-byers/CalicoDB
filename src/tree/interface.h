@@ -27,7 +27,9 @@ public:
 /* TODO:
     virtual auto erase(Cursor lower, Cursor one_past_upper) -> Size;
 */
-    virtual auto find(BytesView, bool) -> Cursor = 0;
+    virtual auto find(BytesView) -> Cursor = 0;
+    virtual auto lower_bound(BytesView key) -> Cursor = 0;
+    virtual auto upper_bound(BytesView key) -> Cursor = 0;
     virtual auto find_minimum() -> Cursor = 0;
     virtual auto find_maximum() -> Cursor = 0;
     virtual auto root(bool) -> Node = 0;

@@ -1,19 +1,19 @@
 cmake_minimum_required(VERSION 3.14)
 
 SET(
-    CMAKE_CXX_FLAGS_RELWITHASSERTIONS "-O3"
-    CACHE STRING "C++ compiler flags for a RelWithAssertions build" FORCE
+        CMAKE_CXX_FLAGS_RELWITHASSERTIONS "-O3"
+        CACHE STRING "C++ compiler flags for a RelWithAssertions build" FORCE
 )
 SET(
-    CMAKE_C_FLAGS_RELWITHASSERTIONS "-O3"
-    CACHE STRING "C compiler flags for a RelWithAssertions build" FORCE
+        CMAKE_C_FLAGS_RELWITHASSERTIONS "-O3"
+        CACHE STRING "C compiler flags for a RelWithAssertions build" FORCE
 )
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
 project(
-    CalicoDB
-    LANGUAGES CXX
-    VERSION 0.0.1
+        CalicoDB
+        LANGUAGES CXX
+        VERSION 0.0.1
 )
 set(CMAKE_CXX_STANDARD 17)
 
@@ -24,13 +24,19 @@ set(CALICO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/src")
 set(CALICO_TEST_DIR "${PROJECT_SOURCE_DIR}/test")
 set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic -Wpointer-arith)
 
+# Determine whether Calico DB is the main project, or if it was added with add_subdirectory().
+set(CALICO_MAIN_PROJECT Off)
+if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(CALICO_MAIN_PROJECT On)
+endif()
+
 # Check if we have O_DIRECT, which turns off kernel page caching.
 include(CheckCXXSymbolExists)
 check_cxx_symbol_exists(O_DIRECT "fcntl.h" CALICO_HAS_O_DIRECT)
 
-option(CALICO_INSTALL "Install the library and headers" On)
-option(CALICO_BUILD_TESTS "Build the tests" On)
-option(CALICO_BUILD_EXAMPLES "Build the examples" On)
+option(CALICO_INSTALL "Install the library and headers" ${CALICO_MAIN_PROJECT})
+option(CALICO_BUILD_TESTS "Build the tests" ${CALICO_MAIN_PROJECT})
+option(CALICO_BUILD_EXAMPLES "Build the examples" ${CALICO_MAIN_PROJECT})
 
 set(CALICO_SOURCES '')
 set(CALICO_HEADERS '')
@@ -42,14 +48,14 @@ include(GNUInstallDirs)
 include(FetchContent)
 
 FetchContent_Declare(
-    zlib
-    GIT_REPOSITORY https://github.com/madler/zlib.git
-    GIT_TAG        v1.2.12
+        zlib
+        GIT_REPOSITORY https://github.com/madler/zlib.git
+        GIT_TAG        v1.2.12
 )
 FetchContent_Declare(
-    spdlog
-    GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG        v1.10.0
+        spdlog
+        GIT_REPOSITORY https://github.com/gabime/spdlog.git
+        GIT_TAG        v1.10.0
 )
 FetchContent_MakeAvailable(spdlog)
 FetchContent_GetProperties(zlib)
@@ -63,21 +69,21 @@ endif()
 
 # Build the static library.
 add_library(
-    "${CALICO_NAME}"
-    STATIC "${CALICO_SOURCES}")
+        "${CALICO_NAME}"
+        STATIC "${CALICO_SOURCES}")
 target_include_directories(
-    "${CALICO_NAME}"
-    PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
-            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE "${CALICO_SOURCE_DIR}"
-    PUBLIC  "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
+        "${CALICO_NAME}"
+        PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PRIVATE "${CALICO_SOURCE_DIR}"
+        PUBLIC  "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
 target_compile_options(
-    "${CALICO_NAME}"
-    PRIVATE "${CALICO_WARNINGS}")
+        "${CALICO_NAME}"
+        PRIVATE "${CALICO_WARNINGS}")
 target_link_libraries(
-    "${CALICO_NAME}"
-    PUBLIC  spdlog::spdlog
-    PRIVATE pthread zlib)
+        "${CALICO_NAME}"
+        PUBLIC  spdlog::spdlog
+        PRIVATE pthread zlib)
 
 # Build the examples/use cases.
 if(CALICO_BUILD_EXAMPLES)
@@ -128,9 +134,9 @@ endif()
 if(CALICO_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_Declare(
-        googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG        release-1.11.0
+            googletest
+            GIT_REPOSITORY https://github.com/google/googletest.git
+            GIT_TAG        release-1.11.0
     )
     FetchContent_MakeAvailable(googletest)
     include(GoogleTest)

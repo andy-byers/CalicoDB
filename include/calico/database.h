@@ -60,13 +60,27 @@ public:
      * Search for a record.
      *
      * @param key The key to search for.
-     * @param allow_greater True if we should return a cursor pointing to the next record if we cannot find the key,
-     *                      false otherwise.
-     * @return A valid cursor positioned on the record with the desired relationship to the given key, or an
-     *         invalid cursor if that record does not exist.
+     * @return A valid cursor positioned on the record with the given key, or an invalid cursor otherwise.
      */
-    [[nodiscard]] auto find(BytesView key, bool allow_greater = false) const -> Cursor;
+    [[nodiscard]] auto find(BytesView key) const -> Cursor;
 
+    /**
+     * Find the first record that does not compare less than the given key.
+     *
+     * @param key The key to compare against.
+     * @return A cursor positioned on the first record not less than the given key, or an invalid cursor if no
+     *         such record exists.
+     */
+    [[nodiscard]] auto lower_bound(BytesView key) const -> Cursor;
+
+    /**
+     * Find the first record that compares greater than the given key.
+     *
+     * @param key The key to compare against.
+     * @return A cursor positioned on the first record greater than the given key, or an invalid cursor if no
+     *         such record exists.
+     */
+    [[nodiscard]] auto upper_bound(BytesView key) const -> Cursor;
 
     /**
      * Search for the smallest key.

@@ -183,15 +183,32 @@ auto Database::Impl::info() -> Info
     return info;
 }
 
-auto Database::Impl::find(BytesView key, bool require_exact) -> Cursor
+inline auto check_key(BytesView key, spdlog::logger &logger)
 {
     if (key.is_empty()) {
         logging::MessageGroup group;
         group.set_primary("cannot read record");
         group.set_detail("key cannot be empty");
-        throw std::invalid_argument {group.err(*m_logger)};
+        throw std::invalid_argument {group.err(logger)};
     }
-    return m_tree->find(key, require_exact);
+}
+
+auto Database::Impl::find(BytesView key) -> Cursor
+{
+    check_key(key, *m_logger);
+    return m_tree->find(key);
+}
+
+auto Database::Impl::lower_bound(BytesView key) -> Cursor
+{
+    check_key(key, *m_logger);
+    return m_tree->lower_bound(key);
+}
+
+auto Database::Impl::upper_bound(BytesView key) -> Cursor
+{
+    check_key(key, *m_logger);
+    return m_tree->upper_bound(key);
 }
 
 auto Database::Impl::find_minimum() -> Cursor
@@ -211,7 +228,7 @@ auto Database::Impl::insert(BytesView key, BytesView value) -> bool
 
 auto Database::Impl::erase(BytesView key) -> bool
 {
-    return erase(m_tree->find(key, true));
+    return erase(m_tree->find(key));
 }
 
 auto Database::Impl::erase(Cursor cursor) -> bool

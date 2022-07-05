@@ -59,18 +59,50 @@ auto Tree::erase(Cursor cursor) -> bool
     return false;
 }
 
-auto Tree::find(BytesView key, bool require_exact) -> Cursor
+auto maybe_reposition(NodePool &pool, Node &node, Index &index)
+{
+    if (index == node.cell_count() && !node.right_sibling_id().is_null()) {
+        node = pool.acquire(node.right_sibling_id(), false);
+        index = 0;
+    }
+}
+
+auto Tree::find_aux(BytesView key, bool &found_exact_out) -> Cursor
 {
     CALICO_EXPECT_FALSE(key.is_empty());
     auto [node, index, found_exact] = m_internal.find_external(key, false);
+
     if (index == node.cell_count() && !node.right_sibling_id().is_null()) {
-        CALICO_EXPECT_FALSE(found_exact);
         node = m_pool.acquire(node.right_sibling_id(), false);
         index = 0;
     }
     Cursor cursor {&m_pool, &m_internal};
-    if (found_exact || !require_exact)
-        cursor.move_to(std::move(node), index);
+    cursor.move_to(std::move(node), index);
+    found_exact_out = found_exact;
+    return cursor;
+}
+
+auto Tree::find(BytesView key) -> Cursor
+{
+    bool found_exact {};
+    auto cursor = find_aux(key, found_exact);
+    if (!found_exact)
+        cursor.invalidate();
+    return cursor;
+}
+
+auto Tree::lower_bound(BytesView key) -> Cursor
+{
+    bool found_exact {};
+    return find_aux(key, found_exact);
+}
+
+auto Tree::upper_bound(BytesView key) -> Cursor
+{
+    bool found_exact {};
+    auto cursor = find_aux(key, found_exact);
+    if (found_exact)
+        cursor++;
     return cursor;
 }
 

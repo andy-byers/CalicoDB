@@ -274,16 +274,14 @@ We still have a ways to go performance-wise, however, it seems that the cursors 
 7. Implement optional compression of record values
 8. Work on performance
 9. Work on the benchmark suite
-    + Results may not be all that accurate (really need to benchmark against other databases)
-    + Need to test large (100,000 B) values
-    + Code is very messy/difficult to change
-10. Get the CMake installation to work
-11. Implement WAL segmentation
-    + WAL should be segmented after it reaches a user-provided size
-    + Similar to `spdlog`s rotating file sink
-    + This should improve the performance of long-running transactions
-12. Consider allowing multiple independent trees in a single database
-13. 
+  + Results may not be all that accurate (really need to benchmark against other databases)
+  + Need to test large (100,000 B) values
+  + Code is very messy/difficult to change
+11. Get the CMake installation to work
+12. Implement WAL segmentation
+  + WAL should be segmented after it reaches a fixed size, similar to `spdlog`s rotating file sink
+  + This should improve the performance of long-running transactions
+13. Consider allowing multiple independent trees in a single database (could be either in the same `data` file or separate `data-*` files)
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.

@@ -28,6 +28,9 @@ auto Database::temp(Options options) -> Database
 
 auto Database::destroy(Database db) -> void
 {
+    if (db.m_impl->is_temp())
+        return;
+
     if (const auto &path = db.m_impl->path(); !path.empty())
         fs::remove_all(path);
 }
@@ -40,9 +43,19 @@ Database::Database(Database&&) noexcept = default;
 
 auto Database::operator=(Database&&) noexcept -> Database& = default;
 
-auto Database::find(BytesView key, bool allow_greater) const -> Cursor
+auto Database::find(BytesView key) const -> Cursor
 {
-    return m_impl->find(key, !allow_greater);
+    return m_impl->find(key);
+}
+
+auto Database::lower_bound(BytesView key) const -> Cursor
+{
+    return m_impl->lower_bound(key);
+}
+
+auto Database::upper_bound(BytesView key) const -> Cursor
+{
+    return m_impl->upper_bound(key);
 }
 
 auto Database::find_minimum() const -> Cursor
