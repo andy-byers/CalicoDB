@@ -148,7 +148,7 @@ auto NodeHeader::set_free_total(Size free_total) -> void
     m_page->put_u16(header_offset() + NodeLayout::FREE_TOTAL_OFFSET, static_cast<uint16_t>(free_total));
 }
 
-auto NodeHeader::cell_pointers_offset() const -> Size
+auto NodeHeader::cell_directory_offset() const -> Size
 {
     return NodeLayout::content_offset(m_page->id());
 }
@@ -156,7 +156,7 @@ auto NodeHeader::cell_pointers_offset() const -> Size
 auto NodeHeader::cell_area_offset() const -> Size
 {
     const auto cell_count = m_page->get_u16(header_offset() + NodeLayout::CELL_COUNT_OFFSET);
-    return cell_pointers_offset() + CELL_POINTER_SIZE*cell_count;
+    return cell_directory_offset() + CELL_POINTER_SIZE * cell_count;
 }
 
 auto NodeHeader::header_offset() const -> Index
@@ -174,20 +174,20 @@ auto NodeHeader::gap_size() const -> Size
 
 auto NodeHeader::max_usable_space() const -> Size
 {
-    return m_page->size() - cell_pointers_offset();
+    return m_page->size() - cell_directory_offset();
 }
 
 auto CellDirectory::get_pointer(Index index) const -> Pointer
 {
     CALICO_EXPECT_LT(index, m_header->cell_count());
-    return {m_page->get_u16(m_header->cell_pointers_offset() + index * CELL_POINTER_SIZE)};
+    return {m_page->get_u16(m_header->cell_directory_offset() + index * CELL_POINTER_SIZE)};
 }
 
 auto CellDirectory::set_pointer(Index index, Pointer pointer) -> void
 {
     CALICO_EXPECT_LT(index, m_header->cell_count());
     CALICO_EXPECT_LE(pointer.value, m_page->size());
-    m_page->put_u16(m_header->cell_pointers_offset() + index*CELL_POINTER_SIZE, static_cast<uint16_t>(pointer.value));
+    m_page->put_u16(m_header->cell_directory_offset() + index * CELL_POINTER_SIZE, static_cast<uint16_t>(pointer.value));
 }
 
 auto CellDirectory::insert_pointer(Index index, Pointer pointer) -> void
@@ -240,7 +240,7 @@ auto BlockAllocator::compute_free_total() const -> Size
         free_total += get_block_size(ptr);
         ptr = get_next_pointer(ptr);
     }
-    CALICO_EXPECT_LE(free_total, m_page->size() - m_header->cell_pointers_offset());
+    CALICO_EXPECT_LE(free_total, m_page->size() - m_header->cell_directory_offset());
     return free_total;
 }
 
@@ -485,11 +485,6 @@ auto Node::find_ge(BytesView key) const -> SearchResult
         }
     }
     return {static_cast<Index>(lower), false};
-}
-
-auto Node::cell_pointers_offset() const -> Size
-{
-    return m_header.cell_pointers_offset();
 }
 
 auto Node::cell_area_offset() const -> Size

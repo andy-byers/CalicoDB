@@ -36,7 +36,7 @@ public:
     [[nodiscard]] auto gap_size() const -> Size;
     [[nodiscard]] auto max_usable_space() const -> Size;
     [[nodiscard]] auto cell_area_offset() const -> Size;
-    [[nodiscard]] auto cell_pointers_offset() const -> Size;
+    [[nodiscard]] auto cell_directory_offset() const -> Size;
     [[nodiscard]] auto header_offset() const -> Index;
 
     explicit NodeHeader(Page &page)
@@ -104,8 +104,8 @@ private:
 class Node final {
 public:
     struct SearchResult {
-        Index index{};
-        bool found_eq{};
+        Index index {};
+        bool found_eq {};
     };
 
     ~Node() = default;
@@ -218,7 +218,6 @@ public:
     [[nodiscard]] auto usable_space() const -> Size;
     [[nodiscard]] auto max_usable_space() const -> Size;
     [[nodiscard]] auto cell_area_offset() const -> Size;
-    [[nodiscard]] auto cell_pointers_offset() const -> Size;
     [[nodiscard]] auto header_offset() const -> Index;
     auto reset(bool = false) -> void;
 

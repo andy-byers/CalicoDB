@@ -28,21 +28,21 @@ External nodes make up the lowest level of the B<sup>+</sup>-tree and are connec
 
 ### Database Header
 The database header is located at the start of the `data` file.
-It contains important information that applies to the entire database.
+It contains important database state information and is affected by many components.
 
-| Size | Offset | Name        |
-|-----:|-------:|:------------|
-|    4 |      0 | Magic code  |
-|    4 |      4 | Header CRC  |
-|    4 |      8 | Page count  |
-|    4 |     12 | Node count  |
-|    4 |     16 | Free count  |
-|    4 |     20 | Free start  |
-|    2 |     24 | Page size   |
-|    2 |     26 | Block size  |
-|    4 |     28 | Key count   |
-|    4 |     32 | Flushed LSN |
-|   12 |     36 | Reserved    |
+| Size | Offset | Name         | Description                                                                 |
+|-----:|-------:|:-------------|:----------------------------------------------------------------------------|
+|    4 |      0 | Magic code   | An integer constant that identifies the `data` file as a Calico DB database |
+|    4 |      4 | Header CRC   | CRC computed on this header                                                 |
+|    4 |      8 | Page count   | Number of pages allocated to the database                                   |
+|    4 |     12 | Node count   | Number of node pages allocated to the database                              |
+|    4 |     16 | Free count   | Number of pages in the free list                                            |                                           
+|    4 |     20 | Free start   | Page ID of the first free list page                                         |
+|    2 |     24 | Page size    | Size of a database page in bytes                                            |
+|    2 |     26 | Block size   | Size of a WAL block in bytes                                                |
+|    4 |     28 | Record count | Number of records in the database                                           |
+|    4 |     32 | Flushed LSN  | LSN of the last WAL record flushed to disk after a successful commit        |
+|   12 |     36 | Reserved     | Reserved for expansion                                                      |
 
 ### Pages
 The page size is chosen at the time the database is created and must be a power of two.
@@ -53,22 +53,22 @@ See [Links](#links) and [Nodes](#nodes) for more details.
 If the database instance was created with transactions enabled, pages will keep track of their contents before and after all modifications.
 This is accomplished by copying the "before" page contents to scratch memory once, then updating the page in-place.
 The offset and size of each write are kept track of, and a simple algorithm is used to keep them consolidated.
-When the page is no longer needed, these updates are sent to the WAL.
+When the page is no longer needed, the updates are sent to the WAL.
 
 #### Page Header
-|  Size | Offset | Name    |
-|------:|-------:|:--------|
-|     4 |      0 | LSN     |
-|     2 |      4 | Type    |
+|  Size | Offset | Name    | Description                                                        |
+|------:|-------:|:--------|:-------------------------------------------------------------------|
+|     4 |      0 | LSN     | LSN of the WAL record describing the last modification to the page |
+|     2 |      4 | Type    | Page type field                                                    |
 
 ### Links
 A link is a page that holds a single pointer to another page.
 They are used to form the freelist, and to connect overflow chains.
 
 #### Link Header
-| Size | Offset | Name    |
-|-----:|-------:|:--------|
-|    4 |      0 | Next ID |
+| Size | Offset | Name    | Description                           |
+|-----:|-------:|:--------|:--------------------------------------|
+|    4 |      0 | Next ID | Page ID of the next page in the chain |
 
 ## Buffer Pool
 TODO
@@ -102,31 +102,36 @@ Nodes are made up of three main regions: the header, the cell pointer list, and 
 #### Node Header
 The node header contains information about the node's layout and its connections to surrounding nodes.
 
-| Size | Offset | Name                           |
-|-----:|-------:|:-------------------------------|
-|    4 |      0 | Header CRC                     |
-|    4 |      4 | Parent ID                      |
-|    4 |      8 | Rightmost child ID<sup>1</sup> |
-|    4 |      8 | Right sibling ID<sup>1</sup>   |
-|    4 |     12 | Left sibling ID<sup>2</sup>    |
-|    2 |     14 | Cell count                     |
-|    2 |     16 | Free block count               |
-|    2 |     18 | Cell start                     |
-|    2 |     20 | Free block start               |
-|    2 |     22 | Fragment count                 |
+| Size | Offset | Name                           | Description                                      |
+|-----:|-------:|:-------------------------------|:-------------------------------------------------|
+|    4 |      0 | Header CRC                     | CRC computed on this header                      |
+|    4 |      4 | Parent ID                      | Page ID of the parent node                       |
+|    4 |      8 | Rightmost child ID<sup>1</sup> | Page ID of the rightmost child node              |
+|    4 |      8 | Right sibling ID<sup>1</sup>   | Page ID of the right sibling node                |
+|    4 |     12 | Left sibling ID<sup>2</sup>    | Page ID of the left sibling node                 |
+|    2 |     14 | Cell count                     | Number of cells in the node                      |
+|    2 |     16 | Free block count               | Number of free blocks in the node                |
+|    2 |     18 | Cell start                     | Offset of the end of the "gap" area              |
+|    2 |     20 | Free block start               | Offset of the first entry in the free block list |
+|    2 |     22 | Fragment count                 | Number of fragmented bytes                       |
 
 <sup>1</sup> The rightmost child ID and right sibling ID fields refer to the same data location.
 Use the rightmost child ID name in internal nodes and the right sibling ID name in external nodes.
 <sup>2</sup> The left sibling ID, like the right sibling ID, is only present in external nodes.
 This field is currently unused in internal nodes.
 
+[//]: # (TODO: We could probably do away with the free block count field and just use a "null-terminator" in the
+               last free block. We may also be able to use a byte for the fragment count and defragment if it is
+               about to overflow. It generally doesn't get that large anyway, it's just a measure to make sure we
+               keep track of every byte on the page.)
+
 #### Cell Directory
-The cell directory is located directly after the node header and contains the offset of each cell in the node.
-This list is kept sorted by the keys, which are stored with their respective cells further down in the cell content area.
-We can use binary search on the cell directory to retrieve a cell from the node in $O(log_2 N)$, where $N$ is the number of cells in the node.
+The cell directory is an embedded array located directly after the node header.
+It stores the offset of each cell from the start of the node, ordered by the keys, which are stored with their respective cells further down in the cell content area.
+We can use binary search on the cell directory to retrieve the location of a cell in $O(log_2 N)$, where $N$ is the number of cells in the node.
 
 #### Cell Content Area
-After the cell directory is the cell content area.
+The cell content area makes up the majority of the page, and is located right after the cell directory.
 As cells are added, the cell directory grows toward the end of the page.
 The cells themselves are added to the cell content area from the reverse direction, such that the two regions meet in the middle.
 When a cell is removed, its memory is added to a list of free blocks embedded within the node.
@@ -138,23 +143,24 @@ As cells are added and removed, we may encounter a situation where the memory we
 Such a page requires defragmentation, where all free blocks and fragments are merged into the gap space.
 
 ### Cell Layout
-| Size |     Offset | Name                      |
-|-----:|-----------:|:--------------------------|
-|    4 |          0 | Left child ID<sup>1</sup> |
-|    2 |          4 | Key size (K)              |
-|    4 |          6 | Value size (V)            |
-|    K |         10 | Key                       |
-|    L |     10 + K | Local value<sup>2</sup>   |
-|    4 | 10 + K + L | Overflow ID<sup>2</sup>   |
+| Size |     Offset | Name                      | Description                                     |
+|-----:|-----------:|:--------------------------|:------------------------------------------------|
+|    4 |          0 | Left child ID<sup>1</sup> | Page ID of the left child node                  |
+|    2 |          4 | Key size (K)              | Size of the key in bytes                        |
+|    4 |          6 | Value size (V)            | Size of the value in bytes                      |
+|    K |         10 | Key                       | Key by which cells are ordered                  |
+|    L |     10 + K | Local value<sup>2</sup>   | Some or all of the record value                 |
+|    4 | 10 + K + L | Overflow ID<sup>3</sup>   | Page ID of the first page in the overflow chain |
 
 <sup>1</sup> This field is only present in internal cells. <br>
 <sup>2</sup> `Local value` (length = `L`) refers to the portion of the value stored directly in the node.
-`L` depends on the combined size of the key and value and may or may not be equal to `V`.
+`L` depends on the combined size of the key and value and may or may not be equal to `V`. <br>
+<sup>3</sup> This field is only present if the value is too large to fit in the node, i.e. $L < V$.
 See [Overflow Chains](#overflow-chains) for details.
 
 ## Free List
-Occasionally, a routine will require deletion of a page, and since we are operating on a disk file, we need to manage these pages manually.
-The current solution is to add them to a singly-linked list, called the free list.
+Occasionally, a routine will require deletion of a page.
+The free list keeps track of these pages in a singly-linked list of free list link pages.
 Each time we need to delete a page, we convert it to a link page and add it at the head of the list, which is stored in the database header.
 
 ## Overflow Chains
@@ -169,63 +175,59 @@ This makes traversing the B<sup>+</sup>-tree easier (we don't have to read addit
                multiple overflow pages, without affecting the cache too much.)
 
 ## Write-Ahead Log (WAL)
-The WAL design was inspired by that of Rocks DB, but may or may not be all that similar in reality.
-It was mostly based off of some documents found in their GitHub wiki documentation (https://github.com/facebook/rocksdb/wiki/).
-Currently the WAL consists of a single file, written in block-sized chunks.
+Currently, the WAL consists of a single file, written in block-sized chunks.
 It is managed by a pair of constructs: one to read from the file and one to write to it.
 Both constructs operate on WAL records and perform their own caching internally.
 
 ### WAL Writer
 The WAL writer fills up an internal buffer with WAL records.
 When it runs out of space, it flushes the buffer to the WAL file.
-At that point, all database pages with updates corresponding to these WAL records can be safely flushed to the `data` file.
+At that point, all database pages with updates corresponding to the flushed records can be safely written to the `data` file.
 To this end, we always keep the LSN of the most-recently-flushed record in memory.
 Also note that the WAL is truncated after each commit, including when the database instance is closed.
 
 ### WAL Reader
 The WAL reader is a cursor-like object used to traverse the `wal` file.
-It can be used to traverse in either direction, but must always start on the first WAL record.
+It can be used to traverse in either direction, but must always start at the beginning of the file.
 
 ### WAL Records
 WAL records are used to store information about updates made to database pages.
-See the aforementioned Rocks DB wiki link for more information about WAL records.
+See ***3*** for more information about WAL records.
 We use a similar scheme including multiple record types.
 Basically, multiple WAL records can correspond to a single page update.
 This is because WAL records can be split up into multiple blocks, depending on their size and the amount of memory remaining in the WAL writer's internal buffer.
 
 ### WAL Record Header
-| Size | Offset | Name             |
-|-----:|-------:|:-----------------|
-|    4 |      0 | LSN              |
-|    4 |      4 | CRC              |
-|    1 |      8 | Type             |
-|    2 |      9 | Payload size (X) |
-|    X |     11 | payload          |
+| Size | Offset | Name         | Description                                       |
+|-----:|-------:|:-------------|:--------------------------------------------------|
+|    4 |      0 | LSN          | Unique log sequence number describing this record |
+|    4 |      4 | CRC          | CRC computed on this record                       |
+|    1 |      8 | Type         | WAL record type                                   |
+|    2 |      9 | Payload size | Size of the payload in bytes                      |
 
 ### WAL Record Payload Header
-| Size | Offset | Name              |
-|-----:|-------:|:------------------|
-|    4 |      0 | Previous LSN      |
-|    4 |      4 | Page ID           |
-|    2 |      6 | Count<sup>1</sup> |
+| Size | Offset | Name              | Description                                    |
+|-----:|-------:|:------------------|:-----------------------------------------------|
+|    4 |      0 | Previous LSN      | LSN describing the previous update to the page |
+|    4 |      4 | Page ID           | Page ID of the page that was updated           |
+|    2 |      6 | Count<sup>1</sup> | Number of payload entries                      |
 <sup>1</sup> Determines the number of WAL record payload entries.
 
 ### WAL Record Payload Entry
 Holds a region of a database page before and after some modification.
 
-| Size | Offset | Name     |
-|-----:|-------:|:---------|
-|    2 |      0 | Offset   |
-|    2 |      2 | Size (Y) |
-|    Y |      4 | Before   |
-|    Y |  4 + Y | After    |
+| Size | Offset | Name     | Description                                     |
+|-----:|-------:|:---------|:------------------------------------------------|
+|    2 |      0 | Offset   | Offset of the update from the start of the page |
+|    2 |      2 | Size (Y) | Size of the updated region in bytes             |
+|    Y |      4 | Before   | Contents before the update                      |
+|    Y |  4 + Y | After    | Contents after the update                       |
 
 ## Cursors
 A cursor acts much like an STL iterator, allowing traversal of the database in-order.
 Since we are using a B<sup>+</sup>-tree, all records are stored in external nodes.
 Thus, cursors are confined to bottom row of the tree and move around using sibling node links.
-A valid cursor is one that is positioned on an existing database record.
-An invalid cursor is one that is not.
+A valid cursor is one that is positioned on an existing database record, while an invalid cursor is one that is not.
 Invalid cursors make no distinction between "end" (one past the last element) and the "rend" (one before the first element) positions.
 When a cursor moves out of range, it is marked invalid and cannot be restored.
 This is achieved by letting the cursor stay on the first or last element, and setting a boolean flag to mark invalid-ness.
@@ -246,3 +248,40 @@ for (auto c = db.find_minimum(); c != bounds; c++) {
 ```
 
 This is effectively the same as iterating while `c.is_valid()`.
+
+## Transactions
+Calico DB uses transactions to preserve database integrity.
+Transactions are atomic, that is, the effects of a transaction are either completely applied, or entirely discarded.
+This is achieved by storing both undo and redo information in the WAL, and always flushing WAL records before their corresponding data pages.
+In the event of a crash, we can always read the WAL forward to regain lost updates, or backward to undo applied updates.
+
+## Recovery
+Each time the database is closed, we commit the running transaction, which involves truncating the WAL.
+This means that the presence of records in the WAL on startup indicates that the previous database instance had crashed, meaning recovery is necessary.
+In Calico DB, recovery is pretty simple.
+First, we read the WAL starting from the beginning, applying updates to stale pages.
+If we encounter a commit record at the end of the WAL, then recovery is complete.
+Otherwise, we do not have enough information to complete the transaction and must abort.
+Here we read the WAL in reverse, reverting pages to their state before the transaction started.
+In either case, we truncate the WAL and flush the buffer pool on completion.
+
+[//]: # (TODO: Since we are currently using exceptions, we need to make sure that commit\(\), abort\(\), and
+               the recovery procedure are all reentrant. They should be already, more or less, but we need
+               explicit verification of this fact. If the recovery procedure throws, we will end up aborting
+               the database constructor, but we should be able to try to construct that database instance as
+               many times as we want until it maybe succeeds, and not have it become corrupted.)
+
+## References
+1. https://cstack.github.io/db_tutorial/
+  + Awesome tutorial on database development in C
+2. https://www.sqlite.org/arch.html
+  + Much of this project was inspired by SQLite3, both the architecture design documents and the source code
+  + Especially see the B-tree design document, as well as `btree.h`, `btree.c`, and `btreeInt.h`
+2. https://github.com/google/leveldb
+  + The idea for using a hand-rolled slice object and some of its functionality are from `slice.h`.
+  + Their CMake build process was very instructive.
+3. https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log
+  + Nice explanation of RocksDB's WAL
+  + The idea to have multiple different record types and to use a "tail" buffer are from this document
+4. https://arpitbhayani.me/blogs/2q-cache
+  + Nice description of the 2Q cache replacement policy

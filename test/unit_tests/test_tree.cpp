@@ -63,6 +63,7 @@ TEST_F(NodePoolTests, NewNodePoolIsEmpty)
 
 TEST_F(NodePoolTests, AllocateIncreasesNodeCount)
 {
+    // allocate() returns a new node, which is immediately released.
     pool.allocate(PageType::EXTERNAL_NODE);
     ASSERT_EQ(pool.node_count(), 1);
 }

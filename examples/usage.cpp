@@ -1,28 +1,28 @@
 
 #include "calico/calico.h"
 #include <filesystem>
-#include <spdlog/fmt/fmt.h>
 
 namespace {
 
 constexpr auto PATH = "/tmp/calico_usage";
+namespace cco = calico;
 
 auto bytes_objects()
 {
-    auto function_taking_a_bytes_view = [](calico::BytesView) {};
+    auto function_taking_a_bytes_view = [](cco::BytesView) {};
 
     std::string data {"Hello, world!"};
 
     // Construct slices from a string. The string still owns the memory, the slices just refer
     // to it.
-    calico::Bytes b {data.data(), data.size()};
-    calico::BytesView v {data.data(), data.size()};
+    cco::Bytes b {data.data(), data.size()};
+    cco::BytesView v {data.data(), data.size()};
 
     // Convenience conversion from a string.
-    const auto from_string = calico::stob(data);
+    const auto from_string = cco::stob(data);
 
     // Convenience conversion back to a string. This operation may allocate heap memory.
-    assert(calico::btos(from_string) == data);
+    assert(cco::btos(from_string) == data);
 
     // Implicit conversions from `Bytes` to `BytesView` are allowed.
     function_taking_a_bytes_view(b);
@@ -31,16 +31,18 @@ auto bytes_objects()
     b.advance(7).truncate(5);
 
     // Comparisons.
-    assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
-    assert(b == calico::stob("world"));
+    assert(cco::compare_three_way(b, v) != cco::ThreeWayComparison::EQ);
+    assert(b == cco::stob("world"));
 }
 
-auto updating_a_database(calico::Database &db)
+auto updating_a_database(cco::Database &db)
 {
+    namespace cco = cco;
+
     // Insert some records. If a record is already in the database, insert() will return false.
-    assert(db.insert(calico::stob("bengal"), calico::stob("short;spotted,marbled,rosetted")));
-    assert(db.insert(calico::stob("turkish vankedisi"), calico::stob("long;white")));
-    assert(db.insert(calico::stob("abyssinian"), calico::stob("short;ticked tabby")));
+    assert(db.insert(cco::stob("bengal"), cco::stob("short;spotted,marbled,rosetted")));
+    assert(db.insert(cco::stob("turkish vankedisi"), cco::stob("long;white")));
+    assert(db.insert(cco::stob("abyssinian"), cco::stob("short;ticked tabby")));
     assert(db.insert({"russian blue", "short;blue"}));
     assert(db.insert({"american shorthair", "short;all"}));
     assert(db.insert({"badger", "???"}));
@@ -49,13 +51,14 @@ auto updating_a_database(calico::Database &db)
     assert(db.insert({"cyprus", "all;all"}));
 
     // Erase a record by key.
-    assert(db.erase(calico::stob("badger")));
+    assert(db.erase(cco::stob("badger")));
 }
 
-auto querying_a_database(calico::Database &db)
+auto querying_a_database(cco::Database &db)
 {
+    namespace cco = cco;
     static constexpr auto target = "russian blue";
-    const auto key = calico::stob(target);
+    const auto key = cco::stob(target);
 
     // find() looks for a record that compares equal to the given key and returns a cursor
     // pointing to it.
@@ -84,8 +87,10 @@ auto querying_a_database(calico::Database &db)
     }
 }
 
-auto transactions(calico::Database &db)
+auto transactions(cco::Database &db)
 {
+    namespace cco = cco;
+
     // Commit all the updates we made in the previous examples.
     db.commit();
 
@@ -96,16 +101,16 @@ auto transactions(calico::Database &db)
     db.abort();
 
     // All updates since the last call to commit() have been reverted.
-    assert(not db.find(calico::stob("opposum")).is_valid());
-    assert(db.find_minimum().key() == calico::stob("abyssinian"));
-    assert(db.find_maximum().key() == calico::stob("turkish vankedisi"));
+    assert(not db.find(cco::stob("opposum")).is_valid());
+    assert(db.find_minimum().key() == cco::stob("abyssinian"));
+    assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
 }
 
-//auto deleting_a_database(calico::Database db)
-//{
-//    // We can delete a database by passing ownership to the following static method.
-//    calico::Database::destroy(std::move(db));
-//}
+auto deleting_a_database(cco::Database db)
+{
+    // We can delete a database by passing ownership to the following static method.
+    cco::Database::destroy(std::move(db));
+}
 
 } // namespace
 
@@ -115,16 +120,16 @@ auto main(int, const char *[]) -> int
     std::filesystem::remove_all(PATH, error);
 
     try {
-        calico::Options options;
-        auto db = calico::Database::open(PATH, options);
+        cco::Options options;
+        auto db = cco::Database::open(PATH, options);
         bytes_objects();
         updating_a_database(db);
         querying_a_database(db);
         transactions(db);
-//        deleting_a_database(std::move(db));
-    } catch (const calico::CorruptionError &error) {
+        deleting_a_database(std::move(db));
+    } catch (const cco::CorruptionError &error) {
         printf("CorruptionError: %s\n", error.what());
-    } catch (const calico::IOError &error) {
+    } catch (const cco::IOError &error) {
         printf("IOError: %s\n", error.what());
     } catch (const std::invalid_argument &error) {
         printf("std::invalid_argument: %s\n", error.what());
@@ -135,17 +140,5 @@ auto main(int, const char *[]) -> int
     } catch (...) {
         puts("...");
     }
-    namespace co = calico;
-
-    co::Options options;
-    options.page_size = 0x2000;
-    options.use_transactions = false;
-
-    auto store = co::Database::temp(options);
-
-    for (auto c = store.find_minimum(); c.is_valid(); c++)
-        fmt::print("{}, {}\n", co::btos(c.key()), c.value());
-
-    co::Database::destroy(std::move(store));
     return 0;
 }

@@ -76,6 +76,7 @@ While not yet part of CI, some basic fuzzers (using libFuzzer) are also included
 See the `Dockerfile` for details on how to build them.
 
 ## API
+**NOTE**: The following examples make use of the alias `namespace cco = calico;`.
 
 ### Exceptions
 Calico DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
@@ -85,8 +86,8 @@ The entry point to an application using Calico DB might look something like:
 
 ```C++
 try {
-    calico::Options options;
-    auto db = calico::Database::open("/tmp/calico", options);
+    cco::Options options;
+    auto db = cco::Database::open("/tmp/calico", options);
     // Run the application!
 } catch (const CorruptionError &error) {
     // This is thrown if corruption is detected in a file.
@@ -105,26 +106,27 @@ try {
 
 ### Closing a Database
 Calico DB uses RAII, so databases are closed by letting them go out of scope.
+At that point, the database object will automatically commit the most recent transaction.
 
 ### Bytes Objects
 Calico DB uses `Bytes` and `BytesView` objects to represent unowned byte sequences, a.k.a. slices.
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
-auto function_taking_a_bytes_view = [](calico::BytesView) {};
+auto function_taking_a_bytes_view = [](cco::BytesView) {};
 
 std::string data {"Hello, world!"};
 
 // Construct slices from a string. The string still owns the memory, the slices just refer
 // to it.
-calico::Bytes b {data.data(), data.size()};
-calico::BytesView v {data.data(), data.size()};
+cco::Bytes b {data.data(), data.size()};
+cco::BytesView v {data.data(), data.size()};
 
 // Convenience conversion from a string.
-const auto from_string = calico::stob(data);
+const auto from_string = cco::stob(data);
 
 // Convenience conversion back to a string. This operation may allocate heap memory.
-assert(calico::btos(from_string) == data);
+assert(cco::btos(from_string) == data);
 
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
 function_taking_a_bytes_view(b);
@@ -133,8 +135,8 @@ function_taking_a_bytes_view(b);
 b.advance(7).truncate(5);
 
 // Comparisons.
-assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
-assert(b == calico::stob("world"));
+assert(cco::compare_three_way(b, v) != cco::ThreeWayComparison::EQ);
+assert(b == cco::stob("world"));
 ```
 
 ### Updating a Database
@@ -142,9 +144,9 @@ Records and be added or removed using methods on the `Database` object.
 
 ```C++
 // Insert some records. If a record is already in the database, insert() will return false.
-assert(db.insert(calico::stob("bengal"), calico::stob("short;spotted,marbled,rosetted")));
-assert(db.insert(calico::stob("turkish vankedisi"), calico::stob("long;white")));
-assert(db.insert(calico::stob("abyssinian"), calico::stob("short;ticked tabby")));
+assert(db.insert(cco::stob("bengal"), cco::stob("short;spotted,marbled,rosetted")));
+assert(db.insert(cco::stob("turkish vankedisi"), cco::stob("long;white")));
+assert(db.insert(cco::stob("abyssinian"), cco::stob("short;ticked tabby")));
 assert(db.insert({"russian blue", "short;blue"}));
 assert(db.insert({"american shorthair", "short;all"}));
 assert(db.insert({"badger", "???"}));
@@ -153,7 +155,7 @@ assert(db.insert({"chantilly-tiffany", "long;solid,tabby"}));
 assert(db.insert({"cyprus", "all;all"}));
 
 // Erase a record by key.
-assert(db.erase(calico::stob("badger")));
+assert(db.erase(cco::stob("badger")));
 ```
 
 ### Querying a Database
@@ -161,7 +163,7 @@ The database is queried using cursors returned by the `find*()` methods.
 
 ```C++
 static constexpr auto target = "russian blue";
-const auto key = calico::stob(target);
+const auto key = cco::stob(target);
 
 // By default, find() looks for the first record with a key equal to the given key and
 // returns a cursor pointing to it.
@@ -202,15 +204,15 @@ assert(db.erase(db.find_maximum()));
 db.abort();
 
 // All updates since the last call to commit() have been reverted.
-assert(not db.find(calico::stob("opposum")).is_valid());
-assert(db.find_minimum().key() == calico::stob("abyssinian"));
-assert(db.find_maximum().key() == calico::stob("turkish vankedisi"));
+assert(not db.find(cco::stob("opposum")).is_valid());
+assert(db.find_minimum().key() == cco::stob("abyssinian"));
+assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
 ```
 
 ### Deleting a Database
 ```C++
 // We can delete a database by passing ownership to the following static method.
-calico::Database::destroy(std::move(db));
+cco::Database::destroy(std::move(db));
 ```
 
 ## Performance
@@ -319,5 +321,5 @@ CalicoDB
 ## Contributions
 Contributions are welcome!
 Pull requests that fix bugs or address correctness issues will always be considered.
-The `TODO` section contains a list of things that need to be addressed.
+The `TODO` section contains a list of things that need to be addressed, and `DESIGN.md` contains some TODO comments that I thought were important.
 Feel free to create a pull request.
