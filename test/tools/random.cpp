@@ -18,11 +18,6 @@ Random::Random(Seed seed)
     set_seed(seed);
 }
 
-auto Random::engine() -> Engine
-{
-    return m_rng;
-}
-
 /**
  * Get the RNG seed.
  *

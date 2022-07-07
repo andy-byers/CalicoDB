@@ -39,9 +39,9 @@ auto generate_wal_reader_seed(const std::string &path, Size block_size, Size num
             const auto data = std::to_string(i);
             db.insert({data, data + data});
         }
-        std::filesystem::copy(get_wal_path(database_path), path);
+        std::filesystem::copy(database_path + "/wal", path);
     }
-    std::filesystem::remove(database_path);
+    std::filesystem::remove(database_path + "/wal");
 }
 
 auto main(int, const char*[]) -> int

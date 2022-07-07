@@ -18,14 +18,14 @@ WALWriter::WALWriter(Parameters param)
     m_logger->trace("starting WALWriter");
 
     const auto is_block_size_valid = is_power_of_two(param.block_size) &&
-                                     param.block_size >= MIN_BLOCK_SIZE &&
-                                     param.block_size <= MAX_BLOCK_SIZE;
+                                     param.block_size >= MINIMUM_BLOCK_SIZE &&
+                                     param.block_size <= MAXIMUM_BLOCK_SIZE;
 
     if (!is_block_size_valid) {
         logging::MessageGroup group;
         group.set_primary("cannot open WAL writer");
         group.set_detail("WAL block size {} is invalid", param.block_size);
-        group.set_hint("must be a power of 2 in [{}, {}]", MIN_BLOCK_SIZE, MAX_BLOCK_SIZE);
+        group.set_hint("must be a power of 2 in [{}, {}]", MINIMUM_BLOCK_SIZE, MAXIMUM_BLOCK_SIZE);
         throw std::invalid_argument {group.err(*m_logger)};
     }
 }

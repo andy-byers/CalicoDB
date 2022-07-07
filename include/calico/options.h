@@ -5,12 +5,12 @@
 
 namespace calico {
 
-static constexpr Size MIN_FRAME_COUNT {0x8};
-static constexpr Size MAX_FRAME_COUNT {0x1000};
-static constexpr Size MIN_PAGE_SIZE {0x100};
-static constexpr Size MAX_PAGE_SIZE {1 << 15};
-static constexpr Size MIN_BLOCK_SIZE {MIN_PAGE_SIZE};
-static constexpr Size MAX_BLOCK_SIZE {MAX_PAGE_SIZE};
+static constexpr Size MINIMUM_FRAME_COUNT {0x8};
+static constexpr Size MAXIMUM_FRAME_COUNT {0x2000};
+static constexpr Size MINIMUM_PAGE_SIZE {0x100};
+static constexpr Size MAXIMUM_PAGE_SIZE {1 << 15};
+static constexpr Size MINIMUM_BLOCK_SIZE {MINIMUM_PAGE_SIZE};
+static constexpr Size MAXIMUM_BLOCK_SIZE {MAXIMUM_PAGE_SIZE};
 static constexpr Size DEFAULT_FRAME_COUNT {0x80};
 static constexpr Size DEFAULT_PAGE_SIZE {0x4000};
 static constexpr Size DEFAULT_BLOCK_SIZE {0x8000};

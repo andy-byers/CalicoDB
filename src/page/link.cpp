@@ -6,7 +6,7 @@
 namespace calico {
 
 Link::Link(Page page)
-    : m_page{std::move(page)} {}
+    : m_page {std::move(page)} {}
 
 auto Link::next_id() const -> PID
 {

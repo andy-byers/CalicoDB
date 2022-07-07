@@ -14,7 +14,7 @@ namespace calico {
 BufferPool::BufferPool(Parameters param)
     : m_wal_reader {std::move(param.wal_reader)},
       m_wal_writer {std::move(param.wal_writer)},
-      m_file {param.directory.open_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666)},
+      m_file {param.directory.open_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, param.permissions)},
       m_logger {logging::create_logger(param.log_sink, "BufferPool")},
       m_scratch {param.page_size},
       m_pager {{m_file->open_reader(), m_file->open_writer(), param.page_size, param.frame_count}},

@@ -14,6 +14,9 @@ Frame::Frame(Size size)
     , m_size {size}
 {
     CALICO_EXPECT_TRUE(is_power_of_two(size));
+    CALICO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
+    CALICO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
+    // The buffer should be aligned to the page size.
     CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_data.get()) % size, 0);
     mem_clear(data());
 }

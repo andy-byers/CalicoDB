@@ -34,7 +34,9 @@ public:
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto uses_transactions() const -> Size;
     [[nodiscard]] auto is_temp() const -> bool;
-    auto find(BytesView, bool) -> Cursor;
+    auto find(BytesView) -> Cursor;
+    auto lower_bound(BytesView key) -> Cursor;
+    auto upper_bound(BytesView key) -> Cursor;
     auto find_minimum() -> Cursor;
     auto find_maximum() -> Cursor;
     auto insert(BytesView, BytesView) -> bool;
