@@ -231,54 +231,12 @@ cco::Database::destroy(std::move(db));
 
 ## Performance
 The benchmark suite (still in-progress) prints out each benchmark result in units of operations per second.
-Each database is opened without using direct I/O, as this usually seems to hurt performance (still working on that one).
 We use 16-byte keys and 100-byte values with a 4MB cache (similar to http://www.lmdb.tech/bench/microbench/benchmark.html).
-We still have a ways to go performance-wise, however, it seems that the cursors provide pretty fast sequential and reverse-sequential reads.
-
-### Benchmark Results
-| Name        | Result (ops/sec) |
-|:------------|-----------------:|
-| write_rand  |           37,853 |
-| write_seq   |           40,014 |
-| read_rand   |          214,133 |
-| read_seq    |        3,622,860 |
-| read_rev    |        4,400,077 |
-| erase_rand  |           21,290 |
-| erase_seq   |           20,449 |
-
-
-### Benchmark Results (In-Memory Database)
-| Name (In-Memory DB) | Result (ops/sec) |
-|:--------------------|-----------------:|
-| write_rand          |          184,074 |
-| write_seq           |          215,414 |
-| read_rand           |        1,057,665 |
-| read_seq            |        5,052,099 |
-| read_rev            |        5,559,223 |
-| erase_rand          |           67,573 |
-| erase_seq           |           77,081 |
-
-### Benchmark Results (w/o Transactions)
-| Name        | Result (ops/sec) |
-|:------------|-----------------:|
-| write_rand  |          234,945 |
-| write_seq   |          384,419 |
-| read_rand   |          173,517 |
-| read_seq    |        3,610,230 |
-| read_rev    |        3,317,678 |
-| erase_rand  |           63,421 |
-| erase_seq   |           65,919 |
-
-### Benchmark Results (In-Memory Database w/o Transactions)
-| Name (In-Memory DB) | Result (ops/sec) |
-|:--------------------|-----------------:|
-| write_rand          |          609,501 |
-| write_seq           |          587,153 |
-| read_rand           |          882,593 |
-| read_seq            |        4,504,567 |
-| read_rev            |        5,249,257 |
-| erase_rand          |          365,165 |
-| erase_seq           |          333,536 |
+The results are not shown here since they aren't very meaningful without other databases to compare them to (see [TODO](#todo)).
+Basically, any routine that modifies the database is going to be pretty slow while using transactions and a persistent database, roughly 30K ops/second.
+This number can increase to around 1M ops/second with transactions disabled and an in-memory database.
+Reads are pretty fast, and are unaffected by transactions.
+We can usually get over 500K ops/second for random reads and several million for sequential reads.
 
 ## TODO
 1. Get everything code reviewed!
