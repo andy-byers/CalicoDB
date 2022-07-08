@@ -8,17 +8,17 @@ namespace calico {
 
 class FileLayout {
 public:
-    static const Size MAGIC_CODE_OFFSET = 0;
-    static const Size HEADER_CRC_OFFSET = 4;
-    static const Size PAGE_COUNT_OFFSET = 8;
-    static const Size NODE_COUNT_OFFSET = 12;
-    static const Size FREE_COUNT_OFFSET = 16;
-    static const Size FREE_START_OFFSET = 20;
-    static const Size PAGE_SIZE_OFFSET = 24;
-    static const Size BLOCK_SIZE_OFFSET = 26;
-    static const Size KEY_COUNT_OFFSET = 28;
-    static const Size FLUSHED_LSN_OFFSET = 32;
-    static const Size HEADER_SIZE = 48;
+    static constexpr Size MAGIC_CODE_OFFSET {0};
+    static constexpr Size HEADER_CRC_OFFSET {4};
+    static constexpr Size PAGE_COUNT_OFFSET {8};
+    static constexpr Size NODE_COUNT_OFFSET {12};
+    static constexpr Size FREE_COUNT_OFFSET {16};
+    static constexpr Size FREE_START_OFFSET {20};
+    static constexpr Size PAGE_SIZE_OFFSET {24};
+    static constexpr Size BLOCK_SIZE_OFFSET {26};
+    static constexpr Size KEY_COUNT_OFFSET {28};
+    static constexpr Size FLUSHED_LSN_OFFSET {32};
+    static constexpr Size HEADER_SIZE {48};
 
     static auto header_offset() noexcept -> Index
     {
@@ -58,9 +58,9 @@ public:
 
 class PageLayout {
 public:
-    static const Size LSN_OFFSET = 0;
-    static const Size TYPE_OFFSET = 4;
-    static const Size HEADER_SIZE = 6;
+    static constexpr Size LSN_OFFSET {0};
+    static constexpr Size TYPE_OFFSET {4};
+    static constexpr Size HEADER_SIZE {6};
 
     static auto header_offset(PID page_id) noexcept -> Size
     {
@@ -75,19 +75,19 @@ public:
 
 class NodeLayout {
 public:
-    static const Size HEADER_CRC_OFFSET = 0;
-    static const Size PARENT_ID_OFFSET = 4;
-    static const Size RIGHTMOST_CHILD_ID_OFFSET = 8;
-    static const Size RIGHT_SIBLING_ID_OFFSET = 8;
-    static const Size RESERVED_OFFSET = 12;
-    static const Size LEFT_SIBLING_ID_OFFSET = 12;
-    static const Size CELL_COUNT_OFFSET = 16;
-    static const Size FREE_COUNT_OFFSET = 18;
-    static const Size CELL_START_OFFSET = 20;
-    static const Size FREE_START_OFFSET = 22;
-    static const Size FRAG_TOTAL_OFFSET = 24;
-    static const Size FREE_TOTAL_OFFSET = 26;
-    static const Size HEADER_SIZE = 28;
+    static constexpr Size HEADER_CRC_OFFSET {0};
+    static constexpr Size PARENT_ID_OFFSET {4};
+    static constexpr Size RIGHTMOST_CHILD_ID_OFFSET {8};
+    static constexpr Size RIGHT_SIBLING_ID_OFFSET {8};
+    static constexpr Size RESERVED_OFFSET {12};
+    static constexpr Size LEFT_SIBLING_ID_OFFSET {12};
+    static constexpr Size CELL_COUNT_OFFSET {16};
+    static constexpr Size FREE_COUNT_OFFSET {18};
+    static constexpr Size CELL_START_OFFSET {20};
+    static constexpr Size FREE_START_OFFSET {22};
+    static constexpr Size FRAG_TOTAL_OFFSET {24};
+    static constexpr Size FREE_TOTAL_OFFSET {26};
+    static constexpr Size HEADER_SIZE {28};
 
     static auto header_offset(PID page_id) noexcept -> Size
     {
@@ -102,14 +102,14 @@ public:
 
 class LinkLayout {
 public:
-    static const Size NEXT_ID_OFFSET = 0;
-    static const Size HEADER_SIZE = 4;
+    static constexpr Size NEXT_ID_OFFSET {0};
+    static constexpr Size HEADER_SIZE {4};
 
     static auto header_offset() noexcept -> Size
     {
         // The root page can never become a link page, so this value is the same for
         // all pages.
-        const PID non_root{2};
+        const PID non_root {ROOT_ID_VALUE + 1};
         CALICO_EXPECT_FALSE(non_root.is_root());
         return PageLayout::content_offset(non_root);
     }

@@ -23,7 +23,7 @@ WALReader::WALReader(Parameters param)
  */
 auto WALReader::reset() -> void
 {
-    m_logger->trace("moving cursor to the beginning of the WAL storage");
+    m_logger->trace("resetting WAL reader");
 
     m_reader->seek(0, Seek::BEGIN);
     m_has_block = false;
@@ -54,6 +54,7 @@ auto WALReader::increment() -> bool
     m_incremented = true;
     if (auto record = read_next()) {
         m_record = std::move(record);
+        m_logger->trace("incremented to record with LSN {}", m_record->lsn().value);
         return m_record && m_incremented;
     }
     return false;
@@ -70,6 +71,7 @@ auto WALReader::decrement() -> bool
         return false;
     if (auto record = read_previous()) {
         m_record = std::move(record);
+        m_logger->trace("decremented to record with LSN {}", m_record->lsn().value);
         return true;
     }
     return false;
@@ -99,9 +101,14 @@ auto WALReader::read_next() -> std::optional<WALRecord>
                 return std::nullopt;
             }
         }
-        if (!record.is_consistent())
-            throw CorruptionError {"cannot read record: record is corrupted"};
-
+        if (!record.is_consistent()) {
+            logging::MessageGroup group;
+            group.set_primary("cannot read WAL record");
+            group.set_detail("record with LSN {} is corrupted", record.lsn().value);
+            group.set_hint("block ID is {} and block offset is {}", m_block_id, m_cursor);
+            // This exception gets ignored, but we still get the log output.
+            throw CorruptionError {group.warn(*m_logger)};
+        }
         return record;
 
     } catch (const CorruptionError&) {
@@ -186,8 +193,8 @@ auto WALReader::read_record_aux(Index offset) -> std::optional<WALRecord>
         default:
             logging::MessageGroup group;
             group.set_primary("cannot read record");
-            group.set_detail("WAL record type {} is not recognized", static_cast<unsigned>(record.type()));
-            throw CorruptionError {group.err(*m_logger)};
+            group.set_detail("WAL record type {} is not recognized", static_cast<int>(record.type()));
+            throw CorruptionError {group.warn(*m_logger)};
     }
 }
 
@@ -222,7 +229,7 @@ auto WALReader::read_block() -> bool
                 group.set_primary("cannot read block");
                 group.set_detail("WAL contains an incomplete block of size {} B", bytes_read);
                 group.set_hint("block size is {} B", m_block.size());
-                throw CorruptionError {group.err(*m_logger)};
+                throw CorruptionError {group.warn(*m_logger)};
             }
             m_has_block = true;
             return true;

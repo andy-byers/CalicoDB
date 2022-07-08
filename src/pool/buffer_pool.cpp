@@ -17,14 +17,14 @@ BufferPool::BufferPool(Parameters param)
       m_file {param.directory.open_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, param.permissions)},
       m_logger {logging::create_logger(param.log_sink, "BufferPool")},
       m_scratch {param.page_size},
-      m_pager {{m_file->open_reader(), m_file->open_writer(), param.page_size, param.frame_count}},
+      m_pager {{m_file->open_reader(), m_file->open_writer(), param.log_sink, param.page_size, param.frame_count}},
       m_flushed_lsn {param.flushed_lsn},
       m_next_lsn {param.flushed_lsn + LSN {1}},
       m_page_count {param.page_count},
       m_uses_transactions {param.use_transactions}
 {
     CALICO_EXPECT_EQ(m_uses_transactions, m_wal_reader && m_wal_writer);
-    m_logger->trace("Constructing BufferPool object");
+    m_logger->trace("constructing BufferPool object");
 
     if (!m_uses_transactions) {
         m_flushed_lsn = LSN::max();
@@ -177,10 +177,13 @@ auto BufferPool::on_page_error() -> void
 auto BufferPool::roll_forward() -> bool
 {
     CALICO_EXPECT_TRUE(uses_transactions());
+    m_logger->trace("trying to roll the WAL forward");
     m_wal_reader->reset();
 
-    if (!m_wal_reader->record())
+    if (!m_wal_reader->record()) {
+        m_logger->trace("WAL is empty");
         return false;
+    }
 
     do {
         const auto record = *m_wal_reader->record();
@@ -191,28 +194,37 @@ auto BufferPool::roll_forward() -> bool
             m_next_lsn++;
         }
         // Stop at the first commit record.
-        if (record.is_commit())
+        if (record.is_commit()) {
+            m_logger->trace("found the commit record with LSN {}", record.lsn().value);
             return true;
+        }
 
         const auto update = record.decode();
         auto page = fetch_page(update.page_id, true);
 
-        if (page.lsn() < record.lsn())
+        if (page.lsn() < record.lsn()) {
+            m_logger->trace("updating page {} using record {}", page.id().value, record.lsn().value);
+            m_logger->trace("page LSN will change from {} to {}", page.lsn().value, record.lsn().value);
+            m_logger->trace("{} updates to apply", update.changes.size());
             page.redo_changes(record.lsn(), update.changes);
+        }
 
     } while (m_wal_reader->increment());
 
+    m_logger->trace("unable to find commit record");
     return false;
 }
 
 auto BufferPool::roll_backward() -> void
 {
     CALICO_EXPECT_TRUE(uses_transactions());
+    m_logger->trace("trying to roll the WAL backward");
+
     // Make sure the WAL reader is at the end of the log.
     try {
         while (m_wal_reader->increment()) {}
     } catch (const CorruptionError&) {
-        m_logger->warn("found a corrupted record at end of WAL");
+        m_logger->warn("found corrupted record {} at end of the WAL", m_wal_reader->record()->lsn().value);
     }
     CALICO_EXPECT_NE(m_wal_reader->record(), std::nullopt);
 
@@ -221,9 +233,9 @@ auto BufferPool::roll_backward() -> void
     while (m_wal_reader->record()->is_commit()) {
         if (!m_wal_reader->decrement()) {
             logging::MessageGroup group;
-            group.set_primary("could not roll back");
+            group.set_primary("cannot roll back");
             group.set_detail("transaction is empty");
-            throw CorruptionError {group.err(*m_logger)};
+            throw CorruptionError {group.error(*m_logger)};
         }
     }
 
@@ -237,6 +249,8 @@ auto BufferPool::roll_backward() -> void
             page.undo_changes(update.previous_lsn, update.changes);
 
     } while (m_wal_reader->decrement());
+
+    m_logger->trace("finished roll back procedure");
 }
 
 auto BufferPool::commit() -> void
@@ -267,8 +281,8 @@ auto BufferPool::abort() -> void
 
     try {
         try_flush_wal();
-    } catch (const IOError &error) {
-        m_logger->error("unable to flush WAL: {}", error.what());
+    } catch (const std::system_error &error) {
+        m_logger->error(error.what());
     }
     if (!m_wal_writer->has_committed()) {
         m_logger->trace("stopping abort: transaction is empty");
@@ -299,10 +313,8 @@ auto BufferPool::recover() -> bool
     try {
         found_commit = roll_forward();
     } catch (const CorruptionError &error) {
-        logging::MessageGroup group;
-        group.set_primary("unable to apply WAL updates");
-        group.set_detail("{}",  error.what());
-        group.log(*m_logger, spdlog::level::warn);
+        m_logger->warn("cannot apply transaction");
+        m_logger->warn(error.what());
     }
     // If we didn't encounter a commit record, we must roll back.
     if (!found_commit)
@@ -316,11 +328,15 @@ auto BufferPool::recover() -> bool
 auto BufferPool::try_flush() -> bool
 {
     CALICO_EXPECT_EQ(m_ref_sum, 0);
-    if (m_cache.is_empty())
-        return false;
-    std::optional<Frame> frame;
-    while (try_evict_frame()) {}
-    return m_cache.is_empty();
+
+    if (!m_cache.is_empty()) {
+        m_logger->trace("trying to flush {} frames", m_cache.size());
+        while (try_evict_frame()) {}
+        m_logger->trace("{} frames are left", m_cache.size());
+        return m_cache.is_empty();
+    }
+    m_logger->trace("buffer pool is empty");
+    return false;
 }
 
 auto BufferPool::try_evict_frame() -> bool
@@ -343,17 +359,22 @@ auto BufferPool::try_evict_frame() -> bool
 
 auto BufferPool::try_flush_wal() -> bool
 {
+    m_logger->trace("trying to flush WAL");
     if (const auto lsn = m_wal_writer->flush(); !lsn.is_null()) {
+        m_logger->trace("WAL has been flushed");
         CALICO_EXPECT_EQ(m_next_lsn, lsn + LSN {1});
         m_flushed_lsn = lsn;
         return true;
     }
+    m_logger->trace("nothing to flush");
     return false;
 }
 
 auto BufferPool::purge() -> void
 {
     CALICO_EXPECT_EQ(m_ref_sum, 0);
+    m_logger->trace("purging page cache");
+
     while (!m_cache.is_empty()) {
         auto frame = m_cache.evict();
         CALICO_EXPECT_NE(frame, std::nullopt);
@@ -365,12 +386,14 @@ auto BufferPool::purge() -> void
 
 auto BufferPool::save_header(FileHeader &header) -> void
 {
+    m_logger->trace("saving header fields");
     header.set_flushed_lsn(m_uses_transactions ? m_flushed_lsn : LSN::null());
     header.set_page_count(m_page_count);
 }
 
 auto BufferPool::load_header(const FileHeader &header) -> void
 {
+    m_logger->trace("loading header fields");
     if (m_uses_transactions)
         m_flushed_lsn = header.flushed_lsn();
     m_page_count = header.page_count();

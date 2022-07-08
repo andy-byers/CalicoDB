@@ -135,7 +135,7 @@ TEST_F(TreeTests, NewTreeHasOneNode)
 TEST_F(TreeTests, InsertCell)
 {
     tools::insert(*tree, "key", "value");
-    ASSERT_TRUE(tools::find(*tree, "key").is_valid());
+    ASSERT_TRUE(tools::find_exact(*tree, "key").is_valid());
 }
 
 TEST_F(TreeTests, OnlyAcceptsValidKeySizes)
@@ -149,7 +149,7 @@ TEST_F(TreeTests, RemoveRecord)
     std::string unused;
     tools::insert(*tree, "key", "value");
     ASSERT_TRUE(tools::erase(*tree, "key"));
-    ASSERT_FALSE(tools::find(*tree, "key").is_valid());
+    ASSERT_FALSE(tools::find_exact(*tree, "key").is_valid());
 }
 
 TEST_F(TreeTests, InsertBefore)
@@ -233,15 +233,13 @@ TEST_F(TreeTests, CanFindExtrema)
 
     auto minimum = tree->find_minimum();
     ASSERT_EQ(btos(minimum.key()), make_key(0));
+    ASSERT_EQ(tools::find_exact(*tree, make_key(0)), minimum);
     ASSERT_EQ(tools::find(*tree, make_key(0)), minimum);
-    ASSERT_EQ(tools::lower_bound(*tree, make_key(0)), minimum);
-    ASSERT_NE(tools::upper_bound(*tree, make_key(0)), minimum);
 
     auto maximum = tree->find_maximum();
     ASSERT_EQ(btos(maximum.key()), make_key(199));
+    ASSERT_EQ(tools::find_exact(*tree, make_key(199)), maximum);
     ASSERT_EQ(tools::find(*tree, make_key(199)), maximum);
-    ASSERT_EQ(tools::lower_bound(*tree, make_key(199)), maximum);
-    ASSERT_FALSE(tools::upper_bound(*tree, make_key(199)).is_valid());
 }
 
 TEST_F(TreeTests, CanFind)
@@ -249,19 +247,14 @@ TEST_F(TreeTests, CanFind)
     insert_sequence(*tree, 0, 200, 2);
     Cursor cursor;
 
-    cursor = tools::lower_bound(*tree, make_key(100));
+    cursor = tools::find(*tree, make_key(100));
     ASSERT_EQ(btos(cursor.key()), make_key(100));
-    cursor = tools::lower_bound(*tree, make_key(101));
-    ASSERT_EQ(btos(cursor.key()), make_key(102));
-
-    cursor = tools::upper_bound(*tree, make_key(100));
-    ASSERT_EQ(btos(cursor.key()), make_key(102));
-    cursor = tools::upper_bound(*tree, make_key(101));
-    ASSERT_EQ(btos(cursor.key()), make_key(102));
-
     cursor = tools::find(*tree, make_key(101));
+    ASSERT_EQ(btos(cursor.key()), make_key(102));
+
+    cursor = tools::find_exact(*tree, make_key(101));
     ASSERT_FALSE(cursor.is_valid());
-    cursor = tools::find(*tree, make_key(102));
+    cursor = tools::find_exact(*tree, make_key(102));
     ASSERT_EQ(btos(cursor.key()), make_key(102));
 }
 
@@ -425,7 +418,7 @@ TEST_F(TreeTests, ModifiesValue)
 {
     tools::insert(*tree, make_key(1), "a");
     tools::insert(*tree, make_key(1), "b");
-    ASSERT_EQ(tools::find(*tree, make_key(1)).value(), "b");
+    ASSERT_EQ(tools::find_exact(*tree, make_key(1)).value(), "b");
     ASSERT_EQ(tree->cell_count(), 1);
 }
 
@@ -435,7 +428,7 @@ TEST_F(TreeTests, ModifySanityCheck)
 
     for (Index i {0}; i < tree->cell_count(); ++i) {
         const auto key = make_key(i);
-        auto cursor = tools::find(*tree, key);
+        auto cursor = tools::find_exact(*tree, key);
         if (auto value = cursor.value(); value.empty()) {
             tools::insert(*tree, key, "value");
         } else {
@@ -488,7 +481,7 @@ TEST_F(TreeTests, RemoveFromLeft)
     
     // Remove the minimum key without relying on find_minimum().
     while (tree->cell_count())
-        ASSERT_TRUE(tree->erase(tools::lower_bound(*tree, make_key(0))));
+        ASSERT_TRUE(tree->erase(tools::find(*tree, make_key(0))));
 }
 
 TEST_F(TreeTests, RemoveFromRight)
@@ -506,7 +499,7 @@ TEST_F(TreeTests, RemoveFromMiddle)
     while (tree->cell_count()) {
         const auto key = make_key(tree->cell_count() / 2);
 
-        if (auto c = tools::lower_bound(*tree, key); c.is_valid())
+        if (auto c = tools::find(*tree, key); c.is_valid())
             tree->erase(c);
     }
 }
@@ -519,7 +512,7 @@ TEST_F(TreeTests, RemoveFromRandomPosition)
     while (tree->cell_count()) {
         const auto key = make_key(random.next_int(n));
 
-        if (auto c = tools::lower_bound(*tree, key); c.is_valid())
+        if (auto c = tools::find(*tree, key); c.is_valid())
             tree->erase(c);
     }
 }
@@ -539,7 +532,7 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
         }
         Index counter {};
         for (const auto &[k, v]: records) {
-            auto cursor = tools::find(*tree, k);
+            auto cursor = tools::find_exact(*tree, k);
             ASSERT_TRUE(cursor.is_valid());
             ASSERT_EQ(btos(cursor.key()), k);
             ASSERT_EQ(cursor.value(), v);
@@ -557,7 +550,7 @@ TEST_F(TreeTests, ForwardPartialIteration)
     insert_sequence(*tree, 0, 200);
     auto i = tree->cell_count() / 5;
 
-    for (auto cursor = tools::find(*tree, make_key(i)); cursor.is_valid(); cursor++)
+    for (auto cursor = tools::find_exact(*tree, make_key(i)); cursor.is_valid(); cursor++)
         ASSERT_EQ(btos(cursor.key()), make_key(i++));
 }
 
@@ -565,8 +558,8 @@ TEST_F(TreeTests, ForwardBoundedIteration)
 {
     insert_sequence(*tree, 0, 200);
     auto i = tree->cell_count() / 5;
-    auto lower = tools::find(*tree, make_key(i));
-    auto upper = tools::find(*tree, make_key(tree->cell_count() - i));
+    auto lower = tools::find_exact(*tree, make_key(i));
+    auto upper = tools::find_exact(*tree, make_key(tree->cell_count() - i));
 
     for (; lower.is_valid() && lower != upper; lower++)
         ASSERT_EQ(btos(lower.key()), make_key(i++));
@@ -578,7 +571,7 @@ TEST_F(TreeTests, ReversePartialIteration)
     insert_sequence(*tree, 0, count);
     auto i = count / 5;
 
-    for (auto c = tools::find(*tree, make_key(count - i - 1)); c.is_valid(); c--)
+    for (auto c = tools::find_exact(*tree, make_key(count - i - 1)); c.is_valid(); c--)
         ASSERT_EQ(btos(c.key()), make_key(count - i++ - 1));
 }
 
@@ -586,8 +579,8 @@ TEST_F(TreeTests, ReverseBoundedIteration)
 {
     auto i = tree->cell_count() / 5;
 
-    auto lower = tools::find(*tree, make_key(i));
-    auto upper = tools::find(*tree, make_key(tree->cell_count() - i - 1));
+    auto lower = tools::find_exact(*tree, make_key(i));
+    auto upper = tools::find_exact(*tree, make_key(tree->cell_count() - i - 1));
 
     for (; upper.is_valid() && upper != lower; upper--)
         ASSERT_EQ(btos(upper.key()), make_key(tree->cell_count() - i++ - 1));
@@ -606,7 +599,7 @@ TEST_F(TreeTests, SanityCheck)
     Random random {0};
 
     const auto remove_one = [&random, this](const std::string &key) {
-        if (auto c = tools::lower_bound(*tree, key); c.is_valid()) {
+        if (auto c = tools::find(*tree, key); c.is_valid()) {
             tree->erase(c);
         } else if (random.next_int(1) == 0) {
             tree->erase(tree->find_minimum());

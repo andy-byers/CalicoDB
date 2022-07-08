@@ -467,18 +467,19 @@ auto Node::validate() const -> void
     CALICO_EXPECT_EQ(used_space + usable_space, size());
 }
 
-auto Node::find_ge(BytesView key) const -> SearchResult
+auto Node::find_ge(BytesView key) const -> FindGeResult
 {
     long lower {};
-    auto upper = static_cast<long>(cell_count()) - 1;
+    auto upper = static_cast<long>(cell_count());
     
-    while (lower <= upper) {
-        const auto middle = (lower + upper) / 2;
+    while (lower < upper) {
+        // Note that this cannot overflow since the page size is bounded by a 16-bit integer.
+        const auto middle = (lower+upper) / 2;
         switch (compare_three_way(key, read_key(static_cast<Index>(middle)))) {
             case ThreeWayComparison::EQ:
                 return {static_cast<Index>(middle), true};
             case ThreeWayComparison::LT:
-                upper = middle - 1;
+                upper = middle;
                 break;
             case ThreeWayComparison::GT:
                 lower = middle + 1;

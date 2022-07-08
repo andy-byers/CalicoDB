@@ -35,8 +35,7 @@ public:
     [[nodiscard]] auto uses_transactions() const -> Size;
     [[nodiscard]] auto is_temp() const -> bool;
     auto find(BytesView) -> Cursor;
-    auto lower_bound(BytesView key) -> Cursor;
-    auto upper_bound(BytesView key) -> Cursor;
+    auto find_exact(BytesView) -> Cursor;
     auto find_minimum() -> Cursor;
     auto find_maximum() -> Cursor;
     auto insert(BytesView, BytesView) -> bool;
@@ -66,7 +65,7 @@ struct InitialState {
     bool is_new {};
 };
 
-auto setup(const std::string&, const Options&) -> InitialState;
+auto setup(const std::string&, const Options&, spdlog::logger&) -> InitialState;
 
 } // calico
 

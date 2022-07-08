@@ -37,7 +37,7 @@ auto Internal::find_root(bool is_writable) -> Node
 auto Internal::find_external(BytesView key, bool is_writable) -> Result
 {
     auto node = find_root(is_writable);
-    Node::SearchResult result;
+    Node::FindGeResult result;
     while (true) {
         result = node.find_ge(key);
         if (node.is_external())

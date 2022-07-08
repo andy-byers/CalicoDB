@@ -21,21 +21,24 @@ Tree::Tree(Parameters param)
 
 auto Tree::insert(BytesView key, BytesView value) -> bool
 {
+    static constexpr auto ERROR_PRIMARY = "cannot write record";
+
     if (key.is_empty()) {
         logging::MessageGroup group;
-        group.set_primary("cannot write record");
+        group.set_primary(ERROR_PRIMARY);
         group.set_detail("key is empty");
-        throw std::invalid_argument {group.err(*m_logger)};
+        group.set_hint("use a nonempty key");
+        throw std::invalid_argument {group.error(*m_logger)};
     }
 
     auto [node, index, found_eq] = m_internal.find_external(key, true);
 
     if (key.size() > get_max_local(node.size())) {
         logging::MessageGroup group;
-        group.set_primary("cannot write record");
+        group.set_primary(ERROR_PRIMARY);
         group.set_detail("key of length {} B is too long", key.size());
         group.set_hint("maximum key length is {} B", get_max_local(m_pool.page_size()));
-        throw std::invalid_argument {group.err(*m_logger)};
+        throw std::invalid_argument {group.error(*m_logger)};
     }
 
     if (found_eq) {
@@ -82,7 +85,7 @@ auto Tree::find_aux(BytesView key, bool &found_exact_out) -> Cursor
     return cursor;
 }
 
-auto Tree::find(BytesView key) -> Cursor
+auto Tree::find_exact(BytesView key) -> Cursor
 {
     bool found_exact {};
     auto cursor = find_aux(key, found_exact);
@@ -91,19 +94,10 @@ auto Tree::find(BytesView key) -> Cursor
     return cursor;
 }
 
-auto Tree::lower_bound(BytesView key) -> Cursor
+auto Tree::find(BytesView key) -> Cursor
 {
     bool found_exact {};
     return find_aux(key, found_exact);
-}
-
-auto Tree::upper_bound(BytesView key) -> Cursor
-{
-    bool found_exact {};
-    auto cursor = find_aux(key, found_exact);
-    if (found_exact)
-        cursor++;
-    return cursor;
 }
 
 auto Tree::find_minimum() -> Cursor

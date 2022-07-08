@@ -19,33 +19,27 @@ class Node;
 namespace tools {
 
     template<class T>
+    auto find_exact(T &t, const std::string &key) -> Cursor
+    {
+        return t.find_exact(stob(key));
+    }
+
+    template<class T>
     auto find(T &t, const std::string &key) -> Cursor
     {
         return t.find(stob(key));
     }
 
     template<class T>
-    auto lower_bound(T &t, const std::string &key) -> Cursor
-    {
-        return t.lower_bound(stob(key));
-    }
-
-    template<class T>
-    auto upper_bound(T &t, const std::string &key) -> Cursor
-    {
-        return t.upper_bound(stob(key));
-    }
-
-    template<class T>
     auto contains(T &t, const std::string &key) -> bool
     {
-        return find(t, key).is_valid();
+        return find_exact(t, key).is_valid();
     }
 
     template<class T>
     auto contains(T &t, const std::string &key, const std::string &value) -> bool
     {
-        if (auto c = find(t, key); c.is_valid())
+        if (auto c = find_exact(t, key); c.is_valid())
             return c.value() == value;
         return false;
     }
@@ -59,13 +53,13 @@ namespace tools {
     template<class T>
     auto erase(T &t, const std::string &key) -> bool
     {
-        return t.erase(find(t, key));
+        return t.erase(find_exact(t, key));
     }
 
     template<class T>
     auto erase_one(T &t, const std::string &key) -> bool
     {
-        if (t.erase(find(t, key)))
+        if (t.erase(find_exact(t, key)))
             return true;
         return t.erase(t.find_minimum());
     }

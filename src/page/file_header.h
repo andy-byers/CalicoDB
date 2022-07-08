@@ -11,6 +11,9 @@ struct PID;
 
 class FileHeader {
 public:
+    /// Identifies a file as a Calico DB database.
+    static constexpr uint32_t MAGIC_CODE {0xB11924E1};
+
     FileHeader();
     explicit FileHeader(Bytes);
     explicit FileHeader(Node&);
@@ -41,9 +44,6 @@ public:
     [[nodiscard]] auto is_header_crc_consistent() const -> bool;
 
 private:
-    // Identifies the storage as a Calico DB database.
-    static constexpr uint32_t MAGIC_CODE = 0xB11924E1;
-
     std::string m_backing;
     Bytes m_header;
 };

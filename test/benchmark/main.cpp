@@ -109,7 +109,7 @@ auto run_read_rand(Database &db, const Work &work)
 {
     std::string k, v;
     for (const auto &[key, value]: work) {
-        auto cursor = db.find(stob(key));
+        auto cursor = db.find_exact(stob(key));
         CALICO_EXPECT_TRUE(cursor.is_valid());
         k = btos(cursor.key());
         v = cursor.value();

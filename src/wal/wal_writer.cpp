@@ -15,18 +15,29 @@ WALWriter::WALWriter(Parameters param)
       m_logger {logging::create_logger(param.log_sink, "WALWriter")},
       m_block(param.block_size, '\x00')
 {
+    static constexpr auto ERROR_PRIMARY = "cannot open WAL writer";
     m_logger->trace("starting WALWriter");
 
-    const auto is_block_size_valid = is_power_of_two(param.block_size) &&
-                                     param.block_size >= MINIMUM_BLOCK_SIZE &&
-                                     param.block_size <= MAXIMUM_BLOCK_SIZE;
-
-    if (!is_block_size_valid) {
+    if (param.block_size < MINIMUM_PAGE_SIZE) {
         logging::MessageGroup group;
-        group.set_primary("cannot open WAL writer");
+        group.set_primary(ERROR_PRIMARY);
+        group.set_detail("WAL block size {} is too small", param.block_size);
+        group.set_hint("must be greater than or equal to {}", MINIMUM_BLOCK_SIZE);
+        throw std::invalid_argument {group.error(*m_logger)};
+    }
+    if (param.block_size > MAXIMUM_BLOCK_SIZE) {
+        logging::MessageGroup group;
+        group.set_primary(ERROR_PRIMARY);
+        group.set_detail("WAL block size {} is too large", param.block_size);
+        group.set_hint("must be less than or equal to {}", MAXIMUM_BLOCK_SIZE);
+        throw std::invalid_argument {group.error(*m_logger)};
+    }
+    if (!is_power_of_two(param.block_size)) {
+        logging::MessageGroup group;
+        group.set_primary(ERROR_PRIMARY);
         group.set_detail("WAL block size {} is invalid", param.block_size);
-        group.set_hint("must be a power of 2 in [{}, {}]", MINIMUM_BLOCK_SIZE, MAXIMUM_BLOCK_SIZE);
-        throw std::invalid_argument {group.err(*m_logger)};
+        group.set_hint("must be a power of 2");
+        throw std::invalid_argument {group.error(*m_logger)};
     }
 }
 
@@ -37,6 +48,7 @@ auto WALWriter::has_committed() const -> bool
 
 auto WALWriter::append(WALRecord record) -> LSN
 {
+    m_logger->trace("appending {} B record with LSN {}", record.size(), record.lsn().value);
     std::optional<WALRecord> temp {std::move(record)};
     const auto lsn = temp->lsn();
     auto flushed = false;
@@ -77,12 +89,15 @@ auto WALWriter::append(WALRecord record) -> LSN
 
 auto WALWriter::truncate() -> void
 {
+    m_logger->trace("truncating WAL");
     m_writer->resize(0);
     m_writer->sync();
 }
 
 auto WALWriter::flush() -> LSN
 {
+    m_logger->trace("trying to flush WAL");
+
     if (m_cursor) {
         // The unused part of the block should be zero-filled.
         auto block = stob(m_block);
@@ -90,10 +105,12 @@ auto WALWriter::flush() -> LSN
 
         m_writer->write(block);
         m_writer->sync();
+        m_logger->trace("WAL has been flushed up to LSN {}", m_last_lsn.value);
 
         m_cursor = 0;
         return m_last_lsn;
     }
+    m_logger->trace("nothing to flush");
     return LSN::null();
 }
 

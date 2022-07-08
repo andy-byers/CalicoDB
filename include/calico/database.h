@@ -11,19 +11,6 @@ class Cursor;
 class Info;
 
 /**
- * Represents a relationship between two keys.
- *
- * @see Database::read()
- */
-enum class Ordering: unsigned {
-    LT = 1, ///< Less than
-    LE = 2, ///< Less than or equal to
-    EQ = 3, ///< Equal to
-    GE = 4, ///< Greater than or equal to
-    GT = 5, ///< Greater than
-};
-
-/**
  * An object that represents a Cub DB database.
  */
 class Database {
@@ -57,30 +44,32 @@ public:
     static auto destroy(Database db) -> void;
 
     /**
-     * Search for a record.
+     * Determine if the database contains a given key.
+     *
+     * @param key The key to check for.
+     * @return True if the database contains a record with the key, false otherwise.
+     */
+    [[nodiscard]] auto contains(BytesView key) const -> bool;
+    [[nodiscard]] auto contains(const std::string &key) const -> bool;
+
+    /**
+     * Find the record with a given key.
      *
      * @param key The key to search for.
      * @return A valid cursor positioned on the record with the given key, or an invalid cursor otherwise.
      */
+    [[nodiscard]] auto find_exact(BytesView key) const -> Cursor;
+    [[nodiscard]] auto find_exact(const std::string &key) const -> Cursor;
+
+    /**
+     * Find the first record that is greater than or equal to the given key.
+     *
+     * @param key The key to compare against.
+     * @return A cursor positioned on the first record greater than or equal to than the given key, or an
+     *         invalid cursor if no such record exists.
+     */
     [[nodiscard]] auto find(BytesView key) const -> Cursor;
-
-    /**
-     * Find the first record that does not compare less than the given key.
-     *
-     * @param key The key to compare against.
-     * @return A cursor positioned on the first record not less than the given key, or an invalid cursor if no
-     *         such record exists.
-     */
-    [[nodiscard]] auto lower_bound(BytesView key) const -> Cursor;
-
-    /**
-     * Find the first record that compares greater than the given key.
-     *
-     * @param key The key to compare against.
-     * @return A cursor positioned on the first record greater than the given key, or an invalid cursor if no
-     *         such record exists.
-     */
-    [[nodiscard]] auto upper_bound(BytesView key) const -> Cursor;
+    [[nodiscard]] auto find(const std::string &key) const -> Cursor;
 
     /**
      * Search for the smallest key.
@@ -103,7 +92,8 @@ public:
      * @param value The value to write.
      * @return True if the record was not already in the database, false otherwise.
      */
-    auto insert(BytesView, BytesView) -> bool;
+    auto insert(BytesView key, BytesView value) -> bool;
+    auto insert(const std::string &key, const std::string &value) -> bool;
 
     /**
      * Insert a new record or update an existing one.
@@ -120,6 +110,7 @@ public:
      * @return True if the record was found (and thus erased), false otherwise.
      */
     auto erase(BytesView key) -> bool;
+    auto erase(const std::string &key) -> bool;
 
     /**
      * Erase a record given a cursor pointing to it.

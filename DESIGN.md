@@ -21,7 +21,7 @@
 + **value**: A sequence of bytes associated with a unique **key** to form a database record.
 
 ## B<sup>+</sup>-Tree
-Calico DB uses a B<sup>+</sup>-tree to maintain an ordered collection of keys and values.
+Calico DB uses a B<sup>+</sup>-tree to maintain an ordered collection of records.
 The tree is contained in the `data` file and is made up of two types of nodes: internal and external.
 Nodes that have children are internal nodes, while those that do not are external nodes.
 External nodes make up the lowest level of the B<sup>+</sup>-tree and are connected as a doubly-linked list.
@@ -211,7 +211,8 @@ This is because WAL records can be split up into multiple blocks, depending on t
 |    4 |      0 | Previous LSN      | LSN describing the previous update to the page |
 |    4 |      4 | Page ID           | Page ID of the page that was updated           |
 |    2 |      6 | Count<sup>1</sup> | Number of payload entries                      |
-<sup>1</sup> Determines the number of WAL record payload entries.
+
+<sup>1</sup> Determines the number of WAL record payload entries
 
 ### WAL Record Payload Entry
 Holds a region of a database page before and after some modification.
