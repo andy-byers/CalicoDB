@@ -33,10 +33,10 @@ Check out the [Contributions](#contributions) section if you are interested in w
 
 ## Features
 + Durability provided through write-ahead logging
-+ Uses a dynamic-order B<sup>+</sup>-tree to store the data in a single file
++ Uses a dynamic-order B<sup>+</sup>-tree to organize the data on disk
 + Supports forward and reverse traversal using cursors
 + Allows creation of in-memory databases
-+ Supports nearly arbitrary values (up to 4 GB)
++ Supports variable-length keys and values
 + API only exposes objects (no pointers to deal with)
 + Allows tuning of various parameters (page size, block size, cache size, etc.)
 
