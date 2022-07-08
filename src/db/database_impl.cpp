@@ -3,6 +3,7 @@
 #include <filesystem>
 #include "calico/cursor.h"
 #include "calico/exception.h"
+#include "page/file_header.h"
 #include "pool/buffer_pool.h"
 #include "pool/in_memory.h"
 #include "storage/directory.h"
@@ -76,7 +77,7 @@ Database::Impl::~Impl()
         logging::MessageGroup group;
         group.set_primary("cannot commit");
         group.set_detail("{}", error.what());
-        group.err(*m_logger);
+        group.error(*m_logger);
         committed = false;
     }
 
@@ -89,7 +90,7 @@ Database::Impl::~Impl()
         logging::MessageGroup group;
         group.set_primary("cannot unlink WAL");
         group.set_detail("{}", error.what());
-        group.err(*m_logger);
+        group.error(*m_logger);
     }
 }
 
@@ -100,7 +101,7 @@ Database::Impl::Impl(Parameters param)
 {
     initialize_log(*m_logger, m_directory->path());
     m_logger->trace("constructing Database object");
-    auto [state, revised, is_new] = setup(m_directory->path(), param.options);
+    auto [state, revised, is_new] = setup(m_directory->path(), param.options, *m_logger);
     std::unique_ptr<WALReader> wal_reader;
     std::unique_ptr<WALWriter> wal_writer;
 
@@ -189,26 +190,20 @@ inline auto check_key(BytesView key, spdlog::logger &logger)
         logging::MessageGroup group;
         group.set_primary("cannot read record");
         group.set_detail("key cannot be empty");
-        throw std::invalid_argument {group.err(logger)};
+        throw std::invalid_argument {group.error(logger)};
     }
+}
+
+auto Database::Impl::find_exact(BytesView key) -> Cursor
+{
+    check_key(key, *m_logger);
+    return m_tree->find_exact(key);
 }
 
 auto Database::Impl::find(BytesView key) -> Cursor
 {
     check_key(key, *m_logger);
     return m_tree->find(key);
-}
-
-auto Database::Impl::lower_bound(BytesView key) -> Cursor
-{
-    check_key(key, *m_logger);
-    return m_tree->lower_bound(key);
-}
-
-auto Database::Impl::upper_bound(BytesView key) -> Cursor
-{
-    check_key(key, *m_logger);
-    return m_tree->upper_bound(key);
 }
 
 auto Database::Impl::find_minimum() -> Cursor
@@ -228,7 +223,7 @@ auto Database::Impl::insert(BytesView key, BytesView value) -> bool
 
 auto Database::Impl::erase(BytesView key) -> bool
 {
-    return erase(m_tree->find(key));
+    return erase(m_tree->find_exact(key));
 }
 
 auto Database::Impl::erase(Cursor cursor) -> bool
@@ -252,7 +247,7 @@ auto Database::Impl::abort() -> bool
         logging::MessageGroup group;
         group.set_primary("cannot abort transaction");
         group.set_detail("transactions are disabled");
-        throw std::logic_error {group.err(*m_logger)};
+        throw std::logic_error {group.error(*m_logger)};
     }
 
     if (m_pool->can_commit()) {
@@ -310,10 +305,16 @@ auto Database::Impl::is_temp() const -> bool
     return m_is_temp;
 }
 
-auto setup(const std::string &path, const Options &options) -> InitialState
+auto setup(const std::string &path, const Options &options, spdlog::logger &logger) -> InitialState
 {
-    if (path.empty())
-        throw std::invalid_argument {"cannot open database: path argument cannot be empty"};
+    static constexpr auto ERROR_PRIMARY = "cannot open database";
+    logging::MessageGroup group;
+    group.set_primary(ERROR_PRIMARY);
+
+    if (path.empty()) {
+        group.set_detail("path argument cannot be empty");
+        throw std::invalid_argument {group.error(logger)};
+    }
 
     auto directory = std::make_unique<Directory>(path);
     const auto perm = options.permissions;
@@ -326,20 +327,30 @@ auto setup(const std::string &path, const Options &options) -> InitialState
         auto reader = file->open_reader();
         const auto file_size = file->size();
 
-        if (file_size < FileLayout::HEADER_SIZE)
-            throw CorruptionError {"cannot read file header: database is too small"};
-
-        if (!read_exact(*reader, header.data()))
-            throw CorruptionError {"cannot read file header"};
-
-        if (file_size < header.page_size())
-            throw CorruptionError {"cannot setup database: database is smaller than the minimum valid size"};
-
-        if (!header.is_magic_code_consistent())
-            throw std::invalid_argument {"cannot read file header: path does not point to a Calico DB database"};
-
-        if (!header.is_header_crc_consistent())
-            throw CorruptionError {"cannot read file header: header has an inconsistent CRC"};
+        if (file_size < FileLayout::HEADER_SIZE) {
+            group.set_detail("database is too small to read the file header");
+            group.set_hint("file header is {} B", FileLayout::HEADER_SIZE);
+            throw CorruptionError {group.error(logger)};
+        }
+        if (!read_exact(*reader, header.data())) {
+            group.set_detail("cannot read file header");
+            throw std::runtime_error {group.error(logger)};
+        }
+        if (file_size % header.page_size()) {
+            group.set_detail("database has an invalid size");
+            group.set_hint("database must contain an integral number of pages");
+            throw CorruptionError {group.error(logger)};
+        }
+        if (!header.is_magic_code_consistent()) {
+            group.set_detail("path does not point to a Calico DB database");
+            group.set_hint("magic code is {}, but should be {}", header.magic_code(), FileHeader::MAGIC_CODE);
+            throw std::invalid_argument {group.error(logger)};
+        }
+        if (!header.is_header_crc_consistent()) {
+            group.set_detail("header has an inconsistent CRC");
+            group.set_hint("CRC is {}", header.header_crc());
+            throw CorruptionError {group.error(logger)};
+        }
 
         // If the database does not use transactions, this field will always be 0.
         revised.use_transactions = !header.flushed_lsn().is_null();
@@ -355,21 +366,27 @@ auto setup(const std::string &path, const Options &options) -> InitialState
         is_new = true;
     }
 
-    const auto choose_error = [is_new](std::string message) {
-        message = "cannot setup database: " + message;
+    const auto choose_error = [is_new, &logger](logging::MessageGroup group) {
         if (is_new)
-            throw std::invalid_argument {message};
-        return CorruptionError {message};
+            throw std::invalid_argument {group.error(logger)};
+        throw CorruptionError {group.error(logger)};
     };
 
-    if (header.page_size() < MINIMUM_PAGE_SIZE)
-        choose_error(fmt::format("page size is too small (must be larger than {})", MINIMUM_PAGE_SIZE));
-
-    if (header.page_size() < MINIMUM_PAGE_SIZE)
-        choose_error(fmt::format("page size is too large (must be smaller than {})", MAXIMUM_PAGE_SIZE));
-
-    if (header.page_size() < MINIMUM_PAGE_SIZE)
-        choose_error("page size is invalid (must be a power of 2)");
+    if (header.page_size() < MINIMUM_PAGE_SIZE) {
+        group.set_detail("page size is too small");
+        group.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
+        choose_error(group);
+    }
+    if (header.page_size() > MAXIMUM_PAGE_SIZE) {
+        group.set_detail("page size is too large");
+        group.set_hint("must be less than or equal to {}", MAXIMUM_PAGE_SIZE);
+        choose_error(group);
+    }
+    if (!is_power_of_two(header.page_size())) {
+        group.set_detail("page size is invalid");
+        group.set_hint("must be a power of 2");
+        choose_error(group);
+    }
 
     return {
         std::move(header),

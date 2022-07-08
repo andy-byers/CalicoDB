@@ -87,20 +87,16 @@ The entry point to an application using Calico DB might look something like:
 ```C++
 try {
     cco::Options options;
-    auto db = cco::Database::open("/tmp/calico", options);
+    auto store = cco::Database::open("/tmp/calico", options);
     // Run the application!
 } catch (const CorruptionError &error) {
     // This is thrown if corruption is detected in a file.
-} catch (const IOError &error) {
-    // This is thrown if we were unable to perform I/O on a file.
 } catch (const std::invalid_argument &error) {
     // This is thrown if invalid arguments were passed to a Calico DB function.
 } catch (const std::system_error &error) {
-    // This propagates up from failed non-I/O system calls.
+    // This propagates up from failed system calls.
 } catch (const std::exception &error) {
-    // This catches any Calico DB exception.
-} catch (...) {
-    // So does this...
+    // This will catch any exception thrown by Calico DB.
 }
 ```
 
@@ -131,12 +127,17 @@ assert(cco::btos(from_string) == data);
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
 function_taking_a_bytes_view(b);
 
-// Advance and truncate with chaining.
+// advance() moves the start of the slice forward and truncate moves the end of the slice
+// backward.
 b.advance(7).truncate(5);
 
 // Comparisons.
 assert(cco::compare_three_way(b, v) != cco::ThreeWayComparison::EQ);
 assert(b == cco::stob("world"));
+
+// Bytes objects can modify the underlying string, while BytesView objects cannot.
+b[0] = '\xFF';
+assert(data[7] == '\xFF');
 ```
 
 ### Updating a Database
@@ -144,18 +145,25 @@ Records and be added or removed using methods on the `Database` object.
 
 ```C++
 // Insert some records. If a record is already in the database, insert() will return false.
-assert(db.insert(cco::stob("bengal"), cco::stob("short;spotted,marbled,rosetted")));
-assert(db.insert(cco::stob("turkish vankedisi"), cco::stob("long;white")));
-assert(db.insert(cco::stob("abyssinian"), cco::stob("short;ticked tabby")));
-assert(db.insert({"russian blue", "short;blue"}));
-assert(db.insert({"american shorthair", "short;all"}));
-assert(db.insert({"badger", "???"}));
-assert(db.insert({"manx", "short,long;all"}));
-assert(db.insert({"chantilly-tiffany", "long;solid,tabby"}));
-assert(db.insert({"cyprus", "all;all"}));
+assert(db.insert("bengal", "short;spotted,marbled,rosetted"));
+assert(db.insert("turkish vankedisi", "long;white"));
+assert(db.insert("moose", "???"));
+assert(db.insert("abyssinian", "short;ticked tabby"));
+assert(db.insert("russian blue", "short;blue"));
+assert(db.insert("american shorthair", "short;all"));
+assert(db.insert("badger", "???"));
+assert(db.insert("manx", "short,long;all"));
+assert(db.insert("chantilly-tiffany", "long;solid,tabby"));
+assert(db.insert("cyprus", "..."));
+
+// Modify a record.
+assert(not db.insert("cyprus", "all;all"));
 
 // Erase a record by key.
-assert(db.erase(cco::stob("badger")));
+assert(db.erase("badger"));
+
+// Erase a record using a cursor (see "Querying a Database" below).
+assert(db.erase(db.find_exact("moose")));
 ```
 
 ### Querying a Database
@@ -165,24 +173,30 @@ The database is queried using cursors returned by the `find*()` methods.
 static constexpr auto target = "russian blue";
 const auto key = cco::stob(target);
 
-// By default, find() looks for the first record with a key equal to the given key and
-// returns a cursor pointing to it.
-auto cursor = db.find(key);
+// find_exact() looks for a record that compares equal to the given key and returns a cursor
+// pointing to it.
+auto cursor = db.find_exact(key);
 assert(cursor.is_valid());
 assert(cursor.key() == key);
 
-// We can use the second parameter to leave the cursor on the next record, if the target
-// key does not exist.
-const auto prefix = key.copy().truncate(key.size() / 2);
-assert(db.find(prefix, true).value() == cursor.value());
+// If there isn't such a record, the cursor will be invalid.
+assert(not db.find_exact("not found").is_valid());
 
-// Cursors returned from the find*() methods can be used for range queries. They can
-// traverse the database in sequential order, or in reverse sequential order.
+// find() returns a cursor on the first record that does not compare less than the given key.
+const auto prefix = key.copy().truncate(key.size() / 2);
+assert(db.find(prefix).key() == cursor.key());
+
+// We can use this method is we just need to check for the existence of a key.
+assert(db.contains("bengal"));
+assert(not db.contains("moose"));
+
+// Cursors can be used for range queries. They can traverse the database in sequential order,
+// or in reverse sequential order.
 for (auto c = db.find_minimum(); c.is_valid(); c++) {}
 for (auto c = db.find_maximum(); c.is_valid(); c--) {}
 
 // They also support equality comparison.
-if (const auto boundary = db.find(key); boundary.is_valid()) {
+if (const auto boundary = db.find_exact(key); boundary.is_valid()) {
     for (auto c = db.find_minimum(); c.is_valid() && c != boundary; c++) {}
     for (auto c = db.find_maximum(); c.is_valid() && c != boundary; c--) {}
 }
@@ -198,13 +212,13 @@ Otherwise, transaction boundaries are defined by calls to either `commit()` or `
 db.commit();
 
 // Make some changes and abort the transaction.
-db.insert({"opossum", "pretty cute"});
+db.insert("opossum", "pretty cute");
 assert(db.erase(db.find_minimum()));
 assert(db.erase(db.find_maximum()));
 db.abort();
 
 // All updates since the last call to commit() have been reverted.
-assert(not db.find(cco::stob("opposum")).is_valid());
+assert(not db.find_exact("opposum").is_valid());
 assert(db.find_minimum().key() == cco::stob("abyssinian"));
 assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
 ```

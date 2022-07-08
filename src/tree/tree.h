@@ -61,9 +61,8 @@ public:
     auto load_header(const FileHeader&) -> void override;
     auto insert(BytesView, BytesView) -> bool override;
     auto erase(Cursor) -> bool override;
-    auto find(BytesView) -> Cursor override;
-    auto lower_bound(BytesView key) -> Cursor override;
-    auto upper_bound(BytesView key) -> Cursor override;
+    auto find_exact(BytesView) -> Cursor override;
+    auto find(BytesView key) -> Cursor override;
     auto find_minimum() -> Cursor override;
     auto find_maximum() -> Cursor override;
     auto root(bool) -> Node override;

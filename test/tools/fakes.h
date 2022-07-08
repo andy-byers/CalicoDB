@@ -8,6 +8,7 @@
 #include "storage/interface.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
+#include "pool/buffer_pool.h"
 
 namespace calico {
 
@@ -316,6 +317,16 @@ struct FakeFilesHarness {
     FaultControls wal_reader_faults;
     FaultControls wal_writer_faults;
     Options options;
+};
+
+struct FakeDatabase {
+    explicit FakeDatabase(Options);
+
+    SharedMemory data_backing;
+    SharedMemory wal_backing;
+    FaultControls data_faults;
+    FaultControls wal_faults;
+    std::unique_ptr<Database::Impl> db;
 };
 
 } // calico

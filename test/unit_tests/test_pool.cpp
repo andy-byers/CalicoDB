@@ -31,6 +31,7 @@ public:
         pager = std::make_unique<Pager>(Pager::Parameters{
             file->open_reader(),
             file->open_writer(),
+            logging::create_sink("", 0),
             page_size,
             frame_count,
         });

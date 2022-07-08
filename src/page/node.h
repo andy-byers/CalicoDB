@@ -103,7 +103,7 @@ private:
 
 class Node final {
 public:
-    struct SearchResult {
+    struct FindGeResult {
         Index index {};
         bool found_eq {};
     };
@@ -181,7 +181,7 @@ public:
     [[nodiscard]] auto read_key(Index) const -> BytesView;
     [[nodiscard]] auto read_cell(Index) const -> Cell;
     [[nodiscard]] auto detach_cell(Index, Scratch) const -> Cell;
-    [[nodiscard]] auto find_ge(BytesView) const -> SearchResult;
+    [[nodiscard]] auto find_ge(BytesView) const -> FindGeResult;
     auto validate() const -> void;
     auto extract_cell(Index, Scratch) -> Cell;
     auto insert(Cell) -> void;

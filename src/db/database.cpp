@@ -43,19 +43,34 @@ Database::Database(Database&&) noexcept = default;
 
 auto Database::operator=(Database&&) noexcept -> Database& = default;
 
+auto Database::contains(BytesView key) const -> bool
+{
+    return find_exact(key).is_valid();
+}
+
+auto Database::contains(const std::string &key) const -> bool
+{
+    return contains(stob(key));
+}
+
+auto Database::find_exact(BytesView key) const -> Cursor
+{
+    return m_impl->find_exact(key);
+}
+
+auto Database::find_exact(const std::string &key) const -> Cursor
+{
+    return find_exact(stob(key));
+}
+
 auto Database::find(BytesView key) const -> Cursor
 {
     return m_impl->find(key);
 }
 
-auto Database::lower_bound(BytesView key) const -> Cursor
+auto Database::find(const std::string &key) const -> Cursor
 {
-    return m_impl->lower_bound(key);
-}
-
-auto Database::upper_bound(BytesView key) const -> Cursor
-{
-    return m_impl->upper_bound(key);
+    return m_impl->find(stob(key));
 }
 
 auto Database::find_minimum() const -> Cursor
@@ -73,15 +88,25 @@ auto Database::insert(BytesView key, BytesView value) -> bool
     return m_impl->insert(key, value);
 }
 
+auto Database::insert(const std::string &key, const std::string &value) -> bool
+{
+    return insert(stob(key), stob(value));
+}
+
 auto Database::insert(const Record &record) -> bool
 {
     const auto &[key, value] = record;
-    return m_impl->insert(stob(key), stob(value));
+    return insert(key, value);
 }
 
 auto Database::erase(BytesView key) -> bool
 {
     return m_impl->erase(key);
+}
+
+auto Database::erase(const std::string &key) -> bool
+{
+    return erase(stob(key));
 }
 
 auto Database::erase(Cursor cursor) -> bool

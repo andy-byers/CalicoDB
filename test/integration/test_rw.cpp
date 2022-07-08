@@ -30,7 +30,7 @@ auto reader_task(Database *db) -> void*
 
     for (; c.is_valid(); c++, counter++) {
         // We should be able to call the read*() methods from many threads.
-        CALICO_EXPECT_EQ(db->find(c.key()).value(), value);
+        CALICO_EXPECT_EQ(db->find_exact(c.key()).value(), value);
         CALICO_EXPECT_EQ(c.value(), value);
     }
     CALICO_EXPECT_EQ(counter, expected_size);

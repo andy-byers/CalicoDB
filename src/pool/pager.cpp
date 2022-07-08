@@ -6,23 +6,49 @@
 #include "storage/file.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
+#include "utils/logging.h"
 
 namespace calico {
 
 Pager::Pager(Parameters param)
     : m_reader {std::move(param.reader)},
       m_writer {std::move(param.writer)},
+      m_logger {logging::create_logger(param.log_sink, "Pager")},
       m_frame_count {param.frame_count},
       m_page_size {param.page_size}
 {
-    if (m_frame_count < MINIMUM_FRAME_COUNT)
-        throw std::invalid_argument {"Frame count is too small"};
+    static constexpr auto ERROR_PRIMARY = "cannot create pager object";
+    static constexpr auto ERROR_DETAIL = "frame count is too {}";
+    static constexpr auto ERROR_HINT = "{} frame count is {}";
+    m_logger->trace("constructing Pager object");
 
-    if (m_frame_count > MAXIMUM_FRAME_COUNT)
-        throw std::invalid_argument {"Frame count is too large"};
+    if (m_frame_count < MINIMUM_FRAME_COUNT) {
+        logging::MessageGroup group;
+        group.set_primary(ERROR_PRIMARY);
+        group.set_detail(ERROR_DETAIL, "small");
+        group.set_hint(ERROR_HINT, "minimum", MINIMUM_FRAME_COUNT);
+        throw std::invalid_argument {group.error(*m_logger)};
+    }
+
+    if (m_frame_count > MAXIMUM_FRAME_COUNT) {
+        logging::MessageGroup group;
+        group.set_primary(ERROR_PRIMARY);
+        group.set_detail(ERROR_DETAIL, "large");
+        group.set_hint(ERROR_HINT, "maximum", MAXIMUM_FRAME_COUNT);
+        throw std::invalid_argument {group.error(*m_logger)};
+    }
 
     while (m_available.size() < m_frame_count)
         m_available.emplace_back(m_page_size);
+}
+
+Pager::~Pager()
+{
+    try {
+        maybe_write_pending();
+    } catch (...) {
+
+    }
 }
 
 auto Pager::available() const -> Size 
@@ -53,6 +79,8 @@ auto Pager::truncate(Size page_count) -> void
 auto Pager::pin(PID id) -> std::optional<Frame>
 {
     CALICO_EXPECT_FALSE(id.is_null());
+    maybe_write_pending();
+
     if (m_available.empty())
         return std::nullopt;
 
@@ -60,7 +88,7 @@ auto Pager::pin(PID id) -> std::optional<Frame>
 
     // This can throw. If it does, we haven't done anything yet, so we should be okay. Also, when we hit EOF we make
     // sure to clear the frame, since we are essentially allocating a new page.
-    if (!try_read_page_from_file(id, frame.data()))
+    if (!read_page_from_file(id, frame.data()))
         mem_clear(frame.data());
 
     auto moved = std::move(m_available.back());
@@ -78,19 +106,28 @@ auto Pager::discard(Frame frame) -> void
 auto Pager::unpin(Frame frame) -> void
 {
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
-    const auto needs_write = frame.is_dirty();
-    const auto id = frame.page_id();
-    const auto data = frame.data();
+    try {
+        maybe_write_pending();
+    } catch (...) {
+        m_pending.emplace_back(std::move(frame));
+        throw;
+    }
+
+    if (frame.is_dirty()) {
+        try {
+            write_page_to_file(frame.page_id(), frame.data());
+        } catch (...) {
+            m_pending.emplace_back(std::move(frame));
+            return;
+        }
+    }
 
     frame.reset(PID::null());
     if (m_available.size() < m_frame_count)
         m_available.emplace_back(std::move(frame));
-
-    if (needs_write)
-        write_page_to_file(id, data);
 }
 
-auto Pager::try_read_page_from_file(PID id, Bytes out) const -> bool
+auto Pager::read_page_from_file(PID id, Bytes out) const -> bool
 {
     CALICO_EXPECT_FALSE(id.is_null());
     CALICO_EXPECT_EQ(page_size(), out.size());
@@ -98,7 +135,11 @@ auto Pager::try_read_page_from_file(PID id, Bytes out) const -> bool
     if (const auto read_size = m_reader->read_at(out, offset); !read_size) {
         return false;
     } else if (read_size != out.size()) {
-        throw IOError {"partial read"};
+        logging::MessageGroup group;
+        group.set_primary("cannot read page");
+        group.set_detail("read an incomplete page");
+        const auto code = std::make_error_code(std::errc::io_error);
+        throw std::system_error {code, group.error(*m_logger)};
     }
     return true;
 }
@@ -114,6 +155,20 @@ auto Pager::write_page_to_file(PID id, BytesView in) const -> void
 auto Pager::sync() -> void
 {
     m_writer->sync();
+}
+
+auto Pager::maybe_write_pending() -> void
+{
+    for (auto &frame: m_pending) {
+        if (!frame.is_dirty())
+            continue;
+        write_page_to_file(frame.page_id(), frame.data());
+        frame.reset(PID::null());
+        if (m_available.size() < m_frame_count)
+            m_available.emplace_back(std::move(frame));
+    }
+    // This is a NOP if m_pending is empty.
+    m_available.splice(end(m_available), m_pending);
 }
 
 } // calico

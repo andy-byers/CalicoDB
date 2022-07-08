@@ -141,7 +141,7 @@ public:
             if (operation == Operation::WRITE) {
                 std::string value(value_size, '*');
                 m_db.insert({key, value});
-            } else if (auto c = m_db.find(stob(key), true); c.is_valid()) {
+            } else if (auto c = m_db.find_exact(stob(key), true); c.is_valid()) {
                 m_db.erase(c);
             }
         }

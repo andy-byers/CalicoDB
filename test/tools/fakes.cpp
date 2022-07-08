@@ -5,6 +5,11 @@
 
 namespace calico {
 
+static auto make_io_error(const std::string &message)
+{
+    return std::system_error(std::make_error_code(std::errc::io_error), message);
+}
+
 static auto maybe_throw_read_error(Random &random, FaultControls::Controls &controls)
 {
     // If the counter is positive, we tick down until we hit 0, at which point we throw an exception.
@@ -12,7 +17,7 @@ static auto maybe_throw_read_error(Random &random, FaultControls::Controls &cont
     // is never set, it stays at -1 and doesn't contribute to the faults generated.
     auto &counter = controls.read_fault_counter;
     if (!counter || random.next_int(99U) < controls.read_fault_rate)
-        throw IOError {"read"};
+        throw make_io_error("read");
     // Counter should settle on -1.
     counter -= counter >= 0;
 }
@@ -21,7 +26,7 @@ static auto maybe_throw_write_error(Random &random, FaultControls::Controls &con
 {
     auto &counter = controls.write_fault_counter;
     if (!counter || random.next_int(99U) < controls.write_fault_rate)
-        throw IOError {"write"};
+        throw make_io_error("write");
     counter -= counter >= 0;
 }
 
@@ -221,5 +226,24 @@ FakeFilesHarness::FakeFilesHarness(Options)
       tree_faults {tree_file->faults()},
       wal_reader_faults {wal_reader_file->faults()},
       wal_writer_faults {wal_writer_file->faults()} {}
+
+FakeDatabase::FakeDatabase(Options options)
+{
+    auto directory = std::make_unique<MemoryBank>("FakeDatabase");
+
+    {
+        auto data_file = directory->open_memory(DATA_NAME, Mode::READ_WRITE, 0666);
+        auto wal_file = directory->open_memory(WAL_NAME, Mode::READ_WRITE, 0666);
+        data_backing = data_file->shared_memory();
+        wal_backing = wal_file->shared_memory();
+        data_faults = data_file->faults();
+        wal_faults = wal_file->faults();
+    }
+
+    db = std::make_unique<Database::Impl>(Database::Impl::Parameters {
+        std::move(directory),
+        options,
+    });
+}
 
 } // calico

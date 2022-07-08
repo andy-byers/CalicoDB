@@ -33,7 +33,14 @@ public:
         return set_text(HINT, format, std::forward<Args>(args)...);
     }
 
-    auto err(spdlog::logger &logger) -> std::string
+    auto warn(spdlog::logger &logger) -> std::string
+    {
+        auto message = assemble_message();
+        logger.warn(message);
+        return message;
+    }
+
+    auto error(spdlog::logger &logger) -> std::string
     {
         auto message = assemble_message();
         logger.error(message);
