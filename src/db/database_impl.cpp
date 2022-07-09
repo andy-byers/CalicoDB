@@ -156,7 +156,7 @@ Database::Impl::Impl(Parameters param)
 }
 
 Database::Impl::Impl(Parameters param, InMemoryTag)
-    : m_sink {logging::create_sink("", 0)},
+    : m_sink {logging::create_sink("", spdlog::level::off)},
       m_logger {logging::create_logger(m_sink, "Database")},
       m_pool {std::make_unique<InMemory>(param.options.page_size, param.options.use_transactions, m_sink)},
       m_tree {std::make_unique<Tree>(Tree::Parameters {m_pool.get(), m_sink, PID::null(), 0, 0, 0})},

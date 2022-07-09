@@ -11,7 +11,12 @@
 namespace calico {
 
 Pager::Pager(Parameters param)
-    : m_reader {std::move(param.reader)},
+    : m_buffer {
+          std::unique_ptr<Byte[], AlignedDeleter> {
+           new(static_cast<std::align_val_t>(param.page_size)) Byte[param.page_size * param.frame_count],
+           AlignedDeleter {static_cast<std::align_val_t>(param.page_size)}}
+      },
+      m_reader {std::move(param.reader)},
       m_writer {std::move(param.writer)},
       m_logger {logging::create_logger(param.log_sink, "Pager")},
       m_frame_count {param.frame_count},
@@ -21,6 +26,10 @@ Pager::Pager(Parameters param)
     static constexpr auto ERROR_DETAIL = "frame count is too {}";
     static constexpr auto ERROR_HINT = "{} frame count is {}";
     m_logger->trace("constructing Pager object");
+
+    // The buffer should be aligned to the page size.
+    CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % m_page_size, 0);
+    mem_clear({m_buffer.get(), m_page_size * m_frame_count});
 
     if (m_frame_count < MINIMUM_FRAME_COUNT) {
         logging::MessageGroup group;
@@ -39,7 +48,7 @@ Pager::Pager(Parameters param)
     }
 
     while (m_available.size() < m_frame_count)
-        m_available.emplace_back(m_page_size);
+        m_available.emplace_back(m_buffer.get(), m_available.size(), m_page_size);
 }
 
 Pager::~Pager()
@@ -123,7 +132,7 @@ auto Pager::unpin(Frame frame) -> void
     }
 
     frame.reset(PID::null());
-    if (m_available.size() < m_frame_count)
+    if (!frame.is_owned())
         m_available.emplace_back(std::move(frame));
 }
 

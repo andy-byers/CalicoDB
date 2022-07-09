@@ -39,6 +39,8 @@ auto Page::operator=(Page &&rhs) noexcept -> Page&
 
 auto Page::do_release() noexcept -> void
 {
+    (void)m_is_transient; // TODO
+
     try {
         if (m_pool.value)
             m_pool.value->on_page_release(*this);

@@ -209,7 +209,7 @@ WALHarness::WALHarness(Size block_size)
 {
     auto temp = bank->open_memory(WAL_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
     backing = temp->shared_memory();
-    auto sink = logging::create_sink("", 0);
+    auto sink = logging::create_sink("", spdlog::level::off);
     writer = std::make_unique<WALWriter>(WALWriter::Parameters {*bank, sink, block_size});
     reader = std::make_unique<WALReader>(WALReader::Parameters {*bank, sink, block_size});
 }

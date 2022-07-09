@@ -21,9 +21,9 @@ Options options {
     PAGE_SIZE,                // Page size
     PAGE_SIZE,                // Block size
     CACHE_SIZE / PAGE_SIZE, // Frame count
-    0,
+    spdlog::level::off,
     0666,                    // Permissions
-    false,               // Use transactions (can be changed commandline)
+    false,               // Use transactions (can be changed via commandline)
 };
 
 struct BenchmarkParameters {

@@ -1,19 +1,19 @@
 cmake_minimum_required(VERSION 3.14)
 
 SET(
-        CMAKE_CXX_FLAGS_RELWITHASSERTIONS "-O3"
-        CACHE STRING "C++ compiler flags for a RelWithAssertions build" FORCE
+    CMAKE_CXX_FLAGS_RELWITHASSERTIONS "-O3"
+    CACHE STRING "C++ compiler flags for a RelWithAssertions build" FORCE
 )
 SET(
-        CMAKE_C_FLAGS_RELWITHASSERTIONS "-O3"
-        CACHE STRING "C compiler flags for a RelWithAssertions build" FORCE
+    CMAKE_C_FLAGS_RELWITHASSERTIONS "-O3"
+    CACHE STRING "C compiler flags for a RelWithAssertions build" FORCE
 )
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
 project(
-        CalicoDB
-        LANGUAGES CXX
-        VERSION 0.0.1
+    CalicoDB
+    LANGUAGES CXX
+    VERSION 0.0.1
 )
 set(CMAKE_CXX_STANDARD 17)
 
@@ -36,7 +36,7 @@ include(CheckCXXSymbolExists)
 check_cxx_symbol_exists(O_DIRECT "fcntl.h" CALICO_HAS_O_DIRECT)
 
 option(CALICO_INSTALL "Install the library and headers" ${CALICO_MAIN_PROJECT})
-option(CALICO_BUILD_TESTS "Build the tests" ${CALICO_MAIN_PROJECT})
+option(CALICO_BUILD_TESTS "Build the tests" Off)
 option(CALICO_BUILD_EXAMPLES "Build the examples" ${CALICO_MAIN_PROJECT})
 
 set(CALICO_SOURCES '')
@@ -49,30 +49,11 @@ include(GNUInstallDirs)
 include(FetchContent)
 
 FetchContent_Declare(
-    zlib
-    GIT_REPOSITORY https://github.com/madler/zlib.git
-    GIT_TAG        v1.2.12
-)
-FetchContent_Declare(
     spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG        v1.10.0
 )
 FetchContent_MakeAvailable(spdlog)
-FetchContent_GetProperties(zlib)
-if (NOT zlib_POPULATED)
-    FetchContent_Populate(zlib)
-
-    # Replace the CMakeLists.txt in zlib with one that is altered to a) not build the examples/
-    # add them as CTest tests, and b) bump the minimum required CMake version and set a policy
-    # to get rid of the build warnings.
-    file(REMOVE "${zlib_SOURCE_DIR}/CMakeLists.txt")
-    file(COPY "${PROJECT_SOURCE_DIR}/cmake/ZLibCMakeLists.txt" DESTINATION "${zlib_SOURCE_DIR}")
-    file(RENAME "${zlib_SOURCE_DIR}/ZLibCMakeLists.txt" "${zlib_SOURCE_DIR}/CMakeLists.txt")
-    #    set(INSTALL_LIB_DIR "${PROJECT_BINARY_DIR}/lib")
-    #    set(INSTALL_INC_DIR "${PROJECT_BINARY_DIR}/include/calico")
-    add_subdirectory(${zlib_SOURCE_DIR} ${zlib_BINARY_DIR})
-endif()
 
 # Build the static library.
 add_library(
@@ -81,23 +62,21 @@ add_library(
 target_include_directories(
     "${CALICO_NAME}"
     PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE "${CALICO_SOURCE_DIR}"
-    PUBLIC  "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
+            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE "${CALICO_SOURCE_DIR}")
 target_compile_options(
     "${CALICO_NAME}"
     PRIVATE "${CALICO_WARNINGS}")
 target_link_libraries(
     "${CALICO_NAME}"
     PUBLIC  spdlog::spdlog
-    PRIVATE pthread zlib)
+    PRIVATE pthread)
 
 # Build the examples/use cases.
 if(CALICO_BUILD_EXAMPLES)
     add_subdirectory(${CALICO_EXAMPLES_DIR})
 endif()
 
-# TODO
 if(CALICO_INSTALL)
     set(TARGETS_NAME ${PROJECT_NAME}Targets)
     set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
@@ -105,47 +84,57 @@ if(CALICO_INSTALL)
     set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
     set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
 
-#    install(
-#        TARGETS "${CALICO_NAME}"
-#        EXPORT "${TARGETS_NAME}"
-#        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-#        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-#        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-#    )
-#    install(
-#        FILES "${CALICO_HEADERS}"
-#        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/calico"
-#    )
-#
-#    include(CMakePackageConfigHelpers)
-#    configure_package_config_file(
-#        "${CONFIG_FILE_IN}"
-#        "${CONFIG_FILE_OUT}"
-#        INSTALL_DESTINATION "${INSTALL_DIR}"
-#    )
-#    write_basic_package_version_file(
-#        "${VERSION_FILE}"
-#        COMPATIBILITY SameMajorVersion
-#    )
-#    install(
-#        EXPORT "${TARGETS_NAME}"
-#        NAMESPACE "${PROJECT_NAME}::"
-#        DESTINATION "${INSTALL_DIR}"
-#    )
-#    install(
-#        FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
-#        DESTINATION "${INSTALL_DIR}"
-#    )
+    install(
+        TARGETS "${CALICO_NAME}" spdlog
+        EXPORT "${TARGETS_NAME}"
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+    install(
+        DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+    install(
+        DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/calico"
+    )
+
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CONFIG_FILE_IN}"
+        "${CONFIG_FILE_OUT}"
+        INSTALL_DESTINATION "${INSTALL_DIR}"
+    )
+    write_basic_package_version_file(
+        "${VERSION_FILE}"
+        COMPATIBILITY SameMajorVersion
+    )
+    install(
+        EXPORT "${TARGETS_NAME}"
+        NAMESPACE "${PROJECT_NAME}::"
+        DESTINATION "${INSTALL_DIR}"
+    )
+    install(
+        FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
+        DESTINATION "${INSTALL_DIR}"
+    )
 endif()
 
 if(CALICO_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_Declare(
-            googletest
-            GIT_REPOSITORY https://github.com/google/googletest.git
-            GIT_TAG        release-1.11.0
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        release-1.11.0
     )
-    FetchContent_MakeAvailable(googletest)
+    FetchContent_GetProperties(googletest)
+    if (NOT googletest_POPULATED)
+        FetchContent_Populate(googletest)
+        # Don't install GTest if we are installing Calico DB.
+        set(INSTALL_GTEST Off)
+        add_subdirectory("${googletest_SOURCE_DIR}" "${googletest_BINARY_DIR}")
+    endif()
     include(GoogleTest)
     include(CTest)
     enable_testing()

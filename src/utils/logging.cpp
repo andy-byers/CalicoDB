@@ -14,7 +14,7 @@ auto create_logger(spdlog::sink_ptr sink, const std::string &name) -> std::share
     return std::make_shared<spdlog::logger>(name, std::move(sink));
 }
 
-auto create_sink(const std::string &base, unsigned level) -> spdlog::sink_ptr
+auto create_sink(const std::string &base, spdlog::level::level_enum level) -> spdlog::sink_ptr
 {
     spdlog::sink_ptr sink;
     if (base.empty()) {
@@ -22,7 +22,7 @@ auto create_sink(const std::string &base, unsigned level) -> spdlog::sink_ptr
     } else {
         sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(fs::path {base} / LOG_NAME);
     }
-    sink->set_level(static_cast<spdlog::level::level_enum>(level));
+    sink->set_level(level);
     return sink;
 }
 

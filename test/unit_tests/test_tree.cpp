@@ -34,7 +34,7 @@ public:
             *bank,
             nullptr,
             nullptr,
-            logging::create_sink("", 0),
+            logging::create_sink("", spdlog::level::off),
             LSN::null(),
             32,
             0,
@@ -97,7 +97,7 @@ public:
         max_local = get_max_local(PAGE_SIZE);
         tree = std::make_unique<Tree>(Tree::Parameters{
             buffer_pool.get(),
-            logging::create_sink("", 0),
+            logging::create_sink("", spdlog::level::off),
             PID::null(),
             0,
             0,

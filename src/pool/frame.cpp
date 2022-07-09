@@ -8,17 +8,22 @@
 namespace calico {
 
 Frame::Frame(Size size)
-    : m_data {std::unique_ptr<Byte[], AlignedDeleter> {
-          new(static_cast<std::align_val_t>(size)) Byte[size],
-          AlignedDeleter {static_cast<std::align_val_t>(size)}}}
-    , m_size {size}
+    : m_owned(size, '\x00'),
+      m_bytes {stob(m_owned)},
+      m_size {size}
 {
     CALICO_EXPECT_TRUE(is_power_of_two(size));
     CALICO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
     CALICO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
-    // The buffer should be aligned to the page size.
-    CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_data.get()) % size, 0);
-    mem_clear(data());
+}
+
+Frame::Frame(Byte *buffer, Index id, Size size)
+    : m_bytes {buffer + id*size, size},
+      m_size {size}
+{
+    CALICO_EXPECT_TRUE(is_power_of_two(size));
+    CALICO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
+    CALICO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
 }
 
 auto Frame::borrow(IBufferPool *parent, bool is_writable) -> Page

@@ -31,7 +31,7 @@ public:
         pager = std::make_unique<Pager>(Pager::Parameters{
             file->open_reader(),
             file->open_writer(),
-            logging::create_sink("", 0),
+            logging::create_sink("", spdlog::level::off),
             page_size,
             frame_count,
         });
@@ -95,7 +95,7 @@ public:
             *bank, // Will open a file that shares memory with `memory` member.
             nullptr,
             nullptr,
-            logging::create_sink("", 0),
+            logging::create_sink("", spdlog::level::off),
             static_lsn,
             frame_count,
             0,
@@ -278,7 +278,7 @@ public:
     static constexpr Size page_size = 0x200;
 
     InMemoryTests()
-        : pool {std::make_unique<InMemory>(page_size, true, logging::create_sink("", 0))} {}
+        : pool {std::make_unique<InMemory>(page_size, true, logging::create_sink("", spdlog::level::off))} {}
 
     Random random {0};
     std::unique_ptr<InMemory> pool;

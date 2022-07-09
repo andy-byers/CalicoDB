@@ -20,7 +20,13 @@ public:
     using ConstReference = std::reference_wrapper<const Frame>;
 
     explicit Frame(Size);
+    Frame(Byte*, Index, Size);
     ~Frame() = default;
+
+    [[nodiscard]] auto is_owned() const -> bool
+    {
+        return !m_owned.empty();
+    }
 
     [[nodiscard]] auto page_id() const -> PID
     {
@@ -37,14 +43,19 @@ public:
         return m_is_dirty;
     }
 
+    [[nodiscard]] auto size() const -> Size
+    {
+        return m_size;
+    }
+
     [[nodiscard]] auto data() const -> BytesView
     {
-        return {m_data.get(), m_size};
+        return m_bytes;
     }
 
     auto data() -> Bytes
     {
-        return {m_data.get(), m_size};
+        return m_bytes;
     }
 
     auto clean() -> void
@@ -67,20 +78,8 @@ public:
     Frame(Frame&&) = default;
 
 private:
-    struct AlignedDeleter {
-
-        explicit AlignedDeleter(std::align_val_t alignment)
-            : align {alignment} {}
-
-        auto operator()(Byte *ptr) const -> void
-        {
-            operator delete[](ptr, align);
-        }
-
-        std::align_val_t align;
-    };
-
-    std::unique_ptr<Byte[], AlignedDeleter> m_data;
+    std::string m_owned;
+    Bytes m_bytes;
     PID m_page_id {};
     Size m_ref_count {};
     Size m_size {};

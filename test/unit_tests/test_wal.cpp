@@ -369,7 +369,7 @@ public:
     {
         std::error_code ignore;
         std::filesystem::remove_all(BASE_PATH, ignore);
-        auto sink = logging::create_sink("", 0);
+        auto sink = logging::create_sink("", spdlog::level::off);
 
         directory = std::make_unique<Directory>(BASE_PATH);
         writer = std::make_unique<WALWriter>(WALWriter::Parameters {*directory, sink, BLOCK_SIZE});

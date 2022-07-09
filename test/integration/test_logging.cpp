@@ -3,7 +3,6 @@
 #include "fakes.h"
 #include "tools.h"
 #include "pool/buffer_pool.h"
-#include "storage/directory.h"
 #include "storage/system.h"
 #include "wal/wal_reader.h"
 #include "wal/wal_record.h"
@@ -27,7 +26,7 @@ public:
         options.page_size = BLOCK_SIZE;
         options.block_size = BLOCK_SIZE;
         FakeFilesHarness harness {options};
-        auto sink = logging::create_sink("", 0);
+        auto sink = logging::create_sink("", spdlog::level::off);
         bank = std::move(harness.bank);
         pool = std::make_unique<BufferPool>(BufferPool::Parameters{
             *bank,
@@ -53,12 +52,12 @@ public:
         wal_reader_faults = bank->open_memory(WAL_NAME, Mode::READ_ONLY, 0666)->faults();
         wal_writer_faults = bank->open_memory(WAL_NAME, Mode::READ_ONLY, 0666)->faults();
         pool.reset();
-        auto sink = logging::create_sink("", 0);
+        auto sink = logging::create_sink("", spdlog::level::off);
         pool = std::make_unique<BufferPool>(BufferPool::Parameters{
             *bank,
             std::make_unique<WALReader>(WALReader::Parameters {*bank, sink, BLOCK_SIZE}),
             std::make_unique<WALWriter>(WALWriter::Parameters {*bank, sink, BLOCK_SIZE}),
-            logging::create_sink("", 0),
+            logging::create_sink("", spdlog::level::off),
             LSN::base(),
             CACHE_SIZE,
             0,
@@ -86,7 +85,14 @@ public:
         const auto lsn_offset = PageLayout::header_offset(page.id()) + PageLayout::LSN_OFFSET;
         auto temp = btos(page.range(0));
         put_uint32(stob(temp).range(lsn_offset), 0);
-        return crc_32(stob(temp).range(content_offset));
+//        return crc_32(stob(temp).range(content_offset));
+        auto sum = 0U; // TODO: Need that crc32 functionality back.
+        auto data = stob(temp).range(content_offset);
+        while (!data.is_empty()) {
+            sum += static_cast<unsigned>(data[0]);
+            data.advance();
+        }
+        return sum;
     }
 
     Random random {0};

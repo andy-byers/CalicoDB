@@ -33,11 +33,16 @@ public:
         return m_is_dirty;
     }
 
+    auto set_transient() -> void
+    {
+        m_is_transient = true;
+    }
+
     [[nodiscard]] auto type() const -> PageType;
     [[nodiscard]] auto lsn() const -> LSN;
     auto set_type(PageType) -> void;
-    auto set_lsn(LSN) -> void;
 
+    auto set_lsn(LSN) -> void;
     [[nodiscard]] auto id() const -> PID;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto range(Index) const -> BytesView;
@@ -69,6 +74,7 @@ private:
     std::optional<UpdateManager> m_updates;
     Bytes m_data;
     PID m_id;
+    bool m_is_transient {};
     bool m_is_writable {};
     bool m_is_dirty {};
 };

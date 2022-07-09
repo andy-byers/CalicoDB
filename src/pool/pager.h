@@ -40,6 +40,20 @@ private:
     auto do_write(PID, BytesView) const -> void;
     auto maybe_write_pending() -> void;
 
+    struct AlignedDeleter {
+
+        explicit AlignedDeleter(std::align_val_t alignment)
+            : align {alignment} {}
+
+        auto operator()(Byte *ptr) const -> void
+        {
+            operator delete[](ptr, align);
+        }
+
+        std::align_val_t align;
+    };
+
+    std::unique_ptr<Byte[], AlignedDeleter> m_buffer;
     std::list<Frame> m_available;           ///< List of available frames
     std::list<Frame> m_pending;           ///< List of available frames
     std::unique_ptr<IFileReader> m_reader;

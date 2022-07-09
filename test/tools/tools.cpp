@@ -156,7 +156,7 @@ auto WALPrinter::print(const std::string &path, Size block_size) -> void
 {
     const auto base = std::filesystem::path {path}.parent_path();
     auto directory = std::make_unique<Directory>(base); // Could be /tmp.
-    WALReader reader {{*directory, logging::create_sink("", 0), block_size}};
+    WALReader reader {{*directory, logging::create_sink("", spdlog::level::off), block_size}};
     print(reader);
 }
 
