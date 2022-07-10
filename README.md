@@ -2,6 +2,10 @@
 
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
+> **Note**: I'm currently experimenting with removing exceptions throughout the library.
+>           I'm using @TartanLlama/expected for error handling instead!
+>           This branch will be broken for a little while.
+
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 

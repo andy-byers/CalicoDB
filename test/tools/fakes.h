@@ -120,6 +120,12 @@ public:
     auto remove() -> void override;
     auto sync() -> void override {}
 
+    [[nodiscard]] auto noex_children() const -> Result<std::vector<std::string>> override;
+    auto noex_open_directory(const std::string&) -> Result<std::unique_ptr<IDirectory>> override;
+    auto noex_open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> override;
+    auto noex_remove() -> Result<void> override;
+    auto noex_sync() -> Result<void> override;
+
     auto open_memory_bank(const std::string&) -> std::unique_ptr<MemoryBank>;
     auto open_memory(const std::string&, Mode, int) -> std::unique_ptr<Memory>;
 
@@ -249,6 +255,44 @@ public:
         m_path.clear();
     }
 
+
+
+    [[nodiscard]] auto noex_size() const -> Result<Size> override
+    {
+        return m_memory.memory().size();
+    }
+
+    [[nodiscard]] auto noex_open(const std::string &path, Mode mode, int permissions) -> Result<void> override
+    {
+        m_is_open = true;
+        m_path = path;
+        m_permissions = permissions;
+        m_is_readable = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_ONLY)) == static_cast<unsigned>(Mode::READ_ONLY) ||
+                        (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_WRITE)) == static_cast<unsigned>(Mode::READ_WRITE);
+        m_is_writable = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::WRITE_ONLY)) == static_cast<unsigned>(Mode::WRITE_ONLY) ||
+                        (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_WRITE)) == static_cast<unsigned>(Mode::READ_WRITE);
+        m_is_append = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::APPEND)) == static_cast<unsigned>(Mode::APPEND);
+        return {};
+    }
+
+    [[nodiscard]] auto noex_close() -> Result<void> override
+    {
+        m_is_open = false;
+        return {};
+    }
+
+    // TODO: Shared memory filename?
+    [[nodiscard]] auto noex_rename(const std::string&) -> Result<void> override
+    {
+        return {};
+    }
+
+    [[nodiscard]] auto noex_remove() -> Result<void> override
+    {
+        m_path.clear();
+        return {};
+    }
+
 private:
     FaultControls m_faults;
     SharedMemory m_memory;
@@ -270,6 +314,10 @@ public:
     auto read(Bytes) -> Size override;
     auto read_at(Bytes, Index) -> Size override;
 
+    auto noex_seek(long, Seek) -> Result<Index> override;
+    auto noex_read(Bytes) -> Result<Size> override;
+    auto noex_read_at(Bytes, Index) -> Result<Size> override;
+
 private:
     Memory *m_memory {};
 };
@@ -283,6 +331,12 @@ public:
     auto write_at(BytesView, Index) -> Size override;
     auto sync() -> void override {}
     auto resize(Size) -> void override;
+
+    auto noex_seek(long, Seek) -> Result<Index> override;
+    auto noex_write(BytesView) -> Result<Size> override;
+    auto noex_write_at(BytesView, Index) -> Result<Size> override;
+    auto noex_sync() -> Result<void> override;
+    auto noex_resize(Size) -> Result<void> override;
 
 private:
     Memory *m_memory {};

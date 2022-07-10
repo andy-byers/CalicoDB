@@ -13,6 +13,12 @@ class IBufferPool;
 
 class Page final {
 public:
+    enum Mode {
+        QUERY,
+        UPDATE,
+        TRACKED,
+    };
+
     struct Parameters {
         PID id;
         Bytes data;
@@ -20,6 +26,7 @@ public:
         bool is_writable {};
         bool is_dirty {};
     };
+
     explicit Page(const Parameters&);
     ~Page();
 

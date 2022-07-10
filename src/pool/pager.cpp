@@ -4,6 +4,7 @@
 #include "calico/exception.h"
 #include "page/page.h"
 #include "storage/file.h"
+#include "storage/system.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
@@ -173,11 +174,125 @@ auto Pager::maybe_write_pending() -> void
             continue;
         write_page_to_file(frame.page_id(), frame.data());
         frame.reset(PID::null());
-        if (m_available.size() < m_frame_count)
-            m_available.emplace_back(std::move(frame));
+//        if (m_available.size() < m_frame_count) TODO: Not necessary! We splice down below...
+//            m_available.emplace_back(std::move(frame));
     }
     // This is a NOP if m_pending is empty.
     m_available.splice(end(m_available), m_pending);
+}
+
+
+
+
+
+auto Pager::noex_truncate(Size page_count) -> Result<void>
+{
+    CALICO_EXPECT_EQ(m_available.size(), m_frame_count);
+    return m_writer->noex_resize(page_count * page_size());
+}
+
+auto Pager::noex_pin(PID id) -> Result<Frame>
+{
+    CALICO_EXPECT_FALSE(id.is_null());
+    maybe_write_pending();
+
+    if (m_available.empty())
+        m_available.emplace_back(Frame {page_size()});
+
+    auto &frame = m_available.back();
+
+    if (auto result = noex_read_page_from_file(id, frame.data()); !result) {
+        return ErrorResult {result.error()};
+    } else if (!result.value()) {
+        mem_clear(frame.data());
+    }
+
+    auto moved = std::move(m_available.back());
+    m_available.pop_back();
+    moved.reset(id);
+    return moved;
+}
+
+auto Pager::noex_discard(Frame frame) -> Result<void>
+{
+    frame.clean();
+    return noex_unpin(std::move(frame));
+}
+
+auto Pager::noex_unpin(Frame frame) -> Result<void>
+{
+    CALICO_EXPECT_EQ(frame.ref_count(), 0);
+    if (auto result = noex_maybe_write_pending(); !result) {
+        m_pending.emplace_back(std::move(frame));
+        return result;
+    }
+
+    if (frame.is_dirty()) {
+        if (auto result = noex_write_page_to_file(frame.page_id(), frame.data()); !result) {
+            m_pending.emplace_back(std::move(frame));
+            return result;
+        }
+    }
+
+    frame.reset(PID::null());
+    if (!frame.is_owned())
+        m_available.emplace_back(std::move(frame));
+    return {};
+}
+
+auto Pager::noex_sync() -> Result<void>
+{
+    return m_writer->noex_sync();
+}
+
+auto Pager::noex_maybe_write_pending() -> Result<void>
+{
+    for (auto &frame: m_pending) {
+        if (!frame.is_dirty())
+            continue;
+        if (auto result = noex_write_page_to_file(frame.page_id(), frame.data()); !result)
+            return result;
+        frame.reset(PID::null());
+    }
+    // This is a NOP if m_pending is empty.
+    m_available.splice(end(m_available), m_pending);
+    return {};
+}
+
+auto Pager::noex_read_page_from_file(PID id, Bytes out) const -> Result<bool>
+{
+    CALICO_EXPECT_EQ(page_size(), out.size());
+
+    return m_reader->noex_read_at(out, FileLayout::page_offset(id, out.size()))
+        .and_then([&](Size read_size) -> Result<bool> {
+            if (read_size == 0) {
+                // Just hit EOF.
+                return false;
+            } else if (read_size == out.size()) {
+                // Read a full page.
+                return true;
+            }
+            // Partial read.
+            logging::MessageGroup group;
+            group.set_primary("cannot read page");
+            group.set_detail("read an incomplete page");
+            return ErrorResult {group.system_error(*m_logger)};
+        })
+        .or_else([this](const Error &error) -> Result<bool> {
+            m_logger->error(btos(error.what()));
+            return ErrorResult {error};
+        });
+}
+
+auto Pager::noex_write_page_to_file(PID id, BytesView in) const -> Result<void>
+{
+    CALICO_EXPECT_EQ(page_size(), in.size());
+
+    return noex_write_all_at(*m_writer, in, FileLayout::page_offset(id, in.size()))
+        .or_else([this](const Error &error) -> Result<void> {
+            m_logger->error(btos(error.what()));
+            return ErrorResult {error};
+        });
 }
 
 } // calico

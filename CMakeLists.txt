@@ -53,7 +53,25 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG        v1.10.0
 )
+FetchContent_Declare(
+    expected
+    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
+    GIT_TAG        v1.0.0
+)
 FetchContent_MakeAvailable(spdlog)
+FetchContent_GetProperties(expected)
+if(NOT expected_POPULATED)
+    FetchContent_Populate(expected)
+    set(TL_EXPECTED_DIR "${expected_SOURCE_DIR}/include")
+    set(TL_EXPECTED_INC "${TL_EXPECTED_DIR}/tl/expected.hpp")
+#    file(COPY "${expected_SOURCE_DIR}/include/tl/expected.h" "${CALIC}")
+#    set(EXPECTED_ENABLE_TESTS Off)
+#    set(EXPECTED_BUILD_PACKAGE Off)
+#    set(CXXSTD 17)
+#    add_subdirectory("${expected_SOURCE_DIR}" "${expected_BINARY_DIR}")
+endif()
+
+list(APPEND CALICO_SOURCES "${TL_EXPECTED_INC}")
 
 # Build the static library.
 add_library(
@@ -63,7 +81,7 @@ target_include_directories(
     "${CALICO_NAME}"
     PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE "${CALICO_SOURCE_DIR}")
+    PRIVATE "${CALICO_SOURCE_DIR}" "${TL_EXPECTED_DIR}/tl")
 target_compile_options(
     "${CALICO_NAME}"
     PRIVATE "${CALICO_WARNINGS}")

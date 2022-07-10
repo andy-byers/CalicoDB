@@ -25,6 +25,12 @@ public:
     auto rename(const std::string&) -> void override;
     auto remove() -> void override;
 
+    [[nodiscard]] auto noex_size() const -> Result<Size> override;
+    auto noex_open(const std::string&, Mode, int) -> Result<void> override;
+    auto noex_close() -> Result<void> override;
+    auto noex_rename(const std::string&) -> Result<void> override;
+    auto noex_remove() -> Result<void> override;
+
 private:
     std::filesystem::path m_path;
     Mode m_mode {};
@@ -36,6 +42,11 @@ auto read_exact(IFileReader&, Bytes) -> bool;
 auto read_exact_at(IFileReader&, Bytes, Index) -> bool;
 auto write_all(IFileWriter&, BytesView) -> bool;
 auto write_all_at(IFileWriter&, BytesView, Index) -> bool;
+
+auto noex_read_exact(IFileReader&, Bytes) -> Result<void>;
+auto noex_read_exact_at(IFileReader&, Bytes, Index) -> Result<void>;
+auto noex_write_all(IFileWriter&, BytesView) -> Result<void>;
+auto noex_write_all_at(IFileWriter&, BytesView, Index) -> Result<void>;
 
 } // calico
 

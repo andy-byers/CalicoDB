@@ -23,6 +23,10 @@ public:
     virtual auto append(WALRecord) -> LSN = 0;
     virtual auto truncate() -> void = 0;
     virtual auto flush() -> LSN = 0;
+
+    [[nodiscard]] virtual auto noex_append(WALRecord) -> Result<LSN> = 0;
+    [[nodiscard]] virtual auto noex_truncate() -> Result<void> = 0;
+    [[nodiscard]] virtual auto noex_flush() -> Result<LSN> = 0;
 };
 
 
@@ -33,6 +37,12 @@ public:
     virtual auto increment() -> bool = 0;
     virtual auto decrement() -> bool = 0;
     virtual auto reset() -> void = 0;
+
+
+    [[nodiscard]] virtual auto noex_record() const -> Result<WALRecord> = 0;
+    [[nodiscard]] virtual auto noex_increment() -> Result<bool> = 0;
+    [[nodiscard]] virtual auto noex_decrement() -> Result<bool> = 0;
+    [[nodiscard]] virtual auto noex_reset() -> Result<void> = 0;
 };
 
 } // calico

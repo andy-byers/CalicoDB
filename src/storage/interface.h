@@ -1,11 +1,11 @@
 #ifndef CALICO_STORAGE_INTERFACE_H
 #define CALICO_STORAGE_INTERFACE_H
 
-#include "calico/bytes.h"
 #include <memory>
 #include <string>
 #include <vector>
 #include <fcntl.h>
+#include "calico/error.h"
 
 namespace calico {
 
@@ -43,6 +43,10 @@ public:
     virtual auto seek(long, Seek) -> void = 0;
     virtual auto read(Bytes) -> Size = 0;
     virtual auto read_at(Bytes, Index) -> Size = 0;
+
+    virtual auto noex_seek(long, Seek) -> Result<Index> = 0;
+    virtual auto noex_read(Bytes) -> Result<Size> = 0;
+    virtual auto noex_read_at(Bytes, Index) -> Result<Size> = 0;
 };
 
 class IFileWriter {
@@ -53,6 +57,12 @@ public:
     virtual auto write_at(BytesView, Index) -> Size = 0;
     virtual auto sync() -> void = 0;
     virtual auto resize(Size) -> void = 0;
+
+    virtual auto noex_seek(long, Seek) -> Result<Index> = 0;
+    virtual auto noex_write(BytesView) -> Result<Size> = 0;
+    virtual auto noex_write_at(BytesView, Index) -> Result<Size> = 0;
+    virtual auto noex_sync() -> Result<void> = 0;
+    virtual auto noex_resize(Size) -> Result<void> = 0;
 };
 
 class IFile {
@@ -73,6 +83,12 @@ public:
     virtual auto close() -> void = 0;
     virtual auto rename(const std::string&) -> void = 0;
     virtual auto remove() -> void = 0;
+
+    [[nodiscard]] virtual auto noex_size() const -> Result<Size> = 0;
+    virtual auto noex_open(const std::string&, Mode, int) -> Result<void> = 0;
+    virtual auto noex_close() -> Result<void> = 0;
+    virtual auto noex_rename(const std::string&) -> Result<void> = 0;
+    virtual auto noex_remove() -> Result<void> = 0;
 };
 
 class IDirectory {
@@ -85,6 +101,12 @@ public:
     virtual auto open_directory(const std::string&) -> std::unique_ptr<IDirectory> = 0;
     virtual auto remove() -> void = 0;
     virtual auto sync() -> void = 0;
+
+    [[nodiscard]] virtual auto noex_children() const -> Result<std::vector<std::string>> = 0;
+    virtual auto noex_open_directory(const std::string&) -> Result<std::unique_ptr<IDirectory>> = 0;
+    virtual auto noex_open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> = 0;
+    virtual auto noex_remove() -> Result<void> = 0;
+    virtual auto noex_sync() -> Result<void> = 0;
 };
 
 } // calico

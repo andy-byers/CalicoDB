@@ -51,6 +51,10 @@ public:
     auto truncate() -> void override;
     auto flush() -> LSN override;
 
+    [[nodiscard]] auto noex_append(WALRecord) -> Result<LSN> override;
+    [[nodiscard]] auto noex_truncate() -> Result<void> override;
+    [[nodiscard]] auto noex_flush() -> Result<LSN> override;
+
 private:
     std::unique_ptr<IFile> m_file;
     std::unique_ptr<IFileWriter> m_writer;

@@ -35,8 +35,8 @@ auto main(int, const char *[]) -> int
         param.is_sequential = true;
         cco::RecordGenerator generator {param};
         cco::Random random;
-        auto records = generator.generate(random, 10'000);
-        auto db = cco::Database::open(PATH, options);
+        auto records = generator.generate(random, 1'000'000);
+        auto db = cco::Database::temp(options);
         run_inserts(db, records);
 
     } catch (const cco::CorruptionError &error) {

@@ -5,6 +5,9 @@
 #include <cstdlib>
 #include <string>
 
+// @TartanLlama/expected v1.0.0
+#include "expected.hpp"
+
 #if (!defined(_WIN32) && !defined(_WIN64)) && (defined(__unix__) || defined(__unix) || defined(__APPLE__))
 #  define CALICO_UNIX
 #  ifdef __APPLE__

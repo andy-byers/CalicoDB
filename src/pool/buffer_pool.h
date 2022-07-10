@@ -37,12 +37,6 @@ public:
         bool use_transactions {};
     };
 
-//    enum PageMode {
-//        QUERY,
-//        UPDATE,
-//        TRACKED,
-//    };
-
     explicit BufferPool(Parameters);
     ~BufferPool() override = default;
 
@@ -86,6 +80,21 @@ public:
     auto on_page_release(Page&) -> void override;
     auto on_page_error() -> void override;
 
+    [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<IBufferPool>>;
+    [[nodiscard]] auto noex_close() -> Result<void> override;
+    [[nodiscard]] auto noex_allocate(PageType) -> Result<Page> override;
+    [[nodiscard]] auto noex_acquire(PID, bool) -> Result<Page> override;
+    [[nodiscard]] auto noex_commit() -> Result<void> override;
+    [[nodiscard]] auto noex_abort() -> Result<void> override;
+    [[nodiscard]] auto noex_try_flush() -> Result<bool> override;
+    [[nodiscard]] auto noex_try_flush_wal() -> Result<bool> override;
+    [[nodiscard]] auto noex_purge() -> Result<void> override;
+    [[nodiscard]] auto noex_recover() -> Result<bool> override;
+    [[nodiscard]] auto noex_save_header(FileHeader&) -> Result<void> override;
+    [[nodiscard]] auto noex_load_header(const FileHeader&) -> Result<void> override;
+    [[nodiscard]] auto noex_on_page_release(Page&) -> Result<void> override;
+    [[nodiscard]] auto noex_on_page_error() -> Result<void> override;
+
 private:
     auto propagate_page_error() -> void;
     auto log_update(Page&) -> void;
@@ -94,6 +103,9 @@ private:
     auto fetch_page(PID, bool) -> Page;
     auto fetch_frame(PID) -> Frame;
     auto try_evict_frame() -> bool;
+
+    [[nodiscard]] auto noex_fetch_page(PID, bool) -> Result<Page>;
+    [[nodiscard]] auto noex_fetch_frame(PID) -> Result<Frame>;
 
     mutable std::mutex m_mutex;
     std::unique_ptr<IWALReader> m_wal_reader;

@@ -37,6 +37,11 @@ public:
     auto decrement() -> bool override;
     auto reset() -> void override;
 
+    [[nodiscard]] auto noex_record() const -> Result<WALRecord> override;
+    [[nodiscard]] auto noex_increment() -> Result<bool> override;
+    [[nodiscard]] auto noex_decrement() -> Result<bool> override;
+    [[nodiscard]] auto noex_reset() -> Result<void> override;
+
 private:
     auto read_block() -> bool;
     auto read_record() -> std::optional<WALRecord>;
@@ -45,6 +50,14 @@ private:
     auto read_previous() -> std::optional<WALRecord>;
     auto push_position() -> void;
     auto pop_position_and_seek() -> void;
+
+    [[nodiscard]] auto noex_read_next() -> Result<std::optional<WALRecord>>; // TODO: Try to not use optional so much if possible. Seems unnecessary in some cases.
+    [[nodiscard]] auto noex_read_previous() -> Result<std::optional<WALRecord>>;
+    [[nodiscard]] auto noex_read_record() -> Result<std::optional<WALRecord>>;
+    [[nodiscard]] auto noex_read_record_aux(Index) -> Result<std::optional<WALRecord>>;
+    [[nodiscard]] auto noex_pop_position_and_seek() -> Result<void>;
+    [[nodiscard]] auto noex_try_pop_position_and_seek() -> Result<void>;
+    [[nodiscard]] auto noex_read_block() -> Result<bool>;
 
     std::vector<Index> m_positions;        ///< Stack containing the absolute offset of each record we have read so far
     std::string m_block;                   ///< Tail buffer for caching WAL block contents

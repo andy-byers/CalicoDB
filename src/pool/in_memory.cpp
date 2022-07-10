@@ -1,7 +1,6 @@
 #include "in_memory.h"
 #include "frame.h"
 #include "page/file_header.h"
-#include "page/page.h"
 #include "utils/logging.h"
 
 namespace calico {
@@ -92,5 +91,72 @@ auto InMemory::load_header(const FileHeader &header) -> void
     while (page_count() < header.page_count())
         m_frames.emplace_back(m_page_size);
 }
+
+//
+//auto InMemory::noex_close() -> Result<void>
+//{
+//
+//}
+//
+//auto InMemory::noex_allocate(PageType) -> Result<Page>
+//{
+//
+//}
+//
+//auto InMemory::noex_acquire(PID id, bool mode) -> Result<Page>
+//{
+//
+//}
+//
+//auto InMemory::noex_commit() -> Result<void>
+//{
+//
+//}
+//
+//auto InMemory::noex_abort() -> Result<void>
+//{
+//
+//}
+//
+//auto InMemory::noex_try_flush() -> Result<bool>
+//{
+//
+//}
+//
+//auto InMemory::noex_try_flush_wal() -> Result<bool>
+//{
+//
+//}
+//
+//auto InMemory::noex_purge() -> Result<void>
+//{
+//
+//}
+//
+//auto InMemory::noex_recover() -> Result<bool>
+//{
+//
+//}
+//
+//auto InMemory::noex_save_header(FileHeader&) -> Result<void>
+//{
+//
+//}
+//
+//auto InMemory::noex_load_header(const FileHeader&) -> Result<void>
+//{
+//
+//}
+//
+//auto InMemory::noex_on_page_release(Page&) -> Result<void>
+//{
+//
+//}
+//
+//auto InMemory::noex_on_page_error() -> Result<void>
+//{
+//
+//}
+
 
 } // calico

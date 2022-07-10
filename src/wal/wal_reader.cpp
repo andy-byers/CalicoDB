@@ -1,9 +1,10 @@
-#include "calico/exception.h"
 #include "wal_reader.h"
-#include "wal_record.h"
+#include "calico/exception.h"
 #include "page/page.h"
+#include "storage/file.h"
 #include "storage/interface.h"
 #include "utils/logging.h"
+#include "wal_record.h"
 
 namespace calico {
 
@@ -243,6 +244,183 @@ auto WALReader::read_block() -> bool
         m_cursor = 0;
         throw;
     }
+}
+
+
+
+
+
+
+
+
+auto WALReader::noex_read_next() -> Result<std::optional<WALRecord>>
+{
+    WALRecord record;
+
+    if (!m_has_block) {
+        if (const auto success = noex_read_block()) {
+            if (!success.value())
+                return success;
+        } else {
+            return success;
+        }
+    }
+    push_position();
+
+    try {
+        while (record.type() != WALRecord::Type::FULL) {
+            // Merge partial values until we have a full record.
+            if (auto maybe_partial = noex_read_record()) {
+                record.merge(*maybe_partial);
+                // We just hit EOF. Note that we discard `record`, which may contain a non-FULL record.
+            } else {
+                pop_position_and_seek();
+                return std::nullopt;
+            }
+        }
+        if (!record.is_consistent()) {
+            logging::MessageGroup group;
+            group.set_primary("cannot read WAL record");
+            group.set_detail("record with LSN {} is corrupted", record.lsn().value);
+            group.set_hint("block ID is {} and block offset is {}", m_block_id, m_cursor);
+            // This exception gets ignored, but we still get the log output.
+            throw CorruptionError {group.warn(*m_logger)};
+        }
+        return record;
+
+    } catch (const CorruptionError&) {
+        m_incremented = false;
+        if (auto previous = read_previous())
+            return previous;
+        if (!m_positions.empty())
+            pop_position_and_seek();
+        return std::nullopt;
+    }
+}
+
+auto WALReader::noex_read_previous() -> Result<std::optional<WALRecord>>
+{
+    CALICO_EXPECT_GE(m_positions.size(), 2);
+    if (m_positions.size() >= 2) {
+        return noex_pop_position_and_seek()
+            .and_then(noex_pop_position_and_seek)
+            .and_then(read_next);
+    }
+    return std::nullopt;
+}
+
+auto WALReader::noex_read_record() -> Result<std::optional<WALRecord>>
+{
+    const auto out_of_space = m_block.size() - m_cursor <= WALRecord::HEADER_SIZE;
+    const auto needs_new_block = out_of_space || !m_has_block;
+
+    if (needs_new_block) {
+        if (out_of_space) {
+            m_block_id++;
+            m_cursor = 0;
+        }
+        if (const auto success = noex_read_block()) {
+            if (!success.value())
+                return std::nullopt;
+        } else {
+            return success;
+        }
+    }
+    if (auto record = noex_read_record_aux(m_cursor)) {
+        if (record.value()) {
+            m_cursor += record.value()->size();
+            CALICO_EXPECT_LE(m_cursor, m_block.size());
+            return record;
+        }
+    } else {
+        return record;
+    }
+    m_cursor = m_block.size();
+    return noex_read_record();
+}
+
+auto WALReader::noex_read_record_aux(Index offset) -> Result<std::optional<WALRecord>>
+{
+    // There should be enough space for a minimally-sized record in the tail buffer.
+    CALICO_EXPECT_TRUE(m_has_block);
+    CALICO_EXPECT_GT(m_block.size() - offset, WALRecord::HEADER_SIZE);
+
+    WALRecord record;
+    auto buffer = stob(m_block);
+    buffer.advance(offset);
+    record.read(buffer);
+
+    switch (record.type()) {
+        case WALRecord::Type::FIRST:
+        case WALRecord::Type::MIDDLE:
+        case WALRecord::Type::LAST:
+        case WALRecord::Type::FULL:
+            return record;
+        case WALRecord::Type::EMPTY:
+            return std::nullopt;
+        default:
+            logging::MessageGroup group;
+            group.set_primary("cannot read record");
+            group.set_detail("WAL record type {} is not recognized", static_cast<int>(record.type()));
+            return ErrorResult {group.corruption(*m_logger)};
+    }
+}
+
+auto WALReader::noex_pop_position_and_seek() -> Result<void>
+{
+    const auto absolute = m_positions.back();
+    const auto block_id = absolute / m_block.size();
+    const auto needs_new_block = m_block_id != block_id;
+
+    m_block_id = block_id;
+    m_cursor = absolute % m_block.size();
+    m_positions.pop_back();
+
+    if (needs_new_block)
+        return noex_read_block().map([] {return Result<void> {};});
+    return {};
+}
+
+auto WALReader::noex_try_pop_position_and_seek() -> Result<void>
+{
+    const auto absolute = m_positions.back();
+    const auto block_id = absolute / m_block.size();
+    const auto needs_new_block = m_block_id != block_id;
+
+    if (needs_new_block) {
+        if (const auto result = noex_read_block(); !result) {
+            return result;
+        } else if (!result.value()) {
+            logging::MessageGroup group;
+            group.set_primary("unable to seek backward");
+            group.set_detail("unexpected EOF");
+            return ErrorResult {group.corruption(*m_logger)};
+        }
+    }
+
+    m_block_id = block_id;
+    m_cursor = absolute % m_block.size();
+    m_positions.pop_back();
+}
+
+auto WALReader::noex_read_block() -> Result<bool>
+{
+
+    return m_reader->noex_read_at(stob(m_block), m_block_id * m_block.size())
+        .and_then([this](Size read_size) -> Result<bool> {
+            if (read_size == 0)
+                return false;
+            m_has_block = true;
+            return true;
+        })
+        .or_else([this](const Error &error) -> Result<bool> {
+            m_has_block = false;
+            m_positions.clear();
+            m_record.reset();
+            m_cursor = 0;
+            m_logger->error(btos(error.what()));
+            return ErrorResult {error};
+        });
 }
 
 } // calico

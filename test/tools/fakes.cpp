@@ -30,6 +30,29 @@ static auto maybe_throw_write_error(Random &random, FaultControls::Controls &con
     counter -= counter >= 0;
 }
 
+static auto maybe_emit_read_error(Random &random, FaultControls::Controls &controls) -> Result<void>
+{
+    // If the counter is positive, we tick down until we hit 0, at which point we throw an exception.
+    // Afterward, further reads will be subject to the normal read fault rate mechanism. If the counter
+    // is never set, it stays at -1 and doesn't contribute to the faults generated.
+    auto &counter = controls.read_fault_counter;
+    if (!counter || random.next_int(99U) < controls.read_fault_rate)
+        return ErrorResult {Error::system_error(std::make_error_code(std::errc::io_error).message())};
+    // Counter should settle on -1.
+    counter -= counter >= 0;
+    return {};
+}
+
+static auto maybe_emit_write_error(Random &random, FaultControls::Controls &controls) -> Result<void>
+{
+    auto &counter = controls.write_fault_counter;
+    if (!counter || random.next_int(99U) < controls.write_fault_rate)
+        return ErrorResult {Error::system_error(std::make_error_code(std::errc::io_error).message())};
+    counter -= counter >= 0;
+    return {};
+}
+
+
 MemoryBank::MemoryBank(const std::string &path)
     : m_path {path} {}
 
@@ -244,6 +267,121 @@ FakeDatabase::FakeDatabase(Options options)
         std::move(directory),
         options,
     });
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+auto MemoryBank::noex_children() const -> Result<std::vector<std::string>>
+{
+    std::vector<std::string> result;
+    std::transform(begin(m_shared), end(m_shared), begin(result), [](auto entry) {
+        return entry.first;
+    });
+    return result;
+}
+
+auto MemoryBank::noex_open_directory(const std::string &name) -> Result<std::unique_ptr<IDirectory>>
+{
+    return std::make_unique<MemoryBank>(m_path / name);
+}
+
+auto MemoryBank::noex_open_file(const std::string &name, Mode mode, int permissions) -> Result<std::unique_ptr<IFile>>
+{
+    std::unique_ptr<IFile> memory;
+    if (auto itr = m_shared.find(name); itr != std::end(m_shared)) {
+        if ((static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::TRUNCATE)) == static_cast<unsigned>(Mode::TRUNCATE))
+            itr->second.memory().clear();
+        memory = std::make_unique<Memory>(name, itr->second, m_faults[name]);
+    } else {
+        FaultControls faults;
+        SharedMemory shared;
+        m_shared.emplace(name, shared);
+        m_faults.emplace(name, faults);
+        memory = std::make_unique<Memory>(name, shared, faults);
+    }
+    memory->open(name, mode, permissions);
+    return memory;
+}
+
+auto MemoryBank::noex_remove() -> Result<void>
+{
+    m_path.clear();
+    return {};
+}
+
+auto MemoryBank::noex_sync() -> Result<void>
+{
+    return {};
+}
+
+auto MemoryReader::noex_seek(long offset, Seek whence) -> Result<Index>
+{
+    m_memory->cursor() = do_seek(m_memory->cursor(), m_memory->size(), offset, whence);
+    return m_memory->cursor();
+}
+
+auto MemoryReader::noex_read(Bytes out) -> Result<Size>
+{
+    if (const auto result = maybe_emit_read_error(m_memory->random(), m_memory->faults().controls()); !result)
+        return ErrorResult {result.error()};
+
+    const auto [cursor, read_size] = do_read(m_memory->memory(), m_memory->cursor(), out);
+    m_memory->cursor() = cursor;
+    return read_size;
+}
+
+auto MemoryReader::noex_read_at(Bytes out, Index offset) -> Result<Size>
+{
+    return noex_seek(static_cast<long>(offset), Seek::BEGIN)
+        .and_then([out, this](Index) -> Result<Size> {
+            return noex_read(out);
+        });
+}
+
+auto MemoryWriter::noex_seek(long offset, Seek whence) -> Result<Index>
+{
+    // TODO: Actually simulate system call errors rather than just tripping assertions.
+    m_memory->cursor() = do_seek(m_memory->cursor(), m_memory->size(), offset, whence);
+    return m_memory->cursor();
+}
+
+auto MemoryWriter::noex_write(BytesView in) -> Result<Size>
+{
+    if (const auto result = maybe_emit_write_error(m_memory->random(), m_memory->faults().controls()); !result)
+        return ErrorResult {result.error()};
+
+    const auto [cursor, write_size] = do_write(m_memory->memory(), m_memory->cursor(), in);
+    m_memory->cursor() = cursor;
+    return write_size;
+}
+
+auto MemoryWriter::noex_write_at(BytesView in, Index offset) -> Result<Size>
+{
+    return noex_seek(static_cast<long>(offset), Seek::BEGIN)
+        .and_then([in, this](Index) -> Result<Size> {
+            return noex_write(in);
+        });
+}
+
+auto MemoryWriter::noex_sync() -> Result<void>
+{
+    return {};
+}
+
+auto MemoryWriter::noex_resize(Size size) -> Result<void>
+{
+    m_memory->memory().resize(size);
+    return {};
 }
 
 } // calico

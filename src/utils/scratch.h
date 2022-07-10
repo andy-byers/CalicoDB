@@ -52,7 +52,7 @@ private:
     friend class Scratch;
     auto on_scratch_release(Scratch&) -> void;
 
-    static constexpr auto MIN_SCRATCH_ID = 1UL;
+    static constexpr Size MIN_SCRATCH_ID {1};
     std::unordered_map<Index, std::string> m_pinned;
     std::list<std::string> m_available;
     Size m_scratch_size;

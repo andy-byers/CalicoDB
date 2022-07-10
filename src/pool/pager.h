@@ -5,7 +5,7 @@
 #include <memory>
 #include <optional>
 #include <spdlog/spdlog.h>
-#include "calico/bytes.h"
+#include "calico/error.h"
 
 namespace calico {
 
@@ -34,7 +34,17 @@ public:
     auto truncate(Size) -> void;
     auto sync() -> void;
 
+    [[nodiscard]] auto noex_pin(PID) -> Result<Frame>;
+    [[nodiscard]] auto noex_unpin(Frame) -> Result<void>;
+    [[nodiscard]] auto noex_discard(Frame) -> Result<void>;
+    [[nodiscard]] auto noex_truncate(Size) -> Result<void>;
+    [[nodiscard]] auto noex_sync() -> Result<void>;
+
 private:
+    [[nodiscard]] auto noex_read_page_from_file(PID, Bytes) const -> Result<bool>;
+    [[nodiscard]] auto noex_write_page_to_file(PID, BytesView) const -> Result<void>;
+    [[nodiscard]] auto noex_maybe_write_pending() -> Result<void>;
+
     [[nodiscard]] auto read_page_from_file(PID, Bytes) const -> bool;
     auto write_page_to_file(PID, BytesView) const -> void;
     auto do_write(PID, BytesView) const -> void;

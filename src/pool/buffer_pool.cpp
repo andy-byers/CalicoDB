@@ -2,9 +2,7 @@
 #include "calico/options.h"
 #include "calico/exception.h"
 #include "page/file_header.h"
-#include "page/page.h"
 #include "storage/directory.h"
-#include "storage/file.h"
 #include "utils/logging.h"
 #include "wal/interface.h"
 #include "wal/wal_record.h"
@@ -398,5 +396,142 @@ auto BufferPool::load_header(const FileHeader &header) -> void
         m_flushed_lsn = header.flushed_lsn();
     m_page_count = header.page_count();
 }
+
+auto BufferPool::open(Parameters param) -> Result<std::unique_ptr<IBufferPool>>
+{
+    return std::make_unique<BufferPool>(std::move(param));
+}
+
+auto BufferPool::noex_close() -> Result<void>
+{
+    return {};
+}
+
+auto BufferPool::noex_allocate(PageType type) -> Result<Page>
+{
+    CALICO_EXPECT_TRUE(is_page_type_valid(type));
+    return noex_acquire(PID {ROOT_ID_VALUE + m_page_count}, true)
+        .and_then([this, type](Page page) -> Result<Page> {
+            page.set_type(type);
+            m_page_count++;
+            return page;
+        });
+}
+
+auto BufferPool::noex_acquire(PID id, bool is_writable) -> Result<Page>
+{
+    CALICO_EXPECT_FALSE(id.is_null());
+    return noex_fetch_page(id, is_writable)
+        .and_then([this](Page page) -> Result<Page> {
+            if (m_uses_transactions && page.is_writable())
+                page.enable_tracking(m_scratch.get());
+            return page;
+        });
+}
+
+//auto BufferPool::noex_commit() -> Result<void>
+//{
+//
+//}
+//
+//auto BufferPool::noex_abort() -> Result<void>
+//{
+//
+//}
+//
+//auto BufferPool::noex_try_flush() -> Result<bool>
+//{
+//
+//}
+//
+//auto BufferPool::noex_try_flush_wal() -> Result<bool>
+//{
+//
+//}
+//
+//auto BufferPool::noex_purge() -> Result<void>
+//{
+//
+//}
+//
+//auto BufferPool::noex_recover() -> Result<bool>
+//{
+//
+//}
+//
+//auto BufferPool::noex_save_header(FileHeader&) -> Result<void>
+//{
+//
+//}
+//
+//auto BufferPool::noex_load_header(const FileHeader&) -> Result<void>
+//{
+//
+//}
+//
+//auto BufferPool::noex_on_page_release(Page&) -> Result<void>
+//{
+//
+//}
+//
+//auto BufferPool::noex_on_page_error() -> Result<void>
+//{
+//
+//}
+
+//
+//auto BufferPool::noex_fetch_page(PID id, Page::Mode mode) -> Result<Page>
+//{
+//    CALICO_EXPECT_FALSE(id.is_null());
+//    std::lock_guard lock {m_mutex};
+//
+//    // Propagate exceptions from the Page destructor (likely I/O errors from the WALWriter).
+//    propagate_page_error();
+//
+//    const auto try_fetch = [id, mode, this]() -> std::optional<Page> {
+//        if (auto ref = m_cache.get(id)) {
+//            auto page = ref->get().borrow(this, mode);
+//            m_ref_sum++;
+//            return page;
+//        }
+//        return std::nullopt;
+//    };
+//
+//    // Frame is already pinned.
+//    if (auto page = try_fetch())
+//        return std::move(*page);
+//
+//    // Get page from cache or disk.
+//    m_cache.put(id, fetch_frame(id));
+//    auto page = try_fetch();
+//    CALICO_EXPECT_NE(page, std::nullopt);
+//    return std::move(*page);
+//}
+
+auto BufferPool::noex_fetch_frame(PID id) -> Result<Frame>
+{
+    const auto try_evict_and_pin = [id, this]() -> std::optional<Frame> {
+        if (try_evict_frame())
+            return m_pager.pin(id);
+        return std::nullopt;
+    };
+    if (auto frame = m_cache.extract(id))
+        return std::move(*frame);
+
+    if (auto frame = m_pager.pin(id))
+        return std::move(*frame);
+
+    if (auto frame = try_evict_and_pin())
+        return std::move(*frame);
+
+    if (!try_flush_wal()) {
+        m_pager.unpin(Frame {m_pager.page_size()});
+        return *m_pager.pin(id);
+    }
+    auto frame = try_evict_and_pin();
+    CALICO_EXPECT_NE(frame, std::nullopt);
+    return std::move(*frame);
+}
+
 
 } // calico

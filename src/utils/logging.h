@@ -3,6 +3,7 @@
 
 #include <numeric>
 #include <spdlog/spdlog.h>
+#include "calico/error.h"
 #include "calico/options.h"
 #include "expect.h"
 
@@ -50,6 +51,34 @@ public:
     auto log(spdlog::logger &logger, spdlog::level::level_enum level = spdlog::level::trace) const -> void
     {
         logger.log(level, assemble_message());
+    }
+
+    auto system_error(spdlog::logger &logger) -> Error
+    {
+        auto message = assemble_message();
+        logger.error(message);
+        return Error::system_error(message);
+    }
+
+    auto invalid_argument(spdlog::logger &logger) -> Error
+    {
+        auto message = assemble_message();
+        logger.error(message);
+        return Error::invalid_argument(message);
+    }
+
+    auto logic_error(spdlog::logger &logger) -> Error
+    {
+        auto message = assemble_message();
+        logger.error(message);
+        return Error::logic_error(message);
+    }
+
+    auto corruption(spdlog::logger &logger) -> Error
+    {
+        auto message = assemble_message();
+        logger.error(message);
+        return Error::corruption(message);
     }
 
 private:
