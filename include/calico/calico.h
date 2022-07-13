@@ -4,7 +4,7 @@
 #include "bytes.h"
 #include "cursor.h"
 #include "database.h"
-#include "exception.h"
+#include "error.h"
 #include "options.h"
 
 #endif // CALICO_CALICO_H

@@ -10,7 +10,7 @@
 #  define CALICO_EXPECT(cc)
 #  define CALICO_VALIDATE(validator)
 #else
-#  define CALICO_EXPECT_(cc, file, line) impl::handle_expect(cc, #cc, file, line)
+#  define CALICO_EXPECT_(cc, file, line) utils::impl::handle_expect(cc, #cc, file, line)
 #  define CALICO_EXPECT(cc) CALICO_EXPECT_(cc, __FILE__, __LINE__)
 #  ifdef CALICO_USE_VALIDATORS
 #    define CALICO_VALIDATE(validator) validator
@@ -32,7 +32,41 @@
 #define CALICO_EXPECT_BOUNDED_BY(Type, t) CALICO_EXPECT_LE(t, std::numeric_limits<Type>::max())
 #define CALICO_EXPECT_STATIC(cc, message) static_assert(cc, message)
 
-namespace calico::impl {
+#define CALICO_TRY(expr) \
+    do { \
+        if (auto calico_try_result = (expr); !calico_try_result.has_value()) \
+            return ErrorResult {calico_try_result.error()}; \
+    } while (0)
+
+#define CALICO_TRY_CREATE(name, expr) \
+    auto name = (expr); \
+    if (!(name).has_value()) { \
+        return ErrorResult {(name).error()}; \
+    }
+
+#define CCO_TRY(expr) \
+    do { \
+        if (auto calico_try_result = (expr); !calico_try_result.has_value()) \
+            return ErrorResult {calico_try_result.error()}; \
+    } while (0)
+
+#define CCO_TRY_ASSIGN(out, expr) \
+    do { \
+        if (auto calico_try_result = (expr); !calico_try_result.has_value()) {  \
+            return ErrorResult {calico_try_result.error()}; \
+        } else { \
+            (out) = std::move(calico_try_result.value()); \
+        } \
+    } while (0)
+
+#define CCO_TRY_CREATE(type, out, expr) \
+    auto calico_try_##out = (expr); \
+    if (!calico_try_##out.has_value()) {  \
+        return ErrorResult {calico_try_##out.error()}; \
+    } \
+    auto out = std::move(*calico_try_##out);
+
+namespace calico::utils::impl {
 
 inline auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept
 {
@@ -42,6 +76,6 @@ inline auto handle_expect(bool expectation, const char *repr, const char *file, 
     }
 }
 
-} // calico::impl
+} // calico::utils::impl
 
 #endif // CALICO_UTILS_ASSERT_H

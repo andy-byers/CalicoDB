@@ -101,42 +101,42 @@ if(CALICO_INSTALL)
     set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
     set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
     set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
-
-    install(
-        TARGETS "${CALICO_NAME}" spdlog
-        EXPORT "${TARGETS_NAME}"
-        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-    )
-    install(
-        DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-    )
-    install(
-        DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/calico"
-    )
-
-    include(CMakePackageConfigHelpers)
-    configure_package_config_file(
-        "${CONFIG_FILE_IN}"
-        "${CONFIG_FILE_OUT}"
-        INSTALL_DESTINATION "${INSTALL_DIR}"
-    )
-    write_basic_package_version_file(
-        "${VERSION_FILE}"
-        COMPATIBILITY SameMajorVersion
-    )
-    install(
-        EXPORT "${TARGETS_NAME}"
-        NAMESPACE "${PROJECT_NAME}::"
-        DESTINATION "${INSTALL_DIR}"
-    )
-    install(
-        FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
-        DESTINATION "${INSTALL_DIR}"
-    )
+#
+#    install(
+#        TARGETS "${CALICO_NAME}" spdlog
+#        EXPORT "${TARGETS_NAME}"
+#        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+#        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+#        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+#
+#    install(
+#        DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
+#        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+#    )
+#    install(
+#        DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
+#        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/calico"
+#    )
+#
+#    include(CMakePackageConfigHelpers)
+#    configure_package_config_file(
+#        "${CONFIG_FILE_IN}"
+#        "${CONFIG_FILE_OUT}"
+#        INSTALL_DESTINATION "${INSTALL_DIR}"
+#    )
+#    write_basic_package_version_file(
+#        "${VERSION_FILE}"
+#        COMPATIBILITY SameMajorVersion
+#    )
+#    install(
+#        EXPORT "${TARGETS_NAME}"
+#        NAMESPACE "${PROJECT_NAME}::"
+#        DESTINATION "${INSTALL_DIR}"
+#    )
+#    install(
+#        FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
+#        DESTINATION "${INSTALL_DIR}"
+#    )
 endif()
 
 if(CALICO_BUILD_TESTS)

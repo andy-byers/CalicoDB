@@ -7,14 +7,14 @@
 #include "calico/options.h"
 #include "expect.h"
 
-namespace calico::logging {
+namespace calico::utils {
 
 constexpr auto LOG_NAME = "log";
 
 auto create_logger(spdlog::sink_ptr, const std::string&) -> std::shared_ptr<spdlog::logger>;
 auto create_sink(const std::string&, spdlog::level::level_enum) -> spdlog::sink_ptr;
 
-class MessageGroup {
+class ErrorMessage {
 public:
     template<class ...Args>
     auto set_primary(const char *format, Args &&...args) -> void
@@ -114,6 +114,26 @@ private:
     std::string m_text[3];
 };
 
-} // calico::logging
+
+class NumberedGroup {
+public:
+    template<class ...Args>
+    auto push_line(Args &&...args) -> void
+    {
+        m_text.emplace_back(fmt::format(std::forward<Args>(args)...));
+    }
+
+    auto log(spdlog::logger &logger, spdlog::level::level_enum level = spdlog::level::trace) const -> void
+    {
+        Index i {};
+        for (const auto &line: m_text)
+            logger.log(level, "({}/{}):", ++i, m_text.size(), line);
+    }
+
+private:
+    std::vector<std::string> m_text;
+};
+
+} // calico::utils
 
 #endif // CALICO_UTILS_LOGGING_H

@@ -119,8 +119,8 @@ namespace impl {
         /**
          * Create another slice out of a sub-section of this slice.
          *
-         * @param offset The offset of the range in elements.
-         * @param size The size of the range in elements.
+         * @param offset The offset of the view in elements.
+         * @param size The size of the view in elements.
          * @return The new slice.
          */
         [[nodiscard]] auto range(Index offset, Size size) const noexcept -> Slice
@@ -134,7 +134,7 @@ namespace impl {
         /**
          * Create another slice out of a sub-section of this slice.
          *
-         * @param offset The offset of the range in elements.
+         * @param offset The offset of the view in elements.
          * @return The new slice, spanning from the given offset to the end.
          */
         [[nodiscard]] auto range(Index offset) const noexcept -> Slice

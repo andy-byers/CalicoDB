@@ -11,11 +11,13 @@ public:
     static auto system_error(const std::string&) -> Error;
     static auto logic_error(const std::string&) -> Error;
     static auto corruption(const std::string&) -> Error;
+    static auto not_found() -> Error;
 
     [[nodiscard]] auto is_invalid_argument() const -> bool;
     [[nodiscard]] auto is_system_error() const -> bool;
     [[nodiscard]] auto is_logic_error() const -> bool;
     [[nodiscard]] auto is_corruption() const -> bool;
+    [[nodiscard]] auto is_not_found() const -> bool;
 
     [[nodiscard]] auto what() const -> BytesView;
 
@@ -25,6 +27,7 @@ private:
         SYSTEM_ERROR = 2,
         LOGIC_ERROR = 3,
         CORRUPTION = 4,
+        NOT_FOUND = 5,
     };
 
     Error(Code, const std::string&);

@@ -4,7 +4,7 @@
 #include "identifier.h"
 #include "utils.h"
 
-namespace calico {
+namespace calico::utils {
 
 class FileLayout {
 public:
@@ -146,6 +146,6 @@ inline auto get_local_value_size(Size key_size, Size value_size, Size page_size)
     return value_size;
 }
 
-} // calico
+} // calico::utils
 
 #endif // CALICO_UTILS_LAYOUT_H

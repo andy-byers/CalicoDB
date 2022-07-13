@@ -15,13 +15,9 @@ class FileReader: public IFileReader {
 public:
     ~FileReader() override = default;
     explicit FileReader(File&);
-    auto seek(long, Seek) -> void override;
-    auto read(Bytes) -> Size override;
-    auto read_at(Bytes, Index) -> Size override;
-
-    auto noex_seek(long, Seek) -> Result<Index> override;
-    auto noex_read(Bytes) -> Result<Size> override;
-    auto noex_read_at(Bytes, Index) -> Result<Size> override;
+    [[nodiscard]] auto seek(long, Seek) -> Result<Index> override;
+    [[nodiscard]] auto read(Bytes) -> Result<Size> override;
+    [[nodiscard]] auto read(Bytes, Index) -> Result<Size> override;
 
 private:
     File *m_file {};
@@ -35,17 +31,11 @@ class FileWriter: public IFileWriter {
 public:
     ~FileWriter() override = default;
     explicit FileWriter(File&);
-    auto seek(long, Seek) -> void override;
-    auto write(BytesView) -> Size override;
-    auto write_at(BytesView, Index) -> Size override;
-    auto sync() -> void override;
-    auto resize(Size) -> void override;
-
-    auto noex_seek(long, Seek) -> Result<Index> override;
-    auto noex_write(BytesView) -> Result<Size> override;
-    auto noex_write_at(BytesView, Index) -> Result<Size> override;
-    auto noex_sync() -> Result<void> override;
-    auto noex_resize(Size) -> Result<void> override;
+    [[nodiscard]] auto seek(long, Seek) -> Result<Index> override;
+    [[nodiscard]] auto write(BytesView) -> Result<Size> override;
+    [[nodiscard]] auto write(BytesView, Index) -> Result<Size> override;
+    [[nodiscard]] auto sync() -> Result<void> override;
+    [[nodiscard]] auto resize(Size) -> Result<void> override;
 
 private:
     File *m_file {};

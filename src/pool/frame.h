@@ -9,7 +9,10 @@
 namespace calico {
 
 class IBufferPool;
-class Page;
+
+namespace page {
+    class Page;
+} // page
 
 /**
  * Represents in-memory storage for a single database page.
@@ -58,11 +61,6 @@ public:
         return m_bytes;
     }
 
-    auto clean() -> void
-    {
-        m_is_dirty = false;
-    }
-
     auto reset(PID page_id) -> void
     {
         CALICO_EXPECT_EQ(m_ref_count, 0);
@@ -70,9 +68,21 @@ public:
         m_is_dirty = false;
     }
 
-    [[nodiscard]] auto page_lsn() const -> LSN;
-    auto borrow(IBufferPool*, bool) -> Page;
-    auto synchronize(Page&) -> void;
+    /**
+     * Reset the reference count and flags.
+     *
+     * This method is used when we have lost a page, e.g. when a system call fails in one of the
+     * tree balancing methods. Should generally be followed by a WAL roll back or program exit.
+     */
+    auto purge() -> void
+    {
+        m_ref_count = 0;
+        m_is_writable = false;
+        m_is_dirty = false;
+    }
+
+    auto borrow(IBufferPool*, bool) -> page::Page;
+    auto synchronize(page::Page&) -> void;
 
     auto operator=(Frame&&) -> Frame& = default;
     Frame(Frame&&) = default;
@@ -80,7 +90,7 @@ public:
 private:
     std::string m_owned;
     Bytes m_bytes;
-    PID m_page_id {};
+    PID m_page_id;
     Size m_ref_count {};
     Size m_size {};
     bool m_is_writable {};

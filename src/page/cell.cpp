@@ -5,7 +5,9 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace calico {
+namespace calico::page {
+
+using namespace utils;
 
 auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 {
@@ -13,14 +15,14 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
     cell.m_page_size = page_size;
 
     if (!is_external) {
-        cell.m_left_child_id.value = get_uint32(in);
+        cell.m_left_child_id.value = utils::get_u32(in);
         in.advance(PAGE_ID_SIZE);
     }
-    const auto key_size = get_uint16(in);
+    const auto key_size = utils::get_u16(in);
     in.advance(sizeof(uint16_t));
 
     if (is_external) {
-        cell.m_value_size = get_uint32(in);
+        cell.m_value_size = utils::get_u32(in);
         in.advance(sizeof(uint32_t));
     }
 
@@ -35,7 +37,7 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 
         if (local_value_size < cell.m_value_size) {
             in.advance(local_value_size);
-            cell.m_overflow_id.value = get_uint32(in);
+            cell.m_overflow_id.value = utils::get_u32(in);
         }
     }
     cell.m_is_external = is_external;
@@ -44,7 +46,7 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 
 auto Cell::read_at(const Node &node, Index offset) -> Cell
 {
-    return read_at(node.page().range(offset), node.size(), node.is_external());
+    return read_at(node.page().view(offset), node.size(), node.is_external());
 }
 
 Cell::Cell(const Parameters &param)
@@ -113,14 +115,14 @@ auto Cell::write(Bytes out) const -> void
 {
     if (!m_is_external) {
         CALICO_EXPECT_FALSE(m_left_child_id.is_root());
-        put_uint32(out, m_left_child_id.value);
+        utils::put_u32(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);
     }
-    put_uint16(out, static_cast<uint16_t>(m_key.size()));
+    utils::put_u16(out, static_cast<uint16_t>(m_key.size()));
     out.advance(sizeof(uint16_t));
 
     if (m_is_external) {
-        put_uint32(out, static_cast<uint32_t>(m_value_size));
+        utils::put_u32(out, static_cast<uint32_t>(m_value_size));
         out.advance(sizeof(uint32_t));
     }
 
@@ -135,15 +137,13 @@ auto Cell::write(Bytes out) const -> void
             CALICO_EXPECT_FALSE(m_left_child_id.is_root());
             CALICO_EXPECT_LT(local.size(), m_value_size);
             out.advance(local.size());
-            put_uint32(out, m_overflow_id.value);
+            utils::put_u32(out, m_overflow_id.value);
         }
     }
 }
 
 auto Cell::detach(Scratch scratch, bool ensure_internal) -> void
 {
-    auto data = scratch.data();
-
     if (ensure_internal && m_is_external) {
         m_is_external = false;
         m_local_value.clear();
@@ -151,17 +151,15 @@ auto Cell::detach(Scratch scratch, bool ensure_internal) -> void
         m_overflow_id = PID::null();
     }
 
+    auto data = scratch.data();
     write(data);
     *this = read_at(data, m_page_size, m_is_external);
-    m_scratch = std::move(scratch);
+    m_scratch = scratch;
 }
 
 auto Cell::set_is_external(bool is_external) -> void
 {
     m_is_external = is_external;
-    if (is_external) {
-
-    }
 }
 
 auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
@@ -194,4 +192,4 @@ auto make_internal_cell(BytesView key, Size page_size) -> Cell
     return Cell {param};
 }
 
-} // calico
+} // calico::page

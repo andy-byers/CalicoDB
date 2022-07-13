@@ -2,13 +2,17 @@
 #define CALICO_CURSOR_H
 
 #include <memory>
-#include "bytes.h"
+#include <optional>
+#include "error.h"
 
 namespace calico {
 
-class Node;
 class NodePool;
 class Internal;
+
+namespace page {
+    class Node;
+} // page;
 
 class Cursor final {
 public:
@@ -24,6 +28,14 @@ public:
      * @return True if the cursor is on a valid record, false otherwise.
      */
     [[nodiscard]] auto is_valid() const -> bool;
+
+    /**
+     * Get the error state of the cursor.
+     *
+     * @return The cursor error state, which contains the last error that the cursor encountered if
+     *         the cursor has ever encountered an error, or std::nullopt otherwise.
+     */
+    [[nodiscard]] auto error() const -> std::optional<Error>;
 
     /**
      * Check if the cursor is on the record with the largest key (the rightmost record).
@@ -145,7 +157,7 @@ public:
 private:
 
     /**
-     * Representation of the position of a cursor in the tree.
+     * Representation of the position of a cursor in the page.
      */
     struct Position {
         static constexpr Index LEFT {0};
@@ -166,15 +178,17 @@ private:
     Cursor(NodePool*, Internal*);
     [[nodiscard]] auto id() const -> Index;
     [[nodiscard]] auto index() const -> Index;
-    auto move_to(Node, Index) -> void;
-    auto seek_left() -> void;
-    auto seek_right() -> void;
+    auto move_to(page::Node, Index) -> void;
+    auto seek_left() -> bool;
+    auto seek_right() -> bool;
     auto invalidate() -> void;
+    auto set_error(const Error&) const -> void;
 
+    mutable std::optional<Error> m_error {};
     NodePool *m_pool {}; ///< Reference to an object that provides nodes from the buffer pool.
-    Internal *m_internal {}; ///< Reference to the tree internals.
-    Position m_position; ///< Position of the cursor in the tree.
-    bool m_is_valid {}; ///< True if the cursor is in range, false otherwise.
+    Internal *m_internal {}; ///< Reference to the page internals.
+    Position m_position; ///< Position of the cursor in the page.
+    bool m_is_valid {}; ///< True if the cursor is in view, false otherwise.
 };
 
 } // calico

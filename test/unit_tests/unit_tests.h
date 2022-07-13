@@ -8,6 +8,6 @@ namespace calico {
 
 static constexpr const char *EXPECTATION_MATCHER = "Expect";
 
-} // db
+} // calico
 
 #endif //CALICO_UNIT_H

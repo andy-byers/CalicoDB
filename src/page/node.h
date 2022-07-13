@@ -4,11 +4,10 @@
 #include "cell.h"
 #include "page.h"
 
-namespace calico {
+namespace calico::page {
 
 class NodeHeader final {
 public:
-    [[nodiscard]] auto header_crc() const -> Index;
     [[nodiscard]] auto parent_id() const -> PID;
     [[nodiscard]] auto right_sibling_id() const -> PID;
     [[nodiscard]] auto rightmost_child_id() const -> PID;
@@ -20,12 +19,10 @@ public:
     [[nodiscard]] auto free_count() const -> Size;
     [[nodiscard]] auto free_start() const -> Index;
     [[nodiscard]] auto free_total() const -> Size;
-    auto update_header_crc() -> void;
     auto set_parent_id(PID) -> void;
     auto set_right_sibling_id(PID) -> void;
     auto set_rightmost_child_id(PID) -> void;
     auto set_left_sibling_id(PID) -> void;
-    auto set_reserved(uint32_t) -> void;
     auto set_cell_count(Size) -> void;
     auto set_cell_start(Index) -> void;
     auto set_frag_count(Size) -> void;
@@ -180,10 +177,10 @@ public:
 
     [[nodiscard]] auto read_key(Index) const -> BytesView;
     [[nodiscard]] auto read_cell(Index) const -> Cell;
-    [[nodiscard]] auto detach_cell(Index, Scratch) const -> Cell;
+    [[nodiscard]] auto detach_cell(Index, utils::Scratch) const -> Cell;
     [[nodiscard]] auto find_ge(BytesView) const -> FindGeResult;
     auto validate() const -> void;
-    auto extract_cell(Index, Scratch) -> Cell;
+    auto extract_cell(Index, utils::Scratch) -> Cell;
     auto insert(Cell) -> void;
     auto insert_at(Index, Cell) -> void;
     auto remove(BytesView) -> bool;
@@ -198,14 +195,11 @@ public:
     [[nodiscard]] auto is_underflowing() const -> bool;
     [[nodiscard]] auto is_external() const -> bool;
     [[nodiscard]] auto child_id(Index) const -> PID;
-
-    [[nodiscard]] auto header_crc() const -> Index;
     [[nodiscard]] auto parent_id() const -> PID;
     [[nodiscard]] auto right_sibling_id() const -> PID;
     [[nodiscard]] auto left_sibling_id() const -> PID;
     [[nodiscard]] auto rightmost_child_id() const -> PID;
     [[nodiscard]] auto cell_count() const -> Size;
-    auto update_header_crc() -> void;
     auto set_parent_id(PID) -> void;
     auto set_right_sibling_id(PID) -> void;
     auto set_left_sibling_id(PID id) -> void
@@ -238,8 +232,8 @@ auto merge_left(Node&, Node&, Node&, Index) -> void;
 auto merge_right(Node&, Node&, Node&, Index) -> void;
 auto merge_root(Node&, Node&) -> void;
 auto split_root(Node&, Node&) -> void;
-[[nodiscard]] auto split_non_root(Node&, Node&, Scratch) -> Cell;
+[[nodiscard]] auto split_non_root(Node&, Node&, utils::Scratch) -> Cell;
 
-} // calico
+} // calico::page
 
 #endif // CALICO_PAGE_NODE_H

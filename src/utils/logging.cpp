@@ -4,7 +4,7 @@
 #include <spdlog/sinks/null_sink.h>
 #include "expect.h"
 
-namespace calico::logging {
+namespace calico::utils {
 
 namespace fs = std::filesystem;
 
@@ -26,4 +26,4 @@ auto create_sink(const std::string &base, spdlog::level::level_enum level) -> sp
     return sink;
 }
 
-} // calico::logging
+} // calico::utils

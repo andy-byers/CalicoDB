@@ -35,6 +35,11 @@ auto Error::corruption(const std::string &what) -> Error
     return {Code::CORRUPTION, what};
 }
 
+auto Error::not_found() -> Error
+{
+    return {Code::NOT_FOUND, "not found"};
+}
+
 auto Error::is_invalid_argument() const -> bool
 {
     return code() == Code::INVALID_ARGUMENT;
@@ -53,6 +58,11 @@ auto Error::is_logic_error() const -> bool
 auto Error::is_corruption() const -> bool
 {
     return code() == Code::CORRUPTION;
+}
+
+auto Error::is_not_found() const -> bool
+{
+    return code() == Code::NOT_FOUND;
 }
 
 auto Error::what() const -> BytesView

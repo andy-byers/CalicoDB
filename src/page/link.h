@@ -3,13 +3,12 @@
 
 #include "page.h"
 
-namespace calico {
+namespace calico::page {
 
 class Link {
 public:
     explicit Link(Page);
     ~Link() = default;
-
 
     [[nodiscard]] auto id() const -> PID
     {
@@ -20,7 +19,6 @@ public:
     {
         return m_page.size();
     }
-
 
     [[nodiscard]] auto page() const -> const Page&
     {
@@ -41,16 +39,16 @@ public:
     auto set_next_id(PID) -> void;
 
     [[nodiscard]] auto content_size() const -> Size;
-    [[nodiscard]] auto ref_content() const -> BytesView;
-    auto mut_content(Size) -> Bytes;
+    [[nodiscard]] auto content_view() const -> BytesView;
+    auto content_bytes(Size) -> Bytes;
 
-    Link(Link&&) = default;
     auto operator=(Link&&) -> Link& = default;
+    Link(Link&&) = default;
 
 private:
     Page m_page;
 };
 
-} // calico
+} // calico::page
 
 #endif // CALICO_PAGE_LINK_H

@@ -40,55 +40,37 @@ inline auto operator|(const Mode &lhs, const Mode &rhs)
 class IFileReader {
 public:
     virtual ~IFileReader() = default;
-    virtual auto seek(long, Seek) -> void = 0;
-    virtual auto read(Bytes) -> Size = 0;
-    virtual auto read_at(Bytes, Index) -> Size = 0;
-
-    virtual auto noex_seek(long, Seek) -> Result<Index> = 0;
-    virtual auto noex_read(Bytes) -> Result<Size> = 0;
-    virtual auto noex_read_at(Bytes, Index) -> Result<Size> = 0;
+    virtual auto seek(long, Seek) -> Result<Index> = 0;
+    virtual auto read(Bytes) -> Result<Size> = 0;
+    virtual auto read(Bytes, Index) -> Result<Size> = 0;
 };
 
 class IFileWriter {
 public:
     virtual ~IFileWriter() = default;
-    virtual auto seek(long, Seek) -> void = 0;
-    virtual auto write(BytesView) -> Size = 0;
-    virtual auto write_at(BytesView, Index) -> Size = 0;
-    virtual auto sync() -> void = 0;
-    virtual auto resize(Size) -> void = 0;
-
-    virtual auto noex_seek(long, Seek) -> Result<Index> = 0;
-    virtual auto noex_write(BytesView) -> Result<Size> = 0;
-    virtual auto noex_write_at(BytesView, Index) -> Result<Size> = 0;
-    virtual auto noex_sync() -> Result<void> = 0;
-    virtual auto noex_resize(Size) -> Result<void> = 0;
+    virtual auto seek(long, Seek) -> Result<Index> = 0;
+    virtual auto write(BytesView) -> Result<Size> = 0;
+    virtual auto write(BytesView, Index) -> Result<Size> = 0;
+    virtual auto sync() -> Result<void> = 0;
+    virtual auto resize(Size) -> Result<void> = 0;
 };
 
 class IFile {
 public:
     virtual ~IFile() = default;
     [[nodiscard]] virtual auto is_open() const -> bool = 0;
-    [[nodiscard]] virtual auto is_readable() const -> bool = 0;
-    [[nodiscard]] virtual auto is_writable() const -> bool = 0;
-    [[nodiscard]] virtual auto is_append() const -> bool = 0;
+    [[nodiscard]] virtual auto mode() const -> Mode = 0;
     [[nodiscard]] virtual auto permissions() const -> int = 0;
     [[nodiscard]] virtual auto path() const -> std::string = 0;
     [[nodiscard]] virtual auto name() const -> std::string = 0;
-    [[nodiscard]] virtual auto size() const -> Size = 0;
     [[nodiscard]] virtual auto file() const -> int = 0;
+    [[nodiscard]] virtual auto size() const -> Result<Size> = 0;
     [[nodiscard]] virtual auto open_reader() -> std::unique_ptr<IFileReader> = 0;
     [[nodiscard]] virtual auto open_writer() -> std::unique_ptr<IFileWriter> = 0;
-    virtual auto open(const std::string&, Mode, int) -> void = 0;
-    virtual auto close() -> void = 0;
-    virtual auto rename(const std::string&) -> void = 0;
-    virtual auto remove() -> void = 0;
-
-    [[nodiscard]] virtual auto noex_size() const -> Result<Size> = 0;
-    virtual auto noex_open(const std::string&, Mode, int) -> Result<void> = 0;
-    virtual auto noex_close() -> Result<void> = 0;
-    virtual auto noex_rename(const std::string&) -> Result<void> = 0;
-    virtual auto noex_remove() -> Result<void> = 0;
+    [[nodiscard]] virtual auto open(const std::string&, Mode, int) -> Result<void> = 0;
+    [[nodiscard]] virtual auto close() -> Result<void> = 0;
+    [[nodiscard]] virtual auto rename(const std::string&) -> Result<void> = 0;
+    [[nodiscard]] virtual auto remove() -> Result<void> = 0;
 };
 
 class IDirectory {
@@ -96,17 +78,11 @@ public:
     virtual ~IDirectory() = default;
     [[nodiscard]] virtual auto path() const -> std::string = 0;
     [[nodiscard]] virtual auto name() const -> std::string = 0;
-    [[nodiscard]] virtual auto children() const -> std::vector<std::string> = 0;
-    virtual auto open_file(const std::string&, Mode, int) -> std::unique_ptr<IFile> = 0;
-    virtual auto open_directory(const std::string&) -> std::unique_ptr<IDirectory> = 0;
-    virtual auto remove() -> void = 0;
-    virtual auto sync() -> void = 0;
-
-    [[nodiscard]] virtual auto noex_children() const -> Result<std::vector<std::string>> = 0;
-    virtual auto noex_open_directory(const std::string&) -> Result<std::unique_ptr<IDirectory>> = 0;
-    virtual auto noex_open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> = 0;
-    virtual auto noex_remove() -> Result<void> = 0;
-    virtual auto noex_sync() -> Result<void> = 0;
+    [[nodiscard]] virtual auto children() const -> Result<std::vector<std::string>> = 0;
+    [[nodiscard]] virtual auto open_directory(const std::string&) -> Result<std::unique_ptr<IDirectory>> = 0;
+    [[nodiscard]] virtual auto open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> = 0;
+    [[nodiscard]] virtual auto remove() -> Result<void> = 0;
+    [[nodiscard]] virtual auto sync() -> Result<void> = 0;
 };
 
 } // calico

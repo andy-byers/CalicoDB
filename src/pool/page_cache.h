@@ -7,6 +7,7 @@
 
 #include <list>
 #include <unordered_map>
+#include "frame.h"
 #include "utils/cache.h"
 #include "utils/identifier.h"
 
@@ -50,8 +51,8 @@ public:
     auto evict() -> std::optional<Frame>;
 
 private:
-    FifoCache<PID, Frame, PID::Hasher> m_cold;
-    LruCache<PID, Frame, PID::Hasher> m_hot;
+    utils::FifoCache<PID, Frame, PID::Hasher> m_cold;
+    utils::LruCache<PID, Frame, PID::Hasher> m_hot;
     Size m_hits {};
     Size m_misses {};
 };

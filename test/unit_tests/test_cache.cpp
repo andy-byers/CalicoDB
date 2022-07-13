@@ -11,7 +11,7 @@ using namespace calico;
 
 TEST(CacheTests, NewCacheIsEmpty)
 {
-    LruCache<int, int> cache;
+    utils::LruCache<int, int> cache;
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
 }
@@ -26,19 +26,13 @@ public:
         m_cache.put(id, std::move(frame));
     }
 
-    auto make_frame(PID page_id, LSN page_lsn = LSN::null()) -> Frame
+    auto make_frame(PID page_id, LSN = LSN::null()) -> Frame
     {
         m_backing.emplace_back();
         m_backing.back().resize(m_frame_size);
 
         Frame frame {m_frame_size};
         frame.reset(page_id);
-
-        if (!page_lsn.is_null()) {
-            auto page = frame.borrow(nullptr, true);
-            page.set_lsn(page_lsn);
-            frame.synchronize(page);
-        }
         return frame;
     }
 

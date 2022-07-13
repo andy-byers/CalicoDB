@@ -12,45 +12,23 @@ FileReader::FileReader(File &file)
     : m_file {&file}
 {
     CALICO_EXPECT_TRUE(file.is_open());
-    CALICO_EXPECT_TRUE(file.is_readable());
 }
 
-auto FileReader::seek(long offset, Seek whence) -> void
+auto FileReader::seek(long offset, Seek whence) -> Result<Index>
 {
-    system::seek(m_file->file(), offset, static_cast<int>(whence));
+    return system::seek(m_file->file(), offset, static_cast<int>(whence));
 }
 
-auto FileReader::read(Bytes out) -> Size
+auto FileReader::read(Bytes out) -> Result<Size>
 {
     return system::read(m_file->file(), out);
 }
 
-auto FileReader::read_at(Bytes out, Index offset) -> Size
+auto FileReader::read(Bytes out, Index offset) -> Result<Size>
 {
-    seek(static_cast<long>(offset), Seek::BEGIN);
-    return read(out);
-}
-
-
-
-
-
-
-auto FileReader::noex_seek(long offset, Seek whence) -> Result<Index>
-{
-    return system::noex_seek(m_file->file(), offset, static_cast<int>(whence));
-}
-
-auto FileReader::noex_read(Bytes out) -> Result<Size>
-{
-    return system::noex_read(m_file->file(), out);
-}
-
-auto FileReader::noex_read_at(Bytes out, Index offset) -> Result<Size>
-{
-    return noex_seek(static_cast<long>(offset), Seek::BEGIN)
+    return seek(static_cast<long>(offset), Seek::BEGIN)
         .and_then([out, this](Index) -> Result<Size> {
-            return noex_read(out);
+            return read(out);
         });
 }
 
@@ -58,67 +36,32 @@ FileWriter::FileWriter(File &file)
     : m_file {&file}
 {
     CALICO_EXPECT_TRUE(file.is_open());
-    CALICO_EXPECT_TRUE(file.is_writable());
 }
 
-auto FileWriter::seek(long offset, Seek whence) -> void
+auto FileWriter::seek(long offset, Seek whence) -> Result<Index>
 {
-    system::seek(m_file->file(), offset, static_cast<int>(whence));
+    return system::seek(m_file->file(), offset, static_cast<int>(whence));
 }
 
-auto FileWriter::write(BytesView in) -> Size
+auto FileWriter::write(BytesView in) -> Result<Size>
 {
     return system::write(m_file->file(), in);
 }
 
-auto FileWriter::write_at(BytesView in, Index offset) -> Size
+auto FileWriter::write(BytesView in, Index offset) -> Result<Size>
 {
-    seek(static_cast<long>(offset), Seek::BEGIN);
-    return write(in);
-}
-
-auto FileWriter::sync() -> void
-{
-    system::sync(m_file->file());
-}
-
-auto FileWriter::resize(Size size) -> void
-{
-    fs::resize_file(m_file->path(), size);
-}
-
-
-
-
-
-
-
-
-
-auto FileWriter::noex_seek(long offset, Seek whence) -> Result<Index>
-{
-    return system::noex_seek(m_file->file(), offset, static_cast<int>(whence));
-}
-
-auto FileWriter::noex_write(BytesView in) -> Result<Size>
-{
-    return system::noex_write(m_file->file(), in);
-}
-
-auto FileWriter::noex_write_at(BytesView in, Index offset) -> Result<Size>
-{
-    return noex_seek(static_cast<long>(offset), Seek::BEGIN)
+    return seek(static_cast<long>(offset), Seek::BEGIN)
         .and_then([in, this](Index) -> Result<Size> {
-            return noex_write(in);
+            return write(in);
         });
 }
 
-auto FileWriter::noex_sync() -> Result<void>
+auto FileWriter::sync() -> Result<void>
 {
-    return system::noex_sync(m_file->file());
+    return system::sync(m_file->file());
 }
 
-auto FileWriter::noex_resize(Size size) -> Result<void>
+auto FileWriter::resize(Size size) -> Result<void>
 {
     std::error_code error;
     fs::resize_file(m_file->path(), size, error);

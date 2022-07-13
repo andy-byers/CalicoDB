@@ -6,6 +6,9 @@
 
 namespace calico {
 
+using namespace page;
+using namespace utils;
+
 FreeList::FreeList(const Parameters &param)
     : m_pool {param.buffer_pool}
     , m_free_start {param.free_start}
@@ -23,7 +26,7 @@ auto FreeList::load_header(const FileHeader &header) -> void
     m_free_count = header.free_count();
 }
 
-auto FreeList::push(Page page) -> void
+auto FreeList::push(Page page) -> Result<void>
 {
     CALICO_EXPECT_FALSE(page.id().is_root());
     CALICO_EXPECT_EQ(m_free_count == 0, m_free_start.is_null());
@@ -32,19 +35,27 @@ auto FreeList::push(Page page) -> void
     link.set_next_id(m_free_start);
     m_free_start = link.page().id();
     m_free_count++;
+    return m_pool->release(link.take());
 }
 
-auto FreeList::pop() -> std::optional<Page>
+auto FreeList::pop() -> Result<Page>
 {
     if (m_free_count) {
         CALICO_EXPECT_FALSE(m_free_start.is_null());
-        Link link {m_pool->acquire(m_free_start, true)};
-        m_free_start = link.next_id();
-        m_free_count--;
-        return link.take();
+        return m_pool->acquire(m_free_start, true)
+            .and_then([&](Page page) -> Result<Page> {
+                Link link {std::move(page)};
+                m_free_start = link.next_id();
+                m_free_count--;
+                return link.take();
+            })
+            .or_else([&](Error error) -> Result<Page> {
+                // TODO: Error logging here. We'll need a logger for the free list.
+                return ErrorResult {std::move(error)};
+            });
     }
     CALICO_EXPECT_TRUE(m_free_start.is_null());
-    return std::nullopt;
+    return ErrorResult {Error::logic_error("cannot pop page: free list is empty")};
 }
 
 } // calico

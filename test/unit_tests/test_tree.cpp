@@ -1,5 +1,4 @@
 
-#include <array>
 #include <map>
 #include <unordered_map>
 
@@ -10,32 +9,30 @@
 #include "pool/interface.h"
 #include "tree/tree.h"
 #include "tree/node_pool.h"
-#include "validation.h"
-#include "tree/internal.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 
 #include "fakes.h"
 #include "random.h"
 #include "tools.h"
+#include "validation.h"
 
 namespace {
 
 using namespace calico;
+using namespace calico::utils;
+using namespace calico::page;
 
 class TreeHarness: public testing::Test {
 public:
     static constexpr Size PAGE_SIZE = 0x100;
 
-    TreeHarness()
-        : bank {std::make_unique<MemoryBank>("TreeTests")}
+    TreeHarness():
+          bank {std::make_unique<MemoryBank>("TreeTests")}
     {
-        buffer_pool = std::make_unique<BufferPool>(BufferPool::Parameters{
+        buffer_pool = *BufferPool::open({
             *bank,
-            nullptr,
-            nullptr,
-            logging::create_sink("", spdlog::level::off),
-            LSN::null(),
+            utils::create_sink("", spdlog::level::off),
             32,
             0,
             PAGE_SIZE,
@@ -50,8 +47,8 @@ public:
 
 class NodePoolTests: public TreeHarness {
 public:
-    NodePoolTests()
-        : pool {{buffer_pool.get(), PID::null(), 0, 0}} {}
+    NodePoolTests():
+          pool {{buffer_pool.get(), PID::null(), 0, 0}} {}
 
     NodePool pool;
 };
@@ -64,29 +61,29 @@ TEST_F(NodePoolTests, NewNodePoolIsEmpty)
 TEST_F(NodePoolTests, AllocateIncreasesNodeCount)
 {
     // allocate() returns a new node, which is immediately released.
-    pool.allocate(PageType::EXTERNAL_NODE);
+    ASSERT_TRUE(pool.release(*pool.allocate(PageType::EXTERNAL_NODE)));
     ASSERT_EQ(pool.node_count(), 1);
 }
 
 TEST_F(NodePoolTests, NodeContentsPersist)
 {
-    pool.allocate(PageType::EXTERNAL_NODE);
+    ASSERT_TRUE(pool.release(*pool.allocate(PageType::EXTERNAL_NODE)));
     auto root = pool.acquire(PID::root(), false);
-    ASSERT_EQ(root.type(), PageType::EXTERNAL_NODE);
+    ASSERT_EQ(root->type(), PageType::EXTERNAL_NODE);
 }
 
-class InternalTests: public NodePoolTests {
-public:
-    InternalTests()
-        : internal {{&pool, 0}} {}
-
-    Internal internal;
-};
-
-TEST_F(InternalTests, TODO)
-{
-
-}
+//class InternalTests: public NodePoolTests {
+//public:
+//    InternalTests()
+//        : internal {{&pool, 0}} {}
+//
+//    Internal internal;
+//};
+//
+//TEST_F(InternalTests, TODO)
+//{
+//
+//}
 
 class TreeTests: public TreeHarness {
 public:
@@ -95,9 +92,9 @@ public:
     TreeTests()
     {
         max_local = get_max_local(PAGE_SIZE);
-        tree = std::make_unique<Tree>(Tree::Parameters{
+        tree = *Tree::open(Tree::Parameters{
             buffer_pool.get(),
-            logging::create_sink("", spdlog::level::off),
+            utils::create_sink("", spdlog::level::off),
             PID::null(),
             0,
             0,
@@ -105,10 +102,7 @@ public:
         });
     }
 
-    ~TreeTests() override
-    {
-        buffer_pool->try_flush();
-    }
+    ~TreeTests() override = default;
 
     auto validate() const
     {
@@ -121,9 +115,16 @@ public:
     Size max_local {};
 };
 
-TEST_F(TreeTests, NewTreeHasNoCells)
+TEST_F(TreeTests, NewTreeIsEmpty)
 {
+    Cursor cursor;
     ASSERT_EQ(tree->cell_count(), 0);
+    cursor = tree->find_minimum();
+    ASSERT_FALSE(cursor.is_valid());
+    ASSERT_FALSE(cursor.error());
+    cursor = tree->find_maximum();
+    ASSERT_FALSE(cursor.is_valid());
+    ASSERT_FALSE(cursor.error());
 }
 
 TEST_F(TreeTests, NewTreeHasOneNode)
@@ -140,8 +141,8 @@ TEST_F(TreeTests, InsertCell)
 
 TEST_F(TreeTests, OnlyAcceptsValidKeySizes)
 {
-    ASSERT_THROW(tools::insert(*tree, "", "value"), std::invalid_argument);
-    ASSERT_THROW(tools::insert(*tree, std::string(max_local + 1, 'x'), "value"), std::invalid_argument);
+    ASSERT_TRUE(tree->insert(stob(""), stob("value")).error().is_invalid_argument());
+    ASSERT_TRUE(tree->insert(stob(std::string(max_local + 1, 'x')), stob("value")).error().is_invalid_argument());
 }
 
 TEST_F(TreeTests, RemoveRecord)
@@ -202,16 +203,6 @@ TEST_F(TreeTests, SequentialInserts)
 {
     insert_sequence(*tree, 0, 200);
     validate();
-}
-
-TEST_F(TreeTests, NewTreeIsEmpty)
-{
-    Cursor cursor;
-    ASSERT_EQ(tree->cell_count(), 0);
-    cursor = tree->find_minimum();
-    ASSERT_FALSE(cursor.is_valid());
-    cursor = tree->find_maximum();
-    ASSERT_FALSE(cursor.is_valid());
 }
 
 TEST_F(TreeTests, CursorCannotMoveInEmptyTree)
@@ -478,7 +469,7 @@ TEST_F(TreeTests, CollapseAlternatingFromEnds)
 TEST_F(TreeTests, RemoveFromLeft)
 {
     insert_sequence(*tree, 0, 1'000);
-    
+
     // Remove the minimum key without relying on find_minimum().
     while (tree->cell_count())
         ASSERT_TRUE(tree->erase(tools::find(*tree, make_key(0))));

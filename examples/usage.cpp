@@ -85,10 +85,6 @@ auto querying_a_database(cco::Database &db)
     const auto prefix = key.copy().truncate(key.size() / 2);
     assert(db.find(prefix).key() == cursor.key());
 
-    // We can use this method is we just need to check for the existence of a key.
-    assert(db.contains("bengal"));
-    assert(not db.contains("moose"));
-
     // Cursors can be used for range queries. They can traverse the database in sequential order,
     // or in reverse sequential order.
     for (auto c = db.find_minimum(); c.is_valid(); c++) {}
@@ -103,21 +99,22 @@ auto querying_a_database(cco::Database &db)
 
 auto transactions(cco::Database &db)
 {
-    namespace cco = cco;
-
-    // Commit all the updates we made in the previous examples.
-    db.commit();
-
-    // Make some changes and abort the transaction.
-    db.insert("opossum", "pretty cute");
-    assert(db.erase(db.find_minimum()));
-    assert(db.erase(db.find_maximum()));
-    db.abort();
-
-    // All updates since the last call to commit() have been reverted.
-    assert(not db.find_exact("opposum").is_valid());
-    assert(db.find_minimum().key() == cco::stob("abyssinian"));
-    assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
+    (void)db;
+//    namespace cco = cco;
+//
+//    // Commit all the updates we made in the previous examples.
+//    db.commit();
+//
+//    // Make some changes and abort the transaction.
+//    db.insert("opossum", "pretty cute");
+//    assert(db.erase(db.find_minimum()));
+//    assert(db.erase(db.find_maximum()));
+//    db.abort();
+//
+//    // All updates since the last call to commit() have been reverted.
+//    assert(not db.find_exact("opposum").is_valid());
+//    assert(db.find_minimum().key() == cco::stob("abyssinian"));
+//    assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
 }
 
 auto deleting_a_database(cco::Database db)
@@ -132,25 +129,12 @@ auto main(int, const char *[]) -> int
 {
     std::error_code error;
     std::filesystem::remove_all(PATH, error);
-
-    try {
-        cco::Options options;
-        auto db = cco::Database::open(PATH, options);
-        bytes_objects();
-        updating_a_database(db);
-        querying_a_database(db);
-        transactions(db);
-        deleting_a_database(std::move(db));
-    } catch (const cco::CorruptionError &error) {
-        printf("CorruptionError: %s\n", error.what());
-    } catch (const std::invalid_argument &error) {
-        printf("std::invalid_argument: %s\n", error.what());
-    } catch (const std::system_error &error) {
-        printf("std::system_error (errno=%d): %s\n", error.code().value(), error.what());
-    } catch (const std::exception &error) {
-        printf("std::exception: %s\n", error.what());
-    } catch (...) {
-        puts("...");
-    }
+    cco::Options options;
+    auto db = *cco::Database::open(PATH, options);
+    bytes_objects();
+    updating_a_database(db);
+    querying_a_database(db);
+    transactions(db);
+    deleting_a_database(std::move(db));
     return 0;
 }

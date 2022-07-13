@@ -3,7 +3,7 @@
 
 #include "calico/bytes.h"
 
-namespace calico {
+namespace calico::utils {
 
 inline auto crc_32(BytesView) noexcept
 {
@@ -12,6 +12,6 @@ inline auto crc_32(BytesView) noexcept
     return std::uint32_t {};
 }
 
-} // calico
+} // calico::utils
 
 #endif // CALICO_UTILS_CRC_H

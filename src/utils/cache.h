@@ -8,7 +8,7 @@
 #include "calico/common.h"
 #include "utils/expect.h"
 
-namespace calico {
+namespace calico::utils {
 
 template<class Key, class Value, class Hash = std::hash<Key>>
 class FifoCache {
@@ -98,6 +98,6 @@ public:
     }
 };
 
-} // calico
+} // calico::utils
 
 #endif // CALICO_UTILS_CACHE_H

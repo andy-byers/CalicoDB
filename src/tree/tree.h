@@ -8,10 +8,8 @@
 
 namespace calico {
 
-class Cell;
 class Cursor;
 class IBufferPool;
-class Node;
 
 class Tree: public ITree {
 public:
@@ -56,19 +54,21 @@ public:
         return m_pool;
     }
 
-    explicit Tree(Parameters);
-    auto save_header(FileHeader&) const -> void override;
-    auto load_header(const FileHeader&) -> void override;
-    auto insert(BytesView, BytesView) -> bool override;
-    auto erase(Cursor) -> bool override;
+    [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<ITree>>;
+    [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool> override;
+    [[nodiscard]] auto erase(Cursor) -> Result<bool> override;
+    [[nodiscard]] auto root(bool) -> Result<page::Node> override;
+    auto save_header(page::FileHeader&) const -> void override;
+    auto load_header(const page::FileHeader&) -> void override;
     auto find_exact(BytesView) -> Cursor override;
     auto find(BytesView key) -> Cursor override;
     auto find_minimum() -> Cursor override;
     auto find_maximum() -> Cursor override;
-    auto root(bool) -> Node override;
 
 private:
+    explicit Tree(Parameters);
     auto find_aux(BytesView, bool&) -> Cursor;
+
     NodePool m_pool;
     Internal m_internal;
     std::shared_ptr<spdlog::logger> m_logger;

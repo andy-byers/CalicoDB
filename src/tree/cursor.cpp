@@ -5,8 +5,11 @@
 
 namespace calico {
 
-Cursor::Cursor(NodePool *pool, Internal *internal)
-    : m_pool {pool},
+using namespace page;
+using namespace utils;
+
+Cursor::Cursor(NodePool *pool, Internal *internal):
+      m_pool {pool},
       m_internal {internal}
 {
     invalidate();
@@ -73,7 +76,18 @@ auto Cursor::operator--(int) -> Cursor
 
 auto Cursor::is_valid() const -> bool
 {
-    return m_is_valid;
+    return m_is_valid && !m_error;
+}
+
+auto Cursor::error() const -> std::optional<Error>
+{
+    return m_error;
+}
+
+auto Cursor::set_error(const Error &error) const -> void
+{
+    CALICO_EXPECT_EQ(m_error, std::nullopt);
+    m_error = error;
 }
 
 auto Cursor::is_maximum() const -> bool
@@ -99,6 +113,9 @@ auto Cursor::move_to(Node node, Index index) -> void
         m_position.ids[Position::CURRENT] = node.id().value;
         m_position.ids[Position::RIGHT] = node.right_sibling_id().value;
     }
+
+    if (auto result = m_pool->release(std::move(node)); !result.has_value())
+        set_error(result.error());
 }
 
 auto Cursor::invalidate() -> void
@@ -110,7 +127,7 @@ auto Cursor::increment() -> bool
 {
     if (m_is_valid) {
         if (m_position.index == m_position.cell_count - 1) {
-            seek_right();
+            return seek_right();
         } else {
             m_position.index++;
         }
@@ -123,7 +140,7 @@ auto Cursor::decrement() -> bool
 {
     if (m_is_valid) {
         if (m_position.index == 0) {
-            seek_left();
+            return seek_left();
         } else {
             m_position.index--;
         }
@@ -136,24 +153,45 @@ auto Cursor::key() const -> BytesView
 {
     CALICO_EXPECT_TRUE(m_is_valid);
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
-    return node.read_key(m_position.index);
+    if (!node.has_value()) {
+        set_error(node.error());
+        return {};
+    }
+    return node->read_key(m_position.index);
 }
 
 auto Cursor::value() const -> std::string
 {
     CALICO_EXPECT_TRUE(m_is_valid);
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
-    return m_internal->collect_value(node, m_position.index);
+    if (!node.has_value()) {
+        set_error(node.error());
+        return {};
+    }
+    return *m_internal->collect_value(*node, m_position.index)
+       .map_error([this](const Error &error) -> std::string {
+           set_error(error);
+           return {};
+       });
 }
 
 auto Cursor::record() const -> Record
 {
     CALICO_EXPECT_TRUE(m_is_valid);
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
-    return {btos(node.read_key(m_position.index)), m_internal->collect_value(node, m_position.index)};
+    if (!node.has_value()) {
+        set_error(node.error());
+        return {};
+    }
+    auto value = m_internal->collect_value(*node, m_position.index);
+    if (!value.has_value()) {
+        set_error(node.error());
+        return {};
+    }
+    return {btos(node->read_key(m_position.index)), std::move(*value)};
 }
 
-auto Cursor::seek_left() -> void
+auto Cursor::seek_left() -> bool
 {
     CALICO_EXPECT_TRUE(m_is_valid);
     CALICO_EXPECT_EQ(m_position.index, 0);
@@ -161,12 +199,18 @@ auto Cursor::seek_left() -> void
         invalidate();
     } else {
         const PID left {m_position.ids[Position::LEFT]};
-        move_to(m_pool->acquire(left, false), 0);
+        auto previous = m_pool->acquire(left, false);
+        if (!previous.has_value()) {
+            set_error(previous.error());
+            return false;
+        }
+        move_to(std::move(*previous), 0);
         m_position.index = m_position.cell_count - 1;
     }
+    return true;
 }
 
-auto Cursor::seek_right() -> void
+auto Cursor::seek_right() -> bool
 {
     CALICO_EXPECT_TRUE(m_is_valid);
     CALICO_EXPECT_EQ(m_position.index, m_position.cell_count - 1);
@@ -174,8 +218,14 @@ auto Cursor::seek_right() -> void
         invalidate();
     } else {
         const PID right {m_position.ids[Position::RIGHT]};
-        move_to(m_pool->acquire(right, false), 0);
+        auto next = m_pool->acquire(right, false);
+        if (!next.has_value()) {
+            set_error(next.error());
+            return false;
+        }
+        move_to(std::move(*next), 0);
     }
+    return true;
 }
 
 auto Cursor::Position::operator==(const Position &rhs) const -> bool

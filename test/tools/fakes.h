@@ -1,14 +1,10 @@
 #ifndef CALICO_TEST_TOOLS_FAKES_H
 #define CALICO_TEST_TOOLS_FAKES_H
 
+#include <filesystem>
 #include "calico/calico.h"
-#include "db/database_impl.h"
-#include "page/file_header.h"
 #include "random.h"
 #include "storage/interface.h"
-#include "wal/wal_reader.h"
-#include "wal/wal_writer.h"
-#include "pool/buffer_pool.h"
 
 namespace calico {
 
@@ -114,17 +110,11 @@ public:
     explicit MemoryBank(const std::string&);
     [[nodiscard]] auto path() const -> std::string override;
     [[nodiscard]] auto name() const -> std::string override;
-    [[nodiscard]] auto children() const -> std::vector<std::string> override;
-    auto open_directory(const std::string&) -> std::unique_ptr<IDirectory> override;
-    auto open_file(const std::string&, Mode, int) -> std::unique_ptr<IFile> override;
-    auto remove() -> void override;
-    auto sync() -> void override {}
-
-    [[nodiscard]] auto noex_children() const -> Result<std::vector<std::string>> override;
-    auto noex_open_directory(const std::string&) -> Result<std::unique_ptr<IDirectory>> override;
-    auto noex_open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> override;
-    auto noex_remove() -> Result<void> override;
-    auto noex_sync() -> Result<void> override;
+    [[nodiscard]] auto children() const -> Result<std::vector<std::string>> override;
+    [[nodiscard]] auto open_directory(const std::string&) -> Result<std::unique_ptr<IDirectory>> override;
+    [[nodiscard]] auto open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> override;
+    [[nodiscard]] auto remove() -> Result<void> override;
+    [[nodiscard]] auto sync() -> Result<void> override;
 
     auto open_memory_bank(const std::string&) -> std::unique_ptr<MemoryBank>;
     auto open_memory(const std::string&, Mode, int) -> std::unique_ptr<Memory>;
@@ -152,19 +142,9 @@ public:
         return m_is_open;
     }
 
-    [[nodiscard]] auto is_readable() const -> bool override
+    [[nodiscard]] auto mode() const -> Mode override
     {
-        return m_is_readable;
-    }
-
-    [[nodiscard]] auto is_writable() const -> bool override
-    {
-        return m_is_writable;
-    }
-
-    [[nodiscard]] auto is_append() const -> bool override
-    {
-        return m_is_append;
+        return {}; // TODO: Store mode and return here.
     }
 
     [[nodiscard]] auto permissions() const -> int override
@@ -185,11 +165,6 @@ public:
     [[nodiscard]] auto name() const -> std::string override
     {
         return m_path.filename();
-    }
-
-    [[nodiscard]] auto size() const -> Size override
-    {
-        return memory().size();
     }
 
     [[nodiscard]] auto open_reader() -> std::unique_ptr<IFileReader> override;
@@ -230,39 +205,12 @@ public:
         return m_cursor;
     }
 
-    auto open(const std::string &path, Mode mode, int permissions) -> void override
-    {
-        m_is_open = true;
-        m_path = path;
-        m_permissions = permissions;
-        m_is_readable = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_ONLY)) == static_cast<unsigned>(Mode::READ_ONLY) ||
-                        (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_WRITE)) == static_cast<unsigned>(Mode::READ_WRITE);
-        m_is_writable = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::WRITE_ONLY)) == static_cast<unsigned>(Mode::WRITE_ONLY) ||
-                        (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::READ_WRITE)) == static_cast<unsigned>(Mode::READ_WRITE);
-        m_is_append = (static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::APPEND)) == static_cast<unsigned>(Mode::APPEND);
-    }
-
-    auto close() -> void override
-    {
-        m_is_open = false;
-    }
-
-    // TODO: Shared memory filename?
-    auto rename(const std::string&) -> void override {}
-
-    auto remove() -> void override
-    {
-        m_path.clear();
-    }
-
-
-
-    [[nodiscard]] auto noex_size() const -> Result<Size> override
+    [[nodiscard]] auto size() const -> Result<Size> override
     {
         return m_memory.memory().size();
     }
 
-    [[nodiscard]] auto noex_open(const std::string &path, Mode mode, int permissions) -> Result<void> override
+    [[nodiscard]] auto open(const std::string &path, Mode mode, int permissions) -> Result<void> override
     {
         m_is_open = true;
         m_path = path;
@@ -275,19 +223,19 @@ public:
         return {};
     }
 
-    [[nodiscard]] auto noex_close() -> Result<void> override
+    [[nodiscard]] auto close() -> Result<void> override
     {
         m_is_open = false;
         return {};
     }
 
     // TODO: Shared memory filename?
-    [[nodiscard]] auto noex_rename(const std::string&) -> Result<void> override
+    [[nodiscard]] auto rename(const std::string&) -> Result<void> override
     {
         return {};
     }
 
-    [[nodiscard]] auto noex_remove() -> Result<void> override
+    [[nodiscard]] auto remove() -> Result<void> override
     {
         m_path.clear();
         return {};
@@ -310,13 +258,9 @@ class MemoryReader: public IFileReader {
 public:
     ~MemoryReader() override = default;
     explicit MemoryReader(Memory&);
-    auto seek(long, Seek) -> void override;
-    auto read(Bytes) -> Size override;
-    auto read_at(Bytes, Index) -> Size override;
-
-    auto noex_seek(long, Seek) -> Result<Index> override;
-    auto noex_read(Bytes) -> Result<Size> override;
-    auto noex_read_at(Bytes, Index) -> Result<Size> override;
+    auto seek(long, Seek) -> Result<Index> override;
+    auto read(Bytes) -> Result<Size> override;
+    auto read(Bytes, Index) -> Result<Size> override;
 
 private:
     Memory *m_memory {};
@@ -326,61 +270,14 @@ class MemoryWriter: public IFileWriter {
 public:
     ~MemoryWriter() override = default;
     explicit MemoryWriter(Memory&);
-    auto seek(long, Seek) -> void override;
-    auto write(BytesView) -> Size override;
-    auto write_at(BytesView, Index) -> Size override;
-    auto sync() -> void override {}
-    auto resize(Size) -> void override;
-
-    auto noex_seek(long, Seek) -> Result<Index> override;
-    auto noex_write(BytesView) -> Result<Size> override;
-    auto noex_write_at(BytesView, Index) -> Result<Size> override;
-    auto noex_sync() -> Result<void> override;
-    auto noex_resize(Size) -> Result<void> override;
+    auto seek(long, Seek) -> Result<Index> override;
+    auto write(BytesView) -> Result<Size> override;
+    auto write(BytesView, Index) -> Result<Size> override;
+    auto sync() -> Result<void> override;
+    auto resize(Size) -> Result<void> override;
 
 private:
     Memory *m_memory {};
-};
-
-class IWALReader;
-class IWALWriter;
-
-struct WALHarness final {
-    explicit WALHarness(Size);
-    ~WALHarness();
-    SharedMemory backing;
-    std::unique_ptr<MemoryBank> bank;
-    std::unique_ptr<IWALReader> reader;
-    std::unique_ptr<IWALWriter> writer;
-};
-
-struct FakeFilesHarness {
-
-    explicit FakeFilesHarness(Options);
-    ~FakeFilesHarness() = default;
-    FakeFilesHarness(FakeFilesHarness&&) = default;
-    auto operator=(FakeFilesHarness&&) -> FakeFilesHarness& = default;
-
-    std::unique_ptr<MemoryBank> bank;
-    std::unique_ptr<Memory> tree_file;
-    std::unique_ptr<Memory> wal_reader_file;
-    std::unique_ptr<Memory> wal_writer_file;
-    SharedMemory tree_backing;
-    SharedMemory wal_backing;
-    FaultControls tree_faults;
-    FaultControls wal_reader_faults;
-    FaultControls wal_writer_faults;
-    Options options;
-};
-
-struct FakeDatabase {
-    explicit FakeDatabase(Options);
-
-    SharedMemory data_backing;
-    SharedMemory wal_backing;
-    FaultControls data_faults;
-    FaultControls wal_faults;
-    std::unique_ptr<Database::Impl> db;
 };
 
 } // calico

@@ -15,13 +15,22 @@ class IDirectory;
 class IFile;
 class ITree;
 
+struct InitialState {
+    page::FileHeader state;
+    Options revised;
+    bool is_new {};
+};
+
 class Database::Impl final {
 public:
     struct Parameters {
         std::unique_ptr<IDirectory> directory;
+        spdlog::sink_ptr sink;
+        page::FileHeader state;
         Options options;
     };
 
+    friend class Database;
     struct InMemoryTag {};
 
     explicit Impl(Parameters);
@@ -32,24 +41,20 @@ public:
     [[nodiscard]] auto record_count() const -> Size;
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
-    [[nodiscard]] auto uses_transactions() const -> Size;
     [[nodiscard]] auto is_temp() const -> bool;
+    [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool>;
+    [[nodiscard]] auto erase(BytesView) -> Result<bool>;
+    [[nodiscard]] auto erase(Cursor) -> Result<bool>;
+    [[nodiscard]] auto commit() -> Result<void>;
     auto find(BytesView) -> Cursor;
     auto find_exact(BytesView) -> Cursor;
     auto find_minimum() -> Cursor;
     auto find_maximum() -> Cursor;
-    auto insert(BytesView, BytesView) -> bool;
-    auto erase(BytesView) -> bool;
-    auto erase(Cursor) -> bool;
-    auto commit() -> bool;
-    auto abort() -> bool;
-
     auto info() -> Info;
 
 private:
-    auto save_header() -> void;
-    auto load_header() -> void;
-    auto recover() -> void;
+    [[nodiscard]] auto save_header() -> Result<void>;
+    [[nodiscard]] auto load_header() -> Result<void>;
 
     spdlog::sink_ptr m_sink;
     std::shared_ptr<spdlog::logger> m_logger;
@@ -59,13 +64,7 @@ private:
     bool m_is_temp {};
 };
 
-struct InitialState {
-    FileHeader state;
-    Options revised;
-    bool is_new {};
-};
-
-auto setup(const std::string&, const Options&, spdlog::logger&) -> InitialState;
+auto setup(IDirectory&, const Options&, spdlog::logger&) -> Result<InitialState>;
 
 } // calico
 

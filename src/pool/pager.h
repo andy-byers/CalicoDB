@@ -28,27 +28,16 @@ public:
     ~Pager();
     [[nodiscard]] auto available() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
-    [[nodiscard]] auto pin(PID) -> std::optional<Frame>;
-    auto unpin(Frame) -> void;
-    auto discard(Frame) -> void;
-    auto truncate(Size) -> void;
-    auto sync() -> void;
-
-    [[nodiscard]] auto noex_pin(PID) -> Result<Frame>;
-    [[nodiscard]] auto noex_unpin(Frame) -> Result<void>;
-    [[nodiscard]] auto noex_discard(Frame) -> Result<void>;
-    [[nodiscard]] auto noex_truncate(Size) -> Result<void>;
-    [[nodiscard]] auto noex_sync() -> Result<void>;
+    [[nodiscard]] auto pin(PID) -> Result<Frame>;
+    [[nodiscard]] auto unpin(Frame) -> Result<void>;
+    [[nodiscard]] auto discard(Frame) -> Result<void>;
+    [[nodiscard]] auto truncate(Size) -> Result<void>;
+    [[nodiscard]] auto sync() -> Result<void>;
 
 private:
-    [[nodiscard]] auto noex_read_page_from_file(PID, Bytes) const -> Result<bool>;
-    [[nodiscard]] auto noex_write_page_to_file(PID, BytesView) const -> Result<void>;
-    [[nodiscard]] auto noex_maybe_write_pending() -> Result<void>;
-
-    [[nodiscard]] auto read_page_from_file(PID, Bytes) const -> bool;
-    auto write_page_to_file(PID, BytesView) const -> void;
-    auto do_write(PID, BytesView) const -> void;
-    auto maybe_write_pending() -> void;
+    [[nodiscard]] auto read_page_from_file(PID, Bytes) const -> Result<bool>;
+    [[nodiscard]] auto write_page_to_file(PID, BytesView) const -> Result<void>;
+    [[nodiscard]] auto maybe_write_pending() -> Result<void>;
 
     struct AlignedDeleter {
 
@@ -64,8 +53,8 @@ private:
     };
 
     std::unique_ptr<Byte[], AlignedDeleter> m_buffer;
-    std::list<Frame> m_available;           ///< List of available frames
-    std::list<Frame> m_pending;           ///< List of available frames
+    std::list<Frame> m_available;
+    std::list<Frame> m_pending;
     std::unique_ptr<IFileReader> m_reader;
     std::unique_ptr<IFileWriter> m_writer;
     std::shared_ptr<spdlog::logger> m_logger;

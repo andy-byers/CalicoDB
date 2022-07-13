@@ -2,12 +2,11 @@
 #define CALICO_PAGE_FILE_HEADER_H
 
 #include "calico/bytes.h"
+#include "utils/identifier.h"
 
-namespace calico {
+namespace calico::page {
 
 class Node;
-struct LSN;
-struct PID;
 
 class FileHeader {
 public:
@@ -48,6 +47,6 @@ private:
     Bytes m_header;
 };
 
-} // calico
+} // calico::page
 
 #endif // CALICO_PAGE_FILE_HEADER_H
