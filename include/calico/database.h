@@ -1,11 +1,11 @@
-#ifndef CALICO_DATABASE_H
-#define CALICO_DATABASE_H
+#ifndef CCO_DATABASE_H
+#define CCO_DATABASE_H
 
 #include <memory>
 #include <optional>
 #include "error.h"
 
-namespace calico {
+namespace cco {
 
 class Cursor;
 class Info;
@@ -17,23 +17,28 @@ class Database {
 public:
 
     /**
-     * Open or create a Calico DB database.
+     * Open or create a persistent database.
      *
-     * @param path The path to the database storage.
+     * @param path The path to the database home directory.
      * @param options Options to apply to the database.
-     * @return A Calico DB database, located at the provided path on disk.
+     * @return A database located at the provided path on disk.
      */
     static auto open(const std::string &path, Options options) -> Result<Database>;
 
     /**
-     * Create an in-memory Calico DB database.
+     * Create an in-memory database.
      *
      * @param options Options to apply to the database.
-     * @return An in-memory Calico DB database.
+     * @return An in-memory database.
      */
     static auto temp(Options options) -> Result<Database>;
 
-    
+    /**
+     * Close a database.
+     *
+     * @param db The database to close.
+     * @return A result object describing success or failure.
+     */
     static auto close(Database db) -> Result<void>;
     
     /**
@@ -43,6 +48,7 @@ public:
      * at your own risk.
      *
      * @param db The database to destroy.
+     * @return A result object describing success or failure.
      */
     static auto destroy(Database db) -> Result<void>;
     
@@ -180,4 +186,4 @@ private:
 
 } // calico
 
-#endif // CALICO_DATABASE_H
+#endif // CCO_DATABASE_H

@@ -6,7 +6,7 @@
 #include "utils/identifier.h"
 #include "utils/layout.h"
 
-namespace calico::page {
+namespace cco::page {
 
 using namespace utils;
 
@@ -21,7 +21,7 @@ FileHeader::FileHeader(Node &root)
     // Causes the whole storage header region to be written to the WAL.
     : m_header {root.page().bytes(FileLayout::header_offset(), FileLayout::HEADER_SIZE)}
 {
-    CALICO_EXPECT_TRUE(root.id().is_root());
+    CCO_EXPECT_TRUE(root.id().is_root());
 }
 
 auto FileHeader::data() -> Bytes
@@ -97,19 +97,19 @@ auto FileHeader::update_header_crc() -> void
 
 auto FileHeader::set_page_count(Size page_count) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint32_t, page_count);
+    CCO_EXPECT_BOUNDED_BY(uint32_t, page_count);
     utils::put_u32(m_header.range(FileLayout::PAGE_COUNT_OFFSET), static_cast<uint32_t>(page_count));
 }
 
 auto FileHeader::set_node_count(Size node_count) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint32_t, node_count);
+    CCO_EXPECT_BOUNDED_BY(uint32_t, node_count);
     utils::put_u32(m_header.range(FileLayout::NODE_COUNT_OFFSET), static_cast<uint32_t>(node_count));
 }
 
 auto FileHeader::set_free_count(Size free_count) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint32_t, free_count);
+    CCO_EXPECT_BOUNDED_BY(uint32_t, free_count);
     utils::put_u32(m_header.range(FileLayout::FREE_COUNT_OFFSET), static_cast<uint32_t>(free_count));
 }
 
@@ -120,19 +120,19 @@ auto FileHeader::set_free_start(PID free_start) -> void
 
 auto FileHeader::set_page_size(Size page_size) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint16_t, page_size);
+    CCO_EXPECT_BOUNDED_BY(uint16_t, page_size);
     utils::put_u16(m_header.range(FileLayout::PAGE_SIZE_OFFSET), static_cast<uint16_t>(page_size));
 }
 
 auto FileHeader::set_block_size(Size block_size) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint16_t, block_size);
+    CCO_EXPECT_BOUNDED_BY(uint16_t, block_size);
     utils::put_u16(m_header.range(FileLayout::BLOCK_SIZE_OFFSET), static_cast<uint16_t>(block_size));
 }
 
 auto FileHeader::set_key_count(Size key_count) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint32_t, key_count);
+    CCO_EXPECT_BOUNDED_BY(uint32_t, key_count);
     utils::put_u32(m_header.range(FileLayout::KEY_COUNT_OFFSET), static_cast<uint32_t>(key_count));
 }
 

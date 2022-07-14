@@ -2,8 +2,8 @@
  * Very loosely based off of https://medium.com/@koushikmohan/an-analysis-of-2q-cache-replacement-algorithms-21acceae672a
  */
 
-#ifndef CALICO_POOL_PAGE_CACHE_H
-#define CALICO_POOL_PAGE_CACHE_H
+#ifndef CCO_POOL_PAGE_CACHE_H
+#define CCO_POOL_PAGE_CACHE_H
 
 #include <list>
 #include <unordered_map>
@@ -11,7 +11,7 @@
 #include "utils/cache.h"
 #include "utils/identifier.h"
 
-namespace calico {
+namespace cco {
 
 class Frame;
 
@@ -59,4 +59,4 @@ private:
 
 } // calico
 
-#endif // CALICO_POOL_PAGE_CACHE_H
+#endif // CCO_POOL_PAGE_CACHE_H

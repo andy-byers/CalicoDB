@@ -1,31 +1,42 @@
 #include "buffer_pool.h"
+#include "pager.h"
 #include "calico/options.h"
 #include "page/file_header.h"
 #include "page/page.h"
 #include "storage/directory.h"
 #include "utils/logging.h"
 
-namespace calico {
+namespace cco {
 
 using namespace page;
 using namespace utils;
 
 auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBufferPool>>
 {
-    std::unique_ptr<IFile> file;
     const auto mode = Mode::CREATE | Mode::READ_WRITE;
-    CCO_TRY_ASSIGN(file, param.directory.open_file(DATA_NAME, mode, param.permissions));
-    return std::unique_ptr<IBufferPool> {new BufferPool {std::move(file), param}};
+    CCO_TRY_CREATE(file, param.directory.open_file(DATA_NAME, mode, param.permissions));
+    CCO_TRY_CREATE(pager, Pager::open({file->open_reader(), file->open_writer(), param.log_sink, param.page_size, param.frame_count}));
+    return std::unique_ptr<IBufferPool> {new BufferPool {std::move(file), std::move(pager), param}};
 }
 
-BufferPool::BufferPool(std::unique_ptr<IFile> file, const Parameters &param):
+BufferPool::BufferPool(std::unique_ptr<IFile> file, std::unique_ptr<Pager> pager, const Parameters &param):
       m_file {std::move(file)},
+      m_pager {std::move(pager)},
       m_logger {utils::create_logger(param.log_sink, "BufferPool")},
       m_scratch {param.page_size},
-      m_pager {{m_file->open_reader(), m_file->open_writer(), param.log_sink, param.page_size, param.frame_count}},
       m_page_count {param.page_count}
 {
-    m_logger->trace("constructing BufferPool object");
+    m_logger->trace("opening");
+}
+
+BufferPool::~BufferPool()
+{
+    m_logger->trace("closing");
+}
+
+auto BufferPool::page_size() const -> Size
+{
+    return m_pager->page_size();
 }
 
 auto BufferPool::pin_frame(PID id) -> Result<void>
@@ -33,10 +44,11 @@ auto BufferPool::pin_frame(PID id) -> Result<void>
     if (m_cache.contains(id))
         return {};
 
-    if (!m_pager.available())
+    if (!m_pager->available())
         try_evict_frame();
 
-    return m_pager.pin(id)
+    // Pager will allocate a new temporary frame if there aren't any more available.
+    return m_pager->pin(id)
         .and_then([id, this](Frame frame) -> Result<void> {
             m_cache.put(id, std::move(frame));
             return {};
@@ -45,22 +57,24 @@ auto BufferPool::pin_frame(PID id) -> Result<void>
 
 auto BufferPool::flush() -> Result<void>
 {
-    CALICO_EXPECT_EQ(m_ref_sum, 0);
+    CCO_EXPECT_EQ(m_ref_sum, 0);
+    m_logger->trace("flushing");
 
     if (!m_cache.is_empty()) {
-        m_logger->trace("trying to flush {} frames", m_cache.size());
-        for (Index i {}, n {m_cache.size()}; i < n; ++i) {
-            auto was_evicted = try_evict_frame();
-            if (!was_evicted)
-                return was_evicted;
-        }
+        m_logger->info("trying to flush {} frames", m_cache.size());
+
+        for (Index i {}, n {m_cache.size()}; i < n; ++i)
+            CCO_TRY(try_evict_frame());
+
         if (!m_cache.is_empty()) {
-            // TODO: More logging here?
-            m_logger->trace("{} frames are left", m_cache.size());
-            return ErrorResult {Error::not_found()};
+            LogMessage message {*m_logger};
+            message.set_primary("cannot flush cache");
+            message.set_detail("{} frames are left", m_cache.size());
+            message.set_hint("flush the WAL and try again");
+            return Err {message.not_found(spdlog::level::info)};
         }
+        m_logger->info("cache was flushed");
     }
-    m_logger->trace("buffer pool is empty");
     return {};
 }
 
@@ -68,15 +82,15 @@ auto BufferPool::try_evict_frame() -> Result<void>
 {
     for (Index i {}; i < m_cache.size(); ++i) {
         auto frame = m_cache.evict();
-        CALICO_EXPECT_NE(frame, std::nullopt);
+        CCO_EXPECT_NE(frame, std::nullopt);
         if (frame->ref_count() == 0) {
             m_dirty_count -= frame->is_dirty();
-            return m_pager.unpin(std::move(*frame));
+            return m_pager->unpin(std::move(*frame));
         }
         const auto id = frame->page_id();
         m_cache.put(id, std::move(*frame));
     }
-    return ErrorResult {Error::not_found()};
+    return Err {Error::not_found("")};
 }
 
 auto BufferPool::on_release(page::Page &page) -> void
@@ -95,12 +109,12 @@ auto BufferPool::release(Page page) -> Result<void>
 auto BufferPool::do_release(page::Page &page) -> Result<void>
 {
     // This function needs external synchronization!
-    CALICO_EXPECT_GT(m_ref_sum, 0);
+    CCO_EXPECT_GT(m_ref_sum, 0);
 
     // TODO: Push updates to the WAL here, which can fail. If it fails, we push the error object to the error stack.
 
     auto reference = m_cache.get(page.id());
-    CALICO_EXPECT_NE(reference, std::nullopt);
+    CCO_EXPECT_NE(reference, std::nullopt);
     auto &frame = reference->get();
 
     m_dirty_count += !frame.is_dirty() && page.is_dirty();
@@ -111,17 +125,17 @@ auto BufferPool::do_release(page::Page &page) -> Result<void>
 
 auto BufferPool::purge() -> Result<void>
 {
-    CALICO_EXPECT_EQ(m_ref_sum, 0);
+    CCO_EXPECT_EQ(m_ref_sum, 0);
     m_logger->trace("purging page cache");
 
     while (!m_cache.is_empty()) {
         auto frame = m_cache.evict();
-        CALICO_EXPECT_NE(frame, std::nullopt);
+        CCO_EXPECT_NE(frame, std::nullopt);
         m_dirty_count -= frame->is_dirty();
         if (frame->ref_count())
             frame->purge();
 
-        if (auto unpinned = m_pager.discard(std::move(*frame)); !unpinned)
+        if (auto unpinned = m_pager->discard(std::move(*frame)); !unpinned)
             return unpinned;
     }
     return {};
@@ -155,7 +169,7 @@ auto BufferPool::allocate() -> Result<Page>
 
 auto BufferPool::acquire(PID id, bool is_writable) -> Result<page::Page>
 {
-    CALICO_EXPECT_FALSE(id.is_null());
+    CCO_EXPECT_FALSE(id.is_null());
     std::lock_guard lock {m_mutex};
 
     if (auto reference = m_cache.get(id)) {
@@ -167,7 +181,7 @@ auto BufferPool::acquire(PID id, bool is_writable) -> Result<page::Page>
     return pin_frame(id)
         .map([id, is_writable, this] {
             auto reference = m_cache.get(id);
-            CALICO_EXPECT_NE(reference, std::nullopt);
+            CCO_EXPECT_NE(reference, std::nullopt);
             auto page = reference->get().borrow(this, is_writable);
             m_ref_sum++;
             return page;

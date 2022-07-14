@@ -3,13 +3,13 @@
 #include "system.h"
 #include "utils/expect.h"
 
-namespace calico {
+namespace cco {
 
 namespace fs = std::filesystem;
 
 auto File::is_open() const -> bool
 {
-    CALICO_EXPECT_GE(m_file, system::FAILURE);
+    CCO_EXPECT_GE(m_file, system::FAILURE);
     return m_file != system::FAILURE;
 }
 
@@ -55,7 +55,7 @@ auto File::size() const -> Result<Size>
     std::error_code error;
     if (const auto size = fs::file_size(m_path, error); size != INVALID_SIZE)
         return size;
-    return ErrorResult {Error::system_error(error.message())};
+    return Err {Error::system_error(error.message())};
 }
 
 auto File::open(const std::string &path, Mode mode, int permissions) -> Result<void>
@@ -81,12 +81,12 @@ auto File::close() -> Result<void>
 
 auto File::rename(const std::string &name) -> Result<void>
 {
-    CALICO_EXPECT_TRUE(m_path.has_parent_path());
-    CALICO_EXPECT_FALSE(m_path.empty());
+    CCO_EXPECT_TRUE(m_path.has_parent_path());
+    CCO_EXPECT_FALSE(m_path.empty());
     std::error_code error;
     fs::rename(std::exchange(m_path, m_path.parent_path() / name), m_path, error);
     if (error)
-        return ErrorResult {Error::system_error(error.message())};
+        return Err {Error::system_error(error.message())};
     return {};
 }
 
@@ -103,7 +103,7 @@ auto read_exact(IFileReader &reader, Bytes in) -> Result<void>
 {
     return reader.read(in)
         .and_then([in](Size read_size) {
-            return read_size == in.size() ? Result<void> {} : ErrorResult {system::error(std::errc::io_error)};
+            return read_size == in.size() ? Result<void> {} : Err {system::error(std::errc::io_error)};
         });
 }
 
@@ -111,7 +111,7 @@ auto read_exact_at(IFileReader &reader, Bytes in, Index offset) -> Result<void>
 {
     return reader.read(in, offset)
         .and_then([in](Size read_size) {
-            return read_size == in.size() ? Result<void> {} : ErrorResult {system::error(std::errc::io_error)};
+            return read_size == in.size() ? Result<void> {} : Err {system::error(std::errc::io_error)};
         });
 }
 
@@ -119,7 +119,7 @@ auto write_all(IFileWriter &writer, BytesView out) -> Result<void>
 {
     return writer.write(out)
         .and_then([out](Size write_size) {
-            return write_size == out.size() ? Result<void> {} : ErrorResult {system::error(std::errc::io_error)};
+            return write_size == out.size() ? Result<void> {} : Err {system::error(std::errc::io_error)};
         });
 }
 
@@ -127,7 +127,7 @@ auto write_all(IFileWriter &writer, BytesView out, Index offset) -> Result<void>
 {
     return writer.write(out, offset)
         .and_then([out](Size write_size) {
-            return write_size == out.size() ? Result<void> {} : ErrorResult {system::error(std::errc::io_error)};
+            return write_size == out.size() ? Result<void> {} : Err {system::error(std::errc::io_error)};
         });
 }
 

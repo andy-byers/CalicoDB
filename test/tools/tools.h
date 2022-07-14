@@ -1,6 +1,6 @@
 
-#ifndef CALICO_TEST_TOOLS_TOOLS_H
-#define CALICO_TEST_TOOLS_TOOLS_H
+#ifndef CCO_TEST_TOOLS_TOOLS_H
+#define CCO_TEST_TOOLS_TOOLS_H
 
 #include <iomanip>
 #include <iostream>
@@ -10,7 +10,7 @@
 #include "utils/identifier.h"
 #include "utils/utils.h"
 
-namespace calico {
+namespace cco {
 
 class ITree;
 class Node;
@@ -47,7 +47,7 @@ namespace tools {
     auto insert(T &t, const std::string &key, const std::string &value) -> bool
     {
         auto was_inserted = t.insert(stob(key), stob(value));
-        CALICO_EXPECT_TRUE(was_inserted.has_value());
+        CCO_EXPECT_TRUE(was_inserted.has_value());
         return was_inserted.value();
     }
 
@@ -55,7 +55,7 @@ namespace tools {
     auto erase(T &t, const std::string &key) -> bool
     {
         auto was_erased = t.erase(find_exact(t, key));
-        CALICO_EXPECT_TRUE(was_erased.has_value());
+        CCO_EXPECT_TRUE(was_erased.has_value());
         return was_erased.value();
     }
 
@@ -63,15 +63,15 @@ namespace tools {
     auto erase_one(T &t, const std::string &key) -> bool
     {
         auto was_erased = t.erase(find_exact(t, key));
-        CALICO_EXPECT_TRUE(was_erased.has_value());
+        CCO_EXPECT_TRUE(was_erased.has_value());
         if (was_erased.value())
             return true;
         auto cursor = t.find_minimum();
-        CALICO_EXPECT_EQ(cursor.error(), std::nullopt);
+        CCO_EXPECT_EQ(cursor.error(), std::nullopt);
         if (!cursor.is_valid())
             return false;
         was_erased = t.erase(cursor);
-        CALICO_EXPECT_TRUE(was_erased.value());
+        CCO_EXPECT_TRUE(was_erased.value());
         return true;
     }
 
@@ -187,4 +187,4 @@ private:
 
 } // calico
 
-#endif // CALICO_TEST_TOOLS_TOOLS_H
+#endif // CCO_TEST_TOOLS_TOOLS_H

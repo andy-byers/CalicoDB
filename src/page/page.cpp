@@ -4,7 +4,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace calico::page {
+namespace cco::page {
 
 using namespace utils;
 
@@ -15,9 +15,9 @@ Page::Page(const Parameters &param):
       m_is_writable {param.is_writable},
       m_is_dirty {param.is_dirty}
 {
-    CALICO_EXPECT_TRUE(is_power_of_two(m_data.size()));
-    CALICO_EXPECT_GE(m_data.size(), MINIMUM_PAGE_SIZE);
-    CALICO_EXPECT_LE(m_data.size(), MAXIMUM_PAGE_SIZE);
+    CCO_EXPECT_TRUE(is_power_of_two(m_data.size()));
+    CCO_EXPECT_GE(m_data.size(), MINIMUM_PAGE_SIZE);
+    CCO_EXPECT_LE(m_data.size(), MAXIMUM_PAGE_SIZE);
 }
 
 Page::~Page()

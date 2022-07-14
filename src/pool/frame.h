@@ -1,12 +1,12 @@
 
-#ifndef CALICO_POOL_FRAME_H
-#define CALICO_POOL_FRAME_H
+#ifndef CCO_POOL_FRAME_H
+#define CCO_POOL_FRAME_H
 
 #include <memory>
 #include "calico/bytes.h"
 #include "utils/identifier.h"
 
-namespace calico {
+namespace cco {
 
 class IBufferPool;
 
@@ -63,7 +63,7 @@ public:
 
     auto reset(PID page_id) -> void
     {
-        CALICO_EXPECT_EQ(m_ref_count, 0);
+        CCO_EXPECT_EQ(m_ref_count, 0);
         m_page_id = page_id;
         m_is_dirty = false;
     }
@@ -99,4 +99,4 @@ private:
 
 } // calico
 
-#endif // CALICO_POOL_FRAME_H
+#endif // CCO_POOL_FRAME_H

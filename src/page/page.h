@@ -1,12 +1,12 @@
-#ifndef CALICO_PAGE_PAGE_H
-#define CALICO_PAGE_PAGE_H
+#ifndef CCO_PAGE_PAGE_H
+#define CCO_PAGE_PAGE_H
 
 #include <optional>
 #include <vector>
 #include "utils/identifier.h"
 #include "utils/types.h"
 
-namespace calico {
+namespace cco {
 
 class IBufferPool;
 class Frame;
@@ -15,7 +15,7 @@ namespace page {
 
 class Page final {
 public:
-    friend class calico::Frame;
+    friend class cco::Frame;
 
     struct Parameters {
         PID id;
@@ -72,4 +72,4 @@ auto put_u32(Page&, Index, uint32_t) -> void;
 } // page
 } // calico
 
-#endif // CALICO_PAGE_PAGE_H
+#endif // CCO_PAGE_PAGE_H

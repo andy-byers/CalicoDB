@@ -1,12 +1,12 @@
-#ifndef CALICO_TEST_TOOLS_RANDOM_H
-#define CALICO_TEST_TOOLS_RANDOM_H
+#ifndef CCO_TEST_TOOLS_RANDOM_H
+#define CCO_TEST_TOOLS_RANDOM_H
 
 #include <algorithm>
 #include <random>
 #include "calico/options.h"
 #include "utils/expect.h"
 
-namespace calico {
+namespace cco {
 
 /**
 ** Helper class for generating random numbers.
@@ -59,7 +59,7 @@ template<class T> auto Random::next_int(T v_max) -> T
 */
 template<class T> auto Random::next_int(T v_min, T v_max) -> T
 {
-    CALICO_EXPECT_LE(v_min, v_max);
+    CCO_EXPECT_LE(v_min, v_max);
     std::uniform_int_distribution<T> dist(v_min, v_max);
     return dist(m_rng);
 }
@@ -84,7 +84,7 @@ template<class T> auto Random::next_real(T v_max) -> T
 */
 template<class T> auto Random::next_real(T v_min, T v_max) -> T
 {
-    CALICO_EXPECT_LE(v_min, v_max);
+    CCO_EXPECT_LE(v_min, v_max);
     std::uniform_real_distribution<T> dist(v_min, v_max);
     return dist(m_rng);
 }
@@ -113,4 +113,4 @@ inline auto random_binary(Random &random, Size max_size) -> std::string
 
 } // calico
 
-#endif // CALICO_TEST_TOOLS_RANDOM_H
+#endif // CCO_TEST_TOOLS_RANDOM_H

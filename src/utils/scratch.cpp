@@ -1,6 +1,6 @@
 #include "scratch.h"
 
-namespace calico::utils {
+namespace cco::utils {
 
 auto ScratchManager::get() -> Scratch
 {

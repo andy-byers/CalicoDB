@@ -1,10 +1,10 @@
-#ifndef CALICO_PAGE_NODE_H
-#define CALICO_PAGE_NODE_H
+#ifndef CCO_PAGE_NODE_H
+#define CCO_PAGE_NODE_H
 
 #include "cell.h"
 #include "page.h"
 
-namespace calico::page {
+namespace cco::page {
 
 class NodeHeader final {
 public:
@@ -236,4 +236,4 @@ auto split_root(Node&, Node&) -> void;
 
 } // calico::page
 
-#endif // CALICO_PAGE_NODE_H
+#endif // CCO_PAGE_NODE_H

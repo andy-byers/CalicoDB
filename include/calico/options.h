@@ -1,10 +1,10 @@
-#ifndef CALICO_OPTIONS_H
-#define CALICO_OPTIONS_H
+#ifndef CCO_OPTIONS_H
+#define CCO_OPTIONS_H
 
 #include "common.h"
 #include <spdlog/spdlog.h>
 
-namespace calico {
+namespace cco {
 
 static constexpr Size MINIMUM_FRAME_COUNT {0x8};
 static constexpr Size MAXIMUM_FRAME_COUNT {0x2000};
@@ -27,4 +27,4 @@ struct Options {
 
 } // calico
 
-#endif // CALICO_OPTIONS_H
+#endif // CCO_OPTIONS_H

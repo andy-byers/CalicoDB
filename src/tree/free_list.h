@@ -1,12 +1,12 @@
-#ifndef CALICO_TREE_FREE_LIST_H
-#define CALICO_TREE_FREE_LIST_H
+#ifndef CCO_TREE_FREE_LIST_H
+#define CCO_TREE_FREE_LIST_H
 
 #include <optional>
 #include "interface.h"
 #include "calico/error.h"
 #include "utils/identifier.h"
 
-namespace calico {
+namespace cco {
 
 class IBufferPool;
 
@@ -80,4 +80,4 @@ private:
 
 } // calico
 
-#endif // CALICO_TREE_FREE_LIST_H
+#endif // CCO_TREE_FREE_LIST_H

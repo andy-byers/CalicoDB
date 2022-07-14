@@ -1,10 +1,10 @@
-#ifndef CALICO_STORAGE_FILE_H
-#define CALICO_STORAGE_FILE_H
+#ifndef CCO_STORAGE_FILE_H
+#define CCO_STORAGE_FILE_H
 
 #include "interface.h"
 #include <filesystem>
 
-namespace calico {
+namespace cco {
 
 class File: public IFile {
 public:
@@ -37,4 +37,4 @@ auto write_all(IFileWriter&, BytesView, Index) -> Result<void>;
 
 } // calico
 
-#endif // CALICO_STORAGE_FILE_H
+#endif // CCO_STORAGE_FILE_H

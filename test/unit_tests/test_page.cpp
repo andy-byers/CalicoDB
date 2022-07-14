@@ -13,9 +13,9 @@
 
 namespace {
 
-using namespace calico;
-using namespace calico::page;
-using namespace calico::utils;
+using namespace cco;
+using namespace cco::page;
+using namespace cco::utils;
 
 class PageBacking {
 public:
@@ -94,7 +94,7 @@ public:
         param.is_external = is_external;
 
         if (local_value_size != value.size()) {
-            CALICO_EXPECT_LT(local_value_size, value.size());
+            CCO_EXPECT_LT(local_value_size, value.size());
             param.local_value.truncate(local_value_size);
             param.overflow_id = overflow_id;
         }

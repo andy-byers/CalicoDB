@@ -7,7 +7,7 @@
 #include "tree/tree.h"
 #include "utils/logging.h"
 
-namespace calico {
+namespace cco {
 
 namespace fs = std::filesystem;
 using namespace page;
@@ -22,13 +22,13 @@ auto initialize_log(spdlog::logger &logger, const std::string &base)
 
 auto Database::open(const std::string &path, Options options) -> Result<Database>
 {
-    CCO_TRY_CREATE(std::unique_ptr<IDirectory>, directory, Directory::open(path));
+    CCO_TRY_CREATE(directory, Directory::open(path));
 
     auto sink = utils::create_sink(path, options.log_level);
     auto logger = utils::create_logger(sink, "Database");
     initialize_log(*logger, path);
 
-    CCO_TRY_CREATE(InitialState, initial_state, setup(*directory, options, *logger));
+    CCO_TRY_CREATE(initial_state, setup(*directory, options, *logger));
     logger->trace("constructing Database object");
 
     Database db;
@@ -41,8 +41,8 @@ auto Database::open(const std::string &path, Options options) -> Result<Database
     auto [state, revised, is_new] = std::move(initial_state);
     auto &impl = *db.m_impl;
 
-    CCO_TRY_ASSIGN(impl.m_pool, BufferPool::open(BufferPool::Parameters {
-        *impl.m_directory,
+    CCO_TRY_STORE(impl.m_pool, BufferPool::open(BufferPool::Parameters {
+        *impl.m_home,
         sink,
         revised.frame_count,
         state.page_count(),
@@ -50,7 +50,7 @@ auto Database::open(const std::string &path, Options options) -> Result<Database
         revised.permissions,
     }));
 
-    CCO_TRY_ASSIGN(impl.m_tree, Tree::open(Tree::Parameters {
+    CCO_TRY_STORE(impl.m_tree, Tree::open(Tree::Parameters {
         impl.m_pool.get(),
         sink,
         state.free_start(),
@@ -60,7 +60,7 @@ auto Database::open(const std::string &path, Options options) -> Result<Database
     }));
 
     if (is_new) {
-        CCO_TRY_CREATE(Node, root, impl.m_tree->root(true));
+        CCO_TRY_CREATE(root, impl.m_tree->root(true));
         FileHeader header {root};
         header.update_magic_code();
         header.set_page_size(state.page_size());
@@ -86,7 +86,7 @@ auto Database::destroy(Database db) -> Result<void>
 
     if (const auto &path = db.m_impl->path(); !path.empty()) {
         if (std::error_code error; !fs::remove_all(path, error))
-            return ErrorResult {Error::system_error(error.message())};
+            return Err {Error::system_error(error.message())};
     }
     return {};
 }

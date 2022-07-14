@@ -19,7 +19,7 @@
 
 namespace {
 
-using namespace calico;
+using namespace cco;
 namespace fs = std::filesystem;
 constexpr auto BASE = "/tmp/__calico_database_tests";
 
@@ -63,7 +63,7 @@ TEST_F(DatabaseTests, DataPersists)
     }
 
     auto db = *Database::open(BASE, options);
-    CALICO_EXPECT_EQ(db.info().record_count(), records.size());
+    CCO_EXPECT_EQ(db.info().record_count(), records.size());
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(db, key);
         ASSERT_TRUE(c.is_valid());
@@ -75,7 +75,7 @@ TEST_F(DatabaseTests, DataPersists)
 TEST_F(DatabaseTests, SanityCheck)
 {
     static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size GROUP_SIZE {500};
+    static constexpr Size GROUP_SIZE {5'000};
     Options options;
     options.page_size = 0x200;
 
@@ -105,7 +105,7 @@ TEST_F(DatabaseTests, SanityCheck)
     }
 
     auto db = *Database::open(BASE, options);
-    CALICO_EXPECT_EQ(db.info().record_count(), 0);
+    CCO_EXPECT_EQ(db.info().record_count(), 0);
 }
 
 } // <anonymous>

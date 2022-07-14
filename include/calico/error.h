@@ -1,9 +1,9 @@
-#ifndef CALICO_ERROR_H
-#define CALICO_ERROR_H
+#ifndef CCO_ERROR_H
+#define CCO_ERROR_H
 
 #include "bytes.h"
 
-namespace calico {
+namespace cco {
 
 class Error final {
 public:
@@ -11,14 +11,12 @@ public:
     static auto system_error(const std::string&) -> Error;
     static auto logic_error(const std::string&) -> Error;
     static auto corruption(const std::string&) -> Error;
-    static auto not_found() -> Error;
-
+    static auto not_found(const std::string&) -> Error;
     [[nodiscard]] auto is_invalid_argument() const -> bool;
     [[nodiscard]] auto is_system_error() const -> bool;
     [[nodiscard]] auto is_logic_error() const -> bool;
     [[nodiscard]] auto is_corruption() const -> bool;
     [[nodiscard]] auto is_not_found() const -> bool;
-
     [[nodiscard]] auto what() const -> BytesView;
 
 private:
@@ -36,14 +34,10 @@ private:
     std::string m_what;
 };
 
-struct None {};
-
-/// Return type for routines that can fail.
 template<class T>
 using Result = tl::expected<T, Error>;
-
-using ErrorResult = tl::unexpected<Error>;
+using Err = tl::unexpected<Error>;
 
 } // calico
 
-#endif //CALICO_ERROR_H
+#endif //CCO_ERROR_H

@@ -1,11 +1,11 @@
-#ifndef CALICO_CURSOR_H
-#define CALICO_CURSOR_H
+#ifndef CCO_CURSOR_H
+#define CCO_CURSOR_H
 
 #include <memory>
 #include <optional>
 #include "error.h"
 
-namespace calico {
+namespace cco {
 
 class NodePool;
 class Internal;
@@ -193,4 +193,4 @@ private:
 
 } // calico
 
-#endif // CALICO_CURSOR_H
+#endif // CCO_CURSOR_H

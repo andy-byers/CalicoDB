@@ -5,11 +5,12 @@
 #include "page/file_header.h"
 #include "pool/buffer_pool.h"
 #include "pool/memory_pool.h"
+#include "pool/pager.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 #include "fakes.h"
 
-namespace calico {
+namespace cco {
 
 using namespace page;
 using namespace utils;
@@ -24,7 +25,7 @@ public:
     {
         file = bank->open_memory(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
         memory = file->shared_memory();
-        pager = std::make_unique<Pager>(Pager::Parameters{
+        pager = *Pager::open({
             file->open_reader(),
             file->open_writer(),
             utils::create_sink("", spdlog::level::off),
@@ -182,14 +183,14 @@ TEST_F(BufferPoolTests, AcquireReadableAndWritablePagesDeathTest)
 auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = PageLayout::content_offset(page.id());
-    CALICO_EXPECT_LE(offset + message.size(), page.size());
+    CCO_EXPECT_LE(offset + message.size(), page.size());
     page.write(stob(message), offset);
 }
 
 auto read_from_page(const Page &page, Size size) -> std::string
 {
     const auto offset = PageLayout::content_offset(page.id());
-    CALICO_EXPECT_LE(offset + size, page.size());
+    CCO_EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
     page.read(stob(message), offset);
     return message;

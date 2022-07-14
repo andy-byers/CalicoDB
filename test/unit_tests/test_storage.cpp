@@ -13,7 +13,7 @@
 
 namespace {
 
-using namespace calico;
+using namespace cco;
 
 constexpr auto TEST_STRING = "TEST_STRING";
 

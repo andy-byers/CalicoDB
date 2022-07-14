@@ -3,7 +3,7 @@
 #include "tree/internal.h"
 #include "tree/node_pool.h"
 
-namespace calico {
+namespace cco {
 
 using namespace page;
 using namespace utils;
@@ -17,13 +17,13 @@ Cursor::Cursor(NodePool *pool, Internal *internal):
 
 auto Cursor::id() const -> Index
 {
-    CALICO_EXPECT_TRUE(m_is_valid);
+    CCO_EXPECT_TRUE(is_valid());
     return m_position.ids[Position::CURRENT];
 }
 
 auto Cursor::index() const -> Index
 {
-    CALICO_EXPECT_TRUE(m_is_valid);
+    CCO_EXPECT_TRUE(is_valid());
     return m_position.index;
 }
 
@@ -31,8 +31,8 @@ auto Cursor::operator==(const Cursor &rhs) const -> bool
 {
     if (m_position == rhs.m_position) {
         // These cursors should come from the same database.
-        CALICO_EXPECT_EQ(m_pool, rhs.m_pool);
-        CALICO_EXPECT_EQ(m_internal, rhs.m_internal);
+        CCO_EXPECT_EQ(m_pool, rhs.m_pool);
+        CCO_EXPECT_EQ(m_internal, rhs.m_internal);
         return m_is_valid == rhs.m_is_valid;
     }
     return !(m_is_valid && rhs.m_is_valid);
@@ -43,40 +43,35 @@ auto Cursor::operator!=(const Cursor &rhs) const -> bool
     return !(*this == rhs);
 }
 
-
-// Define prefix increment operator.
 auto Cursor::operator++() -> Cursor&
 {
     increment();
     return *this;
 }
 
-// Define postfix increment operator.
 auto Cursor::operator++(int) -> Cursor
 {
-    auto temp = *this;
+    const auto temp = *this;
     ++*this;
     return temp;
 }
 
-// Define prefix decrement operator.
 auto Cursor::operator--() -> Cursor&
 {
     decrement();
     return *this;
 }
 
-// Define postfix decrement operator.
 auto Cursor::operator--(int) -> Cursor
 {
-    auto temp = *this;
+    const auto temp = *this;
     --*this;
     return temp;
 }
 
 auto Cursor::is_valid() const -> bool
 {
-    return m_is_valid && !m_error;
+    return m_is_valid && !m_error.has_value();
 }
 
 auto Cursor::error() const -> std::optional<Error>
@@ -86,7 +81,7 @@ auto Cursor::error() const -> std::optional<Error>
 
 auto Cursor::set_error(const Error &error) const -> void
 {
-    CALICO_EXPECT_EQ(m_error, std::nullopt);
+    CCO_EXPECT_EQ(m_error, std::nullopt);
     m_error = error;
 }
 
@@ -102,7 +97,7 @@ auto Cursor::is_minimum() const -> bool
 
 auto Cursor::move_to(Node node, Index index) -> void
 {
-    CALICO_EXPECT_TRUE(node.is_external());
+    CCO_EXPECT_TRUE(node.is_external());
     const auto count = node.cell_count();
     m_is_valid = count && index < count;
 
@@ -151,7 +146,7 @@ auto Cursor::decrement() -> bool
 
 auto Cursor::key() const -> BytesView
 {
-    CALICO_EXPECT_TRUE(m_is_valid);
+    CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         set_error(node.error());
@@ -162,7 +157,7 @@ auto Cursor::key() const -> BytesView
 
 auto Cursor::value() const -> std::string
 {
-    CALICO_EXPECT_TRUE(m_is_valid);
+    CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         set_error(node.error());
@@ -177,7 +172,7 @@ auto Cursor::value() const -> std::string
 
 auto Cursor::record() const -> Record
 {
-    CALICO_EXPECT_TRUE(m_is_valid);
+    CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         set_error(node.error());
@@ -193,8 +188,8 @@ auto Cursor::record() const -> Record
 
 auto Cursor::seek_left() -> bool
 {
-    CALICO_EXPECT_TRUE(m_is_valid);
-    CALICO_EXPECT_EQ(m_position.index, 0);
+    CCO_EXPECT_TRUE(is_valid());
+    CCO_EXPECT_EQ(m_position.index, 0);
     if (is_minimum()) {
         invalidate();
     } else {
@@ -212,8 +207,8 @@ auto Cursor::seek_left() -> bool
 
 auto Cursor::seek_right() -> bool
 {
-    CALICO_EXPECT_TRUE(m_is_valid);
-    CALICO_EXPECT_EQ(m_position.index, m_position.cell_count - 1);
+    CCO_EXPECT_TRUE(is_valid());
+    CCO_EXPECT_EQ(m_position.index, m_position.cell_count - 1);
     if (is_maximum()) {
         invalidate();
     } else {
@@ -231,9 +226,9 @@ auto Cursor::seek_right() -> bool
 auto Cursor::Position::operator==(const Position &rhs) const -> bool
 {
     if (ids[CURRENT] == rhs.ids[CURRENT]) {
-        CALICO_EXPECT_EQ(ids[LEFT], rhs.ids[LEFT]);
-        CALICO_EXPECT_EQ(ids[RIGHT], rhs.ids[RIGHT]);
-        CALICO_EXPECT_EQ(cell_count, rhs.cell_count);
+        CCO_EXPECT_EQ(ids[LEFT], rhs.ids[LEFT]);
+        CCO_EXPECT_EQ(ids[RIGHT], rhs.ids[RIGHT]);
+        CCO_EXPECT_EQ(cell_count, rhs.cell_count);
         return index == rhs.index;
     }
     return false;
@@ -241,13 +236,13 @@ auto Cursor::Position::operator==(const Position &rhs) const -> bool
 
 auto Cursor::Position::is_maximum() const -> bool
 {
-    CALICO_EXPECT_NE(ids[CURRENT], 0);
+    CCO_EXPECT_NE(ids[CURRENT], 0);
     return PID {ids[RIGHT]}.is_null() && index + 1 == cell_count;
 }
 
 auto Cursor::Position::is_minimum() const -> bool
 {
-    CALICO_EXPECT_NE(ids[CURRENT], 0);
+    CCO_EXPECT_NE(ids[CURRENT], 0);
     return cell_count && PID {ids[LEFT]}.is_null() && index == 0;
 }
 

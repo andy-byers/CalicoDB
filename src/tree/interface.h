@@ -1,11 +1,11 @@
-#ifndef CALICO_TREE_INTERFACE_H
-#define CALICO_TREE_INTERFACE_H
+#ifndef CCO_TREE_INTERFACE_H
+#define CCO_TREE_INTERFACE_H
 
 #include <optional>
 #include "calico/cursor.h"
 #include "calico/error.h"
 
-namespace calico {
+namespace cco {
 
 class Internal;
 class NodePool;
@@ -40,4 +40,4 @@ public:
 
 } // calico
 
-#endif // CALICO_TREE_INTERFACE_H
+#endif // CCO_TREE_INTERFACE_H

@@ -3,7 +3,7 @@
 #include "utils/logging.h"
 #include "utils/utils.h"
 
-namespace calico {
+namespace cco {
 
 static auto maybe_emit_read_error(Random &random, FaultControls::Controls &controls) -> Result<void>
 {
@@ -12,7 +12,7 @@ static auto maybe_emit_read_error(Random &random, FaultControls::Controls &contr
     // is never set, it stays at -1 and doesn't contribute to the faults generated.
     auto &counter = controls.read_fault_counter;
     if (!counter || random.next_int(99U) < controls.read_fault_rate)
-        return ErrorResult {Error::system_error(std::make_error_code(std::errc::io_error).message())};
+        return Err {Error::system_error(std::make_error_code(std::errc::io_error).message())};
     // Counter should settle on -1.
     counter -= counter >= 0;
     return {};
@@ -22,7 +22,7 @@ static auto maybe_emit_write_error(Random &random, FaultControls::Controls &cont
 {
     auto &counter = controls.write_fault_counter;
     if (!counter || random.next_int(99U) < controls.write_fault_rate)
-        return ErrorResult {Error::system_error(std::make_error_code(std::errc::io_error).message())};
+        return Err {Error::system_error(std::make_error_code(std::errc::io_error).message())};
     counter -= counter >= 0;
     return {};
 }
@@ -63,22 +63,22 @@ auto Memory::open_writer() -> std::unique_ptr<IFileWriter>
 
 static auto do_seek(Index cursor, Size file_size, long offset, Seek whence)
 {
-    CALICO_EXPECT_BOUNDED_BY(long, cursor);
+    CCO_EXPECT_BOUNDED_BY(long, cursor);
     const auto position = static_cast<long>(cursor);
 
     if (whence == Seek::BEGIN) {
-        CALICO_EXPECT_GE(offset, 0);
+        CCO_EXPECT_GE(offset, 0);
         cursor = static_cast<Size>(offset);
     } else if (whence == Seek::CURRENT) {
-        CALICO_EXPECT_GE(position + offset, 0);
+        CCO_EXPECT_GE(position + offset, 0);
         cursor = static_cast<Size>(position + offset);
     } else {
         const auto end = static_cast<long>(file_size);
-        CALICO_EXPECT_EQ(whence, Seek::END);
-        CALICO_EXPECT_GE(end + offset, 0);
+        CCO_EXPECT_EQ(whence, Seek::END);
+        CCO_EXPECT_GE(end + offset, 0);
         cursor = static_cast<Size>(end + offset);
     }
-    CALICO_EXPECT_GE(static_cast<off_t>(cursor), 0);
+    CCO_EXPECT_GE(static_cast<off_t>(cursor), 0);
     return cursor;
 }
 
@@ -151,7 +151,7 @@ auto MemoryBank::open_file(const std::string &name, Mode mode, int permissions) 
     if (auto opened = memory->open(name, mode, permissions)) {
         return memory;
     } else {
-        return ErrorResult {opened.error()};
+        return Err {opened.error()};
     }
 }
 
@@ -175,7 +175,7 @@ auto MemoryReader::seek(long offset, Seek whence) -> Result<Index>
 auto MemoryReader::read(Bytes out) -> Result<Size>
 {
     if (const auto result = maybe_emit_read_error(m_memory->random(), m_memory->faults().controls()); !result)
-        return ErrorResult {result.error()};
+        return Err {result.error()};
 
     const auto [cursor, read_size] = do_read(m_memory->memory(), m_memory->cursor(), out);
     m_memory->cursor() = cursor;
@@ -200,7 +200,7 @@ auto MemoryWriter::seek(long offset, Seek whence) -> Result<Index>
 auto MemoryWriter::write(BytesView in) -> Result<Size>
 {
     if (const auto result = maybe_emit_write_error(m_memory->random(), m_memory->faults().controls()); !result)
-        return ErrorResult {result.error()};
+        return Err {result.error()};
 
     const auto [cursor, write_size] = do_write(m_memory->memory(), m_memory->cursor(), in);
     m_memory->cursor() = cursor;

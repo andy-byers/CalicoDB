@@ -5,7 +5,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace calico::page {
+namespace cco::page {
 
 using namespace utils;
 
@@ -19,11 +19,11 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
         in.advance(PAGE_ID_SIZE);
     }
     const auto key_size = utils::get_u16(in);
-    in.advance(sizeof(uint16_t));
+    in.advance(sizeof(std::uint16_t));
 
     if (is_external) {
         cell.m_value_size = utils::get_u32(in);
-        in.advance(sizeof(uint32_t));
+        in.advance(sizeof(std::uint32_t));
     }
 
     cell.m_key = in;
@@ -60,7 +60,7 @@ Cell::Cell(const Parameters &param)
 auto Cell::size() const -> Size
 {
     const auto is_internal = !m_is_external;
-    const auto size_fields {sizeof(uint16_t) + sizeof(uint32_t)*m_is_external};
+    const auto size_fields {sizeof(std::uint16_t) + sizeof(std::uint32_t)*m_is_external};
     const auto has_overflow_id = !m_overflow_id.is_null();
     return PAGE_ID_SIZE * static_cast<Size>(is_internal + has_overflow_id) +
            size_fields + m_key.size() + m_local_value.size();
@@ -68,19 +68,19 @@ auto Cell::size() const -> Size
 
 auto Cell::left_child_id() const -> PID
 {
-    CALICO_EXPECT_FALSE(m_is_external);
+    CCO_EXPECT_FALSE(m_is_external);
     return m_left_child_id;
 }
 
 auto Cell::set_left_child_id(PID left_child_id) -> void
 {
-    CALICO_EXPECT_FALSE(m_is_external);
+    CCO_EXPECT_FALSE(m_is_external);
     m_left_child_id = left_child_id;
 }
 
 auto Cell::set_overflow_id(PID id) -> void
 {
-    CALICO_EXPECT_TRUE(m_is_external);
+    CCO_EXPECT_TRUE(m_is_external);
     m_overflow_id = id;
 }
 
@@ -91,7 +91,7 @@ auto Cell::key() const -> BytesView
 
 auto Cell::local_value() const -> BytesView
 {
-//    CALICO_EXPECT_TRUE(m_is_external);
+//    CCO_EXPECT_TRUE(m_is_external);
     return m_local_value;
 }
 
@@ -107,23 +107,23 @@ auto Cell::overflow_size() const -> Size
 
 auto Cell::overflow_id() const -> PID
 {
-//    CALICO_EXPECT_TRUE(m_is_external);
+//    CCO_EXPECT_TRUE(m_is_external);
     return m_overflow_id;
 }
 
 auto Cell::write(Bytes out) const -> void
 {
     if (!m_is_external) {
-        CALICO_EXPECT_FALSE(m_left_child_id.is_root());
+        CCO_EXPECT_FALSE(m_left_child_id.is_root());
         utils::put_u32(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);
     }
-    utils::put_u16(out, static_cast<uint16_t>(m_key.size()));
-    out.advance(sizeof(uint16_t));
+    utils::put_u16(out, static_cast<std::uint16_t>(m_key.size()));
+    out.advance(sizeof(std::uint16_t));
 
     if (m_is_external) {
-        utils::put_u32(out, static_cast<uint32_t>(m_value_size));
-        out.advance(sizeof(uint32_t));
+        utils::put_u32(out, static_cast<std::uint32_t>(m_value_size));
+        out.advance(sizeof(std::uint32_t));
     }
 
     mem_copy(out, m_key, m_key.size());
@@ -134,8 +134,8 @@ auto Cell::write(Bytes out) const -> void
         mem_copy(out, local, local.size());
 
         if (!m_overflow_id.is_null()) {
-            CALICO_EXPECT_FALSE(m_left_child_id.is_root());
-            CALICO_EXPECT_LT(local.size(), m_value_size);
+            CCO_EXPECT_FALSE(m_left_child_id.is_root());
+            CCO_EXPECT_LT(local.size(), m_value_size);
             out.advance(local.size());
             utils::put_u32(out, m_overflow_id.value);
         }
@@ -164,7 +164,7 @@ auto Cell::set_is_external(bool is_external) -> void
 
 auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
 {
-    CALICO_EXPECT_FALSE(key.is_empty());
+    CCO_EXPECT_FALSE(key.is_empty());
     const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
     Cell::Parameters param;
     param.key = key;
@@ -174,7 +174,7 @@ auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
     param.is_external = true;
 
     if (local_value_size != value.size()) {
-        CALICO_EXPECT_LT(local_value_size, value.size());
+        CCO_EXPECT_LT(local_value_size, value.size());
         param.local_value.truncate(local_value_size);
         // Set to an arbitrary value.
         param.overflow_id = PID::root();
@@ -184,7 +184,7 @@ auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
 
 auto make_internal_cell(BytesView key, Size page_size) -> Cell
 {
-    CALICO_EXPECT_FALSE(key.is_empty());
+    CCO_EXPECT_FALSE(key.is_empty());
     Cell::Parameters param;
     param.key = key;
     param.page_size = page_size;

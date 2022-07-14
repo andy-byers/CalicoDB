@@ -1,9 +1,9 @@
-#ifndef CALICO_STORAGE_IO_H
-#define CALICO_STORAGE_IO_H
+#ifndef CCO_STORAGE_IO_H
+#define CCO_STORAGE_IO_H
 
 #include "interface.h"
 
-namespace calico {
+namespace cco {
 
 class File;
 
@@ -43,4 +43,4 @@ private:
 
 } // calico
 
-#endif // CALICO_STORAGE_IO_H
+#endif // CCO_STORAGE_IO_H

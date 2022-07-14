@@ -1,11 +1,11 @@
-#ifndef CALICO_STORAGE_DIRECTORY_H
-#define CALICO_STORAGE_DIRECTORY_H
+#ifndef CCO_STORAGE_DIRECTORY_H
+#define CCO_STORAGE_DIRECTORY_H
 
 #include "calico/error.h"
 #include "interface.h"
 #include <filesystem>
 
-namespace calico {
+namespace cco {
 
 class IFile;
 
@@ -15,6 +15,7 @@ public:
     [[nodiscard]] static auto open(const std::string&) -> Result<std::unique_ptr<IDirectory>>;
     [[nodiscard]] auto path() const -> std::string override;
     [[nodiscard]] auto name() const -> std::string override;
+    [[nodiscard]] auto exists(const std::string&) const -> Result<bool> override;
     [[nodiscard]] auto children() const -> Result<std::vector<std::string>> override;
     [[nodiscard]] auto open_directory(const std::string&) -> Result<std::unique_ptr<IDirectory>> override;
     [[nodiscard]] auto open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> override;
@@ -30,4 +31,4 @@ private:
 
 } // calico
 
-#endif // CALICO_STORAGE_DIRECTORY_H
+#endif // CCO_STORAGE_DIRECTORY_H

@@ -13,12 +13,12 @@
 
 namespace {
 
-using namespace calico;
-using namespace calico::utils;
+using namespace cco;
+using namespace cco::utils;
 
 TEST(AssertionDeathTest, Assert)
 {
-    ASSERT_DEATH(CALICO_EXPECT(false), EXPECTATION_MATCHER);
+    ASSERT_DEATH(CCO_EXPECT(false), EXPECTATION_MATCHER);
 }
 
 TEST(TestEncoding, ReadsAndWrites)
@@ -27,7 +27,7 @@ TEST(TestEncoding, ReadsAndWrites)
     const auto u16 = random.next_int(std::numeric_limits<uint16_t>::max());
     const auto u32 = random.next_int(std::numeric_limits<uint32_t>::max());
     const auto u64 = random.next_int(std::numeric_limits<uint64_t>::max());
-    std::vector<calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
+    std::vector<cco::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
 
     auto dst = buffer.data();
     put_u16(dst, u16);
@@ -214,34 +214,34 @@ template<class Id> auto run_comparisons()
     Id b {2};
 
     ASSERT_EQ(a, a);
-    CALICO_EXPECT_EQ(a, a);
-    CALICO_EXPECT_TRUE(a == a);
+    CCO_EXPECT_EQ(a, a);
+    CCO_EXPECT_TRUE(a == a);
 
     ASSERT_NE(a, b);
-    CALICO_EXPECT_NE(a, b);
-    CALICO_EXPECT_TRUE(a != b);
+    CCO_EXPECT_NE(a, b);
+    CCO_EXPECT_TRUE(a != b);
 
     ASSERT_LT(a, b);
-    CALICO_EXPECT_LT(a, b);
-    CALICO_EXPECT_TRUE(a < b);
+    CCO_EXPECT_LT(a, b);
+    CCO_EXPECT_TRUE(a < b);
 
     ASSERT_LE(a, a);
     ASSERT_LE(a, b);
-    CALICO_EXPECT_LE(a, a);
-    CALICO_EXPECT_LE(a, b);
-    CALICO_EXPECT_TRUE(a <= a);
-    CALICO_EXPECT_TRUE(a <= b);
+    CCO_EXPECT_LE(a, a);
+    CCO_EXPECT_LE(a, b);
+    CCO_EXPECT_TRUE(a <= a);
+    CCO_EXPECT_TRUE(a <= b);
 
     ASSERT_GT(b, a);
-    CALICO_EXPECT_GT(b, a);
-    CALICO_EXPECT_TRUE(b > a);
+    CCO_EXPECT_GT(b, a);
+    CCO_EXPECT_TRUE(b > a);
 
     ASSERT_GE(a, a);
     ASSERT_GE(b, a);
-    CALICO_EXPECT_GE(a, a);
-    CALICO_EXPECT_GE(b, a);
-    CALICO_EXPECT_TRUE(a >= a);
-    CALICO_EXPECT_TRUE(b >= a);
+    CCO_EXPECT_GE(a, a);
+    CCO_EXPECT_GE(b, a);
+    CCO_EXPECT_TRUE(a >= a);
+    CCO_EXPECT_TRUE(b >= a);
 }
 
 TEST(IdentifierTest, PIDsAreComparable)

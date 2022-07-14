@@ -1,12 +1,12 @@
 
-#ifndef CALICO_TREE_TREE_H
-#define CALICO_TREE_TREE_H
+#ifndef CCO_TREE_TREE_H
+#define CCO_TREE_TREE_H
 
 #include <spdlog/spdlog.h>
 #include "interface.h"
 #include "internal.h"
 
-namespace calico {
+namespace cco {
 
 class Cursor;
 class IBufferPool;
@@ -76,4 +76,4 @@ private:
 
 } // calico
 
-#endif // CALICO_TREE_TREE_H
+#endif // CCO_TREE_TREE_H

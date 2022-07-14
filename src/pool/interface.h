@@ -1,11 +1,11 @@
-#ifndef CALICO_POOL_INTERFACE_H
-#define CALICO_POOL_INTERFACE_H
+#ifndef CCO_POOL_INTERFACE_H
+#define CCO_POOL_INTERFACE_H
 
 #include "calico/bytes.h"
 #include "calico/error.h"
 #include "utils/utils.h"
 
-namespace calico {
+namespace cco {
 
 constexpr auto DATA_NAME = "data";
 
@@ -37,4 +37,4 @@ public:
 
 } // calico
 
-#endif // CALICO_POOL_INTERFACE_H
+#endif // CCO_POOL_INTERFACE_H

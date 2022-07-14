@@ -73,40 +73,44 @@ to build the library and tests.
 Note that the tests must be built with assertions, hence the "RelWithAssertions".
 To build the library in release mode, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCCO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
 While not yet part of CI, some basic fuzzers (using libFuzzer) are also included.
 See the `Dockerfile` for details on how to build them.
 
 ## API
-**NOTE**: The following examples make use of the alias `namespace cco = calico;`.
 
-### Exceptions
-Calico DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
+### Errors
+Calico DB uses `@TartanLlama/expected` in conjunction with a custom error object for reporting invalid states.
+API calls that can fail will generally return a `cco::Result<T>`, which is an alias for `tl::expected<T, cco::Error>`.
+If the call succeeds, the result object will contain an instance of the expected `T`.
+Otherwise, it will contain an error object, which holds the error type and an explanation of what went wrong.
 
 ### Opening a Database
 The entry point to an application using Calico DB might look something like:
 
 ```C++
-try {
-    cco::Options options;
-    auto store = cco::Database::open("/tmp/calico", options);
-    // Run the application!
-} catch (const CorruptionError &error) {
-    // This is thrown if corruption is detected in a file.
-} catch (const std::invalid_argument &error) {
-    // This is thrown if invalid arguments were passed to a Calico DB function.
-} catch (const std::system_error &error) {
-    // This propagates up from failed system calls.
-} catch (const std::exception &error) {
-    // This will catch any exception thrown by Calico DB.
-}
+// Set some initialization options. We'll create a database with pages of size 8 KB and a 
+// cache of size 2 MB at "/tmp/example". We also set the instance's log level here.
+cco::Options options;
+options.page_size = 1 << 13;
+options.frame_count = 256;
+options.log_level = spdlog::level::info;
+
+return *cco::Database::open("/tmp/example", options)
+    .or_else([](const cco::Error &error) -> cco::Result<cco::Database> {
+        fmt::print("(1/2) cannot open database\n");
+        fmt::print("(2/2) {}\n", cco::btos(error.what()));
+        return cco::Err {error};
+    });
 ```
 
 ### Closing a Database
-Calico DB uses RAII, so databases are closed by letting them go out of scope.
-At that point, the database object will automatically commit the most recent transaction.
+
+```C++
+cco::Database::close(std::move(db));
+```
 
 ### Bytes Objects
 Calico DB uses `Bytes` and `BytesView` objects to represent unowned byte sequences, a.k.a. slices.
@@ -149,25 +153,25 @@ Records and be added or removed using methods on the `Database` object.
 
 ```C++
 // Insert some records. If a record is already in the database, insert() will return false.
-assert(db.insert("bengal", "short;spotted,marbled,rosetted"));
-assert(db.insert("turkish vankedisi", "long;white"));
-assert(db.insert("moose", "???"));
-assert(db.insert("abyssinian", "short;ticked tabby"));
-assert(db.insert("russian blue", "short;blue"));
-assert(db.insert("american shorthair", "short;all"));
-assert(db.insert("badger", "???"));
-assert(db.insert("manx", "short,long;all"));
-assert(db.insert("chantilly-tiffany", "long;solid,tabby"));
-assert(db.insert("cyprus", "..."));
+assert(*db.insert("bengal", "short;spotted,marbled,rosetted"));
+assert(*db.insert("turkish vankedisi", "long;white"));
+assert(*db.insert("moose", "???"));
+assert(*db.insert("abyssinian", "short;ticked tabby"));
+assert(*db.insert("russian blue", "short;blue"));
+assert(*db.insert("american shorthair", "short;all"));
+assert(*db.insert("badger", "???"));
+assert(*db.insert("manx", "short,long;all"));
+assert(*db.insert("chantilly-tiffany", "long;solid,tabby"));
+assert(*db.insert("cyprus", "..."));
 
 // Modify a record.
-assert(not db.insert("cyprus", "all;all"));
+assert(not *db.insert("cyprus", "all;all"));
 
 // Erase a record by key.
-assert(db.erase("badger"));
+assert(*db.erase("badger"));
 
 // Erase a record using a cursor (see "Querying a Database" below).
-assert(db.erase(db.find_exact("moose")));
+assert(*db.erase(db.find_exact("moose")));
 ```
 
 ### Querying a Database

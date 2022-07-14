@@ -1,13 +1,13 @@
 
-#ifndef CALICO_TREE_NODE_POOL_H
-#define CALICO_TREE_NODE_POOL_H
+#ifndef CCO_TREE_NODE_POOL_H
+#define CCO_TREE_NODE_POOL_H
 
 #include <spdlog/spdlog.h>
 #include "free_list.h"
 #include "interface.h"
 #include "utils/scratch.h"
 
-namespace calico {
+namespace cco {
 
 class IBufferPool;
 
@@ -47,4 +47,4 @@ private:
 
 } // calico
 
-#endif // CALICO_TREE_NODE_POOL_H
+#endif // CCO_TREE_NODE_POOL_H

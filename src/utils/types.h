@@ -3,12 +3,12 @@
  * (1) https://en.cppreference.com/w/cpp/utility/exchange
  */
 
-#ifndef CALICO_UTILS_TYPES_H
-#define CALICO_UTILS_TYPES_H
+#ifndef CCO_UTILS_TYPES_H
+#define CCO_UTILS_TYPES_H
 
 #include "calico/options.h"
 
-namespace calico::utils {
+namespace cco::utils {
 
 template<class Value> struct Unique {
 
@@ -142,4 +142,4 @@ private:
 
 } // calico::utils
 
-#endif // CALICO_UTILS_TYPES_H
+#endif // CCO_UTILS_TYPES_H

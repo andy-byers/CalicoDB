@@ -1,5 +1,5 @@
-#ifndef CALICO_TREE_INTERNAL_H
-#define CALICO_TREE_INTERNAL_H
+#ifndef CCO_TREE_INTERNAL_H
+#define CCO_TREE_INTERNAL_H
 
 #include <spdlog/spdlog.h>
 #include "node_pool.h"
@@ -7,7 +7,7 @@
 #include "page/node.h"
 #include "utils/scratch.h"
 
-namespace calico {
+namespace cco {
 
 class Internal final {
 public:
@@ -75,4 +75,4 @@ private:
 
 } // calico
 
-#endif // CALICO_TREE_INTERNAL_H
+#endif // CCO_TREE_INTERNAL_H

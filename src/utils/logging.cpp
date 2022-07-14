@@ -4,13 +4,13 @@
 #include <spdlog/sinks/null_sink.h>
 #include "expect.h"
 
-namespace calico::utils {
+namespace cco::utils {
 
 namespace fs = std::filesystem;
 
 auto create_logger(spdlog::sink_ptr sink, const std::string &name) -> std::shared_ptr<spdlog::logger>
 {
-    CALICO_EXPECT_FALSE(name.empty());
+    CCO_EXPECT_FALSE(name.empty());
     return std::make_shared<spdlog::logger>(name, std::move(sink));
 }
 

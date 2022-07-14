@@ -7,7 +7,7 @@
 
 namespace {
 
-using namespace calico;
+using namespace cco;
 
 TEST(CacheTests, NewCacheIsEmpty)
 {

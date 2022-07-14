@@ -4,7 +4,7 @@
 #include "utils/logging.h"
 #include <unordered_set>
 
-namespace calico {
+namespace cco {
 
 unsigned RecordGenerator::default_seed = 0;
 

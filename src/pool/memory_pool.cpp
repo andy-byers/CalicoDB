@@ -4,15 +4,18 @@
 #include "page/page.h"
 #include "utils/logging.h"
 
-namespace calico {
+namespace cco {
 
 using namespace page;
 using namespace utils;
 
 MemoryPool::MemoryPool(Size page_size, bool /* use_transactions */, spdlog::sink_ptr log_sink):
       m_scratch {page_size},
-      m_logger {utils::create_logger(std::move(log_sink), "BufferPool")},
-      m_page_size {page_size} {}
+      m_logger {utils::create_logger(std::move(log_sink), "MemoryPool")},
+      m_page_size {page_size}
+{
+    m_logger->trace("opening");
+}
 
 auto MemoryPool::page_count() const -> Size
 {
@@ -35,6 +38,7 @@ auto MemoryPool::load_header(const page::FileHeader &header) -> void
 
 auto MemoryPool::close() -> Result<void>
 {
+    m_logger->trace("closing");
     return {};
 }
 
@@ -50,7 +54,7 @@ auto MemoryPool::acquire(PID id, bool is_writable) -> Result<Page>
 
 auto MemoryPool::acquire_aux(PID id, bool is_writable) -> Page
 {
-    CALICO_EXPECT_FALSE(id.is_null());
+    CCO_EXPECT_FALSE(id.is_null());
     while (page_count() <= id.as_index()) {
         m_frames.emplace_back(m_page_size);
         m_frames.back().reset(PID::from_index(m_frames.size() - 1));
@@ -74,12 +78,13 @@ auto MemoryPool::on_release(page::Page &page) -> void
 auto MemoryPool::do_release(page::Page &page) -> void
 {
     const auto index = page.id().as_index();
-    CALICO_EXPECT_LT(index, m_frames.size());
+    CCO_EXPECT_LT(index, m_frames.size());
     m_frames[index].synchronize(page);
 }
 
 auto MemoryPool::purge() -> Result<void>
 {
+    m_logger->trace("purging cache");
     for (auto &frame: m_frames) {
         if (frame.ref_count())
             frame.purge();

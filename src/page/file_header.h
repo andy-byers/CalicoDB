@@ -1,10 +1,10 @@
-#ifndef CALICO_PAGE_FILE_HEADER_H
-#define CALICO_PAGE_FILE_HEADER_H
+#ifndef CCO_PAGE_FILE_HEADER_H
+#define CCO_PAGE_FILE_HEADER_H
 
 #include "calico/bytes.h"
 #include "utils/identifier.h"
 
-namespace calico::page {
+namespace cco::page {
 
 class Node;
 
@@ -49,4 +49,4 @@ private:
 
 } // calico::page
 
-#endif // CALICO_PAGE_FILE_HEADER_H
+#endif // CCO_PAGE_FILE_HEADER_H

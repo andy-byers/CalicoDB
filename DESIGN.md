@@ -20,6 +20,18 @@
 + **page pointer**: Synonym for **page ID**.
 + **value**: A sequence of bytes associated with a unique **key** to form a database record.
 
+## Error Handling
+**Note**: `std::make_unique<T>()` is used to allocate some database components that use runtime polymorphism (for test doubles).
+In these places, OOM exceptions are allowed to escape and, if uncaught by the user, terminate the program.
+My thought is that if we do not have enough memory to allocate a relatively small object, we probably don't have enough memory to do anything useful, so it's okay to do nothing.
+
+TODO: Use something like `std::unique_ptr<T> {new(std::nothrow) T}` and try to log the OOM error (there isn't a nothrow overload of `std::make_unique<T>()`).
+For example, to allocate a new `Directory` we could use something like:
+
+```C++
+auto directory = std::unique_ptr<IDirectory> {new(std::nothrow) Directory {"/home/calico/cats"}};
+```
+
 ## B<sup>+</sup>-Tree
 Calico DB uses a B<sup>+</sup>-tree to maintain an ordered collection of records.
 The tree is contained in the `data` file and is made up of two types of nodes: internal and external.

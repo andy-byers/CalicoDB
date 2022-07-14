@@ -6,14 +6,13 @@
 #include "page/file_header.h"
 #include "pool/buffer_pool.h"
 #include "pool/memory_pool.h"
-#include "storage/directory.h"
 #include "storage/file.h"
 #include "storage/io.h"
 #include "tree/tree.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 
-namespace calico {
+namespace cco {
 
 namespace fs = std::filesystem;
 using namespace page;
@@ -52,7 +51,7 @@ auto Info::is_temp() const -> bool
 Database::Impl::~Impl()
 {
     if (const auto committed = commit(); !committed.has_value()) {
-        utils::NumberedGroup group;
+        NumberedGroup group;
         group.push_line("database failed to commit in destructor");
         group.push_line("{}", btos(committed.error().what()));
         group.log(*m_logger, spdlog::level::err);
@@ -61,19 +60,19 @@ Database::Impl::~Impl()
 
 Database::Impl::Impl(Parameters param):
       m_sink {std::move(param.sink)},
-      m_logger {utils::create_logger(m_sink, "Database")},
-      m_directory {std::move(param.directory)} {}
+      m_logger {create_logger(m_sink, "Database")},
+      m_home {std::move(param.home)} {}
 
 Database::Impl::Impl(Parameters param, InMemoryTag)
-    : m_sink {utils::create_sink("", spdlog::level::off)},
-      m_logger {utils::create_logger(m_sink, "Database")},
+    : m_sink {create_sink("", spdlog::level::off)},
+      m_logger {create_logger(m_sink, "Database")},
       m_pool {std::make_unique<MemoryPool>(param.options.page_size, false, m_sink)},
       m_tree {*Tree::open(Tree::Parameters {m_pool.get(), m_sink, PID::null(), 0, 0, 0})},
       m_is_temp {true} {}
 
 auto Database::Impl::path() const -> std::string
 {
-    return m_directory->path();
+    return m_home->path();
 }
 
 auto Database::Impl::info() -> Info
@@ -83,25 +82,13 @@ auto Database::Impl::info() -> Info
     return info;
 }
 
-inline auto check_key(BytesView key, spdlog::logger &logger)
-{
-    if (key.is_empty()) {
-        utils::ErrorMessage group;
-        group.set_primary("cannot read record");
-        group.set_detail("key cannot be empty");
-        throw std::invalid_argument {group.error(logger)};
-    }
-}
-
 auto Database::Impl::find_exact(BytesView key) -> Cursor
 {
-    check_key(key, *m_logger);
     return m_tree->find_exact(key);
 }
 
 auto Database::Impl::find(BytesView key) -> Cursor
 {
-    check_key(key, *m_logger);
     return m_tree->find(key);
 }
 
@@ -138,7 +125,7 @@ auto Database::Impl::commit() -> Result<void>
 
 auto Database::Impl::save_header() -> Result<void>
 {
-    CCO_TRY_CREATE(Node, root, m_tree->root(true));
+    CCO_TRY_CREATE(root, m_tree->root(true));
     FileHeader header {root};
     m_pool->save_header(header);
     m_tree->save_header(header);
@@ -148,7 +135,7 @@ auto Database::Impl::save_header() -> Result<void>
 
 auto Database::Impl::load_header() -> Result<void>
 {
-    CCO_TRY_CREATE(Node, root, m_tree->root(true));
+    CCO_TRY_CREATE(root, m_tree->root(true));
     FileHeader header {root};
     m_pool->load_header(header);
     m_tree->load_header(header);
@@ -183,49 +170,49 @@ auto Database::Impl::is_temp() const -> bool
 auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger) -> Result<InitialState>
 {
     static constexpr auto ERROR_PRIMARY = "cannot open database";
-    utils::ErrorMessage group;
-    group.set_primary(ERROR_PRIMARY);
+    LogMessage message {logger};
+    message.set_primary(ERROR_PRIMARY);
 
     const auto perm = options.permissions;
     auto revised = options;
     FileHeader header;
     bool is_new {};
 
-    if (auto temp = directory.open_file(DATA_NAME, Mode::READ_ONLY, perm)) {
-        auto file = std::move(*temp);
+    CCO_TRY_CREATE(exists, directory.exists(DATA_NAME));
+
+    if (exists) {
+        CCO_TRY_CREATE(file, directory.open_file(DATA_NAME, Mode::READ_ONLY, perm));
         auto reader = file->open_reader();
-        CCO_TRY_CREATE(Size, file_size, file->size());
+        CCO_TRY_CREATE(file_size, file->size());
 
         if (file_size < FileLayout::HEADER_SIZE) {
-            group.set_detail("database is too small to read the file header");
-            group.set_hint("file header is {} B", FileLayout::HEADER_SIZE);
-            return ErrorResult {group.corruption(logger)};
+            message.set_detail("database is too small to read the file header");
+            message.set_hint("file header is {} B", FileLayout::HEADER_SIZE);
+            return Err {message.corruption()};
         }
         if (!read_exact(*reader, header.data())) {
-            group.set_detail("cannot read file header");
-            return ErrorResult {group.corruption(logger)};
+            message.set_detail("cannot read file header");
+            return Err {message.corruption()};
         }
-        // TODO: Check page size before modulus to avoid potential FPE.
-        if (file_size % header.page_size()) {
-            group.set_detail("database has an invalid size");
-            group.set_hint("database must contain an integral number of pages");
-            return ErrorResult {group.corruption(logger)};
+        // NOTE: This check is omitted if the page size is 0 to avoid getting a floating-point exception. If this is
+        //       the case, we'll find out below when we make sure the page size is valid.
+        if (header.page_size() && file_size % header.page_size()) {
+            message.set_detail("database has an invalid size");
+            message.set_hint("database must contain an integral number of pages");
+            return Err {message.corruption()};
         }
         if (!header.is_magic_code_consistent()) {
-            group.set_detail("path does not point to a Calico DB database");
-            group.set_hint("magic code is {}, but should be {}", header.magic_code(), FileHeader::MAGIC_CODE);
-            return ErrorResult {group.invalid_argument(logger)};
+            message.set_detail("path does not point to a Calico DB database");
+            message.set_hint("magic code is {}, but should be {}", header.magic_code(), FileHeader::MAGIC_CODE);
+            return Err {message.invalid_argument()};
         }
         if (!header.is_header_crc_consistent()) {
-            group.set_detail("header has an inconsistent CRC");
-            group.set_hint("CRC is {}", header.header_crc());
-            return ErrorResult {group.corruption(logger)};
+            message.set_detail("header has an inconsistent CRC");
+            message.set_hint("CRC is {}", header.header_crc());
+            return Err {message.corruption()};
         }
 
     } else {
-        if (!temp.error().is_system_error())
-            return ErrorResult {temp.error()};
-
         header.update_magic_code();
         header.set_page_size(options.page_size);
         header.update_header_crc();
@@ -234,67 +221,60 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
         // Try to create the file. If it doesn't work this time, we've got a problem.
         std::unique_ptr<IFile> file;
         const auto mode = Mode::READ_WRITE | Mode::CREATE;
-        CCO_TRY_ASSIGN(file, directory.open_file(DATA_NAME, mode, perm));
+        CCO_TRY_STORE(file, directory.open_file(DATA_NAME, mode, perm));
     }
 
-    const auto choose_error = [is_new, &logger](utils::ErrorMessage group) {
-        return ErrorResult {is_new
-            ? group.invalid_argument(logger)
-            : group.corruption(logger)
-        };
+    const auto choose_error = [is_new, &message] {
+        return Err {is_new ? message.invalid_argument() : message.corruption()};
     };
 
     if (header.page_size() < MINIMUM_PAGE_SIZE) {
-        group.set_detail("page size is too small");
-        group.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
-        return choose_error(group);
+        message.set_detail("page size {} is too small", header.page_size());
+        message.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
+        return choose_error();
     }
     if (header.page_size() > MAXIMUM_PAGE_SIZE) {
-        group.set_detail("page size is too large");
-        group.set_hint("must be less than or equal to {}", MAXIMUM_PAGE_SIZE);
-        return choose_error(group);
+        message.set_detail("page size {} is too large", header.page_size());
+        message.set_hint("must be less than or equal to {}", MAXIMUM_PAGE_SIZE);
+        return choose_error();
     }
     if (!is_power_of_two(header.page_size())) {
-        group.set_detail("page size is invalid");
-        group.set_hint("must be a power of 2");
-        return choose_error(group);
+        message.set_detail("page size {} is invalid", header.page_size());
+        message.set_hint("must be a power of 2");
+        return choose_error();
     }
 
-    return InitialState {
-        std::move(header),
-        revised,
-        is_new,
-    };
+    return InitialState {std::move(header), revised, is_new};
 }
 
 } // calico
 
-auto operator<(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator<(const cco::Record &lhs, const cco::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) < calico::stob(rhs.key);
+    return cco::stob(lhs.key) < cco::stob(rhs.key);
 }
 
-auto operator>(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator>(const cco::Record &lhs, const cco::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) > calico::stob(rhs.key);
+    return cco::stob(lhs.key) > cco::stob(rhs.key);
 }
 
-auto operator<=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator<=(const cco::Record &lhs, const cco::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) <= calico::stob(rhs.key);
+    return cco::stob(lhs.key) <= cco::stob(rhs.key);
 }
 
-auto operator>=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator>=(const cco::Record &lhs, const cco::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) >= calico::stob(rhs.key);
+    return cco::stob(lhs.key) >= cco::stob(rhs.key);
 }
 
-auto operator==(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator==(const cco::Record &lhs, const cco::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) == calico::stob(rhs.key);
+    return cco::stob(lhs.key) == cco::stob(rhs.key);
 }
 
-auto operator!=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator!=(const cco::Record &lhs, const cco::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) != calico::stob(rhs.key);
+    return cco::stob(lhs.key) != cco::stob(rhs.key);
 }

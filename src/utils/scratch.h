@@ -1,6 +1,6 @@
 
-#ifndef CALICO_UTILS_SCRATCH_H
-#define CALICO_UTILS_SCRATCH_H
+#ifndef CCO_UTILS_SCRATCH_H
+#define CCO_UTILS_SCRATCH_H
 
 #include <list>
 #include <string>
@@ -8,7 +8,7 @@
 #include "types.h"
 #include "calico/bytes.h"
 
-namespace calico::utils {
+namespace cco::utils {
 
 class ScratchManager;
 
@@ -57,4 +57,4 @@ private:
 
 } // calico::utils
 
-#endif // CALICO_UTILS_SCRATCH_H
+#endif // CCO_UTILS_SCRATCH_H

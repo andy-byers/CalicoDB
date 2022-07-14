@@ -17,33 +17,33 @@ project(
 )
 set(CMAKE_CXX_STANDARD 17)
 
-set(CALICO_NAME calico)
-set(CALICO_EXAMPLES_DIR "${PROJECT_SOURCE_DIR}/examples")
-set(CALICO_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
-set(CALICO_LIBRARY_DIR "${PROJECT_SOURCE_DIR}/lib")
-set(CALICO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/src")
-set(CALICO_TEST_DIR "${PROJECT_SOURCE_DIR}/test")
-set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic -Wpointer-arith)
+set(CCO_NAME calico)
+set(CCO_EXAMPLES_DIR "${PROJECT_SOURCE_DIR}/examples")
+set(CCO_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
+set(CCO_LIBRARY_DIR "${PROJECT_SOURCE_DIR}/lib")
+set(CCO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/src")
+set(CCO_TEST_DIR "${PROJECT_SOURCE_DIR}/test")
+set(CCO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic -Wpointer-arith)
 
 # Determine whether Calico DB is the main project, or if it was added with add_subdirectory().
-set(CALICO_MAIN_PROJECT Off)
+set(CCO_MAIN_PROJECT Off)
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(CALICO_MAIN_PROJECT On)
+    set(CCO_MAIN_PROJECT On)
 endif()
 
 # Check if we have O_DIRECT, which turns off kernel page caching.
 include(CheckCXXSymbolExists)
-check_cxx_symbol_exists(O_DIRECT "fcntl.h" CALICO_HAS_O_DIRECT)
+check_cxx_symbol_exists(O_DIRECT "fcntl.h" CCO_HAS_O_DIRECT)
 
-option(CALICO_INSTALL "Install the library and headers" ${CALICO_MAIN_PROJECT})
-option(CALICO_BUILD_TESTS "Build the tests" Off)
-option(CALICO_BUILD_EXAMPLES "Build the examples" ${CALICO_MAIN_PROJECT})
+option(CCO_INSTALL "Install the library and headers" ${CCO_MAIN_PROJECT})
+option(CCO_BUILD_TESTS "Build the tests" Off)
+option(CCO_BUILD_EXAMPLES "Build the examples" ${CCO_MAIN_PROJECT})
 
-set(CALICO_SOURCES '')
-set(CALICO_HEADERS '')
-file(GLOB_RECURSE CALICO_SOURCES "${CALICO_SOURCE_DIR}/*/*.cpp" "${CALICO_SOURCE_DIR}/*/*.h")
-file(GLOB_RECURSE CALICO_HEADERS "${CALICO_INCLUDE_DIR}/calico/*.h")
-list(APPEND CALICO_SOURCES ${CALICO_HEADERS})
+set(CCO_SOURCES '')
+set(CCO_HEADERS '')
+file(GLOB_RECURSE CCO_SOURCES "${CCO_SOURCE_DIR}/*/*.cpp" "${CCO_SOURCE_DIR}/*/*.h")
+file(GLOB_RECURSE CCO_HEADERS "${CCO_INCLUDE_DIR}/calico/*.h")
+list(APPEND CCO_SOURCES ${CCO_HEADERS})
 
 include(GNUInstallDirs)
 include(FetchContent)
@@ -71,31 +71,31 @@ if(NOT expected_POPULATED)
 #    add_subdirectory("${expected_SOURCE_DIR}" "${expected_BINARY_DIR}")
 endif()
 
-list(APPEND CALICO_SOURCES "${TL_EXPECTED_INC}")
+list(APPEND CCO_SOURCES "${TL_EXPECTED_INC}")
 
 # Build the static library.
 add_library(
-    "${CALICO_NAME}"
-    STATIC "${CALICO_SOURCES}")
+    "${CCO_NAME}"
+    STATIC "${CCO_SOURCES}")
 target_include_directories(
-    "${CALICO_NAME}"
-    PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
+    "${CCO_NAME}"
+    PUBLIC  $<BUILD_INTERFACE:${CCO_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE "${CALICO_SOURCE_DIR}" "${TL_EXPECTED_DIR}/tl")
+    PRIVATE "${CCO_SOURCE_DIR}" "${TL_EXPECTED_DIR}/tl")
 target_compile_options(
-    "${CALICO_NAME}"
-    PRIVATE "${CALICO_WARNINGS}")
+    "${CCO_NAME}"
+    PRIVATE "${CCO_WARNINGS}")
 target_link_libraries(
-    "${CALICO_NAME}"
+    "${CCO_NAME}"
     PUBLIC  spdlog::spdlog
     PRIVATE pthread)
 
 # Build the examples/use cases.
-if(CALICO_BUILD_EXAMPLES)
-    add_subdirectory(${CALICO_EXAMPLES_DIR})
+if(CCO_BUILD_EXAMPLES)
+    add_subdirectory(${CCO_EXAMPLES_DIR})
 endif()
 
-if(CALICO_INSTALL)
+if(CCO_INSTALL)
     set(TARGETS_NAME ${PROJECT_NAME}Targets)
     set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
     set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
@@ -103,14 +103,14 @@ if(CALICO_INSTALL)
     set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
 #
 #    install(
-#        TARGETS "${CALICO_NAME}" spdlog
+#        TARGETS "${CCO_NAME}" spdlog
 #        EXPORT "${TARGETS_NAME}"
 #        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 #        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 #        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 #
 #    install(
-#        DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
+#        DIRECTORY "${CCO_INCLUDE_DIR}/calico"
 #        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 #    )
 #    install(
@@ -139,7 +139,7 @@ if(CALICO_INSTALL)
 #    )
 endif()
 
-if(CALICO_BUILD_TESTS)
+if(CCO_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_Declare(
         googletest
@@ -157,5 +157,5 @@ if(CALICO_BUILD_TESTS)
     include(CTest)
     enable_testing()
 
-    add_subdirectory(${CALICO_TEST_DIR})
+    add_subdirectory(${CCO_TEST_DIR})
 endif()

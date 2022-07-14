@@ -1,5 +1,5 @@
-#ifndef CALICO_POOL_IN_MEMORY_H
-#define CALICO_POOL_IN_MEMORY_H
+#ifndef CCO_POOL_IN_MEMORY_H
+#define CCO_POOL_IN_MEMORY_H
 
 #include "calico/error.h"
 #include "interface.h"
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-namespace calico {
+namespace cco {
 
 class MemoryPool : public IBufferPool {
 public:
@@ -61,10 +61,9 @@ private:
     std::vector<UndoInfo> m_stack;
     std::vector<Frame> m_frames;
     std::shared_ptr<spdlog::logger> m_logger;
-    std::exception_ptr m_error;
     Size m_page_size {};
 };
 
 } // calico
 
-#endif // CALICO_POOL_IN_MEMORY_H
+#endif // CCO_POOL_IN_MEMORY_H

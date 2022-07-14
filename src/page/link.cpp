@@ -3,7 +3,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace calico::page {
+namespace cco::page {
 
 using namespace utils;
 

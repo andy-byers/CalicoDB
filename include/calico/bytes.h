@@ -2,14 +2,14 @@
  * (1) https://github.com/google/leveldb/blob/main/include/leveldb/slice.h
  */
 
-#ifndef CALICO_BYTES_H
-#define CALICO_BYTES_H
+#ifndef CCO_BYTES_H
+#define CCO_BYTES_H
 
 #include <cassert>
 #include <cstring>
 #include "options.h"
 
-namespace calico {
+namespace cco {
 
 /**
  * An enum for specifying a three-way comparison.
@@ -285,34 +285,34 @@ inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> ThreeWay
 
 } // calico
 
-inline auto operator<(calico::BytesView lhs, calico::BytesView rhs) noexcept -> bool
+inline auto operator<(cco::BytesView lhs, cco::BytesView rhs) noexcept -> bool
 {
-    return calico::compare_three_way(lhs, rhs) == calico::ThreeWayComparison::LT;
+    return cco::compare_three_way(lhs, rhs) == cco::ThreeWayComparison::LT;
 }
 
-inline auto operator<=(calico::BytesView lhs, calico::BytesView rhs) noexcept -> bool
+inline auto operator<=(cco::BytesView lhs, cco::BytesView rhs) noexcept -> bool
 {
-    return calico::compare_three_way(lhs, rhs) != calico::ThreeWayComparison::GT;
+    return cco::compare_three_way(lhs, rhs) != cco::ThreeWayComparison::GT;
 }
 
-inline auto operator>(calico::BytesView lhs, calico::BytesView rhs) noexcept -> bool
+inline auto operator>(cco::BytesView lhs, cco::BytesView rhs) noexcept -> bool
 {
-    return calico::compare_three_way(lhs, rhs) == calico::ThreeWayComparison::GT;
+    return cco::compare_three_way(lhs, rhs) == cco::ThreeWayComparison::GT;
 }
 
-inline auto operator>=(calico::BytesView lhs, calico::BytesView rhs) noexcept -> bool
+inline auto operator>=(cco::BytesView lhs, cco::BytesView rhs) noexcept -> bool
 {
-    return calico::compare_three_way(lhs, rhs) != calico::ThreeWayComparison::LT;
+    return cco::compare_three_way(lhs, rhs) != cco::ThreeWayComparison::LT;
 }
 
-inline auto operator==(calico::BytesView lhs, calico::BytesView rhs) noexcept -> bool
+inline auto operator==(cco::BytesView lhs, cco::BytesView rhs) noexcept -> bool
 {
-    return calico::compare_three_way(lhs, rhs) == calico::ThreeWayComparison::EQ;
+    return cco::compare_three_way(lhs, rhs) == cco::ThreeWayComparison::EQ;
 }
 
-inline auto operator!=(calico::BytesView lhs, calico::BytesView rhs) noexcept -> bool
+inline auto operator!=(cco::BytesView lhs, cco::BytesView rhs) noexcept -> bool
 {
     return !(lhs == rhs);
 }
 
-#endif // CALICO_BYTES_H
+#endif // CCO_BYTES_H

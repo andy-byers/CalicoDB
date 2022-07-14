@@ -19,9 +19,9 @@
 
 namespace {
 
-using namespace calico;
-using namespace calico::utils;
-using namespace calico::page;
+using namespace cco;
+using namespace cco::utils;
+using namespace cco::page;
 
 class TreeHarness: public testing::Test {
 public:
@@ -527,7 +527,7 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
             ASSERT_TRUE(cursor.is_valid());
             ASSERT_EQ(btos(cursor.key()), k);
             ASSERT_EQ(cursor.value(), v);
-            CALICO_EXPECT_TRUE(tools::erase(*tree, k));
+            CCO_EXPECT_TRUE(tools::erase(*tree, k));
             if (counter++ % 100 == 0)
                 validate();
         }

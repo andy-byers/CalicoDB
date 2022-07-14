@@ -2,12 +2,12 @@
 #include "calico/error.h"
 #include "utils/expect.h"
 
-namespace calico {
+namespace cco {
 
 Error::Error(Code code, const std::string &message)
     : m_what {static_cast<char>(code) + message}
 {
-    CALICO_EXPECT_NE(m_what[0], '\x00');
+    CCO_EXPECT_NE(m_what[0], '\x00');
 }
 
 auto Error::code() const -> Code
@@ -35,9 +35,9 @@ auto Error::corruption(const std::string &what) -> Error
     return {Code::CORRUPTION, what};
 }
 
-auto Error::not_found() -> Error
+auto Error::not_found(const std::string &what) -> Error
 {
-    return {Code::NOT_FOUND, "not found"};
+    return {Code::NOT_FOUND, what};
 }
 
 auto Error::is_invalid_argument() const -> bool

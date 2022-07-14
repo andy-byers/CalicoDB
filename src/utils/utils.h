@@ -1,10 +1,10 @@
-#ifndef CALICO_UTILS_UTILS_H
-#define CALICO_UTILS_UTILS_H
+#ifndef CCO_UTILS_UTILS_H
+#define CCO_UTILS_UTILS_H
 
 #include <filesystem>
 #include "calico/bytes.h"
 
-namespace calico {
+namespace cco {
 
 static constexpr Size PAGE_ID_SIZE{sizeof(uint32_t)};
 static constexpr Size CELL_POINTER_SIZE{sizeof(uint16_t)};
@@ -91,4 +91,4 @@ namespace utils {
 } // utils
 } // calico
 
-#endif // CALICO_UTILS_UTILS_H
+#endif // CCO_UTILS_UTILS_H

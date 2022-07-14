@@ -6,7 +6,7 @@
 #include "utils/layout.h"
 #include "utils/logging.h"
 
-namespace calico {
+namespace cco {
 
 using namespace page;
 using namespace utils;
@@ -14,7 +14,7 @@ using namespace utils;
 Tree::Tree(Parameters param)
     : m_pool {{param.buffer_pool, param.free_start, param.free_count, param.node_count}},
       m_internal {{&m_pool, param.cell_count}},
-      m_logger {utils::create_logger(param.log_sink, "Tree")}
+      m_logger {create_logger(param.log_sink, "Tree")}
 {
     m_logger->trace("constructing Tree object");
 }
@@ -23,8 +23,8 @@ auto Tree::open(Parameters param) -> Result<std::unique_ptr<ITree>>
 {
     auto tree = std::unique_ptr<Tree>(new Tree {std::move(param)});
     if (tree->m_pool.node_count() == 0) {
-        CALICO_TRY_CREATE(root, tree->m_pool.allocate(PageType::EXTERNAL_NODE));
-        CALICO_TRY(tree->m_pool.release(std::move(*root)));
+        CCO_TRY_CREATE(root, tree->m_pool.allocate(PageType::EXTERNAL_NODE));
+        CCO_TRY(tree->m_pool.release(std::move(root)));
     }
     return tree;
 }
@@ -34,28 +34,28 @@ auto Tree::insert(BytesView key, BytesView value) -> Result<bool>
     static constexpr auto ERROR_PRIMARY = "cannot write record";
 
     if (key.is_empty()) {
-        utils::ErrorMessage group;
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail("key is empty");
-        group.set_hint("use a nonempty key");
-        return ErrorResult {Error::invalid_argument(group.error(*m_logger))};
+        LogMessage message {*m_logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail("key is empty");
+        message.set_hint("use a nonempty key");
+        return Err {message.invalid_argument()};
     }
 
     if (key.size() > get_max_local(m_pool.page_size())) {
-        utils::ErrorMessage group;
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail("key of length {} B is too long", key.size());
-        group.set_hint("maximum key length is {} B", get_max_local(m_pool.page_size()));
-        return ErrorResult {Error::invalid_argument(group.error(*m_logger))};
+        LogMessage message {*m_logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail("key of length {} B is too long", key.size());
+        message.set_hint("maximum key length is {} B", get_max_local(m_pool.page_size()));
+        return Err {message.invalid_argument()};
     }
-    CALICO_TRY_CREATE(was_found, m_internal.find_external(key, true));
-    auto [node, index, found_eq] = std::move(*was_found);
+    CCO_TRY_CREATE(was_found, m_internal.find_external(key, true));
+    auto [node, index, found_eq] = std::move(was_found);
 
     if (found_eq) {
-        CALICO_TRY(m_internal.positioned_modify({std::move(node), index}, value));
+        CCO_TRY(m_internal.positioned_modify({std::move(node), index}, value));
         return false;
     } else {
-        CALICO_TRY(m_internal.positioned_insert({std::move(node), index}, key, value));
+        CCO_TRY(m_internal.positioned_insert({std::move(node), index}, key, value));
         return true;
     }
 }
@@ -63,7 +63,7 @@ auto Tree::insert(BytesView key, BytesView value) -> Result<bool>
 auto Tree::erase(Cursor cursor) -> Result<bool>
 {
     if (cursor.is_valid()) {
-        CCO_TRY_CREATE(Node, node, m_pool.acquire(PID {cursor.id()}, true));
+        CCO_TRY_CREATE(node, m_pool.acquire(PID {cursor.id()}, true));
         CCO_TRY(m_internal.positioned_remove({std::move(node), cursor.index()}));
         return true;
     }
@@ -73,7 +73,7 @@ auto Tree::erase(Cursor cursor) -> Result<bool>
 auto maybe_reposition(NodePool &pool, Node &node, Index &index) -> Result<void>
 {
     if (index == node.cell_count() && !node.right_sibling_id().is_null()) {
-        CCO_TRY_ASSIGN(node, pool.acquire(node.right_sibling_id(), false));
+        CCO_TRY_STORE(node, pool.acquire(node.right_sibling_id(), false));
         index = 0;
     }
     return {};
@@ -81,7 +81,7 @@ auto maybe_reposition(NodePool &pool, Node &node, Index &index) -> Result<void>
 
 auto Tree::find_aux(BytesView key, bool &found_exact_out) -> Cursor
 {
-    CALICO_EXPECT_FALSE(key.is_empty());
+    CCO_EXPECT_FALSE(key.is_empty());
     Cursor cursor {&m_pool, &m_internal};
     auto was_found = m_internal.find_external(key, false);
     if (!was_found.has_value()) {
@@ -114,7 +114,7 @@ auto Tree::find_exact(BytesView key) -> Cursor
     bool found_exact {};
     auto cursor = find_aux(key, found_exact);
     if (!found_exact)
-        cursor.invalidate(); // TODO
+        cursor.invalidate();
     return cursor;
 }
 
@@ -138,7 +138,7 @@ auto Tree::find_minimum() -> Cursor
         return cursor;
     }
     auto [node, index] = std::move(*temp);
-    CALICO_EXPECT_EQ(index, 0);
+    CCO_EXPECT_EQ(index, 0);
     cursor.move_to(std::move(node), index);
     return cursor;
 }
@@ -157,7 +157,7 @@ auto Tree::find_maximum() -> Cursor
         return cursor;
     }
     auto [node, index] = std::move(*temp);
-    CALICO_EXPECT_EQ(index, node.cell_count() - 1);
+    CCO_EXPECT_EQ(index, node.cell_count() - 1);
     cursor.move_to(std::move(node), index);
     return cursor;
 }

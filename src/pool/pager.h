@@ -1,5 +1,5 @@
-#ifndef CALICO_POOL_PAGER_H
-#define CALICO_POOL_PAGER_H
+#ifndef CCO_POOL_PAGER_H
+#define CCO_POOL_PAGER_H
 
 #include <list>
 #include <memory>
@@ -7,7 +7,7 @@
 #include <spdlog/spdlog.h>
 #include "calico/error.h"
 
-namespace calico {
+namespace cco {
 
 class Frame;
 class IFileReader;
@@ -20,24 +20,9 @@ public:
         std::unique_ptr<IFileReader> reader;
         std::unique_ptr<IFileWriter> writer;
         spdlog::sink_ptr log_sink;
-        Size page_size{};
-        Size frame_count{};
+        Size page_size {};
+        Size frame_count {};
     };
-
-    explicit Pager(Parameters);
-    ~Pager();
-    [[nodiscard]] auto available() const -> Size;
-    [[nodiscard]] auto page_size() const -> Size;
-    [[nodiscard]] auto pin(PID) -> Result<Frame>;
-    [[nodiscard]] auto unpin(Frame) -> Result<void>;
-    [[nodiscard]] auto discard(Frame) -> Result<void>;
-    [[nodiscard]] auto truncate(Size) -> Result<void>;
-    [[nodiscard]] auto sync() -> Result<void>;
-
-private:
-    [[nodiscard]] auto read_page_from_file(PID, Bytes) const -> Result<bool>;
-    [[nodiscard]] auto write_page_to_file(PID, BytesView) const -> Result<void>;
-    [[nodiscard]] auto maybe_write_pending() -> Result<void>;
 
     struct AlignedDeleter {
 
@@ -52,9 +37,28 @@ private:
         std::align_val_t align;
     };
 
-    std::unique_ptr<Byte[], AlignedDeleter> m_buffer;
+    using AlignedBuffer = std::unique_ptr<Byte[], AlignedDeleter>;
+
+    ~Pager() = default;
+    [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<Pager>>;
+    [[nodiscard]] auto available() const -> Size;
+    [[nodiscard]] auto page_size() const -> Size;
+    [[nodiscard]] auto pin(PID) -> Result<Frame>;
+    [[nodiscard]] auto unpin(Frame) -> Result<void>;
+    [[nodiscard]] auto discard(Frame) -> Result<void>;
+    [[nodiscard]] auto truncate(Size) -> Result<void>;
+    [[nodiscard]] auto sync() -> Result<void>;
+
+    auto operator=(Pager&&) -> Pager& = default;
+    Pager(Pager&&) = default;
+
+private:
+    Pager(AlignedBuffer, Parameters);
+    [[nodiscard]] auto read_page_from_file(PID, Bytes) const -> Result<bool>;
+    [[nodiscard]] auto write_page_to_file(PID, BytesView) const -> Result<void>;
+
+    AlignedBuffer m_buffer;
     std::list<Frame> m_available;
-    std::list<Frame> m_pending;
     std::unique_ptr<IFileReader> m_reader;
     std::unique_ptr<IFileWriter> m_writer;
     std::shared_ptr<spdlog::logger> m_logger;
@@ -64,4 +68,4 @@ private:
 
 } // calico
 
-#endif // CALICO_POOL_PAGER_H
+#endif // CCO_POOL_PAGER_H

@@ -1,11 +1,12 @@
 
 #include "calico/calico.h"
 #include <filesystem>
+#include <spdlog/fmt/fmt.h>
 
 namespace {
 
 constexpr auto PATH = "/tmp/calico_usage";
-namespace cco = calico;
+namespace cco = cco;
 
 auto bytes_objects()
 {
@@ -45,25 +46,25 @@ auto updating_a_database(cco::Database &db)
     namespace cco = cco;
 
     // Insert some records. If a record is already in the database, insert() will return false.
-    assert(db.insert("bengal", "short;spotted,marbled,rosetted"));
-    assert(db.insert("turkish vankedisi", "long;white"));
-    assert(db.insert("moose", "???"));
-    assert(db.insert("abyssinian", "short;ticked tabby"));
-    assert(db.insert("russian blue", "short;blue"));
-    assert(db.insert("american shorthair", "short;all"));
-    assert(db.insert("badger", "???"));
-    assert(db.insert("manx", "short,long;all"));
-    assert(db.insert("chantilly-tiffany", "long;solid,tabby"));
-    assert(db.insert("cyprus", "..."));
+    assert(*db.insert("bengal", "short;spotted,marbled,rosetted"));
+    assert(*db.insert("turkish vankedisi", "long;white"));
+    assert(*db.insert("moose", "???"));
+    assert(*db.insert("abyssinian", "short;ticked tabby"));
+    assert(*db.insert("russian blue", "short;blue"));
+    assert(*db.insert("american shorthair", "short;all"));
+    assert(*db.insert("badger", "???"));
+    assert(*db.insert("manx", "short,long;all"));
+    assert(*db.insert("chantilly-tiffany", "long;solid,tabby"));
+    assert(*db.insert("cyprus", "..."));
 
     // Modify a record.
-    assert(not db.insert("cyprus", "all;all"));
+    assert(not *db.insert("cyprus", "all;all"));
 
     // Erase a record by key.
-    assert(db.erase("badger"));
+    assert(*db.erase("badger"));
 
     // Erase a record using a cursor (see "Querying a Database" below).
-    assert(db.erase(db.find_exact("moose")));
+    assert(*db.erase(db.find_exact("moose")));
 }
 
 auto querying_a_database(cco::Database &db)
@@ -123,6 +124,16 @@ auto deleting_a_database(cco::Database db)
     cco::Database::destroy(std::move(db));
 }
 
+auto open_database(cco::Options options) -> cco::Database
+{
+    return *cco::Database::open(PATH, options)
+        .or_else([](const cco::Error &error) -> cco::Result<cco::Database> {
+            fmt::print("(1/2) cannot open database\n");
+            fmt::print("(2/2) {}\n", cco::btos(error.what()));
+            return cco::Err {error};
+        });
+}
+
 } // namespace
 
 auto main(int, const char *[]) -> int
@@ -130,8 +141,9 @@ auto main(int, const char *[]) -> int
     std::error_code error;
     std::filesystem::remove_all(PATH, error);
     cco::Options options;
-    auto db = *cco::Database::open(PATH, options);
+
     bytes_objects();
+    auto db = open_database(options);
     updating_a_database(db);
     querying_a_database(db);
     transactions(db);

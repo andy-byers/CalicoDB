@@ -1,13 +1,13 @@
-#ifndef CALICO_UNIT_H
-#define CALICO_UNIT_H
+#ifndef CCO_UNIT_H
+#define CCO_UNIT_H
 
 #include <iomanip>
 #include <sstream>
 
-namespace calico {
+namespace cco {
 
 static constexpr const char *EXPECTATION_MATCHER = "Expect";
 
 } // calico
 
-#endif //CALICO_UNIT_H
+#endif //CCO_UNIT_H

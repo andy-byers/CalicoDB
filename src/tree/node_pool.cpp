@@ -8,7 +8,7 @@
 #include "utils/layout.h"
 #include "utils/logging.h"
 
-namespace calico {
+namespace cco {
 
 using namespace page;
 using namespace utils;
@@ -30,14 +30,14 @@ auto NodePool::allocate(PageType type) -> Result<Node>
         .or_else([this](const Error &error) -> Result<Page> {
             if (error.is_logic_error())
                 return m_pool->allocate();
-            return ErrorResult {error};
+            return Err {error};
         });
     if (page) {
         page->set_type(type);
         m_node_count++;
         return Node {std::move(*page), true};
     }
-    return ErrorResult {page.error()};
+    return Err {page.error()};
 }
 
 auto NodePool::acquire(PID id, bool is_writable) -> Result<Node>
@@ -50,20 +50,20 @@ auto NodePool::acquire(PID id, bool is_writable) -> Result<Node>
 
 auto NodePool::release(Node node) -> Result<void>
 {
-    CALICO_EXPECT_FALSE(node.is_overflowing());
+    CCO_EXPECT_FALSE(node.is_overflowing());
     return m_pool->release(node.take());
 }
 
 auto NodePool::destroy(Node node) -> Result<void>
 {
-    CALICO_EXPECT_FALSE(node.is_overflowing());
+    CCO_EXPECT_FALSE(node.is_overflowing());
     return m_free_list.push(node.take())
         .map([this] {m_node_count--;});
 }
 
 auto NodePool::allocate_chain(BytesView overflow) -> Result<PID>
 {
-    CALICO_EXPECT_FALSE(overflow.is_empty());
+    CCO_EXPECT_FALSE(overflow.is_empty());
     std::optional<Link> prev;
     auto head = PID::null();
 
@@ -72,10 +72,10 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<PID>
             .or_else([this](const Error &error) -> Result<Page> {
                 if (error.is_logic_error())
                     return m_pool->allocate();
-                return ErrorResult {error};
+                return Err {error};
             });
         if (!page.has_value())
-            return ErrorResult {page.error()};
+            return Err {page.error()};
 
         page->set_type(PageType::OVERFLOW_LINK);
         Link link {std::move(*page)};
@@ -85,34 +85,34 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<PID>
 
         if (prev) {
             prev->set_next_id(link.id());
-            CALICO_TRY(m_pool->release(prev->take()));
+            CCO_TRY(m_pool->release(prev->take()));
         } else {
             head = link.id();
         }
         prev.emplace(std::move(link));
     }
     if (prev)
-        CALICO_TRY(m_pool->release(prev->take()));
+        CCO_TRY(m_pool->release(prev->take()));
     return head;
 }
 
 auto NodePool::collect_chain(PID id, Bytes out) const -> Result<void>
 {
     while (!out.is_empty()) {
-        CALICO_TRY_CREATE(page, m_pool->acquire(id, false));
-        if (page->type() != PageType::OVERFLOW_LINK) {
+        CCO_TRY_CREATE(page, m_pool->acquire(id, false));
+        if (page.type() != PageType::OVERFLOW_LINK) {
 //            utils::ErrorMessage message;
 //            message.set_primary("cannot collect overflow chain");
 //            message.set_detail("link has an invalid page type {}", static_cast<unsigned>(page->type()));
-            return ErrorResult {Error::corruption("")};
+            return Err {Error::corruption("")};
         }
-        Link link {std::move(*page)};
+        Link link {std::move(page)};
         auto content = link.content_view();
         const auto chunk = std::min(out.size(), content.size());
         mem_copy(out, content, chunk);
         out.advance(chunk);
         id = link.next_id();
-        CALICO_TRY(m_pool->release(link.take()));
+        CCO_TRY(m_pool->release(link.take()));
     }
     return {};
 }
@@ -122,12 +122,12 @@ auto NodePool::destroy_chain(PID id, Size size) -> Result<void>
     while (size) {
         auto page = m_pool->acquire(id, true);
         if (!page.has_value())
-            return ErrorResult {page.error()};
-        CALICO_EXPECT_EQ(page->type(), PageType::OVERFLOW_LINK); // TODO: Corruption error, not assertion. Need a logger for this class.
+            return Err {page.error()};
+        CCO_EXPECT_EQ(page->type(), PageType::OVERFLOW_LINK); // TODO: Corruption error, not assertion. Need a logger for this class.
         Link link {std::move(*page)};
         id = link.next_id();
         size -= std::min(size, link.content_view().size());
-        CALICO_TRY(m_free_list.push(link.take()));
+        CCO_TRY(m_free_list.push(link.take()));
     }
     return {};
 }

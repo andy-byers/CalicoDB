@@ -1,5 +1,5 @@
-#ifndef CALICO_STORAGE_INTERFACE_H
-#define CALICO_STORAGE_INTERFACE_H
+#ifndef CCO_STORAGE_INTERFACE_H
+#define CCO_STORAGE_INTERFACE_H
 
 #include <memory>
 #include <string>
@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include "calico/error.h"
 
-namespace calico {
+namespace cco {
 
 enum class Seek: int {
     BEGIN   = SEEK_SET,
@@ -25,7 +25,7 @@ enum class Mode: int {
     SYNCHRONOUS = O_SYNC,
     TRUNCATE = O_TRUNC,
 
-#if CALICO_HAS_O_DIRECT
+#if CCO_HAS_O_DIRECT
     DIRECT = O_DIRECT,
 #else
     DIRECT = 0,
@@ -78,6 +78,7 @@ public:
     virtual ~IDirectory() = default;
     [[nodiscard]] virtual auto path() const -> std::string = 0;
     [[nodiscard]] virtual auto name() const -> std::string = 0;
+    [[nodiscard]] virtual auto exists(const std::string&) const -> Result<bool> = 0;
     [[nodiscard]] virtual auto children() const -> Result<std::vector<std::string>> = 0;
     [[nodiscard]] virtual auto open_directory(const std::string&) -> Result<std::unique_ptr<IDirectory>> = 0;
     [[nodiscard]] virtual auto open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> = 0;
@@ -87,4 +88,4 @@ public:
 
 } // calico
 
-#endif // CALICO_STORAGE_INTERFACE_H
+#endif // CCO_STORAGE_INTERFACE_H

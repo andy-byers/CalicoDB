@@ -1,12 +1,12 @@
-#ifndef CALICO_TEST_TOOLS_FAKES_H
-#define CALICO_TEST_TOOLS_FAKES_H
+#ifndef CCO_TEST_TOOLS_FAKES_H
+#define CCO_TEST_TOOLS_FAKES_H
 
 #include <filesystem>
 #include "calico/calico.h"
 #include "random.h"
 #include "storage/interface.h"
 
-namespace calico {
+namespace cco {
 
 class SharedMemory {
 public:
@@ -76,25 +76,25 @@ public:
 
     auto set_read_fault_rate(unsigned rate)
     {
-        CALICO_EXPECT_LE(rate, 100);
+        CCO_EXPECT_LE(rate, 100);
         m_controls->read_fault_rate = rate;
     }
 
     auto set_write_fault_rate(unsigned rate)
     {
-        CALICO_EXPECT_LE(rate, 100);
+        CCO_EXPECT_LE(rate, 100);
         m_controls->write_fault_rate = rate;
     }
 
     auto set_read_fault_counter(int value)
     {
-        CALICO_EXPECT_GE(value, -1);
+        CCO_EXPECT_GE(value, -1);
         m_controls->read_fault_counter = value;
     }
 
     auto set_write_fault_counter(int value)
     {
-        CALICO_EXPECT_GE(value, -1);
+        CCO_EXPECT_GE(value, -1);
         m_controls->write_fault_counter = value;
     }
 
@@ -115,6 +115,11 @@ public:
     [[nodiscard]] auto open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> override;
     [[nodiscard]] auto remove() -> Result<void> override;
     [[nodiscard]] auto sync() -> Result<void> override;
+
+    [[nodiscard]] auto exists(const std::string&) const -> Result<bool> override
+    {
+        return true;
+    }
 
     auto open_memory_bank(const std::string&) -> std::unique_ptr<MemoryBank>;
     auto open_memory(const std::string&, Mode, int) -> std::unique_ptr<Memory>;
@@ -282,4 +287,4 @@ private:
 
 } // calico
 
-#endif // CALICO_TEST_TOOLS_FAKES_H
+#endif // CCO_TEST_TOOLS_FAKES_H

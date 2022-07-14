@@ -1,25 +1,20 @@
-#ifndef CALICO_POOL_BUFFER_POOL_H
-#define CALICO_POOL_BUFFER_POOL_H
+#ifndef CCO_POOL_BUFFER_POOL_H
+#define CCO_POOL_BUFFER_POOL_H
 
 #include <list>
 #include <mutex>
-#include <stdexcept>
 #include <unordered_map>
 #include <spdlog/logger.h>
 #include "page_cache.h"
 #include "frame.h"
 #include "interface.h"
-#include "pager.h"
 #include "utils/scratch.h"
 
-namespace calico {
+namespace cco {
 
 class IDirectory;
 class IFile;
-
-namespace page {
-    class Page;
-} // page
+class Pager;
 
 class BufferPool: public IBufferPool {
 public:
@@ -32,7 +27,7 @@ public:
         int permissions {};
     };
 
-    ~BufferPool() override = default;
+    ~BufferPool() override;
 
     [[nodiscard]] static auto open(const Parameters&) -> Result<std::unique_ptr<IBufferPool>>;
 
@@ -46,11 +41,7 @@ public:
         return m_cache.hit_ratio();
     }
 
-    [[nodiscard]] auto page_size() const -> Size override
-    {
-        return m_pager.page_size();
-    }
-
+    [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto allocate() -> Result<page::Page> override;
     [[nodiscard]] auto acquire(PID, bool) -> Result<page::Page> override;
     [[nodiscard]] auto release(page::Page) -> Result<void> override;
@@ -62,18 +53,18 @@ public:
     auto load_header(const page::FileHeader&) -> void override;
 
 private:
-    BufferPool(std::unique_ptr<IFile>, const Parameters&);
+    BufferPool(std::unique_ptr<IFile>, std::unique_ptr<Pager>, const Parameters&);
     [[nodiscard]] auto pin_frame(PID) -> Result<void>;
     auto try_evict_frame() -> Result<void>;
     [[nodiscard]] auto do_release(page::Page&) -> Result<void>;
 
     mutable std::mutex m_mutex;
     std::unique_ptr<IFile> m_file;
+    std::unique_ptr<Pager> m_pager;
     std::shared_ptr<spdlog::logger> m_logger;
     std::vector<Error> m_errors;
     utils::ScratchManager m_scratch;
     PageCache m_cache;
-    Pager m_pager;
     Size m_page_count {};
     Size m_dirty_count {};
     Size m_ref_sum {};
@@ -81,4 +72,4 @@ private:
 
 } // calico
 
-#endif // CALICO_POOL_BUFFER_POOL_H
+#endif // CCO_POOL_BUFFER_POOL_H

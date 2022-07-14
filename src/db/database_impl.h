@@ -1,5 +1,5 @@
-#ifndef CALICO_DB_DATABASE_IMPL_H
-#define CALICO_DB_DATABASE_IMPL_H
+#ifndef CCO_DB_DATABASE_IMPL_H
+#define CCO_DB_DATABASE_IMPL_H
 
 #include <shared_mutex>
 #include <spdlog/spdlog.h>
@@ -7,7 +7,7 @@
 #include "calico/database.h"
 #include "page/file_header.h"
 
-namespace calico {
+namespace cco {
 
 class Cursor;
 class IBufferPool;
@@ -24,13 +24,17 @@ struct InitialState {
 class Database::Impl final {
 public:
     struct Parameters {
-        std::unique_ptr<IDirectory> directory;
+        std::unique_ptr<IDirectory> home;
         spdlog::sink_ptr sink;
         page::FileHeader state;
         Options options;
     };
 
     friend class Database;
+
+    /**
+     * Tag for in-memory database constructor overload.
+     */
     struct InMemoryTag {};
 
     explicit Impl(Parameters);
@@ -58,7 +62,7 @@ private:
 
     spdlog::sink_ptr m_sink;
     std::shared_ptr<spdlog::logger> m_logger;
-    std::unique_ptr<IDirectory> m_directory;
+    std::unique_ptr<IDirectory> m_home;
     std::unique_ptr<IBufferPool> m_pool;
     std::unique_ptr<ITree> m_tree;
     bool m_is_temp {};
@@ -68,4 +72,4 @@ auto setup(IDirectory&, const Options&, spdlog::logger&) -> Result<InitialState>
 
 } // calico
 
-#endif // CALICO_DB_DATABASE_IMPL_H
+#endif // CCO_DB_DATABASE_IMPL_H
