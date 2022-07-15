@@ -83,7 +83,7 @@ They are used to form the freelist, and to connect overflow chains.
 |    4 |      0 | Next ID | Page ID of the next page in the chain |
 
 ## Buffer Pool
-TODO
+Steal, no-force.
 
 ### Frames
 TODO
@@ -92,7 +92,7 @@ TODO
 TODO
 
 ### Page Cache
-TODO
+Simplified 2Q replacement.
 
 ## Filesystem Interface
 TODO
@@ -191,17 +191,6 @@ Currently, the WAL consists of a single file, written in block-sized chunks.
 It is managed by a pair of constructs: one to read from the file and one to write to it.
 Both constructs operate on WAL records and perform their own caching internally.
 
-### WAL Writer
-The WAL writer fills up an internal buffer with WAL records.
-When it runs out of space, it flushes the buffer to the WAL file.
-At that point, all database pages with updates corresponding to the flushed records can be safely written to the `data` file.
-To this end, we always keep the LSN of the most-recently-flushed record in memory.
-Also note that the WAL is truncated after each commit, including when the database instance is closed.
-
-### WAL Reader
-The WAL reader is a cursor-like object used to traverse the `wal` file.
-It can be used to traverse in either direction, but must always start at the beginning of the file.
-
 ### WAL Records
 WAL records are used to store information about updates made to database pages.
 See ***3*** for more information about WAL records.
@@ -235,6 +224,17 @@ Holds a region of a database page before and after some modification.
 |    2 |      2 | Size (Y) | Size of the updated region in bytes             |
 |    Y |      4 | Before   | Contents before the update                      |
 |    Y |  4 + Y | After    | Contents after the update                       |
+
+### WAL Writer
+The WAL writer fills up an internal buffer with WAL records.
+When it runs out of space, it flushes the buffer to the WAL file.
+At that point, all database pages with updates corresponding to the flushed records can be safely written to the `data` file.
+To this end, we always keep the LSN of the most-recently-flushed record in memory.
+Also note that the WAL is truncated after each commit, including when the database instance is closed.
+
+### WAL Reader
+The WAL reader is a cursor-like object used to traverse the `wal` file.
+It can be used to traverse in either direction, but must always start at the beginning of the file.
 
 ## Cursors
 A cursor acts much like an STL iterator, allowing traversal of the database in-order.

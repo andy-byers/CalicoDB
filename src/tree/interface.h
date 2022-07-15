@@ -25,6 +25,7 @@ public:
     [[nodiscard]] virtual auto node_count() const -> Size = 0;
     [[nodiscard]] virtual auto internal() const -> const Internal& = 0;
     [[nodiscard]] virtual auto pool() const -> const NodePool& = 0;
+    [[nodiscard]] virtual auto close() -> Result<void> = 0;
     virtual auto internal() -> Internal& = 0;
     virtual auto pool() -> NodePool& = 0;
     virtual auto save_header(page::FileHeader&) const -> void = 0;

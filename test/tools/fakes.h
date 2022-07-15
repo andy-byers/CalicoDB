@@ -115,6 +115,7 @@ public:
     [[nodiscard]] auto open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> override;
     [[nodiscard]] auto remove() -> Result<void> override;
     [[nodiscard]] auto sync() -> Result<void> override;
+    [[nodiscard]] auto close() -> Result<void> override;
 
     [[nodiscard]] auto exists(const std::string&) const -> Result<bool> override
     {

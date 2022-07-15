@@ -14,6 +14,8 @@ namespace cco {
 
 class IDirectory;
 class IFile;
+class IWALReader;
+class IWALWriter;
 class Pager;
 
 class BufferPool: public IBufferPool {
@@ -25,6 +27,7 @@ public:
         Size page_count {};
         Size page_size {};
         int permissions {};
+        bool use_xact {};
     };
 
     ~BufferPool() override;
@@ -53,21 +56,31 @@ public:
     auto load_header(const page::FileHeader&) -> void override;
 
 private:
-    BufferPool(std::unique_ptr<IFile>, std::unique_ptr<Pager>, const Parameters&);
+    struct State {
+        std::unique_ptr<IFile> file;
+        std::unique_ptr<Pager> pager;
+//        std::unique_ptr<IWALReader> wal_reader;
+        std::unique_ptr<IWALWriter> wal_writer;
+    };
+    BufferPool(State, const Parameters&);
     [[nodiscard]] auto pin_frame(PID) -> Result<void>;
-    auto try_evict_frame() -> Result<void>;
+    [[nodiscard]] auto try_evict_frame() -> Result<bool>;
     [[nodiscard]] auto do_release(page::Page&) -> Result<void>;
 
     mutable std::mutex m_mutex;
     std::unique_ptr<IFile> m_file;
     std::unique_ptr<Pager> m_pager;
+//    std::unique_ptr<IWALReader> m_wal_reader;
+    std::unique_ptr<IWALWriter> m_wal_writer;
     std::shared_ptr<spdlog::logger> m_logger;
     std::vector<Error> m_errors;
     utils::ScratchManager m_scratch;
     PageCache m_cache;
+    LSN m_next_lsn {LSN::base()};
     Size m_page_count {};
     Size m_dirty_count {};
     Size m_ref_sum {};
+    bool m_use_xact {};
 };
 
 } // calico

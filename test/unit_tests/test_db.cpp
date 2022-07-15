@@ -54,15 +54,15 @@ TEST_F(DatabaseTests, DataPersists)
     auto itr = std::cbegin(records);
 
     for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        auto db = *Database::open(BASE, options);
+        auto db = Database::open(BASE, options).value();
 
         for (Index i {}; i < GROUP_SIZE; ++i) {
-            db.insert(*itr);
+            ASSERT_TRUE(db.insert(*itr));
             itr++;
         }
     }
 
-    auto db = *Database::open(BASE, options);
+    auto db = Database::open(BASE, options).value();
     CCO_EXPECT_EQ(db.info().record_count(), records.size());
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(db, key);
@@ -91,20 +91,20 @@ TEST_F(DatabaseTests, SanityCheck)
     fs::remove_all(BASE, ignore);
 
     for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        auto db = *Database::open(BASE, options);
+        auto db = Database::open(BASE, options).value();
 
         for (const auto &record: generator.generate(random, GROUP_SIZE))
             db.insert(record);
     }
 
     for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        auto db = *Database::open(BASE, options);
+        auto db = Database::open(BASE, options).value();
 
         for (const auto &record: generator.generate(random, GROUP_SIZE))
             tools::erase_one(db, record.key);
     }
 
-    auto db = *Database::open(BASE, options);
+    auto db = Database::open(BASE, options).value();
     CCO_EXPECT_EQ(db.info().record_count(), 0);
 }
 

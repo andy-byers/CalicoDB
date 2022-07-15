@@ -70,6 +70,11 @@ auto Database::open(const std::string &path, Options options) -> Result<Database
     return db;
 }
 
+auto Database::close(Database db) -> Result<void>
+{
+    return db.m_impl->close();
+}
+
 auto Database::temp(Options options) -> Result<Database>
 {
     Impl::Parameters param;

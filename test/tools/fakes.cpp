@@ -166,6 +166,11 @@ auto MemoryBank::sync() -> Result<void>
     return {};
 }
 
+auto MemoryBank::close() -> Result<void>
+{
+    return {};
+}
+
 auto MemoryReader::seek(long offset, Seek whence) -> Result<Index>
 {
     m_memory->cursor() = do_seek(m_memory->cursor(), *m_memory->size(), offset, whence);

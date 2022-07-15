@@ -53,8 +53,14 @@ auto Frame::synchronize(Page &page) -> void
         m_is_dirty = true;
         page.m_is_dirty = false;
     }
+    // Make sure the page doesn't get released twice.
     page.m_source.reset();
     m_ref_count--;
+}
+
+auto Frame::page_lsn() const -> LSN
+{
+    return LSN {get_u32(m_bytes.range(PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET))};
 }
 
 } // calico

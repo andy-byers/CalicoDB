@@ -13,6 +13,8 @@ class Frame;
 
 namespace page {
 
+class UpdateManager;
+
 class Page final {
 public:
     friend class cco::Frame;
@@ -43,11 +45,19 @@ public:
     [[nodiscard]] auto view(Index) const -> BytesView;
     [[nodiscard]] auto view(Index, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
+    [[nodiscard]] auto lsn() const -> LSN;
     auto set_type(PageType) -> void;
+    auto set_lsn(LSN) -> void;
     auto read(Bytes, Index) const -> void;
     auto bytes(Index) -> Bytes;
     auto bytes(Index, Size) -> Bytes;
     auto write(BytesView, Index) -> void;
+
+    auto set_manager(UpdateManager &manager) -> void
+    {
+        CCO_EXPECT_EQ(m_manager, nullptr);
+        m_manager = &manager;
+    }
 
     Page(Page&&) noexcept = default;
     auto operator=(Page&&) noexcept -> Page& = default;
@@ -58,6 +68,7 @@ private:
     [[nodiscard]] auto header_offset() const -> Index;
 
     utils::UniqueNullable<IBufferPool*> m_source;
+    UpdateManager *m_manager {};
     Bytes m_data;
     PID m_id;
     bool m_is_writable {};

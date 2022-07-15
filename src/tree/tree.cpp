@@ -16,7 +16,7 @@ Tree::Tree(Parameters param)
       m_internal {{&m_pool, param.cell_count}},
       m_logger {create_logger(param.log_sink, "Tree")}
 {
-    m_logger->trace("constructing Tree object");
+    m_logger->trace("opening");
 }
 
 auto Tree::open(Parameters param) -> Result<std::unique_ptr<ITree>>

@@ -50,6 +50,7 @@ public:
     [[nodiscard]] auto erase(BytesView) -> Result<bool>;
     [[nodiscard]] auto erase(Cursor) -> Result<bool>;
     [[nodiscard]] auto commit() -> Result<void>;
+    [[nodiscard]] auto close() -> Result<void>;
     auto find(BytesView) -> Cursor;
     auto find_exact(BytesView) -> Cursor;
     auto find_minimum() -> Cursor;

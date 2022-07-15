@@ -51,10 +51,7 @@ auto Info::is_temp() const -> bool
 Database::Impl::~Impl()
 {
     if (const auto committed = commit(); !committed.has_value()) {
-        NumberedGroup group;
-        group.push_line("database failed to commit in destructor");
-        group.push_line("{}", btos(committed.error().what()));
-        group.log(*m_logger, spdlog::level::err);
+
     }
 }
 
@@ -119,8 +116,26 @@ auto Database::Impl::erase(Cursor cursor) -> Result<bool>
 
 auto Database::Impl::commit() -> Result<void>
 {
-    CCO_TRY(save_header());
-    return m_pool->flush();
+    return save_header()
+        .and_then([this]() -> Result<void> {
+            CCO_TRY(m_pool->flush());
+            m_logger->trace("commit succeeded");
+            return {};
+        })
+        .or_else([this](const Error &error) -> Result<void> {
+            LogMessage message {*m_logger};
+            message.set_primary("cannot commit");
+            message.log(spdlog::level::err);
+            return Err {error};
+        });
+}
+
+auto Database::Impl::close() -> Result<void>
+{
+    CCO_TRY(commit());
+    CCO_TRY(m_tree->close());
+    CCO_TRY(m_pool->close());
+    return m_home->close();
 }
 
 auto Database::Impl::save_header() -> Result<void>
@@ -211,6 +226,7 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
             message.set_hint("CRC is {}", header.header_crc());
             return Err {message.corruption()};
         }
+        revised.use_xact = !header.flushed_lsn().is_null();
 
     } else {
         header.update_magic_code();

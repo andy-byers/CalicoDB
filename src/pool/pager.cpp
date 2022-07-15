@@ -18,19 +18,19 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
     auto logger = create_logger(param.log_sink, "Pager");
 
     if (param.frame_count < MINIMUM_FRAME_COUNT) {
-        ErrorMessage group;
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail(ERROR_DETAIL, "small");
-        group.set_hint(ERROR_HINT, "minimum", MINIMUM_FRAME_COUNT);
-        return Err {group.invalid_argument(*logger)};
+        LogMessage message {*logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail(ERROR_DETAIL, "small");
+        message.set_hint(ERROR_HINT, "minimum", MINIMUM_FRAME_COUNT);
+        return Err {message.invalid_argument()};
     }
 
     if (param.frame_count > MAXIMUM_FRAME_COUNT) {
-        ErrorMessage group;
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail(ERROR_DETAIL, "large");
-        group.set_hint(ERROR_HINT, "maximum", MAXIMUM_FRAME_COUNT);
-        return Err {group.invalid_argument(*logger)};
+        LogMessage message {*logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail(ERROR_DETAIL, "large");
+        message.set_hint(ERROR_HINT, "maximum", MAXIMUM_FRAME_COUNT);
+        return Err {message.invalid_argument()};
     }
 
     const auto cache_size = param.page_size * param.frame_count;
@@ -40,11 +40,11 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
     };
 
     if (!buffer) {
-        ErrorMessage group;
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail("allocation of {} B cache failed", cache_size);
-        group.set_hint("out of memory");
-        return Err {group.system_error(*logger)};
+        LogMessage message {*logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail("allocation of {} B cache failed", cache_size);
+        message.set_hint("out of memory");
+        return Err {message.system_error()};
     }
     return std::unique_ptr<Pager> {new Pager{std::move(buffer), std::move(param)}};
 }
@@ -131,30 +131,36 @@ auto Pager::sync() -> Result<void>
 
 auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
 {
+    static constexpr auto ERROR_PRIMARY = "cannot read page";
+    static constexpr auto ERROR_DETAIL = "page ID is {}";
     CCO_EXPECT_EQ(page_size(), out.size());
 
-    return m_reader->read(out, FileLayout::page_offset(id, out.size()))
-        .and_then([&](Size read_size) -> Result<bool> {
-            if (read_size == 0) {
-                // Just hit EOF.
-                return false;
-            } else if (read_size == out.size()) {
-                // Read a full page.
-                return true;
-            }
-            // Partial read.
-            ErrorMessage message;
-            message.set_primary("cannot read page");
-            message.set_detail("read an incomplete page");
-            return Err {message.system_error(*m_logger)};
-        })
-        .or_else([this](const Error &error) -> Result<bool> {
-            NumberedGroup group;
-            group.push_line("cannot read page");
-            group.push_line("[FileReader] {}", btos(error.what()));
-            group.log(*m_logger, spdlog::level::err);
-            return Err {error};
-        });
+    const auto was_read = m_reader->read(out, FileLayout::page_offset(id, out.size()));
+
+    // System call error.
+    if (!was_read.has_value()) {
+        m_logger->error(btos(was_read.error().what()));
+        LogMessage message {*m_logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail(ERROR_DETAIL, id.value);
+        message.log();
+        return Err {was_read.error()};
+    }
+
+    // Just read the whole page.
+    if (const auto read_size = *was_read; read_size == out.size()) {
+        return true;
+    // Just hit EOF.
+    } else if (read_size == 0) {
+        return false;
+    // Incomplete read.
+    } else {
+        LogMessage message {*m_logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail(ERROR_DETAIL, id.value);
+        message.set_hint("incomplete read of {} B", read_size);
+        return Err {message.system_error()};
+    }
 }
 
 auto Pager::write_page_to_file(PID id, BytesView in) const -> Result<void>
@@ -163,10 +169,8 @@ auto Pager::write_page_to_file(PID id, BytesView in) const -> Result<void>
 
     return write_all(*m_writer, in, FileLayout::page_offset(id, in.size()))
         .or_else([this](const Error &error) -> Result<void> {
-            NumberedGroup group;
-            group.push_line("cannot write page");
-            group.push_line("[FileWriter] {}", btos(error.what()));
-            group.log(*m_logger, spdlog::level::err);
+            m_logger->error(btos(error.what()));
+            m_logger->error("cannot write page");
             return Err {error};
         });
 }

@@ -40,19 +40,19 @@ inline auto operator|(const Mode &lhs, const Mode &rhs)
 class IFileReader {
 public:
     virtual ~IFileReader() = default;
-    virtual auto seek(long, Seek) -> Result<Index> = 0;
-    virtual auto read(Bytes) -> Result<Size> = 0;
-    virtual auto read(Bytes, Index) -> Result<Size> = 0;
+    [[nodiscard]] virtual auto seek(long, Seek) -> Result<Index> = 0;
+    [[nodiscard]] virtual auto read(Bytes) -> Result<Size> = 0;
+    [[nodiscard]] virtual auto read(Bytes, Index) -> Result<Size> = 0;
 };
 
 class IFileWriter {
 public:
     virtual ~IFileWriter() = default;
-    virtual auto seek(long, Seek) -> Result<Index> = 0;
-    virtual auto write(BytesView) -> Result<Size> = 0;
-    virtual auto write(BytesView, Index) -> Result<Size> = 0;
-    virtual auto sync() -> Result<void> = 0;
-    virtual auto resize(Size) -> Result<void> = 0;
+    [[nodiscard]] virtual auto seek(long, Seek) -> Result<Index> = 0;
+    [[nodiscard]] virtual auto write(BytesView) -> Result<Size> = 0;
+    [[nodiscard]] virtual auto write(BytesView, Index) -> Result<Size> = 0;
+    [[nodiscard]] virtual auto sync() -> Result<void> = 0;
+    [[nodiscard]] virtual auto resize(Size) -> Result<void> = 0;
 };
 
 class IFile {
@@ -84,6 +84,7 @@ public:
     [[nodiscard]] virtual auto open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> = 0;
     [[nodiscard]] virtual auto remove() -> Result<void> = 0;
     [[nodiscard]] virtual auto sync() -> Result<void> = 0;
+    [[nodiscard]] virtual auto close() -> Result<void> = 0;
 };
 
 } // calico

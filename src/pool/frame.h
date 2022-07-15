@@ -81,7 +81,8 @@ public:
         m_is_dirty = false;
     }
 
-    auto borrow(IBufferPool*, bool) -> page::Page;
+    [[nodiscard]] auto page_lsn() const -> LSN;
+    [[nodiscard]] auto borrow(IBufferPool*, bool) -> page::Page;
     auto synchronize(page::Page&) -> void;
 
     auto operator=(Frame&&) -> Frame& = default;

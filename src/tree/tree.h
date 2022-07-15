@@ -54,6 +54,11 @@ public:
         return m_pool;
     }
 
+    [[nodiscard]] auto close() -> Result<void> override
+    {
+        return {};
+    }
+
     [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<ITree>>;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool> override;
     [[nodiscard]] auto erase(Cursor) -> Result<bool> override;

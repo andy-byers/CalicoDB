@@ -1,4 +1,5 @@
 #include "page.h"
+#include "update.h"
 
 #include "pool/interface.h"
 #include "utils/encoding.h"
@@ -36,10 +37,21 @@ auto Page::type() const -> PageType
     return PageType {get_u16(*this, header_offset() + PageLayout::TYPE_OFFSET)};
 }
 
+auto Page::lsn() const -> LSN
+{
+    return LSN {get_u32(*this, header_offset() + PageLayout::LSN_OFFSET)};
+}
+
 auto Page::set_type(PageType type) -> void
 {
     const auto offset = header_offset() + PageLayout::TYPE_OFFSET;
     put_u16(*this, offset, static_cast<uint16_t>(type));
+}
+
+auto Page::set_lsn(LSN lsn) -> void
+{
+    const auto offset = header_offset() + PageLayout::LSN_OFFSET;
+    put_u32(*this, offset, lsn.value);
 }
 
 auto Page::id() const -> PID
@@ -69,13 +81,16 @@ auto Page::read(Bytes out, Index offset) const -> void
 
 auto Page::bytes(Index offset) -> Bytes
 {
-    m_is_dirty = true;
-    return m_data.range(offset);
+    return bytes(offset, size() - offset);
 }
 
 auto Page::bytes(Index offset, Size size) -> Bytes
 {
-    return bytes(offset).truncate(size);
+    CCO_EXPECT_TRUE(m_is_writable);
+    if (m_manager)
+        m_manager->push({offset, size});
+    m_is_dirty = true;
+    return m_data.range(offset, size);
 }
 
 auto Page::write(BytesView in, Index offset) -> void

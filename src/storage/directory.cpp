@@ -7,15 +7,6 @@ namespace cco {
 
 namespace fs = std::filesystem;
 
-Directory::~Directory()
-{
-    system::close(m_file)
-        .or_else([](const Error &error) -> Result<void> {
-            // TODO: Log this error.
-            return Err {error};
-        });
-}
-
 auto Directory::path() const -> std::string
 {
     return m_path;
@@ -89,6 +80,12 @@ auto Directory::open_file(const std::string &name, Mode mode, int permissions) -
         .and_then([&file]() -> Result<std::unique_ptr<IFile>> {
             return std::move(file);
         });
+}
+
+auto Directory::close() -> Result<void>
+{
+    CCO_TRY(sync());
+    return system::close(m_file);
 }
 
 } // calico
