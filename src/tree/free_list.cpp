@@ -49,13 +49,13 @@ auto FreeList::pop() -> Result<Page>
                 m_free_count--;
                 return link.take();
             })
-            .or_else([&](Error error) -> Result<Page> {
+            .or_else([&](Status error) -> Result<Page> {
                 // TODO: Error logging here. We'll need a logger for the free list.
                 return Err {std::move(error)};
             });
     }
     CCO_EXPECT_TRUE(m_free_start.is_null());
-    return Err {Error::logic_error("cannot pop page: free list is empty")};
+    return Err {Status::logic_error("cannot pop page: free list is empty")};
 }
 
 } // calico

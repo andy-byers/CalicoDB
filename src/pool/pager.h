@@ -1,25 +1,22 @@
 #ifndef CCO_POOL_PAGER_H
 #define CCO_POOL_PAGER_H
 
+#include "calico/status.h"
 #include <list>
 #include <memory>
 #include <optional>
 #include <spdlog/spdlog.h>
-#include "calico/error.h"
 
 namespace cco {
 
 class Frame;
-class IFileReader;
-class IFileWriter;
+class IFile;
 struct PID;
 
 class Pager final {
 public:
     struct Parameters {
-        std::unique_ptr<IFileReader> reader;
-        std::unique_ptr<IFileWriter> writer;
-        spdlog::sink_ptr log_sink;
+        std::unique_ptr<IFile> file;
         Size page_size {};
         Size frame_count {};
     };
@@ -45,9 +42,9 @@ public:
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto pin(PID) -> Result<Frame>;
     [[nodiscard]] auto unpin(Frame) -> Result<void>;
-    [[nodiscard]] auto discard(Frame) -> Result<void>;
     [[nodiscard]] auto truncate(Size) -> Result<void>;
     [[nodiscard]] auto sync() -> Result<void>;
+    auto discard(Frame) -> void;
 
     auto operator=(Pager&&) -> Pager& = default;
     Pager(Pager&&) = default;
@@ -59,9 +56,7 @@ private:
 
     AlignedBuffer m_buffer;
     std::list<Frame> m_available;
-    std::unique_ptr<IFileReader> m_reader;
-    std::unique_ptr<IFileWriter> m_writer;
-    std::shared_ptr<spdlog::logger> m_logger;
+    std::unique_ptr<IFile> m_file;
     Size m_frame_count{};
     Size m_page_size{};
 };

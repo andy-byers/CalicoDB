@@ -1,6 +1,5 @@
 #include "page.h"
 #include "update.h"
-
 #include "pool/interface.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
@@ -96,6 +95,26 @@ auto Page::bytes(Index offset, Size size) -> Bytes
 auto Page::write(BytesView in, Index offset) -> void
 {
     mem_copy(bytes(offset, in.size()), in);
+}
+
+auto Page::undo(LSN previous_lsn, const std::vector<ChangedRegion> &changes) -> void
+{
+    CCO_EXPECT_GE(lsn(), previous_lsn);
+    for (const auto &region: changes)
+        mem_copy(m_data.range(region.offset), region.before, region.before.size());
+    const auto lsn_offset = PageLayout::header_offset(m_id) + PageLayout::LSN_OFFSET;
+    utils::put_u32(m_data.range(lsn_offset), previous_lsn.value);
+    m_is_dirty = true;
+}
+
+auto Page::redo(LSN next_lsn, const std::vector<ChangedRegion> &changes) -> void
+{
+    CCO_EXPECT_LT(lsn(), next_lsn);
+    for (const auto &region: changes)
+        mem_copy(m_data.range(region.offset), region.after, region.after.size());
+    const auto lsn_offset = PageLayout::header_offset(m_id) + PageLayout::LSN_OFFSET;
+    utils::put_u32(m_data.range(lsn_offset), next_lsn.value);
+    m_is_dirty = true;
 }
 
 auto get_u16(const Page &page, Index offset) -> uint16_t

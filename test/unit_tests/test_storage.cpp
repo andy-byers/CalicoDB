@@ -53,25 +53,23 @@ auto write_exact_string(Writer &&writer, const std::string &buffer, Index offset
     Random random {0};
     const auto payload_out = random.next_string(payload_size);
     auto out = stob(payload_out);
-    auto writer = file.open_writer();
 
     // Write out the string in random-sized chunks.
     while (!out.is_empty()) {
         const auto chunk_size = random.next_int(out.size());
-        ASSERT_TRUE(write_all(*writer, out.range(0, chunk_size)));
+        ASSERT_TRUE(write_all(file, out.range(0, chunk_size)));
         out.advance(chunk_size);
     }
-    auto seek_result = writer->seek(0, Seek::BEGIN);
+    auto seek_result = file.seek(0, Seek::BEGIN);
     ASSERT_TRUE(seek_result && not seek_result.value());
 
     std::string payload_in(payload_size, '\x00');
     auto in = stob(payload_in);
-    auto reader = file.open_reader();
 
     // Read back the string in random-sized chunks.
     while (!in.is_empty()) {
         const auto chunk_size = random.next_int(in.size());
-        ASSERT_TRUE(read_exact(*reader, in.range(0, chunk_size)));
+        ASSERT_TRUE(read_exact(file, in.range(0, chunk_size)));
         in.advance(chunk_size);
     }
     ASSERT_EQ(payload_in, payload_out);
@@ -137,16 +135,15 @@ TEST_F(FileTests, ReadFromFile)
         ofs << TEST_STRING;
     }
     auto file = open(PATH, Mode::READ_ONLY);
-    read_exact_string(*file->open_reader(), test_buffer);
+    read_exact_string(*file, test_buffer);
     ASSERT_EQ(test_buffer, TEST_STRING);
 }
 
 TEST_F(FileTests, WriteToFile)
 {
     auto file = open(PATH, Mode::WRITE_ONLY | Mode::CREATE | Mode::TRUNCATE);
-    auto writer = file->open_writer();
-    write_exact_string(*writer, TEST_STRING);
-    ASSERT_TRUE(writer->sync());
+    write_exact_string(*file, TEST_STRING);
+    ASSERT_TRUE(file->sync());
     auto ifs = std::ifstream{PATH};
     std::string result;
     ifs >> result;
@@ -157,35 +154,33 @@ TEST_F(FileTests, WriteToFile)
 TEST_F(FileTests, PositionedReadsAndWrites)
 {
     auto file = open(PATH, Mode::READ_WRITE | Mode::CREATE);
-    write_exact_string(*file->open_writer(), "!", 12);
-    write_exact_string(*file->open_writer(), "world", 7);
-    write_exact_string(*file->open_writer(), "Hello, ", 0);
+    write_exact_string(*file, "!", 12);
+    write_exact_string(*file, "world", 7);
+    write_exact_string(*file, "Hello, ", 0);
     std::string buffer(13, '\x00');
 
-    auto reader = file->open_reader();
-    ASSERT_TRUE(read_exact_at(*reader, stob(buffer).advance(12), 12));
-    ASSERT_TRUE(read_exact_at(*reader, stob(buffer).range(6, 6), 6));
-    ASSERT_TRUE(read_exact_at(*reader, stob(buffer).truncate(7), 0));
+    ASSERT_TRUE(read_exact_at(*file, stob(buffer).advance(12), 12));
+    ASSERT_TRUE(read_exact_at(*file, stob(buffer).range(6, 6), 6));
+    ASSERT_TRUE(read_exact_at(*file, stob(buffer).truncate(7), 0));
     ASSERT_EQ(buffer, "Hello, world!");
 }
 
 TEST_F(FileTests, ExactReadsFailIfNotEnoughData)
 {
     auto file = open(PATH, Mode::READ_WRITE | Mode::CREATE);
-    write_exact_string(*file->open_writer(), "Hello, world!");
+    write_exact_string(*file, "Hello, world!");
     std::string buffer(100, '\x00');
-    ASSERT_FALSE(read_exact(*file->open_reader(), stob(buffer)));
+    ASSERT_FALSE(read_exact(*file, stob(buffer)));
 }
 
 TEST_F(FileTests, ReportsEOFDuringRead)
 {
     auto file = open(PATH, Mode::CREATE | Mode::READ_WRITE | Mode::TRUNCATE);
-    write_exact_string(*file->open_writer(), TEST_STRING);
-    auto reader = file->open_reader();
-    ASSERT_TRUE(reader->seek(0, Seek::BEGIN));
+    write_exact_string(*file, TEST_STRING);
+    ASSERT_TRUE(file->seek(0, Seek::BEGIN));
     test_buffer.resize(test_buffer.size() * 2);
     // Try to read past EOF.
-    auto result = reader->read(stob(test_buffer));
+    auto result = file->read(stob(test_buffer));
     ASSERT_TRUE(result && result.value() == strlen(TEST_STRING));
     test_buffer.resize(strlen(TEST_STRING));
     ASSERT_EQ(test_buffer, TEST_STRING);
@@ -235,26 +230,22 @@ TEST_F(FileFailureTests, FailsWhenFileDoesNotExistButShould)
 
 TEST_F(FileFailureTests, FailsWhenReadSizeIsTooLarge)
 {
-    auto reader = file->open_reader();
-    ASSERT_TRUE(reader->read(large_slice).error().is_system_error());
+    ASSERT_TRUE(file->read(large_slice).error().is_system_error());
 }
 
 TEST_F(FileFailureTests, FailsWhenWriteSizeIsTooLarge)
 {
-    auto writer = file->open_writer();
-    ASSERT_TRUE(writer->write(large_slice).error().is_system_error());
+    ASSERT_TRUE(file->write(large_slice).error().is_system_error());
 }
 
 TEST_F(FileFailureTests, FailsWhenSeekOffsetIsTooLarge)
 {
-    auto reader = file->open_reader();
-    ASSERT_TRUE(reader->seek(static_cast<long>(OVERFLOW_SIZE), Seek::BEGIN).error().is_system_error());
+    ASSERT_TRUE(file->seek(static_cast<long>(OVERFLOW_SIZE), Seek::BEGIN).error().is_system_error());
 }
 
 TEST_F(FileFailureTests, FailsWhenNewSizeIsTooLarge)
 {
-    auto writer = file->open_writer();
-    ASSERT_TRUE(writer->resize(OVERFLOW_SIZE).error().is_system_error());
+    ASSERT_TRUE(file->resize(OVERFLOW_SIZE).error().is_system_error());
 }
 
 TEST_F(FileTests, FailsWhenNewNameIsTooLong)

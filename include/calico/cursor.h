@@ -1,9 +1,9 @@
 #ifndef CCO_CURSOR_H
 #define CCO_CURSOR_H
 
+#include "status.h"
 #include <memory>
 #include <optional>
-#include "error.h"
 
 namespace cco {
 
@@ -29,13 +29,7 @@ public:
      */
     [[nodiscard]] auto is_valid() const -> bool;
 
-    /**
-     * Get the error state of the cursor.
-     *
-     * @return The cursor error state, which contains the last error that the cursor encountered if
-     *         the cursor has ever encountered an error, or std::nullopt otherwise.
-     */
-    [[nodiscard]] auto error() const -> std::optional<Error>;
+    [[nodiscard]] auto status() const -> Status;
 
     /**
      * Check if the cursor is on the record with the largest key (the rightmost record).
@@ -182,9 +176,9 @@ private:
     auto seek_left() -> bool;
     auto seek_right() -> bool;
     auto invalidate() -> void;
-    auto set_error(const Error&) const -> void;
+    auto set_status(const Status&) const -> void;
 
-    mutable std::optional<Error> m_error {};
+    mutable Status m_status {Status::ok()};
     NodePool *m_pool {}; ///< Reference to an object that provides nodes from the buffer pool.
     Internal *m_internal {}; ///< Reference to the page internals.
     Position m_position; ///< Position of the cursor in the page.

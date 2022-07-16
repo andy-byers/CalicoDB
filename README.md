@@ -20,6 +20,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
   + [Bytes Objects](#bytes-objects)
   + [Updating a Database](#updating-a-database)
   + [Querying a Database](#querying-a-database)
+  + [Errors](#errors)
   + [Transactions](#transactions)
   + [Deleting a Database](#deleting-a-database)
 + [Performance](#performance)
@@ -81,12 +82,6 @@ See the `Dockerfile` for details on how to build them.
 
 ## API
 
-### Errors
-Calico DB uses `@TartanLlama/expected` in conjunction with a custom error object for reporting invalid states.
-API calls that can fail will generally return a `cco::Result<T>`, which is an alias for `tl::expected<T, cco::Error>`.
-If the call succeeds, the result object will contain an instance of the expected `T`.
-Otherwise, it will contain an error object, which holds the error type and an explanation of what went wrong.
-
 ### Opening a Database
 The entry point to an application using Calico DB might look something like:
 
@@ -99,7 +94,7 @@ options.frame_count = 256;
 options.log_level = spdlog::level::info;
 
 return *cco::Database::open("/tmp/example", options)
-    .or_else([](const cco::Error &error) -> cco::Result<cco::Database> {
+    .or_else([](const cco::Status &error) -> cco::Result<cco::Database> {
         fmt::print("(1/2) cannot open database\n");
         fmt::print("(2/2) {}\n", cco::btos(error.what()));
         return cco::Err {error};
@@ -210,6 +205,11 @@ if (const auto boundary = db.find_exact(key); boundary.is_valid()) {
 }
 ```
 
+### Errors
+Calico DB uses @TartanLlama/expected to handle errors.
+Methods that modify the database will return a `cco::Result<T>` (an alias for `tl::expected<T, cco::Status>`).
+If the operation was successful, the `cco::Result<T>` will contain the expected `T`, otherwise, it will contain a `cco::Status` that describes what went wrong.
+
 ### Transactions
 Every modification to a Calico DB database occurs within a transaction.
 The first transaction begins when the database is opened, and the last one commits when the database is closed.
@@ -255,15 +255,12 @@ We can usually get over 500K ops/second for random reads and several million for
 6. Work on the design document
 7. Implement optional compression of record values
 8. Work on performance
-9. Work on the benchmark suite
-  + Results may not be all that accurate (really need to benchmark against other databases)
-  + Need to test large (100,000 B) values
-  + Code is very messy/difficult to change
-11. Get the CMake installation to work
-12. Implement WAL segmentation
+9. Write a benchmark suite
+10. Get the CMake installation to work
+11. Implement WAL segmentation
   + WAL should be segmented after it reaches a fixed size, similar to `spdlog`s rotating file sink
   + This should improve the performance of long-running transactions
-13. Consider allowing multiple independent trees in a single database (could be either in the same `data` file or separate `data-*` files)
+12. Consider allowing multiple independent trees in a single database (could be either in the same `data` file or separate `data-*` files)
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.
@@ -280,7 +277,7 @@ CalicoDB
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
-┃ ┣╸exception.h ┄┄┄┄ Public-facing exceptions
+┃ ┣╸error.h ┄┄┄┄┄┄┄┄ Status object
 ┃ ┗╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┣╸src
 ┃ ┣╸db ┄┄┄┄┄┄┄┄┄┄┄┄┄ API implementation
@@ -290,9 +287,6 @@ CalicoDB
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Utility module
 ┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging module
 ┗╸test
-  ┣╸benchmark ┄┄┄┄┄┄ Performance benchmarks
-  ┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄ Fuzz tests
-  ┣╸integration ┄┄┄┄ Integration tests
   ┣╸recovery ┄┄┄┄┄┄┄ Test database failure and recovery
   ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Test tools
   ┗╸unit_tests ┄┄┄┄┄ Unit tests

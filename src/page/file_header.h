@@ -7,6 +7,7 @@
 namespace cco::page {
 
 class Node;
+class Page;
 
 class FileHeader {
 public:
@@ -16,6 +17,7 @@ public:
     FileHeader();
     explicit FileHeader(Bytes);
     explicit FileHeader(Node&);
+    explicit FileHeader(Page&);
     [[nodiscard]] auto data() const -> BytesView;
     [[nodiscard]] auto magic_code() const -> Index;
     [[nodiscard]] auto header_crc() const -> Index;

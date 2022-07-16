@@ -10,16 +10,18 @@ namespace cco::page {
 
 using namespace utils;
 
-FileHeader::FileHeader()
-    : m_backing(FileLayout::HEADER_SIZE, '\x00')
-    , m_header {stob(m_backing)} {}
+FileHeader::FileHeader():
+      m_backing(FileLayout::HEADER_SIZE, '\x00'),
+      m_header {stob(m_backing)} {}
 
-FileHeader::FileHeader(Bytes data)
-    : m_header{data.range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)} {}
+FileHeader::FileHeader(Bytes data):
+      m_header{data.range(FileLayout::header_offset(), FileLayout::HEADER_SIZE)} {}
 
-FileHeader::FileHeader(Node &root)
-    // Causes the whole storage header region to be written to the WAL.
-    : m_header {root.page().bytes(FileLayout::header_offset(), FileLayout::HEADER_SIZE)}
+FileHeader::FileHeader(Node &root):
+      FileHeader {root.page()} {}
+
+FileHeader::FileHeader(Page &root):
+    m_header {root.bytes(FileLayout::header_offset(), FileLayout::HEADER_SIZE)}
 {
     CCO_EXPECT_TRUE(root.id().is_root());
 }

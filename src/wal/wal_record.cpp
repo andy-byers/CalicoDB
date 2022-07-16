@@ -127,7 +127,7 @@ auto WALRecord::read(BytesView in) -> Result<bool>
     in.advance(sizeof(Type));
 
     if (!is_record_type_valid(m_type))
-        return Err {Error::corruption(ERROR_PRIMARY)};
+        return Err {Status::corruption(ERROR_PRIMARY)};
 
     // x (2B)
     const auto payload_size = get_u16(in.data());
@@ -135,7 +135,7 @@ auto WALRecord::read(BytesView in) -> Result<bool>
 
     // Every record stores at least 1 payload byte.
     if (!payload_size || payload_size > in.size())
-        return Err {Error::corruption(ERROR_PRIMARY)};
+        return Err {Status::corruption(ERROR_PRIMARY)};
 
     m_payload.m_data.resize(payload_size);
 
@@ -229,7 +229,7 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
 
     if (m_type == Type::EMPTY) {
         if (rhs.m_type == Type::MIDDLE || rhs.m_type == Type::LAST)
-            return Err {Error::corruption(ERROR_PRIMARY)};
+            return Err {Status::corruption(ERROR_PRIMARY)};
 
         m_type = rhs.m_type;
         m_lsn = rhs.m_lsn;
@@ -239,7 +239,7 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
         CCO_EXPECT_EQ(m_type, Type::FIRST);
 
         if (m_lsn != rhs.m_lsn || m_crc != rhs.m_crc)
-            return Err {Error::corruption(ERROR_PRIMARY)};
+            return Err {Status::corruption(ERROR_PRIMARY)};
 
         // We have just completed a record.
         if (rhs.m_type == Type::LAST)

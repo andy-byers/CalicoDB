@@ -1,5 +1,4 @@
 #include "pager.h"
-
 #include "frame.h"
 #include "storage/file.h"
 #include "utils/expect.h"
@@ -15,10 +14,9 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
     static constexpr auto ERROR_PRIMARY = "cannot create pager object";
     static constexpr auto ERROR_DETAIL = "frame count is too {}";
     static constexpr auto ERROR_HINT = "{} frame count is {}";
-    auto logger = create_logger(param.log_sink, "Pager");
 
     if (param.frame_count < MINIMUM_FRAME_COUNT) {
-        LogMessage message {*logger};
+        ThreePartMessage message;
         message.set_primary(ERROR_PRIMARY);
         message.set_detail(ERROR_DETAIL, "small");
         message.set_hint(ERROR_HINT, "minimum", MINIMUM_FRAME_COUNT);
@@ -26,7 +24,7 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
     }
 
     if (param.frame_count > MAXIMUM_FRAME_COUNT) {
-        LogMessage message {*logger};
+        ThreePartMessage message;
         message.set_primary(ERROR_PRIMARY);
         message.set_detail(ERROR_DETAIL, "large");
         message.set_hint(ERROR_HINT, "maximum", MAXIMUM_FRAME_COUNT);
@@ -40,7 +38,7 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
     };
 
     if (!buffer) {
-        LogMessage message {*logger};
+        ThreePartMessage message;
         message.set_primary(ERROR_PRIMARY);
         message.set_detail("allocation of {} B cache failed", cache_size);
         message.set_hint("out of memory");
@@ -51,14 +49,10 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
 
 Pager::Pager(AlignedBuffer buffer, Parameters param):
       m_buffer {std::move(buffer)},
-      m_reader {std::move(param.reader)},
-      m_writer {std::move(param.writer)},
-      m_logger {create_logger(param.log_sink, "Pager")},
+      m_file {std::move(param.file)},
       m_frame_count {param.frame_count},
       m_page_size {param.page_size}
 {
-    m_logger->trace("constructing Pager object");
-
     // The buffer should be aligned to the page size.
     CCO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % m_page_size, 0);
     mem_clear({m_buffer.get(), m_page_size * m_frame_count});
@@ -80,7 +74,7 @@ auto Pager::page_size() const -> Size
 auto Pager::truncate(Size page_count) -> Result<void>
 {
     CCO_EXPECT_EQ(m_available.size(), m_frame_count);
-    return m_writer->resize(page_count * page_size());
+    return m_file->resize(page_count * page_size());
 }
 
 auto Pager::pin(PID id) -> Result<Frame>
@@ -103,10 +97,11 @@ auto Pager::pin(PID id) -> Result<Frame>
     return moved;
 }
 
-auto Pager::discard(Frame frame) -> Result<void>
+auto Pager::discard(Frame frame) -> void
 {
-    frame.reset(PID::null());
-    return unpin(std::move(frame));
+    frame.purge();
+    if (!frame.is_owned())
+        m_available.emplace_back(std::move(frame));
 }
 
 auto Pager::unpin(Frame frame) -> Result<void>
@@ -126,7 +121,7 @@ auto Pager::unpin(Frame frame) -> Result<void>
 
 auto Pager::sync() -> Result<void>
 {
-    return m_writer->sync();
+    return m_file->sync();
 }
 
 auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
@@ -135,17 +130,11 @@ auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
     static constexpr auto ERROR_DETAIL = "page ID is {}";
     CCO_EXPECT_EQ(page_size(), out.size());
 
-    const auto was_read = m_reader->read(out, FileLayout::page_offset(id, out.size()));
+    const auto was_read = m_file->read(out, FileLayout::page_offset(id, out.size()));
 
     // System call error.
-    if (!was_read.has_value()) {
-        m_logger->error(btos(was_read.error().what()));
-        LogMessage message {*m_logger};
-        message.set_primary(ERROR_PRIMARY);
-        message.set_detail(ERROR_DETAIL, id.value);
-        message.log();
+    if (!was_read.has_value())
         return Err {was_read.error()};
-    }
 
     // Just read the whole page.
     if (const auto read_size = *was_read; read_size == out.size()) {
@@ -155,7 +144,7 @@ auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
         return false;
     // Incomplete read.
     } else {
-        LogMessage message {*m_logger};
+        ThreePartMessage message;
         message.set_primary(ERROR_PRIMARY);
         message.set_detail(ERROR_DETAIL, id.value);
         message.set_hint("incomplete read of {} B", read_size);
@@ -166,13 +155,7 @@ auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
 auto Pager::write_page_to_file(PID id, BytesView in) const -> Result<void>
 {
     CCO_EXPECT_EQ(page_size(), in.size());
-
-    return write_all(*m_writer, in, FileLayout::page_offset(id, in.size()))
-        .or_else([this](const Error &error) -> Result<void> {
-            m_logger->error(btos(error.what()));
-            m_logger->error("cannot write page");
-            return Err {error};
-        });
+    return write_all(*m_file, in, FileLayout::page_offset(id, in.size()));
 }
 
 } // calico

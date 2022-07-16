@@ -71,13 +71,12 @@ namespace impl {
 
 } // impl
 
-UpdateManager::UpdateManager(Page &page, Bytes scratch):
-      m_snapshot {scratch},
-      m_current {page.view(0)}
+UpdateManager::UpdateManager(BytesView page, Bytes scratch):
+    m_snapshot {scratch},
+    m_current {page}
 {
     CCO_EXPECT_EQ(page.size(), m_snapshot.size());
     mem_copy(scratch, m_current);
-    page.set_manager(*this);
 }
 
 auto UpdateManager::push(Range range) -> void

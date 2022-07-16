@@ -26,29 +26,29 @@ auto create_sink(const std::string &base, spdlog::level::level_enum level) -> sp
     return sink;
 }
 
-auto ThreePartMessage::system_error() const -> Error
+auto create_sink() -> spdlog::sink_ptr
 {
-    return Error::system_error(text());
+    return create_sink("", spdlog::level::off);
 }
 
-auto ThreePartMessage::invalid_argument() const -> Error
+auto ThreePartMessage::system_error() const -> Status
 {
-    return Error::invalid_argument(text());
+    return Status::system_error(text());
 }
 
-auto ThreePartMessage::logic_error() const -> Error
+auto ThreePartMessage::invalid_argument() const -> Status
 {
-    return Error::logic_error(text());
+    return Status::invalid_argument(text());
 }
 
-auto ThreePartMessage::corruption() const -> Error
+auto ThreePartMessage::logic_error() const -> Status
 {
-    return Error::corruption(text());
+    return Status::logic_error(text());
 }
 
-auto ThreePartMessage::not_found() const -> Error
+auto ThreePartMessage::corruption() const -> Status
 {
-    return Error::not_found(text());
+    return Status::corruption(text());
 }
 
 auto ThreePartMessage::text() const -> std::string
@@ -70,29 +70,24 @@ auto ThreePartMessage::set_text(Index index, const char *text) -> void
     m_text[index] = text;
 }
 
-auto LogMessage::system_error(spdlog::level::level_enum level) const -> Error
+auto LogMessage::system_error(spdlog::level::level_enum level) const -> Status
 {
-    return Error::system_error(log(level));
+    return Status::system_error(log(level));
 }
 
-auto LogMessage::invalid_argument(spdlog::level::level_enum level) const -> Error
+auto LogMessage::invalid_argument(spdlog::level::level_enum level) const -> Status
 {
-    return Error::invalid_argument(log(level));
+    return Status::invalid_argument(log(level));
 }
 
-auto LogMessage::logic_error(spdlog::level::level_enum level) const -> Error
+auto LogMessage::logic_error(spdlog::level::level_enum level) const -> Status
 {
-    return Error::logic_error(log(level));
+    return Status::logic_error(log(level));
 }
 
-auto LogMessage::corruption(spdlog::level::level_enum level) const -> Error
+auto LogMessage::corruption(spdlog::level::level_enum level) const -> Status
 {
-    return Error::corruption(log(level));
-}
-
-auto LogMessage::not_found(spdlog::level::level_enum level) const -> Error
-{
-    return Error::not_found(log(level));
+    return Status::corruption(log(level));
 }
 
 auto LogMessage::log(spdlog::level::level_enum level) const -> std::string

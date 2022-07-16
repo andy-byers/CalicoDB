@@ -8,46 +8,34 @@ namespace cco {
 
 using namespace utils;
 
-auto WALReader::open(const Parameters &param) -> Result<std::unique_ptr<IWALReader>>
+auto WALReader::open(const WALParameters &param) -> Result<std::unique_ptr<IWALReader>>
 {
-    static constexpr auto ERROR_PRIMARY = "cannot open WAL reader";
-    auto logger = utils::create_logger(param.log_sink, "WALReader");
-    logger->trace("opening");
-
-    auto file = param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::READ_ONLY, 0666);
-    if (!file.has_value()) {
-        logger->error(btos(file.error().what()));
-        logger->error(ERROR_PRIMARY);
-        return Err {file.error()};
-    }
     CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
     CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
     CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
 
-    auto reader = std::unique_ptr<IWALReader> {new(std::nothrow) WALReader {std::move(*file), param}};
+    CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::READ_ONLY, 0666));
+    auto reader = std::unique_ptr<IWALReader> {new(std::nothrow) WALReader {std::move(file), param}};
     if (!reader) {
-        LogMessage group {*logger};
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail("out of memory");
-        return Err {group.system_error()};
+        ThreePartMessage message;
+        message.set_primary("cannot open WAL reader");
+        message.set_detail("out of memory");
+        return Err {message.system_error()};
     }
     return reader;
 }
 
 
-WALReader::WALReader(std::unique_ptr<IFile> file, Parameters param):
+WALReader::WALReader(std::unique_ptr<IFile> file, WALParameters param):
       m_block(param.page_size, '\x00'),
-      m_file {std::move(file)},
-      m_reader {m_file->open_reader()},
-      m_logger {create_logger(std::move(param.log_sink), "WALReader")} {}
+      m_file {std::move(file)} {}
 
 /**
  * Move the cursor to the beginning of the WAL storage.
  */
 auto WALReader::reset() -> Result<void>
 {
-    m_logger->trace("resetting");
-    CCO_TRY(m_reader->seek(0, Seek::BEGIN));
+    CCO_TRY(m_file->seek(0, Seek::BEGIN));
     m_has_block = false;
     m_cursor = 0;
     m_block_id = 0;
@@ -70,11 +58,10 @@ auto WALReader::record() const -> std::optional<WALRecord>
 auto WALReader::increment() -> Result<bool>
 {
     CCO_TRY_CREATE(record, read_next());
-    m_incremented = true;
+    m_incremented = true; // TODO: Why???
     if (record) {
         m_record = std::move(record);
-        m_logger->trace("incremented to record with LSN {}", m_record->lsn().value);
-        return m_record && m_incremented;
+        return true;
     }
     return false;
 }
@@ -91,7 +78,6 @@ auto WALReader::decrement() -> Result<bool>
     CCO_TRY_CREATE(record, read_previous());
     if (record) {
         m_record = std::move(record);
-        m_logger->trace("decremented to record with LSN {}", m_record->lsn().value);
         return true;
     }
     return false;
@@ -122,19 +108,13 @@ auto WALReader::read_next() -> Result<std::optional<WALRecord>>
                 return std::nullopt;
             }
         }
-        if (!record.is_consistent()) {
-            LogMessage message {*m_logger};
-            message.set_primary("cannot read WAL record");
-            message.set_detail("record with LSN {} is corrupted", record.lsn().value);
-            message.set_hint("block ID is {} and block offset is {}", m_block_id, m_cursor);
-            // This error gets ignored, but we still get the log output.
-            return Err {message.corruption()};
-        }
+        if (!record.is_consistent())
+            return Err {Status::corruption("")};
         return record;
     };
 
     return do_read_next()
-        .or_else([this](const Error&) -> Result<std::optional<WALRecord>> {
+        .or_else([this](const Status&) -> Result<std::optional<WALRecord>> {
             m_incremented = false;
             CCO_TRY_CREATE(previous, read_previous());
             if (previous)
@@ -165,7 +145,8 @@ auto WALReader::read_record() -> Result<std::optional<WALRecord>>
             m_block_id++;
             m_cursor = 0;
         }
-        if (!read_block())
+        CCO_TRY_CREATE(was_read, read_block());
+        if (!was_read)
             return std::nullopt;
     }
     CCO_TRY_CREATE(record, read_record_aux(m_cursor));
@@ -200,7 +181,7 @@ auto WALReader::read_record_aux(Index offset) -> Result<std::optional<WALRecord>
         case WALRecord::Type::EMPTY:
             return std::nullopt;
         default:
-            LogMessage message {*m_logger};
+            ThreePartMessage message;
             message.set_primary(ERROR_PRIMARY);
             message.set_detail("type {} is not recognized", static_cast<int>(record.type()));
             return Err {message.corruption()};
@@ -231,7 +212,7 @@ auto WALReader::pop_position_and_seek() -> Result<void>
 auto WALReader::read_block() -> Result<bool>
 {
     const auto block_start = m_block_id * m_block.size();
-    return m_reader->read(stob(m_block), block_start)
+    return m_file->read(stob(m_block), block_start)
         .and_then([this](Size read_size) -> Result<bool> {
             if (read_size != m_block.size()) {
                 if (read_size == 0)
@@ -245,12 +226,11 @@ auto WALReader::read_block() -> Result<bool>
             m_has_block = true;
             return true;
         })
-        .or_else([this](const Error &error) -> Result<bool> {
+        .or_else([this](const Status &error) -> Result<bool> {
             m_has_block = false;
             m_positions.clear();
             m_record.reset();
             m_cursor = 0;
-            m_logger->error(btos(error.what()));
             return Err {error};
         });
 }

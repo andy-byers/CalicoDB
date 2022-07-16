@@ -71,28 +71,29 @@ auto Cursor::operator--(int) -> Cursor
 
 auto Cursor::is_valid() const -> bool
 {
-    return m_is_valid && !m_error.has_value();
+    return m_is_valid && m_status.is_ok();
 }
 
-auto Cursor::error() const -> std::optional<Error>
+auto Cursor::status() const -> Status
 {
-    return m_error;
+    return m_status;
 }
 
-auto Cursor::set_error(const Error &error) const -> void
+auto Cursor::set_status(const Status &status) const -> void
 {
-    CCO_EXPECT_EQ(m_error, std::nullopt);
-    m_error = error;
+    CCO_EXPECT_TRUE(m_status.is_ok());
+    CCO_EXPECT_FALSE(status.is_ok());
+    m_status = status;
 }
 
 auto Cursor::is_maximum() const -> bool
 {
-    return m_is_valid && m_position.is_maximum();
+    return is_valid() && m_position.is_maximum();
 }
 
 auto Cursor::is_minimum() const -> bool
 {
-    return m_is_valid && m_position.is_minimum();
+    return is_valid() && m_position.is_minimum();
 }
 
 auto Cursor::move_to(Node node, Index index) -> void
@@ -110,7 +111,7 @@ auto Cursor::move_to(Node node, Index index) -> void
     }
 
     if (auto result = m_pool->release(std::move(node)); !result.has_value())
-        set_error(result.error());
+        set_status(result.error());
 }
 
 auto Cursor::invalidate() -> void
@@ -120,7 +121,7 @@ auto Cursor::invalidate() -> void
 
 auto Cursor::increment() -> bool
 {
-    if (m_is_valid) {
+    if (is_valid()) {
         if (m_position.index == m_position.cell_count - 1) {
             return seek_right();
         } else {
@@ -133,7 +134,7 @@ auto Cursor::increment() -> bool
 
 auto Cursor::decrement() -> bool
 {
-    if (m_is_valid) {
+    if (is_valid()) {
         if (m_position.index == 0) {
             return seek_left();
         } else {
@@ -149,7 +150,7 @@ auto Cursor::key() const -> BytesView
     CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
-        set_error(node.error());
+        set_status(node.error());
         return {};
     }
     return node->read_key(m_position.index);
@@ -160,12 +161,12 @@ auto Cursor::value() const -> std::string
     CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
-        set_error(node.error());
+        set_status(node.error());
         return {};
     }
     return *m_internal->collect_value(*node, m_position.index)
-       .map_error([this](const Error &error) -> std::string {
-           set_error(error);
+       .map_error([this](const Status &status) -> std::string {
+           set_status(status);
            return {};
        });
 }
@@ -175,12 +176,12 @@ auto Cursor::record() const -> Record
     CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
-        set_error(node.error());
+        set_status(node.error());
         return {};
     }
     auto value = m_internal->collect_value(*node, m_position.index);
     if (!value.has_value()) {
-        set_error(node.error());
+        set_status(node.error());
         return {};
     }
     return {btos(node->read_key(m_position.index)), std::move(*value)};
@@ -196,7 +197,7 @@ auto Cursor::seek_left() -> bool
         const PID left {m_position.ids[Position::LEFT]};
         auto previous = m_pool->acquire(left, false);
         if (!previous.has_value()) {
-            set_error(previous.error());
+            set_status(previous.error());
             return false;
         }
         move_to(std::move(*previous), 0);
@@ -215,7 +216,7 @@ auto Cursor::seek_right() -> bool
         const PID right {m_position.ids[Position::RIGHT]};
         auto next = m_pool->acquire(right, false);
         if (!next.has_value()) {
-            set_error(next.error());
+            set_status(next.error());
             return false;
         }
         move_to(std::move(*next), 0);

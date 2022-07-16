@@ -21,12 +21,14 @@ Tree::Tree(Parameters param)
 
 auto Tree::open(Parameters param) -> Result<std::unique_ptr<ITree>>
 {
-    auto tree = std::unique_ptr<Tree>(new Tree {std::move(param)});
-    if (tree->m_pool.node_count() == 0) {
-        CCO_TRY_CREATE(root, tree->m_pool.allocate(PageType::EXTERNAL_NODE));
-        CCO_TRY(tree->m_pool.release(std::move(root)));
-    }
-    return tree;
+    return std::unique_ptr<Tree>(new Tree {std::move(param)});
+}
+
+auto Tree::allocate_root() -> Result<page::Node>
+{
+    CCO_EXPECT_EQ(m_pool.node_count(), 0);
+    CCO_TRY_CREATE(root, m_pool.allocate(PageType::EXTERNAL_NODE));
+    return root;
 }
 
 auto Tree::insert(BytesView key, BytesView value) -> Result<bool>
@@ -66,6 +68,8 @@ auto Tree::erase(Cursor cursor) -> Result<bool>
         CCO_TRY_CREATE(node, m_pool.acquire(PID {cursor.id()}, true));
         CCO_TRY(m_internal.positioned_remove({std::move(node), cursor.index()}));
         return true;
+    } else if (!cursor.status().is_ok()) {
+        return Err {cursor.status()};
     }
     return false;
 }
@@ -85,7 +89,7 @@ auto Tree::find_aux(BytesView key, bool &found_exact_out) -> Cursor
     Cursor cursor {&m_pool, &m_internal};
     auto was_found = m_internal.find_external(key, false);
     if (!was_found.has_value()) {
-        cursor.set_error(was_found.error());
+        cursor.set_status(was_found.error());
         return cursor;
     }
     auto [node, index, found_exact] = std::move(*was_found);
@@ -93,14 +97,14 @@ auto Tree::find_aux(BytesView key, bool &found_exact_out) -> Cursor
     if (index == node.cell_count() && !node.right_sibling_id().is_null()) {
         const auto id = node.right_sibling_id();
         if (auto result = m_pool.release(std::move(node)); !result.has_value()) {
-            cursor.set_error(result.error());
+            cursor.set_status(result.error());
             return cursor;
         }
         if (auto next = m_pool.acquire(id, false)) {
             node = std::move(*next);
             index = 0;
         } else {
-            cursor.set_error(next.error());
+            cursor.set_status(next.error());
             return cursor;
         }
     }
@@ -129,12 +133,12 @@ auto Tree::find_minimum() -> Cursor
     Cursor cursor {&m_pool, &m_internal};
     auto root = Tree::root(false);
     if (!root.has_value()) {
-        cursor.set_error(root.error());
+        cursor.set_status(root.error());
         return cursor;
     }
     auto temp = m_internal.find_local_min(std::move(*root));
     if (!temp.has_value()) {
-        cursor.set_error(temp.error());
+        cursor.set_status(temp.error());
         return cursor;
     }
     auto [node, index] = std::move(*temp);
@@ -148,12 +152,12 @@ auto Tree::find_maximum() -> Cursor
     Cursor cursor {&m_pool, &m_internal};
     auto root = Tree::root(false);
     if (!root.has_value()) {
-        cursor.set_error(root.error());
+        cursor.set_status(root.error());
         return cursor;
     }
     auto temp = m_internal.find_local_max(std::move(*root));
     if (!temp.has_value()) {
-        cursor.set_error(temp.error());
+        cursor.set_status(temp.error());
         return cursor;
     }
     auto [node, index] = std::move(*temp);
@@ -164,6 +168,7 @@ auto Tree::find_maximum() -> Cursor
 
 auto Tree::root(bool is_writable) -> Result<Node>
 {
+    CCO_EXPECT_GT(m_pool.node_count(), 0);
     return m_internal.find_root(is_writable);
 }
 

@@ -21,25 +21,23 @@ public:
     static constexpr Size page_size {0x100};
 
     explicit PagerTests()
-        : bank {std::make_unique<MemoryBank>("PagerTests")}
+        : home {std::make_unique<FakeDirectory>("PagerTests")}
     {
-        file = bank->open_memory(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
+        file = home->open_fake_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
         memory = file->shared_memory();
-        pager = *Pager::open({
-            file->open_reader(),
-            file->open_writer(),
-            utils::create_sink("", spdlog::level::off),
+        pager = Pager::open({
+            std::move(file),
             page_size,
             frame_count,
-        });
+        }).value();
     }
 
     ~PagerTests() override = default;
 
     Random random {0};
     SharedMemory memory;
-    std::unique_ptr<MemoryBank> bank;
-    std::unique_ptr<Memory> file;
+    std::unique_ptr<FakeDirectory> home;
+    std::unique_ptr<FakeFile> file;
     std::unique_ptr<Pager> pager;
 };
 
@@ -57,7 +55,7 @@ TEST_F(PagerTests, PagerKeepsTrackOfAvailableCount)
 {
     auto frame = pager->pin(PID::root());
     ASSERT_EQ(pager->available(), frame_count - 1);
-    ASSERT_TRUE(pager->discard(std::move(*frame)));
+    pager->discard(std::move(*frame));
     ASSERT_EQ(pager->available(), frame_count);
 }
 
@@ -81,14 +79,15 @@ public:
     static constexpr Size frame_count {32};
     static constexpr Size page_size {0x100};
 
-    explicit BufferPoolTestsBase(std::unique_ptr<MemoryBank> memory_bank):
-          bank {std::move(memory_bank)}
+    explicit BufferPoolTestsBase(std::unique_ptr<FakeDirectory> memory_home):
+          home {std::move(memory_home)}
     {
-        auto file = bank->open_memory(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
+        auto file = home->open_fake_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
         memory = file->shared_memory();
         pool = *BufferPool::open({
-            *bank,
-            utils::create_sink("", spdlog::level::off),
+            *home,
+            create_sink(),
+            LSN::null(),
             frame_count,
             0,
             page_size,
@@ -100,14 +99,14 @@ public:
 
     Random random {0};
     SharedMemory memory;
-    std::unique_ptr<MemoryBank> bank;
+    std::unique_ptr<FakeDirectory> home;
     std::unique_ptr<IBufferPool> pool;
 };
 
 class BufferPoolTests: public BufferPoolTestsBase {
 public:
     BufferPoolTests():
-          BufferPoolTestsBase {std::make_unique<MemoryBank>("BufferPoolTests")} {}
+          BufferPoolTestsBase {std::make_unique<FakeDirectory>("BufferPoolTests")} {}
 
     ~BufferPoolTests() override = default;
 };
@@ -256,8 +255,8 @@ class MemoryPoolTests: public testing::Test {
 public:
     static constexpr Size page_size = 0x200;
 
-    MemoryPoolTests()
-        : pool {std::make_unique<MemoryPool>(page_size, true, utils::create_sink("", spdlog::level::off))} {}
+    MemoryPoolTests(): 
+          pool {std::make_unique<MemoryPool>(page_size, true, create_sink())} {}
 
     Random random {0};
     std::unique_ptr<MemoryPool> pool;
@@ -277,7 +276,7 @@ TEST_F(MemoryPoolTests, FreshMemoryPoolIsSetUpCorrectly)
 TEST_F(MemoryPoolTests, StubMethodsWork)
 {
     ASSERT_TRUE(pool->flush());
-    ASSERT_TRUE(pool->purge());
+    pool->purge();
 }
 
 TEST_F(MemoryPoolTests, LoadsRequiredFileHeaderFields)

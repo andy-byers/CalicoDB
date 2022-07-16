@@ -1,11 +1,11 @@
 #ifndef CCO_UTILS_LOGGING_H
 #define CCO_UTILS_LOGGING_H
 
+#include "calico/options.h"
+#include "calico/status.h"
+#include "expect.h"
 #include <numeric>
 #include <spdlog/spdlog.h>
-#include "calico/error.h"
-#include "calico/options.h"
-#include "expect.h"
 
 namespace cco::utils {
 
@@ -17,6 +17,7 @@ constexpr auto LOG_NAME = "log";
 
 auto create_logger(spdlog::sink_ptr, const std::string&) -> std::shared_ptr<spdlog::logger>;
 auto create_sink(const std::string&, spdlog::level::level_enum) -> spdlog::sink_ptr;
+auto create_sink() -> spdlog::sink_ptr;
 
 class ThreePartMessage {
 public:
@@ -40,11 +41,10 @@ public:
         return set_text(HINT, format, std::forward<Args>(args)...);
     }
 
-    [[nodiscard]] auto system_error() const -> Error;
-    [[nodiscard]] auto invalid_argument() const -> Error;
-    [[nodiscard]] auto logic_error() const -> Error;
-    [[nodiscard]] auto corruption() const -> Error;
-    [[nodiscard]] auto not_found() const -> Error;
+    [[nodiscard]] auto system_error() const -> Status;
+    [[nodiscard]] auto invalid_argument() const -> Status;
+    [[nodiscard]] auto logic_error() const -> Status;
+    [[nodiscard]] auto corruption() const -> Status;
     [[nodiscard]] auto text() const -> std::string;
 
 private:
@@ -86,11 +86,10 @@ public:
         return m_message.set_hint(format, std::forward<Args>(args)...);
     }
 
-    [[nodiscard]] auto system_error(spdlog::level::level_enum = spdlog::level::err) const -> Error;
-    [[nodiscard]] auto invalid_argument(spdlog::level::level_enum = spdlog::level::err) const -> Error;
-    [[nodiscard]] auto logic_error(spdlog::level::level_enum = spdlog::level::err) const -> Error;
-    [[nodiscard]] auto corruption(spdlog::level::level_enum = spdlog::level::err) const -> Error;
-    [[nodiscard]] auto not_found(spdlog::level::level_enum = spdlog::level::err) const -> Error;
+    [[nodiscard]] auto system_error(spdlog::level::level_enum = spdlog::level::err) const -> Status;
+    [[nodiscard]] auto invalid_argument(spdlog::level::level_enum = spdlog::level::err) const -> Status;
+    [[nodiscard]] auto corruption(spdlog::level::level_enum = spdlog::level::err) const -> Status;
+    [[nodiscard]] auto logic_error(spdlog::level::level_enum = spdlog::level::err) const -> Status;
     auto log(spdlog::level::level_enum = spdlog::level::err) const -> std::string;
 
 private:

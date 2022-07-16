@@ -1,5 +1,4 @@
 #include "file.h"
-#include "io.h"
 #include "system.h"
 #include "utils/expect.h"
 
@@ -38,16 +37,6 @@ auto File::file() const -> int
     return m_file;
 }
 
-auto File::open_reader() -> std::unique_ptr<IFileReader>
-{
-    return std::make_unique<FileReader>(*this);
-}
-
-auto File::open_writer() -> std::unique_ptr<IFileWriter>
-{
-    return std::make_unique<FileWriter>(*this);
-}
-
 auto File::size() const -> Result<Size>
 {
     static constexpr auto INVALID_SIZE = static_cast<std::uintmax_t>(-1);
@@ -55,7 +44,7 @@ auto File::size() const -> Result<Size>
     std::error_code error;
     if (const auto size = fs::file_size(m_path, error); size != INVALID_SIZE)
         return size;
-    return Err {Error::system_error(error.message())};
+    return Err {Status::system_error(error.message())};
 }
 
 auto File::open(const std::string &path, Mode mode, int permissions) -> Result<void>
@@ -86,7 +75,7 @@ auto File::rename(const std::string &name) -> Result<void>
     std::error_code error;
     fs::rename(std::exchange(m_path, m_path.parent_path() / name), m_path, error);
     if (error)
-        return Err {Error::system_error(error.message())};
+        return Err {Status::system_error(error.message())};
     return {};
 }
 
@@ -99,33 +88,80 @@ auto File::remove() -> Result<void>
         });
 }
 
-auto read_exact(IFileReader &reader, Bytes in) -> Result<void>
+auto File::seek(long offset, Seek whence) -> Result<Index>
 {
-    return reader.read(in)
+    return system::seek(m_file, offset, static_cast<int>(whence));
+}
+
+auto File::read(Bytes out) -> Result<Size>
+{
+    return system::read(m_file, out);
+}
+
+auto File::read(Bytes out, Index offset) -> Result<Size>
+{
+    return seek(static_cast<long>(offset), Seek::BEGIN)
+        .and_then([out, this](Index) -> Result<Size> {
+            return read(out);
+        });
+}
+
+auto File::write(BytesView in) -> Result<Size>
+{
+    return system::write(m_file, in);
+}
+
+auto File::write(BytesView in, Index offset) -> Result<Size>
+{
+    return seek(static_cast<long>(offset), Seek::BEGIN)
+        .and_then([in, this](Index) -> Result<Size> {
+            return write(in);
+        });
+}
+
+auto File::sync() -> Result<void>
+{
+    return system::sync(m_file);
+}
+
+auto File::resize(Size size) -> Result<void>
+{
+    std::error_code error;
+    fs::resize_file(m_path, size, error);
+    if (error)
+        return Err {Status::system_error(error.message())};
+    return {};
+}
+
+auto read_exact(IFile &file, Bytes in) -> Result<void>
+{
+    return file.read(in)
+        .and_then([in](Size read_size) {
+            return read_size == in.size()
+                ? Result<void> {}
+                : Err {system::error(std::errc::io_error)};
+        });
+}
+
+auto read_exact_at(IFile &file, Bytes in, Index offset) -> Result<void>
+{
+    return file.read(in, offset)
         .and_then([in](Size read_size) {
             return read_size == in.size() ? Result<void> {} : Err {system::error(std::errc::io_error)};
         });
 }
 
-auto read_exact_at(IFileReader &reader, Bytes in, Index offset) -> Result<void>
+auto write_all(IFile &file, BytesView out) -> Result<void>
 {
-    return reader.read(in, offset)
-        .and_then([in](Size read_size) {
-            return read_size == in.size() ? Result<void> {} : Err {system::error(std::errc::io_error)};
-        });
-}
-
-auto write_all(IFileWriter &writer, BytesView out) -> Result<void>
-{
-    return writer.write(out)
+    return file.write(out)
         .and_then([out](Size write_size) {
             return write_size == out.size() ? Result<void> {} : Err {system::error(std::errc::io_error)};
         });
 }
 
-auto write_all(IFileWriter &writer, BytesView out, Index offset) -> Result<void>
+auto write_all(IFile &file, BytesView out, Index offset) -> Result<void>
 {
-    return writer.write(out, offset)
+    return file.write(out, offset)
         .and_then([out](Size write_size) {
             return write_size == out.size() ? Result<void> {} : Err {system::error(std::errc::io_error)};
         });

@@ -28,11 +28,12 @@ public:
     static constexpr Size PAGE_SIZE = 0x100;
 
     TreeHarness():
-          bank {std::make_unique<MemoryBank>("TreeTests")}
+          bank {std::make_unique<FakeDirectory>("TreeTests")}
     {
         buffer_pool = *BufferPool::open({
             *bank,
             utils::create_sink("", spdlog::level::off),
+            LSN::null(),
             32,
             0,
             PAGE_SIZE,
@@ -41,7 +42,7 @@ public:
     }
 
     Random random {0};
-    std::unique_ptr<MemoryBank> bank;
+    std::unique_ptr<FakeDirectory> bank;
     std::unique_ptr<IBufferPool> buffer_pool;
 };
 
@@ -100,6 +101,7 @@ public:
             0,
             0,
         });
+        EXPECT_TRUE(tree->allocate_root());
     }
 
     ~TreeTests() override = default;
@@ -121,10 +123,10 @@ TEST_F(TreeTests, NewTreeIsEmpty)
     ASSERT_EQ(tree->cell_count(), 0);
     cursor = tree->find_minimum();
     ASSERT_FALSE(cursor.is_valid());
-    ASSERT_FALSE(cursor.error());
+    ASSERT_TRUE(cursor.status().is_ok());
     cursor = tree->find_maximum();
     ASSERT_FALSE(cursor.is_valid());
-    ASSERT_FALSE(cursor.error());
+    ASSERT_TRUE(cursor.status().is_ok());
 }
 
 TEST_F(TreeTests, NewTreeHasOneNode)
@@ -490,8 +492,9 @@ TEST_F(TreeTests, RemoveFromMiddle)
     while (tree->cell_count()) {
         const auto key = make_key(tree->cell_count() / 2);
 
-        if (auto c = tools::find(*tree, key); c.is_valid())
-            tree->erase(c);
+        if (auto c = tools::find(*tree, key); c.is_valid()) {
+            ASSERT_TRUE(tree->erase(c));
+        }
     }
 }
 
@@ -503,8 +506,9 @@ TEST_F(TreeTests, RemoveFromRandomPosition)
     while (tree->cell_count()) {
         const auto key = make_key(random.next_int(n));
 
-        if (auto c = tools::find(*tree, key); c.is_valid())
-            tree->erase(c);
+        if (auto c = tools::find(*tree, key); c.is_valid()) {
+            ASSERT_TRUE(tree->erase(c));
+        }
     }
 }
 
@@ -591,11 +595,11 @@ TEST_F(TreeTests, SanityCheck)
 
     const auto remove_one = [&random, this](const std::string &key) {
         if (auto c = tools::find(*tree, key); c.is_valid()) {
-            tree->erase(c);
+            ASSERT_TRUE(tree->erase(c));
         } else if (random.next_int(1) == 0) {
-            tree->erase(tree->find_minimum());
+            ASSERT_TRUE(tree->erase(tree->find_minimum()));
         } else {
-            tree->erase(tree->find_maximum());
+            ASSERT_TRUE(tree->erase(tree->find_maximum()));
         }
     };
 

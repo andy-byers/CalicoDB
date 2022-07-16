@@ -1,10 +1,10 @@
 #ifndef CCO_TREE_FREE_LIST_H
 #define CCO_TREE_FREE_LIST_H
 
-#include <optional>
+#include "calico/status.h"
 #include "interface.h"
-#include "calico/error.h"
 #include "utils/identifier.h"
+#include <optional>
 
 namespace cco {
 

@@ -6,7 +6,6 @@
 namespace {
 
 constexpr auto PATH = "/tmp/calico_usage";
-namespace cco = cco;
 
 auto bytes_objects()
 {
@@ -43,33 +42,51 @@ auto bytes_objects()
 
 auto updating_a_database(cco::Database &db)
 {
-    namespace cco = cco;
+    std::vector<cco::Record> records {
+        {"bengal", "short;spotted,marbled,rosetted"},
+        {"turkish vankedisi", "long;white"},
+        {"moose", "???"},
+        {"abyssinian", "short;ticked tabby"},
+        {"russian blue", "short;blue"},
+        {"american shorthair", "short;all"},
+        {"badger", "???"},
+        {"manx", "short,long;all"},
+        {"chantilly-tiffany", "long;solid,tabby"},
+        {"cyprus", "..."},
+    };
 
-    // Insert some records. If a record is already in the database, insert() will return false.
-    assert(*db.insert("bengal", "short;spotted,marbled,rosetted"));
-    assert(*db.insert("turkish vankedisi", "long;white"));
-    assert(*db.insert("moose", "???"));
-    assert(*db.insert("abyssinian", "short;ticked tabby"));
-    assert(*db.insert("russian blue", "short;blue"));
-    assert(*db.insert("american shorthair", "short;all"));
-    assert(*db.insert("badger", "???"));
-    assert(*db.insert("manx", "short,long;all"));
-    assert(*db.insert("chantilly-tiffany", "long;solid,tabby"));
-    assert(*db.insert("cyprus", "..."));
+    // Insert some records.
+    for (const auto &[key, value]: records) {
+        const auto s = db.insert(key, value);
+        if (!s.is_ok()) {
+            fmt::print("cannot insert record ({}, {})", key, value);
+            fmt::print(s.what());
+            return;
+        }
+    }
+    assert(db.insert("bengal", "short;spotted,marbled,rosetted").is_ok());
+    assert(db.insert("turkish vankedisi", "long;white").is_ok());
+    assert(db.insert("moose", "???").is_ok());
+    assert(db.insert("abyssinian", "short;ticked tabby").is_ok());
+    assert(db.insert("russian blue", "short;blue").is_ok());
+    assert(db.insert("american shorthair", "short;all").is_ok());
+    assert(db.insert("badger", "???").is_ok());
+    assert(db.insert("manx", "short,long;all").is_ok());
+    assert(db.insert("chantilly-tiffany", "long;solid,tabby").is_ok());
+    assert(db.insert("cyprus", "...").is_ok());
 
     // Modify a record.
-    assert(not *db.insert("cyprus", "all;all"));
+    assert(db.insert("cyprus", "all;all").is_ok());
 
     // Erase a record by key.
-    assert(*db.erase("badger"));
+    assert(db.erase("badger").is_ok());
 
     // Erase a record using a cursor (see "Querying a Database" below).
-    assert(*db.erase(db.find_exact("moose")));
+    assert(db.erase(db.find_exact("moose")).is_ok());
 }
 
 auto querying_a_database(cco::Database &db)
 {
-    namespace cco = cco;
     static constexpr auto target = "russian blue";
     const auto key = cco::stob(target);
 
@@ -100,38 +117,43 @@ auto querying_a_database(cco::Database &db)
 
 auto transactions(cco::Database &db)
 {
-    (void)db;
-//    namespace cco = cco;
-//
-//    // Commit all the updates we made in the previous examples.
-//    db.commit();
-//
-//    // Make some changes and abort the transaction.
-//    db.insert("opossum", "pretty cute");
-//    assert(db.erase(db.find_minimum()));
-//    assert(db.erase(db.find_maximum()));
-//    db.abort();
-//
-//    // All updates since the last call to commit() have been reverted.
-//    assert(not db.find_exact("opposum").is_valid());
-//    assert(db.find_minimum().key() == cco::stob("abyssinian"));
-//    assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
+    // Commit all the updates we made in the previous examples.
+    assert(db.commit().is_ok());
+
+    // Make some changes and abort the transaction.
+    assert(db.insert("opossum", "pretty cute").is_ok());
+    assert(db.erase(db.find_minimum()).is_ok());
+    assert(db.erase(db.find_maximum()).is_ok());
+    assert(db.abort().is_ok());
+
+    // All updates since the last call to commit() have been reverted.
+    auto opossum = db.find_exact("opposum");
+    assert(not opossum.is_valid() and opossum.status().is_ok());
+    assert(db.find_minimum().key() == cco::stob("abyssinian"));
+    assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
 }
 
 auto deleting_a_database(cco::Database db)
 {
     // We can delete a database by passing ownership to the following static method.
-    cco::Database::destroy(std::move(db));
+    assert(cco::Database::destroy(std::move(db)).is_ok());
 }
 
-auto open_database(cco::Options options) -> cco::Database
+auto open_database() -> cco::Database
 {
-    return *cco::Database::open(PATH, options)
-        .or_else([](const cco::Error &error) -> cco::Result<cco::Database> {
-            fmt::print("(1/2) cannot open database\n");
-            fmt::print("(2/2) {}\n", cco::btos(error.what()));
-            return cco::Err {error};
-        });
+    cco::Options options;
+    options.path = PATH;
+    options.page_size = 0x8000;
+    options.frame_count = 128;
+    cco::Database db {options};
+
+    if (const auto s = db.open(); !s.is_ok()) {
+        fmt::print("(1/2) cannot open database\n");
+        fmt::print("(2/2) {}\n", s.what());
+        std::exit(EXIT_FAILURE);
+    }
+    assert(db.is_open());
+    return db;
 }
 
 } // namespace
@@ -140,10 +162,9 @@ auto main(int, const char *[]) -> int
 {
     std::error_code error;
     std::filesystem::remove_all(PATH, error);
-    cco::Options options;
 
     bytes_objects();
-    auto db = open_database(options);
+    auto db = open_database();
     updating_a_database(db);
     querying_a_database(db);
     transactions(db);

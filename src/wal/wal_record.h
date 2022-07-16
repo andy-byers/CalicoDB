@@ -7,7 +7,7 @@
 #ifndef CCO_WAL_WAL_RECORD_H
 #define CCO_WAL_WAL_RECORD_H
 
-#include "calico/error.h"
+#include "calico/status.h"
 #include "page/page.h"
 #include "page/update.h"
 #include "utils/identifier.h"

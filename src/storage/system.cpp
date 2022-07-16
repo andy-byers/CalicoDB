@@ -7,14 +7,14 @@ namespace cco::system {
 
 namespace fs = std::filesystem;
 
-auto error() -> Error
+auto error() -> Status
 {
     return error(std::errc {std::exchange(errno, SUCCESS)});
 }
 
-auto error(std::errc code) -> Error
+auto error(std::errc code) -> Status
 {
-    return Error::system_error(std::make_error_code(code).message());
+    return Status::system_error(std::make_error_code(code).message());
 }
 
 auto exists(const std::string &name) -> Result<bool>

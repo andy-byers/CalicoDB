@@ -27,7 +27,7 @@ auto NodePool::page_size() const -> Size
 auto NodePool::allocate(PageType type) -> Result<Node>
 {
     auto page = m_free_list.pop()
-        .or_else([this](const Error &error) -> Result<Page> {
+        .or_else([this](const Status &error) -> Result<Page> {
             if (error.is_logic_error())
                 return m_pool->allocate();
             return Err {error};
@@ -69,7 +69,7 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<PID>
 
     while (!overflow.is_empty()) {
         auto page = m_free_list.pop()
-            .or_else([this](const Error &error) -> Result<Page> {
+            .or_else([this](const Status &error) -> Result<Page> {
                 if (error.is_logic_error())
                     return m_pool->allocate();
                 return Err {error};
@@ -104,7 +104,7 @@ auto NodePool::collect_chain(PID id, Bytes out) const -> Result<void>
 //            utils::ErrorMessage message;
 //            message.set_primary("cannot collect overflow chain");
 //            message.set_detail("link has an invalid page type {}", static_cast<unsigned>(page->type()));
-            return Err {Error::corruption("")};
+            return Err {Status::corruption("")};
         }
         Link link {std::move(page)};
         auto content = link.content_view();

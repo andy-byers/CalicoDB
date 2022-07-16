@@ -29,7 +29,7 @@ public:
         Size dx {};
     };
 
-    UpdateManager(Page&, Bytes);
+    UpdateManager(BytesView, Bytes);
     [[nodiscard]] auto collect() -> std::vector<ChangedRegion>;
     auto push(Range) -> void;
 

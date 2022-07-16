@@ -20,6 +20,7 @@ static constexpr int DEFAULT_PERMISSIONS {0666};
  * Options to use when opening a database.
  */
 struct Options {
+    std::string path; ///< Path at which to open the database (leave blank to open an in-memory database).
     Size page_size {DEFAULT_PAGE_SIZE}; ///< Size of a database page in bytes.
     Size frame_count {DEFAULT_FRAME_COUNT}; ///< Number of frames to allow the buffer pool.
     spdlog::level::level_enum log_level {DEFAULT_LOG_LEVEL}; ///< The max level of log message that will be written.

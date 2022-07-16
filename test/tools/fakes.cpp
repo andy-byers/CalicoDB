@@ -12,7 +12,7 @@ static auto maybe_emit_read_error(Random &random, FaultControls::Controls &contr
     // is never set, it stays at -1 and doesn't contribute to the faults generated.
     auto &counter = controls.read_fault_counter;
     if (!counter || random.next_int(99U) < controls.read_fault_rate)
-        return Err {Error::system_error(std::make_error_code(std::errc::io_error).message())};
+        return Err {Status::system_error(std::make_error_code(std::errc::io_error).message())};
     // Counter should settle on -1.
     counter -= counter >= 0;
     return {};
@@ -22,43 +22,28 @@ static auto maybe_emit_write_error(Random &random, FaultControls::Controls &cont
 {
     auto &counter = controls.write_fault_counter;
     if (!counter || random.next_int(99U) < controls.write_fault_rate)
-        return Err {Error::system_error(std::make_error_code(std::errc::io_error).message())};
+        return Err {Status::system_error(std::make_error_code(std::errc::io_error).message())};
     counter -= counter >= 0;
     return {};
 }
 
-MemoryBank::MemoryBank(const std::string &path)
+FakeDirectory::FakeDirectory(const std::string &path)
     : m_path {path} {}
 
-auto MemoryBank::path() const -> std::string
+auto FakeDirectory::path() const -> std::string
 {
     return m_path;
 }
 
-auto MemoryBank::name() const -> std::string
+auto FakeDirectory::name() const -> std::string
 {
     return m_path.filename();
 }
 
-auto MemoryBank::open_memory_bank(const std::string &name) -> std::unique_ptr<MemoryBank>
-{
-    return std::unique_ptr<MemoryBank> {dynamic_cast<MemoryBank*>(open_directory(name)->release())};
-}
-
-auto MemoryBank::open_memory(const std::string &name, Mode mode, int permissions) -> std::unique_ptr<Memory>
+auto FakeDirectory::open_fake_file(const std::string &name, Mode mode, int permissions) -> std::unique_ptr<FakeFile>
 {
     auto file = open_file(name, mode, permissions);
-    return std::unique_ptr<Memory> {dynamic_cast<Memory*>(file->release())};
-}
-
-auto Memory::open_reader() -> std::unique_ptr<IFileReader>
-{
-    return std::make_unique<MemoryReader>(*this);
-}
-
-auto Memory::open_writer() -> std::unique_ptr<IFileWriter>
-{
-    return std::make_unique<MemoryWriter>(*this);
+    return std::unique_ptr<FakeFile> {dynamic_cast<FakeFile*>(file->release())};
 }
 
 static auto do_seek(Index cursor, Size file_size, long offset, Seek whence)
@@ -108,19 +93,7 @@ static auto do_write(std::string &memory, Index cursor, BytesView in)
     return IOResult {cursor + in.size(), in.size()};
 }
 
-MemoryReader::MemoryReader(Memory &memory)
-    : m_memory {&memory}
-{
-    assert(memory.is_open());
-}
-
-MemoryWriter::MemoryWriter(Memory &memory)
-    : m_memory {&memory}
-{
-    assert(memory.is_open());
-}
-
-auto MemoryBank::children() const -> Result<std::vector<std::string>>
+auto FakeDirectory::children() const -> Result<std::vector<std::string>>
 {
     std::vector<std::string> result;
     std::transform(begin(m_shared), end(m_shared), begin(result), [](auto entry) {
@@ -129,65 +102,60 @@ auto MemoryBank::children() const -> Result<std::vector<std::string>>
     return result;
 }
 
-auto MemoryBank::open_directory(const std::string &name) -> Result<std::unique_ptr<IDirectory>>
+auto FakeDirectory::open_file(const std::string &name, Mode mode, int permissions) -> Result<std::unique_ptr<IFile>>
 {
-    return std::make_unique<MemoryBank>(m_path / name);
-}
-
-auto MemoryBank::open_file(const std::string &name, Mode mode, int permissions) -> Result<std::unique_ptr<IFile>>
-{
-    std::unique_ptr<IFile> memory;
+    std::unique_ptr<IFile> file;
     if (auto itr = m_shared.find(name); itr != std::end(m_shared)) {
         if ((static_cast<unsigned>(mode) & static_cast<unsigned>(Mode::TRUNCATE)) == static_cast<unsigned>(Mode::TRUNCATE))
             itr->second.memory().clear();
-        memory = std::make_unique<Memory>(name, itr->second, m_faults[name]);
+        file = std::make_unique<FakeFile>(name, itr->second, m_faults[name]);
     } else {
         FaultControls faults;
         SharedMemory shared;
         m_shared.emplace(name, shared);
         m_faults.emplace(name, faults);
-        memory = std::make_unique<Memory>(name, shared, faults);
+        file = std::make_unique<FakeFile>(name, shared, faults);
     }
-    if (auto opened = memory->open(name, mode, permissions)) {
-        return memory;
+    if (auto opened = file->open(name, mode, permissions)) {
+        return file;
     } else {
         return Err {opened.error()};
     }
 }
 
-auto MemoryBank::remove() -> Result<void>
+auto FakeDirectory::remove() -> Result<void>
 {
     m_path.clear();
     return {};
 }
 
-auto MemoryBank::sync() -> Result<void>
+auto FakeDirectory::sync() -> Result<void>
 {
     return {};
 }
 
-auto MemoryBank::close() -> Result<void>
+auto FakeDirectory::close() -> Result<void>
 {
     return {};
 }
 
-auto MemoryReader::seek(long offset, Seek whence) -> Result<Index>
+auto FakeFile::seek(long offset, Seek whence) -> Result<Index>
 {
-    m_memory->cursor() = do_seek(m_memory->cursor(), *m_memory->size(), offset, whence);
-    return m_memory->cursor();
+    m_cursor = do_seek(m_cursor, size().value(), offset, whence);
+    return m_cursor;
 }
 
-auto MemoryReader::read(Bytes out) -> Result<Size>
+auto FakeFile::read(Bytes out) -> Result<Size>
 {
-    if (const auto result = maybe_emit_read_error(m_memory->random(), m_memory->faults().controls()); !result)
+    if (const auto result = maybe_emit_read_error(m_random, m_faults.controls()); !result)
         return Err {result.error()};
 
-    const auto [cursor, read_size] = do_read(m_memory->memory(), m_memory->cursor(), out);
-    m_memory->cursor() = cursor;
+    const auto [cursor, read_size] = do_read(m_memory.memory(), m_cursor, out);
+    m_cursor = cursor;
     return read_size;
 }
 
-auto MemoryReader::read(Bytes out, Index offset) -> Result<Size>
+auto FakeFile::read(Bytes out, Index offset) -> Result<Size>
 {
     return seek(static_cast<long>(offset), Seek::BEGIN)
         .and_then([out, this](Index) -> Result<Size> {
@@ -195,24 +163,17 @@ auto MemoryReader::read(Bytes out, Index offset) -> Result<Size>
         });
 }
 
-auto MemoryWriter::seek(long offset, Seek whence) -> Result<Index>
+auto FakeFile::write(BytesView in) -> Result<Size>
 {
-    // TODO: Actually simulate system call errors rather than just tripping assertions.
-    m_memory->cursor() = do_seek(m_memory->cursor(), *m_memory->size(), offset, whence);
-    return m_memory->cursor();
-}
-
-auto MemoryWriter::write(BytesView in) -> Result<Size>
-{
-    if (const auto result = maybe_emit_write_error(m_memory->random(), m_memory->faults().controls()); !result)
+    if (const auto result = maybe_emit_write_error(m_random, m_faults.controls()); !result)
         return Err {result.error()};
 
-    const auto [cursor, write_size] = do_write(m_memory->memory(), m_memory->cursor(), in);
-    m_memory->cursor() = cursor;
+    const auto [cursor, write_size] = do_write(m_memory.memory(), m_cursor, in);
+    m_cursor = cursor;
     return write_size;
 }
 
-auto MemoryWriter::write(BytesView in, Index offset) -> Result<Size>
+auto FakeFile::write(BytesView in, Index offset) -> Result<Size>
 {
     return seek(static_cast<long>(offset), Seek::BEGIN)
         .and_then([in, this](Index) -> Result<Size> {
@@ -220,15 +181,23 @@ auto MemoryWriter::write(BytesView in, Index offset) -> Result<Size>
         });
 }
 
-auto MemoryWriter::sync() -> Result<void>
+auto FakeFile::sync() -> Result<void>
 {
     return {};
 }
 
-auto MemoryWriter::resize(Size size) -> Result<void>
+auto FakeFile::resize(Size size) -> Result<void>
 {
-    m_memory->memory().resize(size);
+    m_memory.memory().resize(size);
     return {};
 }
+
+//auto MockDirectory::open_and_register_mock_file(const std::string &name, Mode mode, int permissions) -> std::unique_ptr<IFile>
+//{
+//    auto *mock = new testing::NiceMock<MockFile> {m_fake.open_file(name, mode, permissions).value()};
+//    mock->delegate_to_fake();
+//    m_files.emplace(mock_name(name, mode), mock);
+//    return std::unique_ptr<IFile> {mock};
+//}
 
 } // calico

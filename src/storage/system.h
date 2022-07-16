@@ -8,8 +8,8 @@ namespace cco::system {
 static constexpr int SUCCESS = 0;
 static constexpr int FAILURE = -1;
 
-[[nodiscard]] auto error() -> Error;
-[[nodiscard]] auto error(std::errc) -> Error;
+[[nodiscard]] auto error() -> Status;
+[[nodiscard]] auto error(std::errc) -> Status;
 [[nodiscard]] auto exists(const std::string &name) -> Result<bool>;
 [[nodiscard]] auto size(int) -> Result<Size>;
 [[nodiscard]] auto read(int, Bytes) -> Result<Size>;

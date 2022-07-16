@@ -6,6 +6,8 @@
 #include "storage/directory.h"
 #include "tree/tree.h"
 #include "utils/logging.h"
+#include "wal/wal_reader.h"
+#include "wal/wal_writer.h"
 
 namespace cco {
 
@@ -13,87 +15,64 @@ namespace fs = std::filesystem;
 using namespace page;
 using namespace utils;
 
-auto initialize_log(spdlog::logger &logger, const std::string &base)
+#define DB_TRY(expr) \
+    do { \
+        const auto db_try_result = (expr); \
+        if (!db_try_result.has_value()) \
+            return db_try_result.error(); \
+    } while (0)
+
+Database::Database(const Options &options):
+    m_options {options} {}
+
+auto Database::is_open() const -> bool
 {
-    logger.info("starting CalicoDB v{} at \"{}\"", VERSION_NAME, base);
-    logger.info("tree is located at \"{}/{}\"", base, DATA_NAME);
-    logger.info("log is located at \"{}/{}\"", base, LOG_NAME);
+    return m_impl != nullptr;
 }
 
-auto Database::open(const std::string &path, Options options) -> Result<Database>
-{
-    CCO_TRY_CREATE(directory, Directory::open(path));
-
-    auto sink = utils::create_sink(path, options.log_level);
-    auto logger = utils::create_logger(sink, "Database");
-    initialize_log(*logger, path);
-
-    CCO_TRY_CREATE(initial_state, setup(*directory, options, *logger));
-    logger->trace("constructing Database object");
-
-    Database db;
-    db.m_impl = std::make_unique<Impl>(Impl::Parameters {
-        std::move(directory),
-        sink,
-        initial_state.state,
-        initial_state.revised,
-    });
-    auto [state, revised, is_new] = std::move(initial_state);
-    auto &impl = *db.m_impl;
-
-    CCO_TRY_STORE(impl.m_pool, BufferPool::open(BufferPool::Parameters {
-        *impl.m_home,
-        sink,
-        revised.frame_count,
-        state.page_count(),
-        state.page_size(),
-        revised.permissions,
-    }));
-
-    CCO_TRY_STORE(impl.m_tree, Tree::open(Tree::Parameters {
-        impl.m_pool.get(),
-        sink,
-        state.free_start(),
-        state.free_count(),
-        state.record_count(),
-        state.node_count(),
-    }));
-
-    if (is_new) {
-        CCO_TRY_CREATE(root, impl.m_tree->root(true));
-        FileHeader header {root};
-        header.update_magic_code();
-        header.set_page_size(state.page_size());
-        header.set_block_size(state.block_size());
-        CCO_TRY(impl.m_pool->release(root.take()));
-    }
-    return db;
-}
-
-auto Database::close(Database db) -> Result<void>
-{
-    return db.m_impl->close();
-}
-
-auto Database::temp(Options options) -> Result<Database>
+auto Database::open() -> Status
 {
     Impl::Parameters param;
-    param.options = options;
-    Database db;
-    db.m_impl = std::make_unique<Impl>(std::move(param), Impl::InMemoryTag {});
-    return db;
+    param.options = m_options;
+
+    if (!m_options.path.empty()) {
+        auto home = Directory::open(m_options.path);
+        if (!home.has_value())
+            return home.error();
+
+        param.sink = create_sink(m_options.path, m_options.log_level);
+        auto impl = Impl::open(std::move(param), std::move(*home));
+        if (!impl.has_value())
+            return impl.error();
+        m_impl = std::move(*impl);
+    } else {
+        auto impl = Impl::open(std::move(param));
+        if (!impl.has_value())
+            return impl.error();
+        m_impl = std::move(*impl);
+    }
+    return Status::ok();
 }
 
-auto Database::destroy(Database db) -> Result<void>
+auto Database::close() -> Status
+{
+    const auto r = m_impl->close();
+    m_impl.reset();
+    if (!r.has_value())
+        return r.error();
+    return Status::ok();
+}
+
+auto Database::destroy(Database db) -> Status
 {
     if (db.m_impl->is_temp())
-        return {};
+        return Status::ok();
 
     if (const auto &path = db.m_impl->path(); !path.empty()) {
         if (std::error_code error; !fs::remove_all(path, error))
-            return Err {Error::system_error(error.message())};
+            return Status::system_error(error.message());
     }
-    return {};
+    return Status::ok();
 }
 
 Database::Database() = default;
@@ -134,40 +113,54 @@ auto Database::find_maximum() const -> Cursor
     return m_impl->find_maximum();
 }
 
-auto Database::insert(BytesView key, BytesView value) -> Result<bool>
+auto Database::insert(BytesView key, BytesView value) -> Status
 {
-    return m_impl->insert(key, value);
+    DB_TRY(m_impl->insert(key, value));
+    return Status::ok();
 }
 
-auto Database::insert(const std::string &key, const std::string &value) -> Result<bool>
+auto Database::insert(const std::string &key, const std::string &value) -> Status
 {
     return insert(stob(key), stob(value));
 }
 
-auto Database::insert(const Record &record) -> Result<bool>
+auto Database::insert(const Record &record) -> Status
 {
     const auto &[key, value] = record;
     return insert(key, value);
 }
 
-auto Database::erase(BytesView key) -> Result<bool>
+auto Database::erase(BytesView key) -> Status
 {
-    return m_impl->erase(key);
+    return erase(find_exact(key));
 }
 
-auto Database::erase(const std::string &key) -> Result<bool>
+auto Database::erase(const std::string &key) -> Status
 {
     return erase(stob(key));
 }
 
-auto Database::erase(const Cursor &cursor) -> Result<bool>
+auto Database::erase(const Cursor &cursor) -> Status
 {
-    return m_impl->erase(cursor);
+    auto r = m_impl->erase(cursor);
+    if (!r.has_value()) {
+        return Status {r.error()};
+    } else if (!r.value()) {
+        return Status::not_found();
+    }
+    return Status::ok();
 }
 
-auto Database::commit() -> Result<void>
+auto Database::commit() -> Status
 {
-    return m_impl->commit();
+    DB_TRY(m_impl->commit());
+    return Status::ok();
+}
+
+auto Database::abort() -> Status
+{
+    DB_TRY(m_impl->abort());
+    return Status::ok();
 }
 
 auto Database::info() const -> Info
@@ -175,4 +168,6 @@ auto Database::info() const -> Info
     return m_impl->info();
 }
 
-} // calico
+#undef DB_TRY
+
+} // cco

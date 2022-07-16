@@ -21,40 +21,34 @@
 + **value**: A sequence of bytes associated with a unique **key** to form a database record.
 
 ## Error Handling
-**Note**: `std::make_unique<T>()` is used to allocate some database components that use runtime polymorphism (for test doubles).
-In these places, OOM exceptions are allowed to escape and, if uncaught by the user, terminate the program.
-My thought is that if we do not have enough memory to allocate a relatively small object, we probably don't have enough memory to do anything useful, so it's okay to do nothing.
-
-TODO: Use something like `std::unique_ptr<T> {new(std::nothrow) T}` and try to log the OOM error (there isn't a nothrow overload of `std::make_unique<T>()`).
-For example, to allocate a new `Directory` we could use something like:
-
-```C++
-auto directory = std::unique_ptr<IDirectory> {new(std::nothrow) Directory {"/home/calico/cats"}};
-```
+Calico DB enforces certain rules to make sure that the database stays consistent through crashes and other exceptional events.
+The current policy is to lock the database if an error is encountered while working with a writable page after the database has been modified during a transaction.
+This is more restrictive than necessary, but has the benefit of covering all cases where the database could be corrupted.
+The lock can be released by performing a successful abort operation.
 
 ## B<sup>+</sup>-Tree
-Calico DB uses a B<sup>+</sup>-tree to maintain an ordered collection of records.
+Calico DB uses a dynamic-order B<sup>+</sup>-tree to maintain an ordered collection of records on-disk.
 The tree is contained in the `data` file and is made up of two types of nodes: internal and external.
 Nodes that have children are internal nodes, while those that do not are external nodes.
 External nodes make up the lowest level of the B<sup>+</sup>-tree and are connected as a doubly-linked list.
 
 ### Database Header
 The database header is located at the start of the `data` file.
-It contains important database state information and is affected by many components.
+It contains important database state information and is read and written by multiple components.
 
-| Size | Offset | Name         | Description                                                                 |
-|-----:|-------:|:-------------|:----------------------------------------------------------------------------|
-|    4 |      0 | Magic code   | An integer constant that identifies the `data` file as a Calico DB database |
-|    4 |      4 | Header CRC   | CRC computed on this header                                                 |
-|    4 |      8 | Page count   | Number of pages allocated to the database                                   |
-|    4 |     12 | Node count   | Number of node pages allocated to the database                              |
-|    4 |     16 | Free count   | Number of pages in the free list                                            |                                           
-|    4 |     20 | Free start   | Page ID of the first free list page                                         |
-|    2 |     24 | Page size    | Size of a database page in bytes                                            |
-|    2 |     26 | Block size   | Size of a WAL block in bytes                                                |
-|    4 |     28 | Record count | Number of records in the database                                           |
-|    4 |     32 | Flushed LSN  | LSN of the last WAL record flushed to disk after a successful commit        |
-|   12 |     36 | Reserved     | Reserved for expansion                                                      |
+| Size | Offset | Name         | Description                                                                              |
+|-----:|-------:|:-------------|:-----------------------------------------------------------------------------------------|
+|    4 |      0 | Magic code   | An integer constant that identifies the `data` file as belonging to a Calico DB database |
+|    4 |      4 | Header CRC   | CRC computed on this header                                                              |
+|    4 |      8 | Page count   | Number of pages allocated to the database                                                |
+|    4 |     12 | Node count   | Number of node pages allocated to the database                                           |
+|    4 |     16 | Free count   | Number of pages in the free list                                                         |                                           
+|    4 |     20 | Free start   | Page ID of the first free list page                                                      |
+|    2 |     24 | Page size    | Size of a database page in bytes                                                         |
+|    2 |     26 | Block size   | Size of a WAL block in bytes                                                             |
+|    4 |     28 | Record count | Number of records in the database                                                        |
+|    4 |     32 | Flushed LSN  | LSN of the last WAL record flushed to disk after a successful commit                     |
+|   12 |     36 | Reserved     | Reserved for expansion                                                                   |
 
 ### Pages
 The page size is chosen at the time the database is created and must be a power of two.
@@ -62,10 +56,6 @@ All pages begin with a page header, except for the root page, which places the d
 Following the page header are the page contents, which depend on the page type.
 Pages can be one of two general types, links or nodes, depending on the value of the `Type` field.
 See [Links](#links) and [Nodes](#nodes) for more details.
-If the database instance was created with transactions enabled, pages will keep track of their contents before and after all modifications.
-This is accomplished by copying the "before" page contents to scratch memory once, then updating the page in-place.
-The offset and size of each write are kept track of, and a simple algorithm is used to keep them consolidated.
-When the page is no longer needed, the updates are sent to the WAL.
 
 #### Page Header
 |  Size | Offset | Name    | Description                                                        |
@@ -190,6 +180,8 @@ This makes traversing the B<sup>+</sup>-tree easier (we don't have to read addit
 Currently, the WAL consists of a single file, written in block-sized chunks.
 It is managed by a pair of constructs: one to read from the file and one to write to it.
 Both constructs operate on WAL records and perform their own caching internally.
+
+TODO: Add info about the WALManager.
 
 ### WAL Records
 WAL records are used to store information about updates made to database pages.

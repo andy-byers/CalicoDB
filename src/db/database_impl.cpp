@@ -1,16 +1,15 @@
 
 #include "database_impl.h"
-#include <filesystem>
 #include "calico/cursor.h"
-#include "calico/error.h"
+#include "calico/status.h"
 #include "page/file_header.h"
 #include "pool/buffer_pool.h"
 #include "pool/memory_pool.h"
 #include "storage/file.h"
-#include "storage/io.h"
 #include "tree/tree.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
+#include <filesystem>
 
 namespace cco {
 
@@ -48,24 +47,78 @@ auto Info::is_temp() const -> bool
     return m_db->is_temp();
 }
 
-Database::Impl::~Impl()
+auto initialize_log(spdlog::logger &logger, const std::string &base)
 {
-    if (const auto committed = commit(); !committed.has_value()) {
-
-    }
+    logger.info("starting CalicoDB v{} at \"{}\"", VERSION_NAME, base);
+    logger.info("tree is located at \"{}/{}\"", base, DATA_NAME);
+    logger.info("log is located at \"{}/{}\"", base, LOG_NAME);
 }
 
-Database::Impl::Impl(Parameters param):
-      m_sink {std::move(param.sink)},
-      m_logger {create_logger(m_sink, "Database")},
-      m_home {std::move(param.home)} {}
+auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) -> Result<std::unique_ptr<Impl>>
+{
+    const auto path = home->path();
+    auto sink = utils::create_sink(path, param.options.log_level);
+    auto logger = utils::create_logger(sink, "Database");
+    initialize_log(*logger, path);
 
-Database::Impl::Impl(Parameters param, InMemoryTag)
-    : m_sink {create_sink("", spdlog::level::off)},
-      m_logger {create_logger(m_sink, "Database")},
-      m_pool {std::make_unique<MemoryPool>(param.options.page_size, false, m_sink)},
-      m_tree {*Tree::open(Tree::Parameters {m_pool.get(), m_sink, PID::null(), 0, 0, 0})},
-      m_is_temp {true} {}
+    CCO_TRY_CREATE(initial_state, setup(*home, param.options, *logger));
+    logger->trace("constructing Database object");
+
+    auto impl = std::make_unique<Impl>();
+    auto [state, revised, is_new] = std::move(initial_state);
+
+    CCO_TRY_STORE(impl->m_pool, BufferPool::open({
+        *home,
+        sink,
+        state.flushed_lsn(),
+        revised.frame_count,
+        state.page_count(),
+        state.page_size(),
+        revised.permissions,
+        revised.use_xact,
+    }));
+
+    CCO_TRY_STORE(impl->m_tree, Tree::open({
+        impl->m_pool.get(),
+        sink,
+        state.free_start(),
+        state.free_count(),
+        state.record_count(),
+        state.node_count(),
+    }));
+
+    impl->m_sink = std::move(sink);
+    impl->m_logger = create_logger(impl->m_sink, "Database");
+    impl->m_home = std::move(home);
+
+    if (is_new) {
+        CCO_TRY_CREATE(root, impl->m_tree->allocate_root());
+        FileHeader header {root};
+        header.update_magic_code();
+        header.set_page_size(state.page_size());
+        header.set_block_size(state.block_size());
+        CCO_TRY(impl->m_pool->release(root.take()));
+    } else if (revised.use_xact) {
+        CCO_TRY(impl->m_pool->recover());
+    }
+    return impl;
+}
+
+auto Database::Impl::open(Parameters param) -> Result<std::unique_ptr<Impl>>
+{
+    auto impl = std::make_unique<Impl>();
+    impl->m_sink = create_sink();
+    impl->m_logger = create_logger(impl->m_sink, "Database");
+    impl->m_pool = std::make_unique<MemoryPool>(param.options.page_size, false, impl->m_sink);
+    impl->m_tree = Tree::open({impl->m_pool.get(), impl->m_sink, PID::null(), 0, 0, 0}).value();
+    impl->m_is_temp = true;
+    return impl;
+}
+
+auto Database::Impl::status() const -> Status
+{
+    return m_pool->status();
+}
 
 auto Database::Impl::path() const -> std::string
 {
@@ -118,15 +171,31 @@ auto Database::Impl::commit() -> Result<void>
 {
     return save_header()
         .and_then([this]() -> Result<void> {
-            CCO_TRY(m_pool->flush());
+            CCO_TRY(m_pool->commit());
             m_logger->trace("commit succeeded");
             return {};
         })
-        .or_else([this](const Error &error) -> Result<void> {
+        .or_else([this](const Status &status) -> Result<void> {
             LogMessage message {*m_logger};
             message.set_primary("cannot commit");
             message.log(spdlog::level::err);
-            return Err {error};
+            return Err {status};
+        });
+}
+
+auto Database::Impl::abort() -> Result<void>
+{
+    return m_pool->abort()
+        .and_then([this]() -> Result<void> {
+            CCO_TRY(m_pool->commit());
+            m_logger->trace("abort succeeded");
+            return {};
+        })
+        .or_else([this](const Status &status) -> Result<void> {
+            LogMessage message {*m_logger};
+            message.set_primary("cannot abort");
+            message.log(spdlog::level::err);
+            return Err {status};
         });
 }
 
@@ -197,7 +266,6 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
 
     if (exists) {
         CCO_TRY_CREATE(file, directory.open_file(DATA_NAME, Mode::READ_ONLY, perm));
-        auto reader = file->open_reader();
         CCO_TRY_CREATE(file_size, file->size());
 
         if (file_size < FileLayout::HEADER_SIZE) {
@@ -205,7 +273,7 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
             message.set_hint("file header is {} B", FileLayout::HEADER_SIZE);
             return Err {message.corruption()};
         }
-        if (!read_exact(*reader, header.data())) {
+        if (!read_exact(*file, header.data())) {
             message.set_detail("cannot read file header");
             return Err {message.corruption()};
         }
@@ -231,6 +299,7 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
     } else {
         header.update_magic_code();
         header.set_page_size(options.page_size);
+        header.set_flushed_lsn(LSN::base());
         header.update_header_crc();
         is_new = true;
 
@@ -259,7 +328,7 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
         message.set_hint("must be a power of 2");
         return choose_error();
     }
-
+    revised.page_size = header.page_size();
     return InitialState {std::move(header), revised, is_new};
 }
 

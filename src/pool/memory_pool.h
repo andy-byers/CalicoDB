@@ -1,7 +1,7 @@
 #ifndef CCO_POOL_IN_MEMORY_H
 #define CCO_POOL_IN_MEMORY_H
 
-#include "calico/error.h"
+#include "calico/status.h"
 #include "interface.h"
 #include "utils/identifier.h"
 #include "utils/scratch.h"
@@ -44,7 +44,20 @@ public:
         return {};
     }
 
-    [[nodiscard]] auto purge() -> Result<void> override;
+    [[nodiscard]] auto fetch(PID id, bool is_writable) -> Result<page::Page> override;
+
+    [[nodiscard]] auto status() const -> Status override
+    {
+        return Status::ok();
+    }
+
+    auto commit() -> Result<void> override {return {};}
+    auto abort() -> Result<void> override {return {};}
+    auto recover() -> Result<void> override {return {};}
+
+    auto clear_error() -> void override {}
+
+    auto purge() -> void override;
 
 private:
     struct UndoInfo {

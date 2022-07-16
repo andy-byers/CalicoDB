@@ -1,9 +1,9 @@
 #ifndef CCO_DATABASE_H
 #define CCO_DATABASE_H
 
+#include "status.h"
 #include <memory>
 #include <optional>
-#include "error.h"
 
 namespace cco {
 
@@ -15,43 +15,13 @@ class Info;
  */
 class Database {
 public:
+    explicit Database(const Options&);
+    [[nodiscard]] static auto destroy(Database db) -> Status;
+    [[nodiscard]] auto close() -> Status;
+    [[nodiscard]] auto open() -> Status;
 
-    /**
-     * Open or create a persistent database.
-     *
-     * @param path The path to the database home directory.
-     * @param options Options to apply to the database.
-     * @return A database located at the provided path on disk.
-     */
-    static auto open(const std::string &path, Options options) -> Result<Database>;
+    [[nodiscard]] auto is_open() const -> bool;
 
-    /**
-     * Create an in-memory database.
-     *
-     * @param options Options to apply to the database.
-     * @return An in-memory database.
-     */
-    static auto temp(Options options) -> Result<Database>;
-
-    /**
-     * Close a database.
-     *
-     * @param db The database to close.
-     * @return A result object describing success or failure.
-     */
-    static auto close(Database db) -> Result<void>;
-    
-    /**
-     * Destroy a database.
-     *
-     * Warning: this method is dangerous. It deletes the database and WAL files and cannot be undone. Use
-     * at your own risk.
-     *
-     * @param db The database to destroy.
-     * @return A result object describing success or failure.
-     */
-    static auto destroy(Database db) -> Result<void>;
-    
     /**
      * Find the record with a given key.
      *
@@ -92,9 +62,9 @@ public:
      * @param value The value to write.
      * @return True if the record was not already in the database, false otherwise.
      */
-    auto insert(BytesView key, BytesView value) -> Result<bool>;
-    auto insert(const std::string &key, const std::string &value) -> Result<bool>;
-    auto insert(const Record&) -> Result<bool>;
+    auto insert(BytesView key, BytesView value) -> Status;
+    auto insert(const std::string &key, const std::string &value) -> Status;
+    auto insert(const Record&) -> Status;
 
     /**
      * Erase a record given its key.
@@ -102,9 +72,13 @@ public:
      * @param key The key of the record to erase.
      * @return True if the record was found (and thus erased), false otherwise.
      */
-    auto erase(BytesView key) -> Result<bool>;
-    auto erase(const std::string &key) -> Result<bool>;
-    auto erase(const Cursor &cursor) -> Result<bool>;
+    auto erase(BytesView key) -> Status;
+    auto erase(const std::string &key) -> Status;
+    auto erase(const Cursor &cursor) -> Status;
+
+    [[nodiscard]] auto status() const -> Status;
+    [[nodiscard]] auto abort() -> Status;
+    [[nodiscard]] auto commit() -> Status;
 
     /**
      * Open an object that can be used to get information about this database.
@@ -118,10 +92,10 @@ public:
     Database(Database&&) noexcept;
     Database& operator=(Database&&) noexcept;
 
-    [[nodiscard]] auto commit() -> Result<void>;
-
 private:
     Database();
+
+    Options m_options;
     std::unique_ptr<Impl> m_impl;
 };
 

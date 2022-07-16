@@ -1,10 +1,11 @@
 #ifndef CCO_PAGE_PAGE_H
 #define CCO_PAGE_PAGE_H
 
-#include <optional>
-#include <vector>
+//#include "update.h"
 #include "utils/identifier.h"
 #include "utils/types.h"
+#include <optional>
+#include <vector>
 
 namespace cco {
 
@@ -13,6 +14,8 @@ class Frame;
 
 namespace page {
 
+struct ChangedRegion;
+struct PageUpdate;
 class UpdateManager;
 
 class Page final {
@@ -52,11 +55,24 @@ public:
     auto bytes(Index) -> Bytes;
     auto bytes(Index, Size) -> Bytes;
     auto write(BytesView, Index) -> void;
+    auto undo(LSN, const std::vector<ChangedRegion>&) -> void;
+    auto redo(LSN, const std::vector<ChangedRegion>&) -> void;
+
+    [[nodiscard]] auto has_manager() const -> bool
+    {
+        return m_manager != nullptr;
+    }
 
     auto set_manager(UpdateManager &manager) -> void
     {
         CCO_EXPECT_EQ(m_manager, nullptr);
         m_manager = &manager;
+    }
+
+    auto clear_manager() -> void
+    {
+        CCO_EXPECT_NE(m_manager, nullptr);
+        m_manager = nullptr;
     }
 
     Page(Page&&) noexcept = default;
@@ -81,6 +97,6 @@ auto put_u16(Page&, Index, uint16_t) -> void;
 auto put_u32(Page&, Index, uint32_t) -> void;
 
 } // page
-} // calico
+} // cco
 
 #endif // CCO_PAGE_PAGE_H

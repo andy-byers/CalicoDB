@@ -14,8 +14,7 @@ namespace cco {
 
 class IDirectory;
 class IFile;
-class IWALReader;
-class IWALWriter;
+class IWALManager;
 class Pager;
 
 class BufferPool: public IBufferPool {
@@ -23,6 +22,7 @@ public:
     struct Parameters {
         IDirectory &directory;
         spdlog::sink_ptr log_sink;
+        LSN flushed_lsn;
         Size frame_count {};
         Size page_count {};
         Size page_size {};
@@ -44,39 +44,44 @@ public:
         return m_cache.hit_ratio();
     }
 
+    [[nodiscard]] auto status() const -> Status override
+    {
+        return m_status;
+    }
+
+    auto clear_error() -> void override
+    {
+        m_status = Status::ok();
+    }
+
     [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto allocate() -> Result<page::Page> override;
+    [[nodiscard]] auto fetch(PID, bool) -> Result<page::Page> override;
     [[nodiscard]] auto acquire(PID, bool) -> Result<page::Page> override;
     [[nodiscard]] auto release(page::Page) -> Result<void> override;
-    [[nodiscard]] auto purge() -> Result<void> override;
+    [[nodiscard]] auto recover() -> Result<void> override;
     [[nodiscard]] auto flush() -> Result<void> override;
     [[nodiscard]] auto close() -> Result<void> override;
+    [[nodiscard]] auto commit() -> Result<void> override;
+    [[nodiscard]] auto abort() -> Result<void> override;
+    auto purge() -> void override;
     auto on_release(page::Page&) -> void override;
     auto save_header(page::FileHeader&) -> void override;
     auto load_header(const page::FileHeader&) -> void override;
 
 private:
-    struct State {
-        std::unique_ptr<IFile> file;
-        std::unique_ptr<Pager> pager;
-//        std::unique_ptr<IWALReader> wal_reader;
-        std::unique_ptr<IWALWriter> wal_writer;
-    };
-    BufferPool(State, const Parameters&);
+    explicit BufferPool(const Parameters&);
     [[nodiscard]] auto pin_frame(PID) -> Result<void>;
     [[nodiscard]] auto try_evict_frame() -> Result<bool>;
     [[nodiscard]] auto do_release(page::Page&) -> Result<void>;
-
+    [[nodiscard]] auto has_updates() const -> bool;
     mutable std::mutex m_mutex;
-    std::unique_ptr<IFile> m_file;
     std::unique_ptr<Pager> m_pager;
-//    std::unique_ptr<IWALReader> m_wal_reader;
-    std::unique_ptr<IWALWriter> m_wal_writer;
+    std::unique_ptr<IWALManager> m_wal;
     std::shared_ptr<spdlog::logger> m_logger;
-    std::vector<Error> m_errors;
     utils::ScratchManager m_scratch;
     PageCache m_cache;
-    LSN m_next_lsn {LSN::base()};
+    Status m_status {Status::ok()};
     Size m_page_count {};
     Size m_dirty_count {};
     Size m_ref_sum {};

@@ -63,6 +63,7 @@ public:
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool> override;
     [[nodiscard]] auto erase(Cursor) -> Result<bool> override;
     [[nodiscard]] auto root(bool) -> Result<page::Node> override;
+    [[nodiscard]] auto allocate_root() -> Result<page::Node> override;
     auto save_header(page::FileHeader&) const -> void override;
     auto load_header(const page::FileHeader&) -> void override;
     auto find_exact(BytesView) -> Cursor override;

@@ -52,6 +52,12 @@ auto MemoryPool::acquire(PID id, bool is_writable) -> Result<Page>
     return acquire_aux(id, is_writable);
 }
 
+auto MemoryPool::fetch(PID id, bool is_writable) -> Result<page::Page>
+{
+    // TODO
+    return acquire(id, is_writable);
+}
+
 auto MemoryPool::acquire_aux(PID id, bool is_writable) -> Page
 {
     CCO_EXPECT_FALSE(id.is_null());
@@ -82,14 +88,13 @@ auto MemoryPool::do_release(page::Page &page) -> void
     m_frames[index].synchronize(page);
 }
 
-auto MemoryPool::purge() -> Result<void>
+auto MemoryPool::purge() -> void
 {
     m_logger->trace("purging cache");
     for (auto &frame: m_frames) {
         if (frame.ref_count())
             frame.purge();
     }
-    return {};
 }
 
 } // calico

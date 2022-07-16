@@ -6,6 +6,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include "calico/database.h"
 #include "page/file_header.h"
+#include "utils/error.h"
 
 namespace cco {
 
@@ -24,22 +25,17 @@ struct InitialState {
 class Database::Impl final {
 public:
     struct Parameters {
-        std::unique_ptr<IDirectory> home;
         spdlog::sink_ptr sink;
-        page::FileHeader state;
         Options options;
     };
 
     friend class Database;
 
-    /**
-     * Tag for in-memory database constructor overload.
-     */
-    struct InMemoryTag {};
-
-    explicit Impl(Parameters);
-    Impl(Parameters, InMemoryTag);
-    ~Impl();
+    [[nodiscard]] static auto open(Parameters, std::unique_ptr<IDirectory>) -> Result<std::unique_ptr<Impl>>;
+    [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<Impl>>;
+    Impl() = default;
+    ~Impl() = default;
+    [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
     [[nodiscard]] auto cache_hit_ratio() const -> double;
     [[nodiscard]] auto record_count() const -> Size;
@@ -50,12 +46,23 @@ public:
     [[nodiscard]] auto erase(BytesView) -> Result<bool>;
     [[nodiscard]] auto erase(Cursor) -> Result<bool>;
     [[nodiscard]] auto commit() -> Result<void>;
+    [[nodiscard]] auto abort() -> Result<void>;
     [[nodiscard]] auto close() -> Result<void>;
     auto find(BytesView) -> Cursor;
     auto find_exact(BytesView) -> Cursor;
     auto find_minimum() -> Cursor;
     auto find_maximum() -> Cursor;
     auto info() -> Info;
+
+    [[nodiscard]] auto home() -> IDirectory&
+    {
+        return *m_home;
+    }
+
+    [[nodiscard]] auto home() const -> const IDirectory&
+    {
+        return *m_home;
+    }
 
 private:
     [[nodiscard]] auto save_header() -> Result<void>;

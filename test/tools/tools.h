@@ -9,6 +9,7 @@
 #include "calico/calico.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
+#include "wal/wal_record.h"
 
 namespace cco {
 
@@ -183,6 +184,87 @@ public:
 
 private:
     Parameters m_param;
+};
+
+class WALRecordGenerator {
+public:
+    explicit WALRecordGenerator(Size page_size):
+          m_page_size {page_size}
+    {
+        CCO_EXPECT_TRUE(utils::is_power_of_two(page_size));
+    }
+
+    auto generate_small() -> WALRecord
+    {
+        const auto small_size = m_page_size / 0x10;
+        const auto total_update_size = random.next_int(small_size, small_size * 2);
+        const auto update_count = random.next_int(1UL, 5UL);
+        const auto mean_update_size = total_update_size / update_count;
+        return generate(mean_update_size, update_count);
+    }
+
+    auto generate_large() -> WALRecord
+    {
+        const auto large_size = m_page_size / 3 * 2;
+        const auto total_update_size = random.next_int(large_size, large_size * 2);
+        const auto update_count = random.next_int(1UL, 5UL);
+        const auto mean_update_size = total_update_size / update_count;
+        return generate(mean_update_size, update_count);
+    }
+
+    auto generate(Size mean_update_size, Size update_count) -> WALRecord
+    {
+        CCO_EXPECT_GT(mean_update_size, 0);
+        constexpr Size page_count = 0x1000;
+        const auto lower_bound = mean_update_size - mean_update_size/3;
+        const auto upper_bound = mean_update_size + mean_update_size/3;
+        const auto page_size = upper_bound;
+        CCO_EXPECT_LE(page_size, std::numeric_limits<uint16_t>::max());
+
+        m_snapshots_before.emplace_back(random.next_string(page_size));
+        m_snapshots_after.emplace_back(random.next_string(page_size));
+        std::vector<page::ChangedRegion> update {};
+
+        for (Index i {}; i < update_count; ++i) {
+            const auto size = random.next_int(lower_bound, upper_bound);
+            const auto offset = random.next_int(page_size - size);
+
+            update.emplace_back();
+            update.back().offset = offset;
+            update.back().before = stob(m_snapshots_before.back()).range(offset, size);
+            update.back().after = stob(m_snapshots_after.back()).range(offset, size);
+        }
+        WALRecord record {{
+            std::move(update),
+            PID {static_cast<uint32_t>(random.next_int(page_count))},
+            LSN::null(),
+            LSN {static_cast<uint32_t>(m_payloads.size() + ROOT_ID_VALUE)},
+        }};
+        m_payloads.push_back(btos(record.payload().data()));
+        return record;
+    }
+
+    auto validate_record(const WALRecord &record, LSN target_lsn) const -> void
+    {
+        CCO_EXPECT_EQ(record.lsn(), target_lsn);
+        const auto payload = retrieve_payload(target_lsn);
+        CCO_EXPECT_EQ(record.type(), WALRecord::Type::FULL);
+        CCO_EXPECT_TRUE(record.payload().data() == stob(payload));
+        CCO_EXPECT_TRUE(record.is_consistent());
+    }
+
+    [[nodiscard]] auto retrieve_payload(LSN lsn) const -> const std::string&
+    {
+        return m_payloads.at(lsn.as_index());
+    }
+
+    Random random {0};
+
+private:
+    std::vector<std::string> m_payloads;
+    std::vector<std::string> m_snapshots_before;
+    std::vector<std::string> m_snapshots_after;
+    Size m_page_size;
 };
 
 } // calico

@@ -289,7 +289,7 @@ auto BlockAllocator::allocate(Size needed_size) -> Index
 
 /* Free block layout:
  *     .---------------------.-------------.---------------------------.
- *     |  Next Pointer (2B)  |  Size (2B)  |   Free Memory (Size-4 B)  |
+ *     |  Next Pointer (2B)  |  Size (2B)  |   Free FakeFile (Size-4 B)  |
  *     '---------------------'-------------'---------------------------'
  */
 auto BlockAllocator::take_free_space(Index ptr0, Index ptr1, Size needed_size) -> Index
