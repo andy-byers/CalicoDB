@@ -140,6 +140,6 @@ private:
     std::atomic<unsigned> m_count {};
 };
 
-} // calico::utils
+} // cco::utils
 
 #endif // CCO_UTILS_TYPES_H

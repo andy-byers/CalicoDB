@@ -267,6 +267,6 @@ private:
     Size m_page_size;
 };
 
-} // calico
+} // cco
 
 #endif // CCO_TEST_TOOLS_TOOLS_H

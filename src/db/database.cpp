@@ -41,9 +41,13 @@ auto Database::open() -> Status
             return home.error();
 
         param.sink = create_sink(m_options.path, m_options.log_level);
+        auto temp = create_logger(param.sink, "open");
         auto impl = Impl::open(std::move(param), std::move(*home));
-        if (!impl.has_value())
+        if (!impl.has_value()) {
+            temp->error("cannot open database");
+            temp->error("(reason) {}", impl.error().what());
             return impl.error();
+        }
         m_impl = std::move(*impl);
     } else {
         auto impl = Impl::open(std::move(param));

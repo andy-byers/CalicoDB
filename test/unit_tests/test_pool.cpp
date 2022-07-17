@@ -132,32 +132,10 @@ TEST_F(BufferPoolTests, AllocationInceasesPageCount)
     ASSERT_EQ(pool->page_count(), 3);
 }
 
-TEST_F(BufferPoolTests, LoadsFileHeaderFields)
-{
-    std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {stob(backing)};
-    header.set_page_count(123);
-    header.set_flushed_lsn(LSN {456});
-    pool->load_header(header);
-
-    ASSERT_EQ(pool->page_count(), 123);
-}
-
-TEST_F(BufferPoolTests, SavesFileHeaderFields)
-{
-    std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {stob(backing)};
-
-    ASSERT_TRUE(pool->release(*pool->allocate()));
-    pool->save_header(header);
-    ASSERT_EQ(header.page_count(), 1);
-}
-
 TEST_F(BufferPoolTests, AllocateReturnsCorrectPage)
 {
     auto page = pool->allocate();
     ASSERT_EQ(page->id(), PID::root());
-
 }
 
 TEST_F(BufferPoolTests, AcquireReturnsCorrectPage)
@@ -256,7 +234,7 @@ public:
     static constexpr Size page_size = 0x200;
 
     MemoryPoolTests(): 
-          pool {std::make_unique<MemoryPool>(page_size, true, create_sink())} {}
+          pool {std::make_unique<MemoryPool>(page_size, true)} {}
 
     Random random {0};
     std::unique_ptr<MemoryPool> pool;
@@ -279,26 +257,6 @@ TEST_F(MemoryPoolTests, StubMethodsWork)
     pool->purge();
 }
 
-TEST_F(MemoryPoolTests, LoadsRequiredFileHeaderFields)
-{
-    std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {stob(backing)};
-    header.set_page_count(123);
-    pool->load_header(header);
-
-    ASSERT_EQ(pool->page_count(), 123);
-}
-
-TEST_F(MemoryPoolTests, SavesRequiredFileHeaderFields)
-{
-    std::string backing(FileLayout::HEADER_SIZE, '\x00');
-    FileHeader header {stob(backing)};
-
-    ASSERT_TRUE(pool->release(*pool->allocate()));
-    pool->save_header(header);
-    ASSERT_EQ(header.page_count(), 1);
-}
-
 TEST_F(MemoryPoolTests, SanityCheck)
 {
     run_sanity_check(*this, 1'000);
@@ -310,4 +268,4 @@ TEST_F(MemoryPoolTests, HitRatioIsAlwaysOne)
     ASSERT_EQ(pool->hit_ratio(), 1.0);
 }
 
-} // calico
+} // cco

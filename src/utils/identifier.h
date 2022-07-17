@@ -155,6 +155,6 @@ struct LSN final: public Identifier {
     }
 };
 
-} // calico
+} // cco
 
 #endif // CCO_UTILS_IDENTIFIER_H

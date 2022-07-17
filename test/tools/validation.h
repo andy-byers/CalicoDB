@@ -11,6 +11,6 @@ auto validate_siblings(ITree&) -> void;
 auto validate_ordering(ITree&) -> void;
 auto validate_links(ITree&) -> void;
 
-} // calico
+} // cco
 
 #endif // CCO_TREE_VALIDATION_H

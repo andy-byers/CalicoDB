@@ -1,11 +1,12 @@
 #ifndef CCO_POOL_PAGER_H
 #define CCO_POOL_PAGER_H
 
-#include "calico/status.h"
 #include <list>
 #include <memory>
 #include <optional>
 #include <spdlog/spdlog.h>
+#include "calico/status.h"
+#include "utils/result.h"
 
 namespace cco {
 
@@ -38,6 +39,7 @@ public:
 
     ~Pager() = default;
     [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<Pager>>;
+    [[nodiscard]] auto close() -> Result<void>;
     [[nodiscard]] auto available() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto pin(PID) -> Result<Frame>;
@@ -61,6 +63,6 @@ private:
     Size m_page_size{};
 };
 
-} // calico
+} // cco
 
 #endif // CCO_POOL_PAGER_H

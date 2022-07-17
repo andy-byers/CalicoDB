@@ -40,4 +40,4 @@ auto Link::content_bytes(Size size) -> Bytes
     return m_page.bytes(LinkLayout::content_offset(), size);
 }
 
-} // calico::page
+} // cco::page

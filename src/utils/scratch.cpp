@@ -18,4 +18,4 @@ auto ScratchManager::reset() -> void
     m_available.splice(end(m_available), m_occupied);
 }
 
-} // calico::utils
+} // cco::utils

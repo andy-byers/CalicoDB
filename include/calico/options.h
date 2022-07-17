@@ -28,6 +28,6 @@ struct Options {
     bool use_xact {DEFAULT_USE_XACT};
 };
 
-} // calico
+} // cco
 
 #endif // CCO_OPTIONS_H

@@ -11,6 +11,7 @@
 #include "page/page.h"
 #include "page/update.h"
 #include "utils/identifier.h"
+#include "utils/result.h"
 #include "utils/utils.h"
 
 namespace cco {

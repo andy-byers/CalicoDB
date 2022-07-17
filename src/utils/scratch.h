@@ -55,6 +55,6 @@ private:
     Size m_scratch_size;
 };
 
-} // calico::utils
+} // cco::utils
 
 #endif // CCO_UTILS_SCRATCH_H

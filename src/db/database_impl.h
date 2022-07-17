@@ -6,7 +6,7 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include "calico/database.h"
 #include "page/file_header.h"
-#include "utils/error.h"
+#include "utils/result.h"
 
 namespace cco {
 
@@ -17,7 +17,7 @@ class IFile;
 class ITree;
 
 struct InitialState {
-    page::FileHeader state;
+    std::string state;
     Options revised;
     bool is_new {};
 };
@@ -34,7 +34,7 @@ public:
     [[nodiscard]] static auto open(Parameters, std::unique_ptr<IDirectory>) -> Result<std::unique_ptr<Impl>>;
     [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<Impl>>;
     Impl() = default;
-    ~Impl() = default;
+    ~Impl();
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
     [[nodiscard]] auto cache_hit_ratio() const -> double;
@@ -78,6 +78,6 @@ private:
 
 auto setup(IDirectory&, const Options&, spdlog::logger&) -> Result<InitialState>;
 
-} // calico
+} // cco
 
 #endif // CCO_DB_DATABASE_IMPL_H

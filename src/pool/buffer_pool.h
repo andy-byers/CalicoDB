@@ -30,7 +30,7 @@ public:
         bool use_xact {};
     };
 
-    ~BufferPool() override;
+    ~BufferPool() override = default;
 
     [[nodiscard]] static auto open(const Parameters&) -> Result<std::unique_ptr<IBufferPool>>;
 
@@ -55,6 +55,7 @@ public:
     }
 
     [[nodiscard]] auto page_size() const -> Size override;
+    [[nodiscard]] auto can_commit() const -> bool override;
     [[nodiscard]] auto allocate() -> Result<page::Page> override;
     [[nodiscard]] auto fetch(PID, bool) -> Result<page::Page> override;
     [[nodiscard]] auto acquire(PID, bool) -> Result<page::Page> override;
@@ -66,8 +67,8 @@ public:
     [[nodiscard]] auto abort() -> Result<void> override;
     auto purge() -> void override;
     auto on_release(page::Page&) -> void override;
-    auto save_header(page::FileHeader&) -> void override;
-    auto load_header(const page::FileHeader&) -> void override;
+    auto save_header(page::FileHeaderWriter&) -> void override;
+    auto load_header(const page::FileHeaderReader&) -> void override;
 
 private:
     explicit BufferPool(const Parameters&);
@@ -88,6 +89,6 @@ private:
     bool m_use_xact {};
 };
 
-} // calico
+} // cco
 
 #endif // CCO_POOL_BUFFER_POOL_H

@@ -1,11 +1,12 @@
 #ifndef CCO_STORAGE_INTERFACE_H
 #define CCO_STORAGE_INTERFACE_H
 
-#include "calico/status.h"
 #include <fcntl.h>
 #include <memory>
 #include <string>
 #include <vector>
+#include "calico/status.h"
+#include "utils/result.h"
 
 namespace cco {
 
@@ -73,6 +74,6 @@ public:
     [[nodiscard]] virtual auto close() -> Result<void> = 0;
 };
 
-} // calico
+} // cco
 
 #endif // CCO_STORAGE_INTERFACE_H

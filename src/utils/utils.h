@@ -89,6 +89,6 @@ namespace utils {
     }
 
 } // utils
-} // calico
+} // cco
 
 #endif // CCO_UTILS_UTILS_H

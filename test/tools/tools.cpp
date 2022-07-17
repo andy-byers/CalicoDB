@@ -30,4 +30,4 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
     return records;
 }
 
-} // calico
+} // cco

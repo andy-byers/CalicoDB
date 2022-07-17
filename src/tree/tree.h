@@ -54,32 +54,27 @@ public:
         return m_pool;
     }
 
-    [[nodiscard]] auto close() -> Result<void> override
-    {
-        return {};
-    }
-
-    [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<ITree>>;
+    [[nodiscard]] static auto open(const Parameters&) -> Result<std::unique_ptr<ITree>>;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool> override;
     [[nodiscard]] auto erase(Cursor) -> Result<bool> override;
     [[nodiscard]] auto root(bool) -> Result<page::Node> override;
     [[nodiscard]] auto allocate_root() -> Result<page::Node> override;
-    auto save_header(page::FileHeader&) const -> void override;
-    auto load_header(const page::FileHeader&) -> void override;
+    auto save_header(page::FileHeaderWriter&) const -> void override;
+    auto load_header(const page::FileHeaderReader&) -> void override;
     auto find_exact(BytesView) -> Cursor override;
     auto find(BytesView key) -> Cursor override;
     auto find_minimum() -> Cursor override;
     auto find_maximum() -> Cursor override;
 
 private:
-    explicit Tree(Parameters);
-    auto find_aux(BytesView, bool&) -> Cursor;
+    explicit Tree(const Parameters&);
+    auto find_aux(BytesView) -> Result<Internal::FindResult>;
 
     NodePool m_pool;
     Internal m_internal;
     std::shared_ptr<spdlog::logger> m_logger;
 };
 
-} // calico
+} // cco
 
 #endif // CCO_TREE_TREE_H

@@ -97,12 +97,4 @@ auto LogMessage::log(spdlog::level::level_enum level) const -> std::string
     return message;
 }
 
-auto MessageGroup::log(spdlog::level::level_enum level) const -> void
-{
-    m_logger->log(level, m_primary);
-    Index i {};
-    for (const auto &line: m_text)
-        m_logger->log(level, "({}/{}):", ++i, m_text.size(), line);
-}
-
-} // calico::utils
+} // cco::utils

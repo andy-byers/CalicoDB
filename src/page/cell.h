@@ -69,6 +69,6 @@ private:
 auto make_external_cell(BytesView, BytesView, Size) -> Cell;
 auto make_internal_cell(BytesView, Size) -> Cell;
 
-} // calico::page
+} // cco::page
 
 #endif // CCO_PAGE_CELL_H

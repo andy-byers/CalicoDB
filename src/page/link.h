@@ -49,6 +49,6 @@ private:
     Page m_page;
 };
 
-} // calico::page
+} // cco::page
 
 #endif // CCO_PAGE_LINK_H

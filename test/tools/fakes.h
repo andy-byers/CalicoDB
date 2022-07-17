@@ -447,6 +447,6 @@ private:
 //    std::unique_ptr<IFile> m_file;
 //};
 
-} // calico
+} // cco
 
 #endif // CCO_TEST_TOOLS_FAKES_H

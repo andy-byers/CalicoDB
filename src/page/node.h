@@ -226,14 +226,17 @@ private:
     std::optional<Cell> m_overflow {};
 };
 
+[[nodiscard]] auto can_merge_siblings(const Node&, const Node&, const Cell&) -> bool;
 auto transfer_cell(Node&, Node&, Index) -> void;
-auto can_merge_siblings(const Node&, const Node&, const Cell&) -> bool;
 auto merge_left(Node&, Node&, Node&, Index) -> void;
 auto merge_right(Node&, Node&, Node&, Index) -> void;
 auto merge_root(Node&, Node&) -> void;
 auto split_root(Node&, Node&) -> void;
 [[nodiscard]] auto split_non_root(Node&, Node&, utils::Scratch) -> Cell;
 
-} // calico::page
+[[nodiscard]] auto get_file_header_reader(const Node&) -> FileHeaderReader;
+[[nodiscard]] auto get_file_header_writer(Node&) -> FileHeaderWriter;
+
+} // cco::page
 
 #endif // CCO_PAGE_NODE_H

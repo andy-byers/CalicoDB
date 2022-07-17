@@ -24,19 +24,19 @@ public:
     ThreePartMessage() = default;
 
     template<class ...Args>
-    auto set_primary(const char *format, Args &&...args) -> void
+    auto set_primary(const std::string &format, Args &&...args) -> void
     {
         return set_text(PRIMARY, format, std::forward<Args>(args)...);
     }
 
     template<class ...Args>
-    auto set_detail(const char *format, Args &&...args) -> void
+    auto set_detail(const std::string &format, Args &&...args) -> void
     {
         return set_text(DETAIL, format, std::forward<Args>(args)...);
     }
 
     template<class ...Args>
-    auto set_hint(const char *format, Args &&...args) -> void
+    auto set_hint(const std::string &format, Args &&...args) -> void
     {
         return set_text(HINT, format, std::forward<Args>(args)...);
     }
@@ -55,7 +55,7 @@ private:
     auto set_text(Index, const char*) -> void;
 
     template<class ...Args>
-    auto set_text(Index index, const char *format, Args &&...args) -> void
+    auto set_text(Index index, const std::string &format, Args &&...args) -> void
     {
         set_text(index, fmt::format(format, std::forward<Args>(args)...).c_str());
     }
@@ -69,19 +69,19 @@ public:
           m_logger {&logger} {}
 
     template<class ...Args>
-    auto set_primary(const char *format, Args &&...args) -> void
+    auto set_primary(const std::string &format, Args &&...args) -> void
     {
         return m_message.set_primary(format, std::forward<Args>(args)...);
     }
 
     template<class ...Args>
-    auto set_detail(const char *format, Args &&...args) -> void
+    auto set_detail(const std::string &format, Args &&...args) -> void
     {
         return m_message.set_detail(format, std::forward<Args>(args)...);
     }
 
     template<class ...Args>
-    auto set_hint(const char *format, Args &&...args) -> void
+    auto set_hint(const std::string &format, Args &&...args) -> void
     {
         return m_message.set_hint(format, std::forward<Args>(args)...);
     }
@@ -97,31 +97,6 @@ private:
     spdlog::logger *m_logger {};
 };
 
-class MessageGroup {
-public:
-    explicit MessageGroup(spdlog::logger &logger):
-          m_logger {&logger} {}
-
-    template<class ...Args>
-    auto set_primary(const char *format, Args &&...args) -> void
-    {
-        m_primary = fmt::format(format, std::forward<Args>(args)...);
-    }
-
-    template<class ...Args>
-    auto push(Args &&...args) -> void
-    {
-        m_text.emplace_back(fmt::format(std::forward<Args>(args)...));
-    }
-
-    auto log(spdlog::level::level_enum = spdlog::level::err) const -> void;
-
-private:
-    std::string m_primary;
-    std::vector<std::string> m_text;
-    spdlog::logger *m_logger {};
-};
-
-} // calico::utils
+} // cco::utils
 
 #endif // CCO_UTILS_LOGGING_H

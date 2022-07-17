@@ -25,6 +25,8 @@ using namespace utils;
 auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBufferPool>>
 {
     auto pool = std::unique_ptr<BufferPool> {new (std::nothrow) BufferPool {param}};
+    pool->m_logger->trace("opening");
+
     if (!pool) {
         ThreePartMessage message;
         message.set_primary("cannot open buffer pool");
@@ -47,6 +49,7 @@ auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBuffer
     CCO_TRY_STORE(pool->m_wal, WALManager::open({
         pool.get(),
         param.directory,
+        create_sink(),
         param.page_size,
         param.flushed_lsn,
     }));
@@ -54,17 +57,14 @@ auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBuffer
 }
 
 BufferPool::BufferPool(const Parameters &param):
-      m_logger {utils::create_logger(param.log_sink, "BufferPool")},
+      m_logger {utils::create_logger(param.log_sink, "pool")},
       m_scratch {param.page_size},
       m_page_count {param.page_count},
-      m_use_xact {param.use_xact}
-{
-    m_logger->trace("opening");
-}
+      m_use_xact {param.use_xact} {}
 
-BufferPool::~BufferPool()
+auto BufferPool::can_commit() const -> bool
 {
-    m_logger->trace("closing");
+    return m_dirty_count > 0;
 }
 
 auto BufferPool::page_size() const -> Size
@@ -96,7 +96,7 @@ auto BufferPool::flush() -> Result<void>
     if (!m_cache.is_empty()) {
         m_logger->info("trying to flush {} frames", m_cache.size());
 
-        for (Index i {}, n {m_cache.size()}; i < n; ++i) {
+        while (!m_cache.is_empty()) {
             CCO_TRY_CREATE(was_evicted, try_evict_frame());
             if (!was_evicted)
                 break;
@@ -207,8 +207,11 @@ auto BufferPool::do_release(page::Page &page) -> Result<void>
 
     // Appending a record to the WAL is the only thing that can fail in this method. If we already have an error,
     // we'll skip this step, so we cannot encounter another error.
-    if (!m_status.is_ok() && page.has_manager())
-        return m_wal->append(page);
+    if (page.has_manager()) {
+        if (m_status.is_ok())
+            return m_wal->append(page);
+        m_wal->discard(page);
+    }
     return {};
 }
 
@@ -225,21 +228,34 @@ auto BufferPool::purge() -> void
     }
 }
 
-auto BufferPool::save_header(FileHeader &header) -> void
+auto BufferPool::save_header(FileHeaderWriter &header) -> void
 {
     m_logger->trace("saving header fields");
+    m_wal->save_header(header);
     header.set_page_count(m_page_count);
 }
 
-auto BufferPool::load_header(const FileHeader &header) -> void
+auto BufferPool::load_header(const FileHeaderReader &header) -> void
 {
     m_logger->trace("loading header fields");
+    m_wal->load_header(header);
     m_page_count = header.page_count();
 }
 
 auto BufferPool::close() -> Result<void>
 {
-    return {};
+    m_logger->trace("closing");
+    const auto pr = m_pager->close();
+    if (!pr.has_value()) {
+        m_logger->error("cannot close pager");
+        m_logger->error("(reason) {}", pr.error().what());
+    }
+    const auto wr = m_wal->close();
+    if (!wr.has_value()) {
+        m_logger->error("cannot close WAL");
+        m_logger->error("(reason) {}", wr.error().what());
+    }
+    return !pr.has_value() ? pr : wr;
 }
 
 auto BufferPool::allocate() -> Result<Page>
@@ -262,7 +278,7 @@ auto BufferPool::acquire(PID id, bool is_writable) -> Result<Page>
     return fetch(id, is_writable)
         .and_then([is_writable, this](Page page) -> Result<Page> {
             if (is_writable && m_use_xact)
-                m_wal->post(page);
+                m_wal->track(page);
             return page;
         })
         .or_else([is_writable, this](const Status &status) -> Result<Page> {
@@ -304,4 +320,4 @@ auto BufferPool::fetch(PID id, bool is_writable) -> Result<Page>
 
 #undef POOL_TRY
 
-} // calico
+} // cco

@@ -64,16 +64,6 @@ auto updating_a_database(cco::Database &db)
             return;
         }
     }
-    assert(db.insert("bengal", "short;spotted,marbled,rosetted").is_ok());
-    assert(db.insert("turkish vankedisi", "long;white").is_ok());
-    assert(db.insert("moose", "???").is_ok());
-    assert(db.insert("abyssinian", "short;ticked tabby").is_ok());
-    assert(db.insert("russian blue", "short;blue").is_ok());
-    assert(db.insert("american shorthair", "short;all").is_ok());
-    assert(db.insert("badger", "???").is_ok());
-    assert(db.insert("manx", "short,long;all").is_ok());
-    assert(db.insert("chantilly-tiffany", "long;solid,tabby").is_ok());
-    assert(db.insert("cyprus", "...").is_ok());
 
     // Modify a record.
     assert(db.insert("cyprus", "all;all").is_ok());
@@ -93,11 +83,20 @@ auto querying_a_database(cco::Database &db)
     // find_exact() looks for a record that compares equal to the given key and returns a cursor
     // pointing to it.
     auto cursor = db.find_exact(key);
+
+    // If the cursor is valid (i.e. is_valid() returns true) we are safe to use any of the getter
+    // methods.
     assert(cursor.is_valid());
     assert(cursor.key() == key);
+    assert(cursor.value() == "short;blue");
 
-    // If there isn't such a record, the cursor will be invalid.
+    // If we cannot find an exact match, an invalid cursor will be returned.
     assert(not db.find_exact("not found").is_valid());
+
+    // If a cursor encounters an error at any point, it will also become invalidated. In this case,
+    // it will modify the status returned by cursor.status() to hold information about the error.
+    auto error = db.find_exact("");
+    assert(error.status().is_invalid_argument());
 
     // find() returns a cursor on the first record that does not compare less than the given key.
     const auto prefix = key.copy().truncate(key.size() / 2);
@@ -117,20 +116,19 @@ auto querying_a_database(cco::Database &db)
 
 auto transactions(cco::Database &db)
 {
-    // Commit all the updates we made in the previous examples.
+    // Commit all the updates we made in the previous examples and begin a new transaction.
     assert(db.commit().is_ok());
 
-    // Make some changes and abort the transaction.
+    // Modify the database.
     assert(db.insert("opossum", "pretty cute").is_ok());
-    assert(db.erase(db.find_minimum()).is_ok());
-    assert(db.erase(db.find_maximum()).is_ok());
+    assert(db.erase("manx").is_ok());
+
+    // abort() restores the database to how it looked at the beginning of the transaction.
     assert(db.abort().is_ok());
 
     // All updates since the last call to commit() have been reverted.
-    auto opossum = db.find_exact("opposum");
-    assert(not opossum.is_valid() and opossum.status().is_ok());
-    assert(db.find_minimum().key() == cco::stob("abyssinian"));
-    assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
+    assert(db.find_exact("opossum").status().is_not_found());
+    assert(db.find_exact("manx").is_valid());
 }
 
 auto deleting_a_database(cco::Database db)
@@ -149,7 +147,7 @@ auto open_database() -> cco::Database
 
     if (const auto s = db.open(); !s.is_ok()) {
         fmt::print("(1/2) cannot open database\n");
-        fmt::print("(2/2) {}\n", s.what());
+        fmt::print("(2/2) (reason) {}\n", s.what());
         std::exit(EXIT_FAILURE);
     }
     assert(db.is_open());

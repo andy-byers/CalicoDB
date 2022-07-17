@@ -10,6 +10,11 @@ namespace cco {
 
 class IBufferPool;
 
+namespace page {
+    class FileHeaderReader;
+    class FileHeaderWriter;
+} // page
+
 /**
  * Object that manages a stack of deleted pages on disk.
  */
@@ -53,14 +58,14 @@ public:
      *
      * @param header The header to save state to.
      */
-    auto save_header(page::FileHeader &header) const -> void;
+    auto save_header(page::FileHeaderWriter &header) const -> void;
 
     /**
      * Load state from a file header.
      *
      * @param header The header to read state from.
      */
-    auto load_header(const page::FileHeader &header) -> void;
+    auto load_header(const page::FileHeaderReader &header) -> void;
 
     /**
      * Determine if the free list is empty.
@@ -78,6 +83,6 @@ private:
     Size m_free_count {}; ///< Number of pages in the free list stack.
 };
 
-} // calico
+} // cco
 
 #endif // CCO_TREE_FREE_LIST_H

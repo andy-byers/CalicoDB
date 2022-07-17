@@ -53,18 +53,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG        v1.10.0
 )
-FetchContent_Declare(
-    expected
-    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
-    GIT_TAG        v1.0.0
-)
 FetchContent_MakeAvailable(spdlog)
-FetchContent_GetProperties(expected)
-if(NOT expected_POPULATED)
-    FetchContent_Populate(expected)
-    set(TL_EXPECTED_DIR "${expected_SOURCE_DIR}/include")
-    set(TL_EXPECTED_INC "${TL_EXPECTED_DIR}/tl/expected.hpp")
-endif()
 
 list(APPEND CCO_SOURCES "${TL_EXPECTED_INC}")
 
@@ -76,7 +65,7 @@ target_include_directories(
     "${CCO_NAME}"
     PUBLIC  $<BUILD_INTERFACE:${CCO_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-    PRIVATE "${CCO_SOURCE_DIR}" "${TL_EXPECTED_DIR}/tl")
+    PRIVATE "${CCO_SOURCE_DIR}")
 target_compile_options(
     "${CCO_NAME}"
     PRIVATE "${CCO_WARNINGS}")

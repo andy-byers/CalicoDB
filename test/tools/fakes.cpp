@@ -200,4 +200,4 @@ auto FakeFile::resize(Size size) -> Result<void>
 //    return std::unique_ptr<IFile> {mock};
 //}
 
-} // calico
+} // cco

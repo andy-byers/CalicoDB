@@ -38,10 +38,6 @@ private:
     std::string m_what;
 };
 
-template<class T>
-using Result = tl::expected<T, Status>;
-using Err = tl::unexpected<Status>;
-
-} // calico
+} // cco
 
 #endif //CCO_ERROR_H

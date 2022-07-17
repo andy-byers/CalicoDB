@@ -5,13 +5,24 @@
 
 namespace cco::utils {
 
-inline auto crc_32(BytesView) noexcept -> std::uint32_t
+inline auto crc_32(BytesView data) noexcept -> std::uint32_t
 {
     // TODO: I'm getting rid of the zlib dependency, so we'll need to roll our own CRC function,
-    //       or depend on another library.
-    return {};
+    //       or depend on another library. For now, here's an Adler32 checksum copy-pasted from
+    //       Wikipedia, with some stylistic changes...
+    static constexpr std::uint32_t MOD_ADLER {65521};
+    std::uint32_t a {1}, b {0};
+
+    // Process each byte of the data in order
+    for (Index index {}; index < data.size(); ++index)
+    {
+        a = (a+static_cast<std::uint8_t>(data[index])) % MOD_ADLER;
+        b = (b+a) % MOD_ADLER;
+    }
+
+    return (b << 16) | a;
 }
 
-} // calico::utils
+} // cco::utils
 
 #endif // CCO_UTILS_CRC_H

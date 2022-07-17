@@ -111,6 +111,6 @@ inline auto random_binary(Random &random, Size max_size) -> std::string
 
 // TODO: Function for building a random string from a choice of characters.
 
-} // calico
+} // cco
 
 #endif // CCO_TEST_TOOLS_RANDOM_H

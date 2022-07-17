@@ -98,6 +98,6 @@ private:
     bool m_is_dirty {};
 };
 
-} // calico
+} // cco
 
 #endif // CCO_POOL_FRAME_H

@@ -33,6 +33,11 @@ WALWriter::WALWriter(std::unique_ptr<IFile> file, const WALParameters &param):
       m_file {std::move(file)},
       m_block(param.page_size, '\x00') {}
 
+auto WALWriter::close() -> Result<void>
+{
+    return m_file->close();
+}
+
 auto WALWriter::append(WALRecord record) -> Result<void>
 {
     const auto next_lsn {record.lsn()};

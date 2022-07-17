@@ -1,4 +1,5 @@
 #include "node.h"
+#include "file_header.h"
 
 #include "utils/crc.h"
 #include "utils/encoding.h"
@@ -923,8 +924,18 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     CCO_EXPECT_TRUE(Ln.is_overflowing());
     CCO_EXPECT_EQ(Ln.is_external(), rn.is_external());
     if (Ln.is_external())
-        return split_external_non_root(Ln, rn, std::move(scratch));
-    return split_internal_non_root(Ln, rn, std::move(scratch));
+        return split_external_non_root(Ln, rn, scratch);
+    return split_internal_non_root(Ln, rn, scratch);
 }
 
-} // calico::page
+auto get_file_header_reader(const Node &node) -> FileHeaderReader
+{
+    return get_file_header_reader(node.page());
+}
+
+auto get_file_header_writer(Node &node) -> FileHeaderWriter
+{
+    return get_file_header_writer(node.page());
+}
+
+} // cco::page

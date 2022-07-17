@@ -20,6 +20,6 @@ static constexpr int FAILURE = -1;
 [[nodiscard]] auto sync(int) -> Result<void>;
 [[nodiscard]] auto unlink(const std::string&) -> Result<void>;
 
-} // calico::system
+} // cco::system
 
 #endif // CCO_STORAGE_SYSTEM_H

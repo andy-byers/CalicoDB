@@ -25,10 +25,14 @@ auto WALReader::open(const WALParameters &param) -> Result<std::unique_ptr<IWALR
     return reader;
 }
 
-
 WALReader::WALReader(std::unique_ptr<IFile> file, WALParameters param):
       m_block(param.page_size, '\x00'),
       m_file {std::move(file)} {}
+
+auto WALReader::close() -> Result<void>
+{
+    return m_file->close();
+}
 
 /**
  * Move the cursor to the beginning of the WAL storage.

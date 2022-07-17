@@ -7,8 +7,9 @@ namespace cco {
 using namespace page;
 using namespace utils;
 
-Internal::Internal(Parameters param)
-    : m_scratch {get_max_local(param.pool->page_size()) * 2},
+Internal::Internal(Parameters param):
+      m_maximum_key_size {get_max_local(param.pool->page_size())},
+      m_scratch {m_maximum_key_size * 2}, // TODO: Should only need exactly m_maximum_key_size, i.e. the largest cell payload we can store locally.
       m_pool {param.pool},
       m_cell_count {param.cell_count} {}
 
@@ -383,13 +384,13 @@ auto Internal::fix_root(Node node) -> Result<void>
     return m_pool->release(std::move(node));
 }
 
-auto Internal::save_header(FileHeader &header) const -> void
+auto Internal::save_header(FileHeaderWriter &header) const -> void
 {
     m_pool->save_header(header);
     header.set_key_count(m_cell_count);
 }
 
-auto Internal::load_header(const FileHeader &header) -> void
+auto Internal::load_header(const FileHeaderReader &header) -> void
 {
     m_pool->load_header(header);
     m_cell_count = header.record_count();
@@ -503,4 +504,4 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Index ind
     return {};
 }
 
-} // calico
+} // cco

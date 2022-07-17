@@ -114,4 +114,4 @@ auto validate_ordering(ITree &tree) -> void
     CCO_EXPECT_TRUE(std::getline(right, rhs).eof());
 }
 
-} // calico
+} // cco

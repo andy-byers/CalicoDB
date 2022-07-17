@@ -14,13 +14,13 @@ FreeList::FreeList(const Parameters &param)
     , m_free_start {param.free_start}
     , m_free_count {param.free_count} {}
 
-auto FreeList::save_header(FileHeader &header) const-> void
+auto FreeList::save_header(FileHeaderWriter &header) const-> void
 {
     header.set_free_start(m_free_start);
     header.set_free_count(m_free_count);
 }
 
-auto FreeList::load_header(const FileHeader &header) -> void
+auto FreeList::load_header(const FileHeaderReader &header) -> void
 {
     m_free_start = header.free_start();
     m_free_count = header.free_count();
@@ -58,4 +58,4 @@ auto FreeList::pop() -> Result<Page>
     return Err {Status::logic_error("cannot pop page: free list is empty")};
 }
 
-} // calico
+} // cco

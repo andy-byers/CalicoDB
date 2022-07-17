@@ -32,10 +32,28 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
 }
 
 WALManager::WALManager(std::unique_ptr<IWALReader> reader, std::unique_ptr<IWALWriter> writer, const WALParameters &param):
-      m_scratch {param.page_size},
+      m_tracker {param.page_size},
       m_reader {std::move(reader)},
       m_writer {std::move(writer)},
+      m_logger {create_logger(param.log_sink, "wal")},
       m_pool {param.pool} {}
+
+auto WALManager::close() -> Result<void>
+{
+    const auto rr = m_reader->close();
+    if (!rr.has_value()) {
+        m_logger->error("cannot close WAL reader");
+        m_logger->error("(reason) {}", rr.error().what());
+    }
+    const auto wr = m_writer->close();
+    if (!wr.has_value()) {
+        m_logger->error("cannot close WAL writer");
+        m_logger->error("(reason) {}", wr.error().what());
+    }
+    // If both close() calls produced an error, we'll lose one of them. It'll end up in the
+    // log though.
+    return !rr.has_value() ? rr : wr;
+}
 
 auto WALManager::has_records() const -> bool
 {
@@ -47,31 +65,24 @@ auto WALManager::flushed_lsn() const -> LSN
     return m_writer->flushed_lsn();
 }
 
-auto WALManager::post(Page &page) -> void
+auto WALManager::track(Page &page) -> void
 {
-    CCO_EXPECT_EQ(m_registry.find(page.id()), end(m_registry));
-    auto [itr, was_posted] = m_registry.emplace(page.id(), UpdateManager {page.view(0), m_scratch.get().data()});
-    CCO_EXPECT_TRUE(was_posted);
-    page.set_manager(itr->second);
+    m_tracker.track(page);
+}
+
+auto WALManager::discard(Page &page) -> void
+{
+    m_tracker.discard(page);
 }
 
 auto WALManager::append(Page &page) -> Result<void>
 {
-    auto itr = m_registry.find(page.id());
-    CCO_EXPECT_NE(itr, end(m_registry));
-    PageUpdate update;
-    update.page_id = page.id();
-    update.previous_lsn = page.lsn();
-    const auto next_lsn = ++m_writer->last_lsn();
-    page.set_lsn(next_lsn);
-    update.lsn = next_lsn;
-    update.changes = itr->second.collect();
-    m_registry.erase(itr);
-    return m_writer->append(WALRecord {update});
+    return m_writer->append(WALRecord {m_tracker.collect(page, ++m_writer->last_lsn())});
 }
 
 auto WALManager::truncate() -> Result<void>
 {
+    m_tracker.reset();
     return m_writer->truncate();
 }
 
@@ -105,8 +116,9 @@ auto WALManager::commit() -> Result<void>
 {
     auto next_lsn = ++m_writer->last_lsn();
     CCO_TRY_CREATE(root, m_pool->acquire(PID::root(), true));
-    FileHeader header {root};
+    auto header = get_file_header_writer(root);
     header.set_flushed_lsn(next_lsn++);
+    header.update_header_crc();
     CCO_TRY(m_pool->release(std::move(root)));
     CCO_TRY(m_writer->append(WALRecord::commit(next_lsn)));
     CCO_TRY(flush());
@@ -184,6 +196,16 @@ auto WALManager::roll_backward() -> Result<void>
         CCO_TRY_STORE(should_continue, m_reader->decrement());
     }
     return {};
+}
+
+auto WALManager::save_header(page::FileHeaderWriter &header) -> void
+{
+    header.set_flushed_lsn(m_writer->flushed_lsn());
+}
+
+auto WALManager::load_header(const page::FileHeaderReader &header) -> void
+{
+    m_writer->set_flushed_lsn(header.flushed_lsn());
 }
 
 } // cco

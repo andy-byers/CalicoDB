@@ -162,9 +162,9 @@ private:
         [[nodiscard]] auto is_minimum() const -> bool;
         [[nodiscard]] auto is_maximum() const -> bool;
 
-        Size cell_count {}; ///< Number of cells in the current node.
-        Index ids[3] {0, 1, 0}; ///< Page IDs of the current node and its two siblings.
-        Index index {}; ///< Offset of the cursor in the current node.
+        std::uint32_t ids[3] {0, 1, 0}; ///< Page IDs of the current node and its two siblings.
+        std::uint16_t cell_count {}; ///< Number of cells in the current node.
+        std::uint16_t index {}; ///< Offset of the cursor in the current node.
     };
 
     friend class Tree;
@@ -175,16 +175,14 @@ private:
     auto move_to(page::Node, Index) -> void;
     auto seek_left() -> bool;
     auto seek_right() -> bool;
-    auto invalidate() -> void;
-    auto set_status(const Status&) const -> void;
+    auto invalidate(const Status& = Status::not_found()) const -> void;
 
-    mutable Status m_status {Status::ok()};
+    mutable Status m_status {Status::not_found()};
     NodePool *m_pool {}; ///< Reference to an object that provides nodes from the buffer pool.
     Internal *m_internal {}; ///< Reference to the page internals.
     Position m_position; ///< Position of the cursor in the page.
-    bool m_is_valid {}; ///< True if the cursor is in view, false otherwise.
 };
 
-} // calico
+} // cco
 
 #endif // CCO_CURSOR_H

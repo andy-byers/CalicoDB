@@ -158,6 +158,6 @@ private:
     Database::Impl *m_db {}; ///< Pointer to the database this object was opened on.
 };
 
-} // calico
+} // cco
 
 #endif // CCO_DATABASE_H

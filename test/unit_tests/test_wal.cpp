@@ -34,8 +34,8 @@ public:
     WALReaderWriterTests()
     {
         home = std::make_unique<FakeDirectory>("WALReaderWriterTests");
-        reader = WALReader::open({nullptr, *home, PAGE_SIZE, LSN::null()}).value();
-        writer = WALWriter::open({nullptr, *home, PAGE_SIZE, LSN::null()}).value();
+        reader = WALReader::open({nullptr, *home, create_sink(), PAGE_SIZE, LSN::null()}).value();
+        writer = WALWriter::open({nullptr, *home, create_sink(), PAGE_SIZE, LSN::null()}).value();
         backing = home->get_shared("wal");
         faults = home->get_faults("wal");
     }
@@ -377,8 +377,8 @@ public:
         std::filesystem::remove_all(BASE_PATH, ignore);
 
         directory = Directory::open(BASE_PATH).value();
-        writer = WALWriter::open({nullptr, *directory, PAGE_SIZE, LSN::base()}).value();
-        reader = WALReader::open({nullptr, *directory, PAGE_SIZE, LSN::base()}).value();
+        writer = WALWriter::open({nullptr, *directory, create_sink(), PAGE_SIZE, LSN::base()}).value();
+        reader = WALReader::open({nullptr, *directory, create_sink(), PAGE_SIZE, LSN::base()}).value();
     }
 
     ~RealWALReaderWriterTests() override = default;
@@ -427,7 +427,7 @@ public:
     {
         home = std::make_unique<FakeDirectory>("WALReaderWriterTests");
         pool = BufferPool::open({*home, create_sink(), LSN::null(), 0, PAGE_SIZE, 0666, true}).value();
-        wal = WALManager::open({pool.get(), *home, PAGE_SIZE, LSN::null()}).value();
+        wal = WALManager::open({pool.get(), *home, create_sink(), PAGE_SIZE, LSN::null()}).value();
         wal_backing = home->get_shared("wal");
         wal_faults = home->get_faults("wal");
         data_backing = home->get_shared("data");

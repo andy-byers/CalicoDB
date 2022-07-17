@@ -123,10 +123,10 @@ TEST_F(TreeTests, NewTreeIsEmpty)
     ASSERT_EQ(tree->cell_count(), 0);
     cursor = tree->find_minimum();
     ASSERT_FALSE(cursor.is_valid());
-    ASSERT_TRUE(cursor.status().is_ok());
+    ASSERT_TRUE(cursor.status().is_not_found());
     cursor = tree->find_maximum();
     ASSERT_FALSE(cursor.is_valid());
-    ASSERT_TRUE(cursor.status().is_ok());
+    ASSERT_TRUE(cursor.status().is_not_found());
 }
 
 TEST_F(TreeTests, NewTreeHasOneNode)

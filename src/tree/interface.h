@@ -3,6 +3,7 @@
 
 #include "calico/cursor.h"
 #include "calico/status.h"
+#include "utils/result.h"
 #include <optional>
 
 namespace cco {
@@ -12,7 +13,8 @@ class NodePool;
 
 namespace page {
     class Cell;
-    class FileHeader;
+    class FileHeaderReader;
+    class FileHeaderWriter;
     class Link;
     class Node;
     class Page;
@@ -25,7 +27,6 @@ public:
     [[nodiscard]] virtual auto node_count() const -> Size = 0;
     [[nodiscard]] virtual auto internal() const -> const Internal& = 0;
     [[nodiscard]] virtual auto pool() const -> const NodePool& = 0;
-    [[nodiscard]] virtual auto close() -> Result<void> = 0;
     [[nodiscard]] virtual auto internal() -> Internal& = 0;
     [[nodiscard]] virtual auto pool() -> NodePool& = 0;
     [[nodiscard]] virtual auto insert(BytesView, BytesView) -> Result<bool> = 0;
@@ -36,10 +37,10 @@ public:
     [[nodiscard]] virtual auto find_maximum() -> Cursor = 0;
     [[nodiscard]] virtual auto root(bool) -> Result<page::Node> = 0;
     [[nodiscard]] virtual auto allocate_root() -> Result<page::Node> = 0;
-    virtual auto save_header(page::FileHeader&) const -> void = 0;
-    virtual auto load_header(const page::FileHeader&) -> void = 0;
+    virtual auto save_header(page::FileHeaderWriter&) const -> void = 0;
+    virtual auto load_header(const page::FileHeaderReader&) -> void = 0;
 };
 
-} // calico
+} // cco
 
 #endif // CCO_TREE_INTERFACE_H

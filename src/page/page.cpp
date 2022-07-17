@@ -1,4 +1,5 @@
 #include "page.h"
+#include "file_header.h"
 #include "update.h"
 #include "pool/interface.h"
 #include "utils/encoding.h"
@@ -137,4 +138,16 @@ auto put_u32(Page &page, Index offset, uint32_t value) -> void
     utils::put_u32(page.bytes(offset, sizeof(value)), value);
 }
 
-} // calico::page
+auto get_file_header_reader(const Page &page) -> FileHeaderReader
+{
+    CCO_EXPECT_TRUE(page.id().is_root());
+    return FileHeaderReader {page.view(FileLayout::header_offset(), FileLayout::HEADER_SIZE)};
+}
+
+auto get_file_header_writer(Page &page) -> FileHeaderWriter
+{
+    CCO_EXPECT_TRUE(page.id().is_root());
+    return FileHeaderWriter {page.bytes(FileLayout::header_offset(), FileLayout::HEADER_SIZE)};
+}
+
+} // cco::page

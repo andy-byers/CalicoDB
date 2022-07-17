@@ -5,9 +5,6 @@
 #include <cstdlib>
 #include <string>
 
-// @TartanLlama/expected v1.0.0
-#include "expected.hpp"
-
 #if (!defined(_WIN32) && !defined(_WIN64)) && (defined(__unix__) || defined(__unix) || defined(__APPLE__))
 #  define CCO_UNIX
 #  ifdef __APPLE__
@@ -34,7 +31,7 @@ struct Record {
     std::string value; ///< The record value.
 };
 
-} // calico
+} // cco
 
 auto operator<(const cco::Record&, const cco::Record&) -> bool;
 auto operator>(const cco::Record&, const cco::Record&) -> bool;

@@ -78,6 +78,6 @@ inline auto handle_expect(bool expectation, const char *repr, const char *file, 
     }
 }
 
-} // calico::utils::impl
+} // cco::utils::impl
 
 #endif // CCO_UTILS_ASSERT_H

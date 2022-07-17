@@ -211,9 +211,7 @@ TEST_F(DatabaseTests, DataPersists)
             ASSERT_TRUE(db.insert(*itr).is_ok());
             itr++;
         }
-        ASSERT_TRUE(db.commit().is_ok());
         ASSERT_TRUE(db.close().is_ok());
-        ASSERT_FALSE(db.is_open());
     }
 
     Database db {options};
@@ -225,6 +223,7 @@ TEST_F(DatabaseTests, DataPersists)
         ASSERT_EQ(btos(c.key()), key);
         ASSERT_EQ(c.value(), value);
     }
+    ASSERT_TRUE(db.close().is_ok());
 }
 
 TEST_F(DatabaseTests, SanityCheck)
@@ -232,7 +231,9 @@ TEST_F(DatabaseTests, SanityCheck)
     static constexpr Size NUM_ITERATIONS {5};
     static constexpr Size GROUP_SIZE {1'000};
     Options options;
+    options.path = BASE;
     options.page_size = 0x200;
+    options.frame_count = 16;
 
     RecordGenerator::Parameters param;
     param.mean_key_size = 20;
@@ -251,21 +252,28 @@ TEST_F(DatabaseTests, SanityCheck)
 
         for (const auto &record: generator.generate(random, GROUP_SIZE))
             db.insert(record);
+        ASSERT_TRUE(db.close().is_ok());
     }
 
     for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         Database db {options};
         ASSERT_TRUE(db.open().is_ok());
 
-        for (const auto &record: generator.generate(random, GROUP_SIZE))
-            if (!db.erase(record.key).is_ok()) {
-                ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
-            }
+        for (const auto &record: generator.generate(random, GROUP_SIZE)) {
+            auto r = db.erase(record.key);
+            if (r.is_not_found())
+                r = db.erase(db.find_minimum());
+
+            if (!r.is_ok())
+                ADD_FAILURE() << "cannot find record to remove";
+        }
+        ASSERT_TRUE(db.commit().is_ok());
+        ASSERT_TRUE(db.close().is_ok());
     }
 
     Database db {options};
     ASSERT_TRUE(db.open().is_ok());
-    CCO_EXPECT_EQ(db.info().record_count(), 0);
+    ASSERT_EQ(db.info().record_count(), 0);
 }
 
 } // <anonymous>

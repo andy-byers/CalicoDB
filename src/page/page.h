@@ -16,6 +16,8 @@ namespace page {
 
 struct ChangedRegion;
 struct PageUpdate;
+class FileHeaderReader;
+class FileHeaderWriter;
 class UpdateManager;
 
 class Page final {
@@ -95,6 +97,9 @@ private:
 [[nodiscard]] auto get_u32(const Page&, Index) -> uint32_t;
 auto put_u16(Page&, Index, uint16_t) -> void;
 auto put_u32(Page&, Index, uint32_t) -> void;
+
+[[nodiscard]] auto get_file_header_reader(const Page&) -> FileHeaderReader;
+[[nodiscard]] auto get_file_header_writer(Page&) -> FileHeaderWriter;
 
 } // page
 } // cco

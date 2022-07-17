@@ -61,6 +61,11 @@ Pager::Pager(AlignedBuffer buffer, Parameters param):
         m_available.emplace_back(m_buffer.get(), m_available.size(), m_page_size);
 }
 
+auto Pager::close() -> Result<void>
+{
+    return m_file->close();
+}
+
 auto Pager::available() const -> Size 
 {
     return m_available.size();
@@ -158,4 +163,4 @@ auto Pager::write_page_to_file(PID id, BytesView in) const -> Result<void>
     return write_all(*m_file, in, FileLayout::page_offset(id, in.size()));
 }
 
-} // calico
+} // cco

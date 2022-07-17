@@ -8,6 +8,6 @@ namespace cco {
 
 static constexpr const char *EXPECTATION_MATCHER = "Expect";
 
-} // calico
+} // cco
 
 #endif //CCO_UNIT_H

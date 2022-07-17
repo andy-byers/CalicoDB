@@ -29,6 +29,6 @@ private:
     int m_file {-1};
 };
 
-} // calico
+} // cco
 
 #endif // CCO_STORAGE_DIRECTORY_H

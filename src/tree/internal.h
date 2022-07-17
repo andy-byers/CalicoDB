@@ -38,12 +38,17 @@ public:
     [[nodiscard]] auto positioned_insert(Position, BytesView, BytesView) -> Result<void>;
     [[nodiscard]] auto positioned_modify(Position, BytesView) -> Result<void>;
     [[nodiscard]] auto positioned_remove(Position) -> Result<void>;
-    auto save_header(page::FileHeader&) const -> void;
-    auto load_header(const page::FileHeader&) -> void;
+    auto save_header(page::FileHeaderWriter&) const -> void;
+    auto load_header(const page::FileHeaderReader&) -> void;
 
     [[nodiscard]] auto cell_count() const -> Size
     {
         return m_cell_count;
+    }
+
+    [[nodiscard]] auto maximum_key_size() const -> Size
+    {
+        return m_maximum_key_size;
     }
 
 private:
@@ -68,11 +73,12 @@ private:
 
     [[nodiscard]] auto maybe_fix_child_parent_connections(page::Node&) -> Result<void>;
 
+    Size m_maximum_key_size {};
     utils::ScratchManager m_scratch;
     NodePool *m_pool;
     Size m_cell_count {};
 };
 
-} // calico
+} // cco
 
 #endif // CCO_TREE_INTERNAL_H

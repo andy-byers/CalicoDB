@@ -40,6 +40,6 @@ auto read_exact_at(IFile&, Bytes, Index) -> Result<void>;
 auto write_all(IFile&, BytesView) -> Result<void>;
 auto write_all(IFile&, BytesView, Index) -> Result<void>;
 
-} // calico
+} // cco
 
 #endif // CCO_STORAGE_FILE_H

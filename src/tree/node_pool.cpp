@@ -132,16 +132,16 @@ auto NodePool::destroy_chain(PID id, Size size) -> Result<void>
     return {};
 }
 
-auto NodePool::save_header(FileHeader &header) -> void
+auto NodePool::save_header(FileHeaderWriter &header) -> void
 {
     header.set_node_count(m_node_count);
     m_free_list.save_header(header);
 }
 
-auto NodePool::load_header(const FileHeader &header) -> void
+auto NodePool::load_header(const FileHeaderReader &header) -> void
 {
     m_node_count = header.node_count();
     m_free_list.load_header(header);
 }
 
-} // calico
+} // cco

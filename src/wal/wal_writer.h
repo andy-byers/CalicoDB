@@ -20,6 +20,7 @@ class WALWriter: public IWALWriter {
 public:
     ~WALWriter() override = default;
     [[nodiscard]] static auto open(const WALParameters&) -> Result<std::unique_ptr<IWALWriter>>;
+    [[nodiscard]] auto close() -> Result<void> override;
     [[nodiscard]] auto append(WALRecord) -> Result<void> override;
     [[nodiscard]] auto truncate() -> Result<void> override;
     [[nodiscard]] auto flush() -> Result<void> override;

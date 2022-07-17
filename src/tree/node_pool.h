@@ -31,8 +31,8 @@ public:
     [[nodiscard]] auto allocate_chain(BytesView) -> Result<PID>;
     [[nodiscard]] auto destroy_chain(PID, Size) -> Result<void>;
     [[nodiscard]] auto collect_chain(PID, Bytes) const -> Result<void>;
-    auto save_header(page::FileHeader&) -> void;
-    auto load_header(const page::FileHeader&) -> void;
+    auto save_header(page::FileHeaderWriter&) -> void;
+    auto load_header(const page::FileHeaderReader&) -> void;
 
     [[nodiscard]] auto node_count() const -> Size
     {
@@ -45,6 +45,6 @@ private:
     Size m_node_count {};
 };
 
-} // calico
+} // cco
 
 #endif // CCO_TREE_NODE_POOL_H

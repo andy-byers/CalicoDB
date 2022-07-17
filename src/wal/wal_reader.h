@@ -26,6 +26,7 @@ class WALReader: public IWALReader {
 public:
    ~WALReader() override = default;
     [[nodiscard]] static auto open(const WALParameters&) -> Result<std::unique_ptr<IWALReader>>;
+    [[nodiscard]] auto close() -> Result<void> override;
     [[nodiscard]] auto record() const -> std::optional<WALRecord> override;
     auto increment() -> Result<bool> override;
     auto decrement() -> Result<bool> override;
