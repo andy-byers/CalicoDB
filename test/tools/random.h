@@ -1,12 +1,12 @@
-#ifndef CALICO_TEST_TOOLS_RANDOM_H
-#define CALICO_TEST_TOOLS_RANDOM_H
+#ifndef CCO_TEST_TOOLS_RANDOM_H
+#define CCO_TEST_TOOLS_RANDOM_H
 
 #include <algorithm>
 #include <random>
 #include "calico/options.h"
 #include "utils/expect.h"
 
-namespace calico {
+namespace cco {
 
 /**
 ** Helper class for generating random numbers.
@@ -43,7 +43,7 @@ template<class Container> auto Random::shuffle(Container &data) -> void
 ** Generate a positive integer from a uniform distribution.
 **
 ** @param v_max The maximum value (inclusive) that the integer can take.
-** @return A random integer in the range [0, v_max].
+** @return A random integer in the view [0, v_max].
 */
 template<class T> auto Random::next_int(T v_max) -> T
 {
@@ -55,11 +55,11 @@ template<class T> auto Random::next_int(T v_max) -> T
 **
 ** @param v_min The minimum value (inclusive) that the integer can take.
 ** @param v_max The maximum value (inclusive) that the integer can take.
-** @return A random integer in the range [v_min, v_max].
+** @return A random integer in the view [v_min, v_max].
 */
 template<class T> auto Random::next_int(T v_min, T v_max) -> T
 {
-    CALICO_EXPECT_LE(v_min, v_max);
+    CCO_EXPECT_LE(v_min, v_max);
     std::uniform_int_distribution<T> dist(v_min, v_max);
     return dist(m_rng);
 }
@@ -68,7 +68,7 @@ template<class T> auto Random::next_int(T v_min, T v_max) -> T
 ** Generate a positive real number from a uniform distribution.
 **
 ** @param v_max The maximum value (inclusive) that the number can take.
-** @return A random real number in the range [0, v_max].
+** @return A random real number in the view [0, v_max].
 */
 template<class T> auto Random::next_real(T v_max) -> T
 {
@@ -80,11 +80,11 @@ template<class T> auto Random::next_real(T v_max) -> T
 **
 ** @param v_min The minimum value (inclusive) that the number can take.
 ** @param v_max The maximum value (inclusive) that the number can take.
-** @return A random real number in the range [v_min, v_max].
+** @return A random real number in the view [v_min, v_max].
 */
 template<class T> auto Random::next_real(T v_min, T v_max) -> T
 {
-    CALICO_EXPECT_LE(v_min, v_max);
+    CCO_EXPECT_LE(v_min, v_max);
     std::uniform_real_distribution<T> dist(v_min, v_max);
     return dist(m_rng);
 }
@@ -111,6 +111,6 @@ inline auto random_binary(Random &random, Size max_size) -> std::string
 
 // TODO: Function for building a random string from a choice of characters.
 
-} // calico
+} // cco
 
-#endif // CALICO_TEST_TOOLS_RANDOM_H
+#endif // CCO_TEST_TOOLS_RANDOM_H

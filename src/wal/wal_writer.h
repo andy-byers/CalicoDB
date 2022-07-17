@@ -4,62 +4,64 @@
 #include <memory>
 #include <spdlog/logger.h>
 #include "interface.h"
+#include "page/update.h"
 #include "utils/identifier.h"
 
-namespace calico {
+namespace cco {
 
 class IDirectory;
 class IFile;
-class IFileWriter;
 class WALRecord;
 
 /**
- * A writer that appends records to the WAL storage.
+ * A component that appends records to the WAL file.
  */
 class WALWriter: public IWALWriter {
 public:
-    struct Parameters {
-        IDirectory &directory;
-        spdlog::sink_ptr log_sink;
-        Size block_size {};
-    };
-    explicit WALWriter(Parameters);
     ~WALWriter() override = default;
-    [[nodiscard]] auto has_committed() const -> bool override;
+    [[nodiscard]] static auto open(const WALParameters&) -> Result<std::unique_ptr<IWALWriter>>;
+    [[nodiscard]] auto close() -> Result<void> override;
+    [[nodiscard]] auto append(WALRecord) -> Result<void> override;
+    [[nodiscard]] auto truncate() -> Result<void> override;
+    [[nodiscard]] auto flush() -> Result<void> override;
 
-    /**
-     * Determine if there is data waiting to be flushed to disk.
-     *
-     * @return True if there is data in the tail buffer, false otherwise.
-     */
+    auto set_flushed_lsn(LSN flushed_lsn) -> void override
+    {
+        m_flushed_lsn = flushed_lsn;
+        m_last_lsn = flushed_lsn;
+    }
+
+    [[nodiscard]] auto flushed_lsn() const -> LSN override
+    {
+        return m_flushed_lsn;
+    }
+
+    [[nodiscard]] auto last_lsn() const -> LSN override
+    {
+        return m_last_lsn;
+    }
+
     [[nodiscard]] auto has_pending() const -> bool override
     {
         return m_cursor > 0;
     }
 
-    /**
-     * Get the WAL block size.
-     *
-     * @return The size of a WAL block
-     */
-    [[nodiscard]] auto block_size() const -> Size override
+    [[nodiscard]] auto has_committed() const -> bool override
     {
-        return m_block.size();
+        return m_has_committed;
     }
 
-    auto append(WALRecord record) -> LSN override;
-    auto truncate() -> void override;
-    auto flush() -> LSN override;
-
 private:
+    WALWriter(std::unique_ptr<IFile>, const WALParameters&);
+
     std::unique_ptr<IFile> m_file;
-    std::unique_ptr<IFileWriter> m_writer;
-    std::shared_ptr<spdlog::logger> m_logger;
-    std::string m_block;              ///< Tail buffer for holding the current block
-    Index m_cursor {};                ///< Position in the tail buffer
+    std::string m_block;
+    Index m_cursor {};
+    LSN m_flushed_lsn;
     LSN m_last_lsn;
+    bool m_has_committed {};
 };
 
-} // calico
+} // cco
 
 #endif // CALICO_WAL_WAL_WRITER_H

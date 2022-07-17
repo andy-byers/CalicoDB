@@ -1,38 +1,82 @@
 
 #include "database_impl.h"
 #include "calico/cursor.h"
+#include "pool/buffer_pool.h"
+#include "pool/interface.h"
 #include "storage/directory.h"
+#include "tree/tree.h"
+#include "utils/logging.h"
+#include "wal/wal_reader.h"
+#include "wal/wal_writer.h"
 
-namespace calico {
+namespace cco {
 
 namespace fs = std::filesystem;
+using namespace page;
+using namespace utils;
 
-auto Database::open(const std::string &path, Options options) -> Database
+#define DB_TRY(expr) \
+    do { \
+        const auto db_try_result = (expr); \
+        if (!db_try_result.has_value()) \
+            return db_try_result.error(); \
+    } while (0)
+
+Database::Database(const Options &options):
+    m_options {options} {}
+
+auto Database::is_open() const -> bool
 {
-    Database db;
-    db.m_impl = std::make_unique<Impl>(Impl::Parameters {
-        std::make_unique<Directory>(path),
-        options,
-    });
-    return db;
+    return m_impl != nullptr;
 }
 
-auto Database::temp(Options options) -> Database
+auto Database::open() -> Status
 {
     Impl::Parameters param;
-    param.options = options;
-    Database db;
-    db.m_impl = std::make_unique<Impl>(std::move(param), Impl::InMemoryTag {});
-    return db;
+    param.options = m_options;
+
+    if (!m_options.path.empty()) {
+        auto home = Directory::open(m_options.path);
+        if (!home.has_value())
+            return home.error();
+
+        param.sink = create_sink(m_options.path, m_options.log_level);
+        auto temp = create_logger(param.sink, "open");
+        auto impl = Impl::open(std::move(param), std::move(*home));
+        if (!impl.has_value()) {
+            temp->error("cannot open database");
+            temp->error("(reason) {}", impl.error().what());
+            return impl.error();
+        }
+        m_impl = std::move(*impl);
+    } else {
+        auto impl = Impl::open(std::move(param));
+        if (!impl.has_value())
+            return impl.error();
+        m_impl = std::move(*impl);
+    }
+    return Status::ok();
 }
 
-auto Database::destroy(Database db) -> void
+auto Database::close() -> Status
+{
+    const auto r = m_impl->close();
+    m_impl.reset();
+    if (!r.has_value())
+        return r.error();
+    return Status::ok();
+}
+
+auto Database::destroy(Database db) -> Status
 {
     if (db.m_impl->is_temp())
-        return;
+        return Status::ok();
 
-    if (const auto &path = db.m_impl->path(); !path.empty())
-        fs::remove_all(path);
+    if (const auto &path = db.m_impl->path(); !path.empty()) {
+        if (std::error_code error; !fs::remove_all(path, error))
+            return Status::system_error(error.message());
+    }
+    return Status::ok();
 }
 
 Database::Database() = default;
@@ -42,16 +86,6 @@ Database::~Database() = default;
 Database::Database(Database&&) noexcept = default;
 
 auto Database::operator=(Database&&) noexcept -> Database& = default;
-
-auto Database::contains(BytesView key) const -> bool
-{
-    return find_exact(key).is_valid();
-}
-
-auto Database::contains(const std::string &key) const -> bool
-{
-    return contains(stob(key));
-}
 
 auto Database::find_exact(BytesView key) const -> Cursor
 {
@@ -83,45 +117,54 @@ auto Database::find_maximum() const -> Cursor
     return m_impl->find_maximum();
 }
 
-auto Database::insert(BytesView key, BytesView value) -> bool
+auto Database::insert(BytesView key, BytesView value) -> Status
 {
-    return m_impl->insert(key, value);
+    DB_TRY(m_impl->insert(key, value));
+    return Status::ok();
 }
 
-auto Database::insert(const std::string &key, const std::string &value) -> bool
+auto Database::insert(const std::string &key, const std::string &value) -> Status
 {
     return insert(stob(key), stob(value));
 }
 
-auto Database::insert(const Record &record) -> bool
+auto Database::insert(const Record &record) -> Status
 {
     const auto &[key, value] = record;
     return insert(key, value);
 }
 
-auto Database::erase(BytesView key) -> bool
+auto Database::erase(BytesView key) -> Status
 {
-    return m_impl->erase(key);
+    return erase(find_exact(key));
 }
 
-auto Database::erase(const std::string &key) -> bool
+auto Database::erase(const std::string &key) -> Status
 {
     return erase(stob(key));
 }
 
-auto Database::erase(Cursor cursor) -> bool
+auto Database::erase(const Cursor &cursor) -> Status
 {
-    return m_impl->erase(cursor);
+    auto r = m_impl->erase(cursor);
+    if (!r.has_value()) {
+        return Status {r.error()};
+    } else if (!r.value()) {
+        return Status::not_found();
+    }
+    return Status::ok();
 }
 
-auto Database::commit() -> bool
+auto Database::commit() -> Status
 {
-    return m_impl->commit();
+    DB_TRY(m_impl->commit());
+    return Status::ok();
 }
 
-auto Database::abort() -> bool
+auto Database::abort() -> Status
 {
-    return m_impl->abort();
+    DB_TRY(m_impl->abort());
+    return Status::ok();
 }
 
 auto Database::info() const -> Info
@@ -129,4 +172,6 @@ auto Database::info() const -> Info
     return m_impl->info();
 }
 
-} // calico
+#undef DB_TRY
+
+} // cco

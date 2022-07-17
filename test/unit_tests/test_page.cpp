@@ -7,143 +7,15 @@
 #include "page/cell.h"
 #include "page/node.h"
 #include "page/page.h"
-#include "page/update.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
 #include "utils/scratch.h"
 
 namespace {
 
-using namespace calico;
-using Range = UpdateManager::Range;
-
-TEST(UpdateTests, BasicAssertions)
-{
-    using namespace impl;
-
-    // 0  1  2  3  4
-    // |--------|
-    // |--------|
-    CALICO_EXPECT_TRUE(can_merge({0, 3}, {0, 3}));
-    const auto res_1 = merge({0, 3}, {0, 3});
-    CALICO_EXPECT_EQ(res_1.x, 0);
-    CALICO_EXPECT_EQ(res_1.dx, 3);
-
-    // 0  1  2  3  4
-    // |--------|
-    // |-----|
-    CALICO_EXPECT_TRUE(can_merge({0, 3}, {0, 2}));
-    const auto res_2 = merge({0, 3}, {0, 2});
-    CALICO_EXPECT_EQ(res_2.x, 0);
-    CALICO_EXPECT_EQ(res_2.dx, 3);
-
-    // 0  1  2  3  4
-    // |--------|
-    // |-----------|
-    CALICO_EXPECT_TRUE(can_merge({0, 3}, {0, 4}));
-    const auto res_3 = merge({0, 3}, {0, 4});
-    CALICO_EXPECT_EQ(res_3.x, 0);
-    CALICO_EXPECT_EQ(res_3.dx, 4);
-
-    // 0  1  2  3  4
-    // |--------|
-    //    |--|
-    CALICO_EXPECT_TRUE(can_merge({0, 3}, {1, 1}));
-    const auto res_4 = merge({0, 3}, {1, 1});
-    CALICO_EXPECT_EQ(res_4.x, 0);
-    CALICO_EXPECT_EQ(res_4.dx, 3);
-
-    // 0  1  2  3  4
-    // |--------|
-    //    |-----|
-    CALICO_EXPECT_TRUE(can_merge({0, 3}, {1, 2}));
-    const auto res_5 = merge({0, 3}, {1, 2});
-    CALICO_EXPECT_EQ(res_5.x, 0);
-    CALICO_EXPECT_EQ(res_5.dx, 3);
-
-    // 0  1  2  3  4
-    // |--------|
-    //    |--------|
-    CALICO_EXPECT_TRUE(can_merge({0, 3}, {1, 3}));
-    const auto res_6 = merge({0, 3}, {1, 3});
-    CALICO_EXPECT_EQ(res_6.x, 0);
-    CALICO_EXPECT_EQ(res_6.dx, 4);
-
-    // 0  1  2  3  4
-    // |--------|
-    //          |--|
-    CALICO_EXPECT_TRUE(can_merge({0, 3}, {3, 1}));
-    const auto res_7 = merge({0, 3}, {3, 1});
-    CALICO_EXPECT_EQ(res_7.x, 0);
-    CALICO_EXPECT_EQ(res_7.dx, 4);
-
-    std::vector<Range> v {
-        {0, 2},
-        {4, 2},
-        {7, 1},
-        {8, 3},
-    };
-
-    // 0  1  2  3  4  5  6  7  8  9
-    // |--------|
-    //                |-----|
-    //                         |--|
-
-    const Range r {3, 1};
-    insert_range(v, r);
-    compress_ranges(v);
-}
-
-class UpdateManagerTests: public testing::Test {
-private:
-    ScratchManager m_scratch {page_size};
-
-public:
-    static constexpr Size page_size = 0x400;
-
-    UpdateManagerTests()
-        : manager {m_scratch.get()}
-        , scratch {m_scratch.get()}
-        , snapshot {scratch.data()} {}
-
-    UpdateManager manager;
-    Scratch scratch;
-    BytesView snapshot;
-};
-
-TEST_F(UpdateManagerTests, FreshUpdateManagerHasNoChanges)
-{
-    ASSERT_FALSE(manager.has_changes());
-}
-
-TEST_F(UpdateManagerTests, RegistersChange)
-{
-    manager.indicate_change(1, 2);
-    ASSERT_TRUE(manager.has_changes());
-    const auto changes = manager.collect_changes(snapshot);
-    const auto change = changes.at(0);
-    ASSERT_EQ(change.offset, 1);
-    ASSERT_EQ(change.before.size(), 2);
-    ASSERT_EQ(change.after.size(), 2);
-}
-
-TEST_F(UpdateManagerTests, DoesNotMergeDisjointChanges)
-{
-    manager.indicate_change(0, 1);
-    manager.indicate_change(2, 1);
-    manager.indicate_change(4, 1);
-    const auto changes = manager.collect_changes(snapshot);
-    ASSERT_EQ(changes.size(), 3);
-}
-
-TEST_F(UpdateManagerTests, MergesIntersectingChanges)
-{
-    manager.indicate_change(0, 1);
-    manager.indicate_change(1, 1);
-    manager.indicate_change(2, 1);
-    const auto changes = manager.collect_changes(snapshot);
-    ASSERT_EQ(changes.size(), 1);
-}
+using namespace cco;
+using namespace cco::page;
+using namespace cco::utils;
 
 class PageBacking {
 public:
@@ -155,9 +27,7 @@ public:
     auto get_page(PID id) -> Page
     {
         m_map.emplace(id, std::string(m_page_size, '\x00'));
-        Page page {{id, stob(m_map[id]), nullptr, true, false}};
-        page.enable_tracking(m_scratch.get());
-        return page;
+        return Page {{id, stob(m_map[id]), nullptr, true, false}};
     }
 
 private:
@@ -169,7 +39,6 @@ private:
 class PageTests: public testing::Test {
 public:
     static constexpr Size page_size = 0x100;
-    static constexpr Size halfway_point = page_size / 2;
 
     PageTests()
         : m_backing {page_size} {}
@@ -187,63 +56,13 @@ TEST_F(PageTests, HeaderFields)
 {
     auto page = get_page(PID::root());
     page.set_type(PageType::EXTERNAL_NODE);
-    page.set_lsn(LSN {123});
     ASSERT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    ASSERT_EQ(page.lsn(), LSN {123});
 }
 
 TEST_F(PageTests, FreshPagesAreEmpty)
 {
     auto page = get_page(PID::root());
-    ASSERT_FALSE(page.has_changes());
-    ASSERT_TRUE(page.range(0) == stob(std::string(page_size, '\x00')));
-}
-
-TEST_F(PageTests, RegistersHeaderChange)
-{
-    auto page = get_page(PID::root());
-    ASSERT_EQ(page.type(), PageType::NULL_PAGE);
-    page.set_type(PageType::EXTERNAL_NODE);
-    ASSERT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    ASSERT_TRUE(page.has_changes());
-}
-
-TEST_F(PageTests, RegistersContentChange)
-{
-    auto page = get_page(PID::root());
-    ASSERT_EQ(page.get_u32(halfway_point), 0);
-    page.put_u32(halfway_point, 42);
-    ASSERT_EQ(page.get_u32(halfway_point), 42);
-    ASSERT_TRUE(page.has_changes());
-}
-
-auto perform_basic_changes_and_collect(Page &page)
-{
-    page.set_type(PageType::EXTERNAL_NODE);
-    page.put_u32(PageTests::halfway_point, 42);
-    return page.collect_changes();
-}
-
-TEST_F(PageTests, UndoChanges)
-{
-    auto page = get_page(PID::root());
-    auto changes = perform_basic_changes_and_collect(page);
-    page.set_lsn(LSN::base());
-    page.undo_changes(LSN::null(), changes);
-    ASSERT_EQ(page.lsn(), LSN::null()) << "Page LSN should have been updated";
-    ASSERT_EQ(page.type(), PageType::NULL_PAGE);
-    ASSERT_EQ(page.get_u32(halfway_point), 0);
-}
-
-TEST_F(PageTests, RedoChanges)
-{
-    auto temp = get_page(PID::root());
-    auto changes = perform_basic_changes_and_collect(temp);
-    auto page = get_page(PID::root());
-    page.redo_changes(LSN::base(), changes);
-    ASSERT_EQ(page.lsn(), LSN::base()) << "Page LSN should have been updated";
-    ASSERT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    ASSERT_EQ(page.get_u32(halfway_point), 42);
+    ASSERT_TRUE(page.view(0) == stob(std::string(page_size, '\x00')));
 }
 
 class CellBacking {
@@ -275,7 +94,7 @@ public:
         param.is_external = is_external;
 
         if (local_value_size != value.size()) {
-            CALICO_EXPECT_LT(local_value_size, value.size());
+            CCO_EXPECT_LT(local_value_size, value.size());
             param.local_value.truncate(local_value_size);
             param.overflow_id = overflow_id;
         }
@@ -586,12 +405,6 @@ public:
     PID arbitrary_pid {2};
 };
 
-TEST_F(NodeTests, NodeAllocationCausesPageChanges)
-{
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
-    ASSERT_TRUE(node.page().has_changes());
-}
-
 TEST_F(NodeTests, FreshNodesAreEmpty)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
@@ -766,7 +579,7 @@ TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
     std::string value {"world"};
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
     auto cell = cell_backing.get_cell("hello", value, true);
-    node.insert(cell_backing.get_cell("hello", value, true));
+    node.insert(std::move(cell));
     ASSERT_DEATH(node.insert(cell_backing.get_cell("hello", value, true)), EXPECTATION_MATCHER);
 }
 

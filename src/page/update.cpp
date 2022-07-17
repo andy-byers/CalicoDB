@@ -2,7 +2,9 @@
 
 #include <algorithm>
 
-namespace calico {
+namespace cco::page {
+
+using namespace utils;
 
 namespace impl {
     auto can_merge(const Range &lhs, const Range &rhs) -> bool
@@ -38,9 +40,6 @@ namespace impl {
         ranges.erase(++lhs, ranges.end());
     }
 
-
-    // TODO: Check if -O3 moves strings automatically when they are expiring.
-
     auto insert_range(std::vector<Range> &ranges, Range range) -> void
     {
         if (ranges.empty()) {
@@ -72,20 +71,20 @@ namespace impl {
 
 } // impl
 
-UpdateManager::UpdateManager(Scratch scratch)
-    : m_snapshot {std::move(scratch)} {}
-
-auto UpdateManager::has_changes() const -> bool
+UpdateManager::UpdateManager(BytesView page, Bytes scratch):
+    m_snapshot {scratch},
+    m_current {page}
 {
-    return !m_ranges.empty();
+    CCO_EXPECT_EQ(page.size(), m_snapshot.size());
+    mem_copy(scratch, m_current);
 }
 
-auto UpdateManager::indicate_change(Index x, Size dx) -> void
+auto UpdateManager::push(Range range) -> void
 {
-    impl::insert_range(m_ranges, {x, dx});
+    impl::insert_range(m_ranges, range);
 }
 
-auto UpdateManager::collect_changes(BytesView snapshot) -> std::vector<ChangedRegion>
+auto UpdateManager::collect() -> std::vector<ChangedRegion>
 {
     impl::compress_ranges(m_ranges);
 
@@ -94,21 +93,15 @@ auto UpdateManager::collect_changes(BytesView snapshot) -> std::vector<ChangedRe
     for (auto &[offset, before, after]: update) {
         const auto &[x, dx] = *itr;
         offset = x;
-        before = m_snapshot.data().range(offset, dx);
-        after = snapshot.range(offset, dx);
+        before = m_snapshot.range(x, dx);
+        after = m_current.range(x, dx);
         itr++;
     }
     m_ranges.clear();
     return update;
 }
 
-} // calico
-
-
-
-
-
-
+} // cco::page
 
 
 

@@ -1,56 +1,26 @@
-#ifndef CALICO_DATABASE_H
-#define CALICO_DATABASE_H
+#ifndef CCO_DATABASE_H
+#define CCO_DATABASE_H
 
+#include "status.h"
 #include <memory>
 #include <optional>
-#include "bytes.h"
 
-namespace calico {
+namespace cco {
 
 class Cursor;
 class Info;
 
 /**
- * An object that represents a Cub DB database.
+ * An object that represents a Calico DB database.
  */
 class Database {
 public:
+    explicit Database(const Options&);
+    [[nodiscard]] static auto destroy(Database db) -> Status;
+    [[nodiscard]] auto close() -> Status;
+    [[nodiscard]] auto open() -> Status;
 
-    /**
-     * Open or create a Cub DB database.
-     *
-     * @param path The path to the database storage.
-     * @param options Options to apply to the database.
-     * @return A Cub DB database, located at the provided path on disk.
-     */
-    static auto open(const std::string &path, Options options) -> Database;
-
-    /**
-     * Create an in-memory Cub DB database.
-     *
-     * @param options Options to apply to the database.
-     * @return An in-memory Cub DB database.
-     */
-    static auto temp(Options options) -> Database;
-
-    /**
-     * Destroy a database.
-     *
-     * Warning: this method is dangerous. It deletes the database and WAL files and cannot be undone. Use
-     * at your own risk.
-     *
-     * @param db The database to destroy.
-     */
-    static auto destroy(Database db) -> void;
-
-    /**
-     * Determine if the database contains a given key.
-     *
-     * @param key The key to check for.
-     * @return True if the database contains a record with the key, false otherwise.
-     */
-    [[nodiscard]] auto contains(BytesView key) const -> bool;
-    [[nodiscard]] auto contains(const std::string &key) const -> bool;
+    [[nodiscard]] auto is_open() const -> bool;
 
     /**
      * Find the record with a given key.
@@ -92,16 +62,9 @@ public:
      * @param value The value to write.
      * @return True if the record was not already in the database, false otherwise.
      */
-    auto insert(BytesView key, BytesView value) -> bool;
-    auto insert(const std::string &key, const std::string &value) -> bool;
-
-    /**
-     * Insert a new record or update an existing one.
-     *
-     * @param record The record to write.
-     * @return True if the record was not already in the database, false otherwise.
-     */
-    auto insert(const Record&) -> bool;
+    auto insert(BytesView key, BytesView value) -> Status;
+    auto insert(const std::string &key, const std::string &value) -> Status;
+    auto insert(const Record&) -> Status;
 
     /**
      * Erase a record given its key.
@@ -109,30 +72,13 @@ public:
      * @param key The key of the record to erase.
      * @return True if the record was found (and thus erased), false otherwise.
      */
-    auto erase(BytesView key) -> bool;
-    auto erase(const std::string &key) -> bool;
+    auto erase(BytesView key) -> Status;
+    auto erase(const std::string &key) -> Status;
+    auto erase(const Cursor &cursor) -> Status;
 
-    /**
-     * Erase a record given a cursor pointing to it.
-     *
-     * @param cursor A cursor pointing to the record to erase.
-     * @return True if the record was found (and thus erased), false otherwise.
-     */
-    auto erase(Cursor cursor) -> bool;
-
-    /**
-     * Commit the current transaction.
-     *
-     * @return True if there were changes to commit, false otherwise.
-     */
-    auto commit() -> bool;
-
-    /**
-     * Abort the current transaction.
-     *
-     * @return True if there were changes to abort, false otherwise.
-     */
-    auto abort() -> bool;
+    [[nodiscard]] auto status() const -> Status;
+    [[nodiscard]] auto abort() -> Status;
+    [[nodiscard]] auto commit() -> Status;
 
     /**
      * Open an object that can be used to get information about this database.
@@ -148,6 +94,8 @@ public:
 
 private:
     Database();
+
+    Options m_options;
     std::unique_ptr<Impl> m_impl;
 };
 
@@ -158,7 +106,7 @@ public:
     /**
      * Get the hit ratio for the buffer pool page cache.
      *
-     * @return A page cache hit ratio in the range 0.0 to 1.0, inclusive.
+     * @return A page cache hit ratio in the view 0.0 to 1.0, inclusive.
      */
     [[nodiscard]] auto cache_hit_ratio() const -> double;
 
@@ -210,6 +158,6 @@ private:
     Database::Impl *m_db {}; ///< Pointer to the database this object was opened on.
 };
 
-} // calico
+} // cco
 
-#endif // CALICO_DATABASE_H
+#endif // CCO_DATABASE_H

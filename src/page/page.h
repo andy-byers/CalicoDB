@@ -1,18 +1,29 @@
-#ifndef CALICO_PAGE_PAGE_H
-#define CALICO_PAGE_PAGE_H
+#ifndef CCO_PAGE_PAGE_H
+#define CCO_PAGE_PAGE_H
 
+//#include "update.h"
+#include "utils/identifier.h"
+#include "utils/types.h"
 #include <optional>
 #include <vector>
-#include "update.h"
-#include "utils/scratch.h"
-#include "utils/types.h"
 
-namespace calico {
+namespace cco {
 
 class IBufferPool;
+class Frame;
+
+namespace page {
+
+struct ChangedRegion;
+struct PageUpdate;
+class FileHeaderReader;
+class FileHeaderWriter;
+class UpdateManager;
 
 class Page final {
 public:
+    friend class cco::Frame;
+
     struct Parameters {
         PID id;
         Bytes data;
@@ -20,8 +31,9 @@ public:
         bool is_writable {};
         bool is_dirty {};
     };
-    explicit Page(const Parameters&);
+
     ~Page();
+    explicit Page(const Parameters&);
 
     [[nodiscard]] auto is_writable() const -> bool
     {
@@ -33,46 +45,63 @@ public:
         return m_is_dirty;
     }
 
+    [[nodiscard]] auto id() const -> PID;
+    [[nodiscard]] auto size() const -> Size;
+    [[nodiscard]] auto view(Index) const -> BytesView;
+    [[nodiscard]] auto view(Index, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
     [[nodiscard]] auto lsn() const -> LSN;
     auto set_type(PageType) -> void;
     auto set_lsn(LSN) -> void;
-
-    [[nodiscard]] auto id() const -> PID;
-    [[nodiscard]] auto size() const -> Size;
-    [[nodiscard]] auto range(Index) const -> BytesView;
-    [[nodiscard]] auto range(Index, Size) const -> BytesView;
-    [[nodiscard]] auto get_u16(Index) const -> uint16_t;
-    [[nodiscard]] auto get_u32(Index) const -> uint32_t;
-    [[nodiscard]] auto has_changes() const -> bool;
     auto read(Bytes, Index) const -> void;
-    auto mut_range(Index) -> Bytes;
-    auto mut_range(Index, Size) -> Bytes;
-    auto put_u16(Index, uint16_t) -> void;
-    auto put_u32(Index, uint32_t) -> void;
+    auto bytes(Index) -> Bytes;
+    auto bytes(Index, Size) -> Bytes;
     auto write(BytesView, Index) -> void;
-    auto collect_changes() -> std::vector<ChangedRegion>;
-    auto enable_tracking(Scratch) -> void;
-    auto undo_changes(LSN, const std::vector<ChangedRegion>&) -> void;
-    auto redo_changes(LSN, const std::vector<ChangedRegion>&) -> void;
-    auto raw_data() -> Bytes;
+    auto undo(LSN, const std::vector<ChangedRegion>&) -> void;
+    auto redo(LSN, const std::vector<ChangedRegion>&) -> void;
+
+    [[nodiscard]] auto has_manager() const -> bool
+    {
+        return m_manager != nullptr;
+    }
+
+    auto set_manager(UpdateManager &manager) -> void
+    {
+        CCO_EXPECT_EQ(m_manager, nullptr);
+        m_manager = &manager;
+    }
+
+    auto clear_manager() -> void
+    {
+        CCO_EXPECT_NE(m_manager, nullptr);
+        m_manager = nullptr;
+    }
 
     Page(Page&&) noexcept = default;
-    auto operator=(Page&&) noexcept -> Page&;
+    auto operator=(Page&&) noexcept -> Page& = default;
+    Page(const Page&) noexcept = delete;
+    auto operator=(const Page&) noexcept -> Page& = delete;
 
 private:
     [[nodiscard]] auto header_offset() const -> Index;
-    auto do_release() noexcept -> void;
-    auto do_change(Index, Size) -> void;
 
-    Unique<IBufferPool*> m_pool;
-    std::optional<UpdateManager> m_updates;
+    utils::UniqueNullable<IBufferPool*> m_source;
+    UpdateManager *m_manager {};
     Bytes m_data;
     PID m_id;
     bool m_is_writable {};
     bool m_is_dirty {};
 };
 
-} // calico
+[[nodiscard]] auto get_u16(const Page&, Index) -> uint16_t;
+[[nodiscard]] auto get_u32(const Page&, Index) -> uint32_t;
+auto put_u16(Page&, Index, uint16_t) -> void;
+auto put_u32(Page&, Index, uint32_t) -> void;
 
-#endif // CALICO_PAGE_PAGE_H
+[[nodiscard]] auto get_file_header_reader(const Page&) -> FileHeaderReader;
+[[nodiscard]] auto get_file_header_writer(Page&) -> FileHeaderWriter;
+
+} // page
+} // cco
+
+#endif // CCO_PAGE_PAGE_H

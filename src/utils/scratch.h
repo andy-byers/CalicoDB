@@ -1,6 +1,6 @@
 
-#ifndef CALICO_UTILS_SCRATCH_H
-#define CALICO_UTILS_SCRATCH_H
+#ifndef CCO_UTILS_SCRATCH_H
+#define CCO_UTILS_SCRATCH_H
 
 #include <list>
 #include <string>
@@ -8,57 +8,53 @@
 #include "types.h"
 #include "calico/bytes.h"
 
-namespace calico {
+namespace cco::utils {
 
 class ScratchManager;
 
 class Scratch final {
 public:
-    Scratch(Index, Bytes, ScratchManager*);
-    ~Scratch();
-    [[nodiscard]] auto id() const -> Index;
-    [[nodiscard]] auto size() const -> Size;
-    [[nodiscard]] auto data() const -> BytesView;
-    auto data() -> Bytes;
+    ~Scratch() = default;
 
-    Scratch(Scratch&&) noexcept = default;
+    explicit Scratch(Bytes data):
+          m_data {data} {}
 
-    auto operator=(Scratch &&rhs) noexcept -> Scratch&
+    [[nodiscard]] auto size() const -> Size
     {
-        if (this != &rhs) {
-            do_release();
-            m_internal = std::move(rhs.m_internal);
-        }
-        return *this;
+        return m_data.size();
     }
 
-private:
-    auto do_release() -> void;
+    [[nodiscard]] auto data() const -> BytesView
+    {
+        return m_data;
+    }
 
-    struct Internal {
-        Bytes data;
-        ScratchManager *source{};
-        Index id{};
-    };
-    Unique<Internal> m_internal;
+    [[nodiscard]] auto data() -> Bytes
+    {
+        return m_data;
+    }
+
+
+private:
+    Bytes m_data;
 };
 
 class ScratchManager final {
 public:
-    explicit ScratchManager(Size);
-    auto get() -> Scratch;
+    explicit ScratchManager(Size scratch_size):
+          m_scratch_size {scratch_size} {}
+
+    [[nodiscard]] auto get() -> Scratch;
+    auto reset() -> void;
 
 private:
-    friend class Scratch;
-    auto on_scratch_release(Scratch&) -> void;
+    static constexpr Size MIN_SCRATCH_ID {1};
 
-    static constexpr auto MIN_SCRATCH_ID = 1UL;
-    std::unordered_map<Index, std::string> m_pinned;
+    std::list<std::string> m_occupied;
     std::list<std::string> m_available;
     Size m_scratch_size;
-    Size m_id_counter {MIN_SCRATCH_ID};
 };
 
-} // calico
+} // cco::utils
 
-#endif // CALICO_UTILS_SCRATCH_H
+#endif // CCO_UTILS_SCRATCH_H

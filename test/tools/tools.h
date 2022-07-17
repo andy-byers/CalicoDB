@@ -1,6 +1,6 @@
 
-#ifndef CALICO_TEST_TOOLS_TOOLS_H
-#define CALICO_TEST_TOOLS_TOOLS_H
+#ifndef CCO_TEST_TOOLS_TOOLS_H
+#define CCO_TEST_TOOLS_TOOLS_H
 
 #include <iomanip>
 #include <iostream>
@@ -11,7 +11,7 @@
 #include "utils/utils.h"
 #include "wal/wal_record.h"
 
-namespace calico {
+namespace cco {
 
 class ITree;
 class Node;
@@ -47,21 +47,33 @@ namespace tools {
     template<class T>
     auto insert(T &t, const std::string &key, const std::string &value) -> bool
     {
-        return t.insert(stob(key), stob(value));
+        auto was_inserted = t.insert(stob(key), stob(value));
+        CCO_EXPECT_TRUE(was_inserted.has_value());
+        return was_inserted.value();
     }
 
     template<class T>
     auto erase(T &t, const std::string &key) -> bool
     {
-        return t.erase(find_exact(t, key));
+        auto was_erased = t.erase(find_exact(t, key));
+        CCO_EXPECT_TRUE(was_erased.has_value());
+        return was_erased.value();
     }
 
     template<class T>
     auto erase_one(T &t, const std::string &key) -> bool
     {
-        if (t.erase(find_exact(t, key)))
+        auto was_erased = t.erase(find_exact(t, key));
+        CCO_EXPECT_TRUE(was_erased.has_value());
+        if (was_erased.value())
             return true;
-        return t.erase(t.find_minimum());
+        auto cursor = t.find_minimum();
+        CCO_EXPECT_EQ(cursor.error(), std::nullopt);
+        if (!cursor.is_valid())
+            return false;
+        was_erased = t.erase(cursor);
+        CCO_EXPECT_TRUE(was_erased.value());
+        return true;
     }
 
 } // tools
@@ -113,21 +125,6 @@ private:
     std::vector<std::string> m_levels;
     ITree &m_tree;
     bool m_has_integer_keys {};
-};
-
-class WALReader;
-class WALRecord;
-class SharedMemory;
-
-class WALPrinter {
-public:
-    WALPrinter() = default;
-    virtual ~WALPrinter() = default;
-
-    auto print(const WALRecord&) -> void;
-    auto print(WALReader&) -> void;
-    auto print(const std::string&, Size) -> void;
-    auto print(SharedMemory, Size) -> void;
 };
 
 [[maybe_unused]] inline auto hexdump(const Byte *data, Size size, Size indent = 0) -> void
@@ -189,32 +186,17 @@ private:
     Parameters m_param;
 };
 
-template<class Db, class F> auto traverse_db(Db &db, F &&f)
-{
-    for (auto c = db.find_minimum(); c.is_valid(); c++)
-        f(c.record());
-}
-
-template<class Db> auto collect_records(Db &db) -> std::vector<Record>
-{
-    std::vector<Record> out;
-    traverse_db(db, [&out](const Record &record) {
-        out.emplace_back(record);
-    });
-    return out;
-}
-
 class WALRecordGenerator {
 public:
-    explicit WALRecordGenerator(Size block_size)
-        : m_block_size {block_size}
+    explicit WALRecordGenerator(Size page_size):
+          m_page_size {page_size}
     {
-        CALICO_EXPECT_TRUE(is_power_of_two(block_size));
+        CCO_EXPECT_TRUE(utils::is_power_of_two(page_size));
     }
 
     auto generate_small() -> WALRecord
     {
-        const auto small_size = m_block_size / 0x10;
+        const auto small_size = m_page_size / 0x10;
         const auto total_update_size = random.next_int(small_size, small_size * 2);
         const auto update_count = random.next_int(1UL, 5UL);
         const auto mean_update_size = total_update_size / update_count;
@@ -223,7 +205,7 @@ public:
 
     auto generate_large() -> WALRecord
     {
-        const auto large_size = m_block_size / 3 * 2;
+        const auto large_size = m_page_size / 3 * 2;
         const auto total_update_size = random.next_int(large_size, large_size * 2);
         const auto update_count = random.next_int(1UL, 5UL);
         const auto mean_update_size = total_update_size / update_count;
@@ -232,16 +214,16 @@ public:
 
     auto generate(Size mean_update_size, Size update_count) -> WALRecord
     {
-        CALICO_EXPECT_GT(mean_update_size, 0);
+        CCO_EXPECT_GT(mean_update_size, 0);
         constexpr Size page_count = 0x1000;
         const auto lower_bound = mean_update_size - mean_update_size/3;
         const auto upper_bound = mean_update_size + mean_update_size/3;
         const auto page_size = upper_bound;
-        CALICO_EXPECT_LE(page_size, std::numeric_limits<uint16_t>::max());
+        CCO_EXPECT_LE(page_size, std::numeric_limits<uint16_t>::max());
 
         m_snapshots_before.emplace_back(random.next_string(page_size));
         m_snapshots_after.emplace_back(random.next_string(page_size));
-        std::vector<ChangedRegion> update {};
+        std::vector<page::ChangedRegion> update {};
 
         for (Index i {}; i < update_count; ++i) {
             const auto size = random.next_int(lower_bound, upper_bound);
@@ -264,11 +246,11 @@ public:
 
     auto validate_record(const WALRecord &record, LSN target_lsn) const -> void
     {
-        CALICO_EXPECT_EQ(record.lsn(), target_lsn);
+        CCO_EXPECT_EQ(record.lsn(), target_lsn);
         const auto payload = retrieve_payload(target_lsn);
-        CALICO_EXPECT_EQ(record.type(), WALRecord::Type::FULL);
-        CALICO_EXPECT_TRUE(record.payload().data() == stob(payload));
-        CALICO_EXPECT_TRUE(record.is_consistent());
+        CCO_EXPECT_EQ(record.type(), WALRecord::Type::FULL);
+        CCO_EXPECT_TRUE(record.payload().data() == stob(payload));
+        CCO_EXPECT_TRUE(record.is_consistent());
     }
 
     [[nodiscard]] auto retrieve_payload(LSN lsn) const -> const std::string&
@@ -282,9 +264,9 @@ private:
     std::vector<std::string> m_payloads;
     std::vector<std::string> m_snapshots_before;
     std::vector<std::string> m_snapshots_after;
-    Size m_block_size;
+    Size m_page_size;
 };
 
-} // calico
+} // cco
 
-#endif // CALICO_TEST_TOOLS_TOOLS_H
+#endif // CCO_TEST_TOOLS_TOOLS_H

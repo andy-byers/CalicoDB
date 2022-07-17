@@ -4,14 +4,17 @@
 *   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
 */
 
-#ifndef CALICO_WAL_WAL_RECORD_H
-#define CALICO_WAL_WAL_RECORD_H
+#ifndef CCO_WAL_WAL_RECORD_H
+#define CCO_WAL_WAL_RECORD_H
 
+#include "calico/status.h"
 #include "page/page.h"
+#include "page/update.h"
 #include "utils/identifier.h"
+#include "utils/result.h"
 #include "utils/utils.h"
 
-namespace calico {
+namespace cco {
 
 // WAL payload format:
 //
@@ -31,18 +34,11 @@ public:
     static constexpr Size HEADER_SIZE = 10;
     static constexpr Size UPDATE_HEADER_SIZE = 4;
 
-    struct Parameters {
-        std::vector<ChangedRegion> changes;
-        PID page_id;
-        LSN previous_lsn;
-        LSN lsn;
-    };
-
     WALPayload() = default;
     ~WALPayload() = default;
-    explicit WALPayload(const Parameters&);
+    explicit WALPayload(const page::PageUpdate&);
     [[nodiscard]] auto is_commit() const -> bool;
-    [[nodiscard]] auto decode() const -> PageUpdate;
+    [[nodiscard]] auto decode() const -> page::PageUpdate;
 
     [[nodiscard]] auto data() const -> BytesView
     {
@@ -73,11 +69,9 @@ public:
         FULL   = 0x45,
     };
 
-    using Parameters = WALPayload::Parameters;
-
     static auto commit(LSN) -> WALRecord;
     WALRecord() = default;
-    explicit WALRecord(const Parameters&);
+    explicit WALRecord(const page::PageUpdate&);
     ~WALRecord() = default;
 
     [[nodiscard]] auto lsn() const -> LSN
@@ -107,20 +101,20 @@ public:
 
     [[nodiscard]] auto is_commit() const -> bool
     {
-        CALICO_EXPECT_EQ(m_type, Type::FULL);
+        CCO_EXPECT_EQ(m_type, Type::FULL);
         return m_payload.is_commit();
     }
 
-    [[nodiscard]] auto decode() const -> PageUpdate
+    [[nodiscard]] auto decode() const -> page::PageUpdate
     {
         return m_payload.decode();
     }
 
     [[nodiscard]] auto is_consistent() const -> bool;
-    auto read(BytesView) -> void;
+    [[nodiscard]] auto read(BytesView) -> Result<bool>;
+    [[nodiscard]] auto merge(const WALRecord&) -> Result<void>;
     auto write(Bytes) const noexcept -> void;
     auto split(Index) -> WALRecord;
-    auto merge(const WALRecord&) -> void;
 
 private:
     WALPayload m_payload;
@@ -129,6 +123,6 @@ private:
     Type m_type {Type::EMPTY};
 };
 
-} // calico
+} // cco
 
-#endif // CALICO_WAL_WAL_RECORD_H
+#endif // CCO_WAL_WAL_RECORD_H

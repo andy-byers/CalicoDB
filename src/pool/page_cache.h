@@ -2,15 +2,16 @@
  * Very loosely based off of https://medium.com/@koushikmohan/an-analysis-of-2q-cache-replacement-algorithms-21acceae672a
  */
 
-#ifndef CALICO_POOL_PAGE_CACHE_H
-#define CALICO_POOL_PAGE_CACHE_H
+#ifndef CCO_POOL_PAGE_CACHE_H
+#define CCO_POOL_PAGE_CACHE_H
 
 #include <list>
 #include <unordered_map>
+#include "frame.h"
 #include "utils/cache.h"
 #include "utils/identifier.h"
 
-namespace calico {
+namespace cco {
 
 class Frame;
 
@@ -50,12 +51,12 @@ public:
     auto evict() -> std::optional<Frame>;
 
 private:
-    FifoCache<PID, Frame, PID::Hasher> m_cold;
-    LruCache<PID, Frame, PID::Hasher> m_hot;
+    utils::FifoCache<PID, Frame, PID::Hasher> m_cold;
+    utils::LruCache<PID, Frame, PID::Hasher> m_hot;
     Size m_hits {};
     Size m_misses {};
 };
 
-} // calico
+} // cco
 
-#endif // CALICO_POOL_PAGE_CACHE_H
+#endif // CCO_POOL_PAGE_CACHE_H

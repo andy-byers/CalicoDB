@@ -1,12 +1,13 @@
-#ifndef CALICO_PAGE_UPDATE_H
-#define CALICO_PAGE_UPDATE_H
+#ifndef CCO_PAGE_UPDATE_H
+#define CCO_PAGE_UPDATE_H
 
-#include <optional>
-#include <vector>
+#include "page.h"
 #include "utils/identifier.h"
 #include "utils/scratch.h"
+#include <optional>
+#include <vector>
 
-namespace calico {
+namespace cco::page {
 
 struct ChangedRegion {
     Index offset {};  ///< Offset of the region from the start of the page
@@ -16,9 +17,9 @@ struct ChangedRegion {
 
 struct PageUpdate {
     std::vector<ChangedRegion> changes;
-    PID page_id {NULL_ID_VALUE};
-    LSN previous_lsn {};
-    LSN lsn {};
+    PID page_id;
+    LSN previous_lsn;
+    LSN lsn;
 };
 
 class UpdateManager {
@@ -28,14 +29,14 @@ public:
         Size dx {};
     };
 
-    explicit UpdateManager(Scratch);
-    [[nodiscard]] auto has_changes() const -> bool;
-    [[nodiscard]] auto collect_changes(BytesView) -> std::vector<ChangedRegion>;
-    auto indicate_change(Index, Size) -> void;
+    UpdateManager(BytesView, Bytes);
+    [[nodiscard]] auto collect() -> std::vector<ChangedRegion>;
+    auto push(Range) -> void;
 
 private:
     std::vector<Range> m_ranges;
-    Scratch m_snapshot;
+    BytesView m_snapshot;
+    BytesView m_current;
 };
 
 namespace impl {
@@ -49,6 +50,6 @@ namespace impl {
 
 } // impl
 
-} // calico
+} // cco::page
 
-#endif // CALICO_PAGE_UPDATE_H
+#endif // CCO_PAGE_UPDATE_H

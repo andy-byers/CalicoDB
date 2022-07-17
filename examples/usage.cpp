@@ -1,11 +1,11 @@
 
 #include "calico/calico.h"
 #include <filesystem>
+#include <spdlog/fmt/fmt.h>
 
 namespace {
 
 constexpr auto PATH = "/tmp/calico_usage";
-namespace cco = calico;
 
 auto bytes_objects()
 {
@@ -42,52 +42,65 @@ auto bytes_objects()
 
 auto updating_a_database(cco::Database &db)
 {
-    namespace cco = cco;
+    std::vector<cco::Record> records {
+        {"bengal", "short;spotted,marbled,rosetted"},
+        {"turkish vankedisi", "long;white"},
+        {"moose", "???"},
+        {"abyssinian", "short;ticked tabby"},
+        {"russian blue", "short;blue"},
+        {"american shorthair", "short;all"},
+        {"badger", "???"},
+        {"manx", "short,long;all"},
+        {"chantilly-tiffany", "long;solid,tabby"},
+        {"cyprus", "..."},
+    };
 
-    // Insert some records. If a record is already in the database, insert() will return false.
-    assert(db.insert("bengal", "short;spotted,marbled,rosetted"));
-    assert(db.insert("turkish vankedisi", "long;white"));
-    assert(db.insert("moose", "???"));
-    assert(db.insert("abyssinian", "short;ticked tabby"));
-    assert(db.insert("russian blue", "short;blue"));
-    assert(db.insert("american shorthair", "short;all"));
-    assert(db.insert("badger", "???"));
-    assert(db.insert("manx", "short,long;all"));
-    assert(db.insert("chantilly-tiffany", "long;solid,tabby"));
-    assert(db.insert("cyprus", "..."));
+    // Insert some records.
+    for (const auto &[key, value]: records) {
+        const auto s = db.insert(key, value);
+        if (!s.is_ok()) {
+            fmt::print("cannot insert record ({}, {})", key, value);
+            fmt::print(s.what());
+            return;
+        }
+    }
 
     // Modify a record.
-    assert(not db.insert("cyprus", "all;all"));
+    assert(db.insert("cyprus", "all;all").is_ok());
 
     // Erase a record by key.
-    assert(db.erase("badger"));
+    assert(db.erase("badger").is_ok());
 
     // Erase a record using a cursor (see "Querying a Database" below).
-    assert(db.erase(db.find_exact("moose")));
+    assert(db.erase(db.find_exact("moose")).is_ok());
 }
 
 auto querying_a_database(cco::Database &db)
 {
-    namespace cco = cco;
     static constexpr auto target = "russian blue";
     const auto key = cco::stob(target);
 
     // find_exact() looks for a record that compares equal to the given key and returns a cursor
     // pointing to it.
     auto cursor = db.find_exact(key);
+
+    // If the cursor is valid (i.e. is_valid() returns true) we are safe to use any of the getter
+    // methods.
     assert(cursor.is_valid());
     assert(cursor.key() == key);
+    assert(cursor.value() == "short;blue");
 
-    // If there isn't such a record, the cursor will be invalid.
+    // If we cannot find an exact match, an invalid cursor will be returned.
     assert(not db.find_exact("not found").is_valid());
+
+    // If a cursor encounters an error at any point, it will also become invalidated. In this case,
+    // it will modify the status returned by cursor.status() to hold information about the error.
+    auto error = db.find_exact("");
+    assert(error.status().is_invalid_argument());
 
     // find() returns a cursor on the first record that does not compare less than the given key.
     const auto prefix = key.copy().truncate(key.size() / 2);
     assert(db.find(prefix).key() == cursor.key());
-
-    // We can use this method is we just need to check for the existence of a key.
-    assert(db.contains("bengal"));
-    assert(not db.contains("moose"));
 
     // Cursors can be used for range queries. They can traverse the database in sequential order,
     // or in reverse sequential order.
@@ -103,27 +116,42 @@ auto querying_a_database(cco::Database &db)
 
 auto transactions(cco::Database &db)
 {
-    namespace cco = cco;
+    // Commit all the updates we made in the previous examples and begin a new transaction.
+    assert(db.commit().is_ok());
 
-    // Commit all the updates we made in the previous examples.
-    db.commit();
+    // Modify the database.
+    assert(db.insert("opossum", "pretty cute").is_ok());
+    assert(db.erase("manx").is_ok());
 
-    // Make some changes and abort the transaction.
-    db.insert("opossum", "pretty cute");
-    assert(db.erase(db.find_minimum()));
-    assert(db.erase(db.find_maximum()));
-    db.abort();
+    // abort() restores the database to how it looked at the beginning of the transaction.
+    assert(db.abort().is_ok());
 
     // All updates since the last call to commit() have been reverted.
-    assert(not db.find_exact("opposum").is_valid());
-    assert(db.find_minimum().key() == cco::stob("abyssinian"));
-    assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
+    assert(db.find_exact("opossum").status().is_not_found());
+    assert(db.find_exact("manx").is_valid());
 }
 
 auto deleting_a_database(cco::Database db)
 {
     // We can delete a database by passing ownership to the following static method.
-    cco::Database::destroy(std::move(db));
+    assert(cco::Database::destroy(std::move(db)).is_ok());
+}
+
+auto open_database() -> cco::Database
+{
+    cco::Options options;
+    options.path = PATH;
+    options.page_size = 0x8000;
+    options.frame_count = 128;
+    cco::Database db {options};
+
+    if (const auto s = db.open(); !s.is_ok()) {
+        fmt::print("(1/2) cannot open database\n");
+        fmt::print("(2/2) (reason) {}\n", s.what());
+        std::exit(EXIT_FAILURE);
+    }
+    assert(db.is_open());
+    return db;
 }
 
 } // namespace
@@ -133,24 +161,11 @@ auto main(int, const char *[]) -> int
     std::error_code error;
     std::filesystem::remove_all(PATH, error);
 
-    try {
-        cco::Options options;
-        auto db = cco::Database::open(PATH, options);
-        bytes_objects();
-        updating_a_database(db);
-        querying_a_database(db);
-        transactions(db);
-        deleting_a_database(std::move(db));
-    } catch (const cco::CorruptionError &error) {
-        printf("CorruptionError: %s\n", error.what());
-    } catch (const std::invalid_argument &error) {
-        printf("std::invalid_argument: %s\n", error.what());
-    } catch (const std::system_error &error) {
-        printf("std::system_error (errno=%d): %s\n", error.code().value(), error.what());
-    } catch (const std::exception &error) {
-        printf("std::exception: %s\n", error.what());
-    } catch (...) {
-        puts("...");
-    }
+    bytes_objects();
+    auto db = open_database();
+    updating_a_database(db);
+    querying_a_database(db);
+    transactions(db);
+    deleting_a_database(std::move(db));
     return 0;
 }

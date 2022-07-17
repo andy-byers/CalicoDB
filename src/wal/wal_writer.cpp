@@ -1,57 +1,48 @@
-
 #include "wal_writer.h"
-#include "calico/exception.h"
 #include "storage/interface.h"
 #include "utils/identifier.h"
 #include "utils/logging.h"
-#include "wal_reader.h"
+#include "wal_record.h"
 #include <optional>
 
-namespace calico {
+namespace cco {
 
-WALWriter::WALWriter(Parameters param)
-    : m_file {param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::WRITE_ONLY, 0666)},
-      m_writer {m_file->open_writer()},
-      m_logger {logging::create_logger(param.log_sink, "WALWriter")},
-      m_block(param.block_size, '\x00')
+using namespace page;
+using namespace utils;
+
+auto WALWriter::open(const WALParameters &param) -> Result<std::unique_ptr<IWALWriter>>
 {
-    static constexpr auto ERROR_PRIMARY = "cannot open WAL writer";
-    m_logger->trace("starting WALWriter");
+    CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
+    CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
+    CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
 
-    if (param.block_size < MINIMUM_PAGE_SIZE) {
-        logging::MessageGroup group;
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail("WAL block size {} is too small", param.block_size);
-        group.set_hint("must be greater than or equal to {}", MINIMUM_BLOCK_SIZE);
-        throw std::invalid_argument {group.error(*m_logger)};
+    CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND, 0666));
+    CCO_TRY_CREATE(file_size, file->size());
+    auto writer = std::unique_ptr<WALWriter> {new(std::nothrow) WALWriter {std::move(file), param}};
+    if (!writer) {
+        ThreePartMessage message;
+        message.set_primary("cannot open WAL writer");
+        message.set_detail("out of memory");
+        return Err {message.system_error()};
     }
-    if (param.block_size > MAXIMUM_BLOCK_SIZE) {
-        logging::MessageGroup group;
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail("WAL block size {} is too large", param.block_size);
-        group.set_hint("must be less than or equal to {}", MAXIMUM_BLOCK_SIZE);
-        throw std::invalid_argument {group.error(*m_logger)};
-    }
-    if (!is_power_of_two(param.block_size)) {
-        logging::MessageGroup group;
-        group.set_primary(ERROR_PRIMARY);
-        group.set_detail("WAL block size {} is invalid", param.block_size);
-        group.set_hint("must be a power of 2");
-        throw std::invalid_argument {group.error(*m_logger)};
-    }
+    writer->m_has_committed = file_size > 0;
+    return writer;
 }
 
-auto WALWriter::has_committed() const -> bool
+WALWriter::WALWriter(std::unique_ptr<IFile> file, const WALParameters &param):
+      m_file {std::move(file)},
+      m_block(param.page_size, '\x00') {}
+
+auto WALWriter::close() -> Result<void>
 {
-    return m_file->size() > 0;
+    return m_file->close();
 }
 
-auto WALWriter::append(WALRecord record) -> LSN
+auto WALWriter::append(WALRecord record) -> Result<void>
 {
-    m_logger->trace("appending {} B record with LSN {}", record.size(), record.lsn().value);
+    const auto next_lsn {record.lsn()};
+    CCO_EXPECT_EQ(next_lsn.value, m_last_lsn.value + 1);
     std::optional<WALRecord> temp {std::move(record)};
-    const auto lsn = temp->lsn();
-    auto flushed = false;
 
     while (temp) {
         const auto remaining = m_block.size() - m_cursor;
@@ -78,40 +69,41 @@ auto WALWriter::append(WALRecord record) -> LSN
             }
             continue;
         }
-        flush();
-        flushed = true;
+        CCO_TRY(flush());
     }
-    // If we flushed, the last record to be put to the tail buffer is guaranteed to be on disk. Some
-    // or all of the current record will be in the tail buffer.
-    const auto last_lsn = std::exchange(m_last_lsn, lsn);
-    return flushed ? last_lsn : LSN::null();
+    m_last_lsn = next_lsn;
+    return {};
 }
 
-auto WALWriter::truncate() -> void
+auto WALWriter::truncate() -> Result<void>
 {
-    m_logger->trace("truncating WAL");
-    m_writer->resize(0);
-    m_writer->sync();
+    return m_file->resize(0)
+        .and_then([this]() -> Result<void> {
+            return m_file->sync();
+        })
+        .and_then([this]() -> Result<void> {
+            m_cursor = 0;
+            m_has_committed = false;
+            mem_clear(stob(m_block));
+            return {};
+        });
 }
 
-auto WALWriter::flush() -> LSN
+auto WALWriter::flush() -> Result<void>
 {
-    m_logger->trace("trying to flush WAL");
-
     if (m_cursor) {
         // The unused part of the block should be zero-filled.
         auto block = stob(m_block);
         mem_clear(block.range(m_cursor));
 
-        m_writer->write(block);
-        m_writer->sync();
-        m_logger->trace("WAL has been flushed up to LSN {}", m_last_lsn.value);
+        CCO_TRY(m_file->write(block));
+        CCO_TRY(m_file->sync());
 
         m_cursor = 0;
-        return m_last_lsn;
+        m_flushed_lsn = m_last_lsn;
+        m_has_committed = true;
     }
-    m_logger->trace("nothing to flush");
-    return LSN::null();
+    return {};
 }
 
-} // namespace calico
+} // cco

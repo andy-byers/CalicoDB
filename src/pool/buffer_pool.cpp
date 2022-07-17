@@ -1,354 +1,168 @@
 #include "buffer_pool.h"
+#include "pager.h"
 #include "calico/options.h"
-#include "calico/exception.h"
 #include "page/file_header.h"
 #include "page/page.h"
 #include "storage/directory.h"
-#include "storage/file.h"
+#include "utils/identifier.h"
 #include "utils/logging.h"
-#include "wal/interface.h"
-#include "wal/wal_record.h"
+#include "wal/wal_manager.h"
 
-namespace calico {
+namespace cco {
 
-BufferPool::BufferPool(Parameters param)
-    : m_wal_reader {std::move(param.wal_reader)},
-      m_wal_writer {std::move(param.wal_writer)},
-      m_file {param.directory.open_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, param.permissions)},
-      m_logger {logging::create_logger(param.log_sink, "BufferPool")},
-      m_scratch {param.page_size},
-      m_pager {{m_file->open_reader(), m_file->open_writer(), param.log_sink, param.page_size, param.frame_count}},
-      m_flushed_lsn {param.flushed_lsn},
-      m_next_lsn {param.flushed_lsn + LSN {1}},
-      m_page_count {param.page_count},
-      m_uses_transactions {param.use_transactions}
+using namespace page;
+using namespace utils;
+
+#define POOL_TRY(expr) \
+    do {                  \
+        auto pool_try_result = (expr); \
+        if (!pool_try_result.has_value()) { \
+            m_status = pool_try_result.error(); \
+            return Err {m_status}; \
+        } \
+    } while (0)
+
+auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBufferPool>>
 {
-    CALICO_EXPECT_EQ(m_uses_transactions, m_wal_reader && m_wal_writer);
-    m_logger->trace("constructing BufferPool object");
+    auto pool = std::unique_ptr<BufferPool> {new (std::nothrow) BufferPool {param}};
+    pool->m_logger->trace("opening");
 
-    if (!m_uses_transactions) {
-        m_flushed_lsn = LSN::max();
-        m_next_lsn = LSN::max();
+    if (!pool) {
+        ThreePartMessage message;
+        message.set_primary("cannot open buffer pool");
+        message.set_detail("out of memory");
+        return Err {message.system_error()};
     }
+
+    // Open the "data" file.
+    const auto mode = Mode::CREATE | Mode::READ_WRITE;
+    CCO_TRY_CREATE(file, param.directory.open_file(DATA_NAME, mode, param.permissions));
+
+    CCO_TRY_STORE(pool->m_pager, Pager::open({
+        std::move(file),
+        param.page_size,
+        param.frame_count,
+    }));
+    if (!param.use_xact)
+        return pool;
+
+    CCO_TRY_STORE(pool->m_wal, WALManager::open({
+        pool.get(),
+        param.directory,
+        create_sink(),
+        param.page_size,
+        param.flushed_lsn,
+    }));
+    return pool;
 }
+
+BufferPool::BufferPool(const Parameters &param):
+      m_logger {utils::create_logger(param.log_sink, "pool")},
+      m_scratch {param.page_size},
+      m_page_count {param.page_count},
+      m_use_xact {param.use_xact} {}
 
 auto BufferPool::can_commit() const -> bool
 {
-    if (m_uses_transactions) {
-        return m_wal_writer->has_committed() || m_wal_writer->has_pending();
-    } else {
-        return m_dirty_count > 0;
-    }
+    return m_dirty_count > 0;
 }
 
-auto BufferPool::block_size() const -> Size
+auto BufferPool::page_size() const -> Size
 {
-    return m_uses_transactions ? m_wal_writer->block_size() : 0;
+    return m_pager->page_size();
 }
 
-auto BufferPool::allocate(PageType type) -> Page
+auto BufferPool::pin_frame(PID id) -> Result<void>
 {
-    CALICO_EXPECT_TRUE(is_page_type_valid(type));
-    auto page = acquire(PID {ROOT_ID_VALUE + m_page_count}, true);
-    page.set_type(type);
-    m_page_count++;
-    return page;
+    if (m_cache.contains(id))
+        return {};
+
+    if (!m_pager->available())
+        CCO_TRY(try_evict_frame());
+
+    // Pager will allocate a new temporary frame if there aren't any more available.
+    return m_pager->pin(id)
+        .and_then([id, this](Frame frame) -> Result<void> {
+            m_cache.put(id, std::move(frame));
+            return {};
+        });
 }
 
-/**
- * Get a page object containing data from the database storage.
- *
- * This method should only be used to acquire existing pages (unless the page count will be updated subsequently,
- * such as in the case of the "roll-forward" procedure).
- *
- * @param id Page ID of the page to retrieve.
- * @param is_writable True if the page object should allow modification, false otherwise.
- * @return A page object containing the page with the specified page ID.
- */
-auto BufferPool::acquire(PID id, bool is_writable) -> Page
+auto BufferPool::flush() -> Result<void>
 {
-    CALICO_EXPECT_FALSE(id.is_null());
-    auto page = fetch_page(id, is_writable);
-    if (m_uses_transactions && is_writable)
-        page.enable_tracking(m_scratch.get());
-    return page;
-}
-
-auto BufferPool::fetch_page(PID id, bool is_writable) -> Page
-{
-    CALICO_EXPECT_FALSE(id.is_null());
-    std::lock_guard lock {m_mutex};
-
-    // Propagate exceptions from the Page destructor (likely I/O errors from the WALWriter).
-    propagate_page_error();
-
-    const auto try_fetch = [id, is_writable, this]() -> std::optional<Page> {
-        if (auto ref = m_cache.get(id)) {
-            auto page = ref->get().borrow(this, is_writable);
-            m_ref_sum++;
-            return page;
-        }
-        return std::nullopt;
-    };
-
-    // Frame is already pinned.
-    if (auto page = try_fetch())
-        return std::move(*page);
-
-    // Get page from cache or disk.
-    m_cache.put(id, fetch_frame(id));
-    auto page = try_fetch();
-    CALICO_EXPECT_NE(page, std::nullopt);
-    return std::move(*page);
-}
-
-auto BufferPool::propagate_page_error() -> void
-{
-    if (m_error)
-        std::rethrow_exception(std::exchange(m_error, {}));
-}
-
-auto BufferPool::log_update(Page &page) -> void
-{
-    CALICO_EXPECT_TRUE(m_uses_transactions);
-    page.set_lsn(m_next_lsn);
-
-    const WALRecord::Parameters param {
-        page.collect_changes(),
-        page.id(),
-        page.lsn(),
-        m_next_lsn,
-    };
-
-    if (const auto lsn = m_wal_writer->append(WALRecord{param}); !lsn.is_null())
-        m_flushed_lsn = lsn;
-
-    m_next_lsn++;
-}
-
-auto BufferPool::fetch_frame(PID id) -> Frame
-{
-    const auto try_evict_and_pin = [id, this]() -> std::optional<Frame> {
-        if (try_evict_frame())
-            return m_pager.pin(id);
-        return std::nullopt;
-    };
-    if (auto frame = m_cache.extract(id))
-        return std::move(*frame);
-
-    if (auto frame = m_pager.pin(id))
-        return std::move(*frame);
-
-    if (auto frame = try_evict_and_pin())
-        return std::move(*frame);
-
-    if (!try_flush_wal()) {
-        m_pager.unpin(Frame {m_pager.page_size()});
-        return *m_pager.pin(id);
-    }
-    auto frame = try_evict_and_pin();
-    CALICO_EXPECT_NE(frame, std::nullopt);
-    return std::move(*frame);
-}
-
-auto BufferPool::on_page_release(Page &page) -> void
-{
-    if (page.has_changes())
-        log_update(page);
-
-    std::lock_guard lock {m_mutex};
-    CALICO_EXPECT_GT(m_ref_sum, 0);
-
-    auto ref = m_cache.get(page.id());
-    CALICO_EXPECT_NE(ref, std::nullopt);
-    auto &frame = ref->get();
-
-    m_dirty_count += !frame.is_dirty() && page.is_dirty();
-    frame.synchronize(page);
-    m_ref_sum--;
-}
-
-auto BufferPool::on_page_error() -> void
-{
-    // This method should only be called from Page::~Page().
-    m_error = std::current_exception();
-}
-
-auto BufferPool::roll_forward() -> bool
-{
-    CALICO_EXPECT_TRUE(uses_transactions());
-    m_logger->trace("trying to roll the WAL forward");
-    m_wal_reader->reset();
-
-    if (!m_wal_reader->record()) {
-        m_logger->trace("WAL is empty");
-        return false;
-    }
-
-    do {
-        const auto record = *m_wal_reader->record();
-
-        if (m_next_lsn < record.lsn()) {
-            m_flushed_lsn = record.lsn();
-            m_next_lsn = m_flushed_lsn;
-            m_next_lsn++;
-        }
-        // Stop at the first commit record.
-        if (record.is_commit()) {
-            m_logger->trace("found the commit record with LSN {}", record.lsn().value);
-            return true;
-        }
-
-        const auto update = record.decode();
-        auto page = fetch_page(update.page_id, true);
-
-        if (page.lsn() < record.lsn()) {
-            m_logger->trace("updating page {} using record {}", page.id().value, record.lsn().value);
-            m_logger->trace("page LSN will change from {} to {}", page.lsn().value, record.lsn().value);
-            m_logger->trace("{} updates to apply", update.changes.size());
-            page.redo_changes(record.lsn(), update.changes);
-        }
-
-    } while (m_wal_reader->increment());
-
-    m_logger->trace("unable to find commit record");
-    return false;
-}
-
-auto BufferPool::roll_backward() -> void
-{
-    CALICO_EXPECT_TRUE(uses_transactions());
-    m_logger->trace("trying to roll the WAL backward");
-
-    // Make sure the WAL reader is at the end of the log.
-    try {
-        while (m_wal_reader->increment()) {}
-    } catch (const CorruptionError&) {
-        m_logger->warn("found corrupted record {} at end of the WAL", m_wal_reader->record()->lsn().value);
-    }
-    CALICO_EXPECT_NE(m_wal_reader->record(), std::nullopt);
-
-    // Skip commit record(s) at the end. These can arise from exceptions during commit(), i.e. we write the commit record,
-    // but get an I/O error while flushing dirty database pages.
-    while (m_wal_reader->record()->is_commit()) {
-        if (!m_wal_reader->decrement()) {
-            logging::MessageGroup group;
-            group.set_primary("cannot roll back");
-            group.set_detail("transaction is empty");
-            throw CorruptionError {group.error(*m_logger)};
-        }
-    }
-
-    do {
-        const auto record = *m_wal_reader->record();
-        CALICO_EXPECT_FALSE(record.is_commit());
-        const auto update = record.decode();
-        auto page = fetch_page(update.page_id, true);
-
-        if (page.lsn() >= record.lsn())
-            page.undo_changes(update.previous_lsn, update.changes);
-
-    } while (m_wal_reader->decrement());
-
-    m_logger->trace("finished roll back procedure");
-}
-
-auto BufferPool::commit() -> void
-{
-    CALICO_EXPECT_EQ(m_ref_sum, 0);
-    m_logger->trace("starting commit");
-
-    if (m_uses_transactions) {
-        m_wal_writer->append(WALRecord::commit(m_next_lsn++));
-        try_flush_wal();
-    }
-    try_flush();
-    CALICO_EXPECT_EQ(m_dirty_count, 0);
-
-    m_pager.sync();
-
-    // Don't do this until we have succeeded sync'ing the database storage.
-    if (m_uses_transactions)
-        m_wal_writer->truncate();
-    m_logger->trace("finished commit");
-}
-
-auto BufferPool::abort() -> void
-{
-    CALICO_EXPECT_EQ(m_ref_sum, 0);
-    CALICO_EXPECT_TRUE(m_uses_transactions);
-    m_logger->trace("starting abort");
-
-    try {
-        try_flush_wal();
-    } catch (const std::system_error &error) {
-        m_logger->error(error.what());
-    }
-    if (!m_wal_writer->has_committed()) {
-        m_logger->trace("stopping abort: transaction is empty");
-        return;
-    }
-
-    // Throw away in-memory updates.
-    purge();
-    m_wal_reader->reset();
-    roll_backward();
-    try_flush();
-    m_wal_writer->truncate();
-    m_logger->trace("finished abort");
-}
-
-auto BufferPool::recover() -> bool
-{
-    CALICO_EXPECT_TRUE(m_uses_transactions);
-    m_logger->trace("starting recovery");
-
-    if (!m_wal_writer->has_committed()) {
-        m_logger->trace("nothing to recover");
-        return false;
-    }
-
-    // Read through the WAL in order, applying missing updates to database pages.
-    bool found_commit {};
-    try {
-        found_commit = roll_forward();
-    } catch (const CorruptionError &error) {
-        m_logger->warn("cannot apply transaction");
-        m_logger->warn(error.what());
-    }
-    // If we didn't encounter a commit record, we must roll back.
-    if (!found_commit)
-        roll_backward();
-    try_flush();
-    m_wal_writer->truncate();
-    m_logger->trace("finished recovery");
-    return true;
-}
-
-auto BufferPool::try_flush() -> bool
-{
-    CALICO_EXPECT_EQ(m_ref_sum, 0);
+    CCO_EXPECT_EQ(m_ref_sum, 0);
+    m_logger->trace("flushing");
 
     if (!m_cache.is_empty()) {
-        m_logger->trace("trying to flush {} frames", m_cache.size());
-        while (try_evict_frame()) {}
-        m_logger->trace("{} frames are left", m_cache.size());
-        return m_cache.is_empty();
+        m_logger->info("trying to flush {} frames", m_cache.size());
+
+        while (!m_cache.is_empty()) {
+            CCO_TRY_CREATE(was_evicted, try_evict_frame());
+            if (!was_evicted)
+                break;
+        }
+
+        if (!m_cache.is_empty()) {
+            LogMessage message {*m_logger};
+            message.set_primary("cannot flush cache");
+            message.set_detail("{} frames are left", m_cache.size());
+            message.log(spdlog::level::info);
+            return Err {message.system_error()};
+        }
+        m_logger->info("cache was flushed");
     }
-    m_logger->trace("buffer pool is empty");
-    return false;
+    return {};
 }
 
-auto BufferPool::try_evict_frame() -> bool
+auto BufferPool::commit() -> Result<void>
+{
+    if (!m_status.is_ok())
+        return Err {m_status};
+
+    if (!m_use_xact)
+        return flush();
+
+    // Flush the WAL tail buffer, followed by the data pages.
+    POOL_TRY(m_wal->commit());
+    POOL_TRY(flush());
+    POOL_TRY(m_wal->truncate());
+    return {};
+}
+
+auto BufferPool::abort() -> Result<void>
+{
+    if (!m_use_xact) {
+        ThreePartMessage message;
+        message.set_primary("cannot abort");
+        message.set_detail("not supported");
+        message.set_hint("transactions are disabled");
+        return Err {message.logic_error()};
+    }
+
+    purge();
+    CCO_TRY(m_wal->abort());
+    CCO_TRY(flush());
+    CCO_TRY(m_wal->truncate());
+    clear_error();
+    return {};
+}
+
+auto BufferPool::recover() -> Result<void>
+{
+    return m_wal->recover();
+}
+
+auto BufferPool::try_evict_frame() -> Result<bool>
 {
     for (Index i {}; i < m_cache.size(); ++i) {
         auto frame = m_cache.evict();
-        CALICO_EXPECT_NE(frame, std::nullopt);
-        const auto not_pinned = frame->ref_count() == 0;
-        const auto is_safe = !frame->is_dirty() || frame->page_lsn() <= m_flushed_lsn;
-        if (not_pinned && is_safe) {
+        CCO_EXPECT_NE(frame, std::nullopt);
+        const auto limit = m_use_xact ? m_wal->flushed_lsn() : LSN::null();
+        const auto is_unpinned = frame->ref_count() == 0;
+        const auto is_writable = frame->page_lsn() <= limit;
+        if (is_unpinned && is_writable) {
             m_dirty_count -= frame->is_dirty();
-            m_pager.unpin(std::move(*frame));
+            CCO_TRY(m_pager->unpin(std::move(*frame)));
             return true;
         }
         const auto id = frame->page_id();
@@ -357,46 +171,153 @@ auto BufferPool::try_evict_frame() -> bool
     return false;
 }
 
-auto BufferPool::try_flush_wal() -> bool
+auto BufferPool::on_release(page::Page &page) -> void
 {
-    m_logger->trace("trying to flush WAL");
-    if (const auto lsn = m_wal_writer->flush(); !lsn.is_null()) {
-        m_logger->trace("WAL has been flushed");
-        CALICO_EXPECT_EQ(m_next_lsn, lsn + LSN {1});
-        m_flushed_lsn = lsn;
-        return true;
+    std::lock_guard lock {m_mutex};
+    if (auto result = do_release(page); !result.has_value()) {
+        m_logger->error(result.error().what());
+        m_status = result.error();
     }
-    m_logger->trace("nothing to flush");
-    return false;
+}
+
+auto BufferPool::release(Page page) -> Result<void>
+{
+    std::lock_guard lock {m_mutex};
+    if (auto result = do_release(page); !result.has_value()) {
+        m_logger->error(result.error().what());
+        m_status = result.error();
+        return Err {m_status};
+    }
+    return {};
+}
+
+auto BufferPool::do_release(page::Page &page) -> Result<void>
+{
+    // This function needs external synchronization!
+    CCO_EXPECT_GT(m_ref_sum, 0);
+
+    auto reference = m_cache.get(page.id());
+    CCO_EXPECT_NE(reference, std::nullopt);
+    auto &frame = reference->get();
+    const auto became_dirty = !frame.is_dirty() && page.is_dirty();
+
+    m_dirty_count += became_dirty;
+    frame.synchronize(page);
+    m_ref_sum--;
+
+    // Appending a record to the WAL is the only thing that can fail in this method. If we already have an error,
+    // we'll skip this step, so we cannot encounter another error.
+    if (page.has_manager()) {
+        if (m_status.is_ok())
+            return m_wal->append(page);
+        m_wal->discard(page);
+    }
+    return {};
 }
 
 auto BufferPool::purge() -> void
 {
-    CALICO_EXPECT_EQ(m_ref_sum, 0);
+    CCO_EXPECT_EQ(m_ref_sum, 0);
     m_logger->trace("purging page cache");
 
     while (!m_cache.is_empty()) {
         auto frame = m_cache.evict();
-        CALICO_EXPECT_NE(frame, std::nullopt);
+        CCO_EXPECT_NE(frame, std::nullopt);
         m_dirty_count -= frame->is_dirty();
-        frame->clean();
-        m_pager.unpin(std::move(*frame));
+        m_pager->discard(std::move(*frame));
     }
 }
 
-auto BufferPool::save_header(FileHeader &header) -> void
+auto BufferPool::save_header(FileHeaderWriter &header) -> void
 {
     m_logger->trace("saving header fields");
-    header.set_flushed_lsn(m_uses_transactions ? m_flushed_lsn : LSN::null());
+    m_wal->save_header(header);
     header.set_page_count(m_page_count);
 }
 
-auto BufferPool::load_header(const FileHeader &header) -> void
+auto BufferPool::load_header(const FileHeaderReader &header) -> void
 {
     m_logger->trace("loading header fields");
-    if (m_uses_transactions)
-        m_flushed_lsn = header.flushed_lsn();
+    m_wal->load_header(header);
     m_page_count = header.page_count();
 }
 
-} // calico
+auto BufferPool::close() -> Result<void>
+{
+    m_logger->trace("closing");
+    const auto pr = m_pager->close();
+    if (!pr.has_value()) {
+        m_logger->error("cannot close pager");
+        m_logger->error("(reason) {}", pr.error().what());
+    }
+    const auto wr = m_wal->close();
+    if (!wr.has_value()) {
+        m_logger->error("cannot close WAL");
+        m_logger->error("(reason) {}", wr.error().what());
+    }
+    return !pr.has_value() ? pr : wr;
+}
+
+auto BufferPool::allocate() -> Result<Page>
+{
+    return acquire(PID {ROOT_ID_VALUE + m_page_count}, true)
+        .and_then([this](Page page) -> Result<Page> {
+            m_page_count++;
+            return page;
+        });
+}
+
+auto BufferPool::acquire(PID id, bool is_writable) -> Result<Page>
+{
+    CCO_EXPECT_FALSE(id.is_null());
+    std::lock_guard lock {m_mutex};
+
+    if (!m_status.is_ok())
+        return Err {m_status};
+
+    return fetch(id, is_writable)
+        .and_then([is_writable, this](Page page) -> Result<Page> {
+            if (is_writable && m_use_xact)
+                m_wal->track(page);
+            return page;
+        })
+        .or_else([is_writable, this](const Status &status) -> Result<Page> {
+            m_logger->error(status.what());
+            // We should only enter the error state if data has been altered during this transaction. Otherwise, we
+            // can just return from whatever operation we are in immediately (releasing resources as needed).
+            if (is_writable && has_updates())
+                m_status = status;
+            return Err {status};
+        });
+}
+
+auto BufferPool::has_updates() const -> bool
+{
+    if (m_use_xact)
+        return m_wal->has_records();
+    return m_dirty_count > 0;
+}
+
+auto BufferPool::fetch(PID id, bool is_writable) -> Result<Page>
+{
+    const auto do_acquire = [this, is_writable](PageCache::Reference frame) {
+        auto page = frame.get().borrow(this, is_writable);
+        m_ref_sum++;
+        return page;
+    };
+    CCO_EXPECT_FALSE(id.is_null());
+
+    if (auto reference = m_cache.get(id))
+        return do_acquire(*reference);
+
+    return pin_frame(id)
+        .and_then([id, this, do_acquire]() -> Result<Page> {
+            auto frame = m_cache.get(id);
+            CCO_EXPECT_NE(frame, std::nullopt);
+            return do_acquire(*frame);
+        });
+}
+
+#undef POOL_TRY
+
+} // cco

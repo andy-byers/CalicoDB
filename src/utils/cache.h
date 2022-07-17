@@ -1,5 +1,5 @@
-#ifndef CALICO_UTILS_CACHE_H
-#define CALICO_UTILS_CACHE_H
+#ifndef CCO_UTILS_CACHE_H
+#define CCO_UTILS_CACHE_H
 
 #include <functional>
 #include <list>
@@ -8,7 +8,7 @@
 #include "calico/common.h"
 #include "utils/expect.h"
 
-namespace calico {
+namespace cco::utils {
 
 template<class Key, class Value, class Hash = std::hash<Key>>
 class FifoCache {
@@ -16,7 +16,7 @@ public:
     using Reference = std::reference_wrapper<Value>;
 
     FifoCache() = default;
-    virtual ~FifoCache() = default;
+    ~FifoCache() = default;
 
     [[nodiscard]] auto is_empty() const -> Size
     {
@@ -30,26 +30,17 @@ public:
 
     [[nodiscard]] auto contains(const Key &key) const -> bool
     {
-        return m_map.find(key) != std::end(m_map);
+        return m_map.find(key) != end(m_map);
     }
 
-    virtual auto put(const Key &key, Value &&value) -> std::optional<Value>
+    [[nodiscard]] auto get(const Key &key) -> std::optional<Reference>
     {
-        // Currently, we don't handle duplicate keys. We only cache page IDs, which are unique.
-        CALICO_EXPECT_FALSE(contains(key));
-        m_list.emplace_back(key, std::forward<Value>(value));
-        m_map.emplace(key, std::prev(std::end(m_list)));
-        return std::nullopt;
-    }
-
-    virtual auto get(const Key &key) -> std::optional<Reference>
-    {
-        if (auto itr = m_map.find(key); itr != std::end(m_map))
+        if (auto itr = m_map.find(key); itr != end(m_map))
             return std::ref(itr->second->second);
         return std::nullopt;
     }
 
-    virtual auto extract(const Key &key) -> std::optional<Value>
+    [[nodiscard]] auto extract(const Key &key) -> std::optional<Value>
     {
         if (auto node = m_map.extract(key)) {
             auto value = std::move(node.mapped()->second);
@@ -59,7 +50,16 @@ public:
         return std::nullopt;
     }
 
-    virtual auto evict() -> std::optional<Value>
+    auto put(const Key &key, Value &&value) -> std::optional<Value>
+    {
+        // Currently, we don't handle duplicate keys. We only cache page IDs, which are unique.
+        CCO_EXPECT_FALSE(contains(key));
+        m_list.emplace_back(key, std::forward<Value>(value));
+        m_map.emplace(key, prev(end(m_list)));
+        return std::nullopt;
+    }
+
+    auto evict() -> std::optional<Value>
     {
         if (is_empty())
             return std::nullopt;
@@ -84,20 +84,20 @@ public:
     using typename Base::Reference;
 
     LruCache() = default;
-    ~LruCache() override = default;
+    ~LruCache() = default;
 
-    auto get(const Key &key) -> std::optional<Reference> override
+    auto get(const Key &key) -> std::optional<Reference>
     {
         auto &m = Base::m_map;
         auto &L = Base::m_list;
-        if (auto itr = m.find(key); itr != std::end(m)) {
-            L.splice(std::end(L), L, itr->second);
+        if (auto itr = m.find(key); itr != end(m)) {
+            L.splice(end(L), L, itr->second);
             return std::ref(itr->second->second);
         }
         return std::nullopt;
     }
 };
 
-} // calico
+} // cco::utils
 
-#endif // CALICO_UTILS_CACHE_H
+#endif // CCO_UTILS_CACHE_H

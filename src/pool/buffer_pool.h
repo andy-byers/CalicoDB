@@ -1,59 +1,42 @@
-#ifndef CALICO_POOL_BUFFER_POOL_H
-#define CALICO_POOL_BUFFER_POOL_H
+#ifndef CCO_POOL_BUFFER_POOL_H
+#define CCO_POOL_BUFFER_POOL_H
 
 #include <list>
 #include <mutex>
-#include <stdexcept>
 #include <unordered_map>
 #include <spdlog/logger.h>
 #include "page_cache.h"
 #include "frame.h"
 #include "interface.h"
-#include "pager.h"
 #include "utils/scratch.h"
 
-namespace calico {
-
-constexpr auto DATA_NAME = "data";
+namespace cco {
 
 class IDirectory;
 class IFile;
-class IWALReader;
-class IWALWriter;
-class Page;
+class IWALManager;
+class Pager;
 
 class BufferPool: public IBufferPool {
 public:
     struct Parameters {
         IDirectory &directory;
-        std::unique_ptr<IWALReader> wal_reader;
-        std::unique_ptr<IWALWriter> wal_writer;
         spdlog::sink_ptr log_sink;
         LSN flushed_lsn;
         Size frame_count {};
         Size page_count {};
         Size page_size {};
         int permissions {};
-        bool use_transactions {};
+        bool use_xact {};
     };
 
-//    enum PageMode {
-//        QUERY,
-//        UPDATE,
-//        TRACKED,
-//    };
-
-    explicit BufferPool(Parameters);
     ~BufferPool() override = default;
+
+    [[nodiscard]] static auto open(const Parameters&) -> Result<std::unique_ptr<IBufferPool>>;
 
     [[nodiscard]] auto page_count() const -> Size override
     {
         return m_page_count;
-    }
-
-    [[nodiscard]] auto flushed_lsn() const -> LSN override
-    {
-        return m_flushed_lsn;
     }
 
     [[nodiscard]] auto hit_ratio() const -> double override
@@ -61,57 +44,51 @@ public:
         return m_cache.hit_ratio();
     }
 
-    [[nodiscard]] auto page_size() const -> Size override
+    [[nodiscard]] auto status() const -> Status override
     {
-        return m_pager.page_size();
+        return m_status;
     }
 
-    [[nodiscard]] auto uses_transactions() const -> bool override
+    auto clear_error() -> void override
     {
-        return m_uses_transactions;
+        m_status = Status::ok();
     }
 
-    [[nodiscard]] auto block_size() const -> Size override;
-    [[nodiscard]] auto allocate(PageType) -> Page override;
-    [[nodiscard]] auto acquire(PID, bool) -> Page override;
+    [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto can_commit() const -> bool override;
-    auto try_flush() -> bool override;
-    auto try_flush_wal() -> bool override;
-    auto commit() -> void override;
-    auto abort() -> void override;
+    [[nodiscard]] auto allocate() -> Result<page::Page> override;
+    [[nodiscard]] auto fetch(PID, bool) -> Result<page::Page> override;
+    [[nodiscard]] auto acquire(PID, bool) -> Result<page::Page> override;
+    [[nodiscard]] auto release(page::Page) -> Result<void> override;
+    [[nodiscard]] auto recover() -> Result<void> override;
+    [[nodiscard]] auto flush() -> Result<void> override;
+    [[nodiscard]] auto close() -> Result<void> override;
+    [[nodiscard]] auto commit() -> Result<void> override;
+    [[nodiscard]] auto abort() -> Result<void> override;
     auto purge() -> void override;
-    auto recover() -> bool override;
-    auto save_header(FileHeader&) -> void override;
-    auto load_header(const FileHeader&) -> void override;
-    auto on_page_release(Page&) -> void override;
-    auto on_page_error() -> void override;
+    auto on_release(page::Page&) -> void override;
+    auto save_header(page::FileHeaderWriter&) -> void override;
+    auto load_header(const page::FileHeaderReader&) -> void override;
 
 private:
-    auto propagate_page_error() -> void;
-    auto log_update(Page&) -> void;
-    auto roll_forward() -> bool;
-    auto roll_backward() -> void;
-    auto fetch_page(PID, bool) -> Page;
-    auto fetch_frame(PID) -> Frame;
-    auto try_evict_frame() -> bool;
-
+    explicit BufferPool(const Parameters&);
+    [[nodiscard]] auto pin_frame(PID) -> Result<void>;
+    [[nodiscard]] auto try_evict_frame() -> Result<bool>;
+    [[nodiscard]] auto do_release(page::Page&) -> Result<void>;
+    [[nodiscard]] auto has_updates() const -> bool;
     mutable std::mutex m_mutex;
-    std::unique_ptr<IWALReader> m_wal_reader;
-    std::unique_ptr<IWALWriter> m_wal_writer;
-    std::shared_ptr<IFile> m_file;
+    std::unique_ptr<Pager> m_pager;
+    std::unique_ptr<IWALManager> m_wal;
     std::shared_ptr<spdlog::logger> m_logger;
-    std::exception_ptr m_error;
-    ScratchManager m_scratch;
+    utils::ScratchManager m_scratch;
     PageCache m_cache;
-    Pager m_pager;
-    LSN m_flushed_lsn;
-    LSN m_next_lsn;
+    Status m_status {Status::ok()};
     Size m_page_count {};
     Size m_dirty_count {};
     Size m_ref_sum {};
-    bool m_uses_transactions {};
+    bool m_use_xact {};
 };
 
-} // calico
+} // cco
 
-#endif // CALICO_POOL_BUFFER_POOL_H
+#endif // CCO_POOL_BUFFER_POOL_H

@@ -1,9 +1,6 @@
 : << 'END_DOCSTRING'
-
   recovery.sh
-
   Run the recovery test, which looks something like the following.
-
   First, we run the `fail` process and wait for it to finish creating the database and commit. When `fail` has finished,
   it will write all of the record values to a file, in order. The keys for one of these databases always consists of
   sequential integers from 0 to N, exclusive, where N is the number of records in the database. Next we wait, allowing
@@ -12,7 +9,6 @@
   will be left in an invalid state. To remedy this, we run the `recover` process. `recover` will reopen the database
   and perform recovery. It will then validate the database contents against the N values written out by `fail`. Either
   0 or 1 will be returned from this script to indicate success or failure, respectively.
-
 END_DOCSTRING
 
 PASS_LABEL="[$(tput setaf 2)PASS$(tput sgr0)]"
@@ -37,7 +33,7 @@ while getopts n:r:s:vw: FLAG; do
     s) SEED=${OPTARG};;
     v) VERBOSE=1;;
     w) WAIT_TIME=${OPTARG};;
-    *) echo Error: Invalid option "${FLAG}";;
+    *) echo Status: Invalid option "${FLAG}";;
   esac
 done
 

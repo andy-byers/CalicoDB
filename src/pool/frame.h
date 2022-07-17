@@ -1,15 +1,18 @@
 
-#ifndef CALICO_POOL_FRAME_H
-#define CALICO_POOL_FRAME_H
+#ifndef CCO_POOL_FRAME_H
+#define CCO_POOL_FRAME_H
 
 #include <memory>
 #include "calico/bytes.h"
 #include "utils/identifier.h"
 
-namespace calico {
+namespace cco {
 
 class IBufferPool;
-class Page;
+
+namespace page {
+    class Page;
+} // page
 
 /**
  * Represents in-memory storage for a single database page.
@@ -20,7 +23,13 @@ public:
     using ConstReference = std::reference_wrapper<const Frame>;
 
     explicit Frame(Size);
+    Frame(Byte*, Index, Size);
     ~Frame() = default;
+
+    [[nodiscard]] auto is_owned() const -> bool
+    {
+        return !m_owned.empty();
+    }
 
     [[nodiscard]] auto page_id() const -> PID
     {
@@ -37,57 +46,58 @@ public:
         return m_is_dirty;
     }
 
+    [[nodiscard]] auto size() const -> Size
+    {
+        return m_size;
+    }
+
     [[nodiscard]] auto data() const -> BytesView
     {
-        return {m_data.get(), m_size};
+        return m_bytes;
     }
 
     auto data() -> Bytes
     {
-        return {m_data.get(), m_size};
-    }
-
-    auto clean() -> void
-    {
-        m_is_dirty = false;
+        return m_bytes;
     }
 
     auto reset(PID page_id) -> void
     {
-        CALICO_EXPECT_EQ(m_ref_count, 0);
+        CCO_EXPECT_EQ(m_ref_count, 0);
         m_page_id = page_id;
         m_is_dirty = false;
     }
 
+    /**
+     * Reset the reference count and flags.
+     *
+     * This method is used when we have lost a page, e.g. when a system call fails in one of the
+     * tree balancing methods. Should generally be followed by a WAL roll back or program exit.
+     */
+    auto purge() -> void
+    {
+        m_ref_count = 0;
+        m_is_writable = false;
+        m_is_dirty = false;
+    }
+
     [[nodiscard]] auto page_lsn() const -> LSN;
-    auto borrow(IBufferPool*, bool) -> Page;
-    auto synchronize(Page&) -> void;
+    [[nodiscard]] auto borrow(IBufferPool*, bool) -> page::Page;
+    auto synchronize(page::Page&) -> void;
 
     auto operator=(Frame&&) -> Frame& = default;
     Frame(Frame&&) = default;
 
 private:
-    struct AlignedDeleter {
-
-        explicit AlignedDeleter(std::align_val_t alignment)
-            : align {alignment} {}
-
-        auto operator()(Byte *ptr) const -> void
-        {
-            operator delete[](ptr, align);
-        }
-
-        std::align_val_t align;
-    };
-
-    std::unique_ptr<Byte[], AlignedDeleter> m_data;
-    PID m_page_id {};
+    std::string m_owned;
+    Bytes m_bytes;
+    PID m_page_id;
     Size m_ref_count {};
     Size m_size {};
     bool m_is_writable {};
     bool m_is_dirty {};
 };
 
-} // calico
+} // cco
 
-#endif // CALICO_POOL_FRAME_H
+#endif // CCO_POOL_FRAME_H

@@ -1,10 +1,11 @@
-#ifndef CALICO_PAGE_CELL_H
-#define CALICO_PAGE_CELL_H
+#ifndef CCO_PAGE_CELL_H
+#define CCO_PAGE_CELL_H
 
 #include <optional>
 #include "page.h"
+#include "utils/scratch.h"
 
-namespace calico {
+namespace cco::page {
 
 class Node;
 
@@ -35,8 +36,10 @@ public:
     auto set_left_child_id(PID) -> void;
     auto set_overflow_id(PID) -> void;
     auto write(Bytes) const -> void;
-    auto detach(Scratch, bool = false) -> void;
+    auto detach(utils::Scratch, bool = false) -> void;
 
+    Cell(const Cell&) = delete;
+    auto operator=(const Cell&) -> Cell& = delete;
     Cell(Cell&&) = default;
     auto operator=(Cell&&) -> Cell& = default;
 
@@ -53,7 +56,7 @@ public:
 private:
     Cell() = default;
 
-    std::optional<Scratch> m_scratch;
+    std::optional<utils::Scratch> m_scratch;
     BytesView m_key;
     BytesView m_local_value;
     PID m_left_child_id;
@@ -66,6 +69,6 @@ private:
 auto make_external_cell(BytesView, BytesView, Size) -> Cell;
 auto make_internal_cell(BytesView, Size) -> Cell;
 
-} // calico
+} // cco::page
 
-#endif // CALICO_PAGE_CELL_H
+#endif // CCO_PAGE_CELL_H

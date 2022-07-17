@@ -8,15 +8,17 @@
 #include "utils/encoding.h"
 #include "utils/identifier.h"
 #include "utils/scratch.h"
+#include "utils/types.h"
 #include "utils/utils.h"
 
 namespace {
 
-using namespace calico;
+using namespace cco;
+using namespace cco::utils;
 
 TEST(AssertionDeathTest, Assert)
 {
-    ASSERT_DEATH(CALICO_EXPECT(false), EXPECTATION_MATCHER);
+    ASSERT_DEATH(CCO_EXPECT(false), EXPECTATION_MATCHER);
 }
 
 TEST(TestEncoding, ReadsAndWrites)
@@ -25,17 +27,17 @@ TEST(TestEncoding, ReadsAndWrites)
     const auto u16 = random.next_int(std::numeric_limits<uint16_t>::max());
     const auto u32 = random.next_int(std::numeric_limits<uint32_t>::max());
     const auto u64 = random.next_int(std::numeric_limits<uint64_t>::max());
-    std::vector<Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
+    std::vector<cco::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
 
     auto dst = buffer.data();
-    put_uint16(dst, u16);
-    put_uint32(dst += sizeof(uint16_t), u32);
-    put_uint64(dst += sizeof(uint32_t), u64);
+    put_u16(dst, u16);
+    put_u32(dst += sizeof(uint16_t), u32);
+    put_u64(dst += sizeof(uint32_t), u64);
 
     auto src = buffer.data();
-    ASSERT_EQ(u16, get_uint16(src));
-    ASSERT_EQ(u32, get_uint32(src += sizeof(uint16_t)));
-    ASSERT_EQ(u64, get_uint64(src += sizeof(uint32_t)));
+    ASSERT_EQ(u16, get_u16(src));
+    ASSERT_EQ(u32, get_u32(src += sizeof(uint16_t)));
+    ASSERT_EQ(u64, get_u64(src += sizeof(uint32_t)));
     ASSERT_EQ(buffer.back(), 0) << "Buffer overflow";
 }
 
@@ -212,34 +214,34 @@ template<class Id> auto run_comparisons()
     Id b {2};
 
     ASSERT_EQ(a, a);
-    CALICO_EXPECT_EQ(a, a);
-    CALICO_EXPECT_TRUE(a == a);
+    CCO_EXPECT_EQ(a, a);
+    CCO_EXPECT_TRUE(a == a);
 
     ASSERT_NE(a, b);
-    CALICO_EXPECT_NE(a, b);
-    CALICO_EXPECT_TRUE(a != b);
+    CCO_EXPECT_NE(a, b);
+    CCO_EXPECT_TRUE(a != b);
 
     ASSERT_LT(a, b);
-    CALICO_EXPECT_LT(a, b);
-    CALICO_EXPECT_TRUE(a < b);
+    CCO_EXPECT_LT(a, b);
+    CCO_EXPECT_TRUE(a < b);
 
     ASSERT_LE(a, a);
     ASSERT_LE(a, b);
-    CALICO_EXPECT_LE(a, a);
-    CALICO_EXPECT_LE(a, b);
-    CALICO_EXPECT_TRUE(a <= a);
-    CALICO_EXPECT_TRUE(a <= b);
+    CCO_EXPECT_LE(a, a);
+    CCO_EXPECT_LE(a, b);
+    CCO_EXPECT_TRUE(a <= a);
+    CCO_EXPECT_TRUE(a <= b);
 
     ASSERT_GT(b, a);
-    CALICO_EXPECT_GT(b, a);
-    CALICO_EXPECT_TRUE(b > a);
+    CCO_EXPECT_GT(b, a);
+    CCO_EXPECT_TRUE(b > a);
 
     ASSERT_GE(a, a);
     ASSERT_GE(b, a);
-    CALICO_EXPECT_GE(a, a);
-    CALICO_EXPECT_GE(b, a);
-    CALICO_EXPECT_TRUE(a >= a);
-    CALICO_EXPECT_TRUE(b >= a);
+    CCO_EXPECT_GE(a, a);
+    CCO_EXPECT_GE(b, a);
+    CCO_EXPECT_TRUE(a >= a);
+    CCO_EXPECT_TRUE(b >= a);
 }
 
 TEST(IdentifierTest, PIDsAreComparable)
@@ -276,6 +278,46 @@ TEST(IdentifierTest, LSNsCanBeIncremented)
     ASSERT_EQ(lsn.value, 1);
     ++lsn;
     ASSERT_EQ(lsn.value, 2);
+}
+
+TEST(TestUniqueNullable, ResourceIsMoved)
+{
+    UniqueNullable<int> moved_from {123};
+    const auto moved_into = std::move(moved_from);
+    ASSERT_EQ(*moved_from, 0);
+    ASSERT_FALSE(moved_from.is_valid());
+    ASSERT_EQ(*moved_into, 123);
+    ASSERT_TRUE(moved_into.is_valid());
+}
+
+TEST(TestReferenceCount, CountsCorrectly)
+{
+    ReferenceCount count;
+    ASSERT_EQ(count.count(), 0);
+    {
+        auto a = count.increment();
+        ASSERT_EQ(count.count(), 1);
+        {
+            auto b = count.increment();
+            ASSERT_EQ(count.count(), 2);
+            {
+                auto c = count.increment();
+                ASSERT_EQ(count.count(), 3);
+            }
+            ASSERT_EQ(count.count(), 2);
+        }
+        ASSERT_EQ(count.count(), 1);
+    }
+    ASSERT_EQ(count.count(), 0);
+}
+
+TEST(TestReferenceCount, MovingTokenDoesNotChangeCount)
+{
+    ReferenceCount count;
+    auto a = count.increment();
+    ASSERT_EQ(count.count(), 1);
+    auto b = std::move(a);
+    ASSERT_EQ(count.count(), 1);
 }
 
 } // <anonymous>

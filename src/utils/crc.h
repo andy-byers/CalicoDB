@@ -1,18 +1,28 @@
-#ifndef CALICO_UTILS_CRC_H
-#define CALICO_UTILS_CRC_H
+#ifndef CCO_UTILS_CRC_H
+#define CCO_UTILS_CRC_H
 
 #include "calico/bytes.h"
-#include <zlib.h>
 
-namespace calico {
+namespace cco::utils {
 
-inline auto crc_32(BytesView data) noexcept
+inline auto crc_32(BytesView data) noexcept -> std::uint32_t
 {
-    const auto ptr = reinterpret_cast<const Bytef*>(data.data());
-    const auto len = static_cast<uInt>(data.size());
-    return static_cast<uint32_t>(crc32(0, ptr, len));
+    // TODO: I'm getting rid of the zlib dependency, so we'll need to roll our own CRC function,
+    //       or depend on another library. For now, here's an Adler32 checksum copy-pasted from
+    //       Wikipedia, with some stylistic changes...
+    static constexpr std::uint32_t MOD_ADLER {65521};
+    std::uint32_t a {1}, b {0};
+
+    // Process each byte of the data in order
+    for (Index index {}; index < data.size(); ++index)
+    {
+        a = (a+static_cast<std::uint8_t>(data[index])) % MOD_ADLER;
+        b = (b+a) % MOD_ADLER;
+    }
+
+    return (b << 16) | a;
 }
 
-} // calico
+} // cco::utils
 
-#endif // CALICO_UTILS_CRC_H
+#endif // CCO_UTILS_CRC_H

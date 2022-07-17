@@ -35,7 +35,7 @@ WORKDIR ./build
 # work properly. Definitely a bad idea in general, but we're just using this container for fuzz testing.
 RUN git config --global http.sslverify false && \
     cmake -E env CXXFLAGS="-fsanitize=fuzzer,address" \
-    cmake -DCMAKE_BUILD_TYPE=RelWithAssertions -DCALICO_USE_VALIDATORS=On \
-          -DCALICO_BUILD_FUZZERS=ON -DCALICO_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" .. && \
+    cmake -DCMAKE_BUILD_TYPE=RelWithAssertions -DCCO_USE_VALIDATORS=On \
+          -DCCO_BUILD_FUZZERS=ON -DCCO_FUZZER_LDFLAGS="-fsanitize=fuzzer,address" .. && \
     cmake --build . --config RelWithAssertions --target calico all_fuzzers
 

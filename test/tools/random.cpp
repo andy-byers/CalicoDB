@@ -1,6 +1,6 @@
 #include "random.h"
 
-namespace calico {
+namespace cco {
 
 /**
  * Create a random number generator with a default seed.
@@ -74,4 +74,4 @@ auto Random::next_binary(Size size) -> std::string
     return result;
 }
 
-} // calico
+} // cco

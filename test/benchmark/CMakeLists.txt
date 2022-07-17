@@ -1,4 +1,0 @@
-set(BENCHMARK_FILES "")
-file(GLOB_RECURSE BENCHMARK_FILES "*.cpp" "*.h")
-add_executable(benchmark "${BENCHMARK_FILES}")
-target_link_libraries(benchmark PRIVATE test_tools gtest_main)

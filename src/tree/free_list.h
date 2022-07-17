@@ -1,41 +1,88 @@
-#ifndef CALICO_TREE_FREE_LIST_H
-#define CALICO_TREE_FREE_LIST_H
+#ifndef CCO_TREE_FREE_LIST_H
+#define CCO_TREE_FREE_LIST_H
 
-#include <optional>
+#include "calico/status.h"
+#include "interface.h"
 #include "utils/identifier.h"
+#include <optional>
 
-namespace calico {
+namespace cco {
 
-class FileHeader;
 class IBufferPool;
-class Page;
 
+namespace page {
+    class FileHeaderReader;
+    class FileHeaderWriter;
+} // page
+
+/**
+ * Object that manages a stack of deleted pages on disk.
+ */
 class FreeList {
 public:
+
+    /**
+     * Parameters for constructing a free list.
+     */
     struct Parameters {
-        IBufferPool *buffer_pool{};
-        PID free_start{};
-        Size free_count{};
+        IBufferPool *buffer_pool {}; ///< Reference to the underlying buffer pool.
+        PID free_start {}; ///< Page ID of the page at the top of the free list stack.
+        Size free_count {}; ///< Number of pages in the free list stack.
     };
 
-    explicit FreeList(const Parameters&);
     ~FreeList() = default;
-    auto push(Page) -> void;
-    auto pop() -> std::optional<Page>;
-    auto save_header(FileHeader&) const -> void;
-    auto load_header(const FileHeader&) -> void;
 
+    /**
+     * Create a new free list.
+     *
+     * @param param Initial state and dependencies.
+     */
+    explicit FreeList(const Parameters &param);
+
+    /**
+     * Push a page onto the free list stack.
+     *
+     * @param page The page to push.
+     */
+    [[nodiscard]] auto push(page::Page page) -> Result<void>;
+
+    /**
+     * Pop a page off of the free list stack.
+     *
+     * @return The page at the top of the free list stack, or a logic error result if the free list is empty.
+     */
+    [[nodiscard]] auto pop() -> Result<page::Page>;
+
+    /**
+     * Save state to a file header.
+     *
+     * @param header The header to save state to.
+     */
+    auto save_header(page::FileHeaderWriter &header) const -> void;
+
+    /**
+     * Load state from a file header.
+     *
+     * @param header The header to read state from.
+     */
+    auto load_header(const page::FileHeaderReader &header) -> void;
+
+    /**
+     * Determine if the free list is empty.
+     *
+     * @return True if the free list is empty, false otherwise.
+     */
     [[nodiscard]] auto is_empty() const -> bool
     {
         return m_free_count == 0;
     }
 
 private:
-    IBufferPool *m_pool;
-    PID m_free_start{};
-    Size m_free_count{};
+    IBufferPool *m_pool; ///< Reference to the underlying buffer pool.
+    PID m_free_start; ///< Page ID of the page at the top of the free list stack.
+    Size m_free_count {}; ///< Number of pages in the free list stack.
 };
 
-} // calico
+} // cco
 
-#endif // CALICO_TREE_FREE_LIST_H
+#endif // CCO_TREE_FREE_LIST_H

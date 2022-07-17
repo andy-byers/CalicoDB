@@ -1,29 +1,32 @@
-#ifndef CALICO_STORAGE_FILE_H
-#define CALICO_STORAGE_FILE_H
+#ifndef CCO_STORAGE_FILE_H
+#define CCO_STORAGE_FILE_H
 
 #include "interface.h"
 #include <filesystem>
 
-namespace calico {
+namespace cco {
 
 class File: public IFile {
 public:
     ~File() override = default;
     [[nodiscard]] auto is_open() const -> bool override;
-    [[nodiscard]] auto is_readable() const -> bool override;
-    [[nodiscard]] auto is_writable() const -> bool override;
-    [[nodiscard]] auto is_append() const -> bool override;
+    [[nodiscard]] auto mode() const -> Mode override;
     [[nodiscard]] auto permissions() const -> int override;
     [[nodiscard]] auto file() const -> int override;
     [[nodiscard]] auto path() const -> std::string override;
     [[nodiscard]] auto name() const -> std::string override;
-    [[nodiscard]] auto size() const -> Size override;
-    [[nodiscard]] auto open_reader() -> std::unique_ptr<IFileReader> override;
-    [[nodiscard]] auto open_writer() -> std::unique_ptr<IFileWriter> override;
-    auto open(const std::string&, Mode, int) -> void override;
-    auto close() -> void override;
-    auto rename(const std::string&) -> void override;
-    auto remove() -> void override;
+    [[nodiscard]] auto size() const -> Result<Size> override;
+    [[nodiscard]] auto open(const std::string&, Mode, int) -> Result<void> override;
+    [[nodiscard]] auto close() -> Result<void> override;
+    [[nodiscard]] auto rename(const std::string&) -> Result<void> override;
+    [[nodiscard]] auto resize(Size) -> Result<void> override;
+    [[nodiscard]] auto remove() -> Result<void> override;
+    [[nodiscard]] auto seek(long, Seek) -> Result<Index> override;
+    [[nodiscard]] auto read(Bytes) -> Result<Size> override;
+    [[nodiscard]] auto read(Bytes, Index) -> Result<Size> override;
+    [[nodiscard]] auto write(BytesView) -> Result<Size> override;
+    [[nodiscard]] auto write(BytesView, Index) -> Result<Size> override;
+    [[nodiscard]] auto sync() -> Result<void> override;
 
 private:
     std::filesystem::path m_path;
@@ -32,11 +35,11 @@ private:
     int m_file {-1};
 };
 
-auto read_exact(IFileReader&, Bytes) -> bool;
-auto read_exact_at(IFileReader&, Bytes, Index) -> bool;
-auto write_all(IFileWriter&, BytesView) -> bool;
-auto write_all_at(IFileWriter&, BytesView, Index) -> bool;
+auto read_exact(IFile&, Bytes) -> Result<void>;
+auto read_exact_at(IFile&, Bytes, Index) -> Result<void>;
+auto write_all(IFile&, BytesView) -> Result<void>;
+auto write_all(IFile&, BytesView, Index) -> Result<void>;
 
-} // calico
+} // cco
 
-#endif // CALICO_STORAGE_FILE_H
+#endif // CCO_STORAGE_FILE_H

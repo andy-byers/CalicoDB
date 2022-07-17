@@ -2,6 +2,10 @@
 
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
+> **Note**: I'm currently experimenting with removing exceptions throughout the library.
+>           I'm using @TartanLlama/expected for error handling instead!
+>           This branch will be broken for a little while.
+
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 
@@ -16,6 +20,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
   + [Bytes Objects](#bytes-objects)
   + [Updating a Database](#updating-a-database)
   + [Querying a Database](#querying-a-database)
+  + [Errors](#errors)
   + [Transactions](#transactions)
   + [Deleting a Database](#deleting-a-database)
 + [Performance](#performance)
@@ -69,40 +74,38 @@ to build the library and tests.
 Note that the tests must be built with assertions, hence the "RelWithAssertions".
 To build the library in release mode, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCCO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
 While not yet part of CI, some basic fuzzers (using libFuzzer) are also included.
 See the `Dockerfile` for details on how to build them.
 
 ## API
-**NOTE**: The following examples make use of the alias `namespace cco = calico;`.
-
-### Exceptions
-Calico DB uses exceptions for reporting invalid arguments, database corruption, and system-level errors.
 
 ### Opening a Database
 The entry point to an application using Calico DB might look something like:
 
 ```C++
-try {
-    cco::Options options;
-    auto store = cco::Database::open("/tmp/calico", options);
-    // Run the application!
-} catch (const CorruptionError &error) {
-    // This is thrown if corruption is detected in a file.
-} catch (const std::invalid_argument &error) {
-    // This is thrown if invalid arguments were passed to a Calico DB function.
-} catch (const std::system_error &error) {
-    // This propagates up from failed system calls.
-} catch (const std::exception &error) {
-    // This will catch any exception thrown by Calico DB.
-}
+// Set some initialization options. We'll create a database with pages of size 8 KB and a 
+// cache of size 2 MB at "/tmp/example". We also set the instance's log level here.
+cco::Options options;
+options.page_size = 1 << 13;
+options.frame_count = 256;
+options.log_level = spdlog::level::info;
+
+return *cco::Database::open("/tmp/example", options)
+    .or_else([](const cco::Status &error) -> cco::Result<cco::Database> {
+        fmt::print("(1/2) cannot open database\n");
+        fmt::print("(2/2) {}\n", cco::btos(error.what()));
+        return cco::Err {error};
+    });
 ```
 
 ### Closing a Database
-Calico DB uses RAII, so databases are closed by letting them go out of scope.
-At that point, the database object will automatically commit the most recent transaction.
+
+```C++
+cco::Database::close(std::move(db));
+```
 
 ### Bytes Objects
 Calico DB uses `Bytes` and `BytesView` objects to represent unowned byte sequences, a.k.a. slices.
@@ -145,25 +148,25 @@ Records and be added or removed using methods on the `Database` object.
 
 ```C++
 // Insert some records. If a record is already in the database, insert() will return false.
-assert(db.insert("bengal", "short;spotted,marbled,rosetted"));
-assert(db.insert("turkish vankedisi", "long;white"));
-assert(db.insert("moose", "???"));
-assert(db.insert("abyssinian", "short;ticked tabby"));
-assert(db.insert("russian blue", "short;blue"));
-assert(db.insert("american shorthair", "short;all"));
-assert(db.insert("badger", "???"));
-assert(db.insert("manx", "short,long;all"));
-assert(db.insert("chantilly-tiffany", "long;solid,tabby"));
-assert(db.insert("cyprus", "..."));
+assert(*db.insert("bengal", "short;spotted,marbled,rosetted"));
+assert(*db.insert("turkish vankedisi", "long;white"));
+assert(*db.insert("moose", "???"));
+assert(*db.insert("abyssinian", "short;ticked tabby"));
+assert(*db.insert("russian blue", "short;blue"));
+assert(*db.insert("american shorthair", "short;all"));
+assert(*db.insert("badger", "???"));
+assert(*db.insert("manx", "short,long;all"));
+assert(*db.insert("chantilly-tiffany", "long;solid,tabby"));
+assert(*db.insert("cyprus", "..."));
 
 // Modify a record.
-assert(not db.insert("cyprus", "all;all"));
+assert(not *db.insert("cyprus", "all;all"));
 
 // Erase a record by key.
-assert(db.erase("badger"));
+assert(*db.erase("badger"));
 
 // Erase a record using a cursor (see "Querying a Database" below).
-assert(db.erase(db.find_exact("moose")));
+assert(*db.erase(db.find_exact("moose")));
 ```
 
 ### Querying a Database
@@ -201,6 +204,11 @@ if (const auto boundary = db.find_exact(key); boundary.is_valid()) {
     for (auto c = db.find_maximum(); c.is_valid() && c != boundary; c--) {}
 }
 ```
+
+### Errors
+Calico DB uses @TartanLlama/expected to handle errors.
+Methods that modify the database will return a `cco::Result<T>` (an alias for `tl::expected<T, cco::Status>`).
+If the operation was successful, the `cco::Result<T>` will contain the expected `T`, otherwise, it will contain a `cco::Status` that describes what went wrong.
 
 ### Transactions
 Every modification to a Calico DB database occurs within a transaction.
@@ -247,15 +255,12 @@ We can usually get over 500K ops/second for random reads and several million for
 6. Work on the design document
 7. Implement optional compression of record values
 8. Work on performance
-9. Work on the benchmark suite
-  + Results may not be all that accurate (really need to benchmark against other databases)
-  + Need to test large (100,000 B) values
-  + Code is very messy/difficult to change
-11. Get the CMake installation to work
-12. Implement WAL segmentation
+9. Write a benchmark suite
+10. Get the CMake installation to work
+11. Implement WAL segmentation
   + WAL should be segmented after it reaches a fixed size, similar to `spdlog`s rotating file sink
   + This should improve the performance of long-running transactions
-13. Consider allowing multiple independent trees in a single database (could be either in the same `data` file or separate `data-*` files)
+12. Consider allowing multiple independent trees in a single database (could be either in the same `data` file or separate `data-*` files)
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.
@@ -272,7 +277,7 @@ CalicoDB
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
-┃ ┣╸exception.h ┄┄┄┄ Public-facing exceptions
+┃ ┣╸error.h ┄┄┄┄┄┄┄┄ Status object
 ┃ ┗╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┣╸src
 ┃ ┣╸db ┄┄┄┄┄┄┄┄┄┄┄┄┄ API implementation
@@ -282,9 +287,6 @@ CalicoDB
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Utility module
 ┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging module
 ┗╸test
-  ┣╸benchmark ┄┄┄┄┄┄ Performance benchmarks
-  ┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄ Fuzz tests
-  ┣╸integration ┄┄┄┄ Integration tests
   ┣╸recovery ┄┄┄┄┄┄┄ Test database failure and recovery
   ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Test tools
   ┗╸unit_tests ┄┄┄┄┄ Unit tests

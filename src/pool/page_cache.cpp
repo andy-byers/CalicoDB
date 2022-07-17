@@ -2,12 +2,12 @@
 #include "page_cache.h"
 #include "frame.h"
 
-namespace calico {
+namespace cco {
 
 auto PageCache::put(PID id, Frame frame) -> void
 {
-    CALICO_EXPECT_FALSE(m_cold.contains(id));
-    CALICO_EXPECT_FALSE(m_hot.contains(id));
+    CCO_EXPECT_FALSE(m_cold.contains(id));
+    CCO_EXPECT_FALSE(m_hot.contains(id));
     m_cold.put(id, std::move(frame));
 }
 
@@ -47,4 +47,4 @@ auto PageCache::evict() -> std::optional<Frame>
     return m_cold.evict();
 }
 
-} // calico
+} // cco
