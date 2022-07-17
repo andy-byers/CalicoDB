@@ -55,8 +55,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(spdlog)
 
-list(APPEND CCO_SOURCES "${TL_EXPECTED_INC}")
-
 # Build the static library.
 add_library(
     "${CCO_NAME}"

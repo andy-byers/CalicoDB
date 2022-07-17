@@ -207,7 +207,9 @@ auto Cursor::seek_left() -> bool
             return false;
         }
         move_to(std::move(*previous), 0);
-        m_position.index = m_position.cell_count - 1;
+        CCO_EXPECT_GT(m_position.cell_count, 0);
+        m_position.index = m_position.cell_count;
+        m_position.index--;
     }
     return true;
 }
