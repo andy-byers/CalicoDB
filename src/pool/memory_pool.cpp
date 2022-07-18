@@ -88,13 +88,34 @@ auto MemoryPool::do_release(page::Page &page) -> void
 
 auto MemoryPool::commit() -> Result<void>
 {
-    if (can_commit())
+    if (can_commit()) {
         m_stack.clear();
+    } else if (m_use_xact) {
+        ThreePartMessage message;
+        message.set_primary("cannot commit");
+        message.set_detail("transaction is empty");
+        return Err {message.logic_error()};
+    }
     return {};
 }
 
 auto MemoryPool::abort() -> Result<void>
 {
+    if (!m_use_xact) {
+        ThreePartMessage message;
+        message.set_primary("cannot abort");
+        message.set_detail("not supported");
+        message.set_hint("transactions are disabled");
+        return Err {message.logic_error()};
+    }
+
+    if (!can_commit()) {
+        ThreePartMessage message;
+        message.set_primary("cannot abort");
+        message.set_detail("transaction is empty");
+        return Err {message.logic_error()};
+    }
+
     while (can_commit()) {
         const auto [before, id, offset] = std::move(m_stack.back());
         m_stack.pop_back();

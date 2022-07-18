@@ -107,6 +107,7 @@ auto WALManager::recover() -> Result<void>
 
 auto WALManager::abort() -> Result<void>
 {
+    CCO_TRY(flush());
     CCO_TRY(roll_forward());
     CCO_TRY(roll_backward());
     return flush();

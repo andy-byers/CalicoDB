@@ -13,6 +13,7 @@ class Directory: public IDirectory {
 public:
     ~Directory() override = default;
     [[nodiscard]] static auto open(const std::string&) -> Result<std::unique_ptr<IDirectory>>;
+    [[nodiscard]] auto is_open() const -> bool override;
     [[nodiscard]] auto path() const -> std::string override;
     [[nodiscard]] auto name() const -> std::string override;
     [[nodiscard]] auto exists(const std::string&) const -> Result<bool> override;

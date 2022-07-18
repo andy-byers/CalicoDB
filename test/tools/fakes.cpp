@@ -136,6 +136,8 @@ auto FakeDirectory::sync() -> Result<void>
 
 auto FakeDirectory::close() -> Result<void>
 {
+    CCO_EXPECT_TRUE(m_is_open);
+    m_is_open = false;
     return {};
 }
 

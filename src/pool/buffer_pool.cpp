@@ -64,7 +64,8 @@ BufferPool::BufferPool(const Parameters &param):
 
 auto BufferPool::can_commit() const -> bool
 {
-    return m_dirty_count > 0;
+    const auto flag = m_use_xact && m_wal->has_records();
+    return m_dirty_count > 0 || flag;
 }
 
 auto BufferPool::page_size() const -> Size
@@ -119,6 +120,13 @@ auto BufferPool::commit() -> Result<void>
     if (!m_status.is_ok())
         return Err {m_status};
 
+    if (!can_commit()) {
+        ThreePartMessage message;
+        message.set_primary("cannot commit");
+        message.set_detail("transaction is empty");
+        return Err {message.logic_error()};
+    }
+
     if (!m_use_xact)
         return flush();
 
@@ -138,8 +146,13 @@ auto BufferPool::abort() -> Result<void>
         message.set_hint("transactions are disabled");
         return Err {message.logic_error()};
     }
+    if (!can_commit()) {
+        ThreePartMessage message;
+        message.set_primary("cannot abort");
+        message.set_detail("transaction is empty");
+        return Err {message.logic_error()};
+    }
 
-    purge();
     CCO_TRY(m_wal->abort());
     CCO_TRY(flush());
     CCO_TRY(m_wal->truncate());

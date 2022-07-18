@@ -14,14 +14,13 @@ using namespace utils;
 Tree::Tree(const Parameters &param)
     : m_pool {{param.buffer_pool, param.free_start, param.free_count, param.node_count}},
       m_internal {{&m_pool, param.cell_count}},
-      m_logger {create_logger(param.log_sink, "tree")}
-{
-    m_logger->trace("opening");
-}
+      m_logger {create_logger(param.log_sink, "tree")} {}
 
 auto Tree::open(const Parameters &param) -> Result<std::unique_ptr<ITree>>
 {
-    return std::unique_ptr<Tree>(new Tree {param});
+    auto tree = std::unique_ptr<Tree>(new Tree {param});
+    tree->m_logger->trace("opening");
+    return tree;
 }
 
 auto Tree::allocate_root() -> Result<page::Node>
@@ -48,7 +47,6 @@ auto run_key_check(BytesView key, Size max_key_size, spdlog::logger &logger, con
         message.set_hint("maximum key length is {} B", max_key_size);
         return message.invalid_argument();
     }
-
     return Status::ok();
 }
 
