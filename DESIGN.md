@@ -25,6 +25,7 @@ Calico DB enforces certain rules to make sure that the database stays consistent
 The current policy is to lock the database if an error is encountered while working with a writable page after the database has been modified during a transaction.
 This is more restrictive than necessary, but has the benefit of covering all cases where the database could be corrupted.
 The lock can be released by performing a successful abort operation.
+Errors that result from passing invalid arguments to a method will never lock up the database.
 
 ## B<sup>+</sup>-Tree
 Calico DB uses a dynamic-order B<sup>+</sup>-tree to maintain an ordered collection of records on-disk.

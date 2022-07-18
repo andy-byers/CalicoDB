@@ -2,10 +2,6 @@
 
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
-> **Note**: I'm currently experimenting with removing exceptions throughout the library.
->           I'm using @TartanLlama/expected for error handling instead!
->           This branch will be broken for a little while.
-
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 
@@ -43,7 +39,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Allows creation of in-memory databases
 + Supports variable-length keys and values
 + API only exposes objects (no pointers to deal with)
-+ Allows tuning of various parameters (page size, block size, cache size, etc.)
++ Allows tuning of various parameters (page size, cache size, etc.)
 
 ## Caveats
 + Currently, Calico DB only runs on 64-bit Ubuntu and OSX
@@ -51,11 +47,11 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + WAL is only used to ensure ACID properties on the current transaction and is truncated afterward
 + Has a hard limit on key length, equal to roughly 1/4 of the page size (anywhere from ~64 B to ~8 KB)
 + Doesn't support concurrent transactions
-+ Doesn't provide synchronization past support for multiple cursors, however `std::shared_mutex` can be used to coordinate writes (see `/test/integration/test_rw.cpp` for an example)
++ Doesn't provide synchronization past support for multiple cursors
 
 ## Dependencies
-Calico DB depends on `spdlog` for logging, and `zlib` for compression (***NOT IMPLEMENTED YET***).
-Both libraries are downloaded during the build using CMake's FetchContent API.
+Calico DB depends on `@gabime/spdlog` and `@TartanLlama/expected`.
+`spdlog` is downloaded during the build using CMake's FetchContent API, and `expected` is bundled with the source code.
 
 ## Build
 Calico DB is built using CMake.
@@ -77,34 +73,36 @@ To build the library in release mode, the last command would look like:
 cmake -DCMAKE_BUILD_TYPE=Release -DCCO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
-While not yet part of CI, some basic fuzzers (using libFuzzer) are also included.
-See the `Dockerfile` for details on how to build them.
-
 ## API
 
 ### Opening a Database
 The entry point to an application using Calico DB might look something like:
 
 ```C++
-// Set some initialization options. We'll create a database with pages of size 8 KB and a 
-// cache of size 2 MB at "/tmp/example". We also set the instance's log level here.
+// Set some options. We'll create a database at "tmp/cats" with pages of size 8 KB and 
+// 128 cache frames (4 MB total).
 cco::Options options;
-options.page_size = 1 << 13;
-options.frame_count = 256;
-options.log_level = spdlog::level::info;
+options.path = "/tmp/cats";
+options.page_size = 0x8000;
+options.frame_count = 128;
 
-return *cco::Database::open("/tmp/example", options)
-    .or_else([](const cco::Status &error) -> cco::Result<cco::Database> {
-        fmt::print("(1/2) cannot open database\n");
-        fmt::print("(2/2) {}\n", cco::btos(error.what()));
-        return cco::Err {error};
-    });
+// Create the database object.
+cco::Database db {options};
+
+// Open the database connection.
+if (const auto s = db.open(); !s.is_ok()) {
+    fmt::print("(1/2) cannot open database\n");
+    fmt::print("(2/2) (reason) {}\n", s.what());
+    std::exit(EXIT_FAILURE);
+}
+// This will be true until db.close() is called.
+assert(db.is_open());
 ```
 
 ### Closing a Database
 
 ```C++
-cco::Database::close(std::move(db));
+assert(db.close().is_ok());
 ```
 
 ### Bytes Objects
@@ -137,6 +135,7 @@ b.advance(7).truncate(5);
 // Comparisons.
 assert(cco::compare_three_way(b, v) != cco::ThreeWayComparison::EQ);
 assert(b == cco::stob("world"));
+assert(b.starts_with(cco::stob("wor")));
 
 // Bytes objects can modify the underlying string, while BytesView objects cannot.
 b[0] = '\xFF';
@@ -147,26 +146,32 @@ assert(data[7] == '\xFF');
 Records and be added or removed using methods on the `Database` object.
 
 ```C++
-// Insert some records. If a record is already in the database, insert() will return false.
-assert(*db.insert("bengal", "short;spotted,marbled,rosetted"));
-assert(*db.insert("turkish vankedisi", "long;white"));
-assert(*db.insert("moose", "???"));
-assert(*db.insert("abyssinian", "short;ticked tabby"));
-assert(*db.insert("russian blue", "short;blue"));
-assert(*db.insert("american shorthair", "short;all"));
-assert(*db.insert("badger", "???"));
-assert(*db.insert("manx", "short,long;all"));
-assert(*db.insert("chantilly-tiffany", "long;solid,tabby"));
-assert(*db.insert("cyprus", "..."));
+std::vector<cco::Record> records {
+    {"bengal", "short;spotted,marbled,rosetted"},
+    {"turkish vankedisi", "long;white"},
+    {"moose", "???"},
+    {"abyssinian", "short;ticked tabby"},
+    {"russian blue", "short;blue"},
+    {"american shorthair", "short;all"},
+    {"badger", "???"},
+    {"manx", "short,long;all"},
+    {"chantilly-tiffany", "long;solid,tabby"},
+    {"cyprus", "..."},
+};
 
-// Modify a record.
-assert(not *db.insert("cyprus", "all;all"));
+// Insert some records.
+for (const auto &record: records)
+    assert(db.insert(record).is_ok());
+
+// Keys are unique, so inserting a record with an existing key will modify the
+// existing value.
+assert(db.insert("cyprus", "all;all").is_ok());
 
 // Erase a record by key.
-assert(*db.erase("badger"));
+assert(db.erase("badger").is_ok());
 
 // Erase a record using a cursor (see "Querying a Database" below).
-assert(*db.erase(db.find_exact("moose")));
+assert(db.erase(db.find_exact("moose")).is_ok());
 ```
 
 ### Querying a Database
@@ -179,19 +184,23 @@ const auto key = cco::stob(target);
 // find_exact() looks for a record that compares equal to the given key and returns a cursor
 // pointing to it.
 auto cursor = db.find_exact(key);
+
+// If the cursor is valid (i.e. is_valid() returns true) we are safe to use any of the getter
+// methods.
 assert(cursor.is_valid());
 assert(cursor.key() == key);
+assert(cursor.value() == "short;blue");
 
-// If there isn't such a record, the cursor will be invalid.
+// If we cannot find an exact match, an invalid cursor will be returned.
 assert(not db.find_exact("not found").is_valid());
+
+// If a cursor encounters an error at any point, it will also become invalidated. In this case,
+// it will modify its status (returned by cursor.status()) to contain information about the error.
+assert(db.find_exact("").status().is_invalid_argument());
 
 // find() returns a cursor on the first record that does not compare less than the given key.
 const auto prefix = key.copy().truncate(key.size() / 2);
 assert(db.find(prefix).key() == cursor.key());
-
-// We can use this method is we just need to check for the existence of a key.
-assert(db.contains("bengal"));
-assert(not db.contains("moose"));
 
 // Cursors can be used for range queries. They can traverse the database in sequential order,
 // or in reverse sequential order.
@@ -216,19 +225,20 @@ The first transaction begins when the database is opened, and the last one commi
 Otherwise, transaction boundaries are defined by calls to either `commit()` or `abort()`.
 
 ```C++
-// Commit all the updates we made in the previous examples.
-db.commit();
+// Commit all the updates we made in the previous examples and begin a new transaction.
+assert(db.commit().is_ok());
 
-// Make some changes and abort the transaction.
-db.insert("opossum", "pretty cute");
-assert(db.erase(db.find_minimum()));
-assert(db.erase(db.find_maximum()));
-db.abort();
+// Modify the database.
+assert(db.insert("opossum", "pretty cute").is_ok());
+assert(db.erase("manx").is_ok());
+
+// abort() restores the database to how it looked at the beginning of the transaction.
+assert(db.abort().is_ok());
 
 // All updates since the last call to commit() have been reverted.
-assert(not db.find_exact("opposum").is_valid());
-assert(db.find_minimum().key() == cco::stob("abyssinian"));
-assert(db.find_maximum().key() == cco::stob("turkish vankedisi"));
+auto s = db.find_exact("opossum");
+assert(db.find_exact("opossum").status().is_not_found());
+assert(db.find_exact("manx").is_valid());
 ```
 
 ### Deleting a Database

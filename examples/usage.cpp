@@ -34,6 +34,7 @@ auto bytes_objects()
     // Comparisons.
     assert(cco::compare_three_way(b, v) != cco::ThreeWayComparison::EQ);
     assert(b == cco::stob("world"));
+    assert(b.starts_with(cco::stob("wor")));
 
     // Bytes objects can modify the underlying string, while BytesView objects cannot.
     b[0] = '\xFF';
@@ -56,16 +57,11 @@ auto updating_a_database(cco::Database &db)
     };
 
     // Insert some records.
-    for (const auto &[key, value]: records) {
-        const auto s = db.insert(key, value);
-        if (!s.is_ok()) {
-            fmt::print("cannot insert record ({}, {})", key, value);
-            fmt::print(s.what());
-            return;
-        }
-    }
+    for (const auto &record: records)
+        assert(db.insert(record).is_ok());
 
-    // Modify a record.
+    // Keys are unique, so inserting a record with an existing key will modify the
+    // existing value.
     assert(db.insert("cyprus", "all;all").is_ok());
 
     // Erase a record by key.
@@ -94,9 +90,8 @@ auto querying_a_database(cco::Database &db)
     assert(not db.find_exact("not found").is_valid());
 
     // If a cursor encounters an error at any point, it will also become invalidated. In this case,
-    // it will modify the status returned by cursor.status() to hold information about the error.
-    auto error = db.find_exact("");
-    assert(error.status().is_invalid_argument());
+    // it will modify its status (returned by cursor.status()) to contain information about the error.
+    assert(db.find_exact("").status().is_invalid_argument());
 
     // find() returns a cursor on the first record that does not compare less than the given key.
     const auto prefix = key.copy().truncate(key.size() / 2);
@@ -127,6 +122,7 @@ auto transactions(cco::Database &db)
     assert(db.abort().is_ok());
 
     // All updates since the last call to commit() have been reverted.
+    auto s = db.find_exact("opossum");
     assert(db.find_exact("opossum").status().is_not_found());
     assert(db.find_exact("manx").is_valid());
 }

@@ -115,9 +115,17 @@ public:
     DatabaseWriteFaultTests()
     {
         EXPECT_TRUE(db.impl->commit());
+
+        // Mess up the database.
         auto generator = RecordGenerator {{}};
-        for (const auto &[key, value]: generator.generate(db.random, 1'500))
+        for (const auto &[key, value]: generator.generate(db.random, 2'500)) {
+            if (const auto r = db.random.next_int(8); r == 0) {
+                EXPECT_TRUE(db.impl->erase(db.impl->find_minimum()));
+            } else if (r == 1) {
+                EXPECT_TRUE(db.impl->erase(db.impl->find_maximum()));
+            }
             EXPECT_TRUE(tools::insert(*db.impl, key, value));
+        }
     }
     ~DatabaseWriteFaultTests() override = default;
 
@@ -139,6 +147,56 @@ TEST_F(DatabaseWriteFaultTests, InvalidArgumentErrorsDoNotCauseLockup)
     ASSERT_TRUE(db.impl->insert(stob(long_key).truncate(long_key.size() - 1), stob("value")));
 }
 
+template<class RateSetter>
+auto abort_until_successful(TestDatabase &db, RateSetter &&setter)
+{
+    for (unsigned rate {100}; rate >= 50; rate -= 10) {
+        setter(rate);
+        ASSERT_TRUE(db.impl->abort().error().is_system_error());
+    }
+    setter(0);
+    auto x = db.impl->abort();
+     ASSERT_TRUE(x);
+}
+
+auto validate_after_abort(TestDatabase &db)
+{
+    // db.records contains the set of records in the database after the first commit. The constructor for the "write fault tests"
+    // adds some records and deletes others, so if abort() didn't do its job, the database will contain different records. Removing
+    // all the records here makes sure the tree connections are still valid.
+    for (const auto &[key, value]: db.records) {
+        auto cursor = tools::find(*db.impl, key);
+        ASSERT_TRUE(cursor.is_valid());
+        ASSERT_EQ(cursor.value(), value);
+        ASSERT_TRUE(db.impl->erase(cursor));
+    }
+    ASSERT_EQ(db.impl->info().record_count(), 0);
+}
+
+TEST_F(DatabaseWriteFaultTests, AbortIsReentrantAfterDataWriteFaults)
+{
+    abort_until_successful(db, [this](unsigned rate) {
+        db.data_controls.set_write_fault_rate(rate);
+    });
+    validate_after_abort(db);
+}
+
+TEST_F(DatabaseWriteFaultTests, AbortIsReentrantAfterDataReadFaults)
+{
+    abort_until_successful(db, [this](unsigned rate) {
+        db.data_controls.set_read_fault_rate(rate);
+    });
+    validate_after_abort(db);
+}
+
+TEST_F(DatabaseWriteFaultTests, AbortIsReentrantAfterWALReadFaults)
+{
+    abort_until_successful(db, [this](unsigned rate) {
+        db.wal_controls.set_read_fault_rate(rate);
+    });
+    validate_after_abort(db);
+}
+
 TEST_F(DatabaseWriteFaultTests, AbortFixesLockup)
 {
     db.data_controls.set_write_fault_rate(100);
@@ -153,22 +211,17 @@ TEST_F(DatabaseWriteFaultTests, AbortFixesLockup)
             ASSERT_TRUE(db.impl->find(stob(s)).status().is_system_error());
             ASSERT_TRUE(db.impl->find_minimum().status().is_system_error());
             ASSERT_TRUE(db.impl->find_maximum().status().is_system_error());
+            ASSERT_TRUE(db.impl->commit().error().is_system_error());
             break;
         }
     }
-    // Might as well let it fail a few times. abort() should be reentrant.
+    // Might as well let it fail a few times. abort() should be reentrant anyway.
     while (!db.impl->abort().has_value()) {
         const auto rate = db.data_controls.write_fault_rate();
         db.data_controls.set_write_fault_rate(2 * rate / 3);
     }
 
-    for (const auto &[key, value]: db.records) {
-        auto cursor = tools::find(*db.impl, key);
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_EQ(cursor.value(), value);
-        ASSERT_TRUE(db.impl->erase(cursor));
-    }
-    ASSERT_EQ(db.impl->info().record_count(), db.records.size());
+    validate_after_abort(db);
 }
 
 class DatabaseTests: public testing::Test {

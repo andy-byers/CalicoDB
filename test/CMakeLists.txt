@@ -13,3 +13,7 @@ target_compile_options(test_tools PUBLIC "${CCO_WARNINGS}")
 
 add_subdirectory(unit_tests)
 add_subdirectory(recovery)
+
+if(CCO_BUILD_FUZZERS)
+    add_subdirectory(fuzz)
+endif()

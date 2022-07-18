@@ -7,6 +7,11 @@ namespace cco {
 
 namespace fs = std::filesystem;
 
+auto Directory::is_open() const -> bool
+{
+    return m_file >= 0;
+}
+
 auto Directory::path() const -> std::string
 {
     return m_path;
@@ -42,6 +47,7 @@ auto Directory::remove() -> Result<void>
     std::error_code error;
     if (!fs::remove(m_path, error))
         return Err {Status::system_error(error.message())};
+    m_path.clear();
     return {};
 }
 
@@ -80,7 +86,7 @@ auto Directory::open_file(const std::string &name, Mode mode, int permissions) -
 auto Directory::close() -> Result<void>
 {
     CCO_TRY(sync());
-    return system::close(m_file);
+    return system::close(std::exchange(m_file, system::FAILURE));
 }
 
 } // cco

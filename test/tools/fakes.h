@@ -32,7 +32,6 @@ private:
     std::shared_ptr<std::string> m_memory;
 };
 
-
 class FaultControls {
 public:
     struct Controls {
@@ -119,6 +118,11 @@ public:
     [[nodiscard]] auto sync() -> Result<void> override;
     [[nodiscard]] auto close() -> Result<void> override;
 
+    [[nodiscard]] auto is_open() const -> bool override
+    {
+        return m_is_open;
+    }
+
     [[nodiscard]] auto exists(const std::string &name) const -> Result<bool> override
     {
         return m_faults.find(name) != end(m_faults);
@@ -144,6 +148,7 @@ private:
     std::unordered_map<std::string, SharedMemory> m_shared;
     std::unordered_map<std::string, FaultControls> m_faults;
     std::filesystem::path m_path;
+    bool m_is_open {true};
 };
 
 class FakeFile : public IFile {

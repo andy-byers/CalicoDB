@@ -64,6 +64,7 @@ public:
 class IDirectory {
 public:
     virtual ~IDirectory() = default;
+    [[nodiscard]] virtual auto is_open() const -> bool = 0;
     [[nodiscard]] virtual auto path() const -> std::string = 0;
     [[nodiscard]] virtual auto name() const -> std::string = 0;
     [[nodiscard]] virtual auto exists(const std::string&) const -> Result<bool> = 0;

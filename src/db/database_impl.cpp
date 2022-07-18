@@ -133,7 +133,7 @@ auto Database::Impl::open(Parameters param) -> Result<std::unique_ptr<Impl>>
 Database::Impl::~Impl()
 {
     // The specific error has already been logged in close().
-    if (close().has_value())
+    if (m_home->is_open() && close().has_value())
         m_logger->error("failed to close in destructor");
 }
 
@@ -191,6 +191,7 @@ auto Database::Impl::erase(Cursor cursor) -> Result<bool>
 
 auto Database::Impl::commit() -> Result<void>
 {
+    m_logger->trace("committing");
     return save_header()
         .and_then([this]() -> Result<void> {
             CCO_TRY(m_pool->commit());
@@ -198,25 +199,27 @@ auto Database::Impl::commit() -> Result<void>
             return {};
         })
         .or_else([this](const Status &status) -> Result<void> {
-            LogMessage message {*m_logger};
-            message.set_primary("cannot commit");
-            message.log(spdlog::level::err);
+            m_logger->error("cannot commit");
+            m_logger->error("(reason) {}", status.what());
             return Err {status};
         });
 }
 
 auto Database::Impl::abort() -> Result<void>
 {
+    m_logger->trace("aborting");
     return m_pool->abort()
         .and_then([this]() -> Result<void> {
-            CCO_TRY(m_pool->commit());
+            CCO_TRY_CREATE(root, m_tree->root(false));
+            auto reader = get_file_header_reader(root);
+            m_pool->load_header(reader);
+            m_tree->load_header(reader);
             m_logger->trace("abort succeeded");
             return {};
         })
         .or_else([this](const Status &status) -> Result<void> {
-            LogMessage message {*m_logger};
-            message.set_primary("cannot abort");
-            message.log(spdlog::level::err);
+            m_logger->error("cannot abort");
+            m_logger->error("(reason) {}", status.what());
             return Err {status};
         });
 }
@@ -250,6 +253,7 @@ auto Database::Impl::save_header() -> Result<void>
 {
     CCO_TRY_CREATE(root, m_tree->root(true));
     auto header = get_file_header_writer(root);
+    m_logger->trace("saving file header");
     m_pool->save_header(header);
     m_tree->save_header(header);
     header.update_header_crc();
@@ -260,6 +264,7 @@ auto Database::Impl::load_header() -> Result<void>
 {
     CCO_TRY_CREATE(root, m_tree->root(true));
     auto header = get_file_header_reader(root);
+    m_logger->trace("loading file header");
     m_pool->load_header(header);
     m_tree->load_header(header);
     return {};
