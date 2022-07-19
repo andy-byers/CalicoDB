@@ -1,6 +1,7 @@
 #include "validation.h"
 #include <filesystem>
 #include <fstream>
+#include <spdlog/fmt/fmt.h>
 #include "calico/cursor.h"
 #include "tree/tree.h"
 #include "tree/node_pool.h"
@@ -50,6 +51,14 @@ static auto traverse_inorder_helper(NodePool &pool, Node node, const std::functi
 static auto traverse_inorder(NodePool &pool, const std::function<void(Node&, Index)> &callback) -> void
 {
     traverse_inorder_helper(pool, *pool.acquire(PID::root(), false), callback);
+}
+
+auto print_keys(ITree &tree) -> void
+{
+    traverse_inorder(tree.pool(), [](Node &node, Index index) {
+        fmt::print("{}, ", btos(node.read_key(index)));
+    });
+    putchar('\n');
 }
 
 auto validate_siblings(ITree &tree) -> void

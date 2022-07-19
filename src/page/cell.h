@@ -25,6 +25,7 @@ public:
     explicit Cell(const Parameters&);
 
     ~Cell() = default;
+    [[nodiscard]] auto copy() const -> Cell;
     [[nodiscard]] auto key() const -> BytesView;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto value_size() const -> Size;
@@ -37,11 +38,6 @@ public:
     auto set_overflow_id(PID) -> void;
     auto write(Bytes) const -> void;
     auto detach(utils::Scratch, bool = false) -> void;
-
-    Cell(const Cell&) = delete;
-    auto operator=(const Cell&) -> Cell& = delete;
-    Cell(Cell&&) = default;
-    auto operator=(Cell&&) -> Cell& = default;
 
     [[nodiscard]] auto is_external() const -> bool
     {

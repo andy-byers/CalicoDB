@@ -2,11 +2,12 @@
 
 #include "calico/bytes.h"
 #include "calico/options.h"
-#include "random.h"
-#include "unit_tests.h"
 #include "page/cell.h"
 #include "page/node.h"
 #include "page/page.h"
+#include "random.h"
+#include "tools.h"
+#include "unit_tests.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
 #include "utils/scratch.h"
@@ -377,9 +378,9 @@ public:
     explicit NodeBacking(Size page_size)
         : PageBacking {page_size} {}
 
-    auto get_node(PID id, PageType type) -> Node
+    auto get_node(PID id, PageType type) -> page::Node
     {
-        Node node {get_page(id), true};
+        page::Node node {get_page(id), true};
         node.page().set_type(type);
         return node;
     }
@@ -597,18 +598,6 @@ TEST_F(NodeTests, RemovingCellDecrementsCellCount)
     ASSERT_EQ(node.cell_count(), 0);
 }
 
-TEST_F(NodeTests, A)
-{
-    auto node = make_node(PID::root(), PageType::INTERNAL_NODE);
-    const std::vector<std::string> keys {"Vn98oi", "VtZPREUPcKsuw", "W4PH8S", "WAA", "WE3wrByTqG", "WGPeRx7qo", "WMXX2VmvTlAi","WYwDilYMS", "byFKBvxMMndEY"};
-    for (const auto &key: keys)
-        node.insert(cell_backing.get_cell(key, "", false));
-    auto [index, found_eq] = node.find_ge(stob("WamfVthwD2"));
-    printf("%lu, %d\n", index, found_eq);
-//    for (Index i {}; i < keys.size(); ++i)
-//        printf("%s\n", btos(node.read_key(i)).c_str());
-}
-
 TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
 {
     auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
@@ -617,6 +606,21 @@ TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
     node.insert(std::move(cell));
     node.remove(stob("hello"));
     ASSERT_EQ(node.usable_space(), usable_space_before);
+}
+
+TEST_F(NodeTests, SplitNonRootExternal)
+{
+    auto lhs = make_node(PID {2}, PageType::EXTERNAL_NODE);
+    auto rhs = make_node(PID {3}, PageType::EXTERNAL_NODE);
+    ScratchManager scratch {lhs.size()};
+
+    lhs.insert(cell_backing.get_cell(make_key(100), normal_value, true));
+    lhs.insert(cell_backing.get_cell(make_key(200), normal_value, true));
+    while (!lhs.is_overflowing())
+        lhs.insert(cell_backing.get_cell(make_key(100 + lhs.cell_count()), normal_value, true));
+    auto separator = split_non_root(lhs, rhs, scratch.get());
+
+    ASSERT_EQ(separator.left_child_id(), lhs.id());
 }
 
 } // <anonymous>

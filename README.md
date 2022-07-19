@@ -192,7 +192,12 @@ assert(cursor.key() == key);
 assert(cursor.value() == "short;blue");
 
 // If we cannot find an exact match, an invalid cursor will be returned.
-assert(not db.find_exact("not found").is_valid());
+assert(not db.find_exact("not_found").is_valid());
+
+// If a cursor encounters an error at any point, it will also become invalidated. In this case,
+// it will modify its status (returned by cursor.status()) to contain information about the error.
+assert(db.find_exact("").status().is_invalid_argument());
+
 
 // If a cursor encounters an error at any point, it will also become invalidated. In this case,
 // it will modify its status (returned by cursor.status()) to contain information about the error.
@@ -204,25 +209,34 @@ assert(db.find(prefix).key() == cursor.key());
 
 // Cursors can be used for range queries. They can traverse the database in sequential order,
 // or in reverse sequential order.
-for (auto c = db.find_minimum(); c.is_valid(); c++) {}
-for (auto c = db.find_maximum(); c.is_valid(); c--) {}
+for (auto c = db.find_minimum(); c.is_valid(); ++c) {}
+for (auto c = db.find_maximum(); c.is_valid(); --c) {}
 
 // They also support equality comparison.
 if (const auto boundary = db.find_exact(key); boundary.is_valid()) {
-    for (auto c = db.find_minimum(); c.is_valid() && c != boundary; c++) {}
-    for (auto c = db.find_maximum(); c.is_valid() && c != boundary; c--) {}
+    for (auto c = db.find_minimum(); c.is_valid() && c != boundary; ++c) {}
+    for (auto c = db.find_maximum(); c.is_valid() && c != boundary; --c) {}
 }
 ```
 
 ### Errors
-Calico DB uses @TartanLlama/expected to handle errors.
-Methods that modify the database will return a `cco::Result<T>` (an alias for `tl::expected<T, cco::Status>`).
-If the operation was successful, the `cco::Result<T>` will contain the expected `T`, otherwise, it will contain a `cco::Status` that describes what went wrong.
+Methods on the database object that can fail will generally return a `cco::Status` object (similar to and inspired by LevelDB's status object).
+If a method returning a cursor encounters an error, the error status will be made available in the cursor's status field.
+If an error occurs that could potentially lead to corruption of the database contents, the database object will lock up and refuse to perform any more work.
+Rather, the exceptional status that caused the lockup will be returned each time a method call is made.
+An error such as this could be caused, for example, by becoming unable to write to disk in the middle of a tree balancing operation.
+The lockup can be resolved by a successful call to abort(), which discards updates made during the current transaction.
+abort() is reentrant, so it can be called repeatedly.
+A good rule of thumb is that if one receives a system error from a call that can modify the database, i.e. insert(), erase(), or commit(), then one should try to abort().
+If this isn't possible, it's best to just exit the program.
+The next time that the database is started up, it will perform the necessary recovery.
 
 ### Transactions
 Every modification to a Calico DB database occurs within a transaction.
 The first transaction begins when the database is opened, and the last one commits when the database is closed.
-Otherwise, transaction boundaries are defined by calls to either `commit()` or `abort()`.
+Otherwise, transaction boundaries are defined by successful calls to either `commit()` or `abort()`.
+Calico DB only provides ACID guarantees and rollback behavior on the current transaction.
+After a transaction is committed and all dirty pages are written to disk, the WAL is truncated and a new transaction is started.
 
 ```C++
 // Commit all the updates we made in the previous examples and begin a new transaction.
@@ -236,7 +250,6 @@ assert(db.erase("manx").is_ok());
 assert(db.abort().is_ok());
 
 // All updates since the last call to commit() have been reverted.
-auto s = db.find_exact("opossum");
 assert(db.find_exact("opossum").status().is_not_found());
 assert(db.find_exact("manx").is_valid());
 ```
@@ -287,7 +300,7 @@ CalicoDB
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
-┃ ┣╸error.h ┄┄┄┄┄┄┄┄ Status object
+┃ ┣╸status.h ┄┄┄┄┄┄┄┄ Status object
 ┃ ┗╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┣╸src
 ┃ ┣╸db ┄┄┄┄┄┄┄┄┄┄┄┄┄ API implementation
@@ -297,6 +310,7 @@ CalicoDB
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Utility module
 ┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging module
 ┗╸test
+  ┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄ Fuzz tests
   ┣╸recovery ┄┄┄┄┄┄┄ Test database failure and recovery
   ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Test tools
   ┗╸unit_tests ┄┄┄┄┄ Unit tests

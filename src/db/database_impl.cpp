@@ -133,7 +133,7 @@ auto Database::Impl::open(Parameters param) -> Result<std::unique_ptr<Impl>>
 Database::Impl::~Impl()
 {
     // The specific error has already been logged in close().
-    if (m_home->is_open() && close().has_value())
+    if (!m_is_temp && m_home->is_open() && !close().has_value())
         m_logger->error("failed to close in destructor");
 }
 

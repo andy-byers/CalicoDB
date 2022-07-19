@@ -1,4 +1,3 @@
-
 #include "calico/status.h"
 #include "utils/expect.h"
 

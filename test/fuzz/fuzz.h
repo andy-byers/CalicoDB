@@ -13,6 +13,7 @@ public:
     struct Parsed {
         std::vector<BytesView> segments;
         Index opcode {};
+        Size size {};
     };
 
     struct Instruction {

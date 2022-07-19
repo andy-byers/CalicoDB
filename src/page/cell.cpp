@@ -57,6 +57,18 @@ Cell::Cell(const Parameters &param)
       m_page_size {param.page_size},
       m_is_external {param.is_external} {}
 
+auto Cell::copy() const -> Cell
+{
+    return Cell {{
+        m_key,
+        m_local_value,
+        m_overflow_id,
+        m_value_size,
+        m_page_size,
+        m_is_external,
+    }};
+}
+
 auto Cell::size() const -> Size
 {
     const auto is_internal = !m_is_external;
@@ -144,12 +156,8 @@ auto Cell::write(Bytes out) const -> void
 
 auto Cell::detach(Scratch scratch, bool ensure_internal) -> void
 {
-    if (ensure_internal && m_is_external) {
-        m_is_external = false;
-        m_local_value.clear();
-        m_value_size = 0;
-        m_overflow_id = PID::null();
-    }
+    if (ensure_internal && m_is_external)
+        set_is_external(false);
 
     auto data = scratch.data();
     write(data);
@@ -160,6 +168,12 @@ auto Cell::detach(Scratch scratch, bool ensure_internal) -> void
 auto Cell::set_is_external(bool is_external) -> void
 {
     m_is_external = is_external;
+
+    if (!m_is_external) {
+        m_local_value.clear();
+        m_value_size = 0;
+        m_overflow_id = PID::null();
+    }
 }
 
 auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
