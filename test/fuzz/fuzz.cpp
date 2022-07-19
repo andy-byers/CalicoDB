@@ -8,15 +8,17 @@ auto InstructionParser::parse(BytesView view) const -> std::optional<Parsed>
         return std::nullopt;
 
     Index byte = static_cast<unsigned char>(view[0]);
+    Size total_size {1};
     Index opcode {};
     view.advance();
 
-    for (const auto [chance, size]: m_instructions) {
+    for (const auto [chance, _]: m_instructions) {
         if (byte < chance)
             break;
         byte -= chance;
         opcode++;
     }
+    opcode -= opcode == m_instructions.size();
     const auto opsize = m_instructions.at(opcode).num_segments;
     std::vector<BytesView> segments(opsize);
 
@@ -24,14 +26,15 @@ auto InstructionParser::parse(BytesView view) const -> std::optional<Parsed>
         if (view.is_empty())
             return std::nullopt;
 
-        const auto size = static_cast<Size>(view[0]);
-        if (view.size() + 1 < size)
+        const auto size = static_cast<unsigned char>(view[0]);
+        if (view.size() < size + 1)
             return std::nullopt;
 
         segment = view.range(1, size);
         view.advance(size + 1);
+        total_size += size + 1;
     }
-    return Parsed {std::move(segments), opcode};
+    return Parsed {std::move(segments), opcode, total_size};
 }
 
 DatabaseTarget::DatabaseTarget(InstructionParser::Instructions instructions, Options options):
@@ -48,7 +51,9 @@ auto DatabaseTarget::fuzz(BytesView data) -> void
         if (!parsed)
             break;
 
-        auto [segments, opcode] = *parsed;
+        auto [segments, opcode, size] = *parsed;
+        data.advance(size);
+
         switch (opcode) {
             case 0:
                 CCO_EXPECT_EQ(segments.size(), 2);
@@ -92,7 +97,7 @@ auto DatabaseTarget::erase_one(BytesView key) -> void
     auto s = m_db.erase(c);
 
     if (!s.is_ok()) {
-        CCO_EXPECT_TRUE(c.status().is_not_found());
+        CCO_EXPECT_TRUE(c.status().is_not_found() or c.status().is_invalid_argument());
         c = m_db.find_minimum();
         s = m_db.erase(c);
     }
@@ -109,12 +114,14 @@ auto DatabaseTarget::erase_one(BytesView key) -> void
 
 auto DatabaseTarget::do_commit() -> void
 {
-    CCO_EXPECT_TRUE(m_db.commit().is_ok());
+    const auto s = m_db.commit();
+    CCO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
 }
 
 auto DatabaseTarget::do_abort() -> void
 {
-    CCO_EXPECT_TRUE(m_db.abort().is_ok());
+    const auto s = m_db.abort();
+    CCO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
 }
 
 } // cco

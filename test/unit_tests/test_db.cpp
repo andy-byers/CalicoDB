@@ -7,8 +7,6 @@
 #include <gtest/gtest.h>
 
 #include "db/database_impl.h"
-#include "pool/interface.h"
-#include "storage/file.h"
 #include "storage/system.h"
 
 #include "tree/tree.h"
@@ -92,6 +90,11 @@ TEST_F(DatabaseReadFaultTests, SystemErrorIsStoredInCursor)
 TEST_F(DatabaseReadFaultTests, StateIsUnaffectedByReadFaults)
 {
     static constexpr auto STEP = 10;
+
+    // We need to commit before we encounter a system error. The current implementation will lock up
+    // if one is encountered while in the middle of a transaction.
+    ASSERT_TRUE(db.impl->commit());
+
     unsigned r {}, num_faults {};
     for (; r <= 100; r += STEP) {
         db.data_controls.set_read_fault_rate(100 - r);
@@ -204,8 +207,7 @@ TEST_F(DatabaseWriteFaultTests, AbortFixesLockup)
         const auto s = std::to_string(i);
         auto result = db.impl->insert(stob(s), stob(s));
         if (!result.has_value()) {
-            ASSERT_TRUE(result.error().is_system_error());
-            // None of the following operations should succeed until an abort() call is successful.
+            // The following operations should fail until an abort() call is successful.
             ASSERT_TRUE(db.impl->insert(stob(s), stob(s)).error().is_system_error());
             ASSERT_TRUE(db.impl->erase(stob(s)).error().is_system_error());
             ASSERT_TRUE(db.impl->find(stob(s)).status().is_system_error());

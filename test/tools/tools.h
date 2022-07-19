@@ -7,6 +7,7 @@
 #include <vector>
 #include "random.h"
 #include "calico/calico.h"
+#include "page/node.h"
 #include "utils/identifier.h"
 #include "utils/utils.h"
 #include "wal/wal_record.h"
@@ -14,7 +15,6 @@
 namespace cco {
 
 class ITree;
-class Node;
 
 namespace tools {
 
@@ -78,8 +78,6 @@ namespace tools {
 
 } // tools
 
-
-
 template<std::size_t Length = 20> auto make_key(Index key) -> std::string
 {
     auto key_string = std::to_string(key);
@@ -96,8 +94,8 @@ private:
     auto validate_parent_child_connections() -> void;
     auto validate_ordering() -> void;
     auto collect_keys() -> std::vector<std::string>;
-    auto traverse_inorder(const std::function<void(Node&, Index)>&) -> void;
-    auto traverse_inorder_helper(Node, const std::function<void(Node&, Index)>&) -> void;
+    auto traverse_inorder(const std::function<void(page::Node&, Index)>&) -> void;
+    auto traverse_inorder_helper(page::Node, const std::function<void(page::Node&, Index)>&) -> void;
     auto is_reachable(std::string) -> bool;
 
     ITree &m_tree;
@@ -111,7 +109,7 @@ public:
 private:
     auto add_spaces_to_level(Size, Index) -> void;
     auto add_spaces_to_other_levels(Size, Index) -> void;
-    auto print_aux(Node, Index) -> void;
+    auto print_aux(page::Node, Index) -> void;
     auto add_key_to_level(BytesView, Index, bool) -> void;
     auto add_key_separator_to_level(Index) -> void;
     auto add_node_start_to_level(Index, Index) -> void;
@@ -176,6 +174,7 @@ public:
         Size mean_value_size {18};
         Size spread {4};
         bool is_sequential {};
+        bool is_unique {};
     };
 
     RecordGenerator() = default;

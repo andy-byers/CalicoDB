@@ -16,6 +16,12 @@ public:
         Index index {};
     };
 
+    struct SearchResult_ {
+        PID id;
+        Index index {};
+        bool was_found {};
+    };
+
     struct FindResult {
         page::Node node;
         Index index {};
@@ -30,6 +36,9 @@ public:
     explicit Internal(Parameters);
     ~Internal() = default;
     [[nodiscard]] auto collect_value(const page::Node&, Index) const -> Result<std::string>;
+    [[nodiscard]] auto find_external_(BytesView) -> Result<SearchResult_>;
+    [[nodiscard]] auto find_minimum() -> Result<SearchResult_>;
+    [[nodiscard]] auto find_maximum() -> Result<SearchResult_>;
     [[nodiscard]] auto find_root(bool) -> Result<page::Node>;
     [[nodiscard]] auto find_external(BytesView, bool) -> Result<FindResult>;
     [[nodiscard]] auto find_local_min(page::Node) -> Result<Position>;

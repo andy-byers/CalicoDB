@@ -195,15 +195,13 @@ TEST_F(TreeTests, OverflowChains)
 
 auto insert_sequence(ITree &tree, Index start, Index n, Index step = 1)
 {
-    for (auto i = start; i < n; i += step) {
-        EXPECT_GE(i, 0) << "Sequence values must not be negative";
+    for (auto i = start; i < n; i += step)
         tools::insert(tree, make_key(i), "");
-    }
 }
 
 TEST_F(TreeTests, SequentialInserts)
 {
-    insert_sequence(*tree, 0, 200);
+    insert_sequence(*tree, 0, 500);
     validate();
 }
 
@@ -405,6 +403,39 @@ TEST_F(TreeTests, AlternatingInsertsFromEnds)
     }
     validate();
     ASSERT_EQ(tree->cell_count(), 500);
+}
+
+TEST_F(TreeTests, ExternalRootFitsAtLeastThreeCells)
+{
+    // Generate maximally-sized cells.
+    RecordGenerator::Parameters param;
+    param.mean_key_size = max_local;
+    param.mean_value_size = 10;
+    param.spread = 0;
+
+    for (const auto &[key, value]: RecordGenerator {param}.generate(random, 3)) {
+        ASSERT_TRUE(tools::insert(*tree, key, value));
+        ASSERT_EQ(tree->node_count(), 1);
+    }
+}
+
+TEST_F(TreeTests, RandomInserts)
+{
+    RecordGenerator::Parameters param;
+    param.is_unique = true;
+
+    RecordGenerator generator {param};
+    const auto records = generator.generate(random, 500);
+    for (const auto &[key, value]: records)
+        tools::insert(*tree, key, value);
+
+    validate();
+    for (const auto &[key, value]: records) {
+        const auto c = tools::find_exact(*tree, key);
+        ASSERT_EQ(btos(c.key()), key);
+        ASSERT_EQ(c.value(), value);
+    }
+    ASSERT_EQ(tree->cell_count(), records.size());
 }
 
 TEST_F(TreeTests, ModifiesValue)

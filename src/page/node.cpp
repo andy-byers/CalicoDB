@@ -2,7 +2,6 @@
 #include "file_header.h"
 
 #include "utils/crc.h"
-#include "utils/encoding.h"
 #include "utils/layout.h"
 
 namespace cco::page {
@@ -180,8 +179,8 @@ auto CellDirectory::insert_pointer(Index index, Pointer pointer) -> void
     CCO_EXPECT_LT(pointer.value, m_page->size());
     CCO_EXPECT_LE(index, m_header->cell_count());
     const auto start = NodeLayout::content_offset(m_page->id());
-    const auto offset = start + CELL_POINTER_SIZE*index;
-    const auto size = (m_header->cell_count()-index) * CELL_POINTER_SIZE;
+    const auto offset = start + CELL_POINTER_SIZE * index;
+    const auto size = (m_header->cell_count() - index) * CELL_POINTER_SIZE;
     auto chunk = m_page->bytes(offset, size + CELL_POINTER_SIZE);
     mem_move(chunk.range(CELL_POINTER_SIZE), chunk, size);
     m_header->set_cell_count(m_header->cell_count() + 1);
@@ -193,8 +192,8 @@ auto CellDirectory::remove_pointer(Index index) -> void
     CCO_EXPECT_GT(m_header->cell_count(), 0);
     CCO_EXPECT_LT(index, m_header->cell_count());
     const auto start = NodeLayout::header_offset(m_page->id()) + NodeLayout::HEADER_SIZE;
-    const auto offset = start + CELL_POINTER_SIZE*index;
-    const auto size = (m_header->cell_count()-index-1) * CELL_POINTER_SIZE;
+    const auto offset = start + CELL_POINTER_SIZE * index;
+    const auto size = (m_header->cell_count() - index - 1) * CELL_POINTER_SIZE;
     auto chunk = m_page->bytes(offset, size + CELL_POINTER_SIZE);
     mem_move(chunk, chunk.range(CELL_POINTER_SIZE), size);
     m_header->set_cell_count(m_header->cell_count() - 1);
@@ -202,7 +201,8 @@ auto CellDirectory::remove_pointer(Index index) -> void
 
 BlockAllocator::BlockAllocator(NodeHeader &header)
     : m_page {&header.page()},
-      m_header {&header} {}
+      m_header {&header}
+{}
 
 auto BlockAllocator::usable_space() const -> Size
 {
@@ -411,14 +411,14 @@ auto Node::detach_cell(Index index, Scratch scratch) const -> Cell
 {
     CCO_EXPECT_LT(index, cell_count());
     auto cell = read_cell(index);
-    cell.detach(std::move(scratch));
+    cell.detach(scratch);
     return cell;
 }
 
 auto Node::extract_cell(Index index, Scratch scratch) -> Cell
 {
     CCO_EXPECT_LT(index, cell_count());
-    auto cell = detach_cell(index, std::move(scratch));
+    auto cell = detach_cell(index, scratch);
     remove_at(index, cell.size());
     return cell;
 }
@@ -445,10 +445,10 @@ auto Node::find_ge(BytesView key) const -> FindGeResult
 {
     long lower {};
     auto upper = static_cast<long>(cell_count());
-    
+
     while (lower < upper) {
         // Note that this cannot overflow since the page size is bounded by a 16-bit integer.
-        const auto middle = (lower+upper) / 2;
+        const auto middle = (lower + upper) / 2;
         switch (compare_three_way(key, read_key(static_cast<Index>(middle)))) {
             case ThreeWayComparison::EQ:
                 return {static_cast<Index>(middle), true};
@@ -489,7 +489,7 @@ auto Node::is_underflowing() const -> bool
     return m_allocator.usable_space() > max_usable_space() / 2;
 }
 
-auto Node::overflow_cell() const -> const Cell&
+auto Node::overflow_cell() const -> const Cell &
 {
     CCO_EXPECT_TRUE(is_overflowing());
     return *m_overflow;
@@ -497,12 +497,12 @@ auto Node::overflow_cell() const -> const Cell&
 
 auto Node::set_overflow_cell(Cell cell) -> void
 {
-    m_overflow = std::move(cell);
+    m_overflow = cell;
 }
 
 auto Node::take_overflow_cell() -> Cell
 {
-    auto cell = std::move(*m_overflow);
+    auto cell = *m_overflow;
     m_overflow.reset();
     return cell;
 }
@@ -562,7 +562,7 @@ auto Node::insert(Cell cell) -> void
     const auto [index, should_be_false] = find_ge(cell.key());
     // Keys should be unique.
     CCO_EXPECT_FALSE(should_be_false);
-    insert_at(index, std::move(cell));
+    insert_at(index, cell);
 }
 
 auto Node::insert_at(Index index, Cell cell) -> void
@@ -577,9 +577,9 @@ auto Node::insert_at(Index index, Cell cell) -> void
     if (cell_area_offset() + CELL_POINTER_SIZE > m_header.cell_start()) {
         if (m_allocator.usable_space() >= local_size + CELL_POINTER_SIZE) {
             defragment();
-            return insert_at(index, std::move(cell));
+            return insert_at(index, cell);
         }
-        set_overflow_cell(std::move(cell));
+        set_overflow_cell(cell);
         return;
     }
     // insert a dummy cell pointer to save the slot.
@@ -590,7 +590,8 @@ auto Node::insert_at(Index index, Cell cell) -> void
 
     // We don't have room to insert the cell.
     if (!offset) {
-        set_overflow_cell(std::move(cell));
+        CCO_EXPECT_LT(m_allocator.usable_space(), local_size + CELL_POINTER_SIZE);
+        set_overflow_cell(cell);
         m_directory.remove_pointer(index);
         return;
     }
@@ -602,7 +603,7 @@ auto Node::insert_at(Index index, Cell cell) -> void
     if (offset < m_header.cell_start())
         m_header.set_cell_start(offset);
 
-//    CCO_VALIDATE(validate());
+    //    CCO_VALIDATE(validate());
 }
 
 auto Node::remove(BytesView key) -> bool
@@ -622,7 +623,7 @@ auto Node::remove_at(Index index, Size local_size) -> void
     CCO_EXPECT_FALSE(is_overflowing());
     m_allocator.free(m_directory.get_pointer(index).value, local_size);
     m_directory.remove_pointer(index);
-//    CCO_VALIDATE(validate());
+    //    CCO_VALIDATE(validate());
 }
 
 auto Node::reset(bool reset_header) -> void
@@ -641,7 +642,7 @@ auto transfer_cell(Node &src, Node &dst, Index index) -> void
     CCO_EXPECT_EQ(src.type(), dst.type());
     auto cell = src.read_cell(index);
     const auto cell_size = cell.size();
-    dst.insert(std::move(cell));
+    dst.insert(cell);
     src.remove_at(index, cell_size);
 }
 
@@ -689,7 +690,7 @@ auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
     auto separator = parent.read_cell(index);
     const auto separator_size = separator.size();
     separator.set_left_child_id(Lc.rightmost_child_id());
-    Lc.insert(std::move(separator));
+    Lc.insert(separator);
     parent.remove_at(index, separator_size);
 
     // Transfer the rest of the cells. Lc shouldn't overflow.
@@ -735,7 +736,7 @@ auto internal_merge_right(Node &Lc, Node &rc, Node &parent, Index index) -> void
     const auto separator_size = separator.size();
     separator.set_left_child_id(Lc.rightmost_child_id());
     Lc.set_rightmost_child_id(rc.rightmost_child_id());
-    Lc.insert(std::move(separator));
+    Lc.insert(separator);
     CCO_EXPECT_EQ(parent.child_id(index + 1), rc.id());
     parent.set_child_id(index + 1, Lc.id());
     parent.remove_at(index, separator_size);
@@ -779,7 +780,7 @@ auto split_root(Node &root, Node &child) -> void
 
     // Copy the header and cell pointers.
     offset = child.header_offset();
-    size = NodeLayout::HEADER_SIZE + root.cell_count()*CELL_POINTER_SIZE;
+    size = NodeLayout::HEADER_SIZE + root.cell_count() * CELL_POINTER_SIZE;
     child.page().write(root.page().view(root.header_offset()).truncate(size), offset);
 
     CCO_EXPECT_TRUE(root.is_overflowing());
@@ -803,120 +804,140 @@ auto merge_root(Node &root, Node &child) -> void
 
     // Copy the header and cell pointers.
     offset = root.header_offset();
-    size = NodeLayout::HEADER_SIZE + child.cell_count()*CELL_POINTER_SIZE;
+    size = NodeLayout::HEADER_SIZE + child.cell_count() * CELL_POINTER_SIZE;
     root.page().write(child.page().view(child.header_offset()).truncate(size), offset);
     root.page().set_type(child.type());
+}
+
+template<class Predicate>
+auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> void
+{
+    Index counter {};
+    while (predicate(src, dst, counter++)) {
+        const auto last = src.cell_count() - 1;
+        auto cell = src.read_cell(last);
+        const auto cell_size = cell.size();
+        dst.insert_at(0, cell);
+        CCO_EXPECT_FALSE(dst.is_overflowing());
+        src.remove_at(last, cell_size);
+    }
+}
+
+auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Index overflow_index, Scratch scratch) -> Cell
+{
+    transfer_cells_right_while(Ln, rn, [overflow_index](const Node &src, const Node &, Index) {
+        return src.cell_count() > overflow_index;
+    });
+
+    if (overflow.is_attached())
+        overflow.detach(scratch, true);
+    overflow.set_is_external(false);
+    overflow.set_left_child_id(Ln.id());
+    return overflow;
+}
+
+auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Index overflow_index, Scratch scratch) -> Cell
+{
+    // Note that we need to insert the overflow cell into either Ln or rn no matter what, even if it ends up being the separator.
+    transfer_cells_right_while(Ln, rn, [&overflow, overflow_index](const Node &src, const Node &, Index counter) {
+        const auto goes_in_src = src.cell_count() > overflow_index;
+        const auto has_no_room = src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
+        return !counter || (goes_in_src && has_no_room);
+    });
+
+    if (Ln.cell_count() > overflow_index) {
+        Ln.insert_at(overflow_index, overflow);
+        CCO_EXPECT_FALSE(Ln.is_overflowing());
+    } else {
+        rn.insert_at(0, overflow);
+        CCO_EXPECT_FALSE(rn.is_overflowing());
+    }
+    auto separator = rn.read_cell(0);
+    separator.detach(scratch, true);
+    separator.set_left_child_id(Ln.id());
+    return separator;
 }
 
 auto split_external_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
-    // Include the overflow cell in our count.
-    const auto n = Ln.cell_count() + 1;
-
     // Figure out where the overflow cell should go.
     const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
     CCO_EXPECT_FALSE(should_be_false);
-    auto where = ThreeWayComparison::EQ;
-    auto median_index = n / 2;
 
-    const auto create_median = [&](Index index) {
-        if (index == median_index) {
-            auto median = make_internal_cell(overflow.key(), Ln.size());
-            median.detach(std::move(scratch), Ln.is_external());
-            return median;
-        } else {
-            const auto is_right_of_median = index > median_index;
-            median_index -= !is_right_of_median;
-            // Since `is_left_of_median` is either 0 or 1, this will produce either -1 or 1, i.e. LT or
-            // GT to indicate the position of the overflow cell relative to the median.
-            where = static_cast<ThreeWayComparison>(2*is_right_of_median - 1);
-            auto median = Ln.read_cell(median_index);
-            median.detach(std::move(scratch), Ln.is_external());
-            return median;
-        }
-    };
-    auto median = create_median(overflow_idx);
+    // Warning: We don't have access to the former right sibling of Ln, but we need to set its left child ID.
+    //          We need to make sure to do that in the caller.
     rn.set_right_sibling_id(Ln.right_sibling_id());
     Ln.set_right_sibling_id(rn.id());
     rn.set_left_sibling_id(Ln.id());
-    // Warning: We don't have access to the former right sibling of Ln, but we need to set its left child ID.
-    //          We need to make sure to do that in the caller.
     rn.set_parent_id(Ln.parent_id());
-    median.set_left_child_id(Ln.id());
 
-    // Transfer cells after the median cell to the right sibling node.
-    const auto cell_count = Ln.cell_count();
-    for (auto index = median_index; index < cell_count; ++index) {
-        auto cell = Ln.read_cell(median_index);
-        const auto cell_size = cell.size();
-        rn.insert_at(rn.cell_count(), std::move(cell));
-        Ln.remove_at(median_index, cell_size);
+    if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
+        auto separator = split_non_root_fast_external(Ln, rn, overflow, overflow_idx, scratch);
+
+        return separator;
+    } else if (overflow_idx == 0) {
+        // We need the `!counter` because the condition following it may not be true if we got here from split_root().
+        transfer_cells_right_while(Ln, rn, [&overflow](const Node &src, const Node &, Index counter) {
+            return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
+        });
+        Ln.insert_at(0, overflow);
+        CCO_EXPECT_FALSE(Ln.is_overflowing());
+
+    } else if (overflow_idx == Ln.cell_count()) {
+        // Just transfer a single cell in this case. This should reduce the number of splits during a sequential write, which seems to be
+        // a common use case. If we want to change this behavior, we just need to make sure that rn still has room for the overflow cell.
+        transfer_cells_right_while(Ln, rn, [](const Node &, const Node &, Index counter) {
+            return !counter;
+        });
+        rn.insert_at(rn.cell_count(), overflow);
+        CCO_EXPECT_FALSE(rn.is_overflowing());
     }
-    const auto do_transfer = [](Node &target, Cell cell) {
-        const auto [index, found_eq]{target.find_ge(cell.key())};
-        CCO_EXPECT_FALSE(found_eq);
-        target.insert_at(index, std::move(cell));
-    };
-    if (where == ThreeWayComparison::LT) {
-        do_transfer(Ln, std::move(overflow));
-    } else {
-        do_transfer(rn, std::move(overflow));
-    }
-    return median;
+
+    auto separator = rn.detach_cell(0, scratch);
+    separator.set_is_external(false);
+    separator.set_left_child_id(Ln.id());
+    return separator;
 }
 
 auto split_internal_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
-    // Include the overflow cell in our count.
-    const auto n = Ln.cell_count() + 1;
-
     // Figure out where the overflow cell should go.
-    const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
-    CCO_EXPECT_FALSE(should_be_false);
-    auto where = ThreeWayComparison::EQ;
-    auto median_index = n / 2;
+    const auto [overflow_idx, falsy] = Ln.find_ge(overflow.key());
+    CCO_EXPECT_FALSE(falsy);
 
-    const auto create_median = [&](Index index) {
-        if (index == median_index) {
-            return std::move(overflow);
-        } else {
-            const auto is_right_of_median = index > median_index;
-            median_index -= !is_right_of_median;
-            // Since `is_left_of_median` is either 0 or 1, this will produce either -1 or 1, i.e. LT or
-            // GT to indicate the position of the overflow cell relative to the median.
-            where = static_cast<ThreeWayComparison>(2*is_right_of_median - 1);
-            return Ln.extract_cell(median_index, std::move(scratch));
-        }
-    };
-    auto median = create_median(overflow_idx);
     rn.set_rightmost_child_id(Ln.rightmost_child_id());
-    Ln.set_rightmost_child_id(median.left_child_id());
     rn.set_parent_id(Ln.parent_id());
-    median.set_left_child_id(Ln.id());
 
-    // Transfer cells after the median cell to the right sibling node.
-    const auto cell_count = Ln.cell_count();
-    for (auto index = median_index; index < cell_count; ++index) {
-        auto cell = Ln.read_cell(median_index);
-        const auto cell_size = cell.size();
-        rn.insert_at(rn.cell_count(), std::move(cell));
-        Ln.remove_at(median_index, cell_size);
+    if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
+        Ln.set_rightmost_child_id(overflow.left_child_id());
+        return split_non_root_fast_internal(Ln, rn, overflow, overflow_idx, scratch);
+
+    // TODO: Split the other way in this case, as we are possibly inserting reverse sequentially?
+    } else if (overflow_idx == 0) {
+        transfer_cells_right_while(Ln, rn, [&overflow](const Node &src, const Node &, Index counter) {
+            return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
+        });
+        Ln.insert_at(0, overflow);
+        CCO_EXPECT_FALSE(Ln.is_overflowing());
+
+    } else if (overflow_idx == Ln.cell_count()) {
+        // Just transfer a single cell in this case. This should reduce the number of splits during a sequential write, which seems to be
+        // a common use case. If we want to change this behavior, we just need to make sure that rn still has room for the overflow cell.
+        transfer_cells_right_while(Ln, rn, [](const Node &, const Node &, Index counter) {
+            return !counter;
+        });
+        rn.insert_at(rn.cell_count(), overflow);
+        CCO_EXPECT_FALSE(rn.is_overflowing());
     }
-    const auto do_transfer = [](Node &target, Cell cell) {
-        const auto [index, found_eq] = target.find_ge(cell.key());
-        CCO_EXPECT_FALSE(found_eq);
-        target.insert_at(index, std::move(cell));
-    };
-    if (where == ThreeWayComparison::LT) {
-        do_transfer(Ln, std::move(overflow));
-    } else if (where == ThreeWayComparison::GT) {
-        do_transfer(rn, std::move(overflow));
-    }
-    return median;
+
+    auto separator = Ln.extract_cell(Ln.cell_count() - 1, scratch);
+    Ln.set_rightmost_child_id(separator.left_child_id());
+    separator.set_left_child_id(Ln.id());
+    return separator;
 }
 
 auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell

@@ -21,7 +21,7 @@ auto Internal::collect_value(const Node &node, Index index) const -> Result<std:
     auto out = stob(result);
 
     // Note that it is possible to have no value stored locally but have an overflow page. The happens when
-    // the key is of maximal length (i.e. get_max_local(m_header->page_size())).
+    // the key is of maximal length (i.e. m_maximum_key_size).
     if (!local.is_empty())
         mem_copy(out, local, local.size());
 
@@ -51,23 +51,91 @@ auto Internal::find_external(BytesView key, bool is_writable) -> Result<FindResu
             break;
         result.index += result.found_eq;
         CCO_TRY(m_pool->release(std::move(*node)));
-        node = m_pool->acquire(node->child_id(result.index), is_writable);
+        node = m_pool->acquire(node->child_id(result.index), false);
         if (!node.has_value())
             return Err {node.error()};
     }
     const auto [index, found_eq] = result;
+    if (is_writable) {
+        const auto id = node->id();
+        CCO_TRY(m_pool->release(std::move(*node)));
+        node = m_pool->acquire(id, true);
+    }
     return FindResult {std::move(*node), index, found_eq};
 }
 
+auto Internal::find_external_(BytesView key) -> Result<SearchResult_>
+{
+    auto node = find_root(false);
+    if (!node.has_value())
+        return Err {node.error()};
+
+    Node::FindGeResult result;
+    for (; ; ) {
+        result = node->find_ge(key);
+        if (node->is_external())
+            break;
+        result.index += result.found_eq;
+        CCO_TRY(m_pool->release(std::move(*node)));
+        node = m_pool->acquire(node->child_id(result.index), false);
+        if (!node.has_value())
+            return Err {node.error()};
+    }
+    const auto [index, found_eq] = result;
+    return SearchResult_ {node->id(), index, found_eq};
+}
+
+auto Internal::find_minimum() -> Result<SearchResult_>
+{
+    CCO_TRY_CREATE(node, m_pool->acquire(PID::root(), false));
+    auto id = node.id();
+
+    while (!node.is_external()) {
+        id = node.child_id(0);
+        CCO_TRY(m_pool->release(std::move(node)));
+        CCO_TRY_STORE(node, m_pool->acquire(id, false));
+    }
+    auto was_found = true;
+    if (node.cell_count() == 0) {
+        CCO_EXPECT_TRUE(id.is_root());
+        was_found = false;
+    }
+    CCO_TRY(m_pool->release(std::move(node)));
+    return SearchResult_ {id, 0, was_found};
+}
+
+auto Internal::find_maximum() -> Result<SearchResult_>
+{
+    CCO_TRY_CREATE(node, m_pool->acquire(PID::root(), false));
+    auto id = node.id();
+
+    while (!node.is_external()) {
+        CCO_EXPECT_GT(node.cell_count(), 0);
+        id = node.rightmost_child_id();
+        CCO_TRY(m_pool->release(std::move(node)));
+        CCO_TRY_STORE(node, m_pool->acquire(id, false));
+    }
+    auto was_found = true;
+    Index index {};
+
+    if (node.cell_count() == 0) {
+        CCO_EXPECT_TRUE(id.is_root());
+        was_found = false;
+    } else {
+        index = node.cell_count() - 1;
+    }
+    CCO_TRY(m_pool->release(std::move(node)));
+    return SearchResult_ {id, index, was_found};
+}
 
 auto Internal::positioned_insert(Position position, BytesView key, BytesView value) -> Result<void>
 {
-    CCO_EXPECT_LE(key.size(), get_max_local(m_pool->page_size()));
+    CCO_EXPECT_LE(key.size(), m_maximum_key_size);
     auto [node, index] = std::move(position);
     m_scratch.reset();
 
     CCO_TRY_CREATE(cell, make_cell(key, value, true));
-    node.insert_at(index, std::move(cell));
+    node.insert_at(index, cell);
     m_cell_count++;
 
     if (node.is_overflowing())
@@ -90,7 +158,7 @@ auto Internal::positioned_modify(Position position, BytesView value) -> Result<v
         CCO_TRY(m_pool->destroy_chain(old_cell.overflow_id(), old_cell.overflow_size()));
 
     node.remove_at(index, old_cell.size());
-    node.insert_at(index, std::move(new_cell));
+    node.insert_at(index, new_cell);
 
     if (node.is_overflowing())
         return balance_after_overflow(std::move(node));
@@ -207,8 +275,8 @@ auto Internal::split_non_root(Node node) -> Result<Node>
     CCO_TRY_CREATE(parent, m_pool->acquire(node.parent_id(), true));
     CCO_TRY_CREATE(sibling, m_pool->allocate(node.type()));
 
-    auto median = ::cco::split_non_root(node, sibling, m_scratch.get());
-    auto [index, found_eq] = parent.find_ge(median.key());
+    auto separator = ::cco::split_non_root(node, sibling, m_scratch.get());
+    auto [index, found_eq] = parent.find_ge(separator.key());
     CCO_EXPECT_FALSE(found_eq);
 
     if (node.is_external() && !sibling.right_sibling_id().is_null()) {
@@ -217,7 +285,7 @@ auto Internal::split_non_root(Node node) -> Result<Node>
         CCO_TRY(m_pool->release(std::move(right)));
     }
 
-    parent.insert_at(index, std::move(median));
+    parent.insert_at(index, separator);
     CCO_EXPECT_FALSE(node.is_overflowing());
     CCO_EXPECT_FALSE(sibling.is_overflowing());
 
@@ -449,9 +517,9 @@ auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Index ind
 
     // Parent might overflow.
     parent.remove_at(index, separator.size());
-    parent.insert_at(index, std::move(new_separator));
+    parent.insert_at(index, new_separator);
 
-    rc.insert_at(0, std::move(highest));
+    rc.insert_at(0, highest);
     CCO_EXPECT_FALSE(rc.is_overflowing());
     return {};
 }
@@ -470,13 +538,13 @@ auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Index inde
     child.set_parent_id(Lc.id());
     Lc.set_rightmost_child_id(child.id());
     CCO_TRY(m_pool->release(std::move(child)));
-    Lc.insert_at(Lc.cell_count(), std::move(separator));
+    Lc.insert_at(Lc.cell_count(), separator);
     CCO_EXPECT_FALSE(Lc.is_overflowing());
 
     auto lowest = rc.extract_cell(0, m_scratch.get());
     lowest.set_left_child_id(Lc.id());
     // Parent might overflow.
-    parent.insert_at(index, std::move(lowest));
+    parent.insert_at(index, lowest);
     return {};
 }
 
@@ -494,13 +562,13 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Index ind
     child.set_parent_id(rc.id());
     CCO_TRY(m_pool->release(std::move(child)));
     Lc.set_rightmost_child_id(Lc.child_id(Lc.cell_count() - 1));
-    rc.insert_at(0, std::move(separator));
+    rc.insert_at(0, separator);
     CCO_EXPECT_FALSE(rc.is_overflowing());
 
     auto highest = Lc.extract_cell(Lc.cell_count() - 1, m_scratch.get());
     highest.set_left_child_id(Lc.id());
     // The parent might overflow.
-    parent.insert_at(index, std::move(highest));
+    parent.insert_at(index, highest);
     return {};
 }
 

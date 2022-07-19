@@ -4,9 +4,10 @@
 #include "calico/options.h"
 #include "random.h"
 #include "unit_tests.h"
-#include "utils/expect.h"
 #include "utils/encoding.h"
+#include "utils/expect.h"
 #include "utils/identifier.h"
+#include "utils/layout.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
@@ -318,6 +319,20 @@ TEST(TestReferenceCount, MovingTokenDoesNotChangeCount)
     ASSERT_EQ(count.count(), 1);
     auto b = std::move(a);
     ASSERT_EQ(count.count(), 1);
+}
+
+TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
+{
+    const auto start = NodeLayout::header_offset(PID {2}) +
+                       NodeLayout::HEADER_SIZE +
+                       CELL_POINTER_SIZE;
+    Size page_size {MINIMUM_PAGE_SIZE};
+    while (page_size <= MAXIMUM_PAGE_SIZE) {
+        const auto max_local = get_max_local(page_size) + MAX_CELL_HEADER_SIZE;
+        ASSERT_LE(max_local * 4, page_size - start);
+        std::cout << page_size-start << " >= " << max_local*4 << '\n';
+        page_size <<= 1;
+    }
 }
 
 } // <anonymous>

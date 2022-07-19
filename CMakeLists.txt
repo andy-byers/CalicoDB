@@ -40,6 +40,7 @@ option(CCO_BUILD_TESTS "Build the tests" ${CCO_MAIN_PROJECT})
 option(CCO_BUILD_EXAMPLES "Build the examples" ${CCO_MAIN_PROJECT})
 option(CCO_BUILD_FUZZERS "Build the fuzz tests" Off)
 option(CCO_FUZZER_LINK_MAIN "Link each fuzzer with a main() for reproducing specific crashes" Off)
+set(CCO_FUZZER_LDFLAGS "" CACHE STRING "Linker flags for the fuzz targets")
 
 set(CCO_SOURCES '')
 set(CCO_HEADERS '')

@@ -97,7 +97,7 @@ auto BufferPool::flush() -> Result<void>
     if (!m_cache.is_empty()) {
         m_logger->info("trying to flush {} frames", m_cache.size());
 
-        while (!m_cache.is_empty()) {
+        for (; ; ) {
             CCO_TRY_CREATE(was_evicted, try_evict_frame());
             if (!was_evicted)
                 break;
@@ -221,6 +221,7 @@ auto BufferPool::do_release(page::Page &page) -> Result<void>
     // Appending a record to the WAL is the only thing that can fail in this method. If we already have an error,
     // we'll skip this step, so we cannot encounter another error.
     if (page.has_manager()) {
+        CCO_EXPECT_TRUE(m_use_xact);
         if (m_status.is_ok())
             return m_wal->append(page);
         m_wal->discard(page);
@@ -294,11 +295,11 @@ auto BufferPool::acquire(PID id, bool is_writable) -> Result<Page>
                 m_wal->track(page);
             return page;
         })
-        .or_else([is_writable, this](const Status &status) -> Result<Page> {
+        .or_else([this](const Status &status) -> Result<Page> {
             m_logger->error(status.what());
             // We should only enter the error state if data has been altered during this transaction. Otherwise, we
             // can just return from whatever operation we are in immediately (releasing resources as needed).
-            if (is_writable && has_updates())
+            if (has_updates())
                 m_status = status;
             return Err {status};
         });
