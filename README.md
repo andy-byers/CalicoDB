@@ -198,6 +198,11 @@ assert(not db.find_exact("not_found").is_valid());
 // it will modify its status (returned by cursor.status()) to contain information about the error.
 assert(db.find_exact("").status().is_invalid_argument());
 
+
+// If a cursor encounters an error at any point, it will also become invalidated. In this case,
+// it will modify its status (returned by cursor.status()) to contain information about the error.
+assert(db.find_exact("").status().is_invalid_argument());
+
 // find() returns a cursor on the first record that does not compare less than the given key.
 const auto prefix = key.copy().truncate(key.size() / 2);
 assert(db.find(prefix).key() == cursor.key());

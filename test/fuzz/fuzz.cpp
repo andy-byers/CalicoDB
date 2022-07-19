@@ -19,6 +19,7 @@ auto InstructionParser::parse(BytesView view) const -> std::optional<Parsed>
         opcode++;
     }
     opcode -= opcode == m_instructions.size();
+
     const auto opsize = m_instructions.at(opcode).num_segments;
     std::vector<BytesView> segments(opsize);
 
