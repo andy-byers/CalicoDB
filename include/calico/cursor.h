@@ -158,7 +158,7 @@ private:
         static constexpr Index CURRENT {1};
         static constexpr Index RIGHT {2};
 
-        [[nodiscard]] auto operator==(const Position &rhs) const -> bool;
+        auto operator==(const Position &rhs) const -> bool;
         [[nodiscard]] auto is_minimum() const -> bool;
         [[nodiscard]] auto is_maximum() const -> bool;
 
@@ -176,6 +176,7 @@ private:
     auto seek_left() -> bool;
     auto seek_right() -> bool;
     auto invalidate(const Status& = Status::not_found()) const -> void;
+    auto TEST_validate() const -> void;
 
     mutable Status m_status {Status::not_found()};
     NodePool *m_pool {}; ///< Reference to an object that provides nodes from the buffer pool.

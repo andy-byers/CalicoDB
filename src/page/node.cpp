@@ -1,6 +1,6 @@
 #include "node.h"
+#include <spdlog/fmt/fmt.h>
 #include "file_header.h"
-
 #include "utils/crc.h"
 #include "utils/layout.h"
 
@@ -423,22 +423,32 @@ auto Node::extract_cell(Index index, Scratch scratch) -> Cell
     return cell;
 }
 
-auto Node::validate() const -> void
+auto Node::TEST_validate() const -> void
 {
+    const auto label = fmt::format("node {}: ", m_page.id().value);
+
     // The usable space is the total of all the free blocks, fragments, and the gap space.
-    [[maybe_unused]] const auto usable_space = m_allocator.usable_space();
+    const auto usable_space = m_allocator.usable_space();
 
     // The used space is the total of the header, cell pointers list, and the cells.
-    [[maybe_unused]] auto used_space = cell_area_offset();
+    auto used_space = cell_area_offset();
     for (Index i {}; i < cell_count(); ++i) {
         const auto lhs = read_cell(i);
         used_space += lhs.size();
         if (i < cell_count() - 1) {
-            [[maybe_unused]] const auto rhs = read_cell(i + 1);
-            CCO_EXPECT_TRUE(lhs.key() < rhs.key());
+            const auto rhs = read_cell(i + 1);
+            if (lhs.key() >= rhs.key()) {
+                fmt::print("(1/2) {}: keys are out of order\n", label);
+                fmt::print("(2/2) {}: {} should be less than {}\n", label, btos(lhs.key()), btos(rhs.key()));
+                std::exit(EXIT_FAILURE);
+            }
         }
     }
-    CCO_EXPECT_EQ(used_space + usable_space, size());
+    if (used_space + usable_space != size()) {
+        fmt::print("(1/2) {}: memory is unaccounted for\n", label);
+        fmt::print("(2/2) {}: {} bytes were lost\n", label, int(size()) - int(used_space + usable_space));
+        std::exit(EXIT_FAILURE);
+    }
 }
 
 auto Node::find_ge(BytesView key) const -> FindGeResult
@@ -807,6 +817,7 @@ auto merge_root(Node &root, Node &child) -> void
     size = NodeLayout::HEADER_SIZE + child.cell_count() * CELL_POINTER_SIZE;
     root.page().write(child.page().view(child.header_offset()).truncate(size), offset);
     root.page().set_type(child.type());
+    root.page().set_lsn(child.page().lsn());
 }
 
 template<class Predicate>
@@ -887,7 +898,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
 
     } else if (overflow_idx == Ln.cell_count()) {
         // Just transfer a single cell in this case. This should reduce the number of splits during a sequential write, which seems to be
-        // a common use case. If we want to change this behavior, we just need to make sure that rn still has room for the overflow cell.
+        // a common use case.
         transfer_cells_right_while(Ln, rn, [](const Node &, const Node &, Index counter) {
             return !counter;
         });
@@ -916,8 +927,8 @@ auto split_internal_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
         Ln.set_rightmost_child_id(overflow.left_child_id());
         return split_non_root_fast_internal(Ln, rn, overflow, overflow_idx, scratch);
 
-    // TODO: Split the other way in this case, as we are possibly inserting reverse sequentially?
     } else if (overflow_idx == 0) {
+        // TODO: Split the other way in this case, as we are possibly inserting reverse sequentially?
         transfer_cells_right_while(Ln, rn, [&overflow](const Node &src, const Node &, Index counter) {
             return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
         });
@@ -959,4 +970,4 @@ auto get_file_header_writer(Node &node) -> FileHeaderWriter
     return get_file_header_writer(node.page());
 }
 
-} // cco::page
+} // namespace cco::page

@@ -7,9 +7,8 @@ namespace cco {
 
 static auto maybe_emit_read_error(Random &random, FaultControls::Controls &controls) -> Result<void>
 {
-    // If the counter is positive, we tick down until we hit 0, at which point we throw an exception.
-    // Afterward, further reads will be subject to the normal read fault rate mechanism. If the counter
-    // is never set, it stays at -1 and doesn't contribute to the faults generated.
+    // Once the counter reaches 0, we return an error. Additional calls will also return errors, until
+    // the read fault counter is reset to -1.
     auto &counter = controls.read_fault_counter;
     if (!counter || random.next_int(99U) < controls.read_fault_rate)
         return Err {Status::system_error(std::make_error_code(std::errc::io_error).message())};
@@ -87,7 +86,7 @@ auto do_read(const std::string &memory, Index cursor, Bytes out)
 
 static auto do_write(std::string &memory, Index cursor, BytesView in)
 {
-    if (const auto write_end = in.size() + cursor; memory.size() < write_end)
+    if (const auto write_end = cursor + in.size(); memory.size() < write_end)
         memory.resize(write_end);
     utils::mem_copy(stob(memory).range(cursor), in);
     return IOResult {cursor + in.size(), in.size()};
@@ -169,7 +168,8 @@ auto FakeFile::write(BytesView in) -> Result<Size>
 {
     if (const auto result = maybe_emit_write_error(m_random, m_faults.controls()); !result)
         return Err {result.error()};
-
+    if (m_is_append)
+        m_cursor = m_memory.memory().size();
     const auto [cursor, write_size] = do_write(m_memory.memory(), m_cursor, in);
     m_cursor = cursor;
     return write_size;

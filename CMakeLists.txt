@@ -125,22 +125,20 @@ if(CCO_INSTALL)
 endif()
 
 if(CCO_BUILD_TESTS)
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    # TODO: Not entirely sure why, but the following line is needed to compile with clang. See https://github.com/google/benchmark/issues/1072
+    #       for more info.
+    set(BENCHMARK_ENABLE_EXCEPTIONS On)
+    set(BENCHMARK_ENABLE_TESTING Off)
+    set(gtest_force_shared_crt On CACHE BOOL "" FORCE)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG        release-1.11.0
     )
-    FetchContent_GetProperties(googletest)
-    if (NOT googletest_POPULATED)
-        FetchContent_Populate(googletest)
-        # Don't install GTest if we are installing Calico DB.
-        option(INSTALL_GTEST Off)
-        add_subdirectory("${googletest_SOURCE_DIR}" "${googletest_BINARY_DIR}")
-    endif()
+    FetchContent_MakeAvailable(googletest)
+
     include(GoogleTest)
     include(CTest)
     enable_testing()
-
     add_subdirectory(${CCO_TEST_DIR})
 endif()

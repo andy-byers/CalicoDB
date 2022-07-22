@@ -1,4 +1,5 @@
 #include "calico/cursor.h"
+#include <spdlog/fmt/fmt.h>
 #include "pool/interface.h"
 #include "tree/internal.h"
 #include "tree/node_pool.h"
@@ -230,6 +231,15 @@ auto Cursor::seek_right() -> bool
         move_to(std::move(*next), 0);
     }
     return true;
+}
+
+auto Cursor::TEST_validate() const -> void
+{
+    if (!is_valid())
+        return;
+
+    auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
+    node->TEST_validate();
 }
 
 auto Cursor::Position::operator==(const Position &rhs) const -> bool

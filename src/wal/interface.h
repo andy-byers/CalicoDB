@@ -1,17 +1,15 @@
 #ifndef CCO_WAL_INTERFACE_H
 #define CCO_WAL_INTERFACE_H
 
-#include "calico/status.h"
-#include "page/file_header.h"
-#include "utils/identifier.h"
-#include "utils/result.h"
 #include <optional>
+#include "wal_record.h"
+#include "page/file_header.h"
+#include "utils/result.h"
 
 namespace cco {
 
 class IBufferPool;
 class IDirectory;
-class WALRecord;
 
 namespace page {
     class Page;
@@ -29,6 +27,12 @@ struct WALParameters {
 
 class IWALManager {
 public:
+    struct Position {
+        Index block_id {};
+        Index offset {};
+    };
+
+
     virtual ~IWALManager() = default;
     [[nodiscard]] virtual auto has_records() const -> bool = 0;
     [[nodiscard]] virtual auto flushed_lsn() const -> LSN = 0;
@@ -47,12 +51,13 @@ public:
 
 class IWALWriter {
 public:
+    using Position = IWALManager::Position;
     virtual ~IWALWriter() = default;
     [[nodiscard]] virtual auto flushed_lsn() const -> LSN = 0;
     [[nodiscard]] virtual auto last_lsn() const -> LSN = 0;
     [[nodiscard]] virtual auto has_pending() const -> bool = 0;
     [[nodiscard]] virtual auto has_committed() const -> bool = 0;
-    [[nodiscard]] virtual auto append(WALRecord) -> Result<void> = 0;
+    [[nodiscard]] virtual auto append(WALRecord) -> Result<Position> = 0;
     [[nodiscard]] virtual auto truncate() -> Result<void> = 0;
     [[nodiscard]] virtual auto flush() -> Result<void> = 0;
     [[nodiscard]] virtual auto close() -> Result<void> = 0;
@@ -61,12 +66,11 @@ public:
 
 class IWALReader {
 public:
+    using Position = IWALManager::Position;
     virtual ~IWALReader() = default;
-    [[nodiscard]] virtual auto record() const -> std::optional<WALRecord> = 0;
-    [[nodiscard]] virtual auto increment() -> Result<bool> = 0;
-    [[nodiscard]] virtual auto decrement() -> Result<bool> = 0;
-    [[nodiscard]] virtual auto reset() -> Result<void> = 0;
+    [[nodiscard]] virtual auto read(Position&) -> Result<WALRecord> = 0;
     [[nodiscard]] virtual auto close() -> Result<void> = 0;
+    virtual auto reset() -> void = 0;
 };
 
 } // cco

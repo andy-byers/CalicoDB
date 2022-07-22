@@ -27,12 +27,18 @@ auto main(int argc, char **argv) -> int
        logger->info("Running \"{}\" ({} B)", file.path(), buffer.size());
        LLVMFuzzerTestOneInput(data, buffer.size());
    };
+   Size num_passed {};
    for (Index index {1}; index < static_cast<Index>(argc); index++) {
        const std::string path {argv[index]};
        File file;
-       CCO_EXPECT_TRUE(file.open(path, Mode::READ_ONLY, 0666).has_value());
-       run(std::move(file));
-       logger->info("Pass: \"{}\"", path);
+       const auto result = file.open(path, Mode::READ_ONLY, 0666);
+       if (result.has_value()) {
+           run(file);
+           num_passed++;
+           logger->info("Pass: \"{}\"", path);
+       } else {
+           logger->info("Cannot open file \"{}\"", path);
+       }
    }
-   logger->info("Finished: Passed {} tests", argc - 1);
+   logger->info("Finished: Passed {}/{} tests", num_passed, argc - 1);
 }

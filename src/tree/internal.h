@@ -16,16 +16,10 @@ public:
         Index index {};
     };
 
-    struct SearchResult_ {
+    struct SearchResult {
         PID id;
         Index index {};
         bool was_found {};
-    };
-
-    struct FindResult {
-        page::Node node;
-        Index index {};
-        bool flag {};
     };
 
     struct Parameters {
@@ -36,13 +30,10 @@ public:
     explicit Internal(Parameters);
     ~Internal() = default;
     [[nodiscard]] auto collect_value(const page::Node&, Index) const -> Result<std::string>;
-    [[nodiscard]] auto find_external_(BytesView) -> Result<SearchResult_>;
-    [[nodiscard]] auto find_minimum() -> Result<SearchResult_>;
-    [[nodiscard]] auto find_maximum() -> Result<SearchResult_>;
+    [[nodiscard]] auto find_external(BytesView) -> Result<SearchResult>;
+    [[nodiscard]] auto find_minimum() -> Result<SearchResult>;
+    [[nodiscard]] auto find_maximum() -> Result<SearchResult>;
     [[nodiscard]] auto find_root(bool) -> Result<page::Node>;
-    [[nodiscard]] auto find_external(BytesView, bool) -> Result<FindResult>;
-    [[nodiscard]] auto find_local_min(page::Node) -> Result<Position>;
-    [[nodiscard]] auto find_local_max(page::Node) -> Result<Position>;
     [[nodiscard]] auto make_cell(BytesView, BytesView, bool) -> Result<page::Cell>;
     [[nodiscard]] auto positioned_insert(Position, BytesView, BytesView) -> Result<void>;
     [[nodiscard]] auto positioned_modify(Position, BytesView) -> Result<void>;

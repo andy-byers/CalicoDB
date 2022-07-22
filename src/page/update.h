@@ -33,6 +33,11 @@ public:
     [[nodiscard]] auto collect() -> std::vector<ChangedRegion>;
     auto push(Range) -> void;
 
+    [[nodiscard]] auto has_updates() -> bool
+    {
+        return !m_ranges.empty();
+    }
+
 private:
     std::vector<Range> m_ranges;
     BytesView m_snapshot;

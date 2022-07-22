@@ -10,6 +10,7 @@ namespace cco {
 
 class Internal;
 class NodePool;
+struct PID;
 
 namespace page {
     class Cell;
@@ -39,6 +40,7 @@ public:
     [[nodiscard]] virtual auto allocate_root() -> Result<page::Node> = 0;
     virtual auto save_header(page::FileHeaderWriter&) const -> void = 0;
     virtual auto load_header(const page::FileHeaderReader&) -> void = 0;
+    virtual auto TEST_validate_node(PID) -> void = 0;
 };
 
 } // cco

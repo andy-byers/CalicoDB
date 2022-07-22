@@ -55,7 +55,7 @@ auto Tree::insert(BytesView key, BytesView value) -> Result<bool>
     if (const auto r = run_key_check(key, m_internal.maximum_key_size(), *m_logger, "cannot write record"); !r.is_ok())
         return Err {r};
 
-    CCO_TRY_CREATE(search_result, m_internal.find_external_(key));
+    CCO_TRY_CREATE(search_result, m_internal.find_external(key));
     auto [id, index, found_eq] = search_result;
     CCO_TRY_CREATE(node, m_pool.acquire(id, true));
 
@@ -80,16 +80,18 @@ auto Tree::erase(Cursor cursor) -> Result<bool>
     return false;
 }
 
-auto Tree::find_aux(BytesView key) -> Result<Internal::FindResult>
+auto Tree::find_aux(BytesView key) -> Result<SearchResult>
 {
     if (const auto r = run_key_check(key, m_internal.maximum_key_size(), *m_logger, "cannot write record"); !r.is_ok())
         return Err {r};
 
-    CCO_TRY_CREATE(find_result, m_internal.find_external_(key));
+    CCO_TRY_CREATE(find_result, m_internal.find_external(key));
     auto [id, index, found_exact] = find_result;
     CCO_TRY_CREATE(node, m_pool.acquire(id, false));
 
-    if (index == node.cell_count() && !node.right_sibling_id().is_null()) {
+    // TODO: We shouldn't even need to check the cell count here. Instead, we should make sure all the pointers are updated.
+    //       There shouldn't be a right sibling ID, i.e. it should be 0, if the cell count is 0.
+    if (m_internal.cell_count() && index == node.cell_count() && !node.right_sibling_id().is_null()) {
         CCO_EXPECT_FALSE(found_exact);
         id = node.right_sibling_id();
         CCO_TRY(m_pool.release(std::move(node)));
@@ -97,7 +99,7 @@ auto Tree::find_aux(BytesView key) -> Result<Internal::FindResult>
         node = std::move(next);
         index = 0;
     }
-    return Internal::FindResult {std::move(node), index, found_exact};
+    return SearchResult {std::move(node), index, found_exact};
 }
 
 auto Tree::find_exact(BytesView key) -> Cursor
@@ -106,7 +108,7 @@ auto Tree::find_exact(BytesView key) -> Cursor
     auto result = find_aux(key);
     if (!result.has_value()) {
         cursor.invalidate(result.error());
-    } else if (result->flag) {
+    } else if (result->was_found) {
         auto [node, index, found_exact] = std::move(*result);
         CCO_EXPECT_TRUE(found_exact);
         cursor.move_to(std::move(node), index);
@@ -187,6 +189,18 @@ auto Tree::save_header(FileHeaderWriter &header) const -> void
 auto Tree::load_header(const FileHeaderReader &header) -> void
 {
     m_internal.load_header(header);
+}
+
+auto Tree::TEST_validate_node(PID id) -> void
+{
+    auto result = m_pool.acquire(id, false);
+    if (!result.has_value()) {
+        fmt::print("(1/2) tree: cannot acquire node {}", id.value);
+        fmt::print("(2/2) tree: (reason) {}", result.error().what());
+        std::exit(EXIT_FAILURE);
+    }
+    auto node = std::move(*result);
+    node.TEST_validate();
 }
 
 } // cco

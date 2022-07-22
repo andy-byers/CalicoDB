@@ -11,7 +11,6 @@
 #include <stack>
 #include <spdlog/logger.h>
 #include "interface.h"
-#include "wal_record.h"
 
 namespace cco {
 
@@ -19,37 +18,42 @@ class IDirectory;
 class IFile;
 struct LSN;
 
-/**
-* A cursor-like object for traversing the WAL storage.
-*/
 class WALReader: public IWALReader {
 public:
-   ~WALReader() override = default;
+    ~WALReader() override = default;
     [[nodiscard]] static auto open(const WALParameters&) -> Result<std::unique_ptr<IWALReader>>;
+    [[nodiscard]] auto read(Position&) -> Result<WALRecord> override;
     [[nodiscard]] auto close() -> Result<void> override;
-    [[nodiscard]] auto record() const -> std::optional<WALRecord> override;
-    auto increment() -> Result<bool> override;
-    auto decrement() -> Result<bool> override;
-    auto reset() -> Result<void> override;
+    auto reset() -> void override;
 
 private:
     WALReader(std::unique_ptr<IFile>, WALParameters);
-    auto read_block() -> Result<bool>;
-    auto read_record() -> Result<std::optional<WALRecord>>;
-    auto read_record_aux(Index) -> Result<std::optional<WALRecord>>;
-    auto read_next() -> Result<std::optional<WALRecord>>;
-    auto read_previous() -> Result<std::optional<WALRecord>>;
-    auto push_position() -> void;
-    auto pop_position_and_seek() -> Result<void>;
+    [[nodiscard]] auto read_block(Index) -> Result<bool>;
+    [[nodiscard]] auto read_record(Index) -> Result<WALRecord>;
 
-    std::vector<Index> m_positions;
     std::string m_block;
     std::unique_ptr<IFile> m_file;
-    std::optional<WALRecord> m_record;
     Index m_block_id {};
-    Index m_cursor {};
     bool m_has_block {};
-    bool m_incremented {};
+};
+
+class WALExplorer final {
+public:
+    using Position = IWALReader::Position;
+
+    struct Discovery {
+        WALRecord record;
+        Position position;
+    };
+
+    ~WALExplorer() = default;
+    explicit WALExplorer(IWALReader&);
+    [[nodiscard]] auto read_next() -> Result<Discovery>;
+    auto reset() -> void;
+
+private:
+    Position m_position;
+    IWALReader *m_reader {};
 };
 
 } // cco

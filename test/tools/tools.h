@@ -245,6 +245,7 @@ public:
 
     auto validate_record(const WALRecord &record, LSN target_lsn) const -> void
     {
+        (void)record;
         CCO_EXPECT_EQ(record.lsn(), target_lsn);
         const auto payload = retrieve_payload(target_lsn);
         CCO_EXPECT_EQ(record.type(), WALRecord::Type::FULL);

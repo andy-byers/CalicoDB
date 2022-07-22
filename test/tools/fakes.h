@@ -239,6 +239,7 @@ public:
         m_path = path;
         m_permissions = permissions;
         m_mode = mode;
+        m_is_append = int(mode) & int(Mode::APPEND);
         return {};
     }
 
@@ -276,6 +277,7 @@ private:
     Index m_cursor {};
     int m_permissions {};
     Mode m_mode {};
+    bool m_is_append {};
     bool m_is_open {};
 };
 

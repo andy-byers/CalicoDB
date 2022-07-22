@@ -15,6 +15,7 @@
 #include "pool/buffer_pool.h"
 #include "random.h"
 #include "tools.h"
+#include "utils/layout.h"
 
 namespace {
 
@@ -130,15 +131,16 @@ TEST_F(WALReaderWriterTests, MultipleMerges)
 
 TEST_F(WALReaderWriterTests, EmptyFileBehavior)
 {
-    ASSERT_EQ(reader->record(), std::nullopt);
-    ASSERT_FALSE(reader->decrement().value());
-    ASSERT_FALSE(reader->increment().value());
+    WALReader::Position start;
+    ASSERT_TRUE(reader->read(start).error().is_not_found());
 }
 
 TEST_F(WALReaderWriterTests, WritesRecordCorrectly)
 {
     WALRecordGenerator generator {PAGE_SIZE};
-    ASSERT_TRUE(writer->append(generator.generate_small()));
+    const auto position = writer->append(generator.generate_small());
+    ASSERT_TRUE(position.has_value());
+    ASSERT_TRUE(position->block_id == 0 and position->offset == 0);
     ASSERT_TRUE(writer->flush());
 
     const auto &memory = backing.memory();
@@ -160,22 +162,49 @@ TEST_F(WALReaderWriterTests, FlushedLSNReflectsLastFullRecord)
     ASSERT_TRUE(writer->flush());
     ASSERT_EQ(writer->flushed_lsn(), lsn);
 }
+//
+//auto setup_read_fault_test(WALReaderWriterTests &test, WALRecordGenerator &generator, Size n)
+//{
+//    Random random {0};
+//
+//    for (Index i {}; i < n; ++i)
+//        ASSERT_TRUE(test.writer->append(generator.generate(random.next_int(1UL, 500UL), 10)));
+//
+//    ASSERT_TRUE(test.writer->flush());
+//}
+//
+//template<class Callable>
+//auto call_until_error(Callable &&callable) -> Result<bool>
+//{
+//    static constexpr auto limit = 100'000;
+//    for (Index i {}; i < limit; ++i) {
+//        auto result = callable();
+//        if (!result.has_value() || !result.value())
+//            return result;
+//    }
+//    ADD_FAILURE() << "call limit (" << limit << ") exceeded";
+//    return {};
+//}
 
 auto test_writes_then_reads(WALReaderWriterTests &test, const std::vector<Size> &sizes) -> void
 {
     WALRecordGenerator generator {WALReaderWriterTests::PAGE_SIZE};
+    std::vector<IWALManager::Position> positions;
+    positions.reserve(sizes.size());
 
-    for (auto size: sizes)
-        ASSERT_TRUE(test.writer->append(generator.generate(size, 10)));
+    for (auto size: sizes) {
+        auto position = test.writer->append(generator.generate(size, std::min(16UL, size)));
+        ASSERT_TRUE(position.has_value());
+        positions.emplace_back(*position);
+    }
     ASSERT_TRUE(test.writer->flush());
-    ASSERT_TRUE(test.reader->reset());
 
     auto lsn = LSN::base();
-    std::for_each(sizes.begin(), sizes.end(), [&generator, &lsn, &test](Size) {
-        ASSERT_NE(test.reader->record(), std::nullopt);
-        generator.validate_record(*test.reader->record(), LSN {lsn.value++});
-        ASSERT_TRUE(test.reader->increment().has_value());
-    });
+    for (auto position: positions) {
+        auto record = test.reader->read(position);
+        ASSERT_TRUE(record.has_value());
+        generator.validate_record(*record, LSN {lsn.value++});
+    }
 }
 
 TEST_F(WALReaderWriterTests, SingleSmallRecord)
@@ -185,7 +214,7 @@ TEST_F(WALReaderWriterTests, SingleSmallRecord)
 
 TEST_F(WALReaderWriterTests, MultipleSmallRecords)
 {
-    test_writes_then_reads(*this, {1, 2, 3, 4, 5});
+    test_writes_then_reads(*this, {1, 2, 1, 2, 1});
 }
 
 TEST_F(WALReaderWriterTests, LargeRecord)
@@ -198,108 +227,64 @@ TEST_F(WALReaderWriterTests, MultipleLargeRecords)
     test_writes_then_reads(*this, {0x400, 0x800, 0x1000, 0x1400, 0x1800});
 }
 
-TEST_F(WALReaderWriterTests, CursorStopsAtLastRecord)
+TEST_F(WALReaderWriterTests, ExplorerStopsAtLastRecord)
 {
     WALRecordGenerator generator {PAGE_SIZE};
+    WALExplorer explorer {*reader};
     ASSERT_TRUE(writer->append(generator.generate_small()));
     ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->flush());
-
-    ASSERT_TRUE(reader->reset());
-    generator.validate_record(*reader->record(), LSN {1});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {2});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {3});
-    ASSERT_FALSE(reader->increment().value());
-}
-
-TEST_F(WALReaderWriterTests, TraversesIncompleteBlocks)
-{
-    WALRecordGenerator generator {PAGE_SIZE};
-
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->flush());
-
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->flush());
-
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->flush());
-
-    ASSERT_TRUE(reader->reset());
-    generator.validate_record(*reader->record(), LSN {1});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {2});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {3});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {4});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {5});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {6});
-    ASSERT_FALSE(reader->increment().value());
-}
-
-TEST_F(WALReaderWriterTests, TraverseBackwardWithinBlock)
-{
-    WALRecordGenerator generator {PAGE_SIZE};
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->append(generator.generate_small()));
-    ASSERT_TRUE(writer->flush());
-
-    ASSERT_TRUE(reader->reset());
-    generator.validate_record(*reader->record(), LSN {1});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {2});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {3});
-    ASSERT_FALSE(reader->increment().value());
-
-    generator.validate_record(*reader->record(), LSN {3});
-    ASSERT_TRUE(reader->decrement().value());
-
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {3});
-    ASSERT_TRUE(reader->decrement().value());
-
-    generator.validate_record(*reader->record(), LSN {2});
-    ASSERT_TRUE(reader->decrement().value());
-    generator.validate_record(*reader->record(), LSN {1});
-    ASSERT_FALSE(reader->decrement().value());
-}
-
-TEST_F(WALReaderWriterTests, TraverseBackwardBetweenBlocks)
-{
-    WALRecordGenerator generator {PAGE_SIZE};
-    ASSERT_TRUE(writer->append(generator.generate_large()));
-    ASSERT_TRUE(writer->append(generator.generate_large()));
     ASSERT_TRUE(writer->append(generator.generate_large()));
     ASSERT_TRUE(writer->flush());
 
-    ASSERT_TRUE(reader->reset());
-    generator.validate_record(*reader->record(), LSN {1});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {2});
-    ASSERT_TRUE(reader->increment().value());
-    generator.validate_record(*reader->record(), LSN {3});
-    ASSERT_FALSE(reader->increment().value());
-
-    generator.validate_record(*reader->record(), LSN {3});
-    ASSERT_TRUE(reader->decrement().value());
-    generator.validate_record(*reader->record(), LSN {2});
-    ASSERT_TRUE(reader->decrement().value());
-    generator.validate_record(*reader->record(), LSN {1});
-    ASSERT_FALSE(reader->decrement().value());
+    auto next = explorer.read_next().value();
+    generator.validate_record(next.record, LSN {1});
+    next = explorer.read_next().value();
+    generator.validate_record(next.record, LSN {2});
+    next = explorer.read_next().value();
+    generator.validate_record(next.record, LSN {3});
+    ASSERT_TRUE(explorer.read_next().error().is_not_found());
 }
 
-template<class Test> auto test_write_records_and_traverse(Test &test, Size num_records, double large_fraction, double flush_fraction) -> void
+TEST_F(WALReaderWriterTests, ExploresIncompleteBlocks)
+{
+    WALRecordGenerator generator {PAGE_SIZE};
+
+    ASSERT_TRUE(writer->append(generator.generate_small()));
+    ASSERT_TRUE(writer->flush());
+
+    ASSERT_TRUE(writer->append(generator.generate_small()));
+    ASSERT_TRUE(writer->append(generator.generate_small()));
+    ASSERT_TRUE(writer->flush());
+
+    ASSERT_TRUE(writer->append(generator.generate_small()));
+    ASSERT_TRUE(writer->append(generator.generate_small()));
+    ASSERT_TRUE(writer->append(generator.generate_small()));
+    ASSERT_TRUE(writer->flush());
+
+    WALExplorer explorer {*reader};
+    auto next = explorer.read_next();
+    ASSERT_TRUE(next);
+    generator.validate_record(next->record, LSN {1});
+    next = explorer.read_next();
+    ASSERT_TRUE(next);
+    generator.validate_record(next->record, LSN {2});
+    next = explorer.read_next();
+    ASSERT_TRUE(next);
+    generator.validate_record(next->record, LSN {3});
+    next = explorer.read_next();
+    ASSERT_TRUE(next);
+    generator.validate_record(next->record, LSN {4});
+    next = explorer.read_next();
+    ASSERT_TRUE(next);
+    generator.validate_record(next->record, LSN {5});
+    next = explorer.read_next();
+    ASSERT_TRUE(next);
+    generator.validate_record(next->record, LSN {6});
+    ASSERT_FALSE(explorer.read_next());
+}
+
+template<class Test> 
+auto test_write_records_and_explore(Test &test, Size num_records, double large_fraction, double flush_fraction) -> void
 {
     WALRecordGenerator generator {WALReaderWriterTests::PAGE_SIZE};
 
@@ -317,53 +302,45 @@ template<class Test> auto test_write_records_and_traverse(Test &test, Size num_r
             ASSERT_TRUE(test.writer->flush());
         }
     }
-    ASSERT_TRUE(test.reader->reset());
+    WALExplorer explorer {*test.reader};
 
-    // Read forward.
     for (Index i {}; i < num_records; ++i) {
-        ASSERT_NE(test.reader->record(), std::nullopt) << "record " << i << " does not exist";
-        ASSERT_TRUE(test.reader->record()->is_consistent()) << "record " << i << " is corrupted";
-        generator.validate_record(*test.reader->record(), LSN {i + ROOT_ID_VALUE});
-        ASSERT_EQ(test.reader->increment().value(), i < num_records - 1);
+        auto next = explorer.read_next();
+        ASSERT_TRUE(next) << "record " << i << " does not exist";
+        ASSERT_TRUE(next->record.is_consistent()) << "record " << i << " is corrupted";
+        generator.validate_record(next->record, LSN {i + ROOT_ID_VALUE});
     }
-
-    // Read backward.
-    for (Index i {}; i < num_records - 1; ++i) {
-        ASSERT_TRUE(test.reader->decrement());
-        ASSERT_NE(test.reader->record(), std::nullopt);
-        ASSERT_TRUE(test.reader->record()->is_consistent());
-        generator.validate_record(*test.reader->record(), LSN {num_records - i - 1});
-    }
+    ASSERT_FALSE(explorer.read_next());
 }
 
 TEST_F(WALReaderWriterTests, WriteAndTraverseSmallRecordsInCompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 0.0, 0.0);
+    test_write_records_and_explore(*this, 250, 0.0, 0.0);
 }
 
 TEST_F(WALReaderWriterTests, WriteAndTraverseLargeRecordsInCompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 1.0, 0.0);
+    test_write_records_and_explore(*this, 250, 1.0, 0.0);
 }
 
 TEST_F(WALReaderWriterTests, WriteAndTraverseMixedRecordsInCompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 0.5, 0.0);
+    test_write_records_and_explore(*this, 250, 0.5, 0.0);
 }
 
 TEST_F(WALReaderWriterTests, WriteAndTraverseSmallRecordsInIncompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 0.0, 0.5);
+    test_write_records_and_explore(*this, 250, 0.0, 0.5);
 }
 
 TEST_F(WALReaderWriterTests, WriteAndTraverseLargeRecordsInIncompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 1.0, 0.5);
+    test_write_records_and_explore(*this, 250, 1.0, 0.5);
 }
 
 TEST_F(WALReaderWriterTests, WriteAndTraverseMixedRecordsInIncompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 0.5, 0.5);
+    test_write_records_and_explore(*this, 250, 0.5, 0.5);
 }
 
 class RealWALReaderWriterTests: public testing::Test {
@@ -390,51 +367,89 @@ public:
 
 TEST_F(RealWALReaderWriterTests, WriteAndTraverseSmallRecordsInCompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 0.0, 0.0);
+    test_write_records_and_explore(*this, 250, 0.0, 0.0);
 }
 
 TEST_F(RealWALReaderWriterTests, WriteAndTraverseLargeRecordsInCompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 1.0, 0.0);
+    test_write_records_and_explore(*this, 250, 1.0, 0.0);
 }
 
 TEST_F(RealWALReaderWriterTests, WriteAndTraverseMixedRecordsInCompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 0.5, 0.0);
+    test_write_records_and_explore(*this, 250, 0.5, 0.0);
 }
 
 TEST_F(RealWALReaderWriterTests, WriteAndTraverseSmallRecordsInIncompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 0.0, 0.5);
+    test_write_records_and_explore(*this, 250, 0.0, 0.5);
 }
 
 TEST_F(RealWALReaderWriterTests, WriteAndTraverseLargeRecordsInIncompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 1.0, 0.5);
+    test_write_records_and_explore(*this, 250, 1.0, 0.5);
 }
 
 TEST_F(RealWALReaderWriterTests, WriteAndTraverseMixedRecordsInIncompleteBlocks)
 {
-    test_write_records_and_traverse(*this, 250, 0.5, 0.5);
+    test_write_records_and_explore(*this, 250, 0.5, 0.5);
 }
-
 
 class WALTests: public testing::Test {
 public:
-    static constexpr Size PAGE_SIZE = 0x100;
+    static constexpr Size PAGE_SIZE = 0x200;
+
+    ~WALTests() override = default;
 
     WALTests()
     {
         home = std::make_unique<FakeDirectory>("WALReaderWriterTests");
-        pool = BufferPool::open({*home, create_sink(), LSN::null(), 0, PAGE_SIZE, 0666, true}).value();
-        wal = WALManager::open({pool.get(), *home, create_sink(), PAGE_SIZE, LSN::null()}).value();
+        pool = BufferPool::open({*home, create_sink(), LSN::null(), 16, 0, PAGE_SIZE, 0666, true}).value();
         wal_backing = home->get_shared("wal");
         wal_faults = home->get_faults("wal");
         data_backing = home->get_shared("data");
         data_faults = home->get_faults("data");
     }
 
-    ~WALTests() override = default;
+    auto allocate_page() -> Page
+    {
+        auto page = pool->allocate().value();
+        const auto id = page.id().as_index();
+        if (id >= pages_before.size()) {
+            CCO_EXPECT_EQ(id, pages_before.size());
+            pages_before.emplace_back(btos(page.view(0)));
+            pages_after.emplace_back(PAGE_SIZE, '\x00');
+        }
+        return page;
+    }
+
+    auto alter_page(Page &page) -> void
+    {
+        const auto start = PageLayout::content_offset(page.id());
+        const auto id = page.id().as_index();
+        for (Size x {start}, dx {}; ; x += dx) {
+            dx = random.next_int(20UL);
+            if (x + dx > page.size())
+                break;
+            mem_copy(page.bytes(x, dx), stob(random.next_string(dx)));
+            x += random.next_int(10UL, 30UL);
+        }
+        mem_copy(stob(pages_after.at(id)), page.view(0));
+    }
+
+    auto assert_page_is_same_as_before(const Page &page) -> void
+    {
+        // Skip the header which contains an LSN value that will be automatically incremented when a dirtied page
+        // is released.
+        const auto start = PageLayout::content_offset(page.id());
+        ASSERT_TRUE(stob(pages_before.at(page.id().as_index())).range(start) == page.view(start));
+    }
+
+    auto assert_page_is_same_as_after(const Page &page) -> void
+    {
+        const auto start = PageLayout::content_offset(page.id());
+        ASSERT_TRUE(stob(pages_after.at(page.id().as_index())).range(start) == page.view(start));
+    }
 
     SharedMemory wal_backing;
     SharedMemory data_backing;
@@ -442,7 +457,80 @@ public:
     FaultControls data_faults;
     std::unique_ptr<FakeDirectory> home;
     std::unique_ptr<IBufferPool> pool;
-    std::unique_ptr<IWALManager> wal;
+    std::vector<std::string> pages_before;
+    std::vector<std::string> pages_after;
+    Random random {0};
 };
+
+TEST_F(WALTests, NewWALIsEmpty)
+{
+    ASSERT_FALSE(pool->can_commit());
+}
+
+TEST_F(WALTests, AllocationDoesNotAlterPage)
+{
+    ASSERT_TRUE(pool->release(allocate_page()));
+    ASSERT_FALSE(pool->can_commit());
+}
+
+TEST_F(WALTests, UpdatesAreRegistered)
+{
+    auto page = allocate_page();
+    alter_page(page);
+    ASSERT_TRUE(pool->release(std::move(page)));
+    ASSERT_TRUE(pool->can_commit());
+    page = pool->acquire(PID::root(), false).value();
+    assert_page_is_same_as_after(page);
+}
+
+TEST_F(WALTests, AbortRollsBackUpdates)
+{
+    auto page = allocate_page();
+    alter_page(page);
+    ASSERT_TRUE(pool->release(std::move(page)));
+    ASSERT_TRUE(pool->abort());
+    page = pool->acquire(PID::root(), false).value();
+    assert_page_is_same_as_before(page);
+}
+
+TEST_F(WALTests, CommitIsACheckpoint)
+{
+    auto page = allocate_page();
+    alter_page(page);
+    ASSERT_TRUE(pool->release(std::move(page)));
+    ASSERT_TRUE(pool->commit());
+    ASSERT_FALSE(pool->abort());
+    page = pool->acquire(PID::root(), false).value();
+    assert_page_is_same_as_after(page);
+}
+
+TEST_F(WALTests, AbortSanityCheck)
+{
+    for (Index i {}; i < 100; ++i) {
+        auto page = allocate_page();
+        alter_page(page);
+        ASSERT_TRUE(pool->release(std::move(page)));
+    }
+     ASSERT_TRUE(pool->abort());
+    for (Index i {}; i < 100; ++i) {
+        auto page = pool->acquire(PID::from_index(i), false).value();
+        assert_page_is_same_as_before(page);
+    }
+}
+
+TEST_F(WALTests, CommitSanityCheck)
+{
+    for (Index i {}; i < 100; ++i) {
+        auto page = allocate_page();
+        alter_page(page);
+        ASSERT_TRUE(pool->release(std::move(page)));
+    }
+    ASSERT_TRUE(pool->commit());
+    ASSERT_FALSE(pool->abort());
+    for (Index i {}; i < 100; ++i) {
+        auto page = pool->acquire(PID::from_index(i), false).value();
+        assert_page_is_same_as_after(page);
+    }
+}
 
 } // <anonymous>

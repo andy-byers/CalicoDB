@@ -1,5 +1,11 @@
 # Calico DB Design
 
+**NOTES**:
++ If we encounter a corrupted WAL record during recovery, we need to check its LSN and the database flushed LSN.
+If the corrupted record has an LSN >= the flushed LSN, we cannot know if the data on the page is correct, since we have committed possibly corrupted data.
+We could check if the page contents match the "after" contents of the record, but it doesn't really matter since the record is corrupted anyway.
+If there are WAL records after the corrupted record, we cannot roll back
+
 ## Terms
 + **block**: The basic unit of storage in the `wal` file (see **page**).
 + **cell**: An structure embedded within a **node** that contains a **key** and optionally a **value**.

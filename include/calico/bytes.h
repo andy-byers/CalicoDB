@@ -12,12 +12,12 @@
 namespace cco {
 
 /**
- * An enum for specifying a three-way comparison.
+ * Specifies an ordering between two entities.
  */
 enum class ThreeWayComparison {
-   LT = -1, ///< Less than
-   EQ = 0, ///< Equal to
-   GT = 1, ///< Greater than
+    LT = -1, ///< Less than
+    EQ = 0, ///< Equal to
+    GT = 1, ///< Greater than
 };
 
 namespace impl {

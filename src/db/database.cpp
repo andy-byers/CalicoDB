@@ -22,7 +22,7 @@ using namespace utils;
             return db_try_result.error(); \
     } while (0)
 
-Database::Database(const Options &options):
+Database::Database(const Options &options) noexcept:
     m_options {options} {}
 
 auto Database::is_open() const -> bool

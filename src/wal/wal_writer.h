@@ -21,7 +21,7 @@ public:
     ~WALWriter() override = default;
     [[nodiscard]] static auto open(const WALParameters&) -> Result<std::unique_ptr<IWALWriter>>;
     [[nodiscard]] auto close() -> Result<void> override;
-    [[nodiscard]] auto append(WALRecord) -> Result<void> override;
+    [[nodiscard]] auto append(WALRecord) -> Result<Position> override;
     [[nodiscard]] auto truncate() -> Result<void> override;
     [[nodiscard]] auto flush() -> Result<void> override;
 
@@ -56,6 +56,7 @@ private:
 
     std::unique_ptr<IFile> m_file;
     std::string m_block;
+    Position m_position {};
     Index m_cursor {};
     LSN m_flushed_lsn;
     LSN m_last_lsn;
