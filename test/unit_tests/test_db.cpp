@@ -61,6 +61,17 @@ public:
         wal_controls.set_write_fault_counter(-1);
     }
 
+    auto remove_one(const std::string &key) -> Result<void>
+    {
+        CCO_EXPECT_GT(impl->info().record_count(), 0);
+        CCO_TRY_CREATE(was_erased, impl->erase(impl->find(stob(key))));
+        if (!was_erased) {
+            CCO_TRY_STORE(was_erased, impl->erase(impl->find_minimum()));
+            EXPECT_TRUE(was_erased);
+        }
+        return {};
+    }
+
     Random random {0};
     FakeDirectory *fake {};
     FaultControls data_controls {};
@@ -76,6 +87,26 @@ public:
 
     TestDatabase db;
 };
+
+TEST_F(DatabaseReadFaultTests, OperationsAfterAbort)
+{
+    ASSERT_TRUE(db.impl->commit());
+
+    const auto info = db.impl->info();
+    const auto half = info.record_count() / 2;
+    ASSERT_GT(half, 0);
+
+    while (info.record_count() > half)
+        ASSERT_TRUE(db.impl->erase(db.impl->find_minimum()));
+
+    ASSERT_TRUE(db.impl->abort());
+
+    for (const auto &[key, value]: db.records) {
+        auto c = tools::find(*db.impl, key);
+        ASSERT_EQ(btos(c.key()), key);
+        ASSERT_EQ(c.value(), value);
+    }
+}
 
 TEST_F(DatabaseReadFaultTests, SystemErrorIsStoredInCursor)
 {
@@ -281,10 +312,63 @@ TEST_F(DatabaseTests, DataPersists)
     ASSERT_TRUE(db.close().is_ok());
 }
 
-TEST_F(DatabaseTests, SanityCheck)
+auto run_xact_sanity_check(bool is_temp)
 {
     static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size GROUP_SIZE {1'000};
+    static constexpr Size GROUP_SIZE {250};
+
+    Options options;
+    options.page_size = 0x200;
+    options.frame_count = 16;
+    options.path = is_temp ? "" : BASE;
+    Database db {options};
+    ASSERT_TRUE(db.open().is_ok());
+
+    RecordGenerator::Parameters param;
+    param.mean_key_size = 20;
+    param.mean_value_size = 20;
+    param.spread = 15;
+    RecordGenerator generator {param};
+    const auto info = db.info();
+    Random random {0};
+
+    auto records = generator.generate(random, 500);
+    for (const auto &record: records)
+        ASSERT_TRUE(db.insert(record).is_ok());
+    ASSERT_TRUE(db.commit().is_ok());
+
+    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
+        for (const auto &record: generator.generate(random, GROUP_SIZE)) {
+            if (random.next_int(8) == 0 && info.record_count() > 0) {
+                if (!db.erase(record.key).is_ok()) {
+                    ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
+                }
+            }  else {
+                ASSERT_TRUE(db.insert(record).is_ok());
+            }
+        }
+        ASSERT_TRUE(db.abort().is_ok());
+    }
+    for (const auto &[key, value]: records) {
+        auto c = db.find(key);
+        ASSERT_TRUE(c.is_valid() and c.value() == value);
+    }
+}
+
+TEST(AbortTests, Persistent)
+{
+    run_xact_sanity_check(false);
+}
+
+TEST(AbortTests, InMemory)
+{
+    run_xact_sanity_check(true);
+}
+
+TEST_F(DatabaseTests, SanityCheck)
+{
+    static constexpr Size NUM_ITERATIONS {3};
+    static constexpr Size GROUP_SIZE {500};
     Options options;
     options.path = BASE;
     options.page_size = 0x200;
@@ -306,7 +390,7 @@ TEST_F(DatabaseTests, SanityCheck)
         ASSERT_TRUE(db.open().is_ok());
 
         for (const auto &record: generator.generate(random, GROUP_SIZE))
-            db.insert(record);
+            ASSERT_TRUE(db.insert(record).is_ok());
         ASSERT_TRUE(db.close().is_ok());
     }
 

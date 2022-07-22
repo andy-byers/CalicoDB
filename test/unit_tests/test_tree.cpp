@@ -454,7 +454,7 @@ TEST_F(TreeTests, ModifySanityCheck)
         const auto key = make_key(i);
         auto cursor = tools::find_exact(*tree, key);
         if (auto value = cursor.value(); value.empty()) {
-            tools::insert(*tree, key, "value");
+            tools::insert(*tree, key, std::string(123, 'x'));
         } else {
             tools::insert(*tree, key, value + value);
         }

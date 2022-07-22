@@ -32,12 +32,20 @@ auto Tracker::collect(Page &page, LSN lsn) -> PageUpdate
 {
     auto itr = m_registry.find(page.id());
     CCO_EXPECT_NE(itr, end(m_registry));
+    auto &manager = itr->second;
+
     PageUpdate update;
-    update.page_id = page.id();
-    update.previous_lsn = page.lsn();
-    page.set_lsn(lsn);
-    update.lsn = lsn;
-    update.changes = itr->second.collect();
+    if (manager.has_updates()) {
+        const auto previous_lsn = page.lsn();
+        page.set_lsn(lsn);
+
+        auto changes = manager.collect();
+        CCO_EXPECT_FALSE(changes.empty());
+        update.page_id = page.id();
+        update.previous_lsn = previous_lsn;
+        update.lsn = lsn;
+        update.changes = std::move(changes);
+    }
     m_registry.erase(itr);
     page.clear_manager();
     return update;

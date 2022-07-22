@@ -101,6 +101,10 @@ auto BufferPool::flush() -> Result<void>
             CCO_TRY_CREATE(was_evicted, try_evict_frame());
             if (!was_evicted)
                 break;
+
+            if(page_count()==1){
+
+            }
         }
 
         if (!m_cache.is_empty()) {
@@ -245,31 +249,36 @@ auto BufferPool::purge() -> void
 auto BufferPool::save_header(FileHeaderWriter &header) -> void
 {
     m_logger->trace("saving header fields");
-    m_wal->save_header(header);
+    if (m_use_xact)
+        m_wal->save_header(header);
     header.set_page_count(m_page_count);
 }
 
 auto BufferPool::load_header(const FileHeaderReader &header) -> void
 {
     m_logger->trace("loading header fields");
-    m_wal->load_header(header);
+    if (m_use_xact)
+        m_wal->load_header(header);
     m_page_count = header.page_count();
 }
 
 auto BufferPool::close() -> Result<void>
 {
     m_logger->trace("closing");
-    const auto pr = m_pager->close();
+    auto pr = m_pager->close();
     if (!pr.has_value()) {
         m_logger->error("cannot close pager");
         m_logger->error("(reason) {}", pr.error().what());
     }
-    const auto wr = m_wal->close();
-    if (!wr.has_value()) {
-        m_logger->error("cannot close WAL");
-        m_logger->error("(reason) {}", wr.error().what());
+    if (m_use_xact) {
+        auto wr = m_wal->close();
+        if (!wr.has_value()) {
+            m_logger->error("cannot close WAL");
+            m_logger->error("(reason) {}", wr.error().what());
+            return wr;
+        }
     }
-    return !pr.has_value() ? pr : wr;
+    return pr;
 }
 
 auto BufferPool::allocate() -> Result<Page>

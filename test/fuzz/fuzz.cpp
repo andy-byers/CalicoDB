@@ -1,4 +1,5 @@
 #include "fuzz.h"
+#include <spdlog/fmt/fmt.h>
 
 namespace cco {
 
@@ -19,7 +20,6 @@ auto InstructionParser::parse(BytesView view) const -> std::optional<Parsed>
         opcode++;
     }
     opcode -= opcode == m_instructions.size();
-
     const auto opsize = m_instructions.at(opcode).num_segments;
     std::vector<BytesView> segments(opsize);
 
@@ -28,7 +28,7 @@ auto InstructionParser::parse(BytesView view) const -> std::optional<Parsed>
             return std::nullopt;
 
         const auto size = static_cast<unsigned char>(view[0]);
-        if (view.size() < size + 1)
+        if (view.size() < static_cast<Size>(size + 1))
             return std::nullopt;
 
         segment = view.range(1, size);
@@ -58,21 +58,41 @@ auto DatabaseTarget::fuzz(BytesView data) -> void
         switch (opcode) {
             case 0:
                 CCO_EXPECT_EQ(segments.size(), 2);
+//                fmt::print("insert: ({}/{} B, {} B)\n", btos(segments[0]).size(), m_db.info().maximum_key_size(), btos(segments[1]).size());
                 insert_one(segments[0], segments[1]);
                 break;
             case 1:
                 CCO_EXPECT_EQ(segments.size(), 1);
+//                fmt::print("erase: {} B\n", btos(segments[0]).size());
                 erase_one(segments[0]);
                 break;
             case 2:
                 CCO_EXPECT_TRUE(segments.empty());
+//                fmt::print("commit: ...\n");
                 do_commit();
+//                fmt::print("...{} records in database\n", m_db.info().record_count());
                 break;
             default:
                 CCO_EXPECT_TRUE(segments.empty());
                 CCO_EXPECT_EQ(opcode, 3);
+//                fmt::print("abort: {} records in database before\n", m_db.info().record_count());
                 do_abort();
+//                fmt::print("...{} records in database after\n", m_db.info().record_count());
         }
+    }
+
+    if (auto lhs = m_db.find_minimum(), rhs = lhs; rhs.is_valid() && rhs.increment()) {
+        CCO_EXPECT_TRUE(lhs.is_valid());
+        for (; rhs.is_valid(); ) {
+            CCO_EXPECT_LT(lhs.key(), rhs.key());
+            if (!rhs.increment())
+                break;
+            CCO_EXPECT_TRUE(lhs.increment());
+        }
+    } else {
+        CCO_EXPECT_EQ(m_db.info().record_count(), 0);
+        CCO_EXPECT_TRUE(lhs.status().is_not_found());
+        CCO_EXPECT_TRUE(rhs.status().is_not_found());
     }
 }
 

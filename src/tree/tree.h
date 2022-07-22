@@ -65,10 +65,16 @@ public:
     auto find(BytesView key) -> Cursor override;
     auto find_minimum() -> Cursor override;
     auto find_maximum() -> Cursor override;
+    auto TEST_validate_node(PID) -> void override;
 
 private:
+    struct SearchResult {
+        page::Node node;
+        Index index {};
+        bool was_found {};
+    };
     explicit Tree(const Parameters&);
-    auto find_aux(BytesView) -> Result<Internal::FindResult>;
+    auto find_aux(BytesView) -> Result<SearchResult>;
 
     NodePool m_pool;
     Internal m_internal;

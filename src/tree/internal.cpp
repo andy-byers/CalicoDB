@@ -38,34 +38,11 @@ auto Internal::find_root(bool is_writable) -> Result<Node>
     return m_pool->acquire(PID::root(), is_writable);
 }
 
-auto Internal::find_external(BytesView key, bool is_writable) -> Result<FindResult>
+auto Internal::find_external(BytesView key) -> Result<SearchResult>
 {
-    auto node = find_root(is_writable);
-    if (!node.has_value())
-        return Err {node.error()};
+    if (m_cell_count == 0)
+        return SearchResult {PID::root(), 0, false};
 
-    Node::FindGeResult result;
-    while (true) {
-        result = node->find_ge(key);
-        if (node->is_external())
-            break;
-        result.index += result.found_eq;
-        CCO_TRY(m_pool->release(std::move(*node)));
-        node = m_pool->acquire(node->child_id(result.index), false);
-        if (!node.has_value())
-            return Err {node.error()};
-    }
-    const auto [index, found_eq] = result;
-    if (is_writable) {
-        const auto id = node->id();
-        CCO_TRY(m_pool->release(std::move(*node)));
-        node = m_pool->acquire(id, true);
-    }
-    return FindResult {std::move(*node), index, found_eq};
-}
-
-auto Internal::find_external_(BytesView key) -> Result<SearchResult_>
-{
     auto node = find_root(false);
     if (!node.has_value())
         return Err {node.error()};
@@ -76,16 +53,17 @@ auto Internal::find_external_(BytesView key) -> Result<SearchResult_>
         if (node->is_external())
             break;
         result.index += result.found_eq;
+        const auto id = node->child_id(result.index);
         CCO_TRY(m_pool->release(std::move(*node)));
-        node = m_pool->acquire(node->child_id(result.index), false);
+        node = m_pool->acquire(id, false);
         if (!node.has_value())
             return Err {node.error()};
     }
     const auto [index, found_eq] = result;
-    return SearchResult_ {node->id(), index, found_eq};
+    return SearchResult {node->id(), index, found_eq};
 }
 
-auto Internal::find_minimum() -> Result<SearchResult_>
+auto Internal::find_minimum() -> Result<SearchResult>
 {
     CCO_TRY_CREATE(node, m_pool->acquire(PID::root(), false));
     auto id = node.id();
@@ -101,10 +79,10 @@ auto Internal::find_minimum() -> Result<SearchResult_>
         was_found = false;
     }
     CCO_TRY(m_pool->release(std::move(node)));
-    return SearchResult_ {id, 0, was_found};
+    return SearchResult {id, 0, was_found};
 }
 
-auto Internal::find_maximum() -> Result<SearchResult_>
+auto Internal::find_maximum() -> Result<SearchResult>
 {
     CCO_TRY_CREATE(node, m_pool->acquire(PID::root(), false));
     auto id = node.id();
@@ -125,7 +103,7 @@ auto Internal::find_maximum() -> Result<SearchResult_>
         index = node.cell_count() - 1;
     }
     CCO_TRY(m_pool->release(std::move(node)));
-    return SearchResult_ {id, index, was_found};
+    return SearchResult {id, index, was_found};
 }
 
 auto Internal::positioned_insert(Position position, BytesView key, BytesView value) -> Result<void>
@@ -188,29 +166,6 @@ auto Internal::positioned_remove(Position position) -> Result<void>
     // TODO: Figure out how to avoid storing the anchor. It's easy to either use the call stack or an actual stack to backtrack,
     //       however, some rebalancing operations can cause ancestor nodes to split, which can invalidate the stack.
     return balance_after_underflow(std::move(node), stob(anchor));
-}
-
-auto Internal::find_local_min(Node root) -> Result<Position>
-{
-    const auto is_writable = root.page().is_writable();
-    while (!root.is_external()) {
-        const auto id = root.child_id(0);
-        CCO_TRY(m_pool->release(std::move(root)));
-        CCO_TRY_STORE(root, m_pool->acquire(id, is_writable));
-    }
-    return Position {std::move(root), 0};
-}
-
-auto Internal::find_local_max(Node root) -> Result<Position>
-{
-    const auto is_writable = root.page().is_writable();
-    while (!root.is_external()) {
-        const auto id = root.rightmost_child_id();
-        CCO_TRY(m_pool->release(std::move(root)));
-        CCO_TRY_STORE(root, m_pool->acquire(id, is_writable));
-    }
-    const auto index = root.cell_count() - 1;
-    return Position {std::move(root), index};
 }
 
 auto Internal::balance_after_overflow(Node node) -> Result<void>

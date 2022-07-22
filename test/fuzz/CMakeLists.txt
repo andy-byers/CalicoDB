@@ -24,8 +24,8 @@ function(build_fuzzer NAME)
 #        add_test(NAME "${NAME}" COMMAND "${NAME}" -max_total_time=20)
 endfunction()
 
-build_fuzzer(fuzz_db_modify)
-build_fuzzer(fuzz_db_xact)
+build_fuzzer(db_mods)
+build_fuzzer(db_xact)
 
 # TODO: Copy corpus to build directory as part of build, then uncomment the add_test() above to add to CI. Should run
 #       the CI fuzz tests on the corpus. libFuzzer may not work on the OSX builds though, so we'll need to disable them

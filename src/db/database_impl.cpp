@@ -98,12 +98,9 @@ auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) ->
         header.update_magic_code();
         header.set_page_size(state.page_size());
         CCO_TRY(impl->m_pool->release(root.take()));
+        CCO_TRY(impl->commit());
     } else {
-        CCO_TRY_CREATE(root, impl->m_pool->acquire(PID::root(), false));
-        auto header = get_file_header_reader(root);
-        impl->m_pool->load_header(header);
-        impl->m_tree->load_header(header);
-        CCO_TRY(impl->m_pool->release(std::move(root)));
+        CCO_TRY(impl->load_header());
         // This is a no-op if the WAL is empty.
         if (revised.use_xact)
             CCO_TRY(impl->m_pool->recover());
@@ -113,12 +110,11 @@ auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) ->
 
 auto Database::Impl::open(Parameters param) -> Result<std::unique_ptr<Impl>>
 {
-
     const auto page_size = param.options.page_size;
     auto impl = std::make_unique<Impl>();
     impl->m_sink = create_sink(); // Creates a spdlog::sinks::null_sink.
     impl->m_logger = create_logger(impl->m_sink, "db"); // Do-nothing logger.
-    impl->m_pool = std::make_unique<MemoryPool>(page_size, false);
+    impl->m_pool = std::make_unique<MemoryPool>(page_size, param.options.use_xact);
     impl->m_tree = Tree::open({impl->m_pool.get(), impl->m_sink, PID::null(), 0, 0, 0}).value();
     impl->m_is_temp = true;
     CCO_TRY_CREATE(root, impl->m_tree->allocate_root());
@@ -210,10 +206,7 @@ auto Database::Impl::abort() -> Result<void>
     m_logger->trace("aborting");
     return m_pool->abort()
         .and_then([this]() -> Result<void> {
-            CCO_TRY_CREATE(root, m_tree->root(false));
-            auto reader = get_file_header_reader(root);
-            m_pool->load_header(reader);
-            m_tree->load_header(reader);
+            CCO_TRY(load_header());
             m_logger->trace("abort succeeded");
             return {};
         })
@@ -257,7 +250,7 @@ auto Database::Impl::save_header() -> Result<void>
     m_pool->save_header(header);
     m_tree->save_header(header);
     header.update_header_crc();
-    return {};
+    return m_pool->release(root.take());
 }
 
 auto Database::Impl::load_header() -> Result<void>
@@ -267,7 +260,7 @@ auto Database::Impl::load_header() -> Result<void>
     m_logger->trace("loading file header");
     m_pool->load_header(header);
     m_tree->load_header(header);
-    return {};
+    return m_pool->release(root.take());
 }
 
 auto Database::Impl::cache_hit_ratio() const -> double

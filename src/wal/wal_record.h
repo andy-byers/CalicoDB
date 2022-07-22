@@ -31,8 +31,8 @@ namespace cco {
 class WALPayload {
 public:
     friend class WALRecord;
-    static constexpr Size HEADER_SIZE = 10;
-    static constexpr Size UPDATE_HEADER_SIZE = 4;
+    static constexpr Size HEADER_SIZE {10};
+    static constexpr Size UPDATE_HEADER_SIZE {4};
 
     WALPayload() = default;
     ~WALPayload() = default;
@@ -59,7 +59,8 @@ private:
  */
 class WALRecord {
 public:
-    static constexpr Size HEADER_SIZE = 11;
+    static constexpr Size HEADER_SIZE {11};
+    static constexpr auto MINIMUM_SIZE = HEADER_SIZE + 1;
 
     enum class Type: Byte {
         EMPTY  = 0x00,
@@ -107,7 +108,9 @@ public:
 
     [[nodiscard]] auto decode() const -> page::PageUpdate
     {
-        return m_payload.decode();
+        auto decoded = m_payload.decode();
+        decoded.lsn = m_lsn;
+        return decoded;
     }
 
     [[nodiscard]] auto is_consistent() const -> bool;
@@ -115,6 +118,11 @@ public:
     [[nodiscard]] auto merge(const WALRecord&) -> Result<void>;
     auto write(Bytes) const noexcept -> void;
     auto split(Index) -> WALRecord;
+
+    auto TEST_corrupt_crc() -> void
+    {
+        m_crc++;
+    }
 
 private:
     WALPayload m_payload;

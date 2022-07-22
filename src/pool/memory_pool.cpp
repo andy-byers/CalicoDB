@@ -79,7 +79,7 @@ auto MemoryPool::do_release(page::Page &page) -> void
 {
     const auto index = page.id().as_index();
     CCO_EXPECT_LT(index, m_frames.size());
-    if (m_use_xact && page.is_writable()) {
+    if (page.has_manager()) {
         for (const auto &change: m_tracker.collect(page, LSN::null()).changes)
             m_stack.emplace_back(UndoInfo {btos(change.before), page.id(), change.offset});
     }

@@ -2,6 +2,7 @@
 #include "page/update.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
+#include "utils/logging.h"
 
 namespace cco {
 
@@ -110,7 +111,7 @@ auto WALRecord::read(BytesView in) -> Result<bool>
     static constexpr auto ERROR_PRIMARY = "cannot read WAL record";
 
     // lsn (4B)
-    m_lsn.value = get_u32(in.data());
+    m_lsn.value = get_u32(in);
     in.advance(sizeof(uint32_t));
 
     // No more values in the buffer (empty space in the buffer must be zeroed and LSNs
@@ -119,23 +120,31 @@ auto WALRecord::read(BytesView in) -> Result<bool>
         return false;
 
     // crc (4B)
-    m_crc = get_u32(in.data());
+    m_crc = get_u32(in);
     in.advance(sizeof(uint32_t));
 
     // type (1B)
     m_type = static_cast<Type>(in[0]);
     in.advance(sizeof(Type));
 
-    if (!is_record_type_valid(m_type))
-        return Err {Status::corruption(ERROR_PRIMARY)};
+    if (!is_record_type_valid(m_type)) {
+        ThreePartMessage message;
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail("record type 0x{:02X} is unrecognized", int(m_type));
+        return Err {message.corruption()};
+    }
 
     // x (2B)
-    const auto payload_size = get_u16(in.data());
+    const auto payload_size = get_u16(in);
     in.advance(sizeof(uint16_t));
 
-    // Every record stores at least 1 payload byte.
-    if (!payload_size || payload_size > in.size())
-        return Err {Status::corruption(ERROR_PRIMARY)};
+    if (payload_size == 0 || payload_size > in.size()) {
+        ThreePartMessage message;
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail("payload size {} is out of range", payload_size);
+        message.set_detail("must be in [1, {}]", in.size());
+        return Err {message.corruption()};
+    }
 
     m_payload.m_data.resize(payload_size);
 
@@ -228,8 +237,12 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
     m_payload.append(rhs.m_payload);
 
     if (m_type == Type::EMPTY) {
-        if (rhs.m_type == Type::MIDDLE || rhs.m_type == Type::LAST)
-            return Err {Status::corruption(ERROR_PRIMARY)};
+        if (rhs.m_type == Type::MIDDLE || rhs.m_type == Type::LAST) {
+            ThreePartMessage message;
+            message.set_primary(ERROR_PRIMARY);
+            message.set_detail("record types are incompatible");
+            return Err {message.corruption()};
+        }
 
         m_type = rhs.m_type;
         m_lsn = rhs.m_lsn;
@@ -238,8 +251,12 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
     } else {
         CCO_EXPECT_EQ(m_type, Type::FIRST);
 
-        if (m_lsn != rhs.m_lsn || m_crc != rhs.m_crc)
-            return Err {Status::corruption(ERROR_PRIMARY)};
+        if (m_lsn != rhs.m_lsn || m_crc != rhs.m_crc) {
+            ThreePartMessage message;
+            message.set_primary(ERROR_PRIMARY);
+            message.set_detail("parts to not belong to the same logical record");
+            return Err {message.corruption()};
+        }
 
         // We have just completed a record.
         if (rhs.m_type == Type::LAST)

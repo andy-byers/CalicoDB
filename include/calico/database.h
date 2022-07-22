@@ -11,11 +11,20 @@ class Cursor;
 class Info;
 
 /**
- * An object that represents a Calico DB database.
+ * A CalicoDB database!
  */
 class Database {
 public:
-    explicit Database(const Options&);
+    /**
+     * Create a database object.
+     *
+     * Note that a newly constructed database will not be open.
+     *
+     * @see open()
+     * @param options Initialization options for the database.
+     */
+    explicit Database(const Options &options) noexcept;
+
     [[nodiscard]] static auto destroy(Database db) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto open() -> Status;
@@ -62,9 +71,9 @@ public:
      * @param value The value to write.
      * @return True if the record was not already in the database, false otherwise.
      */
-    auto insert(BytesView key, BytesView value) -> Status;
-    auto insert(const std::string &key, const std::string &value) -> Status;
-    auto insert(const Record&) -> Status;
+    [[nodiscard]] auto insert(BytesView key, BytesView value) -> Status;
+    [[nodiscard]] auto insert(const std::string &key, const std::string &value) -> Status;
+    [[nodiscard]] auto insert(const Record&) -> Status;
 
     /**
      * Erase a record given its key.
@@ -72,9 +81,9 @@ public:
      * @param key The key of the record to erase.
      * @return True if the record was found (and thus erased), false otherwise.
      */
-    auto erase(BytesView key) -> Status;
-    auto erase(const std::string &key) -> Status;
-    auto erase(const Cursor &cursor) -> Status;
+    [[nodiscard]] auto erase(BytesView key) -> Status;
+    [[nodiscard]] auto erase(const std::string &key) -> Status;
+    [[nodiscard]] auto erase(const Cursor &cursor) -> Status;
 
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto abort() -> Status;

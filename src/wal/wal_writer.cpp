@@ -2,7 +2,6 @@
 #include "storage/interface.h"
 #include "utils/identifier.h"
 #include "utils/logging.h"
-#include "wal_record.h"
 #include <optional>
 
 namespace cco {
@@ -38,17 +37,17 @@ auto WALWriter::close() -> Result<void>
     return m_file->close();
 }
 
-auto WALWriter::append(WALRecord record) -> Result<void>
+auto WALWriter::append(WALRecord record) -> Result<Position>
 {
     const auto next_lsn {record.lsn()};
     CCO_EXPECT_EQ(next_lsn.value, m_last_lsn.value + 1);
+
     std::optional<WALRecord> temp {std::move(record)};
+    std::optional<Position> first;
 
     while (temp) {
-        const auto remaining = m_block.size() - m_cursor;
-
-        // Each record must contain at least 1 payload byte.
-        const auto can_fit_some = remaining > WALRecord::HEADER_SIZE;
+        const auto remaining = m_block.size() - m_position.offset;
+        const auto can_fit_some = remaining >= WALRecord::MINIMUM_SIZE;
         const auto can_fit_all = remaining >= temp->size();
 
         if (can_fit_some) {
@@ -57,10 +56,14 @@ auto WALWriter::append(WALRecord record) -> Result<void>
             if (!can_fit_all)
                 rest = temp->split(remaining - WALRecord::HEADER_SIZE);
 
-            auto destination = stob(m_block).range(m_cursor, temp->size());
+            if (!first.has_value())
+                first = m_position;
+
+            auto destination = stob(m_block)
+               .range(m_position.offset, temp->size());
             temp->write(destination);
 
-            m_cursor += temp->size();
+            m_position.offset += temp->size();
 
             if (can_fit_all) {
                 temp.reset();
@@ -71,8 +74,9 @@ auto WALWriter::append(WALRecord record) -> Result<void>
         }
         CCO_TRY(flush());
     }
+    CCO_EXPECT_TRUE(first.has_value());
     m_last_lsn = next_lsn;
-    return {};
+    return *first;
 }
 
 auto WALWriter::truncate() -> Result<void>
@@ -82,7 +86,7 @@ auto WALWriter::truncate() -> Result<void>
             return m_file->sync();
         })
         .and_then([this]() -> Result<void> {
-            m_cursor = 0;
+            m_position = {};
             m_has_committed = false;
             mem_clear(stob(m_block));
             return {};
@@ -91,15 +95,16 @@ auto WALWriter::truncate() -> Result<void>
 
 auto WALWriter::flush() -> Result<void>
 {
-    if (m_cursor) {
+    if (m_position.offset) {
         // The unused part of the block should be zero-filled.
         auto block = stob(m_block);
-        mem_clear(block.range(m_cursor));
+        mem_clear(block.range(m_position.offset));
 
         CCO_TRY(m_file->write(block));
         CCO_TRY(m_file->sync());
 
-        m_cursor = 0;
+        m_position.block_id++;
+        m_position.offset = 0;
         m_flushed_lsn = m_last_lsn;
         m_has_committed = true;
     }

@@ -179,7 +179,6 @@ public:
     [[nodiscard]] auto read_cell(Index) const -> Cell;
     [[nodiscard]] auto detach_cell(Index, utils::Scratch) const -> Cell;
     [[nodiscard]] auto find_ge(BytesView) const -> FindGeResult;
-    auto validate() const -> void;
     auto extract_cell(Index, utils::Scratch) -> Cell;
     auto insert(Cell) -> void;
     auto insert_at(Index, Cell) -> void;
@@ -214,6 +213,8 @@ public:
     [[nodiscard]] auto cell_area_offset() const -> Size;
     [[nodiscard]] auto header_offset() const -> Index;
     auto reset(bool = false) -> void;
+
+    auto TEST_validate() const -> void;
 
 private:
     auto defragment(std::optional<Index>) -> void;

@@ -1,5 +1,4 @@
 #include "wal_reader.h"
-#include "wal_record.h"
 #include "page/page.h"
 #include "storage/interface.h"
 #include "utils/logging.h"
@@ -29,147 +28,69 @@ WALReader::WALReader(std::unique_ptr<IFile> file, WALParameters param):
       m_block(param.page_size, '\x00'),
       m_file {std::move(file)} {}
 
+auto WALReader::read(Position &position) -> Result<WALRecord>
+{
+    WALRecord record;
+    while (record.type() != WALRecord::Type::FULL) {
+        // Make sure we are buffering the correct block.
+        if (!m_has_block || m_block_id != position.block_id) {
+            CCO_TRY_CREATE(not_eof, read_block(position.block_id));
+            if (!not_eof) return Err {Status::not_found()};
+        }
+        auto maybe_partial = read_record(position.offset);
+        if (maybe_partial.has_value()) {
+            position.offset += maybe_partial->size();
+            CCO_TRY(record.merge(*maybe_partial));
+        } else if (maybe_partial.error().is_not_found() && position.offset > 0) {
+            position.block_id++;
+            position.offset = 0;
+        } else {
+            return Err {maybe_partial.error()};
+        }
+    }
+    return record;
+}
+
+
 auto WALReader::close() -> Result<void>
 {
     return m_file->close();
 }
 
-/**
- * Move the cursor to the beginning of the WAL storage.
- */
-auto WALReader::reset() -> Result<void>
+auto WALReader::read_block(Index block_id) -> Result<bool>
 {
-    CCO_TRY(m_file->seek(0, Seek::BEGIN));
-    m_has_block = false;
-    m_cursor = 0;
-    m_block_id = 0;
-    m_positions.clear();
-    m_record.reset();
-    CCO_TRY(increment());
-    return {};
-}
-
-auto WALReader::record() const -> std::optional<WALRecord>
-{
-    return m_record;
-}
-
-/**
- * Move the cursor toward the end of the WAL.
- *
- * @return True if the cursor was successfully moved, false otherwise
- */
-auto WALReader::increment() -> Result<bool>
-{
-    CCO_TRY_CREATE(record, read_next());
-    m_incremented = true; // TODO: Why???
-    if (record) {
-        m_record = std::move(record);
-        return true;
-    }
-    return false;
-}
-
-/**
- * Move the cursor toward the beginning of the WAL.
- *
- * @return True if the cursor was successfully moved, false otherwise
- */
-auto WALReader::decrement() -> Result<bool>
-{
-    if (!m_record)
-        return false;
-    CCO_TRY_CREATE(record, read_previous());
-    if (record) {
-        m_record = std::move(record);
-        return true;
-    }
-    return false;
-}
-
-/**
- * Read the next WAL record, advancing the cursor.
- *
- * @return The next WAL record if we are not already at the end, std::nullopt otherwise
- */
-auto WALReader::read_next() -> Result<std::optional<WALRecord>>
-{
-    WALRecord record;
-
-    if (!m_has_block)
-        CCO_TRY(read_block());
-    push_position();
-
-    const auto do_read_next = [this, &record]() -> Result<std::optional<WALRecord>> {
-        while (record.type() != WALRecord::Type::FULL) {
-            // Merge partial values until we have a full record.
-            CCO_TRY_CREATE(maybe_partial, read_record());
-            if (maybe_partial) {
-                CCO_TRY(record.merge(*maybe_partial));
-                // We just hit EOF. Note that we discard `record`, which may contain a non-FULL record.
-            } else {
-                CCO_TRY(pop_position_and_seek());
-                return std::nullopt;
+    const auto block_start = block_id * m_block.size();
+    return m_file->read(stob(m_block), block_start)
+        .and_then([block_id, this](Size read_size) -> Result<bool> {
+            if (read_size != m_block.size()) {
+                // If we hit EOF, we didn't read anything into the buffer. Just leave the block ID alone, since
+                // the last block we read is still valid.
+                if (read_size == 0)
+                    return false;
+                ThreePartMessage message;
+                message.set_primary("cannot read block");
+                message.set_detail("block is incomplete");
+                message.set_hint("read {}/{} B", read_size, m_block.size());
+                m_has_block = false; // We corrupted the buffer. Force a reread.
+                return Err {message.corruption()};
             }
-        }
-        if (!record.is_consistent())
-            return Err {Status::corruption("")};
-        return record;
-    };
-
-    return do_read_next()
-        .or_else([this](const Status&) -> Result<std::optional<WALRecord>> {
-            m_incremented = false;
-            CCO_TRY_CREATE(previous, read_previous());
-            if (previous)
-                return previous;
-            if (!m_positions.empty())
-                CCO_TRY(pop_position_and_seek());
-            return std::nullopt;
+            m_block_id = block_id;
+            m_has_block = true;
+            return true;
+        })
+        .or_else([this](const Status &error) -> Result<bool> {
+            // Buffer could be corrupted, not sure if we have any guarantees about its contents after a failed
+            // call to read().
+            m_has_block = false;
+            return Err {error};
         });
 }
 
-auto WALReader::read_previous() -> Result<std::optional<WALRecord>>
+auto WALReader::read_record(Index offset) -> Result<WALRecord>
 {
-    if (m_positions.size() >= 2) {
-        pop_position_and_seek();
-        pop_position_and_seek();
-        return read_next();
-    }
-    return std::nullopt;
-}
-
-auto WALReader::read_record() -> Result<std::optional<WALRecord>>
-{
-    const auto out_of_space = m_block.size() - m_cursor <= WALRecord::HEADER_SIZE;
-    const auto needs_new_block = out_of_space || !m_has_block;
-
-    if (needs_new_block) {
-        if (out_of_space) {
-            m_block_id++;
-            m_cursor = 0;
-        }
-        CCO_TRY_CREATE(was_read, read_block());
-        if (!was_read)
-            return std::nullopt;
-    }
-    CCO_TRY_CREATE(record, read_record_aux(m_cursor));
-    if (record) {
-        m_cursor += record->size();
-        CCO_EXPECT_LE(m_cursor, m_block.size());
-        return std::move(*record);
-    }
-    m_cursor = m_block.size();
-    return read_record();
-}
-
-auto WALReader::read_record_aux(Index offset) -> Result<std::optional<WALRecord>>
-{
-    static constexpr auto ERROR_PRIMARY = "cannot read record";
-
-    // There should be enough space for a minimally-sized record in the tail buffer.
     CCO_EXPECT_TRUE(m_has_block);
-    CCO_EXPECT_GT(m_block.size() - offset, WALRecord::HEADER_SIZE);
+    if (offset + WALRecord::MINIMUM_SIZE > m_block.size())
+        return Err {Status::not_found()};
 
     WALRecord record;
     auto buffer = stob(m_block);
@@ -183,60 +104,37 @@ auto WALReader::read_record_aux(Index offset) -> Result<std::optional<WALRecord>
         case WALRecord::Type::FULL:
             return record;
         case WALRecord::Type::EMPTY:
-            return std::nullopt;
+            return Err {Status::not_found()};
         default:
             ThreePartMessage message;
-            message.set_primary(ERROR_PRIMARY);
+            message.set_primary("cannot read record");
             message.set_detail("type {} is not recognized", static_cast<int>(record.type()));
             return Err {message.corruption()};
     }
 }
 
-auto WALReader::push_position() -> void
+auto WALReader::reset() -> void
 {
-    const auto absolute = m_block.size()*m_block_id + m_cursor;
-    m_positions.push_back(absolute);
+    m_has_block = false;
 }
 
-auto WALReader::pop_position_and_seek() -> Result<void>
+WALExplorer::WALExplorer(IWALReader &reader):
+      m_reader {&reader} {}
+
+auto WALExplorer::reset() -> void
 {
-    const auto absolute = m_positions.back();
-    const auto block_id = absolute / m_block.size();
-    const auto needs_new_block = m_block_id != block_id;
-
-    m_block_id = block_id;
-    m_cursor = absolute % m_block.size();
-    m_positions.pop_back();
-
-    if (needs_new_block)
-        CCO_TRY(read_block());
-    return {};
+    m_position = {};
 }
 
-auto WALReader::read_block() -> Result<bool>
+auto WALExplorer::read_next() -> Result<Discovery>
 {
-    const auto block_start = m_block_id * m_block.size();
-    return m_file->read(stob(m_block), block_start)
-        .and_then([this](Size read_size) -> Result<bool> {
-            if (read_size != m_block.size()) {
-                if (read_size == 0)
-                    return false;
-                ThreePartMessage message;
-                message.set_primary("cannot read block");
-                message.set_detail("block is incomplete");
-                message.set_hint("read {}/{} B", read_size, m_block.size());
-                return Err {message.corruption()};
-            }
-            m_has_block = true;
-            return true;
-        })
-        .or_else([this](const Status &error) -> Result<bool> {
-            m_has_block = false;
-            m_positions.clear();
-            m_record.reset();
-            m_cursor = 0;
-            return Err {error};
-        });
+    auto position = m_position;
+    auto record = m_reader->read(position);
+    if (record.has_value()) {
+        CCO_EXPECT_GE(record->size(), WALRecord::MINIMUM_SIZE);
+        return Discovery {*record, std::exchange(m_position, position)};
+    }
+    return Err {record.error()};
 }
 
 } // cco
