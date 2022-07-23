@@ -8,6 +8,15 @@ namespace {
 
 constexpr auto PATH = "/tmp/calico_usage";
 
+#define USAGE_ASSERT_OK(status, message) \
+    do { \
+        if (!(status).is_ok()) { \
+            fmt::print(__FILE__ ": {}\n", (message)); \
+            fmt::print(__FILE__ ": (reason) {}\n", (status).what()); \
+            std::exit(EXIT_FAILURE); \
+        } \
+    } while (0)
+
 auto bytes_objects()
 {
     auto function_taking_a_bytes_view = [](cco::BytesView) {};
@@ -40,6 +49,23 @@ auto bytes_objects()
     // Bytes objects can modify the underlying string, while BytesView objects cannot.
     b[0] = '\xFF';
     assert(data[7] == '\xFF');
+}
+
+auto reads_and_writes(cco::Database &db)
+{
+    static constexpr auto setup_error_message = "cannot setup \"reads_and_writes\" example";
+    USAGE_ASSERT_OK(db.insert("2000-10-23 14:23:05", ""), setup_error_message);
+    USAGE_ASSERT_OK(db.insert("2000-04-09 09:03:34", ""), setup_error_message);
+    USAGE_ASSERT_OK(db.insert("2000-11-01 21:15:45", ""), setup_error_message);
+    USAGE_ASSERT_OK(db.insert("2000-09-17 02:54:32", ""), setup_error_message);
+
+    // To insert a new record, we write the following:
+    auto s = db.insert("2000-02-06 12:32:19", "");
+
+    // Keys are unique in a Calico DB database, so inserting a record that already exists
+    // will overwrite the current value.
+
+    //
 }
 
 auto updating_a_database(cco::Database &db)
@@ -160,6 +186,7 @@ auto main(int, const char *[]) -> int
 
     bytes_objects();
     auto db = open_database();
+    reads_and_writes(db);
     updating_a_database(db);
     querying_a_database(db);
     transactions(db);

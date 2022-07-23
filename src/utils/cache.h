@@ -14,6 +14,7 @@ template<class Key, class Value, class Hash = std::hash<Key>>
 class FifoCache {
 public:
     using Reference = std::reference_wrapper<Value>;
+    using Iterator = typename std::list<std::pair<Key, Value>>::iterator;
 
     FifoCache() = default;
     ~FifoCache() = default;
@@ -30,12 +31,12 @@ public:
 
     [[nodiscard]] auto contains(const Key &key) const -> bool
     {
-        return m_map.find(key) != end(m_map);
+        return m_map.find(key) != std::end(m_map);
     }
 
     [[nodiscard]] auto get(const Key &key) -> std::optional<Reference>
     {
-        if (auto itr = m_map.find(key); itr != end(m_map))
+        if (auto itr = m_map.find(key); itr != std::end(m_map))
             return std::ref(itr->second->second);
         return std::nullopt;
     }
@@ -55,7 +56,7 @@ public:
         // Currently, we don't handle duplicate keys. We only cache page IDs, which are unique.
         CCO_EXPECT_FALSE(contains(key));
         m_list.emplace_back(key, std::forward<Value>(value));
-        m_map.emplace(key, prev(end(m_list)));
+        m_map.emplace(key, prev(end()));
         return std::nullopt;
     }
 
@@ -67,6 +68,16 @@ public:
         m_list.pop_front();
         m_map.erase(key);
         return std::move(value);
+    }
+
+    [[nodiscard]] auto begin() -> Iterator
+    {
+        return std::begin(m_list);
+    }
+
+    [[nodiscard]] auto end() -> Iterator
+    {
+        return std::end(m_list);
     }
 
 protected:

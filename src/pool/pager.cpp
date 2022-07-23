@@ -102,6 +102,14 @@ auto Pager::pin(PID id) -> Result<Frame>
     return moved;
 }
 
+auto Pager::clean(Frame &frame) -> Result<void>
+{
+    CCO_EXPECT_TRUE(frame.is_dirty());
+    auto result = write_page_to_file(frame.page_id(), frame.data());
+    frame.reset(frame.page_id());
+    return result;
+}
+
 auto Pager::discard(Frame frame) -> void
 {
     frame.purge();
@@ -135,7 +143,14 @@ auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
     static constexpr auto ERROR_DETAIL = "page ID is {}";
     CCO_EXPECT_EQ(page_size(), out.size());
 
-    const auto was_read = m_file->read(out, FileLayout::page_offset(id, out.size()));
+    CCO_TRY_CREATE(file_size, m_file->size());
+    const auto offset = FileLayout::page_offset(id, out.size());
+
+    // Don't even try to call read() if the file isn't large enough. It's pretty slow even if it doesn't read anything.
+    if (offset + out.size() > file_size)
+        return false;
+
+    const auto was_read = m_file->read(out, offset);
 
     // System call error.
     if (!was_read.has_value())
@@ -144,9 +159,6 @@ auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
     // Just read the whole page.
     if (const auto read_size = *was_read; read_size == out.size()) {
         return true;
-    // Just hit EOF.
-    } else if (read_size == 0) {
-        return false;
     // Incomplete read.
     } else {
         ThreePartMessage message;

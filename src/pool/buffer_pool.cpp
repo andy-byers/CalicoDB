@@ -91,27 +91,27 @@ auto BufferPool::pin_frame(PID id) -> Result<void>
 
 auto BufferPool::flush() -> Result<void>
 {
+    const auto flush_frames = [this](auto begin, auto end) -> Result<void> {
+        for (auto itr = begin; itr != end; ++itr) {
+            if (itr->second.is_dirty()) {
+                CCO_TRY(m_pager->clean(itr->second));
+                m_dirty_count--;
+            }
+        }
+        return {};
+    };
     CCO_EXPECT_EQ(m_ref_sum, 0);
     m_logger->trace("flushing");
 
-    if (!m_cache.is_empty()) {
-        m_logger->info("trying to flush {} frames", m_cache.size());
+    if (m_dirty_count > 0) {
+        m_logger->info("trying to flush {} dirty frames", m_dirty_count);
+        CCO_TRY(flush_frames(m_cache.cold_begin(), m_cache.cold_end()));
+        CCO_TRY(flush_frames(m_cache.hot_begin(), m_cache.hot_end()));
 
-        for (; ; ) {
-            CCO_TRY_CREATE(was_evicted, try_evict_frame());
-            if (!was_evicted)
-                break;
-
-            if(page_count()==1){
-
-            }
-        }
-
-        if (!m_cache.is_empty()) {
+        if (m_dirty_count > 0) {
             LogMessage message {*m_logger};
             message.set_primary("cannot flush cache");
-            message.set_detail("{} frames are left", m_cache.size());
-            message.log(spdlog::level::info);
+            message.set_detail("{} dirty frames are left", m_dirty_count);
             return Err {message.system_error()};
         }
         m_logger->info("cache was flushed");
