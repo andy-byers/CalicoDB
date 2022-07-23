@@ -19,6 +19,8 @@ class PageCache final {
 public:
     using Reference = std::reference_wrapper<Frame>;
     using ConstReference = std::reference_wrapper<const Frame>;
+    using ColdCache = utils::FifoCache<PID, Frame, PID::Hasher>;
+    using HotCache = utils::LruCache<PID, Frame, PID::Hasher>;
 
     PageCache() = default;
     ~PageCache() = default;
@@ -43,6 +45,26 @@ public:
         if (const auto total = static_cast<double>(m_hits + m_misses); total != 0.0)
             return static_cast<double>(m_hits) / total;
         return 0.0;
+    }
+
+    [[nodiscard]] auto cold_begin() -> ColdCache::Iterator
+    {
+        return m_cold.begin();
+    }
+
+    [[nodiscard]] auto cold_end() -> ColdCache::Iterator
+    {
+        return m_cold.end();
+    }
+
+    [[nodiscard]] auto hot_begin() -> ColdCache::Iterator
+    {
+        return m_hot.begin();
+    }
+
+    [[nodiscard]] auto hot_end() -> ColdCache::Iterator
+    {
+        return m_hot.end();
     }
 
     auto put(PID, Frame) -> void;

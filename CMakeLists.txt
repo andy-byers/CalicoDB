@@ -31,15 +31,12 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     set(CCO_MAIN_PROJECT On)
 endif()
 
-# Check if we have O_DIRECT, which turns off kernel page caching.
-include(CheckCXXSymbolExists)
-check_cxx_symbol_exists(O_DIRECT "fcntl.h" CCO_HAS_O_DIRECT)
-
-option(CCO_INSTALL "Install the library and headers" ${CCO_MAIN_PROJECT})
-option(CCO_BUILD_TESTS "Build the tests" ${CCO_MAIN_PROJECT})
-option(CCO_BUILD_EXAMPLES "Build the examples" ${CCO_MAIN_PROJECT})
+option(CCO_INSTALL "Install the library and headers" "${CCO_MAIN_PROJECT}")
+option(CCO_BUILD_TESTS "Build the tests" "${CCO_MAIN_PROJECT}")
+option(CCO_BUILD_BENCHMARKS "Build the benchmarks" Off)
+option(CCO_BUILD_EXAMPLES "Build the examples" "${CCO_MAIN_PROJECT}")
 option(CCO_BUILD_FUZZERS "Build the fuzz tests" Off)
-option(CCO_FUZZER_LINK_MAIN "Link each fuzzer with a main() for reproducing specific crashes" Off)
+option(CCO_FUZZER_LINK_MAIN "Link each fuzzer with a main for reproducing specific crashes" Off)
 set(CCO_FUZZER_LDFLAGS "" CACHE STRING "Linker flags for the fuzz targets")
 
 set(CCO_SOURCES '')
@@ -51,33 +48,28 @@ list(APPEND CCO_SOURCES ${CCO_HEADERS})
 include(GNUInstallDirs)
 include(FetchContent)
 
-FetchContent_Declare(
-    spdlog
+FetchContent_Declare(spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG        v1.10.0
 )
 FetchContent_MakeAvailable(spdlog)
 
 # Build the static library.
-add_library(
-    "${CCO_NAME}"
+add_library(calico
     STATIC "${CCO_SOURCES}")
-target_include_directories(
-    "${CCO_NAME}"
+target_include_directories(calico
     PUBLIC  $<BUILD_INTERFACE:${CCO_INCLUDE_DIR}>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE "${CCO_SOURCE_DIR}")
-target_compile_options(
-    "${CCO_NAME}"
+target_compile_options(calico
     PRIVATE "${CCO_WARNINGS}")
-target_link_libraries(
-    "${CCO_NAME}"
+target_link_libraries(calico
     PUBLIC  spdlog::spdlog
     PRIVATE pthread)
 
 # Build the examples/use cases.
 if(CCO_BUILD_EXAMPLES)
-    add_subdirectory(${CCO_EXAMPLES_DIR})
+    add_subdirectory(examples)
 endif()
 
 if(CCO_INSTALL)
@@ -124,11 +116,21 @@ if(CCO_INSTALL)
 #    )
 endif()
 
-if(CCO_BUILD_TESTS)
+if(CCO_BUILD_BENCHMARKS)
     # TODO: Not entirely sure why, but the following line is needed to compile with clang. See https://github.com/google/benchmark/issues/1072
     #       for more info.
-    set(BENCHMARK_ENABLE_EXCEPTIONS On)
+#    set(BENCHMARK_ENABLE_EXCEPTIONS On)
     set(BENCHMARK_ENABLE_TESTING Off)
+    FetchContent_Declare(
+        googlebenchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG        v1.6.2
+    )
+    FetchContent_MakeAvailable(googlebenchmark)
+    add_subdirectory(benchmarks)
+endif()
+
+if(CCO_BUILD_TESTS)
     set(gtest_force_shared_crt On CACHE BOOL "" FORCE)
     FetchContent_Declare(
         googletest
@@ -136,9 +138,8 @@ if(CCO_BUILD_TESTS)
         GIT_TAG        release-1.11.0
     )
     FetchContent_MakeAvailable(googletest)
-
     include(GoogleTest)
     include(CTest)
     enable_testing()
-    add_subdirectory(${CCO_TEST_DIR})
+    add_subdirectory(test)
 endif()

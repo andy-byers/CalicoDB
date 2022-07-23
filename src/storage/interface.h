@@ -25,12 +25,6 @@ enum class Mode: int {
     EXCLUSIVE = O_EXCL,
     SYNCHRONOUS = O_SYNC,
     TRUNCATE = O_TRUNC,
-
-#if CCO_HAS_O_DIRECT
-    DIRECT = O_DIRECT,
-#else
-    DIRECT = 0,
-#endif
 };
 
 inline auto operator|(const Mode &lhs, const Mode &rhs)

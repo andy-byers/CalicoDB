@@ -44,6 +44,7 @@ public:
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto pin(PID) -> Result<Frame>;
     [[nodiscard]] auto unpin(Frame) -> Result<void>;
+    [[nodiscard]] auto clean(Frame&) -> Result<void>;
     [[nodiscard]] auto truncate(Size) -> Result<void>;
     [[nodiscard]] auto sync() -> Result<void>;
     auto discard(Frame) -> void;
