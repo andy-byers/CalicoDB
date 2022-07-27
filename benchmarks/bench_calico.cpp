@@ -211,6 +211,7 @@ BENCHMARK_DEFINE_F(CalicoBenchmarks, RandomBatchWrites)(benchmark::State& state)
 BENCHMARK_DEFINE_F(CalicoBenchmarks, SequentialBatchWrites)(benchmark::State& state) {
     long i {};
     Batch batch;
+
     for (auto _ : state) {
         state.PauseTiming();
         const auto backing = fmt::format("{:016d}", i++);
