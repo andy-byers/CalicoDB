@@ -8,18 +8,15 @@
 
 namespace cco {
 
-class Internal;
-class NodePool;
 struct PID;
-
-namespace page {
-    class Cell;
-    class FileHeaderReader;
-    class FileHeaderWriter;
-    class Link;
-    class Node;
-    class Page;
-} // page
+class Cell;
+class FileHeaderReader;
+class FileHeaderWriter;
+class Link;
+class Internal;
+class Node;
+class NodePool;
+class Page;
 
 class ITree {
 public:
@@ -36,10 +33,10 @@ public:
     [[nodiscard]] virtual auto find(BytesView key) -> Cursor = 0;
     [[nodiscard]] virtual auto find_minimum() -> Cursor = 0;
     [[nodiscard]] virtual auto find_maximum() -> Cursor = 0;
-    [[nodiscard]] virtual auto root(bool) -> Result<page::Node> = 0;
-    [[nodiscard]] virtual auto allocate_root() -> Result<page::Node> = 0;
-    virtual auto save_header(page::FileHeaderWriter&) const -> void = 0;
-    virtual auto load_header(const page::FileHeaderReader&) -> void = 0;
+    [[nodiscard]] virtual auto root(bool) -> Result<Node> = 0;
+    [[nodiscard]] virtual auto allocate_root() -> Result<Node> = 0;
+    virtual auto save_header(FileHeaderWriter&) const -> void = 0;
+    virtual auto load_header(const FileHeaderReader&) -> void = 0;
     virtual auto TEST_validate_node(PID) -> void = 0;
 };
 

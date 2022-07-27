@@ -7,8 +7,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 Frame::Frame(Size size):
       m_owned(size, '\x00'),

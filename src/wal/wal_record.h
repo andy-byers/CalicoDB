@@ -16,15 +16,6 @@
 
 namespace cco {
 
-// WAL payload format:
-//
-//   .-------------- Payload Header -------------.   .------------------ Update Header ----------------.
-//   .-------------------.--------------.--------.   .-------------.--------.-------------.------------.
-//   | previous_lsn (4B) | page_id (4B) | N (2B) |   | offset (2B) | y (2B) | before (yB) | after (yB) | (x N)
-//   '-------------------'--------------'--------'   '-------------'--------'-------------'------------'
-//   0                   4              8        10  s             s+2      s+4           s+y+4        s+y*2+4
-//
-
 /**
  * The variable-length payload field of a WAL record.
  */
@@ -36,9 +27,9 @@ public:
 
     WALPayload() = default;
     ~WALPayload() = default;
-    explicit WALPayload(const page::PageUpdate&);
+    explicit WALPayload(const PageUpdate&);
     [[nodiscard]] auto is_commit() const -> bool;
-    [[nodiscard]] auto decode() const -> page::PageUpdate;
+    [[nodiscard]] auto decode() const -> PageUpdate;
 
     [[nodiscard]] auto data() const -> BytesView
     {
@@ -72,7 +63,7 @@ public:
 
     static auto commit(LSN) -> WALRecord;
     WALRecord() = default;
-    explicit WALRecord(const page::PageUpdate&);
+    explicit WALRecord(const PageUpdate&);
     ~WALRecord() = default;
 
     [[nodiscard]] auto lsn() const -> LSN
@@ -106,7 +97,7 @@ public:
         return m_payload.is_commit();
     }
 
-    [[nodiscard]] auto decode() const -> page::PageUpdate
+    [[nodiscard]] auto decode() const -> PageUpdate
     {
         auto decoded = m_payload.decode();
         decoded.lsn = m_lsn;

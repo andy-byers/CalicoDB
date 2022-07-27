@@ -7,7 +7,7 @@
 #include <numeric>
 #include <spdlog/spdlog.h>
 
-namespace cco::utils {
+namespace cco {
 
 constexpr auto LOG_NAME = "log";
 
@@ -97,6 +97,6 @@ private:
     spdlog::logger *m_logger {};
 };
 
-} // cco::utils
+} // cco
 
 #endif // CCO_UTILS_LOGGING_H

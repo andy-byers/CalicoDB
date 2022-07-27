@@ -25,6 +25,11 @@ public:
         return 1.0;
     }
 
+    [[nodiscard]] auto uses_xact() const -> bool override
+    {
+        return m_uses_xact;
+    }
+
     [[nodiscard]] auto page_size() const -> Size override
     {
         return m_page_size;
@@ -34,7 +39,6 @@ public:
     {
         return {};
     }
-
 
     [[nodiscard]] auto status() const -> Status override
     {
@@ -55,16 +59,15 @@ public:
 
     [[nodiscard]] auto page_count() const -> Size override;
     [[nodiscard]] auto close() -> Result<void> override;
-    [[nodiscard]] auto allocate() -> Result<page::Page> override;
-    [[nodiscard]] auto acquire(PID, bool) -> Result<page::Page> override;
-    [[nodiscard]] auto release(page::Page) -> Result<void> override;
-    [[nodiscard]] auto fetch(PID id, bool is_writable) -> Result<page::Page> override;
+    [[nodiscard]] auto allocate() -> Result<Page> override;
+    [[nodiscard]] auto acquire(PID, bool) -> Result<Page> override;
+    [[nodiscard]] auto release(Page) -> Result<void> override;
+    [[nodiscard]] auto fetch(PID id, bool is_writable) -> Result<Page> override;
     [[nodiscard]] auto commit() -> Result<void> override;
     [[nodiscard]] auto abort() -> Result<void> override;
-    auto on_release(page::Page&) -> void override;
-    auto save_header(page::FileHeaderWriter&) -> void override;
-    auto load_header(const page::FileHeaderReader&) -> void override;
-    auto purge() -> void override;
+    auto on_release(Page&) -> void override;
+    auto save_header(FileHeaderWriter&) -> void override;
+    auto load_header(const FileHeaderReader&) -> void override;
 
 private:
     struct UndoInfo {
@@ -73,15 +76,15 @@ private:
         Index offset {};
     };
 
-    auto do_release(page::Page&) -> void;
+    auto do_release(Page&) -> void;
 
     mutable std::mutex m_mutex;
     Tracker m_tracker;
-    utils::ScratchManager m_scratch;
+    ScratchManager m_scratch;
     std::vector<UndoInfo> m_stack;
     std::vector<Frame> m_frames;
     Size m_page_size {};
-    bool m_use_xact {};
+    bool m_uses_xact {};
 };
 
 } // cco

@@ -3,7 +3,7 @@
 
 #include "page.h"
 
-namespace cco::page {
+namespace cco {
 
 class Link {
 public:
@@ -49,6 +49,6 @@ private:
     Page m_page;
 };
 
-} // cco::page
+} // cco
 
 #endif // CCO_PAGE_LINK_H

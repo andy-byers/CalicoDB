@@ -57,10 +57,10 @@ public:
     [[nodiscard]] static auto open(const Parameters&) -> Result<std::unique_ptr<ITree>>;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool> override;
     [[nodiscard]] auto erase(Cursor) -> Result<bool> override;
-    [[nodiscard]] auto root(bool) -> Result<page::Node> override;
-    [[nodiscard]] auto allocate_root() -> Result<page::Node> override;
-    auto save_header(page::FileHeaderWriter&) const -> void override;
-    auto load_header(const page::FileHeaderReader&) -> void override;
+    [[nodiscard]] auto root(bool) -> Result<Node> override;
+    [[nodiscard]] auto allocate_root() -> Result<Node> override;
+    auto save_header(FileHeaderWriter&) const -> void override;
+    auto load_header(const FileHeaderReader&) -> void override;
     auto find_exact(BytesView) -> Cursor override;
     auto find(BytesView key) -> Cursor override;
     auto find_minimum() -> Cursor override;
@@ -69,7 +69,7 @@ public:
 
 private:
     struct SearchResult {
-        page::Node node;
+        Node node;
         Index index {};
         bool was_found {};
     };

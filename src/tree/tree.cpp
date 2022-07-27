@@ -1,4 +1,5 @@
 #include "tree.h"
+#include "cursor_internal.h"
 #include "calico/cursor.h"
 #include "page/file_header.h"
 #include "page/node.h"
@@ -8,8 +9,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 Tree::Tree(const Parameters &param)
     : m_pool {{param.buffer_pool, param.free_start, param.free_count, param.node_count}},
@@ -23,7 +22,7 @@ auto Tree::open(const Parameters &param) -> Result<std::unique_ptr<ITree>>
     return tree;
 }
 
-auto Tree::allocate_root() -> Result<page::Node>
+auto Tree::allocate_root() -> Result<Node>
 {
     CCO_EXPECT_EQ(m_pool.node_count(), 0);
     CCO_TRY_CREATE(root, m_pool.allocate(PageType::EXTERNAL_NODE));
@@ -71,8 +70,8 @@ auto Tree::insert(BytesView key, BytesView value) -> Result<bool>
 auto Tree::erase(Cursor cursor) -> Result<bool>
 {
     if (cursor.is_valid()) {
-        CCO_TRY_CREATE(node, m_pool.acquire(PID {cursor.id()}, true));
-        CCO_TRY(m_internal.positioned_remove({std::move(node), cursor.index()}));
+        CCO_TRY_CREATE(node, m_pool.acquire(PID {CursorInternal::id(cursor)}, true));
+        CCO_TRY(m_internal.positioned_remove({std::move(node), CursorInternal::index(cursor)}));
         return true;
     } else if (!cursor.status().is_ok()) {
         return Err {cursor.status()};
@@ -104,74 +103,74 @@ auto Tree::find_aux(BytesView key) -> Result<SearchResult>
 
 auto Tree::find_exact(BytesView key) -> Cursor
 {
-    Cursor cursor {&m_pool, &m_internal};
+    auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
     auto result = find_aux(key);
     if (!result.has_value()) {
-        cursor.invalidate(result.error());
+        CursorInternal::invalidate(cursor, result.error());
     } else if (result->was_found) {
         auto [node, index, found_exact] = std::move(*result);
         CCO_EXPECT_TRUE(found_exact);
-        cursor.move_to(std::move(node), index);
+        CursorInternal::move_to(cursor, std::move(node), index);
     }
     return cursor;
 }
 
 auto Tree::find(BytesView key) -> Cursor
 {
-    Cursor cursor {&m_pool, &m_internal};
+    auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
     auto result = find_aux(key);
     if (!result.has_value()) {
-        cursor.invalidate(result.error());
+        CursorInternal::invalidate(cursor, result.error());
     } else {
         auto [node, index, found_exact] = std::move(*result);
-        cursor.move_to(std::move(node), index);
+        CursorInternal::move_to(cursor, std::move(node), index);
     }
     return cursor;
 }
 
 auto Tree::find_minimum() -> Cursor
 {
-    Cursor cursor {&m_pool, &m_internal};
+    auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
     auto temp = m_internal.find_minimum();
     if (!temp.has_value()) {
-        cursor.invalidate(temp.error());
+        CursorInternal::invalidate(cursor, temp.error());
         return cursor;
     }
     auto [id, index, was_found] = *temp;
     if (!was_found) {
-        cursor.invalidate(Status::not_found());
+        CursorInternal::invalidate(cursor, Status::not_found());
         return cursor;
     }
     auto node = m_pool.acquire(id, false);
     if (!node.has_value()) {
-        cursor.invalidate(temp.error());
+        CursorInternal::invalidate(cursor, temp.error());
         return cursor;
     }
     CCO_EXPECT_EQ(index, 0);
-    cursor.move_to(std::move(*node), index);
+    CursorInternal::move_to(cursor, std::move(*node), index);
     return cursor;
 }
 
 auto Tree::find_maximum() -> Cursor
 {
-    Cursor cursor {&m_pool, &m_internal};
+    auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
     auto temp = m_internal.find_maximum();
     if (!temp.has_value()) {
-        cursor.invalidate(temp.error());
+        CursorInternal::invalidate(cursor, temp.error());
         return cursor;
     }
     auto [id, index, was_found] = *temp;
     if (!was_found) {
-        cursor.invalidate(Status::not_found());
+        CursorInternal::invalidate(cursor, Status::not_found());
         return cursor;
     }
     auto node = m_pool.acquire(id, false);
     if (!node.has_value()) {
-        cursor.invalidate(temp.error());
+        CursorInternal::invalidate(cursor, temp.error());
         return cursor;
     }
     CCO_EXPECT_EQ(index, node->cell_count() - 1);
-    cursor.move_to(std::move(*node), index);
+    CursorInternal::move_to(cursor, std::move(*node), index);
     return cursor;
 }
 

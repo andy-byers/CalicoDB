@@ -12,24 +12,39 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
+
+TEST(PagerOpenTests, A)
+{
+    auto home = std::make_unique<FakeDirectory>("PagerOpenTests");
+    auto file = home->open_fake_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
+    auto memory = file->shared_memory();
+    auto pager = Pager::open({
+        std::move(file),
+        0x100,
+        16,
+    });
+
+}
 
 class PagerTests: public testing::Test {
 public:
-    static constexpr Size frame_count {32};
-    static constexpr Size page_size {0x100};
-
     explicit PagerTests()
         : home {std::make_unique<FakeDirectory>("PagerTests")}
     {
         file = home->open_fake_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
         memory = file->shared_memory();
-        pager = Pager::open({
+    }
+
+    auto setup(Size page_size, Size frame_count) -> Result<void>
+    {
+        return Pager::open({
             std::move(file),
             page_size,
             frame_count,
-        }).value();
+        }).and_then([this](std::unique_ptr<Pager> p) -> Result<void> {
+            pager = std::move(p);
+            return {};
+        });
     }
 
     ~PagerTests() override = default;
@@ -41,35 +56,34 @@ public:
     std::unique_ptr<Pager> pager;
 };
 
-TEST_F(PagerTests, FreshPagerHasAllFramesAvailable)
+TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
-    ASSERT_EQ(pager->available(), frame_count);
+    setup(0x100, 16);
+    ASSERT_EQ(pager->available(), 16);
+    ASSERT_EQ(pager->page_size(), 0x100);
 }
 
-TEST_F(PagerTests, FreshPagerIsSetUpCorrectly)
+TEST_F(PagerTests, KeepsTrackOfAvailableCount)
 {
-    ASSERT_EQ(pager->page_size(), page_size);
-}
-
-TEST_F(PagerTests, PagerKeepsTrackOfAvailableCount)
-{
+    setup(0x100, 16);
     auto frame = pager->pin(PID::root());
-    ASSERT_EQ(pager->available(), frame_count - 1);
+    ASSERT_EQ(pager->available(), 15);
     pager->discard(std::move(*frame));
-    ASSERT_EQ(pager->available(), frame_count);
+    ASSERT_EQ(pager->available(), 16);
 }
 
 TEST_F(PagerTests, PagerCreatesExtraPagesOnDemand)
 {
-    Index i {ROOT_ID_VALUE};
-    for (; i < frame_count * 2; )
-        ASSERT_TRUE(pager->pin(PID {i++}));
+    setup(0x100, 16);
+    for (Index i {ROOT_ID_VALUE}; i < 32; i++)
+        ASSERT_TRUE(pager->pin(PID {i}));
 }
 
 TEST_F(PagerTests, TruncateResizesUnderlyingFile)
 {
+    setup(0x100, 16);
     ASSERT_TRUE(pager->unpin(*pager->pin(PID::root())));
-    ASSERT_NE(memory.memory().size(), page_size);
+    ASSERT_NE(memory.memory().size(), 0x100);
     ASSERT_TRUE(pager->truncate(0));
     ASSERT_EQ(memory.memory().size(), 0);
 }
@@ -79,11 +93,11 @@ public:
     static constexpr Size frame_count {32};
     static constexpr Size page_size {0x100};
 
-    explicit BufferPoolTestsBase(std::unique_ptr<FakeDirectory> memory_home):
+    explicit BufferPoolTestsBase(std::unique_ptr<MockDirectory> memory_home):
           home {std::move(memory_home)}
     {
-        auto file = home->open_fake_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
-        memory = file->shared_memory();
+        EXPECT_CALL(*home, open_file).Times(1);
+
         pool = *BufferPool::open({
             *home,
             create_sink(),
@@ -93,20 +107,22 @@ public:
             page_size,
             false,
         });
+
+        mock = home->get_mock_file("data", Mode::CREATE | Mode::READ_WRITE);
     }
 
     ~BufferPoolTestsBase() override = default;
 
     Random random {0};
-    SharedMemory memory;
-    std::unique_ptr<FakeDirectory> home;
+    MockFile *mock;
+    std::unique_ptr<MockDirectory> home;
     std::unique_ptr<IBufferPool> pool;
 };
 
 class BufferPoolTests: public BufferPoolTestsBase {
 public:
     BufferPoolTests():
-          BufferPoolTestsBase {std::make_unique<FakeDirectory>("BufferPoolTests")} {}
+          BufferPoolTestsBase {std::make_unique<MockDirectory>("BufferPoolTests")} {}
 
     ~BufferPoolTests() override = default;
 };
@@ -254,7 +270,6 @@ TEST_F(MemoryPoolTests, FreshMemoryPoolIsSetUpCorrectly)
 TEST_F(MemoryPoolTests, StubMethodsWork)
 {
     ASSERT_TRUE(pool->flush());
-    pool->purge();
 }
 
 TEST_F(MemoryPoolTests, SanityCheck)

@@ -1,7 +1,6 @@
 
 #include "database_impl.h"
-#include "calico/cursor.h"
-#include "calico/status.h"
+#include "calico/calico.h"
 #include "page/file_header.h"
 #include "pool/buffer_pool.h"
 #include "pool/memory_pool.h"
@@ -14,27 +13,25 @@
 namespace cco {
 
 namespace fs = std::filesystem;
-using namespace page;
-using namespace utils;
 
 auto Info::cache_hit_ratio() const -> double
 {
-    return m_db->cache_hit_ratio();
+    return m_impl->cache_hit_ratio();
 }
 
 auto Info::record_count() const -> Size
 {
-    return m_db->record_count();
+    return m_impl->record_count();
 }
 
 auto Info::page_count() const -> Size
 {
-    return m_db->page_count();
+    return m_impl->page_count();
 }
 
 auto Info::page_size() const -> Size
 {
-    return m_db->page_size();
+    return m_impl->page_size();
 }
 
 auto Info::maximum_key_size() const -> Size
@@ -44,7 +41,12 @@ auto Info::maximum_key_size() const -> Size
 
 auto Info::is_temp() const -> bool
 {
-    return m_db->is_temp();
+    return m_impl->is_temp();
+}
+
+auto Info::uses_xact() const -> bool
+{
+    return m_impl->uses_xact();
 }
 
 auto initialize_log(spdlog::logger &logger, const std::string &base)
@@ -57,8 +59,8 @@ auto initialize_log(spdlog::logger &logger, const std::string &base)
 auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) -> Result<std::unique_ptr<Impl>>
 {
     const auto path = home->path();
-    auto sink = utils::create_sink(path, param.options.log_level);
-    auto logger = utils::create_logger(sink, "db");
+    auto sink = create_sink(path, param.options.log_level);
+    auto logger = create_logger(sink, "db");
     initialize_log(*logger, path);
 
     CCO_TRY_CREATE(initial_state, setup(*home, param.options, *logger));
@@ -133,6 +135,16 @@ Database::Impl::~Impl()
         m_logger->error("failed to close in destructor");
 }
 
+auto Database::Impl::uses_xact() const -> bool
+{
+    return m_pool->uses_xact();
+}
+
+auto Database::Impl::can_commit() const -> bool
+{
+    return m_pool->can_commit();
+}
+
 auto Database::Impl::status() const -> Status
 {
     return m_pool->status();
@@ -140,13 +152,13 @@ auto Database::Impl::status() const -> Status
 
 auto Database::Impl::path() const -> std::string
 {
-    return m_home->path();
+    return m_is_temp ? std::string {} : m_home->path();
 }
 
 auto Database::Impl::info() -> Info
 {
     Info info;
-    info.m_db = this;
+    info.m_impl = this;
     return info;
 }
 
@@ -217,10 +229,16 @@ auto Database::Impl::abort() -> Result<void>
         });
 }
 
+auto Database::Impl::recover() -> Result<void>
+{
+    m_logger->trace("recovering");
+    return m_pool->recover();
+}
+
 auto Database::Impl::close() -> Result<void>
 {
     const auto cr = commit();
-    if (!cr.has_value()) {
+    if (!cr.has_value() && !cr.error().is_logic_error()) {
         m_logger->error("cannot commit before close");
         m_logger->error("(reason) {}", cr.error().what());
     }
@@ -299,7 +317,18 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
     std::string backing(FileLayout::HEADER_SIZE, '\x00');
     FileHeaderReader reader {stob(backing)};
     FileHeaderWriter writer {stob(backing)};
-    bool is_new {};
+
+    if (options.frame_count < MINIMUM_FRAME_COUNT) {
+        message.set_detail("frame count is too small");
+        message.set_hint("minimum frame count is {}", MINIMUM_FRAME_COUNT);
+        return Err {message.invalid_argument()};
+    }
+
+    if (options.frame_count > MAXIMUM_FRAME_COUNT) {
+        message.set_detail("frame count is too large");
+        message.set_hint("maximum frame count is {}", MAXIMUM_FRAME_COUNT);
+        return Err {message.invalid_argument()};
+    }
 
     CCO_TRY_CREATE(exists, directory.exists(DATA_NAME));
 
@@ -334,22 +363,16 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
             return Err {message.corruption()};
         }
         revised.use_xact = !reader.flushed_lsn().is_null();
-
-    } else {
+        CCO_TRY(file->close());
+    }else {
         writer.update_magic_code();
         writer.set_page_size(options.page_size);
         writer.set_flushed_lsn(LSN::base());
         writer.update_header_crc();
-        is_new = true;
-
-        // Try to create the file. If it doesn't work this time, we've got a problem.
-        std::unique_ptr<IFile> file;
-        const auto mode = Mode::READ_WRITE | Mode::CREATE;
-        CCO_TRY_STORE(file, directory.open_file(DATA_NAME, mode, perm));
     }
 
-    const auto choose_error = [is_new, &message] {
-        return Err {is_new ? message.invalid_argument() : message.corruption()};
+    const auto choose_error = [exists, &message] {
+        return Err {exists ? message.corruption() : message.invalid_argument()};
     };
 
     if (reader.page_size() < MINIMUM_PAGE_SIZE) {
@@ -367,8 +390,9 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
         message.set_hint("must be a power of 2");
         return choose_error();
     }
+
     revised.page_size = reader.page_size();
-    return InitialState {std::move(backing), revised, is_new};
+    return InitialState {std::move(backing), revised, !exists};
 }
 
 } // cco

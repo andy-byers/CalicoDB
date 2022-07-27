@@ -44,28 +44,28 @@ public:
      *
      * @param page The page to push.
      */
-    [[nodiscard]] auto push(page::Page page) -> Result<void>;
+    [[nodiscard]] auto push(Page page) -> Result<void>;
 
     /**
      * Pop a page off of the free list stack.
      *
      * @return The page at the top of the free list stack, or a logic error result if the free list is empty.
      */
-    [[nodiscard]] auto pop() -> Result<page::Page>;
+    [[nodiscard]] auto pop() -> Result<Page>;
 
     /**
      * Save state to a file header.
      *
      * @param header The header to save state to.
      */
-    auto save_header(page::FileHeaderWriter &header) const -> void;
+    auto save_header(FileHeaderWriter &header) const -> void;
 
     /**
      * Load state from a file header.
      *
      * @param header The header to read state from.
      */
-    auto load_header(const page::FileHeaderReader &header) -> void;
+    auto load_header(const FileHeaderReader &header) -> void;
 
     /**
      * Determine if the free list is empty.

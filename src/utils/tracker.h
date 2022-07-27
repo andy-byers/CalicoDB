@@ -14,14 +14,14 @@ public:
     explicit Tracker(Size page_size):
           m_scratch {page_size} {}
 
-    [[nodiscard]] auto collect(page::Page&, LSN) -> page::PageUpdate;
+    [[nodiscard]] auto collect(Page&, LSN) -> PageUpdate;
     auto reset() -> void;
-    auto discard(page::Page&) -> void;
-    auto track(page::Page&) -> void;
+    auto discard(Page&) -> void;
+    auto track(Page&) -> void;
 
 private:
-    std::unordered_map<PID, page::UpdateManager, PID::Hasher> m_registry;
-    utils::ScratchManager m_scratch;
+    std::unordered_map<PID, UpdateManager, PID::Hasher> m_registry;
+    ScratchManager m_scratch;
 };
 
 } // cco

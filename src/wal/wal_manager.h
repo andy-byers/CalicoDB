@@ -18,14 +18,14 @@ public:
     [[nodiscard]] auto flushed_lsn() const -> LSN override;
     [[nodiscard]] auto truncate() -> Result<void> override;
     [[nodiscard]] auto flush() -> Result<void> override;
-    [[nodiscard]] auto append(page::Page&) -> Result<void> override;
+    [[nodiscard]] auto append(Page&) -> Result<void> override;
     [[nodiscard]] auto recover() -> Result<void> override;
     [[nodiscard]] auto abort() -> Result<void> override;
     [[nodiscard]] auto commit() -> Result<void> override;
-    auto discard(page::Page&) -> void override;
-    auto track(page::Page&) -> void override;
-    auto save_header(page::FileHeaderWriter&) -> void override;
-    auto load_header(const page::FileHeaderReader&) -> void override;
+    auto discard(Page&) -> void override;
+    auto track(Page&) -> void override;
+    auto save_header(FileHeaderWriter&) -> void override;
+    auto load_header(const FileHeaderReader&) -> void override;
 private:
     explicit WALManager(const WALParameters&);
     [[nodiscard]] auto roll_forward() -> Result<bool>;

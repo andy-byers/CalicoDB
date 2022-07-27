@@ -13,7 +13,7 @@ namespace fs = std::filesystem;
 class CalicoBenchmarks: public benchmark::Fixture {
 public:
     static constexpr auto PATH = "/tmp/calico_benchmarks__";
-    static constexpr Size BATCH_SIZE {5'000};
+    static constexpr Size BATCH_SIZE {10'000};
 
     CalicoBenchmarks()
     {
@@ -27,7 +27,7 @@ public:
         fs::remove_all(PATH, ignore);
     }
 
-    auto SetUp(const benchmark::State &state) -> void
+    auto SetUp(benchmark::State &state) -> void override
     {
         // If the "is_persistent" flag is set, we only create the database once. If we try to recreate it each time, we lose our cache each time this
         // method is called. This makes the benchmarks run extremely slow since each page must be reread from disk. Also, the first few batches where
@@ -40,41 +40,32 @@ public:
                 is_persistent ? PATH : "",
                 0x8000,
                 128,
+                0644,
+                state.range(1) != 0,
                 spdlog::level::off,
-                0666,
-                true,
             });
 
             const auto s = db->open();
             if (!s.is_ok()) {
-                fmt::print("failed to open benchmark database\n");
+                fmt::print("failed to open in-memory database\n");
                 fmt::print("(reason) {}\n", s.what());
                 std::exit(EXIT_FAILURE);
             }
         }
     }
 
-    auto TearDown(const benchmark::State &state) -> void
+    auto TearDown(const benchmark::State &state) -> void override
     {
         const bool is_persistent = state.range(0);
         if (!is_persistent) {
             const auto s = db->close();
             if (!s.is_ok()) {
-                fmt::print("failed close transient database\n");
+                fmt::print("failed to close in-memory database\n");
                 fmt::print("(reason) {}\n", s.what());
                 std::exit(EXIT_FAILURE);
             }
             return;
         }
-        //
-//        while (db->info().record_count() > 10'000) {
-//            const auto s = db->erase(db->find_minimum());
-//            if (!s.is_ok()) {
-//                fmt::print("failed to keep benchmark database from getting too large\n");
-//                fmt::print("(reason) {}\n", s.what());
-//                std::exit(EXIT_FAILURE);
-//            }
-//        }
     }
 
     auto next_key() -> cco::BytesView
@@ -85,6 +76,11 @@ public:
     auto next_value() -> cco::BytesView
     {
         return generator.generate(100);
+    }
+
+    auto next_large_value() -> cco::BytesView
+    {
+        return generator.generate(100'000);
     }
 
     cco::RandomGenerator generator;
@@ -103,30 +99,26 @@ BENCHMARK_DEFINE_F(CalicoBenchmarks, RandomWrites)(benchmark::State& state) {
         const auto key = next_key();
         const auto value = next_value();
         auto s = Status::ok();
-        auto t = s;
         state.ResumeTiming();
 
         s = db->insert(key, value);
-        t = db->commit();
 
         state.PauseTiming();
         handle_error(state, s);
-        handle_error(state, t);
         state.ResumeTiming();
     }
 }
 
 BENCHMARK_DEFINE_F(CalicoBenchmarks, RandomReads)(benchmark::State& state) {
-    while (db->info().record_count() < 10'000)
+    while (db->info().record_count() < 50'000)
         benchmark::DoNotOptimize(db->insert(next_key(), next_value()));
 
     for (auto _ : state) {
         state.PauseTiming();
         const auto key = next_key();
-        Cursor c;
         state.ResumeTiming();
 
-        c = db->find(key);
+        auto c = db->find(key);
 
         state.PauseTiming();
         const auto s = c.status();
@@ -145,24 +137,21 @@ BENCHMARK_DEFINE_F(CalicoBenchmarks, SequentialWrites)(benchmark::State& state) 
         const auto key = stob(backing);
         const auto value = next_value();
         auto s = Status::ok();
-        auto t = s;
         state.ResumeTiming();
 
         s = db->insert(key, value);
-        t = db->commit();
 
         state.PauseTiming();
         handle_error(state, s);
-        handle_error(state, t);
         state.ResumeTiming();
     }
 }
 
 BENCHMARK_DEFINE_F(CalicoBenchmarks, ForwardIteration)(benchmark::State& state) {
-    while (db->info().record_count() < 10'000)
+    while (db->info().record_count() < 50'000)
         benchmark::DoNotOptimize(db->insert(next_key(), next_value()));
 
-    Cursor c;
+    auto c = db->find_minimum();
 
     for (auto _ : state) {
         state.PauseTiming();
@@ -178,10 +167,10 @@ BENCHMARK_DEFINE_F(CalicoBenchmarks, ForwardIteration)(benchmark::State& state) 
 }
 
 BENCHMARK_DEFINE_F(CalicoBenchmarks, ReverseIteration)(benchmark::State& state) {
-    while (db->info().record_count() < 10'000)
+    while (db->info().record_count() < 50'000)
         benchmark::DoNotOptimize(db->insert(next_key(), next_value()));
 
-    Cursor c;
+    auto c = db->find_minimum();
 
     for (auto _ : state) {
         state.PauseTiming();
@@ -198,28 +187,30 @@ BENCHMARK_DEFINE_F(CalicoBenchmarks, ReverseIteration)(benchmark::State& state) 
 
 BENCHMARK_DEFINE_F(CalicoBenchmarks, RandomBatchWrites)(benchmark::State& state) {
     long i {};
+    Batch batch;
     for (auto _ : state) {
         state.PauseTiming();
         const auto key = next_key();
         const auto value = next_value();
         const auto should_commit = ++i % BATCH_SIZE == 0;
         auto s = Status::ok();
-        auto t = s;
         state.ResumeTiming();
 
-        s = db->insert(key, value);
-        if (should_commit)
-            t = db->commit();
+        batch.insert(key, value);
+        if (should_commit) {
+            s = db->apply(batch);
+            batch = Batch {};
+        }
 
         state.PauseTiming();
         handle_error(state, s);
-        handle_error(state, t);
         state.ResumeTiming();
     }
 }
 
 BENCHMARK_DEFINE_F(CalicoBenchmarks, SequentialBatchWrites)(benchmark::State& state) {
     long i {};
+    Batch batch;
 
     for (auto _ : state) {
         state.PauseTiming();
@@ -228,57 +219,114 @@ BENCHMARK_DEFINE_F(CalicoBenchmarks, SequentialBatchWrites)(benchmark::State& st
         const auto key = stob(backing);
         const auto value = next_value();
         auto s = Status::ok();
-        auto t = s;
         state.ResumeTiming();
 
-        s = db->insert(key, value);
-        if (should_commit)
-            t = db->commit();
+        batch.insert(key, value);
+        if (should_commit) {
+            s = db->apply(batch);
+            batch = Batch {};
+        }
 
         state.PauseTiming();
         handle_error(state, s);
-        handle_error(state, t);
         state.ResumeTiming();
     }
 }
 
-auto compute_ops_per_second(const std::vector<double>& v) -> double
-{
-    fmt::print("{} {}\n", v.size(), v[0]);
-    return 1.0;
+BENCHMARK_DEFINE_F(CalicoBenchmarks, RandomBatchWrites100K)(benchmark::State& state) {
+    Index i {};
+    Batch batch;
+    for (auto _ : state) {
+        state.PauseTiming();
+        const auto key = next_key();
+        const auto value = next_large_value();
+        const auto should_commit = ++i % BATCH_SIZE == 0;
+        auto s = Status::ok();
+        state.ResumeTiming();
+
+        batch.insert(key, value);
+        if (should_commit) {
+            s = db->apply(batch);
+            batch = Batch {};
+        }
+
+        state.PauseTiming();
+        handle_error(state, s);
+        state.ResumeTiming();
+    }
+}
+
+BENCHMARK_DEFINE_F(CalicoBenchmarks, RandomReads100K)(benchmark::State& state) {
+    while (db->info().record_count() < 1'000)
+        benchmark::DoNotOptimize(db->insert(next_key(), next_large_value()));
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        const auto key = next_key();
+        state.ResumeTiming();
+
+        auto c = db->find(key);
+        benchmark::DoNotOptimize(c.key());
+
+        // Will traverse the overflow chain to get the whole value.
+        benchmark::DoNotOptimize(c.value());
+
+        state.PauseTiming();
+        const auto s = c.status();
+        if (!s.is_ok() && !s.is_not_found())
+            state.SkipWithError(s.what().c_str());
+        state.ResumeTiming();
+    }
 }
 
 constexpr long IN_MEMORY {0};
 constexpr long PERSISTENT {1};
 
 BENCHMARK_REGISTER_F(CalicoBenchmarks, RandomWrites)
-    ->ComputeStatistics("ops_per_second", compute_ops_per_second)
-    ->Arg(PERSISTENT)
-    ->Arg(IN_MEMORY);
-BENCHMARK_REGISTER_F(CalicoBenchmarks, RandomReads)
-    ->ComputeStatistics("ops_per_second", compute_ops_per_second)
-    ->Arg(PERSISTENT)
-    ->Arg(IN_MEMORY);
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
 BENCHMARK_REGISTER_F(CalicoBenchmarks, SequentialWrites)
-    ->ComputeStatistics("ops_per_second", compute_ops_per_second)
-    ->Arg(PERSISTENT)
-    ->Arg(IN_MEMORY);
-BENCHMARK_REGISTER_F(CalicoBenchmarks, ForwardIteration)
-    ->ComputeStatistics("ops_per_second", compute_ops_per_second)
-    ->Arg(PERSISTENT)
-    ->Arg(IN_MEMORY);
-BENCHMARK_REGISTER_F(CalicoBenchmarks, ReverseIteration)
-    ->ComputeStatistics("ops_per_second", compute_ops_per_second)
-    ->Arg(PERSISTENT)
-    ->Arg(IN_MEMORY);
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
 BENCHMARK_REGISTER_F(CalicoBenchmarks, RandomBatchWrites)
-    ->ComputeStatistics("ops_per_second", compute_ops_per_second)
-    ->Arg(PERSISTENT)
-    ->Arg(IN_MEMORY);
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
 BENCHMARK_REGISTER_F(CalicoBenchmarks, SequentialBatchWrites)
-    ->ComputeStatistics("ops_per_second", compute_ops_per_second)
-    ->Arg(PERSISTENT)
-    ->Arg(IN_MEMORY);
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
+BENCHMARK_REGISTER_F(CalicoBenchmarks, RandomReads)
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
+BENCHMARK_REGISTER_F(CalicoBenchmarks, ForwardIteration)
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
+BENCHMARK_REGISTER_F(CalicoBenchmarks, ReverseIteration)
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
+BENCHMARK_REGISTER_F(CalicoBenchmarks, RandomBatchWrites100K)
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
+BENCHMARK_REGISTER_F(CalicoBenchmarks, RandomReads100K)
+    ->Args({PERSISTENT, true})
+    ->Args({PERSISTENT, false})
+    ->Args({IN_MEMORY, true})
+    ->Args({IN_MEMORY, false});
 BENCHMARK_MAIN();
 
 

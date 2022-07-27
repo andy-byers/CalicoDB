@@ -1,21 +1,22 @@
 #include "scratch.h"
+#include "expect.h"
 
-namespace cco::utils {
+namespace cco {
 
 auto ScratchManager::get() -> Scratch
 {
-    if (m_available.empty()) {
-        m_occupied.emplace_back(m_scratch_size, '\x00');
-    } else {
-        m_occupied.emplace_back(std::move(m_available.back()));
-        m_available.pop_back();
+    if (m_counter >= MAXIMUM_SCRATCHES - 1) {
+        CCO_EXPECT_EQ(m_counter, MAXIMUM_SCRATCHES - 1);
+        m_emergency.emplace_back(m_scratch_size, '\x00');
+        return Scratch {stob(m_emergency.back())};
     }
-    return Scratch {stob(m_occupied.back())};
+    return Scratch {stob(m_scratches[m_counter++])};
 }
 
 auto ScratchManager::reset() -> void
 {
-    m_available.splice(end(m_available), m_occupied);
+    m_counter = 0;
+    m_emergency.clear();
 }
 
-} // cco::utils
+} // cco

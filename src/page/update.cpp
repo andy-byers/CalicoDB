@@ -2,9 +2,8 @@
 
 #include <algorithm>
 
-namespace cco::page {
+namespace cco {
 
-using namespace utils;
 
 namespace impl {
     auto can_merge(const Range &lhs, const Range &rhs) -> bool
@@ -101,7 +100,7 @@ auto UpdateManager::collect() -> std::vector<ChangedRegion>
     return update;
 }
 
-} // cco::page
+} // cco
 
 
 

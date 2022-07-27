@@ -2,8 +2,7 @@
 #define CCO_FUZZ_FUZZ_H
 
 #include <array>
-#include "calico/database.h"
-#include "calico/cursor.h"
+#include "calico/calico.h"
 #include "utils/expect.h"
 
 namespace cco {

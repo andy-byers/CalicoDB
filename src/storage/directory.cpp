@@ -32,7 +32,7 @@ auto Directory::open(const std::string &path) -> Result<std::unique_ptr<IDirecto
     if (code)
         return Err {Status::system_error(code.message())};
 
-    return system::open(path, static_cast<int>(Mode::READ_ONLY), 0666)
+    return system::open(path, static_cast<int>(Mode::READ_ONLY), DEFAULT_PERMISSIONS)
         .and_then([path](int fd) {
             auto directory = std::unique_ptr<Directory>(new Directory);
             directory->m_file = fd;

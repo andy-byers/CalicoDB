@@ -2,6 +2,7 @@
 
 #include "calico/bytes.h"
 #include "calico/options.h"
+#include "calico/status.h"
 #include "random.h"
 #include "unit_tests.h"
 #include "utils/encoding.h"
@@ -15,7 +16,7 @@
 namespace {
 
 using namespace cco;
-using namespace cco::utils;
+using namespace cco;
 
 TEST(AssertionDeathTest, Assert)
 {
@@ -330,9 +331,18 @@ TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
     while (page_size <= MAXIMUM_PAGE_SIZE) {
         const auto max_local = get_max_local(page_size) + MAX_CELL_HEADER_SIZE;
         ASSERT_LE(max_local * 4, page_size - start);
-        std::cout << page_size-start << " >= " << max_local*4 << '\n';
         page_size <<= 1;
     }
+}
+
+TEST(StatusTests, StatusCodesAreCorrect)
+{
+    ASSERT_TRUE(Status::invalid_argument("").is_invalid_argument());
+    ASSERT_TRUE(Status::system_error("").is_system_error());
+    ASSERT_TRUE(Status::logic_error("").is_logic_error());
+    ASSERT_TRUE(Status::corruption("").is_corruption());
+    ASSERT_TRUE(Status::not_found().is_not_found());
+    ASSERT_TRUE(Status::ok().is_ok());
 }
 
 } // <anonymous>

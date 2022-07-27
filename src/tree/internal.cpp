@@ -4,12 +4,11 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 Internal::Internal(Parameters param):
       m_maximum_key_size {get_max_local(param.pool->page_size())},
-      m_scratch {m_maximum_key_size * 2}, // TODO: Should only need exactly m_maximum_key_size, i.e. the largest cell payload we can store locally.
+      // Scratch memory needs to be able to hold a maximally-sized cell.
+      m_scratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
       m_pool {param.pool},
       m_cell_count {param.cell_count} {}
 
@@ -172,6 +171,9 @@ auto Internal::balance_after_overflow(Node node) -> Result<void>
 {
     CCO_EXPECT(node.is_overflowing());
     while (node.is_overflowing()) {
+        if (node.overflow_cell().is_attached())
+            m_scratch.reset();
+
         if (node.id().is_root()) {
             CCO_TRY_STORE(node, split_root(std::move(node)));
         } else {
@@ -184,6 +186,8 @@ auto Internal::balance_after_overflow(Node node) -> Result<void>
 auto Internal::balance_after_underflow(Node node, BytesView anchor) -> Result<void>
 {
     while (node.is_underflowing()) {
+        m_scratch.reset();
+
         if (node.id().is_root()) {
             if (!node.cell_count())
                 return fix_root(std::move(node));
@@ -451,9 +455,9 @@ auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Index inde
 
     // Parent might overflow.
     parent.remove_at(index, old_separator.size());
-    parent.insert_at(index, std::move(new_separator));
+    parent.insert_at(index, new_separator);
 
-    Lc.insert_at(Lc.cell_count(), std::move(lowest));
+    Lc.insert_at(Lc.cell_count(), lowest);
     CCO_EXPECT_FALSE(Lc.is_overflowing());
     return {};
 }

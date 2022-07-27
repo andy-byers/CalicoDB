@@ -10,8 +10,6 @@
 namespace cco {
 
 unsigned RecordGenerator::default_seed = 0;
-using namespace page;
-using namespace utils;
 
 RecordGenerator::RecordGenerator(Parameters param)
     : m_param {param} {}

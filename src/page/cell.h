@@ -5,7 +5,7 @@
 #include "page.h"
 #include "utils/scratch.h"
 
-namespace cco::page {
+namespace cco {
 
 class Node;
 
@@ -37,7 +37,7 @@ public:
     auto set_left_child_id(PID) -> void;
     auto set_overflow_id(PID) -> void;
     auto write(Bytes) const -> void;
-    auto detach(utils::Scratch, bool = false) -> void;
+    auto detach(Scratch, bool = false) -> void;
 
     [[nodiscard]] auto is_external() const -> bool
     {
@@ -52,7 +52,7 @@ public:
 private:
     Cell() = default;
 
-    std::optional<utils::Scratch> m_scratch;
+    std::optional<Scratch> m_scratch;
     BytesView m_key;
     BytesView m_local_value;
     PID m_left_child_id;
@@ -65,6 +65,6 @@ private:
 auto make_external_cell(BytesView, BytesView, Size) -> Cell;
 auto make_internal_cell(BytesView, Size) -> Cell;
 
-} // cco::page
+} // cco
 
 #endif // CCO_PAGE_CELL_H

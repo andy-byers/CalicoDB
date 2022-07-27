@@ -4,7 +4,7 @@
 #include "calico/bytes.h"
 #include "utils/identifier.h"
 
-namespace cco::page {
+namespace cco {
 
 class Page;
 
@@ -50,6 +50,6 @@ private:
     Bytes m_header;
 };
 
-} // cco::page
+} // cco
 
 #endif // CCO_PAGE_FILE_HEADER_H

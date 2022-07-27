@@ -1,19 +1,19 @@
 
 #include "database_impl.h"
+#include "batch_internal.h"
+#include "calico/batch.h"
 #include "calico/cursor.h"
+#include "calico/info.h"
 #include "pool/buffer_pool.h"
 #include "pool/interface.h"
 #include "storage/directory.h"
 #include "tree/tree.h"
 #include "utils/logging.h"
-#include "wal/wal_reader.h"
 #include "wal/wal_writer.h"
 
 namespace cco {
 
 namespace fs = std::filesystem;
-using namespace page;
-using namespace utils;
 
 #define DB_TRY(expr) \
     do { \
@@ -22,8 +22,8 @@ using namespace utils;
             return db_try_result.error(); \
     } while (0)
 
-Database::Database(const Options &options) noexcept:
-    m_options {options} {}
+Database::Database(Options options) noexcept:
+    m_options {std::move(options)} {}
 
 auto Database::is_open() const -> bool
 {
@@ -60,19 +60,18 @@ auto Database::open() -> Status
 
 auto Database::close() -> Status
 {
-    const auto r = m_impl->close();
-    m_impl.reset();
-    if (!r.has_value())
-        return r.error();
+    auto impl = std::move(m_impl);
+    CCO_EXPECT_EQ(m_options.path, impl->path());
+    DB_TRY(impl->close());
     return Status::ok();
 }
 
 auto Database::destroy(Database db) -> Status
 {
-    if (db.m_impl->is_temp())
+    if (db.m_options.path.empty())
         return Status::ok();
 
-    if (const auto &path = db.m_impl->path(); !path.empty()) {
+    if (const auto &path = db.m_options.path; !path.empty()) {
         if (std::error_code error; !fs::remove_all(path, error))
             return Status::system_error(error.message());
     }
@@ -120,6 +119,7 @@ auto Database::find_maximum() const -> Cursor
 auto Database::insert(BytesView key, BytesView value) -> Status
 {
     DB_TRY(m_impl->insert(key, value));
+    DB_TRY(m_impl->commit());
     return Status::ok();
 }
 
@@ -152,24 +152,50 @@ auto Database::erase(const Cursor &cursor) -> Status
     } else if (!r.value()) {
         return Status::not_found();
     }
-    return Status::ok();
-}
-
-auto Database::commit() -> Status
-{
     DB_TRY(m_impl->commit());
     return Status::ok();
 }
 
-auto Database::abort() -> Status
+auto Database::apply(Batch batch) -> Status
 {
-    DB_TRY(m_impl->abort());
+    const auto count = BatchInternal::entry_count(batch);
+
+    for (Index i {}; i < count; ++i) {
+        const auto entry = BatchInternal::read_entry(batch, i);
+        Result<bool> r;
+
+        if (entry.type == BatchInternal::EntryType::INSERT) {
+            r = m_impl->insert(entry.key, entry.value);
+        } else {
+            r = m_impl->erase(entry.key);
+        }
+        // We will receive a "not found" error if the key we are trying to erase does not exist. insert() will
+        // never return such an error.
+        if (!r.has_value() && !r.error().is_not_found()) {
+            DB_TRY(m_impl->abort());
+            return r.error();
+        }
+    }
+    DB_TRY(m_impl->commit());
     return Status::ok();
 }
 
 auto Database::info() const -> Info
 {
     return m_impl->info();
+}
+
+auto Database::status() const -> Status
+{
+    return m_impl->status();
+}
+
+auto Database::recover() -> Status
+{
+    if (m_impl->status().is_ok())
+        return Status::logic_error("cannot recover: nothing is wrong");
+    DB_TRY(m_impl->recover());
+    return m_impl->status();
 }
 
 #undef DB_TRY

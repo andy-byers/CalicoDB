@@ -8,41 +8,22 @@
 
 #include "calico/options.h"
 
-namespace cco::utils {
+namespace cco {
 
-template<class Value> struct Unique {
+struct AlignedDeleter {
 
-    template<class V> explicit Unique(V v)
-        : value{std::move(v)} {}
+    explicit AlignedDeleter(std::align_val_t alignment)
+        : align {alignment} {}
 
-    Unique(const Unique &) = delete;
-    auto operator=(const Unique &) -> Unique & = delete;
-
-    Unique(Unique &&rhs) noexcept
+    auto operator()(Byte *ptr) const -> void
     {
-        *this = std::move(rhs);
+        operator delete[](ptr, align);
     }
 
-    auto operator=(Unique &&rhs) noexcept -> Unique &
-    {
-        // TODO: std::exchange() is not noexcept until C++23, but (1) doesn't specify
-        //       any exceptions it could throw. Depends on `Value`?
-        value = std::exchange(rhs.value, {});
-        return *this;
-    }
-
-    auto operator->() noexcept -> Value&
-    {
-        return value;
-    }
-
-    auto operator->() const noexcept -> const Value&
-    {
-        return value;
-    }
-
-    Value value;
+    std::align_val_t align;
 };
+
+using AlignedBuffer = std::unique_ptr<Byte[], AlignedDeleter>;
 
 template<class T>
 class UniqueNullable {
@@ -140,6 +121,6 @@ private:
     std::atomic<unsigned> m_count {};
 };
 
-} // cco::utils
+} // cco
 
 #endif // CCO_UTILS_TYPES_H

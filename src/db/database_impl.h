@@ -35,6 +35,7 @@ public:
     [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<Impl>>;
     Impl() = default;
     ~Impl();
+    [[nodiscard]] auto can_commit() const -> bool;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
     [[nodiscard]] auto cache_hit_ratio() const -> double;
@@ -42,17 +43,20 @@ public:
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto is_temp() const -> bool;
+    [[nodiscard]] auto uses_xact() const -> bool;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool>;
     [[nodiscard]] auto erase(BytesView) -> Result<bool>;
     [[nodiscard]] auto erase(Cursor) -> Result<bool>;
+    [[nodiscard]] auto recover() -> Result<void>;
     [[nodiscard]] auto commit() -> Result<void>;
     [[nodiscard]] auto abort() -> Result<void>;
     [[nodiscard]] auto close() -> Result<void>;
-    auto find(BytesView) -> Cursor;
-    auto find_exact(BytesView) -> Cursor;
-    auto find_minimum() -> Cursor;
-    auto find_maximum() -> Cursor;
-    auto info() -> Info;
+    [[nodiscard]] auto find(BytesView) -> Cursor;
+    [[nodiscard]] auto find_exact(BytesView) -> Cursor;
+    [[nodiscard]] auto find_minimum() -> Cursor;
+    [[nodiscard]] auto find_maximum() -> Cursor;
+    [[nodiscard]] auto info() -> Info;
+    [[nodiscard]] auto batch() -> Batch;
 
     [[nodiscard]] auto home() -> IDirectory&
     {
@@ -73,6 +77,7 @@ private:
     std::unique_ptr<IDirectory> m_home;
     std::unique_ptr<IBufferPool> m_pool;
     std::unique_ptr<ITree> m_tree;
+    Status m_status {Status::ok()};
     bool m_is_temp {};
 };
 

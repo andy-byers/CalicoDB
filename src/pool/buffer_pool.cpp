@@ -10,8 +10,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 #define POOL_TRY(expr) \
     do {                  \
@@ -57,14 +55,14 @@ auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBuffer
 }
 
 BufferPool::BufferPool(const Parameters &param):
-      m_logger {utils::create_logger(param.log_sink, "pool")},
+      m_logger {create_logger(param.log_sink, "pool")},
       m_scratch {param.page_size},
       m_page_count {param.page_count},
-      m_use_xact {param.use_xact} {}
+      m_uses_xact {param.use_xact} {}
 
 auto BufferPool::can_commit() const -> bool
 {
-    const auto flag = m_use_xact && m_wal->has_records();
+    const auto flag = m_uses_xact && m_wal->has_records();
     return m_dirty_count > 0 || flag;
 }
 
@@ -111,9 +109,10 @@ auto BufferPool::flush() -> Result<void>
         if (m_dirty_count > 0) {
             LogMessage message {*m_logger};
             message.set_primary("cannot flush cache");
-            message.set_detail("{} dirty frames are left", m_dirty_count);
+            message.set_detail("{} dirty frame(s) left", m_dirty_count);
             return Err {message.system_error()};
         }
+        CCO_TRY(m_pager->sync());
         m_logger->info("cache was flushed");
     }
     return {};
@@ -131,7 +130,7 @@ auto BufferPool::commit() -> Result<void>
         return Err {message.logic_error()};
     }
 
-    if (!m_use_xact)
+    if (!m_uses_xact)
         return flush();
 
     // Flush the WAL tail buffer, followed by the data pages.
@@ -143,7 +142,7 @@ auto BufferPool::commit() -> Result<void>
 
 auto BufferPool::abort() -> Result<void>
 {
-    if (!m_use_xact) {
+    if (!m_uses_xact) {
         ThreePartMessage message;
         message.set_primary("cannot abort");
         message.set_detail("not supported");
@@ -171,44 +170,61 @@ auto BufferPool::recover() -> Result<void>
 
 auto BufferPool::try_evict_frame() -> Result<bool>
 {
-    for (Index i {}; i < m_cache.size(); ++i) {
-        auto frame = m_cache.evict();
-        CCO_EXPECT_NE(frame, std::nullopt);
-        const auto limit = m_use_xact ? m_wal->flushed_lsn() : LSN::null();
-        const auto is_unpinned = frame->ref_count() == 0;
-        const auto is_writable = frame->page_lsn() <= limit;
-        if (is_unpinned && is_writable) {
-            m_dirty_count -= frame->is_dirty();
-            CCO_TRY(m_pager->unpin(std::move(*frame)));
-            return true;
+    const auto find_for_eviction = [this](auto begin, auto end) {
+        for (auto itr = begin; itr != end; ++itr) {
+            const auto limit = m_uses_xact ? m_wal->flushed_lsn() : LSN::null();
+            const auto is_unpinned = itr->second.ref_count() == 0;
+            const auto is_protected = itr->second.page_lsn() <= limit;
+            if (is_unpinned && is_protected)
+                return itr->second.page_id();
         }
-        const auto id = frame->page_id();
-        m_cache.put(id, std::move(*frame));
+        return PID::null();
+    };
+
+    const auto perform_eviction = [this](PID id) -> Result<bool> {
+        auto frame = *m_cache.extract(id);
+
+        // XXX: We alter the dirty count before we unpin the frame. We transfer ownership, so we lose the opportunity
+        //      to retry anyway.
+        m_dirty_count -= frame.is_dirty();
+        CCO_TRY(m_pager->unpin(std::move(frame)));
+        return true;
+    };
+
+    auto id = find_for_eviction(m_cache.cold_begin(), m_cache.cold_end());
+    if (!id.is_null()) {
+        CCO_TRY(perform_eviction(id));
+        return true;
+    }
+    id = find_for_eviction(m_cache.hot_begin(), m_cache.hot_end());
+    if (!id.is_null()) {
+        CCO_TRY(perform_eviction(id));
+        return true;
     }
     return false;
 }
 
-auto BufferPool::on_release(page::Page &page) -> void
+auto BufferPool::on_release(Page &page) -> void
 {
     std::lock_guard lock {m_mutex};
-    if (auto result = do_release(page); !result.has_value()) {
-        m_logger->error(result.error().what());
-        m_status = result.error();
+    if (auto r = do_release(page); !r.has_value()) {
+        m_logger->error(r.error().what());
+        m_status = r.error();
     }
 }
 
 auto BufferPool::release(Page page) -> Result<void>
 {
     std::lock_guard lock {m_mutex};
-    if (auto result = do_release(page); !result.has_value()) {
-        m_logger->error(result.error().what());
-        m_status = result.error();
+    if (auto r = do_release(page); !r.has_value()) {
+        m_logger->error(r.error().what());
+        m_status = r.error();
         return Err {m_status};
     }
     return {};
 }
 
-auto BufferPool::do_release(page::Page &page) -> Result<void>
+auto BufferPool::do_release(Page &page) -> Result<void>
 {
     // This function needs external synchronization!
     CCO_EXPECT_GT(m_ref_sum, 0);
@@ -225,7 +241,7 @@ auto BufferPool::do_release(page::Page &page) -> Result<void>
     // Appending a record to the WAL is the only thing that can fail in this method. If we already have an error,
     // we'll skip this step, so we cannot encounter another error.
     if (page.has_manager()) {
-        CCO_EXPECT_TRUE(m_use_xact);
+        CCO_EXPECT_TRUE(m_uses_xact);
         if (m_status.is_ok())
             return m_wal->append(page);
         m_wal->discard(page);
@@ -233,23 +249,10 @@ auto BufferPool::do_release(page::Page &page) -> Result<void>
     return {};
 }
 
-auto BufferPool::purge() -> void
-{
-    CCO_EXPECT_EQ(m_ref_sum, 0);
-    m_logger->trace("purging page cache");
-
-    while (!m_cache.is_empty()) {
-        auto frame = m_cache.evict();
-        CCO_EXPECT_NE(frame, std::nullopt);
-        m_dirty_count -= frame->is_dirty();
-        m_pager->discard(std::move(*frame));
-    }
-}
-
 auto BufferPool::save_header(FileHeaderWriter &header) -> void
 {
     m_logger->trace("saving header fields");
-    if (m_use_xact)
+    if (m_uses_xact)
         m_wal->save_header(header);
     header.set_page_count(m_page_count);
 }
@@ -257,7 +260,7 @@ auto BufferPool::save_header(FileHeaderWriter &header) -> void
 auto BufferPool::load_header(const FileHeaderReader &header) -> void
 {
     m_logger->trace("loading header fields");
-    if (m_use_xact)
+    if (m_uses_xact)
         m_wal->load_header(header);
     m_page_count = header.page_count();
 }
@@ -269,12 +272,14 @@ auto BufferPool::close() -> Result<void>
     if (!pr.has_value()) {
         m_logger->error("cannot close pager");
         m_logger->error("(reason) {}", pr.error().what());
+        m_status = pr.error();
     }
-    if (m_use_xact) {
+    if (m_uses_xact) {
         auto wr = m_wal->close();
         if (!wr.has_value()) {
             m_logger->error("cannot close WAL");
             m_logger->error("(reason) {}", wr.error().what());
+            m_status = wr.error();
             return wr;
         }
     }
@@ -300,7 +305,7 @@ auto BufferPool::acquire(PID id, bool is_writable) -> Result<Page>
 
     return fetch(id, is_writable)
         .and_then([is_writable, this](Page page) -> Result<Page> {
-            if (is_writable && m_use_xact)
+            if (is_writable && m_uses_xact)
                 m_wal->track(page);
             return page;
         })
@@ -316,7 +321,7 @@ auto BufferPool::acquire(PID id, bool is_writable) -> Result<Page>
 
 auto BufferPool::has_updates() const -> bool
 {
-    if (m_use_xact)
+    if (m_uses_xact)
         return m_wal->has_records();
     return m_dirty_count > 0;
 }

@@ -281,178 +281,194 @@ private:
     bool m_is_open {};
 };
 
-//class MockDirectory: public IDirectory {
-//public:
-//    ~MockDirectory() override = default;
-//
-//    explicit MockDirectory(const std::string &path):
-//          m_fake {path}
-//    {
-//        delegate_to_fake();
-//    }
-//
-//    [[nodiscard]] auto path() const -> std::string override
-//    {
-//        return m_fake.path();
-//    }
-//
-//    [[nodiscard]] auto name() const -> std::string override
-//    {
-//        return m_fake.name();
-//    }
-//
-//    MOCK_METHOD(Result<std::vector<std::string>>, children, (), (const, override));
-//    MOCK_METHOD(Result<std::unique_ptr<IFile>>, open_file, (const std::string&, Mode, int), (override));
-//    MOCK_METHOD(Result<void>, remove, (), (override));
-//    MOCK_METHOD(Result<void>, sync, (), (override));
-//    MOCK_METHOD(Result<void>, close, (), (override));
-//    MOCK_METHOD(Result<bool>, exists, (const std::string&), (const, override));
-//
-//    auto delegate_to_fake() -> void
-//    {
-//        ON_CALL(*this, children).WillByDefault([this] {
-//            return m_fake.children();
-//        });
-//        ON_CALL(*this, open_file).WillByDefault([this](const std::string &name, Mode mode, int permissions) {
-//            return open_and_register_mock_file(name, mode, permissions);
-//        });
-//        ON_CALL(*this, remove).WillByDefault([this] {
-//            return m_fake.remove();
-//        });
-//        ON_CALL(*this, sync).WillByDefault([this] {
-//            return m_fake.sync();
-//        });
-//        ON_CALL(*this, close).WillByDefault([this] {
-//            return m_fake.close();
-//        });
-//        ON_CALL(*this, exists).WillByDefault([this](const std::string &name) {
-//            return m_fake.exists(name);
-//        });
-//    }
-//
-//    [[nodiscard]] auto fake() -> FakeDirectory&
-//    {
-//        return m_fake;
-//    }
-//
-//    [[nodiscard]] auto get_mock_file(const std::string &name, Mode mode) -> MockFile*
-//    {
-//        auto itr = m_files.find(mock_name(name, mode));
-//        CCO_EXPECT_NE(itr, end(m_files));
-//        return itr->second;
-//    }
-//
-//private:
-//    [[nodiscard]] auto mock_name(const std::string &name, Mode mode) -> std::string
-//    {
-//        return name + std::to_string(static_cast<unsigned>(mode));
-//    }
-//    [[nodiscard]] auto open_and_register_mock_file(const std::string&, Mode, int) -> std::unique_ptr<IFile>;
-//
-//    auto unregister_mock_file(const std::string &name)
-//    {
-//        CCO_EXPECT_TRUE(m_files.erase(name));
-//    }
-//
-//    std::unordered_map<std::string, MockFile*> m_files;
-//    FakeDirectory m_fake;
-//};
-//
-//class MockFile: public IFile {
-//public:
-//    ~MockFile() override = default;
-//
-//    explicit MockFile(std::unique_ptr<IFile> file):
-//          m_file {std::move(file)} {}
-//
-//    [[nodiscard]] auto is_open() const -> bool override
-//    {
-//        return m_file->is_open();
-//    }
-//
-//    [[nodiscard]] auto mode() const -> Mode override
-//    {
-//        return m_file->mode();
-//    }
-//
-//    [[nodiscard]] auto permissions() const -> int override
-//    {
-//        return m_file->permissions();
-//    }
-//
-//    [[nodiscard]] auto path() const -> std::string override
-//    {
-//        return m_file->path();
-//    }
-//
-//    [[nodiscard]] auto name() const -> std::string override
-//    {
-//        return m_file->name();
-//    }
-//
-//    [[nodiscard]] auto file() const -> int override
-//    {
-//        return m_file->file();
-//    }
-//
-//    MOCK_METHOD(Result<Size>, size, (), (const, override));
-//    MOCK_METHOD(Result<void>, open, (const std::string&, Mode, int), (override));
-//    MOCK_METHOD(Result<void>, close, (), (override));
-//    MOCK_METHOD(Result<void>, rename, (const std::string&), (override));
-//    MOCK_METHOD(Result<void>, remove, (), (override));
-//    MOCK_METHOD(Result<Index>, seek, (long, Seek), (override));
-//    MOCK_METHOD(Result<Size>, read, (Bytes), (override));
-//    MOCK_METHOD(Result<Size>, read, (Bytes, Index), (override));
-//    MOCK_METHOD(Result<Size>, write, (BytesView), (override));
-//    MOCK_METHOD(Result<Size>, write, (BytesView, Index), (override));
-//    MOCK_METHOD(Result<void>, sync, (), (override));
-//    MOCK_METHOD(Result<void>, resize, (Size), (override));
-//
-//    auto delegate_to_fake() -> void
-//    {
-//        using testing::_;
-//
-//        ON_CALL(*this, size).WillByDefault([this] {
-//            return m_file->size();
-//        });
-//        ON_CALL(*this, open).WillByDefault([this](const std::string &name, Mode mode, int permissions) {
-//            return m_file->open(name, mode, permissions);
-//        });
-//        ON_CALL(*this, close).WillByDefault([this] {
-//            return m_file->close();
-//        });
-//        ON_CALL(*this, rename).WillByDefault([this](const std::string &name) {
-//            return m_file->rename(name);
-//        });
-//        ON_CALL(*this, remove).WillByDefault([this] {
-//            return m_file->remove();
-//        });
-//        ON_CALL(*this, seek).WillByDefault([this](long offset, Seek whence) {
-//            return m_file->seek(offset, whence);
-//        });
-//        ON_CALL(*this, read(_)).WillByDefault([this](Bytes out) {
-//            return m_file->read(out);
-//        });
-//        ON_CALL(*this, read(_, _)).WillByDefault([this](Bytes out, Index offset) {
-//            return m_file->read(out, offset);
-//        });
-//        ON_CALL(*this, write(_)).WillByDefault([this](BytesView in) {
-//            return m_file->write(in);
-//        });
-//        ON_CALL(*this, write(_, _)).WillByDefault([this](BytesView in, Index offset) {
-//            return m_file->write(in, offset);
-//        });
-//        ON_CALL(*this, sync).WillByDefault([this] {
-//            return m_file->sync();
-//        });
-//        ON_CALL(*this, resize).WillByDefault([this](Size size) {
-//            return m_file->resize(size);
-//        });
-//    }
-//
-//private:
-//    std::unique_ptr<IFile> m_file;
-//};
+class MockDirectory: public IDirectory {
+public:
+    ~MockDirectory() override = default;
+
+    explicit MockDirectory(const std::string &path):
+          m_fake {path}
+    {
+        delegate_to_fake();
+    }
+
+    [[nodiscard]] auto is_open() const -> bool override
+    {
+        return m_fake.is_open();
+    }
+
+    [[nodiscard]] auto path() const -> std::string override
+    {
+        return m_fake.path();
+    }
+
+    [[nodiscard]] auto name() const -> std::string override
+    {
+        return m_fake.name();
+    }
+
+    MOCK_METHOD(Result<std::vector<std::string>>, children, (), (const, override));
+    MOCK_METHOD(Result<std::unique_ptr<IFile>>, open_file, (const std::string&, Mode, int), (override));
+    MOCK_METHOD(Result<void>, remove, (), (override));
+    MOCK_METHOD(Result<void>, sync, (), (override));
+    MOCK_METHOD(Result<void>, close, (), (override));
+    MOCK_METHOD(Result<bool>, exists, (const std::string&), (const, override));
+
+    auto delegate_to_fake() -> void
+    {
+        ON_CALL(*this, children).WillByDefault([this] {
+            return m_fake.children();
+        });
+        ON_CALL(*this, open_file).WillByDefault([this](const std::string &name, Mode mode, int permissions) {
+            return open_and_register_mock_file(name, mode, permissions);
+        });
+        ON_CALL(*this, remove).WillByDefault([this] {
+            return m_fake.remove();
+        });
+        ON_CALL(*this, sync).WillByDefault([this] {
+            return m_fake.sync();
+        });
+        ON_CALL(*this, close).WillByDefault([this] {
+            return m_fake.close();
+        });
+        ON_CALL(*this, exists).WillByDefault([this](const std::string &name) {
+            return m_fake.exists(name);
+        });
+    }
+
+    [[nodiscard]] auto fake() -> FakeDirectory&
+    {
+        return m_fake;
+    }
+
+    [[nodiscard]] auto get_mock_file(const std::string &name, Mode mode) -> MockFile*
+    {
+        auto itr = m_files.find(mock_name(name, mode));
+        CCO_EXPECT_NE(itr, end(m_files));
+        return itr->second;
+    }
+
+private:
+    [[nodiscard]] auto mock_name(const std::string &name, Mode mode) -> std::string
+    {
+        return name + std::to_string(static_cast<unsigned>(mode));
+    }
+    [[nodiscard]] auto open_and_register_mock_file(const std::string&, Mode, int) -> std::unique_ptr<IFile>;
+
+    auto unregister_mock_file(const std::string &name)
+    {
+        [[maybe_unused]] const auto num_erased = m_files.erase(name);
+        CCO_EXPECT_EQ(num_erased, 1);
+    }
+
+    std::unordered_map<std::string, MockFile*> m_files;
+    FakeDirectory m_fake;
+};
+
+class MockFile: public IFile {
+public:
+    ~MockFile() override = default;
+
+    explicit MockFile(std::unique_ptr<IFile> file):
+          m_file {std::move(file)} {}
+
+    [[nodiscard]] auto is_open() const -> bool override
+    {
+        return m_file->is_open();
+    }
+
+    [[nodiscard]] auto mode() const -> Mode override
+    {
+        return m_file->mode();
+    }
+
+    [[nodiscard]] auto permissions() const -> int override
+    {
+        return m_file->permissions();
+    }
+
+    [[nodiscard]] auto path() const -> std::string override
+    {
+        return m_file->path();
+    }
+
+    [[nodiscard]] auto name() const -> std::string override
+    {
+        return m_file->name();
+    }
+
+    [[nodiscard]] auto file() const -> int override
+    {
+        return m_file->file();
+    }
+
+    MOCK_METHOD(Result<Size>, size, (), (const, override));
+    MOCK_METHOD(Result<void>, open, (const std::string&, Mode, int), (override));
+    MOCK_METHOD(Result<void>, close, (), (override));
+    MOCK_METHOD(Result<void>, rename, (const std::string&), (override));
+    MOCK_METHOD(Result<void>, remove, (), (override));
+    MOCK_METHOD(Result<Index>, seek, (long, Seek), (override));
+    MOCK_METHOD(Result<Size>, read, (Bytes), (override));
+    MOCK_METHOD(Result<Size>, read, (Bytes, Index), (override));
+    MOCK_METHOD(Result<Size>, write, (BytesView), (override));
+    MOCK_METHOD(Result<Size>, write, (BytesView, Index), (override));
+    MOCK_METHOD(Result<void>, sync, (), (override));
+    MOCK_METHOD(Result<void>, resize, (Size), (override));
+
+    auto delegate_to_fake() -> void
+    {
+        using testing::_;
+
+        ON_CALL(*this, size).WillByDefault([this] {
+            return m_file->size();
+        });
+        ON_CALL(*this, open).WillByDefault([this](const std::string &name, Mode mode, int permissions) {
+            return m_file->open(name, mode, permissions);
+        });
+        ON_CALL(*this, close).WillByDefault([this] {
+            return m_file->close();
+        });
+        ON_CALL(*this, rename).WillByDefault([this](const std::string &name) {
+            return m_file->rename(name);
+        });
+        ON_CALL(*this, remove).WillByDefault([this] {
+            return m_file->remove();
+        });
+        ON_CALL(*this, seek).WillByDefault([this](long offset, Seek whence) {
+            return m_file->seek(offset, whence);
+        });
+        ON_CALL(*this, read(_)).WillByDefault([this](Bytes out) {
+            return m_file->read(out);
+        });
+        ON_CALL(*this, read(_, _)).WillByDefault([this](Bytes out, Index offset) {
+            return m_file->read(out, offset);
+        });
+        ON_CALL(*this, write(_)).WillByDefault([this](BytesView in) {
+            return m_file->write(in);
+        });
+        ON_CALL(*this, write(_, _)).WillByDefault([this](BytesView in, Index offset) {
+            return m_file->write(in, offset);
+        });
+        ON_CALL(*this, sync).WillByDefault([this] {
+            return m_file->sync();
+        });
+        ON_CALL(*this, resize).WillByDefault([this](Size size) {
+            return m_file->resize(size);
+        });
+    }
+
+    auto fake() -> FakeFile&
+    {
+        return *dynamic_cast<FakeFile*>(m_file.get());
+    }
+
+    auto fake() const -> const FakeFile&
+    {
+        return *dynamic_cast<const FakeFile*>(m_file.get());
+    }
+
+private:
+    std::unique_ptr<IFile> m_file;
+};
 
 } // cco
 

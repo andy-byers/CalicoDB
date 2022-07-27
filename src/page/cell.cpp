@@ -5,9 +5,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cco::page {
-
-using namespace utils;
+namespace cco {
 
 auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 {
@@ -15,14 +13,14 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
     cell.m_page_size = page_size;
 
     if (!is_external) {
-        cell.m_left_child_id.value = utils::get_u32(in);
+        cell.m_left_child_id.value = get_u32(in);
         in.advance(PAGE_ID_SIZE);
     }
-    const auto key_size = utils::get_u16(in);
+    const auto key_size = get_u16(in);
     in.advance(sizeof(std::uint16_t));
 
     if (is_external) {
-        cell.m_value_size = utils::get_u32(in);
+        cell.m_value_size = get_u32(in);
         in.advance(sizeof(std::uint32_t));
     }
 
@@ -37,7 +35,7 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 
         if (local_value_size < cell.m_value_size) {
             in.advance(local_value_size);
-            cell.m_overflow_id.value = utils::get_u32(in);
+            cell.m_overflow_id.value = get_u32(in);
         }
     }
     cell.m_is_external = is_external;
@@ -119,7 +117,8 @@ auto Cell::overflow_size() const -> Size
 
 auto Cell::overflow_id() const -> PID
 {
-//    CCO_EXPECT_TRUE(m_is_external);
+    // Internal cells have a zero-length value field, so they cannot overflow.
+    CCO_EXPECT_TRUE(m_is_external);
     return m_overflow_id;
 }
 
@@ -127,14 +126,14 @@ auto Cell::write(Bytes out) const -> void
 {
     if (!m_is_external) {
         CCO_EXPECT_FALSE(m_left_child_id.is_root());
-        utils::put_u32(out, m_left_child_id.value);
+        put_u32(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);
     }
-    utils::put_u16(out, static_cast<std::uint16_t>(m_key.size()));
+    put_u16(out, static_cast<std::uint16_t>(m_key.size()));
     out.advance(sizeof(std::uint16_t));
 
     if (m_is_external) {
-        utils::put_u32(out, static_cast<std::uint32_t>(m_value_size));
+        put_u32(out, static_cast<std::uint32_t>(m_value_size));
         out.advance(sizeof(std::uint32_t));
     }
 
@@ -149,7 +148,7 @@ auto Cell::write(Bytes out) const -> void
             CCO_EXPECT_FALSE(m_left_child_id.is_root());
             CCO_EXPECT_LT(local.size(), m_value_size);
             out.advance(local.size());
-            utils::put_u32(out, m_overflow_id.value);
+            put_u32(out, m_overflow_id.value);
         }
     }
 }
@@ -206,4 +205,4 @@ auto make_internal_cell(BytesView key, Size page_size) -> Cell
     return Cell {param};
 }
 
-} // cco::page
+} // cco

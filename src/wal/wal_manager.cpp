@@ -11,8 +11,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWALManager>>
 {
@@ -96,6 +94,7 @@ auto WALManager::truncate() -> Result<void>
 
 auto WALManager::flush() -> Result<void>
 {
+    m_tracker.reset();
     return m_writer->flush();
 }
 
@@ -203,12 +202,12 @@ auto WALManager::roll_backward() -> Result<void>
     return {};
 }
 
-auto WALManager::save_header(page::FileHeaderWriter &header) -> void
+auto WALManager::save_header(FileHeaderWriter &header) -> void
 {
     header.set_flushed_lsn(m_writer->flushed_lsn());
 }
 
-auto WALManager::load_header(const page::FileHeaderReader &header) -> void
+auto WALManager::load_header(const FileHeaderReader &header) -> void
 {
     if (header.flushed_lsn() > m_writer->flushed_lsn())
         m_writer->set_flushed_lsn(header.flushed_lsn());

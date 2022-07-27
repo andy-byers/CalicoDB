@@ -19,25 +19,25 @@ class PageCache final {
 public:
     using Reference = std::reference_wrapper<Frame>;
     using ConstReference = std::reference_wrapper<const Frame>;
-    using ColdCache = utils::FifoCache<PID, Frame, PID::Hasher>;
-    using HotCache = utils::LruCache<PID, Frame, PID::Hasher>;
+    using ColdCache = FifoCache<PID, Frame, PID::Hasher>;
+    using HotCache = LruCache<PID, Frame, PID::Hasher>;
 
     PageCache() = default;
     ~PageCache() = default;
 
     [[nodiscard]] auto is_empty() const -> Size
     {
-        return m_cold.is_empty() && m_hot.is_empty();
+        return m_warm.is_empty() && m_hot.is_empty();
     }
 
     [[nodiscard]] auto size() const -> Size
     {
-        return m_cold.size() + m_hot.size();
+        return m_warm.size() + m_hot.size();
     }
 
     [[nodiscard]] auto contains(PID id) const -> bool
     {
-        return m_cold.contains(id) || m_hot.contains(id);
+        return m_warm.contains(id) || m_hot.contains(id);
     }
 
     [[nodiscard]] auto hit_ratio() const -> double
@@ -49,12 +49,12 @@ public:
 
     [[nodiscard]] auto cold_begin() -> ColdCache::Iterator
     {
-        return m_cold.begin();
+        return m_warm.begin();
     }
 
     [[nodiscard]] auto cold_end() -> ColdCache::Iterator
     {
-        return m_cold.end();
+        return m_warm.end();
     }
 
     [[nodiscard]] auto hot_begin() -> ColdCache::Iterator
@@ -73,8 +73,8 @@ public:
     auto evict() -> std::optional<Frame>;
 
 private:
-    utils::FifoCache<PID, Frame, PID::Hasher> m_cold;
-    utils::LruCache<PID, Frame, PID::Hasher> m_hot;
+    FifoCache<PID, Frame, PID::Hasher> m_warm;
+    LruCache<PID, Frame, PID::Hasher> m_hot;
     Size m_hits {};
     Size m_misses {};
 };

@@ -27,7 +27,7 @@ public:
     auto reset() -> void override;
 
 private:
-    WALReader(std::unique_ptr<IFile>, WALParameters);
+    WALReader(std::unique_ptr<IFile>, const WALParameters&);
     [[nodiscard]] auto read_block(Index) -> Result<bool>;
     [[nodiscard]] auto read_record(Index) -> Result<WALRecord>;
 

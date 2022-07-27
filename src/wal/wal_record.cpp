@@ -6,8 +6,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 namespace {
 

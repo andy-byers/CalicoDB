@@ -20,30 +20,37 @@
 namespace {
 
 using namespace cco;
-using namespace cco::utils;
-using namespace cco::page;
+using namespace cco;
+using namespace cco;
 
 class TreeHarness: public testing::Test {
 public:
-    static constexpr Size PAGE_SIZE = 0x100;
+    static constexpr Size PAGE_SIZE {0x100};
+    static constexpr Size FRAME_COUNT {16};
+    static constexpr auto CACHE_SIZE = PAGE_SIZE * FRAME_COUNT;
 
     TreeHarness():
-          bank {std::make_unique<FakeDirectory>("TreeTests")}
+          home {std::make_unique<MockDirectory>("TreeTests")}
     {
+        EXPECT_CALL(*home, open_file).Times(1);
+
         buffer_pool = *BufferPool::open({
-            *bank,
-            utils::create_sink("", spdlog::level::off),
+            *home,
+            create_sink(),
             LSN::null(),
-            32,
+            FRAME_COUNT,
             0,
             PAGE_SIZE,
             false,
         });
+        mock = home->get_mock_file("data", Mode::CREATE | Mode::READ_WRITE);
+        CCO_EXPECT_NE(mock, nullptr);
     }
 
     Random random {0};
-    std::unique_ptr<FakeDirectory> bank;
+    std::unique_ptr<MockDirectory> home;
     std::unique_ptr<IBufferPool> buffer_pool;
+    MockFile *mock;
 };
 
 class NodePoolTests: public TreeHarness {
@@ -73,6 +80,48 @@ TEST_F(NodePoolTests, NodeContentsPersist)
     ASSERT_EQ(root->type(), PageType::EXTERNAL_NODE);
 }
 
+TEST_F(NodePoolTests, PropagatesErrorDuringChainAllocation)
+{
+    using testing::_;
+    using testing::Return;
+
+    ASSERT_TRUE(pool.release(*pool.allocate(PageType::EXTERNAL_NODE)));
+    ON_CALL(*mock, write(_, _))
+        .WillByDefault(Return(Err {Status::system_error("123")}));
+    const auto r = pool.allocate_chain(stob(std::string(CACHE_SIZE, '$')));
+    ASSERT_TRUE(not r.has_value() and r.error().is_system_error());
+}
+
+TEST_F(NodePoolTests, PropagatesErrorDuringChainCollection)
+{
+    using testing::_;
+    using testing::Return;
+
+    ASSERT_TRUE(pool.release(*pool.allocate(PageType::EXTERNAL_NODE)));
+    ON_CALL(*mock, read(_, _))
+        .WillByDefault(Return(Err {Status::system_error("123")}));
+    std::string buffer(CACHE_SIZE, '\x00');
+    auto q = pool.allocate_chain(stob(buffer));
+    ASSERT_TRUE(q);
+    auto r = pool.collect_chain(*q, stob(buffer));
+    ASSERT_TRUE(not r.has_value() and r.error().is_system_error());
+}
+
+TEST_F(NodePoolTests, PropagatesErrorDuringChainDestruction)
+{
+    using testing::_;
+    using testing::Return;
+
+    ASSERT_TRUE(pool.release(*pool.allocate(PageType::EXTERNAL_NODE)));
+    ON_CALL(*mock, read(_, _))
+        .WillByDefault(Return(Err {Status::system_error("123")}));
+    std::string buffer(CACHE_SIZE, '\x00');
+    auto q = pool.allocate_chain(stob(buffer));
+    ASSERT_TRUE(q);
+    auto r = pool.destroy_chain(*q, buffer.size());
+    ASSERT_TRUE(not r.has_value() and r.error().is_system_error());
+}
+
 //class InternalTests: public NodePoolTests {
 //public:
 //    InternalTests()
@@ -95,7 +144,7 @@ public:
         max_local = get_max_local(PAGE_SIZE);
         tree = *Tree::open(Tree::Parameters{
             buffer_pool.get(),
-            utils::create_sink("", spdlog::level::off),
+            create_sink("", spdlog::level::off),
             PID::null(),
             0,
             0,
@@ -119,9 +168,8 @@ public:
 
 TEST_F(TreeTests, NewTreeIsEmpty)
 {
-    Cursor cursor;
     ASSERT_EQ(tree->cell_count(), 0);
-    cursor = tree->find_minimum();
+    auto cursor = tree->find_minimum();
     ASSERT_FALSE(cursor.is_valid());
     ASSERT_TRUE(cursor.status().is_not_found());
     cursor = tree->find_maximum();
@@ -236,9 +284,8 @@ TEST_F(TreeTests, CanFindExtrema)
 TEST_F(TreeTests, CanFind)
 {
     insert_sequence(*tree, 0, 200, 2);
-    Cursor cursor;
 
-    cursor = tools::find(*tree, make_key(100));
+    auto cursor = tools::find(*tree, make_key(100));
     ASSERT_EQ(btos(cursor.key()), make_key(100));
     cursor = tools::find(*tree, make_key(101));
     ASSERT_EQ(btos(cursor.key()), make_key(102));

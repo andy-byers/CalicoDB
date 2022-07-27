@@ -15,8 +15,8 @@
 namespace {
 
 using namespace cco;
-using namespace cco::page;
-using namespace cco::utils;
+using namespace cco;
+using namespace cco;
 
 class PageBacking {
 public:
@@ -378,9 +378,9 @@ public:
     explicit NodeBacking(Size page_size)
         : PageBacking {page_size} {}
 
-    auto get_node(PID id, PageType type) -> page::Node
+    auto get_node(PID id, PageType type) -> Node
     {
-        page::Node node {get_page(id), true};
+        Node node {get_page(id), true};
         node.page().set_type(type);
         return node;
     }

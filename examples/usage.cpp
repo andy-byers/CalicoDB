@@ -136,22 +136,21 @@ auto querying_a_database(cco::Database &db)
     }
 }
 
-auto transactions(cco::Database &db)
+auto batch_writes(cco::Database &db)
 {
-    // Commit all the updates we made in the previous examples and begin a new transaction.
-    assert(db.commit().is_ok());
+    cco::Batch batch;
 
-    // Modify the database.
-    assert(db.insert("opossum", "pretty cute").is_ok());
-    assert(db.erase("manx").is_ok());
+    // Updates made to the batch object are saved in RAM initially.
+    batch.insert("opossum", "pretty cute");
+    batch.erase("manx");
 
-    // abort() restores the database to how it looked at the beginning of the transaction.
-    assert(db.abort().is_ok());
+    // Then, when apply() is called, they are applied to the database in an atomic transaction.
+    assert(db.apply(batch).is_ok());
 
-    // All updates since the last call to commit() have been reverted.
-    auto s = db.find_exact("opossum");
-    assert(db.find_exact("opossum").status().is_not_found());
-    assert(db.find_exact("manx").is_valid());
+    // If apply() succeeded, then the database will have the entire batch of updates persisted
+    // on disk.
+    assert(db.find_exact("opossum").is_valid());
+    assert(not db.find_exact("manx").is_valid());
 }
 
 auto deleting_a_database(cco::Database db)
@@ -189,7 +188,7 @@ auto main(int, const char *[]) -> int
     reads_and_writes(db);
     updating_a_database(db);
     querying_a_database(db);
-    transactions(db);
+    batch_writes(db);
     deleting_a_database(std::move(db));
     return 0;
 }

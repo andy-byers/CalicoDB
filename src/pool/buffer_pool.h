@@ -34,6 +34,11 @@ public:
 
     [[nodiscard]] static auto open(const Parameters&) -> Result<std::unique_ptr<IBufferPool>>;
 
+    [[nodiscard]] auto uses_xact() const -> bool override
+    {
+        return m_uses_xact;
+    }
+
     [[nodiscard]] auto page_count() const -> Size override
     {
         return m_page_count;
@@ -56,37 +61,36 @@ public:
 
     [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto can_commit() const -> bool override;
-    [[nodiscard]] auto allocate() -> Result<page::Page> override;
-    [[nodiscard]] auto fetch(PID, bool) -> Result<page::Page> override;
-    [[nodiscard]] auto acquire(PID, bool) -> Result<page::Page> override;
-    [[nodiscard]] auto release(page::Page) -> Result<void> override;
+    [[nodiscard]] auto allocate() -> Result<Page> override;
+    [[nodiscard]] auto fetch(PID, bool) -> Result<Page> override;
+    [[nodiscard]] auto acquire(PID, bool) -> Result<Page> override;
+    [[nodiscard]] auto release(Page) -> Result<void> override;
     [[nodiscard]] auto recover() -> Result<void> override;
     [[nodiscard]] auto flush() -> Result<void> override;
     [[nodiscard]] auto close() -> Result<void> override;
     [[nodiscard]] auto commit() -> Result<void> override;
     [[nodiscard]] auto abort() -> Result<void> override;
-    auto purge() -> void override;
-    auto on_release(page::Page&) -> void override;
-    auto save_header(page::FileHeaderWriter&) -> void override;
-    auto load_header(const page::FileHeaderReader&) -> void override;
+    auto on_release(Page&) -> void override;
+    auto save_header(FileHeaderWriter&) -> void override;
+    auto load_header(const FileHeaderReader&) -> void override;
 
 private:
     explicit BufferPool(const Parameters&);
     [[nodiscard]] auto pin_frame(PID) -> Result<void>;
     [[nodiscard]] auto try_evict_frame() -> Result<bool>;
-    [[nodiscard]] auto do_release(page::Page&) -> Result<void>;
+    [[nodiscard]] auto do_release(Page&) -> Result<void>;
     [[nodiscard]] auto has_updates() const -> bool;
     mutable std::mutex m_mutex;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<IWALManager> m_wal;
     std::shared_ptr<spdlog::logger> m_logger;
-    utils::ScratchManager m_scratch;
+    ScratchManager m_scratch;
     PageCache m_cache;
     Status m_status {Status::ok()};
     Size m_page_count {};
     Size m_dirty_count {};
     Size m_ref_sum {};
-    bool m_use_xact {};
+    bool m_uses_xact {};
 };
 
 } // cco

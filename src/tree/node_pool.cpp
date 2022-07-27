@@ -10,8 +10,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 NodePool::NodePool(Parameters param)
     : m_free_list {{param.buffer_pool, param.free_start, param.free_count}},
@@ -101,10 +99,10 @@ auto NodePool::collect_chain(PID id, Bytes out) const -> Result<void>
     while (!out.is_empty()) {
         CCO_TRY_CREATE(page, m_pool->acquire(id, false));
         if (page.type() != PageType::OVERFLOW_LINK) {
-//            utils::ErrorMessage message;
-//            message.set_primary("cannot collect overflow chain");
-//            message.set_detail("link has an invalid page type {}", static_cast<unsigned>(page->type()));
-            return Err {Status::corruption("")};
+            ThreePartMessage message;
+            message.set_primary("cannot collect overflow chain");
+            message.set_detail("link has an invalid page type 0x{:04X}", static_cast<unsigned>(page.type()));
+            return Err {message.corruption()};
         }
         Link link {std::move(page)};
         auto content = link.content_view();

@@ -6,9 +6,9 @@ namespace cco {
 
 auto PageCache::put(PID id, Frame frame) -> void
 {
-    CCO_EXPECT_FALSE(m_cold.contains(id));
+    CCO_EXPECT_FALSE(m_warm.contains(id));
     CCO_EXPECT_FALSE(m_hot.contains(id));
-    m_cold.put(id, std::move(frame));
+    m_warm.put(id, std::move(frame));
 }
 
 auto PageCache::get(PID id) -> std::optional<Reference>
@@ -17,7 +17,7 @@ auto PageCache::get(PID id) -> std::optional<Reference>
         m_hits++;
         return ref;
     }
-    if (auto ref = m_cold.extract(id)) {
+    if (auto ref = m_warm.extract(id)) {
         m_hits++;
         m_hot.put(id, std::move(*ref));
         return m_hot.get(id);
@@ -32,7 +32,7 @@ auto PageCache::extract(PID id) -> std::optional<Frame>
         m_hits++;
         return frame;
     }
-    if (auto frame = m_cold.extract(id)) {
+    if (auto frame = m_warm.extract(id)) {
         m_hits++;
         return frame;
     }
@@ -44,7 +44,7 @@ auto PageCache::evict() -> std::optional<Frame>
 {
     if (auto frame = m_hot.evict())
         return frame;
-    return m_cold.evict();
+    return m_warm.evict();
 }
 
 } // cco

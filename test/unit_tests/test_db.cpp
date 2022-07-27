@@ -88,6 +88,50 @@ public:
     TestDatabase db;
 };
 
+TEST(DatabaseOpenTest, ReportsInvalidPageSizes)
+{
+    Options options;
+    options.path = "/tmp/calico_test_db__";
+    std::error_code ignore;
+
+    fs::remove_all(options.path, ignore);
+    options.page_size = MINIMUM_PAGE_SIZE / 2;
+    Database db {options};
+    ASSERT_TRUE(db.open().is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+
+    fs::remove_all(options.path, ignore); // TODO: We shouldn't need to remove the database directory each time.
+    options.page_size = MAXIMUM_PAGE_SIZE * 2;  //       If we fail during construction of a new database, we should
+    db = Database {options};                    //       clean up after ourselves properly.
+    ASSERT_TRUE(db.open().is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+
+    fs::remove_all(options.path, ignore);
+    options.page_size = DEFAULT_PAGE_SIZE - 1;
+    db = Database {options};
+    ASSERT_TRUE(db.open().is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+}
+
+TEST(DatabaseOpenTest, ReportsInvalidFrameCounts)
+{
+    Options options;
+    options.path = "/tmp/calico_test_db__";
+    std::error_code ignore;
+
+    fs::remove_all(options.path, ignore);
+    options.frame_count = MINIMUM_FRAME_COUNT - 1;
+    Database db {options};
+    ASSERT_TRUE(db.open().is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+
+    fs::remove_all(options.path, ignore);
+    options.frame_count = MAXIMUM_FRAME_COUNT + 1;
+    db = Database {options};
+    ASSERT_TRUE(db.open().is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+}
+
 TEST_F(DatabaseReadFaultTests, OperationsAfterAbort)
 {
     ASSERT_TRUE(db.impl->commit());
@@ -189,8 +233,7 @@ auto abort_until_successful(TestDatabase &db, RateSetter &&setter)
         ASSERT_TRUE(db.impl->abort().error().is_system_error());
     }
     setter(0);
-    auto x = db.impl->abort();
-     ASSERT_TRUE(x);
+    ASSERT_TRUE(db.impl->abort());
 }
 
 auto validate_after_abort(TestDatabase &db)
@@ -281,6 +324,18 @@ public:
     RecordGenerator generator;
 };
 
+TEST_F(DatabaseTests, NewDatabase)
+{
+    Database db {options};
+    ASSERT_TRUE(db.open().is_ok());
+    const auto info = db.info();
+    ASSERT_EQ(info.record_count(), 0);
+    ASSERT_EQ(info.page_count(), 1);
+    ASSERT_NE(info.cache_hit_ratio(), 0.0);
+    ASSERT_TRUE(info.uses_xact());
+    ASSERT_FALSE(info.is_temp());
+}
+
 TEST_F(DatabaseTests, DataPersists)
 {
     static constexpr Size NUM_ITERATIONS {10};
@@ -312,66 +367,13 @@ TEST_F(DatabaseTests, DataPersists)
     ASSERT_TRUE(db.close().is_ok());
 }
 
-auto run_xact_sanity_check(bool is_temp)
-{
-    static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size GROUP_SIZE {250};
-
-    Options options;
-    options.page_size = 0x200;
-    options.frame_count = 16;
-    options.path = is_temp ? "" : BASE;
-    Database db {options};
-    ASSERT_TRUE(db.open().is_ok());
-
-    RecordGenerator::Parameters param;
-    param.mean_key_size = 20;
-    param.mean_value_size = 20;
-    param.spread = 15;
-    RecordGenerator generator {param};
-    const auto info = db.info();
-    Random random {0};
-
-    auto records = generator.generate(random, 500);
-    for (const auto &record: records)
-        ASSERT_TRUE(db.insert(record).is_ok());
-    ASSERT_TRUE(db.commit().is_ok());
-
-    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        for (const auto &record: generator.generate(random, GROUP_SIZE)) {
-            if (random.next_int(8) == 0 && info.record_count() > 0) {
-                if (!db.erase(record.key).is_ok()) {
-                    ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
-                }
-            }  else {
-                ASSERT_TRUE(db.insert(record).is_ok());
-            }
-        }
-        ASSERT_TRUE(db.abort().is_ok());
-    }
-    for (const auto &[key, value]: records) {
-        auto c = db.find(key);
-        ASSERT_TRUE(c.is_valid() and c.value() == value);
-    }
-}
-
-TEST(AbortTests, Persistent)
-{
-    run_xact_sanity_check(false);
-}
-
-TEST(AbortTests, InMemory)
-{
-    run_xact_sanity_check(true);
-}
-
 TEST_F(DatabaseTests, SanityCheck)
 {
     static constexpr Size NUM_ITERATIONS {3};
     static constexpr Size GROUP_SIZE {500};
     Options options;
     options.path = BASE;
-    options.page_size = 0x200;
+    options.page_size = 0x100;
     options.frame_count = 16;
 
     RecordGenerator::Parameters param;
@@ -406,13 +408,235 @@ TEST_F(DatabaseTests, SanityCheck)
             if (!r.is_ok())
                 ADD_FAILURE() << "cannot find record to remove";
         }
-        ASSERT_TRUE(db.commit().is_ok());
         ASSERT_TRUE(db.close().is_ok());
     }
 
     Database db {options};
     ASSERT_TRUE(db.open().is_ok());
     ASSERT_EQ(db.info().record_count(), 0);
+}
+
+TEST_F(DatabaseTests, DatabaseRecovers)
+{
+    static constexpr Size GROUP_SIZE {500};
+    Options options;
+    options.path = BASE;
+    options.page_size = 0x100;
+    options.frame_count = 16;
+
+    RecordGenerator::Parameters param;
+    param.mean_key_size = 20;
+    param.mean_value_size = 20;
+    param.spread = 15;
+    RecordGenerator generator {param};
+    Random random {0};
+
+    // Make sure the database does not exist already.
+    std::error_code ignore;
+    const auto alternate = std::string {BASE} + "_";
+    fs::remove_all(BASE, ignore);
+    fs::remove_all(alternate, ignore);
+
+    Database db {options};
+    ASSERT_TRUE(db.open().is_ok());
+
+    const auto committed = generator.generate(random, GROUP_SIZE);
+    for (const auto &record: committed)
+        ASSERT_TRUE(db.insert(record).is_ok());
+
+    for (const auto &record: generator.generate(random, GROUP_SIZE))
+        ASSERT_TRUE(db.insert(record).is_ok());
+
+    fs::copy(BASE, alternate);
+    ASSERT_TRUE(db.close().is_ok());
+
+    options.path = alternate;
+    db = Database {options};
+    ASSERT_TRUE(db.open().is_ok());
+
+    for (const auto &[key, value]: committed) {
+        const auto c = db.find_exact(key);
+        ASSERT_TRUE(c.is_valid());
+    }
+}
+
+class MockDatabase {
+public:
+    MockDatabase()
+    {
+        using testing::_;
+
+        Database::Impl::Parameters param;
+        param.options.page_size = 0x200;
+        param.options.frame_count = 16;
+
+        auto temp = std::make_unique<MockDirectory>("MockDatabase");
+        EXPECT_CALL(*temp, open_file("wal", _, _)).Times(2);
+        EXPECT_CALL(*temp, open_file("data", _, _)).Times(1);
+        EXPECT_CALL(*temp, exists("data")).Times(1);
+        EXPECT_CALL(*temp, close).Times(1);
+        impl = Database::Impl::open(param, std::move(temp)).value();
+        mock = dynamic_cast<MockDirectory*>(&impl->home());
+        rwal_mock = mock->get_mock_file("wal", Mode::CREATE | Mode::READ_ONLY);
+        wwal_mock = mock->get_mock_file("wal", Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND);
+        data_mock = mock->get_mock_file("data", Mode::CREATE | Mode::READ_WRITE);
+
+        RecordGenerator::Parameters generator_param;
+        generator_param.mean_key_size = 20;
+        generator_param.mean_value_size = 50;
+        generator_param.spread = 15;
+        auto generator = RecordGenerator {generator_param};
+
+        records = generator.generate(random, 1'500);
+        for (const auto &[key, value]: records)
+            tools::insert(*impl, key, value);
+        std::sort(begin(records), end(records));
+    }
+
+    ~MockDatabase() = default;
+
+    auto remove_one(const std::string &key) -> Result<void>
+    {
+        CCO_EXPECT_GT(impl->info().record_count(), 0);
+        CCO_TRY_CREATE(was_erased, impl->erase(impl->find(stob(key))));
+        if (!was_erased) {
+            CCO_TRY_STORE(was_erased, impl->erase(impl->find_minimum()));
+            EXPECT_TRUE(was_erased);
+        }
+        return {};
+    }
+
+    Random random {0};
+    MockDirectory *mock {};
+    MockFile *data_mock {};
+    MockFile *rwal_mock {};
+    MockFile *wwal_mock {};
+    std::vector<Record> records;
+    std::unique_ptr<Database::Impl> impl;
+};
+
+TEST(MockDatabaseTests, RecoversFromFailedCommit)
+{
+    using testing::_;
+    using testing::Return;
+
+    MockDatabase db;
+    ON_CALL(*db.data_mock, write(_, _))
+        .WillByDefault(Return(Err {Status::system_error("123")}));
+
+    auto r = db.impl->commit();
+    ASSERT_FALSE(r.has_value());
+    ASSERT_TRUE(r.error().is_system_error());
+    ASSERT_EQ(r.error().what(), "123");
+    ASSERT_EQ(db.impl->status().what(), "123");
+
+    db.data_mock->delegate_to_fake();
+    r = db.impl->abort();
+    ASSERT_TRUE(r.has_value());
+    ASSERT_TRUE(db.impl->status().is_ok());
+}
+
+template<class Mock>
+auto run_close_error_test(MockDatabase &db, Mock &mock)
+{
+    using testing::Return;
+
+    ON_CALL(mock, close)
+        .WillByDefault(Return(Err {Status::system_error("123")}));
+
+    const auto s = db.impl->close();
+    ASSERT_FALSE(s.has_value());
+    ASSERT_TRUE(s.error().is_system_error());
+    ASSERT_EQ(s.error().what(), "123");
+    ASSERT_TRUE(db.impl->status().is_system_error());
+    ASSERT_EQ(db.impl->status().what(), "123");
+}
+
+// TODO: Tighten up the close() procedure. It should be reentrant.
+TEST(MockDatabaseTests, PropagatesErrorFromWALClose)
+{
+    MockDatabase db;
+    run_close_error_test(db, *db.wwal_mock);
+}
+
+TEST(MockDatabaseTests, PropagatesErrorFromDataClose)
+{
+    MockDatabase db;
+    run_close_error_test(db, *db.wwal_mock);
+}
+
+TEST(RealDatabaseTests, DestroyDatabase)
+{
+    Options options;
+    options.path = "/tmp/calico_test_db__";
+    std::error_code ignore;
+    fs::remove_all(options.path, ignore);
+    Database db {options};
+    ASSERT_TRUE(db.open().is_ok());
+    ASSERT_TRUE(Database::destroy(std::move(db)).is_ok());
+    ASSERT_FALSE(fs::exists(options.path, ignore));
+}
+
+TEST(RealDatabaseTests, CanDestroyClosedDatabase)
+{
+    Database db {{}};
+    ASSERT_TRUE(db.open().is_ok());
+    ASSERT_TRUE(db.close().is_ok());
+    ASSERT_TRUE(Database::destroy(std::move(db)).is_ok());
+}
+
+TEST(RealDatabaseTests, BatchDoesNothingIfNotApplied)
+{
+    Options options;
+    options.page_size = 0x100;
+    options.frame_count = 16;
+    Database db {options};
+    ASSERT_TRUE(db.open().is_ok());
+    Batch batch;
+    batch.insert("a", "1");
+    batch.insert("b", "2");
+    batch.insert("c", "3");
+    ASSERT_EQ(db.info().record_count(), 0);
+    ASSERT_TRUE(db.close().is_ok());
+}
+
+TEST(RealDatabaseTests, BatchCanBeReapplied)
+{
+    Options options;
+    options.page_size = 0x100;
+    options.frame_count = 16;
+    Database db {options};
+    ASSERT_TRUE(db.open().is_ok());
+
+    Batch batch;
+    batch.insert("a", "1");
+    batch.insert("b", "2");
+    batch.insert("c", "3");
+    ASSERT_TRUE(db.apply(batch).is_ok());
+    ASSERT_EQ(db.info().record_count(), 3);
+
+    ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
+    ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
+    ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
+    ASSERT_EQ(db.info().record_count(), 0);
+
+    ASSERT_TRUE(db.apply(batch).is_ok());
+    ASSERT_EQ(db.info().record_count(), 3);
+    ASSERT_TRUE(db.close().is_ok());
+}
+
+TEST(RealDatabaseTests, DatabaseObjectTypes)
+{
+    Options options;
+    Database val {options};
+    ASSERT_TRUE(val.open().is_ok());
+    ASSERT_TRUE(val.close().is_ok());
+    ASSERT_TRUE(Database::destroy(std::move(val)).is_ok());
+
+    auto ptr = std::make_unique<Database>(options);
+    ASSERT_TRUE(ptr->open().is_ok());
+    ASSERT_TRUE(ptr->close().is_ok());
+    ASSERT_TRUE(Database::destroy(std::move(*ptr)).is_ok());
 }
 
 } // <anonymous>

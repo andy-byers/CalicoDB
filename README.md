@@ -2,6 +2,8 @@
 
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
+> **Note**: The public API is now stable!
+
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 
@@ -42,8 +44,9 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Doesn't provide synchronization past support for multiple cursors
 
 ## Dependencies
-Calico DB depends on `@gabime/spdlog` and `@TartanLlama/expected`.
+The library itself depends on `@gabime/spdlog` and `@TartanLlama/expected`.
 `spdlog` is downloaded during the build using CMake's FetchContent API, and `expected` is bundled with the source code.
+The tests depend on `@google/googletest` and the benchmarks depend on `@google/benchmark`.
 
 ## Build
 Calico DB is built using CMake.
@@ -132,14 +135,16 @@ See `DESIGN.md` for more information about the design of Calico DB.
 ## Source Tree Overview
 ```
 CalicoDB
+┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
+┃ ┣╸batch.h ┄┄┄┄┄┄┄┄ Represents an atomic unit of work to perform on the database
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Constructs for holding contiguous sequences of bytes
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
-┃ ┣╸status.h ┄┄┄┄┄┄┄┄ Status object
+┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object
 ┃ ┗╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┣╸src
 ┃ ┣╸db ┄┄┄┄┄┄┄┄┄┄┄┄┄ API implementation
