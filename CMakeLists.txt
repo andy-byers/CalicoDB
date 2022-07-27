@@ -78,14 +78,14 @@ if(CCO_INSTALL)
     set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
     set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
     set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
-#
+
 #    install(
 #        TARGETS "${CCO_NAME}" spdlog
 #        EXPORT "${TARGETS_NAME}"
 #        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
 #        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
 #        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-#
+#    )
 #    install(
 #        DIRECTORY "${CCO_INCLUDE_DIR}/calico"
 #        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"

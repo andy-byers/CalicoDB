@@ -8,8 +8,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 static auto find_minimum(ITree &tree) -> Node
 {

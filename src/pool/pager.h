@@ -1,12 +1,13 @@
 #ifndef CCO_POOL_PAGER_H
 #define CCO_POOL_PAGER_H
 
+#include "calico/status.h"
+#include "utils/result.h"
+#include "utils/types.h"
 #include <list>
 #include <memory>
 #include <optional>
 #include <spdlog/spdlog.h>
-#include "calico/status.h"
-#include "utils/result.h"
 
 namespace cco {
 
@@ -21,21 +22,6 @@ public:
         Size page_size {};
         Size frame_count {};
     };
-
-    struct AlignedDeleter {
-
-        explicit AlignedDeleter(std::align_val_t alignment)
-            : align {alignment} {}
-
-        auto operator()(Byte *ptr) const -> void
-        {
-            operator delete[](ptr, align);
-        }
-
-        std::align_val_t align;
-    };
-
-    using AlignedBuffer = std::unique_ptr<Byte[], AlignedDeleter>;
 
     ~Pager() = default;
     [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<Pager>>;

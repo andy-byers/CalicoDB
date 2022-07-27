@@ -4,9 +4,8 @@
 #include "utils/crc.h"
 #include "utils/layout.h"
 
-namespace cco::page {
+namespace cco {
 
-using namespace utils;
 
 auto NodeHeader::parent_id() const -> PID
 {
@@ -885,9 +884,8 @@ auto split_external_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     rn.set_parent_id(Ln.parent_id());
 
     if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
-        auto separator = split_non_root_fast_external(Ln, rn, overflow, overflow_idx, scratch);
+        return split_non_root_fast_external(Ln, rn, overflow, overflow_idx, scratch);
 
-        return separator;
     } else if (overflow_idx == 0) {
         // We need the `!counter` because the condition following it may not be true if we got here from split_root().
         transfer_cells_right_while(Ln, rn, [&overflow](const Node &src, const Node &, Index counter) {
@@ -970,4 +968,4 @@ auto get_file_header_writer(Node &node) -> FileHeaderWriter
     return get_file_header_writer(node.page());
 }
 
-} // namespace cco::page
+} // namespace cco

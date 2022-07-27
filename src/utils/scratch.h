@@ -8,7 +8,7 @@
 #include "types.h"
 #include "calico/bytes.h"
 
-namespace cco::utils {
+namespace cco {
 
 class ScratchManager;
 
@@ -41,20 +41,26 @@ private:
 
 class ScratchManager final {
 public:
+    static constexpr Size MAXIMUM_SCRATCHES {16};
+
     explicit ScratchManager(Size scratch_size):
-          m_scratch_size {scratch_size} {}
+          m_scratches(MAXIMUM_SCRATCHES),
+          m_scratch_size {scratch_size}
+    {
+        for (auto &scratch: m_scratches)
+            scratch.resize(scratch_size);
+    }
 
     [[nodiscard]] auto get() -> Scratch;
     auto reset() -> void;
 
 private:
-    static constexpr Size MIN_SCRATCH_ID {1};
-
-    std::list<std::string> m_occupied;
-    std::list<std::string> m_available;
+    std::vector<std::string> m_scratches;
+    std::list<std::string> m_emergency;
     Size m_scratch_size;
+    Index m_counter {};
 };
 
-} // cco::utils
+} // cco
 
 #endif // CCO_UTILS_SCRATCH_H

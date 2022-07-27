@@ -8,15 +8,6 @@ namespace {
 
 constexpr auto PATH = "/tmp/calico_usage";
 
-#define USAGE_ASSERT_OK(status, message) \
-    do { \
-        if (!(status).is_ok()) { \
-            fmt::print(__FILE__ ": {}\n", (message)); \
-            fmt::print(__FILE__ ": (reason) {}\n", (status).what()); \
-            std::exit(EXIT_FAILURE); \
-        } \
-    } while (0)
-
 auto bytes_objects()
 {
     auto function_taking_a_bytes_view = [](cco::BytesView) {};
@@ -49,23 +40,6 @@ auto bytes_objects()
     // Bytes objects can modify the underlying string, while BytesView objects cannot.
     b[0] = '\xFF';
     assert(data[7] == '\xFF');
-}
-
-auto reads_and_writes(cco::Database &db)
-{
-    static constexpr auto setup_error_message = "cannot setup \"reads_and_writes\" example";
-    USAGE_ASSERT_OK(db.insert("2000-10-23 14:23:05", ""), setup_error_message);
-    USAGE_ASSERT_OK(db.insert("2000-04-09 09:03:34", ""), setup_error_message);
-    USAGE_ASSERT_OK(db.insert("2000-11-01 21:15:45", ""), setup_error_message);
-    USAGE_ASSERT_OK(db.insert("2000-09-17 02:54:32", ""), setup_error_message);
-
-    // To insert a new record, we write the following:
-    auto s = db.insert("2000-02-06 12:32:19", "");
-
-    // Keys are unique in a Calico DB database, so inserting a record that already exists
-    // will overwrite the current value.
-
-    //
 }
 
 auto updating_a_database(cco::Database &db)
@@ -136,22 +110,21 @@ auto querying_a_database(cco::Database &db)
     }
 }
 
-auto transactions(cco::Database &db)
+auto batch_writes(cco::Database &db)
 {
-    // Commit all the updates we made in the previous examples and begin a new transaction.
-    assert(db.commit().is_ok());
+    cco::Batch batch;
 
-    // Modify the database.
-    assert(db.insert("opossum", "pretty cute").is_ok());
-    assert(db.erase("manx").is_ok());
+    // Updates made to the batch object are saved in RAM initially.
+    batch.insert("opossum", "pretty cute");
+    batch.erase("manx");
 
-    // abort() restores the database to how it looked at the beginning of the transaction.
-    assert(db.abort().is_ok());
+    // Then, when apply() is called, they are applied to the database in an atomic transaction.
+    assert(db.apply(batch).is_ok());
 
-    // All updates since the last call to commit() have been reverted.
-    auto s = db.find_exact("opossum");
-    assert(db.find_exact("opossum").status().is_not_found());
-    assert(db.find_exact("manx").is_valid());
+    // If apply() succeeded, then the database will have the entire batch of updates persisted
+    // on disk.
+    assert(db.find_exact("opossum").is_valid());
+    assert(not db.find_exact("manx").is_valid());
 }
 
 auto deleting_a_database(cco::Database db)
@@ -186,10 +159,9 @@ auto main(int, const char *[]) -> int
 
     bytes_objects();
     auto db = open_database();
-    reads_and_writes(db);
     updating_a_database(db);
     querying_a_database(db);
-    transactions(db);
+    batch_writes(db);
     deleting_a_database(std::move(db));
     return 0;
 }

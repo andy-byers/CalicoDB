@@ -7,29 +7,14 @@
 
 namespace cco {
 
-using namespace utils;
 
 auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
 {
-    static constexpr auto ERROR_PRIMARY = "cannot create pager object";
-    static constexpr auto ERROR_DETAIL = "frame count is too {}";
-    static constexpr auto ERROR_HINT = "{} frame count is {}";
-
-    if (param.frame_count < MINIMUM_FRAME_COUNT) {
-        ThreePartMessage message;
-        message.set_primary(ERROR_PRIMARY);
-        message.set_detail(ERROR_DETAIL, "small");
-        message.set_hint(ERROR_HINT, "minimum", MINIMUM_FRAME_COUNT);
-        return Err {message.invalid_argument()};
-    }
-
-    if (param.frame_count > MAXIMUM_FRAME_COUNT) {
-        ThreePartMessage message;
-        message.set_primary(ERROR_PRIMARY);
-        message.set_detail(ERROR_DETAIL, "large");
-        message.set_hint(ERROR_HINT, "maximum", MAXIMUM_FRAME_COUNT);
-        return Err {message.invalid_argument()};
-    }
+    CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
+    CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
+    CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
+    CCO_EXPECT_GE(param.frame_count, MINIMUM_FRAME_COUNT);
+    CCO_EXPECT_LE(param.frame_count, MAXIMUM_FRAME_COUNT);
 
     const auto cache_size = param.page_size * param.frame_count;
     auto buffer = std::unique_ptr<Byte[], AlignedDeleter> {
@@ -39,7 +24,7 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
 
     if (!buffer) {
         ThreePartMessage message;
-        message.set_primary(ERROR_PRIMARY);
+        message.set_primary("cannot open pager");
         message.set_detail("allocation of {} B cache failed", cache_size);
         message.set_hint("out of memory");
         return Err {message.system_error()};
@@ -106,7 +91,8 @@ auto Pager::clean(Frame &frame) -> Result<void>
 {
     CCO_EXPECT_TRUE(frame.is_dirty());
     auto result = write_page_to_file(frame.page_id(), frame.data());
-    frame.reset(frame.page_id());
+    if (result.has_value())
+        frame.reset(frame.page_id());
     return result;
 }
 

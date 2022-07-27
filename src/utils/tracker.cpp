@@ -3,8 +3,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 auto Tracker::reset() -> void
 {
@@ -26,6 +24,8 @@ auto Tracker::discard(Page &page) -> void
     CCO_EXPECT_NE(itr, end(m_registry));
     m_registry.erase(itr);
     page.clear_manager();
+    if (m_registry.empty())
+        m_scratch.reset();
 }
 
 auto Tracker::collect(Page &page, LSN lsn) -> PageUpdate

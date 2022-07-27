@@ -1,4 +1,4 @@
-#include "calico/cursor.h"
+#include "cursor_internal.h"
 #include <spdlog/fmt/fmt.h>
 #include "pool/interface.h"
 #include "tree/internal.h"
@@ -6,26 +6,81 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
-
-Cursor::Cursor(NodePool *pool, Internal *internal):
-      m_pool {pool},
-      m_internal {internal}
+auto CursorInternal::make_cursor(NodePool &pool, Internal &internal) -> Cursor
 {
-    invalidate();
+    Cursor cursor;
+    cursor.m_pool = &pool;
+    cursor.m_internal = &internal;
+    invalidate(cursor);
+    return cursor;
 }
 
-auto Cursor::id() const -> Index
+auto CursorInternal::id(const Cursor &cursor) -> Index
 {
-    CCO_EXPECT_TRUE(is_valid());
-    return m_position.ids[Position::CURRENT];
+    CCO_EXPECT_TRUE(cursor.is_valid());
+    return cursor.m_position.ids[Cursor::Position::CURRENT];
 }
 
-auto Cursor::index() const -> Index
+auto CursorInternal::index(const Cursor &cursor) -> Index
 {
-    CCO_EXPECT_TRUE(is_valid());
-    return m_position.index;
+    CCO_EXPECT_TRUE(cursor.is_valid());
+    return cursor.m_position.index;
+}
+
+
+auto CursorInternal::invalidate(Cursor &cursor, const Status &status) -> void
+{
+    CCO_EXPECT_FALSE(status.is_ok());
+    cursor.m_status = status;
+}
+
+
+auto CursorInternal::seek_left(Cursor &cursor) -> bool
+{
+    CCO_EXPECT_TRUE(cursor.is_valid());
+    CCO_EXPECT_EQ(cursor.m_position.index, 0);
+    if (cursor.is_minimum()) {
+        invalidate(cursor);
+    } else {
+        const PID left {cursor.m_position.ids[Cursor::Position::LEFT]};
+        auto previous = cursor.m_pool->acquire(left, false);
+        if (!previous.has_value()) {
+            invalidate(cursor, previous.error());
+            return false;
+        }
+        move_to(cursor, std::move(*previous), 0);
+        CCO_EXPECT_GT(cursor.m_position.cell_count, 0);
+        cursor.m_position.index = cursor.m_position.cell_count;
+        cursor.m_position.index--;
+    }
+    return true;
+}
+
+auto CursorInternal::seek_right(Cursor &cursor) -> bool
+{
+    CCO_EXPECT_TRUE(cursor.is_valid());
+    CCO_EXPECT_EQ(cursor.m_position.index, cursor.m_position.cell_count - 1);
+    if (cursor.is_maximum()) {
+        invalidate(cursor);
+    } else {
+        const PID right {cursor.m_position.ids[Cursor::Position::RIGHT]};
+        auto next = cursor.m_pool->acquire(right, false);
+        if (!next.has_value()) {
+            invalidate(cursor, next.error());
+            return false;
+        }
+        move_to(cursor, std::move(*next), 0);
+    }
+    return true;
+}
+
+auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
+{
+    if (!cursor.is_valid())
+        return;
+
+    auto node = cursor.m_pool->acquire(PID {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
+    node->TEST_validate();
 }
 
 auto Cursor::operator==(const Cursor &rhs) const -> bool
@@ -98,39 +153,32 @@ auto Cursor::is_minimum() const -> bool
     return is_valid() && m_position.is_minimum();
 }
 
-auto Cursor::move_to(Node node, Index index) -> void
+auto CursorInternal::move_to(Cursor &cursor, Node node, Index index) -> void
 {
     CCO_EXPECT_TRUE(node.is_external());
     const auto count = node.cell_count();
     auto is_valid = count && index < count;
 
     if (is_valid) {
-        m_position.index = static_cast<std::uint16_t>(index);
-        m_position.cell_count = static_cast<std::uint16_t>(count);
-        m_position.ids[Position::LEFT] = node.left_sibling_id().value;
-        m_position.ids[Position::CURRENT] = node.id().value;
-        m_position.ids[Position::RIGHT] = node.right_sibling_id().value;
-        m_status = Status::ok();
+        cursor.m_position.index = static_cast<std::uint16_t>(index);
+        cursor.m_position.cell_count = static_cast<std::uint16_t>(count);
+        cursor.m_position.ids[Cursor::Position::LEFT] = node.left_sibling_id().value;
+        cursor.m_position.ids[Cursor::Position::CURRENT] = node.id().value;
+        cursor.m_position.ids[Cursor::Position::RIGHT] = node.right_sibling_id().value;
+        cursor.m_status = Status::ok();
     } else {
-        invalidate();
+        invalidate(cursor);
     }
 
-    if (auto result = m_pool->release(std::move(node)); !result.has_value())
-        invalidate(result.error());
-}
-
-auto Cursor::invalidate(const Status &status) const -> void
-{
-    CCO_EXPECT_FALSE(status.is_ok());
-    // m_status member is mutable.
-    m_status = status;
+    if (auto result = cursor.m_pool->release(std::move(node)); !result.has_value())
+        invalidate(cursor, result.error());
 }
 
 auto Cursor::increment() -> bool
 {
     if (is_valid()) {
         if (m_position.index == m_position.cell_count - 1) {
-            return seek_right();
+            return CursorInternal::seek_right(*this);
         } else {
             m_position.index++;
         }
@@ -143,7 +191,7 @@ auto Cursor::decrement() -> bool
 {
     if (is_valid()) {
         if (m_position.index == 0) {
-            return seek_left();
+            return CursorInternal::seek_left(*this);
         } else {
             m_position.index--;
         }
@@ -157,7 +205,7 @@ auto Cursor::key() const -> BytesView
     CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
-        invalidate(node.error());
+        m_status = node.error();
         return {};
     }
     return node->read_key(m_position.index);
@@ -168,12 +216,12 @@ auto Cursor::value() const -> std::string
     CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
-        invalidate(node.error());
+        m_status = node.error();
         return {};
     }
     return *m_internal->collect_value(*node, m_position.index)
        .map_error([this](const Status &status) -> std::string {
-           invalidate(status);
+           m_status = status;
            return {};
        });
 }
@@ -183,63 +231,15 @@ auto Cursor::record() const -> Record
     CCO_EXPECT_TRUE(is_valid());
     const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
-        invalidate(node.error());
+        m_status = node.error();
         return {};
     }
     auto value = m_internal->collect_value(*node, m_position.index);
     if (!value.has_value()) {
-        invalidate(node.error());
+        m_status = node.error();
         return {};
     }
     return {btos(node->read_key(m_position.index)), std::move(*value)};
-}
-
-auto Cursor::seek_left() -> bool
-{
-    CCO_EXPECT_TRUE(is_valid());
-    CCO_EXPECT_EQ(m_position.index, 0);
-    if (is_minimum()) {
-        invalidate();
-    } else {
-        const PID left {m_position.ids[Position::LEFT]};
-        auto previous = m_pool->acquire(left, false);
-        if (!previous.has_value()) {
-            invalidate(previous.error());
-            return false;
-        }
-        move_to(std::move(*previous), 0);
-        CCO_EXPECT_GT(m_position.cell_count, 0);
-        m_position.index = m_position.cell_count;
-        m_position.index--;
-    }
-    return true;
-}
-
-auto Cursor::seek_right() -> bool
-{
-    CCO_EXPECT_TRUE(is_valid());
-    CCO_EXPECT_EQ(m_position.index, m_position.cell_count - 1);
-    if (is_maximum()) {
-        invalidate();
-    } else {
-        const PID right {m_position.ids[Position::RIGHT]};
-        auto next = m_pool->acquire(right, false);
-        if (!next.has_value()) {
-            invalidate(next.error());
-            return false;
-        }
-        move_to(std::move(*next), 0);
-    }
-    return true;
-}
-
-auto Cursor::TEST_validate() const -> void
-{
-    if (!is_valid())
-        return;
-
-    auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
-    node->TEST_validate();
 }
 
 auto Cursor::Position::operator==(const Position &rhs) const -> bool

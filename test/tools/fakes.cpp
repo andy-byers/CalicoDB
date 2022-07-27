@@ -26,8 +26,8 @@ static auto maybe_emit_write_error(Random &random, FaultControls::Controls &cont
     return {};
 }
 
-FakeDirectory::FakeDirectory(const std::string &path)
-    : m_path {path} {}
+FakeDirectory::FakeDirectory(const std::string &path):
+      m_path {path} {}
 
 auto FakeDirectory::path() const -> std::string
 {
@@ -78,7 +78,7 @@ auto do_read(const std::string &memory, Index cursor, Bytes out)
         const auto diff = buffer.size() - cursor;
         read_size = std::min(out.size(), diff);
         buffer.advance(cursor);
-        utils::mem_copy(out, buffer, read_size);
+        mem_copy(out, buffer, read_size);
         cursor += read_size;
     }
     return IOResult {cursor, read_size};
@@ -88,7 +88,7 @@ static auto do_write(std::string &memory, Index cursor, BytesView in)
 {
     if (const auto write_end = cursor + in.size(); memory.size() < write_end)
         memory.resize(write_end);
-    utils::mem_copy(stob(memory).range(cursor), in);
+    mem_copy(stob(memory).range(cursor), in);
     return IOResult {cursor + in.size(), in.size()};
 }
 
@@ -135,7 +135,6 @@ auto FakeDirectory::sync() -> Result<void>
 
 auto FakeDirectory::close() -> Result<void>
 {
-    CCO_EXPECT_TRUE(m_is_open);
     m_is_open = false;
     return {};
 }
@@ -194,12 +193,12 @@ auto FakeFile::resize(Size size) -> Result<void>
     return {};
 }
 
-//auto MockDirectory::open_and_register_mock_file(const std::string &name, Mode mode, int permissions) -> std::unique_ptr<IFile>
-//{
-//    auto *mock = new testing::NiceMock<MockFile> {m_fake.open_file(name, mode, permissions).value()};
-//    mock->delegate_to_fake();
-//    m_files.emplace(mock_name(name, mode), mock);
-//    return std::unique_ptr<IFile> {mock};
-//}
+auto MockDirectory::open_and_register_mock_file(const std::string &name, Mode mode, int permissions) -> std::unique_ptr<IFile>
+{
+    auto *mock = new testing::NiceMock<MockFile> {m_fake.open_file(name, mode, permissions).value()};
+    mock->delegate_to_fake();
+    m_files.emplace(mock_name(name, mode), mock);
+    return std::unique_ptr<IFile> {mock};
+}
 
 } // cco

@@ -135,14 +135,14 @@ auto DatabaseTarget::erase_one(BytesView key) -> void
 
 auto DatabaseTarget::do_commit() -> void
 {
-    const auto s = m_db.commit();
-    CCO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
+//    const auto s = m_db.commit();
+//    CCO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
 }
 
 auto DatabaseTarget::do_abort() -> void
 {
-    const auto s = m_db.abort();
-    CCO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
+//    const auto s = m_db.abort();
+//    CCO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
 }
 
 } // cco

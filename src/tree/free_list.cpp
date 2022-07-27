@@ -6,13 +6,11 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
-FreeList::FreeList(const Parameters &param)
-    : m_pool {param.buffer_pool}
-    , m_free_start {param.free_start}
-    , m_free_count {param.free_count} {}
+FreeList::FreeList(const Parameters &param):
+      m_pool {param.buffer_pool},
+      m_free_start {param.free_start},
+      m_free_count {param.free_count} {}
 
 auto FreeList::save_header(FileHeaderWriter &header) const-> void
 {
@@ -48,10 +46,6 @@ auto FreeList::pop() -> Result<Page>
                 m_free_start = link.next_id();
                 m_free_count--;
                 return link.take();
-            })
-            .or_else([&](Status error) -> Result<Page> {
-                // TODO: Error logging here. We'll need a logger for the free list.
-                return Err {std::move(error)};
             });
     }
     CCO_EXPECT_TRUE(m_free_start.is_null());

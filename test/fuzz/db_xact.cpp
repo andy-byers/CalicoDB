@@ -6,7 +6,7 @@ namespace fs = std::filesystem;
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
-    // We generally shouldn't access disk during fuzzing since it greatly slows down execution speed.
+//    // We generally shouldn't access disk during fuzzing since it greatly slows down execution speed.
 //    static constexpr auto PATH = "/tmp/calico_fuzz_db_xact__";
 //    std::error_code ignore;
 //    if (fs::file_size(PATH, ignore) > 0x4000)

@@ -1,4 +1,5 @@
 # API
+Calico DB aims to provide a simple yet robust API for manipulating ordered data.
 
 + [Opening a Database](#opening-a-database)
 + [Closing a Database](#closing-a-database)
@@ -10,16 +11,21 @@
 + [Deleting a Database](#deleting-a-database)
 
 ### Opening a Database
+Opening a database is a two-step process.
+First, we create the database object using a public constructor.
+Next, we call `open()` to open the database connection.
 
 ```C++
 // Set some options. We'll create a database at "tmp/cats" with pages of size 8 KB and 
-// 128 cache frames (4 MB total).
+// 128 cache frames (4 MB total). We'll also enable logging.
 cco::Options options;
 options.path = "/tmp/cats";
 options.page_size = 0x8000;
 options.frame_count = 128;
+options.log_level = spdlog::level::info;
 
-// Create the database object.
+// Create the database object. Note that we could just as easily use a smart pointer or
+// new/delete to manage the resource.
 cco::Database db {options};
 
 // Open the database connection.
@@ -39,7 +45,7 @@ assert(db.close().is_ok());
 ```
 
 ### Bytes Objects
-Calico DB uses `Bytes` and `BytesView` objects to represent unowned byte sequences, a.k.a. slices.
+Calico DB uses `Bytes` and `BytesView` objects to represent unowned, contiguous sequences of bytes.
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
@@ -76,7 +82,8 @@ assert(data[7] == '\xFF');
 ```
 
 ### Updating a Database
-Records and be added or removed using methods on the `Database` object.
+Records can be added or removed using methods on the `Database` object.
+Keys are unique, so inserting a record that already exists will cause modification of the existing value.
 
 ```C++
 std::vector<cco::Record> records {
@@ -96,8 +103,7 @@ std::vector<cco::Record> records {
 for (const auto &record: records)
     assert(db.insert(record).is_ok());
 
-// Keys are unique, so inserting a record with an existing key will modify the
-// existing value.
+// Modify a record.
 assert(db.insert("cyprus", "all;all").is_ok());
 
 // Erase a record by key.
@@ -153,31 +159,29 @@ If a method returning a cursor encounters an error, the error status will be mad
 If an error occurs that could potentially lead to corruption of the database contents, the database object will lock up and refuse to perform any more work.
 Rather, the exceptional status that caused the lockup will be returned each time a method call is made.
 An error such as this could be caused, for example, by becoming unable to write to disk in the middle of a tree balancing operation.
-The lockup can be resolved by a successful call to abort(), which discards updates made during the current transaction.
-abort() is reentrant, so it can be called repeatedly.
+The lockup can be resolved by a successful call to recover(), which attempts restore a valid database state.
+recover() is reentrant, so it can be called repeatedly.
 A good rule of thumb is that if one receives a system error from a call that can modify the database, i.e. insert(), erase(), or commit(), then one should try to abort().
 If this isn't possible, it's best to just exit the program.
 The next time that the database is started up, it will perform the necessary recovery.
 
-### Transactions
-Every modification to a Calico DB database occurs within a transaction.
-The first transaction begins when the database is opened, and the last one commits when the database is closed.
-Otherwise, transaction boundaries are defined by successful calls to either `commit()` or `abort()`.
-Calico DB only provides ACID guarantees and rollback behavior on the current transaction.
-After a transaction is committed and all dirty pages are written to disk, the WAL is truncated and a new transaction is started.
+### Batch Writes
+All methods that modify the database will make sure that all updates are persisted on disk before returning (i.e. they call `fsync()`).
+We can use batch writes to get rid of much of this overhead.
 
 ```C++
-// Commit all the updates we made in the previous examples and begin a new transaction.
-assert(db.commit().is_ok());
+cco::Batch batch;
 
-// Modify the database.
-assert(db.insert("opossum", "pretty cute").is_ok());
-assert(db.erase("manx").is_ok());
+// Updates made to the batch object are saved in RAM initially.
+batch.insert("opossum", "pretty cute");
+batch.erase("manx");
 
-// abort() restores the database to how it looked at the beginning of the transaction.
-assert(db.abort().is_ok());
+// Then, when apply() is called, they are applied to the database in an atomic transaction.
+assert(db.apply(batch).is_ok());
 
-// All updates since the last call to commit() have been reverted.
+// If apply() succeeded, then the database will have the entire batch of updates persisted
+// to disk.
+auto s = db.find_exact("opossum");
 assert(db.find_exact("opossum").status().is_not_found());
 assert(db.find_exact("manx").is_valid());
 ```

@@ -48,8 +48,8 @@ namespace impl {
          * @tparam Q The other slice pointer type.
          * @param rhs The other slice.
          */
-        template<class Q> Slice(Slice<Q> rhs) noexcept
-            : Slice {rhs.data(), rhs.size()} {}
+        template<class Q> Slice(Slice<Q> rhs) noexcept:
+              Slice {rhs.data(), rhs.size()} {}
 
         /**
          * Create a slice from a pointer and a length.
@@ -58,9 +58,9 @@ namespace impl {
          * @param data A pointer to the start of a sequence.
          * @param size The length of the sequence.
          */
-        template<class Q> Slice(Q data, Size size) noexcept
-            : m_data {data}
-            , m_size {size} {}
+        template<class Q> Slice(Q data, Size size) noexcept:
+              m_data {data},
+              m_size {size} {}
 
         /**
          * Get a reference to the element at a specified index.

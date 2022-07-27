@@ -6,8 +6,6 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 auto WALWriter::open(const WALParameters &param) -> Result<std::unique_ptr<IWALWriter>>
 {
@@ -15,7 +13,7 @@ auto WALWriter::open(const WALParameters &param) -> Result<std::unique_ptr<IWALW
     CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
     CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
 
-    CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND, 0666));
+    CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND, DEFAULT_PERMISSIONS));
     CCO_TRY_CREATE(file_size, file->size());
     auto writer = std::unique_ptr<WALWriter> {new(std::nothrow) WALWriter {std::move(file), param}};
     if (!writer) {

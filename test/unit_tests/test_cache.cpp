@@ -11,7 +11,7 @@ using namespace cco;
 
 TEST(CacheTests, NewCacheIsEmpty)
 {
-    utils::LruCache<int, int> cache;
+    LruCache<int, int> cache;
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
 }

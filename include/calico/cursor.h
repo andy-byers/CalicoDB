@@ -7,16 +7,12 @@
 
 namespace cco {
 
+class Node;
 class NodePool;
 class Internal;
 
-namespace page {
-    class Node;
-} // page;
-
 class Cursor final {
 public:
-    Cursor() = default;
     ~Cursor() = default;
 
     /**
@@ -151,7 +147,7 @@ public:
 private:
 
     /**
-     * Representation of the position of a cursor in the page.
+     * Representation of a cursor position in the tree.
      */
     struct Position {
         static constexpr Index LEFT {0};
@@ -167,16 +163,8 @@ private:
         std::uint16_t index {}; ///< Offset of the cursor in the current node.
     };
 
-    friend class Tree;
-
-    Cursor(NodePool*, Internal*);
-    [[nodiscard]] auto id() const -> Index;
-    [[nodiscard]] auto index() const -> Index;
-    auto move_to(page::Node, Index) -> void;
-    auto seek_left() -> bool;
-    auto seek_right() -> bool;
-    auto invalidate(const Status& = Status::not_found()) const -> void;
-    auto TEST_validate() const -> void;
+    friend class CursorInternal;
+    Cursor() = default;
 
     mutable Status m_status {Status::not_found()};
     NodePool *m_pool {}; ///< Reference to an object that provides nodes from the buffer pool.

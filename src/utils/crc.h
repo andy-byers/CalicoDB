@@ -3,7 +3,7 @@
 
 #include "calico/bytes.h"
 
-namespace cco::utils {
+namespace cco {
 
 inline auto crc_32(BytesView data) noexcept -> std::uint32_t
 {
@@ -14,15 +14,14 @@ inline auto crc_32(BytesView data) noexcept -> std::uint32_t
     std::uint32_t a {1}, b {0};
 
     // Process each byte of the data in order
-    for (Index index {}; index < data.size(); ++index)
-    {
-        a = (a+static_cast<std::uint8_t>(data[index])) % MOD_ADLER;
+    for (Index i {}, n {data.size()}; i < n; ++i) {
+        a = (a+static_cast<std::uint8_t>(data[i])) % MOD_ADLER;
         b = (b+a) % MOD_ADLER;
     }
 
     return (b << 16) | a;
 }
 
-} // cco::utils
+} // cco
 
 #endif // CCO_UTILS_CRC_H

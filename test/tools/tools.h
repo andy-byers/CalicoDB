@@ -94,8 +94,8 @@ private:
     auto validate_parent_child_connections() -> void;
     auto validate_ordering() -> void;
     auto collect_keys() -> std::vector<std::string>;
-    auto traverse_inorder(const std::function<void(page::Node&, Index)>&) -> void;
-    auto traverse_inorder_helper(page::Node, const std::function<void(page::Node&, Index)>&) -> void;
+    auto traverse_inorder(const std::function<void(Node&, Index)>&) -> void;
+    auto traverse_inorder_helper(Node, const std::function<void(Node&, Index)>&) -> void;
     auto is_reachable(std::string) -> bool;
 
     ITree &m_tree;
@@ -109,7 +109,7 @@ public:
 private:
     auto add_spaces_to_level(Size, Index) -> void;
     auto add_spaces_to_other_levels(Size, Index) -> void;
-    auto print_aux(page::Node, Index) -> void;
+    auto print_aux(Node, Index) -> void;
     auto add_key_to_level(BytesView, Index, bool) -> void;
     auto add_key_separator_to_level(Index) -> void;
     auto add_node_start_to_level(Index, Index) -> void;
@@ -190,7 +190,7 @@ public:
     explicit WALRecordGenerator(Size page_size):
           m_page_size {page_size}
     {
-        CCO_EXPECT_TRUE(utils::is_power_of_two(page_size));
+        CCO_EXPECT_TRUE(is_power_of_two(page_size));
     }
 
     auto generate_small() -> WALRecord
@@ -222,7 +222,7 @@ public:
 
         m_snapshots_before.emplace_back(random.next_string(page_size));
         m_snapshots_after.emplace_back(random.next_string(page_size));
-        std::vector<page::ChangedRegion> update {};
+        std::vector<ChangedRegion> update {};
 
         for (Index i {}; i < update_count; ++i) {
             const auto size = random.next_int(lower_bound, upper_bound);

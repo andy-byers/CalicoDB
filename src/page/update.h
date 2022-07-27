@@ -7,7 +7,7 @@
 #include <optional>
 #include <vector>
 
-namespace cco::page {
+namespace cco {
 
 struct ChangedRegion {
     Index offset {};  ///< Offset of the region from the start of the page
@@ -55,6 +55,6 @@ namespace impl {
 
 } // impl
 
-} // cco::page
+} // cco
 
 #endif // CCO_PAGE_UPDATE_H

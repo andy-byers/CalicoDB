@@ -4,7 +4,7 @@
 #include "cell.h"
 #include "page.h"
 
-namespace cco::page {
+namespace cco {
 
 class NodeHeader final {
 public:
@@ -121,7 +121,7 @@ public:
           m_header {NodeHeader {m_page}},
           m_directory {CellDirectory {m_header}},
           m_allocator {BlockAllocator {m_header}},
-          m_overflow {std::move(rhs.m_overflow)} {}
+          m_overflow {rhs.m_overflow} {}
 
     auto operator=(Node &&rhs) noexcept -> Node&
     {
@@ -130,7 +130,8 @@ public:
             m_header = NodeHeader {m_page};
             m_directory = CellDirectory {m_header};
             m_allocator = BlockAllocator {m_header};
-            m_overflow = std::move(rhs.m_overflow);
+            m_overflow = rhs.m_overflow;
+            rhs.m_overflow.reset();
         }
         return *this;
     }
@@ -177,9 +178,9 @@ public:
 
     [[nodiscard]] auto read_key(Index) const -> BytesView;
     [[nodiscard]] auto read_cell(Index) const -> Cell;
-    [[nodiscard]] auto detach_cell(Index, utils::Scratch) const -> Cell;
+    [[nodiscard]] auto detach_cell(Index, Scratch) const -> Cell;
     [[nodiscard]] auto find_ge(BytesView) const -> FindGeResult;
-    auto extract_cell(Index, utils::Scratch) -> Cell;
+    auto extract_cell(Index, Scratch) -> Cell;
     auto insert(Cell) -> void;
     auto insert_at(Index, Cell) -> void;
     auto remove(BytesView) -> bool;
@@ -233,11 +234,11 @@ auto merge_left(Node&, Node&, Node&, Index) -> void;
 auto merge_right(Node&, Node&, Node&, Index) -> void;
 auto merge_root(Node&, Node&) -> void;
 auto split_root(Node&, Node&) -> void;
-[[nodiscard]] auto split_non_root(Node&, Node&, utils::Scratch) -> Cell;
+[[nodiscard]] auto split_non_root(Node&, Node&, Scratch) -> Cell;
 
 [[nodiscard]] auto get_file_header_reader(const Node&) -> FileHeaderReader;
 [[nodiscard]] auto get_file_header_writer(Node&) -> FileHeaderWriter;
 
-} // cco::page
+} // cco
 
 #endif // CCO_PAGE_NODE_H

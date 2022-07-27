@@ -5,7 +5,6 @@
 
 namespace cco {
 
-using namespace utils;
 
 auto WALReader::open(const WALParameters &param) -> Result<std::unique_ptr<IWALReader>>
 {
@@ -13,7 +12,7 @@ auto WALReader::open(const WALParameters &param) -> Result<std::unique_ptr<IWALR
     CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
     CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
 
-    CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::READ_ONLY, 0666));
+    CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::READ_ONLY, DEFAULT_PERMISSIONS));
     auto reader = std::unique_ptr<IWALReader> {new(std::nothrow) WALReader {std::move(file), param}};
     if (!reader) {
         ThreePartMessage message;
@@ -24,7 +23,7 @@ auto WALReader::open(const WALParameters &param) -> Result<std::unique_ptr<IWALR
     return reader;
 }
 
-WALReader::WALReader(std::unique_ptr<IFile> file, WALParameters param):
+WALReader::WALReader(std::unique_ptr<IFile> file, const WALParameters &param):
       m_block(param.page_size, '\x00'),
       m_file {std::move(file)} {}
 

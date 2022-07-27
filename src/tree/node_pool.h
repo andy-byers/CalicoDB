@@ -24,15 +24,15 @@ public:
     ~NodePool() = default;
 
     [[nodiscard]] auto page_size() const -> Size;
-    [[nodiscard]] auto allocate(PageType) -> Result<page::Node>;
-    [[nodiscard]] auto acquire(PID, bool) -> Result<page::Node>;
-    [[nodiscard]] auto release(page::Node) -> Result<void>;
-    [[nodiscard]] auto destroy(page::Node) -> Result<void>;
+    [[nodiscard]] auto allocate(PageType) -> Result<Node>;
+    [[nodiscard]] auto acquire(PID, bool) -> Result<Node>;
+    [[nodiscard]] auto release(Node) -> Result<void>;
+    [[nodiscard]] auto destroy(Node) -> Result<void>;
     [[nodiscard]] auto allocate_chain(BytesView) -> Result<PID>;
     [[nodiscard]] auto destroy_chain(PID, Size) -> Result<void>;
     [[nodiscard]] auto collect_chain(PID, Bytes) const -> Result<void>;
-    auto save_header(page::FileHeaderWriter&) -> void;
-    auto load_header(const page::FileHeaderReader&) -> void;
+    auto save_header(FileHeaderWriter&) -> void;
+    auto load_header(const FileHeaderReader&) -> void;
 
     [[nodiscard]] auto node_count() const -> Size
     {

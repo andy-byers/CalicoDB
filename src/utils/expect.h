@@ -10,7 +10,7 @@
 #  define CCO_EXPECT(cc)
 #  define CCO_VALIDATE(validator)
 #else
-#  define CCO_EXPECT_(cc, file, line) utils::impl::handle_expect(cc, #cc, file, line)
+#  define CCO_EXPECT_(cc, file, line) impl::handle_expect(cc, #cc, file, line)
 #  define CCO_EXPECT(cc) CCO_EXPECT_(cc, __FILE__, __LINE__)
 #endif // NDEBUG
 
@@ -68,7 +68,7 @@
     } \
     auto out = std::move(*calico_try_##out)
 
-namespace cco::utils::impl {
+namespace cco::impl {
 
 inline auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept
 {
@@ -78,6 +78,6 @@ inline auto handle_expect(bool expectation, const char *repr, const char *file, 
     }
 }
 
-} // cco::utils::impl
+} // cco::impl
 
 #endif // CCO_UTILS_ASSERT_H

@@ -6,26 +6,24 @@
 
 namespace cco {
 
-using namespace page;
-using namespace utils;
 
 MemoryPool::MemoryPool(Size page_size, bool use_xact):
       m_tracker {page_size},
       m_scratch {page_size},
       m_page_size {page_size},
-      m_use_xact {use_xact} {}
+      m_uses_xact {use_xact} {}
 
 auto MemoryPool::page_count() const -> Size
 {
     return m_frames.size();
 }
 
-auto MemoryPool::save_header(page::FileHeaderWriter &header) -> void
+auto MemoryPool::save_header(FileHeaderWriter &header) -> void
 {
     header.set_page_count(page_count());
 }
 
-auto MemoryPool::load_header(const page::FileHeaderReader &header) -> void
+auto MemoryPool::load_header(const FileHeaderReader &header) -> void
 {
     while (page_count() > header.page_count())
         m_frames.pop_back();
@@ -47,7 +45,7 @@ auto MemoryPool::allocate() -> Result<Page>
 auto MemoryPool::acquire(PID id, bool is_writable) -> Result<Page>
 {
     CCO_TRY_CREATE(page, fetch(id, is_writable));
-    if (m_use_xact && is_writable)
+    if (m_uses_xact && is_writable)
         m_tracker.track(page);
     return page;
 }
@@ -69,13 +67,13 @@ auto MemoryPool::release(Page page) -> Result<void>
     return {};
 }
 
-auto MemoryPool::on_release(page::Page &page) -> void
+auto MemoryPool::on_release(Page &page) -> void
 {
     std::lock_guard lock {m_mutex};
     do_release(page);
 }
 
-auto MemoryPool::do_release(page::Page &page) -> void
+auto MemoryPool::do_release(Page &page) -> void
 {
     const auto index = page.id().as_index();
     CCO_EXPECT_LT(index, m_frames.size());
@@ -90,7 +88,7 @@ auto MemoryPool::commit() -> Result<void>
 {
     if (can_commit()) {
         m_stack.clear();
-    } else if (m_use_xact) {
+    } else if (m_uses_xact) {
         ThreePartMessage message;
         message.set_primary("cannot commit");
         message.set_detail("transaction is empty");
@@ -101,7 +99,7 @@ auto MemoryPool::commit() -> Result<void>
 
 auto MemoryPool::abort() -> Result<void>
 {
-    if (!m_use_xact) {
+    if (!m_uses_xact) {
         ThreePartMessage message;
         message.set_primary("cannot abort");
         message.set_detail("not supported");
@@ -123,14 +121,6 @@ auto MemoryPool::abort() -> Result<void>
         mem_copy(page.bytes(offset), stob(before));
     }
     return {};
-}
-
-auto MemoryPool::purge() -> void
-{
-    for (auto &frame: m_frames) {
-        if (frame.ref_count())
-            frame.purge();
-    }
 }
 
 } // cco

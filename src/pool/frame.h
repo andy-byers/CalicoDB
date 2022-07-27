@@ -9,10 +9,7 @@
 namespace cco {
 
 class IBufferPool;
-
-namespace page {
-    class Page;
-} // page
+class Page;
 
 /**
  * Represents in-memory storage for a single database page.
@@ -82,8 +79,8 @@ public:
     }
 
     [[nodiscard]] auto page_lsn() const -> LSN;
-    [[nodiscard]] auto borrow(IBufferPool*, bool) -> page::Page;
-    auto synchronize(page::Page&) -> void;
+    [[nodiscard]] auto borrow(IBufferPool*, bool) -> Page;
+    auto synchronize(Page&) -> void;
 
     auto operator=(Frame&&) -> Frame& = default;
     Frame(Frame&&) = default;

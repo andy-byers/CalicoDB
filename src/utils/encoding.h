@@ -8,7 +8,7 @@
 #include "calico/options.h"
 #include "calico/bytes.h"
 
-namespace cco::utils {
+namespace cco {
 
 inline auto get_u16(const Byte *in) noexcept -> std::uint16_t
 {
@@ -97,6 +97,6 @@ inline auto put_u64(Bytes out, std::uint64_t value) noexcept -> void
     put_u64(out.data(), value);
 }
 
-} // cco::utils
+} // cco
 
 #endif // CCO_UTILS_ENCODING_H

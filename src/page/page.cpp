@@ -5,9 +5,8 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cco::page {
+namespace cco {
 
-using namespace utils;
 
 Page::Page(const Parameters &param):
       m_source {param.source},
@@ -104,7 +103,7 @@ auto Page::undo(LSN previous_lsn, const std::vector<ChangedRegion> &changes) -> 
     for (const auto &region: changes)
         mem_copy(m_data.range(region.offset), region.before, region.before.size());
     const auto lsn_offset = PageLayout::header_offset(m_id) + PageLayout::LSN_OFFSET;
-    utils::put_u32(m_data.range(lsn_offset), previous_lsn.value);
+    put_u32(m_data.range(lsn_offset), previous_lsn.value);
     m_is_dirty = true;
 }
 
@@ -114,28 +113,28 @@ auto Page::redo(LSN next_lsn, const std::vector<ChangedRegion> &changes) -> void
     for (const auto &region: changes)
         mem_copy(m_data.range(region.offset), region.after, region.after.size());
     const auto lsn_offset = PageLayout::header_offset(m_id) + PageLayout::LSN_OFFSET;
-    utils::put_u32(m_data.range(lsn_offset), next_lsn.value);
+    put_u32(m_data.range(lsn_offset), next_lsn.value);
     m_is_dirty = true;
 }
 
 auto get_u16(const Page &page, Index offset) -> uint16_t
 {
-    return utils::get_u16(page.view(offset, sizeof(uint16_t)));
+    return get_u16(page.view(offset, sizeof(uint16_t)));
 }
 
 auto get_u32(const Page &page, Index offset) -> uint32_t
 {
-    return utils::get_u32(page.view(offset, sizeof(uint32_t)));
+    return get_u32(page.view(offset, sizeof(uint32_t)));
 }
 
 auto put_u16(Page &page, Index offset, uint16_t value) -> void
 {
-    utils::put_u16(page.bytes(offset, sizeof(value)), value);
+    put_u16(page.bytes(offset, sizeof(value)), value);
 }
 
 auto put_u32(Page &page, Index offset, uint32_t value) -> void
 {
-    utils::put_u32(page.bytes(offset, sizeof(value)), value);
+    put_u32(page.bytes(offset, sizeof(value)), value);
 }
 
 auto get_file_header_reader(const Page &page) -> FileHeaderReader
@@ -150,4 +149,4 @@ auto get_file_header_writer(Page &page) -> FileHeaderWriter
     return FileHeaderWriter {page.bytes(FileLayout::header_offset(), FileLayout::HEADER_SIZE)};
 }
 
-} // cco::page
+} // cco

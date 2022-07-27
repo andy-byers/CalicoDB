@@ -38,15 +38,15 @@ public:
     [[nodiscard]] virtual auto flushed_lsn() const -> LSN = 0;
     [[nodiscard]] virtual auto truncate() -> Result<void> = 0;
     [[nodiscard]] virtual auto flush() -> Result<void> = 0;
-    [[nodiscard]] virtual auto append(page::Page&) -> Result<void> = 0;
+    [[nodiscard]] virtual auto append(Page&) -> Result<void> = 0;
     [[nodiscard]] virtual auto recover() -> Result<void> = 0;
     [[nodiscard]] virtual auto commit() -> Result<void> = 0;
     [[nodiscard]] virtual auto abort() -> Result<void> = 0;
     [[nodiscard]] virtual auto close() -> Result<void> = 0;
-    virtual auto track(page::Page&) -> void = 0;
-    virtual auto discard(page::Page&) -> void = 0;
-    virtual auto save_header(page::FileHeaderWriter&) -> void = 0;
-    virtual auto load_header(const page::FileHeaderReader&) -> void = 0;
+    virtual auto track(Page&) -> void = 0;
+    virtual auto discard(Page&) -> void = 0;
+    virtual auto save_header(FileHeaderWriter&) -> void = 0;
+    virtual auto load_header(const FileHeaderReader&) -> void = 0;
 };
 
 class IWALWriter {

@@ -4,7 +4,7 @@
 #include <spdlog/sinks/null_sink.h>
 #include "expect.h"
 
-namespace cco::utils {
+namespace cco {
 
 namespace fs = std::filesystem;
 
@@ -97,4 +97,4 @@ auto LogMessage::log(spdlog::level::level_enum level) const -> std::string
     return message;
 }
 
-} // cco::utils
+} // cco

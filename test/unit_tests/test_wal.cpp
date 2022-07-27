@@ -20,8 +20,8 @@
 namespace {
 
 using namespace cco;
-using namespace cco::page;
-using namespace cco::utils;
+using namespace cco;
+using namespace cco;
 
 struct TestWALOptions {
     std::string path;
@@ -403,12 +403,13 @@ public:
 
     WALTests()
     {
-        home = std::make_unique<FakeDirectory>("WALReaderWriterTests");
-        pool = BufferPool::open({*home, create_sink(), LSN::null(), 16, 0, PAGE_SIZE, 0666, true}).value();
-        wal_backing = home->get_shared("wal");
-        wal_faults = home->get_faults("wal");
-        data_backing = home->get_shared("data");
-        data_faults = home->get_faults("data");
+        auto temp = std::make_unique<FakeDirectory>("WALReaderWriterTests");
+        pool = BufferPool::open({*temp, create_sink(), LSN::null(), 16, 0, PAGE_SIZE, 0666, true}).value();
+        wal_backing = temp->get_shared("wal");
+        wal_faults = temp->get_faults("wal");
+        data_backing = temp->get_shared("data");
+        data_faults = temp->get_faults("data");
+        home = std::move(temp);
     }
 
     auto allocate_page() -> Page
@@ -455,7 +456,7 @@ public:
     SharedMemory data_backing;
     FaultControls wal_faults;
     FaultControls data_faults;
-    std::unique_ptr<FakeDirectory> home;
+    std::unique_ptr<IDirectory> home;
     std::unique_ptr<IBufferPool> pool;
     std::vector<std::string> pages_before;
     std::vector<std::string> pages_after;
@@ -531,6 +532,118 @@ TEST_F(WALTests, CommitSanityCheck)
         auto page = pool->acquire(PID::from_index(i), false).value();
         assert_page_is_same_as_after(page);
     }
+}
+
+
+class MockWALTests: public WALTests {
+public:
+    static constexpr Size PAGE_SIZE = 0x200;
+
+    ~MockWALTests() override = default;
+
+    MockWALTests()
+    {
+        home = std::make_unique<MockDirectory>("WALReaderWriterTests");
+        home_mock = dynamic_cast<MockDirectory*>(home.get());
+    }
+
+    auto setup(bool use_xact) -> void
+    {
+        EXPECT_CALL(*home_mock, open_file)
+            .Times(2*use_xact + 1);
+
+        pool = BufferPool::open({*home, create_sink(), LSN::null(), 16, 0, PAGE_SIZE, 0666, use_xact}).value();
+        data_mock = home_mock->get_mock_file("data", Mode::CREATE | Mode::READ_WRITE);
+        if (use_xact) {
+            rwal_mock = home_mock->get_mock_file("wal", Mode::CREATE | Mode::READ_ONLY);
+            wwal_mock = home_mock->get_mock_file("wal", Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND);
+        }
+    }
+
+    MockDirectory *home_mock {};
+    MockFile *rwal_mock {};
+    MockFile *wwal_mock {};
+    MockFile *data_mock {};
+};
+
+auto run_close_error_test(MockWALTests &test, MockFile &mock)
+{
+    using testing::Return;
+    ON_CALL(mock, close)
+        .WillByDefault(testing::Return(Err {Status::system_error("123")}));
+
+    const auto r = test.pool->close();
+    ASSERT_FALSE(r.has_value());
+    ASSERT_TRUE(r.error().is_system_error());
+    ASSERT_EQ(r.error().what(), "123");
+}
+
+TEST_F(MockWALTests, asdfgh)
+{
+    setup(true);
+
+}
+
+TEST_F(MockWALTests, DataFileCloseErrorIsPropagated)
+{
+    setup(true);
+    run_close_error_test(*this, *data_mock);
+}
+
+TEST_F(MockWALTests, WALReaderFileCloseErrorIsPropagated)
+{
+    setup(true);
+    run_close_error_test(*this, *rwal_mock);
+}
+
+TEST_F(MockWALTests, WALWriterFileCloseErrorIsPropagated)
+{
+    setup(true);
+    run_close_error_test(*this, *wwal_mock);
+}
+
+TEST_F(MockWALTests, CannotCommitEmptyTransaction)
+{
+    setup(true);
+    ASSERT_TRUE(pool->commit().error().is_logic_error());
+}
+
+TEST_F(MockWALTests, CannotAbortEmptyTransaction)
+{
+    setup(true);
+    ASSERT_TRUE(pool->abort().error().is_logic_error());
+}
+
+TEST_F(MockWALTests, SystemErrorIsPropagated)
+{
+    using testing::_;
+    setup(true);
+
+    ON_CALL(*data_mock, write(_, _))
+        .WillByDefault(testing::Return(Err {Status::system_error("123")}));
+
+    // We should never call read() during page allocation. We would hit EOF anyway.
+    EXPECT_CALL(*data_mock, read(_, _))
+        .Times(0);
+
+    for (; ; ) {
+        auto p = pool->allocate();
+        if (!p.has_value())
+            break;
+        p->set_type(PageType::INTERNAL_NODE);
+        p->set_lsn(LSN {123});
+        auto r = pool->release(std::move(*p));
+        if (!r.has_value())
+            break;
+    }
+    ASSERT_TRUE(pool->status().is_system_error());
+    ASSERT_EQ(pool->status().what(), "123");
+}
+
+TEST_F(MockWALTests, CannotAbortIfNotUsingTransactions)
+{
+    setup(false);
+    ASSERT_TRUE(pool->abort().error().is_logic_error());
 }
 
 } // <anonymous>

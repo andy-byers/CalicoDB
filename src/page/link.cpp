@@ -3,9 +3,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cco::page {
-
-using namespace utils;
+namespace cco {
 
 Link::Link(Page page)
     : m_page {std::move(page)} {}
@@ -40,4 +38,4 @@ auto Link::content_bytes(Size size) -> Bytes
     return m_page.bytes(LinkLayout::content_offset(), size);
 }
 
-} // cco::page
+} // cco

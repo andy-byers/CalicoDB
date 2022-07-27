@@ -9,15 +9,12 @@
 
 namespace cco {
 
-class IBufferPool;
-class Frame;
-
-namespace page {
-
 struct ChangedRegion;
 struct PageUpdate;
+class Frame;
 class FileHeaderReader;
 class FileHeaderWriter;
+class IBufferPool;
 class UpdateManager;
 
 class Page final {
@@ -85,7 +82,7 @@ public:
 private:
     [[nodiscard]] auto header_offset() const -> Index;
 
-    utils::UniqueNullable<IBufferPool*> m_source;
+    UniqueNullable<IBufferPool*> m_source;
     UpdateManager *m_manager {};
     Bytes m_data;
     PID m_id;
@@ -101,7 +98,6 @@ auto put_u32(Page&, Index, uint32_t) -> void;
 [[nodiscard]] auto get_file_header_reader(const Page&) -> FileHeaderReader;
 [[nodiscard]] auto get_file_header_writer(Page&) -> FileHeaderWriter;
 
-} // page
 } // cco
 
 #endif // CCO_PAGE_PAGE_H
