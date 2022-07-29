@@ -65,9 +65,9 @@ public:
     [[nodiscard]] auto fetch(PID id, bool is_writable) -> Result<Page> override;
     [[nodiscard]] auto commit() -> Result<void> override;
     [[nodiscard]] auto abort() -> Result<void> override;
-    auto on_release(Page&) -> void override;
-    auto save_header(FileHeaderWriter&) -> void override;
-    auto load_header(const FileHeaderReader&) -> void override;
+    auto on_release(Page &) -> void override;
+    auto save_header(FileHeaderWriter &) -> void override;
+    auto load_header(const FileHeaderReader &) -> void override;
 
 private:
     struct UndoInfo {
@@ -76,7 +76,7 @@ private:
         Index offset {};
     };
 
-    auto do_release(Page&) -> void;
+    auto do_release(Page &) -> void;
 
     mutable std::mutex m_mutex;
     Tracker m_tracker;
@@ -87,6 +87,6 @@ private:
     bool m_uses_xact {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_POOL_IN_MEMORY_H

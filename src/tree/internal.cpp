@@ -4,13 +4,13 @@
 
 namespace cco {
 
-
-Internal::Internal(Parameters param):
-      m_maximum_key_size {get_max_local(param.pool->page_size())},
+Internal::Internal(Parameters param)
+    : m_maximum_key_size {get_max_local(param.pool->page_size())},
       // Scratch memory needs to be able to hold a maximally-sized cell.
       m_scratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
       m_pool {param.pool},
-      m_cell_count {param.cell_count} {}
+      m_cell_count {param.cell_count}
+{}
 
 auto Internal::collect_value(const Node &node, Index index) const -> Result<std::string>
 {
@@ -47,7 +47,7 @@ auto Internal::find_external(BytesView key) -> Result<SearchResult>
         return Err {node.error()};
 
     Node::FindGeResult result;
-    for (; ; ) {
+    for (;;) {
         result = node->find_ge(key);
         if (node->is_external())
             break;
@@ -531,4 +531,4 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Index ind
     return {};
 }
 
-} // cco
+} // namespace cco

@@ -1,9 +1,9 @@
 
-#include "database_impl.h"
 #include "batch_internal.h"
 #include "calico/batch.h"
 #include "calico/cursor.h"
 #include "calico/info.h"
+#include "database_impl.h"
 #include "pool/buffer_pool.h"
 #include "pool/interface.h"
 #include "storage/directory.h"
@@ -15,15 +15,16 @@ namespace cco {
 
 namespace fs = std::filesystem;
 
-#define DB_TRY(expr) \
-    do { \
+#define DB_TRY(expr)                       \
+    do {                                   \
         const auto db_try_result = (expr); \
-        if (!db_try_result.has_value()) \
-            return db_try_result.error(); \
+        if (!db_try_result.has_value())    \
+            return db_try_result.error();  \
     } while (0)
 
-Database::Database(Options options) noexcept:
-    m_options {std::move(options)} {}
+Database::Database(Options options) noexcept
+    : m_options {std::move(options)}
+{}
 
 auto Database::is_open() const -> bool
 {
@@ -82,9 +83,9 @@ Database::Database() = default;
 
 Database::~Database() = default;
 
-Database::Database(Database&&) noexcept = default;
+Database::Database(Database &&) noexcept = default;
 
-auto Database::operator=(Database&&) noexcept -> Database& = default;
+auto Database::operator=(Database &&) noexcept -> Database & = default;
 
 auto Database::find_exact(BytesView key) const -> Cursor
 {
@@ -200,4 +201,4 @@ auto Database::recover() -> Status
 
 #undef DB_TRY
 
-} // cco
+} // namespace cco

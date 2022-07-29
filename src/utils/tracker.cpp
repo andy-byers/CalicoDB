@@ -3,7 +3,6 @@
 
 namespace cco {
 
-
 auto Tracker::reset() -> void
 {
     CCO_EXPECT_TRUE(m_registry.empty());
@@ -51,4 +50,4 @@ auto Tracker::collect(Page &page, LSN lsn) -> PageUpdate
     return update;
 }
 
-} // cco
+} // namespace cco

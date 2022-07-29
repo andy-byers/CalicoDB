@@ -1,15 +1,14 @@
 #include "page.h"
 #include "file_header.h"
-#include "update.h"
 #include "pool/interface.h"
+#include "update.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
 namespace cco {
 
-
-Page::Page(const Parameters &param):
-      m_source {param.source},
+Page::Page(const Parameters &param)
+    : m_source {param.source},
       m_data {param.data},
       m_id {param.id},
       m_is_writable {param.is_writable},
@@ -149,4 +148,4 @@ auto get_file_header_writer(Page &page) -> FileHeaderWriter
     return FileHeaderWriter {page.bytes(FileLayout::header_offset(), FileLayout::HEADER_SIZE)};
 }
 
-} // cco
+} // namespace cco

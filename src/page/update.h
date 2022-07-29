@@ -53,8 +53,8 @@ namespace impl {
     auto compress_ranges(std::vector<Range> &ranges) -> void;
     auto insert_range(std::vector<Range> &ranges, Range) -> void;
 
-} // impl
+} // namespace impl
 
-} // cco
+} // namespace cco
 
 #endif // CCO_PAGE_UPDATE_H

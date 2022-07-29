@@ -1,11 +1,11 @@
 #ifndef CALICO_WAL_WAL_WRITER_H
 #define CALICO_WAL_WAL_WRITER_H
 
-#include <memory>
-#include <spdlog/logger.h>
 #include "interface.h"
 #include "page/update.h"
 #include "utils/identifier.h"
+#include <memory>
+#include <spdlog/logger.h>
 
 namespace cco {
 
@@ -16,10 +16,10 @@ class WALRecord;
 /**
  * A component that appends records to the WAL file.
  */
-class WALWriter: public IWALWriter {
+class WALWriter : public IWALWriter {
 public:
     ~WALWriter() override = default;
-    [[nodiscard]] static auto open(const WALParameters&) -> Result<std::unique_ptr<IWALWriter>>;
+    [[nodiscard]] static auto open(const WALParameters &) -> Result<std::unique_ptr<IWALWriter>>;
     [[nodiscard]] auto close() -> Result<void> override;
     [[nodiscard]] auto append(WALRecord) -> Result<Position> override;
     [[nodiscard]] auto truncate() -> Result<void> override;
@@ -52,7 +52,7 @@ public:
     }
 
 private:
-    WALWriter(std::unique_ptr<IFile>, const WALParameters&);
+    WALWriter(std::unique_ptr<IFile>, const WALParameters &);
 
     std::unique_ptr<IFile> m_file;
     std::string m_block;
@@ -63,6 +63,6 @@ private:
     bool m_has_committed {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CALICO_WAL_WAL_WRITER_H

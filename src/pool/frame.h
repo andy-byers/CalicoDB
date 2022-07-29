@@ -2,9 +2,9 @@
 #ifndef CCO_POOL_FRAME_H
 #define CCO_POOL_FRAME_H
 
-#include <memory>
 #include "calico/bytes.h"
 #include "utils/identifier.h"
+#include <memory>
 
 namespace cco {
 
@@ -20,7 +20,7 @@ public:
     using ConstReference = std::reference_wrapper<const Frame>;
 
     explicit Frame(Size);
-    Frame(Byte*, Index, Size);
+    Frame(Byte *, Index, Size);
     ~Frame() = default;
 
     [[nodiscard]] auto is_owned() const -> bool
@@ -79,11 +79,11 @@ public:
     }
 
     [[nodiscard]] auto page_lsn() const -> LSN;
-    [[nodiscard]] auto borrow(IBufferPool*, bool) -> Page;
-    auto synchronize(Page&) -> void;
+    [[nodiscard]] auto borrow(IBufferPool *, bool) -> Page;
+    auto synchronize(Page &) -> void;
 
-    auto operator=(Frame&&) -> Frame& = default;
-    Frame(Frame&&) = default;
+    auto operator=(Frame &&) -> Frame & = default;
+    Frame(Frame &&) = default;
 
 private:
     std::string m_owned;
@@ -95,6 +95,6 @@ private:
     bool m_is_dirty {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_POOL_FRAME_H

@@ -1,8 +1,8 @@
 #include "cell.h"
 
 #include "node.h"
-#include "utils/expect.h"
 #include "utils/encoding.h"
+#include "utils/expect.h"
 #include "utils/layout.h"
 
 namespace cco {
@@ -53,7 +53,8 @@ Cell::Cell(const Parameters &param)
       m_overflow_id {param.overflow_id},
       m_value_size {param.value_size},
       m_page_size {param.page_size},
-      m_is_external {param.is_external} {}
+      m_is_external {param.is_external}
+{}
 
 auto Cell::copy() const -> Cell
 {
@@ -70,7 +71,7 @@ auto Cell::copy() const -> Cell
 auto Cell::size() const -> Size
 {
     const auto is_internal = !m_is_external;
-    const auto size_fields {sizeof(std::uint16_t) + sizeof(std::uint32_t)*m_is_external};
+    const auto size_fields {sizeof(std::uint16_t) + sizeof(std::uint32_t) * m_is_external};
     const auto has_overflow_id = !m_overflow_id.is_null();
     return PAGE_ID_SIZE * static_cast<Size>(is_internal + has_overflow_id) +
            size_fields + m_key.size() + m_local_value.size();
@@ -101,7 +102,7 @@ auto Cell::key() const -> BytesView
 
 auto Cell::local_value() const -> BytesView
 {
-//    CCO_EXPECT_TRUE(m_is_external);
+    //    CCO_EXPECT_TRUE(m_is_external);
     return m_local_value;
 }
 
@@ -205,4 +206,4 @@ auto make_internal_cell(BytesView key, Size page_size) -> Cell
     return Cell {param};
 }
 
-} // cco
+} // namespace cco

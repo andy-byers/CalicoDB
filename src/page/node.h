@@ -37,14 +37,15 @@ public:
     [[nodiscard]] auto header_offset() const -> Index;
 
     explicit NodeHeader(Page &page)
-        : m_page {&page} {}
+        : m_page {&page}
+    {}
 
-    [[nodiscard]] auto page() const -> const Page&
+    [[nodiscard]] auto page() const -> const Page &
     {
         return *m_page;
     }
 
-    auto page() -> Page&
+    auto page() -> Page &
     {
         return *m_page;
     }
@@ -61,7 +62,8 @@ public:
 
     explicit CellDirectory(NodeHeader &header)
         : m_page {&header.page()},
-          m_header {&header} {}
+          m_header {&header}
+    {}
 
     [[nodiscard]] auto get_pointer(Index) const -> Pointer;
     auto set_pointer(Index, Pointer) -> void;
@@ -75,7 +77,7 @@ private:
 
 class BlockAllocator final {
 public:
-    explicit BlockAllocator(NodeHeader&);
+    explicit BlockAllocator(NodeHeader &);
     ~BlockAllocator() = default;
     [[nodiscard]] auto usable_space() const -> Size;
     [[nodiscard]] auto compute_free_total() const -> Size;
@@ -121,9 +123,10 @@ public:
           m_header {NodeHeader {m_page}},
           m_directory {CellDirectory {m_header}},
           m_allocator {BlockAllocator {m_header}},
-          m_overflow {rhs.m_overflow} {}
+          m_overflow {rhs.m_overflow}
+    {}
 
-    auto operator=(Node &&rhs) noexcept -> Node&
+    auto operator=(Node &&rhs) noexcept -> Node &
     {
         if (this != &rhs) {
             m_page = std::move(rhs.m_page);
@@ -136,12 +139,12 @@ public:
         return *this;
     }
 
-    auto header() -> NodeHeader&
+    auto header() -> NodeHeader &
     {
         return m_header;
     }
 
-    [[nodiscard]] auto header() const -> const NodeHeader&
+    [[nodiscard]] auto header() const -> const NodeHeader &
     {
         return m_header;
     }
@@ -161,12 +164,12 @@ public:
         return m_page.type();
     }
 
-    [[nodiscard]] auto page() const -> const Page&
+    [[nodiscard]] auto page() const -> const Page &
     {
         return m_page;
     }
 
-    auto page() -> Page&
+    auto page() -> Page &
     {
         return m_page;
     }
@@ -187,7 +190,7 @@ public:
     auto remove_at(Index, Size) -> void;
     auto defragment() -> void;
 
-    [[nodiscard]] auto overflow_cell() const -> const Cell&;
+    [[nodiscard]] auto overflow_cell() const -> const Cell &;
     auto set_overflow_cell(Cell) -> void;
     auto take_overflow_cell() -> Cell;
 
@@ -228,17 +231,17 @@ private:
     std::optional<Cell> m_overflow {};
 };
 
-[[nodiscard]] auto can_merge_siblings(const Node&, const Node&, const Cell&) -> bool;
-auto transfer_cell(Node&, Node&, Index) -> void;
-auto merge_left(Node&, Node&, Node&, Index) -> void;
-auto merge_right(Node&, Node&, Node&, Index) -> void;
-auto merge_root(Node&, Node&) -> void;
-auto split_root(Node&, Node&) -> void;
-[[nodiscard]] auto split_non_root(Node&, Node&, Scratch) -> Cell;
+[[nodiscard]] auto can_merge_siblings(const Node &, const Node &, const Cell &) -> bool;
+auto transfer_cell(Node &, Node &, Index) -> void;
+auto merge_left(Node &, Node &, Node &, Index) -> void;
+auto merge_right(Node &, Node &, Node &, Index) -> void;
+auto merge_root(Node &, Node &) -> void;
+auto split_root(Node &, Node &) -> void;
+[[nodiscard]] auto split_non_root(Node &, Node &, Scratch) -> Cell;
 
-[[nodiscard]] auto get_file_header_reader(const Node&) -> FileHeaderReader;
-[[nodiscard]] auto get_file_header_writer(Node&) -> FileHeaderWriter;
+[[nodiscard]] auto get_file_header_reader(const Node &) -> FileHeaderReader;
+[[nodiscard]] auto get_file_header_writer(Node &) -> FileHeaderWriter;
 
-} // cco
+} // namespace cco
 
 #endif // CCO_PAGE_NODE_H

@@ -19,4 +19,4 @@ auto ScratchManager::reset() -> void
     m_emergency.clear();
 }
 
-} // cco
+} // namespace cco

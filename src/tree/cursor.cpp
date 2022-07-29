@@ -1,8 +1,8 @@
 #include "cursor_internal.h"
-#include <spdlog/fmt/fmt.h>
 #include "pool/interface.h"
 #include "tree/internal.h"
 #include "tree/node_pool.h"
+#include <spdlog/fmt/fmt.h>
 
 namespace cco {
 
@@ -27,13 +27,11 @@ auto CursorInternal::index(const Cursor &cursor) -> Index
     return cursor.m_position.index;
 }
 
-
 auto CursorInternal::invalidate(Cursor &cursor, const Status &status) -> void
 {
     CCO_EXPECT_FALSE(status.is_ok());
     cursor.m_status = status;
 }
-
 
 auto CursorInternal::seek_left(Cursor &cursor) -> bool
 {
@@ -93,7 +91,7 @@ auto Cursor::operator==(const Cursor &rhs) const -> bool
 
     if (m_status.is_ok() && rhs.m_status.is_ok()) {
         return m_position == rhs.m_position;
-    // A cursor in an exceptional state is never equal to another cursor.
+        // A cursor in an exceptional state is never equal to another cursor.
     } else if (lhs_has_error || rhs_has_error) {
         return false;
     } else if (m_status.is_not_found() || rhs.m_status.is_not_found()) {
@@ -107,7 +105,7 @@ auto Cursor::operator!=(const Cursor &rhs) const -> bool
     return !(*this == rhs);
 }
 
-auto Cursor::operator++() -> Cursor&
+auto Cursor::operator++() -> Cursor &
 {
     increment();
     return *this;
@@ -120,7 +118,7 @@ auto Cursor::operator++(int) -> Cursor
     return temp;
 }
 
-auto Cursor::operator--() -> Cursor&
+auto Cursor::operator--() -> Cursor &
 {
     decrement();
     return *this;
@@ -220,10 +218,10 @@ auto Cursor::value() const -> std::string
         return {};
     }
     return *m_internal->collect_value(*node, m_position.index)
-       .map_error([this](const Status &status) -> std::string {
-           m_status = status;
-           return {};
-       });
+                .map_error([this](const Status &status) -> std::string {
+                    m_status = status;
+                    return {};
+                });
 }
 
 auto Cursor::record() const -> Record
@@ -265,4 +263,4 @@ auto Cursor::Position::is_minimum() const -> bool
     return cell_count && PID {ids[LEFT]}.is_null() && index == 0;
 }
 
-} // cco
+} // namespace cco

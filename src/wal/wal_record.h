@@ -27,7 +27,7 @@ public:
 
     WALPayload() = default;
     ~WALPayload() = default;
-    explicit WALPayload(const PageUpdate&);
+    explicit WALPayload(const PageUpdate &);
     [[nodiscard]] auto is_commit() const -> bool;
     [[nodiscard]] auto decode() const -> PageUpdate;
 
@@ -53,17 +53,17 @@ public:
     static constexpr Size HEADER_SIZE {11};
     static constexpr auto MINIMUM_SIZE = HEADER_SIZE + 1;
 
-    enum class Type: Byte {
-        EMPTY  = 0x00,
-        FIRST  = 0x12,
+    enum class Type : Byte {
+        EMPTY = 0x00,
+        FIRST = 0x12,
         MIDDLE = 0x23,
-        LAST   = 0x34,
-        FULL   = 0x45,
+        LAST = 0x34,
+        FULL = 0x45,
     };
 
     static auto commit(LSN) -> WALRecord;
     WALRecord() = default;
-    explicit WALRecord(const PageUpdate&);
+    explicit WALRecord(const PageUpdate &);
     ~WALRecord() = default;
 
     [[nodiscard]] auto lsn() const -> LSN
@@ -86,7 +86,7 @@ public:
         return m_payload.m_data.size() + HEADER_SIZE;
     }
 
-    [[nodiscard]] auto payload() const -> const WALPayload&
+    [[nodiscard]] auto payload() const -> const WALPayload &
     {
         return m_payload;
     }
@@ -106,7 +106,7 @@ public:
 
     [[nodiscard]] auto is_consistent() const -> bool;
     [[nodiscard]] auto read(BytesView) -> Result<bool>;
-    [[nodiscard]] auto merge(const WALRecord&) -> Result<void>;
+    [[nodiscard]] auto merge(const WALRecord &) -> Result<void>;
     auto write(Bytes) const noexcept -> void;
     auto split(Index) -> WALRecord;
 
@@ -122,6 +122,6 @@ private:
     Type m_type {Type::EMPTY};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_WAL_WAL_RECORD_H

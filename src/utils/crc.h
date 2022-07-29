@@ -15,13 +15,13 @@ inline auto crc_32(BytesView data) noexcept -> std::uint32_t
 
     // Process each byte of the data in order
     for (Index i {}, n {data.size()}; i < n; ++i) {
-        a = (a+static_cast<std::uint8_t>(data[i])) % MOD_ADLER;
-        b = (b+a) % MOD_ADLER;
+        a = (a + static_cast<std::uint8_t>(data[i])) % MOD_ADLER;
+        b = (b + a) % MOD_ADLER;
     }
 
     return (b << 16) | a;
 }
 
-} // cco
+} // namespace cco
 
 #endif // CCO_UTILS_CRC_H

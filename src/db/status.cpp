@@ -1,13 +1,14 @@
 #include "calico/status.h"
-#include "utils/expect.h"
 
 namespace cco {
 
-Status::Status(Code code):
-      m_what(1, static_cast<char>(code)) {}
+Status::Status(Code code)
+    : m_what(1, static_cast<char>(code))
+{}
 
-Status::Status(Code code, const std::string &message):
-      m_what {static_cast<char>(code) + message} {}
+Status::Status(Code code, const std::string &message)
+    : m_what {static_cast<char>(code) + message}
+{}
 
 auto Status::code() const -> Code
 {
@@ -80,5 +81,4 @@ auto Status::what() const -> std::string
     return btos(stob(m_what).advance());
 }
 
-} // cco
-
+} // namespace cco

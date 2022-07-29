@@ -87,5 +87,4 @@ auto Batch::append(const Batch &rhs) -> void
     m_data.insert(end(m_data), begin(rhs.m_data), end(rhs.m_data));
 }
 
-} // cco
-
+} // namespace cco

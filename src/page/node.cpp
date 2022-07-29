@@ -1,11 +1,10 @@
 #include "node.h"
-#include <spdlog/fmt/fmt.h>
 #include "file_header.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
+#include <spdlog/fmt/fmt.h>
 
 namespace cco {
-
 
 auto NodeHeader::parent_id() const -> PID
 {
@@ -709,8 +708,6 @@ auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
 
     Lc.set_rightmost_child_id(rc.rightmost_child_id());
     parent.set_child_id(index, Lc.id());
-    if (parent.rightmost_child_id() == rc.id()) // TODO: Necessary???
-        parent.set_rightmost_child_id(Lc.id());
 }
 
 auto external_merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
@@ -725,8 +722,6 @@ auto external_merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void
         transfer_cell(rc, Lc, 0);
     CCO_EXPECT_FALSE(Lc.is_overflowing());
     parent.set_child_id(index, Lc.id());
-    if (parent.rightmost_child_id() == rc.id()) // TODO: Necessary???
-        parent.set_rightmost_child_id(Lc.id());
 }
 
 auto merge_left(Node &Lc, Node &rc, Node &parent, Index index) -> void

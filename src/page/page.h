@@ -1,7 +1,6 @@
 #ifndef CCO_PAGE_PAGE_H
 #define CCO_PAGE_PAGE_H
 
-//#include "update.h"
 #include "utils/identifier.h"
 #include "utils/types.h"
 #include <optional>
@@ -30,7 +29,7 @@ public:
     };
 
     ~Page();
-    explicit Page(const Parameters&);
+    explicit Page(const Parameters &);
 
     [[nodiscard]] auto is_writable() const -> bool
     {
@@ -54,8 +53,8 @@ public:
     auto bytes(Index) -> Bytes;
     auto bytes(Index, Size) -> Bytes;
     auto write(BytesView, Index) -> void;
-    auto undo(LSN, const std::vector<ChangedRegion>&) -> void;
-    auto redo(LSN, const std::vector<ChangedRegion>&) -> void;
+    auto undo(LSN, const std::vector<ChangedRegion> &) -> void;
+    auto redo(LSN, const std::vector<ChangedRegion> &) -> void;
 
     [[nodiscard]] auto has_manager() const -> bool
     {
@@ -74,15 +73,15 @@ public:
         m_manager = nullptr;
     }
 
-    Page(Page&&) noexcept = default;
-    auto operator=(Page&&) noexcept -> Page& = default;
-    Page(const Page&) noexcept = delete;
-    auto operator=(const Page&) noexcept -> Page& = delete;
+    Page(Page &&) noexcept = default;
+    auto operator=(Page &&) noexcept -> Page & = default;
+    Page(const Page &) noexcept = delete;
+    auto operator=(const Page &) noexcept -> Page & = delete;
 
 private:
     [[nodiscard]] auto header_offset() const -> Index;
 
-    UniqueNullable<IBufferPool*> m_source;
+    UniqueNullable<IBufferPool *> m_source;
     UpdateManager *m_manager {};
     Bytes m_data;
     PID m_id;
@@ -90,14 +89,14 @@ private:
     bool m_is_dirty {};
 };
 
-[[nodiscard]] auto get_u16(const Page&, Index) -> uint16_t;
-[[nodiscard]] auto get_u32(const Page&, Index) -> uint32_t;
-auto put_u16(Page&, Index, uint16_t) -> void;
-auto put_u32(Page&, Index, uint32_t) -> void;
+[[nodiscard]] auto get_u16(const Page &, Index) -> uint16_t;
+[[nodiscard]] auto get_u32(const Page &, Index) -> uint32_t;
+auto put_u16(Page &, Index, uint16_t) -> void;
+auto put_u32(Page &, Index, uint32_t) -> void;
 
-[[nodiscard]] auto get_file_header_reader(const Page&) -> FileHeaderReader;
-[[nodiscard]] auto get_file_header_writer(Page&) -> FileHeaderWriter;
+[[nodiscard]] auto get_file_header_reader(const Page &) -> FileHeaderReader;
+[[nodiscard]] auto get_file_header_writer(Page &) -> FileHeaderWriter;
 
-} // cco
+} // namespace cco
 
 #endif // CCO_PAGE_PAGE_H

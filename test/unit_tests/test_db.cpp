@@ -552,7 +552,6 @@ auto run_close_error_test(MockDatabase &db, Mock &mock)
     ASSERT_EQ(db.impl->status().what(), "123");
 }
 
-// TODO: Tighten up the close() procedure. It should be reentrant.
 TEST(MockDatabaseTests, PropagatesErrorFromWALClose)
 {
     MockDatabase db;

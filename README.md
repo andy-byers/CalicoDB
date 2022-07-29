@@ -31,15 +31,15 @@ Check out the [Contributions](#contributions) section if you are interested in w
 + Uses a dynamic-order B<sup>+</sup>-tree to organize the data on disk
 + Supports forward and reverse traversal using cursors
 + Allows creation of in-memory databases
-+ Supports variable-length keys and values
++ Supports variable-length keys and values (with a hard limit on both)
 + API only exposes objects (no pointers to deal with)
 + Allows tuning of various parameters (page size, cache size, etc.)
 
 ## Caveats
 + Currently, Calico DB only runs on 64-bit Ubuntu and OSX
-+ Uses a single WAL file, which can grow quite large in a long-running transaction
-+ WAL is only used to ensure ACID properties on the current transaction and is truncated afterward
-+ Has a hard limit on key length, equal to roughly 1/4 of the page size (anywhere from ~64 B to ~8 KB)
++ WAL is only used to ensure ACID properties on the current operation and is truncated afterward
++ Has a hard limit on key length, equal to roughly 1/4 of the page size (anywhere from 39 B to 8167 B)
++ Has a hard limit on value length, equal to roughly 4 GB
 + Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for multiple cursors
 
@@ -62,7 +62,7 @@ cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
 ```
 
 to build the library and tests.
-Note that the tests must be built with assertions, hence the "RelWithAssertions".
+Note that the tests must be built with assertions, hence the `RelWithAssertions`.
 To build the library in release mode, the last command would look like:
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -DCCO_BUILD_TESTS=Off .. && cmake --build .
@@ -97,35 +97,17 @@ The benchmarks use 16 B keys, 100 B values, pages of size 32 KB, and 4 MB of cac
 | ForwardIteration      |           3,952,569 |
 | ReverseIteration      |           3,968,253 |
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ## TODO
 1. Get everything code reviewed!
 2. Get unit test coverage up
-3. Write some documentation
-4. Add more logging
-5. Work on this README
-6. Work on the design document
-7. Implement optional compression of record values
-8. Work on performance
-9. Write a benchmark suite
-10. Get the CMake installation to work
-11. Implement WAL segmentation
-  + WAL should be segmented after it reaches a fixed size, similar to `spdlog`s rotating file sink
-  + This should improve the performance of long-running transactions
-12. Consider allowing multiple independent trees in a single database (could be either in the same `data` file or separate `data-*` files)
+3. Write documentation
+4. Work on performance
+    + Could try to do all the writes on a different thread
+    + Need to consider how this would impact data integrity after a crash
+5. Write a benchmark suite
+6. Get the CMake installation to work
+7. Need some way to reduce the file size once many pages become unused
+    + We need some way to collect freelist pages at the end of the file so that we can truncate
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.
@@ -138,7 +120,7 @@ CalicoDB
 ┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
-┃ ┣╸batch.h ┄┄┄┄┄┄┄┄ Represents an atomic unit of work to perform on the database
+┃ ┣╸batch.h ┄┄┄┄┄┄┄┄ A group of operations applied atomically
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Constructs for holding contiguous sequences of bytes
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
@@ -163,5 +145,5 @@ CalicoDB
 ## Contributions
 Contributions are welcome!
 Pull requests that fix bugs or address correctness issues will always be considered.
-The `TODO` section contains a list of things that need to be addressed, and `DESIGN.md` contains some TODO comments that I thought were important.
+The [TODO](#todo) section contains a list of things that need to be addressed, and [design.md](doc/design.md) contains some TODO comments that I thought were important.
 Feel free to create a pull request.

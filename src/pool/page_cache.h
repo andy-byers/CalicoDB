@@ -5,11 +5,11 @@
 #ifndef CCO_POOL_PAGE_CACHE_H
 #define CCO_POOL_PAGE_CACHE_H
 
-#include <list>
-#include <unordered_map>
 #include "frame.h"
 #include "utils/cache.h"
 #include "utils/identifier.h"
+#include <list>
+#include <unordered_map>
 
 namespace cco {
 
@@ -79,6 +79,6 @@ private:
     Size m_misses {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_POOL_PAGE_CACHE_H

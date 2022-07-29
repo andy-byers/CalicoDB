@@ -15,11 +15,11 @@ static constexpr int FAILURE = -1;
 [[nodiscard]] auto read(int, Bytes) -> Result<Size>;
 [[nodiscard]] auto write(int, BytesView) -> Result<Size>;
 [[nodiscard]] auto seek(int, long, int) -> Result<Index>;
-[[nodiscard]] auto open(const std::string&, int, int) -> Result<int>;
+[[nodiscard]] auto open(const std::string &, int, int) -> Result<int>;
 [[nodiscard]] auto close(int) -> Result<void>;
 [[nodiscard]] auto sync(int) -> Result<void>;
-[[nodiscard]] auto unlink(const std::string&) -> Result<void>;
+[[nodiscard]] auto unlink(const std::string &) -> Result<void>;
 
-} // cco::system
+} // namespace cco::system
 
 #endif // CCO_STORAGE_SYSTEM_H

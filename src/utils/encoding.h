@@ -4,15 +4,15 @@
 #ifndef CCO_UTILS_ENCODING_H
 #define CCO_UTILS_ENCODING_H
 
-#include <zconf.h>
-#include "calico/options.h"
 #include "calico/bytes.h"
+#include "calico/options.h"
+#include <zconf.h>
 
 namespace cco {
 
 inline auto get_u16(const Byte *in) noexcept -> std::uint16_t
 {
-    const auto src = reinterpret_cast<const std::uint8_t*>(in);
+    const auto src = reinterpret_cast<const std::uint8_t *>(in);
     return static_cast<std::uint16_t>(src[1] | (src[0] << 8));
 }
 
@@ -53,7 +53,7 @@ inline auto get_u64(BytesView in) noexcept -> std::uint64_t
     return get_u64(in.data());
 }
 
-inline auto put_u16(Byte * out, std::uint16_t value) noexcept -> void
+inline auto put_u16(Byte *out, std::uint16_t value) noexcept -> void
 {
     auto *dst = reinterpret_cast<std::uint8_t *>(out);
     dst[1] = static_cast<std::uint8_t>(value);
@@ -97,6 +97,6 @@ inline auto put_u64(Bytes out, std::uint64_t value) noexcept -> void
     put_u64(out.data(), value);
 }
 
-} // cco
+} // namespace cco
 
 #endif // CCO_UTILS_ENCODING_H

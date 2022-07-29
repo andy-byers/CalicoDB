@@ -28,7 +28,8 @@ struct Identifier {
 
     Identifier() noexcept = default;
 
-    template<class Id> explicit Identifier(Id id) noexcept
+    template<class Id>
+    explicit Identifier(Id id) noexcept
         : value {static_cast<uint32_t>(id)}
     {
         CCO_EXPECT_BOUNDED_BY(uint32_t, static_cast<std::make_unsigned_t<Id>>(id));
@@ -75,7 +76,7 @@ struct Identifier {
         return value - ROOT_ID_VALUE;
     }
 
-    uint32_t value{};
+    uint32_t value {};
 };
 
 inline auto operator+(const Identifier &lhs, const Identifier &rhs) noexcept -> Identifier
@@ -92,14 +93,19 @@ struct IdentifierHash {
     }
 };
 
-struct PID final: public Identifier {
-    PID() noexcept = default;
+struct PID final : public Identifier {
+    PID()
+    noexcept = default;
 
-    PID(Identifier id) noexcept
-        : Identifier {id.value} {}
+    PID(Identifier id)
+    noexcept
+        : Identifier {id.value}
+    {}
 
-    template<class T> explicit PID(T id) noexcept
-        : Identifier {id} {}
+    template<class T>
+    explicit PID(T id) noexcept
+        : Identifier {id}
+    {}
 
     [[nodiscard]] auto is_root() const noexcept -> bool
     {
@@ -117,14 +123,19 @@ struct PID final: public Identifier {
     }
 };
 
-struct LSN final: public Identifier {
-    LSN() noexcept = default;
+struct LSN final : public Identifier {
+    LSN()
+    noexcept = default;
 
-    LSN(Identifier id) noexcept
-        : Identifier {id.value} {}
+    LSN(Identifier id)
+    noexcept
+        : Identifier {id.value}
+    {}
 
-    template<class T> explicit LSN(T id) noexcept
-        : Identifier {id} {}
+    template<class T>
+    explicit LSN(T id) noexcept
+        : Identifier {id}
+    {}
 
     [[nodiscard]] auto is_base() const noexcept -> bool
     {
@@ -141,7 +152,7 @@ struct LSN final: public Identifier {
         return LSN {ROOT_ID_VALUE};
     }
 
-    auto operator++() -> LSN&
+    auto operator++() -> LSN &
     {
         value++;
         return *this;
@@ -155,6 +166,6 @@ struct LSN final: public Identifier {
     }
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_UTILS_IDENTIFIER_H

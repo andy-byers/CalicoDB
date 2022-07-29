@@ -7,7 +7,6 @@
 
 namespace cco {
 
-
 auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
 {
     CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
@@ -18,9 +17,8 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
 
     const auto cache_size = param.page_size * param.frame_count;
     auto buffer = std::unique_ptr<Byte[], AlignedDeleter> {
-        new(static_cast<std::align_val_t>(param.page_size), std::nothrow) Byte[cache_size],
-        AlignedDeleter {static_cast<std::align_val_t>(param.page_size)}
-    };
+        new (static_cast<std::align_val_t>(param.page_size), std::nothrow) Byte[cache_size],
+        AlignedDeleter {static_cast<std::align_val_t>(param.page_size)}};
 
     if (!buffer) {
         ThreePartMessage message;
@@ -29,11 +27,11 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
         message.set_hint("out of memory");
         return Err {message.system_error()};
     }
-    return std::unique_ptr<Pager> {new Pager{std::move(buffer), std::move(param)}};
+    return std::unique_ptr<Pager> {new Pager {std::move(buffer), std::move(param)}};
 }
 
-Pager::Pager(AlignedBuffer buffer, Parameters param):
-      m_buffer {std::move(buffer)},
+Pager::Pager(AlignedBuffer buffer, Parameters param)
+    : m_buffer {std::move(buffer)},
       m_file {std::move(param.file)},
       m_frame_count {param.frame_count},
       m_page_size {param.page_size}
@@ -51,7 +49,7 @@ auto Pager::close() -> Result<void>
     return m_file->close();
 }
 
-auto Pager::available() const -> Size 
+auto Pager::available() const -> Size
 {
     return m_available.size();
 }
@@ -145,7 +143,7 @@ auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
     // Just read the whole page.
     if (const auto read_size = *was_read; read_size == out.size()) {
         return true;
-    // Incomplete read.
+        // Incomplete read.
     } else {
         ThreePartMessage message;
         message.set_primary(ERROR_PRIMARY);
@@ -161,4 +159,4 @@ auto Pager::write_page_to_file(PID id, BytesView in) const -> Result<void>
     return write_all(*m_file, in, FileLayout::page_offset(id, in.size()));
 }
 
-} // cco
+} // namespace cco

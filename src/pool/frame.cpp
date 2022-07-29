@@ -7,9 +7,8 @@
 
 namespace cco {
 
-
-Frame::Frame(Size size):
-      m_owned(size, '\x00'),
+Frame::Frame(Size size)
+    : m_owned(size, '\x00'),
       m_bytes {stob(m_owned)},
       m_size {size}
 {
@@ -18,8 +17,8 @@ Frame::Frame(Size size):
     CCO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
 }
 
-Frame::Frame(Byte *buffer, Index id, Size size):
-      m_bytes {buffer + id*size, size},
+Frame::Frame(Byte *buffer, Index id, Size size)
+    : m_bytes {buffer + id * size, size},
       m_size {size}
 {
     CCO_EXPECT_TRUE(is_power_of_two(size));
@@ -61,4 +60,4 @@ auto Frame::page_lsn() const -> LSN
     return LSN {get_u32(m_bytes.range(PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET))};
 }
 
-} // cco
+} // namespace cco

@@ -2,11 +2,11 @@
 #ifndef CCO_UTILS_SCRATCH_H
 #define CCO_UTILS_SCRATCH_H
 
+#include "calico/bytes.h"
+#include "types.h"
 #include <list>
 #include <string>
 #include <unordered_map>
-#include "types.h"
-#include "calico/bytes.h"
 
 namespace cco {
 
@@ -16,8 +16,9 @@ class Scratch final {
 public:
     ~Scratch() = default;
 
-    explicit Scratch(Bytes data):
-          m_data {data} {}
+    explicit Scratch(Bytes data)
+        : m_data {data}
+    {}
 
     [[nodiscard]] auto size() const -> Size
     {
@@ -34,7 +35,6 @@ public:
         return m_data;
     }
 
-
 private:
     Bytes m_data;
 };
@@ -43,8 +43,8 @@ class ScratchManager final {
 public:
     static constexpr Size MAXIMUM_SCRATCHES {16};
 
-    explicit ScratchManager(Size scratch_size):
-          m_scratches(MAXIMUM_SCRATCHES),
+    explicit ScratchManager(Size scratch_size)
+        : m_scratches(MAXIMUM_SCRATCHES),
           m_scratch_size {scratch_size}
     {
         for (auto &scratch: m_scratches)
@@ -61,6 +61,6 @@ private:
     Index m_counter {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_UTILS_SCRATCH_H

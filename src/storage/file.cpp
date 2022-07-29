@@ -138,8 +138,8 @@ auto read_exact(IFile &file, Bytes in) -> Result<void>
     return file.read(in)
         .and_then([in](Size read_size) {
             return read_size == in.size()
-                ? Result<void> {}
-                : Err {system::error(std::errc::io_error)};
+                       ? Result<void> {}
+                       : Err {system::error(std::errc::io_error)};
         });
 }
 
@@ -167,4 +167,4 @@ auto write_all(IFile &file, BytesView out, Index offset) -> Result<void>
         });
 }
 
-} // cco
+} // namespace cco

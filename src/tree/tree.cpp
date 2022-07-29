@@ -1,6 +1,6 @@
 #include "tree.h"
-#include "cursor_internal.h"
 #include "calico/cursor.h"
+#include "cursor_internal.h"
 #include "page/file_header.h"
 #include "page/node.h"
 #include "pool/interface.h"
@@ -9,11 +9,11 @@
 
 namespace cco {
 
-
 Tree::Tree(const Parameters &param)
     : m_pool {{param.buffer_pool, param.free_start, param.free_count, param.node_count}},
       m_internal {{&m_pool, param.cell_count}},
-      m_logger {create_logger(param.log_sink, "tree")} {}
+      m_logger {create_logger(param.log_sink, "tree")}
+{}
 
 auto Tree::open(const Parameters &param) -> Result<std::unique_ptr<ITree>>
 {
@@ -202,4 +202,4 @@ auto Tree::TEST_validate_node(PID id) -> void
     node.TEST_validate();
 }
 
-} // cco
+} // namespace cco

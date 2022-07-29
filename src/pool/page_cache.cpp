@@ -47,4 +47,4 @@ auto PageCache::evict() -> std::optional<Frame>
     return m_warm.evict();
 }
 
-} // cco
+} // namespace cco

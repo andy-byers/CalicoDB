@@ -18,11 +18,11 @@ public:
         BytesView value;
     };
 
-    static auto entry_count(const Batch&) -> Size;
-    static auto read_entry(const Batch&, Index) -> Entry;
-    static auto push_entry(Batch&, Entry) -> void;
+    static auto entry_count(const Batch &) -> Size;
+    static auto read_entry(const Batch &, Index) -> Entry;
+    static auto push_entry(Batch &, Entry) -> void;
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_DB_BATCH_INTERNAL_H

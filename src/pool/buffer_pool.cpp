@@ -1,8 +1,8 @@
 #include "buffer_pool.h"
-#include "pager.h"
 #include "calico/options.h"
 #include "page/file_header.h"
 #include "page/page.h"
+#include "pager.h"
 #include "storage/directory.h"
 #include "utils/identifier.h"
 #include "utils/logging.h"
@@ -10,14 +10,13 @@
 
 namespace cco {
 
-
-#define POOL_TRY(expr) \
-    do {                  \
-        auto pool_try_result = (expr); \
-        if (!pool_try_result.has_value()) { \
+#define POOL_TRY(expr)                          \
+    do {                                        \
+        auto pool_try_result = (expr);          \
+        if (!pool_try_result.has_value()) {     \
             m_status = pool_try_result.error(); \
-            return Err {m_status}; \
-        } \
+            return Err {m_status};              \
+        }                                       \
     } while (0)
 
 auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBufferPool>>
@@ -37,28 +36,29 @@ auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBuffer
     CCO_TRY_CREATE(file, param.directory.open_file(DATA_NAME, mode, param.permissions));
 
     CCO_TRY_STORE(pool->m_pager, Pager::open({
-        std::move(file),
-        param.page_size,
-        param.frame_count,
-    }));
+                                     std::move(file),
+                                     param.page_size,
+                                     param.frame_count,
+                                 }));
     if (!param.use_xact)
         return pool;
 
     CCO_TRY_STORE(pool->m_wal, WALManager::open({
-        pool.get(),
-        param.directory,
-        create_sink(),
-        param.page_size,
-        param.flushed_lsn,
-    }));
+                                   pool.get(),
+                                   param.directory,
+                                   create_sink(),
+                                   param.page_size,
+                                   param.flushed_lsn,
+                               }));
     return pool;
 }
 
-BufferPool::BufferPool(const Parameters &param):
-      m_logger {create_logger(param.log_sink, "pool")},
+BufferPool::BufferPool(const Parameters &param)
+    : m_logger {create_logger(param.log_sink, "pool")},
       m_scratch {param.page_size},
       m_page_count {param.page_count},
-      m_uses_xact {param.use_xact} {}
+      m_uses_xact {param.use_xact}
+{}
 
 auto BufferPool::can_commit() const -> bool
 {
@@ -348,4 +348,4 @@ auto BufferPool::fetch(PID id, bool is_writable) -> Result<Page>
 
 #undef POOL_TRY
 
-} // cco
+} // namespace cco

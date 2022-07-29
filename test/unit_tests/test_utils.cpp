@@ -16,7 +16,6 @@
 namespace {
 
 using namespace cco;
-using namespace cco;
 
 TEST(AssertionDeathTest, Assert)
 {
@@ -290,36 +289,6 @@ TEST(TestUniqueNullable, ResourceIsMoved)
     ASSERT_FALSE(moved_from.is_valid());
     ASSERT_EQ(*moved_into, 123);
     ASSERT_TRUE(moved_into.is_valid());
-}
-
-TEST(TestReferenceCount, CountsCorrectly)
-{
-    ReferenceCount count;
-    ASSERT_EQ(count.count(), 0);
-    {
-        auto a = count.increment();
-        ASSERT_EQ(count.count(), 1);
-        {
-            auto b = count.increment();
-            ASSERT_EQ(count.count(), 2);
-            {
-                auto c = count.increment();
-                ASSERT_EQ(count.count(), 3);
-            }
-            ASSERT_EQ(count.count(), 2);
-        }
-        ASSERT_EQ(count.count(), 1);
-    }
-    ASSERT_EQ(count.count(), 0);
-}
-
-TEST(TestReferenceCount, MovingTokenDoesNotChangeCount)
-{
-    ReferenceCount count;
-    auto a = count.increment();
-    ASSERT_EQ(count.count(), 1);
-    auto b = std::move(a);
-    ASSERT_EQ(count.count(), 1);
 }
 
 TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
