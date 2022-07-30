@@ -32,7 +32,7 @@ public:
     }
 
 private:
-    std::unordered_map<PID, std::string, PID::Hasher> m_map;
+    std::unordered_map<PID, std::string, PID::Hash> m_map;
     ScratchManager m_scratch;
     Size m_page_size {};
 };

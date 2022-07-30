@@ -13,21 +13,20 @@ class IBufferPool;
 namespace page {
     class FileHeaderReader;
     class FileHeaderWriter;
-} // page
+} // namespace page
 
 /**
  * Object that manages a stack of deleted pages on disk.
  */
 class FreeList {
 public:
-
     /**
      * Parameters for constructing a free list.
      */
     struct Parameters {
         IBufferPool *buffer_pool {}; ///< Reference to the underlying buffer pool.
-        PID free_start {}; ///< Page ID of the page at the top of the free list stack.
-        Size free_count {}; ///< Number of pages in the free list stack.
+        PID free_start {};           ///< Page ID of the page at the top of the free list stack.
+        Size free_count {};          ///< Number of pages in the free list stack.
     };
 
     ~FreeList() = default;
@@ -78,11 +77,11 @@ public:
     }
 
 private:
-    IBufferPool *m_pool; ///< Reference to the underlying buffer pool.
-    PID m_free_start; ///< Page ID of the page at the top of the free list stack.
+    IBufferPool *m_pool;  ///< Reference to the underlying buffer pool.
+    PID m_free_start;     ///< Page ID of the page at the top of the free list stack.
     Size m_free_count {}; ///< Number of pages in the free list stack.
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_TREE_FREE_LIST_H

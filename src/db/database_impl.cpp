@@ -71,24 +71,24 @@ auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) ->
     FileHeaderReader state {stob(backing)};
 
     CCO_TRY_STORE(impl->m_pool, BufferPool::open({
-        *home,
-        sink,
-        state.flushed_lsn(),
-        revised.frame_count,
-        state.page_count(),
-        state.page_size(),
-        revised.permissions,
-        revised.use_xact,
-    }));
+                                    *home,
+                                    sink,
+                                    state.flushed_lsn(),
+                                    revised.frame_count,
+                                    state.page_count(),
+                                    state.page_size(),
+                                    revised.permissions,
+                                    revised.use_xact,
+                                }));
 
     CCO_TRY_STORE(impl->m_tree, Tree::open({
-        impl->m_pool.get(),
-        sink,
-        state.free_start(),
-        state.free_count(),
-        state.record_count(),
-        state.node_count(),
-    }));
+                                    impl->m_pool.get(),
+                                    sink,
+                                    state.free_start(),
+                                    state.free_count(),
+                                    state.record_count(),
+                                    state.node_count(),
+                                }));
 
     impl->m_sink = std::move(sink);
     impl->m_logger = logger;
@@ -114,7 +114,7 @@ auto Database::Impl::open(Parameters param) -> Result<std::unique_ptr<Impl>>
 {
     const auto page_size = param.options.page_size;
     auto impl = std::make_unique<Impl>();
-    impl->m_sink = create_sink(); // Creates a spdlog::sinks::null_sink.
+    impl->m_sink = create_sink();                       // Creates a spdlog::sinks::null_sink.
     impl->m_logger = create_logger(impl->m_sink, "db"); // Do-nothing logger.
     impl->m_pool = std::make_unique<MemoryPool>(page_size, param.options.use_xact);
     impl->m_tree = Tree::open({impl->m_pool.get(), impl->m_sink, PID::null(), 0, 0, 0}).value();
@@ -227,12 +227,6 @@ auto Database::Impl::abort() -> Result<void>
             m_logger->error("(reason) {}", status.what());
             return Err {status};
         });
-}
-
-auto Database::Impl::recover() -> Result<void>
-{
-    m_logger->trace("recovering");
-    return m_pool->recover();
 }
 
 auto Database::Impl::close() -> Result<void>
@@ -364,7 +358,7 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
         }
         revised.use_xact = !reader.flushed_lsn().is_null();
         CCO_TRY(file->close());
-    }else {
+    } else {
         writer.update_magic_code();
         writer.set_page_size(options.page_size);
         writer.set_flushed_lsn(LSN::base());
@@ -395,7 +389,7 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
     return InitialState {std::move(backing), revised, !exists};
 }
 
-} // cco
+} // namespace cco
 
 auto operator<(const cco::Record &lhs, const cco::Record &rhs) -> bool
 {

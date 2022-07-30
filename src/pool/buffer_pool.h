@@ -1,14 +1,14 @@
 #ifndef CCO_POOL_BUFFER_POOL_H
 #define CCO_POOL_BUFFER_POOL_H
 
-#include <list>
-#include <mutex>
-#include <unordered_map>
-#include <spdlog/logger.h>
-#include "page_cache.h"
 #include "frame.h"
 #include "interface.h"
+#include "page_cache.h"
 #include "utils/scratch.h"
+#include <list>
+#include <mutex>
+#include <spdlog/logger.h>
+#include <unordered_map>
 
 namespace cco {
 
@@ -17,7 +17,7 @@ class IFile;
 class IWALManager;
 class Pager;
 
-class BufferPool: public IBufferPool {
+class BufferPool : public IBufferPool {
 public:
     struct Parameters {
         IDirectory &directory;
@@ -32,7 +32,7 @@ public:
 
     ~BufferPool() override = default;
 
-    [[nodiscard]] static auto open(const Parameters&) -> Result<std::unique_ptr<IBufferPool>>;
+    [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<IBufferPool>>;
 
     [[nodiscard]] auto uses_xact() const -> bool override
     {
@@ -70,20 +70,21 @@ public:
     [[nodiscard]] auto close() -> Result<void> override;
     [[nodiscard]] auto commit() -> Result<void> override;
     [[nodiscard]] auto abort() -> Result<void> override;
-    auto on_release(Page&) -> void override;
-    auto save_header(FileHeaderWriter&) -> void override;
-    auto load_header(const FileHeaderReader&) -> void override;
+    auto on_release(Page &) -> void override;
+    auto save_header(FileHeaderWriter &) -> void override;
+    auto load_header(const FileHeaderReader &) -> void override;
 
 private:
-    explicit BufferPool(const Parameters&);
+    explicit BufferPool(const Parameters &);
     [[nodiscard]] auto pin_frame(PID) -> Result<void>;
     [[nodiscard]] auto try_evict_frame() -> Result<bool>;
-    [[nodiscard]] auto do_release(Page&) -> Result<void>;
+    [[nodiscard]] auto do_release(Page &) -> Result<void>;
     [[nodiscard]] auto has_updates() const -> bool;
     mutable std::mutex m_mutex;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<IWALManager> m_wal;
     std::shared_ptr<spdlog::logger> m_logger;
+//    std::vector<Size> m_ref_counts;                                         // TODO: Keeping track of ref counts differently.
     ScratchManager m_scratch;
     PageCache m_cache;
     Status m_status {Status::ok()};
@@ -93,6 +94,6 @@ private:
     bool m_uses_xact {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_POOL_BUFFER_POOL_H

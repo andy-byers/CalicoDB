@@ -428,6 +428,7 @@ TEST_F(DatabaseTests, DatabaseRecovers)
     param.mean_key_size = 20;
     param.mean_value_size = 20;
     param.spread = 15;
+    param.is_unique = true;
     RecordGenerator generator {param};
     Random random {0};
 
@@ -440,12 +441,14 @@ TEST_F(DatabaseTests, DatabaseRecovers)
     Database db {options};
     ASSERT_TRUE(db.open().is_ok());
 
-    const auto committed = generator.generate(random, GROUP_SIZE);
-    for (const auto &record: committed)
-        ASSERT_TRUE(db.insert(record).is_ok());
+    const auto all_records = generator.generate(random, GROUP_SIZE * 2);
+    for (auto itr = begin(all_records); itr != begin(all_records) + GROUP_SIZE; ++itr)
+        ASSERT_TRUE(db.insert(*itr).is_ok());
 
-    for (const auto &record: generator.generate(random, GROUP_SIZE))
-        ASSERT_TRUE(db.insert(record).is_ok());
+    ASSERT_TRUE(db.commit().is_ok());
+
+    for (auto itr = begin(all_records) + GROUP_SIZE; itr != end(all_records); ++itr)
+        ASSERT_TRUE(db.insert(*itr).is_ok());
 
     fs::copy(BASE, alternate);
     ASSERT_TRUE(db.close().is_ok());
@@ -454,9 +457,10 @@ TEST_F(DatabaseTests, DatabaseRecovers)
     db = Database {options};
     ASSERT_TRUE(db.open().is_ok());
 
-    for (const auto &[key, value]: committed) {
-        const auto c = db.find_exact(key);
+    for (auto itr = begin(all_records); itr != begin(all_records) + GROUP_SIZE; ++itr) {
+        const auto c = db.find_exact(itr->key);
         ASSERT_TRUE(c.is_valid());
+        ASSERT_EQ(c.value(), itr->value);
     }
 }
 
@@ -552,7 +556,6 @@ auto run_close_error_test(MockDatabase &db, Mock &mock)
     ASSERT_EQ(db.impl->status().what(), "123");
 }
 
-// TODO: Tighten up the close() procedure. It should be reentrant.
 TEST(MockDatabaseTests, PropagatesErrorFromWALClose)
 {
     MockDatabase db;
@@ -583,46 +586,6 @@ TEST(RealDatabaseTests, CanDestroyClosedDatabase)
     ASSERT_TRUE(db.open().is_ok());
     ASSERT_TRUE(db.close().is_ok());
     ASSERT_TRUE(Database::destroy(std::move(db)).is_ok());
-}
-
-TEST(RealDatabaseTests, BatchDoesNothingIfNotApplied)
-{
-    Options options;
-    options.page_size = 0x100;
-    options.frame_count = 16;
-    Database db {options};
-    ASSERT_TRUE(db.open().is_ok());
-    Batch batch;
-    batch.insert("a", "1");
-    batch.insert("b", "2");
-    batch.insert("c", "3");
-    ASSERT_EQ(db.info().record_count(), 0);
-    ASSERT_TRUE(db.close().is_ok());
-}
-
-TEST(RealDatabaseTests, BatchCanBeReapplied)
-{
-    Options options;
-    options.page_size = 0x100;
-    options.frame_count = 16;
-    Database db {options};
-    ASSERT_TRUE(db.open().is_ok());
-
-    Batch batch;
-    batch.insert("a", "1");
-    batch.insert("b", "2");
-    batch.insert("c", "3");
-    ASSERT_TRUE(db.apply(batch).is_ok());
-    ASSERT_EQ(db.info().record_count(), 3);
-
-    ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
-    ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
-    ASSERT_TRUE(db.erase(db.find_minimum()).is_ok());
-    ASSERT_EQ(db.info().record_count(), 0);
-
-    ASSERT_TRUE(db.apply(batch).is_ok());
-    ASSERT_EQ(db.info().record_count(), 3);
-    ASSERT_TRUE(db.close().is_ok());
 }
 
 TEST(RealDatabaseTests, DatabaseObjectTypes)

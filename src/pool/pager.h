@@ -30,13 +30,13 @@ public:
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto pin(PID) -> Result<Frame>;
     [[nodiscard]] auto unpin(Frame) -> Result<void>;
-    [[nodiscard]] auto clean(Frame&) -> Result<void>;
+    [[nodiscard]] auto clean(Frame &) -> Result<void>;
     [[nodiscard]] auto truncate(Size) -> Result<void>;
     [[nodiscard]] auto sync() -> Result<void>;
     auto discard(Frame) -> void;
 
-    auto operator=(Pager&&) -> Pager& = default;
-    Pager(Pager&&) = default;
+    auto operator=(Pager &&) -> Pager & = default;
+    Pager(Pager &&) = default;
 
 private:
     Pager(AlignedBuffer, Parameters);
@@ -46,10 +46,10 @@ private:
     AlignedBuffer m_buffer;
     std::list<Frame> m_available;
     std::unique_ptr<IFile> m_file;
-    Size m_frame_count{};
-    Size m_page_size{};
+    Size m_frame_count {};
+    Size m_page_size {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_POOL_PAGER_H

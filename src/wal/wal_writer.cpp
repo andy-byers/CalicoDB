@@ -6,7 +6,6 @@
 
 namespace cco {
 
-
 auto WALWriter::open(const WALParameters &param) -> Result<std::unique_ptr<IWALWriter>>
 {
     CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
@@ -15,7 +14,7 @@ auto WALWriter::open(const WALParameters &param) -> Result<std::unique_ptr<IWALW
 
     CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND, DEFAULT_PERMISSIONS));
     CCO_TRY_CREATE(file_size, file->size());
-    auto writer = std::unique_ptr<WALWriter> {new(std::nothrow) WALWriter {std::move(file), param}};
+    auto writer = std::unique_ptr<WALWriter> {new (std::nothrow) WALWriter {std::move(file), param}};
     if (!writer) {
         ThreePartMessage message;
         message.set_primary("cannot open WAL writer");
@@ -26,9 +25,10 @@ auto WALWriter::open(const WALParameters &param) -> Result<std::unique_ptr<IWALW
     return writer;
 }
 
-WALWriter::WALWriter(std::unique_ptr<IFile> file, const WALParameters &param):
-      m_file {std::move(file)},
-      m_block(param.page_size, '\x00') {}
+WALWriter::WALWriter(std::unique_ptr<IFile> file, const WALParameters &param)
+    : m_file {std::move(file)},
+      m_block(param.page_size, '\x00')
+{}
 
 auto WALWriter::close() -> Result<void>
 {
@@ -58,7 +58,7 @@ auto WALWriter::append(WALRecord record) -> Result<Position>
                 first = m_position;
 
             auto destination = stob(m_block)
-               .range(m_position.offset, temp->size());
+                                   .range(m_position.offset, temp->size());
             temp->write(destination);
 
             m_position.offset += temp->size();
@@ -109,4 +109,4 @@ auto WALWriter::flush() -> Result<void>
     return {};
 }
 
-} // cco
+} // namespace cco

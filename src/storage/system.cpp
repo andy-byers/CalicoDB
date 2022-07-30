@@ -1,6 +1,6 @@
 #include "system.h"
-#include <filesystem>
 #include <fcntl.h>
+#include <filesystem>
 #include <unistd.h>
 
 namespace cco::system {
@@ -89,4 +89,4 @@ auto unlink(const std::string &path) -> Result<void>
     return {};
 }
 
-} // cco::system
+} // namespace cco::system

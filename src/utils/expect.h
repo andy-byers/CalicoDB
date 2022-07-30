@@ -7,11 +7,11 @@
 #include <type_traits>
 
 #ifdef NDEBUG
-#  define CCO_EXPECT(cc)
-#  define CCO_VALIDATE(validator)
+#define CCO_EXPECT(cc)
+#define CCO_VALIDATE(validator)
 #else
-#  define CCO_EXPECT_(cc, file, line) impl::handle_expect(cc, #cc, file, line)
-#  define CCO_EXPECT(cc) CCO_EXPECT_(cc, __FILE__, __LINE__)
+#define CCO_EXPECT_(cc, file, line) impl::handle_expect(cc, #cc, file, line)
+#define CCO_EXPECT(cc) CCO_EXPECT_(cc, __FILE__, __LINE__)
 #endif // NDEBUG
 
 #define CCO_EXPECT_TRUE(cc) CCO_EXPECT(cc)
@@ -30,10 +30,10 @@
  *
  * @param expr The expression to evaluate.
  */
-#define CCO_TRY(expr) \
-    do { \
+#define CCO_TRY(expr)                                                        \
+    do {                                                                     \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) \
-            return Err {calico_try_result.error()}; \
+            return Err {calico_try_result.error()};                          \
     } while (0)
 
 /**
@@ -43,13 +43,13 @@
  * @param out The new variable.
  * @param expr The expression to evaluate.
  */
-#define CCO_TRY_STORE(out, expr) \
-    do { \
-        if (auto calico_try_result = (expr); !calico_try_result.has_value()) {  \
-            return Err {calico_try_result.error()}; \
-        } else { \
-            (out) = std::move(calico_try_result.value()); \
-        } \
+#define CCO_TRY_STORE(out, expr)                                               \
+    do {                                                                       \
+        if (auto calico_try_result = (expr); !calico_try_result.has_value()) { \
+            return Err {calico_try_result.error()};                            \
+        } else {                                                               \
+            (out) = std::move(calico_try_result.value());                      \
+        }                                                                      \
     } while (0)
 
 /**
@@ -61,11 +61,11 @@
  * @param out A valid identifier denoting the name of the new variable.
  * @param expr The expression to evaluate.
  */
-#define CCO_TRY_CREATE(out, expr) \
-    auto calico_try_##out = (expr); \
-    if (!calico_try_##out.has_value()) {  \
+#define CCO_TRY_CREATE(out, expr)              \
+    auto calico_try_##out = (expr);            \
+    if (!calico_try_##out.has_value()) {       \
         return Err {calico_try_##out.error()}; \
-    } \
+    }                                          \
     auto out = std::move(*calico_try_##out)
 
 namespace cco::impl {
@@ -78,6 +78,6 @@ inline auto handle_expect(bool expectation, const char *repr, const char *file, 
     }
 }
 
-} // cco::impl
+} // namespace cco::impl
 
 #endif // CCO_UTILS_ASSERT_H

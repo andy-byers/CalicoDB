@@ -4,7 +4,6 @@
 
 namespace cco {
 
-
 namespace impl {
     auto can_merge(const Range &lhs, const Range &rhs) -> bool
     {
@@ -48,7 +47,7 @@ namespace impl {
         auto itr = std::upper_bound(ranges.begin(), ranges.end(), range, [](const Range &lhs, const Range &rhs) {
             return lhs.x <= rhs.x;
         });
-        const auto try_merge = [&itr] (const Range &lhs, const Range &rhs) {
+        const auto try_merge = [&itr](const Range &lhs, const Range &rhs) {
             if (can_merge(lhs, rhs)) {
                 *itr = merge(lhs, rhs);
                 return true;
@@ -68,11 +67,11 @@ namespace impl {
         ranges.insert(itr, range);
     }
 
-} // impl
+} // namespace impl
 
-UpdateManager::UpdateManager(BytesView page, Bytes scratch):
-    m_snapshot {scratch},
-    m_current {page}
+UpdateManager::UpdateManager(BytesView page, Bytes scratch)
+    : m_snapshot {scratch},
+      m_current {page}
 {
     CCO_EXPECT_EQ(page.size(), m_snapshot.size());
     mem_copy(scratch, m_current);
@@ -100,7 +99,4 @@ auto UpdateManager::collect() -> std::vector<ChangedRegion>
     return update;
 }
 
-} // cco
-
-
-
+} // namespace cco

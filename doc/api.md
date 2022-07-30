@@ -159,32 +159,11 @@ If a method returning a cursor encounters an error, the error status will be mad
 If an error occurs that could potentially lead to corruption of the database contents, the database object will lock up and refuse to perform any more work.
 Rather, the exceptional status that caused the lockup will be returned each time a method call is made.
 An error such as this could be caused, for example, by becoming unable to write to disk in the middle of a tree balancing operation.
-The lockup can be resolved by a successful call to recover(), which attempts restore a valid database state.
-recover() is reentrant, so it can be called repeatedly.
+The lockup can be resolved by a successful call to abort(), which attempts roll back the current transaction.
+abort() is reentrant, so it can be called again if it fails.
 A good rule of thumb is that if one receives a system error from a call that can modify the database, i.e. insert(), erase(), or commit(), then one should try to abort().
 If this isn't possible, it's best to just exit the program.
 The next time that the database is started up, it will perform the necessary recovery.
-
-### Batch Writes
-All methods that modify the database will make sure that all updates are persisted on disk before returning (i.e. they call `fsync()`).
-We can use batch writes to get rid of much of this overhead.
-
-```C++
-cco::Batch batch;
-
-// Updates made to the batch object are saved in RAM initially.
-batch.insert("opossum", "pretty cute");
-batch.erase("manx");
-
-// Then, when apply() is called, they are applied to the database in an atomic transaction.
-assert(db.apply(batch).is_ok());
-
-// If apply() succeeded, then the database will have the entire batch of updates persisted
-// to disk.
-auto s = db.find_exact("opossum");
-assert(db.find_exact("opossum").status().is_not_found());
-assert(db.find_exact("manx").is_valid());
-```
 
 ### Deleting a Database
 ```C++

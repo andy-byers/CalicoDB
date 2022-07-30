@@ -7,10 +7,10 @@
 #ifndef CCO_WAL_WAL_READER_H
 #define CCO_WAL_WAL_READER_H
 
-#include <memory>
-#include <stack>
-#include <spdlog/logger.h>
 #include "interface.h"
+#include <memory>
+#include <spdlog/logger.h>
+#include <stack>
 
 namespace cco {
 
@@ -18,16 +18,16 @@ class IDirectory;
 class IFile;
 struct LSN;
 
-class WALReader: public IWALReader {
+class WALReader : public IWALReader {
 public:
     ~WALReader() override = default;
-    [[nodiscard]] static auto open(const WALParameters&) -> Result<std::unique_ptr<IWALReader>>;
-    [[nodiscard]] auto read(Position&) -> Result<WALRecord> override;
+    [[nodiscard]] static auto open(const WALParameters &) -> Result<std::unique_ptr<IWALReader>>;
+    [[nodiscard]] auto read(Position &) -> Result<WALRecord> override;
     [[nodiscard]] auto close() -> Result<void> override;
     auto reset() -> void override;
 
 private:
-    WALReader(std::unique_ptr<IFile>, const WALParameters&);
+    WALReader(std::unique_ptr<IFile>, const WALParameters &);
     [[nodiscard]] auto read_block(Index) -> Result<bool>;
     [[nodiscard]] auto read_record(Index) -> Result<WALRecord>;
 
@@ -47,7 +47,7 @@ public:
     };
 
     ~WALExplorer() = default;
-    explicit WALExplorer(IWALReader&);
+    explicit WALExplorer(IWALReader &);
     [[nodiscard]] auto read_next() -> Result<Discovery>;
     auto reset() -> void;
 
@@ -56,6 +56,6 @@ private:
     IWALReader *m_reader {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_WAL_WAL_READER_H

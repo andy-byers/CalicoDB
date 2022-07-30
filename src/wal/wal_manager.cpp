@@ -11,7 +11,6 @@
 
 namespace cco {
 
-
 auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWALManager>>
 {
     CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
@@ -20,7 +19,7 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
 
     CCO_TRY_CREATE(writer, WALWriter::open(param));
     CCO_TRY_CREATE(reader, WALReader::open(param));
-    auto manager = std::unique_ptr<WALManager> {new(std::nothrow) WALManager {param}};
+    auto manager = std::unique_ptr<WALManager> {new (std::nothrow) WALManager {param}};
     if (!manager) {
         ThreePartMessage message;
         message.set_primary("cannot open WAL manager");
@@ -32,10 +31,11 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
     return manager;
 }
 
-WALManager::WALManager(const WALParameters &param):
-      m_tracker {param.page_size},
+WALManager::WALManager(const WALParameters &param)
+    : m_tracker {param.page_size},
       m_logger {create_logger(param.log_sink, "wal")},
-      m_pool {param.pool} {}
+      m_pool {param.pool}
+{}
 
 auto WALManager::close() -> Result<void>
 {
@@ -140,7 +140,7 @@ auto WALManager::roll_forward() -> Result<bool>
     WALExplorer explorer {*m_reader};
     m_reader->reset();
 
-    for (; ; ) {
+    for (;;) {
         auto record = read_next(explorer);
         if (!record.has_value()) {
             // We hit EOF but didn't find a commit record.
@@ -231,4 +231,4 @@ auto WALManager::read_next(WALExplorer &explorer) -> Result<WALRecord>
     return Err {status};
 }
 
-} // cco
+} // namespace cco

@@ -50,6 +50,6 @@ private:
     Bytes m_header;
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_PAGE_FILE_HEADER_H

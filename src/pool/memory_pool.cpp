@@ -6,12 +6,12 @@
 
 namespace cco {
 
-
-MemoryPool::MemoryPool(Size page_size, bool use_xact):
-      m_tracker {page_size},
+MemoryPool::MemoryPool(Size page_size, bool use_xact)
+    : m_tracker {page_size},
       m_scratch {page_size},
       m_page_size {page_size},
-      m_uses_xact {use_xact} {}
+      m_uses_xact {use_xact}
+{}
 
 auto MemoryPool::page_count() const -> Size
 {
@@ -123,4 +123,4 @@ auto MemoryPool::abort() -> Result<void>
     return {};
 }
 
-} // cco
+} // namespace cco

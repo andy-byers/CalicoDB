@@ -89,4 +89,4 @@ auto Directory::close() -> Result<void>
     return system::close(std::exchange(m_file, system::FAILURE));
 }
 
-} // cco
+} // namespace cco

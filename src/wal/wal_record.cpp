@@ -6,7 +6,6 @@
 
 namespace cco {
 
-
 namespace {
 
     inline auto is_record_type_valid(WALRecord::Type type) -> bool
@@ -17,7 +16,7 @@ namespace {
                type == WALRecord::Type::FULL;
     }
 
-} // <anonymous>
+} // namespace
 
 WALPayload::WALPayload(const PageUpdate &param)
 {
@@ -35,7 +34,7 @@ WALPayload::WALPayload(const PageUpdate &param)
     for (const auto &change: param.changes) {
         const auto size = change.before.size();
         CCO_EXPECT_EQ(size, change.after.size());
-        auto chunk = std::string(UPDATE_HEADER_SIZE + 2*size, '\x00');
+        auto chunk = std::string(UPDATE_HEADER_SIZE + 2 * size, '\x00');
         bytes = stob(chunk);
 
         put_u16(bytes, static_cast<uint16_t>(change.offset));
@@ -60,7 +59,7 @@ auto WALPayload::is_commit() const -> bool
 
 auto WALPayload::decode() const -> PageUpdate
 {
-    auto update = PageUpdate{};
+    auto update = PageUpdate {};
     auto bytes = stob(m_data);
 
     update.previous_lsn.value = get_u32(bytes);
@@ -90,7 +89,7 @@ auto WALPayload::decode() const -> PageUpdate
 
 auto WALRecord::commit(LSN commit_lsn) -> WALRecord
 {
-    return WALRecord{{
+    return WALRecord {{
         {},
         PID::null(),
         LSN::null(),
@@ -98,11 +97,12 @@ auto WALRecord::commit(LSN commit_lsn) -> WALRecord
     }};
 }
 
-WALRecord::WALRecord(const PageUpdate &update):
-      m_payload {update},
+WALRecord::WALRecord(const PageUpdate &update)
+    : m_payload {update},
       m_lsn {update.lsn},
       m_crc {crc_32(m_payload.data())},
-      m_type {Type::FULL} {}
+      m_type {Type::FULL}
+{}
 
 auto WALRecord::read(BytesView in) -> Result<bool>
 {
@@ -263,4 +263,4 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
     return {};
 }
 
-} // cco
+} // namespace cco

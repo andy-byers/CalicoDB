@@ -20,12 +20,12 @@ public:
         return m_page.size();
     }
 
-    [[nodiscard]] auto page() const -> const Page&
+    [[nodiscard]] auto page() const -> const Page &
     {
         return m_page;
     }
 
-    auto page() -> Page&
+    auto page() -> Page &
     {
         return m_page;
     }
@@ -42,13 +42,13 @@ public:
     [[nodiscard]] auto content_view() const -> BytesView;
     auto content_bytes(Size) -> Bytes;
 
-    auto operator=(Link&&) -> Link& = default;
-    Link(Link&&) = default;
+    auto operator=(Link &&) -> Link & = default;
+    Link(Link &&) = default;
 
 private:
     Page m_page;
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_PAGE_LINK_H

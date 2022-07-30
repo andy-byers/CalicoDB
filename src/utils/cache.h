@@ -1,12 +1,12 @@
 #ifndef CCO_UTILS_CACHE_H
 #define CCO_UTILS_CACHE_H
 
+#include "calico/common.h"
+#include "utils/expect.h"
 #include <functional>
 #include <list>
 #include <optional>
 #include <unordered_map>
-#include "calico/common.h"
-#include "utils/expect.h"
 
 namespace cco {
 
@@ -60,7 +60,7 @@ public:
         return std::nullopt;
     }
 
-    auto evict() -> std::optional<Value>
+    [[nodiscard]] auto evict() -> std::optional<Value>
     {
         if (is_empty())
             return std::nullopt;
@@ -89,7 +89,7 @@ protected:
 };
 
 template<class Key, class Value, class Hash = std::hash<Key>>
-class LruCache final: public FifoCache<Key, Value, Hash> {
+class LruCache final : public FifoCache<Key, Value, Hash> {
 public:
     using Base = FifoCache<Key, Value, Hash>;
     using typename Base::Reference;
@@ -97,18 +97,16 @@ public:
     LruCache() = default;
     ~LruCache() = default;
 
-    auto get(const Key &key) -> std::optional<Reference>
+    [[nodiscard]] auto get(const Key &key) -> std::optional<Reference>
     {
-        auto &m = Base::m_map;
-        auto &L = Base::m_list;
-        if (auto itr = m.find(key); itr != end(m)) {
-            L.splice(end(L), L, itr->second);
+        if (auto itr = Base::m_map.find(key); itr != end(Base::m_map)) {
+            Base::m_list.splice(end(Base::m_list), Base::m_list, itr->second);
             return std::ref(itr->second->second);
         }
         return std::nullopt;
     }
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_UTILS_CACHE_H

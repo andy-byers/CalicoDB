@@ -8,12 +8,13 @@
 
 namespace cco {
 
-FileHeaderReader::FileHeaderReader():
-      m_backing(FileLayout::HEADER_SIZE, '\x00'),
-      m_header {stob(m_backing)} {}
+FileHeaderReader::FileHeaderReader()
+    : m_backing(FileLayout::HEADER_SIZE, '\x00'),
+      m_header {stob(m_backing)}
+{}
 
-FileHeaderReader::FileHeaderReader(BytesView view):
-      m_header {view}
+FileHeaderReader::FileHeaderReader(BytesView view)
+    : m_header {view}
 {
     CCO_EXPECT_EQ(view.size(), FileLayout::HEADER_SIZE);
 }
@@ -63,8 +64,8 @@ auto FileHeaderReader::flushed_lsn() const -> LSN
     return LSN {get_u32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET))};
 }
 
-FileHeaderWriter::FileHeaderWriter(Bytes bytes):
-      m_header {bytes}
+FileHeaderWriter::FileHeaderWriter(Bytes bytes)
+    : m_header {bytes}
 {
     CCO_EXPECT_EQ(bytes.size(), FileLayout::HEADER_SIZE);
 }
@@ -126,4 +127,4 @@ auto FileHeaderReader::is_header_crc_consistent() const -> bool
     return header_crc() == crc_32(m_header.range(offset));
 }
 
-} // cco
+} // namespace cco

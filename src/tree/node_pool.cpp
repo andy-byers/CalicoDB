@@ -10,7 +10,6 @@
 
 namespace cco {
 
-
 NodePool::NodePool(Parameters param)
     : m_free_list {{param.buffer_pool, param.free_start, param.free_count}},
       m_pool {param.buffer_pool},
@@ -25,11 +24,11 @@ auto NodePool::page_size() const -> Size
 auto NodePool::allocate(PageType type) -> Result<Node>
 {
     auto page = m_free_list.pop()
-        .or_else([this](const Status &error) -> Result<Page> {
-            if (error.is_logic_error())
-                return m_pool->allocate();
-            return Err {error};
-        });
+                    .or_else([this](const Status &error) -> Result<Page> {
+                        if (error.is_logic_error())
+                            return m_pool->allocate();
+                        return Err {error};
+                    });
     if (page) {
         page->set_type(type);
         m_node_count++;
@@ -56,7 +55,7 @@ auto NodePool::destroy(Node node) -> Result<void>
 {
     CCO_EXPECT_FALSE(node.is_overflowing());
     return m_free_list.push(node.take())
-        .map([this] {m_node_count--;});
+        .map([this] { m_node_count--; });
 }
 
 auto NodePool::allocate_chain(BytesView overflow) -> Result<PID>
@@ -67,11 +66,11 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<PID>
 
     while (!overflow.is_empty()) {
         auto page = m_free_list.pop()
-            .or_else([this](const Status &error) -> Result<Page> {
-                if (error.is_logic_error())
-                    return m_pool->allocate();
-                return Err {error};
-            });
+                        .or_else([this](const Status &error) -> Result<Page> {
+                            if (error.is_logic_error())
+                                return m_pool->allocate();
+                            return Err {error};
+                        });
         if (!page.has_value())
             return Err {page.error()};
 
@@ -142,4 +141,4 @@ auto NodePool::load_header(const FileHeaderReader &header) -> void
     m_free_list.load_header(header);
 }
 
-} // cco
+} // namespace cco

@@ -1,8 +1,8 @@
 #include "logging.h"
+#include "expect.h"
 #include <filesystem>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/null_sink.h>
-#include "expect.h"
 
 namespace cco {
 
@@ -97,4 +97,4 @@ auto LogMessage::log(spdlog::level::level_enum level) const -> std::string
     return message;
 }
 
-} // cco
+} // namespace cco

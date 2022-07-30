@@ -12,6 +12,6 @@ template<class T>
 using Result = tl::expected<T, Status>;
 using Err = tl::unexpected<Status>;
 
-} // cco
+} // namespace cco
 
 #endif // CCO_UTILS_RESULT_H

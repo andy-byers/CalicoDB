@@ -1,8 +1,8 @@
 #include "buffer_pool.h"
-#include "pager.h"
 #include "calico/options.h"
 #include "page/file_header.h"
 #include "page/page.h"
+#include "pager.h"
 #include "storage/directory.h"
 #include "utils/identifier.h"
 #include "utils/logging.h"
@@ -10,14 +10,13 @@
 
 namespace cco {
 
-
-#define POOL_TRY(expr) \
-    do {                  \
-        auto pool_try_result = (expr); \
-        if (!pool_try_result.has_value()) { \
+#define POOL_TRY(expr)                          \
+    do {                                        \
+        auto pool_try_result = (expr);          \
+        if (!pool_try_result.has_value()) {     \
             m_status = pool_try_result.error(); \
-            return Err {m_status}; \
-        } \
+            return Err {m_status};              \
+        }                                       \
     } while (0)
 
 auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBufferPool>>
@@ -54,11 +53,13 @@ auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBuffer
     return pool;
 }
 
-BufferPool::BufferPool(const Parameters &param):
-      m_logger {create_logger(param.log_sink, "pool")},
+BufferPool::BufferPool(const Parameters &param)
+    : m_logger {create_logger(param.log_sink, "pool")},
+//      m_ref_counts(param.frame_count),
       m_scratch {param.page_size},
       m_page_count {param.page_count},
-      m_uses_xact {param.use_xact} {}
+      m_uses_xact {param.use_xact}
+{}
 
 auto BufferPool::can_commit() const -> bool
 {
@@ -229,6 +230,10 @@ auto BufferPool::do_release(Page &page) -> Result<void>
     // This function needs external synchronization!
     CCO_EXPECT_GT(m_ref_sum, 0);
 
+//    const auto index = page.id().as_index();
+//    CCO_EXPECT_GT(m_ref_counts[index], 0);
+//    m_ref_counts[index]--;
+
     auto reference = m_cache.get(page.id());
     CCO_EXPECT_NE(reference, std::nullopt);
     auto &frame = reference->get();
@@ -348,4 +353,4 @@ auto BufferPool::fetch(PID id, bool is_writable) -> Result<Page>
 
 #undef POOL_TRY
 
-} // cco
+} // namespace cco

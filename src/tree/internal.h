@@ -1,11 +1,11 @@
 #ifndef CCO_TREE_INTERNAL_H
 #define CCO_TREE_INTERNAL_H
 
-#include <spdlog/spdlog.h>
-#include "node_pool.h"
 #include "interface.h"
+#include "node_pool.h"
 #include "page/node.h"
 #include "utils/scratch.h"
+#include <spdlog/spdlog.h>
 
 namespace cco {
 
@@ -29,7 +29,7 @@ public:
 
     explicit Internal(Parameters);
     ~Internal() = default;
-    [[nodiscard]] auto collect_value(const Node&, Index) const -> Result<std::string>;
+    [[nodiscard]] auto collect_value(const Node &, Index) const -> Result<std::string>;
     [[nodiscard]] auto find_external(BytesView) -> Result<SearchResult>;
     [[nodiscard]] auto find_minimum() -> Result<SearchResult>;
     [[nodiscard]] auto find_maximum() -> Result<SearchResult>;
@@ -38,8 +38,8 @@ public:
     [[nodiscard]] auto positioned_insert(Position, BytesView, BytesView) -> Result<void>;
     [[nodiscard]] auto positioned_modify(Position, BytesView) -> Result<void>;
     [[nodiscard]] auto positioned_remove(Position) -> Result<void>;
-    auto save_header(FileHeaderWriter&) const -> void;
-    auto load_header(const FileHeaderReader&) -> void;
+    auto save_header(FileHeaderWriter &) const -> void;
+    auto load_header(const FileHeaderReader &) -> void;
 
     [[nodiscard]] auto cell_count() const -> Size
     {
@@ -62,16 +62,16 @@ private:
     [[nodiscard]] auto split_root(Node) -> Result<Node>;
 
     [[nodiscard]] auto balance_after_underflow(Node, BytesView) -> Result<void>;
-    [[nodiscard]] auto fix_non_root(Node, Node&, Index) -> Result<bool>;
+    [[nodiscard]] auto fix_non_root(Node, Node &, Index) -> Result<bool>;
     [[nodiscard]] auto fix_root(Node) -> Result<void>;
-    [[nodiscard]] auto rotate_left(Node&, Node&, Node&, Index) -> Result<void>;
-    [[nodiscard]] auto rotate_right(Node&, Node&, Node&, Index) -> Result<void>;
-    [[nodiscard]] auto external_rotate_left(Node&, Node&, Node&, Index) -> Result<void>;
-    [[nodiscard]] auto external_rotate_right(Node&, Node&, Node&, Index) -> Result<void>;
-    [[nodiscard]] auto internal_rotate_left(Node&, Node&, Node&, Index) -> Result<void>;
-    [[nodiscard]] auto internal_rotate_right(Node&, Node&, Node&, Index) -> Result<void>;
+    [[nodiscard]] auto rotate_left(Node &, Node &, Node &, Index) -> Result<void>;
+    [[nodiscard]] auto rotate_right(Node &, Node &, Node &, Index) -> Result<void>;
+    [[nodiscard]] auto external_rotate_left(Node &, Node &, Node &, Index) -> Result<void>;
+    [[nodiscard]] auto external_rotate_right(Node &, Node &, Node &, Index) -> Result<void>;
+    [[nodiscard]] auto internal_rotate_left(Node &, Node &, Node &, Index) -> Result<void>;
+    [[nodiscard]] auto internal_rotate_right(Node &, Node &, Node &, Index) -> Result<void>;
 
-    [[nodiscard]] auto maybe_fix_child_parent_connections(Node&) -> Result<void>;
+    [[nodiscard]] auto maybe_fix_child_parent_connections(Node &) -> Result<void>;
 
     Size m_maximum_key_size {};
     ScratchManager m_scratch;
@@ -79,6 +79,6 @@ private:
     Size m_cell_count {};
 };
 
-} // cco
+} // namespace cco
 
 #endif // CCO_TREE_INTERNAL_H

@@ -1,12 +1,12 @@
 #ifndef CCO_DB_DATABASE_IMPL_H
 #define CCO_DB_DATABASE_IMPL_H
 
-#include <shared_mutex>
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/basic_file_sink.h>
 #include "calico/database.h"
 #include "page/file_header.h"
 #include "utils/result.h"
+#include <shared_mutex>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/spdlog.h>
 
 namespace cco {
 
@@ -47,7 +47,6 @@ public:
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool>;
     [[nodiscard]] auto erase(BytesView) -> Result<bool>;
     [[nodiscard]] auto erase(Cursor) -> Result<bool>;
-    [[nodiscard]] auto recover() -> Result<void>;
     [[nodiscard]] auto commit() -> Result<void>;
     [[nodiscard]] auto abort() -> Result<void>;
     [[nodiscard]] auto close() -> Result<void>;
@@ -56,14 +55,13 @@ public:
     [[nodiscard]] auto find_minimum() -> Cursor;
     [[nodiscard]] auto find_maximum() -> Cursor;
     [[nodiscard]] auto info() -> Info;
-    [[nodiscard]] auto batch() -> Batch;
 
-    [[nodiscard]] auto home() -> IDirectory&
+    [[nodiscard]] auto home() -> IDirectory &
     {
         return *m_home;
     }
 
-    [[nodiscard]] auto home() const -> const IDirectory&
+    [[nodiscard]] auto home() const -> const IDirectory &
     {
         return *m_home;
     }
@@ -81,8 +79,8 @@ private:
     bool m_is_temp {};
 };
 
-auto setup(IDirectory&, const Options&, spdlog::logger&) -> Result<InitialState>;
+auto setup(IDirectory &, const Options &, spdlog::logger &) -> Result<InitialState>;
 
-} // cco
+} // namespace cco
 
 #endif // CCO_DB_DATABASE_IMPL_H

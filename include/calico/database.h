@@ -92,8 +92,8 @@ public:
      */
     [[nodiscard]] auto info() const -> Info;
     [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto apply(Batch) -> Status;
-    [[nodiscard]] auto recover() -> Status;
+    [[nodiscard]] auto commit() -> Status;
+    [[nodiscard]] auto abort() -> Status;
 
     class Impl;
     virtual ~Database();

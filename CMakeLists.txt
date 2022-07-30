@@ -33,7 +33,6 @@ endif()
 
 option(CCO_INSTALL "Install the library and headers" "${CCO_MAIN_PROJECT}")
 option(CCO_BUILD_TESTS "Build the tests" "${CCO_MAIN_PROJECT}")
-option(CCO_BUILD_BENCHMARKS "Build the benchmarks" Off)
 option(CCO_BUILD_EXAMPLES "Build the examples" "${CCO_MAIN_PROJECT}")
 option(CCO_BUILD_FUZZERS "Build the fuzz tests" Off)
 option(CCO_FUZZER_LINK_MAIN "Link each fuzzer with a main for reproducing specific crashes" Off)
@@ -48,6 +47,7 @@ list(APPEND CCO_SOURCES ${CCO_HEADERS})
 include(GNUInstallDirs)
 include(FetchContent)
 
+set(SPDLOG_NO_EXCEPTIONS On)
 FetchContent_Declare(spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG        v1.10.0
@@ -114,20 +114,6 @@ if(CCO_INSTALL)
 #        FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
 #        DESTINATION "${INSTALL_DIR}"
 #    )
-endif()
-
-if(CCO_BUILD_BENCHMARKS)
-    # TODO: Not entirely sure why, but the following line is needed to compile with clang. See https://github.com/google/benchmark/issues/1072
-    #       for more info.
-#    set(BENCHMARK_ENABLE_EXCEPTIONS On)
-    set(BENCHMARK_ENABLE_TESTING Off)
-    FetchContent_Declare(
-        googlebenchmark
-        GIT_REPOSITORY https://github.com/google/benchmark.git
-        GIT_TAG        v1.6.2
-    )
-    FetchContent_MakeAvailable(googlebenchmark)
-    add_subdirectory(benchmarks)
 endif()
 
 if(CCO_BUILD_TESTS)

@@ -1,9 +1,9 @@
 #ifndef CCO_PAGE_CELL_H
 #define CCO_PAGE_CELL_H
 
-#include <optional>
 #include "page.h"
 #include "utils/scratch.h"
+#include <optional>
 
 namespace cco {
 
@@ -21,8 +21,8 @@ public:
     };
 
     static auto read_at(BytesView, Size, bool) -> Cell;
-    static auto read_at(const Node&, Index) -> Cell;
-    explicit Cell(const Parameters&);
+    static auto read_at(const Node &, Index) -> Cell;
+    explicit Cell(const Parameters &);
 
     ~Cell() = default;
     [[nodiscard]] auto copy() const -> Cell;
@@ -65,6 +65,6 @@ private:
 auto make_external_cell(BytesView, BytesView, Size) -> Cell;
 auto make_internal_cell(BytesView, Size) -> Cell;
 
-} // cco
+} // namespace cco
 
 #endif // CCO_PAGE_CELL_H

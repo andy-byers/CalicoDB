@@ -45,7 +45,7 @@ The node header contains information about the node's layout and its connections
 |    4 |     12 | Left sibling ID<sup>2</sup>    | Page ID of the left sibling node                 |
 |    2 |     14 | Cell count                     | Number of cells in the node                      |
 |    2 |     16 | Free block count               | Number of free blocks in the node                |
-|    2 |     18 | Cell start                     | Offset of the end of the "gap" area              |
+|    2 |     18 | Cell start                     | Offset of the start of the "gap" area            |
 |    2 |     20 | Free block start               | Offset of the first entry in the free block list |
 |    2 |     22 | Fragment count                 | Number of fragmented bytes                       |
 
