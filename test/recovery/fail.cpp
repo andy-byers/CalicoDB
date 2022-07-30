@@ -53,24 +53,24 @@ auto main(int argc, const char *argv[]) -> int
             CCO_EXPECT_TRUE(db.insert(stob(key), stob(value)).is_ok());
             ofs << value << '\n';
         }
+        CCO_EXPECT_TRUE(db.commit().is_ok());
     }
 
     puts(value_path.c_str());
     fflush(stdout);
-    Batch batch;
 
     // Modify the database until we receive a signal or hit the operation limit.
     for (Index i {}; i < LIMIT; ++i) {
         const auto key = std::to_string(random.next_int(num_committed * 2));
         const auto value = random_string(random, 0, options.page_size / 2);
-        CCO_EXPECT_TRUE(batch.insert(stob(key), stob(value)).is_ok());
+        CCO_EXPECT_TRUE(db.insert(stob(key), stob(value)).is_ok());
 
         // Keep the database from getting too large.
         if (const auto info = db.info(); info.record_count() > max_database_size) {
             while (info.record_count() >= max_database_size / 2) {
                 const auto cursor = db.find_minimum();
                 CCO_EXPECT_TRUE(cursor.is_valid());
-                CCO_EXPECT_TRUE(batch.erase(cursor.key()).is_ok());
+                CCO_EXPECT_TRUE(db.erase(cursor.key()).is_ok());
             }
         }
     }

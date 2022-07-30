@@ -9,7 +9,7 @@ namespace cco {
 struct IdentifierHash;
 
 struct Identifier {
-    using Hasher = IdentifierHash;
+    using Hash = IdentifierHash;
 
     [[nodiscard]] static auto min() noexcept -> Identifier
     {
@@ -83,6 +83,14 @@ inline auto operator+(const Identifier &lhs, const Identifier &rhs) noexcept -> 
 {
     Identifier res {lhs};
     res.value += rhs.value;
+    return res;
+}
+
+inline auto operator-(const Identifier &lhs, const Identifier &rhs) noexcept -> Identifier
+{
+    CCO_EXPECT_GE(lhs.value, rhs.value);
+    Identifier res {lhs};
+    res.value -= rhs.value;
     return res;
 }
 

@@ -19,8 +19,8 @@ class PageCache final {
 public:
     using Reference = std::reference_wrapper<Frame>;
     using ConstReference = std::reference_wrapper<const Frame>;
-    using ColdCache = FifoCache<PID, Frame, PID::Hasher>;
-    using HotCache = LruCache<PID, Frame, PID::Hasher>;
+    using ColdCache = FifoCache<PID, Frame, PID::Hash>;
+    using HotCache = LruCache<PID, Frame, PID::Hash>;
 
     PageCache() = default;
     ~PageCache() = default;
@@ -73,8 +73,8 @@ public:
     auto evict() -> std::optional<Frame>;
 
 private:
-    FifoCache<PID, Frame, PID::Hasher> m_warm;
-    LruCache<PID, Frame, PID::Hasher> m_hot;
+    FifoCache<PID, Frame, PID::Hash> m_warm;
+    LruCache<PID, Frame, PID::Hash> m_hot;
     Size m_hits {};
     Size m_misses {};
 };

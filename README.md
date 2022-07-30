@@ -120,7 +120,6 @@ CalicoDB
 ┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
-┃ ┣╸batch.h ┄┄┄┄┄┄┄┄ A group of operations applied atomically
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Constructs for holding contiguous sequences of bytes
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants

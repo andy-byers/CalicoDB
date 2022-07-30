@@ -140,11 +140,11 @@ auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
     if (!was_read.has_value())
         return Err {was_read.error()};
 
-    // Just read the whole page.
     if (const auto read_size = *was_read; read_size == out.size()) {
+        // Just read the whole page.
         return true;
-        // Incomplete read.
     } else {
+        // Incomplete read.
         ThreePartMessage message;
         message.set_primary(ERROR_PRIMARY);
         message.set_detail(ERROR_DETAIL, id.value);

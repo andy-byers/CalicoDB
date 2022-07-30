@@ -21,7 +21,7 @@ public:
     auto track(Page &) -> void;
 
 private:
-    std::unordered_map<PID, UpdateManager, PID::Hasher> m_registry;
+    std::unordered_map<PID, UpdateManager, PID::Hash> m_registry;
     ScratchManager m_scratch;
 };
 

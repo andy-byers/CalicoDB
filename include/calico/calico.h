@@ -1,7 +1,6 @@
 #ifndef CCO_CALICO_H
 #define CCO_CALICO_H
 
-#include "batch.h"
 #include "bytes.h"
 #include "common.h"
 #include "cursor.h"

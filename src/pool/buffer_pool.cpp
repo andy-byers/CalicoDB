@@ -36,25 +36,26 @@ auto BufferPool::open(const Parameters &param) -> Result<std::unique_ptr<IBuffer
     CCO_TRY_CREATE(file, param.directory.open_file(DATA_NAME, mode, param.permissions));
 
     CCO_TRY_STORE(pool->m_pager, Pager::open({
-                                     std::move(file),
-                                     param.page_size,
-                                     param.frame_count,
-                                 }));
+        std::move(file),
+        param.page_size,
+        param.frame_count,
+    }));
     if (!param.use_xact)
         return pool;
 
     CCO_TRY_STORE(pool->m_wal, WALManager::open({
-                                   pool.get(),
-                                   param.directory,
-                                   create_sink(),
-                                   param.page_size,
-                                   param.flushed_lsn,
-                               }));
+        pool.get(),
+        param.directory,
+        create_sink(),
+        param.page_size,
+        param.flushed_lsn,
+    }));
     return pool;
 }
 
 BufferPool::BufferPool(const Parameters &param)
     : m_logger {create_logger(param.log_sink, "pool")},
+//      m_ref_counts(param.frame_count),
       m_scratch {param.page_size},
       m_page_count {param.page_count},
       m_uses_xact {param.use_xact}
@@ -228,6 +229,10 @@ auto BufferPool::do_release(Page &page) -> Result<void>
 {
     // This function needs external synchronization!
     CCO_EXPECT_GT(m_ref_sum, 0);
+
+//    const auto index = page.id().as_index();
+//    CCO_EXPECT_GT(m_ref_counts[index], 0);
+//    m_ref_counts[index]--;
 
     auto reference = m_cache.get(page.id());
     CCO_EXPECT_NE(reference, std::nullopt);

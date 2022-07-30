@@ -229,12 +229,6 @@ auto Database::Impl::abort() -> Result<void>
         });
 }
 
-auto Database::Impl::recover() -> Result<void>
-{
-    m_logger->trace("recovering");
-    return m_pool->recover();
-}
-
 auto Database::Impl::close() -> Result<void>
 {
     const auto cr = commit();

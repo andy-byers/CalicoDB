@@ -84,6 +84,7 @@ private:
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<IWALManager> m_wal;
     std::shared_ptr<spdlog::logger> m_logger;
+//    std::vector<Size> m_ref_counts;                                         // TODO: Keeping track of ref counts differently.
     ScratchManager m_scratch;
     PageCache m_cache;
     Status m_status {Status::ok()};

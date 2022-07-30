@@ -799,7 +799,9 @@ auto split_root(Node &root, Node &child) -> void
 auto merge_root(Node &root, Node &child) -> void
 {
     CCO_EXPECT(root.rightmost_child_id() == child.id());
-    child.defragment();
+    const auto needs_defragment = child.header().free_count() || child.header().frag_count();
+    if (needs_defragment)
+        child.defragment();
 
     // Copy the cell content area.
     auto offset = child.cell_area_offset();

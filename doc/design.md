@@ -7,7 +7,6 @@ We could check if the page contents match the "after" contents of the record, bu
 If there are WAL records after the corrupted record, we cannot roll back
 
 ## Terms
-+ **block**: The basic unit of storage in the `wal` file (see **page**).
 + **cell**: An structure embedded within a **node** that contains a **key** and optionally a **value**.
   **Cells** can be either internal cells or external cells, depending on what type of node they belong to.
 + **cell directory**: An embedded array that is placed right after the node header.
@@ -118,7 +117,7 @@ This makes traversing the B<sup>+</sup>-tree easier (we don't have to read addit
                multiple overflow pages, without affecting the cache too much.)
 
 ## Write-Ahead Log (WAL)
-Currently, the WAL consists of a single file, written in block-sized chunks.
+Currently, the WAL consists of a single file, written in page-sized chunks.
 It is managed by a pair of constructs: one to read from the file and one to write to it.
 Both constructs operate on WAL records and perform their own caching internally.
 
@@ -129,7 +128,7 @@ WAL records are used to store information about updates made to database pages.
 See ***3*** for more information about WAL records.
 We use a similar scheme including multiple record types.
 Basically, multiple WAL records can correspond to a single page update.
-This is because WAL records can be split up into multiple blocks, depending on their size and the amount of memory remaining in the WAL writer's internal buffer.
+This is because WAL records can be split up into multiple pages, depending on their size and the amount of memory remaining in the WAL writer's internal buffer.
 
 ### WAL Writer
 The WAL writer fills up an internal buffer with WAL records.

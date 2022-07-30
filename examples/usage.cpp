@@ -136,23 +136,6 @@ auto querying_a_database(cco::Database &db)
     }
 }
 
-auto batch_writes(cco::Database &db)
-{
-    cco::Batch batch;
-
-    // Updates made to the batch object are saved in RAM initially.
-    batch.insert("opossum", "pretty cute");
-    batch.erase("manx");
-
-    // Then, when apply() is called, they are applied to the database in an atomic transaction.
-    assert(db.apply(batch).is_ok());
-
-    // If apply() succeeded, then the database will have the entire batch of updates persisted
-    // on disk.
-    assert(db.find_exact("opossum").is_valid());
-    assert(not db.find_exact("manx").is_valid());
-}
-
 auto deleting_a_database(cco::Database db)
 {
     // We can delete a database by passing ownership to the following static method.
@@ -188,7 +171,6 @@ auto main(int, const char *[]) -> int
     reads_and_writes(db);
     updating_a_database(db);
     querying_a_database(db);
-    batch_writes(db);
     deleting_a_database(std::move(db));
     return 0;
 }

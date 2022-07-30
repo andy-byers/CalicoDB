@@ -1,6 +1,4 @@
 
-#include "batch_internal.h"
-#include "calico/batch.h"
 #include "calico/cursor.h"
 #include "calico/info.h"
 #include "database_impl.h"
@@ -120,7 +118,6 @@ auto Database::find_maximum() const -> Cursor
 auto Database::insert(BytesView key, BytesView value) -> Status
 {
     DB_TRY(m_impl->insert(key, value));
-    DB_TRY(m_impl->commit());
     return Status::ok();
 }
 
@@ -153,31 +150,6 @@ auto Database::erase(const Cursor &cursor) -> Status
     } else if (!r.value()) {
         return Status::not_found();
     }
-    DB_TRY(m_impl->commit());
-    return Status::ok();
-}
-
-auto Database::apply(Batch batch) -> Status
-{
-    const auto count = BatchInternal::entry_count(batch);
-
-    for (Index i {}; i < count; ++i) {
-        const auto entry = BatchInternal::read_entry(batch, i);
-        Result<bool> r;
-
-        if (entry.type == BatchInternal::EntryType::INSERT) {
-            r = m_impl->insert(entry.key, entry.value);
-        } else {
-            r = m_impl->erase(entry.key);
-        }
-        // We will receive a "not found" error if the key we are trying to erase does not exist. insert() will
-        // never return such an error.
-        if (!r.has_value() && !r.error().is_not_found()) {
-            DB_TRY(m_impl->abort());
-            return r.error();
-        }
-    }
-    DB_TRY(m_impl->commit());
     return Status::ok();
 }
 
@@ -191,13 +163,16 @@ auto Database::status() const -> Status
     return m_impl->status();
 }
 
-auto Database::recover() -> Status
+auto Database::commit() -> Status
 {
-    if (m_impl->status().is_ok())
-        return Status::logic_error("cannot recover: nothing is wrong");
-    DB_TRY(m_impl->recover());
-    return m_impl->status();
+    DB_TRY(m_impl->commit());
+    return Status::ok();
 }
+
+auto Database::abort() -> Status
+{
+    DB_TRY(m_impl->abort());
+    return Status::ok();}
 
 #undef DB_TRY
 

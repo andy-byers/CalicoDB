@@ -47,7 +47,6 @@ public:
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool>;
     [[nodiscard]] auto erase(BytesView) -> Result<bool>;
     [[nodiscard]] auto erase(Cursor) -> Result<bool>;
-    [[nodiscard]] auto recover() -> Result<void>;
     [[nodiscard]] auto commit() -> Result<void>;
     [[nodiscard]] auto abort() -> Result<void>;
     [[nodiscard]] auto close() -> Result<void>;
@@ -56,7 +55,6 @@ public:
     [[nodiscard]] auto find_minimum() -> Cursor;
     [[nodiscard]] auto find_maximum() -> Cursor;
     [[nodiscard]] auto info() -> Info;
-    [[nodiscard]] auto batch() -> Batch;
 
     [[nodiscard]] auto home() -> IDirectory &
     {
