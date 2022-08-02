@@ -19,13 +19,13 @@ It contains important database state information and is accessed by multiple com
 |    2 |     24 | Page size    | Size of a database page in bytes                                                         |
 |    2 |     26 | Block size   | Size of a WAL block in bytes                                                             |
 |    4 |     28 | Record count | Number of records in the database                                                        |
-|    4 |     32 | Flushed LSN  | LSN of the last WAL record flushed to disk after a successful commit                     |
+|    4 |     32 | Flushed SequenceNumber  | SequenceNumber of the last WAL record flushed to disk after a successful commit                     |
 |   12 |     36 | Reserved     | Reserved for expansion                                                                   |
 
 ### Page Header
 |  Size | Offset | Name    | Description                                                        |
 |------:|-------:|:--------|:-------------------------------------------------------------------|
-|     4 |      0 | LSN     | LSN of the WAL record describing the last modification to the page |
+|     4 |      0 | SequenceNumber     | SequenceNumber of the WAL record describing the last modification to the page |
 |     2 |      4 | Type    | Page type field                                                    |
 
 ### Link Header
@@ -73,7 +73,7 @@ See [Overflow Chains](#overflow-chains) for details.
 ### WAL Record Header
 | Size | Offset | Name         | Description                                       |
 |-----:|-------:|:-------------|:--------------------------------------------------|
-|    4 |      0 | LSN          | Unique log sequence number describing this record |
+|    4 |      0 | SequenceNumber          | Unique log sequence number describing this record |
 |    4 |      4 | CRC          | CRC computed on this record                       |
 |    1 |      8 | Type         | WAL record type                                   |
 |    2 |      9 | Payload size | Size of the payload in bytes                      |
@@ -81,7 +81,7 @@ See [Overflow Chains](#overflow-chains) for details.
 ### WAL Record Payload Header
 | Size | Offset | Name              | Description                                    |
 |-----:|-------:|:------------------|:-----------------------------------------------|
-|    4 |      0 | Previous LSN      | LSN describing the previous update to the page |
+|    4 |      0 | Previous SequenceNumber      | SequenceNumber describing the previous update to the page |
 |    4 |      4 | Page ID           | Page ID of the page that was updated           |
 |    2 |      6 | Count<sup>1</sup> | Number of payload entries                      |
 

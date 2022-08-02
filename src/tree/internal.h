@@ -17,7 +17,7 @@ public:
     };
 
     struct SearchResult {
-        PID id;
+        PageId id;
         Index index {};
         bool was_found {};
     };

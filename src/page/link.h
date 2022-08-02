@@ -10,7 +10,7 @@ public:
     explicit Link(Page);
     ~Link() = default;
 
-    [[nodiscard]] auto id() const -> PID
+    [[nodiscard]] auto id() const -> PageId
     {
         return m_page.id();
     }
@@ -35,8 +35,8 @@ public:
         return std::move(m_page);
     }
 
-    [[nodiscard]] auto next_id() const -> PID;
-    auto set_next_id(PID) -> void;
+    [[nodiscard]] auto next_id() const -> PageId;
+    auto set_next_id(PageId) -> void;
 
     [[nodiscard]] auto content_size() const -> Size;
     [[nodiscard]] auto content_view() const -> BytesView;

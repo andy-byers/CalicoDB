@@ -6,29 +6,43 @@
 
 namespace cco {
 
-auto WALWriter::open(const WALParameters &param) -> Result<std::unique_ptr<IWALWriter>>
+auto WALWriter::create(const WALParameters &param) -> Result<std::unique_ptr<IWALWriter>>
 {
     CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
     CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
     CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
 
-    CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND, DEFAULT_PERMISSIONS));
-    CCO_TRY_CREATE(file_size, file->size());
-    auto writer = std::unique_ptr<WALWriter> {new (std::nothrow) WALWriter {std::move(file), param}};
+    auto writer = std::unique_ptr<WALWriter> {new (std::nothrow) WALWriter {param}};
     if (!writer) {
         ThreePartMessage message;
         message.set_primary("cannot open WAL writer");
         message.set_detail("out of memory");
         return Err {message.system_error()};
     }
-    writer->m_has_committed = file_size > 0;
     return writer;
 }
 
-WALWriter::WALWriter(std::unique_ptr<IFile> file, const WALParameters &param)
-    : m_file {std::move(file)},
-      m_block(param.page_size, '\x00')
+WALWriter::WALWriter(const WALParameters &param)
+    : m_tail(param.page_size, '\x00')
 {}
+
+auto WALWriter::is_open() -> bool
+{
+    return m_file && m_file->is_open();
+}
+
+auto WALWriter::needs_segmentation() -> bool
+{
+    return m_position.block_id > 32; // TODO: Should be an option.
+}
+
+auto WALWriter::open(std::unique_ptr<IFile> file) -> Result<void>
+{
+    CCO_EXPECT_FALSE(is_open());
+    m_file = std::move(file);
+    m_position = Position {};
+    return {};
+}
 
 auto WALWriter::close() -> Result<void>
 {
@@ -37,6 +51,8 @@ auto WALWriter::close() -> Result<void>
 
 auto WALWriter::append(WALRecord record) -> Result<Position>
 {
+//printf("appending LSN %u to %s\n", record.lsn().value, m_file->name().c_str());
+
     const auto next_lsn {record.lsn()};
     CCO_EXPECT_EQ(next_lsn.value, m_last_lsn.value + 1);
 
@@ -44,7 +60,7 @@ auto WALWriter::append(WALRecord record) -> Result<Position>
     std::optional<Position> first;
 
     while (temp) {
-        const auto remaining = m_block.size() - m_position.offset;
+        const auto remaining = m_tail.size() - m_position.offset;
         const auto can_fit_some = remaining >= WALRecord::MINIMUM_SIZE;
         const auto can_fit_all = remaining >= temp->size();
 
@@ -57,7 +73,7 @@ auto WALWriter::append(WALRecord record) -> Result<Position>
             if (!first.has_value())
                 first = m_position;
 
-            auto destination = stob(m_block)
+            auto destination = stob(m_tail)
                                    .range(m_position.offset, temp->size());
             temp->write(destination);
 
@@ -85,8 +101,7 @@ auto WALWriter::truncate() -> Result<void>
         })
         .and_then([this]() -> Result<void> {
             m_position = {};
-            m_has_committed = false;
-            mem_clear(stob(m_block));
+            mem_clear(stob(m_tail));
             return {};
         });
 }
@@ -95,7 +110,7 @@ auto WALWriter::flush() -> Result<void>
 {
     if (m_position.offset) {
         // The unused part of the block should be zero-filled.
-        auto block = stob(m_block);
+        auto block = stob(m_tail);
         mem_clear(block.range(m_position.offset));
 
         CCO_TRY(m_file->write(block));
@@ -104,7 +119,6 @@ auto WALWriter::flush() -> Result<void>
         m_position.block_id++;
         m_position.offset = 0;
         m_flushed_lsn = m_last_lsn;
-        m_has_committed = true;
     }
     return {};
 }

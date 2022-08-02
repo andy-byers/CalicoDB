@@ -21,7 +21,7 @@ public:
     friend class cco::Frame;
 
     struct Parameters {
-        PID id;
+        PageId id;
         Bytes data;
         IBufferPool *source {};
         bool is_writable {};
@@ -41,20 +41,20 @@ public:
         return m_is_dirty;
     }
 
-    [[nodiscard]] auto id() const -> PID;
+    [[nodiscard]] auto id() const -> PageId;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto view(Index) const -> BytesView;
     [[nodiscard]] auto view(Index, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
-    [[nodiscard]] auto lsn() const -> LSN;
+    [[nodiscard]] auto lsn() const -> SequenceNumber;
     auto set_type(PageType) -> void;
-    auto set_lsn(LSN) -> void;
+    auto set_lsn(SequenceNumber) -> void;
     auto read(Bytes, Index) const -> void;
     auto bytes(Index) -> Bytes;
     auto bytes(Index, Size) -> Bytes;
     auto write(BytesView, Index) -> void;
-    auto undo(LSN, const std::vector<ChangedRegion> &) -> void;
-    auto redo(LSN, const std::vector<ChangedRegion> &) -> void;
+    auto undo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
+    auto redo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
 
     [[nodiscard]] auto has_manager() const -> bool
     {
@@ -84,7 +84,7 @@ private:
     UniqueNullable<IBufferPool *> m_source;
     UpdateManager *m_manager {};
     Bytes m_data;
-    PID m_id;
+    PageId m_id;
     bool m_is_writable {};
     bool m_is_dirty {};
 };

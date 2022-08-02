@@ -25,14 +25,14 @@ public:
         , m_scratch {page_size}
         , m_page_size {page_size} {}
 
-    auto get_page(PID id) -> Page
+    auto get_page(PageId id) -> Page
     {
         m_map.emplace(id, std::string(m_page_size, '\x00'));
         return Page {{id, stob(m_map[id]), nullptr, true, false}};
     }
 
 private:
-    std::unordered_map<PID, std::string, PID::Hash> m_map;
+    std::unordered_map<PageId, std::string, PageId::Hash> m_map;
     ScratchManager m_scratch;
     Size m_page_size {};
 };
@@ -44,7 +44,7 @@ public:
     PageTests()
         : m_backing {page_size} {}
 
-    auto get_page(PID id) -> Page
+    auto get_page(PageId id) -> Page
     {
         return m_backing.get_page(id);
     }
@@ -55,14 +55,14 @@ private:
 
 TEST_F(PageTests, HeaderFields)
 {
-    auto page = get_page(PID::root());
+    auto page = get_page(PageId::base());
     page.set_type(PageType::EXTERNAL_NODE);
     ASSERT_EQ(page.type(), PageType::EXTERNAL_NODE);
 }
 
 TEST_F(PageTests, FreshPagesAreEmpty)
 {
-    auto page = get_page(PID::root());
+    auto page = get_page(PageId::base());
     ASSERT_TRUE(page.view(0) == stob(std::string(page_size, '\x00')));
 }
 
@@ -80,11 +80,11 @@ public:
         param.is_external = false;
         Cell cell {param};
         cell.detach(scratch.get());
-        cell.set_left_child_id(PID {123});
+        cell.set_left_child_id(PageId {123});
         return cell;
     }
 
-    auto get_cell(const std::string &key, const std::string &value, bool is_external, PID overflow_id = PID::null()) -> Cell
+    auto get_cell(const std::string &key, const std::string &value, bool is_external, PageId overflow_id = PageId::null()) -> Cell
     {
         const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
         Cell::Parameters param;
@@ -112,7 +112,7 @@ class NodeComponentBacking: public PageBacking {
 public:
     explicit NodeComponentBacking(Size page_size)
         : PageBacking {page_size}
-        , backing {get_page(PID {2})}
+        , backing {get_page(PageId {2})}
         , header {backing}
         , directory {header}
         , allocator {header}
@@ -147,27 +147,27 @@ public:
 TEST_F(NodeHeaderTests, SetChildOfExternalNodeDeathTest)
 {
     backing.backing.set_type(PageType::EXTERNAL_NODE);
-    ASSERT_DEATH(header().set_rightmost_child_id(PID {123}), EXPECTATION_MATCHER);
+    ASSERT_DEATH(header().set_rightmost_child_id(PageId {123}), EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeHeaderTests, SetSiblingOfInternalNodeDeathTest)
 {
     backing.backing.set_type(PageType::INTERNAL_NODE);
-    ASSERT_DEATH(header().set_right_sibling_id(PID {123}), EXPECTATION_MATCHER);
+    ASSERT_DEATH(header().set_right_sibling_id(PageId {123}), EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeHeaderTests, FieldsAreConsistent)
 {
     backing.backing.set_type(PageType::EXTERNAL_NODE);
-    header().set_parent_id(PID {1});
-    header().set_right_sibling_id(PID {2});
+    header().set_parent_id(PageId {1});
+    header().set_right_sibling_id(PageId {2});
     header().set_cell_start(3);
     header().set_free_start(4);
     header().set_free_count(5);
     header().set_frag_count(6);
     header().set_cell_count(7);
-    ASSERT_EQ(header().parent_id(), PID {1});
-    ASSERT_EQ(header().right_sibling_id(), PID {2});
+    ASSERT_EQ(header().parent_id(), PageId {1});
+    ASSERT_EQ(header().right_sibling_id(), PageId {2});
     ASSERT_EQ(header().cell_start(), 3);
     ASSERT_EQ(header().free_start(), 4);
     ASSERT_EQ(header().free_count(), 5);
@@ -376,14 +376,18 @@ TEST_F(FreeBlockTests, ReduceBlockToFragments)
 class NodeBacking: public PageBacking {
 public:
     explicit NodeBacking(Size page_size)
-        : PageBacking {page_size} {}
+        : PageBacking {page_size},
+          scratch(page_size, '\x00')
+    {}
 
-    auto get_node(PID id, PageType type) -> Node
+    auto get_node(PageId id, PageType type) -> Node
     {
-        Node node {get_page(id), true};
+        Node node {get_page(id), true, scratch.data()};
         node.page().set_type(type);
         return node;
     }
+
+    std::string scratch;
 };
 
 class NodeTests: public PageTests {
@@ -393,7 +397,7 @@ public:
         , cell_backing {page_size}
         , overflow_value(page_size, 'x') {}
 
-    auto make_node(PID id, PageType type)
+    auto make_node(PageId id, PageType type)
     {
         return node_backing.get_node(id, type);
     }
@@ -403,24 +407,24 @@ public:
     CellBacking cell_backing;
     std::string normal_value {"world"};
     std::string overflow_value;
-    PID arbitrary_pid {2};
+    PageId arbitrary_pid {2};
 };
 
 TEST_F(NodeTests, FreshNodesAreEmpty)
 {
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
     ASSERT_EQ(node.cell_count(), 0);
 }
 
 TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 {
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
     ASSERT_DEATH(node.remove_at(0, MAX_CELL_HEADER_SIZE), EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 {
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
     auto [index, found_eq] = node.find_ge(stob("hello"));
     ASSERT_FALSE(found_eq);
 
@@ -430,7 +434,7 @@ TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 
 TEST_F(NodeTests, UsableSpaceIsUpdatedOnInsert)
 {
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
     auto cell = cell_backing.get_cell("hello", normal_value, node.is_external());
     const auto usable_space_after = node.usable_space() - cell.size() - CELL_POINTER_SIZE;
     node.insert(std::move(cell));
@@ -441,7 +445,7 @@ TEST_F(NodeTests, SanityCheck)
 {
     static constexpr Size NUM_ITERATIONS {10};
     Random random {0};
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
     for (Index i {}; i < NUM_ITERATIONS; ++i) {
         while (!node.is_overflowing()) {
             const auto key = random_string(random, 2, 5);
@@ -479,12 +483,12 @@ auto get_maximally_sized_internal_cell(NodeTests &test)
     // cannot store part of the key on an overflow page in the current design, so we have an embedded payload of size
     // get_max_local(page_size), an overflow ID, and maybe a left child ID.
     const auto max_key_length = get_max_local(NodeTests::page_size);
-    auto cell = test.cell_backing.get_cell(test.random.next_string(max_key_length), "", false, PID::null());
+    auto cell = test.cell_backing.get_cell(test.random.next_string(max_key_length), "", false, PageId::null());
     cell.set_left_child_id(test.arbitrary_pid);
     return cell;
 }
 
-auto run_maximally_sized_cell_test(NodeTests &test, PID id, Size max_records_before_overflow, bool is_external)
+auto run_maximally_sized_cell_test(NodeTests &test, PageId id, Size max_records_before_overflow, bool is_external)
 {
     auto node = test.make_node(id, is_external ? PageType::EXTERNAL_NODE : PageType::INTERNAL_NODE);
 
@@ -502,22 +506,22 @@ auto run_maximally_sized_cell_test(NodeTests &test, PID id, Size max_records_bef
 
 TEST_F(NodeTests, InternalRootFitsAtLeastThreeRecords)
 {
-    run_maximally_sized_cell_test(*this, PID::root(), 3, false);
+    run_maximally_sized_cell_test(*this, PageId::base(), 3, false);
 }
 
 TEST_F(NodeTests, ExternalRootFitsAtLeastThreeRecords)
 {
-    run_maximally_sized_cell_test(*this, PID::root(), 3, true);
+    run_maximally_sized_cell_test(*this, PageId::base(), 3, true);
 }
 
 TEST_F(NodeTests, InternalNonRootFitsAtLeastFourRecords)
 {
-    run_maximally_sized_cell_test(*this, PID {ROOT_ID_VALUE + 1}, 4, false);
+    run_maximally_sized_cell_test(*this, PageId {ROOT_ID_VALUE + 1}, 4, false);
 }
 
 template<class Test>auto get_node_with_one_cell(Test &test, bool has_overflow = false)
 {
-    static PID next_id {2};
+    static PageId next_id {2};
     auto value = has_overflow ? test.overflow_value : test.normal_value;
     auto node = test.node_backing.get_node(next_id, PageType::EXTERNAL_NODE);
     auto cell = test.cell_backing.get_cell("hello", value, true);
@@ -563,7 +567,7 @@ TEST_F(NodeTests, ReadCell)
 {
     auto node = get_node_with_one_cell(*this);
     auto cell = node.read_cell(0);
-    ASSERT_EQ(cell.overflow_id(), PID::null());
+    ASSERT_EQ(cell.overflow_id(), PageId::null());
     ASSERT_TRUE(cell.key() == stob("hello"));
     ASSERT_TRUE(cell.local_value() == stob("world"));
 }
@@ -578,7 +582,7 @@ TEST_F(NodeTests, ReadCellWithOverflow)
 TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
 {
     std::string value {"world"};
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
     auto cell = cell_backing.get_cell("hello", value, true);
     node.insert(std::move(cell));
     ASSERT_DEATH(node.insert(cell_backing.get_cell("hello", value, true)), EXPECTATION_MATCHER);
@@ -600,7 +604,7 @@ TEST_F(NodeTests, RemovingCellDecrementsCellCount)
 
 TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
 {
-    auto node = make_node(PID::root(), PageType::EXTERNAL_NODE);
+    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
     auto cell = cell_backing.get_cell("hello", normal_value, true);
     const auto usable_space_before = node.usable_space();
     node.insert(std::move(cell));
@@ -610,8 +614,8 @@ TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
 
 TEST_F(NodeTests, SplitNonRootExternal)
 {
-    auto lhs = make_node(PID {2}, PageType::EXTERNAL_NODE);
-    auto rhs = make_node(PID {3}, PageType::EXTERNAL_NODE);
+    auto lhs = make_node(PageId {2}, PageType::EXTERNAL_NODE);
+    auto rhs = make_node(PageId {3}, PageType::EXTERNAL_NODE);
     ScratchManager scratch {lhs.size()};
 
     lhs.insert(cell_backing.get_cell(make_key(100), normal_value, true));

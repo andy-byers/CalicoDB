@@ -19,4 +19,27 @@ auto ScratchManager::reset() -> void
     m_emergency.clear();
 }
 
+auto ManualScratchManager::get() -> ManualScratch
+{
+    std::string scratch;
+    if (m_available.empty()) {
+        scratch.resize(m_scratch_size);
+    } else {
+        scratch = std::move(m_available.back());
+        m_available.pop_back();
+    }
+    const auto id = m_next_id++;
+    auto [itr, truthy] = m_occupied.emplace(id, std::move(scratch));
+    CCO_EXPECT_TRUE(truthy);
+    return ManualScratch {id, stob(itr->second)};
+}
+
+auto ManualScratchManager::put(ManualScratch scratch) -> void
+{
+    auto itr = m_occupied.find(scratch.id());
+    CCO_EXPECT_NE(itr, end(m_occupied));
+    m_available.emplace_back(std::move(itr->second));
+    m_occupied.erase(itr);
+}
+
 } // namespace cco

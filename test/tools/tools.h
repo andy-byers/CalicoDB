@@ -235,15 +235,15 @@ public:
         }
         WALRecord record {{
             std::move(update),
-            PID {static_cast<uint32_t>(random.next_int(page_count))},
-            LSN::null(),
-            LSN {static_cast<uint32_t>(m_payloads.size() + ROOT_ID_VALUE)},
+            PageId {static_cast<uint32_t>(random.next_int(page_count))},
+            SequenceNumber::null(),
+            SequenceNumber {static_cast<uint32_t>(m_payloads.size() + ROOT_ID_VALUE)},
         }};
         m_payloads.push_back(btos(record.payload().data()));
         return record;
     }
 
-    auto validate_record(const WALRecord &record, LSN target_lsn) const -> void
+    auto validate_record(const WALRecord &record, SequenceNumber target_lsn) const -> void
     {
         (void)record;
         CCO_EXPECT_EQ(record.lsn(), target_lsn);
@@ -253,7 +253,7 @@ public:
         CCO_EXPECT_TRUE(record.is_consistent());
     }
 
-    [[nodiscard]] auto retrieve_payload(LSN lsn) const -> const std::string&
+    [[nodiscard]] auto retrieve_payload(SequenceNumber lsn) const -> const std::string&
     {
         return m_payloads.at(lsn.as_index());
     }

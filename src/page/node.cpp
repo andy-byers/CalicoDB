@@ -6,15 +6,15 @@
 
 namespace cco {
 
-auto NodeHeader::parent_id() const -> PID
+auto NodeHeader::parent_id() const -> PageId
 {
-    return PID {get_u32(*m_page, header_offset() + NodeLayout::PARENT_ID_OFFSET)};
+    return PageId {get_u32(*m_page, header_offset() + NodeLayout::PARENT_ID_OFFSET)};
 }
 
-auto NodeHeader::right_sibling_id() const -> PID
+auto NodeHeader::right_sibling_id() const -> PageId
 {
     CCO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
-    return PID {get_u32(*m_page, header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
+    return PageId {get_u32(*m_page, header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
 }
 
 auto NodeHeader::reserved() const -> uint32_t
@@ -23,16 +23,16 @@ auto NodeHeader::reserved() const -> uint32_t
     return get_u32(*m_page, header_offset() + NodeLayout::RESERVED_OFFSET);
 }
 
-auto NodeHeader::left_sibling_id() const -> PID
+auto NodeHeader::left_sibling_id() const -> PageId
 {
     CCO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
-    return PID {get_u32(*m_page, header_offset() + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
+    return PageId {get_u32(*m_page, header_offset() + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
 }
 
-auto NodeHeader::rightmost_child_id() const -> PID
+auto NodeHeader::rightmost_child_id() const -> PageId
 {
     CCO_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
-    return PID {get_u32(*m_page, header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
+    return PageId {get_u32(*m_page, header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
 }
 
 auto NodeHeader::cell_count() const -> Size
@@ -65,28 +65,28 @@ auto NodeHeader::free_total() const -> Size
     return get_u16(*m_page, header_offset() + NodeLayout::FREE_TOTAL_OFFSET);
 }
 
-auto NodeHeader::set_parent_id(PID parent_id) -> void
+auto NodeHeader::set_parent_id(PageId parent_id) -> void
 {
-    CCO_EXPECT_NE(m_page->id(), PID::root());
+    CCO_EXPECT_NE(m_page->id(), PageId::base());
     const auto offset = header_offset() + NodeLayout::PARENT_ID_OFFSET;
     put_u32(*m_page, offset, parent_id.value);
 }
 
-auto NodeHeader::set_right_sibling_id(PID right_sibling_id) -> void
+auto NodeHeader::set_right_sibling_id(PageId right_sibling_id) -> void
 {
     CCO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
     put_u32(*m_page, offset, right_sibling_id.value);
 }
 
-auto NodeHeader::set_left_sibling_id(PID left_sibling_id) -> void
+auto NodeHeader::set_left_sibling_id(PageId left_sibling_id) -> void
 {
     CCO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset() + NodeLayout::LEFT_SIBLING_ID_OFFSET;
     put_u32(*m_page, offset, left_sibling_id.value);
 }
 
-auto NodeHeader::set_rightmost_child_id(PID rightmost_child_id) -> void
+auto NodeHeader::set_rightmost_child_id(PageId rightmost_child_id) -> void
 {
     CCO_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET;
@@ -334,22 +334,22 @@ auto BlockAllocator::free(Index ptr, Size size) -> void
     m_header->set_free_total(m_header->free_total() + size);
 }
 
-auto Node::parent_id() const -> PID
+auto Node::parent_id() const -> PageId
 {
     return m_header.parent_id();
 }
 
-auto Node::right_sibling_id() const -> PID
+auto Node::right_sibling_id() const -> PageId
 {
     return m_header.right_sibling_id();
 }
 
-auto Node::left_sibling_id() const -> PID
+auto Node::left_sibling_id() const -> PageId
 {
     return m_header.left_sibling_id();
 }
 
-auto Node::rightmost_child_id() const -> PID
+auto Node::rightmost_child_id() const -> PageId
 {
     return m_header.rightmost_child_id();
 }
@@ -359,17 +359,17 @@ auto Node::cell_count() const -> Size
     return m_header.cell_count();
 }
 
-auto Node::set_parent_id(PID parent_id) -> void
+auto Node::set_parent_id(PageId parent_id) -> void
 {
     m_header.set_parent_id(parent_id);
 }
 
-auto Node::set_right_sibling_id(PID right_sibling_id) -> void
+auto Node::set_right_sibling_id(PageId right_sibling_id) -> void
 {
     m_header.set_right_sibling_id(right_sibling_id);
 }
 
-auto Node::set_rightmost_child_id(PID rightmost_child_id) -> void
+auto Node::set_rightmost_child_id(PageId rightmost_child_id) -> void
 {
     m_header.set_rightmost_child_id(rightmost_child_id);
 }
@@ -384,7 +384,7 @@ auto Node::is_external() const -> bool
     return m_page.type() == PageType::EXTERNAL_NODE;
 }
 
-auto Node::child_id(Index index) const -> PID
+auto Node::child_id(Index index) const -> PageId
 {
     CCO_EXPECT_FALSE(is_external());
     CCO_EXPECT_LE(index, cell_count());
@@ -492,7 +492,7 @@ auto Node::is_overflowing() const -> bool
 
 auto Node::is_underflowing() const -> bool
 {
-    if (id().is_root())
+    if (id().is_base())
         return cell_count() == 0;
     return m_allocator.usable_space() > max_usable_space() / 2;
 }
@@ -515,7 +515,7 @@ auto Node::take_overflow_cell() -> Cell
     return cell;
 }
 
-auto Node::set_child_id(Index index, PID child_id) -> void
+auto Node::set_child_id(Index index, PageId child_id) -> void
 {
     CCO_EXPECT_FALSE(is_external());
     CCO_EXPECT_LE(index, cell_count());
@@ -564,6 +564,35 @@ auto Node::defragment(std::optional<Index> skipped_cid) -> void
     m_header.set_cell_start(end);
     m_allocator.reset();
 }
+
+//auto Node::defragment(std::optional<Index> skipped_cid) -> void
+//{
+//    const auto n = cell_count();
+//    const auto to_skip = skipped_cid ? *skipped_cid : n;
+//    auto end = m_page.size();
+//    std::vector<Size> ptrs(n);
+//
+//    // TODO: We're using scratch memory for this now. We only have one scratch buffer, shared among all nodes. This is okay right now
+//    //       since all tree operations happen in a single thread, so only one node can be defragmenting at any given time.
+//
+//    for (Index index {}; index < n; ++index) {
+//        if (index == to_skip)
+//            continue;
+//        const auto cell = read_cell(index);
+//        end -= cell.size();
+//        cell.write(m_scratch.range(end));
+//        ptrs.at(index) = end;
+//    }
+//    for (Index index {}; index < n; ++index) {
+//        if (index != to_skip)
+//            m_directory.set_pointer(index, {ptrs.at(index)});
+//    }
+//    const auto offset = cell_area_offset();
+//    m_page.write(m_scratch.range(offset, m_page.size() - offset), offset);
+//    m_header.set_cell_start(end);
+//    m_allocator.reset();
+//}
+
 
 auto Node::insert(Cell cell) -> void
 {
@@ -661,8 +690,8 @@ auto accumulate_occupied_space(const Node &Ln, const Node &rn)
     CCO_EXPECT_EQ(Ln.type(), rn.type());
     CCO_EXPECT_FALSE(Ln.is_overflowing());
     CCO_EXPECT_FALSE(rn.is_overflowing());
-    CCO_EXPECT_FALSE(Ln.id().is_root());
-    CCO_EXPECT_FALSE(rn.id().is_root());
+    CCO_EXPECT_FALSE(Ln.id().is_base());
+    CCO_EXPECT_FALSE(rn.id().is_base());
     Size total {};
 
     // Occupied space in each node, including the headers.
@@ -793,7 +822,7 @@ auto split_root(Node &root, Node &child) -> void
     root.reset(true);
     root.page().set_type(PageType::INTERNAL_NODE);
     root.set_rightmost_child_id(child.id());
-    child.set_parent_id(PID::root());
+    child.set_parent_id(PageId::base());
 }
 
 auto merge_root(Node &root, Node &child) -> void

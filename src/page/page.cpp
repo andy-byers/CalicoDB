@@ -35,9 +35,9 @@ auto Page::type() const -> PageType
     return PageType {get_u16(*this, header_offset() + PageLayout::TYPE_OFFSET)};
 }
 
-auto Page::lsn() const -> LSN
+auto Page::lsn() const -> SequenceNumber
 {
-    return LSN {get_u32(*this, header_offset() + PageLayout::LSN_OFFSET)};
+    return SequenceNumber {get_u32(*this, header_offset() + PageLayout::LSN_OFFSET)};
 }
 
 auto Page::set_type(PageType type) -> void
@@ -46,13 +46,13 @@ auto Page::set_type(PageType type) -> void
     put_u16(*this, offset, static_cast<uint16_t>(type));
 }
 
-auto Page::set_lsn(LSN lsn) -> void
+auto Page::set_lsn(SequenceNumber lsn) -> void
 {
     const auto offset = header_offset() + PageLayout::LSN_OFFSET;
     put_u32(*this, offset, lsn.value);
 }
 
-auto Page::id() const -> PID
+auto Page::id() const -> PageId
 {
     return m_id;
 }
@@ -96,7 +96,7 @@ auto Page::write(BytesView in, Index offset) -> void
     mem_copy(bytes(offset, in.size()), in);
 }
 
-auto Page::undo(LSN previous_lsn, const std::vector<ChangedRegion> &changes) -> void
+auto Page::undo(SequenceNumber previous_lsn, const std::vector<ChangedRegion> &changes) -> void
 {
     CCO_EXPECT_GE(lsn(), previous_lsn);
     for (const auto &region: changes)
@@ -106,7 +106,7 @@ auto Page::undo(LSN previous_lsn, const std::vector<ChangedRegion> &changes) -> 
     m_is_dirty = true;
 }
 
-auto Page::redo(LSN next_lsn, const std::vector<ChangedRegion> &changes) -> void
+auto Page::redo(SequenceNumber next_lsn, const std::vector<ChangedRegion> &changes) -> void
 {
     CCO_EXPECT_LT(lsn(), next_lsn);
     for (const auto &region: changes)
@@ -138,13 +138,13 @@ auto put_u32(Page &page, Index offset, uint32_t value) -> void
 
 auto get_file_header_reader(const Page &page) -> FileHeaderReader
 {
-    CCO_EXPECT_TRUE(page.id().is_root());
+    CCO_EXPECT_TRUE(page.id().is_base());
     return FileHeaderReader {page.view(FileLayout::header_offset(), FileLayout::HEADER_SIZE)};
 }
 
 auto get_file_header_writer(Page &page) -> FileHeaderWriter
 {
-    CCO_EXPECT_TRUE(page.id().is_root());
+    CCO_EXPECT_TRUE(page.id().is_base());
     return FileHeaderWriter {page.bytes(FileLayout::header_offset(), FileLayout::HEADER_SIZE)};
 }
 

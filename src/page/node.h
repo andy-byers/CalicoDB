@@ -8,10 +8,10 @@ namespace cco {
 
 class NodeHeader final {
 public:
-    [[nodiscard]] auto parent_id() const -> PID;
-    [[nodiscard]] auto right_sibling_id() const -> PID;
-    [[nodiscard]] auto rightmost_child_id() const -> PID;
-    [[nodiscard]] auto left_sibling_id() const -> PID;
+    [[nodiscard]] auto parent_id() const -> PageId;
+    [[nodiscard]] auto right_sibling_id() const -> PageId;
+    [[nodiscard]] auto rightmost_child_id() const -> PageId;
+    [[nodiscard]] auto left_sibling_id() const -> PageId;
     [[nodiscard]] auto reserved() const -> uint32_t;
     [[nodiscard]] auto cell_count() const -> Size;
     [[nodiscard]] auto cell_start() const -> Index;
@@ -19,10 +19,10 @@ public:
     [[nodiscard]] auto free_count() const -> Size;
     [[nodiscard]] auto free_start() const -> Index;
     [[nodiscard]] auto free_total() const -> Size;
-    auto set_parent_id(PID) -> void;
-    auto set_right_sibling_id(PID) -> void;
-    auto set_rightmost_child_id(PID) -> void;
-    auto set_left_sibling_id(PID) -> void;
+    auto set_parent_id(PageId) -> void;
+    auto set_right_sibling_id(PageId) -> void;
+    auto set_rightmost_child_id(PageId) -> void;
+    auto set_left_sibling_id(PageId) -> void;
     auto set_cell_count(Size) -> void;
     auto set_cell_start(Index) -> void;
     auto set_frag_count(Size) -> void;
@@ -109,11 +109,12 @@ public:
 
     ~Node() = default;
 
-    Node(Page page, bool reset_header)
+    Node(Page page, bool reset_header, Byte *scratch)
         : m_page {std::move(page)},
           m_header {m_page},
           m_directory {m_header},
-          m_allocator {m_header}
+          m_allocator {m_header},
+          m_scratch {Bytes {scratch, m_page.size()}}
     {
         reset(reset_header);
     }
@@ -123,7 +124,8 @@ public:
           m_header {NodeHeader {m_page}},
           m_directory {CellDirectory {m_header}},
           m_allocator {BlockAllocator {m_header}},
-          m_overflow {rhs.m_overflow}
+          m_overflow {rhs.m_overflow},
+          m_scratch {rhs.m_scratch}
     {}
 
     auto operator=(Node &&rhs) noexcept -> Node &
@@ -134,6 +136,7 @@ public:
             m_directory = CellDirectory {m_header};
             m_allocator = BlockAllocator {m_header};
             m_overflow = rhs.m_overflow;
+            m_scratch = rhs.m_scratch;
             rhs.m_overflow.reset();
         }
         return *this;
@@ -149,7 +152,7 @@ public:
         return m_header;
     }
 
-    [[nodiscard]] auto id() const -> PID
+    [[nodiscard]] auto id() const -> PageId
     {
         return m_page.id();
     }
@@ -197,20 +200,20 @@ public:
     [[nodiscard]] auto is_overflowing() const -> bool;
     [[nodiscard]] auto is_underflowing() const -> bool;
     [[nodiscard]] auto is_external() const -> bool;
-    [[nodiscard]] auto child_id(Index) const -> PID;
-    [[nodiscard]] auto parent_id() const -> PID;
-    [[nodiscard]] auto right_sibling_id() const -> PID;
-    [[nodiscard]] auto left_sibling_id() const -> PID;
-    [[nodiscard]] auto rightmost_child_id() const -> PID;
+    [[nodiscard]] auto child_id(Index) const -> PageId;
+    [[nodiscard]] auto parent_id() const -> PageId;
+    [[nodiscard]] auto right_sibling_id() const -> PageId;
+    [[nodiscard]] auto left_sibling_id() const -> PageId;
+    [[nodiscard]] auto rightmost_child_id() const -> PageId;
     [[nodiscard]] auto cell_count() const -> Size;
-    auto set_parent_id(PID) -> void;
-    auto set_right_sibling_id(PID) -> void;
-    auto set_left_sibling_id(PID id) -> void
+    auto set_parent_id(PageId) -> void;
+    auto set_right_sibling_id(PageId) -> void;
+    auto set_left_sibling_id(PageId id) -> void
     {
         return m_header.set_left_sibling_id(id);
     }
-    auto set_rightmost_child_id(PID) -> void;
-    auto set_child_id(Index, PID) -> void;
+    auto set_rightmost_child_id(PageId) -> void;
+    auto set_child_id(Index, PageId) -> void;
 
     [[nodiscard]] auto usable_space() const -> Size;
     [[nodiscard]] auto max_usable_space() const -> Size;
@@ -229,6 +232,7 @@ private:
     CellDirectory m_directory;
     BlockAllocator m_allocator;
     std::optional<Cell> m_overflow {};
+    Bytes m_scratch;
 };
 
 [[nodiscard]] auto can_merge_siblings(const Node &, const Node &, const Cell &) -> bool;

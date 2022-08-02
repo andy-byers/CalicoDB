@@ -87,12 +87,12 @@ auto WALPayload::decode() const -> PageUpdate
     return update;
 }
 
-auto WALRecord::commit(LSN commit_lsn) -> WALRecord
+auto WALRecord::commit(SequenceNumber commit_lsn) -> WALRecord
 {
     return WALRecord {{
         {},
-        PID::null(),
-        LSN::null(),
+        PageId::null(),
+        SequenceNumber::null(),
         commit_lsn,
     }};
 }

@@ -12,7 +12,7 @@ namespace cco {
 static auto find_minimum(ITree &tree) -> Node
 {
     auto &pool = tree.pool();
-    auto node = *pool.acquire(PID::root(), false);
+    auto node = *pool.acquire(PageId::base(), false);
     while (!node.is_external()) {
         const auto id = node.child_id(0);
         CCO_EXPECT_TRUE(pool.release(std::move(node)).has_value());
@@ -48,7 +48,7 @@ static auto traverse_inorder_helper(NodePool &pool, Node node, const std::functi
 
 static auto traverse_inorder(NodePool &pool, const std::function<void(Node&, Index)> &callback) -> void
 {
-    traverse_inorder_helper(pool, *pool.acquire(PID::root(), false), callback);
+    traverse_inorder_helper(pool, *pool.acquire(PageId::base(), false), callback);
 }
 
 auto print_keys(ITree &tree) -> void

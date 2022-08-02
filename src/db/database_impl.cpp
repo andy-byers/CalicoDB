@@ -101,11 +101,19 @@ auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) ->
         header.set_page_size(state.page_size());
         CCO_TRY(impl->m_pool->release(root.take()));
         CCO_TRY(impl->commit());
+        CCO_TRY(impl->m_pool->flush());
     } else {
         CCO_TRY(impl->load_header());
         // This is a no-op if the WAL is empty.
-        if (revised.use_xact)
+        if (revised.use_xact) {
             CCO_TRY(impl->m_pool->recover());
+
+            CCO_TRY_CREATE(root, impl->m_pool->acquire(PageId::base(), false));
+            auto header = get_file_header_reader(root);
+            impl->m_pool->load_header(header);
+            impl->m_tree->load_header(header);
+            CCO_TRY(impl->m_pool->release(std::move(root)));
+        }
     }
     return impl;
 }
@@ -117,7 +125,7 @@ auto Database::Impl::open(Parameters param) -> Result<std::unique_ptr<Impl>>
     impl->m_sink = create_sink();                       // Creates a spdlog::sinks::null_sink.
     impl->m_logger = create_logger(impl->m_sink, "db"); // Do-nothing logger.
     impl->m_pool = std::make_unique<MemoryPool>(page_size, param.options.use_xact);
-    impl->m_tree = Tree::open({impl->m_pool.get(), impl->m_sink, PID::null(), 0, 0, 0}).value();
+    impl->m_tree = Tree::open({impl->m_pool.get(), impl->m_sink, PageId::null(), 0, 0, 0}).value();
     impl->m_is_temp = true;
     CCO_TRY_CREATE(root, impl->m_tree->allocate_root());
     auto header = get_file_header_writer(root);
@@ -131,7 +139,7 @@ auto Database::Impl::open(Parameters param) -> Result<std::unique_ptr<Impl>>
 Database::Impl::~Impl()
 {
     // The specific error has already been logged in close().
-    if (!m_is_temp && m_home->is_open() && !close().has_value())
+    if (m_home && m_home->is_open() && !close().has_value())
         m_logger->error("failed to close in destructor");
 }
 
@@ -236,6 +244,13 @@ auto Database::Impl::close() -> Result<void>
         m_logger->error("cannot commit before close");
         m_logger->error("(reason) {}", cr.error().what());
     }
+
+    const auto fr = m_pool->flush();
+    if (!fr.has_value() && !fr.error().is_logic_error()) {
+        m_logger->error("cannot flush buffer pool before close");
+        m_logger->error("(reason) {}", fr.error().what());
+    }
+
     const auto pr = m_pool->close();
     if (!pr.has_value()) {
         m_logger->error("cannot close buffer pool");
@@ -251,7 +266,7 @@ auto Database::Impl::close() -> Result<void>
             return hr;
         }
     }
-    return !cr.has_value() ? cr : pr;
+    return !fr ? fr : (!cr ? cr : pr);
 }
 
 auto Database::Impl::save_header() -> Result<void>
@@ -361,7 +376,7 @@ auto setup(IDirectory &directory, const Options &options, spdlog::logger &logger
     } else {
         writer.update_magic_code();
         writer.set_page_size(options.page_size);
-        writer.set_flushed_lsn(LSN::base());
+        writer.set_flushed_lsn(SequenceNumber::base());
         writer.update_header_crc();
     }
 

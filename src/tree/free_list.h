@@ -25,7 +25,7 @@ public:
      */
     struct Parameters {
         IBufferPool *buffer_pool {}; ///< Reference to the underlying buffer pool.
-        PID free_start {};           ///< Page ID of the page at the top of the free list stack.
+        PageId free_start {};           ///< Page ID of the page at the top of the free list stack.
         Size free_count {};          ///< Number of pages in the free list stack.
     };
 
@@ -78,7 +78,7 @@ public:
 
 private:
     IBufferPool *m_pool;  ///< Reference to the underlying buffer pool.
-    PID m_free_start;     ///< Page ID of the page at the top of the free list stack.
+    PageId m_free_start;     ///< Page ID of the page at the top of the free list stack.
     Size m_free_count {}; ///< Number of pages in the free list stack.
 };
 

@@ -35,10 +35,12 @@ public:
     WALReaderWriterTests()
     {
         home = std::make_unique<FakeDirectory>("WALReaderWriterTests");
-        reader = WALReader::open({nullptr, *home, create_sink(), PAGE_SIZE, LSN::null()}).value();
-        writer = WALWriter::open({nullptr, *home, create_sink(), PAGE_SIZE, LSN::null()}).value();
-        backing = home->get_shared("wal");
-        faults = home->get_faults("wal");
+        reader = WALReader::create({nullptr, *home, create_sink(), PAGE_SIZE, SequenceNumber::null()}).value();
+        writer = WALWriter::create({nullptr, *home, create_sink(), PAGE_SIZE, SequenceNumber::null()}).value();
+        CCO_EXPECT_TRUE(writer->open(*home->open_file("wal-0", Mode::WRITE_ONLY | Mode::CREATE | Mode::APPEND, DEFAULT_PERMISSIONS)).has_value());
+        CCO_EXPECT_TRUE(reader->open(*home->open_file("wal-0", Mode::READ_ONLY, DEFAULT_PERMISSIONS)).has_value());
+        backing = home->get_shared("wal-0");
+        faults = home->get_faults("wal-0");
     }
 
     ~WALReaderWriterTests() override = default;
@@ -146,7 +148,7 @@ TEST_F(WALReaderWriterTests, WritesRecordCorrectly)
     const auto &memory = backing.memory();
     WALRecord record;
     ASSERT_TRUE(record.read(stob(memory)));
-    generator.validate_record(record, LSN::base());
+    generator.validate_record(record, SequenceNumber::base());
 }
 
 TEST_F(WALReaderWriterTests, FlushedLSNReflectsLastFullRecord)
@@ -157,7 +159,7 @@ TEST_F(WALReaderWriterTests, FlushedLSNReflectsLastFullRecord)
     // Writing this record should cause a flush after the FIRST part is written. The last record we wrote should
     // then be on disk, and the LAST part of the current record should be in the tail buffer.
     ASSERT_TRUE(writer->append(generator.generate(PAGE_SIZE / 2 * 3, 1)));
-    auto lsn = LSN::base();
+    auto lsn = SequenceNumber::base();
     ASSERT_EQ(writer->flushed_lsn(), lsn++);
     ASSERT_TRUE(writer->flush());
     ASSERT_EQ(writer->flushed_lsn(), lsn);
@@ -189,7 +191,7 @@ TEST_F(WALReaderWriterTests, FlushedLSNReflectsLastFullRecord)
 auto test_writes_then_reads(WALReaderWriterTests &test, const std::vector<Size> &sizes) -> void
 {
     WALRecordGenerator generator {WALReaderWriterTests::PAGE_SIZE};
-    std::vector<IWALManager::Position> positions;
+    std::vector<WALRecordPosition> positions;
     positions.reserve(sizes.size());
 
     for (auto size: sizes) {
@@ -199,11 +201,11 @@ auto test_writes_then_reads(WALReaderWriterTests &test, const std::vector<Size> 
     }
     ASSERT_TRUE(test.writer->flush());
 
-    auto lsn = LSN::base();
+    auto lsn = SequenceNumber::base();
     for (auto position: positions) {
         auto record = test.reader->read(position);
         ASSERT_TRUE(record.has_value());
-        generator.validate_record(*record, LSN {lsn.value++});
+        generator.validate_record(*record, SequenceNumber {lsn.value++});
     }
 }
 
@@ -237,11 +239,11 @@ TEST_F(WALReaderWriterTests, ExplorerStopsAtLastRecord)
     ASSERT_TRUE(writer->flush());
 
     auto next = explorer.read_next().value();
-    generator.validate_record(next.record, LSN {1});
+    generator.validate_record(next.record, SequenceNumber {1});
     next = explorer.read_next().value();
-    generator.validate_record(next.record, LSN {2});
+    generator.validate_record(next.record, SequenceNumber {2});
     next = explorer.read_next().value();
-    generator.validate_record(next.record, LSN {3});
+    generator.validate_record(next.record, SequenceNumber {3});
     ASSERT_TRUE(explorer.read_next().error().is_not_found());
 }
 
@@ -264,22 +266,22 @@ TEST_F(WALReaderWriterTests, ExploresIncompleteBlocks)
     WALExplorer explorer {*reader};
     auto next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, LSN {1});
+    generator.validate_record(next->record, SequenceNumber {1});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, LSN {2});
+    generator.validate_record(next->record, SequenceNumber {2});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, LSN {3});
+    generator.validate_record(next->record, SequenceNumber {3});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, LSN {4});
+    generator.validate_record(next->record, SequenceNumber {4});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, LSN {5});
+    generator.validate_record(next->record, SequenceNumber {5});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, LSN {6});
+    generator.validate_record(next->record, SequenceNumber {6});
     ASSERT_FALSE(explorer.read_next());
 }
 
@@ -308,7 +310,7 @@ auto test_write_records_and_explore(Test &test, Size num_records, double large_f
         auto next = explorer.read_next();
         ASSERT_TRUE(next) << "record " << i << " does not exist";
         ASSERT_TRUE(next->record.is_consistent()) << "record " << i << " is corrupted";
-        generator.validate_record(next->record, LSN {i + ROOT_ID_VALUE});
+        generator.validate_record(next->record, SequenceNumber {i + ROOT_ID_VALUE});
     }
     ASSERT_FALSE(explorer.read_next());
 }
@@ -354,8 +356,10 @@ public:
         std::filesystem::remove_all(BASE_PATH, ignore);
 
         directory = Directory::open(BASE_PATH).value();
-        writer = WALWriter::open({nullptr, *directory, create_sink(), PAGE_SIZE, LSN::base()}).value();
-        reader = WALReader::open({nullptr, *directory, create_sink(), PAGE_SIZE, LSN::base()}).value();
+        writer = WALWriter::create({nullptr, *directory, create_sink(), PAGE_SIZE, SequenceNumber::base()}).value();
+        reader = WALReader::create({nullptr, *directory, create_sink(), PAGE_SIZE, SequenceNumber::base()}).value();
+        CCO_EXPECT_TRUE(writer->open(*directory->open_file("wal-0", Mode::WRITE_ONLY | Mode::CREATE | Mode::APPEND, DEFAULT_PERMISSIONS)).has_value());
+        CCO_EXPECT_TRUE(reader->open(*directory->open_file("wal-0", Mode::READ_ONLY, DEFAULT_PERMISSIONS)).has_value());
     }
 
     ~RealWALReaderWriterTests() override = default;
@@ -404,12 +408,15 @@ public:
     WALTests()
     {
         auto temp = std::make_unique<FakeDirectory>("WALReaderWriterTests");
-        pool = BufferPool::open({*temp, create_sink(), LSN::null(), 16, 0, PAGE_SIZE, 0666, true}).value();
-        wal_backing = temp->get_shared("wal");
-        wal_faults = temp->get_faults("wal");
+        pool = BufferPool::open({*temp, create_sink(), SequenceNumber::null(), 16, 0, PAGE_SIZE, 0666, true}).value();
         data_backing = temp->get_shared("data");
         data_faults = temp->get_faults("data");
         home = std::move(temp);
+    }
+
+    auto fake_home() -> FakeDirectory&
+    {
+        return *dynamic_cast<FakeDirectory*>(home.get());
     }
 
     auto allocate_page() -> Page
@@ -452,9 +459,7 @@ public:
         ASSERT_TRUE(stob(pages_after.at(page.id().as_index())).range(start) == page.view(start));
     }
 
-    SharedMemory wal_backing;
     SharedMemory data_backing;
-    FaultControls wal_faults;
     FaultControls data_faults;
     std::unique_ptr<IDirectory> home;
     std::unique_ptr<IBufferPool> pool;
@@ -480,7 +485,7 @@ TEST_F(WALTests, UpdatesAreRegistered)
     alter_page(page);
     ASSERT_TRUE(pool->release(std::move(page)));
     ASSERT_TRUE(pool->can_commit());
-    page = pool->acquire(PID::root(), false).value();
+    page = pool->acquire(PageId::base(), false).value();
     assert_page_is_same_as_after(page);
 }
 
@@ -490,7 +495,7 @@ TEST_F(WALTests, AbortRollsBackUpdates)
     alter_page(page);
     ASSERT_TRUE(pool->release(std::move(page)));
     ASSERT_TRUE(pool->abort());
-    page = pool->acquire(PID::root(), false).value();
+    page = pool->acquire(PageId::base(), false).value();
     assert_page_is_same_as_before(page);
 }
 
@@ -500,40 +505,50 @@ TEST_F(WALTests, CommitIsACheckpoint)
     alter_page(page);
     ASSERT_TRUE(pool->release(std::move(page)));
     ASSERT_TRUE(pool->commit());
-    ASSERT_FALSE(pool->abort());
-    page = pool->acquire(PID::root(), false).value();
+    auto r = pool->abort();
+    ASSERT_FALSE(r) << "abort() should have failed";
+    ASSERT_TRUE(r.error().is_logic_error());
+    page = pool->acquire(PageId::base(), false).value();
     assert_page_is_same_as_after(page);
 }
 
 TEST_F(WALTests, AbortSanityCheck)
 {
-    for (Index i {}; i < 100; ++i) {
+    static constexpr Size num_iterations {500};
+    static constexpr auto commit_interval = num_iterations / 10;
+
+    // First, create some successful commits.
+    for (Index i {}; i < num_iterations; ++i) {
+        auto page = allocate_page();
+        alter_page(page);
+        ASSERT_TRUE(pool->release(std::move(page)));
+        if (i && i % commit_interval == 0) {
+            ASSERT_TRUE(pool->commit());
+        }
+    }
+    ASSERT_TRUE(pool->commit());
+
+    // Only this transaction should be undone.
+    for (Index i {}; i < num_iterations; ++i) {
         auto page = allocate_page();
         alter_page(page);
         ASSERT_TRUE(pool->release(std::move(page)));
     }
-     ASSERT_TRUE(pool->abort());
-    for (Index i {}; i < 100; ++i) {
-        auto page = pool->acquire(PID::from_index(i), false).value();
+    ASSERT_TRUE(pool->abort());
+    Index i {};
+
+    // These modifications should persist.
+    for (; i < num_iterations; ++i) {
+        auto page = pool->acquire(PageId::from_index(i), false).value();
+        assert_page_is_same_as_after(page);
+    }
+
+    // Only these modifications should be undone.
+    for (; i < 2 * num_iterations; ++i) {
+        auto page = pool->acquire(PageId::from_index(i), false).value();
         assert_page_is_same_as_before(page);
     }
 }
-
-TEST_F(WALTests, CommitSanityCheck)
-{
-    for (Index i {}; i < 100; ++i) {
-        auto page = allocate_page();
-        alter_page(page);
-        ASSERT_TRUE(pool->release(std::move(page)));
-    }
-    ASSERT_TRUE(pool->commit());
-    ASSERT_FALSE(pool->abort());
-    for (Index i {}; i < 100; ++i) {
-        auto page = pool->acquire(PID::from_index(i), false).value();
-        assert_page_is_same_as_after(page);
-    }
-}
-
 
 class MockWALTests: public WALTests {
 public:
@@ -544,26 +559,24 @@ public:
     MockWALTests()
     {
         home = std::make_unique<MockDirectory>("WALReaderWriterTests");
-        home_mock = dynamic_cast<MockDirectory*>(home.get());
+        mock = dynamic_cast<MockDirectory*>(home.get());
     }
 
     auto setup(bool use_xact) -> void
     {
-        EXPECT_CALL(*home_mock, open_file)
-            .Times(2*use_xact + 1);
+        EXPECT_CALL(*mock, open_file)
+            .Times(testing::AtLeast(use_xact + 1));
+        EXPECT_CALL(*mock, remove_file)
+            .Times(testing::AtLeast(0));
+        EXPECT_CALL(*mock, children)
+            .Times(use_xact);
 
-        pool = BufferPool::open({*home, create_sink(), LSN::null(), 16, 0, PAGE_SIZE, 0666, use_xact}).value();
-        data_mock = home_mock->get_mock_file("data", Mode::CREATE | Mode::READ_WRITE);
-        if (use_xact) {
-            rwal_mock = home_mock->get_mock_file("wal", Mode::CREATE | Mode::READ_ONLY);
-            wwal_mock = home_mock->get_mock_file("wal", Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND);
-        }
+        pool = BufferPool::open({*home, create_sink(), SequenceNumber::null(), 16, 0, PAGE_SIZE, 0666, use_xact}).value();
+        data = mock->get_mock_data_file();
     }
 
-    MockDirectory *home_mock {};
-    MockFile *rwal_mock {};
-    MockFile *wwal_mock {};
-    MockFile *data_mock {};
+    MockFile *data {};
+    MockDirectory *mock {};
 };
 
 auto run_close_error_test(MockWALTests &test, MockFile &mock)
@@ -578,52 +591,46 @@ auto run_close_error_test(MockWALTests &test, MockFile &mock)
     ASSERT_EQ(r.error().what(), "123");
 }
 
-TEST_F(MockWALTests, asdfgh)
-{
-    setup(true);
-
-}
-
 TEST_F(MockWALTests, DataFileCloseErrorIsPropagated)
 {
     setup(true);
-    run_close_error_test(*this, *data_mock);
+    run_close_error_test(*this, *data);
 }
 
-TEST_F(MockWALTests, WALReaderFileCloseErrorIsPropagated)
-{
-    setup(true);
-    run_close_error_test(*this, *rwal_mock);
-}
-
-TEST_F(MockWALTests, WALWriterFileCloseErrorIsPropagated)
-{
-    setup(true);
-    run_close_error_test(*this, *wwal_mock);
-}
-
-TEST_F(MockWALTests, CannotCommitEmptyTransaction)
-{
-    setup(true);
-    ASSERT_TRUE(pool->commit().error().is_logic_error());
-}
-
-TEST_F(MockWALTests, CannotAbortEmptyTransaction)
-{
-    setup(true);
-    ASSERT_TRUE(pool->abort().error().is_logic_error());
-}
+//TEST_F(MockWALTests, WALReaderFileCloseErrorIsPropagated)
+//{
+//    setup(true);
+//    run_close_error_test(*this, *rwal_mock);
+//}
+//
+//TEST_F(MockWALTests, WALWriterFileCloseErrorIsPropagated)
+//{
+//    setup(true);
+//    run_close_error_test(*this, *wwal_mock);
+//}
+//
+//TEST_F(MockWALTests, CannotCommitEmptyTransaction)
+//{
+//    setup(true);
+//    ASSERT_TRUE(pool->commit().error().is_logic_error());
+//}
+//
+//TEST_F(MockWALTests, CannotAbortEmptyTransaction)
+//{
+//    setup(true);
+//    ASSERT_TRUE(pool->abort().error().is_logic_error());
+//}
 
 TEST_F(MockWALTests, SystemErrorIsPropagated)
 {
     using testing::_;
     setup(true);
 
-    ON_CALL(*data_mock, write(_, _))
+    ON_CALL(*data, write(_, _))
         .WillByDefault(testing::Return(Err {Status::system_error("123")}));
 
     // We should never call read() during page allocation. We would hit EOF anyway.
-    EXPECT_CALL(*data_mock, read(_, _))
+    EXPECT_CALL(*data, read(_, _))
         .Times(0);
 
     for (; ; ) {
@@ -631,7 +638,7 @@ TEST_F(MockWALTests, SystemErrorIsPropagated)
         if (!p.has_value())
             break;
         p->set_type(PageType::INTERNAL_NODE);
-        p->set_lsn(LSN {123});
+        p->set_lsn(SequenceNumber {123});
         auto r = pool->release(std::move(*p));
         if (!r.has_value())
             break;

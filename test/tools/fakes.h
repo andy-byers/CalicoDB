@@ -114,7 +114,7 @@ public:
     [[nodiscard]] auto name() const -> std::string override;
     [[nodiscard]] auto children() const -> Result<std::vector<std::string>> override;
     [[nodiscard]] auto open_file(const std::string&, Mode, int) -> Result<std::unique_ptr<IFile>> override;
-    [[nodiscard]] auto remove() -> Result<void> override;
+    [[nodiscard]] auto remove_file(const std::string &) -> Result<void> override;
     [[nodiscard]] auto sync() -> Result<void> override;
     [[nodiscard]] auto close() -> Result<void> override;
 
@@ -132,6 +132,10 @@ public:
 
     [[nodiscard]] auto get_shared(const std::string &name) -> SharedMemory
     {
+        // TODO: Hacky. Only works because the latest WAL segment has the greatest name, lexicographically.
+        if (name == "wal-latest")
+            return prev(end(m_shared))->second;
+
         auto itr = m_shared.find(name);
         CCO_EXPECT_NE(itr, end(m_shared));
         return itr->second;
@@ -139,14 +143,18 @@ public:
 
     [[nodiscard]] auto get_faults(const std::string &name) -> FaultControls
     {
+        // TODO: Hacky. Only works because the latest WAL segment has the greatest name, lexicographically.
+        if (name == "wal-latest")
+            return prev(end(m_faults))->second;
+
         auto itr = m_faults.find(name);
         CCO_EXPECT_NE(itr, end(m_faults));
         return itr->second;
     }
 
 private:
-    std::unordered_map<std::string, SharedMemory> m_shared;
-    std::unordered_map<std::string, FaultControls> m_faults;
+    std::map<std::string, SharedMemory> m_shared;
+    std::map<std::string, FaultControls> m_faults;
     std::filesystem::path m_path;
     bool m_is_open {true};
 };
@@ -155,13 +163,13 @@ class FakeFile : public IFile {
 public:
     ~FakeFile() override = default;
 
-    explicit FakeFile(const std::string &path):
-          m_path {path} {}
+    explicit FakeFile(const std::string &name):
+          m_name {name} {}
 
-    FakeFile(const std::string &path, SharedMemory memory, FaultControls faults):
+    FakeFile(const std::string &name, SharedMemory memory, FaultControls faults):
           m_faults {std::move(faults)},
           m_memory {std::move(memory)},
-          m_path {path} {}
+          m_name {name} {}
 
     [[nodiscard]] auto is_open() const -> bool override
     {
@@ -173,24 +181,14 @@ public:
         return {}; // TODO: Store mode and return here.
     }
 
-    [[nodiscard]] auto permissions() const -> int override
-    {
-        return m_permissions;
-    }
-
     [[nodiscard]] auto file() const -> int override
     {
         return -1;
     }
 
-    [[nodiscard]] auto path() const -> std::string override
-    {
-        return m_path;
-    }
-
     [[nodiscard]] auto name() const -> std::string override
     {
-        return m_path.filename();
+        return m_name;
     }
 
     [[nodiscard]] auto faults() -> FaultControls
@@ -233,31 +231,19 @@ public:
         return m_memory.memory().size();
     }
 
-    [[nodiscard]] auto open(const std::string &path, Mode mode, int permissions) -> Result<void> override
+    [[nodiscard]] static auto open(const std::string &path, Mode mode, int permissions) -> Result<std::unique_ptr<IFile>>
     {
-        m_is_open = true;
-        m_path = path;
-        m_permissions = permissions;
-        m_mode = mode;
-        m_is_append = int(mode) & int(Mode::APPEND);
-        return {};
+        auto file = std::make_unique<FakeFile>(path);
+        file->m_is_open = true;
+        file->m_permissions = permissions;
+        file->m_mode = mode;
+        file->m_is_append = int(mode) & int(Mode::APPEND);
+        return file;
     }
 
     [[nodiscard]] auto close() -> Result<void> override
     {
         m_is_open = false;
-        return {};
-    }
-
-    // TODO: Shared memory filename?
-    [[nodiscard]] auto rename(const std::string&) -> Result<void> override
-    {
-        return {};
-    }
-
-    [[nodiscard]] auto remove() -> Result<void> override
-    {
-        m_path.clear();
         return {};
     }
 
@@ -273,12 +259,12 @@ private:
     FaultControls m_faults;
     SharedMemory m_memory;
     Random m_random;
-    std::filesystem::path m_path;
+    std::string m_name;
     Index m_cursor {};
     int m_permissions {};
     Mode m_mode {};
     bool m_is_append {};
-    bool m_is_open {};
+    bool m_is_open {true};
 };
 
 class MockDirectory: public IDirectory {
@@ -308,7 +294,7 @@ public:
 
     MOCK_METHOD(Result<std::vector<std::string>>, children, (), (const, override));
     MOCK_METHOD(Result<std::unique_ptr<IFile>>, open_file, (const std::string&, Mode, int), (override));
-    MOCK_METHOD(Result<void>, remove, (), (override));
+    MOCK_METHOD(Result<void>, remove_file, (const std::string &), (override));
     MOCK_METHOD(Result<void>, sync, (), (override));
     MOCK_METHOD(Result<void>, close, (), (override));
     MOCK_METHOD(Result<bool>, exists, (const std::string&), (const, override));
@@ -321,8 +307,12 @@ public:
         ON_CALL(*this, open_file).WillByDefault([this](const std::string &name, Mode mode, int permissions) {
             return open_and_register_mock_file(name, mode, permissions);
         });
-        ON_CALL(*this, remove).WillByDefault([this] {
-            return m_fake.remove();
+        ON_CALL(*this, remove_file).WillByDefault([this](const std::string &name) {
+            if (stob(name).starts_with(stob("wal"))) {
+                unregister_mock_wal_file(name, true);
+                unregister_mock_wal_file(name, false);
+            }
+            return m_fake.remove_file(name);
         });
         ON_CALL(*this, sync).WillByDefault([this] {
             return m_fake.sync();
@@ -340,10 +330,26 @@ public:
         return m_fake;
     }
 
-    [[nodiscard]] auto get_mock_file(const std::string &name, Mode mode) -> MockFile*
+    [[nodiscard]] auto get_mock_data_file() -> MockFile*
     {
-        auto itr = m_files.find(mock_name(name, mode));
-        CCO_EXPECT_NE(itr, end(m_files));
+        return m_data_file;
+    }
+
+    [[nodiscard]] auto get_mock_wal_reader_file(const std::string &name) -> MockFile*
+    {
+        if (name == "latest")
+            return prev(end(m_wal_reader_files))->second;
+        auto itr = m_wal_reader_files.find(name);
+        CCO_EXPECT_NE(itr, end(m_wal_reader_files));
+        return itr->second;
+    }
+
+    [[nodiscard]] auto get_mock_wal_writer_file(const std::string &name) -> MockFile*
+    {
+        if (name == "latest")
+            return prev(end(m_wal_writer_files))->second;
+        auto itr = m_wal_writer_files.find(name);
+        CCO_EXPECT_NE(itr, end(m_wal_reader_files));
         return itr->second;
     }
 
@@ -354,13 +360,16 @@ private:
     }
     [[nodiscard]] auto open_and_register_mock_file(const std::string&, Mode, int) -> std::unique_ptr<IFile>;
 
-    auto unregister_mock_file(const std::string &name)
+    auto unregister_mock_wal_file(const std::string &name, bool is_writer) -> void
     {
-        [[maybe_unused]] const auto num_erased = m_files.erase(name);
-        CCO_EXPECT_EQ(num_erased, 1);
+        is_writer
+            ? m_wal_writer_files.erase(name)
+            : m_wal_reader_files.erase(name);
     }
 
-    std::unordered_map<std::string, MockFile*> m_files;
+    MockFile* m_data_file;
+    std::map<std::string, MockFile*> m_wal_reader_files;
+    std::map<std::string, MockFile*> m_wal_writer_files;
     FakeDirectory m_fake;
 };
 
@@ -381,16 +390,6 @@ public:
         return m_file->mode();
     }
 
-    [[nodiscard]] auto permissions() const -> int override
-    {
-        return m_file->permissions();
-    }
-
-    [[nodiscard]] auto path() const -> std::string override
-    {
-        return m_file->path();
-    }
-
     [[nodiscard]] auto name() const -> std::string override
     {
         return m_file->name();
@@ -402,10 +401,7 @@ public:
     }
 
     MOCK_METHOD(Result<Size>, size, (), (const, override));
-    MOCK_METHOD(Result<void>, open, (const std::string&, Mode, int), (override));
     MOCK_METHOD(Result<void>, close, (), (override));
-    MOCK_METHOD(Result<void>, rename, (const std::string&), (override));
-    MOCK_METHOD(Result<void>, remove, (), (override));
     MOCK_METHOD(Result<Index>, seek, (long, Seek), (override));
     MOCK_METHOD(Result<Size>, read, (Bytes), (override));
     MOCK_METHOD(Result<Size>, read, (Bytes, Index), (override));
@@ -421,17 +417,8 @@ public:
         ON_CALL(*this, size).WillByDefault([this] {
             return m_file->size();
         });
-        ON_CALL(*this, open).WillByDefault([this](const std::string &name, Mode mode, int permissions) {
-            return m_file->open(name, mode, permissions);
-        });
         ON_CALL(*this, close).WillByDefault([this] {
             return m_file->close();
-        });
-        ON_CALL(*this, rename).WillByDefault([this](const std::string &name) {
-            return m_file->rename(name);
-        });
-        ON_CALL(*this, remove).WillByDefault([this] {
-            return m_file->remove();
         });
         ON_CALL(*this, seek).WillByDefault([this](long offset, Seek whence) {
             return m_file->seek(offset, whence);

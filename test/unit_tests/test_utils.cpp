@@ -247,12 +247,12 @@ template<class Id> auto run_comparisons()
 
 TEST(IdentifierTest, PIDsAreComparable)
 {
-    run_comparisons<PID>();
+    run_comparisons<PageId>();
 }
 
 TEST(IdentifierTest, LSNsAreComparable)
 {
-    run_comparisons<LSN>();
+    run_comparisons<SequenceNumber>();
 }
 
 template<class Id> auto run_addition()
@@ -263,17 +263,17 @@ template<class Id> auto run_addition()
 
 TEST(IdentifierTest, PIDsCanBeAdded)
 {
-    run_comparisons<PID>();
+    run_comparisons<PageId>();
 }
 
 TEST(IdentifierTest, LSNsCanBeAdded)
 {
-    run_comparisons<LSN>();
+    run_comparisons<SequenceNumber>();
 }
 
 TEST(IdentifierTest, LSNsCanBeIncremented)
 {
-    LSN lsn {0};
+    SequenceNumber lsn {0};
     ASSERT_EQ(lsn.value, 0);
     lsn++;
     ASSERT_EQ(lsn.value, 1);
@@ -293,7 +293,7 @@ TEST(TestUniqueNullable, ResourceIsMoved)
 
 TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 {
-    const auto start = NodeLayout::header_offset(PID {2}) +
+    const auto start = NodeLayout::header_offset(PageId {2}) +
                        NodeLayout::HEADER_SIZE +
                        CELL_POINTER_SIZE;
     Size page_size {MINIMUM_PAGE_SIZE};

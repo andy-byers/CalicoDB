@@ -16,7 +16,7 @@ public:
     struct Parameters {
         IBufferPool *buffer_pool {};
         spdlog::sink_ptr log_sink;
-        PID free_start {};
+        PageId free_start {};
         Size free_count {};
         Size cell_count {};
         Size node_count {};
@@ -65,7 +65,7 @@ public:
     auto find(BytesView key) -> Cursor override;
     auto find_minimum() -> Cursor override;
     auto find_maximum() -> Cursor override;
-    auto TEST_validate_node(PID) -> void override;
+    auto TEST_validate_node(PageId) -> void override;
 
 private:
     struct SearchResult {

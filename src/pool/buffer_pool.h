@@ -22,7 +22,7 @@ public:
     struct Parameters {
         IDirectory &directory;
         spdlog::sink_ptr log_sink;
-        LSN flushed_lsn;
+        SequenceNumber flushed_lsn;
         Size frame_count {};
         Size page_count {};
         Size page_size {};
@@ -58,12 +58,12 @@ public:
     {
         m_status = Status::ok();
     }
-
+    [[nodiscard]] auto flushed_lsn() const -> SequenceNumber override;
     [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto can_commit() const -> bool override;
     [[nodiscard]] auto allocate() -> Result<Page> override;
-    [[nodiscard]] auto fetch(PID, bool) -> Result<Page> override;
-    [[nodiscard]] auto acquire(PID, bool) -> Result<Page> override;
+    [[nodiscard]] auto fetch(PageId, bool) -> Result<Page> override;
+    [[nodiscard]] auto acquire(PageId, bool) -> Result<Page> override;
     [[nodiscard]] auto release(Page) -> Result<void> override;
     [[nodiscard]] auto recover() -> Result<void> override;
     [[nodiscard]] auto flush() -> Result<void> override;
@@ -76,7 +76,7 @@ public:
 
 private:
     explicit BufferPool(const Parameters &);
-    [[nodiscard]] auto pin_frame(PID) -> Result<void>;
+    [[nodiscard]] auto pin_frame(PageId) -> Result<void>;
     [[nodiscard]] auto try_evict_frame() -> Result<bool>;
     [[nodiscard]] auto do_release(Page &) -> Result<void>;
     [[nodiscard]] auto has_updates() const -> bool;

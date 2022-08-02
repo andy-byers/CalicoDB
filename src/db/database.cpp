@@ -59,22 +59,23 @@ auto Database::open() -> Status
 
 auto Database::close() -> Status
 {
-    auto impl = std::move(m_impl);
-    CCO_EXPECT_EQ(m_options.path, impl->path());
-    DB_TRY(impl->close());
-    return Status::ok();
+    auto r = m_impl->close();
+    m_impl.reset();
+    return r ? Status::ok() : r.error();
 }
 
 auto Database::destroy(Database db) -> Status
 {
-    if (db.m_options.path.empty())
-        return Status::ok();
+    auto s = Status::ok();
+    if (db.is_open())
+        s = db.close();
 
     if (const auto &path = db.m_options.path; !path.empty()) {
         if (std::error_code error; !fs::remove_all(path, error))
             return Status::system_error(error.message());
     }
-    return Status::ok();
+
+    return s;
 }
 
 Database::Database() = default;

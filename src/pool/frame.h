@@ -28,7 +28,7 @@ public:
         return !m_owned.empty();
     }
 
-    [[nodiscard]] auto page_id() const -> PID
+    [[nodiscard]] auto page_id() const -> PageId
     {
         return m_page_id;
     }
@@ -58,7 +58,7 @@ public:
         return m_bytes;
     }
 
-    auto reset(PID page_id) -> void
+    auto reset(PageId page_id) -> void
     {
         CCO_EXPECT_EQ(m_ref_count, 0);
         m_page_id = page_id;
@@ -78,7 +78,7 @@ public:
         m_is_dirty = false;
     }
 
-    [[nodiscard]] auto page_lsn() const -> LSN;
+    [[nodiscard]] auto page_lsn() const -> SequenceNumber;
     [[nodiscard]] auto borrow(IBufferPool *, bool) -> Page;
     auto synchronize(Page &) -> void;
 
@@ -88,7 +88,7 @@ public:
 private:
     std::string m_owned;
     Bytes m_bytes;
-    PID m_page_id;
+    PageId m_page_id;
     Size m_ref_count {};
     Size m_size {};
     bool m_is_writable {};

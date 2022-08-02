@@ -20,6 +20,7 @@ TEST(PagerOpenTests, A)
     auto memory = file->shared_memory();
     auto pager = Pager::open({
         std::move(file),
+        SequenceNumber::base(),
         0x100,
         16,
     });
@@ -39,6 +40,7 @@ public:
     {
         return Pager::open({
             std::move(file),
+            SequenceNumber::base(),
             page_size,
             frame_count,
         }).and_then([this](std::unique_ptr<Pager> p) -> Result<void> {
@@ -66,7 +68,7 @@ TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 TEST_F(PagerTests, KeepsTrackOfAvailableCount)
 {
     setup(0x100, 16);
-    auto frame = pager->pin(PID::root());
+    auto frame = pager->pin(PageId::base());
     ASSERT_EQ(pager->available(), 15);
     pager->discard(std::move(*frame));
     ASSERT_EQ(pager->available(), 16);
@@ -76,13 +78,13 @@ TEST_F(PagerTests, PagerCreatesExtraPagesOnDemand)
 {
     setup(0x100, 16);
     for (Index i {ROOT_ID_VALUE}; i < 32; i++)
-        ASSERT_TRUE(pager->pin(PID {i}));
+        ASSERT_TRUE(pager->pin(PageId {i}));
 }
 
 TEST_F(PagerTests, TruncateResizesUnderlyingFile)
 {
     setup(0x100, 16);
-    ASSERT_TRUE(pager->unpin(*pager->pin(PID::root())));
+    ASSERT_TRUE(pager->unpin(*pager->pin(PageId::base())));
     ASSERT_NE(memory.memory().size(), 0x100);
     ASSERT_TRUE(pager->truncate(0));
     ASSERT_EQ(memory.memory().size(), 0);
@@ -101,14 +103,14 @@ public:
         pool = *BufferPool::open({
             *home,
             create_sink(),
-            LSN::null(),
+            SequenceNumber::null(),
             frame_count,
             0,
             page_size,
             false,
         });
 
-        mock = home->get_mock_file("data", Mode::CREATE | Mode::READ_WRITE);
+        mock = home->get_mock_data_file();
     }
 
     ~BufferPoolTestsBase() override = default;
@@ -151,26 +153,26 @@ TEST_F(BufferPoolTests, AllocationInceasesPageCount)
 TEST_F(BufferPoolTests, AllocateReturnsCorrectPage)
 {
     auto page = pool->allocate();
-    ASSERT_EQ(page->id(), PID::root());
+    ASSERT_EQ(page->id(), PageId::base());
 }
 
 TEST_F(BufferPoolTests, AcquireReturnsCorrectPage)
 {
     ASSERT_TRUE(pool->release(*pool->allocate()));
-    auto page = pool->acquire(PID::root(), true);
-    ASSERT_EQ(page->id(), PID::root());
+    auto page = pool->acquire(PageId::base(), true);
+    ASSERT_EQ(page->id(), PageId::base());
 }
 
 TEST_F(BufferPoolTests, AcquireMultipleWritablePagesDeathTest)
 {
     auto page = pool->allocate();
-    ASSERT_DEATH(auto unused = pool->acquire(PID::root(), true), "Expect");
+    ASSERT_DEATH(auto unused = pool->acquire(PageId::base(), true), "Expect");
 }
 
 TEST_F(BufferPoolTests, AcquireReadableAndWritablePagesDeathTest)
 {
     auto page = pool->allocate();
-    ASSERT_DEATH(auto unused = pool->acquire(PID::root(), false), "Expect");
+    ASSERT_DEATH(auto unused = pool->acquire(PageId::base(), false), "Expect");
 }
 
 auto write_to_page(Page &page, const std::string &message) -> void
@@ -194,7 +196,7 @@ TEST_F(BufferPoolTests, PageDataPersistsBetweenAcquires)
     auto in_page = pool->allocate();
     write_to_page(*in_page, "Hello, world!");
     ASSERT_TRUE(pool->release(std::move(*in_page)));
-    auto out_page = pool->acquire(PID::root(), false);
+    auto out_page = pool->acquire(PageId::base(), false);
     ASSERT_EQ(read_from_page(*out_page, 13), "Hello, world!");
     ASSERT_TRUE(pool->release(std::move(*out_page)));
 }
@@ -208,7 +210,7 @@ TEST_F(BufferPoolTests, PageDataPersistsAfterEviction)
         ASSERT_TRUE(pool->release(std::move(*in_page)));
     }
     for (Index i {}; i < n; ++i) {
-        auto out_page = pool->acquire(PID {i + 1}, false);
+        auto out_page = pool->acquire(PageId {i + 1}, false);
         ASSERT_EQ(read_from_page(*out_page, 13), "Hello, world!");
         ASSERT_TRUE(pool->release(std::move(*out_page)));
     }
@@ -226,7 +228,7 @@ template<class Test> auto run_sanity_check(Test &test, Size num_iterations) -> S
         } else if (test.pool->page_count()) {
             const auto id = test.random.next_int(Size {1}, test.pool->page_count());
             const auto result = std::to_string(id);
-            auto page = test.pool->acquire(PID {id}, false);
+            auto page = test.pool->acquire(PageId {id}, false);
             EXPECT_EQ(read_from_page(*page, result.size()), result);
             EXPECT_TRUE(test.pool->release(std::move(*page)));
         }

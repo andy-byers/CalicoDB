@@ -44,9 +44,9 @@ auto FileHeaderReader::free_count() const -> Size
     return get_u32(m_header.range(FileLayout::FREE_COUNT_OFFSET));
 }
 
-auto FileHeaderReader::free_start() const -> PID
+auto FileHeaderReader::free_start() const -> PageId
 {
-    return PID {get_u32(m_header.range(FileLayout::FREE_START_OFFSET))};
+    return PageId {get_u32(m_header.range(FileLayout::FREE_START_OFFSET))};
 }
 
 auto FileHeaderReader::page_size() const -> Size
@@ -59,9 +59,9 @@ auto FileHeaderReader::record_count() const -> Size
     return get_u32(m_header.range(FileLayout::KEY_COUNT_OFFSET));
 }
 
-auto FileHeaderReader::flushed_lsn() const -> LSN
+auto FileHeaderReader::flushed_lsn() const -> SequenceNumber
 {
-    return LSN {get_u32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET))};
+    return SequenceNumber {get_u32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET))};
 }
 
 FileHeaderWriter::FileHeaderWriter(Bytes bytes)
@@ -96,7 +96,7 @@ auto FileHeaderWriter::set_free_count(Size free_count) -> void
     put_u32(m_header.range(FileLayout::FREE_COUNT_OFFSET), static_cast<uint32_t>(free_count));
 }
 
-auto FileHeaderWriter::set_free_start(PID free_start) -> void
+auto FileHeaderWriter::set_free_start(PageId free_start) -> void
 {
     put_u32(m_header.range(FileLayout::FREE_START_OFFSET), free_start.value);
 }
@@ -111,7 +111,7 @@ auto FileHeaderWriter::set_key_count(Size key_count) -> void
     put_u32(m_header.range(FileLayout::KEY_COUNT_OFFSET), static_cast<uint32_t>(key_count));
 }
 
-auto FileHeaderWriter::set_flushed_lsn(LSN flushed_lsn) -> void
+auto FileHeaderWriter::set_flushed_lsn(SequenceNumber flushed_lsn) -> void
 {
     put_u32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET), flushed_lsn.value);
 }

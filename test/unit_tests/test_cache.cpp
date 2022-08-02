@@ -26,7 +26,7 @@ public:
         m_cache.put(id, std::move(frame));
     }
 
-    auto make_frame(PID page_id, LSN = LSN::null()) -> Frame
+    auto make_frame(PageId page_id, SequenceNumber = SequenceNumber::null()) -> Frame
     {
         m_backing.emplace_back();
         m_backing.back().resize(m_frame_size);
@@ -43,15 +43,15 @@ public:
 
 TEST_F(PageCacheTests, PutFrame)
 {
-    cache_put(make_frame(PID::root()));
-    ASSERT_TRUE(m_cache.contains(PID::root()));
+    cache_put(make_frame(PageId::base()));
+    ASSERT_TRUE(m_cache.contains(PageId::base()));
     ASSERT_EQ(m_cache.size(), 1);
 }
 
 TEST_F(PageCacheTests, ExtractFrame)
 {
-    cache_put(make_frame(PID::root()));
-    ASSERT_EQ(m_cache.extract(PID::root())->page_id(), PID::root());
+    cache_put(make_frame(PageId::base()));
+    ASSERT_EQ(m_cache.extract(PageId::base())->page_id(), PageId::base());
     ASSERT_EQ(m_cache.size(), 0);
 }
 
@@ -62,7 +62,7 @@ TEST_F(PageCacheTests, EvictFromEmptyCacheDoesNothing)
 
 TEST_F(PageCacheTests, EvictUntilEmpty)
 {
-    cache_put(make_frame(PID::root()));
+    cache_put(make_frame(PageId::base()));
     ASSERT_NE(m_cache.evict(), std::nullopt);
     ASSERT_EQ(m_cache.evict(), std::nullopt);
     ASSERT_EQ(m_cache.size(), 0);

@@ -69,12 +69,13 @@ namespace impl {
 
 } // namespace impl
 
-UpdateManager::UpdateManager(BytesView page, Bytes scratch)
-    : m_snapshot {scratch},
+UpdateManager::UpdateManager(BytesView page, ManualScratch scratch)
+    : m_scratch {scratch},
+      m_snapshot {scratch.data()},
       m_current {page}
 {
     CCO_EXPECT_EQ(page.size(), m_snapshot.size());
-    mem_copy(scratch, m_current);
+    mem_copy(scratch.data(), m_current);
 }
 
 auto UpdateManager::push(Range range) -> void
@@ -82,7 +83,12 @@ auto UpdateManager::push(Range range) -> void
     impl::insert_range(m_ranges, range);
 }
 
-auto UpdateManager::collect() -> std::vector<ChangedRegion>
+auto UpdateManager::scratch() -> ManualScratch
+{
+    return m_scratch;
+}
+
+auto UpdateManager::collect_updates() -> std::vector<ChangedRegion>
 {
     impl::compress_ranges(m_ranges);
 

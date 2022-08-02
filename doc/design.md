@@ -1,8 +1,8 @@
 # Calico DB Design
 
 **NOTES**:
-+ If we encounter a corrupted WAL record during recovery, we need to check its LSN and the database flushed LSN.
-If the corrupted record has an LSN >= the flushed LSN, we cannot know if the data on the page is correct, since we have committed possibly corrupted data.
++ If we encounter a corrupted WAL record during recovery, we need to check its SequenceNumber and the database flushed SequenceNumber.
+If the corrupted record has an SequenceNumber >= the flushed SequenceNumber, we cannot know if the data on the page is correct, since we have committed possibly corrupted data.
 We could check if the page contents match the "after" contents of the record, but it doesn't really matter since the record is corrupted anyway.
 If there are WAL records after the corrupted record, we cannot roll back
 
@@ -134,7 +134,7 @@ This is because WAL records can be split up into multiple pages, depending on th
 The WAL writer fills up an internal buffer with WAL records.
 When it runs out of space, it flushes the buffer to the WAL file.
 At that point, all database pages with updates corresponding to the flushed records can be safely written to the `data` file.
-To this end, we always keep the LSN of the most-recently-flushed record in memory.
+To this end, we always keep the SequenceNumber of the most-recently-flushed record in memory.
 Also note that the WAL is truncated after each commit, including when the database instance is closed.
 
 ### WAL Reader
@@ -183,11 +183,8 @@ Otherwise, we do not have enough information to complete the transaction and mus
 Here we read the WAL in reverse, reverting pages to their state before the transaction started.
 In either case, we truncate the WAL and flush the buffer pool on completion.
 
-[//]: # (TODO: Since we are currently using exceptions, we need to make sure that commit\(\), abort\(\), and
-               the recovery procedure are all reentrant. They should be already, more or less, but we need
-               explicit verification of this fact. If the recovery procedure throws, we will end up aborting
-               the database constructor, but we should be able to try to construct that database instance as
-               many times as we want until it maybe succeeds, and not have it become corrupted.)
+# Optimizations?
++ We could come up with a physiological logging scheme to try and reduce the amount of data we write to the WAL
 
 ## References
 1. https://cstack.github.io/db_tutorial/

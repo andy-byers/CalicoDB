@@ -34,13 +34,13 @@ auto Internal::collect_value(const Node &node, Index index) const -> Result<std:
 
 auto Internal::find_root(bool is_writable) -> Result<Node>
 {
-    return m_pool->acquire(PID::root(), is_writable);
+    return m_pool->acquire(PageId::base(), is_writable);
 }
 
 auto Internal::find_external(BytesView key) -> Result<SearchResult>
 {
     if (m_cell_count == 0)
-        return SearchResult {PID::root(), 0, false};
+        return SearchResult {PageId::base(), 0, false};
 
     auto node = find_root(false);
     if (!node.has_value())
@@ -64,7 +64,7 @@ auto Internal::find_external(BytesView key) -> Result<SearchResult>
 
 auto Internal::find_minimum() -> Result<SearchResult>
 {
-    CCO_TRY_CREATE(node, m_pool->acquire(PID::root(), false));
+    CCO_TRY_CREATE(node, m_pool->acquire(PageId::base(), false));
     auto id = node.id();
 
     while (!node.is_external()) {
@@ -74,7 +74,7 @@ auto Internal::find_minimum() -> Result<SearchResult>
     }
     auto was_found = true;
     if (node.cell_count() == 0) {
-        CCO_EXPECT_TRUE(id.is_root());
+        CCO_EXPECT_TRUE(id.is_base());
         was_found = false;
     }
     CCO_TRY(m_pool->release(std::move(node)));
@@ -83,7 +83,7 @@ auto Internal::find_minimum() -> Result<SearchResult>
 
 auto Internal::find_maximum() -> Result<SearchResult>
 {
-    CCO_TRY_CREATE(node, m_pool->acquire(PID::root(), false));
+    CCO_TRY_CREATE(node, m_pool->acquire(PageId::base(), false));
     auto id = node.id();
 
     while (!node.is_external()) {
@@ -96,7 +96,7 @@ auto Internal::find_maximum() -> Result<SearchResult>
     Index index {};
 
     if (node.cell_count() == 0) {
-        CCO_EXPECT_TRUE(id.is_root());
+        CCO_EXPECT_TRUE(id.is_base());
         was_found = false;
     } else {
         index = node.cell_count() - 1;
@@ -174,7 +174,7 @@ auto Internal::balance_after_overflow(Node node) -> Result<void>
         if (node.overflow_cell().is_attached())
             m_scratch.reset();
 
-        if (node.id().is_root()) {
+        if (node.id().is_base()) {
             CCO_TRY_STORE(node, split_root(std::move(node)));
         } else {
             CCO_TRY_STORE(node, split_non_root(std::move(node)));
@@ -188,7 +188,7 @@ auto Internal::balance_after_underflow(Node node, BytesView anchor) -> Result<vo
     while (node.is_underflowing()) {
         m_scratch.reset();
 
-        if (node.id().is_root()) {
+        if (node.id().is_base()) {
             if (!node.cell_count())
                 return fix_root(std::move(node));
             break;
@@ -214,7 +214,7 @@ auto Internal::balance_after_underflow(Node node, BytesView anchor) -> Result<vo
  */
 auto Internal::split_root(Node root) -> Result<Node>
 {
-    CCO_EXPECT_TRUE(root.id().is_root());
+    CCO_EXPECT_TRUE(root.id().is_base());
     CCO_EXPECT_TRUE(root.is_overflowing());
 
     CCO_TRY_CREATE(child, m_pool->allocate(root.type()));
@@ -227,7 +227,7 @@ auto Internal::split_root(Node root) -> Result<Node>
 
 auto Internal::split_non_root(Node node) -> Result<Node>
 {
-    CCO_EXPECT_FALSE(node.id().is_root());
+    CCO_EXPECT_FALSE(node.id().is_base());
     CCO_EXPECT_FALSE(node.parent_id().is_null());
     CCO_EXPECT(node.is_overflowing());
 
@@ -259,11 +259,14 @@ auto Internal::split_non_root(Node node) -> Result<Node>
 auto Internal::maybe_fix_child_parent_connections(Node &node) -> Result<void>
 {
     if (!node.is_external()) {
-        const auto fix_connection = [&node, this](PID child_id) -> Result<void> {
+        const auto parent_id = node.id();
+
+        const auto fix_connection = [parent_id, this](PageId child_id) -> Result<void> {
             CCO_TRY_CREATE(child, m_pool->acquire(child_id, true));
-            child.set_parent_id(node.id());
+            child.set_parent_id(parent_id);
             return m_pool->release(std::move(child));
         };
+
 
         for (Index index {}; index <= node.cell_count(); ++index)
             CCO_TRY(fix_connection(node.child_id(index)));
@@ -295,7 +298,7 @@ auto Internal::make_cell(BytesView key, BytesView value, bool is_external) -> Re
 
 auto Internal::fix_non_root(Node node, Node &parent, Index index) -> Result<bool>
 {
-    CCO_EXPECT_FALSE(node.id().is_root());
+    CCO_EXPECT_FALSE(node.id().is_base());
     CCO_EXPECT_FALSE(node.is_overflowing());
     CCO_EXPECT_FALSE(parent.is_overflowing());
     if (index > 0) {
@@ -384,7 +387,7 @@ auto Internal::fix_non_root(Node node, Node &parent, Index index) -> Result<bool
 
 auto Internal::fix_root(Node node) -> Result<void>
 {
-    CCO_EXPECT_TRUE(node.id().is_root());
+    CCO_EXPECT_TRUE(node.id().is_base());
     CCO_EXPECT_TRUE(node.is_underflowing());
 
     // If the root is external here, the whole tree must be empty.

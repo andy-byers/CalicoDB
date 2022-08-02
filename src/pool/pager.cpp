@@ -33,6 +33,7 @@ auto Pager::open(Parameters param) -> Result<std::unique_ptr<Pager>>
 Pager::Pager(AlignedBuffer buffer, Parameters param)
     : m_buffer {std::move(buffer)},
       m_file {std::move(param.file)},
+      m_flushed_lsn {param.flushed_lsn},
       m_frame_count {param.frame_count},
       m_page_size {param.page_size}
 {
@@ -65,7 +66,7 @@ auto Pager::truncate(Size page_count) -> Result<void>
     return m_file->resize(page_count * page_size());
 }
 
-auto Pager::pin(PID id) -> Result<Frame>
+auto Pager::pin(PageId id) -> Result<Frame>
 {
     CCO_EXPECT_FALSE(id.is_null());
     if (m_available.empty())
@@ -107,10 +108,14 @@ auto Pager::unpin(Frame frame) -> Result<void>
     Result<void> result;
 
     // If this fails, the caller (buffer pool) will need to roll back the database state or exit.
-    if (frame.is_dirty())
+    if (frame.is_dirty()) {
         result = write_page_to_file(frame.page_id(), frame.data());
 
-    frame.reset(PID::null());
+        if (result.has_value())
+            m_flushed_lsn = std::max(m_flushed_lsn, frame.page_lsn());
+    }
+
+    frame.reset(PageId::null());
     if (!frame.is_owned())
         m_available.emplace_back(std::move(frame));
     return result;
@@ -121,7 +126,7 @@ auto Pager::sync() -> Result<void>
     return m_file->sync();
 }
 
-auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
+auto Pager::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
 {
     static constexpr auto ERROR_PRIMARY = "cannot read page";
     static constexpr auto ERROR_DETAIL = "page ID is {}";
@@ -153,10 +158,20 @@ auto Pager::read_page_from_file(PID id, Bytes out) const -> Result<bool>
     }
 }
 
-auto Pager::write_page_to_file(PID id, BytesView in) const -> Result<void>
+auto Pager::write_page_to_file(PageId id, BytesView in) const -> Result<void>
 {
     CCO_EXPECT_EQ(page_size(), in.size());
     return write_all(*m_file, in, FileLayout::page_offset(id, in.size()));
+}
+
+auto Pager::load_header(const FileHeaderReader &reader) -> void
+{
+    m_flushed_lsn = reader.flushed_lsn();
+}
+
+auto Pager::save_header(FileHeaderWriter &writer) -> void
+{
+    writer.set_flushed_lsn(m_flushed_lsn);
 }
 
 } // namespace cco

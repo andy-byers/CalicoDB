@@ -40,7 +40,7 @@ auto CursorInternal::seek_left(Cursor &cursor) -> bool
     if (cursor.is_minimum()) {
         invalidate(cursor);
     } else {
-        const PID left {cursor.m_position.ids[Cursor::Position::LEFT]};
+        const PageId left {cursor.m_position.ids[Cursor::Position::LEFT]};
         auto previous = cursor.m_pool->acquire(left, false);
         if (!previous.has_value()) {
             invalidate(cursor, previous.error());
@@ -61,7 +61,7 @@ auto CursorInternal::seek_right(Cursor &cursor) -> bool
     if (cursor.is_maximum()) {
         invalidate(cursor);
     } else {
-        const PID right {cursor.m_position.ids[Cursor::Position::RIGHT]};
+        const PageId right {cursor.m_position.ids[Cursor::Position::RIGHT]};
         auto next = cursor.m_pool->acquire(right, false);
         if (!next.has_value()) {
             invalidate(cursor, next.error());
@@ -77,7 +77,7 @@ auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
     if (!cursor.is_valid())
         return;
 
-    auto node = cursor.m_pool->acquire(PID {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
+    auto node = cursor.m_pool->acquire(PageId {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
     node->TEST_validate();
 }
 
@@ -201,7 +201,7 @@ auto Cursor::decrement() -> bool
 auto Cursor::key() const -> BytesView
 {
     CCO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
@@ -212,7 +212,7 @@ auto Cursor::key() const -> BytesView
 auto Cursor::value() const -> std::string
 {
     CCO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
@@ -227,7 +227,7 @@ auto Cursor::value() const -> std::string
 auto Cursor::record() const -> Record
 {
     CCO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PID {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
@@ -254,13 +254,13 @@ auto Cursor::Position::operator==(const Position &rhs) const -> bool
 auto Cursor::Position::is_maximum() const -> bool
 {
     CCO_EXPECT_NE(ids[CURRENT], 0);
-    return PID {ids[RIGHT]}.is_null() && index + 1 == cell_count;
+    return PageId {ids[RIGHT]}.is_null() && index + 1 == cell_count;
 }
 
 auto Cursor::Position::is_minimum() const -> bool
 {
     CCO_EXPECT_NE(ids[CURRENT], 0);
-    return cell_count && PID {ids[LEFT]}.is_null() && index == 0;
+    return cell_count && PageId {ids[LEFT]}.is_null() && index == 0;
 }
 
 } // namespace cco

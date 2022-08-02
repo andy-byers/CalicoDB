@@ -26,7 +26,7 @@ auto FreeList::load_header(const FileHeaderReader &header) -> void
 
 auto FreeList::push(Page page) -> Result<void>
 {
-    CCO_EXPECT_FALSE(page.id().is_root());
+    CCO_EXPECT_FALSE(page.id().is_base());
     CCO_EXPECT_EQ(m_free_count == 0, m_free_start.is_null());
     page.set_type(PageType::FREELIST_LINK);
     Link link {std::move(page)};

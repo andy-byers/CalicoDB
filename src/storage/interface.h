@@ -37,16 +37,11 @@ public:
     virtual ~IFile() = default;
     [[nodiscard]] virtual auto is_open() const -> bool = 0;
     [[nodiscard]] virtual auto mode() const -> Mode = 0;
-    [[nodiscard]] virtual auto permissions() const -> int = 0;
-    [[nodiscard]] virtual auto path() const -> std::string = 0;
     [[nodiscard]] virtual auto name() const -> std::string = 0;
     [[nodiscard]] virtual auto file() const -> int = 0;
     [[nodiscard]] virtual auto size() const -> Result<Size> = 0;
-    [[nodiscard]] virtual auto open(const std::string &, Mode, int) -> Result<void> = 0;
     [[nodiscard]] virtual auto close() -> Result<void> = 0;
-    [[nodiscard]] virtual auto rename(const std::string &) -> Result<void> = 0;
     [[nodiscard]] virtual auto resize(Size) -> Result<void> = 0;
-    [[nodiscard]] virtual auto remove() -> Result<void> = 0;
     [[nodiscard]] virtual auto seek(long, Seek) -> Result<Index> = 0;
     [[nodiscard]] virtual auto read(Bytes) -> Result<Size> = 0;
     [[nodiscard]] virtual auto read(Bytes, Index) -> Result<Size> = 0;
@@ -64,7 +59,7 @@ public:
     [[nodiscard]] virtual auto exists(const std::string &) const -> Result<bool> = 0;
     [[nodiscard]] virtual auto children() const -> Result<std::vector<std::string>> = 0;
     [[nodiscard]] virtual auto open_file(const std::string &, Mode, int) -> Result<std::unique_ptr<IFile>> = 0;
-    [[nodiscard]] virtual auto remove() -> Result<void> = 0;
+    [[nodiscard]] virtual auto remove_file(const std::string &) -> Result<void> = 0;
     [[nodiscard]] virtual auto sync() -> Result<void> = 0;
     [[nodiscard]] virtual auto close() -> Result<void> = 0;
 };

@@ -17,9 +17,9 @@ struct ChangedRegion {
 
 struct PageUpdate {
     std::vector<ChangedRegion> changes;
-    PID page_id;
-    LSN previous_lsn;
-    LSN lsn;
+    PageId page_id;
+    SequenceNumber previous_lsn;
+    SequenceNumber lsn;
 };
 
 class UpdateManager {
@@ -29,8 +29,9 @@ public:
         Size dx {};
     };
 
-    UpdateManager(BytesView, Bytes);
-    [[nodiscard]] auto collect() -> std::vector<ChangedRegion>;
+    UpdateManager(BytesView, ManualScratch);
+    [[nodiscard]] auto scratch() -> ManualScratch;
+    [[nodiscard]] auto collect_updates() -> std::vector<ChangedRegion>;
     auto push(Range) -> void;
 
     [[nodiscard]] auto has_updates() -> bool
@@ -40,6 +41,7 @@ public:
 
 private:
     std::vector<Range> m_ranges;
+    ManualScratch m_scratch;
     BytesView m_snapshot;
     BytesView m_current;
 };

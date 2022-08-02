@@ -30,7 +30,7 @@ public:
         return header_offset() + HEADER_SIZE;
     }
 
-    static auto page_offset(PID page_id, Size page_size) noexcept -> Index
+    static auto page_offset(PageId page_id, Size page_size) noexcept -> Index
     {
         return page_id.as_index() * page_size;
     }
@@ -42,12 +42,12 @@ public:
     static constexpr Size TYPE_OFFSET {4};
     static constexpr Size HEADER_SIZE {6};
 
-    static auto header_offset(PID page_id) noexcept -> Size
+    static auto header_offset(PageId page_id) noexcept -> Size
     {
-        return page_id.is_root() * FileLayout::HEADER_SIZE;
+        return page_id.is_base() * FileLayout::HEADER_SIZE;
     }
 
-    static auto content_offset(PID page_id) noexcept -> Size
+    static auto content_offset(PageId page_id) noexcept -> Size
     {
         return header_offset(page_id) + HEADER_SIZE;
     }
@@ -69,12 +69,12 @@ public:
     static constexpr Size FREE_TOTAL_OFFSET {26};
     static constexpr Size HEADER_SIZE {28};
 
-    static auto header_offset(PID page_id) noexcept -> Size
+    static auto header_offset(PageId page_id) noexcept -> Size
     {
         return PageLayout::content_offset(page_id);
     }
 
-    static auto content_offset(PID page_id) noexcept -> Size
+    static auto content_offset(PageId page_id) noexcept -> Size
     {
         return header_offset(page_id) + HEADER_SIZE;
     }
@@ -89,8 +89,8 @@ public:
     {
         // The root page can never become a link page, so this value is the same for
         // all pages.
-        const PID non_root {ROOT_ID_VALUE + 1};
-        CCO_EXPECT_FALSE(non_root.is_root());
+        const PageId non_root {ROOT_ID_VALUE + 1};
+        CCO_EXPECT_FALSE(non_root.is_base());
         return PageLayout::content_offset(non_root);
     }
 

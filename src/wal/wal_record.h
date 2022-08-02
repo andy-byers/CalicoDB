@@ -61,12 +61,12 @@ public:
         FULL = 0x45,
     };
 
-    static auto commit(LSN) -> WALRecord;
+    static auto commit(SequenceNumber) -> WALRecord;
     WALRecord() = default;
     explicit WALRecord(const PageUpdate &);
     ~WALRecord() = default;
 
-    [[nodiscard]] auto lsn() const -> LSN
+    [[nodiscard]] auto lsn() const -> SequenceNumber
     {
         return m_lsn;
     }
@@ -117,7 +117,7 @@ public:
 
 private:
     WALPayload m_payload;
-    LSN m_lsn;
+    SequenceNumber m_lsn;
     Index m_crc {};
     Type m_type {Type::EMPTY};
 };

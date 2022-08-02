@@ -15,7 +15,7 @@ class NodePool final {
 public:
     struct Parameters {
         IBufferPool *buffer_pool {};
-        PID free_start;
+        PageId free_start;
         Size free_count {};
         Size node_count {};
     };
@@ -25,12 +25,12 @@ public:
 
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto allocate(PageType) -> Result<Node>;
-    [[nodiscard]] auto acquire(PID, bool) -> Result<Node>;
+    [[nodiscard]] auto acquire(PageId, bool) -> Result<Node>;
     [[nodiscard]] auto release(Node) -> Result<void>;
     [[nodiscard]] auto destroy(Node) -> Result<void>;
-    [[nodiscard]] auto allocate_chain(BytesView) -> Result<PID>;
-    [[nodiscard]] auto destroy_chain(PID, Size) -> Result<void>;
-    [[nodiscard]] auto collect_chain(PID, Bytes) const -> Result<void>;
+    [[nodiscard]] auto allocate_chain(BytesView) -> Result<PageId>;
+    [[nodiscard]] auto destroy_chain(PageId, Size) -> Result<void>;
+    [[nodiscard]] auto collect_chain(PageId, Bytes) const -> Result<void>;
     auto save_header(FileHeaderWriter &) -> void;
     auto load_header(const FileHeaderReader &) -> void;
 
@@ -41,6 +41,7 @@ public:
 
 private:
     FreeList m_free_list;
+    std::string m_scratch;
     IBufferPool *m_pool {};
     Size m_node_count {};
 };

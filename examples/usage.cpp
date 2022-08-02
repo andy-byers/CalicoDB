@@ -168,6 +168,14 @@ auto main(int, const char *[]) -> int
 
     bytes_objects();
     auto db = open_database();
+
+    for (int i {}; i < 1'000'000; ++i) {
+        const auto s = std::to_string(i);
+        assert(db.insert(s, s).is_ok());
+    }
+    assert(db.close().is_ok());
+    exit(0);
+
     reads_and_writes(db);
     updating_a_database(db);
     querying_a_database(db);

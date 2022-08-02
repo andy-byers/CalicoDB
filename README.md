@@ -2,7 +2,15 @@
 
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
-> **Note**: The public API is now stable!
+> **Note (08/01)**: We're almost there!
+> Currently, Calico DB is far too slow to be useful when the WAL is enabled.
+> In an attempt to keep the design as simple as possible, we have been truncating the WAL after each commit.
+> This first requires us to flush all dirty database pages, otherwise our updates won't reach disk in the event of a crash.
+> In the next few weeks, I'll be implementing WAL segmentation and cleanup of obsolete WAL segments.
+> We won't get rid of any segments until all of their referenced pages are written to disk as part of the normal "steal" buffer pool management routine.
+> If we push the cleanup of obsolete segments off into a background thread, we end up with much less work each time commit() is called.
+> All we have to do is write the commit WAL record, flush the tail buffer, call fsync(), then open a new WAL segment.
+
 
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.

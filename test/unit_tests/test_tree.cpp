@@ -37,13 +37,13 @@ public:
         buffer_pool = *BufferPool::open({
             *home,
             create_sink(),
-            LSN::null(),
+            SequenceNumber::null(),
             FRAME_COUNT,
             0,
             PAGE_SIZE,
             false,
         });
-        mock = home->get_mock_file("data", Mode::CREATE | Mode::READ_WRITE);
+        mock = home->get_mock_data_file();
         CCO_EXPECT_NE(mock, nullptr);
     }
 
@@ -56,7 +56,7 @@ public:
 class NodePoolTests: public TreeHarness {
 public:
     NodePoolTests():
-          pool {{buffer_pool.get(), PID::null(), 0, 0}} {}
+          pool {{buffer_pool.get(), PageId::null(), 0, 0}} {}
 
     NodePool pool;
 };
@@ -76,7 +76,7 @@ TEST_F(NodePoolTests, AllocateIncreasesNodeCount)
 TEST_F(NodePoolTests, NodeContentsPersist)
 {
     ASSERT_TRUE(pool.release(*pool.allocate(PageType::EXTERNAL_NODE)));
-    auto root = pool.acquire(PID::root(), false);
+    auto root = pool.acquire(PageId::base(), false);
     ASSERT_EQ(root->type(), PageType::EXTERNAL_NODE);
 }
 
@@ -145,7 +145,7 @@ public:
         tree = *Tree::open(Tree::Parameters{
             buffer_pool.get(),
             create_sink("", spdlog::level::off),
-            PID::null(),
+            PageId::null(),
             0,
             0,
             0,

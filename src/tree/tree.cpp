@@ -70,7 +70,7 @@ auto Tree::insert(BytesView key, BytesView value) -> Result<bool>
 auto Tree::erase(Cursor cursor) -> Result<bool>
 {
     if (cursor.is_valid()) {
-        CCO_TRY_CREATE(node, m_pool.acquire(PID {CursorInternal::id(cursor)}, true));
+        CCO_TRY_CREATE(node, m_pool.acquire(PageId {CursorInternal::id(cursor)}, true));
         CCO_TRY(m_internal.positioned_remove({std::move(node), CursorInternal::index(cursor)}));
         return true;
     } else if (!cursor.status().is_ok()) {
@@ -190,7 +190,7 @@ auto Tree::load_header(const FileHeaderReader &header) -> void
     m_internal.load_header(header);
 }
 
-auto Tree::TEST_validate_node(PID id) -> void
+auto Tree::TEST_validate_node(PageId id) -> void
 {
     auto result = m_pool.acquire(id, false);
     if (!result.has_value()) {
