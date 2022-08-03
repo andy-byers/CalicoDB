@@ -23,11 +23,14 @@ auto WALReader::create(const WALParameters &param) -> Result<std::unique_ptr<IWA
 
 WALReader::WALReader(const WALParameters &param)
     : m_block(param.page_size, '\x00')
-{}
+{
+    m_scratch[0] = std::string(param.page_size * 4, '\x00');
+    m_scratch[1] = std::string(param.page_size * 4, '\x00');
+}
 
 auto WALReader::read(Position &position) -> Result<WALRecord>
 {
-    WALRecord record;
+    WALRecord record {stob(m_scratch[0])};
     while (record.type() != WALRecord::Type::FULL) {
         // Make sure we are buffering the correct block.
         if (!m_has_block || m_block_id != position.block_id) {
@@ -109,7 +112,7 @@ auto WALReader::read_record(Index offset) -> Result<WALRecord>
     if (offset + WALRecord::MINIMUM_SIZE > m_block.size())
         return Err {Status::not_found()};
 
-    WALRecord record;
+    WALRecord record {stob(m_scratch[1])};
     auto buffer = stob(m_block);
     buffer.advance(offset);
     CCO_TRY(record.read(buffer));

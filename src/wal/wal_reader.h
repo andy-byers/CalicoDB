@@ -36,6 +36,7 @@ private:
     [[nodiscard]] auto read_record(Index) -> Result<WALRecord>;
 
     std::string m_block;
+    std::string m_scratch[2];
     std::unique_ptr<IFile> m_file;
     Index m_block_id {};
     bool m_has_block {};

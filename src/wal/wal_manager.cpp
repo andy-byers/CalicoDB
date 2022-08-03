@@ -65,6 +65,7 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
         CCO_TRY_STORE(segment.has_commit, manager->roll_forward(segment.positions));
         segment.start = record.lsn();
     }
+
     WALSegment current;
     current.id = SegmentId::base();
     current.start = SequenceNumber::base();
@@ -84,7 +85,7 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
 WALManager::WALManager(const WALParameters &param)
     : m_tracker {param.page_size},
       m_logger {create_logger(param.log_sink, "wal")},
-      m_scratch(param.page_size * 2, '\x00'), // TODO: Find a sensible value for this. Really shouldn't need much more than a page at max, if even.
+      m_scratch(param.page_size * 4, '\x00'), // TODO: Find a sensible value for this. Really shouldn't need much more than a page at max, if even.
       m_pool {param.pool}
 {}
 
@@ -93,8 +94,8 @@ auto WALManager::cleanup() -> Result<void>
     if (m_segments.empty())
         return {};
 
-    auto limit = std::find_if(next(begin(m_segments)), end(m_segments), [this](const auto &segment) {
-        return segment.start <= m_pool->flushed_lsn();
+    auto limit = std::find_if(begin(m_segments), end(m_segments), [](const auto &segment) {
+        return segment.has_commit;
     });
     for (auto itr = begin(m_segments); itr != limit; ++itr) // TODO: Design for reentrancy...
         CCO_TRY(m_home->remove_file(id_to_name(itr->id)));
@@ -154,16 +155,12 @@ auto WALManager::append(Page &page) -> Result<void>
 {
     auto update = m_tracker.collect(page, ++m_writer->last_lsn());
     if (!update.changes.empty()) {
-        CCO_TRY_CREATE(position, m_writer->append(WALRecord {update}));
+        CCO_TRY_CREATE(position, m_writer->append(WALRecord {update, stob(m_scratch)}));
         m_current.positions.emplace_back(position);
         m_has_pending = true;
 
-//printf("appended %u to %u\n", update.lsn.value, m_current.id.value);
-        if (m_writer->needs_segmentation()) {
-//printf("segmenting!\n");
-
+        if (m_writer->needs_segmentation())
             return advance_writer(++update.lsn, false);
-        }
     }
     return {};
 }
@@ -190,31 +187,6 @@ auto WALManager::recover() -> Result<void>
     if (m_segments.empty())
         return {};
 
-//    std::vector<std::vector<WALRecordPosition>> positions;
-//    std::vector<int> found_commits;
-//    const auto boundary = prev(cend(m_segments));
-//    for (auto itr = cbegin(m_segments); itr != boundary; ++itr) {
-//printf("recovering fwd segment %u, %u\n", itr->id.value, itr->start.value);
-//
-//        CCO_TRY(open_reader_segment(itr->id));
-//        CCO_TRY_CREATE(is_empty, m_reader->is_empty());
-//
-//        if (!is_empty) {
-//            positions.emplace_back();
-//            found_commits.emplace_back();
-//            CCO_TRY_STORE(found_commits.back(), roll_forward(positions.back()));
-//            CCO_TRY(m_reader->close());
-//
-//         Only allow the last segment before the new one to be empty.
-//        } else if (itr != prev(cend(m_segments))) {
-//            LogMessage message {*m_logger};
-//            message.set_primary("cannot recover");
-//            message.set_detail("encountered an empty WAL segment");
-//            message.set_hint("segment ID is {}", itr->id.value);
-//            return Err {message.corruption()};
-//        }
-//    }
-
     auto segment = crbegin(m_segments);
     if (!segment->has_commit) {
         for (; segment != crend(m_segments) && !segment->has_commit; ++segment)
@@ -225,25 +197,11 @@ auto WALManager::recover() -> Result<void>
             CCO_TRY(m_home->remove_file(id_to_name(itr->id)));
         m_segments.erase(segment.base(), end(m_segments));
     }
-
-
-
-//    if (!m_segments.empty()) {
-//        CCO_EXPECT_TRUE(m_pool->status().is_ok()); // TODO
-//        CCO_EXPECT_FALSE(m_writer->has_pending());
-//        CCO_TRY_CREATE(found_commit, roll_forward());
-//        if (!found_commit)
-//            CCO_TRY(roll_backward());
-//        CCO_TRY(m_pool->flush());
-////        CCO_TRY(truncate());
-//    }
     return {};
 }
 
 auto WALManager::undo_segment(const WALSegment &segment) -> Result<void>
 {
-//printf("undo segment %u, %u\n", segment.id.value, segment.start.value);
-
     if (segment.positions.empty()) {
         LogMessage message {*m_logger};
         message.set_primary("cannot undo segment");
@@ -253,17 +211,6 @@ auto WALManager::undo_segment(const WALSegment &segment) -> Result<void>
     }
     CCO_TRY(open_reader_segment(segment.id));
     CCO_TRY(roll_backward(segment.positions));
-    return m_reader->close();
-}
-
-auto WALManager::maybe_redo_segment(WALSegment &segment) -> Result<void>
-{
-//printf("undo segment %u, %u\n", segment.id.value, segment.start.value);
-
-    if (!segment.positions.empty()) // TODO: Overload of roll_forward() that uses existing positions.
-        segment.positions.clear();
-    CCO_TRY(open_reader_segment(segment.id));
-    CCO_TRY(roll_forward(segment.positions));
     return m_reader->close();
 }
 
@@ -298,9 +245,6 @@ auto WALManager::abort() -> Result<void>
 
 auto WALManager::commit() -> Result<void>
 {
-//printf("committing!\n");
-
-
     // Skip the LSN that will be used for the file header updates.
     SequenceNumber commit_lsn {m_writer->last_lsn().value + 2};
     CCO_TRY_CREATE(root, m_pool->acquire(PageId::base(), true));
@@ -308,7 +252,7 @@ auto WALManager::commit() -> Result<void>
     header.set_flushed_lsn(commit_lsn);
     header.update_header_crc();
     CCO_TRY(m_pool->release(std::move(root)));
-    CCO_TRY(m_writer->append(WALRecord::commit(commit_lsn)));
+    CCO_TRY(m_writer->append(WALRecord::commit(commit_lsn, stob(m_scratch))));
     CCO_TRY(flush());
 
     m_has_pending = false;
@@ -326,10 +270,7 @@ auto WALManager::commit() -> Result<void>
 
 auto WALManager::advance_writer(SequenceNumber next_start, bool has_commit) -> Result<void>
 {
-//fmt::print("adv {} -> {}\n", m_current.id.value, m_current.id.value + 1);
-
     CCO_TRY(m_writer->flush());
-//    m_tracker.reset();
 
     m_current.has_commit = has_commit;
     m_segments.emplace_back(m_current);
@@ -377,7 +318,6 @@ auto WALManager::roll_forward(std::vector<WALRecordPosition> &positions) -> Resu
                 break;
             return Err {record.error()};
         }
-//printf("fwd @ %u\n", record->lsn().value);
 
         if (m_writer->flushed_lsn() < record->lsn())
             m_writer->set_flushed_lsn(record->lsn());
@@ -407,8 +347,6 @@ auto WALManager::roll_backward(const std::vector<WALRecordPosition> &positions) 
     for (; itr != crend(positions); ++itr) {
         auto position = *itr;
         CCO_TRY_CREATE(record, m_reader->read(position));
-
-//printf("rev @ %u\n", record.lsn().value);
 
         if (record.is_commit()) {
             if (itr != crbegin(positions)) { // TODO: Only valid at the end of the most recent segment?

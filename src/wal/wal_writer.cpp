@@ -56,33 +56,31 @@ auto WALWriter::append(WALRecord record) -> Result<Position>
     const auto next_lsn {record.lsn()};
     CCO_EXPECT_EQ(next_lsn.value, m_last_lsn.value + 1);
 
-    std::optional<WALRecord> temp {std::move(record)};
     std::optional<Position> first;
 
-    while (temp) {
+    for (; ; ) {
         const auto remaining = m_tail.size() - m_position.offset;
         const auto can_fit_some = remaining >= WALRecord::MINIMUM_SIZE;
-        const auto can_fit_all = remaining >= temp->size();
+        const auto can_fit_all = remaining >= record.size();
 
         if (can_fit_some) {
             WALRecord rest;
 
             if (!can_fit_all)
-                rest = temp->split(remaining - WALRecord::HEADER_SIZE);
+                rest = record.split(remaining - WALRecord::HEADER_SIZE);
 
             if (!first.has_value())
                 first = m_position;
 
-            auto destination = stob(m_tail)
-                                   .range(m_position.offset, temp->size());
-            temp->write(destination);
+            auto destination = stob(m_tail).range(m_position.offset, record.size());
+            record.write(destination);
 
-            m_position.offset += temp->size();
+            m_position.offset += record.size();
 
             if (can_fit_all) {
-                temp.reset();
+                break;
             } else {
-                temp = rest;
+                record = rest;
             }
             continue;
         }

@@ -399,55 +399,6 @@ TEST_F(DatabaseTests, DataPersists)
     ASSERT_TRUE(db.close().is_ok());
 }
 
-TEST_F(DatabaseTests, SanityCheck)
-{
-    static constexpr Size NUM_ITERATIONS {3};
-    static constexpr Size GROUP_SIZE {300};
-    Options options;
-    options.path = BASE;
-    options.page_size = 0x100;
-    options.frame_count = 16;
-
-    RecordGenerator::Parameters param;
-    param.mean_key_size = 20;
-    param.mean_value_size = 20;
-    param.spread = 15;
-    RecordGenerator generator {param};
-    Random random {0};
-
-    // Make sure the database does not exist already.
-    std::error_code ignore;
-    fs::remove_all(BASE, ignore);
-
-    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        Database db {options};
-        ASSERT_TRUE(db.open().is_ok());
-
-        for (const auto &record: generator.generate(random, GROUP_SIZE))
-            ASSERT_TRUE(db.insert(record).is_ok());
-        ASSERT_TRUE(db.close().is_ok());
-    }
-
-    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        Database db {options};
-        ASSERT_TRUE(db.open().is_ok());
-
-        for (const auto &record: generator.generate(random, GROUP_SIZE)) {
-            auto r = db.erase(record.key);
-            if (r.is_not_found())
-                r = db.erase(db.find_minimum());
-
-            if (!r.is_ok())
-                ADD_FAILURE() << "cannot find record to remove";
-        }
-        ASSERT_TRUE(db.close().is_ok());
-    }
-
-    Database db {options};
-    ASSERT_TRUE(db.open().is_ok());
-    ASSERT_EQ(db.info().record_count(), 0);
-}
-
 TEST_F(DatabaseTests, DatabaseRecovers)
 {
     static constexpr Size GROUP_SIZE {500};
@@ -495,6 +446,66 @@ TEST_F(DatabaseTests, DatabaseRecovers)
         ASSERT_EQ(c.value(), itr->value);
     }
 }
+
+//class DatabaseSanityCheck: public testing::TestWithParam<Options> {
+//public:
+//    auto run()
+//    {
+//        static constexpr Size GROUP_SIZE {50};
+//        static constexpr Size NUM_ITERATIONS {30};
+//        RecordGenerator::Parameters param;
+//        param.mean_key_size = 20;
+//        param.mean_value_size = 20;
+//        param.spread = 15;
+//        param.is_unique = true;
+//        RecordGenerator generator {param};
+//        Random random {0};
+//
+//        // Make sure the database does not exist already.
+//        std::error_code ignore;
+//        fs::remove_all(BASE, ignore);
+//
+//        Database db {GetParam()};
+//        ASSERT_TRUE(db.open().is_ok());
+//
+//        const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
+//        std::vector<Record> committed;
+//
+//        auto parity = 0;
+//        for (auto itr = cbegin(records); itr + GROUP_SIZE != cend(records); itr += GROUP_SIZE) {
+//            for (auto record = itr; record != itr + GROUP_SIZE; ++record) {
+//                ASSERT_TRUE(db.insert(*record).is_ok());
+//            }
+//            if (++parity & 1) {
+//                committed.insert(end(committed), itr, itr + GROUP_SIZE);
+//                ASSERT_TRUE(db.commit().is_ok());
+//            } else {
+//                ASSERT_TRUE(db.abort().is_ok());
+//            }
+//            itr += GROUP_SIZE;
+//        }
+//
+//        for (const auto &record: committed) {
+//            const auto c = db.find_exact(record.key);
+//            ASSERT_TRUE(c.is_valid());
+//            ASSERT_EQ(c.value(), record.value);
+//        }
+//    }
+//};
+//
+//TEST_P(DatabaseSanityCheck, Transactions)
+//{
+//    run();
+//}
+//
+//
+//INSTANTIATE_TEST_SUITE_P(
+//    TransactionTestCase,
+//    DatabaseSanityCheck,
+//    ::testing::Values(
+//        Options {"/tmp/__calico_transactions", 0x100, 16, 0644}
+////        Options {"", 0x100, 16, 0644}
+//        ));
 
 class MockDatabase {
 public:

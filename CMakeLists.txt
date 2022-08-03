@@ -62,7 +62,7 @@ target_include_directories(calico
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE "${CCO_SOURCE_DIR}")
 target_compile_options(calico
-    PRIVATE "${CCO_WARNINGS}")
+    PRIVATE "${CCO_WARNINGS}" -fno-rtti) # -fno-exceptions) # TODO: Get Calico DB to compile without exceptions. Currently expected.hpp prevents this from working...
 target_link_libraries(calico
     PUBLIC  spdlog::spdlog
     PRIVATE pthread)

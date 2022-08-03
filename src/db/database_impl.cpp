@@ -71,24 +71,24 @@ auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) ->
     FileHeaderReader state {stob(backing)};
 
     CCO_TRY_STORE(impl->m_pool, BufferPool::open({
-                                    *home,
-                                    sink,
-                                    state.flushed_lsn(),
-                                    revised.frame_count,
-                                    state.page_count(),
-                                    state.page_size(),
-                                    revised.permissions,
-                                    revised.use_xact,
-                                }));
+        *home,
+        sink,
+        state.flushed_lsn(),
+        revised.frame_count,
+        state.page_count(),
+        state.page_size(),
+        revised.permissions,
+        revised.use_xact,
+    }));
 
     CCO_TRY_STORE(impl->m_tree, Tree::open({
-                                    impl->m_pool.get(),
-                                    sink,
-                                    state.free_start(),
-                                    state.free_count(),
-                                    state.record_count(),
-                                    state.node_count(),
-                                }));
+        impl->m_pool.get(),
+        sink,
+        state.free_start(),
+        state.free_count(),
+        state.record_count(),
+        state.node_count(),
+    }));
 
     impl->m_sink = std::move(sink);
     impl->m_logger = logger;
@@ -103,17 +103,11 @@ auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) ->
         CCO_TRY(impl->commit());
         CCO_TRY(impl->m_pool->flush());
     } else {
-        CCO_TRY(impl->load_header());
         // This is a no-op if the WAL is empty.
-        if (revised.use_xact) {
+        if (revised.use_xact)
             CCO_TRY(impl->m_pool->recover());
+        CCO_TRY(impl->load_header());
 
-            CCO_TRY_CREATE(root, impl->m_pool->acquire(PageId::base(), false));
-            auto header = get_file_header_reader(root);
-            impl->m_pool->load_header(header);
-            impl->m_tree->load_header(header);
-            CCO_TRY(impl->m_pool->release(std::move(root)));
-        }
     }
     return impl;
 }
@@ -282,7 +276,7 @@ auto Database::Impl::save_header() -> Result<void>
 
 auto Database::Impl::load_header() -> Result<void>
 {
-    CCO_TRY_CREATE(root, m_tree->root(true));
+    CCO_TRY_CREATE(root, m_tree->root(false));
     auto header = get_file_header_reader(root);
     m_logger->trace("loading file header");
     m_pool->load_header(header);

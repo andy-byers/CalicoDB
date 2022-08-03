@@ -18,10 +18,16 @@ namespace {
 
 } // namespace
 
-WALPayload::WALPayload(const PageUpdate &param)
+// WAL Record Workflows:
+// (1) Create a WAL record and append it to the WAL
+//     - May involve splitting the record over multiple blocks in the segment
+// (2) Read a WAL record from the WAL reader tail buffer
+//     - May involve merging multiple records together
+
+WALPayload::WALPayload(const PageUpdate &param, Bytes scratch)
 {
-    m_data.resize(HEADER_SIZE);
-    auto bytes = stob(m_data);
+    m_data = scratch;
+    auto bytes = scratch;
 
     put_u32(bytes, param.previous_lsn.value);
     bytes.advance(sizeof(uint32_t));
@@ -30,12 +36,11 @@ WALPayload::WALPayload(const PageUpdate &param)
     bytes.advance(sizeof(uint32_t));
 
     put_u16(bytes, static_cast<uint16_t>(param.changes.size()));
+    bytes.advance(sizeof(uint16_t));
 
     for (const auto &change: param.changes) {
         const auto size = change.before.size();
         CCO_EXPECT_EQ(size, change.after.size());
-        auto chunk = std::string(UPDATE_HEADER_SIZE + 2 * size, '\x00');
-        bytes = stob(chunk);
 
         put_u16(bytes, static_cast<uint16_t>(change.offset));
         bytes.advance(sizeof(uint16_t));
@@ -47,8 +52,10 @@ WALPayload::WALPayload(const PageUpdate &param)
         bytes.advance(size);
 
         mem_copy(bytes, change.after, size);
-        m_data += chunk;
+        bytes.advance(size);
     }
+    CCO_EXPECT_GE(m_data.size(), bytes.size());
+    m_data.truncate(m_data.size() - bytes.size());
 }
 
 auto WALPayload::is_commit() const -> bool
@@ -60,7 +67,7 @@ auto WALPayload::is_commit() const -> bool
 auto WALPayload::decode() const -> PageUpdate
 {
     auto update = PageUpdate {};
-    auto bytes = stob(m_data);
+    auto bytes = m_data;
 
     update.previous_lsn.value = get_u32(bytes);
     bytes.advance(sizeof(uint32_t));
@@ -84,22 +91,24 @@ auto WALPayload::decode() const -> PageUpdate
         region.after = bytes.range(0, region_size);
         bytes.advance(region_size);
     }
+    CCO_EXPECT_TRUE(bytes.is_empty());
     return update;
 }
 
-auto WALRecord::commit(SequenceNumber commit_lsn) -> WALRecord
+auto WALRecord::commit(SequenceNumber commit_lsn, Bytes scratch) -> WALRecord
 {
     return WALRecord {{
         {},
         PageId::null(),
         SequenceNumber::null(),
         commit_lsn,
-    }};
+    }, scratch};
 }
 
-WALRecord::WALRecord(const PageUpdate &update)
-    : m_payload {update},
+WALRecord::WALRecord(const PageUpdate &update, Bytes scratch)
+    : m_payload {update, scratch},
       m_lsn {update.lsn},
+      m_backing {scratch},
       m_crc {crc_32(m_payload.data())},
       m_type {Type::FULL}
 {}
@@ -144,10 +153,10 @@ auto WALRecord::read(BytesView in) -> Result<bool>
         return Err {message.corruption()};
     }
 
-    m_payload.m_data.resize(payload_size);
+    m_payload.m_data = m_backing.range(0, payload_size);
 
     // payload (xB)
-    mem_copy(stob(m_payload.m_data), in, payload_size);
+    mem_copy(m_payload.m_data, in, payload_size);
     return true;
 }
 
@@ -175,7 +184,7 @@ auto WALRecord::write(Bytes out) const noexcept -> void
     out.advance(sizeof(uint16_t));
 
     // payload (xB)
-    mem_copy(out, stob(m_payload.m_data), payload_size);
+    mem_copy(out, m_payload.m_data, payload_size);
 }
 
 auto WALRecord::is_consistent() const -> bool
@@ -197,9 +206,12 @@ auto WALRecord::split(Index offset_in_payload) -> WALRecord
 {
     CCO_EXPECT_LT(offset_in_payload, m_payload.m_data.size());
     WALRecord rhs;
+    rhs.m_backing = m_backing.range(offset_in_payload); // TODO: Added...
+    rhs.m_payload.m_data = m_payload.m_data; // TODO: Added...
 
-    rhs.m_payload.m_data = m_payload.m_data.substr(offset_in_payload);
-    m_payload.m_data.resize(offset_in_payload);
+    rhs.m_payload.m_data.advance(offset_in_payload);
+    m_payload.m_data.truncate(offset_in_payload);
+
 
     rhs.m_lsn = m_lsn;
     rhs.m_crc = m_crc;
@@ -232,7 +244,10 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
     static constexpr auto ERROR_PRIMARY = "cannot merge WAL records";
 
     CCO_EXPECT_TRUE(is_record_type_valid(rhs.m_type));
+    const auto new_size = m_payload.m_data.size() + rhs.m_payload.m_data.size();
+    m_payload.m_data = m_backing;
     m_payload.append(rhs.m_payload);
+    m_payload.m_data.truncate(new_size);
 
     if (m_type == Type::EMPTY) {
         if (rhs.m_type == Type::MIDDLE || rhs.m_type == Type::LAST) {
@@ -252,7 +267,7 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
         if (m_lsn != rhs.m_lsn || m_crc != rhs.m_crc) {
             ThreePartMessage message;
             message.set_primary(ERROR_PRIMARY);
-            message.set_detail("parts to not belong to the same logical record");
+            message.set_detail("parts do not belong to the same logical record");
             return Err {message.corruption()};
         }
 

@@ -26,23 +26,32 @@ public:
     static constexpr Size UPDATE_HEADER_SIZE {4};
 
     WALPayload() = default;
+
+    explicit WALPayload(Bytes scratch)
+        : m_data {scratch}
+    {}
+
     ~WALPayload() = default;
-    explicit WALPayload(const PageUpdate &);
+    WALPayload(const PageUpdate &, Bytes);
     [[nodiscard]] auto is_commit() const -> bool;
     [[nodiscard]] auto decode() const -> PageUpdate;
 
     [[nodiscard]] auto data() const -> BytesView
     {
-        return stob(m_data);
+        return m_data;
     }
 
     auto append(const WALPayload &rhs) -> void
     {
-        m_data += rhs.m_data;
+        mem_copy(m_data.range(m_cursor), rhs.m_data);
+        m_cursor += rhs.m_data.size();
     }
 
 private:
-    std::string m_data; ///< Payload contents
+    // TODO: Beware that m_data may be exactly the size of an entire payload, if the payload was made with the PageUpdate constructor, otherwise, it is the full scratch memory
+    //       and one should use the WALRecord payload size instead.
+    Bytes m_data; ///< Payload contents
+    Index m_cursor {};
 };
 
 /**
@@ -61,9 +70,14 @@ public:
         FULL = 0x45,
     };
 
-    static auto commit(SequenceNumber) -> WALRecord;
     WALRecord() = default;
-    explicit WALRecord(const PageUpdate &);
+
+    explicit WALRecord(Bytes scratch)
+        : m_backing {scratch}
+    {}
+
+    static auto commit(SequenceNumber, Bytes) -> WALRecord;
+    WALRecord(const PageUpdate &, Bytes);
     ~WALRecord() = default;
 
     [[nodiscard]] auto lsn() const -> SequenceNumber
@@ -118,6 +132,7 @@ public:
 private:
     WALPayload m_payload;
     SequenceNumber m_lsn;
+    Bytes m_backing;
     Index m_crc {};
     Type m_type {Type::EMPTY};
 };
