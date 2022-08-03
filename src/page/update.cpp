@@ -5,20 +5,22 @@
 namespace cco {
 
 namespace impl {
+    using Range = ChangeDescriptor;
+
     auto can_merge(const Range &lhs, const Range &rhs) -> bool
     {
         // TODO: Could eliminate the first check and perhaps rename the function to
         //       reflect the precondition `lhs.x <= rhs.x`. We only call this on two
         //       ranges that are already ordered by the `x` field. Maybe we could call
         //       it `can_merge_ordered()` or something.
-        return lhs.x <= rhs.x && rhs.x <= lhs.x + lhs.dx;
+        return lhs.offset <= rhs.offset && rhs.offset <= lhs.offset + lhs.size;
     }
 
     auto merge(const Range &lhs, const Range &rhs) -> Range
     {
-        const auto rhs_end = rhs.x + rhs.dx;
-        const auto new_dx = std::max(lhs.dx, rhs_end - lhs.x);
-        return Range {lhs.x, new_dx};
+        const auto rhs_end = rhs.offset + rhs.size;
+        const auto new_dx = std::max(lhs.size, rhs_end - lhs.offset);
+        return Range {lhs.offset, new_dx};
     }
 
     auto compress_ranges(std::vector<Range> &ranges) -> void
@@ -44,10 +46,10 @@ namespace impl {
             ranges.emplace_back(range);
             return;
         }
-        auto itr = std::upper_bound(ranges.begin(), ranges.end(), range, [](const Range &lhs, const Range &rhs) {
-            return lhs.x <= rhs.x;
+        auto itr = std::upper_bound(ranges.begin(), ranges.end(), range, [](const auto &lhs, const auto &rhs) {
+            return lhs.offset <= rhs.offset;
         });
-        const auto try_merge = [&itr](const Range &lhs, const Range &rhs) {
+        const auto try_merge = [&itr](const auto &lhs, const auto &rhs) {
             if (can_merge(lhs, rhs)) {
                 *itr = merge(lhs, rhs);
                 return true;
@@ -69,39 +71,47 @@ namespace impl {
 
 } // namespace impl
 
-UpdateManager::UpdateManager(BytesView page, ManualScratch scratch)
-    : m_scratch {scratch},
-      m_snapshot {scratch.data()},
+ChangeManager::ChangeManager(BytesView page, ManualScratch before, ManualScratch after)
+    : m_before {before},
+      m_after {after},
       m_current {page}
 {
-    CCO_EXPECT_EQ(page.size(), m_snapshot.size());
-    mem_copy(scratch.data(), m_current);
+    CCO_EXPECT_EQ(m_current.size(), m_before.size());
+    CCO_EXPECT_EQ(m_current.size(), m_after.size());
+    mem_copy(m_before.data(), m_current);
 }
 
-auto UpdateManager::push(Range range) -> void
+auto ChangeManager::push_change(ChangeDescriptor change) -> void
 {
-    impl::insert_range(m_ranges, range);
+    impl::insert_range(m_changes, change);
 }
 
-auto UpdateManager::scratch() -> ManualScratch
+auto ChangeManager::release_scratches(ManualScratchManager &manager) -> void
 {
-    return m_scratch;
+    // Beware! Don't use an instance after calling this method on it!
+    manager.put(m_before);
+    manager.put(m_after);
 }
 
-auto UpdateManager::collect_updates() -> std::vector<ChangedRegion>
+auto ChangeManager::collect_changes() -> std::vector<ChangedRegion>
 {
-    impl::compress_ranges(m_ranges);
+    impl::compress_ranges(m_changes);
 
-    std::vector<ChangedRegion> update(m_ranges.size());
-    auto itr = m_ranges.begin();
+    // Copy all the data we need to reference off of the page. This lets us reuse the page buffer immediately, so that we can
+    // push construction of WAL records to a background thread. Otherwise, the page needs to remain live and unaltered until
+    // the "after" contents are written somewhere.
+    mem_copy(m_after.data(), m_current);
+
+    std::vector<ChangedRegion> update(m_changes.size());
+    auto itr = m_changes.begin();
     for (auto &[offset, before, after]: update) {
         const auto &[x, dx] = *itr;
         offset = x;
-        before = m_snapshot.range(x, dx);
-        after = m_current.range(x, dx);
+        before = m_before.data().range(x, dx);
+        after = m_after.data().range(x, dx);
         itr++;
     }
-    m_ranges.clear();
+    m_changes.clear();
     return update;
 }
 

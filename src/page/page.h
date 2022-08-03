@@ -14,7 +14,7 @@ class Frame;
 class FileHeaderReader;
 class FileHeaderWriter;
 class IBufferPool;
-class UpdateManager;
+class ChangeManager;
 
 class Page final {
 public:
@@ -61,7 +61,7 @@ public:
         return m_manager != nullptr;
     }
 
-    auto set_manager(UpdateManager &manager) -> void
+    auto set_manager(ChangeManager &manager) -> void
     {
         CCO_EXPECT_EQ(m_manager, nullptr);
         m_manager = &manager;
@@ -82,7 +82,7 @@ private:
     [[nodiscard]] auto header_offset() const -> Index;
 
     UniqueNullable<IBufferPool *> m_source;
-    UpdateManager *m_manager {};
+    ChangeManager *m_manager {};
     Bytes m_data;
     PageId m_id;
     bool m_is_writable {};

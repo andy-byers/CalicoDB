@@ -154,8 +154,13 @@ auto WALManager::discard(Page &page) -> void
 auto WALManager::append(Page &page) -> Result<void>
 {
     auto update = m_tracker.collect(page, ++m_writer->last_lsn());
+
     if (!update.changes.empty()) {
+        // TODO: Append to shared memory queue here so that background thread can (a) create the WAL record, which is costly, and (b) write to disk, which is also costly.
+        //       May need to move the update manager object out of the "registry" in case the buffer pool asks for the same page to be tracked again.
+
         CCO_TRY_CREATE(position, m_writer->append(WALRecord {update, stob(m_scratch)}));
+        m_tracker.cleanup(update.page_id);
         m_current.positions.emplace_back(position);
         m_has_pending = true;
 
@@ -178,7 +183,6 @@ auto WALManager::truncate(SegmentId id) -> Result<void>
 
 auto WALManager::flush() -> Result<void>
 {
-    m_tracker.reset();
     return m_writer->flush();
 }
 
@@ -226,7 +230,7 @@ auto WALManager::abort() -> Result<void>
 {
     CCO_EXPECT_TRUE(m_has_pending);
 
-    CCO_TRY(flush());
+    CCO_TRY(m_writer->flush());
 
     if (!m_current.positions.empty())
         CCO_TRY(undo_segment(m_current));
@@ -253,7 +257,7 @@ auto WALManager::commit() -> Result<void>
     header.update_header_crc();
     CCO_TRY(m_pool->release(std::move(root)));
     CCO_TRY(m_writer->append(WALRecord::commit(commit_lsn, stob(m_scratch))));
-    CCO_TRY(flush());
+    CCO_TRY(m_writer->flush());
 
     m_has_pending = false;
 

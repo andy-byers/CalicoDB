@@ -9,6 +9,11 @@
 
 namespace cco {
 
+struct ChangeDescriptor {
+    Index offset {};
+    Size size {};
+};
+
 struct ChangedRegion {
     Index offset {};  ///< Offset of the region from the start of the page
     BytesView before; ///< Contents of the region pre-update
@@ -22,38 +27,30 @@ struct PageUpdate {
     SequenceNumber lsn;
 };
 
-class UpdateManager {
+class ChangeManager {
 public:
-    struct Range {
-        Index x {};
-        Size dx {};
-    };
+    ChangeManager(BytesView, ManualScratch, ManualScratch);
+    [[nodiscard]] auto collect_changes() -> std::vector<ChangedRegion>;
+    auto release_scratches(ManualScratchManager&) -> void;
+    auto push_change(ChangeDescriptor) -> void;
 
-    UpdateManager(BytesView, ManualScratch);
-    [[nodiscard]] auto scratch() -> ManualScratch;
-    [[nodiscard]] auto collect_updates() -> std::vector<ChangedRegion>;
-    auto push(Range) -> void;
-
-    [[nodiscard]] auto has_updates() -> bool
+    [[nodiscard]] auto has_changes() -> bool
     {
-        return !m_ranges.empty();
+        return !m_changes.empty();
     }
 
 private:
-    std::vector<Range> m_ranges;
-    ManualScratch m_scratch;
-    BytesView m_snapshot;
+    std::vector<ChangeDescriptor> m_changes;
+    ManualScratch m_before;
+    ManualScratch m_after;
     BytesView m_current;
 };
 
 namespace impl {
-
-    using Range = UpdateManager::Range;
-
-    auto can_merge(const Range &lhs, const Range &rhs) -> bool;
-    auto merge(const Range &lhs, const Range &rhs) -> Range;
-    auto compress_ranges(std::vector<Range> &ranges) -> void;
-    auto insert_range(std::vector<Range> &ranges, Range) -> void;
+    auto can_merge(const ChangeDescriptor &lhs, const ChangeDescriptor &rhs) -> bool;
+    auto merge(const ChangeDescriptor &lhs, const ChangeDescriptor &rhs) -> ChangeDescriptor;
+    auto compress_ranges(std::vector<ChangeDescriptor> &ranges) -> void;
+    auto insert_range(std::vector<ChangeDescriptor> &ranges, ChangeDescriptor) -> void;
 
 } // namespace impl
 

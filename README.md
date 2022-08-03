@@ -8,7 +8,7 @@
 > This first requires us to flush all dirty database pages, otherwise our updates won't reach disk in the event of a crash.
 > In the next few weeks, I'll be implementing WAL segmentation and cleanup of obsolete WAL segments.
 > We won't get rid of any segments until all of their referenced pages are written to disk as part of the normal "steal" buffer pool management routine.
-> If we push the cleanup of obsolete segments off into a background thread, we end up with much less work each time commit() is called.
+> If we push_change the cleanup of obsolete segments off into a background thread, we end up with much less work each time commit() is called.
 > All we have to do is write the commit WAL record, flush the tail buffer, call fsync(), then open a new WAL segment.
 
 

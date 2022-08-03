@@ -16,12 +16,13 @@ public:
     {}
 
     [[nodiscard]] auto collect(Page &, SequenceNumber) -> PageUpdate;
-    auto reset() -> void;
+    auto cleanup(PageId) -> void;
     auto discard(Page &) -> void;
     auto track(Page &) -> void;
 
 private:
-    std::unordered_map<PageId, UpdateManager, PageId::Hash> m_registry;
+    std::unordered_map<PageId, ChangeManager, PageId::Hash> m_registry;
+    std::unordered_map<PageId, ChangeManager, PageId::Hash> m_processing;
     ManualScratchManager m_scratch;
 };
 

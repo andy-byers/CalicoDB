@@ -41,7 +41,7 @@ public:
     /**
      * Push a page onto the free list stack.
      *
-     * @param page The page to push.
+     * @param page The page to push_change.
      */
     [[nodiscard]] auto push(Page page) -> Result<void>;
 

@@ -86,7 +86,7 @@ auto Page::bytes(Index offset, Size size) -> Bytes
 {
     CCO_EXPECT_TRUE(m_is_writable);
     if (m_manager)
-        m_manager->push({offset, size});
+        m_manager->push_change({offset, size});
     m_is_dirty = true;
     return m_data.range(offset, size);
 }
