@@ -135,7 +135,7 @@ auto BufferPool::commit() -> Result<void>
 
     // All we need to do is write a commit record and start a new WAL segment.
     if (m_uses_xact)
-        return m_wal->commit();
+        POOL_TRY(m_wal->commit());
 
     return {};
 }

@@ -85,7 +85,7 @@ private:
 
     mutable std::mutex m_mutex;
     Tracker m_tracker;
-    ScratchManager m_scratch;
+    RollingScratchManager m_scratch;
     std::vector<UndoInfo> m_stack;
     std::vector<Frame> m_frames;
     Size m_page_size {};

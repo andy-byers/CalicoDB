@@ -2,6 +2,10 @@
 #define CCO_WAL_WAL_MANAGER_H
 
 #include "interface.h"
+#include <condition_variable>
+#include <optional>
+#include <mutex>
+#include <thread>
 #include "page/update.h"
 #include "utils/queue.h"
 #include "utils/tracker.h"
@@ -10,19 +14,6 @@ namespace cco {
 
 class IDirectory;
 class WALExplorer;
-
-// TODO: Mechanism for writing the WAL in the background. More pertinent, however, is optimizing the WALRecord constructor, which
-//       is the current bottleneck.
-//class BackgroundWriter {
-//public:
-//    BackgroundWriter(std::unique_ptr<IWALWriter>, Queue<WALRecord>&);
-//    [[nodiscard]] auto append(Page &) -> Result<void>;
-//    [[nodiscard]] auto commit() -> Result<void>;
-//private:
-//    Queue<WALRecord> *m_queue;
-//    std::unique_ptr<IWALWriter> m_writer;
-//    bool m_is_running {true};
-//};
 
 class WALManager : public IWALManager {
 public:
@@ -37,6 +28,7 @@ public:
     [[nodiscard]] auto abort() -> Result<void> override;
     [[nodiscard]] auto commit() -> Result<void> override;
     [[nodiscard]] auto cleanup() -> Result<void> override;
+    [[nodiscard]] auto spawn_writer() -> Result<void> override;
     auto discard(Page &) -> void override;
     auto track(Page &) -> void override;
     auto save_header(FileHeaderWriter &) -> void override;
@@ -48,7 +40,6 @@ private:
     [[nodiscard]] auto open_writer_segment(SegmentId) -> Result<void>;
     [[nodiscard]] auto advance_writer(SequenceNumber, bool) -> Result<void>;
     [[nodiscard]] auto undo_segment(const WALSegment&) -> Result<void>;
-    [[nodiscard]] auto maybe_redo_segment(WALSegment&) -> Result<void>;
     [[nodiscard]] auto roll_forward(std::vector<WALRecordPosition> &) -> Result<bool>;
     [[nodiscard]] auto roll_backward(const std::vector<WALRecordPosition> &) -> Result<void>;
     [[nodiscard]] auto read_next(WALExplorer &, std::vector<WALRecordPosition> &) -> Result<WALRecord>;
@@ -60,11 +51,24 @@ private:
     std::shared_ptr<spdlog::logger> m_logger;
     std::vector<WALSegment> m_segments;
     std::string m_scratch;
-    Queue<WALRecord> m_write_queue;
     WALSegment m_current;
     IBufferPool *m_pool {};
     IDirectory *m_home {};
     bool m_has_pending {};
+
+    struct BackgroundState {
+        mutable std::mutex mutex;
+        std::condition_variable condition;
+        std::string record_scratch;
+        std::queue<PageUpdate> pending_updates;
+        std::vector<WALSegment> completed_segments;
+        WALSegment current_segment;
+        Status status {Status::ok()};
+        bool is_running {true};
+    };
+
+    BackgroundState m_background_state;
+    std::optional<std::thread> m_background_task;
 };
 
 } // namespace cco

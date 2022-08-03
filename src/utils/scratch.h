@@ -10,7 +10,7 @@
 
 namespace cco {
 
-class ScratchManager;
+class RollingScratchManager;
 
 class Scratch {
 public:
@@ -39,11 +39,11 @@ private:
     Bytes m_data;
 };
 
-class ScratchManager final {
+class RollingScratchManager final {
 public:
     static constexpr Size MAXIMUM_SCRATCHES {16};
 
-    explicit ScratchManager(Size scratch_size)
+    explicit RollingScratchManager(Size scratch_size)
         : m_scratches(MAXIMUM_SCRATCHES),
           m_scratch_size {scratch_size}
     {

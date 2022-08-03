@@ -153,7 +153,7 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
 
 TEST(ScratchTest, ScratchesAreUnique)
 {
-    ScratchManager manager {1};
+    RollingScratchManager manager {1};
     auto s1 = manager.get();
     auto s2 = manager.get();
     auto s3 = manager.get();

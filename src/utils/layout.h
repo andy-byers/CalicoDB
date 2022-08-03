@@ -55,19 +55,17 @@ public:
 
 class NodeLayout {
 public:
-    static constexpr Size HEADER_CRC_OFFSET {0};
-    static constexpr Size PARENT_ID_OFFSET {4};
-    static constexpr Size RIGHTMOST_CHILD_ID_OFFSET {8};
-    static constexpr Size RIGHT_SIBLING_ID_OFFSET {8};
-    static constexpr Size RESERVED_OFFSET {12};
-    static constexpr Size LEFT_SIBLING_ID_OFFSET {12};
-    static constexpr Size CELL_COUNT_OFFSET {16};
-    static constexpr Size FREE_COUNT_OFFSET {18};
-    static constexpr Size CELL_START_OFFSET {20};
-    static constexpr Size FREE_START_OFFSET {22};
-    static constexpr Size FRAG_TOTAL_OFFSET {24};
-    static constexpr Size FREE_TOTAL_OFFSET {26};
-    static constexpr Size HEADER_SIZE {28};
+    static constexpr Size PARENT_ID_OFFSET {0};
+    static constexpr Size RIGHTMOST_CHILD_ID_OFFSET {4};
+    static constexpr Size RIGHT_SIBLING_ID_OFFSET {4};
+    static constexpr Size RESERVED_OFFSET {8};
+    static constexpr Size LEFT_SIBLING_ID_OFFSET {8};
+    static constexpr Size CELL_COUNT_OFFSET {12};
+    static constexpr Size CELL_START_OFFSET {14};
+    static constexpr Size FREE_START_OFFSET {16};
+    static constexpr Size FRAG_TOTAL_OFFSET {18};
+    static constexpr Size FREE_TOTAL_OFFSET {20};
+    static constexpr Size HEADER_SIZE {22};
 
     static auto header_offset(PageId page_id) noexcept -> Size
     {

@@ -145,9 +145,9 @@ auto deleting_a_database(cco::Database db)
 auto open_database() -> cco::Database
 {
     cco::Options options;
-    options.path = PATH;
+    options.path = "";//PATH;
     options.page_size = 0x8000;
-    options.frame_count = 128;
+    options.frame_count = 128;                                              options.use_xact=false;
     cco::Database db {options};
 
     if (const auto s = db.open(); !s.is_ok()) {

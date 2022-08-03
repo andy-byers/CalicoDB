@@ -3,7 +3,7 @@
 
 namespace cco {
 
-auto ScratchManager::get() -> Scratch
+auto RollingScratchManager::get() -> Scratch
 {
     if (m_counter >= MAXIMUM_SCRATCHES - 1) {
         CCO_EXPECT_EQ(m_counter, MAXIMUM_SCRATCHES - 1);
@@ -13,7 +13,7 @@ auto ScratchManager::get() -> Scratch
     return Scratch {stob(m_scratches[m_counter++])};
 }
 
-auto ScratchManager::reset() -> void
+auto RollingScratchManager::reset() -> void
 {
     m_counter = 0;
     m_emergency.clear();

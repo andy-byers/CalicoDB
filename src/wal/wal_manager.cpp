@@ -8,7 +8,6 @@
 #include "wal_reader.h"
 #include "wal_record.h"
 #include "wal_writer.h"
-#include <optional>
 
 namespace cco {
 
@@ -75,6 +74,10 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
         current.id++;
         current.start++;
     }
+
+
+
+
     CCO_TRY(manager->open_writer_segment(current.id));
     CCO_EXPECT_TRUE(manager->m_writer->is_open());
     manager->m_current = std::move(current);
@@ -88,6 +91,16 @@ WALManager::WALManager(const WALParameters &param)
       m_scratch(param.page_size * 4, '\x00'), // TODO: Find a sensible value for this. Really shouldn't need much more than a page at max, if even.
       m_pool {param.pool}
 {}
+
+auto WALManager::spawn_writer() -> Result<void>
+{
+//    m_background_task = std::thread {[](BackgroundState *state) {
+//        while (state->is_running) {
+//
+//        }
+//    }, &m_background_state};
+    return {};
+}
 
 auto WALManager::cleanup() -> Result<void>
 {

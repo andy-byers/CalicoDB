@@ -102,7 +102,7 @@ auto Cell::key() const -> BytesView
 
 auto Cell::local_value() const -> BytesView
 {
-    //    CCO_EXPECT_TRUE(m_is_external);
+    CCO_EXPECT_TRUE(m_is_external);
     return m_local_value;
 }
 

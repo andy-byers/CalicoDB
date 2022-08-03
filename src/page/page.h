@@ -75,8 +75,6 @@ public:
 
     Page(Page &&) noexcept = default;
     auto operator=(Page &&) noexcept -> Page & = default;
-    Page(const Page &) noexcept = delete;
-    auto operator=(const Page &) noexcept -> Page & = delete;
 
 private:
     [[nodiscard]] auto header_offset() const -> Index;
