@@ -346,7 +346,6 @@ TEST_F(DatabaseTests, ReopenDatabase)
     ASSERT_TRUE(db.close().is_ok());
 }
 
-
 TEST_F(DatabaseTests, Inserts)
 {
     static constexpr Size NUM_ITERATIONS {5};
@@ -399,18 +398,36 @@ TEST_F(DatabaseTests, DataPersists)
     ASSERT_TRUE(db.close().is_ok());
 }
 
+TEST_F(DatabaseTests, CannotCommitEmptyTransaction)
+{
+    Options options;
+    options.path = "/tmp/__database_commit_test";
+    Database db {options};
+    CCO_EXPECT_OK(db.open());
+    CCO_EXPECT_OK(db.insert("a", "1"));
+    CCO_EXPECT_OK(db.insert("b", "2"));
+    CCO_EXPECT_OK(db.insert("c", "3"));
+    CCO_EXPECT_OK(db.commit());
+
+    const auto s = db.commit();
+    ASSERT_TRUE(s.is_logic_error()) << "Error: " << (s.is_ok() ? "commit() should have failed" : s.what());
+    const auto info = db.info();
+    ASSERT_EQ(info.record_count(), 3);
+    ASSERT_EQ(info.page_count(), 1);
+}
+
 TEST_F(DatabaseTests, DatabaseRecovers)
 {
     static constexpr Size GROUP_SIZE {500};
     Options options;
     options.path = BASE;
-    options.page_size = 0x100;
+    options.page_size = 0x400;
     options.frame_count = 16;
 
     RecordGenerator::Parameters param;
-    param.mean_key_size = 20;
+    param.mean_key_size = 40;
     param.mean_value_size = 20;
-    param.spread = 9;
+    param.spread = 20;
     param.is_unique = true;
     RecordGenerator generator {param};
     Random random {0};
@@ -448,6 +465,7 @@ TEST_F(DatabaseTests, DatabaseRecovers)
         ASSERT_EQ(c.value(), itr->value);
     }
 }
+
 
 //class DatabaseSanityCheck: public testing::TestWithParam<Options> {
 //public:
@@ -564,6 +582,42 @@ public:
     std::unique_ptr<Database::Impl> impl;
 };
 
+TEST(MockDatabaseTests, CommitSmallTransactions)
+{
+    MockDatabase db;
+    const auto info = db.impl->info();
+    ASSERT_TRUE(db.impl->commit());
+    const auto record_count = info.record_count();
+
+    for (Index i {}; i < 10; ++i) {
+        ASSERT_TRUE(db.impl->erase(db.impl->find_minimum()));
+        ASSERT_TRUE(db.impl->erase(db.impl->find_maximum()));
+        ASSERT_TRUE(db.impl->commit());
+        ASSERT_EQ(info.record_count(), record_count - 2*(i+1));
+    }
+}
+
+TEST(MockDatabaseTests, AbortSmallTransactions)
+{
+    MockDatabase db;
+    const auto info = db.impl->info();
+    ASSERT_TRUE(db.impl->commit());
+    const auto record_count = info.record_count();
+    auto left = cbegin(db.records);
+    auto right = crbegin(db.records);
+    for (Index i {}; i < 10; ++i, ++left, ++right) {
+        ASSERT_TRUE(db.impl->erase(db.impl->find(stob(left->key))));
+        ASSERT_TRUE(db.impl->erase(db.impl->find(stob(right->key))));
+        ASSERT_TRUE(db.impl->abort());
+        ASSERT_EQ(info.record_count(), record_count);
+    }
+    for (const auto &[key, value]: db.records) {
+        auto c = db.impl->find_exact(stob(key));
+        ASSERT_TRUE(c.is_valid());
+        ASSERT_EQ(c.value(), value);
+    }
+}
+
 TEST(MockDatabaseTests, RecoversFromFailedCommit)
 {
     using testing::_;
@@ -585,6 +639,38 @@ TEST(MockDatabaseTests, RecoversFromFailedCommit)
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(db.impl->status().is_ok());
 }
+
+//TEST(MockDatabaseTests, SanityCheck)
+//{
+//    static constexpr Size NUM_ITERATIONS {10};
+//    static constexpr Size GROUP_SIZE {500};
+//    using testing::_;
+//    using testing::Return;
+//
+//    MockDatabase db;
+//    auto remaining = db.records;
+//    for (auto itr = cbegin(db.records); itr != cend(db.records); ++itr) {
+//        auto n = db.random.next_int(50);
+//        while (itr != cend(db.records) && n-- > 0) {
+//
+//        }
+//    }
+//
+//    auto wal_mock = db.mock->get_mock_wal_writer_file("latest");
+//    ON_CALL(*wal_mock, write(_))
+//        .WillByDefault(Return(Err {Status::system_error("123")}));
+//
+//    auto r = db.impl->commit();
+//    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
+//    ASSERT_TRUE(r.error().is_system_error()) << "Unexpected error: " << r.error().what();
+//    ASSERT_EQ(r.error().what(), "123");
+//    ASSERT_EQ(db.impl->status().what(), "123") << "System error should be stored in database status";
+//
+//    wal_mock->delegate_to_fake();
+//    r = db.impl->abort();
+//    ASSERT_TRUE(r.has_value());
+//    ASSERT_TRUE(db.impl->status().is_ok());
+//}
 
 template<class Mock>
 auto run_close_error_test(MockDatabase &db, Mock &mock)
@@ -641,6 +727,72 @@ TEST(RealDatabaseTests, DatabaseObjectTypes)
     ASSERT_TRUE(ptr->open().is_ok());
     ASSERT_TRUE(ptr->close().is_ok());
     ASSERT_TRUE(Database::destroy(std::move(*ptr)).is_ok());
+}
+
+class RecoveryTests: public testing::TestWithParam<Size> {
+public:
+    static constexpr auto SOURCE = "/tmp/__calico_recovery_tests";
+    static constexpr auto TARGET = "/tmp/__calico_recovery_tests_alt";
+
+    RecoveryTests()
+    {
+        std::error_code ignore;
+        fs::remove_all(SOURCE, ignore);
+        fs::remove_all(TARGET, ignore);
+        CCO_EXPECT_OK(db.open());
+    }
+
+    ~RecoveryTests() override
+    {
+        EXPECT_EQ(options.path, TARGET) << "fail_and_reopen() was never called";
+        EXPECT_TRUE(db.is_open()) << "Database should be open";
+        std::error_code ignore;
+        fs::remove_all(SOURCE, ignore);
+        CCO_EXPECT_OK(Database::destroy(std::move(db)));
+    }
+
+    auto fail_and_recover() -> Status
+    {
+        EXPECT_EQ(options.path, SOURCE) << "fail_and_reopen() was called more than once";
+        fs::copy(SOURCE, TARGET);
+        CCO_EXPECT_OK(db.close());
+        options.path = TARGET;
+        db = Database {options};
+        return db.open();
+    }
+
+    Options options {
+        SOURCE,
+        0x400,
+        16,
+        0666,
+        true,
+    };
+
+    Database db {options};
+};
+
+TEST_F(RecoveryTests, RollsBackUncommittedTransaction)
+{
+    CCO_EXPECT_OK(db.insert("a", "1"));
+    CCO_EXPECT_OK(db.insert("b", "2"));
+    CCO_EXPECT_OK(db.insert("c", "3"));
+    CCO_EXPECT_OK(fail_and_recover());
+    const auto info = db.info();
+    ASSERT_EQ(info.record_count(), 0);
+    ASSERT_EQ(info.page_count(), 1);
+}
+
+TEST_F(RecoveryTests, PreservesCommittedTransaction)
+{
+    CCO_EXPECT_OK(db.insert("a", "1"));
+    CCO_EXPECT_OK(db.insert("b", "2"));
+    CCO_EXPECT_OK(db.insert("c", "3"));
+    CCO_EXPECT_OK(db.commit());
+    CCO_EXPECT_OK(fail_and_recover());
+    const auto info = db.info();
+    ASSERT_EQ(info.record_count(), 3);
+    ASSERT_EQ(info.page_count(), 1);
 }
 
 } // <anonymous>

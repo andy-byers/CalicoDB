@@ -43,17 +43,17 @@ auto main(int argc, const char *argv[]) -> int
     options.page_size = 0x200;
     options.path = path;
     Database db {options};
-    CCO_EXPECT_TRUE(db.open().is_ok());
+    CCO_EXPECT_OK(db.open());
     {
         std::ofstream ofs {value_path, std::ios::trunc};
         CCO_EXPECT_TRUE(ofs.is_open());
         for (Index i {}; i < num_committed; ++i) {
             const auto key = make_key<KEY_WIDTH>(i);
             const auto value = random_string(random, 2, 15);
-            CCO_EXPECT_TRUE(db.insert(stob(key), stob(value)).is_ok());
+            CCO_EXPECT_OK(db.insert(stob(key), stob(value)));
             ofs << value << '\n';
         }
-        CCO_EXPECT_TRUE(db.commit().is_ok());
+        CCO_EXPECT_OK(db.commit());
     }
 
     puts(value_path.c_str());
@@ -63,14 +63,14 @@ auto main(int argc, const char *argv[]) -> int
     for (Index i {}; i < LIMIT; ++i) {
         const auto key = std::to_string(random.next_int(num_committed * 2));
         const auto value = random_string(random, 0, options.page_size / 2);
-        CCO_EXPECT_TRUE(db.insert(stob(key), stob(value)).is_ok());
+        CCO_EXPECT_OK(db.insert(stob(key), stob(value)));
 
         // Keep the database from getting too large.
         if (const auto info = db.info(); info.record_count() > max_database_size) {
             while (info.record_count() >= max_database_size / 2) {
                 const auto cursor = db.find_minimum();
                 CCO_EXPECT_TRUE(cursor.is_valid());
-                CCO_EXPECT_TRUE(db.erase(cursor.key()).is_ok());
+                CCO_EXPECT_OK(db.erase(cursor.key()));
             }
         }
     }

@@ -6,7 +6,8 @@
 
 namespace cco {
 
-static constexpr const char *EXPECTATION_MATCHER = "Expect";
+static constexpr auto BOOL_EXPECTATION_MATCHER = "^Expectation";
+static constexpr auto STAT_EXPECTATION_MATCHER = "^Unexpected";
 
 } // cco
 

@@ -199,7 +199,15 @@ auto Database::Impl::erase(Cursor cursor) -> Result<bool>
 
 auto Database::Impl::commit() -> Result<void>
 {
+    static constexpr auto ERROR_PRIMARY = "cannot commit";
     m_logger->trace("committing");
+
+    if (!m_pool->can_commit()) {
+        LogMessage message {*m_logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail("transaction is empty");
+        return Err {message.logic_error()};
+    }
     return save_header()
         .and_then([this]() -> Result<void> {
             CCO_TRY(m_pool->commit());
@@ -207,7 +215,7 @@ auto Database::Impl::commit() -> Result<void>
             return {};
         })
         .or_else([this](const Status &status) -> Result<void> {
-            m_logger->error("cannot commit");
+            m_logger->error(ERROR_PRIMARY);
             m_logger->error("(reason) {}", status.what());
             return Err {status};
         });
@@ -231,10 +239,15 @@ auto Database::Impl::abort() -> Result<void>
 
 auto Database::Impl::close() -> Result<void>
 {
-    const auto cr = commit();
-    if (!cr.has_value() && !cr.error().is_logic_error()) {
+    auto cr = commit();
+    if (!cr.has_value()) {
         m_logger->error("cannot commit before close");
-        m_logger->error("(reason) {}", cr.error().what());
+        if (cr.error().is_logic_error()) {
+            cr = Result<void> {};
+            m_logger->error("(reason) transaction is empty");
+        } else {
+            m_logger->error("(reason) {}", cr.error().what());
+        }
     }
 
     const auto fr = m_pool->flush();

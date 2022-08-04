@@ -123,15 +123,9 @@ auto BufferPool::flush() -> Result<void>
 
 auto BufferPool::commit() -> Result<void>
 {
+    CCO_EXPECT_TRUE(can_commit());
     if (!m_status.is_ok())
         return Err {m_status};
-
-    if (!can_commit()) {
-        ThreePartMessage message;
-        message.set_primary("cannot commit");
-        message.set_detail("transaction is empty");
-        return Err {message.logic_error()};
-    }
 
     // All we need to do is write a commit record and start a new WAL segment.
     if (m_uses_xact)
@@ -142,6 +136,8 @@ auto BufferPool::commit() -> Result<void>
 
 auto BufferPool::abort() -> Result<void>
 {
+    CCO_EXPECT_TRUE(can_commit());
+
     if (!m_uses_xact) {
         ThreePartMessage message;
         message.set_primary("cannot abort");
@@ -149,13 +145,6 @@ auto BufferPool::abort() -> Result<void>
         message.set_hint("transactions are disabled");
         return Err {message.logic_error()};
     }
-    if (!can_commit()) {
-        ThreePartMessage message;
-        message.set_primary("cannot abort");
-        message.set_detail("transaction is empty");
-        return Err {message.logic_error()};
-    }
-    // TODO: Add the undo changes as new WAL records in a special transaction?
 
     CCO_TRY(m_wal->abort());
     CCO_TRY(flush());

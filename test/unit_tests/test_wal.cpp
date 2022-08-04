@@ -39,14 +39,10 @@ public:
         writer = WALWriter::create({nullptr, *home, create_sink(), PAGE_SIZE, SequenceNumber::null()}).value();
         CCO_EXPECT_TRUE(writer->open(*home->open_file("wal-0", Mode::WRITE_ONLY | Mode::CREATE | Mode::APPEND, DEFAULT_PERMISSIONS)).has_value());
         CCO_EXPECT_TRUE(reader->open(*home->open_file("wal-0", Mode::READ_ONLY, DEFAULT_PERMISSIONS)).has_value());
-        backing = home->get_shared("wal-0");
-        faults = home->get_faults("wal-0");
     }
 
     ~WALReaderWriterTests() override = default;
 
-    SharedMemory backing;
-    FaultControls faults;
     std::unique_ptr<FakeDirectory> home;
     std::unique_ptr<IWALReader> reader;
     std::unique_ptr<IWALWriter> writer;
@@ -146,7 +142,7 @@ TEST_F(WALReaderWriterTests, WritesRecordCorrectly)
     ASSERT_TRUE(position->block_id == 0 and position->offset == 0);
     ASSERT_TRUE(writer->flush());
 
-    const auto &memory = backing.memory();
+    const auto &memory = home->get_shared("wal-latest").memory();
     std::string scratch(2 * PAGE_SIZE, '\x00');
     WALRecord record {stob(scratch)};
     ASSERT_TRUE(record.read(stob(memory)));
@@ -501,19 +497,6 @@ TEST_F(WALTests, AbortRollsBackUpdates)
     assert_page_is_same_as_before(page);
 }
 
-TEST_F(WALTests, CommitIsACheckpoint)
-{
-    auto page = allocate_page();
-    alter_page(page);
-    ASSERT_TRUE(pool->release(std::move(page)));
-    ASSERT_TRUE(pool->commit());
-    auto r = pool->abort();
-    ASSERT_FALSE(r) << "abort() should have failed";
-    ASSERT_TRUE(r.error().is_logic_error());
-    page = pool->acquire(PageId::base(), false).value();
-    assert_page_is_same_as_after(page);
-}
-
 TEST_F(WALTests, AbortSanityCheck)
 {
     static constexpr Size num_iterations {500};
@@ -524,7 +507,7 @@ TEST_F(WALTests, AbortSanityCheck)
         auto page = allocate_page();
         alter_page(page);
         ASSERT_TRUE(pool->release(std::move(page)));
-        if (i && i % commit_interval == 0) {
+        if (i && i < num_iterations - commit_interval && i % commit_interval == 0) {
             ASSERT_TRUE(pool->commit());
         }
     }
@@ -647,12 +630,6 @@ TEST_F(MockWALTests, SystemErrorIsPropagated)
     }
     ASSERT_TRUE(pool->status().is_system_error());
     ASSERT_EQ(pool->status().what(), "123");
-}
-
-TEST_F(MockWALTests, CannotAbortIfNotUsingTransactions)
-{
-    setup(false);
-    ASSERT_TRUE(pool->abort().error().is_logic_error());
 }
 
 } // <anonymous>

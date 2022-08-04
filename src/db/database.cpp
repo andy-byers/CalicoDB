@@ -70,8 +70,10 @@ auto Database::destroy(Database db) -> Status
     if (db.is_open())
         s = db.close();
 
+    // remove() and remove_all() return this on failure. See https://en.cppreference.com/w/cpp/filesystem/remove.
+    static constexpr auto error_value = static_cast<std::uintmax_t>(-1);
     if (const auto &path = db.m_options.path; !path.empty()) {
-        if (std::error_code error; !fs::remove_all(path, error))
+        if (std::error_code error; fs::remove_all(path, error) == error_value)
             return Status::system_error(error.message());
     }
 

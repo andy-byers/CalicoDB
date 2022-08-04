@@ -18,89 +18,99 @@ struct Identifier {
     };
 
     constexpr Identifier() noexcept = default;
+    constexpr auto operator=(const Identifier &rhs) -> Identifier&
+    {
+        value = rhs.value;
+        return *this;
+    }
+    constexpr Identifier(const Identifier &rhs)
+        : value {rhs.value}
+    {}
+
+    ~Identifier() = default;
 
     template<class Id>
-    constexpr explicit Identifier(Id id) noexcept:
-          value {id} {}
+    constexpr explicit Identifier(Id &&id) noexcept
+        : value {std::forward<Id>(id)} {}
 
     template<class Id>
-    auto operator==(const Id &rhs) const noexcept -> bool
+    constexpr auto operator==(const Id &rhs) const noexcept -> bool
     {
         return value == T(rhs);
     }
 
     template<class Id>
-    auto operator!=(const Id &rhs) const noexcept -> bool
+    constexpr auto operator!=(const Id &rhs) const noexcept -> bool
     {
         return value != T(rhs);
     }
 
     template<class Id>
-    auto operator<(const Id &rhs) const noexcept -> bool
+    constexpr auto operator<(const Id &rhs) const noexcept -> bool
     {
         return value < T(rhs);
     }
 
     template<class Id>
-    auto operator<=(const Id &rhs) const noexcept -> bool
+    constexpr auto operator<=(const Id &rhs) const noexcept -> bool
     {
         return value <= T(rhs);
     }
 
     template<class Id>
-    auto operator>(const Id &rhs) const noexcept -> bool
+    constexpr auto operator>(const Id &rhs) const noexcept -> bool
     {
         return value > T(rhs);
     }
 
     template<class Id>
-    auto operator>=(const Id &rhs) const noexcept -> bool
+    constexpr auto operator>=(const Id &rhs) const noexcept -> bool
     {
         return value >= T(rhs);
     }
 
     template<class Id>
-    auto operator+=(const Id &rhs) noexcept -> Identifier&
+    constexpr auto operator+=(const Id &rhs) noexcept -> Identifier&
     {
         value += T(rhs);
         return *this;
     }
 
     template<class Id>
-    auto operator-=(const Id &rhs) noexcept -> Identifier&
+    constexpr auto operator-=(const Id &rhs) noexcept -> Identifier&
     {
         CCO_EXPECT_GE(value, T(rhs));
         value -= T(rhs);
         return *this;
     }
 
-    auto operator++() -> Identifier &
+    constexpr auto operator++() -> Identifier &
     {
         value++;
         return *this;
     }
 
-    auto operator--() -> Identifier &
+    constexpr auto operator--() -> Identifier &
     {
         value--;
         return *this;
     }
 
-    auto operator++(int) -> Identifier
+    constexpr auto operator++(int) -> Identifier
     {
         const auto temp = *this;
         ++*this;
         return temp;
     }
 
-    auto operator--(int) -> Identifier
+    constexpr auto operator--(int) -> Identifier
     {
         const auto temp = *this;
         --*this;
         return temp;
     }
 
-    explicit operator T() const
+    explicit constexpr operator T() const
     {
         return value;
     }

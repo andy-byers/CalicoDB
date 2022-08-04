@@ -3,6 +3,7 @@
 #include "calico/bytes.h"
 #include "calico/options.h"
 #include "page/cell.h"
+#include "page/file_header.h"
 #include "page/node.h"
 #include "page/page.h"
 #include "random.h"
@@ -404,6 +405,75 @@ public:
     PageId arbitrary_pid {2ULL};
 };
 
+TEST_F(NodeTests, RootNodeFieldsAreDistinct)
+{
+    auto root = make_node(PageId::base(), PageType::EXTERNAL_NODE);
+    FileHeaderReader reader {root.page().view(0, FileLayout::HEADER_SIZE)};
+    FileHeaderWriter writer {root.page().bytes(0, FileLayout::HEADER_SIZE)};
+
+    const auto number = random.next_int(std::numeric_limits<std::uint64_t>::max() / 2,
+                                                        std::numeric_limits<std::uint64_t>::max());
+
+    writer.set_page_count(number);
+    writer.set_free_start(PageId {number * 10});
+    writer.set_record_count(number * 20);
+    writer.set_flushed_lsn(SequenceNumber {number * 30});
+    writer.set_page_size(0x1234);
+    writer.update_magic_code();
+    writer.update_header_crc();
+    root.page().set_lsn(SequenceNumber {number * 40});
+    NodeHeader::set_right_sibling_id(root.page(), PageId {number * 50});
+    NodeHeader::set_left_sibling_id(root.page(), PageId {number * 60});
+    NodeHeader::set_cell_count(root.page(), 0x2345);
+    NodeHeader::set_cell_start(root.page(), 0x3456);
+    NodeHeader::set_frag_count(root.page(), 0x4567);
+    NodeHeader::set_free_start(root.page(), 0x5678);
+    NodeHeader::set_free_total(root.page(), 0x6789);
+    CCO_EXPECT_EQ(root.page().lsn(), SequenceNumber {number * 40});
+    CCO_EXPECT_EQ(root.page().type(), PageType::EXTERNAL_NODE);
+    ASSERT_TRUE(reader.is_magic_code_consistent());
+    ASSERT_TRUE(reader.is_header_crc_consistent());
+    ASSERT_EQ(reader.page_count(), number);
+    ASSERT_EQ(reader.free_start(), number * 10);
+    ASSERT_EQ(reader.record_count(), number * 20);
+    ASSERT_EQ(reader.flushed_lsn(), number * 30);
+    ASSERT_EQ(reader.page_size(), 0x1234);
+    ASSERT_EQ(NodeHeader::right_sibling_id(root.page()), PageId {number * 50});
+    ASSERT_EQ(NodeHeader::left_sibling_id(root.page()), PageId {number * 60});
+    ASSERT_EQ(NodeHeader::cell_count(root.page()), 0x2345);
+    ASSERT_EQ(NodeHeader::cell_start(root.page()), 0x3456);
+    ASSERT_EQ(NodeHeader::frag_count(root.page()), 0x4567);
+    ASSERT_EQ(NodeHeader::free_start(root.page()), 0x5678);
+    ASSERT_EQ(NodeHeader::free_total(root.page()), 0x6789);
+}
+
+TEST_F(NodeTests, NonRootNodeFieldsAreDistinct)
+{
+    auto root = make_node(++PageId::base(), PageType::EXTERNAL_NODE);
+    const auto number = random.next_int(std::numeric_limits<std::uint64_t>::max() / 2,
+                                        std::numeric_limits<std::uint64_t>::max());
+
+    root.page().set_lsn(SequenceNumber {number * 40});
+    NodeHeader::set_parent_id(root.page(), PageId {number * 50});
+    NodeHeader::set_right_sibling_id(root.page(), PageId {number * 60});
+    NodeHeader::set_left_sibling_id(root.page(), PageId {number * 80});
+    NodeHeader::set_cell_count(root.page(), 0x2345);
+    NodeHeader::set_cell_start(root.page(), 0x3456);
+    NodeHeader::set_frag_count(root.page(), 0x4567);
+    NodeHeader::set_free_start(root.page(), 0x5678);
+    NodeHeader::set_free_total(root.page(), 0x6789);
+    CCO_EXPECT_EQ(root.page().lsn(), SequenceNumber {number * 40});
+    CCO_EXPECT_EQ(root.page().type(), PageType::EXTERNAL_NODE);
+    ASSERT_EQ(NodeHeader::parent_id(root.page()), PageId {number * 50});
+    ASSERT_EQ(NodeHeader::right_sibling_id(root.page()), PageId {number * 60});
+    ASSERT_EQ(NodeHeader::left_sibling_id(root.page()), PageId {number * 80});
+    ASSERT_EQ(NodeHeader::cell_count(root.page()), 0x2345);
+    ASSERT_EQ(NodeHeader::cell_start(root.page()), 0x3456);
+    ASSERT_EQ(NodeHeader::frag_count(root.page()), 0x4567);
+    ASSERT_EQ(NodeHeader::free_start(root.page()), 0x5678);
+    ASSERT_EQ(NodeHeader::free_total(root.page()), 0x6789);
+}
+
 TEST_F(NodeTests, FreshNodesAreEmpty)
 {
     auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
@@ -413,7 +483,7 @@ TEST_F(NodeTests, FreshNodesAreEmpty)
 TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 {
     auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
-    ASSERT_DEATH(node.remove_at(0, MAX_CELL_HEADER_SIZE), EXPECTATION_MATCHER);
+    ASSERT_DEATH(node.remove_at(0, MAX_CELL_HEADER_SIZE), BOOL_EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
@@ -579,7 +649,7 @@ TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
     auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
     auto cell = cell_backing.get_cell("hello", value, true);
     node.insert(std::move(cell));
-    ASSERT_DEATH(node.insert(cell_backing.get_cell("hello", value, true)), EXPECTATION_MATCHER);
+    ASSERT_DEATH(node.insert(cell_backing.get_cell("hello", value, true)), BOOL_EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeTests, RemovingNonexistentCellDoesNothing)

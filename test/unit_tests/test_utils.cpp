@@ -19,7 +19,7 @@ using namespace cco;
 
 TEST(AssertionDeathTest, Assert)
 {
-    ASSERT_DEATH(CCO_EXPECT(false), EXPECTATION_MATCHER);
+    ASSERT_DEATH(CCO_EXPECT_TRUE(false), BOOL_EXPECTATION_MATCHER);
 }
 
 TEST(TestEncoding, ReadsAndWrites)

@@ -785,7 +785,7 @@ auto split_root(Node &root, Node &child) -> void
 
 auto merge_root(Node &root, Node &child) -> void
 {
-    CCO_EXPECT(root.rightmost_child_id() == child.id());
+    CCO_EXPECT_EQ(root.rightmost_child_id(), child.id());
     const auto needs_defragment = NodeHeader::free_start(child.page()) || NodeHeader::frag_count(child.page());
     if (needs_defragment)
         child.defragment();

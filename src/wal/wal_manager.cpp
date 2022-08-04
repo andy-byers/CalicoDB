@@ -60,17 +60,21 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
     for (auto &segment: segments) {
         WALRecordPosition first;
         CCO_TRY(manager->open_reader_segment(segment.id));
-        CCO_TRY_CREATE(record, manager->m_reader->read(first));
-        CCO_TRY_STORE(segment.has_commit, manager->roll_forward(segment.positions));
-        segment.start = record.lsn();
+        CCO_TRY_CREATE(is_empty, manager->m_reader->is_empty());
+        if (!is_empty) {
+            CCO_TRY_CREATE(record, manager->m_reader->read(first));
+            CCO_TRY_STORE(segment.has_commit, manager->roll_forward(segment.positions));
+            segment.start = record.lsn();
+            manager->m_segments.emplace_back(std::move(segment));
+        }
     }
 
     WALSegment current;
     current.id = SegmentId::base();
     current.start = SequenceNumber::base();
-    if (!segments.empty()) {
-        current.id = segments.back().id;
-        current.start = segments.back().start;
+    if (!manager->m_segments.empty()) {
+        current.id = manager->m_segments.back().id;
+        current.start = manager->m_segments.back().start;
         current.id++;
         current.start++;
     }
@@ -81,7 +85,6 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
     CCO_TRY(manager->open_writer_segment(current.id));
     CCO_EXPECT_TRUE(manager->m_writer->is_open());
     manager->m_current = std::move(current);
-    manager->m_segments = std::move(segments);
     return manager;
 }
 

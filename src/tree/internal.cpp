@@ -169,7 +169,7 @@ auto Internal::positioned_remove(Position position) -> Result<void>
 
 auto Internal::balance_after_overflow(Node node) -> Result<void>
 {
-    CCO_EXPECT(node.is_overflowing());
+    CCO_EXPECT_TRUE(node.is_overflowing());
     while (node.is_overflowing()) {
         if (node.overflow_cell().is_attached())
             m_scratch.reset();
@@ -229,7 +229,7 @@ auto Internal::split_non_root(Node node) -> Result<Node>
 {
     CCO_EXPECT_FALSE(node.id().is_base());
     CCO_EXPECT_FALSE(node.parent_id().is_null());
-    CCO_EXPECT(node.is_overflowing());
+    CCO_EXPECT_TRUE(node.is_overflowing());
 
     CCO_TRY_CREATE(parent, m_pool->acquire(node.parent_id(), true));
     CCO_TRY_CREATE(sibling, m_pool->allocate(node.type()));
