@@ -73,8 +73,8 @@ public:
         m_manager = nullptr;
     }
 
-    Page(Page &&) noexcept = default;
-    auto operator=(Page &&) noexcept -> Page & = default;
+    Page(Page &&) = default;
+    auto operator=(Page &&) -> Page & = default;
 
 private:
     [[nodiscard]] auto header_offset() const -> Index;

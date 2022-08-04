@@ -84,8 +84,8 @@ public:
         reset(reset_header);
     }
 
-    Node(Node &&rhs) noexcept = default;
-    auto operator=(Node &&rhs) noexcept -> Node & = default;
+    Node(Node &&rhs) = default;
+    auto operator=(Node &&rhs) -> Node & = default;
 
     [[nodiscard]] auto id() const -> PageId
     {
