@@ -18,12 +18,10 @@ public:
     [[nodiscard]] auto magic_code() const -> Index;
     [[nodiscard]] auto header_crc() const -> Index;
     [[nodiscard]] auto page_count() const -> Size;
-    [[nodiscard]] auto node_count() const -> Size;
-    [[nodiscard]] auto free_count() const -> Size;
-    [[nodiscard]] auto free_start() const -> PID;
+    [[nodiscard]] auto free_start() const -> PageId;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto record_count() const -> Size;
-    [[nodiscard]] auto flushed_lsn() const -> LSN;
+    [[nodiscard]] auto flushed_lsn() const -> SequenceNumber;
     [[nodiscard]] auto is_magic_code_consistent() const -> bool;
     [[nodiscard]] auto is_header_crc_consistent() const -> bool;
 
@@ -38,12 +36,10 @@ public:
     auto update_magic_code() -> void;
     auto update_header_crc() -> void;
     auto set_page_count(Size) -> void;
-    auto set_node_count(Size) -> void;
-    auto set_free_count(Size) -> void;
-    auto set_free_start(PID) -> void;
+    auto set_free_start(PageId) -> void;
     auto set_page_size(Size) -> void;
-    auto set_key_count(Size) -> void;
-    auto set_flushed_lsn(LSN) -> void;
+    auto set_record_count(Size) -> void;
+    auto set_flushed_lsn(SequenceNumber) -> void;
 
 private:
     std::string m_backing;

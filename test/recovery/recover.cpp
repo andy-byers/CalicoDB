@@ -49,7 +49,7 @@ auto main(int argc, const char *argv[]) -> int
     Options options;
     options.path = path;
     Database db {options};
-    CCO_EXPECT_TRUE(db.open().is_ok());
+    CCO_EXPECT_OK(db.open());
     const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.
@@ -62,12 +62,12 @@ auto main(int argc, const char *argv[]) -> int
         CCO_EXPECT_TRUE(cursor.is_valid());
         CCO_EXPECT_EQ(btos(cursor.key()), key);
         CCO_EXPECT_EQ(cursor.value(), value);
-        CCO_EXPECT_TRUE(db.erase(stob(key)).is_ok());
+        CCO_EXPECT_OK(db.erase(stob(key)));
     }
 
     // All records should have been reached and removed.
     CCO_EXPECT_EQ(key_counter, num_committed);
     CCO_EXPECT_EQ(info.record_count(), 0);
-    CCO_EXPECT_TRUE(Database::destroy(std::move(db)).is_ok());
+    CCO_EXPECT_OK(Database::destroy(std::move(db)));
     return 0;
 }

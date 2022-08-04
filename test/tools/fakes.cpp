@@ -95,13 +95,13 @@ static auto do_write(std::string &memory, Index cursor, BytesView in)
 auto FakeDirectory::children() const -> Result<std::vector<std::string>>
 {
     std::vector<std::string> result;
-    std::transform(begin(m_shared), end(m_shared), begin(result), [](auto entry) {
+    std::transform(begin(m_shared), end(m_shared), back_inserter(result), [](auto entry) {
         return entry.first;
     });
     return result;
 }
 
-auto FakeDirectory::open_file(const std::string &name, Mode mode, int permissions) -> Result<std::unique_ptr<IFile>>
+auto FakeDirectory::open_file(const std::string &name, Mode mode, int) -> Result<std::unique_ptr<IFile>>
 {
     std::unique_ptr<IFile> file;
     if (auto itr = m_shared.find(name); itr != std::end(m_shared)) {
@@ -115,16 +115,16 @@ auto FakeDirectory::open_file(const std::string &name, Mode mode, int permission
         m_faults.emplace(name, faults);
         file = std::make_unique<FakeFile>(name, shared, faults);
     }
-    if (auto opened = file->open(name, mode, permissions)) {
-        return file;
-    } else {
-        return Err {opened.error()};
-    }
+    return file;
 }
 
-auto FakeDirectory::remove() -> Result<void>
+auto FakeDirectory::remove_file(const std::string &name) -> Result<void>
 {
-    m_path.clear();
+    // If we have a live IFile object somewhere, we need to make sure it is closed before calling this method.
+    CCO_EXPECT_NE(m_shared.find(name), end(m_shared));
+    CCO_EXPECT_NE(m_faults.find(name), end(m_faults));
+    m_shared.erase(name);
+    m_faults.erase(name);
     return {};
 }
 
@@ -197,7 +197,13 @@ auto MockDirectory::open_and_register_mock_file(const std::string &name, Mode mo
 {
     auto *mock = new testing::NiceMock<MockFile> {m_fake.open_file(name, mode, permissions).value()};
     mock->delegate_to_fake();
-    m_files.emplace(mock_name(name, mode), mock);
+    if (name == "data") {
+        m_data_file = mock;
+    } else if (int(mode) & O_APPEND) {
+        m_wal_writer_files.emplace(name, mock);
+    } else {
+        m_wal_reader_files.emplace(name, mock);
+    }
     return std::unique_ptr<IFile> {mock};
 }
 

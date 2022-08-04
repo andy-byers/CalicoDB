@@ -39,10 +39,10 @@ auto MemoryPool::close() -> Result<void>
 
 auto MemoryPool::allocate() -> Result<Page>
 {
-    return acquire(PID {ROOT_ID_VALUE + page_count()}, true);
+    return acquire(PageId {ROOT_ID_VALUE + page_count()}, true);
 }
 
-auto MemoryPool::acquire(PID id, bool is_writable) -> Result<Page>
+auto MemoryPool::acquire(PageId id, bool is_writable) -> Result<Page>
 {
     CCO_TRY_CREATE(page, fetch(id, is_writable));
     if (m_uses_xact && is_writable)
@@ -50,12 +50,12 @@ auto MemoryPool::acquire(PID id, bool is_writable) -> Result<Page>
     return page;
 }
 
-auto MemoryPool::fetch(PID id, bool is_writable) -> Result<Page>
+auto MemoryPool::fetch(PageId id, bool is_writable) -> Result<Page>
 {
     CCO_EXPECT_FALSE(id.is_null());
     while (page_count() <= id.as_index()) {
         m_frames.emplace_back(m_page_size);
-        m_frames.back().reset(PID::from_index(m_frames.size() - 1));
+        m_frames.back().reset(PageId::from_index(m_frames.size() - 1));
     }
     return m_frames[id.as_index()].borrow(this, is_writable);
 }
@@ -78,7 +78,7 @@ auto MemoryPool::do_release(Page &page) -> void
     const auto index = page.id().as_index();
     CCO_EXPECT_LT(index, m_frames.size());
     if (page.has_manager()) {
-        for (const auto &change: m_tracker.collect(page, LSN::null()).changes)
+        for (const auto &change: m_tracker.collect(page, SequenceNumber::null()).changes)
             m_stack.emplace_back(UndoInfo {btos(change.before), page.id(), change.offset});
     }
     m_frames[index].synchronize(page);

@@ -18,37 +18,44 @@ namespace {
 
 } // namespace
 
-WALPayload::WALPayload(const PageUpdate &param)
+// WAL Record Workflows:
+// (1) Create a WAL record and append it to the WAL
+//     - May involve splitting the record over multiple blocks in the segment
+// (2) Read a WAL record from the WAL reader tail buffer
+//     - May involve merging multiple records together
+
+WALPayload::WALPayload(const PageUpdate &param, Bytes scratch)
 {
-    m_data.resize(HEADER_SIZE);
-    auto bytes = stob(m_data);
+    m_data = scratch;
+    auto bytes = scratch;
 
-    put_u32(bytes, param.previous_lsn.value);
-    bytes.advance(sizeof(uint32_t));
+    put_u64(bytes, param.previous_lsn.value);
+    bytes.advance(sizeof(param.previous_lsn.value));
 
-    put_u32(bytes, param.page_id.value);
-    bytes.advance(sizeof(uint32_t));
+    put_u64(bytes, param.page_id.value);
+    bytes.advance(sizeof(param.page_id.value));
 
-    put_u16(bytes, static_cast<uint16_t>(param.changes.size()));
+    put_u16(bytes, static_cast<std::uint16_t>(param.changes.size()));
+    bytes.advance(sizeof(std::uint16_t));
 
     for (const auto &change: param.changes) {
         const auto size = change.before.size();
         CCO_EXPECT_EQ(size, change.after.size());
-        auto chunk = std::string(UPDATE_HEADER_SIZE + 2 * size, '\x00');
-        bytes = stob(chunk);
 
-        put_u16(bytes, static_cast<uint16_t>(change.offset));
-        bytes.advance(sizeof(uint16_t));
+        put_u16(bytes, static_cast<std::uint16_t>(change.offset));
+        bytes.advance(sizeof(std::uint16_t));
 
-        put_u16(bytes, static_cast<uint16_t>(size));
-        bytes.advance(sizeof(uint16_t));
+        put_u16(bytes, static_cast<std::uint16_t>(size));
+        bytes.advance(sizeof(std::uint16_t));
 
         mem_copy(bytes, change.before, size);
         bytes.advance(size);
 
         mem_copy(bytes, change.after, size);
-        m_data += chunk;
+        bytes.advance(size);
     }
+    CCO_EXPECT_GE(m_data.size(), bytes.size());
+    m_data.truncate(m_data.size() - bytes.size());
 }
 
 auto WALPayload::is_commit() const -> bool
@@ -60,23 +67,23 @@ auto WALPayload::is_commit() const -> bool
 auto WALPayload::decode() const -> PageUpdate
 {
     auto update = PageUpdate {};
-    auto bytes = stob(m_data);
+    auto bytes = m_data;
 
-    update.previous_lsn.value = get_u32(bytes);
-    bytes.advance(sizeof(uint32_t));
+    update.previous_lsn.value = get_u64(bytes);
+    bytes.advance(sizeof(update.previous_lsn.value));
 
-    update.page_id.value = get_u32(bytes);
-    bytes.advance(sizeof(uint32_t));
+    update.page_id.value = get_u64(bytes);
+    bytes.advance(sizeof(update.page_id.value));
 
     update.changes.resize(get_u16(bytes));
-    bytes.advance(sizeof(uint16_t));
+    bytes.advance(sizeof(std::uint16_t));
 
     for (auto &region: update.changes) {
         region.offset = get_u16(bytes);
-        bytes.advance(sizeof(uint16_t));
+        bytes.advance(sizeof(std::uint16_t));
 
         const auto region_size = get_u16(bytes);
-        bytes.advance(sizeof(uint16_t));
+        bytes.advance(sizeof(std::uint16_t));
 
         region.before = bytes.range(0, region_size);
         bytes.advance(region_size);
@@ -84,22 +91,24 @@ auto WALPayload::decode() const -> PageUpdate
         region.after = bytes.range(0, region_size);
         bytes.advance(region_size);
     }
+    CCO_EXPECT_TRUE(bytes.is_empty());
     return update;
 }
 
-auto WALRecord::commit(LSN commit_lsn) -> WALRecord
+auto WALRecord::commit(SequenceNumber commit_lsn, Bytes scratch) -> WALRecord
 {
     return WALRecord {{
         {},
-        PID::null(),
-        LSN::null(),
+        PageId::null(),
+        SequenceNumber::null(),
         commit_lsn,
-    }};
+    }, scratch};
 }
 
-WALRecord::WALRecord(const PageUpdate &update)
-    : m_payload {update},
+WALRecord::WALRecord(const PageUpdate &update, Bytes scratch)
+    : m_payload {update, scratch},
       m_lsn {update.lsn},
+      m_backing {scratch},
       m_crc {crc_32(m_payload.data())},
       m_type {Type::FULL}
 {}
@@ -109,8 +118,8 @@ auto WALRecord::read(BytesView in) -> Result<bool>
     static constexpr auto ERROR_PRIMARY = "cannot read WAL record";
 
     // lsn (4B)
-    m_lsn.value = get_u32(in);
-    in.advance(sizeof(uint32_t));
+    m_lsn.value = get_u64(in);
+    in.advance(sizeof(m_lsn.value));
 
     // No more values in the buffer (empty space in the buffer must be zeroed and LSNs
     // start with 1).
@@ -144,10 +153,10 @@ auto WALRecord::read(BytesView in) -> Result<bool>
         return Err {message.corruption()};
     }
 
-    m_payload.m_data.resize(payload_size);
+    m_payload.m_data = m_backing.range(0, payload_size);
 
     // payload (xB)
-    mem_copy(stob(m_payload.m_data), in, payload_size);
+    mem_copy(m_payload.m_data, in, payload_size);
     return true;
 }
 
@@ -155,13 +164,13 @@ auto WALRecord::write(Bytes out) const noexcept -> void
 {
     CCO_EXPECT_GE(out.size(), size());
 
-    // lsn (4B)
-    put_u32(out, static_cast<uint32_t>(m_lsn.value));
-    out.advance(sizeof(uint32_t));
+    // lsn (8B)
+    put_u64(out, m_lsn.value);
+    out.advance(sizeof(m_lsn.value));
 
     // crc (4B)
-    put_u32(out, static_cast<uint32_t>(m_crc));
-    out.advance(sizeof(uint32_t));
+    put_u32(out, static_cast<std::uint32_t>(m_crc));
+    out.advance(sizeof(std::uint32_t));
 
     // type (1B)
     CCO_EXPECT_TRUE(is_record_type_valid(m_type));
@@ -171,11 +180,11 @@ auto WALRecord::write(Bytes out) const noexcept -> void
     // x (2B)
     const auto payload_size = m_payload.m_data.size();
     CCO_EXPECT_NE(payload_size, 0);
-    put_u16(out, static_cast<uint16_t>(payload_size));
-    out.advance(sizeof(uint16_t));
+    put_u16(out, static_cast<std::uint16_t>(payload_size));
+    out.advance(sizeof(std::uint16_t));
 
     // payload (xB)
-    mem_copy(out, stob(m_payload.m_data), payload_size);
+    mem_copy(out, m_payload.m_data, payload_size);
 }
 
 auto WALRecord::is_consistent() const -> bool
@@ -197,9 +206,12 @@ auto WALRecord::split(Index offset_in_payload) -> WALRecord
 {
     CCO_EXPECT_LT(offset_in_payload, m_payload.m_data.size());
     WALRecord rhs;
+    rhs.m_backing = m_backing.range(offset_in_payload); // TODO: Added...
+    rhs.m_payload.m_data = m_payload.m_data; // TODO: Added...
 
-    rhs.m_payload.m_data = m_payload.m_data.substr(offset_in_payload);
-    m_payload.m_data.resize(offset_in_payload);
+    rhs.m_payload.m_data.advance(offset_in_payload);
+    m_payload.m_data.truncate(offset_in_payload);
+
 
     rhs.m_lsn = m_lsn;
     rhs.m_crc = m_crc;
@@ -232,7 +244,10 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
     static constexpr auto ERROR_PRIMARY = "cannot merge WAL records";
 
     CCO_EXPECT_TRUE(is_record_type_valid(rhs.m_type));
+    const auto new_size = m_payload.m_data.size() + rhs.m_payload.m_data.size();
+    m_payload.m_data = m_backing;
     m_payload.append(rhs.m_payload);
+    m_payload.m_data.truncate(new_size);
 
     if (m_type == Type::EMPTY) {
         if (rhs.m_type == Type::MIDDLE || rhs.m_type == Type::LAST) {
@@ -252,7 +267,7 @@ auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
         if (m_lsn != rhs.m_lsn || m_crc != rhs.m_crc) {
             ThreePartMessage message;
             message.set_primary(ERROR_PRIMARY);
-            message.set_detail("parts to not belong to the same logical record");
+            message.set_detail("parts do not belong to the same logical record");
             return Err {message.corruption()};
         }
 

@@ -89,9 +89,8 @@ public:
 
     static auto open(const std::string &name, Mode mode) -> std::unique_ptr<IFile>
     {
-        auto file = std::make_unique<File>();
-        EXPECT_TRUE(file->open(name, mode, 0666));
-        return file;
+        auto fd = *system::open(name, static_cast<int>(mode), 0666);
+        return std::make_unique<File>(fd, mode, name);
     }
 
     std::string test_buffer;
@@ -107,9 +106,8 @@ TEST_F(FileTests, StoresFileInformation)
     // File is closed in the destructor.
     const auto mode = Mode::CREATE | Mode::READ_WRITE | Mode::APPEND;
     auto file = open(PATH, mode);
-    ASSERT_EQ(file->name(), std::filesystem::path {PATH}.filename());
+    ASSERT_EQ(file->name(), PATH);
     ASSERT_EQ(file->mode(), mode);
-    ASSERT_EQ(file->permissions(), 0666);
 }
 
 TEST_F(FileTests, ExistsAfterClose)
@@ -117,15 +115,6 @@ TEST_F(FileTests, ExistsAfterClose)
     // File is closed in the destructor.
     open(PATH, Mode::CREATE);
     ASSERT_TRUE(std::filesystem::exists(PATH));
-}
-
-TEST_F(FileTests, RenameReplacesOldName)
-{
-    // File is closed in the destructor.
-    auto file = open(PATH, Mode::CREATE);
-    ASSERT_TRUE(file->rename(PATH + "_new"));
-    ASSERT_FALSE(std::filesystem::exists(PATH));
-    ASSERT_TRUE(std::filesystem::exists(PATH + "_new"));
 }
 
 TEST_F(FileTests, ReadFromFile)
@@ -198,9 +187,10 @@ public:
     static constexpr Size OVERFLOW_SIZE {std::numeric_limits<Size>::max()};
 
     FileFailureTests()
-        : file {std::make_unique<File>()}
     {
-        EXPECT_TRUE(file->open(PATH, Mode::READ_WRITE | Mode::CREATE | Mode::TRUNCATE, 0666));
+        const auto mode = Mode::READ_WRITE | Mode::CREATE | Mode::TRUNCATE;
+        const auto fd = *system::open(PATH, static_cast<int>(mode), 0666);
+        file = std::make_unique<File>(fd, mode, PATH);
     }
 
     ~FileFailureTests() override
@@ -215,17 +205,15 @@ public:
 
 TEST_F(FileFailureTests, FailsWhenFileExistsButShouldNot)
 {
-    File file;
-    ASSERT_FALSE(file.open(PATH, Mode::CREATE | Mode::EXCLUSIVE, 0666));
+    ASSERT_FALSE(system::open(PATH, static_cast<int>(Mode::CREATE | Mode::EXCLUSIVE), 0666));
 }
 
 TEST_F(FileFailureTests, FailsWhenFileDoesNotExistButShould)
 {
-    ASSERT_TRUE(file->remove());
+    ASSERT_TRUE(system::unlink(PATH));
     ASSERT_TRUE(file->close());
 
-    File file;
-    ASSERT_FALSE(file.open(PATH, Mode {}, 0666));
+    ASSERT_FALSE(system::open(PATH, O_RDONLY, 0666));
 }
 
 TEST_F(FileFailureTests, FailsWhenReadSizeIsTooLarge)
@@ -246,19 +234,6 @@ TEST_F(FileFailureTests, FailsWhenSeekOffsetIsTooLarge)
 TEST_F(FileFailureTests, FailsWhenNewSizeIsTooLarge)
 {
     ASSERT_TRUE(file->resize(OVERFLOW_SIZE).error().is_system_error());
-}
-
-TEST_F(FileTests, FailsWhenNewNameIsTooLong)
-{
-    // File is closed in the destructor.
-    auto file = open(PATH, Mode::CREATE);
-    ASSERT_TRUE(file->rename(std::string(PATH_MAX + 1, 'x')).error().is_system_error());
-}
-
-TEST_F(FileTests, FailsWhenNewNameIsEmpty)
-{
-    auto file = open(PATH, Mode::CREATE);
-    ASSERT_TRUE(file->rename("").error().is_system_error());
 }
 
 TEST_F(FileTests, CannotCloseFileTwice)

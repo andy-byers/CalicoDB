@@ -14,7 +14,7 @@ public:
     struct Parameters {
         BytesView key;
         BytesView local_value;
-        PID overflow_id;
+        PageId overflow_id;
         Size value_size {};
         Size page_size {};
         bool is_external {};
@@ -31,11 +31,11 @@ public:
     [[nodiscard]] auto value_size() const -> Size;
     [[nodiscard]] auto overflow_size() const -> Size;
     [[nodiscard]] auto local_value() const -> BytesView;
-    [[nodiscard]] auto overflow_id() const -> PID;
-    [[nodiscard]] auto left_child_id() const -> PID;
+    [[nodiscard]] auto overflow_id() const -> PageId;
+    [[nodiscard]] auto left_child_id() const -> PageId;
     auto set_is_external(bool) -> void;
-    auto set_left_child_id(PID) -> void;
-    auto set_overflow_id(PID) -> void;
+    auto set_left_child_id(PageId) -> void;
+    auto set_overflow_id(PageId) -> void;
     auto write(Bytes) const -> void;
     auto detach(Scratch, bool = false) -> void;
 
@@ -55,8 +55,8 @@ private:
     std::optional<Scratch> m_scratch;
     BytesView m_key;
     BytesView m_local_value;
-    PID m_left_child_id;
-    PID m_overflow_id;
+    PageId m_left_child_id;
+    PageId m_overflow_id;
     Size m_value_size {};
     Size m_page_size {};
     bool m_is_external {};

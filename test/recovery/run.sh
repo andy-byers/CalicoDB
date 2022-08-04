@@ -58,7 +58,7 @@ function run_instance() {
   local WAIT="$3"
   local SEED="$4"
 
-  rm -f "$FILE_PATH"
+  rm -rf "$FILE_PATH"
   rm -f "$TEMP_PATH"
   true > "$DONE_PATH"
 

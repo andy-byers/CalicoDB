@@ -4,6 +4,7 @@
 #include "calico/bytes.h"
 #include "calico/status.h"
 #include "utils/result.h"
+#include "utils/identifier.h"
 #include "utils/utils.h"
 #include <optional>
 
@@ -15,20 +16,19 @@ class FileHeaderReader;
 class FileHeaderWriter;
 class Frame;
 class Page;
-struct PID;
-struct LSN;
 
 class IBufferPool {
 public:
     virtual ~IBufferPool() = default;
+    [[nodiscard]] virtual auto flushed_lsn() const -> SequenceNumber = 0;
     [[nodiscard]] virtual auto hit_ratio() const -> double = 0;
     [[nodiscard]] virtual auto uses_xact() const -> bool = 0;
     [[nodiscard]] virtual auto page_count() const -> Size = 0;
     [[nodiscard]] virtual auto page_size() const -> Size = 0;
     [[nodiscard]] virtual auto can_commit() const -> bool = 0;
     [[nodiscard]] virtual auto allocate() -> Result<Page> = 0;
-    [[nodiscard]] virtual auto acquire(PID, bool) -> Result<Page> = 0;
-    [[nodiscard]] virtual auto fetch(PID, bool) -> Result<Page> = 0;
+    [[nodiscard]] virtual auto acquire(PageId, bool) -> Result<Page> = 0;
+    [[nodiscard]] virtual auto fetch(PageId, bool) -> Result<Page> = 0;
     [[nodiscard]] virtual auto release(Page) -> Result<void> = 0;
     [[nodiscard]] virtual auto recover() -> Result<void> = 0;
     [[nodiscard]] virtual auto flush() -> Result<void> = 0;

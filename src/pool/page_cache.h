@@ -19,8 +19,8 @@ class PageCache final {
 public:
     using Reference = std::reference_wrapper<Frame>;
     using ConstReference = std::reference_wrapper<const Frame>;
-    using ColdCache = FifoCache<PID, Frame, PID::Hash>;
-    using HotCache = LruCache<PID, Frame, PID::Hash>;
+    using ColdCache = FifoCache<PageId, Frame, PageId::Hash>;
+    using HotCache = LruCache<PageId, Frame, PageId::Hash>;
 
     PageCache() = default;
     ~PageCache() = default;
@@ -35,7 +35,7 @@ public:
         return m_warm.size() + m_hot.size();
     }
 
-    [[nodiscard]] auto contains(PID id) const -> bool
+    [[nodiscard]] auto contains(PageId id) const -> bool
     {
         return m_warm.contains(id) || m_hot.contains(id);
     }
@@ -67,14 +67,14 @@ public:
         return m_hot.end();
     }
 
-    auto put(PID, Frame) -> void;
-    auto get(PID) -> std::optional<Reference>;
-    auto extract(PID) -> std::optional<Frame>;
+    auto put(PageId, Frame) -> void;
+    auto get(PageId) -> std::optional<Reference>;
+    auto extract(PageId) -> std::optional<Frame>;
     auto evict() -> std::optional<Frame>;
 
 private:
-    FifoCache<PID, Frame, PID::Hash> m_warm;
-    LruCache<PID, Frame, PID::Hash> m_hot;
+    FifoCache<PageId, Frame, PageId::Hash> m_warm;
+    LruCache<PageId, Frame, PageId::Hash> m_hot;
     Size m_hits {};
     Size m_misses {};
 };

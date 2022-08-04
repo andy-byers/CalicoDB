@@ -20,6 +20,11 @@ public:
     ~MemoryPool() override = default;
     MemoryPool(Size, bool);
 
+    [[nodiscard]] auto flushed_lsn() const -> SequenceNumber override
+    {
+        return SequenceNumber::null();
+    }
+
     [[nodiscard]] auto hit_ratio() const -> double override
     {
         return 1.0;
@@ -60,9 +65,9 @@ public:
     [[nodiscard]] auto page_count() const -> Size override;
     [[nodiscard]] auto close() -> Result<void> override;
     [[nodiscard]] auto allocate() -> Result<Page> override;
-    [[nodiscard]] auto acquire(PID, bool) -> Result<Page> override;
+    [[nodiscard]] auto acquire(PageId, bool) -> Result<Page> override;
     [[nodiscard]] auto release(Page) -> Result<void> override;
-    [[nodiscard]] auto fetch(PID id, bool is_writable) -> Result<Page> override;
+    [[nodiscard]] auto fetch(PageId id, bool is_writable) -> Result<Page> override;
     [[nodiscard]] auto commit() -> Result<void> override;
     [[nodiscard]] auto abort() -> Result<void> override;
     auto on_release(Page &) -> void override;
@@ -72,7 +77,7 @@ public:
 private:
     struct UndoInfo {
         std::string before;
-        PID id;
+        PageId id;
         Index offset {};
     };
 
@@ -80,7 +85,7 @@ private:
 
     mutable std::mutex m_mutex;
     Tracker m_tracker;
-    ScratchManager m_scratch;
+    RollingScratchManager m_scratch;
     std::vector<UndoInfo> m_stack;
     std::vector<Frame> m_frames;
     Size m_page_size {};

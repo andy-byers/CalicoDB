@@ -41,13 +41,11 @@ auto Directory::open(const std::string &path) -> Result<std::unique_ptr<IDirecto
         });
 }
 
-auto Directory::remove() -> Result<void>
+auto Directory::remove_file(const std::string &name) -> Result<void>
 {
-    // Note that the directory must be empty for this to succeed.
     std::error_code error;
-    if (!fs::remove(m_path, error))
+    if (!fs::remove(m_path / name, error))
         return Err {Status::system_error(error.message())};
-    m_path.clear();
     return {};
 }
 
@@ -76,11 +74,8 @@ auto Directory::children() const -> Result<std::vector<std::string>>
 
 auto Directory::open_file(const std::string &name, Mode mode, int permissions) -> Result<std::unique_ptr<IFile>>
 {
-    auto file = std::make_unique<File>();
-    return file->open(m_path / name, mode, permissions)
-        .and_then([&file]() -> Result<std::unique_ptr<IFile>> {
-            return std::move(file);
-        });
+    CCO_TRY_CREATE(fd, system::open(m_path / name, static_cast<int>(mode), permissions));
+    return std::make_unique<File>(fd, mode, name);
 }
 
 auto Directory::close() -> Result<void>

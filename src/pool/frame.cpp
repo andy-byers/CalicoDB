@@ -55,9 +55,9 @@ auto Frame::synchronize(Page &page) -> void
     m_ref_count--;
 }
 
-auto Frame::page_lsn() const -> LSN
+auto Frame::page_lsn() const -> SequenceNumber
 {
-    return LSN {get_u32(m_bytes.range(PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET))};
+    return SequenceNumber {get_u32(m_bytes.range(PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET))};
 }
 
 } // namespace cco

@@ -8,50 +8,31 @@ namespace cco {
 
 class NodeHeader final {
 public:
-    [[nodiscard]] auto parent_id() const -> PID;
-    [[nodiscard]] auto right_sibling_id() const -> PID;
-    [[nodiscard]] auto rightmost_child_id() const -> PID;
-    [[nodiscard]] auto left_sibling_id() const -> PID;
-    [[nodiscard]] auto reserved() const -> uint32_t;
-    [[nodiscard]] auto cell_count() const -> Size;
-    [[nodiscard]] auto cell_start() const -> Index;
-    [[nodiscard]] auto frag_count() const -> Size;
-    [[nodiscard]] auto free_count() const -> Size;
-    [[nodiscard]] auto free_start() const -> Index;
-    [[nodiscard]] auto free_total() const -> Size;
-    auto set_parent_id(PID) -> void;
-    auto set_right_sibling_id(PID) -> void;
-    auto set_rightmost_child_id(PID) -> void;
-    auto set_left_sibling_id(PID) -> void;
-    auto set_cell_count(Size) -> void;
-    auto set_cell_start(Index) -> void;
-    auto set_frag_count(Size) -> void;
-    auto set_free_count(Size) -> void;
-    auto set_free_start(Index) -> void;
-    auto set_free_total(Size) -> void;
+    [[nodiscard]] static auto parent_id(const Page&) -> PageId;
+    [[nodiscard]] static auto right_sibling_id(const Page&) -> PageId;
+    [[nodiscard]] static auto rightmost_child_id(const Page&) -> PageId;
+    [[nodiscard]] static auto left_sibling_id(const Page&) -> PageId;
+    [[nodiscard]] static auto reserved(const Page&) -> std::uint64_t;
+    [[nodiscard]] static auto cell_count(const Page&) -> Size;
+    [[nodiscard]] static auto cell_start(const Page&) -> Index;
+    [[nodiscard]] static auto frag_count(const Page&) -> Size;
+    [[nodiscard]] static auto free_start(const Page&) -> Index;
+    [[nodiscard]] static auto free_total(const Page&) -> Size;
+    static auto set_parent_id(Page&, PageId) -> void;
+    static auto set_right_sibling_id(Page&, PageId) -> void;
+    static auto set_rightmost_child_id(Page&, PageId) -> void;
+    static auto set_left_sibling_id(Page&, PageId) -> void;
+    static auto set_cell_count(Page&, Size) -> void;
+    static auto set_cell_start(Page&, Index) -> void;
+    static auto set_frag_count(Page&, Size) -> void;
+    static auto set_free_start(Page&, Index) -> void;
+    static auto set_free_total(Page&, Size) -> void;
 
-    [[nodiscard]] auto gap_size() const -> Size;
-    [[nodiscard]] auto max_usable_space() const -> Size;
-    [[nodiscard]] auto cell_area_offset() const -> Size;
-    [[nodiscard]] auto cell_directory_offset() const -> Size;
-    [[nodiscard]] auto header_offset() const -> Index;
-
-    explicit NodeHeader(Page &page)
-        : m_page {&page}
-    {}
-
-    [[nodiscard]] auto page() const -> const Page &
-    {
-        return *m_page;
-    }
-
-    auto page() -> Page &
-    {
-        return *m_page;
-    }
-
-private:
-    Page *m_page {};
+    [[nodiscard]] static auto gap_size(const Page&) -> Size;
+    [[nodiscard]] static auto max_usable_space(const Page&) -> Size;
+    [[nodiscard]] static auto cell_area_offset(const Page&) -> Size;
+    [[nodiscard]] static auto cell_directory_offset(const Page&) -> Size;
+    [[nodiscard]] static auto header_offset(const Page&) -> Index;
 };
 
 class CellDirectory final {
@@ -60,44 +41,31 @@ public:
         Index value;
     };
 
-    explicit CellDirectory(NodeHeader &header)
-        : m_page {&header.page()},
-          m_header {&header}
-    {}
-
-    [[nodiscard]] auto get_pointer(Index) const -> Pointer;
-    auto set_pointer(Index, Pointer) -> void;
-    auto insert_pointer(Index, Pointer) -> void;
-    auto remove_pointer(Index) -> void;
-
-private:
-    Page *m_page {};
-    NodeHeader *m_header {};
+    [[nodiscard]] static auto get_pointer(const Page&, Index) -> Pointer;
+    static auto set_pointer(Page&, Index, Pointer) -> void;
+    static auto insert_pointer(Page&, Index, Pointer) -> void;
+    static auto remove_pointer(Page&, Index) -> void;
 };
 
 class BlockAllocator final {
 public:
-    explicit BlockAllocator(NodeHeader &);
     ~BlockAllocator() = default;
-    [[nodiscard]] auto usable_space() const -> Size;
-    [[nodiscard]] auto compute_free_total() const -> Size;
-    auto allocate(Size) -> Index;
-    auto free(Index, Size) -> void;
-    auto reset() -> void;
+    [[nodiscard]] static auto usable_space(const Page&) -> Size;
+    [[nodiscard]] static auto compute_free_total(const Page&) -> Size;
+    static auto allocate(Page&, Size) -> Index;
+    static auto free(Page&, Index, Size) -> void;
+    static auto reset(Page&) -> void;
 
 private:
     static constexpr Size FREE_BLOCK_HEADER_SIZE {2 * sizeof(uint16_t)};
 
-    [[nodiscard]] auto get_next_pointer(Index) const -> Index;
-    [[nodiscard]] auto get_block_size(Index) const -> Size;
-    auto set_next_pointer(Index, Index) -> void;
-    auto set_block_size(Index, Size) -> void;
-    auto allocate_from_gap(Size) -> Index;
-    auto allocate_from_free(Size) -> Index;
-    auto take_free_space(Index, Index, Size) -> Index;
-
-    Page *m_page {};
-    NodeHeader *m_header {};
+    [[nodiscard]] static auto get_next_pointer(const Page&, Index) -> Index;
+    [[nodiscard]] static auto get_block_size(const Page&, Index) -> Size;
+    static auto set_next_pointer(Page&, Index, Index) -> void;
+    static auto set_block_size(Page&, Index, Size) -> void;
+    static auto allocate_from_gap(Page&, Size) -> Index;
+    static auto allocate_from_free(Page&, Size) -> Index;
+    static auto take_free_space(Page&, Index, Index, Size) -> Index;
 };
 
 class Node final {
@@ -109,47 +77,17 @@ public:
 
     ~Node() = default;
 
-    Node(Page page, bool reset_header)
+    Node(Page page, bool reset_header, Byte *scratch)
         : m_page {std::move(page)},
-          m_header {m_page},
-          m_directory {m_header},
-          m_allocator {m_header}
+          m_scratch {Bytes {scratch, m_page.size()}}
     {
         reset(reset_header);
     }
 
-    Node(Node &&rhs) noexcept
-        : m_page {std::move(rhs.m_page)},
-          m_header {NodeHeader {m_page}},
-          m_directory {CellDirectory {m_header}},
-          m_allocator {BlockAllocator {m_header}},
-          m_overflow {rhs.m_overflow}
-    {}
+    Node(Node &&rhs) = default;
+    auto operator=(Node &&rhs) -> Node & = default;
 
-    auto operator=(Node &&rhs) noexcept -> Node &
-    {
-        if (this != &rhs) {
-            m_page = std::move(rhs.m_page);
-            m_header = NodeHeader {m_page};
-            m_directory = CellDirectory {m_header};
-            m_allocator = BlockAllocator {m_header};
-            m_overflow = rhs.m_overflow;
-            rhs.m_overflow.reset();
-        }
-        return *this;
-    }
-
-    auto header() -> NodeHeader &
-    {
-        return m_header;
-    }
-
-    [[nodiscard]] auto header() const -> const NodeHeader &
-    {
-        return m_header;
-    }
-
-    [[nodiscard]] auto id() const -> PID
+    [[nodiscard]] auto id() const -> PageId
     {
         return m_page.id();
     }
@@ -197,20 +135,20 @@ public:
     [[nodiscard]] auto is_overflowing() const -> bool;
     [[nodiscard]] auto is_underflowing() const -> bool;
     [[nodiscard]] auto is_external() const -> bool;
-    [[nodiscard]] auto child_id(Index) const -> PID;
-    [[nodiscard]] auto parent_id() const -> PID;
-    [[nodiscard]] auto right_sibling_id() const -> PID;
-    [[nodiscard]] auto left_sibling_id() const -> PID;
-    [[nodiscard]] auto rightmost_child_id() const -> PID;
+    [[nodiscard]] auto child_id(Index) const -> PageId;
+    [[nodiscard]] auto parent_id() const -> PageId;
+    [[nodiscard]] auto right_sibling_id() const -> PageId;
+    [[nodiscard]] auto left_sibling_id() const -> PageId;
+    [[nodiscard]] auto rightmost_child_id() const -> PageId;
     [[nodiscard]] auto cell_count() const -> Size;
-    auto set_parent_id(PID) -> void;
-    auto set_right_sibling_id(PID) -> void;
-    auto set_left_sibling_id(PID id) -> void
+    auto set_parent_id(PageId) -> void;
+    auto set_right_sibling_id(PageId) -> void;
+    auto set_left_sibling_id(PageId id) -> void
     {
-        return m_header.set_left_sibling_id(id);
+        return NodeHeader::set_left_sibling_id(m_page, id);
     }
-    auto set_rightmost_child_id(PID) -> void;
-    auto set_child_id(Index, PID) -> void;
+    auto set_rightmost_child_id(PageId) -> void;
+    auto set_child_id(Index, PageId) -> void;
 
     [[nodiscard]] auto usable_space() const -> Size;
     [[nodiscard]] auto max_usable_space() const -> Size;
@@ -225,10 +163,8 @@ private:
     auto allocate(Size, std::optional<Index>) -> Index;
 
     Page m_page;
-    NodeHeader m_header;
-    CellDirectory m_directory;
-    BlockAllocator m_allocator;
     std::optional<Cell> m_overflow {};
+    Bytes m_scratch;
 };
 
 [[nodiscard]] auto can_merge_siblings(const Node &, const Node &, const Cell &) -> bool;

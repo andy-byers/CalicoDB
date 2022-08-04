@@ -6,284 +6,268 @@
 
 namespace cco {
 
-auto NodeHeader::parent_id() const -> PID
+auto NodeHeader::parent_id(const Page &page) -> PageId
 {
-    return PID {get_u32(*m_page, header_offset() + NodeLayout::PARENT_ID_OFFSET)};
+    return PageId {get_u64(page, header_offset(page) + NodeLayout::PARENT_ID_OFFSET)};
 }
 
-auto NodeHeader::right_sibling_id() const -> PID
+auto NodeHeader::right_sibling_id(const Page &page) -> PageId
 {
-    CCO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
-    return PID {get_u32(*m_page, header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
+    CCO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
+    return PageId {get_u64(page, header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
 }
 
-auto NodeHeader::reserved() const -> uint32_t
+auto NodeHeader::reserved(const Page &page) -> std::uint64_t
 {
-    CCO_EXPECT_EQ(m_page->type(), PageType::INTERNAL_NODE);
-    return get_u32(*m_page, header_offset() + NodeLayout::RESERVED_OFFSET);
+    CCO_EXPECT_EQ(page.type(), PageType::INTERNAL_NODE);
+    return get_u64(page, header_offset(page) + NodeLayout::RESERVED_OFFSET);
 }
 
-auto NodeHeader::left_sibling_id() const -> PID
+auto NodeHeader::left_sibling_id(const Page &page) -> PageId
 {
-    CCO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
-    return PID {get_u32(*m_page, header_offset() + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
+    CCO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
+    return PageId {get_u64(page, header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
 }
 
-auto NodeHeader::rightmost_child_id() const -> PID
+auto NodeHeader::rightmost_child_id(const Page &page) -> PageId
 {
-    CCO_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
-    return PID {get_u32(*m_page, header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
+    CCO_EXPECT_NE(page.type(), PageType::EXTERNAL_NODE);
+    return PageId {get_u64(page, header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
 }
 
-auto NodeHeader::cell_count() const -> Size
+auto NodeHeader::cell_count(const Page &page) -> Size
 {
-    return get_u16(*m_page, header_offset() + NodeLayout::CELL_COUNT_OFFSET);
+    return get_u16(page, header_offset(page) + NodeLayout::CELL_COUNT_OFFSET);
 }
 
-auto NodeHeader::free_count() const -> Size
+auto NodeHeader::cell_start(const Page &page) -> Index
 {
-    return get_u16(*m_page, header_offset() + NodeLayout::FREE_COUNT_OFFSET);
+    return get_u16(page, header_offset(page) + NodeLayout::CELL_START_OFFSET);
 }
 
-auto NodeHeader::cell_start() const -> Index
+auto NodeHeader::free_start(const Page &page) -> Index
 {
-    return get_u16(*m_page, header_offset() + NodeLayout::CELL_START_OFFSET);
+    return get_u16(page, header_offset(page) + NodeLayout::FREE_START_OFFSET);
 }
 
-auto NodeHeader::free_start() const -> Index
+auto NodeHeader::frag_count(const Page &page) -> Size
 {
-    return get_u16(*m_page, header_offset() + NodeLayout::FREE_START_OFFSET);
+    return get_u16(page, header_offset(page) + NodeLayout::FRAG_TOTAL_OFFSET);
 }
 
-auto NodeHeader::frag_count() const -> Size
+auto NodeHeader::free_total(const Page &page) -> Size
 {
-    return get_u16(*m_page, header_offset() + NodeLayout::FRAG_TOTAL_OFFSET);
+    return get_u16(page, header_offset(page) + NodeLayout::FREE_TOTAL_OFFSET);
 }
 
-auto NodeHeader::free_total() const -> Size
+auto NodeHeader::set_parent_id(Page &page, PageId parent_id) -> void
 {
-    return get_u16(*m_page, header_offset() + NodeLayout::FREE_TOTAL_OFFSET);
+    CCO_EXPECT_NE(page.id(), PageId::base());
+    const auto offset = header_offset(page) + NodeLayout::PARENT_ID_OFFSET;
+    put_u64(page, offset, parent_id.value);
 }
 
-auto NodeHeader::set_parent_id(PID parent_id) -> void
+auto NodeHeader::set_right_sibling_id(Page &page, PageId right_sibling_id) -> void
 {
-    CCO_EXPECT_NE(m_page->id(), PID::root());
-    const auto offset = header_offset() + NodeLayout::PARENT_ID_OFFSET;
-    put_u32(*m_page, offset, parent_id.value);
+    CCO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
+    const auto offset = header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
+    put_u64(page, offset, right_sibling_id.value);
 }
 
-auto NodeHeader::set_right_sibling_id(PID right_sibling_id) -> void
+auto NodeHeader::set_left_sibling_id(Page &page, PageId left_sibling_id) -> void
 {
-    CCO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
-    const auto offset = header_offset() + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
-    put_u32(*m_page, offset, right_sibling_id.value);
+    CCO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
+    const auto offset = header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET;
+    put_u64(page, offset, left_sibling_id.value);
 }
 
-auto NodeHeader::set_left_sibling_id(PID left_sibling_id) -> void
+auto NodeHeader::set_rightmost_child_id(Page &page, PageId rightmost_child_id) -> void
 {
-    CCO_EXPECT_EQ(m_page->type(), PageType::EXTERNAL_NODE);
-    const auto offset = header_offset() + NodeLayout::LEFT_SIBLING_ID_OFFSET;
-    put_u32(*m_page, offset, left_sibling_id.value);
+    CCO_EXPECT_NE(page.type(), PageType::EXTERNAL_NODE);
+    const auto offset = header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET;
+    put_u64(page, offset, rightmost_child_id.value);
 }
 
-auto NodeHeader::set_rightmost_child_id(PID rightmost_child_id) -> void
-{
-    CCO_EXPECT_NE(m_page->type(), PageType::EXTERNAL_NODE);
-    const auto offset = header_offset() + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET;
-    put_u32(*m_page, offset, rightmost_child_id.value);
-}
-
-auto NodeHeader::set_cell_count(Size cell_count) -> void
+auto NodeHeader::set_cell_count(Page &page, Size cell_count) -> void
 {
     CCO_EXPECT_BOUNDED_BY(uint16_t, cell_count);
-    put_u16(*m_page, header_offset() + NodeLayout::CELL_COUNT_OFFSET, static_cast<uint16_t>(cell_count));
+    put_u16(page, header_offset(page) + NodeLayout::CELL_COUNT_OFFSET, static_cast<uint16_t>(cell_count));
 }
 
-auto NodeHeader::set_free_count(Size free_count) -> void
-{
-    CCO_EXPECT_BOUNDED_BY(uint16_t, free_count);
-    put_u16(*m_page, header_offset() + NodeLayout::FREE_COUNT_OFFSET, static_cast<uint16_t>(free_count));
-}
-
-auto NodeHeader::set_cell_start(Index cell_start) -> void
+auto NodeHeader::set_cell_start(Page &page, Index cell_start) -> void
 {
     CCO_EXPECT_BOUNDED_BY(uint16_t, cell_start);
-    put_u16(*m_page, header_offset() + NodeLayout::CELL_START_OFFSET, static_cast<uint16_t>(cell_start));
+    put_u16(page, header_offset(page) + NodeLayout::CELL_START_OFFSET, static_cast<uint16_t>(cell_start));
 }
 
-auto NodeHeader::set_free_start(Index free_start) -> void
+auto NodeHeader::set_free_start(Page &page, Index free_start) -> void
 {
     CCO_EXPECT_BOUNDED_BY(uint16_t, free_start);
-    put_u16(*m_page, header_offset() + NodeLayout::FREE_START_OFFSET, static_cast<uint16_t>(free_start));
+    put_u16(page, header_offset(page) + NodeLayout::FREE_START_OFFSET, static_cast<uint16_t>(free_start));
 }
 
-auto NodeHeader::set_frag_count(Size frag_count) -> void
+auto NodeHeader::set_frag_count(Page &page, Size frag_count) -> void
 {
     CCO_EXPECT_BOUNDED_BY(uint16_t, frag_count);
-    put_u16(*m_page, header_offset() + NodeLayout::FRAG_TOTAL_OFFSET, static_cast<uint16_t>(frag_count));
+    put_u16(page, header_offset(page) + NodeLayout::FRAG_TOTAL_OFFSET, static_cast<uint16_t>(frag_count));
 }
 
-auto NodeHeader::set_free_total(Size free_total) -> void
+auto NodeHeader::set_free_total(Page &page, Size free_total) -> void
 {
     CCO_EXPECT_BOUNDED_BY(uint16_t, free_total);
-    put_u16(*m_page, header_offset() + NodeLayout::FREE_TOTAL_OFFSET, static_cast<uint16_t>(free_total));
+    put_u16(page, header_offset(page) + NodeLayout::FREE_TOTAL_OFFSET, static_cast<uint16_t>(free_total));
 }
 
-auto NodeHeader::cell_directory_offset() const -> Size
+auto NodeHeader::cell_directory_offset(const Page &page) -> Size
 {
-    return NodeLayout::content_offset(m_page->id());
+    return NodeLayout::content_offset(page.id());
 }
 
-auto NodeHeader::cell_area_offset() const -> Size
+auto NodeHeader::cell_area_offset(const Page &page) -> Size
 {
-    const auto cell_count = get_u16(*m_page, header_offset() + NodeLayout::CELL_COUNT_OFFSET);
-    return cell_directory_offset() + CELL_POINTER_SIZE * cell_count;
+    const auto cell_count = get_u16(page, header_offset(page) + NodeLayout::CELL_COUNT_OFFSET);
+    return cell_directory_offset(page) + CELL_POINTER_SIZE * cell_count;
 }
 
-auto NodeHeader::header_offset() const -> Index
+auto NodeHeader::header_offset(const Page &page) -> Index
 {
-    return NodeLayout::header_offset(m_page->id());
+    return NodeLayout::header_offset(page.id());
 }
 
-auto NodeHeader::gap_size() const -> Size
+auto NodeHeader::gap_size(const Page &page) -> Size
 {
-    const auto top = cell_start();
-    const auto bottom = cell_area_offset();
+    const auto top = cell_start(page);
+    const auto bottom = cell_area_offset(page);
     CCO_EXPECT_GE(top, bottom);
     return top - bottom;
 }
 
-auto NodeHeader::max_usable_space() const -> Size
+auto NodeHeader::max_usable_space(const Page &page) -> Size
 {
-    return m_page->size() - cell_directory_offset();
+    return page.size() - cell_directory_offset(page);
 }
 
-auto CellDirectory::get_pointer(Index index) const -> Pointer
+auto CellDirectory::get_pointer(const Page &page, Index index) -> Pointer
 {
-    CCO_EXPECT_LT(index, m_header->cell_count());
-    return {get_u16(*m_page, m_header->cell_directory_offset() + index * CELL_POINTER_SIZE)};
+    CCO_EXPECT_LT(index, NodeHeader::cell_count(page));
+    return {get_u16(page, NodeHeader::cell_directory_offset(page) + index * CELL_POINTER_SIZE)};
 }
 
-auto CellDirectory::set_pointer(Index index, Pointer pointer) -> void
+auto CellDirectory::set_pointer(Page &page, Index index, Pointer pointer) -> void
 {
-    CCO_EXPECT_LT(index, m_header->cell_count());
-    CCO_EXPECT_LE(pointer.value, m_page->size());
-    put_u16(*m_page, m_header->cell_directory_offset() + index * CELL_POINTER_SIZE, static_cast<uint16_t>(pointer.value));
+    CCO_EXPECT_LT(index, NodeHeader::cell_count(page));
+    CCO_EXPECT_LE(pointer.value, page.size());
+    put_u16(page, NodeHeader::cell_directory_offset(page) + index * CELL_POINTER_SIZE, static_cast<uint16_t>(pointer.value));
 }
 
-auto CellDirectory::insert_pointer(Index index, Pointer pointer) -> void
+auto CellDirectory::insert_pointer(Page &page, Index index, Pointer pointer) -> void
 {
-    CCO_EXPECT_GE(pointer.value, m_header->cell_area_offset());
-    CCO_EXPECT_LT(pointer.value, m_page->size());
-    CCO_EXPECT_LE(index, m_header->cell_count());
-    const auto start = NodeLayout::content_offset(m_page->id());
+    CCO_EXPECT_GE(pointer.value, NodeHeader::cell_area_offset(page));
+    CCO_EXPECT_LT(pointer.value, page.size());
+    CCO_EXPECT_LE(index, NodeHeader::cell_count(page));
+    const auto start = NodeLayout::content_offset(page.id());
     const auto offset = start + CELL_POINTER_SIZE * index;
-    const auto size = (m_header->cell_count() - index) * CELL_POINTER_SIZE;
-    auto chunk = m_page->bytes(offset, size + CELL_POINTER_SIZE);
+    const auto size = (NodeHeader::cell_count(page) - index) * CELL_POINTER_SIZE;
+    auto chunk = page.bytes(offset, size + CELL_POINTER_SIZE);
     mem_move(chunk.range(CELL_POINTER_SIZE), chunk, size);
-    m_header->set_cell_count(m_header->cell_count() + 1);
-    set_pointer(index, pointer);
+    NodeHeader::set_cell_count(page, NodeHeader::cell_count(page) + 1);
+    set_pointer(page, index, pointer);
 }
 
-auto CellDirectory::remove_pointer(Index index) -> void
+auto CellDirectory::remove_pointer(Page &page, Index index) -> void
 {
-    CCO_EXPECT_GT(m_header->cell_count(), 0);
-    CCO_EXPECT_LT(index, m_header->cell_count());
-    const auto start = NodeLayout::header_offset(m_page->id()) + NodeLayout::HEADER_SIZE;
+    CCO_EXPECT_GT(NodeHeader::cell_count(page), 0);
+    CCO_EXPECT_LT(index, NodeHeader::cell_count(page));
+    const auto start = NodeLayout::header_offset(page.id()) + NodeLayout::HEADER_SIZE;
     const auto offset = start + CELL_POINTER_SIZE * index;
-    const auto size = (m_header->cell_count() - index - 1) * CELL_POINTER_SIZE;
-    auto chunk = m_page->bytes(offset, size + CELL_POINTER_SIZE);
+    const auto size = (NodeHeader::cell_count(page) - index - 1) * CELL_POINTER_SIZE;
+    auto chunk = page.bytes(offset, size + CELL_POINTER_SIZE);
     mem_move(chunk, chunk.range(CELL_POINTER_SIZE), size);
-    m_header->set_cell_count(m_header->cell_count() - 1);
+    NodeHeader::set_cell_count(page, NodeHeader::cell_count(page) - 1);
 }
 
-BlockAllocator::BlockAllocator(NodeHeader &header)
-    : m_page {&header.page()},
-      m_header {&header}
-{}
-
-auto BlockAllocator::usable_space() const -> Size
+auto BlockAllocator::usable_space(const Page &page) -> Size
 {
-    return m_header->free_total() + m_header->gap_size();
+    return NodeHeader::free_total(page) + NodeHeader::gap_size(page);
 }
 
-auto BlockAllocator::reset() -> void
+auto BlockAllocator::reset(Page &page) -> void
 {
-    CCO_EXPECT_TRUE(m_page->is_writable());
-    m_header->set_frag_count(0);
-    m_header->set_free_count(0);
-    m_header->set_free_total(0);
+    CCO_EXPECT_TRUE(page.is_writable());
+    NodeHeader::set_frag_count(page, 0);
+    NodeHeader::set_free_start(page, 0);
+    NodeHeader::set_free_total(page, 0);
 }
 
-auto BlockAllocator::compute_free_total() const -> Size
+auto BlockAllocator::compute_free_total(const Page &page) -> Size
 {
-    auto free_total = m_header->frag_count();
-    for (Index i {}, ptr {m_header->free_start()}; i < m_header->free_count(); ++i) {
-        free_total += get_block_size(ptr);
-        ptr = get_next_pointer(ptr);
+    auto free_total = NodeHeader::frag_count(page);
+    for (Index i {}, ptr {NodeHeader::free_start(page)}; ptr; ++i) {
+        free_total += get_block_size(page, ptr);
+        ptr = get_next_pointer(page, ptr);
     }
-    CCO_EXPECT_LE(free_total, m_page->size() - m_header->cell_directory_offset());
+    CCO_EXPECT_LE(free_total, page.size() - NodeHeader::cell_directory_offset(page));
     return free_total;
 }
 
-auto BlockAllocator::get_next_pointer(Index offset) const -> Index
+auto BlockAllocator::get_next_pointer(const Page &page, Index offset) -> Index
 {
-    return get_u16(*m_page, offset);
+    return get_u16(page, offset);
 }
 
-auto BlockAllocator::get_block_size(Index offset) const -> Size
+auto BlockAllocator::get_block_size(const Page &page, Index offset) -> Size
 {
-    return get_u16(*m_page, offset + CELL_POINTER_SIZE);
+    return get_u16(page, offset + CELL_POINTER_SIZE);
 }
 
-auto BlockAllocator::set_next_pointer(Index offset, Index next_pointer) -> void
+auto BlockAllocator::set_next_pointer(Page &page, Index offset, Index next_pointer) -> void
 {
-    CCO_EXPECT_LT(next_pointer, m_page->size());
-    return put_u16(*m_page, offset, static_cast<uint16_t>(next_pointer));
+    CCO_EXPECT_LT(next_pointer, page.size());
+    return put_u16(page, offset, static_cast<uint16_t>(next_pointer));
 }
 
-auto BlockAllocator::set_block_size(Index offset, Size block_size) -> void
+auto BlockAllocator::set_block_size(Page &page, Index offset, Size block_size) -> void
 {
     CCO_EXPECT_GE(block_size, CELL_POINTER_SIZE + sizeof(uint16_t));
-    CCO_EXPECT_LT(block_size, m_header->max_usable_space());
-    return put_u16(*m_page, offset + CELL_POINTER_SIZE, static_cast<uint16_t>(block_size));
+    CCO_EXPECT_LT(block_size, NodeHeader::max_usable_space(page));
+    return put_u16(page, offset + CELL_POINTER_SIZE, static_cast<uint16_t>(block_size));
 }
 
-auto BlockAllocator::allocate_from_free(Size needed_size) -> Index
+auto BlockAllocator::allocate_from_free(Page &page, Size needed_size) -> Index
 {
     // NOTE: We use a value of zero to indicate that there is no previous pointer.
     Index prev_ptr {};
-    auto curr_ptr = m_header->free_start();
+    auto curr_ptr = NodeHeader::free_start(page);
 
-    for (Index i {}; i < m_header->free_count(); ++i) {
-        if (needed_size <= get_block_size(curr_ptr))
-            return take_free_space(prev_ptr, curr_ptr, needed_size);
+    for (Index i {}; curr_ptr != 0; ++i) {
+        if (needed_size <= get_block_size(page, curr_ptr))
+            return take_free_space(page, prev_ptr, curr_ptr, needed_size);
         prev_ptr = curr_ptr;
-        curr_ptr = get_next_pointer(curr_ptr);
+        curr_ptr = get_next_pointer(page, curr_ptr);
     }
     return 0;
 }
 
-auto BlockAllocator::allocate_from_gap(Size needed_size) -> Index
+auto BlockAllocator::allocate_from_gap(Page &page, Size needed_size) -> Index
 {
-    if (needed_size <= m_header->gap_size()) {
-        const auto top = m_header->cell_start() - needed_size;
-        m_header->set_cell_start(top);
+    if (needed_size <= NodeHeader::gap_size(page)) {
+        const auto top = NodeHeader::cell_start(page) - needed_size;
+        NodeHeader::set_cell_start(page, top);
         return top;
     }
     return 0;
 }
 
-auto BlockAllocator::allocate(Size needed_size) -> Index
+auto BlockAllocator::allocate(Page &page, Size needed_size) -> Index
 {
-    CCO_EXPECT_TRUE(m_page->is_writable());
-    CCO_EXPECT_LT(needed_size, m_page->size() - NodeLayout::content_offset(m_page->id()));
+    CCO_EXPECT_TRUE(page.is_writable());
+    CCO_EXPECT_LT(needed_size, page.size() - NodeLayout::content_offset(page.id()));
 
-    if (needed_size > usable_space())
+    if (needed_size > usable_space(page))
         return 0;
-    if (auto ptr = allocate_from_free(needed_size))
+    if (auto ptr = allocate_from_free(page, needed_size))
         return ptr;
-    return allocate_from_gap(needed_size);
+    return allocate_from_gap(page, needed_size);
 }
 
 /* Free block layout:
@@ -291,92 +275,92 @@ auto BlockAllocator::allocate(Size needed_size) -> Index
  *     |  Next Pointer (2B)  |  Size (2B)  |   Free FakeFile (Size-4 B)  |
  *     '---------------------'-------------'---------------------------'
  */
-auto BlockAllocator::take_free_space(Index ptr0, Index ptr1, Size needed_size) -> Index
+auto BlockAllocator::take_free_space(Page &page, Index ptr0, Index ptr1, Size needed_size) -> Index
 {
-    CCO_EXPECT_LT(ptr0, m_page->size());
-    CCO_EXPECT_LT(ptr1, m_page->size());
-    CCO_EXPECT_LT(needed_size, m_page->size());
+    CCO_EXPECT_LT(ptr0, page.size());
+    CCO_EXPECT_LT(ptr1, page.size());
+    CCO_EXPECT_LT(needed_size, page.size());
     const auto is_first = !ptr0;
-    const auto ptr2 = get_next_pointer(ptr1);
-    const auto free_size = get_block_size(ptr1);
+    const auto ptr2 = get_next_pointer(page, ptr1);
+    const auto free_size = get_block_size(page, ptr1);
     CCO_EXPECT_GE(free_size, needed_size);
     const auto diff = free_size - needed_size;
 
     if (diff < 4) {
-        m_header->set_frag_count(m_header->frag_count() + diff);
-        m_header->set_free_count(m_header->free_count() - 1);
+        NodeHeader::set_frag_count(page, NodeHeader::frag_count(page) + diff);
+
         if (is_first) {
-            m_header->set_free_start(ptr2);
+            NodeHeader::set_free_start(page, ptr2);
         } else {
-            set_next_pointer(ptr0, ptr2);
+            set_next_pointer(page, ptr0, ptr2);
         }
     } else {
-        set_block_size(ptr1, diff);
+        set_block_size(page, ptr1, diff);
     }
-    const auto free_total = m_header->free_total();
+    const auto free_total = NodeHeader::free_total(page);
     CCO_EXPECT_GE(free_total, needed_size);
-    m_header->set_free_total(free_total - needed_size);
+    NodeHeader::set_free_total(page, free_total - needed_size);
     return ptr1 + diff;
 }
 
-auto BlockAllocator::free(Index ptr, Size size) -> void
+auto BlockAllocator::free(Page &page, Index ptr, Size size) -> void
 {
-    CCO_EXPECT_LE(ptr + size, m_page->size());
-    CCO_EXPECT_GE(ptr, NodeLayout::content_offset(m_page->id()));
+    CCO_EXPECT_LE(ptr + size, page.size());
+    CCO_EXPECT_GE(ptr, NodeLayout::content_offset(page.id()));
+
     if (size < FREE_BLOCK_HEADER_SIZE) {
-        m_header->set_frag_count(m_header->frag_count() + size);
+        NodeHeader::set_frag_count(page, NodeHeader::frag_count(page) + size);
     } else {
-        set_next_pointer(ptr, m_header->free_start());
-        set_block_size(ptr, size);
-        m_header->set_free_count(m_header->free_count() + 1);
-        m_header->set_free_start(ptr);
+        set_next_pointer(page, ptr, NodeHeader::free_start(page));
+        set_block_size(page, ptr, size);
+        NodeHeader::set_free_start(page, ptr);
     }
-    m_header->set_free_total(m_header->free_total() + size);
+    NodeHeader::set_free_total(page, NodeHeader::free_total(page) + size);
 }
 
-auto Node::parent_id() const -> PID
+auto Node::parent_id() const -> PageId
 {
-    return m_header.parent_id();
+    return NodeHeader::parent_id(m_page);
 }
 
-auto Node::right_sibling_id() const -> PID
+auto Node::right_sibling_id() const -> PageId
 {
-    return m_header.right_sibling_id();
+    return NodeHeader::right_sibling_id(m_page);
 }
 
-auto Node::left_sibling_id() const -> PID
+auto Node::left_sibling_id() const -> PageId
 {
-    return m_header.left_sibling_id();
+    return NodeHeader::left_sibling_id(m_page);
 }
 
-auto Node::rightmost_child_id() const -> PID
+auto Node::rightmost_child_id() const -> PageId
 {
-    return m_header.rightmost_child_id();
+    return NodeHeader::rightmost_child_id(m_page);
 }
 
 auto Node::cell_count() const -> Size
 {
-    return m_header.cell_count();
+    return NodeHeader::cell_count(m_page);
 }
 
-auto Node::set_parent_id(PID parent_id) -> void
+auto Node::set_parent_id(PageId parent_id) -> void
 {
-    m_header.set_parent_id(parent_id);
+    NodeHeader::set_parent_id(m_page, parent_id);
 }
 
-auto Node::set_right_sibling_id(PID right_sibling_id) -> void
+auto Node::set_right_sibling_id(PageId right_sibling_id) -> void
 {
-    m_header.set_right_sibling_id(right_sibling_id);
+    NodeHeader::set_right_sibling_id(m_page, right_sibling_id);
 }
 
-auto Node::set_rightmost_child_id(PID rightmost_child_id) -> void
+auto Node::set_rightmost_child_id(PageId rightmost_child_id) -> void
 {
-    m_header.set_rightmost_child_id(rightmost_child_id);
+    NodeHeader::set_rightmost_child_id(m_page, rightmost_child_id);
 }
 
 auto Node::usable_space() const -> Size
 {
-    return m_allocator.usable_space();
+    return BlockAllocator::usable_space(m_page);
 }
 
 auto Node::is_external() const -> bool
@@ -384,7 +368,7 @@ auto Node::is_external() const -> bool
     return m_page.type() == PageType::EXTERNAL_NODE;
 }
 
-auto Node::child_id(Index index) const -> PID
+auto Node::child_id(Index index) const -> PageId
 {
     CCO_EXPECT_FALSE(is_external());
     CCO_EXPECT_LE(index, cell_count());
@@ -402,7 +386,7 @@ auto Node::read_key(Index index) const -> BytesView
 auto Node::read_cell(Index index) const -> Cell
 {
     CCO_EXPECT_LT(index, cell_count());
-    return Cell::read_at(*this, m_directory.get_pointer(index).value);
+    return Cell::read_at(*this, CellDirectory::get_pointer(m_page, index).value);
 }
 
 auto Node::detach_cell(Index index, Scratch scratch) const -> Cell
@@ -426,7 +410,7 @@ auto Node::TEST_validate() const -> void
     const auto label = fmt::format("node {}: ", m_page.id().value);
 
     // The usable space is the total of all the free blocks, fragments, and the gap space.
-    const auto usable_space = m_allocator.usable_space();
+    const auto usable_space = BlockAllocator::usable_space(m_page);
 
     // The used space is the total of the header, cell pointers list, and the cells.
     auto used_space = cell_area_offset();
@@ -472,17 +456,17 @@ auto Node::find_ge(BytesView key) const -> FindGeResult
 
 auto Node::cell_area_offset() const -> Size
 {
-    return m_header.cell_area_offset();
+    return NodeHeader::cell_area_offset(m_page);
 }
 
 auto Node::header_offset() const -> Index
 {
-    return m_header.header_offset();
+    return NodeHeader::header_offset(m_page);
 }
 
 auto Node::max_usable_space() const -> Size
 {
-    return m_header.max_usable_space();
+    return NodeHeader::max_usable_space(m_page);
 }
 
 auto Node::is_overflowing() const -> bool
@@ -492,9 +476,9 @@ auto Node::is_overflowing() const -> bool
 
 auto Node::is_underflowing() const -> bool
 {
-    if (id().is_root())
+    if (id().is_base())
         return cell_count() == 0;
-    return m_allocator.usable_space() > max_usable_space() / 2;
+    return BlockAllocator::usable_space(m_page) > max_usable_space() / 2;
 }
 
 auto Node::overflow_cell() const -> const Cell &
@@ -515,12 +499,12 @@ auto Node::take_overflow_cell() -> Cell
     return cell;
 }
 
-auto Node::set_child_id(Index index, PID child_id) -> void
+auto Node::set_child_id(Index index, PageId child_id) -> void
 {
     CCO_EXPECT_FALSE(is_external());
     CCO_EXPECT_LE(index, cell_count());
     if (index < cell_count()) {
-        put_u32(m_page, m_directory.get_pointer(index).value, child_id.value);
+        put_u64(m_page, CellDirectory::get_pointer(m_page, index).value, child_id.value);
     } else {
         set_rightmost_child_id(child_id);
     }
@@ -528,10 +512,10 @@ auto Node::set_child_id(Index index, PID child_id) -> void
 
 auto Node::allocate(Size needed_size, std::optional<Index> skipped_cid) -> Index
 {
-    if (const auto ptr = m_allocator.allocate(needed_size))
+    if (const auto ptr = BlockAllocator::allocate(m_page, needed_size))
         return ptr;
     defragment(skipped_cid);
-    return m_allocator.allocate(needed_size);
+    return BlockAllocator::allocate(m_page, needed_size);
 }
 
 auto Node::defragment() -> void
@@ -544,26 +528,29 @@ auto Node::defragment(std::optional<Index> skipped_cid) -> void
     const auto n = cell_count();
     const auto to_skip = skipped_cid ? *skipped_cid : n;
     auto end = m_page.size();
-    std::string temp(end, '\x00');
     std::vector<Size> ptrs(n);
+
+    // TODO: We're using scratch memory for this now. We only have one scratch buffer, shared among all nodes. This is okay right now
+    //       since all tree operations happen in a single thread, so only one node can be defragmenting at any given time.
 
     for (Index index {}; index < n; ++index) {
         if (index == to_skip)
             continue;
         const auto cell = read_cell(index);
         end -= cell.size();
-        cell.write({temp.data() + end, temp.size() - end});
+        cell.write(m_scratch.range(end));
         ptrs.at(index) = end;
     }
     for (Index index {}; index < n; ++index) {
         if (index != to_skip)
-            m_directory.set_pointer(index, {ptrs.at(index)});
+            CellDirectory::set_pointer(m_page, index, {ptrs.at(index)});
     }
     const auto offset = cell_area_offset();
-    m_page.write(stob(temp).range(offset, m_page.size() - offset), offset);
-    m_header.set_cell_start(end);
-    m_allocator.reset();
+    m_page.write(m_scratch.range(offset, m_page.size() - offset), offset);
+    NodeHeader::set_cell_start(m_page, end);
+    BlockAllocator::reset(m_page);
 }
+
 
 auto Node::insert(Cell cell) -> void
 {
@@ -582,8 +569,8 @@ auto Node::insert_at(Index index, Cell cell) -> void
     const auto local_size = cell.size();
 
     // We don't have room to insert the cell pointer.
-    if (cell_area_offset() + CELL_POINTER_SIZE > m_header.cell_start()) {
-        if (m_allocator.usable_space() >= local_size + CELL_POINTER_SIZE) {
+    if (cell_area_offset() + CELL_POINTER_SIZE > NodeHeader::cell_start(m_page)) {
+        if (BlockAllocator::usable_space(m_page) >= local_size + CELL_POINTER_SIZE) {
             defragment();
             return insert_at(index, cell);
         }
@@ -591,25 +578,25 @@ auto Node::insert_at(Index index, Cell cell) -> void
         return;
     }
     // insert a dummy cell pointer to save the slot.
-    m_directory.insert_pointer(index, {m_page.size() - 1});
+    CellDirectory::insert_pointer(m_page, index, {m_page.size() - 1});
 
     // allocate space for the cell. This call may defragment the node.
     const auto offset = allocate(local_size, index);
 
     // We don't have room to insert the cell.
     if (!offset) {
-        CCO_EXPECT_LT(m_allocator.usable_space(), local_size + CELL_POINTER_SIZE);
+        CCO_EXPECT_LT(BlockAllocator::usable_space(m_page), local_size + CELL_POINTER_SIZE);
         set_overflow_cell(cell);
-        m_directory.remove_pointer(index);
+        CellDirectory::remove_pointer(m_page, index);
         return;
     }
     // Now we can fill in the dummy cell pointer and write_all the cell.
-    m_directory.set_pointer(index, {offset});
+    CellDirectory::set_pointer(m_page, index, {offset});
     cell.write(m_page.bytes(offset, cell.size()));
 
     // Adjust the start of the cell content area.
-    if (offset < m_header.cell_start())
-        m_header.set_cell_start(offset);
+    if (offset < NodeHeader::cell_start(m_page))
+        NodeHeader::set_cell_start(m_page, offset);
 
     //    CCO_VALIDATE(validate());
 }
@@ -629,8 +616,8 @@ auto Node::remove_at(Index index, Size local_size) -> void
     CCO_EXPECT_LE(local_size, get_max_local(m_page.size()) + MAX_CELL_HEADER_SIZE);
     CCO_EXPECT_LT(index, cell_count());
     CCO_EXPECT_FALSE(is_overflowing());
-    m_allocator.free(m_directory.get_pointer(index).value, local_size);
-    m_directory.remove_pointer(index);
+    BlockAllocator::free(m_page, CellDirectory::get_pointer(m_page, index).value, local_size);
+    CellDirectory::remove_pointer(m_page, index);
     //    CCO_VALIDATE(validate());
 }
 
@@ -640,7 +627,7 @@ auto Node::reset(bool reset_header) -> void
         CCO_EXPECT_TRUE(m_page.is_writable());
         auto chunk = m_page.bytes(header_offset(), NodeLayout::HEADER_SIZE);
         mem_clear(chunk, chunk.size());
-        m_header.set_cell_start(m_page.size());
+        NodeHeader::set_cell_start(m_page, m_page.size());
     }
     m_overflow.reset();
 }
@@ -661,8 +648,8 @@ auto accumulate_occupied_space(const Node &Ln, const Node &rn)
     CCO_EXPECT_EQ(Ln.type(), rn.type());
     CCO_EXPECT_FALSE(Ln.is_overflowing());
     CCO_EXPECT_FALSE(rn.is_overflowing());
-    CCO_EXPECT_FALSE(Ln.id().is_root());
-    CCO_EXPECT_FALSE(rn.id().is_root());
+    CCO_EXPECT_FALSE(Ln.id().is_base());
+    CCO_EXPECT_FALSE(rn.id().is_base());
     Size total {};
 
     // Occupied space in each node, including the headers.
@@ -793,13 +780,13 @@ auto split_root(Node &root, Node &child) -> void
     root.reset(true);
     root.page().set_type(PageType::INTERNAL_NODE);
     root.set_rightmost_child_id(child.id());
-    child.set_parent_id(PID::root());
+    child.set_parent_id(PageId::base());
 }
 
 auto merge_root(Node &root, Node &child) -> void
 {
-    CCO_EXPECT(root.rightmost_child_id() == child.id());
-    const auto needs_defragment = child.header().free_count() || child.header().frag_count();
+    CCO_EXPECT_EQ(root.rightmost_child_id(), child.id());
+    const auto needs_defragment = NodeHeader::free_start(child.page()) || NodeHeader::frag_count(child.page());
     if (needs_defragment)
         child.defragment();
 

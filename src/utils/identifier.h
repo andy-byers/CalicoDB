@@ -6,173 +6,157 @@
 
 namespace cco {
 
-struct IdentifierHash;
-
+template<class T>
 struct Identifier {
-    using Hash = IdentifierHash;
+    using Type = T;
 
-    [[nodiscard]] static auto min() noexcept -> Identifier
+    struct Hash {
+        auto operator()(const Identifier<T> &id) const -> std::size_t
+        {
+            return id.value;
+        }
+    };
+
+    constexpr Identifier() noexcept = default;
+    constexpr auto operator=(const Identifier &rhs) -> Identifier&
     {
-        return Identifier {std::numeric_limits<decltype(value)>::min()};
+        value = rhs.value;
+        return *this;
     }
+    constexpr Identifier(const Identifier &rhs)
+        : value {rhs.value}
+    {}
 
-    [[nodiscard]] static auto max() noexcept -> Identifier
-    {
-        return Identifier {std::numeric_limits<decltype(value)>::max()};
-    }
-
-    [[nodiscard]] static auto from_index(Index index) noexcept -> Identifier
-    {
-        return Identifier {index + ROOT_ID_VALUE};
-    }
-
-    Identifier() noexcept = default;
+    ~Identifier() = default;
 
     template<class Id>
-    explicit Identifier(Id id) noexcept
-        : value {static_cast<uint32_t>(id)}
+    constexpr explicit Identifier(Id &&id) noexcept
+        : value {std::forward<Id>(id)} {}
+
+    template<class Id>
+    constexpr auto operator==(const Id &rhs) const noexcept -> bool
     {
-        CCO_EXPECT_BOUNDED_BY(uint32_t, static_cast<std::make_unsigned_t<Id>>(id));
+        return value == T(rhs);
     }
 
-    auto operator==(const Identifier &rhs) const noexcept -> bool
+    template<class Id>
+    constexpr auto operator!=(const Id &rhs) const noexcept -> bool
     {
-        return value == rhs.value;
+        return value != T(rhs);
     }
 
-    auto operator!=(const Identifier &rhs) const noexcept -> bool
+    template<class Id>
+    constexpr auto operator<(const Id &rhs) const noexcept -> bool
     {
-        return value != rhs.value;
+        return value < T(rhs);
     }
 
-    auto operator<(const Identifier &rhs) const noexcept -> bool
+    template<class Id>
+    constexpr auto operator<=(const Id &rhs) const noexcept -> bool
     {
-        return value < rhs.value;
+        return value <= T(rhs);
     }
 
-    auto operator<=(const Identifier &rhs) const noexcept -> bool
+    template<class Id>
+    constexpr auto operator>(const Id &rhs) const noexcept -> bool
     {
-        return value <= rhs.value;
+        return value > T(rhs);
     }
 
-    auto operator>(const Identifier &rhs) const noexcept -> bool
+    template<class Id>
+    constexpr auto operator>=(const Id &rhs) const noexcept -> bool
     {
-        return value > rhs.value;
+        return value >= T(rhs);
     }
 
-    auto operator>=(const Identifier &rhs) const noexcept -> bool
+    template<class Id>
+    constexpr auto operator+=(const Id &rhs) noexcept -> Identifier&
     {
-        return value >= rhs.value;
+        value += T(rhs);
+        return *this;
     }
 
-    [[nodiscard]] auto is_null() const noexcept -> bool
+    template<class Id>
+    constexpr auto operator-=(const Id &rhs) noexcept -> Identifier&
     {
-        return value == 0;
+        CCO_EXPECT_GE(value, T(rhs));
+        value -= T(rhs);
+        return *this;
     }
 
-    [[nodiscard]] auto as_index() const noexcept -> Index
-    {
-        CCO_EXPECT_GE(value, ROOT_ID_VALUE);
-        return value - ROOT_ID_VALUE;
-    }
-
-    uint32_t value {};
-};
-
-inline auto operator+(const Identifier &lhs, const Identifier &rhs) noexcept -> Identifier
-{
-    Identifier res {lhs};
-    res.value += rhs.value;
-    return res;
-}
-
-inline auto operator-(const Identifier &lhs, const Identifier &rhs) noexcept -> Identifier
-{
-    CCO_EXPECT_GE(lhs.value, rhs.value);
-    Identifier res {lhs};
-    res.value -= rhs.value;
-    return res;
-}
-
-struct IdentifierHash {
-    auto operator()(const Identifier &id) const -> size_t
-    {
-        return id.value;
-    }
-};
-
-struct PID final : public Identifier {
-    PID()
-    noexcept = default;
-
-    PID(Identifier id)
-    noexcept
-        : Identifier {id.value}
-    {}
-
-    template<class T>
-    explicit PID(T id) noexcept
-        : Identifier {id}
-    {}
-
-    [[nodiscard]] auto is_root() const noexcept -> bool
-    {
-        return value == ROOT_ID_VALUE;
-    }
-
-    static auto null() noexcept -> PID
-    {
-        return PID {NULL_ID_VALUE};
-    }
-
-    static auto root() noexcept -> PID
-    {
-        return PID {ROOT_ID_VALUE};
-    }
-};
-
-struct LSN final : public Identifier {
-    LSN()
-    noexcept = default;
-
-    LSN(Identifier id)
-    noexcept
-        : Identifier {id.value}
-    {}
-
-    template<class T>
-    explicit LSN(T id) noexcept
-        : Identifier {id}
-    {}
-
-    [[nodiscard]] auto is_base() const noexcept -> bool
-    {
-        return value == ROOT_ID_VALUE;
-    }
-
-    static auto null() noexcept -> LSN
-    {
-        return LSN {NULL_ID_VALUE};
-    }
-
-    static auto base() noexcept -> LSN
-    {
-        return LSN {ROOT_ID_VALUE};
-    }
-
-    auto operator++() -> LSN &
+    constexpr auto operator++() -> Identifier &
     {
         value++;
         return *this;
     }
 
-    auto operator++(int) -> LSN
+    constexpr auto operator--() -> Identifier &
+    {
+        value--;
+        return *this;
+    }
+
+    constexpr auto operator++(int) -> Identifier
     {
         const auto temp = *this;
         ++*this;
         return temp;
     }
+
+    constexpr auto operator--(int) -> Identifier
+    {
+        const auto temp = *this;
+        --*this;
+        return temp;
+    }
+
+    explicit constexpr operator T() const
+    {
+        return value;
+    }
+
+    [[nodiscard]]
+    static constexpr auto null() noexcept -> Identifier
+    {
+        return Identifier {T{}};
+    }
+
+    [[nodiscard]]
+    static constexpr auto base() noexcept -> Identifier
+    {
+        return ++null();
+    }
+
+    [[nodiscard]]
+    constexpr auto is_base() const noexcept -> bool
+    {
+        return value == base().value;
+    }
+
+    [[nodiscard]]
+    constexpr auto is_null() const noexcept -> bool
+    {
+        return value == null().value;
+    }
+
+    [[nodiscard]]
+    constexpr auto as_index() const noexcept -> Index
+    {
+        CCO_EXPECT_NE(value, T {});
+        return value - base().value;
+    }
+
+    [[nodiscard]]
+    static constexpr auto from_index(Index index) noexcept -> Identifier
+    {
+        return Identifier {index + 1};
+    }
+
+    T value {};
 };
+
+using PageId = Identifier<std::uint64_t>;
+using SequenceNumber = Identifier<std::uint64_t>;
 
 } // namespace cco
 

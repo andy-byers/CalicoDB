@@ -3,12 +3,12 @@
 
 #include "calico/cursor.h"
 #include "calico/status.h"
+#include "utils/identifier.h"
 #include "utils/result.h"
 #include <optional>
 
 namespace cco {
 
-struct PID;
 class Cell;
 class FileHeaderReader;
 class FileHeaderWriter;
@@ -22,7 +22,6 @@ class ITree {
 public:
     virtual ~ITree() = default;
     [[nodiscard]] virtual auto cell_count() const -> Size = 0;
-    [[nodiscard]] virtual auto node_count() const -> Size = 0;
     [[nodiscard]] virtual auto internal() const -> const Internal & = 0;
     [[nodiscard]] virtual auto pool() const -> const NodePool & = 0;
     [[nodiscard]] virtual auto internal() -> Internal & = 0;
@@ -37,7 +36,7 @@ public:
     [[nodiscard]] virtual auto allocate_root() -> Result<Node> = 0;
     virtual auto save_header(FileHeaderWriter &) const -> void = 0;
     virtual auto load_header(const FileHeaderReader &) -> void = 0;
-    virtual auto TEST_validate_node(PID) -> void = 0;
+    virtual auto TEST_validate_node(PageId) -> void = 0;
 };
 
 } // namespace cco

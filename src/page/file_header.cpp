@@ -31,22 +31,12 @@ auto FileHeaderReader::header_crc() const -> Index
 
 auto FileHeaderReader::page_count() const -> Size
 {
-    return get_u32(m_header.range(FileLayout::PAGE_COUNT_OFFSET));
+    return get_u64(m_header.range(FileLayout::PAGE_COUNT_OFFSET));
 }
 
-auto FileHeaderReader::node_count() const -> Size
+auto FileHeaderReader::free_start() const -> PageId
 {
-    return get_u32(m_header.range(FileLayout::NODE_COUNT_OFFSET));
-}
-
-auto FileHeaderReader::free_count() const -> Size
-{
-    return get_u32(m_header.range(FileLayout::FREE_COUNT_OFFSET));
-}
-
-auto FileHeaderReader::free_start() const -> PID
-{
-    return PID {get_u32(m_header.range(FileLayout::FREE_START_OFFSET))};
+    return PageId {get_u64(m_header.range(FileLayout::FREE_START_OFFSET))};
 }
 
 auto FileHeaderReader::page_size() const -> Size
@@ -56,12 +46,12 @@ auto FileHeaderReader::page_size() const -> Size
 
 auto FileHeaderReader::record_count() const -> Size
 {
-    return get_u32(m_header.range(FileLayout::KEY_COUNT_OFFSET));
+    return get_u64(m_header.range(FileLayout::RECORD_COUNT_OFFSET));
 }
 
-auto FileHeaderReader::flushed_lsn() const -> LSN
+auto FileHeaderReader::flushed_lsn() const -> SequenceNumber
 {
-    return LSN {get_u32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET))};
+    return SequenceNumber {get_u64(m_header.range(FileLayout::FLUSHED_LSN_OFFSET))};
 }
 
 FileHeaderWriter::FileHeaderWriter(Bytes bytes)
@@ -83,22 +73,12 @@ auto FileHeaderWriter::update_header_crc() -> void
 
 auto FileHeaderWriter::set_page_count(Size page_count) -> void
 {
-    put_u32(m_header.range(FileLayout::PAGE_COUNT_OFFSET), static_cast<uint32_t>(page_count));
+    put_u64(m_header.range(FileLayout::PAGE_COUNT_OFFSET), page_count);
 }
 
-auto FileHeaderWriter::set_node_count(Size node_count) -> void
+auto FileHeaderWriter::set_free_start(PageId free_start) -> void
 {
-    put_u32(m_header.range(FileLayout::NODE_COUNT_OFFSET), static_cast<uint32_t>(node_count));
-}
-
-auto FileHeaderWriter::set_free_count(Size free_count) -> void
-{
-    put_u32(m_header.range(FileLayout::FREE_COUNT_OFFSET), static_cast<uint32_t>(free_count));
-}
-
-auto FileHeaderWriter::set_free_start(PID free_start) -> void
-{
-    put_u32(m_header.range(FileLayout::FREE_START_OFFSET), free_start.value);
+    put_u64(m_header.range(FileLayout::FREE_START_OFFSET), free_start.value);
 }
 
 auto FileHeaderWriter::set_page_size(Size page_size) -> void
@@ -106,14 +86,14 @@ auto FileHeaderWriter::set_page_size(Size page_size) -> void
     put_u16(m_header.range(FileLayout::PAGE_SIZE_OFFSET), static_cast<uint16_t>(page_size));
 }
 
-auto FileHeaderWriter::set_key_count(Size key_count) -> void
+auto FileHeaderWriter::set_record_count(Size record_count) -> void
 {
-    put_u32(m_header.range(FileLayout::KEY_COUNT_OFFSET), static_cast<uint32_t>(key_count));
+    put_u64(m_header.range(FileLayout::RECORD_COUNT_OFFSET), record_count);
 }
 
-auto FileHeaderWriter::set_flushed_lsn(LSN flushed_lsn) -> void
+auto FileHeaderWriter::set_flushed_lsn(SequenceNumber flushed_lsn) -> void
 {
-    put_u32(m_header.range(FileLayout::FLUSHED_LSN_OFFSET), flushed_lsn.value);
+    put_u64(m_header.range(FileLayout::FLUSHED_LSN_OFFSET), flushed_lsn.value);
 }
 
 auto FileHeaderReader::is_magic_code_consistent() const -> bool

@@ -10,9 +10,9 @@
 
 namespace cco {
 
-class ScratchManager;
+class RollingScratchManager;
 
-class Scratch final {
+class Scratch {
 public:
     ~Scratch() = default;
 
@@ -39,11 +39,11 @@ private:
     Bytes m_data;
 };
 
-class ScratchManager final {
+class RollingScratchManager final {
 public:
     static constexpr Size MAXIMUM_SCRATCHES {16};
 
-    explicit ScratchManager(Size scratch_size)
+    explicit RollingScratchManager(Size scratch_size)
         : m_scratches(MAXIMUM_SCRATCHES),
           m_scratch_size {scratch_size}
     {
@@ -59,6 +59,39 @@ private:
     std::list<std::string> m_emergency;
     Size m_scratch_size;
     Index m_counter {};
+};
+
+class ManualScratch: public Scratch {
+public:
+    
+    ManualScratch(Index id, Bytes data)
+        : Scratch {data},
+          m_id {id}
+    {}
+
+    [[nodiscard]] auto id() const -> Index
+    {
+        return m_id;
+    }
+    
+private:
+    Index m_id {};
+};
+
+class ManualScratchManager final {
+public:
+    
+    explicit ManualScratchManager(Size scratch_size)
+        : m_scratch_size {scratch_size} {}
+
+    [[nodiscard]] auto get() -> ManualScratch;
+    auto put(ManualScratch) -> void;
+
+private:
+    std::unordered_map<Index, std::string> m_occupied;
+    std::list<std::string> m_available;
+    Index m_next_id {};
+    Size m_scratch_size;
 };
 
 } // namespace cco

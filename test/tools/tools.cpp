@@ -53,7 +53,7 @@ TreePrinter::TreePrinter(ITree &tree, bool has_integer_keys)
 
 auto TreePrinter::print(Size indentation) -> void
 {
-    print_aux(m_tree.pool().acquire(PID::root(), false).value(), 0);
+    print_aux(m_tree.pool().acquire(PageId::base(), false).value(), 0);
 
     for (auto &level: m_levels)
         fmt::print("{}{}\n", std::string(indentation, ' '), level);

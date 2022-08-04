@@ -16,22 +16,27 @@ namespace cco {
 
 class IDirectory;
 class IFile;
-struct LSN;
 
 class WALReader : public IWALReader {
 public:
     ~WALReader() override = default;
-    [[nodiscard]] static auto open(const WALParameters &) -> Result<std::unique_ptr<IWALReader>>;
+    [[nodiscard]] static auto create(const WALParameters &) -> Result<std::unique_ptr<IWALReader>>;
+    [[nodiscard]] auto is_open() -> bool override;
+    [[nodiscard]] auto is_empty() -> Result<bool> override;
+    [[nodiscard]] auto open(std::unique_ptr<IFile>) -> Result<void> override;
+
+    // NOTE: We can always call read({0, 0}) to get the first record in the segment, even if we don't know the other positions yet.
     [[nodiscard]] auto read(Position &) -> Result<WALRecord> override;
     [[nodiscard]] auto close() -> Result<void> override;
     auto reset() -> void override;
 
 private:
-    WALReader(std::unique_ptr<IFile>, const WALParameters &);
+    explicit WALReader(const WALParameters &);
     [[nodiscard]] auto read_block(Index) -> Result<bool>;
     [[nodiscard]] auto read_record(Index) -> Result<WALRecord>;
 
     std::string m_block;
+    std::string m_scratch[2];
     std::unique_ptr<IFile> m_file;
     Index m_block_id {};
     bool m_has_block {};

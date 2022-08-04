@@ -16,18 +16,11 @@ public:
     struct Parameters {
         IBufferPool *buffer_pool {};
         spdlog::sink_ptr log_sink;
-        PID free_start {};
-        Size free_count {};
+        PageId free_start {};
         Size cell_count {};
-        Size node_count {};
     };
 
     ~Tree() override = default;
-
-    [[nodiscard]] auto node_count() const -> Size override
-    {
-        return m_pool.node_count();
-    }
 
     [[nodiscard]] auto cell_count() const -> Size override
     {
@@ -65,7 +58,7 @@ public:
     auto find(BytesView key) -> Cursor override;
     auto find_minimum() -> Cursor override;
     auto find_maximum() -> Cursor override;
-    auto TEST_validate_node(PID) -> void override;
+    auto TEST_validate_node(PageId) -> void override;
 
 private:
     struct SearchResult {

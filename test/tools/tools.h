@@ -223,6 +223,7 @@ public:
         m_snapshots_before.emplace_back(random.next_string(page_size));
         m_snapshots_after.emplace_back(random.next_string(page_size));
         std::vector<ChangedRegion> update {};
+        auto payload_size = WALPayload::HEADER_SIZE;
 
         for (Index i {}; i < update_count; ++i) {
             const auto size = random.next_int(lower_bound, upper_bound);
@@ -232,18 +233,22 @@ public:
             update.back().offset = offset;
             update.back().before = stob(m_snapshots_before.back()).range(offset, size);
             update.back().after = stob(m_snapshots_after.back()).range(offset, size);
+            payload_size += WALPayload::UPDATE_HEADER_SIZE + 2 * size;
+            CCO_EXPECT_LT(payload_size, 4 * m_page_size);
         }
+        m_scratches.emplace(m_last_lsn, std::string(4 * m_page_size, '\x00'));
         WALRecord record {{
             std::move(update),
-            PID {static_cast<uint32_t>(random.next_int(page_count))},
-            LSN::null(),
-            LSN {static_cast<uint32_t>(m_payloads.size() + ROOT_ID_VALUE)},
-        }};
+            PageId {static_cast<uint32_t>(random.next_int(page_count))},
+            SequenceNumber::null(),
+            SequenceNumber {static_cast<uint32_t>(m_payloads.size() + ROOT_ID_VALUE)},
+        }, stob(m_scratches[m_last_lsn])};
+        m_last_lsn++;
         m_payloads.push_back(btos(record.payload().data()));
         return record;
     }
 
-    auto validate_record(const WALRecord &record, LSN target_lsn) const -> void
+    auto validate_record(const WALRecord &record, SequenceNumber target_lsn) const -> void
     {
         (void)record;
         CCO_EXPECT_EQ(record.lsn(), target_lsn);
@@ -253,7 +258,7 @@ public:
         CCO_EXPECT_TRUE(record.is_consistent());
     }
 
-    [[nodiscard]] auto retrieve_payload(LSN lsn) const -> const std::string&
+    [[nodiscard]] auto retrieve_payload(SequenceNumber lsn) const -> const std::string&
     {
         return m_payloads.at(lsn.as_index());
     }
@@ -264,6 +269,8 @@ private:
     std::vector<std::string> m_payloads;
     std::vector<std::string> m_snapshots_before;
     std::vector<std::string> m_snapshots_after;
+    std::unordered_map<SequenceNumber, std::string, SequenceNumber::Hash> m_scratches;
+    SequenceNumber m_last_lsn;
     Size m_page_size;
 };
 

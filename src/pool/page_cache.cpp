@@ -4,14 +4,14 @@
 
 namespace cco {
 
-auto PageCache::put(PID id, Frame frame) -> void
+auto PageCache::put(PageId id, Frame frame) -> void
 {
     CCO_EXPECT_FALSE(m_warm.contains(id));
     CCO_EXPECT_FALSE(m_hot.contains(id));
     m_warm.put(id, std::move(frame));
 }
 
-auto PageCache::get(PID id) -> std::optional<Reference>
+auto PageCache::get(PageId id) -> std::optional<Reference>
 {
     if (auto ref = m_hot.get(id)) {
         m_hits++;
@@ -26,7 +26,7 @@ auto PageCache::get(PID id) -> std::optional<Reference>
     return std::nullopt;
 }
 
-auto PageCache::extract(PID id) -> std::optional<Frame>
+auto PageCache::extract(PageId id) -> std::optional<Frame>
 {
     if (auto frame = m_hot.extract(id)) {
         m_hits++;

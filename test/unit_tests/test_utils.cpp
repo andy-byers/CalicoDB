@@ -19,7 +19,7 @@ using namespace cco;
 
 TEST(AssertionDeathTest, Assert)
 {
-    ASSERT_DEATH(CCO_EXPECT(false), EXPECTATION_MATCHER);
+    ASSERT_DEATH(CCO_EXPECT_TRUE(false), BOOL_EXPECTATION_MATCHER);
 }
 
 TEST(TestEncoding, ReadsAndWrites)
@@ -153,7 +153,7 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
 
 TEST(ScratchTest, ScratchesAreUnique)
 {
-    ScratchManager manager {1};
+    RollingScratchManager manager {1};
     auto s1 = manager.get();
     auto s2 = manager.get();
     auto s3 = manager.get();
@@ -211,8 +211,8 @@ TEST(NonPrintableSliceTests, Conversions)
 
 template<class Id> auto run_comparisons()
 {
-    Id a {1};
-    Id b {2};
+    Id a {1ULL};
+    Id b {2ULL};
 
     ASSERT_EQ(a, a);
     CCO_EXPECT_EQ(a, a);
@@ -247,12 +247,12 @@ template<class Id> auto run_comparisons()
 
 TEST(IdentifierTest, PIDsAreComparable)
 {
-    run_comparisons<PID>();
+    run_comparisons<PageId>();
 }
 
 TEST(IdentifierTest, LSNsAreComparable)
 {
-    run_comparisons<LSN>();
+    run_comparisons<SequenceNumber>();
 }
 
 template<class Id> auto run_addition()
@@ -263,17 +263,17 @@ template<class Id> auto run_addition()
 
 TEST(IdentifierTest, PIDsCanBeAdded)
 {
-    run_comparisons<PID>();
+    run_comparisons<PageId>();
 }
 
 TEST(IdentifierTest, LSNsCanBeAdded)
 {
-    run_comparisons<LSN>();
+    run_comparisons<SequenceNumber>();
 }
 
 TEST(IdentifierTest, LSNsCanBeIncremented)
 {
-    LSN lsn {0};
+    auto lsn = SequenceNumber::null();
     ASSERT_EQ(lsn.value, 0);
     lsn++;
     ASSERT_EQ(lsn.value, 1);
@@ -293,7 +293,7 @@ TEST(TestUniqueNullable, ResourceIsMoved)
 
 TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 {
-    const auto start = NodeLayout::header_offset(PID {2}) +
+    const auto start = NodeLayout::header_offset(PageId {2ULL}) +
                        NodeLayout::HEADER_SIZE +
                        CELL_POINTER_SIZE;
     Size page_size {MINIMUM_PAGE_SIZE};

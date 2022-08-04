@@ -17,19 +17,9 @@ auto File::mode() const -> Mode
     return m_mode;
 }
 
-auto File::permissions() const -> int
-{
-    return m_permissions;
-}
-
-auto File::path() const -> std::string
-{
-    return m_path;
-}
-
 auto File::name() const -> std::string
 {
-    return m_path.filename();
+    return m_name;
 }
 
 auto File::file() const -> int
@@ -39,24 +29,8 @@ auto File::file() const -> int
 
 auto File::size() const -> Result<Size>
 {
-    static constexpr auto INVALID_SIZE = static_cast<std::uintmax_t>(-1);
-
-    std::error_code error;
-    if (const auto size = fs::file_size(m_path, error); size != INVALID_SIZE)
-        return size;
-    return Err {Status::system_error(error.message())};
-}
-
-auto File::open(const std::string &path, Mode mode, int permissions) -> Result<void>
-{
-    return system::open(path, static_cast<int>(mode), permissions)
-        .and_then([&path, mode, permissions, this](int fd) -> Result<void> {
-            m_file = fd;
-            m_path = path;
-            m_mode = mode;
-            m_permissions = permissions;
-            return {};
-        });
+    // NOTE: This will mess up the file cursor!
+    return system::size(m_file);
 }
 
 auto File::close() -> Result<void>
@@ -64,26 +38,6 @@ auto File::close() -> Result<void>
     return system::close(m_file)
         .and_then([this]() -> Result<void> {
             m_file = system::FAILURE;
-            return {};
-        });
-}
-
-auto File::rename(const std::string &name) -> Result<void>
-{
-    CCO_EXPECT_TRUE(m_path.has_parent_path());
-    CCO_EXPECT_FALSE(m_path.empty());
-    std::error_code error;
-    fs::rename(std::exchange(m_path, m_path.parent_path() / name), m_path, error);
-    if (error)
-        return Err {Status::system_error(error.message())};
-    return {};
-}
-
-auto File::remove() -> Result<void>
-{
-    return system::unlink(m_path)
-        .and_then([this]() -> Result<void> {
-            m_path.clear();
             return {};
         });
 }
@@ -127,7 +81,7 @@ auto File::sync() -> Result<void>
 auto File::resize(Size size) -> Result<void>
 {
     std::error_code error;
-    fs::resize_file(m_path, size, error);
+    fs::resize_file(m_name, size, error);
     if (error)
         return Err {Status::system_error(error.message())};
     return {};

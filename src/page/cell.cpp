@@ -13,7 +13,7 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
     cell.m_page_size = page_size;
 
     if (!is_external) {
-        cell.m_left_child_id.value = get_u32(in);
+        cell.m_left_child_id.value = get_u64(in);
         in.advance(PAGE_ID_SIZE);
     }
     const auto key_size = get_u16(in);
@@ -35,7 +35,7 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 
         if (local_value_size < cell.m_value_size) {
             in.advance(local_value_size);
-            cell.m_overflow_id.value = get_u32(in);
+            cell.m_overflow_id.value = get_u64(in);
         }
     }
     cell.m_is_external = is_external;
@@ -77,19 +77,19 @@ auto Cell::size() const -> Size
            size_fields + m_key.size() + m_local_value.size();
 }
 
-auto Cell::left_child_id() const -> PID
+auto Cell::left_child_id() const -> PageId
 {
     CCO_EXPECT_FALSE(m_is_external);
     return m_left_child_id;
 }
 
-auto Cell::set_left_child_id(PID left_child_id) -> void
+auto Cell::set_left_child_id(PageId left_child_id) -> void
 {
     CCO_EXPECT_FALSE(m_is_external);
     m_left_child_id = left_child_id;
 }
 
-auto Cell::set_overflow_id(PID id) -> void
+auto Cell::set_overflow_id(PageId id) -> void
 {
     CCO_EXPECT_TRUE(m_is_external);
     m_overflow_id = id;
@@ -102,7 +102,7 @@ auto Cell::key() const -> BytesView
 
 auto Cell::local_value() const -> BytesView
 {
-    //    CCO_EXPECT_TRUE(m_is_external);
+    CCO_EXPECT_TRUE(m_is_external);
     return m_local_value;
 }
 
@@ -116,7 +116,7 @@ auto Cell::overflow_size() const -> Size
     return m_value_size - m_local_value.size();
 }
 
-auto Cell::overflow_id() const -> PID
+auto Cell::overflow_id() const -> PageId
 {
     // Internal cells have a zero-length value field, so they cannot overflow.
     CCO_EXPECT_TRUE(m_is_external);
@@ -126,8 +126,8 @@ auto Cell::overflow_id() const -> PID
 auto Cell::write(Bytes out) const -> void
 {
     if (!m_is_external) {
-        CCO_EXPECT_FALSE(m_left_child_id.is_root());
-        put_u32(out, m_left_child_id.value);
+        CCO_EXPECT_FALSE(m_left_child_id.is_base());
+        put_u64(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);
     }
     put_u16(out, static_cast<std::uint16_t>(m_key.size()));
@@ -146,10 +146,10 @@ auto Cell::write(Bytes out) const -> void
         mem_copy(out, local, local.size());
 
         if (!m_overflow_id.is_null()) {
-            CCO_EXPECT_FALSE(m_left_child_id.is_root());
+            CCO_EXPECT_FALSE(m_left_child_id.is_base());
             CCO_EXPECT_LT(local.size(), m_value_size);
             out.advance(local.size());
-            put_u32(out, m_overflow_id.value);
+            put_u64(out, m_overflow_id.value);
         }
     }
 }
@@ -172,7 +172,7 @@ auto Cell::set_is_external(bool is_external) -> void
     if (!m_is_external) {
         m_local_value.clear();
         m_value_size = 0;
-        m_overflow_id = PID::null();
+        m_overflow_id = PageId::null();
     }
 }
 
@@ -191,7 +191,7 @@ auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
         CCO_EXPECT_LT(local_value_size, value.size());
         param.local_value.truncate(local_value_size);
         // Set to an arbitrary value.
-        param.overflow_id = PID::root();
+        param.overflow_id = PageId::base();
     }
     return Cell {param};
 }

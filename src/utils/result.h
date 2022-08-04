@@ -1,9 +1,7 @@
 #ifndef CCO_UTILS_RESULT_H
 #define CCO_UTILS_RESULT_H
 
-// @TartanLlama/expected v1.0.0 is used internally.
-#include "expected.hpp"
-
+#include "tl/expected.hpp"
 #include "calico/status.h"
 
 namespace cco {

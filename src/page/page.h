@@ -14,14 +14,14 @@ class Frame;
 class FileHeaderReader;
 class FileHeaderWriter;
 class IBufferPool;
-class UpdateManager;
+class ChangeManager;
 
 class Page final {
 public:
     friend class cco::Frame;
 
     struct Parameters {
-        PID id;
+        PageId id;
         Bytes data;
         IBufferPool *source {};
         bool is_writable {};
@@ -41,27 +41,27 @@ public:
         return m_is_dirty;
     }
 
-    [[nodiscard]] auto id() const -> PID;
+    [[nodiscard]] auto id() const -> PageId;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto view(Index) const -> BytesView;
     [[nodiscard]] auto view(Index, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
-    [[nodiscard]] auto lsn() const -> LSN;
+    [[nodiscard]] auto lsn() const -> SequenceNumber;
     auto set_type(PageType) -> void;
-    auto set_lsn(LSN) -> void;
+    auto set_lsn(SequenceNumber) -> void;
     auto read(Bytes, Index) const -> void;
     auto bytes(Index) -> Bytes;
     auto bytes(Index, Size) -> Bytes;
     auto write(BytesView, Index) -> void;
-    auto undo(LSN, const std::vector<ChangedRegion> &) -> void;
-    auto redo(LSN, const std::vector<ChangedRegion> &) -> void;
+    auto undo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
+    auto redo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
 
     [[nodiscard]] auto has_manager() const -> bool
     {
         return m_manager != nullptr;
     }
 
-    auto set_manager(UpdateManager &manager) -> void
+    auto set_manager(ChangeManager &manager) -> void
     {
         CCO_EXPECT_EQ(m_manager, nullptr);
         m_manager = &manager;
@@ -73,26 +73,26 @@ public:
         m_manager = nullptr;
     }
 
-    Page(Page &&) noexcept = default;
-    auto operator=(Page &&) noexcept -> Page & = default;
-    Page(const Page &) noexcept = delete;
-    auto operator=(const Page &) noexcept -> Page & = delete;
+    Page(Page &&) = default;
+    auto operator=(Page &&) -> Page & = default;
 
 private:
     [[nodiscard]] auto header_offset() const -> Index;
 
     UniqueNullable<IBufferPool *> m_source;
-    UpdateManager *m_manager {};
+    ChangeManager *m_manager {};
     Bytes m_data;
-    PID m_id;
+    PageId m_id;
     bool m_is_writable {};
     bool m_is_dirty {};
 };
 
-[[nodiscard]] auto get_u16(const Page &, Index) -> uint16_t;
-[[nodiscard]] auto get_u32(const Page &, Index) -> uint32_t;
-auto put_u16(Page &, Index, uint16_t) -> void;
-auto put_u32(Page &, Index, uint32_t) -> void;
+[[nodiscard]] auto get_u16(const Page &, Index) -> std::uint16_t;
+[[nodiscard]] auto get_u32(const Page &, Index) -> std::uint32_t;
+[[nodiscard]] auto get_u64(const Page &, Index) -> std::uint64_t;
+auto put_u16(Page &, Index, std::uint16_t) -> void;
+auto put_u32(Page &, Index, std::uint32_t) -> void;
+auto put_u64(Page &, Index, std::uint64_t) -> void;
 
 [[nodiscard]] auto get_file_header_reader(const Page &) -> FileHeaderReader;
 [[nodiscard]] auto get_file_header_writer(Page &) -> FileHeaderWriter;

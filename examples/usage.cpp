@@ -145,9 +145,9 @@ auto deleting_a_database(cco::Database db)
 auto open_database() -> cco::Database
 {
     cco::Options options;
-    options.path = PATH;
+    options.path = "";//PATH;
     options.page_size = 0x8000;
-    options.frame_count = 128;
+    options.frame_count = 128;                                              options.use_xact=false;
     cco::Database db {options};
 
     if (const auto s = db.open(); !s.is_ok()) {
@@ -168,6 +168,14 @@ auto main(int, const char *[]) -> int
 
     bytes_objects();
     auto db = open_database();
+
+//    for (int i {}; i < 1'000'000; ++i) {
+//        const auto s = std::to_string(i);
+//        assert(db.insert(s, s).is_ok());
+//    }
+//    assert(db.close().is_ok());
+//    exit(0);
+
     reads_and_writes(db);
     updating_a_database(db);
     querying_a_database(db);

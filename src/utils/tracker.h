@@ -15,14 +15,15 @@ public:
         : m_scratch {page_size}
     {}
 
-    [[nodiscard]] auto collect(Page &, LSN) -> PageUpdate;
-    auto reset() -> void;
+    [[nodiscard]] auto collect(Page &, SequenceNumber) -> PageUpdate;
+    auto cleanup(PageId) -> void;
     auto discard(Page &) -> void;
     auto track(Page &) -> void;
 
 private:
-    std::unordered_map<PID, UpdateManager, PID::Hash> m_registry;
-    ScratchManager m_scratch;
+    std::unordered_map<PageId, ChangeManager, PageId::Hash> m_registry;
+    std::unordered_map<PageId, ChangeManager, PageId::Hash> m_processing;
+    ManualScratchManager m_scratch;
 };
 
 } // namespace cco

@@ -5,14 +5,13 @@
 
 namespace cco {
 
-auto WALReader::open(const WALParameters &param) -> Result<std::unique_ptr<IWALReader>>
+auto WALReader::create(const WALParameters &param) -> Result<std::unique_ptr<IWALReader>>
 {
     CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
     CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
     CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
 
-    CCO_TRY_CREATE(file, param.directory.open_file(WAL_NAME, Mode::CREATE | Mode::READ_ONLY, DEFAULT_PERMISSIONS));
-    auto reader = std::unique_ptr<IWALReader> {new (std::nothrow) WALReader {std::move(file), param}};
+    auto reader = std::unique_ptr<IWALReader> {new (std::nothrow) WALReader {param}};
     if (!reader) {
         ThreePartMessage message;
         message.set_primary("cannot open WAL reader");
@@ -22,14 +21,16 @@ auto WALReader::open(const WALParameters &param) -> Result<std::unique_ptr<IWALR
     return reader;
 }
 
-WALReader::WALReader(std::unique_ptr<IFile> file, const WALParameters &param)
-    : m_block(param.page_size, '\x00'),
-      m_file {std::move(file)}
-{}
+WALReader::WALReader(const WALParameters &param)
+    : m_block(param.page_size, '\x00')
+{
+    m_scratch[0] = std::string(param.page_size * 4, '\x00');
+    m_scratch[1] = std::string(param.page_size * 4, '\x00');
+}
 
 auto WALReader::read(Position &position) -> Result<WALRecord>
 {
-    WALRecord record;
+    WALRecord record {stob(m_scratch[0])};
     while (record.type() != WALRecord::Type::FULL) {
         // Make sure we are buffering the correct block.
         if (!m_has_block || m_block_id != position.block_id) {
@@ -48,6 +49,27 @@ auto WALReader::read(Position &position) -> Result<WALRecord>
         }
     }
     return record;
+}
+
+auto WALReader::is_open() -> bool
+{
+    return m_file && m_file->is_open();
+}
+
+
+auto WALReader::is_empty() -> Result<bool>
+{
+    CCO_EXPECT_TRUE(is_open());
+    return m_file->size().map([](Size size) {return size == 0;});
+}
+
+auto WALReader::open(std::unique_ptr<IFile> file) -> Result<void>
+{
+    CCO_EXPECT_FALSE(is_open());
+    m_file = std::move(file);
+    m_has_block = false;
+    m_block_id = 0;
+    return {};
 }
 
 auto WALReader::close() -> Result<void>
@@ -90,7 +112,7 @@ auto WALReader::read_record(Index offset) -> Result<WALRecord>
     if (offset + WALRecord::MINIMUM_SIZE > m_block.size())
         return Err {Status::not_found()};
 
-    WALRecord record;
+    WALRecord record {stob(m_scratch[1])};
     auto buffer = stob(m_block);
     buffer.advance(offset);
     CCO_TRY(record.read(buffer));

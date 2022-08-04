@@ -1,4 +1,5 @@
 #include "system.h"
+#include "utils/expect.h"
 #include <fcntl.h>
 #include <filesystem>
 #include <unistd.h>
@@ -38,6 +39,14 @@ auto close(int fd) -> Result<void>
     if (::close(fd) == FAILURE)
         return Err {error()};
     return {};
+}
+
+auto size(int fd) -> Result<Size>
+{
+    CCO_TRY_CREATE(save, seek(fd, 0, SEEK_CUR));
+    CCO_TRY_CREATE(size, seek(fd, 0, SEEK_END));
+    CCO_TRY(seek(fd, static_cast<long>(save), SEEK_SET));
+    return size;
 }
 
 auto read(int file, Bytes out) -> Result<Size>

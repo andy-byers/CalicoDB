@@ -34,7 +34,6 @@ public:
         impl = Database::Impl::open(param, std::move(home)).value();
         fake = dynamic_cast<FakeDirectory*>(&impl->home());
         data_controls = fake->get_faults("data");
-        wal_controls = fake->get_faults("wal");
 
         RecordGenerator::Parameters generator_param;
         generator_param.mean_key_size = 20;
@@ -51,14 +50,14 @@ public:
     ~TestDatabase()
     {
         data_controls.set_read_fault_rate(0);
-        wal_controls.set_read_fault_rate(0);
+        fake->get_faults("wal-latest").set_read_fault_rate(0);
         data_controls.set_read_fault_counter(-1);
-        wal_controls.set_read_fault_counter(-1);
+        fake->get_faults("wal-latest").set_read_fault_counter(-1);
 
         data_controls.set_write_fault_rate(0);
-        wal_controls.set_write_fault_rate(0);
+        fake->get_faults("wal-latest").set_write_fault_rate(0);
         data_controls.set_write_fault_counter(-1);
-        wal_controls.set_write_fault_counter(-1);
+        fake->get_faults("wal-latest").set_write_fault_counter(-1);
     }
 
     auto remove_one(const std::string &key) -> Result<void>
@@ -75,7 +74,6 @@ public:
     Random random {0};
     FakeDirectory *fake {};
     FaultControls data_controls {};
-    FaultControls wal_controls {};
     std::vector<Record> records;
     std::unique_ptr<Database::Impl> impl;
 };
@@ -143,7 +141,8 @@ TEST_F(DatabaseReadFaultTests, OperationsAfterAbort)
     while (info.record_count() > half)
         ASSERT_TRUE(db.impl->erase(db.impl->find_minimum()));
 
-    ASSERT_TRUE(db.impl->abort());
+    auto r = db.impl->abort();
+    ASSERT_TRUE(r) << "Error: " << r.error().what();
 
     for (const auto &[key, value]: db.records) {
         auto c = tools::find(*db.impl, key);
@@ -230,7 +229,14 @@ auto abort_until_successful(TestDatabase &db, RateSetter &&setter)
 {
     for (unsigned rate {100}; rate >= 50; rate -= 10) {
         setter(rate);
-        ASSERT_TRUE(db.impl->abort().error().is_system_error());
+
+        if (const auto r = db.impl->abort()) {
+            ASSERT_LT(rate, 100) << "Abort succeeded with an error rate of 100%";
+            setter(0);
+            return;
+        } else {
+            ASSERT_TRUE(r.error().is_system_error()) << "Unexpected error: " << r.error().what();
+        }
     }
     setter(0);
     ASSERT_TRUE(db.impl->abort());
@@ -258,18 +264,10 @@ TEST_F(DatabaseWriteFaultTests, AbortIsReentrantAfterDataWriteFaults)
     validate_after_abort(db);
 }
 
-TEST_F(DatabaseWriteFaultTests, AbortIsReentrantAfterDataReadFaults)
-{
-    abort_until_successful(db, [this](unsigned rate) {
-        db.data_controls.set_read_fault_rate(rate);
-    });
-    validate_after_abort(db);
-}
-
 TEST_F(DatabaseWriteFaultTests, AbortIsReentrantAfterWALReadFaults)
 {
     abort_until_successful(db, [this](unsigned rate) {
-        db.wal_controls.set_read_fault_rate(rate);
+        db.fake->get_faults("wal-latest").set_read_fault_rate(rate);
     });
     validate_after_abort(db);
 }
@@ -334,11 +332,44 @@ TEST_F(DatabaseTests, NewDatabase)
     ASSERT_NE(info.cache_hit_ratio(), 0.0);
     ASSERT_TRUE(info.uses_xact());
     ASSERT_FALSE(info.is_temp());
+    ASSERT_TRUE(db.close().is_ok());
+}
+
+TEST_F(DatabaseTests, ReopenDatabase)
+{
+    Database db {options};
+    ASSERT_TRUE(db.open().is_ok());
+    ASSERT_TRUE(db.close().is_ok());
+
+    ASSERT_TRUE(db.open().is_ok());
+    ASSERT_EQ(db.info().record_count(), 0);
+    ASSERT_TRUE(db.close().is_ok());
+}
+
+TEST_F(DatabaseTests, Inserts)
+{
+    static constexpr Size NUM_ITERATIONS {5};
+    static constexpr Size GROUP_SIZE {500};
+
+    Database db {options};
+    ASSERT_TRUE(db.open().is_ok());
+
+    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
+        const auto records = generator.generate(random, GROUP_SIZE);
+        auto itr = std::cbegin(records);
+
+        for (Index i {}; i < GROUP_SIZE; ++i) {
+            ASSERT_TRUE(db.insert(*itr).is_ok());
+            itr++;
+        }
+        ASSERT_TRUE(db.commit().is_ok());
+    }
+    ASSERT_TRUE(db.close().is_ok());
 }
 
 TEST_F(DatabaseTests, DataPersists)
 {
-    static constexpr Size NUM_ITERATIONS {10};
+    static constexpr Size NUM_ITERATIONS {5};
     static constexpr Size GROUP_SIZE {500};
 
     const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
@@ -367,53 +398,22 @@ TEST_F(DatabaseTests, DataPersists)
     ASSERT_TRUE(db.close().is_ok());
 }
 
-TEST_F(DatabaseTests, SanityCheck)
+TEST_F(DatabaseTests, CannotCommitEmptyTransaction)
 {
-    static constexpr Size NUM_ITERATIONS {3};
-    static constexpr Size GROUP_SIZE {500};
     Options options;
-    options.path = BASE;
-    options.page_size = 0x100;
-    options.frame_count = 16;
-
-    RecordGenerator::Parameters param;
-    param.mean_key_size = 20;
-    param.mean_value_size = 20;
-    param.spread = 15;
-    RecordGenerator generator {param};
-    Random random {0};
-
-    // Make sure the database does not exist already.
-    std::error_code ignore;
-    fs::remove_all(BASE, ignore);
-
-    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        Database db {options};
-        ASSERT_TRUE(db.open().is_ok());
-
-        for (const auto &record: generator.generate(random, GROUP_SIZE))
-            ASSERT_TRUE(db.insert(record).is_ok());
-        ASSERT_TRUE(db.close().is_ok());
-    }
-
-    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        Database db {options};
-        ASSERT_TRUE(db.open().is_ok());
-
-        for (const auto &record: generator.generate(random, GROUP_SIZE)) {
-            auto r = db.erase(record.key);
-            if (r.is_not_found())
-                r = db.erase(db.find_minimum());
-
-            if (!r.is_ok())
-                ADD_FAILURE() << "cannot find record to remove";
-        }
-        ASSERT_TRUE(db.close().is_ok());
-    }
-
+    options.path = "/tmp/__database_commit_test";
     Database db {options};
-    ASSERT_TRUE(db.open().is_ok());
-    ASSERT_EQ(db.info().record_count(), 0);
+    CCO_EXPECT_OK(db.open());
+    CCO_EXPECT_OK(db.insert("a", "1"));
+    CCO_EXPECT_OK(db.insert("b", "2"));
+    CCO_EXPECT_OK(db.insert("c", "3"));
+    CCO_EXPECT_OK(db.commit());
+
+    const auto s = db.commit();
+    ASSERT_TRUE(s.is_logic_error()) << "Error: " << (s.is_ok() ? "commit() should have failed" : s.what());
+    const auto info = db.info();
+    ASSERT_EQ(info.record_count(), 3);
+    ASSERT_EQ(info.page_count(), 1);
 }
 
 TEST_F(DatabaseTests, DatabaseRecovers)
@@ -421,13 +421,13 @@ TEST_F(DatabaseTests, DatabaseRecovers)
     static constexpr Size GROUP_SIZE {500};
     Options options;
     options.path = BASE;
-    options.page_size = 0x100;
+    options.page_size = 0x400;
     options.frame_count = 16;
 
     RecordGenerator::Parameters param;
-    param.mean_key_size = 20;
+    param.mean_key_size = 40;
     param.mean_value_size = 20;
-    param.spread = 15;
+    param.spread = 20;
     param.is_unique = true;
     RecordGenerator generator {param};
     Random random {0};
@@ -442,8 +442,10 @@ TEST_F(DatabaseTests, DatabaseRecovers)
     ASSERT_TRUE(db.open().is_ok());
 
     const auto all_records = generator.generate(random, GROUP_SIZE * 2);
-    for (auto itr = begin(all_records); itr != begin(all_records) + GROUP_SIZE; ++itr)
-        ASSERT_TRUE(db.insert(*itr).is_ok());
+    for (auto itr = begin(all_records); itr != begin(all_records) + GROUP_SIZE; ++itr) {
+        const auto s = db.insert(*itr);
+        ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
+    }
 
     ASSERT_TRUE(db.commit().is_ok());
 
@@ -464,26 +466,89 @@ TEST_F(DatabaseTests, DatabaseRecovers)
     }
 }
 
+
+//class DatabaseSanityCheck: public testing::TestWithParam<Options> {
+//public:
+//    auto run()
+//    {
+//        static constexpr Size GROUP_SIZE {50};
+//        static constexpr Size NUM_ITERATIONS {30};
+//        RecordGenerator::Parameters param;
+//        param.mean_key_size = 20;
+//        param.mean_value_size = 20;
+//        param.spread = 15;
+//        param.is_unique = true;
+//        RecordGenerator generator {param};
+//        Random random {0};
+//
+//        // Make sure the database does not exist already.
+//        std::error_code ignore;
+//        fs::remove_all(BASE, ignore);
+//
+//        Database db {GetParam()};
+//        ASSERT_TRUE(db.open().is_ok());
+//
+//        const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
+//        std::vector<Record> committed;
+//
+//        auto parity = 0;
+//        for (auto itr = cbegin(records); itr + GROUP_SIZE != cend(records); itr += GROUP_SIZE) {
+//            for (auto record = itr; record != itr + GROUP_SIZE; ++record) {
+//                ASSERT_TRUE(db.insert(*record).is_ok());
+//            }
+//            if (++parity & 1) {
+//                committed.insert(end(committed), itr, itr + GROUP_SIZE);
+//                ASSERT_TRUE(db.commit().is_ok());
+//            } else {
+//                ASSERT_TRUE(db.abort().is_ok());
+//            }
+//            itr += GROUP_SIZE;
+//        }
+//
+//        for (const auto &record: committed) {
+//            const auto c = db.find_exact(record.key);
+//            ASSERT_TRUE(c.is_valid());
+//            ASSERT_EQ(c.value(), record.value);
+//        }
+//    }
+//};
+//
+//TEST_P(DatabaseSanityCheck, Transactions)
+//{
+//    run();
+//}
+//
+//
+//INSTANTIATE_TEST_SUITE_P(
+//    TransactionTestCase,
+//    DatabaseSanityCheck,
+//    ::testing::Values(
+//        Options {"/tmp/__calico_transactions", 0x100, 16, 0644}
+////        Options {"", 0x100, 16, 0644}
+//        ));
+
 class MockDatabase {
 public:
     MockDatabase()
     {
         using testing::_;
+        using testing::AtLeast;
+        using testing::StartsWith;
 
         Database::Impl::Parameters param;
         param.options.page_size = 0x200;
         param.options.frame_count = 16;
 
         auto temp = std::make_unique<MockDirectory>("MockDatabase");
-        EXPECT_CALL(*temp, open_file("wal", _, _)).Times(2);
         EXPECT_CALL(*temp, open_file("data", _, _)).Times(1);
-        EXPECT_CALL(*temp, exists("data")).Times(1);
+        EXPECT_CALL(*temp, open_file(StartsWith("wal"), _, _)).Times(AtLeast(2));
+        EXPECT_CALL(*temp, remove_file(StartsWith("wal"))).Times(AtLeast(0));
+        EXPECT_CALL(*temp, exists(_)).Times(AtLeast(1));
+        EXPECT_CALL(*temp, children).Times(1);
         EXPECT_CALL(*temp, close).Times(1);
         impl = Database::Impl::open(param, std::move(temp)).value();
         mock = dynamic_cast<MockDirectory*>(&impl->home());
-        rwal_mock = mock->get_mock_file("wal", Mode::CREATE | Mode::READ_ONLY);
-        wwal_mock = mock->get_mock_file("wal", Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND);
-        data_mock = mock->get_mock_file("data", Mode::CREATE | Mode::READ_WRITE);
+        data_mock = mock->get_mock_data_file();
 
         RecordGenerator::Parameters generator_param;
         generator_param.mean_key_size = 20;
@@ -513,11 +578,45 @@ public:
     Random random {0};
     MockDirectory *mock {};
     MockFile *data_mock {};
-    MockFile *rwal_mock {};
-    MockFile *wwal_mock {};
     std::vector<Record> records;
     std::unique_ptr<Database::Impl> impl;
 };
+
+TEST(MockDatabaseTests, CommitSmallTransactions)
+{
+    MockDatabase db;
+    const auto info = db.impl->info();
+    ASSERT_TRUE(db.impl->commit());
+    const auto record_count = info.record_count();
+
+    for (Index i {}; i < 10; ++i) {
+        ASSERT_TRUE(db.impl->erase(db.impl->find_minimum()));
+        ASSERT_TRUE(db.impl->erase(db.impl->find_maximum()));
+        ASSERT_TRUE(db.impl->commit());
+        ASSERT_EQ(info.record_count(), record_count - 2*(i+1));
+    }
+}
+
+TEST(MockDatabaseTests, AbortSmallTransactions)
+{
+    MockDatabase db;
+    const auto info = db.impl->info();
+    ASSERT_TRUE(db.impl->commit());
+    const auto record_count = info.record_count();
+    auto left = cbegin(db.records);
+    auto right = crbegin(db.records);
+    for (Index i {}; i < 10; ++i, ++left, ++right) {
+        ASSERT_TRUE(db.impl->erase(db.impl->find(stob(left->key))));
+        ASSERT_TRUE(db.impl->erase(db.impl->find(stob(right->key))));
+        ASSERT_TRUE(db.impl->abort());
+        ASSERT_EQ(info.record_count(), record_count);
+    }
+    for (const auto &[key, value]: db.records) {
+        auto c = db.impl->find_exact(stob(key));
+        ASSERT_TRUE(c.is_valid());
+        ASSERT_EQ(c.value(), value);
+    }
+}
 
 TEST(MockDatabaseTests, RecoversFromFailedCommit)
 {
@@ -525,20 +624,53 @@ TEST(MockDatabaseTests, RecoversFromFailedCommit)
     using testing::Return;
 
     MockDatabase db;
-    ON_CALL(*db.data_mock, write(_, _))
+    auto wal_mock = db.mock->get_mock_wal_writer_file("latest");
+    ON_CALL(*wal_mock, write(_))
         .WillByDefault(Return(Err {Status::system_error("123")}));
 
     auto r = db.impl->commit();
-    ASSERT_FALSE(r.has_value());
-    ASSERT_TRUE(r.error().is_system_error());
+    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
+    ASSERT_TRUE(r.error().is_system_error()) << "Unexpected error: " << r.error().what();
     ASSERT_EQ(r.error().what(), "123");
-    ASSERT_EQ(db.impl->status().what(), "123");
+    ASSERT_EQ(db.impl->status().what(), "123") << "System error should be stored in database status";
 
-    db.data_mock->delegate_to_fake();
+    wal_mock->delegate_to_fake();
     r = db.impl->abort();
     ASSERT_TRUE(r.has_value());
     ASSERT_TRUE(db.impl->status().is_ok());
 }
+
+//TEST(MockDatabaseTests, SanityCheck)
+//{
+//    static constexpr Size NUM_ITERATIONS {10};
+//    static constexpr Size GROUP_SIZE {500};
+//    using testing::_;
+//    using testing::Return;
+//
+//    MockDatabase db;
+//    auto remaining = db.records;
+//    for (auto itr = cbegin(db.records); itr != cend(db.records); ++itr) {
+//        auto n = db.random.next_int(50);
+//        while (itr != cend(db.records) && n-- > 0) {
+//
+//        }
+//    }
+//
+//    auto wal_mock = db.mock->get_mock_wal_writer_file("latest");
+//    ON_CALL(*wal_mock, write(_))
+//        .WillByDefault(Return(Err {Status::system_error("123")}));
+//
+//    auto r = db.impl->commit();
+//    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
+//    ASSERT_TRUE(r.error().is_system_error()) << "Unexpected error: " << r.error().what();
+//    ASSERT_EQ(r.error().what(), "123");
+//    ASSERT_EQ(db.impl->status().what(), "123") << "System error should be stored in database status";
+//
+//    wal_mock->delegate_to_fake();
+//    r = db.impl->abort();
+//    ASSERT_TRUE(r.has_value());
+//    ASSERT_TRUE(db.impl->status().is_ok());
+//}
 
 template<class Mock>
 auto run_close_error_test(MockDatabase &db, Mock &mock)
@@ -559,13 +691,7 @@ auto run_close_error_test(MockDatabase &db, Mock &mock)
 TEST(MockDatabaseTests, PropagatesErrorFromWALClose)
 {
     MockDatabase db;
-    run_close_error_test(db, *db.wwal_mock);
-}
-
-TEST(MockDatabaseTests, PropagatesErrorFromDataClose)
-{
-    MockDatabase db;
-    run_close_error_test(db, *db.wwal_mock);
+    run_close_error_test(db, *db.mock->get_mock_wal_writer_file("latest"));
 }
 
 TEST(RealDatabaseTests, DestroyDatabase)
@@ -578,6 +704,7 @@ TEST(RealDatabaseTests, DestroyDatabase)
     ASSERT_TRUE(db.open().is_ok());
     ASSERT_TRUE(Database::destroy(std::move(db)).is_ok());
     ASSERT_FALSE(fs::exists(options.path, ignore));
+    ASSERT_FALSE(ignore);
 }
 
 TEST(RealDatabaseTests, CanDestroyClosedDatabase)
@@ -600,6 +727,72 @@ TEST(RealDatabaseTests, DatabaseObjectTypes)
     ASSERT_TRUE(ptr->open().is_ok());
     ASSERT_TRUE(ptr->close().is_ok());
     ASSERT_TRUE(Database::destroy(std::move(*ptr)).is_ok());
+}
+
+class RecoveryTests: public testing::TestWithParam<Size> {
+public:
+    static constexpr auto SOURCE = "/tmp/__calico_recovery_tests";
+    static constexpr auto TARGET = "/tmp/__calico_recovery_tests_alt";
+
+    RecoveryTests()
+    {
+        std::error_code ignore;
+        fs::remove_all(SOURCE, ignore);
+        fs::remove_all(TARGET, ignore);
+        CCO_EXPECT_OK(db.open());
+    }
+
+    ~RecoveryTests() override
+    {
+        EXPECT_EQ(options.path, TARGET) << "fail_and_reopen() was never called";
+        EXPECT_TRUE(db.is_open()) << "Database should be open";
+        std::error_code ignore;
+        fs::remove_all(SOURCE, ignore);
+        CCO_EXPECT_OK(Database::destroy(std::move(db)));
+    }
+
+    auto fail_and_recover() -> Status
+    {
+        EXPECT_EQ(options.path, SOURCE) << "fail_and_reopen() was called more than once";
+        fs::copy(SOURCE, TARGET);
+        CCO_EXPECT_OK(db.close());
+        options.path = TARGET;
+        db = Database {options};
+        return db.open();
+    }
+
+    Options options {
+        SOURCE,
+        0x400,
+        16,
+        0666,
+        true,
+    };
+
+    Database db {options};
+};
+
+TEST_F(RecoveryTests, RollsBackUncommittedTransaction)
+{
+    CCO_EXPECT_OK(db.insert("a", "1"));
+    CCO_EXPECT_OK(db.insert("b", "2"));
+    CCO_EXPECT_OK(db.insert("c", "3"));
+    CCO_EXPECT_OK(fail_and_recover());
+    const auto info = db.info();
+    ASSERT_EQ(info.record_count(), 0);
+    ASSERT_EQ(info.page_count(), 1);
+}
+
+TEST_F(RecoveryTests, PreservesCommittedTransaction)
+{
+    CCO_EXPECT_OK(db.insert("a", "1"));
+    CCO_EXPECT_OK(db.insert("b", "2"));
+    CCO_EXPECT_OK(db.insert("c", "3"));
+    CCO_EXPECT_OK(db.commit());
+    CCO_EXPECT_OK(fail_and_recover());
+    const auto info = db.info();
+    ASSERT_EQ(info.record_count(), 3);
+    ASSERT_EQ(info.page_count(), 1);
 }
 
 } // <anonymous>
