@@ -12,7 +12,7 @@ public:
     [[nodiscard]] static auto right_sibling_id(const Page&) -> PageId;
     [[nodiscard]] static auto rightmost_child_id(const Page&) -> PageId;
     [[nodiscard]] static auto left_sibling_id(const Page&) -> PageId;
-    [[nodiscard]] static auto reserved(const Page&) -> uint32_t;
+    [[nodiscard]] static auto reserved(const Page&) -> std::uint64_t;
     [[nodiscard]] static auto cell_count(const Page&) -> Size;
     [[nodiscard]] static auto cell_start(const Page&) -> Index;
     [[nodiscard]] static auto frag_count(const Page&) -> Size;

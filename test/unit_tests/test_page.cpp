@@ -80,7 +80,7 @@ public:
         param.is_external = false;
         Cell cell {param};
         cell.detach(scratch.get());
-        cell.set_left_child_id(PageId {123});
+        cell.set_left_child_id(PageId {123ULL});
         return cell;
     }
 
@@ -401,7 +401,7 @@ public:
     CellBacking cell_backing;
     std::string normal_value {"world"};
     std::string overflow_value;
-    PageId arbitrary_pid {2};
+    PageId arbitrary_pid {2ULL};
 };
 
 TEST_F(NodeTests, FreshNodesAreEmpty)
@@ -498,9 +498,9 @@ auto run_maximally_sized_cell_test(NodeTests &test, PageId id, Size max_records_
     ASSERT_TRUE(node.is_overflowing());
 }
 
-TEST_F(NodeTests, InternalRootFitsAtLeastThreeRecords)
+TEST_F(NodeTests, InternalRootFitsAtLeastFourRecords)
 {
-    run_maximally_sized_cell_test(*this, PageId::base(), 3, false);
+    run_maximally_sized_cell_test(*this, PageId::base(), 4, false);
 }
 
 TEST_F(NodeTests, ExternalRootFitsAtLeastThreeRecords)
@@ -508,14 +508,14 @@ TEST_F(NodeTests, ExternalRootFitsAtLeastThreeRecords)
     run_maximally_sized_cell_test(*this, PageId::base(), 3, true);
 }
 
-TEST_F(NodeTests, InternalNonRootFitsAtLeastFourRecords)
+TEST_F(NodeTests, InternalNonRootFitsAtLeastFiveRecords)
 {
-    run_maximally_sized_cell_test(*this, PageId {ROOT_ID_VALUE + 1}, 4, false);
+    run_maximally_sized_cell_test(*this, PageId {ROOT_ID_VALUE + 1}, 5, false);
 }
 
 template<class Test>auto get_node_with_one_cell(Test &test, bool has_overflow = false)
 {
-    static PageId next_id {2};
+    static PageId next_id {2ULL};
     auto value = has_overflow ? test.overflow_value : test.normal_value;
     auto node = test.node_backing.get_node(next_id, PageType::EXTERNAL_NODE);
     auto cell = test.cell_backing.get_cell("hello", value, true);
@@ -608,8 +608,8 @@ TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
 
 TEST_F(NodeTests, SplitNonRootExternal)
 {
-    auto lhs = make_node(PageId {2}, PageType::EXTERNAL_NODE);
-    auto rhs = make_node(PageId {3}, PageType::EXTERNAL_NODE);
+    auto lhs = make_node(PageId {2ULL}, PageType::EXTERNAL_NODE);
+    auto rhs = make_node(PageId {3ULL}, PageType::EXTERNAL_NODE);
     RollingScratchManager scratch {lhs.size()};
 
     lhs.insert(cell_backing.get_cell(make_key(100), normal_value, true));

@@ -158,7 +158,7 @@ private:
         [[nodiscard]] auto is_minimum() const -> bool;
         [[nodiscard]] auto is_maximum() const -> bool;
 
-        std::uint32_t ids[3] {0, 1, 0}; ///< Page IDs of the current node and its two siblings.
+        std::uint64_t ids[3] {0, 1, 0}; ///< Page IDs of the current node and its two siblings.
         std::uint16_t cell_count {}; ///< Number of cells in the current node.
         std::uint16_t index {}; ///< Offset of the cursor in the current node.
     };

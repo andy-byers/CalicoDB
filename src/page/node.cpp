@@ -8,31 +8,31 @@ namespace cco {
 
 auto NodeHeader::parent_id(const Page &page) -> PageId
 {
-    return PageId {get_u32(page, header_offset(page) + NodeLayout::PARENT_ID_OFFSET)};
+    return PageId {get_u64(page, header_offset(page) + NodeLayout::PARENT_ID_OFFSET)};
 }
 
 auto NodeHeader::right_sibling_id(const Page &page) -> PageId
 {
     CCO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    return PageId {get_u32(page, header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
+    return PageId {get_u64(page, header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
 }
 
-auto NodeHeader::reserved(const Page &page) -> uint32_t
+auto NodeHeader::reserved(const Page &page) -> std::uint64_t
 {
     CCO_EXPECT_EQ(page.type(), PageType::INTERNAL_NODE);
-    return get_u32(page, header_offset(page) + NodeLayout::RESERVED_OFFSET);
+    return get_u64(page, header_offset(page) + NodeLayout::RESERVED_OFFSET);
 }
 
 auto NodeHeader::left_sibling_id(const Page &page) -> PageId
 {
     CCO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    return PageId {get_u32(page, header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
+    return PageId {get_u64(page, header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
 }
 
 auto NodeHeader::rightmost_child_id(const Page &page) -> PageId
 {
     CCO_EXPECT_NE(page.type(), PageType::EXTERNAL_NODE);
-    return PageId {get_u32(page, header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
+    return PageId {get_u64(page, header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
 }
 
 auto NodeHeader::cell_count(const Page &page) -> Size
@@ -64,28 +64,28 @@ auto NodeHeader::set_parent_id(Page &page, PageId parent_id) -> void
 {
     CCO_EXPECT_NE(page.id(), PageId::base());
     const auto offset = header_offset(page) + NodeLayout::PARENT_ID_OFFSET;
-    put_u32(page, offset, parent_id.value);
+    put_u64(page, offset, parent_id.value);
 }
 
 auto NodeHeader::set_right_sibling_id(Page &page, PageId right_sibling_id) -> void
 {
     CCO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
-    put_u32(page, offset, right_sibling_id.value);
+    put_u64(page, offset, right_sibling_id.value);
 }
 
 auto NodeHeader::set_left_sibling_id(Page &page, PageId left_sibling_id) -> void
 {
     CCO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET;
-    put_u32(page, offset, left_sibling_id.value);
+    put_u64(page, offset, left_sibling_id.value);
 }
 
 auto NodeHeader::set_rightmost_child_id(Page &page, PageId rightmost_child_id) -> void
 {
     CCO_EXPECT_NE(page.type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET;
-    put_u32(page, offset, rightmost_child_id.value);
+    put_u64(page, offset, rightmost_child_id.value);
 }
 
 auto NodeHeader::set_cell_count(Page &page, Size cell_count) -> void
@@ -504,7 +504,7 @@ auto Node::set_child_id(Index index, PageId child_id) -> void
     CCO_EXPECT_FALSE(is_external());
     CCO_EXPECT_LE(index, cell_count());
     if (index < cell_count()) {
-        put_u32(m_page, CellDirectory::get_pointer(m_page, index).value, child_id.value);
+        put_u64(m_page, CellDirectory::get_pointer(m_page, index).value, child_id.value);
     } else {
         set_rightmost_child_id(child_id);
     }

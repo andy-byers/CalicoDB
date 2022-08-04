@@ -11,10 +11,11 @@ public:
     static constexpr Size MAGIC_CODE_OFFSET {0};
     static constexpr Size HEADER_CRC_OFFSET {4};
     static constexpr Size PAGE_COUNT_OFFSET {8};
-    static constexpr Size FREE_START_OFFSET {12};
-    static constexpr Size PAGE_SIZE_OFFSET {16};
-    static constexpr Size KEY_COUNT_OFFSET {20};
-    static constexpr Size FLUSHED_LSN_OFFSET {24};
+    static constexpr Size FREE_START_OFFSET {16};
+    static constexpr Size RECORD_COUNT_OFFSET {24};
+    static constexpr Size FLUSHED_LSN_OFFSET {32};
+    static constexpr Size PAGE_SIZE_OFFSET {40};
+    static constexpr Size RESERVED_OFFSET {42};
     static constexpr Size HEADER_SIZE {48};
 
     static constexpr auto header_offset() noexcept -> Index
@@ -36,8 +37,8 @@ public:
 class PageLayout {
 public:
     static constexpr Size LSN_OFFSET {0};
-    static constexpr Size TYPE_OFFSET {4};
-    static constexpr Size HEADER_SIZE {6};
+    static constexpr Size TYPE_OFFSET {8};
+    static constexpr Size HEADER_SIZE {10};
 
     static constexpr auto header_offset(PageId page_id) noexcept -> Size
     {
@@ -53,16 +54,16 @@ public:
 class NodeLayout {
 public:
     static constexpr Size PARENT_ID_OFFSET {0};
-    static constexpr Size RIGHTMOST_CHILD_ID_OFFSET {4};
-    static constexpr Size RIGHT_SIBLING_ID_OFFSET {4};
-    static constexpr Size RESERVED_OFFSET {8};
-    static constexpr Size LEFT_SIBLING_ID_OFFSET {8};
-    static constexpr Size CELL_COUNT_OFFSET {12};
-    static constexpr Size CELL_START_OFFSET {14};
-    static constexpr Size FREE_START_OFFSET {16};
-    static constexpr Size FRAG_TOTAL_OFFSET {18};
-    static constexpr Size FREE_TOTAL_OFFSET {20};
-    static constexpr Size HEADER_SIZE {22};
+    static constexpr Size RIGHTMOST_CHILD_ID_OFFSET {8};
+    static constexpr Size RIGHT_SIBLING_ID_OFFSET {8};
+    static constexpr Size RESERVED_OFFSET {16}; // TODO: Could be used for something else in internal nodes (or have separate layouts).
+    static constexpr Size LEFT_SIBLING_ID_OFFSET {16};
+    static constexpr Size CELL_COUNT_OFFSET {24};
+    static constexpr Size CELL_START_OFFSET {26};
+    static constexpr Size FREE_START_OFFSET {28};
+    static constexpr Size FRAG_TOTAL_OFFSET {30};
+    static constexpr Size FREE_TOTAL_OFFSET {32};
+    static constexpr Size HEADER_SIZE {34};
 
     static constexpr auto header_offset(PageId page_id) noexcept -> Size
     {
@@ -78,7 +79,7 @@ public:
 class LinkLayout {
 public:
     static constexpr Size NEXT_ID_OFFSET {0};
-    static constexpr Size HEADER_SIZE {4};
+    static constexpr Size HEADER_SIZE {8};
 
     static constexpr auto header_offset() noexcept -> Size
     {
@@ -95,7 +96,7 @@ public:
     }
 };
 
-inline constexpr auto get_min_local(Size page_size)
+inline constexpr auto get_min_local(Size page_size) -> Size
 {
     CCO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
@@ -103,7 +104,7 @@ inline constexpr auto get_min_local(Size page_size)
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
 }
 
-inline constexpr auto get_max_local(Size page_size)
+inline constexpr auto get_max_local(Size page_size) -> Size
 {
     CCO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.

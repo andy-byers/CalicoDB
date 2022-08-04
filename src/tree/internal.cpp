@@ -417,7 +417,7 @@ auto Internal::fix_root(Node node) -> Result<void>
 auto Internal::save_header(FileHeaderWriter &header) const -> void
 {
     m_pool->save_header(header);
-    header.set_key_count(m_cell_count);
+    header.set_record_count(m_cell_count);
 }
 
 auto Internal::load_header(const FileHeaderReader &header) -> void

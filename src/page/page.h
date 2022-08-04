@@ -87,10 +87,12 @@ private:
     bool m_is_dirty {};
 };
 
-[[nodiscard]] auto get_u16(const Page &, Index) -> uint16_t;
-[[nodiscard]] auto get_u32(const Page &, Index) -> uint32_t;
-auto put_u16(Page &, Index, uint16_t) -> void;
-auto put_u32(Page &, Index, uint32_t) -> void;
+[[nodiscard]] auto get_u16(const Page &, Index) -> std::uint16_t;
+[[nodiscard]] auto get_u32(const Page &, Index) -> std::uint32_t;
+[[nodiscard]] auto get_u64(const Page &, Index) -> std::uint64_t;
+auto put_u16(Page &, Index, std::uint16_t) -> void;
+auto put_u32(Page &, Index, std::uint32_t) -> void;
+auto put_u64(Page &, Index, std::uint64_t) -> void;
 
 [[nodiscard]] auto get_file_header_reader(const Page &) -> FileHeaderReader;
 [[nodiscard]] auto get_file_header_writer(Page &) -> FileHeaderWriter;

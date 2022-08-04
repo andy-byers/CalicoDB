@@ -12,41 +12,38 @@ It contains important database state information and is accessed by multiple com
 |-----:|-------:|:-------------|:-----------------------------------------------------------------------------------------|
 |    4 |      0 | Magic code   | An integer constant that identifies the `data` file as belonging to a Calico DB database |
 |    4 |      4 | Header CRC   | CRC computed on this header                                                              |
-|    4 |      8 | Page count   | Number of pages allocated to the database                                                |
-|    4 |     12 | Node count   | Number of node pages allocated to the database                                           |
-|    4 |     16 | Free count   | Number of pages in the free list                                                         |                                           
-|    4 |     20 | Free start   | Page ID of the first free list page                                                      |
-|    2 |     24 | Page size    | Size of a database page in bytes                                                         |
-|    2 |     26 | Block size   | Size of a WAL block in bytes                                                             |
-|    4 |     28 | Record count | Number of records in the database                                                        |
-|    4 |     32 | Flushed LSN  | LSN of the last WAL record flushed to disk after a successful commit                     |
-|   12 |     36 | Reserved     | Reserved for expansion                                                                   |
+|    8 |      8 | Page count   | Number of pages allocated to the database                                                |
+|    8 |     16 | Free start   | Page ID of the first free list page                                                      |
+|    8 |     24 | Record count | Number of records in the database                                                        |
+|    8 |     32 | Flushed LSN  | LSN of the last WAL record flushed to disk after a successful commit                     |
+|    2 |     40 | Page size    | Size of a database page in bytes                                                         |
+|    6 |     42 | Reserved     | Reserved for expansion                                                                   |
 
 ### Page Header
-|  Size | Offset | Name | Description                                                        |
-|------:|-------:|:-----|:-------------------------------------------------------------------|
-|     4 |      0 | LSN  | LSN of the WAL record describing the last modification to the page |
-|     2 |      4 | Type | Page type field                                                    |
+| Size | Offset | Name | Description                                                        |
+|-----:|-------:|:-----|:-------------------------------------------------------------------|
+|    8 |      0 | LSN  | LSN of the WAL record describing the last modification to the page |
+|    2 |      8 | Type | Page type field                                                    |
 
 ### Link Header
 | Size | Offset | Name    | Description                           |
 |-----:|-------:|:--------|:--------------------------------------|
-|    4 |      0 | Next ID | Page ID of the next page in the chain |
+|    8 |      0 | Next ID | Page ID of the next page in the chain |
 
 ### Node Header
 The node header contains information about the node's layout and its connections to surrounding nodes.
 
 | Size | Offset | Name                           | Description                                      |
 |-----:|-------:|:-------------------------------|:-------------------------------------------------|
-|    4 |      0 | Parent ID                      | Page ID of the parent node                       |
-|    4 |      4 | Rightmost child ID<sup>1</sup> | Page ID of the rightmost child node              |
-|    4 |      4 | Right sibling ID<sup>1</sup>   | Page ID of the right sibling node                |
-|    4 |      8 | Left sibling ID<sup>2</sup>    | Page ID of the left sibling node                 |
-|    2 |     12 | Cell count                     | Number of cells in the node                      |
-|    2 |     14 | Cell start                     | Offset of the start of the "gap" area            |
-|    2 |     16 | Free block start               | Offset of the first entry in the free block list |
-|    2 |     18 | Fragment count                 | Number of fragmented bytes                       |
-|    2 |     20 | Free block total<sup>3</sup>   | Total memory contained in free blocks            |
+|    8 |      0 | Parent ID                      | Page ID of the parent node                       |
+|    8 |      8 | Rightmost child ID<sup>1</sup> | Page ID of the rightmost child node              |
+|    8 |      8 | Right sibling ID<sup>1</sup>   | Page ID of the right sibling node                |
+|    8 |     16 | Left sibling ID<sup>2</sup>    | Page ID of the left sibling node                 |
+|    2 |     24 | Cell count                     | Number of cells in the node                      |
+|    2 |     26 | Cell start                     | Offset of the start of the "gap" area            |
+|    2 |     28 | Free block start               | Offset of the first entry in the free block list |
+|    2 |     30 | Fragment count                 | Number of fragmented bytes                       |
+|    2 |     32 | Free block total<sup>3</sup>   | Total memory contained in free blocks            |
 
 <sup>1</sup> The rightmost child ID and right sibling ID fields refer to the same data location.
 Use the rightmost child ID name in internal nodes and the right sibling ID name in external nodes.
@@ -73,17 +70,17 @@ See [Overflow Chains](#overflow-chains) for details.
 ### WAL Record Header
 | Size | Offset | Name         | Description                                       |
 |-----:|-------:|:-------------|:--------------------------------------------------|
-|    4 |      0 | LSN          | Unique log sequence number describing this record |
-|    4 |      4 | CRC          | CRC computed on this record                       |
-|    1 |      8 | Type         | WAL record type                                   |
-|    2 |      9 | Payload size | Size of the payload in bytes                      |
+|    8 |      0 | LSN          | Unique log sequence number describing this record |
+|    4 |      8 | CRC          | CRC computed on this record                       |
+|    1 |     12 | Type         | WAL record type                                   |
+|    2 |     13 | Payload size | Size of the payload in bytes                      |
 
 ### WAL Record Payload Header
 | Size | Offset | Name              | Description                                    |
 |-----:|-------:|:------------------|:-----------------------------------------------|
-|    4 |      0 | Previous LSN      | LSN describing the previous update to the page |
-|    4 |      4 | Page ID           | Page ID of the page that was updated           |
-|    2 |      6 | Count<sup>1</sup> | Number of payload entries                      |
+|    8 |      0 | Previous LSN      | LSN describing the previous update to the page |
+|    8 |      8 | Page ID           | Page ID of the page that was updated           |
+|    2 |     16 | Count<sup>1</sup> | Number of payload entries                      |
 
 <sup>1</sup> Determines the number of WAL record payload entries
 

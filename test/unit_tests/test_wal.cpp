@@ -241,11 +241,11 @@ TEST_F(WALReaderWriterTests, ExplorerStopsAtLastRecord)
     ASSERT_TRUE(writer->flush());
 
     auto next = explorer.read_next().value();
-    generator.validate_record(next.record, SequenceNumber {1});
+    generator.validate_record(next.record, SequenceNumber {1ULL});
     next = explorer.read_next().value();
-    generator.validate_record(next.record, SequenceNumber {2});
+    generator.validate_record(next.record, SequenceNumber {2ULL});
     next = explorer.read_next().value();
-    generator.validate_record(next.record, SequenceNumber {3});
+    generator.validate_record(next.record, SequenceNumber {3ULL});
     ASSERT_TRUE(explorer.read_next().error().is_not_found());
 }
 
@@ -268,22 +268,22 @@ TEST_F(WALReaderWriterTests, ExploresIncompleteBlocks)
     WALExplorer explorer {*reader};
     auto next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, SequenceNumber {1});
+    generator.validate_record(next->record, SequenceNumber {1ULL});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, SequenceNumber {2});
+    generator.validate_record(next->record, SequenceNumber {2ULL});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, SequenceNumber {3});
+    generator.validate_record(next->record, SequenceNumber {3ULL});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, SequenceNumber {4});
+    generator.validate_record(next->record, SequenceNumber {4ULL});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, SequenceNumber {5});
+    generator.validate_record(next->record, SequenceNumber {5ULL});
     next = explorer.read_next();
     ASSERT_TRUE(next);
-    generator.validate_record(next->record, SequenceNumber {6});
+    generator.validate_record(next->record, SequenceNumber {6ULL});
     ASSERT_FALSE(explorer.read_next());
 }
 
@@ -640,7 +640,7 @@ TEST_F(MockWALTests, SystemErrorIsPropagated)
         if (!p.has_value())
             break;
         p->set_type(PageType::INTERNAL_NODE);
-        p->set_lsn(SequenceNumber {123});
+        p->set_lsn(SequenceNumber {123ULL});
         auto r = pool->release(std::move(*p));
         if (!r.has_value())
             break;

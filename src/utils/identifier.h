@@ -8,6 +8,8 @@ namespace cco {
 
 template<class T>
 struct Identifier {
+    using Type = T;
+
     struct Hash {
         auto operator()(const Identifier<T> &id) const -> std::size_t
         {
@@ -19,7 +21,7 @@ struct Identifier {
 
     template<class Id>
     constexpr explicit Identifier(Id id) noexcept:
-          value {T(id)} {}
+          value {id} {}
 
     template<class Id>
     auto operator==(const Id &rhs) const noexcept -> bool
@@ -143,8 +145,8 @@ struct Identifier {
     T value {};
 };
 
-using PageId = Identifier<std::uint32_t>;
-using SequenceNumber = Identifier<std::uint32_t>;
+using PageId = Identifier<std::uint64_t>;
+using SequenceNumber = Identifier<std::uint64_t>;
 
 } // namespace cco
 

@@ -410,7 +410,7 @@ TEST_F(DatabaseTests, DatabaseRecovers)
     RecordGenerator::Parameters param;
     param.mean_key_size = 20;
     param.mean_value_size = 20;
-    param.spread = 15;
+    param.spread = 9;
     param.is_unique = true;
     RecordGenerator generator {param};
     Random random {0};
@@ -425,8 +425,10 @@ TEST_F(DatabaseTests, DatabaseRecovers)
     ASSERT_TRUE(db.open().is_ok());
 
     const auto all_records = generator.generate(random, GROUP_SIZE * 2);
-    for (auto itr = begin(all_records); itr != begin(all_records) + GROUP_SIZE; ++itr)
-        ASSERT_TRUE(db.insert(*itr).is_ok());
+    for (auto itr = begin(all_records); itr != begin(all_records) + GROUP_SIZE; ++itr) {
+        const auto s = db.insert(*itr);
+        ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
+    }
 
     ASSERT_TRUE(db.commit().is_ok());
 

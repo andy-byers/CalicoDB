@@ -29,24 +29,24 @@ WALPayload::WALPayload(const PageUpdate &param, Bytes scratch)
     m_data = scratch;
     auto bytes = scratch;
 
-    put_u32(bytes, param.previous_lsn.value);
-    bytes.advance(sizeof(uint32_t));
+    put_u64(bytes, param.previous_lsn.value);
+    bytes.advance(sizeof(param.previous_lsn.value));
 
-    put_u32(bytes, param.page_id.value);
-    bytes.advance(sizeof(uint32_t));
+    put_u64(bytes, param.page_id.value);
+    bytes.advance(sizeof(param.page_id.value));
 
-    put_u16(bytes, static_cast<uint16_t>(param.changes.size()));
-    bytes.advance(sizeof(uint16_t));
+    put_u16(bytes, static_cast<std::uint16_t>(param.changes.size()));
+    bytes.advance(sizeof(std::uint16_t));
 
     for (const auto &change: param.changes) {
         const auto size = change.before.size();
         CCO_EXPECT_EQ(size, change.after.size());
 
-        put_u16(bytes, static_cast<uint16_t>(change.offset));
-        bytes.advance(sizeof(uint16_t));
+        put_u16(bytes, static_cast<std::uint16_t>(change.offset));
+        bytes.advance(sizeof(std::uint16_t));
 
-        put_u16(bytes, static_cast<uint16_t>(size));
-        bytes.advance(sizeof(uint16_t));
+        put_u16(bytes, static_cast<std::uint16_t>(size));
+        bytes.advance(sizeof(std::uint16_t));
 
         mem_copy(bytes, change.before, size);
         bytes.advance(size);
@@ -69,21 +69,21 @@ auto WALPayload::decode() const -> PageUpdate
     auto update = PageUpdate {};
     auto bytes = m_data;
 
-    update.previous_lsn.value = get_u32(bytes);
-    bytes.advance(sizeof(uint32_t));
+    update.previous_lsn.value = get_u64(bytes);
+    bytes.advance(sizeof(update.previous_lsn.value));
 
-    update.page_id.value = get_u32(bytes);
-    bytes.advance(sizeof(uint32_t));
+    update.page_id.value = get_u64(bytes);
+    bytes.advance(sizeof(update.page_id.value));
 
     update.changes.resize(get_u16(bytes));
-    bytes.advance(sizeof(uint16_t));
+    bytes.advance(sizeof(std::uint16_t));
 
     for (auto &region: update.changes) {
         region.offset = get_u16(bytes);
-        bytes.advance(sizeof(uint16_t));
+        bytes.advance(sizeof(std::uint16_t));
 
         const auto region_size = get_u16(bytes);
-        bytes.advance(sizeof(uint16_t));
+        bytes.advance(sizeof(std::uint16_t));
 
         region.before = bytes.range(0, region_size);
         bytes.advance(region_size);
@@ -118,8 +118,8 @@ auto WALRecord::read(BytesView in) -> Result<bool>
     static constexpr auto ERROR_PRIMARY = "cannot read WAL record";
 
     // lsn (4B)
-    m_lsn.value = get_u32(in);
-    in.advance(sizeof(uint32_t));
+    m_lsn.value = get_u64(in);
+    in.advance(sizeof(m_lsn.value));
 
     // No more values in the buffer (empty space in the buffer must be zeroed and LSNs
     // start with 1).
@@ -164,13 +164,13 @@ auto WALRecord::write(Bytes out) const noexcept -> void
 {
     CCO_EXPECT_GE(out.size(), size());
 
-    // lsn (4B)
-    put_u32(out, static_cast<uint32_t>(m_lsn.value));
-    out.advance(sizeof(uint32_t));
+    // lsn (8B)
+    put_u64(out, m_lsn.value);
+    out.advance(sizeof(m_lsn.value));
 
     // crc (4B)
-    put_u32(out, static_cast<uint32_t>(m_crc));
-    out.advance(sizeof(uint32_t));
+    put_u32(out, static_cast<std::uint32_t>(m_crc));
+    out.advance(sizeof(std::uint32_t));
 
     // type (1B)
     CCO_EXPECT_TRUE(is_record_type_valid(m_type));
@@ -180,8 +180,8 @@ auto WALRecord::write(Bytes out) const noexcept -> void
     // x (2B)
     const auto payload_size = m_payload.m_data.size();
     CCO_EXPECT_NE(payload_size, 0);
-    put_u16(out, static_cast<uint16_t>(payload_size));
-    out.advance(sizeof(uint16_t));
+    put_u16(out, static_cast<std::uint16_t>(payload_size));
+    out.advance(sizeof(std::uint16_t));
 
     // payload (xB)
     mem_copy(out, m_payload.m_data, payload_size);

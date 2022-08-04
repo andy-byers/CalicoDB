@@ -13,7 +13,7 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
     cell.m_page_size = page_size;
 
     if (!is_external) {
-        cell.m_left_child_id.value = get_u32(in);
+        cell.m_left_child_id.value = get_u64(in);
         in.advance(PAGE_ID_SIZE);
     }
     const auto key_size = get_u16(in);
@@ -35,7 +35,7 @@ auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 
         if (local_value_size < cell.m_value_size) {
             in.advance(local_value_size);
-            cell.m_overflow_id.value = get_u32(in);
+            cell.m_overflow_id.value = get_u64(in);
         }
     }
     cell.m_is_external = is_external;
@@ -127,7 +127,7 @@ auto Cell::write(Bytes out) const -> void
 {
     if (!m_is_external) {
         CCO_EXPECT_FALSE(m_left_child_id.is_base());
-        put_u32(out, m_left_child_id.value);
+        put_u64(out, m_left_child_id.value);
         out.advance(PAGE_ID_SIZE);
     }
     put_u16(out, static_cast<std::uint16_t>(m_key.size()));
@@ -149,7 +149,7 @@ auto Cell::write(Bytes out) const -> void
             CCO_EXPECT_FALSE(m_left_child_id.is_base());
             CCO_EXPECT_LT(local.size(), m_value_size);
             out.advance(local.size());
-            put_u32(out, m_overflow_id.value);
+            put_u64(out, m_overflow_id.value);
         }
     }
 }

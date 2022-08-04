@@ -38,7 +38,7 @@ public:
     auto set_page_count(Size) -> void;
     auto set_free_start(PageId) -> void;
     auto set_page_size(Size) -> void;
-    auto set_key_count(Size) -> void;
+    auto set_record_count(Size) -> void;
     auto set_flushed_lsn(SequenceNumber) -> void;
 
 private:

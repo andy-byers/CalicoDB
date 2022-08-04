@@ -7,13 +7,13 @@
 
 namespace cco {
 
-static constexpr Size PAGE_ID_SIZE {sizeof(uint32_t)};
-static constexpr Size CELL_POINTER_SIZE {sizeof(uint16_t)};
+static constexpr Size PAGE_ID_SIZE {sizeof(std::uint64_t)};
+static constexpr Size CELL_POINTER_SIZE {sizeof(std::uint16_t)};
 static constexpr Index NULL_ID_VALUE {0};
 static constexpr Index ROOT_ID_VALUE {1};
 
-static constexpr Size MIN_CELL_HEADER_SIZE = sizeof(uint16_t) + // Key size       (2B)
-                                             sizeof(uint32_t);  // Value size     (4B)
+static constexpr Size MIN_CELL_HEADER_SIZE = sizeof(std::uint16_t) + // Key size       (2B)
+                                             sizeof(std::uint32_t);  // Value size     (4B)
 
 static constexpr Size MAX_CELL_HEADER_SIZE = MIN_CELL_HEADER_SIZE +
                                              PAGE_ID_SIZE + // Left child ID  (4B)

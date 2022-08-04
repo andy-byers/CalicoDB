@@ -14,7 +14,7 @@ class IFile;
 class Page;
 
 constexpr auto WAL_PREFIX = "wal-";
-using SegmentId = Identifier<std::uint32_t>;
+using SegmentId = Identifier<std::uint64_t>;
 
 inline auto id_to_name(SegmentId id) -> std::string
 {
@@ -34,7 +34,7 @@ inline auto name_to_id(BytesView name) -> SegmentId
     if (!is_valid)
         return SegmentId::null();
 
-    return SegmentId {static_cast<std::uint32_t>(std::stoul(btos(digits)))};
+    return SegmentId {std::stoull(btos(digits))};
 }
 
 struct WALParameters {

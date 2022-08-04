@@ -651,7 +651,7 @@ TEST_F(TreeTests, SanityCheck)
     RecordGenerator::Parameters param;
     param.mean_key_size = 20;
     param.mean_value_size = 10;
-    param.spread = 10;
+    param.spread = 9;
     RecordGenerator generator {param};
     Random random {0};
 

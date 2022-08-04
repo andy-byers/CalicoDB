@@ -22,7 +22,7 @@ namespace cco {
 class WALPayload {
 public:
     friend class WALRecord;
-    static constexpr Size HEADER_SIZE {10};
+    static constexpr Size HEADER_SIZE {18};
     static constexpr Size UPDATE_HEADER_SIZE {4};
 
     WALPayload() = default;
@@ -59,7 +59,7 @@ private:
  */
 class WALRecord {
 public:
-    static constexpr Size HEADER_SIZE {11};
+    static constexpr Size HEADER_SIZE {15};
     static constexpr auto MINIMUM_SIZE = HEADER_SIZE + 1;
 
     enum class Type : Byte {
