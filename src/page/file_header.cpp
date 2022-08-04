@@ -34,16 +34,6 @@ auto FileHeaderReader::page_count() const -> Size
     return get_u32(m_header.range(FileLayout::PAGE_COUNT_OFFSET));
 }
 
-auto FileHeaderReader::node_count() const -> Size
-{
-    return get_u32(m_header.range(FileLayout::NODE_COUNT_OFFSET));
-}
-
-auto FileHeaderReader::free_count() const -> Size
-{
-    return get_u32(m_header.range(FileLayout::FREE_COUNT_OFFSET));
-}
-
 auto FileHeaderReader::free_start() const -> PageId
 {
     return PageId {get_u32(m_header.range(FileLayout::FREE_START_OFFSET))};
@@ -84,16 +74,6 @@ auto FileHeaderWriter::update_header_crc() -> void
 auto FileHeaderWriter::set_page_count(Size page_count) -> void
 {
     put_u32(m_header.range(FileLayout::PAGE_COUNT_OFFSET), static_cast<uint32_t>(page_count));
-}
-
-auto FileHeaderWriter::set_node_count(Size node_count) -> void
-{
-    put_u32(m_header.range(FileLayout::NODE_COUNT_OFFSET), static_cast<uint32_t>(node_count));
-}
-
-auto FileHeaderWriter::set_free_count(Size free_count) -> void
-{
-    put_u32(m_header.range(FileLayout::FREE_COUNT_OFFSET), static_cast<uint32_t>(free_count));
 }
 
 auto FileHeaderWriter::set_free_start(PageId free_start) -> void

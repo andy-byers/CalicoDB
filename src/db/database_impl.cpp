@@ -85,9 +85,7 @@ auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) ->
         impl->m_pool.get(),
         sink,
         state.free_start(),
-        state.free_count(),
         state.record_count(),
-        state.node_count(),
     }));
 
     impl->m_sink = std::move(sink);
@@ -119,7 +117,7 @@ auto Database::Impl::open(Parameters param) -> Result<std::unique_ptr<Impl>>
     impl->m_sink = create_sink();                       // Creates a spdlog::sinks::null_sink.
     impl->m_logger = create_logger(impl->m_sink, "db"); // Do-nothing logger.
     impl->m_pool = std::make_unique<MemoryPool>(page_size, param.options.use_xact);
-    impl->m_tree = Tree::open({impl->m_pool.get(), impl->m_sink, PageId::null(), 0, 0, 0}).value();
+    impl->m_tree = Tree::open({impl->m_pool.get(), impl->m_sink, PageId::null(), 0}).value();
     impl->m_is_temp = true;
     CCO_TRY_CREATE(root, impl->m_tree->allocate_root());
     auto header = get_file_header_writer(root);

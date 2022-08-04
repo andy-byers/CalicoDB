@@ -55,23 +55,11 @@ public:
 
 class NodePoolTests: public TreeHarness {
 public:
-    NodePoolTests():
-          pool {{buffer_pool.get(), PageId::null(), 0, 0}} {}
+    NodePoolTests()
+        : pool {{buffer_pool.get(), PageId::null()}} {}
 
     NodePool pool;
 };
-
-TEST_F(NodePoolTests, NewNodePoolIsEmpty)
-{
-    ASSERT_EQ(pool.node_count(), 0);
-}
-
-TEST_F(NodePoolTests, AllocateIncreasesNodeCount)
-{
-    // allocate() returns a new node, which is immediately released.
-    ASSERT_TRUE(pool.release(*pool.allocate(PageType::EXTERNAL_NODE)));
-    ASSERT_EQ(pool.node_count(), 1);
-}
 
 TEST_F(NodePoolTests, NodeContentsPersist)
 {
@@ -147,8 +135,6 @@ public:
             create_sink("", spdlog::level::off),
             PageId::null(),
             0,
-            0,
-            0,
         });
         EXPECT_TRUE(tree->allocate_root());
     }
@@ -177,10 +163,9 @@ TEST_F(TreeTests, NewTreeIsEmpty)
     ASSERT_TRUE(cursor.status().is_not_found());
 }
 
-TEST_F(TreeTests, NewTreeHasOneNode)
+TEST_F(TreeTests, NewTreeHasOnePage)
 {
     ASSERT_EQ(buffer_pool->page_count(), 1);
-    ASSERT_EQ(tree->node_count(), 1);
 }
 
 TEST_F(TreeTests, InsertCell)
@@ -462,7 +447,6 @@ TEST_F(TreeTests, ExternalRootFitsAtLeastThreeCells)
 
     for (const auto &[key, value]: RecordGenerator {param}.generate(random, 3)) {
         ASSERT_TRUE(tools::insert(*tree, key, value));
-        ASSERT_EQ(tree->node_count(), 1);
     }
 }
 

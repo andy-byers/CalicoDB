@@ -10,7 +10,7 @@
 namespace cco {
 
 Tree::Tree(const Parameters &param)
-    : m_pool {{param.buffer_pool, param.free_start, param.free_count, param.node_count}},
+    : m_pool {{param.buffer_pool, param.free_start}},
       m_internal {{&m_pool, param.cell_count}},
       m_logger {create_logger(param.log_sink, "tree")}
 {}
@@ -24,9 +24,7 @@ auto Tree::open(const Parameters &param) -> Result<std::unique_ptr<ITree>>
 
 auto Tree::allocate_root() -> Result<Node>
 {
-    CCO_EXPECT_EQ(m_pool.node_count(), 0);
-    CCO_TRY_CREATE(root, m_pool.allocate(PageType::EXTERNAL_NODE));
-    return root;
+    return m_pool.allocate(PageType::EXTERNAL_NODE);
 }
 
 auto run_key_check(BytesView key, Size max_key_size, spdlog::logger &logger, const std::string &primary) -> Status
@@ -176,7 +174,6 @@ auto Tree::find_maximum() -> Cursor
 
 auto Tree::root(bool is_writable) -> Result<Node>
 {
-    CCO_EXPECT_GT(m_pool.node_count(), 0);
     return m_internal.find_root(is_writable);
 }
 

@@ -16,8 +16,6 @@ public:
     struct Parameters {
         IBufferPool *buffer_pool {};
         PageId free_start;
-        Size free_count {};
-        Size node_count {};
     };
 
     explicit NodePool(Parameters);
@@ -34,16 +32,10 @@ public:
     auto save_header(FileHeaderWriter &) -> void;
     auto load_header(const FileHeaderReader &) -> void;
 
-    [[nodiscard]] auto node_count() const -> Size
-    {
-        return m_node_count;
-    }
-
 private:
     FreeList m_free_list;
     std::string m_scratch;
     IBufferPool *m_pool {};
-    Size m_node_count {};
 };
 
 } // namespace cco

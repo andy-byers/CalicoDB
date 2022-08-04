@@ -104,38 +104,38 @@ struct Identifier {
     }
 
     [[nodiscard]]
-    static auto null() noexcept -> Identifier
+    static constexpr auto null() noexcept -> Identifier
     {
         return Identifier {T{}};
     }
 
     [[nodiscard]]
-    static auto base() noexcept -> Identifier
+    static constexpr auto base() noexcept -> Identifier
     {
         return ++null();
     }
 
     [[nodiscard]]
-    auto is_base() const noexcept -> bool
+    constexpr auto is_base() const noexcept -> bool
     {
         return value == base().value;
     }
 
     [[nodiscard]]
-    auto is_null() const noexcept -> bool
+    constexpr auto is_null() const noexcept -> bool
     {
         return value == null().value;
     }
 
     [[nodiscard]]
-    auto as_index() const noexcept -> Index
+    constexpr auto as_index() const noexcept -> Index
     {
         CCO_EXPECT_NE(value, T {});
         return value - base().value;
     }
 
     [[nodiscard]]
-    static auto from_index(Index index) noexcept -> Identifier
+    static constexpr auto from_index(Index index) noexcept -> Identifier
     {
         return Identifier {index + 1};
     }

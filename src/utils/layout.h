@@ -11,26 +11,23 @@ public:
     static constexpr Size MAGIC_CODE_OFFSET {0};
     static constexpr Size HEADER_CRC_OFFSET {4};
     static constexpr Size PAGE_COUNT_OFFSET {8};
-    static constexpr Size NODE_COUNT_OFFSET {12};
-    static constexpr Size FREE_COUNT_OFFSET {16};
-    static constexpr Size FREE_START_OFFSET {20};
-    static constexpr Size PAGE_SIZE_OFFSET {24};
-    static constexpr Size BLOCK_SIZE_OFFSET {26};
-    static constexpr Size KEY_COUNT_OFFSET {28};
-    static constexpr Size FLUSHED_LSN_OFFSET {32};
+    static constexpr Size FREE_START_OFFSET {12};
+    static constexpr Size PAGE_SIZE_OFFSET {16};
+    static constexpr Size KEY_COUNT_OFFSET {20};
+    static constexpr Size FLUSHED_LSN_OFFSET {24};
     static constexpr Size HEADER_SIZE {48};
 
-    static auto header_offset() noexcept -> Index
+    static constexpr auto header_offset() noexcept -> Index
     {
         return 0;
     }
 
-    static auto content_offset() noexcept -> Index
+    static constexpr auto content_offset() noexcept -> Index
     {
         return header_offset() + HEADER_SIZE;
     }
 
-    static auto page_offset(PageId page_id, Size page_size) noexcept -> Index
+    static constexpr auto page_offset(PageId page_id, Size page_size) noexcept -> Index
     {
         return page_id.as_index() * page_size;
     }
@@ -42,12 +39,12 @@ public:
     static constexpr Size TYPE_OFFSET {4};
     static constexpr Size HEADER_SIZE {6};
 
-    static auto header_offset(PageId page_id) noexcept -> Size
+    static constexpr auto header_offset(PageId page_id) noexcept -> Size
     {
         return page_id.is_base() * FileLayout::HEADER_SIZE;
     }
 
-    static auto content_offset(PageId page_id) noexcept -> Size
+    static constexpr auto content_offset(PageId page_id) noexcept -> Size
     {
         return header_offset(page_id) + HEADER_SIZE;
     }
@@ -67,12 +64,12 @@ public:
     static constexpr Size FREE_TOTAL_OFFSET {20};
     static constexpr Size HEADER_SIZE {22};
 
-    static auto header_offset(PageId page_id) noexcept -> Size
+    static constexpr auto header_offset(PageId page_id) noexcept -> Size
     {
         return PageLayout::content_offset(page_id);
     }
 
-    static auto content_offset(PageId page_id) noexcept -> Size
+    static constexpr auto content_offset(PageId page_id) noexcept -> Size
     {
         return header_offset(page_id) + HEADER_SIZE;
     }
@@ -83,7 +80,7 @@ public:
     static constexpr Size NEXT_ID_OFFSET {0};
     static constexpr Size HEADER_SIZE {4};
 
-    static auto header_offset() noexcept -> Size
+    static constexpr auto header_offset() noexcept -> Size
     {
         // The root page can never become a link page, so this value is the same for
         // all pages.
@@ -92,13 +89,13 @@ public:
         return PageLayout::content_offset(non_root);
     }
 
-    static auto content_offset() noexcept -> Size
+    static constexpr auto content_offset() noexcept -> Size
     {
         return header_offset() + HEADER_SIZE;
     }
 };
 
-inline auto get_min_local(Size page_size)
+inline constexpr auto get_min_local(Size page_size)
 {
     CCO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
@@ -106,7 +103,7 @@ inline auto get_min_local(Size page_size)
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
 }
 
-inline auto get_max_local(Size page_size)
+inline constexpr auto get_max_local(Size page_size)
 {
     CCO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
@@ -114,7 +111,7 @@ inline auto get_max_local(Size page_size)
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
 }
 
-inline auto get_local_value_size(Size key_size, Size value_size, Size page_size) -> Size
+inline constexpr auto get_local_value_size(Size key_size, Size value_size, Size page_size) -> Size
 {
     CCO_EXPECT_GT(key_size, 0);
     CCO_EXPECT_TRUE(is_power_of_two(page_size));

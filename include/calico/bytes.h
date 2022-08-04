@@ -31,7 +31,8 @@ namespace impl {
      * @see BytesView
      * @tparam Pointer The underlying pointer type.
      */
-    template<class Pointer> class Slice {
+    template<class Pointer>
+    class Slice {
     public:
         using Value = std::remove_pointer_t<Pointer>;
 
@@ -48,7 +49,8 @@ namespace impl {
          * @tparam Q The other slice pointer type.
          * @param rhs The other slice.
          */
-        template<class Q> Slice(Slice<Q> rhs) noexcept:
+        template<class Q>
+        Slice(Slice<Q> rhs) noexcept:
               Slice {rhs.data(), rhs.size()} {}
 
         /**
@@ -58,7 +60,8 @@ namespace impl {
          * @param data A pointer to the start of a sequence.
          * @param size The length of the sequence.
          */
-        template<class Q> Slice(Q data, Size size) noexcept:
+        template<class Q>
+        Slice(Q data, Size size) noexcept:
               m_data {data},
               m_size {size} {}
 
@@ -91,7 +94,8 @@ namespace impl {
          *
          * @return True if the slice has zero length, false otherwise.
          */
-        [[nodiscard]] auto is_empty() const noexcept -> bool
+        [[nodiscard]]
+        auto is_empty() const noexcept -> bool
         {
             return m_size == 0;
         }
@@ -101,7 +105,8 @@ namespace impl {
          *
          * @return The length in elements.
          */
-        [[nodiscard]] auto size() const noexcept -> Size
+        [[nodiscard]]
+        auto size() const noexcept -> Size
         {
             return m_size;
         }
@@ -111,7 +116,8 @@ namespace impl {
          *
          * @return A copy of the slice.
          */
-        [[nodiscard]] auto copy() const -> Slice
+        [[nodiscard]]
+        auto copy() const -> Slice
         {
             return *this;
         }
@@ -123,7 +129,8 @@ namespace impl {
          * @param size The size of the view in elements.
          * @return The new slice.
          */
-        [[nodiscard]] auto range(Index offset, Size size) const noexcept -> Slice
+        [[nodiscard]]
+        auto range(Index offset, Size size) const noexcept -> Slice
         {
             assert(size <= m_size);
             assert(offset <= m_size);
@@ -137,7 +144,8 @@ namespace impl {
          * @param offset The offset of the view in elements.
          * @return The new slice, spanning from the given offset to the end.
          */
-        [[nodiscard]] auto range(Index offset) const noexcept -> Slice
+        [[nodiscard]]
+        auto range(Index offset) const noexcept -> Slice
         {
             assert(m_size >= offset);
             return range(offset, m_size - offset);
@@ -148,7 +156,8 @@ namespace impl {
          *
          * @return The underlying pointer.
          */
-        [[nodiscard]] auto data() const noexcept -> Pointer
+        [[nodiscard]]
+        auto data() const noexcept -> Pointer
         {
             return m_data;
         }
@@ -158,6 +167,7 @@ namespace impl {
          *
          * @return The underlying pointer.
          */
+        [[nodiscard]]
         auto data() noexcept -> Pointer
         {
             return m_data;
@@ -199,7 +209,8 @@ namespace impl {
             return *this;
         }
 
-        [[nodiscard]] auto starts_with(Slice<const Value*> rhs) const noexcept -> bool
+        [[nodiscard]]
+        auto starts_with(Slice<const Value*> rhs) const noexcept -> bool
         {
             if (rhs.size() > m_size)
                 return false;

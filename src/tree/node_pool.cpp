@@ -11,10 +11,9 @@
 namespace cco {
 
 NodePool::NodePool(Parameters param)
-    : m_free_list {{param.buffer_pool, param.free_start, param.free_count}},
+    : m_free_list {{param.buffer_pool, param.free_start}},
       m_scratch(param.buffer_pool->page_size(), '\x00'),
-      m_pool {param.buffer_pool},
-      m_node_count {param.node_count}
+      m_pool {param.buffer_pool}
 {}
 
 auto NodePool::page_size() const -> Size
@@ -32,7 +31,6 @@ auto NodePool::allocate(PageType type) -> Result<Node>
         });
     if (page) {
         page->set_type(type);
-        m_node_count++;
         return Node {std::move(*page), true, m_scratch.data()};
     }
     return Err {page.error()};
@@ -55,8 +53,7 @@ auto NodePool::release(Node node) -> Result<void>
 auto NodePool::destroy(Node node) -> Result<void>
 {
     CCO_EXPECT_FALSE(node.is_overflowing());
-    return m_free_list.push(node.take())
-        .map([this] { m_node_count--; });
+    return m_free_list.push(node.take());
 }
 
 auto NodePool::allocate_chain(BytesView overflow) -> Result<PageId>
@@ -132,13 +129,11 @@ auto NodePool::destroy_chain(PageId id, Size size) -> Result<void>
 
 auto NodePool::save_header(FileHeaderWriter &header) -> void
 {
-    header.set_node_count(m_node_count);
     m_free_list.save_header(header);
 }
 
 auto NodePool::load_header(const FileHeaderReader &header) -> void
 {
-    m_node_count = header.node_count();
     m_free_list.load_header(header);
 }
 

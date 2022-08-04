@@ -17,17 +17,10 @@ public:
         IBufferPool *buffer_pool {};
         spdlog::sink_ptr log_sink;
         PageId free_start {};
-        Size free_count {};
         Size cell_count {};
-        Size node_count {};
     };
 
     ~Tree() override = default;
-
-    [[nodiscard]] auto node_count() const -> Size override
-    {
-        return m_pool.node_count();
-    }
 
     [[nodiscard]] auto cell_count() const -> Size override
     {

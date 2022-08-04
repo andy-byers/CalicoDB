@@ -18,8 +18,6 @@ public:
     [[nodiscard]] auto magic_code() const -> Index;
     [[nodiscard]] auto header_crc() const -> Index;
     [[nodiscard]] auto page_count() const -> Size;
-    [[nodiscard]] auto node_count() const -> Size;
-    [[nodiscard]] auto free_count() const -> Size;
     [[nodiscard]] auto free_start() const -> PageId;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto record_count() const -> Size;
@@ -38,8 +36,6 @@ public:
     auto update_magic_code() -> void;
     auto update_header_crc() -> void;
     auto set_page_count(Size) -> void;
-    auto set_node_count(Size) -> void;
-    auto set_free_count(Size) -> void;
     auto set_free_start(PageId) -> void;
     auto set_page_size(Size) -> void;
     auto set_key_count(Size) -> void;

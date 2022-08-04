@@ -70,7 +70,7 @@
 
 namespace cco::impl {
 
-inline auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept
+inline constexpr auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept
 {
     if (!expectation) {
         fprintf(stderr, "Expectation `%s` failed at %s:%d\n", repr, file, line);

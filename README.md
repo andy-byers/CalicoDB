@@ -11,6 +11,8 @@
 > If we push_change the cleanup of obsolete segments off into a background thread, we end up with much less work each time commit() is called.
 > All we have to do is write the commit WAL record, flush the tail buffer, call fsync(), then open a new WAL segment.
 
+> **Note (08/03)**: We've got the WAL segmentation pretty much down!
+> The architecture is set up to have the WAL record creation/writing and segment truncation moved to a background thread.
 
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
@@ -45,8 +47,7 @@ Check out the [Contributions](#contributions) section if you are interested in w
 
 ## Caveats
 + Currently, Calico DB only runs on 64-bit Ubuntu and OSX
-+ WAL is only used to ensure ACID properties on the current operation and is truncated afterward
-+ Has a hard limit on key length, equal to roughly 1/4 of the page size (anywhere from 39 B to 8167 B)
++ Has a hard limit on key length, equal to roughly 1/4 of the page size (anywhere from 39 B to 8,167 B)
 + Has a hard limit on value length, equal to roughly 4 GB
 + Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for multiple cursors
@@ -80,30 +81,7 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCCO_BUILD_TESTS=Off .. && cmake --build .
 See the [API documentation](doc/api.md).
 
 ## Performance
-Following are the latest performance benchmarks for Calico DB.
-The benchmarks use 16 B keys, 100 B values, pages of size 32 KB, and 4 MB of cache.
-
-### Persistent Database
-| Name                  | Result (ops/second) |
-|:----------------------|--------------------:|
-| RandomWrites          |               1,351 |
-| SequentialWrites      |               1,422 |
-| RandomBatchWrites     |               7,368 |
-| SequentialBatchWrites |              76,958 |
-| RandomReads           |             343,406 |
-| ForwardIteration      |           2,403,846 |
-| ReverseIteration      |           2,386,634 |
-
-### In-Memory Database
-| Name                  | Result (ops/second) |
-|:----------------------|--------------------:|
-| RandomWrites          |              58,041 |
-| SequentialWrites      |              73,030 |
-| RandomBatchWrites     |              64,532 |
-| SequentialBatchWrites |             287,438 |
-| RandomReads           |           1,226,993 |
-| ForwardIteration      |           3,952,569 |
-| ReverseIteration      |           3,968,253 |
+Benchmarks are run in a modified version of LevelDB, using the `db_bench` routines.
 
 ## TODO
 1. Get everything code reviewed!
@@ -154,3 +132,5 @@ Contributions are welcome!
 Pull requests that fix bugs or address correctness issues will always be considered.
 The [TODO](#todo) section contains a list of things that need to be addressed, and [design.md](doc/design.md) contains some TODO comments that I thought were important.
 Feel free to create a pull request.
+
+

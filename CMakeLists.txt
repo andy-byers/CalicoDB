@@ -52,7 +52,13 @@ FetchContent_Declare(spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG        v1.10.0
 )
-FetchContent_MakeAvailable(spdlog)
+
+#set(EXPECTED_BUILD_TESTS Off)
+#FetchContent_Declare(expected
+#    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
+#    GIT_TAG        v1.0.0
+#)
+FetchContent_MakeAvailable(spdlog)# expected)
 
 # Build the static library.
 add_library(calico
@@ -62,7 +68,7 @@ target_include_directories(calico
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE "${CCO_SOURCE_DIR}")
 target_compile_options(calico
-    PRIVATE "${CCO_WARNINGS}" -fno-rtti) # -fno-exceptions) # TODO: Get Calico DB to compile without exceptions. Currently expected.hpp prevents this from working...
+    PRIVATE "${CCO_WARNINGS}") # -fno-exceptions -fno-rtti) TODO: Get Calico DB to compile without RTTI/exceptions.
 target_link_libraries(calico
     PUBLIC  spdlog::spdlog
     PRIVATE pthread)
