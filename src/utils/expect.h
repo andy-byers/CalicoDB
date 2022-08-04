@@ -68,7 +68,7 @@
     if (!calico_try_##out.has_value()) {       \
         return Err {calico_try_##out.error()}; \
     }                                          \
-    auto out = std::move(*calico_try_##out)
+    auto out = std::move(calico_try_##out.value())
 
 namespace cco::impl {
 
