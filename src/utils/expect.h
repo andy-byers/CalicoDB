@@ -8,8 +8,8 @@
 #include <type_traits>
 
 #ifdef NDEBUG
-#  define CCO_EXPECT_BOOL_(cc)
-#  define CCO_EXPECT_STAT_(s)
+#  define CCO_EXPECT_BOOL_(cc, file, line)
+#  define CCO_EXPECT_STAT_(s, file, line)
 #else
 #  define CCO_EXPECT_BOOL_(cc, file, line) impl::handle_expect(cc, #cc, file, line)
 #  define CCO_EXPECT_STAT_(s, file, line) impl::handle_expect(s, file, line)

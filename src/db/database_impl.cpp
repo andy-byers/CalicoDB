@@ -157,9 +157,7 @@ auto Database::Impl::path() const -> std::string
 
 auto Database::Impl::info() -> Info
 {
-    Info info;
-    info.m_impl = this;
-    return info;
+    return Info {*this};
 }
 
 auto Database::Impl::find_exact(BytesView key) -> Cursor
@@ -202,7 +200,7 @@ auto Database::Impl::commit() -> Result<void>
     static constexpr auto ERROR_PRIMARY = "cannot commit";
     m_logger->trace("committing");
 
-    if (!m_pool->can_commit()) {
+    if (m_pool->uses_xact() && !m_pool->can_commit()) {
         LogMessage message {*m_logger};
         message.set_primary(ERROR_PRIMARY);
         message.set_detail("transaction is empty");
@@ -223,7 +221,15 @@ auto Database::Impl::commit() -> Result<void>
 
 auto Database::Impl::abort() -> Result<void>
 {
+    static constexpr auto ERROR_PRIMARY = "cannot abort";
     m_logger->trace("aborting");
+
+    if (m_pool->uses_xact() && !m_pool->can_commit()) {
+        LogMessage message {*m_logger};
+        message.set_primary(ERROR_PRIMARY);
+        message.set_detail("transaction is empty");
+        return Err {message.logic_error()};
+    }
     return m_pool->abort()
         .and_then([this]() -> Result<void> {
             CCO_TRY(load_header());
@@ -231,7 +237,7 @@ auto Database::Impl::abort() -> Result<void>
             return {};
         })
         .or_else([this](const Status &status) -> Result<void> {
-            m_logger->error("cannot abort");
+            m_logger->error(ERROR_PRIMARY);
             m_logger->error("(reason) {}", status.what());
             return Err {status};
         });

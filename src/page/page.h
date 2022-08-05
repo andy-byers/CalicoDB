@@ -73,6 +73,7 @@ public:
         m_manager = nullptr;
     }
 
+    // NOTE: We need these because we have a user-defined destructor.
     Page(Page &&) = default;
     auto operator=(Page &&) -> Page & = default;
 

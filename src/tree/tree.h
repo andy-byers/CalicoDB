@@ -22,26 +22,31 @@ public:
 
     ~Tree() override = default;
 
-    [[nodiscard]] auto cell_count() const -> Size override
+    [[nodiscard]]
+    auto cell_count() const -> Size override
     {
         return m_internal.cell_count();
     }
 
-    [[nodiscard]] auto internal() const -> const Internal & override
+    [[nodiscard]]
+    auto internal() const -> const Internal & override
     {
         return m_internal;
     }
 
-    [[nodiscard]] auto pool() const -> const NodePool & override
+    [[nodiscard]]
+    auto pool() const -> const NodePool & override
     {
         return m_pool;
     }
 
+    [[nodiscard]]
     auto internal() -> Internal & override
     {
         return m_internal;
     }
 
+    [[nodiscard]]
     auto pool() -> NodePool & override
     {
         return m_pool;
@@ -52,12 +57,12 @@ public:
     [[nodiscard]] auto erase(Cursor) -> Result<bool> override;
     [[nodiscard]] auto root(bool) -> Result<Node> override;
     [[nodiscard]] auto allocate_root() -> Result<Node> override;
+    [[nodiscard]] auto find_exact(BytesView) -> Cursor override;
+    [[nodiscard]] auto find(BytesView key) -> Cursor override;
+    [[nodiscard]] auto find_minimum() -> Cursor override;
+    [[nodiscard]] auto find_maximum() -> Cursor override;
     auto save_header(FileHeaderWriter &) const -> void override;
     auto load_header(const FileHeaderReader &) -> void override;
-    auto find_exact(BytesView) -> Cursor override;
-    auto find(BytesView key) -> Cursor override;
-    auto find_minimum() -> Cursor override;
-    auto find_maximum() -> Cursor override;
     auto TEST_validate_node(PageId) -> void override;
 
 private:

@@ -21,7 +21,6 @@ public:
 
     explicit Frame(Size);
     Frame(Byte *, Index, Size);
-    ~Frame() = default;
 
     [[nodiscard]] auto is_owned() const -> bool
     {
@@ -81,9 +80,6 @@ public:
     [[nodiscard]] auto page_lsn() const -> SequenceNumber;
     [[nodiscard]] auto borrow(IBufferPool *, bool) -> Page;
     auto synchronize(Page &) -> void;
-
-    auto operator=(Frame &&) -> Frame & = default;
-    Frame(Frame &&) = default;
 
 private:
     std::string m_owned;

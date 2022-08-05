@@ -7,7 +7,6 @@
 namespace cco {
 
 class Cursor;
-class Batch;
 class Info;
 
 /**

@@ -36,6 +36,7 @@ public:
 
 private:
     explicit WALManager(const WALParameters &);
+    [[nodiscard]] auto setup(const WALParameters &) -> Result<void>;
     [[nodiscard]] auto open_reader_segment(SegmentId) -> Result<void>;
     [[nodiscard]] auto open_writer_segment(SegmentId) -> Result<void>;
     [[nodiscard]] auto advance_writer(SequenceNumber, bool) -> Result<void>;
@@ -49,26 +50,19 @@ private:
     std::unique_ptr<IWALReader> m_reader;
     std::unique_ptr<IWALWriter> m_writer;
     std::shared_ptr<spdlog::logger> m_logger;
-    std::vector<WALSegment> m_segments;
-    std::string m_scratch;
-    WALSegment m_current;
     IBufferPool *m_pool {};
     IDirectory *m_home {};
     bool m_has_pending {};
 
-    struct BackgroundState {
-        mutable std::mutex mutex;
-        std::condition_variable condition;
-        std::string record_scratch;
-        std::queue<PageUpdate> pending_updates;
-        std::vector<WALSegment> completed_segments;
-        WALSegment current_segment;
-        Status status {Status::ok()};
-        bool is_running {true};
-    };
-
-    BackgroundState m_background_state;
-    std::optional<std::thread> m_background_task;
+    mutable std::mutex m_mutex;
+    std::condition_variable m_condition;
+    std::queue<PageUpdate> m_pending_updates;
+    std::string m_record_scratch;
+    std::vector<WALSegment> m_completed_segments;
+    WALSegment m_current_segment;
+    Status m_writer_status {Status::ok()};
+    std::optional<std::thread> m_writer_task;
+    SequenceNumber m_last_lsn;
 };
 
 } // namespace cco

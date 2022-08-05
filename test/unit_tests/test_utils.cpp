@@ -304,14 +304,81 @@ TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
     }
 }
 
+TEST(StatusTests, OkStatusHasNoMessage)
+{
+    auto s = Status::ok();
+    ASSERT_TRUE(s.what().empty());
+}
+
+TEST(StatusTests, NonOkStatusSavesMessage)
+{
+    static constexpr auto message = "status message";
+    auto s = Status::invalid_argument(message);
+    ASSERT_EQ(s.what(), message);
+    ASSERT_TRUE(s.is_invalid_argument());
+}
+
+// Bad idea??? Uses const reference lifetime extension to name "test", which can be an lvalue or rvalue. Then we use the name in a more
+// complicated expression. Seems pretty useful for creating more complicated asserts.
+#define CCO_TEST(test, expression) \
+    do { \
+        const auto &_test = (test);  \
+        CCO_EXPECT_TRUE(expression); \
+    } while (0)
+
+TEST(MacroTest, WeirdMacro)
+{
+    CCO_TEST(75 * 2 + 10, _test >= 100 and _test <= 200);
+}
+
 TEST(StatusTests, StatusCodesAreCorrect)
 {
-    ASSERT_TRUE(Status::invalid_argument("").is_invalid_argument());
-    ASSERT_TRUE(Status::system_error("").is_system_error());
-    ASSERT_TRUE(Status::logic_error("").is_logic_error());
-    ASSERT_TRUE(Status::corruption("").is_corruption());
-    ASSERT_TRUE(Status::not_found().is_not_found());
+    ASSERT_TRUE(Status::invalid_argument("invalid argument").is_invalid_argument());
+    ASSERT_TRUE(Status::system_error("system error").is_system_error());
+    ASSERT_TRUE(Status::logic_error("logic error").is_logic_error());
+    ASSERT_TRUE(Status::corruption("corruption").is_corruption());
+    ASSERT_TRUE(Status::not_found("not found").is_not_found());
     ASSERT_TRUE(Status::ok().is_ok());
+}
+
+TEST(StatusTests, OkStatusCanBeCopied)
+{
+    auto src = Status::ok();
+    auto dst = src;
+    ASSERT_TRUE(src.is_ok());
+    ASSERT_TRUE(dst.is_ok());
+    ASSERT_TRUE(src.what().empty());
+    ASSERT_TRUE(dst.what().empty());
+}
+
+TEST(StatusTests, NonOkStatusCanBeCopied)
+{
+    auto src = Status::invalid_argument("status message");
+    auto dst = src;
+    ASSERT_TRUE(src.is_invalid_argument());
+    ASSERT_TRUE(dst.is_invalid_argument());
+    ASSERT_EQ(src.what(), "status message");
+    ASSERT_EQ(dst.what(), "status message");
+}
+
+TEST(StatusTests, OkStatusCanBeMoved)
+{
+    auto src = Status::ok();
+    auto dst = std::move(src);
+    ASSERT_TRUE(src.is_ok());
+    ASSERT_TRUE(dst.is_ok());
+    ASSERT_TRUE(src.what().empty());
+    ASSERT_TRUE(dst.what().empty());
+}
+
+TEST(StatusTests, NonOkStatusCanBeMoved)
+{
+    auto src = Status::invalid_argument("status message");
+    auto dst = std::move(src);
+    ASSERT_TRUE(src.is_ok());
+    ASSERT_TRUE(dst.is_invalid_argument());
+    ASSERT_TRUE(src.what().empty());
+    ASSERT_EQ(dst.what(), "status message");
 }
 
 } // <anonymous>

@@ -168,7 +168,7 @@ private:
 
     mutable Status m_status {Status::not_found()};
     NodePool *m_pool {}; ///< Reference to an object that provides nodes from the buffer pool.
-    Internal *m_internal {}; ///< Reference to the page internals.
+    Internal *m_internal {}; ///< Reference to the tree internals.
     Position m_position; ///< Position of the cursor in the page.
 };
 

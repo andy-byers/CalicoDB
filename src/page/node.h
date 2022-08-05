@@ -75,17 +75,12 @@ public:
         bool found_eq {};
     };
 
-    ~Node() = default;
-
     Node(Page page, bool reset_header, Byte *scratch)
         : m_page {std::move(page)},
           m_scratch {Bytes {scratch, m_page.size()}}
     {
         reset(reset_header);
     }
-
-    Node(Node &&rhs) = default;
-    auto operator=(Node &&rhs) -> Node & = default;
 
     [[nodiscard]] auto id() const -> PageId
     {

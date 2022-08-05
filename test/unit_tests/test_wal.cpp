@@ -68,6 +68,17 @@ TEST_F(WALReaderWriterTests, PayloadEncoding)
     ASSERT_EQ(update.changes.size(), 10);
 }
 
+TEST_F(WALReaderWriterTests, GenRecords)
+{
+    WALRecordGenerator generator {PAGE_SIZE};
+    Random random {0};
+    for (Index i {}; i < 1'000'000; ++i) {
+        const auto record = generator.generate(random.next_int(5ULL, 10ULL), random.next_int(5ULL, 10ULL));
+        const auto update = record.payload().decode();
+        ASSERT_LE(update.changes.size(), 10);
+    }
+}
+
 TEST_F(WALReaderWriterTests, SingleSplit)
 {
     WALRecordGenerator generator {PAGE_SIZE};
@@ -631,5 +642,64 @@ TEST_F(MockWALTests, SystemErrorIsPropagated)
     ASSERT_TRUE(pool->status().is_system_error());
     ASSERT_EQ(pool->status().what(), "123");
 }
+
+/*
+ * When a WAL record is created, the payload data is accumulated and copied into scratch memory. Here, we try to determine the maximum scratch memory we
+ * could possibly need and make sure that the WAL components allocate an appropriate amount of memory.
+ */
+class RecordSizeLimitTests: public testing::TestWithParam<Size> {
+public:
+    RecordSizeLimitTests()
+        : scratch(max_size, '\x00'),
+          backing(GetParam(), '\x00'),
+          page {{
+              PageId {2ULL},
+              stob(backing),
+              nullptr,
+              true,
+              false,
+          }}
+    {
+        static_assert(IWALManager::SCRATCH_SCALE >= 1);
+        tracker.track(page);
+    }
+
+    ~RecordSizeLimitTests() override = default;
+
+    Size max_size {GetParam() * IWALManager::SCRATCH_SCALE};
+    Size min_size {max_size - GetParam()};
+    Tracker tracker {GetParam()};
+    std::string scratch;
+    std::string backing;
+    Page page;
+};
+
+TEST_P(RecordSizeLimitTests, LargestPossibleRecord)
+{
+    // Don't set the type, otherwise the LSN part (set by the tracker) will get merged with the next range.
+    for (auto i = PageLayout::HEADER_SIZE; i < GetParam(); i += 2) {
+        page.bytes(i, 1)[0] = ' ';
+    }
+    const auto update = tracker.collect(page, SequenceNumber::base());
+    const WALRecord record {update, stob(scratch)};
+    const auto size = record.payload().data().size();
+    ASSERT_GE(size, min_size) << "Excessive scratch memory allocated";
+    ASSERT_LE(size, max_size) << "Scratch memory cannot fit maximally sized WAL record payload";
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RecordSizeLimitTests,
+    RecordSizeLimitTests,
+    ::testing::Values(
+        0x100,
+        0x100 << 1,
+        0x100 << 2,
+        0x100 << 3,
+        0x100 << 4,
+        0x100 << 5,
+        0x100 << 6,
+        0x100 << 7
+    )
+);
 
 } // <anonymous>

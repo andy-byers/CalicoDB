@@ -18,12 +18,6 @@ namespace {
 
 } // namespace
 
-// WAL Record Workflows:
-// (1) Create a WAL record and append it to the WAL
-//     - May involve splitting the record over multiple blocks in the segment
-// (2) Read a WAL record from the WAL reader tail buffer
-//     - May involve merging multiple records together
-
 WALPayload::WALPayload(const PageUpdate &param, Bytes scratch)
 {
     m_data = scratch;

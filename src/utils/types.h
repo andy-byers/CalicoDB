@@ -27,19 +27,29 @@ struct AlignedDeleter {
 using AlignedBuffer = std::unique_ptr<Byte[], AlignedDeleter>;
 
 template<class T>
-class UniqueNullable {
+class UniqueNullable final {
 public:
+    using Type = T;
+
+    ~UniqueNullable() = default;
     UniqueNullable() = delete;
     UniqueNullable(const UniqueNullable &) = delete;
     auto operator=(const UniqueNullable &) -> UniqueNullable & = delete;
 
-    explicit UniqueNullable(T resource)
+    template<class Resource>
+    explicit UniqueNullable(Resource resource)
         : m_resource {resource}
     {}
 
     UniqueNullable(UniqueNullable &&rhs) noexcept
     {
         m_resource = std::exchange(rhs.m_resource, T {});
+    }
+
+    auto operator=(UniqueNullable &&rhs) noexcept -> UniqueNullable &
+    {
+        m_resource = rhs.reset();
+        return *this;
     }
 
     [[nodiscard]] auto is_valid() const -> bool
@@ -50,13 +60,6 @@ public:
     auto reset() -> T
     {
         return std::exchange(m_resource, T {});
-        ;
-    }
-
-    auto operator=(UniqueNullable &&rhs) noexcept -> UniqueNullable &
-    {
-        m_resource = rhs.reset();
-        return *this;
     }
 
     auto operator->() noexcept -> T &

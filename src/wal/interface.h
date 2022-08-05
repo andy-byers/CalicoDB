@@ -59,6 +59,8 @@ struct WALSegment {
 
 class IWALManager {
 public:
+    static constexpr Size SCRATCH_SCALE {4};
+
     virtual ~IWALManager() = default;
     [[nodiscard]] virtual auto has_pending() const -> bool = 0;
     [[nodiscard]] virtual auto flushed_lsn() const -> SequenceNumber = 0;

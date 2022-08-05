@@ -7,6 +7,10 @@ namespace cco {
 
 class Info {
 public:
+    Info(Database::Impl &impl)
+        : m_impl {&impl}
+    {}
+
     virtual ~Info() = default;
 
     /**
@@ -59,8 +63,6 @@ public:
     [[nodiscard]] auto is_temp() const -> bool;
 
 private:
-    friend class Database;
-    Info() = default;
     Database::Impl *m_impl {}; ///< Pointer to the database this object was opened on.
 };
 
