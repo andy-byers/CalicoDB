@@ -32,60 +32,60 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
     manager->m_writer = std::move(writer);
     manager->m_reader = std::move(reader);
 
-//    // Get a sorted list of WAL segments.
-//    CCO_TRY_CREATE(children, param.directory.children());
-//    std::vector<WALSegment> segments;
-//
-//    for (const auto &child: children) {
-//        const auto filename = fs::path {child}.filename().string();
-//        auto name = stob(filename);
-//        if (name.starts_with(stob(WAL_PREFIX))) {
-//            const auto id = name_to_id(name);
-//            if (id.is_null()) {
-//                ThreePartMessage message;
-//                message.set_primary("cannot open WAL manager");
-//                message.set_detail("segment name is corrupted");
-//                message.set_hint("invalid name is \"{}\"", child);
-//                return Err {message.corruption()};
-//            }
-//
-//            WALSegment segment;
-//            segment.id = id;
-//            segments.emplace_back(segment);
-//        }
-//    }
-//    std::sort(begin(segments), end(segments), [](const auto &lhs, const auto &rhs) {
-//        return lhs.id <= rhs.id;
-//    });
-//    for (auto &segment: segments) {
-//        WALRecordPosition first;
-//        CCO_TRY(manager->open_reader_segment(segment.id));
-//        CCO_TRY_CREATE(is_empty, manager->m_reader->is_empty());
-//        if (!is_empty) {
-//            CCO_TRY_CREATE(record, manager->m_reader->read(first));
-//            CCO_TRY_STORE(segment.has_commit, manager->roll_forward(segment.positions));
-//            segment.start = record.lsn();
-//            manager->m_completed_segments.emplace_back(std::move(segment));
-//        }
-//    }
-//
-//    WALSegment current;
-//    current.id = SegmentId::base();
-//    current.start = SequenceNumber::base();
-//    if (!manager->m_completed_segments.empty()) {
-//        current.id = manager->m_completed_segments.back().id;
-//        current.start = manager->m_completed_segments.back().start;
-//        current.id++;
-//        current.start++;
-//    }
-//
-//
-//
-//
-//    CCO_TRY(manager->open_writer_segment(current.id));
-//    CCO_EXPECT_TRUE(manager->m_writer->is_open());
-//    manager->m_current_segment = std::move(current);
-//    return manager;
+    //    // Get a sorted list of WAL segments.
+    //    CCO_TRY_CREATE(children, param.directory.children());
+    //    std::vector<WALSegment> segments;
+    //
+    //    for (const auto &child: children) {
+    //        const auto filename = fs::path {child}.filename().string();
+    //        auto name = stob(filename);
+    //        if (name.starts_with(stob(WAL_PREFIX))) {
+    //            const auto id = name_to_id(name);
+    //            if (id.is_null()) {
+    //                ThreePartMessage message;
+    //                message.set_primary("cannot open WAL manager");
+    //                message.set_detail("segment name is corrupted");
+    //                message.set_hint("invalid name is \"{}\"", child);
+    //                return Err {message.corruption()};
+    //            }
+    //
+    //            WALSegment segment;
+    //            segment.id = id;
+    //            segments.emplace_back(segment);
+    //        }
+    //    }
+    //    std::sort(begin(segments), end(segments), [](const auto &lhs, const auto &rhs) {
+    //        return lhs.id <= rhs.id;
+    //    });
+    //    for (auto &segment: segments) {
+    //        WALRecordPosition first;
+    //        CCO_TRY(manager->open_reader_segment(segment.id));
+    //        CCO_TRY_CREATE(is_empty, manager->m_reader->is_empty());
+    //        if (!is_empty) {
+    //            CCO_TRY_CREATE(record, manager->m_reader->read(first));
+    //            CCO_TRY_STORE(segment.has_commit, manager->roll_forward(segment.positions));
+    //            segment.start = record.lsn();
+    //            manager->m_completed_segments.emplace_back(std::move(segment));
+    //        }
+    //    }
+    //
+    //    WALSegment current;
+    //    current.id = SegmentId::base();
+    //    current.start = SequenceNumber::base();
+    //    if (!manager->m_completed_segments.empty()) {
+    //        current.id = manager->m_completed_segments.back().id;
+    //        current.start = manager->m_completed_segments.back().start;
+    //        current.id++;
+    //        current.start++;
+    //    }
+    //
+    //
+    //
+    //
+    //    CCO_TRY(manager->open_writer_segment(current.id));
+    //    CCO_EXPECT_TRUE(manager->m_writer->is_open());
+    //    manager->m_current_segment = std::move(current);
+    //    return manager;
 
     CCO_TRY(manager->setup(param));
     return manager;
@@ -97,6 +97,21 @@ WALManager::WALManager(const WALParameters &param)
       m_pool {param.pool},
       m_record_scratch(param.page_size * IWALManager::SCRATCH_SCALE, '\x00')
 {}
+
+WALManager::~WALManager()
+{
+
+}
+
+auto WALManager::teardown() -> void
+{
+    {
+        std::lock_guard lock {m_queue_mutex};
+        m_queue.enqueue(ExitEvent {});
+        m_queue_cond.notify_one();
+    }
+    m_writer_task->join();
+}
 
 auto WALManager::setup(const WALParameters &param) -> Result<void>
 {
@@ -127,6 +142,8 @@ auto WALManager::setup(const WALParameters &param) -> Result<void>
     });
     std::vector<WALSegment> filtered;
     filtered.reserve(segments.size());
+    m_next_lsn = param.flushed_lsn;
+    m_next_lsn++;
 
     for (auto &segment: segments) {
         WALRecordPosition first;
@@ -155,46 +172,127 @@ auto WALManager::setup(const WALParameters &param) -> Result<void>
     return spawn_writer();
 }
 
+#define WRITER_TRY(expr) \
+    do { \
+        if (auto writer_try_result = (expr); !writer_try_result.has_value()) { \
+            m_writer_status = writer_try_result.error(); \
+            return nullptr; \
+        } \
+    } while (0)
+
+// "name" must be a valid, unused, identifier.
+#define WRITER_TRY_CREATE(name, expr) \
+    auto writer_try_##name = (expr); \
+    if (!writer_try_##name.has_value()) { \
+        m_writer_status = writer_try_##name.error(); \
+        return nullptr; \
+    } \
+    auto name = *writer_try_##name;
+
 auto WALManager::spawn_writer() -> Result<void>
 {
-    m_writer_task = std::thread {[this] {
-        while (m_writer_status.is_ok()) {
+    if (!m_writer->is_open())
+        CCO_TRY(open_writer_segment(m_current_segment.id));
 
-            std::unique_lock lock {m_mutex};
-            m_condition.wait(lock, [this] {
-                return m_pending_updates.empty(); // TODO: Variable "needs_new_segment" which, if true, causes us to go through this wait. We'll check it below and switch to a new segment if it is true, then set it to false again and go back through.
-            });
-            auto update = std::move(m_pending_updates.front());
-            m_pending_updates.pop();
+    m_writer_task = std::thread {[this] {
+        for (; ; ) {
+            std::unique_lock lock {m_queue_mutex};
+            writer_wait_on_event(lock);
+            auto event = m_queue.dequeue();
+            m_is_busy = true;
             lock.unlock();
 
-            fmt::print("Hello, world (from the background)!\n");
+            fmt::print(stderr, "Selecting event type...\n");
 
-//            auto s = Status::ok();
-//
-//            if (auto r1 = m_writer->append(WALRecord {update, stob(m_record_scratch)})) {
-//                m_current_segment.positions.emplace_back(*r1);
-//                m_tracker.cleanup(update.page_id); // TODO: Calling other tracker methods may need some synchronization with this line.
-//                m_has_pending = true;
-//
-//                if (!m_writer->needs_segmentation())
-//                    continue;
-//
-//                auto r2 = advance_writer(++update.lsn, false);
-//                if (r2.has_value())
-//                    continue;
-//                s = r2.error();
-//            } else {
-//                s = r1.error();
-//            }
-//
-//            m_writer_status = s;
-//            break;
+            if (std::holds_alternative<AppendEvent>(event)) {
+
+                fmt::print(stderr, "AppendEvent\n");
+
+                auto update = std::get<0>(std::get<AppendEvent>(event).data);
+                WALRecord record {update, stob(m_record_scratch)};
+
+                WRITER_TRY_CREATE(position, m_writer->append(record))
+
+                m_current_segment.positions.emplace_back(position);
+                m_tracker.cleanup(update.page_id); // Internally synchronized.
+                m_has_pending = true;
+
+                if (m_writer->needs_segmentation())
+                    WRITER_TRY(advance_writer(++update.lsn, false));
+
+            } else if (std::holds_alternative<CommitEvent>(event)) {
+
+                fmt::print(stderr, "CommitEvent\n");
+
+                auto commit_lsn = std::get<0>(std::get<CommitEvent>(event).data);
+
+                WRITER_TRY(m_writer->append(WALRecord::commit(commit_lsn, stob(m_record_scratch))));
+                WRITER_TRY(m_writer->flush());
+
+                // Only advance if we're not already in a new segment.
+                if (m_writer->has_committed()) {
+                    m_current_segment.has_commit = true;
+                    WRITER_TRY(advance_writer(++commit_lsn, true));
+                } else {
+                    m_completed_segments.back().has_commit = true; // TODO: This needs synchronization probably...
+                }
+                WRITER_TRY(cleanup());
+
+            } else if (std::holds_alternative<AbortEvent>(event)) {
+
+                fmt::print(stderr, "AbortEvent\n");
+
+                WRITER_TRY(m_writer->flush());
+                WRITER_TRY(advance_writer(m_next_lsn, false));
+            }
+
+//            writer_signal_manager();
+
+            if (std::holds_alternative<ExitEvent>(event)) {
+                WRITER_TRY(m_writer->flush());
+                WRITER_TRY(cleanup());
+                fmt::print(stderr, "ExitEvent\n");
+                break;
+            } else {
+                std::lock_guard guard {m_busy_mutex};
+                if (std::exchange(m_is_busy, false))
+                    m_busy_cond.notify_one();
+            }
         }
         return nullptr;
     }};
-    m_writer_task->detach();
     return {};
+}
+
+#undef WRITER_TRY
+#undef WRITER_TRY_CREATE
+
+auto WALManager::writer_wait_on_event(std::unique_lock<std::mutex> &lock) -> void
+{
+    m_queue_cond.wait(lock, [this] {
+        return !m_queue.is_empty();
+    });
+}
+
+auto WALManager::manager_wait_on_writer(std::unique_lock<std::mutex> &lock) -> void
+{
+    m_busy_cond.wait(lock, [this] {
+        return !m_is_busy;
+    });
+}
+
+auto WALManager::writer_signal_manager() -> void
+{
+    std::lock_guard lock {m_queue_mutex};
+    m_is_busy = false;
+    m_busy_cond.notify_one();
+}
+
+auto WALManager::manager_signal_writer(PageUpdate update) -> void
+{
+    std::lock_guard lock {m_queue_mutex};
+    m_queue.enqueue(AppendEvent {std::move(update)});
+    m_queue_cond.notify_one();
 }
 
 auto WALManager::cleanup() -> Result<void>
@@ -213,14 +311,8 @@ auto WALManager::cleanup() -> Result<void>
 
 auto WALManager::close() -> Result<void>
 {
-    Result<void> er, rr, wr;
-    if (m_reader->is_open()) {
-        rr = m_reader->close();
-        if (!rr.has_value()) {
-            m_logger->error("cannot close WAL reader");
-            m_logger->error("(reason) {}", rr.error().what());
-        }
-    }
+    Result<void> er, wr;
+    CCO_EXPECT_FALSE(m_reader->is_open());
 
     if (m_writer->is_open()) {
         wr = m_writer->close();
@@ -236,7 +328,7 @@ auto WALManager::close() -> Result<void>
 
     // If both close() calls produced an error, we'll lose one of them. It'll end up in the
     // log though.
-    return !rr ? rr : (!er ? er : wr);
+    return !er ? er : wr;
 }
 
 auto WALManager::has_pending() const -> bool
@@ -261,21 +353,16 @@ auto WALManager::discard(Page &page) -> void
 
 auto WALManager::append(Page &page) -> Result<void>
 {
-    auto update = m_tracker.collect(page, ++m_writer->last_lsn());
+    auto update = m_tracker.collect(page, m_next_lsn++);
 
     if (!update.changes.empty()) {
-        // TODO: Append to shared memory queue here so that background thread can (a) create the WAL record, which is costly, and (b) write to disk, which is also costly.
-        //       May need to move the update manager object out of the "registry" in case the buffer pool asks for the same page to be tracked again.
-
-        CCO_TRY_CREATE(position, m_writer->append(WALRecord {update, stob(m_record_scratch)}));
-        m_tracker.cleanup(update.page_id);
-        m_current_segment.positions.emplace_back(position);
-        m_has_pending = true;
-
-        if (m_writer->needs_segmentation())
-            return advance_writer(++update.lsn, false);
+        m_has_pending = true; // Allows commit() to be called.
+        std::lock_guard lock {m_queue_mutex};
+        m_queue.enqueue(AppendEvent {std::move(update)});
+        m_queue_cond.notify_one();
     }
-    return {};
+
+    return {}; // TODO: void?
 }
 
 auto WALManager::truncate(SegmentId id) -> Result<void>
@@ -298,6 +385,16 @@ auto WALManager::recover() -> Result<void>
 {
     if (m_completed_segments.empty())
         return {};
+    {
+        std::lock_guard lock {m_queue_mutex};
+        m_is_busy = true;
+        m_queue.enqueue(ExitEvent {});
+    }
+
+    {
+        std::unique_lock lock {m_busy_mutex};
+        manager_wait_on_writer(lock);
+    }
 
     auto segment = crbegin(m_completed_segments);
     if (!segment->has_commit) {
@@ -309,7 +406,7 @@ auto WALManager::recover() -> Result<void>
             CCO_TRY(m_home->remove_file(id_to_name(itr->id)));
         m_completed_segments.erase(segment.base(), end(m_completed_segments));
     }
-    return {};
+    return spawn_writer();
 }
 
 auto WALManager::undo_segment(const WALSegment &segment) -> Result<void>
@@ -329,8 +426,8 @@ auto WALManager::undo_segment(const WALSegment &segment) -> Result<void>
 // TODO: Fixes our state if we fail trying to open or close a new segment file.
 auto WALManager::ensure_initialized() -> Result<void>
 {
-    if (!m_writer->is_open())
-        return open_writer_segment(m_current_segment.id);
+//    if (!m_writer->is_open())
+//        return open_writer_segment(m_current_segment.id);
     return {};
 }
 
@@ -338,6 +435,19 @@ auto WALManager::abort() -> Result<void>
 {
     CCO_EXPECT_TRUE(m_has_pending);
 
+
+    {
+        std::lock_guard lock {m_queue_mutex};
+        m_is_busy = true;
+        m_queue.enqueue(AbortEvent {});
+    }
+
+    {
+        std::unique_lock lock {m_busy_mutex};
+        manager_wait_on_writer(lock);
+    }
+
+    m_has_pending = false;
     CCO_TRY(m_writer->flush());
 
     if (!m_current_segment.positions.empty())
@@ -352,37 +462,30 @@ auto WALManager::abort() -> Result<void>
         CCO_TRY(m_home->remove_file(id_to_name(itr->id)));
     m_completed_segments.erase(segment.base(), end(m_completed_segments));
     m_has_pending = false;
-    return {};
+    return spawn_writer();
 }
 
 auto WALManager::commit() -> Result<void>
 {
     // Skip the LSN that will be used for the file header updates.
-    SequenceNumber commit_lsn {m_writer->last_lsn().value + 2};
+    SequenceNumber commit_lsn {m_next_lsn.value + 2}; // TODO: Maybe "+ 1" now.
     CCO_TRY_CREATE(root, m_pool->acquire(PageId::base(), true));
     auto header = get_file_header_writer(root);
     header.set_flushed_lsn(commit_lsn);
     header.update_header_crc();
     CCO_TRY(m_pool->release(std::move(root)));
-    CCO_TRY(m_writer->append(WALRecord::commit(commit_lsn, stob(m_record_scratch))));
-    CCO_TRY(m_writer->flush());
 
+    std::lock_guard lock {m_queue_mutex};
     m_has_pending = false;
-
-    // Only advance if we're not already in a new segment.
-    if (m_writer->has_committed()) {
-        m_current_segment.has_commit = true;
-        CCO_TRY(advance_writer(++commit_lsn, true));
-    } else {
-        m_completed_segments.back().has_commit = true;
-    }
-    CCO_TRY(cleanup()); // TODO: Could go elsewhere, like in a background thread. We would likely need a bit of synchronization though.
+    m_queue.enqueue(CommitEvent {commit_lsn});
+    m_queue_cond.notify_one();
     return {};
 }
 
 auto WALManager::advance_writer(SequenceNumber next_start, bool has_commit) -> Result<void>
 {
     CCO_TRY(m_writer->flush());
+    std::lock_guard lock {m_queue_mutex};
 
     m_current_segment.has_commit = has_commit;
     m_completed_segments.emplace_back(m_current_segment);
@@ -431,8 +534,10 @@ auto WALManager::roll_forward(std::vector<WALRecordPosition> &positions) -> Resu
             return Err {record.error()};
         }
 
-        if (m_writer->flushed_lsn() < record->lsn())
+        if (m_writer->flushed_lsn() < record->lsn()) {
             m_writer->set_flushed_lsn(record->lsn());
+            m_next_lsn = ++record->lsn();
+        }
 
         // Stop at the commit record. TODO: This should always be the last record in a given segment.
         if (record->is_commit())

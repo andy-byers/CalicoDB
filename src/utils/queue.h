@@ -35,7 +35,7 @@ public:
     auto dequeue() -> T
     {
         std::unique_lock lock {m_mutex};
-        m_cond.wait(lock, [this]() {return is_empty();});
+        m_cond.wait(lock, [this]() {return !is_empty();});
         auto t = std::move(m_queue.top());
         m_queue.pop();
         return t;

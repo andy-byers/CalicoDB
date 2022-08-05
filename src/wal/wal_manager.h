@@ -2,6 +2,7 @@
 #define CCO_WAL_WAL_MANAGER_H
 
 #include "interface.h"
+#include "event_queue.h"
 #include <condition_variable>
 #include <optional>
 #include <mutex>
@@ -17,6 +18,7 @@ class WALExplorer;
 
 class WALManager : public IWALManager {
 public:
+    ~WALManager() override;
     [[nodiscard]] static auto open(const WALParameters &) -> Result<std::unique_ptr<IWALManager>>;
     [[nodiscard]] auto close() -> Result<void> override;
     [[nodiscard]] auto has_pending() const -> bool override;
@@ -29,6 +31,7 @@ public:
     [[nodiscard]] auto commit() -> Result<void> override;
     [[nodiscard]] auto cleanup() -> Result<void> override;
     [[nodiscard]] auto spawn_writer() -> Result<void> override;
+    auto teardown() -> void override;
     auto discard(Page &) -> void override;
     auto track(Page &) -> void override;
     auto save_header(FileHeaderWriter &) -> void override;
@@ -46,6 +49,11 @@ private:
     [[nodiscard]] auto read_next(WALExplorer &, std::vector<WALRecordPosition> &) -> Result<WALRecord>;
     [[nodiscard]] auto ensure_initialized() -> Result<void>;
 
+    auto writer_wait_on_event(std::unique_lock<std::mutex> &lock) -> void;
+    auto manager_wait_on_writer(std::unique_lock<std::mutex> &) -> void;
+    auto writer_signal_manager() -> void;
+    auto manager_signal_writer(PageUpdate) -> void;
+
     Tracker m_tracker;
     std::unique_ptr<IWALReader> m_reader;
     std::unique_ptr<IWALWriter> m_writer;
@@ -54,15 +62,25 @@ private:
     IDirectory *m_home {};
     bool m_has_pending {};
 
-    mutable std::mutex m_mutex;
-    std::condition_variable m_condition;
+    using CommitEvent = Event<0, SequenceNumber>; // TODO: More state in this class (less in WALWriter), and more state passed through these?
+    using AbortEvent = Event<1>;
+    using AppendEvent = Event<2, PageUpdate>;
+    using ExitEvent = Event<3>;
+    using WALEventQueue = EventQueue<CommitEvent, AbortEvent, AppendEvent, ExitEvent>;
+
+    WALEventQueue m_queue;
+    mutable std::mutex m_queue_mutex;
+    mutable std::mutex m_busy_mutex;
+    std::condition_variable m_queue_cond;
+    std::condition_variable m_busy_cond;
     std::queue<PageUpdate> m_pending_updates;
     std::string m_record_scratch;
     std::vector<WALSegment> m_completed_segments;
     WALSegment m_current_segment;
     Status m_writer_status {Status::ok()};
     std::optional<std::thread> m_writer_task;
-    SequenceNumber m_last_lsn;
+    SequenceNumber m_next_lsn;
+    bool m_is_busy {};
 };
 
 } // namespace cco

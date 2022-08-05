@@ -21,6 +21,7 @@ public:
     auto track(Page &) -> void;
 
 private:
+    mutable std::mutex m_mutex;
     std::unordered_map<PageId, ChangeManager, PageId::Hash> m_registry;
     std::unordered_map<PageId, ChangeManager, PageId::Hash> m_processing;
     ManualScratchManager m_scratch;

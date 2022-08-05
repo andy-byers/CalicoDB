@@ -39,8 +39,10 @@ auto Tracker::collect(Page &page, SequenceNumber lsn) -> PageUpdate
         update.changes = std::move(changes);
     }
     // Note that we don't release scratch memory here. We need to call cleanup() when we're done with the
-    // memory used by the before and after page snapshots. TODO: We'll need to synchronize access to m_registry and such...
+    // memory used by the before and after page snapshots.
     page.clear_manager();
+
+    std::lock_guard lock {m_mutex};
     m_processing.emplace(itr->first, std::move(itr->second));
     m_registry.erase(itr);
     return update;
@@ -48,6 +50,7 @@ auto Tracker::collect(Page &page, SequenceNumber lsn) -> PageUpdate
 
 auto Tracker::cleanup(PageId id) -> void
 {
+    std::lock_guard lock {m_mutex};
     auto itr = m_processing.find(id);
     CCO_EXPECT_NE(itr, end(m_processing));
     itr->second.release_scratches(m_scratch);

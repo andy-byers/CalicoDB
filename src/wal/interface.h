@@ -73,6 +73,7 @@ public:
     [[nodiscard]] virtual auto close() -> Result<void> = 0;
     [[nodiscard]] virtual auto cleanup() -> Result<void> = 0;
     [[nodiscard]] virtual auto spawn_writer() -> Result<void> = 0;
+    virtual auto teardown() -> void = 0;
     virtual auto track(Page &) -> void = 0;
     virtual auto discard(Page &) -> void = 0;
     virtual auto save_header(FileHeaderWriter &) -> void = 0;

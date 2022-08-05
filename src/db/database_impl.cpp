@@ -105,7 +105,6 @@ auto Database::Impl::open(Parameters param, std::unique_ptr<IDirectory> home) ->
         if (revised.use_xact)
             CCO_TRY(impl->m_pool->recover());
         CCO_TRY(impl->load_header());
-
     }
     return impl;
 }

@@ -62,6 +62,11 @@ BufferPool::BufferPool(const Parameters &param)
       m_uses_xact {param.use_xact}
 {}
 
+BufferPool::~BufferPool()
+{
+    m_wal->teardown();
+}
+
 auto BufferPool::can_commit() const -> bool
 {
     if (m_uses_xact)

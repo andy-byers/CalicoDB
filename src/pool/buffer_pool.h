@@ -30,7 +30,7 @@ public:
         bool use_xact {};
     };
 
-    ~BufferPool() override = default;
+    ~BufferPool() override;
 
     [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<IBufferPool>>;
 
