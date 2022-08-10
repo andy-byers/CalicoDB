@@ -7,14 +7,14 @@
 #ifndef CCO_WAL_WAL_READER_H
 #define CCO_WAL_WAL_READER_H
 
-#include "interface.h"
+#include "calico/wal.h"
 #include <memory>
 #include <spdlog/logger.h>
 #include <stack>
 
 namespace cco {
 
-class IDirectory;
+class Storage;
 class IFile;
 
 class WALReader : public IWALReader {

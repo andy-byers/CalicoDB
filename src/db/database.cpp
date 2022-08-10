@@ -4,8 +4,8 @@
 #include "database_impl.h"
 #include "pool/buffer_pool.h"
 #include "pool/interface.h"
-#include "storage/directory.h"
-#include "tree/tree.h"
+#include "storage/disk.h"
+#include "tree/bplus_tree.h"
 #include "utils/logging.h"
 #include "wal/wal_writer.h"
 
@@ -35,7 +35,7 @@ auto Database::open() -> Status
     param.options = m_options;
 
     if (!m_options.path.empty()) {
-        auto home = Directory::open(m_options.path);
+        auto home = DiskStorage::open(m_options.path);
         if (!home.has_value())
             return home.error();
 

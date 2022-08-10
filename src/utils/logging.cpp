@@ -51,6 +51,11 @@ auto ThreePartMessage::corruption() const -> Status
     return Status::corruption(text());
 }
 
+auto ThreePartMessage::not_found() const -> Status
+{
+    return Status::not_found(text());
+}
+
 auto ThreePartMessage::text() const -> std::string
 {
     CCO_EXPECT_FALSE(m_text[PRIMARY].empty());

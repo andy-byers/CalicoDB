@@ -4,46 +4,46 @@
 
 namespace cco {
 
-auto PageCache::put(PageId id, Frame frame) -> void
+auto PageCache::put(CacheEntry entry) -> void
 {
-    CCO_EXPECT_FALSE(m_warm.contains(id));
-    CCO_EXPECT_FALSE(m_hot.contains(id));
-    m_warm.put(id, std::move(frame));
+    CCO_EXPECT_FALSE(m_warm.contains(entry.pid));
+    CCO_EXPECT_FALSE(m_hot.contains(entry.pid));
+    m_warm.put(entry.pin.pid, std::move(entry));
 }
 
-auto PageCache::get(PageId id) -> std::optional<Reference>
+auto PageCache::get(PageId id) -> Iterator
 {
-    if (auto ref = m_hot.get(id)) {
+    if (auto itr = m_hot.get(id); itr != m_hot.end()) {
         m_hits++;
-        return ref;
+        return itr;
     }
-    if (auto ref = m_warm.extract(id)) {
+    if (auto itr = m_warm.extract(id)) {
         m_hits++;
-        m_hot.put(id, std::move(*ref));
+        m_hot.put(id, std::move(*itr));
         return m_hot.get(id);
     }
     m_misses++;
-    return std::nullopt;
+    return m_hot.end();
 }
 
-auto PageCache::extract(PageId id) -> std::optional<Frame>
+auto PageCache::extract(PageId id) -> std::optional<CacheEntry>
 {
-    if (auto frame = m_hot.extract(id)) {
+    if (auto e = m_hot.extract(id)) {
         m_hits++;
-        return frame;
+        return e;
     }
-    if (auto frame = m_warm.extract(id)) {
+    if (auto e = m_warm.extract(id)) {
         m_hits++;
-        return frame;
+        return e;
     }
     m_misses++;
     return std::nullopt;
 }
 
-auto PageCache::evict() -> std::optional<Frame>
+auto PageCache::evict() -> std::optional<CacheEntry>
 {
-    if (auto frame = m_hot.evict())
-        return frame;
+    if (auto e = m_hot.evict())
+        return e;
     return m_warm.evict();
 }
 

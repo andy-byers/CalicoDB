@@ -10,7 +10,7 @@ class Cursor;
 class Info;
 
 /**
- * A CalicoDB database!
+ * A Calico DB database!
  */
 class Database {
 public:
@@ -22,11 +22,11 @@ public:
      * @see open()
      * @param options Initialization options for the database.
      */
-    explicit Database(Options options) noexcept;
+    explicit Database(const std::string&, Options options = {}) noexcept;
 
     [[nodiscard]] static auto destroy(Database db) -> Status;
-    [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto open() -> Status;
+    [[nodiscard]] auto close() -> Status;
 
     [[nodiscard]] auto is_open() const -> bool;
 
@@ -100,9 +100,7 @@ public:
     Database& operator=(Database&&) noexcept;
 
 private:
-    Database();
-
-    Options m_options;
+    std::string m_path;
     std::unique_ptr<Impl> m_impl;
 };
 

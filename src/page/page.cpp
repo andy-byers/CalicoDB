@@ -22,7 +22,7 @@ Page::Page(const Parameters &param)
 Page::~Page()
 {
     if (m_source.is_valid())
-        m_source->on_release(*this);
+        [[maybe_unused]] auto s = m_source->release(std::move(*this));
 }
 
 auto Page::header_offset() const -> Index

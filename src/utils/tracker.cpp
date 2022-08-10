@@ -34,8 +34,8 @@ auto Tracker::collect(Page &page, SequenceNumber lsn) -> PageUpdate
         auto changes = manager.collect_changes();
         CCO_EXPECT_FALSE(changes.empty());
         update.page_id = page.id();
-        update.previous_lsn = previous_lsn;
-        update.lsn = lsn;
+        update.last_lsn = previous_lsn;
+        update.page_lsn = lsn;
         update.changes = std::move(changes);
     }
     // Note that we don't release scratch memory here. We need to call cleanup() when we're done with the

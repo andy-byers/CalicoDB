@@ -39,7 +39,7 @@ Status::Status(const Status &rhs)
     : m_what {copy_status(rhs.m_what.get())}
 {}
 
-Status::Status(Status &&rhs)
+Status::Status(Status &&rhs) noexcept
     : m_what {std::move(rhs.m_what)}
 {}
 
@@ -50,7 +50,7 @@ auto Status::operator=(const Status &rhs) -> Status&
     return *this;
 }
 
-auto Status::operator=(Status &&rhs) -> Status&
+auto Status::operator=(Status &&rhs) noexcept -> Status&
 {
     if (this != &rhs)
         m_what = std::move(rhs.m_what);
@@ -66,11 +66,6 @@ auto Status::code() const -> Code
 auto Status::ok() -> Status
 {
     return Status {};
-}
-
-auto Status::not_found() -> Status
-{
-    return {Code::NOT_FOUND, "not found"};
 }
 
 auto Status::not_found(const std::string &what) -> Status

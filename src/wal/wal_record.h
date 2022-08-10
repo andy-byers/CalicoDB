@@ -114,7 +114,7 @@ public:
     [[nodiscard]] auto decode() const -> PageUpdate
     {
         auto decoded = m_payload.decode();
-        decoded.lsn = m_lsn;
+        decoded.page_lsn = m_lsn;
         return decoded;
     }
 

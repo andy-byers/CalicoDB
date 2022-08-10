@@ -5,9 +5,10 @@
 #include <gtest/gtest.h>
 
 #include "calico/options.h"
+#include "calico/storage.h"
 #include "random.h"
-#include "storage/file.h"
-#include "storage/interface.h"
+#include "storage/disk.h"
+#include "storage/heap.h"
 #include "storage/system.h"
 #include "unit_tests.h"
 
@@ -15,253 +16,228 @@ namespace {
 
 using namespace cco;
 
-constexpr auto TEST_STRING = "TEST_STRING";
-
-template<class Reader>
-auto read_exact_string(Reader &&reader, std::string &buffer) -> Result<void>
+template<class Base, class Store>
+[[nodiscard]]
+auto open_blob(Store &store, const std::string &name) -> std::unique_ptr<Base>
 {
-    return read_exact(std::forward<Reader>(reader), stob(buffer));
-}
+    auto s = Status::ok();
+    Base *temp {};
 
-template<class Reader>
-auto read_exact_string(Reader &&reader, std::string &buffer, Index offset) -> Result<void>
-{
-    return read_exact_at(std::forward<Reader>(reader), stob(buffer), offset);
-}
-
-template<class Writer>
-auto write_string(Writer &writer, const std::string &buffer) -> Result<Size>
-{
-    return writer.write(stob(buffer));
-}
-
-template<class Writer>
-auto write_exact_string(Writer &&writer, const std::string &buffer) -> Result<void>
-{
-    return write_all(std::forward<Writer>(writer), stob(buffer));
-}
-
-template<class Writer>
-auto write_exact_string(Writer &&writer, const std::string &buffer, Index offset) -> Result<void>
-{
-    return write_all(std::forward<Writer>(writer), stob(buffer), offset);
-}
-
-[[maybe_unused]] auto test_random_reads_and_writes(IFile &file) -> void
-{
-    static constexpr Size payload_size {1'000};
-    Random random {0};
-    const auto payload_out = random.next_string(payload_size);
-    auto out = stob(payload_out);
-
-    // Write out the string in random-sized chunks.
-    while (!out.is_empty()) {
-        const auto chunk_size = random.next_int(out.size());
-        ASSERT_TRUE(write_all(file, out.range(0, chunk_size)));
-        out.advance(chunk_size);
+    if constexpr (std::is_same_v<RandomAccessReader, Base>) {
+        s = store.open_random_access_reader(name, &temp);
+    } else if constexpr (std::is_same_v<RandomAccessEditor, Base>) {
+        s = store.open_random_access_editor(name, &temp);
+    } else if constexpr (std::is_same_v<AppendWriter, Base>) {
+        s = store.open_append_writer(name, &temp);
+    } else {
+        ADD_FAILURE() << "Error: Unexpected blob type";
     }
-    auto seek_result = file.seek(0, Seek::BEGIN);
-    ASSERT_TRUE(seek_result && not seek_result.value());
+    EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+    return std::unique_ptr<Base> {temp};
+}
 
-    std::string payload_in(payload_size, '\x00');
-    auto in = stob(payload_in);
+auto write_whole_file(const std::string &path, const std::string &message) -> void
+{
+    std::ofstream ofs {path, std::ios::trunc};
+    ofs << message;
+}
 
-    // Read back the string in random-sized chunks.
+[[nodiscard]]
+auto read_whole_file(const std::string &path) -> std::string
+{
+    std::string message;
+    std::ifstream ifs {path};
+    ifs >> message;
+    return message;
+}
+
+template<class Writer>
+constexpr auto write_out_randomly(Random &random, Writer &writer, const std::string &message) -> void
+{
+    constexpr Size num_chunks {20};
+    ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
+    auto in = stob(message);
+    Index counter {};
+
     while (!in.is_empty()) {
-        const auto chunk_size = random.next_int(in.size());
-        ASSERT_TRUE(read_exact(file, in.range(0, chunk_size)));
+        const auto chunk_size = std::min(in.size(), random.next_int(message.size() / num_chunks));
+        auto chunk = in.copy().truncate(chunk_size);
+
+        if constexpr (std::is_same_v<AppendWriter, Writer>) {
+            ASSERT_TRUE(writer.write(chunk).is_ok());
+        } else {
+            ASSERT_TRUE(writer.write(chunk, counter).is_ok());
+            counter += chunk_size;
+        }
         in.advance(chunk_size);
     }
-    ASSERT_EQ(payload_in, payload_out);
+    ASSERT_TRUE(in.is_empty());
+}
+
+template<class Reader>
+[[nodiscard]]
+auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::string
+{
+    static constexpr Size num_chunks {20};
+    EXPECT_GT(size, num_chunks) << "File is too small for this test";
+    std::string backing(size, '\x00');
+    auto out = stob(backing);
+    Index counter {};
+
+    while (!out.is_empty()) {
+        const auto chunk_size = std::min(out.size(), random.next_int(size / num_chunks));
+        auto chunk = out.copy().truncate(chunk_size);
+        const auto s = reader.read(chunk, counter);
+
+        if (chunk.size() < chunk_size)
+            return backing;
+
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        EXPECT_EQ(chunk.size(), chunk_size);
+        out.advance(chunk_size);
+        counter += chunk_size;
+    }
+    EXPECT_TRUE(out.is_empty());
+    return backing;
 }
 
 class FileTests: public testing::Test {
 public:
-    const std::string PATH = "/tmp/calico_test_file";
+    static constexpr auto HOME = "/tmp/calico_test_files";
+    static constexpr auto PATH = "/tmp/calico_test_files/name";
 
     FileTests()
-        : test_buffer(strlen(TEST_STRING), '\x00') {}
+    {
+        Storage *temp;
+        const auto s = DiskStorage::open(HOME, &temp);
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        storage.reset(temp);
+    }
 
     ~FileTests() override
     {
-        std::filesystem::remove(PATH);
+        std::error_code ignore;
+        std::filesystem::remove_all(HOME, ignore);
     }
 
-    static auto open(const std::string &name, Mode mode) -> std::unique_ptr<IFile>
-    {
-        auto fd = *system::open(name, static_cast<int>(mode), 0666);
-        return std::make_unique<File>(fd, mode, name);
-    }
-
-    std::string test_buffer;
+    std::unique_ptr<Storage> storage;
+    Random random {0};
 };
 
-TEST_F(FileTests, NewFileIsEmpty)
-{
-    ASSERT_EQ(open(PATH, Mode::CREATE)->size().value(), 0);
-}
-
-TEST_F(FileTests, StoresFileInformation)
-{
-    // File is closed in the destructor.
-    const auto mode = Mode::CREATE | Mode::READ_WRITE | Mode::APPEND;
-    auto file = open(PATH, mode);
-    ASSERT_EQ(file->name(), PATH);
-    ASSERT_EQ(file->mode(), mode);
-}
-
-TEST_F(FileTests, ExistsAfterClose)
-{
-    // File is closed in the destructor.
-    open(PATH, Mode::CREATE);
-    ASSERT_TRUE(std::filesystem::exists(PATH));
-}
-
-TEST_F(FileTests, ReadFromFile)
-{
-    {
-        auto ofs = std::ofstream{PATH};
-        ofs << TEST_STRING;
-    }
-    auto file = open(PATH, Mode::READ_ONLY);
-    read_exact_string(*file, test_buffer);
-    ASSERT_EQ(test_buffer, TEST_STRING);
-}
-
-TEST_F(FileTests, WriteToFile)
-{
-    auto file = open(PATH, Mode::WRITE_ONLY | Mode::CREATE | Mode::TRUNCATE);
-    write_exact_string(*file, TEST_STRING);
-    ASSERT_TRUE(file->sync());
-    auto ifs = std::ifstream{PATH};
-    std::string result;
-    ifs >> result;
-    ASSERT_EQ(result, TEST_STRING);
-    ASSERT_EQ(file->size(), result.size());
-}
-
-TEST_F(FileTests, PositionedReadsAndWrites)
-{
-    auto file = open(PATH, Mode::READ_WRITE | Mode::CREATE);
-    write_exact_string(*file, "!", 12);
-    write_exact_string(*file, "world", 7);
-    write_exact_string(*file, "Hello, ", 0);
-    std::string buffer(13, '\x00');
-
-    ASSERT_TRUE(read_exact_at(*file, stob(buffer).advance(12), 12));
-    ASSERT_TRUE(read_exact_at(*file, stob(buffer).range(6, 6), 6));
-    ASSERT_TRUE(read_exact_at(*file, stob(buffer).truncate(7), 0));
-    ASSERT_EQ(buffer, "Hello, world!");
-}
-
-TEST_F(FileTests, ExactReadsFailIfNotEnoughData)
-{
-    auto file = open(PATH, Mode::READ_WRITE | Mode::CREATE);
-    write_exact_string(*file, "Hello, world!");
-    std::string buffer(100, '\x00');
-    ASSERT_FALSE(read_exact(*file, stob(buffer)));
-}
-
-TEST_F(FileTests, ReportsEOFDuringRead)
-{
-    auto file = open(PATH, Mode::CREATE | Mode::READ_WRITE | Mode::TRUNCATE);
-    write_exact_string(*file, TEST_STRING);
-    ASSERT_TRUE(file->seek(0, Seek::BEGIN));
-    test_buffer.resize(test_buffer.size() * 2);
-    // Try to read past EOF.
-    auto result = file->read(stob(test_buffer));
-    ASSERT_TRUE(result && result.value() == strlen(TEST_STRING));
-    test_buffer.resize(strlen(TEST_STRING));
-    ASSERT_EQ(test_buffer, TEST_STRING);
-}
-
-TEST_F(FileTests, RandomReadsAndWrites)
-{
-    auto file = open(PATH, Mode::READ_WRITE | Mode::CREATE | Mode::TRUNCATE);
-    test_random_reads_and_writes(*file);
-}
-
-class FileFailureTests: public testing::Test {
+class RandomAccessFileReaderTests: public FileTests {
 public:
-    static constexpr auto PATH = "/tmp/calico_file_failure";
-    static constexpr Size OVERFLOW_SIZE {std::numeric_limits<Size>::max()};
-
-    FileFailureTests()
+    RandomAccessFileReaderTests()
     {
-        const auto mode = Mode::READ_WRITE | Mode::CREATE | Mode::TRUNCATE;
-        const auto fd = *system::open(PATH, static_cast<int>(mode), 0666);
-        file = std::make_unique<File>(fd, mode, PATH);
+        write_whole_file(PATH, "");
+        file = open_blob<RandomAccessReader>(*storage, "name");
     }
 
-    ~FileFailureTests() override
-    {
-        std::filesystem::remove(PATH);
-    }
-
-    std::unique_ptr<IFile> file;
-    Byte *fake_ptr {reinterpret_cast<Byte*>(123)};
-    Bytes large_slice {fake_ptr, OVERFLOW_SIZE};
+    std::unique_ptr<RandomAccessReader> file;
 };
 
-TEST_F(FileFailureTests, FailsWhenFileExistsButShouldNot)
+TEST_F(RandomAccessFileReaderTests, NewFileIsEmpty)
 {
-    ASSERT_FALSE(system::open(PATH, static_cast<int>(Mode::CREATE | Mode::EXCLUSIVE), 0666));
+    std::string backing(8, '\x00');
+    auto bytes = stob(backing);
+    ASSERT_TRUE(file->read(bytes, 0).is_ok());
+    ASSERT_TRUE(bytes.is_empty());
 }
 
-TEST_F(FileFailureTests, FailsWhenFileDoesNotExistButShould)
+TEST_F(RandomAccessFileReaderTests, ReadsBackContents)
 {
-    ASSERT_TRUE(system::unlink(PATH));
-    ASSERT_TRUE(file->close());
-
-    ASSERT_FALSE(system::open(PATH, O_RDONLY, 0666));
+    auto data = random.next_string(500);
+    write_whole_file(PATH, data);
+    ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-TEST_F(FileFailureTests, FailsWhenReadSizeIsTooLarge)
+class RandomAccessFileEditorTests: public FileTests {
+public:
+    RandomAccessFileEditorTests()
+        : file {open_blob<RandomAccessEditor>(*storage, "name")}
+    {}
+
+    std::unique_ptr<RandomAccessEditor> file;
+};
+
+TEST_F(RandomAccessFileEditorTests, NewFileIsEmpty)
 {
-    ASSERT_TRUE(file->read(large_slice).error().is_system_error());
+    std::string backing(8, '\x00');
+    auto bytes = stob(backing);
+    ASSERT_TRUE(file->read(bytes, 0).is_ok());
+    ASSERT_TRUE(bytes.is_empty());
 }
 
-TEST_F(FileFailureTests, FailsWhenWriteSizeIsTooLarge)
+TEST_F(RandomAccessFileEditorTests, WritesOutAndReadsBackData)
 {
-    ASSERT_TRUE(file->write(large_slice).error().is_system_error());
+    auto data = random.next_string(500);
+    write_out_randomly(random, *file, data);
+    ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-TEST_F(FileFailureTests, FailsWhenSeekOffsetIsTooLarge)
+class AppendFileWriterTests: public FileTests {
+public:
+    AppendFileWriterTests()
+        : file {open_blob<AppendWriter>(*storage, "name")}
+    {}
+
+    std::unique_ptr<AppendWriter> file;
+};
+
+TEST_F(AppendFileWriterTests, WritesOutData)
 {
-    ASSERT_TRUE(file->seek(static_cast<long>(OVERFLOW_SIZE), Seek::BEGIN).error().is_system_error());
+    auto data = random.next_string(500);
+    write_out_randomly<AppendWriter>(random, *file, data);
+    ASSERT_EQ(read_whole_file(PATH), data);
 }
 
-TEST_F(FileFailureTests, FailsWhenNewSizeIsTooLarge)
+class HeapTests: public testing::Test {
+public:
+    HeapTests()
+        : storage {std::make_unique<HeapStorage>()}
+    {}
+
+    ~HeapTests() override = default;
+
+    std::unique_ptr<Storage> storage;
+    Random random {0};
+};
+
+TEST_F(HeapTests, ReaderCannotCreateBlob)
 {
-    ASSERT_TRUE(file->resize(OVERFLOW_SIZE).error().is_system_error());
+    RandomAccessReader *temp {};
+    const auto s = storage->open_random_access_reader("nonexistent", &temp);
+    ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what();
 }
 
-TEST_F(FileTests, CannotCloseFileTwice)
+TEST_F(HeapTests, ReadsAndWrites)
 {
-    auto file = open(PATH, Mode::CREATE);
-    ASSERT_TRUE(file->close());
-    ASSERT_FALSE(file->close());
+    auto ra_editor = open_blob<RandomAccessEditor>(*storage, "name");
+    auto ra_reader = open_blob<RandomAccessReader>(*storage, "name");
+    auto ap_writer = open_blob<AppendWriter>(*storage, "name");
+
+    const auto first_input = random.next_string(500);
+    const auto second_input = random.next_string(500);
+    write_out_randomly(random, *ra_editor, first_input);
+    write_out_randomly(random, *ap_writer, second_input);
+    const auto output_1 = read_back_randomly(random, *ra_reader, 1'000);
+    const auto output_2 = read_back_randomly(random, *ra_editor, 1'000);
+    ASSERT_EQ(output_1, output_2);
+    ASSERT_EQ(output_1, first_input + second_input);
 }
 
-TEST(SystemTests, OperationsFailOnInvalidHandle)
+TEST_F(HeapTests, ReaderStopsAtEOF)
 {
-    static constexpr auto fd {123'456'789};
+    auto ra_editor = open_blob<RandomAccessEditor>(*storage, "name");
+    auto ra_reader = open_blob<RandomAccessReader>(*storage, "name");
 
-    std::string buffer(13, '\x00');
-    ASSERT_FALSE(system::read(fd, stob(buffer)));
-    ASSERT_FALSE(system::write(fd, stob(buffer)));
-    ASSERT_FALSE(system::seek(fd, 123, static_cast<int>(Seek::BEGIN)));
-    ASSERT_FALSE(system::seek(fd, 123, static_cast<int>(Seek::BEGIN)));
-    ASSERT_FALSE(system::sync(fd));
-}
+    const auto data = random.next_string(500);
+    write_out_randomly(random, *ra_editor, data);
 
-TEST(SystemTests, CannotUnlinkNonexistentFile)
-{
-    static constexpr auto nonexistent = "/tmp/calico_should_not_exist__";
-    std::error_code error;
-    std::filesystem::remove(nonexistent, error);
-    ASSERT_FALSE(system::unlink(nonexistent));
-    ASSERT_FALSE(system::unlink(""));
+    std::string buffer(data.size() * 2, '\x00');
+    auto bytes = stob(buffer);
+    ra_reader->read(bytes, 0);
+
+    ASSERT_EQ(btos(bytes), data);
 }
 
 } // <anonymous>

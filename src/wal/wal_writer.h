@@ -1,7 +1,7 @@
 #ifndef CALICO_WAL_WAL_WRITER_H
 #define CALICO_WAL_WAL_WRITER_H
 
-#include "interface.h"
+#include "calico/wal.h"
 #include "page/update.h"
 #include "utils/identifier.h"
 #include <memory>
@@ -9,7 +9,7 @@
 
 namespace cco {
 
-class IDirectory;
+class Storage;
 class IFile;
 class WALRecord;
 

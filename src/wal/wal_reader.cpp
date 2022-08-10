@@ -1,6 +1,6 @@
 #include "wal_reader.h"
+#include "calico/storage.h"
 #include "page/page.h"
-#include "storage/interface.h"
 #include "utils/logging.h"
 
 namespace cco {

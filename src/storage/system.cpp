@@ -1,5 +1,6 @@
 #include "system.h"
 #include "utils/expect.h"
+#include "utils/logging.h"
 #include <fcntl.h>
 #include <filesystem>
 #include <unistd.h>
@@ -18,34 +19,45 @@ auto error(std::errc code) -> Status
     return Status::system_error(std::make_error_code(code).message());
 }
 
-auto exists(const std::string &name) -> Result<bool>
+auto exists(const std::string &name) -> Status
 {
     std::error_code code;
     auto was_found = fs::exists(name, code);
-    if (code)
-        return Err {error(std::errc {code.value()})};
-    return was_found;
+    if (code) {
+        return error(std::errc {code.value()});
+    } else if (!was_found) {
+        const auto message = fmt::format("cannot find file \"{}\"", name);
+        return Status::not_found(message);
+    }
+    return Status::ok();
 }
 
 auto open(const std::string &name, int mode, int permissions) -> Result<int>
 {
     if (const auto fd = ::open(name.c_str(), mode, permissions); fd != FAILURE)
         return fd;
+    if (std::exchange(errno, SUCCESS) == ENOENT) {
+        // Special case for read-only files that don't exist.
+        ThreePartMessage message;
+        message.set_primary("could not open file");
+        message.set_detail("no such file or directory \"{}\"", name);
+        return Err {message.not_found()};
+    }
     return Err {error()};
 }
 
-auto close(int fd) -> Result<void>
+auto close(int fd) -> Status
 {
     if (::close(fd) == FAILURE)
-        return Err {error()};
-    return {};
+        return error();
+    return Status::ok();
 }
 
-auto size(int fd) -> Result<Size>
+auto size(const std::string &path) -> Result<Size>
 {
-    CCO_TRY_CREATE(save, seek(fd, 0, SEEK_CUR));
-    CCO_TRY_CREATE(size, seek(fd, 0, SEEK_END));
-    CCO_TRY(seek(fd, static_cast<long>(save), SEEK_SET));
+    std::error_code code;
+    const auto size = fs::file_size(path, code);
+    if (code) return Err {Status::system_error(code.message())};
     return size;
 }
 
@@ -77,11 +89,11 @@ auto write(int file, BytesView in) -> Result<Size>
     return target_size - in.size();
 }
 
-auto sync(int fd) -> Result<void>
+auto sync(int fd) -> Status
 {
     if (fsync(fd) == FAILURE)
-        return Err {error()};
-    return {};
+        return error();
+    return Status::ok();
 }
 
 auto seek(int fd, long offset, int whence) -> Result<Index>
@@ -91,11 +103,11 @@ auto seek(int fd, long offset, int whence) -> Result<Index>
     return Err {error()};
 }
 
-auto unlink(const std::string &path) -> Result<void>
+auto unlink(const std::string &path) -> Status
 {
     if (::unlink(path.c_str()) == FAILURE)
-        return Err {error()};
-    return {};
+        return error();
+    return Status::ok();
 }
 
 } // namespace cco::system

@@ -40,9 +40,10 @@ set(CCO_FUZZER_LDFLAGS "" CACHE STRING "Linker flags for the fuzz targets")
 
 set(CCO_SOURCES '')
 set(CCO_HEADERS '')
+
 file(GLOB_RECURSE CCO_SOURCES "${CCO_SOURCE_DIR}/*/*.cpp" "${CCO_SOURCE_DIR}/*/*.h")
 file(GLOB_RECURSE CCO_HEADERS "${CCO_INCLUDE_DIR}/calico/*.h")
-list(APPEND CCO_SOURCES ${CCO_HEADERS})
+list(APPEND CCO_SOURCES "${CCO_HEADERS}")
 
 include(GNUInstallDirs)
 include(FetchContent)

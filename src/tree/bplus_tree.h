@@ -9,12 +9,12 @@
 namespace cco {
 
 class Cursor;
-class IBufferPool;
+class BufferPool;
 
 class Tree : public ITree {
 public:
     struct Parameters {
-        IBufferPool *buffer_pool {};
+        BufferPool *buffer_pool {};
         spdlog::sink_ptr log_sink;
         PageId free_start {};
         Size cell_count {};
@@ -28,31 +28,7 @@ public:
         return m_internal.cell_count();
     }
 
-    [[nodiscard]]
-    auto internal() const -> const Internal & override
-    {
-        return m_internal;
-    }
-
-    [[nodiscard]]
-    auto pool() const -> const NodePool & override
-    {
-        return m_pool;
-    }
-
-    [[nodiscard]]
-    auto internal() -> Internal & override
-    {
-        return m_internal;
-    }
-
-    [[nodiscard]]
-    auto pool() -> NodePool & override
-    {
-        return m_pool;
-    }
-
-    [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<ITree>>;
+    [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<Tree>>;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool> override;
     [[nodiscard]] auto erase(Cursor) -> Result<bool> override;
     [[nodiscard]] auto root(bool) -> Result<Node> override;

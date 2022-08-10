@@ -18,14 +18,11 @@ class Node;
 class NodePool;
 class Page;
 
+// Depends on BufferPool
 class ITree {
 public:
     virtual ~ITree() = default;
     [[nodiscard]] virtual auto cell_count() const -> Size = 0;
-    [[nodiscard]] virtual auto internal() const -> const Internal & = 0;
-    [[nodiscard]] virtual auto pool() const -> const NodePool & = 0;
-    [[nodiscard]] virtual auto internal() -> Internal & = 0;
-    [[nodiscard]] virtual auto pool() -> NodePool & = 0;
     [[nodiscard]] virtual auto insert(BytesView, BytesView) -> Result<bool> = 0;
     [[nodiscard]] virtual auto erase(Cursor) -> Result<bool> = 0;
     [[nodiscard]] virtual auto find_exact(BytesView) -> Cursor = 0;

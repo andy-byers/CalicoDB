@@ -15,66 +15,78 @@ namespace cco {
 
 class Frame;
 
+class DirtyList final {
+public:
+    using Iterator = std::list<PageId>::iterator;
+
+    DirtyList() = default;
+    ~DirtyList() = default;
+
+    [[nodiscard]]
+    auto add(const PageId &id) -> Iterator
+    {
+        return m_list.emplace(cend(m_list), id);
+    }
+
+    auto remove(Iterator itr) -> void
+    {
+        m_list.erase(itr);
+    }
+
+private:
+    std::list<PageId> m_list;
+};
+
+struct CacheEntry {
+    Pin pin;
+    DirtyList::Iterator dirty_itr {};
+};
+
 class PageCache final {
 public:
-    using Reference = std::reference_wrapper<Frame>;
-    using ConstReference = std::reference_wrapper<const Frame>;
-    using ColdCache = FifoCache<PageId, Frame, PageId::Hash>;
-    using HotCache = LruCache<PageId, Frame, PageId::Hash>;
+    using WarmCache = UniqueFifoCache<PageId, CacheEntry, PageId::Hash>;
+    using HotCache = UniqueLruCache<PageId, CacheEntry, PageId::Hash>;
+
+    using Iterator = HotCache::Iterator;
+    using ConstIterator = HotCache::ConstIterator;
 
     PageCache() = default;
     ~PageCache() = default;
 
-    [[nodiscard]] auto is_empty() const -> Size
+    [[nodiscard]]
+    auto is_empty() const -> Size
     {
         return m_warm.is_empty() && m_hot.is_empty();
     }
 
-    [[nodiscard]] auto size() const -> Size
+    [[nodiscard]]
+    auto size() const -> Size
     {
         return m_warm.size() + m_hot.size();
     }
 
-    [[nodiscard]] auto contains(PageId id) const -> bool
+    [[nodiscard]]
+    auto contains(PageId id) const -> bool
     {
-        return m_warm.contains(id) || m_hot.contains(id);
+        return m_hot.contains(id) || m_warm.contains(id);
     }
 
-    [[nodiscard]] auto hit_ratio() const -> double
+    [[nodiscard]]
+    auto hit_ratio() const -> double
     {
         if (const auto total = static_cast<double>(m_hits + m_misses); total != 0.0)
             return static_cast<double>(m_hits) / total;
         return 0.0;
     }
 
-    [[nodiscard]] auto cold_begin() -> ColdCache::Iterator
-    {
-        return m_warm.begin();
-    }
-
-    [[nodiscard]] auto cold_end() -> ColdCache::Iterator
-    {
-        return m_warm.end();
-    }
-
-    [[nodiscard]] auto hot_begin() -> ColdCache::Iterator
-    {
-        return m_hot.begin();
-    }
-
-    [[nodiscard]] auto hot_end() -> ColdCache::Iterator
-    {
-        return m_hot.end();
-    }
-
-    auto put(PageId, Frame) -> void;
-    auto get(PageId) -> std::optional<Reference>;
-    auto extract(PageId) -> std::optional<Frame>;
-    auto evict() -> std::optional<Frame>;
+    auto put(CacheEntry) -> void;
+    auto get(PageId) -> Iterator;
+    auto extract(PageId) -> std::optional<CacheEntry>;
+    auto evict() -> std::optional<CacheEntry>;
 
 private:
-    FifoCache<PageId, Frame, PageId::Hash> m_warm;
-    LruCache<PageId, Frame, PageId::Hash> m_hot;
+    WarmCache m_warm;
+    HotCache m_hot;
     Size m_hits {};
     Size m_misses {};
 };

@@ -9,12 +9,12 @@
 
 namespace cco {
 
-class IBufferPool;
+class BufferPool;
 
 class NodePool final {
 public:
     struct Parameters {
-        IBufferPool *buffer_pool {};
+        BufferPool *buffer_pool {};
         PageId free_start;
     };
 
@@ -35,7 +35,7 @@ public:
 private:
     FreeList m_free_list;
     std::string m_scratch;
-    IBufferPool *m_pool {};
+    BufferPool *m_pool {};
 };
 
 } // namespace cco

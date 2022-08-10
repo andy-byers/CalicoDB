@@ -97,6 +97,22 @@ inline auto mem_clear_safe(Bytes data) noexcept -> void *
     return mem_clear_safe(data, data.size());
 }
 
+// Modified from an answer to https://stackoverflow.com/questions/29779825 by T.C..
+// Rather than depending on an additional template parameter, we restrict usage to
+// containers that expose a value_type member.
+template<class Container>
+using ElementOf = std::conditional_t<
+    std::is_lvalue_reference<Container>::value,
+    typename std::remove_reference_t<Container>::value_type&,
+    typename std::remove_reference_t<Container>::value_type&&>;
+
+template<class Container, class T>
+[[nodiscard]]
+constexpr auto forward_like(T &&t) -> ElementOf<Container>
+{
+    return std::forward<ElementOf<Container>>(std::forward<T>(t));
+}
+
 } // namespace cco
 
 #endif // CCO_UTILS_UTILS_H

@@ -1,5 +1,5 @@
 #include "wal_writer.h"
-#include "storage/interface.h"
+#include "calico/storage.h"
 #include "utils/identifier.h"
 #include "utils/logging.h"
 #include <optional>

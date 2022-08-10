@@ -5,7 +5,7 @@
 namespace cco {
 
 namespace impl {
-    using Range = ChangeDescriptor;
+    using Range = PageChange;
 
     auto can_merge(const Range &lhs, const Range &rhs) -> bool
     {
@@ -81,7 +81,7 @@ ChangeManager::ChangeManager(BytesView page, ManualScratch before, ManualScratch
     mem_copy(m_before.data(), m_current);
 }
 
-auto ChangeManager::push_change(ChangeDescriptor change) -> void
+auto ChangeManager::push_change(PageChange change) -> void
 {
     impl::insert_range(m_changes, change);
 }

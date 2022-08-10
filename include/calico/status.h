@@ -12,7 +12,6 @@ public:
     [[nodiscard]] static auto logic_error(const std::string &) -> Status;
     [[nodiscard]] static auto corruption(const std::string &) -> Status;
     [[nodiscard]] static auto not_found(const std::string &) -> Status;
-    [[nodiscard]] static auto not_found() -> Status; // TODO: Remove me!
     [[nodiscard]] static auto ok() -> Status;
     [[nodiscard]] auto is_invalid_argument() const -> bool;
     [[nodiscard]] auto is_system_error() const -> bool;
@@ -25,8 +24,8 @@ public:
     Status(const Status&);
     auto operator=(const Status&) -> Status&;
 
-    Status(Status&&);
-    auto operator=(Status&&) -> Status&;
+    Status(Status&&) noexcept;
+    auto operator=(Status&&) noexcept -> Status&;
 
 private:
     enum class Code : Byte {

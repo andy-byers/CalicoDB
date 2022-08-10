@@ -1,4 +1,4 @@
-#include "tree.h"
+#include "bplus_tree.h"
 #include "calico/cursor.h"
 #include "cursor_internal.h"
 #include "page/file_header.h"
@@ -15,7 +15,7 @@ Tree::Tree(const Parameters &param)
       m_logger {create_logger(param.log_sink, "tree")}
 {}
 
-auto Tree::open(const Parameters &param) -> Result<std::unique_ptr<ITree>>
+auto Tree::open(const Parameters &param) -> Result<std::unique_ptr<Tree>>
 {
     auto tree = std::unique_ptr<Tree>(new Tree {param});
     tree->m_logger->trace("opening");

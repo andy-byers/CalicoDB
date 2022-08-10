@@ -11,10 +11,10 @@
 namespace cco {
 
 class Cursor;
-class IBufferPool;
-class IDirectory;
+class BufferPool;
+class Storage;
 class IFile;
-class ITree;
+class Tree;
 
 struct InitialState {
     std::string state;
@@ -31,7 +31,7 @@ public:
 
     friend class Database;
 
-    [[nodiscard]] static auto open(Parameters, std::unique_ptr<IDirectory>) -> Result<std::unique_ptr<Impl>>;
+    [[nodiscard]] static auto open(Parameters, std::unique_ptr<Storage>) -> Result<std::unique_ptr<Impl>>;
     [[nodiscard]] static auto open(Parameters) -> Result<std::unique_ptr<Impl>>;
     Impl() = default;
     ~Impl();
@@ -56,12 +56,12 @@ public:
     [[nodiscard]] auto find_maximum() -> Cursor;
     [[nodiscard]] auto info() -> Info;
 
-    [[nodiscard]] auto home() -> IDirectory &
+    [[nodiscard]] auto home() -> Storage &
     {
         return *m_home;
     }
 
-    [[nodiscard]] auto home() const -> const IDirectory &
+    [[nodiscard]] auto home() const -> const Storage &
     {
         return *m_home;
     }
@@ -72,14 +72,14 @@ private:
 
     spdlog::sink_ptr m_sink;
     std::shared_ptr<spdlog::logger> m_logger;
-    std::unique_ptr<IDirectory> m_home;
-    std::unique_ptr<IBufferPool> m_pool;
-    std::unique_ptr<ITree> m_tree;
+    std::unique_ptr<Storage> m_home;
+    std::unique_ptr<BufferPool> m_pool;
+    std::unique_ptr<Tree> m_tree;
     Status m_status {Status::ok()};
     bool m_is_temp {};
 };
 
-auto setup(IDirectory &, const Options &, spdlog::logger &) -> Result<InitialState>;
+auto setup(Storage &, const Options &, spdlog::logger &) -> Result<InitialState>;
 
 } // namespace cco
 

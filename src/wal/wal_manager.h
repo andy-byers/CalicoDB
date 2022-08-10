@@ -1,22 +1,22 @@
 #ifndef CCO_WAL_WAL_MANAGER_H
 #define CCO_WAL_WAL_MANAGER_H
 
-#include "interface.h"
+#include "calico/wal.h"
 #include "event_queue.h"
-#include <condition_variable>
-#include <optional>
-#include <mutex>
-#include <thread>
 #include "page/update.h"
 #include "utils/queue.h"
 #include "utils/tracker.h"
+#include <condition_variable>
+#include <mutex>
+#include <optional>
+#include <thread>
 
 namespace cco {
 
-class IDirectory;
+class Storage;
 class WALExplorer;
 
-class WALManager : public IWALManager {
+class BasicWriteAheadLog: public WriteAheadLog {
 public:
     ~WALManager() override;
     [[nodiscard]] static auto open(const WALParameters &) -> Result<std::unique_ptr<IWALManager>>;
@@ -58,8 +58,8 @@ private:
     std::unique_ptr<IWALReader> m_reader;
     std::unique_ptr<IWALWriter> m_writer;
     std::shared_ptr<spdlog::logger> m_logger;
-    IBufferPool *m_pool {};
-    IDirectory *m_home {};
+    BufferPool *m_pool {};
+    Storage *m_home {};
     bool m_has_pending {};
 
     using CommitEvent = Event<0, SequenceNumber>; // TODO: More state in this class (less in WALWriter), and more state passed through these?

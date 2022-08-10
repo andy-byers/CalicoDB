@@ -23,8 +23,8 @@ WALPayload::WALPayload(const PageUpdate &param, Bytes scratch)
     m_data = scratch;
     auto bytes = scratch;
 
-    put_u64(bytes, param.previous_lsn.value);
-    bytes.advance(sizeof(param.previous_lsn.value));
+    put_u64(bytes, param.last_lsn.value);
+    bytes.advance(sizeof(param.last_lsn.value));
 
     put_u64(bytes, param.page_id.value);
     bytes.advance(sizeof(param.page_id.value));
@@ -63,8 +63,8 @@ auto WALPayload::decode() const -> PageUpdate
     auto update = PageUpdate {};
     auto bytes = m_data;
 
-    update.previous_lsn.value = get_u64(bytes);
-    bytes.advance(sizeof(update.previous_lsn.value));
+    update.last_lsn.value = get_u64(bytes);
+    bytes.advance(sizeof(update.last_lsn.value));
 
     update.page_id.value = get_u64(bytes);
     bytes.advance(sizeof(update.page_id.value));
@@ -101,7 +101,7 @@ auto WALRecord::commit(SequenceNumber commit_lsn, Bytes scratch) -> WALRecord
 
 WALRecord::WALRecord(const PageUpdate &update, Bytes scratch)
     : m_payload {update, scratch},
-      m_lsn {update.lsn},
+      m_lsn {update.page_lsn},
       m_backing {scratch},
       m_crc {crc_32(m_payload.data())},
       m_type {Type::FULL}

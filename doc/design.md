@@ -83,7 +83,7 @@ Nodes are made up of three main regions: the header, the cell pointer list, and 
                about to overflow. It generally doesn't get that large anyway, it's just a measure to make sure we
                keep track of every byte on the page.)
 
-#### Cell Directory
+#### Cell DiskStorage
 The cell directory is an embedded array located directly after the node header.
 It stores the offset of each cell from the start of the node, ordered by the keys, which are stored with their respective cells further down in the cell content area.
 We can use binary search on the cell directory to retrieve the location of a cell in $O(log_2 N)$, where $N$ is the number of cells in the node.

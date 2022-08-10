@@ -3,13 +3,13 @@
 
 #include "page/file_header.h"
 #include "utils/result.h"
-#include "wal_record.h"
+#include "wal/wal_record.h"
 #include <optional>
 
 namespace cco {
 
-class IBufferPool;
-class IDirectory;
+class BufferPool;
+class Storage;
 class IFile;
 class Page;
 
@@ -38,8 +38,8 @@ inline auto name_to_id(BytesView name) -> SegmentId
 }
 
 struct WALParameters {
-    IBufferPool *pool {};
-    IDirectory &directory;
+    BufferPool *pool {};
+    Storage &directory;
     spdlog::sink_ptr log_sink;
     Size page_size {};
     SequenceNumber flushed_lsn {};
@@ -57,35 +57,12 @@ struct WALSegment {
     bool has_commit {};
 };
 
-class IWALManager {
-public:
-    static constexpr Size SCRATCH_SCALE {4};
-
-    virtual ~IWALManager() = default;
-    [[nodiscard]] virtual auto has_pending() const -> bool = 0;
-    [[nodiscard]] virtual auto flushed_lsn() const -> SequenceNumber = 0;
-    [[nodiscard]] virtual auto truncate(SegmentId) -> Result<void> = 0;
-    [[nodiscard]] virtual auto flush() -> Result<void> = 0;
-    [[nodiscard]] virtual auto append(Page &) -> Result<void> = 0;
-    [[nodiscard]] virtual auto recover() -> Result<void> = 0;
-    [[nodiscard]] virtual auto commit() -> Result<void> = 0;
-    [[nodiscard]] virtual auto abort() -> Result<void> = 0;
-    [[nodiscard]] virtual auto close() -> Result<void> = 0;
-    [[nodiscard]] virtual auto cleanup() -> Result<void> = 0;
-    [[nodiscard]] virtual auto spawn_writer() -> Result<void> = 0;
-    virtual auto teardown() -> void = 0;
-    virtual auto track(Page &) -> void = 0;
-    virtual auto discard(Page &) -> void = 0;
-    virtual auto save_header(FileHeaderWriter &) -> void = 0;
-    virtual auto load_header(const FileHeaderReader &) -> void = 0;
-};
-
 class IWALWriter {
 public:
     using Position = WALRecordPosition;
     virtual ~IWALWriter() = default;
-    [[nodiscard]] virtual auto is_open() -> bool = 0;
-    [[nodiscard]] virtual auto needs_segmentation() -> bool = 0;
+    virtual auto is_open() -> bool = 0;
+    virtual auto needs_segmentation() -> bool = 0;
 
     /**
      * Open the writer on a WAL segment file.
@@ -95,10 +72,10 @@ public:
      *
      * @return A result object that provides error information in the failure case.
      */
-    [[nodiscard]] virtual auto open(std::unique_ptr<IFile>) -> Result<void> = 0;
-    [[nodiscard]] virtual auto close() -> Result<void> = 0;
-    [[nodiscard]] virtual auto flushed_lsn() const -> SequenceNumber = 0;
-    [[nodiscard]] virtual auto last_lsn() const -> SequenceNumber = 0;
+    virtual auto open(std::unique_ptr<IFile>) -> Result<void> = 0;
+    virtual auto close() -> Result<void> = 0;
+    virtual auto flushed_lsn() const -> SequenceNumber = 0;
+    virtual auto last_lsn() const -> SequenceNumber = 0;
 
     /**
      * Check if there are records waiting to be flushed.
@@ -108,17 +85,17 @@ public:
      *
      * @return True if there are records to be flushed, false otherwise.
      */
-    [[nodiscard]] virtual auto has_pending() const -> bool = 0;
+    virtual auto has_pending() const -> bool = 0;
 
     /**
      * Check if there are records already written to the segment file.
      *
      * @return True if there are records to be flushed, false otherwise.
      */
-    [[nodiscard]] virtual auto has_committed() const -> bool = 0;
-    [[nodiscard]] virtual auto append(WALRecord) -> Result<Position> = 0;
-    [[nodiscard]] virtual auto truncate() -> Result<void> = 0;
-    [[nodiscard]] virtual auto flush() -> Result<void> = 0;
+    virtual auto has_committed() const -> bool = 0;
+    virtual auto append(WALRecord) -> Result<Position> = 0;
+    virtual auto truncate() -> Result<void> = 0;
+    virtual auto flush() -> Result<void> = 0;
     virtual auto set_flushed_lsn(SequenceNumber) -> void = 0;
 };
 
@@ -126,11 +103,11 @@ class IWALReader {
 public:
     using Position = WALRecordPosition;
     virtual ~IWALReader() = default;
-    [[nodiscard]] virtual auto is_open() -> bool = 0;
-    [[nodiscard]] virtual auto is_empty() -> Result<bool> = 0;
-    [[nodiscard]] virtual auto open(std::unique_ptr<IFile>) -> Result<void> = 0;
-    [[nodiscard]] virtual auto read(Position &) -> Result<WALRecord> = 0;
-    [[nodiscard]] virtual auto close() -> Result<void> = 0;
+    virtual auto is_open() -> bool = 0;
+    virtual auto is_empty() -> Result<bool> = 0;
+    virtual auto open(std::unique_ptr<IFile>) -> Result<void> = 0;
+    virtual auto read(Position &) -> Result<WALRecord> = 0;
+    virtual auto close() -> Result<void> = 0;
     virtual auto reset() -> void = 0;
 };
 

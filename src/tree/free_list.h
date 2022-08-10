@@ -8,7 +8,7 @@
 
 namespace cco {
 
-class IBufferPool;
+class BufferPool;
 
 namespace page {
     class FileHeaderReader;
@@ -24,7 +24,7 @@ public:
      * Parameters for constructing a free list.
      */
     struct Parameters {
-        IBufferPool *buffer_pool {}; ///< Reference to the underlying buffer pool.
+        BufferPool *buffer_pool {}; ///< Reference to the underlying buffer pool.
         PageId free_head {};           ///< Page ID of the page at the top of the free list stack.
     };
 
@@ -76,7 +76,7 @@ public:
     }
 
 private:
-    IBufferPool *m_pool;  ///< Reference to the underlying buffer pool.
+    BufferPool *m_pool;  ///< Reference to the underlying buffer pool.
     PageId m_head;     ///< Page ID of the page at the head of the free list.
 };
 

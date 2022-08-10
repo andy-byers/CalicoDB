@@ -1,32 +1,19 @@
 #include "frame.h"
-
-#include "interface.h"
 #include "page/page.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
 namespace cco {
 
-Frame::Frame(Size size)
-    : m_owned(size, '\x00'),
-      m_bytes {stob(m_owned)},
-      m_size {size}
-{
-    CCO_EXPECT_TRUE(is_power_of_two(size));
-    CCO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
-    CCO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
-}
-
 Frame::Frame(Byte *buffer, Index id, Size size)
-    : m_bytes {buffer + id * size, size},
-      m_size {size}
+    : m_bytes {buffer + id*size, size}
 {
     CCO_EXPECT_TRUE(is_power_of_two(size));
     CCO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
     CCO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
 }
 
-auto Frame::borrow(IBufferPool *pool, bool is_writable) -> Page
+auto Frame::ref(IBufferPool *pool, bool is_writable) -> Page
 {
     CCO_EXPECT_FALSE(m_is_writable);
 
@@ -38,8 +25,9 @@ auto Frame::borrow(IBufferPool *pool, bool is_writable) -> Page
     return Page {{m_page_id, data(), pool, is_writable, m_is_dirty}};
 }
 
-auto Frame::synchronize(Page &page) -> void
+auto Frame::unref(Page &page) -> void
 {
+    CCO_EXPECT_EQ(m_page_id, page.id());
     CCO_EXPECT_GT(m_ref_count, 0);
 
     if (page.is_writable()) {
@@ -53,11 +41,6 @@ auto Frame::synchronize(Page &page) -> void
     // Make sure the page doesn't get released twice.
     page.m_source.reset();
     m_ref_count--;
-}
-
-auto Frame::page_lsn() const -> SequenceNumber
-{
-    return SequenceNumber {get_u32(m_bytes.range(PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET))};
 }
 
 } // namespace cco

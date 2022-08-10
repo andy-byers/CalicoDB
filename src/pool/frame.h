@@ -5,88 +5,72 @@
 #include "calico/bytes.h"
 #include "utils/identifier.h"
 #include <memory>
+#include <list>
 
 namespace cco {
 
 class IBufferPool;
 class Page;
 
+using FrameId = Identifier<std::uint64_t>;
+
+struct Pin {
+    FrameId fid;
+    PageId pid;
+};
+
 /**
  * Represents in-memory storage for a single database page.
  */
 class Frame final {
 public:
-    using Reference = std::reference_wrapper<Frame>;
-    using ConstReference = std::reference_wrapper<const Frame>;
-
     explicit Frame(Size);
     Frame(Byte *, Index, Size);
 
-    [[nodiscard]] auto is_owned() const -> bool
-    {
-        return !m_owned.empty();
-    }
-
-    [[nodiscard]] auto page_id() const -> PageId
+    [[nodiscard]]
+    auto pid() const -> PageId
     {
         return m_page_id;
     }
 
-    [[nodiscard]] auto ref_count() const -> Size
+    [[nodiscard]]
+    auto ref_count() const -> Size
     {
         return m_ref_count;
     }
 
-    [[nodiscard]] auto is_dirty() const -> bool
+    [[nodiscard]]
+    auto is_dirty() const -> bool
     {
         return m_is_dirty;
     }
 
-    [[nodiscard]] auto size() const -> Size
-    {
-        return m_size;
-    }
-
-    [[nodiscard]] auto data() const -> BytesView
+    [[nodiscard]]
+    auto data() const -> BytesView
     {
         return m_bytes;
     }
 
+    [[nodiscard]]
     auto data() -> Bytes
     {
         return m_bytes;
     }
 
-    auto reset(PageId page_id) -> void
+    auto reset(PageId id) -> void
     {
         CCO_EXPECT_EQ(m_ref_count, 0);
-        m_page_id = page_id;
+        m_page_id = id;
         m_is_dirty = false;
     }
 
-    /**
-     * Reset the reference count and flags.
-     *
-     * This method is used when we have lost a page, e.g. when a system call fails in one of the
-     * tree balancing methods. Should generally be followed by a WAL roll back or program exit.
-     */
-    auto purge() -> void
-    {
-        m_ref_count = 0;
-        m_is_writable = false;
-        m_is_dirty = false;
-    }
-
-    [[nodiscard]] auto page_lsn() const -> SequenceNumber;
-    [[nodiscard]] auto borrow(IBufferPool *, bool) -> Page;
-    auto synchronize(Page &) -> void;
+    [[nodiscard]] auto ref(IBufferPool*, bool) -> Page;
+    auto unref(Page &page) -> void;
 
 private:
-    std::string m_owned;
     Bytes m_bytes;
     PageId m_page_id;
     Size m_ref_count {};
-    Size m_size {};
     bool m_is_writable {};
     bool m_is_dirty {};
 };

@@ -1,8 +1,8 @@
 #include "wal_manager.h"
+#include "calico/storage.h"
 #include "page/file_header.h"
 #include "page/node.h"
 #include "pool/interface.h"
-#include "storage/interface.h"
 #include "storage/system.h"
 #include "utils/logging.h"
 #include "wal_reader.h"
@@ -28,7 +28,7 @@ auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWAL
         message.set_detail("out of memory");
         return Err {message.system_error()};
     }
-    manager->m_home = &param.directory;
+    manager->m_home = &param.store;
     manager->m_writer = std::move(writer);
     manager->m_reader = std::move(reader);
 
@@ -116,7 +116,7 @@ auto WALManager::teardown() -> void
 auto WALManager::setup(const WALParameters &param) -> Result<void>
 {
     // Get a sorted list of WAL segments.
-    CCO_TRY_CREATE(children, param.directory.children());
+    CCO_TRY_CREATE(children, param.store.get_blob_names());
     std::vector<WALSegment> segments;
 
     for (const auto &child: children) {
@@ -152,7 +152,7 @@ auto WALManager::setup(const WALParameters &param) -> Result<void>
         if (!is_empty) {
             CCO_TRY_CREATE(record, m_reader->read(first));
             CCO_TRY_STORE(segment.has_commit, roll_forward(segment.positions));
-            segment.start = record.lsn();
+            segment.start = record.page_lsn();
             filtered.emplace_back(std::move(segment));
         }
     }
@@ -218,7 +218,7 @@ auto WALManager::spawn_writer() -> Result<void>
                 m_has_pending = true;
 
                 if (m_writer->needs_segmentation())
-                    WRITER_TRY(advance_writer(++update.lsn, false));
+                    WRITER_TRY(advance_writer(++update.page_lsn, false));
 
             } else if (std::holds_alternative<CommitEvent>(event)) {
 
@@ -534,9 +534,9 @@ auto WALManager::roll_forward(std::vector<WALRecordPosition> &positions) -> Resu
             return Err {record.error()};
         }
 
-        if (m_writer->flushed_lsn() < record->lsn()) {
-            m_writer->set_flushed_lsn(record->lsn());
-            m_next_lsn = ++record->lsn();
+        if (m_writer->flushed_lsn() < record->page_lsn()) {
+            m_writer->set_flushed_lsn(record->page_lsn());
+            m_next_lsn = ++record->page_lsn();
         }
 
         // Stop at the commit record. TODO: This should always be the last record in a given segment.
@@ -547,8 +547,8 @@ auto WALManager::roll_forward(std::vector<WALRecordPosition> &positions) -> Resu
         CCO_TRY_CREATE(page, m_pool->fetch(update.page_id, true));
         CCO_EXPECT_FALSE(page.has_manager());
 
-        if (page.lsn() < record->lsn())
-            page.redo(record->lsn(), update.changes);
+        if (page.page_lsn() < record->page_lsn())
+            page.redo(record->page_lsn(), update.changes);
 
         CCO_TRY(m_pool->release(std::move(page)));
     }
@@ -570,7 +570,7 @@ auto WALManager::roll_backward(const std::vector<WALRecordPosition> &positions) 
                 LogMessage message {*m_logger};
                 message.set_primary("cannot roll backward");
                 message.set_detail("encountered a misplaced commit record");
-                message.set_hint("LSN is {}", record.lsn().value);
+                message.set_hint("LSN is {}", record.page_lsn().value);
                 return Err {message.corruption()};
             }
             continue;
@@ -579,10 +579,10 @@ auto WALManager::roll_backward(const std::vector<WALRecordPosition> &positions) 
         const auto update = record.decode();
         CCO_TRY_CREATE(page, m_pool->fetch(update.page_id, true));
         CCO_EXPECT_FALSE(page.has_manager());
-        CCO_EXPECT_EQ(record.lsn(), update.lsn);
+        CCO_EXPECT_EQ(record.page_lsn(), update.page_lsn);
 
-        if (page.lsn() >= record.lsn())
-            page.undo(update.previous_lsn, update.changes);
+        if (page.page_lsn() >= record.page_lsn())
+            page.undo(update.last_lsn, update.changes);
 
         CCO_TRY(m_pool->release(std::move(page)));
     }

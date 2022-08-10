@@ -45,6 +45,7 @@ public:
     [[nodiscard]] auto invalid_argument() const -> Status;
     [[nodiscard]] auto logic_error() const -> Status;
     [[nodiscard]] auto corruption() const -> Status;
+    [[nodiscard]] auto not_found() const -> Status;
     [[nodiscard]] auto text() const -> std::string;
 
 private:
