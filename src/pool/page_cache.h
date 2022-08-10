@@ -8,8 +8,6 @@
 #include "frame.h"
 #include "utils/cache.h"
 #include "utils/identifier.h"
-#include <list>
-#include <unordered_map>
 
 namespace cco {
 
@@ -23,7 +21,7 @@ public:
     ~DirtyList() = default;
 
     [[nodiscard]]
-    auto add(const PageId &id) -> Iterator
+    auto insert(const PageId &id) -> Iterator
     {
         return m_list.emplace(cend(m_list), id);
     }
@@ -38,7 +36,8 @@ private:
 };
 
 struct CacheEntry {
-    Pin pin;
+    PageId pid;
+    FrameId fid;
     DirtyList::Iterator dirty_itr {};
 };
 
@@ -77,6 +76,12 @@ public:
         if (const auto total = static_cast<double>(m_hits + m_misses); total != 0.0)
             return static_cast<double>(m_hits) / total;
         return 0.0;
+    }
+
+    [[nodiscard]]
+    auto end() -> Iterator
+    {
+        return m_hot.end();
     }
 
     auto put(CacheEntry) -> void;

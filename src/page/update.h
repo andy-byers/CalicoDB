@@ -9,20 +9,6 @@
 
 namespace cco {
 
-struct PageChange {
-    Index offset {};
-    Size size {};
-};
-
-
-
-struct PageUpdate {
-    LogBuffer buffer;
-    std::vector<PageChange> changes;
-    PageId page_id;
-    SequenceNumber last_lsn;
-    SequenceNumber page_lsn;
-};
 
 class ChangeManager {
 public:

@@ -85,9 +85,11 @@ auto Page::bytes(Index offset) -> Bytes
 auto Page::bytes(Index offset, Size size) -> Bytes
 {
     CCO_EXPECT_TRUE(m_is_writable);
-    if (m_manager)
-        m_manager->push_change({offset, size});
-    m_is_dirty = true;
+    if (!m_is_dirty) {
+        m_source->update_page(*this, m_data.size(), 0);
+        m_is_dirty = true;
+    }
+    m_changes.emplace_back(PageChange {offset, size});
     return m_data.range(offset, size);
 }
 
@@ -114,6 +116,11 @@ auto Page::redo(SequenceNumber next_lsn, const std::vector<ChangedRegion> &chang
     const auto lsn_offset = PageLayout::header_offset(m_id) + PageLayout::LSN_OFFSET;
     put_u64(m_data.range(lsn_offset), next_lsn.value);
     m_is_dirty = true;
+}
+
+auto Page::describe_update() const -> PageUpdate
+{
+
 }
 
 auto get_u16(const Page &page, Index offset) -> std::uint16_t

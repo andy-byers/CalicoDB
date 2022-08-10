@@ -173,7 +173,23 @@ auto BufferPool::do_release(Page &page) -> Result<void>
     // This function needs external synchronization!
     CCO_EXPECT_GT(m_ref_sum, 0);
 
-    auto reference = m_cache.get(page.id());
+    auto itr = m_cache.get(page.id());
+    CCO_EXPECT_NE(reference, std::nullopt);
+    auto &frame = reference->get();
+    const auto became_dirty = !frame.is_dirty() && page.is_dirty();
+
+    m_dirty_count += became_dirty;
+    frame.synchronize(page);
+    m_ref_sum--;
+    return {};
+}
+
+auto BufferPool::update_page(Page &page) -> Result<void>
+{
+    // This function needs external synchronization!
+    CCO_EXPECT_GT(m_ref_sum, 0);
+
+    auto itr = m_cache.get(page.id());
     CCO_EXPECT_NE(reference, std::nullopt);
     auto &frame = reference->get();
     const auto became_dirty = !frame.is_dirty() && page.is_dirty();

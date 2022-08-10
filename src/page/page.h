@@ -14,7 +14,18 @@ class Frame;
 class FileHeaderReader;
 class FileHeaderWriter;
 class IBufferPool;
-class ChangeManager;
+
+
+struct PageChange {
+    Index offset {};
+    Size size {};
+};
+
+struct PageUpdate {
+    std::vector<PageChange> changes;
+    PageId id;
+    SequenceNumber lsn;
+};
 
 class Page final {
 public:
@@ -47,6 +58,7 @@ public:
     [[nodiscard]] auto view(Index, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
     [[nodiscard]] auto lsn() const -> SequenceNumber;
+    [[nodiscard]] auto describe_update() const -> PageUpdate;
     auto set_type(PageType) -> void;
     auto set_lsn(SequenceNumber) -> void;
     auto read(Bytes, Index) const -> void;
@@ -56,23 +68,6 @@ public:
     auto undo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
     auto redo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
 
-    [[nodiscard]] auto has_manager() const -> bool
-    {
-        return m_manager != nullptr;
-    }
-
-    auto set_manager(ChangeManager &manager) -> void
-    {
-        CCO_EXPECT_EQ(m_manager, nullptr);
-        m_manager = &manager;
-    }
-
-    auto clear_manager() -> void
-    {
-        CCO_EXPECT_NE(m_manager, nullptr);
-        m_manager = nullptr;
-    }
-
     // NOTE: We need these because we have a user-defined destructor.
     Page(Page &&) = default;
     auto operator=(Page &&) -> Page & = default;
@@ -80,8 +75,8 @@ public:
 private:
     [[nodiscard]] auto header_offset() const -> Index;
 
+    std::vector<PageChange> m_changes;
     UniqueNullable<IBufferPool *> m_source;
-    ChangeManager *m_manager {};
     Bytes m_data;
     PageId m_id;
     bool m_is_writable {};

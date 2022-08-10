@@ -31,3 +31,36 @@ However, for pages that are modified frequently, the reduction in WAL size justi
 
 [//]: # (TODO: Logging scheme also can cause extra full-page records to be written due to buffer pool frame stealing (a dirty page gets written back, reused, then made dirty again, in the same transaction.)
 [//]: # (TODO: We can prevent extra full-page records by keeping track of which pages we have records for during each transaction and refusing to make them twice for a given page.)
+
+## Customization
+As mentioned in [options.md](#./options.md), it is possible to pass a pointer to a custom WAL object to the database constructor.
+In this case, the database will interact with the passed object through the WriteAheadLog interface.
+The custom WAL object should keep track of the log sequence number (LSN) of the last record it has written to disk, called the flushed LSN, so that the buffer pool can refrain from writing out non-guaranteed pages.
+The flushed LSN value provided does not need to be exact, however, it must be equal to or lower than the actual flushed LSN.
+This allows writing to be done in the background.
+
+### Record Types
+The custom WAL object must handle three types of records: full-page images, delta records, and commit records.
+
+#### Full-Page Images
+A full-page image is generated right before a database page is made dirty.
+It contains the entire page contents, and can be used to undo many modifications made during a transaction.
+All that is needed for a full-page image is an immutable slice of the page data.
+The page LSN is not updated when generating this type of record, since the page was not actually updated.
+
+[//]: # (TODO: I don't see a problem with this, but who knows. We may need to update the page LSN with this type of record.
+               If so, we can let the changes be part of the next delta record.)
+
+#### Delta Records
+A delta record is generated when a page is released back to the buffer pool after being modified.
+Delta records contain only the exact changes made to a page.
+
+#### Commit Records
+A commit record is emitted when a transaction commits.
+It contains no actual information (other than its LSN) and serves as a sentinel to mark that a transaction has succeeded.
+
+### Recovery
+Together, records of these three record types can be used to undo and redo modifications made to database pages.
+
+and database pages store the LSN of their most-recent WAL record (called the page LSN).
+[//]: # (TODO: Trying to work out whether or not we actually need to store the previous LSN in the WAL records...)

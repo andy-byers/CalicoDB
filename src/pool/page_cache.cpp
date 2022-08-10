@@ -1,6 +1,5 @@
 
 #include "page_cache.h"
-#include "frame.h"
 
 namespace cco {
 
@@ -8,7 +7,7 @@ auto PageCache::put(CacheEntry entry) -> void
 {
     CCO_EXPECT_FALSE(m_warm.contains(entry.pid));
     CCO_EXPECT_FALSE(m_hot.contains(entry.pid));
-    m_warm.put(entry.pin.pid, std::move(entry));
+    m_warm.put(entry.pid, std::move(entry));
 }
 
 auto PageCache::get(PageId id) -> Iterator
@@ -23,6 +22,8 @@ auto PageCache::get(PageId id) -> Iterator
         return m_hot.get(id);
     }
     m_misses++;
+    // NOTE: We also provide an end() method, which returns m_hot.end() to compare this return against.
+    //       It'll work, but may not be ideal. Hopefully we never need to iterate over the cache!
     return m_hot.end();
 }
 
@@ -42,9 +43,11 @@ auto PageCache::extract(PageId id) -> std::optional<CacheEntry>
 
 auto PageCache::evict() -> std::optional<CacheEntry>
 {
-    if (auto e = m_hot.evict())
+    // Evicts the first element placed into the warm cache.
+    if (auto e = m_warm.evict())
         return e;
-    return m_warm.evict();
+    // Evicts the least-recently-used element from the hot cache.
+    return m_hot.evict();
 }
 
 } // namespace cco
