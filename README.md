@@ -80,6 +80,12 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCCO_BUILD_TESTS=Off .. && cmake --build .
 ## API
 See the [API documentation](doc/api.md).
 
+## Architecture
+
+<p align="center">
+   <img src="./doc/architecture.png" width="75%" />
+</p>
+
 ## Performance
 Benchmarks are run in a modified version of LevelDB, using the `db_bench` routines.
 
