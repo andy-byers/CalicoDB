@@ -1,6 +1,7 @@
 #ifndef CCO_PAGE_PAGE_H
 #define CCO_PAGE_PAGE_H
 
+#include "calico/wal.h"
 #include "utils/identifier.h"
 #include "utils/types.h"
 #include <optional>
@@ -13,19 +14,7 @@ struct PageUpdate;
 class Frame;
 class FileHeaderReader;
 class FileHeaderWriter;
-class IBufferPool;
-
-
-struct PageChange {
-    Index offset {};
-    Size size {};
-};
-
-struct PageUpdate {
-    std::vector<PageChange> changes;
-    PageId id;
-    SequenceNumber lsn;
-};
+class Pager;
 
 class Page final {
 public:
@@ -34,7 +23,7 @@ public:
     struct Parameters {
         PageId id;
         Bytes data;
-        IBufferPool *source {};
+        Pager *source {};
         bool is_writable {};
         bool is_dirty {};
     };
@@ -58,15 +47,15 @@ public:
     [[nodiscard]] auto view(Index, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
     [[nodiscard]] auto lsn() const -> SequenceNumber;
-    [[nodiscard]] auto describe_update() const -> PageUpdate;
+    [[nodiscard]] auto deltas() const -> std::vector<PageDelta>;
     auto set_type(PageType) -> void;
     auto set_lsn(SequenceNumber) -> void;
     auto read(Bytes, Index) const -> void;
     auto bytes(Index) -> Bytes;
     auto bytes(Index, Size) -> Bytes;
     auto write(BytesView, Index) -> void;
-    auto undo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
-    auto redo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
+    auto undo(const UndoDescriptor&) -> void;
+    auto redo(const RedoDescriptor&) -> void;
 
     // NOTE: We need these because we have a user-defined destructor.
     Page(Page &&) = default;
@@ -75,8 +64,8 @@ public:
 private:
     [[nodiscard]] auto header_offset() const -> Index;
 
-    std::vector<PageChange> m_changes;
-    UniqueNullable<IBufferPool *> m_source;
+    std::vector<PageDelta> m_deltas;
+    UniqueNullable<Pager *> m_source;
     Bytes m_data;
     PageId m_id;
     bool m_is_writable {};

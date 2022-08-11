@@ -67,6 +67,8 @@ This field is currently unused in internal nodes.
 <sup>3</sup> This field is only present if the value is too large to fit in the node, i.e. $L < V$.
 See [Overflow Chains](#overflow-chains) for details.
 
+[//]: # (TODO: The following is not valid anymore and will need to be changed slightly... Also, it should go in notes about the specific WAL implementation provided, since it is specific to that.)
+
 ### WAL Record Header
 | Size | Offset | Name         | Description                                       |
 |-----:|-------:|:-------------|:--------------------------------------------------|

@@ -8,7 +8,7 @@
 
 namespace cco {
 
-class BufferPool;
+class Pager;
 
 namespace page {
     class FileHeaderReader;
@@ -24,7 +24,7 @@ public:
      * Parameters for constructing a free list.
      */
     struct Parameters {
-        BufferPool *buffer_pool {}; ///< Reference to the underlying buffer pool.
+        Pager *buffer_pool {}; ///< Reference to the underlying buffer pool.
         PageId free_head {};           ///< Page ID of the page at the top of the free list stack.
     };
 
@@ -56,14 +56,14 @@ public:
      *
      * @param header The header to save state to.
      */
-    auto save_header(FileHeaderWriter &header) const -> void;
+    auto save_state(FileHeader &header) const -> void;
 
     /**
      * Load state from a file header.
      *
      * @param header The header to read state from.
      */
-    auto load_header(const FileHeaderReader &header) -> void;
+    auto load_state(const FileHeader &header) -> void;
 
     /**
      * Determine if the free list is empty.
@@ -76,7 +76,7 @@ public:
     }
 
 private:
-    BufferPool *m_pool;  ///< Reference to the underlying buffer pool.
+    Pager *m_pool;  ///< Reference to the underlying buffer pool.
     PageId m_head;     ///< Page ID of the page at the head of the free list.
 };
 

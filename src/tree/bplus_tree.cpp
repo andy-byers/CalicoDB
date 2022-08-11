@@ -1,7 +1,6 @@
 #include "bplus_tree.h"
 #include "calico/cursor.h"
 #include "cursor_internal.h"
-#include "page/file_header.h"
 #include "page/node.h"
 #include "pool/interface.h"
 #include "utils/layout.h"
@@ -9,20 +8,20 @@
 
 namespace cco {
 
-Tree::Tree(const Parameters &param)
+BPlusTree::BPlusTree(const Parameters &param)
     : m_pool {{param.buffer_pool, param.free_start}},
       m_internal {{&m_pool, param.cell_count}},
       m_logger {create_logger(param.log_sink, "tree")}
 {}
 
-auto Tree::open(const Parameters &param) -> Result<std::unique_ptr<Tree>>
+auto BPlusTree::open(const Parameters &param) -> Result<std::unique_ptr<BPlusTree>>
 {
-    auto tree = std::unique_ptr<Tree>(new Tree {param});
+    auto tree = std::unique_ptr<BPlusTree>(new BPlusTree {param});
     tree->m_logger->trace("opening");
     return tree;
 }
 
-auto Tree::allocate_root() -> Result<Node>
+auto BPlusTree::allocate_root() -> Result<Node>
 {
     return m_pool.allocate(PageType::EXTERNAL_NODE);
 }
@@ -47,7 +46,7 @@ auto run_key_check(BytesView key, Size max_key_size, spdlog::logger &logger, con
     return Status::ok();
 }
 
-auto Tree::insert(BytesView key, BytesView value) -> Result<bool>
+auto BPlusTree::insert(BytesView key, BytesView value) -> Result<bool>
 {
     if (const auto r = run_key_check(key, m_internal.maximum_key_size(), *m_logger, "cannot write record"); !r.is_ok())
         return Err {r};
@@ -65,7 +64,7 @@ auto Tree::insert(BytesView key, BytesView value) -> Result<bool>
     }
 }
 
-auto Tree::erase(Cursor cursor) -> Result<bool>
+auto BPlusTree::erase(Cursor cursor) -> Result<bool>
 {
     if (cursor.is_valid()) {
         CCO_TRY_CREATE(node, m_pool.acquire(PageId {CursorInternal::id(cursor)}, true));
@@ -77,7 +76,7 @@ auto Tree::erase(Cursor cursor) -> Result<bool>
     return false;
 }
 
-auto Tree::find_aux(BytesView key) -> Result<SearchResult>
+auto BPlusTree::find_aux(BytesView key) -> Result<SearchResult>
 {
     if (const auto r = run_key_check(key, m_internal.maximum_key_size(), *m_logger, "cannot write record"); !r.is_ok())
         return Err {r};
@@ -99,7 +98,7 @@ auto Tree::find_aux(BytesView key) -> Result<SearchResult>
     return SearchResult {std::move(node), index, found_exact};
 }
 
-auto Tree::find_exact(BytesView key) -> Cursor
+auto BPlusTree::find_exact(BytesView key) -> Cursor
 {
     auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
     auto result = find_aux(key);
@@ -113,7 +112,7 @@ auto Tree::find_exact(BytesView key) -> Cursor
     return cursor;
 }
 
-auto Tree::find(BytesView key) -> Cursor
+auto BPlusTree::find(BytesView key) -> Cursor
 {
     auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
     auto result = find_aux(key);
@@ -126,7 +125,7 @@ auto Tree::find(BytesView key) -> Cursor
     return cursor;
 }
 
-auto Tree::find_minimum() -> Cursor
+auto BPlusTree::find_minimum() -> Cursor
 {
     auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
     auto temp = m_internal.find_minimum();
@@ -136,7 +135,7 @@ auto Tree::find_minimum() -> Cursor
     }
     auto [id, index, was_found] = *temp;
     if (!was_found) {
-        CursorInternal::invalidate(cursor, Status::not_found());
+        CursorInternal::invalidate(cursor);
         return cursor;
     }
     auto node = m_pool.acquire(id, false);
@@ -149,7 +148,7 @@ auto Tree::find_minimum() -> Cursor
     return cursor;
 }
 
-auto Tree::find_maximum() -> Cursor
+auto BPlusTree::find_maximum() -> Cursor
 {
     auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
     auto temp = m_internal.find_maximum();
@@ -159,7 +158,7 @@ auto Tree::find_maximum() -> Cursor
     }
     auto [id, index, was_found] = *temp;
     if (!was_found) {
-        CursorInternal::invalidate(cursor, Status::not_found());
+        CursorInternal::invalidate(cursor);
         return cursor;
     }
     auto node = m_pool.acquire(id, false);
@@ -172,22 +171,22 @@ auto Tree::find_maximum() -> Cursor
     return cursor;
 }
 
-auto Tree::root(bool is_writable) -> Result<Node>
+auto BPlusTree::root(bool is_writable) -> Result<Node>
 {
     return m_internal.find_root(is_writable);
 }
 
-auto Tree::save_header(FileHeaderWriter &header) const -> void
+auto BPlusTree::save_state(FileHeader &header) const -> void
 {
-    m_internal.save_header(header);
+    m_internal.save_state(header);
 }
 
-auto Tree::load_header(const FileHeaderReader &header) -> void
+auto BPlusTree::load_state(const FileHeader &header) -> void
 {
-    m_internal.load_header(header);
+    m_internal.load_state(header);
 }
 
-auto Tree::TEST_validate_node(PageId id) -> void
+auto BPlusTree::TEST_validate_node(PageId id) -> void
 {
     auto result = m_pool.acquire(id, false);
     if (!result.has_value()) {

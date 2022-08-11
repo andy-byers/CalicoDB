@@ -1,5 +1,4 @@
 #include "node.h"
-#include "file_header.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
 #include <spdlog/fmt/fmt.h>
@@ -940,16 +939,6 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     if (Ln.is_external())
         return split_external_non_root(Ln, rn, scratch);
     return split_internal_non_root(Ln, rn, scratch);
-}
-
-auto get_file_header_reader(const Node &node) -> FileHeaderReader
-{
-    return get_file_header_reader(node.page());
-}
-
-auto get_file_header_writer(Node &node) -> FileHeaderWriter
-{
-    return get_file_header_writer(node.page());
 }
 
 } // namespace cco

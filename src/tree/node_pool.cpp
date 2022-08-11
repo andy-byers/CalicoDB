@@ -1,6 +1,5 @@
 #include "node_pool.h"
 #include "page/cell.h"
-#include "page/file_header.h"
 #include "page/link.h"
 #include "page/node.h"
 #include "page/page.h"
@@ -11,14 +10,14 @@
 namespace cco {
 
 NodePool::NodePool(Parameters param)
-    : m_free_list {{param.buffer_pool, param.free_start}},
-      m_scratch(param.buffer_pool->page_size(), '\x00'),
-      m_pool {param.buffer_pool}
+    : m_free_list {{param.pager, param.free_start}},
+      m_scratch(param.page_size, '\x00'),
+      m_pager {param.pager}
 {}
 
 auto NodePool::page_size() const -> Size
 {
-    return m_pool->page_size();
+    return m_scratch.size();
 }
 
 auto NodePool::allocate(PageType type) -> Result<Node>
@@ -26,7 +25,7 @@ auto NodePool::allocate(PageType type) -> Result<Node>
     auto page = m_free_list.pop()
         .or_else([this](const Status &error) -> Result<Page> {
             if (error.is_logic_error())
-                return m_pool->allocate();
+                return m_pager->allocate();
             return Err {error};
         });
     if (page) {
@@ -38,7 +37,7 @@ auto NodePool::allocate(PageType type) -> Result<Node>
 
 auto NodePool::acquire(PageId id, bool is_writable) -> Result<Node>
 {
-    return m_pool->acquire(id, is_writable)
+    return m_pager->acquire(id, is_writable)
         .and_then([this](Page page) -> Result<Node> {
             return Node {std::move(page), false, m_scratch.data()};
         });
@@ -47,7 +46,9 @@ auto NodePool::acquire(PageId id, bool is_writable) -> Result<Node>
 auto NodePool::release(Node node) -> Result<void>
 {
     CCO_EXPECT_FALSE(node.is_overflowing());
-    return m_pool->release(node.take());
+    const auto s = m_pager->release(node.take());
+    if (!s.is_ok()) return Err {s}; // TODO: Should return a Status.
+    return {};
 }
 
 auto NodePool::destroy(Node node) -> Result<void>
@@ -64,11 +65,11 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<PageId>
 
     while (!overflow.is_empty()) {
         auto page = m_free_list.pop()
-                        .or_else([this](const Status &error) -> Result<Page> {
-                            if (error.is_logic_error())
-                                return m_pool->allocate();
-                            return Err {error};
-                        });
+            .or_else([this](const Status &error) -> Result<Page> {
+                if (error.is_logic_error())
+                    return m_pager->allocate();
+                return Err {error};
+            });
         if (!page.has_value())
             return Err {page.error()};
 
@@ -80,21 +81,24 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<PageId>
 
         if (prev) {
             prev->set_next_id(link.id());
-            CCO_TRY(m_pool->release(prev->take()));
+            const auto s = m_pager->release(prev->take());
+            if (!s.is_ok()) return Err {s};
         } else {
             head = link.id();
         }
         prev.emplace(std::move(link));
     }
-    if (prev)
-        CCO_TRY(m_pool->release(prev->take()));
+    if (prev) {
+        const auto s = m_pager->release(prev->take());
+        if (!s.is_ok()) return Err {s};
+    }
     return head;
 }
 
 auto NodePool::collect_chain(PageId id, Bytes out) const -> Result<void>
 {
     while (!out.is_empty()) {
-        CCO_TRY_CREATE(page, m_pool->acquire(id, false));
+        CCO_TRY_CREATE(page, m_pager->acquire(id, false));
         if (page.type() != PageType::OVERFLOW_LINK) {
             ThreePartMessage message;
             message.set_primary("cannot collect overflow chain");
@@ -107,7 +111,8 @@ auto NodePool::collect_chain(PageId id, Bytes out) const -> Result<void>
         mem_copy(out, content, chunk);
         out.advance(chunk);
         id = link.next_id();
-        CCO_TRY(m_pool->release(link.take()));
+        const auto s = m_pager->release(link.take());
+        if (!s.is_ok()) return Err {s};
     }
     return {};
 }
@@ -115,7 +120,7 @@ auto NodePool::collect_chain(PageId id, Bytes out) const -> Result<void>
 auto NodePool::destroy_chain(PageId id, Size size) -> Result<void>
 {
     while (size) {
-        auto page = m_pool->acquire(id, true);
+        auto page = m_pager->acquire(id, true);
         if (!page.has_value())
             return Err {page.error()};
         CCO_EXPECT_EQ(page->type(), PageType::OVERFLOW_LINK); // TODO: Corruption error, not assertion. Need a logger for this class.
@@ -127,14 +132,14 @@ auto NodePool::destroy_chain(PageId id, Size size) -> Result<void>
     return {};
 }
 
-auto NodePool::save_header(FileHeaderWriter &header) -> void
+auto NodePool::save_state(FileHeader &header) -> void
 {
-    m_free_list.save_header(header);
+    m_free_list.save_state(header);
 }
 
-auto NodePool::load_header(const FileHeaderReader &header) -> void
+auto NodePool::load_state(const FileHeader &header) -> void
 {
-    m_free_list.load_header(header);
+    m_free_list.load_state(header);
 }
 
 } // namespace cco

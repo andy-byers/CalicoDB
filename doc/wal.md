@@ -61,6 +61,19 @@ It contains no actual information (other than its LSN) and serves as a sentinel 
 
 ### Recovery
 Together, records of these three record types can be used to undo and redo modifications made to database pages.
+We split recovery up into two phases: redo and undo.
 
-and database pages store the LSN of their most-recent WAL record (called the page LSN).
-[//]: # (TODO: Trying to work out whether or not we actually need to store the previous LSN in the WAL records...)
+#### Redo Phase
+During the redo phase, we roll the WAL forward and apply updates that aren't already reflected in the database (using the database flushed LSN for reference).
+If we find a commit record at the end of the log, we are done, and the database is up-to-date.
+Otherwise, we must enter the second phase of recovery: undo.
+
+### Undo Phase
+In the undo phase, we roll back the most recent (incomplete) transaction, that is, we roll the log backward from the end until the most recent commit.
+Now the database is consistent with its state at the last successful commit.
+
+### Reentrancy
+Both of these phases involve numerous disk accesses, and thus have many opportunities for failure.
+The custom WAL object must guarantee that recovery as-a-whole is reentrant.
+We should be able to both recovery phases multiple times without corrupting the database.
+It should be noted that this routine does not protect from database corruption in most cases, it just provides atomicity and added durability to transactions.

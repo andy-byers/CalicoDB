@@ -9,13 +9,14 @@
 
 namespace cco {
 
-class BufferPool;
+class Pager;
 
 class NodePool final {
 public:
     struct Parameters {
-        BufferPool *buffer_pool {};
+        Pager *pager {};
         PageId free_start;
+        Size page_size {};
     };
 
     explicit NodePool(Parameters);
@@ -29,13 +30,13 @@ public:
     [[nodiscard]] auto allocate_chain(BytesView) -> Result<PageId>;
     [[nodiscard]] auto destroy_chain(PageId, Size) -> Result<void>;
     [[nodiscard]] auto collect_chain(PageId, Bytes) const -> Result<void>;
-    auto save_header(FileHeaderWriter &) -> void;
-    auto load_header(const FileHeaderReader &) -> void;
+    auto save_state(FileHeader &header) -> void;
+    auto load_state(const FileHeader &header) -> void;
 
 private:
     FreeList m_free_list;
     std::string m_scratch;
-    BufferPool *m_pool {};
+    Pager *m_pager {};
 };
 
 } // namespace cco

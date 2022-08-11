@@ -6,6 +6,161 @@
 
 namespace cco {
 
+//template<class T>
+//struct EqualityComparableTraits {
+//    friend T; // See https://www.fluentcpp.com/2017/05/12/curiously-recurring-template-pattern/.
+//    using Type = T;
+//
+//    template<class U>
+//    constexpr auto operator==(const U &u) const noexcept -> bool
+//    {
+//        return static_cast<const T&>(*this).value == u;
+//    }
+//
+//    template<class U>
+//    constexpr auto operator!=(const U &u) const noexcept -> bool
+//    {
+//        return static_cast<const T&>(*this).value == u;
+//    }
+//
+//private:
+//    EqualityComparableTraits() = default;
+//};
+//
+//template<class T>
+//struct OrderableTraits: public EqualityComparableTraits<T> {
+//    using Type = T;
+//    friend T;
+//
+//    template<class U>
+//    constexpr auto operator<(const U &u) const noexcept -> bool
+//    {
+//        return static_cast<const T&>(*this).value == u;
+//    }
+//
+//    template<class U>
+//    constexpr auto operator<=(const U &u) const noexcept -> bool
+//    {
+//        return static_cast<const T&>(*this).value == u;
+//    }
+//
+//    template<class U>
+//    constexpr auto operator>(const U &u) const noexcept -> bool
+//    {
+//        return static_cast<const T&>(*this).value == u;
+//    }
+//
+//    template<class U>
+//    constexpr auto operator>=(const U &u) const noexcept -> bool
+//    {
+//        return static_cast<const T&>(*this).value == u;
+//    }
+//};
+//
+//template<class T>
+//struct IncrementableTraits {
+//    using Type = T;
+//    friend T;
+//
+//    constexpr auto operator++() -> IncrementableTraits<T> &
+//    {
+//        static_cast<T&>(*this).value++;
+//        return *this;
+//    }
+//
+//    constexpr auto operator++(int) -> IncrementableTraits<T>
+//    {
+//        const auto temp = *this;
+//        ++static_cast<T&>(*this).value;
+//        return temp;
+//    }
+//
+//private:
+//    IncrementableTraits() = default;
+//};
+//
+//template<class T>
+//struct IdentifierTraits
+//    : public EqualityComparableTraits<T>,
+//      public IncrementableTraits<T>
+//{
+//    using Type = T;
+//    friend T;
+//
+//    [[nodiscard]]
+//    static constexpr auto null() noexcept -> T
+//    {
+//        return T {};
+//    }
+//
+//    [[nodiscard]]
+//    static constexpr auto base() noexcept -> T
+//    {
+//        return ++null();
+//    }
+//
+//    [[nodiscard]]
+//    constexpr auto is_base() const noexcept -> bool
+//    {
+//        return static_cast<const T&>(*this) == base();
+//    }
+//
+//    [[nodiscard]]
+//    constexpr auto is_null() const noexcept -> bool
+//    {
+//        return static_cast<const T&>(*this) == null();
+//    }
+//
+//    [[nodiscard]]
+//    constexpr auto as_index() const noexcept -> Index
+//    {
+//        const auto &t = static_cast<const T&>(*this);
+//        CCO_EXPECT_NE(t, T {});
+//        return t - base();
+//    }
+//
+//    [[nodiscard]]
+//    static constexpr auto from_index(Index index) noexcept -> T
+//    {
+//        return T {index + 1};
+//    }
+//};
+//
+//template<class T>
+//struct SequenceIdTraits
+//    : public OrderableTraits<T>,
+//      public IncrementableTraits<T>
+//{
+//    using Type = T;
+//    friend T;
+//};
+//
+//struct PageId: public IdentifierTraits<PageId> {
+//    std::uint64_t value {};
+//};
+//
+//struct SeqNum: public SequenceIdTraits<SeqNum> {
+//    std::uint64_t value {};
+//};
+
+//template<class T>
+//class IdentifierTraits {
+//    using Type = T;
+//    static constexpr T null = T {};
+//    static constexpr T base = null + 1;
+//
+//    struct Hash {
+//        template<class Id>
+//        auto operator()(const Id &id) const -> std::size_t
+//        {
+//            // T must implicitly convert to std::size_t, and all identifiers must have a value member;
+//            return id.value;
+//        }
+//    };
+//
+//
+//};
+
 template<class T>
 struct Identifier {
     using Type = T;
@@ -157,6 +312,19 @@ struct Identifier {
 
 using PageId = Identifier<std::uint64_t>;
 using SequenceNumber = Identifier<std::uint64_t>;
+
+// Should be able to do the following with a page ID
+//     convert to and from an index
+//     hashable
+//     equality comparable
+//     orderable?
+
+// Should be able to do the following with an LSN
+//     convert to and from an index?
+//     hashable?
+//     equality comparable
+//     orderable
+//     incrementable
 
 } // namespace cco
 

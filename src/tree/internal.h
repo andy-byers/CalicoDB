@@ -38,8 +38,8 @@ public:
     [[nodiscard]] auto positioned_insert(Position, BytesView, BytesView) -> Result<void>;
     [[nodiscard]] auto positioned_modify(Position, BytesView) -> Result<void>;
     [[nodiscard]] auto positioned_remove(Position) -> Result<void>;
-    auto save_header(FileHeaderWriter &) const -> void;
-    auto load_header(const FileHeaderReader &) -> void;
+    auto save_state(FileHeader &header) const -> void;
+    auto load_state(const FileHeader &header) -> void;
 
     [[nodiscard]] auto cell_count() const -> Size
     {

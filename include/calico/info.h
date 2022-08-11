@@ -7,7 +7,7 @@ namespace cco {
 
 class Info {
 public:
-    Info(Database::Impl &impl)
+    explicit Info(Database::Impl &impl)
         : m_impl {&impl}
     {}
 

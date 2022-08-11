@@ -1,7 +1,5 @@
 #include "page.h"
-#include "file_header.h"
 #include "pool/interface.h"
-#include "update.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
@@ -85,11 +83,8 @@ auto Page::bytes(Index offset) -> Bytes
 auto Page::bytes(Index offset, Size size) -> Bytes
 {
     CCO_EXPECT_TRUE(m_is_writable);
-    if (!m_is_dirty) {
-        m_source->update_page(*this, m_data.size(), 0);
-        m_is_dirty = true;
-    }
-    m_changes.emplace_back(PageChange {offset, size});
+    m_deltas.emplace_back(PageDelta {offset, size});
+    m_is_dirty = true;
     return m_data.range(offset, size);
 }
 
@@ -98,29 +93,27 @@ auto Page::write(BytesView in, Index offset) -> void
     mem_copy(bytes(offset, in.size()), in);
 }
 
-auto Page::undo(SequenceNumber previous_lsn, const std::vector<ChangedRegion> &changes) -> void
+auto Page::undo(const UndoDescriptor &descriptor) -> void
 {
-    CCO_EXPECT_GE(lsn(), previous_lsn);
-    for (const auto &region: changes)
-        mem_copy(m_data.range(region.offset), region.before, region.before.size());
-    const auto lsn_offset = PageLayout::header_offset(m_id) + PageLayout::LSN_OFFSET;
-    put_u64(m_data.range(lsn_offset), previous_lsn.value);
+
+    CCO_EXPECT_EQ(m_id, descriptor.page_id);
+    CCO_EXPECT_EQ(m_data.size(), descriptor.image.size());
+    mem_copy(m_data, descriptor.image);
+    m_is_dirty = true; // Dirty flag is set here and in redo(), even though we don't have any deltas.
+}
+
+auto Page::redo(const RedoDescriptor &descriptor) -> void
+{
+    CCO_EXPECT_EQ(m_id, descriptor.page_id);
+    CCO_EXPECT_FALSE(descriptor.is_commit);
+    for (const auto &[offset, delta]: descriptor.deltas)
+        mem_copy(m_data.range(offset, delta.size()), delta);
     m_is_dirty = true;
 }
 
-auto Page::redo(SequenceNumber next_lsn, const std::vector<ChangedRegion> &changes) -> void
+auto Page::deltas() const -> std::vector<PageDelta>
 {
-    CCO_EXPECT_LT(lsn(), next_lsn);
-    for (const auto &region: changes)
-        mem_copy(m_data.range(region.offset), region.after, region.after.size());
-    const auto lsn_offset = PageLayout::header_offset(m_id) + PageLayout::LSN_OFFSET;
-    put_u64(m_data.range(lsn_offset), next_lsn.value);
-    m_is_dirty = true;
-}
-
-auto Page::describe_update() const -> PageUpdate
-{
-
+    return m_deltas;
 }
 
 auto get_u16(const Page &page, Index offset) -> std::uint16_t
@@ -151,18 +144,6 @@ auto put_u32(Page &page, Index offset, std::uint32_t value) -> void
 auto put_u64(Page &page, Index offset, std::uint64_t value) -> void
 {
     put_u64(page.bytes(offset, sizeof(value)), value);
-}
-
-auto get_file_header_reader(const Page &page) -> FileHeaderReader
-{
-    CCO_EXPECT_TRUE(page.id().is_base());
-    return FileHeaderReader {page.view(FileLayout::header_offset(), FileLayout::HEADER_SIZE)};
-}
-
-auto get_file_header_writer(Page &page) -> FileHeaderWriter
-{
-    CCO_EXPECT_TRUE(page.id().is_base());
-    return FileHeaderWriter {page.bytes(FileLayout::header_offset(), FileLayout::HEADER_SIZE)};
 }
 
 } // namespace cco

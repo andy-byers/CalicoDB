@@ -13,7 +13,7 @@ Typically, pages are acquired as read-only and promoted to read-write when an up
 This subverts the overhead of keeping a "before" copy of the page for recovery (see [wal.md](./wal.md) for more details).
 It also allows us to obtain multiple read-only references to a single database page for use in concurrent queries.
 
-## Pager
+## Framer
 The pager object is in charge of "pinning" database pages to buffer pool frames.
 When a page is pinned, it is read from the database file into an available frame.
 Once the page is no longer needed, it can be "unpinned".

@@ -1,5 +1,5 @@
 #include "free_list.h"
-#include "page/file_header.h"
+#include "calico/options.h"
 #include "page/link.h"
 #include "page/page.h"
 #include "pool/interface.h"
@@ -11,14 +11,14 @@ FreeList::FreeList(const Parameters &param)
       m_head {param.free_head}
 {}
 
-auto FreeList::save_header(FileHeaderWriter &header) const -> void
+auto FreeList::save_state(FileHeader &header) const -> void
 {
-    header.set_free_start(m_head);
+    header.freelist_head = m_head.value;
 }
 
-auto FreeList::load_header(const FileHeaderReader &header) -> void
+auto FreeList::load_state(const FileHeader &header) -> void
 {
-    m_head = header.free_start();
+    m_head.value = header.freelist_head;
 }
 
 auto FreeList::push(Page page) -> Result<void>
@@ -28,7 +28,9 @@ auto FreeList::push(Page page) -> Result<void>
     Link link {std::move(page)};
     link.set_next_id(m_head);
     m_head = link.page().id();
-    return m_pool->release(link.take());
+    const auto s = m_pool->release(link.take());
+    if (!s.is_ok()) return Err {s}; // TODO
+    return {};
 }
 
 auto FreeList::pop() -> Result<Page>

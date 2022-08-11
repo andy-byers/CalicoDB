@@ -43,6 +43,7 @@ namespace impl {
         [[nodiscard]]
         virtual auto get(const Key &key) -> Iterator
         {
+            using std::end;
             if (auto itr = m_map.find(key); itr != end(m_map))
                 return itr->second;
             return end(m_list);

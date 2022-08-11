@@ -9,6 +9,11 @@ class Node;
 class NodePool;
 class Internal;
 
+inline auto default_error_status() -> Status
+{
+    return Status::not_found("cursor is invalid");
+}
+
 class CursorInternal {
 public:
     [[nodiscard]] static auto make_cursor(NodePool &, Internal &) -> Cursor;
@@ -17,7 +22,7 @@ public:
     [[nodiscard]] static auto seek_left(Cursor &) -> bool;
     [[nodiscard]] static auto seek_right(Cursor &) -> bool;
     static auto move_to(Cursor &, Node, Index) -> void;
-    static auto invalidate(Cursor &, const Status & = Status::not_found()) -> void;
+    static auto invalidate(Cursor &, const Status & = default_error_status()) -> void;
 
     static auto TEST_validate(const Cursor &) -> void;
 };

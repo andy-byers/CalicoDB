@@ -1,5 +1,4 @@
 #include "internal.h"
-#include "page/file_header.h"
 #include "utils/layout.h"
 
 namespace cco {
@@ -414,16 +413,16 @@ auto Internal::fix_root(Node node) -> Result<void>
     return m_pool->release(std::move(node));
 }
 
-auto Internal::save_header(FileHeaderWriter &header) const -> void
+auto Internal::save_state(FileHeader &header) const -> void
 {
-    m_pool->save_header(header);
-    header.set_record_count(m_cell_count);
+    m_pool->save_state(header);
+    header.record_count = m_cell_count;
 }
 
-auto Internal::load_header(const FileHeaderReader &header) -> void
+auto Internal::load_state(const FileHeader &header) -> void
 {
-    m_pool->load_header(header);
-    m_cell_count = header.record_count();
+    m_pool->load_state(header);
+    m_cell_count = header.record_count;
 }
 
 auto Internal::rotate_left(Node &parent, Node &Lc, Node &rc, Index index) -> Result<void>

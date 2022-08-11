@@ -2,8 +2,8 @@
 #define CCO_POOL_BUFFER_POOL_H
 
 #include "frame.h"
-#include "interface.h"
-#include "page_cache.h"
+#include "pager.h"
+#include "registry.h"
 #include "utils/scratch.h"
 #include <list>
 #include <mutex>
@@ -14,9 +14,9 @@ namespace cco {
 
 class Storage;
 class IFile;
-class Pager;
+class Framer;
 
-class BufferPool : public IBufferPool {
+class BasicPager : public Pager {
 public:
     struct Parameters {
         Storage &storage;
@@ -29,10 +29,10 @@ public:
         bool use_xact {};
     };
 
-    ~BufferPool() override;
+    ~BasicPager() override;
 
     [[nodiscard]]
-    static auto open(const Parameters &) -> Result<std::unique_ptr<BufferPool>>;
+    static auto open(const Parameters &) -> Result<std::unique_ptr<BasicPager>>;
 
     [[nodiscard]]
     auto status() const -> Status override
@@ -51,23 +51,22 @@ public:
     [[nodiscard]] auto acquire(PageId, bool) -> Result<Page> override;
     [[nodiscard]] auto release(Page) -> Status override;
     [[nodiscard]] auto flush() -> Status override;
-    auto update_page(Page &, Size, Index) -> void override;
     auto save_state(FileHeader &) -> void override;
     auto load_state(const FileHeader &) -> void override;
-
 private:
-    explicit BufferPool(const Parameters &);
+
+    explicit BasicPager(const Parameters &);
     [[nodiscard]] auto pin_frame(PageId) -> Status;
-    [[nodiscard]] auto try_evict_frame() -> Result<bool>;
-    [[nodiscard]] auto do_release(Page &) -> Status;
+    [[nodiscard]] auto try_make_available() -> Result<bool>;
+    auto register_page(Page &) -> void;
 
     mutable std::mutex m_mutex;
-    std::unique_ptr<Pager> m_pager;
+    std::unique_ptr<Framer> m_framer;
     std::shared_ptr<spdlog::logger> m_logger;
     RollingScratchManager m_scratch;
     WriteAheadLog *m_wal {};
-    DirtyList m_dirty;
-    PageCache m_cache;
+    PageList m_dirty;
+    PageRegistry m_registry;
     Status m_status {Status::ok()};
     Size m_dirty_count {};
     Size m_ref_sum {};

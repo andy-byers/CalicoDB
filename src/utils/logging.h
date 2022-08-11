@@ -92,6 +92,7 @@ public:
     [[nodiscard]] auto invalid_argument(spdlog::level::level_enum = spdlog::level::err) const -> Status;
     [[nodiscard]] auto corruption(spdlog::level::level_enum = spdlog::level::err) const -> Status;
     [[nodiscard]] auto logic_error(spdlog::level::level_enum = spdlog::level::err) const -> Status;
+    [[nodiscard]] auto not_found(spdlog::level::level_enum = spdlog::level::err) const -> Status;
     auto log(spdlog::level::level_enum = spdlog::level::err) const -> std::string;
 
 private:

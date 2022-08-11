@@ -31,8 +31,8 @@ public:
     [[nodiscard]] virtual auto find_maximum() -> Cursor = 0;
     [[nodiscard]] virtual auto root(bool) -> Result<Node> = 0;
     [[nodiscard]] virtual auto allocate_root() -> Result<Node> = 0;
-    virtual auto save_header(FileHeaderWriter &) const -> void = 0;
-    virtual auto load_header(const FileHeaderReader &) -> void = 0;
+    virtual auto save_state(FileHeader &) const -> void = 0;
+    virtual auto load_state(const FileHeader &) -> void = 0;
     virtual auto TEST_validate_node(PageId) -> void = 0;
 };
 

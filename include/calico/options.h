@@ -30,6 +30,20 @@ struct Options {
     WriteAheadLog *wal {};
 };
 
+/**
+ * File header for populating the state of custom database components.
+ */
+struct FileHeader {
+    std::uint32_t magic_code;
+    std::uint32_t header_crc;
+    std::uint64_t page_count;
+    std::uint64_t freelist_head;
+    std::uint64_t record_count;
+    std::uint64_t flushed_lsn;
+    std::uint16_t page_size;
+    Byte reserved[6];
+};
+
 } // cco
 
 #endif // CCO_OPTIONS_H

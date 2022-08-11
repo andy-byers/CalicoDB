@@ -1,15 +1,15 @@
 #include "cursor_internal.h"
-#include "pool/interface.h"
+#include "pager/pager.h"
 #include "tree/internal.h"
 #include "tree/node_pool.h"
 #include <spdlog/fmt/fmt.h>
 
 namespace cco {
 
-auto CursorInternal::make_cursor(NodePool &pool, Internal &internal) -> Cursor
+auto CursorInternal::make_cursor(NodePool &pager, Internal &internal) -> Cursor
 {
     Cursor cursor;
-    cursor.m_pool = &pool;
+    cursor.m_pager = &pager;
     cursor.m_internal = &internal;
     invalidate(cursor);
     return cursor;
@@ -41,7 +41,7 @@ auto CursorInternal::seek_left(Cursor &cursor) -> bool
         invalidate(cursor);
     } else {
         const PageId left {cursor.m_position.ids[Cursor::Position::LEFT]};
-        auto previous = cursor.m_pool->acquire(left, false);
+        auto previous = cursor.m_pager->acquire(left, false);
         if (!previous.has_value()) {
             invalidate(cursor, previous.error());
             return false;
@@ -62,7 +62,7 @@ auto CursorInternal::seek_right(Cursor &cursor) -> bool
         invalidate(cursor);
     } else {
         const PageId right {cursor.m_position.ids[Cursor::Position::RIGHT]};
-        auto next = cursor.m_pool->acquire(right, false);
+        auto next = cursor.m_pager->acquire(right, false);
         if (!next.has_value()) {
             invalidate(cursor, next.error());
             return false;
@@ -77,14 +77,14 @@ auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
     if (!cursor.is_valid())
         return;
 
-    auto node = cursor.m_pool->acquire(PageId {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
+    auto node = cursor.m_pager->acquire(PageId {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
     node->TEST_validate();
 }
 
 auto Cursor::operator==(const Cursor &rhs) const -> bool
 {
     // These cursors should come from the same database.
-    CCO_EXPECT_EQ(m_pool, rhs.m_pool);
+    CCO_EXPECT_EQ(m_pager, rhs.m_pager);
     CCO_EXPECT_EQ(m_internal, rhs.m_internal);
     const auto lhs_has_error = !m_status.is_ok() && !m_status.is_not_found();
     const auto rhs_has_error = !rhs.m_status.is_ok() && !rhs.m_status.is_not_found();
@@ -168,7 +168,7 @@ auto CursorInternal::move_to(Cursor &cursor, Node node, Index index) -> void
         invalidate(cursor);
     }
 
-    if (auto result = cursor.m_pool->release(std::move(node)); !result.has_value())
+    if (auto result = cursor.m_pager->release(std::move(node)); !result.has_value())
         invalidate(cursor, result.error());
 }
 
@@ -201,7 +201,7 @@ auto Cursor::decrement() -> bool
 auto Cursor::key() const -> BytesView
 {
     CCO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_pager->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
@@ -212,7 +212,7 @@ auto Cursor::key() const -> BytesView
 auto Cursor::value() const -> std::string
 {
     CCO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_pager->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
@@ -227,7 +227,7 @@ auto Cursor::value() const -> std::string
 auto Cursor::record() const -> Record
 {
     CCO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_pager->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};

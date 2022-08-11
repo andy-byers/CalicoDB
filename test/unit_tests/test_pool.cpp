@@ -1,95 +1,169 @@
-//
-//#include "fakes.h"
-//#include "page/file_header.h"
-//#include "page/page.h"
-//#include "pool/buffer_pool.h"
-//#include "pool/memory_pool.h"
-//#include "pool/pager.h"
-//#include "utils/layout.h"
-//#include "utils/logging.h"
-//#include <gtest/gtest.h>
-//#include <numeric>
-//
-//namespace cco {
-//
-//
-//TEST(PagerOpenTests, A)
-//{
-//    auto home = std::make_unique<FakeDirectory>("PagerOpenTests");
-//    auto file = home->open_fake_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
-//    auto memory = file->shared_memory();
-//    auto pager = Pager::open({
-//        std::move(file),
-//        SequenceNumber::base(),
-//        0x100,
-//        16,
-//    });
-//
-//}
-//
-//class PagerTests: public testing::Test {
-//public:
-//    explicit PagerTests()
-//        : home {std::make_unique<FakeDirectory>("PagerTests")}
-//    {
-//        file = home->open_fake_file(DATA_NAME, Mode::CREATE | Mode::READ_WRITE, 0666);
-//        memory = file->shared_memory();
-//    }
-//
-//    auto setup(Size page_size, Size frame_count) -> Result<void>
-//    {
-//        return Pager::open({
-//            std::move(file),
-//            SequenceNumber::base(),
-//            page_size,
-//            frame_count,
-//        }).and_then([this](std::unique_ptr<Pager> p) -> Result<void> {
-//            pager = std::move(p);
-//            return {};
-//        });
-//    }
-//
-//    ~PagerTests() override = default;
-//
-//    Random random {0};
-//    SharedMemory memory;
-//    std::unique_ptr<FakeDirectory> home;
-//    std::unique_ptr<FakeFile> file;
-//    std::unique_ptr<Pager> pager;
-//};
-//
-//TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
-//{
-//    setup(0x100, 16);
-//    ASSERT_EQ(pager->available(), 16);
-//    ASSERT_EQ(pager->page_size(), 0x100);
-//}
-//
-//TEST_F(PagerTests, KeepsTrackOfAvailableCount)
-//{
-//    setup(0x100, 16);
-//    auto frame = pager->pin(PageId::base());
-//    ASSERT_EQ(pager->available(), 15);
-//    pager->discard(std::move(*frame));
-//    ASSERT_EQ(pager->available(), 16);
-//}
-//
-//TEST_F(PagerTests, PagerCreatesExtraPagesOnDemand)
-//{
-//    setup(0x100, 16);
-//    for (Index i {ROOT_ID_VALUE}; i < 32; i++)
-//        ASSERT_TRUE(pager->pin(PageId {i}));
-//}
-//
-//TEST_F(PagerTests, TruncateResizesUnderlyingFile)
-//{
-//    setup(0x100, 16);
-//    ASSERT_TRUE(pager->unpin(*pager->pin(PageId::base())));
-//    ASSERT_NE(memory.memory().size(), 0x100);
-//    ASSERT_TRUE(pager->truncate(0));
-//    ASSERT_EQ(memory.memory().size(), 0);
-//}
-//
+
+#include <numeric>
+#include <gtest/gtest.h>
+#include "fakes.h"
+#include "page/page.h"
+#include "pool/basic_pager.h"
+#include "pool/framer.h"
+#include "utils/layout.h"
+#include "utils/logging.h"
+
+namespace cco {
+
+TEST(UniqueCacheTests, NewCacheIsEmpty)
+{
+    impl::UniqueCache<int, int> cache;
+    ASSERT_TRUE(cache.is_empty());
+    ASSERT_EQ(cache.size(), 0);
+}
+
+TEST(UniqueCacheTests, CanGetEntry)
+{
+    impl::UniqueCache<int, int> cache;
+    cache.put(4, 2);
+    ASSERT_EQ(cache.get(4)->second, 2);
+}
+
+TEST(UniqueCacheTests, DuplicateKeyDeathTest)
+{
+    impl::UniqueCache<int, int> cache;
+    cache.put(4, 2);
+    ASSERT_DEATH(cache.put(4, 2), "Expect");
+}
+
+TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
+{
+    impl::UniqueCache<int, int> cache;
+    ASSERT_EQ(cache.evict(), std::nullopt);
+}
+
+TEST(UniqueCacheTests, CannotGetNonexistentValue)
+{
+    impl::UniqueCache<int, int> cache;
+    ASSERT_EQ(cache.get(0), cache.end());
+}
+
+TEST(UniqueCacheTests, FifoCacheEvictsLastInElement)
+{
+    UniqueFifoCache<int, int> cache;
+    cache.put(0, 0);
+    cache.put(1, 1);
+    cache.put(2, 2);
+    ASSERT_EQ(cache.evict().value(), 0);
+    ASSERT_EQ(cache.evict().value(), 1);
+    ASSERT_EQ(cache.evict().value(), 2);
+}
+
+TEST(UniqueCacheTests, LruCacheEvictsLeastRecentlyUsedElement)
+{
+    UniqueLruCache<int, int> cache;
+    cache.put(0, 0);
+    cache.put(1, 1);
+    cache.put(2, 2);
+    ASSERT_EQ(cache.get(0)->second, 0);
+    ASSERT_EQ(cache.get(1)->second, 1);
+    ASSERT_EQ(cache.evict().value(), 2);
+    ASSERT_EQ(cache.evict().value(), 0);
+    ASSERT_EQ(cache.evict().value(), 1);
+}
+
+TEST(UniqueCacheTests, ExistenceCheckDoesNotCountAsUsage)
+{
+    UniqueLruCache<int, int> cache;
+    cache.put(0, 0);
+    cache.put(1, 1);
+    cache.put(2, 2);
+    ASSERT_TRUE(cache.contains(0));
+    ASSERT_TRUE(cache.contains(1));
+    ASSERT_EQ(cache.evict().value(), 0);
+    ASSERT_EQ(cache.evict().value(), 1);
+    ASSERT_EQ(cache.evict().value(), 2);
+}
+
+class PageCacheTests: public testing::Test {
+public:
+    ~PageCacheTests() override = default;
+
+    Registry cache;
+};
+
+TEST_F(PageCacheTests, HotEntriesAreFoundLast)
+{
+    cache.put(PageId {11UL}, FrameId {11UL});
+    cache.put(PageId {12UL}, FrameId {12UL});
+    cache.put(PageId {13UL}, FrameId {13UL});
+    cache.put(PageId {1UL}, FrameId {1UL});
+    cache.put(PageId {2UL}, FrameId {2UL});
+    cache.put(PageId {3UL}, FrameId {3UL});
+    ASSERT_EQ(cache.size(), 6);
+
+    // Reference these entries again, causing them to be placed in the hot cache.
+    ASSERT_EQ(cache.get(PageId {11UL})->second.frame_id, 11);
+    ASSERT_EQ(cache.get(PageId {12UL})->second.frame_id, 12);
+    ASSERT_EQ(cache.get(PageId {13UL})->second.frame_id, 13);
+
+    Index i {}, j {};
+
+    const auto callback = [&i, &j](auto page_id, auto frame_id, auto) {
+        EXPECT_EQ(page_id, frame_id);
+        EXPECT_EQ(page_id, i + (j >= 3)*10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
+        j++;
+        i = j % 3;
+        return false;
+    };
+
+    auto itr = cache.find_entry(callback);
+    ASSERT_EQ(itr, cache.end());
+}
+
+class PagerTests: public testing::Test {
+public:
+    explicit PagerTests()
+        : home {std::make_unique<HeapStorage>()}
+    {
+        std::unique_ptr<RandomAccessEditor> file;
+        RandomAccessEditor *temp {};
+        EXPECT_TRUE(home->open_random_access_editor(DATA_FILENAME, &temp).is_ok());
+        file.reset(temp);
+
+        pager = Framer::open(std::move(file), 0x100, 8).value();
+    }
+
+    ~PagerTests() override = default;
+
+    Random random {0};
+    std::unique_ptr<HeapStorage> home;
+    std::unique_ptr<Framer> pager;
+};
+
+TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
+{
+    ASSERT_EQ(pager->available(), 8);
+    ASSERT_EQ(pager->page_count(), 0);
+    ASSERT_TRUE(pager->flushed_lsn().is_null());
+}
+
+TEST_F(PagerTests, KeepsTrackOfAvailableFrames)
+{
+    auto frame_id = pager->pin(PageId::base()).value();
+    ASSERT_EQ(pager->available(), 7);
+    pager->discard(frame_id);
+    ASSERT_EQ(pager->available(), 8);
+}
+
+TEST_F(PagerTests, PinFailsWhenNoFramesAreAvailable)
+{
+    for (Index i {1}; i <= 8; i++)
+        ASSERT_TRUE(pager->pin(PageId {i}));
+    const auto r = pager->pin(PageId {9UL});
+    ASSERT_FALSE(r.has_value());
+    ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
+
+    const auto s = pager->unpin(FrameId {1UL});
+    ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
+    ASSERT_TRUE(pager->pin(PageId {9UL}));
+}
+
 //class BufferPoolTestsBase: public testing::Test {
 //public:
 //    static constexpr Size frame_count {32};
@@ -284,5 +358,5 @@
 //    run_sanity_check(*this, 10);
 //    ASSERT_EQ(pool->hit_ratio(), 1.0);
 //}
-//
-//} // cco
+
+} // cco

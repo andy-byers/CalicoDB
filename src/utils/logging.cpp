@@ -90,6 +90,11 @@ auto LogMessage::logic_error(spdlog::level::level_enum level) const -> Status
     return Status::logic_error(log(level));
 }
 
+auto LogMessage::not_found(spdlog::level::level_enum level) const -> Status
+{
+    return Status::not_found(log(level));
+}
+
 auto LogMessage::corruption(spdlog::level::level_enum level) const -> Status
 {
     return Status::corruption(log(level));

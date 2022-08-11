@@ -9,17 +9,20 @@ class Link {
 public:
     explicit Link(Page);
 
-    [[nodiscard]] auto id() const -> PageId
+    [[nodiscard]]
+    auto id() const -> PageId
     {
         return m_page.id();
     }
 
-    [[nodiscard]] auto size() const -> Size
+    [[nodiscard]]
+    auto size() const -> Size
     {
         return m_page.size();
     }
 
-    [[nodiscard]] auto page() const -> const Page &
+    [[nodiscard]]
+    auto page() const -> const Page &
     {
         return m_page;
     }
@@ -35,10 +38,9 @@ public:
     }
 
     [[nodiscard]] auto next_id() const -> PageId;
-    auto set_next_id(PageId) -> void;
-
     [[nodiscard]] auto content_size() const -> Size;
     [[nodiscard]] auto content_view() const -> BytesView;
+    auto set_next_id(PageId) -> void;
     auto content_bytes(Size) -> Bytes;
 
 private:

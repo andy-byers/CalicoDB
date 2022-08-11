@@ -14,7 +14,7 @@
 
 namespace cco {
 
-class Tree;
+class BPlusTree;
 
 namespace tools {
 
@@ -86,7 +86,7 @@ template<std::size_t Length = 20> auto make_key(Index key) -> std::string
 
 class TreeValidator {
 public:
-    explicit TreeValidator(Tree &);
+    explicit TreeValidator(BPlusTree &);
     auto validate() -> void;
 
 private:
@@ -98,12 +98,12 @@ private:
     auto traverse_inorder_helper(Node, const std::function<void(Node&, Index)>&) -> void;
     auto is_reachable(std::string) -> bool;
 
-    Tree &m_tree;
+    BPlusTree &m_tree;
 };
 
 class TreePrinter {
 public:
-    explicit TreePrinter(Tree &, bool = true);
+    explicit TreePrinter(BPlusTree &, bool = true);
     auto print(Size = 0) -> void;
 
 private:
@@ -121,7 +121,7 @@ private:
     auto ensure_level_exists(Index) -> void;
 
     std::vector<std::string> m_levels;
-    Tree &m_tree;
+    BPlusTree &m_tree;
     bool m_has_integer_keys {};
 };
 

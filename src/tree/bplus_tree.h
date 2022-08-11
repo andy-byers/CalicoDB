@@ -9,18 +9,18 @@
 namespace cco {
 
 class Cursor;
-class BufferPool;
+class Pager;
 
-class Tree : public ITree {
+class BPlusTree : public ITree {
 public:
     struct Parameters {
-        BufferPool *buffer_pool {};
+        Pager *buffer_pool {};
         spdlog::sink_ptr log_sink;
         PageId free_start {};
         Size cell_count {};
     };
 
-    ~Tree() override = default;
+    ~BPlusTree() override = default;
 
     [[nodiscard]]
     auto cell_count() const -> Size override
@@ -28,7 +28,7 @@ public:
         return m_internal.cell_count();
     }
 
-    [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<Tree>>;
+    [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<BPlusTree>>;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool> override;
     [[nodiscard]] auto erase(Cursor) -> Result<bool> override;
     [[nodiscard]] auto root(bool) -> Result<Node> override;
@@ -37,8 +37,8 @@ public:
     [[nodiscard]] auto find(BytesView key) -> Cursor override;
     [[nodiscard]] auto find_minimum() -> Cursor override;
     [[nodiscard]] auto find_maximum() -> Cursor override;
-    auto save_header(FileHeaderWriter &) const -> void override;
-    auto load_header(const FileHeaderReader &) -> void override;
+    auto save_state(FileHeader &header) const -> void override;
+    auto load_state(const FileHeader &header) -> void override;
     auto TEST_validate_node(PageId) -> void override;
 
 private:
@@ -47,7 +47,7 @@ private:
         Index index {};
         bool was_found {};
     };
-    explicit Tree(const Parameters &);
+    explicit BPlusTree(const Parameters &);
     auto find_aux(BytesView) -> Result<SearchResult>;
 
     NodePool m_pool;

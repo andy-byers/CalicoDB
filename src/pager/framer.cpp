@@ -1,7 +1,6 @@
-#include "pager.h"
-#include "frame.h"
 #include "calico/storage.h"
-#include "db/header.h"
+#include "framer.h"
+#include "page/page.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
@@ -9,7 +8,51 @@
 
 namespace cco {
 
-auto Pager::open(std::unique_ptr<RandomAccessEditor> file, Size page_size, Size frame_count) -> Result<std::unique_ptr<Pager>>
+Frame::Frame(Byte *buffer, Index id, Size size)
+    : m_bytes {buffer + id*size, size}
+{
+    CCO_EXPECT_TRUE(is_power_of_two(size));
+    CCO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
+    CCO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
+}
+
+auto Frame::lsn() const -> SequenceNumber
+{
+    const auto offset = PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET;
+    return SequenceNumber {get_u64(m_bytes.range(offset))};
+}
+
+auto Frame::ref(Pager &source, bool is_writable) -> Page
+{
+    CCO_EXPECT_FALSE(m_is_writable);
+
+    if (is_writable) {
+        CCO_EXPECT_EQ(m_ref_count, 0);
+        m_is_writable = true;
+    }
+    m_ref_count++;
+    return Page {{m_page_id, data(), &source, is_writable, m_is_dirty}};
+}
+
+auto Frame::unref(Page &page) -> void
+{
+    CCO_EXPECT_EQ(m_page_id, page.id());
+    CCO_EXPECT_GT(m_ref_count, 0);
+
+    if (page.is_writable()) {
+        CCO_EXPECT_EQ(m_ref_count, 1);
+        m_is_writable = false;
+    }
+    if (page.is_dirty()) {
+        m_is_dirty = true;
+        page.m_is_dirty = false;
+    }
+    // Make sure the page doesn't get released twice.
+    page.m_source.reset();
+    m_ref_count--;
+}
+
+auto Framer::open(std::unique_ptr<RandomAccessEditor> file, Size page_size, Size frame_count) -> Result<std::unique_ptr<Framer>>
 {
     CCO_EXPECT_TRUE(is_power_of_two(page_size));
     CCO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
@@ -29,10 +72,10 @@ auto Pager::open(std::unique_ptr<RandomAccessEditor> file, Size page_size, Size 
         message.set_hint("tried to allocate {} bytes of cache memory", cache_size);
         return Err {message.system_error()};
     }
-    return std::unique_ptr<Pager> {new Pager {std::move(file), std::move(buffer), page_size, frame_count}};
+    return std::unique_ptr<Framer> {new Framer {std::move(file), std::move(buffer), page_size, frame_count}};
 }
 
-Pager::Pager(std::unique_ptr<RandomAccessEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
+Framer::Framer(std::unique_ptr<RandomAccessEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
     : m_buffer {std::move(buffer)},
       m_file {std::move(file)},
       m_frame_count {frame_count},
@@ -45,22 +88,22 @@ Pager::Pager(std::unique_ptr<RandomAccessEditor> file, AlignedBuffer buffer, Siz
     while (m_frames.size() < frame_count)
         m_frames.emplace_back(m_buffer.get(), m_available.size(), page_size);
     
-    for (const auto &frame: m_frames)
-        m_available.emplace_back(m_available.size());
+    while (m_available.size() < m_frames.size())
+        m_available.emplace_back(FrameId::from_index(m_available.size()));
 }
 
-auto Pager::ref(FrameId id, IBufferPool *src, bool is_writable) -> Page
+auto Framer::ref(FrameId id, Pager &source, bool is_writable) -> Page
 {
     CCO_EXPECT_LT(id.as_index(), m_frame_count);
-    return m_frames[id.as_index()].ref(src, is_writable);
+    return m_frames[id.as_index()].ref(source, is_writable);
 }
-auto Pager::unref(FrameId id, Page &page) -> void
+auto Framer::unref(FrameId id, Page &page) -> void
 {
     CCO_EXPECT_LT(id.as_index(), m_frame_count);
     m_frames[id.as_index()].unref(page);
 }
 
-auto Pager::pin(PageId id) -> Result<FrameId>
+auto Framer::pin(PageId id) -> Result<FrameId>
 {
     CCO_EXPECT_FALSE(id.is_null());
     if (m_available.empty()) {
@@ -71,12 +114,12 @@ auto Pager::pin(PageId id) -> Result<FrameId>
         return Err {message.not_found()};
     }
 
-    auto &frame = frame_at(m_available.back());
+    auto &frame = frame_at_impl(m_available.back());
 
     if (auto r = read_page_from_file(id, frame.data())) {
         if (!*r) {
             // We just tried to read at EOF. This happens when we allocate a new page or roll the WAL forward.
-            CCO_EXPECT_EQ(id.value, m_page_count);
+            CCO_EXPECT_EQ(id.as_index(), m_page_count);
             mem_clear(frame.data());
             m_page_count++;
         }
@@ -90,17 +133,17 @@ auto Pager::pin(PageId id) -> Result<FrameId>
     return fid;
 }
 
-auto Pager::discard(FrameId id) -> void
+auto Framer::discard(FrameId id) -> void
 {
-    CCO_EXPECT_EQ(frame_at(id).ref_count(), 0);
-    frame_at(id).reset(PageId::null());
+    CCO_EXPECT_EQ(frame_at_impl(id).ref_count(), 0);
+    frame_at_impl(id).reset(PageId::null());
     m_available.emplace_back(id);
 }
 
-auto Pager::unpin(FrameId id) -> Status
+auto Framer::unpin(FrameId id) -> Status
 {
-    auto &frame = frame_at(id);
-    CCO_EXPECT_LT(frame.pid().value, m_page_count);
+    auto &frame = frame_at_impl(id);
+    CCO_EXPECT_LT(frame.pid().as_index(), m_page_count);
     CCO_EXPECT_EQ(frame.ref_count(), 0);
     auto s = Status::ok();
 
@@ -119,17 +162,14 @@ auto Pager::unpin(FrameId id) -> Status
     return s;
 }
 
-auto Pager::sync() -> Status
+auto Framer::sync() -> Status
 {
     return m_file->sync();
 }
 
-auto Pager::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
+auto Framer::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
 {
-    static constexpr auto ERROR_PRIMARY = "could not read page";
-    static constexpr auto ERROR_DETAIL = "page ID is {}";
     CCO_EXPECT_EQ(m_page_size, out.size());
-
     const auto file_size = m_page_count * m_page_size;
     const auto offset = FileLayout::page_offset(id, out.size());
 
@@ -153,20 +193,20 @@ auto Pager::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
     return true;
 }
 
-auto Pager::write_page_to_file(PageId id, BytesView in) const -> Status
+auto Framer::write_page_to_file(PageId id, BytesView in) const -> Status
 {
-    CCO_EXPECT_EQ(page_size(), in.size());
+    CCO_EXPECT_EQ(m_page_size, in.size());
     return m_file->write(in, FileLayout::page_offset(id, in.size()));
 }
 
-auto Pager::load_state(const FileHeader &header) -> void
+auto Framer::load_state(const FileHeader &header) -> void
 {
     m_flushed_lsn.value = header.flushed_lsn;
     m_page_count = header.page_count;
     m_page_size = header.page_size;
 }
 
-auto Pager::save_state(FileHeader &header) -> void
+auto Framer::save_state(FileHeader &header) -> void
 {
     header.flushed_lsn = m_flushed_lsn.value;
     header.page_count = m_page_count;
