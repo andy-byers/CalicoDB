@@ -43,10 +43,9 @@ auto Frame::unref(Page &page) -> void
         CCO_EXPECT_EQ(m_ref_count, 1);
         m_is_writable = false;
     }
-    if (page.is_dirty()) {
+    if (page.is_dirty())
         m_is_dirty = true;
-        page.m_is_dirty = false;
-    }
+
     // Make sure the page doesn't get released twice.
     page.m_source.reset();
     m_ref_count--;
@@ -86,7 +85,7 @@ Framer::Framer(std::unique_ptr<RandomAccessEditor> file, AlignedBuffer buffer, S
     mem_clear({m_buffer.get(), page_size * frame_count});
 
     while (m_frames.size() < frame_count)
-        m_frames.emplace_back(m_buffer.get(), m_available.size(), page_size);
+        m_frames.emplace_back(m_buffer.get(), m_frames.size(), page_size);
     
     while (m_available.size() < m_frames.size())
         m_available.emplace_back(FrameId::from_index(m_available.size()));

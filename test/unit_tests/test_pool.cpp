@@ -1,12 +1,14 @@
 
-#include <numeric>
-#include <gtest/gtest.h>
 #include "fakes.h"
 #include "page/page.h"
-#include "pool/basic_pager.h"
-#include "pool/framer.h"
+#include "pager/basic_pager.h"
+#include "pager/framer.h"
+#include "pager/registry.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
+#include "wal/basic_wal.h"
+#include <gtest/gtest.h>
+#include <numeric>
 
 namespace cco {
 
@@ -80,27 +82,27 @@ TEST(UniqueCacheTests, ExistenceCheckDoesNotCountAsUsage)
     ASSERT_EQ(cache.evict().value(), 2);
 }
 
-class PageCacheTests: public testing::Test {
+class PageRegistryTests : public testing::Test {
 public:
-    ~PageCacheTests() override = default;
+    ~PageRegistryTests() override = default;
 
-    Registry cache;
+    PageRegistry registry;
 };
 
-TEST_F(PageCacheTests, HotEntriesAreFoundLast)
+TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 {
-    cache.put(PageId {11UL}, FrameId {11UL});
-    cache.put(PageId {12UL}, FrameId {12UL});
-    cache.put(PageId {13UL}, FrameId {13UL});
-    cache.put(PageId {1UL}, FrameId {1UL});
-    cache.put(PageId {2UL}, FrameId {2UL});
-    cache.put(PageId {3UL}, FrameId {3UL});
-    ASSERT_EQ(cache.size(), 6);
+    registry.put(PageId {11UL}, FrameId {11UL});
+    registry.put(PageId {12UL}, FrameId {12UL});
+    registry.put(PageId {13UL}, FrameId {13UL});
+    registry.put(PageId {1UL}, FrameId {1UL});
+    registry.put(PageId {2UL}, FrameId {2UL});
+    registry.put(PageId {3UL}, FrameId {3UL});
+    ASSERT_EQ(registry.size(), 6);
 
     // Reference these entries again, causing them to be placed in the hot cache.
-    ASSERT_EQ(cache.get(PageId {11UL})->second.frame_id, 11);
-    ASSERT_EQ(cache.get(PageId {12UL})->second.frame_id, 12);
-    ASSERT_EQ(cache.get(PageId {13UL})->second.frame_id, 13);
+    ASSERT_EQ(registry.get(PageId {11UL})->second.frame_id, 11);
+    ASSERT_EQ(registry.get(PageId {12UL})->second.frame_id, 12);
+    ASSERT_EQ(registry.get(PageId {13UL})->second.frame_id, 13);
 
     Index i {}, j {};
 
@@ -112,13 +114,13 @@ TEST_F(PageCacheTests, HotEntriesAreFoundLast)
         return false;
     };
 
-    auto itr = cache.find_entry(callback);
-    ASSERT_EQ(itr, cache.end());
+    auto itr = registry.find_entry(callback);
+    ASSERT_EQ(itr, registry.end());
 }
 
-class PagerTests: public testing::Test {
+class FramerTests : public testing::Test {
 public:
-    explicit PagerTests()
+    explicit FramerTests()
         : home {std::make_unique<HeapStorage>()}
     {
         std::unique_ptr<RandomAccessEditor> file;
@@ -126,237 +128,244 @@ public:
         EXPECT_TRUE(home->open_random_access_editor(DATA_FILENAME, &temp).is_ok());
         file.reset(temp);
 
-        pager = Framer::open(std::move(file), 0x100, 8).value();
+        framer = Framer::open(std::move(file), 0x100, 8).value();
     }
 
-    ~PagerTests() override = default;
+    ~FramerTests() override = default;
 
     Random random {0};
     std::unique_ptr<HeapStorage> home;
-    std::unique_ptr<Framer> pager;
+    std::unique_ptr<Framer> framer;
+};
+
+TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
+{
+    ASSERT_EQ(framer->available(), 8);
+    ASSERT_EQ(framer->page_count(), 0);
+    ASSERT_TRUE(framer->flushed_lsn().is_null());
+}
+
+TEST_F(FramerTests, KeepsTrackOfAvailableFrames)
+{
+    auto frame_id = framer->pin(PageId::base()).value();
+    ASSERT_EQ(framer->available(), 7);
+    framer->discard(frame_id);
+    ASSERT_EQ(framer->available(), 8);
+}
+
+TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
+{
+    for (Index i {1}; i <= 8; i++)
+        ASSERT_TRUE(framer->pin(PageId {i}));
+    const auto r = framer->pin(PageId {9UL});
+    ASSERT_FALSE(r.has_value());
+    ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
+
+    const auto s = framer->unpin(FrameId {1UL});
+    ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
+    ASSERT_TRUE(framer->pin(PageId {9UL}));
+}
+
+auto write_to_page(Page &page, const std::string &message) -> void
+{
+    const auto offset = PageLayout::content_offset(page.id());
+    CCO_EXPECT_LE(offset + message.size(), page.size());
+    page.write(stob(message), offset);
+}
+
+[[nodiscard]]
+auto read_from_page(const Page &page, Size size) -> std::string
+{
+    const auto offset = PageLayout::content_offset(page.id());
+    CCO_EXPECT_LE(offset + size, page.size());
+    auto message = std::string(size, '\x00');
+    page.read(stob(message), offset);
+    return message;
+}
+
+class PagerTests : public testing::Test {
+public:
+    static constexpr Size frame_count {32};
+    static constexpr Size page_size {0x100};
+    std::string test_message {"Hello, world!"};
+
+    explicit PagerTests()
+          : wal {std::make_unique<DisabledWriteAheadLog>()},
+            store {std::make_unique<MockStorage>()}
+    {
+        store->delegate_to_real();
+        EXPECT_CALL(*store, open_random_access_editor).Times(1);
+
+        pager = *BasicPager::open({
+            *store,
+            *wal,
+            create_sink(),
+            frame_count,
+            page_size,
+        });
+        mock = store->get_mock_random_access_editor(DATA_FILENAME);
+    }
+
+    ~PagerTests() override = default;
+    
+    [[nodiscard]]
+    auto allocate_write(const std::string &message) const
+    {
+        auto r = pager->allocate();
+        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
+        write_to_page(*r, message);
+        return std::move(*r);
+    }
+    
+    [[nodiscard]]
+    auto allocate_write_release(const std::string &message) const
+    {
+        auto page = allocate_write(message);
+        const auto id = page.id();
+        const auto s = pager->release(std::move(page));
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        return id;
+    }
+
+    [[nodiscard]]
+    auto acquire_write(PageId id, const std::string &message) const
+    {
+        auto r = pager->acquire(id, false);
+        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
+        write_to_page(*r, message);
+        return std::move(*r);
+    }
+
+    auto acquire_write_release(PageId id, const std::string &message) const
+    {
+        auto page = acquire_write(id, message);
+        const auto s = pager->release(std::move(page));
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+    }
+
+    [[nodiscard]]
+    auto acquire_read_release(PageId id, Size size) const
+    {
+        auto r = pager->acquire(id, false);
+        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
+        auto message = read_from_page(*r, size);
+        EXPECT_TRUE(pager->release(std::move(*r)).is_ok());
+        return message;
+    }
+
+    Random random {0};
+    MockRandomAccessEditor *mock;
+    std::unique_ptr<WriteAheadLog> wal;
+    std::unique_ptr<MockStorage> store;
+    std::unique_ptr<Pager> pager;
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
-    ASSERT_EQ(pager->available(), 8);
     ASSERT_EQ(pager->page_count(), 0);
-    ASSERT_TRUE(pager->flushed_lsn().is_null());
+    ASSERT_EQ(pager->flushed_lsn(), SequenceNumber::null());
+    ASSERT_TRUE(pager->status().is_ok());
 }
 
-TEST_F(PagerTests, KeepsTrackOfAvailableFrames)
+TEST_F(PagerTests, AllocationInceasesPageCount)
 {
-    auto frame_id = pager->pin(PageId::base()).value();
-    ASSERT_EQ(pager->available(), 7);
-    pager->discard(frame_id);
-    ASSERT_EQ(pager->available(), 8);
+    [[maybe_unused]] const auto a = allocate_write_release("a");
+    ASSERT_EQ(pager->page_count(), 1);
+    [[maybe_unused]] const auto b = allocate_write_release("b");
+    ASSERT_EQ(pager->page_count(), 2);
+    [[maybe_unused]] const auto c = allocate_write_release("c");
+    ASSERT_EQ(pager->page_count(), 3);
 }
 
-TEST_F(PagerTests, PinFailsWhenNoFramesAreAvailable)
+TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 {
-    for (Index i {1}; i <= 8; i++)
-        ASSERT_TRUE(pager->pin(PageId {i}));
-    const auto r = pager->pin(PageId {9UL});
-    ASSERT_FALSE(r.has_value());
-    ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
-
-    const auto s = pager->unpin(FrameId {1UL});
-    ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
-    ASSERT_TRUE(pager->pin(PageId {9UL}));
+    auto id = allocate_write_release(test_message);
+    ASSERT_EQ(id, PageId::base());
 }
 
-//class BufferPoolTestsBase: public testing::Test {
-//public:
-//    static constexpr Size frame_count {32};
-//    static constexpr Size page_size {0x100};
-//
-//    explicit BufferPoolTestsBase(std::unique_ptr<MockDirectory> memory_home):
-//          home {std::move(memory_home)}
-//    {
-//        EXPECT_CALL(*home, open_file).Times(1);
-//
-//        pool = *BufferPool::open({
-//            *home,
-//            create_sink(),
-//            SequenceNumber::null(),
-//            frame_count,
-//            0,
-//            page_size,
-//            false,
-//        });
-//
-//        mock = home->get_mock_data_file();
-//    }
-//
-//    ~BufferPoolTestsBase() override = default;
-//
-//    Random random {0};
-//    MockFile *mock;
-//    std::unique_ptr<MockDirectory> home;
-//    std::unique_ptr<BufferPool> pool;
-//};
-//
-//class BufferPoolTests: public BufferPoolTestsBase {
-//public:
-//    BufferPoolTests():
-//          BufferPoolTestsBase {std::make_unique<MockDirectory>("BufferPoolTests")} {}
-//
-//    ~BufferPoolTests() override = default;
-//};
-//
-//TEST_F(BufferPoolTests, FreshBufferPoolIsEmpty)
-//{
-//    ASSERT_EQ(pool->page_count(), 0);
-//}
-//
-//TEST_F(BufferPoolTests, FreshPoolIsSetUpCorrectly)
-//{
-//    ASSERT_EQ(pool->page_size(), page_size);
-//    ASSERT_EQ(pool->hit_ratio(), 0.0);
-//}
-//
-//TEST_F(BufferPoolTests, AllocationInceasesPageCount)
-//{
-//    ASSERT_TRUE(pool->release(*pool->allocate()));
-//    ASSERT_EQ(pool->page_count(), 1);
-//    ASSERT_TRUE(pool->release(*pool->allocate()));
-//    ASSERT_EQ(pool->page_count(), 2);
-//    ASSERT_TRUE(pool->release(*pool->allocate()));
-//    ASSERT_EQ(pool->page_count(), 3);
-//}
-//
-//TEST_F(BufferPoolTests, AllocateReturnsCorrectPage)
-//{
-//    auto page = pool->allocate();
-//    ASSERT_EQ(page->id(), PageId::base());
-//}
-//
-//TEST_F(BufferPoolTests, AcquireReturnsCorrectPage)
-//{
-//    ASSERT_TRUE(pool->release(*pool->allocate()));
-//    auto page = pool->acquire(PageId::base(), true);
-//    ASSERT_EQ(page->id(), PageId::base());
-//}
-//
-//TEST_F(BufferPoolTests, AcquireMultipleWritablePagesDeathTest)
-//{
-//    auto page = pool->allocate();
-//    ASSERT_DEATH(auto unused = pool->acquire(PageId::base(), true), "Expect");
-//}
-//
-//TEST_F(BufferPoolTests, AcquireReadableAndWritablePagesDeathTest)
-//{
-//    auto page = pool->allocate();
-//    ASSERT_DEATH(auto unused = pool->acquire(PageId::base(), false), "Expect");
-//}
-//
-//auto write_to_page(Page &page, const std::string &message) -> void
-//{
-//    const auto offset = PageLayout::content_offset(page.id());
-//    CCO_EXPECT_LE(offset + message.size(), page.size());
-//    page.write(stob(message), offset);
-//}
-//
-//auto read_from_page(const Page &page, Size size) -> std::string
-//{
-//    const auto offset = PageLayout::content_offset(page.id());
-//    CCO_EXPECT_LE(offset + size, page.size());
-//    auto message = std::string(size, '\x00');
-//    page.read(stob(message), offset);
-//    return message;
-//}
-//
-//TEST_F(BufferPoolTests, PageDataPersistsBetweenAcquires)
-//{
-//    auto in_page = pool->allocate();
-//    write_to_page(*in_page, "Hello, world!");
-//    ASSERT_TRUE(pool->release(std::move(*in_page)));
-//    auto out_page = pool->acquire(PageId::base(), false);
-//    ASSERT_EQ(read_from_page(*out_page, 13), "Hello, world!");
-//    ASSERT_TRUE(pool->release(std::move(*out_page)));
-//}
-//
-//TEST_F(BufferPoolTests, PageDataPersistsAfterEviction)
-//{
-//    const auto n = frame_count * 2;
-//    for (Index i {}; i < n; ++i) {
-//        auto in_page = pool->allocate();
-//        write_to_page(*in_page, "Hello, world!");
-//        ASSERT_TRUE(pool->release(std::move(*in_page)));
-//    }
-//    for (Index i {}; i < n; ++i) {
-//        auto out_page = pool->acquire(PageId {i + 1}, false);
-//        ASSERT_EQ(read_from_page(*out_page, 13), "Hello, world!");
-//        ASSERT_TRUE(pool->release(std::move(*out_page)));
-//    }
-//}
-//
-//template<class Test> auto run_sanity_check(Test &test, Size num_iterations) -> Size
-//{
-//    Size num_updates {};
-//    for (Index i {}; i < num_iterations; ++i) {
-//        if (test.random.next_int(1) == 0) {
-//            auto page = test.pool->allocate();
-//            write_to_page(*page, std::to_string(page->id().value));
-//            num_updates++;
-//            EXPECT_TRUE(test.pool->release(std::move(*page)));
-//        } else if (test.pool->page_count()) {
-//            const auto id = test.random.next_int(Size {1}, test.pool->page_count());
-//            const auto result = std::to_string(id);
-//            auto page = test.pool->acquire(PageId {id}, false);
-//            EXPECT_EQ(read_from_page(*page, result.size()), result);
-//            EXPECT_TRUE(test.pool->release(std::move(*page)));
-//        }
-//    }
-//    return num_updates;
-//}
-//
-//TEST_F(BufferPoolTests, SanityCheck)
-//{
-//    run_sanity_check(*this, 1'000);
-//}
-//
-//TEST_F(BufferPoolTests, KeepsTrackOfHitRatio)
-//{
-//    run_sanity_check(*this, 10);
-//    ASSERT_NE(pool->hit_ratio(), 0.0);
-//}
-//
-//class MemoryPoolTests: public testing::Test {
-//public:
-//    static constexpr Size page_size = 0x200;
-//
-//    MemoryPoolTests():
-//          pool {std::make_unique<MemoryPool>(page_size, true)} {}
-//
-//    Random random {0};
-//    std::unique_ptr<MemoryPool> pool;
-//};
-//
-//TEST_F(MemoryPoolTests, FreshMemoryPoolIsEmpty)
-//{
-//    ASSERT_EQ(pool->page_count(), 0);
-//}
-//
-//TEST_F(MemoryPoolTests, FreshMemoryPoolIsSetUpCorrectly)
-//{
-//    ASSERT_EQ(pool->page_size(), page_size);
-//    ASSERT_EQ(pool->hit_ratio(), 1.0);
-//}
-//
-//TEST_F(MemoryPoolTests, StubMethodsWork)
-//{
-//    ASSERT_TRUE(pool->flush());
-//}
-//
-//TEST_F(MemoryPoolTests, SanityCheck)
-//{
-//    run_sanity_check(*this, 1'000);
-//}
-//
-//TEST_F(MemoryPoolTests, HitRatioIsAlwaysOne)
-//{
-//    run_sanity_check(*this, 10);
-//    ASSERT_EQ(pool->hit_ratio(), 1.0);
-//}
+TEST_F(PagerTests, AcquireReturnsCorrectPage)
+{
+    const auto id = allocate_write_release(test_message);
+    auto r = pager->acquire(id, false);
+    ASSERT_EQ(id, r->id());
+    ASSERT_EQ(id, PageId::base());
+    EXPECT_TRUE(pager->release(std::move(*r)).is_ok());
+}
+
+TEST_F(PagerTests, MultipleWritersDeathTest)
+{
+    const auto page = allocate_write(test_message);
+    ASSERT_DEATH(const auto same_page = pager->acquire(page.id(), true), "Expect");
+}
+
+TEST_F(PagerTests, ReaderAndWriterDeathTest)
+{
+    const auto page = allocate_write(test_message);
+    ASSERT_DEATH(const auto same_page = pager->acquire(page.id(), false), "Expect");
+}
+
+TEST_F(PagerTests, MultipleReaders)
+{
+    const auto id = allocate_write_release(test_message);
+    auto page_1a = pager->acquire(id, false).value();
+    auto page_1b = pager->acquire(id, false).value();
+    ASSERT_TRUE(pager->release(std::move(page_1a)).is_ok());
+    ASSERT_TRUE(pager->release(std::move(page_1b)).is_ok());
+}
+
+TEST_F(PagerTests, PagesAreAutomaticallyReleased)
+{
+    // This line allocates a page, writes to it, then lets it go out of scope. The page should release itself in its destructor using the pointer it
+    // stores back to the pager object. If it doesn't, we would not be able to acquire the same page as writable again (see MultipleWritersDeathTest).
+    const auto id = allocate_write(test_message).id();
+    ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
+}
+
+TEST_F(PagerTests, PageDataPersistsInFrame)
+{
+    const auto id = allocate_write_release(test_message);
+    ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
+}
+
+TEST_F(PagerTests, PageDataPersistsInFile)
+{
+    using testing::_;
+    using testing::AtLeast;
+    EXPECT_CALL(*mock, write).Times(AtLeast(frame_count));
+    EXPECT_CALL(*mock, read(_, 0)).Times(1); // Root page is read once.
+    EXPECT_CALL(*mock, write(_, 0)).Times(1); // Root page is written once.
+    const auto id = allocate_write_release(test_message);
+
+    // Cause the root page to be evicted and written back, along with some other pages.
+    while (pager->page_count() < frame_count * 2)
+        [[maybe_unused]] auto unused = allocate_write_release("...");
+
+    // Read the root page back from the file.
+    ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
+}
+
+TEST_F(PagerTests, SanityCheck)
+{
+    std::vector<Index> id_ints(500);
+    std::iota(begin(id_ints), end(id_ints), 1);
+
+    std::vector<std::string> id_strs;
+    std::transform(cbegin(id_ints), cend(id_ints), back_inserter(id_strs), [](auto id) {
+        return fmt::format("{:06}", id);
+    });
+
+    using testing::AtLeast;
+    EXPECT_CALL(*mock, read).Times(AtLeast(frame_count));
+    EXPECT_CALL(*mock, write).Times(AtLeast(frame_count));
+
+    for (const auto &id: id_strs)
+        [[maybe_unused]] const auto unused = allocate_write_release(id);
+
+    auto id_int = cbegin(id_ints);
+    for (const auto &id_str: id_strs) {
+        ASSERT_NE(id_int, cend(id_ints));
+        ASSERT_EQ(id_str, acquire_read_release(PageId {*id_int++}, id_str.size()));
+    }
+}
 
 } // cco

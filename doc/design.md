@@ -25,6 +25,11 @@ If there are WAL records after the corrupted record, we cannot roll back
 + **page pointer**: Synonym for **page ID**.
 + **value**: A sequence of bytes associated with a unique **key** to form a database record.
 
+Put this thing somewhere, and fix up this document!
+<p align="center">
+  <img src="./architecture.png" width="65%" alt="Diagram of Calico DB's architecture"/>
+</p>
+
 ## Error Handling
 Calico DB enforces certain rules to make sure that the database stays consistent through crashes and other exceptional events.
 The current policy is to lock the database if an error is encountered while working with a writable page after the database has been modified during a transaction.

@@ -1,9 +1,9 @@
 #ifndef CCO_TREE_INTERNAL_H
 #define CCO_TREE_INTERNAL_H
 
-#include "interface.h"
 #include "node_pool.h"
 #include "page/node.h"
+#include "tree.h"
 #include "utils/scratch.h"
 #include <spdlog/spdlog.h>
 
@@ -27,7 +27,8 @@ public:
         Size cell_count {};
     };
 
-    explicit Internal(Parameters);
+    explicit Internal(NodePool &);
+
     ~Internal() = default;
     [[nodiscard]] auto collect_value(const Node &, Index) const -> Result<std::string>;
     [[nodiscard]] auto find_external(BytesView) -> Result<SearchResult>;
@@ -75,7 +76,7 @@ private:
 
     Size m_maximum_key_size {};
     RollingScratchManager m_scratch;
-    NodePool *m_pool;
+    NodePool *m_pool {};
     Size m_cell_count {};
 };
 

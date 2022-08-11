@@ -14,7 +14,7 @@ This subverts the overhead of keeping a "before" copy of the page for recovery (
 It also allows us to obtain multiple read-only references to a single database page for use in concurrent queries.
 
 ## Framer
-The pager object is in charge of "pinning" database pages to buffer pool frames.
+The framer object is in charge of "pinning" database pages to buffer pool frames.
 When a page is pinned, it is read from the database file into an available frame.
 Once the page is no longer needed, it can be "unpinned".
 This involves writing it back to the database file if it is dirty.

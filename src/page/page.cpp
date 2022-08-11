@@ -1,5 +1,5 @@
 #include "page.h"
-#include "pool/interface.h"
+#include "pager/pager.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
 

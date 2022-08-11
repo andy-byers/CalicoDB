@@ -3,7 +3,7 @@
 
 #include "calico/calico.h"
 #include "calico/storage.h"
-#include "pool/interface.h"
+#include "pager/pager.h"
 #include "random.h"
 #include "storage/heap.h"
 #include <filesystem>
@@ -116,6 +116,7 @@ public:
     MOCK_METHOD(Status, open_random_access_editor, (const std::string &, RandomAccessEditor**), (override));
     MOCK_METHOD(Status, open_append_writer, (const std::string &, AppendWriter**), (override));
     MOCK_METHOD(Status, rename_blob, (const std::string &, const std::string &), (override));
+    MOCK_METHOD(Status, resize_blob, (const std::string &, Size), (override));
     MOCK_METHOD(Status, blob_exists, (const std::string &), (const, override));
     MOCK_METHOD(Status, blob_size, (const std::string &, Size &), (const, override));
     MOCK_METHOD(Status, remove_blob, (const std::string &), (override));
@@ -161,6 +162,9 @@ public:
         ON_CALL(*this, blob_size).WillByDefault([this](const std::string &name, Size &out) {
             return m_real.blob_size(name, out);
         });
+        ON_CALL(*this, resize_blob).WillByDefault([this](const std::string &name, Size size) {
+            return m_real.resize_blob(name, size);
+        });
         ON_CALL(*this, remove_blob).WillByDefault([this](const std::string &name) {
             auto s = m_real.remove_blob(name);
             if (s.is_ok()) {
@@ -197,7 +201,7 @@ private:
     template<class Base, class Mock>
     auto register_mock(const std::string &name, Base **out) -> void
     {
-        const auto descriptor = get_blob_descriptor<RandomAccessReader>(name);
+        const auto descriptor = get_blob_descriptor<Base>(name);
         CCO_EXPECT_EQ(m_mocks.find(descriptor), cend(m_mocks));
 
         auto s = Status::ok();
@@ -217,6 +221,7 @@ private:
 
         // The mock blob reader takes ownership of the real object.
         auto *mock = new Mock {base};
+        mock->delegate_to_real();
         m_mocks.emplace(descriptor, mock);
         *out = mock;
     }

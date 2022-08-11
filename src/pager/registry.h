@@ -5,7 +5,6 @@
 #ifndef CCO_POOL_PAGE_CACHE_H
 #define CCO_POOL_PAGE_CACHE_H
 
-#include "frame.h"
 #include "framer.h"
 #include "utils/cache.h"
 #include "utils/identifier.h"
@@ -52,9 +51,11 @@ private:
 
 class PageRegistry final {
 public:
+    using DirtyToken = std::optional<PageList::Iterator>;
+
     struct Entry {
         FrameId frame_id;
-        PageList::Iterator dirty_itr {};
+        DirtyToken dirty_token {};
     };
 
     using WarmCache = UniqueFifoCache<PageId, Entry, PageId::Hash>;

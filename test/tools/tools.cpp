@@ -1,52 +1,52 @@
-//
-//#include "tools.h"
-//#include "fakes.h"
-//#include "page/node.h"
-//#include "tree/interface.h"
-//#include "tree/node_pool.h"
-//#include "utils/logging.h"
-//#include <unordered_set>
-//
-//namespace cco {
-//
-//unsigned RecordGenerator::default_seed = 0;
-//
-//RecordGenerator::RecordGenerator(Parameters param)
-//    : m_param {param} {}
-//
-//auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<Record>
-//{
-//    const auto [mks, mvs, spread, is_sequential, is_unique] = m_param;
-//    std::vector<Record> records(num_records);
-//
-//    const auto min_ks = mks < spread ? 1 : mks - spread;
-//    const auto min_vs = mvs < spread ? 0 : mvs - spread;
-//    const auto max_ks = mks + spread;
-//    const auto max_vs = mvs + spread;
-//    auto itr = records.begin();
-//    std::unordered_set<std::string> set;
-//    Size num_collisions {};
-//
-//    while (itr != records.end()) {
-//        auto key = random_string(random, min_ks, max_ks);
-//        if (is_sequential) {
-//            if (set.find(key) != end(set)) {
-//                CCO_EXPECT_LT(num_collisions, num_records);
-//                num_collisions++;
-//                continue;
-//            }
-//            set.emplace(key);
-//        }
-//        itr->key = std::move(key);
-//        itr->value = random_string(random, min_vs, max_vs);
-//        itr++;
-//    }
-//    if (is_sequential)
-//        std::sort(begin(records), end(records));
-//    return records;
-//}
-//
-//
+
+#include "tools.h"
+#include "fakes.h"
+#include "page/node.h"
+#include "tree/tree.h"
+#include "tree/node_pool.h"
+#include "utils/logging.h"
+#include <unordered_set>
+
+namespace cco {
+
+unsigned RecordGenerator::default_seed = 0;
+
+RecordGenerator::RecordGenerator(Parameters param)
+    : m_param {param} {}
+
+auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<Record>
+{
+    const auto [mks, mvs, spread, is_sequential, is_unique] = m_param;
+    std::vector<Record> records(num_records);
+
+    const auto min_ks = mks < spread ? 1 : mks - spread;
+    const auto min_vs = mvs < spread ? 0 : mvs - spread;
+    const auto max_ks = mks + spread;
+    const auto max_vs = mvs + spread;
+    auto itr = records.begin();
+    std::unordered_set<std::string> set;
+    Size num_collisions {};
+
+    while (itr != records.end()) {
+        auto key = random_string(random, min_ks, max_ks);
+        if (is_sequential) {
+            if (set.find(key) != end(set)) {
+                CCO_EXPECT_LT(num_collisions, num_records);
+                num_collisions++;
+                continue;
+            }
+            set.emplace(key);
+        }
+        itr->key = std::move(key);
+        itr->value = random_string(random, min_vs, max_vs);
+        itr++;
+    }
+    if (is_sequential)
+        std::sort(begin(records), end(records));
+    return records;
+}
+
+
 //TreePrinter::TreePrinter(Tree &tree, bool has_integer_keys)
 //    : m_tree{tree},
 //      m_has_integer_keys {has_integer_keys} {}
@@ -157,5 +157,5 @@
 //        m_levels.emplace_back();
 //    CCO_EXPECT_GT(m_levels.size(), level);
 //}
-//
-//} // cco
+
+} // cco

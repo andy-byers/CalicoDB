@@ -92,7 +92,7 @@
 <rect x="219.35" y="406.4" class="st1" width="106.52" height="28.31"/>
 <text transform="matrix(1 0 0 1 219.3508 426.2358)" class="st2 st12">storage</text>
 <rect x="105.74" y="278.82" class="st1" width="72.94" height="28.31"/>
-<text transform="matrix(1 0 0 1 105.7434 298.6548)" class="st2 st12">pager</text>
+<text transform="matrix(1 0 0 1 105.7434 298.6548)" class="st2 st12">framer</text>
 <path class="st5" d="M246.3,200.98H38.47c-1.31,0-2.37-1.06-2.37-2.37v-85.35c0-1.31,1.06-2.37,2.37-2.37H246.3
 	c1.31,0,2.37,1.06,2.37,2.37v85.35C248.67,199.92,247.61,200.98,246.3,200.98z"/>
 <rect x="112.4" y="141.79" class="st1" width="59.98" height="28.31"/>

@@ -2,7 +2,7 @@
 #define CCO_TREE_FREE_LIST_H
 
 #include "calico/status.h"
-#include "interface.h"
+#include "tree.h"
 #include "utils/identifier.h"
 #include <optional>
 
@@ -20,14 +20,6 @@ namespace page {
  */
 class FreeList {
 public:
-    /**
-     * Parameters for constructing a free list.
-     */
-    struct Parameters {
-        Pager *buffer_pool {}; ///< Reference to the underlying buffer pool.
-        PageId free_head {};           ///< Page ID of the page at the top of the free list stack.
-    };
-
     ~FreeList() = default;
 
     /**
@@ -35,7 +27,8 @@ public:
      *
      * @param param Initial state and dependencies.
      */
-    explicit FreeList(const Parameters &param);
+    explicit FreeList(Pager &pager)
+        : m_pager {&pager} {}
 
     /**
      * Push a page onto the free list stack.
@@ -76,7 +69,7 @@ public:
     }
 
 private:
-    Pager *m_pool;  ///< Reference to the underlying buffer pool.
+    Pager *m_pager;  ///< Reference to the underlying buffer pool.
     PageId m_head;     ///< Page ID of the page at the head of the free list.
 };
 

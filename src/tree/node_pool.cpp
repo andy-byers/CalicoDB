@@ -1,18 +1,17 @@
 #include "node_pool.h"
-#include "page/cell.h"
 #include "page/link.h"
 #include "page/node.h"
 #include "page/page.h"
-#include "pool/interface.h"
+#include "pager/pager.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 
 namespace cco {
 
-NodePool::NodePool(Parameters param)
-    : m_free_list {{param.pager, param.free_start}},
-      m_scratch(param.page_size, '\x00'),
-      m_pager {param.pager}
+NodePool::NodePool(Pager &pager, Size page_size)
+    : m_free_list {pager},
+      m_scratch(page_size, '\x00'),
+      m_pager {&pager}
 {}
 
 auto NodePool::page_size() const -> Size

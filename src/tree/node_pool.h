@@ -3,7 +3,7 @@
 #define CCO_TREE_NODE_POOL_H
 
 #include "free_list.h"
-#include "interface.h"
+#include "tree.h"
 #include "utils/scratch.h"
 #include <spdlog/spdlog.h>
 
@@ -13,13 +13,8 @@ class Pager;
 
 class NodePool final {
 public:
-    struct Parameters {
-        Pager *pager {};
-        PageId free_start;
-        Size page_size {};
-    };
 
-    explicit NodePool(Parameters);
+    NodePool(Pager&, Size);
     ~NodePool() = default;
 
     [[nodiscard]] auto page_size() const -> Size;

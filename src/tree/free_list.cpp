@@ -2,14 +2,9 @@
 #include "calico/options.h"
 #include "page/link.h"
 #include "page/page.h"
-#include "pool/interface.h"
+#include "pager/pager.h"
 
 namespace cco {
-
-FreeList::FreeList(const Parameters &param)
-    : m_pool {param.buffer_pool},
-      m_head {param.free_head}
-{}
 
 auto FreeList::save_state(FileHeader &header) const -> void
 {
@@ -28,7 +23,7 @@ auto FreeList::push(Page page) -> Result<void>
     Link link {std::move(page)};
     link.set_next_id(m_head);
     m_head = link.page().id();
-    const auto s = m_pool->release(link.take());
+    const auto s = m_pager->release(link.take());
     if (!s.is_ok()) return Err {s}; // TODO
     return {};
 }
@@ -36,7 +31,7 @@ auto FreeList::push(Page page) -> Result<void>
 auto FreeList::pop() -> Result<Page>
 {
     if (!m_head.is_null()) {
-        return m_pool->acquire(m_head, true)
+        return m_pager->acquire(m_head, true)
             .and_then([&](Page page) -> Result<Page> {
                 Link link {std::move(page)};
                 m_head = link.next_id();

@@ -167,7 +167,7 @@ private:
     Cursor() = default;
 
     mutable Status m_status {Status::not_found("not found")};
-    NodePool *m_pager {}; ///< Reference to an object that provides nodes from the buffer pool.
+    NodePool *m_pool {}; ///< Reference to an object that provides nodes from the buffer pool.
     Internal *m_internal {}; ///< Reference to the tree internals.
     Position m_position; ///< Position of the cursor in the page.
 };

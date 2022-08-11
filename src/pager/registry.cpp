@@ -7,7 +7,7 @@ auto PageRegistry::put(PageId pid, FrameId fid) -> void
 {
     CCO_EXPECT_FALSE(m_warm.contains(pid));
     CCO_EXPECT_FALSE(m_hot.contains(pid));
-    m_warm.put(pid, CacheEntry {fid});
+    m_warm.put(pid, Entry {fid});
 }
 
 auto PageRegistry::get(PageId id) -> Iterator

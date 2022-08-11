@@ -2,28 +2,35 @@
 #include "calico/cursor.h"
 #include "cursor_internal.h"
 #include "page/node.h"
-#include "pool/interface.h"
+#include "pager/pager.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 
 namespace cco {
 
-BPlusTree::BPlusTree(const Parameters &param)
-    : m_pool {{param.buffer_pool, param.free_start}},
-      m_internal {{&m_pool, param.cell_count}},
-      m_logger {create_logger(param.log_sink, "tree")}
+BPlusTree::BPlusTree(Pager &pager, spdlog::sink_ptr log_sink, Size page_size)
+    : m_pool {pager, page_size},
+      m_internal {m_pool},
+      m_logger {create_logger(std::move(log_sink), "tree")}
 {}
 
-auto BPlusTree::open(const Parameters &param) -> Result<std::unique_ptr<BPlusTree>>
+auto BPlusTree::open(Pager &pager, spdlog::sink_ptr log_sink, Size page_size) -> Result<std::unique_ptr<BPlusTree>>
 {
-    auto tree = std::unique_ptr<BPlusTree>(new BPlusTree {param});
+    auto tree = std::unique_ptr<BPlusTree>(new BPlusTree {pager, std::move(log_sink), page_size});
     tree->m_logger->trace("opening");
-    return tree;
-}
 
-auto BPlusTree::allocate_root() -> Result<Node>
-{
-    return m_pool.allocate(PageType::EXTERNAL_NODE);
+    // Allocate the root page.
+    if (pager.page_count() == 0) {
+        auto r1 = tree->m_pool.allocate(PageType::EXTERNAL_NODE);
+        auto r2 = tree->m_pool.release(std::move(*r1));
+        auto s = !r1 ? r1.error() : (!r2 ? r2.error() : Status::ok());
+        if (!s.is_ok()) {
+            tree->m_logger->error("cannot allocate root page");
+            tree->m_logger->error("(reason) {}", s.what());
+            return Err {s};
+        }
+    }
+    return tree;
 }
 
 auto run_key_check(BytesView key, Size max_key_size, spdlog::logger &logger, const std::string &primary) -> Status

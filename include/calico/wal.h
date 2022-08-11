@@ -43,8 +43,6 @@ using UndoCallback = std::function<Status(UndoDescriptor)>;
  */
 class WriteAheadLog {
 public:
-
-
     virtual ~WriteAheadLog() = default;
 
     /**

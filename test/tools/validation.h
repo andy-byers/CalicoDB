@@ -5,13 +5,13 @@
 
 namespace cco {
 
-class BPlusTree;
+class Tree;
 
-auto validate_siblings(BPlusTree &) -> void;
-auto validate_ordering(BPlusTree &) -> void;
-auto validate_links(BPlusTree &) -> void;
+auto validate_siblings(Tree &) -> void;
+auto validate_ordering(Tree &) -> void;
+auto validate_links(Tree &) -> void;
 
-auto print_keys(BPlusTree &) -> void;
+auto print_keys(Tree &) -> void;
 
 } // cco
 
