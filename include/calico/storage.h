@@ -34,14 +34,16 @@ public:
 class Storage {
 public:
     virtual ~Storage() = default;
-    virtual auto open_random_access_reader(const std::string &, RandomAccessReader**) -> Status = 0;
-    virtual auto open_random_access_editor(const std::string &, RandomAccessEditor**) -> Status = 0;
+    virtual auto create_directory(const std::string &) -> Status = 0;
+    virtual auto remove_directory(const std::string &) -> Status = 0;
+    virtual auto open_random_reader(const std::string &, RandomAccessReader**) -> Status = 0;
+    virtual auto open_random_editor(const std::string &, RandomAccessEditor**) -> Status = 0;
     virtual auto open_append_writer(const std::string &, AppendWriter**) -> Status = 0;
-    virtual auto get_blob_names(std::vector<std::string>&) const -> Status = 0;
-    virtual auto rename_blob(const std::string &, const std::string &) -> Status = 0;
-    virtual auto blob_exists(const std::string &) const -> Status = 0;
-    virtual auto resize_blob(const std::string &, Size) -> Status = 0;
-    virtual auto blob_size(const std::string &, Size &) const -> Status = 0;
+    virtual auto get_file_names(std::vector<std::string>&) const -> Status = 0;
+    virtual auto rename_file(const std::string &, const std::string &) -> Status = 0;
+    virtual auto file_exists(const std::string &) const -> Status = 0;
+    virtual auto resize_file(const std::string &, Size) -> Status = 0;
+    virtual auto file_size(const std::string &, Size &) const -> Status = 0;
 
     /**
      * Remove a blob from the storage object.
@@ -51,7 +53,7 @@ public:
      * @param name Name of the child to remove.
      * @return A status object indicating success or failure.
      */
-    virtual auto remove_blob(const std::string &name) -> Status = 0;
+    virtual auto remove_file(const std::string &name) -> Status = 0;
 };
 
 template<class Reader>
@@ -59,7 +61,7 @@ auto read_exact(Reader &reader, Bytes out, Index offset) -> Status
 {
     static constexpr auto ERROR_FMT = "could not read exact: read {}/{} bytes";
     const auto requested = out.size();
-    auto s = reader.read(out, offset);
+    auto s = reader.file_read(out, offset);
     if (s.is_ok() && out.size() != requested) {
         const auto message = fmt::format(ERROR_FMT, out.size(), requested);
         s = Status::system_error(message);

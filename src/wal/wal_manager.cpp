@@ -423,7 +423,7 @@
 //    return m_reader->close();
 //}
 //
-//// TODO: Fixes our state if we fail trying to open or close a new segment file.
+//// TODO: Fixes our state if we fail trying to open or file_close a new segment file.
 //auto WALManager::ensure_initialized() -> Result<void>
 //{
 ////    if (!m_writer->is_open())

@@ -1,18 +1,55 @@
+
+#include "calico/cursor.h"
+#include "calico/info.h"
+#include "core.h"
+#include "pager/basic_pager.h"
+#include "pager/pager.h"
+#include "storage/disk.h"
+#include "tree/bplus_tree.h"
+#include "utils/logging.h"
+#include "wal/wal_writer.h"
+
+namespace cco {
+
+namespace fs = std::filesystem;
+
+auto sanitize_options(const Options &options) -> Options
+{
+    auto sanitized = options;
+    if (sanitized.log_level >= spdlog::level::n_levels)
+        sanitized.log_level = spdlog::level::off;
+    return sanitized;
+//    ThreePartMessage message;
+//    message.set_primary("cannot sanitize options");
 //
-//#include "calico/cursor.h"
-//#include "calico/info.h"
-//#include "database_impl.h"
-//#include "pool/buffer_pool.h"
-//#include "pool/interface.h"
-//#include "storage/disk.h"
-//#include "tree/bplus_tree.h"
-//#include "utils/logging.h"
-//#include "wal/wal_writer.h"
-//
-//namespace cco {
-//
-//namespace fs = std::filesystem;
-//
+//    if (options.page_size < MINIMUM_PAGE_SIZE) {
+//        message.set_detail("page size {} is too small", options.page_size);
+//        message.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
+//        return message.invalid_argument();
+//    }
+//    if (options.page_size > MAXIMUM_PAGE_SIZE) {
+//        message.set_detail("page size {} is too large", options.page_size);
+//        message.set_hint("must be less than or equal to {}", MAXIMUM_PAGE_SIZE);
+//        return message.invalid_argument();
+//    }
+//    if (!is_power_of_two(options.page_size)) {
+//        message.set_detail("page size {} is invalid", options.page_size);
+//        message.set_hint("must be a power of 2");
+//        return message.invalid_argument();
+//    }
+//    return options;
+}
+
+[[nodiscard]]
+static auto not_open_error(const std::string &primary)
+{
+    ThreePartMessage message;
+    message.set_primary("cannot file_close database");
+    message.set_detail("database is not open");
+    message.set_hint("open a database and try again");
+    return message.logic_error();
+}
+
 //#define DB_TRY(expr)                       \newline_goes_here
 //    do {                                   \newline_goes_here
 //        const auto db_try_result = (expr); \newline_goes_here
@@ -20,65 +57,42 @@
 //            return db_try_result.error();  \newline_goes_here
 //    } while (0)
 //
-//Database::Database(Options options) noexcept
-//    : m_options {std::move(options)}
-//{}
-//
-//auto Database::is_open() const -> bool
-//{
-//    return m_impl != nullptr;
-//}
-//
-//auto Database::open() -> Status
-//{
-//    Impl::Parameters param;
-//    param.options = m_options;
-//
-//    if (!m_options.path.empty()) {
-//        auto home = DiskStorage::open(m_options.path);
-//        if (!home.has_value())
-//            return home.error();
-//
-//        param.sink = create_sink(m_options.path, m_options.log_level);
-//        auto temp = create_logger(param.sink, "open");
-//        auto impl = Impl::open(std::move(param), std::move(*home));
-//        if (!impl.has_value()) {
-//            temp->error("cannot open database");
-//            temp->error("(reason) {}", impl.error().what());
-//            return impl.error();
-//        }
-//        m_impl = std::move(*impl);
-//    } else {
-//        auto impl = Impl::open(std::move(param));
-//        if (!impl.has_value())
-//            return impl.error();
-//        m_impl = std::move(*impl);
-//    }
-//    return Status::ok();
-//}
-//
-//auto Database::close() -> Status
-//{
-//    auto r = m_impl->close();
-//    m_impl.reset();
-//    return r ? Status::ok() : r.error();
-//}
-//
-//auto Database::destroy(Database db) -> Status
-//{
-//    auto s = Status::ok();
-//    if (db.is_open())
-//        s = db.close();
-//
-//    // remove() and remove_all() return this on failure. See https://en.cppreference.com/w/cpp/filesystem/remove.
-//    static constexpr auto error_value = static_cast<std::uintmax_t>(-1);
-//    if (const auto &path = db.m_options.path; !path.empty()) {
-//        if (std::error_code error; fs::remove_all(path, error) == error_value)
-//            return Status::system_error(error.message());
-//    }
-//
-//    return s;
-//}
+Database::Database() noexcept = default;
+
+auto Database::is_open() const -> bool
+{
+    return m_core != nullptr;
+}
+
+auto Database::open(const std::string &path, const Options &options) -> Status
+{
+    m_core = std::make_unique<Core>(path, options);
+    return m_core->open();
+}
+
+auto Database::close() -> Status
+{
+    if (!is_open()) return not_open_error("cannot file_close database");
+
+    auto r = m_core->close();
+    m_core.reset();
+    return r ? Status::ok() : r.error();
+}
+
+auto Database::destroy(Database db) -> Status
+{
+    if (!db.is_open()) return not_open_error("cannot destroy database");
+    auto &store = *db.m_core->m_store;
+    auto s = Status::ok();
+
+    std::vector<std::string> children;
+    s = store.get_file_names(children);
+    if (!s.is_ok()) return s;
+
+    for (const auto &name: children)
+        s = store.remove_file(name);
+    return store.remove_directory(db.m_core->m_path);
+}
 //
 //Database::Database() = default;
 //
@@ -179,4 +193,4 @@
 //
 //#undef DB_TRY
 //
-//} // namespace cco
+} // namespace cco

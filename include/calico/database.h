@@ -6,6 +6,7 @@
 
 namespace cco {
 
+class Core;
 class Cursor;
 class Info;
 
@@ -14,18 +15,10 @@ class Info;
  */
 class Database {
 public:
-    /**
-     * Create a database object.
-     *
-     * Note that a newly constructed database will not be open.
-     *
-     * @see open()
-     * @param options Initialization options for the database.
-     */
-    explicit Database(const std::string&, Options options = {}) noexcept;
+    Database() noexcept;
 
     [[nodiscard]] static auto destroy(Database db) -> Status;
-    [[nodiscard]] auto open() -> Status;
+    [[nodiscard]] auto open(const std::string &path, const Options &options = {}) -> Status;
     [[nodiscard]] auto close() -> Status;
 
     [[nodiscard]] auto is_open() const -> bool;
@@ -44,7 +37,7 @@ public:
      *
      * @param key The key to compare against.
      * @return A cursor positioned on the first record greater than or equal to than the given key, or an
-     *         invalid cursor if no such record exists.
+     *         invalid cursor if no such record file_exists.
      */
     [[nodiscard]] auto find(BytesView key) const -> Cursor;
     [[nodiscard]] auto find(const std::string &key) const -> Cursor;
@@ -94,14 +87,12 @@ public:
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;
 
-    class Impl;
     virtual ~Database();
     Database(Database&&) noexcept;
     Database& operator=(Database&&) noexcept;
 
 private:
-    std::string m_path;
-    std::unique_ptr<Impl> m_impl;
+    std::unique_ptr<Core> m_core;
 };
 
 } // cco

@@ -20,7 +20,7 @@ auto create_sink(const std::string &base, spdlog::level::level_enum level) -> sp
     if (base.empty()) {
         sink = std::make_shared<spdlog::sinks::null_sink_mt>();
     } else {
-        sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(fs::path {base} / LOG_NAME);
+        sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(fs::path {base} / LOG_FILENAME);
     }
     sink->set_level(level);
     return sink;

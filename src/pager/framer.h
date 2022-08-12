@@ -36,12 +36,6 @@ public:
     }
 
     [[nodiscard]]
-    auto is_dirty() const -> bool
-    {
-        return m_is_dirty;
-    }
-
-    [[nodiscard]]
     auto data() const -> BytesView
     {
         return m_bytes;
@@ -57,11 +51,10 @@ public:
     {
         CCO_EXPECT_EQ(m_ref_count, 0);
         m_page_id = id;
-        m_is_dirty = false;
     }
 
     [[nodiscard]] auto lsn() const -> SequenceNumber;
-    [[nodiscard]] auto ref(Pager&, bool) -> Page;
+    [[nodiscard]] auto ref(Pager&, bool, bool) -> Page;
     auto unref(Page &page) -> void;
 
 private:
@@ -69,7 +62,6 @@ private:
     PageId m_page_id;
     Size m_ref_count {};
     bool m_is_writable {};
-    bool m_is_dirty {};
 };
 
 class Framer final {
@@ -77,9 +69,9 @@ public:
     ~Framer() = default;
     [[nodiscard]] static auto open(std::unique_ptr<RandomAccessEditor>, Size, Size) -> Result<std::unique_ptr<Framer>>;
     [[nodiscard]] auto pin(PageId) -> Result<FrameId>;
-    [[nodiscard]] auto unpin(FrameId) -> Status;
+    [[nodiscard]] auto unpin(FrameId, bool) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto ref(FrameId, Pager&, bool) -> Page;
+    [[nodiscard]] auto ref(FrameId, Pager&, bool, bool) -> Page;
     auto unref(FrameId, Page&) -> void;
     auto discard(FrameId) -> void;
     auto load_state(const FileHeader&) -> void;

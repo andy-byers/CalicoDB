@@ -23,7 +23,7 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
 
     // Open the database file.
     RandomAccessEditor *file {};
-    auto s = param.storage.open_random_access_editor(DATA_FILENAME, &file);
+    auto s = param.storage.open_random_editor(DATA_FILENAME, &file);
 
     CCO_TRY_STORE(pool->m_framer, Framer::open(
         std::unique_ptr<RandomAccessEditor> {file},
@@ -79,7 +79,7 @@ auto BasicPager::flush() -> Status
     for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
         CCO_EXPECT_NE(m_registry.get(*itr), m_registry.end());
         auto entry = m_registry.get(*itr)->second;
-        auto s = m_framer->unpin(entry.frame_id);
+        auto s = m_framer->unpin(entry.frame_id, true);
         if (!s.is_ok()) return s;
 
         entry.dirty_token.reset();
@@ -103,27 +103,21 @@ auto BasicPager::try_make_available() -> Result<bool>
             return false;
 
         const auto is_protected = frame.lsn() <= m_wal->flushed_lsn();
-        CCO_EXPECT_EQ(frame.is_dirty(), dirty_token.has_value());
-        return !frame.is_dirty() || is_protected;
+        return !dirty_token.has_value() || is_protected;
     });
 
     if (itr == m_registry.end())
         return false;
 
-    auto &[frame_id, dirty_token] = itr->second;
-    const auto &frame = m_framer->frame_at(frame_id);
-    const auto was_dirty = frame.is_dirty();
-    auto pid = itr->first;
-    auto s = m_framer->unpin(frame_id);
+    auto &[pid, entry] = *itr;
+    auto &[frame_id, dirty_token] = entry;
+    const auto was_dirty = dirty_token.has_value();
+    auto s = m_framer->unpin(frame_id, was_dirty);
     if (!s.is_ok()) return Err {s};
 
     if (was_dirty) {
-        CCO_EXPECT_TRUE(dirty_token.has_value());
         m_dirty.remove(*dirty_token);
         dirty_token.reset();
-        CCO_EXPECT_FALSE(itr->second.dirty_token.has_value());
-
-        fmt::print("cleaning {} in {}\n", pid.value, frame_id.value);
     }
     m_registry.erase(pid);
     return true;
@@ -154,9 +148,6 @@ auto BasicPager::register_page(Page &page, PageRegistry::Entry &entry) -> void
 
     entry.dirty_token = m_dirty.insert(page.id());
     m_dirty_count++;
-
-    fmt::print("DIRTYING {} in {}\n", page.id().value, entry.frame_id.value);
-
 
     if (m_wal->is_enabled())
         m_wal->log_image(page.id().value, page.view(0));
@@ -189,13 +180,14 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 
     const auto do_acquire = [this, is_writable](auto &entry) {
         m_ref_sum++;
-        auto page = m_framer->ref(entry.frame_id, *this, is_writable);
+        const auto is_frame_dirty = entry.dirty_token.has_value();
+        auto page = m_framer->ref(entry.frame_id, *this, is_writable, is_frame_dirty);
 
         // We write a full image WAL record for the page if we are acquiring it as writable for the first time. This is part of the reason we should never
         // acquire a writable page unless we intend to write to it immediately. This way we keep the surface between the Pager interface and Page small
         // (page just uses its Pager* member to call release on itself, but only if it was not already released manually).
-        if (is_writable && !page.is_dirty()) {
-            CCO_EXPECT_FALSE(entry.dirty_token.has_value());
+        if (is_writable && !is_frame_dirty) {
+            CCO_EXPECT_FALSE(page.is_dirty());
             register_page(page, entry);
         }
 

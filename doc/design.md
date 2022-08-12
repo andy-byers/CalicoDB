@@ -102,7 +102,7 @@ The number of free blocks and the location of the first free block are kept in t
 When a new cell is added, the free block list is traversed to see if there is a free block large enough to satisfy the request.
 If so, the new cell is allocated from the free block. 
 Otherwise, the cell is allocated from the gap region between the cell directory and the existing cell content.
-As cells are added and removed, we may encounter a situation where the memory we need to write a new cell exists on the page, but is not contiguous.
+As cells are added and removed, we may encounter a situation where the memory we need to write a new cell file_exists on the page, but is not contiguous.
 Such a page requires defragmentation, where all free blocks and fragments are merged into the gap space.
 
 ## Free List

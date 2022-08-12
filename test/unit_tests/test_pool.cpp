@@ -125,7 +125,7 @@ public:
     {
         std::unique_ptr<RandomAccessEditor> file;
         RandomAccessEditor *temp {};
-        EXPECT_TRUE(home->open_random_access_editor(DATA_FILENAME, &temp).is_ok());
+        EXPECT_TRUE(home->open_random_editor(DATA_FILENAME, &temp).is_ok());
         file.reset(temp);
 
         framer = Framer::open(std::move(file), 0x100, 8).value();
@@ -161,7 +161,7 @@ TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
     ASSERT_FALSE(r.has_value());
     ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
 
-    const auto s = framer->unpin(FrameId {1UL});
+    const auto s = framer->unpin(FrameId {1UL}, false);
     ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
     ASSERT_TRUE(framer->pin(PageId {9UL}));
 }
@@ -194,7 +194,7 @@ public:
             store {std::make_unique<MockStorage>()}
     {
         store->delegate_to_real();
-        EXPECT_CALL(*store, open_random_access_editor).Times(1);
+        EXPECT_CALL(*store, open_random_editor).Times(1);
 
         pager = *BasicPager::open({
             *store,
@@ -344,27 +344,32 @@ TEST_F(PagerTests, PageDataPersistsInFile)
     ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
 }
 
-TEST_F(PagerTests, SanityCheck)
+[[nodiscard]]
+auto generate_id_strings(Size n)
 {
-    std::vector<Index> id_ints(500);
+    std::vector<Index> id_ints(n);
     std::iota(begin(id_ints), end(id_ints), 1);
 
     std::vector<std::string> id_strs;
     std::transform(cbegin(id_ints), cend(id_ints), back_inserter(id_strs), [](auto id) {
         return fmt::format("{:06}", id);
     });
+    return id_strs;
+}
+
+TEST_F(PagerTests, SanityCheck)
+{
+    const auto ids = generate_id_strings(500);
 
     using testing::AtLeast;
     EXPECT_CALL(*mock, read).Times(AtLeast(frame_count));
     EXPECT_CALL(*mock, write).Times(AtLeast(frame_count));
 
-    for (const auto &id: id_strs)
+    for (const auto &id: ids)
         [[maybe_unused]] const auto unused = allocate_write_release(id);
 
-    auto id_int = cbegin(id_ints);
-    for (const auto &id_str: id_strs) {
-        ASSERT_NE(id_int, cend(id_ints));
-        ASSERT_EQ(id_str, acquire_read_release(PageId {*id_int++}, id_str.size()));
+    for (const auto &id: ids) { // NOTE: gtest assertion macros sometimes complain if braces are omitted.
+        ASSERT_EQ(id, acquire_read_release(PageId {std::stoull(id)}, id.size()));
     }
 }
 

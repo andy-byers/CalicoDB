@@ -24,9 +24,9 @@ auto open_blob(Store &store, const std::string &name) -> std::unique_ptr<Base>
     Base *temp {};
 
     if constexpr (std::is_same_v<RandomAccessReader, Base>) {
-        s = store.open_random_access_reader(name, &temp);
+        s = store.open_random_reader(name, &temp);
     } else if constexpr (std::is_same_v<RandomAccessEditor, Base>) {
-        s = store.open_random_access_editor(name, &temp);
+        s = store.open_random_editor(name, &temp);
     } else if constexpr (std::is_same_v<AppendWriter, Base>) {
         s = store.open_append_writer(name, &temp);
     } else {
@@ -64,9 +64,9 @@ constexpr auto write_out_randomly(Random &random, Writer &writer, const std::str
         auto chunk = in.copy().truncate(chunk_size);
 
         if constexpr (std::is_same_v<AppendWriter, Writer>) {
-            ASSERT_TRUE(writer.write(chunk).is_ok());
+            ASSERT_TRUE(writer.file_write(chunk).is_ok());
         } else {
-            ASSERT_TRUE(writer.write(chunk, counter).is_ok());
+            ASSERT_TRUE(writer.file_write(chunk, counter).is_ok());
             counter += chunk_size;
         }
         in.advance(chunk_size);
@@ -87,7 +87,7 @@ auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::strin
     while (!out.is_empty()) {
         const auto chunk_size = std::min(out.size(), random.next_int(size / num_chunks));
         auto chunk = out.copy().truncate(chunk_size);
-        const auto s = reader.read(chunk, counter);
+        const auto s = reader.file_read(chunk, counter);
 
         if (chunk.size() < chunk_size)
             return backing;
@@ -205,7 +205,7 @@ public:
 TEST_F(HeapTests, ReaderCannotCreateBlob)
 {
     RandomAccessReader *temp {};
-    const auto s = storage->open_random_access_reader("nonexistent", &temp);
+    const auto s = storage->open_random_reader("nonexistent", &temp);
     ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what();
 }
 

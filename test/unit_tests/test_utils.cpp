@@ -318,6 +318,35 @@ TEST(StatusTests, NonOkStatusSavesMessage)
     ASSERT_TRUE(s.is_invalid_argument());
 }
 
+TEST(StatusTests, StatusCanBeCopied)
+{
+    auto s = Status::invalid_argument("invalid argument");
+    auto t = s;
+    ASSERT_TRUE(t.is_invalid_argument());
+    ASSERT_EQ(t.what(), "invalid argument");
+
+    t = Status::ok();
+    ASSERT_TRUE(s.is_invalid_argument());
+    ASSERT_EQ(s.what(), "invalid argument");
+}
+
+TEST(StatusTests, StatusCanBeReassigned)
+{
+    auto s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+
+    s = Status::invalid_argument("invalid argument");
+    ASSERT_TRUE(s.is_invalid_argument());
+    ASSERT_EQ(s.what(), "invalid argument");
+
+    s = Status::logic_error("logic error");
+    ASSERT_TRUE(s.is_logic_error());
+    ASSERT_EQ(s.what(), "logic error");
+
+    s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+}
+
 // Bad idea??? Uses const reference lifetime extension to name "test", which can be an lvalue or rvalue. Then we use the name in a more
 // complicated expression. Seems pretty useful for creating more complicated asserts.
 #define CCO_TEST(test, expression) \

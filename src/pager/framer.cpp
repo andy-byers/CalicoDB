@@ -22,7 +22,7 @@ auto Frame::lsn() const -> SequenceNumber
     return SequenceNumber {get_u64(m_bytes.range(offset))};
 }
 
-auto Frame::ref(Pager &source, bool is_writable) -> Page
+auto Frame::ref(Pager &source, bool is_writable, bool is_dirty) -> Page
 {
     CCO_EXPECT_FALSE(m_is_writable);
 
@@ -31,7 +31,7 @@ auto Frame::ref(Pager &source, bool is_writable) -> Page
         m_is_writable = true;
     }
     m_ref_count++;
-    return Page {{m_page_id, data(), &source, is_writable, m_is_dirty}};
+    return Page {{m_page_id, data(), &source, is_writable, is_dirty}};
 }
 
 auto Frame::unref(Page &page) -> void
@@ -43,9 +43,6 @@ auto Frame::unref(Page &page) -> void
         CCO_EXPECT_EQ(m_ref_count, 1);
         m_is_writable = false;
     }
-    if (page.is_dirty())
-        m_is_dirty = true;
-
     // Make sure the page doesn't get released twice.
     page.m_source.reset();
     m_ref_count--;
@@ -91,10 +88,10 @@ Framer::Framer(std::unique_ptr<RandomAccessEditor> file, AlignedBuffer buffer, S
         m_available.emplace_back(FrameId::from_index(m_available.size()));
 }
 
-auto Framer::ref(FrameId id, Pager &source, bool is_writable) -> Page
+auto Framer::ref(FrameId id, Pager &source, bool is_writable, bool is_dirty) -> Page
 {
     CCO_EXPECT_LT(id.as_index(), m_frame_count);
-    return m_frames[id.as_index()].ref(source, is_writable);
+    return m_frames[id.as_index()].ref(source, is_writable, is_dirty);
 }
 auto Framer::unref(FrameId id, Page &page) -> void
 {
@@ -139,7 +136,7 @@ auto Framer::discard(FrameId id) -> void
     m_available.emplace_back(id);
 }
 
-auto Framer::unpin(FrameId id) -> Status
+auto Framer::unpin(FrameId id, bool is_dirty) -> Status
 {
     auto &frame = frame_at_impl(id);
     CCO_EXPECT_LT(frame.pid().as_index(), m_page_count);
@@ -147,7 +144,7 @@ auto Framer::unpin(FrameId id) -> Status
     auto s = Status::ok();
 
     // If this fails, the caller (buffer pool) will need to roll back the database state or exit.
-    if (frame.is_dirty()) {
+    if (is_dirty) {
         s = write_page_to_file(frame.pid(), frame.data());
 
         if (s.is_ok()) {

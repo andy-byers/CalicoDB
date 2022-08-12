@@ -9,7 +9,7 @@
 
 namespace cco {
 
-constexpr auto LOG_NAME = "log";
+constexpr auto LOG_FILENAME = "log";
 
 #define CCO_STRINGIFY_(x) #x
 #define CCO_STRINGIFY(x) CCO_STRINGIFY_(x)

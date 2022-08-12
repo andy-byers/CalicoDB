@@ -58,9 +58,9 @@ auto AppendHeapWriter::sync() -> Status
     return Status::ok();
 }
 
-auto HeapStorage::open_random_access_reader(const std::string &name, RandomAccessReader **out) -> Status
+auto HeapStorage::open_random_reader(const std::string &name, RandomAccessReader **out) -> Status
 {
-    if (auto itr = m_blobs.find(name); itr != end(m_blobs)) {
+    if (auto itr = m_files.find(name); itr != end(m_files)) {
         *out = new RandomAccessHeapReader {name, itr->second};
     } else {
         ThreePartMessage message;
@@ -72,12 +72,12 @@ auto HeapStorage::open_random_access_reader(const std::string &name, RandomAcces
     return Status::ok();
 }
 
-auto HeapStorage::open_random_access_editor(const std::string &name, RandomAccessEditor **out) -> Status
+auto HeapStorage::open_random_editor(const std::string &name, RandomAccessEditor **out) -> Status
 {
-    if (auto itr = m_blobs.find(name); itr != end(m_blobs)) {
+    if (auto itr = m_files.find(name); itr != end(m_files)) {
         *out = new RandomAccessHeapEditor {name, itr->second};
     } else {
-        auto [position, truthy] = m_blobs.emplace(name, std::string {});
+        auto [position, truthy] = m_files.emplace(name, std::string {});
         CCO_EXPECT_TRUE(truthy);
         *out = new RandomAccessHeapEditor {name, position->second};
     }
@@ -86,33 +86,33 @@ auto HeapStorage::open_random_access_editor(const std::string &name, RandomAcces
 
 auto HeapStorage::open_append_writer(const std::string &name, AppendWriter **out) -> Status
 {
-    if (auto itr = m_blobs.find(name); itr != end(m_blobs)) {
+    if (auto itr = m_files.find(name); itr != end(m_files)) {
         *out = new AppendHeapWriter {name, itr->second};
     } else {
-        auto [position, truthy] = m_blobs.emplace(name, std::string {});
+        auto [position, truthy] = m_files.emplace(name, std::string {});
         CCO_EXPECT_TRUE(truthy);
         *out = new AppendHeapWriter {name, position->second};
     }
     return Status::ok();
 }
 
-auto HeapStorage::remove_blob(const std::string &name) -> Status
+auto HeapStorage::remove_file(const std::string &name) -> Status
 {
-    auto itr = m_blobs.find(name);
-    if (itr == end(m_blobs)) {
+    auto itr = m_files.find(name);
+    if (itr == end(m_files)) {
         ThreePartMessage message;
         message.set_primary("could not remove blob");
         message.set_detail("blob does not exist");
         return message.system_error();
     }
-    m_blobs.erase(itr);
+    m_files.erase(itr);
     return Status::ok();
 }
 
-auto HeapStorage::resize_blob(const std::string &name, Size size) -> Status
+auto HeapStorage::resize_file(const std::string &name, Size size) -> Status
 {
-    auto itr = m_blobs.find(name);
-    if (itr == end(m_blobs)) {
+    auto itr = m_files.find(name);
+    if (itr == end(m_files)) {
         ThreePartMessage message;
         message.set_primary("could not resize blob");
         message.set_detail("blob does not exist");
@@ -122,7 +122,7 @@ auto HeapStorage::resize_blob(const std::string &name, Size size) -> Status
     return Status::ok();
 }
 
-auto HeapStorage::rename_blob(const std::string &old_name, const std::string &new_name) -> Status
+auto HeapStorage::rename_file(const std::string &old_name, const std::string &new_name) -> Status
 {
     if (new_name.empty()) {
         ThreePartMessage message;
@@ -130,7 +130,7 @@ auto HeapStorage::rename_blob(const std::string &old_name, const std::string &ne
         message.set_detail("new name is empty");
         return message.system_error();
     }
-    auto node = m_blobs.extract(old_name);
+    auto node = m_files.extract(old_name);
     if (node.empty()) {
         ThreePartMessage message;
         message.set_primary("cannot rename blob");
@@ -138,15 +138,15 @@ auto HeapStorage::rename_blob(const std::string &old_name, const std::string &ne
         return message.system_error();
     }
     node.key() = new_name;
-    m_blobs.insert(std::move(node));
+    m_files.insert(std::move(node));
     return Status::ok();
 }
 
-auto HeapStorage::blob_size(const std::string &name, Size &out) const -> Status
+auto HeapStorage::file_size(const std::string &name, Size &out) const -> Status
 {
 
-    auto itr = m_blobs.find(name);
-    if (itr == cend(m_blobs)) {
+    auto itr = m_files.find(name);
+    if (itr == cend(m_files)) {
         ThreePartMessage message;
         message.set_primary("cannot get blob size");
         message.set_detail("blob \"{}\" does not exist", name);
@@ -156,10 +156,10 @@ auto HeapStorage::blob_size(const std::string &name, Size &out) const -> Status
     return Status::ok();
 }
 
-auto HeapStorage::blob_exists(const std::string &name) const -> Status
+auto HeapStorage::file_exists(const std::string &name) const -> Status
 {
-    const auto itr = m_blobs.find(name);
-    if (itr == cend(m_blobs)) {
+    const auto itr = m_files.find(name);
+    if (itr == cend(m_files)) {
         ThreePartMessage message;
         message.set_primary("could not find blob");
         message.set_detail("blob \"{}\" does not exist", name);
@@ -168,11 +168,26 @@ auto HeapStorage::blob_exists(const std::string &name) const -> Status
     return Status::ok();
 }
 
-auto HeapStorage::get_blob_names(std::vector<std::string> &out) const -> Status
+auto HeapStorage::get_file_names(std::vector<std::string> &out) const -> Status
 {
-    std::transform(cbegin(m_blobs), cend(m_blobs), back_inserter(out), [](auto entry) {
+    std::transform(cbegin(m_files), cend(m_files), back_inserter(out), [](auto entry) {
         return entry.first;
     });
+    return Status::ok();
+}
+
+auto HeapStorage::create_directory(const std::string &name) -> Status
+{
+    CCO_EXPECT_EQ(m_directories.find(name), cend(m_directories));
+    // Just keep track of nested directory names for now.
+    m_directories.insert(name);
+    return Status::ok();
+}
+
+auto HeapStorage::remove_directory(const std::string &name) -> Status
+{
+    CCO_EXPECT_NE(m_directories.find(name), cend(m_directories));
+    m_directories.erase(name);
     return Status::ok();
 }
 

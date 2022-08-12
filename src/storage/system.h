@@ -10,15 +10,17 @@ static constexpr int FAILURE = -1;
 
 [[nodiscard]] auto error() -> Status;
 [[nodiscard]] auto error(std::errc) -> Status;
-[[nodiscard]] auto exists(const std::string &) -> Status;
-[[nodiscard]] auto size(const std::string &) -> Result<Size>;
-[[nodiscard]] auto read(int, Bytes) -> Result<Size>;
-[[nodiscard]] auto write(int, BytesView) -> Result<Size>;
-[[nodiscard]] auto seek(int, long, int) -> Result<Index>;
-[[nodiscard]] auto open(const std::string &, int, int) -> Result<int>;
-[[nodiscard]] auto close(int) -> Status;
-[[nodiscard]] auto sync(int) -> Status;
-[[nodiscard]] auto unlink(const std::string &) -> Status;
+[[nodiscard]] auto file_exists(const std::string &) -> Status;
+[[nodiscard]] auto file_size(const std::string &) -> Result<Size>;
+[[nodiscard]] auto file_read(int, Bytes) -> Result<Size>;
+[[nodiscard]] auto file_write(int, BytesView) -> Result<Size>;
+[[nodiscard]] auto file_seek(int, long, int) -> Result<Index>;
+[[nodiscard]] auto file_open(const std::string &, int, int) -> Result<int>;
+[[nodiscard]] auto file_close(int) -> Status;
+[[nodiscard]] auto file_sync(int) -> Status;
+[[nodiscard]] auto file_remove(const std::string &) -> Status;
+[[nodiscard]] auto dir_create(const std::string &) -> Status;
+[[nodiscard]] auto dir_remove(const std::string &) -> Status;
 
 } // namespace cco::system
 

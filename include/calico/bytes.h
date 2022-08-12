@@ -44,7 +44,7 @@ namespace impl {
         /**
          * Create a slice from another slice.
          *
-         * This constructor exists to allow implicit conversions from Bytes to BytesView.
+         * This constructor file_exists to allow implicit conversions from Bytes to BytesView.
          *
          * @tparam Q The other slice pointer type.
          * @param rhs The other slice.
@@ -212,9 +212,9 @@ namespace impl {
         [[nodiscard]]
         auto starts_with(Slice<const Value*> rhs) const noexcept -> bool
         {
-            if (rhs.size() > m_size)
+            if (rhs.file_size() > m_size)
                 return false;
-            return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
+            return std::memcmp(m_data, rhs.data(), rhs.file_size()) == 0;
         }
 
     private:

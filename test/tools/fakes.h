@@ -111,28 +111,28 @@ auto get_blob_descriptor(const std::string &name) -> std::string
 class MockStorage: public Storage {
 public:
     ~MockStorage() override = default;
-    MOCK_METHOD(Status, get_blob_names, (std::vector<std::string>&), (const, override));
-    MOCK_METHOD(Status, open_random_access_reader, (const std::string &, RandomAccessReader**), (override));
-    MOCK_METHOD(Status, open_random_access_editor, (const std::string &, RandomAccessEditor**), (override));
+    MOCK_METHOD(Status, get_file_names, (std::vector<std::string>&), (const, override));
+    MOCK_METHOD(Status, open_random_reader, (const std::string &, RandomAccessReader**), (override));
+    MOCK_METHOD(Status, open_random_editor, (const std::string &, RandomAccessEditor**), (override));
     MOCK_METHOD(Status, open_append_writer, (const std::string &, AppendWriter**), (override));
-    MOCK_METHOD(Status, rename_blob, (const std::string &, const std::string &), (override));
-    MOCK_METHOD(Status, resize_blob, (const std::string &, Size), (override));
-    MOCK_METHOD(Status, blob_exists, (const std::string &), (const, override));
-    MOCK_METHOD(Status, blob_size, (const std::string &, Size &), (const, override));
-    MOCK_METHOD(Status, remove_blob, (const std::string &), (override));
+    MOCK_METHOD(Status, rename_file, (const std::string &, const std::string &), (override));
+    MOCK_METHOD(Status, resize_file, (const std::string &, Size), (override));
+    MOCK_METHOD(Status, file_exists, (const std::string &), (const, override));
+    MOCK_METHOD(Status, file_size, (const std::string &, Size &), (const, override));
+    MOCK_METHOD(Status, remove_file, (const std::string &), (override));
 
     MockStorage() = default;
 
     auto delegate_to_real() -> void
     {
-        ON_CALL(*this, get_blob_names).WillByDefault([this](std::vector<std::string> &out) {
-            return m_real.get_blob_names(out);
+        ON_CALL(*this, get_file_names).WillByDefault([this](std::vector<std::string> &out) {
+            return m_real.get_file_names(out);
         });
-        ON_CALL(*this, open_random_access_reader).WillByDefault([this](const std::string &name, RandomAccessReader **out) {
+        ON_CALL(*this, open_random_reader).WillByDefault([this](const std::string &name, RandomAccessReader **out) {
             register_mock<RandomAccessReader, MockRandomAccessReader>(name, out);
             return Status::ok();
         });
-        ON_CALL(*this, open_random_access_editor).WillByDefault([this](const std::string &name, RandomAccessEditor **out) {
+        ON_CALL(*this, open_random_editor).WillByDefault([this](const std::string &name, RandomAccessEditor **out) {
             register_mock<RandomAccessEditor, MockRandomAccessEditor>(name, out);
             return Status::ok();
         });
@@ -140,7 +140,7 @@ public:
             register_mock<AppendWriter, MockAppendWriter>(name, out);
             return Status::ok();
         });
-        ON_CALL(*this, rename_blob).WillByDefault([this](const std::string &old_name, const std::string &new_name) {
+        ON_CALL(*this, rename_file).WillByDefault([this](const std::string &old_name, const std::string &new_name) {
             const auto maybe_rename_mock = [this](const auto &old_name, const auto &new_name) {
                 auto node = m_mocks.extract(old_name);
                 if (!node.empty()) {
@@ -148,7 +148,7 @@ public:
                     m_mocks.insert(std::move(node));
                 }
             };
-            auto s = m_real.rename_blob(old_name, new_name);
+            auto s = m_real.rename_file(old_name, new_name);
             if (s.is_ok()) {
                 maybe_rename_mock(get_blob_descriptor<RandomAccessReader>(old_name), get_blob_descriptor<RandomAccessReader>(new_name));
                 maybe_rename_mock(get_blob_descriptor<RandomAccessEditor>(old_name), get_blob_descriptor<RandomAccessEditor>(new_name));
@@ -156,17 +156,17 @@ public:
             }
             return s;
         });
-        ON_CALL(*this, blob_exists).WillByDefault([this](const std::string &name) {
-            return m_real.blob_exists(name);
+        ON_CALL(*this, file_exists).WillByDefault([this](const std::string &name) {
+            return m_real.file_exists(name);
         });
-        ON_CALL(*this, blob_size).WillByDefault([this](const std::string &name, Size &out) {
-            return m_real.blob_size(name, out);
+        ON_CALL(*this, file_size).WillByDefault([this](const std::string &name, Size &out) {
+            return m_real.file_size(name, out);
         });
-        ON_CALL(*this, resize_blob).WillByDefault([this](const std::string &name, Size size) {
-            return m_real.resize_blob(name, size);
+        ON_CALL(*this, resize_file).WillByDefault([this](const std::string &name, Size size) {
+            return m_real.resize_file(name, size);
         });
-        ON_CALL(*this, remove_blob).WillByDefault([this](const std::string &name) {
-            auto s = m_real.remove_blob(name);
+        ON_CALL(*this, remove_file).WillByDefault([this](const std::string &name) {
+            auto s = m_real.remove_file(name);
             if (s.is_ok()) {
                 m_mocks.erase(get_blob_descriptor<RandomAccessReader>(name));
                 m_mocks.erase(get_blob_descriptor<RandomAccessEditor>(name));
@@ -209,9 +209,9 @@ private:
 
         // We need to use the real object to open blobs. All blobs with the same name share memory.
         if constexpr (std::is_same_v<Base, RandomAccessReader>) {
-            s = m_real.open_random_access_reader(name, &base);
+            s = m_real.open_random_reader(name, &base);
         } else if constexpr (std::is_same_v<Base, RandomAccessEditor>) {
-            s = m_real.open_random_access_editor(name, &base);
+            s = m_real.open_random_editor(name, &base);
         } else if constexpr (std::is_same_v<Base, AppendWriter>) {
             s = m_real.open_append_writer(name, &base);
         } else {

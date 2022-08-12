@@ -10,9 +10,9 @@ static constexpr int PERMISSIONS {0644}; ///< -rw-r--r--
 
 static auto read_file_at(int file, Bytes &out, Index offset)
 {
-    auto r = system::seek(file, static_cast<long>(offset), SEEK_SET);
+    auto r = system::file_seek(file, static_cast<long>(offset), SEEK_SET);
     if (r.has_value())
-        r = system::read(file, out);
+        r = system::file_read(file, out);
     
     if (!r.has_value())
         return r.error();
@@ -22,7 +22,7 @@ static auto read_file_at(int file, Bytes &out, Index offset)
 
 static auto write_file(int file, BytesView in)
 {
-    const auto r = system::write(file, in);
+    const auto r = system::file_write(file, in);
     
     if (!r.has_value()) {
         return r.error();
@@ -38,7 +38,7 @@ static auto write_file(int file, BytesView in)
 
 RandomAccessFileReader::~RandomAccessFileReader()
 {
-    [[maybe_unused]] const auto s = system::close(m_file);
+    [[maybe_unused]] const auto s = system::file_close(m_file);
 }
 
 auto RandomAccessFileReader::read(Bytes &out, Index offset) -> Status
@@ -48,7 +48,7 @@ auto RandomAccessFileReader::read(Bytes &out, Index offset) -> Status
 
 RandomAccessFileEditor::~RandomAccessFileEditor()
 {
-    [[maybe_unused]] const auto s = system::close(m_file);
+    [[maybe_unused]] const auto s = system::file_close(m_file);
 }
 
 auto RandomAccessFileEditor::read(Bytes &out, Index offset) -> Status
@@ -58,7 +58,7 @@ auto RandomAccessFileEditor::read(Bytes &out, Index offset) -> Status
 
 auto RandomAccessFileEditor::write(BytesView in, Index offset) -> Status
 {
-    auto r = system::seek(m_file, static_cast<long>(offset), SEEK_SET);
+    auto r = system::file_seek(m_file, static_cast<long>(offset), SEEK_SET);
     if (r.has_value())
         return write_file(m_file, in);
     return r.error();
@@ -66,12 +66,12 @@ auto RandomAccessFileEditor::write(BytesView in, Index offset) -> Status
 
 auto RandomAccessFileEditor::sync() -> Status
 {
-    return system::sync(m_file);
+    return system::file_sync(m_file);
 }
 
 AppendFileWriter::~AppendFileWriter()
 {
-    [[maybe_unused]] const auto s = system::close(m_file);
+    [[maybe_unused]] const auto s = system::file_close(m_file);
 }
 
 auto AppendFileWriter::write(BytesView in) -> Status
@@ -81,16 +81,16 @@ auto AppendFileWriter::write(BytesView in) -> Status
 
 auto AppendFileWriter::sync() -> Status
 {
-    return system::sync(m_file);
+    return system::file_sync(m_file);
 }
 
 auto DiskStorage::open(const std::string &path, Storage **out) -> Status
 {
-    const auto r = system::open(path, O_RDONLY, 0666);
+    const auto r = system::file_open(path, O_RDONLY, 0666);
     auto s = Status::ok();
 
     if (r.has_value()) {
-        s = system::close(*r);
+        s = system::file_close(*r);
     } else if (r.error().is_not_found()) {
         std::error_code code;
         fs::create_directory(path, code);
@@ -100,7 +100,7 @@ auto DiskStorage::open(const std::string &path, Storage **out) -> Status
     return s;
 }
 
-auto DiskStorage::resize_blob(const std::string &name, Size size) -> Status
+auto DiskStorage::resize_file(const std::string &name, Size size) -> Status
 {
     std::error_code code;
     fs::resize_file(m_path / name, size, code);
@@ -108,7 +108,7 @@ auto DiskStorage::resize_blob(const std::string &name, Size size) -> Status
     return Status::ok();
 }
 
-auto DiskStorage::rename_blob(const std::string &old_name, const std::string &new_name) -> Status
+auto DiskStorage::rename_file(const std::string &old_name, const std::string &new_name) -> Status
 {
     std::error_code code;
     fs::rename(m_path / old_name, m_path / new_name, code);
@@ -116,19 +116,19 @@ auto DiskStorage::rename_blob(const std::string &old_name, const std::string &ne
     return Status::ok();
 }
 
-auto DiskStorage::remove_blob(const std::string &name) -> Status
+auto DiskStorage::remove_file(const std::string &name) -> Status
 {
-    return system::unlink(m_path / name);
+    return system::file_remove(m_path / name);
 }
 
-auto DiskStorage::blob_exists(const std::string &name) const -> Status
+auto DiskStorage::file_exists(const std::string &name) const -> Status
 {
-    return system::exists(m_path / name);
+    return system::file_exists(m_path / name);
 }
 
-auto DiskStorage::blob_size(const std::string &name, Size &out) const -> Status
+auto DiskStorage::file_size(const std::string &name, Size &out) const -> Status
 {
-    auto r = system::size(m_path / name);
+    auto r = system::file_size(m_path / name);
     if (r.has_value()) {
         out = *r;
         return Status::ok();
@@ -136,7 +136,7 @@ auto DiskStorage::blob_size(const std::string &name, Size &out) const -> Status
     return r.error();
 }
 
-auto DiskStorage::get_blob_names(std::vector<std::string> &out) const -> Status
+auto DiskStorage::get_file_names(std::vector<std::string> &out) const -> Status
 {
     std::error_code code;
     std::filesystem::directory_iterator itr {m_path, code};
@@ -148,9 +148,9 @@ auto DiskStorage::get_blob_names(std::vector<std::string> &out) const -> Status
     return Status::ok();
 }
 
-auto DiskStorage::open_random_access_reader(const std::string &name, RandomAccessReader **out) -> Status
+auto DiskStorage::open_random_reader(const std::string &name, RandomAccessReader **out) -> Status
 {
-    const auto fd = system::open(m_path / name, O_RDONLY, PERMISSIONS);
+    const auto fd = system::file_open(m_path / name, O_RDONLY, PERMISSIONS);
     if (fd.has_value()) {
         *out = new RandomAccessFileReader {name, *fd};
         return Status::ok();
@@ -158,9 +158,9 @@ auto DiskStorage::open_random_access_reader(const std::string &name, RandomAcces
     return fd.error();
 }
 
-auto DiskStorage::open_random_access_editor(const std::string &name, RandomAccessEditor **out) -> Status
+auto DiskStorage::open_random_editor(const std::string &name, RandomAccessEditor **out) -> Status
 {
-    const auto fd = system::open(m_path / name, O_CREAT | O_RDWR, PERMISSIONS);
+    const auto fd = system::file_open(m_path / name, O_CREAT | O_RDWR, PERMISSIONS);
     if (fd.has_value()) {
         *out = new RandomAccessFileEditor {name, *fd};
         return Status::ok();
@@ -170,12 +170,22 @@ auto DiskStorage::open_random_access_editor(const std::string &name, RandomAcces
 
 auto DiskStorage::open_append_writer(const std::string &name, AppendWriter **out) -> Status
 {
-    const auto fd = system::open(m_path / name, O_CREAT | O_WRONLY | O_APPEND, PERMISSIONS);
+    const auto fd = system::file_open(m_path / name, O_CREAT | O_WRONLY | O_APPEND, PERMISSIONS);
     if (fd.has_value()) {
         *out = new AppendFileWriter {name, *fd};
         return Status::ok();
     }
     return fd.error();
+}
+
+auto DiskStorage::create_directory(const std::string &name) -> Status
+{
+    return system::dir_create(m_path / name);
+}
+
+auto DiskStorage::remove_directory(const std::string &name) -> Status
+{
+    return system::dir_remove(m_path / name);
 }
 
 } // namespace cco

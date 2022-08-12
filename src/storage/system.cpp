@@ -3,6 +3,7 @@
 #include "utils/logging.h"
 #include <fcntl.h>
 #include <filesystem>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace cco::system {
@@ -19,7 +20,7 @@ auto error(std::errc code) -> Status
     return Status::system_error(std::make_error_code(code).message());
 }
 
-auto exists(const std::string &name) -> Status
+auto file_exists(const std::string &name) -> Status
 {
     std::error_code code;
     auto was_found = fs::exists(name, code);
@@ -32,7 +33,7 @@ auto exists(const std::string &name) -> Status
     return Status::ok();
 }
 
-auto open(const std::string &name, int mode, int permissions) -> Result<int>
+auto file_open(const std::string &name, int mode, int permissions) -> Result<int>
 {
     if (const auto fd = ::open(name.c_str(), mode, permissions); fd != FAILURE)
         return fd;
@@ -46,14 +47,14 @@ auto open(const std::string &name, int mode, int permissions) -> Result<int>
     return Err {error()};
 }
 
-auto close(int fd) -> Status
+auto file_close(int fd) -> Status
 {
     if (::close(fd) == FAILURE)
         return error();
     return Status::ok();
 }
 
-auto size(const std::string &path) -> Result<Size>
+auto file_size(const std::string &path) -> Result<Size>
 {
     std::error_code code;
     const auto size = fs::file_size(path, code);
@@ -61,7 +62,7 @@ auto size(const std::string &path) -> Result<Size>
     return size;
 }
 
-auto read(int file, Bytes out) -> Result<Size>
+auto file_read(int file, Bytes out) -> Result<Size>
 {
     const auto target_size = out.size();
 
@@ -75,7 +76,7 @@ auto read(int file, Bytes out) -> Result<Size>
     return target_size - out.size();
 }
 
-auto write(int file, BytesView in) -> Result<Size>
+auto file_write(int file, BytesView in) -> Result<Size>
 {
     const auto target_size = in.size();
 
@@ -89,23 +90,37 @@ auto write(int file, BytesView in) -> Result<Size>
     return target_size - in.size();
 }
 
-auto sync(int fd) -> Status
+auto file_sync(int fd) -> Status
 {
     if (fsync(fd) == FAILURE)
         return error();
     return Status::ok();
 }
 
-auto seek(int fd, long offset, int whence) -> Result<Index>
+auto file_seek(int fd, long offset, int whence) -> Result<Index>
 {
     if (const auto position = lseek(fd, offset, whence); position != FAILURE)
         return static_cast<Index>(position);
     return Err {error()};
 }
 
-auto unlink(const std::string &path) -> Status
+auto file_remove(const std::string &path) -> Status
 {
     if (::unlink(path.c_str()) == FAILURE)
+        return error();
+    return Status::ok();
+}
+
+auto dir_create(const std::string &path) -> Status
+{
+    if (::mkdir(path.c_str(), 0755) == FAILURE)
+        return error();
+    return Status::ok();
+}
+
+auto dir_remove(const std::string &path) -> Status
+{
+    if (::rmdir(path.c_str()) == FAILURE)
         return error();
     return Status::ok();
 }

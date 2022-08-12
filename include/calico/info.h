@@ -5,20 +5,13 @@
 
 namespace cco {
 
-class Info {
+class Info final {
 public:
-    explicit Info(Database::Impl &impl)
-        : m_impl {&impl}
+    explicit Info(Core &core)
+        : m_core {&core}
     {}
 
-    virtual ~Info() = default;
-
-    /**
-     * Get the hit ratio for the buffer pool page cache.
-     *
-     * @return A page cache hit ratio in the view 0.0 to 1.0, inclusive.
-     */
-    [[nodiscard]] auto cache_hit_ratio() const -> double;
+    ~Info() = default;
 
     /**
      * Get the number of records in the database.
@@ -48,22 +41,8 @@ public:
      */
     [[nodiscard]] auto maximum_key_size() const -> Size;
 
-    /**
-     * Determine if the database uses transactions.
-     *
-     * @return True if the database uses transactions, false otherwise.
-     */
-    [[nodiscard]] auto uses_xact() const -> bool;
-
-    /**
-     * Determine if the database exists only in-memory.
-     *
-     * @return True if the database is an in-memory database, false otherwise.
-     */
-    [[nodiscard]] auto is_temp() const -> bool;
-
 private:
-    Database::Impl *m_impl {}; ///< Pointer to the database this object was opened on.
+    Core *m_core {}; ///< Pointer to the database this object was opened on.
 };
 
 } // cco

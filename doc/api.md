@@ -34,14 +34,14 @@ if (const auto s = db.open(); !s.is_ok()) {
     fmt::print("(2/2) (reason) {}\n", s.what());
     std::exit(EXIT_FAILURE);
 }
-// This will be true until db.close() is called.
+// This will be true until db.file_close() is called.
 assert(db.is_open());
 ```
 
 ### Closing a Database
 
 ```C++
-assert(db.close().is_ok());
+assert(db.file_close().is_ok());
 ```
 
 ### Bytes Objects
@@ -83,7 +83,7 @@ assert(data[7] == '\xFF');
 
 ### Updating a Database
 Records can be added or removed using methods on the `Database` object.
-Keys are unique, so inserting a record that already exists will cause modification of the existing value.
+Keys are unique, so inserting a record that already file_exists will cause modification of the existing value.
 
 ```C++
 std::vector<cco::Record> records {

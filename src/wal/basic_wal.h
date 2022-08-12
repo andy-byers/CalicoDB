@@ -61,6 +61,7 @@ struct WALSegment {
 class BasicWriteAheadLog: public WriteAheadLog {
 public:
     ~BasicWriteAheadLog() override = default;
+    static auto open(Storage&, WriteAheadLog**) -> Status;
 
     [[nodiscard]]
     auto is_enabled() const -> bool override
