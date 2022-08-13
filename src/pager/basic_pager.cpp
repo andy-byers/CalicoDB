@@ -2,12 +2,13 @@
 #include "calico/options.h"
 #include "framer.h"
 #include "page/page.h"
-#include "storage/disk.h"
-#include "utils/identifier.h"
+#include "store/disk.h"
 #include "utils/logging.h"
-#include "wal/wal_manager.h"
+#include "utils/types.h"
 
-namespace cco {
+namespace calico {
+
+namespace fs = std::filesystem;
 
 auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPager>>
 {
@@ -21,12 +22,15 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
         return Err {message.system_error()};
     }
 
-    // Open the database file.
-    RandomAccessEditor *file {};
-    auto s = param.storage.open_random_editor(DATA_FILENAME, &file);
+    fs::path root {param.root};
+    root /= DATA_FILENAME;
 
-    CCO_TRY_STORE(pool->m_framer, Framer::open(
-        std::unique_ptr<RandomAccessEditor> {file},
+    // Open the database file.
+    RandomEditor *file {};
+    auto s = param.storage.open_random_editor(root, &file);
+
+    CALICO_TRY_STORE(pool->m_framer, Framer::open(
+        std::unique_ptr<RandomEditor> {file},
         param.page_size,
         param.frame_count
     ));
@@ -46,7 +50,7 @@ auto BasicPager::page_count() const -> Size
 
 auto BasicPager::pin_frame(PageId id) -> Status
 {
-    CCO_EXPECT_FALSE(m_registry.contains(id));
+    CALICO_EXPECT_FALSE(m_registry.contains(id));
 
     if (!m_framer->available()) {
         const auto r = try_make_available();
@@ -73,14 +77,15 @@ auto BasicPager::pin_frame(PageId id) -> Status
 
 auto BasicPager::flush() -> Status
 {
-    CCO_EXPECT_EQ(m_ref_sum, 0);
+    CALICO_EXPECT_EQ(m_ref_sum, 0);
     m_logger->trace("flushing");
 
     for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
-        CCO_EXPECT_NE(m_registry.get(*itr), m_registry.end());
+        CALICO_EXPECT_NE(m_registry.get(*itr), m_registry.end());
         auto entry = m_registry.get(*itr)->second;
         auto s = m_framer->unpin(entry.frame_id, true);
         if (!s.is_ok()) return s;
+        m_registry.erase(*itr);
 
         entry.dirty_token.reset();
         itr = m_dirty.remove(itr);
@@ -88,7 +93,7 @@ auto BasicPager::flush() -> Status
     return Status::ok();
 }
 
-auto BasicPager::flushed_lsn() const -> SequenceNumber
+auto BasicPager::flushed_lsn() const -> SequenceId
 {
     return m_framer->flushed_lsn();
 }
@@ -126,15 +131,15 @@ auto BasicPager::try_make_available() -> Result<bool>
 auto BasicPager::release(Page page) -> Status
 {
     std::lock_guard lock {m_mutex};
-    CCO_EXPECT_GT(m_ref_sum, 0);
+    CALICO_EXPECT_GT(m_ref_sum, 0);
 
     if (m_wal->is_enabled() && !page.deltas().empty()) {
-        CCO_EXPECT_TRUE(page.is_dirty());
-        page.set_lsn(SequenceNumber {m_wal->current_lsn()});
+        CALICO_EXPECT_TRUE(page.is_dirty());
+        page.set_lsn(SequenceId {m_wal->current_lsn()});
         m_wal->log_deltas(page.id().value, page.view(0), page.deltas());
     }
 
-    CCO_EXPECT_TRUE(m_registry.contains(page.id()));
+    CALICO_EXPECT_TRUE(m_registry.contains(page.id()));
     auto &entry = m_registry.get(page.id())->second;
     m_framer->unref(entry.frame_id, page);
     m_ref_sum--;
@@ -144,7 +149,7 @@ auto BasicPager::release(Page page) -> Status
 auto BasicPager::register_page(Page &page, PageRegistry::Entry &entry) -> void
 {
     // This function needs external synchronization!
-    CCO_EXPECT_GT(m_ref_sum, 0);
+    CALICO_EXPECT_GT(m_ref_sum, 0);
 
     entry.dirty_token = m_dirty.insert(page.id());
     m_dirty_count++;
@@ -157,12 +162,14 @@ auto BasicPager::save_state(FileHeader &header) -> void
 {
     m_logger->trace("saving header fields");
     m_framer->save_state(header);
+    m_wal->save_state(header);
 }
 
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
     m_logger->trace("loading header fields");
     m_framer->load_state(header);
+    m_wal->load_state(header);
 }
 
 auto BasicPager::allocate() -> Result<Page>
@@ -172,7 +179,7 @@ auto BasicPager::allocate() -> Result<Page>
 
 auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 {
-    CCO_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_FALSE(id.is_null());
     std::lock_guard lock {m_mutex};
 
     if (!m_status.is_ok())
@@ -187,13 +194,13 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
         // acquire a writable page unless we intend to write to it immediately. This way we keep the surface between the Pager interface and Page small
         // (page just uses its Pager* member to call release on itself, but only if it was not already released manually).
         if (is_writable && !is_frame_dirty) {
-            CCO_EXPECT_FALSE(page.is_dirty());
+            CALICO_EXPECT_FALSE(page.is_dirty());
             register_page(page, entry);
         }
 
         return page;
     };
-    CCO_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_FALSE(id.is_null());
 
     if (auto itr = m_registry.get(id); itr != m_registry.end())
         return do_acquire(itr->second);
@@ -205,7 +212,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     }
 
     auto itr = m_registry.get(id);
-    CCO_EXPECT_NE(itr, m_registry.end());
+    CALICO_EXPECT_NE(itr, m_registry.end());
     return do_acquire(itr->second);
 }
 

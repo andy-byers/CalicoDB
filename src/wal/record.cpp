@@ -34,7 +34,7 @@
 //
 //    for (const auto &change: param.changes) {
 //        const auto size = change.before.size();
-//        CCO_EXPECT_EQ(size, change.after.size());
+//        CALICO_EXPECT_EQ(size, change.after.size());
 //
 //        put_u16(bytes, static_cast<std::uint16_t>(change.offset));
 //        bytes.advance(sizeof(std::uint16_t));
@@ -48,7 +48,7 @@
 //        mem_copy(bytes, change.after, size);
 //        bytes.advance(size);
 //    }
-//    CCO_EXPECT_GE(m_data.size(), bytes.size());
+//    CALICO_EXPECT_GE(m_data.size(), bytes.size());
 //    m_data.truncate(m_data.size() - bytes.size());
 //}
 //
@@ -85,16 +85,16 @@
 //        region.after = bytes.range(0, region_size);
 //        bytes.advance(region_size);
 //    }
-//    CCO_EXPECT_TRUE(bytes.is_empty());
+//    CALICO_EXPECT_TRUE(bytes.is_empty());
 //    return update;
 //}
 //
-//auto WALRecord::commit(SequenceNumber commit_lsn, Bytes scratch) -> WALRecord
+//auto WALRecord::commit(SeqNum commit_lsn, Bytes scratch) -> WALRecord
 //{
 //    return WALRecord {{
 //        {},
 //        PageId::null(),
-//        SequenceNumber::null(),
+//        SeqNum::null(),
 //        commit_lsn,
 //    }, scratch};
 //}
@@ -156,7 +156,7 @@
 //
 //auto WALRecord::write(Bytes out) const noexcept -> void
 //{
-//    CCO_EXPECT_GE(out.size(), size());
+//    CALICO_EXPECT_GE(out.size(), size());
 //
 //    // lsn (8B)
 //    put_u64(out, m_lsn.value);
@@ -167,13 +167,13 @@
 //    out.advance(sizeof(std::uint32_t));
 //
 //    // type (1B)
-//    CCO_EXPECT_TRUE(is_record_type_valid(m_type));
+//    CALICO_EXPECT_TRUE(is_record_type_valid(m_type));
 //    out[0] = static_cast<Byte>(m_type);
 //    out.advance(sizeof(Type));
 //
 //    // x (2B)
 //    const auto payload_size = m_payload.m_data.size();
-//    CCO_EXPECT_NE(payload_size, 0);
+//    CALICO_EXPECT_NE(payload_size, 0);
 //    put_u16(out, static_cast<std::uint16_t>(payload_size));
 //    out.advance(sizeof(std::uint16_t));
 //
@@ -183,7 +183,7 @@
 //
 //auto WALRecord::is_consistent() const -> bool
 //{
-//    CCO_EXPECT_EQ(m_type, Type::FULL);
+//    CALICO_EXPECT_EQ(m_type, Type::FULL);
 //    return m_crc == crc_32(m_payload.data());
 //}
 //
@@ -196,9 +196,9 @@
 // *     |  LAST    |  MIDDLE  |  LAST   |
 // *     '----------'----------'---------'
 // */
-//auto WALRecord::split(Index offset_in_payload) -> WALRecord
+//auto WALRecord::split(Size offset_in_payload) -> WALRecord
 //{
-//    CCO_EXPECT_LT(offset_in_payload, m_payload.m_data.size());
+//    CALICO_EXPECT_LT(offset_in_payload, m_payload.m_data.size());
 //    WALRecord rhs;
 //    rhs.m_backing = m_backing.range(offset_in_payload); // TODO: Added...
 //    rhs.m_payload.m_data = m_payload.m_data; // TODO: Added...
@@ -211,12 +211,12 @@
 //    rhs.m_crc = m_crc;
 //    rhs.m_type = Type::LAST;
 //
-//    CCO_EXPECT_NE(m_type, Type::EMPTY);
-//    CCO_EXPECT_NE(m_type, Type::FIRST);
+//    CALICO_EXPECT_NE(m_type, Type::EMPTY);
+//    CALICO_EXPECT_NE(m_type, Type::FIRST);
 //    if (m_type == Type::FULL) {
 //        m_type = Type::FIRST;
 //    } else {
-//        CCO_EXPECT_EQ(m_type, Type::LAST);
+//        CALICO_EXPECT_EQ(m_type, Type::LAST);
 //        m_type = Type::MIDDLE;
 //    }
 //    return rhs;
@@ -237,7 +237,7 @@
 //{
 //    static constexpr auto ERROR_PRIMARY = "cannot merge WAL records";
 //
-//    CCO_EXPECT_TRUE(is_record_type_valid(rhs.m_type));
+//    CALICO_EXPECT_TRUE(is_record_type_valid(rhs.m_type));
 //    const auto new_size = m_payload.m_data.size() + rhs.m_payload.m_data.size();
 //    m_payload.m_data = m_backing;
 //    m_payload.append(rhs.m_payload);
@@ -256,7 +256,7 @@
 //        m_crc = rhs.m_crc;
 //
 //    } else {
-//        CCO_EXPECT_EQ(m_type, Type::FIRST);
+//        CALICO_EXPECT_EQ(m_type, Type::FIRST);
 //
 //        if (m_lsn != rhs.m_lsn || m_crc != rhs.m_crc) {
 //            ThreePartMessage message;

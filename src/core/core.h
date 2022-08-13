@@ -1,5 +1,5 @@
-#ifndef CCO_DB_DATABASE_IMPL_H
-#define CCO_DB_DATABASE_IMPL_H
+#ifndef CALICO_DB_DATABASE_IMPL_H
+#define CALICO_DB_DATABASE_IMPL_H
 
 #include "calico/database.h"
 #include "utils/result.h"
@@ -7,7 +7,11 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
 
-namespace cco {
+#ifdef CALICO_BUILD_TESTS
+#  include <gtest/gtest_prod.h>
+#endif
+
+namespace calico {
 
 class Cursor;
 class Pager;
@@ -16,10 +20,7 @@ class Tree;
 
 struct InitialState {
     FileHeader state;
-    Options options;
     bool is_new {};
-    bool owns_store {};
-    bool owns_wal {};
 };
 
 class Core final {
@@ -30,30 +31,80 @@ public:
     ~Core();
 
     [[nodiscard]] auto open() -> Status;
-    [[nodiscard]] auto can_commit() const -> bool;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
-    [[nodiscard]] auto cache_hit_ratio() const -> double;
-    [[nodiscard]] auto record_count() const -> Size;
-    [[nodiscard]] auto page_count() const -> Size;
-    [[nodiscard]] auto page_size() const -> Size;
-    [[nodiscard]] auto is_temp() const -> bool;
-    [[nodiscard]] auto uses_xact() const -> bool;
-    [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool>;
-    [[nodiscard]] auto erase(BytesView) -> Result<bool>;
-    [[nodiscard]] auto erase(Cursor) -> Result<bool>;
-    [[nodiscard]] auto commit() -> Result<void>;
-    [[nodiscard]] auto abort() -> Result<void>;
-    [[nodiscard]] auto close() -> Result<void>;
+    [[nodiscard]] auto insert(BytesView, BytesView) -> Status;
+    [[nodiscard]] auto erase(BytesView) -> Status;
+    [[nodiscard]] auto erase(Cursor) -> Status;
+    [[nodiscard]] auto commit() -> Status;
+    [[nodiscard]] auto abort() -> Status;
+    [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto find(BytesView) -> Cursor;
     [[nodiscard]] auto find_exact(BytesView) -> Cursor;
     [[nodiscard]] auto find_minimum() -> Cursor;
     [[nodiscard]] auto find_maximum() -> Cursor;
     [[nodiscard]] auto info() -> Info;
 
+    [[nodiscard]]
+    auto store() -> Storage&
+    {
+        return *m_store;
+    }
+
+    [[nodiscard]]
+    auto store() const -> const Storage&
+    {
+        return *m_store;
+    }
+
+    [[nodiscard]]
+    auto wal() -> WriteAheadLog&
+    {
+        return *m_wal;
+    }
+
+    [[nodiscard]]
+    auto wal() const -> const WriteAheadLog&
+    {
+        return *m_wal;
+    }
+
+    [[nodiscard]]
+    auto tree() -> Tree&
+    {
+        return *m_tree;
+    }
+
+    [[nodiscard]]
+    auto tree() const -> const Tree&
+    {
+        return *m_tree;
+    }
+
+    [[nodiscard]]
+    auto pager() -> Pager&
+    {
+        return *m_pager;
+    }
+
+    [[nodiscard]]
+    auto pager() const -> const Pager&
+    {
+        return *m_pager;
+    }
+
+    [[nodiscard]]
+    auto options() const -> const Options&
+    {
+        return m_options;
+    }
+
 private:
+    [[nodiscard]] auto forward_status(Status, const std::string &) -> Status;
+    [[nodiscard]] auto recover() -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;
+    auto load_state(const FileHeader&) -> void;
 
     std::string m_path;
     Options m_options;
@@ -63,12 +114,14 @@ private:
     std::unique_ptr<Tree> m_tree;
     Storage *m_store {};
     WriteAheadLog *m_wal {};
+    bool m_has_update {};
     bool m_owns_store {};
     bool m_owns_wal {};
+    bool m_is_open {};
 };
 
-auto setup(Storage &, const Options &, spdlog::logger &) -> Result<SanitizedOptions>;
+auto setup(const std::string &, Storage &, const Options &, spdlog::logger &) -> Result<InitialState>;
 
 } // namespace cco
 
-#endif // CCO_DB_DATABASE_IMPL_H
+#endif // CALICO_DB_DATABASE_IMPL_H

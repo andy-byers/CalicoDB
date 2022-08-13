@@ -7,14 +7,14 @@
 #include "calico/options.h"
 #include "calico/storage.h"
 #include "random.h"
-#include "storage/disk.h"
-#include "storage/heap.h"
-#include "storage/system.h"
+#include "store/disk.h"
+#include "store/heap.h"
+#include "store/system.h"
 #include "unit_tests.h"
 
 namespace {
 
-using namespace cco;
+using namespace calico;
 
 template<class Base, class Store>
 [[nodiscard]]
@@ -23,9 +23,9 @@ auto open_blob(Store &store, const std::string &name) -> std::unique_ptr<Base>
     auto s = Status::ok();
     Base *temp {};
 
-    if constexpr (std::is_same_v<RandomAccessReader, Base>) {
+    if constexpr (std::is_same_v<RandomReader, Base>) {
         s = store.open_random_reader(name, &temp);
-    } else if constexpr (std::is_same_v<RandomAccessEditor, Base>) {
+    } else if constexpr (std::is_same_v<RandomEditor, Base>) {
         s = store.open_random_editor(name, &temp);
     } else if constexpr (std::is_same_v<AppendWriter, Base>) {
         s = store.open_append_writer(name, &temp);
@@ -57,16 +57,16 @@ constexpr auto write_out_randomly(Random &random, Writer &writer, const std::str
     constexpr Size num_chunks {20};
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
     auto in = stob(message);
-    Index counter {};
+    Size counter {};
 
     while (!in.is_empty()) {
         const auto chunk_size = std::min(in.size(), random.next_int(message.size() / num_chunks));
         auto chunk = in.copy().truncate(chunk_size);
 
         if constexpr (std::is_same_v<AppendWriter, Writer>) {
-            ASSERT_TRUE(writer.file_write(chunk).is_ok());
+            ASSERT_TRUE(writer.write(chunk).is_ok());
         } else {
-            ASSERT_TRUE(writer.file_write(chunk, counter).is_ok());
+            ASSERT_TRUE(writer.write(chunk, counter).is_ok());
             counter += chunk_size;
         }
         in.advance(chunk_size);
@@ -82,12 +82,12 @@ auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::strin
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
     std::string backing(size, '\x00');
     auto out = stob(backing);
-    Index counter {};
+    Size counter {};
 
     while (!out.is_empty()) {
         const auto chunk_size = std::min(out.size(), random.next_int(size / num_chunks));
         auto chunk = out.copy().truncate(chunk_size);
-        const auto s = reader.file_read(chunk, counter);
+        const auto s = reader.read(chunk, counter);
 
         if (chunk.size() < chunk_size)
             return backing;
@@ -101,17 +101,19 @@ auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::strin
     return backing;
 }
 
+constexpr auto HOME = "/tmp/calico_test_files";
+constexpr auto PATH = "/tmp/calico_test_files/name";
+
 class FileTests: public testing::Test {
 public:
-    static constexpr auto HOME = "/tmp/calico_test_files";
-    static constexpr auto PATH = "/tmp/calico_test_files/name";
-
     FileTests()
+        : storage {std::make_unique<DiskStorage>()}
     {
-        Storage *temp;
-        const auto s = DiskStorage::open(HOME, &temp);
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
-        storage.reset(temp);
+        std::error_code ignore;
+        std::filesystem::remove_all(HOME, ignore);
+
+        const auto s = storage->create_directory(HOME);
+        EXPECT_TRUE(s.is_ok());
     }
 
     ~FileTests() override
@@ -124,18 +126,18 @@ public:
     Random random {0};
 };
 
-class RandomAccessFileReaderTests: public FileTests {
+class RandomFileReaderTests: public FileTests {
 public:
-    RandomAccessFileReaderTests()
+    RandomFileReaderTests()
     {
         write_whole_file(PATH, "");
-        file = open_blob<RandomAccessReader>(*storage, "name");
+        file = open_blob<RandomReader>(*storage, PATH);
     }
 
-    std::unique_ptr<RandomAccessReader> file;
+    std::unique_ptr<RandomReader> file;
 };
 
-TEST_F(RandomAccessFileReaderTests, NewFileIsEmpty)
+TEST_F(RandomFileReaderTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
     auto bytes = stob(backing);
@@ -143,23 +145,23 @@ TEST_F(RandomAccessFileReaderTests, NewFileIsEmpty)
     ASSERT_TRUE(bytes.is_empty());
 }
 
-TEST_F(RandomAccessFileReaderTests, ReadsBackContents)
+TEST_F(RandomFileReaderTests, ReadsBackContents)
 {
     auto data = random.next_string(500);
     write_whole_file(PATH, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-class RandomAccessFileEditorTests: public FileTests {
+class RandomFileEditorTests: public FileTests {
 public:
-    RandomAccessFileEditorTests()
-        : file {open_blob<RandomAccessEditor>(*storage, "name")}
+    RandomFileEditorTests()
+        : file {open_blob<RandomEditor>(*storage, PATH)}
     {}
 
-    std::unique_ptr<RandomAccessEditor> file;
+    std::unique_ptr<RandomEditor> file;
 };
 
-TEST_F(RandomAccessFileEditorTests, NewFileIsEmpty)
+TEST_F(RandomFileEditorTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
     auto bytes = stob(backing);
@@ -167,7 +169,7 @@ TEST_F(RandomAccessFileEditorTests, NewFileIsEmpty)
     ASSERT_TRUE(bytes.is_empty());
 }
 
-TEST_F(RandomAccessFileEditorTests, WritesOutAndReadsBackData)
+TEST_F(RandomFileEditorTests, WritesOutAndReadsBackData)
 {
     auto data = random.next_string(500);
     write_out_randomly(random, *file, data);
@@ -177,7 +179,7 @@ TEST_F(RandomAccessFileEditorTests, WritesOutAndReadsBackData)
 class AppendFileWriterTests: public FileTests {
 public:
     AppendFileWriterTests()
-        : file {open_blob<AppendWriter>(*storage, "name")}
+        : file {open_blob<AppendWriter>(*storage, PATH)}
     {}
 
     std::unique_ptr<AppendWriter> file;
@@ -190,11 +192,24 @@ TEST_F(AppendFileWriterTests, WritesOutData)
     ASSERT_EQ(read_whole_file(PATH), data);
 }
 
+class DiskStorageTests: public testing::Test {
+public:
+    DiskStorageTests() = default;
+
+    ~DiskStorageTests() override = default;
+
+    DiskStorage storage;
+    Random random {0};
+};
+
 class HeapTests: public testing::Test {
 public:
     HeapTests()
         : storage {std::make_unique<HeapStorage>()}
-    {}
+    {
+        const auto s = storage->create_directory(HOME);
+        EXPECT_TRUE(s.is_ok());
+    }
 
     ~HeapTests() override = default;
 
@@ -204,16 +219,16 @@ public:
 
 TEST_F(HeapTests, ReaderCannotCreateBlob)
 {
-    RandomAccessReader *temp {};
+    RandomReader *temp {};
     const auto s = storage->open_random_reader("nonexistent", &temp);
     ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what();
 }
 
 TEST_F(HeapTests, ReadsAndWrites)
 {
-    auto ra_editor = open_blob<RandomAccessEditor>(*storage, "name");
-    auto ra_reader = open_blob<RandomAccessReader>(*storage, "name");
-    auto ap_writer = open_blob<AppendWriter>(*storage, "name");
+    auto ra_editor = open_blob<RandomEditor>(*storage, PATH);
+    auto ra_reader = open_blob<RandomReader>(*storage, PATH);
+    auto ap_writer = open_blob<AppendWriter>(*storage, PATH);
 
     const auto first_input = random.next_string(500);
     const auto second_input = random.next_string(500);
@@ -227,8 +242,8 @@ TEST_F(HeapTests, ReadsAndWrites)
 
 TEST_F(HeapTests, ReaderStopsAtEOF)
 {
-    auto ra_editor = open_blob<RandomAccessEditor>(*storage, "name");
-    auto ra_reader = open_blob<RandomAccessReader>(*storage, "name");
+    auto ra_editor = open_blob<RandomEditor>(*storage, PATH);
+    auto ra_reader = open_blob<RandomReader>(*storage, PATH);
 
     const auto data = random.next_string(500);
     write_out_randomly(random, *ra_editor, data);

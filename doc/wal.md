@@ -1,8 +1,10 @@
 # Write-Ahead Log (WAL)
-Calico DB uses write-ahead logging to protect transactions.
+Calico DB uses write-ahead logging to provide ACID properties to transactions.
 Each update to a database page must first be written to the WAL, and WAL segments cannot be removed until all of their corresponding database pages have been flushed to disk.
 A physical logging scheme is used, described in [Logging Scheme](#logging-scheme).
-This incurs additional overhead compared to higher-level logging schemes, but also protects against crashes during tree rebalancing and other routines.
+This incurs additional overhead compared to higher-level logging schemes, but also protects against crashes during tree rebalancing.
+
+## Log Segments
 Calico DB only supports a single running transaction, so all updates go to the same WAL segment.
 When the transaction is committed, a commit record is written at the end of the current segment, and a new segment is generated.
 Updates made on the new transaction will be written to the new WAL segment.
@@ -19,13 +21,13 @@ It keeps track of the log sequence number (LSN) of the last record it has writte
 The WAL uses physical logging to protect pages during a transaction.
 What follows is a short description of the lifecycle of a **writable** database page during a transaction.
 Assuming that the requested page $P$ is not already in the buffer pool cache, we first read $P$ into a vacant frame.
-Thus far, $P$ has not been modified, so we write out a WAL record containing its entire "before" contents, with its page LSN updated to reflect the new WAL record.
-Note that the record will also contain the page's previous LSN, so we can always revert the page to its state before this operation.
-Now we are free to modify $P$.
+Thus far, $P$ has not been modified, so we write out a WAL record containing its entire "before" contents, called a full image record (see [Full Images](#full-images)).
+Writing out this WAL record represents a promise that the database page will actually be modified: the tree component should never acquire a writable page unless it is actually going to write to it.
+Now that $P$ has its contents saved in the WAL, we are free to modify it.
 Each time we do so, $P$ will record a (offset, size) pair describing the modified region.
 Once $P$ is released, all of these pairs are consolidated such that there are no overlaps.
 Since each WAL record references only a single page, consolidation of these pairs has the benefit of bounding the maximum record size.
-Finally, the "after" contents of the modified regions are bundled into another WAL record and written to disk.
+Finally, the "after" contents of the modified regions are bundled into another WAL record and written to disk (see [Delta Records](#delta-records)).
 This procedure has the downside of causing extra data to be written to the WAL when a given page is only updated a few times.
 However, for pages that are modified frequently, the reduction in WAL size justifies use of this scheme.
 
@@ -40,12 +42,12 @@ The flushed LSN value provided does not need to be exact, however, it must be eq
 This allows writing to be done in the background.
 
 ### Record Types
-The custom WAL object must handle three types of records: full-page images, delta records, and commit records.
+The custom WAL object must handle three types of records: full images, delta records, and commit records.
 
-#### Full-Page Images
-A full-page image is generated right before a database page is made dirty.
+#### Full Images
+A full-page image is generated when a clean writable page is acquired from the pager.
 It contains the entire page contents, and can be used to undo many modifications made during a transaction.
-All that is needed for a full-page image is an immutable slice of the page data.
+All that is needed for a full image is an immutable slice of the page data.
 The page LSN is not updated when generating this type of record, since the page was not actually updated.
 
 [//]: # (TODO: I don't see a problem with this, but who knows. We may need to update the page LSN with this type of record.
@@ -75,5 +77,5 @@ Now the database is consistent with its state at the last successful commit.
 ### Reentrancy
 Both of these phases involve numerous disk accesses, and thus have many opportunities for failure.
 The custom WAL object must guarantee that recovery as-a-whole is reentrant.
-We should be able to both recovery phases multiple times without corrupting the database.
+We should be able to perform both recovery phases multiple times without corrupting the database.
 It should be noted that this routine does not protect from database corruption in most cases, it just provides atomicity and added durability to transactions.

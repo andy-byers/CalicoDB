@@ -1,10 +1,10 @@
-#ifndef CCO_DATABASE_H
-#define CCO_DATABASE_H
+#ifndef CALICO_DATABASE_H
+#define CALICO_DATABASE_H
 
 #include "status.h"
 #include <memory>
 
-namespace cco {
+namespace calico {
 
 class Core;
 class Cursor;
@@ -97,4 +97,4 @@ private:
 
 } // cco
 
-#endif // CCO_DATABASE_H
+#endif // CALICO_DATABASE_H

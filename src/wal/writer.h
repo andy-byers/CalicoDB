@@ -16,40 +16,40 @@
 ///**
 // * A component that appends records to the WAL file.
 // */
-//class WALWriter : public IWALWriter {
+//class WALWriter {
 //public:
-//    ~WALWriter() override = default;
+//    ~WALWriter() = default;
 //    [[nodiscard]] static auto create(const WALParameters &) -> Result<std::unique_ptr<IWALWriter>>;
-//    [[nodiscard]] auto needs_segmentation() -> bool override;
-//    [[nodiscard]] auto is_open() -> bool override;
-//    [[nodiscard]] auto open(std::unique_ptr<IFile>) -> Result<void> override;
-//    [[nodiscard]] auto close() -> Result<void> override;
-//    [[nodiscard]] auto append(WALRecord) -> Result<Position> override;
-//    [[nodiscard]] auto truncate() -> Result<void> override;
-//    [[nodiscard]] auto flush() -> Result<void> override;
+//    [[nodiscard]] auto needs_segmentation() -> bool ;
+//    [[nodiscard]] auto is_open() -> bool ;
+//    [[nodiscard]] auto open(std::unique_ptr<IFile>) -> Status ;
+//    [[nodiscard]] auto close() -> Status ;
+//    [[nodiscard]] auto append(WALRecord) -> Result<Position> ;
+//    [[nodiscard]] auto truncate() -> Status ;
+//    [[nodiscard]] auto flush() -> Status ;
 //
-//    auto set_flushed_lsn(SequenceNumber flushed_lsn) -> void override
+//    auto set_flushed_lsn(SeqNum flushed_lsn) -> void
 //    {
 //        m_flushed_lsn = flushed_lsn;
 //        m_last_lsn = flushed_lsn;
 //    }
 //
-//    [[nodiscard]] auto flushed_lsn() const -> SequenceNumber override
+//    [[nodiscard]] auto flushed_lsn() const -> SeqNum
 //    {
 //        return m_flushed_lsn;
 //    }
 //
-//    [[nodiscard]] auto last_lsn() const -> SequenceNumber override
+//    [[nodiscard]] auto last_lsn() const -> SeqNum
 //    {
 //        return m_last_lsn;
 //    }
 //
-//    [[nodiscard]] auto has_pending() const -> bool override
+//    [[nodiscard]] auto has_pending() const -> bool
 //    {
 //        return m_position.offset > 0;
 //    }
 //
-//    [[nodiscard]] auto has_committed() const -> bool override
+//    [[nodiscard]] auto has_committed() const -> bool
 //    {
 //        return m_position.block_id > 0;
 //    }
@@ -60,8 +60,8 @@
 //    std::unique_ptr<IFile> m_file;
 //    std::string m_tail;
 //    Position m_position {};
-//    SequenceNumber m_flushed_lsn;
-//    SequenceNumber m_last_lsn;
+//    SeqNum m_flushed_lsn;
+//    SeqNum m_last_lsn;
 //};
 //
 //} // namespace cco

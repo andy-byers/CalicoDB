@@ -1,9 +1,9 @@
-#ifndef CCO_UTILS_CRC_H
-#define CCO_UTILS_CRC_H
+#ifndef CALICO_UTILS_CRC_H
+#define CALICO_UTILS_CRC_H
 
 #include "calico/bytes.h"
 
-namespace cco {
+namespace calico {
 
 inline auto crc_32(BytesView data) noexcept -> std::uint32_t
 {
@@ -14,7 +14,7 @@ inline auto crc_32(BytesView data) noexcept -> std::uint32_t
     std::uint32_t a {1}, b {0};
 
     // Process each byte of the data in order
-    for (Index i {}, n {data.size()}; i < n; ++i) {
+    for (Size i {}, n {data.size()}; i < n; ++i) {
         a = (a + static_cast<std::uint8_t>(data[i])) % MOD_ADLER;
         b = (b + a) % MOD_ADLER;
     }
@@ -24,4 +24,4 @@ inline auto crc_32(BytesView data) noexcept -> std::uint32_t
 
 } // namespace cco
 
-#endif // CCO_UTILS_CRC_H
+#endif // CALICO_UTILS_CRC_H

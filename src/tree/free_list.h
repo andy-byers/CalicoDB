@@ -1,19 +1,14 @@
-#ifndef CCO_TREE_FREE_LIST_H
-#define CCO_TREE_FREE_LIST_H
+#ifndef CALICO_TREE_FREE_LIST_H
+#define CALICO_TREE_FREE_LIST_H
 
 #include "calico/status.h"
 #include "tree.h"
-#include "utils/identifier.h"
+#include "utils/types.h"
 #include <optional>
 
-namespace cco {
+namespace calico {
 
 class Pager;
-
-namespace page {
-    class FileHeaderReader;
-    class FileHeaderWriter;
-} // namespace page
 
 /**
  * Object that manages a stack of deleted pages on disk.
@@ -75,4 +70,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_TREE_FREE_LIST_H
+#endif // CALICO_TREE_FREE_LIST_H

@@ -4,7 +4,7 @@
 #include "page/page.h"
 #include "pager/pager.h"
 
-namespace cco {
+namespace calico {
 
 auto FreeList::save_state(FileHeader &header) const -> void
 {
@@ -18,7 +18,7 @@ auto FreeList::load_state(const FileHeader &header) -> void
 
 auto FreeList::push(Page page) -> Result<void>
 {
-    CCO_EXPECT_FALSE(page.id().is_base());
+    CALICO_EXPECT_FALSE(page.id().is_root());
     page.set_type(PageType::FREELIST_LINK);
     Link link {std::move(page)};
     link.set_next_id(m_head);
@@ -38,7 +38,7 @@ auto FreeList::pop() -> Result<Page>
                 return link.take();
             });
     }
-    CCO_EXPECT_TRUE(m_head.is_null());
+    CALICO_EXPECT_TRUE(m_head.is_null());
     return Err {Status::logic_error("cannot pop page: free list is empty")};
 }
 

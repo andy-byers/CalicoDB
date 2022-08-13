@@ -1,9 +1,9 @@
-#ifndef CCO_PAGE_LINK_H
-#define CCO_PAGE_LINK_H
+#ifndef CALICO_PAGE_LINK_H
+#define CALICO_PAGE_LINK_H
 
 #include "page.h"
 
-namespace cco {
+namespace calico {
 
 class Link {
 public:
@@ -49,4 +49,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_PAGE_LINK_H
+#endif // CALICO_PAGE_LINK_H

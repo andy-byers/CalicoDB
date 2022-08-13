@@ -4,8 +4,8 @@
 //*   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
 //*/
 //
-//#ifndef CCO_WAL_WAL_RECORD_H
-//#define CCO_WAL_WAL_RECORD_H
+//#ifndef CALICO_WAL_WAL_RECORD_H
+//#define CALICO_WAL_WAL_RECORD_H
 //
 //#include "calico/status.h"
 //#include "page/page.h"
@@ -50,7 +50,7 @@
 //    // TODO: Beware that m_data may be exactly the size of an entire payload, if the payload was made with the PageUpdate constructor, otherwise, it is the full scratch memory
 //    //       and one should use the WALRecord payload size instead.
 //    Bytes m_data; ///< Payload contents
-//    Index m_cursor {};
+//    Size m_cursor {};
 //};
 //
 ///**
@@ -75,16 +75,16 @@
 //        : m_backing {scratch}
 //    {}
 //
-//    static auto commit(SequenceNumber, Bytes) -> WALRecord;
+//    static auto commit(SeqNum, Bytes) -> WALRecord;
 //    WALRecord(const PageUpdate &, Bytes);
 //    ~WALRecord() = default;
 //
-//    [[nodiscard]] auto lsn() const -> SequenceNumber
+//    [[nodiscard]] auto lsn() const -> SeqNum
 //    {
 //        return m_lsn;
 //    }
 //
-//    [[nodiscard]] auto crc() const -> Index
+//    [[nodiscard]] auto crc() const -> Size
 //    {
 //        return m_crc;
 //    }
@@ -106,7 +106,7 @@
 //
 //    [[nodiscard]] auto is_commit() const -> bool
 //    {
-//        CCO_EXPECT_EQ(m_type, Type::FULL);
+//        CALICO_EXPECT_EQ(m_type, Type::FULL);
 //        return m_payload.is_commit();
 //    }
 //
@@ -121,7 +121,7 @@
 //    [[nodiscard]] auto read(BytesView) -> Result<bool>;
 //    [[nodiscard]] auto merge(const WALRecord &) -> Result<void>;
 //    auto write(Bytes) const noexcept -> void;
-//    auto split(Index) -> WALRecord;
+//    auto split(Size) -> WALRecord;
 //
 //    auto TEST_corrupt_crc() -> void
 //    {
@@ -130,12 +130,12 @@
 //
 //private:
 //    WALPayload m_payload;
-//    SequenceNumber m_lsn;
+//    SeqNum m_lsn;
 //    Bytes m_backing;
-//    Index m_crc {};
+//    Size m_crc {};
 //    Type m_type {Type::EMPTY};
 //};
 //
 //} // namespace cco
 //
-//#endif // CCO_WAL_WAL_RECORD_H
+//#endif // CALICO_WAL_WAL_RECORD_H

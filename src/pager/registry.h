@@ -2,14 +2,14 @@
  * Very loosely based off of https://medium.com/@koushikmohan/an-analysis-of-2q-cache-replacement-algorithms-21acceae672a
  */
 
-#ifndef CCO_POOL_PAGE_CACHE_H
-#define CCO_POOL_PAGE_CACHE_H
+#ifndef CALICO_POOL_PAGE_CACHE_H
+#define CALICO_POOL_PAGE_CACHE_H
 
 #include "framer.h"
 #include "utils/cache.h"
-#include "utils/identifier.h"
+#include "utils/types.h"
 
-namespace cco {
+namespace calico {
 
 class Frame;
 
@@ -54,7 +54,7 @@ public:
     using DirtyToken = std::optional<PageList::Iterator>;
 
     struct Entry {
-        FrameId frame_id;
+        FrameNumber frame_id;
         DirtyToken dirty_token {};
     };
 
@@ -113,7 +113,7 @@ public:
         return end();
     }
 
-    auto put(PageId, FrameId) -> void;
+    auto put(PageId, FrameNumber) -> void;
     auto get(PageId) -> Iterator;
     auto erase(PageId) -> void;
 
@@ -126,4 +126,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_POOL_PAGE_CACHE_H
+#endif // CALICO_POOL_PAGE_CACHE_H

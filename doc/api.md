@@ -18,7 +18,7 @@ Next, we call `open()` to open the database connection.
 ```C++
 // Set some options. We'll create a database at "tmp/cats" with pages of size 8 KB and 
 // 128 cache frames (4 MB total). We'll also enable logging.
-cco::Options options;
+calico::Options options;
 options.path = "/tmp/cats";
 options.page_size = 0x8000;
 options.frame_count = 128;
@@ -26,7 +26,7 @@ options.log_level = spdlog::level::info;
 
 // Create the database object. Note that we could just as easily use a smart pointer or
 // new/delete to manage the resource.
-cco::Database db {options};
+calico::Database db {options};
 
 // Open the database connection.
 if (const auto s = db.open(); !s.is_ok()) {
@@ -49,20 +49,20 @@ Calico DB uses `Bytes` and `BytesView` objects to represent unowned, contiguous 
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
-auto function_taking_a_bytes_view = [](cco::BytesView) {};
+auto function_taking_a_bytes_view = [](calico::BytesView) {};
 
 std::string data {"Hello, world!"};
 
 // Construct slices from a string. The string still owns the memory, the slices just refer
 // to it.
-cco::Bytes b {data.data(), data.size()};
-cco::BytesView v {data.data(), data.size()};
+calico::Bytes b {data.data(), data.size()};
+calico::BytesView v {data.data(), data.size()};
 
 // Convenience conversion from a string.
-const auto from_string = cco::stob(data);
+const auto from_string = calico::stob(data);
 
 // Convenience conversion back to a string. This operation may allocate heap memory.
-assert(cco::btos(from_string) == data);
+assert(calico::btos(from_string) == data);
 
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
 function_taking_a_bytes_view(b);
@@ -72,9 +72,9 @@ function_taking_a_bytes_view(b);
 b.advance(7).truncate(5);
 
 // Comparisons.
-assert(cco::compare_three_way(b, v) != cco::ThreeWayComparison::EQ);
-assert(b == cco::stob("world"));
-assert(b.starts_with(cco::stob("wor")));
+assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
+assert(b == calico::stob("world"));
+assert(b.starts_with(calico::stob("wor")));
 
 // Bytes objects can modify the underlying string, while BytesView objects cannot.
 b[0] = '\xFF';
@@ -86,7 +86,7 @@ Records can be added or removed using methods on the `Database` object.
 Keys are unique, so inserting a record that already file_exists will cause modification of the existing value.
 
 ```C++
-std::vector<cco::Record> records {
+std::vector<calico::Record> records {
     {"bengal", "short;spotted,marbled,rosetted"},
     {"turkish vankedisi", "long;white"},
     {"moose", "???"},
@@ -118,7 +118,7 @@ The database is queried using cursors returned by the `find*()` methods.
 
 ```C++
 static constexpr auto target = "russian blue";
-const auto key = cco::stob(target);
+const auto key = calico::stob(target);
 
 // find_exact() looks for a record that compares equal to the given key and returns a cursor
 // pointing to it.
@@ -154,7 +154,7 @@ if (const auto boundary = db.find_exact(key); boundary.is_valid()) {
 ```
 
 ### Errors
-Methods on the database object that can fail will generally return a `cco::Status` object (similar to and inspired by LevelDB's status object).
+Methods on the database object that can fail will generally return a `calico::Status` object (similar to and inspired by LevelDB's status object).
 If a method returning a cursor encounters an error, the error status will be made available in the cursor's status field.
 If an error occurs that could potentially lead to corruption of the database contents, the database object will lock up and refuse to perform any more work.
 Rather, the exceptional status that caused the lockup will be returned each time a method call is made.
@@ -168,5 +168,5 @@ The next time that the database is started up, it will perform the necessary rec
 ### Deleting a Database
 ```C++
 // We can delete a database by passing ownership to the following static method.
-cco::Database::destroy(std::move(db));
+calico::Database::destroy(std::move(db));
 ```

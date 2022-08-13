@@ -1,17 +1,158 @@
+
 /**
  * References
  * (1) https://en.cppreference.com/w/cpp/utility/exchange
  */
 
-#ifndef CCO_UTILS_TYPES_H
-#define CCO_UTILS_TYPES_H
+#ifndef CALICO_UTILS_TYPES_H
+#define CALICO_UTILS_TYPES_H
 
-#include "calico/options.h"
+#include "utils.h"
 
-namespace cco {
+namespace calico {
+
+template<class Index>
+struct IndexHash {
+    auto operator()(const Index &index) const -> std::size_t
+    {
+        return static_cast<std::size_t>(index.value);
+    }
+};
+
+template<class T>
+struct NullableId {
+
+    [[nodiscard]]
+    static constexpr auto null() noexcept -> T
+    {
+        return T {0};
+    }
+
+    [[nodiscard]]
+    constexpr auto is_null() const noexcept -> bool
+    {
+        return static_cast<const T&>(*this).value == null().value;
+    }
+
+    [[nodiscard]]
+    constexpr auto as_index() const noexcept -> Size
+    {
+        const auto &t = static_cast<const T&>(*this);
+        CALICO_EXPECT_NE(t, null());
+        return t.value - 1U;
+    }
+
+    [[nodiscard]]
+    static constexpr auto from_index(Size t) noexcept -> T
+    {
+        return T {t + 1};
+    }
+};
+
+template<class T1>
+struct EqualityComparableTraits {
+
+    template<class T2>
+    auto operator==(const T2 &t) const noexcept -> bool
+    {
+        return static_cast<const T1&>(*this).value == T1 {t}.value;
+    }
+
+    template<class T2>
+    auto operator!=(const T2 &t) const noexcept -> bool
+    {
+        return static_cast<const T1&>(*this).value != T1 {t}.value;
+    }
+};
+
+template<class T1>
+struct OrderableTraits {
+
+    template<class T2>
+    auto operator<(const T2 &t) const noexcept -> bool
+    {
+        return static_cast<const T1&>(*this).value < T1 {t}.value;
+    }
+
+    template<class T2>
+    auto operator<=(const T2 &t) const noexcept -> bool
+    {
+        return static_cast<const T1&>(*this).value <= T1 {t}.value;
+    }
+
+    template<class T2>
+    auto operator>(const T2 &t) const noexcept -> bool
+    {
+        return static_cast<const T1&>(*this).value > T1 {t}.value;
+    }
+
+    template<class T2>
+    auto operator>=(const T2 &t) const noexcept -> bool
+    {
+        return static_cast<const T1&>(*this).value >= T1 {t}.value;
+    }
+};
+
+struct PageId
+    : public NullableId<PageId>,
+      public EqualityComparableTraits<PageId>
+{
+    using Type = std::uint64_t;
+    using Hash = IndexHash<PageId>;
+
+    constexpr PageId() noexcept = default;
+
+    template<class T>
+    constexpr explicit PageId(T t) noexcept
+        : value {std::uint64_t(t)}
+    {}
+
+    [[nodiscard]]
+    static constexpr auto root() noexcept -> PageId
+    {
+        return PageId {1};
+    }
+
+    [[nodiscard]]
+    constexpr auto is_root() const noexcept -> bool
+    {
+        return value == root().value;
+    }
+
+    std::uint64_t value {};
+};
+
+struct SequenceId
+    : public NullableId<SequenceId>,
+      public EqualityComparableTraits<SequenceId>,
+      public OrderableTraits<SequenceId>
+{
+    using Type = std::uint64_t;
+    using Hash = IndexHash<SequenceId>;
+
+    constexpr SequenceId() noexcept = default;
+
+    template<class U>
+    constexpr explicit SequenceId(U u) noexcept
+        : value {std::uint64_t(u)}
+    {}
+
+    [[nodiscard]]
+    static constexpr auto base() noexcept -> SequenceId
+    {
+        return SequenceId {1};
+    }
+
+    [[nodiscard]]
+    constexpr auto is_base() const noexcept -> bool
+    {
+        return value == base().value;
+    }
+
+    std::uint64_t value {};
+};
 
 struct AlignedDeleter {
-
     explicit AlignedDeleter(std::align_val_t align)
         : alignment {align}
     {}
@@ -88,4 +229,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_UTILS_TYPES_H
+#endif // CALICO_UTILS_TYPES_H

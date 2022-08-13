@@ -35,10 +35,10 @@
 //    WALReaderWriterTests()
 //    {
 //        home = std::make_unique<FakeDirectory>("WALReaderWriterTests");
-//        reader = WALReader::create({nullptr, *home, create_sink(), PAGE_SIZE, SequenceNumber::null()}).value();
-//        writer = WALWriter::create({nullptr, *home, create_sink(), PAGE_SIZE, SequenceNumber::null()}).value();
-//        CCO_EXPECT_TRUE(writer->open(*home->open_file("wal-0", Mode::WRITE_ONLY | Mode::CREATE | Mode::APPEND, DEFAULT_PERMISSIONS)).has_value());
-//        CCO_EXPECT_TRUE(reader->open(*home->open_file("wal-0", Mode::READ_ONLY, DEFAULT_PERMISSIONS)).has_value());
+//        reader = WALReader::create({nullptr, *home, create_sink(), PAGE_SIZE, SeqNum::null()}).value();
+//        writer = WALWriter::create({nullptr, *home, create_sink(), PAGE_SIZE, SeqNum::null()}).value();
+//        CALICO_EXPECT_TRUE(writer->open(*home->open_file("wal-0", Mode::WRITE_ONLY | Mode::CREATE | Mode::APPEND, DEFAULT_PERMISSIONS)).has_value());
+//        CALICO_EXPECT_TRUE(reader->open(*home->open_file("wal-0", Mode::READ_ONLY, DEFAULT_PERMISSIONS)).has_value());
 //    }
 //
 //    ~WALReaderWriterTests() override = default;
@@ -72,7 +72,7 @@
 //{
 //    WALRecordGenerator generator {PAGE_SIZE};
 //    Random random {0};
-//    for (Index i {}; i < 1'000'000; ++i) {
+//    for (Size i {}; i < 1'000'000; ++i) {
 //        const auto record = generator.generate(random.next_int(5ULL, 10ULL), random.next_int(5ULL, 10ULL));
 //        const auto update = record.payload().decode();
 //        ASSERT_LE(update.changes.size(), 10);
@@ -157,7 +157,7 @@
 //    std::string scratch(2 * PAGE_SIZE, '\x00');
 //    WALRecord record {stob(scratch)};
 //    ASSERT_TRUE(record.read(stob(memory)));
-//    generator.validate_record(record, SequenceNumber::base());
+//    generator.validate_record(record, SeqNum::base());
 //}
 //
 //TEST_F(WALReaderWriterTests, FlushedLSNReflectsLastFullRecord)
@@ -168,7 +168,7 @@
 //    // Writing this record should cause a flush after the FIRST part is written. The last record we wrote should
 //    // then be on disk, and the LAST part of the current record should be in the tail buffer.
 //    ASSERT_TRUE(writer->append(generator.generate(PAGE_SIZE / 2, 1)));
-//    auto lsn = SequenceNumber::base();
+//    auto lsn = SeqNum::base();
 //    ASSERT_EQ(writer->flushed_lsn(), lsn++);
 //    ASSERT_TRUE(writer->flush());
 //    ASSERT_EQ(writer->flushed_lsn(), lsn);
@@ -178,7 +178,7 @@
 ////{
 ////    Random random {0};
 ////
-////    for (Index i {}; i < n; ++i)
+////    for (Size i {}; i < n; ++i)
 ////        ASSERT_TRUE(test.writer->append(generator.generate(random.next_int(1UL, 500UL), 10)));
 ////
 ////    ASSERT_TRUE(test.writer->flush());
@@ -188,7 +188,7 @@
 ////auto call_until_error(Callable &&callable) -> Result<bool>
 ////{
 ////    static constexpr auto limit = 100'000;
-////    for (Index i {}; i < limit; ++i) {
+////    for (Size i {}; i < limit; ++i) {
 ////        auto result = callable();
 ////        if (!result.has_value() || !result.value())
 ////            return result;
@@ -210,11 +210,11 @@
 //    }
 //    ASSERT_TRUE(test.writer->flush());
 //
-//    auto lsn = SequenceNumber::base();
+//    auto lsn = SeqNum::base();
 //    for (auto position: positions) {
 //        auto record = test.reader->read(position);
 //        ASSERT_TRUE(record.has_value());
-//        generator.validate_record(*record, SequenceNumber {lsn.value++});
+//        generator.validate_record(*record, SeqNum {lsn.value++});
 //    }
 //}
 //
@@ -248,11 +248,11 @@
 //    ASSERT_TRUE(writer->flush());
 //
 //    auto next = explorer.read_next().value();
-//    generator.validate_record(next.record, SequenceNumber {1ULL});
+//    generator.validate_record(next.record, SeqNum {1ULL});
 //    next = explorer.read_next().value();
-//    generator.validate_record(next.record, SequenceNumber {2ULL});
+//    generator.validate_record(next.record, SeqNum {2ULL});
 //    next = explorer.read_next().value();
-//    generator.validate_record(next.record, SequenceNumber {3ULL});
+//    generator.validate_record(next.record, SeqNum {3ULL});
 //    ASSERT_TRUE(explorer.read_next().error().is_not_found());
 //}
 //
@@ -275,22 +275,22 @@
 //    WALExplorer explorer {*reader};
 //    auto next = explorer.read_next();
 //    ASSERT_TRUE(next);
-//    generator.validate_record(next->record, SequenceNumber {1ULL});
+//    generator.validate_record(next->record, SeqNum {1ULL});
 //    next = explorer.read_next();
 //    ASSERT_TRUE(next);
-//    generator.validate_record(next->record, SequenceNumber {2ULL});
+//    generator.validate_record(next->record, SeqNum {2ULL});
 //    next = explorer.read_next();
 //    ASSERT_TRUE(next);
-//    generator.validate_record(next->record, SequenceNumber {3ULL});
+//    generator.validate_record(next->record, SeqNum {3ULL});
 //    next = explorer.read_next();
 //    ASSERT_TRUE(next);
-//    generator.validate_record(next->record, SequenceNumber {4ULL});
+//    generator.validate_record(next->record, SeqNum {4ULL});
 //    next = explorer.read_next();
 //    ASSERT_TRUE(next);
-//    generator.validate_record(next->record, SequenceNumber {5ULL});
+//    generator.validate_record(next->record, SeqNum {5ULL});
 //    next = explorer.read_next();
 //    ASSERT_TRUE(next);
-//    generator.validate_record(next->record, SequenceNumber {6ULL});
+//    generator.validate_record(next->record, SeqNum {6ULL});
 //    ASSERT_FALSE(explorer.read_next());
 //}
 //
@@ -303,7 +303,7 @@
 //        return generator.random.next_real(1.0) < fraction;
 //    };
 //
-//    for (Index i {}; i < num_records; ++i) {
+//    for (Size i {}; i < num_records; ++i) {
 //        auto record = make_choice(large_fraction)
 //            ? generator.generate_large()
 //            : generator.generate_small();
@@ -315,11 +315,11 @@
 //    }
 //    WALExplorer explorer {*test.reader};
 //
-//    for (Index i {}; i < num_records; ++i) {
+//    for (Size i {}; i < num_records; ++i) {
 //        auto next = explorer.read_next();
 //        ASSERT_TRUE(next) << "record " << i << " does not exist";
 //        ASSERT_TRUE(next->record.is_consistent()) << "record " << i << " is corrupted";
-//        generator.validate_record(next->record, SequenceNumber {i + ROOT_ID_VALUE});
+//        generator.validate_record(next->record, SeqNum {i + ROOT_ID_VALUE});
 //    }
 //    ASSERT_FALSE(explorer.read_next());
 //}
@@ -365,10 +365,10 @@
 //        std::filesystem::remove_all(BASE_PATH, ignore);
 //
 //        directory = DiskStorage::open(BASE_PATH).value();
-//        writer = WALWriter::create({nullptr, *directory, create_sink(), PAGE_SIZE, SequenceNumber::base()}).value();
-//        reader = WALReader::create({nullptr, *directory, create_sink(), PAGE_SIZE, SequenceNumber::base()}).value();
-//        CCO_EXPECT_TRUE(writer->open(*directory->open_file("wal-0", Mode::WRITE_ONLY | Mode::CREATE | Mode::APPEND, DEFAULT_PERMISSIONS)).has_value());
-//        CCO_EXPECT_TRUE(reader->open(*directory->open_file("wal-0", Mode::READ_ONLY, DEFAULT_PERMISSIONS)).has_value());
+//        writer = WALWriter::create({nullptr, *directory, create_sink(), PAGE_SIZE, SeqNum::base()}).value();
+//        reader = WALReader::create({nullptr, *directory, create_sink(), PAGE_SIZE, SeqNum::base()}).value();
+//        CALICO_EXPECT_TRUE(writer->open(*directory->open_file("wal-0", Mode::WRITE_ONLY | Mode::CREATE | Mode::APPEND, DEFAULT_PERMISSIONS)).has_value());
+//        CALICO_EXPECT_TRUE(reader->open(*directory->open_file("wal-0", Mode::READ_ONLY, DEFAULT_PERMISSIONS)).has_value());
 //    }
 //
 //    ~RealWALReaderWriterTests() override = default;
@@ -417,7 +417,7 @@
 //    WALTests()
 //    {
 //        auto temp = std::make_unique<FakeDirectory>("WALReaderWriterTests");
-//        pool = BufferPool::open({*temp, create_sink(), SequenceNumber::null(), 16, 0, PAGE_SIZE, 0666, true}).value();
+//        pool = BufferPool::open({*temp, create_sink(), SeqNum::null(), 16, 0, PAGE_SIZE, 0666, true}).value();
 //        data_backing = temp->get_shared("data");
 //        data_faults = temp->get_faults("data");
 //        home = std::move(temp);
@@ -433,7 +433,7 @@
 //        auto page = pool->allocate().value();
 //        const auto id = page.id().as_index();
 //        if (id >= pages_before.size()) {
-//            CCO_EXPECT_EQ(id, pages_before.size());
+//            CALICO_EXPECT_EQ(id, pages_before.size());
 //            pages_before.emplace_back(btos(page.view(0)));
 //            pages_after.emplace_back(PAGE_SIZE, '\x00');
 //        }
@@ -514,7 +514,7 @@
 //    static constexpr auto commit_interval = num_iterations / 10;
 //
 //    // First, create some successful commits.
-//    for (Index i {}; i < num_iterations; ++i) {
+//    for (Size i {}; i < num_iterations; ++i) {
 //        auto page = allocate_page();
 //        alter_page(page);
 //        ASSERT_TRUE(pool->release(std::move(page)));
@@ -525,13 +525,13 @@
 //    ASSERT_TRUE(pool->commit());
 //
 //    // Only this transaction should be undone.
-//    for (Index i {}; i < num_iterations; ++i) {
+//    for (Size i {}; i < num_iterations; ++i) {
 //        auto page = allocate_page();
 //        alter_page(page);
 //        ASSERT_TRUE(pool->release(std::move(page)));
 //    }
 //    ASSERT_TRUE(pool->abort());
-//    Index i {};
+//    Size i {};
 //
 //    // These modifications should persist.
 //    for (; i < num_iterations; ++i) {
@@ -567,7 +567,7 @@
 //        EXPECT_CALL(*mock, children)
 //            .Times(use_xact);
 //
-//        pool = BufferPool::open({*home, create_sink(), SequenceNumber::null(), 16, 0, PAGE_SIZE, 0666, use_xact}).value();
+//        pool = BufferPool::open({*home, create_sink(), SeqNum::null(), 16, 0, PAGE_SIZE, 0666, use_xact}).value();
 //        data = mock->get_mock_data_file();
 //    }
 //
@@ -634,7 +634,7 @@
 //        if (!p.has_value())
 //            break;
 //        p->set_type(PageType::INTERNAL_NODE);
-//        p->set_lsn(SequenceNumber {123ULL});
+//        p->set_lsn(SeqNum {123ULL});
 //        auto r = pool->release(std::move(*p));
 //        if (!r.has_value())
 //            break;
@@ -680,7 +680,7 @@
 //    for (auto i = PageLayout::HEADER_SIZE; i < GetParam(); i += 2) {
 //        page.bytes(i, 1)[0] = ' ';
 //    }
-//    const auto update = tracker.collect(page, SequenceNumber::base());
+//    const auto update = tracker.collect(page, SeqNum::base());
 //    const WALRecord record {update, stob(scratch)};
 //    const auto size = record.payload().data().size();
 //    ASSERT_GE(size, min_size) << "Excessive scratch memory allocated";

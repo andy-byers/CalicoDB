@@ -4,8 +4,8 @@
 //*   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
 //*/
 //
-//#ifndef CCO_WAL_WAL_READER_H
-//#define CCO_WAL_WAL_READER_H
+//#ifndef CALICO_WAL_WAL_READER_H
+//#define CALICO_WAL_WAL_READER_H
 //
 //#include "calico/wal.h"
 //#include <memory>
@@ -32,13 +32,13 @@
 //
 //private:
 //    explicit WALReader(const WALParameters &);
-//    [[nodiscard]] auto read_block(Index) -> Result<bool>;
-//    [[nodiscard]] auto read_record(Index) -> Result<WALRecord>;
+//    [[nodiscard]] auto read_block(Size) -> Result<bool>;
+//    [[nodiscard]] auto read_record(Size) -> Result<WALRecord>;
 //
 //    std::string m_block;
 //    std::string m_scratch[2];
 //    std::unique_ptr<IFile> m_file;
-//    Index m_block_id {};
+//    Size m_block_id {};
 //    bool m_has_block {};
 //};
 //
@@ -63,4 +63,4 @@
 //
 //} // namespace cco
 //
-//#endif // CCO_WAL_WAL_READER_H
+//#endif // CALICO_WAL_WAL_READER_H

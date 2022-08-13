@@ -15,12 +15,12 @@
 //
 //auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWALManager>>
 //{
-//    CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
-//    CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
-//    CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
+//    CALICO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
+//    CALICO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
+//    CALICO_EXPECT_TRUE(is_power_of_two(param.page_size));
 //
-//    CCO_TRY_CREATE(writer, WALWriter::create(param));
-//    CCO_TRY_CREATE(reader, WALReader::create(param));
+//    CALICO_TRY_CREATE(writer, WALWriter::create(param));
+//    CALICO_TRY_CREATE(reader, WALReader::create(param));
 //    auto manager = std::unique_ptr<WALManager> {new (std::nothrow) WALManager {param}};
 //    if (!manager) {
 //        ThreePartMessage message;
@@ -33,7 +33,7 @@
 //    manager->m_reader = std::move(reader);
 //
 //    //    // Get a sorted list of WAL segments.
-//    //    CCO_TRY_CREATE(children, param.directory.children());
+//    //    CALICO_TRY_CREATE(children, param.directory.children());
 //    //    std::vector<WALSegment> segments;
 //    //
 //    //    for (const auto &child: children) {
@@ -59,11 +59,11 @@
 //    //    });
 //    //    for (auto &segment: segments) {
 //    //        WALRecordPosition first;
-//    //        CCO_TRY(manager->open_reader_segment(segment.id));
-//    //        CCO_TRY_CREATE(is_empty, manager->m_reader->is_empty());
+//    //        CALICO_TRY(manager->open_reader_segment(segment.id));
+//    //        CALICO_TRY_CREATE(is_empty, manager->m_reader->is_empty());
 //    //        if (!is_empty) {
-//    //            CCO_TRY_CREATE(record, manager->m_reader->read(first));
-//    //            CCO_TRY_STORE(segment.has_commit, manager->roll_forward(segment.positions));
+//    //            CALICO_TRY_CREATE(record, manager->m_reader->read(first));
+//    //            CALICO_TRY_STORE(segment.has_commit, manager->roll_forward(segment.positions));
 //    //            segment.start = record.lsn();
 //    //            manager->m_completed_segments.emplace_back(std::move(segment));
 //    //        }
@@ -71,7 +71,7 @@
 //    //
 //    //    WALSegment current;
 //    //    current.id = SegmentId::base();
-//    //    current.start = SequenceNumber::base();
+//    //    current.start = SeqNum::base();
 //    //    if (!manager->m_completed_segments.empty()) {
 //    //        current.id = manager->m_completed_segments.back().id;
 //    //        current.start = manager->m_completed_segments.back().start;
@@ -82,12 +82,12 @@
 //    //
 //    //
 //    //
-//    //    CCO_TRY(manager->open_writer_segment(current.id));
-//    //    CCO_EXPECT_TRUE(manager->m_writer->is_open());
+//    //    CALICO_TRY(manager->open_writer_segment(current.id));
+//    //    CALICO_EXPECT_TRUE(manager->m_writer->is_open());
 //    //    manager->m_current_segment = std::move(current);
 //    //    return manager;
 //
-//    CCO_TRY(manager->setup(param));
+//    CALICO_TRY(manager->setup(param));
 //    return manager;
 //}
 //
@@ -116,7 +116,7 @@
 //auto WALManager::setup(const WALParameters &param) -> Result<void>
 //{
 //    // Get a sorted list of WAL segments.
-//    CCO_TRY_CREATE(children, param.store.get_blob_names());
+//    CALICO_TRY_CREATE(children, param.store.get_blob_names());
 //    std::vector<WALSegment> segments;
 //
 //    for (const auto &child: children) {
@@ -147,11 +147,11 @@
 //
 //    for (auto &segment: segments) {
 //        WALRecordPosition first;
-//        CCO_TRY(open_reader_segment(segment.id));
-//        CCO_TRY_CREATE(is_empty, m_reader->is_empty());
+//        CALICO_TRY(open_reader_segment(segment.id));
+//        CALICO_TRY_CREATE(is_empty, m_reader->is_empty());
 //        if (!is_empty) {
-//            CCO_TRY_CREATE(record, m_reader->read(first));
-//            CCO_TRY_STORE(segment.has_commit, roll_forward(segment.positions));
+//            CALICO_TRY_CREATE(record, m_reader->read(first));
+//            CALICO_TRY_STORE(segment.has_commit, roll_forward(segment.positions));
 //            segment.start = record.page_lsn();
 //            filtered.emplace_back(std::move(segment));
 //        }
@@ -159,7 +159,7 @@
 //
 //    WALSegment current;
 //    current.id = SegmentId::base();
-//    current.start = SequenceNumber::base();
+//    current.start = SeqNum::base();
 //    if (!filtered.empty()) {
 //        current.id = filtered.back().id;
 //        current.start = filtered.back().start;
@@ -192,7 +192,7 @@
 //auto WALManager::spawn_writer() -> Result<void>
 //{
 //    if (!m_writer->is_open())
-//        CCO_TRY(open_writer_segment(m_current_segment.id));
+//        CALICO_TRY(open_writer_segment(m_current_segment.id));
 //
 //    m_writer_task = std::thread {[this] {
 //        for (; ; ) {
@@ -304,7 +304,7 @@
 //        return segment.has_commit;
 //    });
 //    for (auto itr = begin(m_completed_segments); itr != limit; ++itr) // TODO: Design for reentrancy...
-//        CCO_TRY(m_home->remove_file(id_to_name(itr->id)));
+//        CALICO_TRY(m_home->remove_file(id_to_name(itr->id)));
 //    m_completed_segments.erase(begin(m_completed_segments), limit);
 //    return {};
 //}
@@ -312,7 +312,7 @@
 //auto WALManager::close() -> Result<void>
 //{
 //    Result<void> er, wr;
-//    CCO_EXPECT_FALSE(m_reader->is_open());
+//    CALICO_EXPECT_FALSE(m_reader->is_open());
 //
 //    if (m_writer->is_open()) {
 //        wr = m_writer->close();
@@ -336,7 +336,7 @@
 //    return m_has_pending;
 //}
 //
-//auto WALManager::flushed_lsn() const -> SequenceNumber
+//auto WALManager::flushed_lsn() const -> SeqNum
 //{
 //    return m_writer->flushed_lsn();
 //}
@@ -371,7 +371,7 @@
 //    return {};//system::unlink(id_to_name(id));
 //
 ////    m_tracker.reset();
-////    CCO_TRY(m_writer->truncate());
+////    CALICO_TRY(m_writer->truncate());
 ////    m_positions.clear();
 //    return {};
 //}
@@ -399,11 +399,11 @@
 //    auto segment = crbegin(m_completed_segments);
 //    if (!segment->has_commit) {
 //        for (; segment != crend(m_completed_segments) && !segment->has_commit; ++segment)
-//            CCO_TRY(undo_segment(*segment));
+//            CALICO_TRY(undo_segment(*segment));
 //
-//        CCO_TRY(m_pool->flush());
+//        CALICO_TRY(m_pool->flush());
 //        for (auto itr = crbegin(m_completed_segments); itr != segment; ++itr)
-//            CCO_TRY(m_home->remove_file(id_to_name(itr->id)));
+//            CALICO_TRY(m_home->remove_file(id_to_name(itr->id)));
 //        m_completed_segments.erase(segment.base(), end(m_completed_segments));
 //    }
 //    return spawn_writer();
@@ -418,8 +418,8 @@
 //        message.set_hint("segment ID is {}", segment.id.value);
 //        return Err {message.corruption()};
 //    }
-//    CCO_TRY(open_reader_segment(segment.id));
-//    CCO_TRY(roll_backward(segment.positions));
+//    CALICO_TRY(open_reader_segment(segment.id));
+//    CALICO_TRY(roll_backward(segment.positions));
 //    return m_reader->close();
 //}
 //
@@ -433,7 +433,7 @@
 //
 //auto WALManager::abort() -> Result<void>
 //{
-//    CCO_EXPECT_TRUE(m_has_pending);
+//    CALICO_EXPECT_TRUE(m_has_pending);
 //
 //
 //    {
@@ -448,18 +448,18 @@
 //    }
 //
 //    m_has_pending = false;
-//    CCO_TRY(m_writer->flush());
+//    CALICO_TRY(m_writer->flush());
 //
 //    if (!m_current_segment.positions.empty())
-//        CCO_TRY(undo_segment(m_current_segment));
+//        CALICO_TRY(undo_segment(m_current_segment));
 //
 //    auto segment = crbegin(m_completed_segments);
 //    for (; segment != crend(m_completed_segments) && !segment->has_commit; ++segment)
-//        CCO_TRY(undo_segment(*segment));
+//        CALICO_TRY(undo_segment(*segment));
 //
 //    // TODO: Erase segments from vector and directory at the same time so we don't get mismatched in case of failure?
 //    for (auto itr = crbegin(m_completed_segments); itr != segment; ++itr)
-//        CCO_TRY(m_home->remove_file(id_to_name(itr->id)));
+//        CALICO_TRY(m_home->remove_file(id_to_name(itr->id)));
 //    m_completed_segments.erase(segment.base(), end(m_completed_segments));
 //    m_has_pending = false;
 //    return spawn_writer();
@@ -468,12 +468,12 @@
 //auto WALManager::commit() -> Result<void>
 //{
 //    // Skip the LSN that will be used for the file header updates.
-//    SequenceNumber commit_lsn {m_next_lsn.value + 2}; // TODO: Maybe "+ 1" now.
-//    CCO_TRY_CREATE(root, m_pool->acquire(PageId::base(), true));
+//    SeqNum commit_lsn {m_next_lsn.value + 2}; // TODO: Maybe "+ 1" now.
+//    CALICO_TRY_CREATE(root, m_pool->acquire(PageId::base(), true));
 //    auto header = get_file_header_writer(root);
 //    header.set_flushed_lsn(commit_lsn);
 //    header.update_header_crc();
-//    CCO_TRY(m_pool->release(std::move(root)));
+//    CALICO_TRY(m_pool->release(std::move(root)));
 //
 //    std::lock_guard lock {m_queue_mutex};
 //    m_has_pending = false;
@@ -482,9 +482,9 @@
 //    return {};
 //}
 //
-//auto WALManager::advance_writer(SequenceNumber next_start, bool has_commit) -> Result<void>
+//auto WALManager::advance_writer(SeqNum next_start, bool has_commit) -> Result<void>
 //{
-//    CCO_TRY(m_writer->flush());
+//    CALICO_TRY(m_writer->flush());
 //    std::lock_guard lock {m_queue_mutex};
 //
 //    m_current_segment.has_commit = has_commit;
@@ -500,16 +500,16 @@
 //auto WALManager::open_reader_segment(SegmentId id) -> Result<void>
 //{
 //    if (m_reader->is_open())
-//        CCO_TRY(m_reader->close());
-//    CCO_TRY_CREATE(file, m_home->open_file(id_to_name(id), Mode::READ_ONLY, DEFAULT_PERMISSIONS));
+//        CALICO_TRY(m_reader->close());
+//    CALICO_TRY_CREATE(file, m_home->open_file(id_to_name(id), Mode::READ_ONLY, DEFAULT_PERMISSIONS));
 //    return m_reader->open(std::move(file));
 //}
 //
 //auto WALManager::open_writer_segment(SegmentId id) -> Result<void>
 //{
 //    if (m_writer->is_open())
-//        CCO_TRY(m_writer->close());
-//    CCO_TRY_CREATE(file, m_home->open_file(id_to_name(id), Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND, DEFAULT_PERMISSIONS));
+//        CALICO_TRY(m_writer->close());
+//    CALICO_TRY_CREATE(file, m_home->open_file(id_to_name(id), Mode::CREATE | Mode::WRITE_ONLY | Mode::APPEND, DEFAULT_PERMISSIONS));
 //    return m_writer->open(std::move(file));
 //}
 //
@@ -544,13 +544,13 @@
 //            return true;
 //
 //        const auto update = record->decode();
-//        CCO_TRY_CREATE(page, m_pool->fetch(update.page_id, true));
-//        CCO_EXPECT_FALSE(page.has_manager());
+//        CALICO_TRY_CREATE(page, m_pool->fetch(update.page_id, true));
+//        CALICO_EXPECT_FALSE(page.has_manager());
 //
 //        if (page.page_lsn() < record->page_lsn())
 //            page.redo(record->page_lsn(), update.changes);
 //
-//        CCO_TRY(m_pool->release(std::move(page)));
+//        CALICO_TRY(m_pool->release(std::move(page)));
 //    }
 //    return false;
 //}
@@ -558,12 +558,12 @@
 //auto WALManager::roll_backward(const std::vector<WALRecordPosition> &positions) -> Result<void>
 //{
 //    auto itr = crbegin(positions);
-//    CCO_EXPECT_NE(itr, crend(positions));
+//    CALICO_EXPECT_NE(itr, crend(positions));
 //    m_reader->reset();
 //
 //    for (; itr != crend(positions); ++itr) {
 //        auto position = *itr;
-//        CCO_TRY_CREATE(record, m_reader->read(position));
+//        CALICO_TRY_CREATE(record, m_reader->read(position));
 //
 //        if (record.is_commit()) {
 //            if (itr != crbegin(positions)) { // TODO: Only valid at the end of the most recent segment?
@@ -577,14 +577,14 @@
 //        }
 //
 //        const auto update = record.decode();
-//        CCO_TRY_CREATE(page, m_pool->fetch(update.page_id, true));
-//        CCO_EXPECT_FALSE(page.has_manager());
-//        CCO_EXPECT_EQ(record.page_lsn(), update.page_lsn);
+//        CALICO_TRY_CREATE(page, m_pool->fetch(update.page_id, true));
+//        CALICO_EXPECT_FALSE(page.has_manager());
+//        CALICO_EXPECT_EQ(record.page_lsn(), update.page_lsn);
 //
 //        if (page.page_lsn() >= record.page_lsn())
 //            page.undo(update.last_lsn, update.changes);
 //
-//        CCO_TRY(m_pool->release(std::move(page)));
+//        CALICO_TRY(m_pool->release(std::move(page)));
 //    }
 //    return {};
 //}
@@ -609,7 +609,7 @@
 //        return discovery->record;
 //    }
 //    auto status = discovery.error();
-//    CCO_EXPECT_FALSE(status.is_ok());
+//    CALICO_EXPECT_FALSE(status.is_ok());
 //    if (!status.is_not_found()) {
 //        m_logger->error(ERROR_PRIMARY);
 //        m_logger->error("(reason) {}", status.what());

@@ -3,11 +3,11 @@
 #include "utils/logging.h"
 #include "utils/utils.h"
 
-namespace cco {
+namespace calico {
 
 namespace fs = std::filesystem;
 
-static auto read_blob_at(const std::string &blob, Bytes &out, Index offset)
+static auto read_blob_at(const std::string &blob, Bytes &out, Size offset)
 {
     Size r {};
     if (auto buffer = stob(blob); offset < buffer.size()) {
@@ -20,7 +20,7 @@ static auto read_blob_at(const std::string &blob, Bytes &out, Index offset)
     return Status::ok();
 }
 
-static auto write_blob_at(std::string &blob, BytesView in, Index offset)
+static auto write_blob_at(std::string &blob, BytesView in, Size offset)
 {
     if (const auto write_end = offset + in.size(); blob.size() < write_end)
         blob.resize(write_end);
@@ -28,22 +28,22 @@ static auto write_blob_at(std::string &blob, BytesView in, Index offset)
     return Status::ok();
 }
 
-auto RandomAccessHeapReader::read(Bytes &out, Index offset) -> Status
+auto RandomHeapReader::read(Bytes &out, Size offset) -> Status
 {
     return read_blob_at(*m_blob, out, offset);
 }
 
-auto RandomAccessHeapEditor::read(Bytes &out, Index offset) -> Status
+auto RandomHeapEditor::read(Bytes &out, Size offset) -> Status
 {
     return read_blob_at(*m_blob, out, offset);
 }
 
-auto RandomAccessHeapEditor::write(BytesView in, Index offset) -> Status 
+auto RandomHeapEditor::write(BytesView in, Size offset) -> Status
 {
     return write_blob_at(*m_blob, in, offset);
 }
 
-auto RandomAccessHeapEditor::sync() -> Status 
+auto RandomHeapEditor::sync() -> Status
 {
     return Status::ok();
 }
@@ -58,10 +58,10 @@ auto AppendHeapWriter::sync() -> Status
     return Status::ok();
 }
 
-auto HeapStorage::open_random_reader(const std::string &name, RandomAccessReader **out) -> Status
+auto HeapStorage::open_random_reader(const std::string &name, RandomReader **out) -> Status
 {
     if (auto itr = m_files.find(name); itr != end(m_files)) {
-        *out = new RandomAccessHeapReader {name, itr->second};
+        *out = new RandomHeapReader {name, itr->second};
     } else {
         ThreePartMessage message;
         message.set_primary("could not open blob");
@@ -72,14 +72,14 @@ auto HeapStorage::open_random_reader(const std::string &name, RandomAccessReader
     return Status::ok();
 }
 
-auto HeapStorage::open_random_editor(const std::string &name, RandomAccessEditor **out) -> Status
+auto HeapStorage::open_random_editor(const std::string &name, RandomEditor **out) -> Status
 {
     if (auto itr = m_files.find(name); itr != end(m_files)) {
-        *out = new RandomAccessHeapEditor {name, itr->second};
+        *out = new RandomHeapEditor {name, itr->second};
     } else {
         auto [position, truthy] = m_files.emplace(name, std::string {});
-        CCO_EXPECT_TRUE(truthy);
-        *out = new RandomAccessHeapEditor {name, position->second};
+        CALICO_EXPECT_TRUE(truthy);
+        *out = new RandomHeapEditor {name, position->second};
     }
     return Status::ok();
 }
@@ -90,7 +90,7 @@ auto HeapStorage::open_append_writer(const std::string &name, AppendWriter **out
         *out = new AppendHeapWriter {name, itr->second};
     } else {
         auto [position, truthy] = m_files.emplace(name, std::string {});
-        CCO_EXPECT_TRUE(truthy);
+        CALICO_EXPECT_TRUE(truthy);
         *out = new AppendHeapWriter {name, position->second};
     }
     return Status::ok();
@@ -168,27 +168,48 @@ auto HeapStorage::file_exists(const std::string &name) const -> Status
     return Status::ok();
 }
 
-auto HeapStorage::get_file_names(std::vector<std::string> &out) const -> Status
+auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::string> &out) const -> Status
 {
+    // TODO: This whole thing sucks and doesn't work! I'll figure it out later as it's surprisingly complicated to do correctly.
+    //       Use std::filesystem::path to iterate through the paths. Or maybe even keep an auxiliary data structure, like a tree of some sort,
+    //       to keep track of the directory structures, which can get arbitrarily complicated (but is not likely to in practice). For now just
+    //       return all children, which works with the current design.
+
+    auto itr = m_directories.find(dir_path);
+    if (itr == cend(m_directories)) {
+        ThreePartMessage message;
+        message.set_primary("could not get children");
+        message.set_detail("directory {} does not exist", dir_path);
+        return message.system_error();
+    }
+
+    std::vector<std::string> all_files(m_files.size());
     std::transform(cbegin(m_files), cend(m_files), back_inserter(out), [](auto entry) {
         return entry.first;
     });
     return Status::ok();
 }
 
-auto HeapStorage::create_directory(const std::string &name) -> Status
+auto HeapStorage::create_directory(const std::string &path) -> Status
 {
-    CCO_EXPECT_EQ(m_directories.find(name), cend(m_directories));
-    // Just keep track of nested directory names for now.
-    m_directories.insert(name);
+    CALICO_EXPECT_EQ(m_directories.find(path), cend(m_directories));
+    m_directories.insert(path);
     return Status::ok();
 }
 
 auto HeapStorage::remove_directory(const std::string &name) -> Status
 {
-    CCO_EXPECT_NE(m_directories.find(name), cend(m_directories));
+    CALICO_EXPECT_NE(m_directories.find(name), cend(m_directories));
     m_directories.erase(name);
     return Status::ok();
+}
+
+auto HeapStorage::clone() const -> Storage*
+{
+    auto *store = new HeapStorage;
+    store->m_files = m_files;
+    store->m_directories = m_directories;
+    return store;
 }
 
 } // namespace cco

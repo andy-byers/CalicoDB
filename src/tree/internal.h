@@ -1,5 +1,5 @@
-#ifndef CCO_TREE_INTERNAL_H
-#define CCO_TREE_INTERNAL_H
+#ifndef CALICO_TREE_INTERNAL_H
+#define CALICO_TREE_INTERNAL_H
 
 #include "node_pool.h"
 #include "page/node.h"
@@ -7,18 +7,18 @@
 #include "utils/scratch.h"
 #include <spdlog/spdlog.h>
 
-namespace cco {
+namespace calico {
 
 class Internal final {
 public:
     struct Position {
         Node node;
-        Index index {};
+        Size index {};
     };
 
     struct SearchResult {
         PageId id;
-        Index index {};
+        Size index {};
         bool was_found {};
     };
 
@@ -30,7 +30,7 @@ public:
     explicit Internal(NodePool &);
 
     ~Internal() = default;
-    [[nodiscard]] auto collect_value(const Node &, Index) const -> Result<std::string>;
+    [[nodiscard]] auto collect_value(const Node &, Size) const -> Result<std::string>;
     [[nodiscard]] auto find_external(BytesView) -> Result<SearchResult>;
     [[nodiscard]] auto find_minimum() -> Result<SearchResult>;
     [[nodiscard]] auto find_maximum() -> Result<SearchResult>;
@@ -63,14 +63,14 @@ private:
     [[nodiscard]] auto split_root(Node) -> Result<Node>;
 
     [[nodiscard]] auto balance_after_underflow(Node, BytesView) -> Result<void>;
-    [[nodiscard]] auto fix_non_root(Node, Node &, Index) -> Result<bool>;
+    [[nodiscard]] auto fix_non_root(Node, Node &, Size) -> Result<bool>;
     [[nodiscard]] auto fix_root(Node) -> Result<void>;
-    [[nodiscard]] auto rotate_left(Node &, Node &, Node &, Index) -> Result<void>;
-    [[nodiscard]] auto rotate_right(Node &, Node &, Node &, Index) -> Result<void>;
-    [[nodiscard]] auto external_rotate_left(Node &, Node &, Node &, Index) -> Result<void>;
-    [[nodiscard]] auto external_rotate_right(Node &, Node &, Node &, Index) -> Result<void>;
-    [[nodiscard]] auto internal_rotate_left(Node &, Node &, Node &, Index) -> Result<void>;
-    [[nodiscard]] auto internal_rotate_right(Node &, Node &, Node &, Index) -> Result<void>;
+    [[nodiscard]] auto rotate_left(Node &, Node &, Node &, Size) -> Result<void>;
+    [[nodiscard]] auto rotate_right(Node &, Node &, Node &, Size) -> Result<void>;
+    [[nodiscard]] auto external_rotate_left(Node &, Node &, Node &, Size) -> Result<void>;
+    [[nodiscard]] auto external_rotate_right(Node &, Node &, Node &, Size) -> Result<void>;
+    [[nodiscard]] auto internal_rotate_left(Node &, Node &, Node &, Size) -> Result<void>;
+    [[nodiscard]] auto internal_rotate_right(Node &, Node &, Node &, Size) -> Result<void>;
 
     [[nodiscard]] auto maybe_fix_child_parent_connections(Node &) -> Result<void>;
 
@@ -82,4 +82,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_TREE_INTERNAL_H
+#endif // CALICO_TREE_INTERNAL_H

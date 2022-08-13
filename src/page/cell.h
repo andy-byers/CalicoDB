@@ -1,11 +1,11 @@
-#ifndef CCO_PAGE_CELL_H
-#define CCO_PAGE_CELL_H
+#ifndef CALICO_PAGE_CELL_H
+#define CALICO_PAGE_CELL_H
 
 #include "page.h"
 #include "utils/scratch.h"
 #include <optional>
 
-namespace cco {
+namespace calico {
 
 class Node;
 
@@ -21,7 +21,7 @@ public:
     };
 
     static auto read_at(BytesView, Size, bool) -> Cell;
-    static auto read_at(const Node &, Index) -> Cell;
+    static auto read_at(const Node &, Size) -> Cell;
     explicit Cell(const Parameters &);
 
     ~Cell() = default;
@@ -67,4 +67,4 @@ auto make_internal_cell(BytesView, Size) -> Cell;
 
 } // namespace cco
 
-#endif // CCO_PAGE_CELL_H
+#endif // CALICO_PAGE_CELL_H

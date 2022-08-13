@@ -14,7 +14,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t*, size_t);
 
 auto main(int argc, char **argv) -> int
 {
-   CCO_EXPECT_GT(argc, 0);
+   CALICO_EXPECT_GT(argc, 0);
    auto logger = spdlog::stdout_logger_st("main");
    logger->set_pattern("[%H:%M:%S.%e] %v");
    logger->info("StandaloneFuzzTargetMain: running {} input(s)", argc - 1);

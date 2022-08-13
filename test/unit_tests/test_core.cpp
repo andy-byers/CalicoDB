@@ -7,20 +7,15 @@
 #include <gtest/gtest.h>
 
 #include "core/header.h"
-//#include "db/database_impl.h"
-//#include "storage/system.h"
-//
-//#include "fakes.h"
-//#include "tree/bplus_tree.h"
-//
-//#include "tools.h"
-//#include "utils/logging.h"
-//
+#include "core/core.h"
+#include "fakes.h"
+#include "tools.h"
+
 namespace {
 
-using namespace cco;
+using namespace calico;
 namespace fs = std::filesystem;
-//constexpr auto BASE = "/tmp/__calico_database_tests";
+constexpr auto ROOT = "/tmp/__calico_database_tests";
 
 template<class T>
 constexpr auto is_pod = std::is_standard_layout_v<T> && std::is_trivial_v<T>;
@@ -30,24 +25,20 @@ TEST(TestFileHeader, FileHeaderIsPOD)
     ASSERT_TRUE(is_pod<FileHeader>);
 }
 
+class TestDatabase {
+public:
+    TestDatabase()
+    {
+        Options options;
+        options.page_size = 0x200;
+        options.frame_count = 16;
 
+        store = std::make_unique<MockStorage>();
+        core = std::make_unique<Core>("test", options);
+        const auto s = core->open();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        mock = dynamic_cast<MockStorage &>(*store).get_mock_random_editor(DATA_FILENAME);
 
-
-//
-//class TestDatabase {
-//public:
-//    TestDatabase()
-//    {
-//        std::unique_ptr<Storage> home;
-//        Database::Impl::Parameters param;
-//        param.options.page_size = 0x200;
-//        param.options.frame_count = 16;
-//
-//        home = std::make_unique<FakeDirectory>("");
-//        impl = Database::Impl::open(param, std::move(home)).value();
-//        fake = dynamic_cast<FakeDirectory*>(&impl->home());
-//        data_controls = fake->get_faults("data");
-//
 //        RecordGenerator::Parameters generator_param;
 //        generator_param.mean_key_size = 20;
 //        generator_param.mean_value_size = 50;
@@ -56,40 +47,171 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //
 //        records = generator.generate(random, 1'500);
 //        for (const auto &[key, value]: records)
-//            tools::insert(*impl, key, value);
+//            tools::insert(*core, key, value);
 //        std::sort(begin(records), end(records));
-//    }
-//
-//    ~TestDatabase()
-//    {
-//        data_controls.set_read_fault_rate(0);
-//        fake->get_faults("wal-latest").set_read_fault_rate(0);
-//        data_controls.set_read_fault_counter(-1);
-//        fake->get_faults("wal-latest").set_read_fault_counter(-1);
-//
-//        data_controls.set_write_fault_rate(0);
-//        fake->get_faults("wal-latest").set_write_fault_rate(0);
-//        data_controls.set_write_fault_counter(-1);
-//        fake->get_faults("wal-latest").set_write_fault_counter(-1);
-//    }
-//
-//    auto remove_one(const std::string &key) -> Result<void>
-//    {
-//        CCO_EXPECT_GT(impl->info().record_count(), 0);
-//        CCO_TRY_CREATE(was_erased, impl->erase(impl->find(stob(key))));
-//        if (!was_erased) {
-//            CCO_TRY_STORE(was_erased, impl->erase(impl->find_minimum()));
-//            EXPECT_TRUE(was_erased);
-//        }
-//        return {};
-//    }
-//
-//    Random random {0};
-//    FakeDirectory *fake {};
-//    FaultControls data_controls {};
-//    std::vector<Record> records;
-//    std::unique_ptr<Database::Impl> impl;
-//};
+    }
+
+    ~TestDatabase() = default;
+
+    auto erase_one(const std::string &maybe) -> void
+    {
+        ASSERT_GT(core->info().record_count(), 0);
+        auto s = core->erase(core->find(stob(maybe)));
+        if (s.is_not_found())
+            s = core->erase(core->find_minimum());
+        ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
+    }
+
+    Random random {0};
+    std::unique_ptr<MockStorage> store;
+    MockRandomEditor *mock {};
+    std::vector<Record> records;
+    std::unique_ptr<Core> core;
+};
+
+static auto expose_message(Status s)
+{
+    EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+    return s.is_ok();
+}
+
+class BasicDatabaseTests: public testing::Test {
+public:
+
+    BasicDatabaseTests()
+    {
+        std::error_code ignore;
+        fs::remove_all(ROOT, ignore);
+
+        options.page_size = 0x100;
+        options.frame_count = 16;
+    }
+
+    ~BasicDatabaseTests() override
+    {
+        std::error_code ignore;
+        fs::remove_all(ROOT, ignore);
+    }
+
+    Options options;
+};
+
+TEST_F(BasicDatabaseTests, NewDatabaseIsClosed)
+{
+    Database db;
+    ASSERT_FALSE(db.is_open());
+}
+
+TEST_F(BasicDatabaseTests, OpenAndCloseDatabase)
+{
+    Database db;
+    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    ASSERT_TRUE(db.is_open());
+    ASSERT_TRUE(expose_message(db.close()));
+}
+
+TEST_F(BasicDatabaseTests, ReopenDatabase)
+{
+    Database db;
+    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    ASSERT_TRUE(expose_message(db.close()));
+
+    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    ASSERT_TRUE(expose_message(db.close()));
+}
+
+TEST_F(BasicDatabaseTests, Inserts)
+{
+    static constexpr Size NUM_ITERATIONS {5};
+    static constexpr Size GROUP_SIZE {500};
+
+    Database db;
+    ASSERT_TRUE(db.open(ROOT, options).is_ok());
+
+    RecordGenerator generator;
+    Random random {0};
+
+    for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
+        const auto records = generator.generate(random, GROUP_SIZE);
+        auto itr = std::cbegin(records);
+
+        for (Size i {}; i < GROUP_SIZE; ++i) {
+            ASSERT_TRUE(db.insert(*itr).is_ok());
+            itr++;
+        }
+        ASSERT_TRUE(db.commit().is_ok());
+    }
+    ASSERT_TRUE(db.close().is_ok());
+}
+
+TEST_F(BasicDatabaseTests, DataPersists)
+{
+    static constexpr Size NUM_ITERATIONS {5};
+    static constexpr Size GROUP_SIZE {500};
+
+    auto s = Status::ok();
+    RecordGenerator generator;
+    Random random {0};
+
+    const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
+    auto itr = std::cbegin(records);
+    Database db;
+
+    for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
+
+        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+
+        for (Size i {}; i < GROUP_SIZE; ++i) {
+            ASSERT_TRUE(expose_message(db.insert(*itr)));
+            itr++;
+        }
+        ASSERT_TRUE(expose_message(db.close()));
+    }
+
+    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    CALICO_EXPECT_EQ(db.info().record_count(), records.size());
+    for (const auto &[key, value]: records) {
+        const auto c = tools::find_exact(db, key);
+        ASSERT_TRUE(c.is_valid());
+        ASSERT_EQ(btos(c.key()), key);
+        ASSERT_EQ(c.value(), value);
+    }
+    ASSERT_TRUE(db.close().is_ok());
+}
+
+TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
+{
+    auto invalid = options;
+
+    Database db;
+    invalid.page_size = MINIMUM_PAGE_SIZE / 2;
+    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+
+    invalid.page_size = MAXIMUM_PAGE_SIZE * 2;
+    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+
+    invalid.page_size = DEFAULT_PAGE_SIZE - 1;
+    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+}
+
+TEST_F(BasicDatabaseTests, ReportsInvalidFrameCounts)
+{
+    auto invalid = options;
+    std::error_code ignore;
+
+    Database db;
+    invalid.frame_count = MINIMUM_FRAME_COUNT - 1;
+    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+
+    invalid.frame_count = MAXIMUM_FRAME_COUNT + 1;
+    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
+    ASSERT_FALSE(db.is_open());
+}
+
 //
 //class DatabaseReadFaultTests: public testing::Test {
 //public:
@@ -99,66 +221,24 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //    TestDatabase db;
 //};
 //
-//TEST(DatabaseOpenTest, ReportsInvalidPageSizes)
-//{
-//    Options options;
-//    options.path = "/tmp/calico_test_db__";
-//    std::error_code ignore;
-//
-//    fs::remove_all(options.path, ignore);
-//    options.page_size = MINIMUM_PAGE_SIZE / 2;
-//    Database db {options};
-//    ASSERT_TRUE(db.open().is_invalid_argument());
-//    ASSERT_FALSE(db.is_open());
-//
-//    fs::remove_all(options.path, ignore); // TODO: We shouldn't need to remove the database directory each time.
-//    options.page_size = MAXIMUM_PAGE_SIZE * 2;  //       If we fail during construction of a new database, we should
-//    db = Database {options};                    //       clean up after ourselves properly.
-//    ASSERT_TRUE(db.open().is_invalid_argument());
-//    ASSERT_FALSE(db.is_open());
-//
-//    fs::remove_all(options.path, ignore);
-//    options.page_size = DEFAULT_PAGE_SIZE - 1;
-//    db = Database {options};
-//    ASSERT_TRUE(db.open().is_invalid_argument());
-//    ASSERT_FALSE(db.is_open());
-//}
-//
-//TEST(DatabaseOpenTest, ReportsInvalidFrameCounts)
-//{
-//    Options options;
-//    options.path = "/tmp/calico_test_db__";
-//    std::error_code ignore;
-//
-//    fs::remove_all(options.path, ignore);
-//    options.frame_count = MINIMUM_FRAME_COUNT - 1;
-//    Database db {options};
-//    ASSERT_TRUE(db.open().is_invalid_argument());
-//    ASSERT_FALSE(db.is_open());
-//
-//    fs::remove_all(options.path, ignore);
-//    options.frame_count = MAXIMUM_FRAME_COUNT + 1;
-//    db = Database {options};
-//    ASSERT_TRUE(db.open().is_invalid_argument());
-//    ASSERT_FALSE(db.is_open());
-//}
-//
+
+
 //TEST_F(DatabaseReadFaultTests, OperationsAfterAbort)
 //{
-//    ASSERT_TRUE(db.impl->commit());
+//    ASSERT_TRUE(db.core->commit());
 //
-//    const auto info = db.impl->info();
+//    const auto info = db.core->info();
 //    const auto half = info.record_count() / 2;
 //    ASSERT_GT(half, 0);
 //
 //    while (info.record_count() > half)
-//        ASSERT_TRUE(db.impl->erase(db.impl->find_minimum()));
+//        ASSERT_TRUE(db.core->erase(db.core->find_minimum()));
 //
-//    auto r = db.impl->abort();
+//    auto r = db.core->abort();
 //    ASSERT_TRUE(r) << "Error: " << r.error().what();
 //
 //    for (const auto &[key, value]: db.records) {
-//        auto c = tools::find(*db.impl, key);
+//        auto c = tools::find(*db.core, key);
 //        ASSERT_EQ(btos(c.key()), key);
 //        ASSERT_EQ(c.value(), value);
 //    }
@@ -166,7 +246,7 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //
 //TEST_F(DatabaseReadFaultTests, SystemErrorIsStoredInCursor)
 //{
-//    auto cursor = db.impl->find_minimum();
+//    auto cursor = db.core->find_minimum();
 //    ASSERT_TRUE(cursor.is_valid());
 //    db.data_controls.set_read_fault_rate(100);
 //    while (cursor.increment()) {}
@@ -178,14 +258,14 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //{
 //    static constexpr auto STEP = 10;
 //
-//    // We need to commit before we encounter a system error. The current implementation will lock up
+//    // We need to commit before we encounter a system error. The current coreementation will lock up
 //    // if one is encountered while in the middle of a transaction.
-//    ASSERT_TRUE(db.impl->commit());
+//    ASSERT_TRUE(db.core->commit());
 //
 //    unsigned r {}, num_faults {};
 //    for (; r <= 100; r += STEP) {
 //        db.data_controls.set_read_fault_rate(100 - r);
-//        auto cursor = db.impl->find_minimum();
+//        auto cursor = db.core->find_minimum();
 //        while (cursor.increment()) {}
 //        ASSERT_FALSE(cursor.is_valid());
 //        num_faults += !cursor.status().is_ok();
@@ -194,7 +274,7 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //
 //    db.data_controls.set_read_fault_rate(0);
 //    for (const auto &[key, value]: db.records) {
-//        auto cursor = tools::find(*db.impl, key);
+//        auto cursor = tools::find(*db.core, key);
 //        ASSERT_TRUE(cursor.is_valid());
 //        ASSERT_EQ(cursor.value(), value);
 //    }
@@ -204,17 +284,17 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //public:
 //    DatabaseWriteFaultTests()
 //    {
-//        EXPECT_TRUE(db.impl->commit());
+//        EXPECT_TRUE(db.core->commit());
 //
 //        // Mess up the database.
 //        auto generator = RecordGenerator {{}};
 //        for (const auto &[key, value]: generator.generate(db.random, 2'500)) {
 //            if (const auto r = db.random.next_int(8); r == 0) {
-//                EXPECT_TRUE(db.impl->erase(db.impl->find_minimum()));
+//                EXPECT_TRUE(db.core->erase(db.core->find_minimum()));
 //            } else if (r == 1) {
-//                EXPECT_TRUE(db.impl->erase(db.impl->find_maximum()));
+//                EXPECT_TRUE(db.core->erase(db.core->find_maximum()));
 //            }
-//            EXPECT_TRUE(tools::insert(*db.impl, key, value));
+//            EXPECT_TRUE(tools::insert(*db.core, key, value));
 //        }
 //    }
 //    ~DatabaseWriteFaultTests() override = default;
@@ -225,16 +305,16 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //
 //TEST_F(DatabaseWriteFaultTests, InvalidArgumentErrorsDoNotCauseLockup)
 //{
-//    const auto empty_key_result = db.impl->insert(stob(""), stob("value"));
+//    const auto empty_key_result = db.core->insert(stob(""), stob("value"));
 //    ASSERT_FALSE(empty_key_result.has_value());
 //    ASSERT_TRUE(empty_key_result.error().is_invalid_argument());
-//    ASSERT_TRUE(db.impl->insert(stob("*"), stob("value")));
+//    ASSERT_TRUE(db.core->insert(stob("*"), stob("value")));
 //
-//    const std::string long_key(db.impl->info().maximum_key_size() + 1, 'x');
-//    const auto long_key_result = db.impl->insert(stob(long_key), stob("value"));
+//    const std::string long_key(db.core->info().maximum_key_size() + 1, 'x');
+//    const auto long_key_result = db.core->insert(stob(long_key), stob("value"));
 //    ASSERT_FALSE(long_key_result.has_value());
 //    ASSERT_TRUE(long_key_result.error().is_invalid_argument());
-//    ASSERT_TRUE(db.impl->insert(stob(long_key).truncate(long_key.size() - 1), stob("value")));
+//    ASSERT_TRUE(db.core->insert(stob(long_key).truncate(long_key.size() - 1), stob("value")));
 //}
 //
 //template<class RateSetter>
@@ -243,7 +323,7 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //    for (unsigned rate {100}; rate >= 50; rate -= 10) {
 //        setter(rate);
 //
-//        if (const auto r = db.impl->abort()) {
+//        if (const auto r = db.core->abort()) {
 //            ASSERT_LT(rate, 100) << "Abort succeeded with an error rate of 100%";
 //            setter(0);
 //            return;
@@ -252,7 +332,7 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //        }
 //    }
 //    setter(0);
-//    ASSERT_TRUE(db.impl->abort());
+//    ASSERT_TRUE(db.core->abort());
 //}
 //
 //auto validate_after_abort(TestDatabase &db)
@@ -261,12 +341,12 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //    // adds some records and deletes others, so if abort() didn't do its job, the database will contain different records. Removing
 //    // all the records here makes sure the tree connections are still valid.
 //    for (const auto &[key, value]: db.records) {
-//        auto cursor = tools::find(*db.impl, key);
+//        auto cursor = tools::find(*db.core, key);
 //        ASSERT_TRUE(cursor.is_valid());
 //        ASSERT_EQ(cursor.value(), value);
-//        ASSERT_TRUE(db.impl->erase(cursor));
+//        ASSERT_TRUE(db.core->erase(cursor));
 //    }
-//    ASSERT_EQ(db.impl->info().record_count(), 0);
+//    ASSERT_EQ(db.core->info().record_count(), 0);
 //}
 //
 //TEST_F(DatabaseWriteFaultTests, AbortIsReentrantAfterDataWriteFaults)
@@ -288,22 +368,22 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //TEST_F(DatabaseWriteFaultTests, AbortFixesLockup)
 //{
 //    db.data_controls.set_write_fault_rate(100);
-//    for (Index i {}; ; ++i) {
+//    for (Size i {}; ; ++i) {
 //        const auto s = std::to_string(i);
-//        auto result = db.impl->insert(stob(s), stob(s));
+//        auto result = db.core->insert(stob(s), stob(s));
 //        if (!result.has_value()) {
 //            // The following operations should fail until an abort() call is successful.
-//            ASSERT_TRUE(db.impl->insert(stob(s), stob(s)).error().is_system_error());
-//            ASSERT_TRUE(db.impl->erase(stob(s)).error().is_system_error());
-//            ASSERT_TRUE(db.impl->find(stob(s)).status().is_system_error());
-//            ASSERT_TRUE(db.impl->find_minimum().status().is_system_error());
-//            ASSERT_TRUE(db.impl->find_maximum().status().is_system_error());
-//            ASSERT_TRUE(db.impl->commit().error().is_system_error());
+//            ASSERT_TRUE(db.core->insert(stob(s), stob(s)).error().is_system_error());
+//            ASSERT_TRUE(db.core->erase(stob(s)).error().is_system_error());
+//            ASSERT_TRUE(db.core->find(stob(s)).status().is_system_error());
+//            ASSERT_TRUE(db.core->find_minimum().status().is_system_error());
+//            ASSERT_TRUE(db.core->find_maximum().status().is_system_error());
+//            ASSERT_TRUE(db.core->commit().error().is_system_error());
 //            break;
 //        }
 //    }
 //    // Might as well let it fail a few times. abort() should be reentrant anyway.
-//    while (!db.impl->abort().has_value()) {
+//    while (!db.core->abort().has_value()) {
 //        const auto rate = db.data_controls.write_fault_rate();
 //        db.data_controls.set_write_fault_rate(2 * rate / 3);
 //    }
@@ -347,80 +427,17 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //    ASSERT_FALSE(info.is_temp());
 //    ASSERT_TRUE(db.close().is_ok());
 //}
-//
-//TEST_F(DatabaseTests, ReopenDatabase)
-//{
-//    Database db {options};
-//    ASSERT_TRUE(db.open().is_ok());
-//    ASSERT_TRUE(db.close().is_ok());
-//
-//    ASSERT_TRUE(db.open().is_ok());
-//    ASSERT_EQ(db.info().record_count(), 0);
-//    ASSERT_TRUE(db.close().is_ok());
-//}
-//
-//TEST_F(DatabaseTests, Inserts)
-//{
-//    static constexpr Size NUM_ITERATIONS {5};
-//    static constexpr Size GROUP_SIZE {500};
-//
-//    Database db {options};
-//    ASSERT_TRUE(db.open().is_ok());
-//
-//    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-//        const auto records = generator.generate(random, GROUP_SIZE);
-//        auto itr = std::cbegin(records);
-//
-//        for (Index i {}; i < GROUP_SIZE; ++i) {
-//            ASSERT_TRUE(db.insert(*itr).is_ok());
-//            itr++;
-//        }
-//        ASSERT_TRUE(db.commit().is_ok());
-//    }
-//    ASSERT_TRUE(db.close().is_ok());
-//}
-//
-//TEST_F(DatabaseTests, DataPersists)
-//{
-//    static constexpr Size NUM_ITERATIONS {5};
-//    static constexpr Size GROUP_SIZE {500};
-//
-//    const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
-//    auto itr = std::cbegin(records);
-//
-//    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-//        Database db {options};
-//        ASSERT_TRUE(db.open().is_ok());
-//
-//        for (Index i {}; i < GROUP_SIZE; ++i) {
-//            ASSERT_TRUE(db.insert(*itr).is_ok());
-//            itr++;
-//        }
-//        ASSERT_TRUE(db.close().is_ok());
-//    }
-//
-//    Database db {options};
-//    ASSERT_TRUE(db.open().is_ok());
-//    CCO_EXPECT_EQ(db.info().record_count(), records.size());
-//    for (const auto &[key, value]: records) {
-//        const auto c = tools::find_exact(db, key);
-//        ASSERT_TRUE(c.is_valid());
-//        ASSERT_EQ(btos(c.key()), key);
-//        ASSERT_EQ(c.value(), value);
-//    }
-//    ASSERT_TRUE(db.close().is_ok());
-//}
-//
+
 //TEST_F(DatabaseTests, CannotCommitEmptyTransaction)
 //{
 //    Options options;
 //    options.path = "/tmp/__database_commit_test";
 //    Database db {options};
-//    CCO_EXPECT_OK(db.open());
-//    CCO_EXPECT_OK(db.insert("a", "1"));
-//    CCO_EXPECT_OK(db.insert("b", "2"));
-//    CCO_EXPECT_OK(db.insert("c", "3"));
-//    CCO_EXPECT_OK(db.commit());
+//    CALICO_EXPECT_OK(db.open());
+//    CALICO_EXPECT_OK(db.insert("a", "1"));
+//    CALICO_EXPECT_OK(db.insert("b", "2"));
+//    CALICO_EXPECT_OK(db.insert("c", "3"));
+//    CALICO_EXPECT_OK(db.commit());
 //
 //    const auto s = db.commit();
 //    ASSERT_TRUE(s.is_logic_error()) << "Error: " << (s.is_ok() ? "commit() should have failed" : s.what());
@@ -559,8 +576,8 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //        EXPECT_CALL(*temp, exists(_)).Times(AtLeast(1));
 //        EXPECT_CALL(*temp, children).Times(1);
 //        EXPECT_CALL(*temp, close).Times(1);
-//        impl = Database::Impl::open(param, std::move(temp)).value();
-//        mock = dynamic_cast<MockDirectory*>(&impl->home());
+//        core = Database::Impl::open(param, std::move(temp)).value();
+//        mock = dynamic_cast<MockDirectory*>(&core->home());
 //        data_mock = mock->get_mock_data_file();
 //
 //        RecordGenerator::Parameters generator_param;
@@ -571,7 +588,7 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //
 //        records = generator.generate(random, 1'500);
 //        for (const auto &[key, value]: records)
-//            tools::insert(*impl, key, value);
+//            tools::insert(*core, key, value);
 //        std::sort(begin(records), end(records));
 //    }
 //
@@ -579,10 +596,10 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //
 //    auto remove_one(const std::string &key) -> Result<void>
 //    {
-//        CCO_EXPECT_GT(impl->info().record_count(), 0);
-//        CCO_TRY_CREATE(was_erased, impl->erase(impl->find(stob(key))));
+//        CALICO_EXPECT_GT(core->info().record_count(), 0);
+//        CALICO_TRY_CREATE(was_erased, core->erase(core->find(stob(key))));
 //        if (!was_erased) {
-//            CCO_TRY_STORE(was_erased, impl->erase(impl->find_minimum()));
+//            CALICO_TRY_STORE(was_erased, core->erase(core->find_minimum()));
 //            EXPECT_TRUE(was_erased);
 //        }
 //        return {};
@@ -592,20 +609,20 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //    MockDirectory *mock {};
 //    MockFile *data_mock {};
 //    std::vector<Record> records;
-//    std::unique_ptr<Database::Impl> impl;
+//    std::unique_ptr<Database::Impl> core;
 //};
 //
 //TEST(MockDatabaseTests, CommitSmallTransactions)
 //{
 //    MockDatabase db;
-//    const auto info = db.impl->info();
-//    ASSERT_TRUE(db.impl->commit());
+//    const auto info = db.core->info();
+//    ASSERT_TRUE(db.core->commit());
 //    const auto record_count = info.record_count();
 //
-//    for (Index i {}; i < 10; ++i) {
-//        ASSERT_TRUE(db.impl->erase(db.impl->find_minimum()));
-//        ASSERT_TRUE(db.impl->erase(db.impl->find_maximum()));
-//        ASSERT_TRUE(db.impl->commit());
+//    for (Size i {}; i < 10; ++i) {
+//        ASSERT_TRUE(db.core->erase(db.core->find_minimum()));
+//        ASSERT_TRUE(db.core->erase(db.core->find_maximum()));
+//        ASSERT_TRUE(db.core->commit());
 //        ASSERT_EQ(info.record_count(), record_count - 2*(i+1));
 //    }
 //}
@@ -613,19 +630,19 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //TEST(MockDatabaseTests, AbortSmallTransactions)
 //{
 //    MockDatabase db;
-//    const auto info = db.impl->info();
-//    ASSERT_TRUE(db.impl->commit());
+//    const auto info = db.core->info();
+//    ASSERT_TRUE(db.core->commit());
 //    const auto record_count = info.record_count();
 //    auto left = cbegin(db.records);
 //    auto right = crbegin(db.records);
-//    for (Index i {}; i < 10; ++i, ++left, ++right) {
-//        ASSERT_TRUE(db.impl->erase(db.impl->find(stob(left->key))));
-//        ASSERT_TRUE(db.impl->erase(db.impl->find(stob(right->key))));
-//        ASSERT_TRUE(db.impl->abort());
+//    for (Size i {}; i < 10; ++i, ++left, ++right) {
+//        ASSERT_TRUE(db.core->erase(db.core->find(stob(left->key))));
+//        ASSERT_TRUE(db.core->erase(db.core->find(stob(right->key))));
+//        ASSERT_TRUE(db.core->abort());
 //        ASSERT_EQ(info.record_count(), record_count);
 //    }
 //    for (const auto &[key, value]: db.records) {
-//        auto c = db.impl->find_exact(stob(key));
+//        auto c = db.core->find_exact(stob(key));
 //        ASSERT_TRUE(c.is_valid());
 //        ASSERT_EQ(c.value(), value);
 //    }
@@ -641,16 +658,16 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //    ON_CALL(*wal_mock, write(_))
 //        .WillByDefault(Return(Err {Status::system_error("123")}));
 //
-//    auto r = db.impl->commit();
+//    auto r = db.core->commit();
 //    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
 //    ASSERT_TRUE(r.error().is_system_error()) << "Unexpected error: " << r.error().what();
 //    ASSERT_EQ(r.error().what(), "123");
-//    ASSERT_EQ(db.impl->status().what(), "123") << "System error should be stored in database status";
+//    ASSERT_EQ(db.core->status().what(), "123") << "System error should be stored in database status";
 //
 //    wal_mock->delegate_to_fake();
-//    r = db.impl->abort();
+//    r = db.core->abort();
 //    ASSERT_TRUE(r.has_value());
-//    ASSERT_TRUE(db.impl->status().is_ok());
+//    ASSERT_TRUE(db.core->status().is_ok());
 //}
 //
 ////TEST(MockDatabaseTests, SanityCheck)
@@ -673,16 +690,16 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 ////    ON_CALL(*wal_mock, write(_))
 ////        .WillByDefault(Return(Err {Status::system_error("123")}));
 ////
-////    auto r = db.impl->commit();
+////    auto r = db.core->commit();
 ////    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
 ////    ASSERT_TRUE(r.error().is_system_error()) << "Unexpected error: " << r.error().what();
 ////    ASSERT_EQ(r.error().what(), "123");
-////    ASSERT_EQ(db.impl->status().what(), "123") << "System error should be stored in database status";
+////    ASSERT_EQ(db.core->status().what(), "123") << "System error should be stored in database status";
 ////
 ////    wal_mock->delegate_to_fake();
-////    r = db.impl->abort();
+////    r = db.core->abort();
 ////    ASSERT_TRUE(r.has_value());
-////    ASSERT_TRUE(db.impl->status().is_ok());
+////    ASSERT_TRUE(db.core->status().is_ok());
 ////}
 //
 //template<class Mock>
@@ -693,12 +710,12 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //    ON_CALL(mock, close)
 //        .WillByDefault(Return(Err {Status::system_error("123")}));
 //
-//    const auto s = db.impl->close();
+//    const auto s = db.core->close();
 //    ASSERT_FALSE(s.has_value());
 //    ASSERT_TRUE(s.error().is_system_error());
 //    ASSERT_EQ(s.error().what(), "123");
-//    ASSERT_TRUE(db.impl->status().is_system_error());
-//    ASSERT_EQ(db.impl->status().what(), "123");
+//    ASSERT_TRUE(db.core->status().is_system_error());
+//    ASSERT_EQ(db.core->status().what(), "123");
 //}
 //
 //TEST(MockDatabaseTests, PropagatesErrorFromWALClose)
@@ -752,7 +769,7 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //        std::error_code ignore;
 //        fs::remove_all(SOURCE, ignore);
 //        fs::remove_all(TARGET, ignore);
-//        CCO_EXPECT_OK(db.open());
+//        CALICO_EXPECT_OK(db.open());
 //    }
 //
 //    ~RecoveryTests() override
@@ -761,14 +778,14 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //        EXPECT_TRUE(db.is_open()) << "Database should be open";
 //        std::error_code ignore;
 //        fs::remove_all(SOURCE, ignore);
-//        CCO_EXPECT_OK(Database::destroy(std::move(db)));
+//        CALICO_EXPECT_OK(Database::destroy(std::move(db)));
 //    }
 //
 //    auto fail_and_recover() -> Status
 //    {
 //        EXPECT_EQ(options.path, SOURCE) << "fail_and_reopen() was called more than once";
 //        fs::copy(SOURCE, TARGET);
-//        CCO_EXPECT_OK(db.close());
+//        CALICO_EXPECT_OK(db.close());
 //        options.path = TARGET;
 //        db = Database {options};
 //        return db.open();
@@ -787,10 +804,10 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //
 //TEST_F(RecoveryTests, RollsBackUncommittedTransaction)
 //{
-//    CCO_EXPECT_OK(db.insert("a", "1"));
-//    CCO_EXPECT_OK(db.insert("b", "2"));
-//    CCO_EXPECT_OK(db.insert("c", "3"));
-//    CCO_EXPECT_OK(fail_and_recover());
+//    CALICO_EXPECT_OK(db.insert("a", "1"));
+//    CALICO_EXPECT_OK(db.insert("b", "2"));
+//    CALICO_EXPECT_OK(db.insert("c", "3"));
+//    CALICO_EXPECT_OK(fail_and_recover());
 //    const auto info = db.info();
 //    ASSERT_EQ(info.record_count(), 0);
 //    ASSERT_EQ(info.page_count(), 1);
@@ -798,11 +815,11 @@ TEST(TestFileHeader, FileHeaderIsPOD)
 //
 //TEST_F(RecoveryTests, PreservesCommittedTransaction)
 //{
-//    CCO_EXPECT_OK(db.insert("a", "1"));
-//    CCO_EXPECT_OK(db.insert("b", "2"));
-//    CCO_EXPECT_OK(db.insert("c", "3"));
-//    CCO_EXPECT_OK(db.commit());
-//    CCO_EXPECT_OK(fail_and_recover());
+//    CALICO_EXPECT_OK(db.insert("a", "1"));
+//    CALICO_EXPECT_OK(db.insert("b", "2"));
+//    CALICO_EXPECT_OK(db.insert("c", "3"));
+//    CALICO_EXPECT_OK(db.commit());
+//    CALICO_EXPECT_OK(fail_and_recover());
 //    const auto info = db.info();
 //    ASSERT_EQ(info.record_count(), 3);
 //    ASSERT_EQ(info.page_count(), 1);

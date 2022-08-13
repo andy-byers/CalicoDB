@@ -1,33 +1,33 @@
-#ifndef CCO_WAL_INTERFACE_H
-#define CCO_WAL_INTERFACE_H
+#ifndef CALICO_WAL_H
+#define CALICO_WAL_H
 
 #include "utils/result.h"
-#include "wal/wal_record.h"
+#include "wal/record.h"
 #include <optional>
 
-namespace cco {
+namespace calico {
 
 struct FileHeader; // TODO: Will need to be exposed in the public API.
 
 struct PageDelta {
-    Index offset {};
+    Size offset {};
     Size size {};
 };
 
 struct DeltaContent {
-    Index offset {};
+    Size offset {};
     BytesView data {};
 };
 
 struct RedoDescriptor {
-    std::uint64_t page_id;
-    std::uint64_t page_lsn;
+    std::uint64_t page_id {};
+    std::uint64_t page_lsn {};
     std::vector<DeltaContent> deltas;
     bool is_commit {};
 };
 
 struct UndoDescriptor {
-    std::uint64_t page_id;
+    std::uint64_t page_id {};
     BytesView image;
 };
 
@@ -155,6 +155,6 @@ public:
     virtual auto load_state(const FileHeader &) -> void = 0;
 };
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_WAL_INTERFACE_H
+#endif // CALICO_WAL_H

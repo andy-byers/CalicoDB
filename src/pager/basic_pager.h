@@ -1,5 +1,5 @@
-#ifndef CCO_POOL_BUFFER_POOL_H
-#define CCO_POOL_BUFFER_POOL_H
+#ifndef CALICO_POOL_BUFFER_POOL_H
+#define CALICO_POOL_BUFFER_POOL_H
 
 #include "pager.h"
 #include "registry.h"
@@ -9,7 +9,7 @@
 #include <spdlog/logger.h>
 #include <unordered_map>
 
-namespace cco {
+namespace calico {
 
 class Storage;
 class Framer;
@@ -17,6 +17,7 @@ class Framer;
 class BasicPager : public Pager {
 public:
     struct Parameters {
+        std::string root;
         Storage &storage;
         WriteAheadLog &wal;
         spdlog::sink_ptr log_sink;
@@ -28,7 +29,7 @@ public:
 
     [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<BasicPager>>;
     [[nodiscard]] auto page_count() const -> Size override;
-    [[nodiscard]] auto flushed_lsn() const -> SequenceNumber override;
+    [[nodiscard]] auto flushed_lsn() const -> SequenceId override;
     [[nodiscard]] auto allocate() -> Result<Page> override;
     [[nodiscard]] auto acquire(PageId, bool) -> Result<Page> override;
     [[nodiscard]] auto release(Page) -> Status override;
@@ -67,4 +68,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_POOL_BUFFER_POOL_H
+#endif // CALICO_POOL_BUFFER_POOL_H

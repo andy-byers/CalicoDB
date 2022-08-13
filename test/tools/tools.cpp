@@ -7,7 +7,7 @@
 #include "utils/logging.h"
 #include <unordered_set>
 
-namespace cco {
+namespace calico {
 
 unsigned RecordGenerator::default_seed = 0;
 
@@ -31,7 +31,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
         auto key = random_string(random, min_ks, max_ks);
         if (is_sequential) {
             if (set.find(key) != end(set)) {
-                CCO_EXPECT_LT(num_collisions, num_records);
+                CALICO_EXPECT_LT(num_collisions, num_records);
                 num_collisions++;
                 continue;
             }
@@ -67,7 +67,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 //auto TreePrinter::add_spaces_to_other_levels(Size n, Index excluded) -> void
 //{
 //    // If excluded is equal to m_levels.size(), add spaces to all levels.
-//    CCO_EXPECT_LE(excluded, m_levels.size());
+//    CALICO_EXPECT_LE(excluded, m_levels.size());
 //    for (Index level{}; level < m_levels.size(); ++level) {
 //        if (level != excluded)
 //            add_spaces_to_level(n, level);
@@ -155,7 +155,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 //{
 //    while (level >= m_levels.size())
 //        m_levels.emplace_back();
-//    CCO_EXPECT_GT(m_levels.size(), level);
+//    CALICO_EXPECT_GT(m_levels.size(), level);
 //}
 
 } // cco

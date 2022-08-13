@@ -96,7 +96,7 @@
 //        param.is_external = is_external;
 //
 //        if (local_value_size != value.size()) {
-//            CCO_EXPECT_LT(local_value_size, value.size());
+//            CALICO_EXPECT_LT(local_value_size, value.size());
 //            param.local_value.truncate(local_value_size);
 //            param.overflow_id = overflow_id;
 //        }
@@ -170,7 +170,7 @@
 ////    ASSERT_EQ(header().free_start(), 4);
 //////    ASSERT_EQ(header().free_count(), 5);
 ////    ASSERT_EQ(header().frag_count(), 6);
-////    ASSERT_EQ(header().cell_count(), 7);
+////    ASSERT_EQ(header().record_count(), 7);
 ////
 ////    header().set_free_start(0); // TODO
 //////    header().set_free_count(0); // TODO
@@ -183,15 +183,15 @@
 ////        return backing.directory;
 ////    }
 ////
-////    [[nodiscard]] auto cell_count() const -> Size
+////    [[nodiscard]] auto record_count() const -> Size
 ////    {
-////        return backing.header.cell_count();
+////        return backing.header.record_count();
 ////    }
 ////};
 ////
 ////TEST_F(CellDirectoryTests, FreshDirectoryIsEmpty)
 ////{
-////    ASSERT_EQ(cell_count(), 0);
+////    ASSERT_EQ(record_count(), 0);
 ////}
 ////
 ////TEST_F(CellDirectoryTests, RemoveFromEmptyDirectoryDeathTest)
@@ -208,9 +208,9 @@
 ////TEST_F(CellDirectoryTests, ModifyingDirectoryChangesCellCount)
 ////{
 ////    directory().insert_pointer(0, {100});
-////    ASSERT_EQ(cell_count(), 1);
+////    ASSERT_EQ(record_count(), 1);
 ////    directory().remove_pointer(0);
-////    ASSERT_EQ(cell_count(), 0);
+////    ASSERT_EQ(record_count(), 0);
 ////}
 ////
 ////TEST_F(CellDirectoryTests, InsertedPointersCanBeRead)
@@ -417,11 +417,11 @@
 //    writer.set_page_count(number);
 //    writer.set_free_start(PageId {number * 10});
 //    writer.set_record_count(number * 20);
-//    writer.set_flushed_lsn(SequenceNumber {number * 30});
+//    writer.set_flushed_lsn(SeqNum {number * 30});
 //    writer.set_page_size(0x1234);
 //    writer.update_magic_code();
 //    writer.update_header_crc();
-//    root.page().set_lsn(SequenceNumber {number * 40});
+//    root.page().set_lsn(SeqNum {number * 40});
 //    NodeHeader::set_right_sibling_id(root.page(), PageId {number * 50});
 //    NodeHeader::set_left_sibling_id(root.page(), PageId {number * 60});
 //    NodeHeader::set_cell_count(root.page(), 0x2345);
@@ -429,8 +429,8 @@
 //    NodeHeader::set_frag_count(root.page(), 0x4567);
 //    NodeHeader::set_free_start(root.page(), 0x5678);
 //    NodeHeader::set_free_total(root.page(), 0x6789);
-//    CCO_EXPECT_EQ(root.page().lsn(), SequenceNumber {number * 40});
-//    CCO_EXPECT_EQ(root.page().type(), PageType::EXTERNAL_NODE);
+//    CALICO_EXPECT_EQ(root.page().lsn(), SeqNum {number * 40});
+//    CALICO_EXPECT_EQ(root.page().type(), PageType::EXTERNAL_NODE);
 //    ASSERT_TRUE(reader.is_magic_code_consistent());
 //    ASSERT_TRUE(reader.is_header_crc_consistent());
 //    ASSERT_EQ(reader.page_count(), number);
@@ -453,7 +453,7 @@
 //    const auto number = random.next_int(std::numeric_limits<std::uint64_t>::max() / 2,
 //                                        std::numeric_limits<std::uint64_t>::max());
 //
-//    root.page().set_lsn(SequenceNumber {number * 40});
+//    root.page().set_lsn(SeqNum {number * 40});
 //    NodeHeader::set_parent_id(root.page(), PageId {number * 50});
 //    NodeHeader::set_right_sibling_id(root.page(), PageId {number * 60});
 //    NodeHeader::set_left_sibling_id(root.page(), PageId {number * 80});
@@ -462,8 +462,8 @@
 //    NodeHeader::set_frag_count(root.page(), 0x4567);
 //    NodeHeader::set_free_start(root.page(), 0x5678);
 //    NodeHeader::set_free_total(root.page(), 0x6789);
-//    CCO_EXPECT_EQ(root.page().lsn(), SequenceNumber {number * 40});
-//    CCO_EXPECT_EQ(root.page().type(), PageType::EXTERNAL_NODE);
+//    CALICO_EXPECT_EQ(root.page().lsn(), SeqNum {number * 40});
+//    CALICO_EXPECT_EQ(root.page().type(), PageType::EXTERNAL_NODE);
 //    ASSERT_EQ(NodeHeader::parent_id(root.page()), PageId {number * 50});
 //    ASSERT_EQ(NodeHeader::right_sibling_id(root.page()), PageId {number * 60});
 //    ASSERT_EQ(NodeHeader::left_sibling_id(root.page()), PageId {number * 80});

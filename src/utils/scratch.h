@@ -1,6 +1,6 @@
 
-#ifndef CCO_UTILS_SCRATCH_H
-#define CCO_UTILS_SCRATCH_H
+#ifndef CALICO_UTILS_SCRATCH_H
+#define CALICO_UTILS_SCRATCH_H
 
 #include "calico/bytes.h"
 #include "types.h"
@@ -8,7 +8,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace cco {
+namespace calico {
 
 class RollingScratchManager;
 
@@ -58,24 +58,24 @@ private:
     std::vector<std::string> m_scratches;
     std::list<std::string> m_emergency;
     Size m_scratch_size;
-    Index m_counter {};
+    Size m_counter {};
 };
 
 class ManualScratch: public Scratch {
 public:
     
-    ManualScratch(Index id, Bytes data)
+    ManualScratch(Size id, Bytes data)
         : Scratch {data},
           m_id {id}
     {}
 
-    [[nodiscard]] auto id() const -> Index
+    [[nodiscard]] auto id() const -> Size
     {
         return m_id;
     }
     
 private:
-    Index m_id {};
+    Size m_id {};
 };
 
 class ManualScratchManager final {
@@ -88,12 +88,12 @@ public:
     auto put(ManualScratch) -> void;
 
 private:
-    std::unordered_map<Index, std::string> m_occupied;
+    std::unordered_map<Size, std::string> m_occupied;
     std::list<std::string> m_available;
-    Index m_next_id {};
+    Size m_next_id {};
     Size m_scratch_size;
 };
 
 } // namespace cco
 
-#endif // CCO_UTILS_SCRATCH_H
+#endif // CALICO_UTILS_SCRATCH_H

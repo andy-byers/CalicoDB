@@ -6,7 +6,7 @@
 #include "utils/layout.h"
 #include "utils/logging.h"
 
-namespace cco {
+namespace calico {
 
 NodePool::NodePool(Pager &pager, Size page_size)
     : m_free_list {pager},
@@ -44,7 +44,7 @@ auto NodePool::acquire(PageId id, bool is_writable) -> Result<Node>
 
 auto NodePool::release(Node node) -> Result<void>
 {
-    CCO_EXPECT_FALSE(node.is_overflowing());
+    CALICO_EXPECT_FALSE(node.is_overflowing());
     const auto s = m_pager->release(node.take());
     if (!s.is_ok()) return Err {s}; // TODO: Should return a Status.
     return {};
@@ -52,13 +52,13 @@ auto NodePool::release(Node node) -> Result<void>
 
 auto NodePool::destroy(Node node) -> Result<void>
 {
-    CCO_EXPECT_FALSE(node.is_overflowing());
+    CALICO_EXPECT_FALSE(node.is_overflowing());
     return m_free_list.push(node.take());
 }
 
 auto NodePool::allocate_chain(BytesView overflow) -> Result<PageId>
 {
-    CCO_EXPECT_FALSE(overflow.is_empty());
+    CALICO_EXPECT_FALSE(overflow.is_empty());
     std::optional<Link> prev;
     auto head = PageId::null();
 
@@ -97,7 +97,7 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<PageId>
 auto NodePool::collect_chain(PageId id, Bytes out) const -> Result<void>
 {
     while (!out.is_empty()) {
-        CCO_TRY_CREATE(page, m_pager->acquire(id, false));
+        CALICO_TRY_CREATE(page, m_pager->acquire(id, false));
         if (page.type() != PageType::OVERFLOW_LINK) {
             ThreePartMessage message;
             message.set_primary("cannot collect overflow chain");
@@ -122,11 +122,11 @@ auto NodePool::destroy_chain(PageId id, Size size) -> Result<void>
         auto page = m_pager->acquire(id, true);
         if (!page.has_value())
             return Err {page.error()};
-        CCO_EXPECT_EQ(page->type(), PageType::OVERFLOW_LINK); // TODO: Corruption error, not assertion. Need a logger for this class.
+        CALICO_EXPECT_EQ(page->type(), PageType::OVERFLOW_LINK); // TODO: Corruption error, not assertion. Need a logger for this class.
         Link link {std::move(*page)};
         id = link.next_id();
         size -= std::min(size, link.content_view().size());
-        CCO_TRY(m_free_list.push(link.take()));
+        CALICO_TRY(m_free_list.push(link.take()));
     }
     return {};
 }

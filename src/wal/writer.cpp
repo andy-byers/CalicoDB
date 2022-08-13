@@ -1,16 +1,17 @@
-//#include "wal_writer.h"
+//#include "writer.h"
+//#include "basic_wal.h"
 //#include "calico/storage.h"
-//#include "utils/identifier.h"
 //#include "utils/logging.h"
+//#include "utils/types.h"
 //#include <optional>
 //
 //namespace cco {
 //
 //auto WALWriter::create(const WALParameters &param) -> Result<std::unique_ptr<IWALWriter>>
 //{
-//    CCO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
-//    CCO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
-//    CCO_EXPECT_TRUE(is_power_of_two(param.page_size));
+//    CALICO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
+//    CALICO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
+//    CALICO_EXPECT_TRUE(is_power_of_two(param.page_size));
 //
 //    auto writer = std::unique_ptr<WALWriter> {new (std::nothrow) WALWriter {param}};
 //    if (!writer) {
@@ -38,7 +39,7 @@
 //
 //auto WALWriter::open(std::unique_ptr<IFile> file) -> Result<void>
 //{
-//    CCO_EXPECT_FALSE(is_open());
+//    CALICO_EXPECT_FALSE(is_open());
 //    m_file = std::move(file);
 //    m_position = Position {};
 //    return {};
@@ -54,7 +55,7 @@
 ////printf("appending LSN %u to %s\n", record.lsn().value, m_file->name().c_str());
 //
 //    const auto next_lsn {record.lsn()};
-//    CCO_EXPECT_EQ(next_lsn.value, m_last_lsn.value + 1);
+//    CALICO_EXPECT_EQ(next_lsn.value, m_last_lsn.value + 1);
 //
 //    std::optional<Position> first;
 //
@@ -84,9 +85,9 @@
 //            }
 //            continue;
 //        }
-//        CCO_TRY(flush());
+//        CALICO_TRY(flush());
 //    }
-//    CCO_EXPECT_TRUE(first.has_value());
+//    CALICO_EXPECT_TRUE(first.has_value());
 //    m_last_lsn = next_lsn;
 //    return *first;
 //}
@@ -111,8 +112,8 @@
 //        auto block = stob(m_tail);
 //        mem_clear(block.range(m_position.offset));
 //
-//        CCO_TRY(m_file->write(block));
-//        CCO_TRY(m_file->sync());
+//        CALICO_TRY(m_file->write(block));
+//        CALICO_TRY(m_file->sync());
 //
 //        m_position.block_id++;
 //        m_position.offset = 0;

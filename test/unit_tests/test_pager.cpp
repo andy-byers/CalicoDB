@@ -10,7 +10,7 @@
 #include <gtest/gtest.h>
 #include <numeric>
 
-namespace cco {
+namespace calico {
 
 TEST(UniqueCacheTests, NewCacheIsEmpty)
 {
@@ -91,20 +91,20 @@ public:
 
 TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 {
-    registry.put(PageId {11UL}, FrameId {11UL});
-    registry.put(PageId {12UL}, FrameId {12UL});
-    registry.put(PageId {13UL}, FrameId {13UL});
-    registry.put(PageId {1UL}, FrameId {1UL});
-    registry.put(PageId {2UL}, FrameId {2UL});
-    registry.put(PageId {3UL}, FrameId {3UL});
+    registry.put(PageId {11UL}, FrameNumber {11UL});
+    registry.put(PageId {12UL}, FrameNumber {12UL});
+    registry.put(PageId {13UL}, FrameNumber {13UL});
+    registry.put(PageId {1UL}, FrameNumber {1UL});
+    registry.put(PageId {2UL}, FrameNumber {2UL});
+    registry.put(PageId {3UL}, FrameNumber {3UL});
     ASSERT_EQ(registry.size(), 6);
 
     // Reference these entries again, causing them to be placed in the hot cache.
-    ASSERT_EQ(registry.get(PageId {11UL})->second.frame_id, 11);
-    ASSERT_EQ(registry.get(PageId {12UL})->second.frame_id, 12);
-    ASSERT_EQ(registry.get(PageId {13UL})->second.frame_id, 13);
+    ASSERT_EQ(registry.get(PageId {11UL})->second.frame_id, 11UL);
+    ASSERT_EQ(registry.get(PageId {12UL})->second.frame_id, 12UL);
+    ASSERT_EQ(registry.get(PageId {13UL})->second.frame_id, 13UL);
 
-    Index i {}, j {};
+    Size i {}, j {};
 
     const auto callback = [&i, &j](auto page_id, auto frame_id, auto) {
         EXPECT_EQ(page_id, frame_id);
@@ -123,8 +123,8 @@ public:
     explicit FramerTests()
         : home {std::make_unique<HeapStorage>()}
     {
-        std::unique_ptr<RandomAccessEditor> file;
-        RandomAccessEditor *temp {};
+        std::unique_ptr<RandomEditor> file;
+        RandomEditor *temp {};
         EXPECT_TRUE(home->open_random_editor(DATA_FILENAME, &temp).is_ok());
         file.reset(temp);
 
@@ -147,7 +147,7 @@ TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
 
 TEST_F(FramerTests, KeepsTrackOfAvailableFrames)
 {
-    auto frame_id = framer->pin(PageId::base()).value();
+    auto frame_id = framer->pin(PageId::root()).value();
     ASSERT_EQ(framer->available(), 7);
     framer->discard(frame_id);
     ASSERT_EQ(framer->available(), 8);
@@ -155,13 +155,13 @@ TEST_F(FramerTests, KeepsTrackOfAvailableFrames)
 
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
-    for (Index i {1}; i <= 8; i++)
+    for (Size i {1}; i <= 8; i++)
         ASSERT_TRUE(framer->pin(PageId {i}));
     const auto r = framer->pin(PageId {9UL});
     ASSERT_FALSE(r.has_value());
     ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
 
-    const auto s = framer->unpin(FrameId {1UL}, false);
+    const auto s = framer->unpin(FrameNumber {1UL}, false);
     ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
     ASSERT_TRUE(framer->pin(PageId {9UL}));
 }
@@ -169,7 +169,7 @@ TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = PageLayout::content_offset(page.id());
-    CCO_EXPECT_LE(offset + message.size(), page.size());
+    CALICO_EXPECT_LE(offset + message.size(), page.size());
     page.write(stob(message), offset);
 }
 
@@ -177,7 +177,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 auto read_from_page(const Page &page, Size size) -> std::string
 {
     const auto offset = PageLayout::content_offset(page.id());
-    CCO_EXPECT_LE(offset + size, page.size());
+    CALICO_EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
     page.read(stob(message), offset);
     return message;
@@ -195,15 +195,17 @@ public:
     {
         store->delegate_to_real();
         EXPECT_CALL(*store, open_random_editor).Times(1);
-
+        EXPECT_CALL(*store, create_directory).Times(1);
+        EXPECT_TRUE(store->create_directory("test").is_ok());
         pager = *BasicPager::open({
+            "test",
             *store,
             *wal,
             create_sink(),
             frame_count,
             page_size,
         });
-        mock = store->get_mock_random_access_editor(DATA_FILENAME);
+        mock = store->get_mock_random_editor("test/data");
     }
 
     ~PagerTests() override = default;
@@ -254,7 +256,7 @@ public:
     }
 
     Random random {0};
-    MockRandomAccessEditor *mock;
+    MockRandomEditor *mock;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<MockStorage> store;
     std::unique_ptr<Pager> pager;
@@ -263,7 +265,7 @@ public:
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
-    ASSERT_EQ(pager->flushed_lsn(), SequenceNumber::null());
+    ASSERT_EQ(pager->flushed_lsn(), SequenceId::null());
     ASSERT_TRUE(pager->status().is_ok());
 }
 
@@ -280,7 +282,7 @@ TEST_F(PagerTests, AllocationInceasesPageCount)
 TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 {
     auto id = allocate_write_release(test_message);
-    ASSERT_EQ(id, PageId::base());
+    ASSERT_EQ(id, PageId::root());
 }
 
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
@@ -288,7 +290,7 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
     const auto id = allocate_write_release(test_message);
     auto r = pager->acquire(id, false);
     ASSERT_EQ(id, r->id());
-    ASSERT_EQ(id, PageId::base());
+    ASSERT_EQ(id, PageId::root());
     EXPECT_TRUE(pager->release(std::move(*r)).is_ok());
 }
 
@@ -347,7 +349,7 @@ TEST_F(PagerTests, PageDataPersistsInFile)
 [[nodiscard]]
 auto generate_id_strings(Size n)
 {
-    std::vector<Index> id_ints(n);
+    std::vector<Size> id_ints(n);
     std::iota(begin(id_ints), end(id_ints), 1);
 
     std::vector<std::string> id_strs;

@@ -1,14 +1,14 @@
-#ifndef CCO_UNIT_H
-#define CCO_UNIT_H
+#ifndef CALICO_UNIT_H
+#define CALICO_UNIT_H
 
 #include <iomanip>
 #include <sstream>
 
-namespace cco {
+namespace calico {
 
 static constexpr auto BOOL_EXPECTATION_MATCHER = "^Expectation";
 static constexpr auto STAT_EXPECTATION_MATCHER = "^Unexpected";
 
 } // cco
 
-#endif //CCO_UNIT_H
+#endif //CALICO_UNIT_H

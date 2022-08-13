@@ -1,7 +1,7 @@
 #include "calico/status.h"
 #include "utils/utils.h"
 
-namespace cco {
+namespace calico {
 
 static auto copy_status(const char *status) -> std::unique_ptr<char[]>
 {
@@ -13,7 +13,7 @@ static auto copy_status(const char *status) -> std::unique_ptr<char[]>
     auto copy = std::make_unique<char[]>(size);
     Bytes bytes {copy.get(), size};
 
-    CCO_EXPECT_EQ(status[size - 1], '\0');
+    CALICO_EXPECT_EQ(status[size - 1], '\0');
     std::strcpy(bytes.data(), status);
     bytes[size - 1] = '\0';
     return copy;
@@ -59,7 +59,7 @@ auto Status::operator=(Status &&rhs) noexcept -> Status&
 
 auto Status::code() const -> Code
 {
-    CCO_EXPECT_FALSE(is_ok());
+    CALICO_EXPECT_FALSE(is_ok());
     return Code {m_what.get()[0]};
 }
 

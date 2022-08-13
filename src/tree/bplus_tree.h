@@ -1,12 +1,12 @@
 
-#ifndef CCO_TREE_BPLUS_TREE_H
-#define CCO_TREE_BPLUS_TREE_H
+#ifndef CALICO_TREE_BPLUS_TREE_H
+#define CALICO_TREE_BPLUS_TREE_H
 
 #include "internal.h"
 #include "tree.h"
 #include <spdlog/spdlog.h>
 
-namespace cco {
+namespace calico {
 
 class Cursor;
 class Pager;
@@ -16,14 +16,14 @@ public:
     ~BPlusTree() override = default;
 
     [[nodiscard]]
-    auto cell_count() const -> Size override
+    auto record_count() const -> Size override
     {
         return m_internal.cell_count();
     }
 
     [[nodiscard]] static auto open(Pager &, spdlog::sink_ptr, Size) -> Result<std::unique_ptr<BPlusTree>>;
-    [[nodiscard]] auto insert(BytesView, BytesView) -> Result<bool> override;
-    [[nodiscard]] auto erase(Cursor) -> Result<bool> override;
+    [[nodiscard]] auto insert(BytesView, BytesView) -> Status override;
+    [[nodiscard]] auto erase(Cursor) -> Status override;
     [[nodiscard]] auto root(bool) -> Result<Node> override;
     [[nodiscard]] auto find_exact(BytesView) -> Cursor override;
     [[nodiscard]] auto find(BytesView key) -> Cursor override;
@@ -36,7 +36,7 @@ public:
 private:
     struct SearchResult {
         Node node;
-        Index index {};
+        Size index {};
         bool was_found {};
     };
     BPlusTree(Pager &, spdlog::sink_ptr, Size);
@@ -49,4 +49,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_TREE_BPLUS_TREE_H
+#endif // CALICO_TREE_BPLUS_TREE_H

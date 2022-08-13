@@ -7,7 +7,6 @@
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
-#include "utils/identifier.h"
 #include "utils/layout.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
@@ -15,11 +14,11 @@
 
 namespace {
 
-using namespace cco;
+using namespace calico;
 
 TEST(AssertionDeathTest, Assert)
 {
-    ASSERT_DEATH(CCO_EXPECT_TRUE(false), BOOL_EXPECTATION_MATCHER);
+    ASSERT_DEATH(CALICO_EXPECT_TRUE(false), BOOL_EXPECTATION_MATCHER);
 }
 
 TEST(TestEncoding, ReadsAndWrites)
@@ -28,7 +27,7 @@ TEST(TestEncoding, ReadsAndWrites)
     const auto u16 = random.next_int(std::numeric_limits<uint16_t>::max());
     const auto u32 = random.next_int(std::numeric_limits<uint32_t>::max());
     const auto u64 = random.next_int(std::numeric_limits<uint64_t>::max());
-    std::vector<cco::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
+    std::vector<calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
 
     auto dst = buffer.data();
     put_u16(dst, u16);
@@ -51,6 +50,16 @@ protected:
 TEST_F(SliceTests, EqualsSelf)
 {
     ASSERT_TRUE(bytes == bytes);
+}
+
+TEST_F(SliceTests, StringLiteralSlice)
+{
+    ASSERT_TRUE(stob(test_string) == stob("Hello, world!"));
+}
+
+TEST_F(SliceTests, StartsWith)
+{
+    ASSERT_TRUE(stob("Hello, world!").starts_with(stob("Hello")));
 }
 
 TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
@@ -209,91 +218,100 @@ TEST(NonPrintableSliceTests, Conversions)
     ASSERT_EQ(s[1], '\x01');
 }
 
-template<class Id> auto run_comparisons()
+template<class T>
+auto run_nullability_check()
 {
-    Id a {1ULL};
-    Id b {2ULL};
+    const auto x = T::null();
+    const T y {x.value + 1};
 
-    ASSERT_EQ(a, a);
-    CCO_EXPECT_EQ(a, a);
-    CCO_EXPECT_TRUE(a == a);
-
-    ASSERT_NE(a, b);
-    CCO_EXPECT_NE(a, b);
-    CCO_EXPECT_TRUE(a != b);
-
-    ASSERT_LT(a, b);
-    CCO_EXPECT_LT(a, b);
-    CCO_EXPECT_TRUE(a < b);
-
-    ASSERT_LE(a, a);
-    ASSERT_LE(a, b);
-    CCO_EXPECT_LE(a, a);
-    CCO_EXPECT_LE(a, b);
-    CCO_EXPECT_TRUE(a <= a);
-    CCO_EXPECT_TRUE(a <= b);
-
-    ASSERT_GT(b, a);
-    CCO_EXPECT_GT(b, a);
-    CCO_EXPECT_TRUE(b > a);
-
-    ASSERT_GE(a, a);
-    ASSERT_GE(b, a);
-    CCO_EXPECT_GE(a, a);
-    CCO_EXPECT_GE(b, a);
-    CCO_EXPECT_TRUE(a >= a);
-    CCO_EXPECT_TRUE(b >= a);
+    ASSERT_TRUE(x.is_null());
+    ASSERT_FALSE(y.is_null());
 }
 
-TEST(IdentifierTest, PIDsAreComparable)
+template<class T>
+auto run_equality_comparisons()
 {
-    run_comparisons<PageId>();
+    T x {1};
+    T y {2};
+
+    CALICO_EXPECT_TRUE(x == x);
+    CALICO_EXPECT_TRUE(x == 1);
+    CALICO_EXPECT_TRUE(x != y);
+    CALICO_EXPECT_TRUE(x != 2);
+    ASSERT_EQ(x, x);
+    ASSERT_EQ(x, 1);
+    ASSERT_NE(x, y);
+    ASSERT_NE(x, 2);
 }
 
-TEST(IdentifierTest, LSNsAreComparable)
+template<class T>
+auto run_ordering_comparisons()
 {
-    run_comparisons<SequenceNumber>();
+    T x {1};
+    T y {2};
+
+    CALICO_EXPECT_TRUE(x < y and x < 2);
+    CALICO_EXPECT_TRUE(x <= x and x <= y);
+    CALICO_EXPECT_TRUE(x <= 1 and x <= 2);
+    CALICO_EXPECT_TRUE(y > x and y > 1);
+    CALICO_EXPECT_TRUE(y >= y and y >= x);
+    CALICO_EXPECT_TRUE(y >= 2 and y >= 1);
+    ASSERT_LT(x, y);
+    ASSERT_LT(x, 2);
+    ASSERT_LE(x, x);
+    ASSERT_LE(x, y);
+    ASSERT_LE(x, 1);
+    ASSERT_LE(x, 2);
+    ASSERT_GT(y, x);
+    ASSERT_GT(y, 1);
+    ASSERT_GE(y, y);
+    ASSERT_GE(y, x);
+    ASSERT_GE(y, 2);
+    ASSERT_GE(y, 1);
 }
 
-template<class Id> auto run_addition()
+TEST(SimpleDSLTests, PageIdsAreNullable)
 {
-    const auto res = Id {1} + Id {2};
-    ASSERT_EQ(res.value, 3);
+    run_nullability_check<PageId>();
+    ASSERT_FALSE(PageId::root().is_null());
+    ASSERT_TRUE(PageId::root().is_root());
 }
 
-TEST(IdentifierTest, PIDsCanBeAdded)
+TEST(SimpleDSLTests, SequenceIdsAreNullable)
 {
-    run_comparisons<PageId>();
+    run_nullability_check<SequenceId>();
+    ASSERT_FALSE(SequenceId::base().is_null());
+    ASSERT_TRUE(SequenceId::base().is_base());
 }
 
-TEST(IdentifierTest, LSNsCanBeAdded)
+TEST(SimpleDSLTests, PageIdsAreEqualityComparable)
 {
-    run_comparisons<SequenceNumber>();
+    run_equality_comparisons<PageId>();
 }
 
-TEST(IdentifierTest, LSNsCanBeIncremented)
+TEST(SimpleDSLTests, SequenceIdsAreEqualityComparable)
 {
-    auto lsn = SequenceNumber::null();
-    ASSERT_EQ(lsn.value, 0);
-    lsn++;
-    ASSERT_EQ(lsn.value, 1);
-    ++lsn;
-    ASSERT_EQ(lsn.value, 2);
+    run_equality_comparisons<SequenceId>();
+}
+
+TEST(SimpleDSLTests, SequenceIdsAreOrderable)
+{
+    run_ordering_comparisons<SequenceId>();
 }
 
 TEST(TestUniqueNullable, ResourceIsMoved)
 {
-    UniqueNullable<int> moved_from {123};
+    UniqueNullable<int> moved_from {42};
     const auto moved_into = std::move(moved_from);
     ASSERT_EQ(*moved_from, 0);
     ASSERT_FALSE(moved_from.is_valid());
-    ASSERT_EQ(*moved_into, 123);
+    ASSERT_EQ(*moved_into, 42);
     ASSERT_TRUE(moved_into.is_valid());
 }
 
 TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 {
-    const auto start = NodeLayout::header_offset(PageId {2ULL}) +
+    const auto start = NodeLayout::header_offset(PageId {2}) +
                        NodeLayout::HEADER_SIZE +
                        CELL_POINTER_SIZE;
     Size page_size {MINIMUM_PAGE_SIZE};
@@ -349,15 +367,15 @@ TEST(StatusTests, StatusCanBeReassigned)
 
 // Bad idea??? Uses const reference lifetime extension to name "test", which can be an lvalue or rvalue. Then we use the name in a more
 // complicated expression. Seems pretty useful for creating more complicated asserts.
-#define CCO_TEST(test, expression) \
+#define CALICO_TEST(test, expression) \
     do { \
         const auto &_test = (test);  \
-        CCO_EXPECT_TRUE(expression); \
+        CALICO_EXPECT_TRUE(expression); \
     } while (0)
 
 TEST(MacroTest, WeirdMacro)
 {
-    CCO_TEST(75 * 2 + 10, _test >= 100 and _test <= 200);
+    CALICO_TEST(75 * 2 + 10, _test >= 100 and _test <= 200);
 }
 
 TEST(StatusTests, StatusCodesAreCorrect)
@@ -408,6 +426,14 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     ASSERT_TRUE(dst.is_invalid_argument());
     ASSERT_TRUE(src.what().empty());
     ASSERT_EQ(dst.what(), "status message");
+}
+
+TEST(SimpleDSLTests, Size)
+{
+    PageId a {1UL};
+    PageId b {2UL};
+    CALICO_EXPECT_EQ(a, 1UL);
+    CALICO_EXPECT_NE(b, 1UL);
 }
 
 } // <anonymous>

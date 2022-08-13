@@ -1,6 +1,6 @@
 //
-//#ifndef CCO_WAL_EVENT_QUEUE_H
-//#define CCO_WAL_EVENT_QUEUE_H
+//#ifndef CALICO_WAL_EVENT_QUEUE_H
+//#define CALICO_WAL_EVENT_QUEUE_H
 //
 //#include <queue>
 //#include <tuple>
@@ -10,14 +10,14 @@
 //
 //namespace cco {
 //
-//template<Index Tag, class ...Data>
+//template<Size Tag, class ...Data>
 //struct Event {
 //    template<class ...Param>
 //    explicit constexpr Event(Param &&...param)
 //        : data {std::forward<Param>(param)...}
 //    {}
 //
-//    static constexpr Index tag = Tag;
+//    static constexpr Size tag = Tag;
 //    std::tuple<Data...> data;
 //};
 //
@@ -41,7 +41,7 @@
 //    [[nodiscard]]
 //    auto dequeue() -> EventWrapper
 //    {
-//        CCO_EXPECT_FALSE(is_empty());
+//        CALICO_EXPECT_FALSE(is_empty());
 //        const auto event = std::move(m_events.front());
 //        m_events.pop();
 //        return event;
@@ -53,4 +53,4 @@
 //
 //} // namespace cco
 //
-//#endif // CCO_WAL_EVENT_QUEUE_H
+//#endif // CALICO_WAL_EVENT_QUEUE_H

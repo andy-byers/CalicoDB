@@ -74,7 +74,7 @@ to build the library and tests.
 Note that the tests must be built with assertions, hence the `RelWithAssertions`.
 To build the library in release mode, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCCO_BUILD_TESTS=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
 ## API

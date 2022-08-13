@@ -1,33 +1,34 @@
-#include "calico/storage.h"
 #include "framer.h"
+#include "calico/storage.h"
+#include "core/header.h"
 #include "page/page.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 
-namespace cco {
+namespace calico {
 
-Frame::Frame(Byte *buffer, Index id, Size size)
+Frame::Frame(Byte *buffer, Size id, Size size)
     : m_bytes {buffer + id*size, size}
 {
-    CCO_EXPECT_TRUE(is_power_of_two(size));
-    CCO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
-    CCO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
+    CALICO_EXPECT_TRUE(is_power_of_two(size));
+    CALICO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
+    CALICO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
 }
 
-auto Frame::lsn() const -> SequenceNumber
+auto Frame::lsn() const -> SequenceId
 {
     const auto offset = PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET;
-    return SequenceNumber {get_u64(m_bytes.range(offset))};
+    return SequenceId {get_u64(m_bytes.range(offset))};
 }
 
 auto Frame::ref(Pager &source, bool is_writable, bool is_dirty) -> Page
 {
-    CCO_EXPECT_FALSE(m_is_writable);
+    CALICO_EXPECT_FALSE(m_is_writable);
 
     if (is_writable) {
-        CCO_EXPECT_EQ(m_ref_count, 0);
+        CALICO_EXPECT_EQ(m_ref_count, 0);
         m_is_writable = true;
     }
     m_ref_count++;
@@ -36,11 +37,11 @@ auto Frame::ref(Pager &source, bool is_writable, bool is_dirty) -> Page
 
 auto Frame::unref(Page &page) -> void
 {
-    CCO_EXPECT_EQ(m_page_id, page.id());
-    CCO_EXPECT_GT(m_ref_count, 0);
+    CALICO_EXPECT_EQ(m_page_id, page.id());
+    CALICO_EXPECT_GT(m_ref_count, 0);
 
     if (page.is_writable()) {
-        CCO_EXPECT_EQ(m_ref_count, 1);
+        CALICO_EXPECT_EQ(m_ref_count, 1);
         m_is_writable = false;
     }
     // Make sure the page doesn't get released twice.
@@ -48,13 +49,13 @@ auto Frame::unref(Page &page) -> void
     m_ref_count--;
 }
 
-auto Framer::open(std::unique_ptr<RandomAccessEditor> file, Size page_size, Size frame_count) -> Result<std::unique_ptr<Framer>>
+auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame_count) -> Result<std::unique_ptr<Framer>>
 {
-    CCO_EXPECT_TRUE(is_power_of_two(page_size));
-    CCO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
-    CCO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
-    CCO_EXPECT_GE(frame_count, MINIMUM_FRAME_COUNT);
-    CCO_EXPECT_LE(frame_count, MAXIMUM_FRAME_COUNT);
+    CALICO_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
+    CALICO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
+    CALICO_EXPECT_GE(frame_count, MINIMUM_FRAME_COUNT);
+    CALICO_EXPECT_LE(frame_count, MAXIMUM_FRAME_COUNT);
 
     const auto cache_size = page_size * frame_count;
     AlignedBuffer buffer {
@@ -71,37 +72,37 @@ auto Framer::open(std::unique_ptr<RandomAccessEditor> file, Size page_size, Size
     return std::unique_ptr<Framer> {new Framer {std::move(file), std::move(buffer), page_size, frame_count}};
 }
 
-Framer::Framer(std::unique_ptr<RandomAccessEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
+Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
     : m_buffer {std::move(buffer)},
       m_file {std::move(file)},
       m_frame_count {frame_count},
       m_page_size {page_size}
 {
     // The buffer should be aligned to the page size.
-    CCO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
+    CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
     mem_clear({m_buffer.get(), page_size * frame_count});
 
     while (m_frames.size() < frame_count)
         m_frames.emplace_back(m_buffer.get(), m_frames.size(), page_size);
     
     while (m_available.size() < m_frames.size())
-        m_available.emplace_back(FrameId::from_index(m_available.size()));
+        m_available.emplace_back(FrameNumber {m_available.size()});
 }
 
-auto Framer::ref(FrameId id, Pager &source, bool is_writable, bool is_dirty) -> Page
+auto Framer::ref(FrameNumber id, Pager &source, bool is_writable, bool is_dirty) -> Page
 {
-    CCO_EXPECT_LT(id.as_index(), m_frame_count);
-    return m_frames[id.as_index()].ref(source, is_writable, is_dirty);
+    CALICO_EXPECT_LT(id, m_frame_count);
+    return m_frames[id].ref(source, is_writable, is_dirty);
 }
-auto Framer::unref(FrameId id, Page &page) -> void
+auto Framer::unref(FrameNumber id, Page &page) -> void
 {
-    CCO_EXPECT_LT(id.as_index(), m_frame_count);
-    m_frames[id.as_index()].unref(page);
+    CALICO_EXPECT_LT(id, m_frame_count);
+    m_frames[id].unref(page);
 }
 
-auto Framer::pin(PageId id) -> Result<FrameId>
+auto Framer::pin(PageId id) -> Result<FrameNumber>
 {
-    CCO_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_FALSE(id.is_null());
     if (m_available.empty()) {
         ThreePartMessage message;
         message.set_primary("could not pin page");
@@ -115,7 +116,7 @@ auto Framer::pin(PageId id) -> Result<FrameId>
     if (auto r = read_page_from_file(id, frame.data())) {
         if (!*r) {
             // We just tried to read at EOF. This happens when we allocate a new page or roll the WAL forward.
-            CCO_EXPECT_EQ(id.as_index(), m_page_count);
+            CALICO_EXPECT_EQ(id.as_index(), m_page_count);
             mem_clear(frame.data());
             m_page_count++;
         }
@@ -129,18 +130,18 @@ auto Framer::pin(PageId id) -> Result<FrameId>
     return fid;
 }
 
-auto Framer::discard(FrameId id) -> void
+auto Framer::discard(FrameNumber id) -> void
 {
-    CCO_EXPECT_EQ(frame_at_impl(id).ref_count(), 0);
+    CALICO_EXPECT_EQ(frame_at_impl(id).ref_count(), 0);
     frame_at_impl(id).reset(PageId::null());
     m_available.emplace_back(id);
 }
 
-auto Framer::unpin(FrameId id, bool is_dirty) -> Status
+auto Framer::unpin(FrameNumber id, bool is_dirty) -> Status
 {
     auto &frame = frame_at_impl(id);
-    CCO_EXPECT_LT(frame.pid().as_index(), m_page_count);
-    CCO_EXPECT_EQ(frame.ref_count(), 0);
+    CALICO_EXPECT_LT(frame.pid().as_index(), m_page_count);
+    CALICO_EXPECT_EQ(frame.ref_count(), 0);
     auto s = Status::ok();
 
     // If this fails, the caller (buffer pool) will need to roll back the database state or exit.
@@ -149,7 +150,7 @@ auto Framer::unpin(FrameId id, bool is_dirty) -> Status
 
         if (s.is_ok()) {
             const auto offset = PageLayout::header_offset(frame.pid()) + PageLayout::LSN_OFFSET;
-            m_flushed_lsn = std::max(m_flushed_lsn, SequenceNumber {get_u64(frame.data().range(offset))});
+            m_flushed_lsn = std::max(m_flushed_lsn, SequenceId {get_u64(frame.data().range(offset))});
         }
     }
 
@@ -165,7 +166,7 @@ auto Framer::sync() -> Status
 
 auto Framer::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
 {
-    CCO_EXPECT_EQ(m_page_size, out.size());
+    CALICO_EXPECT_EQ(m_page_size, out.size());
     const auto file_size = m_page_count * m_page_size;
     const auto offset = FileLayout::page_offset(id, out.size());
 
@@ -191,7 +192,7 @@ auto Framer::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
 
 auto Framer::write_page_to_file(PageId id, BytesView in) const -> Status
 {
-    CCO_EXPECT_EQ(m_page_size, in.size());
+    CALICO_EXPECT_EQ(m_page_size, in.size());
     return m_file->write(in, FileLayout::page_offset(id, in.size()));
 }
 
@@ -199,14 +200,14 @@ auto Framer::load_state(const FileHeader &header) -> void
 {
     m_flushed_lsn.value = header.flushed_lsn;
     m_page_count = header.page_count;
-    m_page_size = header.page_size;
+    m_page_size = decode_page_size(header.page_size);
 }
 
 auto Framer::save_state(FileHeader &header) -> void
 {
     header.flushed_lsn = m_flushed_lsn.value;
     header.page_count = m_page_count;
-    header.page_size = static_cast<std::uint16_t>(m_page_size);
+    header.page_size = encode_page_size(m_page_size);
 }
 
 } // namespace cco

@@ -1,8 +1,7 @@
-#ifndef CCO_POOL_PAGER_H
-#define CCO_POOL_PAGER_H
+#ifndef CALICO_POOL_PAGER_H
+#define CALICO_POOL_PAGER_H
 
 #include "calico/status.h"
-#include "utils/identifier.h"
 #include "utils/result.h"
 #include "utils/types.h"
 #include <list>
@@ -10,18 +9,34 @@
 #include <optional>
 #include <spdlog/spdlog.h>
 
-namespace cco {
+namespace calico {
 
 struct FileHeader;
 class Page;
 class Pager;
-class RandomAccessEditor;
+class RandomEditor;
 
-using FrameId = Identifier<std::uint64_t>;
+struct FrameNumber {
+    using Hash = IndexHash<FrameNumber>;
+
+    constexpr FrameNumber() noexcept = default;
+
+    template<class U>
+    constexpr explicit FrameNumber(U u) noexcept
+        : value {u}
+    {}
+
+    constexpr operator std::uint64_t() const
+    {
+        return value;
+    }
+
+    std::uint64_t value {};
+};
 
 class Frame final {
 public:
-    Frame(Byte *, Index, Size);
+    Frame(Byte *, Size, Size);
 
     [[nodiscard]]
     auto pid() const -> PageId
@@ -49,11 +64,11 @@ public:
 
     auto reset(PageId id) -> void
     {
-        CCO_EXPECT_EQ(m_ref_count, 0);
+        CALICO_EXPECT_EQ(m_ref_count, 0);
         m_page_id = id;
     }
 
-    [[nodiscard]] auto lsn() const -> SequenceNumber;
+    [[nodiscard]] auto lsn() const -> SequenceId;
     [[nodiscard]] auto ref(Pager&, bool, bool) -> Page;
     auto unref(Page &page) -> void;
 
@@ -67,18 +82,18 @@ private:
 class Framer final {
 public:
     ~Framer() = default;
-    [[nodiscard]] static auto open(std::unique_ptr<RandomAccessEditor>, Size, Size) -> Result<std::unique_ptr<Framer>>;
-    [[nodiscard]] auto pin(PageId) -> Result<FrameId>;
-    [[nodiscard]] auto unpin(FrameId, bool) -> Status;
+    [[nodiscard]] static auto open(std::unique_ptr<RandomEditor>, Size, Size) -> Result<std::unique_ptr<Framer>>;
+    [[nodiscard]] auto pin(PageId) -> Result<FrameNumber>;
+    [[nodiscard]] auto unpin(FrameNumber, bool) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto ref(FrameId, Pager&, bool, bool) -> Page;
-    auto unref(FrameId, Page&) -> void;
-    auto discard(FrameId) -> void;
+    [[nodiscard]] auto ref(FrameNumber, Pager&, bool, bool) -> Page;
+    auto unref(FrameNumber, Page&) -> void;
+    auto discard(FrameNumber) -> void;
     auto load_state(const FileHeader&) -> void;
     auto save_state(FileHeader&) -> void;
 
     [[nodiscard]]
-    auto flushed_lsn() -> SequenceNumber
+    auto flushed_lsn() -> SequenceId
     {
         return m_flushed_lsn;
     }
@@ -96,32 +111,32 @@ public:
     }
 
     [[nodiscard]]
-    auto frame_at(FrameId id) const -> const Frame&
+    auto frame_at(FrameNumber id) const -> const Frame&
     {
-        CCO_EXPECT_LT(id.as_index(), m_frame_count);
-        return m_frames[id.as_index()];
+        CALICO_EXPECT_LT(id, m_frame_count);
+        return m_frames[id.value];
     }
 
     auto operator=(Framer &&) -> Framer & = default;
     Framer(Framer &&) = default;
 
 private:
-    Framer(std::unique_ptr<RandomAccessEditor>, AlignedBuffer, Size, Size);
+    Framer(std::unique_ptr<RandomEditor>, AlignedBuffer, Size, Size);
     [[nodiscard]] auto read_page_from_file(PageId, Bytes) const -> Result<bool>;
     [[nodiscard]] auto write_page_to_file(PageId, BytesView) const -> Status;
 
     [[nodiscard]]
-    auto frame_at_impl(FrameId id) -> Frame&
+    auto frame_at_impl(FrameNumber id) -> Frame&
     {
-        CCO_EXPECT_LT(id.as_index(), m_frame_count);
-        return m_frames[id.as_index()];
+        CALICO_EXPECT_LT(id, m_frame_count);
+        return m_frames[id.value];
     }
 
     AlignedBuffer m_buffer;
     std::vector<Frame> m_frames;
-    std::list<FrameId> m_available;
-    std::unique_ptr<RandomAccessEditor> m_file;
-    SequenceNumber m_flushed_lsn;
+    std::list<FrameNumber> m_available;
+    std::unique_ptr<RandomEditor> m_file;
+    SequenceId m_flushed_lsn;
     Size m_frame_count {};
     Size m_page_count {};
     Size m_page_size {};
@@ -129,4 +144,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_POOL_PAGER_H
+#endif // CALICO_POOL_PAGER_H

@@ -5,7 +5,7 @@
 #include "header.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
-#include "storage/disk.h"
+#include "store/disk.h"
 #include "tree/bplus_tree.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
@@ -13,21 +13,47 @@
 #include "wal/basic_wal.h"
 #include <filesystem>
 
-namespace cco {
+namespace calico {
+
+[[nodiscard]]
+static auto empty_transaction_error(const std::string &primary)
+{
+    ThreePartMessage message;
+    message.set_primary(primary);
+    message.set_detail("transaction is empty");
+    message.set_hint("update the database and try again");
+    return message.logic_error();
+}
+
+[[nodiscard]]
+static auto not_supported_error(const std::string &primary)
+{
+    ThreePartMessage message;
+    message.set_primary(primary);
+    message.set_detail("action is not supported with the given database options");
+    return message.logic_error();
+}
+
+[[nodiscard]]
+static auto compute_header_crc(const FileHeader &state)
+{
+    BytesView bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
+    return crc_32(bytes.range(CRC_OFFSET));
+}
 
 auto Info::record_count() const -> Size
 {
-    return m_core->record_count();
+    return m_core->tree().record_count();
 }
 
 auto Info::page_count() const -> Size
 {
-    return m_core->page_count();
+    return m_core->pager().page_count();
 }
 
 auto Info::page_size() const -> Size
 {
-    return m_core->page_size();
+    return m_core->options().page_size;
 }
 
 auto Info::maximum_key_size() const -> Size
@@ -45,67 +71,87 @@ auto initialize_log(spdlog::logger &logger, const std::string &base)
 Core::Core(const std::string &path, const Options &options)
     : m_path {path},
       m_options {options},
-      m_sink {create_sink(path, options.log_level)},
+      m_sink {create_sink(path, options.log_level)}, // TODO: Don't create a logger if we don't have anything on disk, i.e. the store keeps everything in memory...
       m_logger {create_logger(m_sink, "core")}
 {}
 
 auto Core::open() -> Status
 {
+    static constexpr auto MSG = "cannot open database";
     initialize_log(*m_logger, m_path);
     m_logger->trace("opening");
 
-    auto initial = setup(*m_store, m_options, *m_logger);
-    if (!initial.has_value()) return initial.error();
-    auto [state, options, is_new, owns_store, owns_wal] = *initial;
-
     auto *store = m_options.store;
     if (!store) {
-        auto s = DiskStorage::open(m_path, &store);
-        if (!s.is_ok()) return s;
+        store = new DiskStorage;
         m_owns_store = true;
     }
     m_store = store;
+    m_options.store = store;
+
+    auto initial = setup(m_path, *m_store, m_options, *m_logger);
+    if (!initial.has_value()) return forward_status(initial.error(), MSG);
+    auto [state, is_new] = *initial;
 
     auto *wal = m_options.wal;
     if (!wal) {
-        auto s = BasicWriteAheadLog::open(*store, &wal);
-        if (!s.is_ok()) return s;
+        wal = new DisabledWriteAheadLog;
+//        auto s = BasicWriteAheadLog::open(*store, &wal);
+//        if (!s.is_ok()) return forward_status(s, MSG);
         m_owns_wal = true;
     }
     m_wal = wal;
+    m_options.wal = wal;
+    m_wal->load_state(state);
 
     {
-        auto r = BasicPager::open({*store, *wal, m_sink, options.frame_count, options.page_size});
-        if (!r.has_value()) return r.error();
+        auto r = BasicPager::open({m_path, *store, *wal, m_sink, m_options.frame_count, m_options.page_size});
+        if (!r.has_value()) return forward_status(r.error(), MSG);
         m_pager = std::move(*r);
+        m_pager->load_state(state);
     }
 
     {
-        auto r = BPlusTree::open({*m_pager, m_sink, options.page_size});
-        if (!r.has_value()) return r.error();
+        auto r = BPlusTree::open(*m_pager, m_sink, m_options.page_size);
+        if (!r.has_value()) return forward_status(r.error(), MSG);
         m_tree = std::move(*r);
+        m_tree->load_state(state);
     }
 
+    auto s = Status::ok();
     if (is_new) {
-        auto root = m_pager->acquire(PageId::base(), true);
-        if (!root.has_value()) return root.error();
+        // Write out the root page containing the newly-populated file header.
+        auto root = m_pager->acquire(PageId::root(), true);
+        if (!root.has_value()) return forward_status(root.error(), MSG);
+        CALICO_EXPECT_EQ(m_pager->page_count(), 1);
+        state.page_count = 1; // Tree constructor should allocate the root page if it doesn't already exist.
+        state.header_crc = compute_header_crc(state);
         write_header(*root, state);
-        m_pager->release(std::move(*root));
+        s = m_pager->release(std::move(*root));
+        if (!s.is_ok()) return forward_status(s, MSG);
 
-        commit();
-        m_pager->flush();
+        s = m_pager->flush();
+
     } else {
-        // This is a no-op if the WAL is empty.
-//        if (revised.use_xact)
-//            CCO_TRY(impl->m_pool->recover());
-        load_state();
+
+        // This should be a no-op if the WAL is empty.
+        if (m_wal->is_enabled()) {
+            s = recover();
+            if (!s.is_ok()) return forward_status(s, MSG);
+            s = load_state();
+        }
     }
+    if (s.is_ok())
+        s = m_wal->start();
+
+    m_is_open = s.is_ok();
+    return forward_status(s, MSG);
 }
 
 Core::~Core()
 {
     // The specific error has already been logged in close().
-    if (!close().has_value())
+    if (!close().is_ok())
         m_logger->error("failed to close in destructor");
 
     if (m_owns_store)
@@ -115,15 +161,14 @@ Core::~Core()
         delete m_wal;
 }
 
-////auto Core::uses_xact() const -> bool
-////{
-////    return m_pool->uses_xact();
-////}
-//
-//auto Core::can_commit() const -> bool
-//{
-//    return m_pool->can_commit();
-//}
+auto Core::forward_status(Status s, const std::string &message) -> Status
+{
+    if (!s.is_ok()) {
+        m_logger->error(message);
+        m_logger->error("(reason) {}", s.what());
+    }
+    return s;
+}
 
 auto Core::status() const -> Status
 {
@@ -160,159 +205,172 @@ auto Core::find_maximum() -> Cursor
     return m_tree->find_maximum();
 }
 
-auto Core::insert(BytesView key, BytesView value) -> Result<bool>
+auto Core::insert(BytesView key, BytesView value) -> Status
 {
-    return m_tree->insert(key, value);
+    auto s = m_tree->insert(key, value);
+    if (!m_has_update) m_has_update = s.is_ok();
+    return s;
 }
 
-auto Core::erase(BytesView key) -> Result<bool>
+auto Core::erase(BytesView key) -> Status
 {
     return erase(m_tree->find_exact(key));
 }
 
-auto Core::erase(Cursor cursor) -> Result<bool>
+auto Core::erase(Cursor cursor) -> Status
 {
-    return m_tree->erase(cursor);
+    auto s = m_tree->erase(cursor);
+    if (!m_has_update) m_has_update = s.is_ok();
+    return s;
 }
 
-//auto Core::commit() -> Result<void>
-//{
-//    static constexpr auto ERROR_PRIMARY = "cannot commit";
-//    m_logger->trace("committing");
-//
-//    if (m_pool->uses_xact() && !m_pool->can_commit()) {
-//        LogMessage message {*m_logger};
-//        message.set_primary(ERROR_PRIMARY);
-//        message.set_detail("transaction is empty");
-//        return Err {message.logic_error()};
-//    }
-//    return save_state()
-//        .and_then([this]() -> Result<void> {
-//            CCO_TRY(m_pool->commit());
-//            m_logger->trace("commit succeeded");
-//            return {};
-//        })
-//        .or_else([this](const Status &status) -> Result<void> {
-//            m_logger->error(ERROR_PRIMARY);
-//            m_logger->error("(reason) {}", status.what());
-//            return Err {status};
-//        });
-//}
-//
-//auto Core::abort() -> Result<void>
-//{
-//    static constexpr auto ERROR_PRIMARY = "cannot abort";
-//    m_logger->trace("aborting");
-//
-//    if (m_pool->uses_xact() && !m_pool->can_commit()) {
-//        LogMessage message {*m_logger};
-//        message.set_primary(ERROR_PRIMARY);
-//        message.set_detail("transaction is empty");
-//        return Err {message.logic_error()};
-//    }
-//    return m_pool->abort()
-//        .and_then([this]() -> Result<void> {
-//            CCO_TRY(load_state());
-//            m_logger->trace("abort succeeded");
-//            return {};
-//        })
-//        .or_else([this](const Status &status) -> Result<void> {
-//            m_logger->error(ERROR_PRIMARY);
-//            m_logger->error("(reason) {}", status.what());
-//            return Err {status};
-//        });
-//}
-//
-//auto Core::file_close() -> Result<void>
-//{
-//    auto cr = commit();
-//    if (!cr.has_value()) {
-//        m_logger->error("cannot commit before file_close");
-//        if (cr.error().is_logic_error()) {
-//            cr = Result<void> {};
-//            m_logger->error("(reason) transaction is empty");
-//        } else {
-//            m_logger->error("(reason) {}", cr.error().what());
-//        }
-//    }
-//
-//    const auto fr = m_pool->flush();
-//    if (!fr.has_value() && !fr.error().is_logic_error()) {
-//        m_logger->error("cannot flush buffer pool before file_close");
-//        m_logger->error("(reason) {}", fr.error().what());
-//    }
-//
-//    const auto pr = m_pool->file_close();
-//    if (!pr.has_value()) {
-//        m_logger->error("cannot file_close buffer pool");
-//        m_logger->error("(reason) {}", pr.error().what());
-//    }
-//    if (!m_is_temp) {
-//        auto hr = m_home->file_close();
-//        if (!hr.has_value()) {
-//            m_logger->error("cannot file_close home directory");
-//            m_logger->error("(reason) {}", hr.error().what());
-//            // If there were errors from the previous methods, they are already logged. We can only return
-//            // one of the errors, so we'll just go with this one.
-//            return hr;
-//        }
-//    }
-//    return !fr ? fr : (!cr ? cr : pr);
-//}
-//
-//auto Core::save_state() -> Result<void>
-//{
-//    CCO_TRY_CREATE(root, m_tree->root(true));
-//    auto header = get_file_header_writer(root);
-//    m_logger->trace("saving file header");
-//    m_pool->save_state(header);
-//    m_tree->save_state(header);
-//    header.update_header_crc();
-//    return m_pool->release(root.take());
-//}
-//
-//auto Core::load_state() -> Result<void>
-//{
-//    CCO_TRY_CREATE(root, m_tree->root(false));
-//    auto header = get_file_header_reader(root);
-//    m_logger->trace("loading file header");
-//    m_pool->load_state(header);
-//    m_tree->load_state(header);
-//    return m_pool->release(root.take());
-//}
-//
-//auto Core::cache_hit_ratio() const -> double
-//{
-//    return m_pool->hit_ratio();
-//}
-//
-//auto Core::record_count() const -> Size
-//{
-//    return m_tree->cell_count();
-//}
-//
-//auto Core::page_count() const -> Size
-//{
-//    return m_pool->page_count();
-//}
-//
-//auto Core::page_size() const -> Size
-//{
-//    return m_pool->page_size();
-//}
-//
-//auto Core::is_temp() const -> bool
-//{
-//    return m_is_temp;
-//}
-
-auto setup(Storage &store, const Options &options, spdlog::logger &logger) -> Result<InitialState>
+// TODO: Should we block until the commit record is actually on disk?
+auto Core::commit() -> Status
 {
-    static constexpr auto ERROR_PRIMARY = "cannot open database";
-    LogMessage message {logger};
-    message.set_primary(ERROR_PRIMARY);
+    m_logger->trace("committing");
+    static constexpr auto MSG = "could not commit";
+    if (!m_has_update) return empty_transaction_error(MSG);
 
-    auto revised = options;
+    auto s = save_state();
+    if (!s.is_ok()) return forward_status(s, MSG);
+
+    s = m_wal->log_commit();
+    if (!s.is_ok()) return forward_status(s, MSG);
+    m_logger->trace("commit succeeded");
+    return s;
+}
+
+auto Core::abort() -> Status
+{
+    m_logger->trace("committing");
+    static constexpr auto MSG = "could not abort";
+    if (!m_wal->is_enabled()) return not_supported_error(MSG);
+    if (!m_has_update) return empty_transaction_error(MSG);
+
+    auto s = m_wal->stop();
+
+    // This should give us the full images of each updated page belonging to the current transaction, before any changes were made,
+    // in reverse order.
+    s = m_wal->undo_last([this](UndoDescriptor undo) {
+        const auto [id, image] = undo;
+        auto page = m_pager->acquire(PageId {id}, true);
+        if (!page.has_value()) return page.error();
+
+        page->undo(undo);
+        return m_pager->release(std::move(*page));
+    });
+    if (!s.is_ok()) return forward_status(s, MSG);
+
+    s = load_state();
+    if (!s.is_ok()) return forward_status(s, MSG);
+
+    m_logger->trace("abort succeeded");
+    return m_wal->start();
+}
+
+auto Core::close() -> Status
+{
+    // Failed in open().
+    if (!m_is_open) return Status::logic_error("not open");
+
+    auto s = commit();
+    if (!s.is_ok()) s = forward_status(s, "cannot commit before close");
+
+    s = m_pager->flush();
+    if (!s.is_ok() && !s.is_logic_error()) s = forward_status(s, "cannot commit before close");
+
+    return s;
+}
+
+auto Core::recover() -> Status
+{
+    static constexpr auto MSG = "cannot recover";
+
+    bool found_commit {};
+    auto s = m_wal->redo_all([&found_commit, this](RedoDescriptor redo) {
+        found_commit = redo.is_commit;
+
+        if (!found_commit) {
+            auto page = m_pager->acquire(PageId {redo.page_id}, true);
+            if (!page.has_value()) return page.error();
+
+            page->redo(redo);
+            return m_pager->release(std::move(*page));
+        }
+        return Status::ok();
+    });
+    if (!s.is_ok()) return forward_status(s, MSG);
+
+    if (!found_commit) {
+        s = m_wal->undo_last([this](UndoDescriptor undo) {
+            const auto [id, image] = undo;
+            auto page = m_pager->acquire(PageId {id}, true);
+            if (!page.has_value()) return page.error();
+
+            page->undo(undo);
+            return m_pager->release(std::move(*page));
+        });
+        if (!s.is_ok()) return forward_status(s, MSG);
+    }
+    s = load_state();
+    if (!s.is_ok()) return forward_status(s, MSG);
+    return s;
+}
+
+auto Core::save_state() -> Status
+{
+    m_logger->trace("saving file header");
+
+    auto root = m_pager->acquire(PageId::root(), true);
+    if (!root.has_value()) return root.error();
+
+    auto state = read_header(*root);
+
+    m_pager->save_state(state);
+    m_tree->save_state(state);
+    m_wal->save_state(state);
+    state.header_crc = compute_header_crc(state);
+    write_header(*root, state);
+
+fmt::print("save crc = {}\n", state.header_crc);
+
+    return m_pager->release(std::move(*root));
+}
+
+auto Core::load_state() -> Status
+{
+    m_logger->trace("loading file header");
+
+    auto root = m_pager->acquire(PageId::root(), true);
+    if (!root.has_value()) return root.error();
+
+    auto state = read_header(*root);
+    if (state.header_crc != compute_header_crc(state)) {
+        LogMessage message {*m_logger};
+        message.set_primary("cannot load database state");
+        message.set_detail("file header is corrupted");
+        message.set_hint("header CRC is {} but should be {}", state.header_crc, compute_header_crc(state));
+        return message.corruption();
+    }
+fmt::print("load crc = {}\n", state.header_crc);
+
+    load_state(state);
+    return m_pager->release(std::move(*root));
+}
+
+auto Core::load_state(const FileHeader &state) -> void
+{
+    m_pager->load_state(state);
+    m_tree->load_state(state);
+    m_wal->load_state(state);
+}
+
+auto setup(const std::string &path, Storage &store, const Options &options, spdlog::logger &logger) -> Result<InitialState>
+{
+    const auto MSG = fmt::format("cannot initialize database at \"{}\"", path);
+    LogMessage message {logger};
+    message.set_primary(MSG);
+
     FileHeader header {};
     Bytes bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
 
@@ -328,23 +386,51 @@ auto setup(Storage &store, const Options &options, spdlog::logger &logger) -> Re
         return Err {message.invalid_argument()};
     }
 
-    RandomAccessReader *reader {};
-    RandomAccessEditor *editor {};
+    if (options.page_size < MINIMUM_PAGE_SIZE) {
+        message.set_detail("page size {} is too small", options.page_size);
+        message.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
+        return Err {message.invalid_argument()};
+    }
 
-    if (auto s = store.open_random_reader(DATA_FILENAME, &reader); s.is_ok()) {
+    if (options.page_size > MAXIMUM_PAGE_SIZE) {
+        message.set_detail("page size {} is too large", options.page_size);
+        message.set_hint("must be less than or equal to {}", MAXIMUM_PAGE_SIZE);
+        return Err {message.invalid_argument()};
+    }
+
+    if (!is_power_of_two(options.page_size)) {
+        message.set_detail("page size {} is invalid", options.page_size);
+        message.set_hint("must be a power of 2");
+        return Err {message.invalid_argument()};
+    }
+
+    {
+        auto s = store.create_directory(path);
+        if (!s.is_ok() && !s.is_logic_error()) {
+            logger.error("cannot create database directory");
+            logger.error("(reason) {}", s.what());
+            return Err {s};
+        }
+    }
+
+    const auto filename = fmt::format("{}/{}", path, DATA_FILENAME);
+    RandomReader *reader {};
+    RandomEditor *editor {};
+    bool exists {};
+
+    if (auto s = store.open_random_reader(filename, &reader); s.is_ok()) {
         Size file_size {};
         s = store.file_size(DATA_FILENAME, file_size);
+        if (!s.is_ok()) return Err {s};
 
         if (file_size < FileLayout::HEADER_SIZE) {
             message.set_detail("database is too small to read the file header");
-            message.set_hint("file header is {} B", FileLayout::HEADER_SIZE);
+            message.set_hint("file header is {} bytes", FileLayout::HEADER_SIZE);
             return Err {message.corruption()};
         }
         s = read_exact(*reader, bytes, 0);
         if (!s.is_ok()) return Err {s};
 
-        // NOTE: This check is omitted if the page size is 0 to avoid getting a floating-point exception. If this is
-        //       the case, we'll find out below when we make sure the page size is valid.
         if (header.page_size && file_size % header.page_size) {
             message.set_detail("database has an invalid size");
             message.set_hint("database must contain an integral number of pages");
@@ -352,14 +438,15 @@ auto setup(Storage &store, const Options &options, spdlog::logger &logger) -> Re
         }
         if (header.magic_code != MAGIC_CODE) {
             message.set_detail("path does not point to a Calico DB database");
-            message.set_hint("magic code is {}, but should be {}", header.magic_code, MAGIC_CODE);
+            message.set_hint("magic code is {} but should be {}", header.magic_code, MAGIC_CODE);
             return Err {message.invalid_argument()};
         }
-        if (header.header_crc != crc_32(bytes)) {
+        if (header.header_crc != compute_header_crc(header)) {
             message.set_detail("header has an inconsistent CRC");
-            message.set_hint("CRC is {}", header.header_crc);
+            message.set_hint("CRC is {} but should be {}", header.header_crc, compute_header_crc(header));
             return Err {message.corruption()};
         }
+        exists = true;
         delete reader;
 
     } else if (s.is_not_found()) {
@@ -367,9 +454,10 @@ auto setup(Storage &store, const Options &options, spdlog::logger &logger) -> Re
         if (!s.is_ok()) return Err {s};
 
         header.magic_code = MAGIC_CODE;
-        header.page_size = static_cast<std::uint16_t>(options.page_size);
-        header.flushed_lsn = SequenceNumber::base().value;
-        header.header_crc = crc_32(bytes);
+        header.page_size = encode_page_size(options.page_size);
+        header.flushed_lsn = SequenceId::base().value;
+        header.header_crc = compute_header_crc(header);
+fmt::print("init crc = {}\n", header.header_crc);
         auto root = btos(bytes);
         root.resize(options.page_size);
         s = editor->write(stob(root), 0);
@@ -377,107 +465,52 @@ auto setup(Storage &store, const Options &options, spdlog::logger &logger) -> Re
         delete editor;
 
     } else {
-
+        return Err {s};
     }
 
-    const auto choose_error = [exists, &message] {
-        return Err {exists ? message.corruption() : message.invalid_argument()};
-    };
-
-    if (reader.page_size() < MINIMUM_PAGE_SIZE) {
-        message.set_detail("page size {} is too small", reader.page_size());
+    if (header.page_size && header.page_size < MINIMUM_PAGE_SIZE) {
+        message.set_detail("header page size {} is too small", header.page_size);
         message.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
-        return choose_error();
-    }
-    if (reader.page_size() > MAXIMUM_PAGE_SIZE) {
-        message.set_detail("page size {} is too large", reader.page_size());
-        message.set_hint("must be less than or equal to {}", MAXIMUM_PAGE_SIZE);
-        return choose_error();
-    }
-    if (!is_power_of_two(reader.page_size())) {
-        message.set_detail("page size {} is invalid", reader.page_size());
-        message.set_hint("must be a power of 2");
-        return choose_error();
+        return Err {message.corruption()};
     }
 
-    revised.page_size = reader.page_size();
-    return InitialState {std::move(backing), revised, !exists};
+    if (header.page_size && !is_power_of_two(header.page_size)) {
+        message.set_detail("header page size {} is invalid", header.page_size);
+        message.set_hint("must either be 0 or a power of 2");
+        return Err {message.corruption()};
+    }
+
+    return InitialState {header, !exists};
 }
-
-
-
-
-
-
-
-
-
-
-//
-//auto BufferPool::commit() -> Result<void>
-//{
-//    CCO_EXPECT_TRUE(can_commit());
-//    if (!m_status.is_ok())
-//        return Err {m_status};
-//
-//    // All we need to do is write a commit record and start a new WAL segment.
-//    //    if (m_uses_xact)
-//    //        POOL_TRY(m_wal->commit());
-//
-//    return {};
-//}
-//
-//auto BufferPool::abort() -> Result<void>
-//{
-//    CCO_EXPECT_TRUE(can_commit());
-//
-//    if (!m_uses_xact) {
-//        ThreePartMessage message;
-//        message.set_primary("cannot abort");
-//        message.set_detail("not supported");
-//        message.set_hint("transactions are disabled");
-//        return Err {message.logic_error()};
-//    }
-//
-//    //    CCO_TRY(m_wal->abort());
-//    CCO_TRY(flush());
-//    clear_error();
-//    return {};
-//}
-//
-//auto BufferPool::recover() -> Result<void>
-//{
-//    return {};//m_wal->recover();
-//}
 
 } // namespace cco
 
-auto operator<(const cco::Record &lhs, const cco::Record &rhs) -> bool
+auto operator<(const calico::Record &lhs, const calico::Record &rhs) -> bool
 {
-    return cco::stob(lhs.key) < cco::stob(rhs.key);
+    return calico::stob(lhs.key) < calico::stob(rhs.key);
 }
 
-auto operator>(const cco::Record &lhs, const cco::Record &rhs) -> bool
+auto operator>(const calico::Record &lhs, const calico::Record &rhs) -> bool
 {
-    return cco::stob(lhs.key) > cco::stob(rhs.key);
+    return calico::stob(lhs.key) > calico::stob(rhs.key);
 }
 
-auto operator<=(const cco::Record &lhs, const cco::Record &rhs) -> bool
+auto operator<=(const calico::Record &lhs, const calico::Record &rhs) -> bool
 {
-    return cco::stob(lhs.key) <= cco::stob(rhs.key);
+    return calico::stob(lhs.key) <= calico::stob(rhs.key);
 }
 
-auto operator>=(const cco::Record &lhs, const cco::Record &rhs) -> bool
+auto operator>=(const calico::Record &lhs, const calico::Record &rhs) -> bool
 {
-    return cco::stob(lhs.key) >= cco::stob(rhs.key);
+    return calico::stob(lhs.key) >= calico::stob(rhs.key);
 }
 
-auto operator==(const cco::Record &lhs, const cco::Record &rhs) -> bool
+auto operator==(const calico::Record &lhs, const calico::Record &rhs) -> bool
 {
-    return cco::stob(lhs.key) == cco::stob(rhs.key);
+    return calico::stob(lhs.key) == calico::stob(rhs.key);
 }
 
-auto operator!=(const cco::Record &lhs, const cco::Record &rhs) -> bool
+auto operator!=(const calico::Record &lhs, const calico::Record &rhs) -> bool
 {
-    return cco::stob(lhs.key) != cco::stob(rhs.key);
+    return calico::stob(lhs.key) != calico::stob(rhs.key);
 }

@@ -1,9 +1,9 @@
-#ifndef CCO_INFO_H
-#define CCO_INFO_H
+#ifndef CALICO_INFO_H
+#define CALICO_INFO_H
 
 #include "database.h"
 
-namespace cco {
+namespace calico {
 
 class Info final {
 public:
@@ -47,4 +47,4 @@ private:
 
 } // cco
 
-#endif // CCO_INFO_H
+#endif // CALICO_INFO_H

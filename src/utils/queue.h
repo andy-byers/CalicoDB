@@ -1,12 +1,12 @@
-#ifndef CCO_UTILS_QUEUE_H
-#define CCO_UTILS_QUEUE_H
+#ifndef CALICO_UTILS_QUEUE_H
+#define CALICO_UTILS_QUEUE_H
 
 #include <condition_variable>
 #include <mutex>
 #include <queue>
 #include "calico/common.h"
 
-namespace cco {
+namespace calico {
 
 template<class T>
 class Queue {
@@ -49,4 +49,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_UTILS_QUEUE_H
+#endif // CALICO_UTILS_QUEUE_H

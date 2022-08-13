@@ -20,7 +20,7 @@
 
 namespace {
 
-using namespace cco;
+using namespace calico;
 
 class TestHarness: public testing::Test {
 public:
@@ -33,25 +33,30 @@ public:
           store {std::make_unique<MockStorage>()}
     {
         store->delegate_to_real();
-        EXPECT_CALL(*store, open_random_access_editor).Times(1);
+        EXPECT_CALL(*store, create_directory).Times(1);
+        EXPECT_CALL(*store, open_random_editor).Times(1);
+
+        const auto s = store->create_directory("test");
+        EXPECT_TRUE(s.is_ok());
 
         pager = *BasicPager::open({
+            "test",
             *store,
             *wal,
             create_sink(),
             FRAME_COUNT,
             PAGE_SIZE
         });
-        mock = store->get_mock_random_access_editor(DATA_FILENAME);
+        mock = store->get_mock_random_editor("test/data");
+        CALICO_EXPECT_NE(mock, nullptr);
         mock->delegate_to_real();
-        CCO_EXPECT_NE(mock, nullptr);
     }
 
     Random random {0};
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<MockStorage> store;
     std::unique_ptr<Pager> pager;
-    MockRandomAccessEditor *mock {};
+    MockRandomEditor *mock {};
 };
 
 class TreeTests: public TestHarness {
@@ -88,7 +93,7 @@ public:
 TEST_F(TreeTests, NewTreeSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 1);
-    ASSERT_EQ(tree->cell_count(), 0);
+    ASSERT_EQ(tree->record_count(), 0);
     auto cursor = tree->find_minimum();
     ASSERT_FALSE(cursor.is_valid());
     ASSERT_TRUE(cursor.status().is_not_found());
@@ -105,8 +110,8 @@ TEST_F(TreeTests, InsertCell)
 
 TEST_F(TreeTests, OnlyAcceptsValidKeySizes)
 {
-    ASSERT_TRUE(tree->insert(stob(""), stob("value")).error().is_invalid_argument());
-    ASSERT_TRUE(tree->insert(stob(std::string(max_local + 1, 'x')), stob("value")).error().is_invalid_argument());
+    ASSERT_TRUE(tree->insert(stob(""), stob("value")).is_invalid_argument());
+    ASSERT_TRUE(tree->insert(stob(std::string(max_local + 1, 'x')), stob("value")).is_invalid_argument());
 }
 
 TEST_F(TreeTests, RemoveRecord)
@@ -155,7 +160,7 @@ TEST_F(TreeTests, OverflowChains)
     validate();
 }
 
-auto insert_sequence(Tree &tree, Index start, Index n, Index step = 1)
+auto insert_sequence(Tree &tree, Size start, Size n, Size step = 1)
 {
     for (auto i = start; i < n; i += step)
         tools::insert(tree, make_key(i), "");
@@ -340,43 +345,30 @@ TEST_F(TreeTests, CanCopyInvalidCursor)
 
 TEST_F(TreeTests, ReverseSequentialInserts)
 {
-    for (Index i {}; i < 500; ++i)
+    for (Size i {}; i < 500; ++i)
         tools::insert(*tree, make_key(499 - i), "");
     validate();
-    ASSERT_EQ(tree->cell_count(), 500);
+    ASSERT_EQ(tree->record_count(), 500);
 }
 
 TEST_F(TreeTests, AlternatingInsertsFromMiddle)
 {
-    for (Index i {}; i < 250; ++i) {
+    for (Size i {}; i < 250; ++i) {
         tools::insert(*tree, make_key(249 - i), "");
         tools::insert(*tree, make_key(250 + i), "");
     }
     validate();
-    ASSERT_EQ(tree->cell_count(), 500);
+    ASSERT_EQ(tree->record_count(), 500);
 }
 
 TEST_F(TreeTests, AlternatingInsertsFromEnds)
 {
-    for (Index i {}; i < 250; ++i) {
+    for (Size i {}; i < 250; ++i) {
         tools::insert(*tree, make_key(i), "");
         tools::insert(*tree, make_key(499 - i), "");
     }
     validate();
-    ASSERT_EQ(tree->cell_count(), 500);
-}
-
-TEST_F(TreeTests, ExternalRootFitsAtLeastThreeCells)
-{
-    // Generate maximally-sized cells.
-    RecordGenerator::Parameters param;
-    param.mean_key_size = max_local;
-    param.mean_value_size = 10;
-    param.spread = 0;
-
-    for (const auto &[key, value]: RecordGenerator {param}.generate(random, 3)) {
-        ASSERT_TRUE(tools::insert(*tree, key, value));
-    }
+    ASSERT_EQ(tree->record_count(), 500);
 }
 
 TEST_F(TreeTests, RandomInserts)
@@ -395,7 +387,7 @@ TEST_F(TreeTests, RandomInserts)
         ASSERT_EQ(btos(c.key()), key);
         ASSERT_EQ(c.value(), value);
     }
-    ASSERT_EQ(tree->cell_count(), records.size());
+    ASSERT_EQ(tree->record_count(), records.size());
 }
 
 TEST_F(TreeTests, ModifiesValue)
@@ -403,14 +395,14 @@ TEST_F(TreeTests, ModifiesValue)
     tools::insert(*tree, make_key(1), "a");
     tools::insert(*tree, make_key(1), "b");
     ASSERT_EQ(tools::find_exact(*tree, make_key(1)).value(), "b");
-    ASSERT_EQ(tree->cell_count(), 1);
+    ASSERT_EQ(tree->record_count(), 1);
 }
 
 TEST_F(TreeTests, ModifySanityCheck)
 {
     insert_sequence(*tree, 0, 1'000);
 
-    for (Index i {0}; i < tree->cell_count(); ++i) {
+    for (Size i {0}; i < tree->record_count(); ++i) {
         const auto key = make_key(i);
         auto cursor = tools::find_exact(*tree, key);
         if (auto value = cursor.value(); value.empty()) {
@@ -420,43 +412,43 @@ TEST_F(TreeTests, ModifySanityCheck)
         }
     }
     validate();
-    ASSERT_EQ(tree->cell_count(), 1'000);
+    ASSERT_EQ(tree->record_count(), 1'000);
 }
 
 TEST_F(TreeTests, CollapseForward)
 {
     insert_sequence(*tree, 0, 200);
-    for (Index i {}, n {tree->cell_count()}; i < n; ++i)
+    for (Size i {}, n {tree->record_count()}; i < n; ++i)
         tools::erase(*tree, make_key(i));
-    ASSERT_EQ(tree->cell_count(), 0);
+    ASSERT_EQ(tree->record_count(), 0);
 }
 
 TEST_F(TreeTests, CollapseBackward)
 {
     insert_sequence(*tree, 0, 200);
-    for (Index i {}, n {tree->cell_count()}; i < n; ++i)
+    for (Size i {}, n {tree->record_count()}; i < n; ++i)
         tools::erase(*tree, make_key(n - i - 1));
-    ASSERT_EQ(tree->cell_count(), 0);
+    ASSERT_EQ(tree->record_count(), 0);
 }
 
 TEST_F(TreeTests, CollapseAlternatingFromMiddle)
 {
     insert_sequence(*tree, 0, 200);
-    for (Index i {}, n {tree->cell_count()}; i < n / 2; ++i) {
+    for (Size i {}, n {tree->record_count()}; i < n / 2; ++i) {
         tools::erase(*tree, make_key(n/2 - i - 1));
         tools::erase(*tree, make_key(n/2 + i));
     }
-    ASSERT_EQ(tree->cell_count(), 0);
+    ASSERT_EQ(tree->record_count(), 0);
 }
 
 TEST_F(TreeTests, CollapseAlternatingFromEnds)
 {
     insert_sequence(*tree, 0, 200);
-    for (Index i {}, n {tree->cell_count()}; i < n / 2; ++i) {
+    for (Size i {}, n {tree->record_count()}; i < n / 2; ++i) {
         tools::erase(*tree, make_key(i));
         tools::erase(*tree, make_key(n - i - 1));
     }
-    ASSERT_EQ(tree->cell_count(), 0);
+    ASSERT_EQ(tree->record_count(), 0);
 }
 
 TEST_F(TreeTests, RemoveFromLeft)
@@ -464,15 +456,16 @@ TEST_F(TreeTests, RemoveFromLeft)
     insert_sequence(*tree, 0, 1'000);
 
     // Remove the minimum key without relying on find_minimum().
-    while (tree->cell_count())
-        ASSERT_TRUE(tree->erase(tools::find(*tree, make_key(0))));
+    while (tree->record_count())
+        ASSERT_TRUE(tree->erase(tools::find(*tree, make_key(0))).is_ok());
 }
 
 TEST_F(TreeTests, RemoveFromRight)
 {
     insert_sequence(*tree, 0, 1'000);
-    while (tree->cell_count())
-        ASSERT_TRUE(tree->erase(tree->find_maximum()));
+    while (tree->record_count()) {
+        ASSERT_TRUE(tree->erase(tree->find_maximum()).is_ok());
+    }
 }
 
 TEST_F(TreeTests, RemoveFromMiddle)
@@ -480,11 +473,11 @@ TEST_F(TreeTests, RemoveFromMiddle)
     static constexpr Size n {1'000};
     insert_sequence(*tree, 0, n);
 
-    while (tree->cell_count()) {
-        const auto key = make_key(tree->cell_count() / 2);
+    while (tree->record_count()) {
+        const auto key = make_key(tree->record_count() / 2);
 
         if (auto c = tools::find(*tree, key); c.is_valid()) {
-            ASSERT_TRUE(tree->erase(c));
+            ASSERT_TRUE(tree->erase(c).is_ok());
         }
     }
 }
@@ -494,11 +487,11 @@ TEST_F(TreeTests, RemoveFromRandomPosition)
     static constexpr Size n {1'000};
     insert_sequence(*tree, 0, n);
 
-    while (tree->cell_count()) {
+    while (tree->record_count()) {
         const auto key = make_key(random.next_int(n));
 
         if (auto c = tools::find(*tree, key); c.is_valid()) {
-            ASSERT_TRUE(tree->erase(c));
+            ASSERT_TRUE(tree->erase(c).is_ok());
         }
     }
 }
@@ -509,24 +502,24 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
     static constexpr Size num_iterations = 3;
     static constexpr Size cutoff = 1'000;
 
-    for (Index i {}; i < num_iterations; ++i) {
-        while (tree->cell_count() < cutoff) {
+    for (Size i {}; i < num_iterations; ++i) {
+        while (tree->record_count() < cutoff) {
             const auto key = random_string(random, 7, 10);
             const auto value = random_string(random, 20);
             tools::insert(*tree, key, value);
             records[key] = value;
         }
-        Index counter {};
+        Size counter {};
         for (const auto &[k, v]: records) {
             auto cursor = tools::find_exact(*tree, k);
             ASSERT_TRUE(cursor.is_valid());
             ASSERT_EQ(btos(cursor.key()), k);
             ASSERT_EQ(cursor.value(), v);
-            CCO_EXPECT_TRUE(tools::erase(*tree, k));
+            CALICO_EXPECT_TRUE(tools::erase(*tree, k));
             if (counter++ % 100 == 0)
                 validate();
         }
-        ASSERT_EQ(tree->cell_count(), 0);
+        ASSERT_EQ(tree->record_count(), 0);
         records.clear();
     }
 }
@@ -534,7 +527,7 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
 TEST_F(TreeTests, ForwardPartialIteration)
 {
     insert_sequence(*tree, 0, 200);
-    auto i = tree->cell_count() / 5;
+    auto i = tree->record_count() / 5;
 
     for (auto cursor = tools::find_exact(*tree, make_key(i)); cursor.is_valid(); cursor++)
         ASSERT_EQ(btos(cursor.key()), make_key(i++));
@@ -543,9 +536,9 @@ TEST_F(TreeTests, ForwardPartialIteration)
 TEST_F(TreeTests, ForwardBoundedIteration)
 {
     insert_sequence(*tree, 0, 200);
-    auto i = tree->cell_count() / 5;
+    auto i = tree->record_count() / 5;
     auto lower = tools::find_exact(*tree, make_key(i));
-    auto upper = tools::find_exact(*tree, make_key(tree->cell_count() - i));
+    auto upper = tools::find_exact(*tree, make_key(tree->record_count() - i));
 
     for (; lower.is_valid() && lower != upper; lower++)
         ASSERT_EQ(btos(lower.key()), make_key(i++));
@@ -563,13 +556,13 @@ TEST_F(TreeTests, ReversePartialIteration)
 
 TEST_F(TreeTests, ReverseBoundedIteration)
 {
-    auto i = tree->cell_count() / 5;
+    auto i = tree->record_count() / 5;
 
     auto lower = tools::find_exact(*tree, make_key(i));
-    auto upper = tools::find_exact(*tree, make_key(tree->cell_count() - i - 1));
+    auto upper = tools::find_exact(*tree, make_key(tree->record_count() - i - 1));
 
     for (; upper.is_valid() && upper != lower; upper--)
-        ASSERT_EQ(btos(upper.key()), make_key(tree->cell_count() - i++ - 1));
+        ASSERT_EQ(btos(upper.key()), make_key(tree->record_count() - i++ - 1));
 }
 
 TEST_F(TreeTests, SanityCheck)
@@ -586,23 +579,23 @@ TEST_F(TreeTests, SanityCheck)
 
     const auto remove_one = [&random, this](const std::string &key) {
         if (auto c = tools::find(*tree, key); c.is_valid()) {
-            ASSERT_TRUE(tree->erase(c));
+            ASSERT_TRUE(tree->erase(c).is_ok());
         } else if (random.next_int(1) == 0) {
-            ASSERT_TRUE(tree->erase(tree->find_minimum()));
+            ASSERT_TRUE(tree->erase(tree->find_minimum()).is_ok());
         } else {
-            ASSERT_TRUE(tree->erase(tree->find_maximum()));
+            ASSERT_TRUE(tree->erase(tree->find_maximum()).is_ok());
         }
     };
 
-    for (Index iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
+    for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         for (const auto &[key, value]: generator.generate(random, NUM_RECORDS)) {
-            if (tree->cell_count() < MIN_SIZE || random.next_int(5) != 0) {
+            if (tree->record_count() < MIN_SIZE || random.next_int(5) != 0) {
                 tools::insert(*tree, key, value);
             } else {
                 remove_one(key);
             }
         }
-        while (tree->cell_count())
+        while (tree->record_count())
             remove_one(random_string(random, 1, 30));
     }
 }

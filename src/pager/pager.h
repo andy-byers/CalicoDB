@@ -1,15 +1,15 @@
-#ifndef CCO_POOL_INTERFACE_H
-#define CCO_POOL_INTERFACE_H
+#ifndef CALICO_POOL_INTERFACE_H
+#define CALICO_POOL_INTERFACE_H
 
 #include "calico/bytes.h"
 #include "calico/status.h"
 #include "calico/wal.h"
-#include "utils/identifier.h"
 #include "utils/result.h"
+#include "utils/types.h"
 #include "utils/utils.h"
 #include <optional>
 
-namespace cco {
+namespace calico {
 
 constexpr auto DATA_FILENAME = "data";
 
@@ -24,7 +24,7 @@ class Page;
 class Pager {
 public:
     virtual ~Pager() = default;
-    virtual auto flushed_lsn() const -> SequenceNumber = 0;
+    virtual auto flushed_lsn() const -> SequenceId = 0;
     virtual auto page_count() const -> Size = 0;
     virtual auto status() const -> Status = 0;
     virtual auto allocate() -> Result<Page> = 0;
@@ -38,4 +38,4 @@ public:
 
 } // namespace cco
 
-#endif // CCO_POOL_INTERFACE_H
+#endif // CALICO_POOL_INTERFACE_H

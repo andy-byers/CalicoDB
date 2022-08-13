@@ -3,7 +3,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace cco {
+namespace calico {
 
 Link::Link(Page page)
     : m_page {std::move(page)}

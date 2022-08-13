@@ -19,20 +19,20 @@ constexpr auto PATH = "/tmp/calico_usage";
 
 auto bytes_objects()
 {
-    auto function_taking_a_bytes_view = [](cco::BytesView) {};
+    auto function_taking_a_bytes_view = [](calico::BytesView) {};
 
     std::string data {"Hello, world!"};
 
     // Construct slices from a string. The string still owns the memory, the slices just refer
     // to it.
-    cco::Bytes b {data.data(), data.size()};
-    cco::BytesView v {data.data(), data.size()};
+    calico::Bytes b {data.data(), data.size()};
+    calico::BytesView v {data.data(), data.size()};
 
     // Convenience conversion from a string.
-    const auto from_string = cco::stob(data);
+    const auto from_string = calico::stob(data);
 
     // Convenience conversion back to a string. This operation may allocate heap memory.
-    assert(cco::btos(from_string) == data);
+    assert(calico::btos(from_string) == data);
 
     // Implicit conversions from `Bytes` to `BytesView` are allowed.
     function_taking_a_bytes_view(b);
@@ -42,16 +42,16 @@ auto bytes_objects()
     b.advance(7).truncate(5);
 
     // Comparisons.
-    assert(cco::compare_three_way(b, v) != cco::ThreeWayComparison::EQ);
-    assert(b == cco::stob("world"));
-    assert(b.starts_with(cco::stob("wor")));
+    assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
+    assert(b == calico::stob("world"));
+    assert(b.starts_with(calico::stob("wor")));
 
     // Bytes objects can modify the underlying string, while BytesView objects cannot.
     b[0] = '\xFF';
     assert(data[7] == '\xFF');
 }
 
-auto reads_and_writes(cco::Database &db)
+auto reads_and_writes(calico::Database &db)
 {
     static constexpr auto setup_error_message = "cannot setup \"reads_and_writes\" example";
     USAGE_ASSERT_OK(db.insert("2000-10-23 14:23:05", ""), setup_error_message);
@@ -68,9 +68,9 @@ auto reads_and_writes(cco::Database &db)
     //
 }
 
-auto updating_a_database(cco::Database &db)
+auto updating_a_database(calico::Database &db)
 {
-    std::vector<cco::Record> records {
+    std::vector<calico::Record> records {
         {"bengal", "short;spotted,marbled,rosetted"},
         {"turkish vankedisi", "long;white"},
         {"moose", "???"},
@@ -98,10 +98,10 @@ auto updating_a_database(cco::Database &db)
     assert(db.erase(db.find_exact("moose")).is_ok());
 }
 
-auto querying_a_database(cco::Database &db)
+auto querying_a_database(calico::Database &db)
 {
     static constexpr auto target = "russian blue";
-    const auto key = cco::stob(target);
+    const auto key = calico::stob(target);
 
     // find_exact() looks for a record that compares equal to the given key and returns a cursor
     // pointing to it.
@@ -136,21 +136,20 @@ auto querying_a_database(cco::Database &db)
     }
 }
 
-auto deleting_a_database(cco::Database db)
+auto deleting_a_database(calico::Database db)
 {
     // We can delete a database by passing ownership to the following static method.
-    assert(cco::Database::destroy(std::move(db)).is_ok());
+    assert(calico::Database::destroy(std::move(db)).is_ok());
 }
 
-auto open_database() -> cco::Database
+auto open_database() -> calico::Database
 {
-    cco::Options options;
-    options.path = PATH;
+    calico::Options options;
     options.page_size = 0x2000;
     options.frame_count = 128;
-    cco::Database db {options};
+    calico::Database db;
 
-    if (const auto s = db.open(); !s.is_ok()) {
+    if (const auto s = db.open(PATH, options); !s.is_ok()) {
         fmt::print("(1/2) cannot open database\n");
         fmt::print("(2/2) (reason) {}\n", s.what());
         std::exit(EXIT_FAILURE);

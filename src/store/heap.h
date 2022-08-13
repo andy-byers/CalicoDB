@@ -1,5 +1,5 @@
-#ifndef CCO_STORAGE_IN_MEMORY_H
-#define CCO_STORAGE_IN_MEMORY_H
+#ifndef CALICO_STORAGE_IN_MEMORY_H
+#define CALICO_STORAGE_IN_MEMORY_H
 
 #include "calico/status.h"
 #include "calico/storage.h"
@@ -8,33 +8,33 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace cco {
+namespace calico {
 
-class RandomAccessHeapReader: public RandomAccessReader {
+class RandomHeapReader : public RandomReader {
 public:
-    RandomAccessHeapReader(const std::string &name, std::string &file)
-        : m_name {name},
+    RandomHeapReader(std::string name, std::string &file)
+        : m_name {std::move(name)},
           m_blob {&file}
     {}
 
-    ~RandomAccessHeapReader() override = default;
-    [[nodiscard]] auto read(Bytes&, Index) -> Status override;
+    ~RandomHeapReader() override = default;
+    [[nodiscard]] auto read(Bytes&, Size) -> Status override;
 
 private:
     std::string m_name;
     std::string *m_blob {};
 };
 
-class RandomAccessHeapEditor: public RandomAccessEditor {
+class RandomHeapEditor: public RandomEditor {
 public:
-    RandomAccessHeapEditor(const std::string &name, std::string &file)
-        : m_name {name},
+    RandomHeapEditor(std::string name, std::string &file)
+        : m_name {std::move(name)},
           m_blob {&file}
     {}
 
-    ~RandomAccessHeapEditor() override = default;
-    [[nodiscard]] auto read(Bytes&, Index) -> Status override;
-    [[nodiscard]] auto write(BytesView, Index) -> Status override;
+    ~RandomHeapEditor() override = default;
+    [[nodiscard]] auto read(Bytes&, Size) -> Status override;
+    [[nodiscard]] auto write(BytesView, Size) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
 private:
@@ -44,8 +44,8 @@ private:
 
 class AppendHeapWriter: public AppendWriter {
 public:
-    AppendHeapWriter(const std::string &name, std::string &file)
-        : m_name {name},
+    AppendHeapWriter(std::string name, std::string &file)
+        : m_name {std::move(name)},
           m_blob {&file}
     {}
 
@@ -64,22 +64,23 @@ public:
     ~HeapStorage() override = default;
     [[nodiscard]] auto create_directory(const std::string&) -> Status override;
     [[nodiscard]] auto remove_directory(const std::string&) -> Status override;
-    [[nodiscard]] auto get_file_names(std::vector<std::string>&) const -> Status override;
-    [[nodiscard]] auto open_random_reader(const std::string &, RandomAccessReader**) -> Status override;
-    [[nodiscard]] auto open_random_editor(const std::string &, RandomAccessEditor**) -> Status override;
+    [[nodiscard]] auto get_children(const std::string&, std::vector<std::string>&) const -> Status override;
+    [[nodiscard]] auto open_random_reader(const std::string &, RandomReader**) -> Status override;
+    [[nodiscard]] auto open_random_editor(const std::string &, RandomEditor**) -> Status override;
     [[nodiscard]] auto open_append_writer(const std::string &, AppendWriter**) -> Status override;
     [[nodiscard]] auto rename_file(const std::string &, const std::string &) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &, Size) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &) const -> Status override;
     [[nodiscard]] auto file_size(const std::string &, Size &) const -> Status override;
+    auto clone() const -> Storage*;
 
 private:
-    // TODO: Could use a custom allocator that is better for large blobs.
+    // TODO: Could use a custom allocator that is better for large contiguous chunks.
     std::unordered_map<std::string, std::string> m_files;
     std::unordered_set<std::string> m_directories;
 };
 
 } // namespace cco
 
-#endif // CCO_STORAGE_IN_MEMORY_H
+#endif // CALICO_STORAGE_IN_MEMORY_H

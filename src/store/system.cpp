@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace cco::system {
+namespace calico::system {
 
 namespace fs = std::filesystem;
 
@@ -66,7 +66,7 @@ auto file_read(int file, Bytes out) -> Result<Size>
 {
     const auto target_size = out.size();
 
-    for (Index i {}; !out.is_empty() && i < target_size; ++i) {
+    for (Size i {}; !out.is_empty() && i < target_size; ++i) {
         if (const auto n = ::read(file, out.data(), out.size()); n != FAILURE) {
             out.advance(static_cast<Size>(n));
         } else if (errno != EINTR) {
@@ -80,7 +80,7 @@ auto file_write(int file, BytesView in) -> Result<Size>
 {
     const auto target_size = in.size();
 
-    for (Index i {}; !in.is_empty() && i < target_size; ++i) {
+    for (Size i {}; !in.is_empty() && i < target_size; ++i) {
         if (const auto n = ::write(file, in.data(), in.size()); n != FAILURE) {
             in.advance(static_cast<Size>(n));
         } else if (errno != EINTR) {
@@ -97,10 +97,10 @@ auto file_sync(int fd) -> Status
     return Status::ok();
 }
 
-auto file_seek(int fd, long offset, int whence) -> Result<Index>
+auto file_seek(int fd, long offset, int whence) -> Result<Size>
 {
     if (const auto position = lseek(fd, offset, whence); position != FAILURE)
-        return static_cast<Index>(position);
+        return static_cast<Size>(position);
     return Err {error()};
 }
 
@@ -111,10 +111,17 @@ auto file_remove(const std::string &path) -> Status
     return Status::ok();
 }
 
-auto dir_create(const std::string &path) -> Status
+auto dir_create(const std::string &path, mode_t permissions) -> Status
 {
-    if (::mkdir(path.c_str(), 0755) == FAILURE)
+    if (::mkdir(path.c_str(), permissions) == FAILURE) {
+        if (std::exchange(errno, SUCCESS) == EEXIST) {
+            ThreePartMessage message;
+            message.set_primary("could not create directory");
+            message.set_detail("directory {} already exists", path);
+            return message.logic_error();
+        }
         return error();
+    }
     return Status::ok();
 }
 

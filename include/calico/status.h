@@ -1,9 +1,9 @@
-#ifndef CCO_ERROR_H
-#define CCO_ERROR_H
+#ifndef CALICO_ERROR_H
+#define CALICO_ERROR_H
 
 #include "bytes.h"
 
-namespace cco {
+namespace calico {
 
 class Status final {
 public:
@@ -45,4 +45,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_ERROR_H
+#endif // CALICO_ERROR_H

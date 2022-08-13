@@ -1,17 +1,15 @@
-#ifndef CCO_TREE_TREE_H
-#define CCO_TREE_TREE_H
+#ifndef CALICO_TREE_TREE_H
+#define CALICO_TREE_TREE_H
 
 #include "calico/cursor.h"
 #include "calico/status.h"
-#include "utils/identifier.h"
 #include "utils/result.h"
+#include "utils/types.h"
 #include <optional>
 
-namespace cco {
+namespace calico {
 
 class Cell;
-class FileHeaderReader;
-class FileHeaderWriter;
 class Link;
 class Internal;
 class Node;
@@ -22,9 +20,9 @@ class Page;
 class Tree {
 public:
     virtual ~Tree() = default;
-    virtual auto cell_count() const -> Size = 0;
-    virtual auto insert(BytesView, BytesView) -> Result<bool> = 0;
-    virtual auto erase(Cursor) -> Result<bool> = 0;
+    virtual auto record_count() const -> Size = 0;
+    virtual auto insert(BytesView, BytesView) -> Status = 0;
+    virtual auto erase(Cursor) -> Status = 0;
     virtual auto find_exact(BytesView) -> Cursor = 0;
     virtual auto find(BytesView key) -> Cursor = 0;
     virtual auto find_minimum() -> Cursor = 0;
@@ -37,4 +35,4 @@ public:
 
 } // namespace cco
 
-#endif // CCO_TREE_TREE_H
+#endif // CALICO_TREE_TREE_H

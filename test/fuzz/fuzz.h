@@ -1,5 +1,5 @@
-#ifndef CCO_FUZZ_FUZZ_H
-#define CCO_FUZZ_FUZZ_H
+#ifndef CALICO_FUZZ_FUZZ_H
+#define CALICO_FUZZ_FUZZ_H
 
 #include <array>
 #include "calico/calico.h"
@@ -63,4 +63,4 @@ private:
 } // cco
 
 
-#endif // CCO_FUZZ_FUZZ_H
+#endif // CALICO_FUZZ_FUZZ_H

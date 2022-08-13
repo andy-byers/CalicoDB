@@ -1,5 +1,5 @@
-#ifndef CCO_UTILS_CACHE_H
-#define CCO_UTILS_CACHE_H
+#ifndef CALICO_UTILS_CACHE_H
+#define CALICO_UTILS_CACHE_H
 
 #include "calico/common.h"
 #include "utils/expect.h"
@@ -8,7 +8,7 @@
 #include <optional>
 #include <unordered_map>
 
-namespace cco {
+namespace calico {
 
 namespace impl {
 
@@ -63,7 +63,7 @@ namespace impl {
         virtual auto put(const Key &key, Value &&value) -> void
         {
             // We don't handle duplicate keys. We only need to cache unique identifiers.
-            CCO_EXPECT_FALSE(contains(key));
+            CALICO_EXPECT_FALSE(contains(key));
             m_list.emplace_back(key, std::forward<Value>(value));
             m_map.emplace(key, prev(end()));
         }
@@ -150,4 +150,4 @@ public:
 
 } // namespace cco
 
-#endif // CCO_UTILS_CACHE_H
+#endif // CALICO_UTILS_CACHE_H

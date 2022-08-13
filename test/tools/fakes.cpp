@@ -3,6 +3,6 @@
 #include "utils/logging.h"
 #include "utils/utils.h"
 
-namespace cco {
+namespace calico {
 
 } // cco

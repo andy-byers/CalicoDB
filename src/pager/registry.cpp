@@ -1,12 +1,12 @@
 
 #include "registry.h"
 
-namespace cco {
+namespace calico {
 
-auto PageRegistry::put(PageId pid, FrameId fid) -> void
+auto PageRegistry::put(PageId pid, FrameNumber fid) -> void
 {
-    CCO_EXPECT_FALSE(m_warm.contains(pid));
-    CCO_EXPECT_FALSE(m_hot.contains(pid));
+    CALICO_EXPECT_FALSE(m_warm.contains(pid));
+    CALICO_EXPECT_FALSE(m_hot.contains(pid));
     m_warm.put(pid, Entry {fid});
 }
 
@@ -31,7 +31,7 @@ auto PageRegistry::erase(PageId id) -> void
         return;
     if (m_warm.extract(id))
         return;
-    CCO_EXPECT_TRUE(false && "erase(): cannot find entry");
+    CALICO_EXPECT_TRUE(false && "erase(): cannot find entry");
 }
 
 } // namespace cco

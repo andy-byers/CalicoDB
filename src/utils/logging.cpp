@@ -4,13 +4,13 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/null_sink.h>
 
-namespace cco {
+namespace calico {
 
 namespace fs = std::filesystem;
 
 auto create_logger(spdlog::sink_ptr sink, const std::string &name) -> std::shared_ptr<spdlog::logger>
 {
-    CCO_EXPECT_FALSE(name.empty());
+    CALICO_EXPECT_FALSE(name.empty());
     return std::make_shared<spdlog::logger>(name, std::move(sink));
 }
 
@@ -58,7 +58,7 @@ auto ThreePartMessage::not_found() const -> Status
 
 auto ThreePartMessage::text() const -> std::string
 {
-    CCO_EXPECT_FALSE(m_text[PRIMARY].empty());
+    CALICO_EXPECT_FALSE(m_text[PRIMARY].empty());
     std::string message {m_text[PRIMARY]};
 
     if (!m_text[DETAIL].empty())
@@ -70,7 +70,7 @@ auto ThreePartMessage::text() const -> std::string
     return message;
 }
 
-auto ThreePartMessage::set_text(Index index, const char *text) -> void
+auto ThreePartMessage::set_text(Size index, const char *text) -> void
 {
     m_text[index] = text;
 }

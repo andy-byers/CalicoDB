@@ -1,13 +1,13 @@
 
-#ifndef CCO_TREE_NODE_POOL_H
-#define CCO_TREE_NODE_POOL_H
+#ifndef CALICO_TREE_NODE_POOL_H
+#define CALICO_TREE_NODE_POOL_H
 
 #include "free_list.h"
 #include "tree.h"
 #include "utils/scratch.h"
 #include <spdlog/spdlog.h>
 
-namespace cco {
+namespace calico {
 
 class Pager;
 
@@ -36,4 +36,4 @@ private:
 
 } // namespace cco
 
-#endif // CCO_TREE_NODE_POOL_H
+#endif // CALICO_TREE_NODE_POOL_H
