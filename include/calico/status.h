@@ -1,5 +1,5 @@
-#ifndef CALICO_ERROR_H
-#define CALICO_ERROR_H
+#ifndef CALICO_STATUS_H
+#define CALICO_STATUS_H
 
 #include "bytes.h"
 
@@ -45,4 +45,4 @@ private:
 
 } // namespace cco
 
-#endif // CALICO_ERROR_H
+#endif // CALICO_STATUS_H

@@ -1,7 +1,7 @@
 
 #include "core.h"
 #include "calico/calico.h"
-#include "calico/storage.h"
+#include "calico/store.h"
 #include "header.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"

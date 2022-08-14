@@ -1,13 +1,11 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
-#include "utils/result.h"
-#include "wal/record.h"
-#include <optional>
+#include "bytes.h"
 
 namespace calico {
 
-struct FileHeader; // TODO: Will need to be exposed in the public API.
+struct FileHeader;
 
 struct PageDelta {
     Size offset {};

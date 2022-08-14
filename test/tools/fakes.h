@@ -2,7 +2,7 @@
 #define CALICO_TEST_TOOLS_FAKES_H
 
 #include "calico/calico.h"
-#include "calico/storage.h"
+#include "calico/store.h"
 #include "pager/pager.h"
 #include "random.h"
 #include "store/heap.h"

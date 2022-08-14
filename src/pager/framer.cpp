@@ -1,5 +1,5 @@
 #include "framer.h"
-#include "calico/storage.h"
+#include "calico/store.h"
 #include "core/header.h"
 #include "page/page.h"
 #include "utils/encoding.h"

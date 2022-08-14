@@ -7,10 +7,10 @@ namespace calico {
 
 namespace fs = std::filesystem;
 
-static auto read_blob_at(const std::string &blob, Bytes &out, Size offset)
+static auto read_file_at(const std::string &file, Bytes &out, Size offset)
 {
     Size r {};
-    if (auto buffer = stob(blob); offset < buffer.size()) {
+    if (auto buffer = stob(file); offset < buffer.size()) {
         const auto diff = buffer.size() - offset;
         r = std::min(out.size(), diff);
         buffer.advance(offset);
@@ -20,27 +20,27 @@ static auto read_blob_at(const std::string &blob, Bytes &out, Size offset)
     return Status::ok();
 }
 
-static auto write_blob_at(std::string &blob, BytesView in, Size offset)
+static auto write_file_at(std::string &file, BytesView in, Size offset)
 {
-    if (const auto write_end = offset + in.size(); blob.size() < write_end)
-        blob.resize(write_end);
-    mem_copy(stob(blob).range(offset), in);
+    if (const auto write_end = offset + in.size(); file.size() < write_end)
+        file.resize(write_end);
+    mem_copy(stob(file).range(offset), in);
     return Status::ok();
 }
 
 auto RandomHeapReader::read(Bytes &out, Size offset) -> Status
 {
-    return read_blob_at(*m_blob, out, offset);
+    return read_file_at(*m_file, out, offset);
 }
 
 auto RandomHeapEditor::read(Bytes &out, Size offset) -> Status
 {
-    return read_blob_at(*m_blob, out, offset);
+    return read_file_at(*m_file, out, offset);
 }
 
 auto RandomHeapEditor::write(BytesView in, Size offset) -> Status
 {
-    return write_blob_at(*m_blob, in, offset);
+    return write_file_at(*m_file, in, offset);
 }
 
 auto RandomHeapEditor::sync() -> Status
@@ -50,7 +50,7 @@ auto RandomHeapEditor::sync() -> Status
 
 auto AppendHeapWriter::write(BytesView in) -> Status 
 {
-    return write_blob_at(*m_blob, in, m_blob->size());
+    return write_file_at(*m_file, in, m_file->size());
 }
 
 auto AppendHeapWriter::sync() -> Status 
@@ -58,15 +58,15 @@ auto AppendHeapWriter::sync() -> Status
     return Status::ok();
 }
 
-auto HeapStorage::open_random_reader(const std::string &name, RandomReader **out) -> Status
+auto HeapStorage::open_random_reader(const std::string &path, RandomReader **out) -> Status
 {
-    if (auto itr = m_files.find(name); itr != end(m_files)) {
-        *out = new RandomHeapReader {name, itr->second};
+    if (auto itr = m_files.find(path); itr != end(m_files)) {
+        *out = new RandomHeapReader {path, itr->second};
     } else {
         ThreePartMessage message;
-        message.set_primary("could not open blob");
-        message.set_detail("blob does not exist");
-        message.set_hint("open a writer or editor to create the blob");
+        message.set_primary("could not open file");
+        message.set_detail("file does not exist");
+        message.set_hint("open a writer or editor to create the file");
         return message.not_found();
     }
     return Status::ok();
@@ -101,8 +101,8 @@ auto HeapStorage::remove_file(const std::string &name) -> Status
     auto itr = m_files.find(name);
     if (itr == end(m_files)) {
         ThreePartMessage message;
-        message.set_primary("could not remove blob");
-        message.set_detail("blob does not exist");
+        message.set_primary("could not remove file");
+        message.set_detail("file does not exist");
         return message.system_error();
     }
     m_files.erase(itr);
@@ -114,8 +114,8 @@ auto HeapStorage::resize_file(const std::string &name, Size size) -> Status
     auto itr = m_files.find(name);
     if (itr == end(m_files)) {
         ThreePartMessage message;
-        message.set_primary("could not resize blob");
-        message.set_detail("blob does not exist");
+        message.set_primary("could not resize file");
+        message.set_detail("file does not exist");
         return message.system_error();
     }
     itr->second.resize(size);
@@ -126,15 +126,15 @@ auto HeapStorage::rename_file(const std::string &old_name, const std::string &ne
 {
     if (new_name.empty()) {
         ThreePartMessage message;
-        message.set_primary("could not rename blob");
+        message.set_primary("could not rename file");
         message.set_detail("new name is empty");
         return message.system_error();
     }
     auto node = m_files.extract(old_name);
     if (node.empty()) {
         ThreePartMessage message;
-        message.set_primary("cannot rename blob");
-        message.set_detail("blob \"{}\" does not exist", old_name);
+        message.set_primary("cannot rename file");
+        message.set_detail("file \"{}\" does not exist", old_name);
         return message.system_error();
     }
     node.key() = new_name;
@@ -148,8 +148,8 @@ auto HeapStorage::file_size(const std::string &name, Size &out) const -> Status
     auto itr = m_files.find(name);
     if (itr == cend(m_files)) {
         ThreePartMessage message;
-        message.set_primary("cannot get blob size");
-        message.set_detail("blob \"{}\" does not exist", name);
+        message.set_primary("cannot get file size");
+        message.set_detail("file \"{}\" does not exist", name);
         return message.system_error();
     }
     out = itr->second.size();
@@ -161,8 +161,8 @@ auto HeapStorage::file_exists(const std::string &name) const -> Status
     const auto itr = m_files.find(name);
     if (itr == cend(m_files)) {
         ThreePartMessage message;
-        message.set_primary("could not find blob");
-        message.set_detail("blob \"{}\" does not exist", name);
+        message.set_primary("could not find file");
+        message.set_detail("file \"{}\" does not exist", name);
         return message.not_found();
     }
     return Status::ok();

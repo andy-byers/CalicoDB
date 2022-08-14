@@ -1,20 +1,36 @@
-///**
-//*
-//* References
-//*   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
-//*/
-//
-//#ifndef CALICO_WAL_WAL_RECORD_H
-//#define CALICO_WAL_WAL_RECORD_H
-//
-//#include "calico/status.h"
-//#include "page/page.h"
-//#include "utils/identifier.h"
-//#include "utils/result.h"
-//#include "utils/utils.h"
-//
-//namespace cco {
-//
+/**
+*
+* References
+*   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
+*/
+
+#ifndef CALICO_WAL_RECORD_H
+#define CALICO_WAL_RECORD_H
+
+#include "utils/types.h"
+
+namespace calico {
+
+struct BasicWalRecordHeader {
+    enum Type: Byte {
+        EMPTY = 0,
+        FULL = 1,
+        FIRST = 2,
+        MIDDLE = 3,
+        LAST = 4,
+    };
+
+    std::uint64_t lsn;
+    std::uint32_t crc;
+    Type type;
+    std::uint16_t size;
+};
+
+enum BasicWalPayloadType: Byte {
+    FULL_IMAGE = 1,
+    DELTAS = 2,
+    COMMIT = 3,
+};
 ///**
 // * The variable-length payload field of a WAL record.
 // */
@@ -135,7 +151,7 @@
 //    Size m_crc {};
 //    Type m_type {Type::EMPTY};
 //};
-//
-//} // namespace cco
-//
-//#endif // CALICO_WAL_WAL_RECORD_H
+
+} // namespace calico
+
+#endif // CALICO_WAL_RECORD_H

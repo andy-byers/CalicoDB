@@ -1,16 +1,69 @@
-//#include "wal_manager.h"
-//#include "calico/storage.h"
-//#include "page/file_header.h"
-//#include "page/node.h"
-//#include "pool/interface.h"
-//#include "storage/system.h"
-//#include "utils/logging.h"
-//#include "wal_reader.h"
-//#include "wal_record.h"
-//#include "wal_writer.h"
-//
-//namespace cco {
-//
+#include "basic_wal.h"
+#include "utils/logging.h"
+
+namespace calico {
+
+auto BasicWriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
+{
+
+}
+
+auto BasicWriteAheadLog::flushed_lsn() const -> std::uint64_t
+{
+
+}
+
+auto BasicWriteAheadLog::current_lsn() const -> std::uint64_t
+{
+
+}
+
+auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> Status
+{
+
+}
+
+auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status
+{
+
+}
+
+auto BasicWriteAheadLog::log_commit() -> Status
+{
+
+}
+
+auto BasicWriteAheadLog::stop() -> Status
+{
+
+}
+
+auto BasicWriteAheadLog::start() -> Status
+{
+
+}
+
+auto BasicWriteAheadLog::redo_all(const RedoCallback &callback) -> Status
+{
+
+}
+
+auto BasicWriteAheadLog::undo_last(const UndoCallback &callback) -> Status
+{
+
+}
+
+auto BasicWriteAheadLog::save_state(FileHeader &) -> void
+{
+
+}
+
+auto BasicWriteAheadLog::load_state(const FileHeader &) -> void
+{
+
+}
+
+
 //namespace fs = std::filesystem;
 //
 //auto WALManager::open(const WALParameters &param) -> Result<std::unique_ptr<IWALManager>>
@@ -616,5 +669,5 @@
 //    }
 //    return Err {status};
 //}
-//
-//} // namespace cco
+
+} // namespace calico

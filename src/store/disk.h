@@ -2,7 +2,7 @@
 #define CALICO_STORAGE_ON_DISK_H
 
 #include "calico/status.h"
-#include "calico/storage.h"
+#include "calico/store.h"
 #include "utils/expect.h"
 #include <filesystem>
 

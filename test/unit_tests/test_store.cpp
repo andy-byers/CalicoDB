@@ -5,7 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "calico/options.h"
-#include "calico/storage.h"
+#include "calico/store.h"
 #include "random.h"
 #include "store/disk.h"
 #include "store/heap.h"

@@ -2,7 +2,7 @@
 #define CALICO_STORAGE_IN_MEMORY_H
 
 #include "calico/status.h"
-#include "calico/storage.h"
+#include "calico/store.h"
 #include "utils/expect.h"
 #include <filesystem>
 #include <unordered_map>
@@ -14,7 +14,7 @@ class RandomHeapReader : public RandomReader {
 public:
     RandomHeapReader(std::string name, std::string &file)
         : m_name {std::move(name)},
-          m_blob {&file}
+          m_file {&file}
     {}
 
     ~RandomHeapReader() override = default;
@@ -22,14 +22,14 @@ public:
 
 private:
     std::string m_name;
-    std::string *m_blob {};
+    std::string *m_file {};
 };
 
 class RandomHeapEditor: public RandomEditor {
 public:
     RandomHeapEditor(std::string name, std::string &file)
         : m_name {std::move(name)},
-          m_blob {&file}
+          m_file {&file}
     {}
 
     ~RandomHeapEditor() override = default;
@@ -39,14 +39,14 @@ public:
 
 private:
     std::string m_name;
-    std::string *m_blob {};
+    std::string *m_file {};
 };
 
 class AppendHeapWriter: public AppendWriter {
 public:
     AppendHeapWriter(std::string name, std::string &file)
         : m_name {std::move(name)},
-          m_blob {&file}
+          m_file {&file}
     {}
 
     ~AppendHeapWriter() override = default;
@@ -55,7 +55,7 @@ public:
 
 private:
     std::string m_name;
-    std::string *m_blob {};
+    std::string *m_file {};
 };
 
 class HeapStorage: public Storage {

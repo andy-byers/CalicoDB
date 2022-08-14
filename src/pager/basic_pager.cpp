@@ -62,7 +62,7 @@ auto BasicPager::pin_frame(PageId id) -> Status
             LogMessage message {*m_logger};
             message.set_primary("could not pin frame");
             message.set_detail("out of frames");
-            message.set_hint("release some pages or wait for the WAL to flush");
+            message.set_hint("release some pages or wait for the WAL to advance_block");
             return message.not_found();
         }
     }

@@ -185,7 +185,7 @@ namespace impl {
         /**
          * Move the beginning of the slice forward.
          *
-         * @param n The number of elements to advance by.
+         * @param n The number of elements to advance_cursor by.
          * @return A copy of this slice for chaining.
          */
         auto advance(Size n = 1) noexcept -> Slice&

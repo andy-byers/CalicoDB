@@ -1,7 +1,7 @@
 #ifndef CALICO_STORAGE_SYSTEM_H
 #define CALICO_STORAGE_SYSTEM_H
 
-#include "calico/storage.h"
+#include "calico/store.h"
 
 namespace calico::system {
 

@@ -20,7 +20,7 @@ Once the page is no longer needed, it can be "unpinned".
 This involves writing it back to the database file if it is dirty.
 It is the buffer pool's job, however, to ensure that if a dirty page is unpinned, its contents are already in the WAL.
 This is achieved by checking the page LSN against the WAL flushed LSN.
-If the WAL flushed LSN is greater than or equal to the page LSN, then the page is safe to flush.
+If the WAL flushed LSN is greater than or equal to the page LSN, then the page is safe to advance_block.
 
 ## Page Cache
 The page cache provides an in-memory mapping between frame IDs and page IDs.

@@ -67,9 +67,9 @@ assert(calico::btos(from_string) == data);
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
 function_taking_a_bytes_view(b);
 
-// advance() moves the start of the slice forward and truncate moves the end of the slice
+// advance_cursor() moves the start of the slice forward and truncate moves the end of the slice
 // backward.
-b.advance(7).truncate(5);
+b.advance_cursor(7).truncate(5);
 
 // Comparisons.
 assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);

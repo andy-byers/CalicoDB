@@ -167,7 +167,7 @@ First, we read the WAL starting from the beginning, applying updates to stale pa
 If we encounter a commit record at the end of the WAL, then recovery is complete.
 Otherwise, we do not have enough information to complete the transaction and must abort.
 Here we read the WAL in reverse, reverting pages to their state before the transaction started.
-In either case, we truncate the WAL and flush the buffer pool on completion.
+In either case, we truncate the WAL and advance_block the buffer pool on completion.
 
 # Optimizations?
 + We could come up with a physiological logging scheme to try and reduce the amount of data we write to the WAL

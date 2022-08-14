@@ -1,5 +1,5 @@
-#ifndef CALICO_STORAGE_H
-#define CALICO_STORAGE_H
+#ifndef CALICO_STORE_H
+#define CALICO_STORE_H
 
 #include "calico/status.h"
 #include "utils/result.h"
@@ -71,4 +71,4 @@ auto read_exact(Reader &reader, Bytes out, Size offset) -> Status
 
 } // namespace calico
 
-#endif // CALICO_STORAGE_H
+#endif // CALICO_STORE_H

@@ -1,28 +1,171 @@
-//#include <gtest/gtest.h>
-//
-//#include "calico/bytes.h"
-//#include "calico/options.h"
-//#include "storage/file.h"
-//#include "storage/on_disk.h"
-//#include "utils/logging.h"
-//#include "utils/utils.h"
-//#include "wal/wal_manager.h"
-//#include "wal/wal_reader.h"
-//#include "wal/wal_record.h"
-//#include "wal/wal_writer.h"
-//
-//#include "fakes.h"
-//#include "pool/buffer_pool.h"
-//#include "random.h"
-//#include "tools.h"
-//#include "utils/layout.h"
-//
-//namespace {
-//
-//using namespace cco;
-//using namespace cco;
-//using namespace cco;
-//
+#include <gtest/gtest.h>
+
+#include "calico/bytes.h"
+#include "calico/options.h"
+#include "calico/store.h"
+#include "utils/logging.h"
+#include "utils/utils.h"
+#include "wal/helpers.h"
+#include "fakes.h"
+
+namespace {
+
+using namespace calico;
+
+class LogEntityTests: public testing::Test {
+public:
+    static constexpr Size BLOCK_SIZE {4};
+
+    LogEntityTests()
+    {
+        store = std::make_unique<HeapStorage>();
+        CALICO_EXPECT_OK(store->create_directory("test"));
+    }
+
+    std::unique_ptr<Storage> store;
+};
+
+[[nodiscard]]
+auto open_and_read_file(Storage &store, const std::string &name)
+{
+    RandomReader *file {};
+    Size size {};
+    CALICO_EXPECT_OK(store.open_random_reader(name, &file));
+    CALICO_EXPECT_OK(store.file_size(name, size));
+    std::string buffer(size, '\x00');
+    CALICO_EXPECT_OK(read_exact(*file, stob(buffer), 0));
+    return buffer;
+}
+
+[[nodiscard]]
+auto open_and_write_file(Storage &store, const std::string &name, const std::string &in)
+{
+    RandomEditor *file {};
+    CALICO_EXPECT_OK(store.open_random_editor(name, &file));
+    CALICO_EXPECT_OK(file->write(stob(in), 0));
+}
+
+class AppendLogWriterTests: public LogEntityTests {
+public:
+    AppendLogWriterTests()
+    {
+        CALICO_EXPECT_OK(store->open_append_writer("test/wal", &file));
+        CALICO_EXPECT_OK(writer.attach(file));
+    }
+
+    AppendLogWriter writer {BLOCK_SIZE};
+    AppendWriter *file {};
+};
+
+TEST_F(AppendLogWriterTests, NewWriterStartsAtBeginning)
+{
+    ASSERT_EQ(writer.position().offset.value, 0);
+    ASSERT_EQ(writer.position().number.value, 0);
+}
+
+TEST_F(AppendLogWriterTests, OutOfBoundsCursorDeathTest)
+{
+    ASSERT_DEATH(writer.advance_cursor(5), "Expect");
+}
+
+TEST_F(AppendLogWriterTests, WriterWritesAndAdvances)
+{
+    mem_copy(writer.remaining(), stob("123"));
+    writer.advance_cursor(3);
+    ASSERT_EQ(writer.position().offset.value, 3);
+    ASSERT_EQ(writer.position().number.value, 0);
+
+    mem_copy(writer.remaining(), stob("4"));
+    writer.advance_cursor(1);
+    ASSERT_EQ(writer.position().offset.value, 4);
+    ASSERT_EQ(writer.position().number.value, 0);
+
+    CALICO_EXPECT_OK(writer.advance_block());
+    ASSERT_EQ(writer.position().offset.value, 0);
+    ASSERT_EQ(writer.position().number.value, 1);
+
+    mem_copy(writer.remaining(), stob("5678"));
+    writer.advance_cursor(4);
+    ASSERT_EQ(writer.position().offset.value, 4);
+    ASSERT_EQ(writer.position().number.value, 1);
+
+    CALICO_EXPECT_OK(writer.advance_block());
+    ASSERT_EQ(writer.position().offset.value, 0);
+    ASSERT_EQ(writer.position().number.value, 2);
+
+    ASSERT_EQ(open_and_read_file(*store, "test/wal"), "12345678");
+}
+
+class SequentialLogReaderTests: public LogEntityTests {
+public:
+    SequentialLogReaderTests()
+    {
+        // Needs to be created by a writable file type.
+        RandomEditor *temp;
+        CALICO_EXPECT_OK(store->open_random_editor("test/wal", &temp));
+        delete temp;
+
+        CALICO_EXPECT_OK(store->open_random_reader("test/wal", &file));
+    }
+
+    auto attach_reader() -> void
+    {
+        CALICO_EXPECT_OK(reader.attach(file));
+    }
+
+    SequentialLogReader reader {BLOCK_SIZE};
+    RandomReader *file {};
+};
+
+TEST_F(SequentialLogReaderTests, NewWriterStartsAtBeginning)
+{
+    ASSERT_EQ(reader.position().offset.value, 0);
+    ASSERT_EQ(reader.position().number.value, 0);
+}
+
+TEST_F(SequentialLogReaderTests, OutOfBoundsCursorDeathTest)
+{
+    ASSERT_DEATH(reader.advance_cursor(5), "Expect");
+}
+
+TEST_F(SequentialLogReaderTests, ReaderReadsAndAdvances)
+{
+    open_and_write_file(*store, "test/wal", "12345678");
+    std::string buffer(8, '\x00');
+    auto bytes = stob(buffer);
+
+    attach_reader();
+
+    mem_copy(bytes, reader.remaining().truncate(3));
+    reader.advance_cursor(3);
+    bytes.advance(3);
+    ASSERT_EQ(reader.position().offset.value, 3);
+    ASSERT_EQ(reader.position().number.value, 0);
+
+    mem_copy(bytes, reader.remaining().truncate(1));
+    reader.advance_cursor(1);
+    bytes.advance(1);
+    ASSERT_EQ(reader.position().offset.value, 4);
+    ASSERT_EQ(reader.position().number.value, 0);
+
+    CALICO_EXPECT_OK(reader.advance_block());
+    ASSERT_EQ(reader.position().offset.value, 0);
+    ASSERT_EQ(reader.position().number.value, 1);
+
+    mem_copy(bytes, reader.remaining());
+    reader.advance_cursor(4);
+    ASSERT_EQ(bytes.size(), 4);
+    ASSERT_EQ(reader.position().offset.value, 4);
+    ASSERT_EQ(reader.position().number.value, 1);
+
+    CALICO_EXPECT_TRUE(reader.advance_block().is_system_error());
+    ASSERT_EQ(reader.position().offset.value, 4);
+    ASSERT_EQ(reader.position().number.value, 1);
+
+    ASSERT_EQ(buffer, "12345678");
+}
+
+
 //struct TestWALOptions {
 //    std::string path;
 //    Size page_size {};
@@ -181,7 +324,7 @@
 ////    for (Size i {}; i < n; ++i)
 ////        ASSERT_TRUE(test.writer->append(generator.generate(random.next_int(1UL, 500UL), 10)));
 ////
-////    ASSERT_TRUE(test.writer->flush());
+////    ASSERT_TRUE(test.writer->advance_block());
 ////}
 ////
 ////template<class Callable>
@@ -701,5 +844,5 @@
 //        0x100 << 7
 //    )
 //);
-//
-//} // <anonymous>
+
+} // <anonymous>
