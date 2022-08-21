@@ -18,6 +18,7 @@ public:
     ~NodePool() = default;
 
     [[nodiscard]] auto page_size() const -> Size;
+    [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto allocate(PageType) -> Result<Node>;
     [[nodiscard]] auto acquire(PageId, bool) -> Result<Node>;
     [[nodiscard]] auto release(Node) -> Result<void>;

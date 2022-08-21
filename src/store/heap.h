@@ -76,6 +76,7 @@ public:
     auto clone() const -> Storage*;
 
 private:
+    mutable std::mutex m_mutex;
     // TODO: Could use a custom allocator that is better for large contiguous chunks.
     std::unordered_map<std::string, std::string> m_files;
     std::unordered_set<std::string> m_directories;

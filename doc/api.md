@@ -35,7 +35,7 @@ if (const auto s = db.open(); !s.is_ok()) {
     std::exit(EXIT_FAILURE);
 }
 // This will be true until db.file_close() is called.
-assert(db.is_open());
+assert(db.is_running());
 ```
 
 ### Closing a Database

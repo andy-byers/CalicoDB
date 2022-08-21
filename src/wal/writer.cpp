@@ -1,125 +1,207 @@
-//#include "writer.h"
-//#include "basic_wal.h"
-//#include "calico/storage.h"
-//#include "utils/logging.h"
-//#include "utils/types.h"
-//#include <optional>
+#include <chrono>
+#include "writer.h"
+#include "basic_wal.h"
+#include "calico/store.h"
+#include "utils/logging.h"
+#include "utils/types.h"
+#include <optional>
+
+namespace calico {
+
+auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
+{
+    using namespace std::chrono_literals;
+
+    auto &[mu, cv, events, self] = writer->m_state;
+    auto &flushed_lsn = *writer->m_flushed_lsn;
+    auto &scratch = *writer->m_scratch;
+    auto is_running = true;
+
+    while (is_running) {
+        std::unique_lock lock {mu};
+        cv.wait(lock, [writer] { // TODO: Wake up periodically using wait_for() and check some flag to determine if we should exit instead of having a "STOP" event?
+            return !writer->m_state.events.empty();
+        });
+//        cv.wait_for(lock, 500us);
+//        if (events.empty()) continue;
+        auto [type, lsn, buffer, size] = events.front();
+        events.pop_front();
+        lock.unlock();
+
+        auto s = Status::ok();
+        switch (type) {
+            case EventType::LOG_DELTAS:
+                CALICO_EXPECT_TRUE(buffer.has_value());
+                s = writer->emit_payload(lsn, buffer->data().truncate(size));
+                break;
+            case EventType::LOG_FULL_IMAGE:
+                CALICO_EXPECT_TRUE(buffer.has_value());
+                s = writer->emit_payload(lsn, buffer->data().truncate(size));
+                break;
+            case EventType::LOG_COMMIT:
+                CALICO_EXPECT_FALSE(buffer.has_value());
+                s = writer->emit_commit(lsn);
+                break;
+            case EventType::PAUSE_WRITER:
+                CALICO_EXPECT_FALSE(buffer.has_value());
+                s = writer->advance_segment(false);
+                // Main thread should be waiting in standby().
+                cv.notify_one();
+                break;
+            case EventType::STOP_WRITER:
+                CALICO_EXPECT_FALSE(buffer.has_value());
+                s = writer->try_close_segment(lsn);
+                is_running = false;
+                break;
+
+            default:
+                CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
+        }
+
+        // Replace the scratch memory so that the main thread can reuse it. This is internally synchronized.
+        if (buffer) scratch.put(*buffer);
+
+        // Shouldn't need segmentation on this round unless we wrote something.
+        if (s.is_ok() && writer->needs_segmentation()) {
+            s = writer->advance_segment(false);
+
+            if (s.is_ok())
+                flushed_lsn.store(lsn);
+        }
+
+        // TODO: Clean up unneeded segments. We'll use the m_first_lsn member from BasicWriteAheadLog...
+
+        if (!s.is_ok())
+            return writer->handle_error(s);
+    }
+    return nullptr;
+}
+
+auto BackgroundWriter::handle_error(Status s) -> void*
+{
+    CALICO_EXPECT_FALSE(s.is_ok());
+    std::lock_guard guard {m_state.mu};
+    m_status = std::move(s);
+    m_state.events.clear();
+    m_state.thread->detach();
+    m_state.thread.reset();
+    (void)m_writer.detach(); // TODO: Store multiple status objects? Or just log additional errors?
+    return nullptr;
+}
+
+auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
+{
+    const auto is_first = !m_writer.is_attached();
+    auto s = Status::ok();
+
+    if (is_first) {
+        s = open_on_segment();
+        if (!s.is_ok()) return s;
+    }
+
+    s = m_writer.write(lsn, payload, [this](auto flushed_lsn) {
+        m_flushed_lsn->store(flushed_lsn);
+    });
+
+    if (!s.is_ok())
+        m_collection->abort_segment();
+
+    return s;
+}
+
+auto BackgroundWriter::emit_commit(SequenceId lsn) -> Status
+{
+    std::string scratch(1, '\x00');
+    const auto payload_size = encode_commit_payload(stob(scratch));
+    CALICO_EXPECT_EQ(payload_size, 1);
+
+    auto s = emit_payload(lsn, stob(scratch));
+    if (s.is_ok()) {
+        s = advance_segment(true);
+        if (s.is_ok()) m_flushed_lsn->store(lsn);
+    }
+    return s;
+}
+
+auto BackgroundWriter::advance_segment(bool has_commit) -> Status // TODO: Weird semantics...
+{
+    if (m_writer.is_attached()) {
+        CALICO_EXPECT_TRUE(m_collection->is_segment_started());
+        m_current_id.value++;
+        m_collection->finish_segment(has_commit);
+
+        auto s = m_writer.detach();
+        if (!s.is_ok()) return s;
+
+        return open_on_segment();
+    }
+    return Status::ok();
+}
+
+auto BasicWalWriter::start() -> Status
+{
+    return m_writer.startup();
+}
+
+auto BasicWalWriter::pause() -> Status
+{
+    return m_writer.standby();
+}
+
+auto BasicWalWriter::stop() -> Status
+{
+    return m_writer.teardown();
+}
+
+auto BasicWalWriter::log_full_image(SequenceId lsn, PageId page_id, BytesView image) -> void
+{
+    auto buffer = m_scratch.get();
+    const auto size = encode_full_image_payload(page_id, image, buffer.data());
+
+    m_writer.dispatch({
+        BackgroundWriter::EventType::LOG_FULL_IMAGE,
+        lsn,
+        buffer,
+        size,
+    });
+}
+
+auto BasicWalWriter::log_deltas(SequenceId lsn, PageId page_id, BytesView image, const std::vector<PageDelta> &deltas) -> void
+{
+    auto buffer = m_scratch.get();
+    const auto size = encode_deltas_payload(page_id, image, deltas, buffer.data());
+
+    m_writer.dispatch({
+        BackgroundWriter::EventType::LOG_DELTAS,
+        lsn,
+        buffer,
+        size,
+    });
+}
+
+auto BasicWalWriter::log_commit(SequenceId lsn) -> void
+{
+    m_writer.dispatch({
+        BackgroundWriter::EventType::LOG_COMMIT,
+        lsn,
+        std::nullopt,
+        0,
+    });
+}
+
 //
-//namespace cco {
-//
-//auto WALWriter::create(const WALParameters &param) -> Result<std::unique_ptr<IWALWriter>>
-//{
-//    CALICO_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
-//    CALICO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
-//    CALICO_EXPECT_TRUE(is_power_of_two(param.page_size));
-//
-//    auto writer = std::unique_ptr<WALWriter> {new (std::nothrow) WALWriter {param}};
-//    if (!writer) {
-//        ThreePartMessage message;
-//        message.set_primary("cannot open WAL writer");
-//        message.set_detail("out of memory");
-//        return Err {message.system_error()};
-//    }
-//    return writer;
-//}
-//
-//WALWriter::WALWriter(const WALParameters &param)
-//    : m_tail(param.page_size, '\x00')
-//{}
-//
-//auto WALWriter::is_open() -> bool
-//{
-//    return m_file && m_file->is_open();
-//}
-//
-//auto WALWriter::needs_segmentation() -> bool
-//{
-//    return m_position.block_id > 32; // TODO: Should be an option.
-//}
-//
-//auto WALWriter::open(std::unique_ptr<IFile> file) -> Result<void>
-//{
-//    CALICO_EXPECT_FALSE(is_open());
-//    m_file = std::move(file);
-//    m_position = Position {};
-//    return {};
-//}
-//
-//auto WALWriter::close() -> Result<void>
-//{
-//    return m_file->close();
-//}
-//
-//auto WALWriter::append(WALRecord record) -> Result<Position>
-//{
-////printf("appending LSN %u to %s\n", record.lsn().value, m_file->name().c_str());
-//
-//    const auto next_lsn {record.lsn()};
-//    CALICO_EXPECT_EQ(next_lsn.value, m_last_lsn.value + 1);
-//
-//    std::optional<Position> first;
-//
+//    // Clean up obsolete segments.
+//    const auto pager_lsn = m_pager_lsn->load();
 //    for (; ; ) {
-//        const auto remaining = m_tail.size() - m_position.offset;
-//        const auto can_fit_some = remaining >= WALRecord::MINIMUM_SIZE;
-//        const auto can_fit_all = remaining >= record.size();
+//        const auto front = m_segments->front();
+//        const auto is_flushed = pager_lsn >= front.first_lsn;
+//        const auto is_previous = front.id < m_positions->front().id;
+//        if (!is_flushed || !is_previous)
+//            break;
 //
-//        if (can_fit_some) {
-//            WALRecord rest;
-//
-//            if (!can_fit_all)
-//                rest = record.split(remaining - WALRecord::HEADER_SIZE);
-//
-//            if (!first.has_value())
-//                first = m_position;
-//
-//            auto destination = stob(m_tail).range(m_position.offset, record.size());
-//            record.write(destination);
-//
-//            m_position.offset += record.size();
-//
-//            if (can_fit_all) {
-//                break;
-//            } else {
-//                record = rest;
-//            }
-//            continue;
-//        }
-//        CALICO_TRY(flush());
+//        s = m_store->remove_file(prefix + m_segments->front().id.to_name());
+//        if (!s.is_ok()) return s;
+//        m_segments->erase(cbegin(*m_segments));
 //    }
-//    CALICO_EXPECT_TRUE(first.has_value());
-//    m_last_lsn = next_lsn;
-//    return *first;
-//}
-//
-//auto WALWriter::truncate() -> Result<void>
-//{
-//    return m_file->resize(0)
-//        .and_then([this]() -> Result<void> {
-//            return m_file->sync();
-//        })
-//        .and_then([this]() -> Result<void> {
-//            m_position = {};
-//            mem_clear(stob(m_tail));
-//            return {};
-//        });
-//}
-//
-//auto WALWriter::flush() -> Result<void>
-//{
-//    if (m_position.offset) {
-//        // The unused part of the block should be zero-filled.
-//        auto block = stob(m_tail);
-//        mem_clear(block.range(m_position.offset));
-//
-//        CALICO_TRY(m_file->write(block));
-//        CALICO_TRY(m_file->sync());
-//
-//        m_position.block_id++;
-//        m_position.offset = 0;
-//        m_flushed_lsn = m_last_lsn;
-//    }
-//    return {};
-//}
-//
-//} // namespace cco
+
+} // namespace calico

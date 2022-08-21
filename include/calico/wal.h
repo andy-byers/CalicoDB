@@ -2,6 +2,7 @@
 #define CALICO_WAL_H
 
 #include "bytes.h"
+#include "status.h"
 
 namespace calico {
 
@@ -58,6 +59,17 @@ public:
     }
 
     /**
+     * Flag indicating if the WAL is being written to.
+     *
+     * This method provides a way to determine if any background writer/cleanup threads are running. If the WAL implementation does these things synchronously,
+     * it should emulate this behavior so that the pager component knows how to behave. For example, if start_writer() returned Status::ok(), this method should
+     * return true until stop_writer() is called and returns an OK status.
+     *
+     * @return True if the WAL is being written to, false otherwise.
+     */
+    virtual auto is_writing() const -> bool = 0;
+
+    /**
      * Get the LSN of the last WAL record written to disk.
      *
      * Since implementations of this interface are allowed to write in the background, the value returned by this method need not be exact. It must, however,
@@ -79,7 +91,7 @@ public:
     /**
      * Log a record containing the entire contents of a database page, before it was made dirty by a write.
      *
-     * Note that because the buffer pool implementation is allowed to "steal" frames (sometimes causing a dirty page to be written to disk during a transaction
+     * Note that because the block pool implementation is allowed to "steal" frames (sometimes causing a dirty page to be written to disk during a transaction
      * and its frame reused), this method may be called multiple times for a given page during a given transaction. Implementations are allowed ignore subsequent
      * calls on the same page until commit() is called.
      *
@@ -91,7 +103,7 @@ public:
 
     /**
      *
-     * @param page_id Page ID of the page that these deltas are for.
+     * @param page_id Page ID of the page that these collect_deltas are for.
      * @param image Contents of the page after the modifications.
      * @param deltas A collection of ranges representing unique regions of the page that have been updated.
      * @return A status indicating success or failure.
@@ -112,7 +124,7 @@ public:
      *
      * @return A status indicating success or failure.
      */
-    virtual auto stop() -> Status = 0;
+    virtual auto stop_writer() -> Status = 0;
 
     /**
      * Enter the running state.
@@ -121,7 +133,7 @@ public:
      *
      * @return A status indicating success or failure.
      */
-    virtual auto start() -> Status = 0;
+    virtual auto start_writer() -> Status = 0;
 
     /**
      * Roll the entire WAL.
@@ -147,6 +159,16 @@ public:
      * @return A status indicating success or failure.
      */
     virtual auto undo_last(const UndoCallback &callback) -> Status = 0;
+
+    /**
+     * Indicate the point to which the log can be cleared.
+     *
+     * We only need to keep WAL records until their corresponding database pages have been written to disk. Afterwards, they are considered obsolete and we are free
+     * to delete them.
+     *
+     * @param pager_lsn Largest page LSN written to disk by the pager component.
+     */
+    virtual auto allow_cleanup(std::uint64_t pager_lsn) -> void = 0;
 
     virtual auto save_state(FileHeader &) -> void = 0;
 

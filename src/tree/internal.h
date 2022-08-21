@@ -75,7 +75,7 @@ private:
     [[nodiscard]] auto maybe_fix_child_parent_connections(Node &) -> Result<void>;
 
     Size m_maximum_key_size {};
-    RollingScratchManager m_scratch;
+    MonotonicScratchManager<16> m_scratch;
     NodePool *m_pool {};
     Size m_cell_count {};
 };

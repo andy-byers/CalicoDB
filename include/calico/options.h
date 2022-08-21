@@ -25,7 +25,7 @@ struct Options {
     using LogLevel = spdlog::level::level_enum;
 
     Size page_size {DEFAULT_PAGE_SIZE}; ///< Size of a database page in bytes.
-    Size frame_count {DEFAULT_FRAME_COUNT}; ///< Number of frames to allow the buffer pool cache.
+    Size frame_count {DEFAULT_FRAME_COUNT}; ///< Number of frames to allow the block pool cache.
     LogLevel log_level {DEFAULT_LOG_LEVEL}; ///< The max level of log message that will be written.
     Storage *store {};
     WriteAheadLog *wal {};

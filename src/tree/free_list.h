@@ -64,7 +64,7 @@ public:
     }
 
 private:
-    Pager *m_pager;  ///< Reference to the underlying buffer pool.
+    Pager *m_pager;  ///< Reference to the underlying block pool.
     PageId m_head;     ///< Page ID of the page at the head of the free list.
 };
 

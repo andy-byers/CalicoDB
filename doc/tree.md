@@ -114,11 +114,11 @@ WAL records are used to store information about updates made to database pages.
 See ***3*** for more information about WAL records.
 We use a similar scheme including multiple record types.
 Basically, multiple WAL records can correspond to a single page update.
-This is because WAL records can be split up into multiple pages, depending on their size and the amount of memory remaining in the WAL writer's internal buffer.
+This is because WAL records can be split up into multiple pages, depending on their size and the amount of memory remaining in the WAL writer's internal block.
 
 ### WAL Writer
-The WAL writer fills up an internal buffer with WAL records.
-When it runs out of space, it flushes the buffer to the WAL file.
+The WAL writer fills up an internal block with WAL records.
+When it runs out of space, it flushes the block to the WAL file.
 At that point, all database pages with updates corresponding to the flushed records can be safely written to the `data` file.
 To this end, we always keep the SequenceId of the most-recently-flushed record in memory.
 Also note that the WAL is truncated after each commit, including when the database instance is closed.
@@ -167,7 +167,7 @@ First, we read the WAL starting from the beginning, applying updates to stale pa
 If we encounter a commit record at the end of the WAL, then recovery is complete.
 Otherwise, we do not have enough information to complete the transaction and must abort.
 Here we read the WAL in reverse, reverting pages to their state before the transaction started.
-In either case, we truncate the WAL and advance_block the buffer pool on completion.
+In either case, we truncate the WAL and advance_block the block pool on completion.
 
 # Optimizations?
 + We could come up with a physiological logging scheme to try and reduce the amount of data we write to the WAL

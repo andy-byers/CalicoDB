@@ -160,6 +160,7 @@ public:
         });
         ON_CALL(*this, rename_file).WillByDefault([this](const std::string &old_name, const std::string &new_name) {
             const auto maybe_rename_mock = [this](const auto &old_name, const auto &new_name) {
+                std::lock_guard lock {m_mutex};
                 auto node = m_mocks.extract(old_name);
                 if (!node.empty()) {
                     node.key() = new_name;
@@ -186,6 +187,7 @@ public:
         ON_CALL(*this, remove_file).WillByDefault([this](const std::string &name) {
             auto s = m_real->remove_file(name);
             if (s.is_ok()) {
+                std::lock_guard lock {m_mutex};
                 m_mocks.erase(get_blob_descriptor<RandomReader>(name));
                 m_mocks.erase(get_blob_descriptor<RandomEditor>(name));
                 m_mocks.erase(get_blob_descriptor<AppendWriter>(name));
@@ -223,6 +225,7 @@ public:
     auto get_mock_random_reader(const std::string &name) -> MockRandomReader*
     {
         const auto descriptor = get_blob_descriptor<RandomReader>(name);
+        std::lock_guard lock {m_mutex};
         auto itr = m_mocks.find(descriptor);
         return itr != cend(m_mocks) ? static_cast<MockRandomReader *>(itr->second) : nullptr;
     }
@@ -231,6 +234,7 @@ public:
     auto get_mock_random_editor(const std::string &name) -> MockRandomEditor*
     {
         const auto descriptor = get_blob_descriptor<RandomEditor>(name);
+        std::lock_guard lock {m_mutex};
         auto itr = m_mocks.find(descriptor);
         return itr != cend(m_mocks) ? static_cast<MockRandomEditor *>(itr->second) : nullptr;
     }
@@ -239,6 +243,7 @@ public:
     auto get_mock_append_writer(const std::string &name) -> MockAppendWriter*
     {
         const auto descriptor = get_blob_descriptor<AppendWriter>(name);
+        std::lock_guard lock {m_mutex};
         auto itr = m_mocks.find(descriptor);
         return itr != cend(m_mocks) ? static_cast<MockAppendWriter *>(itr->second) : nullptr;
     }
@@ -247,6 +252,7 @@ private:
     template<class Base, class Mock>
     auto register_mock(const std::string &name, Base **out) -> void
     {
+        std::lock_guard lock {m_mutex};
         const auto descriptor = get_blob_descriptor<Base>(name);
         CALICO_EXPECT_EQ(m_mocks.find(descriptor), cend(m_mocks));
 
@@ -263,7 +269,7 @@ private:
         } else {
             CALICO_EXPECT_TRUE(false && "Unexpected base class for mock");
         }
-        CALICO_EXPECT_OK(s);
+        CALICO_EXPECT_TRUE(s.is_ok());
 
         // The mock blob reader takes ownership of the real object.
         auto *mock = new Mock {base};
@@ -275,10 +281,12 @@ private:
     template<class Base, class Mock>
     auto lookup_mock(const std::string &name) -> Mock*
     {
+        std::lock_guard lock {m_mutex};
         auto itr = m_mocks.find(get_blob_descriptor<RandomReader>(name));
         return itr != cend(m_mocks) ? itr->second : nullptr;
     }
 
+    mutable std::mutex m_mutex;
     std::unordered_map<std::string, void*> m_mocks;
     std::unique_ptr<HeapStorage> m_real;
 };

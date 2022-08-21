@@ -10,8 +10,6 @@
 
 namespace calico {
 
-class RollingScratchManager;
-
 class Scratch {
 public:
     ~Scratch() = default;
@@ -39,32 +37,32 @@ private:
     Bytes m_data;
 };
 
-class RollingScratchManager final {
+template<Size N>
+class MonotonicScratchManager final {
 public:
-    static constexpr Size MAXIMUM_SCRATCHES {16};
+    static constexpr auto ScratchCount = N;
 
-    explicit RollingScratchManager(Size scratch_size)
-        : m_scratches(MAXIMUM_SCRATCHES),
+    explicit MonotonicScratchManager(Size scratch_size)
+        : m_scratch(scratch_size * ScratchCount, '\x00'),
           m_scratch_size {scratch_size}
+    {}
+
+    [[nodiscard]] auto get() -> Scratch
     {
-        for (auto &scratch: m_scratches)
-            scratch.resize(scratch_size);
+        auto data = stob(m_scratch).range(m_counter++ * m_scratch_size, m_scratch_size);
+        m_counter %= ScratchCount;
+        return Scratch {data};
     }
 
-    [[nodiscard]] auto get() -> Scratch;
-    auto reset() -> void;
-
 private:
-    std::vector<std::string> m_scratches;
-    std::list<std::string> m_emergency;
+    std::string m_scratch;
     Size m_scratch_size;
     Size m_counter {};
 };
 
-class ManualScratch: public Scratch {
+class NamedScratch : public Scratch {
 public:
-    
-    ManualScratch(Size id, Bytes data)
+    NamedScratch(Size id, Bytes data)
         : Scratch {data},
           m_id {id}
     {}
@@ -78,14 +76,13 @@ private:
     Size m_id {};
 };
 
-class ManualScratchManager final {
+class NamedScratchManager final {
 public:
-    
-    explicit ManualScratchManager(Size scratch_size)
+    explicit NamedScratchManager(Size scratch_size)
         : m_scratch_size {scratch_size} {}
 
-    [[nodiscard]] auto get() -> ManualScratch;
-    auto put(ManualScratch) -> void;
+    [[nodiscard]] auto get() -> NamedScratch;
+    auto put(NamedScratch) -> void;
 
 private:
     std::unordered_map<Size, std::string> m_occupied;

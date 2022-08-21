@@ -4,7 +4,7 @@ Available options include:
 
 + `page_size`: The size of a database page in bytes. 
 Must be a power of two between 256 and 32768, inclusive.
-+ `frame_count`: The number of page-sized frames to allow the buffer pool page cache.
++ `frame_count`: The number of page-sized frames to allow the block pool page cache.
 + `log_level`: Log level enumeration passed to `spdlog`. 
 Determines the types of messages that get written to the log file.
 + `store`: See [store](#store).
@@ -27,6 +27,6 @@ The second one, called HeapStorage, stores its data on the heap.
 
 ### Caveats
 Note that once a database has been created with a given set of options, that database must always use those same options.
-Exceptions to this rule are the buffer pool cache size and the log level.
+Exceptions to this rule are the block pool cache size and the log level.
 Also, the database does not take ownership of the provided customization objects.
 Rather, they are owned by the database creator and must be live for as long as the database is open.

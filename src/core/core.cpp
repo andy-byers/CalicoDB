@@ -11,19 +11,10 @@
 #include "utils/layout.h"
 #include "utils/logging.h"
 #include "wal/basic_wal.h"
+#include "wal/disabled_wal.h"
 #include <filesystem>
 
 namespace calico {
-
-[[nodiscard]]
-static auto empty_transaction_error(const std::string &primary)
-{
-    ThreePartMessage message;
-    message.set_primary(primary);
-    message.set_detail("transaction is empty");
-    message.set_hint("update the database and try again");
-    return message.logic_error();
-}
 
 [[nodiscard]]
 static auto not_supported_error(const std::string &primary)
@@ -73,13 +64,14 @@ Core::Core(const std::string &path, const Options &options)
       m_options {options},
       m_sink {create_sink(path, options.log_level)}, // TODO: Don't create a logger if we don't have anything on disk, i.e. the store keeps everything in memory...
       m_logger {create_logger(m_sink, "core")}
-{}
+{
+    m_logger->info("constructing Core object");
+}
 
 auto Core::open() -> Status
 {
     static constexpr auto MSG = "cannot open database";
     initialize_log(*m_logger, m_path);
-    m_logger->trace("opening");
 
     auto *store = m_options.store;
     if (!store) {
@@ -95,9 +87,14 @@ auto Core::open() -> Status
 
     auto *wal = m_options.wal;
     if (!wal) {
-        wal = new DisabledWriteAheadLog;
-//        auto s = BasicWriteAheadLog::open(*store, &wal);
-//        if (!s.is_ok()) return forward_status(s, MSG);
+//        wal = new DisabledWriteAheadLog;
+        auto s = BasicWriteAheadLog::open({
+            m_path, // TODO: Could specify a different directory for WAL segments.
+            m_store,
+            m_sink,
+            state.page_size,
+        }, &wal);
+        if (!s.is_ok()) return forward_status(s, MSG);
         m_owns_wal = true;
     }
     m_wal = wal;
@@ -120,45 +117,39 @@ auto Core::open() -> Status
 
     auto s = Status::ok();
     if (is_new) {
-        // Write out the root page containing the newly-populated file header.
-        auto root = m_pager->acquire(PageId::root(), true);
+        // The first call to root() allocates the root page.
+        auto root = m_tree->root(true);
         if (!root.has_value()) return forward_status(root.error(), MSG);
         CALICO_EXPECT_EQ(m_pager->page_count(), 1);
-        state.page_count = 1; // Tree constructor should allocate the root page if it doesn't already exist.
+        state.page_count = 1;
         state.header_crc = compute_header_crc(state);
-        write_header(*root, state);
-        s = m_pager->release(std::move(*root));
+        write_header(root->page(), state);
+        s = m_pager->release(root->take());
         if (!s.is_ok()) return forward_status(s, MSG);
 
+        // This is safe right now because the WAL has not been started. If successful, we will have the root page set up and saved
+        // to the database file.
         s = m_pager->flush();
 
-    } else {
-
-        // This should be a no-op if the WAL is empty.
-        if (m_wal->is_enabled()) {
-            s = recover();
-            if (!s.is_ok()) return forward_status(s, MSG);
-            s = load_state();
-        }
+    } else if (m_wal->is_enabled()) {
+        // This should be a no-op if the database closed normally last time.
+        s = recover();
     }
     if (s.is_ok())
-        s = m_wal->start();
+        s = m_wal->start_writer();
 
-    m_is_open = s.is_ok();
     return forward_status(s, MSG);
 }
 
 Core::~Core()
 {
-    // The specific error has already been logged in close().
-    if (!close().is_ok())
-        m_logger->error("failed to close in destructor");
-
-    if (m_owns_store)
-        delete m_store;
+    m_logger->info("destroying Core object");
 
     if (m_owns_wal)
         delete m_wal;
+
+    if (m_owns_store)
+        delete m_store;
 }
 
 auto Core::forward_status(Status s, const std::string &message) -> Status
@@ -224,30 +215,37 @@ auto Core::erase(Cursor cursor) -> Status
     return s;
 }
 
-// TODO: Should we block until the commit record is actually on disk?
 auto Core::commit() -> Status
 {
-    m_logger->trace("committing");
+    m_logger->info("received commit request");
     static constexpr auto MSG = "could not commit";
-    if (!m_has_update) return empty_transaction_error(MSG);
 
+    // Committing an empty transaction is a NOOP.
+    if (!m_has_update) return Status::ok();
+
+    // Write database state to the root page file header.
     auto s = save_state();
     if (!s.is_ok()) return forward_status(s, MSG);
 
+    // Write a commit record to the WAL.
     s = m_wal->log_commit();
     if (!s.is_ok()) return forward_status(s, MSG);
-    m_logger->trace("commit succeeded");
+    m_logger->info("commit succeeded");
     return s;
 }
 
 auto Core::abort() -> Status
 {
-    m_logger->trace("committing");
+    m_logger->info("received abort request");
     static constexpr auto MSG = "could not abort";
     if (!m_wal->is_enabled()) return not_supported_error(MSG);
-    if (!m_has_update) return empty_transaction_error(MSG);
 
-    auto s = m_wal->stop();
+    // Aborting an empty transaction is a NOOP.
+    if (!m_has_update) return Status::ok();
+
+    // Stop the background writer thread.
+    auto s = m_wal->stop_writer();
+    if (!s.is_ok()) return forward_status(s, MSG);
 
     // This should give us the full images of each updated page belonging to the current transaction, before any changes were made,
     // in reverse order.
@@ -261,23 +259,32 @@ auto Core::abort() -> Status
     });
     if (!s.is_ok()) return forward_status(s, MSG);
 
+    s = m_pager->flush();
+    if (!s.is_ok()) return forward_status(s, MSG);
+
+    // Load database state from the root page file header.
     s = load_state();
     if (!s.is_ok()) return forward_status(s, MSG);
 
-    m_logger->trace("abort succeeded");
-    return m_wal->start();
+    m_logger->info("abort succeeded");
+    return m_wal->start_writer();
 }
 
 auto Core::close() -> Status
 {
-    // Failed in open().
-    if (!m_is_open) return Status::logic_error("not open");
-
-    auto s = commit();
-    if (!s.is_ok()) s = forward_status(s, "cannot commit before close");
-
+    auto s = Status::ok();
+    if (m_has_update) {
+        s = commit();
+        if (!s.is_ok()) s = forward_status(s, "cannot commit before stop");
+    }
+    if (m_wal->is_writing()) {
+        s = m_wal->stop_writer();
+        if (!s.is_ok()) s = forward_status(s, "cannot stop WAL");
+    }
+    // We already waited on the WAL to be done writing so this should happen immediately.
     s = m_pager->flush();
-    if (!s.is_ok() && !s.is_logic_error()) s = forward_status(s, "cannot commit before close");
+
+    if (!s.is_ok()) s = forward_status(s, "cannot flush pages before stop");
 
     return s;
 }
@@ -314,12 +321,13 @@ auto Core::recover() -> Status
     }
     s = load_state();
     if (!s.is_ok()) return forward_status(s, MSG);
-    return s;
+    s = m_pager->flush();
+    return forward_status(s, MSG);
 }
 
 auto Core::save_state() -> Status
 {
-    m_logger->trace("saving file header");
+    m_logger->info("saving state to file header");
 
     auto root = m_pager->acquire(PageId::root(), true);
     if (!root.has_value()) return root.error();
@@ -332,14 +340,12 @@ auto Core::save_state() -> Status
     state.header_crc = compute_header_crc(state);
     write_header(*root, state);
 
-fmt::print("save crc = {}\n", state.header_crc);
-
     return m_pager->release(std::move(*root));
 }
 
 auto Core::load_state() -> Status
 {
-    m_logger->trace("loading file header");
+    m_logger->info("loading state from file header");
 
     auto root = m_pager->acquire(PageId::root(), true);
     if (!root.has_value()) return root.error();
@@ -352,17 +358,11 @@ auto Core::load_state() -> Status
         message.set_hint("header CRC is {} but should be {}", state.header_crc, compute_header_crc(state));
         return message.corruption();
     }
-fmt::print("load crc = {}\n", state.header_crc);
 
-    load_state(state);
-    return m_pager->release(std::move(*root));
-}
-
-auto Core::load_state(const FileHeader &state) -> void
-{
     m_pager->load_state(state);
     m_tree->load_state(state);
     m_wal->load_state(state);
+    return m_pager->release(std::move(*root));
 }
 
 auto setup(const std::string &path, Storage &store, const Options &options, spdlog::logger &logger) -> Result<InitialState>
@@ -404,7 +404,7 @@ auto setup(const std::string &path, Storage &store, const Options &options, spdl
         return Err {message.invalid_argument()};
     }
 
-    {
+    {   // TODO: Already getting created by the log sink...
         auto s = store.create_directory(path);
         if (!s.is_ok() && !s.is_logic_error()) {
             logger.error("cannot create database directory");
@@ -457,7 +457,7 @@ auto setup(const std::string &path, Storage &store, const Options &options, spdl
         header.page_size = encode_page_size(options.page_size);
         header.flushed_lsn = SequenceId::base().value;
         header.header_crc = compute_header_crc(header);
-fmt::print("init crc = {}\n", header.header_crc);
+
         auto root = btos(bytes);
         root.resize(options.page_size);
         s = editor->write(stob(root), 0);
@@ -483,7 +483,7 @@ fmt::print("init crc = {}\n", header.header_crc);
     return InitialState {header, !exists};
 }
 
-} // namespace cco
+} // namespace calico
 
 auto operator<(const calico::Record &lhs, const calico::Record &rhs) -> bool
 {

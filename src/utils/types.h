@@ -149,6 +149,19 @@ struct SequenceId
         return value == base().value;
     }
 
+    auto operator++() -> SequenceId&
+    {
+        value++;
+        return *this;
+    }
+
+    auto operator++(int) -> SequenceId
+    {
+        auto temp = *this;
+        ++(*this);
+        return temp;
+    }
+
     std::uint64_t value {};
 };
 

@@ -19,6 +19,11 @@ auto NodePool::page_size() const -> Size
     return m_scratch.size();
 }
 
+auto NodePool::page_count() const -> Size
+{
+    return m_pager->page_count();
+}
+
 auto NodePool::allocate(PageType type) -> Result<Node>
 {
     auto page = m_free_list.pop()

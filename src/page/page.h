@@ -43,7 +43,7 @@ public:
     [[nodiscard]] auto view(Size, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
     [[nodiscard]] auto lsn() const -> SequenceId;
-    [[nodiscard]] auto deltas() const -> std::vector<PageDelta>;
+    [[nodiscard]] auto collect_deltas() -> std::vector<PageDelta>;
     auto set_type(PageType) -> void;
     auto set_lsn(SequenceId) -> void;
     auto read(Bytes, Size) const -> void;

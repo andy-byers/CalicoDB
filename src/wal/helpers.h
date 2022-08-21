@@ -1,110 +1,215 @@
 #ifndef CALICO_WAL_HELPERS_H
 #define CALICO_WAL_HELPERS_H
 
+#include <map>
 #include <mutex>
-#include "basic_wal.h"
+#include "record.h"
 #include "calico/store.h"
+#include "utils/logging.h"
 #include "utils/queue.h"
 #include "utils/types.h"
 #include "utils/scratch.h"
 
 namespace calico {
 
-constexpr auto WAL_PREFIX = "wal";
+class WalBuffer final {
+public:
+    explicit WalBuffer(Size size)
+        : m_buffer(size, '\x00')
+    {
+        CALICO_EXPECT_TRUE(is_power_of_two(size));
+    }
 
-struct SegmentId
-    : public NullableId<SegmentId>,
-      public EqualityComparableTraits<SegmentId>,
-      public OrderableTraits<SegmentId>
-{
-    static constexpr auto NAME_FORMAT = "{}-{:06d}";
-    static constexpr Size DIGITS_SIZE {6};
-    using Hash = IndexHash<SegmentId>;
-
-    constexpr SegmentId() noexcept = default;
-
-    template<class U>
-    constexpr explicit SegmentId(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
+    ~WalBuffer() = default;
 
     [[nodiscard]]
-    static auto from_name(BytesView name) -> SegmentId
+    auto block_number() const -> Size
     {
-        if (name.size() < DIGITS_SIZE)
-            return null();
-
-        auto digits = name.advance(name.size() - DIGITS_SIZE);
-
-        // Don't call std::stoul() if it's going to throw an exception.
-        const auto is_valid = std::all_of(digits.data(), digits.data() + digits.size(), [](auto c) {return std::isdigit(c);});
-
-        if (!is_valid)
-            return null();
-
-        return SegmentId {std::stoull(btos(digits))};
+        return m_number;
     }
 
     [[nodiscard]]
-    auto to_name() const -> std::string
+    auto block_offset() const -> Size
     {
-        return fmt::format(NAME_FORMAT, WAL_PREFIX, value);
+        return m_offset;
     }
 
-    constexpr explicit operator std::uint64_t() const
+    [[nodiscard]]
+    auto remaining() -> Bytes
     {
-        return value;
+        return stob(m_buffer).advance(block_offset());
     }
 
-    std::uint64_t value {};
+    [[nodiscard]]
+    auto remaining() const -> BytesView
+    {
+        return stob(m_buffer).advance(block_offset());
+    }
+
+    [[nodiscard]]
+    auto block() -> Bytes
+    {
+        return stob(m_buffer);
+    }
+
+    [[nodiscard]]
+    auto buffer() const -> BytesView
+    {
+        return stob(m_buffer);
+    }
+
+    auto advance_cursor(Size record_size) -> void
+    {
+        CALICO_EXPECT_LE(record_size, m_buffer.size() - m_offset);
+        m_offset += record_size;
+    }
+
+    template<class Advance>
+    [[nodiscard]]
+    auto advance_block(const Advance &advance) -> Status
+    {
+        auto s = advance();
+        if (s.is_ok()) {
+            m_offset = 0;
+            m_number++;
+        }
+        return s;
+    }
+
+    auto reset() -> void
+    {
+        m_number = 0;
+        m_offset = 0;
+    }
+
+protected:
+    std::string m_buffer;
+    Size m_number {};
+    Size m_offset {};
 };
 
-struct BlockNumber: public EqualityComparableTraits<SegmentId> {
-    using Hash = IndexHash<BlockNumber>;
-
-    constexpr BlockNumber() noexcept = default;
-
-    template<class U>
-    constexpr explicit BlockNumber(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
-
-    constexpr explicit operator std::uint64_t() const
-    {
-        return value;
-    }
-
-    std::uint64_t value {};
+struct WalMetadata {
+    SequenceId first_lsn;
+    bool has_commit {};
 };
 
-struct BlockOffset: public EqualityComparableTraits<SegmentId> {
-    using Hash = IndexHash<BlockNumber>;
+class WalCollection final {
+public:
+    WalCollection() = default;
+    ~WalCollection() = default;
 
-    constexpr BlockOffset() noexcept = default;
-
-    template<class U>
-    constexpr explicit BlockOffset(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
-
-    constexpr explicit operator std::uint64_t() const
+    [[nodiscard]]
+    auto is_segment_started() const -> bool
     {
-        return value;
+        return !m_id.is_null();
     }
 
-    std::uint64_t value {};
+    auto start_segment(SegmentId id, SequenceId first_lsn) -> void
+    {
+        CALICO_EXPECT_FALSE(is_segment_started());
+        m_id = id;
+        m_meta.first_lsn = first_lsn;
+        m_meta.has_commit = false;
+    }
+
+    auto abort_segment() -> void
+    {
+        CALICO_EXPECT_TRUE(is_segment_started());
+        m_id = SegmentId::null();
+        m_meta.first_lsn = SequenceId::null();
+        m_meta.has_commit = false;
+    }
+
+    auto finish_segment(bool has_commit) -> void
+    {
+        CALICO_EXPECT_TRUE(is_segment_started());
+        m_meta.has_commit = has_commit;
+        m_segments.emplace(m_id, m_meta);
+        abort_segment();
+    }
+
+    template<class Action>
+    [[nodiscard]]
+    auto remove_segments_from_left(SegmentId id, const Action &action) -> Status
+    {
+        // Removes segments from [<begin>, id).
+        while (!m_segments.empty()) {
+            const auto itr = cbegin(m_segments);
+            if (id == itr->first) return Status::ok();
+            auto s = action(itr->first, itr->second);
+            if (!s.is_ok()) return s;
+            m_segments.erase(itr);
+        }
+        return Status::ok();
+    }
+
+    template<class Action>
+    [[nodiscard]]
+    auto remove_segments_from_right(SegmentId id, const Action &action) -> Status
+    {
+        // Removes segments from [id, <end>) in reverse.
+        while (!m_segments.empty()) {
+            const auto itr = prev(cend(m_segments));
+            if (id > itr->first) return Status::ok();
+            auto s = action(itr->first, itr->second);
+            if (!s.is_ok()) return s;
+            m_segments.erase(itr);
+        }
+        return Status::ok();
+    }
+
+    [[nodiscard]]
+    auto most_recent_id() const -> SegmentId
+    {
+        if (m_segments.empty())
+            return SegmentId::null();
+        return crbegin(m_segments)->first;
+    }
+
+    [[nodiscard]]
+    auto map() const -> const std::map<SegmentId, WalMetadata>&
+    {
+        return m_segments;
+    }
+
+private:
+    std::map<SegmentId, WalMetadata> m_segments;
+    std::vector<RecordPosition> m_uncommitted;
+
+    SegmentId m_id;
+    WalMetadata m_meta;
 };
 
-struct LogPosition {
-    BlockNumber number;
-    BlockOffset offset;
+class SegmentGuard {
+public:
+    SegmentGuard(WalCollection *source, SegmentId id, SequenceId lsn)
+        : m_source {source}
+    {
+        m_source->start_segment(id, lsn);
+    }
+
+    ~SegmentGuard()
+    {
+        if (m_source.is_valid())
+            m_source->abort_segment();
+    }
+
+    auto finish(bool has_commit) -> void
+    {
+        CALICO_EXPECT_TRUE((m_source.is_valid()));
+        m_source->finish_segment(has_commit);
+        m_source.reset();
+    }
+
+private:
+    UniqueNullable<WalCollection*> m_source;
 };
 
 class LogHelper {
 public:
     using Action = std::function<Status()>;
 
-    explicit LogHelper(Size block_size, Action action)
+    LogHelper(Size block_size, Action action)
         : m_block(block_size, '\x00'),
           m_action {std::move(action)}
     {}
@@ -135,16 +240,9 @@ public:
         return stob(m_block);
     }
 
-    auto reset() -> void
-    {
-        m_position.number.value = 0;
-        m_position.offset.value = 0;
-    }
-
     auto advance_cursor(Size record_size) -> void
     {
-        const auto bytes_remaining = m_block.size() - m_position.offset.value;
-        CALICO_EXPECT_LE(record_size, bytes_remaining);
+        CALICO_EXPECT_LE(record_size, m_block.size() - m_position.offset.value);
         m_position.offset.value += record_size;
     }
 
@@ -159,18 +257,59 @@ public:
         return s;
     }
 
-private:
+protected:
+    auto reset() -> void
+    {
+        m_position = LogPosition {};
+    }
+
     std::string m_block;
     Action m_action;
     LogPosition m_position;
 };
 
+class WalFilter {
+public:
+    using Predicate = std::function<bool(WalPayloadType)>;
+
+    explicit WalFilter(Predicate predicate)
+        : m_predicate {std::move(predicate)}
+    {}
+
+    [[nodiscard]]
+    auto should_admit(BytesView payload) const -> bool
+    {
+        return m_predicate(WalPayloadType {payload[0]});
+    }
+
+private:
+    Predicate m_predicate;
+};
+
+[[nodiscard]]
+inline auto read_exact_or_hit_eof(RandomReader &file, Bytes out, Size n) -> Status
+{
+    auto temp = out;
+    auto s = file.read(temp, n * temp.size());
+    if (!s.is_ok()) return s;
+
+    if (temp.is_empty()) {
+        return Status::logic_error("EOF");
+    } else if (temp.size() != out.size()) {
+        ThreePartMessage message;
+        message.set_primary("could not read from log");
+        message.set_detail("incomplete read");
+        return message.system_error();
+    }
+    return s;
+}
+
 class SequentialLogReader final: public LogHelper {
 public:
     explicit SequentialLogReader(Size block_size)
         : LogHelper {block_size, [this] {
-              const auto offset = (position().number.value+1) * block().size();
-              return read_exact(*m_file, block(), offset);
+              const auto offset = position().number.value + 1;
+              return read_exact_or_hit_eof(*m_file, block(), offset);
           }}
     {}
 
@@ -183,11 +322,18 @@ public:
     }
 
     [[nodiscard]]
+    auto reset_position() -> Status
+    {
+        reset();
+        return read_exact_or_hit_eof(*m_file, block(), 0);
+    }
+
+    [[nodiscard]]
     auto attach(RandomReader *file) -> Status
     {
+        CALICO_EXPECT_NE(file, nullptr);
         m_file.reset(file);
-        reset();
-        return read_exact(*file, remaining(), 0);
+        return reset_position();
     }
 
     [[nodiscard]]
@@ -230,17 +376,19 @@ public:
         return m_file.release();
     }
 
-    auto read(LogPosition position, Bytes &out) -> Status
+    auto present(LogPosition position, Bytes &out) -> Status
     {
         auto tail = stob(m_tail);
         if (!m_has_block || position.number != m_block_num) {
-            auto s = read_exact(*m_file, tail, position.number.value * m_tail.size());
-
-            // If s is not OK, the tail buffer has an indeterminate state. We'll have to reread it next time.
+            auto s = read_exact_or_hit_eof(*m_file, tail, position.number.value);
             if (!s.is_ok()) {
-                m_has_block = false;
+                // Keep the last block if we hit EOF. No sense in throwing it away I suppose.
+                if (!s.is_logic_error())
+                    m_has_block = false;
                 return s;
             }
+            m_block_num = position.number;
+            m_has_block = true;
         }
         out = tail.advance(position.offset.value);
         return Status::ok();
@@ -255,16 +403,26 @@ private:
 
 class AppendLogWriter final: public LogHelper {
 public:
-
-    explicit AppendLogWriter(Size block_size)
+    explicit AppendLogWriter(Size block_size, Size existing_block_count = 0)
         : LogHelper {block_size, [this] {
               // Clear unused bytes at the end of the tail buffer.
               mem_clear(remaining());
-              return m_file->write(block());
-          }}
-    {}
+              auto s = m_file->write(block());
+              m_block_count += s.is_ok();
+              return s;
+          }},
+          m_block_count {existing_block_count}
+    {
+        m_position.number.value = existing_block_count;
+    }
 
     ~AppendLogWriter() override = default;
+
+    [[nodiscard]]
+    auto block_count() const -> Size
+    {
+        return m_block_count;
+    }
 
     [[nodiscard]]
     auto is_attached() const -> bool
@@ -280,37 +438,22 @@ public:
     }
 
     [[nodiscard]]
-    auto detach() -> AppendWriter*
+    auto detach() -> Status
     {
-        return m_file.release();
+        auto s = Status::ok();
+        if (position().offset.value)
+            s = advance_block();
+        if (s.is_ok())
+            s = m_file->sync();
+        m_file.reset();
+        m_block_count = 0;
+        reset();
+        return s;
     }
 
 private:
     std::unique_ptr<AppendWriter> m_file;
-};
-
-class LogSegment {
-public:
-    explicit LogSegment(std::string path)
-        : m_path {std::move(path)},
-          m_id {SegmentId::from_name(stob(m_path))}
-    {}
-
-    auto add_position(LogPosition position) -> void
-    {
-        m_positions.emplace_back(position);
-    }
-
-    [[nodiscard]]
-    auto positions() const -> const std::vector<LogPosition>&
-    {
-        return m_positions;
-    }
-
-private:
-    std::vector<LogPosition> m_positions;
-    std::string m_path;
-    SegmentId m_id;
+    Size m_block_count {};
 };
 
 /**
@@ -327,13 +470,13 @@ public:
     ~LogScratchManager() = default;
 
     [[nodiscard]]
-    auto get() -> ManualScratch
+    auto get() -> NamedScratch
     {
         std::lock_guard lock {m_mutex};
         return m_manager.get();
     }
 
-    auto put(ManualScratch scratch) -> void
+    auto put(NamedScratch scratch) -> void
     {
         std::lock_guard lock {m_mutex};
         m_manager.put(scratch);
@@ -341,17 +484,7 @@ public:
 
 private:
     mutable std::mutex m_mutex;
-    ManualScratchManager m_manager;
-};
-
-class LogEventQueue final {
-public:
-    struct Event {
-
-    };
-
-private:
-    Queue<Event> m_queue;
+    NamedScratchManager m_manager;
 };
 
 } // namespace calico

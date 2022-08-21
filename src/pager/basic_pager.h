@@ -57,7 +57,6 @@ private:
     mutable std::mutex m_mutex;
     std::unique_ptr<Framer> m_framer;
     std::shared_ptr<spdlog::logger> m_logger;
-    RollingScratchManager m_scratch;
     WriteAheadLog *m_wal {};
     PageList m_dirty;
     PageRegistry m_registry;

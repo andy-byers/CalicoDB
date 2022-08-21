@@ -107,7 +107,6 @@ auto Internal::positioned_insert(Position position, BytesView key, BytesView val
 {
     CALICO_EXPECT_LE(key.size(), m_maximum_key_size);
     auto [node, index] = std::move(position);
-    m_scratch.reset();
 
     CALICO_TRY_CREATE(cell, make_cell(key, value, true));
     node.insert_at(index, cell);
@@ -125,7 +124,6 @@ auto Internal::positioned_modify(Position position, BytesView value) -> Result<v
     // Make a copy of the key. The data backing the old key slice may be written over when we call
     // remove_at() on the old cell.
     const auto key = btos(old_cell.key());
-    m_scratch.reset();
 
     CALICO_TRY_CREATE(new_cell, make_cell(stob(key), value, true));
 
@@ -146,7 +144,6 @@ auto Internal::positioned_remove(Position position) -> Result<void>
     CALICO_EXPECT_TRUE(node.is_external());
     CALICO_EXPECT_LT(index, node.cell_count());
     CALICO_EXPECT_GT(m_cell_count, 0);
-    m_scratch.reset();
     m_cell_count--;
 
     auto cell = node.read_cell(index);
@@ -167,9 +164,6 @@ auto Internal::balance_after_overflow(Node node) -> Result<void>
 {
     CALICO_EXPECT_TRUE(node.is_overflowing());
     while (node.is_overflowing()) {
-        if (node.overflow_cell().is_attached())
-            m_scratch.reset();
-
         if (node.id().is_root()) {
             CALICO_TRY_STORE(node, split_root(std::move(node)));
         } else {
@@ -182,8 +176,6 @@ auto Internal::balance_after_overflow(Node node) -> Result<void>
 auto Internal::balance_after_underflow(Node node, BytesView anchor) -> Result<void>
 {
     while (node.is_underflowing()) {
-        m_scratch.reset();
-
         if (node.id().is_root()) {
             if (!node.cell_count())
                 return fix_root(std::move(node));

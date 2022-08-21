@@ -18,7 +18,7 @@ using namespace calico;
 
 TEST(AssertionDeathTest, Assert)
 {
-    ASSERT_DEATH(CALICO_EXPECT_TRUE(false), BOOL_EXPECTATION_MATCHER);
+    ASSERT_DEATH(CALICO_EXPECT_TRUE(false), EXPECTATION_MATCHER);
 }
 
 TEST(TestEncoding, ReadsAndWrites)
@@ -160,9 +160,9 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
     ASSERT_TRUE(is_power_of_two(1 << 20));
 }
 
-TEST(ScratchTest, ScratchesAreUnique)
+TEST(MonotonicScratchTest, ScratchesAreDistinct)
 {
-    RollingScratchManager manager {1};
+    MonotonicScratchManager<3> manager {1};
     auto s1 = manager.get();
     auto s2 = manager.get();
     auto s3 = manager.get();
@@ -174,10 +174,19 @@ TEST(ScratchTest, ScratchesAreUnique)
     ASSERT_EQ(s3.data()[0], 3);
 }
 
+TEST(MonotonicScratchTest, ScratchesRepeat)
+{
+    MonotonicScratchManager<3> manager {1};
+    manager.get().data()[0] = 1;
+    manager.get().data()[0] = 2;
+    manager.get().data()[0] = 3;
+    ASSERT_EQ(manager.get().data()[0], 1);
+    ASSERT_EQ(manager.get().data()[0], 2);
+    ASSERT_EQ(manager.get().data()[0], 3);
+}
+
 TEST(NonPrintableSliceTests, UsesStringSize)
 {
-    // We can construct a string holding non-printable bytes by specifying its size along with
-    // a string literal that is not null-terminated.
     std::string u {"\x00\x01", 2};
     ASSERT_EQ(stob(u).size(), 2);
 }
@@ -268,6 +277,12 @@ auto run_ordering_comparisons()
     ASSERT_GE(y, x);
     ASSERT_GE(y, 2);
     ASSERT_GE(y, 1);
+}
+
+TEST(SimpleDSLTests, TypesAreSizedCorrectly)
+{
+    static_assert(sizeof(PageId) == sizeof(PageId::Type));
+    static_assert(sizeof(SequenceId) == sizeof(SequenceId::Type));
 }
 
 TEST(SimpleDSLTests, PageIdsAreNullable)

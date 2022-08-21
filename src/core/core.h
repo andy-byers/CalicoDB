@@ -104,7 +104,6 @@ private:
     [[nodiscard]] auto recover() -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;
-    auto load_state(const FileHeader&) -> void;
 
     std::string m_path;
     Options m_options;
@@ -117,7 +116,6 @@ private:
     bool m_has_update {};
     bool m_owns_store {};
     bool m_owns_wal {};
-    bool m_is_open {};
 };
 
 auto setup(const std::string &, Storage &, const Options &, spdlog::logger &) -> Result<InitialState>;

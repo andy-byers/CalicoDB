@@ -60,6 +60,7 @@ auto AppendHeapWriter::sync() -> Status
 
 auto HeapStorage::open_random_reader(const std::string &path, RandomReader **out) -> Status
 {
+    std::lock_guard lock {m_mutex};
     if (auto itr = m_files.find(path); itr != end(m_files)) {
         *out = new RandomHeapReader {path, itr->second};
     } else {
@@ -74,6 +75,7 @@ auto HeapStorage::open_random_reader(const std::string &path, RandomReader **out
 
 auto HeapStorage::open_random_editor(const std::string &name, RandomEditor **out) -> Status
 {
+    std::lock_guard lock {m_mutex};
     if (auto itr = m_files.find(name); itr != end(m_files)) {
         *out = new RandomHeapEditor {name, itr->second};
     } else {
@@ -86,6 +88,7 @@ auto HeapStorage::open_random_editor(const std::string &name, RandomEditor **out
 
 auto HeapStorage::open_append_writer(const std::string &name, AppendWriter **out) -> Status
 {
+    std::lock_guard lock {m_mutex};
     if (auto itr = m_files.find(name); itr != end(m_files)) {
         *out = new AppendHeapWriter {name, itr->second};
     } else {
@@ -98,6 +101,7 @@ auto HeapStorage::open_append_writer(const std::string &name, AppendWriter **out
 
 auto HeapStorage::remove_file(const std::string &name) -> Status
 {
+    std::lock_guard lock {m_mutex};
     auto itr = m_files.find(name);
     if (itr == end(m_files)) {
         ThreePartMessage message;
@@ -111,6 +115,7 @@ auto HeapStorage::remove_file(const std::string &name) -> Status
 
 auto HeapStorage::resize_file(const std::string &name, Size size) -> Status
 {
+    std::lock_guard lock {m_mutex};
     auto itr = m_files.find(name);
     if (itr == end(m_files)) {
         ThreePartMessage message;
@@ -130,6 +135,7 @@ auto HeapStorage::rename_file(const std::string &old_name, const std::string &ne
         message.set_detail("new name is empty");
         return message.system_error();
     }
+    std::lock_guard lock {m_mutex};
     auto node = m_files.extract(old_name);
     if (node.empty()) {
         ThreePartMessage message;
@@ -144,7 +150,7 @@ auto HeapStorage::rename_file(const std::string &old_name, const std::string &ne
 
 auto HeapStorage::file_size(const std::string &name, Size &out) const -> Status
 {
-
+    std::lock_guard lock {m_mutex};
     auto itr = m_files.find(name);
     if (itr == cend(m_files)) {
         ThreePartMessage message;
@@ -158,6 +164,7 @@ auto HeapStorage::file_size(const std::string &name, Size &out) const -> Status
 
 auto HeapStorage::file_exists(const std::string &name) const -> Status
 {
+    std::lock_guard lock {m_mutex};
     const auto itr = m_files.find(name);
     if (itr == cend(m_files)) {
         ThreePartMessage message;
@@ -175,6 +182,7 @@ auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::str
     //       to keep track of the directory structures, which can get arbitrarily complicated (but is not likely to in practice). For now just
     //       return all children, which works with the current design.
 
+    std::lock_guard lock {m_mutex};
     auto itr = m_directories.find(dir_path);
     if (itr == cend(m_directories)) {
         ThreePartMessage message;
@@ -192,6 +200,7 @@ auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::str
 
 auto HeapStorage::create_directory(const std::string &path) -> Status
 {
+    std::lock_guard lock {m_mutex};
     CALICO_EXPECT_EQ(m_directories.find(path), cend(m_directories));
     m_directories.insert(path);
     return Status::ok();
@@ -199,6 +208,7 @@ auto HeapStorage::create_directory(const std::string &path) -> Status
 
 auto HeapStorage::remove_directory(const std::string &name) -> Status
 {
+    std::lock_guard lock {m_mutex};
     CALICO_EXPECT_NE(m_directories.find(name), cend(m_directories));
     m_directories.erase(name);
     return Status::ok();
@@ -206,6 +216,7 @@ auto HeapStorage::remove_directory(const std::string &name) -> Status
 
 auto HeapStorage::clone() const -> Storage*
 {
+    std::lock_guard lock {m_mutex};
     auto *store = new HeapStorage;
     store->m_files = m_files;
     store->m_directories = m_directories;

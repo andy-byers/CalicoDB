@@ -1,275 +1,194 @@
-//#include "wal_record.h"
-//#include "page/update.h"
-//#include "utils/crc.h"
-//#include "utils/encoding.h"
-//#include "utils/logging.h"
-//
-//namespace cco {
-//
-//namespace {
-//
-//    inline auto is_record_type_valid(WALRecord::Type type) -> bool
-//    {
-//        return type == WALRecord::Type::FIRST ||
-//               type == WALRecord::Type::MIDDLE ||
-//               type == WALRecord::Type::LAST ||
-//               type == WALRecord::Type::FULL;
-//    }
-//
-//} // namespace
-//
-//WALPayload::WALPayload(const PageUpdate &param, Bytes scratch)
-//{
-//    m_data = scratch;
-//    auto bytes = scratch;
-//
-//    put_u64(bytes, param.last_lsn.value);
-//    bytes.advance(sizeof(param.last_lsn.value));
-//
-//    put_u64(bytes, param.page_id.value);
-//    bytes.advance(sizeof(param.page_id.value));
-//
-//    put_u16(bytes, static_cast<std::uint16_t>(param.changes.size()));
-//    bytes.advance(sizeof(std::uint16_t));
-//
-//    for (const auto &change: param.changes) {
-//        const auto size = change.before.size();
-//        CALICO_EXPECT_EQ(size, change.after.size());
-//
-//        put_u16(bytes, static_cast<std::uint16_t>(change.offset));
-//        bytes.advance(sizeof(std::uint16_t));
-//
-//        put_u16(bytes, static_cast<std::uint16_t>(size));
-//        bytes.advance(sizeof(std::uint16_t));
-//
-//        mem_copy(bytes, change.before, size);
-//        bytes.advance(size);
-//
-//        mem_copy(bytes, change.after, size);
-//        bytes.advance(size);
-//    }
-//    CALICO_EXPECT_GE(m_data.size(), bytes.size());
-//    m_data.truncate(m_data.size() - bytes.size());
-//}
-//
-//auto WALPayload::is_commit() const -> bool
-//{
-//    const auto update = decode();
-//    return update.page_id.is_null() && update.changes.empty();
-//}
-//
-//auto WALPayload::decode() const -> PageUpdate
-//{
-//    auto update = PageUpdate {};
-//    auto bytes = m_data;
-//
-//    update.last_lsn.value = get_u64(bytes);
-//    bytes.advance(sizeof(update.last_lsn.value));
-//
-//    update.page_id.value = get_u64(bytes);
-//    bytes.advance(sizeof(update.page_id.value));
-//
-//    update.changes.resize(get_u16(bytes));
-//    bytes.advance(sizeof(std::uint16_t));
-//
-//    for (auto &region: update.changes) {
-//        region.offset = get_u16(bytes);
-//        bytes.advance(sizeof(std::uint16_t));
-//
-//        const auto region_size = get_u16(bytes);
-//        bytes.advance(sizeof(std::uint16_t));
-//
-//        region.before = bytes.range(0, region_size);
-//        bytes.advance(region_size);
-//
-//        region.after = bytes.range(0, region_size);
-//        bytes.advance(region_size);
-//    }
-//    CALICO_EXPECT_TRUE(bytes.is_empty());
-//    return update;
-//}
-//
-//auto WALRecord::commit(SeqNum commit_lsn, Bytes scratch) -> WALRecord
-//{
-//    return WALRecord {{
-//        {},
-//        PageId::null(),
-//        SeqNum::null(),
-//        commit_lsn,
-//    }, scratch};
-//}
-//
-//WALRecord::WALRecord(const PageUpdate &update, Bytes scratch)
-//    : m_payload {update, scratch},
-//      m_lsn {update.page_lsn},
-//      m_backing {scratch},
-//      m_crc {crc_32(m_payload.data())},
-//      m_type {Type::FULL}
-//{}
-//
-//auto WALRecord::read(BytesView in) -> Result<bool>
-//{
-//    static constexpr auto ERROR_PRIMARY = "cannot read WAL record";
-//
-//    // lsn (4B)
-//    m_lsn.value = get_u64(in);
-//    in.advance(sizeof(m_lsn.value));
-//
-//    // No more values in the buffer (empty space in the buffer must be zeroed and LSNs
-//    // start with 1).
-//    if (m_lsn.is_null())
-//        return false;
-//
-//    // crc (4B)
-//    m_crc = get_u32(in);
-//    in.advance(sizeof(uint32_t));
-//
-//    // type (1B)
-//    m_type = static_cast<Type>(in[0]);
-//    in.advance(sizeof(Type));
-//
-//    if (!is_record_type_valid(m_type)) {
-//        ThreePartMessage message;
-//        message.set_primary(ERROR_PRIMARY);
-//        message.set_detail("record type 0x{:02X} is unrecognized", int(m_type));
-//        return Err {message.corruption()};
-//    }
-//
-//    // x (2B)
-//    const auto payload_size = get_u16(in);
-//    in.advance(sizeof(uint16_t));
-//
-//    if (payload_size == 0 || payload_size > in.size()) {
-//        ThreePartMessage message;
-//        message.set_primary(ERROR_PRIMARY);
-//        message.set_detail("payload size {} is out of range", payload_size);
-//        message.set_detail("must be in [1, {}]", in.size());
-//        return Err {message.corruption()};
-//    }
-//
-//    m_payload.m_data = m_backing.range(0, payload_size);
-//
-//    // payload (xB)
-//    mem_copy(m_payload.m_data, in, payload_size);
-//    return true;
-//}
-//
-//auto WALRecord::write(Bytes out) const noexcept -> void
-//{
-//    CALICO_EXPECT_GE(out.size(), size());
-//
-//    // lsn (8B)
-//    put_u64(out, m_lsn.value);
-//    out.advance(sizeof(m_lsn.value));
-//
-//    // crc (4B)
-//    put_u32(out, static_cast<std::uint32_t>(m_crc));
-//    out.advance(sizeof(std::uint32_t));
-//
-//    // type (1B)
-//    CALICO_EXPECT_TRUE(is_record_type_valid(m_type));
-//    out[0] = static_cast<Byte>(m_type);
-//    out.advance(sizeof(Type));
-//
-//    // x (2B)
-//    const auto payload_size = m_payload.m_data.size();
-//    CALICO_EXPECT_NE(payload_size, 0);
-//    put_u16(out, static_cast<std::uint16_t>(payload_size));
-//    out.advance(sizeof(std::uint16_t));
-//
-//    // payload (xB)
-//    mem_copy(out, m_payload.m_data, payload_size);
-//}
-//
-//auto WALRecord::is_consistent() const -> bool
-//{
-//    CALICO_EXPECT_EQ(m_type, Type::FULL);
-//    return m_crc == crc_32(m_payload.data());
-//}
-//
-///*
-// * Valid Splits:
-// *     .-------------------------------.
-// *     |  Before  =  Left    +  Right  |
-// *     :----------.----------.---------:
-// *     |  FULL    |  FIRST   |  LAST   |
-// *     |  LAST    |  MIDDLE  |  LAST   |
-// *     '----------'----------'---------'
-// */
-//auto WALRecord::split(Size offset_in_payload) -> WALRecord
-//{
-//    CALICO_EXPECT_LT(offset_in_payload, m_payload.m_data.size());
-//    WALRecord rhs;
-//    rhs.m_backing = m_backing.range(offset_in_payload); // TODO: Added...
-//    rhs.m_payload.m_data = m_payload.m_data; // TODO: Added...
-//
-//    rhs.m_payload.m_data.advance(offset_in_payload);
-//    m_payload.m_data.truncate(offset_in_payload);
-//
-//
-//    rhs.m_lsn = m_lsn;
-//    rhs.m_crc = m_crc;
-//    rhs.m_type = Type::LAST;
-//
-//    CALICO_EXPECT_NE(m_type, Type::EMPTY);
-//    CALICO_EXPECT_NE(m_type, Type::FIRST);
-//    if (m_type == Type::FULL) {
-//        m_type = Type::FIRST;
-//    } else {
-//        CALICO_EXPECT_EQ(m_type, Type::LAST);
-//        m_type = Type::MIDDLE;
-//    }
-//    return rhs;
-//}
-//
-///*
-// * Valid Merges:
-// *     .-------------------------------.
-// *     |  Left    +  Right   =  After  |
-// *     :----------.----------.---------:
-// *     |  EMPTY   |  FIRST   |  FIRST  |
-// *     |  EMPTY   |  FULL    |  FULL   |
-// *     |  FIRST   |  MIDDLE  |  FIRST  |
-// *     |  FIRST   |  LAST    |  FULL   |
-// *     '----------'----------'---------'
-// */
-//auto WALRecord::merge(const WALRecord &rhs) -> Result<void>
-//{
-//    static constexpr auto ERROR_PRIMARY = "cannot merge WAL records";
-//
-//    CALICO_EXPECT_TRUE(is_record_type_valid(rhs.m_type));
-//    const auto new_size = m_payload.m_data.size() + rhs.m_payload.m_data.size();
-//    m_payload.m_data = m_backing;
-//    m_payload.append(rhs.m_payload);
-//    m_payload.m_data.truncate(new_size);
-//
-//    if (m_type == Type::EMPTY) {
-//        if (rhs.m_type == Type::MIDDLE || rhs.m_type == Type::LAST) {
-//            ThreePartMessage message;
-//            message.set_primary(ERROR_PRIMARY);
-//            message.set_detail("record types are incompatible");
-//            return Err {message.corruption()};
-//        }
-//
-//        m_type = rhs.m_type;
-//        m_lsn = rhs.m_lsn;
-//        m_crc = rhs.m_crc;
-//
-//    } else {
-//        CALICO_EXPECT_EQ(m_type, Type::FIRST);
-//
-//        if (m_lsn != rhs.m_lsn || m_crc != rhs.m_crc) {
-//            ThreePartMessage message;
-//            message.set_primary(ERROR_PRIMARY);
-//            message.set_detail("parts do not belong to the same logical record");
-//            return Err {message.corruption()};
-//        }
-//
-//        // We have just completed a record.
-//        if (rhs.m_type == Type::LAST)
-//            m_type = Type::FULL;
-//    }
-//    return {};
-//}
-//
-//} // namespace cco
+#include "record.h"
+#include "utils/crc.h"
+#include "utils/encoding.h"
+#include "utils/logging.h"
+
+namespace calico {
+
+auto contains_record(BytesView in) -> bool
+{
+    if (in.size() > sizeof(WalRecordHeader))
+        return get_u64(in) != 0;
+    return false;
+}
+
+auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void
+{
+    BytesView bytes {reinterpret_cast<const Byte*>(&header), sizeof(header)};
+    mem_copy(out, bytes);
+}
+
+auto read_wal_record_header(BytesView in) -> WalRecordHeader
+{
+    WalRecordHeader header {};
+    Bytes bytes {reinterpret_cast<Byte*>(&header), sizeof(header)};
+    mem_copy(bytes, in.truncate(bytes.size()));
+    return header;
+}
+
+auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
+{
+    const auto original_size = out.size();
+    out[0] = static_cast<Byte>(WalPayloadType::DELTAS);
+    out.advance();
+
+    put_u64(out, page_id.value);
+    out.advance(sizeof(page_id.value));
+
+    put_u16(out, static_cast<std::uint16_t>(deltas.size()));
+    out.advance(sizeof(std::uint16_t));
+
+    for (const auto &[offset, size]: deltas) {
+        put_u16(out, static_cast<std::uint16_t>(offset));
+        out.advance(sizeof(std::uint16_t));
+
+        put_u16(out, static_cast<std::uint16_t>(size));
+        out.advance(sizeof(std::uint16_t));
+
+        mem_copy(out, image.range(offset, size));
+        out.advance(size);
+    }
+    return original_size - out.size();
+}
+
+auto decode_deltas_payload(const WalRecordHeader &header, BytesView in) -> RedoDescriptor
+{
+    RedoDescriptor redo;
+    redo.page_lsn = header.lsn;
+    redo.is_commit = false;
+
+    // We assume that the payload type is still at the front of the input data. The caller should have checked and switched on the value prior to calling one
+    // of these "decode_*()" functions.
+    CALICO_EXPECT_EQ(read_payload_type(in), WalPayloadType::DELTAS);
+    in.advance();
+
+    redo.page_id = get_u64(in);
+    in.advance(sizeof(redo.page_id));
+
+    redo.deltas.resize(get_u16(in));
+    in.advance(sizeof(std::uint16_t));
+
+    redo.is_commit = false;
+
+    for (auto &[offset, bytes]: redo.deltas) {
+        offset = get_u16(in);
+        in.advance(sizeof(std::uint16_t));
+
+        const auto size = get_u16(in);
+        in.advance(sizeof(std::uint16_t));
+
+        bytes = in.range(0, size);
+        in.advance(size);
+    }
+    return redo;
+}
+
+auto encode_commit_payload(Bytes in) -> Size
+{
+    in[0] = static_cast<Byte>(WalPayloadType::COMMIT);
+    return sizeof(WalPayloadType);
+}
+
+auto decode_commit_payload(const WalRecordHeader &header, BytesView in) -> RedoDescriptor
+{
+    CALICO_EXPECT_EQ(read_payload_type(in), WalPayloadType::COMMIT);
+
+    RedoDescriptor redo;
+    redo.page_lsn = header.lsn;
+    redo.is_commit = true;
+    return redo;
+}
+
+auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size
+{
+    const auto original_size = out.size();
+
+    // This routine should copy from memory owned by the pager to memory owned by the WAL.
+    out[0] = static_cast<Byte>(WalPayloadType::FULL_IMAGE);
+    out.advance();
+
+    put_u64(out, page_id.value);
+    out.advance(sizeof(page_id));
+
+    mem_copy(out, image);
+    out.advance(image.size());
+
+    return original_size - out.size();
+}
+
+auto decode_full_image_payload(BytesView in) -> UndoDescriptor
+{
+    // In this case, "in" should contain the exact payload.
+    CALICO_EXPECT_EQ(WalPayloadType {in[0]}, WalPayloadType::FULL_IMAGE);
+    in.advance();
+
+    UndoDescriptor descriptor {};
+    descriptor.page_id = get_u64(in);
+    descriptor.image = in.range(sizeof(PageId));
+    return descriptor;
+}
+
+auto split_record(WalRecordHeader &lhs, BytesView payload, Size available_size) -> WalRecordHeader
+{
+    CALICO_EXPECT_NE(lhs.type, WalRecordHeader::Type::FIRST);
+    CALICO_EXPECT_EQ(lhs.size, payload.size());
+    CALICO_EXPECT_LT(available_size, sizeof(lhs) + payload.size()); // Only call this if we actually need a split.
+    auto rhs = lhs;
+
+    lhs.size = static_cast<std::uint16_t>(available_size - sizeof(lhs));
+    rhs.size = static_cast<std::uint16_t>(payload.size() - lhs.size);
+    rhs.type = WalRecordHeader::Type::LAST;
+
+    if (lhs.type == WalRecordHeader::Type::FULL) {
+        lhs.type = WalRecordHeader::Type::FIRST;
+    } else {
+        CALICO_EXPECT_EQ(lhs.type, WalRecordHeader::Type::LAST);
+        lhs.type = WalRecordHeader::Type::MIDDLE;
+    }
+    return rhs;
+}
+
+template<bool IsLeftMerge>
+static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
+{
+    static constexpr auto MSG = "cannot merge WAL records";
+    static constexpr auto FIRST_TYPE = IsLeftMerge ? WalRecordHeader::FIRST : WalRecordHeader::LAST;
+    static constexpr auto LAST_TYPE = IsLeftMerge ? WalRecordHeader::LAST : WalRecordHeader::FIRST;
+    CALICO_EXPECT_NE(lhs.type, rhs.type);
+
+    // First merge in the logical record.
+    if (lhs.type == WalRecordHeader::Type {}) {
+        CALICO_EXPECT_TRUE(rhs.type != WalRecordHeader::MIDDLE &&
+                           rhs.type != LAST_TYPE);
+        CALICO_EXPECT_EQ(lhs.lsn, 0);
+
+        lhs.type = rhs.type;
+        lhs.lsn = rhs.lsn;
+        lhs.crc = rhs.crc;
+
+    } else {
+        CALICO_EXPECT_EQ(lhs.type, FIRST_TYPE);
+        if (lhs.lsn != rhs.lsn || lhs.crc != rhs.crc) {
+            ThreePartMessage message;
+            message.set_primary(MSG);
+            message.set_detail("fragments do not belong to the same logical record");
+            return message.corruption();
+        }
+        if (rhs.type == LAST_TYPE)
+            lhs.type = WalRecordHeader::FULL;
+    }
+    lhs.size += rhs.size;
+    return Status::ok();
+}
+
+auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
+{
+    return merge_records<true>(lhs, rhs);
+}
+
+auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status
+{
+    return merge_records<false>(rhs, lhs);
+}
+
+} // namespace calico

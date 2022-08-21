@@ -4,9 +4,10 @@
 #include "pager/basic_pager.h"
 #include "pager/framer.h"
 #include "pager/registry.h"
+#include "unit_tests.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
-#include "wal/basic_wal.h"
+#include "wal/disabled_wal.h"
 #include <gtest/gtest.h>
 #include <numeric>
 
@@ -30,7 +31,7 @@ TEST(UniqueCacheTests, DuplicateKeyDeathTest)
 {
     impl::UniqueCache<int, int> cache;
     cache.put(4, 2);
-    ASSERT_DEATH(cache.put(4, 2), "Expect");
+    ASSERT_DEATH(cache.put(4, 2), EXPECTATION_MATCHER);
 }
 
 TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
@@ -297,13 +298,13 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
 TEST_F(PagerTests, MultipleWritersDeathTest)
 {
     const auto page = allocate_write(test_message);
-    ASSERT_DEATH(const auto same_page = pager->acquire(page.id(), true), "Expect");
+    ASSERT_DEATH(const auto same_page = pager->acquire(page.id(), true), EXPECTATION_MATCHER);
 }
 
 TEST_F(PagerTests, ReaderAndWriterDeathTest)
 {
     const auto page = allocate_write(test_message);
-    ASSERT_DEATH(const auto same_page = pager->acquire(page.id(), false), "Expect");
+    ASSERT_DEATH(const auto same_page = pager->acquire(page.id(), false), EXPECTATION_MATCHER);
 }
 
 TEST_F(PagerTests, MultipleReaders)

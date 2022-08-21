@@ -1,4 +1,5 @@
 #include "page.h"
+#include "deltas.h"
 #include "pager/pager.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
@@ -19,8 +20,10 @@ Page::Page(const Parameters &param)
 
 Page::~Page()
 {
-    if (m_source.is_valid())
-        [[maybe_unused]] auto s = m_source->release(std::move(*this));
+    if (m_source.is_valid()) {
+        const auto source = std::move(m_source);
+        [[maybe_unused]] auto s = source->release(std::move(*this));
+    }
 }
 
 auto Page::header_offset() const -> Size
@@ -44,10 +47,12 @@ auto Page::set_type(PageType type) -> void
     put_u16(*this, offset, static_cast<uint16_t>(type));
 }
 
-auto Page::set_lsn(SequenceId lsn) -> void
+auto Page::set_lsn(SequenceId value) -> void
 {
+fmt::print(stderr, "{} <= {} for page {}\n", lsn().value, value.value, m_id.value);
+    CALICO_EXPECT_LE(lsn(), value);
     const auto offset = header_offset() + PageLayout::LSN_OFFSET;
-    put_u64(*this, offset, lsn.value);
+    put_u64(*this, offset, value.value);
 }
 
 auto Page::id() const -> PageId
@@ -83,7 +88,7 @@ auto Page::bytes(Size offset) -> Bytes
 auto Page::bytes(Size offset, Size size) -> Bytes
 {
     CALICO_EXPECT_TRUE(m_is_writable);
-    m_deltas.emplace_back(PageDelta {offset, size});
+    insert_delta(m_deltas, PageDelta {offset, size});
     m_is_dirty = true;
     return m_data.range(offset, size);
 }
@@ -95,7 +100,6 @@ auto Page::write(BytesView in, Size offset) -> void
 
 auto Page::undo(const UndoDescriptor &descriptor) -> void
 {
-
     CALICO_EXPECT_EQ(m_id, descriptor.page_id);
     CALICO_EXPECT_EQ(m_data.size(), descriptor.image.size());
     mem_copy(m_data, descriptor.image);
@@ -106,13 +110,16 @@ auto Page::redo(const RedoDescriptor &descriptor) -> void
 {
     CALICO_EXPECT_EQ(m_id, descriptor.page_id);
     CALICO_EXPECT_FALSE(descriptor.is_commit);
-    for (const auto &[offset, delta]: descriptor.deltas)
-        mem_copy(m_data.range(offset, delta.size()), delta);
-    m_is_dirty = true;
+    if (lsn() < descriptor.page_lsn) {
+        for (const auto &[offset, delta]: descriptor.deltas)
+            mem_copy(m_data.range(offset, delta.size()), delta);
+        m_is_dirty = true;
+    }
 }
 
-auto Page::deltas() const -> std::vector<PageDelta>
+auto Page::collect_deltas() -> std::vector<PageDelta>
 {
+    compress_deltas(m_deltas);
     return m_deltas;
 }
 

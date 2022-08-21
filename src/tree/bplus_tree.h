@@ -13,7 +13,7 @@ class Pager;
 
 class BPlusTree : public Tree {
 public:
-    ~BPlusTree() override = default;
+    ~BPlusTree() override;
 
     [[nodiscard]]
     auto record_count() const -> Size override

@@ -1,23 +1,154 @@
-//#include <gtest/gtest.h>
-//
-//#include "calico/bytes.h"
-//#include "calico/options.h"
-//#include "page/cell.h"
-//#include "page/file_header.h"
-//#include "page/node.h"
-//#include "page/page.h"
-//#include "random.h"
-//#include "tools.h"
-//#include "unit_tests.h"
-//#include "utils/expect.h"
-//#include "utils/layout.h"
-//#include "utils/scratch.h"
-//
-//namespace {
-//
-//using namespace cco;
-//using namespace cco;
-//using namespace cco;
+#include <gtest/gtest.h>
+
+#include "calico/bytes.h"
+#include "calico/options.h"
+#include "page/cell.h"
+#include "page/deltas.h"
+#include "page/node.h"
+#include "page/page.h"
+#include "random.h"
+#include "tools.h"
+#include "unit_tests.h"
+#include "utils/expect.h"
+#include "utils/layout.h"
+#include "utils/scratch.h"
+
+namespace {
+
+using namespace calico;
+
+class DeltaCompressionTest: public testing::Test {
+public:
+    static constexpr Size PAGE_SIZE {0x200};
+
+    [[nodiscard]]
+    auto build_deltas(const std::vector<PageDelta> &unordered)
+    {
+        std::vector<PageDelta> deltas;
+        for (const auto &delta: unordered)
+            insert_delta(deltas, delta);
+        compress_deltas(deltas);
+        return deltas;
+    }
+
+    [[nodiscard]]
+    auto insert_random_delta(std::vector<PageDelta> &deltas)
+    {
+        static constexpr Size MIN_DELTA_SIZE {1};
+        const auto offset = random.next_int(PAGE_SIZE - MIN_DELTA_SIZE);
+        const auto size = random.next_int(PAGE_SIZE - offset);
+        insert_delta(deltas, {offset, size});
+    }
+
+    Random random {0};
+};
+
+TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
+{
+    const auto empty = build_deltas({});
+    ASSERT_TRUE(empty.empty());
+}
+
+TEST_F(DeltaCompressionTest, InsertEmptyDeltaDeathTest)
+{
+    std::vector<PageDelta> deltas;
+    ASSERT_DEATH(insert_delta(deltas, {123, 0}), EXPECTATION_MATCHER);
+}
+
+TEST_F(DeltaCompressionTest, CompressingSingleDeltaDoesNothing)
+{
+    const auto single = build_deltas({{123, 1}});
+    ASSERT_EQ(single.size(), 1);
+    ASSERT_EQ(single.front().offset, 123);
+    ASSERT_EQ(single.front().size, 1);
+}
+
+TEST_F(DeltaCompressionTest, DeltasAreOrdered)
+{
+    const auto deltas = build_deltas({
+        {20, 2},
+        {60, 6},
+        {50, 5},
+        {10, 1},
+        {90, 9},
+        {70, 7},
+        {40, 4},
+        {80, 8},
+        {30, 3},
+    });
+
+    Size i {1};
+    ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
+        const auto j = std::exchange(i, i + 1);
+        return delta.offset == 10 * j && delta.size == j;
+    }));
+    ASSERT_EQ(deltas.size(), 9);
+}
+
+TEST_F(DeltaCompressionTest, DeltasAreNotRepeated)
+{
+    const auto deltas = build_deltas({
+        {20, 2},
+        {50, 5},
+        {40, 4},
+        {10, 1},
+        {20, 2},
+        {30, 3},
+        {50, 5},
+        {40, 4},
+        {30, 3},
+        {10, 1},
+    });
+
+    Size i {1};
+    ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
+        const auto j = std::exchange(i, i + 1);
+        return delta.offset == 10 * j && delta.size == j;
+    }));
+    ASSERT_EQ(deltas.size(), 5);
+}
+
+TEST_F(DeltaCompressionTest, OverlappingDeltasAreMerged)
+{
+    auto deltas = build_deltas({
+        {0, 10},
+        {20, 10},
+        {40, 10},
+    });
+
+    insert_delta(deltas, {5, 10});
+    insert_delta(deltas, {30, 10});
+    compress_deltas(deltas);
+
+    ASSERT_EQ(deltas.size(), 2);
+    ASSERT_EQ(deltas[0].size, 15);
+    ASSERT_EQ(deltas[0].offset, 0);
+    ASSERT_EQ(deltas[1].size, 30);
+    ASSERT_EQ(deltas[1].offset, 20);
+}
+
+TEST_F(DeltaCompressionTest, SanityCheck)
+{
+    static constexpr Size NUM_INSERTS {100};
+    static constexpr Size MAX_DELTA_SIZE {10};
+    std::vector<PageDelta> deltas;
+    for (Size i {}; i < NUM_INSERTS; ++i) {
+        const auto offset = random.next_int(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto size = random.next_int(1UL, MAX_DELTA_SIZE);
+        insert_delta(deltas, PageDelta {offset, size});
+    }
+    compress_deltas(deltas);
+
+    std::vector<int> covering(PAGE_SIZE);
+    for (const auto &[offset, size]: deltas) {
+        for (Size i {}; i < size; ++i) {
+            ASSERT_EQ(covering.at(offset + i), 0);
+            covering[offset + i]++;
+        }
+    }
+}
+
+
 //
 //class PageBacking {
 //public:
@@ -690,5 +821,5 @@
 //
 //    ASSERT_EQ(separator.left_child_id(), lhs.id());
 //}
-//
-//} // <anonymous>
+
+} // <anonymous>

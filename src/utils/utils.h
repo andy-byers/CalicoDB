@@ -111,6 +111,26 @@ constexpr auto forward_like(T &&t) -> ElementOf<Container>
     return std::forward<ElementOf<Container>>(std::forward<T>(t));
 }
 
+[[nodiscard]]
+inline auto get_status_name(const Status &s) noexcept -> std::string
+{
+    if (s.is_ok()) {
+        return "OK";
+    } else if (s.is_not_found()) {
+        return "not found";
+    } else if (s.is_system_error()) {
+        return "system error";
+    } else if (s.is_logic_error()) {
+        return "logic error";
+    } else if (s.is_corruption()) {
+        return "corruption";
+    } else if (s.is_invalid_argument()) {
+        return "invalid argument";
+    } else {
+        return "unknown";
+    }
+}
+
 } // namespace cco
 
 #endif // CALICO_UTILS_UTILS_H

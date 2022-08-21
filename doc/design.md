@@ -34,6 +34,6 @@ Errors that result from passing invalid arguments to a method will never lock up
   + Their CMake build process was very instructive.
 3. https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log
   + Nice explanation of RocksDB's WAL
-  + The idea to have multiple different record types and to use a "remaining" buffer are from this document
+  + The idea to have multiple different record types and to use a "remaining" block are from this document
 4. https://arpitbhayani.me/blogs/2q-cache
   + Nice description of the 2Q cache replacement policy

@@ -16,7 +16,7 @@
 #include "random.h"
 #include "tools.h"
 #include "validation.h"
-#include "wal/basic_wal.h"
+#include "wal/disabled_wal.h"
 
 namespace {
 
@@ -26,7 +26,6 @@ class TestHarness: public testing::Test {
 public:
     static constexpr Size PAGE_SIZE {0x100};
     static constexpr Size FRAME_COUNT {16};
-    static constexpr auto CACHE_SIZE = PAGE_SIZE * FRAME_COUNT;
 
     TestHarness()
         : wal {std::make_unique<DisabledWriteAheadLog>()},
@@ -71,6 +70,10 @@ public:
             create_sink(),
             PAGE_SIZE
         );
+        auto root = tree->root(true);
+        EXPECT_TRUE(root.has_value()) << "Error: " << root.error().what();
+        auto s = pager->release(root->take());
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
 
         using testing::AtLeast;
         EXPECT_CALL(*mock, read).Times(AtLeast(0));
@@ -568,8 +571,8 @@ TEST_F(TreeTests, ReverseBoundedIteration)
 TEST_F(TreeTests, SanityCheck)
 {
     static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size NUM_RECORDS {5'000};
-    static constexpr Size MIN_SIZE {1'000};
+    static constexpr Size NUM_RECORDS {500};
+    static constexpr Size MIN_SIZE {100};
     RecordGenerator::Parameters param;
     param.mean_key_size = 20;
     param.mean_value_size = 10;

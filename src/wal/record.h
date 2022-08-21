@@ -7,150 +7,170 @@
 #ifndef CALICO_WAL_RECORD_H
 #define CALICO_WAL_RECORD_H
 
+#include "calico/wal.h"
+#include "utils/encoding.h"
 #include "utils/types.h"
 
 namespace calico {
 
-struct BasicWalRecordHeader {
+static constexpr auto WAL_PREFIX = "wal-";
+static constexpr Size WAL_SCRATCH_SCALE {3};
+static constexpr Size WAL_BLOCK_SCALE {1};
+
+struct SegmentId
+    : public NullableId<SegmentId>,
+      public EqualityComparableTraits<SegmentId>,
+      public OrderableTraits<SegmentId>
+{
+    static constexpr auto NAME_FORMAT = "{}{:06d}";
+    static constexpr Size DIGITS_SIZE {6};
+    using Hash = IndexHash<SegmentId>;
+
+    constexpr SegmentId() noexcept = default;
+
+    template<class U>
+    constexpr explicit SegmentId(U u) noexcept
+        : value {std::uint64_t(u)}
+    {}
+
+    [[nodiscard]]
+    static auto from_name(BytesView name) -> SegmentId
+    {
+        if (name.size() < DIGITS_SIZE)
+            return null();
+
+        auto digits = name.advance(name.size() - DIGITS_SIZE);
+
+        // Don't call std::stoul() if it's going to throw an exception.
+        const auto is_valid = std::all_of(digits.data(), digits.data() + digits.size(), [](auto c) {return std::isdigit(c);});
+
+        if (!is_valid)
+            return null();
+
+        return SegmentId {std::stoull(btos(digits))};
+    }
+
+    [[nodiscard]]
+    auto to_name() const -> std::string
+    {
+        return fmt::format(NAME_FORMAT, WAL_PREFIX, value);
+    }
+
+    constexpr explicit operator std::uint64_t() const
+    {
+        return value;
+    }
+
+    std::uint64_t value {};
+};
+
+struct BlockNumber: public EqualityComparableTraits<SegmentId> {
+    using Hash = IndexHash<BlockNumber>;
+
+    constexpr BlockNumber() noexcept = default;
+
+    template<class U>
+    constexpr explicit BlockNumber(U u) noexcept
+        : value {std::uint64_t(u)}
+    {}
+
+    constexpr explicit operator std::uint64_t() const
+    {
+        return value;
+    }
+
+    std::uint64_t value {};
+};
+
+struct BlockOffset: public EqualityComparableTraits<SegmentId> {
+    using Hash = IndexHash<BlockNumber>;
+
+    constexpr BlockOffset() noexcept = default;
+
+    template<class U>
+    constexpr explicit BlockOffset(U u) noexcept
+        : value {std::uint64_t(u)}
+    {}
+
+    constexpr explicit operator std::uint64_t() const
+    {
+        return value;
+    }
+
+    std::uint64_t value {};
+};
+
+struct LogPosition {
+
+    [[nodiscard]]
+    auto is_start() const -> bool
+    {
+        return number == 0 && offset == 0;
+    }
+
+    BlockNumber number;
+    BlockOffset offset;
+};
+
+struct RecordPosition {
+    SegmentId id;
+    LogPosition pos;
+};
+
+struct LogSegment {
+    SegmentId id;
+    SequenceId first_lsn;
+};
+
+struct WalRecordHeader {
     enum Type: Byte {
-        EMPTY = 0,
-        FULL = 1,
-        FIRST = 2,
-        MIDDLE = 3,
-        LAST = 4,
+        FULL   = '\xA4',
+        FIRST  = '\xB3',
+        MIDDLE = '\xC2',
+        LAST   = '\xD1',
     };
 
     std::uint64_t lsn;
     std::uint32_t crc;
-    Type type;
     std::uint16_t size;
+    Type type;
+    Byte pad; ///< Padding byte that should always be zero.
 };
 
-enum BasicWalPayloadType: Byte {
-    FULL_IMAGE = 1,
-    DELTAS = 2,
-    COMMIT = 3,
+// TODO: May need some compiler intrinsics to make this actually true on all platforms...
+static_assert(sizeof(WalRecordHeader) == 16);
+
+enum WalPayloadType: Byte {
+    COMMIT     = '\xFF',
+    DELTAS     = '\xEE',
+    FULL_IMAGE = '\xDD',
 };
-///**
-// * The variable-length payload field of a WAL record.
-// */
-//class WALPayload {
-//public:
-//    friend class WALRecord;
-//    static constexpr Size HEADER_SIZE {18};
-//    static constexpr Size UPDATE_HEADER_SIZE {4};
-//
-//    WALPayload() = default;
-//
-//    explicit WALPayload(Bytes scratch)
-//        : m_data {scratch}
-//    {}
-//
-//    ~WALPayload() = default;
-//    WALPayload(const PageUpdate &, Bytes);
-//    [[nodiscard]] auto is_commit() const -> bool;
-//    [[nodiscard]] auto decode() const -> PageUpdate;
-//
-//    [[nodiscard]] auto data() const -> BytesView
-//    {
-//        return m_data;
-//    }
-//
-//    auto append(const WALPayload &rhs) -> void
-//    {
-//        mem_copy(m_data.range(m_cursor), rhs.m_data);
-//        m_cursor += rhs.m_data.size();
-//    }
-//
-//private:
-//    // TODO: Beware that m_data may be exactly the size of an entire payload, if the payload was made with the PageUpdate constructor, otherwise, it is the full scratch memory
-//    //       and one should use the WALRecord payload size instead.
-//    Bytes m_data; ///< Payload contents
-//    Size m_cursor {};
-//};
-//
-///**
-// * A container that makes data compatible with the WAL storage format.
-// */
-//class WALRecord {
-//public:
-//    static constexpr Size HEADER_SIZE {15};
-//    static constexpr auto MINIMUM_SIZE = HEADER_SIZE + 1;
-//
-//    enum class Type : Byte {
-//        EMPTY = 0x00,
-//        FIRST = 0x12,
-//        MIDDLE = 0x23,
-//        LAST = 0x34,
-//        FULL = 0x45,
-//    };
-//
-//    WALRecord() = default;
-//
-//    explicit WALRecord(Bytes scratch)
-//        : m_backing {scratch}
-//    {}
-//
-//    static auto commit(SeqNum, Bytes) -> WALRecord;
-//    WALRecord(const PageUpdate &, Bytes);
-//    ~WALRecord() = default;
-//
-//    [[nodiscard]] auto lsn() const -> SeqNum
-//    {
-//        return m_lsn;
-//    }
-//
-//    [[nodiscard]] auto crc() const -> Size
-//    {
-//        return m_crc;
-//    }
-//
-//    [[nodiscard]] auto type() const -> Type
-//    {
-//        return m_type;
-//    }
-//
-//    [[nodiscard]] auto size() const -> Size
-//    {
-//        return m_payload.m_data.size() + HEADER_SIZE;
-//    }
-//
-//    [[nodiscard]] auto payload() const -> const WALPayload &
-//    {
-//        return m_payload;
-//    }
-//
-//    [[nodiscard]] auto is_commit() const -> bool
-//    {
-//        CALICO_EXPECT_EQ(m_type, Type::FULL);
-//        return m_payload.is_commit();
-//    }
-//
-//    [[nodiscard]] auto decode() const -> PageUpdate
-//    {
-//        auto decoded = m_payload.decode();
-//        decoded.page_lsn = m_lsn;
-//        return decoded;
-//    }
-//
-//    [[nodiscard]] auto is_consistent() const -> bool;
-//    [[nodiscard]] auto read(BytesView) -> Result<bool>;
-//    [[nodiscard]] auto merge(const WALRecord &) -> Result<void>;
-//    auto write(Bytes) const noexcept -> void;
-//    auto split(Size) -> WALRecord;
-//
-//    auto TEST_corrupt_crc() -> void
-//    {
-//        m_crc++;
-//    }
-//
-//private:
-//    WALPayload m_payload;
-//    SeqNum m_lsn;
-//    Bytes m_backing;
-//    Size m_crc {};
-//    Type m_type {Type::EMPTY};
-//};
+
+struct WalDeltasHeader {
+    std::uint64_t page_id;
+    std::uint16_t count;
+};
+
+// Routines for working with WAL records.
+auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void;
+[[nodiscard]] auto contains_record(BytesView in) -> bool;
+[[nodiscard]] auto read_wal_record_header(BytesView in) -> WalRecordHeader;
+[[nodiscard]] auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
+[[nodiscard]] auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size;
+[[nodiscard]] auto encode_commit_payload(Bytes in) -> Size;
+[[nodiscard]] auto decode_commit_payload(const WalRecordHeader&, BytesView in) -> RedoDescriptor;
+[[nodiscard]] auto decode_deltas_payload(const WalRecordHeader&, BytesView in) -> RedoDescriptor;
+[[nodiscard]] auto decode_full_image_payload(BytesView in) -> UndoDescriptor;
+[[nodiscard]] auto split_record(WalRecordHeader &lhs, BytesView payload, Size available_size) -> WalRecordHeader;
+[[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
+[[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
+
+[[nodiscard]]
+inline auto read_payload_type(BytesView payload) -> WalPayloadType
+{
+    CALICO_EXPECT_FALSE(payload.is_empty());
+    return WalPayloadType {payload[0]};
+}
 
 } // namespace calico
 

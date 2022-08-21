@@ -13,11 +13,10 @@ namespace fs = std::filesystem;
 auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPager>>
 {
     auto pool = std::unique_ptr<BasicPager> {new (std::nothrow) BasicPager {param}};
-    pool->m_logger->trace("opening");
 
     if (!pool) {
         ThreePartMessage message;
-        message.set_primary("cannot open buffer pool");
+        message.set_primary("cannot open block pool");
         message.set_detail("out of memory");
         return Err {message.system_error()};
     }
@@ -38,10 +37,11 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
 }
 
 BasicPager::BasicPager(const Parameters &param)
-    : m_logger {create_logger(param.log_sink, "pool")},
-      m_scratch {param.page_size},
+    : m_logger {create_logger(param.log_sink, "pager")},
       m_wal {&param.wal}
-{}
+{
+    m_logger->info("constructing BasicPager instance");
+}
 
 auto BasicPager::page_count() const -> Size
 {
@@ -59,10 +59,10 @@ auto BasicPager::pin_frame(PageId id) -> Status
         // We are of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
         // very often, if at all.
         if (!*r) {
-            LogMessage message {*m_logger};
+            ThreePartMessage message;
             message.set_primary("could not pin frame");
             message.set_detail("out of frames");
-            message.set_hint("release some pages or wait for the WAL to advance_block");
+            message.set_hint("release some pages or wait for the WAL to flush");
             return message.not_found();
         }
     }
@@ -77,16 +77,25 @@ auto BasicPager::pin_frame(PageId id) -> Status
 
 auto BasicPager::flush() -> Status
 {
+    m_logger->info("flushing cached database pages");
     CALICO_EXPECT_EQ(m_ref_sum, 0);
-    m_logger->trace("flushing");
 
     for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
         CALICO_EXPECT_NE(m_registry.get(*itr), m_registry.end());
         auto entry = m_registry.get(*itr)->second;
+        const auto page_lsn = m_framer->frame_at(entry.frame_id).lsn();
+
+        if (page_lsn > m_wal->flushed_lsn()) {
+            LogMessage message {*m_logger};
+            message.set_primary("could not flush");
+            message.set_detail("WAL has pending updates");
+            message.set_hint("flush the WAL and try again");
+            return message.logic_error();
+        }
         auto s = m_framer->unpin(entry.frame_id, true);
         if (!s.is_ok()) return s;
         m_registry.erase(*itr);
-
+        m_wal->allow_cleanup(m_framer->flushed_lsn().value);
         entry.dirty_token.reset();
         itr = m_dirty.remove(itr);
     }
@@ -103,7 +112,7 @@ auto BasicPager::try_make_available() -> Result<bool>
     auto itr = m_registry.find_entry([this](auto, auto fid, auto dirty_token) {
         const auto &frame = m_framer->frame_at(fid);
 
-        // The buffer pool management happens under lock, so if this frame is not referenced, it is safe to consider for reuse.
+        // The page/frame management happens under lock, so if this frame is not referenced, it is safe to consider for reuse.
         if (frame.ref_count() != 0)
             return false;
 
@@ -121,6 +130,7 @@ auto BasicPager::try_make_available() -> Result<bool>
     if (!s.is_ok()) return Err {s};
 
     if (was_dirty) {
+        m_wal->allow_cleanup(m_framer->flushed_lsn().value);
         m_dirty.remove(*dirty_token);
         dirty_token.reset();
     }
@@ -133,10 +143,15 @@ auto BasicPager::release(Page page) -> Status
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_ref_sum, 0);
 
-    if (m_wal->is_enabled() && !page.deltas().empty()) {
-        CALICO_EXPECT_TRUE(page.is_dirty());
+    if (const auto deltas = page.collect_deltas(); m_wal->is_writing() && !deltas.empty()) {
         page.set_lsn(SequenceId {m_wal->current_lsn()});
-        m_wal->log_deltas(page.id().value, page.view(0), page.deltas());
+        auto s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
+
+        if (!s.is_ok()) {
+            m_logger->error("could not write page deltas to WAL");
+            m_logger->error("(reason) {}", s.what());
+            return s;
+        }
     }
 
     CALICO_EXPECT_TRUE(m_registry.contains(page.id()));
@@ -154,20 +169,27 @@ auto BasicPager::register_page(Page &page, PageRegistry::Entry &entry) -> void
     entry.dirty_token = m_dirty.insert(page.id());
     m_dirty_count++;
 
-    if (m_wal->is_enabled())
-        m_wal->log_image(page.id().value, page.view(0));
+    if (m_wal->is_writing()) {
+        auto s = m_wal->log_image(page.id().value, page.view(0));
+
+        if (!s.is_ok()) {
+            m_logger->error("could not write full image to WAL");
+            m_logger->error("(reason) {}", s.what());
+            m_status = s;
+        }
+    }
 }
 
 auto BasicPager::save_state(FileHeader &header) -> void
 {
-    m_logger->trace("saving header fields");
+    m_logger->info("saving header fields");
     m_framer->save_state(header);
     m_wal->save_state(header);
 }
 
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
-    m_logger->trace("loading header fields");
+    m_logger->info("loading header fields");
     m_framer->load_state(header);
     m_wal->load_state(header);
 }
@@ -205,10 +227,17 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     if (auto itr = m_registry.get(id); itr != m_registry.end())
         return do_acquire(itr->second);
 
-    if (auto s = pin_frame(id); !s.is_ok()) {
-        m_logger->error(s.what());
-        m_status = s;
-        return Err {s};
+    // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
+    // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is incremented each time the WAL flushes a block.
+    for (; ; ) {
+        auto s = pin_frame(id);
+        if (s.is_ok()) break;
+
+        if (!s.is_not_found()) {
+            m_logger->error(s.what());
+            m_status = s;
+            return Err {s};
+        }
     }
 
     auto itr = m_registry.get(id);

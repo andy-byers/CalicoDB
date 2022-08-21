@@ -6,10 +6,13 @@
 
 #include <gtest/gtest.h>
 
-#include "core/header.h"
 #include "core/core.h"
+#include "core/header.h"
 #include "fakes.h"
+#include "store/disk.h"
 #include "tools.h"
+#include "unit_tests.h"
+#include "wal/basic_wal.h"
 
 namespace {
 
@@ -69,12 +72,6 @@ public:
     std::unique_ptr<Core> core;
 };
 
-static auto expose_message(Status s)
-{
-    EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
-    return s.is_ok();
-}
-
 class BasicDatabaseTests: public testing::Test {
 public:
 
@@ -83,8 +80,9 @@ public:
         std::error_code ignore;
         fs::remove_all(ROOT, ignore);
 
-        options.page_size = 0x100;
-        options.frame_count = 16;
+        options.page_size = 0x200;
+        options.frame_count = 64;
+        options.log_level = spdlog::level::trace;
     }
 
     ~BasicDatabaseTests() override
@@ -126,7 +124,7 @@ TEST_F(BasicDatabaseTests, Inserts)
     static constexpr Size GROUP_SIZE {500};
 
     Database db;
-    ASSERT_TRUE(db.open(ROOT, options).is_ok());
+    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
 
     RecordGenerator generator;
     Random random {0};
@@ -136,12 +134,12 @@ TEST_F(BasicDatabaseTests, Inserts)
         auto itr = std::cbegin(records);
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
-            ASSERT_TRUE(db.insert(*itr).is_ok());
+            ASSERT_TRUE(expose_message(db.insert(*itr)));
             itr++;
         }
-        ASSERT_TRUE(db.commit().is_ok());
+        ASSERT_TRUE(expose_message(db.commit()));
     }
-    ASSERT_TRUE(db.close().is_ok());
+    ASSERT_TRUE(expose_message(db.close()));
 }
 
 TEST_F(BasicDatabaseTests, DataPersists)
@@ -158,7 +156,6 @@ TEST_F(BasicDatabaseTests, DataPersists)
     Database db;
 
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-
         ASSERT_TRUE(expose_message(db.open(ROOT, options)));
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
@@ -211,6 +208,8 @@ TEST_F(BasicDatabaseTests, ReportsInvalidFrameCounts)
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
     ASSERT_FALSE(db.is_open());
 }
+
+
 
 //
 //class DatabaseReadFaultTests: public testing::Test {

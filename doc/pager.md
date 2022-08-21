@@ -7,18 +7,18 @@ Both pages and frames are uniquely identified by their own indices.
 A page's page ID gives the offset of the page in the database file, while a frame's frame ID is its index in the collection of available frames.
 
 ## Page
-Note that the word "page" can also refer to the actual Calico DB Page object, which is returned by the buffer pool when a page is requested.
+Note that the word "page" can also refer to the actual Calico DB Page object, which is returned by the block pool when a page is requested.
 Page objects can be either read-only or read-write, and are reference counted.
 Typically, pages are acquired as read-only and promoted to read-write when an update is about to be made.
 This subverts the overhead of keeping a "before" copy of the page for recovery (see [wal.md](./wal.md) for more details).
 It also allows us to obtain multiple read-only references to a single database page for use in concurrent queries.
 
 ## Framer
-The framer object is in charge of "pinning" database pages to buffer pool frames.
+The framer object is in charge of "pinning" database pages to block pool frames.
 When a page is pinned, it is read from the database file into an available frame.
 Once the page is no longer needed, it can be "unpinned".
 This involves writing it back to the database file if it is dirty.
-It is the buffer pool's job, however, to ensure that if a dirty page is unpinned, its contents are already in the WAL.
+It is the block pool's job, however, to ensure that if a dirty page is unpinned, its contents are already in the WAL.
 This is achieved by checking the page LSN against the WAL flushed LSN.
 If the WAL flushed LSN is greater than or equal to the page LSN, then the page is safe to advance_block.
 
@@ -40,7 +40,7 @@ For reference, we are using something like the simplified version from this arti
 [//]: # (TODO: May upgrade to the full 2Q algorithm, which uses another queue, if deemed necessary for performance. However, it seems to work pretty well as-is.)
 
 ## Dirty List
-The buffer pool cache can contain anywhere from 8 to 8192 entries.
+The block pool cache can contain anywhere from 8 to 8192 entries.
 It can be pretty expensive to repeatedly search this many entries when looking for a frame to reuse.
 To help mitigate this cost, we keep a dirty list.
 The dirty list is a linked list containing the page IDs of dirty database pages.

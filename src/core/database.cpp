@@ -65,7 +65,10 @@ auto Database::destroy(Database db) -> Status
     return store.remove_directory(core.path());
 }
 
-Database::~Database() = default;
+Database::~Database()
+{
+    if (is_open()) (void)close();
+}
 
 Database::Database(Database &&) noexcept = default;
 

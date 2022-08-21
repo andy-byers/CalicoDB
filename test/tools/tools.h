@@ -3,7 +3,10 @@
 #define CALICO_TEST_TOOLS_TOOLS_H
 
 #include "calico/calico.h"
+#include "core/header.h"
 #include "page/node.h"
+#include "pager/framer.h"
+#include "store/disk.h"
 #include "random.h"
 #include "utils/types.h"
 #include "utils/utils.h"
@@ -11,8 +14,174 @@
 #include <iomanip>
 #include <iostream>
 #include <vector>
+#include <unordered_map>
 
 namespace calico {
+
+class DataFileInspector {
+public:
+    DataFileInspector(const std::string &path, Size page_size)
+        : m_store {std::make_unique<DiskStorage>()}
+    {
+        RandomReader *file {};
+        auto s = m_store->open_random_reader(path, &file);
+        CALICO_EXPECT_TRUE(s.is_ok());
+        m_file = std::unique_ptr<RandomReader> {file};
+
+        Size file_size {};
+        s = m_store->file_size(path, file_size);
+        CALICO_EXPECT_TRUE(s.is_ok());
+        CALICO_EXPECT_EQ(file_size % page_size, 0);
+        m_data.resize(file_size);
+
+        auto bytes = stob(m_data);
+        s = m_file->read(bytes, 0);
+        CALICO_EXPECT_EQ(bytes.size(), file_size);
+    }
+
+    [[nodiscard]]
+    auto page_count() const -> Size
+    {
+        return m_data.size() / m_page_size;
+    }
+
+    [[nodiscard]]
+    auto get_state() -> FileHeader
+    {
+        CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader));
+        auto root = get_page(PageId::root());
+        return read_header(root);
+    }
+
+    [[nodiscard]]
+    auto get_page(PageId id) -> Page
+    {
+        const auto offset = id.as_index() * m_page_size;
+        CALICO_EXPECT_LE(offset + m_page_size, m_data.size());
+
+        return Page {{
+            id,
+            stob(m_data).range(offset, m_page_size),
+            nullptr,
+            false,
+            false,
+        }};
+    }
+
+private:
+    std::unique_ptr<Storage> m_store;
+    std::unique_ptr<RandomReader> m_file;
+    std::string m_data;
+    Size m_page_size {};
+};
+
+class WalRecordGenerator {
+public:
+
+    [[nodiscard]]
+    auto setup_deltas(Bytes image) -> std::vector<PageDelta>
+    {
+        static constexpr Size MAX_WIDTH {30};
+        static constexpr Size MAX_SPREAD {20};
+        std::vector<PageDelta> deltas;
+
+        for (Size offset {random.next_int(image.size() / 10)}; offset < image.size(); ) {
+            const auto rest = image.size() - offset;
+            const auto size = random.next_int(1UL, std::min(rest, MAX_WIDTH));
+            deltas.emplace_back(PageDelta {offset, size});
+            offset += size + random.next_int(1UL, MAX_SPREAD);
+        }
+        for (const auto &[offset, size]: deltas) {
+            const auto replacement = random.next_string(size);
+            mem_copy(image.range(offset, size), stob(replacement));
+        }
+        return deltas;
+    }
+
+//    [[nodiscard]]
+//    auto setup_single_page_update(Bytes image)
+//    {
+//
+//    }
+
+private:
+    Random random {123};
+};
+//
+//struct WalPayloadWrapper {
+//    WalPayloadType type {};
+//    std::vector<PageDelta> deltas;
+//    BytesView image;
+//};
+//
+//struct WalScenario {
+//    std::vector<std::string> before_images;
+//    std::vector<std::string> after_images;
+//    std::vector<WalPayloadWrapper> payloads;
+//};
+//
+//class WalScenarioGenerator {
+//public:
+//    explicit WalScenarioGenerator(Size page_size)
+//        : m_page_size {page_size}
+//    {}
+//
+//    [[nodiscard]]
+//    auto generate_single_page(Size max_rounds) -> WalScenario
+//    {
+//        CALICO_EXPECT_GT(max_rounds, 0);
+//        WalScenario scenario;
+//        auto &[before_images, after_images, payloads] = scenario;
+//
+//        before_images.emplace_back(m_random.next_string(m_page_size));
+//        after_images.emplace_back(before_images.back());
+//        payloads.emplace_back();
+//        payloads.back().type = WalPayloadType::FULL_IMAGE;
+//        payloads.back().image = stob(pages.back());
+//
+//        const auto num_rounds = m_random.next_int(1UL, max_rounds);
+//        while (payloads.size() - 1 < num_rounds) {
+//            WalPayloadWrapper payload;
+//            payload.image = stob(after_images.back());
+//            payload.type = WalPayloadType::DELTAS;
+//            payload.deltas = generate_deltas(payload.image);
+//        }
+//    }
+//
+//    [[nodiscard]]
+//    auto generate_multiple_pages(Size num_pages, Size max_rounds_per_page) -> WalScenario
+//    {
+//        std::vector<WalScenario> scenarios(num_pages);
+//        std::generate(begin(scenarios), end(scenarios), [this, max_rounds_per_page] {
+//            return generate_single_page(max_rounds_per_page);
+//        });
+//
+//    }
+//
+//private:
+//    [[nodiscard]]
+//    auto generate_deltas(Bytes image) -> std::vector<PageDelta>
+//    {
+//        static constexpr Size MAX_WIDTH {30};
+//        static constexpr Size MAX_SPREAD {20};
+//        std::vector<PageDelta> deltas;
+//
+//        for (Size offset {m_random.next_int(image.size() / 10)}; offset < image.size(); ) {
+//            const auto rest = image.size() - offset;
+//            const auto size = m_random.next_int(1UL, std::min(rest, MAX_WIDTH));
+//            deltas.emplace_back(PageDelta {offset, size});
+//            offset += size + m_random.next_int(1UL, MAX_SPREAD);
+//        }
+//        for (const auto &[offset, size]: deltas) {
+//            const auto replacement = m_random.next_string(size);
+//            mem_copy(image.range(offset, size), stob(replacement));
+//        }
+//        return deltas;
+//    }
+//
+//    Random m_random {123};
+//    Size m_page_size {};
+//};
 
 class BPlusTree;
 
@@ -185,6 +354,7 @@ public:
 private:
     Parameters m_param;
 };
+
 //
 //class WALRecordGenerator {
 //public:
@@ -275,6 +445,134 @@ private:
 //    Size m_page_size;
 //};
 
-} // cco
+} // namespace calico
+
+
+namespace fmt {
+
+namespace cco = calico;
+
+template <>
+struct formatter<cco::FileHeader> {
+
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const cco::FileHeader &header, FormatContext &ctx) {
+        auto out = fmt::format("({} B) {{", sizeof(header));
+        out += fmt::format("magic_code: {}, ", header.magic_code);
+        out += fmt::format("header_crc: {}, ", header.header_crc);
+        out += fmt::format("page_count: {}, ", header.page_count);
+        out += fmt::format("freelist_head: {}, ", header.freelist_head);
+        out += fmt::format("record_count: {}, ", header.record_count);
+        out += fmt::format("flushed_lsn: {}, ", header.flushed_lsn);
+        out += fmt::format("page_size: {}", header.page_size);
+        return format_to(ctx.out(), "FileHeader {}}}", out);
+    }
+};
+
+template <>
+struct formatter<cco::Options> {
+
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const cco::Options &options, FormatContext &ctx) {
+        auto out = fmt::format("({} B) {{", sizeof(options));
+        out += fmt::format("page_size: {}, ", options.page_size);
+        out += fmt::format("frame_count: {}, ", options.frame_count);
+        out += fmt::format("log_level: {}, ", options.log_level);
+        out += fmt::format("store: {}, ", static_cast<void*>(options.store));
+        out += fmt::format("wal: {}", static_cast<void*>(options.wal));
+        return format_to(ctx.out(), "Options {}}}", out);
+    }
+};
+
+template <>
+struct formatter<cco::PageType> {
+
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const cco::PageType &type, FormatContext &ctx) {
+        switch (type) {
+            case cco::PageType::EXTERNAL_NODE: return format_to(ctx.out(), "EXTERNAL_NODE");
+            case cco::PageType::INTERNAL_NODE: return format_to(ctx.out(), "INTERNAL_NODE");
+            case cco::PageType::FREELIST_LINK: return format_to(ctx.out(), "FREELIST_LINK");
+            case cco::PageType::OVERFLOW_LINK: return format_to(ctx.out(), "OVERFLOW_LINK");
+            default: return format_to(ctx.out(), "<unrecognized>");
+        }
+    }
+};
+
+template <>
+struct formatter<cco::WalRecordHeader::Type> {
+
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const cco::WalRecordHeader::Type &type, FormatContext &ctx) {
+        switch (type) {
+            case cco::WalRecordHeader::FULL: return format_to(ctx.out(), "FULL");
+            case cco::WalRecordHeader::FIRST: return format_to(ctx.out(), "FIRST");
+            case cco::WalRecordHeader::MIDDLE: return format_to(ctx.out(), "MIDDLE");
+            case cco::WalRecordHeader::LAST: return format_to(ctx.out(), "LAST");
+            default: return format_to(ctx.out(), "<unrecognized>");
+        }
+    }
+};
+
+template <>
+struct formatter<cco::WalRecordHeader> {
+
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const cco::WalRecordHeader &header, FormatContext &ctx) {
+        auto out = fmt::format("({} B) {{", sizeof(header));
+        out += fmt::format("lsn: {}, ", header.lsn);
+        out += fmt::format("crc: {}, ", header.crc);
+        out += fmt::format("size: {}, ", header.size);
+        out += fmt::format("type: {}, ", header.type);
+        out += fmt::format("pad: {}", header.pad);
+        return format_to(ctx.out(), "WalRecordHeader {}}}", out);
+    }
+};
+
+template <>
+struct formatter<cco::WalPayloadType> {
+
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const cco::WalPayloadType &type, FormatContext &ctx) {
+        switch (type) {
+            case cco::WalPayloadType::FULL_IMAGE: return format_to(ctx.out(), "FULL_IMAGE");
+            case cco::WalPayloadType::DELTAS: return format_to(ctx.out(), "DELTAS");
+            case cco::WalPayloadType::COMMIT: return format_to(ctx.out(), "COMMIT");
+            default: return format_to(ctx.out(), "<unrecognized>");
+        }
+    }
+};
+
+}  // namespace fmt
 
 #endif // CALICO_TEST_TOOLS_TOOLS_H
