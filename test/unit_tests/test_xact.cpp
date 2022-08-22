@@ -128,7 +128,7 @@ TEST_F(XactTests, SequenceIdsAlwaysIncrease)
     // the most-recent transaction. Normally, we wouldn't want to call either of these methods directly. This is just for testing!
     SequenceId last_lsn;
     ASSERT_TRUE(expose_message(wal->stop_writer()));
-    ASSERT_TRUE(expose_message(wal->open_and_recover(
+    ASSERT_TRUE(expose_message(wal->setup_and_recover(
         [&last_lsn](const auto &info) {
             EXPECT_LT(last_lsn, info.page_lsn);
             return Status::ok();

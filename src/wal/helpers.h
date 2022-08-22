@@ -8,6 +8,7 @@
 #include "utils/logging.h"
 #include "utils/queue.h"
 #include "utils/types.h"
+#include "utils/result.h"
 #include "utils/scratch.h"
 
 namespace calico {
@@ -96,6 +97,42 @@ struct SegmentInfo {
 
     SegmentId id;
     bool has_commit {};
+};
+
+class WalCollection;
+class WalRecordWriter;
+
+struct SegmentGuard final {
+public:
+    [[nodiscard]] auto start(WalRecordWriter &writer, WalCollection &collection) -> Status;
+    [[nodiscard]] auto finish(bool has_commit) -> Status;
+    [[nodiscard]] auto abort() -> Status;
+
+    // No moves or copies!
+    SegmentGuard(const SegmentGuard&) = delete;
+    auto operator=(const SegmentGuard&) -> SegmentGuard& = delete;
+    SegmentGuard(SegmentGuard&&) = delete;
+    auto operator=(SegmentGuard&&) -> SegmentGuard& = delete;
+
+    SegmentGuard(Storage &store, std::string prefix)
+        : m_prefix {std::move(prefix)},
+          m_store {&store}
+    {}
+
+    ~SegmentGuard();
+
+    [[nodiscard]]
+    auto is_started() const -> bool
+    {
+        CALICO_EXPECT_EQ(m_writer == nullptr, m_collection == nullptr);
+        return m_writer != nullptr;
+    }
+
+private:
+    std::string m_prefix;
+    Storage *m_store {};
+    WalRecordWriter *m_writer {};
+    WalCollection *m_collection {};
 };
 
 class WalCollection final {

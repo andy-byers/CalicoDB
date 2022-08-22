@@ -64,13 +64,13 @@ public:
     }
 
     [[nodiscard]]
-    auto open_and_recover(const RedoCallback &, const UndoCallback &) -> Status override
+    auto setup_and_recover(const RedoCallback &, const UndoCallback &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto undo_last(const UndoCallback &) -> Status override
+    auto abort_last(const UndoCallback &) -> Status override
     {
         return Status::ok();
     }

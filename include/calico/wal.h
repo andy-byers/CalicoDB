@@ -67,7 +67,7 @@ public:
      *
      * @return True if the WAL is being written to, false otherwise.
      */
-    virtual auto is_writing() const -> bool = 0;
+    [[nodiscard]] virtual auto is_writing() const -> bool = 0;
 
     /**
      * Get the LSN of the last WAL record written to disk.
@@ -77,7 +77,7 @@ public:
      *
      * @return The last LSN written to disk.
      */
-    virtual auto flushed_lsn() const -> std::uint64_t = 0;
+    [[nodiscard]] virtual auto flushed_lsn() const -> std::uint64_t = 0;
 
     /**
      * Get the LSN of the next WAL record.
@@ -86,7 +86,7 @@ public:
      *
      * @return The LSN of the next WAL record.
      */
-    virtual auto current_lsn() const -> std::uint64_t = 0;
+    [[nodiscard]] virtual auto current_lsn() const -> std::uint64_t = 0;
 
     /**
      * Log a record containing the entire contents of a database page, before it was made dirty by a write.
@@ -99,7 +99,7 @@ public:
      * @param image Contents of the page before the first modification.
      * @return A status indicating success or failure.
      */
-    virtual auto log_image(std::uint64_t page_id, BytesView image) -> Status = 0;
+    [[nodiscard]] virtual auto log_image(std::uint64_t page_id, BytesView image) -> Status = 0;
 
     /**
      *
@@ -108,13 +108,13 @@ public:
      * @param deltas A collection of ranges representing unique regions of the page that have been updated.
      * @return A status indicating success or failure.
      */
-    virtual auto log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status = 0;
+    [[nodiscard]] virtual auto log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status = 0;
 
     /**
      *
      * @return A status indicating success or failure.
      */
-    virtual auto log_commit() -> Status = 0;
+    [[nodiscard]] virtual auto log_commit() -> Status = 0;
 
     /**
      * Enter the stopped state.
@@ -124,7 +124,7 @@ public:
      *
      * @return A status indicating success or failure.
      */
-    virtual auto stop_writer() -> Status = 0;
+    [[nodiscard]] virtual auto stop_writer() -> Status = 0;
 
     /**
      * Enter the running state.
@@ -133,7 +133,7 @@ public:
      *
      * @return A status indicating success or failure.
      */
-    virtual auto start_writer() -> Status = 0;
+    [[nodiscard]] virtual auto start_writer() -> Status = 0;
 
     /**
      * Open and roll the entire WAL.
@@ -147,7 +147,7 @@ public:
      *                 the updates could not be applied for some reason).
      * @return A status indicating success or failure.
      */
-    virtual auto open_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status = 0;
+    [[nodiscard]] virtual auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status = 0;
 
     /**
      * Roll back the most recent transaction.
@@ -155,11 +155,11 @@ public:
      * This method calls the provided callback for each full image record belonging to the most recent transaction in reverse order. It can be used either at the
      * end of recovery, if a commit record was not encountered, or during a transaction to abort.
      *
-     * @see open_and_recover()
+     * @see setup_and_recover()
      * @param callback A callback to call on each full page image.
      * @return A status indicating success or failure.
      */
-    virtual auto undo_last(const UndoCallback &callback) -> Status = 0;
+    [[nodiscard]] virtual auto abort_last(const UndoCallback &callback) -> Status = 0;
 
     /**
      * Indicate the point to which the log can be cleared.

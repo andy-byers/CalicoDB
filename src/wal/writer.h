@@ -61,6 +61,7 @@ public:
     template<class UpdateLsn>
     auto write(SequenceId lsn, BytesView payload, const UpdateLsn &update) -> Status
     {
+        CALICO_EXPECT_TRUE(is_attached());
         CALICO_EXPECT_FALSE(lsn.is_null());
         const SequenceId last_lsn {lsn.value - 1};
 
@@ -134,10 +135,11 @@ public:
     };
 
     enum class EventType {
+        START_WRITER,
+        STOP_WRITER,
         LOG_FULL_IMAGE,
         LOG_DELTAS,
         LOG_COMMIT,
-        STOP_WRITER,
     };
 
     struct Event {
@@ -175,8 +177,16 @@ public:
     auto startup() -> Status
     {
         CALICO_EXPECT_FALSE(is_running());
-        m_status = open_on_segment();
+        m_status = Status::ok();
         m_state.thread = std::thread {background_writer, this};
+        m_state.events.emplace_back(Event {
+            EventType::START_WRITER,
+            SequenceId::null(),
+            std::nullopt,
+        });
+        m_state.cv.notify_one();
+
+        // TODO: May want to wait until the writer gets set up on the first segment?
         return m_status;
     }
 
@@ -199,7 +209,7 @@ public:
             m_state.thread->join();
             m_state.thread.reset();
         }
-        return Status::ok();
+        return m_status;
     }
 
     [[nodiscard]]
@@ -212,64 +222,33 @@ public:
 private:
 
     [[nodiscard]]
-    auto open_on_segment() -> Status
+    auto run_start(SegmentGuard &guard) -> Status
     {
-        CALICO_EXPECT_FALSE(m_collection->is_segment_started());
-        const SegmentId next_id {m_collection->most_recent_id().value + 1};
-
-        AppendWriter *file {};
-        const auto path = m_prefix + next_id.to_name();
-        auto s = m_store->open_append_writer(path, &file);
-
-        if (s.is_ok()) {
-            m_collection->start_segment(next_id);
-            m_writer.attach(file);
-        }
-        return s;
+        return guard.start(m_writer, *m_collection);
     }
 
     [[nodiscard]]
-    auto try_close_segment() -> Status
+    auto run_stop(SegmentGuard &guard) -> Status
     {
-        auto s = Status::ok();
-        if (m_writer.is_attached()) {
-            CALICO_EXPECT_TRUE(m_collection->is_segment_started());
-            const auto should_abort = !m_writer.has_written();
-            s = m_writer.detach();
+        if (m_writer.has_written())
+            return guard.finish(false);
 
-            if (!s.is_ok()) {
-                (void)try_abort_segment();
-                return s;
-            } else if (should_abort) {
-                return try_abort_segment();
-            } else {
-                m_collection->finish_segment(false);
-            }
-        }
-        return s;
-    }
-
-    [[nodiscard]]
-    auto try_abort_segment() -> Status
-    {
-        CALICO_EXPECT_TRUE(m_collection->is_segment_started());
-        CALICO_EXPECT_FALSE(m_writer.is_attached());
         const auto id = m_collection->current_segment().id;
-        m_collection->abort_segment();
+        (void)guard.abort(); // TODO
         return m_store->remove_file(m_prefix + id.to_name());
     }
 
     [[nodiscard]]
     auto needs_segmentation() const -> bool
     {
-        return m_writer.block_count() > 128; // TODO: Make this tunable?
+        return m_writer.is_attached() && m_writer.block_count() > 128; // TODO: Make this tunable?
     }
 
     static auto background_writer(BackgroundWriter *writer) -> void*;
     [[nodiscard]] auto emit_payload(SequenceId lsn, BytesView payload) -> Status;
-    [[nodiscard]] auto emit_commit(SequenceId lsn) -> Status;
-    [[nodiscard]] auto advance_segment(bool) -> Status;
-    auto handle_error(Status) -> void*;
+    [[nodiscard]] auto emit_commit(SegmentGuard &guard, SequenceId lsn) -> Status;
+    [[nodiscard]] auto advance_segment(SegmentGuard &guard, bool has_commit) -> Status;
+    auto handle_error(SegmentGuard &guard, Status error) -> void*;
 
     struct {
         mutable std::mutex mu;

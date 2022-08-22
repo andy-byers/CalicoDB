@@ -10,8 +10,19 @@ namespace calico {
     } while (0)
 
 [[nodiscard]]
-auto not_started_error(spdlog::logger &logger, const std::string &primary)
+auto is_writer_ready(const BasicWalWriter &writer)
 {
+    return writer.is_running() && writer.status().is_ok();
+}
+
+[[nodiscard]]
+auto writer_error(spdlog::logger &logger, const BasicWalWriter &writer, const std::string &primary)
+{
+    if (!writer.status().is_ok()) {
+        logger.error(primary);
+        logger.error("(reason) {}", writer.status().what());
+        return writer.status();
+    }
     LogMessage message {logger};
     message.set_primary(primary);
     message.set_detail("background writer is not running");
@@ -38,29 +49,6 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
 {
     m_logger->info("constructing BasicWriteAheadLog object");
 }
-//
-//[[nodiscard]]
-//auto find_last_lsn(BasicWalReader &reader, std::vector<SegmentId> &segments, SequenceId &last_lsn)
-//{
-//    for (auto itr = crbegin(segments); itr != crend(segments); ++itr) {
-//        auto s = reader.open(*itr);
-//        if (s.is_logic_error()) continue;
-//        MAYBE_FORWARD(s, MSG);
-//
-//        std::vector<RecordPosition> positions;
-//        s = reader.redo(positions, [&last_lsn](const auto &descriptor) {
-//            last_lsn.value = descriptor.page_lsn;
-//            return Status::ok();
-//        });
-//        if (positions.empty()) continue;
-//        MAYBE_FORWARD(s, MSG);
-//
-//        // Get rid of empty segments at the end.
-//        segments.erase(itr.base(), end(segments));
-//        break;
-//    }
-//    return reader.close();
-//}
 
 auto BasicWriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
@@ -72,44 +60,6 @@ auto BasicWriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> S
         message.set_detail("out of memory");
         return message.system_error();
     }
-//    std::vector<std::string> child_names;
-//    const auto prefix = param.prefix + WAL_PREFIX;
-//    auto s = param.store->get_children(param.prefix, child_names);
-//
-//    std::vector<std::string> segment_names;
-//    std::copy_if(cbegin(child_names), cend(child_names), back_inserter(segment_names), [prefix](const auto &path) {
-//        return stob(path).starts_with(prefix) && path.size() - prefix.size() == SegmentId::DIGITS_SIZE;
-//    });
-//
-//    std::vector<SegmentId> segment_ids;
-//    std::transform(cbegin(segment_names), cend(segment_names), back_inserter(segment_ids), [](const auto &name) {
-//        return SegmentId::from_name(stob(name));
-//    });
-//
-//    std::sort(begin(segment_ids), end(segment_ids));
-//    for (const auto &id: segment_ids) {
-//        s = temp->m_reader.open(id);
-//        if (s.is_logic_error()) continue;
-//        if (!s.is_ok()) return s;
-//
-//        bool has_commit {};
-//        std::vector<RecordPosition> positions;
-//        s = temp->m_reader.redo(positions, [&](const auto &info) {
-//            temp->m_last_lsn.value = info.page_lsn;
-//            has_commit = info.is_commit;
-//            return Status::ok();
-//        });
-//        if (!s.is_ok()) return s;
-//
-//        s = temp->m_reader.close();
-//        if (!s.is_ok()) return s;
-//
-//        temp->m_collection.start_segment(id);
-//        temp->m_collection.finish_segment(has_commit);
-//    }
-//
-//    temp->m_flushed_lsn.store(temp->m_last_lsn);
-
     *out = temp;
     return Status::ok();
 }
@@ -137,11 +87,11 @@ auto BasicWriteAheadLog::current_lsn() const -> std::uint64_t
 
 auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> Status
 {
-    if (!m_writer.is_running()) return not_started_error(*m_logger, "could not log full image");
+    if (!is_writer_ready(m_writer)) return writer_error(*m_logger, m_writer, "could not log full image");
 
     // Skip writing this full image if one has already been written for this page during this transaction. If so, we can
     // just use the old one to undo changes made to this page during the entire transaction.
-    const auto itr = m_images.find(PageId {page_id}); // TODO: Likely doesn't do much, we already refuse to write an image if a page was already dirty when we acquire it.
+    const auto itr = m_images.find(PageId {page_id});
     if (itr != cend(m_images)) {
         m_logger->info("skipping full image for page {}", page_id);
         return Status::ok();
@@ -156,7 +106,7 @@ auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> St
 
 auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status
 {
-    if (!m_writer.is_running()) return not_started_error(*m_logger, "could not log deltas");
+    if (!is_writer_ready(m_writer)) return writer_error(*m_logger, m_writer, "could not log deltas");
 
     m_last_lsn++;
     m_logger->info("logging deltas for page {} (LSN = {})", page_id, m_last_lsn.value);
@@ -166,7 +116,7 @@ auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, cons
 
 auto BasicWriteAheadLog::log_commit() -> Status
 {
-    if (!m_writer.is_running()) return not_started_error(*m_logger, "could not log commit");
+    if (!is_writer_ready(m_writer)) return writer_error(*m_logger, m_writer, "could not log commit");
 
     m_last_lsn++;
     m_logger->info("logging commit (LSN = {})", m_last_lsn.value);
@@ -195,7 +145,7 @@ auto BasicWriteAheadLog::start_writer() -> Status
     return s;
 }
 
-auto BasicWriteAheadLog::open_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status
+auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status
 {
     static constexpr auto MSG = "could not recovery";
     m_logger->info("received recovery request");
@@ -280,7 +230,7 @@ auto BasicWriteAheadLog::open_and_recover(const RedoCallback &redo_cb, const Und
     return s;
 }
 
-auto BasicWriteAheadLog::undo_last(const UndoCallback &callback) -> Status
+auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
 {
     static constexpr auto MSG = "could not undo last";
     m_logger->info("received undo request");

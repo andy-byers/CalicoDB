@@ -56,8 +56,8 @@ public:
     [[nodiscard]] auto log_commit() -> Status override;
     [[nodiscard]] auto stop_writer() -> Status override;
     [[nodiscard]] auto start_writer() -> Status override;
-    [[nodiscard]] auto open_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status override;
-    [[nodiscard]] auto undo_last(const UndoCallback &callback) -> Status override;
+    [[nodiscard]] auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status override;
+    [[nodiscard]] auto abort_last(const UndoCallback &callback) -> Status override;
     auto save_state(FileHeader &) -> void override;
     auto load_state(const FileHeader &) -> void override;
 

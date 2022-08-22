@@ -259,7 +259,7 @@ auto Core::abort() -> Status
 
     // This should give us the full images of each updated page belonging to the current transaction, before any changes were made,
     // in reverse order.
-    s = m_wal->undo_last([this](UndoDescriptor undo) {
+    s = m_wal->abort_last([this](UndoDescriptor undo) {
         const auto [id, image] = undo;
         auto page = m_pager->acquire(PageId {id}, true);
         if (!page.has_value()) return page.error();
@@ -303,7 +303,7 @@ auto Core::ensure_consistent_state() -> Status
 {
     static constexpr auto MSG = "cannot ensure consistent database state";
 
-    auto s = m_wal->open_and_recover(
+    auto s = m_wal->setup_and_recover(
         [this](const auto &info) {
             if (!info.is_commit) {
                 auto page = m_pager->acquire(PageId {info.page_id}, true);

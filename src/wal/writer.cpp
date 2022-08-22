@@ -1,42 +1,9 @@
-#include <chrono>
 #include "writer.h"
-#include "basic_wal.h"
-#include "calico/store.h"
 #include "utils/logging.h"
 #include "utils/types.h"
 #include <optional>
 
 namespace calico {
-
-//[[maybe_unused]] [[nodiscard]]
-//static auto check_update_parameters(BackgroundWriter::Event event) -> bool
-//{
-//    CALICO_EXPECT_TRUE(event.buffer.has_value());
-//    CALICO_EXPECT_NE(event.lsn, 0);
-//}
-//
-//[[maybe_unused]] [[nodiscard]]
-//static auto check_commit_parameters(BackgroundWriter::Event event) -> bool
-//{
-//    CALICO_EXPECT_FALSE(event.buffer.has_value());
-//    CALICO_EXPECT_NE(event.lsn, 0);
-//
-//}
-//
-//[[maybe_unused]] [[nodiscard]]
-//static auto check_stop_parameters(BackgroundWriter::Event event) -> bool
-//{
-//    CALICO_EXPECT_FALSE(event.buffer.has_value());
-//    CALICO_EXPECT_EQ(event.lsn, 0);
-//
-//}
-//
-//[[maybe_unused]] [[nodiscard]]
-//static auto check_pause_parameters(BackgroundWriter::Event event) -> bool
-//{
-//    CALICO_EXPECT_FALSE(event.buffer.has_value());
-//    CALICO_EXPECT_EQ(event.lsn, 0);
-//}
 
 auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
 {
@@ -47,15 +14,22 @@ auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
     auto &scratch = *writer->m_scratch;
     auto is_running = true;
 
+    SegmentGuard current {*writer->m_store, writer->m_prefix};
+
     while (is_running) {
         std::unique_lock lock {mu};
-        cv.wait(lock, [writer] { // TODO: Wake up periodically using wait_for() and check some flag to determine if we should exit instead of having a "STOP" event?
+        cv.wait(lock, [writer] {
             return !writer->m_state.events.empty();
         });
-//        cv.wait_for(lock, 500us);
-//        if (events.empty()) continue;
-        auto [type, lsn, buffer, size] = events.front();
+
+        auto [
+            type,
+            lsn,
+            buffer,
+            size
+        ] = events.front();
         events.pop_front();
+
         lock.unlock();
 
         auto s = Status::ok();
@@ -66,10 +40,13 @@ auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
                 s = writer->emit_payload(lsn, buffer->data().truncate(size));
                 break;
             case EventType::LOG_COMMIT:
-                s = writer->emit_commit(lsn);
+                s = writer->emit_commit(current, lsn);
+                break;
+            case EventType::START_WRITER:
+                s = writer->run_start(current);
                 break;
             case EventType::STOP_WRITER:
-                s = writer->try_close_segment();
+                s = writer->run_stop(current);
                 is_running = false;
                 break;
             default:
@@ -81,7 +58,7 @@ auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
 
         // Shouldn't need segmentation on this round unless we wrote something.
         if (s.is_ok() && writer->needs_segmentation()) {
-            s = writer->advance_segment(false);
+            s = writer->advance_segment(current, false);
 
             if (s.is_ok())
                 flushed_lsn.store(lsn);
@@ -90,21 +67,23 @@ auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
         // TODO: Clean up unneeded segments. We'll use the m_first_lsn member from BasicWriteAheadLog...
 
         if (!s.is_ok())
-            return writer->handle_error(s);
+            return writer->handle_error(current, s);
     }
     return nullptr;
 }
 
-auto BackgroundWriter::handle_error(Status s) -> void*
+auto BackgroundWriter::handle_error(SegmentGuard &guard, Status s) -> void*
 {
     CALICO_EXPECT_FALSE(s.is_ok());
-    std::lock_guard guard {m_state.mu};
+    std::lock_guard lock {m_state.mu};
     m_status = std::move(s);
     m_state.events.clear();
     m_state.thread->detach();
     m_state.thread.reset();
-    (void)m_writer.detach();
-    (void)try_abort_segment(); // TODO: Store multiple status objects? Or just log additional errors?
+
+    const auto id = m_collection->current_segment().id;
+    if (guard.is_started()) (void)guard.abort();
+    (void)m_store->remove_file(m_prefix + id.to_name());
     return nullptr;
 }
 
@@ -115,7 +94,7 @@ auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
     });
 }
 
-auto BackgroundWriter::emit_commit(SequenceId lsn) -> Status
+auto BackgroundWriter::emit_commit(SegmentGuard &guard, SequenceId lsn) -> Status
 {
     std::string scratch(1, '\x00');
     const auto payload_size = encode_commit_payload(stob(scratch));
@@ -123,24 +102,19 @@ auto BackgroundWriter::emit_commit(SequenceId lsn) -> Status
 
     auto s = emit_payload(lsn, stob(scratch));
     if (s.is_ok()) {
-        s = advance_segment(true);
+        s = advance_segment(guard, true);
         if (s.is_ok()) m_flushed_lsn->store(lsn);
     }
     return s;
 }
 
-auto BackgroundWriter::advance_segment(bool has_commit) -> Status // TODO: Weird semantics...
+auto BackgroundWriter::advance_segment(SegmentGuard &guard, bool has_commit) -> Status // TODO: Weird semantics...
 {
-    if (m_writer.is_attached()) {
-        CALICO_EXPECT_TRUE(m_collection->is_segment_started());
-        m_collection->finish_segment(has_commit);
-
-        auto s = m_writer.detach();
+    if (guard.is_started()) {
+        auto s = guard.finish(has_commit);
         if (!s.is_ok()) return s;
-
-        return open_on_segment();
     }
-    return Status::ok();
+    return run_start(guard);
 }
 
 auto BasicWalWriter::start() -> Status
@@ -188,20 +162,5 @@ auto BasicWalWriter::log_commit(SequenceId lsn) -> void
         0,
     });
 }
-
-//
-//    // Clean up obsolete segments.
-//    const auto pager_lsn = m_pager_lsn->load();
-//    for (; ; ) {
-//        const auto front = m_segments->front();
-//        const auto is_flushed = pager_lsn >= front.first_lsn;
-//        const auto is_previous = front.id < m_positions->front().id;
-//        if (!is_flushed || !is_previous)
-//            break;
-//
-//        s = m_store->remove_file(prefix + m_segments->front().id.to_name());
-//        if (!s.is_ok()) return s;
-//        m_segments->erase(cbegin(*m_segments));
-//    }
 
 } // namespace calico
