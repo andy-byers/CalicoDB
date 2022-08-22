@@ -42,17 +42,17 @@ auto main(int argc, const char *argv[]) -> int
     Options options;
     options.page_size = 0x200;
     Database db;
-    CALICO_EXPECT_OK(db.open(path, options));
+    expect_ok(db.open(path, options));
     {
         std::ofstream ofs {value_path, std::ios::trunc};
         CALICO_EXPECT_TRUE(ofs.is_open());
         for (Size i {}; i < num_committed; ++i) {
             const auto key = make_key<KEY_WIDTH>(i);
             const auto value = random_string(random, 2, 15);
-            CALICO_EXPECT_OK(db.insert(stob(key), stob(value)));
+            expect_ok(db.insert(stob(key), stob(value)));
             ofs << value << '\n';
         }
-        CALICO_EXPECT_OK(db.commit());
+        expect_ok(db.commit());
     }
 
     puts(value_path.c_str());
@@ -62,14 +62,14 @@ auto main(int argc, const char *argv[]) -> int
     for (Size i {}; i < LIMIT; ++i) {
         const auto key = std::to_string(random.next_int(num_committed * 2));
         const auto value = random_string(random, 0, options.page_size / 2);
-        CALICO_EXPECT_OK(db.insert(stob(key), stob(value)));
+        expect_ok(db.insert(stob(key), stob(value)));
 
         // Keep the database from getting too large.
         if (const auto info = db.info(); info.record_count() > max_database_size) {
             while (info.record_count() >= max_database_size / 2) {
                 const auto cursor = db.find_minimum();
                 CALICO_EXPECT_TRUE(cursor.is_valid());
-                CALICO_EXPECT_OK(db.erase(cursor.key()));
+                expect_ok(db.erase(cursor.key()));
             }
         }
     }

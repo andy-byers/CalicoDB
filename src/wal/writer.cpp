@@ -8,6 +8,36 @@
 
 namespace calico {
 
+//[[maybe_unused]] [[nodiscard]]
+//static auto check_update_parameters(BackgroundWriter::Event event) -> bool
+//{
+//    CALICO_EXPECT_TRUE(event.buffer.has_value());
+//    CALICO_EXPECT_NE(event.lsn, 0);
+//}
+//
+//[[maybe_unused]] [[nodiscard]]
+//static auto check_commit_parameters(BackgroundWriter::Event event) -> bool
+//{
+//    CALICO_EXPECT_FALSE(event.buffer.has_value());
+//    CALICO_EXPECT_NE(event.lsn, 0);
+//
+//}
+//
+//[[maybe_unused]] [[nodiscard]]
+//static auto check_stop_parameters(BackgroundWriter::Event event) -> bool
+//{
+//    CALICO_EXPECT_FALSE(event.buffer.has_value());
+//    CALICO_EXPECT_EQ(event.lsn, 0);
+//
+//}
+//
+//[[maybe_unused]] [[nodiscard]]
+//static auto check_pause_parameters(BackgroundWriter::Event event) -> bool
+//{
+//    CALICO_EXPECT_FALSE(event.buffer.has_value());
+//    CALICO_EXPECT_EQ(event.lsn, 0);
+//}
+
 auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
 {
     using namespace std::chrono_literals;
@@ -30,30 +60,18 @@ auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
 
         auto s = Status::ok();
         switch (type) {
+            case EventType::LOG_FULL_IMAGE:
             case EventType::LOG_DELTAS:
                 CALICO_EXPECT_TRUE(buffer.has_value());
                 s = writer->emit_payload(lsn, buffer->data().truncate(size));
                 break;
-            case EventType::LOG_FULL_IMAGE:
-                CALICO_EXPECT_TRUE(buffer.has_value());
-                s = writer->emit_payload(lsn, buffer->data().truncate(size));
-                break;
             case EventType::LOG_COMMIT:
-                CALICO_EXPECT_FALSE(buffer.has_value());
                 s = writer->emit_commit(lsn);
                 break;
-            case EventType::PAUSE_WRITER:
-                CALICO_EXPECT_FALSE(buffer.has_value());
-                s = writer->advance_segment(false);
-                // Main thread should be waiting in standby().
-                cv.notify_one();
-                break;
             case EventType::STOP_WRITER:
-                CALICO_EXPECT_FALSE(buffer.has_value());
-                s = writer->try_close_segment(lsn);
+                s = writer->try_close_segment();
                 is_running = false;
                 break;
-
             default:
                 CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
         }
@@ -85,28 +103,16 @@ auto BackgroundWriter::handle_error(Status s) -> void*
     m_state.events.clear();
     m_state.thread->detach();
     m_state.thread.reset();
-    (void)m_writer.detach(); // TODO: Store multiple status objects? Or just log additional errors?
+    (void)m_writer.detach();
+    (void)try_abort_segment(); // TODO: Store multiple status objects? Or just log additional errors?
     return nullptr;
 }
 
 auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
 {
-    const auto is_first = !m_writer.is_attached();
-    auto s = Status::ok();
-
-    if (is_first) {
-        s = open_on_segment();
-        if (!s.is_ok()) return s;
-    }
-
-    s = m_writer.write(lsn, payload, [this](auto flushed_lsn) {
+    return m_writer.write(lsn, payload, [this](auto flushed_lsn) {
         m_flushed_lsn->store(flushed_lsn);
     });
-
-    if (!s.is_ok())
-        m_collection->abort_segment();
-
-    return s;
 }
 
 auto BackgroundWriter::emit_commit(SequenceId lsn) -> Status
@@ -127,7 +133,6 @@ auto BackgroundWriter::advance_segment(bool has_commit) -> Status // TODO: Weird
 {
     if (m_writer.is_attached()) {
         CALICO_EXPECT_TRUE(m_collection->is_segment_started());
-        m_current_id.value++;
         m_collection->finish_segment(has_commit);
 
         auto s = m_writer.detach();
@@ -141,11 +146,6 @@ auto BackgroundWriter::advance_segment(bool has_commit) -> Status // TODO: Weird
 auto BasicWalWriter::start() -> Status
 {
     return m_writer.startup();
-}
-
-auto BasicWalWriter::pause() -> Status
-{
-    return m_writer.standby();
 }
 
 auto BasicWalWriter::stop() -> Status

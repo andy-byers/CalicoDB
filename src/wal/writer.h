@@ -129,7 +129,7 @@ public:
         LogScratchManager *scratch {};
         WalCollection *collection {};
         std::atomic<SequenceId> *flushed_lsn {};
-        std::string dirname;
+        std::string prefix;
         Size block_size {};
     };
 
@@ -137,7 +137,6 @@ public:
         LOG_FULL_IMAGE,
         LOG_DELTAS,
         LOG_COMMIT,
-        PAUSE_WRITER,
         STOP_WRITER,
     };
 
@@ -151,7 +150,7 @@ public:
     explicit BackgroundWriter(const Parameters &param)
         : m_flushed_lsn {param.flushed_lsn},
           m_writer {param.block_size},
-          m_path_prefix {param.dirname + "/"},
+          m_prefix {param.prefix},
           m_scratch {param.scratch},
           m_collection {param.collection},
           m_store {param.store}
@@ -176,7 +175,6 @@ public:
     auto startup() -> Status
     {
         CALICO_EXPECT_FALSE(is_running());
-        m_current_id.value = m_collection->most_recent_id().value + 1;
         m_status = open_on_segment();
         m_state.thread = std::thread {background_writer, this};
         return m_status;
@@ -204,24 +202,6 @@ public:
         return Status::ok();
     }
 
-    auto standby() -> Status
-    {
-        dispatch({
-            EventType::PAUSE_WRITER,
-            SequenceId::null(),
-            std::nullopt,
-            0,
-        });
-
-        // Block until the event queue is empty. This should be called from the main thread, so no more events will enter
-        // the queue while we are waiting. The background thread will notify us when it has moved to a new segment.
-        std::unique_lock lock {m_state.mu};
-        m_state.cv.wait(lock, [this] {
-            return m_state.events.empty();
-        });
-        return m_status; // TODO
-    }
-
     [[nodiscard]]
     auto status() const -> Status
     {
@@ -235,37 +215,48 @@ private:
     auto open_on_segment() -> Status
     {
         CALICO_EXPECT_FALSE(m_collection->is_segment_started());
+        const SegmentId next_id {m_collection->most_recent_id().value + 1};
 
         AppendWriter *file {};
-        const auto path = m_path_prefix + m_current_id.to_name();
+        const auto path = m_prefix + next_id.to_name();
         auto s = m_store->open_append_writer(path, &file);
 
         if (s.is_ok()) {
-            // Flushed LSN is correct because the last segment is complete.
-            const SequenceId lsn {m_flushed_lsn->load().value + 1};
-            m_collection->start_segment(m_current_id, lsn);
+            m_collection->start_segment(next_id);
             m_writer.attach(file);
         }
         return s;
     }
 
     [[nodiscard]]
-    auto try_close_segment(SequenceId lsn) -> Status
+    auto try_close_segment() -> Status
     {
         auto s = Status::ok();
         if (m_writer.is_attached()) {
             CALICO_EXPECT_TRUE(m_collection->is_segment_started());
             const auto should_abort = !m_writer.has_written();
             s = m_writer.detach();
-            if (!s.is_ok()) return s;
-            m_flushed_lsn->store(lsn);
-            if (should_abort) {
-                m_collection->abort_segment();
+
+            if (!s.is_ok()) {
+                (void)try_abort_segment();
+                return s;
+            } else if (should_abort) {
+                return try_abort_segment();
             } else {
                 m_collection->finish_segment(false);
             }
         }
         return s;
+    }
+
+    [[nodiscard]]
+    auto try_abort_segment() -> Status
+    {
+        CALICO_EXPECT_TRUE(m_collection->is_segment_started());
+        CALICO_EXPECT_FALSE(m_writer.is_attached());
+        const auto id = m_collection->current_segment().id;
+        m_collection->abort_segment();
+        return m_store->remove_file(m_prefix + id.to_name());
     }
 
     [[nodiscard]]
@@ -289,11 +280,10 @@ private:
 
     std::atomic<SequenceId> *m_flushed_lsn {};
     WalRecordWriter m_writer;
-    std::string m_path_prefix;
+    std::string m_prefix;
     Status m_status {Status::ok()};
     LogScratchManager *m_scratch {};
     WalCollection *m_collection {};
-    SegmentId m_current_id;
     Storage *m_store {};
 };
 

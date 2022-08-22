@@ -201,7 +201,6 @@ auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::str
 auto HeapStorage::create_directory(const std::string &path) -> Status
 {
     std::lock_guard lock {m_mutex};
-    CALICO_EXPECT_EQ(m_directories.find(path), cend(m_directories));
     m_directories.insert(path);
     return Status::ok();
 }

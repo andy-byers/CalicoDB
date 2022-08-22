@@ -16,7 +16,7 @@ static constexpr Size KEY_WIDTH {12};
 
 auto show_usage()
 {
-    std::cout << "usage: recover PATH N\n";
+    std::cout << "usage: ensure_consistent_state PATH N\n";
     std::cout << "  Parameters\n";
     std::cout << "==============\n";
     std::cout << "PATH: Path at which to look for the database\n";
@@ -48,7 +48,7 @@ auto main(int argc, const char *argv[]) -> int
     }
     Options options;
     Database db;
-    CALICO_EXPECT_OK(db.open(path, options));
+    expect_ok(db.open(path, options));
     const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.
@@ -61,12 +61,12 @@ auto main(int argc, const char *argv[]) -> int
         CALICO_EXPECT_TRUE(cursor.is_valid());
         CALICO_EXPECT_EQ(btos(cursor.key()), key);
         CALICO_EXPECT_EQ(cursor.value(), value);
-        CALICO_EXPECT_OK(db.erase(stob(key)));
+        expect_ok(db.erase(stob(key)));
     }
 
     // All records should have been reached and removed.
     CALICO_EXPECT_EQ(key_counter, num_committed);
     CALICO_EXPECT_EQ(info.record_count(), 0);
-    CALICO_EXPECT_OK(Database::destroy(std::move(db)));
+    expect_ok(Database::destroy(std::move(db)));
     return 0;
 }

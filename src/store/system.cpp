@@ -17,7 +17,12 @@ auto error() -> Status
 
 auto error(std::errc code) -> Status
 {
-    return Status::system_error(std::make_error_code(code).message());
+    return error(std::make_error_code(code).message());
+}
+
+auto error(const std::string &message) -> Status
+{
+    return Status::system_error(message);
 }
 
 auto file_exists(const std::string &name) -> Status
@@ -108,6 +113,14 @@ auto file_remove(const std::string &path) -> Status
 {
     if (::unlink(path.c_str()) == FAILURE)
         return error();
+    return Status::ok();
+}
+
+auto file_resize(const std::string &path, Size size) -> Status
+{
+    std::error_code code;
+    fs::resize_file(path, size, code);
+    if (code) return error(code.message());
     return Status::ok();
 }
 

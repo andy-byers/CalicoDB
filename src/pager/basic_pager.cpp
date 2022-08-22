@@ -116,8 +116,13 @@ auto BasicPager::try_make_available() -> Result<bool>
         if (frame.ref_count() != 0)
             return false;
 
-        const auto is_protected = frame.lsn() <= m_wal->flushed_lsn();
-        return !dirty_token.has_value() || is_protected;
+        if (!dirty_token.has_value())
+            return true;
+
+        if (m_wal->is_writing())
+            return frame.lsn() <= m_wal->flushed_lsn();
+
+        return true;
     });
 
     if (itr == m_registry.end())
@@ -148,6 +153,7 @@ auto BasicPager::release(Page page) -> Status
         auto s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
 
         if (!s.is_ok()) {
+            m_status = s;
             m_logger->error("could not write page deltas to WAL");
             m_logger->error("(reason) {}", s.what());
             return s;
@@ -161,13 +167,15 @@ auto BasicPager::release(Page page) -> Status
     return Status::ok();
 }
 
-auto BasicPager::register_page(Page &page, PageRegistry::Entry &entry) -> void
+auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
 {
     // This function needs external synchronization!
     CALICO_EXPECT_GT(m_ref_sum, 0);
 
-    entry.dirty_token = m_dirty.insert(page.id());
-    m_dirty_count++;
+    if (!page.is_dirty()) {
+        entry.dirty_token = m_dirty.insert(page.id());
+        m_dirty_count++;
+    }
 
     if (m_wal->is_writing()) {
         auto s = m_wal->log_image(page.id().value, page.view(0));
@@ -177,6 +185,11 @@ auto BasicPager::register_page(Page &page, PageRegistry::Entry &entry) -> void
             m_logger->error("(reason) {}", s.what());
             m_status = s;
         }
+    } else if (m_wal->is_enabled()) {
+        LogMessage message {*m_logger};
+        message.set_primary("omitting watch for page {}", page.id().value);
+        message.set_detail("WAL writer has not been started");
+        message.log(spdlog::level::info);
     }
 }
 
@@ -215,10 +228,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
         // We write a full image WAL record for the page if we are acquiring it as writable for the first time. This is part of the reason we should never
         // acquire a writable page unless we intend to write to it immediately. This way we keep the surface between the Pager interface and Page small
         // (page just uses its Pager* member to call release on itself, but only if it was not already released manually).
-        if (is_writable && !is_frame_dirty) {
-            CALICO_EXPECT_FALSE(page.is_dirty());
-            register_page(page, entry);
-        }
+        if (is_writable) watch_page(page, entry);
 
         return page;
     };

@@ -16,6 +16,12 @@
 
 namespace calico {
 
+#define MAYBE_FORWARD(expr, message) \
+    do { \
+        const auto &calico_s = (expr); \
+        if (!calico_s.is_ok()) return forward_status(calico_s, message); \
+    } while (0)
+
 [[nodiscard]]
 static auto not_supported_error(const std::string &primary)
 {
@@ -60,7 +66,7 @@ auto initialize_log(spdlog::logger &logger, const std::string &base)
 }
 
 Core::Core(const std::string &path, const Options &options)
-    : m_path {path},
+    : m_prefix {path + "/"},
       m_options {options},
       m_sink {create_sink(path, options.log_level)}, // TODO: Don't create a logger if we don't have anything on disk, i.e. the store keeps everything in memory...
       m_logger {create_logger(m_sink, "core")}
@@ -71,7 +77,7 @@ Core::Core(const std::string &path, const Options &options)
 auto Core::open() -> Status
 {
     static constexpr auto MSG = "cannot open database";
-    initialize_log(*m_logger, m_path);
+    initialize_log(*m_logger, m_prefix);
 
     auto *store = m_options.store;
     if (!store) {
@@ -81,20 +87,20 @@ auto Core::open() -> Status
     m_store = store;
     m_options.store = store;
 
-    auto initial = setup(m_path, *m_store, m_options, *m_logger);
+    auto initial = setup(m_prefix, *m_store, m_options, *m_logger);
     if (!initial.has_value()) return forward_status(initial.error(), MSG);
     auto [state, is_new] = *initial;
+    m_options.page_size = state.page_size;
 
     auto *wal = m_options.wal;
     if (!wal) {
-//        wal = new DisabledWriteAheadLog;
         auto s = BasicWriteAheadLog::open({
-            m_path, // TODO: Could specify a different directory for WAL segments.
+            m_prefix, // TODO: Could specify a different directory for WAL segments.
             m_store,
             m_sink,
             state.page_size,
         }, &wal);
-        if (!s.is_ok()) return forward_status(s, MSG);
+        MAYBE_FORWARD(s, MSG);
         m_owns_wal = true;
     }
     m_wal = wal;
@@ -102,14 +108,14 @@ auto Core::open() -> Status
     m_wal->load_state(state);
 
     {
-        auto r = BasicPager::open({m_path, *store, *wal, m_sink, m_options.frame_count, m_options.page_size});
+        auto r = BasicPager::open({m_prefix, *store, *wal, m_sink, m_options.frame_count, m_options.page_size});
         if (!r.has_value()) return forward_status(r.error(), MSG);
         m_pager = std::move(*r);
         m_pager->load_state(state);
     }
 
     {
-        auto r = BPlusTree::open(*m_pager, m_sink, m_options.page_size);
+        auto r = BPlusTree::open(*m_pager, m_sink, state.page_size);
         if (!r.has_value()) return forward_status(r.error(), MSG);
         m_tree = std::move(*r);
         m_tree->load_state(state);
@@ -119,13 +125,15 @@ auto Core::open() -> Status
     if (is_new) {
         // The first call to root() allocates the root page.
         auto root = m_tree->root(true);
-        if (!root.has_value()) return forward_status(root.error(), MSG);
         CALICO_EXPECT_EQ(m_pager->page_count(), 1);
+        s = !root.has_value() ? root.error() : s;
+        MAYBE_FORWARD(s, MSG);
+
         state.page_count = 1;
         state.header_crc = compute_header_crc(state);
         write_header(root->page(), state);
         s = m_pager->release(root->take());
-        if (!s.is_ok()) return forward_status(s, MSG);
+        MAYBE_FORWARD(s, MSG);
 
         // This is safe right now because the WAL has not been started. If successful, we will have the root page set up and saved
         // to the database file.
@@ -133,9 +141,11 @@ auto Core::open() -> Status
 
     } else if (m_wal->is_enabled()) {
         // This should be a no-op if the database closed normally last time.
-        s = recover();
+        s = ensure_consistent_state();
+        MAYBE_FORWARD(s, MSG);
     }
-    if (s.is_ok())
+
+    if (s.is_ok() && m_wal->is_enabled())
         s = m_wal->start_writer();
 
     return forward_status(s, MSG);
@@ -168,7 +178,7 @@ auto Core::status() const -> Status
 
 auto Core::path() const -> std::string
 {
-    return m_path;
+    return m_prefix;
 }
 
 auto Core::info() -> Info
@@ -225,11 +235,11 @@ auto Core::commit() -> Status
 
     // Write database state to the root page file header.
     auto s = save_state();
-    if (!s.is_ok()) return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
 
     // Write a commit record to the WAL.
     s = m_wal->log_commit();
-    if (!s.is_ok()) return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
     m_logger->info("commit succeeded");
     return s;
 }
@@ -245,7 +255,7 @@ auto Core::abort() -> Status
 
     // Stop the background writer thread.
     auto s = m_wal->stop_writer();
-    if (!s.is_ok()) return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
 
     // This should give us the full images of each updated page belonging to the current transaction, before any changes were made,
     // in reverse order.
@@ -257,14 +267,14 @@ auto Core::abort() -> Status
         page->undo(undo);
         return m_pager->release(std::move(*page));
     });
-    if (!s.is_ok()) return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
 
     s = m_pager->flush();
-    if (!s.is_ok()) return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
 
     // Load database state from the root page file header.
     s = load_state();
-    if (!s.is_ok()) return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
 
     m_logger->info("abort succeeded");
     return m_wal->start_writer();
@@ -289,27 +299,22 @@ auto Core::close() -> Status
     return s;
 }
 
-auto Core::recover() -> Status
+auto Core::ensure_consistent_state() -> Status
 {
-    static constexpr auto MSG = "cannot recover";
+    static constexpr auto MSG = "cannot ensure consistent database state";
 
-    bool found_commit {};
-    auto s = m_wal->redo_all([&found_commit, this](RedoDescriptor redo) {
-        found_commit = redo.is_commit;
+    auto s = m_wal->open_and_recover(
+        [this](const auto &info) {
+            if (!info.is_commit) {
+                auto page = m_pager->acquire(PageId {info.page_id}, true);
+                if (!page.has_value()) return page.error();
 
-        if (!found_commit) {
-            auto page = m_pager->acquire(PageId {redo.page_id}, true);
-            if (!page.has_value()) return page.error();
-
-            page->redo(redo);
-            return m_pager->release(std::move(*page));
-        }
-        return Status::ok();
-    });
-    if (!s.is_ok()) return forward_status(s, MSG);
-
-    if (!found_commit) {
-        s = m_wal->undo_last([this](UndoDescriptor undo) {
+                page->redo(info);
+                return m_pager->release(std::move(*page));
+            }
+            return Status::ok();
+        },
+        [this](UndoDescriptor undo) {
             const auto [id, image] = undo;
             auto page = m_pager->acquire(PageId {id}, true);
             if (!page.has_value()) return page.error();
@@ -317,10 +322,10 @@ auto Core::recover() -> Status
             page->undo(undo);
             return m_pager->release(std::move(*page));
         });
-        if (!s.is_ok()) return forward_status(s, MSG);
-    }
+    MAYBE_FORWARD(s, MSG);
+
     s = load_state();
-    if (!s.is_ok()) return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
     s = m_pager->flush();
     return forward_status(s, MSG);
 }
@@ -333,7 +338,6 @@ auto Core::save_state() -> Status
     if (!root.has_value()) return root.error();
 
     auto state = read_header(*root);
-
     m_pager->save_state(state);
     m_tree->save_state(state);
     m_wal->save_state(state);
@@ -347,7 +351,7 @@ auto Core::load_state() -> Status
 {
     m_logger->info("loading state from file header");
 
-    auto root = m_pager->acquire(PageId::root(), true);
+    auto root = m_pager->acquire(PageId::root(), false);
     if (!root.has_value()) return root.error();
 
     auto state = read_header(*root);
@@ -358,11 +362,18 @@ auto Core::load_state() -> Status
         message.set_hint("header CRC is {} but should be {}", state.header_crc, compute_header_crc(state));
         return message.corruption();
     }
+    const auto before_count = m_pager->page_count();
 
     m_pager->load_state(state);
     m_tree->load_state(state);
     m_wal->load_state(state);
-    return m_pager->release(std::move(*root));
+
+    auto s = m_pager->release(std::move(*root));
+    if (s.is_ok() && m_pager->page_count() < before_count) {
+        const auto after_size = m_pager->page_count() * m_options.page_size;
+        return m_store->resize_file(m_prefix + DATA_FILENAME, after_size);
+    }
+    return s;
 }
 
 auto setup(const std::string &path, Storage &store, const Options &options, spdlog::logger &logger) -> Result<InitialState>
@@ -482,6 +493,8 @@ auto setup(const std::string &path, Storage &store, const Options &options, spdl
 
     return InitialState {header, !exists};
 }
+
+#undef MAYBE_FORWARD
 
 } // namespace calico
 

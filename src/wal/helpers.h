@@ -1,8 +1,8 @@
 #ifndef CALICO_WAL_HELPERS_H
 #define CALICO_WAL_HELPERS_H
 
-#include <map>
 #include <mutex>
+#include <set>
 #include "record.h"
 #include "calico/store.h"
 #include "utils/logging.h"
@@ -53,7 +53,7 @@ public:
     }
 
     [[nodiscard]]
-    auto buffer() const -> BytesView
+    auto block() const -> BytesView
     {
         return stob(m_buffer);
     }
@@ -88,8 +88,13 @@ protected:
     Size m_offset {};
 };
 
-struct WalMetadata {
-    SequenceId first_lsn;
+struct SegmentInfo {
+    auto operator<(const SegmentInfo &rhs) const -> bool
+    {
+        return id < rhs.id;
+    }
+
+    SegmentId id;
     bool has_commit {};
 };
 
@@ -101,31 +106,35 @@ public:
     [[nodiscard]]
     auto is_segment_started() const -> bool
     {
-        return !m_id.is_null();
+        return !m_temp.id.is_null();
     }
 
-    auto start_segment(SegmentId id, SequenceId first_lsn) -> void
+    auto start_segment(SegmentId id) -> void
     {
         CALICO_EXPECT_FALSE(is_segment_started());
-        m_id = id;
-        m_meta.first_lsn = first_lsn;
-        m_meta.has_commit = false;
+        m_temp.id = id;
+        m_temp.has_commit = false;
     }
 
     auto abort_segment() -> void
     {
         CALICO_EXPECT_TRUE(is_segment_started());
-        m_id = SegmentId::null();
-        m_meta.first_lsn = SequenceId::null();
-        m_meta.has_commit = false;
+        m_temp = {};
     }
 
     auto finish_segment(bool has_commit) -> void
     {
         CALICO_EXPECT_TRUE(is_segment_started());
-        m_meta.has_commit = has_commit;
-        m_segments.emplace(m_id, m_meta);
+        m_temp.has_commit = has_commit;
+        m_info.emplace(m_temp);
         abort_segment();
+    }
+
+    [[nodiscard]]
+    auto current_segment() const -> const SegmentInfo&
+    {
+        CALICO_EXPECT_TRUE(is_segment_started());
+        return m_temp;
     }
 
     template<class Action>
@@ -133,12 +142,11 @@ public:
     auto remove_segments_from_left(SegmentId id, const Action &action) -> Status
     {
         // Removes segments from [<begin>, id).
-        while (!m_segments.empty()) {
-            const auto itr = cbegin(m_segments);
-            if (id == itr->first) return Status::ok();
-            auto s = action(itr->first, itr->second);
+        for (auto itr = cbegin(m_info); itr != cend(m_info); ) {
+            if (id == itr->id) return Status::ok();
+            auto s = action(*itr);
             if (!s.is_ok()) return s;
-            m_segments.erase(itr);
+            itr = m_info.erase(itr);
         }
         return Status::ok();
     }
@@ -148,12 +156,12 @@ public:
     auto remove_segments_from_right(SegmentId id, const Action &action) -> Status
     {
         // Removes segments from [id, <end>) in reverse.
-        while (!m_segments.empty()) {
-            const auto itr = prev(cend(m_segments));
-            if (id > itr->first) return Status::ok();
-            auto s = action(itr->first, itr->second);
+        while (!m_info.empty()) {
+            const auto itr = prev(cend(m_info));
+            if (id > itr->id) return Status::ok();
+            auto s = action(*itr);
             if (!s.is_ok()) return s;
-            m_segments.erase(itr);
+            m_info.erase(itr);
         }
         return Status::ok();
     }
@@ -161,111 +169,20 @@ public:
     [[nodiscard]]
     auto most_recent_id() const -> SegmentId
     {
-        if (m_segments.empty())
+        if (m_info.empty())
             return SegmentId::null();
-        return crbegin(m_segments)->first;
+        return crbegin(m_info)->id;
     }
 
     [[nodiscard]]
-    auto map() const -> const std::map<SegmentId, WalMetadata>&
+    auto set() const -> const std::set<SegmentInfo>&
     {
-        return m_segments;
+        return m_info;
     }
 
 private:
-    std::map<SegmentId, WalMetadata> m_segments;
-    std::vector<RecordPosition> m_uncommitted;
-
-    SegmentId m_id;
-    WalMetadata m_meta;
-};
-
-class SegmentGuard {
-public:
-    SegmentGuard(WalCollection *source, SegmentId id, SequenceId lsn)
-        : m_source {source}
-    {
-        m_source->start_segment(id, lsn);
-    }
-
-    ~SegmentGuard()
-    {
-        if (m_source.is_valid())
-            m_source->abort_segment();
-    }
-
-    auto finish(bool has_commit) -> void
-    {
-        CALICO_EXPECT_TRUE((m_source.is_valid()));
-        m_source->finish_segment(has_commit);
-        m_source.reset();
-    }
-
-private:
-    UniqueNullable<WalCollection*> m_source;
-};
-
-class LogHelper {
-public:
-    using Action = std::function<Status()>;
-
-    LogHelper(Size block_size, Action action)
-        : m_block(block_size, '\x00'),
-          m_action {std::move(action)}
-    {}
-
-    virtual ~LogHelper() = default;
-
-    [[nodiscard]]
-    auto position() const -> LogPosition
-    {
-        return m_position;
-    }
-
-    [[nodiscard]]
-    auto remaining() -> Bytes
-    {
-        return stob(m_block).advance(m_position.offset.value);
-    }
-
-    [[nodiscard]]
-    auto block() -> Bytes
-    {
-        return stob(m_block);
-    }
-
-    [[nodiscard]]
-    auto block() const -> BytesView
-    {
-        return stob(m_block);
-    }
-
-    auto advance_cursor(Size record_size) -> void
-    {
-        CALICO_EXPECT_LE(record_size, m_block.size() - m_position.offset.value);
-        m_position.offset.value += record_size;
-    }
-
-    [[nodiscard]]
-    auto advance_block() -> Status
-    {
-        auto s = m_action();
-        if (s.is_ok()) {
-            m_position.number.value++;
-            m_position.offset.value = 0;
-        }
-        return s;
-    }
-
-protected:
-    auto reset() -> void
-    {
-        m_position = LogPosition {};
-    }
-
-    std::string m_block;
-    Action m_action;
-    LogPosition m_position;
+    std::set<SegmentInfo> m_info;
+    SegmentInfo m_temp;
 };
 
 class WalFilter {
@@ -304,16 +221,13 @@ inline auto read_exact_or_hit_eof(RandomReader &file, Bytes out, Size n) -> Stat
     return s;
 }
 
-class SequentialLogReader final: public LogHelper {
+class SequentialLogReader final {
 public:
     explicit SequentialLogReader(Size block_size)
-        : LogHelper {block_size, [this] {
-              const auto offset = position().number.value + 1;
-              return read_exact_or_hit_eof(*m_file, block(), offset);
-          }}
+        : m_buffer {block_size}
     {}
 
-    ~SequentialLogReader() override = default;
+    ~SequentialLogReader() = default;
 
     [[nodiscard]]
     auto is_attached() const -> bool
@@ -324,7 +238,7 @@ public:
     [[nodiscard]]
     auto reset_position() -> Status
     {
-        reset();
+        m_buffer.reset();
         return read_exact_or_hit_eof(*m_file, block(), 0);
     }
 
@@ -342,8 +256,50 @@ public:
         return m_file.release();
     }
 
+    [[nodiscard]]
+    auto position() const -> LogPosition
+    {
+        LogPosition position;
+        position.number.value = m_buffer.block_number();
+        position.offset.value = m_buffer.block_offset();
+        return position;
+    }
+
+    [[nodiscard]]
+    auto remaining() -> Bytes
+    {
+        return m_buffer.remaining();
+    }
+
+    [[nodiscard]]
+    auto block() -> Bytes
+    {
+        return m_buffer.block();
+    }
+
+    [[nodiscard]]
+    auto block() const -> BytesView
+    {
+        return m_buffer.block();
+    }
+
+    auto advance_cursor(Size record_size) -> void
+    {
+        m_buffer.advance_cursor(record_size);
+    }
+
+    [[nodiscard]]
+    auto advance_block() -> Status
+    {
+        return m_buffer.advance_block([this] {
+            const auto offset = m_buffer.block_number() + 1;
+            return read_exact_or_hit_eof(*m_file, block(), offset);
+        });
+    }
+
 private:
     std::unique_ptr<RandomReader> m_file;
+    WalBuffer m_buffer;
 };
 
 class RandomLogReader final {
@@ -399,61 +355,6 @@ private:
     std::string m_tail;
     BlockNumber m_block_num;
     bool m_has_block {};
-};
-
-class AppendLogWriter final: public LogHelper {
-public:
-    explicit AppendLogWriter(Size block_size, Size existing_block_count = 0)
-        : LogHelper {block_size, [this] {
-              // Clear unused bytes at the end of the tail buffer.
-              mem_clear(remaining());
-              auto s = m_file->write(block());
-              m_block_count += s.is_ok();
-              return s;
-          }},
-          m_block_count {existing_block_count}
-    {
-        m_position.number.value = existing_block_count;
-    }
-
-    ~AppendLogWriter() override = default;
-
-    [[nodiscard]]
-    auto block_count() const -> Size
-    {
-        return m_block_count;
-    }
-
-    [[nodiscard]]
-    auto is_attached() const -> bool
-    {
-        return m_file != nullptr;
-    }
-
-    [[nodiscard]]
-    auto attach(AppendWriter *file) -> Status
-    {
-        m_file.reset(file);
-        return Status::ok();
-    }
-
-    [[nodiscard]]
-    auto detach() -> Status
-    {
-        auto s = Status::ok();
-        if (position().offset.value)
-            s = advance_block();
-        if (s.is_ok())
-            s = m_file->sync();
-        m_file.reset();
-        m_block_count = 0;
-        reset();
-        return s;
-    }
-
-private:
-    std::unique_ptr<AppendWriter> m_file;
-    Size m_block_count {};
 };
 
 /**

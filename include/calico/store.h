@@ -2,7 +2,6 @@
 #define CALICO_STORE_H
 
 #include "calico/status.h"
-#include "utils/result.h"
 #include <fcntl.h>
 #include <memory>
 #include <string>

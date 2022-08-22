@@ -115,8 +115,7 @@ auto Framer::pin(PageId id) -> Result<FrameNumber>
 
     if (auto r = read_page_from_file(id, frame.data())) {
         if (!*r) {
-            // We just tried to read at EOF. This happens when we allocate a new page or roll the WAL forward.
-            CALICO_EXPECT_EQ(id.as_index(), m_page_count);
+            // We just tried to read at or past EOF. This happens when we allocate a new page or roll the WAL forward.
             mem_clear(frame.data());
             m_page_count++;
         }
@@ -140,7 +139,6 @@ auto Framer::discard(FrameNumber id) -> void
 auto Framer::unpin(FrameNumber id, bool is_dirty) -> Status
 {
     auto &frame = frame_at_impl(id);
-    CALICO_EXPECT_LT(frame.pid().as_index(), m_page_count);
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
     auto s = Status::ok();
 

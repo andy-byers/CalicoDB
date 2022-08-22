@@ -86,10 +86,7 @@ auto AppendFileWriter::sync() -> Status
 
 auto DiskStorage::resize_file(const std::string &path, Size size) -> Status
 {
-    std::error_code code;
-    fs::resize_file(path, size, code);
-    if (code) return Status::system_error(code.message());
-    return Status::ok();
+    return system::file_resize(path, size);
 }
 
 auto DiskStorage::rename_file(const std::string &old_path, const std::string &new_path) -> Status

@@ -1,5 +1,5 @@
-#ifndef CALICO_STORAGE_ON_DISK_H
-#define CALICO_STORAGE_ON_DISK_H
+#ifndef CALICO_STORE_DISK_H
+#define CALICO_STORE_DISK_H
 
 #include "calico/status.h"
 #include "calico/store.h"
@@ -81,4 +81,4 @@ public:
 
 } // namespace cco
 
-#endif // CALICO_STORAGE_ON_DISK_H
+#endif // CALICO_STORE_DISK_H

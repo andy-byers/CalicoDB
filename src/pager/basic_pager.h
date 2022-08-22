@@ -52,7 +52,16 @@ private:
     explicit BasicPager(const Parameters &);
     [[nodiscard]] auto pin_frame(PageId) -> Status;
     [[nodiscard]] auto try_make_available() -> Result<bool>;
-    auto register_page(Page &, PageRegistry::Entry &) -> void;
+    auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
+
+    auto forward_status(Status s, const std::string &message) -> Status
+    {
+        if (!s.is_ok()) {
+            m_logger->error(message);
+            m_logger->error("(reason) {}", s.what());
+        }
+        return s;
+    }
 
     mutable std::mutex m_mutex;
     std::unique_ptr<Framer> m_framer;

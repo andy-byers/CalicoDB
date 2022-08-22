@@ -18,10 +18,19 @@
 
 namespace calico {
 
+inline auto expect_ok(const Status &s) -> void
+{
+    if (!s.is_ok()) {
+        fmt::print(stderr, "unexpected {} status: {}\n", get_status_name(s), s.what());
+        CALICO_EXPECT_TRUE(false && "expect_ok() failed");
+    }
+}
+
 class DataFileInspector {
 public:
     DataFileInspector(const std::string &path, Size page_size)
-        : m_store {std::make_unique<DiskStorage>()}
+        : m_store {std::make_unique<DiskStorage>()},
+          m_page_size {page_size}
     {
         RandomReader *file {};
         auto s = m_store->open_random_reader(path, &file);
@@ -211,6 +220,21 @@ namespace tools {
         if (auto c = find_exact(t, key); c.is_valid())
             return c.value() == value;
         return false;
+    }
+
+    template<class T>
+    auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
+    {
+        const auto FMT = fmt::format("expected record ({}, {}): {{}}\n", key, value);
+        if (auto c = find_exact(t, key); c.is_valid()) {
+            if (c.value() != value) {
+                fmt::print(stderr, FMT, "value \"{}\" does not match", c.value());
+                CALICO_EXPECT_TRUE(false && "expect_contains() failed to match value");
+            }
+        } else {
+            fmt::print(stderr, FMT, "could not find key");
+            CALICO_EXPECT_TRUE(false && "expect_contains() failed to find key");
+        }
     }
 
     template<class T>

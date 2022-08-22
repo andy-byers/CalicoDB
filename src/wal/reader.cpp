@@ -8,7 +8,7 @@ namespace calico {
 auto BasicWalReader::open(SegmentId id) -> Status
 {
     RandomReader *file {};
-    const auto path = fmt::format("{}/{}", m_dirname, id.to_name());
+    const auto path = m_prefix + id.to_name();
     auto s = m_store->open_random_reader(path, &file);
     if (!s.is_ok()) return s;
 
@@ -69,23 +69,26 @@ auto BasicWalReader::redo(PositionList &out, const RedoCallback &callback) -> St
         auto payload = stob(m_payload);
         WalRecordHeader header {};
 
-        s = forward_read_logical_record(header, payload, out);
+        PositionList temp;
+        s = forward_read_logical_record(header, payload, temp);
         if (s.is_logic_error()) return Status::ok(); // EOF
         if (!s.is_ok()) return s;
 
         const auto type = read_payload_type(payload);
         switch (type) {
             case WalPayloadType::DELTAS:
-                callback(decode_deltas_payload(header, payload));
+                s = callback(decode_deltas_payload(header, payload));
                 break;
             case WalPayloadType::COMMIT:
-                callback(decode_commit_payload(header, payload));
+                s = callback(decode_commit_payload(header, payload));
                 break;
             case WalPayloadType::FULL_IMAGE:
                 break;
             default:
                 return unrecognized_type_error(type);
         }
+        if (!s.is_ok()) return s;
+        out.insert(cend(out), cbegin(temp), cend(temp));
     }
 }
 

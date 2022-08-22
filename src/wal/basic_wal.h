@@ -21,7 +21,7 @@ class RandomReader;
 class BasicWriteAheadLog: public WriteAheadLog {
 public:
     struct Parameters {
-        std::string dir;
+        std::string prefix;
         Storage *store {};
         spdlog::sink_ptr sink;
         Size page_size {};
@@ -56,7 +56,7 @@ public:
     [[nodiscard]] auto log_commit() -> Status override;
     [[nodiscard]] auto stop_writer() -> Status override;
     [[nodiscard]] auto start_writer() -> Status override;
-    [[nodiscard]] auto redo_all(const RedoCallback &callback) -> Status override;
+    [[nodiscard]] auto open_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status override;
     [[nodiscard]] auto undo_last(const UndoCallback &callback) -> Status override;
     auto save_state(FileHeader &) -> void override;
     auto load_state(const FileHeader &) -> void override;
@@ -64,12 +64,21 @@ public:
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
 
-    std::unordered_set<PageId, PageId::Hash> m_image_ids;
+    auto forward_status(Status s, const std::string &message) -> Status
+    {
+        if (!s.is_ok()) {
+            m_logger->error(message);
+            m_logger->error("(reason) {}", s.what());
+        }
+        return s;
+    }
+
+    std::unordered_set<PageId, PageId::Hash> m_images;
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> m_flushed_lsn;
     std::atomic<SequenceId> m_pager_lsn;
     WalCollection m_collection;
-    std::string m_dirname;
+    std::string m_prefix;
     SequenceId m_last_lsn;
     Storage *m_store {};
 

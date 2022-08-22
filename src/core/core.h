@@ -101,11 +101,11 @@ public:
 
 private:
     [[nodiscard]] auto forward_status(Status, const std::string &) -> Status;
-    [[nodiscard]] auto recover() -> Status;
+    [[nodiscard]] auto ensure_consistent_state() -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;
 
-    std::string m_path;
+    std::string m_prefix;
     Options m_options;
     spdlog::sink_ptr m_sink;
     std::shared_ptr<spdlog::logger> m_logger;

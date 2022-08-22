@@ -22,7 +22,7 @@ inline auto expose_message(const Status &s)
 
 class TestOnHeap : public testing::Test {
 public:
-    static constexpr auto ROOT = "test";
+    static constexpr auto ROOT = "test/";
 
     TestOnHeap()
         : store {std::make_unique<HeapStorage>()}

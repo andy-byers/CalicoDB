@@ -131,11 +131,10 @@ TEST_F(BasicDatabaseTests, Inserts)
 
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         const auto records = generator.generate(random, GROUP_SIZE);
-        auto itr = std::cbegin(records);
+        auto itr = cbegin(records);
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
-            ASSERT_TRUE(expose_message(db.insert(*itr)));
-            itr++;
+            ASSERT_TRUE(expose_message(db.insert(*itr++)));
         }
         ASSERT_TRUE(expose_message(db.commit()));
     }

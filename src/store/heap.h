@@ -1,5 +1,5 @@
-#ifndef CALICO_STORAGE_IN_MEMORY_H
-#define CALICO_STORAGE_IN_MEMORY_H
+#ifndef CALICO_STORE_HEAP_H
+#define CALICO_STORE_HEAP_H
 
 #include "calico/status.h"
 #include "calico/store.h"
@@ -84,4 +84,4 @@ private:
 
 } // namespace cco
 
-#endif // CALICO_STORAGE_IN_MEMORY_H
+#endif // CALICO_STORE_HEAP_H

@@ -64,7 +64,7 @@ public:
     }
 
     [[nodiscard]]
-    auto redo_all(const RedoCallback &) -> Status override
+    auto open_and_recover(const RedoCallback &, const UndoCallback &) -> Status override
     {
         return Status::ok();
     }

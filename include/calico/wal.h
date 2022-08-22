@@ -136,17 +136,18 @@ public:
     virtual auto start_writer() -> Status = 0;
 
     /**
-     * Roll the entire WAL.
+     * Open and roll the entire WAL.
      *
-     * This method calls the provided callback for each delta record, and every commit record, in order. This allows each update to be applied sequentially. If a
-     * commit record is not found at the end of the log, the WAL will be asked to roll back the most recent transaction.
+     * This method must be called before the WAL object is safe to use. It calls the provided callback for each delta record, and every commit record, in order,
+     * allowing updates from the WAL to be applied to the database, if needed. It should return with success if the database is in a consistent state after all
+     * updates have been applied. If the WAL is missing a commit record at the end, this method should return with a "not found" status. Otherwise, it
+     * should report the error appropriately.
      *
      * @param callback A callback to call on each delta or commit record. The procedure will end early if a non-OK status is returned by the callback (indicating
-     *                 the updates could not be applied for some reason). In this case, we must either reenter whatever routine this method call was a part of, or
-     *                 exit the program and try again.
+     *                 the updates could not be applied for some reason).
      * @return A status indicating success or failure.
      */
-    virtual auto redo_all(const RedoCallback &callback) -> Status = 0;
+    virtual auto open_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status = 0;
 
     /**
      * Roll back the most recent transaction.
@@ -154,7 +155,7 @@ public:
      * This method calls the provided callback for each full image record belonging to the most recent transaction in reverse order. It can be used either at the
      * end of recovery, if a commit record was not encountered, or during a transaction to abort.
      *
-     * @see redo_all()
+     * @see open_and_recover()
      * @param callback A callback to call on each full page image.
      * @return A status indicating success or failure.
      */

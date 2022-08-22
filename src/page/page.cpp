@@ -49,7 +49,6 @@ auto Page::set_type(PageType type) -> void
 
 auto Page::set_lsn(SequenceId value) -> void
 {
-fmt::print(stderr, "{} <= {} for page {}\n", lsn().value, value.value, m_id.value);
     CALICO_EXPECT_LE(lsn(), value);
     const auto offset = header_offset() + PageLayout::LSN_OFFSET;
     put_u64(*this, offset, value.value);
