@@ -129,12 +129,13 @@ public:
         EXPECT_TRUE(home->open_random_editor(DATA_FILENAME, &temp).is_ok());
         file.reset(temp);
 
-        framer = Framer::open(std::move(file), 0x100, 8).value();
+        framer = Framer::open(std::move(file), wal, 0x100, 8).value();
     }
 
     ~FramerTests() override = default;
 
     Random random {0};
+    DisabledWriteAheadLog wal;
     std::unique_ptr<HeapStorage> home;
     std::unique_ptr<Framer> framer;
 };

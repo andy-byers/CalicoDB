@@ -1,5 +1,5 @@
-#ifndef CALICO_UNIT_H
-#define CALICO_UNIT_H
+#ifndef CALICO_TEST_UNIT_TESTS_H
+#define CALICO_TEST_UNIT_TESTS_H
 
 #include "calico/status.h"
 #include "store/disk.h"
@@ -58,4 +58,4 @@ public:
 
 } // namespace calico
 
-#endif //CALICO_UNIT_H
+#endif // CALICO_TEST_UNIT_TESTS_H

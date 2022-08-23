@@ -89,7 +89,7 @@ auto encode_commit_payload(Bytes in) -> Size
     return sizeof(WalPayloadType);
 }
 
-auto decode_commit_payload(const WalRecordHeader &header, BytesView in) -> RedoDescriptor
+auto decode_commit_payload(const WalRecordHeader &header, [[maybe_unused]] BytesView in) -> RedoDescriptor
 {
     CALICO_EXPECT_EQ(read_payload_type(in), WalPayloadType::COMMIT);
 
@@ -151,9 +151,10 @@ auto split_record(WalRecordHeader &lhs, BytesView payload, Size available_size) 
 template<bool IsLeftMerge>
 static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
 {
-    static constexpr auto MSG = "cannot merge WAL records";
+    [[maybe_unused]]
     static constexpr auto FIRST_TYPE = IsLeftMerge ? WalRecordHeader::FIRST : WalRecordHeader::LAST;
     static constexpr auto LAST_TYPE = IsLeftMerge ? WalRecordHeader::LAST : WalRecordHeader::FIRST;
+    static constexpr auto MSG = "cannot merge WAL records";
     CALICO_EXPECT_NE(lhs.type, rhs.type);
 
     // First merge in the logical record.

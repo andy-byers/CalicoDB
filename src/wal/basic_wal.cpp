@@ -10,24 +10,34 @@ namespace calico {
     } while (0)
 
 [[nodiscard]]
-auto is_writer_ready(const BasicWalWriter &writer)
+static auto handle_writer_error(spdlog::logger &logger, BasicWalWriter &writer)
 {
-    return writer.is_running() && writer.status().is_ok();
+    auto s = Status::ok(); // First error encountered by the writer gets stored here.
+    auto t = writer.next_status();
+    Size i {1};
+
+    while (!t.is_ok()) {
+        if (s.is_ok()) {
+            logger.error("emitting background writer errors");
+            s = t;
+        } else {
+            logger.error("(error {:6<}) {}", i++, t.what());
+        }
+        t = writer.next_status();
+    }
+    return s;
 }
 
-[[nodiscard]]
-auto writer_error(spdlog::logger &logger, const BasicWalWriter &writer, const std::string &primary)
+static auto handle_not_running_error(spdlog::logger &logger, BasicWalWriter &writer, const std::string &primary)
 {
-    if (!writer.status().is_ok()) {
-        logger.error(primary);
-        logger.error("(reason) {}", writer.status().what());
-        return writer.status();
+    if (!writer.is_running()) {
+        LogMessage message {logger};
+        message.set_primary(primary);
+        message.set_detail("background writer is not running");
+        message.set_hint("start the background writer and try again");
+        return message.logic_error();
     }
-    LogMessage message {logger};
-    message.set_primary(primary);
-    message.set_detail("background writer is not running");
-    message.set_hint("start the background writer and try again");
-    return message.logic_error();
+    return Status::ok();
 }
 
 BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
@@ -68,11 +78,14 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
 {
     m_logger->info("destroying BasicWriteAheadLog object");
 
-    const auto s = m_writer.stop();
-    if (!s.is_ok()) {
-        m_logger->error("cannot stop WAL writer");
-        m_logger->error("(reason) {}", s.what());
-    }
+    auto s = handle_writer_error(*m_logger, m_writer);
+    forward_status(s, "cannot clean up WAL writer");
+
+    // NOOP if the writer is already stopped.
+    m_writer.stop();
+
+    s = handle_writer_error(*m_logger, m_writer);
+    forward_status(s, "cannot stop WAL writer");
 }
 
 auto BasicWriteAheadLog::flushed_lsn() const -> std::uint64_t
@@ -87,7 +100,12 @@ auto BasicWriteAheadLog::current_lsn() const -> std::uint64_t
 
 auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> Status
 {
-    if (!is_writer_ready(m_writer)) return writer_error(*m_logger, m_writer, "could not log full image");
+    static constexpr auto MSG = "could not log full image";
+    auto s = handle_writer_error(*m_logger, m_writer);
+    MAYBE_FORWARD(s, MSG);
+
+    s = handle_not_running_error(*m_logger, m_writer, MSG);
+    MAYBE_FORWARD(s, MSG);
 
     // Skip writing this full image if one has already been written for this page during this transaction. If so, we can
     // just use the old one to undo changes made to this page during the entire transaction.
@@ -98,40 +116,53 @@ auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> St
     }
     m_last_lsn++;
 
-    m_logger->info("logging full image for page {} (LSN = {})", page_id, m_last_lsn.value);
     m_writer.log_full_image(m_last_lsn, PageId {page_id}, image);
     m_images.emplace(PageId {page_id});
-    return m_writer.status();
+    return m_writer.next_status();
 }
 
 auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status
 {
-    if (!is_writer_ready(m_writer)) return writer_error(*m_logger, m_writer, "could not log deltas");
+    static constexpr auto MSG = "could not log deltas";
+    auto s = handle_writer_error(*m_logger, m_writer);
+    MAYBE_FORWARD(s, MSG);
+
+    s = handle_not_running_error(*m_logger, m_writer, MSG);
+    MAYBE_FORWARD(s, MSG);
 
     m_last_lsn++;
-    m_logger->info("logging deltas for page {} (LSN = {})", page_id, m_last_lsn.value);
     m_writer.log_deltas(m_last_lsn, PageId {page_id}, image, deltas);
-    return m_writer.status();
+    return m_writer.next_status();
 }
 
 auto BasicWriteAheadLog::log_commit() -> Status
 {
-    if (!is_writer_ready(m_writer)) return writer_error(*m_logger, m_writer, "could not log commit");
+    m_logger->info("logging commit (LSN = {})", m_last_lsn.value);
+
+    static constexpr auto MSG = "could not log commit";
+    auto s = handle_writer_error(*m_logger, m_writer);
+    MAYBE_FORWARD(s, MSG);
+
+    s = handle_not_running_error(*m_logger, m_writer, MSG);
+    MAYBE_FORWARD(s, MSG);
 
     m_last_lsn++;
-    m_logger->info("logging commit (LSN = {})", m_last_lsn.value);
     m_writer.log_commit(m_last_lsn);
     m_images.clear();
-    return m_writer.status();
+    return m_writer.next_status();
 }
 
 auto BasicWriteAheadLog::stop_writer() -> Status
 {
+    static constexpr auto MSG = "could not stop background writer";
     m_logger->info("received stop request");
-    auto s = m_writer.stop();
-    MAYBE_FORWARD(s, "could not stop background writer");
+    m_writer.stop();
+
+    auto s = handle_writer_error(*m_logger, m_writer);
+    MAYBE_FORWARD(s, MSG);
+
     m_logger->info("background writer is stopped");
-    m_images.clear();
+    m_images.clear(); // TODO: Shouldn't need these anymore since this call should be followed by an abort or shutdown.
     return s;
 }
 
@@ -139,10 +170,9 @@ auto BasicWriteAheadLog::start_writer() -> Status
 {
     m_logger->info("received start request: next segment ID is {}", m_collection.most_recent_id().value);
 
-    auto s = m_writer.start();
-    MAYBE_FORWARD(s, "could not start background writer");
+    m_writer.start();
     m_logger->info("background writer is started");
-    return s;
+    return handle_writer_error(*m_logger, m_writer); // TODO: Likely doesn't do much since writer is not guaranteed to have done anything yet...
 }
 
 auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status
@@ -238,7 +268,7 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
     auto s = Status::ok();
     SegmentId obsolete;
 
-    for (auto itr = crbegin(m_collection.set()); itr != crend(m_collection.set()); itr++) {
+    for (auto itr = crbegin(m_collection.info()); itr != crend(m_collection.info()); itr++) {
         const auto [id, has_commit] = *itr;
         m_logger->info("rolling segment {} backward", id.value);
 

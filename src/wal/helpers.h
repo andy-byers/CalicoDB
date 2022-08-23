@@ -13,6 +13,8 @@
 
 namespace calico {
 
+class WalRecordWriter;
+
 class WalBuffer final {
 public:
     explicit WalBuffer(Size size)
@@ -99,42 +101,12 @@ struct SegmentInfo {
     bool has_commit {};
 };
 
-class WalCollection;
-class WalRecordWriter;
-
-struct SegmentGuard final {
-public:
-    [[nodiscard]] auto start(WalRecordWriter &writer, WalCollection &collection) -> Status;
-    [[nodiscard]] auto finish(bool has_commit) -> Status;
-    [[nodiscard]] auto abort() -> Status;
-
-    // No moves or copies!
-    SegmentGuard(const SegmentGuard&) = delete;
-    auto operator=(const SegmentGuard&) -> SegmentGuard& = delete;
-    SegmentGuard(SegmentGuard&&) = delete;
-    auto operator=(SegmentGuard&&) -> SegmentGuard& = delete;
-
-    SegmentGuard(Storage &store, std::string prefix)
-        : m_prefix {std::move(prefix)},
-          m_store {&store}
-    {}
-
-    ~SegmentGuard();
-
-    [[nodiscard]]
-    auto is_started() const -> bool
-    {
-        CALICO_EXPECT_EQ(m_writer == nullptr, m_collection == nullptr);
-        return m_writer != nullptr;
-    }
-
-private:
-    std::string m_prefix;
-    Storage *m_store {};
-    WalRecordWriter *m_writer {};
-    WalCollection *m_collection {};
-};
-
+/**
+ * Collects, and provides a staging area for, WAL segment descriptors.
+ *
+ * @see SegmentGuard
+ * @see WalRecordWriter
+ */
 class WalCollection final {
 public:
     WalCollection() = default;
@@ -212,7 +184,7 @@ public:
     }
 
     [[nodiscard]]
-    auto set() const -> const std::set<SegmentInfo>&
+    auto info() const -> const std::set<SegmentInfo>&
     {
         return m_info;
     }
@@ -220,6 +192,45 @@ public:
 private:
     std::set<SegmentInfo> m_info;
     SegmentInfo m_temp;
+};
+
+/**
+ * A scope guard that keeps the set of in-memory WAL segment descriptors consistent with what is on disk.
+ *
+ * @see WalRecordWriter
+ * @see WalCollection
+ */
+class SegmentGuard final {
+public:
+    [[nodiscard]] auto start(WalRecordWriter &writer, WalCollection &collection) -> Status;
+    [[nodiscard]] auto finish(bool has_commit) -> Status;
+    [[nodiscard]] auto abort() -> Status;
+
+    // No moves or copies!
+    SegmentGuard(const SegmentGuard&) = delete;
+    auto operator=(const SegmentGuard&) -> SegmentGuard& = delete;
+    SegmentGuard(SegmentGuard&&) = delete;
+    auto operator=(SegmentGuard&&) -> SegmentGuard& = delete;
+
+    SegmentGuard(Storage &store, std::string prefix)
+        : m_prefix {std::move(prefix)},
+          m_store {&store}
+    {}
+
+    ~SegmentGuard();
+
+    [[nodiscard]]
+    auto is_started() const -> bool
+    {
+        CALICO_EXPECT_EQ(m_writer == nullptr, m_collection == nullptr);
+        return m_writer != nullptr;
+    }
+
+private:
+    std::string m_prefix;
+    Storage *m_store {};
+    WalRecordWriter *m_writer {};
+    WalCollection *m_collection {};
 };
 
 class WalFilter {

@@ -46,13 +46,12 @@ public:
 
     [[nodiscard]] auto is_attached() const -> bool
     {
-        return m_scratch == std::nullopt;
+        return m_is_attached;
     }
 
 private:
     Cell() = default;
 
-    std::optional<Scratch> m_scratch;
     BytesView m_key;
     BytesView m_local_value;
     PageId m_left_child_id;
@@ -60,6 +59,7 @@ private:
     Size m_value_size {};
     Size m_page_size {};
     bool m_is_external {};
+    bool m_is_attached {true};
 };
 
 auto make_external_cell(BytesView, BytesView, Size) -> Cell;

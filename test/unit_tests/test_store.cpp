@@ -250,8 +250,7 @@ TEST_F(HeapTests, ReaderStopsAtEOF)
 
     std::string buffer(data.size() * 2, '\x00');
     auto bytes = stob(buffer);
-    ra_reader->read(bytes, 0);
-
+    ASSERT_TRUE(expose_message(ra_reader->read(bytes, 0)));
     ASSERT_EQ(btos(bytes), data);
 }
 

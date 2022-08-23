@@ -44,7 +44,8 @@ public:
         // TODO: m_pager_lsn is the largest page LSN written back to the database file. We can delete WAL segments up to this point. We could
         //       do this in a thread separate from the background writer, with some synchronization to make sure we aren't messing with the
         //       segment being written.
-        m_pager_lsn.store(SequenceId {pager_lsn});
+        const auto before = m_pager_lsn.load();
+        m_pager_lsn.store(SequenceId {std::max(before, SequenceId {pager_lsn})});
     }
 
     ~BasicWriteAheadLog() override;

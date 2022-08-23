@@ -5,6 +5,8 @@
 #include "store/disk.h"
 #include "utils/logging.h"
 #include "utils/types.h"
+#include <chrono>
+#include <thread>
 
 namespace calico {
 
@@ -30,6 +32,7 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
 
     CALICO_TRY_STORE(pool->m_framer, Framer::open(
         std::unique_ptr<RandomEditor> {file},
+        param.wal,
         param.page_size,
         param.frame_count
     ));
@@ -50,27 +53,30 @@ auto BasicPager::page_count() const -> Size
 
 auto BasicPager::pin_frame(PageId id) -> Status
 {
+    static constexpr auto MSG = "could not pin frame: out of frames";
     CALICO_EXPECT_FALSE(m_registry.contains(id));
 
     if (!m_framer->available()) {
         const auto r = try_make_available();
         if (!r.has_value()) return r.error();
 
-        // We are of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
+        // We are out of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
         // very often, if at all.
         if (!*r) {
-            ThreePartMessage message;
-            message.set_primary("could not pin frame");
-            message.set_detail("out of frames");
-            message.set_hint("release some pages or wait for the WAL to flush");
-            return message.not_found();
+
+            // TODO: Seems like spinning while waiting for the WAL is eating up too much CPU...
+
+//            using namespace std::chrono_literals;
+//            std::this_thread::sleep_for(10ms); // TODO
+
+            return Status::not_found(MSG);
         }
     }
     // Read the page into a frame.
     auto r = m_framer->pin(id);
     if (!r.has_value()) return r.error();
 
-    // Associate the page ID with the frame ID we got from the pager.
+    // Associate the page ID with the frame ID we got from the framer.
     m_registry.put(id, *r);
     return Status::ok();
 }
@@ -95,7 +101,6 @@ auto BasicPager::flush() -> Status
         auto s = m_framer->unpin(entry.frame_id, true);
         if (!s.is_ok()) return s;
         m_registry.erase(*itr);
-        m_wal->allow_cleanup(m_framer->flushed_lsn().value);
         entry.dirty_token.reset();
         itr = m_dirty.remove(itr);
     }
@@ -119,7 +124,7 @@ auto BasicPager::try_make_available() -> Result<bool>
         if (!dirty_token.has_value())
             return true;
 
-        if (m_wal->is_writing())
+        if (m_wal->is_enabled())
             return frame.lsn() <= m_wal->flushed_lsn();
 
         return true;
@@ -135,7 +140,6 @@ auto BasicPager::try_make_available() -> Result<bool>
     if (!s.is_ok()) return Err {s};
 
     if (was_dirty) {
-        m_wal->allow_cleanup(m_framer->flushed_lsn().value);
         m_dirty.remove(*dirty_token);
         dirty_token.reset();
     }

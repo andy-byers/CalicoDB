@@ -159,10 +159,9 @@ auto Cell::detach(Scratch scratch, bool ensure_internal) -> void
     if (ensure_internal && m_is_external)
         set_is_external(false);
 
-    auto data = scratch.data();
-    write(data);
-    *this = read_at(data, m_page_size, m_is_external);
-    m_scratch = scratch;
+    write(*scratch);
+    *this = read_at(*scratch, m_page_size, m_is_external);
+    m_is_attached = false;
 }
 
 auto Cell::set_is_external(bool is_external) -> void

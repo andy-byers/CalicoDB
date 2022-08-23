@@ -1,4 +1,5 @@
 #include "disk.h"
+#include <fcntl.h>
 #include "system.h"
 #include "utils/expect.h"
 #include "utils/logging.h"

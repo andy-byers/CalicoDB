@@ -168,7 +168,7 @@ auto main(int, const char *[]) -> int
     bytes_objects();
     auto db = open_database();
 
-    for (int i {}; i < 10'000; ++i) {
+    for (int i {}; i < 100'000; ++i) {
         const auto s = std::to_string(i);
         assert(db.insert(s, s).is_ok());
     }

@@ -60,6 +60,7 @@ TEST_F(SliceTests, StringLiteralSlice)
 TEST_F(SliceTests, StartsWith)
 {
     ASSERT_TRUE(stob("Hello, world!").starts_with(stob("Hello")));
+    ASSERT_FALSE(stob("Hello, world!").starts_with(stob(" Hello")));
 }
 
 TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
@@ -166,23 +167,36 @@ TEST(MonotonicScratchTest, ScratchesAreDistinct)
     auto s1 = manager.get();
     auto s2 = manager.get();
     auto s3 = manager.get();
-    s1.data()[0] = 1;
-    s2.data()[0] = 2;
-    s3.data()[0] = 3;
-    ASSERT_EQ(s1.data()[0], 1);
-    ASSERT_EQ(s2.data()[0], 2);
-    ASSERT_EQ(s3.data()[0], 3);
+    (*s1)[0] = 1;
+    (*s2)[0] = 2;
+    (*s3)[0] = 3;
+    ASSERT_EQ((*s1)[0], 1);
+    ASSERT_EQ((*s2)[0], 2);
+    ASSERT_EQ((*s3)[0], 3);
 }
 
 TEST(MonotonicScratchTest, ScratchesRepeat)
 {
     MonotonicScratchManager<3> manager {1};
-    manager.get().data()[0] = 1;
-    manager.get().data()[0] = 2;
-    manager.get().data()[0] = 3;
-    ASSERT_EQ(manager.get().data()[0], 1);
-    ASSERT_EQ(manager.get().data()[0], 2);
-    ASSERT_EQ(manager.get().data()[0], 3);
+    (*manager.get())[0] = 1;
+    (*manager.get())[0] = 2;
+    (*manager.get())[0] = 3;
+    ASSERT_EQ((*manager.get())[0], 1);
+    ASSERT_EQ((*manager.get())[0], 2);
+    ASSERT_EQ((*manager.get())[0], 3);
+}
+
+TEST(ScratchTest, BehavesLikeASlice)
+{
+    static constexpr auto MSG = "Hello, world!";
+    MonotonicScratchManager<1> manager {strlen(MSG)};
+    auto scratch = manager.get();
+
+    mem_copy(*scratch, stob(MSG));
+    ASSERT_TRUE(*scratch == stob(MSG));
+    ASSERT_TRUE(scratch->starts_with(stob("Hello")));
+    ASSERT_TRUE(scratch->range(7, 5) == stob("world"));
+    ASSERT_TRUE(scratch->advance(7).truncate(5) == stob("world"));
 }
 
 TEST(NonPrintableSliceTests, UsesStringSize)

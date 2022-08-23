@@ -2,10 +2,7 @@
 #define CALICO_STORE_H
 
 #include "calico/status.h"
-#include <fcntl.h>
-#include <memory>
 #include <string>
-#include <vector>
 
 namespace calico {
 
@@ -56,6 +53,7 @@ public:
 };
 
 template<class Reader>
+[[nodiscard]]
 auto read_exact(Reader &reader, Bytes out, Size offset) -> Status
 {
     static constexpr auto FMT = "could not read exact: read {}/{} bytes";

@@ -49,7 +49,7 @@ auto Frame::unref(Page &page) -> void
     m_ref_count--;
 }
 
-auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame_count) -> Result<std::unique_ptr<Framer>>
+auto Framer::open(std::unique_ptr<RandomEditor> file, WriteAheadLog &wal, Size page_size, Size frame_count) -> Result<std::unique_ptr<Framer>>
 {
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
@@ -69,14 +69,15 @@ auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame
         message.set_hint("tried to allocate {} bytes of cache memory", cache_size);
         return Err {message.system_error()};
     }
-    return std::unique_ptr<Framer> {new Framer {std::move(file), std::move(buffer), page_size, frame_count}};
+    return std::unique_ptr<Framer> {new Framer {std::move(file), wal, std::move(buffer), page_size, frame_count}};
 }
 
-Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
+Framer::Framer(std::unique_ptr<RandomEditor> file, WriteAheadLog &wal, AlignedBuffer buffer, Size page_size, Size frame_count)
     : m_buffer {std::move(buffer)},
       m_file {std::move(file)},
-      m_frame_count {frame_count},
-      m_page_size {page_size}
+      m_wal {&wal},
+      m_page_size {page_size},
+      m_frame_count {frame_count}
 {
     // The buffer should be aligned to the page size.
     CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
@@ -145,11 +146,7 @@ auto Framer::unpin(FrameNumber id, bool is_dirty) -> Status
     // If this fails, the caller (buffer pool) will need to roll back the database state or exit.
     if (is_dirty) {
         s = write_page_to_file(frame.pid(), frame.data());
-
-        if (s.is_ok()) {
-            const auto offset = PageLayout::header_offset(frame.pid()) + PageLayout::LSN_OFFSET;
-            m_flushed_lsn = std::max(m_flushed_lsn, SequenceId {get_u64(frame.data().range(offset))});
-        }
+        if (s.is_ok()) m_wal->allow_cleanup(frame.lsn().value);
     }
 
     frame.reset(PageId::null());

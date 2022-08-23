@@ -10,6 +10,30 @@
 
 namespace calico {
 
+template<Size N>
+class StaticScratch {
+public:
+    static constexpr Size Width = N;
+
+    StaticScratch()
+        : m_bytes {m_data.data(), m_data.size()}
+    {}
+
+    auto operator*() -> Bytes
+    {
+        return m_bytes;
+    }
+
+    auto operator->() -> Bytes*
+    {
+        return &m_data;
+    }
+
+private:
+    std::array<char, N> m_data {};
+    Bytes m_bytes;
+};
+
 class Scratch {
 public:
     ~Scratch() = default;
@@ -18,19 +42,14 @@ public:
         : m_data {data}
     {}
 
-    [[nodiscard]] auto size() const -> Size
-    {
-        return m_data.size();
-    }
-
-    [[nodiscard]] auto data() const -> BytesView
+    auto operator*() -> Bytes
     {
         return m_data;
     }
 
-    [[nodiscard]] auto data() -> Bytes
+    auto operator->() -> Bytes*
     {
-        return m_data;
+        return &m_data;
     }
 
 private:
@@ -71,7 +90,7 @@ public:
     {
         return m_id;
     }
-    
+
 private:
     Size m_id {};
 };

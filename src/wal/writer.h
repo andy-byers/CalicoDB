@@ -52,6 +52,8 @@ public:
         auto s = Status::ok();
         if (m_buffer.block_offset())
             s = append_block();
+        if (s.is_ok())
+            s = m_file->sync();
         m_block_count = 0;
         m_buffer.reset();
         m_file.reset();
@@ -112,7 +114,7 @@ private:
             // Clear unused bytes at the end of the tail buffer.
             mem_clear(m_buffer.remaining());
             auto s = m_file->write(m_buffer.block());
-            if (s.is_ok()) s = m_file->sync();
+//            if (s.is_ok()) s = m_file->sync(); // TODO
             m_block_count += s.is_ok();
             return s;
         });
@@ -163,8 +165,7 @@ public:
     [[nodiscard]]
     auto is_running() const -> bool
     {
-        std::lock_guard lock {m_state.mu};
-        return m_state.thread != std::nullopt;
+        return m_state.is_running.load();
     }
 
     auto dispatch(Event event) -> void
@@ -174,10 +175,10 @@ public:
         m_state.cv.notify_one();
     }
 
-    auto startup() -> Status
+    auto startup() -> void
     {
         CALICO_EXPECT_FALSE(is_running());
-        m_status = Status::ok();
+        m_state.errors.clear();
         m_state.thread = std::thread {background_writer, this};
         m_state.events.emplace_back(Event {
             EventType::START_WRITER,
@@ -185,42 +186,40 @@ public:
             std::nullopt,
         });
         m_state.cv.notify_one();
-
-        // TODO: May want to wait until the writer gets set up on the first segment?
-        return m_status;
     }
 
-    auto teardown() -> Status
+    auto teardown() -> void
     {
         const auto request_stop = [this] {
             std::lock_guard lock {m_state.mu};
-            m_state.events.emplace_back(Event {
-                EventType::STOP_WRITER,
-                SequenceId::null(),
-                std::nullopt,
-            });
-            m_state.cv.notify_one();
+            if (m_state.thread != std::nullopt) {
+                m_state.events.emplace_back(Event {
+                    EventType::STOP_WRITER,
+                    SequenceId::null(),
+                    std::nullopt,
+                });
+                m_state.cv.notify_one();
+                return true;
+            }
+            return false;
         };
-        if (is_running()) {
-            request_stop();
-
-            CALICO_EXPECT_NE(m_state.thread, std::nullopt);
-
+        if (request_stop()) {
             m_state.thread->join();
             m_state.thread.reset();
         }
-        return m_status;
     }
 
     [[nodiscard]]
-    auto status() const -> Status
+    auto next_status() -> Status
     {
         std::lock_guard lock {m_state.mu};
-        return m_status;
+        if (m_state.errors.empty()) return Status::ok();
+        auto s = m_state.errors.front();
+        m_state.errors.pop_front();
+        return s;
     }
 
 private:
-
     [[nodiscard]]
     auto run_start(SegmentGuard &guard) -> Status
     {
@@ -234,33 +233,35 @@ private:
             return guard.finish(false);
 
         const auto id = m_collection->current_segment().id;
-        (void)guard.abort(); // TODO
+        auto s = guard.abort();
+
         return m_store->remove_file(m_prefix + id.to_name());
     }
 
     [[nodiscard]]
     auto needs_segmentation() const -> bool
     {
-        return m_writer.is_attached() && m_writer.block_count() > 128; // TODO: Make this tunable?
+        return m_writer.block_count() > 128; // TODO: Make this tunable?
     }
 
     static auto background_writer(BackgroundWriter *writer) -> void*;
     [[nodiscard]] auto emit_payload(SequenceId lsn, BytesView payload) -> Status;
     [[nodiscard]] auto emit_commit(SegmentGuard &guard, SequenceId lsn) -> Status;
     [[nodiscard]] auto advance_segment(SegmentGuard &guard, bool has_commit) -> Status;
-    auto handle_error(SegmentGuard &guard, Status error) -> void*;
+    auto handle_error(SegmentGuard &guard, Status e) -> void*;
 
     struct {
         mutable std::mutex mu;
         std::condition_variable cv;
         std::deque<Event> events;
+        std::list<Status> errors;
+        std::atomic<bool> is_running {};
         std::optional<std::thread> thread;
     } m_state;
 
     std::atomic<SequenceId> *m_flushed_lsn {};
     WalRecordWriter m_writer;
     std::string m_prefix;
-    Status m_status {Status::ok()};
     LogScratchManager *m_scratch {};
     WalCollection *m_collection {};
     Storage *m_store {};
@@ -278,7 +279,7 @@ public:
 
     explicit BasicWalWriter(const Parameters &param)
         : m_scratch {param.page_size * WAL_SCRATCH_SCALE},
-          m_writer {{
+          m_background {{
               param.store,
               &m_scratch,
               param.collection,
@@ -291,26 +292,24 @@ public:
     [[nodiscard]]
     auto is_running() const -> bool
     {
-        return m_writer.is_running();
+        return m_background.is_running();
     }
 
     [[nodiscard]]
-    auto status() const -> Status
+    auto next_status() -> Status
     {
-        return m_writer.status();
+        return m_background.next_status();
     }
 
-    [[nodiscard]] auto start() -> Status;
-    [[nodiscard]] auto pause() -> Status;
-    [[nodiscard]] auto stop() -> Status;
+    auto start() -> void;
+    auto stop() -> void;
     auto log_full_image(SequenceId lsn, PageId page_id, BytesView image) -> void;
     auto log_deltas(SequenceId lsn, PageId page_id, BytesView image, const std::vector<PageDelta> &deltas) -> void;
     auto log_commit(SequenceId lsn) -> void;
 
 private:
     LogScratchManager m_scratch;
-    BackgroundWriter m_writer;
-    Storage *m_store {};
+    BackgroundWriter m_background;
 };
 
 } // namespace calico

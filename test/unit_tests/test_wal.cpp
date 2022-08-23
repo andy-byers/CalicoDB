@@ -57,8 +57,8 @@ public:
         std::string data(get_segment_size(id), '\x00');
         auto bytes = stob(data);
         EXPECT_TRUE(expose_message(reader->read(bytes, 0)));
-
         EXPECT_EQ(bytes.size(), data.size());
+        delete reader;
         return data;
     }
 };
@@ -399,7 +399,7 @@ TEST_F(WalRecordWriterTests, ClearsRestOfBlock)
 auto get_ids(const WalCollection &c)
 {
     std::vector<SegmentId> ids;
-    std::transform(cbegin(c.set()), cend(c.set()), back_inserter(ids), [](const auto &itr) {
+    std::transform(cbegin(c.info()), cend(c.info()), back_inserter(ids), [](const auto &itr) {
         return itr.id;
     });
     return ids;
@@ -548,10 +548,11 @@ public:
         event.type = random.next_int(3) == 0
                          ? BackgroundWriter::EventType::LOG_FULL_IMAGE
                          : BackgroundWriter::EventType::LOG_DELTAS;
-        event.buffer = scratch->get();
-        event.size = random.next_int(10UL, event.buffer->size());
+        auto buffer = scratch->get();
+        event.size = random.next_int(10UL, buffer->size());
         const auto data = random.next_string(event.size);
-        mem_copy(event.buffer->data(), stob(data));
+        mem_copy(*buffer, stob(data));
+        event.buffer = buffer;
         return event;
     }
 
@@ -565,25 +566,25 @@ public:
 TEST_F(BackgroundWriterTests, NewWriterState)
 {
     ASSERT_FALSE(writer->is_running());
-    ASSERT_TRUE(expose_message(writer->status()));
+    ASSERT_TRUE(expose_message(writer->next_status()));
 }
 
 TEST_F(BackgroundWriterTests, StartAndStopRepeatedly)
 {
     // Should be run with TSan every once in a while!
     for (Size i {}; i < 100; ++i) {
-        ASSERT_TRUE(expose_message(writer->startup()));
-        ASSERT_TRUE(expose_message(writer->teardown()));
-        ASSERT_TRUE(expose_message(writer->status()));
+        writer->startup();
+        writer->teardown();
+        ASSERT_TRUE(expose_message(writer->next_status()));
     }
 }
 
 TEST_F(BackgroundWriterTests, WriterCleansUp)
 {
-    ASSERT_TRUE(expose_message(writer->startup()));
+    writer->startup();
     writer->dispatch(get_update_event(SequenceId::from_index(0)));
-    ASSERT_TRUE(expose_message(writer->status()));
-    ASSERT_TRUE(expose_message(writer->teardown()));
+    ASSERT_TRUE(expose_message(writer->next_status()));
+    writer->teardown();
 
     ASSERT_FALSE(writer->is_running());
     ASSERT_FALSE(collection.is_segment_started());
@@ -595,12 +596,12 @@ TEST_F(BackgroundWriterTests, WriterCleansUp)
 
 TEST_F(BackgroundWriterTests, WriteUpdates)
 {
-    ASSERT_TRUE(expose_message(writer->startup()));
+    writer->startup();
     for (Size i {}; i < 100; ++i) {
         writer->dispatch(get_update_event(SequenceId::from_index(i)));
-        ASSERT_TRUE(expose_message(writer->status()));
+        ASSERT_TRUE(expose_message(writer->next_status()));
     }
-    ASSERT_TRUE(expose_message(writer->teardown()));
+    writer->teardown();
 
     const auto ids = get_ids(collection);
     ASSERT_FALSE(ids.empty());
@@ -727,6 +728,105 @@ TEST_F(RandomLogReaderTests, ReadsRecordsBetweenBlocks)
     ASSERT_EQ(answer, result.substr(0, answer.size()));
 }
 
+class SegmentGuardTests: public TestWithWalSegmentsOnHeap {
+public:
+    static constexpr Size PAGE_SIZE {0x100};
+
+    SegmentGuardTests()
+        : writer {PAGE_SIZE * WAL_BLOCK_SCALE}
+    {}
+
+    [[nodiscard]]
+    auto create_guard() const -> SegmentGuard
+    {
+        return SegmentGuard {*store, ROOT};
+    }
+
+    auto assert_components_are_started() const -> void
+    {
+        ASSERT_TRUE(collection.is_segment_started());
+        ASSERT_TRUE(writer.is_attached());
+    }
+
+    auto assert_components_are_stopped() const -> void
+    {
+        ASSERT_FALSE(collection.is_segment_started());
+        ASSERT_FALSE(writer.is_attached());
+    }
+
+    WalCollection collection;
+    WalRecordWriter writer;
+};
+
+TEST_F(SegmentGuardTests, NewGuardIsNotStarted)
+{
+    auto guard = create_guard();
+    ASSERT_FALSE(guard.is_started());
+    assert_components_are_stopped();
+}
+
+TEST_F(SegmentGuardTests, StartAndFinish)
+{
+    auto guard = create_guard();
+    ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+    ASSERT_TRUE(guard.is_started());
+    assert_components_are_started();
+
+    ASSERT_TRUE(expose_message(guard.finish(false)));
+    ASSERT_FALSE(guard.is_started());
+    assert_components_are_stopped();
+
+    ASSERT_EQ(collection.info().size(), 1);
+    const auto segment = cbegin(collection.info());
+    ASSERT_EQ(segment->id.value, 1);
+    ASSERT_FALSE(segment->has_commit);
+}
+
+TEST_F(SegmentGuardTests, StartAndFinishWithCommit)
+{
+    auto guard = create_guard();
+    ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+    ASSERT_TRUE(expose_message(guard.finish(true)));
+
+    ASSERT_EQ(collection.info().size(), 1);
+    const auto segment = cbegin(collection.info());
+    ASSERT_EQ(segment->id.value, 1);
+    ASSERT_TRUE(segment->has_commit);
+}
+
+TEST_F(SegmentGuardTests, BehavesLikeScopeGuard)
+{
+    {
+        auto guard = create_guard();
+        ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+    }
+
+    assert_components_are_stopped();
+    ASSERT_TRUE(collection.info().empty());
+}
+
+TEST_F(SegmentGuardTests, DoubleStartDeathTest)
+{
+    auto guard = create_guard();
+    ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+    ASSERT_DEATH(const auto unused = guard.start(writer, collection), EXPECTATION_MATCHER);
+}
+
+TEST_F(SegmentGuardTests, DoubleFinishDeathTest)
+{
+    auto guard = create_guard();
+    ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+    ASSERT_TRUE(expose_message(guard.finish(true)));
+    ASSERT_DEATH(const auto unused = guard.finish(true), EXPECTATION_MATCHER);
+}
+
+TEST_F(SegmentGuardTests, NotStartedDeathTest)
+{
+    auto guard = create_guard();
+    ASSERT_DEATH(const auto unused = guard.abort(), EXPECTATION_MATCHER);
+    ASSERT_DEATH(const auto unused = guard.finish(true), EXPECTATION_MATCHER);
+}
+
 class BasicWalReaderWriterTests: public TestWithWalSegmentsOnHeap {
 public:
     static constexpr Size PAGE_SIZE {0x100};
@@ -763,7 +863,7 @@ public:
 
 TEST_F(BasicWalReaderWriterTests, NewWriterIsOk)
 {
-    ASSERT_TRUE(writer->status().is_ok());
+    ASSERT_TRUE(writer->next_status().is_ok());
 }
 
 TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
@@ -774,30 +874,30 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
     std::vector<std::vector<PageDelta>> deltas;
     std::vector<std::string> images;
 
-    ASSERT_TRUE(expose_message(writer->start()));
+    writer->start();
     for (Size i {}; i < NUM_RECORDS; ++i) {
         images.emplace_back(random.next_string(0x80));
         deltas.emplace_back(generator.setup_deltas(stob(images.back())));
         writer->log_deltas(SequenceId::from_index(i), PageId::root(), stob(images.back()), deltas[i]);
     }
     // close() should cause the writer to flush the current block.
-    ASSERT_TRUE(expose_message(writer->stop()));
+    writer->stop();
 
-//    std::vector<RecordPosition> positions;
-//    ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
-//
-//    Size i {};
-//    ASSERT_TRUE(expose_message(reader->redo(positions, [deltas, &i, images](const RedoDescriptor &descriptor) {
-//        auto lhs = cbegin(descriptor.deltas);
-//        auto rhs = cbegin(deltas[i]);
-//        for (; rhs != cend(deltas[i]); ++lhs, ++rhs) {
-//            EXPECT_NE(lhs, cend(descriptor.deltas));
-//            EXPECT_TRUE(lhs->data == stob(images[i]).range(rhs->offset, rhs->size));
-//            EXPECT_EQ(lhs->offset, rhs->offset);
-//        }
-//        i++;
-//        return Status::ok();
-//    })));
+    std::vector<RecordPosition> positions;
+    ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
+
+    Size i {};
+    ASSERT_TRUE(expose_message(reader->redo(positions, [deltas, &i, images](const RedoDescriptor &descriptor) {
+        auto lhs = cbegin(descriptor.deltas);
+        auto rhs = cbegin(deltas[i]);
+        for (; rhs != cend(deltas[i]); ++lhs, ++rhs) {
+            EXPECT_NE(lhs, cend(descriptor.deltas));
+            EXPECT_TRUE(lhs->data == stob(images[i]).range(rhs->offset, rhs->size));
+            EXPECT_EQ(lhs->offset, rhs->offset);
+        }
+        i++;
+        return Status::ok();
+    })));
 
     ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
 }
@@ -808,12 +908,12 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
     static constexpr Size NUM_RECORDS {100};
     std::vector<std::string> images;
 
-    ASSERT_TRUE(expose_message(writer->start()));
+    writer->start();
     for (Size i {}; i < NUM_RECORDS; ++i) {
         images.emplace_back(random.next_string(0x80));
         writer->log_full_image(SequenceId::from_index(i), PageId::from_index(i), stob(images.back()));
     }
-    ASSERT_TRUE(expose_message(writer->stop()));
+    writer->stop();
 
     std::vector<RecordPosition> positions;
     ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
@@ -848,7 +948,7 @@ auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_d
     auto &random = test.random;
     auto &collection = test.collection;
 
-    ASSERT_TRUE(expose_message(writer->start()));
+    writer->start();
     for (Size i {}; i < num_images; ++i) {
         auto lsn = SequenceId::from_index(i * deltas_per_image);
         auto pid = PageId::from_index(i);
@@ -862,12 +962,12 @@ auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_d
             writer->log_deltas(lsn++, pid, stob(after_images.back()), deltas);
         }
     }
-    ASSERT_TRUE(expose_message(writer->stop()));
+    writer->stop();
 
     // Roll forward some copies of the "before images" to match the "after images".
     std::vector<std::vector<RecordPosition>> all_positions;
     auto images = before_images;
-    for (const auto &[id, meta]: collection.set()) {
+    for (const auto &[id, meta]: collection.info()) {
         all_positions.emplace_back();
         ASSERT_TRUE(expose_message(reader->open(id)));
         ASSERT_TRUE(expose_message(reader->redo(all_positions.back(), [&images](const RedoDescriptor &info) {
@@ -966,7 +1066,7 @@ public:
 // TODO: Can't immediately get the mock file since the writer won't create its version immediately...
 //TEST_F(MockWalReaderWriterTests, WriterCleansUpOnError)
 //{
-//    ASSERT_TRUE(expose_message(writer->start()));
+//    writer->start();
 //    open_mock_segment(SegmentId {1});
 //    EXPECT_CALL(*mock, write).Times(testing::AtLeast(1));
 //    EXPECT_CALL(mock_store(), remove_file).Times(1); // No writes succeed in this test, so the empty segment file should be removed.
@@ -988,7 +1088,7 @@ public:
 //    ASSERT_EQ(writer->status().what(), "42");
 //
 //    // NOOP if already closed.
-//    ASSERT_TRUE(expose_message(writer->stop()));
+//    writer->stop();
 //}
 
 class BasicWalTests: public TestWithWalSegmentsOnHeap {

@@ -82,7 +82,7 @@ private:
 class Framer final {
 public:
     ~Framer() = default;
-    [[nodiscard]] static auto open(std::unique_ptr<RandomEditor>, Size, Size) -> Result<std::unique_ptr<Framer>>;
+    [[nodiscard]] static auto open(std::unique_ptr<RandomEditor>, WriteAheadLog&, Size, Size) -> Result<std::unique_ptr<Framer>>;
     [[nodiscard]] auto pin(PageId) -> Result<FrameNumber>;
     [[nodiscard]] auto unpin(FrameNumber, bool) -> Status;
     [[nodiscard]] auto sync() -> Status;
@@ -121,7 +121,7 @@ public:
     Framer(Framer &&) = default;
 
 private:
-    Framer(std::unique_ptr<RandomEditor>, AlignedBuffer, Size, Size);
+    Framer(std::unique_ptr<RandomEditor>, WriteAheadLog&, AlignedBuffer, Size, Size);
     [[nodiscard]] auto read_page_from_file(PageId, Bytes) const -> Result<bool>;
     [[nodiscard]] auto write_page_to_file(PageId, BytesView) const -> Status;
 
@@ -136,10 +136,11 @@ private:
     std::vector<Frame> m_frames;
     std::list<FrameNumber> m_available;
     std::unique_ptr<RandomEditor> m_file;
+    WriteAheadLog *m_wal {};
     SequenceId m_flushed_lsn;
-    Size m_frame_count {};
     Size m_page_count {};
     Size m_page_size {};
+    Size m_frame_count {};
 };
 
 } // namespace cco

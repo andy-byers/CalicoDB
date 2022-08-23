@@ -7,16 +7,17 @@ namespace calico {
 
 auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
 {
-    using namespace std::chrono_literals;
-
-    auto &[mu, cv, events, self] = writer->m_state;
+    // Take some references for convenience.
+    auto &[mu, cv, events, errors, is_running, self] = writer->m_state;
     auto &flushed_lsn = *writer->m_flushed_lsn;
     auto &scratch = *writer->m_scratch;
-    auto is_running = true;
 
-    SegmentGuard current {*writer->m_store, writer->m_prefix};
+    auto flag = true;
+    is_running.store(flag);
 
-    while (is_running) {
+    SegmentGuard guard {*writer->m_store, writer->m_prefix};
+
+    while (flag) {
         std::unique_lock lock {mu};
         cv.wait(lock, [writer] {
             return !writer->m_state.events.empty();
@@ -37,17 +38,17 @@ auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
             case EventType::LOG_FULL_IMAGE:
             case EventType::LOG_DELTAS:
                 CALICO_EXPECT_TRUE(buffer.has_value());
-                s = writer->emit_payload(lsn, buffer->data().truncate(size));
+                s = writer->emit_payload(lsn, (*buffer)->truncate(size));
                 break;
             case EventType::LOG_COMMIT:
-                s = writer->emit_commit(current, lsn);
+                s = writer->emit_commit(guard, lsn);
                 break;
             case EventType::START_WRITER:
-                s = writer->run_start(current);
+                s = writer->run_start(guard);
                 break;
             case EventType::STOP_WRITER:
-                s = writer->run_stop(current);
-                is_running = false;
+                s = writer->run_stop(guard);
+                flag = false;
                 break;
             default:
                 CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
@@ -56,34 +57,40 @@ auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
         // Replace the scratch memory so that the main thread can reuse it. This is internally synchronized.
         if (buffer) scratch.put(*buffer);
 
-        // Shouldn't need segmentation on this round unless we wrote something.
-        if (s.is_ok() && writer->needs_segmentation()) {
-            s = writer->advance_segment(current, false);
+        if (s.is_ok()) {
+            // Shouldn't need segmentation on this round unless we wrote something.
+            if (guard.is_started() && writer->needs_segmentation()) {
+                s = writer->advance_segment(guard, false);
 
-            if (s.is_ok())
-                flushed_lsn.store(lsn);
+                if (s.is_ok())
+                    flushed_lsn.store(lsn);
+            }
         }
 
         // TODO: Clean up unneeded segments. We'll use the m_first_lsn member from BasicWriteAheadLog...
 
-        if (!s.is_ok())
-            return writer->handle_error(current, s);
+        if (!s.is_ok()) {
+            writer->handle_error(guard, s);
+            flag = false;
+        }
+
+        if (!flag) is_running.store(flag);
     }
     return nullptr;
 }
 
-auto BackgroundWriter::handle_error(SegmentGuard &guard, Status s) -> void*
+auto BackgroundWriter::handle_error(SegmentGuard &guard, Status e) -> void*
 {
-    CALICO_EXPECT_FALSE(s.is_ok());
+    CALICO_EXPECT_FALSE(e.is_ok());
     std::lock_guard lock {m_state.mu};
-    m_status = std::move(s);
+    m_state.errors.push_back(e);
     m_state.events.clear();
     m_state.thread->detach();
     m_state.thread.reset();
 
-    const auto id = m_collection->current_segment().id;
-    if (guard.is_started()) (void)guard.abort();
-    (void)m_store->remove_file(m_prefix + id.to_name());
+    // We still want to try and finish the segment. We may need it to roll back changes.
+    e = run_stop(guard);
+    if (!e.is_ok()) m_state.errors.push_back(e);
     return nullptr;
 }
 
@@ -97,7 +104,7 @@ auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
 auto BackgroundWriter::emit_commit(SegmentGuard &guard, SequenceId lsn) -> Status
 {
     std::string scratch(1, '\x00');
-    const auto payload_size = encode_commit_payload(stob(scratch));
+    [[maybe_unused]] const auto payload_size = encode_commit_payload(stob(scratch));
     CALICO_EXPECT_EQ(payload_size, 1);
 
     auto s = emit_payload(lsn, stob(scratch));
@@ -117,22 +124,22 @@ auto BackgroundWriter::advance_segment(SegmentGuard &guard, bool has_commit) -> 
     return run_start(guard);
 }
 
-auto BasicWalWriter::start() -> Status
+auto BasicWalWriter::start() -> void
 {
-    return m_writer.startup();
+    m_background.startup();
 }
 
-auto BasicWalWriter::stop() -> Status
+auto BasicWalWriter::stop() -> void
 {
-    return m_writer.teardown();
+    m_background.teardown();
 }
 
 auto BasicWalWriter::log_full_image(SequenceId lsn, PageId page_id, BytesView image) -> void
 {
     auto buffer = m_scratch.get();
-    const auto size = encode_full_image_payload(page_id, image, buffer.data());
+    const auto size = encode_full_image_payload(page_id, image, *buffer);
 
-    m_writer.dispatch({
+    m_background.dispatch({
         BackgroundWriter::EventType::LOG_FULL_IMAGE,
         lsn,
         buffer,
@@ -143,9 +150,9 @@ auto BasicWalWriter::log_full_image(SequenceId lsn, PageId page_id, BytesView im
 auto BasicWalWriter::log_deltas(SequenceId lsn, PageId page_id, BytesView image, const std::vector<PageDelta> &deltas) -> void
 {
     auto buffer = m_scratch.get();
-    const auto size = encode_deltas_payload(page_id, image, deltas, buffer.data());
+    const auto size = encode_deltas_payload(page_id, image, deltas, *buffer);
 
-    m_writer.dispatch({
+    m_background.dispatch({
         BackgroundWriter::EventType::LOG_DELTAS,
         lsn,
         buffer,
@@ -155,7 +162,7 @@ auto BasicWalWriter::log_deltas(SequenceId lsn, PageId page_id, BytesView image,
 
 auto BasicWalWriter::log_commit(SequenceId lsn) -> void
 {
-    m_writer.dispatch({
+    m_background.dispatch({
         BackgroundWriter::EventType::LOG_COMMIT,
         lsn,
         std::nullopt,

@@ -24,27 +24,10 @@ namespace {
 using namespace calico;
 namespace fs = std::filesystem;
 
-class XactTests: public testing::Test {
+class XactTests: public TestOnDisk {
 public:
-    static constexpr auto ROOT = "/tmp/__calico_xact_tests/";
-
-    XactTests()
-    {
-        std::error_code ignore;
-        fs::remove_all(ROOT, ignore);
-    }
-
-    ~XactTests() override
-    {
-//        std::error_code ignore;
-//        fs::remove_all(ROOT, ignore);
-    }
-
     auto SetUp() -> void override
     {
-        store = std::make_unique<DiskStorage>();
-        store->create_directory(ROOT);
-
         WriteAheadLog *temp {};
         BasicWriteAheadLog::Parameters param {
             ROOT,
@@ -74,7 +57,6 @@ public:
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
-    std::unique_ptr<Storage> store;
     std::unique_ptr<WriteAheadLog> wal;
     Random random {123};
     Options options;
@@ -192,114 +174,73 @@ auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
     return committed;
 }
 
-[[nodiscard]]
-auto read_whole_file(const std::string &path) -> std::string
-{
-    std::string data;
-    std::ifstream ifs {path};
-    EXPECT_TRUE(ifs.is_open());
-    ifs >> data;
-    return data;
-}
-
-TEST_F(XactTests, AbortSanityCheck)
-{
-    DataFileInspector inspector {std::string {ROOT} + DATA_FILENAME, db.info().page_size()};
-
-    for (Size i {}; i < 3; ++i) {
-        insert_1000_records(*this);
-//        ASSERT_TRUE(expose_message(db.abort()));
-//        insert_1000_records(*this);
-//        erase_1000_records(*this);
-        ASSERT_TRUE(expose_message(db.abort()));
-
-        ASSERT_EQ(db.info().record_count(), 0);
-
-        auto root = inspector.get_page(PageId::root());
-        const auto offset = sizeof(FileHeader) + PageLayout::HEADER_SIZE + NodeHeader::cell_directory_offset(root);
-        const auto content = root.view(offset);
-        ASSERT_EQ(root.type(), PageType::EXTERNAL_NODE);
-        ASSERT_EQ(root.lsn(), SequenceId::null());
-        ASSERT_TRUE(std::all_of(content.data(), content.data() + content.size(), [](auto c) {
-            return c == '\x00';
-        }));
-    }
-    ASSERT_EQ(db.info().record_count(), 0);
-}
-
 TEST_F(XactTests, AbortRestoresPriorState)
 {
-    const auto path = ROOT + std::string{"/data"};
-    const auto before = read_whole_file(path);
-    const auto records = generator.generate(random, 500);
-    for (const auto &r: run_random_operations(*this, cbegin(records), cend(records))) {
-        ASSERT_TRUE(tools::contains(db, r.key));
-    }
-    ASSERT_TRUE(expose_message(db.abort()));
-    const auto after = read_whole_file(path);
+    static constexpr Size NUM_RECORDS {500};
+    const auto path = ROOT + std::string {DATA_FILENAME};
+    const auto records = generator.generate(random, NUM_RECORDS);
 
-    // TODO: Pager component should truncate the data file given the new page_count value after the abort. The second argument passed to substr() below should be removed once this is implemented.
-    ASSERT_EQ(before.substr(sizeof(FileHeader)), after.substr(sizeof(FileHeader), before.size() - sizeof(FileHeader)));
+    auto committed = run_random_operations(*this, cbegin(records), cbegin(records) + NUM_RECORDS/2);
+    ASSERT_TRUE(expose_message(db.commit()));
+
+    run_random_operations(*this, cbegin(records) + NUM_RECORDS/2, cend(records));
+    ASSERT_TRUE(expose_message(db.abort()));
+
+    // The database should contain exactly these records.
+    ASSERT_EQ(db.info().record_count(), committed.size());
+    for (const auto &[key, value]: committed) {
+        ASSERT_TRUE(tools::contains(db, key, value));
+    }
 }
 
 template<class Test>
 [[nodiscard]]
 auto run_random_transactions(Test &test, Size n)
 {
-    {
-        DataFileInspector inspector {std::string {Test::ROOT} + DATA_FILENAME, test.db.info().page_size()};
-        const auto page = inspector.get_page(PageId::root());
-        hexdump(page.view(0).data(), page.size());
-        fmt::print("\n");
-    }
-
-    static constexpr Size XACT_SIZE {1};
-
+    static constexpr long XACT_SIZE {100};
     // Generate the records all at once, so we know that they are unique.
     auto all_records = test.generator.generate(test.random, n * XACT_SIZE);
     std::vector<Record> committed;
 
     for (Size i {}; i < n; ++i) {
-        const auto start = cbegin(all_records) + long(XACT_SIZE*i);
+        const auto start = cbegin(all_records) + static_cast<long>(XACT_SIZE * i);
         const auto temp = run_random_operations(test, start, start + XACT_SIZE);
-//        if (test.random.next_int(4UL) == 0) {
-//            EXPECT_TRUE(expose_message(test.db.abort()));
-//
-//            DataFileInspector inspector {std::string {Test::ROOT} + DATA_FILENAME, test.db.info().page_size()};
-//            const auto page = inspector.get_page(PageId::root());
-//            hexdump(page.view(0).data(), page.size());
-//            fmt::print("\n");
-//        } else {
+        if (test.random.next_int(4UL) == 0) {
+            EXPECT_TRUE(expose_message(test.db.abort()));
+        } else {
             EXPECT_TRUE(expose_message(test.db.commit()));
             committed.insert(cend(committed), cbegin(temp), cend(temp));
-//        }
+        }
     }
     return committed;
 }
 
-TEST_F(XactTests, SanityCheck_1)
+template<class Test>
+auto test_transactions(Test &test, Size n)
 {
-    for (const auto &r: run_random_transactions(*this, 1)) {
-        ASSERT_TRUE(tools::contains(db, r.key));
+    for (const auto &[key, value]: run_random_transactions(test, n)) {
+        ASSERT_TRUE(tools::contains(test.db, key, value));
     }
 }
 
-TEST_F(XactTests, SanityCheck_10)
+TEST_F(XactTests, SanityCheck)
 {
-    for (const auto &r: run_random_transactions(*this, 10)) {
-        ASSERT_TRUE(tools::contains(db, r.key));
-    }
+    test_transactions(*this, 20);
 }
 
-// TODO
-//TEST_F(XactTests, PersistenceSanityCheck)
-//{
-//    for (Size i {}; i < 10; ++i) {
-//        for (const auto &r: run_random_transactions(*this, 10)) {
-//            ASSERT_TRUE(tools::contains(db, r.key));
-//        }
+TEST_F(XactTests, PersistenceSanityCheck)
+{
+    ASSERT_TRUE(expose_message(db.close()));
+    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+
+//    ASSERT_TRUE(expose_message(db.close()));
+//
+//    for (Size i {}; i < 5; ++i) {
+//        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+//        test_transactions(*this, 3);
+//        ASSERT_TRUE(expose_message(db.close()));
 //    }
-//}
+}
 //
 //class IncompleteXactTests: public TestOnHeap {
 //public:
@@ -330,13 +271,19 @@ TEST_F(XactTests, SanityCheck_10)
 //        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
 //        ASSERT_TRUE(db.is_open());
 //
-//        committed = run_random_transactions(*this, 10);
+//        const auto records = generator.generate(random, 500);
+//        committed = run_random_operations(*this, cbegin(records), cend(records));
+//        ASSERT_TRUE(expose_message(db.commit()));
 //
+////        const auto uncommitted = generator.generate(random, 500);
+////        run_random_operations(*this, cbegin(records), cend(records));
 //
-//        (void)db.close();
+//        auto *cloned = dynamic_cast<HeapStorage &>(*store).clone();
+//
+//        ASSERT_TRUE(expose_message(db.close()));
 //        wal.reset();
 //
-//        store.reset(dynamic_cast<HeapStorage &>(*store).clone());
+//        store.reset(cloned);
 //        param.store = store.get();
 //
 //        ASSERT_TRUE(expose_message(BasicWriteAheadLog::open(param, &temp)));
