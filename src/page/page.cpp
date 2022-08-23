@@ -152,4 +152,4 @@ auto put_u64(Page &page, Size offset, std::uint64_t value) -> void
     put_u64(page.bytes(offset, sizeof(value)), value);
 }
 
-} // namespace cco
+} // namespace calico

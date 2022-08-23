@@ -205,4 +205,4 @@ auto Framer::save_state(FileHeader &header) -> void
     header.page_size = encode_page_size(m_page_size);
 }
 
-} // namespace cco
+} // namespace calico

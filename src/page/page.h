@@ -75,6 +75,6 @@ auto put_u16(Page &, Size, std::uint16_t) -> void;
 auto put_u32(Page &, Size, std::uint32_t) -> void;
 auto put_u64(Page &, Size, std::uint64_t) -> void;
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_PAGE_PAGE_H

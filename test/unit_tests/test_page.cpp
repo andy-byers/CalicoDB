@@ -134,7 +134,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     std::vector<PageDelta> deltas;
     for (Size i {}; i < NUM_INSERTS; ++i) {
         const auto offset = random.next_int(PAGE_SIZE - MAX_DELTA_SIZE);
-        const auto size = random.next_int(1UL, MAX_DELTA_SIZE);
+        const auto size = random.next_int(1ULL, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);

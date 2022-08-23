@@ -45,6 +45,6 @@ inline auto encode_page_size(Size page_size) -> std::uint16_t
     return static_cast<std::uint16_t>(page_size);
 }
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_DB_HEADER_H

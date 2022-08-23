@@ -8,7 +8,7 @@
 #include "storage/file.h"
 #include "utils/expect.h"
 
-using namespace cco;
+using namespace calico;
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t*, size_t);
 

@@ -22,6 +22,6 @@ inline auto crc_32(BytesView data) noexcept -> std::uint32_t
     return (b << 16) | a;
 }
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_CRC_H

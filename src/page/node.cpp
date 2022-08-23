@@ -941,4 +941,4 @@ auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     return split_internal_non_root(Ln, rn, scratch);
 }
 
-} // namespace cco
+} // namespace calico

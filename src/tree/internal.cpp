@@ -520,4 +520,4 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     return {};
 }
 
-} // namespace cco
+} // namespace calico

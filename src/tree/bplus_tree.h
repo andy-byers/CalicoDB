@@ -47,6 +47,6 @@ private:
     std::shared_ptr<spdlog::logger> m_logger;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_TREE_BPLUS_TREE_H

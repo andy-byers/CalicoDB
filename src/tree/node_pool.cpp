@@ -146,4 +146,4 @@ auto NodePool::load_state(const FileHeader &header) -> void
     m_free_list.load_state(header);
 }
 
-} // namespace cco
+} // namespace calico

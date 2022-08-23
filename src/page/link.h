@@ -47,6 +47,6 @@ private:
     Page m_page;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_PAGE_LINK_H

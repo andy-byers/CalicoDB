@@ -110,6 +110,6 @@ private:
     Size m_scratch_size;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_SCRATCH_H

@@ -1,6 +1,6 @@
 #include "fuzz.h"
 
-using namespace cco;
+using namespace calico;
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {

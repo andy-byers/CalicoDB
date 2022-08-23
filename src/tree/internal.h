@@ -80,6 +80,6 @@ private:
     Size m_cell_count {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_TREE_INTERNAL_H

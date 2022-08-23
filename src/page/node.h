@@ -170,6 +170,6 @@ auto merge_root(Node &, Node &) -> void;
 auto split_root(Node &, Node &) -> void;
 [[nodiscard]] auto split_non_root(Node &, Node &, Scratch) -> Cell;
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_PAGE_NODE_H

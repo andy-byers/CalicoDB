@@ -34,4 +34,4 @@ auto PageRegistry::erase(PageId id) -> void
     CALICO_EXPECT_TRUE(false && "erase(): cannot find entry");
 }
 
-} // namespace cco
+} // namespace calico

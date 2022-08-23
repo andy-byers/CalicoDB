@@ -148,6 +148,6 @@ public:
     }
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_CACHE_H

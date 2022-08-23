@@ -124,14 +124,21 @@ auto BasicPager::try_make_available() -> Result<bool>
         if (!dirty_token.has_value())
             return true;
 
-        if (m_wal->is_enabled())
+        if (m_wal->is_enabled()) {
+            if(!m_wal->flushed_lsn()){
+
+            }
+//if(frame.lsn()>m_wal->flushed_lsn()){fmt::print("not found F:{} > W:{}\n",frame.lsn().value,m_wal->flushed_lsn());}
             return frame.lsn() <= m_wal->flushed_lsn();
+        }
 
         return true;
     });
 
-    if (itr == m_registry.end())
+    if (itr == m_registry.end()) {
+
         return false;
+    }
 
     auto &[pid, entry] = *itr;
     auto &[frame_id, dirty_token] = entry;
@@ -259,4 +266,4 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     return do_acquire(itr->second);
 }
 
-} // namespace cco
+} // namespace calico

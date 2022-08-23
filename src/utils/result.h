@@ -10,6 +10,6 @@ template<class T>
 using Result = tl::expected<T, Status>;
 using Err = tl::unexpected<Status>;
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_RESULT_H

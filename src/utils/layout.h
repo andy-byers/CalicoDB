@@ -141,6 +141,6 @@ inline constexpr auto get_local_value_size(Size key_size, Size value_size, Size 
     return value_size;
 }
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_LAYOUT_H

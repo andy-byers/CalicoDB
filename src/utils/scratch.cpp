@@ -26,4 +26,4 @@ auto NamedScratchManager::put(NamedScratch scratch) -> void
     m_occupied.erase(itr);
 }
 
-} // namespace cco
+} // namespace calico

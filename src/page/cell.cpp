@@ -205,4 +205,4 @@ auto make_internal_cell(BytesView key, Size page_size) -> Cell
     return Cell {param};
 }
 
-} // namespace cco
+} // namespace calico

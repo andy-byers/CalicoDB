@@ -100,6 +100,6 @@ private:
     spdlog::logger *m_logger {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_LOGGING_H

@@ -59,6 +59,6 @@ private:
     Storage *m_store {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_WAL_READER_H

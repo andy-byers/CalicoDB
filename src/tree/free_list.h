@@ -68,6 +68,6 @@ private:
     PageId m_head;     ///< Page ID of the page at the head of the free list.
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_TREE_FREE_LIST_H

@@ -26,6 +26,6 @@ static constexpr int FAILURE = -1;
 [[nodiscard]] auto dir_create(const std::string &, mode_t) -> Status;
 [[nodiscard]] auto dir_remove(const std::string &) -> Status;
 
-} // namespace cco::system
+} // namespace calico::system
 
 #endif // CALICO_STORE_SYSTEM_H

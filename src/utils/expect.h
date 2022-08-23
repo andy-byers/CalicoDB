@@ -77,6 +77,6 @@ inline constexpr auto handle_expect(bool expectation, const char *repr, const ch
     }
 }
 
-} // namespace cco::impl
+} // namespace calico::impl
 
 #endif // CALICO_UTILS_ASSERT_H

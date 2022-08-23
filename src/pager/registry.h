@@ -124,6 +124,6 @@ private:
     Size m_misses {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_POOL_PAGE_CACHE_H

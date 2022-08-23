@@ -36,6 +36,6 @@ public:
     virtual auto load_state(const FileHeader &) -> void = 0;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_POOL_INTERFACE_H

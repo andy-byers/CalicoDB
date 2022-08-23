@@ -79,6 +79,6 @@ public:
     [[nodiscard]] auto file_size(const std::string &, Size &) const -> Status override;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_STORE_DISK_H

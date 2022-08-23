@@ -107,4 +107,4 @@ auto LogMessage::log(spdlog::level::level_enum level) const -> std::string
     return message;
 }
 
-} // namespace cco
+} // namespace calico

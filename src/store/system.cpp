@@ -145,4 +145,4 @@ auto dir_remove(const std::string &path) -> Status
     return Status::ok();
 }
 
-} // namespace cco::system
+} // namespace calico::system

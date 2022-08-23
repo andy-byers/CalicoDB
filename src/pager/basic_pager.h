@@ -74,6 +74,6 @@ private:
     Size m_ref_sum {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_POOL_BUFFER_POOL_H

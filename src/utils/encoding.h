@@ -97,6 +97,6 @@ inline auto put_u64(Bytes out, std::uint64_t value) noexcept -> void
     put_u64(out.data(), value);
 }
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_ENCODING_H

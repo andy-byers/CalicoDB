@@ -6,7 +6,7 @@
 //#include <fstream>
 //#include <spdlog/fmt/fmt.h>
 //
-//namespace cco {
+//namespace calico {
 //
 //
 //static auto find_minimum(Tree &tree) -> Node

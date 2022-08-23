@@ -65,6 +65,6 @@ private:
 auto make_external_cell(BytesView, BytesView, Size) -> Cell;
 auto make_internal_cell(BytesView, Size) -> Cell;
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_PAGE_CELL_H

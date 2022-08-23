@@ -210,4 +210,4 @@ auto BPlusTree::TEST_validate_node(PageId id) -> void
     node.TEST_validate();
 }
 
-} // namespace cco
+} // namespace calico

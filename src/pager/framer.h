@@ -143,6 +143,6 @@ private:
     Size m_frame_count {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_POOL_PAGER_H

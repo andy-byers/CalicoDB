@@ -82,6 +82,6 @@ private:
     std::unordered_set<std::string> m_directories;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_STORE_HEAP_H

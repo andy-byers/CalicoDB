@@ -11,57 +11,38 @@
 namespace calico {
 
 /**
+ * A simple queue with internal synchronization.
+ *
+ * Modified from RocksDB's WorkQueue class.
  *
  * @tparam T Must be CopyConstructible!
  */
 template<class T>
-class Queue {
+class Queue final {
 public:
+    Queue() = default;
+    ~Queue() = default;
 
-    [[nodiscard]]
-    auto is_empty() const -> bool
+    auto enqueue(T &&t) -> void
     {
-        std::lock_guard lock {m_mutex};
-        return size() == 0;
+        std::unique_lock lock {m_mu};
+        m_queue.push_back(std::forward<T>(t));
+        m_empty_cv.notify_one();
+        m_is_finished = false;
     }
 
     [[nodiscard]]
-    auto size() const -> Size
+    auto dequeue() -> std::optional<T>
     {
-        std::lock_guard lock {m_mutex};
-        return m_queue.size();
-    }
-
-    [[nodiscard]]
-    auto to_vector() const -> std::vector<T>
-    {
-        std::vector<T> result;
-        std::lock_guard lock {m_mutex};
-        result.reserve(m_queue.size());
-        std::copy(cbegin(m_queue), cend(m_queue), back_inserter(result));
-        return result;
-    }
-
-    auto clear() -> void
-    {
-        // Careful, this won't wake up any waiting threads.
-        std::lock_guard lock {m_mutex};
-        m_queue.clear();
-    }
-
-    auto enqueue(T t) -> void
-    {
-        std::lock_guard lock {m_mutex};
-        m_queue.push_back(t);
-        m_cond.notify_one();
-    }
-
-    [[nodiscard]]
-    auto dequeue() -> T
-    {
-        std::unique_lock lock {m_mutex};
-        m_cond.wait(lock, &Queue<T>::wait_until);
-        auto t = m_queue.front();
+        std::unique_lock lock {m_mu};
+        m_empty_cv.wait(lock, [this] {
+            return !m_queue.empty() && !m_is_finished;
+        });
+        if (m_queue.empty()) {
+            CALICO_EXPECT_TRUE(m_is_finished);
+            return std::nullopt;
+        }
+        auto t = std::move(m_queue.front());
         m_queue.pop_front();
         return t;
     }
@@ -69,34 +50,37 @@ public:
     [[nodiscard]]
     auto peek() const -> std::optional<T>
     {
-        std::lock_guard lock {m_mutex};
-        return m_queue.empty() ? std::nullopt : std::optional {m_queue.front()};
+        std::lock_guard lock {m_mu};
+        if (m_queue.empty())
+            return std::nullopt;
+        return m_queue.front();
     }
 
-    [[nodiscard]]
-    auto try_dequeue(std::chrono::microseconds micros) -> std::optional<T>
+    auto finish() -> void
     {
-        std::unique_lock lock {m_mutex};
-        if (m_cond.wait_for(lock, micros, &Queue<T>::wait_until)) {
-            auto t = std::move(m_queue.front());
-            m_queue.pop_front();
-            return t;
+        {
+            std::lock_guard lock {m_mu};
+            m_is_finished = true;
         }
-        return std::nullopt;
+        m_empty_cv.notify_all();
+    }
+
+    auto wait_until_finish() -> void
+    {
+        std::unique_lock lock {m_mu};
+        m_finish_cv.wait(lock, [this] {
+            return m_is_finished;
+        });
     }
 
 private:
-    [[nodiscard]]
-    auto wait_until() const -> bool
-    {
-        return !m_queue.empty();
-    }
-
-    std::vector<T> m_queue;
-    mutable std::mutex m_mutex;
-    std::condition_variable m_cond;
+    std::condition_variable m_empty_cv;
+    std::condition_variable m_finish_cv;
+    mutable std::mutex m_mu;
+    std::deque<T> m_queue;
+    bool m_is_finished {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_QUEUE_H

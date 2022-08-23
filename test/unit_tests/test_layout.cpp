@@ -14,7 +14,7 @@
 //
 //namespace {
 //
-//using namespace cco;
+//using namespace calico;
 //
 //
 //

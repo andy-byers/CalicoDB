@@ -222,4 +222,4 @@ auto HeapStorage::clone() const -> Storage*
     return store;
 }
 
-} // namespace cco
+} // namespace calico

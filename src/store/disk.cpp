@@ -169,4 +169,4 @@ auto DiskStorage::remove_directory(const std::string &path) -> Status
     return system::dir_remove(path);
 }
 
-} // namespace cco
+} // namespace calico

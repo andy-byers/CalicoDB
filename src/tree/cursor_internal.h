@@ -27,6 +27,6 @@ public:
     static auto TEST_validate(const Cursor &) -> void;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_TREE_CURSOR_INTERNAL_H

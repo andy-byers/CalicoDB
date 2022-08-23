@@ -35,6 +35,6 @@ private:
     Pager *m_pager {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_TREE_NODE_POOL_H

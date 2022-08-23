@@ -1,3 +1,4 @@
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -145,16 +146,16 @@ public:
     }
 
     std::vector<std::array<WalRecordHeader::Type, 3>> valid_left_merges {
-        {WalRecordHeader::Type {}, WalRecordHeader::Type::FIRST, WalRecordHeader::Type::FIRST},
-        {WalRecordHeader::Type {}, WalRecordHeader::Type::FULL, WalRecordHeader::Type::FULL},
-        {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::FIRST},
-        {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::LAST, WalRecordHeader::Type::FULL},
+        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type {}, WalRecordHeader::Type::FIRST, WalRecordHeader::Type::FIRST},
+        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type {}, WalRecordHeader::Type::FULL, WalRecordHeader::Type::FULL},
+        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::FIRST},
+        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::LAST, WalRecordHeader::Type::FULL},
     };
     std::vector<std::array<WalRecordHeader::Type, 3>> valid_right_merges {
-        {WalRecordHeader::Type::LAST, WalRecordHeader::Type {}, WalRecordHeader::Type::LAST},
-        {WalRecordHeader::Type::FULL, WalRecordHeader::Type {}, WalRecordHeader::Type::FULL},
-        {WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::LAST, WalRecordHeader::Type::LAST},
-        {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::LAST, WalRecordHeader::Type::FULL},
+        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::LAST, WalRecordHeader::Type {}, WalRecordHeader::Type::LAST},
+        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FULL, WalRecordHeader::Type {}, WalRecordHeader::Type::FULL},
+        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::LAST, WalRecordHeader::Type::LAST},
+        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::LAST, WalRecordHeader::Type::FULL},
     };
     WalRecordHeader lhs {};
     WalRecordHeader rhs {};
@@ -549,7 +550,7 @@ public:
                          ? BackgroundWriter::EventType::LOG_FULL_IMAGE
                          : BackgroundWriter::EventType::LOG_DELTAS;
         auto buffer = scratch->get();
-        event.size = random.next_int(10UL, buffer->size());
+        event.size = random.next_int(10ULL, buffer->size());
         const auto data = random.next_string(event.size);
         mem_copy(*buffer, stob(data));
         event.buffer = buffer;
@@ -667,7 +668,7 @@ auto randomly_read_from_segment(Random &random, SequentialLogReader &reader) -> 
                 break;
             EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
         } else {
-            const auto n = random.next_int(1UL, reader.remaining().size());
+            const auto n = random.next_int(1ULL, reader.remaining().size());
             std::string chunk(n, '\x00');
             mem_copy(stob(chunk), reader.remaining().truncate(n));
             out += chunk;

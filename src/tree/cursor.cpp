@@ -263,4 +263,4 @@ auto Cursor::Position::is_minimum() const -> bool
     return cell_count && PageId {ids[LEFT]}.is_null() && index == 0;
 }
 
-} // namespace cco
+} // namespace calico

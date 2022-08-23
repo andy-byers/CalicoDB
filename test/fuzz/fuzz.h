@@ -5,7 +5,7 @@
 #include "calico/calico.h"
 #include "utils/expect.h"
 
-namespace cco {
+namespace calico {
 
 class InstructionParser {
 public:

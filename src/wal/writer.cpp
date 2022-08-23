@@ -37,10 +37,12 @@ auto BackgroundWriter::background_writer(BackgroundWriter *writer) -> void*
         switch (type) {
             case EventType::LOG_FULL_IMAGE:
             case EventType::LOG_DELTAS:
+                CALICO_EXPECT_FALSE(lsn.is_null());
                 CALICO_EXPECT_TRUE(buffer.has_value());
                 s = writer->emit_payload(lsn, (*buffer)->truncate(size));
                 break;
             case EventType::LOG_COMMIT:
+                CALICO_EXPECT_FALSE(lsn.is_null());
                 s = writer->emit_commit(guard, lsn);
                 break;
             case EventType::START_WRITER:
@@ -97,6 +99,7 @@ auto BackgroundWriter::handle_error(SegmentGuard &guard, Status e) -> void*
 auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
 {
     return m_writer.write(lsn, payload, [this](auto flushed_lsn) {
+fmt::print(stderr, "app {}\n", flushed_lsn.value);
         m_flushed_lsn->store(flushed_lsn);
     });
 }

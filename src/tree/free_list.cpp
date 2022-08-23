@@ -42,4 +42,4 @@ auto FreeList::pop() -> Result<Page>
     return Err {Status::logic_error("cannot pop page: free list is empty")};
 }
 
-} // namespace cco
+} // namespace calico

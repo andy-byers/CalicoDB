@@ -240,6 +240,6 @@ private:
     T m_resource {};
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_TYPES_H

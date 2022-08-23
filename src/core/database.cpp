@@ -157,4 +157,4 @@ auto Database::abort() -> Status
     return m_core->abort();
 }
 
-} // namespace cco
+} // namespace calico

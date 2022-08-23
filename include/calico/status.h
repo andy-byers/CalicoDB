@@ -43,6 +43,6 @@ private:
     std::unique_ptr<char[]> m_what;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_STATUS_H

@@ -129,4 +129,4 @@ auto Status::what() const -> std::string
     return is_ok() ? "" : std::string {m_what.get() + sizeof(Code)};
 }
 
-} // namespace cco
+} // namespace calico

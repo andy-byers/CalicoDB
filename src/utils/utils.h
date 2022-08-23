@@ -131,6 +131,6 @@ inline auto get_status_name(const Status &s) noexcept -> std::string
     }
 }
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_UTILS_UTILS_H

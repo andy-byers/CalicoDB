@@ -120,6 +120,6 @@ private:
 
 auto setup(const std::string &, Storage &, const Options &, spdlog::logger &) -> Result<InitialState>;
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_DB_DATABASE_IMPL_H

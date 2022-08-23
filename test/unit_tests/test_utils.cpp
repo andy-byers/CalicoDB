@@ -8,6 +8,7 @@
 #include "utils/encoding.h"
 #include "utils/expect.h"
 #include "utils/layout.h"
+#include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
@@ -463,6 +464,31 @@ TEST(SimpleDSLTests, Size)
     PageId b {2UL};
     CALICO_EXPECT_EQ(a, 1UL);
     CALICO_EXPECT_NE(b, 1UL);
+}
+
+//auto transfer_n(Queue<int> *queue, std::vector<std::optional<int>> *out, Size n) -> void*
+//{
+//    for (Size i {}; i < n; ++i)
+//        out->emplace_back(queue->dequeue());
+//    return nullptr;
+//}
+
+class QueueTests: public testing::Test {
+public:
+    QueueTests() = default;
+    ~QueueTests() override = default;
+
+    Queue<int> queue;
+};
+
+TEST_F(QueueTests, EnqueueAndDequeueST)
+{
+    queue.enqueue(1);
+    queue.enqueue(2);
+    queue.enqueue(3);
+    ASSERT_EQ(queue.dequeue(), 1);
+    ASSERT_EQ(queue.dequeue(), 2);
+    ASSERT_EQ(queue.dequeue(), 3);
 }
 
 } // <anonymous>

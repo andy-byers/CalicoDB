@@ -1,7 +1,7 @@
 #include "fuzz.h"
 #include <spdlog/fmt/fmt.h>
 
-namespace cco {
+namespace calico {
 
 auto InstructionParser::parse(BytesView view) const -> std::optional<Parsed>
 {

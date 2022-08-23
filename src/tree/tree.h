@@ -33,6 +33,6 @@ public:
     virtual auto TEST_validate_node(PageId) -> void = 0;
 };
 
-} // namespace cco
+} // namespace calico
 
 #endif // CALICO_TREE_TREE_H

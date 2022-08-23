@@ -102,7 +102,8 @@ public:
             if (!s.is_ok()) return s;
 
             // This may happen more than once, but should still be correct (when the current record spans multiple blocks).
-            update(last_lsn);
+            if (!last_lsn.is_null())
+                update(last_lsn);
         }
         return Status::ok();
     }
@@ -179,12 +180,15 @@ public:
     {
         CALICO_EXPECT_FALSE(is_running());
         m_state.errors.clear();
-        m_state.thread = std::thread {background_writer, this};
         m_state.events.emplace_back(Event {
             EventType::START_WRITER,
             SequenceId::null(),
             std::nullopt,
         });
+        m_state.thread = std::thread {
+            background_writer,
+            this
+        };
         m_state.cv.notify_one();
     }
 
@@ -192,18 +196,15 @@ public:
     {
         const auto request_stop = [this] {
             std::lock_guard lock {m_state.mu};
-            if (m_state.thread != std::nullopt) {
-                m_state.events.emplace_back(Event {
-                    EventType::STOP_WRITER,
-                    SequenceId::null(),
-                    std::nullopt,
-                });
-                m_state.cv.notify_one();
-                return true;
-            }
-            return false;
+            m_state.events.emplace_back(Event {
+                EventType::STOP_WRITER,
+                SequenceId::null(),
+                std::nullopt,
+            });
+            m_state.cv.notify_one();
         };
-        if (request_stop()) {
+        if (is_running()) {
+            request_stop();
             m_state.thread->join();
             m_state.thread.reset();
         }
