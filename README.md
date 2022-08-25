@@ -76,6 +76,41 @@ See the [API documentation](doc/api.md).
 
 ## Performance
 Benchmarks are run in a modified version of LevelDB, using the `db_bench` routines.
+Below are the results of running some of `db_bench` on Calico DB and SQLite3.
+
+```
+Calico DB:  version 0.0.1
+SQLite:     version 3.37.2
+Date:       Wed Aug 24 20:50:38 2022
+CPU:        16 * 12th Gen Intel(R) Core(TM) i5-12600K
+CPUCache:   20480 KB
+```
+
+### Calico DB
+| Name         | Result (operations/second) |
+|:-------------|---------------------------:|
+| fillseq      |                    327,761 |
+| fillrandom   |                    154,679 |
+| overwrite    |                    157,085 |
+| readrandom   |                    386,698 |
+| readseq      |                  2,518,892 |
+| fillrand100K |                        761 |
+| fillseq100K  |                        649 |
+| readseq100K  |                     16,158 |
+| readrand100K |                     17,443 |
+
+### SQLite3
+| Name         | Result (operations/second) |
+|:-------------|---------------------------:|
+| fillseq      |                    352,361 |
+| fillrandom   |                    186,567 |
+| overwrite    |                    185,529 |
+| readrandom   |                    497,265 |
+| readseq      |                  7,936,508 |
+| fillrand100K |                      5,185 |
+| fillseq100K  |                      7,572 |
+| readseq100K  |                     64,098 |
+| readrand100K |                     11,696 |
 
 ## TODO
 1. Get everything code reviewed!
