@@ -1,14 +1,14 @@
 #ifndef CALICO_WAL_WAL_WRITER_H
 #define CALICO_WAL_WAL_WRITER_H
 
-#include "calico/wal.h"
-#include "utils/crc.h"
 #include "helpers.h"
-#include <queue>
+#include "utils/crc.h"
+#include "wal.h"
 #include <memory>
 #include <optional>
-#include <thread>
+#include <queue>
 #include <spdlog/logger.h>
+#include <thread>
 
 namespace calico {
 

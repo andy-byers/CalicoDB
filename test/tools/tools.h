@@ -508,11 +508,11 @@ struct formatter<cco::Options> {
     template <typename FormatContext>
     auto format(const cco::Options &options, FormatContext &ctx) {
         auto out = fmt::format("({} B) {{", sizeof(options));
+        out += fmt::format("wal_limit: {}", options.wal_limit);
         out += fmt::format("page_size: {}, ", options.page_size);
         out += fmt::format("frame_count: {}, ", options.frame_count);
         out += fmt::format("log_level: {}, ", options.log_level);
         out += fmt::format("store: {}, ", static_cast<void*>(options.store));
-        out += fmt::format("wal: {}", static_cast<void*>(options.wal));
         return format_to(ctx.out(), "Options {}}}", out);
     }
 };

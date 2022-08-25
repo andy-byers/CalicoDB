@@ -1,14 +1,14 @@
 # Write-Ahead Log (WAL)
 Calico DB uses write-ahead logging to provide atomicity to database transactions.
-A default WAL implementation is provided, however, there is also opportunity for customization.
-This document details the WAL interface, the default implementation, and the injection of custom WAL objects (see [Customization](#customization)).
+
+[//]: # (TODO: Removing this customization point. It's not worth it in my opinion. We need more control over synchronization...)
 
 ## WAL Interface
 The WAL interface is represented by an abstract class, called `WriteAheadLog`.
 If custom behavior is desired, users can inherit from this class and pass an instance to the database to use.
 Otherwise, passing in `nullptr` will cause the database to use the default implementation.
 Classes that implement the WAL interface must abide by certain rules for everything to work correctly.
-The pre-/post-conditions required for proper operation are outlined in [wal.h](../include/calico/wal.h).
+The pre-/post-conditions required for proper operation are outlined in [wal.h](../src/wal/wal.h).
 Here, we provide a higher-level overview of how the WAL component fits into the overall database design.
 
 First, the WAL object is not required to perform logging in the main thread.

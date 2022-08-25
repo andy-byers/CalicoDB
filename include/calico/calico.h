@@ -9,6 +9,5 @@
 #include "options.h"
 #include "status.h"
 #include "store.h"
-#include "wal.h"
 
 #endif // CALICO_CALICO_H

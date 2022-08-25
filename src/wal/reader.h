@@ -7,10 +7,10 @@
 #ifndef CALICO_WAL_READER_H
 #define CALICO_WAL_READER_H
 
-#include "calico/wal.h"
 #include "helpers.h"
 #include "record.h"
 #include "utils/crc.h"
+#include "wal.h"
 #include <optional>
 #include <thread>
 

@@ -17,7 +17,10 @@ static constexpr Size DEFAULT_PAGE_SIZE {0x2000};
 static constexpr Size MAXIMUM_PAGE_SIZE {0x10000};
 static constexpr auto DEFAULT_LOG_LEVEL = spdlog::level::off;
 static constexpr auto MAXIMUM_LOG_LEVEL = spdlog::level::n_levels - 1;
-
+static constexpr Size MINIMUM_WAL_LIMIT {0x20};
+static constexpr Size DEFAULT_WAL_LIMIT {0x200};
+static constexpr Size MAXIMUM_WAL_LIMIT {0x2000};
+static constexpr Size DISABLE_WAL {0};
 /**
  * Options to use when opening a database.
  */
@@ -26,9 +29,9 @@ struct Options {
 
     Size page_size {DEFAULT_PAGE_SIZE}; ///< Size of a database page in bytes.
     Size frame_count {DEFAULT_FRAME_COUNT}; ///< Number of frames to allow the block pool cache.
+    Size wal_limit {DEFAULT_WAL_LIMIT}; ///< Number of blocks in a WAL segment.
     LogLevel log_level {DEFAULT_LOG_LEVEL}; ///< The max level of log message that will be written.
     Storage *store {};
-    WriteAheadLog *wal {};
 };
 
 /**

@@ -5,7 +5,7 @@
 #ifndef CALICO_PAGE_DELTAS_H
 #define CALICO_PAGE_DELTAS_H
 
-#include "calico/wal.h"
+#include "wal/wal.h"
 
 namespace calico {
 

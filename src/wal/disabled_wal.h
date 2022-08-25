@@ -1,7 +1,7 @@
 #ifndef CALICO_DISABLED_WAL_H
 #define CALICO_DISABLED_WAL_H
 
-#include "calico/wal.h"
+#include "wal.h"
 
 namespace calico {
 

@@ -1,8 +1,8 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
-#include "bytes.h"
-#include "status.h"
+#include "calico/bytes.h"
+#include "calico/status.h"
 
 namespace calico {
 

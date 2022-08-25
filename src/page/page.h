@@ -1,8 +1,8 @@
 #ifndef CALICO_PAGE_PAGE_H
 #define CALICO_PAGE_PAGE_H
 
-#include "calico/wal.h"
 #include "utils/types.h"
+#include "wal/wal.h"
 #include <optional>
 #include <vector>
 

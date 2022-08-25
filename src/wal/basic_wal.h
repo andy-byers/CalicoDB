@@ -1,13 +1,13 @@
 #ifndef CALICO_WAL_BASIC_WAL_H
 #define CALICO_WAL_BASIC_WAL_H
 
-#include "calico/wal.h"
-#include "reader.h"
-#include "writer.h"
 #include "helpers.h"
+#include "reader.h"
 #include "utils/result.h"
 #include "utils/types.h"
+#include "wal.h"
 #include "wal/record.h"
+#include "writer.h"
 #include <atomic>
 #include <optional>
 #include <unordered_set>

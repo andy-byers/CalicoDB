@@ -42,7 +42,6 @@ public:
         options.frame_count = 64;
         options.log_level = spdlog::level::trace;
         options.store = store.get();
-        options.wal = wal.get();
 
         ASSERT_TRUE(expose_message(db.open(ROOT, options)));
         ASSERT_TRUE(db.is_open());

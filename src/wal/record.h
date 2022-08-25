@@ -7,9 +7,9 @@
 #ifndef CALICO_WAL_RECORD_H
 #define CALICO_WAL_RECORD_H
 
-#include "calico/wal.h"
 #include "utils/encoding.h"
 #include "utils/types.h"
+#include "wal.h"
 
 namespace calico {
 

@@ -3,10 +3,10 @@
 
 #include "calico/bytes.h"
 #include "calico/status.h"
-#include "calico/wal.h"
 #include "utils/result.h"
 #include "utils/types.h"
 #include "utils/utils.h"
+#include "wal/wal.h"
 #include <optional>
 
 namespace calico {

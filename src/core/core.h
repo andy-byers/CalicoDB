@@ -110,13 +110,12 @@ private:
     Options m_options;
     spdlog::sink_ptr m_sink;
     std::shared_ptr<spdlog::logger> m_logger;
+    std::unique_ptr<WriteAheadLog> m_wal;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
     Storage *m_store {};
-    WriteAheadLog *m_wal {};
     bool m_has_update {};
     bool m_owns_store {};
-    bool m_owns_wal {};
 };
 
 auto setup(const std::string &, Storage &, const Options &, spdlog::logger &) -> Result<InitialState>;

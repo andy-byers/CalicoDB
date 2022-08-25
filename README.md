@@ -52,15 +52,14 @@ In the project root directory, run
 mkdir -p build && cd ./build
 ```
 
-to set up an out-of-source build.
-Then
+followed by
 ```bash
 cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
 ```
 
 to build the library and tests.
 Note that the tests must be built with assertions, hence the `RelWithAssertions`.
-To build the library in release mode, the last command would look like:
+To build the library in release mode without tests, the last command would look like:
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
 ```
@@ -87,39 +86,38 @@ CPUCache:   20480 KB
 ```
 
 ### Calico DB
-| Name         | Result (operations/second) |
-|:-------------|---------------------------:|
-| fillseq      |                    327,761 |
-| fillrandom   |                    154,679 |
-| overwrite    |                    157,085 |
-| readrandom   |                    386,698 |
-| readseq      |                  2,518,892 |
-| fillrand100K |                        761 |
-| fillseq100K  |                        649 |
-| readseq100K  |                     16,158 |
-| readrand100K |                     17,443 |
+| Benchmark    | Result (ops/second) |
+|:-------------|--------------------:|
+| fillseq      |             327,761 |
+| fillrandom   |             154,679 |
+| overwrite    |             157,085 |
+| readrandom   |             386,698 |
+| readseq      |           2,518,892 |
+| fillrand100K |                 761 |
+| fillseq100K  |                 649 |
+| readseq100K  |              16,158 |
+| readrand100K |              17,443 |
 
 ### SQLite3
-| Name         | Result (operations/second) |
-|:-------------|---------------------------:|
-| fillseq      |                    352,361 |
-| fillrandom   |                    186,567 |
-| overwrite    |                    185,529 |
-| readrandom   |                    497,265 |
-| readseq      |                  7,936,508 |
-| fillrand100K |                      5,185 |
-| fillseq100K  |                      7,572 |
-| readseq100K  |                     64,098 |
-| readrand100K |                     11,696 |
+| Benchmark    | Result (ops/second) |
+|:-------------|--------------------:|
+| fillseq      |             352,361 |
+| fillrandom   |             186,567 |
+| overwrite    |             185,529 |
+| readrandom   |             497,265 |
+| readseq      |           7,936,508 |
+| fillrand100K |               5,185 |
+| fillseq100K  |               7,572 |
+| readseq100K  |              64,098 |
+| readrand100K |              11,696 |
 
 ## TODO
 1. Get everything code reviewed!
 2. Get unit test coverage up
 3. Write documentation
 4. Work on performance
-5. Write a benchmark suite
-6. Get the CMake installation to work
-7. Need some way to reduce the file size once many pages become unused
+5. Get the CMake installation to work
+6. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
 
 ## Design
@@ -141,8 +139,7 @@ CalicoDB
 ┃ ┣╸info.h ┄┄┄┄┄┄┄┄┄ Query information about the database
 ┃ ┣╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object for function returns
-┃ ┣╸storage.h ┄┄┄┄┄┄ Storage interface
-┃ ┗╸wal.h ┄┄┄┄┄┄┄┄┄┄ Write-ahead log interface
+┃ ┗╸store.h ┄┄┄┄┄┄┄┄ Storage interface
 ┣╸src
 ┃ ┣╸core ┄┄┄┄┄┄┄┄┄┄┄ API implementation
 ┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Pager module

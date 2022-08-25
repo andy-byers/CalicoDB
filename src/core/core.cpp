@@ -92,23 +92,21 @@ auto Core::open() -> Status
     auto [state, is_new] = *initial;
     m_options.page_size = state.page_size;
 
-    auto *wal = m_options.wal;
-    if (!wal) {
+    {
+        WriteAheadLog *wal {};
         auto s = BasicWriteAheadLog::open({
-            m_prefix, // TODO: Could specify a different directory for WAL segments.
+            m_prefix,
             m_store,
             m_sink,
             state.page_size,
         }, &wal);
         MAYBE_FORWARD(s, MSG);
-        m_owns_wal = true;
+        m_wal.reset(wal);
+        m_wal->load_state(state);
     }
-    m_wal = wal;
-    m_options.wal = wal;
-    m_wal->load_state(state);
 
     {
-        auto r = BasicPager::open({m_prefix, *store, *wal, m_sink, m_options.frame_count, m_options.page_size});
+        auto r = BasicPager::open({m_prefix, *store, *m_wal, m_sink, m_options.frame_count, m_options.page_size});
         if (!r.has_value()) return forward_status(r.error(), MSG);
         m_pager = std::move(*r);
         m_pager->load_state(state);
@@ -155,9 +153,6 @@ Core::~Core()
 {
     m_logger->info("destroying Core object");
 
-    if (m_owns_wal)
-        delete m_wal;
-
     if (m_owns_store)
         delete m_store;
 }
@@ -165,11 +160,7 @@ Core::~Core()
 auto Core::destroy() -> Status
 {
     auto s = Status::ok();
-
-    if (m_owns_wal) {
-        delete m_wal;
-        m_owns_wal = false;
-    }
+    m_wal.reset();
 
     std::vector<std::string> children;
     s = m_store->get_children(m_prefix, children);
@@ -401,9 +392,9 @@ auto Core::load_state() -> Status
     return s;
 }
 
-auto setup(const std::string &path, Storage &store, const Options &options, spdlog::logger &logger) -> Result<InitialState>
+auto setup(const std::string &prefix, Storage &store, const Options &options, spdlog::logger &logger) -> Result<InitialState>
 {
-    const auto MSG = fmt::format("cannot initialize database at \"{}\"", path);
+    const auto MSG = fmt::format("cannot initialize database at \"{}\"", prefix);
     LogMessage message {logger};
     message.set_primary(MSG);
 
@@ -441,7 +432,7 @@ auto setup(const std::string &path, Storage &store, const Options &options, spdl
     }
 
     {   // TODO: Already getting created by the log sink...
-        auto s = store.create_directory(path);
+        auto s = store.create_directory(prefix);
         if (!s.is_ok() && !s.is_logic_error()) {
             logger.error("cannot create database directory");
             logger.error("(reason) {}", s.what());
@@ -449,12 +440,14 @@ auto setup(const std::string &path, Storage &store, const Options &options, spdl
         }
     }
 
-    const auto filename = fmt::format("{}/{}", path, DATA_FILENAME);
-    RandomReader *reader {};
-    RandomEditor *editor {};
+    std::unique_ptr<RandomReader> reader;
+    std::unique_ptr<RandomEditor> editor;
+    RandomReader *reader_temp {};
+    RandomEditor *editor_temp {};
     bool exists {};
 
-    if (auto s = store.open_random_reader(filename, &reader); s.is_ok()) {
+    if (auto s = store.open_random_reader(prefix + DATA_FILENAME, &reader_temp); s.is_ok()) {
+        reader.reset(reader_temp);
         Size file_size {};
         s = store.file_size(DATA_FILENAME, file_size);
         if (!s.is_ok()) return Err {s};
@@ -483,11 +476,11 @@ auto setup(const std::string &path, Storage &store, const Options &options, spdl
             return Err {message.corruption()};
         }
         exists = true;
-        delete reader;
 
     } else if (s.is_not_found()) {
-        s = store.open_random_editor(DATA_FILENAME, &editor);
+        s = store.open_random_editor(DATA_FILENAME, &editor_temp);
         if (!s.is_ok()) return Err {s};
+        editor.reset(editor_temp);
 
         header.magic_code = MAGIC_CODE;
         header.page_size = encode_page_size(options.page_size);
@@ -498,7 +491,6 @@ auto setup(const std::string &path, Storage &store, const Options &options, spdl
         root.resize(options.page_size);
         s = editor->write(stob(root), 0);
         if (!s.is_ok()) return Err {s};
-        delete editor;
 
     } else {
         return Err {s};
