@@ -2,17 +2,11 @@
 
 > **Warning**: This library is not yet stable and should **not** be used for anything serious.
 
-> **Note (08/01)**: We're almost there!
-> Currently, Calico DB is far too slow to be useful when the WAL is enabled.
-> In an attempt to keep the design as simple as possible, we have been truncating the WAL after each commit.
-> This first requires us to advance_block all dirty database pages, otherwise our updates won't reach disk in the event of a crash.
-> In the next few weeks, I'll be implementing WAL segmentation and cleanup of obsolete WAL segments.
-> We won't get rid of any segments until all of their referenced pages are written to disk as part of the normal "steal" block pool management routine.
-> If we push_change the cleanup of obsolete segments off into a background thread, we end up with much less work each time commit() is called.
-> All we have to do is write the commit WAL record, advance_block the remaining block, call fsync(), then open a new WAL segment.
-
-> **Note (08/03)**: We've got the WAL segmentation pretty much down!
-> The architecture is set up to have the WAL record creation/writing and segment truncation moved to a background thread.
+> **Note (08/21)**: Check out the develop branch for the latest iteration of the design.
+I'm working on the abort and recovery routines right now.
+I've also gotten the WAL to write everything in the background and do segmentation, which has improved performance considerably.
+Unfortunately, the pager ends up waiting on the WAL to flush more blocks under heavy write workloads.
+Once this gets figured out, performance should actually be pretty good!
 
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
@@ -74,17 +68,11 @@ to build the library and tests.
 Note that the tests must be built with assertions, hence the `RelWithAssertions`.
 To build the library in release mode, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCCO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
 ## API
 See the [API documentation](doc/api.md).
-
-## Architecture
-
-<p align="center">
-   <img src="./doc/architecture.png" width="75%" />
-</p>
 
 ## Performance
 Benchmarks are run in a modified version of LevelDB, using the `db_bench` routines.
@@ -94,6 +82,8 @@ Benchmarks are run in a modified version of LevelDB, using the `db_bench` routin
 2. Get unit test coverage up
 3. Write documentation
 4. Work on performance
+    + Could try to do all the writes on a different thread
+    + Need to consider how this would impact data integrity after a crash
 5. Write a benchmark suite
 6. Get the CMake installation to work
 7. Need some way to reduce the file size once many pages become unused
@@ -115,18 +105,15 @@ CalicoDB
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
-┃ ┣╸info.h ┄┄┄┄┄┄┄┄┄ Query information about the database
-┃ ┣╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
-┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object for function returns
-┃ ┣╸storage.h ┄┄┄┄┄┄ Storage interface
-┃ ┗╸wal.h ┄┄┄┄┄┄┄┄┄┄ Write-ahead log interface
+┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object
+┃ ┗╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┣╸src
-┃ ┣╸core ┄┄┄┄┄┄┄┄┄┄┄ API implementation
-┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Pager module
-┃ ┣╸store ┄┄┄┄┄┄┄┄┄┄ Storage implementations
+┃ ┣╸db ┄┄┄┄┄┄┄┄┄┄┄┄┄ API implementation
+┃ ┣╸pool ┄┄┄┄┄┄┄┄┄┄┄ Buffer pool module
+┃ ┣╸storage ┄┄┄┄┄┄┄┄ Persistent storage module
 ┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization module
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Utility module
-┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead log implementations
+┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging module
 ┗╸test
   ┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄ Fuzz tests
   ┣╸recovery ┄┄┄┄┄┄┄ Test database failure and recovery
