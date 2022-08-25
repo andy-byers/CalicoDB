@@ -34,6 +34,12 @@ public:
     }
 
     [[nodiscard]]
+    auto flush_pending() -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]]
     auto log_image(std::uint64_t, BytesView) -> Status override
     {
         return Status::ok();

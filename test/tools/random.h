@@ -25,9 +25,9 @@ public:
     auto next_binary(Size) -> std::string;
     template<class C> auto shuffle(C&) -> void;
     template<class T> auto next_int(T) -> T;
-    template<class T> auto next_int(T, T) -> T;
+    template<class T1, class T2> auto next_int(T1, T2) -> T1;
     template<class T> auto next_real(T) -> T;
-    template<class T> auto next_real(T, T) -> T;
+    template<class T1, class T2> auto next_real(T1, T2) -> T1;
 
 protected:
     Seed m_seed {};  ///< Seed for the random number generator.
@@ -45,7 +45,8 @@ template<class Container> auto Random::shuffle(Container &data) -> void
 ** @param v_max The maximum value (inclusive) that the integer can take.
 ** @return A random integer in the view [0, v_max].
 */
-template<class T> auto Random::next_int(T v_max) -> T
+template<class T>
+auto Random::next_int(T v_max) -> T
 {
     return next_int(T {}, v_max);
 }
@@ -57,10 +58,11 @@ template<class T> auto Random::next_int(T v_max) -> T
 ** @param v_max The maximum value (inclusive) that the integer can take.
 ** @return A random integer in the view [v_min, v_max].
 */
-template<class T> auto Random::next_int(T v_min, T v_max) -> T
+template<class T1, class T2>
+auto Random::next_int(T1 v_min, T2 v_max) -> T1
 {
     CALICO_EXPECT_LE(v_min, v_max);
-    std::uniform_int_distribution<T> dist(v_min, v_max);
+    std::uniform_int_distribution<T1> dist(v_min, T1(v_max));
     return dist(m_rng);
 }
 
@@ -70,7 +72,8 @@ template<class T> auto Random::next_int(T v_min, T v_max) -> T
 ** @param v_max The maximum value (inclusive) that the number can take.
 ** @return A random real number in the view [0, v_max].
 */
-template<class T> auto Random::next_real(T v_max) -> T
+template<class T>
+auto Random::next_real(T v_max) -> T
 {
     return next_real(T {}, v_max);
 }
@@ -82,10 +85,11 @@ template<class T> auto Random::next_real(T v_max) -> T
 ** @param v_max The maximum value (inclusive) that the number can take.
 ** @return A random real number in the view [v_min, v_max].
 */
-template<class T> auto Random::next_real(T v_min, T v_max) -> T
+template<class T1, class T2>
+auto Random::next_real(T1 v_min, T2 v_max) -> T1
 {
     CALICO_EXPECT_LE(v_min, v_max);
-    std::uniform_real_distribution<T> dist(v_min, v_max);
+    std::uniform_real_distribution<T1> dist(v_min, T1(v_max));
     return dist(m_rng);
 }
 

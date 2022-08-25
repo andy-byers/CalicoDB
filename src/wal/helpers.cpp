@@ -3,7 +3,7 @@
 
 namespace calico {
 
-auto SegmentGuard::start(WalRecordWriter &writer, WalCollection &collection) -> Status
+auto SegmentGuard::start(WalRecordWriter &writer, WalCollection &collection, std::atomic<SequenceId> &flushed_lsn) -> Status
 {
     CALICO_EXPECT_FALSE(writer.is_attached());
     CALICO_EXPECT_FALSE(collection.is_segment_started());
@@ -19,6 +19,7 @@ auto SegmentGuard::start(WalRecordWriter &writer, WalCollection &collection) -> 
 
     m_collection = &collection;
     m_writer = &writer;
+    m_flushed_lsn = &flushed_lsn;
     return Status::ok();
 }
 
@@ -34,7 +35,8 @@ auto SegmentGuard::abort() -> Status
     m_collection->abort_segment();
     m_collection = nullptr;
 
-    auto s = m_writer->detach();
+    // If this returns a non-OK status, the file should still be closed and the writer ready to be attached again.
+    auto s = m_writer->detach([](auto) {});
     m_writer = nullptr;
     return s;
 }
@@ -46,7 +48,9 @@ auto SegmentGuard::finish(bool has_commit) -> Status
     m_collection->finish_segment(has_commit);
     m_collection = nullptr;
 
-    auto s = m_writer->detach();
+    auto s = m_writer->detach([this](auto lsn) {
+        m_flushed_lsn->store(lsn);
+    });
     m_writer = nullptr;
     return s;
 }

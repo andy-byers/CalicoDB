@@ -17,6 +17,8 @@ namespace calico {
  */
 class WalRecordWriter {
 public:
+    using SetFlushedLsn = std::function<void(SequenceId)>;
+
     explicit WalRecordWriter(Size buffer_size)
         : m_buffer {buffer_size}
     {}
@@ -35,7 +37,7 @@ public:
     }
 
     [[nodiscard]]
-    auto has_written() const -> Size
+    auto has_written() const -> bool
     {
         return m_buffer.block_number() || m_buffer.block_offset();
     }
@@ -43,10 +45,11 @@ public:
     auto attach(AppendWriter *file) -> void
     {
         CALICO_EXPECT_FALSE(is_attached());
+        m_last_lsn = SequenceId::null();
         m_file.reset(file);
     }
 
-    auto detach() -> Status
+    auto detach(const SetFlushedLsn &update) -> Status
     {
         CALICO_EXPECT_TRUE(is_attached());
         auto s = Status::ok();
@@ -54,14 +57,16 @@ public:
             s = append_block();
         if (s.is_ok())
             s = m_file->sync();
+        if (s.is_ok() && has_written())
+            update(m_last_lsn);
         m_block_count = 0;
         m_buffer.reset();
+        m_last_lsn = SequenceId::null();
         m_file.reset();
         return s;
     }
 
-    template<class UpdateLsn>
-    auto write(SequenceId lsn, BytesView payload, const UpdateLsn &update) -> Status
+    auto write(SequenceId lsn, BytesView payload, const SetFlushedLsn &update) -> Status
     {
         CALICO_EXPECT_TRUE(is_attached());
         CALICO_EXPECT_FALSE(lsn.is_null());
@@ -105,23 +110,25 @@ public:
             if (!last_lsn.is_null())
                 update(last_lsn);
         }
+        m_last_lsn = lsn;
         return Status::ok();
     }
 
-private:
     auto append_block() -> Status
     {
         return m_buffer.advance_block([this] {
             // Clear unused bytes at the end of the tail buffer.
             mem_clear(m_buffer.remaining());
             auto s = m_file->write(m_buffer.block());
-//            if (s.is_ok()) s = m_file->sync(); // TODO
+            //            if (s.is_ok()) s = m_file->sync(); // TODO
             m_block_count += s.is_ok();
             return s;
         });
     }
 
+private:
     std::unique_ptr<AppendWriter> m_file;
+    SequenceId m_last_lsn;
     WalBuffer m_buffer;
     Size m_block_count {};
 };
@@ -138,8 +145,8 @@ public:
     };
 
     enum class EventType {
-        START_WRITER,
         STOP_WRITER,
+        FLUSH_BLOCK,
         LOG_FULL_IMAGE,
         LOG_DELTAS,
         LOG_COMMIT,
@@ -148,8 +155,9 @@ public:
     struct Event {
         EventType type {};
         SequenceId lsn;
-        std::optional<NamedScratch> buffer;
+        std::optional<NamedScratch> buffer {};
         Size size {};
+        bool is_waiting {};
     };
 
     explicit BackgroundWriter(const Parameters &param)
@@ -166,48 +174,36 @@ public:
     [[nodiscard]]
     auto is_running() const -> bool
     {
-        return m_state.is_running.load();
+        return m_state.is_running;
     }
 
     auto dispatch(Event event) -> void
     {
-        std::lock_guard lock {m_state.mu};
-        m_state.events.emplace_back(event);
-        m_state.cv.notify_one();
+        if (event.is_waiting) {
+            dispatch_and_wait(event);
+        } else {
+            dispatch_and_return(event);
+        }
     }
 
     auto startup() -> void
     {
         CALICO_EXPECT_FALSE(is_running());
         m_state.errors.clear();
-        m_state.events.emplace_back(Event {
-            EventType::START_WRITER,
-            SequenceId::null(),
-            std::nullopt,
-        });
-        m_state.thread = std::thread {
-            background_writer,
-            this
-        };
-        m_state.cv.notify_one();
+        m_state.is_running = true;
+        m_state.thread = std::thread {[this] {
+            background_writer();
+        }};
     }
 
     auto teardown() -> void
     {
-        const auto request_stop = [this] {
-            std::lock_guard lock {m_state.mu};
-            m_state.events.emplace_back(Event {
-                EventType::STOP_WRITER,
-                SequenceId::null(),
-                std::nullopt,
-            });
-            m_state.cv.notify_one();
-        };
-        if (is_running()) {
-            request_stop();
-            m_state.thread->join();
-            m_state.thread.reset();
-        }
+        CALICO_EXPECT_TRUE(m_state.is_running);
+        m_state.events.finish();
+        m_state.thread->join();
+        m_state.thread.reset();
+        m_state.is_running = false;
+        m_state.events.restart();
     }
 
     [[nodiscard]]
@@ -221,10 +217,29 @@ public:
     }
 
 private:
-    [[nodiscard]]
-    auto run_start(SegmentGuard &guard) -> Status
+
+    auto dispatch_and_return(Event event) -> void
     {
-        return guard.start(m_writer, *m_collection);
+        CALICO_EXPECT_FALSE(event.is_waiting);
+        std::lock_guard lock {m_state.mu};
+        m_state.events.enqueue(event);
+    }
+
+    auto dispatch_and_wait(Event event) -> void
+    {
+        CALICO_EXPECT_TRUE(event.is_waiting);
+        m_is_waiting.store(true);
+        m_state.events.enqueue(event);
+        std::unique_lock lock {m_state.mu};
+        m_state.cv.wait(lock, [this] {
+            return m_is_waiting.load();
+        });
+    }
+
+    auto add_error(const Status &e) -> void
+    {
+        std::lock_guard lock {m_state.mu};
+        m_state.errors.emplace_back(e);
     }
 
     [[nodiscard]]
@@ -245,22 +260,23 @@ private:
         return m_writer.block_count() > 128; // TODO: Make this tunable?
     }
 
-    static auto background_writer(BackgroundWriter *writer) -> void*;
+    auto background_writer() -> void;
     [[nodiscard]] auto emit_payload(SequenceId lsn, BytesView payload) -> Status;
-    [[nodiscard]] auto emit_commit(SegmentGuard &guard, SequenceId lsn) -> Status;
+    [[nodiscard]] auto emit_commit(SequenceId lsn) -> Status;
     [[nodiscard]] auto advance_segment(SegmentGuard &guard, bool has_commit) -> Status;
-    auto handle_error(SegmentGuard &guard, Status e) -> void*;
+    auto handle_error(SegmentGuard &guard, Status e) -> void;
 
     struct {
+        Queue<Event> events {32}; ///< Internally synchronized queue.
         mutable std::mutex mu;
         std::condition_variable cv;
-        std::deque<Event> events;
         std::list<Status> errors;
-        std::atomic<bool> is_running {};
         std::optional<std::thread> thread;
+        bool is_running {};
     } m_state;
 
     std::atomic<SequenceId> *m_flushed_lsn {};
+    std::atomic<bool> m_is_waiting {};
     WalRecordWriter m_writer;
     std::string m_prefix;
     LogScratchManager *m_scratch {};
@@ -279,12 +295,13 @@ public:
     };
 
     explicit BasicWalWriter(const Parameters &param)
-        : m_scratch {param.page_size * WAL_SCRATCH_SCALE},
+        : m_flushed_lsn {param.flushed_lsn},
+          m_scratch {param.page_size * WAL_SCRATCH_SCALE},
           m_background {{
               param.store,
               &m_scratch,
               param.collection,
-              param.flushed_lsn,
+              m_flushed_lsn,
               param.dirname,
               param.page_size * WAL_BLOCK_SCALE,
           }}
@@ -302,13 +319,22 @@ public:
         return m_background.next_status();
     }
 
+    [[nodiscard]]
+    auto last_lsn() const -> SequenceId
+    {
+        return m_last_lsn;
+    }
+
     auto start() -> void;
     auto stop() -> void;
-    auto log_full_image(SequenceId lsn, PageId page_id, BytesView image) -> void;
-    auto log_deltas(SequenceId lsn, PageId page_id, BytesView image, const std::vector<PageDelta> &deltas) -> void;
-    auto log_commit(SequenceId lsn) -> void;
+    auto flush_block() -> void;
+    auto log_full_image(PageId page_id, BytesView image) -> void;
+    auto log_deltas(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas) -> void;
+    auto log_commit() -> void;
 
 private:
+    std::atomic<SequenceId> *m_flushed_lsn;
+    SequenceId m_last_lsn;
     LogScratchManager m_scratch;
     BackgroundWriter m_background;
 };

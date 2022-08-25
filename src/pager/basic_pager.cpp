@@ -64,11 +64,17 @@ auto BasicPager::pin_frame(PageId id) -> Status
         // very often, if at all.
         if (!*r) {
 
+
+            fmt::print("WAL_LSN:{}, PAGER_LSN:{}\n", m_wal->flushed_lsn(), m_framer->flushed_lsn().value);
+            if(m_framer->flushed_lsn().value==12347){
+                fmt::print("{}\n", m_wal->current_lsn());
+                exit(123);
+            }
+
             // TODO: Seems like spinning while waiting for the WAL is eating up too much CPU...
-
+            std::this_thread::yield();
 //            using namespace std::chrono_literals;
-//            std::this_thread::sleep_for(10ms); // TODO
-
+//            std::this_thread::sleep_for(123us); // TODO
             return Status::not_found(MSG);
         }
     }
@@ -124,19 +130,16 @@ auto BasicPager::try_make_available() -> Result<bool>
         if (!dirty_token.has_value())
             return true;
 
-        if (m_wal->is_enabled()) {
-            if(!m_wal->flushed_lsn()){
-
-            }
-//if(frame.lsn()>m_wal->flushed_lsn()){fmt::print("not found F:{} > W:{}\n",frame.lsn().value,m_wal->flushed_lsn());}
+        if (m_wal->is_writing())
             return frame.lsn() <= m_wal->flushed_lsn();
-        }
 
         return true;
     });
 
     if (itr == m_registry.end()) {
-
+        CALICO_EXPECT_TRUE(m_wal->is_writing());
+        const auto s = m_wal->flush_pending();
+        if (!s.is_ok()) return Err {s};
         return false;
     }
 

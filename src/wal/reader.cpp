@@ -114,7 +114,9 @@ auto BasicWalReader::undo(const UndoIterator &begin, const UndoIterator &end, co
                 callback(decode_full_image_payload(payload));
                 break;
             case WalPayloadType::DELTAS:
+                break;
             case WalPayloadType::COMMIT:
+                CALICO_EXPECT_TRUE(false && "error: encountered a commit record during undo");
                 break;
             default:
                 return unrecognized_type_error(type);

@@ -145,8 +145,12 @@ auto Framer::unpin(FrameNumber id, bool is_dirty) -> Status
 
     // If this fails, the caller (buffer pool) will need to roll back the database state or exit.
     if (is_dirty) {
+        const auto lsn = frame.lsn();
         s = write_page_to_file(frame.pid(), frame.data());
-        if (s.is_ok()) m_wal->allow_cleanup(frame.lsn().value);
+        if (s.is_ok()) {
+            m_flushed_lsn = std::max(lsn, m_flushed_lsn);
+            m_wal->allow_cleanup(lsn.value);
+        }
     }
 
     frame.reset(PageId::null());

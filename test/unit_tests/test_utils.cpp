@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <thread>
 
 #include "calico/bytes.h"
 #include "calico/options.h"
@@ -242,6 +243,24 @@ TEST(NonPrintableSliceTests, Conversions)
     ASSERT_EQ(s[1], '\x01');
 }
 
+TEST(NonPrintableSliceTests, CStyleStringLengths)
+{
+    const auto a = "ab";
+    const char b[] {'4', '2', '\x00'};
+    ASSERT_EQ(stob(a).size(), 2);
+    ASSERT_EQ(stob(b).size(), 2);
+}
+
+TEST(NonPrintableSliceTests, ModifyCharArray)
+{
+    char data[] {'a', 'b', '\x00'};
+    auto bytes = stob(data);
+    bytes[0] = '4';
+    bytes.advance();
+    bytes[0] = '2';
+    ASSERT_TRUE(stob(data) == stob("42"));
+}
+
 template<class T>
 auto run_nullability_check()
 {
@@ -473,22 +492,100 @@ TEST(SimpleDSLTests, Size)
 //    return nullptr;
 //}
 
+
+
+
+// Modified from RocksDB.
 class QueueTests: public testing::Test {
 public:
+    static constexpr Size NUM_ELEMENTS {500};
+
     QueueTests() = default;
     ~QueueTests() override = default;
 
-    Queue<int> queue;
+    std::array<Size, NUM_ELEMENTS> data {};
+    mutable std::mutex mutex;
+    Queue<Size> queue;
+};
+
+struct Consumer {
+    auto operator()() -> void
+    {
+        std::optional<Size> next;
+        while ((next = queue->dequeue())) {
+            std::lock_guard lock {*mu};
+            out[*next] = *next;
+        }
+    }
+
+    std::mutex *mu {};
+    Queue<Size> *queue {};
+    Size *out {};
 };
 
 TEST_F(QueueTests, EnqueueAndDequeueST)
 {
-    queue.enqueue(1);
-    queue.enqueue(2);
-    queue.enqueue(3);
+    queue.enqueue(1UL);
+    queue.enqueue(2UL);
+    queue.enqueue(3UL);
     ASSERT_EQ(queue.dequeue(), 1);
     ASSERT_EQ(queue.dequeue(), 2);
     ASSERT_EQ(queue.dequeue(), 3);
+}
+
+TEST_F(QueueTests, SingleProducerMultipleConsumers)
+{
+    static constexpr Size NUM_GROUPS {5};
+    std::vector<std::thread> consumers;
+    for (Size i {}; i < NUM_GROUPS; ++i)
+        consumers.emplace_back(Consumer {&mutex, &queue, data.data()});
+
+    for (Size i {}; i < NUM_ELEMENTS; ++i)
+        queue.enqueue(i);
+
+    queue.finish();
+
+    for (auto &thread: consumers)
+        thread.join();
+
+    queue.wait_until_finish();
+
+    Size answer {};
+    ASSERT_TRUE(std::all_of(cbegin(data), cend(data), [&answer](auto result) {
+        return result == answer++;
+    }));
+}
+
+TEST_F(QueueTests, MultipleProducersMultipleConsumers)
+{
+    static constexpr Size NUM_GROUPS {5};
+    static constexpr auto GROUP_SIZE = NUM_ELEMENTS / NUM_GROUPS;
+    static_assert(GROUP_SIZE * NUM_GROUPS == NUM_ELEMENTS);
+
+    std::vector<std::thread> consumers;
+    for (Size i {}; i < NUM_GROUPS; ++i)
+        consumers.emplace_back(Consumer {&mutex, &queue, data.data()});
+
+    std::vector<std::thread> producers;
+    for (Size i {}; i < NUM_GROUPS; ++i) {
+        producers.emplace_back([i, this] {
+            for (Size j {}; j < GROUP_SIZE; ++j)
+                queue.enqueue(j + i*GROUP_SIZE);
+        });
+    }
+
+    for (auto &thread: producers)
+        thread.join();
+
+    queue.finish();
+
+    for (auto &thread: consumers)
+        thread.join();
+
+    Size answer {};
+    ASSERT_TRUE(std::all_of(cbegin(data), cend(data), [&answer](auto result) {
+        return result == answer++;
+    }));
 }
 
 } // <anonymous>

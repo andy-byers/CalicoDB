@@ -116,6 +116,8 @@ public:
      */
     [[nodiscard]] virtual auto log_commit() -> Status = 0;
 
+    [[nodiscard]] virtual auto flush_pending() -> Status = 0;
+
     /**
      * Enter the stopped state.
      *

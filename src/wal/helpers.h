@@ -202,7 +202,7 @@ private:
  */
 class SegmentGuard final {
 public:
-    [[nodiscard]] auto start(WalRecordWriter &writer, WalCollection &collection) -> Status;
+    [[nodiscard]] auto start(WalRecordWriter &writer, WalCollection &collection, std::atomic<SequenceId> &flushed_lsn) -> Status;
     [[nodiscard]] auto finish(bool has_commit) -> Status;
     [[nodiscard]] auto abort() -> Status;
 
@@ -231,6 +231,7 @@ private:
     Storage *m_store {};
     WalRecordWriter *m_writer {};
     WalCollection *m_collection {};
+    std::atomic<SequenceId> *m_flushed_lsn {};
 };
 
 class WalFilter {

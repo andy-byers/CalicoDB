@@ -157,7 +157,7 @@ auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto read_wal_record_header(BytesView in) -> WalRecordHeader;
 [[nodiscard]] auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
 [[nodiscard]] auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size;
-[[nodiscard]] auto encode_commit_payload(Bytes in) -> Size;
+auto encode_commit_payload(Bytes in) -> void;
 [[nodiscard]] auto decode_commit_payload(const WalRecordHeader&, BytesView in) -> RedoDescriptor;
 [[nodiscard]] auto decode_deltas_payload(const WalRecordHeader&, BytesView in) -> RedoDescriptor;
 [[nodiscard]] auto decode_full_image_payload(BytesView in) -> UndoDescriptor;

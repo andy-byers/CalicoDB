@@ -83,10 +83,10 @@ auto decode_deltas_payload(const WalRecordHeader &header, BytesView in) -> RedoD
     return redo;
 }
 
-auto encode_commit_payload(Bytes in) -> Size
+auto encode_commit_payload(Bytes in) -> void
 {
+    static_assert(sizeof(WalPayloadType) == sizeof(char));
     in[0] = static_cast<Byte>(WalPayloadType::COMMIT);
-    return sizeof(WalPayloadType);
 }
 
 auto decode_commit_payload(const WalRecordHeader &header, [[maybe_unused]] BytesView in) -> RedoDescriptor

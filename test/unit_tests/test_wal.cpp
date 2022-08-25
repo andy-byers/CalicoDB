@@ -333,7 +333,7 @@ public:
 
     auto detach_writer()
     {
-        ASSERT_TRUE(expose_message(writer.detach()));
+        ASSERT_TRUE(expose_message(writer.detach([](auto) {})));
     }
 
     WalRecordWriter writer {BLOCK_SIZE};
@@ -585,6 +585,13 @@ TEST_F(BackgroundWriterTests, WriterCleansUp)
     writer->startup();
     writer->dispatch(get_update_event(SequenceId::from_index(0)));
     ASSERT_TRUE(expose_message(writer->next_status()));
+
+    writer->dispatch(BackgroundWriter::Event {
+        BackgroundWriter::EventType::STOP_WRITER,
+        SequenceId::from_index(0),
+        std::nullopt,
+        0,
+    });
     writer->teardown();
 
     ASSERT_FALSE(writer->is_running());
@@ -757,6 +764,7 @@ public:
 
     WalCollection collection;
     WalRecordWriter writer;
+    std::atomic<SequenceId> flushed_lsn;
 };
 
 TEST_F(SegmentGuardTests, NewGuardIsNotStarted)
@@ -769,7 +777,7 @@ TEST_F(SegmentGuardTests, NewGuardIsNotStarted)
 TEST_F(SegmentGuardTests, StartAndFinish)
 {
     auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
     ASSERT_TRUE(guard.is_started());
     assert_components_are_started();
 
@@ -786,7 +794,7 @@ TEST_F(SegmentGuardTests, StartAndFinish)
 TEST_F(SegmentGuardTests, StartAndFinishWithCommit)
 {
     auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
     ASSERT_TRUE(expose_message(guard.finish(true)));
 
     ASSERT_EQ(collection.info().size(), 1);
@@ -799,7 +807,7 @@ TEST_F(SegmentGuardTests, BehavesLikeScopeGuard)
 {
     {
         auto guard = create_guard();
-        ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+        ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
     }
 
     assert_components_are_stopped();
@@ -809,14 +817,14 @@ TEST_F(SegmentGuardTests, BehavesLikeScopeGuard)
 TEST_F(SegmentGuardTests, DoubleStartDeathTest)
 {
     auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection)));
-    ASSERT_DEATH(const auto unused = guard.start(writer, collection), EXPECTATION_MATCHER);
+    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
+    ASSERT_DEATH(const auto unused = guard.start(writer, collection, flushed_lsn), EXPECTATION_MATCHER);
 }
 
 TEST_F(SegmentGuardTests, DoubleFinishDeathTest)
 {
     auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection)));
+    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
     ASSERT_TRUE(expose_message(guard.finish(true)));
     ASSERT_DEATH(const auto unused = guard.finish(true), EXPECTATION_MATCHER);
 }
@@ -879,7 +887,7 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
     for (Size i {}; i < NUM_RECORDS; ++i) {
         images.emplace_back(random.next_string(0x80));
         deltas.emplace_back(generator.setup_deltas(stob(images.back())));
-        writer->log_deltas(SequenceId::from_index(i), PageId::root(), stob(images.back()), deltas[i]);
+        writer->log_deltas(PageId::root(), stob(images.back()), deltas[i]);
     }
     // close() should cause the writer to flush the current block.
     writer->stop();
@@ -912,7 +920,7 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
     writer->start();
     for (Size i {}; i < NUM_RECORDS; ++i) {
         images.emplace_back(random.next_string(0x80));
-        writer->log_full_image(SequenceId::from_index(i), PageId::from_index(i), stob(images.back()));
+        writer->log_full_image(PageId::from_index(i), stob(images.back()));
     }
     writer->stop();
 
@@ -951,16 +959,15 @@ auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_d
 
     writer->start();
     for (Size i {}; i < num_images; ++i) {
-        auto lsn = SequenceId::from_index(i * deltas_per_image);
         auto pid = PageId::from_index(i);
 
         before_images.emplace_back(random.next_string(BasicWalReaderWriterTests::PAGE_SIZE));
-        writer->log_full_image(lsn++, pid, stob(before_images.back()));
+        writer->log_full_image(pid, stob(before_images.back()));
 
         after_images.emplace_back(before_images.back());
         for (Size j {}; j < deltas_per_image; ++j) {
             const auto deltas = generator.setup_deltas(stob(after_images.back()));
-            writer->log_deltas(lsn++, pid, stob(after_images.back()), deltas);
+            writer->log_deltas(pid, stob(after_images.back()), deltas);
         }
     }
     writer->stop();

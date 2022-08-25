@@ -258,6 +258,17 @@ inline auto stob(std::string &data) noexcept -> Bytes
 }
 
 /**
+* Create a mutable slice from a C-style string.
+*
+* @param data The C-style string.
+* @return The resulting mutable slice.
+*/
+inline auto stob(char *data) noexcept -> Bytes
+{
+    return {data, std::strlen(data)};
+}
+
+/**
  * Create an immutable slice from a C-style string.
  *
  * @param data The C-style string.

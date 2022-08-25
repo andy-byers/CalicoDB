@@ -81,8 +81,8 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
     auto s = handle_writer_error(*m_logger, m_writer);
     forward_status(s, "cannot clean up WAL writer");
 
-    // NOOP if the writer is already stopped.
-    m_writer.stop();
+    if (m_writer.is_running())
+        m_writer.stop();
 
     s = handle_writer_error(*m_logger, m_writer);
     forward_status(s, "cannot stop WAL writer");
@@ -95,7 +95,7 @@ auto BasicWriteAheadLog::flushed_lsn() const -> std::uint64_t
 
 auto BasicWriteAheadLog::current_lsn() const -> std::uint64_t
 {
-    return m_last_lsn.value + 1;
+    return m_writer.last_lsn().value + 1;
 }
 
 auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> Status
@@ -114,9 +114,8 @@ auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> St
         m_logger->info("skipping full image for page {}", page_id);
         return Status::ok();
     }
-    m_last_lsn++;
 
-    m_writer.log_full_image(m_last_lsn, PageId {page_id}, image);
+    m_writer.log_full_image(PageId {page_id}, image);
     m_images.emplace(PageId {page_id});
     return m_writer.next_status();
 }
@@ -130,14 +129,13 @@ auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, cons
     s = handle_not_running_error(*m_logger, m_writer, MSG);
     MAYBE_FORWARD(s, MSG);
 
-    m_last_lsn++;
-    m_writer.log_deltas(m_last_lsn, PageId {page_id}, image, deltas);
+    m_writer.log_deltas(PageId {page_id}, image, deltas);
     return m_writer.next_status();
 }
 
 auto BasicWriteAheadLog::log_commit() -> Status
 {
-    m_logger->info("logging commit (LSN = {})", m_last_lsn.value);
+    m_logger->info("logging commit");
 
     static constexpr auto MSG = "could not log commit";
     auto s = handle_writer_error(*m_logger, m_writer);
@@ -146,8 +144,7 @@ auto BasicWriteAheadLog::log_commit() -> Status
     s = handle_not_running_error(*m_logger, m_writer, MSG);
     MAYBE_FORWARD(s, MSG);
 
-    m_last_lsn++;
-    m_writer.log_commit(m_last_lsn);
+    m_writer.log_commit();
     m_images.clear();
     return m_writer.next_status();
 }
@@ -209,9 +206,10 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
 
         m_collection.start_segment(id);
 
+        SequenceId last_lsn;
         bool has_commit {};
         s = m_reader.redo(uncommitted, [&](const auto &info) {
-            m_last_lsn.value = info.page_lsn;
+            last_lsn.value = info.page_lsn;
             has_commit = info.is_commit;
             return redo_cb(info);
         });
@@ -225,9 +223,8 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
             uncommitted.clear();
 
         m_collection.finish_segment(has_commit);
+        m_flushed_lsn.store(last_lsn);
     }
-
-    m_flushed_lsn.store(m_last_lsn);
 
     for (auto itr = crbegin(uncommitted); itr != crend(uncommitted); ) {
         m_logger->info("rolling segment {} backward", itr->id.value);
@@ -314,6 +311,12 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
     });
     m_logger->info("finished undo");
     return s;
+}
+
+auto BasicWriteAheadLog::flush_pending() -> Status
+{
+    m_writer.flush_block();
+    return m_writer.next_status(); // TODO: May not reflect error yet... Should find a good place to check this each operation...
 }
 
 auto BasicWriteAheadLog::save_state(FileHeader &) -> void

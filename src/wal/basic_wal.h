@@ -59,6 +59,7 @@ public:
     [[nodiscard]] auto start_writer() -> Status override;
     [[nodiscard]] auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status override;
     [[nodiscard]] auto abort_last(const UndoCallback &callback) -> Status override;
+    [[nodiscard]] auto flush_pending() -> Status override;
     auto save_state(FileHeader &) -> void override;
     auto load_state(const FileHeader &) -> void override;
 
@@ -80,7 +81,6 @@ private:
     std::atomic<SequenceId> m_pager_lsn;
     WalCollection m_collection;
     std::string m_prefix;
-    SequenceId m_last_lsn;
     Storage *m_store {};
 
     BasicWalReader m_reader;

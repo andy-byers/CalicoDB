@@ -96,7 +96,7 @@ public:
 
         for (Size offset {random.next_int(image.size() / 10)}; offset < image.size(); ) {
             const auto rest = image.size() - offset;
-            const auto size = random.next_int(1ULL, std::min(rest, MAX_WIDTH));
+            const auto size = random.next_int(1UL, std::min(rest, MAX_WIDTH));
             deltas.emplace_back(PageDelta {offset, size});
             offset += size + random.next_int(1ULL, MAX_SPREAD);
         }
