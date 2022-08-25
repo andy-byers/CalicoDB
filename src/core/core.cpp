@@ -12,6 +12,7 @@
 #include "utils/logging.h"
 #include "wal/basic_wal.h"
 #include "wal/disabled_wal.h"
+#include "store/heap.h"
 #include <filesystem>
 
 namespace calico {
@@ -50,7 +51,7 @@ auto Info::page_count() const -> Size
 
 auto Info::page_size() const -> Size
 {
-    return m_core->options().page_size;
+    return m_core->page_size();
 }
 
 auto Info::maximum_key_size() const -> Size
@@ -65,48 +66,44 @@ auto initialize_log(spdlog::logger &logger, const std::string &base)
     logger.info("log is located at \"{}/{}\"", base, LOG_FILENAME);
 }
 
-Core::Core(const std::string &path, const Options &options)
-    : m_prefix {path + "/"},
-      m_options {options},
-      m_sink {create_sink(path, options.log_level)}, // TODO: Don't create a logger if we don't have anything on disk, i.e. the store keeps everything in memory...
-      m_logger {create_logger(m_sink, "core")}
-{
-    m_logger->info("constructing Core object");
-}
-
-auto Core::open() -> Status
+auto Core::open(const std::string &path, const Options &options) -> Status
 {
     static constexpr auto MSG = "cannot open database";
-    initialize_log(*m_logger, m_prefix);
 
-    auto *store = m_options.store;
-    if (!store) {
-        store = new DiskStorage;
+    m_prefix = path + "/";
+    m_sink = options.log_level ? create_sink(path, options.log_level) : create_sink();
+    m_logger = create_logger(m_sink, "core");
+    initialize_log(*m_logger, m_prefix);
+    m_logger->info("constructing Core object");
+
+    m_store = options.store;
+    if (!m_store) {
+        m_store = new DiskStorage;
         m_owns_store = true;
     }
-    m_store = store;
-    m_options.store = store;
 
-    auto initial = setup(m_prefix, *m_store, m_options, *m_logger);
+    auto initial = setup(m_prefix, *m_store, options, *m_logger);
     if (!initial.has_value()) return forward_status(initial.error(), MSG);
     auto [state, is_new] = *initial;
-    m_options.page_size = state.page_size;
 
-    {
+    if (options.wal_limit != DISABLE_WAL) {
         WriteAheadLog *wal {};
         auto s = BasicWriteAheadLog::open({
             m_prefix,
             m_store,
             m_sink,
             state.page_size,
+            options.wal_limit,
         }, &wal);
         MAYBE_FORWARD(s, MSG);
         m_wal.reset(wal);
         m_wal->load_state(state);
+    } else {
+        m_wal = std::make_unique<DisabledWriteAheadLog>();
     }
 
     {
-        auto r = BasicPager::open({m_prefix, *store, *m_wal, m_sink, m_options.frame_count, m_options.page_size});
+        auto r = BasicPager::open({m_prefix, *m_store, *m_wal, m_sink, options.frame_count, state.page_size});
         if (!r.has_value()) return forward_status(r.error(), MSG);
         m_pager = std::move(*r);
         m_pager->load_state(state);
@@ -195,6 +192,11 @@ auto Core::status() const -> Status
 auto Core::path() const -> std::string
 {
     return m_prefix;
+}
+
+auto Core::page_size() const -> Size
+{
+    return m_pager->page_size();
 }
 
 auto Core::info() -> Info
@@ -386,7 +388,7 @@ auto Core::load_state() -> Status
 
     auto s = m_pager->release(std::move(*root));
     if (s.is_ok() && m_pager->page_count() < before_count) {
-        const auto after_size = m_pager->page_count() * m_options.page_size;
+        const auto after_size = m_pager->page_count() * m_pager->page_size();
         return m_store->resize_file(m_prefix + DATA_FILENAME, after_size);
     }
     return s;
@@ -428,6 +430,18 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
     if (!is_power_of_two(options.page_size)) {
         message.set_detail("page size {} is invalid", options.page_size);
         message.set_hint("must be a power of 2");
+        return Err {message.invalid_argument()};
+    }
+
+    if (options.wal_limit != DISABLE_WAL && options.wal_limit < MINIMUM_WAL_LIMIT) {
+        message.set_detail("WAL segment limit {} is too small", options.wal_limit);
+        message.set_hint("must be greater than or equal to {} blocks", MINIMUM_WAL_LIMIT);
+        return Err {message.invalid_argument()};
+    }
+
+    if (options.wal_limit > MAXIMUM_WAL_LIMIT) {
+        message.set_detail("WAL segment limit {} is too large", options.wal_limit);
+        message.set_hint("must be less than or equal to {} blocks", MAXIMUM_WAL_LIMIT);
         return Err {message.invalid_argument()};
     }
 

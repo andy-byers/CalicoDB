@@ -1,5 +1,5 @@
-#ifndef CALICO_UTILS_ASSERT_H
-#define CALICO_UTILS_ASSERT_H
+#ifndef CALICO_UTILS_EXPECT_H
+#define CALICO_UTILS_EXPECT_H
 
 #include "calico/status.h"
 #include <cstdio>
@@ -21,7 +21,6 @@
 #define CALICO_EXPECT_LE(t1, t2) CALICO_EXPECT_TRUE((t1) <= (t2))
 #define CALICO_EXPECT_GT(t1, t2) CALICO_EXPECT_TRUE((t1) > (t2))
 #define CALICO_EXPECT_GE(t1, t2) CALICO_EXPECT_TRUE((t1) >= (t2))
-#define CALICO_EXPECT_BOUNDED_BY(Type, t) CALICO_EXPECT_LE(t, std::numeric_limits<Type>::max())
 
 /**
  * If the expression evaluates to an error object, this macro propagates it up to the caller, otherwise it
@@ -79,4 +78,4 @@ inline constexpr auto handle_expect(bool expectation, const char *repr, const ch
 
 } // namespace calico::impl
 
-#endif // CALICO_UTILS_ASSERT_H
+#endif // CALICO_UTILS_EXPECT_H

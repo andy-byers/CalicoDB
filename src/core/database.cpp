@@ -37,8 +37,8 @@ auto Database::open(const std::string &path, const Options &options) -> Status
         message.set_detail("database is already open");
         return message.logic_error();
     }
-    m_core = std::make_unique<Core>(path, sanitize_options(options));
-    auto s = m_core->open();
+    m_core = std::make_unique<Core>();
+    auto s = m_core->open(path, sanitize_options(options));
     if (!s.is_ok()) m_core.reset();
     return s;
 }

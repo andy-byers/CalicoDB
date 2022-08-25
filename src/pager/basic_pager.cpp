@@ -14,9 +14,9 @@ namespace fs = std::filesystem;
 
 auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPager>>
 {
-    auto pool = std::unique_ptr<BasicPager> {new (std::nothrow) BasicPager {param}};
+    auto pager = std::unique_ptr<BasicPager> {new (std::nothrow) BasicPager {param}};
 
-    if (!pool) {
+    if (!pager) {
         ThreePartMessage message;
         message.set_primary("cannot open block pool");
         message.set_detail("out of memory");
@@ -30,13 +30,13 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
     RandomEditor *file {};
     auto s = param.storage.open_random_editor(root, &file);
 
-    CALICO_TRY_STORE(pool->m_framer, Framer::open(
+    CALICO_TRY_STORE(pager->m_framer, Framer::open(
         std::unique_ptr<RandomEditor> {file},
         param.wal,
         param.page_size,
         param.frame_count
     ));
-    return pool;
+    return pager;
 }
 
 BasicPager::BasicPager(const Parameters &param)
@@ -49,6 +49,11 @@ BasicPager::BasicPager(const Parameters &param)
 auto BasicPager::page_count() const -> Size
 {
     return m_framer->page_count();
+}
+
+auto BasicPager::page_size() const -> Size
+{
+    return m_framer->page_size();
 }
 
 auto BasicPager::pin_frame(PageId id) -> Status

@@ -199,14 +199,12 @@ auto Framer::load_state(const FileHeader &header) -> void
 {
     m_flushed_lsn.value = header.flushed_lsn;
     m_page_count = header.page_count;
-    m_page_size = decode_page_size(header.page_size);
 }
 
 auto Framer::save_state(FileHeader &header) -> void
 {
     header.flushed_lsn = m_flushed_lsn.value;
     header.page_count = m_page_count;
-    header.page_size = encode_page_size(m_page_size);
 }
 
 } // namespace calico

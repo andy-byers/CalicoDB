@@ -7,7 +7,6 @@ namespace calico {
 
 auto BackgroundWriter::background_writer() -> void
 {
-    CALICO_EXPECT_TRUE(m_state.is_running);
     SegmentGuard guard {*m_store, m_prefix};
 
     auto s = guard.start(m_writer, *m_collection, *m_flushed_lsn);
@@ -70,7 +69,7 @@ auto BackgroundWriter::background_writer() -> void
             m_state.cv.notify_one();
         }
 
-        // TODO: Clean up unneeded segments. We'll use the m_first_lsn member from BasicWriteAheadLog...
+        // TODO: Clean up obsolete segments...
 
     }
 }
@@ -95,9 +94,8 @@ auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
 
 auto BackgroundWriter::emit_commit(SequenceId lsn) -> Status
 {
-    char scratch[] {' ', '\x00'};
-    encode_commit_payload(stob(scratch));
-    return emit_payload(lsn, stob(scratch));
+    static constexpr char payload[] {WalPayloadType::COMMIT, '\x00'};
+    return emit_payload(lsn, stob(payload));
 }
 
 auto BackgroundWriter::advance_segment(SegmentGuard &guard, bool has_commit) -> Status
@@ -120,8 +118,10 @@ auto BasicWalWriter::stop() -> void
     m_background.dispatch(BackgroundWriter::Event {
         BackgroundWriter::EventType::STOP_WRITER,
         m_last_lsn,
+        std::nullopt,
+        0,
+        true,
     });
-    // Blocks until the background thread is finished.
     m_background.teardown();
 }
 

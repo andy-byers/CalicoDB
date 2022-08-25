@@ -29,6 +29,7 @@ public:
 
     [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<BasicPager>>;
     [[nodiscard]] auto page_count() const -> Size override;
+    [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto flushed_lsn() const -> SequenceId override;
     [[nodiscard]] auto allocate() -> Result<Page> override;
     [[nodiscard]] auto acquire(PageId, bool) -> Result<Page> override;

@@ -55,6 +55,7 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
           &m_flushed_lsn,
           param.prefix,
           param.page_size,
+          param.wal_limit,
       }}
 {
     m_logger->info("constructing BasicWriteAheadLog object");

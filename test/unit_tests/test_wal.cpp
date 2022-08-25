@@ -859,11 +859,12 @@ public:
             &flushed_lsn,
             ROOT,
             PAGE_SIZE,
+            128,
         });
     }
 
     WalCollection collection;
-    std::atomic<SequenceId> flushed_lsn;
+    std::atomic<SequenceId> flushed_lsn {};
     std::unique_ptr<LogScratchManager> scratch;
     std::unique_ptr<BasicWalReader> reader;
     std::unique_ptr<BasicWalWriter> writer;
@@ -1115,6 +1116,9 @@ public:
         }, &temp)));
 
         wal.reset(temp);
+
+        ASSERT_TRUE(expose_message(wal->setup_and_recover([](const auto &) { return Status::logic_error(""); },
+                                                          [](const auto &) { return Status::logic_error(""); })));
     }
 
     std::unique_ptr<WriteAheadLog> wal;
@@ -1124,7 +1128,6 @@ TEST_F(BasicWalTests, NewWalIsEmpty)
 {
     ASSERT_EQ(wal->flushed_lsn(), 0);
     ASSERT_EQ(wal->current_lsn(), 1);
-    ASSERT_TRUE(expose_message(wal->setup_and_recover([](const auto &) { return Status::logic_error(""); }, [](const auto &) { return Status::logic_error(""); })));
     ASSERT_TRUE(expose_message(wal->abort_last([](const auto &) { return Status::logic_error(""); })));
 }
 

@@ -10,6 +10,8 @@
 #include "core/header.h"
 #include "fakes.h"
 #include "store/disk.h"
+#include "tree/tree.h"
+#include "tree/bplus_tree.h"
 #include "tools.h"
 #include "unit_tests.h"
 #include "wal/basic_wal.h"
@@ -37,8 +39,8 @@ public:
         options.frame_count = 16;
 
         store = std::make_unique<MockStorage>();
-        core = std::make_unique<Core>("test", options);
-        const auto s = core->open();
+        core = std::make_unique<Core>();
+        const auto s = core->open("test", options);
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
         mock = dynamic_cast<MockStorage &>(*store).get_mock_random_editor(DATA_FILENAME);
 
@@ -151,7 +153,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     Random random {0};
 
     const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
-    auto itr = std::cbegin(records);
+    auto itr = cbegin(records);
     Database db;
 
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {

@@ -1,3 +1,55 @@
+///**
+// *
+// */
+//
+//#include "calico/calico.h"
+//#include "spdlog/fmt/fmt.h"
+//
+//namespace {
+//
+//namespace cco = calico;
+//
+//auto maybe_throw(const cco::Status &s) -> cco::Status
+//{
+//    if (!s.is_ok())
+//        throw std::runtime_error {s.what()};
+//    return s;
+//}
+//
+//class PartitionDatabase {
+//public:
+//    PartitionDatabase(const std::string &path, cco::Size label_width)
+//        : m_label_width {label_width}
+//    {
+//        maybe_throw(m_db.open(path));
+//
+//        const auto max_key_size = m_db.info().maximum_key_size();
+//        if (label_width >= max_key_size)
+//            throw std::invalid_argument {"maximum label width is too large"};
+//    }
+//
+//    [[nodiscard]]
+//    auto maximum_key_size() const -> cco::Size
+//    {
+//        return m_db.info().maximum_key_size() - m_label_width;
+//    }
+//
+//private:
+//    cco::Database m_db;
+//    cco::Size m_label_width {};
+//};
+//
+//class Partition {
+//public:
+//
+//private:
+//
+//};
+//
+//} // namespace
+//
+//
+
 
 #include "calico/calico.h"
 #include <chrono>
@@ -191,9 +243,9 @@ auto main(int, const char *[]) -> int
     assert(db.close().is_ok());
     exit(0);
 
-//    reads_and_writes(db);
-//    updating_a_database(db);
-//    querying_a_database(db);
-//    deleting_a_database(std::move(db));
+    //    reads_and_writes(db);
+    //    updating_a_database(db);
+    //    querying_a_database(db);
+    //    deleting_a_database(std::move(db));
     return 0;
 }

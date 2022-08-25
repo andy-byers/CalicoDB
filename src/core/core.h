@@ -27,19 +27,20 @@ class Core final {
 public:
     friend class Database;
 
-    Core(const std::string &path, const Options &options);
+    Core() = default;
     ~Core();
 
+    [[nodiscard]] auto open(const std::string &path, const Options &options) -> Status;
+    [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto destroy() -> Status;
-    [[nodiscard]] auto open() -> Status;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
+    [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Status;
     [[nodiscard]] auto erase(BytesView) -> Status;
     [[nodiscard]] auto erase(Cursor) -> Status;
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;
-    [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto find(BytesView) -> Cursor;
     [[nodiscard]] auto find_exact(BytesView) -> Cursor;
     [[nodiscard]] auto find_minimum() -> Cursor;
@@ -94,12 +95,6 @@ public:
         return *m_pager;
     }
 
-    [[nodiscard]]
-    auto options() const -> const Options&
-    {
-        return m_options;
-    }
-
 private:
     auto forward_status(Status, const std::string &) -> Status;
     [[nodiscard]] auto ensure_consistent_state() -> Status;
@@ -107,7 +102,6 @@ private:
     [[nodiscard]] auto load_state() -> Status;
 
     std::string m_prefix;
-    Options m_options;
     spdlog::sink_ptr m_sink;
     std::shared_ptr<spdlog::logger> m_logger;
     std::unique_ptr<WriteAheadLog> m_wal;

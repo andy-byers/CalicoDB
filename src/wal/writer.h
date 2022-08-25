@@ -142,6 +142,7 @@ public:
         std::atomic<SequenceId> *flushed_lsn {};
         std::string prefix;
         Size block_size {};
+        Size wal_limit {};
     };
 
     enum class EventType {
@@ -166,7 +167,8 @@ public:
           m_prefix {param.prefix},
           m_scratch {param.scratch},
           m_collection {param.collection},
-          m_store {param.store}
+          m_store {param.store},
+          m_wal_limit {param.wal_limit}
     {}
 
     ~BackgroundWriter() = default;
@@ -257,7 +259,7 @@ private:
     [[nodiscard]]
     auto needs_segmentation() const -> bool
     {
-        return m_writer.block_count() > 128; // TODO: Make this tunable?
+        return m_writer.block_count() > m_wal_limit;
     }
 
     auto background_writer() -> void;
@@ -282,6 +284,7 @@ private:
     LogScratchManager *m_scratch {};
     WalCollection *m_collection {};
     Storage *m_store {};
+    Size m_wal_limit {};
 };
 
 class BasicWalWriter {
@@ -292,6 +295,7 @@ public:
         std::atomic<SequenceId> *flushed_lsn {};
         std::string dirname;
         Size page_size {};
+        Size wal_limit {};
     };
 
     explicit BasicWalWriter(const Parameters &param)
@@ -304,6 +308,7 @@ public:
               m_flushed_lsn,
               param.dirname,
               param.page_size * WAL_BLOCK_SCALE,
+              param.wal_limit,
           }}
     {}
 
@@ -333,7 +338,7 @@ public:
     auto log_commit() -> void;
 
 private:
-    std::atomic<SequenceId> *m_flushed_lsn;
+    std::atomic<SequenceId> *m_flushed_lsn {};
     SequenceId m_last_lsn;
     LogScratchManager m_scratch;
     BackgroundWriter m_background;

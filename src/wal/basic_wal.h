@@ -25,6 +25,7 @@ public:
         Storage *store {};
         spdlog::sink_ptr sink;
         Size page_size {};
+        Size wal_limit {};
     };
 
     [[nodiscard]]
@@ -77,8 +78,8 @@ private:
 
     std::unordered_set<PageId, PageId::Hash> m_images;
     std::shared_ptr<spdlog::logger> m_logger;
-    std::atomic<SequenceId> m_flushed_lsn;
-    std::atomic<SequenceId> m_pager_lsn;
+    std::atomic<SequenceId> m_flushed_lsn {};
+    std::atomic<SequenceId> m_pager_lsn {};
     WalCollection m_collection;
     std::string m_prefix;
     Storage *m_store {};

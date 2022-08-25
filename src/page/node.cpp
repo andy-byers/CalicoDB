@@ -89,31 +89,26 @@ auto NodeHeader::set_rightmost_child_id(Page &page, PageId rightmost_child_id) -
 
 auto NodeHeader::set_cell_count(Page &page, Size cell_count) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint16_t, cell_count);
     put_u16(page, header_offset(page) + NodeLayout::CELL_COUNT_OFFSET, static_cast<uint16_t>(cell_count));
 }
 
 auto NodeHeader::set_cell_start(Page &page, Size cell_start) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint16_t, cell_start);
     put_u16(page, header_offset(page) + NodeLayout::CELL_START_OFFSET, static_cast<uint16_t>(cell_start));
 }
 
 auto NodeHeader::set_free_start(Page &page, Size free_start) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint16_t, free_start);
     put_u16(page, header_offset(page) + NodeLayout::FREE_START_OFFSET, static_cast<uint16_t>(free_start));
 }
 
 auto NodeHeader::set_frag_count(Page &page, Size frag_count) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint16_t, frag_count);
     put_u16(page, header_offset(page) + NodeLayout::FRAG_TOTAL_OFFSET, static_cast<uint16_t>(frag_count));
 }
 
 auto NodeHeader::set_free_total(Page &page, Size free_total) -> void
 {
-    CALICO_EXPECT_BOUNDED_BY(uint16_t, free_total);
     put_u16(page, header_offset(page) + NodeLayout::FREE_TOTAL_OFFSET, static_cast<uint16_t>(free_total));
 }
 

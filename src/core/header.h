@@ -33,14 +33,14 @@ inline auto write_header(Page &page, const FileHeader &header) -> void
 inline auto decode_page_size(std::uint16_t value) -> Size
 {
     if (value == 0)
-        return std::numeric_limits<std::uint16_t>::max();
+        return 1 << 16;
     return value;
 }
 
 [[nodiscard]]
 inline auto encode_page_size(Size page_size) -> std::uint16_t
 {
-    if (page_size == std::numeric_limits<std::uint16_t>::max())
+    if (page_size == 1 << 16)
         return 0;
     return static_cast<std::uint16_t>(page_size);
 }

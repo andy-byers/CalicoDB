@@ -103,6 +103,12 @@ public:
     {
         return m_page_count;
     }
+
+    [[nodiscard]]
+    auto page_size() const -> Size
+    {
+        return m_page_size;
+    }
     
     [[nodiscard]]
     auto available() const -> Size

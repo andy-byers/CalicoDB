@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <thread>
+#include <array>
 
 #include "calico/bytes.h"
 #include "calico/options.h"
@@ -13,6 +14,7 @@
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
+#include "core/header.h"
 
 namespace {
 
@@ -485,16 +487,6 @@ TEST(SimpleDSLTests, Size)
     CALICO_EXPECT_NE(b, 1UL);
 }
 
-//auto transfer_n(Queue<int> *queue, std::vector<std::optional<int>> *out, Size n) -> void*
-//{
-//    for (Size i {}; i < n; ++i)
-//        out->emplace_back(queue->dequeue());
-//    return nullptr;
-//}
-
-
-
-
 // Modified from RocksDB.
 class QueueTests: public testing::Test {
 public:
@@ -586,6 +578,16 @@ TEST_F(QueueTests, MultipleProducersMultipleConsumers)
     ASSERT_TRUE(std::all_of(cbegin(data), cend(data), [&answer](auto result) {
         return result == answer++;
     }));
+}
+
+TEST(HeaderTests, EncodeAndDecodePageSize)
+{
+    ASSERT_EQ(decode_page_size(0), 1 << 16);
+    ASSERT_EQ(encode_page_size(1 << 16), 0);
+
+    for (Size i {1}; i < 16; ++i) {
+        ASSERT_EQ(decode_page_size(encode_page_size(1 << i)), 1 << i);
+    }
 }
 
 } // <anonymous>
