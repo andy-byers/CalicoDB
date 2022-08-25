@@ -52,17 +52,9 @@ auto Database::close() -> Status
 
 auto Database::destroy(Database db) -> Status
 {
-    auto &core = *db.m_core;
-    auto &store = core.store();
-    auto s = Status::ok();
-
-    std::vector<std::string> children;
-    s = store.get_children(core.path(), children);
-    if (!s.is_ok()) return s;
-
-    for (const auto &name: children)
-        s = store.remove_file(name);
-    return store.remove_directory(core.path());
+    auto s = db.m_core->destroy();
+    db.m_core.reset();
+    return s;
 }
 
 Database::~Database()

@@ -19,7 +19,7 @@ class Storage;
 class Tree;
 
 struct InitialState {
-    FileHeader state;
+    FileHeader state {};
     bool is_new {};
 };
 
@@ -30,6 +30,7 @@ public:
     Core(const std::string &path, const Options &options);
     ~Core();
 
+    [[nodiscard]] auto destroy() -> Status;
     [[nodiscard]] auto open() -> Status;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
@@ -100,7 +101,7 @@ public:
     }
 
 private:
-    [[nodiscard]] auto forward_status(Status, const std::string &) -> Status;
+    auto forward_status(Status, const std::string &) -> Status;
     [[nodiscard]] auto ensure_consistent_state() -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;

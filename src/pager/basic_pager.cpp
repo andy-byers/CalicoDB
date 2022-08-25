@@ -63,18 +63,7 @@ auto BasicPager::pin_frame(PageId id) -> Status
         // We are out of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
         // very often, if at all.
         if (!*r) {
-
-
-            fmt::print("WAL_LSN:{}, PAGER_LSN:{}\n", m_wal->flushed_lsn(), m_framer->flushed_lsn().value);
-            if(m_framer->flushed_lsn().value==12347){
-                fmt::print("{}\n", m_wal->current_lsn());
-                exit(123);
-            }
-
-            // TODO: Seems like spinning while waiting for the WAL is eating up too much CPU...
             std::this_thread::yield();
-//            using namespace std::chrono_literals;
-//            std::this_thread::sleep_for(123us); // TODO
             return Status::not_found(MSG);
         }
     }

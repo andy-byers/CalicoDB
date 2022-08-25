@@ -162,6 +162,31 @@ Core::~Core()
         delete m_store;
 }
 
+auto Core::destroy() -> Status
+{
+    auto s = Status::ok();
+
+    if (m_owns_wal) {
+        delete m_wal;
+        m_owns_wal = false;
+    }
+
+    std::vector<std::string> children;
+    s = m_store->get_children(m_prefix, children);
+    if (s.is_ok()) {
+        for (const auto &name: children) {
+            s = m_store->remove_file(name);
+
+            if (!s.is_ok())
+                forward_status(s, "could not remove file " + name);
+        }
+    } else {
+        forward_status(s, "could get child names");
+    }
+    return m_store->remove_directory(m_prefix);
+}
+
+
 auto Core::forward_status(Status s, const std::string &message) -> Status
 {
     if (!s.is_ok()) {
