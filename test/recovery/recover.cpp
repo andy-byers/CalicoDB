@@ -55,6 +55,7 @@ auto main(int argc, const char *argv[]) -> int
     CALICO_EXPECT_EQ(info.record_count(), num_committed);
 
     Size key_counter {};
+    auto xact = db.transaction();
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
         const auto cursor = db.find_exact(stob(key));
@@ -63,6 +64,7 @@ auto main(int argc, const char *argv[]) -> int
         CALICO_EXPECT_EQ(cursor.value(), value);
         expect_ok(db.erase(stob(key)));
     }
+    CALICO_EXPECT_TRUE(xact.commit().is_ok());
 
     // All records should have been reached and removed.
     CALICO_EXPECT_EQ(key_counter, num_committed);

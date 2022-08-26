@@ -76,8 +76,7 @@ Framer::Framer(std::unique_ptr<RandomEditor> file, WriteAheadLog &wal, AlignedBu
     : m_buffer {std::move(buffer)},
       m_file {std::move(file)},
       m_wal {&wal},
-      m_page_size {page_size},
-      m_frame_count {frame_count}
+      m_page_size {page_size}
 {
     // The buffer should be aligned to the page size.
     CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
@@ -92,12 +91,12 @@ Framer::Framer(std::unique_ptr<RandomEditor> file, WriteAheadLog &wal, AlignedBu
 
 auto Framer::ref(FrameNumber id, Pager &source, bool is_writable, bool is_dirty) -> Page
 {
-    CALICO_EXPECT_LT(id, m_frame_count);
+    CALICO_EXPECT_LT(id, m_frames.size());
     return m_frames[id].ref(source, is_writable, is_dirty);
 }
 auto Framer::unref(FrameNumber id, Page &page) -> void
 {
-    CALICO_EXPECT_LT(id, m_frame_count);
+    CALICO_EXPECT_LT(id, m_frames.size());
     m_frames[id].unref(page);
 }
 

@@ -261,7 +261,7 @@ namespace tools {
         CALICO_EXPECT_TRUE(was_erased.has_value());
         if (was_erased.value())
             return true;
-        auto cursor = t.find_minimum();
+        auto cursor = t.first();
         CALICO_EXPECT_EQ(cursor.error(), std::nullopt);
         if (!cursor.is_valid())
             return false;

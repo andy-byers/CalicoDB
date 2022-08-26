@@ -47,19 +47,22 @@ auto main(int argc, const char *argv[]) -> int
     {
         std::ofstream ofs {value_path, std::ios::trunc};
         CALICO_EXPECT_TRUE(ofs.is_open());
+
+        auto xact = db.transaction();
         for (Size i {}; i < num_committed; ++i) {
             const auto key = make_key<KEY_WIDTH>(i);
             const auto value = random_string(random, 2, 15);
             expect_ok(db.insert(stob(key), stob(value)));
             ofs << value << '\n';
         }
-        expect_ok(db.commit());
+        expect_ok(xact.commit());
     }
 
     puts(value_path.c_str());
     fflush(stdout);
 
     // Modify the database until we receive a signal or hit the operation limit.
+    auto xact = db.transaction();
     for (Size i {}; i < LIMIT; ++i) {
         const auto key = std::to_string(random.next_int(num_committed * 2));
         const auto value = random_string(random, 0, options.page_size / 2);
@@ -68,7 +71,7 @@ auto main(int argc, const char *argv[]) -> int
         // Keep the database from getting too large.
         if (const auto info = db.info(); info.record_count() > max_database_size) {
             while (info.record_count() >= max_database_size / 2) {
-                const auto cursor = db.find_minimum();
+                const auto cursor = db.first();
                 CALICO_EXPECT_TRUE(cursor.is_valid());
                 expect_ok(db.erase(cursor.key()));
             }

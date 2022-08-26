@@ -234,7 +234,7 @@ private:
         m_state.events.enqueue(event);
         std::unique_lock lock {m_state.mu};
         m_state.cv.wait(lock, [this] {
-            return m_is_waiting.load();
+            return !m_is_waiting.load();
         });
     }
 

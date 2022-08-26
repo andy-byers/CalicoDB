@@ -33,6 +33,7 @@ public:
     [[nodiscard]] auto open(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto destroy() -> Status;
+    [[nodiscard]] auto transaction() -> Transaction;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Status;
@@ -97,17 +98,20 @@ public:
 private:
     auto forward_status(Status, const std::string &) -> Status;
     [[nodiscard]] auto ensure_consistent_state() -> Status;
+    [[nodiscard]] auto atomic_insert(BytesView, BytesView) -> Status;
+    [[nodiscard]] auto atomic_erase(Cursor) -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;
 
     std::string m_prefix;
     spdlog::sink_ptr m_sink;
+    Status m_status {Status::ok()};
     std::shared_ptr<spdlog::logger> m_logger;
     std::unique_ptr<WriteAheadLog> m_wal;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
     Storage *m_store {};
-    bool m_has_update {};
+    bool m_has_xact {};
     bool m_owns_store {};
 };
 

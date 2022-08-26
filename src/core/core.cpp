@@ -2,6 +2,7 @@
 #include "core.h"
 #include "calico/calico.h"
 #include "calico/store.h"
+#include "calico/transaction.h"
 #include "header.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
@@ -12,7 +13,7 @@
 #include "utils/logging.h"
 #include "wal/basic_wal.h"
 #include "wal/disabled_wal.h"
-#include "store/heap.h"
+#include "store/heap.h" // TODO: Do really we want to support in-memory databases? It seems cool, but complicates the API quite a bit...
 #include <filesystem>
 
 namespace calico {
@@ -23,14 +24,14 @@ namespace calico {
         if (!calico_s.is_ok()) return forward_status(calico_s, message); \
     } while (0)
 
-[[nodiscard]]
-static auto not_supported_error(const std::string &primary)
-{
-    ThreePartMessage message;
-    message.set_primary(primary);
-    message.set_detail("action is not supported with the given database options");
-    return message.logic_error();
-}
+//[[nodiscard]]
+//static auto not_supported_error(const std::string &primary)
+//{
+//    ThreePartMessage message;
+//    message.set_primary(primary);
+//    message.set_detail("action is not supported with the given database options");
+//    return message.logic_error();
+//}
 
 [[nodiscard]]
 static auto compute_header_crc(const FileHeader &state)
@@ -87,9 +88,12 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     auto [state, is_new] = *initial;
 
     if (options.wal_limit != DISABLE_WAL) {
+        // The WAL segments may be stored elsewhere.
+        const auto wal_prefix = options.wal_path.empty()
+            ? m_prefix : options.wal_path + "/";
         WriteAheadLog *wal {};
         auto s = BasicWriteAheadLog::open({
-            m_prefix,
+            wal_prefix,
             m_store,
             m_sink,
             state.page_size,
@@ -103,7 +107,15 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     }
 
     {
-        auto r = BasicPager::open({m_prefix, *m_store, *m_wal, m_sink, options.frame_count, state.page_size});
+        auto r = BasicPager::open({
+            m_prefix,
+            *m_store,
+            *m_wal,
+            m_status,
+            m_sink,
+            options.frame_count,
+            state.page_size,
+        });
         if (!r.has_value()) return forward_status(r.error(), MSG);
         m_pager = std::move(*r);
         m_pager->load_state(state);
@@ -221,9 +233,11 @@ auto Core::find_maximum() -> Cursor
 
 auto Core::insert(BytesView key, BytesView value) -> Status
 {
-    auto s = m_tree->insert(key, value);
-    if (!m_has_update) m_has_update = s.is_ok();
-    return s;
+    if (m_has_xact) {
+        return m_tree->insert(key, value);
+    } else {
+        return atomic_insert(key, value);
+    }
 }
 
 auto Core::erase(BytesView key) -> Status
@@ -233,18 +247,41 @@ auto Core::erase(BytesView key) -> Status
 
 auto Core::erase(Cursor cursor) -> Status
 {
+    if (m_has_xact) {
+        return m_tree->erase(cursor);
+    } else {
+        return atomic_erase(cursor);
+    }
+}
+
+auto Core::atomic_insert(BytesView key, BytesView value) -> Status
+{
+    auto xact = transaction();
+    auto s = m_tree->insert(key, value);
+    if (s.is_ok()) {
+        return xact.commit();
+    } else {
+        m_status = xact.abort();
+        return s;
+    }
+}
+auto Core::atomic_erase(Cursor cursor) -> Status
+{
+    auto xact = transaction();
     auto s = m_tree->erase(cursor);
-    if (!m_has_update) m_has_update = s.is_ok();
+    if (s.is_ok()) {
+        return xact.commit();
+    } else if (!s.is_not_found()) {
+        m_status = xact.abort();
+    }
     return s;
 }
 
 auto Core::commit() -> Status
 {
+    CALICO_EXPECT_TRUE(m_has_xact);
     m_logger->info("received commit request");
     static constexpr auto MSG = "could not commit";
-
-    // Committing an empty transaction is a NOOP.
-    if (!m_has_update) return Status::ok();
 
     // Write database state to the root page file header.
     auto s = save_state();
@@ -254,17 +291,18 @@ auto Core::commit() -> Status
     s = m_wal->log_commit();
     MAYBE_FORWARD(s, MSG);
     m_logger->info("commit succeeded");
+    m_has_xact = false;
     return s;
 }
 
 auto Core::abort() -> Status
 {
+    CALICO_EXPECT_TRUE(m_has_xact);
+    m_has_xact = false;
+
     m_logger->info("received abort request");
     static constexpr auto MSG = "could not abort";
-    if (!m_wal->is_enabled()) return not_supported_error(MSG);
-
-    // Aborting an empty transaction is a NOOP.
-    if (!m_has_update) return Status::ok();
+    if (!m_wal->is_enabled()) return Status::ok();
 
     // Stop the background writer thread.
     auto s = m_wal->stop_writer();
@@ -295,11 +333,9 @@ auto Core::abort() -> Status
 
 auto Core::close() -> Status
 {
+    CALICO_EXPECT_FALSE(m_has_xact);
+
     auto s = Status::ok();
-    if (m_has_update) {
-        s = commit();
-        if (!s.is_ok()) s = forward_status(s, "cannot commit before stop");
-    }
     if (m_wal->is_writing()) {
         s = m_wal->stop_writer();
         if (!s.is_ok()) s = forward_status(s, "cannot stop WAL");
@@ -341,6 +377,13 @@ auto Core::ensure_consistent_state() -> Status
     MAYBE_FORWARD(s, MSG);
     s = m_pager->flush();
     return forward_status(s, MSG);
+}
+
+auto Core::transaction() -> Transaction
+{
+    CALICO_EXPECT_TRUE(m_status.is_ok());
+    m_has_xact = true;
+    return Transaction {*this};
 }
 
 auto Core::save_state() -> Status

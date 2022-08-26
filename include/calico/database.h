@@ -1,14 +1,17 @@
 #ifndef CALICO_DATABASE_H
 #define CALICO_DATABASE_H
 
-#include "status.h"
+#include "bytes.h"
 #include <memory>
 
 namespace calico {
 
+struct Options;
 class Core;
 class Cursor;
 class Info;
+class Status;
+class Transaction;
 
 /**
  * A Calico DB database!
@@ -43,18 +46,18 @@ public:
     [[nodiscard]] auto find(const std::string &key) const -> Cursor;
 
     /**
-     * Search for the smallest key.
+     * Get a cursor positioned on the first record.
      *
-     * @return A cursor positioned on the record with the smallest key, or std::nullopt if the database is empty.
+     * @return A cursor positioned on the record with the smallest key, or an invalid cursor if the database is empty.
      */
-    [[nodiscard]] auto find_minimum() const -> Cursor;
+    [[nodiscard]] auto first() const -> Cursor;
 
     /**
-     * Search for the largest key.
+     * Get a cursor positioned on the last record.
      *
-     * @return The record with the largest key, or std::nullopt if the database is empty.
+     * @return A cursor positioned on the record with the largest key, or an invalid cursor if the database is empty.
      */
-    [[nodiscard]] auto find_maximum() const -> Cursor;
+    [[nodiscard]] auto last() const -> Cursor;
 
     /**
      * Insert a new record or update an existing one.
@@ -84,8 +87,7 @@ public:
      */
     [[nodiscard]] auto info() const -> Info;
     [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto commit() -> Status;
-    [[nodiscard]] auto abort() -> Status;
+    [[nodiscard]] auto transaction() -> Transaction;
 
     virtual ~Database();
     Database(Database&&) noexcept;
@@ -95,6 +97,6 @@ private:
     std::unique_ptr<Core> m_core;
 };
 
-} // cco
+} // namespace calico
 
 #endif // CALICO_DATABASE_H

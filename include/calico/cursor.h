@@ -180,6 +180,6 @@ private:
     Position m_position; ///< Position of the cursor in the page.
 };
 
-} // cco
+} // namespace calico
 
 #endif // CALICO_CURSOR_H

@@ -42,6 +42,7 @@ public:
             "test",
             *store,
             *wal,
+            status,
             create_sink(),
             FRAME_COUNT,
             PAGE_SIZE
@@ -52,6 +53,7 @@ public:
     }
 
     Random random {0};
+    Status status {Status::ok()};
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<MockStorage> store;
     std::unique_ptr<Pager> pager;

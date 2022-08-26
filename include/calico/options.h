@@ -30,6 +30,7 @@ struct Options {
     Size page_size {DEFAULT_PAGE_SIZE}; ///< Size of a database page in bytes.
     Size frame_count {DEFAULT_FRAME_COUNT}; ///< Number of frames to allow the block pool cache.
     Size wal_limit {DEFAULT_WAL_LIMIT}; ///< Number of blocks in a WAL segment.
+    std::string wal_path; ///< Location of the WAL segment files.
     LogLevel log_level {DEFAULT_LOG_LEVEL}; ///< The max level of log message that will be written.
     Storage *store {};
 };
@@ -48,6 +49,6 @@ struct FileHeader {
     Byte reserved[6];
 };
 
-} // cco
+} // namespace calico
 
 #endif // CALICO_OPTIONS_H

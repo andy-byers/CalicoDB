@@ -179,13 +179,13 @@ auto querying_a_database(calico::Database &db)
 
     // Cursors can be used for range queries. They can traverse the database in sequential order,
     // or in reverse sequential order.
-    for (auto c = db.find_minimum(); c.is_valid(); ++c) {}
-    for (auto c = db.find_maximum(); c.is_valid(); --c) {}
+    for (auto c = db.first(); c.is_valid(); ++c) {}
+    for (auto c = db.last(); c.is_valid(); --c) {}
 
     // They also support equality comparison.
     if (const auto boundary = db.find_exact(key); boundary.is_valid()) {
-        for (auto c = db.find_minimum(); c.is_valid() && c != boundary; ++c) {}
-        for (auto c = db.find_maximum(); c.is_valid() && c != boundary; --c) {}
+        for (auto c = db.first(); c.is_valid() && c != boundary; ++c) {}
+        for (auto c = db.last(); c.is_valid() && c != boundary; --c) {}
     }
 }
 

@@ -20,6 +20,7 @@ public:
         std::string root;
         Storage &storage;
         WriteAheadLog &wal;
+        Status &status;
         spdlog::sink_ptr log_sink;
         Size frame_count {};
         Size page_size {};
@@ -41,12 +42,7 @@ public:
     [[nodiscard]]
     auto status() const -> Status override
     {
-        return m_status;
-    }
-
-    auto reset_status() -> void override
-    {
-        m_status = Status::ok();
+        return *m_status;
     }
 
 private:
@@ -70,7 +66,7 @@ private:
     WriteAheadLog *m_wal {};
     PageList m_dirty;
     PageRegistry m_registry;
-    Status m_status {Status::ok()};
+    Status *m_status {};
     Size m_dirty_count {};
     Size m_ref_sum {};
 };

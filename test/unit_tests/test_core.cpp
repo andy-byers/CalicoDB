@@ -6,13 +6,14 @@
 
 #include <gtest/gtest.h>
 
+#include "calico/transaction.h"
 #include "core/core.h"
 #include "core/header.h"
 #include "fakes.h"
 #include "store/disk.h"
-#include "tree/tree.h"
-#include "tree/bplus_tree.h"
 #include "tools.h"
+#include "tree/bplus_tree.h"
+#include "tree/tree.h"
 #include "unit_tests.h"
 #include "wal/basic_wal.h"
 
@@ -134,11 +135,13 @@ TEST_F(BasicDatabaseTests, Inserts)
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         const auto records = generator.generate(random, GROUP_SIZE);
         auto itr = cbegin(records);
+        ASSERT_TRUE(expose_message(db.status()));
+        auto xact = db.transaction();
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
             ASSERT_TRUE(expose_message(db.insert(*itr++)));
         }
-        ASSERT_TRUE(expose_message(db.commit()));
+        ASSERT_TRUE(expose_message(xact.commit()));
     }
     ASSERT_TRUE(expose_message(db.close()));
 }
@@ -146,7 +149,7 @@ TEST_F(BasicDatabaseTests, Inserts)
 TEST_F(BasicDatabaseTests, DataPersists)
 {
     static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size GROUP_SIZE {500};
+    static constexpr Size GROUP_SIZE {10};
 
     auto s = Status::ok();
     RecordGenerator generator;
@@ -158,11 +161,14 @@ TEST_F(BasicDatabaseTests, DataPersists)
 
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        ASSERT_TRUE(expose_message(db.status()));
+//        auto xact = db.start();
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
             ASSERT_TRUE(expose_message(db.insert(*itr)));
             itr++;
         }
+//        ASSERT_TRUE(expose_message(xact.commit()));
         ASSERT_TRUE(expose_message(db.close()));
     }
 

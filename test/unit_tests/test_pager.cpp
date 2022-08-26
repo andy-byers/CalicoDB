@@ -203,6 +203,7 @@ public:
             "test",
             *store,
             *wal,
+            status,
             create_sink(),
             frame_count,
             page_size,
@@ -259,6 +260,7 @@ public:
 
     Random random {0};
     MockRandomEditor *mock;
+    Status status {Status::ok()};
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<MockStorage> store;
     std::unique_ptr<Pager> pager;

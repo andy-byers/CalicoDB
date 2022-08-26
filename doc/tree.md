@@ -143,10 +143,10 @@ namespace calico = calico;
 
 // Here we assume that the database is nonempty and does not contain "xyz", or anything that compares 
 // greater than it.
-const auto bounds = db.find(calico::stob("xyz"), true);
+const auto bounds = core.find(calico::stob("xyz"), true);
 assert(not bounds.is_valid());
 
-for (auto c = db.find_minimum(); c != bounds; c++) {
+for (auto c = core.first(); c != bounds; c++) {
     // Do something with c.key() and/or c.value().
 }
 ```

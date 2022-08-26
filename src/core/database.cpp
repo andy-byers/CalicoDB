@@ -1,6 +1,7 @@
 
 #include "calico/cursor.h"
 #include "calico/info.h"
+#include "calico/transaction.h"
 #include "core.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
@@ -8,7 +9,6 @@
 #include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
 #include "utils/logging.h"
-#include "wal/writer.h"
 
 namespace calico {
 
@@ -86,12 +86,12 @@ auto Database::find(const std::string &key) const -> Cursor
     return find(stob(key));
 }
 
-auto Database::find_minimum() const -> Cursor
+auto Database::first() const -> Cursor
 {
     return m_core->find_minimum();
 }
 
-auto Database::find_maximum() const -> Cursor
+auto Database::last() const -> Cursor
 {
     return m_core->find_maximum();
 }
@@ -139,14 +139,9 @@ auto Database::status() const -> Status
     return m_core->status();
 }
 
-auto Database::commit() -> Status
+auto Database::transaction() -> Transaction
 {
-    return m_core->commit();
-}
-
-auto Database::abort() -> Status
-{
-    return m_core->abort();
+    return m_core->transaction();
 }
 
 } // namespace calico

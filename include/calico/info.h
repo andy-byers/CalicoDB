@@ -45,6 +45,6 @@ private:
     Core *m_core {}; ///< Pointer to the database this object was opened on.
 };
 
-} // cco
+} // namespace calico
 
 #endif // CALICO_INFO_H

@@ -41,7 +41,8 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
 
 BasicPager::BasicPager(const Parameters &param)
     : m_logger {create_logger(param.log_sink, "pager")},
-      m_wal {&param.wal}
+      m_wal {&param.wal},
+      m_status {&param.status}
 {
     m_logger->info("constructing BasicPager instance");
 }
@@ -104,7 +105,7 @@ auto BasicPager::flush() -> Status
         entry.dirty_token.reset();
         itr = m_dirty.remove(itr);
     }
-    return Status::ok();
+    return m_framer->sync();
 }
 
 auto BasicPager::flushed_lsn() const -> SequenceId
@@ -161,7 +162,7 @@ auto BasicPager::release(Page page) -> Status
         auto s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
 
         if (!s.is_ok()) {
-            m_status = s;
+            *m_status = s;
             m_logger->error("could not write page deltas to WAL");
             m_logger->error("(reason) {}", s.what());
             return s;
@@ -191,7 +192,7 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
         if (!s.is_ok()) {
             m_logger->error("could not write full image to WAL");
             m_logger->error("(reason) {}", s.what());
-            m_status = s;
+            *m_status = s;
         }
     } else if (m_wal->is_enabled()) {
         LogMessage message {*m_logger};
@@ -225,8 +226,8 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     CALICO_EXPECT_FALSE(id.is_null());
     std::lock_guard lock {m_mutex};
 
-    if (!m_status.is_ok())
-        return Err {m_status};
+    if (!m_status->is_ok())
+        return Err {*m_status};
 
     const auto do_acquire = [this, is_writable](auto &entry) {
         m_ref_sum++;
@@ -253,7 +254,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 
         if (!s.is_not_found()) {
             m_logger->error(s.what());
-            m_status = s;
+            *m_status = s;
             return Err {s};
         }
     }

@@ -119,7 +119,7 @@ public:
     [[nodiscard]]
     auto frame_at(FrameNumber id) const -> const Frame&
     {
-        CALICO_EXPECT_LT(id, m_frame_count);
+        CALICO_EXPECT_LT(id, m_frames.size());
         return m_frames[id.value];
     }
 
@@ -134,7 +134,7 @@ private:
     [[nodiscard]]
     auto frame_at_impl(FrameNumber id) -> Frame&
     {
-        CALICO_EXPECT_LT(id, m_frame_count);
+        CALICO_EXPECT_LT(id, m_frames.size());
         return m_frames[id.value];
     }
 
@@ -146,7 +146,6 @@ private:
     SequenceId m_flushed_lsn;
     Size m_page_count {};
     Size m_page_size {};
-    Size m_frame_count {};
 };
 
 } // namespace calico

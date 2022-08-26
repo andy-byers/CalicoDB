@@ -32,7 +32,6 @@ public:
     virtual auto acquire(PageId, bool) -> Result<Page> = 0;
     virtual auto release(Page) -> Status = 0;
     virtual auto flush() -> Status = 0;
-    virtual auto reset_status() -> void = 0;
     virtual auto save_state(FileHeader &) -> void = 0;
     virtual auto load_state(const FileHeader &) -> void = 0;
 };

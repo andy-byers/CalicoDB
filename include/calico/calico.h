@@ -9,5 +9,6 @@
 #include "options.h"
 #include "status.h"
 #include "store.h"
+#include "transaction.h"
 
 #endif // CALICO_CALICO_H

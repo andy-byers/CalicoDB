@@ -313,7 +313,7 @@ inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> ThreeWay
    return r < 0 ? ThreeWayComparison::LT : ThreeWayComparison::GT;
 }
 
-} // cco
+} // namespace calico
 
 inline auto operator<(calico::BytesView lhs, calico::BytesView rhs) noexcept -> bool
 {

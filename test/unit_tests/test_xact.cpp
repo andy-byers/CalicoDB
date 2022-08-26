@@ -5,22 +5,23 @@
 #include "calico/bytes.h"
 #include "calico/options.h"
 #include "calico/store.h"
+#include "calico/transaction.h"
+#include "core/core.h"
 #include "fakes.h"
 #include "pager/basic_pager.h"
 #include "pager/framer.h"
 #include "store/disk.h"
 #include "store/system.h"
 #include "tools.h"
+#include "tree/tree.h"
 #include "unit_tests.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 #include "utils/utils.h"
-#include "tree/tree.h"
 #include "wal/basic_wal.h"
 #include "wal/helpers.h"
 #include "wal/reader.h"
 #include "wal/writer.h"
-#include "core/core.h"
 
 namespace {
 
@@ -36,40 +37,38 @@ public:
         options.log_level = spdlog::level::trace;
         options.store = store.get();
 
-        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        ASSERT_TRUE(expose_message(core.open(ROOT, options)));
     }
 
     auto TearDown() -> void override
     {
-        ASSERT_TRUE(expose_message(db.close()));
+        ASSERT_TRUE(expose_message(core.close()));
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
     Random random {123};
     Options options;
-    Core db;
+    Core core;
 };
 
 TEST_F(XactTests, NewDatabaseIsOk)
 {
-    ASSERT_TRUE(expose_message(db.status()));
+    ASSERT_TRUE(expose_message(core.status()));
 }
 
-TEST_F(XactTests, CommittingEmptyXactIsOk)
+template<class Action>
+static auto with_xact(XactTests &test, const Action &action)
 {
-    ASSERT_TRUE(expose_message(db.commit()));
+    auto xact = test.core.transaction();
+    action();
+    ASSERT_TRUE(expose_message(xact.commit()));
 }
 
-TEST_F(XactTests, AbortingEmptyXactIsOk)
-{
-    ASSERT_TRUE(expose_message(db.abort()));
-}
-
-auto insert_1000_records(XactTests &test)
+static auto insert_1000_records(XactTests &test)
 {
     auto records = test.generator.generate(test.random, 1'000);
     for (const auto &r: records) {
-        EXPECT_TRUE(expose_message(test.db.insert(stob(r.key), stob(r.value))));
+        EXPECT_TRUE(expose_message(test.core.insert(stob(r.key), stob(r.value))));
     }
     return records;
 }
@@ -77,56 +76,56 @@ auto insert_1000_records(XactTests &test)
 auto erase_1000_records(XactTests &test)
 {
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(expose_message(test.db.erase(test.db.find_minimum())));
+        ASSERT_TRUE(expose_message(test.core.erase(test.core.find_minimum())));
     }
 }
 
 TEST_F(XactTests, AbortFirstXact)
 {
+    auto xact = core.transaction();
     insert_1000_records(*this);
-    ASSERT_TRUE(expose_message(db.abort()));
-    ASSERT_EQ(db.info().record_count(), 0);
+    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_EQ(core.info().record_count(), 0);
 
     // Normal operations after abort should work.
     insert_1000_records(*this);
-    ASSERT_EQ(db.info().record_count(), 1'000);
+    ASSERT_EQ(core.info().record_count(), 1'000);
 }
 
 TEST_F(XactTests, CommitIsACheckpoint)
 {
-    insert_1000_records(*this);
-    ASSERT_TRUE(expose_message(db.commit()));
-    ASSERT_TRUE(expose_message(db.abort()));
-    ASSERT_EQ(db.info().record_count(), 1'000);
+    with_xact(*this, [this] {insert_1000_records(*this);});
 
-    insert_1000_records(*this);
-    ASSERT_TRUE(expose_message(db.abort()));
-    ASSERT_EQ(db.info().record_count(), 1'000);
+    auto xact = core.transaction();
+    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_EQ(core.info().record_count(), 1'000);
 }
 
 TEST_F(XactTests, KeepsCommittedRecords)
 {
-    insert_1000_records(*this);
-    ASSERT_TRUE(expose_message(db.commit()));
+    with_xact(*this, [this] {insert_1000_records(*this);});
+
+    auto xact = core.transaction();
     erase_1000_records(*this);
-    ASSERT_TRUE(expose_message(db.abort()));
-    ASSERT_EQ(db.info().record_count(), 1'000);
+    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_EQ(core.info().record_count(), 1'000);
 
     // Normal operations after abort should work.
-    erase_1000_records(*this);
-    ASSERT_EQ(db.info().record_count(), 0);
+    with_xact(*this, [this] {erase_1000_records(*this);});
+    ASSERT_EQ(core.info().record_count(), 0);
 }
 
 template<class Test, class Itr>
 auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
 {
     for (auto itr = begin; itr != end; ++itr) {
-        EXPECT_TRUE(expose_message(test.db.insert(stob(itr->key), stob(itr->value))));
+        EXPECT_TRUE(expose_message(test.core.insert(stob(itr->key), stob(itr->value))));
     }
+
     std::vector<Record> committed;
     for (auto itr = begin; itr != end; ++itr) {
         if (test.random.next_int(5) == 0) {
-            EXPECT_TRUE(expose_message(test.db.erase(stob(itr->key))));
+            EXPECT_TRUE(expose_message(test.core.erase(stob(itr->key))));
         } else {
             committed.emplace_back(*itr);
         }
@@ -140,16 +139,18 @@ TEST_F(XactTests, AbortRestoresPriorState)
     const auto path = ROOT + std::string {DATA_FILENAME};
     const auto records = generator.generate(random, NUM_RECORDS);
 
+    auto xact = core.transaction();
     auto committed = run_random_operations(*this, cbegin(records), cbegin(records) + NUM_RECORDS/2);
-    ASSERT_TRUE(expose_message(db.commit()));
+    ASSERT_TRUE(expose_message(xact.commit()));
 
+    xact = core.transaction();
     run_random_operations(*this, cbegin(records) + NUM_RECORDS/2, cend(records));
-    ASSERT_TRUE(expose_message(db.abort()));
+    ASSERT_TRUE(expose_message(xact.abort()));
 
     // The database should contain exactly these records.
-    ASSERT_EQ(db.info().record_count(), committed.size());
+    ASSERT_EQ(core.info().record_count(), committed.size());
     for (const auto &[key, value]: committed) {
-        ASSERT_TRUE(tools::contains(db, key, value));
+        ASSERT_TRUE(tools::contains(core, key, value));
     }
 }
 
@@ -163,44 +164,54 @@ auto run_random_transactions(Test &test, Size n)
     std::vector<Record> committed;
 
     for (Size i {}; i < n; ++i) {
+        auto xact = test.core.transaction();
         const auto start = cbegin(all_records) + static_cast<long>(XACT_SIZE * i);
         const auto temp = run_random_operations(test, start, start + XACT_SIZE);
         if (test.random.next_int(4UL) == 0) {
-            EXPECT_TRUE(expose_message(test.db.abort()));
+            EXPECT_TRUE(expose_message(xact.abort()));
         } else {
-            EXPECT_TRUE(expose_message(test.db.commit()));
+            EXPECT_TRUE(expose_message(xact.commit()));
             committed.insert(cend(committed), cbegin(temp), cend(temp));
         }
     }
     return committed;
 }
 
-template<class Test>
-auto test_transactions(Test &test, Size n)
-{
-    for (const auto &[key, value]: run_random_transactions(test, n)) {
-        ASSERT_TRUE(tools::contains(test.db, key, value));
-    }
-}
-
 TEST_F(XactTests, SanityCheck)
 {
-    test_transactions(*this, 20);
+    for (const auto &[key, value]: run_random_transactions(*this, 20)) {
+        ASSERT_TRUE(tools::contains(core, key, value));
+    }
 }
 
 TEST_F(XactTests, PersistenceSanityCheck)
 {
-    ASSERT_TRUE(expose_message(db.close()));
-    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    ASSERT_TRUE(expose_message(core.close()));
+    std::vector<Record> committed;
 
-//    ASSERT_TRUE(expose_message(db.close()));
-//
-//    for (Size i {}; i < 5; ++i) {
-//        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-//        test_transactions(*this, 3);
-//        ASSERT_TRUE(expose_message(db.close()));
-//    }
+    for (Size i {}; i < 5; ++i) {
+        ASSERT_TRUE(expose_message(core.open(ROOT, options)));
+        const auto current = run_random_transactions(*this, 10);
+        committed.insert(cend(committed), cbegin(current), cend(current));
+        ASSERT_TRUE(expose_message(core.close()));
+    }
+
+    ASSERT_TRUE(expose_message(core.open(ROOT, options)));
+    for (const auto &[key, value]: committed) {
+        ASSERT_TRUE(tools::contains(core, key, value));
+    }
 }
+
+TEST_F(XactTests, AtomicOperationSanityCheck)
+{
+    const auto all_records = generator.generate(random, 500);
+    const auto committed = run_random_operations(*this, cbegin(all_records), cend(all_records));
+
+    for (const auto &[key, value]: committed) {
+        ASSERT_TRUE(tools::contains(core, key, value));
+    }
+}
+
 //
 //class IncompleteXactTests: public TestOnHeap {
 //public:
