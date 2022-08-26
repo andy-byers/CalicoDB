@@ -51,7 +51,7 @@ auto Info::page_count() const -> Size
 
 auto Info::page_size() const -> Size
 {
-    return m_core->page_size();
+    return m_core->pager().page_size();
 }
 
 auto Info::maximum_key_size() const -> Size
@@ -73,7 +73,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     m_prefix = path + "/";
     m_sink = options.log_level ? create_sink(path, options.log_level) : create_sink();
     m_logger = create_logger(m_sink, "core");
-    initialize_log(*m_logger, m_prefix);
+    initialize_log(*m_logger, path);
     m_logger->info("constructing Core object");
 
     m_store = options.store;
@@ -192,11 +192,6 @@ auto Core::status() const -> Status
 auto Core::path() const -> std::string
 {
     return m_prefix;
-}
-
-auto Core::page_size() const -> Size
-{
-    return m_pager->page_size();
 }
 
 auto Core::info() -> Info

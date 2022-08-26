@@ -35,7 +35,6 @@ public:
     [[nodiscard]] auto destroy() -> Status;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
-    [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Status;
     [[nodiscard]] auto erase(BytesView) -> Status;
     [[nodiscard]] auto erase(Cursor) -> Status;
