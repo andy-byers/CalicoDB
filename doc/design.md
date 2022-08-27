@@ -20,6 +20,13 @@ Calico DB is made up of 6 major components:
 
 [//]: # (TODO)
 
+## Transactions
+Every modification to a Calico DB database takes place within a transaction.
+Transactions are atomic units of work: they either commit or abort.
+If a transaction commits, all of its operations are fully applied, and if it aborts, the database is left as it was before the transaction began.
+See [wal.md](./wal.md) for more specifics about the commit procedure.
+Basically, we ensure that all information needed to fully undo and redo all operations in the transaction is flushed to the WAL.
+
 ## Error Handling
 Calico DB enforces certain rules to make sure that the database stays consistent through crashes and other exceptional events.
 The current policy is to lock the database if an error is encountered while working with a writable page after the database has been modified during a transaction.

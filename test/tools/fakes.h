@@ -27,6 +27,18 @@ public:
         });
     }
 
+    [[nodiscard]]
+    auto real() -> RandomReader&
+    {
+        return *m_real;
+    }
+
+    [[nodiscard]]
+    auto real() const -> const RandomReader&
+    {
+        return *m_real;
+    }
+
 private:
     std::unique_ptr<RandomReader> m_real;
 };
@@ -55,6 +67,18 @@ public:
         });
     }
 
+    [[nodiscard]]
+    auto real() -> RandomEditor&
+    {
+        return *m_real;
+    }
+
+    [[nodiscard]]
+    auto real() const -> const RandomEditor&
+    {
+        return *m_real;
+    }
+
 private:
     std::unique_ptr<RandomEditor> m_real;
 };
@@ -77,6 +101,18 @@ public:
         ON_CALL(*this, sync).WillByDefault([this] {
             return m_real->sync();
         });
+    }
+
+    [[nodiscard]]
+    auto real() -> AppendWriter&
+    {
+        return *m_real;
+    }
+
+    [[nodiscard]]
+    auto real() const -> const AppendWriter&
+    {
+        return *m_real;
     }
 
 private:
@@ -266,7 +302,7 @@ private:
         }
         if (s.is_ok()) {
             auto *mock = new testing::NiceMock<Mock> {base};
-            m_mocks.emplace(descriptor, mock);
+            m_mocks.insert_or_assign(descriptor, mock);
             mock->delegate_to_real();
             *out = mock;
         }
@@ -277,7 +313,7 @@ private:
     auto lookup_mock(const std::string &name) -> Mock*
     {
         std::lock_guard lock {m_mutex};
-        auto itr = m_mocks.find(get_blob_descriptor<RandomReader>(name));
+        auto itr = m_mocks.find(get_blob_descriptor<Base>(name));
         return itr != cend(m_mocks) ? itr->second : nullptr;
     }
 

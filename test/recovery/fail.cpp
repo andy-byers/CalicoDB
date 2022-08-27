@@ -25,6 +25,8 @@ auto show_usage()
 
 auto main(int argc, const char *argv[]) -> int
 {
+    static constexpr Size XACT_SIZE {100};
+
     if (argc != 4) {
         show_usage();
         return 1;
@@ -48,14 +50,16 @@ auto main(int argc, const char *argv[]) -> int
         std::ofstream ofs {value_path, std::ios::trunc};
         CALICO_EXPECT_TRUE(ofs.is_open());
 
-        auto xact = db.transaction();
-        for (Size i {}; i < num_committed; ++i) {
-            const auto key = make_key<KEY_WIDTH>(i);
-            const auto value = random_string(random, 2, 15);
-            expect_ok(db.insert(stob(key), stob(value)));
-            ofs << value << '\n';
+        for (Size i {}; i < num_committed; i += XACT_SIZE) {
+            auto xact = db.transaction();
+            for (Size j {}; j < XACT_SIZE; ++j) {
+                const auto key = make_key<KEY_WIDTH>(i + j);
+                const auto value = random_string(random, 2, 15);
+                expect_ok(db.insert(stob(key), stob(value)));
+                ofs << value << '\n';
+            }
+            expect_ok(xact.commit());
         }
-        expect_ok(xact.commit());
     }
 
     puts(value_path.c_str());

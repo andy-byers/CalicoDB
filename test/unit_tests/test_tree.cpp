@@ -15,6 +15,7 @@
 #include "pager/basic_pager.h"
 #include "random.h"
 #include "tools.h"
+#include "unit_tests.h"
 #include "validation.h"
 #include "wal/disabled_wal.h"
 
@@ -22,40 +23,32 @@ namespace {
 
 using namespace calico;
 
-class TestHarness: public testing::Test {
+class TestHarness: public TestWithMock {
 public:
     static constexpr Size PAGE_SIZE {0x100};
     static constexpr Size FRAME_COUNT {16};
 
     TestHarness()
-        : wal {std::make_unique<DisabledWriteAheadLog>()},
-          store {std::make_unique<MockStorage>()}
+        : wal {std::make_unique<DisabledWriteAheadLog>()}
     {
-        store->delegate_to_real();
-        EXPECT_CALL(*store, create_directory).Times(1);
-        EXPECT_CALL(*store, open_random_editor).Times(1);
-
-        const auto s = store->create_directory("test");
-        EXPECT_TRUE(s.is_ok());
-
         pager = *BasicPager::open({
-            "test",
+            PREFIX,
             *store,
             *wal,
             status,
+            has_xact,
             create_sink(),
             FRAME_COUNT,
             PAGE_SIZE
         });
-        mock = store->get_mock_random_editor("test/data");
+        mock = mock_store().get_mock_random_editor(PREFIX + std::string {DATA_FILENAME});
         CALICO_EXPECT_NE(mock, nullptr);
-        mock->delegate_to_real();
     }
 
     Random random {0};
     Status status {Status::ok()};
+    bool has_xact {};
     std::unique_ptr<DisabledWriteAheadLog> wal;
-    std::unique_ptr<MockStorage> store;
     std::unique_ptr<Pager> pager;
     MockRandomEditor *mock {};
 };

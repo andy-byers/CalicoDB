@@ -111,7 +111,8 @@ auto BasicWalReader::undo(const UndoIterator &begin, const UndoIterator &end, co
         const auto type = read_payload_type(payload);
         switch (type) {
             case WalPayloadType::FULL_IMAGE:
-                callback(decode_full_image_payload(payload));
+                s = callback(decode_full_image_payload(payload));
+                if (!s.is_ok()) return s;
                 break;
             case WalPayloadType::DELTAS:
                 break;

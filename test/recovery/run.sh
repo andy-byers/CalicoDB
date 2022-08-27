@@ -16,7 +16,7 @@ FAIL_LABEL="[$(tput setaf 1)FAIL$(tput sgr0)]"
 TOPLEVEL_PREFIX='> recovery.sh:'
 INSTANCE_PREFIX='> '
 DONE_PREFIX=/tmp/calico_recovery_done_
-FILE_PREFIX=/tmp/calico_recovery_file_
+FILE_PREFIX=/tmp/calico_recovery_database_
 TEMP_PREFIX=/tmp/calico_recovery_out_
 OUTPUT_SINK=/dev/null
 
@@ -76,7 +76,7 @@ function run_instance() {
 
   # Let `fail` modify the database for a bit.
   inner_echo "$I" "Modifying database..."
-  sleep "$WAIT"
+  usleep "$WAIT"
 
   # Kill `fail`, leaving an uncommitted database with a WAL.
   inner_echo "$I" "Killing process..."

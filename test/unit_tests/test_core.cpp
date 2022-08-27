@@ -86,7 +86,6 @@ TEST_F(DatabaseOpenTests, MaximumPageSize)
         Database db;
         ASSERT_TRUE(expose_message(db.open(ROOT, options)));
         ASSERT_EQ(db.info().page_size(), MAXIMUM_PAGE_SIZE);
-        fmt::print("{}\n", db.info().maximum_key_size());
         ASSERT_TRUE(expose_message(db.close()));
     }
 }

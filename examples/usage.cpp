@@ -19,6 +19,9 @@ auto main(int, const char *[]) -> int
     options.frame_count = 128;
     options.log_level = spdlog::level::info;
 
+    std::string key {"key"};
+    std::string value {"value"};
+
     // Open the database connection.
     auto s = db.open("/tmp/cats", options);
     USAGE_ASSERT_OK(s);
@@ -44,21 +47,31 @@ auto main(int, const char *[]) -> int
         // Start another transaction and let it go out of scope without calling commit(). This causes the transaction
         // to be aborted. Note that we could have called unwanted.abort() to achieve the same effect.
         auto unwanted = db.transaction();
-        s = db.insert("remove me!", "not a cat");
+        s = db.insert(key, value);
         USAGE_ASSERT_OK(s);
     }
+    // We can use an info object to get info about the database instance.
+    const auto info = db.info();
+    fmt::print("{} records on {} page\n", info.record_count(), info.page_count());
+    fmt::print("maximum key width is {} bytes\n", info.maximum_key_size());
 
-    // This shouldn't work, since we rolled back the transaction that added this key.
-    s = db.erase("remove me!");
-    assert(s.is_not_found());
+    // Modifications made to the database outside the control of a transaction object are wrapped in their own
+    // transaction. If the operation fails, the database will attempt to revert any changes made so far. If even this
+    // fails, the database will need to be closed and reopened to allow recovery to take place.
+    s = db.insert(key, value);
+    USAGE_ASSERT_OK(s);
 
-    // Iterate through the database in order.
+    // We can erase records by key, or using a cursor object (see below).
+    s = db.erase(key);
+    USAGE_ASSERT_OK(s);
+
+    // Iterate through the database in order, using a cursor.
     for (auto c = db.first(); c.is_valid(); ++c)
         fmt::print("{} is a {}\n", cco::btos(c.key()), c.value());
 
     // Iterate through the database in reverse order.
     for (auto c = db.last(); c.is_valid(); --c)
-        fmt::print("{} is still a {}\n", cco::btos(c.key()), c.value());
+        fmt::print("{} is a {}\n", cco::btos(c.key()), c.value());
 
     // Close the database. We must ensure that all transactions are finished beforehand.
     s = db.close();

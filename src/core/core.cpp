@@ -13,15 +13,25 @@
 #include "utils/logging.h"
 #include "wal/basic_wal.h"
 #include "wal/disabled_wal.h"
-#include "store/heap.h" // TODO: Do really we want to support in-memory databases? It seems cool, but complicates the API quite a bit...
 #include <filesystem>
 
 namespace calico {
+
+#define MAYBE_FORWARD_ERROR(message) \
+    do { \
+        if (!m_status.is_ok()) return forward_status(m_status, message); \
+    } while (0)
 
 #define MAYBE_FORWARD(expr, message) \
     do { \
         const auto &calico_s = (expr); \
         if (!calico_s.is_ok()) return forward_status(calico_s, message); \
+    } while (0)
+
+#define MAYBE_SAVE_AND_FORWARD(expr, message) \
+    do { \
+        const auto &calico_s = (expr); \
+        if (!calico_s.is_ok()) return save_and_forward_status(calico_s, message); \
     } while (0)
 
 //[[nodiscard]]
@@ -126,6 +136,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             *m_store,
             *m_wal,
             m_status,
+            m_has_xact,
             m_sink,
             sanitized.frame_count,
             sanitized.page_size,
@@ -211,6 +222,17 @@ auto Core::forward_status(Status s, const std::string &message) -> Status
     return s;
 }
 
+auto Core::save_and_forward_status(Status s, const std::string &message) -> Status
+{
+    CALICO_EXPECT_TRUE(m_status.is_ok());
+    if (!s.is_ok()) {
+        m_logger->error(message);
+        m_logger->error("(reason) {}", s.what());
+        m_status = s;
+    }
+    return s;
+}
+
 auto Core::status() const -> Status
 {
     return m_pager->status();
@@ -248,6 +270,7 @@ auto Core::last() -> Cursor
 
 auto Core::insert(BytesView key, BytesView value) -> Status
 {
+    MAYBE_FORWARD_ERROR("could not insert");
     if (m_has_xact) {
         return m_tree->insert(key, value);
     } else {
@@ -262,6 +285,7 @@ auto Core::erase(BytesView key) -> Status
 
 auto Core::erase(Cursor cursor) -> Status
 {
+    MAYBE_FORWARD_ERROR("could not erase");
     if (m_has_xact) {
         return m_tree->erase(cursor);
     } else {
@@ -295,16 +319,17 @@ auto Core::atomic_erase(Cursor cursor) -> Status
 auto Core::commit() -> Status
 {
     CALICO_EXPECT_TRUE(m_has_xact);
+    MAYBE_FORWARD_ERROR("could not commit");
     m_logger->info("received commit request");
     static constexpr auto MSG = "could not commit";
 
     // Write database state to the root page file header.
     auto s = save_state();
-    MAYBE_FORWARD(s, MSG);
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Write a commit record to the WAL.
     s = m_wal->log_commit();
-    MAYBE_FORWARD(s, MSG);
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
     m_logger->info("commit succeeded");
     m_has_xact = false;
     return s;
@@ -313,15 +338,15 @@ auto Core::commit() -> Status
 auto Core::abort() -> Status
 {
     CALICO_EXPECT_TRUE(m_has_xact);
-    m_has_xact = false;
-
     m_logger->info("received abort request");
     static constexpr auto MSG = "could not abort";
     if (!m_wal->is_enabled()) return Status::ok();
+    auto s = Status::ok();
 
-    // Stop the background writer thread.
-    auto s = m_wal->stop_writer();
-    MAYBE_FORWARD(s, MSG);
+    if (m_wal->is_writing()) {
+        s = m_wal->stop_writer();
+        MAYBE_FORWARD(s, MSG);
+    }
 
     // This should give us the full images of each updated page belonging to the current transaction, before any changes were made,
     // in reverse order.
@@ -335,20 +360,33 @@ auto Core::abort() -> Status
     });
     MAYBE_FORWARD(s, MSG);
 
-    s = m_pager->flush();
-    MAYBE_FORWARD(s, MSG);
-
-    // Load database state from the root page file header.
+    // Load database state from the root page file header. We need the new page count to determine which pages we can flush.
     s = load_state();
     MAYBE_FORWARD(s, MSG);
 
+    s = m_pager->flush();
+    MAYBE_FORWARD(s, MSG);
+
+    // Database state is ALMOST restored if we have made it here.
+    m_status = Status::ok();
+
     m_logger->info("abort succeeded");
-    return m_wal->start_writer();
+    s = m_wal->start_writer();
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
+
+    m_has_xact = false;
+    return Status::ok();
 }
 
 auto Core::close() -> Status
 {
-    CALICO_EXPECT_FALSE(m_has_xact);
+    if (m_has_xact) {
+        LogMessage message {*m_logger};
+        message.set_primary("could not close");
+        message.set_detail("a transaction is active");
+        message.set_hint("finish the transaction and try again");
+        return message.logic_error();
+    }
 
     auto s = Status::ok();
     if (m_wal->is_writing()) {
@@ -507,16 +545,15 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         }
     }
 
+    const auto path = prefix + DATA_FILENAME;
     std::unique_ptr<RandomReader> reader;
-    std::unique_ptr<RandomEditor> editor;
     RandomReader *reader_temp {};
-    RandomEditor *editor_temp {};
     bool exists {};
 
-    if (auto s = store.open_random_reader(prefix + DATA_FILENAME, &reader_temp); s.is_ok()) {
+    if (auto s = store.open_random_reader(path, &reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
         Size file_size {};
-        s = store.file_size(DATA_FILENAME, file_size);
+        s = store.file_size(path, file_size);
         if (!s.is_ok()) return Err {s};
 
         if (file_size < FileLayout::HEADER_SIZE) {
@@ -545,19 +582,10 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         exists = true;
 
     } else if (s.is_not_found()) {
-        s = store.open_random_editor(DATA_FILENAME, &editor_temp);
-        if (!s.is_ok()) return Err {s};
-        editor.reset(editor_temp);
-
         header.magic_code = MAGIC_CODE;
         header.page_size = encode_page_size(options.page_size);
         header.flushed_lsn = SequenceId::base().value;
         header.header_crc = compute_header_crc(header);
-
-        auto root = btos(bytes);
-        root.resize(options.page_size);
-        s = editor->write(stob(root), 0);
-        if (!s.is_ok()) return Err {s};
 
     } else {
         return Err {s};

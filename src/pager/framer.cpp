@@ -94,6 +94,7 @@ auto Framer::ref(FrameNumber id, Pager &source, bool is_writable, bool is_dirty)
     CALICO_EXPECT_LT(id, m_frames.size());
     return m_frames[id].ref(source, is_writable, is_dirty);
 }
+
 auto Framer::unref(FrameNumber id, Page &page) -> void
 {
     CALICO_EXPECT_LT(id, m_frames.size());
@@ -112,6 +113,7 @@ auto Framer::pin(PageId id) -> Result<FrameNumber>
     }
 
     auto &frame = frame_at_impl(m_available.back());
+    CALICO_EXPECT_EQ(frame.ref_count(), 0);
 
     if (auto r = read_page_from_file(id, frame.data())) {
         if (!*r) {
@@ -136,24 +138,26 @@ auto Framer::discard(FrameNumber id) -> void
     m_available.emplace_back(id);
 }
 
-auto Framer::unpin(FrameNumber id, bool is_dirty) -> Status
+auto Framer::unpin(FrameNumber id) -> void
 {
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
-    auto s = Status::ok();
-
-    // If this fails, the caller (buffer pool) will need to roll back the database state or exit.
-    if (is_dirty) {
-        const auto lsn = frame.lsn();
-        s = write_page_to_file(frame.pid(), frame.data());
-        if (s.is_ok()) {
-            m_flushed_lsn = std::max(lsn, m_flushed_lsn);
-            m_wal->allow_cleanup(lsn.value);
-        }
-    }
-
     frame.reset(PageId::null());
     m_available.emplace_back(id);
+}
+
+auto Framer::write_back(FrameNumber id) -> Status
+{
+    auto &frame = frame_at_impl(id);
+    CALICO_EXPECT_LE(frame.ref_count(), 1);
+
+    // If this fails, the caller (buffer pool) will need to roll back the database state or exit.
+    auto s = write_page_to_file(frame.pid(), frame.data());
+    if (s.is_ok()) {
+        const auto lsn = frame.lsn();
+        m_flushed_lsn = std::max(lsn, m_flushed_lsn);
+        m_wal->allow_cleanup(lsn.value);
+    }
     return s;
 }
 
@@ -168,24 +172,27 @@ auto Framer::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
     const auto file_size = m_page_count * m_page_size;
     const auto offset = FileLayout::page_offset(id, out.size());
 
-    // Don't even try to call read() if the file isn't large enough. The system call version can be pretty slow even if it doesn't read anything.
+    // Don't even try to call read() if the file isn't large enough. The system call can be pretty slow even if it doesn't read anything.
+    // This happens when we are allocating a page from the end of the file.
     if (offset >= file_size)
         return false;
 
-    const auto s = m_file->read(out, offset);
+    auto s = m_file->read(out, offset);
+    if (!s.is_ok()) return Err {s};
 
-    // System call error.
-    if (!s.is_ok())
-        return Err {s};
+    // We should always read exactly what we requested, unless we are allocating a page during recovery.
+    if (out.size() == m_page_size)
+        return true;
 
-    if (out.size() != m_page_size) {
-        ThreePartMessage message;
-        message.set_primary("could not read page {}", id.value);
-        message.set_detail("incomplete read");
-        message.set_hint("read {}/{} bytes", out.size(), m_page_size);
-        return Err {message.system_error()};
-    }
-    return true;
+    // In that case, we will hit EOF here.
+    if (out.is_empty())
+        return false;
+
+    ThreePartMessage message;
+    message.set_primary("could not read page {}", id.value);
+    message.set_detail("incomplete read");
+    message.set_hint("read {}/{} bytes", out.size(), m_page_size);
+    return Err {message.system_error()};
 }
 
 auto Framer::write_page_to_file(PageId id, BytesView in) const -> Status

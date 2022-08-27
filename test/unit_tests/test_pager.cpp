@@ -163,8 +163,7 @@ TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
     ASSERT_FALSE(r.has_value());
     ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
 
-    const auto s = framer->unpin(FrameNumber {1UL}, false);
-    ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
+    framer->unpin(FrameNumber {1UL});
     ASSERT_TRUE(framer->pin(PageId {9UL}));
 }
 
@@ -185,30 +184,26 @@ auto read_from_page(const Page &page, Size size) -> std::string
     return message;
 }
 
-class PagerTests : public testing::Test {
+class PagerTests : public TestWithMock {
 public:
     static constexpr Size frame_count {32};
     static constexpr Size page_size {0x100};
     std::string test_message {"Hello, world!"};
 
     explicit PagerTests()
-          : wal {std::make_unique<DisabledWriteAheadLog>()},
-            store {std::make_unique<MockStorage>()}
+          : wal {std::make_unique<DisabledWriteAheadLog>()}
     {
-        store->delegate_to_real();
-        EXPECT_CALL(*store, open_random_editor).Times(1);
-        EXPECT_CALL(*store, create_directory).Times(1);
-        EXPECT_TRUE(store->create_directory("test").is_ok());
         pager = *BasicPager::open({
-            "test",
+            PREFIX,
             *store,
             *wal,
             status,
+            has_xact,
             create_sink(),
             frame_count,
             page_size,
         });
-        mock = store->get_mock_random_editor("test/data");
+        mock = mock_store().get_mock_random_editor(PREFIX + std::string(DATA_FILENAME));
     }
 
     ~PagerTests() override = default;
@@ -259,10 +254,10 @@ public:
     }
 
     Random random {0};
-    MockRandomEditor *mock;
+    MockRandomEditor *mock {};
     Status status {Status::ok()};
+    bool has_xact {};
     std::unique_ptr<WriteAheadLog> wal;
-    std::unique_ptr<MockStorage> store;
     std::unique_ptr<Pager> pager;
 };
 
@@ -335,11 +330,6 @@ TEST_F(PagerTests, PageDataPersistsInFrame)
 
 TEST_F(PagerTests, PageDataPersistsInFile)
 {
-    using testing::_;
-    using testing::AtLeast;
-    EXPECT_CALL(*mock, write).Times(AtLeast(frame_count));
-    EXPECT_CALL(*mock, read(_, 0)).Times(1); // Root page is read once.
-    EXPECT_CALL(*mock, write(_, 0)).Times(1); // Root page is written once.
     const auto id = allocate_write_release(test_message);
 
     // Cause the root page to be evicted and written back, along with some other pages.
