@@ -1,5 +1,5 @@
-#ifndef CCO_CALICO_H
-#define CCO_CALICO_H
+#ifndef CALICO_CALICO_H
+#define CALICO_CALICO_H
 
 #include "bytes.h"
 #include "common.h"
@@ -8,5 +8,7 @@
 #include "info.h"
 #include "options.h"
 #include "status.h"
+#include "store.h"
+#include "transaction.h"
 
-#endif // CCO_CALICO_H
+#endif // CALICO_CALICO_H

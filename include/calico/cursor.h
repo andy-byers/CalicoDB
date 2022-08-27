@@ -1,11 +1,11 @@
-#ifndef CCO_CURSOR_H
-#define CCO_CURSOR_H
+#ifndef CALICO_CURSOR_H
+#define CALICO_CURSOR_H
 
 #include "status.h"
 #include <memory>
 #include <optional>
 
-namespace cco {
+namespace calico {
 
 class Node;
 class NodePool;
@@ -13,18 +13,27 @@ class Internal;
 
 class Cursor final {
 public:
+    Cursor() = default;
+
     ~Cursor() = default;
 
     /**
-     * Check if the cursor is on a valid record.
+     * Determine if the cursor is valid.
      *
-     * This method should be called to make sure that a cursor is valid before calling any method that
-     * accesses the underlying record.
-     *
-     * @return True if the cursor is on a valid record, false otherwise.
+     * @return True if, and only if, the internal status object has an OK state, false otherwise.
      */
     [[nodiscard]] auto is_valid() const -> bool;
 
+    /**
+     * Get the cursor status.
+     *
+     * This method should be called to make sure that a cursor is valid before calling any method that
+     * accesses the underlying record. A valid cursor will have an OK status. Any non-OK status indicates
+     * an invalid cursor. For example, a "not found" status means that the record could not be located,
+     * and the cursor is not safe to use.
+     *
+     * @return The cursor's internal status object.
+     */
     [[nodiscard]] auto status() const -> Status;
 
     /**
@@ -32,14 +41,14 @@ public:
      *
      * @return True if the cursor is on the rightmost record, false otherwise.
      */
-    [[nodiscard]] auto is_maximum() const -> bool;
+    [[nodiscard]] auto is_last() const -> bool;
 
     /**
      * Check if the cursor is on the record with the smallest key (the leftmost record).
      *
      * @return True if the cursor is on the leftmost record, false otherwise.
      */
-    [[nodiscard]] auto is_minimum() const -> bool;
+    [[nodiscard]] auto is_first() const -> bool;
 
     /**
      * Get the key of the current record.
@@ -58,15 +67,6 @@ public:
      * @return The value of the record that the cursor is positioned on.
      */
     [[nodiscard]] auto value() const -> std::string;
-
-    /**
-     * Get the current record.
-     *
-     * This method produces undefined behavior if the cursor is not valid.
-     *
-     * @return The record that the cursor is positioned on.
-     */
-    [[nodiscard]] auto record() const -> Record;
 
     /**
      * Move the cursor to the right by one position.
@@ -150,9 +150,9 @@ private:
      * Representation of a cursor position in the tree.
      */
     struct Position {
-        static constexpr Index LEFT {0};
-        static constexpr Index CURRENT {1};
-        static constexpr Index RIGHT {2};
+        static constexpr Size LEFT {0};
+        static constexpr Size CURRENT {1};
+        static constexpr Size RIGHT {2};
 
         auto operator==(const Position &rhs) const -> bool;
         [[nodiscard]] auto is_minimum() const -> bool;
@@ -164,14 +164,13 @@ private:
     };
 
     friend class CursorInternal;
-    Cursor() = default;
 
-    mutable Status m_status {Status::not_found()};
-    NodePool *m_pool {}; ///< Reference to an object that provides nodes from the buffer pool.
-    Internal *m_internal {}; ///< Reference to the page internals.
+    mutable Status m_status {Status::not_found("not found")};
+    NodePool *m_pool {}; ///< Reference to an object that provides node pages from the pager component.
+    Internal *m_internal {}; ///< Reference to the tree internals.
     Position m_position; ///< Position of the cursor in the page.
 };
 
-} // cco
+} // namespace calico
 
-#endif // CCO_CURSOR_H
+#endif // CALICO_CURSOR_H

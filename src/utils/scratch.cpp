@@ -1,25 +1,9 @@
 #include "scratch.h"
 #include "expect.h"
 
-namespace cco {
+namespace calico {
 
-auto RollingScratchManager::get() -> Scratch
-{
-    if (m_counter >= MAXIMUM_SCRATCHES - 1) {
-        CCO_EXPECT_EQ(m_counter, MAXIMUM_SCRATCHES - 1);
-        m_emergency.emplace_back(m_scratch_size, '\x00');
-        return Scratch {stob(m_emergency.back())};
-    }
-    return Scratch {stob(m_scratches[m_counter++])};
-}
-
-auto RollingScratchManager::reset() -> void
-{
-    m_counter = 0;
-    m_emergency.clear();
-}
-
-auto ManualScratchManager::get() -> ManualScratch
+auto NamedScratchManager::get() -> NamedScratch
 {
     std::string scratch;
     if (m_available.empty()) {
@@ -30,16 +14,16 @@ auto ManualScratchManager::get() -> ManualScratch
     }
     const auto id = m_next_id++;
     auto [itr, truthy] = m_occupied.emplace(id, std::move(scratch));
-    CCO_EXPECT_TRUE(truthy);
-    return ManualScratch {id, stob(itr->second)};
+    CALICO_EXPECT_TRUE(truthy);
+    return NamedScratch {id, stob(itr->second)};
 }
 
-auto ManualScratchManager::put(ManualScratch scratch) -> void
+auto NamedScratchManager::put(NamedScratch scratch) -> void
 {
     auto itr = m_occupied.find(scratch.id());
-    CCO_EXPECT_NE(itr, end(m_occupied));
+    CALICO_EXPECT_NE(itr, end(m_occupied));
     m_available.emplace_back(std::move(itr->second));
     m_occupied.erase(itr);
 }
 
-} // namespace cco
+} // namespace calico

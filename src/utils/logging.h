@@ -1,5 +1,5 @@
-#ifndef CCO_UTILS_LOGGING_H
-#define CCO_UTILS_LOGGING_H
+#ifndef CALICO_UTILS_LOGGING_H
+#define CALICO_UTILS_LOGGING_H
 
 #include "calico/options.h"
 #include "calico/status.h"
@@ -7,13 +7,13 @@
 #include <numeric>
 #include <spdlog/spdlog.h>
 
-namespace cco {
+namespace calico {
 
-constexpr auto LOG_NAME = "log";
+constexpr auto LOG_FILENAME = "log";
 
-#define CCO_STRINGIFY_(x) #x
-#define CCO_STRINGIFY(x) CCO_STRINGIFY_(x)
-#define CCO_LOG_FORMAT(s) ("[" CCO_STRINGIFY(__FILE__) ":" CCO_STRINGIFY(__LINE__) "] "(s))
+#define CALICO_STRINGIFY_(x) #x
+#define CALICO_STRINGIFY(x) CALICO_STRINGIFY_(x)
+#define CALICO_LOG_FORMAT(s) ("[" CALICO_STRINGIFY(__FILE__) ":" CALICO_STRINGIFY(__LINE__) "] "(s))
 
 auto create_logger(spdlog::sink_ptr, const std::string &) -> std::shared_ptr<spdlog::logger>;
 auto create_sink(const std::string &, spdlog::level::level_enum) -> spdlog::sink_ptr;
@@ -45,17 +45,18 @@ public:
     [[nodiscard]] auto invalid_argument() const -> Status;
     [[nodiscard]] auto logic_error() const -> Status;
     [[nodiscard]] auto corruption() const -> Status;
+    [[nodiscard]] auto not_found() const -> Status;
     [[nodiscard]] auto text() const -> std::string;
 
 private:
-    static constexpr Index PRIMARY = 0;
-    static constexpr Index DETAIL = 1;
-    static constexpr Index HINT = 2;
+    static constexpr Size PRIMARY {0};
+    static constexpr Size DETAIL {1};
+    static constexpr Size HINT {2};
 
-    auto set_text(Index, const char *) -> void;
+    auto set_text(Size, const char *) -> void;
 
     template<class... Args>
-    auto set_text(Index index, const std::string &format, Args &&...args) -> void
+    auto set_text(Size index, const std::string &format, Args &&...args) -> void
     {
         set_text(index, fmt::format(format, std::forward<Args>(args)...).c_str());
     }
@@ -91,6 +92,7 @@ public:
     [[nodiscard]] auto invalid_argument(spdlog::level::level_enum = spdlog::level::err) const -> Status;
     [[nodiscard]] auto corruption(spdlog::level::level_enum = spdlog::level::err) const -> Status;
     [[nodiscard]] auto logic_error(spdlog::level::level_enum = spdlog::level::err) const -> Status;
+    [[nodiscard]] auto not_found(spdlog::level::level_enum = spdlog::level::err) const -> Status;
     auto log(spdlog::level::level_enum = spdlog::level::err) const -> std::string;
 
 private:
@@ -98,6 +100,6 @@ private:
     spdlog::logger *m_logger {};
 };
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_UTILS_LOGGING_H
+#endif // CALICO_UTILS_LOGGING_H

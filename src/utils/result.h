@@ -1,15 +1,15 @@
-#ifndef CCO_UTILS_RESULT_H
-#define CCO_UTILS_RESULT_H
+#ifndef CALICO_UTILS_RESULT_H
+#define CALICO_UTILS_RESULT_H
 
 #include "tl/expected.hpp"
 #include "calico/status.h"
 
-namespace cco {
+namespace calico {
 
 template<class T>
 using Result = tl::expected<T, Status>;
 using Err = tl::unexpected<Status>;
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_UTILS_RESULT_H
+#endif // CALICO_UTILS_RESULT_H

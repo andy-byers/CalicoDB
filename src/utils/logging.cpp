@@ -4,13 +4,13 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/null_sink.h>
 
-namespace cco {
+namespace calico {
 
 namespace fs = std::filesystem;
 
 auto create_logger(spdlog::sink_ptr sink, const std::string &name) -> std::shared_ptr<spdlog::logger>
 {
-    CCO_EXPECT_FALSE(name.empty());
+    CALICO_EXPECT_FALSE(name.empty());
     return std::make_shared<spdlog::logger>(name, std::move(sink));
 }
 
@@ -20,7 +20,7 @@ auto create_sink(const std::string &base, spdlog::level::level_enum level) -> sp
     if (base.empty()) {
         sink = std::make_shared<spdlog::sinks::null_sink_mt>();
     } else {
-        sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(fs::path {base} / LOG_NAME);
+        sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(fs::path {base} / LOG_FILENAME);
     }
     sink->set_level(level);
     return sink;
@@ -51,9 +51,14 @@ auto ThreePartMessage::corruption() const -> Status
     return Status::corruption(text());
 }
 
+auto ThreePartMessage::not_found() const -> Status
+{
+    return Status::not_found(text());
+}
+
 auto ThreePartMessage::text() const -> std::string
 {
-    CCO_EXPECT_FALSE(m_text[PRIMARY].empty());
+    CALICO_EXPECT_FALSE(m_text[PRIMARY].empty());
     std::string message {m_text[PRIMARY]};
 
     if (!m_text[DETAIL].empty())
@@ -65,7 +70,7 @@ auto ThreePartMessage::text() const -> std::string
     return message;
 }
 
-auto ThreePartMessage::set_text(Index index, const char *text) -> void
+auto ThreePartMessage::set_text(Size index, const char *text) -> void
 {
     m_text[index] = text;
 }
@@ -85,6 +90,11 @@ auto LogMessage::logic_error(spdlog::level::level_enum level) const -> Status
     return Status::logic_error(log(level));
 }
 
+auto LogMessage::not_found(spdlog::level::level_enum level) const -> Status
+{
+    return Status::not_found(log(level));
+}
+
 auto LogMessage::corruption(spdlog::level::level_enum level) const -> Status
 {
     return Status::corruption(log(level));
@@ -97,4 +107,4 @@ auto LogMessage::log(spdlog::level::level_enum level) const -> std::string
     return message;
 }
 
-} // namespace cco
+} // namespace calico

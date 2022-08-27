@@ -1,10 +1,10 @@
-#ifndef CCO_UTILS_LAYOUT_H
-#define CCO_UTILS_LAYOUT_H
+#ifndef CALICO_UTILS_LAYOUT_H
+#define CALICO_UTILS_LAYOUT_H
 
-#include "identifier.h"
+#include "types.h"
 #include "utils.h"
 
-namespace cco {
+namespace calico {
 
 class FileLayout {
 public:
@@ -18,17 +18,17 @@ public:
     static constexpr Size RESERVED_OFFSET {42};
     static constexpr Size HEADER_SIZE {48};
 
-    static constexpr auto header_offset() noexcept -> Index
+    static constexpr auto header_offset() noexcept -> Size
     {
         return 0;
     }
 
-    static constexpr auto content_offset() noexcept -> Index
+    static constexpr auto content_offset() noexcept -> Size
     {
         return header_offset() + HEADER_SIZE;
     }
 
-    static constexpr auto page_offset(PageId page_id, Size page_size) noexcept -> Index
+    static constexpr auto page_offset(PageId page_id, Size page_size) noexcept -> Size
     {
         return page_id.as_index() * page_size;
     }
@@ -42,7 +42,7 @@ public:
 
     static constexpr auto header_offset(PageId page_id) noexcept -> Size
     {
-        return page_id.is_base() * FileLayout::HEADER_SIZE;
+        return page_id.is_root() * FileLayout::HEADER_SIZE;
     }
 
     static constexpr auto content_offset(PageId page_id) noexcept -> Size
@@ -85,8 +85,7 @@ public:
     {
         // The root page can never become a link page, so this value is the same for
         // all pages.
-        const PageId non_root {ROOT_ID_VALUE + 1};
-        CCO_EXPECT_FALSE(non_root.is_base());
+        const PageId non_root {PageId::root().value + 1};
         return PageLayout::content_offset(non_root);
     }
 
@@ -98,7 +97,7 @@ public:
 
 inline constexpr auto get_min_local(Size page_size) -> Size
 {
-    CCO_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
     return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 32 / 256 -
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
@@ -106,7 +105,7 @@ inline constexpr auto get_min_local(Size page_size) -> Size
 
 inline constexpr auto get_max_local(Size page_size) -> Size
 {
-    CCO_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
     return (page_size - PageLayout::HEADER_SIZE - NodeLayout::HEADER_SIZE) * 64 / 256 -
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
@@ -114,8 +113,8 @@ inline constexpr auto get_max_local(Size page_size) -> Size
 
 inline constexpr auto get_local_value_size(Size key_size, Size value_size, Size page_size) -> Size
 {
-    CCO_EXPECT_GT(key_size, 0);
-    CCO_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICO_EXPECT_GT(key_size, 0);
+    CALICO_EXPECT_TRUE(is_power_of_two(page_size));
 
     /* Cases:
          *              Byte 0     min_local(...)  get_max_local(...)
@@ -142,6 +141,6 @@ inline constexpr auto get_local_value_size(Size key_size, Size value_size, Size 
     return value_size;
 }
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_UTILS_LAYOUT_H
+#endif // CALICO_UTILS_LAYOUT_H

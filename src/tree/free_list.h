@@ -1,33 +1,20 @@
-#ifndef CCO_TREE_FREE_LIST_H
-#define CCO_TREE_FREE_LIST_H
+#ifndef CALICO_TREE_FREE_LIST_H
+#define CALICO_TREE_FREE_LIST_H
 
 #include "calico/status.h"
-#include "interface.h"
-#include "utils/identifier.h"
+#include "tree.h"
+#include "utils/types.h"
 #include <optional>
 
-namespace cco {
+namespace calico {
 
-class IBufferPool;
-
-namespace page {
-    class FileHeaderReader;
-    class FileHeaderWriter;
-} // namespace page
+class Pager;
 
 /**
  * Object that manages a stack of deleted pages on disk.
  */
 class FreeList {
 public:
-    /**
-     * Parameters for constructing a free list.
-     */
-    struct Parameters {
-        IBufferPool *buffer_pool {}; ///< Reference to the underlying buffer pool.
-        PageId free_head {};           ///< Page ID of the page at the top of the free list stack.
-    };
-
     ~FreeList() = default;
 
     /**
@@ -35,7 +22,8 @@ public:
      *
      * @param param Initial state and dependencies.
      */
-    explicit FreeList(const Parameters &param);
+    explicit FreeList(Pager &pager)
+        : m_pager {&pager} {}
 
     /**
      * Push a page onto the free list stack.
@@ -56,14 +44,14 @@ public:
      *
      * @param header The header to save state to.
      */
-    auto save_header(FileHeaderWriter &header) const -> void;
+    auto save_state(FileHeader &header) const -> void;
 
     /**
      * Load state from a file header.
      *
      * @param header The header to read state from.
      */
-    auto load_header(const FileHeaderReader &header) -> void;
+    auto load_state(const FileHeader &header) -> void;
 
     /**
      * Determine if the free list is empty.
@@ -76,10 +64,10 @@ public:
     }
 
 private:
-    IBufferPool *m_pool;  ///< Reference to the underlying buffer pool.
+    Pager *m_pager;  ///< Reference to the underlying block pool.
     PageId m_head;     ///< Page ID of the page at the head of the free list.
 };
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_TREE_FREE_LIST_H
+#endif // CALICO_TREE_FREE_LIST_H

@@ -1,29 +1,25 @@
-#ifndef CCO_PAGE_PAGE_H
-#define CCO_PAGE_PAGE_H
+#ifndef CALICO_PAGE_PAGE_H
+#define CALICO_PAGE_PAGE_H
 
-#include "utils/identifier.h"
 #include "utils/types.h"
+#include "wal/wal.h"
 #include <optional>
 #include <vector>
 
-namespace cco {
+namespace calico {
 
-struct ChangedRegion;
-struct PageUpdate;
+struct FileHeader;
 class Frame;
-class FileHeaderReader;
-class FileHeaderWriter;
-class IBufferPool;
-class ChangeManager;
+class Pager;
 
 class Page final {
 public:
-    friend class cco::Frame;
+    friend class calico::Frame;
 
     struct Parameters {
         PageId id;
         Bytes data;
-        IBufferPool *source {};
+        Pager *source {};
         bool is_writable {};
         bool is_dirty {};
     };
@@ -43,60 +39,42 @@ public:
 
     [[nodiscard]] auto id() const -> PageId;
     [[nodiscard]] auto size() const -> Size;
-    [[nodiscard]] auto view(Index) const -> BytesView;
-    [[nodiscard]] auto view(Index, Size) const -> BytesView;
+    [[nodiscard]] auto view(Size) const -> BytesView;
+    [[nodiscard]] auto view(Size, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
-    [[nodiscard]] auto lsn() const -> SequenceNumber;
+    [[nodiscard]] auto lsn() const -> SequenceId;
+    [[nodiscard]] auto collect_deltas() -> std::vector<PageDelta>;
     auto set_type(PageType) -> void;
-    auto set_lsn(SequenceNumber) -> void;
-    auto read(Bytes, Index) const -> void;
-    auto bytes(Index) -> Bytes;
-    auto bytes(Index, Size) -> Bytes;
-    auto write(BytesView, Index) -> void;
-    auto undo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
-    auto redo(SequenceNumber, const std::vector<ChangedRegion> &) -> void;
+    auto set_lsn(SequenceId) -> void;
+    auto read(Bytes, Size) const -> void;
+    auto bytes(Size) -> Bytes;
+    auto bytes(Size, Size) -> Bytes;
+    auto write(BytesView, Size) -> void;
+    auto undo(const UndoDescriptor&) -> void;
+    auto redo(const RedoDescriptor&) -> void;
 
-    [[nodiscard]] auto has_manager() const -> bool
-    {
-        return m_manager != nullptr;
-    }
-
-    auto set_manager(ChangeManager &manager) -> void
-    {
-        CCO_EXPECT_EQ(m_manager, nullptr);
-        m_manager = &manager;
-    }
-
-    auto clear_manager() -> void
-    {
-        CCO_EXPECT_NE(m_manager, nullptr);
-        m_manager = nullptr;
-    }
-
+    // NOTE: We need these because we have a user-defined destructor.
     Page(Page &&) = default;
     auto operator=(Page &&) -> Page & = default;
 
 private:
-    [[nodiscard]] auto header_offset() const -> Index;
+    [[nodiscard]] auto header_offset() const -> Size;
 
-    UniqueNullable<IBufferPool *> m_source;
-    ChangeManager *m_manager {};
+    std::vector<PageDelta> m_deltas;
+    UniqueNullable<Pager *> m_source;
     Bytes m_data;
     PageId m_id;
     bool m_is_writable {};
     bool m_is_dirty {};
 };
 
-[[nodiscard]] auto get_u16(const Page &, Index) -> std::uint16_t;
-[[nodiscard]] auto get_u32(const Page &, Index) -> std::uint32_t;
-[[nodiscard]] auto get_u64(const Page &, Index) -> std::uint64_t;
-auto put_u16(Page &, Index, std::uint16_t) -> void;
-auto put_u32(Page &, Index, std::uint32_t) -> void;
-auto put_u64(Page &, Index, std::uint64_t) -> void;
+[[nodiscard]] auto get_u16(const Page &, Size) -> std::uint16_t;
+[[nodiscard]] auto get_u32(const Page &, Size) -> std::uint32_t;
+[[nodiscard]] auto get_u64(const Page &, Size) -> std::uint64_t;
+auto put_u16(Page &, Size, std::uint16_t) -> void;
+auto put_u32(Page &, Size, std::uint32_t) -> void;
+auto put_u64(Page &, Size, std::uint64_t) -> void;
 
-[[nodiscard]] auto get_file_header_reader(const Page &) -> FileHeaderReader;
-[[nodiscard]] auto get_file_header_writer(Page &) -> FileHeaderWriter;
+} // namespace calico
 
-} // namespace cco
-
-#endif // CCO_PAGE_PAGE_H
+#endif // CALICO_PAGE_PAGE_H

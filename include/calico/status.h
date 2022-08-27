@@ -1,9 +1,9 @@
-#ifndef CCO_ERROR_H
-#define CCO_ERROR_H
+#ifndef CALICO_STATUS_H
+#define CALICO_STATUS_H
 
 #include "bytes.h"
 
-namespace cco {
+namespace calico {
 
 class Status final {
 public:
@@ -11,7 +11,7 @@ public:
     [[nodiscard]] static auto system_error(const std::string &) -> Status;
     [[nodiscard]] static auto logic_error(const std::string &) -> Status;
     [[nodiscard]] static auto corruption(const std::string &) -> Status;
-    [[nodiscard]] static auto not_found() -> Status;
+    [[nodiscard]] static auto not_found(const std::string &) -> Status;
     [[nodiscard]] static auto ok() -> Status;
     [[nodiscard]] auto is_invalid_argument() const -> bool;
     [[nodiscard]] auto is_system_error() const -> bool;
@@ -21,9 +21,14 @@ public:
     [[nodiscard]] auto is_ok() const -> bool;
     [[nodiscard]] auto what() const -> std::string;
 
+    Status(const Status&);
+    auto operator=(const Status&) -> Status&;
+
+    Status(Status&&) noexcept;
+    auto operator=(Status&&) noexcept -> Status&;
+
 private:
     enum class Code : Byte {
-        OK = 0,
         INVALID_ARGUMENT = 1,
         SYSTEM_ERROR = 2,
         LOGIC_ERROR = 3,
@@ -31,13 +36,13 @@ private:
         NOT_FOUND = 5,
     };
 
-    explicit Status(Code);
+    Status() = default;
     Status(Code, const std::string &);
     [[nodiscard]] auto code() const -> Code;
 
-    std::string m_what;
+    std::unique_ptr<char[]> m_what;
 };
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_ERROR_H
+#endif // CALICO_STATUS_H

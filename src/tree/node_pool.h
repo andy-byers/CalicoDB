@@ -1,27 +1,24 @@
 
-#ifndef CCO_TREE_NODE_POOL_H
-#define CCO_TREE_NODE_POOL_H
+#ifndef CALICO_TREE_NODE_POOL_H
+#define CALICO_TREE_NODE_POOL_H
 
 #include "free_list.h"
-#include "interface.h"
+#include "tree.h"
 #include "utils/scratch.h"
 #include <spdlog/spdlog.h>
 
-namespace cco {
+namespace calico {
 
-class IBufferPool;
+class Pager;
 
 class NodePool final {
 public:
-    struct Parameters {
-        IBufferPool *buffer_pool {};
-        PageId free_start;
-    };
 
-    explicit NodePool(Parameters);
+    NodePool(Pager&, Size);
     ~NodePool() = default;
 
     [[nodiscard]] auto page_size() const -> Size;
+    [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto allocate(PageType) -> Result<Node>;
     [[nodiscard]] auto acquire(PageId, bool) -> Result<Node>;
     [[nodiscard]] auto release(Node) -> Result<void>;
@@ -29,15 +26,15 @@ public:
     [[nodiscard]] auto allocate_chain(BytesView) -> Result<PageId>;
     [[nodiscard]] auto destroy_chain(PageId, Size) -> Result<void>;
     [[nodiscard]] auto collect_chain(PageId, Bytes) const -> Result<void>;
-    auto save_header(FileHeaderWriter &) -> void;
-    auto load_header(const FileHeaderReader &) -> void;
+    auto save_state(FileHeader &header) -> void;
+    auto load_state(const FileHeader &header) -> void;
 
 private:
     FreeList m_free_list;
     std::string m_scratch;
-    IBufferPool *m_pool {};
+    Pager *m_pager {};
 };
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_TREE_NODE_POOL_H
+#endif // CALICO_TREE_NODE_POOL_H

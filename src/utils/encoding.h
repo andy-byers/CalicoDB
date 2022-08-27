@@ -1,14 +1,14 @@
 /* 
  * encoding.h: Simple serialization/deserialization procedures based on those found in LevelDB.
  */
-#ifndef CCO_UTILS_ENCODING_H
-#define CCO_UTILS_ENCODING_H
+#ifndef CALICO_UTILS_ENCODING_H
+#define CALICO_UTILS_ENCODING_H
 
 #include "calico/bytes.h"
 #include "calico/options.h"
 #include <zconf.h>
 
-namespace cco {
+namespace calico {
 
 inline auto get_u16(const Byte *in) noexcept -> std::uint16_t
 {
@@ -97,6 +97,6 @@ inline auto put_u64(Bytes out, std::uint64_t value) noexcept -> void
     put_u64(out.data(), value);
 }
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_UTILS_ENCODING_H
+#endif // CALICO_UTILS_ENCODING_H

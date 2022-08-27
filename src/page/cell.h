@@ -1,11 +1,11 @@
-#ifndef CCO_PAGE_CELL_H
-#define CCO_PAGE_CELL_H
+#ifndef CALICO_PAGE_CELL_H
+#define CALICO_PAGE_CELL_H
 
 #include "page.h"
 #include "utils/scratch.h"
 #include <optional>
 
-namespace cco {
+namespace calico {
 
 class Node;
 
@@ -21,7 +21,7 @@ public:
     };
 
     static auto read_at(BytesView, Size, bool) -> Cell;
-    static auto read_at(const Node &, Index) -> Cell;
+    static auto read_at(const Node &, Size) -> Cell;
     explicit Cell(const Parameters &);
 
     ~Cell() = default;
@@ -46,13 +46,12 @@ public:
 
     [[nodiscard]] auto is_attached() const -> bool
     {
-        return m_scratch == std::nullopt;
+        return m_is_attached;
     }
 
 private:
     Cell() = default;
 
-    std::optional<Scratch> m_scratch;
     BytesView m_key;
     BytesView m_local_value;
     PageId m_left_child_id;
@@ -60,11 +59,12 @@ private:
     Size m_value_size {};
     Size m_page_size {};
     bool m_is_external {};
+    bool m_is_attached {true};
 };
 
 auto make_external_cell(BytesView, BytesView, Size) -> Cell;
 auto make_internal_cell(BytesView, Size) -> Cell;
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_PAGE_CELL_H
+#endif // CALICO_PAGE_CELL_H

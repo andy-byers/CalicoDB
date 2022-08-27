@@ -1,7 +1,7 @@
 #include "fuzz.h"
 #include <spdlog/fmt/fmt.h>
 
-namespace cco {
+namespace calico {
 
 auto InstructionParser::parse(BytesView view) const -> std::optional<Parsed>
 {
@@ -42,7 +42,7 @@ DatabaseTarget::DatabaseTarget(InstructionParser::Instructions instructions, Opt
       m_parser {std::move(instructions)},
       m_db {options}
 {
-    CCO_EXPECT_TRUE(m_db.open().is_ok());
+    CALICO_EXPECT_TRUE(m_db.open().is_ok());
 }
 
 auto DatabaseTarget::fuzz(BytesView data) -> void
@@ -57,24 +57,24 @@ auto DatabaseTarget::fuzz(BytesView data) -> void
 
         switch (opcode) {
             case 0:
-                CCO_EXPECT_EQ(segments.size(), 2);
+                CALICO_EXPECT_EQ(segments.size(), 2);
 //                fmt::print("insert: ({}/{} B, {} B)\n", btos(segments[0]).size(), m_db.info().maximum_key_size(), btos(segments[1]).size());
                 insert_one(segments[0], segments[1]);
                 break;
             case 1:
-                CCO_EXPECT_EQ(segments.size(), 1);
+                CALICO_EXPECT_EQ(segments.size(), 1);
 //                fmt::print("erase: {} B\n", btos(segments[0]).size());
                 erase_one(segments[0]);
                 break;
             case 2:
-                CCO_EXPECT_TRUE(segments.empty());
+                CALICO_EXPECT_TRUE(segments.empty());
 //                fmt::print("commit: ...\n");
                 do_commit();
 //                fmt::print("...{} records in database\n", m_db.info().record_count());
                 break;
             default:
-                CCO_EXPECT_TRUE(segments.empty());
-                CCO_EXPECT_EQ(opcode, 3);
+                CALICO_EXPECT_TRUE(segments.empty());
+                CALICO_EXPECT_EQ(opcode, 3);
 //                fmt::print("abort: {} records in database before\n", m_db.info().record_count());
                 do_abort();
 //                fmt::print("...{} records in database after\n", m_db.info().record_count());
@@ -82,17 +82,17 @@ auto DatabaseTarget::fuzz(BytesView data) -> void
     }
 
     if (auto lhs = m_db.find_minimum(), rhs = lhs; rhs.is_valid() && rhs.increment()) {
-        CCO_EXPECT_TRUE(lhs.is_valid());
+        CALICO_EXPECT_TRUE(lhs.is_valid());
         for (; rhs.is_valid(); ) {
-            CCO_EXPECT_LT(lhs.key(), rhs.key());
+            CALICO_EXPECT_LT(lhs.key(), rhs.key());
             if (!rhs.increment())
                 break;
-            CCO_EXPECT_TRUE(lhs.increment());
+            CALICO_EXPECT_TRUE(lhs.increment());
         }
     } else {
-        CCO_EXPECT_EQ(m_db.info().record_count(), 0);
-        CCO_EXPECT_TRUE(lhs.status().is_not_found());
-        CCO_EXPECT_TRUE(rhs.status().is_not_found());
+        CALICO_EXPECT_EQ(m_db.info().record_count(), 0);
+        CALICO_EXPECT_TRUE(lhs.status().is_not_found());
+        CALICO_EXPECT_TRUE(rhs.status().is_not_found());
     }
 }
 
@@ -104,9 +104,9 @@ auto DatabaseTarget::insert_one(BytesView key, BytesView value) -> void
     const auto s = m_db.insert(key, value);
 
     if (s.is_ok()) {
-        CCO_EXPECT_EQ(info.record_count(), n + !c.is_valid());
+        CALICO_EXPECT_EQ(info.record_count(), n + !c.is_valid());
     } else {
-        CCO_EXPECT_TRUE(s.is_invalid_argument());
+        CALICO_EXPECT_TRUE(s.is_invalid_argument());
     }
 }
 
@@ -118,31 +118,31 @@ auto DatabaseTarget::erase_one(BytesView key) -> void
     auto s = m_db.erase(c);
 
     if (!s.is_ok()) {
-        CCO_EXPECT_TRUE(c.status().is_not_found() or c.status().is_invalid_argument());
+        CALICO_EXPECT_TRUE(c.status().is_not_found() or c.status().is_invalid_argument());
         c = m_db.find_minimum();
         s = m_db.erase(c);
     }
 
     if (n) {
-        CCO_EXPECT_EQ(info.record_count(), n - 1);
-        CCO_EXPECT_TRUE(c.is_valid());
-        CCO_EXPECT_TRUE(s.is_ok());
+        CALICO_EXPECT_EQ(info.record_count(), n - 1);
+        CALICO_EXPECT_TRUE(c.is_valid());
+        CALICO_EXPECT_TRUE(s.is_ok());
     } else {
-        CCO_EXPECT_FALSE(c.is_valid());
-        CCO_EXPECT_TRUE(s.is_not_found());
+        CALICO_EXPECT_FALSE(c.is_valid());
+        CALICO_EXPECT_TRUE(s.is_not_found());
     }
 }
 
 auto DatabaseTarget::do_commit() -> void
 {
 //    const auto s = m_db.commit();
-//    CCO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
+//    CALICO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
 }
 
 auto DatabaseTarget::do_abort() -> void
 {
 //    const auto s = m_db.abort();
-//    CCO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
+//    CALICO_EXPECT_TRUE(s.is_ok() or s.is_logic_error());
 }
 
 } // cco

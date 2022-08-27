@@ -1,7 +1,7 @@
 #include "fuzz.h"
 #include <filesystem>
 
-using namespace cco;
+using namespace calico;
 namespace fs = std::filesystem;
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)

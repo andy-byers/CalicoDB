@@ -1,6 +1,6 @@
 
-#ifndef CCO_UTILS_SCRATCH_H
-#define CCO_UTILS_SCRATCH_H
+#ifndef CALICO_UTILS_SCRATCH_H
+#define CALICO_UTILS_SCRATCH_H
 
 #include "calico/bytes.h"
 #include "types.h"
@@ -8,9 +8,31 @@
 #include <string>
 #include <unordered_map>
 
-namespace cco {
+namespace calico {
 
-class RollingScratchManager;
+template<Size N>
+class StaticScratch {
+public:
+    static constexpr Size Width = N;
+
+    StaticScratch()
+        : m_bytes {m_data.data(), m_data.size()}
+    {}
+
+    auto operator*() -> Bytes
+    {
+        return m_bytes;
+    }
+
+    auto operator->() -> Bytes*
+    {
+        return &m_data;
+    }
+
+private:
+    std::array<char, N> m_data {};
+    Bytes m_bytes;
+};
 
 class Scratch {
 public:
@@ -20,80 +42,74 @@ public:
         : m_data {data}
     {}
 
-    [[nodiscard]] auto size() const -> Size
-    {
-        return m_data.size();
-    }
-
-    [[nodiscard]] auto data() const -> BytesView
+    auto operator*() -> Bytes
     {
         return m_data;
     }
 
-    [[nodiscard]] auto data() -> Bytes
+    auto operator->() -> Bytes*
     {
-        return m_data;
+        return &m_data;
     }
 
 private:
     Bytes m_data;
 };
 
-class RollingScratchManager final {
+template<Size N>
+class MonotonicScratchManager final {
 public:
-    static constexpr Size MAXIMUM_SCRATCHES {16};
+    static constexpr auto ScratchCount = N;
 
-    explicit RollingScratchManager(Size scratch_size)
-        : m_scratches(MAXIMUM_SCRATCHES),
+    explicit MonotonicScratchManager(Size scratch_size)
+        : m_scratch(scratch_size * ScratchCount, '\x00'),
           m_scratch_size {scratch_size}
+    {}
+
+    [[nodiscard]] auto get() -> Scratch
     {
-        for (auto &scratch: m_scratches)
-            scratch.resize(scratch_size);
+        auto data = stob(m_scratch).range(m_counter++ * m_scratch_size, m_scratch_size);
+        m_counter %= ScratchCount;
+        return Scratch {data};
     }
 
-    [[nodiscard]] auto get() -> Scratch;
-    auto reset() -> void;
-
 private:
-    std::vector<std::string> m_scratches;
-    std::list<std::string> m_emergency;
+    std::string m_scratch;
     Size m_scratch_size;
-    Index m_counter {};
+    Size m_counter {};
 };
 
-class ManualScratch: public Scratch {
+class NamedScratch : public Scratch {
 public:
-    
-    ManualScratch(Index id, Bytes data)
+    NamedScratch(Size id, Bytes data)
         : Scratch {data},
           m_id {id}
     {}
 
-    [[nodiscard]] auto id() const -> Index
+    [[nodiscard]] auto id() const -> Size
     {
         return m_id;
     }
-    
+
 private:
-    Index m_id {};
+    Size m_id {};
 };
 
-class ManualScratchManager final {
+class NamedScratchManager final {
 public:
-    
-    explicit ManualScratchManager(Size scratch_size)
+    explicit NamedScratchManager(Size scratch_size)
         : m_scratch_size {scratch_size} {}
 
-    [[nodiscard]] auto get() -> ManualScratch;
-    auto put(ManualScratch) -> void;
+    [[nodiscard]] auto get() -> NamedScratch;
+    auto put(NamedScratch) -> void;
 
 private:
-    std::unordered_map<Index, std::string> m_occupied;
+    std::unordered_map<Size, std::string> m_occupied;
     std::list<std::string> m_available;
-    Index m_next_id {};
+    Size m_next_id {};
     Size m_scratch_size;
 };
 
-} // namespace cco
+} // namespace calico
 
-#endif // CCO_UTILS_SCRATCH_H
+#endif // CALICO_UTILS_SCRATCH_H

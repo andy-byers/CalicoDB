@@ -1,18 +1,18 @@
-#ifndef CCO_TREE_VALIDATION_H
-#define CCO_TREE_VALIDATION_H
+#ifndef CALICO_TREE_VALIDATION_H
+#define CALICO_TREE_VALIDATION_H
 
 #include "calico/common.h"
 
-namespace cco {
+namespace calico {
 
-class ITree;
+class Tree;
 
-auto validate_siblings(ITree&) -> void;
-auto validate_ordering(ITree&) -> void;
-auto validate_links(ITree&) -> void;
+auto validate_siblings(Tree &) -> void;
+auto validate_ordering(Tree &) -> void;
+auto validate_links(Tree &) -> void;
 
-auto print_keys(ITree&) -> void;
+auto print_keys(Tree &) -> void;
 
 } // cco
 
-#endif // CCO_TREE_VALIDATION_H
+#endif // CALICO_TREE_VALIDATION_H

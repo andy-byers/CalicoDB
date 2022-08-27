@@ -1,16 +1,14 @@
-#ifndef CCO_UTILS_UTILS_H
-#define CCO_UTILS_UTILS_H
+#ifndef CALICO_UTILS_UTILS_H
+#define CALICO_UTILS_UTILS_H
 
 #include "expect.h"
 #include "calico/bytes.h"
 #include <filesystem>
 
-namespace cco {
+namespace calico {
 
 static constexpr Size PAGE_ID_SIZE {sizeof(std::uint64_t)};
 static constexpr Size CELL_POINTER_SIZE {sizeof(std::uint16_t)};
-static constexpr Index NULL_ID_VALUE {0};
-static constexpr Index ROOT_ID_VALUE {1};
 
 static constexpr Size MIN_CELL_HEADER_SIZE = sizeof(std::uint16_t) + // Key size       (2B)
                                              sizeof(std::uint32_t);  // Value size     (4B)
@@ -19,17 +17,12 @@ static constexpr Size MAX_CELL_HEADER_SIZE = MIN_CELL_HEADER_SIZE +
                                              PAGE_ID_SIZE + // Left child ID  (4B)
                                              PAGE_ID_SIZE;  // Overflow ID    (4B)
 
-enum class PageType : uint16_t {
+enum class PageType : std::uint16_t {
     INTERNAL_NODE = 0x494E, // "IN"
     EXTERNAL_NODE = 0x4558, // "EX"
     OVERFLOW_LINK = 0x4F56, // "OV"
     FREELIST_LINK = 0x4652, // "FR"
 };
-
-inline auto Record::operator<(const Record &rhs) const -> bool
-{
-    return stob(key) < stob(rhs.key);
-}
 
 inline constexpr auto is_page_type_valid(PageType type) -> bool
 {
@@ -48,20 +41,20 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
 
 inline auto mem_copy(Bytes dst, BytesView src, size_t n) noexcept -> void *
 {
-    CCO_EXPECT_LE(n, src.size());
-    CCO_EXPECT_LE(n, dst.size());
+    CALICO_EXPECT_LE(n, src.size());
+    CALICO_EXPECT_LE(n, dst.size());
     return std::memcpy(dst.data(), src.data(), n);
 }
 
 inline auto mem_copy(Bytes dst, BytesView src) noexcept -> void *
 {
-    CCO_EXPECT_LE(src.size(), dst.size());
+    CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_copy(dst, src, src.size());
 }
 
 inline auto mem_clear(Bytes mem, size_t n) noexcept -> void *
 {
-    CCO_EXPECT_LE(n, mem.size());
+    CALICO_EXPECT_LE(n, mem.size());
     return std::memset(mem.data(), 0, n);
 }
 
@@ -72,22 +65,22 @@ inline auto mem_clear(Bytes mem) noexcept -> void *
 
 inline auto mem_move(Bytes dst, BytesView src, Size n) noexcept -> void *
 {
-    CCO_EXPECT_LE(n, src.size());
-    CCO_EXPECT_LE(n, dst.size());
+    CALICO_EXPECT_LE(n, src.size());
+    CALICO_EXPECT_LE(n, dst.size());
     return std::memmove(dst.data(), src.data(), n);
 }
 
 inline auto mem_move(Bytes dst, BytesView src) noexcept -> void *
 {
-    CCO_EXPECT_LE(src.size(), dst.size());
+    CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_move(dst, src, src.size());
 }
 
 inline auto mem_clear_safe(Bytes data, Size n) noexcept -> void *
 {
-    CCO_EXPECT_LE(n, data.size());
+    CALICO_EXPECT_LE(n, data.size());
     volatile auto *p = data.data();
-    for (Index i {}; i < n; ++i)
+    for (Size i {}; i < n; ++i)
         *p++ = 0;
     return data.data();
 }
@@ -97,6 +90,42 @@ inline auto mem_clear_safe(Bytes data) noexcept -> void *
     return mem_clear_safe(data, data.size());
 }
 
-} // namespace cco
+// Modified from an answer to https://stackoverflow.com/questions/29779825 by T.C..
+// Rather than depending on an additional template parameter, we restrict usage to
+// containers that expose a value_type member.
+template<class Container>
+using ElementOf = std::conditional_t<
+    std::is_lvalue_reference<Container>::value,
+    typename std::remove_reference_t<Container>::value_type&,
+    typename std::remove_reference_t<Container>::value_type&&>;
 
-#endif // CCO_UTILS_UTILS_H
+template<class Container, class T>
+[[nodiscard]]
+constexpr auto forward_like(T &&t) -> ElementOf<Container>
+{
+    return std::forward<ElementOf<Container>>(std::forward<T>(t));
+}
+
+[[nodiscard]]
+inline auto get_status_name(const Status &s) noexcept -> std::string
+{
+    if (s.is_ok()) {
+        return "OK";
+    } else if (s.is_not_found()) {
+        return "not found";
+    } else if (s.is_system_error()) {
+        return "system error";
+    } else if (s.is_logic_error()) {
+        return "logic error";
+    } else if (s.is_corruption()) {
+        return "corruption";
+    } else if (s.is_invalid_argument()) {
+        return "invalid argument";
+    } else {
+        return "unknown";
+    }
+}
+
+} // namespace calico
+
+#endif // CALICO_UTILS_UTILS_H

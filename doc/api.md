@@ -16,22 +16,22 @@ First, we create the database object using a public constructor.
 Next, we call `open()` to open the database connection.
 
 ```C++
-// Set some options. We'll create a database at "tmp/cats" with pages of size 8 KB and 
-// 128 cache frames (4 MB total). We'll also enable logging.
-cco::Options options;
-options.path = "/tmp/cats";
-options.page_size = 0x8000;
+// Create the database object. Note that we could just as easily use a smart pointer or
+// new/delete to manage the resource.
+calico::Database core;
+
+// Set some options. We'll create a database with pages of size 2 KB and 128 cache frames 
+// (1 MB total). We'll also enable logging with spdlog and put our WAL segments in a
+// different directory.
+calico::Options options;
+options.wal_path = "/tmp/cats_wal";
+options.page_size = 0x2000;
 options.frame_count = 128;
 options.log_level = spdlog::level::info;
 
-// Create the database object. Note that we could just as easily use a smart pointer or
-// new/delete to manage the resource.
-cco::Database db {options};
-
 // Open the database connection.
-if (const auto s = db.open(); !s.is_ok()) {
-    fmt::print("(1/2) cannot open database\n");
-    fmt::print("(2/2) (reason) {}\n", s.what());
+if (auto s = core.open("/tmp/cats", options); !s.is_ok()) {
+    fmt::print(stderr, "{}\n", s.what());
     std::exit(EXIT_FAILURE);
 }
 // This will be true until db.close() is called.
@@ -41,7 +41,9 @@ assert(db.is_open());
 ### Closing a Database
 
 ```C++
-assert(db.close().is_ok());
+if (auto s = core.close(); !s.is_ok()) {
+    fmt::print(stderr, "{}\n", s.what());
+}
 ```
 
 ### Bytes Objects
@@ -49,32 +51,32 @@ Calico DB uses `Bytes` and `BytesView` objects to represent unowned, contiguous 
 `Bytes` objects can modify the underlying data while `BytesView` objects cannot.
 
 ```C++
-auto function_taking_a_bytes_view = [](cco::BytesView) {};
+auto function_taking_a_bytes_view = [](calico::BytesView) {};
 
 std::string data {"Hello, world!"};
 
 // Construct slices from a string. The string still owns the memory, the slices just refer
 // to it.
-cco::Bytes b {data.data(), data.size()};
-cco::BytesView v {data.data(), data.size()};
+calico::Bytes b {data.data(), data.size()};
+calico::BytesView v {data.data(), data.size()};
 
 // Convenience conversion from a string.
-const auto from_string = cco::stob(data);
+const auto from_string = calico::stob(data);
 
 // Convenience conversion back to a string. This operation may allocate heap memory.
-assert(cco::btos(from_string) == data);
+assert(calico::btos(from_string) == data);
 
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
 function_taking_a_bytes_view(b);
 
-// advance() moves the start of the slice forward and truncate moves the end of the slice
+// advance_cursor() moves the start of the slice forward and truncate moves the end of the slice
 // backward.
-b.advance(7).truncate(5);
+b.advance_cursor(7).truncate(5);
 
 // Comparisons.
-assert(cco::compare_three_way(b, v) != cco::ThreeWayComparison::EQ);
-assert(b == cco::stob("world"));
-assert(b.starts_with(cco::stob("wor")));
+assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
+assert(b == calico::stob("world"));
+assert(b.starts_with(calico::stob("wor")));
 
 // Bytes objects can modify the underlying string, while BytesView objects cannot.
 b[0] = '\xFF';
@@ -83,10 +85,10 @@ assert(data[7] == '\xFF');
 
 ### Updating a Database
 Records can be added or removed using methods on the `Database` object.
-Keys are unique, so inserting a record that already exists will cause modification of the existing value.
+Keys are unique, so inserting a record that already file_exists will cause modification of the existing value.
 
 ```C++
-std::vector<cco::Record> records {
+std::vector<calico::Record> records {
     {"bengal", "short;spotted,marbled,rosetted"},
     {"turkish vankedisi", "long;white"},
     {"moose", "???"},
@@ -110,7 +112,7 @@ assert(db.insert("cyprus", "all;all").is_ok());
 assert(db.erase("badger").is_ok());
 
 // Erase a record using a cursor (see "Querying a Database" below).
-assert(db.erase(db.find_exact("moose")).is_ok());
+assert(db.erase(core.find_exact("moose")).is_ok());
 ```
 
 ### Querying a Database
@@ -118,7 +120,7 @@ The database is queried using cursors returned by the `find*()` methods.
 
 ```C++
 static constexpr auto target = "russian blue";
-const auto key = cco::stob(target);
+const auto key = calico::stob(target);
 
 // find_exact() looks for a record that compares equal to the given key and returns a cursor
 // pointing to it.
@@ -143,30 +145,59 @@ assert(db.find(prefix).key() == cursor.key());
 
 // Cursors can be used for range queries. They can traverse the database in sequential order,
 // or in reverse sequential order.
-for (auto c = db.find_minimum(); c.is_valid(); ++c) {}
-for (auto c = db.find_maximum(); c.is_valid(); --c) {}
+for (auto c = db.first(); c.is_valid(); ++c) {}
+for (auto c = db.last(); c.is_valid(); --c) {}
 
 // They also support equality comparison.
 if (const auto boundary = db.find_exact(key); boundary.is_valid()) {
-    for (auto c = db.find_minimum(); c.is_valid() && c != boundary; ++c) {}
-    for (auto c = db.find_maximum(); c.is_valid() && c != boundary; --c) {}
+    for (auto c = db.first(); c.is_valid() && c != boundary; ++c) {}
+    for (auto c = db.last(); c.is_valid() && c != boundary; --c) {}
 }
 ```
 
-### Errors
-Methods on the database object that can fail will generally return a `cco::Status` object (similar to and inspired by LevelDB's status object).
-If a method returning a cursor encounters an error, the error status will be made available in the cursor's status field.
-If an error occurs that could potentially lead to corruption of the database contents, the database object will lock up and refuse to perform any more work.
-Rather, the exceptional status that caused the lockup will be returned each time a method call is made.
-An error such as this could be caused, for example, by becoming unable to write to disk in the middle of a tree balancing operation.
-The lockup can be resolved by a successful call to abort(), which attempts roll back the current transaction.
-abort() is reentrant, so it can be called again if it fails.
-A good rule of thumb is that if one receives a system error from a call that can modify the database, i.e. insert(), erase(), or commit(), then one should try to abort().
-If this isn't possible, it's best to just exit the program.
-The next time that the database is started up, it will perform the necessary recovery.
+### Transactions
+In Calico DB, transactions are represented by `Transaction` objects.
+Any modifying operations that take place while a `Transaction` object T is live will take place within the transaction that T represents.
+Otherwise, database modifications behave as if they were atomic, incurring quite a bit of overhead from the additional commit operations.
+For this reason, if one wants to modify more than a few records at a time, it is best to do it in a transaction.
+
+```C++
+// Start the transaction.
+auto xact = db.start();
+
+// Modify the database.
+assert(db.erase(db.first()).is_ok());
+assert(db.erase(db.last()).is_ok());
+
+// Commit the transaction. If the transaction object goes out of scope before commit() is called,
+// it will attempt to abort the transaction.
+assert(xact.commit().is_ok());
+```
+
+Now imagine a situation where a transaction is unable to be completed for some reason.
+Say, for example, that we become unable to write to disk at some point, and an insert fails when rebalancing the tree.
+To avoid the possibility of corruption, we must refuse to perform any more work until our state can be guaranteed again.
+We can attempt to restore our state by calling `abort()` on the transaction object.
+We can call `abort()` as many times as we want, until it succeeds.
+If we are unable to abort, we must exit and recover on the next startup.
+
+```C++
+auto xact = db.start();
+
+// Fail to insert a record.
+auto s = db.insert("key", "value");
+assert(s.is_system_error());
+
+// At this point, the database status should reflect this same error.
+assert(db.status().is_system_error());
+
+// If we are able to abort, the OK status will be restored, and we can continue using the database.
+assert(xact.abort().is_ok());
+assert(db.status().is_ok());
+```
 
 ### Deleting a Database
 ```C++
 // We can delete a database by passing ownership to the following static method.
-cco::Database::destroy(std::move(db));
+calico::Database::destroy(std::move(core));
 ```

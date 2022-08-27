@@ -1,6 +1,6 @@
 #include "random.h"
 
-namespace cco {
+namespace calico {
 
 /**
  * Create a random number generator with a default seed.

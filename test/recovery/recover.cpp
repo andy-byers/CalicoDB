@@ -9,14 +9,14 @@
 #  error "This test must run with assertions enabled"
 #endif
 
-using namespace cco;
+using namespace calico;
 namespace fs = std::filesystem;
 
 static constexpr Size KEY_WIDTH {12};
 
 auto show_usage()
 {
-    std::cout << "usage: recover PATH N\n";
+    std::cout << "usage: ensure_consistent_state PATH N\n";
     std::cout << "  Parameters\n";
     std::cout << "==============\n";
     std::cout << "PATH: Path at which to look for the database\n";
@@ -42,32 +42,33 @@ auto main(int argc, const char *argv[]) -> int
     {
         std::string line;
         std::ifstream ifs {value_path};
-        CCO_EXPECT_TRUE(ifs.is_open());
+        CALICO_EXPECT_TRUE(ifs.is_open());
         while (std::getline(ifs, line))
             values.emplace_back(line);
     }
     Options options;
-    options.path = path;
-    Database db {options};
-    CCO_EXPECT_OK(db.open());
+    Database db;
+    expect_ok(db.open(path, options));
     const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.
-    CCO_EXPECT_EQ(info.record_count(), num_committed);
+    CALICO_EXPECT_EQ(info.record_count(), num_committed);
 
-    Index key_counter {};
+    Size key_counter {};
+    auto xact = db.transaction();
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
         const auto cursor = db.find_exact(stob(key));
-        CCO_EXPECT_TRUE(cursor.is_valid());
-        CCO_EXPECT_EQ(btos(cursor.key()), key);
-        CCO_EXPECT_EQ(cursor.value(), value);
-        CCO_EXPECT_OK(db.erase(stob(key)));
+        CALICO_EXPECT_TRUE(cursor.is_valid());
+        CALICO_EXPECT_EQ(btos(cursor.key()), key);
+        CALICO_EXPECT_EQ(cursor.value(), value);
+        expect_ok(db.erase(stob(key)));
     }
+    CALICO_EXPECT_TRUE(xact.commit().is_ok());
 
     // All records should have been reached and removed.
-    CCO_EXPECT_EQ(key_counter, num_committed);
-    CCO_EXPECT_EQ(info.record_count(), 0);
-    CCO_EXPECT_OK(Database::destroy(std::move(db)));
+    CALICO_EXPECT_EQ(key_counter, num_committed);
+    CALICO_EXPECT_EQ(info.record_count(), 0);
+    expect_ok(Database::destroy(std::move(db)));
     return 0;
 }
