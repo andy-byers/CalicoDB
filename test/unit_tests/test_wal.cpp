@@ -850,7 +850,7 @@ public:
         reader = std::make_unique<BasicWalReader>(
             *store,
             ROOT,
-            BLOCK_SIZE
+            PAGE_SIZE
         );
 
         writer = std::make_unique<BasicWalWriter>(BasicWalWriter::Parameters {
@@ -886,7 +886,7 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
 
     writer->start();
     for (Size i {}; i < NUM_RECORDS; ++i) {
-        images.emplace_back(random.next_string(0x80));
+        images.emplace_back(random.next_string(PAGE_SIZE));
         deltas.emplace_back(generator.setup_deltas(stob(images.back())));
         writer->log_deltas(PageId::root(), stob(images.back()), deltas[i]);
     }
@@ -920,7 +920,7 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
 
     writer->start();
     for (Size i {}; i < NUM_RECORDS; ++i) {
-        images.emplace_back(random.next_string(0x80));
+        images.emplace_back(random.next_string(PAGE_SIZE));
         writer->log_full_image(PageId::from_index(i), stob(images.back()));
     }
     writer->stop();

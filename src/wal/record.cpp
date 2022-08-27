@@ -178,7 +178,7 @@ static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> S
         if (rhs.type == LAST_TYPE)
             lhs.type = WalRecordHeader::FULL;
     }
-    lhs.size += rhs.size;
+    lhs.size = static_cast<std::uint16_t>(lhs.size + rhs.size);
     return Status::ok();
 }
 

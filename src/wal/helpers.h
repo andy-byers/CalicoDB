@@ -15,6 +15,18 @@ namespace calico {
 
 class WalRecordWriter;
 
+[[nodiscard]]
+inline auto wal_block_size(Size page_size) -> Size
+{
+    return std::min(MAXIMUM_PAGE_SIZE, page_size * WAL_BLOCK_SCALE);
+}
+
+[[nodiscard]]
+inline auto wal_scratch_size(Size page_size) -> Size
+{
+    return page_size * WAL_SCRATCH_SCALE;
+}
+
 class WalBuffer final {
 public:
     explicit WalBuffer(Size size)

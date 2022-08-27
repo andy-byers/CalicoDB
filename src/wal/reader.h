@@ -24,8 +24,8 @@ public:
     using UndoIterator = PositionList::const_reverse_iterator;
 
     explicit BasicWalReader(Storage &store, std::string prefix, Size page_size)
-        : m_redo_reader {page_size * WAL_BLOCK_SCALE},
-          m_undo_reader {page_size * WAL_BLOCK_SCALE},
+        : m_redo_reader {wal_block_size(page_size)},
+          m_undo_reader {wal_block_size(page_size)},
           m_redo_filter {[](auto type) {
               return type == WalPayloadType::DELTAS || type == WalPayloadType::COMMIT;
           }},
@@ -33,7 +33,7 @@ public:
               return type == WalPayloadType::FULL_IMAGE;
           }},
           m_prefix {std::move(prefix)},
-          m_payload(page_size * WAL_SCRATCH_SCALE, '\x00'),
+          m_payload(wal_scratch_size(page_size), '\x00'),
           m_store {&store}
     {}
 

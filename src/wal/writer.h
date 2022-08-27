@@ -300,14 +300,14 @@ public:
 
     explicit BasicWalWriter(const Parameters &param)
         : m_flushed_lsn {param.flushed_lsn},
-          m_scratch {param.page_size * WAL_SCRATCH_SCALE},
+          m_scratch {wal_scratch_size(param.page_size)},
           m_background {{
               param.store,
               &m_scratch,
               param.collection,
               m_flushed_lsn,
               param.dirname,
-              param.page_size * WAL_BLOCK_SCALE,
+              wal_block_size(param.page_size),
               param.wal_limit,
           }}
     {}

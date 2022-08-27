@@ -37,7 +37,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 
 ## Caveats
 + Currently, Calico DB only runs on 64-bit Ubuntu and OSX
-+ Has a hard limit on key length, equal to roughly $\frac{1}{4}$ of the page size (anywhere from 29 B to ~16 KB)
++ Has a hard limit on key length (anywhere from 29 B to ~16 KB, depending on the page size)
 + Has a hard limit on value length, equal to roughly 4 GB
 + Only one transaction may be running at any given time
 + Doesn't provide synchronization past support for concurrent cursors
