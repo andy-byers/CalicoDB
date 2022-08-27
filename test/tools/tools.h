@@ -272,7 +272,8 @@ namespace tools {
 
 } // tools
 
-template<std::size_t Length = 20> auto make_key(Size key) -> std::string
+template<std::size_t Length = 20>
+auto make_key(Size key) -> std::string
 {
     auto key_string = std::to_string(key);
     return std::string(Length - key_string.size(), '0') + key_string;

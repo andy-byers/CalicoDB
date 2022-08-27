@@ -150,7 +150,7 @@ auto BPlusTree::find_minimum() -> Cursor
     }
     auto node = m_pool.acquire(id, false);
     if (!node.has_value()) {
-        CursorInternal::invalidate(cursor, temp.error());
+        CursorInternal::invalidate(cursor, node.error());
         return cursor;
     }
     CALICO_EXPECT_EQ(index, 0);
@@ -173,7 +173,7 @@ auto BPlusTree::find_maximum() -> Cursor
     }
     auto node = m_pool.acquire(id, false);
     if (!node.has_value()) {
-        CursorInternal::invalidate(cursor, temp.error());
+        CursorInternal::invalidate(cursor, node.error());
         return cursor;
     }
     CALICO_EXPECT_EQ(index, node->cell_count() - 1);

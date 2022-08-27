@@ -5,7 +5,6 @@
 #include "store/disk.h"
 #include "utils/logging.h"
 #include "utils/types.h"
-#include <chrono>
 #include <thread>
 
 namespace calico {
@@ -23,12 +22,10 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
         return Err {message.system_error()};
     }
 
-    fs::path root {param.root};
-    root /= DATA_FILENAME;
-
     // Open the database file.
     RandomEditor *file {};
-    auto s = param.storage.open_random_editor(root, &file);
+    auto s = param.storage.open_random_editor(param.prefix + DATA_FILENAME, &file);
+    if (!s.is_ok()) return Err {s};
 
     CALICO_TRY_STORE(pager->m_framer, Framer::open(
         std::unique_ptr<RandomEditor> {file},
@@ -42,7 +39,8 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
 BasicPager::BasicPager(const Parameters &param)
     : m_logger {create_logger(param.log_sink, "pager")},
       m_wal {&param.wal},
-      m_status {&param.status}
+      m_status {&param.status},
+      m_has_xact {&param.has_xact}
 {
     m_logger->info("constructing BasicPager instance");
 }
@@ -88,22 +86,33 @@ auto BasicPager::flush() -> Status
     CALICO_EXPECT_EQ(m_ref_sum, 0);
 
     for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
-        CALICO_EXPECT_NE(m_registry.get(*itr), m_registry.end());
-        auto entry = m_registry.get(*itr)->second;
-        const auto page_lsn = m_framer->frame_at(entry.frame_id).lsn();
+        CALICO_EXPECT_TRUE(m_registry.contains(*itr));
+        auto &entry = m_registry.get(*itr)->second;
+        const auto frame_id = entry.frame_id;
+        const auto page_lsn = m_framer->frame_at(frame_id).lsn();
+        const auto page_id = *itr;
+        const auto in_range = page_id.as_index() < m_framer->page_count();
+        auto s = Status::ok();
 
-        if (page_lsn > m_wal->flushed_lsn()) {
-            LogMessage message {*m_logger};
-            message.set_primary("could not flush");
-            message.set_detail("WAL has pending updates");
-            message.set_hint("flush the WAL and try again");
-            return message.logic_error();
-        }
-        auto s = m_framer->unpin(entry.frame_id, true);
-        if (!s.is_ok()) return s;
-        m_registry.erase(*itr);
+        // "entry" is a reference.
         entry.dirty_token.reset();
         itr = m_dirty.remove(itr);
+
+        if (in_range) {
+            if (page_lsn > m_wal->flushed_lsn()) {
+                LogMessage message {*m_logger};
+                message.set_primary("could not flush");
+                message.set_detail("WAL has pending updates");
+                message.set_hint("flush the WAL and try again");
+                return message.logic_error();
+            }
+            s = m_framer->write_back(frame_id);
+            if (!s.is_ok()) return s;
+        } else {
+            // Get rid of all pages that are not in range. This should only happen after pages are deleted during abort() or recovery.
+            m_registry.erase(page_id);
+            m_framer->unpin(frame_id);
+        }
     }
     return m_framer->sync();
 }
@@ -140,15 +149,16 @@ auto BasicPager::try_make_available() -> Result<bool>
 
     auto &[pid, entry] = *itr;
     auto &[frame_id, dirty_token] = entry;
-    const auto was_dirty = dirty_token.has_value();
-    auto s = m_framer->unpin(frame_id, was_dirty);
-    if (!s.is_ok()) return Err {s};
-
-    if (was_dirty) {
+    auto s = Status::ok();
+    if (dirty_token.has_value()) {
+        // We remove the frame's "dirty" status, even if the write failed.
+        s = m_framer->write_back(frame_id);
         m_dirty.remove(*dirty_token);
         dirty_token.reset();
     }
+    m_framer->unpin(frame_id);
     m_registry.erase(pid);
+    if (!s.is_ok()) return Err {s};
     return true;
 }
 
@@ -157,15 +167,15 @@ auto BasicPager::release(Page page) -> Status
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_ref_sum, 0);
 
+    auto s = Status::ok();
     if (const auto deltas = page.collect_deltas(); m_wal->is_writing() && !deltas.empty()) {
         page.set_lsn(SequenceId {m_wal->current_lsn()});
-        auto s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
+        s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
 
         if (!s.is_ok()) {
             *m_status = s;
             m_logger->error("could not write page deltas to WAL");
             m_logger->error("(reason) {}", s.what());
-            return s;
         }
     }
 
@@ -173,7 +183,7 @@ auto BasicPager::release(Page page) -> Status
     auto &entry = m_registry.get(page.id())->second;
     m_framer->unref(entry.frame_id, page);
     m_ref_sum--;
-    return Status::ok();
+    return s;
 }
 
 auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
@@ -186,6 +196,7 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
         m_dirty_count++;
     }
 
+    // TODO: We also have info about whether or not we should watch this page. Like *m_has_xact? Although that may break abort() since it doesn't set *m_has_xact to false until it is totally finished...
     if (m_wal->is_writing()) {
         auto s = m_wal->log_image(page.id().value, page.view(0));
 
@@ -226,8 +237,9 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     CALICO_EXPECT_FALSE(id.is_null());
     std::lock_guard lock {m_mutex};
 
-    if (!m_status->is_ok())
-        return Err {*m_status};
+    // TODO: Handling this at a higher level!
+//    if (!m_status->is_ok())
+//        return Err {*m_status};
 
     const auto do_acquire = [this, is_writable](auto &entry) {
         m_ref_sum++;
@@ -254,7 +266,14 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 
         if (!s.is_not_found()) {
             m_logger->error(s.what());
-            *m_status = s;
+
+            // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
+            // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
+            // data races on this check.
+            if (*m_has_xact) {
+                m_logger->error("setting database error state");
+                *m_status = s;
+            }
             return Err {s};
         }
     }

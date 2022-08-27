@@ -84,9 +84,10 @@ public:
     ~Framer() = default;
     [[nodiscard]] static auto open(std::unique_ptr<RandomEditor>, WriteAheadLog&, Size, Size) -> Result<std::unique_ptr<Framer>>;
     [[nodiscard]] auto pin(PageId) -> Result<FrameNumber>;
-    [[nodiscard]] auto unpin(FrameNumber, bool) -> Status;
+    [[nodiscard]] auto write_back(FrameNumber) -> Status;
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto ref(FrameNumber, Pager&, bool, bool) -> Page;
+    auto unpin(FrameNumber) -> void;
     auto unref(FrameNumber, Page&) -> void;
     auto discard(FrameNumber) -> void;
     auto load_state(const FileHeader&) -> void;

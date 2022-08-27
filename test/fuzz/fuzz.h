@@ -11,7 +11,7 @@ class InstructionParser {
 public:
     struct Parsed {
         std::vector<BytesView> segments;
-        Index opcode {};
+        Size opcode {};
         Size size {};
     };
 
@@ -60,7 +60,7 @@ private:
     Database m_db;
 };
 
-} // cco
+} // namespace calico
 
 
 #endif // CALICO_FUZZ_FUZZ_H

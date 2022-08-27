@@ -38,15 +38,11 @@ This causes often-used entries to remain in the cache, and seldom-used entries t
 Check out https://arpitbhayani.me/blogs/2q-cache for a better description of 2Q.
 For reference, we are using something like the simplified version from this article.
 
-[//]: # (TODO: May upgrade to the full 2Q algorithm, which uses another queue, if deemed necessary for performance. However, it seems to work pretty well as-is.)
-
 ## Dirty List
-The pager cache can contain anywhere from 8 to 8192 entries.
-It can be pretty expensive to repeatedly search this many entries when looking for a frame to reuse.
-To help mitigate this cost, we keep a dirty list.
-The dirty list is a linked list containing the page IDs of dirty database pages.
+The pager cache can contain anywhere from 8 to 8 K entries.
+It can be pretty expensive to repeatedly search this many entries when attempting to flush the cache, which happens during the abort routine.
+In order to make abort-heavy workloads faster, we keep a dirty list which lets us iterate over exactly the pages that are dirty.
+The dirty list is a linked list containing the page IDs of all dirty database pages.
 As mentioned above in [Page Cache](#page-cache), each page cache entry stores a pointer to a dirty list entry.
 This allows one to find a dirty list entry in constant time, given its associated page cache entry.
 Similarly, we can use the page ID contained in a dirty list entry to fetch the associated page cache entry.
-
-[//]: # (TODO: The dirty list is not implemented. Not entirely sure if we need it, but I believe the above design would work. I'll be refactoring the page cache so that this design works, as it should be better in other ways too!)

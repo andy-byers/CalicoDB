@@ -17,10 +17,11 @@ class Framer;
 class BasicPager : public Pager {
 public:
     struct Parameters {
-        std::string root;
+        std::string prefix;
         Storage &storage;
         WriteAheadLog &wal;
         Status &status;
+        bool &has_xact;
         spdlog::sink_ptr log_sink;
         Size frame_count {};
         Size page_size {};
@@ -67,6 +68,7 @@ private:
     PageList m_dirty;
     PageRegistry m_registry;
     Status *m_status {};
+    bool *m_has_xact {};
     Size m_dirty_count {};
     Size m_ref_sum {};
 };

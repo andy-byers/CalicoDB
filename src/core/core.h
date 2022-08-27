@@ -97,6 +97,7 @@ public:
 
 private:
     auto forward_status(Status, const std::string &) -> Status;
+    auto save_and_forward_status(Status, const std::string &) -> Status;
     [[nodiscard]] auto ensure_consistent_state() -> Status;
     [[nodiscard]] auto atomic_insert(BytesView, BytesView) -> Status;
     [[nodiscard]] auto atomic_erase(Cursor) -> Status;

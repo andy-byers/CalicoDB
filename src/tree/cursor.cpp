@@ -78,6 +78,7 @@ auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
         return;
 
     auto node = cursor.m_pool->acquire(PageId {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
+    CALICO_EXPECT_TRUE(node.has_value());
     node->TEST_validate();
 }
 

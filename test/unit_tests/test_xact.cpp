@@ -5,23 +5,12 @@
 #include "calico/bytes.h"
 #include "calico/options.h"
 #include "calico/store.h"
-#include "calico/transaction.h"
 #include "core/core.h"
-#include "fakes.h"
 #include "pager/basic_pager.h"
-#include "pager/framer.h"
-#include "store/disk.h"
-#include "store/system.h"
-#include "tools.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
-#include "utils/layout.h"
-#include "utils/logging.h"
-#include "utils/utils.h"
-#include "wal/basic_wal.h"
-#include "wal/helpers.h"
-#include "wal/reader.h"
-#include "wal/writer.h"
+#include "fakes.h"
+#include "tools.h"
 
 namespace {
 
@@ -33,33 +22,33 @@ public:
     auto SetUp() -> void override
     {
         options.page_size = 0x400;
-        options.frame_count = 64;
+        options.frame_count = 32;
         options.log_level = spdlog::level::trace;
         options.store = store.get();
 
-        ASSERT_TRUE(expose_message(core.open(ROOT, options)));
+        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
     }
 
     auto TearDown() -> void override
     {
-        ASSERT_TRUE(expose_message(core.close()));
+        ASSERT_TRUE(expose_message(db.close()));
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
     Random random {123};
     Options options;
-    Core core;
+    Core db;
 };
 
 TEST_F(XactTests, NewDatabaseIsOk)
 {
-    ASSERT_TRUE(expose_message(core.status()));
+    ASSERT_TRUE(expose_message(db.status()));
 }
 
 template<class Action>
 static auto with_xact(XactTests &test, const Action &action)
 {
-    auto xact = test.core.transaction();
+    auto xact = test.db.transaction();
     action();
     ASSERT_TRUE(expose_message(xact.commit()));
 }
@@ -68,7 +57,7 @@ static auto insert_1000_records(XactTests &test)
 {
     auto records = test.generator.generate(test.random, 1'000);
     for (const auto &r: records) {
-        EXPECT_TRUE(expose_message(test.core.insert(stob(r.key), stob(r.value))));
+        EXPECT_TRUE(expose_message(test.db.insert(stob(r.key), stob(r.value))));
     }
     return records;
 }
@@ -76,56 +65,55 @@ static auto insert_1000_records(XactTests &test)
 auto erase_1000_records(XactTests &test)
 {
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(expose_message(test.core.erase(test.core.first())));
+        ASSERT_TRUE(expose_message(test.db.erase(test.db.first())));
     }
 }
 
 TEST_F(XactTests, AbortFirstXact)
 {
-    auto xact = core.transaction();
+    auto xact = db.transaction();
     insert_1000_records(*this);
     ASSERT_TRUE(expose_message(xact.abort()));
-    ASSERT_EQ(core.info().record_count(), 0);
+    ASSERT_EQ(db.info().record_count(), 0);
 
     // Normal operations after abort should work.
-    insert_1000_records(*this);
-    ASSERT_EQ(core.info().record_count(), 1'000);
+    with_xact(*this, [this] {insert_1000_records(*this);});
 }
 
 TEST_F(XactTests, CommitIsACheckpoint)
 {
     with_xact(*this, [this] {insert_1000_records(*this);});
 
-    auto xact = core.transaction();
+    auto xact = db.transaction();
     ASSERT_TRUE(expose_message(xact.abort()));
-    ASSERT_EQ(core.info().record_count(), 1'000);
+    ASSERT_EQ(db.info().record_count(), 1'000);
 }
 
 TEST_F(XactTests, KeepsCommittedRecords)
 {
     with_xact(*this, [this] {insert_1000_records(*this);});
 
-    auto xact = core.transaction();
+    auto xact = db.transaction();
     erase_1000_records(*this);
     ASSERT_TRUE(expose_message(xact.abort()));
-    ASSERT_EQ(core.info().record_count(), 1'000);
+    ASSERT_EQ(db.info().record_count(), 1'000);
 
     // Normal operations after abort should work.
     with_xact(*this, [this] {erase_1000_records(*this);});
-    ASSERT_EQ(core.info().record_count(), 0);
+    ASSERT_EQ(db.info().record_count(), 0);
 }
 
 template<class Test, class Itr>
 auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
 {
     for (auto itr = begin; itr != end; ++itr) {
-        EXPECT_TRUE(expose_message(test.core.insert(stob(itr->key), stob(itr->value))));
+        EXPECT_TRUE(expose_message(test.db.insert(stob(itr->key), stob(itr->value))));
     }
 
     std::vector<Record> committed;
     for (auto itr = begin; itr != end; ++itr) {
         if (test.random.next_int(5) == 0) {
-            EXPECT_TRUE(expose_message(test.core.erase(stob(itr->key))));
+            EXPECT_TRUE(expose_message(test.db.erase(stob(itr->key))));
         } else {
             committed.emplace_back(*itr);
         }
@@ -139,18 +127,18 @@ TEST_F(XactTests, AbortRestoresPriorState)
     const auto path = ROOT + std::string {DATA_FILENAME};
     const auto records = generator.generate(random, NUM_RECORDS);
 
-    auto xact = core.transaction();
+    auto xact = db.transaction();
     auto committed = run_random_operations(*this, cbegin(records), cbegin(records) + NUM_RECORDS/2);
     ASSERT_TRUE(expose_message(xact.commit()));
 
-    xact = core.transaction();
+    xact = db.transaction();
     run_random_operations(*this, cbegin(records) + NUM_RECORDS/2, cend(records));
     ASSERT_TRUE(expose_message(xact.abort()));
 
     // The database should contain exactly these records.
-    ASSERT_EQ(core.info().record_count(), committed.size());
+    ASSERT_EQ(db.info().record_count(), committed.size());
     for (const auto &[key, value]: committed) {
-        ASSERT_TRUE(tools::contains(core, key, value));
+        ASSERT_TRUE(tools::contains(db, key, value));
     }
 }
 
@@ -164,7 +152,7 @@ auto run_random_transactions(Test &test, Size n)
     std::vector<Record> committed;
 
     for (Size i {}; i < n; ++i) {
-        auto xact = test.core.transaction();
+        auto xact = test.db.transaction();
         const auto start = cbegin(all_records) + static_cast<long>(XACT_SIZE * i);
         const auto temp = run_random_operations(test, start, start + XACT_SIZE);
         if (test.random.next_int(4UL) == 0) {
@@ -180,25 +168,25 @@ auto run_random_transactions(Test &test, Size n)
 TEST_F(XactTests, SanityCheck)
 {
     for (const auto &[key, value]: run_random_transactions(*this, 20)) {
-        ASSERT_TRUE(tools::contains(core, key, value));
+        ASSERT_TRUE(tools::contains(db, key, value));
     }
 }
 
 TEST_F(XactTests, PersistenceSanityCheck)
 {
-    ASSERT_TRUE(expose_message(core.close()));
+    ASSERT_TRUE(expose_message(db.close()));
     std::vector<Record> committed;
 
     for (Size i {}; i < 5; ++i) {
-        ASSERT_TRUE(expose_message(core.open(ROOT, options)));
+        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
         const auto current = run_random_transactions(*this, 10);
         committed.insert(cend(committed), cbegin(current), cend(current));
-        ASSERT_TRUE(expose_message(core.close()));
+        ASSERT_TRUE(expose_message(db.close()));
     }
 
-    ASSERT_TRUE(expose_message(core.open(ROOT, options)));
+    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
     for (const auto &[key, value]: committed) {
-        ASSERT_TRUE(tools::contains(core, key, value));
+        ASSERT_TRUE(tools::contains(db, key, value));
     }
 }
 
@@ -208,7 +196,7 @@ TEST_F(XactTests, AtomicOperationSanityCheck)
     const auto committed = run_random_operations(*this, cbegin(all_records), cend(all_records));
 
     for (const auto &[key, value]: committed) {
-        ASSERT_TRUE(tools::contains(core, key, value));
+        ASSERT_TRUE(tools::contains(db, key, value));
     }
 }
 
@@ -220,45 +208,323 @@ public:
 
     auto SetUp() -> void override
     {
-//        EXPECT_CALL(mock_store(), open_random_editor).Times(2);
-//        EXPECT_CALL(mock_store(), open_random_reader).Times(1);
-//        EXPECT_CALL(mock_store(), open_append_writer).Times(1);
         Options options;
         options.page_size = 0x200;
         options.frame_count = 16;
-//        options.store = store.get();
-        ASSERT_TRUE(expose_message(db.open(ROOT + std::string {"__"}, options)));
-
-//        EXPECT_CALL(*data_mock(), sync).Times(1);
+        options.store = store.get();
+        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        editor_mock = mock_store().get_mock_random_editor(PREFIX + std::string {DATA_FILENAME});
     }
 
     [[nodiscard]]
     auto data_mock() -> MockRandomEditor*
     {
-        return mock_store().get_mock_random_editor(DATA_FILENAME);
+        return editor_mock;
     }
 
     [[nodiscard]]
     auto wal_writer_mock(SegmentId id) -> MockAppendWriter*
     {
-        return mock_store().get_mock_append_writer(ROOT + id.to_name());
+        return mock_store().get_mock_append_writer(PREFIX + id.to_name()); // TODO: Need some way to get mocks for the latest WAL segment...
+                                                                        //       This won't work right now!
     }
 
-    [[nodiscard]]
-    auto wal_reader_mock(SegmentId id) -> MockRandomReader*
-    {
-        return mock_store().get_mock_random_reader(ROOT + id.to_name());
-    }
-
+    MockRandomEditor *editor_mock {};
+    Random random {42};
     Database db;
 };
 
+#define FAIL_ON_NTH_READ(mock, n) \
+    do { \
+        int counter {}; \
+        ON_CALL(*(mock), read) \
+            .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) { \
+                return counter++ < (n) ? (mock)->real().read(out, offset) : Status::system_error("42"); \
+            })); \
+    } while (0)
 
+#define FAIL_ON_NTH_WRITE(mock, n) \
+    do { \
+        int counter {}; \
+        ON_CALL(*(mock), write) \
+            .WillByDefault(testing::Invoke([&counter, this](BytesView in, Size offset) { \
+                return counter++ < (n) ? (mock)->real().write(in, offset) : Status::system_error("42"); \
+            })); \
+    } while (0)
 
-TEST_F(FailureTests, A)
+#define FAIL_ON_NTH_APPEND(mock, n) \
+    do { \
+        int counter {}; \
+        ON_CALL(*(mock), write) \
+            .WillByDefault(testing::Invoke([&counter, this](BytesView in) { \
+                return counter++ < (n) ? (mock)->real().write(in) : Status::system_error("42"); \
+            })); \
+    } while (0)
+
+//auto cleanup_with_failed_abort(FailureTests &test, Transaction &xact)
+//{
+//    FAIL_ON_N(*test.data_mock(), read, 0);
+//    FAIL_ON_N(*test.data_mock(), write, 0);
+////    FAIL_ON_N(*test.latest_wal_reader_mock(), read, 0);
+////    FAIL_ON_N(*test.latest_wal_writer_mock(), write, 0);
+//
+//    // This abort should fail.
+//    const auto s = xact.abort();
+//    ASSERT_FALSE(s.is_ok());
+//
+//    // Since every read or write failed immediately, we should be on the same WAL segment. We were unable to roll back,
+//    // so we cannot get rid of the WAL segment, otherwise we run the risk of losing data.
+//    test.data_mock()->delegate_to_real();
+////    test.latest_wal_reader_mock()->delegate_to_real();
+////    test.latest_wal_writer_mock()->delegate_to_real();
+//}
+
+auto assert_is_failure_status(const Status &s)
 {
-//    auto *mock = data_mock();
-//    (void)mock;
+    ASSERT_TRUE(s.is_system_error() and s.what() == "42") << s.what();
 }
+
+//auto cleanup_with_successful_abort(FailureTests &test, Transaction &xact)
+//{
+//    test.data_mock()->delegate_to_real();
+//
+//    // This abort should succeed.
+//    const auto s = xact.abort();
+//    ASSERT_TRUE(s.is_ok());
+//}
+
+auto add_sequential_records(Database &db, Size n)
+{
+    for (Size i {}; i < n; ++i) {
+        const auto key = make_key(i);
+        ASSERT_TRUE(expose_message(db.insert(key, key)));
+    }
+}
+
+auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
+{
+    RecordGenerator::Parameters param;
+    param.mean_key_size = 16;
+    param.mean_value_size = 100;
+    param.is_unique = true;
+    param.spread = 0;
+    RecordGenerator generator {param};
+
+    const auto info = test.db.info();
+    auto s = Status::ok();
+
+    for (Size i {}; i < limit; ++i) {
+        for (const auto &[key, value]: generator.generate(test.random, 100)) {
+            // insert()/erase() exercises data file reading and writing, and WAL file writing.
+            if (test.random.next_int(4) == 0 && info.record_count()) {
+                s = test.db.erase(test.db.first());
+            } else {
+                s = test.db.insert(key, value);
+            }
+            if (!s.is_ok()) return s;
+        }
+    }
+    return Status::ok();
+}
+
+TEST_F(FailureTests, DataReadErrorIsPropagatedDuringModify)
+{
+    int counter {};
+    ON_CALL(*editor_mock, read)
+        .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) {
+            return counter++ < 5 ? editor_mock->real().read(out, offset) : Status::system_error("42");
+        }));
+
+    // Modify the database until a write() call fails.
+    auto xact = db.transaction();
+    auto s = modify_until_failure(*this);
+    assert_is_failure_status(s);
+
+    // The database status should reflect the error returned by write().
+    s = db.status();
+    assert_is_failure_status(s);
+}
+
+TEST_F(FailureTests, DataWriteErrorIsPropagatedDuringModify)
+{
+    ON_CALL(*editor_mock, write)
+        .WillByDefault(testing::Return(Status::system_error("42")));
+
+    // Modify the database until a write() call fails.
+    auto xact = db.transaction();
+    auto s = modify_until_failure(*this);
+    assert_is_failure_status(s);
+
+    // The database status should reflect the error returned by write().
+    s = db.status();
+    assert_is_failure_status(s);
+}
+
+// TODO: WAL file mocks don't work properly. We don't even create WAL readers until we roll the log and the writer is created in another thread
+//       and we don't know when it is finished...
+//TEST_F(FailureTests, WalReadErrorIsPropagatedDuringModify)
+//{
+//    FAIL_ON_NTH_READ(*wal_reader_mock(SegmentId {1}), 5);
+//
+//    // We need to get the WAL reader to open on the first segment
+//    {
+//
+//    }
+//
+//    auto xact = db.transaction();
+//    auto s = modify_until_failure(*this, xact);
+//    assert_is_failure_status(s);
+//
+//    // The database status should reflect the error returned by write().
+//    s = db.status();
+//    assert_is_failure_status(s);
+//}
+//
+//TEST_F(FailureTests, WalWriteErrorIsPropagatedDuringModify)
+//{
+//    // Modify the database until a write() call fails.
+//    auto xact = db.transaction();
+//
+//    FAIL_ON_NTH_APPEND(*wal_writer_mock(SegmentId {1}), 5);
+//
+//    auto s = modify_until_failure(*this, xact);
+//    assert_is_failure_status(s);
+//
+//    // The database status should reflect the error returned by write().
+//    s = db.status();
+//    assert_is_failure_status(s);
+//}
+
+TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
+{
+    add_sequential_records(db, 500);
+    int counter {};
+    ON_CALL(*editor_mock, read)
+        .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) {
+            return counter++ < 5 ? editor_mock->real().read(out, offset) : Status::system_error("42");
+        }));
+
+    // Iterate until a read() call fails.
+    auto c = db.first();
+    for (; c.is_valid(); ++c) {}
+
+    // The error in the cursor should reflect the read() error.
+    auto s = c.status();
+    assert_is_failure_status(s);
+
+    // The database status should still be OK. Errors during reads cannot corrupt or even modify the database state.
+    s = db.status();
+    ASSERT_TRUE(s.is_ok()) << s.what();
+}
+
+TEST_F(FailureTests, DatabaseNeverWritesDuringQueryAfterPagesAreFlushed)
+{
+    add_sequential_records(db, 500);
+
+    // This will cause all dirty pages to eventually be evicted to make room.
+    auto c = db.first();
+    for (; c.is_valid(); ++c) {}
+
+    // Further writes to the data file will fail.
+    ON_CALL(*editor_mock, write)
+        .WillByDefault(testing::Return(Status::system_error("42")));
+
+    // We should be able to iterate through all pages without any writes occurring.
+    c = db.first();
+    for (; c.is_valid(); ++c) {}
+
+    auto s = c.status();
+    ASSERT_TRUE(s.is_not_found()) << s.what();
+
+    s = db.status();
+    ASSERT_TRUE(s.is_ok()) << s.what();
+}
+
+TEST_F(FailureTests, AbortRestoresStateAfterDataReadError)
+{
+    int counter {};
+    ON_CALL(*editor_mock, read)
+        .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) {
+            return counter++ == 2 ? Status::system_error("42") : editor_mock->real().read(out, offset);
+        }));
+
+    auto xact = db.transaction();
+    auto s = modify_until_failure(*this);
+    assert_is_failure_status(s);
+
+    s = db.status();
+    assert_is_failure_status(s);
+
+    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_TRUE(expose_message(db.status()));
+}
+
+TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
+{
+    int counter {};
+    ON_CALL(*editor_mock, read)
+        .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) {
+            return counter++ == 2 ? Status::system_error("42") : editor_mock->real().read(out, offset);
+        }));
+
+    assert_is_failure_status(modify_until_failure(*this));
+    ASSERT_TRUE(expose_message(db.status()));
+}
+
+TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError)
+{
+    int counter {};
+    ON_CALL(*editor_mock, write)
+        .WillByDefault(testing::Invoke([&counter, this](BytesView in, Size offset) {
+            return counter++ == 5 ? Status::system_error("42") : editor_mock->real().write(in, offset);
+        }));
+
+    auto xact = db.transaction();
+    auto s = modify_until_failure(*this);
+    assert_is_failure_status(s);
+
+    s = db.status();
+    assert_is_failure_status(s);
+
+    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_TRUE(expose_message(db.status()));
+}
+
+TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
+{
+    int counter {};
+    ON_CALL(*editor_mock, write)
+        .WillByDefault(testing::Invoke([&counter, this](BytesView in, Size offset) {
+            return counter++ == 5 ? Status::system_error("42") : editor_mock->real().write(in, offset);
+        }));
+
+    assert_is_failure_status(modify_until_failure(*this));
+    ASSERT_TRUE(expose_message(db.status()));
+}
+
+// TODO: See above TODO.
+////TEST_F(FailureTests, AbortRestoresStateAfterWalReadError)
+////{
+////    FAIL_ON_N(*data_mock(), write, 5);
+////
+////    auto s = modify_until_failure(*this, cleanup_with_successful_abort);
+////    assert_is_failure_status(s);
+////
+////    ASSERT_TRUE(expose_message(db.status()));
+////}
+////
+////TEST_F(FailureTests, AbortRestoresStateAfterWalWriteError)
+////{
+////    FAIL_ON_N(*data_mock(), write, 5);
+////
+////    auto s = modify_until_failure(*this, cleanup_with_successful_abort);
+////    assert_is_failure_status(s);
+////
+////    ASSERT_TRUE(expose_message(db.status()));
+////}
+
+#undef FAIL_ON_NTH_READ
+#undef FAIL_ON_NTH_WRITE
+#undef FAIL_ON_NTH_APPEND
 
 } // <anonymous>

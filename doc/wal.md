@@ -3,10 +3,10 @@ Calico DB uses write-ahead logging to provide atomicity to database transactions
 
 ### Log Segments
 Calico DB only supports a single running transaction, so all updates go to the same WAL segment.
-When the transaction is committed, a commit record is written at the end of the current segment, and a new segment is generated.
-Updates made on the new transaction will be written to the new WAL segment.
-The old segment will be deleted once all updates that it contains have been flushed to the database file.
-A new WAL segment is also generated once the old one has reached a user-provided threshold.
+When the transaction is committed, a commit record is written at the end of the current segment, and a new segment is started.
+Updates made on the new transaction will be written to the new segment.
+The old segment will be deleted once all database pages that it contains references to have been flushed to disk.
+A new WAL segment is also started once the old one has reached a user-provided threshold.
 
 ### Background Writer
 Working with WAL records (both constructing them and writing them to disk) is expensive.
@@ -66,7 +66,6 @@ Both of these phases involve numerous disk accesses, and thus have many opportun
 The WAL object must guarantee that recovery as-a-whole is reentrant.
 We should be able to perform both recovery phases multiple times without corrupting the database.
 It should be noted that this routine does not protect from database corruption in most cases, it just provides atomicity and added durability to transactions.
-
 
 
 

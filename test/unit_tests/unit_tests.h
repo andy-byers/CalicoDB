@@ -23,7 +23,8 @@ inline auto expose_message(const Status &s)
 
 class TestOnHeap : public testing::Test {
 public:
-    static constexpr auto ROOT = "test/";
+    static constexpr auto ROOT = "test";
+    static constexpr auto PREFIX = "test/";
 
     TestOnHeap()
         : store {std::make_unique<HeapStorage>()}
@@ -38,7 +39,8 @@ public:
 
 class TestOnDisk : public testing::Test {
 public:
-    static constexpr auto ROOT = "/tmp/__calico_test__/";
+    static constexpr auto ROOT = "/tmp/__calico_test__";
+    static constexpr auto PREFIX = "/tmp/__calico_test__/";
 
     TestOnDisk()
     {
@@ -59,7 +61,8 @@ public:
 
 class TestWithMock : public testing::Test {
 public:
-    static constexpr auto ROOT = "test/";
+    static constexpr auto ROOT = "test";
+    static constexpr auto PREFIX = "test/";
 
     TestWithMock()
         : store {std::make_unique<testing::NiceMock<MockStorage>>()}
