@@ -586,7 +586,8 @@ TEST(HeaderTests, EncodeAndDecodePageSize)
     ASSERT_EQ(encode_page_size(1 << 16), 0);
 
     for (Size i {1}; i < 16; ++i) {
-        ASSERT_EQ(decode_page_size(encode_page_size(1 << i)), 1 << i);
+        const auto size = 1ULL << i;
+        ASSERT_EQ(decode_page_size(encode_page_size(size)), size);
     }
 }
 
