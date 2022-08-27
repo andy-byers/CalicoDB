@@ -37,7 +37,7 @@ auto CursorInternal::seek_left(Cursor &cursor) -> bool
 {
     CALICO_EXPECT_TRUE(cursor.is_valid());
     CALICO_EXPECT_EQ(cursor.m_position.index, 0);
-    if (cursor.is_minimum()) {
+    if (cursor.is_first()) {
         invalidate(cursor);
     } else {
         const PageId left {cursor.m_position.ids[Cursor::Position::LEFT]};
@@ -58,7 +58,7 @@ auto CursorInternal::seek_right(Cursor &cursor) -> bool
 {
     CALICO_EXPECT_TRUE(cursor.is_valid());
     CALICO_EXPECT_EQ(cursor.m_position.index, cursor.m_position.cell_count - 1);
-    if (cursor.is_maximum()) {
+    if (cursor.is_last()) {
         invalidate(cursor);
     } else {
         const PageId right {cursor.m_position.ids[Cursor::Position::RIGHT]};
@@ -141,12 +141,12 @@ auto Cursor::status() const -> Status
     return m_status;
 }
 
-auto Cursor::is_maximum() const -> bool
+auto Cursor::is_last() const -> bool
 {
     return is_valid() && m_position.is_maximum();
 }
 
-auto Cursor::is_minimum() const -> bool
+auto Cursor::is_first() const -> bool
 {
     return is_valid() && m_position.is_minimum();
 }
@@ -222,22 +222,6 @@ auto Cursor::value() const -> std::string
             m_status = status;
             return {};
         });
-}
-
-auto Cursor::record() const -> Record
-{
-    CALICO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
-    if (!node.has_value()) {
-        m_status = node.error();
-        return {};
-    }
-    auto value = m_internal->collect_value(*node, m_position.index);
-    if (!value.has_value()) {
-        m_status = node.error();
-        return {};
-    }
-    return {btos(node->read_key(m_position.index)), std::move(*value)};
 }
 
 auto Cursor::Position::operator==(const Position &rhs) const -> bool

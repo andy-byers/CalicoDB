@@ -24,11 +24,6 @@ enum class PageType : std::uint16_t {
     FREELIST_LINK = 0x4652, // "FR"
 };
 
-inline auto Record::operator<(const Record &rhs) const -> bool
-{
-    return stob(key) < stob(rhs.key);
-}
-
 inline constexpr auto is_page_type_valid(PageType type) -> bool
 {
     return type == PageType::INTERNAL_NODE ||

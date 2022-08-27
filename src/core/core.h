@@ -43,8 +43,8 @@ public:
     [[nodiscard]] auto abort() -> Status;
     [[nodiscard]] auto find(BytesView) -> Cursor;
     [[nodiscard]] auto find_exact(BytesView) -> Cursor;
-    [[nodiscard]] auto find_minimum() -> Cursor;
-    [[nodiscard]] auto find_maximum() -> Cursor;
+    [[nodiscard]] auto first() -> Cursor;
+    [[nodiscard]] auto last() -> Cursor;
     [[nodiscard]] auto info() -> Info;
 
     [[nodiscard]]

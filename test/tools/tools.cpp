@@ -158,4 +158,35 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 //    CALICO_EXPECT_GT(m_levels.size(), level);
 //}
 
-} // cco
+} // namespace calico
+
+
+auto operator<(const calico::Record &lhs, const calico::Record &rhs) -> bool
+{
+    return calico::stob(lhs.key) < calico::stob(rhs.key);
+}
+
+auto operator>(const calico::Record &lhs, const calico::Record &rhs) -> bool
+{
+    return calico::stob(lhs.key) > calico::stob(rhs.key);
+}
+
+auto operator<=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+{
+    return calico::stob(lhs.key) <= calico::stob(rhs.key);
+}
+
+auto operator>=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+{
+    return calico::stob(lhs.key) >= calico::stob(rhs.key);
+}
+
+auto operator==(const calico::Record &lhs, const calico::Record &rhs) -> bool
+{
+    return calico::stob(lhs.key) == calico::stob(rhs.key);
+}
+
+auto operator!=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+{
+    return calico::stob(lhs.key) != calico::stob(rhs.key);
+}

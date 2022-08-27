@@ -40,6 +40,15 @@ static auto compute_header_crc(const FileHeader &state)
     return crc_32(bytes.range(CRC_OFFSET));
 }
 
+[[nodiscard]]
+static auto sanitize_options(const Options &options) -> Options
+{
+    auto sanitized = options;
+    if (sanitized.log_level > MAXIMUM_LOG_LEVEL)
+        sanitized.log_level = DEFAULT_LOG_LEVEL;
+    return sanitized;
+}
+
 auto Info::record_count() const -> Size
 {
     return m_core->tree().record_count();
@@ -70,34 +79,39 @@ auto initialize_log(spdlog::logger &logger, const std::string &base)
 auto Core::open(const std::string &path, const Options &options) -> Status
 {
     static constexpr auto MSG = "cannot open database";
+    auto sanitized = sanitize_options(options);
 
     m_prefix = path + "/";
-    m_sink = options.log_level ? create_sink(path, options.log_level) : create_sink();
+    m_sink = sanitized.log_level ? create_sink(path, sanitized.log_level) : create_sink();
     m_logger = create_logger(m_sink, "core");
     initialize_log(*m_logger, path);
     m_logger->info("constructing Core object");
 
-    m_store = options.store;
+    m_store = sanitized.store;
     if (!m_store) {
         m_store = new DiskStorage;
         m_owns_store = true;
     }
 
-    auto initial = setup(m_prefix, *m_store, options, *m_logger);
+    auto initial = setup(m_prefix, *m_store, sanitized, *m_logger);
     if (!initial.has_value()) return forward_status(initial.error(), MSG);
     auto [state, is_new] = *initial;
 
-    if (options.wal_limit != DISABLE_WAL) {
+    // The database will store 0 in the "page_size" header field if the maximum page size is used (1 << 16 cannot be held
+    // in a std::uint16_t).
+    if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
+
+    if (sanitized.wal_limit != DISABLE_WAL) {
         // The WAL segments may be stored elsewhere.
-        const auto wal_prefix = options.wal_path.empty()
-            ? m_prefix : options.wal_path + "/";
+        const auto wal_prefix = sanitized.wal_path.empty()
+            ? m_prefix : sanitized.wal_path + "/";
         WriteAheadLog *wal {};
         auto s = BasicWriteAheadLog::open({
             wal_prefix,
             m_store,
             m_sink,
-            state.page_size,
-            options.wal_limit,
+            sanitized.page_size,
+            sanitized.wal_limit,
         }, &wal);
         MAYBE_FORWARD(s, MSG);
         m_wal.reset(wal);
@@ -113,8 +127,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             *m_wal,
             m_status,
             m_sink,
-            options.frame_count,
-            state.page_size,
+            sanitized.frame_count,
+            sanitized.page_size,
         });
         if (!r.has_value()) return forward_status(r.error(), MSG);
         m_pager = std::move(*r);
@@ -122,7 +136,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     }
 
     {
-        auto r = BPlusTree::open(*m_pager, m_sink, state.page_size);
+        auto r = BPlusTree::open(*m_pager, m_sink, sanitized.page_size);
         if (!r.has_value()) return forward_status(r.error(), MSG);
         m_tree = std::move(*r);
         m_tree->load_state(state);
@@ -161,6 +175,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
 Core::~Core()
 {
     m_logger->info("destroying Core object");
+    m_wal.reset();
 
     if (m_owns_store)
         delete m_store;
@@ -221,12 +236,12 @@ auto Core::find(BytesView key) -> Cursor
     return m_tree->find(key);
 }
 
-auto Core::find_minimum() -> Cursor
+auto Core::first() -> Cursor
 {
     return m_tree->find_minimum();
 }
 
-auto Core::find_maximum() -> Cursor
+auto Core::last() -> Cursor
 {
     return m_tree->find_maximum();
 }
@@ -566,33 +581,3 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
 #undef MAYBE_FORWARD
 
 } // namespace calico
-
-auto operator<(const calico::Record &lhs, const calico::Record &rhs) -> bool
-{
-    return calico::stob(lhs.key) < calico::stob(rhs.key);
-}
-
-auto operator>(const calico::Record &lhs, const calico::Record &rhs) -> bool
-{
-    return calico::stob(lhs.key) > calico::stob(rhs.key);
-}
-
-auto operator<=(const calico::Record &lhs, const calico::Record &rhs) -> bool
-{
-    return calico::stob(lhs.key) <= calico::stob(rhs.key);
-}
-
-auto operator>=(const calico::Record &lhs, const calico::Record &rhs) -> bool
-{
-    return calico::stob(lhs.key) >= calico::stob(rhs.key);
-}
-
-auto operator==(const calico::Record &lhs, const calico::Record &rhs) -> bool
-{
-    return calico::stob(lhs.key) == calico::stob(rhs.key);
-}
-
-auto operator!=(const calico::Record &lhs, const calico::Record &rhs) -> bool
-{
-    return calico::stob(lhs.key) != calico::stob(rhs.key);
-}

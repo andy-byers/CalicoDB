@@ -19,24 +19,9 @@ namespace calico {
 using Byte = char;
 using Size = std::uint64_t;
 
+// TODO: Get this from the build system!
 static constexpr auto VERSION_NAME = "0.0.1";
 
-/**
- * Representation of a database record.
- */
-struct Record {
-    auto operator<(const calico::Record&) const -> bool;  // TODO: Seems to be necessary for std::sort()...
-    std::string key; ///< The key by which records are ordered.
-    std::string value; ///< The record value.
-};
-
-} // cco
-
-auto operator<(const calico::Record&, const calico::Record&) -> bool;
-auto operator>(const calico::Record&, const calico::Record&) -> bool;
-auto operator<=(const calico::Record&, const calico::Record&) -> bool;
-auto operator>=(const calico::Record&, const calico::Record&) -> bool;
-auto operator==(const calico::Record&, const calico::Record&) -> bool;
-auto operator!=(const calico::Record&, const calico::Record&) -> bool;
+} // namespace calico
 
 #endif // CALICO_COMMON_H

@@ -147,16 +147,13 @@ public:
             return m_real->get_children(path, out);
         });
         ON_CALL(*this, open_random_reader).WillByDefault([this](const std::string &name, RandomReader **out) {
-            register_mock<RandomReader, MockRandomReader>(name, out);
-            return Status::ok();
+            return register_mock<RandomReader, MockRandomReader>(name, out);
         });
         ON_CALL(*this, open_random_editor).WillByDefault([this](const std::string &name, RandomEditor **out) {
-            register_mock<RandomEditor, MockRandomEditor>(name, out);
-            return Status::ok();
+            return register_mock<RandomEditor, MockRandomEditor>(name, out);
         });
         ON_CALL(*this, open_append_writer).WillByDefault([this](const std::string &name, AppendWriter **out) {
-            register_mock<AppendWriter, MockAppendWriter>(name, out);
-            return Status::ok();
+            return register_mock<AppendWriter, MockAppendWriter>(name, out);
         });
         ON_CALL(*this, rename_file).WillByDefault([this](const std::string &old_name, const std::string &new_name) {
             const auto maybe_rename_mock = [this](const auto &old_name, const auto &new_name) {
@@ -250,12 +247,10 @@ public:
 
 private:
     template<class Base, class Mock>
-    auto register_mock(const std::string &name, Base **out) -> void
+    auto register_mock(const std::string &name, Base **out) -> Status
     {
         std::lock_guard lock {m_mutex};
         const auto descriptor = get_blob_descriptor<Base>(name);
-        CALICO_EXPECT_EQ(m_mocks.find(descriptor), cend(m_mocks));
-
         auto s = Status::ok();
         Base *base {};
 
@@ -269,13 +264,13 @@ private:
         } else {
             CALICO_EXPECT_TRUE(false && "Unexpected base class for mock");
         }
-        CALICO_EXPECT_TRUE(s.is_ok());
-
-        // The mock blob reader takes ownership of the real object.
-        auto *mock = new Mock {base};
-        mock->delegate_to_real();
-        m_mocks.emplace(descriptor, mock);
-        *out = mock;
+        if (s.is_ok()) {
+            auto *mock = new testing::NiceMock<Mock> {base};
+            m_mocks.emplace(descriptor, mock);
+            mock->delegate_to_real();
+            *out = mock;
+        }
+        return s;
     }
 
     template<class Base, class Mock>

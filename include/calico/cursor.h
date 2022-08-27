@@ -41,14 +41,14 @@ public:
      *
      * @return True if the cursor is on the rightmost record, false otherwise.
      */
-    [[nodiscard]] auto is_maximum() const -> bool;
+    [[nodiscard]] auto is_last() const -> bool;
 
     /**
      * Check if the cursor is on the record with the smallest key (the leftmost record).
      *
      * @return True if the cursor is on the leftmost record, false otherwise.
      */
-    [[nodiscard]] auto is_minimum() const -> bool;
+    [[nodiscard]] auto is_first() const -> bool;
 
     /**
      * Get the key of the current record.
@@ -67,15 +67,6 @@ public:
      * @return The value of the record that the cursor is positioned on.
      */
     [[nodiscard]] auto value() const -> std::string;
-
-    /**
-     * Get the current record.
-     *
-     * This method produces undefined behavior if the cursor is not valid.
-     *
-     * @return The record that the cursor is positioned on.
-     */
-    [[nodiscard]] auto record() const -> Record;
 
     /**
      * Move the cursor to the right by one position.
@@ -175,7 +166,7 @@ private:
     friend class CursorInternal;
 
     mutable Status m_status {Status::not_found("not found")};
-    NodePool *m_pool {}; ///< Reference to an object that provides nodes from the block pool.
+    NodePool *m_pool {}; ///< Reference to an object that provides node pages from the pager component.
     Internal *m_internal {}; ///< Reference to the tree internals.
     Position m_position; ///< Position of the cursor in the page.
 };

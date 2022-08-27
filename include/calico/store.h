@@ -6,12 +6,18 @@
 
 namespace calico {
 
+/**
+ * An interface for reading bytes at a specified location.
+ */
 class RandomReader {
 public:
     virtual ~RandomReader() = default;
     [[nodiscard]] virtual auto read(Bytes&, Size) -> Status = 0;
 };
 
+/**
+ * An interface for reading and writing bytes at specified locations.
+ */
 class RandomEditor {
 public:
     virtual ~RandomEditor() = default;
@@ -20,6 +26,9 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
+/**
+ * An interface for appending bytes.
+ */
 class AppendWriter {
 public:
     virtual ~AppendWriter() = default;
@@ -27,6 +36,9 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
+/**
+ * An abstraction that provides a storage environment for a Calico DB database to operate within.
+ */
 class Storage {
 public:
     virtual ~Storage() = default;

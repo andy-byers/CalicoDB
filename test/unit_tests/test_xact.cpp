@@ -76,7 +76,7 @@ static auto insert_1000_records(XactTests &test)
 auto erase_1000_records(XactTests &test)
 {
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(expose_message(test.core.erase(test.core.find_minimum())));
+        ASSERT_TRUE(expose_message(test.core.erase(test.core.first())));
     }
 }
 
@@ -212,84 +212,53 @@ TEST_F(XactTests, AtomicOperationSanityCheck)
     }
 }
 
-//
-//class IncompleteXactTests: public TestOnHeap {
-//public:
-//    static constexpr Size PAGE_SIZE {0x200};
-//
-//    IncompleteXactTests() = default;
-//
-//    ~IncompleteXactTests() override = default;
-//
-//    auto SetUp() -> void override
-//    {
-//        WriteAheadLog *temp {};
-//        BasicWriteAheadLog::Parameters param {
-//            ROOT,
-//            store.get(),
-//            create_sink(),
-//            PAGE_SIZE,
-//        };
-//        ASSERT_TRUE(expose_message(BasicWriteAheadLog::open(param, &temp)));
-//        wal.reset(temp);
-//
-//        options.page_size = PAGE_SIZE;
-//        options.frame_count = 16;
-//        options.log_level = spdlog::level::trace;
+class FailureTests: public TestWithMock {
+public:
+    FailureTests() = default;
+
+    ~FailureTests() override = default;
+
+    auto SetUp() -> void override
+    {
+//        EXPECT_CALL(mock_store(), open_random_editor).Times(2);
+//        EXPECT_CALL(mock_store(), open_random_reader).Times(1);
+//        EXPECT_CALL(mock_store(), open_append_writer).Times(1);
+        Options options;
+        options.page_size = 0x200;
+        options.frame_count = 16;
 //        options.store = store.get();
-//        options.wal = wal.get();
-//
-//        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-//        ASSERT_TRUE(db.is_open());
-//
-//        const auto records = generator.generate(random, 500);
-//        committed = run_random_operations(*this, cbegin(records), cend(records));
-//        ASSERT_TRUE(expose_message(db.commit()));
-//
-////        const auto uncommitted = generator.generate(random, 500);
-////        run_random_operations(*this, cbegin(records), cend(records));
-//
-//        auto *cloned = dynamic_cast<HeapStorage &>(*store).clone();
-//
-//        ASSERT_TRUE(expose_message(db.close()));
-//        wal.reset();
-//
-//        store.reset(cloned);
-//        param.store = store.get();
-//
-//        ASSERT_TRUE(expose_message(BasicWriteAheadLog::open(param, &temp)));
-//        wal.reset(temp);
-//        options.store = store.get();
-//        options.wal = wal.get();
-//
-//        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-//        ASSERT_TRUE(db.is_open());
-//
-//        for (const auto &[key, value]: committed)
-//            tools::expect_contains(db, key, value);
-//
-//        ASSERT_EQ(db.info().record_count(), committed.size());
-//    }
-//
-//    auto TearDown() -> void override
-//    {
-//        if (db.is_open()) {
-//            ASSERT_TRUE(expose_message(db.close()));
-//        }
-//        ASSERT_FALSE(db.is_open());
-//    }
-//
-//    RecordGenerator generator {{16, 100, 10, false, true}};
-//    std::unique_ptr<WriteAheadLog> wal;
-//    std::vector<Record> committed;
-//    Random random {123};
-//    Options options;
-//    Database db;
-//};
-//
-//TEST_F(IncompleteXactTests, X)
-//{
-//
-//}
+        ASSERT_TRUE(expose_message(db.open(ROOT + std::string {"__"}, options)));
+
+//        EXPECT_CALL(*data_mock(), sync).Times(1);
+    }
+
+    [[nodiscard]]
+    auto data_mock() -> MockRandomEditor*
+    {
+        return mock_store().get_mock_random_editor(DATA_FILENAME);
+    }
+
+    [[nodiscard]]
+    auto wal_writer_mock(SegmentId id) -> MockAppendWriter*
+    {
+        return mock_store().get_mock_append_writer(ROOT + id.to_name());
+    }
+
+    [[nodiscard]]
+    auto wal_reader_mock(SegmentId id) -> MockRandomReader*
+    {
+        return mock_store().get_mock_random_reader(ROOT + id.to_name());
+    }
+
+    Database db;
+};
+
+
+
+TEST_F(FailureTests, A)
+{
+//    auto *mock = data_mock();
+//    (void)mock;
+}
 
 } // <anonymous>

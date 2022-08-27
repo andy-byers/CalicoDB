@@ -16,12 +16,20 @@ Calico DB is made up of 6 major components:
 | `wal`      | Stores and retrieves records describing changes made to the database                |
 | `cursor`   | Provides ordered, read-only access to database records.                             |
 
+## Status Objects
+
+[//]: # (TODO)
+
 ## Error Handling
 Calico DB enforces certain rules to make sure that the database stays consistent through crashes and other exceptional events.
 The current policy is to lock the database if an error is encountered while working with a writable page after the database has been modified during a transaction.
 This is more restrictive than necessary, but has the benefit of covering more cases where the database could be corrupted.
 The lock can be released by performing a successful abort operation.
 Errors that result from passing invalid arguments to a method will never lock up the database.
+
+The database object maintains a status, represented by a `Status` object (see [Status Objects](#status-objects)).
+If the database is locked due to an error, it will contain a non-OK status.
+More precisely, it will contain the status object that caused the lockup.
 
 ## References
 1. https://cstack.github.io/db_tutorial/

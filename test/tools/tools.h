@@ -359,6 +359,18 @@ private:
     emit_line(i, rest_size);
 }
 
+struct Record {
+    inline auto operator<(const Record &rhs) const -> bool
+    {
+        return stob(key) < stob(rhs.key);
+    }
+
+    std::string key;
+    std::string value;
+};
+
+
+
 class RecordGenerator {
 public:
     static unsigned default_seed;
@@ -597,5 +609,12 @@ struct formatter<cco::WalPayloadType> {
 };
 
 }  // namespace fmt
+
+auto operator<(const calico::Record&, const calico::Record&) -> bool;
+auto operator>(const calico::Record&, const calico::Record&) -> bool;
+auto operator<=(const calico::Record&, const calico::Record&) -> bool;
+auto operator>=(const calico::Record&, const calico::Record&) -> bool;
+auto operator==(const calico::Record&, const calico::Record&) -> bool;
+auto operator!=(const calico::Record&, const calico::Record&) -> bool;
 
 #endif // CALICO_TEST_TOOLS_TOOLS_H

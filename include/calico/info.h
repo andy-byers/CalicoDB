@@ -42,7 +42,7 @@ public:
     [[nodiscard]] auto maximum_key_size() const -> Size;
 
 private:
-    Core *m_core {}; ///< Pointer to the database this object was opened on.
+    Core *m_core {}; ///< Pointer to the database that this object was opened on.
 };
 
 } // namespace calico

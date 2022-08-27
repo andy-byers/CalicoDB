@@ -5,6 +5,7 @@
 #include "store/disk.h"
 #include "store/heap.h"
 #include "utils/utils.h"
+#include "fakes.h"
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <sstream>
@@ -51,6 +52,34 @@ public:
     {
         std::error_code ignore;
         std::filesystem::remove_all(ROOT, ignore);
+    }
+
+    std::unique_ptr<Storage> store;
+};
+
+class TestWithMock : public testing::Test {
+public:
+    static constexpr auto ROOT = "test/";
+
+    TestWithMock()
+        : store {std::make_unique<testing::NiceMock<MockStorage>>()}
+    {
+        mock_store().delegate_to_real();
+        CALICO_EXPECT_TRUE(expose_message(store->create_directory(ROOT)));
+    }
+
+    ~TestWithMock() override = default;
+
+    [[nodiscard]]
+    auto mock_store() -> MockStorage&
+    {
+        return dynamic_cast<MockStorage&>(*store);
+    }
+
+    [[nodiscard]]
+    auto mock_store() const -> const MockStorage&
+    {
+        return dynamic_cast<const MockStorage&>(*store);
     }
 
     std::unique_ptr<Storage> store;

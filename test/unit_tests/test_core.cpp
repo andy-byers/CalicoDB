@@ -21,7 +21,6 @@ namespace {
 
 using namespace calico;
 namespace fs = std::filesystem;
-constexpr auto ROOT = "/tmp/__calico_database_tests";
 
 template<class T>
 constexpr auto is_pod = std::is_standard_layout_v<T> && std::is_trivial_v<T>;
@@ -64,7 +63,7 @@ public:
         ASSERT_GT(core->info().record_count(), 0);
         auto s = core->erase(core->find(stob(maybe)));
         if (s.is_not_found())
-            s = core->erase(core->find_minimum());
+            s = core->erase(core->first());
         ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
     }
 
@@ -75,8 +74,26 @@ public:
     std::unique_ptr<Core> core;
 };
 
+class DatabaseOpenTests: public TestOnDisk {};
+
+TEST_F(DatabaseOpenTests, MaximumPageSize)
+{
+    // Maximum page size (65,536) is represented as 0 on disk, since it cannot fit into a short integer.
+    Options options;
+    options.page_size = MAXIMUM_PAGE_SIZE;
+
+    for (Size i {}; i < 2; ++i) {
+        Database db;
+        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        ASSERT_EQ(db.info().page_size(), MAXIMUM_PAGE_SIZE);
+        fmt::print("{}\n", db.info().maximum_key_size());
+        ASSERT_TRUE(expose_message(db.close()));
+    }
+}
+
 class BasicDatabaseTests: public testing::Test {
 public:
+    static constexpr auto ROOT = "/tmp/__calico_database_tests";
 
     BasicDatabaseTests()
     {
@@ -97,17 +114,10 @@ public:
     Options options;
 };
 
-TEST_F(BasicDatabaseTests, NewDatabaseIsClosed)
-{
-    Database db;
-    ASSERT_FALSE(db.is_open());
-}
-
 TEST_F(BasicDatabaseTests, OpenAndCloseDatabase)
 {
     Database db;
     ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-    ASSERT_TRUE(db.is_open());
     ASSERT_TRUE(expose_message(db.close()));
 }
 
@@ -139,7 +149,8 @@ TEST_F(BasicDatabaseTests, Inserts)
         auto xact = db.transaction();
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
-            ASSERT_TRUE(expose_message(db.insert(*itr++)));
+            ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
+            itr++;
         }
         ASSERT_TRUE(expose_message(xact.commit()));
     }
@@ -165,7 +176,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
 //        auto xact = db.start();
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
-            ASSERT_TRUE(expose_message(db.insert(*itr)));
+            ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
             itr++;
         }
 //        ASSERT_TRUE(expose_message(xact.commit()));
@@ -190,15 +201,12 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     Database db;
     invalid.page_size = MINIMUM_PAGE_SIZE / 2;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-    ASSERT_FALSE(db.is_open());
 
     invalid.page_size = MAXIMUM_PAGE_SIZE * 2;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-    ASSERT_FALSE(db.is_open());
 
     invalid.page_size = DEFAULT_PAGE_SIZE - 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-    ASSERT_FALSE(db.is_open());
 }
 
 TEST_F(BasicDatabaseTests, ReportsInvalidFrameCounts)
@@ -209,11 +217,9 @@ TEST_F(BasicDatabaseTests, ReportsInvalidFrameCounts)
     Database db;
     invalid.frame_count = MINIMUM_FRAME_COUNT - 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-    ASSERT_FALSE(db.is_open());
 
     invalid.frame_count = MAXIMUM_FRAME_COUNT + 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-    ASSERT_FALSE(db.is_open());
 }
 
 

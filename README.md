@@ -1,6 +1,15 @@
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
-> **Warning**: This library is not yet stable and should **not** be used for anything serious.
+> **Warning**: This library is not quite stable and is definitely not code reviewed. 
+> Use at your own risk!
+
+> **Note**: As of 08/26, development is really coming along.
+> After a bit of a redesign, Calico DB is now fast enough to be useful!
+> Also, I'm back at school for my final semester, so I won't have time to add more features.
+> Luckily the public API is basically finished (with the addition of the Transaction class).
+> At this point, I'll be cleaning things up and working on the error handling model.
+> Once I find someone to help me review all of this code, maybe we can finally put out a release!
+> <p align="right"><i>Andy (<b>08/26</b>)</i></p>
 
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
@@ -14,36 +23,29 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + [Performance](#performance)
 + [Design](#design)
 + [TODO](#todo)
-+ [Source Tree Overview](#source-tree-overview)
++ [Source Tree](#source-tree)
 + [Contributions](#contributions)
-
-## Disclaimer
-None of this code has been reviewed, and I am not a professional software developer.
-I started writing this library so that I could get better at writing modern C++, since I would like to pursue a career in C++ development.
-I've really had a fun time working on Calico DB, and have ended up putting quite a bit of time and effort into it.
-Still, it is a work in progress and needs to have some issues addressed before I feel comfortable declaring it usable.
-Check out the [Contributions](#contributions) section if you are interested in working on Calico DB!
 
 ## Features
 + Durability provided through write-ahead logging
 + Uses a dynamic-order B<sup>+</sup>-tree to organize the data on disk
 + Supports forward and reverse traversal using cursors
-+ Allows creation of in-memory databases
 + Supports variable-length keys and values (with a hard limit on both)
 + API only exposes objects (no pointers to deal with)
 + Allows tuning of various parameters (page size, cache size, etc.)
++ Transactions provided as first-class objects
 
 ## Caveats
 + Currently, Calico DB only runs on 64-bit Ubuntu and OSX
-+ Has a hard limit on key length, equal to roughly 1/4 of the page size (anywhere from 39 B to 8,167 B)
++ Has a hard limit on key length, equal to roughly $\frac{1}{4}$ of the page size (anywhere from 29 B to ~16 KB)
 + Has a hard limit on value length, equal to roughly 4 GB
-+ Doesn't support concurrent transactions
-+ Doesn't provide synchronization past support for multiple cursors
++ Only one transaction may be running at any given time
++ Doesn't provide synchronization past support for concurrent cursors
 
 ## Dependencies
 The library itself depends on `@gabime/spdlog` and `@TartanLlama/expected`.
 `spdlog` is downloaded during the build using CMake's FetchContent API, and `expected` is bundled with the source code.
-The tests depend on `@google/googletest` and the benchmarks depend on `@google/benchmark`.
+The tests depend on `@google/googletest`.
 
 ## Build
 Calico DB is built using CMake.
@@ -80,23 +82,25 @@ Below are the results of running some of `db_bench` on Calico DB and SQLite3.
 ```
 Calico DB:  version 0.0.1
 SQLite:     version 3.37.2
-Date:       Wed Aug 24 20:50:38 2022
 CPU:        16 * 12th Gen Intel(R) Core(TM) i5-12600K
 CPUCache:   20480 KB
 ```
 
 ### Calico DB
-| Benchmark    | Result (ops/second) |
-|:-------------|--------------------:|
-| fillseq      |             327,761 |
-| fillrandom   |             154,679 |
-| overwrite    |             157,085 |
-| readrandom   |             386,698 |
-| readseq      |           2,518,892 |
-| fillrand100K |                 761 |
-| fillseq100K  |                 649 |
-| readseq100K  |              16,158 |
-| readrand100K |              17,443 |
+The `fillseq`, `fillrandom`, and `overwrite` benchmarks were run using a transaction size of 1000.
+Performing many modifications outside a transaction is slow, since each operation is guaranteed to be atomic.
+
+| Benchmark                | Result (ops/second) |
+|:-------------------------|--------------------:|
+| fillseq                  |             311,526 |
+| fillrandom               |             139,801 |
+| overwrite                |             124,038 |
+| readrandom               |           1,524,390 |
+| readseq                  |           5,524,861 |
+| fillrand100K<sup>1</sup> |                 460 |
+| fillseq100K<sup>1</sup>  |                 450 |
+
+<sup>1</sup> These need some work!
 
 ### SQLite3
 | Benchmark    | Result (ops/second) |
@@ -108,8 +112,6 @@ CPUCache:   20480 KB
 | readseq      |           7,936,508 |
 | fillrand100K |               5,185 |
 | fillseq100K  |               7,572 |
-| readseq100K  |              64,098 |
-| readrand100K |              11,696 |
 
 ## TODO
 1. Get everything code reviewed!
@@ -122,13 +124,12 @@ CPUCache:   20480 KB
 
 ## Design
 Internally, Calico DB is broken down into 6 submodules.
-Each submodule is represented by a directory in `src`, as shown in the [source tree overview](#source-tree-overview).
-See `DESIGN.md` for more information about the design of Calico DB.
+Each submodule is represented by a directory in `src`, as shown in the [source tree](#source-tree).
+Check out the [documentation](./doc) for more information about the design of Calico DB.
 
-## Source Tree Overview
+## Source Tree
 ```
 CalicoDB
-┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
 ┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Constructs for holding contiguous sequences of bytes
@@ -139,7 +140,8 @@ CalicoDB
 ┃ ┣╸info.h ┄┄┄┄┄┄┄┄┄ Query information about the database
 ┃ ┣╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object for function returns
-┃ ┗╸store.h ┄┄┄┄┄┄┄┄ Storage interface
+┃ ┣╸store.h ┄┄┄┄┄┄┄┄ Storage interface
+┃ ┗╸transaction.h ┄┄ First-class transaction object
 ┣╸src
 ┃ ┣╸core ┄┄┄┄┄┄┄┄┄┄┄ API implementation
 ┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Pager module
@@ -156,8 +158,8 @@ CalicoDB
 
 ## Contributions
 Contributions are welcome!
-Pull requests that fix bugs or address correctness issues will always be considered.
-The [TODO](#todo) section contains a list of things that need to be addressed, and [design.md](doc/design.md) contains some TODO comments that I thought were important.
+The [TODO](#todo) section contains a list of things that need to be addressed.
+Also, pull requests that fix bugs or address correctness issues will always be considered.
 Feel free to create a pull request.
 
 

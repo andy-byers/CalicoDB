@@ -1,24 +1,25 @@
-# Buffer Pool
+# Pager
 Accessing persistent storage is expensive, so Calico DB tries to avoid that where possible.
 To that end, we reserve a portion of main memory for caching pages from disk.
 Each database page, when read into main memory, lives in a data structure called a frame.
 A frame stores the entire contents of a page along with some auxiliary data ("dirty" flag, reference count, etc.).
 Both pages and frames are uniquely identified by their own indices.
-A page's page ID gives the offset of the page in the database file, while a frame's frame ID is its index in the collection of available frames.
+A page's index, called its page ID, gives the offset of the page in the database file, while a frame's frame ID is its index in the collection of available frames.
+Note that page IDs, along with several other types of identifiers, start at 1, with 0 being reserved as a "null" value.
 
 ## Page
-Note that the word "page" can also refer to the actual Calico DB Page object, which is returned by the block pool when a page is requested.
+Note that the word "page" can also refer to the actual Calico DB page object, which is returned by the pager when a page is requested.
 Page objects can be either read-only or read-write, and are reference counted.
 Typically, pages are acquired as read-only and promoted to read-write when an update is about to be made.
 This subverts the overhead of keeping a "before" copy of the page for recovery (see [wal.md](./wal.md) for more details).
 It also allows us to obtain multiple read-only references to a single database page for use in concurrent queries.
 
 ## Framer
-The framer object is in charge of "pinning" database pages to block pool frames.
+The framer object is in charge of "pinning" database pages to frames.
 When a page is pinned, it is read from the database file into an available frame.
 Once the page is no longer needed, it can be "unpinned".
 This involves writing it back to the database file if it is dirty.
-It is the block pool's job, however, to ensure that if a dirty page is unpinned, its contents are already in the WAL.
+It is the pager's job, however, to ensure that if a dirty page is unpinned, its contents are already in the WAL.
 This is achieved by checking the page LSN against the WAL flushed LSN.
 If the WAL flushed LSN is greater than or equal to the page LSN, then the page is safe to advance_block.
 
@@ -40,7 +41,7 @@ For reference, we are using something like the simplified version from this arti
 [//]: # (TODO: May upgrade to the full 2Q algorithm, which uses another queue, if deemed necessary for performance. However, it seems to work pretty well as-is.)
 
 ## Dirty List
-The block pool cache can contain anywhere from 8 to 8192 entries.
+The pager cache can contain anywhere from 8 to 8192 entries.
 It can be pretty expensive to repeatedly search this many entries when looking for a frame to reuse.
 To help mitigate this cost, we keep a dirty list.
 The dirty list is a linked list containing the page IDs of dirty database pages.
