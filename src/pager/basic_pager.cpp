@@ -268,8 +268,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 
             // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
             // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
-            // data races on this check. TODO: This isn't going to work! Let's do this instead. Split up the "pinning a page to a frame" procedure into two parts: freeing up a frame, and reading a page into it.
-            //                                 We also should have some way to tell that we are in a non-reentrant position and failing to write back a page will mess us up (we are rebalancing or something).
+            // data races on this check.
             if (*m_has_xact || is_fragile) {
                 m_logger->error("setting database error state");
                 *m_status = s;

@@ -175,12 +175,8 @@ TEST_F(TreeTests, CursorCannotMoveInEmptyTree)
     auto cursor = tree->find_minimum();
     cursor.increment();
     ASSERT_FALSE(cursor.is_valid());
-    ASSERT_FALSE(cursor.is_first());
-    ASSERT_FALSE(cursor.is_last());
     cursor.decrement();
     ASSERT_FALSE(cursor.is_valid());
-    ASSERT_FALSE(cursor.is_first());
-    ASSERT_FALSE(cursor.is_last());
 }
 
 TEST_F(TreeTests, CanFindExtrema)
@@ -332,13 +328,11 @@ TEST_F(TreeTests, CanCopyInvalidCursor)
     ASSERT_TRUE(lhs.increment());
     auto rhs = lhs;
     ASSERT_FALSE(rhs.is_valid());
-    ASSERT_FALSE(rhs.is_last());
 
     lhs = tree->find_minimum();
     ASSERT_TRUE(lhs.decrement());
     rhs = lhs;
     ASSERT_FALSE(rhs.is_valid());
-    ASSERT_FALSE(rhs.is_last());
 }
 
 TEST_F(TreeTests, ReverseSequentialInserts)
