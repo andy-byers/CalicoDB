@@ -69,9 +69,13 @@ target_include_directories(calico
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE "${CALICO_SOURCE_DIR}")
 target_compile_options(calico
-    PRIVATE "${CALICO_WARNINGS}") # -fno-exceptions -fno-rtti) TODO: Get Calico DB to compile without RTTI/exceptions.
+    PRIVATE "${CALICO_WARNINGS}")# -fno-rtti) # TODO: Get Calico DB to compile without exceptions, using "-fno-exceptions".
+target_compile_definitions(calico
+    PUBLIC CALICO_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+           CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+           CALICO_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 target_link_libraries(calico
-    PUBLIC  spdlog::spdlog
+    PUBLIC spdlog::spdlog
     PRIVATE pthread)
 
 # Build the examples/use cases.
@@ -79,52 +83,12 @@ if(CALICO_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-if(CALICO_INSTALL)
-    set(TARGETS_NAME ${PROJECT_NAME}Targets)
-    set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
-    set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
-    set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
-    set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
-
-#    install(
-#        TARGETS "${CALICO_NAME}" spdlog
-#        EXPORT "${TARGETS_NAME}"
-#        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-#        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-#        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-#    )
-#    install(
-#        DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
-#        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-#    )
-#    install(
-#        DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
-#        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/calico"
-#    )
-#
-#    include(CMakePackageConfigHelpers)
-#    configure_package_config_file(
-#        "${CONFIG_FILE_IN}"
-#        "${CONFIG_FILE_OUT}"
-#        INSTALL_DESTINATION "${INSTALL_DIR}"
-#    )
-#    write_basic_package_version_file(
-#        "${VERSION_FILE}"
-#        COMPATIBILITY SameMajorVersion
-#    )
-#    install(
-#        EXPORT "${TARGETS_NAME}"
-#        NAMESPACE "${PROJECT_NAME}::"
-#        DESTINATION "${INSTALL_DIR}"
-#    )
-#    install(
-#        FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
-#        DESTINATION "${INSTALL_DIR}"
-#    )
-endif()
 
 if(CALICO_BUILD_TESTS)
     set(gtest_force_shared_crt On CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST Off)
+    set(INSTALL_GMOCK Off)
+    set(BUILD_GMOCK On)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
@@ -135,4 +99,58 @@ if(CALICO_BUILD_TESTS)
     include(CTest)
     enable_testing()
     add_subdirectory(test)
+endif()
+
+if(CALICO_INSTALL)
+    set(TARGETS_NAME ${PROJECT_NAME}Targets)
+    set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+    set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
+    set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
+    set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
+
+    # set_target_properties()?
+
+    install(
+        TARGETS             calico spdlog
+        EXPORT              "${TARGETS_NAME}"
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    )
+    install(
+        FILES       "${CALICO_INCLUDE_DIR}/calico/bytes.h"
+                    "${CALICO_INCLUDE_DIR}/calico/calico.h"
+                    "${CALICO_INCLUDE_DIR}/calico/common.h"
+                    "${CALICO_INCLUDE_DIR}/calico/cursor.h"
+                    "${CALICO_INCLUDE_DIR}/calico/database.h"
+                    "${CALICO_INCLUDE_DIR}/calico/info.h"
+                    "${CALICO_INCLUDE_DIR}/calico/options.h"
+                    "${CALICO_INCLUDE_DIR}/calico/status.h"
+                    "${CALICO_INCLUDE_DIR}/calico/store.h"
+                    "${CALICO_INCLUDE_DIR}/calico/transaction.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+    install(
+        DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    )
+
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CONFIG_FILE_IN}" "${CONFIG_FILE_OUT}"
+        INSTALL_DESTINATION "${INSTALL_DIR}"
+    )
+    write_basic_package_version_file("${VERSION_FILE}"
+        COMPATIBILITY SameMajorVersion
+    )
+    install(
+        EXPORT      "${TARGETS_NAME}"
+        NAMESPACE   "${PROJECT_NAME}::"
+        DESTINATION "${INSTALL_DIR}"
+    )
+    install(
+        FILES       "${CONFIG_FILE_OUT}"
+                    "${VERSION_FILE}"
+        DESTINATION "${INSTALL_DIR}"
+    )
 endif()

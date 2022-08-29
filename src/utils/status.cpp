@@ -5,10 +5,10 @@ namespace calico {
 
 static auto copy_status(const char *status) -> std::unique_ptr<char[]>
 {
-    // Represents an OK status.
-    if (!status)
-        return nullptr;
+    // Status is OK, so there isn't anything to copy.
+    if (!status) return nullptr;
 
+    // Otherwise, we have to copy a code and a message.
     const auto size = std::strlen(status) + sizeof(char);
     auto copy = std::make_unique<char[]>(size);
     Bytes bytes {copy.get(), size};
@@ -19,48 +19,49 @@ static auto copy_status(const char *status) -> std::unique_ptr<char[]>
     return copy;
 }
 
-Status::Status(Code code, const std::string &message)
+Status::Status(Code code, const std::string_view &message)
 {
-    const auto size = message.size() + sizeof(Code) + sizeof(char);
-    m_what = std::make_unique<char[]>(size);
-    Bytes bytes {m_what.get(), size};
+    static constexpr Size EXTRA_SIZE {sizeof(Code) + sizeof(char)};
+    const auto size = message.size() + EXTRA_SIZE;
 
+    m_data = std::make_unique<char[]>(size);
+    Bytes bytes {m_data.get(), size};
+
+    // The first byte holds the status type.
     bytes[0] = static_cast<char>(code);
     bytes.advance();
 
+    // The rest holds the message, plus a '\0'. std::make_unique<char[]>() performs value initialization, so the byte is already
+    // zeroed out. See https://en.cppreference.com/w/cpp/memory/unique_ptr/make_unique, overload (2).
     mem_copy(bytes, stob(message));
-    bytes.advance(message.size());
-
-    // TODO: Does make_unique() write "new char[N]()", or "new char[N]"? The latter will not zero initialize the data and requires this next line.
-    bytes[0] = '\0';
 }
 
 Status::Status(const Status &rhs)
-    : m_what {copy_status(rhs.m_what.get())}
+    : m_data {copy_status(rhs.m_data.get())}
 {}
 
 Status::Status(Status &&rhs) noexcept
-    : m_what {std::move(rhs.m_what)}
+    : m_data {std::move(rhs.m_data)}
 {}
 
 auto Status::operator=(const Status &rhs) -> Status&
 {
     if (this != &rhs)
-        m_what = copy_status(rhs.m_what.get());
+        m_data = copy_status(rhs.m_data.get());
     return *this;
 }
 
 auto Status::operator=(Status &&rhs) noexcept -> Status&
 {
     if (this != &rhs)
-        m_what = std::move(rhs.m_what);
+        m_data = std::move(rhs.m_data);
     return *this;
 }
 
 auto Status::code() const -> Code
 {
     CALICO_EXPECT_FALSE(is_ok());
-    return Code {m_what.get()[0]};
+    return Code {m_data.get()[0]};
 }
 
 auto Status::ok() -> Status
@@ -68,27 +69,27 @@ auto Status::ok() -> Status
     return Status {};
 }
 
-auto Status::not_found(const std::string &what) -> Status
+auto Status::not_found(const std::string_view &what) -> Status
 {
     return {Code::NOT_FOUND, what};
 }
 
-auto Status::invalid_argument(const std::string &what) -> Status
+auto Status::invalid_argument(const std::string_view &what) -> Status
 {
     return {Code::INVALID_ARGUMENT, what};
 }
 
-auto Status::system_error(const std::string &what) -> Status
+auto Status::system_error(const std::string_view &what) -> Status
 {
     return {Code::SYSTEM_ERROR, what};
 }
 
-auto Status::logic_error(const std::string &what) -> Status
+auto Status::logic_error(const std::string_view &what) -> Status
 {
     return {Code::LOGIC_ERROR, what};
 }
 
-auto Status::corruption(const std::string &what) -> Status
+auto Status::corruption(const std::string_view &what) -> Status
 {
     return {Code::CORRUPTION, what};
 }
@@ -120,13 +121,12 @@ auto Status::is_not_found() const -> bool
 
 auto Status::is_ok() const -> bool
 {
-    return m_what == nullptr;
+    return m_data == nullptr;
 }
 
-auto Status::what() const -> std::string
+auto Status::what() const -> std::string_view
 {
-    // We could just return a BytesView, but we usually end up needing to convert it to a string anyway.
-    return is_ok() ? "" : std::string {m_what.get() + sizeof(Code)};
+    return is_ok() ? "" : std::string_view {m_data.get() + sizeof(Code)};
 }
 
 } // namespace calico

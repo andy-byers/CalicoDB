@@ -12,38 +12,17 @@ Calico DB aims to provide a simple yet robust API for manipulating ordered data.
 
 ### Opening a Database
 Opening a database is a two-step process.
-First, we create the database object using a public constructor.
+First, we create the database object using the default constructor.
 Next, we call `open()` to open the database connection.
+This allows us to use either 
 
 ```C++
-// Create the database object. Note that we could just as easily use a smart pointer or
-// new/delete to manage the resource.
-calico::Database core;
-
-// Set some options. We'll create a database with pages of size 2 KB and 128 cache frames 
-// (1 MB total). We'll also enable logging with spdlog and put our WAL segments in a
-// different directory.
-calico::Options options;
-options.wal_path = "/tmp/cats_wal";
-options.page_size = 0x2000;
-options.frame_count = 128;
-options.log_level = spdlog::level::info;
-
-// Open the database connection.
-if (auto s = core.open("/tmp/cats", options); !s.is_ok()) {
-    fmt::print(stderr, "{}\n", s.what());
-    std::exit(EXIT_FAILURE);
-}
-// This will be true until db.close() is called.
-assert(db.is_open());
 ```
 
 ### Closing a Database
 
 ```C++
-if (auto s = core.close(); !s.is_ok()) {
-    fmt::print(stderr, "{}\n", s.what());
-}
+
 ```
 
 ### Bytes Objects
@@ -63,18 +42,17 @@ calico::BytesView v {data.data(), data.size()};
 // Convenience conversion from a string.
 const auto from_string = calico::stob(data);
 
-// Convenience conversion back to a string. This operation may allocate heap memory.
+// Convenience conversion to a string_view.
 assert(calico::btos(from_string) == data);
 
 // Implicit conversions from `Bytes` to `BytesView` are allowed.
 function_taking_a_bytes_view(b);
 
-// advance_cursor() moves the start of the slice forward and truncate moves the end of the slice
+// advance() moves the start of the slice forward and truncate() moves the end of the slice
 // backward.
-b.advance_cursor(7).truncate(5);
+b.advance(7).truncate(5);
 
 // Comparisons.
-assert(calico::compare_three_way(b, v) != calico::ThreeWayComparison::EQ);
 assert(b == calico::stob("world"));
 assert(b.starts_with(calico::stob("wor")));
 
@@ -84,8 +62,9 @@ assert(data[7] == '\xFF');
 ```
 
 ### Updating a Database
-Records can be added or removed using methods on the `Database` object.
-Keys are unique, so inserting a record that already file_exists will cause modification of the existing value.
+Records can be added or removed using methods on the database object.
+Keys are unique, so inserting a record that already exists will cause modification of the existing value.
+Note that the key cannot be empty, nor can it exceed the maximum key length (see [Info](#info-objects)).
 
 ```C++
 std::vector<calico::Record> records {
@@ -163,22 +142,22 @@ For this reason, if one wants to modify more than a few records at a time, it is
 
 ```C++
 // Start the transaction.
-auto xact = db.start();
+auto xact = db.transaction();
 
 // Modify the database.
 assert(db.erase(db.first()).is_ok());
 assert(db.erase(db.last()).is_ok());
 
-// Commit the transaction. If the transaction object goes out of scope before commit() is called,
-// it will attempt to abort the transaction.
+// Commit the transaction. If the transaction object goes out of scope before commit() is called, it
+// will attempt to abort the transaction. We can also call abort() directly to get the same effect.
 assert(xact.commit().is_ok());
 ```
 
 Now imagine a situation where a transaction is unable to be completed for some reason.
 Say, for example, that we become unable to write to disk at some point, and an insert fails when rebalancing the tree.
-To avoid the possibility of corruption, we must refuse to perform any more work until our state can be guaranteed again.
-We can attempt to restore our state by calling `abort()` on the transaction object.
-We can call `abort()` as many times as we want, until it succeeds.
+To avoid the possibility of corruption, the database will refuse to perform any more work until its state can be guaranteed again.
+We can attempt to restore a valid database state by calling `abort()` on the transaction object.
+If `abort()` fails, we can try again as many times as we want, as long as we keep the transaction object around.
 If we are unable to abort, we must exit and recover on the next startup.
 
 ```C++
@@ -188,7 +167,7 @@ auto xact = db.start();
 auto s = db.insert("key", "value");
 assert(s.is_system_error());
 
-// At this point, the database status should reflect this same error.
+// At this point, the database status should reflect the error in "s".
 assert(db.status().is_system_error());
 
 // If we are able to abort, the OK status will be restored, and we can continue using the database.

@@ -47,7 +47,7 @@ struct SegmentId
         if (!is_valid)
             return null();
 
-        return SegmentId {std::stoull(btos(digits))};
+        return SegmentId {std::stoull(std::string {btos(digits)})};
     }
 
     [[nodiscard]]

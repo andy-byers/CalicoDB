@@ -149,7 +149,7 @@ auto get_blob_descriptor(const std::string &path) -> std::string
 inline auto split_blob_descriptor(const std::string &descriptor) -> std::pair<std::string, std::string>
 {
     auto bytes = stob(descriptor);
-    return {btos(bytes.range(0, BLOB_TAG_WIDTH)), btos(bytes.range(BLOB_TAG_WIDTH))};
+    return {std::string {btos(bytes.range(0, BLOB_TAG_WIDTH))}, std::string {btos(bytes.range(BLOB_TAG_WIDTH))}};
 }
 
 class MockStorage: public Storage {

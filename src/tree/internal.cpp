@@ -123,7 +123,7 @@ auto Internal::positioned_modify(Position position, BytesView value) -> Result<v
     auto old_cell = node.read_cell(index);
     // Make a copy of the key. The data backing the old key slice may be written over when we call
     // remove_at() on the old cell.
-    const auto key = btos(old_cell.key());
+    const std::string key {btos(old_cell.key())};
 
     CALICO_TRY_CREATE(new_cell, make_cell(stob(key), value, true));
 
@@ -147,7 +147,7 @@ auto Internal::positioned_remove(Position position) -> Result<void>
     m_cell_count--;
 
     auto cell = node.read_cell(index);
-    auto anchor = btos(cell.key());
+    std::string anchor {btos(cell.key())};
     if (cell.overflow_size()) {
         auto was_destroyed = m_pool->destroy_chain(cell.overflow_id(), cell.overflow_size());
         if (!was_destroyed.has_value()) {

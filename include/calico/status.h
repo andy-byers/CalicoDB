@@ -7,11 +7,11 @@ namespace calico {
 
 class Status final {
 public:
-    [[nodiscard]] static auto invalid_argument(const std::string &) -> Status;
-    [[nodiscard]] static auto system_error(const std::string &) -> Status;
-    [[nodiscard]] static auto logic_error(const std::string &) -> Status;
-    [[nodiscard]] static auto corruption(const std::string &) -> Status;
-    [[nodiscard]] static auto not_found(const std::string &) -> Status;
+    [[nodiscard]] static auto invalid_argument(const std::string_view &) -> Status;
+    [[nodiscard]] static auto system_error(const std::string_view &) -> Status;
+    [[nodiscard]] static auto logic_error(const std::string_view &) -> Status;
+    [[nodiscard]] static auto corruption(const std::string_view &) -> Status;
+    [[nodiscard]] static auto not_found(const std::string_view &) -> Status;
     [[nodiscard]] static auto ok() -> Status;
     [[nodiscard]] auto is_invalid_argument() const -> bool;
     [[nodiscard]] auto is_system_error() const -> bool;
@@ -19,7 +19,7 @@ public:
     [[nodiscard]] auto is_corruption() const -> bool;
     [[nodiscard]] auto is_not_found() const -> bool;
     [[nodiscard]] auto is_ok() const -> bool;
-    [[nodiscard]] auto what() const -> std::string;
+    [[nodiscard]] auto what() const -> std::string_view;
 
     Status(const Status&);
     auto operator=(const Status&) -> Status&;
@@ -37,10 +37,10 @@ private:
     };
 
     Status() = default;
-    Status(Code, const std::string &);
+    Status(Code, const std::string_view &);
     [[nodiscard]] auto code() const -> Code;
 
-    std::unique_ptr<char[]> m_what;
+    std::unique_ptr<char[]> m_data;
 };
 
 } // namespace calico

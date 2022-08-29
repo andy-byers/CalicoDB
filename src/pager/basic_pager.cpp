@@ -11,6 +11,12 @@ namespace calico {
 
 namespace fs = std::filesystem;
 
+#define MAYBE_FORWARD(expr, message) \
+    do { \
+        const auto &calico_s = (expr); \
+        if (!calico_s.is_ok()) return forward_status(calico_s, message); \
+    } while (0)
+
 auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPager>>
 {
     auto pager = std::unique_ptr<BasicPager> {new (std::nothrow) BasicPager {param}};
@@ -55,10 +61,11 @@ auto BasicPager::page_size() const -> Size
     return m_framer->page_size();
 }
 
-auto BasicPager::pin_frame(PageId id) -> Status
+auto BasicPager::pin_frame(PageId id, bool &is_fragile) -> Status
 {
     static constexpr auto MSG = "could not pin frame: out of frames";
     CALICO_EXPECT_FALSE(m_registry.contains(id));
+    is_fragile = true;
 
     if (!m_framer->available()) {
         const auto r = try_make_available();
@@ -67,11 +74,13 @@ auto BasicPager::pin_frame(PageId id) -> Status
         // We are out of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
         // very often, if at all.
         if (!*r) {
+            m_logger->warn(MSG);
             std::this_thread::yield();
             return Status::not_found(MSG);
         }
     }
     // Read the page into a frame.
+    is_fragile = false;
     auto r = m_framer->pin(id);
     if (!r.has_value()) return r.error();
 
@@ -82,6 +91,7 @@ auto BasicPager::pin_frame(PageId id) -> Status
 
 auto BasicPager::flush() -> Status
 {
+    static constexpr auto MSG = "could not flush";
     m_logger->info("flushing cached database pages");
     CALICO_EXPECT_EQ(m_ref_sum, 0);
 
@@ -101,13 +111,14 @@ auto BasicPager::flush() -> Status
         if (in_range) {
             if (page_lsn > m_wal->flushed_lsn()) {
                 LogMessage message {*m_logger};
-                message.set_primary("could not flush");
+                message.set_primary(MSG);
                 message.set_detail("WAL has pending updates");
                 message.set_hint("flush the WAL and try again");
                 return message.logic_error();
             }
             s = m_framer->write_back(frame_id);
-            if (!s.is_ok()) return s;
+            MAYBE_FORWARD(s, MSG);
+
         } else {
             // Get rid of all pages that are not in range. This should only happen after pages are deleted during abort() or recovery.
             m_registry.erase(page_id);
@@ -167,16 +178,13 @@ auto BasicPager::release(Page page) -> Status
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_ref_sum, 0);
 
+    // This method can only fail for writable pages.
     auto s = Status::ok();
     if (const auto deltas = page.collect_deltas(); m_wal->is_writing() && !deltas.empty()) {
+        CALICO_EXPECT_TRUE(page.is_writable());
         page.set_lsn(SequenceId {m_wal->current_lsn()});
         s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
-
-        if (!s.is_ok()) {
-            *m_status = s;
-            m_logger->error("could not write page deltas to WAL");
-            m_logger->error("(reason) {}", s.what());
-        }
+        save_and_forward_status(s, "could not write page deltas to WAL");
     }
 
     CALICO_EXPECT_TRUE(m_registry.contains(page.id()));
@@ -199,12 +207,8 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
     // TODO: We also have info about whether or not we should watch this page. Like *m_has_xact? Although that may break abort() since it doesn't set *m_has_xact to false until it is totally finished...
     if (m_wal->is_writing()) {
         auto s = m_wal->log_image(page.id().value, page.view(0));
+        save_and_forward_status(s, "could not write full image to WAL");
 
-        if (!s.is_ok()) {
-            m_logger->error("could not write full image to WAL");
-            m_logger->error("(reason) {}", s.what());
-            *m_status = s;
-        }
     } else if (m_wal->is_enabled()) {
         LogMessage message {*m_logger};
         message.set_primary("omitting watch for page {}", page.id().value);
@@ -234,13 +238,6 @@ auto BasicPager::allocate() -> Result<Page>
 
 auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 {
-    CALICO_EXPECT_FALSE(id.is_null());
-    std::lock_guard lock {m_mutex};
-
-    // TODO: Handling this at a higher level!
-//    if (!m_status->is_ok())
-//        return Err {*m_status};
-
     const auto do_acquire = [this, is_writable](auto &entry) {
         m_ref_sum++;
         const auto is_frame_dirty = entry.dirty_token.has_value();
@@ -254,6 +251,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
         return page;
     };
     CALICO_EXPECT_FALSE(id.is_null());
+    std::lock_guard lock {m_mutex};
 
     if (auto itr = m_registry.get(id); itr != m_registry.end())
         return do_acquire(itr->second);
@@ -261,7 +259,8 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
     // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is incremented each time the WAL flushes a block.
     for (; ; ) {
-        auto s = pin_frame(id);
+        bool is_fragile {};
+        auto s = pin_frame(id, is_fragile);
         if (s.is_ok()) break;
 
         if (!s.is_not_found()) {
@@ -269,8 +268,9 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 
             // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
             // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
-            // data races on this check.
-            if (*m_has_xact) {
+            // data races on this check. TODO: This isn't going to work! Let's do this instead. Split up the "pinning a page to a frame" procedure into two parts: freeing up a frame, and reading a page into it.
+            //                                 We also should have some way to tell that we are in a non-reentrant position and failing to write back a page will mess us up (we are rebalancing or something).
+            if (*m_has_xact || is_fragile) {
                 m_logger->error("setting database error state");
                 *m_status = s;
             }
@@ -282,5 +282,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     CALICO_EXPECT_NE(itr, m_registry.end());
     return do_acquire(itr->second);
 }
+
+#undef MAYBE_FORWARD
 
 } // namespace calico

@@ -416,19 +416,6 @@ TEST(StatusTests, StatusCanBeReassigned)
     ASSERT_TRUE(s.is_ok());
 }
 
-// Bad idea??? Uses const reference lifetime extension to name "test", which can be an lvalue or rvalue. Then we use the name in a more
-// complicated expression. Seems pretty useful for creating more complicated asserts.
-#define CALICO_TEST(test, expression) \
-    do { \
-        const auto &_test = (test);  \
-        CALICO_EXPECT_TRUE(expression); \
-    } while (0)
-
-TEST(MacroTest, WeirdMacro)
-{
-    CALICO_TEST(75 * 2 + 10, _test >= 100 and _test <= 200);
-}
-
 TEST(StatusTests, StatusCodesAreCorrect)
 {
     ASSERT_TRUE(Status::invalid_argument("invalid argument").is_invalid_argument());

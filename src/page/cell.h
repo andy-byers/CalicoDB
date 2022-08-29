@@ -39,12 +39,14 @@ public:
     auto write(Bytes) const -> void;
     auto detach(Scratch, bool = false) -> void;
 
-    [[nodiscard]] auto is_external() const -> bool
+    [[nodiscard]]
+    auto is_external() const -> bool
     {
         return m_is_external;
     }
 
-    [[nodiscard]] auto is_attached() const -> bool
+    [[nodiscard]]
+    auto is_attached() const -> bool
     {
         return m_is_attached;
     }

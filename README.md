@@ -14,7 +14,6 @@
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 
-+ [Disclaimer](#disclaimer)
 + [Features](#features)
 + [Caveats](#caveats)
 + [Dependencies](#dependencies)

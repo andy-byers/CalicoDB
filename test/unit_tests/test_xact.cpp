@@ -234,64 +234,10 @@ public:
     Database db;
 };
 
-#define FAIL_ON_NTH_READ(mock, n) \
-    do { \
-        int counter {}; \
-        ON_CALL(*(mock), read) \
-            .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) { \
-                return counter++ < (n) ? (mock)->real().read(out, offset) : Status::system_error("42"); \
-            })); \
-    } while (0)
-
-#define FAIL_ON_NTH_WRITE(mock, n) \
-    do { \
-        int counter {}; \
-        ON_CALL(*(mock), write) \
-            .WillByDefault(testing::Invoke([&counter, this](BytesView in, Size offset) { \
-                return counter++ < (n) ? (mock)->real().write(in, offset) : Status::system_error("42"); \
-            })); \
-    } while (0)
-
-#define FAIL_ON_NTH_APPEND(mock, n) \
-    do { \
-        int counter {}; \
-        ON_CALL(*(mock), write) \
-            .WillByDefault(testing::Invoke([&counter, this](BytesView in) { \
-                return counter++ < (n) ? (mock)->real().write(in) : Status::system_error("42"); \
-            })); \
-    } while (0)
-
-//auto cleanup_with_failed_abort(FailureTests &test, Transaction &xact)
-//{
-//    FAIL_ON_N(*test.data_mock(), read, 0);
-//    FAIL_ON_N(*test.data_mock(), write, 0);
-////    FAIL_ON_N(*test.latest_wal_reader_mock(), read, 0);
-////    FAIL_ON_N(*test.latest_wal_writer_mock(), write, 0);
-//
-//    // This abort should fail.
-//    const auto s = xact.abort();
-//    ASSERT_FALSE(s.is_ok());
-//
-//    // Since every read or write failed immediately, we should be on the same WAL segment. We were unable to roll back,
-//    // so we cannot get rid of the WAL segment, otherwise we run the risk of losing data.
-//    test.data_mock()->delegate_to_real();
-////    test.latest_wal_reader_mock()->delegate_to_real();
-////    test.latest_wal_writer_mock()->delegate_to_real();
-//}
-
 auto assert_is_failure_status(const Status &s)
 {
     ASSERT_TRUE(s.is_system_error() and s.what() == "42") << s.what();
 }
-
-//auto cleanup_with_successful_abort(FailureTests &test, Transaction &xact)
-//{
-//    test.data_mock()->delegate_to_real();
-//
-//    // This abort should succeed.
-//    const auto s = xact.abort();
-//    ASSERT_TRUE(s.is_ok());
-//}
 
 auto add_sequential_records(Database &db, Size n)
 {
@@ -417,7 +363,27 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     ASSERT_TRUE(s.is_ok()) << s.what();
 }
 
-TEST_F(FailureTests, DatabaseNeverWritesDuringQueryAfterPagesAreFlushed)
+// Error encountered while flushing a dirty page to make room for a page read during a query. In this case, we don't have a transaction
+// we can try to abort, so we must exit the program. Next time the database is opened, it will roll forward and apply any missing updates.
+TEST_F(FailureTests, DataWriteFailureDuringQuery)
+{
+    add_sequential_records(db, 500);
+
+    // Further writes to the data file will fail.
+    ON_CALL(*editor_mock, write)
+        .WillByDefault(testing::Return(Status::system_error("42")));
+
+    auto c = db.first();
+    for (; c.is_valid(); ++c) {}
+
+    auto s = c.status();
+    assert_is_failure_status(s);
+
+    s = db.status();
+    assert_is_failure_status(s);
+}
+
+TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
 {
     add_sequential_records(db, 500);
 

@@ -19,7 +19,7 @@ The WAL uses physical logging to protect pages during a transaction.
 What follows is a short description of the lifecycle of a **writable** database page during a transaction.
 Assuming that the requested page $P$ is not already in the pager cache, we first read $P$ into a vacant frame.
 Thus far, $P$ has not been modified, so we write out a WAL record containing its entire "before" contents, called a full image record (see [Full Images](#full-images)).
-Writing out this WAL record represents a promise that the database page will actually be modified: the tree component should never acquire a writable page unless it is actually going to write to it.
+Writing out this WAL record represents a promise that the database page will actually be modified: the tree component will never acquire a writable page unless it is actually going to write to it.
 Now that $P$ has its contents saved in the WAL, we are free to modify it.
 Each time we do so, $P$ will record a (offset, size) pair describing the modified region.
 Once $P$ is released, all of these pairs are consolidated such that there are no overlaps.
@@ -37,19 +37,15 @@ It contains the entire page contents, and can be used to undo many modifications
 All that is needed for a full image is an immutable slice of the page data.
 The page LSN is not updated when generating this type of record, since the page was not actually updated.
 
-[//]: # (TODO: I don't see a problem with this, but who knows. We may need to update the page LSN with this type of record.
-               If so, we can let the changes be part of the next delta record.)
-
 #### Delta Records
 A delta record is generated when a page is released back to the pager after being modified.
-Delta records contain only the exact changes made to a page.
+Delta records contain only the exact changes made to a page while it was acquired.
 
 #### Commit Records
 A commit record is emitted when a transaction commits.
 It contains no actual information (other than its LSN) and serves as a sentinel to mark that a transaction has succeeded.
 
 ### Recovery
-Together, records of these three record types can be used to undo and redo modifications made to database pages.
 We split recovery up into two phases: redo and undo.
 
 #### Redo Phase
@@ -57,16 +53,20 @@ During the redo phase, we roll the WAL forward and apply updates that aren't alr
 If we find a commit record at the end of the log, we are done, and the database is up-to-date.
 Otherwise, we must enter the second phase of recovery: undo.
 
-### Undo Phase
+#### Undo Phase
 In the undo phase, we roll back the most recent (incomplete) transaction, that is, we roll the log backward from the end until the most recent commit.
 Now the database is consistent with its state at the last successful commit.
 
 ### Reentrancy
 Both of these phases involve numerous disk accesses, and thus have many opportunities for failure.
 The WAL object must guarantee that recovery as-a-whole is reentrant.
-We should be able to perform both recovery phases multiple times without corrupting the database.
-It should be noted that this routine does not protect from database corruption in most cases, it just provides atomicity and added durability to transactions.
+We should be able to attempt recovery multiple times without corrupting the database.
+It should be noted that this routine does not protect from many types of corruption, it just provides atomicity and added durability to transactions.
+For example, if the database file is erroneously truncated, we cannot recover unless the missing pages are still in the WAL.
 
+[//]: # (TODO: Actually, we need to hit the full images going forward [right now we just hit the deltas and commits] 
+               in case the above situation happened. We could still recover using the full images!)
 
-
+### Transactions
+In addition to providing a means for recovering after a crash, the WAL provides atomicity to transactions.
 

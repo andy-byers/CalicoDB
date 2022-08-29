@@ -19,9 +19,6 @@ namespace calico {
 using Byte = char;
 using Size = std::uint64_t;
 
-// TODO: Get this from the build system!
-static constexpr auto VERSION_NAME = "0.0.1";
-
 } // namespace calico
 
 #endif // CALICO_COMMON_H
