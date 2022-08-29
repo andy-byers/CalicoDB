@@ -24,7 +24,7 @@ std::string_view sv {"123"};
 auto b = cco::stob(s); // Creates a Bytes object.
 auto bv = cco::stob(sv); // Creates a BytesView object.
 
-// ...or from raw parts using the constructor.
+// ...or from "raw parts" using the constructor.
 cco::Bytes b2 {s.data(), s.size()};
 cco::BytesView bv2 {sv.data(), sv.size()};
 

@@ -31,7 +31,7 @@ auto main(int, const char *[]) -> int
         auto b = cco::stob(s); // Creates a Bytes object.
         auto bv = cco::stob(sv); // Creates a BytesView object.
 
-        // ...or from raw parts using the constructor.
+        // ...or from "raw parts" using the constructor.
         cco::Bytes b2 {s.data(), s.size()};
         cco::BytesView bv2 {sv.data(), sv.size()};
 
@@ -53,7 +53,7 @@ auto main(int, const char *[]) -> int
 
         // Comparison operations are implemented.
         assert(b == cco::stob("b"));
-        assert(bv.starts_with(cco::stob("ab")));
+        assert(bv.starts_with(cco::stob("12")));
 
         // Finally, Bytes can use the non-const overload of operator[](), allowing us to modify the original
         // string.
@@ -173,6 +173,19 @@ auto main(int, const char *[]) -> int
         [[maybe_unused]] const auto pc = info.page_count();
         [[maybe_unused]] const auto mk = info.maximum_key_size();
     }
+
+    auto xact = db.transaction();
+    for (cco::Size i {}; i < 10'000'000; ++i) {
+        if (db.info().record_count() > 100'000)
+            assert_ok(db.erase(db.first()));
+        const auto k = std::to_string(i);
+        assert_ok(db.insert(k, k));
+        if (i && i % 1000 == 0 && i < 9'990'000) {
+            assert_ok(xact.commit());
+            xact = db.transaction();
+        }
+    }
+    assert_ok(xact.commit());
 
     return 0;
 }
