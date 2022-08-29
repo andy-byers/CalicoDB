@@ -37,6 +37,7 @@ public:
     std::unique_ptr<Storage> store;
 };
 
+// TODO: Make sure test fixtures inheriting from this class that create databases are using the storage object created here.
 class TestOnDisk : public testing::Test {
 public:
     static constexpr auto ROOT = "/tmp/__calico_test__";

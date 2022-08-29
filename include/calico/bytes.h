@@ -23,13 +23,13 @@ enum class ThreeWayComparison {
 namespace impl {
 
     /**
-     * An internal class representing an unowned sequence of primitives.
+     * An internal class representing an unowned sequence of bytes.
      *
-     * This class should only be used through the Bytes and BytesView aliases.
+     * This class should only be used through the Bytes and BytesView aliases, since it only works with byte sequences.
      *
      * @see Bytes
      * @see BytesView
-     * @tparam Pointer The underlying pointer type.
+     * @tparam Pointer The underlying pointer type. Must be a Byte* or const Byte*.
      */
     template<class Pointer>
     class Slice {
@@ -39,7 +39,7 @@ namespace impl {
         /**
          * Create an empty slice.
          */
-        Slice() noexcept = default;
+        constexpr Slice() noexcept = default;
 
         /**
          * Create a slice from another slice.
@@ -50,19 +50,21 @@ namespace impl {
          * @param rhs The other slice.
          */
         template<class Q>
-        Slice(Slice<Q> rhs) noexcept:
-              Slice {rhs.data(), rhs.size()} {}
+        constexpr Slice(Slice<Q> rhs) noexcept
+            : Slice {rhs.data(), rhs.size()} {}
 
         /**
          * Create a slice from a pointer and a length.
          *
+         * The caller must guarantee that the memory used to create this slice is valid.
+         *
          * @tparam Q The pointer type.
          * @param data A pointer to the start of a sequence.
-         * @param size The length of the sequence.
+         * @param size The length of the sequence in bytes.
          */
         template<class Q>
-        Slice(Q data, Size size) noexcept:
-              m_data {data},
+        constexpr Slice(Q data, Size size) noexcept
+            : m_data {data},
               m_size {size} {}
 
         /**
@@ -71,7 +73,7 @@ namespace impl {
          * @param index The index of the element.
          * @return A const reference to the element.
          */
-        auto operator[](Size index) const noexcept -> const Value&
+        constexpr auto operator[](Size index) const noexcept -> const Value&
         {
             assert(index < m_size);
             return m_data[index];
@@ -83,7 +85,7 @@ namespace impl {
          * @param index The index of the element.
          * @return A reference to the element.
          */
-        auto operator[](Size index) noexcept -> Value&
+        constexpr auto operator[](Size index) noexcept -> Value&
         {
             assert(index < m_size);
             return m_data[index];
@@ -95,7 +97,7 @@ namespace impl {
          * @return True if the slice has zero length, false otherwise.
          */
         [[nodiscard]]
-        auto is_empty() const noexcept -> bool
+        constexpr auto is_empty() const noexcept -> bool
         {
             return m_size == 0;
         }
@@ -106,7 +108,7 @@ namespace impl {
          * @return The length in elements.
          */
         [[nodiscard]]
-        auto size() const noexcept -> Size
+        constexpr auto size() const noexcept -> Size
         {
             return m_size;
         }
@@ -117,7 +119,7 @@ namespace impl {
          * @return A copy of the slice.
          */
         [[nodiscard]]
-        auto copy() const -> Slice
+        constexpr auto copy() const -> Slice
         {
             return *this;
         }
@@ -130,7 +132,7 @@ namespace impl {
          * @return The new slice.
          */
         [[nodiscard]]
-        auto range(Size offset, Size size) const noexcept -> Slice
+        constexpr auto range(Size offset, Size size) const noexcept -> Slice
         {
             assert(size <= m_size);
             assert(offset <= m_size);
@@ -145,7 +147,7 @@ namespace impl {
          * @return The new slice, spanning from the given offset to the end.
          */
         [[nodiscard]]
-        auto range(Size offset) const noexcept -> Slice
+        constexpr auto range(Size offset) const noexcept -> Slice
         {
             assert(m_size >= offset);
             return range(offset, m_size - offset);
@@ -157,7 +159,7 @@ namespace impl {
          * @return The underlying pointer.
          */
         [[nodiscard]]
-        auto data() const noexcept -> Pointer
+        constexpr auto data() const noexcept -> Pointer
         {
             return m_data;
         }
@@ -168,7 +170,7 @@ namespace impl {
          * @return The underlying pointer.
          */
         [[nodiscard]]
-        auto data() noexcept -> Pointer
+        constexpr auto data() noexcept -> Pointer
         {
             return m_data;
         }
@@ -176,7 +178,7 @@ namespace impl {
         /**
          * Invalidate the slice.
          */
-        auto clear() noexcept -> void
+        constexpr auto clear() noexcept -> void
         {
             m_data = nullptr;
             m_size = 0;
@@ -188,7 +190,7 @@ namespace impl {
          * @param n The number of elements to advance_cursor by.
          * @return A copy of this slice for chaining.
          */
-        auto advance(Size n = 1) noexcept -> Slice&
+        constexpr auto advance(Size n = 1) noexcept -> Slice&
         {
             assert(n <= m_size);
             m_data += n;
@@ -202,7 +204,7 @@ namespace impl {
          * @param n The number of elements to reduce the length by.
          * @return A copy of this slice for chaining.
          */
-        auto truncate(Size size) noexcept -> Slice&
+        constexpr auto truncate(Size size) noexcept -> Slice&
         {
             assert(size <= m_size);
             m_size = size;
@@ -211,7 +213,7 @@ namespace impl {
 
         template<class T>
         [[nodiscard]]
-        auto starts_with(const T &rhs) const noexcept -> bool
+        constexpr auto starts_with(const T &rhs) const noexcept -> bool
         {
             if (rhs.size() > m_size)
                 return false;
@@ -244,6 +246,11 @@ using BytesView = impl::Slice<const Byte*>;
 inline auto stob(const std::string &data) noexcept -> BytesView
 {
    return {data.data(), data.size()};
+}
+
+inline auto stob(const std::string_view &data) noexcept -> BytesView
+{
+    return {data.data(), data.size()};
 }
 
 /**
@@ -285,7 +292,7 @@ inline auto stob(const char *data) noexcept -> BytesView
  * @param data The slice.
  * @return The resulting string.
  */
-inline auto btos(BytesView data) -> std::string
+inline auto btos(BytesView data) -> std::string_view
 {
    return {data.data(), data.size()};
 }

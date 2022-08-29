@@ -241,16 +241,18 @@ namespace tools {
     auto insert(T &t, const std::string &key, const std::string &value) -> void
     {
         auto s = t.insert(stob(key), stob(value));
-        if (!s.is_ok())
+        if (!s.is_ok()) {
             CALICO_EXPECT_TRUE(false && "Error: insert() failed");
+        }
     }
 
     template<class T>
     auto erase(T &t, const std::string &key) -> bool
     {
         auto s = t.erase(find_exact(t, key));
-        if (!s.is_ok() && !s.is_not_found())
+        if (!s.is_ok() && !s.is_not_found()) {
             CALICO_EXPECT_TRUE(false && "Error: erase() failed");
+        }
         return !s.is_not_found();
     }
 

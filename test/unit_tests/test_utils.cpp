@@ -263,6 +263,16 @@ TEST(NonPrintableSliceTests, ModifyCharArray)
     ASSERT_TRUE(stob(data) == stob("42"));
 }
 
+TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
+{
+    const auto a = "a\0b";
+    const char b[] {'4', '\x00', '2', '\x00'};
+
+    // We use strlen() to get the length, which stops at the first NULL byte.
+    ASSERT_EQ(stob(a).size(), 1);
+    ASSERT_EQ(stob(b).size(), 1);
+}
+
 template<class T>
 auto run_nullability_check()
 {
@@ -414,19 +424,6 @@ TEST(StatusTests, StatusCanBeReassigned)
 
     s = Status::ok();
     ASSERT_TRUE(s.is_ok());
-}
-
-// Bad idea??? Uses const reference lifetime extension to name "test", which can be an lvalue or rvalue. Then we use the name in a more
-// complicated expression. Seems pretty useful for creating more complicated asserts.
-#define CALICO_TEST(test, expression) \
-    do { \
-        const auto &_test = (test);  \
-        CALICO_EXPECT_TRUE(expression); \
-    } while (0)
-
-TEST(MacroTest, WeirdMacro)
-{
-    CALICO_TEST(75 * 2 + 10, _test >= 100 and _test <= 200);
 }
 
 TEST(StatusTests, StatusCodesAreCorrect)

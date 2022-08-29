@@ -48,7 +48,7 @@ public:
 
 private:
     explicit BasicPager(const Parameters &);
-    [[nodiscard]] auto pin_frame(PageId) -> Status;
+    [[nodiscard]] auto pin_frame(PageId, bool &) -> Status;
     [[nodiscard]] auto try_make_available() -> Result<bool>;
     auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
 
@@ -57,6 +57,16 @@ private:
         if (!s.is_ok()) {
             m_logger->error(message);
             m_logger->error("(reason) {}", s.what());
+        }
+        return s;
+    }
+
+    auto save_and_forward_status(Status s, const std::string &message) -> Status
+    {
+        if (!s.is_ok()) {
+            m_logger->error(message);
+            m_logger->error("(reason) {}", s.what());
+            if (m_status->is_ok()) *m_status = s;
         }
         return s;
     }

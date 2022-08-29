@@ -35,41 +35,12 @@ See [Links](#links) and [Nodes](#nodes) for more details.
 A link is a page that holds a single pointer to another page.
 They are used to form the freelist, and to connect overflow chains.
 
-## Buffer Pool
-Steal, no-force.
-
-### Frames
-TODO
-
-### Framer
-TODO
-
-### Page Cache
-Simplified 2Q replacement.
-
-## Filesystem Interface
-TODO
-
-### Directories
-TODO
-
-### Files
-Currently, the `data`, `log`, and `wal` files are maintained in the toplevel directory.
-The `data` file contains the data records embedded in a B<sup>+</sup>-tree.
-The `log` file contains the log output of the database instance, written by `spdlog`.
-The `wal` file contains the write-ahead log.
-
 ### Nodes
 Nodes are pages that participate in forming the B<sup>+</sup>-tree structure.
 Each node contains many cells and is responsible for their local ordering as well as maintaining links to neighboring nodes.
 Nodes are made up of three main regions: the header, the cell pointer list, and the cell content area.
 
-[//]: # (TODO: We could probably do away with the free block count field and just use a "null-terminator" in the
-               last free block. We may also be able to use a byte for the fragment count and defragment if it is
-               about to overflow. It generally doesn't get that large anyway, it's just a measure to make sure we
-               keep track of every byte on the page.)
-
-#### Cell DiskStorage
+#### Cell Directory
 The cell directory is an embedded array located directly after the node header.
 It stores the offset of each cell from the start of the node, ordered by the keys, which are stored with their respective cells further down in the cell content area.
 We can use binary search on the cell directory to retrieve the location of a cell in $O(log_2 N)$, where $N$ is the number of cells in the node.
@@ -79,79 +50,27 @@ The cell content area makes up the majority of the page, and is located right af
 As cells are added, the cell directory grows toward the end of the page.
 The cells themselves are added to the cell content area from the reverse direction, such that the two regions meet in the middle.
 When a cell is removed, its memory is added to a list of free blocks embedded within the node.
-The number of free blocks and the location of the first free block are kept in the node header (`Free count` and `Free start`, respectively).
+The location of the first free block is kept in the node header (`Free start`).
+The number of free blocks is not necessary to store: we use a "next pointer" of 0 to indicate that there are no more free blocks to follow.
+This means that if the `Free start` is 0, the free block list is empty.
 When a new cell is added, the free block list is traversed to see if there is a free block large enough to satisfy the request.
 If so, the new cell is allocated from the free block.
 Otherwise, the cell is allocated from the gap region between the cell directory and the existing cell content.
-As cells are added and removed, we may encounter a situation where the memory we need to write a new cell file_exists on the page, but is not contiguous.
-Such a page requires defragmentation, where all free blocks and fragments are merged into the gap space.
+As cells are added and removed, we may encounter a situation where the memory we need to write a new cell exists on the page, but is not contiguous.
+Such a situation requires page defragmentation, where all free blocks and fragments are merged into the gap space.
 
 ## Free List
 Occasionally, a routine will require deletion of a page.
-The free list keeps track of these pages in a singly-linked list of free list link pages.
+The free list keeps track of these pages in a singly-linked list of link pages.
 Each time we need to delete a page, we convert it to a link page and add it at the head of the list, which is stored in the database header.
+Like the free block list contained in each [node](#nodes), we don't store the free list length and instead use a NULL page ID to indicate the end of the list.
 
 ## Overflow Chains
-Currently, Calico DB allows insertion of arbitrary values, but places a limit on the key size.
+Currently, Calico DB allows insertion of nearly arbitrary values (up to 4 GB), but places a hard limit on the key size.
 If a record is too large, the excess portion of the value is copied to one or more overflow pages.
 The cell made from this record will then store the first page ID in the overflow chain in its `Overflow ID` header field.
 Note that no part of the key is ever transferred to an overflow page: every key must be entirely embedded in the node that it belongs to.
-This makes traversing the B<sup>+</sup>-tree easier (we don't have to read additional pages to find keys) and doesn't mess up the page cache.
-
-[//]: # (TODO: Now that we're using a simplified 2Q page cache, the cache won't get messed up unless we read the page 
-               again while it is in the FIFO queue. We should be able to have arbitrary length keys, potentially spanning
-               multiple overflow pages, without affecting the cache too much.)
-
-## Write-Ahead Log (WAL)
-Currently, the WAL consists of a single file, written in page-sized chunks.
-It is managed by a pair of constructs: one to read from the file and one to write to it.
-Both constructs operate on WAL records and perform their own caching internally.
-
-TODO: Add info about the WALManager.
-
-### WAL Records
-WAL records are used to store information about updates made to database pages.
-See ***3*** for more information about WAL records.
-We use a similar scheme including multiple record types.
-Basically, multiple WAL records can correspond to a single page update.
-This is because WAL records can be split up into multiple pages, depending on their size and the amount of memory remaining in the WAL writer's internal block.
-
-### WAL Writer
-The WAL writer fills up an internal block with WAL records.
-When it runs out of space, it flushes the block to the WAL file.
-At that point, all database pages with updates corresponding to the flushed records can be safely written to the `data` file.
-To this end, we always keep the SequenceId of the most-recently-flushed record in memory.
-Also note that the WAL is truncated after each commit, including when the database instance is closed.
-
-### WAL Reader
-The WAL reader is a cursor-like object used to traverse the `wal` file.
-It can be used to traverse in either direction, but must always start at the beginning of the file.
-
-## Cursors
-A cursor acts much like an STL iterator, allowing traversal of the database in-order.
-Since we are using a B<sup>+</sup>-tree, all records are stored in external nodes.
-Thus, cursors are confined to bottom row of the tree and move around using sibling node links.
-A valid cursor is one that is positioned on an existing database record, while an invalid cursor is one that is not.
-Invalid cursors make no distinction between "end" (one past the last element) and the "rend" (one before the first element) positions.
-When a cursor moves out of range, it is marked invalid and cannot be restored.
-This is achieved by letting the cursor stay on the first or last element, and setting a boolean flag to mark invalid-ness.
-While this prohibits us from achieving an ordering between any two cursors, we can still use equality comparison (with the caveat that all invalid cursors compare the same).
-This means that iterating toward an invalid cursor is equivalent to iterating to the end of the database.
-For example, the following snippet will iterate through the whole database.
-```C++
-namespace calico = calico;
-
-// Here we assume that the database is nonempty and does not contain "xyz", or anything that compares 
-// greater than it.
-const auto bounds = core.find(calico::stob("xyz"), true);
-assert(not bounds.is_valid());
-
-for (auto c = core.first(); c != bounds; c++) {
-    // Do something with c.key() and/or c.value().
-}
-```
-
-This is effectively the same as iterating while `c.is_valid()`.
+This makes traversing the B<sup>+</sup>-tree faster (we don't have to read additional pages, pages that are likely not already cached, to find keys).
 
 ## Transactions
 Calico DB uses transactions to preserve database integrity.

@@ -90,25 +90,17 @@ TEST_F(DatabaseOpenTests, MaximumPageSize)
     }
 }
 
-class BasicDatabaseTests: public testing::Test {
+class BasicDatabaseTests: public TestOnDisk {
 public:
-    static constexpr auto ROOT = "/tmp/__calico_database_tests";
-
     BasicDatabaseTests()
     {
-        std::error_code ignore;
-        fs::remove_all(ROOT, ignore);
-
         options.page_size = 0x200;
         options.frame_count = 64;
         options.log_level = spdlog::level::trace;
+        options.store = store.get();
     }
 
-    ~BasicDatabaseTests() override
-    {
-        std::error_code ignore;
-        fs::remove_all(ROOT, ignore);
-    }
+    ~BasicDatabaseTests() override = default;
 
     Options options;
 };
@@ -172,13 +164,13 @@ TEST_F(BasicDatabaseTests, DataPersists)
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         ASSERT_TRUE(expose_message(db.open(ROOT, options)));
         ASSERT_TRUE(expose_message(db.status()));
-//        auto xact = db.start();
+        auto xact = db.transaction();
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
             ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
             itr++;
         }
-//        ASSERT_TRUE(expose_message(xact.commit()));
+        ASSERT_TRUE(expose_message(xact.commit()));
         ASSERT_TRUE(expose_message(db.close()));
     }
 
@@ -211,7 +203,6 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
 TEST_F(BasicDatabaseTests, ReportsInvalidFrameCounts)
 {
     auto invalid = options;
-    std::error_code ignore;
 
     Database db;
     invalid.frame_count = MINIMUM_FRAME_COUNT - 1;
@@ -221,7 +212,104 @@ TEST_F(BasicDatabaseTests, ReportsInvalidFrameCounts)
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 }
 
+TEST_F(BasicDatabaseTests, ReportsInvalidWalLimits)
+{
+    auto invalid = options;
 
+    Database db;
+    invalid.wal_limit = MINIMUM_WAL_LIMIT - 1;
+    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
+
+    invalid.wal_limit = MAXIMUM_WAL_LIMIT + 1;
+    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
+}
+
+// TODO: It would be nice to have better parallelism in the pager for multiple readers. Currently, we lock a mutex around all pager operations,
+//       causing a lot of contention. Maybe we could use some kind of per-frame locks?
+class ReaderTests: public BasicDatabaseTests {
+public:
+    static constexpr Size KEY_WIDTH {6};
+    static constexpr Size NUM_RECORDS {200};
+
+    auto SetUp() -> void override
+    {
+        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+
+        auto xact = db.transaction();
+        for (Size i {}; i < NUM_RECORDS; ++i) {
+            const auto key = make_key<KEY_WIDTH>(i);
+            ASSERT_TRUE(expose_message(db.insert(key, key)));
+        }
+        ASSERT_TRUE(expose_message(xact.commit()));
+    }
+
+    auto TearDown() -> void override
+    {
+        ASSERT_TRUE(expose_message(db.close()));
+    }
+
+    auto localized_reader() const -> void
+    {
+        static constexpr Size NUM_ROUNDS {2};
+
+        // Concentrate the cursors on the first N records.
+        static constexpr Size N {10};
+        static_assert(NUM_RECORDS >= N);
+
+        for (Size i {}; i < NUM_ROUNDS; ++i) {
+            Size counter {};
+            for (auto c = db.first(); counter < N; ++c, ++counter) {
+                const auto key = make_key<KEY_WIDTH>(counter);
+                ASSERT_EQ(btos(c.key()), key);
+                ASSERT_EQ(c.value(), key);
+            }
+        }
+    }
+
+    auto distributed_reader() -> void
+    {
+        static constexpr Size MAX_ROUND_SIZE {10};
+        // Try to spread the cursors out across the database.
+        const auto first = random.next_int(NUM_RECORDS - 1);
+        for (auto i = first; i < NUM_RECORDS; ++i) {
+            auto c = db.find(make_key<KEY_WIDTH>(i));
+
+            for (auto j = i; j < std::min(i + MAX_ROUND_SIZE, NUM_RECORDS); ++j, ++c) {
+                const auto key = make_key<KEY_WIDTH>(j);
+                ASSERT_TRUE(c.is_valid());
+                ASSERT_EQ(btos(c.key()), key);
+                ASSERT_EQ(c.value(), key);
+            }
+        }
+    }
+
+    Random random {42};
+    Database db;
+};
+
+TEST_F(ReaderTests, SingleReader)
+{
+    distributed_reader();
+    localized_reader();
+}
+
+TEST_F(ReaderTests, ManyDistributedReaders)
+{
+    std::vector<std::thread> readers;
+    for (Size i {}; i < options.frame_count * 2; ++i)
+        readers.emplace_back(std::thread {[this] {distributed_reader();}});
+    for (auto &reader: readers)
+        reader.join();
+}
+
+TEST_F(ReaderTests, ManyLocalizedReaders)
+{
+    std::vector<std::thread> readers;
+    for (Size i {}; i < options.frame_count * 2; ++i)
+        readers.emplace_back(std::thread {[this] {localized_reader();}});
+    for (auto &reader: readers)
+        reader.join();
+}
 
 //
 //class DatabaseReadFaultTests: public testing::Test {

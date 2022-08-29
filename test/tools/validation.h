@@ -13,6 +13,6 @@ auto validate_links(Tree &) -> void;
 
 auto print_keys(Tree &) -> void;
 
-} // cco
+} // namespace calico
 
 #endif // CALICO_TREE_VALIDATION_H

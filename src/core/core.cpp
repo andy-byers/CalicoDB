@@ -17,7 +17,7 @@
 
 namespace calico {
 
-#define MAYBE_FORWARD_ERROR(message) \
+#define MAYBE_FORWARD_STATUS(message) \
     do { \
         if (!m_status.is_ok()) return forward_status(m_status, message); \
     } while (0)
@@ -81,7 +81,8 @@ auto Info::maximum_key_size() const -> Size
 
 auto initialize_log(spdlog::logger &logger, const std::string &base)
 {
-    logger.info("starting CalicoDB v{} at \"{}\"", VERSION_NAME, base);
+    const auto version_name = fmt::format("v{}.{}.{}", CALICO_VERSION_MAJOR, CALICO_VERSION_MINOR, CALICO_VERSION_PATCH);
+    logger.info("starting CalicoDB {} at \"{}\"", version_name, base);
     logger.info("tree is located at \"{}/{}\"", base, DATA_FILENAME);
     logger.info("log is located at \"{}/{}\"", base, LOG_FILENAME);
 }
@@ -114,7 +115,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     if (sanitized.wal_limit != DISABLE_WAL) {
         // The WAL segments may be stored elsewhere.
         const auto wal_prefix = sanitized.wal_path.empty()
-            ? m_prefix : sanitized.wal_path + "/";
+            ? m_prefix : std::string {sanitized.wal_path} + "/";
         WriteAheadLog *wal {};
         auto s = BasicWriteAheadLog::open({
             wal_prefix,
@@ -270,7 +271,7 @@ auto Core::last() -> Cursor
 
 auto Core::insert(BytesView key, BytesView value) -> Status
 {
-    MAYBE_FORWARD_ERROR("could not insert");
+    MAYBE_FORWARD_STATUS("could not insert");
     if (m_has_xact) {
         return m_tree->insert(key, value);
     } else {
@@ -285,7 +286,7 @@ auto Core::erase(BytesView key) -> Status
 
 auto Core::erase(Cursor cursor) -> Status
 {
-    MAYBE_FORWARD_ERROR("could not erase");
+    MAYBE_FORWARD_STATUS("could not erase");
     if (m_has_xact) {
         return m_tree->erase(cursor);
     } else {
@@ -319,7 +320,7 @@ auto Core::atomic_erase(Cursor cursor) -> Status
 auto Core::commit() -> Status
 {
     CALICO_EXPECT_TRUE(m_has_xact);
-    MAYBE_FORWARD_ERROR("could not commit");
+    MAYBE_FORWARD_STATUS("could not commit");
     m_logger->info("received commit request");
     static constexpr auto MSG = "could not commit";
 
@@ -607,5 +608,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
 }
 
 #undef MAYBE_FORWARD
+#undef MAYBE_FORWARD_STATUS
+#undef MAYBE_SAVE_AND_FORWARD
 
 } // namespace calico
