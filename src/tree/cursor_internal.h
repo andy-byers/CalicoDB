@@ -21,6 +21,8 @@ public:
     [[nodiscard]] static auto index(const Cursor &) -> Size;
     [[nodiscard]] static auto seek_left(Cursor &) -> bool;
     [[nodiscard]] static auto seek_right(Cursor &) -> bool;
+    [[nodiscard]] static auto is_last(const Cursor &) -> bool;
+    [[nodiscard]] static auto is_first(const Cursor &) -> bool;
     static auto move_to(Cursor &, Node, Size) -> void;
     static auto invalidate(Cursor &, const Status & = default_error_status()) -> void;
 

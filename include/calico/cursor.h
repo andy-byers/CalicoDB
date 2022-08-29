@@ -37,20 +37,6 @@ public:
     [[nodiscard]] auto status() const -> Status;
 
     /**
-     * Check if the cursor is on the record with the largest key (the rightmost record).
-     *
-     * @return True if the cursor is on the rightmost record, false otherwise.
-     */
-    [[nodiscard]] auto is_last() const -> bool;
-
-    /**
-     * Check if the cursor is on the record with the smallest key (the leftmost record).
-     *
-     * @return True if the cursor is on the leftmost record, false otherwise.
-     */
-    [[nodiscard]] auto is_first() const -> bool;
-
-    /**
      * Get the key of the current record.
      *
      * This method produces undefined behavior if the cursor is not valid.
