@@ -5,8 +5,8 @@ Available options include:
 + `page_size`: The size of a database page in bytes. 
 Must be a power of two between 256 and 32768, inclusive.
 + `frame_count`: The number of page-sized frames to allow the block pool page cache.
-+ `wal_limit`: Number of blocks before WAL segmentation (see [wal](#wal)).
-+ `wal_path`: Location to store or find WAL segment files. (see [wal](#wal)).
++ `wal_limit`: Number of blocks before WAL segmentation (see [wal](./wal)).
++ `wal_path`: Location to store or find WAL segment files. (see [wal](./wal)).
 + `log_level`: Log level enumeration passed to `spdlog`. 
   Determines the types of messages that get written to the log file.
 + `store`: A pointer to a `Storage` interface object.

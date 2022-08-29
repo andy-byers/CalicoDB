@@ -121,10 +121,8 @@ Performing many modifications outside a transaction is slow, since each operatio
 6. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
 
-## Design
-Internally, Calico DB is broken down into 6 submodules.
-Each submodule is represented by a directory in `src`, as shown in the [source tree](#source-tree).
-Check out the [documentation](./doc) for more information about the design of Calico DB.
+## Documentation
+Check out Calico DB's usage and design [documents](./doc).
 
 ## Source Tree
 ```

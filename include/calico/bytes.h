@@ -23,13 +23,13 @@ enum class ThreeWayComparison {
 namespace impl {
 
     /**
-     * An internal class representing an unowned sequence of primitives.
+     * An internal class representing an unowned sequence of bytes.
      *
-     * This class should only be used through the Bytes and BytesView aliases.
+     * This class should only be used through the Bytes and BytesView aliases, since it only works with byte sequences.
      *
      * @see Bytes
      * @see BytesView
-     * @tparam Pointer The underlying pointer type.
+     * @tparam Pointer The underlying pointer type. Must be a Byte* or const Byte*.
      */
     template<class Pointer>
     class Slice {
@@ -50,19 +50,21 @@ namespace impl {
          * @param rhs The other slice.
          */
         template<class Q>
-        constexpr Slice(Slice<Q> rhs) noexcept:
-              Slice {rhs.data(), rhs.size()} {}
+        constexpr Slice(Slice<Q> rhs) noexcept
+            : Slice {rhs.data(), rhs.size()} {}
 
         /**
          * Create a slice from a pointer and a length.
          *
+         * The caller must guarantee that the memory used to create this slice is valid.
+         *
          * @tparam Q The pointer type.
          * @param data A pointer to the start of a sequence.
-         * @param size The length of the sequence.
+         * @param size The length of the sequence in bytes.
          */
         template<class Q>
-        constexpr Slice(Q data, Size size) noexcept:
-              m_data {data},
+        constexpr Slice(Q data, Size size) noexcept
+            : m_data {data},
               m_size {size} {}
 
         /**

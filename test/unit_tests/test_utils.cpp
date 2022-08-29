@@ -263,6 +263,16 @@ TEST(NonPrintableSliceTests, ModifyCharArray)
     ASSERT_TRUE(stob(data) == stob("42"));
 }
 
+TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
+{
+    const auto a = "a\0b";
+    const char b[] {'4', '\x00', '2', '\x00'};
+
+    // We use strlen() to get the length, which stops at the first NULL byte.
+    ASSERT_EQ(stob(a).size(), 1);
+    ASSERT_EQ(stob(b).size(), 1);
+}
+
 template<class T>
 auto run_nullability_check()
 {

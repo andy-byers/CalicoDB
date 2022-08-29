@@ -3,6 +3,8 @@
  * Code from this file is automatically embedded in markdown files using @tokusumi/markdown-embed-code. When editing this file, be sure to
  * check the line numbers and comments to make sure everything is consistent. Also, this file should be kept short as it is already a bit of
  * a nightmare to edit.
+ *
+ * TODO: Above statement is a lie. We don't have @tokusumi/markdown-embed-code set up yet! Copy-pasting the code fragments into api.md for now...
  */
 
 #include "calico/calico.h"
@@ -22,35 +24,41 @@ auto main(int, const char *[]) -> int
     /** bytes-objects **/
 
     {
-        auto function_taking_a_bytes_view = [](cco::BytesView) {};
+        std::string s {"abc"};
+        std::string_view sv {"123"};
 
-        std::string data {"Hello, world!"};
+        // We can create slices from std::string and std::string_view using the convenience functions...
+        auto b = cco::stob(s); // Creates a Bytes object.
+        auto bv = cco::stob(sv); // Creates a BytesView object.
 
-        // Construct slices from a string. The string still owns the memory, the slices just refer
-        // to it.
-        cco::Bytes b {data.data(), data.size()};
-        cco::BytesView v {data.data(), data.size()};
+        // ...or from raw parts using the constructor.
+        cco::Bytes b2 {s.data(), s.size()};
+        cco::BytesView bv2 {sv.data(), sv.size()};
 
-        // Convenience conversion from a string.
-        const auto from_string = cco::stob(data);
+        // Conversions are allowed from Bytes to BytesView, but not the other way.
+        cco::BytesView b3 {b};
 
-        // Convenience conversion to a string_view.
-        assert(cco::btos(from_string) == data);
+        // Both classes can be easily converted into std::string_view. If we want an owned std::string back,
+        // however, we must perform the conversion explicitly.
+        auto sv2 = cco::btos(b);
+        auto s2 = std::string {sv2};
 
-        // Implicit conversions from `Bytes` to `BytesView` are allowed.
-        function_taking_a_bytes_view(b);
+        // Slices have methods for modifying the size and pointer position. These methods do not change the
+        // underlying data, they just change what range of bytes the slice is currently "viewing". advance()
+        // increments the underlying pointer...
+        b.advance(1);
 
-        // advance() moves the start of the slice forward and truncate() moves the end of the slice
-        // backward.
-        b.advance(7).truncate(5);
+        // ...and truncate() decreases the size.
+        b.truncate(1);
 
-        // Comparisons.
-        assert(b == cco::stob("world"));
-        assert(b.starts_with(cco::stob("wor")));
+        // Comparison operations are implemented.
+        assert(b == cco::stob("b"));
+        assert(bv.starts_with(cco::stob("ab")));
 
-        // Bytes objects can modify the underlying data, while BytesView objects cannot.
+        // Finally, Bytes can use the non-const overload of operator[](), allowing us to modify the original
+        // string.
         b[0] = '\xFF';
-        assert(data[7] == '\xFF');
+        assert(s[1] == '\xFF');
     }
 
     /** opening-a-database (1) **/
@@ -159,7 +167,7 @@ auto main(int, const char *[]) -> int
     /** info-objects **/
 
     {
-        // We can use an info object to get info about the database instance.
+        // We can use an info object to get information about the database state.
         const auto info = db.info();
         [[maybe_unused]] const auto rc = info.record_count();
         [[maybe_unused]] const auto pc = info.page_count();
