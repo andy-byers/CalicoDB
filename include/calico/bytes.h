@@ -19,119 +19,201 @@ enum class ThreeWayComparison {
 
 namespace impl {
 
-    template<class Pointer>
-    class Slice {
+    template<class T, class Value>
+    class SliceTraits {
     public:
-        using Value = std::remove_pointer_t<Pointer>;
-
-        constexpr Slice() noexcept = default;
-
-        template<class Q>
-        constexpr Slice(Slice<Q> rhs) noexcept
-            : Slice {rhs.data(), rhs.size()} {}
-
-        template<class Q>
-        constexpr Slice(Q data, Size size) noexcept
-            : m_data {data},
-              m_size {size} {}
+        [[nodiscard]]
+        constexpr auto is_empty() const noexcept -> bool
+        {
+            return self().size() == 0;
+        }
 
         constexpr auto operator[](Size index) const noexcept -> const Value&
         {
-            assert(index < m_size);
-            return m_data[index];
+            assert(index < self().size());
+            return self().data()[index];
         }
 
         constexpr auto operator[](Size index) noexcept -> Value&
         {
-            assert(index < m_size);
-            return m_data[index];
+            assert(index < self().size());
+            return self().data()[index];
         }
 
         [[nodiscard]]
-        constexpr auto is_empty() const noexcept -> bool
+        constexpr auto range(Size offset, Size size) const noexcept -> T
         {
-            return m_size == 0;
+            assert(size <= self().size());
+            assert(offset <= self().size());
+            assert(offset + size <= self().size());
+
+            // TODO: Is this a valid use of const_cast()? Bytes instances must be constructed with a non-const pointer to Byte, but this method is
+            //       const. In Bytes, the range we get back can be used to change the underlying data, but the act of creating the range itself does
+            //       not modify anything. We're really just casting our data pointer back to its own type. We could easily give Bytes and BytesView
+            //       their own copies of this method with a bit more code.
+            return T {const_cast<Value*>(self().data()) + offset, size};
         }
 
         [[nodiscard]]
-        constexpr auto size() const noexcept -> Size
+        constexpr auto range(Size offset) const noexcept -> T
         {
-            return m_size;
+            assert(self().size() >= offset);
+            return range(offset, self().size() - offset);
         }
 
         [[nodiscard]]
-        constexpr auto copy() const -> Slice
+        constexpr auto copy() const -> T
         {
-            return *this;
-        }
-
-        [[nodiscard]]
-        constexpr auto range(Size offset, Size size) const noexcept -> Slice
-        {
-            assert(size <= m_size);
-            assert(offset <= m_size);
-            assert(offset + size <= m_size);
-            return Slice {m_data + offset, size};
-        }
-
-        [[nodiscard]]
-        constexpr auto range(Size offset) const noexcept -> Slice
-        {
-            assert(m_size >= offset);
-            return range(offset, m_size - offset);
-        }
-
-        [[nodiscard]]
-        constexpr auto data() const noexcept -> Pointer
-        {
-            return m_data;
-        }
-
-        [[nodiscard]]
-        constexpr auto data() noexcept -> Pointer
-        {
-            return m_data;
+            return self();
         }
 
         constexpr auto clear() noexcept -> void
         {
-            m_data = nullptr;
-            m_size = 0;
+            auto &base = self();
+            base.set_data(nullptr);
+            base.set_size(0);
         }
 
-        constexpr auto advance(Size n = 1) noexcept -> Slice&
+        constexpr auto advance(Size n = 1) noexcept -> T&
         {
-            assert(n <= m_size);
-            m_data += n;
-            m_size -= n;
-            return *this;
+            assert(n <= self().size());
+            self().set_data(self().data() + n);
+            self().set_size(self().size() - n);
+            return self();
         }
 
-        constexpr auto truncate(Size size) noexcept -> Slice&
+        constexpr auto truncate(Size size) noexcept -> T&
         {
-            assert(size <= m_size);
-            m_size = size;
-            return *this;
+            assert(size <= self().size());
+            self().set_size(size);
+            return self();
         }
 
-        template<class T>
+        template<class S>
         [[nodiscard]]
-        constexpr auto starts_with(const T &rhs) const noexcept -> bool
+        constexpr auto starts_with(const S &rhs) const noexcept -> bool
         {
-            if (rhs.size() > m_size)
+            if (rhs.size() > self().size())
                 return false;
-            return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
+            return std::memcmp(self().data(), rhs.data(), rhs.size()) == 0;
+        }
+
+        [[nodiscard]]
+        auto to_string() const noexcept -> std::string
+        {
+            return std::string(self().data(), self().size());
         }
 
     private:
-        Pointer m_data {};
-        Size m_size {};
+        [[nodiscard]]
+        auto self() -> T&
+        {
+            return static_cast<T&>(*this);
+        }
+
+        [[nodiscard]]
+        auto self() const -> const T&
+        {
+            return static_cast<const T&>(*this);
+        }
     };
 
 } // namespace impl
 
-using Bytes = impl::Slice<Byte*>;
-using BytesView = impl::Slice<const Byte*>;
+class Bytes: public impl::SliceTraits<Bytes, Byte> {
+public:
+    constexpr Bytes() noexcept = default;
+
+    constexpr Bytes(Byte *data) noexcept
+        : Bytes {data, std::strlen(data)} {}
+
+    constexpr Bytes(Byte *data, Size size) noexcept
+        : m_data {data},
+          m_size {size} {}
+
+    template<class T>
+    constexpr Bytes(T &rhs) noexcept
+        : Bytes {rhs.data(), rhs.size()} {}
+
+    [[nodiscard]]
+    auto data() -> Byte*
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    auto data() const -> const Byte*
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    auto size() const -> Size
+    {
+        return m_size;
+    }
+
+private:
+    friend class impl::SliceTraits<Bytes, Byte>;
+
+    auto set_data(Byte *data) -> void
+    {
+        m_data = data;
+    }
+
+    auto set_size(Size size) -> void
+    {
+        m_size = size;
+    }
+
+    Byte *m_data {};
+    Size m_size {};
+};
+
+class BytesView: public impl::SliceTraits<BytesView, const Byte> {
+public:
+    constexpr BytesView() noexcept = default;
+
+    constexpr BytesView(const Byte *data) noexcept
+        : BytesView {data, std::strlen(data)} {}
+
+    constexpr BytesView(const Byte *data, Size size) noexcept
+        : m_data {data},
+          m_size {size} {}
+
+    template<class T>
+    constexpr BytesView(const T &rhs) noexcept
+        : BytesView {rhs.data(), rhs.size()} {}
+
+    [[nodiscard]]
+    auto data() const -> const Byte*
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    auto size() const -> Size
+    {
+        return m_size;
+    }
+
+private:
+    friend class impl::SliceTraits<BytesView, const Byte>;
+
+    auto set_data(const Byte *data) -> void
+    {
+        m_data = data;
+    }
+
+    auto set_size(Size size) -> void
+    {
+        m_size = size;
+    }
+
+
+    const Byte *m_data {};
+    Size m_size {};
+};
 
 inline auto stob(const std::string &data) noexcept -> BytesView
 {
@@ -156,11 +238,6 @@ inline auto stob(char *data) noexcept -> Bytes
 inline auto stob(const char *data) noexcept -> BytesView
 {
     return {data, std::strlen(data)};
-}
-
-inline auto btos(BytesView data) -> std::string_view
-{
-   return {data.data(), data.size()};
 }
 
 inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> ThreeWayComparison

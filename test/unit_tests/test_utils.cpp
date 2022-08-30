@@ -239,7 +239,7 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
 TEST(NonPrintableSliceTests, Conversions)
 {
     std::string u {"\x00\x01", 2};
-    const auto s = btos(stob(u));
+    const auto s = stob(u).to_string();
     ASSERT_EQ(s.size(), 2);
     ASSERT_EQ(s[0], '\x00');
     ASSERT_EQ(s[1], '\x01');
@@ -249,8 +249,8 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
 {
     const auto a = "ab";
     const char b[] {'4', '2', '\x00'};
-    ASSERT_EQ(stob(a).size(), 2);
-    ASSERT_EQ(stob(b).size(), 2);
+    ASSERT_EQ(BytesView {a}.size(), 2);
+    ASSERT_EQ(BytesView {b}.size(), 2);
 }
 
 TEST(NonPrintableSliceTests, ModifyCharArray)

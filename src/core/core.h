@@ -7,10 +7,6 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
 
-#ifdef CALICO_BUILD_TESTS
-#  include <gtest/gtest_prod.h>
-#endif
-
 namespace calico {
 
 class Cursor;
@@ -21,7 +17,7 @@ class WriteAheadLog;
 
 struct InitialState {
     FileHeader state {};
-    bool is_new {};
+    bool is_new {}; // TODO: state.page_count == 0?
 };
 
 class Core final {

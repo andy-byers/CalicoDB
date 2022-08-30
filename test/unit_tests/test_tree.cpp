@@ -184,12 +184,12 @@ TEST_F(TreeTests, CanFindExtrema)
     insert_sequence(*tree, 0, 200);
 
     auto minimum = tree->find_minimum();
-    ASSERT_EQ(btos(minimum.key()), make_key(0));
+    ASSERT_EQ(minimum.key().to_string(), make_key(0));
     ASSERT_EQ(tools::find_exact(*tree, make_key(0)), minimum);
     ASSERT_EQ(tools::find(*tree, make_key(0)), minimum);
 
     auto maximum = tree->find_maximum();
-    ASSERT_EQ(btos(maximum.key()), make_key(199));
+    ASSERT_EQ(maximum.key().to_string(), make_key(199));
     ASSERT_EQ(tools::find_exact(*tree, make_key(199)), maximum);
     ASSERT_EQ(tools::find(*tree, make_key(199)), maximum);
 }
@@ -199,14 +199,14 @@ TEST_F(TreeTests, CanFind)
     insert_sequence(*tree, 0, 200, 2);
 
     auto cursor = tools::find(*tree, make_key(100));
-    ASSERT_EQ(btos(cursor.key()), make_key(100));
+    ASSERT_EQ(cursor.key().to_string(), make_key(100));
     cursor = tools::find(*tree, make_key(101));
-    ASSERT_EQ(btos(cursor.key()), make_key(102));
+    ASSERT_EQ(cursor.key().to_string(), make_key(102));
 
     cursor = tools::find_exact(*tree, make_key(101));
     ASSERT_FALSE(cursor.is_valid());
     cursor = tools::find_exact(*tree, make_key(102));
-    ASSERT_EQ(btos(cursor.key()), make_key(102));
+    ASSERT_EQ(cursor.key().to_string(), make_key(102));
 }
 
 TEST_F(TreeTests, CopiedCursorsAreEqual)
@@ -376,7 +376,7 @@ TEST_F(TreeTests, RandomInserts)
     validate();
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(*tree, key);
-        ASSERT_EQ(btos(c.key()), key);
+        ASSERT_EQ(c.key().to_string(), key);
         ASSERT_EQ(c.value(), value);
     }
     ASSERT_EQ(tree->record_count(), records.size());
@@ -505,7 +505,7 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
         for (const auto &[k, v]: records) {
             auto cursor = tools::find_exact(*tree, k);
             ASSERT_TRUE(cursor.is_valid());
-            ASSERT_EQ(btos(cursor.key()), k);
+            ASSERT_EQ(cursor.key().to_string(), k);
             ASSERT_EQ(cursor.value(), v);
             CALICO_EXPECT_TRUE(tools::erase(*tree, k));
             if (counter++ % 100 == 0)
@@ -522,7 +522,7 @@ TEST_F(TreeTests, ForwardPartialIteration)
     auto i = tree->record_count() / 5;
 
     for (auto cursor = tools::find_exact(*tree, make_key(i)); cursor.is_valid(); cursor++)
-        ASSERT_EQ(btos(cursor.key()), make_key(i++));
+        ASSERT_EQ(cursor.key().to_string(), make_key(i++));
 }
 
 TEST_F(TreeTests, ForwardBoundedIteration)
@@ -533,7 +533,7 @@ TEST_F(TreeTests, ForwardBoundedIteration)
     auto upper = tools::find_exact(*tree, make_key(tree->record_count() - i));
 
     for (; lower.is_valid() && lower != upper; lower++)
-        ASSERT_EQ(btos(lower.key()), make_key(i++));
+        ASSERT_EQ(lower.key().to_string(), make_key(i++));
 }
 
 TEST_F(TreeTests, ReversePartialIteration)
@@ -543,7 +543,7 @@ TEST_F(TreeTests, ReversePartialIteration)
     auto i = count / 5;
 
     for (auto c = tools::find_exact(*tree, make_key(count - i - 1)); c.is_valid(); c--)
-        ASSERT_EQ(btos(c.key()), make_key(count - i++ - 1));
+        ASSERT_EQ(c.key().to_string(), make_key(count - i++ - 1));
 }
 
 TEST_F(TreeTests, ReverseBoundedIteration)
@@ -554,7 +554,7 @@ TEST_F(TreeTests, ReverseBoundedIteration)
     auto upper = tools::find_exact(*tree, make_key(tree->record_count() - i - 1));
 
     for (; upper.is_valid() && upper != lower; upper--)
-        ASSERT_EQ(btos(upper.key()), make_key(tree->record_count() - i++ - 1));
+        ASSERT_EQ(upper.key().to_string(), make_key(tree->record_count() - i++ - 1));
 }
 
 TEST_F(TreeTests, SanityCheck)

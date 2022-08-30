@@ -123,7 +123,7 @@ auto Internal::positioned_modify(Position position, BytesView value) -> Result<v
     auto old_cell = node.read_cell(index);
     // Make a copy of the key. The data backing the old key slice may be written over when we call
     // remove_at() on the old cell.
-    const std::string key {btos(old_cell.key())};
+    const auto key = old_cell.key().to_string();
 
     CALICO_TRY_CREATE(new_cell, make_cell(stob(key), value, true));
 

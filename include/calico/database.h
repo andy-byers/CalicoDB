@@ -21,15 +21,11 @@ public:
     [[nodiscard]] auto open(const std::string &, const Options & = {}) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto find_exact(BytesView key) const -> Cursor;
-    [[nodiscard]] auto find_exact(const std::string &key) const -> Cursor;
     [[nodiscard]] auto find(BytesView key) const -> Cursor;
-    [[nodiscard]] auto find(const std::string &key) const -> Cursor;
     [[nodiscard]] auto first() const -> Cursor;
     [[nodiscard]] auto last() const -> Cursor;
     [[nodiscard]] auto insert(BytesView key, BytesView value) -> Status;
-    [[nodiscard]] auto insert(const std::string &key, const std::string &value) -> Status;
     [[nodiscard]] auto erase(BytesView key) -> Status;
-    [[nodiscard]] auto erase(const std::string &key) -> Status;
     [[nodiscard]] auto erase(const Cursor &cursor) -> Status;
     [[nodiscard]] auto info() const -> Info;
     [[nodiscard]] auto status() const -> Status;
