@@ -1,9 +1,3 @@
-/**
-*
-* References
-*   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
-*/
-
 #ifndef CALICO_WAL_READER_H
 #define CALICO_WAL_READER_H
 

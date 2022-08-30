@@ -195,9 +195,6 @@ auto Internal::balance_after_underflow(Node node, BytesView anchor) -> Result<vo
     return m_pool->release(std::move(node));
 }
 
-/**
- * Balancing routine for fixing an over-full root node.
- */
 auto Internal::split_root(Node root) -> Result<Node>
 {
     CALICO_EXPECT_TRUE(root.id().is_root());

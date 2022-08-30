@@ -2,49 +2,25 @@
 
 namespace calico {
 
-/**
- * Create a random number generator with a default seed.
- */
 Random::Random()
     : Random(0) { }
 
-/**
- * Create and seed a random number generator.
- *
- * @param seed The RNG seed.
- */
 Random::Random(Seed seed)
 {
     set_seed(seed);
 }
 
-/**
- * Get the RNG seed.
- *
- * @return RNG seed.
- */
 auto Random::seed() const -> Seed
 {
     return m_seed;
 }
 
-/**
- * Set the RNG seed.
- *
- * @param seed RNG seed.
- */
 auto Random::set_seed(Seed seed) -> void
 {
     m_rng.seed(seed);
     m_seed = seed;
 }
 
-/**
- * Generate a random string.
- *
- * @param size The length of the string.
- * @return A string containing alphanumeric characters of the specified length.
- */
 auto Random::next_string(Size size) -> std::string
 {
     constexpr char chars[]{"ABCDEFGHIJKLMNOPQRSTUVWXYZ"

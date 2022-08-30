@@ -15,6 +15,7 @@ auto NamedScratchManager::get() -> NamedScratch
     const auto id = m_next_id++;
     auto [itr, truthy] = m_occupied.emplace(id, std::move(scratch));
     CALICO_EXPECT_TRUE(truthy);
+
     return NamedScratch {id, stob(itr->second)};
 }
 

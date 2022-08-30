@@ -83,7 +83,6 @@ if(CALICO_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-
 if(CALICO_BUILD_TESTS)
     set(gtest_force_shared_crt On CACHE BOOL "" FORCE)
     set(INSTALL_GTEST Off)
@@ -108,8 +107,6 @@ if(CALICO_INSTALL)
     set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
     set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
 
-    # set_target_properties()?
-
     install(
         TARGETS             calico spdlog
         EXPORT              "${TARGETS_NAME}"
@@ -118,16 +115,7 @@ if(CALICO_INSTALL)
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     )
     install(
-        FILES       "${CALICO_INCLUDE_DIR}/calico/bytes.h"
-                    "${CALICO_INCLUDE_DIR}/calico/calico.h"
-                    "${CALICO_INCLUDE_DIR}/calico/common.h"
-                    "${CALICO_INCLUDE_DIR}/calico/cursor.h"
-                    "${CALICO_INCLUDE_DIR}/calico/database.h"
-                    "${CALICO_INCLUDE_DIR}/calico/info.h"
-                    "${CALICO_INCLUDE_DIR}/calico/options.h"
-                    "${CALICO_INCLUDE_DIR}/calico/status.h"
-                    "${CALICO_INCLUDE_DIR}/calico/store.h"
-                    "${CALICO_INCLUDE_DIR}/calico/transaction.h"
+        DIRECTORY   "${CALICO_INCLUDE_DIR}/calico"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     )
     install(

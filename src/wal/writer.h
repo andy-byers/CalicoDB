@@ -12,9 +12,6 @@
 
 namespace calico {
 
-/**
- * A helper class for the WAL background thread that takes care of writing records to the current segment file.
- */
 class WalRecordWriter {
 public:
     using SetFlushedLsn = std::function<void(SequenceId)>;
@@ -269,7 +266,7 @@ private:
     auto handle_error(SegmentGuard &guard, Status e) -> void;
 
     struct {
-        Queue<Event> events {32}; ///< Internally synchronized queue.
+        Queue<Event> events {32};
         mutable std::mutex mu;
         std::condition_variable cv;
         std::list<Status> errors;

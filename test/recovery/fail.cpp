@@ -45,7 +45,7 @@ auto main(int argc, const char *argv[]) -> int
     options.page_size = 0x200;
     options.frame_count = 16;
     Database db;
-    expect_ok(db.open(path, options));
+    expect_ok(db.open(path.string(), options));
     {
         std::ofstream ofs {value_path, std::ios::trunc};
         CALICO_EXPECT_TRUE(ofs.is_open());

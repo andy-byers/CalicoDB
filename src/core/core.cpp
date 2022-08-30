@@ -34,15 +34,6 @@ namespace calico {
         if (!calico_s.is_ok()) return save_and_forward_status(calico_s, message); \
     } while (0)
 
-//[[nodiscard]]
-//static auto not_supported_error(const std::string &primary)
-//{
-//    ThreePartMessage message;
-//    message.set_primary(primary);
-//    message.set_detail("action is not supported with the given database options");
-//    return message.logic_error();
-//}
-
 [[nodiscard]]
 static auto compute_header_crc(const FileHeader &state)
 {
@@ -92,7 +83,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     static constexpr auto MSG = "cannot open database";
     auto sanitized = sanitize_options(options);
 
-    m_prefix = path + "/";
+    m_prefix = path + (path.back() == '/' ? "" :  "/");
     m_sink = sanitized.log_level ? create_sink(path, sanitized.log_level) : create_sink();
     m_logger = create_logger(m_sink, "core");
     initialize_log(*m_logger, path);

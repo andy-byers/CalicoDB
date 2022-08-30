@@ -10,13 +10,6 @@
 
 namespace calico {
 
-/**
- * A simple queue with internal synchronization.
- *
- * Modified from RocksDB's WorkQueue class.
- *
- * @tparam T Must be CopyConstructible!
- */
 template<class T>
 class Queue final {
 public:

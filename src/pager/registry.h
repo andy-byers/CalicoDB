@@ -2,8 +2,8 @@
  * Very loosely based off of https://medium.com/@koushikmohan/an-analysis-of-2q-cache-replacement-algorithms-21acceae672a
  */
 
-#ifndef CALICO_POOL_PAGE_CACHE_H
-#define CALICO_POOL_PAGE_CACHE_H
+#ifndef CALICO_PAGER_PAGE_CACHE_H
+#define CALICO_PAGER_PAGE_CACHE_H
 
 #include "framer.h"
 #include "utils/cache.h"
@@ -126,4 +126,4 @@ private:
 
 } // namespace calico
 
-#endif // CALICO_POOL_PAGE_CACHE_H
+#endif // CALICO_PAGER_PAGE_CACHE_H

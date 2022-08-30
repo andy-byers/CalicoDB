@@ -48,7 +48,7 @@ auto main(int argc, const char *argv[]) -> int
     }
     Options options;
     Database db;
-    expect_ok(db.open(path, options));
+    expect_ok(db.open(path.string(), options));
     const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.

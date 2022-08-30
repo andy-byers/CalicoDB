@@ -1,9 +1,3 @@
-/**
-*
-* References
-*   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
-*/
-
 #ifndef CALICO_WAL_RECORD_H
 #define CALICO_WAL_RECORD_H
 
@@ -134,7 +128,7 @@ struct WalRecordHeader {
     std::uint32_t crc;
     std::uint16_t size;
     Type type;
-    Byte pad; ///< Padding byte that should always be zero.
+    Byte pad;
 };
 
 // TODO: May need some compiler intrinsics to make this actually true on all platforms...

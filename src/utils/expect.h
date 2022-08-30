@@ -22,25 +22,12 @@
 #define CALICO_EXPECT_GT(t1, t2) CALICO_EXPECT_TRUE((t1) > (t2))
 #define CALICO_EXPECT_GE(t1, t2) CALICO_EXPECT_TRUE((t1) >= (t2))
 
-/**
- * If the expression evaluates to an error object, this macro propagates it up to the caller, otherwise it
- * does nothing.
- *
- * @param expr The expression to evaluate.
- */
 #define CALICO_TRY(expr)                                                        \
     do {                                                                     \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) \
             return Err {calico_try_result.error()};                          \
     } while (0)
 
-/**
- * If the expression evaluates to an error object, this macro propagates it up to the caller, otherwise it
- * assigns the unwrapped expected value to an existing variable.
- *
- * @param out The new variable.
- * @param expr The expression to evaluate.
- */
 #define CALICO_TRY_STORE(out, expr)                                               \
     do {                                                                       \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) { \
@@ -50,15 +37,6 @@
         }                                                                      \
     } while (0)
 
-/**
- * If the expression evaluates to an error object, this macro propagates it up to the caller, otherwise it
- * assigns the unwrapped expected value to a new variable.
- *
- * This macro needs to be used with care as it evaluates to multiple statements.
- *
- * @param out A valid identifier denoting the name of the new variable.
- * @param expr The expression to evaluate.
- */
 #define CALICO_TRY_CREATE(out, expr)              \
     auto calico_try_##out = (expr);            \
     if (!calico_try_##out.has_value()) {       \

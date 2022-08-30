@@ -7,7 +7,7 @@
 namespace calico {
 
 namespace fs = std::filesystem;
-static constexpr int FILE_PERMISSIONS {0644}; ///< -rw-r--r--
+static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
 
 static auto read_file_at(int file, Bytes &out, Size offset)
 {

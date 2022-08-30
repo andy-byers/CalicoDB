@@ -17,6 +17,7 @@ class Cursor;
 class Pager;
 class Storage;
 class Tree;
+class WriteAheadLog;
 
 struct InitialState {
     FileHeader state {};

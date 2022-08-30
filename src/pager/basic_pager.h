@@ -1,5 +1,5 @@
-#ifndef CALICO_POOL_BUFFER_POOL_H
-#define CALICO_POOL_BUFFER_POOL_H
+#ifndef CALICO_PAGER_PAGER_H
+#define CALICO_PAGER_PAGER_H
 
 #include "pager.h"
 #include "registry.h"
@@ -85,4 +85,4 @@ private:
 
 } // namespace calico
 
-#endif // CALICO_POOL_BUFFER_POOL_H
+#endif // CALICO_PAGER_PAGER_H

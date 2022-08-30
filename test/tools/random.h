@@ -8,9 +8,6 @@
 
 namespace calico {
 
-/**
-** Helper class for generating random numbers.
-*/
 class Random {
 public:
     using Engine = std::default_random_engine;
@@ -24,14 +21,16 @@ public:
     auto next_string(Size) -> std::string;
     auto next_binary(Size) -> std::string;
     template<class C> auto shuffle(C&) -> void;
+
+    // NOTE: All upper bounds are inclusive.
     template<class T> auto next_int(T) -> T;
     template<class T1, class T2> auto next_int(T1, T2) -> T1;
     template<class T> auto next_real(T) -> T;
     template<class T1, class T2> auto next_real(T1, T2) -> T1;
 
 protected:
-    Seed m_seed {};  ///< Seed for the random number generator.
-    std::default_random_engine m_rng; ///< STL random number generation engine.
+    Seed m_seed {};
+    std::default_random_engine m_rng;
 };
 
 template<class Container> auto Random::shuffle(Container &data) -> void
@@ -39,25 +38,12 @@ template<class Container> auto Random::shuffle(Container &data) -> void
     std::shuffle(begin(data), end(data), m_rng);
 }
 
-/**
-** Generate a positive integer from a uniform distribution.
-**
-** @param v_max The maximum value (inclusive) that the integer can take.
-** @return A random integer in the view [0, v_max].
-*/
 template<class T>
 auto Random::next_int(T v_max) -> T
 {
     return next_int(T {}, v_max);
 }
 
-/**
-** Generate an integer from a uniform distribution.
-**
-** @param v_min The minimum value (inclusive) that the integer can take.
-** @param v_max The maximum value (inclusive) that the integer can take.
-** @return A random integer in the view [v_min, v_max].
-*/
 template<class T1, class T2>
 auto Random::next_int(T1 v_min, T2 v_max) -> T1
 {
@@ -66,25 +52,12 @@ auto Random::next_int(T1 v_min, T2 v_max) -> T1
     return dist(m_rng);
 }
 
-/**
-** Generate a positive real number from a uniform distribution.
-**
-** @param v_max The maximum value (inclusive) that the number can take.
-** @return A random real number in the view [0, v_max].
-*/
 template<class T>
 auto Random::next_real(T v_max) -> T
 {
     return next_real(T {}, v_max);
 }
 
-/**
-** Generate a real number from a uniform distribution.
-**
-** @param v_min The minimum value (inclusive) that the number can take.
-** @param v_max The maximum value (inclusive) that the number can take.
-** @return A random real number in the view [v_min, v_max].
-*/
 template<class T1, class T2>
 auto Random::next_real(T1 v_min, T2 v_max) -> T1
 {

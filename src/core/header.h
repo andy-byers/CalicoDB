@@ -9,12 +9,7 @@ namespace calico {
 
 class Page;
 
-/// Identifies a file as a Calico DB database.
 static constexpr std::uint32_t MAGIC_CODE {0xB11924E1};
-
-/**
- * Offset at which to begin computing the header CRC.
- */
 static constexpr Size CRC_OFFSET {2 * sizeof(std::uint32_t)};
 
 inline auto read_header(const Page &page) -> FileHeader

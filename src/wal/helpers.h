@@ -113,12 +113,6 @@ struct SegmentInfo {
     bool has_commit {};
 };
 
-/**
- * Collects, and provides a staging area for, WAL segment descriptors.
- *
- * @see SegmentGuard
- * @see WalRecordWriter
- */
 class WalCollection final {
 public:
     WalCollection() = default;
@@ -418,11 +412,6 @@ private:
     bool m_has_block {};
 };
 
-/**
- * Provides fixed-length scratch buffers for WAL payload data with synchronization.
- *
- * Used to pass scratch memory between the WAL component and background writer thread.
- */
 class LogScratchManager final {
 public:
     explicit LogScratchManager(Size buffer_size)

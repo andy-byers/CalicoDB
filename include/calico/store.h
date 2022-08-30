@@ -6,18 +6,12 @@
 
 namespace calico {
 
-/**
- * An interface for reading bytes at a specified location.
- */
 class RandomReader {
 public:
     virtual ~RandomReader() = default;
     [[nodiscard]] virtual auto read(Bytes&, Size) -> Status = 0;
 };
 
-/**
- * An interface for reading and writing bytes at specified locations.
- */
 class RandomEditor {
 public:
     virtual ~RandomEditor() = default;
@@ -26,9 +20,6 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
-/**
- * An interface for appending bytes.
- */
 class AppendWriter {
 public:
     virtual ~AppendWriter() = default;
@@ -36,9 +27,6 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
-/**
- * An abstraction that provides a storage environment for a Calico DB database to operate within.
- */
 class Storage {
 public:
     virtual ~Storage() = default;
@@ -52,15 +40,6 @@ public:
     [[nodiscard]] virtual auto file_exists(const std::string &) const -> Status = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &, Size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &, Size &) const -> Status = 0;
-
-    /**
-     * Remove a blob from the storage object.
-     *
-     * Once this method is called on a name N, calling any method (besides the destructor) on a live child with name N will result in undefined behavior.
-     *
-     * @param name Name of the child to remove.
-     * @return A status object indicating success or failure.
-     */
     [[nodiscard]] virtual auto remove_file(const std::string &name) -> Status = 0;
 };
 

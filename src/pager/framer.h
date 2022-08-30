@@ -1,5 +1,5 @@
-#ifndef CALICO_POOL_PAGER_H
-#define CALICO_POOL_PAGER_H
+#ifndef CALICO_PAGER_FRAMER_H
+#define CALICO_PAGER_FRAMER_H
 
 #include "calico/status.h"
 #include "utils/result.h"
@@ -15,6 +15,7 @@ struct FileHeader;
 class Page;
 class Pager;
 class RandomEditor;
+class WriteAheadLog;
 
 struct FrameNumber {
     using Hash = IndexHash<FrameNumber>;
@@ -151,4 +152,4 @@ private:
 
 } // namespace calico
 
-#endif // CALICO_POOL_PAGER_H
+#endif // CALICO_PAGER_FRAMER_H

@@ -21,7 +21,7 @@ auto main(int, const char *[]) -> int
 {
     namespace cco = calico;
 
-    /** bytes-objects **/
+    /* bytes-objects */
 
     {
         std::string s {"abc"};
@@ -61,12 +61,12 @@ auto main(int, const char *[]) -> int
         assert(s[1] == '\xFF');
     }
 
-    /** opening-a-database (1) **/
+    /* opening-a-database (1) */
 
     // Create the database object.
     cco::Database db;
 
-    /** opening-a-database (2) **/
+    /* opening-a-database (2) */
 
     {
         // Set some initialization options. We'll use pages of size 2 KB with 2 MB of cache.
@@ -84,7 +84,7 @@ auto main(int, const char *[]) -> int
         }
     }
 
-    /** updating-a-database **/
+    /* updating-a-database */
 
     {
         // Insert a key-value pair. We can use arbitrary bytes for both the key and value.
@@ -105,7 +105,7 @@ auto main(int, const char *[]) -> int
         assert(s.is_not_found());
     }
 
-    /** querying-a-database **/
+    /* querying-a-database */
 
     {
         // We can find the first record greater than or equal to a given key...
@@ -135,7 +135,7 @@ auto main(int, const char *[]) -> int
         for (auto c = db.first(); c.is_valid() && c.key() < cco::stob("42"); c++) {}
     }
 
-    /** transaction-objects **/
+    /* transaction-objects */
 
     {
         // Start a transaction. All modifications made to the database while this object is live will be part of the transaction
@@ -164,7 +164,7 @@ auto main(int, const char *[]) -> int
         assert_ok(s);
     }
 
-    /** info-objects **/
+    /* info-objects */
 
     {
         // We can use an info object to get information about the database state.
@@ -175,17 +175,22 @@ auto main(int, const char *[]) -> int
     }
 
     auto xact = db.transaction();
-    for (cco::Size i {}; i < 10'000'000; ++i) {
-        if (db.info().record_count() > 100'000)
+    for (cco::Size i {}; i < 5'000'000; ++i) {
+        if (db.info().record_count() > 10'000)
             assert_ok(db.erase(db.first()));
         const auto k = std::to_string(i);
         assert_ok(db.insert(k, k));
-        if (i && i % 1000 == 0 && i < 9'990'000) {
+        if (i && i % 1000 == 0 && i < 4'999'000) {
             assert_ok(xact.commit());
             xact = db.transaction();
         }
     }
     assert_ok(xact.commit());
+
+    {
+        auto s = cco::Database::destroy(std::move(db));
+        assert_ok(s);
+    }
 
     return 0;
 }

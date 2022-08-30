@@ -8,13 +8,13 @@ namespace calico {
 
 namespace fs = std::filesystem;
 
-auto create_logger(spdlog::sink_ptr sink, const std::string &name) -> std::shared_ptr<spdlog::logger>
+auto create_logger(spdlog::sink_ptr sink, const std::string_view &name) -> std::shared_ptr<spdlog::logger>
 {
     CALICO_EXPECT_FALSE(name.empty());
-    return std::make_shared<spdlog::logger>(name, std::move(sink));
+    return std::make_shared<spdlog::logger>(std::string {name}, std::move(sink));
 }
 
-auto create_sink(const std::string &base, spdlog::level::level_enum level) -> spdlog::sink_ptr
+auto create_sink(const std::string_view &base, spdlog::level::level_enum level) -> spdlog::sink_ptr
 {
     spdlog::sink_ptr sink;
     if (base.empty()) {
