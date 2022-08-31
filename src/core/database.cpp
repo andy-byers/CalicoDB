@@ -56,20 +56,10 @@ auto Database::find_exact(BytesView key) const -> Cursor
     return m_core->find_exact(key);
 }
 
-auto Database::find_exact(const std::string &key) const -> Cursor
-{
-    return find_exact(stob(key));
-}
-
 auto Database::find(BytesView key) const -> Cursor
 {
     CALICO_EXPECT_NE(m_core, nullptr);
     return m_core->find(key);
-}
-
-auto Database::find(const std::string &key) const -> Cursor
-{
-    return find(stob(key));
 }
 
 auto Database::first() const -> Cursor
@@ -90,19 +80,9 @@ auto Database::insert(BytesView key, BytesView value) -> Status
     return m_core->insert(key, value);
 }
 
-auto Database::insert(const std::string &key, const std::string &value) -> Status
-{
-    return insert(stob(key), stob(value));
-}
-
 auto Database::erase(BytesView key) -> Status
 {
     return erase(find_exact(key));
-}
-
-auto Database::erase(const std::string &key) -> Status
-{
-    return erase(stob(key));
 }
 
 auto Database::erase(const Cursor &cursor) -> Status

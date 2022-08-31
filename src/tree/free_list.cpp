@@ -1,5 +1,5 @@
 #include "free_list.h"
-#include "calico/options.h"
+#include "core/header.h"
 #include "page/link.h"
 #include "page/page.h"
 #include "pager/pager.h"

@@ -7,13 +7,13 @@
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
 #include "store/disk.h"
+#include "store/helpers.h"
 #include "tree/bplus_tree.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 #include "wal/basic_wal.h"
 #include "wal/disabled_wal.h"
-#include <filesystem>
 
 namespace calico {
 
@@ -133,14 +133,14 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             sanitized.frame_count,
             sanitized.page_size,
         });
-        if (!r.has_value()) return forward_status(r.error(), MSG);
+        MAYBE_FORWARD(r ? Status::ok() : r.error(), MSG);
         m_pager = std::move(*r);
         m_pager->load_state(state);
     }
 
     {
         auto r = BPlusTree::open(*m_pager, m_sink, sanitized.page_size);
-        if (!r.has_value()) return forward_status(r.error(), MSG);
+        MAYBE_FORWARD(r ? Status::ok() : r.error(), MSG);
         m_tree = std::move(*r);
         m_tree->load_state(state);
     }
@@ -149,9 +149,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     if (is_new) {
         // The first call to root() allocates the root page.
         auto root = m_tree->root(true);
+        MAYBE_FORWARD(root ? Status::ok() : root.error(), MSG);
         CALICO_EXPECT_EQ(m_pager->page_count(), 1);
-        s = !root.has_value() ? root.error() : s;
-        MAYBE_FORWARD(s, MSG);
 
         state.page_count = 1;
         state.header_crc = compute_header_crc(state);
@@ -203,7 +202,6 @@ auto Core::destroy() -> Status
     }
     return m_store->remove_directory(m_prefix);
 }
-
 
 auto Core::forward_status(Status s, const std::string &message) -> Status
 {

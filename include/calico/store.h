@@ -1,8 +1,12 @@
+/*
+ * Calico DB storage environment. The interface is based off of https://github.com/google/leveldb/blob/main/include/leveldb/env.h.
+ */
 #ifndef CALICO_STORE_H
 #define CALICO_STORE_H
 
 #include "calico/status.h"
 #include <string>
+#include <vector>
 
 namespace calico {
 
@@ -42,20 +46,6 @@ public:
     [[nodiscard]] virtual auto file_size(const std::string &, Size &) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &name) -> Status = 0;
 };
-
-template<class Reader>
-[[nodiscard]]
-auto read_exact(Reader &reader, Bytes out, Size offset) -> Status
-{
-    static constexpr auto FMT = "could not read exact: read {}/{} bytes";
-    const auto requested = out.size();
-    auto s = reader.read(out, offset);
-
-    if (s.is_ok() && out.size() != requested)
-        return Status::system_error(fmt::format(FMT, out.size(), requested));
-
-    return s;
-}
 
 } // namespace calico
 

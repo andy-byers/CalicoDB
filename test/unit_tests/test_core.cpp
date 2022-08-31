@@ -179,7 +179,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(db, key);
         ASSERT_TRUE(c.is_valid());
-        ASSERT_EQ(btos(c.key()), key);
+        ASSERT_EQ(c.key().to_string(), key);
         ASSERT_EQ(c.value(), value);
     }
     ASSERT_TRUE(db.close().is_ok());
@@ -260,7 +260,7 @@ public:
             Size counter {};
             for (auto c = db.first(); counter < N; ++c, ++counter) {
                 const auto key = make_key<KEY_WIDTH>(counter);
-                ASSERT_EQ(btos(c.key()), key);
+                ASSERT_EQ(c.key().to_string(), key);
                 ASSERT_EQ(c.value(), key);
             }
         }
@@ -277,7 +277,7 @@ public:
             for (auto j = i; j < std::min(i + MAX_ROUND_SIZE, NUM_RECORDS); ++j, ++c) {
                 const auto key = make_key<KEY_WIDTH>(j);
                 ASSERT_TRUE(c.is_valid());
-                ASSERT_EQ(btos(c.key()), key);
+                ASSERT_EQ(c.key().to_string(), key);
                 ASSERT_EQ(c.value(), key);
             }
         }
@@ -338,7 +338,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //
 //    for (const auto &[key, value]: db.records) {
 //        auto c = tools::find(*db.core, key);
-//        ASSERT_EQ(btos(c.key()), key);
+//        ASSERT_EQ(c.key().to_string(), key);
 //        ASSERT_EQ(c.value(), value);
 //    }
 //}

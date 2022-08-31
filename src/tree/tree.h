@@ -10,6 +10,7 @@
 namespace calico {
 
 class Cell;
+class FileHeader;
 class Link;
 class Internal;
 class Node;

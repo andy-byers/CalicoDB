@@ -51,5 +51,4 @@ auto Transaction::abort() -> Status
     return s;
 }
 
-
 } // namespace calico

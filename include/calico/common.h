@@ -2,20 +2,10 @@
 #define CALICO_COMMON_H
 
 #include <cstdint>
-#include <cstdlib>
-#include <string>
-
-#if (!defined(_WIN32) && !defined(_WIN64)) && (defined(__unix__) || defined(__unix) || defined(__APPLE__))
-#  define CALICO_UNIX
-#  ifdef __APPLE__
-#    define CALICO_OSX
-#  endif
-#else
-#  error "Error: This platform is currently unsupported"
-#endif
 
 namespace calico {
 
+// Common types.
 using Byte = char;
 using Size = std::uint64_t;
 
