@@ -1,6 +1,8 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
+#include <functional>
+#include <vector>
 #include "calico/bytes.h"
 #include "calico/status.h"
 

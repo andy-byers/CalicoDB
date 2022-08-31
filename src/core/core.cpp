@@ -7,13 +7,13 @@
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
 #include "store/disk.h"
+#include "store/helpers.h"
 #include "tree/bplus_tree.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 #include "wal/basic_wal.h"
 #include "wal/disabled_wal.h"
-#include <filesystem>
 
 namespace calico {
 
@@ -202,7 +202,6 @@ auto Core::destroy() -> Status
     }
     return m_store->remove_directory(m_prefix);
 }
-
 
 auto Core::forward_status(Status s, const std::string &message) -> Status
 {

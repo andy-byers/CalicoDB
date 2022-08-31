@@ -7,6 +7,7 @@
 #include "database.h"
 #include "info.h"
 #include "options.h"
+#include "platform.h"
 #include "status.h"
 #include "store.h"
 #include "transaction.h"

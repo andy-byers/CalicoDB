@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "core/header.h"
 #include "utils/layout.h"
 
 namespace calico {
@@ -147,7 +148,7 @@ auto Internal::positioned_remove(Position position) -> Result<void>
     m_cell_count--;
 
     auto cell = node.read_cell(index);
-    std::string anchor {btos(cell.key())};
+    auto anchor = cell.key().to_string();
     if (cell.overflow_size()) {
         auto was_destroyed = m_pool->destroy_chain(cell.overflow_id(), cell.overflow_size());
         if (!was_destroyed.has_value()) {

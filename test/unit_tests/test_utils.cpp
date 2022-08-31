@@ -1,6 +1,7 @@
-#include <gtest/gtest.h>
-#include <thread>
 #include <array>
+#include <thread>
+#include <vector>
+#include <gtest/gtest.h>
 
 #include "calico/bytes.h"
 #include "calico/options.h"
@@ -152,6 +153,83 @@ TEST_F(SliceTests, TruncateDeathTest)
     ASSERT_DEATH(bytes.truncate(1), "Assert");
 }
 
+TEST_F(SliceTests, WithCppString)
+{
+    // Construct from and compare with C++ strings.
+    std::string s {"123"};
+    Bytes b1 {s};
+    BytesView bv1 {s};
+    ASSERT_TRUE(b1 == s); // Uses an implicit conversion.
+    ASSERT_TRUE(bv1 == s);
+
+    std::string_view sv {"123"};
+    BytesView bv2 {sv};
+    ASSERT_TRUE(bv2 == sv);
+    ASSERT_TRUE(bv2 != std::string {"321"});
+}
+
+TEST_F(SliceTests, WithCString)
+{
+    // Construct from and compare with C-style strings.
+    char a[4] {"123"}; // Null-terminated
+    Bytes b1 {a};
+    BytesView bv1 {a};
+    ASSERT_TRUE(b1 == a);
+    ASSERT_TRUE(bv1 == a);
+
+    const char *s {"123"};
+    BytesView bv2 {s};
+    ASSERT_TRUE(bv2 == s);
+}
+
+TEST_F(SliceTests, Conversions)
+{
+    std::string data {"abc"};
+    Bytes b {data};
+    BytesView bv {b};
+    ASSERT_TRUE(b == bv);
+    [](BytesView) {}(b);
+}
+
+static constexpr auto constexpr_test_write(Bytes b, BytesView answer)
+{
+    CALICO_EXPECT_EQ(b.size(), answer.size());
+    for (Size i {}; i < b.size(); ++i)
+        b[i] = answer[i];
+
+    // TODO: I have no clue why this works. std::memcmp() isn't constexpr, but starts_with(), which uses it, is...
+    (void)b.starts_with(answer);
+    (void)b.data();
+    (void)b.range(0, 0);
+    (void)b.is_empty();
+    b.advance(0);
+    b.truncate(b.size());
+}
+
+static constexpr auto constexpr_test_read(BytesView bv, BytesView answer)
+{
+    for (Size i {}; i < bv.size(); ++i)
+        CALICO_EXPECT_EQ(bv[i], answer[i]);
+
+    (void)bv.starts_with(answer);
+    (void)bv.data();
+    (void)bv.range(0, 0);
+    (void)bv.is_empty();
+    bv.advance(0);
+    bv.truncate(bv.size());
+}
+
+TEST_F(SliceTests, ConstantExpressions)
+{
+    static constexpr BytesView bv {"42"};
+    constexpr_test_read(bv, "42");
+
+    char a[] {"42"};
+    Bytes b {a};
+    constexpr_test_write(b, "ab");
+    constexpr_test_read(b, "ab");
+}
+
 TEST(UtilsTest, ZeroIsNotAPowerOfTwo)
 {
     ASSERT_FALSE(is_power_of_two(0));
@@ -198,22 +276,22 @@ TEST(ScratchTest, BehavesLikeASlice)
 
     mem_copy(*scratch, stob(MSG));
     ASSERT_TRUE(*scratch == stob(MSG));
-    ASSERT_TRUE(scratch->starts_with(stob("Hello")));
+    ASSERT_TRUE(scratch->starts_with("Hello"));
     ASSERT_TRUE(scratch->range(7, 5) == stob("world"));
     ASSERT_TRUE(scratch->advance(7).truncate(5) == stob("world"));
 }
 
 TEST(NonPrintableSliceTests, UsesStringSize)
 {
-    std::string u {"\x00\x01", 2};
-    ASSERT_EQ(stob(u).size(), 2);
+    const std::string u {"\x00\x01", 2};
+    ASSERT_EQ(BytesView {u}.size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
-    std::string u {"\x00", 1};
-    std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(stob(u), stob(v)), ThreeWayComparison::EQ);
+    const std::string u {"\x00", 1};
+    const std::string v {"\x00", 1};
+    ASSERT_EQ(compare_three_way(BytesView {u}, BytesView {v}), ThreeWayComparison::EQ);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
@@ -238,6 +316,7 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
 
 TEST(NonPrintableSliceTests, Conversions)
 {
+    // We need to pass in the size, since the first character is '\0'. Otherwise, the length will be 0.
     std::string u {"\x00\x01", 2};
     const auto s = stob(u).to_string();
     ASSERT_EQ(s.size(), 2);

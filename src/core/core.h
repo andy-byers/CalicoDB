@@ -2,6 +2,7 @@
 #define CALICO_DB_DATABASE_IMPL_H
 
 #include "calico/database.h"
+#include "header.h"
 #include "utils/result.h"
 #include <shared_mutex>
 #include <spdlog/sinks/basic_file_sink.h>

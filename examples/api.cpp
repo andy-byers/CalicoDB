@@ -27,21 +27,20 @@ auto main(int, const char *[]) -> int
         std::string s {"abc"};
         std::string_view sv {"123"};
 
-        // We can create slices from std::string and std::string_view using the convenience functions...
-        auto b = cco::stob(s); // Creates a Bytes object.
-        auto bv = cco::stob(sv); // Creates a BytesView object.
+        // We can create slices from existing containers...
+        cco::Bytes b {s};
+        cco::BytesView bv {sv};
 
-        // ...or from "raw parts" using the constructor.
+        // ...or from "raw parts", i.e. a pointer and a length.
         cco::Bytes b2 {s.data(), s.size()};
         cco::BytesView bv2 {sv.data(), sv.size()};
 
         // Conversions are allowed from Bytes to BytesView, but not the other way.
         cco::BytesView b3 {b};
 
-        // Both classes can be easily converted into std::string_view. If we want an owned std::string back,
-        // however, we must perform the conversion explicitly.
-        auto sv2 = cco::btos(b);
-        auto s2 = std::string {sv2};
+        // We can also create owned strings.
+        auto sv2 = b.to_string();
+        auto s2 = bv.to_string();
 
         // Slices have methods for modifying the size and pointer position. These methods do not change the
         // underlying data, they just change what range of bytes the slice is currently "viewing". advance()
@@ -52,8 +51,8 @@ auto main(int, const char *[]) -> int
         b.truncate(1);
 
         // Comparison operations are implemented.
-        assert(b == cco::stob("b"));
-        assert(bv.starts_with(cco::stob("12")));
+        assert(b == "b");
+        assert(bv.starts_with("12"));
 
         // Finally, Bytes can use the non-const overload of operator[](), allowing us to modify the original
         // string.
@@ -80,7 +79,6 @@ auto main(int, const char *[]) -> int
 
         // Handle failure. s.what() provides information about what went wrong.
         if (!s.is_ok()) {
-
         }
     }
 
@@ -95,10 +93,10 @@ auto main(int, const char *[]) -> int
         // disk (on the WAL disk, but not the database disk yet). This has a lot of overhead, so using a transaction is desirable
         // if multiple modifications need to be performed at once.
         if (!s.is_ok()) {
-
         }
 
-        // We can erase records by key, or by passing a cursor object (see Queries below).
+        // We can erase records by key, or by passing a cursor object (see Queries below). It should be noted that a cursor used to
+        // erase a key will be invalidated if the operation succeeds.
         s = db.erase("42");
 
         // If the key is not found (or the cursor is invalid), we'll receive a "not found" status.
@@ -115,10 +113,14 @@ auto main(int, const char *[]) -> int
         auto c2 = db.find_exact("/x10/x20/x30");
 
         // Both methods return cursors, which point to database records and can be used to perform range queries. We check if a
-        // cursor is pointing to a record by writing:
+        // cursor is valid (i.e. it points to an existing record and has an OK internal status) by writing:
         if (c1.is_valid()) {
 
         }
+
+        // As mentioned above, cursors store and provide access to a status object. We check this status using the status()
+        // method. Once a cursor's status becomes non-OK, it will stay that way and the cursor can no longer be used.
+        [[maybe_unused]] auto s = c1.status();
 
         // Calico DB provides methods for accessing the first and last records. Like the find*() methods, these methods return
         // cursors. This lets us easily traverse all records in order.
@@ -131,7 +133,7 @@ auto main(int, const char *[]) -> int
         // the same as iterating until we hit the end.
         for (auto c = db.first(); c.is_valid() && c != db.find("42"); c++) {}
 
-        // We can also use the key ordering.
+        // We can also use key comparisons.
         for (auto c = db.first(); c.is_valid() && c.key() < cco::stob("42"); c++) {}
     }
 
@@ -172,20 +174,23 @@ auto main(int, const char *[]) -> int
         [[maybe_unused]] const auto rc = info.record_count();
         [[maybe_unused]] const auto pc = info.page_count();
         [[maybe_unused]] const auto mk = info.maximum_key_size();
+
+        // The page size is fixed at database creation time. If the database already existed, the page size passed to the
+        // constructor through cco::Options is ignored. We can query the real page size using the following line.
+        [[maybe_unused]] const auto ps = info.page_size();
     }
 
-    auto xact = db.transaction();
-    for (cco::Size i {}; i < 5'000'000; ++i) {
-        if (db.info().record_count() > 10'000)
-            assert_ok(db.erase(db.first()));
-        const auto k = std::to_string(i);
-        assert_ok(db.insert(k, k));
-        if (i && i % 1000 == 0 && i < 4'999'000) {
-            assert_ok(xact.commit());
-            xact = db.transaction();
-        }
+    /* closing-a-database */
+
+    {
+        auto s = db.close();
+        assert_ok(s);
     }
-    assert_ok(xact.commit());
+
+    // NOTE: Reopen the database so destroy() works.
+    assert_ok(db.open("/tmp/cats"));
+
+    /* destroying-a-database */
 
     {
         auto s = cco::Database::destroy(std::move(db));

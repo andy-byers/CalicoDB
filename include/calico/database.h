@@ -2,6 +2,7 @@
 #define CALICO_DATABASE_H
 
 #include "bytes.h"
+#include "options.h"
 #include <memory>
 
 namespace calico {
@@ -11,7 +12,6 @@ class Cursor;
 class Info;
 class Status;
 class Transaction;
-struct Options;
 
 class Database final {
 public:

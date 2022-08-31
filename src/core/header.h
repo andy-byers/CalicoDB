@@ -1,9 +1,9 @@
-#ifndef CALICO_DB_HEADER_H
-#define CALICO_DB_HEADER_H
+#ifndef CALICO_CORE_HEADER_H
+#define CALICO_CORE_HEADER_H
 
 #include "calico/bytes.h"
-#include "utils/types.h"
 #include "page/page.h"
+#include "utils/types.h"
 
 namespace calico {
 
@@ -11,6 +11,17 @@ class Page;
 
 static constexpr std::uint32_t MAGIC_CODE {0xB11924E1};
 static constexpr Size CRC_OFFSET {2 * sizeof(std::uint32_t)};
+
+struct FileHeader {
+    std::uint32_t magic_code;
+    std::uint32_t header_crc;
+    std::uint64_t page_count;
+    std::uint64_t freelist_head;
+    std::uint64_t record_count;
+    std::uint64_t flushed_lsn;
+    std::uint16_t page_size;
+    Byte reserved[6];
+};
 
 inline auto read_header(const Page &page) -> FileHeader
 {
@@ -42,4 +53,4 @@ inline auto encode_page_size(Size page_size) -> std::uint16_t
 
 } // namespace calico
 
-#endif // CALICO_DB_HEADER_H
+#endif // CALICO_CORE_HEADER_H

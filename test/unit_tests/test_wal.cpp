@@ -221,7 +221,7 @@ TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
     const auto size = encode_full_image_payload(PageId::root(), stob(image), stob(scratch));
     const auto descriptor = decode_full_image_payload(stob(scratch).truncate(size));
     ASSERT_EQ(descriptor.page_id, 1);
-    ASSERT_EQ(btos(descriptor.image), image);
+    ASSERT_EQ(descriptor.image.to_string(), image);
 }
 
 TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
