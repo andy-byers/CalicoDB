@@ -47,6 +47,41 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 }
 
 
+auto RecordGenerator::generate(Random_ &random, Size num_records) -> std::vector<Record>
+{
+    const auto [mks, mvs, spread, is_sequential, is_unique] = m_param;
+    std::vector<Record> records(num_records);
+
+    const auto min_ks = mks < spread ? 1 : mks - spread;
+    const auto min_vs = mvs < spread ? 0 : mvs - spread;
+    const auto max_ks = mks + spread;
+    const auto max_vs = mvs + spread;
+    auto itr = records.begin();
+    std::unordered_set<std::string> set;
+    Size num_collisions {};
+
+    while (itr != records.end()) {
+        const auto ks = random.get(min_ks, max_ks);
+        auto key = random.get<std::string>('\x00', '\xFF', ks);
+        if (is_sequential) {
+            if (set.find(key) != end(set)) {
+                CALICO_EXPECT_LT(num_collisions, num_records);
+                num_collisions++;
+                continue;
+            }
+            set.emplace(key);
+        }
+        const auto vs = random.get(min_vs, max_vs);
+        itr->key = std::move(key);
+        itr->value = random.get<std::string>('\x00', '\xFF', vs);
+        itr++;
+    }
+    if (is_sequential)
+        std::sort(begin(records), end(records));
+    return records;
+}
+
+
 //TreePrinter::TreePrinter(Tree &tree, bool has_integer_keys)
 //    : m_tree{tree},
 //      m_has_integer_keys {has_integer_keys} {}

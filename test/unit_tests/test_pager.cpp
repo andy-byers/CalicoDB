@@ -134,7 +134,6 @@ public:
 
     ~FramerTests() override = default;
 
-    Random random {0};
     DisabledWriteAheadLog wal;
     std::unique_ptr<HeapStorage> home;
     std::unique_ptr<Framer> framer;
@@ -253,7 +252,6 @@ public:
         return message;
     }
 
-    Random random {0};
     MockRandomEditor *mock {};
     Status status {Status::ok()};
     bool has_xact {};

@@ -2,25 +2,6 @@
 
 namespace calico {
 
-Random::Random()
-    : Random(0) { }
-
-Random::Random(Seed seed)
-{
-    set_seed(seed);
-}
-
-auto Random::seed() const -> Seed
-{
-    return m_seed;
-}
-
-auto Random::set_seed(Seed seed) -> void
-{
-    m_rng.seed(seed);
-    m_seed = seed;
-}
-
 auto Random::next_string(Size size) -> std::string
 {
     constexpr char chars[]{"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -50,4 +31,4 @@ auto Random::next_binary(Size size) -> std::string
     return result;
 }
 
-} // cco
+} // namespace calico

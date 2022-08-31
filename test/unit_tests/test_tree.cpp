@@ -45,7 +45,7 @@ public:
         CALICO_EXPECT_NE(mock, nullptr);
     }
 
-    Random random {0};
+    Random_ random {0};
     Status status {Status::ok()};
     bool has_xact {};
     std::unique_ptr<DisabledWriteAheadLog> wal;
@@ -144,9 +144,9 @@ TEST_F(TreeTests, InsertBetween)
 
 TEST_F(TreeTests, OverflowChains)
 {
-    const auto value_a = random_string(random, max_local, max_local * 10);
-    const auto value_b = random_string(random, max_local, max_local * 20);
-    const auto value_c = random_string(random, max_local, max_local * 30);
+    const auto value_a = random.get<std::string>('a', 'z', random.get(max_local, max_local * 10));
+    const auto value_b = random.get<std::string>('a', 'z', random.get(max_local, max_local * 20));
+    const auto value_c = random.get<std::string>('a', 'z', random.get(max_local, max_local * 30));
 
     tools::insert(*tree, "1", value_a);
     tools::insert(*tree, "2", value_b);
@@ -480,7 +480,7 @@ TEST_F(TreeTests, RemoveFromRandomPosition)
     insert_sequence(*tree, 0, n);
 
     while (tree->record_count()) {
-        const auto key = make_key(random.next_int(n));
+        const auto key = make_key(random.get(n));
 
         if (auto c = tools::find(*tree, key); c.is_valid()) {
             ASSERT_TRUE(tree->erase(c).is_ok());
@@ -496,8 +496,8 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
 
     for (Size i {}; i < num_iterations; ++i) {
         while (tree->record_count() < cutoff) {
-            const auto key = random_string(random, 7, 10);
-            const auto value = random_string(random, 20);
+            const auto key = random.get<std::string>('a', 'z', random.get(7UL, 10UL));
+            const auto value = random.get<std::string>('a', 'z', random.get(20UL));
             tools::insert(*tree, key, value);
             records[key] = value;
         }
@@ -567,12 +567,12 @@ TEST_F(TreeTests, SanityCheck)
     param.mean_value_size = 10;
     param.spread = 9;
     RecordGenerator generator {param};
-    Random random {0};
+    Random_ random {0};
 
     const auto remove_one = [&random, this](const std::string &key) {
         if (auto c = tools::find(*tree, key); c.is_valid()) {
             ASSERT_TRUE(tree->erase(c).is_ok());
-        } else if (random.next_int(1) == 0) {
+        } else if (random.get(1) == 0) {
             ASSERT_TRUE(tree->erase(tree->find_minimum()).is_ok());
         } else {
             ASSERT_TRUE(tree->erase(tree->find_maximum()).is_ok());
@@ -581,15 +581,15 @@ TEST_F(TreeTests, SanityCheck)
 
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         for (const auto &[key, value]: generator.generate(random, NUM_RECORDS)) {
-            if (tree->record_count() < MIN_SIZE || random.next_int(5) != 0) {
+            if (tree->record_count() < MIN_SIZE || random.get(5) != 0) {
                 tools::insert(*tree, key, value);
             } else {
                 remove_one(key);
             }
         }
         while (tree->record_count())
-            remove_one(random_string(random, 1, 30));
+            remove_one(random.get<std::string>('\x00', '\xFF', random.get(1UL, 30UL)));
     }
 }
 
-} // <anonymous>
+} // namespace

@@ -27,10 +27,10 @@ TEST(AssertionDeathTest, Assert)
 
 TEST(TestEncoding, ReadsAndWrites)
 {
-    Random random{0};
-    const auto u16 = random.next_int(std::numeric_limits<uint16_t>::max());
-    const auto u32 = random.next_int(std::numeric_limits<uint32_t>::max());
-    const auto u64 = random.next_int(std::numeric_limits<uint64_t>::max());
+    Random_ random{0};
+    const auto u16 = random.get<std::uint16_t>();
+    const auto u32 = random.get<std::uint32_t>();
+    const auto u64 = random.get<std::uint64_t>();
     std::vector<calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
 
     auto dst = buffer.data();

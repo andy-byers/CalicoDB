@@ -67,7 +67,7 @@ public:
         ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
     }
 
-    Random random {0};
+    Random_ random {0};
     std::unique_ptr<MockStorage> store;
     MockRandomEditor *mock {};
     std::vector<Record> records;
@@ -270,7 +270,7 @@ public:
     {
         static constexpr Size MAX_ROUND_SIZE {10};
         // Try to spread the cursors out across the database.
-        const auto first = random.next_int(NUM_RECORDS - 1);
+        const auto first = random.get(NUM_RECORDS - 1);
         for (auto i = first; i < NUM_RECORDS; ++i) {
             auto c = db.find(make_key<KEY_WIDTH>(i));
 
@@ -283,7 +283,7 @@ public:
         }
     }
 
-    Random random {42};
+    Random_ random {42};
     Database db;
 };
 
@@ -509,7 +509,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //        fs::remove_all(BASE, ignore);
 //    }
 //
-//    Random random {0};
+//    Random_ random {0};
 //    Options options;
 //    RecordGenerator generator;
 //};

@@ -94,14 +94,14 @@ public:
         static constexpr Size MAX_SPREAD {20};
         std::vector<PageDelta> deltas;
 
-        for (Size offset {random.next_int(image.size() / 10)}; offset < image.size(); ) {
+        for (Size offset {random.get(image.size() / 10)}; offset < image.size(); ) {
             const auto rest = image.size() - offset;
-            const auto size = random.next_int(1UL, std::min(rest, MAX_WIDTH));
+            const auto size = random.get(1, std::min(rest, MAX_WIDTH));
             deltas.emplace_back(PageDelta {offset, size});
-            offset += size + random.next_int(1ULL, MAX_SPREAD);
+            offset += size + random.get(1, MAX_SPREAD);
         }
         for (const auto &[offset, size]: deltas) {
-            const auto replacement = random.next_string(size);
+            const auto replacement = random.get<std::string>('\x00', '\xFF', size);
             mem_copy(image.range(offset, size), stob(replacement));
         }
         return deltas;
@@ -114,7 +114,7 @@ public:
 //    }
 
 private:
-    Random random {123};
+    Random_ random {123};
 };
 //
 //struct WalPayloadWrapper {
@@ -372,8 +372,6 @@ struct Record {
     std::string value;
 };
 
-
-
 class RecordGenerator {
 public:
     static unsigned default_seed;
@@ -388,7 +386,8 @@ public:
 
     RecordGenerator() = default;
     explicit RecordGenerator(Parameters);
-    auto generate(Random&, Size) -> std::vector<Record>;
+    auto generate(Random&, Size) -> std::vector<Record>; // TODO: Remove me!
+    auto generate(Random_&, Size) -> std::vector<Record>;
 
 private:
     Parameters m_param;

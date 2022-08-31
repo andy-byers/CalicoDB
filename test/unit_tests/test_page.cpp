@@ -1,17 +1,9 @@
 #include <gtest/gtest.h>
 
-#include "calico/bytes.h"
 #include "calico/options.h"
-#include "page/cell.h"
 #include "page/deltas.h"
-#include "page/node.h"
-#include "page/page.h"
 #include "random.h"
-#include "tools.h"
 #include "unit_tests.h"
-#include "utils/expect.h"
-#include "utils/layout.h"
-#include "utils/scratch.h"
 
 namespace {
 
@@ -35,12 +27,12 @@ public:
     auto insert_random_delta(std::vector<PageDelta> &deltas)
     {
         static constexpr Size MIN_DELTA_SIZE {1};
-        const auto offset = random.next_int(PAGE_SIZE - MIN_DELTA_SIZE);
-        const auto size = random.next_int(PAGE_SIZE - offset);
+        const auto offset = random.get(PAGE_SIZE - MIN_DELTA_SIZE);
+        const auto size = random.get(PAGE_SIZE - offset);
         insert_delta(deltas, {offset, size});
     }
 
-    Random random {0};
+    Random_ random {0};
 };
 
 TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
@@ -133,8 +125,8 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     static constexpr Size MAX_DELTA_SIZE {10};
     std::vector<PageDelta> deltas;
     for (Size i {}; i < NUM_INSERTS; ++i) {
-        const auto offset = random.next_int(PAGE_SIZE - MAX_DELTA_SIZE);
-        const auto size = random.next_int(1ULL, MAX_DELTA_SIZE);
+        const auto offset = random.get(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto size = random.get(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);
