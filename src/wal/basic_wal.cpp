@@ -13,7 +13,7 @@ namespace calico {
 static auto handle_writer_error(spdlog::logger &logger, BasicWalWriter &writer)
 {
     auto s = Status::ok(); // First error encountered by the writer gets stored here.
-    auto t = writer.next_status();
+    auto t = writer.status();
     Size i {1};
 
     while (!t.is_ok()) {
@@ -23,7 +23,7 @@ static auto handle_writer_error(spdlog::logger &logger, BasicWalWriter &writer)
         } else {
             logger.error("(error {:6<}) {}", i++, t.what());
         }
-        t = writer.next_status();
+        t = writer.status();
     }
     return s;
 }
@@ -53,6 +53,7 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
           m_store,
           &m_collection,
           &m_flushed_lsn,
+          m_logger,
           param.prefix,
           param.page_size,
           param.wal_limit,
@@ -79,6 +80,7 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
 {
     m_logger->info("destroying BasicWriteAheadLog object");
 
+    // TODO: Move this into a close() method. We probably want to know if the writer shut down okay.
     auto s = handle_writer_error(*m_logger, m_writer);
     forward_status(s, "cannot clean up WAL writer");
 
@@ -118,7 +120,7 @@ auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> St
 
     m_writer.log_full_image(PageId {page_id}, image);
     m_images.emplace(PageId {page_id});
-    return m_writer.next_status();
+    return m_writer.status();
 }
 
 auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status
@@ -131,7 +133,7 @@ auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, cons
     MAYBE_FORWARD(s, MSG);
 
     m_writer.log_deltas(PageId {page_id}, image, deltas);
-    return m_writer.next_status();
+    return m_writer.status();
 }
 
 auto BasicWriteAheadLog::log_commit() -> Status
@@ -147,7 +149,7 @@ auto BasicWriteAheadLog::log_commit() -> Status
 
     m_writer.log_commit();
     m_images.clear();
-    return m_writer.next_status();
+    return m_writer.status();
 }
 
 auto BasicWriteAheadLog::stop_writer() -> Status
@@ -317,7 +319,7 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
 auto BasicWriteAheadLog::flush_pending() -> Status
 {
     m_writer.flush_block();
-    return m_writer.next_status(); // TODO: May not reflect error yet... Should find a good place to check this each operation...
+    return m_writer.status(); // TODO: May not reflect error yet... Should find a good place to check this each operation...
 }
 
 auto BasicWriteAheadLog::save_state(FileHeader &) -> void

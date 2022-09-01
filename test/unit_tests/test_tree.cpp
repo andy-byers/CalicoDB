@@ -16,7 +16,6 @@
 #include "random.h"
 #include "tools.h"
 #include "unit_tests.h"
-#include "validation.h"
 #include "wal/disabled_wal.h"
 
 namespace {
@@ -79,9 +78,9 @@ public:
 
     auto validate() const
     {
-//        validate_ordering(*tree);
-//        validate_siblings(*tree);
-//        validate_links(*tree);
+        tree->TEST_validate_nodes();
+        tree->TEST_validate_links();
+        tree->TEST_validate_order();
     }
 
     std::unique_ptr<Tree> tree;
@@ -392,19 +391,20 @@ TEST_F(TreeTests, ModifiesValue)
 
 TEST_F(TreeTests, ModifySanityCheck)
 {
-    insert_sequence(*tree, 0, 1'000);
+    static constexpr Size NUM_RECORDS {100};
+    insert_sequence(*tree, 0, NUM_RECORDS);
+    Random_ random {0};
 
-    for (Size i {0}; i < tree->record_count(); ++i) {
-        const auto key = make_key(i);
-        auto cursor = tools::find_exact(*tree, key);
-        if (auto value = cursor.value(); value.empty()) {
-            tools::insert(*tree, key, std::string(123, 'x'));
-        } else {
-            tools::insert(*tree, key, value + value);
+    // Insert payloads that vary a lot in size.
+    for (Size i {}; i < 10; ++i) {
+        for (Size j {}; j < NUM_RECORDS; ++j) {
+            const auto key = make_key(j);
+            const auto value = random.get<std::string>('\x00', '\xFF', random.get(1'000UL));
+            tools::insert(*tree, key, value);
         }
     }
     validate();
-    ASSERT_EQ(tree->record_count(), 1'000);
+    ASSERT_EQ(tree->record_count(), NUM_RECORDS);
 }
 
 TEST_F(TreeTests, CollapseForward)

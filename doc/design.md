@@ -7,25 +7,25 @@
 ## Components
 Calico DB is made up of 6 major components:
 
-| Component  | Purpose                                                                             |
-|:-----------|:------------------------------------------------------------------------------------|
-| `core`     | Main interface for interacting with database components                             |
-| `tree`     | Responsible for organizing the storage of records on database pages                 |
-| `pager`    | Responsible for organizing the storage of database pages in the database file       |
-| `store`    | Provides storage for the database file, WAL segments, and possibly an info log file |
-| `wal`      | Stores and retrieves records describing changes made to the database                |
-| `cursor`   | Provides ordered, read-only access to database records.                             |
+| Component               | Purpose                                                                             |
+|:------------------------|:------------------------------------------------------------------------------------|
+| `core`                  | Main interface for interacting with database components                             |
+| [`tree`](./tree.md)     | Responsible for organizing the storage of records on database pages                 |
+| [`pager`](./pager.md)   | Responsible for organizing the storage of database pages in the database file       |
+| `store`                 | Provides storage for the database file, WAL segments, and possibly an info log file |
+| [`wal`](./wal.md)       | Stores and retrieves records describing changes made to the database                |
+| [`cursor`](./cursor.md) | Provides ordered, read-only access to database records.                             |
 
 ## Status Objects
 
 [//]: # (TODO)
 
 ## Transactions
-Every modification to a Calico DB database takes place within a transaction.
-Transactions are atomic units of work: they either commit or abort.
-If a transaction commits, all of its operations are fully applied, and if it aborts, the database is left as it was before the transaction began.
-See [wal.md](./wal.md) for more specifics about the commit procedure.
-Basically, we ensure that all information needed to fully undo and redo all operations in the transaction is flushed to the WAL.
+Calico DB uses transactions to preserve database integrity across system crashes and other exceptional events.
+Transactions are atomic, that is, the effects of a transaction are either completely applied, or entirely discarded.
+This is achieved by storing both undo and redo information in the WAL, and always flushing WAL records before their corresponding data pages.
+In the event of a crash, we can always read the WAL forward to regain lost updates, or backward to undo applied updates.
+See [wal.md](./wal.md) for more specifics about how the WAL is used in transactions and recovery.
 
 ## Error Handling
 Calico DB enforces certain rules to make sure that the database stays consistent through crashes and other exceptional events.

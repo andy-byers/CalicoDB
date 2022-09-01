@@ -1,22 +1,3 @@
-## Terms
-+ **cell**: An structure embedded within a **node** that contains a **key** and optionally a **value**.
-  **Cells** can be either internal cells or external cells, depending on what type of node they belong to.
-+ **cell directory**: An embedded array that is placed right after the node header.
-  Maps **cell indexes** to **cell pointers**, and is kept sorted by the **keys**.
-+ **cell index**: The index of a cell in the cell directory.
-+ **cell pointer**: A 16-bit unsigned integer that describes the offset of a cell from the start of a node page.
-+ **key**: A sequence of bytes that uniquely identify a record in the database.
-  **Keys** are compared as if they are made up of unsigned bytes.
-+ **link**: A page that contains a pointer to another page and optionally some data.
-+ **node**: A page that contains cells and is involved in the B<sup>+</sup>-tree structure.
-+ **overflow chain**: A linked list composed of link pages.
-  Used to keep track of one or more pages, or part of a **value** that cannot fit in a **node**.
-+ **page**: The basic unit of storage in the `data` file; every access attempts to read or write an entire page of data.
-+ **page ID**: A 32-bit unsigned integer that uniquely identifies a page in the `data` file.
-  **Page IDs** start at 1 and increase sequentially, with 0 being reserved for `NULL`.
-+ **page pointer**: Synonym for **page ID**.
-+ **value**: A sequence of bytes associated with a unique **key** to form a database record.
-
 
 ## B<sup>+</sup>-Tree
 Calico DB uses a dynamic-order B<sup>+</sup>-tree to maintain an ordered collection of records on-disk.
@@ -66,27 +47,12 @@ Each time we need to delete a page, we convert it to a link page and add it at t
 Like the free block list contained in each [node](#nodes), we don't store the free list length and instead use a NULL page ID to indicate the end of the list.
 
 ## Overflow Chains
-Currently, Calico DB allows insertion of nearly arbitrary values (up to 4 GB), but places a hard limit on the key size.
-If a record is too large, the excess portion of the value is copied to one or more overflow pages.
-The cell made from this record will then store the first page ID in the overflow chain in its `Overflow ID` header field.
+Calico DB allows insertion of nearly arbitrary values (up to 4 GB), but places a hard limit on the key size.
+If a record is too large, the excess portion of the value is copied to one or more link pages.
+These pages form a chain on disk, and can be traversed to retrieve the overflow value.
+We then store the page ID of the start of the chain in the cell's `Overflow ID` header field.
 Note that no part of the key is ever transferred to an overflow page: every key must be entirely embedded in the node that it belongs to.
 This makes traversing the B<sup>+</sup>-tree faster (we don't have to read additional pages, pages that are likely not already cached, to find keys).
-
-## Transactions
-Calico DB uses transactions to preserve database integrity.
-Transactions are atomic, that is, the effects of a transaction are either completely applied, or entirely discarded.
-This is achieved by storing both undo and redo information in the WAL, and always flushing WAL records before their corresponding data pages.
-In the event of a crash, we can always read the WAL forward to regain lost updates, or backward to undo applied updates.
-
-## Recovery
-Each time the database is closed, we commit the running transaction, which involves truncating the WAL.
-This means that the presence of records in the WAL on startup indicates that the previous database instance had crashed, meaning recovery is necessary.
-In Calico DB, recovery is pretty simple.
-First, we read the WAL starting from the beginning, applying updates to stale pages.
-If we encounter a commit record at the end of the WAL, then recovery is complete.
-Otherwise, we do not have enough information to complete the transaction and must abort.
-Here we read the WAL in reverse, reverting pages to their state before the transaction started.
-In either case, we truncate the WAL and advance_block the block pool on completion.
 
 # Optimizations?
 + We could come up with a physiological logging scheme to try and reduce the amount of data we write to the WAL

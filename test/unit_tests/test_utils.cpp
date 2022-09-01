@@ -230,6 +230,19 @@ TEST_F(SliceTests, ConstantExpressions)
     constexpr_test_read(b, "ab");
 }
 
+TEST_F(SliceTests, SubRangesHaveProperType)
+{
+    BytesView bv1 {"42"};
+    auto bv2 = bv1.range(0);
+    // NOTE: Extra parenthesis seem to be necessary. ASSERT_*() and EXPECT_*() don't like angle brackets.
+    ASSERT_TRUE((std::is_same_v<BytesView, decltype(bv2)>));
+
+    auto s = bv1.to_string();
+    Bytes b1 {s};
+    auto b2 = b1.range(0);
+    ASSERT_TRUE((std::is_same_v<Bytes, decltype(b2)>));
+}
+
 TEST(UtilsTest, ZeroIsNotAPowerOfTwo)
 {
     ASSERT_FALSE(is_power_of_two(0));
@@ -335,7 +348,7 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
 TEST(NonPrintableSliceTests, ModifyCharArray)
 {
     char data[] {'a', 'b', '\x00'};
-    auto bytes = stob(data);
+    Bytes bytes {data};
     bytes[0] = '4';
     bytes.advance();
     bytes[0] = '2';
@@ -344,10 +357,11 @@ TEST(NonPrintableSliceTests, ModifyCharArray)
 
 TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
 {
-    const auto a = "a\0b";
+    const auto a = "\x12\x00\x34";
     const char b[] {'4', '\x00', '2', '\x00'};
 
-    // We use strlen() to get the length, which stops at the first NULL byte.
+    ASSERT_EQ(std::char_traits<char>::length(a), 1);
+    ASSERT_EQ(std::char_traits<char>::length(b), 1);
     ASSERT_EQ(stob(a).size(), 1);
     ASSERT_EQ(stob(b).size(), 1);
 }
@@ -665,6 +679,19 @@ TEST(HeaderTests, EncodeAndDecodePageSize)
         const auto size = 1ULL << i;
         ASSERT_EQ(decode_page_size(encode_page_size(size)), size);
     }
+}
+
+TEST(MiscTests, StringsUseSizeParameterForComparisons)
+{
+    std::vector<std::string> v {
+        std::string {"\x11\x00\x33", 3},
+        std::string {"\x11\x00\x22", 3},
+        std::string {"\x11\x00\x11", 3},
+    };
+    std::sort(begin(v), end(v));
+    ASSERT_EQ(v[0][2], '\x11');
+    ASSERT_EQ(v[1][2], '\x22');
+    ASSERT_EQ(v[2][2], '\x33');
 }
 
 } // <anonymous>

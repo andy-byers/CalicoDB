@@ -528,6 +528,7 @@ public:
             scratch.get(),
             &collection,
             &flushed_lsn,
+            create_logger(create_sink(), "wal"),
             ROOT,
             BLOCK_SIZE,
         });
@@ -567,7 +568,7 @@ public:
 TEST_F(BackgroundWriterTests, NewWriterState)
 {
     ASSERT_FALSE(writer->is_running());
-    ASSERT_TRUE(expose_message(writer->next_status()));
+    ASSERT_TRUE(expose_message(writer->status()));
 }
 
 TEST_F(BackgroundWriterTests, StartAndStopRepeatedly)
@@ -576,7 +577,7 @@ TEST_F(BackgroundWriterTests, StartAndStopRepeatedly)
     for (Size i {}; i < 100; ++i) {
         writer->startup();
         writer->teardown();
-        ASSERT_TRUE(expose_message(writer->next_status()));
+        ASSERT_TRUE(expose_message(writer->status()));
     }
 }
 
@@ -584,7 +585,7 @@ TEST_F(BackgroundWriterTests, WriterCleansUp)
 {
     writer->startup();
     writer->dispatch(get_update_event(SequenceId::from_index(0)));
-    ASSERT_TRUE(expose_message(writer->next_status()));
+    ASSERT_TRUE(expose_message(writer->status()));
 
     writer->dispatch(BackgroundWriter::Event {
         BackgroundWriter::EventType::STOP_WRITER,
@@ -607,7 +608,7 @@ TEST_F(BackgroundWriterTests, WriteUpdates)
     writer->startup();
     for (Size i {}; i < 100; ++i) {
         writer->dispatch(get_update_event(SequenceId::from_index(i)));
-        ASSERT_TRUE(expose_message(writer->next_status()));
+        ASSERT_TRUE(expose_message(writer->status()));
     }
     writer->teardown();
 
@@ -857,6 +858,7 @@ public:
             store.get(),
             &collection,
             &flushed_lsn,
+            create_logger(create_sink(), "wal"),
             ROOT,
             PAGE_SIZE,
             128,
@@ -873,7 +875,7 @@ public:
 
 TEST_F(BasicWalReaderWriterTests, NewWriterIsOk)
 {
-    ASSERT_TRUE(writer->next_status().is_ok());
+    ASSERT_TRUE(writer->status().is_ok());
 }
 
 TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)

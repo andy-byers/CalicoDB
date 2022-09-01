@@ -137,6 +137,7 @@ public:
         LogScratchManager *scratch {};
         WalCollection *collection {};
         std::atomic<SequenceId> *flushed_lsn {};
+        std::shared_ptr<spdlog::logger> logger;
         std::string prefix;
         Size block_size {};
         Size wal_limit {};
@@ -188,7 +189,7 @@ public:
     auto startup() -> void
     {
         CALICO_EXPECT_FALSE(is_running());
-        m_state.errors.clear();
+        m_state.status = Status::ok();
         m_state.is_running = true;
         m_state.thread = std::thread {[this] {
             background_writer();
@@ -206,13 +207,10 @@ public:
     }
 
     [[nodiscard]]
-    auto next_status() -> Status
+    auto status() -> Status
     {
         std::lock_guard lock {m_state.mu};
-        if (m_state.errors.empty()) return Status::ok();
-        auto s = m_state.errors.front();
-        m_state.errors.pop_front();
-        return s;
+        return m_state.status;
     }
 
 private:
@@ -238,7 +236,9 @@ private:
     auto add_error(const Status &e) -> void
     {
         std::lock_guard lock {m_state.mu};
-        m_state.errors.emplace_back(e);
+        if (m_state.status.is_ok())
+            m_state.status = e;
+        m_logger->error(e.what());
     }
 
     [[nodiscard]]
@@ -269,11 +269,12 @@ private:
         Queue<Event> events {32};
         mutable std::mutex mu;
         std::condition_variable cv;
-        std::list<Status> errors;
+        Status status {Status::ok()};
         std::optional<std::thread> thread;
         bool is_running {};
     } m_state;
 
+    std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> *m_flushed_lsn {};
     std::atomic<bool> m_is_waiting {};
     WalRecordWriter m_writer;
@@ -290,6 +291,7 @@ public:
         Storage *store {};
         WalCollection *collection {};
         std::atomic<SequenceId> *flushed_lsn {};
+        std::shared_ptr<spdlog::logger> logger;
         std::string dirname;
         Size page_size {};
         Size wal_limit {};
@@ -303,6 +305,7 @@ public:
               &m_scratch,
               param.collection,
               m_flushed_lsn,
+              param.logger,
               param.dirname,
               wal_block_size(param.page_size),
               param.wal_limit,
@@ -316,9 +319,9 @@ public:
     }
 
     [[nodiscard]]
-    auto next_status() -> Status
+    auto status() -> Status
     {
-        return m_background.next_status();
+        return m_background.status();
     }
 
     [[nodiscard]]

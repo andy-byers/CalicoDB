@@ -198,16 +198,108 @@ auto BPlusTree::load_state(const FileHeader &header) -> void
     m_internal.load_state(header);
 }
 
-auto BPlusTree::TEST_validate_node(PageId id) -> void
+#if not NDEBUG
+
+using Callback = std::function<void(Node&, Size)>;
+
+static auto traverse_inorder_helper(NodePool &pool, Node node, const Callback &callback) -> void
 {
-    auto result = m_pool.acquire(id, false);
-    if (!result.has_value()) {
-        fmt::print("(1/2) tree: cannot acquire node {}", id.value);
-        fmt::print("(2/2) tree: (reason) {}", result.error().what());
-        std::exit(EXIT_FAILURE);
+    for (Size index {}; index <= node.cell_count(); ++index) {
+        if (!node.is_external()) {
+            auto next = pool.acquire(node.child_id(index), false);
+            CALICO_EXPECT_TRUE(next.has_value());
+            traverse_inorder_helper(pool, std::move(*next), callback);
+        }
+        if (index < node.cell_count())
+            callback(node, index);
     }
-    auto node = std::move(*result);
-    node.TEST_validate();
+    CALICO_EXPECT_TRUE(pool.release(std::move(node)).has_value());
+}
+
+static auto traverse_inorder(NodePool &pool, const Callback &callback) -> void
+{
+    auto root = pool.acquire(PageId::root(), false);
+    CALICO_EXPECT_TRUE(root.has_value());
+    traverse_inorder_helper(pool, std::move(*root), callback);
+}
+
+static auto validate_siblings(NodePool &pool) -> void
+{
+    // Find the leftmost external node.
+    auto node = *pool.acquire(PageId::root(), false);
+    while (!node.is_external()) {
+        const auto id = node.child_id(0);
+        CALICO_EXPECT_TRUE(pool.release(std::move(node)).has_value());
+        auto temp = pool.acquire(id, false);
+        CALICO_EXPECT_TRUE(temp.has_value());
+        node = std::move(*temp);
+    }
+    // Traverse across the sibling chain to the right.
+    while (!node.right_sibling_id().is_null()) {
+        auto right = pool.acquire(node.right_sibling_id(), false);
+        CALICO_EXPECT_TRUE(right.has_value());
+        CALICO_EXPECT_LT(node.read_key(0), right->read_key(0));
+        CALICO_EXPECT_EQ(right->left_sibling_id(), node.id());
+        CALICO_EXPECT_TRUE(pool.release(std::move(node)).has_value());
+        node = std::move(*right);
+    }
+    CALICO_EXPECT_TRUE(pool.release(std::move(node)).has_value());
+}
+
+auto validate_parent_child(NodePool &pool) -> void
+{
+    auto check_connection = [&pool](Node &node, Size index) -> void {
+        auto child = *pool.acquire(node.child_id(index), false);
+        CALICO_EXPECT_EQ(child.parent_id(), node.id());
+        CALICO_EXPECT_TRUE(pool.release(std::move(child)).has_value());
+    };
+    traverse_inorder(pool, [&check_connection](Node &node, Size index) -> void {
+        const auto count = node.cell_count();
+        CALICO_EXPECT_LT(index, count);
+        if (!node.is_external()) {
+            check_connection(node, index);
+            // Rightmost child.
+            if (index == count - 1)
+                check_connection(node, index + 1);
+        }
+    });
+}
+
+#endif // not NDEBUG
+
+auto BPlusTree::TEST_validate_order() -> void
+{
+#if not NDEBUG
+    // NOTE: All keys must fit in main memory (separators included). Doesn't read values.
+    if (record_count() < 2)
+        return;
+
+    std::vector<std::string> keys;
+    keys.reserve(record_count());
+
+    traverse_inorder(m_pool, [&keys](Node &node, Size index) -> void {
+        keys.emplace_back(node.read_key(index).to_string());
+    });
+    CALICO_EXPECT_TRUE(std::is_sorted(cbegin(keys), cend(keys)));
+#endif // not NDEBUG
+}
+
+auto BPlusTree::TEST_validate_nodes() -> void
+{
+#if not NDEBUG
+    traverse_inorder(m_pool, [](Node &node, Size index) -> void {
+        // Only validate once per node.
+        if (index == 0) node.TEST_validate();
+    });
+#endif // not NDEBUG
+}
+
+auto BPlusTree::TEST_validate_links() -> void
+{
+#if not NDEBUG
+    validate_siblings(m_pool);
+    validate_parent_child(m_pool);
+#endif // not NDEBUG
 }
 
 } // namespace calico
