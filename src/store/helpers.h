@@ -1,9 +1,5 @@
-//
-// Created by andy-byers on 8/31/22.
-//
-
-#ifndef CALICODB_HELPERS_H
-#define CALICODB_HELPERS_H
+#ifndef CALICO_STORE_HELPERS_H
+#define CALICO_STORE_HELPERS_H
 
 #include "calico/store.h"
 #include <spdlog/fmt/fmt.h>
@@ -26,4 +22,4 @@ auto read_exact(Reader &reader, Bytes out, Size offset) -> Status
 
 } // namespace calico
 
-#endif //CALICODB_HELPERS_H
+#endif // CALICO_STORE_HELPERS_H

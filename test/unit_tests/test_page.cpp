@@ -32,7 +32,7 @@ public:
         insert_delta(deltas, {offset, size});
     }
 
-    Random_ random {0};
+    Random random {0};
 };
 
 TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)

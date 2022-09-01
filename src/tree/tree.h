@@ -10,12 +10,12 @@
 namespace calico {
 
 class Cell;
-class FileHeader;
 class Link;
 class Internal;
 class Node;
 class NodePool;
 class Page;
+struct FileHeader;
 
 // Depends on BufferPool
 class Tree {

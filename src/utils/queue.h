@@ -1,3 +1,6 @@
+/*
+ * Based off of RocksDB's WorkQueue class.
+ */
 #ifndef CALICO_UTILS_QUEUE_H
 #define CALICO_UTILS_QUEUE_H
 

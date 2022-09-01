@@ -112,7 +112,7 @@ auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
 
     std::vector<Record> committed;
     for (auto itr = begin; itr != end; ++itr) {
-        if (test.random.next_int(5) == 0) {
+        if (test.random.get(5) == 0) {
             EXPECT_TRUE(expose_message(test.db.erase(stob(itr->key))));
         } else {
             committed.emplace_back(*itr);
@@ -155,7 +155,7 @@ auto run_random_transactions(Test &test, Size n)
         auto xact = test.db.transaction();
         const auto start = cbegin(all_records) + static_cast<long>(XACT_SIZE * i);
         const auto temp = run_random_operations(test, start, start + XACT_SIZE);
-        if (test.random.next_int(4UL) == 0) {
+        if (test.random.get(4) == 0) {
             EXPECT_TRUE(expose_message(xact.abort()));
         } else {
             EXPECT_TRUE(expose_message(xact.commit()));
@@ -262,7 +262,7 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
     for (Size i {}; i < limit; ++i) {
         for (const auto &[key, value]: generator.generate(test.random, 100)) {
             // insert()/erase() exercises data file reading and writing, and WAL file writing.
-            if (test.random.next_int(4) == 0 && info.record_count()) {
+            if (test.random.get(4) == 0 && info.record_count()) {
                 s = test.db.erase(test.db.first());
             } else {
                 s = test.db.insert(key, value);
@@ -305,41 +305,6 @@ TEST_F(FailureTests, DataWriteErrorIsPropagatedDuringModify)
     s = db.status();
     assert_is_failure_status(s);
 }
-
-// TODO: WAL file mocks don't work properly. We don't even create WAL readers until we roll the log and the writer is created in another thread
-//       and we don't know when it is finished...
-//TEST_F(FailureTests, WalReadErrorIsPropagatedDuringModify)
-//{
-//    FAIL_ON_NTH_READ(*wal_reader_mock(SegmentId {1}), 5);
-//
-//    // We need to get the WAL reader to open on the first segment
-//    {
-//
-//    }
-//
-//    auto xact = db.transaction();
-//    auto s = modify_until_failure(*this, xact);
-//    assert_is_failure_status(s);
-//
-//    // The database status should reflect the error returned by write().
-//    s = db.status();
-//    assert_is_failure_status(s);
-//}
-//
-//TEST_F(FailureTests, WalWriteErrorIsPropagatedDuringModify)
-//{
-//    // Modify the database until a write() call fails.
-//    auto xact = db.transaction();
-//
-//    FAIL_ON_NTH_APPEND(*wal_writer_mock(SegmentId {1}), 5);
-//
-//    auto s = modify_until_failure(*this, xact);
-//    assert_is_failure_status(s);
-//
-//    // The database status should reflect the error returned by write().
-//    s = db.status();
-//    assert_is_failure_status(s);
-//}
 
 TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
 {
@@ -437,6 +402,34 @@ TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
     ASSERT_TRUE(expose_message(db.status()));
 }
 
+TEST_F(FailureTests, AbortIsReentrantForDataReadErrors)
+{
+    int counter {};
+    int counter_max {10};
+    ON_CALL(*editor_mock, read)
+        .WillByDefault(testing::Invoke([&counter, &counter_max, this](Bytes &out, Size offset) {
+            return counter++ == counter_max ? Status::system_error("42") : editor_mock->real().read(out, offset);
+        }));
+
+    auto xact = db.transaction();
+    auto s = modify_until_failure(*this);
+    assert_is_failure_status(s);
+    Size fail_count {};
+    counter_max = 0;
+
+    for (; ; ) {
+        counter = 0;
+        counter_max++;
+        if (xact.abort().is_ok())
+            break;
+        s = db.status();
+        assert_is_failure_status(s);
+        fail_count++;
+    }
+    ASSERT_GT(fail_count, 5);
+    ASSERT_TRUE(expose_message(db.status()));
+}
+
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError)
 {
     int counter {};
@@ -456,6 +449,34 @@ TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError)
     ASSERT_TRUE(expose_message(db.status()));
 }
 
+TEST_F(FailureTests, AbortIsReentrantForDataWriteErrors)
+{
+    int counter {};
+    int counter_max {10};
+    ON_CALL(*editor_mock, write)
+        .WillByDefault(testing::Invoke([&counter, &counter_max, this](BytesView in, Size offset) {
+            return counter++ == counter_max ? Status::system_error("42") : editor_mock->real().write(in, offset);
+        }));
+
+    auto xact = db.transaction();
+    auto s = modify_until_failure(*this);
+    assert_is_failure_status(s);
+    Size fail_count {};
+    counter_max = 0;
+
+    for (; ; ) {
+        counter = 0;
+        counter_max++;
+        if (xact.abort().is_ok())
+            break;
+        s = db.status();
+        assert_is_failure_status(s);
+        fail_count++;
+    }
+    ASSERT_GT(fail_count, 5);
+    ASSERT_TRUE(expose_message(db.status()));
+}
+
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
 {
     int counter {};
@@ -468,29 +489,30 @@ TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
     ASSERT_TRUE(expose_message(db.status()));
 }
 
-// TODO: See above TODO.
-////TEST_F(FailureTests, AbortRestoresStateAfterWalReadError)
-////{
-////    FAIL_ON_N(*data_mock(), write, 5);
-////
-////    auto s = modify_until_failure(*this, cleanup_with_successful_abort);
-////    assert_is_failure_status(s);
-////
-////    ASSERT_TRUE(expose_message(db.status()));
-////}
-////
-////TEST_F(FailureTests, AbortRestoresStateAfterWalWriteError)
-////{
-////    FAIL_ON_N(*data_mock(), write, 5);
-////
-////    auto s = modify_until_failure(*this, cleanup_with_successful_abort);
-////    assert_is_failure_status(s);
-////
-////    ASSERT_TRUE(expose_message(db.status()));
-////}
+class RecoveryTests: public TestOnDisk {
+public:
+    RecoveryTests()
+    {
 
-#undef FAIL_ON_NTH_READ
-#undef FAIL_ON_NTH_WRITE
-#undef FAIL_ON_NTH_APPEND
+    }
+
+    ~RecoveryTests() override
+    {
+
+    }
+
+    auto SetUp() -> void override
+    {
+
+    }
+
+    auto TearDown() -> void override
+    {
+
+    }
+
+private:
+    Database db;
+};
 
 } // <anonymous>

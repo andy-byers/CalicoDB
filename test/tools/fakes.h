@@ -290,7 +290,7 @@ private:
         auto s = Status::ok();
         Base *base {};
 
-        // We need to use the real object to open blobs. All blobs with the same name share memory.
+        // We need to use the real object to open files. All files with the same name share memory.
         if constexpr (std::is_same_v<Base, RandomReader>) {
             s = m_real->open_random_reader(name, &base);
         } else if constexpr (std::is_same_v<Base, RandomEditor>) {
@@ -322,6 +322,6 @@ private:
     std::unique_ptr<HeapStorage> m_real;
 };
 
-} // cco
+} // namespace calico
 
 #endif // CALICO_TEST_TOOLS_FAKES_H

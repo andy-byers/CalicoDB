@@ -44,7 +44,7 @@ public:
         CALICO_EXPECT_NE(mock, nullptr);
     }
 
-    Random_ random {0};
+    Random random {0};
     Status status {Status::ok()};
     bool has_xact {};
     std::unique_ptr<DisabledWriteAheadLog> wal;
@@ -393,7 +393,7 @@ TEST_F(TreeTests, ModifySanityCheck)
 {
     static constexpr Size NUM_RECORDS {100};
     insert_sequence(*tree, 0, NUM_RECORDS);
-    Random_ random {0};
+    Random random {0};
 
     // Insert payloads that vary a lot in size.
     for (Size i {}; i < 10; ++i) {
@@ -567,7 +567,7 @@ TEST_F(TreeTests, SanityCheck)
     param.mean_value_size = 10;
     param.spread = 9;
     RecordGenerator generator {param};
-    Random_ random {0};
+    Random random {0};
 
     const auto remove_one = [&random, this](const std::string &key) {
         if (auto c = tools::find(*tree, key); c.is_valid()) {

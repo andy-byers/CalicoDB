@@ -89,7 +89,7 @@ class WalPayloadSizeLimitTests: public testing::TestWithParam<Size> {
 public:
     WalPayloadSizeLimitTests()
         : scratch(max_size, '\x00'),
-          image {random.next_string(GetParam())}
+          image {random.get<std::string>('\x00', '\xFF', GetParam())}
     {
         static_assert(WAL_SCRATCH_SCALE >= 1);
     }
@@ -207,7 +207,7 @@ public:
     static constexpr Size PAGE_SIZE {0x80};
 
     WalPayloadTests()
-        : image {random.next_string(PAGE_SIZE)},
+        : image {random.get<std::string>('\x00', '\xFF', PAGE_SIZE)},
           scratch(PAGE_SIZE * WAL_SCRATCH_SCALE, '\x00')
     {}
 
@@ -282,7 +282,7 @@ TEST_F(WalBufferTests, KeepsTrackOfPosition)
     };
 
     for (Size i {}; i < 100; ++i) {
-        const auto size = random.next_int(buffer.remaining().size());
+        const auto size = random.get(buffer.remaining().size());
         block_offset += size;
         buffer.advance_cursor(size);
         ASSERT_TRUE(check());
@@ -358,7 +358,7 @@ TEST_F(WalRecordWriterTests, AdvancesToNewBlocksDuringWrite)
     Random random {123};
 
     while (writer.block_count() < 10) {
-        const auto payload = random.next_string(10);
+        const auto payload = random.get<std::string>('\x00', '\xFF', 10);
         writer.write(lsn++, stob(payload), dummy_cb);
     }
     ASSERT_TRUE(writer.has_written());
@@ -547,12 +547,12 @@ public:
     auto get_update_event(SequenceId lsn)
     {
         auto event = get_commit_event(lsn);
-        event.type = random.next_int(3) == 0
+        event.type = random.get(3) == 0
                          ? BackgroundWriter::EventType::LOG_FULL_IMAGE
                          : BackgroundWriter::EventType::LOG_DELTAS;
         auto buffer = scratch->get();
-        event.size = random.next_int(10ULL, buffer->size());
-        const auto data = random.next_string(event.size);
+        event.size = random.get(10ULL, buffer->size());
+        const auto data = random.get<std::string>('\x00', '\xFF', event.size);
         mem_copy(*buffer, stob(data));
         event.buffer = buffer;
         return event;
@@ -616,6 +616,61 @@ TEST_F(BackgroundWriterTests, WriteUpdates)
     ASSERT_FALSE(ids.empty());
 }
 
+
+
+
+// TODO: Considering using a WAL iterator construct instead of the WAL reader class. Lay out all the intended functionality in tests here.
+//TEST_F(WalIteratorTests, CannotBeOpenedOnNonexistentSegment)
+//{
+//    auto itr = create_iterator();
+//    ASSERT_TRUE(itr.open(SegmentId {1}).is_system_error());
+//}
+//
+//TEST_F(WalIteratorTests, CannotBeOpenedOnEmptySegment)
+//{
+//    auto itr = create_iterator();
+//    create_random_segment(SegmentId {1}, 0);
+//    ASSERT_TRUE(itr.open(SegmentId {1}).is_not_found());
+//}
+//
+//TEST_F(WalIteratorTests, CannotBeIncrementedPastLastRecord)
+//{
+//    auto itr = create_iterator();
+//    create_random_segment(SegmentId {1}, 1);
+//
+//    // We should be open and positioned on the first (and only) record.
+//    ASSERT_TRUE(expose_message(itr.open(SegmentId {1})));
+//    ASSERT_FALSE(itr.payload().is_empty());
+//    ASSERT_FALSE(itr.increment());
+//}
+//
+//auto increment_and_collect(BasicWalIterator &itr)
+//{
+//    do {
+//
+//    } while (itr.increment());
+//}
+//
+//TEST_F(WalIteratorTests, IncrementInsideBlock)
+//{
+//    auto itr = create_iterator();
+//    create_random_segment(SegmentId {1}, 1);
+//
+//    // We should be open and positioned on the first (and only) record.
+//    ASSERT_TRUE(expose_message(itr.open(SegmentId {1})));
+//    ASSERT_FALSE(itr.payload().is_empty());
+//    ASSERT_FALSE(itr.increment());
+//}
+//
+//auto decrement_and_collect(WalIteratorTests &test)
+//{
+//
+//}
+
+
+
+
+
 template<class Reader>
 class LogReaderTests: public TestWithWalSegmentsOnHeap {
 public:
@@ -676,7 +731,7 @@ auto randomly_read_from_segment(Random &random, SequentialLogReader &reader) -> 
                 break;
             EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
         } else {
-            const auto n = random.next_int(1ULL, reader.remaining().size());
+            const auto n = random.get(1ULL, reader.remaining().size());
             std::string chunk(n, '\x00');
             mem_copy(stob(chunk), reader.remaining().truncate(n));
             out += chunk;
@@ -888,7 +943,7 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
 
     writer->start();
     for (Size i {}; i < NUM_RECORDS; ++i) {
-        images.emplace_back(random.next_string(PAGE_SIZE));
+        images.emplace_back(random.get<std::string>('\x00', '\xFF', PAGE_SIZE));
         deltas.emplace_back(generator.setup_deltas(stob(images.back())));
         writer->log_deltas(PageId::root(), stob(images.back()), deltas[i]);
     }
@@ -922,7 +977,7 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
 
     writer->start();
     for (Size i {}; i < NUM_RECORDS; ++i) {
-        images.emplace_back(random.next_string(PAGE_SIZE));
+        images.emplace_back(random.get<std::string>('\x00', '\xFF', PAGE_SIZE));
         writer->log_full_image(PageId::from_index(i), stob(images.back()));
     }
     writer->stop();
@@ -964,7 +1019,7 @@ auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_d
     for (Size i {}; i < num_images; ++i) {
         auto pid = PageId::from_index(i);
 
-        before_images.emplace_back(random.next_string(BasicWalReaderWriterTests::PAGE_SIZE));
+        before_images.emplace_back(random.get<std::string>('\x00', '\xFF', BasicWalReaderWriterTests::PAGE_SIZE));
         writer->log_full_image(pid, stob(before_images.back()));
 
         after_images.emplace_back(before_images.back());
@@ -1068,7 +1123,7 @@ public:
 };
 
 //[[nodiscard]]
-//auto next_deltas(WalRecordGenerator &generator, Random &random, std::string &image, Size page_size)
+//auto next_deltas(WalRecordGenerator &generator, Random_ &random, std::string &image, Size page_size)
 //{
 //    image = random.next_string(page_size);
 //    return generator.setup_deltas(stob(image));

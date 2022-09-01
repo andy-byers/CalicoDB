@@ -67,7 +67,7 @@ public:
         ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
     }
 
-    Random_ random {0};
+    Random random {0};
     std::unique_ptr<MockStorage> store;
     MockRandomEditor *mock {};
     std::vector<Record> records;
@@ -283,7 +283,7 @@ public:
         }
     }
 
-    Random_ random {42};
+    Random random {42};
     Database db;
 };
 

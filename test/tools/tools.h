@@ -114,7 +114,7 @@ public:
 //    }
 
 private:
-    Random_ random {123};
+    Random random {123};
 };
 //
 //struct WalPayloadWrapper {
@@ -345,8 +345,7 @@ public:
 
     RecordGenerator() = default;
     explicit RecordGenerator(Parameters);
-    auto generate(Random&, Size) -> std::vector<Record>; // TODO: Remove me!
-    auto generate(Random_&, Size) -> std::vector<Record>;
+    auto generate(Random &, Size) -> std::vector<Record>;
 
 private:
     Parameters m_param;

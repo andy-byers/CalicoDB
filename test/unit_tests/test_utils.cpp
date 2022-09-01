@@ -28,7 +28,7 @@ TEST(AssertionDeathTest, Assert)
 
 TEST(TestEncoding, ReadsAndWrites)
 {
-    Random_ random{0};
+    Random random{0};
     const auto u16 = random.get<std::uint16_t>();
     const auto u32 = random.get<std::uint32_t>();
     const auto u64 = random.get<std::uint64_t>();
