@@ -1,14 +1,11 @@
 
-#include <fstream>
-#include <gtest/gtest.h>
-
+#include "unit_tests.h"
 #include "calico/bytes.h"
 #include "calico/options.h"
 #include "calico/store.h"
 #include "core/core.h"
 #include "pager/basic_pager.h"
 #include "tree/tree.h"
-#include "unit_tests.h"
 #include "fakes.h"
 #include "tools.h"
 
@@ -489,21 +486,73 @@ TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
     ASSERT_TRUE(expose_message(db.status()));
 }
 
-class RecoveryTests: public TestOnDisk {
+class RecoveryTests: public testing::Test {
 public:
+    static constexpr auto ROOT = "test";
+    static constexpr auto PREFIX = "test/";
+
     RecoveryTests()
+        : store {std::make_unique<testing::NiceMock<MockStorage>>()}
     {
+        mock_store().delegate_to_real();
+        CALICO_EXPECT_TRUE(expose_message(store->create_directory(ROOT)));
 
+        options.page_size = 0x200;
+        options.frame_count = 16;
     }
 
-    ~RecoveryTests() override
-    {
-
-    }
+    ~RecoveryTests() override = default;
 
     auto SetUp() -> void override
     {
+        ASSERT_TRUE(expose_message(open_database()));
 
+        RecordGenerator::Parameters param;
+        param.mean_key_size = 16;
+        param.mean_value_size = 100;
+        param.is_unique = true;
+        param.spread = 0;
+        RecordGenerator generator {param};
+        Random random {42};
+
+        static constexpr Size GROUP_SIZE {1'000};
+        uncommitted = generator.generate(random, GROUP_SIZE * 2);
+        committed.insert(cend(committed), cbegin(uncommitted) + GROUP_SIZE, cend(uncommitted));
+        uncommitted.resize(GROUP_SIZE);
+
+        // Transaction needs to go out of scope before the database is closed, hence the block.
+        {
+            static constexpr Size NUM_XACTS {10};
+            static constexpr auto XACT_SIZE = GROUP_SIZE / NUM_XACTS;
+            static_assert(GROUP_SIZE % XACT_SIZE == 0);
+
+            // Commit 10 transactions.
+            auto begin = cbegin(committed);
+            while (begin != cend(committed)) {
+                auto xact = db.transaction();
+                for (auto itr = begin; itr != begin + XACT_SIZE; ++itr) {
+                    ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
+                }
+                ASSERT_TRUE(expose_message(xact.commit()));
+                begin += XACT_SIZE;
+            }
+            // Fail on the next write to the data file.
+            reset_mock_file();
+            ON_CALL(*mock_file, write).WillByDefault(testing::Invoke([] {
+                return Status::system_error("42");
+            }));
+
+            auto xact = db.transaction();
+            for (const auto &[key, value]: uncommitted) {
+                const auto s = db.insert(key, value);
+                if (!s.is_ok()) {
+                    ASSERT_EQ(s.what(), "42");
+                    break;
+                }
+            }
+            ASSERT_EQ(xact.abort().what(), "42");
+        }
+        ASSERT_EQ(db.close().what(), "42");
     }
 
     auto TearDown() -> void override
@@ -511,8 +560,117 @@ public:
 
     }
 
-private:
-    Database db;
+    auto reset_mock_file() -> void
+    {
+        mock_file = mock_store().get_mock_random_editor(PREFIX + std::string {DATA_FILENAME});
+    }
+
+
+    auto open_database() -> Status
+    {
+        options.store = store.get();
+        return db.open(ROOT, options);
+    }
+
+    auto validate() -> void
+    {
+        db.tree().TEST_validate_nodes();
+        db.tree().TEST_validate_links();
+        db.tree().TEST_validate_order();
+
+        for (const auto &[key, value]: committed) {
+            ASSERT_TRUE(tools::contains(db, key, value)) << "database should contain " << key;
+        }
+        for (const auto &[key, value]: uncommitted) {
+            ASSERT_FALSE(db.find_exact(key).is_valid()) << "database should not contain " << key;
+        }
+    }
+
+    [[nodiscard]]
+    auto mock_store() -> MockStorage&
+    {
+        return dynamic_cast<MockStorage&>(*store);
+    }
+
+    [[nodiscard]]
+    auto mock_store() const -> const MockStorage&
+    {
+        return dynamic_cast<const MockStorage&>(*store);
+    }
+
+    std::vector<Record> committed;
+    std::vector<Record> uncommitted;
+    std::unique_ptr<Storage> store;
+    MockRandomEditor *mock_file {};
+    Options options;
+    Core db;
 };
+
+TEST_F(RecoveryTests, BasicRecoveryWorks)
+{
+    open_database();
+    validate();
+}
+
+TEST_F(RecoveryTests, RecoveryIsReentrantForDataReadFaults)
+{
+    static constexpr auto START {100};
+    int counter {};
+    int target {START};
+
+    mock_store().re_on_create = [&counter, &target](MockRandomEditor *mock) {
+        ON_CALL(*mock, read).WillByDefault(testing::Invoke([&counter, &target, mock](Bytes &out, Size offset) {
+            return counter++ == target ? Status::system_error("42") : mock->real().read(out, offset);
+        }));
+    };
+
+    Size num_tries {};
+    for (; ; num_tries++) {
+        auto s = open_database();
+        if (s.is_ok()) {
+            ASSERT_GT(target, START);
+            target = 0;
+            counter = 1;
+            validate();
+            break;
+        } else {
+            ASSERT_TRUE(s.is_system_error());
+            ASSERT_EQ(s.what(), "42");
+            counter = 0;
+            target += START;
+        }
+    }
+    ASSERT_GE(num_tries, 3);
+}
+
+TEST_F(RecoveryTests, RecoveryIsReentrantForDataWriteFaults)
+{
+    static constexpr auto START {100};
+    int counter {};
+    int target {START};
+
+    mock_store().re_on_create = [&counter, &target](MockRandomEditor *mock) {
+        ON_CALL(*mock, write).WillByDefault(testing::Invoke([&counter, &target, mock](BytesView in, Size offset) {
+            return counter++ == target ? Status::system_error("42") : mock->real().write(in, offset);
+        }));
+    };
+
+    Size num_tries {};
+    for (; ; num_tries++) {
+        auto s = db.open(ROOT, options);
+        if (s.is_ok()) {
+            target = 0;
+            counter = 1;
+            validate();
+            break;
+        } else {
+            ASSERT_TRUE(s.is_system_error());
+            ASSERT_EQ(s.what(), "42");
+            counter = 0;
+            target += START;
+        }
+    }
+    ASSERT_GE(num_tries, 3);
+}
 
 } // <anonymous>

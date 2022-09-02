@@ -149,7 +149,7 @@ auto get_blob_descriptor(const std::string &path) -> std::string
 inline auto split_blob_descriptor(const std::string &descriptor) -> std::pair<std::string, std::string>
 {
     auto bytes = stob(descriptor);
-    return {bytes.range(0, BLOB_TAG_WIDTH).to_string(), bytes.range(BLOB_TAG_WIDTH).to_string()};
+    return {bytes.range(0, BLOB_TAG_WIDTH).to_string(), bytes.range(BLOB_TAG_WIDTH + 1).to_string()};
 }
 
 class MockStorage: public Storage {
@@ -231,10 +231,10 @@ public:
 
     auto clone() -> Storage*
     {
-        auto *mock = new MockStorage;
-        mock->m_mocks = m_mocks;
+        auto *mock = new testing::NiceMock<MockStorage>;
         auto *temp = dynamic_cast<HeapStorage*>(m_real->clone());
         mock->m_real.reset(temp);
+        mock->delegate_to_real();
         for (const auto &[descriptor, unused]: m_mocks) {
             const auto [tag, name] = split_blob_descriptor(descriptor);
             if (tag == BlobTag<RandomReader>::value) {
@@ -269,7 +269,8 @@ public:
         const auto descriptor = get_blob_descriptor<RandomEditor>(name);
         std::lock_guard lock {m_mutex};
         auto itr = m_mocks.find(descriptor);
-        return itr != cend(m_mocks) ? static_cast<MockRandomEditor *>(itr->second) : nullptr;
+        if (itr == cend(m_mocks)) return nullptr;
+        return static_cast<MockRandomEditor *>(itr->second);
     }
 
     [[nodiscard]]
@@ -280,6 +281,10 @@ public:
         auto itr = m_mocks.find(descriptor);
         return itr != cend(m_mocks) ? static_cast<MockAppendWriter *>(itr->second) : nullptr;
     }
+
+    std::function<void(MockRandomEditor*)> re_on_create {[](auto) {}};
+    std::function<void(MockRandomReader*)> rr_on_create {[](auto) {}};
+    std::function<void(MockAppendWriter*)> aw_on_create {[](auto) {}};
 
 private:
     template<class Base, class Mock>
@@ -305,6 +310,14 @@ private:
             m_mocks.insert_or_assign(descriptor, mock);
             mock->delegate_to_real();
             *out = mock;
+
+            if constexpr (std::is_same_v<Base, RandomReader>) {
+                rr_on_create(mock);
+            } else if constexpr (std::is_same_v<Base, RandomEditor>) {
+                re_on_create(mock);
+            } else if constexpr (std::is_same_v<Base, AppendWriter>) {
+                aw_on_create(mock);
+            }
         }
         return s;
     }

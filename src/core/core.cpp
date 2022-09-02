@@ -206,18 +206,21 @@ auto Core::destroy() -> Status
 auto Core::forward_status(Status s, const std::string &message) -> Status
 {
     if (!s.is_ok()) {
-        m_logger->error(message);
-        m_logger->error("(reason) {}", s.what());
+        m_logger->error("(1/2) {}", message);
+        m_logger->error("(2/2) {}", s.what());
     }
     return s;
 }
 
 auto Core::save_and_forward_status(Status s, const std::string &message) -> Status
 {
-    CALICO_EXPECT_TRUE(m_status.is_ok());
+    if (!m_status.is_ok()) {
+        m_logger->error("(1/2) overwriting old error status");
+        m_logger->error("(2/2) {}", m_status.what());
+    }
     if (!s.is_ok()) {
-        m_logger->error(message);
-        m_logger->error("(reason) {}", s.what());
+        m_logger->error("(1/2) {}", message);
+        m_logger->error("(2/2) {}", s.what());
         m_status = s;
     }
     return s;
@@ -370,7 +373,7 @@ auto Core::abort() -> Status
 
 auto Core::close() -> Status
 {
-    if (m_has_xact) {
+    if (m_has_xact && m_status.is_ok()) {
         LogMessage message {*m_logger};
         message.set_primary("could not close");
         message.set_detail("a transaction is active");
@@ -381,14 +384,14 @@ auto Core::close() -> Status
     auto s = Status::ok();
     if (m_wal->is_writing()) {
         s = m_wal->stop_writer();
-        if (!s.is_ok()) s = forward_status(s, "cannot stop WAL");
+        if (!s.is_ok())
+            forward_status(s, "cannot stop WAL");
     }
     // We already waited on the WAL to be done writing so this should happen immediately.
     s = m_pager->flush();
+    MAYBE_SAVE_AND_FORWARD(s, "cannot flush pages before stop");
 
-    if (!s.is_ok()) s = forward_status(s, "cannot flush pages before stop");
-
-    return s;
+    return m_status;
 }
 
 auto Core::ensure_consistent_state() -> Status

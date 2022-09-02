@@ -1175,7 +1175,7 @@ public:
         wal.reset(temp);
 
         ASSERT_TRUE(expose_message(wal->setup_and_recover([](const auto &) { return Status::logic_error(""); },
-                                                          [](const auto &) { return Status::logic_error(""); })));
+                                                             [](const auto &) { return Status::logic_error(""); })));
     }
 
     std::unique_ptr<WriteAheadLog> wal;

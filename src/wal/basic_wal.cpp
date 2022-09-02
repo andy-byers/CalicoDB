@@ -177,7 +177,7 @@ auto BasicWriteAheadLog::start_writer() -> Status
 
 auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status
 {
-    static constexpr auto MSG = "could not recovery";
+    static constexpr auto MSG = "cannot recover";
     m_logger->info("received recovery request");
 
     std::vector<std::string> child_names;
@@ -228,6 +228,9 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
         m_collection.finish_segment(has_commit);
         m_flushed_lsn.store(last_lsn);
     }
+    // Return on fatal errors. Otherwise, we'll try to roll back the most-recent transaction.
+    if (s.is_system_error())
+        return s;
 
     for (auto itr = crbegin(uncommitted); itr != crend(uncommitted); ) {
         m_logger->info("rolling segment {} backward", itr->id.value);

@@ -162,8 +162,8 @@ auto BasicPager::try_make_available() -> Result<bool>
     auto &[frame_id, dirty_token] = entry;
     auto s = Status::ok();
     if (dirty_token.has_value()) {
-        // We remove the frame's "dirty" status, even if the write failed.
         s = m_framer->write_back(frame_id);
+        // We remove the frame's "dirty" status, even if write_back() failed.
         m_dirty.remove(*dirty_token);
         dirty_token.reset();
     }

@@ -54,7 +54,7 @@ auto main(int argc, const char *argv[]) -> int
             auto xact = db.transaction();
             for (Size j {}; j < XACT_SIZE; ++j) {
                 const auto key = make_key<KEY_WIDTH>(i + j);
-                const auto value = random.get<std::string>('\x00', '\xFF', random.get(10UL, 100UL));
+                const auto value = random.get<std::string>('a', 'z', random.get(10UL, 100UL));
                 expect_ok(db.insert(stob(key), stob(value)));
                 ofs << value << '\n';
             }
