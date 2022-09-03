@@ -5,7 +5,7 @@
 #include "core.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
-#include "store/disk.h"
+#include "storage/posix_storage.h"
 #include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
 #include "utils/logging.h"

@@ -1,28 +1,26 @@
 
 #include <map>
 #include <unordered_map>
-
 #include <gtest/gtest.h>
-
 #include "calico/cursor.h"
 #include "pager/pager.h"
 #include "tree/bplus_tree.h"
 #include "tree/node_pool.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
-
-#include "fakes.h"
 #include "pager/basic_pager.h"
 #include "random.h"
 #include "tools.h"
 #include "unit_tests.h"
 #include "wal/disabled_wal.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
 
-class TestHarness: public TestWithMock {
+class TestHarness: public TestOnHeap {
 public:
     static constexpr Size PAGE_SIZE {0x100};
     static constexpr Size FRAME_COUNT {16};
@@ -40,8 +38,6 @@ public:
             FRAME_COUNT,
             PAGE_SIZE
         });
-        mock = mock_store().get_mock_random_editor(PREFIX + std::string {DATA_FILENAME});
-        CALICO_EXPECT_NE(mock, nullptr);
     }
 
     Random random {0};
@@ -49,7 +45,6 @@ public:
     bool has_xact {};
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
-    MockRandomEditor *mock {};
 };
 
 class TreeTests: public TestHarness {
@@ -68,10 +63,6 @@ public:
         EXPECT_TRUE(root.has_value()) << "Error: " << root.error().what();
         auto s = pager->release(root->take());
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
-
-        using testing::AtLeast;
-        EXPECT_CALL(*mock, read).Times(AtLeast(0));
-        EXPECT_CALL(*mock, write).Times(AtLeast(0));
     }
 
     ~TreeTests() override = default;

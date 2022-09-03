@@ -1,15 +1,15 @@
 #ifndef CALICO_WAL_HELPERS_H
 #define CALICO_WAL_HELPERS_H
 
-#include <mutex>
-#include <set>
+#include "calico/storage.h"
 #include "record.h"
-#include "calico/store.h"
 #include "utils/logging.h"
 #include "utils/queue.h"
-#include "utils/types.h"
 #include "utils/result.h"
 #include "utils/scratch.h"
+#include "utils/types.h"
+#include <mutex>
+#include <set>
 
 namespace calico {
 
@@ -156,7 +156,7 @@ public:
     [[nodiscard]]
     auto remove_segments_from_left(SegmentId id, const Action &action) -> Status
     {
-        // Removes segments from [<begin>, id).
+        // Removes segments from [<begin>, id). TODO: I guess we should delete [<begin>, id], since id is the pager flushed LSN?
         for (auto itr = cbegin(m_info); itr != cend(m_info); ) {
             if (id == itr->id) return Status::ok();
             auto s = action(*itr);

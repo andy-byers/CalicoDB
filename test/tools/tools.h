@@ -6,7 +6,7 @@
 #include "core/header.h"
 #include "page/node.h"
 #include "pager/framer.h"
-#include "store/disk.h"
+#include "storage/posix_storage.h"
 #include "random.h"
 #include "utils/types.h"
 #include "utils/utils.h"
@@ -29,7 +29,7 @@ inline auto expect_ok(const Status &s) -> void
 class DataFileInspector {
 public:
     DataFileInspector(const std::string &path, Size page_size)
-        : m_store {std::make_unique<DiskStorage>()},
+        : m_store {std::make_unique<PosixStorage>()},
           m_page_size {page_size}
     {
         RandomReader *file {};

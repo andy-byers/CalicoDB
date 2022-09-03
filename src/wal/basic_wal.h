@@ -35,7 +35,7 @@ public:
     }
 
     [[nodiscard]]
-    auto is_writing() const -> bool override
+    auto is_working() const -> bool override
     {
         return m_writer.is_running();
     }
@@ -56,13 +56,14 @@ public:
     [[nodiscard]] auto log_image(std::uint64_t page_id, BytesView image) -> Status override;
     [[nodiscard]] auto log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status override;
     [[nodiscard]] auto log_commit() -> Status override;
-    [[nodiscard]] auto stop_writer() -> Status override;
-    [[nodiscard]] auto start_writer() -> Status override;
+    [[nodiscard]] auto stop_workers() -> Status override;
+    [[nodiscard]] auto start_workers() -> Status override;
+    [[nodiscard]] auto flush_pending() -> Status override;
+    [[nodiscard]] auto open_iterator(WalIterator**) -> Status override {return Status::ok();} // TODO: Implement me!
+
+
     [[nodiscard]] auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status override;
     [[nodiscard]] auto abort_last(const UndoCallback &callback) -> Status override;
-    [[nodiscard]] auto flush_pending() -> Status override;
-    auto save_state(FileHeader &) -> void override;
-    auto load_state(const FileHeader &) -> void override;
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);

@@ -16,7 +16,7 @@ public:
     }
 
     [[nodiscard]]
-    auto is_writing() const -> bool override
+    auto is_working() const -> bool override
     {
         return false;
     }
@@ -58,13 +58,13 @@ public:
     }
 
     [[nodiscard]]
-    auto stop_writer() -> Status override
+    auto stop_workers() -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto start_writer() -> Status override
+    auto start_workers() -> Status override
     {
         return Status::ok();
     }
@@ -82,8 +82,6 @@ public:
     }
 
     auto allow_cleanup(std::uint64_t) -> void override {}
-    auto save_state(FileHeader &) -> void override {}
-    auto load_state(const FileHeader &) -> void override {}
 };
 
 } // namespace calico

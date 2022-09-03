@@ -137,6 +137,7 @@ public:
         LogScratchManager *scratch {};
         WalCollection *collection {};
         std::atomic<SequenceId> *flushed_lsn {};
+        std::atomic<SequenceId> *pager_lsn {};
         std::shared_ptr<spdlog::logger> logger;
         std::string prefix;
         Size block_size {};
@@ -144,7 +145,7 @@ public:
     };
 
     enum class EventType {
-        STOP_WRITER,
+        STOP_WRITER = 1,
         FLUSH_BLOCK,
         LOG_FULL_IMAGE,
         LOG_DELTAS,
@@ -160,7 +161,9 @@ public:
     };
 
     explicit BackgroundWriter(const Parameters &param)
-        : m_flushed_lsn {param.flushed_lsn},
+        : m_logger {param.logger},
+          m_flushed_lsn {param.flushed_lsn},
+          m_pager_lsn {param.pager_lsn},
           m_writer {param.block_size},
           m_prefix {param.prefix},
           m_scratch {param.scratch},
@@ -276,6 +279,7 @@ private:
 
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> *m_flushed_lsn {};
+    std::atomic<SequenceId> *m_pager_lsn {};
     std::atomic<bool> m_is_waiting {};
     WalRecordWriter m_writer;
     std::string m_prefix;
@@ -291,6 +295,7 @@ public:
         Storage *store {};
         WalCollection *collection {};
         std::atomic<SequenceId> *flushed_lsn {};
+        std::atomic<SequenceId> *pager_lsn {};
         std::shared_ptr<spdlog::logger> logger;
         std::string dirname;
         Size page_size {};
@@ -299,12 +304,14 @@ public:
 
     explicit BasicWalWriter(const Parameters &param)
         : m_flushed_lsn {param.flushed_lsn},
+          m_pager_lsn {param.pager_lsn},
           m_scratch {wal_scratch_size(param.page_size)},
           m_background {{
               param.store,
               &m_scratch,
               param.collection,
               m_flushed_lsn,
+              m_pager_lsn,
               param.logger,
               param.dirname,
               wal_block_size(param.page_size),
@@ -339,6 +346,7 @@ public:
 
 private:
     std::atomic<SequenceId> *m_flushed_lsn {};
+    std::atomic<SequenceId> *m_pager_lsn {};
     SequenceId m_last_lsn;
     LogScratchManager m_scratch;
     BackgroundWriter m_background;

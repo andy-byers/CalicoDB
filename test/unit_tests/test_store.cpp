@@ -1,20 +1,17 @@
 #include <filesystem>
 #include <fstream>
-#include <limits>
-#include <climits>
 #include <gtest/gtest.h>
-
-#include "calico/options.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "random.h"
-#include "store/disk.h"
-#include "store/heap.h"
-#include "store/system.h"
+#include "storage/posix_storage.h"
+#include "fakes.h"
 #include "unit_tests.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
 
 template<class Base, class Store>
 [[nodiscard]]
@@ -107,7 +104,7 @@ constexpr auto PATH = "/tmp/calico_test_files/name";
 class FileTests: public testing::Test {
 public:
     FileTests()
-        : storage {std::make_unique<DiskStorage>()}
+        : storage {std::make_unique<PosixStorage>()}
     {
         std::error_code ignore;
         std::filesystem::remove_all(HOME, ignore);
@@ -123,7 +120,7 @@ public:
     }
 
     std::unique_ptr<Storage> storage;
-    Random random {0};
+    Random random {internal::random_seed};
 };
 
 class RandomFileReaderTests: public FileTests {
@@ -192,14 +189,14 @@ TEST_F(AppendFileWriterTests, WritesOutData)
     ASSERT_EQ(read_whole_file(PATH), data);
 }
 
-class DiskStorageTests: public testing::Test {
+class PosixStorageTests: public testing::Test {
 public:
-    DiskStorageTests() = default;
+    PosixStorageTests() = default;
 
-    ~DiskStorageTests() override = default;
+    ~PosixStorageTests() override = default;
 
-    DiskStorage storage;
-    Random random {0};
+    PosixStorage storage;
+    Random random {internal::random_seed};
 };
 
 class HeapTests: public testing::Test {
@@ -214,7 +211,7 @@ public:
     ~HeapTests() override = default;
 
     std::unique_ptr<Storage> storage;
-    Random random {0};
+    Random random {internal::random_seed};
 };
 
 TEST_F(HeapTests, ReaderCannotCreateBlob)
@@ -254,4 +251,4 @@ TEST_F(HeapTests, ReaderStopsAtEOF)
     ASSERT_EQ(bytes.to_string(), data);
 }
 
-} // <anonymous>
+} // namespace calico

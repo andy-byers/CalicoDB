@@ -1,18 +1,28 @@
 
-#include "unit_tests.h"
 #include "calico/bytes.h"
 #include "calico/options.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "core/core.h"
-#include "pager/basic_pager.h"
-#include "tree/tree.h"
 #include "fakes.h"
+#include "pager/basic_pager.h"
 #include "tools.h"
+#include "tree/tree.h"
+#include "unit_tests.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
 namespace fs = std::filesystem;
+
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
+
+namespace interceptors {
+    extern OpenInterceptor open;
+    extern ReadInterceptor read;
+    extern WriteInterceptor write;
+    extern SyncInterceptor sync;
+} // namespace interceptors
 
 class XactTests: public TestOnDisk {
 public:
@@ -28,11 +38,12 @@ public:
 
     auto TearDown() -> void override
     {
+        interceptors::reset();
         ASSERT_TRUE(expose_message(db.close()));
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
-    Random random {123};
+    Random random {internal::random_seed};
     Options options;
     Core db;
 };
@@ -50,7 +61,8 @@ static auto with_xact(XactTests &test, const Action &action)
     ASSERT_TRUE(expose_message(xact.commit()));
 }
 
-static auto insert_1000_records(XactTests &test)
+template<class Test>
+static auto insert_1000_records(Test &test)
 {
     auto records = test.generator.generate(test.random, 1'000);
     for (const auto &r: records) {
@@ -197,11 +209,14 @@ TEST_F(XactTests, AtomicOperationSanityCheck)
     }
 }
 
-class FailureTests: public TestWithMock {
+class FailureTests: public TestOnHeap {
 public:
     FailureTests() = default;
 
-    ~FailureTests() override = default;
+    ~FailureTests() override
+    {
+        interceptors::reset();
+    }
 
     auto SetUp() -> void override
     {
@@ -209,25 +224,12 @@ public:
         options.page_size = 0x200;
         options.frame_count = 16;
         options.store = store.get();
+        options.log_level = spdlog::level::err; // TODO
         ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-        editor_mock = mock_store().get_mock_random_editor(PREFIX + std::string {DATA_FILENAME});
     }
 
-    [[nodiscard]]
-    auto data_mock() -> MockRandomEditor*
-    {
-        return editor_mock;
-    }
-
-    [[nodiscard]]
-    auto wal_writer_mock(SegmentId id) -> MockAppendWriter*
-    {
-        return mock_store().get_mock_append_writer(PREFIX + id.to_name()); // TODO: Need some way to get mocks for the latest WAL segment...
-                                                                        //       This won't work right now!
-    }
-
-    MockRandomEditor *editor_mock {};
-    Random random {42};
+    RecordGenerator generator {{16, 100, 10, false, true}};
+    Random random {internal::random_seed};
     Database db;
 };
 
@@ -258,7 +260,7 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
 
     for (Size i {}; i < limit; ++i) {
         for (const auto &[key, value]: generator.generate(test.random, 100)) {
-            // insert()/erase() exercises data file reading and writing, and WAL file writing.
+            // insert()/erase() exercise data file reading/writing, and WAL file writing.
             if (test.random.get(4) == 0 && info.record_count()) {
                 s = test.db.erase(test.db.first());
             } else {
@@ -270,47 +272,68 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
     return Status::ok();
 }
 
-TEST_F(FailureTests, DataReadErrorIsPropagatedDuringModify)
+template<class Test>
+static auto run_propagate_test(Test &test)
 {
-    int counter {};
-    ON_CALL(*editor_mock, read)
-        .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) {
-            return counter++ < 5 ? editor_mock->real().read(out, offset) : Status::system_error("42");
-        }));
-
-    // Modify the database until a write() call fails.
-    auto xact = db.transaction();
-    auto s = modify_until_failure(*this);
+    // Modify the database until a system call fails.
+    auto xact = test.db.transaction();
+    const auto s = modify_until_failure(test);
     assert_is_failure_status(s);
 
     // The database status should reflect the error returned by write().
-    s = db.status();
-    assert_is_failure_status(s);
+    assert_is_failure_status(test.db.status());
+
+    interceptors::reset();
+}
+
+TEST_F(FailureTests, DataReadErrorIsPropagatedDuringModify)
+{
+    interceptors::read = [](const std::string &path, Bytes&, Size) {
+        return path == "test/data" ? Status::system_error("42") : Status::ok();
+    };
+    run_propagate_test(*this);
 }
 
 TEST_F(FailureTests, DataWriteErrorIsPropagatedDuringModify)
 {
-    ON_CALL(*editor_mock, write)
-        .WillByDefault(testing::Return(Status::system_error("42")));
+    interceptors::write = [](const std::string &path, BytesView, Size) {
+        return path == "test/data" ? Status::system_error("42") : Status::ok();
+    };
+    run_propagate_test(*this);
+}
 
-    // Modify the database until a write() call fails.
+// TODO: Occasionally causes a deadlock!!!
+//TEST_F(FailureTests, WalWriteErrorIsPropagatedDuringModify)
+//{
+//    interceptors::write = [](const std::string &path, BytesView, Size) {
+//        return path != "test/data" ? Status::system_error("42") : Status::ok();
+//    };
+//    run_propagate_test(*this);
+//}
+
+TEST_F(FailureTests, WalReadErrorIsPropagatedDuringAbort)
+{
+    interceptors::read = [](const std::string &path, Bytes&, Size) {
+        return path != "test/data" ? Status::system_error("42") : Status::ok();
+    };
+
     auto xact = db.transaction();
-    auto s = modify_until_failure(*this);
+    insert_1000_records(*this);
+    const auto s = xact.abort();
     assert_is_failure_status(s);
-
-    // The database status should reflect the error returned by write().
-    s = db.status();
-    assert_is_failure_status(s);
+    assert_is_failure_status(db.status());
 }
 
 TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
 {
     add_sequential_records(db, 500);
+
     int counter {};
-    ON_CALL(*editor_mock, read)
-        .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) {
-            return counter++ < 5 ? editor_mock->real().read(out, offset) : Status::system_error("42");
-        }));
+    interceptors::read = [&counter](const std::string &path, Bytes&, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ < 5 ? Status::ok() : Status::system_error("42");
+    };
 
     // Iterate until a read() call fails.
     auto c = db.first();
@@ -323,17 +346,20 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     // The database status should still be OK. Errors during reads cannot corrupt or even modify the database state.
     s = db.status();
     ASSERT_TRUE(s.is_ok()) << s.what();
+
+    interceptors::reset();
 }
 
-// Error encountered while flushing a dirty page to make room for a page read during a query. In this case, we don't have a transaction
-// we can try to abort, so we must exit the program. Next time the database is opened, it will roll forward and apply any missing updates.
+//// Error encountered while flushing a dirty page to make room for a page read during a query. In this case, we don't have a transaction
+//// we can try to abort, so we must exit the program. Next time the database is opened, it will roll forward and apply any missing updates.
 TEST_F(FailureTests, DataWriteFailureDuringQuery)
 {
     add_sequential_records(db, 500);
 
     // Further writes to the data file will fail.
-    ON_CALL(*editor_mock, write)
-        .WillByDefault(testing::Return(Status::system_error("42")));
+    interceptors::write = [](const std::string &path, BytesView, Size) {
+        return path == "test/data" ? Status::system_error("42") : Status::ok();
+    };
 
     auto c = db.first();
     for (; c.is_valid(); ++c) {}
@@ -343,6 +369,8 @@ TEST_F(FailureTests, DataWriteFailureDuringQuery)
 
     s = db.status();
     assert_is_failure_status(s);
+
+    interceptors::reset();
 }
 
 TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
@@ -354,8 +382,9 @@ TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
     for (; c.is_valid(); ++c) {}
 
     // Further writes to the data file will fail.
-    ON_CALL(*editor_mock, write)
-        .WillByDefault(testing::Return(Status::system_error("42")));
+    interceptors::write = [](auto, auto, auto) {
+        return Status::system_error("shouldn't happen!");
+    };
 
     // We should be able to iterate through all pages without any writes occurring.
     c = db.first();
@@ -366,142 +395,154 @@ TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
 
     s = db.status();
     ASSERT_TRUE(s.is_ok()) << s.what();
+
+    interceptors::reset();
+}
+
+template<class Test>
+static auto run_abort_restores_state_test(Test &test) -> void
+{
+    auto xact = test.db.transaction();
+    auto s = modify_until_failure(test);
+    assert_is_failure_status(s);
+
+    s = test.db.status();
+    assert_is_failure_status(s);
+
+    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_TRUE(expose_message(test.db.status()));
+
+    interceptors::reset();
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataReadError)
 {
     int counter {};
-    ON_CALL(*editor_mock, read)
-        .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) {
-            return counter++ == 2 ? Status::system_error("42") : editor_mock->real().read(out, offset);
-        }));
+    interceptors::read = [&counter](const std::string &path, Bytes&, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ == 5 ? Status::system_error("42") : Status::ok();
+    };
 
-    auto xact = db.transaction();
-    auto s = modify_until_failure(*this);
-    assert_is_failure_status(s);
-
-    s = db.status();
-    assert_is_failure_status(s);
-
-    ASSERT_TRUE(expose_message(xact.abort()));
-    ASSERT_TRUE(expose_message(db.status()));
+    run_abort_restores_state_test(*this);
 }
 
-TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
+TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError)
 {
     int counter {};
-    ON_CALL(*editor_mock, read)
-        .WillByDefault(testing::Invoke([&counter, this](Bytes &out, Size offset) {
-            return counter++ == 2 ? Status::system_error("42") : editor_mock->real().read(out, offset);
-        }));
+    interceptors::write = [&counter](const std::string &path, BytesView, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ == 5 ? Status::system_error("42") : Status::ok();
+    };
 
-    assert_is_failure_status(modify_until_failure(*this));
-    ASSERT_TRUE(expose_message(db.status()));
+    run_abort_restores_state_test(*this);
+}
+
+TEST_F(FailureTests, AbortRestoresStateAfterWalWriteError)
+{
+    int counter {};
+    interceptors::write = [&counter](const std::string &path, BytesView, Size) {
+        if (path == "test/data")
+            return Status::ok();
+        return counter++ == 5 ? Status::system_error("42") : Status::ok();
+    };
+
+    run_abort_restores_state_test(*this);
+}
+
+template<class Test>
+static auto run_abort_is_reentrant_test(Test &test, int &counter, int &counter_max) -> void
+{
+    auto xact = test.db.transaction();
+    auto s = modify_until_failure(test);
+    assert_is_failure_status(s);
+    Size fail_count {};
+    counter_max = 0;
+
+    for (; ; ) {
+        counter = 0;
+        counter_max++;
+        if (xact.abort().is_ok())
+            break;
+        s = test.db.status();
+        assert_is_failure_status(s);
+        fail_count++;
+    }
+    ASSERT_GT(fail_count, 5);
+    ASSERT_TRUE(expose_message(test.db.status()));
+
+    interceptors::reset();
 }
 
 TEST_F(FailureTests, AbortIsReentrantForDataReadErrors)
 {
     int counter {};
     int counter_max {10};
-    ON_CALL(*editor_mock, read)
-        .WillByDefault(testing::Invoke([&counter, &counter_max, this](Bytes &out, Size offset) {
-            return counter++ == counter_max ? Status::system_error("42") : editor_mock->real().read(out, offset);
-        }));
+    interceptors::read = [&counter, &counter_max](const std::string &path, Bytes&, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ == counter_max ? Status::system_error("42") : Status::ok();
+    };
 
-    auto xact = db.transaction();
-    auto s = modify_until_failure(*this);
-    assert_is_failure_status(s);
-    Size fail_count {};
-    counter_max = 0;
-
-    for (; ; ) {
-        counter = 0;
-        counter_max++;
-        if (xact.abort().is_ok())
-            break;
-        s = db.status();
-        assert_is_failure_status(s);
-        fail_count++;
-    }
-    ASSERT_GT(fail_count, 5);
-    ASSERT_TRUE(expose_message(db.status()));
-}
-
-TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError)
-{
-    int counter {};
-    ON_CALL(*editor_mock, write)
-        .WillByDefault(testing::Invoke([&counter, this](BytesView in, Size offset) {
-            return counter++ == 5 ? Status::system_error("42") : editor_mock->real().write(in, offset);
-        }));
-
-    auto xact = db.transaction();
-    auto s = modify_until_failure(*this);
-    assert_is_failure_status(s);
-
-    s = db.status();
-    assert_is_failure_status(s);
-
-    ASSERT_TRUE(expose_message(xact.abort()));
-    ASSERT_TRUE(expose_message(db.status()));
+    run_abort_is_reentrant_test(*this, counter, counter_max);
 }
 
 TEST_F(FailureTests, AbortIsReentrantForDataWriteErrors)
 {
     int counter {};
     int counter_max {10};
-    ON_CALL(*editor_mock, write)
-        .WillByDefault(testing::Invoke([&counter, &counter_max, this](BytesView in, Size offset) {
-            return counter++ == counter_max ? Status::system_error("42") : editor_mock->real().write(in, offset);
-        }));
+    interceptors::write = [&counter, &counter_max](const std::string &path, BytesView, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ == counter_max ? Status::system_error("42") : Status::ok();
+    };
 
-    auto xact = db.transaction();
-    auto s = modify_until_failure(*this);
-    assert_is_failure_status(s);
-    Size fail_count {};
-    counter_max = 0;
+    run_abort_is_reentrant_test(*this, counter, counter_max);
+}
 
-    for (; ; ) {
-        counter = 0;
-        counter_max++;
-        if (xact.abort().is_ok())
-            break;
-        s = db.status();
-        assert_is_failure_status(s);
-        fail_count++;
-    }
-    ASSERT_GT(fail_count, 5);
+TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
+{
+    int counter {};
+    interceptors::read = [&counter](const std::string &path, Bytes&, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ == 2 ? Status::system_error("42") : Status::ok();
+    };
+
+    assert_is_failure_status(modify_until_failure(*this));
     ASSERT_TRUE(expose_message(db.status()));
+
+    interceptors::reset();
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
 {
     int counter {};
-    ON_CALL(*editor_mock, write)
-        .WillByDefault(testing::Invoke([&counter, this](BytesView in, Size offset) {
-            return counter++ == 5 ? Status::system_error("42") : editor_mock->real().write(in, offset);
-        }));
+    interceptors::write = [&counter](const std::string &path, BytesView, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ == 5 ? Status::system_error("42") : Status::ok();
+    };
 
     assert_is_failure_status(modify_until_failure(*this));
     ASSERT_TRUE(expose_message(db.status()));
+
+    interceptors::reset();
 }
 
-class RecoveryTests: public testing::Test {
+class RecoveryTests: public TestOnHeap {
 public:
-    static constexpr auto ROOT = "test";
-    static constexpr auto PREFIX = "test/";
-
     RecoveryTests()
-        : store {std::make_unique<testing::NiceMock<MockStorage>>()}
     {
-        mock_store().delegate_to_real();
-        CALICO_EXPECT_TRUE(expose_message(store->create_directory(ROOT)));
-
         options.page_size = 0x200;
         options.frame_count = 16;
     }
 
-    ~RecoveryTests() override = default;
+    ~RecoveryTests() override
+    {
+        interceptors::reset();
+    }
 
     auto SetUp() -> void override
     {
@@ -513,7 +554,7 @@ public:
         param.is_unique = true;
         param.spread = 0;
         RecordGenerator generator {param};
-        Random random {42};
+        Random random {internal::random_seed};
 
         static constexpr Size GROUP_SIZE {1'000};
         uncommitted = generator.generate(random, GROUP_SIZE * 2);
@@ -537,10 +578,9 @@ public:
                 begin += XACT_SIZE;
             }
             // Fail on the next write to the data file.
-            reset_mock_file();
-            ON_CALL(*mock_file, write).WillByDefault(testing::Invoke([] {
-                return Status::system_error("42");
-            }));
+            interceptors::write = [](const std::string &path, BytesView, Size) {
+                return path != "test/data" ? Status::ok() : Status::system_error("42");
+            };
 
             auto xact = db.transaction();
             for (const auto &[key, value]: uncommitted) {
@@ -553,18 +593,11 @@ public:
             ASSERT_EQ(xact.abort().what(), "42");
         }
         ASSERT_EQ(db.close().what(), "42");
+
+        interceptors::write = [](auto, auto, auto) {
+            return Status::ok();
+        };
     }
-
-    auto TearDown() -> void override
-    {
-
-    }
-
-    auto reset_mock_file() -> void
-    {
-        mock_file = mock_store().get_mock_random_editor(PREFIX + std::string {DATA_FILENAME});
-    }
-
 
     auto open_database() -> Status
     {
@@ -586,22 +619,8 @@ public:
         }
     }
 
-    [[nodiscard]]
-    auto mock_store() -> MockStorage&
-    {
-        return dynamic_cast<MockStorage&>(*store);
-    }
-
-    [[nodiscard]]
-    auto mock_store() const -> const MockStorage&
-    {
-        return dynamic_cast<const MockStorage&>(*store);
-    }
-
     std::vector<Record> committed;
     std::vector<Record> uncommitted;
-    std::unique_ptr<Storage> store;
-    MockRandomEditor *mock_file {};
     Options options;
     Core db;
 };
@@ -612,35 +631,41 @@ TEST_F(RecoveryTests, BasicRecoveryWorks)
     validate();
 }
 
+template<class Test>
+static auto run_recovery_is_reentrant_test(Test &test, int step, int &counter, int &target) -> void
+{
+    Size num_tries {};
+    for (; ; num_tries++) {
+        auto s = test.open_database();
+        if (s.is_ok()) {
+            ASSERT_GT(target, step);
+            target = 0;
+            counter = 1;
+            test.validate();
+            break;
+        } else {
+            ASSERT_TRUE(s.is_system_error());
+            ASSERT_EQ(s.what(), "42");
+            counter = 0;
+            target += step;
+        }
+    }
+    ASSERT_GE(num_tries, 3);
+}
+
 TEST_F(RecoveryTests, RecoveryIsReentrantForDataReadFaults)
 {
     static constexpr auto START {100};
     int counter {};
     int target {START};
 
-    mock_store().re_on_create = [&counter, &target](MockRandomEditor *mock) {
-        ON_CALL(*mock, read).WillByDefault(testing::Invoke([&counter, &target, mock](Bytes &out, Size offset) {
-            return counter++ == target ? Status::system_error("42") : mock->real().read(out, offset);
-        }));
+    interceptors::read = [&counter, &target](const std::string &path, Bytes&, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ == target ? Status::system_error("42") : Status::ok();
     };
 
-    Size num_tries {};
-    for (; ; num_tries++) {
-        auto s = open_database();
-        if (s.is_ok()) {
-            ASSERT_GT(target, START);
-            target = 0;
-            counter = 1;
-            validate();
-            break;
-        } else {
-            ASSERT_TRUE(s.is_system_error());
-            ASSERT_EQ(s.what(), "42");
-            counter = 0;
-            target += START;
-        }
-    }
-    ASSERT_GE(num_tries, 3);
+    run_recovery_is_reentrant_test(*this, START, counter, target);
 }
 
 TEST_F(RecoveryTests, RecoveryIsReentrantForDataWriteFaults)
@@ -649,28 +674,28 @@ TEST_F(RecoveryTests, RecoveryIsReentrantForDataWriteFaults)
     int counter {};
     int target {START};
 
-    mock_store().re_on_create = [&counter, &target](MockRandomEditor *mock) {
-        ON_CALL(*mock, write).WillByDefault(testing::Invoke([&counter, &target, mock](BytesView in, Size offset) {
-            return counter++ == target ? Status::system_error("42") : mock->real().write(in, offset);
-        }));
+    interceptors::write = [&counter, &target](const std::string &path, BytesView, Size) {
+        if (path != "test/data")
+            return Status::ok();
+        return counter++ == target ? Status::system_error("42") : Status::ok();
     };
 
-    Size num_tries {};
-    for (; ; num_tries++) {
-        auto s = db.open(ROOT, options);
-        if (s.is_ok()) {
-            target = 0;
-            counter = 1;
-            validate();
-            break;
-        } else {
-            ASSERT_TRUE(s.is_system_error());
-            ASSERT_EQ(s.what(), "42");
-            counter = 0;
-            target += START;
-        }
-    }
-    ASSERT_GE(num_tries, 3);
+    run_recovery_is_reentrant_test(*this, START, counter, target);
 }
 
-} // <anonymous>
+TEST_F(RecoveryTests, RecoveryIsReentrantForWalReadFaults)
+{
+    static constexpr auto START {100};
+    int counter {};
+    int target {START};
+
+    interceptors::read = [&counter, &target](const std::string &path, Bytes&, Size) {
+        if (path == "test/data")
+            return Status::ok();
+        return counter++ == target ? Status::system_error("42") : Status::ok();
+    };
+
+    run_recovery_is_reentrant_test(*this, START, counter, target);
+}
+
+} // namespace calico

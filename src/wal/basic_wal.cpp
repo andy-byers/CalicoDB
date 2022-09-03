@@ -12,18 +12,10 @@ namespace calico {
 [[nodiscard]]
 static auto handle_writer_error(spdlog::logger &logger, BasicWalWriter &writer)
 {
-    auto s = Status::ok(); // First error encountered by the writer gets stored here.
-    auto t = writer.status();
-    Size i {1};
-
-    while (!t.is_ok()) {
-        if (s.is_ok()) {
-            logger.error("emitting background writer errors");
-            s = t;
-        } else {
-            logger.error("(error {:6<}) {}", i++, t.what());
-        }
-        t = writer.status();
+    auto s = writer.status();
+    if (!s.is_ok()) {
+        logger.error("(1/2) background writer encountered an error");
+        logger.error("(2/2) {}", s.what());
     }
     return s;
 }
@@ -53,6 +45,7 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
           m_store,
           &m_collection,
           &m_flushed_lsn,
+          &m_pager_lsn,
           m_logger,
           param.prefix,
           param.page_size,
@@ -152,7 +145,7 @@ auto BasicWriteAheadLog::log_commit() -> Status
     return m_writer.status();
 }
 
-auto BasicWriteAheadLog::stop_writer() -> Status
+auto BasicWriteAheadLog::stop_workers() -> Status
 {
     static constexpr auto MSG = "could not stop background writer";
     m_logger->info("received stop request");
@@ -166,7 +159,7 @@ auto BasicWriteAheadLog::stop_writer() -> Status
     return s;
 }
 
-auto BasicWriteAheadLog::start_writer() -> Status
+auto BasicWriteAheadLog::start_workers() -> Status
 {
     m_logger->info("received start request: next segment ID is {}", m_collection.most_recent_id().value);
 
@@ -296,7 +289,11 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
 
         // TODO: Would be nice to avoid this by saving the positions...
         s = m_reader.redo(positions, [](auto) {return Status::ok();});
-        MAYBE_FORWARD(s, MSG);
+        if (s.is_system_error()) {
+            m_logger->error("(1/2) {}", MSG);
+            m_logger->error("(2/2) {}", s.what());
+            return s;
+        }
 
         s = m_reader.undo(crbegin(positions), crend(positions), [&callback](const auto &info) {
             return callback(info);
@@ -323,16 +320,6 @@ auto BasicWriteAheadLog::flush_pending() -> Status
 {
     m_writer.flush_block();
     return m_writer.status(); // TODO: May not reflect error yet... Should find a good place to check this each operation...
-}
-
-auto BasicWriteAheadLog::save_state(FileHeader &) -> void
-{
-    // TODO: No state needed yet...
-}
-
-auto BasicWriteAheadLog::load_state(const FileHeader &) -> void
-{
-    // TODO: No state needed yet...
 }
 
 #undef MAYBE_FORWARD

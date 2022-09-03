@@ -19,70 +19,75 @@ auto BackgroundWriter::background_writer() -> void
         auto event = m_state.events.dequeue();
         if (!event.has_value()) break;
 
-        auto [
-            type,
-            lsn,
-            buffer,
-            size,
-            is_waiting
-        ] = *event;
 
         bool should_segment {};
         bool has_commit {};
 
-        switch (type) {
-            case EventType::LOG_FULL_IMAGE:
-            case EventType::LOG_DELTAS:
-                CALICO_EXPECT_TRUE(buffer.has_value());
-                s = emit_payload(lsn, (*buffer)->truncate(size));
-                should_segment = needs_segmentation();
-                break;
-            case EventType::LOG_COMMIT:
-                s = emit_commit(lsn);
-                should_segment = s.is_ok();
-                has_commit = true;
-                break;
-            case EventType::FLUSH_BLOCK:
-                s = m_writer.append_block();
-                m_flushed_lsn->store(lsn);
-                break;
-            case EventType::STOP_WRITER:
-                s = run_stop(guard);
-                break;
-            default:
-                CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
-        }
+        const auto handle_event = [&] {
+            auto [
+                type,
+                lsn,
+                buffer,
+                size,
+                is_waiting
+            ] = *event;
+
+            switch (type) {
+                case EventType::LOG_FULL_IMAGE:
+                case EventType::LOG_DELTAS:
+                    CALICO_EXPECT_TRUE(buffer.has_value());
+                    s = emit_payload(lsn, (*buffer)->truncate(size));
+                    should_segment = needs_segmentation();
+                    break;
+                case EventType::LOG_COMMIT:
+                    s = emit_commit(lsn);
+                    should_segment = s.is_ok();
+                    has_commit = true;
+                    break;
+                case EventType::FLUSH_BLOCK:
+                    s = m_writer.append_block();
+                    m_flushed_lsn->store(lsn);
+                    break;
+                case EventType::STOP_WRITER:
+                    s = run_stop(guard);
+                    break;
+                default:
+                    CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
+            }
+        };
+
+        if (m_state.status.is_ok() || event->type == EventType::STOP_WRITER)
+            handle_event();
 
         // Replace the scratch memory so that the main thread can reuse it. This is internally synchronized.
-        if (buffer) m_scratch->put(*buffer);
+        if (event->buffer) m_scratch->put(*event->buffer);
 
         if (s.is_ok() && should_segment) {
             s = advance_segment(guard, has_commit);
-            if (s.is_ok()) m_flushed_lsn->store(lsn);
+            if (s.is_ok()) m_flushed_lsn->store(event->lsn);
         }
 
         if (!s.is_ok())
             handle_error(guard, s);
 
-        if (is_waiting) {
+        if (event->is_waiting) {
             m_is_waiting.store(false);
-            m_state.cv.notify_one();
+            m_state.cv.notify_all();
         }
 
         // TODO: Clean up obsolete segments...
-
     }
 }
 
-auto BackgroundWriter::handle_error(SegmentGuard &guard, Status e) -> void
+auto BackgroundWriter::handle_error(SegmentGuard & /* TODO */, Status e) -> void
 {
     CALICO_EXPECT_FALSE(e.is_ok());
     add_error(e);
 
-    // We still want to try and finish the segment. We may need it to roll back changes.
-    e = run_stop(guard);
-    if (!e.is_ok())
-        add_error(e);
+//    // We still want to try and finish the segment. We may need it to roll back changes.
+//    e = run_stop(guard);
+//    if (!e.is_ok())
+//        add_error(e);
 }
 
 auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status

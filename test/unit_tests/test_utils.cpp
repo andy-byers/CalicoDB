@@ -17,9 +17,7 @@
 #include "utils/utils.h"
 #include "core/header.h"
 
-namespace {
-
-using namespace calico;
+namespace calico {
 
 TEST(AssertionDeathTest, Assert)
 {
@@ -630,8 +628,6 @@ TEST_F(QueueTests, SingleProducerMultipleConsumers)
     for (auto &thread: consumers)
         thread.join();
 
-    queue.wait_until_finish();
-
     Size answer {};
     ASSERT_TRUE(std::all_of(cbegin(data), cend(data), [&answer](auto result) {
         return result == answer++;
@@ -694,4 +690,4 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
     ASSERT_EQ(v[2][2], '\x33');
 }
 
-} // <anonymous>
+} // namespace calico

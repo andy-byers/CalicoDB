@@ -2,7 +2,7 @@
 #include "calico/options.h"
 #include "framer.h"
 #include "page/page.h"
-#include "store/disk.h"
+#include "storage/posix_storage.h"
 #include "utils/logging.h"
 #include "utils/types.h"
 #include <thread>
@@ -145,14 +145,14 @@ auto BasicPager::try_make_available() -> Result<bool>
         if (!dirty_token.has_value())
             return true;
 
-        if (m_wal->is_writing())
+        if (m_wal->is_working())
             return frame.lsn() <= m_wal->flushed_lsn();
 
         return true;
     });
 
     if (itr == m_registry.end()) {
-        CALICO_EXPECT_TRUE(m_wal->is_writing());
+        CALICO_EXPECT_TRUE(m_wal->is_working());
         const auto s = m_wal->flush_pending();
         if (!s.is_ok()) return Err {s};
         return false;
@@ -180,7 +180,7 @@ auto BasicPager::release(Page page) -> Status
 
     // This method can only fail for writable pages.
     auto s = Status::ok();
-    if (const auto deltas = page.collect_deltas(); m_wal->is_writing() && !deltas.empty()) {
+    if (const auto deltas = page.collect_deltas(); m_wal->is_working() && !deltas.empty()) {
         CALICO_EXPECT_TRUE(page.is_writable());
         page.set_lsn(SequenceId {m_wal->current_lsn()});
         s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
@@ -205,7 +205,7 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
     }
 
     // TODO: We also have info about whether or not we should watch this page. Like *m_has_xact? Although that may break abort() since it doesn't set *m_has_xact to false until it is totally finished...
-    if (m_wal->is_writing()) {
+    if (m_wal->is_working()) {
         auto s = m_wal->log_image(page.id().value, page.view(0));
         save_and_forward_status(s, "could not write full image to WAL");
 
@@ -221,14 +221,12 @@ auto BasicPager::save_state(FileHeader &header) -> void
 {
     m_logger->info("saving header fields");
     m_framer->save_state(header);
-    m_wal->save_state(header);
 }
 
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
     m_logger->info("loading header fields");
     m_framer->load_state(header);
-    m_wal->load_state(header);
 }
 
 auto BasicPager::allocate() -> Result<Page>

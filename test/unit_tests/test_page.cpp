@@ -5,9 +5,11 @@
 #include "random.h"
 #include "unit_tests.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
 
 class DeltaCompressionTest: public testing::Test {
 public:
@@ -32,7 +34,7 @@ public:
         insert_delta(deltas, {offset, size});
     }
 
-    Random random {0};
+    Random random {internal::random_seed};
 };
 
 TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
@@ -420,7 +422,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 ////    static constexpr Size MAX_SIZE {MIN_SIZE * 3};
 ////    std::unordered_map<Index, Size> allocations;
 ////    auto usable_space = max_usable_space();
-////    Random random {0};
+////    Random random {internal::random_seed};
 ////
 ////    for (Index i {}; i < NUM_ITERATIONS; ++i) {
 ////        for (; ; ) {
@@ -520,7 +522,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //        return node_backing.get_node(id, type);
 //    }
 //
-//    Random random {0};
+//    Random random {internal::random_seed};
 //    NodeBacking node_backing;
 //    CellBacking cell_backing;
 //    std::string normal_value {"world"};
@@ -631,7 +633,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //TEST_F(NodeTests, SanityCheck)
 //{
 //    static constexpr Size NUM_ITERATIONS {10};
-//    Random random {0};
+//    Random random {internal::random_seed};
 //    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
 //    for (Index i {}; i < NUM_ITERATIONS; ++i) {
 //        while (!node.is_overflowing()) {

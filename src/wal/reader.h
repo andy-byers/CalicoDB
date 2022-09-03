@@ -73,11 +73,11 @@ public:
 //     * Open the iterator on a given segment. If this method returns OK, the iterator is open on a valid segment
 //     * file and payload() can be called.
 //     */
-//    [[nodiscard]] auto open(SegmentId id) -> Status;
-//    [[nodiscard]] auto close() -> Status;
-//    [[nodiscard]] auto increment() -> Status;
-//    [[nodiscard]] auto decrement() -> Status;
-//    [[nodiscard]] auto payload() -> BytesView;
+//    [[nodiscard]] auto seek_next_segment() -> Status;
+//        [[nodiscard]] auto seek_previous_segment() -> Status;
+//        [[nodiscard]] auto first_lsn() -> SequenceId;
+//        [[nodiscard]] auto redo(const RedoCallback&) -> BytesView;
+//        [[nodiscard]] auto undo(const UndoCallback&) -> BytesView;
 //
 //private:
 //

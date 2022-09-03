@@ -1,13 +1,13 @@
 
 #include "core.h"
 #include "calico/calico.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "calico/transaction.h"
 #include "header.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
-#include "store/disk.h"
-#include "store/helpers.h"
+#include "storage/posix_storage.h"
+#include "storage/helpers.h"
 #include "tree/bplus_tree.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
@@ -91,7 +91,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
 
     m_store = sanitized.store;
     if (!m_store) {
-        m_store = new DiskStorage;
+        m_store = new PosixStorage;
         m_owns_store = true;
     }
 
@@ -117,7 +117,6 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         }, &wal);
         MAYBE_FORWARD(s, MSG);
         m_wal.reset(wal);
-        m_wal->load_state(state);
     } else {
         m_wal = std::make_unique<DisabledWriteAheadLog>();
     }
@@ -169,7 +168,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     }
 
     if (s.is_ok() && m_wal->is_enabled())
-        s = m_wal->start_writer();
+        s = m_wal->start_workers();
 
     return forward_status(s, MSG);
 }
@@ -214,14 +213,16 @@ auto Core::forward_status(Status s, const std::string &message) -> Status
 
 auto Core::save_and_forward_status(Status s, const std::string &message) -> Status
 {
-    if (!m_status.is_ok()) {
-        m_logger->error("(1/2) overwriting old error status");
-        m_logger->error("(2/2) {}", m_status.what());
-    }
     if (!s.is_ok()) {
         m_logger->error("(1/2) {}", message);
         m_logger->error("(2/2) {}", s.what());
-        m_status = s;
+
+        if (m_status.is_ok()) {
+            m_status = s;
+        } else {
+            m_logger->error("(1/2) error status is already set");
+            m_logger->error("(2/2) {}", m_status.what());
+        }
     }
     return s;
 }
@@ -336,9 +337,12 @@ auto Core::abort() -> Status
     if (!m_wal->is_enabled()) return Status::ok();
     auto s = Status::ok();
 
-    if (m_wal->is_writing()) {
-        s = m_wal->stop_writer();
-        MAYBE_FORWARD(s, MSG);
+    if (m_wal->is_working()) {
+        s = m_wal->stop_workers();
+        if (!s.is_ok()) {
+            m_logger->error("(1/2) WAL encountered an error when stopping workers");
+            m_logger->error("(2/2) {}", s.what());
+        }
     }
 
     // This should give us the full images of each updated page belonging to the current transaction, before any changes were made,
@@ -351,20 +355,20 @@ auto Core::abort() -> Status
         page->undo(undo);
         return m_pager->release(std::move(*page));
     });
-    MAYBE_FORWARD(s, MSG);
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Load database state from the root page file header. We need the new page count to determine which pages we can flush.
     s = load_state();
-    MAYBE_FORWARD(s, MSG);
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     s = m_pager->flush();
-    MAYBE_FORWARD(s, MSG);
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Database state is ALMOST restored if we have made it here.
     m_status = Status::ok();
 
     m_logger->info("abort succeeded");
-    s = m_wal->start_writer();
+    s = m_wal->start_workers();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     m_has_xact = false;
@@ -382,8 +386,8 @@ auto Core::close() -> Status
     }
 
     auto s = Status::ok();
-    if (m_wal->is_writing()) {
-        s = m_wal->stop_writer();
+    if (m_wal->is_working()) {
+        s = m_wal->stop_workers();
         if (!s.is_ok())
             forward_status(s, "cannot stop WAL");
     }
@@ -442,7 +446,6 @@ auto Core::save_state() -> Status
     auto state = read_header(*root);
     m_pager->save_state(state);
     m_tree->save_state(state);
-    m_wal->save_state(state);
     state.header_crc = compute_header_crc(state);
     write_header(*root, state);
 
@@ -468,7 +471,6 @@ auto Core::load_state() -> Status
 
     m_pager->load_state(state);
     m_tree->load_state(state);
-    m_wal->load_state(state);
 
     auto s = m_pager->release(std::move(*root));
     if (s.is_ok() && m_pager->page_count() < before_count) {

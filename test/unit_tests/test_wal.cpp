@@ -5,7 +5,7 @@
 
 #include "calico/bytes.h"
 #include "calico/options.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "fakes.h"
 #include "pager/basic_pager.h"
 #include "pager/framer.h"
@@ -19,9 +19,12 @@
 #include "wal/reader.h"
 #include "wal/writer.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
+
 namespace fs = std::filesystem;
 
 template<class Base>
@@ -98,7 +101,7 @@ public:
 
     Size max_size {GetParam() * WAL_SCRATCH_SCALE};
     Size min_size {max_size - GetParam()};
-    Random random {42};
+    Random random {internal::random_seed};
     std::string scratch;
     std::string image;
 };
@@ -211,7 +214,7 @@ public:
           scratch(PAGE_SIZE * WAL_SCRATCH_SCALE, '\x00')
     {}
 
-    Random random {123};
+    Random random {internal::random_seed};
     std::string image;
     std::string scratch;
 };
@@ -269,7 +272,7 @@ TEST_F(WalBufferTests, OutOfBoundsCursorDeathTest)
 
 TEST_F(WalBufferTests, KeepsTrackOfPosition)
 {
-    Random random {123};
+    Random random {internal::random_seed};
     Size block_number {};
     Size block_offset {};
 
@@ -355,7 +358,7 @@ TEST_F(WalRecordWriterTests, AdvancesToNewBlocksDuringWrite)
 {
     attach_writer(SegmentId {1});
     auto lsn = SequenceId::base();
-    Random random {123};
+    Random random {internal::random_seed};
 
     while (writer.block_count() < 10) {
         const auto payload = random.get<std::string>('\x00', '\xFF', 10);
@@ -528,6 +531,7 @@ public:
             scratch.get(),
             &collection,
             &flushed_lsn,
+            &pager_lsn,
             create_logger(create_sink(), "wal"),
             ROOT,
             BLOCK_SIZE,
@@ -560,9 +564,10 @@ public:
 
     WalCollection collection;
     std::atomic<SequenceId> flushed_lsn;
+    std::atomic<SequenceId> pager_lsn;
     std::unique_ptr<LogScratchManager> scratch;
     std::unique_ptr<BackgroundWriter> writer;
-    Random random {42};
+    Random random {internal::random_seed};
 };
 
 TEST_F(BackgroundWriterTests, NewWriterState)
@@ -743,13 +748,13 @@ auto randomly_read_from_segment(Random &random, SequentialLogReader &reader) -> 
 
 TEST_F(SequentialLogReaderTests, ReadsAndAdvancesWithinSegment)
 {
-    Random random {0};
+    Random random {internal::random_seed};
     ASSERT_EQ(randomly_read_from_segment(random, reader), result.substr(0, 8));
 }
 
 TEST_F(SequentialLogReaderTests, ReadsAndAdvancesBetweenSegments)
 {
-    Random random {0};
+    Random random {internal::random_seed};
     auto answer = randomly_read_from_segment(random, reader);
     open_file_and_attach_reader(SegmentId {2});
     answer += randomly_read_from_segment(random, reader);
@@ -913,6 +918,7 @@ public:
             store.get(),
             &collection,
             &flushed_lsn,
+            &pager_lsn,
             create_logger(create_sink(), "wal"),
             ROOT,
             PAGE_SIZE,
@@ -922,10 +928,11 @@ public:
 
     WalCollection collection;
     std::atomic<SequenceId> flushed_lsn {};
+    std::atomic<SequenceId> pager_lsn {};
     std::unique_ptr<LogScratchManager> scratch;
     std::unique_ptr<BasicWalReader> reader;
     std::unique_ptr<BasicWalWriter> writer;
-    Random random {42};
+    Random random {internal::random_seed};
 };
 
 TEST_F(BasicWalReaderWriterTests, NewWriterIsOk)
@@ -1093,34 +1100,34 @@ TEST_F(BasicWalReaderWriterTests, ManyImagesManyDeltas)
 //    test_undo_redo(*this, 10'000, 1'000'000);
 //}
 
-class MockWalReaderWriterTests: public BasicWalReaderWriterTests {
-public:
-    static constexpr Size PAGE_SIZE {0x100};
-
-    MockWalReaderWriterTests()
-    {
-        scratch = std::make_unique<LogScratchManager>(PAGE_SIZE * WAL_SCRATCH_SCALE);
-        store = std::make_unique<MockStorage>();
-        mock_store().delegate_to_real();
-        EXPECT_CALL(mock_store(), open_append_writer).Times(testing::AtLeast(1));
-        EXPECT_CALL(mock_store(), create_directory).Times(1);
-        EXPECT_TRUE(expose_message(store->create_directory("test")));
-    }
-
-    auto mock_store() -> MockStorage&
-    {
-        return dynamic_cast<MockStorage&>(*store);
-    }
-
-    auto open_mock_segment(SegmentId id) -> void
-    {
-        auto &mock_store = dynamic_cast<MockStorage&>(*store);
-        mock = mock_store.get_mock_append_writer("test/" + id.to_name());
-        ASSERT_NE(mock, nullptr);
-    }
-
-    MockAppendWriter *mock {};
-};
+//class MockWalReaderWriterTests: public BasicWalReaderWriterTests {
+//public:
+//    static constexpr Size PAGE_SIZE {0x100};
+//
+//    MockWalReaderWriterTests()
+//    {
+//        scratch = std::make_unique<LogScratchManager>(PAGE_SIZE * WAL_SCRATCH_SCALE);
+//        store = std::make_unique<MockStorage>();
+//        mock_store().delegate_to_real();
+//        EXPECT_CALL(mock_store(), open_append_writer).Times(testing::AtLeast(1));
+//        EXPECT_CALL(mock_store(), create_directory).Times(1);
+//        EXPECT_TRUE(expose_message(store->create_directory("test")));
+//    }
+//
+//    auto mock_store() -> MockStorage&
+//    {
+//        return dynamic_cast<MockStorage&>(*store);
+//    }
+//
+//    auto open_mock_segment(SegmentId id) -> void
+//    {
+//        auto &mock_store = dynamic_cast<MockStorage&>(*store);
+//        mock = mock_store.get_mock_append_writer("test/" + id.to_name());
+//        ASSERT_NE(mock, nullptr);
+//    }
+//
+//    MockAppendWriter *mock {};
+//};
 
 //[[nodiscard]]
 //auto next_deltas(WalRecordGenerator &generator, Random_ &random, std::string &image, Size page_size)
@@ -1190,8 +1197,8 @@ TEST_F(BasicWalTests, NewWalIsEmpty)
 
 TEST_F(BasicWalTests, StartsAndStops)
 {
-    ASSERT_TRUE(expose_message(wal->start_writer()));
-    ASSERT_TRUE(expose_message(wal->stop_writer()));
+    ASSERT_TRUE(expose_message(wal->start_workers()));
+    ASSERT_TRUE(expose_message(wal->stop_workers()));
 }
 
 TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
@@ -1199,10 +1206,10 @@ TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
     std::vector<std::string> children;
 
     for (Size i {}; i < 10; ++i) {
-        ASSERT_TRUE(expose_message(wal->start_writer()));
+        ASSERT_TRUE(expose_message(wal->start_workers()));
 
         // File should be deleted before this method returns, if no records were written to it.
-        ASSERT_TRUE(expose_message(wal->stop_writer()));
+        ASSERT_TRUE(expose_message(wal->stop_workers()));
         ASSERT_TRUE(expose_message(store->get_children(ROOT, children)));
         ASSERT_TRUE(children.empty());
     }

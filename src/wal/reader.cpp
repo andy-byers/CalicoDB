@@ -1,5 +1,5 @@
 #include "reader.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "page/page.h"
 #include "utils/logging.h"
 
@@ -171,8 +171,7 @@ auto BasicWalReader::forward_read_logical_record(WalRecordHeader &header, Bytes 
 
             // Just hit EOF. If we have any record fragments read so far, we consider this corruption.
             if (!s.is_ok()) {
-                if (!s.is_logic_error() || header.lsn != 0)
-//                if (s.is_logic_error() && header.lsn != 0)
+                if (s.is_logic_error() && header.lsn != 0)
                     return read_corruption_error("logical record with LSN {} is incomplete", header.lsn);
                 return s;
             }

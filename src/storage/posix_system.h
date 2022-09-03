@@ -1,9 +1,9 @@
 #ifndef CALICO_STORE_SYSTEM_H
 #define CALICO_STORE_SYSTEM_H
 
-#include <system_error>
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "utils/result.h"
+#include <system_error>
 
 namespace calico::system {
 

@@ -71,14 +71,6 @@ public:
         m_finish_cv.notify_all();
     }
 
-    auto wait_until_finish() -> void
-    {
-        std::unique_lock lock {m_mu};
-        m_finish_cv.wait(lock, [this] {
-            return m_is_finished;
-        });
-    }
-
 private:
     [[nodiscard]]
     auto is_full() const -> bool
