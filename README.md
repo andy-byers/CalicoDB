@@ -89,17 +89,8 @@ CPUCache:   20480 KB
 The `fillseq`, `fillrandom`, and `overwrite` benchmarks were run using a transaction size of 1000.
 Performing many modifications outside a transaction is slow, since each operation is guaranteed to be atomic.
 
-| Benchmark                | Result (ops/second) |
-|:-------------------------|--------------------:|
-| fillseq                  |             311,526 |
-| fillrandom               |             139,801 |
-| overwrite                |             124,038 |
-| readrandom               |           1,524,390 |
-| readseq                  |           5,524,861 |
-| fillrand100K<sup>1</sup> |                 460 |
-| fillseq100K<sup>1</sup>  |                 450 |
-
-<sup>1</sup> These need some work!
+> **NOTE**: I'm removing Calico DB's benchmarks for now.
+> The library is unstable, so it wasn't long before they stopped being meaningful.
 
 ### SQLite3
 | Benchmark    | Result (ops/second) |
