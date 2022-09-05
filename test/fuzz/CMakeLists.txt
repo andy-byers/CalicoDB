@@ -1,3 +1,7 @@
+
+option(CALICO_FUZZER_LINK_MAIN "Link each fuzzer with a main for reproducing specific crashes" Off)
+set(CALICO_FUZZER_LDFLAGS "" CACHE STRING "Linker flags for the fuzz targets")
+
 add_library(fuzz fuzz.cpp fuzz.h)
 target_link_libraries(fuzz PUBLIC test_tools)
 

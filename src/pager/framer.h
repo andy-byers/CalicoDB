@@ -7,7 +7,7 @@
 #include <list>
 #include <memory>
 #include <optional>
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 namespace calico {
 

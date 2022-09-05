@@ -3,7 +3,7 @@
 */
 #include <vector>
 #include <cstdio>
-#include <spdlog/sinks/stdout_sinks.h>
+#include "spdlog/sinks/stdout_sinks.h"
 #include "calico/calico.h"
 #include "storage/file.h"
 #include "utils/expect.h"

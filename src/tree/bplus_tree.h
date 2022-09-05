@@ -4,7 +4,7 @@
 
 #include "internal.h"
 #include "tree.h"
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 #ifdef CALICO_BUILD_TESTS
 #  include <gtest/gtest_prod.h>

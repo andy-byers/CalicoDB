@@ -6,7 +6,7 @@
 #include "utils/scratch.h"
 #include <list>
 #include <mutex>
-#include <spdlog/logger.h>
+#include "spdlog/logger.h"
 #include <unordered_map>
 
 namespace calico {

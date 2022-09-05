@@ -5,7 +5,7 @@
 #include "calico/status.h"
 #include "expect.h"
 #include <numeric>
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 namespace calico {
 
@@ -16,7 +16,7 @@ constexpr auto LOG_FILENAME = "log";
 #define CALICO_LOG_FORMAT(s) ("[" CALICO_STRINGIFY(__FILE__) ":" CALICO_STRINGIFY(__LINE__) "] "(s))
 
 auto create_logger(spdlog::sink_ptr, const std::string_view &) -> std::shared_ptr<spdlog::logger>;
-auto create_sink(const std::string_view &, spdlog::level::level_enum) -> spdlog::sink_ptr;
+auto create_sink(const std::string_view &, LogLevel) -> spdlog::sink_ptr;
 auto create_sink() -> spdlog::sink_ptr;
 
 class ThreePartMessage {

@@ -7,7 +7,7 @@
 #    define CALICO_OSX
 #  endif
 #else
-#  error "Error: This platform is currently unsupported"
+#  error "error: this platform is currently unsupported"
 #endif
 
 #endif // CALICO_PLATFORM_H

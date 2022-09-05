@@ -8,6 +8,8 @@
  */
 
 #include "calico/calico.h"
+#include "spdlog/spdlog.h"
+#include "spdlog/fmt/fmt.h"
 
 static auto assert_ok(const calico::Status &s)
 {

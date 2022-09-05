@@ -1,5 +1,5 @@
 #include "fuzz.h"
-#include <spdlog/fmt/fmt.h>
+#include "spdlog/fmt/fmt.h"
 
 namespace calico {
 

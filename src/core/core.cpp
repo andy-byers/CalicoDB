@@ -45,8 +45,8 @@ static auto compute_header_crc(const FileHeader &state)
 static auto sanitize_options(const Options &options) -> Options
 {
     auto sanitized = options;
-    if (sanitized.log_level > MAXIMUM_LOG_LEVEL)
-        sanitized.log_level = DEFAULT_LOG_LEVEL;
+    if (sanitized.log_level >= spdlog::level::n_levels)
+        sanitized.log_level = spdlog::level::off;
     return sanitized;
 }
 

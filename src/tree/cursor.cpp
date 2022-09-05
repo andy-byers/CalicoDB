@@ -2,7 +2,7 @@
 #include "pager/pager.h"
 #include "tree/internal.h"
 #include "tree/node_pool.h"
-#include <spdlog/fmt/fmt.h>
+#include "spdlog/fmt/fmt.h"
 
 namespace calico {
 

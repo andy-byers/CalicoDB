@@ -2,7 +2,7 @@
 #define CALICO_STORE_HELPERS_H
 
 #include "calico/storage.h"
-#include <spdlog/fmt/fmt.h>
+#include "spdlog/fmt/fmt.h"
 
 namespace calico {
 

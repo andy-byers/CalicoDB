@@ -5,8 +5,8 @@
 #include "header.h"
 #include "utils/result.h"
 #include <shared_mutex>
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/spdlog.h>
+#include "spdlog/sinks/basic_file_sink.h"
+#include "spdlog/spdlog.h"
 
 namespace calico {
 

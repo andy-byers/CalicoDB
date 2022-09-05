@@ -282,40 +282,38 @@ static auto run_propagate_test(Test &test)
 
     // The database status should reflect the error returned by write().
     assert_is_failure_status(test.db.status());
-
-    interceptors::reset();
+    (void)xact.abort();
 }
 
 TEST_F(FailureTests, DataReadErrorIsPropagatedDuringModify)
 {
-    interceptors::read = [](const std::string &path, Bytes&, Size) {
-        return path == "test/data" ? Status::system_error("42") : Status::ok();
-    };
+    interceptors::read = FailOnce<5> {"test/data"};
     run_propagate_test(*this);
 }
 
 TEST_F(FailureTests, DataWriteErrorIsPropagatedDuringModify)
 {
-    interceptors::write = [](const std::string &path, BytesView, Size) {
-        return path == "test/data" ? Status::system_error("42") : Status::ok();
-    };
+    interceptors::write = FailOnce<5> {"test/data"};
     run_propagate_test(*this);
 }
 
 // TODO: Occasionally causes a deadlock!!!
 //TEST_F(FailureTests, WalWriteErrorIsPropagatedDuringModify)
 //{
-//    interceptors::write = [](const std::string &path, BytesView, Size) {
-//        return path != "test/data" ? Status::system_error("42") : Status::ok();
-//    };
+//    interceptors::write = FailOnce<5> {"test/wal-"};
 //    run_propagate_test(*this);
 //}
 
+// TODO: Doesn't work!
+TEST_F(FailureTests, WalOpenErrorIsPropagatedDuringModify)
+{
+    interceptors::open = FailOnce<1> {"test/wal-"};
+    run_propagate_test(*this);
+}
+
 TEST_F(FailureTests, WalReadErrorIsPropagatedDuringAbort)
 {
-    interceptors::read = [](const std::string &path, Bytes&, Size) {
-        return path != "test/data" ? Status::system_error("42") : Status::ok();
-    };
+    interceptors::read = FailOnce<0> {"test/wal-"};
 
     auto xact = db.transaction();
     insert_1000_records(*this);
@@ -328,12 +326,7 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
 {
     add_sequential_records(db, 500);
 
-    int counter {};
-    interceptors::read = [&counter](const std::string &path, Bytes&, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ < 5 ? Status::ok() : Status::system_error("42");
-    };
+    interceptors::read = FailOnce<5> {"test/data"};
 
     // Iterate until a read() call fails.
     auto c = db.first();
@@ -346,8 +339,6 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     // The database status should still be OK. Errors during reads cannot corrupt or even modify the database state.
     s = db.status();
     ASSERT_TRUE(s.is_ok()) << s.what();
-
-    interceptors::reset();
 }
 
 //// Error encountered while flushing a dirty page to make room for a page read during a query. In this case, we don't have a transaction
@@ -357,9 +348,7 @@ TEST_F(FailureTests, DataWriteFailureDuringQuery)
     add_sequential_records(db, 500);
 
     // Further writes to the data file will fail.
-    interceptors::write = [](const std::string &path, BytesView, Size) {
-        return path == "test/data" ? Status::system_error("42") : Status::ok();
-    };
+    interceptors::write = FailOnce<5> {"test/data"};
 
     auto c = db.first();
     for (; c.is_valid(); ++c) {}
@@ -369,8 +358,6 @@ TEST_F(FailureTests, DataWriteFailureDuringQuery)
 
     s = db.status();
     assert_is_failure_status(s);
-
-    interceptors::reset();
 }
 
 TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
@@ -381,10 +368,8 @@ TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
     auto c = db.first();
     for (; c.is_valid(); ++c) {}
 
-    // Further writes to the data file will fail.
-    interceptors::write = [](auto, auto, auto) {
-        return Status::system_error("shouldn't happen!");
-    };
+    // Writes to any file will fail.
+    interceptors::write = FailOnce<0> {"test/"};
 
     // We should be able to iterate through all pages without any writes occurring.
     c = db.first();
@@ -395,8 +380,6 @@ TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
 
     s = db.status();
     ASSERT_TRUE(s.is_ok()) << s.what();
-
-    interceptors::reset();
 }
 
 template<class Test>
@@ -411,43 +394,23 @@ static auto run_abort_restores_state_test(Test &test) -> void
 
     ASSERT_TRUE(expose_message(xact.abort()));
     ASSERT_TRUE(expose_message(test.db.status()));
-
-    interceptors::reset();
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataReadError)
 {
-    int counter {};
-    interceptors::read = [&counter](const std::string &path, Bytes&, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ == 5 ? Status::system_error("42") : Status::ok();
-    };
-
+    interceptors::read = FailOnce<5> {"test/data"};
     run_abort_restores_state_test(*this);
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError)
 {
-    int counter {};
-    interceptors::write = [&counter](const std::string &path, BytesView, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ == 5 ? Status::system_error("42") : Status::ok();
-    };
-
+    interceptors::write = FailOnce<5> {"test/data"};
     run_abort_restores_state_test(*this);
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterWalWriteError)
 {
-    int counter {};
-    interceptors::write = [&counter](const std::string &path, BytesView, Size) {
-        if (path == "test/data")
-            return Status::ok();
-        return counter++ == 5 ? Status::system_error("42") : Status::ok();
-    };
-
+    interceptors::write = FailOnce<5> {"test/wal-"};
     run_abort_restores_state_test(*this);
 }
 
@@ -503,32 +466,16 @@ TEST_F(FailureTests, AbortIsReentrantForDataWriteErrors)
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
 {
-    int counter {};
-    interceptors::read = [&counter](const std::string &path, Bytes&, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ == 2 ? Status::system_error("42") : Status::ok();
-    };
-
+    interceptors::read = FailOnce<2> {"test/data"};
     assert_is_failure_status(modify_until_failure(*this));
     ASSERT_TRUE(expose_message(db.status()));
-
-    interceptors::reset();
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
 {
-    int counter {};
-    interceptors::write = [&counter](const std::string &path, BytesView, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ == 5 ? Status::system_error("42") : Status::ok();
-    };
-
+    interceptors::write = FailOnce<5> {"test/data"};
     assert_is_failure_status(modify_until_failure(*this));
     ASSERT_TRUE(expose_message(db.status()));
-
-    interceptors::reset();
 }
 
 class RecoveryTests: public TestOnHeap {

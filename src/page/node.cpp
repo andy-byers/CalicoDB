@@ -1,7 +1,7 @@
 #include "node.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
-#include <spdlog/fmt/fmt.h>
+#include "spdlog/fmt/fmt.h"
 
 namespace calico {
 

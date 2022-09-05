@@ -5,7 +5,7 @@
 #include "page/node.h"
 #include "tree.h"
 #include "utils/scratch.h"
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 namespace calico {
 

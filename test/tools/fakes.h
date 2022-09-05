@@ -6,6 +6,7 @@
 #include "pager/pager.h"
 #include "random.h"
 #include <filesystem>
+#include <mutex>
 #include <unordered_set>
 
 namespace calico {
@@ -89,6 +90,66 @@ private:
     // TODO: Could use a custom allocator that is better for large contiguous chunks.
     std::unordered_map<std::string, std::string> m_files;
     std::unordered_set<std::string> m_directories;
+};
+
+
+template<Size Delay = 0>
+struct FailOnce {
+    explicit FailOnce(std::string matcher_path = {})
+        : matcher {std::move(matcher_path)}
+    {}
+
+    auto operator()(const std::string &path, ...) -> Status
+    {
+        if (!matcher.empty() && stob(path).starts_with(matcher)) {
+            if (index++ == Delay)
+                return error;
+        }
+        return Status::ok();
+    }
+
+    std::string matcher;
+    Status error {Status::system_error("42")};
+    Size index {};
+};
+
+struct FailAlways {
+    explicit FailAlways(std::string matcher_path = {})
+        : matcher {std::move(matcher_path)}
+    {}
+
+    auto operator()(const std::string &path, ...) const -> Status
+    {
+        if (!matcher.empty() && stob(path).starts_with(matcher))
+            return error;
+        return Status::ok();
+    }
+
+    std::string matcher;
+    Status error {Status::system_error("42")};
+    Size index {};
+};
+
+template<Size Delay>
+struct FailEvery {
+    explicit FailEvery(std::string matcher_path = {})
+        : matcher {std::move(matcher_path)}
+    {}
+
+    auto operator()(const std::string &path, ...) -> Status
+    {
+        if (!matcher.empty()) {
+            if (stob(path).starts_with(matcher) && index++ == Delay) {
+                index = 0;
+                return error;
+            }
+        }
+        return Status::ok();
+    }
+
+    std::string matcher;
+    Status error {Status::system_error("42")};
+    Size index {};
 };
 
 } // namespace calico

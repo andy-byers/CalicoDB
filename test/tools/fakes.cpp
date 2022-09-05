@@ -114,8 +114,8 @@ auto HeapStorage::open_random_reader(const std::string &path, RandomReader **out
 
 auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out) -> Status
 {
-    INTERCEPT(interceptors::open(path));
     std::lock_guard lock {m_mutex};
+    INTERCEPT(interceptors::open(path));
 
     if (auto itr = m_files.find(path); itr != end(m_files)) {
         *out = new RandomHeapEditor {path, itr->second};
@@ -129,8 +129,8 @@ auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out
 
 auto HeapStorage::open_append_writer(const std::string &path, AppendWriter **out) -> Status
 {
-    INTERCEPT(interceptors::open(path));
     std::lock_guard lock {m_mutex};
+    INTERCEPT(interceptors::open(path));
 
     if (auto itr = m_files.find(path); itr != end(m_files)) {
         *out = new AppendHeapWriter {path, itr->second};

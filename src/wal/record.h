@@ -4,6 +4,7 @@
 #include "utils/encoding.h"
 #include "utils/types.h"
 #include "wal.h"
+#include "spdlog/fmt/fmt.h"
 
 namespace calico {
 

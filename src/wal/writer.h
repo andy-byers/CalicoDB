@@ -7,7 +7,7 @@
 #include <memory>
 #include <optional>
 #include <queue>
-#include <spdlog/logger.h>
+#include "spdlog/logger.h"
 #include <thread>
 
 namespace calico {
