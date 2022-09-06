@@ -287,38 +287,37 @@ static auto run_propagate_test(Test &test)
 
 TEST_F(FailureTests, DataReadErrorIsPropagatedDuringModify)
 {
-    interceptors::read = FailOnce<5> {"test/data"};
+    interceptors::set_read(FailOnce<5> {"test/data"});
     run_propagate_test(*this);
 }
 
 TEST_F(FailureTests, DataWriteErrorIsPropagatedDuringModify)
 {
-    interceptors::write = FailOnce<5> {"test/data"};
+    interceptors::set_write(FailOnce<5> {"test/data"});
     run_propagate_test(*this);
 }
 
 // TODO: Occasionally causes a deadlock!!!
-//TEST_F(FailureTests, WalWriteErrorIsPropagatedDuringModify)
-//{
-//    interceptors::write = FailOnce<5> {"test/wal-"};
-//    run_propagate_test(*this);
-//}
+TEST_F(FailureTests, WalWriteErrorIsPropagatedDuringModify)
+{
+    interceptors::set_write(FailOnce<5> {"test/wal-"});
+    run_propagate_test(*this);
+}
 
 // TODO: Doesn't work!
 TEST_F(FailureTests, WalOpenErrorIsPropagatedDuringModify)
 {
-    interceptors::open = FailOnce<1> {"test/wal-"};
+    interceptors::set_open(FailOnce<1> {"test/wal-"});
     run_propagate_test(*this);
 }
 
 TEST_F(FailureTests, WalReadErrorIsPropagatedDuringAbort)
 {
-    interceptors::read = FailOnce<0> {"test/wal-"};
+    interceptors::set_read(FailOnce<0> {"test/wal-"});
 
     auto xact = db.transaction();
     insert_1000_records(*this);
-    const auto s = xact.abort();
-    assert_is_failure_status(s);
+    assert_is_failure_status(xact.abort());
     assert_is_failure_status(db.status());
 }
 
@@ -326,38 +325,33 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
 {
     add_sequential_records(db, 500);
 
-    interceptors::read = FailOnce<5> {"test/data"};
+    interceptors::set_read(FailOnce<5> {"test/data"});
 
     // Iterate until a read() call fails.
     auto c = db.first();
     for (; c.is_valid(); ++c) {}
 
     // The error in the cursor should reflect the read() error.
-    auto s = c.status();
-    assert_is_failure_status(s);
+    assert_is_failure_status(c.status());
 
     // The database status should still be OK. Errors during reads cannot corrupt or even modify the database state.
-    s = db.status();
-    ASSERT_TRUE(s.is_ok()) << s.what();
+    ASSERT_TRUE(expose_message(db.status()));
 }
 
-//// Error encountered while flushing a dirty page to make room for a page read during a query. In this case, we don't have a transaction
-//// we can try to abort, so we must exit the program. Next time the database is opened, it will roll forward and apply any missing updates.
 TEST_F(FailureTests, DataWriteFailureDuringQuery)
 {
+    // This tests database behavior when we encounter an error while flushing a dirty page to make room for a page read
+    // during a query. In this case, we don't have a transaction we can try to abort, so we must exit the program. Next
+    // time the database is opened, it will roll forward and apply any missing updates.
     add_sequential_records(db, 500);
 
-    // Further writes to the data file will fail.
-    interceptors::write = FailOnce<5> {"test/data"};
+    interceptors::set_write(FailOnce<5> {"test/data"});
 
     auto c = db.first();
     for (; c.is_valid(); ++c) {}
 
-    auto s = c.status();
-    assert_is_failure_status(s);
-
-    s = db.status();
-    assert_is_failure_status(s);
+    assert_is_failure_status(c.status());
+    assert_is_failure_status(db.status());
 }
 
 TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
@@ -369,7 +363,7 @@ TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
     for (; c.is_valid(); ++c) {}
 
     // Writes to any file will fail.
-    interceptors::write = FailOnce<0> {"test/"};
+    interceptors::set_write(FailOnce<0> {"test/"});
 
     // We should be able to iterate through all pages without any writes occurring.
     c = db.first();
@@ -398,19 +392,19 @@ static auto run_abort_restores_state_test(Test &test) -> void
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataReadError)
 {
-    interceptors::read = FailOnce<5> {"test/data"};
+    interceptors::set_read(FailOnce<5> {"test/data"});
     run_abort_restores_state_test(*this);
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError)
 {
-    interceptors::write = FailOnce<5> {"test/data"};
+    interceptors::set_write(FailOnce<5> {"test/data"});
     run_abort_restores_state_test(*this);
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterWalWriteError)
 {
-    interceptors::write = FailOnce<5> {"test/wal-"};
+    interceptors::set_write(FailOnce<5> {"test/wal-"});
     run_abort_restores_state_test(*this);
 }
 
@@ -466,14 +460,14 @@ TEST_F(FailureTests, AbortIsReentrantForDataWriteErrors)
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
 {
-    interceptors::read = FailOnce<2> {"test/data"};
+    interceptors::set_read(FailOnce<2> {"test/data"});
     assert_is_failure_status(modify_until_failure(*this));
     ASSERT_TRUE(expose_message(db.status()));
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
 {
-    interceptors::write = FailOnce<5> {"test/data"};
+    interceptors::set_write(FailOnce<5> {"test/data"});
     assert_is_failure_status(modify_until_failure(*this));
     ASSERT_TRUE(expose_message(db.status()));
 }

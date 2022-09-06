@@ -403,7 +403,7 @@ TEST_F(WalRecordWriterTests, ClearsRestOfBlock)
 auto get_ids(const WalCollection &c)
 {
     std::vector<SegmentId> ids;
-    std::transform(cbegin(c.info()), cend(c.info()), back_inserter(ids), [](const auto &itr) {
+    std::transform(cbegin(c.segments()), cend(c.segments()), back_inserter(ids), [](const auto &itr) {
         return itr.id;
     });
     return ids;
@@ -420,8 +420,7 @@ public:
     {
         for (Size i {}; i < n; ++i) {
             auto id = SegmentId::from_index(i);
-            collection.start_segment(id);
-            collection.finish_segment(test_has_commit(id));
+            collection.add_segment({id, test_has_commit(id)});
         }
         ASSERT_EQ(collection.most_recent_id(), SegmentId::from_index(n - 1));
     }
@@ -431,26 +430,13 @@ public:
 
 TEST_F(WalCollectionTests, NewCollectionState)
 {
-    ASSERT_FALSE(collection.is_segment_started());
     ASSERT_TRUE(collection.most_recent_id().is_null());
 }
 
-TEST_F(WalCollectionTests, StartAndAbortSegment)
+TEST_F(WalCollectionTests, AddSegment)
 {
-    collection.start_segment(SegmentId {1});
-    ASSERT_TRUE(collection.is_segment_started());
-    collection.abort_segment();
-    ASSERT_FALSE(collection.is_segment_started());
-    ASSERT_TRUE(collection.most_recent_id().is_null());
-}
-
-TEST_F(WalCollectionTests, StartAndFinishSegment)
-{
-    collection.start_segment(SegmentId {1});
-    ASSERT_TRUE(collection.is_segment_started());
-    collection.finish_segment(false);
-    ASSERT_FALSE(collection.is_segment_started());
-    ASSERT_EQ(collection.most_recent_id(), SegmentId {1});
+    collection.add_segment({SegmentId {1}});
+    ASSERT_EQ(collection.most_recent_id().value, 1);
 }
 
 TEST_F(WalCollectionTests, RecordsMostRecentSegmentId)
@@ -482,7 +468,7 @@ TEST_F(WalCollectionTests, RecordsSegmentInfoCorrectly)
 TEST_F(WalCollectionTests, RemovesAllSegmentsFromLeft)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_segments_from_left(SegmentId::from_index(20), [](auto) {return Status::ok();})));
+    ASSERT_TRUE(expose_message(collection.remove_from_left(SegmentId::from_index(20), [](auto) {return Status::ok();})));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(ids.empty());
@@ -491,7 +477,7 @@ TEST_F(WalCollectionTests, RemovesAllSegmentsFromLeft)
 TEST_F(WalCollectionTests, RemovesAllSegmentsFromRight)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_segments_from_right(SegmentId::from_index(0), [](auto) {return Status::ok();})));
+    ASSERT_TRUE(expose_message(collection.remove_from_right(SegmentId::from_index(0), [](auto) {return Status::ok();})));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(ids.empty());
@@ -500,7 +486,7 @@ TEST_F(WalCollectionTests, RemovesAllSegmentsFromRight)
 TEST_F(WalCollectionTests, RemovesSomeSegmentsFromLeft)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_segments_from_left(SegmentId::from_index(10), [](auto) {return Status::ok();})));
+    ASSERT_TRUE(expose_message(collection.remove_from_left(SegmentId::from_index(10), [](auto) {return Status::ok();})));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), SegmentId::from_index(10), 10));
@@ -509,7 +495,7 @@ TEST_F(WalCollectionTests, RemovesSomeSegmentsFromLeft)
 TEST_F(WalCollectionTests, RemovesSomeSegmentsFromRight)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_segments_from_right(SegmentId::from_index(10), [](auto) {return Status::ok();})));
+    ASSERT_TRUE(expose_message(collection.remove_from_right(SegmentId::from_index(10), [](auto) {return Status::ok();})));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), SegmentId::from_index(0), 10));
@@ -601,8 +587,6 @@ TEST_F(BackgroundWriterTests, WriterCleansUp)
     writer->teardown();
 
     ASSERT_FALSE(writer->is_running());
-    ASSERT_FALSE(collection.is_segment_started());
-
     const auto ids = get_ids(collection);
     ASSERT_EQ(ids.size(), 1);
     ASSERT_EQ(ids[0].value, 1);
@@ -806,20 +790,18 @@ public:
     {}
 
     [[nodiscard]]
-    auto create_guard() const -> SegmentGuard
+    auto create_guard() -> SegmentGuard
     {
-        return SegmentGuard {*store, ROOT};
+        return SegmentGuard {*store, writer, collection, flushed_lsn, ROOT};
     }
 
     auto assert_components_are_started() const -> void
     {
-        ASSERT_TRUE(collection.is_segment_started());
         ASSERT_TRUE(writer.is_attached());
     }
 
     auto assert_components_are_stopped() const -> void
     {
-        ASSERT_FALSE(collection.is_segment_started());
         ASSERT_FALSE(writer.is_attached());
     }
 
@@ -838,7 +820,7 @@ TEST_F(SegmentGuardTests, NewGuardIsNotStarted)
 TEST_F(SegmentGuardTests, StartAndFinish)
 {
     auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
+    ASSERT_TRUE(expose_message(guard.start()));
     ASSERT_TRUE(guard.is_started());
     assert_components_are_started();
 
@@ -846,8 +828,8 @@ TEST_F(SegmentGuardTests, StartAndFinish)
     ASSERT_FALSE(guard.is_started());
     assert_components_are_stopped();
 
-    ASSERT_EQ(collection.info().size(), 1);
-    const auto segment = cbegin(collection.info());
+    ASSERT_EQ(collection.segments().size(), 1);
+    const auto segment = cbegin(collection.segments());
     ASSERT_EQ(segment->id.value, 1);
     ASSERT_FALSE(segment->has_commit);
 }
@@ -855,11 +837,11 @@ TEST_F(SegmentGuardTests, StartAndFinish)
 TEST_F(SegmentGuardTests, StartAndFinishWithCommit)
 {
     auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
+    ASSERT_TRUE(expose_message(guard.start()));
     ASSERT_TRUE(expose_message(guard.finish(true)));
 
-    ASSERT_EQ(collection.info().size(), 1);
-    const auto segment = cbegin(collection.info());
+    ASSERT_EQ(collection.segments().size(), 1);
+    const auto segment = cbegin(collection.segments());
     ASSERT_EQ(segment->id.value, 1);
     ASSERT_TRUE(segment->has_commit);
 }
@@ -868,24 +850,24 @@ TEST_F(SegmentGuardTests, BehavesLikeScopeGuard)
 {
     {
         auto guard = create_guard();
-        ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
+        ASSERT_TRUE(expose_message(guard.start()));
     }
 
     assert_components_are_stopped();
-    ASSERT_TRUE(collection.info().empty());
+    ASSERT_TRUE(collection.segments().empty());
 }
 
 TEST_F(SegmentGuardTests, DoubleStartDeathTest)
 {
     auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
-    ASSERT_DEATH(const auto unused = guard.start(writer, collection, flushed_lsn), EXPECTATION_MATCHER);
+    ASSERT_TRUE(expose_message(guard.start()));
+    ASSERT_DEATH(const auto unused = guard.start(), EXPECTATION_MATCHER);
 }
 
 TEST_F(SegmentGuardTests, DoubleFinishDeathTest)
 {
     auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
+    ASSERT_TRUE(expose_message(guard.start()));
     ASSERT_TRUE(expose_message(guard.finish(true)));
     ASSERT_DEATH(const auto unused = guard.finish(true), EXPECTATION_MATCHER);
 }
@@ -1040,7 +1022,7 @@ auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_d
     // Roll forward some copies of the "before images" to match the "after images".
     std::vector<std::vector<RecordPosition>> all_positions;
     auto images = before_images;
-    for (const auto &[id, meta]: collection.info()) {
+    for (const auto &[id, meta]: collection.segments()) {
         all_positions.emplace_back();
         ASSERT_TRUE(expose_message(reader->open(id)));
         ASSERT_TRUE(expose_message(reader->redo(all_positions.back(), [&images](const RedoDescriptor &info) {

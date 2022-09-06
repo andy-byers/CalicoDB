@@ -7,9 +7,9 @@ namespace calico {
 
 auto BackgroundWriter::background_writer() -> void
 {
-    SegmentGuard guard {*m_store, m_prefix};
+    SegmentGuard guard {*m_store, m_writer, *m_collection, *m_flushed_lsn, m_prefix};
 
-    auto s = guard.start(m_writer, *m_collection, *m_flushed_lsn);
+    auto s = guard.start();
     if (!s.is_ok()) {
         handle_error(guard, s);
         return;
@@ -18,7 +18,6 @@ auto BackgroundWriter::background_writer() -> void
     for (; ; ) {
         auto event = m_state.events.dequeue();
         if (!event.has_value()) break;
-
 
         bool should_segment {};
         bool has_commit {};
@@ -62,6 +61,7 @@ auto BackgroundWriter::background_writer() -> void
         // Replace the scratch memory so that the main thread can reuse it. This is internally synchronized.
         if (event->buffer) m_scratch->put(*event->buffer);
 
+
         if (s.is_ok() && should_segment) {
             s = advance_segment(guard, has_commit);
             if (s.is_ok()) m_flushed_lsn->store(event->lsn);
@@ -79,15 +79,22 @@ auto BackgroundWriter::background_writer() -> void
     }
 }
 
-auto BackgroundWriter::handle_error(SegmentGuard & /* TODO */, Status e) -> void
+auto BackgroundWriter::handle_error(SegmentGuard &guard, Status e) -> void
 {
     CALICO_EXPECT_FALSE(e.is_ok());
-    add_error(e);
+    std::lock_guard lock {m_state.mu};
 
-//    // We still want to try and finish the segment. We may need it to roll back changes.
-//    e = run_stop(guard);
-//    if (!e.is_ok())
-//        add_error(e);
+    if (m_state.status.is_ok())
+        m_state.status = e;
+    m_logger->error(e.what());
+
+    if (guard.is_started()) {
+        e = guard.finish(false);
+        if (!e.is_ok()) {
+            m_logger->error("(1/2) cannot complete segment after error");
+            m_logger->error("(2/2) {}", e.what());
+        }
+    }
 }
 
 auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
@@ -105,11 +112,11 @@ auto BackgroundWriter::emit_commit(SequenceId lsn) -> Status
 
 auto BackgroundWriter::advance_segment(SegmentGuard &guard, bool has_commit) -> Status
 {
-    if (guard.is_started()) {
+    if (!guard.id().is_null()) {
         auto s = guard.finish(has_commit);
         if (!s.is_ok()) return s;
     }
-    return guard.start(m_writer, *m_collection, *m_flushed_lsn);
+    return guard.start();
 }
 
 auto BasicWalWriter::start() -> void

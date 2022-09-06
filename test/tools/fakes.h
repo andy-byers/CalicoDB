@@ -17,6 +17,16 @@ using OpenInterceptor = std::function<Status(const std::string&)>;
 using SyncInterceptor = std::function<Status(const std::string&)>;
 
 namespace interceptors {
+    auto set_read(ReadInterceptor callback) -> void;
+    auto set_write(WriteInterceptor callback) -> void;
+    auto set_open(OpenInterceptor callback) -> void;
+    auto set_sync(SyncInterceptor callback) -> void;
+
+    [[nodiscard]] auto get_read() -> ReadInterceptor;
+    [[nodiscard]] auto get_write() -> WriteInterceptor;
+    [[nodiscard]] auto get_open() -> OpenInterceptor;
+    [[nodiscard]] auto get_sync() -> SyncInterceptor;
+
     auto reset() -> void;
 } // namespace interceptors
 
@@ -84,6 +94,11 @@ public:
     [[nodiscard]] auto file_exists(const std::string &) const -> Status override;
     [[nodiscard]] auto file_size(const std::string &, Size &) const -> Status override;
     auto clone() const -> Storage*;
+
+    ReadInterceptor read_interceptor;
+    WriteInterceptor write_interceptor;
+    OpenInterceptor open_interceptor;
+    SyncInterceptor sync_interceptor;
 
 private:
     mutable std::mutex m_mutex;

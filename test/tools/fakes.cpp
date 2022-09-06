@@ -14,6 +14,54 @@ namespace interceptors {
     OpenInterceptor open;
     SyncInterceptor sync;
 
+    auto set_read(ReadInterceptor callback) -> void
+    {
+        std::lock_guard lock {mutex};
+        read = std::move(callback);
+    }
+
+    auto set_write(WriteInterceptor callback) -> void
+    {
+        std::lock_guard lock {mutex};
+        write = std::move(callback);
+    }
+
+    auto set_open(OpenInterceptor callback) -> void
+    {
+        std::lock_guard lock {mutex};
+        open = std::move(callback);
+    }
+
+    auto set_sync(SyncInterceptor callback) -> void
+    {
+        std::lock_guard lock {mutex};
+        sync = std::move(callback);
+    }
+
+    auto get_read() -> ReadInterceptor
+    {
+        std::lock_guard lock {mutex};
+        return read;
+    }
+
+    auto get_write() -> WriteInterceptor
+    {
+        std::lock_guard lock {mutex};
+        return write;
+    }
+
+    auto get_open() -> OpenInterceptor
+    {
+        std::lock_guard lock {mutex};
+        return open;
+    }
+
+    auto get_sync() -> SyncInterceptor
+    {
+        std::lock_guard lock {mutex};
+        return sync;
+    }
+
     auto reset() -> void
     {
         std::lock_guard lock {mutex};
@@ -129,8 +177,8 @@ auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out
 
 auto HeapStorage::open_append_writer(const std::string &path, AppendWriter **out) -> Status
 {
-    std::lock_guard lock {m_mutex};
     INTERCEPT(interceptors::open(path));
+    std::lock_guard lock {m_mutex};
 
     if (auto itr = m_files.find(path); itr != end(m_files)) {
         *out = new AppendHeapWriter {path, itr->second};

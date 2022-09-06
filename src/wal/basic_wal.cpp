@@ -200,25 +200,22 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
             continue;
         MAYBE_FORWARD(s, MSG);
 
-        m_collection.start_segment(id);
-
+        WalSegment segment {id};
         SequenceId last_lsn;
-        bool has_commit {};
         s = m_reader.redo(uncommitted, [&](const auto &info) {
             last_lsn.value = info.page_lsn;
-            has_commit = info.is_commit;
+            segment.has_commit = info.is_commit;
             return redo_cb(info);
         });
         if (!s.is_ok()) {
             s = forward_status(s, "could not roll WAL forward");
-            m_collection.abort_segment();
             break;
         }
 
-        if (has_commit)
+        if (segment.has_commit)
             uncommitted.clear();
 
-        m_collection.finish_segment(has_commit);
+        m_collection.add_segment(segment);
         m_flushed_lsn.store(last_lsn);
     }
     // Return on fatal errors. Otherwise, we'll try to roll back the most-recent transaction.
@@ -246,7 +243,7 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
     }
 
     if (!uncommitted.empty()) {
-        s = m_collection.remove_segments_from_right(uncommitted.front().id, [this](const auto &info) {
+        s = m_collection.remove_from_right(uncommitted.front().id, [this](const auto &info) {
             CALICO_EXPECT_FALSE(info.has_commit);
             return m_store->remove_file(m_prefix + info.id.to_name());
         });
@@ -264,7 +261,7 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
     auto s = Status::ok();
     SegmentId obsolete;
 
-    for (auto itr = crbegin(m_collection.info()); itr != crend(m_collection.info()); itr++) {
+    for (auto itr = crbegin(m_collection.segments()); itr != crend(m_collection.segments()); itr++) {
         const auto [id, has_commit] = *itr;
         m_logger->info("rolling segment {} backward", id.value);
 
@@ -308,7 +305,7 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
     if (obsolete.is_null()) return s;
 
     // Remove obsolete WAL segments.
-    s = m_collection.remove_segments_from_right(obsolete, [this](auto info) {
+    s = m_collection.remove_from_right(obsolete, [this](auto info) {
         CALICO_EXPECT_FALSE(info.has_commit);
         return m_store->remove_file(m_prefix + info.id.to_name());
     });

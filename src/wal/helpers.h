@@ -103,8 +103,8 @@ protected:
     Size m_offset {};
 };
 
-struct SegmentInfo {
-    auto operator<(const SegmentInfo &rhs) const -> bool
+struct WalSegment {
+    auto operator<(const WalSegment &rhs) const -> bool
     {
         return id < rhs.id;
     }
@@ -113,70 +113,47 @@ struct SegmentInfo {
     bool has_commit {};
 };
 
+/*
+ * Stores a collection of WAL segment descriptors and provides synchronized access.
+ */
 class WalCollection final {
 public:
     WalCollection() = default;
     ~WalCollection() = default;
 
-    [[nodiscard]]
-    auto is_segment_started() const -> bool
+    auto add_segment(WalSegment segment) -> void
     {
-        return !m_temp.id.is_null();
-    }
-
-    auto start_segment(SegmentId id) -> void
-    {
-        CALICO_EXPECT_FALSE(is_segment_started());
-        m_temp.id = id;
-        m_temp.has_commit = false;
-    }
-
-    auto abort_segment() -> void
-    {
-        CALICO_EXPECT_TRUE(is_segment_started());
-        m_temp = {};
-    }
-
-    auto finish_segment(bool has_commit) -> void
-    {
-        CALICO_EXPECT_TRUE(is_segment_started());
-        m_temp.has_commit = has_commit;
-        m_info.emplace(m_temp);
-        abort_segment();
-    }
-
-    [[nodiscard]]
-    auto current_segment() const -> const SegmentInfo&
-    {
-        CALICO_EXPECT_TRUE(is_segment_started());
-        return m_temp;
+        std::lock_guard lock {m_mutex};
+        m_segments.emplace(segment);
     }
 
     template<class Action>
     [[nodiscard]]
-    auto remove_segments_from_left(SegmentId id, const Action &action) -> Status
+    auto remove_from_left(SegmentId id, const Action &action) -> Status
     {
-        // Removes segments from [<begin>, id). TODO: I guess we should delete [<begin>, id], since id is the pager flushed LSN?
-        for (auto itr = cbegin(m_info); itr != cend(m_info); ) {
+        std::lock_guard lock {m_mutex}; // TODO: We may see a bottleneck if we end up waiting for this a lot. I'm hoping unlinking files is much faster than writing...
+        // Removes segments from [<begin>, id).
+        for (auto itr = cbegin(m_segments); itr != cend(m_segments); ) {
             if (id == itr->id) return Status::ok();
             auto s = action(*itr);
             if (!s.is_ok()) return s;
-            itr = m_info.erase(itr);
+            itr = m_segments.erase(itr);
         }
         return Status::ok();
     }
 
     template<class Action>
     [[nodiscard]]
-    auto remove_segments_from_right(SegmentId id, const Action &action) -> Status
+    auto remove_from_right(SegmentId id, const Action &action) -> Status
     {
+        std::lock_guard lock {m_mutex};
         // Removes segments from [id, <end>) in reverse.
-        while (!m_info.empty()) {
-            const auto itr = prev(cend(m_info));
+        while (!m_segments.empty()) {
+            const auto itr = prev(cend(m_segments));
             if (id > itr->id) return Status::ok();
             auto s = action(*itr);
             if (!s.is_ok()) return s;
-            m_info.erase(itr);
+            m_segments.erase(itr);
         }
         return Status::ok();
     }
@@ -184,56 +161,60 @@ public:
     [[nodiscard]]
     auto most_recent_id() const -> SegmentId
     {
-        if (m_info.empty())
+        std::lock_guard lock {m_mutex};
+        if (m_segments.empty())
             return SegmentId::null();
-        return crbegin(m_info)->id;
+        return crbegin(m_segments)->id;
     }
 
     [[nodiscard]]
-    auto info() const -> const std::set<SegmentInfo>&
+    auto segments() const -> const std::set<WalSegment>&
     {
-        return m_info;
+        // WARNING: We must ensure that background threads that modify the collection are paused before using this method.
+        return m_segments;
     }
 
 private:
-    std::set<SegmentInfo> m_info;
-    SegmentInfo m_temp;
+    mutable std::mutex m_mutex;
+    std::set<WalSegment> m_segments;
+    WalSegment m_temp;
 };
 
-/**
+/*
  * A scope guard that keeps the set of in-memory WAL segment descriptors consistent with what is on disk.
- *
- * @see WalRecordWriter
- * @see WalCollection
  */
 class SegmentGuard final {
 public:
-    [[nodiscard]] auto start(WalRecordWriter &writer, WalCollection &collection, std::atomic<SequenceId> &flushed_lsn) -> Status;
-    [[nodiscard]] auto finish(bool has_commit) -> Status;
-    [[nodiscard]] auto abort() -> Status;
-
-    // No moves or copies!
-    SegmentGuard(const SegmentGuard&) = delete;
-    auto operator=(const SegmentGuard&) -> SegmentGuard& = delete;
-    SegmentGuard(SegmentGuard&&) = delete;
-    auto operator=(SegmentGuard&&) -> SegmentGuard& = delete;
-
-    SegmentGuard(Storage &store, std::string prefix)
+    SegmentGuard(Storage &store, WalRecordWriter &writer, WalCollection &collection, std::atomic<SequenceId> &flushed_lsn, std::string prefix)
         : m_prefix {std::move(prefix)},
-          m_store {&store}
+          m_store {&store},
+          m_writer {&writer},
+          m_collection {&collection},
+          m_flushed_lsn {&flushed_lsn}
     {}
 
     ~SegmentGuard();
 
-    [[nodiscard]]
-    auto is_started() const -> bool
+    // No moves or copies!
+    SegmentGuard(const SegmentGuard&) = delete;
+
+    auto operator=(const SegmentGuard&) -> SegmentGuard& = delete;
+    SegmentGuard(SegmentGuard&&) = delete;
+    auto operator=(SegmentGuard&&) -> SegmentGuard& = delete;
+
+    [[nodiscard]] auto start() -> Status;
+    [[nodiscard]] auto finish(bool has_commit) -> Status;
+    [[nodiscard]] auto abort() -> Status;
+    [[nodiscard]] auto is_started() const -> bool;
+
+    [[nodiscard]] auto id() const -> SegmentId
     {
-        CALICO_EXPECT_EQ(m_writer == nullptr, m_collection == nullptr);
-        return m_writer != nullptr;
+        return is_started() ? m_current.id : SegmentId::null();
     }
 
 private:
     std::string m_prefix;
+    WalSegment m_current;
     Storage *m_store {};
     WalRecordWriter *m_writer {};
     WalCollection *m_collection {};

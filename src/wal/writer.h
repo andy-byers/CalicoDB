@@ -7,7 +7,7 @@
 #include <memory>
 #include <optional>
 #include <queue>
-#include "spdlog/logger.h"
+#include <spdlog/logger.h>
 #include <thread>
 
 namespace calico {
@@ -221,7 +221,6 @@ private:
     auto dispatch_and_return(Event event) -> void
     {
         CALICO_EXPECT_FALSE(event.is_waiting);
-        std::lock_guard lock {m_state.mu};
         m_state.events.enqueue(event);
     }
 
@@ -236,23 +235,18 @@ private:
         });
     }
 
-    auto add_error(const Status &e) -> void
-    {
-        std::lock_guard lock {m_state.mu};
-        if (m_state.status.is_ok())
-            m_state.status = e;
-        m_logger->error(e.what());
-    }
-
     [[nodiscard]]
     auto run_stop(SegmentGuard &guard) -> Status
     {
+        if (!guard.is_started()) // TODO
+            return m_state.status;
+
         if (m_writer.has_written())
             return guard.finish(false);
 
-        const auto id = m_collection->current_segment().id;
+        const auto id = guard.id();
         auto s = guard.abort();
-
+        if (!s.is_ok()) handle_error(guard, s);
         return m_store->remove_file(m_prefix + id.to_name());
     }
 
@@ -297,7 +291,7 @@ public:
         std::atomic<SequenceId> *flushed_lsn {};
         std::atomic<SequenceId> *pager_lsn {};
         std::shared_ptr<spdlog::logger> logger;
-        std::string dirname;
+        std::string prefix;
         Size page_size {};
         Size wal_limit {};
     };
@@ -313,7 +307,7 @@ public:
               m_flushed_lsn,
               m_pager_lsn,
               param.logger,
-              param.dirname,
+              param.prefix,
               wal_block_size(param.page_size),
               param.wal_limit,
           }}
