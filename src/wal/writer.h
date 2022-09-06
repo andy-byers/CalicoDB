@@ -311,7 +311,9 @@ public:
               wal_block_size(param.page_size),
               param.wal_limit,
           }}
-    {}
+    {
+        (void)m_pager_lsn;
+    }
 
     [[nodiscard]]
     auto is_running() const -> bool
