@@ -233,11 +233,6 @@ public:
     Database db;
 };
 
-auto assert_is_failure_status(const Status &s)
-{
-    ASSERT_TRUE(s.is_system_error() and s.what() == "42") << s.what();
-}
-
 auto add_sequential_records(Database &db, Size n)
 {
     for (Size i {}; i < n; ++i) {
@@ -278,10 +273,10 @@ static auto run_propagate_test(Test &test)
     // Modify the database until a system call fails.
     auto xact = test.db.transaction();
     const auto s = modify_until_failure(test);
-    assert_is_failure_status(s);
+    assert_error_42(s);
 
     // The database status should reflect the error returned by write().
-    assert_is_failure_status(test.db.status());
+    assert_error_42(test.db.status());
     (void)xact.abort();
 }
 
@@ -317,8 +312,8 @@ TEST_F(FailureTests, WalReadErrorIsPropagatedDuringAbort)
 
     auto xact = db.transaction();
     insert_1000_records(*this);
-    assert_is_failure_status(xact.abort());
-    assert_is_failure_status(db.status());
+    assert_error_42(xact.abort());
+    assert_error_42(db.status());
 }
 
 TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
@@ -332,7 +327,7 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     for (; c.is_valid(); ++c) {}
 
     // The error in the cursor should reflect the read() error.
-    assert_is_failure_status(c.status());
+    assert_error_42(c.status());
 
     // The database status should still be OK. Errors during reads cannot corrupt or even modify the database state.
     ASSERT_TRUE(expose_message(db.status()));
@@ -350,8 +345,8 @@ TEST_F(FailureTests, DataWriteFailureDuringQuery)
     auto c = db.first();
     for (; c.is_valid(); ++c) {}
 
-    assert_is_failure_status(c.status());
-    assert_is_failure_status(db.status());
+    assert_error_42(c.status());
+    assert_error_42(db.status());
 }
 
 TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
@@ -381,10 +376,10 @@ static auto run_abort_restores_state_test(Test &test) -> void
 {
     auto xact = test.db.transaction();
     auto s = modify_until_failure(test);
-    assert_is_failure_status(s);
+    assert_error_42(s);
 
     s = test.db.status();
-    assert_is_failure_status(s);
+    assert_error_42(s);
 
     ASSERT_TRUE(expose_message(xact.abort()));
     ASSERT_TRUE(expose_message(test.db.status()));
@@ -413,7 +408,7 @@ static auto run_abort_is_reentrant_test(Test &test, int &counter, int &counter_m
 {
     auto xact = test.db.transaction();
     auto s = modify_until_failure(test);
-    assert_is_failure_status(s);
+    assert_error_42(s);
     Size fail_count {};
     counter_max = 0;
 
@@ -423,7 +418,7 @@ static auto run_abort_is_reentrant_test(Test &test, int &counter, int &counter_m
         if (xact.abort().is_ok())
             break;
         s = test.db.status();
-        assert_is_failure_status(s);
+        assert_error_42(s);
         fail_count++;
     }
     ASSERT_GT(fail_count, 5);
@@ -461,14 +456,14 @@ TEST_F(FailureTests, AbortIsReentrantForDataWriteErrors)
 TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
 {
     interceptors::set_read(FailOnce<2> {"test/data"});
-    assert_is_failure_status(modify_until_failure(*this));
+    assert_error_42(modify_until_failure(*this));
     ASSERT_TRUE(expose_message(db.status()));
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
 {
     interceptors::set_write(FailOnce<5> {"test/data"});
-    assert_is_failure_status(modify_until_failure(*this));
+    assert_error_42(modify_until_failure(*this));
     ASSERT_TRUE(expose_message(db.status()));
 }
 

@@ -163,7 +163,7 @@ public:
     explicit BackgroundWriter(const Parameters &param)
         : m_logger {param.logger},
           m_flushed_lsn {param.flushed_lsn},
-          m_pager_lsn {param.pager_lsn},
+//          m_pager_lsn {param.pager_lsn},
           m_writer {param.block_size},
           m_prefix {param.prefix},
           m_scratch {param.scratch},
@@ -273,7 +273,7 @@ private:
 
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> *m_flushed_lsn {};
-    std::atomic<SequenceId> *m_pager_lsn {};
+//    std::atomic<SequenceId> *m_pager_lsn {};
     std::atomic<bool> m_is_waiting {};
     WalRecordWriter m_writer;
     std::string m_prefix;

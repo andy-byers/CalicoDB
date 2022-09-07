@@ -7,6 +7,7 @@
 #include "random.h"
 #include <filesystem>
 #include <mutex>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace calico {
@@ -29,6 +30,11 @@ namespace interceptors {
 
     auto reset() -> void;
 } // namespace interceptors
+
+inline auto assert_error_42(const Status &s)
+{
+    CALICO_EXPECT_TRUE(s.is_system_error() and s.what() == "42");
+}
 
 class RandomHeapReader : public RandomReader {
 public:

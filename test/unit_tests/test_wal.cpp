@@ -538,8 +538,8 @@ public:
     {
         auto event = get_commit_event(lsn);
         event.type = random.get(3) == 0
-                         ? BackgroundWriter::EventType::LOG_FULL_IMAGE
-                         : BackgroundWriter::EventType::LOG_DELTAS;
+            ? BackgroundWriter::EventType::LOG_FULL_IMAGE
+            : BackgroundWriter::EventType::LOG_DELTAS;
         auto buffer = scratch->get();
         event.size = random.get(10ULL, buffer->size());
         const auto data = random.get<std::string>('\x00', '\xFF', event.size);
@@ -604,9 +604,6 @@ TEST_F(BackgroundWriterTests, WriteUpdates)
     const auto ids = get_ids(collection);
     ASSERT_FALSE(ids.empty());
 }
-
-
-
 
 // TODO: Considering using a WAL iterator construct instead of the WAL reader class. Lay out all the intended functionality in tests here.
 //TEST_F(WalIteratorTests, CannotBeOpenedOnNonexistentSegment)
@@ -1082,70 +1079,6 @@ TEST_F(BasicWalReaderWriterTests, ManyImagesManyDeltas)
 //    test_undo_redo(*this, 10'000, 1'000'000);
 //}
 
-//class MockWalReaderWriterTests: public BasicWalReaderWriterTests {
-//public:
-//    static constexpr Size PAGE_SIZE {0x100};
-//
-//    MockWalReaderWriterTests()
-//    {
-//        scratch = std::make_unique<LogScratchManager>(PAGE_SIZE * WAL_SCRATCH_SCALE);
-//        store = std::make_unique<MockStorage>();
-//        mock_store().delegate_to_real();
-//        EXPECT_CALL(mock_store(), open_append_writer).Times(testing::AtLeast(1));
-//        EXPECT_CALL(mock_store(), create_directory).Times(1);
-//        EXPECT_TRUE(expose_message(store->create_directory("test")));
-//    }
-//
-//    auto mock_store() -> MockStorage&
-//    {
-//        return dynamic_cast<MockStorage&>(*store);
-//    }
-//
-//    auto open_mock_segment(SegmentId id) -> void
-//    {
-//        auto &mock_store = dynamic_cast<MockStorage&>(*store);
-//        mock = mock_store.get_mock_append_writer("test/" + id.to_name());
-//        ASSERT_NE(mock, nullptr);
-//    }
-//
-//    MockAppendWriter *mock {};
-//};
-
-//[[nodiscard]]
-//auto next_deltas(WalRecordGenerator &generator, Random_ &random, std::string &image, Size page_size)
-//{
-//    image = random.next_string(page_size);
-//    return generator.setup_deltas(stob(image));
-//}
-
-// TODO: Can't immediately get the mock file since the writer won't create its version immediately...
-//TEST_F(MockWalReaderWriterTests, WriterCleansUpOnError)
-//{
-//    writer->start();
-//    open_mock_segment(SegmentId {1});
-//    EXPECT_CALL(*mock, write).Times(testing::AtLeast(1));
-//    EXPECT_CALL(mock_store(), remove_file).Times(1); // No writes succeed in this test, so the empty segment file should be removed.
-//    ON_CALL(*mock, write).WillByDefault(testing::Return(Status::system_error("42")));
-//
-//    // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
-//    WalRecordGenerator generator;
-//    std::vector<std::vector<PageDelta>> deltas;
-//    std::vector<std::string> images;
-//
-//    for (Size i {}; ; ++i) {
-//        images.emplace_back();
-//        deltas.emplace_back(next_deltas(generator, random, images.back(), PAGE_SIZE));
-//        writer->log_deltas(SequenceId::base(), PageId::root(), stob(images.back()), deltas[i]);
-//        if (!writer->status().is_ok()) break;
-//    }
-//    ASSERT_FALSE(writer->is_running());
-//    ASSERT_TRUE(writer->status().is_system_error());
-//    ASSERT_EQ(writer->status().what(), "42");
-//
-//    // NOOP if already closed.
-//    writer->stop();
-//}
-
 class BasicWalTests: public TestWithWalSegmentsOnHeap {
 public:
     ~BasicWalTests() override = default;
@@ -1197,5 +1130,12 @@ TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
     }
 }
 
+TEST_F(BasicWalTests, FailureDuringOpen)
+{
+    interceptors::set_open(FailOnce<0> {"test/wal-"});
+    ASSERT_TRUE(expose_message(wal->start_workers()));
+//    assert_error_42(wal->log_deltas)
+    ASSERT_TRUE(expose_message(wal->stop_workers()));
+}
 
 } // <anonymous>
