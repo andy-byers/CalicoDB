@@ -517,7 +517,6 @@ public:
             scratch.get(),
             &collection,
             &flushed_lsn,
-            &pager_lsn,
             create_logger(create_sink(), "wal"),
             ROOT,
             BLOCK_SIZE,

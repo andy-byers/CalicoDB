@@ -139,7 +139,6 @@ public:
         LogScratchManager *scratch {};
         WalCollection *collection {};
         std::atomic<SequenceId> *flushed_lsn {};
-        std::atomic<SequenceId> *pager_lsn {};
         std::shared_ptr<spdlog::logger> logger;
         std::string prefix;
         Size block_size {};
@@ -163,15 +162,23 @@ public:
     };
 
     explicit BackgroundWriter(const Parameters &param)
-        : m_logger {param.logger},
+        : m_background {
+              [this](const auto &s, const auto &e) {
+                  return s.is_ok() ? on_event(s, e) : s;
+              },
+              [this](const auto &s) {
+                  return on_cleanup(s);
+              }
+          },
+          m_logger {param.logger},
           m_flushed_lsn {param.flushed_lsn},
-//          m_pager_lsn {param.pager_lsn},
           m_writer {param.block_size},
           m_prefix {param.prefix},
           m_scratch {param.scratch},
           m_collection {param.collection},
           m_store {param.store},
-          m_wal_limit {param.wal_limit}
+          m_wal_limit {param.wal_limit},
+          m_guard {*param.store, m_writer, *param.collection, *param.flushed_lsn, param.prefix}
     {}
 
     ~BackgroundWriter() = default;
@@ -179,69 +186,43 @@ public:
     [[nodiscard]]
     auto is_running() const -> bool
     {
-        return m_state.is_running;
+        return m_is_running;
     }
 
     auto dispatch(Event event) -> void
     {
-        if (event.is_waiting) {
-            dispatch_and_wait(event);
-        } else {
-            dispatch_and_return(event);
-        }
+        // TODO: Make event.is_waiting a parameter to this method instead of a struct member...
+        m_background.dispatch(event, event.is_waiting);
     }
 
-    auto startup() -> void
+    auto startup() -> Status
     {
-        CALICO_EXPECT_FALSE(is_running());
-        m_state.status = Status::ok();
-        m_state.is_running = true;
-        m_state.thread = std::thread {[this] {
-            background_writer();
-        }};
+        auto s = m_guard.start();
+        m_is_running = s.is_ok();
+        if (!m_is_running)
+            handle_error(m_guard, s);
+        return s;
     }
 
-    auto teardown() -> void
+    auto teardown() -> Status
     {
-        CALICO_EXPECT_TRUE(m_state.is_running);
-        m_state.events.finish();
-        m_state.thread->join();
-        m_state.thread.reset();
-        m_state.is_running = false;
-        m_state.events.restart();
+        m_is_running = false;
+        return std::move(m_background).destroy();
     }
 
     [[nodiscard]]
     auto status() -> Status
     {
-        std::lock_guard lock {m_state.mu};
-        return m_state.status;
+        return m_background.status();
     }
 
 private:
-
-    auto dispatch_and_return(Event event) -> void
-    {
-        CALICO_EXPECT_FALSE(event.is_waiting);
-        m_state.events.enqueue(event);
-    }
-
-    auto dispatch_and_wait(Event event) -> void
-    {
-        CALICO_EXPECT_TRUE(event.is_waiting);
-        m_is_waiting.store(true);
-        m_state.events.enqueue(event);
-        std::unique_lock lock {m_state.mu};
-        m_state.cv.wait(lock, [this] {
-            return !m_is_waiting.load();
-        });
-    }
 
     [[nodiscard]]
     auto run_stop(SegmentGuard &guard) -> Status
     {
         if (!guard.is_started()) // TODO
-            return m_state.status;
+            return Status::ok();
 
         if (m_writer.has_written())
             return guard.finish(false);
@@ -258,31 +239,85 @@ private:
         return m_writer.block_count() > m_wal_limit;
     }
 
+    auto on_event(const Status &status, const Event &event) -> Status
+    {
+        // We already encountered an error and have it assigned to our current status.
+        if (!status.is_ok())
+            return Status::ok();
+
+        auto s = Status::ok();
+        bool should_segment {};
+        bool has_commit {};
+
+        const auto handle_event = [&] {
+            auto [
+                type,
+                lsn,
+                buffer,
+                size,
+                is_waiting
+            ] = event;
+
+            switch (type) {
+                case EventType::LOG_FULL_IMAGE:
+                case EventType::LOG_DELTAS:
+                    CALICO_EXPECT_TRUE(buffer.has_value());
+                    s = emit_payload(lsn, (*buffer)->truncate(size));
+                    should_segment = needs_segmentation();
+                    break;
+                case EventType::LOG_COMMIT:
+                    s = emit_commit(lsn);
+                    should_segment = s.is_ok();
+                    has_commit = true;
+                    break;
+                case EventType::FLUSH_BLOCK:
+                    s = m_writer.append_block();
+                    m_flushed_lsn->store(lsn);
+                    break;
+                case EventType::STOP_WRITER:
+                    s = run_stop(m_guard);
+                    break;
+                default:
+                    CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
+            }
+        };
+
+        if (status.is_ok() || event.type == EventType::STOP_WRITER)
+            handle_event();
+
+        // Replace the scratch memory so that the main thread can reuse it. This is internally synchronized.
+        if (event.buffer) m_scratch->put(*event.buffer);
+
+
+        if (s.is_ok() && should_segment) {
+            s = advance_segment(m_guard, has_commit);
+            if (s.is_ok()) m_flushed_lsn->store(event.lsn);
+        }
+        return s;
+    }
+
+    auto on_cleanup(const Status &) -> Status
+    {
+        return run_stop(m_guard); // TODO
+    }
+
     auto background_writer() -> void;
     [[nodiscard]] auto emit_payload(SequenceId lsn, BytesView payload) -> Status;
     [[nodiscard]] auto emit_commit(SequenceId lsn) -> Status;
     [[nodiscard]] auto advance_segment(SegmentGuard &guard, bool has_commit) -> Status;
     auto handle_error(SegmentGuard &guard, Status e) -> void;
 
-    struct {
-        Queue<Event> events {32};
-        mutable std::mutex mu;
-        std::condition_variable cv;
-        Status status {Status::ok()};
-        std::optional<std::thread> thread;
-        bool is_running {};
-    } m_state;
-
+    BackgroundWorker<Event> m_background;
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> *m_flushed_lsn {};
-//    std::atomic<SequenceId> *m_pager_lsn {};
-    std::atomic<bool> m_is_waiting {};
     WalRecordWriter m_writer;
     std::string m_prefix;
     LogScratchManager *m_scratch {};
     WalCollection *m_collection {};
     Storage *m_store {};
     Size m_wal_limit {};
+    SegmentGuard m_guard; // TODO: This is kinda pointless now that we're storing it as a member...
+    bool m_is_running {};
 };
 
 class BasicWalWriter {
@@ -307,7 +342,6 @@ public:
               &m_scratch,
               param.collection,
               m_flushed_lsn,
-              m_pager_lsn,
               param.logger,
               param.prefix,
               wal_block_size(param.page_size),
