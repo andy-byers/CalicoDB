@@ -10,6 +10,8 @@
 #include <spdlog/logger.h>
 #include <thread>
 
+#include "worker.h"
+
 namespace calico {
 
 class WalRecordWriter {
