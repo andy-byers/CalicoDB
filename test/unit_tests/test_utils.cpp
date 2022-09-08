@@ -694,16 +694,16 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
 class BasicWorkerTests: public testing::Test {
 public:
     BasicWorkerTests()
-        : worker {[this](const Status &s, int e) {
+        : worker {[this](int e) {
             events.emplace_back(e);
-            return s;
+            return Status::ok();
         }, [this](const Status &s) {
             is_finished = true;
             return s;
         }}
     {}
 
-    BackgroundWorker<int> worker;
+    Worker<int> worker;
     std::vector<int> events;
     bool is_finished {};
 };
@@ -763,16 +763,68 @@ TEST_F(BasicWorkerTests, HandlesManyEvents)
 class WorkerFaultTests: public testing::Test {
 public:
     WorkerFaultTests()
-        : worker {[](const Status &, int) {
-            return Status::system_error("42");
-        }, [](const Status &) {
-            return Status::ok();
+        : worker {[this](int e) {
+            events.emplace_back(e);
+            return callback_status;
+        }, [this](const Status &s) {
+            assert_error_42(s);
+            is_finished = true;
         }}
     {}
 
-    BackgroundWorker<int> worker;
+    ~WorkerFaultTests() override
+    {
+        if (!is_finished)
+            (void)std::move(worker).destroy();
+    }
+
+    Status callback_status {Status::ok()};
+    Worker<int> worker;
     std::vector<int> events;
     bool is_finished {};
 };
+
+TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
+{
+    callback_status = Status::system_error("42");
+    worker.dispatch(1, true);
+    assert_error_42(worker.status());
+    assert_error_42(std::move(worker).destroy());
+    ASSERT_EQ(events.at(0), 1) << "event should still get added";
+}
+
+TEST_F(WorkerFaultTests, WorkerCannotBeRevived)
+{
+    callback_status = Status::system_error("42");
+    worker.dispatch(1, true);
+    callback_status = Status::ok();
+    worker.dispatch(2, true);
+    assert_error_42(worker.status());
+    assert_error_42(std::move(worker).destroy());
+    ASSERT_EQ(events.size(), 1);
+}
+
+TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
+{
+    worker.dispatch(1);
+    worker.dispatch(2);
+    worker.dispatch(3, true);
+
+    callback_status = Status::system_error("42");
+    worker.dispatch(4); // Last event to get added.
+    worker.dispatch(5);
+
+    // Wait should work, event if we aren't processing events.
+    worker.dispatch(6, true);
+
+    ASSERT_EQ(events.at(0), 1);
+    ASSERT_EQ(events.at(1), 2);
+    ASSERT_EQ(events.at(2), 3);
+    ASSERT_EQ(events.at(3), 4);
+    ASSERT_EQ(events.size(), 4);
+
+    assert_error_42(worker.status());
+    assert_error_42(std::move(worker).destroy());
+}
 
 } // namespace calico

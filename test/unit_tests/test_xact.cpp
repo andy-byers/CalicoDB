@@ -292,14 +292,12 @@ TEST_F(FailureTests, DataWriteErrorIsPropagatedDuringModify)
     run_propagate_test(*this);
 }
 
-// TODO: Occasionally causes a deadlock!!!
 TEST_F(FailureTests, WalWriteErrorIsPropagatedDuringModify)
 {
     interceptors::set_write(FailOnce<5> {"test/wal-"});
     run_propagate_test(*this);
 }
 
-// TODO: Doesn't work!
 TEST_F(FailureTests, WalOpenErrorIsPropagatedDuringModify)
 {
     interceptors::set_open(FailOnce<1> {"test/wal-"});

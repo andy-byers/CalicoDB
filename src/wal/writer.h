@@ -161,8 +161,8 @@ public:
 
     explicit BackgroundWriter(const Parameters &param)
         : m_background {
-            [this](const auto &s, const auto &e) {
-                return s.is_ok() ? on_event(s, e) : s;
+            [this](const auto &e) {
+                return on_event(e);
             },
             [this](const auto &s) {
                 return on_cleanup(s);
@@ -173,7 +173,7 @@ public:
           m_writer {param.block_size},
           m_prefix {param.prefix},
           m_scratch {param.scratch},
-          m_collection {param.collection},
+//          m_collection {param.collection},
           m_store {param.store},
           m_wal_limit {param.wal_limit},
           m_guard {*param.store, m_writer, *param.collection, *param.flushed_lsn, param.prefix}
@@ -212,52 +212,42 @@ private:
         return m_writer.block_count() > m_wal_limit;
     }
 
-    auto on_event(const Status &status, const Event &event) -> Status
+    auto on_event(const Event &event) -> Status
     {
-        // We already encountered an error and have it assigned to our current status.
-        if (!status.is_ok())
-            return Status::ok();
-
         auto s = Status::ok();
         bool should_segment {};
         bool has_commit {};
 
-        const auto handle_event = [&] {
-            auto [
-                type,
-                lsn,
-                buffer,
-                size
-            ] = event;
+        auto [
+            type,
+            lsn,
+            buffer,
+            size
+        ] = event;
 
-            switch (type) {
-                case EventType::LOG_FULL_IMAGE:
-                case EventType::LOG_DELTAS:
-                    CALICO_EXPECT_TRUE(buffer.has_value());
-                    s = emit_payload(lsn, (*buffer)->truncate(size));
-                    should_segment = needs_segmentation();
-                    break;
-                case EventType::LOG_COMMIT:
-                    s = emit_commit(lsn);
-                    should_segment = s.is_ok();
-                    has_commit = true;
-                    break;
-                case EventType::FLUSH_BLOCK:
-                    s = m_writer.append_block();
-                    m_flushed_lsn->store(lsn);
-                    break;
-                default:
-                    CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
-            }
-        };
-
-        if (status.is_ok())
-            handle_event();
+        switch (type) {
+            case EventType::LOG_FULL_IMAGE:
+            case EventType::LOG_DELTAS:
+                CALICO_EXPECT_TRUE(buffer.has_value());
+                s = emit_payload(lsn, (*buffer)->truncate(size));
+                should_segment = needs_segmentation();
+                break;
+            case EventType::LOG_COMMIT:
+                s = emit_commit(lsn);
+                should_segment = s.is_ok();
+                has_commit = true;
+                break;
+            case EventType::FLUSH_BLOCK:
+                s = m_writer.append_block();
+                m_flushed_lsn->store(lsn);
+                break;
+            default:
+                CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
+        }
 
         // Replace the scratch memory so that the main thread can reuse it. This is internally synchronized.
         if (event.buffer)
             m_scratch->put(*event.buffer);
-
 
         if (s.is_ok() && should_segment) {
             s = advance_segment(m_guard, has_commit);
@@ -290,13 +280,13 @@ private:
     [[nodiscard]] auto advance_segment(SegmentGuard &guard, bool has_commit) -> Status;
     auto handle_error(SegmentGuard &guard, Status e) -> void;
 
-    BackgroundWorker<Event> m_background;
+    Worker<Event> m_background;
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> *m_flushed_lsn {};
     WalRecordWriter m_writer;
     std::string m_prefix;
     LogScratchManager *m_scratch {};
-    WalCollection *m_collection {};
+//    WalCollection *m_collection {};
     Storage *m_store {};
     Size m_wal_limit {};
     SegmentGuard m_guard; // TODO: This is kinda pointless now that we're storing it as a member...

@@ -10,18 +10,18 @@
 namespace calico {
 
 template<class Event>
-class BackgroundWorker final {
+class Worker final {
 public:
-    using OnEvent = std::function<Status(const Status&, const Event&)>;
+    using OnEvent = std::function<Status(const Event&)>;
     using OnCleanup = std::function<void(const Status&)>;
 
-    BackgroundWorker(OnEvent on_event, OnCleanup on_cleanup)
+    Worker(OnEvent on_event, OnCleanup on_cleanup)
         : m_on_event {std::move(on_event)},
           m_on_cleanup {std::move(on_cleanup)},
           m_thread {[this] {worker();}}
     {}
 
-    ~BackgroundWorker() = default;
+    ~Worker() = default;
 
     [[nodiscard]]
     auto status() const -> Status
@@ -60,12 +60,13 @@ private:
                 m_on_cleanup(m_status);
                 break;
             }
-
-            auto s = m_on_event(m_status, event->event);
-            if (!s.is_ok()) {
-                std::lock_guard lock {m_mu};
-                m_status = std::move(s);
-                m_is_ok.store(false);
+            if (m_status.is_ok()) {
+                auto s = m_on_event(event->event);
+                if (!s.is_ok()) {
+                    std::lock_guard lock {m_mu};
+                    m_status = std::move(s);
+                    m_is_ok.store(false);
+                }
             }
             if (event->needs_wait) {
                 m_is_waiting.store(false);
