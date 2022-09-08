@@ -60,7 +60,7 @@ private:
                 m_on_cleanup(m_status);
                 break;
             }
-            if (m_status.is_ok()) {
+            if (m_is_ok.load()) {
                 auto s = m_on_event(event->event);
                 if (!s.is_ok()) {
                     std::lock_guard lock {m_mu};

@@ -691,15 +691,18 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
     ASSERT_EQ(v[2][2], '\x33');
 }
 
+/*
+ * The Worker<Event> class provides a background thread that waits on Events from a Queue<Event>. We can dispatch an event from the
+ * main thread and either wait or return immediately. It also should provide fast access to its internal Status object.
+ */
 class BasicWorkerTests: public testing::Test {
 public:
     BasicWorkerTests()
-        : worker {[this](int e) {
-            events.emplace_back(e);
+        : worker {[this](int event) {
+            events.emplace_back(event);
             return Status::ok();
-        }, [this](const Status &s) {
+        }, [this](const Status &/* final_worker_status */) {
             is_finished = true;
-            return s;
         }}
     {}
 
@@ -749,22 +752,27 @@ TEST_F(BasicWorkerTests, WaitOnEvent)
     ASSERT_TRUE(expose_message(std::move(worker).destroy()));
 }
 
-TEST_F(BasicWorkerTests, HandlesManyEvents)
+TEST_F(BasicWorkerTests, SanityCheck)
 {
-    for (int i {}; i < 1'000; ++i)
-        worker.dispatch(i, i == 999);
+    static constexpr int NUM_EVENTS {1'000};
+    for (int i {}; i < NUM_EVENTS; ++i) {
+        worker.dispatch(i, i == NUM_EVENTS - 1);
+        ASSERT_TRUE(expose_message(worker.status()));
+    }
 
-    for (int i {}; i < 1'000; ++i)
+    for (int i {}; i < NUM_EVENTS; ++i)
         ASSERT_EQ(events.at(static_cast<Size>(i)), i);
 
+    ASSERT_TRUE(expose_message(worker.status()));
     ASSERT_TRUE(expose_message(std::move(worker).destroy()));
 }
 
 class WorkerFaultTests: public testing::Test {
 public:
     WorkerFaultTests()
-        : worker {[this](int e) {
-            events.emplace_back(e);
+        : worker {[this](int event) {
+            if (callback_status.is_ok())
+                events.emplace_back(event);
             return callback_status;
         }, [this](const Status &s) {
             assert_error_42(s);
@@ -775,7 +783,7 @@ public:
     ~WorkerFaultTests() override
     {
         if (!is_finished)
-            (void)std::move(worker).destroy();
+            assert_error_42(std::move(worker).destroy());
     }
 
     Status callback_status {Status::ok()};
@@ -790,18 +798,21 @@ TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
     worker.dispatch(1, true);
     assert_error_42(worker.status());
     assert_error_42(std::move(worker).destroy());
-    ASSERT_EQ(events.at(0), 1) << "event should still get added";
+    ASSERT_TRUE(events.empty());
 }
 
-TEST_F(WorkerFaultTests, WorkerCannotBeRevived)
+TEST_F(WorkerFaultTests, WorkerCannotBeRecovered)
 {
     callback_status = Status::system_error("42");
     worker.dispatch(1, true);
+
+    // Return an OK status after failing once. Worker should remain invalidated. If we need to start the worker again,
+    // we need to create a new one.
     callback_status = Status::ok();
     worker.dispatch(2, true);
     assert_error_42(worker.status());
     assert_error_42(std::move(worker).destroy());
-    ASSERT_EQ(events.size(), 1);
+    ASSERT_TRUE(events.empty());
 }
 
 TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
@@ -811,20 +822,36 @@ TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
     worker.dispatch(3, true);
 
     callback_status = Status::system_error("42");
-    worker.dispatch(4); // Last event to get added.
+    worker.dispatch(4);
     worker.dispatch(5);
 
-    // Wait should work, event if we aren't processing events.
+    // We should be able to wait, even if we aren't processing events.
     worker.dispatch(6, true);
 
     ASSERT_EQ(events.at(0), 1);
     ASSERT_EQ(events.at(1), 2);
     ASSERT_EQ(events.at(2), 3);
-    ASSERT_EQ(events.at(3), 4);
-    ASSERT_EQ(events.size(), 4);
+    ASSERT_EQ(events.size(), 3);
 
     assert_error_42(worker.status());
     assert_error_42(std::move(worker).destroy());
+}
+
+TEST_F(WorkerFaultTests, ErrorStatusContention)
+{
+    callback_status = Status::system_error("42");
+    worker.dispatch(1);
+
+    // Sketchy but seems to work in practice. I'm getting a few thousand of these checks in before the status is
+    // registered.
+    Size num_hits {};
+    while (worker.status().is_ok())
+        num_hits++;
+    ASSERT_GT(num_hits, 0);
+
+    assert_error_42(worker.status());
+    assert_error_42(std::move(worker).destroy());
+    ASSERT_TRUE(events.empty());
 }
 
 } // namespace calico

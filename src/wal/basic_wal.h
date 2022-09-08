@@ -60,7 +60,7 @@ public:
     [[nodiscard]] auto stop_workers() -> Status override;
     [[nodiscard]] auto start_workers() -> Status override;
     [[nodiscard]] auto flush_pending() -> Status override;
-    [[nodiscard]] auto open_iterator(WalIterator**) -> Status override {return Status::ok();} // TODO: Implement me!
+    [[nodiscard]] auto open_iterator(WalIterator**) -> Status override;
 
 
     [[nodiscard]] auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status override;

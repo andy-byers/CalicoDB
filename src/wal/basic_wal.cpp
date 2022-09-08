@@ -1,4 +1,5 @@
 #include "basic_wal.h"
+#include "iterator.h"
 #include "utils/logging.h"
 
 namespace calico {
@@ -212,6 +213,28 @@ auto BasicWriteAheadLog::start_workers() -> Status
     return s;
 }
 
+auto BasicWriteAheadLog::open_iterator(WalIterator **out) -> Status
+{
+    static constexpr auto MSG = "could not open WAL iterator";
+    auto *itr = new(std::nothrow) BasicWalIterator {*m_store, m_collection, m_prefix, m_page_size};
+
+    if (!itr) {
+        LogMessage message {*m_logger};
+        message.set_primary(MSG);
+        message.set_detail("out of memory");
+        return message.system_error();
+    }
+
+    auto s = itr->open();
+    if (s.is_ok()) {
+        *out = itr;
+    } else {
+        forward_status(s, MSG);
+        delete itr;
+    }
+    return s;
+}
+
 auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status
 {
     static constexpr auto MSG = "cannot recover";
@@ -235,12 +258,25 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
     });
     std::sort(begin(segment_ids), end(segment_ids));
 
+    // TODO: For the iterator, which needs the collection upfront.
+//    // Let the WAL collection object manage the segment IDs.
+//    for (const auto id: segment_ids)
+//        m_collection.add_segment({id});
+
+//    WalIterator *temp {};
+//    s = open_iterator(&temp);
+//    MAYBE_FORWARD(s, MSG);
+//    std::unique_ptr<WalIterator> iterator {temp};
+
     std::vector<RecordPosition> uncommitted;
+    SegmentId commit_id;
+
     for (const auto id: segment_ids) {
         m_logger->info("rolling segment {} forward", id.value);
 
+
         s = m_reader.open(id);
-        // Allow segments to be empty.
+        // Allow segments to be empty. TODO: Missing segments?
         if (s.is_logic_error())
             continue;
         MAYBE_FORWARD(s, MSG);
@@ -257,14 +293,17 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
             break;
         }
 
-        if (segment.has_commit)
+        if (segment.has_commit) {
             uncommitted.clear();
+            commit_id = id;
+        }
 
         m_collection.add_segment(segment);
         m_flushed_lsn.store(last_lsn);
+//        s = iterator->seek_next_segment();
+
     }
-    // Return on fatal errors. Otherwise, we'll try to roll back the most-recent transaction.
-    if (s.is_system_error())
+    if (s.is_system_error() || uncommitted.empty())
         return s;
 
     for (auto itr = crbegin(uncommitted); itr != crend(uncommitted); ) {
@@ -287,13 +326,13 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
         itr = end;
     }
 
-    if (!uncommitted.empty()) {
-        s = m_collection.remove_from_right(uncommitted.front().id, [this](const auto &info) {
-            CALICO_EXPECT_FALSE(info.has_commit);
-            return m_store->remove_file(m_prefix + info.id.to_name());
-        });
+    for (const auto &id: segment_ids) {
+        if (id > commit_id) {
+            s = m_store->remove_file(m_prefix + id.to_name());
+            MAYBE_FORWARD(s, MSG);
+        }
     }
-
+    m_collection.remove_after(commit_id);
     m_logger->info("finished recovery");
     return s;
 }

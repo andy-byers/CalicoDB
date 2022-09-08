@@ -42,9 +42,9 @@ public:
     virtual ~WalIterator() = default;
     [[nodiscard]] virtual auto seek_next_segment() -> Status = 0;
     [[nodiscard]] virtual auto seek_previous_segment() -> Status = 0;
-    [[nodiscard]] virtual auto first_lsn() -> SequenceId = 0;
-    [[nodiscard]] virtual auto redo(const RedoCallback&) -> BytesView = 0;
-    [[nodiscard]] virtual auto undo(const UndoCallback&) -> BytesView = 0;
+    [[nodiscard]] virtual auto read_first_lsn(SequenceId&) -> Status = 0;
+    [[nodiscard]] virtual auto redo(const RedoCallback&) -> Status = 0;
+    [[nodiscard]] virtual auto undo(const UndoCallback&) -> Status = 0;
 };
 
 class WriteAheadLog {

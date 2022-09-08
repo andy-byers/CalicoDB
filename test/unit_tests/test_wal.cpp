@@ -920,19 +920,34 @@ TEST_F(BasicWalReaderWriterTests, NewWriterIsOk)
     writer->stop();
 }
 
+template<class Test>
+auto generate_images(Test &test, Size page_size, Size n)
+{
+    std::vector<std::string> images;
+    std::generate_n(back_inserter(images), n, [&test, page_size] {
+        return test.random.template get<std::string>('\x00', '\xFF', page_size);
+    });
+    return images;
+}
+
+auto generate_deltas(std::vector<std::string> &images)
+{
+    WalRecordGenerator generator;
+    std::vector<std::vector<PageDelta>> deltas;
+    for (auto &image: images)
+        deltas.emplace_back(generator.setup_deltas(stob(image)));
+    return deltas;
+}
+
 TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
 {
     // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
     static constexpr Size NUM_RECORDS {100};
-    WalRecordGenerator generator;
-    std::vector<std::vector<PageDelta>> deltas;
-    std::vector<std::string> images;
+    auto images = generate_images(*this, PAGE_SIZE, NUM_RECORDS);
+    auto deltas = generate_deltas(images);
+    for (Size i {}; i < NUM_RECORDS; ++i)
+        writer->log_deltas(PageId::root(), stob(images[i]), deltas[i]);
 
-    for (Size i {}; i < NUM_RECORDS; ++i) {
-        images.emplace_back(random.get<std::string>('\x00', '\xFF', PAGE_SIZE));
-        deltas.emplace_back(generator.setup_deltas(stob(images.back())));
-        writer->log_deltas(PageId::root(), stob(images.back()), deltas[i]);
-    }
     // close() should cause the writer to flush the current block.
     writer->stop();
 
@@ -959,12 +974,10 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
 {
     // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
     static constexpr Size NUM_RECORDS {100};
-    std::vector<std::string> images;
+    auto images = generate_images(*this, PAGE_SIZE, NUM_RECORDS);
 
-    for (Size i {}; i < NUM_RECORDS; ++i) {
-        images.emplace_back(random.get<std::string>('\x00', '\xFF', PAGE_SIZE));
-        writer->log_full_image(PageId::from_index(i), stob(images.back()));
-    }
+    for (Size i {}; i < NUM_RECORDS; ++i)
+        writer->log_full_image(PageId::from_index(i), stob(images[i]));
     writer->stop();
 
     std::vector<RecordPosition> positions;
@@ -1079,6 +1092,8 @@ TEST_F(BasicWalReaderWriterTests, ManyImagesManyDeltas)
 
 class BasicWalTests: public TestWithWalSegmentsOnHeap {
 public:
+    static constexpr Size PAGE_SIZE {0x100};
+
     ~BasicWalTests() override = default;
 
     auto SetUp() -> void override
@@ -1089,7 +1104,7 @@ public:
             ROOT,
             store.get(),
             create_sink(),
-            0x100,
+            PAGE_SIZE,
         }, &temp)));
 
         wal.reset(temp);
@@ -1098,6 +1113,7 @@ public:
                                                              [](const auto &) { return Status::logic_error(""); })));
     }
 
+    Random random {42};
     std::unique_ptr<WriteAheadLog> wal;
 };
 
@@ -1129,11 +1145,31 @@ TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
     }
 }
 
-//TEST_F(BasicWalTests, FailureDuringOpen)
-//{
-//    interceptors::set_open(FailOnce<0> {"test/wal-"});
-//    ASSERT_TRUE(expose_message(wal->start_workers()));
-//    ASSERT_TRUE(expose_message(wal->stop_workers()));
-//}
+TEST_F(BasicWalTests, FailureDuringFirstOpen)
+{
+    interceptors::set_open(FailOnce<0> {"test/wal-"});
+    ASSERT_TRUE(expose_message(wal->start_workers()));
+    ASSERT_TRUE(expose_message(wal->stop_workers()));
+}
+
+TEST_F(BasicWalTests, FailureDuringNthOpen)
+{
+    auto images = generate_images(*this, PAGE_SIZE, 1'000);
+
+    interceptors::set_open(FailAfter<5> {"test/wal-"});
+    ASSERT_TRUE(expose_message(wal->start_workers()));
+
+    Size num_writes {};
+    for (Size i {}; i < images.size(); ++i) {
+        auto s = wal->log_image(i, stob(images[i]));
+        if (!s.is_ok()) {
+            assert_error_42(s);
+            break;
+        }
+        num_writes++;
+    }
+    ASSERT_GT(num_writes, 5);
+    ASSERT_TRUE(expose_message(wal->stop_workers()));
+}
 
 } // <anonymous>

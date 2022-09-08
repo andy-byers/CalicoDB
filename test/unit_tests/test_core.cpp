@@ -286,8 +286,17 @@ public:
 
 TEST_F(ReaderTests, SingleReader)
 {
-    distributed_reader(0);
-    localized_reader();
+    for (Size x {}; x < 1'000; ++x) {
+
+        std::vector<std::string> strings;
+        for (Size i {}; i < NUM_RECORDS; ++i) {
+            auto c = db.find(make_key<KEY_WIDTH>(i));
+            auto s = c.value();
+            strings.emplace_back(std::move(s));
+        }
+    }
+//    distributed_reader(0);
+//    localized_reader();
 }
 
 TEST_F(ReaderTests, ManyDistributedReaders)

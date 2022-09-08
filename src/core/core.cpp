@@ -407,12 +407,11 @@ auto Core::ensure_consistent_state() -> Status
             }
             return Status::ok();
         },
-        [this](UndoDescriptor undo) {
-            const auto [id, image] = undo;
-            auto page = m_pager->acquire(PageId {id}, true);
+        [this](const auto &info) {
+            auto page = m_pager->acquire(PageId {info.page_id}, true);
             if (!page.has_value()) return page.error();
 
-            page->undo(undo);
+            page->undo(info);
             return m_pager->release(std::move(*page));
         });
     MAYBE_FORWARD(s, MSG);

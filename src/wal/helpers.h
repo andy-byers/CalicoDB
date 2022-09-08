@@ -127,6 +127,39 @@ public:
         m_segments.emplace(segment);
     }
 
+    auto id_before(SegmentId id) const -> SegmentId
+    {
+        std::lock_guard lock {m_mutex};
+        auto itr = m_segments.lower_bound({id});
+        if (itr == cend(m_segments) || itr == cbegin(m_segments))
+            return SegmentId::null();
+        return prev(itr)->id;
+    }
+
+    auto id_after(SegmentId id) const -> SegmentId
+    {
+        std::lock_guard lock {m_mutex};
+        auto itr = m_segments.upper_bound({id});
+        return itr != cend(m_segments) ? itr->id : SegmentId::null();
+    }
+
+    auto remove_before(SegmentId id) -> void
+    {
+        // Removes segments in [<begin>, id).
+        std::lock_guard lock {m_mutex};
+        auto itr = m_segments.lower_bound({id});
+        m_segments.erase(cbegin(m_segments), itr);
+    }
+
+    auto remove_after(SegmentId id) -> void
+    {
+        // Removes segments in (id, <end>).
+        std::lock_guard lock {m_mutex};
+        auto itr = m_segments.upper_bound({id});
+        m_segments.erase(itr, cend(m_segments));
+    }
+
+    // TODO: Deprecated in favor of remove_before().
     template<class Action>
     [[nodiscard]]
     auto remove_from_left(SegmentId id, const Action &action) -> Status
@@ -142,6 +175,7 @@ public:
         return Status::ok();
     }
 
+    // TODO: Deprecated in favor of remove_after().
     template<class Action>
     [[nodiscard]]
     auto remove_from_right(SegmentId id, const Action &action) -> Status
