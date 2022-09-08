@@ -53,13 +53,6 @@ public:
         return t;
     }
 
-    auto restart() -> void
-    {
-        std::lock_guard lock {m_mu};
-        CALICO_EXPECT_TRUE(m_is_finished);
-        m_is_finished = false;
-    }
-
     auto finish() -> void
     {
         {
@@ -68,7 +61,6 @@ public:
         }
         m_empty_cv.notify_all();
         m_full_cv.notify_all();
-        m_finish_cv.notify_all();
     }
 
 private:
@@ -82,7 +74,6 @@ private:
 
     std::condition_variable m_empty_cv;
     std::condition_variable m_full_cv;
-    std::condition_variable m_finish_cv;
     mutable std::mutex m_mu;
     std::deque<T> m_queue;
     Size m_capacity {};
