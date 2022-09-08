@@ -37,7 +37,7 @@ public:
     [[nodiscard]]
     auto is_working() const -> bool override
     {
-        return m_writer.is_running();
+        return m_is_working;
     }
 
     auto allow_cleanup(std::uint64_t pager_lsn) -> void override
@@ -51,6 +51,7 @@ public:
 
     ~BasicWriteAheadLog() override;
     [[nodiscard]] static auto open(const Parameters&, WriteAheadLog**) -> Status;
+    [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto flushed_lsn() const -> std::uint64_t override;
     [[nodiscard]] auto current_lsn() const -> std::uint64_t override;
     [[nodiscard]] auto log_image(std::uint64_t page_id, BytesView image) -> Status override;
@@ -67,6 +68,7 @@ public:
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
+    [[nodiscard]] auto stop_workers_impl() -> Status;
 
     auto forward_status(Status s, const std::string &message) -> Status
     {
@@ -85,8 +87,14 @@ private:
     std::string m_prefix;
     Storage *m_store {};
 
+    Status m_status {Status::ok()};
+    std::unique_ptr<BasicWalWriter> m_writer;
+//    std::unique_ptr<BasicWalCleaner> m_cleaner;
+    Size m_page_size {};
+    Size m_wal_limit {};
+
     BasicWalReader m_reader;
-    BasicWalWriter m_writer;
+    bool m_is_working {};
 };
 
 } // namespace calico

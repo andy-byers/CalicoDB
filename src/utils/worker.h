@@ -1,11 +1,11 @@
 #ifndef CALICO_WAL_WORKER_H
 #define CALICO_WAL_WORKER_H
 
+#include "utils/queue.h"
+#include "wal/helpers.h"
+#include "wal/wal.h"
 #include <optional>
 #include <thread>
-#include "helpers.h"
-#include "wal.h"
-#include "utils/queue.h"
 
 namespace calico {
 
@@ -13,11 +13,12 @@ template<class Event>
 class BackgroundWorker final {
 public:
     using OnEvent = std::function<Status(const Status&, const Event&)>;
-    using OnCleanup = std::function<Status(const Status&)>;
+    using OnCleanup = std::function<void(const Status&)>;
 
     BackgroundWorker(OnEvent on_event, OnCleanup on_cleanup)
         : m_on_event {std::move(on_event)},
-          m_on_cleanup {std::move(on_cleanup)}
+          m_on_cleanup {std::move(on_cleanup)},
+          m_thread {[this] {worker();}}
     {}
 
     ~BackgroundWorker() = default;
@@ -34,6 +35,7 @@ public:
     template<class E>
     auto dispatch(E &&event, bool should_wait = false) -> void
     {
+        // Note that we can only wait on a single event at a time.
         if (should_wait) {
             dispatch_and_wait(std::forward<E>(event));
         } else {
@@ -65,10 +67,9 @@ private:
                 m_status = std::move(s);
                 m_is_ok.store(false);
             }
-
             if (event->needs_wait) {
                 m_is_waiting.store(false);
-                m_cv.notify_all();
+                m_cv.notify_one();
             }
         }
     }
@@ -95,16 +96,16 @@ private:
         bool needs_wait {};
     };
 
-    mutable std::mutex m_mu;
-    std::condition_variable m_cv;
-    std::thread m_thread;
-
     OnEvent m_on_event;
     OnCleanup m_on_cleanup;
-    std::atomic<bool> m_is_ok {};
+    std::atomic<bool> m_is_ok {true};
     std::atomic<bool> m_is_waiting {};
     Queue<EventWrapper> m_events;
     Status m_status {Status::ok()};
+
+    mutable std::mutex m_mu;
+    std::condition_variable m_cv;
+    std::thread m_thread;
 };
 
 } // namespace calico

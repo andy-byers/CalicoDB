@@ -57,6 +57,7 @@ public:
         return true;
     }
 
+    [[nodiscard]] virtual auto status() const -> Status = 0;
     [[nodiscard]] virtual auto is_working() const -> bool = 0;
     [[nodiscard]] virtual auto flushed_lsn() const -> std::uint64_t = 0;
     [[nodiscard]] virtual auto current_lsn() const -> std::uint64_t = 0;

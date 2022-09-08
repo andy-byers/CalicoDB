@@ -385,14 +385,8 @@ auto Core::close() -> Status
         return message.logic_error();
     }
 
-    auto s = Status::ok();
-    if (m_wal->is_working()) {
-        s = m_wal->stop_workers();
-        if (!s.is_ok())
-            forward_status(s, "cannot stop WAL");
-    }
     // We already waited on the WAL to be done writing so this should happen immediately.
-    s = m_pager->flush();
+    auto s = m_pager->flush();
     MAYBE_SAVE_AND_FORWARD(s, "cannot flush pages before stop");
 
     return m_status;

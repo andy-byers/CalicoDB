@@ -15,6 +15,7 @@
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
+#include "utils/worker.h"
 #include "core/header.h"
 
 namespace calico {
@@ -689,5 +690,89 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
     ASSERT_EQ(v[1][2], '\x22');
     ASSERT_EQ(v[2][2], '\x33');
 }
+
+class BasicWorkerTests: public testing::Test {
+public:
+    BasicWorkerTests()
+        : worker {[this](const Status &s, int e) {
+            events.emplace_back(e);
+            return s;
+        }, [this](const Status &s) {
+            is_finished = true;
+            return s;
+        }}
+    {}
+
+    BackgroundWorker<int> worker;
+    std::vector<int> events;
+    bool is_finished {};
+};
+
+TEST_F(BasicWorkerTests, CreateWorker)
+{
+    ASSERT_TRUE(expose_message(worker.status()));
+    ASSERT_TRUE(events.empty());
+    ASSERT_FALSE(is_finished);
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+}
+
+TEST_F(BasicWorkerTests, DestroyWorker)
+{
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_TRUE(events.empty());
+    ASSERT_TRUE(is_finished);
+}
+
+TEST_F(BasicWorkerTests, EventsGetAdded)
+{
+    worker.dispatch(1);
+    worker.dispatch(2);
+    worker.dispatch(3);
+
+    // Blocks until all events are finished and the worker thread is joined.
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_EQ(events.at(0), 1);
+    ASSERT_EQ(events.at(1), 2);
+    ASSERT_EQ(events.at(2), 3);
+}
+
+TEST_F(BasicWorkerTests, WaitOnEvent)
+{
+    worker.dispatch(1);
+    worker.dispatch(2);
+    // Let the event get processed before returning.
+    worker.dispatch(3, true);
+
+    ASSERT_EQ(events.at(0), 1);
+    ASSERT_EQ(events.at(1), 2);
+    ASSERT_EQ(events.at(2), 3);
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+}
+
+TEST_F(BasicWorkerTests, HandlesManyEvents)
+{
+    for (int i {}; i < 1'000; ++i)
+        worker.dispatch(i, i == 999);
+
+    for (int i {}; i < 1'000; ++i)
+        ASSERT_EQ(events.at(static_cast<Size>(i)), i);
+
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+}
+
+class WorkerFaultTests: public testing::Test {
+public:
+    WorkerFaultTests()
+        : worker {[](const Status &, int) {
+            return Status::system_error("42");
+        }, [](const Status &) {
+            return Status::ok();
+        }}
+    {}
+
+    BackgroundWorker<int> worker;
+    std::vector<int> events;
+    bool is_finished {};
+};
 
 } // namespace calico

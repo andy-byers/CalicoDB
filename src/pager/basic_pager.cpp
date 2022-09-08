@@ -72,7 +72,7 @@ auto BasicPager::pin_frame(PageId id, bool &is_fragile) -> Status
         if (!r.has_value()) return r.error();
 
         // We are out of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
-        // very often, if at all.
+        // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
         if (!*r) {
             m_logger->warn(MSG);
             std::this_thread::yield();
@@ -137,7 +137,7 @@ auto BasicPager::try_make_available() -> Result<bool>
 {
     auto itr = m_registry.find_entry([this](auto, auto fid, auto dirty_token) {
         const auto &frame = m_framer->frame_at(fid);
-
+//fmt::print("hi\n");
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to consider for reuse.
         if (frame.ref_count() != 0)
             return false;
@@ -145,8 +145,10 @@ auto BasicPager::try_make_available() -> Result<bool>
         if (!dirty_token.has_value())
             return true;
 
-        if (m_wal->is_working())
+        if (m_wal->is_working()) {
+//fmt::print("{} <= {}\n", frame.lsn().value, m_wal->flushed_lsn());
             return frame.lsn() <= m_wal->flushed_lsn();
+        }
 
         return true;
     });

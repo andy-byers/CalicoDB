@@ -10,7 +10,7 @@
 #include <spdlog/logger.h>
 #include <thread>
 
-#include "worker.h"
+#include "utils/worker.h"
 
 namespace calico {
 
@@ -146,7 +146,6 @@ public:
     };
 
     enum class EventType {
-        STOP_WRITER = 1,
         FLUSH_BLOCK,
         LOG_FULL_IMAGE,
         LOG_DELTAS,
@@ -158,17 +157,16 @@ public:
         SequenceId lsn;
         std::optional<NamedScratch> buffer {};
         Size size {};
-        bool is_waiting {};
     };
 
     explicit BackgroundWriter(const Parameters &param)
         : m_background {
-              [this](const auto &s, const auto &e) {
-                  return s.is_ok() ? on_event(s, e) : s;
-              },
-              [this](const auto &s) {
-                  return on_cleanup(s);
-              }
+            [this](const auto &s, const auto &e) {
+                return s.is_ok() ? on_event(s, e) : s;
+            },
+            [this](const auto &s) {
+                return on_cleanup(s);
+            }
           },
           m_logger {param.logger},
           m_flushed_lsn {param.flushed_lsn},
@@ -179,59 +177,34 @@ public:
           m_store {param.store},
           m_wal_limit {param.wal_limit},
           m_guard {*param.store, m_writer, *param.collection, *param.flushed_lsn, param.prefix}
-    {}
-
-    ~BackgroundWriter() = default;
-
-    [[nodiscard]]
-    auto is_running() const -> bool
-    {
-        return m_is_running;
-    }
-
-    auto dispatch(Event event) -> void
-    {
-        // TODO: Make event.is_waiting a parameter to this method instead of a struct member...
-        m_background.dispatch(event, event.is_waiting);
-    }
-
-    auto startup() -> Status
     {
         auto s = m_guard.start();
         m_is_running = s.is_ok();
         if (!m_is_running)
             handle_error(m_guard, s);
-        return s;
     }
 
-    auto teardown() -> Status
+    ~BackgroundWriter() = default;
+
+    auto dispatch(Event event, bool should_wait = false) -> void
+    {
+        m_background.dispatch(event, should_wait);
+    }
+
+    [[nodiscard]]
+    auto destroy() && -> Status
     {
         m_is_running = false;
         return std::move(m_background).destroy();
     }
 
     [[nodiscard]]
-    auto status() -> Status
+    auto status() const -> Status
     {
         return m_background.status();
     }
 
 private:
-
-    [[nodiscard]]
-    auto run_stop(SegmentGuard &guard) -> Status
-    {
-        if (!guard.is_started()) // TODO
-            return Status::ok();
-
-        if (m_writer.has_written())
-            return guard.finish(false);
-
-        const auto id = guard.id();
-        auto s = guard.abort();
-        if (!s.is_ok()) handle_error(guard, s);
-        return m_store->remove_file(m_prefix + id.to_name());
-    }
 
     [[nodiscard]]
     auto needs_segmentation() const -> bool
@@ -254,8 +227,7 @@ private:
                 type,
                 lsn,
                 buffer,
-                size,
-                is_waiting
+                size
             ] = event;
 
             switch (type) {
@@ -274,19 +246,17 @@ private:
                     s = m_writer.append_block();
                     m_flushed_lsn->store(lsn);
                     break;
-                case EventType::STOP_WRITER:
-                    s = run_stop(m_guard);
-                    break;
                 default:
                     CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
             }
         };
 
-        if (status.is_ok() || event.type == EventType::STOP_WRITER)
+        if (status.is_ok())
             handle_event();
 
         // Replace the scratch memory so that the main thread can reuse it. This is internally synchronized.
-        if (event.buffer) m_scratch->put(*event.buffer);
+        if (event.buffer)
+            m_scratch->put(*event.buffer);
 
 
         if (s.is_ok() && should_segment) {
@@ -296,12 +266,25 @@ private:
         return s;
     }
 
-    auto on_cleanup(const Status &) -> Status
+    auto on_cleanup(const Status &) -> void
     {
-        return run_stop(m_guard); // TODO
+        if (!m_guard.is_started()) // TODO
+            return;
+
+        if (m_writer.has_written()) {
+            auto s = m_guard.finish(false);
+            if (!s.is_ok()) handle_error(m_guard, s);
+            return;
+        }
+
+        const auto id = m_guard.id();
+        auto s = m_guard.abort();
+        if (!s.is_ok()) handle_error(m_guard, s);
+
+        s = m_store->remove_file(m_prefix + id.to_name());
+        if (!s.is_ok()) handle_error(m_guard, s);
     }
 
-    auto background_writer() -> void;
     [[nodiscard]] auto emit_payload(SequenceId lsn, BytesView payload) -> Status;
     [[nodiscard]] auto emit_commit(SequenceId lsn) -> Status;
     [[nodiscard]] auto advance_segment(SegmentGuard &guard, bool has_commit) -> Status;
@@ -335,7 +318,6 @@ public:
 
     explicit BasicWalWriter(const Parameters &param)
         : m_flushed_lsn {param.flushed_lsn},
-          m_pager_lsn {param.pager_lsn},
           m_scratch {wal_scratch_size(param.page_size)},
           m_background {{
               param.store,
@@ -348,17 +330,11 @@ public:
               param.wal_limit,
           }}
     {
-        (void)m_pager_lsn;
+        m_last_lsn = m_flushed_lsn->load();
     }
 
     [[nodiscard]]
-    auto is_running() const -> bool
-    {
-        return m_background.is_running();
-    }
-
-    [[nodiscard]]
-    auto status() -> Status
+    auto status() const -> Status
     {
         return m_background.status();
     }
@@ -369,8 +345,7 @@ public:
         return m_last_lsn;
     }
 
-    auto start() -> void;
-    auto stop() -> void;
+    auto stop() -> Status;
     auto flush_block() -> void;
     auto log_full_image(PageId page_id, BytesView image) -> void;
     auto log_deltas(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas) -> void;
@@ -378,7 +353,6 @@ public:
 
 private:
     std::atomic<SequenceId> *m_flushed_lsn {};
-    std::atomic<SequenceId> *m_pager_lsn {};
     SequenceId m_last_lsn;
     LogScratchManager m_scratch;
     BackgroundWriter m_background;

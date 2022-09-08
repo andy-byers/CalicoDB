@@ -9,24 +9,24 @@ namespace calico {
         if (!calico_s.is_ok()) return forward_status(calico_s, message); \
     } while (0)
 
-[[nodiscard]]
-static auto handle_writer_error(spdlog::logger &logger, BasicWalWriter &writer)
+[[nodiscard]] static auto handle_writer_error(spdlog::logger &logger, BasicWalWriter &writer, Status &out)
 {
     auto s = writer.status();
     if (!s.is_ok()) {
         logger.error("(1/2) background writer encountered an error");
         logger.error("(2/2) {}", s.what());
+        out = s;
     }
     return s;
 }
 
-static auto handle_not_running_error(spdlog::logger &logger, BasicWalWriter &writer, const std::string &primary)
+static auto handle_not_started_error(spdlog::logger &logger, bool is_working, const std::string &primary)
 {
-    if (!writer.is_running()) {
+    if (!is_working) {
         LogMessage message {logger};
         message.set_primary(primary);
-        message.set_detail("background writer is not running");
-        message.set_hint("start the background writer and try again");
+        message.set_detail("background workers are not running");
+        message.set_hint("start the background workers and try again");
         return message.logic_error();
     }
     return Status::ok();
@@ -36,21 +36,12 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
     : m_logger {create_logger(param.sink, "wal")},
       m_prefix {param.prefix},
       m_store {param.store},
+      m_page_size {param.page_size},
+      m_wal_limit {param.wal_limit},
       m_reader {
           *m_store,
           param.prefix,
-          param.page_size
-      },
-      m_writer {{
-          m_store,
-          &m_collection,
-          &m_flushed_lsn,
-          &m_pager_lsn,
-          m_logger,
-          param.prefix,
-          param.page_size,
-          param.wal_limit,
-      }}
+          param.page_size}
 {
     m_logger->info("constructing BasicWriteAheadLog object");
 }
@@ -74,14 +65,26 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
     m_logger->info("destroying BasicWriteAheadLog object");
 
     // TODO: Move this into a close() method. We probably want to know if the writer shut down okay.
-    auto s = handle_writer_error(*m_logger, m_writer);
-    forward_status(s, "cannot clean up WAL writer");
 
-    if (m_writer.is_running())
-        m_writer.stop();
+    if (m_is_working) {
+        auto s = handle_writer_error(*m_logger, *m_writer, m_status);
+        forward_status(s, "cannot clean up WAL writer");
 
-    s = handle_writer_error(*m_logger, m_writer);
-    forward_status(s, "cannot stop WAL writer");
+        s = stop_workers_impl();
+        forward_status(s, "cannot stop workers");
+    }
+}
+
+auto BasicWriteAheadLog::status() const -> Status
+{
+    if (m_is_working) { // TODO: Error model needs some work!
+        auto s = m_writer->status();
+        if (!s.is_ok()) return s;
+
+//        s = m_cleaner->status();
+//        if (!s.is_ok()) return s;
+    }
+    return m_status;
 }
 
 auto BasicWriteAheadLog::flushed_lsn() const -> std::uint64_t
@@ -91,17 +94,22 @@ auto BasicWriteAheadLog::flushed_lsn() const -> std::uint64_t
 
 auto BasicWriteAheadLog::current_lsn() const -> std::uint64_t
 {
-    return m_writer.last_lsn().value + 1;
+    CALICO_EXPECT_TRUE(m_is_working);
+    return m_writer->last_lsn().value + 1;
 }
+
+#define HANDLE_WRITER_ERRORS \
+    do { \
+        auto s = handle_not_started_error(*m_logger, m_is_working, MSG); \
+        MAYBE_FORWARD(s, MSG); \
+        s = handle_writer_error(*m_logger, *m_writer, m_status); \
+        MAYBE_FORWARD(s, MSG); \
+    } while (0)
 
 auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> Status
 {
     static constexpr auto MSG = "could not log full image";
-    auto s = handle_writer_error(*m_logger, m_writer);
-    MAYBE_FORWARD(s, MSG);
-
-    s = handle_not_running_error(*m_logger, m_writer, MSG);
-    MAYBE_FORWARD(s, MSG);
+    HANDLE_WRITER_ERRORS;
 
     // Skip writing this full image if one has already been written for this page during this transaction. If so, we can
     // just use the old one to undo changes made to this page during the entire transaction.
@@ -111,22 +119,18 @@ auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> St
         return Status::ok();
     }
 
-    m_writer.log_full_image(PageId {page_id}, image);
+    m_writer->log_full_image(PageId {page_id}, image);
     m_images.emplace(PageId {page_id});
-    return m_writer.status();
+    return m_writer->status();
 }
 
 auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status
 {
     static constexpr auto MSG = "could not log deltas";
-    auto s = handle_writer_error(*m_logger, m_writer);
-    MAYBE_FORWARD(s, MSG);
+    HANDLE_WRITER_ERRORS;
 
-    s = handle_not_running_error(*m_logger, m_writer, MSG);
-    MAYBE_FORWARD(s, MSG);
-
-    m_writer.log_deltas(PageId {page_id}, image, deltas);
-    return m_writer.status();
+    m_writer->log_deltas(PageId {page_id}, image, deltas);
+    return m_writer->status();
 }
 
 auto BasicWriteAheadLog::log_commit() -> Status
@@ -134,44 +138,85 @@ auto BasicWriteAheadLog::log_commit() -> Status
     m_logger->info("logging commit");
 
     static constexpr auto MSG = "could not log commit";
-    auto s = handle_writer_error(*m_logger, m_writer);
-    MAYBE_FORWARD(s, MSG);
+    HANDLE_WRITER_ERRORS;
 
-    s = handle_not_running_error(*m_logger, m_writer, MSG);
-    MAYBE_FORWARD(s, MSG);
-
-    m_writer.log_commit();
+    m_writer->log_commit();
     m_images.clear();
-    return m_writer.status();
+    return m_writer->status();
 }
+
+#undef HANDLE_WRITER_ERRORS
 
 auto BasicWriteAheadLog::stop_workers() -> Status
 {
+    return stop_workers_impl();
+}
+
+auto BasicWriteAheadLog::stop_workers_impl() -> Status
+{
     static constexpr auto MSG = "could not stop background writer";
     m_logger->info("received stop request");
-    m_writer.stop();
+    CALICO_EXPECT_TRUE(m_is_working);
 
-    auto s = handle_writer_error(*m_logger, m_writer);
+    m_images.clear();
+    m_is_working = false;
+    auto s = m_writer->stop();
+    m_writer.reset();
+
+    auto t = Status::ok(); // m_cleaner->stop();
+//    m_cleaner.reset();
+
+    if (m_status.is_ok()) {
+        if (!s.is_ok()) {
+            m_status = s;
+        } else if (!t.is_ok()) {
+            m_status = t;
+        }
+    }
+
     MAYBE_FORWARD(s, MSG);
+    MAYBE_FORWARD(t, MSG);
 
     m_logger->info("background writer is stopped");
-    m_images.clear(); // TODO: Shouldn't need these anymore since this call should be followed by an abort or shutdown.
     return s;
 }
 
 auto BasicWriteAheadLog::start_workers() -> Status
 {
+    static constexpr auto MSG = "could not start workers";
     m_logger->info("received start request: next segment ID is {}", m_collection.most_recent_id().value);
+    CALICO_EXPECT_FALSE(m_is_working);
 
-    m_writer.start();
-    m_logger->info("background writer is started");
-    return handle_writer_error(*m_logger, m_writer); // TODO: Likely doesn't do much since writer is not guaranteed to have done anything yet...
+    m_writer = std::make_unique<BasicWalWriter>(BasicWalWriter::Parameters {
+        m_store,
+        &m_collection,
+        &m_flushed_lsn,
+        &m_pager_lsn,
+        m_logger,
+        m_prefix,
+        m_page_size,
+        m_wal_limit,
+    });
+
+    auto s = m_writer->status();
+    auto t = Status::ok(); // m_cleaner->status();
+    if (s.is_ok() && t.is_ok()) {
+        m_is_working = true;
+        m_logger->info("workers are started");
+    } else {
+        m_writer.reset();
+//        m_cleaner.reset();
+        MAYBE_FORWARD(s, MSG);
+        MAYBE_FORWARD(t, MSG);
+    }
+    return s;
 }
 
 auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status
 {
     static constexpr auto MSG = "cannot recover";
     m_logger->info("received recovery request");
+    CALICO_EXPECT_FALSE(m_is_working);
 
     std::vector<std::string> child_names;
     const auto path_prefix = m_prefix + WAL_PREFIX;
@@ -255,8 +300,9 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
 
 auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
 {
-    static constexpr auto MSG = "could not undo last";
-    m_logger->info("received undo request");
+    static constexpr auto MSG = "could not abort last transaction";
+    m_logger->info("received abort request");
+    CALICO_EXPECT_FALSE(m_is_working);
 
     auto s = Status::ok();
     SegmentId obsolete;
@@ -315,8 +361,8 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
 
 auto BasicWriteAheadLog::flush_pending() -> Status
 {
-    m_writer.flush_block();
-    return m_writer.status(); // TODO: May not reflect error yet... Should find a good place to check this each operation...
+    m_writer->flush_block();
+    return status();
 }
 
 #undef MAYBE_FORWARD

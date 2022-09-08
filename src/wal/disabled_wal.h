@@ -22,6 +22,12 @@ public:
     }
 
     [[nodiscard]]
+    auto status() const -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]]
     auto flushed_lsn() const -> std::uint64_t override
     {
         return 0;

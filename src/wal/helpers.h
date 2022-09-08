@@ -177,7 +177,6 @@ public:
 private:
     mutable std::mutex m_mutex;
     std::set<WalSegment> m_segments;
-    WalSegment m_temp;
 };
 
 /*
