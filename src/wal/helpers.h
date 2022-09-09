@@ -401,7 +401,7 @@ public:
         return m_file.release();
     }
 
-    auto present(LogPosition position, Bytes &out) -> Status
+    auto fetch_at(LogPosition position, Bytes &out) -> Status
     {
         auto tail = stob(m_tail);
         if (!m_has_block || position.number != m_block_num) {

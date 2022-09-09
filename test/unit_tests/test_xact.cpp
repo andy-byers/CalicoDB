@@ -306,10 +306,11 @@ TEST_F(FailureTests, WalOpenErrorIsPropagatedDuringModify)
 
 TEST_F(FailureTests, WalReadErrorIsPropagatedDuringAbort)
 {
-    interceptors::set_read(FailOnce<0> {"test/wal-"});
-
     auto xact = db.transaction();
     insert_1000_records(*this);
+
+    interceptors::set_read(FailOnce<0> {"test/wal-"});
+
     assert_error_42(xact.abort());
     assert_error_42(db.status());
 }
@@ -318,6 +319,7 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
 {
     add_sequential_records(db, 500);
 
+    // TODO: Kinda sketchy to set this after we've written...
     interceptors::set_read(FailOnce<5> {"test/data"});
 
     // Iterate until a read() call fails.

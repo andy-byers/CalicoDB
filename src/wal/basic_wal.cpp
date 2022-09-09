@@ -1,4 +1,5 @@
 #include "basic_wal.h"
+#include "cleaner.h"
 #include "iterator.h"
 #include "utils/logging.h"
 
@@ -10,13 +11,19 @@ namespace calico {
         if (!calico_s.is_ok()) return forward_status(calico_s, message); \
     } while (0)
 
-[[nodiscard]] static auto handle_writer_error(spdlog::logger &logger, BasicWalWriter &writer, Status &out)
+[[nodiscard]] static auto handle_worker_error(spdlog::logger &logger, const BasicWalWriter &writer, const BasicWalCleaner &cleaner, Status &out)
 {
     auto s = writer.status();
     if (!s.is_ok()) {
         logger.error("(1/2) background writer encountered an error");
         logger.error("(2/2) {}", s.what());
         out = s;
+    }
+    s = cleaner.status();
+    if (!s.is_ok()) {
+        logger.error("(1/2) background cleaner encountered an error");
+        logger.error("(2/2) {}", s.what());
+        if (out.is_ok()) out = s;
     }
     return s;
 }
@@ -68,8 +75,8 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
     // TODO: Move this into a close() method. We probably want to know if the writer shut down okay.
 
     if (m_is_working) {
-        auto s = handle_writer_error(*m_logger, *m_writer, m_status);
-        forward_status(s, "cannot clean up WAL writer");
+        auto s = handle_worker_error(*m_logger, *m_writer, *m_cleaner, m_status);
+        forward_status(s, "cannot clean up before close");
 
         s = stop_workers_impl();
         forward_status(s, "cannot stop workers");
@@ -82,8 +89,8 @@ auto BasicWriteAheadLog::status() const -> Status
         auto s = m_writer->status();
         if (!s.is_ok()) return s;
 
-//        s = m_cleaner->status();
-//        if (!s.is_ok()) return s;
+        s = m_cleaner->status();
+        if (!s.is_ok()) return s;
     }
     return m_status;
 }
@@ -99,18 +106,25 @@ auto BasicWriteAheadLog::current_lsn() const -> std::uint64_t
     return m_writer->last_lsn().value + 1;
 }
 
-#define HANDLE_WRITER_ERRORS \
+auto BasicWriteAheadLog::allow_cleanup(std::uint64_t pager_lsn) -> void
+{
+    (void)pager_lsn; // TODO: Cleanup needs help. Write unit tests!
+//    if (m_is_working)
+//        m_cleaner->dispatch(SequenceId {pager_lsn});
+}
+
+#define HANDLE_WORKER_ERRORS \
     do { \
         auto s = handle_not_started_error(*m_logger, m_is_working, MSG); \
         MAYBE_FORWARD(s, MSG); \
-        s = handle_writer_error(*m_logger, *m_writer, m_status); \
+        s = handle_worker_error(*m_logger, *m_writer, *m_cleaner, m_status); \
         MAYBE_FORWARD(s, MSG); \
     } while (0)
 
 auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> Status
 {
     static constexpr auto MSG = "could not log full image";
-    HANDLE_WRITER_ERRORS;
+    HANDLE_WORKER_ERRORS;
 
     // Skip writing this full image if one has already been written for this page during this transaction. If so, we can
     // just use the old one to undo changes made to this page during the entire transaction.
@@ -128,7 +142,7 @@ auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> St
 auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status
 {
     static constexpr auto MSG = "could not log deltas";
-    HANDLE_WRITER_ERRORS;
+    HANDLE_WORKER_ERRORS;
 
     m_writer->log_deltas(PageId {page_id}, image, deltas);
     return m_writer->status();
@@ -139,14 +153,14 @@ auto BasicWriteAheadLog::log_commit() -> Status
     m_logger->info("logging commit");
 
     static constexpr auto MSG = "could not log commit";
-    HANDLE_WRITER_ERRORS;
+    HANDLE_WORKER_ERRORS;
 
     m_writer->log_commit();
     m_images.clear();
     return m_writer->status();
 }
 
-#undef HANDLE_WRITER_ERRORS
+#undef HANDLE_WORKER_ERRORS
 
 auto BasicWriteAheadLog::stop_workers() -> Status
 {
@@ -164,16 +178,11 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
     auto s = m_writer->stop();
     m_writer.reset();
 
-    auto t = Status::ok(); // m_cleaner->stop();
-//    m_cleaner.reset();
+    auto t = std::move(*m_cleaner).destroy();
+    m_cleaner.reset();
 
-    if (m_status.is_ok()) {
-        if (!s.is_ok()) {
-            m_status = s;
-        } else if (!t.is_ok()) {
-            m_status = t;
-        }
-    }
+    if (m_status.is_ok())
+        m_status = s.is_ok() ? t : s;
 
     MAYBE_FORWARD(s, MSG);
     MAYBE_FORWARD(t, MSG);
@@ -192,12 +201,18 @@ auto BasicWriteAheadLog::start_workers() -> Status
         m_store,
         &m_collection,
         &m_flushed_lsn,
-        &m_pager_lsn,
         m_logger,
         m_prefix,
         m_page_size,
         m_wal_limit,
     });
+
+    m_cleaner = std::make_unique<BasicWalCleaner>(
+        *m_store,
+        m_prefix,
+        m_collection,
+        m_reader
+    );
 
     auto s = m_writer->status();
     auto t = Status::ok(); // m_cleaner->status();
@@ -206,7 +221,7 @@ auto BasicWriteAheadLog::start_workers() -> Status
         m_logger->info("workers are started");
     } else {
         m_writer.reset();
-//        m_cleaner.reset();
+        m_cleaner.reset();
         MAYBE_FORWARD(s, MSG);
         MAYBE_FORWARD(t, MSG);
     }

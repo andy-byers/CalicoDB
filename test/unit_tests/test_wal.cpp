@@ -468,7 +468,8 @@ TEST_F(WalCollectionTests, RecordsSegmentInfoCorrectly)
 TEST_F(WalCollectionTests, RemovesAllSegmentsFromLeft)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_from_left(SegmentId::from_index(20), [](auto) {return Status::ok();})));
+    // SegmentId::from_index(20) is one past the end.
+    collection.remove_before(SegmentId::from_index(20));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(ids.empty());
@@ -477,7 +478,8 @@ TEST_F(WalCollectionTests, RemovesAllSegmentsFromLeft)
 TEST_F(WalCollectionTests, RemovesAllSegmentsFromRight)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_from_right(SegmentId::from_index(0), [](auto) {return Status::ok();})));
+    // SegmentId::null() is one before the beginning.
+    collection.remove_after(SegmentId::null());
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(ids.empty());
@@ -486,7 +488,7 @@ TEST_F(WalCollectionTests, RemovesAllSegmentsFromRight)
 TEST_F(WalCollectionTests, RemovesSomeSegmentsFromLeft)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_from_left(SegmentId::from_index(10), [](auto) {return Status::ok();})));
+    collection.remove_before(SegmentId::from_index(10));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), SegmentId::from_index(10), 10));
@@ -495,7 +497,7 @@ TEST_F(WalCollectionTests, RemovesSomeSegmentsFromLeft)
 TEST_F(WalCollectionTests, RemovesSomeSegmentsFromRight)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_from_right(SegmentId::from_index(10), [](auto) {return Status::ok();})));
+    collection.remove_after(SegmentId::from_index(9));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), SegmentId::from_index(0), 10));
@@ -755,7 +757,7 @@ public:
 auto append_bytes_at(RandomLogReader &reader, LogPosition position, Size num_bytes, std::string &out)
 {
     Bytes temp;
-    ASSERT_TRUE(expose_message(reader.present(position, temp)));
+    ASSERT_TRUE(expose_message(reader.fetch_at(position, temp)));
     out.resize(out.size() + num_bytes);
     mem_copy(stob(out).advance(out.size() - num_bytes), temp.truncate(num_bytes));
 }
@@ -897,7 +899,6 @@ public:
             store.get(),
             &collection,
             &flushed_lsn,
-            &pager_lsn,
             create_logger(create_sink(), "wal"),
             ROOT,
             PAGE_SIZE,
@@ -907,7 +908,6 @@ public:
 
     WalCollection collection;
     std::atomic<SequenceId> flushed_lsn {};
-    std::atomic<SequenceId> pager_lsn {};
     std::unique_ptr<LogScratchManager> scratch;
     std::unique_ptr<BasicWalReader> reader;
     std::unique_ptr<BasicWalWriter> writer;

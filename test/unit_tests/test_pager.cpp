@@ -36,8 +36,8 @@ TEST(UniqueCacheTests, DuplicateKeyDeathTest)
 
 TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
 {
-//    impl::UniqueCache<int, int> cache;
-//    ASSERT_EQ(cache.evict(), std::nullopt);
+    impl::UniqueCache<int, int> cache;
+    ASSERT_EQ(cache.evict(), std::nullopt);
 }
 
 TEST(UniqueCacheTests, CannotGetNonexistentValue)
@@ -100,7 +100,6 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     registry.put(PageId {3UL}, FrameNumber {3UL});
     ASSERT_EQ(registry.size(), 6);
 
-    // Reference these entries again, causing them to be placed in the hot cache.
     ASSERT_EQ(registry.get(PageId {11UL})->second.frame_id, 11UL);
     ASSERT_EQ(registry.get(PageId {12UL})->second.frame_id, 12UL);
     ASSERT_EQ(registry.get(PageId {13UL})->second.frame_id, 13UL);

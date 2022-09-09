@@ -19,6 +19,7 @@ public:
 
     explicit BasicWalReader(Storage &store, std::string prefix, Size page_size)
         : m_redo_reader {wal_block_size(page_size)},
+          m_undo_reader_ {wal_block_size(page_size)},
           m_undo_reader {wal_block_size(page_size)},
           m_redo_filter {[](auto type) {
               return type == WalPayloadType::DELTAS || type == WalPayloadType::COMMIT;
@@ -45,6 +46,7 @@ private:
 
     SegmentId m_segment_id;
     SequentialLogReader m_redo_reader;
+    SequentialLogReader m_undo_reader_;
     RandomLogReader m_undo_reader;
     WalFilter m_redo_filter;
     WalFilter m_undo_filter;

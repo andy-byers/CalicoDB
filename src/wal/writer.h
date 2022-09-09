@@ -286,7 +286,6 @@ private:
     WalRecordWriter m_writer;
     std::string m_prefix;
     LogScratchManager *m_scratch {};
-//    WalCollection *m_collection {};
     Storage *m_store {};
     Size m_wal_limit {};
     SegmentGuard m_guard; // TODO: This is kinda pointless now that we're storing it as a member...
@@ -299,7 +298,6 @@ public:
         Storage *store {};
         WalCollection *collection {};
         std::atomic<SequenceId> *flushed_lsn {};
-        std::atomic<SequenceId> *pager_lsn {};
         std::shared_ptr<spdlog::logger> logger;
         std::string prefix;
         Size page_size {};

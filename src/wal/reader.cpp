@@ -188,7 +188,7 @@ auto BasicWalReader::reverse_read_logical_record(WalRecordHeader &header, Bytes 
 
     for (; itr != end; ) {
         // Get a slice of the reader's tail buffer at the given position.
-        auto s = reader.present(itr->pos, bytes);
+        auto s = reader.fetch_at(itr->pos, bytes);
         if (!s.is_ok()) return s;
 
         auto temp = read_wal_record_header(bytes);

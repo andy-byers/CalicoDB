@@ -17,6 +17,7 @@ namespace calico {
 class Storage;
 class AppendWriter;
 class RandomReader;
+class BasicWalCleaner;
 
 class BasicWriteAheadLog: public WriteAheadLog {
 public:
@@ -40,14 +41,7 @@ public:
         return m_is_working;
     }
 
-    auto allow_cleanup(std::uint64_t pager_lsn) -> void override
-    {
-        // TODO: m_pager_lsn is the largest page LSN written back to the database file. We can delete WAL segments up to this point. We could
-        //       do this in a thread separate from the background writer, with some synchronization to make sure we aren't messing with the
-        //       segment being written.
-        const auto before = m_pager_lsn.load();
-        m_pager_lsn.store(SequenceId {std::max(before, SequenceId {pager_lsn})});
-    }
+    auto allow_cleanup(std::uint64_t pager_lsn) -> void override;
 
     ~BasicWriteAheadLog() override;
     [[nodiscard]] static auto open(const Parameters&, WriteAheadLog**) -> Status;
@@ -89,7 +83,7 @@ private:
 
     Status m_status {Status::ok()};
     std::unique_ptr<BasicWalWriter> m_writer;
-//    std::unique_ptr<BasicWalCleaner> m_cleaner;
+    std::unique_ptr<BasicWalCleaner> m_cleaner;
     Size m_page_size {};
     Size m_wal_limit {};
 
