@@ -298,6 +298,7 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
     s = abort_last(undo_cb);
     MAYBE_FORWARD(s, MSG);
 
+fmt::print("fin abort");
     m_logger->info("finished recovery");
     return s;
 }
@@ -354,6 +355,7 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
         CALICO_EXPECT_FALSE(info.has_commit);
         return m_store->remove_file(m_prefix + info.id.to_name());
     });
+fmt::print("fin abort");
     m_logger->info("finished undo");
     return s;
 }

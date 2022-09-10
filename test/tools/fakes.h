@@ -134,15 +134,18 @@ struct FailOnce {
     Size index {};
 };
 
-struct FailAlways {
-    explicit FailAlways(std::string matcher_path = {})
+template<Size Delay = 0>
+struct FailAfter {
+    explicit FailAfter(std::string matcher_path = {})
         : matcher {std::move(matcher_path)}
     {}
 
-    auto operator()(const std::string &path, ...) const -> Status
+    auto operator()(const std::string &path, ...) -> Status
     {
-        if (!matcher.empty() && stob(path).starts_with(matcher))
-            return error;
+        if (!matcher.empty()) {
+            if (stob(path).starts_with(matcher) && index++ >= Delay)
+                return error;
+        }
         return Status::ok();
     }
 

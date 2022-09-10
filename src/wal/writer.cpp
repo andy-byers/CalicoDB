@@ -21,6 +21,8 @@ auto BackgroundWriter::handle_error(SegmentGuard &guard, Status e) -> void
 
 auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
 {
+if(payload.size()==521)fmt::print(stderr,"app LSN:{}\n", lsn.value);
+
     return m_writer.write(lsn, payload, [this](auto flushed_lsn) {
         m_flushed_lsn->store(flushed_lsn);
     });

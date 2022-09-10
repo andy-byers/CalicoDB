@@ -34,7 +34,6 @@ struct UndoDescriptor {
 };
 
 using RedoCallback = std::function<Status(RedoDescriptor)>;
-
 using UndoCallback = std::function<Status(UndoDescriptor)>;
 
 class WalIterator {
@@ -70,7 +69,12 @@ public:
 //    [[nodiscard]] virtual auto open_iterator(WalIterator**) -> Status {return Status::ok();};// = 0; TODO: Make this pure.
     virtual auto allow_cleanup(std::uint64_t pager_lsn) -> void = 0;
 
-    // TODO: Remove these.
+    // TODO: * * We shouldn't get rid of the segments representing the most-recent failed transaction until the pager has flushed successfully. * *
+    //       Also, we should go ahead and apply both full images and deltas during redo. When we finally implement background cleanup of
+    //       obsolete segments from the left, we should try to remove whole transactions each time. We shouldn't remove any segments until
+    //       a) the transaction they belong to is committed, and b) the pager flushed LSN indicates that all of those updates are on the
+    //       database disk. This ensures that we have full images for every delta that comes afterward. When we start rolling the WAL in
+    //       recovery, we should start at the pager's flushed LSN value. Anything before that is already applied.
     [[nodiscard]] virtual auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status = 0;
     [[nodiscard]] virtual auto abort_last(const UndoCallback &callback) -> Status = 0;
 };

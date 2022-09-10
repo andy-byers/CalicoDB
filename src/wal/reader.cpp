@@ -78,6 +78,7 @@ auto BasicWalReader::redo(const RedoCallback &callback) -> Status
                 s = callback(decode_commit_payload(header, payload));
                 break;
             case WalPayloadType::FULL_IMAGE:
+fmt::print(stderr, "redo LSN {}\n", header.lsn);
                 break;
             default:
                 return unrecognized_type_error(type);
@@ -102,6 +103,8 @@ auto BasicWalReader::undo(const UndoCallback &callback) -> Status
         const auto type = read_payload_type(payload);
         switch (type) {
             case WalPayloadType::FULL_IMAGE:
+fmt::print(stderr, "undo LSN {}\n", header.lsn);
+
                 s = callback(decode_full_image_payload(payload.truncate(header.size)));
                 break;
             case WalPayloadType::DELTAS:

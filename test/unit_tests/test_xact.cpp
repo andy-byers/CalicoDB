@@ -708,7 +708,7 @@ public:
     Size target {};
 };
 
-class RecoveryTests_FailImmediately: public RecoveryTestHarness<FailAlways> {};
+class RecoveryTests_FailImmediately: public RecoveryTestHarness<FailAfter<0>> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryTests_FailImmediately,
@@ -731,11 +731,11 @@ TEST_P(RecoveryTests_FailImmediately, BasicRecovery)
 
 // Only can test system calls that are called at least 5 times before and during abort(). If we don't produce 5 calls during abort(),
 // the procedure will succeed and the database will not need recovery.
-class RecoveryTests_FailAfterDelay: public RecoveryTestHarness<FailEvery<5>> {};
+class RecoveryTests_FailAfterDelay_5: public RecoveryTestHarness<FailEvery<5>> {};
 
 INSTANTIATE_TEST_SUITE_P(
-    RecoveryTests_FailAfterDelay,
-    RecoveryTests_FailAfterDelay,
+    RecoveryTests_FailAfterDelay_5,
+    RecoveryTests_FailAfterDelay_5,
     ::testing::Values(
         RecoveryTestFailureType::DATA_WRITE,
         RecoveryTestFailureType::WAL_OPEN,
@@ -744,13 +744,32 @@ INSTANTIATE_TEST_SUITE_P(
         return recovery_test_failure_type_name(info.param);
     });
 
-TEST_P(RecoveryTests_FailAfterDelay, BasicRecovery)
+TEST_P(RecoveryTests_FailAfterDelay_5, BasicRecovery)
 {
     open_database();
     validate();
 }
 
-class RecoveryReentrancyTests_FailImmediately_100: public RecoveryReentrancyTestHarness<FailAlways, 100> {};
+class RecoveryTests_FailAfterDelay_500: public RecoveryTestHarness<FailAfter<500>> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    RecoveryTests_FailAfterDelay_500,
+    RecoveryTests_FailAfterDelay_500,
+    ::testing::Values(
+        RecoveryTestFailureType::DATA_WRITE,
+        RecoveryTestFailureType::WAL_OPEN,
+        RecoveryTestFailureType::WAL_READ),
+    [](const auto &info) {
+        return recovery_test_failure_type_name(info.param);
+    });
+
+TEST_P(RecoveryTests_FailAfterDelay_500, BasicRecovery)
+{
+    open_database();
+    validate();
+}
+
+class RecoveryReentrancyTests_FailImmediately_100: public RecoveryReentrancyTestHarness<FailAfter<0>, 100> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailImmediately_100,
@@ -768,7 +787,7 @@ TEST_P(RecoveryReentrancyTests_FailImmediately_100, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailImmediately_10000: public RecoveryReentrancyTestHarness<FailAlways, 10000> {};
+class RecoveryReentrancyTests_FailImmediately_10000: public RecoveryReentrancyTestHarness<FailAfter<0>, 10000> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailImmediately_10000,
@@ -785,7 +804,7 @@ TEST_P(RecoveryReentrancyTests_FailImmediately_10000, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailAfterDelay_100: public RecoveryReentrancyTestHarness<FailEvery<5>, 100> {};
+class RecoveryReentrancyTests_FailAfterDelay_100: public RecoveryReentrancyTestHarness<FailAfter<100>, 100> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailAfterDelay_100,
@@ -803,7 +822,7 @@ TEST_P(RecoveryReentrancyTests_FailAfterDelay_100, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailAfterDelay_10000: public RecoveryReentrancyTestHarness<FailEvery<100>, 10000> {};
+class RecoveryReentrancyTests_FailAfterDelay_10000: public RecoveryReentrancyTestHarness<FailAfter<100>, 10000> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailAfterDelay_10000,
