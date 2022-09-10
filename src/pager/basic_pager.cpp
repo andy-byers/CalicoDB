@@ -111,14 +111,13 @@ auto BasicPager::flush() -> Status
         if (in_range) {
             if (page_lsn > m_wal->flushed_lsn()) {
                 LogMessage message {*m_logger};
-                message.set_primary(MSG);
-                message.set_detail("WAL has pending updates");
-                message.set_hint("flush the WAL and try again");
-                return message.logic_error();
+                message.set_primary("could not flush page {}", page_id.value);
+                message.set_detail("page updates for LSN {} were not logged", page_lsn.value);
+                message.log(spdlog::level::warn);
+            } else {
+                s = m_framer->write_back(frame_id);
+                MAYBE_FORWARD(s, MSG);
             }
-            s = m_framer->write_back(frame_id);
-            MAYBE_FORWARD(s, MSG);
-
         } else {
             // Get rid of all pages that are not in range. This should only happen after pages are deleted during abort() or recovery.
             m_registry.erase(page_id);

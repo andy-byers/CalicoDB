@@ -13,7 +13,7 @@
 
 namespace calico {
 
-class WalRecordWriter;
+class LogWriter;
 
 [[nodiscard]]
 inline auto wal_block_size(Size page_size) -> Size
@@ -218,7 +218,7 @@ private:
  */
 class SegmentGuard final {
 public:
-    SegmentGuard(Storage &store, WalRecordWriter &writer, WalCollection &collection, std::atomic<SequenceId> &flushed_lsn, std::string prefix)
+    SegmentGuard(Storage &store, LogWriter &writer, WalCollection &collection, std::atomic<SequenceId> &flushed_lsn, std::string prefix)
         : m_prefix {std::move(prefix)},
           m_store {&store},
           m_writer {&writer},
@@ -249,7 +249,7 @@ private:
     std::string m_prefix;
     WalSegment m_current;
     Storage *m_store {};
-    WalRecordWriter *m_writer {};
+    LogWriter *m_writer {};
     WalCollection *m_collection {};
     std::atomic<SequenceId> *m_flushed_lsn {};
 };
@@ -290,13 +290,13 @@ inline auto read_exact_or_hit_eof(RandomReader &file, Bytes out, Size n) -> Stat
     return s;
 }
 
-class SequentialLogReader final {
+class LogReader final {
 public:
-    explicit SequentialLogReader(Size block_size)
+    explicit LogReader(Size block_size)
         : m_buffer {block_size}
     {}
 
-    ~SequentialLogReader() = default;
+    ~LogReader() = default;
 
     [[nodiscard]]
     auto is_attached() const -> bool

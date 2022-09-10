@@ -449,11 +449,11 @@ TEST_F(FailureTests, AbortIsReentrantForDataReadErrors)
 {
     int counter {};
     int counter_max {10};
-    interceptors::read = [&counter, &counter_max](const std::string &path, Bytes&, Size) {
+    interceptors::set_read([&counter, &counter_max](const std::string &path, Bytes&, Size) {
         if (path != "test/data")
             return Status::ok();
         return counter++ == counter_max ? Status::system_error("42") : Status::ok();
-    };
+    });
 
     run_abort_is_reentrant_test(*this, counter, counter_max);
 }
@@ -462,11 +462,11 @@ TEST_F(FailureTests, AbortIsReentrantForDataWriteErrors)
 {
     int counter {};
     int counter_max {10};
-    interceptors::write = [&counter, &counter_max](const std::string &path, BytesView, Size) {
+    interceptors::set_write([&counter, &counter_max](const std::string &path, BytesView, Size) {
         if (path != "test/data")
             return Status::ok();
         return counter++ == counter_max ? Status::system_error("42") : Status::ok();
-    };
+    });
 
     run_abort_is_reentrant_test(*this, counter, counter_max);
 }
@@ -485,30 +485,55 @@ TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
     ASSERT_TRUE(expose_message(db.status()));
 }
 
-class RecoveryTests: public TestOnHeap {
+enum class RecoveryTestFailureType {
+    DATA_WRITE,
+    DATA_SYNC,
+    WAL_OPEN,
+    WAL_READ,
+    WAL_WRITE,
+    WAL_SYNC,
+};
+
+[[nodiscard]]
+static constexpr auto recovery_test_failure_type_name(RecoveryTestFailureType type) -> const char*
+{
+    switch (type) {
+        case RecoveryTestFailureType::DATA_WRITE:
+            return "DATA_WRITE";
+        case RecoveryTestFailureType::DATA_SYNC:
+            return "DATA_SYNC";
+        case RecoveryTestFailureType::WAL_OPEN:
+            return "WAL_OPEN";
+        case RecoveryTestFailureType::WAL_READ:
+            return "WAL_READ";
+        case RecoveryTestFailureType::WAL_WRITE:
+            return "WAL_WRITE";
+        case RecoveryTestFailureType::WAL_SYNC:
+            return "WAL_SYNC";
+        default:
+            return "";
+    }
+}
+
+template<class Failure>
+class RecoveryTestHarness: public testing::TestWithParam<RecoveryTestFailureType> {
 public:
-    RecoveryTests()
+    static constexpr auto ROOT = "test";
+    static constexpr auto PREFIX = "test/";
+    
+    RecoveryTestHarness()
+        : store {std::make_unique<HeapStorage>()}
     {
         options.page_size = 0x200;
         options.frame_count = 16;
+        options.store = store.get();
     }
 
-    ~RecoveryTests() override
-    {
-        interceptors::reset();
-    }
+    ~RecoveryTestHarness() override = default;
 
     auto SetUp() -> void override
     {
         ASSERT_TRUE(expose_message(open_database()));
-
-        RecordGenerator::Parameters param;
-        param.mean_key_size = 16;
-        param.mean_value_size = 100;
-        param.is_unique = true;
-        param.spread = 0;
-        RecordGenerator generator {param};
-        Random random {internal::random_seed};
 
         static constexpr Size GROUP_SIZE {1'000};
         uncommitted = generator.generate(random, GROUP_SIZE * 2);
@@ -521,7 +546,7 @@ public:
             static constexpr auto XACT_SIZE = GROUP_SIZE / NUM_XACTS;
             static_assert(GROUP_SIZE % XACT_SIZE == 0);
 
-            // Commit 10 transactions.
+            // Commit NUM_XACTS transactions.
             auto begin = cbegin(committed);
             while (begin != cend(committed)) {
                 auto xact = db.transaction();
@@ -531,26 +556,58 @@ public:
                 ASSERT_TRUE(expose_message(xact.commit()));
                 begin += XACT_SIZE;
             }
-            // Fail on the next write to the data file.
-            interceptors::write = [](const std::string &path, BytesView, Size) {
-                return path != "test/data" ? Status::ok() : Status::system_error("42");
-            };
 
-            auto xact = db.transaction();
-            for (const auto &[key, value]: uncommitted) {
-                const auto s = db.insert(key, value);
-                if (!s.is_ok()) {
-                    ASSERT_EQ(s.what(), "42");
+            switch (GetParam()) {
+                case RecoveryTestFailureType::DATA_WRITE:
+                    interceptors::set_write(Failure {"test/data"});
                     break;
-                }
+                case RecoveryTestFailureType::DATA_SYNC:
+                    interceptors::set_sync(Failure {"test/data"});
+                    break;
+                case RecoveryTestFailureType::WAL_OPEN:
+                    interceptors::set_open(Failure {"test/wal-"});
+                    break;
+                case RecoveryTestFailureType::WAL_READ:
+                    interceptors::set_read(Failure {"test/wal-"});
+                    break;
+                case RecoveryTestFailureType::WAL_WRITE:
+                    interceptors::set_write(Failure {"test/wal-"});
+                    break;
+                case RecoveryTestFailureType::WAL_SYNC:
+                    interceptors::set_sync(Failure {"test/wal-"});
+                    break;
+                default:
+                    ADD_FAILURE() << "unrecognized test type \"" << int(GetParam()) << "\"";
             }
-            ASSERT_EQ(xact.abort().what(), "42");
-        }
-        ASSERT_EQ(db.close().what(), "42");
 
-        interceptors::write = [](auto, auto, auto) {
-            return Status::ok();
-        };
+#define BREAK_IF_ERROR if (!s.is_ok()) {assert_error_42(s); break;}
+
+            // Run transactions involving the uncommitted set until failure.
+            for (; ; ) {
+                auto xact = db.transaction();
+                auto s = db.status();
+                for (const auto &[key, value]: uncommitted) {
+                    s = db.insert(key, value);
+                    BREAK_IF_ERROR
+                }
+                BREAK_IF_ERROR
+                for (const auto &[key, value]: uncommitted) {
+                    s = db.erase(key);
+                    BREAK_IF_ERROR
+                }
+                if (random.get(4)) {
+                    s = db.commit();
+                } else {
+                    s = db.abort();
+                }
+                BREAK_IF_ERROR
+
+#undef BREAK_IF_ERROR
+            }
+            assert_error_42(db.status());
+        }
+        assert_error_42(db.close());
+        interceptors::reset();
     }
 
     auto open_database() -> Status
@@ -566,90 +623,201 @@ public:
         db.tree().TEST_validate_order();
 
         for (const auto &[key, value]: committed) {
-            ASSERT_TRUE(tools::contains(db, key, value)) << "database should contain " << key;
+            EXPECT_TRUE(tools::contains(db, key, value)) << "database should contain " << key;
         }
         for (const auto &[key, value]: uncommitted) {
-            ASSERT_FALSE(db.find_exact(key).is_valid()) << "database should not contain " << key;
+            EXPECT_FALSE(db.find_exact(key).is_valid()) << "database should not contain " << key;
         }
     }
 
+    std::unique_ptr<Storage> store;
+    RecordGenerator generator {{16, 100, 10, false, true}};
+    Random random {internal::random_seed};
     std::vector<Record> committed;
     std::vector<Record> uncommitted;
     Options options;
     Core db;
 };
 
-TEST_F(RecoveryTests, BasicRecoveryWorks)
+template<class Failure, Size Step>
+class RecoveryReentrancyTestHarness: public RecoveryTestHarness<Failure> {
+public:
+    using Base = RecoveryTestHarness<Failure>;
+    using Base::GetParam;
+
+    auto SetUp() -> void override
+    {
+        Base::SetUp();
+
+        auto callback = [this](const std::string &path, ...) -> Status
+        {
+            if (!stob(path).starts_with(prefix))
+                return Status::ok();
+            return counter++ == target ? Status::system_error("42") : Status::ok();
+        };
+
+        switch (GetParam()) {
+            case RecoveryTestFailureType::DATA_WRITE:
+                prefix = "test/data";
+                interceptors::set_write(callback);
+                break;
+            case RecoveryTestFailureType::DATA_SYNC:
+                prefix = "test/data";
+                interceptors::set_sync(callback);
+                break;
+            case RecoveryTestFailureType::WAL_OPEN:
+                prefix = "test/wal-";
+                interceptors::set_open(callback);
+                break;
+            case RecoveryTestFailureType::WAL_READ:
+                prefix = "test/wal-";
+                interceptors::set_read(callback);
+                break;
+            case RecoveryTestFailureType::WAL_WRITE:
+                prefix = "test/wal-";
+                interceptors::set_write(callback);
+                break;
+            case RecoveryTestFailureType::WAL_SYNC:
+                prefix = "test/wal-";
+                interceptors::set_sync(callback);
+                break;
+            default:
+                ADD_FAILURE() << "unrecognized test type \"" << int(GetParam()) << "\"";
+        }
+    }
+
+    auto run_test() -> void
+    {
+        Size num_tries {};
+        for (; ; num_tries++) {
+            auto s = Base::open_database();
+            if (s.is_ok()) {
+                break;
+            } else {
+                assert_error_42(s);
+                counter = 0;
+                target += Step;
+            }
+        }
+        Base::validate();
+        ASSERT_GT(num_tries, 0) << "recovery should have failed at least once";
+    }
+
+    std::string prefix;
+    Size counter {};
+    Size target {};
+};
+
+class RecoveryTests_FailImmediately: public RecoveryTestHarness<FailAlways> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    RecoveryTests_FailImmediately,
+    RecoveryTests_FailImmediately,
+    ::testing::Values(
+        RecoveryTestFailureType::DATA_WRITE,
+        RecoveryTestFailureType::DATA_SYNC,
+        RecoveryTestFailureType::WAL_OPEN,
+        RecoveryTestFailureType::WAL_READ,
+        RecoveryTestFailureType::WAL_WRITE),
+    [](const auto &info) {
+        return recovery_test_failure_type_name(info.param);
+    });
+
+TEST_P(RecoveryTests_FailImmediately, BasicRecovery)
 {
     open_database();
     validate();
 }
 
-template<class Test>
-static auto run_recovery_is_reentrant_test(Test &test, int step, int &counter, int &target) -> void
+// Only can test system calls that are called at least 5 times before and during abort(). If we don't produce 5 calls during abort(),
+// the procedure will succeed and the database will not need recovery.
+class RecoveryTests_FailAfterDelay: public RecoveryTestHarness<FailEvery<5>> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    RecoveryTests_FailAfterDelay,
+    RecoveryTests_FailAfterDelay,
+    ::testing::Values(
+        RecoveryTestFailureType::DATA_WRITE,
+        RecoveryTestFailureType::WAL_OPEN,
+        RecoveryTestFailureType::WAL_READ),
+    [](const auto &info) {
+        return recovery_test_failure_type_name(info.param);
+    });
+
+TEST_P(RecoveryTests_FailAfterDelay, BasicRecovery)
 {
-    Size num_tries {};
-    for (; ; num_tries++) {
-        auto s = test.open_database();
-        if (s.is_ok()) {
-            ASSERT_GT(target, step);
-            target = 0;
-            counter = 1;
-            test.validate();
-            break;
-        } else {
-            ASSERT_TRUE(s.is_system_error());
-            ASSERT_EQ(s.what(), "42");
-            counter = 0;
-            target += step;
-        }
-    }
-    ASSERT_GE(num_tries, 3);
+    open_database();
+    validate();
 }
 
-TEST_F(RecoveryTests, RecoveryIsReentrantForDataReadFaults)
+class RecoveryReentrancyTests_FailImmediately_100: public RecoveryReentrancyTestHarness<FailAlways, 100> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    RecoveryReentrancyTests_FailImmediately_100,
+    RecoveryReentrancyTests_FailImmediately_100,
+    ::testing::Values(
+        RecoveryTestFailureType::DATA_WRITE,
+        RecoveryTestFailureType::WAL_OPEN),
+    [](const auto &info) {
+        return recovery_test_failure_type_name(info.param);
+    });
+
+TEST_P(RecoveryReentrancyTests_FailImmediately_100, RecoveryIsReentrant)
 {
-    static constexpr auto START {100};
-    int counter {};
-    int target {START};
-
-    interceptors::read = [&counter, &target](const std::string &path, Bytes&, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ == target ? Status::system_error("42") : Status::ok();
-    };
-
-    run_recovery_is_reentrant_test(*this, START, counter, target);
+    run_test();
+    validate();
 }
 
-TEST_F(RecoveryTests, RecoveryIsReentrantForDataWriteFaults)
+class RecoveryReentrancyTests_FailImmediately_10000: public RecoveryReentrancyTestHarness<FailAlways, 10000> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    RecoveryReentrancyTests_FailImmediately_10000,
+    RecoveryReentrancyTests_FailImmediately_10000,
+    ::testing::Values(
+        RecoveryTestFailureType::WAL_READ),
+    [](const auto &info) {
+        return recovery_test_failure_type_name(info.param);
+    });
+
+TEST_P(RecoveryReentrancyTests_FailImmediately_10000, RecoveryIsReentrant)
 {
-    static constexpr auto START {100};
-    int counter {};
-    int target {START};
-
-    interceptors::write = [&counter, &target](const std::string &path, BytesView, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ == target ? Status::system_error("42") : Status::ok();
-    };
-
-    run_recovery_is_reentrant_test(*this, START, counter, target);
+    run_test();
+    validate();
 }
 
-TEST_F(RecoveryTests, RecoveryIsReentrantForWalReadFaults)
+class RecoveryReentrancyTests_FailAfterDelay_100: public RecoveryReentrancyTestHarness<FailEvery<5>, 100> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    RecoveryReentrancyTests_FailAfterDelay_100,
+    RecoveryReentrancyTests_FailAfterDelay_100,
+    ::testing::Values(
+        RecoveryTestFailureType::DATA_WRITE,
+        RecoveryTestFailureType::WAL_OPEN),
+    [](const auto &info) {
+        return recovery_test_failure_type_name(info.param);
+    });
+
+TEST_P(RecoveryReentrancyTests_FailAfterDelay_100, RecoveryIsReentrant)
 {
-    static constexpr auto START {100};
-    int counter {};
-    int target {START};
+    run_test();
+    validate();
+}
 
-    interceptors::read = [&counter, &target](const std::string &path, Bytes&, Size) {
-        if (path == "test/data")
-            return Status::ok();
-        return counter++ == target ? Status::system_error("42") : Status::ok();
-    };
+class RecoveryReentrancyTests_FailAfterDelay_10000: public RecoveryReentrancyTestHarness<FailEvery<100>, 10000> {};
 
-    run_recovery_is_reentrant_test(*this, START, counter, target);
+INSTANTIATE_TEST_SUITE_P(
+    RecoveryReentrancyTests_FailAfterDelay_10000,
+    RecoveryReentrancyTests_FailAfterDelay_10000,
+    ::testing::Values(
+        RecoveryTestFailureType::WAL_READ),
+    [](const auto &info) {
+        return recovery_test_failure_type_name(info.param);
+    });
+
+TEST_P(RecoveryReentrancyTests_FailAfterDelay_10000, RecoveryIsReentrant)
+{
+    run_test();
+    validate();
 }
 
 } // namespace calico

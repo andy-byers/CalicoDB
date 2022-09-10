@@ -152,8 +152,8 @@ struct FailAlways {
 };
 
 template<Size Delay>
-struct FailAfter {
-    explicit FailAfter(std::string matcher_path = {})
+struct FailEvery {
+    explicit FailEvery(std::string matcher_path = {})
         : matcher {std::move(matcher_path)}
     {}
 

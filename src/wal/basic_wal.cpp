@@ -127,7 +127,8 @@ auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> St
     HANDLE_WORKER_ERRORS;
 
     // Skip writing this full image if one has already been written for this page during this transaction. If so, we can
-    // just use the old one to undo changes made to this page during the entire transaction.
+    // just use the old one to undo changes made to this page during the entire transaction. We also need to make sure the
+    // full images form a disjoint set that covers all changed pages. This lets us read a segment forward to undo changes.
     const auto itr = m_images.find(PageId {page_id});
     if (itr != cend(m_images)) {
         m_logger->info("skipping full image for page {}", page_id);
@@ -169,6 +170,8 @@ auto BasicWriteAheadLog::stop_workers() -> Status
 
 auto BasicWriteAheadLog::stop_workers_impl() -> Status
 {
+    // Stops the workers no matter what, even if an error is encountered. We should be able to call abort_last() safely after
+    // this method returns.
     static constexpr auto MSG = "could not stop background writer";
     m_logger->info("received stop request");
     CALICO_EXPECT_TRUE(m_is_working);
@@ -346,7 +349,6 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
         obsolete = id;
     }
     if (obsolete.is_null()) return s;
-
     // Remove obsolete WAL segments.
     s = m_collection.remove_from_right(obsolete, [this](auto info) {
         CALICO_EXPECT_FALSE(info.has_commit);

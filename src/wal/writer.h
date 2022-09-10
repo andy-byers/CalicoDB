@@ -14,11 +14,11 @@
 
 namespace calico {
 
-class WalRecordWriter {
+class LogWriter {
 public:
     using SetFlushedLsn = std::function<void(SequenceId)>;
 
-    explicit WalRecordWriter(Size buffer_size)
+    explicit LogWriter(Size buffer_size)
         : m_buffer {buffer_size}
     {}
 
@@ -119,7 +119,6 @@ public:
             // Clear unused bytes at the end of the tail buffer.
             mem_clear(m_buffer.remaining());
             auto s = m_file->write(m_buffer.block());
-            //            if (s.is_ok()) s = m_file->sync(); // TODO
             m_block_count += s.is_ok();
             return s;
         });
@@ -173,7 +172,6 @@ public:
           m_writer {param.block_size},
           m_prefix {param.prefix},
           m_scratch {param.scratch},
-//          m_collection {param.collection},
           m_store {param.store},
           m_wal_limit {param.wal_limit},
           m_guard {*param.store, m_writer, *param.collection, *param.flushed_lsn, param.prefix}
@@ -283,7 +281,7 @@ private:
     Worker<Event> m_background;
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> *m_flushed_lsn {};
-    WalRecordWriter m_writer;
+    LogWriter m_writer;
     std::string m_prefix;
     LogScratchManager *m_scratch {};
     Storage *m_store {};

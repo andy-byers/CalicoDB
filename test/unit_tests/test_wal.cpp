@@ -337,7 +337,7 @@ public:
         ASSERT_TRUE(expose_message(writer.detach([](auto) {})));
     }
 
-    WalRecordWriter writer {BLOCK_SIZE};
+    LogWriter writer {BLOCK_SIZE};
 };
 
 TEST_F(WalRecordWriterTests, NewWriterStateIsCorrect)
@@ -565,33 +565,6 @@ TEST_F(BackgroundWriterTests, NewWriterState)
     ASSERT_TRUE(expose_message(writer->status()));
 }
 
-//TEST_F(BackgroundWriterTests, StartAndStopRepeatedly)
-//{
-//    // Should be run with TSan every once in a while!
-//    for (Size i {}; i < 100; ++i) {
-//        writer->startup();
-//        writer->destroy();
-//        ASSERT_TRUE(expose_message(writer->status()));
-//    }
-//}
-
-//TEST_F(BackgroundWriterTests, WriterCleansUp)
-//{
-//    writer->dispatch(get_update_event(SequenceId::from_index(0)));
-//    ASSERT_TRUE(expose_message(writer->status()));
-//
-//    writer->dispatch(BackgroundWriter::Event {
-//        BackgroundWriter::EventType::STOP_WRITER,
-//        SequenceId::from_index(0),
-//        std::nullopt,
-//        0,
-//    }, true);
-//
-//    const auto ids = get_ids(collection);
-//    ASSERT_EQ(ids.size(), 1);
-//    ASSERT_EQ(ids[0].value, 1);
-//}
-
 TEST_F(BackgroundWriterTests, WriteUpdates)
 {
     for (Size i {}; i < 100; ++i) {
@@ -636,7 +609,7 @@ public:
     RandomReader *file {};
 };
 
-class SequentialLogReaderTests: public LogReaderTests<SequentialLogReader> {
+class SequentialLogReaderTests: public LogReaderTests<LogReader> {
 public:
     SequentialLogReaderTests()
     {
@@ -655,7 +628,7 @@ TEST_F(SequentialLogReaderTests, OutOfBoundsCursorDeathTest)
     ASSERT_DEATH(reader.advance_cursor(5), EXPECTATION_MATCHER);
 }
 
-auto randomly_read_from_segment(Random &random, SequentialLogReader &reader) -> std::string
+auto randomly_read_from_segment(Random &random, LogReader &reader) -> std::string
 {
     std::string out;
     for (; ; ) {
@@ -717,7 +690,7 @@ public:
     }
 
     WalCollection collection;
-    WalRecordWriter writer;
+    LogWriter writer;
     std::atomic<SequenceId> flushed_lsn;
 };
 
@@ -877,7 +850,7 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
         i++;
         return Status::ok();
     })));
-
+    ASSERT_EQ(i, images.size());
     ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
 }
 
@@ -904,7 +877,7 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
         i++;
         return Status::ok();
     })));
-
+    ASSERT_EQ(i, images.size());
     ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
 }
 
@@ -1062,7 +1035,7 @@ TEST_F(BasicWalTests, FailureDuringNthOpen)
 {
     auto images = generate_images(*this, PAGE_SIZE, 1'000);
 
-    interceptors::set_open(FailAfter<5> {"test/wal-"});
+    interceptors::set_open(FailEvery<5> {"test/wal-"});
     ASSERT_TRUE(expose_message(wal->start_workers()));
 
     Size num_writes {};

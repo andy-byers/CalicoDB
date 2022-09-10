@@ -32,7 +32,7 @@ public:
     [[nodiscard]]
     auto is_enabled() const -> bool override
     {
-        return true;
+        return m_wal_limit != DISABLE_WAL;
     }
 
     [[nodiscard]]

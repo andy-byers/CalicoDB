@@ -130,7 +130,6 @@ auto BasicWalReader::prepare_traversal() -> Status
 auto BasicWalReader::read_logical_record(WalRecordHeader &header, Bytes payload) -> Status
 {
     CALICO_EXPECT_EQ(header.lsn, 0);
-
     for (auto &reader = m_reader; ; ) {
         if (contains_record(reader.remaining())) {
             const auto temp = read_wal_record_header(reader.remaining());

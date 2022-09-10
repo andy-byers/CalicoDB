@@ -331,28 +331,40 @@ auto Core::commit() -> Status
 
 auto Core::abort() -> Status
 {
-    CALICO_EXPECT_TRUE(m_has_xact);
     m_logger->info("received abort request");
     static constexpr auto MSG = "could not abort";
-    if (!m_wal->is_enabled()) return Status::ok();
+
+    if (!m_wal->is_enabled()) {
+        LogMessage message {*m_logger};
+        message.set_primary(MSG);
+        message.set_detail("WAL is not enabled");
+        message.set_hint("WAL must be enabled when database is created");
+        return message.logic_error();
+    }
+
+    if (!m_has_xact) {
+        LogMessage message {*m_logger};
+        message.set_primary(MSG);
+        message.set_detail("a transaction is not active");
+        message.set_hint("start a transaction and try again");
+        return message.logic_error();
+    }
     auto s = Status::ok();
 
     if (m_wal->is_working()) {
         s = m_wal->stop_workers();
-        if (!s.is_ok()) {
-            m_logger->error("(1/2) WAL encountered an error when stopping workers");
-            m_logger->error("(2/2) {}", s.what());
-        }
+        if (!s.is_ok())
+            forward_status(s, "WAL encountered an error when stopping workers");
     }
 
-    // This should give us the full images of each updated page belonging to the current transaction, before any changes were made,
-    // in reverse order.
-    s = m_wal->abort_last([this](UndoDescriptor undo) {
-        const auto [id, image] = undo;
+    // This should give us the full images of each updated page belonging to the current transaction, before any changes
+    // were made to it.
+    s = m_wal->abort_last([this](const auto &info) {
+        const auto [id, image] = info;
         auto page = m_pager->acquire(PageId {id}, true);
         if (!page.has_value()) return page.error();
 
-        page->undo(undo);
+        page->undo(info);
         return m_pager->release(std::move(*page));
     });
     MAYBE_SAVE_AND_FORWARD(s, MSG);
@@ -364,13 +376,15 @@ auto Core::abort() -> Status
     s = m_pager->flush();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
-    // Database state is ALMOST restored if we have made it here.
+    // Database state is restored if we have made it here, assuming we can start the worker threads again.
     m_status = Status::ok();
 
     m_logger->info("abort succeeded");
     s = m_wal->start_workers();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
+    // If we failed starting up the workers, we should be able to call this method again. It won't really do anything but
+    // start the workers on the second round.
     m_has_xact = false;
     return Status::ok();
 }
@@ -384,7 +398,10 @@ auto Core::close() -> Status
         message.set_hint("finish the transaction and try again");
         return message.logic_error();
     }
-
+    if (m_wal->is_working()) {
+        auto s = m_wal->stop_workers();
+        if (!s.is_ok()) forward_status(s, "could not stop WAL workers");
+    }
     // We already waited on the WAL to be done writing so this should happen immediately.
     auto s = m_pager->flush();
     MAYBE_SAVE_AND_FORWARD(s, "cannot flush pages before stop");

@@ -32,7 +32,7 @@ private:
     [[nodiscard]] auto read_logical_record(WalRecordHeader &header, Bytes payload) -> Status;
 
     SegmentId m_segment_id;
-    SequentialLogReader m_reader;
+    LogReader m_reader;
     std::string m_prefix;
     std::string m_payload;
     Storage *m_store {};
