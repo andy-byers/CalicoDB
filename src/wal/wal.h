@@ -67,7 +67,7 @@ public:
     [[nodiscard]] virtual auto flush_pending() -> Status = 0;
     [[nodiscard]] virtual auto stop_workers() -> Status = 0;
     [[nodiscard]] virtual auto start_workers() -> Status = 0;
-    [[nodiscard]] virtual auto open_iterator(WalIterator**) -> Status {return Status::ok();};// = 0; TODO: Make this pure.
+//    [[nodiscard]] virtual auto open_iterator(WalIterator**) -> Status {return Status::ok();};// = 0; TODO: Make this pure.
     virtual auto allow_cleanup(std::uint64_t pager_lsn) -> void = 0;
 
     // TODO: Remove these.

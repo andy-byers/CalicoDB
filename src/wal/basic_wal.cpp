@@ -1,6 +1,5 @@
 #include "basic_wal.h"
 #include "cleaner.h"
-#include "iterator.h"
 #include "utils/logging.h"
 
 namespace calico {
@@ -49,7 +48,8 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_reader {
           *m_store,
           param.prefix,
-          param.page_size}
+          param.page_size
+      }
 {
     m_logger->info("constructing BasicWriteAheadLog object");
 }
@@ -85,7 +85,7 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
 
 auto BasicWriteAheadLog::status() const -> Status
 {
-    if (m_is_working) { // TODO: Error model needs some work!
+    if (m_is_working) {
         auto s = m_writer->status();
         if (!s.is_ok()) return s;
 
@@ -215,7 +215,7 @@ auto BasicWriteAheadLog::start_workers() -> Status
     );
 
     auto s = m_writer->status();
-    auto t = Status::ok(); // m_cleaner->status();
+    auto t = m_cleaner->status();
     if (s.is_ok() && t.is_ok()) {
         m_is_working = true;
         m_logger->info("workers are started");
@@ -224,28 +224,6 @@ auto BasicWriteAheadLog::start_workers() -> Status
         m_cleaner.reset();
         MAYBE_FORWARD(s, MSG);
         MAYBE_FORWARD(t, MSG);
-    }
-    return s;
-}
-
-auto BasicWriteAheadLog::open_iterator(WalIterator **out) -> Status
-{
-    static constexpr auto MSG = "could not open WAL iterator";
-    auto *itr = new(std::nothrow) BasicWalIterator {*m_store, m_collection, m_prefix, m_page_size};
-
-    if (!itr) {
-        LogMessage message {*m_logger};
-        message.set_primary(MSG);
-        message.set_detail("out of memory");
-        return message.system_error();
-    }
-
-    auto s = itr->open();
-    if (s.is_ok()) {
-        *out = itr;
-    } else {
-        forward_status(s, MSG);
-        delete itr;
     }
     return s;
 }
@@ -273,32 +251,29 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
     });
     std::sort(begin(segment_ids), end(segment_ids));
 
-    // TODO: For the iterator, which needs the collection upfront.
-//    // Let the WAL collection object manage the segment IDs.
-//    for (const auto id: segment_ids)
-//        m_collection.add_segment({id});
-
-//    WalIterator *temp {};
-//    s = open_iterator(&temp);
-//    MAYBE_FORWARD(s, MSG);
-//    std::unique_ptr<WalIterator> iterator {temp};
-
-    std::vector<RecordPosition> uncommitted;
-    SegmentId commit_id;
-
+    // TODO: Only store segment IDs in the collection object (no "has commit" field). We can
+    //       store the segment ID containing the last commit record instead. This lets us abort
+    //       a transaction quickly. May also want to cache the first LSN of each segment (like
+    //       LevelDB/RocksDB).
+    //       .
+    //       If we do the above, we won't have to roll forward segments that are already applied.
+    //       We just read the first LSN of each segment. Once we reach a first LSN greater than
+    //       or equal to the pager's flushed LSN, we can begin rolling forward at the segment
+    //       prior. If no such segment exists, we'll just roll the most-recent segment.
+    bool has_uncommitted {};
     for (const auto id: segment_ids) {
         m_logger->info("rolling segment {} forward", id.value);
-
+        has_uncommitted = true;
 
         s = m_reader.open(id);
-        // Allow segments to be empty. TODO: Missing segments?
+        // Allow segments to be empty.
         if (s.is_logic_error())
             continue;
         MAYBE_FORWARD(s, MSG);
 
         WalSegment segment {id};
         SequenceId last_lsn;
-        s = m_reader.redo(uncommitted, [&](const auto &info) {
+        s = m_reader.redo([&](const auto &info) {
             last_lsn.value = info.page_lsn;
             segment.has_commit = info.is_commit;
             return redo_cb(info);
@@ -308,46 +283,18 @@ auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const Un
             break;
         }
 
-        if (segment.has_commit) {
-            uncommitted.clear();
-            commit_id = id;
-        }
+        if (segment.has_commit)
+            has_uncommitted = false;
 
         m_collection.add_segment(segment);
         m_flushed_lsn.store(last_lsn);
-//        s = iterator->seek_next_segment();
-
     }
-    if (s.is_system_error() || uncommitted.empty())
+    if (s.is_system_error() || !has_uncommitted)
         return s;
 
-    for (auto itr = crbegin(uncommitted); itr != crend(uncommitted); ) {
-        m_logger->info("rolling segment {} backward", itr->id.value);
+    s = abort_last(undo_cb);
+    MAYBE_FORWARD(s, MSG);
 
-        const auto end = std::find_if(next(itr), crend(uncommitted), [itr](const auto &position) {
-            return position.id != itr->id;
-        });
-        s = m_reader.open(itr->id);
-        if (s.is_logic_error()) continue;
-        MAYBE_FORWARD(s, MSG);
-
-        s = m_reader.undo(itr, end, [&undo_cb](const auto &info) {
-            return undo_cb(info);
-        });
-        MAYBE_FORWARD(s, MSG);
-
-        s = m_reader.close();
-        MAYBE_FORWARD(s, MSG);
-        itr = end;
-    }
-
-    for (const auto &id: segment_ids) {
-        if (id > commit_id) {
-            s = m_store->remove_file(m_prefix + id.to_name());
-            MAYBE_FORWARD(s, MSG);
-        }
-    }
-    m_collection.remove_after(commit_id);
     m_logger->info("finished recovery");
     return s;
 }
@@ -382,24 +329,20 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
             continue;
         }
         MAYBE_FORWARD(s, MSG);
-        std::vector<RecordPosition> positions;
 
-        // TODO: Would be nice to avoid this by saving the positions...
-        s = m_reader.redo(positions, [](auto) {return Status::ok();});
-        if (s.is_system_error()) {
-            m_logger->error("(1/2) {}", MSG);
-            m_logger->error("(2/2) {}", s.what());
-            return s;
-        }
-
-        s = m_reader.undo(crbegin(positions), crend(positions), [&callback](const auto &info) {
+        s = m_reader.undo([&callback](const auto &info) {
             return callback(info);
         });
-        MAYBE_FORWARD(s, MSG);
 
-        s = m_reader.close();
-        MAYBE_FORWARD(s, MSG);
+        auto t = m_reader.close();
+        MAYBE_FORWARD(t, MSG);
 
+        // Most-recent segment can have an incomplete record at the end.
+        if (s.is_corruption() && itr == crbegin(m_collection.segments())) {
+            obsolete = id;
+            continue;
+        }
+        MAYBE_FORWARD(s, MSG);
         obsolete = id;
     }
     if (obsolete.is_null()) return s;

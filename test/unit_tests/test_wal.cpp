@@ -7,8 +7,6 @@
 #include "calico/options.h"
 #include "calico/storage.h"
 #include "fakes.h"
-#include "pager/basic_pager.h"
-#include "pager/framer.h"
 #include "tools.h"
 #include "unit_tests.h"
 #include "utils/layout.h"
@@ -607,58 +605,6 @@ TEST_F(BackgroundWriterTests, WriteUpdates)
     ASSERT_FALSE(ids.empty());
 }
 
-// TODO: Considering using a WAL iterator construct instead of the WAL reader class. Lay out all the intended functionality in tests here.
-//TEST_F(WalIteratorTests, CannotBeOpenedOnNonexistentSegment)
-//{
-//    auto itr = create_iterator();
-//    ASSERT_TRUE(itr.open(SegmentId {1}).is_system_error());
-//}
-//
-//TEST_F(WalIteratorTests, CannotBeOpenedOnEmptySegment)
-//{
-//    auto itr = create_iterator();
-//    create_random_segment(SegmentId {1}, 0);
-//    ASSERT_TRUE(itr.open(SegmentId {1}).is_not_found());
-//}
-//
-//TEST_F(WalIteratorTests, CannotBeIncrementedPastLastRecord)
-//{
-//    auto itr = create_iterator();
-//    create_random_segment(SegmentId {1}, 1);
-//
-//    // We should be open and positioned on the first (and only) record.
-//    ASSERT_TRUE(expose_message(itr.open(SegmentId {1})));
-//    ASSERT_FALSE(itr.payload().is_empty());
-//    ASSERT_FALSE(itr.increment());
-//}
-//
-//auto increment_and_collect(BasicWalIterator &itr)
-//{
-//    do {
-//
-//    } while (itr.increment());
-//}
-//
-//TEST_F(WalIteratorTests, IncrementInsideBlock)
-//{
-//    auto itr = create_iterator();
-//    create_random_segment(SegmentId {1}, 1);
-//
-//    // We should be open and positioned on the first (and only) record.
-//    ASSERT_TRUE(expose_message(itr.open(SegmentId {1})));
-//    ASSERT_FALSE(itr.payload().is_empty());
-//    ASSERT_FALSE(itr.increment());
-//}
-//
-//auto decrement_and_collect(WalIteratorTests &test)
-//{
-//
-//}
-
-
-
-
-
 template<class Reader>
 class LogReaderTests: public TestWithWalSegmentsOnHeap {
 public:
@@ -744,40 +690,6 @@ TEST_F(SequentialLogReaderTests, ReadsAndAdvancesBetweenSegments)
     open_file_and_attach_reader(SegmentId {3});
     answer += randomly_read_from_segment(random, reader);
     ASSERT_EQ(answer, result);
-}
-
-class RandomLogReaderTests: public LogReaderTests<RandomLogReader> {
-public:
-    RandomLogReaderTests()
-    {
-        open_file_and_attach_reader(SegmentId {1});
-    }
-};
-
-auto append_bytes_at(RandomLogReader &reader, LogPosition position, Size num_bytes, std::string &out)
-{
-    Bytes temp;
-    ASSERT_TRUE(expose_message(reader.fetch_at(position, temp)));
-    out.resize(out.size() + num_bytes);
-    mem_copy(stob(out).advance(out.size() - num_bytes), temp.truncate(num_bytes));
-}
-
-TEST_F(RandomLogReaderTests, ReadsRecordsWithinBlock)
-{
-    std::string answer;
-    append_bytes_at(reader, LogPosition {BlockNumber {0}, BlockOffset {0}}, 3, answer);
-    append_bytes_at(reader, LogPosition {BlockNumber {0}, BlockOffset {3}}, 1, answer);
-    ASSERT_EQ(answer, result.substr(0, answer.size()));
-}
-
-TEST_F(RandomLogReaderTests, ReadsRecordsBetweenBlocks)
-{
-    std::string answer;
-    append_bytes_at(reader, LogPosition {BlockNumber {0}, BlockOffset {0}}, 2, answer);
-    append_bytes_at(reader, LogPosition {BlockNumber {0}, BlockOffset {2}}, 2, answer);
-    append_bytes_at(reader, LogPosition {BlockNumber {1}, BlockOffset {0}}, 1, answer);
-    append_bytes_at(reader, LogPosition {BlockNumber {1}, BlockOffset {1}}, 3, answer);
-    ASSERT_EQ(answer, result.substr(0, answer.size()));
 }
 
 class SegmentGuardTests: public TestWithWalSegmentsOnHeap {
@@ -951,11 +863,10 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
     // close() should cause the writer to flush the current block.
     writer->stop();
 
-    std::vector<RecordPosition> positions;
     ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
 
     Size i {};
-    ASSERT_TRUE(expose_message(reader->redo(positions, [deltas, &i, images](const RedoDescriptor &descriptor) {
+    ASSERT_TRUE(expose_message(reader->redo([deltas, &i, images](const RedoDescriptor &descriptor) {
         auto lhs = cbegin(descriptor.deltas);
         auto rhs = cbegin(deltas[i]);
         for (; rhs != cend(deltas[i]); ++lhs, ++rhs) {
@@ -980,19 +891,16 @@ TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
         writer->log_full_image(PageId::from_index(i), stob(images[i]));
     writer->stop();
 
-    std::vector<RecordPosition> positions;
     ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
-
-    ASSERT_TRUE(expose_message(reader->redo(positions, [](const auto&) {
+    ASSERT_TRUE(expose_message(reader->redo([](const auto&) {
         ADD_FAILURE() << "This should not be called";
         return Status::logic_error("Logic error!");
     })));
 
     Size i {};
-    ASSERT_TRUE(expose_message(reader->undo(crbegin(positions), crend(positions), [&i, images](const UndoDescriptor &descriptor) {
-        const auto n = NUM_RECORDS - i - 1;
-        EXPECT_EQ(descriptor.page_id, n + 1);
-        EXPECT_TRUE(descriptor.image == stob(images[n]));
+    ASSERT_TRUE(expose_message(reader->undo([&i, images](const UndoDescriptor &descriptor) {
+        EXPECT_EQ(descriptor.page_id, i + 1);
+        EXPECT_TRUE(descriptor.image == stob(images[i]));
         i++;
         return Status::ok();
     })));
@@ -1028,12 +936,10 @@ auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_d
     writer->stop();
 
     // Roll forward some copies of the "before images" to match the "after images".
-    std::vector<std::vector<RecordPosition>> all_positions;
     auto images = before_images;
     for (const auto &[id, meta]: collection.segments()) {
-        all_positions.emplace_back();
         ASSERT_TRUE(expose_message(reader->open(id)));
-        ASSERT_TRUE(expose_message(reader->redo(all_positions.back(), [&images](const RedoDescriptor &info) {
+        ASSERT_TRUE(expose_message(reader->redo([&images](const RedoDescriptor &info) {
             auto image = stob(images.at(info.page_id - 1));
             for (const auto &[offset, content]: info.deltas)
                 mem_copy(image.range(offset, content.size()), content);
@@ -1048,10 +954,10 @@ auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_d
     }
 
     // Now roll them back to match the before images again.
-    for (auto itr = crbegin(all_positions); itr != crend(all_positions); ++itr) {
+    for (auto itr = crbegin(collection.segments()); itr != crend(collection.segments()); ++itr) {
         // Segment ID should be the same for each record position within each group.
-        ASSERT_TRUE(expose_message(reader->open(itr->begin()->id)));
-        ASSERT_TRUE(expose_message(reader->undo(crbegin(*itr), crend(*itr), [&images](const auto &info) {
+        ASSERT_TRUE(expose_message(reader->open(itr->id)));
+        ASSERT_TRUE(expose_message(reader->undo([&images](const auto &info) {
             const auto index = info.page_id - 1;
             mem_copy(stob(images[index]), info.image);
             return Status::ok();

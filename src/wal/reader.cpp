@@ -13,17 +13,13 @@ auto BasicWalReader::open(SegmentId id) -> Status
     if (!s.is_ok()) return s;
 
     m_segment_id = id;
-    return m_redo_reader.attach(file);
+    return m_reader.attach(file);
 }
 
 auto BasicWalReader::close() -> Status
 {
-    // We only use one file pointer between the two reader objects.
-    if (m_redo_reader.is_attached()) {
-        delete m_redo_reader.detach();
-    } else if (m_undo_reader.is_attached()) {
-        delete m_undo_reader.detach();
-    }
+    if (m_reader.is_attached())
+        delete m_reader.detach();
     return Status::ok();
 }
 
@@ -45,10 +41,10 @@ auto unrecognized_type_error(WalPayloadType type) -> Status
 
 auto BasicWalReader::read_first_lsn(SequenceId &lsn) -> Status
 {
-    auto s = prepare_forward_traversal();
+    auto s = prepare_traversal();
     if (s.is_ok()) {
-        CALICO_EXPECT_TRUE(m_redo_reader.position().is_start());
-        lsn.value = read_wal_record_header(m_redo_reader.remaining()).lsn;
+        CALICO_EXPECT_TRUE(m_reader.position().is_start());
+        lsn.value = read_wal_record_header(m_reader.remaining()).lsn;
 
         if (lsn.is_null()) {
             ThreePartMessage message;
@@ -60,17 +56,16 @@ auto BasicWalReader::read_first_lsn(SequenceId &lsn) -> Status
     return s;
 }
 
-auto BasicWalReader::redo(PositionList &out, const RedoCallback &callback) -> Status
+auto BasicWalReader::redo(const RedoCallback &callback) -> Status
 {
-    auto s = prepare_forward_traversal();
+    auto s = prepare_traversal();
     if (!s.is_ok()) return s;
 
     for (; ; ) {
         auto payload = stob(m_payload);
         WalRecordHeader header {};
 
-        PositionList temp;
-        s = forward_read_logical_record(header, payload, temp);
+        s = read_logical_record(header, payload);
         if (s.is_logic_error()) return Status::ok(); // EOF
         if (!s.is_ok()) return s;
 
@@ -88,31 +83,26 @@ auto BasicWalReader::redo(PositionList &out, const RedoCallback &callback) -> St
                 return unrecognized_type_error(type);
         }
         if (!s.is_ok()) return s;
-        out.insert(cend(out), cbegin(temp), cend(temp));
     }
 }
 
-auto BasicWalReader::undo(const UndoIterator &begin, const UndoIterator &end, const UndoCallback &callback) -> Status
+auto BasicWalReader::undo(const UndoCallback &callback) -> Status
 {
-    auto s = prepare_reverse_traversal();
+    auto s = prepare_traversal();
     if (!s.is_ok()) return s;
 
-    for (auto itr = begin; itr != end; ) {
-        CALICO_EXPECT_EQ(m_segment_id, itr->id);
+    for (; ; ) {
         auto payload = stob(m_payload);
         WalRecordHeader header {};
 
-        s = reverse_read_logical_record(header, payload, itr, end);
+        s = read_logical_record(header, payload);
+        if (s.is_logic_error()) return Status::ok(); // EOF
         if (!s.is_ok()) return s;
-
-        // We had to read into the payload buffer from the back end. Adjust so that the payload is pointing at the correct data.
-        payload = payload.range(payload.size() - header.size);
 
         const auto type = read_payload_type(payload);
         switch (type) {
             case WalPayloadType::FULL_IMAGE:
-                s = callback(decode_full_image_payload(payload));
-                if (!s.is_ok()) return s;
+                s = callback(decode_full_image_payload(payload.truncate(header.size)));
                 break;
             case WalPayloadType::DELTAS:
                 break;
@@ -122,38 +112,27 @@ auto BasicWalReader::undo(const UndoIterator &begin, const UndoIterator &end, co
             default:
                 return unrecognized_type_error(type);
         }
-    }
-    return Status::ok();
-}
+        if (s.is_corruption()) {
 
-auto BasicWalReader::prepare_forward_traversal() -> Status
-{
-    if (m_undo_reader.is_attached()) {
-        auto s = m_redo_reader.attach(m_undo_reader.detach());
+        }
         if (!s.is_ok()) return s;
     }
-    CALICO_EXPECT_TRUE(m_redo_reader.is_attached());
-    if (!m_redo_reader.position().is_start())
-        return m_redo_reader.reset_position();
+}
+
+auto BasicWalReader::prepare_traversal() -> Status
+{
+    CALICO_EXPECT_TRUE(m_reader.is_attached());
+    if (!m_reader.position().is_start())
+        return m_reader.reset_position();
     return Status::ok();
 }
 
-auto BasicWalReader::prepare_reverse_traversal() -> Status
-{
-    auto s = Status::ok();
-    if (m_redo_reader.is_attached())
-        s = m_undo_reader.attach(m_redo_reader.detach());
-    CALICO_EXPECT_TRUE(m_undo_reader.is_attached());
-    return s;
-}
-
-auto BasicWalReader::forward_read_logical_record(WalRecordHeader &header, Bytes payload, PositionList &positions) -> Status
+auto BasicWalReader::read_logical_record(WalRecordHeader &header, Bytes payload) -> Status
 {
     CALICO_EXPECT_EQ(header.lsn, 0);
 
-    for (auto &reader = m_redo_reader; ; ) {
+    for (auto &reader = m_reader; ; ) {
         if (contains_record(reader.remaining())) {
-            positions.emplace_back(RecordPosition{ m_segment_id, reader.position()});
             const auto temp = read_wal_record_header(reader.remaining());
             reader.advance_cursor(sizeof(temp));
 
@@ -176,33 +155,6 @@ auto BasicWalReader::forward_read_logical_record(WalRecordHeader &header, Bytes 
                 return s;
             }
         }
-    }
-    return Status::ok();
-}
-
-auto BasicWalReader::reverse_read_logical_record(WalRecordHeader &header, Bytes payload, UndoIterator &itr, const UndoIterator &end) -> Status
-{
-    auto offset = payload.size();
-    auto &reader = m_undo_reader;
-    Bytes bytes;
-
-    for (; itr != end; ) {
-        // Get a slice of the reader's tail buffer at the given position.
-        auto s = reader.fetch_at(itr->pos, bytes);
-        if (!s.is_ok()) return s;
-
-        auto temp = read_wal_record_header(bytes);
-        bytes.advance(sizeof(temp));
-
-        s = merge_records_right(temp, header);
-        if (!s.is_ok()) return s;
-
-        mem_copy(payload.range(offset - temp.size, temp.size), bytes.range(0, temp.size));
-        offset -= temp.size;
-        itr++;
-
-        if (header.type == WalRecordHeader::Type::FULL)
-            break;
     }
     return Status::ok();
 }

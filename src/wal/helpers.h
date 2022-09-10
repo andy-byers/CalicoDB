@@ -371,61 +371,6 @@ private:
     WalBuffer m_buffer;
 };
 
-class RandomLogReader final {
-public:
-    explicit RandomLogReader(Size block_size)
-        : m_tail(block_size, '\x00')
-    {}
-
-    ~RandomLogReader() = default;
-
-    [[nodiscard]]
-    auto is_attached() const -> bool
-    {
-        return m_file != nullptr;
-    }
-
-    [[nodiscard]]
-    auto attach(RandomReader *file) -> Status
-    {
-        m_file.reset(file);
-        m_block_num.value = 0;
-        // Read the first block when read() is called.
-        m_has_block = false;
-        return Status::ok();
-    }
-
-    [[nodiscard]]
-    auto detach() -> RandomReader*
-    {
-        return m_file.release();
-    }
-
-    auto fetch_at(LogPosition position, Bytes &out) -> Status
-    {
-        auto tail = stob(m_tail);
-        if (!m_has_block || position.number != m_block_num) {
-            auto s = read_exact_or_hit_eof(*m_file, tail, position.number.value);
-            if (!s.is_ok()) {
-                // Keep the last block if we hit EOF. No sense in throwing it away I suppose.
-                if (!s.is_logic_error())
-                    m_has_block = false;
-                return s;
-            }
-            m_block_num = position.number;
-            m_has_block = true;
-        }
-        out = tail.advance(position.offset.value);
-        return Status::ok();
-    }
-
-private:
-    std::unique_ptr<RandomReader> m_file;
-    std::string m_tail;
-    BlockNumber m_block_num;
-    bool m_has_block {};
-};
-
 class LogScratchManager final {
 public:
     explicit LogScratchManager(Size buffer_size)

@@ -181,6 +181,24 @@ TEST_F(XactTests, SanityCheck)
     }
 }
 
+TEST_F(XactTests, AbortSanityCheck)
+{
+    static constexpr long NUM_RECORDS {5'000};
+    auto records = generator.generate(random, NUM_RECORDS);
+    const auto committed = run_random_transactions(*this, 10);
+
+    for (long i {}, j {}; i + j < NUM_RECORDS; j += 10, i += j) {
+        auto xact = db.transaction();
+        const auto start = cbegin(records) + i;
+        const auto temp = run_random_operations(*this, start, start + j);
+        ASSERT_TRUE(expose_message(xact.abort()));
+    }
+    ASSERT_EQ(db.info().record_count(), committed.size());
+    for (const auto &[key, value]: committed) {
+        ASSERT_TRUE(tools::contains(db, key, value));
+    }
+}
+
 TEST_F(XactTests, PersistenceSanityCheck)
 {
     ASSERT_TRUE(expose_message(db.close()));
