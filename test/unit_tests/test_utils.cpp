@@ -255,6 +255,16 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
     ASSERT_TRUE(is_power_of_two(1 << 20));
 }
 
+TEST(ScratchTest, CanChangeUnderlyingBytesObject)
+{
+    std::string backing {"abc"};
+    Bytes bytes {backing};
+    Scratch scratch {bytes};
+    scratch->advance(1);
+    scratch->truncate(1);
+    ASSERT_TRUE(*scratch == "b");
+}
+
 TEST(MonotonicScratchTest, ScratchesAreDistinct)
 {
     MonotonicScratchManager<3> manager {1};
@@ -701,8 +711,9 @@ public:
         : worker {[this](int event) {
             events.emplace_back(event);
             return Status::ok();
-        }, [this](const Status &/* final_worker_status */) {
+        }, [this](const Status &status) {
             is_finished = true;
+            return status;
         }}
     {}
 
@@ -777,6 +788,7 @@ public:
         }, [this](const Status &s) {
             assert_error_42(s);
             is_finished = true;
+            return s;
         }}
     {}
 

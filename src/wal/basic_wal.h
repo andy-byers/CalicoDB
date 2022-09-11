@@ -55,6 +55,7 @@ public:
     [[nodiscard]] auto start_workers() -> Status override;
     [[nodiscard]] auto flush_pending() -> Status override;
     [[nodiscard]] auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status override;
+    [[nodiscard]] auto setup_and_recover(const GetPayload &redo, const GetPayload &undo) -> Status override;
     [[nodiscard]] auto abort_last(const UndoCallback &callback) -> Status override;
 
 private:

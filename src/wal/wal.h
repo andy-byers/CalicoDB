@@ -2,6 +2,7 @@
 #define CALICO_WAL_H
 
 #include <functional>
+#include <variant>
 #include <vector>
 #include "calico/bytes.h"
 #include "calico/status.h"
@@ -21,6 +22,25 @@ struct DeltaContent {
     BytesView data {};
 };
 
+struct DeltasDescriptor {
+    std::uint64_t page_id {};
+
+    // LSN here corresponds to the page LSN of the referenced page after it was updated.
+    std::uint64_t page_lsn {};
+    std::vector<DeltaContent> deltas;
+};
+
+struct FullImageDescriptor {
+    std::uint64_t page_id {};
+    BytesView image;
+};
+
+struct CommitDescriptor {
+    SequenceId lsn;
+};
+
+using PayloadDescriptor = std::variant<DeltasDescriptor, FullImageDescriptor, CommitDescriptor>;
+
 struct RedoDescriptor {
     std::uint64_t page_id {};
     std::uint64_t page_lsn {};
@@ -33,18 +53,9 @@ struct UndoDescriptor {
     BytesView image;
 };
 
+using GetPayload = std::function<Status(PayloadDescriptor)>;
 using RedoCallback = std::function<Status(RedoDescriptor)>;
 using UndoCallback = std::function<Status(UndoDescriptor)>;
-
-class WalIterator {
-public:
-    virtual ~WalIterator() = default;
-    [[nodiscard]] virtual auto seek_next_segment() -> Status = 0;
-    [[nodiscard]] virtual auto seek_previous_segment() -> Status = 0;
-    [[nodiscard]] virtual auto read_first_lsn(SequenceId&) -> Status = 0;
-    [[nodiscard]] virtual auto redo(const RedoCallback&) -> Status = 0;
-    [[nodiscard]] virtual auto undo(const UndoCallback&) -> Status = 0;
-};
 
 class WriteAheadLog {
 public:
@@ -76,6 +87,7 @@ public:
     //       database disk. This ensures that we have full images for every delta that comes afterward. When we start rolling the WAL in
     //       recovery, we should start at the pager's flushed LSN value. Anything before that is already applied.
     [[nodiscard]] virtual auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status = 0;
+    [[nodiscard]] virtual auto setup_and_recover(const GetPayload &redo, const GetPayload &undo) -> Status {(void)undo;(void)redo;return Status::ok();}; // TODO
     [[nodiscard]] virtual auto abort_last(const UndoCallback &callback) -> Status = 0;
 };
 

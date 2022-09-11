@@ -16,9 +16,103 @@ namespace calico {
 
 class LogWriter {
 public:
+    // NOTE: LogWriter must always be created on an empty segment file.
+    LogWriter(AppendWriter &file, Bytes tail, std::atomic<SequenceId> &flushed_lsn)
+        : m_flushed_lsn {&flushed_lsn},
+          m_file {&file},
+          m_tail {tail}
+    {}
+
+    [[nodiscard]]
+    auto block_count() const -> Size
+    {
+        return m_number;
+    }
+
+    // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified for the most part.
+    //       However, we can still query the block count to see if we've actually written out any blocks.
+    [[nodiscard]] auto write(SequenceId lsn, BytesView payload) -> Status;
+    [[nodiscard]] auto flush() -> Status;
+
+private:
+    [[nodiscard]] auto clear_rest_and_flush(Size local_offset) -> Status;
+
+    std::atomic<SequenceId> *m_flushed_lsn {};
+    SequenceId m_last_lsn {};
+    AppendWriter *m_file {};
+    Bytes m_tail;
+    Size m_number {};
+    Size m_offset {};
+};
+
+class WalWriter {
+public:
+    WalWriter(Storage &store, WalCollection &segments, LogScratchManager &scratch, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix)
+        : m_worker {[this](const auto &event) {
+              return on_event(event);
+          }, [this](const auto &status) {
+              return on_cleanup(status);
+          }},
+          m_prefix(std::move(prefix)),
+          m_flushed_lsn {&flushed_lsn},
+          m_scratch {&scratch},
+          m_segments {&segments},
+          m_store {&store},
+          m_tail {tail}
+    {}
+
+    [[nodiscard]]
+    auto status() -> Status
+    {
+        return m_worker.status();
+    }
+
+    // NOTE: open() should be called immediately after construction. This object is not valid unless open() returns OK.
+    //       When this object is no longer needed, destroy() should be called.
+    [[nodiscard]] auto open() -> Status;
+    [[nodiscard]] auto destroy() && -> Status;
+
+    auto write(SequenceId lsn, NamedScratch payload) -> void;
+
+    // NOTE: This method will block until the writer has advanced to a new segment. It should be called after writing
+    //       a commit record so that everything is written to disk before we return, and the writer is set up on the
+    //       next segment.
+    auto advance() -> void;
+
+private:
+    struct Event {
+        SequenceId lsn;
+        NamedScratch buffer;
+        Size size {};
+    };
+
+    // Represents either a "write" or an "advance" event. We don't need any information to advance to the next segment,
+    // so that state is represented by std::nullopt.
+    using EventWrapper = std::optional<Event>;
+
+    [[nodiscard]] auto open_segment(SegmentId) -> Status;
+    [[nodiscard]] auto close_segment() -> Status;
+    [[nodiscard]] auto advance_segment() -> Status;
+    [[nodiscard]] auto on_event(const EventWrapper &event) -> Status;
+    [[nodiscard]] auto on_cleanup(const Status &status) -> Status;
+
+    Worker<EventWrapper> m_worker;
+    std::string m_prefix;
+    std::optional<LogWriter> m_writer;
+    std::atomic<SequenceId> *m_flushed_lsn {};
+    std::unique_ptr<AppendWriter> m_file;
+    LogScratchManager *m_scratch {};
+    WalCollection *m_segments {};
+    Storage *m_store {};
+    Bytes m_tail;
+    Size m_wal_limit {};
+};
+
+class LogWriter_ {
+public:
     using SetFlushedLsn = std::function<void(SequenceId)>;
 
-    explicit LogWriter(Size buffer_size)
+    explicit LogWriter_(Size buffer_size)
         : m_buffer {buffer_size}
     {}
 
@@ -53,7 +147,7 @@ public:
         CALICO_EXPECT_TRUE(is_attached());
         auto s = Status::ok();
         if (m_buffer.block_offset())
-            s = append_block();
+            s = flush();
         if (s.is_ok())
             s = m_file->sync();
         if (s.is_ok() && has_written())
@@ -72,7 +166,7 @@ public:
         const SequenceId last_lsn {lsn.value - 1};
 
         WalRecordHeader lhs {};
-        lhs.lsn = lsn.value;
+//        lhs.lsn = lsn.value;
         lhs.type = WalRecordHeader::Type::FULL;
         lhs.size = static_cast<std::uint16_t>(payload.size());
         lhs.crc = crc_32(payload);
@@ -102,7 +196,7 @@ public:
                 lhs = rhs;
                 continue;
             }
-            auto s = append_block();
+            auto s = flush();
             if (!s.is_ok()) return s;
 
             // This may happen more than once, but should still be correct (when the current record spans multiple blocks).
@@ -113,7 +207,7 @@ public:
         return Status::ok();
     }
 
-    auto append_block() -> Status
+    auto flush() -> Status
     {
         return m_buffer.advance_block([this] {
             // Clear unused bytes at the end of the tail buffer.
@@ -127,7 +221,7 @@ public:
 private:
     std::unique_ptr<AppendWriter> m_file;
     SequenceId m_last_lsn;
-    WalBuffer m_buffer;
+    LogBuffer m_buffer;
     Size m_block_count {};
 };
 
@@ -236,7 +330,7 @@ private:
                 has_commit = true;
                 break;
             case EventType::FLUSH_BLOCK:
-                s = m_writer.append_block();
+                s = m_writer.flush();
                 m_flushed_lsn->store(lsn);
                 break;
             default:
@@ -254,15 +348,15 @@ private:
         return s;
     }
 
-    auto on_cleanup(const Status &) -> void
+    auto on_cleanup(const Status &) -> Status
     {
         if (!m_guard.is_started()) // TODO
-            return;
+            return Status::ok();
 
         if (m_writer.has_written()) {
             auto s = m_guard.finish(false);
             if (!s.is_ok()) handle_error(m_guard, s);
-            return;
+            return s;
         }
 
         const auto id = m_guard.id();
@@ -271,6 +365,7 @@ private:
 
         s = m_store->remove_file(m_prefix + id.to_name());
         if (!s.is_ok()) handle_error(m_guard, s);
+        return s;
     }
 
     [[nodiscard]] auto emit_payload(SequenceId lsn, BytesView payload) -> Status;
@@ -281,7 +376,7 @@ private:
     Worker<Event> m_background;
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> *m_flushed_lsn {};
-    LogWriter m_writer;
+    LogWriter_ m_writer;
     std::string m_prefix;
     LogScratchManager *m_scratch {};
     Storage *m_store {};

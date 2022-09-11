@@ -82,6 +82,12 @@ public:
     }
 
     [[nodiscard]]
+    auto setup_and_recover(const RedoCallback_ &, const UndoCallback &) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]]
     auto abort_last(const UndoCallback &) -> Status override
     {
         return Status::ok();

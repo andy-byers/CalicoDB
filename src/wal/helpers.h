@@ -13,29 +13,29 @@
 
 namespace calico {
 
-class LogWriter;
+class LogWriter_;
 
 [[nodiscard]]
-inline auto wal_block_size(Size page_size) -> Size
+inline constexpr auto wal_block_size(Size page_size) -> Size
 {
     return std::min(MAXIMUM_PAGE_SIZE, page_size * WAL_BLOCK_SCALE);
 }
 
 [[nodiscard]]
-inline auto wal_scratch_size(Size page_size) -> Size
+inline constexpr auto wal_scratch_size(Size page_size) -> Size
 {
     return page_size * WAL_SCRATCH_SCALE;
 }
 
-class WalBuffer final {
+class LogBuffer final {
 public:
-    explicit WalBuffer(Size size)
+    explicit LogBuffer(Size size)
         : m_buffer(size, '\x00')
     {
         CALICO_EXPECT_TRUE(is_power_of_two(size));
     }
 
-    ~WalBuffer() = default;
+    ~LogBuffer() = default;
 
     [[nodiscard]]
     auto block_number() const -> Size
@@ -47,6 +47,12 @@ public:
     auto block_offset() const -> Size
     {
         return m_offset;
+    }
+
+    [[nodiscard]]
+    auto offset() const -> Size
+    {
+        return m_number*m_buffer.size() + m_offset;
     }
 
     [[nodiscard]]
@@ -218,7 +224,7 @@ private:
  */
 class SegmentGuard final {
 public:
-    SegmentGuard(Storage &store, LogWriter &writer, WalCollection &collection, std::atomic<SequenceId> &flushed_lsn, std::string prefix)
+    SegmentGuard(Storage &store, LogWriter_ &writer, WalCollection &collection, std::atomic<SequenceId> &flushed_lsn, std::string prefix)
         : m_prefix {std::move(prefix)},
           m_store {&store},
           m_writer {&writer},
@@ -249,7 +255,7 @@ private:
     std::string m_prefix;
     WalSegment m_current;
     Storage *m_store {};
-    LogWriter *m_writer {};
+    LogWriter_ *m_writer {};
     WalCollection *m_collection {};
     std::atomic<SequenceId> *m_flushed_lsn {};
 };
@@ -290,13 +296,13 @@ inline auto read_exact_or_hit_eof(RandomReader &file, Bytes out, Size n) -> Stat
     return s;
 }
 
-class LogReader final {
+class LogReader_ final {
 public:
-    explicit LogReader(Size block_size)
+    explicit LogReader_(Size block_size)
         : m_buffer {block_size}
     {}
 
-    ~LogReader() = default;
+    ~LogReader_() = default;
 
     [[nodiscard]]
     auto is_attached() const -> bool
@@ -368,7 +374,7 @@ public:
 
 private:
     std::unique_ptr<RandomReader> m_file;
-    WalBuffer m_buffer;
+    LogBuffer m_buffer;
 };
 
 class LogScratchManager final {

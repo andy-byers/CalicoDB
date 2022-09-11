@@ -72,9 +72,9 @@ private:
         return Status::ok();
     }
 
-    auto on_cleanup(const Status &) -> void
+    auto on_cleanup(const Status &s) -> Status
     {
-
+        return s;
     }
 
     Worker<SequenceId> m_worker;
