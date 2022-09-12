@@ -1,13 +1,14 @@
 #ifndef CALICO_WAL_BASIC_WAL_H
 #define CALICO_WAL_BASIC_WAL_H
 
+#include "cleaner.h"
 #include "helpers.h"
 #include "reader.h"
+#include "record.h"
+#include "wal.h"
+#include "writer.h"
 #include "utils/result.h"
 #include "utils/types.h"
-#include "wal.h"
-#include "wal/record.h"
-#include "writer.h"
 #include <atomic>
 #include <optional>
 #include <unordered_set>
@@ -48,15 +49,14 @@ public:
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto flushed_lsn() const -> std::uint64_t override;
     [[nodiscard]] auto current_lsn() const -> std::uint64_t override;
-    [[nodiscard]] auto log_image(std::uint64_t page_id, BytesView image) -> Status override;
-    [[nodiscard]] auto log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status override;
-    [[nodiscard]] auto log_commit() -> Status override;
     [[nodiscard]] auto stop_workers() -> Status override;
     [[nodiscard]] auto start_workers() -> Status override;
-    [[nodiscard]] auto flush_pending() -> Status override;
-    [[nodiscard]] auto setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status override;
-    [[nodiscard]] auto setup_and_recover(const GetPayload &redo, const GetPayload &undo) -> Status override;
-    [[nodiscard]] auto abort_last(const UndoCallback &callback) -> Status override;
+    [[nodiscard]] auto log(std::uint64_t page_id, BytesView image) -> Status override;
+    [[nodiscard]] auto log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status override;
+    [[nodiscard]] auto commit() -> Status override;
+    [[nodiscard]] auto start_recovery(const GetPayload &redo, const GetPayload &undo) -> Status override;
+    [[nodiscard]] auto finish_recovery() -> Status override;
+    [[nodiscard]] auto abort_last(const GetPayload &callback) -> Status override;
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
@@ -75,17 +75,24 @@ private:
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> m_flushed_lsn {};
     std::atomic<SequenceId> m_pager_lsn {};
+    SequenceId m_last_lsn;
+    LogScratchManager m_scratch;
     WalCollection m_collection;
     std::string m_prefix;
-    Storage *m_store {};
 
+    Storage *m_store {};
     Status m_status {Status::ok()};
-    std::unique_ptr<BasicWalWriter> m_writer;
-    std::unique_ptr<BasicWalCleaner> m_cleaner;
+    std::optional<WalReader> m_reader;
+    std::optional<WalWriter> m_writer;
+    std::optional<BasicWalCleaner> m_cleaner;
+    std::string m_reader_payload;
+    std::string m_reader_tail;
+    std::string m_writer_tail;
     Size m_page_size {};
     Size m_wal_limit {};
 
-    BasicWalReader m_reader;
+    // If this is true, both m_writer and m_cleaner should exist. Otherwise, m_reader should exist. The two
+    // groups should never overlap.
     bool m_is_working {};
 };
 

@@ -1188,8 +1188,8 @@ public:
 
         wal.reset(temp);
 
-        ASSERT_TRUE(expose_message(wal->setup_and_recover([](const auto &) { return Status::logic_error(""); },
-                                                             [](const auto &) { return Status::logic_error(""); })));
+        ASSERT_TRUE(expose_message(wal->start_recovery([](const auto &) { return Status::logic_error(""); },
+                                                       [](const auto &) { return Status::logic_error(""); })));
     }
 
     Random random {42};

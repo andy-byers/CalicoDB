@@ -10,7 +10,7 @@ namespace calico {
         if (!calico_s.is_ok()) return forward_status(calico_s, message); \
     } while (0)
 
-[[nodiscard]] static auto handle_worker_error(spdlog::logger &logger, const BasicWalWriter &writer, const BasicWalCleaner &cleaner, Status &out)
+[[nodiscard]] static auto handle_worker_error(spdlog::logger &logger, const WalWriter &writer, const BasicWalCleaner &cleaner, Status &out)
 {
     auto s = writer.status();
     if (!s.is_ok()) {
@@ -41,15 +41,11 @@ static auto handle_not_started_error(spdlog::logger &logger, bool is_working, co
 
 BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
     : m_logger {create_logger(param.sink, "wal")},
+      m_scratch {wal_scratch_size(param.page_size)},
       m_prefix {param.prefix},
       m_store {param.store},
       m_page_size {param.page_size},
-      m_wal_limit {param.wal_limit},
-      m_reader {
-          *m_store,
-          param.prefix,
-          param.page_size
-      }
+      m_wal_limit {param.wal_limit}
 {
     m_logger->info("constructing BasicWriteAheadLog object");
 }
@@ -121,7 +117,7 @@ auto BasicWriteAheadLog::allow_cleanup(std::uint64_t pager_lsn) -> void
         MAYBE_FORWARD(s, MSG); \
     } while (0)
 
-auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> Status
+auto BasicWriteAheadLog::log(std::uint64_t page_id, BytesView image) -> Status
 {
     static constexpr auto MSG = "could not log full image";
     HANDLE_WORKER_ERRORS;
@@ -135,29 +131,44 @@ auto BasicWriteAheadLog::log_image(std::uint64_t page_id, BytesView image) -> St
         return Status::ok();
     }
 
-    m_writer->log_full_image(PageId {page_id}, image);
+    auto payload = m_scratch.get();
+    const auto size = encode_full_image_payload(++m_last_lsn, PageId {page_id}, image, *payload);
+    payload->truncate(size);
+
+    m_writer->write(m_last_lsn, payload);
     m_images.emplace(PageId {page_id});
     return m_writer->status();
 }
 
-auto BasicWriteAheadLog::log_deltas(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status
+auto BasicWriteAheadLog::log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status
 {
     static constexpr auto MSG = "could not log deltas";
     HANDLE_WORKER_ERRORS;
 
-    m_writer->log_deltas(PageId {page_id}, image, deltas);
+    auto payload = m_scratch.get();
+    const auto size = encode_deltas_payload(++m_last_lsn, PageId {page_id}, image, deltas, *payload);
+    payload->truncate(size);
+
+    m_writer->write(m_last_lsn, payload);
     return m_writer->status();
 }
 
-auto BasicWriteAheadLog::log_commit() -> Status
+auto BasicWriteAheadLog::commit() -> Status
 {
     m_logger->info("logging commit");
 
     static constexpr auto MSG = "could not log commit";
     HANDLE_WORKER_ERRORS;
 
-    m_writer->log_commit();
+    auto payload = m_scratch.get();
+    const auto size = encode_commit_payload(++m_last_lsn, *payload);
+    payload->truncate(size);
+
+    m_writer->write(m_last_lsn, payload);
+    m_writer->advance();
     m_images.clear();
+
+    // This reflects an updated status, since advance() blocks until the background worker is finished.
     return m_writer->status();
 }
 
@@ -178,7 +189,7 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
 
     m_images.clear();
     m_is_working = false;
-    auto s = m_writer->stop();
+    auto s = std::move(*m_writer).destroy();
     m_writer.reset();
 
     auto t = std::move(*m_cleaner).destroy();
@@ -200,17 +211,16 @@ auto BasicWriteAheadLog::start_workers() -> Status
     m_logger->info("received start request: next segment ID is {}", m_collection.most_recent_id().value);
     CALICO_EXPECT_FALSE(m_is_working);
 
-    m_writer = std::make_unique<BasicWalWriter>(BasicWalWriter::Parameters {
-        m_store,
-        &m_collection,
-        &m_flushed_lsn,
-        m_logger,
-        m_prefix,
-        m_page_size,
-        m_wal_limit,
-    });
+    m_writer = WalWriter {
+        *m_store,
+        m_collection,
+        m_scratch,
+        Bytes {m_writer_tail},
+        m_flushed_lsn,
+        m_prefix
+    };
 
-    m_cleaner = std::make_unique<BasicWalCleaner>(
+    m_cleaner = BasicWalCleaner(
         *m_store,
         m_prefix,
         m_collection,
@@ -231,7 +241,7 @@ auto BasicWriteAheadLog::start_workers() -> Status
     return s;
 }
 
-auto BasicWriteAheadLog::setup_and_recover(const RedoCallback &redo_cb, const UndoCallback &undo_cb) -> Status
+auto BasicWriteAheadLog::start_recovery(const GetPayload &redo_cb, const GetPayload &undo_cb) -> Status
 {
     static constexpr auto MSG = "cannot recover";
     m_logger->info("received recovery request");
@@ -303,18 +313,25 @@ fmt::print("fin abort");
     return s;
 }
 
-auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
+auto BasicWriteAheadLog::abort_last(const GetPayload &callback) -> Status
 {
     static constexpr auto MSG = "could not abort last transaction";
     m_logger->info("received abort request");
     CALICO_EXPECT_FALSE(m_is_working);
 
+    // Find the most-recent segment.
+    for (; ; ) {
+        auto s = m_reader->seek_next();
+        if (!s.is_ok() && !s.is_not_found())
+            return s;
+    }
+
     auto s = Status::ok();
     SegmentId obsolete;
 
-    for (auto itr = crbegin(m_collection.segments()); itr != crend(m_collection.segments()); itr++) {
-        const auto [id, has_commit] = *itr;
-        m_logger->info("rolling segment {} backward", id.value);
+    for (; ; ) {
+
+
 
         if (has_commit) {
             LogMessage message {*m_logger};
@@ -350,20 +367,13 @@ auto BasicWriteAheadLog::abort_last(const UndoCallback &callback) -> Status
         obsolete = id;
     }
     if (obsolete.is_null()) return s;
-    // Remove obsolete WAL segments.
+    // Remove obsolete WAL segments. TODO: Don't do this until the pager has flushed!!!
     s = m_collection.remove_from_right(obsolete, [this](auto info) {
         CALICO_EXPECT_FALSE(info.has_commit);
         return m_store->remove_file(m_prefix + info.id.to_name());
     });
-fmt::print("fin abort");
     m_logger->info("finished undo");
     return s;
-}
-
-auto BasicWriteAheadLog::flush_pending() -> Status
-{
-    m_writer->flush_block();
-    return status();
 }
 
 #undef MAYBE_FORWARD

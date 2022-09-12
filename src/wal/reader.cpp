@@ -46,6 +46,19 @@ auto LogReader::read(Bytes &out, Bytes tail) -> Status
     return read_logical_record(out, tail);
 }
 
+auto LogReader::read_first_lsn(SequenceId &out) -> Status
+{
+    char buffer [sizeof(WalRecordHeader) + MINIMUM_PAYLOAD_SIZE];
+    Bytes bytes {buffer};
+
+    // The LogWriter will never flush a block unless it contains at least one record, so the first record should be
+    // located at the start of the file.
+    auto s = read_exact_or_eof(*m_file, 0, bytes);
+    if (s.is_ok())
+        out = decode_lsn(bytes.advance(sizeof(WalRecordHeader)));
+    return s;
+}
+
 auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
 {
     WalRecordHeader header {};
@@ -57,7 +70,7 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
 
         if (has_enough_space) {
             // Note that this modifies rest to point to [<local>, <end>) in the tail buffer.
-            if (rest.advance(m_offset)[14] != '\x00') { // TODO: 14 is the offset of the type field. Maybe put the type field at the front? We're removing the LSN so we can't check that to determine presence of a record here.
+            if (WalRecordHeader::could_contain_record(rest.advance(m_offset))) {
                 const auto temp = read_wal_record_header(rest);
                 rest.advance(sizeof(temp));
 
@@ -124,15 +137,18 @@ auto WalReader::seek_previous() -> Status
 
 auto WalReader::read_first_lsn(SequenceId &out) -> Status
 {
-
+    return m_reader->read_first_lsn(out);
 }
 
 auto WalReader::roll(const GetPayload &callback) -> Status
 {
-    auto s = prepare_traversal();
+    auto s = Status::ok();
+    prepare_traversal();
 
     while (s.is_ok()) {
         Bytes payload {m_payload};
+
+        // If this call succeeds, payload will be modified to point to the exact payload.
         s = m_reader->read(payload, m_scratch);
         if (s.is_logic_error()) continue;
         if (!s.is_ok()) return s;
@@ -176,147 +192,9 @@ auto WalReader::close_segment() -> void
     m_file.reset();
 }
 
-auto WalReader::prepare_traversal() -> Status
+auto WalReader::prepare_traversal() -> void
 {
     m_reader = LogReader {*m_file};
-}
-
-
-
-
-auto BasicWalReader::open(SegmentId id) -> Status
-{
-    RandomReader *file {};
-    const auto path = m_prefix + id.to_name();
-    auto s = m_store->open_random_reader(path, &file);
-    if (!s.is_ok()) return s;
-
-    m_segment_id = id;
-    return m_reader.attach(file);
-}
-
-auto BasicWalReader::close() -> Status
-{
-    if (m_reader.is_attached())
-        delete m_reader.detach();
-    return Status::ok();
-}
-
-auto BasicWalReader::read_first_lsn(SequenceId &lsn) -> Status
-{
-    auto s = prepare_traversal();
-    if (s.is_ok()) {
-        CALICO_EXPECT_TRUE(m_reader.position().is_start());
-//        lsn.value = read_wal_record_header(m_reader.remaining()).lsn;
-
-        if (lsn.is_null()) {
-            ThreePartMessage message;
-            message.set_primary("cannot read first LSN");
-            message.set_detail("segment is empty");
-            return message.logic_error();
-        }
-    }
-    return s;
-}
-
-auto BasicWalReader::redo(const RedoCallback &callback) -> Status
-{
-    auto s = prepare_traversal();
-    if (!s.is_ok()) return s;
-
-    for (; ; ) {
-        auto payload = stob(m_payload);
-        WalRecordHeader header {};
-
-        s = read_logical_record(header, payload);
-        if (s.is_logic_error()) return Status::ok(); // EOF
-        if (!s.is_ok()) return s;
-
-        const auto type = decode_payload_type(payload);
-        switch (type) {
-            case WalPayloadType::DELTAS:
-                s = callback(decode_deltas_payload(header, payload));
-                break;
-            case WalPayloadType::COMMIT:
-                s = callback(decode_commit_payload(header, payload));
-                break;
-            case WalPayloadType::FULL_IMAGE:
-                break;
-            default:
-                return unrecognized_type_error(type);
-        }
-        if (!s.is_ok()) return s;
-    }
-}
-
-auto BasicWalReader::undo(const UndoCallback &callback) -> Status
-{
-    auto s = prepare_traversal();
-    if (!s.is_ok()) return s;
-
-    for (; ; ) {
-        auto payload = stob(m_payload);
-        WalRecordHeader header {};
-
-        s = read_logical_record(header, payload);
-        if (s.is_logic_error()) return Status::ok(); // EOF
-        if (!s.is_ok()) return s;
-
-        const auto type = decode_payload_type(payload);
-        switch (type) {
-            case WalPayloadType::FULL_IMAGE:
-                s = callback(decode_full_image_payload(payload.truncate(header.size)));
-                break;
-            case WalPayloadType::DELTAS:
-                break;
-            case WalPayloadType::COMMIT:
-                CALICO_EXPECT_TRUE(false && "error: encountered a commit record during undo");
-                break;
-            default:
-                return unrecognized_type_error(type);
-        }
-        if (s.is_corruption()) {
-
-        }
-        if (!s.is_ok()) return s;
-    }
-}
-
-auto BasicWalReader::prepare_traversal() -> Status
-{
-    CALICO_EXPECT_TRUE(m_reader.is_attached());
-    return m_reader.reset_position();
-}
-
-auto BasicWalReader::read_logical_record(WalRecordHeader &header, Bytes payload) -> Status
-{
-//    CALICO_EXPECT_EQ(header.lsn, 0);
-    for (auto &reader = m_reader; ; ) {
-        if (contains_record(reader.remaining())) {
-            const auto temp = read_wal_record_header(reader.remaining());
-            reader.advance_cursor(sizeof(temp));
-
-            auto s = merge_records_left(header, temp);
-            if (!s.is_ok()) return s;
-
-            mem_copy(payload, reader.remaining().truncate(temp.size));
-            reader.advance_cursor(temp.size);
-            payload.advance(temp.size);
-
-            if (header.type == WalRecordHeader::Type::FULL)
-                break;
-        } else {
-            auto s = reader.advance_block();
-
-            // Just hit EOF. If we have any record fragments read so far, we consider this corruption.
-            if (!s.is_ok()) {
-//                if (s.is_logic_error() && header.lsn != 0)
-//                    return read_corruption_error("logical record with LSN {} is incomplete", header.lsn);
-                return s;
-            }
-        }
-    }
-    return Status::ok();
 }
 
 } // namespace calico

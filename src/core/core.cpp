@@ -413,7 +413,7 @@ auto Core::ensure_consistent_state() -> Status
 {
     static constexpr auto MSG = "cannot ensure consistent database state";
 
-    auto s = m_wal->setup_and_recover(
+    auto s = m_wal->start_recovery(
         [this](const auto &info) {
             if (!info.is_commit) {
                 auto page = m_pager->acquire(PageId {info.page_id}, true);

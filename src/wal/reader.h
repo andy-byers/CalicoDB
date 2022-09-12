@@ -16,7 +16,8 @@ public:
         : m_file {&file}
     {}
 
-    // NOTE: If this method returns a non-OK status, the state of this object is unspecified.
+    // NOTE: If either of these methods returns a non-OK status, the state of this object is unspecified.
+    [[nodiscard]] auto read_first_lsn(SequenceId &out) -> Status;
     [[nodiscard]] auto read(Bytes &out, Bytes tail) -> Status;
 
 private:
@@ -50,9 +51,13 @@ public:
     [[nodiscard]] auto read_first_lsn(SequenceId&) -> Status;
     [[nodiscard]] auto roll(const GetPayload&) -> Status;
 
+    // NOTE: The "has_commit" field of the WAL segment descriptor returned by this method is not meaningful until the
+    //       WAL segments have been explored during the first phase of recovery. TODO: Or store the LSN of the last commit??? and use that???
+    [[nodiscard]] auto segment() const -> WalSegment;
+
 private:
-    [[nodiscard]] auto prepare_traversal() -> Status;
     [[nodiscard]] auto open_segment(SegmentId) -> Status;
+    auto prepare_traversal() -> void;
     auto close_segment() -> void;
 
     std::string m_prefix;
@@ -63,34 +68,6 @@ private:
     Bytes m_scratch;
     Bytes m_payload;
     SegmentId m_current;
-};
-
-class Storage;
-
-class BasicWalReader {
-public:
-    explicit BasicWalReader(Storage &store, std::string prefix, Size page_size)
-        : m_reader {wal_block_size(page_size)},
-          m_prefix {std::move(prefix)},
-          m_payload(wal_scratch_size(page_size), '\x00'),
-          m_store {&store}
-    {}
-
-    [[nodiscard]] auto open(SegmentId id) -> Status;
-    [[nodiscard]] auto close() -> Status;
-    [[nodiscard]] auto read_first_lsn(SequenceId&) -> Status;
-    [[nodiscard]] auto redo(const RedoCallback &) -> Status;
-    [[nodiscard]] auto undo(const UndoCallback &) -> Status;
-
-private:
-    [[nodiscard]] auto prepare_traversal() -> Status;
-    [[nodiscard]] auto read_logical_record(WalRecordHeader &header, Bytes payload) -> Status;
-
-    SegmentId m_segment_id;
-    LogReader_ m_reader;
-    std::string m_prefix;
-    std::string m_payload;
-    Storage *m_store {};
 };
 
 } // namespace calico
