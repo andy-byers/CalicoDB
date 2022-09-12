@@ -294,9 +294,10 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
     bool found_start {};
     while (s.is_ok()) {
 
-        // Find the first segment that contains updates not already in the database.
-        if (!found_start) {
-            SequenceId first_lsn;
+        // TODO TODO TODOTODO TODO TODOTODO TODO TODOTODO TODO TODOTODO TODO TODOTODO TODO TODO: Not correct! The pager will flush pages touched by the most-recent
+        // Find the first segment that contains updates not already in the database.       TODO: transaction. We need to roll everything to find the "commit ID".
+        if (!found_start) {                                                          //    TODO: Maybe just roll everything, but don't call the callback unless the
+            SequenceId first_lsn;                                                    //    TODO: updates need to be applied given the LSN/pager LSN.
             s = m_reader->read_first_lsn(first_lsn);
             MAYBE_FORWARD(s, MSG);
 
