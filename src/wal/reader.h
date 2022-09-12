@@ -45,15 +45,20 @@ public:
             close_segment();
     }
 
+    [[nodiscard]]
+    auto segment_id() const -> SegmentId
+    {
+        return m_current;
+    }
+
     [[nodiscard]] auto open() -> Status;
     [[nodiscard]] auto seek_next() -> Status;
     [[nodiscard]] auto seek_previous() -> Status;
+
+    // TODO: LevelDB caches first LSNs of WAL segments. If we end up reading this info a lot, we may want to do the same. We could use this method
+    //       for that, and store the cache in WALCollection, so it lives longer than this object, which is meant to be transient.
     [[nodiscard]] auto read_first_lsn(SequenceId&) -> Status;
     [[nodiscard]] auto roll(const GetPayload&) -> Status;
-
-    // NOTE: The "has_commit" field of the WAL segment descriptor returned by this method is not meaningful until the
-    //       WAL segments have been explored during the first phase of recovery. TODO: Or store the LSN of the last commit??? and use that???
-    [[nodiscard]] auto segment() const -> WalSegment;
 
 private:
     [[nodiscard]] auto open_segment(SegmentId) -> Status;

@@ -23,8 +23,8 @@ Calico DB is made up of 6 major components:
 ## Transactions
 Calico DB uses transactions to preserve database integrity across system crashes and other exceptional events.
 Transactions are atomic, that is, the effects of a transaction are either completely applied, or entirely discarded.
-This is achieved by storing both undo and redo information in the WAL, and always flushing WAL records before their corresponding data pages.
-In the event of a crash, we can always read the WAL forward to regain lost updates, or backward to undo applied updates.
+This is achieved by storing both apply_update and apply_update information in the WAL, and always flushing WAL records before their corresponding data pages.
+In the event of a crash, we can always read the WAL forward to regain lost updates, or backward to apply_update applied updates.
 See [wal.md](./wal.md) for more specifics about how the WAL is used in transactions and recovery.
 
 ## Error Handling

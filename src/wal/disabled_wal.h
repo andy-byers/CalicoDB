@@ -40,25 +40,19 @@ public:
     }
 
     [[nodiscard]]
-    auto flush_pending() -> Status override
+    auto log(std::uint64_t, BytesView) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto log_image(std::uint64_t, BytesView) -> Status override
+    auto log(std::uint64_t, BytesView, const std::vector<PageDelta> &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto log_deltas(std::uint64_t, BytesView, const std::vector<PageDelta> &) -> Status override
-    {
-        return Status::ok();
-    }
-
-    [[nodiscard]]
-    auto log_commit() -> Status override
+    auto commit() -> Status override
     {
         return Status::ok();
     }
@@ -76,19 +70,25 @@ public:
     }
 
     [[nodiscard]]
-    auto setup_and_recover(const RedoCallback &, const UndoCallback &) -> Status override
+    auto start_recovery(const GetDeltas &, const GetFullImage &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto setup_and_recover(const RedoCallback_ &, const UndoCallback &) -> Status override
+    auto finish_recovery() -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto abort_last(const UndoCallback &) -> Status override
+    auto start_abort(const GetFullImage &) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]]
+    auto finish_abort() -> Status override
     {
         return Status::ok();
     }

@@ -6,6 +6,7 @@
 #include <vector>
 #include "calico/bytes.h"
 #include "calico/status.h"
+#include "utils/types.h"
 
 namespace calico {
 
@@ -23,15 +24,15 @@ struct DeltaContent {
 };
 
 struct DeltasDescriptor {
-    std::uint64_t page_id {};
+    PageId page_id {};
 
     // LSN here corresponds to the page LSN of the referenced page after it was updated.
-    std::uint64_t page_lsn {};
+    SequenceId page_lsn {};
     std::vector<DeltaContent> deltas;
 };
 
 struct FullImageDescriptor {
-    std::uint64_t page_id {};
+    PageId page_id {};
     BytesView image;
 };
 
@@ -40,7 +41,9 @@ struct CommitDescriptor {
 };
 
 using PayloadDescriptor = std::variant<DeltasDescriptor, FullImageDescriptor, CommitDescriptor>;
-using GetPayload = std::function<Status(PayloadDescriptor)>;
+using GetPayload = std::function<Status(const PayloadDescriptor&)>;
+using GetDeltas = std::function<Status(const DeltasDescriptor&)>;
+using GetFullImage = std::function<Status(const FullImageDescriptor&)>;
 
 class WriteAheadLog {
 public:
@@ -59,11 +62,12 @@ public:
     [[nodiscard]] virtual auto log(std::uint64_t page_id, BytesView image) -> Status = 0;
     [[nodiscard]] virtual auto log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status = 0;
     [[nodiscard]] virtual auto commit() -> Status = 0;
-    [[nodiscard]] virtual auto stop_workers() -> Status = 0;
     [[nodiscard]] virtual auto start_workers() -> Status = 0;
-    [[nodiscard]] virtual auto start_recovery(const GetPayload &redo, const GetPayload &undo) -> Status = 0;
+    [[nodiscard]] virtual auto stop_workers() -> Status = 0;
+    [[nodiscard]] virtual auto start_recovery(const GetDeltas &delta_cb, const GetFullImage &image_cb) -> Status = 0;
     [[nodiscard]] virtual auto finish_recovery() -> Status = 0;
-    [[nodiscard]] virtual auto abort_last(const GetPayload &callback) -> Status = 0;
+    [[nodiscard]] virtual auto start_abort(const GetFullImage &image_cb) -> Status = 0;
+    [[nodiscard]] virtual auto finish_abort() -> Status = 0;
     virtual auto allow_cleanup(std::uint64_t pager_lsn) -> void = 0;
 };
 

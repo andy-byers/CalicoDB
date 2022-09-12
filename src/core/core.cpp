@@ -322,7 +322,7 @@ auto Core::commit() -> Status
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Write a commit record to the WAL.
-    s = m_wal->log_commit();
+    s = m_wal->commit();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
     m_logger->info("commit succeeded");
     m_has_xact = false;
@@ -359,12 +359,12 @@ auto Core::abort() -> Status
 
     // This should give us the full images of each updated page belonging to the current transaction, before any changes
     // were made to it.
-    s = m_wal->abort_last([this](const auto &info) {
+    s = m_wal->start_abort([this](const auto &info) {
         const auto [id, image] = info;
         auto page = m_pager->acquire(PageId {id}, true);
         if (!page.has_value()) return page.error();
 
-        page->undo(info);
+        page->apply_update(info);
         return m_pager->release(std::move(*page));
     });
     MAYBE_SAVE_AND_FORWARD(s, MSG);
@@ -415,28 +415,28 @@ auto Core::ensure_consistent_state() -> Status
 
     auto s = m_wal->start_recovery(
         [this](const auto &info) {
-            if (!info.is_commit) {
-                auto page = m_pager->acquire(PageId {info.page_id}, true);
-                if (!page.has_value()) return page.error();
+            auto page = m_pager->acquire(PageId {info.page_id}, true);
+            if (!page.has_value()) return page.error();
 
-                page->redo(info);
-                return m_pager->release(std::move(*page));
-            }
-            return Status::ok();
+            page->apply_update(info);
+            return m_pager->release(std::move(*page));
         },
         [this](const auto &info) {
             auto page = m_pager->acquire(PageId {info.page_id}, true);
             if (!page.has_value()) return page.error();
 
-            page->undo(info);
+            page->apply_update(info);
             return m_pager->release(std::move(*page));
         });
     MAYBE_FORWARD(s, MSG);
 
     s = load_state();
     MAYBE_FORWARD(s, MSG);
+
     s = m_pager->flush();
-    return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
+
+    return m_wal->finish_recovery();
 }
 
 auto Core::transaction() -> Transaction

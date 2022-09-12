@@ -54,9 +54,10 @@ public:
     [[nodiscard]] auto log(std::uint64_t page_id, BytesView image) -> Status override;
     [[nodiscard]] auto log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status override;
     [[nodiscard]] auto commit() -> Status override;
-    [[nodiscard]] auto start_recovery(const GetPayload &redo, const GetPayload &undo) -> Status override;
+    [[nodiscard]] auto start_recovery(const GetDeltas &delta_cb, const GetFullImage &image_cb) -> Status override;
     [[nodiscard]] auto finish_recovery() -> Status override;
-    [[nodiscard]] auto abort_last(const GetPayload &callback) -> Status override;
+    [[nodiscard]] auto start_abort(const GetFullImage &callback) -> Status override;
+    [[nodiscard]] auto finish_abort() -> Status override;
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
@@ -76,6 +77,7 @@ private:
     std::atomic<SequenceId> m_flushed_lsn {};
     std::atomic<SequenceId> m_pager_lsn {};
     SequenceId m_last_lsn;
+    SegmentId m_commit_id;
     LogScratchManager m_scratch;
     WalCollection m_collection;
     std::string m_prefix;
@@ -84,7 +86,7 @@ private:
     Status m_status {Status::ok()};
     std::optional<WalReader> m_reader;
     std::optional<WalWriter> m_writer;
-    std::optional<BasicWalCleaner> m_cleaner;
+//    std::optional<BasicWalCleaner> m_cleaner;
     std::string m_reader_payload;
     std::string m_reader_tail;
     std::string m_writer_tail;

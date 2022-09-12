@@ -450,11 +450,9 @@ struct formatter<cco::WalRecordHeader> {
     template <typename FormatContext>
     auto format(const cco::WalRecordHeader &header, FormatContext &ctx) {
         auto out = fmt::format("({} B) {{", sizeof(header));
-        out += fmt::format("lsn: {}, ", header.lsn);
         out += fmt::format("crc: {}, ", header.crc);
         out += fmt::format("size: {}, ", header.size);
         out += fmt::format("type: {}, ", header.type);
-        out += fmt::format("pad: {}", header.pad);
         return format_to(ctx.out(), "WalRecordHeader {}}}", out);
     }
 };

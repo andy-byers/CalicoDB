@@ -154,8 +154,7 @@ auto BasicPager::try_make_available() -> Result<bool>
 
     if (itr == m_registry.end()) {
         CALICO_EXPECT_TRUE(m_wal->is_working());
-        const auto s = m_wal->flush_pending();
-        if (!s.is_ok()) return Err {s};
+        std::this_thread::yield();
         return false;
     }
 
@@ -184,7 +183,7 @@ auto BasicPager::release(Page page) -> Status
     if (const auto deltas = page.collect_deltas(); m_wal->is_working() && !deltas.empty()) {
         CALICO_EXPECT_TRUE(page.is_writable());
         page.set_lsn(SequenceId {m_wal->current_lsn()});
-        s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
+        s = m_wal->log(page.id().value, page.view(0), page.collect_deltas());
         save_and_forward_status(s, "could not write page deltas to WAL");
     }
 
@@ -207,7 +206,7 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
 
     // TODO: We also have info about whether or not we should watch this page. Like *m_has_xact? Although that may break abort() since it doesn't set *m_has_xact to false until it is totally finished...
     if (m_wal->is_working()) {
-        auto s = m_wal->log_image(page.id().value, page.view(0));
+        auto s = m_wal->log(page.id().value, page.view(0));
         save_and_forward_status(s, "could not write full image to WAL");
 
     } else if (m_wal->is_enabled()) {

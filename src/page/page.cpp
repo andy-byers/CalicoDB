@@ -100,20 +100,19 @@ auto Page::write(BytesView in, Size offset) -> void
     mem_copy(bytes(offset, in.size()), in);
 }
 
-auto Page::undo(const UndoDescriptor &descriptor) -> void
+auto Page::apply_update(const FullImageDescriptor &info) -> void
 {
-    CALICO_EXPECT_EQ(m_id, descriptor.page_id);
-    CALICO_EXPECT_EQ(m_data.size(), descriptor.image.size());
-    mem_copy(m_data, descriptor.image);
+    CALICO_EXPECT_EQ(m_id, info.page_id);
+    CALICO_EXPECT_EQ(m_data.size(), info.image.size());
+    mem_copy(m_data, info.image);
     m_is_dirty = true; // Dirty flag is set here and in redo(), even though we don't have any deltas.
 }
 
-auto Page::redo(const RedoDescriptor &descriptor) -> void
+auto Page::apply_update(const DeltasDescriptor &info) -> void
 {
-    CALICO_EXPECT_EQ(m_id, descriptor.page_id);
-    CALICO_EXPECT_FALSE(descriptor.is_commit);
-    if (lsn() < descriptor.page_lsn) {
-        for (const auto &[offset, delta]: descriptor.deltas)
+    CALICO_EXPECT_EQ(m_id, info.page_id);
+    if (lsn() < info.page_lsn) {
+        for (const auto &[offset, delta]: info.deltas)
             mem_copy(m_data.range(offset, delta.size()), delta);
         m_is_dirty = true;
     }

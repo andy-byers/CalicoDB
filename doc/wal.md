@@ -33,7 +33,7 @@ The WAL deals with three types of records: full images, delta records, and commi
 
 #### Full Images
 A full-page image is generated when a clean writable page is acquired from the pager.
-It contains the entire page contents, and can be used to undo many modifications made during a transaction.
+It contains the entire page contents, and can be used to apply_update many modifications made during a transaction.
 All that is needed for a full image is an immutable slice of the page data.
 The page LSN is not updated when generating this type of record, since the page was not actually updated.
 
@@ -46,15 +46,15 @@ A commit record is emitted when a transaction commits.
 It contains no actual information (other than its LSN) and serves as a sentinel to mark that a transaction has succeeded.
 
 ### Recovery
-We split recovery up into two phases: redo and undo.
+We split recovery up into two phases: apply_update and apply_update.
 
 #### Redo Phase
-During the redo phase, we roll the WAL forward and apply updates that aren't already reflected in the database (using the database flushed LSN for reference).
+During the apply_update phase, we roll the WAL forward and apply updates that aren't already reflected in the database (using the database flushed LSN for reference).
 If we find a commit record at the end of the log, we are done, and the database is up-to-date.
-Otherwise, we must enter the second phase of recovery: undo.
+Otherwise, we must enter the second phase of recovery: apply_update.
 
 #### Undo Phase
-In the undo phase, we roll back the most recent (incomplete) transaction, that is, we roll the log backward from the end until the most recent commit.
+In the apply_update phase, we roll back the most recent (incomplete) transaction, that is, we roll the log backward from the end until the most recent commit.
 Now the database is consistent with its state at the last successful commit.
 
 ### Reentrancy

@@ -50,8 +50,8 @@ public:
     auto bytes(Size) -> Bytes;
     auto bytes(Size, Size) -> Bytes;
     auto write(BytesView, Size) -> void;
-    auto undo(const UndoDescriptor&) -> void;
-    auto redo(const RedoDescriptor&) -> void;
+    auto apply_update(const DeltasDescriptor &) -> void;
+    auto apply_update(const FullImageDescriptor&) -> void;
 
     // NOTE: We need these because we have a user-defined destructor.
     Page(Page &&) = default;

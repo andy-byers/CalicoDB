@@ -69,11 +69,11 @@ auto decode_deltas_payload(BytesView in) -> DeltasDescriptor
     in.advance();
 
     // LSN (8 B)
-    info.page_lsn = get_u64(in);
+    info.page_lsn.value = get_u64(in);
     in.advance(sizeof(info.page_lsn));
 
     // Page ID (8 B)
-    info.page_id = get_u64(in);
+    info.page_id.value = get_u64(in);
     in.advance(sizeof(info.page_id));
 
     // Deltas count (2 B)
@@ -143,7 +143,7 @@ auto decode_full_image_payload(BytesView in) -> FullImageDescriptor
     FullImageDescriptor info {};
     // NOTE: Skipping the LSN. Full images don't use this field.
     in.advance(sizeof(SequenceId));
-    info.page_id = get_u64(in);
+    info.page_id.value = get_u64(in);
     info.image = in.range(sizeof(PageId));
     return info;
 }
