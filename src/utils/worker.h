@@ -26,7 +26,7 @@ public:
     [[nodiscard]]
     auto status() const -> Status
     {
-        if (m_is_ok.load())
+        if (m_is_ok.load(std::memory_order_acquire))
             return Status::ok();
         std::lock_guard lock {m_mu};
         return m_status;
@@ -61,17 +61,12 @@ private:
                 // cleaning up now due to an error, we should have stored/logged that error before calling
                 // destroy().
                 auto s = m_on_cleanup(m_status);
-                maybe_store_error(s);
+                maybe_store_error(std::move(s));
                 break;
             }
             if (m_is_ok.load()) {
                 auto s = m_on_event(event->event);
-                maybe_store_error(s);
-//                if (!s.is_ok()) {
-////                    std::lock_guard lock {m_mu}; TODO: Shouldn't need this lock.
-////                    m_status = std::move(s);
-////                    m_is_ok.store(false, std::memory_order_release);
-//                }
+                maybe_store_error(std::move(s));
             }
             if (event->needs_wait) {
                 m_is_waiting.store(false);
@@ -82,10 +77,12 @@ private:
 
     auto maybe_store_error(Status s) -> void
     {
-        m_status = std::move(s);
+        if (!s.is_ok()) {
+            m_status = std::move(s);
 
-        // We won't check status unless m_is_ok is false. This makes sure m_status is set before that happens.
-        m_is_ok.store(false, std::memory_order_release);
+            // We won't check status unless m_is_ok is false. This makes sure m_status is set before that happens.
+            m_is_ok.store(false, std::memory_order_release);
+        }
     }
 
     template<class E>

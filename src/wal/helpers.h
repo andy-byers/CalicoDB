@@ -84,15 +84,6 @@ public:
     }
 
     [[nodiscard]]
-    auto most_recent_id() const -> SegmentId
-    {
-        std::lock_guard lock {m_mutex};
-        if (m_segments.empty())
-            return SegmentId::null();
-        return *crbegin(m_segments);
-    }
-
-    [[nodiscard]]
     auto segments() const -> const std::set<SegmentId>&
     {
         // WARNING: We must ensure that background threads that modify the collection are paused before using this method.

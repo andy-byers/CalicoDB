@@ -90,7 +90,6 @@ private:
     std::string m_reader_payload;
     std::string m_reader_tail;
     std::string m_writer_tail;
-    Size m_page_size {};
     Size m_wal_limit {};
 
     // If this is true, both m_writer and m_cleaner should exist. Otherwise, m_reader should exist. The two

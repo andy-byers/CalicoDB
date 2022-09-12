@@ -44,7 +44,6 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_scratch {wal_scratch_size(param.page_size)},
       m_prefix {param.prefix},
       m_store {param.store},
-      m_page_size {param.page_size},
       m_wal_limit {param.wal_limit}
 {
     m_logger->info("constructing BasicWriteAheadLog object");
@@ -232,7 +231,7 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
 auto BasicWriteAheadLog::start_workers() -> Status
 {
     static constexpr auto MSG = "could not start workers";
-    m_logger->info("received start request: next segment ID is {}", m_collection.most_recent_id().value);
+    m_logger->info("received start request: next segment ID is {}", m_collection.last().value);
     CALICO_EXPECT_FALSE(m_is_working);
 
     m_writer.emplace(
@@ -241,7 +240,8 @@ auto BasicWriteAheadLog::start_workers() -> Status
         m_scratch,
         Bytes {m_writer_tail},
         m_flushed_lsn,
-        m_prefix
+        m_prefix,
+        m_wal_limit
     );
 
 //    m_cleaner.emplace(

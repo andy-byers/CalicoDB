@@ -21,7 +21,7 @@ auto LogWriter::write(SequenceId lsn, BytesView payload) -> Status
         const auto can_fit_all = space_remaining >= sizeof(WalRecordHeader) + payload.size();
 
         if (can_fit_some) {
-            WalRecordHeader rhs {};
+            WalRecordHeader rhs;
 
             if (!can_fit_all)
                 rhs = split_record(lhs, payload, space_remaining);
@@ -72,7 +72,7 @@ auto LogWriter::flush() -> Status
 
 auto WalWriter::open() -> Status
 {
-    return open_segment(++m_segments->most_recent_id());
+    return open_segment(++m_segments->last());
 }
 
 auto WalWriter::write(SequenceId lsn, NamedScratch payload) -> void
@@ -95,8 +95,8 @@ auto WalWriter::on_event(const EventWrapper &event) -> Status
     // std::nullopt means we need to advance to the next segment.
     if (!event) return advance_segment();
 
-    auto [lsn, buffer, size] = *event;
-    auto s = m_writer->write(lsn, buffer->truncate(size));
+    auto [lsn, buffer] = *event;
+    auto s = m_writer->write(lsn, *buffer);
 
     m_scratch->put(buffer);
     if (s.is_ok() && m_writer->block_count() >= m_wal_limit)
@@ -124,6 +124,7 @@ auto WalWriter::open_segment(SegmentId id) -> Status
 auto WalWriter::close_segment() -> Status
 {
     CALICO_EXPECT_NE(m_writer, std::nullopt);
+    const auto is_empty = m_writer->block_count() == 0;
 
     // This is a NOOP if the tail buffer was empty.
     auto s = m_writer->flush();
@@ -131,12 +132,12 @@ auto WalWriter::close_segment() -> Status
     m_file.reset();
 
     // We want to do this part, even if the flush failed.
-    auto id = ++m_segments->most_recent_id();
-    if (m_writer->block_count()) {
-        m_segments->add_segment({id});
-    } else {
+    auto id = ++m_segments->last();
+    if (is_empty) {
         auto t = m_store->remove_file(m_prefix + id.to_name());
         s = s.is_ok() ? t : s;
+    } else {
+        m_segments->add_segment(id);
     }
     return s;
 }
@@ -145,7 +146,7 @@ auto WalWriter::advance_segment() -> Status
 {
     auto s = close_segment();
     if (s.is_ok()) {
-        auto id = ++m_segments->most_recent_id();
+        auto id = ++m_segments->last();
         return open_segment(id);
     }
     return s;

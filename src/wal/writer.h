@@ -47,7 +47,7 @@ private:
 
 class WalWriter {
 public:
-    WalWriter(Storage &store, WalCollection &segments, LogScratchManager &scratch, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix)
+    WalWriter(Storage &store, WalCollection &segments, LogScratchManager &scratch, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix, Size wal_limit)
         : m_worker {[this](const auto &event) {
               return on_event(event);
           }, [this](const auto &status) {
@@ -58,7 +58,8 @@ public:
           m_scratch {&scratch},
           m_segments {&segments},
           m_store {&store},
-          m_tail {tail}
+          m_tail {tail},
+          m_wal_limit {wal_limit}
     {}
 
     [[nodiscard]]
@@ -83,7 +84,6 @@ private:
     struct Event {
         SequenceId lsn;
         NamedScratch buffer;
-        Size size {};
     };
 
     // Represents either a "write" or an "advance" event. We don't need any information to advance to the next segment,
