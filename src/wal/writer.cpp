@@ -54,6 +54,9 @@ auto LogWriter::write(SequenceId lsn, BytesView payload) -> Status
 
 auto LogWriter::flush() -> Status
 {
+    fmt::print(stderr, "flush block {}\n", block_count());
+
+
     // Already flushed, just return OK.
     if (m_offset == 0)
         return Status::ok();
@@ -123,7 +126,9 @@ auto WalWriter::open_segment(SegmentId id) -> Status
 
 auto WalWriter::close_segment() -> Status
 {
-    CALICO_EXPECT_NE(m_writer, std::nullopt);
+    // We must have failed while opening the segment file.
+    if (!m_writer) return status();
+
     const auto is_empty = m_writer->block_count() == 0;
 
     // This is a NOOP if the tail buffer was empty.

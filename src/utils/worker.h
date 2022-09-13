@@ -21,7 +21,11 @@ public:
           m_thread {[this] {worker();}}
     {}
 
-    ~Worker() = default;
+    ~Worker()
+    {
+        if (m_thread.joinable())
+            (void)std::move(*this).destroy();
+    }
 
     [[nodiscard]]
     auto status() const -> Status

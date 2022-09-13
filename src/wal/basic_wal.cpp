@@ -291,43 +291,24 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
     auto s = m_reader->open();
     MAYBE_FORWARD(s, MSG);
 
-    bool found_start {};
     while (s.is_ok()) {
-
-        // TODO TODO TODOTODO TODO TODOTODO TODO TODOTODO TODO TODOTODO TODO TODOTODO TODO TODO: Not correct! The pager will flush pages touched by the most-recent
-        // Find the first segment that contains updates not already in the database.       TODO: transaction. We need to roll everything to find the "commit ID".
-        if (!found_start) {                                                          //    TODO: Maybe just roll everything, but don't call the callback unless the
-            SequenceId first_lsn;                                                    //    TODO: updates need to be applied given the LSN/pager LSN.
-            s = m_reader->read_first_lsn(first_lsn);
-            MAYBE_FORWARD(s, MSG);
-
-            if (first_lsn < m_pager_lsn.load())
-                continue;
-
-            s = m_reader->seek_previous();
-            if (!s.is_ok() && !s.is_not_found())
-                return s;
-            found_start = true;
-        }
-
         bool has_commit {};
         SequenceId last_lsn;
 
         s = m_reader->roll([&](const PayloadDescriptor &info) {
             if (std::holds_alternative<DeltasDescriptor>(info)) {
                 const auto deltas = std::get<DeltasDescriptor>(info);
-                last_lsn = deltas.page_lsn;
-                return delta_cb(deltas);
-            } else if (std::holds_alternative<FullImageDescriptor>(info)) {
-                const auto image = std::get<FullImageDescriptor>(info);
-                return image_cb(image);
-            } else {
+                if (deltas.page_lsn > m_pager_lsn.load(std::memory_order_relaxed)) {
+                    last_lsn = deltas.page_lsn;
+                    return delta_cb(deltas);
+                }
+            } else if (std::holds_alternative<CommitDescriptor>(info)) {
                 const auto commit = std::get<CommitDescriptor>(info);
                 last_lsn = commit.lsn;
                 m_commit_id = m_reader->segment_id();
                 has_commit = true;
-                return Status::ok();
             }
+            return Status::ok();
         });
         if (!s.is_ok()) {
             s = forward_status(s, "could not roll WAL forward");
@@ -396,14 +377,13 @@ auto BasicWriteAheadLog::start_abort(const GetFullImage &image_cb) -> Status
 
 auto BasicWriteAheadLog::finish_abort() -> Status
 {
-    // Remove obsolete WAL segments.
-    const auto &data = m_collection.segments();
-    for (auto itr = crbegin(data); itr != crend(data) && *itr != m_commit_id; ++itr) {
-        auto s = m_store->remove_file(m_prefix + itr->to_name());
-        MAYBE_FORWARD(s, "could not finish abort");
-    }
-    m_collection.remove_after(m_commit_id);
-    return Status::ok();
+    auto s = Status::ok();
+    auto id = m_collection.last();
+    // Try to keep the WAL collection consistent with the segment files on disk.
+    for (; !id.is_null() && id != m_commit_id && s.is_ok(); id = m_collection.id_before(id))
+        s = m_store->remove_file(m_prefix + id.to_name());
+    m_collection.remove_after(id);
+    return s;
 }
 
 #undef MAYBE_FORWARD

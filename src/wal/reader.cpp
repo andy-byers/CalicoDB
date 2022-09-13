@@ -95,8 +95,8 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
         // Read the next block into the tail buffer.
         auto s = read_exact_or_eof(*m_file, m_number * tail.size(), tail);
 
-        // Just hit EOF. If we have any record fragments read so far, we consider this corruption.
         if (!s.is_ok()) {
+            // If we have any record fragments read so far, we consider this corruption.
             if (s.is_logic_error() && header.type != WalRecordHeader::Type {})
                 return read_corruption_error("logical record is incomplete");
             return s;
@@ -150,8 +150,13 @@ auto WalReader::roll(const GetPayload &callback) -> Status
 
         // If this call succeeds, payload will be modified to point to the exact payload.
         s = m_reader->read(payload, m_scratch);
-        if (s.is_logic_error()) continue;
-        if (!s.is_ok()) return s;
+
+        // A logic error means we have reached EOF.
+        if (s.is_logic_error()) {
+            return Status::ok();
+        } else if (!s.is_ok()) {
+            return s;
+        }
 
         const auto type = decode_payload_type(payload);
         switch (type) {
