@@ -87,7 +87,7 @@ private:
     std::optional<WalReader> m_reader;
     std::optional<WalWriter> m_writer;
 //    std::optional<BasicWalCleaner> m_cleaner;
-    std::string m_reader_payload;
+    std::string m_reader_data;
     std::string m_reader_tail;
     std::string m_writer_tail;
     Size m_wal_limit {};

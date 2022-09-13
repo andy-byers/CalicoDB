@@ -71,6 +71,9 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
         if (has_enough_space) {
             // Note that this modifies rest to point to [<local>, <end>) in the tail buffer.
             if (WalRecordHeader::could_contain_record(rest.advance(m_offset))) {
+
+fmt::print(stderr,"N:{}, O:{}\n", m_number,m_offset);
+
                 const auto temp = read_wal_record_header(rest);
                 rest.advance(sizeof(temp));
 
@@ -146,10 +149,10 @@ auto WalReader::roll(const GetPayload &callback) -> Status
     prepare_traversal();
 
     while (s.is_ok()) {
-        Bytes payload {m_payload};
+        Bytes payload {m_data};
 
         // If this call succeeds, payload will be modified to point to the exact payload.
-        s = m_reader->read(payload, m_scratch);
+        s = m_reader->read(payload, m_tail);
 
         // A logic error means we have reached EOF.
         if (s.is_logic_error()) {
@@ -178,6 +181,9 @@ auto WalReader::roll(const GetPayload &callback) -> Status
 
 auto WalReader::open_segment(SegmentId id) -> Status
 {
+    fmt::print(stderr,"read id {}\n",id.value);
+
+
     CALICO_EXPECT_EQ(m_reader, std::nullopt);
     RandomReader *file {}; // TODO: SequentialReader could be useful for this class!
     auto s = m_store->open_random_reader(m_prefix + id.to_name(), &file);

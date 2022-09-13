@@ -711,22 +711,17 @@ public:
         : worker {[this](int event) {
             events.emplace_back(event);
             return Status::ok();
-        }, [this](const Status &status) {
-            is_finished = true;
-            return status;
         }}
     {}
 
     Worker<int> worker;
     std::vector<int> events;
-    bool is_finished {};
 };
 
 TEST_F(BasicWorkerTests, CreateWorker)
 {
     ASSERT_TRUE(expose_message(worker.status()));
     ASSERT_TRUE(events.empty());
-    ASSERT_FALSE(is_finished);
     ASSERT_TRUE(expose_message(std::move(worker).destroy()));
 }
 
@@ -734,7 +729,6 @@ TEST_F(BasicWorkerTests, DestroyWorker)
 {
     ASSERT_TRUE(expose_message(std::move(worker).destroy()));
     ASSERT_TRUE(events.empty());
-    ASSERT_TRUE(is_finished);
 }
 
 TEST_F(BasicWorkerTests, EventsGetAdded)
@@ -785,23 +779,12 @@ public:
             if (callback_status.is_ok())
                 events.emplace_back(event);
             return callback_status;
-        }, [this](const Status &s) {
-            assert_error_42(s);
-            is_finished = true;
-            return s;
         }}
     {}
-
-    ~WorkerFaultTests() override
-    {
-        if (!is_finished)
-            assert_error_42(std::move(worker).destroy());
-    }
 
     Status callback_status {Status::ok()};
     Worker<int> worker;
     std::vector<int> events;
-    bool is_finished {};
 };
 
 TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
@@ -853,6 +836,8 @@ TEST_F(WorkerFaultTests, ErrorStatusContention)
 {
     callback_status = Status::system_error("42");
     worker.dispatch(1);
+    worker.dispatch(2);
+    worker.dispatch(3);
 
     // Sketchy but seems to work in practice. I'm getting a few thousand of these checks in before the status is
     // registered.
