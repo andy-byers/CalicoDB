@@ -72,9 +72,6 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
         if (has_enough_space) {
             // Note that this modifies rest to point to [<local>, <end>) in the tail buffer.
             if (WalRecordHeader::could_contain_record(rest.advance(m_offset))) {
-
-fmt::print(stderr,"N:{}, O:{}\n", m_number,m_offset);
-
                 const auto temp = read_wal_record_header(rest);
                 rest.advance(sizeof(temp));
 
@@ -183,9 +180,6 @@ auto WalReader::roll(const GetPayload &callback) -> Status
 
 auto WalReader::open_segment(SegmentId id) -> Status
 {
-    fmt::print(stderr,"read id {}\n",id.value);
-
-
     CALICO_EXPECT_EQ(m_reader, std::nullopt);
     RandomReader *file {}; // TODO: SequentialReader could be useful for this class!
     auto s = m_store->open_random_reader(m_prefix + id.to_name(), &file);

@@ -695,22 +695,30 @@ public:
         auto s = writer.open();
         if (!s.is_ok()) return s;
 
+        SequenceId lsn;
         for (Size i {}; i < num_writes && writer.status().is_ok(); ++i) {
             const auto n = random.get(PAGE_COUNT - 1UL);
             const auto id = PageId::from_index(n);
             if (has_full_image[n]) {
-                writer.write(SequenceId::from_index(i), get_deltas(SequenceId::from_index(i), id));
+                ++lsn;
+                writer.write(lsn, get_deltas(lsn, id));
+                if(i>3000)fmt::print(stderr,"OUT dl LSN: {}\n", lsn.value);
             } else {
-                writer.write(SequenceId::from_index(i), get_image(SequenceId::from_index(i), id));
+                ++lsn;
+                writer.write(lsn, get_image(lsn, id));
+                if(i>3000)fmt::print(stderr,"OUT im LSN: {}\n", lsn.value);
                 has_full_image[n] = true;
             }
             // Simulate a commit. We've been modifying the images when generating delta records, so we'll just save our
             // state at this point.
-            if (commit_interval && i && i % commit_interval == 0) {
+            if (commit_interval && !lsn.is_null() && lsn.as_index() % commit_interval == 0) {
                 committed = images;
-                commit_lsn = SequenceId::from_index(i);
+                commit_lsn = ++lsn;
                 std::fill(begin(has_full_image), end(has_full_image), false);
-                writer.write(SequenceId::from_index(i), get_commit(SequenceId::from_index(i)));
+                writer.write(lsn, get_commit(lsn));
+                writer.advance();
+                if(i>3000)fmt::print(stderr,"OUT cm SID: {}, LSN: {}\n", collection.last().value, lsn.value);
+
             }
         }
         return std::move(writer).destroy();
@@ -723,6 +731,40 @@ public:
             CALICO_EXPECT_NE(itr, cend(lhs));
             ASSERT_EQ(image, *itr++);
         }
+    }
+
+    [[nodiscard]]
+    auto contains_sequence(WalReader &reader, SequenceId last_lsn) -> Status
+    {
+        auto s = Status::ok();
+        SequenceId lsn;
+        // Roll forward to the end of the WAL.
+        while (s.is_ok()) {
+            s = reader.roll([&](const PayloadDescriptor &info) {
+                SequenceId next_lsn;
+                if (std::holds_alternative<DeltasDescriptor>(info)) {
+                    const auto deltas = std::get<DeltasDescriptor>(info);
+                    next_lsn = deltas.lsn;
+                } else if (std::holds_alternative<FullImageDescriptor>(info)) {
+                    const auto image = std::get<FullImageDescriptor>(info);
+                    next_lsn = image.lsn;
+                } else if (std::holds_alternative<CommitDescriptor>(info)) {
+                    const auto image = std::get<CommitDescriptor>(info);
+                    next_lsn = image.lsn;
+                }
+                EXPECT_EQ(++lsn, next_lsn);
+                return Status::ok();
+            });
+            if (!s.is_ok()) break;
+            s = reader.seek_next();
+            if (s.is_not_found()) {
+                EXPECT_EQ(lsn, last_lsn);
+                return Status::ok();
+            } else if (!s.is_ok()) {
+                break;
+            }
+        }
+        return s;
     }
 
     [[nodiscard]]
@@ -775,6 +817,10 @@ public:
                 } else if (std::holds_alternative<FullImageDescriptor>(info)) {
                     const auto image = std::get<FullImageDescriptor>(info);
                     mem_copy(snapshots[image.pid.as_index()], image.image);
+                    fmt::print(stderr,"im SID:{}, LSN: {}\n", reader.segment_id().value, image.lsn.value);
+                } else if (std::holds_alternative<DeltasDescriptor>(info)) {
+                    const auto deltas = std::get<DeltasDescriptor>(info);
+                    fmt::print(stderr,"dl SID:{}, LSN: {}\n", reader.segment_id().value, deltas.lsn.value);
                 }
                 return Status::ok();
             });
@@ -789,8 +835,6 @@ public:
                 break;
             }
         }
-        if (s.is_not_found() && s.what() == "commit")
-            return Status::ok();
         return s;
     }
 
@@ -808,17 +852,67 @@ public:
     Random random {internal::random_seed};
 };
 
-TEST_F(WalReaderWriterTests, ReadsAndWritesNormally)
+static auto does_not_lose_records_test(WalReaderWriterTests &test, Size num_writes)
 {
-    auto snapshots = images;
-    ASSERT_TRUE(expose_message(emit_segments(5'000)));
+    ASSERT_TRUE(expose_message(test.emit_segments(num_writes)));
 
-    auto reader = get_reader();
+    auto reader = test.get_reader();
     ASSERT_TRUE(expose_message(reader.open()));
-    ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
-    assert_images_match(snapshots, images);
-    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
-    assert_images_match(snapshots, committed);
+    ASSERT_TRUE(expose_message(test.contains_sequence(reader, SequenceId {num_writes})));
+}
+
+TEST_F(WalReaderWriterTests, DoesNotLoseRecordWithinSegment)
+{
+    does_not_lose_records_test(*this, 3);
+}
+
+TEST_F(WalReaderWriterTests, DoesNotLoseRecordsAcrossSegments)
+{
+    does_not_lose_records_test(*this, 5'000);
+}
+
+static auto roll_forward_test(WalReaderWriterTests &test, Size num_writes)
+{
+    auto snapshots = test.images;
+    ASSERT_TRUE(expose_message(test.emit_segments(num_writes)));
+
+    auto reader = test.get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(test.roll_segments_forward(reader, snapshots)));
+    test.assert_images_match(snapshots, test.images);
+}
+
+TEST_F(WalReaderWriterTests, RollForwardWithinSegment)
+{
+    roll_forward_test(*this, 3);
+}
+
+TEST_F(WalReaderWriterTests, RollForwardAcrossSegments)
+{
+    roll_forward_test(*this, 5'000);
+}
+
+static auto roll_backward_test(WalReaderWriterTests &test, Size num_writes)
+{
+    auto snapshots = test.images;
+    ASSERT_TRUE(expose_message(test.emit_segments(num_writes)));
+
+    auto reader = test.get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(test.roll_segments_forward(reader, snapshots)));
+    test.assert_images_match(snapshots, test.images);
+    ASSERT_TRUE(expose_message(test.roll_segments_backward(reader, snapshots)));
+    test.assert_images_match(snapshots, test.committed);
+}
+
+TEST_F(WalReaderWriterTests, RollBackwardWithinSegment)
+{
+    roll_backward_test(*this, 3);
+}
+
+TEST_F(WalReaderWriterTests, RollBackwardAcrossSegments)
+{
+    roll_backward_test(*this, 5'000);
 }
 
 TEST_F(WalReaderWriterTests, RunsTransactionsNormally)
@@ -832,7 +926,22 @@ TEST_F(WalReaderWriterTests, RunsTransactionsNormally)
     assert_images_match(snapshots, images);
     ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
     assert_images_match(snapshots, images);
-    assert_images_match(snapshots, committed);
+}
+
+TEST_F(WalReaderWriterTests, CommitIsCheckpoint)
+{
+    auto snapshots = images;
+
+    // Should commit after the last write.
+    ASSERT_TRUE(expose_message(emit_segments(200, 99)));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
+    assert_images_match(snapshots, images);
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+    assert_images_match(snapshots, images);
+    assert_images_match(images, committed);
 }
 
 TEST_F(WalReaderWriterTests, RollWalAfterWriteError)
