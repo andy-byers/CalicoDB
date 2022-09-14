@@ -50,8 +50,6 @@ public:
     WalWriter(Storage &store, WalCollection &segments, LogScratchManager &scratch, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix, Size wal_limit)
         : m_worker {[this](const auto &event) {
               return on_event(event);
-          }, [this](const auto &status) {
-              return on_cleanup(status);
           }},
           m_prefix(std::move(prefix)),
           m_flushed_lsn {&flushed_lsn},
@@ -90,11 +88,10 @@ private:
     // so that state is represented by std::nullopt.
     using EventWrapper = std::optional<Event>;
 
-    [[nodiscard]] auto open_segment(SegmentId) -> Status;
-    [[nodiscard]] auto close_segment() -> Status;
-    [[nodiscard]] auto advance_segment() -> Status;
     [[nodiscard]] auto on_event(const EventWrapper &event) -> Status;
-    [[nodiscard]] auto on_cleanup(const Status &status) -> Status;
+    [[nodiscard]] auto advance_segment() -> Status;
+    [[nodiscard]] auto open_segment(SegmentId) -> Status;
+    auto close_segment() -> Status;
 
     Worker<EventWrapper> m_worker;
     std::string m_prefix;

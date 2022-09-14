@@ -44,6 +44,9 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_scratch {wal_scratch_size(param.page_size)},
       m_prefix {param.prefix},
       m_store {param.store},
+      m_reader_data(wal_scratch_size(param.page_size), '\x00'),
+      m_reader_tail(wal_block_size(param.page_size), '\x00'),
+      m_writer_tail(wal_block_size(param.page_size), '\x00'),
       m_wal_limit {param.wal_limit}
 {
     m_logger->info("constructing BasicWriteAheadLog object");
@@ -284,7 +287,7 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
         m_collection,
         m_prefix,
         Bytes {m_reader_tail},
-        Bytes {m_reader_payload}
+        Bytes {m_reader_data}
     );
 
     // Open the reader on the first (oldest) WAL segment file.

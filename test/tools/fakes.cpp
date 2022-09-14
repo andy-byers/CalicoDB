@@ -108,6 +108,15 @@ static auto write_file_at(const std::string &path, std::string &file, BytesView 
     return Status::ok();
 }
 
+static auto format_path(std::string path)
+{
+    CALICO_EXPECT_FALSE(path.empty());
+    // TODO: Strip whitespace.
+    if (path.back() == '/')
+        path.erase(prev(cend(path)));
+    return path;
+}
+
 auto RandomHeapReader::read(Bytes &out, Size offset) -> Status
 {
     return read_file_at(m_path, *m_file, out, offset);
@@ -274,7 +283,7 @@ auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::str
     //       return all children, which works with the current design.
 
     std::lock_guard lock {m_mutex};
-    auto itr = m_directories.find(dir_path);
+    auto itr = m_directories.find(format_path(dir_path));
     if (itr == cend(m_directories)) {
         ThreePartMessage message;
         message.set_primary("could not get children");
@@ -292,7 +301,7 @@ auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::str
 auto HeapStorage::create_directory(const std::string &path) -> Status
 {
     std::lock_guard lock {m_mutex};
-    m_directories.insert(path);
+    m_directories.insert(format_path(path));
     return Status::ok();
 }
 

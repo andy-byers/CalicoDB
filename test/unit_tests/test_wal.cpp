@@ -625,24 +625,16 @@ public:
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00')
     {
-        writer.emplace(
-            *store,
-            collection,
-            scratch,
-            Bytes {writer_tail},
-            flushed_lsn,
-            PREFIX,
-            WAL_LIMIT
-        );
-
         std::generate(begin(images), end(images), [this] {
             return random.get<std::string>('a', 'z', PAGE_SIZE);
         });
+        has_full_image.resize(images.size());
     }
 
     ~WalReaderWriterTests() override = default;
 
-    [[nodiscard]] auto get_reader() -> WalReader
+    [[nodiscard]]
+    auto get_reader() -> WalReader
     {
         return WalReader {
             *store,
@@ -652,7 +644,8 @@ public:
             Bytes {reader_data}};
     }
 
-    [[nodiscard]] auto get_writer() -> WalWriter
+    [[nodiscard]]
+    auto get_writer() -> WalWriter
     {
         return WalWriter {
             *store,
@@ -664,40 +657,101 @@ public:
             WAL_LIMIT};
     }
 
-    [[nodiscard]] auto get_image(PageId id) -> NamedScratch
+    [[nodiscard]]
+    auto get_image(SequenceId lsn, PageId id) -> NamedScratch
     {
         EXPECT_LT(id.as_index(), PAGE_COUNT);
         auto payload = scratch.get();
-        const auto size = encode_full_image_payload(++last_lsn, id, Bytes {images[id.as_index()]}, *payload);
+        const auto size = encode_full_image_payload(lsn, id, Bytes {images[id.as_index()]}, *payload);
         payload->truncate(size);
         return payload;
     }
 
-    [[nodiscard]] auto get_deltas(PageId id) -> NamedScratch
+    [[nodiscard]]
+    auto get_deltas(SequenceId lsn, PageId id) -> NamedScratch
     {
         EXPECT_LT(id.as_index(), PAGE_COUNT);
         auto deltas = generator.setup_deltas(Bytes {images[id.as_index()]});
         auto payload = scratch.get();
-        const auto size = encode_deltas_payload(++last_lsn, id, images[id.as_index()], deltas, *payload);
+        const auto size = encode_deltas_payload(lsn, id, images[id.as_index()], deltas, *payload);
         payload->truncate(size);
         return payload;
     }
 
-    [[nodiscard]] auto get_commit() -> NamedScratch
+    [[nodiscard]]
+    auto get_commit(SequenceId lsn) -> NamedScratch
     {
         auto payload = scratch.get();
-        const auto size = encode_commit_payload(++last_lsn, *payload);
+        const auto size = encode_commit_payload(lsn, *payload);
         payload->truncate(size);
         return payload;
+    }
+
+    [[nodiscard]]
+    auto emit_segments(Size num_writes)
+    {
+        auto writer = get_writer();
+        auto s = writer.open();
+        if (!s.is_ok()) return s;
+
+        for (Size i {}; i < num_writes; ++i) {
+            const auto n = random.get(PAGE_COUNT - 1UL);
+            const auto id = PageId::from_index(n);
+            if (has_full_image[n]) {
+                writer.write(SequenceId::from_index(i), get_deltas(SequenceId::from_index(i), id));
+            } else {
+                writer.write(SequenceId::from_index(i), get_image(SequenceId::from_index(i), id));
+                has_full_image[n] = true;
+            }
+        }
+        return std::move(writer).destroy();
+    }
+
+    [[nodiscard]]
+    auto roll_segments(std::vector<std::string> &snapshots) -> Status
+    {
+        auto reader = get_reader();
+        auto s = reader.open();
+
+        while (s.is_ok()) {
+            s = reader.roll([&](const PayloadDescriptor &info) {
+                if (std::holds_alternative<DeltasDescriptor>(info)) {
+                    const auto deltas = std::get<DeltasDescriptor>(info);
+                    for (const auto &delta: deltas.deltas)
+                        mem_copy(Bytes {snapshots[deltas.page_id.as_index()]}.range(delta.offset), delta.data);
+                } else if (std::holds_alternative<FullImageDescriptor>(info)) {
+                    const auto image = std::get<FullImageDescriptor>(info);
+                    // We shouldn't have encountered this page yet.
+                    EXPECT_EQ(image.image.to_string(), snapshots[image.page_id.as_index()]);
+                }
+                return Status::ok();
+            });
+            if (!s.is_ok()) break;
+            s = reader.seek_next();
+            if (s.is_not_found()) {
+                return Status::ok();
+            } else {
+                break;
+            }
+        }
+        return s;
+    }
+
+    [[nodiscard]]
+    auto matches_images(const std::vector<std::string> &rhs) -> bool
+    {
+        auto itr = cbegin(rhs);
+        return std::all_of(cbegin(images), cend(images), [&itr](const auto &image) {
+            return image == *itr++;
+        });
     }
 
     std::vector<std::string> images;
-    SequenceId last_lsn;
+    std::vector<int> has_full_image;
     WalRecordGenerator generator;
     WalCollection collection;
     LogScratchManager scratch;
     std::atomic<SequenceId> flushed_lsn {};
-    std::optional<WalWriter> writer;
     std::string reader_data;
     std::string reader_tail;
     std::string writer_tail;
@@ -707,57 +761,9 @@ public:
 TEST_F(WalReaderWriterTests, ReadsAndWritesNormally)
 {
     auto snapshots = images;
-    std::vector<int> has_image(images.size());
-
-    {
-        auto writer = get_writer();
-        ASSERT_TRUE(expose_message(writer.open()));
-
-        static constexpr Size NUM_WRITES {10000};
-        for (Size i {}; i < NUM_WRITES; ++i) {
-            const auto n = random.get(PAGE_COUNT - 1);
-            const auto id = PageId::from_index(n);
-            if (has_image[n]) {
-                writer.write(++last_lsn, get_deltas(id));
-            } else {
-                writer.write(++last_lsn, get_image(id));
-                has_image[n] = true;
-            }
-        }
-        ASSERT_TRUE(expose_message(std::move(writer).destroy()));
-    }
-
-    {
-        auto reader = get_reader();
-        ASSERT_TRUE(expose_message(reader.open()));
-        for (; ; ) {
-            ASSERT_TRUE(expose_message(reader.roll([&](const PayloadDescriptor &info) {
-                if (std::holds_alternative<DeltasDescriptor>(info)) {
-                    const auto deltas = std::get<DeltasDescriptor>(info);
-                    Page page {{
-                        deltas.page_id,
-                        Bytes {snapshots[deltas.page_id.as_index()]},
-                        nullptr,
-                        true,
-                        false,
-                    }};
-                    page.apply_update(deltas);
-                } else if (std::holds_alternative<FullImageDescriptor>(info)) {
-                    const auto image = std::get<FullImageDescriptor>(info);
-                    // We shouldn't have encountered this page yet.
-                    EXPECT_EQ(image.image.to_string(), snapshots[image.page_id.as_index()]);
-                }
-                return Status::ok();
-            })));
-            auto s = reader.seek_next();
-            if (s.is_not_found()) break;
-            ASSERT_TRUE(expose_message(s));
-        }
-    }
-    auto itr = cbegin(snapshots);
-    std::for_each(cbegin(images), cend(images), [&itr](const auto &image) {
-        ASSERT_EQ(image, *itr++);
-    });
+    ASSERT_TRUE(expose_message(emit_segments(12)));
+    ASSERT_TRUE(expose_message(roll_segments(snapshots)));
+    ASSERT_TRUE(matches_images(snapshots));
 }
 
 //
@@ -978,7 +984,7 @@ public:
         WriteAheadLog *temp {};
 
         ASSERT_TRUE(expose_message(BasicWriteAheadLog::open({
-            ROOT,
+            PREFIX,
             store.get(),
             create_sink(),
             PAGE_SIZE,

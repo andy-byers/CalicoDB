@@ -90,7 +90,9 @@ auto WalWriter::advance() -> void
 
 auto WalWriter::destroy() && -> Status
 {
-    return std::move(m_worker).destroy();
+    auto s = std::move(m_worker).destroy();
+    close_segment();
+    return s;
 }
 
 auto WalWriter::on_event(const EventWrapper &event) -> Status
@@ -104,12 +106,11 @@ auto WalWriter::on_event(const EventWrapper &event) -> Status
     m_scratch->put(buffer);
     if (s.is_ok() && m_writer->block_count() >= m_wal_limit)
         return advance_segment();
-    return s;
-}
 
-auto WalWriter::on_cleanup(const Status &) -> Status
-{
-    return close_segment();
+    // If we failed to write the record, we need to close the segment file. We
+    // should do it in this thread to avoid race conditions.
+    if (!s.is_ok()) close_segment();
+    return s;
 }
 
 auto WalWriter::open_segment(SegmentId id) -> Status
@@ -136,9 +137,9 @@ auto WalWriter::close_segment() -> Status
     m_writer.reset();
     m_file.reset();
 
-    // We want to do this part, even if the flush failed.
-    auto id = ++m_segments->last();
-    if (is_empty) {
+    // We want to do this part, even if the flush failed. If the segment is empty, and we fail to remove
+    // it, we will end up overwriting it next time we open the writer.
+    if (auto id = ++m_segments->last(); is_empty) {
         auto t = m_store->remove_file(m_prefix + id.to_name());
         s = s.is_ok() ? t : s;
     } else {
