@@ -101,7 +101,7 @@ public:
             offset += size + random.get(1, MAX_SPREAD);
         }
         for (const auto &[offset, size]: deltas) {
-            const auto replacement = random.get<std::string>('\x00', '\xFF', size);
+            const auto replacement = random.get<std::string>('a', 'z', size);
             mem_copy(image.range(offset, size), stob(replacement));
         }
         return deltas;

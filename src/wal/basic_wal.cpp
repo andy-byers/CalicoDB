@@ -329,8 +329,10 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
 auto BasicWriteAheadLog::finish_recovery() -> Status
 {
     // Most-recent transaction has been committed.
-    if (m_commit_id == m_collection.last())
+    if (m_commit_id == m_collection.last()) {
+        m_reader.reset();
         return Status::ok();
+    }
 
     return finish_abort();
 }
@@ -383,6 +385,7 @@ auto BasicWriteAheadLog::finish_abort() -> Status
     for (; !id.is_null() && id != m_commit_id && s.is_ok(); id = m_collection.id_before(id))
         s = m_store->remove_file(m_prefix + id.to_name());
     m_collection.remove_after(id);
+    if (s.is_ok()) m_reader.reset();
     return s;
 }
 
