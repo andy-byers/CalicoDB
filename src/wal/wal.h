@@ -24,15 +24,14 @@ struct DeltaContent {
 };
 
 struct DeltasDescriptor {
-    PageId page_id {};
-
-    // LSN here corresponds to the page LSN of the referenced page after it was updated.
-    SequenceId page_lsn {};
+    PageId pid;
+    SequenceId lsn;
     std::vector<DeltaContent> deltas;
 };
 
 struct FullImageDescriptor {
-    PageId page_id {};
+    PageId pid;
+    SequenceId lsn;
     BytesView image;
 };
 

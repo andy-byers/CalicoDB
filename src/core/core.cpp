@@ -360,8 +360,8 @@ auto Core::abort() -> Status
     // This should give us the full images of each updated page belonging to the current transaction, before any changes
     // were made to it.
     s = m_wal->start_abort([this](const auto &info) {
-        const auto [id, image] = info;
-        auto page = m_pager->acquire(PageId {id}, true);
+        const auto [pid, lsn, image] = info;
+        auto page = m_pager->acquire(pid, true);
         if (!page.has_value()) return page.error();
 
         page->apply_update(info);
@@ -415,14 +415,14 @@ auto Core::ensure_consistent_state() -> Status
 
     auto s = m_wal->start_recovery(
         [this](const auto &info) {
-            auto page = m_pager->acquire(PageId {info.page_id}, true);
+            auto page = m_pager->acquire(PageId {info.pid}, true);
             if (!page.has_value()) return page.error();
 
             page->apply_update(info);
             return m_pager->release(std::move(*page));
         },
         [this](const auto &info) {
-            auto page = m_pager->acquire(PageId {info.page_id}, true);
+            auto page = m_pager->acquire(PageId {info.pid}, true);
             if (!page.has_value()) return page.error();
 
             page->apply_update(info);

@@ -201,7 +201,7 @@ TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
 {
     const auto size = encode_full_image_payload(SequenceId {1}, PageId::root(), stob(image), stob(scratch));
     const auto descriptor = decode_full_image_payload(stob(scratch).truncate(size));
-    ASSERT_EQ(descriptor.page_id, 1);
+    ASSERT_EQ(descriptor.pid, 1);
     ASSERT_EQ(descriptor.image.to_string(), image);
 }
 
@@ -211,8 +211,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
     auto deltas = generator.setup_deltas(stob(image));
     const auto size = encode_deltas_payload(SequenceId {42}, PageId::root(), stob(image), deltas, stob(scratch));
     const auto descriptor = decode_deltas_payload(stob(scratch).truncate(size));
-    ASSERT_EQ(descriptor.page_lsn, 42);
-    ASSERT_EQ(descriptor.page_id, 1);
+    ASSERT_EQ(descriptor.lsn, 42);
+    ASSERT_EQ(descriptor.pid, 1);
     ASSERT_EQ(descriptor.deltas.size(), deltas.size());
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const DeltaContent &delta) {
         return delta.data == stob(image).range(delta.offset, delta.data.size());
@@ -628,6 +628,7 @@ public:
         std::generate(begin(images), end(images), [this] {
             return random.get<std::string>('a', 'z', PAGE_SIZE);
         });
+        committed = images;
         has_full_image.resize(images.size());
     }
 
@@ -688,13 +689,13 @@ public:
     }
 
     [[nodiscard]]
-    auto emit_segments(Size num_writes)
+    auto emit_segments(Size num_writes, Size commit_interval = 0)
     {
         auto writer = get_writer();
         auto s = writer.open();
         if (!s.is_ok()) return s;
 
-        for (Size i {}; i < num_writes; ++i) {
+        for (Size i {}; i < num_writes && writer.status().is_ok(); ++i) {
             const auto n = random.get(PAGE_COUNT - 1UL);
             const auto id = PageId::from_index(n);
             if (has_full_image[n]) {
@@ -703,26 +704,42 @@ public:
                 writer.write(SequenceId::from_index(i), get_image(SequenceId::from_index(i), id));
                 has_full_image[n] = true;
             }
+            // Simulate a commit. We've been modifying the images when generating delta records, so we'll just save our
+            // state at this point.
+            if (commit_interval && i && i % commit_interval == 0) {
+                committed = images;
+                commit_lsn = SequenceId::from_index(i);
+                std::fill(begin(has_full_image), end(has_full_image), false);
+                writer.write(SequenceId::from_index(i), get_commit(SequenceId::from_index(i)));
+            }
         }
         return std::move(writer).destroy();
     }
 
-    [[nodiscard]]
-    auto roll_segments(std::vector<std::string> &snapshots) -> Status
+    auto assert_images_match(const std::vector<std::string> &lhs, const std::vector<std::string> &rhs) const -> void
     {
-        auto reader = get_reader();
-        auto s = reader.open();
+        auto itr = cbegin(lhs);
+        for (const auto &image: rhs) {
+            CALICO_EXPECT_NE(itr, cend(lhs));
+            ASSERT_EQ(image, *itr++);
+        }
+    }
 
+    [[nodiscard]]
+    auto roll_segments_forward(WalReader &reader, std::vector<std::string> &snapshots) -> Status
+    {
+        auto s = Status::ok();
+        // Roll forward to the end of the WAL.
         while (s.is_ok()) {
             s = reader.roll([&](const PayloadDescriptor &info) {
                 if (std::holds_alternative<DeltasDescriptor>(info)) {
                     const auto deltas = std::get<DeltasDescriptor>(info);
                     for (const auto &delta: deltas.deltas)
-                        mem_copy(Bytes {snapshots[deltas.page_id.as_index()]}.range(delta.offset), delta.data);
+                        mem_copy(Bytes {snapshots[deltas.pid.as_index()]}.range(delta.offset), delta.data);
                 } else if (std::holds_alternative<FullImageDescriptor>(info)) {
                     const auto image = std::get<FullImageDescriptor>(info);
                     // We shouldn't have encountered this page yet.
-                    EXPECT_EQ(image.image.to_string(), snapshots[image.page_id.as_index()]);
+                    EXPECT_EQ(image.image.to_string(), snapshots[image.pid.as_index()]);
                 }
                 return Status::ok();
             });
@@ -730,7 +747,7 @@ public:
             s = reader.seek_next();
             if (s.is_not_found()) {
                 return Status::ok();
-            } else {
+            } else if (!s.is_ok()) {
                 break;
             }
         }
@@ -738,14 +755,47 @@ public:
     }
 
     [[nodiscard]]
-    auto matches_images(const std::vector<std::string> &rhs) -> bool
+    auto roll_segments_backward(WalReader &reader, std::vector<std::string> &snapshots) -> Status
     {
-        auto itr = cbegin(rhs);
-        return std::all_of(cbegin(images), cend(images), [&itr](const auto &image) {
-            return image == *itr++;
-        });
+        auto s = Status::ok();
+        // Roll back to the most-recent commit.
+        for (Size i {}; s.is_ok(); ++i) {
+
+            SequenceId first_lsn;
+            s = reader.read_first_lsn(first_lsn);
+            if (!s.is_ok()) return s;
+
+            if (first_lsn < commit_lsn)
+                break;
+
+            s = reader.roll([&](const PayloadDescriptor &info) {
+                if (std::holds_alternative<CommitDescriptor>(info)) {
+                    CALICO_EXPECT_TRUE(false);
+                    return Status::not_found("should not have hit a commit record");
+                } else if (std::holds_alternative<FullImageDescriptor>(info)) {
+                    const auto image = std::get<FullImageDescriptor>(info);
+                    mem_copy(snapshots[image.pid.as_index()], image.image);
+                }
+                return Status::ok();
+            });
+            if (!s.is_ok()) {
+                if (!s.is_corruption() || i)
+                    break;
+            }
+            s = reader.seek_previous();
+            if (s.is_not_found()) {
+                return Status::ok();
+            } else if (!s.is_ok()) {
+                break;
+            }
+        }
+        if (s.is_not_found() && s.what() == "commit")
+            return Status::ok();
+        return s;
     }
 
+    SequenceId commit_lsn;
+    std::vector<std::string> committed;
     std::vector<std::string> images;
     std::vector<int> has_full_image;
     WalRecordGenerator generator;
@@ -761,9 +811,66 @@ public:
 TEST_F(WalReaderWriterTests, ReadsAndWritesNormally)
 {
     auto snapshots = images;
-    ASSERT_TRUE(expose_message(emit_segments(12)));
-    ASSERT_TRUE(expose_message(roll_segments(snapshots)));
-    ASSERT_TRUE(matches_images(snapshots));
+    ASSERT_TRUE(expose_message(emit_segments(5'000)));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
+    assert_images_match(snapshots, images);
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+    assert_images_match(snapshots, committed);
+}
+
+TEST_F(WalReaderWriterTests, RunsTransactionsNormally)
+{
+    auto snapshots = images;
+    ASSERT_TRUE(expose_message(emit_segments(5000, 100)));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
+    assert_images_match(snapshots, images);
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+    assert_images_match(snapshots, images);
+    assert_images_match(snapshots, committed);
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterWriteError)
+{
+    interceptors::set_write(FailOnce<10> {"test/wal-"});
+
+    auto snapshots = images;
+    assert_error_42(emit_segments(5'000));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    auto s = roll_segments_forward(reader, snapshots);
+
+    // The writer may have failed in the middle of writing a record (FIRST is written but LAST is in the tail buffer)
+    // still. In this case, we'll get a corruption error during the forward pass.
+    ASSERT_TRUE(s.is_corruption() or s.is_ok());
+
+    // We should be able to roll back any changes we have made to the snapshots.
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
+{
+    interceptors::set_open(FailOnce<3> {"test/wal-"});
+
+    auto snapshots = images;
+    assert_error_42(emit_segments(5'000));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    auto s = roll_segments_forward(reader, snapshots);
+
+    // The writer may have failed in the middle of writing a record (FIRST is written but LAST is in the tail buffer)
+    // still. In this case, we'll get a corruption error during the forward pass.
+    ASSERT_TRUE(s.is_corruption() or s.is_ok());
+
+    // We should be able to roll back any changes we have made to the snapshots.
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
 }
 
 //

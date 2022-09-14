@@ -40,7 +40,7 @@ auto LogReader::read(Bytes &out, Bytes tail) -> Status
 {
     // Lazily read the first block into the tail buffer.
     if (m_offset == 0) {
-        auto s = read_exact_or_eof(*m_file, m_offset, tail);
+        auto s = read_exact_or_eof(*m_file, 0, tail);
         if (!s.is_ok()) return s;
     }
     return read_logical_record(out, tail);
@@ -48,8 +48,9 @@ auto LogReader::read(Bytes &out, Bytes tail) -> Status
 
 auto LogReader::read_first_lsn(SequenceId &out) -> Status
 {
+    // Bytes requires the array size when constructed with a C-style array.
     char buffer [sizeof(WalRecordHeader) + MINIMUM_PAYLOAD_SIZE];
-    Bytes bytes {buffer};
+    Bytes bytes {buffer, sizeof(buffer)};
 
     // The LogWriter will never flush a block unless it contains at least one record, so the first record should be
     // located at the start of the file.
@@ -140,6 +141,7 @@ auto WalReader::seek_previous() -> Status
 
 auto WalReader::read_first_lsn(SequenceId &out) -> Status
 {
+    prepare_traversal();
     return m_reader->read_first_lsn(out);
 }
 

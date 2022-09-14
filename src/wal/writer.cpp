@@ -54,12 +54,9 @@ auto LogWriter::write(SequenceId lsn, BytesView payload) -> Status
 
 auto LogWriter::flush() -> Status
 {
-    fmt::print(stderr, "flush block {}\n", block_count());
-
-
-    // Already flushed, just return OK.
+    // Already flushed.
     if (m_offset == 0)
-        return Status::ok();
+        return Status::logic_error("could not flush tail buffer: tail buffer is empty");
 
     // Clear unused bytes at the end of the tail buffer.
     mem_clear(m_tail.range(m_offset));
@@ -130,10 +127,15 @@ auto WalWriter::close_segment() -> Status
     // We must have failed while opening the segment file.
     if (!m_writer) return status();
 
-    const auto is_empty = m_writer->block_count() == 0;
-
-    // This is a NOOP if the tail buffer was empty.
     auto s = m_writer->flush();
+    bool is_empty {};
+
+    // We get a logic error if the tail buffer was empty. In this case, it is possible
+    // that the whole segment is empty.
+    if (s.is_logic_error()) {
+        is_empty = m_writer->block_count() == 0;
+        s = Status::ok();
+    }
     m_writer.reset();
     m_file.reset();
 

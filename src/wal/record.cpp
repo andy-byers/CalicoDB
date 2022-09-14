@@ -69,12 +69,12 @@ auto decode_deltas_payload(BytesView in) -> DeltasDescriptor
     in.advance();
 
     // LSN (8 B)
-    info.page_lsn.value = get_u64(in);
-    in.advance(sizeof(info.page_lsn));
+    info.lsn.value = get_u64(in);
+    in.advance(sizeof(info.lsn));
 
     // Page ID (8 B)
-    info.page_id.value = get_u64(in);
-    in.advance(sizeof(info.page_id));
+    info.pid.value = get_u64(in);
+    in.advance(sizeof(info.pid));
 
     // Deltas count (2 B)
     info.deltas.resize(get_u16(in));
@@ -98,11 +98,10 @@ auto encode_commit_payload(SequenceId lsn, Bytes out) -> Size
 {
     // Payload type (1 B)
     out[0] = static_cast<Byte>(WalPayloadType::COMMIT);
+    out.advance();
 
     // LSN (8 B)
     put_u64(out, lsn.value);
-    out.advance(sizeof(lsn));
-
     return MINIMUM_PAYLOAD_SIZE;
 }
 
@@ -141,10 +140,11 @@ auto decode_full_image_payload(BytesView in) -> FullImageDescriptor
     in.advance();
 
     FullImageDescriptor info {};
-    // NOTE: Skipping the LSN. Full images don't use this field.
+    info.lsn.value = get_u64(in);
     in.advance(sizeof(SequenceId));
-    info.page_id.value = get_u64(in);
-    info.image = in.range(sizeof(PageId));
+    info.pid.value = get_u64(in);
+    in.advance(sizeof(PageId));
+    info.image = in;
     return info;
 }
 

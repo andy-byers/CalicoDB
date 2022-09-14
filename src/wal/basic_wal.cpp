@@ -301,8 +301,8 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
         s = m_reader->roll([&](const PayloadDescriptor &info) {
             if (std::holds_alternative<DeltasDescriptor>(info)) {
                 const auto deltas = std::get<DeltasDescriptor>(info);
-                if (deltas.page_lsn > m_pager_lsn.load(std::memory_order_relaxed)) {
-                    last_lsn = deltas.page_lsn;
+                if (deltas.lsn > m_pager_lsn.load(std::memory_order_relaxed)) {
+                    last_lsn = deltas.lsn;
                     return delta_cb(deltas);
                 }
             } else if (std::holds_alternative<CommitDescriptor>(info)) {

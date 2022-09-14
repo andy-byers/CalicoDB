@@ -99,7 +99,7 @@ auto Page::write(BytesView in, Size offset) -> void
 
 auto Page::apply_update(const FullImageDescriptor &info) -> void
 {
-    CALICO_EXPECT_EQ(m_id, info.page_id);
+    CALICO_EXPECT_EQ(m_id, info.pid);
     CALICO_EXPECT_EQ(m_data.size(), info.image.size());
     mem_copy(m_data, info.image);
     m_is_dirty = true; // Dirty flag is set here and in redo(), even though we don't have any deltas.
@@ -107,8 +107,8 @@ auto Page::apply_update(const FullImageDescriptor &info) -> void
 
 auto Page::apply_update(const DeltasDescriptor &info) -> void
 {
-    CALICO_EXPECT_EQ(m_id, info.page_id);
-    if (lsn() < info.page_lsn) {
+    CALICO_EXPECT_EQ(m_id, info.pid);
+    if (lsn() < info.lsn) {
         for (const auto &[offset, delta]: info.deltas)
             mem_copy(m_data.range(offset, delta.size()), delta);
         m_is_dirty = true;
