@@ -390,7 +390,7 @@ public:
 TEST_F(LogReaderWriterTests, DoesNotFlushEmptyBlock)
 {
     auto writer = get_writer(SegmentId {1});
-    ASSERT_TRUE(expose_message(writer.flush()));
+    ASSERT_TRUE(writer.flush().is_logic_error());
 
     Size file_size {};
     ASSERT_TRUE(expose_message(store->file_size("test/wal-000001", file_size)));
@@ -474,7 +474,8 @@ TEST_F(LogReaderWriterTests, HandlesEarlyFlushes)
         ASSERT_LE(payload.size(), wal_scratch_size(PAGE_SIZE));
         write_string(writer, payload);
         if (random.get(10) == 0) {
-            ASSERT_TRUE(expose_message(writer.flush()));
+            auto s = writer.flush();
+            ASSERT_TRUE(s.is_ok() or s.is_logic_error());
         }
     }
     ASSERT_TRUE(expose_message(writer.flush()));
@@ -771,6 +772,7 @@ public:
     auto roll_segments_forward(WalReader &reader, std::vector<std::string> &snapshots) -> Status
     {
         auto s = Status::ok();
+        SequenceId last_commit_lsn;
         // Roll forward to the end of the WAL.
         while (s.is_ok()) {
             s = reader.roll([&](const PayloadDescriptor &info) {
@@ -782,12 +784,16 @@ public:
                     const auto image = std::get<FullImageDescriptor>(info);
                     // We shouldn't have encountered this page yet.
                     EXPECT_EQ(image.image.to_string(), snapshots[image.pid.as_index()]);
+                } else if (std::holds_alternative<CommitDescriptor>(info)) {
+                    const auto commit = std::get<CommitDescriptor>(info);
+                    last_commit_lsn = commit.lsn;
                 }
                 return Status::ok();
             });
             if (!s.is_ok()) break;
             s = reader.seek_next();
             if (s.is_not_found()) {
+                EXPECT_EQ(last_commit_lsn, commit_lsn);
                 return Status::ok();
             } else if (!s.is_ok()) {
                 break;
@@ -871,10 +877,10 @@ TEST_F(WalReaderWriterTests, DoesNotLoseRecordsAcrossSegments)
     does_not_lose_records_test(*this, 5'000);
 }
 
-static auto roll_forward_test(WalReaderWriterTests &test, Size num_writes)
+static auto roll_forward_test(WalReaderWriterTests &test, Size num_writes, Size commit_interval = 0)
 {
     auto snapshots = test.images;
-    ASSERT_TRUE(expose_message(test.emit_segments(num_writes)));
+    ASSERT_TRUE(expose_message(test.emit_segments(num_writes, commit_interval)));
 
     auto reader = test.get_reader();
     ASSERT_TRUE(expose_message(reader.open()));
@@ -892,10 +898,22 @@ TEST_F(WalReaderWriterTests, RollForwardAcrossSegments)
     roll_forward_test(*this, 5'000);
 }
 
-static auto roll_backward_test(WalReaderWriterTests &test, Size num_writes)
+TEST_F(WalReaderWriterTests, RollForwardWithinSegmentWithCommit)
+{
+    // Commit after the last write.
+    roll_forward_test(*this, 3, 2);
+    assert_images_match(images, committed);
+}
+
+TEST_F(WalReaderWriterTests, RollForwardAcrossSegmentsWithCommits)
+{
+    roll_forward_test(*this, 5'000, 100);
+}
+
+static auto roll_forward_and_backward_test(WalReaderWriterTests &test, Size num_writes, Size commit_interval = 0)
 {
     auto snapshots = test.images;
-    ASSERT_TRUE(expose_message(test.emit_segments(num_writes)));
+    ASSERT_TRUE(expose_message(test.emit_segments(num_writes, commit_interval)));
 
     auto reader = test.get_reader();
     ASSERT_TRUE(expose_message(reader.open()));
@@ -905,125 +923,88 @@ static auto roll_backward_test(WalReaderWriterTests &test, Size num_writes)
     test.assert_images_match(snapshots, test.committed);
 }
 
-TEST_F(WalReaderWriterTests, RollBackwardWithinSegment)
+TEST_F(WalReaderWriterTests, RollsForwardAndBackwardWithinSegment)
 {
-    roll_backward_test(*this, 3);
+    roll_forward_and_backward_test(*this, 3);
 }
 
-TEST_F(WalReaderWriterTests, RollBackwardAcrossSegments)
+TEST_F(WalReaderWriterTests, RollsForwardAndBackwardAcrossSegments)
 {
-    roll_backward_test(*this, 5'000);
+    roll_forward_and_backward_test(*this, 5'000);
 }
 
-TEST_F(WalReaderWriterTests, RunsTransactionsNormally)
+TEST_F(WalReaderWriterTests, RollsForwardAndBackwardWithinSegmentWithCommit)
 {
-    auto snapshots = images;
-    ASSERT_TRUE(expose_message(emit_segments(5000, 100)));
+    // Commit after the last write.
+    roll_forward_and_backward_test(*this, 3, 2);
 
-    auto reader = get_reader();
-    ASSERT_TRUE(expose_message(reader.open()));
-    ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
-    assert_images_match(snapshots, images);
-    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
-    assert_images_match(snapshots, images);
-}
-
-TEST_F(WalReaderWriterTests, CommitIsCheckpoint)
-{
-    auto snapshots = images;
-
-    // Should commit after the last write.
-    ASSERT_TRUE(expose_message(emit_segments(200, 99)));
-
-    auto reader = get_reader();
-    ASSERT_TRUE(expose_message(reader.open()));
-    ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
-    assert_images_match(snapshots, images);
-    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
-    assert_images_match(snapshots, images);
+    // We shouldn't have rolled any segments back.
     assert_images_match(images, committed);
 }
 
-TEST_F(WalReaderWriterTests, RollWalAfterWriteError)
+TEST_F(WalReaderWriterTests, RollsForwardAndBackwardBetweenSegmentsWithCommits)
 {
-    interceptors::set_write(FailOnce<10> {"test/wal-"});
-
-    auto snapshots = images;
-    assert_error_42(emit_segments(5'000));
-
-    auto reader = get_reader();
-    ASSERT_TRUE(expose_message(reader.open()));
-    auto s = roll_segments_forward(reader, snapshots);
-
-    // The writer may have failed in the middle of writing a record (FIRST is written but LAST is in the tail buffer)
-    // still. In this case, we'll get a corruption error during the forward pass.
-    ASSERT_TRUE(s.is_corruption() or s.is_ok());
-
-    // We should be able to roll back any changes we have made to the snapshots.
-    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+    roll_forward_and_backward_test(*this, 5'000, 100);
 }
 
-TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
+static auto roll_after_writer_error_test(WalReaderWriterTests &test, Size num_writes, Size commit_interval = 0)
 {
-    interceptors::set_open(FailOnce<3> {"test/wal-"});
+    auto snapshots = test.images;
+    assert_error_42(test.emit_segments(num_writes, commit_interval));
 
-    auto snapshots = images;
-    assert_error_42(emit_segments(5'000));
+    auto reader = test.get_reader();
+    auto s = reader.open();
+    if (s.is_ok()) {
+        s = test.roll_segments_forward(reader, snapshots);
 
-    auto reader = get_reader();
-    ASSERT_TRUE(expose_message(reader.open()));
-    auto s = roll_segments_forward(reader, snapshots);
+        // The writer may have failed in the middle of writing a record (FIRST is written but LAST is in the tail buffer)
+        // still. In this case, we'll get a corruption error during the forward pass.
+        ASSERT_TRUE(s.is_corruption() or s.is_ok());
 
-    // The writer may have failed in the middle of writing a record (FIRST is written but LAST is in the tail buffer)
-    // still. In this case, we'll get a corruption error during the forward pass.
-    ASSERT_TRUE(s.is_corruption() or s.is_ok());
-
-    // We should be able to roll back any changes we have made to the snapshots.
-    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+        // We should be able to roll back any changes we have made to the snapshots.
+        ASSERT_TRUE(expose_message(test.roll_segments_backward(reader, snapshots)));
+    } else {
+        // If the writer failed to open the first segment, we'll also fail. The reader only opens existing files.
+        ASSERT_TRUE(s.is_not_found());
+    }
+    test.assert_images_match(snapshots, test.committed);
 }
 
-//
-//class BasicWalReaderWriterTests: public TestWithWalSegmentsOnHeap {
-//public:
-//    static constexpr Size PAGE_SIZE {0x100};
-//    static constexpr Size BLOCK_SIZE {PAGE_SIZE * WAL_BLOCK_SCALE};
-//
-//    BasicWalReaderWriterTests()
-//        : scratch {std::make_unique<LogScratchManager>(PAGE_SIZE * WAL_SCRATCH_SCALE)}
-//    {}
-//
-//    auto SetUp() -> void override
-//    {
-//        reader = std::make_unique<BasicWalReader>(
-//            *store,
-//            ROOT,
-//            PAGE_SIZE
-//        );
-//
-//        writer = std::make_unique<BasicWalWriter>(BasicWalWriter::Parameters {
-//            store.get(),
-//            &collection,
-//            &flushed_lsn,
-//            create_logger(create_sink(), "wal"),
-//            ROOT,
-//            PAGE_SIZE,
-//            128,
-//        });
-//    }
-//
-//    WalCollection collection;
-//    std::atomic<SequenceId> flushed_lsn {};
-//    std::unique_ptr<LogScratchManager> scratch;
-//    std::unique_ptr<BasicWalReader> reader;
-//    std::unique_ptr<BasicWalWriter> writer;
-//    Random random {internal::random_seed};
-//};
-//
-//TEST_F(BasicWalReaderWriterTests, NewWriterIsOk)
-//{
-//    ASSERT_TRUE(writer->status().is_ok());
-//    writer->stop();
-//}
+TEST_F(WalReaderWriterTests, RollWalAfterImmediateWriterWriteError)
+{
+    interceptors::set_write(FailOnce<0> {"test/wal-"});
+    roll_after_writer_error_test(*this, 5'000);
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterDelayedWriterWriteError)
+{
+    interceptors::set_write(FailOnce<50> {"test/wal-"});
+    roll_after_writer_error_test(*this, 5'000);
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterImmediateWriterOpenError)
+{
+    interceptors::set_open(FailOnce<0> {"test/wal-"});
+    roll_after_writer_error_test(*this, 5'000);
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterDelayedWriterOpenError)
+{
+    interceptors::set_open(FailOnce<10> {"test/wal-"});
+    roll_after_writer_error_test(*this, 5'000);
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterDelayedWriterWriteErrorWithCommits)
+{
+    interceptors::set_write(FailOnce<50> {"test/wal-"});
+    roll_after_writer_error_test(*this, 5'000, 100);
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterDelayedWriterOpenErrorWithCommits)
+{
+    interceptors::set_open(FailOnce<10> {"test/wal-"});
+    roll_after_writer_error_test(*this, 5'000, 100);
+}
 
 template<class Test>
 auto generate_images(Test &test, Size page_size, Size n)
@@ -1034,160 +1015,6 @@ auto generate_images(Test &test, Size page_size, Size n)
     });
     return images;
 }
-//
-//auto generate_deltas(std::vector<std::string> &images)
-//{
-//    WalRecordGenerator generator;
-//    std::vector<std::vector<PageDelta>> deltas;
-//    for (auto &image: images)
-//        deltas.emplace_back(generator.setup_deltas(stob(image)));
-//    return deltas;
-//}
-//
-//TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
-//{
-//    // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
-//    static constexpr Size NUM_RECORDS {100};
-//    auto images = generate_images(*this, PAGE_SIZE, NUM_RECORDS);
-//    auto deltas = generate_deltas(images);
-//    for (Size i {}; i < NUM_RECORDS; ++i)
-//        writer->log_deltas(PageId::root(), stob(images[i]), deltas[i]);
-//
-//    // close() should cause the writer to flush the current block.
-//    writer->stop();
-//
-//    ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
-//
-//    Size i {};
-//    ASSERT_TRUE(expose_message(reader->redo([deltas, &i, images](const RedoDescriptor &descriptor) {
-//        auto lhs = cbegin(descriptor.deltas);
-//        auto rhs = cbegin(deltas[i]);
-//        for (; rhs != cend(deltas[i]); ++lhs, ++rhs) {
-//            EXPECT_NE(lhs, cend(descriptor.deltas));
-//            EXPECT_TRUE(lhs->data == stob(images[i]).range(rhs->offset, rhs->size));
-//            EXPECT_EQ(lhs->offset, rhs->offset);
-//        }
-//        i++;
-//        return Status::ok();
-//    })));
-//    ASSERT_EQ(i, images.size());
-//    ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
-//}
-//
-//TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
-//{
-//    // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
-//    static constexpr Size NUM_RECORDS {100};
-//    auto images = generate_images(*this, PAGE_SIZE, NUM_RECORDS);
-//
-//    for (Size i {}; i < NUM_RECORDS; ++i)
-//        writer->log_full_image(PageId::from_index(i), stob(images[i]));
-//    writer->stop();
-//
-//    ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
-//    ASSERT_TRUE(expose_message(reader->redo([](const auto&) {
-//        ADD_FAILURE() << "This should not be called";
-//        return Status::logic_error("Logic error!");
-//    })));
-//
-//    Size i {};
-//    ASSERT_TRUE(expose_message(reader->undo([&i, images](const UndoDescriptor &descriptor) {
-//        EXPECT_EQ(descriptor.page_id, i + 1);
-//        EXPECT_TRUE(descriptor.image == stob(images[i]));
-//        i++;
-//        return Status::ok();
-//    })));
-//    ASSERT_EQ(i, images.size());
-//    ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
-//}
-//
-//auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_deltas)
-//{
-//    const auto deltas_per_image = num_deltas / num_images;
-//
-//    std::vector<std::string> before_images;
-//    std::vector<std::string> after_images;
-//    WalRecordGenerator generator;
-//
-//    auto &reader = test.reader;
-//    auto &writer = test.writer;
-//    auto &random = test.random;
-//    auto &collection = test.collection;
-//
-//    for (Size i {}; i < num_images; ++i) {
-//        auto pid = PageId::from_index(i);
-//
-//        before_images.emplace_back(random.get<std::string>('\x00', '\xFF', BasicWalReaderWriterTests::PAGE_SIZE));
-//        writer->log_full_image(pid, stob(before_images.back()));
-//
-//        after_images.emplace_back(before_images.back());
-//        for (Size j {}; j < deltas_per_image; ++j) {
-//            const auto deltas = generator.setup_deltas(stob(after_images.back()));
-//            writer->log_deltas(pid, stob(after_images.back()), deltas);
-//        }
-//    }
-//    writer->stop();
-//
-//    // Roll forward some copies of the "before images" to match the "after images".
-//    auto images = before_images;
-//    for (const auto &[id, meta]: collection.segments()) {
-//        ASSERT_TRUE(expose_message(reader->open(id)));
-//        ASSERT_TRUE(expose_message(reader->redo([&images](const RedoDescriptor &info) {
-//            auto image = stob(images.at(info.page_id - 1));
-//            for (const auto &[offset, content]: info.deltas)
-//                mem_copy(image.range(offset, content.size()), content);
-//            return Status::ok();
-//        })));
-//        ASSERT_TRUE(expose_message(reader->close()));
-//    }
-//
-//    // Image copies should match the "after images".
-//    for (Size i {}; i < images.size(); ++i) {
-//        ASSERT_EQ(images.at(i), after_images.at(i));
-//    }
-//
-//    // Now roll them back to match the before images again.
-//    for (auto itr = crbegin(collection.segments()); itr != crend(collection.segments()); ++itr) {
-//        // Segment ID should be the same for each record position within each group.
-//        ASSERT_TRUE(expose_message(reader->open(itr->id)));
-//        ASSERT_TRUE(expose_message(reader->undo([&images](const auto &info) {
-//            const auto index = info.page_id - 1;
-//            mem_copy(stob(images[index]), info.image);
-//            return Status::ok();
-//        })));
-//        ASSERT_TRUE(expose_message(reader->close()));
-//    }
-//
-//    for (Size i {}; i < images.size(); ++i) {
-//        ASSERT_EQ(images.at(i), before_images.at(i));
-//    }
-//}
-//
-//TEST_F(BasicWalReaderWriterTests, SingleImage)
-//{
-//    // This situation should not happen in practice, but we technically should be able to handle it.
-//    test_undo_redo(*this, 1, 0);
-//}
-//
-//TEST_F(BasicWalReaderWriterTests, SingleImageSingleDelta)
-//{
-//    test_undo_redo(*this, 1, 1);
-//}
-//
-//TEST_F(BasicWalReaderWriterTests, SingleImageManyDeltas)
-//{
-//    test_undo_redo(*this, 1, 100);
-//}
-//
-//TEST_F(BasicWalReaderWriterTests, ManyImagesManyDeltas)
-//{
-//    test_undo_redo(*this, 100, 1'000);
-//}
-//
-////TEST_F(BasicWalReaderWriterTests, ManyManyImagesManyManyDeltas)
-////{
-////    test_undo_redo(*this, 10'000, 1'000'000);
-////}
 
 class BasicWalTests: public TestWithWalSegmentsOnHeap {
 public:
@@ -1247,14 +1074,13 @@ TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
 TEST_F(BasicWalTests, FailureDuringFirstOpen)
 {
     interceptors::set_open(FailOnce<0> {"test/wal-"});
-    ASSERT_TRUE(expose_message(wal->start_workers()));
-    ASSERT_TRUE(expose_message(wal->stop_workers()));
+    assert_error_42(wal->start_workers());
 }
 
 TEST_F(BasicWalTests, FailureDuringNthOpen)
 {
     auto images = generate_images(*this, PAGE_SIZE, 1'000);
-    interceptors::set_open(FailEvery<5> {"test/wal-"});
+    interceptors::set_open(FailAfter<5> {"test/wal-"});
     ASSERT_TRUE(expose_message(wal->start_workers()));
 
     Size num_writes {};
@@ -1267,7 +1093,7 @@ TEST_F(BasicWalTests, FailureDuringNthOpen)
         num_writes++;
     }
     ASSERT_GT(num_writes, 5);
-    ASSERT_TRUE(expose_message(wal->stop_workers()));
+    assert_error_42(wal->stop_workers());
 }
 
 } // <anonymous>

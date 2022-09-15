@@ -229,7 +229,9 @@ auto Core::save_and_forward_status(Status s, const std::string &message) -> Stat
 
 auto Core::status() const -> Status
 {
-    return m_pager->status();
+    auto s = m_pager->status();
+    if (s.is_ok()) return m_wal->status();
+    return s;
 }
 
 auto Core::path() const -> std::string
@@ -376,6 +378,9 @@ auto Core::abort() -> Status
     s = m_pager->flush();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
+    s = m_wal->finish_abort();
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
+
     // Database state is restored if we have made it here, assuming we can start the worker threads again.
     m_status = Status::ok();
 
@@ -405,7 +410,6 @@ auto Core::close() -> Status
     // We already waited on the WAL to be done writing so this should happen immediately.
     auto s = m_pager->flush();
     MAYBE_SAVE_AND_FORWARD(s, "cannot flush pages before stop");
-
     return m_status;
 }
 
@@ -413,21 +417,15 @@ auto Core::ensure_consistent_state() -> Status
 {
     static constexpr auto MSG = "cannot ensure consistent database state";
 
-    auto s = m_wal->start_recovery(
-        [this](const auto &info) {
-            auto page = m_pager->acquire(PageId {info.pid}, true);
-            if (!page.has_value()) return page.error();
+    const auto apply_update = [this](const auto &info) {
+        auto page = m_pager->acquire(info.pid, true);
+        if (!page.has_value()) return page.error();
 
-            page->apply_update(info);
-            return m_pager->release(std::move(*page));
-        },
-        [this](const auto &info) {
-            auto page = m_pager->acquire(PageId {info.pid}, true);
-            if (!page.has_value()) return page.error();
+        page->apply_update(info);
+        return m_pager->release(std::move(*page));
+    };
 
-            page->apply_update(info);
-            return m_pager->release(std::move(*page));
-        });
+    auto s = m_wal->start_recovery(apply_update, apply_update);
     MAYBE_FORWARD(s, MSG);
 
     s = load_state();

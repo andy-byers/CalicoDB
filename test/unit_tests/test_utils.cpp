@@ -708,7 +708,7 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
 class BasicWorkerTests: public testing::Test {
 public:
     BasicWorkerTests()
-        : worker {[this](int event) {
+        : worker {16, [this](int event) {
             events.emplace_back(event);
             return Status::ok();
         }}
@@ -775,7 +775,7 @@ TEST_F(BasicWorkerTests, SanityCheck)
 class WorkerFaultTests: public testing::Test {
 public:
     WorkerFaultTests()
-        : worker {[this](int event) {
+        : worker {16, [this](int event) {
             if (callback_status.is_ok())
                 events.emplace_back(event);
             return callback_status;

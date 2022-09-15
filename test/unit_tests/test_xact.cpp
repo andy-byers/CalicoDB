@@ -199,22 +199,35 @@ TEST_F(XactTests, AbortSanityCheck)
     }
 }
 
-TEST_F(XactTests, PersistenceSanityCheck)
+
+template<class Test>
+[[nodiscard]]
+auto run_random_instances(Test &test, Size n)
 {
-    ASSERT_TRUE(expose_message(db.close()));
+    ASSERT_TRUE(expose_message(test.db.close()));
     std::vector<Record> committed;
 
-    for (Size i {}; i < 5; ++i) {
-        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-        const auto current = run_random_transactions(*this, 10);
+    for (Size i {}; i < n; ++i) {
+        ASSERT_TRUE(expose_message(test.db.open(Test::ROOT, test.options)));
+        const auto current = run_random_transactions(test, 10);
         committed.insert(cend(committed), cbegin(current), cend(current));
-        ASSERT_TRUE(expose_message(db.close()));
+        ASSERT_TRUE(expose_message(test.db.close()));
     }
 
-    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    ASSERT_TRUE(expose_message(test.db.open(Test::ROOT, test.options)));
     for (const auto &[key, value]: committed) {
-        ASSERT_TRUE(tools::contains(db, key, value));
+        ASSERT_TRUE(tools::contains(test.db, key, value));
     }
+}
+
+TEST_F(XactTests, RecordsPersistBetweenInstances)
+{
+    run_random_instances(*this, 2);
+}
+
+TEST_F(XactTests, PersistenceSanityCheck)
+{
+    run_random_instances(*this, 10);
 }
 
 TEST_F(XactTests, AtomicOperationSanityCheck)
@@ -240,7 +253,7 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.frame_count = 16;
+        options.frame_count = 32;
         options.store = store.get();
         options.log_level = spdlog::level::err; // TODO
         ASSERT_TRUE(expose_message(db.open(ROOT, options)));
@@ -262,7 +275,7 @@ auto add_sequential_records(Database &db, Size n)
 auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
 {
     RecordGenerator::Parameters param;
-    param.mean_key_size = 16;
+    param.mean_key_size = 32;
     param.mean_value_size = 100;
     param.is_unique = true;
     param.spread = 0;
@@ -439,16 +452,14 @@ static auto run_abort_is_reentrant_test(Test &test, int &counter, int &counter_m
         assert_error_42(s);
         fail_count++;
     }
-    ASSERT_GT(fail_count, 5);
+    ASSERT_GE(fail_count, 3);
     ASSERT_TRUE(expose_message(test.db.status()));
-
-    interceptors::reset();
 }
 
 TEST_F(FailureTests, AbortIsReentrantForDataReadErrors)
 {
     int counter {};
-    int counter_max {10};
+    int counter_max {300};
     interceptors::set_read([&counter, &counter_max](const std::string &path, Bytes&, Size) {
         if (path != "test/data")
             return Status::ok();
@@ -461,7 +472,7 @@ TEST_F(FailureTests, AbortIsReentrantForDataReadErrors)
 TEST_F(FailureTests, AbortIsReentrantForDataWriteErrors)
 {
     int counter {};
-    int counter_max {10};
+    int counter_max {500};
     interceptors::set_write([&counter, &counter_max](const std::string &path, BytesView, Size) {
         if (path != "test/data")
             return Status::ok();
@@ -516,7 +527,7 @@ static constexpr auto recovery_test_failure_type_name(RecoveryTestFailureType ty
 }
 
 template<class Failure>
-class RecoveryTestHarness: public testing::TestWithParam<RecoveryTestFailureType> {
+class RecoveryTestHarness: public testing::TestWithParam<std::tuple<RecoveryTestFailureType, Size, Size>> {
 public:
     static constexpr auto ROOT = "test";
     static constexpr auto PREFIX = "test/";
@@ -525,7 +536,7 @@ public:
         : store {std::make_unique<HeapStorage>()}
     {
         options.page_size = 0x200;
-        options.frame_count = 16;
+        options.frame_count = 32;
         options.store = store.get();
     }
 
@@ -534,30 +545,34 @@ public:
     auto SetUp() -> void override
     {
         ASSERT_TRUE(expose_message(open_database()));
+        const auto param = GetParam();
+        const auto failure_type = std::get<0>(param);
+        const auto group_size = std::get<1>(param);
+        const auto num_xacts = std::get<2>(param);
 
-        static constexpr Size GROUP_SIZE {1'000};
-        uncommitted = generator.generate(random, GROUP_SIZE * 2);
-        committed.insert(cend(committed), cbegin(uncommitted) + GROUP_SIZE, cend(uncommitted));
-        uncommitted.resize(GROUP_SIZE);
+        uncommitted = generator.generate(random, group_size * 2);
 
         // Transaction needs to go out of scope before the database is closed, hence the block.
         {
-            static constexpr Size NUM_XACTS {10};
-            static constexpr auto XACT_SIZE = GROUP_SIZE / NUM_XACTS;
-            static_assert(GROUP_SIZE % XACT_SIZE == 0);
+            if (num_xacts) {
+                committed.insert(cend(committed), cbegin(uncommitted) + static_cast<long>(group_size), cend(uncommitted));
+                uncommitted.resize(group_size);
 
-            // Commit NUM_XACTS transactions.
-            auto begin = cbegin(committed);
-            while (begin != cend(committed)) {
-                auto xact = db.transaction();
-                for (auto itr = begin; itr != begin + XACT_SIZE; ++itr) {
-                    ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
+                const auto xact_size = group_size / num_xacts;
+                ASSERT_EQ(group_size % xact_size, 0);
+
+                // Commit num_xacts transactions.
+                auto begin = cbegin(committed);
+                while (begin != cend(committed)) {
+                    auto xact = db.transaction();
+                    for (auto itr = begin; itr != begin + static_cast<long>(xact_size); ++itr) {
+                        ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
+                    }
+                    ASSERT_TRUE(expose_message(xact.commit()));
+                    begin += static_cast<long>(xact_size);
                 }
-                ASSERT_TRUE(expose_message(xact.commit()));
-                begin += XACT_SIZE;
             }
-
-            switch (GetParam()) {
+            switch (failure_type) {
                 case RecoveryTestFailureType::DATA_WRITE:
                     interceptors::set_write(Failure {"test/data"});
                     break;
@@ -577,7 +592,7 @@ public:
                     interceptors::set_sync(Failure {"test/wal-"});
                     break;
                 default:
-                    ADD_FAILURE() << "unrecognized test type \"" << int(GetParam()) << "\"";
+                    ADD_FAILURE() << "unrecognized test type \"" << int(failure_type) << "\"";
             }
 
 #define BREAK_IF_ERROR if (!s.is_ok()) {assert_error_42(s); break;}
@@ -656,7 +671,10 @@ public:
             return counter++ == target ? Status::system_error("42") : Status::ok();
         };
 
-        switch (GetParam()) {
+        const auto param = GetParam();
+        const auto failure_type = std::get<0>(param);
+
+        switch (failure_type) {
             case RecoveryTestFailureType::DATA_WRITE:
                 prefix = "test/data";
                 interceptors::set_write(callback);
@@ -682,7 +700,7 @@ public:
                 interceptors::set_sync(callback);
                 break;
             default:
-                ADD_FAILURE() << "unrecognized test type \"" << int(GetParam()) << "\"";
+                ADD_FAILURE() << "unrecognized test type \"" << int(failure_type) << "\"";
         }
     }
 
@@ -714,14 +732,30 @@ INSTANTIATE_TEST_SUITE_P(
     RecoveryTests_FailImmediately,
     RecoveryTests_FailImmediately,
     ::testing::Values(
-        RecoveryTestFailureType::DATA_WRITE,
-        RecoveryTestFailureType::DATA_SYNC,
-        RecoveryTestFailureType::WAL_OPEN,
-        RecoveryTestFailureType::WAL_READ,
-        RecoveryTestFailureType::WAL_WRITE),
-    [](const auto &info) {
-        return recovery_test_failure_type_name(info.param);
-    });
+
+        // Roll back to empty.
+        std::make_tuple(RecoveryTestFailureType::DATA_WRITE, 500, 0),
+        std::make_tuple(RecoveryTestFailureType::DATA_SYNC, 500, 0),
+        std::make_tuple(RecoveryTestFailureType::WAL_OPEN, 500, 0),
+        std::make_tuple(RecoveryTestFailureType::WAL_READ, 500, 0),
+
+        // Normally, this test will fail if the failure system call is not called during abort(). We need abort() to fail so that
+        // recovery is necessary. This test works because the WAL fails to flush the first block, sees that the segment is empty,
+        // then removes it when it exits. During abort(), we can't roll the segment because it doesn't exist. Luckily, we won't
+        // flush any database pages until they are protected in the WAL, so we don't lose any information.
+        std::make_tuple(RecoveryTestFailureType::WAL_WRITE, 500, 0),
+
+        // Roll back to right after first commit.
+        std::make_tuple(RecoveryTestFailureType::DATA_WRITE, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::DATA_SYNC, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::WAL_OPEN, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::WAL_READ, 500, 1),
+
+        // Keep the first 10 transactions.
+        std::make_tuple(RecoveryTestFailureType::DATA_WRITE, 1'000, 10),
+        std::make_tuple(RecoveryTestFailureType::DATA_SYNC, 1'000, 10),
+        std::make_tuple(RecoveryTestFailureType::WAL_OPEN, 1'000, 10),
+        std::make_tuple(RecoveryTestFailureType::WAL_READ, 1'000, 10)));
 
 TEST_P(RecoveryTests_FailImmediately, BasicRecovery)
 {
@@ -737,11 +771,11 @@ INSTANTIATE_TEST_SUITE_P(
     RecoveryTests_FailAfterDelay_5,
     RecoveryTests_FailAfterDelay_5,
     ::testing::Values(
-        RecoveryTestFailureType::DATA_WRITE,
-        RecoveryTestFailureType::WAL_OPEN,
-        RecoveryTestFailureType::WAL_READ),
+        std::make_tuple(RecoveryTestFailureType::DATA_WRITE, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::WAL_OPEN, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::WAL_READ, 500, 1)),
     [](const auto &info) {
-        return recovery_test_failure_type_name(info.param);
+        return recovery_test_failure_type_name(std::get<0>(info.param));
     });
 
 TEST_P(RecoveryTests_FailAfterDelay_5, BasicRecovery)
@@ -756,11 +790,11 @@ INSTANTIATE_TEST_SUITE_P(
     RecoveryTests_FailAfterDelay_500,
     RecoveryTests_FailAfterDelay_500,
     ::testing::Values(
-        RecoveryTestFailureType::DATA_WRITE,
-        RecoveryTestFailureType::WAL_OPEN,
-        RecoveryTestFailureType::WAL_READ),
+        std::make_tuple(RecoveryTestFailureType::DATA_WRITE, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::WAL_OPEN, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::WAL_READ, 500, 1)),
     [](const auto &info) {
-        return recovery_test_failure_type_name(info.param);
+        return recovery_test_failure_type_name(std::get<0>(info.param));
     });
 
 TEST_P(RecoveryTests_FailAfterDelay_500, BasicRecovery)
@@ -775,10 +809,10 @@ INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailImmediately_100,
     RecoveryReentrancyTests_FailImmediately_100,
     ::testing::Values(
-        RecoveryTestFailureType::DATA_WRITE,
-        RecoveryTestFailureType::WAL_OPEN),
+        std::make_tuple(RecoveryTestFailureType::DATA_WRITE, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::WAL_OPEN, 500, 1)),
     [](const auto &info) {
-        return recovery_test_failure_type_name(info.param);
+        return recovery_test_failure_type_name(std::get<0>(info.param));
     });
 
 TEST_P(RecoveryReentrancyTests_FailImmediately_100, RecoveryIsReentrant)
@@ -793,9 +827,9 @@ INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailImmediately_10000,
     RecoveryReentrancyTests_FailImmediately_10000,
     ::testing::Values(
-        RecoveryTestFailureType::WAL_READ),
+        std::make_tuple(RecoveryTestFailureType::WAL_READ, 500, 1)),
     [](const auto &info) {
-        return recovery_test_failure_type_name(info.param);
+        return recovery_test_failure_type_name(std::get<0>(info.param));
     });
 
 TEST_P(RecoveryReentrancyTests_FailImmediately_10000, RecoveryIsReentrant)
@@ -810,10 +844,10 @@ INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailAfterDelay_100,
     RecoveryReentrancyTests_FailAfterDelay_100,
     ::testing::Values(
-        RecoveryTestFailureType::DATA_WRITE,
-        RecoveryTestFailureType::WAL_OPEN),
+        std::make_tuple(RecoveryTestFailureType::DATA_WRITE, 500, 1),
+        std::make_tuple(RecoveryTestFailureType::WAL_OPEN, 500, 1)),
     [](const auto &info) {
-        return recovery_test_failure_type_name(info.param);
+        return recovery_test_failure_type_name(std::get<0>(info.param));
     });
 
 TEST_P(RecoveryReentrancyTests_FailAfterDelay_100, RecoveryIsReentrant)
@@ -828,15 +862,58 @@ INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailAfterDelay_10000,
     RecoveryReentrancyTests_FailAfterDelay_10000,
     ::testing::Values(
-        RecoveryTestFailureType::WAL_READ),
+        std::make_tuple(RecoveryTestFailureType::WAL_READ, 500, 1)),
     [](const auto &info) {
-        return recovery_test_failure_type_name(info.param);
+        return recovery_test_failure_type_name(std::get<0>(info.param));
     });
 
 TEST_P(RecoveryReentrancyTests_FailAfterDelay_10000, RecoveryIsReentrant)
 {
     run_test();
     validate();
+}
+
+class DisabledWalTests: public TestOnDisk {
+public:
+    auto SetUp() -> void override
+    {
+        options.page_size = 0x400;
+        options.frame_count = 32;
+        options.wal_limit = DISABLE_WAL;
+        options.log_level = spdlog::level::trace;
+        options.store = store.get();
+
+        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    }
+
+    auto TearDown() -> void override
+    {
+        interceptors::reset();
+        ASSERT_TRUE(expose_message(db.close()));
+    }
+
+    RecordGenerator generator {{16, 100, 10, false, true}};
+    Random random {internal::random_seed};
+    Options options;
+    Core db;
+};
+
+TEST_F(DisabledWalTests, RecordsPersist)
+{
+    static constexpr Size STEP {1'000};
+    const auto records = generator.generate(random, STEP * 10);
+
+    ASSERT_TRUE(expose_message(db.close()));
+    for (auto itr = cbegin(records); itr != cend(records); itr += STEP) {
+        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        for (const auto &[key, value]: records)
+            ASSERT_TRUE(expose_message(db.insert(key, value)));
+        ASSERT_TRUE(expose_message(db.close()));
+    }
+
+    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    for (const auto &[key, value]: records)
+        ASSERT_TRUE(tools::contains(db, key, value));
 }
 
 } // namespace calico

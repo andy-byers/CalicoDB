@@ -218,11 +218,11 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
     auto s = std::move(*m_writer).destroy();
     m_writer.reset();
 
-//    auto t = std::move(*m_cleaner).destroy();
+    auto t = Status::ok();//std::move(*m_cleaner).destroy();
 //    m_cleaner.reset();
 
     if (m_status.is_ok())
-        m_status = s;//s.is_ok() ? t : s;
+        m_status = s.is_ok() ? t : s;
 
     MAYBE_FORWARD(s, MSG);
 //    MAYBE_FORWARD(t, MSG);
@@ -301,15 +301,16 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
         s = m_reader->roll([&](const PayloadDescriptor &info) {
             if (std::holds_alternative<DeltasDescriptor>(info)) {
                 const auto deltas = std::get<DeltasDescriptor>(info);
-                if (deltas.lsn > m_pager_lsn.load(std::memory_order_relaxed)) {
-                    last_lsn = deltas.lsn;
-                    return delta_cb(deltas);
-                }
+                last_lsn = std::max(deltas.lsn, m_pager_lsn.load(std::memory_order_relaxed));
+                return delta_cb(deltas);
             } else if (std::holds_alternative<CommitDescriptor>(info)) {
                 const auto commit = std::get<CommitDescriptor>(info);
                 last_lsn = commit.lsn;
                 m_commit_id = m_reader->segment_id();
                 has_commit = true;
+            } else if (std::holds_alternative<FullImageDescriptor>(info)) {
+                const auto image = std::get<FullImageDescriptor>(info);
+                last_lsn = image.lsn;
             }
             return Status::ok();
         });
@@ -320,6 +321,7 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
         m_flushed_lsn.store(last_lsn);
         s = m_reader->seek_next();
     }
+    s = s.is_not_found() ? Status::ok() : s;
     if (m_commit_id != m_collection.last())
         return start_abort(image_cb);
     return s;
@@ -346,6 +348,18 @@ auto BasicWriteAheadLog::start_abort(const GetFullImage &image_cb) -> Status
     m_logger->info("received abort request");
     CALICO_EXPECT_FALSE(m_is_working);
 
+    if (!m_reader.has_value()) {
+        m_reader.emplace(
+            *m_store,
+            m_collection,
+            m_prefix,
+            Bytes {m_reader_tail},
+            Bytes {m_reader_data}
+        );
+        auto s = m_reader->open();
+        MAYBE_FORWARD(s, MSG);
+    }
+
     // Find the most-recent segment.
     for (; ; ) {
         auto s = m_reader->seek_next();
@@ -361,16 +375,22 @@ auto BasicWriteAheadLog::start_abort(const GetFullImage &image_cb) -> Status
         s = m_reader->read_first_lsn(first_lsn);
         MAYBE_FORWARD(s, MSG);
 
-        if (id < m_commit_id)
+        if (id <= m_commit_id)
             break;
 
         s = m_reader->roll([&image_cb](const auto &info) {
+            CALICO_EXPECT_FALSE(std::holds_alternative<CommitDescriptor>(info));
             if (std::holds_alternative<FullImageDescriptor>(info)) {
                 const auto image = std::get<FullImageDescriptor>(info);
                 return image_cb(image);
             }
             return Status::ok();
         });
+
+        auto t = m_reader->seek_previous();
+        if (t.is_not_found())
+            return Status::ok();
+        MAYBE_FORWARD(t, MSG);
 
         // Most-recent segment can have an incomplete record at the end.
         if (s.is_corruption() && i == 0)
@@ -388,7 +408,10 @@ auto BasicWriteAheadLog::finish_abort() -> Status
     for (; !id.is_null() && id != m_commit_id && s.is_ok(); id = m_collection.id_before(id))
         s = m_store->remove_file(m_prefix + id.to_name());
     m_collection.remove_after(id);
-    if (s.is_ok()) m_reader.reset();
+    if (s.is_ok()) {
+        m_status = Status::ok();
+        m_reader.reset();
+    }
     return s;
 }
 

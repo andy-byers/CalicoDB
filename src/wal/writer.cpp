@@ -130,9 +130,8 @@ auto WalWriter::close_segment() -> Status
     auto s = m_writer->flush();
     bool is_empty {};
 
-    // We get a logic error if the tail buffer was empty. In this case, it is possible
-    // that the whole segment is empty.
-    if (s.is_logic_error()) {
+    // If we failed to flush, it is possible that the whole segment is empty.
+    if (!s.is_ok()) {
         is_empty = m_writer->block_count() == 0;
         s = Status::ok();
     }

@@ -14,8 +14,9 @@ class Worker final {
 public:
     using Action = std::function<Status(const Event&)>;
 
-    explicit Worker(Action action)
+    Worker(Size capacity, Action action)
         : m_action {std::move(action)},
+          m_events {capacity},
           m_thread {[this] {worker();}}
     {}
 

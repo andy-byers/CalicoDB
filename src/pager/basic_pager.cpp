@@ -75,7 +75,7 @@ auto BasicPager::pin_frame(PageId id, bool &is_fragile) -> Status
         // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
         if (!*r) {
             m_logger->warn(MSG);
-            std::this_thread::yield();
+            std::this_thread::yield(); // TODO: Turns out we may need to be able to tell the WAL to flush the most-recent block... We seem to be getting stuck when the cache isn't large enough. If we make the minimum frame count 32, it may fix this issue.
             return Status::not_found(MSG);
         }
     }
