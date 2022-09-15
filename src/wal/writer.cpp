@@ -104,9 +104,9 @@ auto WalWriter::on_event(const EventWrapper &event) -> Status
     if (s.is_ok() && m_writer->block_count() >= m_wal_limit)
         return advance_segment();
 
-    // If we failed to write the record, we need to close the segment file. We
-    // should do it in this thread to avoid race conditions.
-    if (!s.is_ok()) close_segment();
+//    // If we failed to write the record, we need to close the segment file. We
+//    // should do it in this thread to avoid race conditions.
+//    if (!s.is_ok()) close_segment();
     return s;
 }
 
@@ -130,11 +130,12 @@ auto WalWriter::close_segment() -> Status
     auto s = m_writer->flush();
     bool is_empty {};
 
-    // We get a logic error if the tail buffer was empty. In this case, it is possible
-    // that the whole segment is empty.
-    if (s.is_logic_error()) {
+    if (!s.is_ok()) {
+        // We get a logic error if the tail buffer was empty. In this case, it is possible
+        // that the whole segment is empty.
         is_empty = m_writer->block_count() == 0;
-        s = Status::ok();
+        if (s.is_logic_error())
+            s = Status::ok();
     }
     m_writer.reset();
     m_file.reset();

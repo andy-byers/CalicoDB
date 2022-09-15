@@ -62,6 +62,7 @@ public:
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
     [[nodiscard]] auto stop_workers_impl() -> Status;
+    [[nodiscard]] auto open_reader() -> Status;
 
     auto forward_status(Status s, const std::string &message) -> Status
     {

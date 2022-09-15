@@ -153,7 +153,7 @@ struct WalRecordHeader {
     };
 
     [[nodiscard]]
-    static auto could_contain_record(BytesView data) -> bool
+    static auto contains_record(BytesView data) -> bool
     {
         return data.size() > sizeof(WalRecordHeader) && data[6] != '\x00';
     }

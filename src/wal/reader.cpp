@@ -71,7 +71,7 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
 
         if (has_enough_space) {
             // Note that this modifies rest to point to [<local>, <end>) in the tail buffer.
-            if (WalRecordHeader::could_contain_record(rest.advance(m_offset))) {
+            if (WalRecordHeader::contains_record(rest.advance(m_offset))) {
                 const auto temp = read_wal_record_header(rest);
                 rest.advance(sizeof(temp));
 
@@ -193,10 +193,11 @@ auto WalReader::open_segment(SegmentId id) -> Status
 
 auto WalReader::close_segment() -> void
 {
-    CALICO_EXPECT_NE(m_reader, std::nullopt);
-    m_current = SegmentId::null();
-    m_reader.reset();
-    m_file.reset();
+    if (m_reader) {
+        m_current = SegmentId::null();
+        m_reader.reset();
+        m_file.reset();
+    }
 }
 
 auto WalReader::prepare_traversal() -> void
