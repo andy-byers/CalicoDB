@@ -151,7 +151,7 @@ auto BasicPager::try_make_available() -> Result<bool>
 
     if (itr == m_registry.end()) {
         CALICO_EXPECT_TRUE(m_wal->is_working());
-        std::this_thread::yield();
+        (void)m_wal->flush();
         return false;
     }
 

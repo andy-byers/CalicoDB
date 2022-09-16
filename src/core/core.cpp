@@ -229,9 +229,7 @@ auto Core::save_and_forward_status(Status s, const std::string &message) -> Stat
 
 auto Core::status() const -> Status
 {
-    auto s = m_pager->status();
-    if (s.is_ok()) return m_wal->status();
-    return s;
+    return m_status.is_ok() ? m_wal->status() : m_status;
 }
 
 auto Core::path() const -> std::string
@@ -375,23 +373,25 @@ auto Core::abort() -> Status
     s = load_state();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
+    // Flush all dirty database pages.
     s = m_pager->flush();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
+    // Remove obsolete segment files.
     s = m_wal->finish_abort();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Database state is restored if we have made it here, assuming we can start the worker threads again.
     m_status = Status::ok();
 
-    m_logger->info("abort succeeded");
     s = m_wal->start_workers();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // If we failed starting up the workers, we should be able to call this method again. It won't really do anything but
     // start the workers on the second round.
     m_has_xact = false;
-    return Status::ok();
+    m_logger->info("abort succeeded");
+    return s;
 }
 
 auto Core::close() -> Status
@@ -567,7 +567,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         s = read_exact(*reader, bytes, 0);
         if (!s.is_ok()) return Err {s};
 
-        if (header.page_size && file_size % header.page_size) {
+        if (file_size % decode_page_size(header.page_size)) {
             message.set_detail("database has an invalid size");
             message.set_hint("database must contain an integral number of pages");
             return Err {message.corruption()};
@@ -594,14 +594,16 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         return Err {s};
     }
 
-    if (header.page_size && header.page_size < MINIMUM_PAGE_SIZE) {
-        message.set_detail("header page size {} is too small", header.page_size);
+    const auto page_size = decode_page_size(header.page_size);
+
+    if (page_size < MINIMUM_PAGE_SIZE) {
+        message.set_detail("header page size {} is too small", page_size);
         message.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
         return Err {message.corruption()};
     }
 
-    if (header.page_size && !is_power_of_two(header.page_size)) {
-        message.set_detail("header page size {} is invalid", header.page_size);
+    if (!is_power_of_two(page_size)) {
+        message.set_detail("header page size {} is invalid", page_size);
         message.set_hint("must either be 0 or a power of 2");
         return Err {message.corruption()};
     }
