@@ -87,6 +87,40 @@ struct OrderableTraits {
     }
 };
 
+template<class T>
+struct IncrementableTraits {
+
+    auto operator++() -> T&
+    {
+        static_cast<T&>(*this).value++;
+        return static_cast<T&>(*this);
+    }
+
+    auto operator++(int) -> T
+    {
+        auto temp = *this;
+        ++(*this);
+        return static_cast<T>(temp);
+    }
+};
+
+template<class T>
+struct DecrementableTraits {
+
+    auto operator--() -> T&
+    {
+        static_cast<T&>(*this).value--;
+        return *this;
+    }
+
+    auto operator--(int) -> T
+    {
+        auto temp = *this;
+        --(*this);
+        return temp;
+    }
+};
+
 struct PageId
     : public NullableId<PageId>,
       public EqualityComparableTraits<PageId>
@@ -119,7 +153,8 @@ struct PageId
 struct SequenceId
     : public NullableId<SequenceId>,
       public EqualityComparableTraits<SequenceId>,
-      public OrderableTraits<SequenceId>
+      public OrderableTraits<SequenceId>,
+      public IncrementableTraits<SequenceId>
 {
     using Type = std::uint64_t;
     using Hash = IndexHash<SequenceId>;
@@ -141,19 +176,6 @@ struct SequenceId
     constexpr auto is_base() const noexcept -> bool
     {
         return value == base().value;
-    }
-
-    auto operator++() -> SequenceId&
-    {
-        value++;
-        return *this;
-    }
-
-    auto operator++(int) -> SequenceId
-    {
-        auto temp = *this;
-        ++(*this);
-        return temp;
     }
 
     std::uint64_t value {};

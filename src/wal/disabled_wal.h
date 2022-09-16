@@ -40,6 +40,12 @@ public:
     }
 
     [[nodiscard]]
+    auto log(NamedScratch) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]]
     auto log(std::uint64_t, BytesView) -> Status override
     {
         return Status::ok();

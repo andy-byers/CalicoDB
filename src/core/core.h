@@ -3,10 +3,11 @@
 
 #include "calico/database.h"
 #include "header.h"
-#include "utils/result.h"
-#include <shared_mutex>
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/spdlog.h"
+#include "utils/result.h"
+#include "wal/helpers.h"
+#include <shared_mutex>
 
 namespace calico {
 
@@ -109,6 +110,7 @@ private:
     std::unique_ptr<WriteAheadLog> m_wal;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
+    std::unique_ptr<LogScratchManager> m_scratch;
     Storage *m_store {};
     bool m_has_xact {};
     bool m_owns_store {};

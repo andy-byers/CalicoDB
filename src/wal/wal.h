@@ -1,12 +1,13 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
+#include "calico/bytes.h"
+#include "calico/status.h"
+#include "utils/scratch.h"
+#include "utils/types.h"
 #include <functional>
 #include <variant>
 #include <vector>
-#include "calico/bytes.h"
-#include "calico/status.h"
-#include "utils/types.h"
 
 namespace calico {
 
@@ -58,6 +59,7 @@ public:
     [[nodiscard]] virtual auto is_working() const -> bool = 0;
     [[nodiscard]] virtual auto flushed_lsn() const -> std::uint64_t = 0;
     [[nodiscard]] virtual auto current_lsn() const -> std::uint64_t = 0;
+    [[nodiscard]] virtual auto log(NamedScratch payload) -> Status = 0;
     [[nodiscard]] virtual auto log(std::uint64_t page_id, BytesView image) -> Status = 0;
     [[nodiscard]] virtual auto log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status = 0;
     [[nodiscard]] virtual auto flush() -> Status = 0;

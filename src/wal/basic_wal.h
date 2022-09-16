@@ -25,6 +25,7 @@ public:
     struct Parameters {
         std::string prefix;
         Storage *store {};
+        LogScratchManager *scratch {};
         spdlog::sink_ptr sink;
         Size page_size {};
         Size wal_limit {};
@@ -53,6 +54,8 @@ public:
     [[nodiscard]] auto start_workers() -> Status override;
     [[nodiscard]] auto log(std::uint64_t page_id, BytesView image) -> Status override;
     [[nodiscard]] auto log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status override;
+    [[nodiscard]] auto log(NamedScratch payload) -> Status override;
+//    [[nodiscard]] auto advance() -> Status override;
     [[nodiscard]] auto flush() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
     [[nodiscard]] auto start_recovery(const GetDeltas &delta_cb, const GetFullImage &image_cb) -> Status override;
@@ -80,11 +83,11 @@ private:
     std::atomic<SequenceId> m_pager_lsn {};
     SequenceId m_last_lsn;
     SegmentId m_commit_id;
-    LogScratchManager m_scratch;
     WalCollection m_collection;
     std::string m_prefix;
 
     Storage *m_store {};
+    LogScratchManager *m_scratch {};
     Status m_status {Status::ok()};
     std::optional<WalReader> m_reader;
     std::optional<WalWriter> m_writer;

@@ -45,6 +45,7 @@ struct SegmentId
         return SegmentId {std::stoull(digits.to_string())};
     }
 
+    // TODO: Current naming scheme won't work. We'll eventually run out of names... Come up with a scheme for storing segment names!
     [[nodiscard]]
     auto to_name() const -> std::string
     {

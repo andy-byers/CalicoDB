@@ -104,6 +104,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
 
     if (sanitized.wal_limit != DISABLE_WAL) {
+        m_scratch = std::make_unique<LogScratchManager>(wal_scratch_size(sanitized.page_size));
+
         // The WAL segments may be stored elsewhere.
         const auto wal_prefix = sanitized.wal_path.empty()
             ? m_prefix : std::string {sanitized.wal_path} + "/";
@@ -111,6 +113,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         auto s = BasicWriteAheadLog::open({
             wal_prefix,
             m_store,
+            m_scratch.get(),
             m_sink,
             sanitized.page_size,
             sanitized.wal_limit,

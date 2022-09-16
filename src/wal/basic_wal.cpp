@@ -41,9 +41,9 @@ static auto handle_not_started_error(spdlog::logger &logger, bool is_working, co
 
 BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
     : m_logger {create_logger(param.sink, "wal")},
-      m_scratch {wal_scratch_size(param.page_size)},
       m_prefix {param.prefix},
       m_store {param.store},
+      m_scratch {param.scratch},
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
@@ -140,6 +140,16 @@ auto BasicWriteAheadLog::allow_cleanup(std::uint64_t pager_lsn) -> void
         MAYBE_FORWARD(s, MSG); \
     } while (0)
 
+
+auto BasicWriteAheadLog::log(NamedScratch payload) -> Status
+{
+    static constexpr auto MSG = "could not log payload";
+    HANDLE_WORKER_ERRORS;
+
+    m_writer->write(++m_last_lsn, payload);
+    return m_writer->status();
+}
+
 auto BasicWriteAheadLog::log(std::uint64_t page_id, BytesView image) -> Status
 {
     static constexpr auto MSG = "could not log full image";
@@ -154,7 +164,7 @@ auto BasicWriteAheadLog::log(std::uint64_t page_id, BytesView image) -> Status
         return Status::ok();
     }
 
-    auto payload = m_scratch.get();
+    auto payload = m_scratch->get();
     const auto size = encode_full_image_payload(++m_last_lsn, PageId {page_id}, image, *payload);
     payload->truncate(size);
 
@@ -168,7 +178,7 @@ auto BasicWriteAheadLog::log(std::uint64_t page_id, BytesView image, const std::
     static constexpr auto MSG = "could not log deltas";
     HANDLE_WORKER_ERRORS;
 
-    auto payload = m_scratch.get();
+    auto payload = m_scratch->get();
     const auto size = encode_deltas_payload(++m_last_lsn, PageId {page_id}, image, deltas, *payload);
     payload->truncate(size);
 
@@ -183,7 +193,7 @@ auto BasicWriteAheadLog::commit() -> Status
     static constexpr auto MSG = "could not log commit";
     HANDLE_WORKER_ERRORS;
 
-    auto payload = m_scratch.get();
+    auto payload = m_scratch->get();
     const auto size = encode_commit_payload(++m_last_lsn, *payload);
     payload->truncate(size);
 
@@ -251,7 +261,7 @@ auto BasicWriteAheadLog::start_workers() -> Status
     m_writer.emplace(
         *m_store,
         m_collection,
-        m_scratch,
+        *m_scratch,
         Bytes {m_writer_tail},
         m_flushed_lsn,
         m_prefix,
