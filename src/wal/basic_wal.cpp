@@ -198,6 +198,18 @@ auto BasicWriteAheadLog::commit() -> Status
     return s;
 }
 
+auto BasicWriteAheadLog::flush() -> Status
+{
+    m_logger->info("logging commit");
+
+    static constexpr auto MSG = "could not flush";
+    HANDLE_WORKER_ERRORS;
+
+    // TODO: We should have a special method to force flush the tail buffer. We don't really need to advance to a new segment.
+    m_writer->advance();
+    return m_writer->status();
+}
+
 #undef HANDLE_WORKER_ERRORS
 
 auto BasicWriteAheadLog::stop_workers() -> Status
@@ -267,6 +279,18 @@ auto BasicWriteAheadLog::start_workers() -> Status
     return s;
 }
 
+auto BasicWriteAheadLog::open_reader() -> Status
+{
+    m_reader.emplace(
+        *m_store,
+        m_collection,
+        m_prefix,
+        Bytes {m_reader_tail},
+        Bytes {m_reader_data}
+    );
+    return m_reader->open();
+}
+
 /*
  * First recovery phase. Here, we roll the WAL forward to apply any missing updates. Then, if we are missing a commit record for the
  * most-recent transaction, we roll that transaction back. In this case, we should keep the aborted segments around until all dirty
@@ -281,32 +305,25 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
     if (m_collection.first().is_null())
         return Status::ok();
 
-    m_reader.emplace(
-        *m_store,
-        m_collection,
-        m_prefix,
-        Bytes {m_reader_tail},
-        Bytes {m_reader_data}
-    );
-
     // Open the reader on the first (oldest) WAL segment file.
-    auto s = m_reader->open();
+    auto s = open_reader();
     MAYBE_FORWARD(s, MSG);
 
     while (s.is_ok()) {
         bool has_commit {};
-        SequenceId last_lsn;
 
         s = m_reader->roll([&](const PayloadDescriptor &info) {
             if (std::holds_alternative<DeltasDescriptor>(info)) {
                 const auto deltas = std::get<DeltasDescriptor>(info);
-                if (deltas.lsn > m_pager_lsn.load(std::memory_order_relaxed)) {
-                    last_lsn = deltas.lsn;
+                m_last_lsn = deltas.lsn;
+                if (deltas.lsn > m_pager_lsn.load(std::memory_order_relaxed))
                     return delta_cb(deltas);
-                }
+            } else if (std::holds_alternative<FullImageDescriptor>(info)) {
+                const auto image = std::get<FullImageDescriptor>(info);
+                m_last_lsn = image.lsn;
             } else if (std::holds_alternative<CommitDescriptor>(info)) {
                 const auto commit = std::get<CommitDescriptor>(info);
-                last_lsn = commit.lsn;
+                m_last_lsn = commit.lsn;
                 m_commit_id = m_reader->segment_id();
                 has_commit = true;
             }
@@ -316,10 +333,19 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
             s = forward_status(s, "could not roll WAL forward");
             break;
         }
-        m_flushed_lsn.store(last_lsn);
+        m_flushed_lsn.store(m_last_lsn);
         s = m_reader->seek_next();
     }
-    if (m_commit_id != m_collection.last())
+    if (!s.is_ok()) {
+        if (s.is_corruption()) {
+            if (m_reader->segment_id() != m_collection.last())
+                return s;
+        } else if (!s.is_not_found()) {
+            return s;
+        }
+        s = Status::ok();
+    }
+    if (s.is_ok() && m_commit_id != m_collection.last())
         return start_abort(image_cb);
     return s;
 }
@@ -345,6 +371,11 @@ auto BasicWriteAheadLog::start_abort(const GetFullImage &image_cb) -> Status
     m_logger->info("received abort request");
     CALICO_EXPECT_FALSE(m_is_working);
 
+    if (m_reader == std::nullopt) {
+        auto s = open_reader();
+        MAYBE_FORWARD(s, MSG);
+    }
+
     // Find the most-recent segment.
     for (; ; ) {
         auto s = m_reader->seek_next();
@@ -353,14 +384,14 @@ auto BasicWriteAheadLog::start_abort(const GetFullImage &image_cb) -> Status
     }
 
     auto s = Status::ok();
-    for (Size i {}; ; i++) {
+    for (Size i {}; s.is_ok(); i++) {
         const auto id = m_reader->segment_id();
 
         SequenceId first_lsn;
         s = m_reader->read_first_lsn(first_lsn);
         MAYBE_FORWARD(s, MSG);
 
-        if (id < m_commit_id)
+        if (id <= m_commit_id)
             break;
 
         s = m_reader->roll([&image_cb](const auto &info) {
@@ -372,11 +403,12 @@ auto BasicWriteAheadLog::start_abort(const GetFullImage &image_cb) -> Status
         });
 
         // Most-recent segment can have an incomplete record at the end.
-        if (s.is_corruption() && i == 0)
-            continue;
-        MAYBE_FORWARD(s, MSG);
+        if (!s.is_corruption() || i != 0)
+            MAYBE_FORWARD(s, MSG);
+
+        s = m_reader->seek_previous();
     }
-    return s;
+    return s.is_not_found() ? Status::ok() : s;
 }
 
 auto BasicWriteAheadLog::finish_abort() -> Status
@@ -387,7 +419,10 @@ auto BasicWriteAheadLog::finish_abort() -> Status
     for (; !id.is_null() && id != m_commit_id && s.is_ok(); id = m_collection.id_before(id))
         s = m_store->remove_file(m_prefix + id.to_name());
     m_collection.remove_after(id);
-    if (s.is_ok()) m_reader.reset();
+    if (s.is_ok()) {
+        m_status = Status::ok();
+        m_reader.reset();
+    }
     return s;
 }
 

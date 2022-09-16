@@ -53,6 +53,7 @@ public:
     [[nodiscard]] auto start_workers() -> Status override;
     [[nodiscard]] auto log(std::uint64_t page_id, BytesView image) -> Status override;
     [[nodiscard]] auto log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status override;
+    [[nodiscard]] auto flush() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
     [[nodiscard]] auto start_recovery(const GetDeltas &delta_cb, const GetFullImage &image_cb) -> Status override;
     [[nodiscard]] auto finish_recovery() -> Status override;

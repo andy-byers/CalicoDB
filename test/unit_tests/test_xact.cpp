@@ -62,36 +62,47 @@ static auto with_xact(XactTests &test, const Action &action)
 }
 
 template<class Test>
-static auto insert_1000_records(Test &test)
+static auto insert_records(Test &test, Size n = 1'000)
 {
-    auto records = test.generator.generate(test.random, 1'000);
+    auto records = test.generator.generate(test.random, n);
     for (const auto &r: records) {
         EXPECT_TRUE(expose_message(test.db.insert(stob(r.key), stob(r.value))));
     }
     return records;
 }
 
-auto erase_1000_records(XactTests &test)
+auto erase_records(XactTests &test, Size n = 1'000)
 {
-    for (Size i {}; i < 1'000; ++i) {
+    for (Size i {}; i < n; ++i) {
         ASSERT_TRUE(expose_message(test.db.erase(test.db.first())));
     }
 }
 
-TEST_F(XactTests, AbortFirstXact)
+template<class Test>
+static auto test_abort_first_xact(Test &test, Size num_records)
 {
-    auto xact = db.transaction();
-    insert_1000_records(*this);
+    auto xact = test.db.transaction();
+    insert_records(test, num_records);
     ASSERT_TRUE(expose_message(xact.abort()));
-    ASSERT_EQ(db.info().record_count(), 0);
+    ASSERT_EQ(test.db.info().record_count(), 0);
 
     // Normal operations after abort should work.
-    with_xact(*this, [this] {insert_1000_records(*this);});
+    with_xact(test, [&test] {insert_records(test);});
+}
+
+TEST_F(XactTests, AbortFirstXactWithSingleRecord)
+{
+    test_abort_first_xact(*this, 1);
+}
+
+TEST_F(XactTests, AbortFirstXactWithMultipleRecord)
+{
+    test_abort_first_xact(*this, 1'000);
 }
 
 TEST_F(XactTests, CommitIsACheckpoint)
 {
-    with_xact(*this, [this] {insert_1000_records(*this);});
+    with_xact(*this, [this] { insert_records(*this);});
 
     auto xact = db.transaction();
     ASSERT_TRUE(expose_message(xact.abort()));
@@ -100,20 +111,20 @@ TEST_F(XactTests, CommitIsACheckpoint)
 
 TEST_F(XactTests, KeepsCommittedRecords)
 {
-    with_xact(*this, [this] {insert_1000_records(*this);});
+    with_xact(*this, [this] { insert_records(*this);});
 
     auto xact = db.transaction();
-    erase_1000_records(*this);
+    erase_records(*this);
     ASSERT_TRUE(expose_message(xact.abort()));
     ASSERT_EQ(db.info().record_count(), 1'000);
 
     // Normal operations after abort should work.
-    with_xact(*this, [this] {erase_1000_records(*this);});
+    with_xact(*this, [this] { erase_records(*this);});
     ASSERT_EQ(db.info().record_count(), 0);
 }
 
 template<class Test, class Itr>
-auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
+static auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
 {
     for (auto itr = begin; itr != end; ++itr) {
         EXPECT_TRUE(expose_message(test.db.insert(stob(itr->key), stob(itr->value))));
@@ -130,25 +141,45 @@ auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
     return committed;
 }
 
-TEST_F(XactTests, AbortRestoresPriorState)
+template<class Test>
+static auto test_abort_second_xact(Test &test, Size first_xact_size, Size second_xact_size)
 {
-    static constexpr Size NUM_RECORDS {500};
-    const auto path = ROOT + std::string {DATA_FILENAME};
-    const auto records = generator.generate(random, NUM_RECORDS);
+    const auto path = Test::ROOT + std::string {DATA_FILENAME};
+    const auto records = test.generator.generate(test.random, first_xact_size + second_xact_size);
 
-    auto xact = db.transaction();
-    auto committed = run_random_operations(*this, cbegin(records), cbegin(records) + NUM_RECORDS/2);
+    auto xact = test.db.transaction();
+    auto committed = run_random_operations(test, cbegin(records), cbegin(records) + static_cast<long>(first_xact_size));
     ASSERT_TRUE(expose_message(xact.commit()));
 
-    xact = db.transaction();
-    run_random_operations(*this, cbegin(records) + NUM_RECORDS/2, cend(records));
+    xact = test.db.transaction();
+    run_random_operations(test, cbegin(records) + static_cast<long>(first_xact_size), cend(records));
     ASSERT_TRUE(expose_message(xact.abort()));
 
     // The database should contain exactly these records.
-    ASSERT_EQ(db.info().record_count(), committed.size());
+    ASSERT_EQ(test.db.info().record_count(), committed.size());
     for (const auto &[key, value]: committed) {
-        ASSERT_TRUE(tools::contains(db, key, value));
+        ASSERT_TRUE(tools::contains(test.db, key, value));
     }
+}
+
+TEST_F(XactTests, AbortSecondXact_1_1)
+{
+    test_abort_second_xact(*this, 1, 1);
+}
+
+TEST_F(XactTests, AbortSecondXact_1000_1)
+{
+    test_abort_second_xact(*this, 1'000, 1);
+}
+
+TEST_F(XactTests, AbortSecondXact_1_1000)
+{
+    test_abort_second_xact(*this, 1, 1'000);
+}
+
+TEST_F(XactTests, AbortSecondXact_1000_1000)
+{
+    test_abort_second_xact(*this, 1'000, 1'000);
 }
 
 template<class Test>
@@ -325,7 +356,7 @@ TEST_F(FailureTests, WalOpenErrorIsPropagatedDuringModify)
 TEST_F(FailureTests, WalReadErrorIsPropagatedDuringAbort)
 {
     auto xact = db.transaction();
-    insert_1000_records(*this);
+    insert_records(*this);
 
     interceptors::set_read(FailOnce<0> {"test/wal-"});
 
@@ -696,6 +727,8 @@ public:
             } else {
                 assert_error_42(s);
                 counter = 0;
+
+                // Allow Step more calls of the target system call to succeed on the next round.
                 target += Step;
             }
         }
@@ -717,8 +750,10 @@ INSTANTIATE_TEST_SUITE_P(
         RecoveryTestFailureType::DATA_WRITE,
         RecoveryTestFailureType::DATA_SYNC,
         RecoveryTestFailureType::WAL_OPEN,
-        RecoveryTestFailureType::WAL_READ,
-        RecoveryTestFailureType::WAL_WRITE),
+        RecoveryTestFailureType::WAL_READ
+        // TODO: We can't use this test for WAL_WRITE, since we don't write during abort(). We have no way to make the
+        //       abort procedure fail with the current setup.
+        ),
     [](const auto &info) {
         return recovery_test_failure_type_name(info.param);
     });

@@ -60,6 +60,7 @@ public:
     [[nodiscard]] virtual auto current_lsn() const -> std::uint64_t = 0;
     [[nodiscard]] virtual auto log(std::uint64_t page_id, BytesView image) -> Status = 0;
     [[nodiscard]] virtual auto log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status = 0;
+    [[nodiscard]] virtual auto flush() -> Status = 0;
     [[nodiscard]] virtual auto commit() -> Status = 0;
     [[nodiscard]] virtual auto start_workers() -> Status = 0;
     [[nodiscard]] virtual auto stop_workers() -> Status = 0;

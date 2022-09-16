@@ -52,6 +52,12 @@ public:
     }
 
     [[nodiscard]]
+    auto flush() -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]]
     auto commit() -> Status override
     {
         return Status::ok();
