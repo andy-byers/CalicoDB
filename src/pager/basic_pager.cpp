@@ -2,7 +2,7 @@
 #include "calico/options.h"
 #include "framer.h"
 #include "page/page.h"
-#include "store/disk.h"
+#include "storage/posix_storage.h"
 #include "utils/logging.h"
 #include "utils/types.h"
 #include <thread>
@@ -72,10 +72,10 @@ auto BasicPager::pin_frame(PageId id, bool &is_fragile) -> Status
         if (!r.has_value()) return r.error();
 
         // We are out of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
-        // very often, if at all.
+        // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
         if (!*r) {
             m_logger->warn(MSG);
-            std::this_thread::yield();
+            (void)m_wal->flush();
             return Status::not_found(MSG);
         }
     }
@@ -111,14 +111,13 @@ auto BasicPager::flush() -> Status
         if (in_range) {
             if (page_lsn > m_wal->flushed_lsn()) {
                 LogMessage message {*m_logger};
-                message.set_primary(MSG);
-                message.set_detail("WAL has pending updates");
-                message.set_hint("flush the WAL and try again");
-                return message.logic_error();
+                message.set_primary("could not flush page {}", page_id.value);
+                message.set_detail("page updates for LSN {} were not logged", page_lsn.value);
+                message.log(spdlog::level::warn);
+            } else {
+                s = m_framer->write_back(frame_id);
+                MAYBE_FORWARD(s, MSG);
             }
-            s = m_framer->write_back(frame_id);
-            MAYBE_FORWARD(s, MSG);
-
         } else {
             // Get rid of all pages that are not in range. This should only happen after pages are deleted during abort() or recovery.
             m_registry.erase(page_id);
@@ -135,9 +134,8 @@ auto BasicPager::flushed_lsn() const -> SequenceId
 
 auto BasicPager::try_make_available() -> Result<bool>
 {
-    auto itr = m_registry.find_entry([this](auto, auto fid, auto dirty_token) {
+    auto itr = m_registry.find_for_replacement([this](auto, auto fid, auto dirty_token) {
         const auto &frame = m_framer->frame_at(fid);
-
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to consider for reuse.
         if (frame.ref_count() != 0)
             return false;
@@ -145,16 +143,15 @@ auto BasicPager::try_make_available() -> Result<bool>
         if (!dirty_token.has_value())
             return true;
 
-        if (m_wal->is_writing())
+        if (m_wal->is_working())
             return frame.lsn() <= m_wal->flushed_lsn();
 
         return true;
     });
 
     if (itr == m_registry.end()) {
-        CALICO_EXPECT_TRUE(m_wal->is_writing());
-        const auto s = m_wal->flush_pending();
-        if (!s.is_ok()) return Err {s};
+        CALICO_EXPECT_TRUE(m_wal->is_working());
+        std::this_thread::yield();
         return false;
     }
 
@@ -162,8 +159,8 @@ auto BasicPager::try_make_available() -> Result<bool>
     auto &[frame_id, dirty_token] = entry;
     auto s = Status::ok();
     if (dirty_token.has_value()) {
-        // We remove the frame's "dirty" status, even if the write failed.
         s = m_framer->write_back(frame_id);
+        // We remove the frame's "dirty" status, even if write_back() failed.
         m_dirty.remove(*dirty_token);
         dirty_token.reset();
     }
@@ -180,10 +177,10 @@ auto BasicPager::release(Page page) -> Status
 
     // This method can only fail for writable pages.
     auto s = Status::ok();
-    if (const auto deltas = page.collect_deltas(); m_wal->is_writing() && !deltas.empty()) {
+    if (const auto deltas = page.collect_deltas(); m_wal->is_working() && !deltas.empty()) {
         CALICO_EXPECT_TRUE(page.is_writable());
         page.set_lsn(SequenceId {m_wal->current_lsn()});
-        s = m_wal->log_deltas(page.id().value, page.view(0), page.collect_deltas());
+        s = m_wal->log(page.id().value, page.view(0), page.collect_deltas());
         save_and_forward_status(s, "could not write page deltas to WAL");
     }
 
@@ -205,8 +202,8 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
     }
 
     // TODO: We also have info about whether or not we should watch this page. Like *m_has_xact? Although that may break abort() since it doesn't set *m_has_xact to false until it is totally finished...
-    if (m_wal->is_writing()) {
-        auto s = m_wal->log_image(page.id().value, page.view(0));
+    if (m_wal->is_working()) {
+        auto s = m_wal->log(page.id().value, page.view(0));
         save_and_forward_status(s, "could not write full image to WAL");
 
     } else if (m_wal->is_enabled()) {
@@ -221,14 +218,12 @@ auto BasicPager::save_state(FileHeader &header) -> void
 {
     m_logger->info("saving header fields");
     m_framer->save_state(header);
-    m_wal->save_state(header);
 }
 
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
     m_logger->info("loading header fields");
     m_framer->load_state(header);
-    m_wal->load_state(header);
 }
 
 auto BasicPager::allocate() -> Result<Page>
@@ -268,8 +263,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 
             // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
             // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
-            // data races on this check. TODO: This isn't going to work! Let's do this instead. Split up the "pinning a page to a frame" procedure into two parts: freeing up a frame, and reading a page into it.
-            //                                 We also should have some way to tell that we are in a non-reentrant position and failing to write back a page will mess us up (we are rebalancing or something).
+            // data races on this check.
             if (*m_has_xact || is_fragile) {
                 m_logger->error("setting database error state");
                 *m_status = s;

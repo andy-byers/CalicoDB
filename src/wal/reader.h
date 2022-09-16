@@ -1,9 +1,3 @@
-/**
-*
-* References
-*   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
-*/
-
 #ifndef CALICO_WAL_READER_H
 #define CALICO_WAL_READER_H
 
@@ -16,47 +10,69 @@
 
 namespace calico {
 
-class Storage;
-
-class BasicWalReader {
+class LogReader final {
 public:
-    using PositionList = std::vector<RecordPosition>;
-    using UndoIterator = PositionList::const_reverse_iterator;
-
-    explicit BasicWalReader(Storage &store, std::string prefix, Size page_size)
-        : m_redo_reader {wal_block_size(page_size)},
-          m_undo_reader {wal_block_size(page_size)},
-          m_redo_filter {[](auto type) {
-              return type == WalPayloadType::DELTAS || type == WalPayloadType::COMMIT;
-          }},
-          m_undo_filter {[](auto type) {
-              return type == WalPayloadType::FULL_IMAGE;
-          }},
-          m_prefix {std::move(prefix)},
-          m_payload(wal_scratch_size(page_size), '\x00'),
-          m_store {&store}
+    explicit LogReader(RandomReader &file)
+        : m_file {&file}
     {}
 
-    [[nodiscard]] auto open(SegmentId id) -> Status;
-    [[nodiscard]] auto close() -> Status;
-    [[nodiscard]] auto read_first_lsn(SequenceId&) -> Status;
-    [[nodiscard]] auto redo(PositionList &, const RedoCallback &) -> Status;
-    [[nodiscard]] auto undo(const UndoIterator&, const UndoIterator&, const UndoCallback &) -> Status;
+    // NOTE: If either of these methods returns a non-OK status, the state of this object is unspecified.
+    [[nodiscard]] auto read_first_lsn(SequenceId &out) -> Status;
+    [[nodiscard]] auto read(Bytes &out, Bytes tail) -> Status;
 
 private:
-    [[nodiscard]] auto prepare_forward_traversal() -> Status;
-    [[nodiscard]] auto prepare_reverse_traversal() -> Status;
-    [[nodiscard]] auto forward_read_logical_record(WalRecordHeader &header, Bytes payload, PositionList &positions) -> Status;
-    [[nodiscard]] auto reverse_read_logical_record(WalRecordHeader &header, Bytes payload, UndoIterator &current, const UndoIterator &end) -> Status;
+    [[nodiscard]] auto read_logical_record(Bytes &out, Bytes tail) -> Status;
 
-    SegmentId m_segment_id;
-    SequentialLogReader m_redo_reader;
-    RandomLogReader m_undo_reader;
-    WalFilter m_redo_filter;
-    WalFilter m_undo_filter;
+    // NOTE: Doesn't take ownership of the file.
+    RandomReader *m_file {};
+    Size m_number {};
+    Size m_offset {};
+};
+
+class WalReader final {
+public:
+    WalReader(Storage &store, WalCollection &segments, std::string prefix, Bytes tail, Bytes data)
+        : m_prefix {std::move(prefix)},
+          m_store {&store},
+          m_segments {&segments},
+          m_tail {tail},
+          m_data {data}
+    {}
+
+    ~WalReader()
+    {
+        if (!m_current.is_null())
+            close_segment();
+    }
+
+    [[nodiscard]]
+    auto segment_id() const -> SegmentId
+    {
+        return m_current;
+    }
+
+    [[nodiscard]] auto open() -> Status;
+    [[nodiscard]] auto seek_next() -> Status;
+    [[nodiscard]] auto seek_previous() -> Status;
+
+    // TODO: LevelDB caches first LSNs of WAL segments. If we end up reading this info a lot, we may want to do the same. We could use this method
+    //       for that, and store the cache in WALCollection, so it lives longer than this object, which is meant to be transient.
+    [[nodiscard]] auto read_first_lsn(SequenceId&) -> Status;
+    [[nodiscard]] auto roll(const GetPayload&) -> Status;
+
+private:
+    [[nodiscard]] auto open_segment(SegmentId) -> Status;
+    auto prepare_traversal() -> void;
+    auto close_segment() -> void;
+
     std::string m_prefix;
-    std::string m_payload;
+    std::optional<LogReader> m_reader;
+    std::unique_ptr<RandomReader> m_file;
     Storage *m_store {};
+    WalCollection *m_segments {};
+    Bytes m_tail;
+    Bytes m_data;
+    SegmentId m_current;
 };
 
 } // namespace calico

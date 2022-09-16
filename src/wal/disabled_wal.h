@@ -16,9 +16,15 @@ public:
     }
 
     [[nodiscard]]
-    auto is_writing() const -> bool override
+    auto is_working() const -> bool override
     {
         return false;
+    }
+
+    [[nodiscard]]
+    auto status() const -> Status override
+    {
+        return Status::ok();
     }
 
     [[nodiscard]]
@@ -34,56 +40,66 @@ public:
     }
 
     [[nodiscard]]
-    auto flush_pending() -> Status override
+    auto log(std::uint64_t, BytesView) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto log_image(std::uint64_t, BytesView) -> Status override
+    auto log(std::uint64_t, BytesView, const std::vector<PageDelta> &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto log_deltas(std::uint64_t, BytesView, const std::vector<PageDelta> &) -> Status override
+    auto flush() -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto log_commit() -> Status override
+    auto commit() -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto stop_writer() -> Status override
+    auto stop_workers() -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto start_writer() -> Status override
+    auto start_workers() -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto setup_and_recover(const RedoCallback &, const UndoCallback &) -> Status override
+    auto start_recovery(const GetDeltas &, const GetFullImage &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto abort_last(const UndoCallback &) -> Status override
+    auto finish_recovery() -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]]
+    auto start_abort(const GetFullImage &) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]]
+    auto finish_abort() -> Status override
     {
         return Status::ok();
     }
 
     auto allow_cleanup(std::uint64_t) -> void override {}
-    auto save_state(FileHeader &) -> void override {}
-    auto load_state(const FileHeader &) -> void override {}
 };
 
 } // namespace calico

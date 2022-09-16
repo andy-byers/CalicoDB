@@ -1,4 +1,5 @@
 #include "internal.h"
+#include "core/header.h"
 #include "utils/layout.h"
 
 namespace calico {
@@ -123,7 +124,7 @@ auto Internal::positioned_modify(Position position, BytesView value) -> Result<v
     auto old_cell = node.read_cell(index);
     // Make a copy of the key. The data backing the old key slice may be written over when we call
     // remove_at() on the old cell.
-    const std::string key {btos(old_cell.key())};
+    const auto key = old_cell.key().to_string();
 
     CALICO_TRY_CREATE(new_cell, make_cell(stob(key), value, true));
 
@@ -147,7 +148,7 @@ auto Internal::positioned_remove(Position position) -> Result<void>
     m_cell_count--;
 
     auto cell = node.read_cell(index);
-    std::string anchor {btos(cell.key())};
+    auto anchor = cell.key().to_string();
     if (cell.overflow_size()) {
         auto was_destroyed = m_pool->destroy_chain(cell.overflow_id(), cell.overflow_size());
         if (!was_destroyed.has_value()) {
@@ -195,9 +196,6 @@ auto Internal::balance_after_underflow(Node node, BytesView anchor) -> Result<vo
     return m_pool->release(std::move(node));
 }
 
-/**
- * Balancing routine for fixing an over-full root node.
- */
 auto Internal::split_root(Node root) -> Result<Node>
 {
     CALICO_EXPECT_TRUE(root.id().is_root());

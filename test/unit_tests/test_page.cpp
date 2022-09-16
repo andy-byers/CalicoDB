@@ -1,21 +1,15 @@
 #include <gtest/gtest.h>
 
-#include "calico/bytes.h"
 #include "calico/options.h"
-#include "page/cell.h"
 #include "page/deltas.h"
-#include "page/node.h"
-#include "page/page.h"
 #include "random.h"
-#include "tools.h"
 #include "unit_tests.h"
-#include "utils/expect.h"
-#include "utils/layout.h"
-#include "utils/scratch.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
 
 class DeltaCompressionTest: public testing::Test {
 public:
@@ -35,12 +29,12 @@ public:
     auto insert_random_delta(std::vector<PageDelta> &deltas)
     {
         static constexpr Size MIN_DELTA_SIZE {1};
-        const auto offset = random.next_int(PAGE_SIZE - MIN_DELTA_SIZE);
-        const auto size = random.next_int(PAGE_SIZE - offset);
+        const auto offset = random.get(PAGE_SIZE - MIN_DELTA_SIZE);
+        const auto size = random.get(PAGE_SIZE - offset);
         insert_delta(deltas, {offset, size});
     }
 
-    Random random {0};
+    Random random {internal::random_seed};
 };
 
 TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
@@ -133,8 +127,8 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     static constexpr Size MAX_DELTA_SIZE {10};
     std::vector<PageDelta> deltas;
     for (Size i {}; i < NUM_INSERTS; ++i) {
-        const auto offset = random.next_int(PAGE_SIZE - MAX_DELTA_SIZE);
-        const auto size = random.next_int(1ULL, MAX_DELTA_SIZE);
+        const auto offset = random.get(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto size = random.get(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);
@@ -428,7 +422,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 ////    static constexpr Size MAX_SIZE {MIN_SIZE * 3};
 ////    std::unordered_map<Index, Size> allocations;
 ////    auto usable_space = max_usable_space();
-////    Random random {0};
+////    Random random {internal::random_seed};
 ////
 ////    for (Index i {}; i < NUM_ITERATIONS; ++i) {
 ////        for (; ; ) {
@@ -528,7 +522,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //        return node_backing.get_node(id, type);
 //    }
 //
-//    Random random {0};
+//    Random random {internal::random_seed};
 //    NodeBacking node_backing;
 //    CellBacking cell_backing;
 //    std::string normal_value {"world"};
@@ -639,7 +633,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //TEST_F(NodeTests, SanityCheck)
 //{
 //    static constexpr Size NUM_ITERATIONS {10};
-//    Random random {0};
+//    Random random {internal::random_seed};
 //    auto node = make_node(PageId::base(), PageType::EXTERNAL_NODE);
 //    for (Index i {}; i < NUM_ITERATIONS; ++i) {
 //        while (!node.is_overflowing()) {

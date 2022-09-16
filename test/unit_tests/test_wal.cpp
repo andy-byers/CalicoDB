@@ -1,47 +1,41 @@
 #include <array>
-#include <filesystem>
-#include <fstream>
 #include <gtest/gtest.h>
-
 #include "calico/bytes.h"
 #include "calico/options.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "fakes.h"
-#include "pager/basic_pager.h"
-#include "pager/framer.h"
 #include "tools.h"
 #include "unit_tests.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
-#include "utils/utils.h"
 #include "wal/basic_wal.h"
 #include "wal/helpers.h"
 #include "wal/reader.h"
 #include "wal/writer.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
+
 namespace fs = std::filesystem;
 
 template<class Base>
-class TestWithWalSegments: public Base {
+class TestWithWalSegments : public Base {
 public:
-    [[nodiscard]]
-    static auto get_segment_name(SegmentId id) -> std::string
+    [[nodiscard]] static auto get_segment_name(SegmentId id) -> std::string
     {
-        return Base::ROOT + id.to_name();
+        return Base::PREFIX + id.to_name();
     }
 
-    [[nodiscard]]
-    static auto get_segment_name(Size index) -> std::string
+    [[nodiscard]] static auto get_segment_name(Size index) -> std::string
     {
-        return Base::ROOT + SegmentId::from_index(index).to_name();
+        return Base::PREFIX + SegmentId::from_index(index).to_name();
     }
 
     template<class Id>
-    [[nodiscard]]
-    auto get_segment_size(const Id &id) const -> Size
+    [[nodiscard]] auto get_segment_size(const Id &id) const -> Size
     {
         Size size {};
         EXPECT_TRUE(expose_message(Base::store->file_size(get_segment_name(id), size)));
@@ -49,8 +43,7 @@ public:
     }
 
     template<class Id>
-    [[nodiscard]]
-    auto get_segment_data(const Id &id) const -> std::string
+    [[nodiscard]] auto get_segment_data(const Id &id) const -> std::string
     {
         RandomReader *reader {};
         EXPECT_TRUE(expose_message(Base::store->open_random_reader(get_segment_name(id), &reader)));
@@ -68,28 +61,18 @@ using TestWithWalSegmentsOnHeap = TestWithWalSegments<TestOnHeap>;
 using TestWithWalSegmentsOnDisk = TestWithWalSegments<TestOnDisk>;
 
 template<class Store>
-[[nodiscard]]
-auto get_file_size(const Store &store, const std::string &path) -> Size
+[[nodiscard]] static auto get_file_size(const Store &store, const std::string &path) -> Size
 {
     Size size {};
     EXPECT_TRUE(expose_message(store.file_size(path, size)));
     return size;
 }
 
-[[nodiscard]]
-auto open_and_write_file(Storage &store, const std::string &name, const std::string &in)
-{
-    RandomEditor *temp {};
-    EXPECT_TRUE(expose_message(store.open_random_editor(name, &temp)));
-    std::unique_ptr<RandomEditor> file {temp};
-    EXPECT_TRUE(expose_message(file->write(stob(in), 0)));
-}
-
-class WalPayloadSizeLimitTests: public testing::TestWithParam<Size> {
+class WalPayloadSizeLimitTests : public testing::TestWithParam<Size> {
 public:
     WalPayloadSizeLimitTests()
         : scratch(max_size, '\x00'),
-          image {random.next_string(GetParam())}
+          image {random.get<std::string>('\x00', '\xFF', GetParam())}
     {
         static_assert(WAL_SCRATCH_SCALE >= 1);
     }
@@ -98,7 +81,7 @@ public:
 
     Size max_size {GetParam() * WAL_SCRATCH_SCALE};
     Size min_size {max_size - GetParam()};
-    Random random {42};
+    Random random {internal::random_seed};
     std::string scratch;
     std::string image;
 };
@@ -110,7 +93,7 @@ TEST_P(WalPayloadSizeLimitTests, LargestPossibleRecord)
     for (Size i {}; i < GetParam(); i += 2)
         deltas.emplace_back(PageDelta {i, 1});
 
-    auto size = encode_deltas_payload(PageId {2}, stob(image), deltas, stob(scratch));
+    auto size = encode_deltas_payload(SequenceId {1}, PageId {2}, stob(image), deltas, stob(scratch));
     ASSERT_GE(size, min_size) << "Excessive scratch memory allocated";
     ASSERT_LE(size, max_size) << "Scratch memory cannot fit maximally sized WAL record payload";
 }
@@ -126,11 +109,9 @@ INSTANTIATE_TEST_SUITE_P(
         0x100 << 4,
         0x100 << 5,
         0x100 << 6,
-        0x100 << 7
-        )
-);
+        0x100 << 7));
 
-class WalRecordMergeTests: public testing::Test {
+class WalRecordMergeTests : public testing::Test {
 public:
     auto setup(const std::array<WalRecordHeader::Type, 3> &types) -> void
     {
@@ -202,225 +183,60 @@ TEST_F(WalRecordMergeTests, MergeInvalidTypesDeathTest)
     ASSERT_DEATH(const auto ignore = merge_records_right(lhs, rhs), EXPECTATION_MATCHER);
 }
 
-class WalPayloadTests: public testing::Test {
+class WalPayloadTests : public testing::Test {
 public:
     static constexpr Size PAGE_SIZE {0x80};
 
     WalPayloadTests()
-        : image {random.next_string(PAGE_SIZE)},
+        : image {random.get<std::string>('\x00', '\xFF', PAGE_SIZE)},
           scratch(PAGE_SIZE * WAL_SCRATCH_SCALE, '\x00')
     {}
 
-    Random random {123};
+    Random random {internal::random_seed};
     std::string image;
     std::string scratch;
 };
 
 TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
 {
-    const auto size = encode_full_image_payload(PageId::root(), stob(image), stob(scratch));
+    const auto size = encode_full_image_payload(SequenceId {1}, PageId::root(), stob(image), stob(scratch));
     const auto descriptor = decode_full_image_payload(stob(scratch).truncate(size));
-    ASSERT_EQ(descriptor.page_id, 1);
-    ASSERT_EQ(btos(descriptor.image), image);
+    ASSERT_EQ(descriptor.pid, 1);
+    ASSERT_EQ(descriptor.image.to_string(), image);
 }
 
 TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(stob(image));
-    const auto size = encode_deltas_payload(PageId::root(), stob(image), deltas, stob(scratch));
-
-    WalRecordHeader header {};
-    header.size = static_cast<std::uint16_t>(size);
-    header.lsn = 123;
-    header.crc = crc_32(stob(scratch).truncate(size));
-    const auto descriptor = decode_deltas_payload(header, stob(scratch).truncate(size));
-    ASSERT_EQ(descriptor.page_lsn, 123);
-    ASSERT_EQ(descriptor.page_id, 1);
+    const auto size = encode_deltas_payload(SequenceId {42}, PageId::root(), stob(image), deltas, stob(scratch));
+    const auto descriptor = decode_deltas_payload(stob(scratch).truncate(size));
+    ASSERT_EQ(descriptor.lsn, 42);
+    ASSERT_EQ(descriptor.pid, 1);
     ASSERT_EQ(descriptor.deltas.size(), deltas.size());
-    ASSERT_FALSE(descriptor.is_commit);
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const DeltaContent &delta) {
         return delta.data == stob(image).range(delta.offset, delta.data.size());
     }));
 }
 
-class WalBufferTests: public testing::Test {
-public:
-    static constexpr Size BLOCK_SIZE {4};
-
-    WalBuffer buffer {BLOCK_SIZE};
-};
-
-TEST_F(WalBufferTests, BufferIsSetUpCorrectly)
-{
-    ASSERT_EQ(buffer.block_number(), 0);
-    ASSERT_EQ(buffer.block_offset(), 0);
-    ASSERT_EQ(buffer.remaining().size(), BLOCK_SIZE);
-    ASSERT_EQ(buffer.block().size(), BLOCK_SIZE);
-}
-
-TEST_F(WalBufferTests, OutOfBoundsCursorDeathTest)
-{
-    ASSERT_DEATH(buffer.advance_cursor(BLOCK_SIZE + 1), EXPECTATION_MATCHER);
-
-    buffer.advance_cursor(1);
-    ASSERT_DEATH(buffer.advance_cursor(BLOCK_SIZE), EXPECTATION_MATCHER);
-}
-
-TEST_F(WalBufferTests, KeepsTrackOfPosition)
-{
-    Random random {123};
-    Size block_number {};
-    Size block_offset {};
-
-    const auto check = [&] {
-        const auto block_numbers_match = buffer.block_number() == block_number;
-        const auto block_offsets_match = buffer.block_offset() == block_offset;
-        EXPECT_TRUE(block_numbers_match) << buffer.block_number() << " should equal " << block_number;
-        EXPECT_TRUE(block_offsets_match) << buffer.block_offset() << " should equal " << block_offset;
-        return block_numbers_match && block_offsets_match;
-    };
-
-    for (Size i {}; i < 100; ++i) {
-        const auto size = random.next_int(buffer.remaining().size());
-        block_offset += size;
-        buffer.advance_cursor(size);
-        ASSERT_TRUE(check());
-
-        if (buffer.remaining().is_empty()) {
-            block_offset = 0;
-            block_number++;
-            ASSERT_TRUE(expose_message(buffer.advance_block([] { return Status::ok(); })));
-            ASSERT_TRUE(check());
-        }
-    }
-}
-
-TEST_F(WalBufferTests, MemoryIsReused)
-{
-    buffer.remaining()[0] = 'a';
-    buffer.advance_cursor(1);
-    buffer.remaining()[0] = 'b';
-    buffer.advance_cursor(1);
-    buffer.remaining()[0] = 'c';
-    buffer.advance_cursor(1);
-    buffer.remaining()[0] = 'd';
-    buffer.advance_cursor(1);
-
-    auto s = buffer.advance_block([] {return Status::ok();});
-    ASSERT_TRUE(s.is_ok());
-
-    ASSERT_EQ(buffer.block()[0], 'a');
-    ASSERT_EQ(buffer.block()[1], 'b');
-    ASSERT_EQ(buffer.block()[2], 'c');
-    ASSERT_EQ(buffer.block()[3], 'd');
-}
-
-class WalRecordWriterTests: public TestWithWalSegmentsOnHeap {
-public:
-    static constexpr Size BLOCK_SIZE {0x200};
-
-    WalRecordWriterTests() = default;
-
-    ~WalRecordWriterTests() override = default;
-
-    auto attach_writer(SegmentId id)
-    {
-        AppendWriter *file {};
-        ASSERT_TRUE(expose_message(store->open_append_writer(ROOT + id.to_name(), &file)));
-        writer.attach(file);
-    }
-
-    auto detach_writer()
-    {
-        ASSERT_TRUE(expose_message(writer.detach([](auto) {})));
-    }
-
-    WalRecordWriter writer {BLOCK_SIZE};
-};
-
-TEST_F(WalRecordWriterTests, NewWriterStateIsCorrect)
-{
-    ASSERT_FALSE(writer.has_written());
-    ASSERT_FALSE(writer.is_attached());
-    ASSERT_EQ(writer.block_count(), 0);
-}
-
-auto dummy_cb(SequenceId) -> Status
-{
-    return Status::ok();
-}
-
-TEST_F(WalRecordWriterTests, AdvancesToNewBlocksDuringWrite)
-{
-    attach_writer(SegmentId {1});
-    auto lsn = SequenceId::base();
-    Random random {123};
-
-    while (writer.block_count() < 10) {
-        const auto payload = random.next_string(10);
-        writer.write(lsn++, stob(payload), dummy_cb);
-    }
-    ASSERT_TRUE(writer.has_written());
-    detach_writer();
-
-    ASSERT_EQ(get_file_size(*store, ROOT + SegmentId {1}.to_name()) / BLOCK_SIZE, 11);
-}
-
-TEST_F(WalRecordWriterTests, NonEmptyLastBlockIsWrittenAfterClose)
-{
-    const auto path = ROOT + SegmentId {1}.to_name();
-
-    attach_writer(SegmentId {1});
-    detach_writer();
-    ASSERT_EQ(get_file_size(*store, path), 0);
-
-    attach_writer(SegmentId {1});
-    writer.write(SequenceId::base(), stob("payload!"), dummy_cb);
-    detach_writer();
-    ASSERT_EQ(get_file_size(*store, path), BLOCK_SIZE);
-}
-
-TEST_F(WalRecordWriterTests, ClearsRestOfBlock)
-{
-    const auto path = ROOT + SegmentId {1}.to_name();
-    std::string payload {"payload!"};
-    const SegmentId id {1};
-
-    attach_writer(id);
-    writer.write(SequenceId::base(), stob(payload), dummy_cb);
-    detach_writer();
-
-    auto result = get_segment_data(id).substr(sizeof(WalRecordHeader));
-    payload.resize(result.size());
-    ASSERT_EQ(payload, result);
-}
-
-[[nodiscard]]
-auto get_ids(const WalCollection &c)
+[[nodiscard]] auto get_ids(const WalCollection &c)
 {
     std::vector<SegmentId> ids;
-    std::transform(cbegin(c.info()), cend(c.info()), back_inserter(ids), [](const auto &itr) {
-        return itr.id;
+    std::transform(cbegin(c.segments()), cend(c.segments()), back_inserter(ids), [](const auto &id) {
+        return id;
     });
     return ids;
 }
 
-class WalCollectionTests: public testing::Test {
+class WalCollectionTests : public testing::Test {
 public:
-    static auto test_has_commit(SegmentId id) -> bool
-    {
-        return id.as_index() & 1;
-    }
-
     auto add_segments(Size n)
     {
         for (Size i {}; i < n; ++i) {
             auto id = SegmentId::from_index(i);
-            collection.start_segment(id);
-            collection.finish_segment(test_has_commit(id));
+            collection.add_segment(id);
         }
-        ASSERT_EQ(collection.most_recent_id(), SegmentId::from_index(n - 1));
+        ASSERT_EQ(collection.last(), SegmentId::from_index(n - 1));
     }
 
     WalCollection collection;
@@ -428,41 +244,27 @@ public:
 
 TEST_F(WalCollectionTests, NewCollectionState)
 {
-    ASSERT_FALSE(collection.is_segment_started());
-    ASSERT_TRUE(collection.most_recent_id().is_null());
+    ASSERT_TRUE(collection.last().is_null());
 }
 
-TEST_F(WalCollectionTests, StartAndAbortSegment)
+TEST_F(WalCollectionTests, AddSegment)
 {
-    collection.start_segment(SegmentId {1});
-    ASSERT_TRUE(collection.is_segment_started());
-    collection.abort_segment();
-    ASSERT_FALSE(collection.is_segment_started());
-    ASSERT_TRUE(collection.most_recent_id().is_null());
-}
-
-TEST_F(WalCollectionTests, StartAndFinishSegment)
-{
-    collection.start_segment(SegmentId {1});
-    ASSERT_TRUE(collection.is_segment_started());
-    collection.finish_segment(false);
-    ASSERT_FALSE(collection.is_segment_started());
-    ASSERT_EQ(collection.most_recent_id(), SegmentId {1});
+    collection.add_segment(SegmentId {1});
+    ASSERT_EQ(collection.last().value, 1);
 }
 
 TEST_F(WalCollectionTests, RecordsMostRecentSegmentId)
 {
     add_segments(20);
-    ASSERT_EQ(collection.most_recent_id(), SegmentId::from_index(19));
+    ASSERT_EQ(collection.last(), SegmentId::from_index(19));
 }
 
 template<class Itr>
-[[nodiscard]]
-auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, SegmentId id, Size n)
+[[nodiscard]] auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, SegmentId id, Size n)
 {
     return std::distance(begin, end) == std::ptrdiff_t(n) && std::all_of(begin, end, [&id](auto current) {
-        return current.value == id.value++;
-    });
+               return current.value == id.value++;
+           });
 }
 
 TEST_F(WalCollectionTests, RecordsSegmentInfoCorrectly)
@@ -479,7 +281,8 @@ TEST_F(WalCollectionTests, RecordsSegmentInfoCorrectly)
 TEST_F(WalCollectionTests, RemovesAllSegmentsFromLeft)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_segments_from_left(SegmentId::from_index(20), [](auto) {return Status::ok();})));
+    // SegmentId::from_index(20) is one past the end.
+    collection.remove_before(SegmentId::from_index(20));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(ids.empty());
@@ -488,7 +291,8 @@ TEST_F(WalCollectionTests, RemovesAllSegmentsFromLeft)
 TEST_F(WalCollectionTests, RemovesAllSegmentsFromRight)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_segments_from_right(SegmentId::from_index(0), [](auto) {return Status::ok();})));
+    // SegmentId::null() is one before the beginning.
+    collection.remove_after(SegmentId::null());
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(ids.empty());
@@ -497,7 +301,7 @@ TEST_F(WalCollectionTests, RemovesAllSegmentsFromRight)
 TEST_F(WalCollectionTests, RemovesSomeSegmentsFromLeft)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_segments_from_left(SegmentId::from_index(10), [](auto) {return Status::ok();})));
+    collection.remove_before(SegmentId::from_index(10));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), SegmentId::from_index(10), 10));
@@ -506,602 +310,884 @@ TEST_F(WalCollectionTests, RemovesSomeSegmentsFromLeft)
 TEST_F(WalCollectionTests, RemovesSomeSegmentsFromRight)
 {
     add_segments(20);
-    ASSERT_TRUE(expose_message(collection.remove_segments_from_right(SegmentId::from_index(10), [](auto) {return Status::ok();})));
+    collection.remove_after(SegmentId::from_index(9));
 
     const auto ids = get_ids(collection);
     ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), SegmentId::from_index(0), 10));
 }
 
-class BackgroundWriterTests: public TestOnDisk {
+class LogReaderWriterTests : public TestWithWalSegmentsOnHeap {
 public:
     static constexpr Size PAGE_SIZE {0x100};
-    static constexpr Size BLOCK_SIZE {PAGE_SIZE * WAL_BLOCK_SCALE};
 
-    BackgroundWriterTests()
-        : scratch {std::make_unique<LogScratchManager>(PAGE_SIZE * WAL_SCRATCH_SCALE)}
+    LogReaderWriterTests()
+        : reader_payload(wal_scratch_size(PAGE_SIZE), '\x00'),
+          reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
+          writer_tail(wal_block_size(PAGE_SIZE), '\x00')
     {}
 
-    auto SetUp() -> void override
+    auto get_reader(SegmentId id) -> LogReader
     {
-        writer = std::make_unique<BackgroundWriter>(BackgroundWriter::Parameters {
-            store.get(),
-            scratch.get(),
-            &collection,
-            &flushed_lsn,
-            ROOT,
-            BLOCK_SIZE,
-        });
+        const auto path = get_segment_name(id);
+        EXPECT_TRUE(expose_message(store->open_random_reader(path, &reader_file)));
+        return LogReader {*reader_file};
     }
 
-    [[nodiscard]]
-    auto get_commit_event(SequenceId lsn)
+    auto get_writer(SegmentId id) -> LogWriter
     {
-        BackgroundWriter::Event event {};
-        event.lsn = lsn;
-        event.type = BackgroundWriter::EventType::LOG_COMMIT;
-        return event;
+        const auto path = get_segment_name(id);
+        EXPECT_TRUE(expose_message(store->open_append_writer(path, &writer_file)));
+        return LogWriter {*writer_file, stob(writer_tail), flushed_lsn};
     }
 
-    [[nodiscard]]
-    auto get_update_event(SequenceId lsn)
+    auto write_string(LogWriter &writer, const std::string &payload) -> void
     {
-        auto event = get_commit_event(lsn);
-        event.type = random.next_int(3) == 0
-                         ? BackgroundWriter::EventType::LOG_FULL_IMAGE
-                         : BackgroundWriter::EventType::LOG_DELTAS;
-        auto buffer = scratch->get();
-        event.size = random.next_int(10ULL, buffer->size());
-        const auto data = random.next_string(event.size);
-        mem_copy(*buffer, stob(data));
-        event.buffer = buffer;
-        return event;
+        ASSERT_TRUE(expose_message(writer.write(++last_lsn, BytesView {payload})));
     }
 
-    WalCollection collection;
-    std::atomic<SequenceId> flushed_lsn;
-    std::unique_ptr<LogScratchManager> scratch;
-    std::unique_ptr<BackgroundWriter> writer;
-    Random random {42};
-};
-
-TEST_F(BackgroundWriterTests, NewWriterState)
-{
-    ASSERT_FALSE(writer->is_running());
-    ASSERT_TRUE(expose_message(writer->next_status()));
-}
-
-TEST_F(BackgroundWriterTests, StartAndStopRepeatedly)
-{
-    // Should be run with TSan every once in a while!
-    for (Size i {}; i < 100; ++i) {
-        writer->startup();
-        writer->teardown();
-        ASSERT_TRUE(expose_message(writer->next_status()));
-    }
-}
-
-TEST_F(BackgroundWriterTests, WriterCleansUp)
-{
-    writer->startup();
-    writer->dispatch(get_update_event(SequenceId::from_index(0)));
-    ASSERT_TRUE(expose_message(writer->next_status()));
-
-    writer->dispatch(BackgroundWriter::Event {
-        BackgroundWriter::EventType::STOP_WRITER,
-        SequenceId::from_index(0),
-        std::nullopt,
-        0,
-    });
-    writer->teardown();
-
-    ASSERT_FALSE(writer->is_running());
-    ASSERT_FALSE(collection.is_segment_started());
-
-    const auto ids = get_ids(collection);
-    ASSERT_EQ(ids.size(), 1);
-    ASSERT_EQ(ids[0].value, 1);
-}
-
-TEST_F(BackgroundWriterTests, WriteUpdates)
-{
-    writer->startup();
-    for (Size i {}; i < 100; ++i) {
-        writer->dispatch(get_update_event(SequenceId::from_index(i)));
-        ASSERT_TRUE(expose_message(writer->next_status()));
-    }
-    writer->teardown();
-
-    const auto ids = get_ids(collection);
-    ASSERT_FALSE(ids.empty());
-}
-
-template<class Reader>
-class LogReaderTests: public TestWithWalSegmentsOnHeap {
-public:
-    static constexpr Size BLOCK_SIZE {4};
-
-    LogReaderTests()
+    auto read_string(LogReader &reader) -> std::string
     {
-        open_and_write_file(*store, get_segment_name(1), "01234567");
-        open_and_write_file(*store, get_segment_name(2), "89012345");
-        open_and_write_file(*store, get_segment_name(3), "67890123");
-        result = "012345678901234567890123";
+        Bytes out {reader_payload};
+        EXPECT_TRUE(expose_message(reader.read(out, Bytes {reader_tail})));
+        return out.to_string();
     }
 
-    ~LogReaderTests() override
+    auto run_basic_test(const std::vector<std::string> &payloads) -> void
     {
-        if (reader.is_attached())
-            delete reader.detach();
-    }
+        auto writer = get_writer(SegmentId {1});
+        auto reader = get_reader(SegmentId {1});
+        for (const auto &payload: payloads) {
+            ASSERT_LE(payload.size(), wal_scratch_size(PAGE_SIZE));
+            write_string(writer, payload);
+        }
+        ASSERT_TRUE(expose_message(writer.flush()));
 
-    auto open_file_and_attach_reader(SegmentId id) -> void
-    {
-        const auto path = get_segment_name(id.value);
-        EXPECT_TRUE(expose_message(store->open_random_reader(path, &file)));
-        EXPECT_TRUE(expose_message(reader.attach(file)));
-    }
-
-    Reader reader {BLOCK_SIZE};
-    std::string result;
-    RandomReader *file {};
-};
-
-class SequentialLogReaderTests: public LogReaderTests<SequentialLogReader> {
-public:
-    SequentialLogReaderTests()
-    {
-        open_file_and_attach_reader(SegmentId {1});
-    }
-};
-
-TEST_F(SequentialLogReaderTests, NewWriterStartsAtBeginning)
-{
-    ASSERT_EQ(reader.position().offset.value, 0);
-    ASSERT_EQ(reader.position().number.value, 0);
-}
-
-TEST_F(SequentialLogReaderTests, OutOfBoundsCursorDeathTest)
-{
-    ASSERT_DEATH(reader.advance_cursor(5), EXPECTATION_MATCHER);
-}
-
-auto randomly_read_from_segment(Random &random, SequentialLogReader &reader) -> std::string
-{
-    std::string out;
-    for (; ; ) {
-        if (reader.remaining().is_empty()) {
-            const auto s = reader.advance_block();
-            if (s.is_logic_error())
-                break;
-            EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
-        } else {
-            const auto n = random.next_int(1ULL, reader.remaining().size());
-            std::string chunk(n, '\x00');
-            mem_copy(stob(chunk), reader.remaining().truncate(n));
-            out += chunk;
-            reader.advance_cursor(n);
+        for (const auto &payload: payloads) {
+            ASSERT_EQ(read_string(reader), payload);
         }
     }
-    return out;
-}
 
-TEST_F(SequentialLogReaderTests, ReadsAndAdvancesWithinSegment)
-{
-    Random random {0};
-    ASSERT_EQ(randomly_read_from_segment(random, reader), result.substr(0, 8));
-}
-
-TEST_F(SequentialLogReaderTests, ReadsAndAdvancesBetweenSegments)
-{
-    Random random {0};
-    auto answer = randomly_read_from_segment(random, reader);
-    open_file_and_attach_reader(SegmentId {2});
-    answer += randomly_read_from_segment(random, reader);
-    open_file_and_attach_reader(SegmentId {3});
-    answer += randomly_read_from_segment(random, reader);
-    ASSERT_EQ(answer, result);
-}
-
-class RandomLogReaderTests: public LogReaderTests<RandomLogReader> {
-public:
-    RandomLogReaderTests()
+    [[nodiscard]] auto get_small_payload() -> std::string
     {
-        open_file_and_attach_reader(SegmentId {1});
-    }
-};
-
-auto append_bytes_at(RandomLogReader &reader, LogPosition position, Size num_bytes, std::string &out)
-{
-    Bytes temp;
-    ASSERT_TRUE(expose_message(reader.present(position, temp)));
-    out.resize(out.size() + num_bytes);
-    mem_copy(stob(out).advance(out.size() - num_bytes), temp.truncate(num_bytes));
-}
-
-TEST_F(RandomLogReaderTests, ReadsRecordsWithinBlock)
-{
-    std::string answer;
-    append_bytes_at(reader, LogPosition {BlockNumber {0}, BlockOffset {0}}, 3, answer);
-    append_bytes_at(reader, LogPosition {BlockNumber {0}, BlockOffset {3}}, 1, answer);
-    ASSERT_EQ(answer, result.substr(0, answer.size()));
-}
-
-TEST_F(RandomLogReaderTests, ReadsRecordsBetweenBlocks)
-{
-    std::string answer;
-    append_bytes_at(reader, LogPosition {BlockNumber {0}, BlockOffset {0}}, 2, answer);
-    append_bytes_at(reader, LogPosition {BlockNumber {0}, BlockOffset {2}}, 2, answer);
-    append_bytes_at(reader, LogPosition {BlockNumber {1}, BlockOffset {0}}, 1, answer);
-    append_bytes_at(reader, LogPosition {BlockNumber {1}, BlockOffset {1}}, 3, answer);
-    ASSERT_EQ(answer, result.substr(0, answer.size()));
-}
-
-class SegmentGuardTests: public TestWithWalSegmentsOnHeap {
-public:
-    static constexpr Size PAGE_SIZE {0x100};
-
-    SegmentGuardTests()
-        : writer {PAGE_SIZE * WAL_BLOCK_SCALE}
-    {}
-
-    [[nodiscard]]
-    auto create_guard() const -> SegmentGuard
-    {
-        return SegmentGuard {*store, ROOT};
+        return random.get<std::string>('a', 'z', wal_scratch_size(PAGE_SIZE) / random.get(10UL, 20UL));
     }
 
-    auto assert_components_are_started() const -> void
+    [[nodiscard]] auto get_large_payload() -> std::string
     {
-        ASSERT_TRUE(collection.is_segment_started());
-        ASSERT_TRUE(writer.is_attached());
+        return random.get<std::string>('a', 'z', 2 * wal_scratch_size(PAGE_SIZE) / random.get(2UL, 4UL));
     }
 
-    auto assert_components_are_stopped() const -> void
-    {
-        ASSERT_FALSE(collection.is_segment_started());
-        ASSERT_FALSE(writer.is_attached());
-    }
-
-    WalCollection collection;
-    WalRecordWriter writer;
-    std::atomic<SequenceId> flushed_lsn;
-};
-
-TEST_F(SegmentGuardTests, NewGuardIsNotStarted)
-{
-    auto guard = create_guard();
-    ASSERT_FALSE(guard.is_started());
-    assert_components_are_stopped();
-}
-
-TEST_F(SegmentGuardTests, StartAndFinish)
-{
-    auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
-    ASSERT_TRUE(guard.is_started());
-    assert_components_are_started();
-
-    ASSERT_TRUE(expose_message(guard.finish(false)));
-    ASSERT_FALSE(guard.is_started());
-    assert_components_are_stopped();
-
-    ASSERT_EQ(collection.info().size(), 1);
-    const auto segment = cbegin(collection.info());
-    ASSERT_EQ(segment->id.value, 1);
-    ASSERT_FALSE(segment->has_commit);
-}
-
-TEST_F(SegmentGuardTests, StartAndFinishWithCommit)
-{
-    auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
-    ASSERT_TRUE(expose_message(guard.finish(true)));
-
-    ASSERT_EQ(collection.info().size(), 1);
-    const auto segment = cbegin(collection.info());
-    ASSERT_EQ(segment->id.value, 1);
-    ASSERT_TRUE(segment->has_commit);
-}
-
-TEST_F(SegmentGuardTests, BehavesLikeScopeGuard)
-{
-    {
-        auto guard = create_guard();
-        ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
-    }
-
-    assert_components_are_stopped();
-    ASSERT_TRUE(collection.info().empty());
-}
-
-TEST_F(SegmentGuardTests, DoubleStartDeathTest)
-{
-    auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
-    ASSERT_DEATH(const auto unused = guard.start(writer, collection, flushed_lsn), EXPECTATION_MATCHER);
-}
-
-TEST_F(SegmentGuardTests, DoubleFinishDeathTest)
-{
-    auto guard = create_guard();
-    ASSERT_TRUE(expose_message(guard.start(writer, collection, flushed_lsn)));
-    ASSERT_TRUE(expose_message(guard.finish(true)));
-    ASSERT_DEATH(const auto unused = guard.finish(true), EXPECTATION_MATCHER);
-}
-
-TEST_F(SegmentGuardTests, NotStartedDeathTest)
-{
-    auto guard = create_guard();
-    ASSERT_DEATH(const auto unused = guard.abort(), EXPECTATION_MATCHER);
-    ASSERT_DEATH(const auto unused = guard.finish(true), EXPECTATION_MATCHER);
-}
-
-class BasicWalReaderWriterTests: public TestWithWalSegmentsOnHeap {
-public:
-    static constexpr Size PAGE_SIZE {0x100};
-    static constexpr Size BLOCK_SIZE {PAGE_SIZE * WAL_BLOCK_SCALE};
-
-    BasicWalReaderWriterTests()
-        : scratch {std::make_unique<LogScratchManager>(PAGE_SIZE * WAL_SCRATCH_SCALE)}
-    {}
-
-    auto SetUp() -> void override
-    {
-        reader = std::make_unique<BasicWalReader>(
-            *store,
-            ROOT,
-            PAGE_SIZE
-        );
-
-        writer = std::make_unique<BasicWalWriter>(BasicWalWriter::Parameters {
-            store.get(),
-            &collection,
-            &flushed_lsn,
-            ROOT,
-            PAGE_SIZE,
-            128,
-        });
-    }
-
-    WalCollection collection;
     std::atomic<SequenceId> flushed_lsn {};
-    std::unique_ptr<LogScratchManager> scratch;
-    std::unique_ptr<BasicWalReader> reader;
-    std::unique_ptr<BasicWalWriter> writer;
-    Random random {42};
+    std::string reader_payload;
+    std::string reader_tail;
+    std::string writer_tail;
+    RandomReader *reader_file {};
+    AppendWriter *writer_file {};
+    SequenceId last_lsn;
+    Random random {internal::random_seed};
 };
 
-TEST_F(BasicWalReaderWriterTests, NewWriterIsOk)
+TEST_F(LogReaderWriterTests, DoesNotFlushEmptyBlock)
 {
-    ASSERT_TRUE(writer->next_status().is_ok());
+    auto writer = get_writer(SegmentId {1});
+    ASSERT_TRUE(writer.flush().is_logic_error());
+
+    Size file_size {};
+    ASSERT_TRUE(expose_message(store->file_size("test/wal-000001", file_size)));
+    ASSERT_EQ(file_size, 0);
 }
 
-TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
+TEST_F(LogReaderWriterTests, WritesMultipleBlocks)
 {
-    // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
-    static constexpr Size NUM_RECORDS {100};
-    WalRecordGenerator generator;
-    std::vector<std::vector<PageDelta>> deltas;
-    std::vector<std::string> images;
+    auto writer = get_writer(SegmentId {1});
+    write_string(writer, get_large_payload());
+    ASSERT_TRUE(expose_message(writer.flush()));
 
-    writer->start();
-    for (Size i {}; i < NUM_RECORDS; ++i) {
-        images.emplace_back(random.next_string(PAGE_SIZE));
-        deltas.emplace_back(generator.setup_deltas(stob(images.back())));
-        writer->log_deltas(PageId::root(), stob(images.back()), deltas[i]);
-    }
-    // close() should cause the writer to flush the current block.
-    writer->stop();
-
-    std::vector<RecordPosition> positions;
-    ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
-
-    Size i {};
-    ASSERT_TRUE(expose_message(reader->redo(positions, [deltas, &i, images](const RedoDescriptor &descriptor) {
-        auto lhs = cbegin(descriptor.deltas);
-        auto rhs = cbegin(deltas[i]);
-        for (; rhs != cend(deltas[i]); ++lhs, ++rhs) {
-            EXPECT_NE(lhs, cend(descriptor.deltas));
-            EXPECT_TRUE(lhs->data == stob(images[i]).range(rhs->offset, rhs->size));
-            EXPECT_EQ(lhs->offset, rhs->offset);
-        }
-        i++;
-        return Status::ok();
-    })));
-
-    ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
+    Size file_size {};
+    ASSERT_TRUE(expose_message(store->file_size("test/wal-000001", file_size)));
+    ASSERT_EQ(file_size % writer_tail.size(), 0);
+    ASSERT_GT(file_size / writer_tail.size(), 0);
 }
 
-TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
+TEST_F(LogReaderWriterTests, SingleSmallPayload)
 {
-    // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
-    static constexpr Size NUM_RECORDS {100};
-    std::vector<std::string> images;
-
-    writer->start();
-    for (Size i {}; i < NUM_RECORDS; ++i) {
-        images.emplace_back(random.next_string(PAGE_SIZE));
-        writer->log_full_image(PageId::from_index(i), stob(images.back()));
-    }
-    writer->stop();
-
-    std::vector<RecordPosition> positions;
-    ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
-
-    ASSERT_TRUE(expose_message(reader->redo(positions, [](const auto&) {
-        ADD_FAILURE() << "This should not be called";
-        return Status::logic_error("Logic error!");
-    })));
-
-    Size i {};
-    ASSERT_TRUE(expose_message(reader->undo(crbegin(positions), crend(positions), [&i, images](const UndoDescriptor &descriptor) {
-        const auto n = NUM_RECORDS - i - 1;
-        EXPECT_EQ(descriptor.page_id, n + 1);
-        EXPECT_TRUE(descriptor.image == stob(images[n]));
-        i++;
-        return Status::ok();
-    })));
-
-    ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
+    run_basic_test({get_small_payload()});
 }
 
-auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_deltas)
+TEST_F(LogReaderWriterTests, MultipleSmallPayloads)
 {
-    const auto deltas_per_image = num_deltas / num_images;
+    run_basic_test({
+        get_small_payload(),
+        get_small_payload(),
+        get_small_payload(),
+        get_small_payload(),
+        get_small_payload(),
+    });
+}
 
-    std::vector<std::string> before_images;
-    std::vector<std::string> after_images;
-    WalRecordGenerator generator;
+TEST_F(LogReaderWriterTests, SingleLargePayload)
+{
+    run_basic_test({get_large_payload()});
+}
 
-    auto &reader = test.reader;
-    auto &writer = test.writer;
-    auto &random = test.random;
-    auto &collection = test.collection;
+TEST_F(LogReaderWriterTests, MultipleLargePayloads)
+{
+    run_basic_test({
+        get_large_payload(),
+        get_large_payload(),
+        get_large_payload(),
+        get_large_payload(),
+        get_large_payload(),
+    });
+}
 
-    writer->start();
-    for (Size i {}; i < num_images; ++i) {
-        auto pid = PageId::from_index(i);
+TEST_F(LogReaderWriterTests, MultipleMixedPayloads)
+{
+    run_basic_test({
+        get_small_payload(),
+        get_large_payload(),
+        get_small_payload(),
+        get_large_payload(),
+        get_small_payload(),
+    });
+}
 
-        before_images.emplace_back(random.next_string(BasicWalReaderWriterTests::PAGE_SIZE));
-        writer->log_full_image(pid, stob(before_images.back()));
+TEST_F(LogReaderWriterTests, SanityCheck)
+{
+    std::vector<std::string> payloads(1'000);
+    std::generate(begin(payloads), end(payloads), [this] {
+        return random.get(4) ? get_small_payload() : get_large_payload();
+    });
+    run_basic_test(payloads);
+}
 
-        after_images.emplace_back(before_images.back());
-        for (Size j {}; j < deltas_per_image; ++j) {
-            const auto deltas = generator.setup_deltas(stob(after_images.back()));
-            writer->log_deltas(pid, stob(after_images.back()), deltas);
+TEST_F(LogReaderWriterTests, HandlesEarlyFlushes)
+{
+    std::vector<std::string> payloads(1'000);
+    std::generate(begin(payloads), end(payloads), [this] {
+        return random.get(4) ? get_small_payload() : get_large_payload();
+    });
+
+    auto writer = get_writer(SegmentId {1});
+    auto reader = get_reader(SegmentId {1});
+    for (const auto &payload: payloads) {
+        ASSERT_LE(payload.size(), wal_scratch_size(PAGE_SIZE));
+        write_string(writer, payload);
+        if (random.get(10) == 0) {
+            auto s = writer.flush();
+            ASSERT_TRUE(s.is_ok() or s.is_logic_error());
         }
     }
-    writer->stop();
+    ASSERT_TRUE(expose_message(writer.flush()));
 
-    // Roll forward some copies of the "before images" to match the "after images".
-    std::vector<std::vector<RecordPosition>> all_positions;
-    auto images = before_images;
-    for (const auto &[id, meta]: collection.info()) {
-        all_positions.emplace_back();
-        ASSERT_TRUE(expose_message(reader->open(id)));
-        ASSERT_TRUE(expose_message(reader->redo(all_positions.back(), [&images](const RedoDescriptor &info) {
-            auto image = stob(images.at(info.page_id - 1));
-            for (const auto &[offset, content]: info.deltas)
-                mem_copy(image.range(offset, content.size()), content);
-            return Status::ok();
-        })));
-        ASSERT_TRUE(expose_message(reader->close()));
-    }
-
-    // Image copies should match the "after images".
-    for (Size i {}; i < images.size(); ++i) {
-        ASSERT_EQ(images.at(i), after_images.at(i));
-    }
-
-    // Now roll them back to match the before images again.
-    for (auto itr = crbegin(all_positions); itr != crend(all_positions); ++itr) {
-        // Segment ID should be the same for each record position within each group.
-        ASSERT_TRUE(expose_message(reader->open(itr->begin()->id)));
-        ASSERT_TRUE(expose_message(reader->undo(crbegin(*itr), crend(*itr), [&images](const auto &info) {
-            const auto index = info.page_id - 1;
-            mem_copy(stob(images[index]), info.image);
-            return Status::ok();
-        })));
-        ASSERT_TRUE(expose_message(reader->close()));
-    }
-
-    for (Size i {}; i < images.size(); ++i) {
-        ASSERT_EQ(images.at(i), before_images.at(i));
+    for (const auto &payload: payloads) {
+        ASSERT_EQ(read_string(reader), payload);
     }
 }
 
-TEST_F(BasicWalReaderWriterTests, SingleImage)
-{
-    // This situation should not happen in practice, but we technically should be able to handle it.
-    test_undo_redo(*this, 1, 0);
-}
-
-TEST_F(BasicWalReaderWriterTests, SingleImageSingleDelta)
-{
-    test_undo_redo(*this, 1, 1);
-}
-
-TEST_F(BasicWalReaderWriterTests, SingleImageManyDeltas)
-{
-    test_undo_redo(*this, 1, 100);
-}
-
-TEST_F(BasicWalReaderWriterTests, ManyImagesManyDeltas)
-{
-    test_undo_redo(*this, 100, 1'000);
-}
-
-//TEST_F(BasicWalReaderWriterTests, ManyManyImagesManyManyDeltas)
-//{
-//    test_undo_redo(*this, 10'000, 1'000'000);
-//}
-
-class MockWalReaderWriterTests: public BasicWalReaderWriterTests {
+class WalWriterTests : public TestWithWalSegmentsOnHeap {
 public:
     static constexpr Size PAGE_SIZE {0x100};
+    static constexpr Size WAL_LIMIT {8};
 
-    MockWalReaderWriterTests()
+    WalWriterTests()
+        : scratch {wal_scratch_size(PAGE_SIZE)},
+          tail(wal_block_size(PAGE_SIZE), '\x00')
     {
-        scratch = std::make_unique<LogScratchManager>(PAGE_SIZE * WAL_SCRATCH_SCALE);
-        store = std::make_unique<MockStorage>();
-        mock_store().delegate_to_real();
-        EXPECT_CALL(mock_store(), open_append_writer).Times(testing::AtLeast(1));
-        EXPECT_CALL(mock_store(), create_directory).Times(1);
-        EXPECT_TRUE(expose_message(store->create_directory("test")));
+        writer.emplace(
+            *store,
+            collection,
+            scratch,
+            Bytes {tail},
+            flushed_lsn,
+            PREFIX,
+            WAL_LIMIT);
     }
 
-    auto mock_store() -> MockStorage&
-    {
-        return dynamic_cast<MockStorage&>(*store);
-    }
+    ~WalWriterTests() override = default;
 
-    auto open_mock_segment(SegmentId id) -> void
-    {
-        auto &mock_store = dynamic_cast<MockStorage&>(*store);
-        mock = mock_store.get_mock_append_writer("test/" + id.to_name());
-        ASSERT_NE(mock, nullptr);
-    }
-
-    MockAppendWriter *mock {};
+    WalCollection collection;
+    LogScratchManager scratch;
+    std::atomic<SequenceId> flushed_lsn {};
+    std::optional<WalWriter> writer;
+    std::string tail;
+    Random random {internal::random_seed};
 };
 
-//[[nodiscard]]
-//auto next_deltas(WalRecordGenerator &generator, Random &random, std::string &image, Size page_size)
-//{
-//    image = random.next_string(page_size);
-//    return generator.setup_deltas(stob(image));
-//}
+TEST_F(WalWriterTests, OpenAndDestroy)
+{
+    ASSERT_TRUE(expose_message(writer->open()));
+    ASSERT_TRUE(expose_message(writer->status()));
+    ASSERT_TRUE(expose_message(std::move(*writer).destroy()));
+}
 
-// TODO: Can't immediately get the mock file since the writer won't create its version immediately...
-//TEST_F(MockWalReaderWriterTests, WriterCleansUpOnError)
-//{
-//    writer->start();
-//    open_mock_segment(SegmentId {1});
-//    EXPECT_CALL(*mock, write).Times(testing::AtLeast(1));
-//    EXPECT_CALL(mock_store(), remove_file).Times(1); // No writes succeed in this test, so the empty segment file should be removed.
-//    ON_CALL(*mock, write).WillByDefault(testing::Return(Status::system_error("42")));
+TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterNormalClose)
+{
+    ASSERT_TRUE(expose_message(writer->open()));
+
+    // After the writer closes a segment file, it will either add it to the set of segment files, or it
+    // will delete it. Empty segments get deleted, while nonempty segments get added.
+    writer->advance();
+    writer->advance();
+    writer->advance();
+
+    // Blocks until the last segment is deleted.
+    ASSERT_TRUE(expose_message(std::move(*writer).destroy()));
+    ASSERT_TRUE(collection.segments().empty());
+
+    std::vector<std::string> children;
+    ASSERT_TRUE(expose_message(store->get_children(ROOT, children)));
+    ASSERT_TRUE(children.empty());
+}
+
+template<class Test>
+static auto test_write_until_failure(Test &test) -> void
+{
+    auto s = test.writer->open();
+    if (!s.is_ok()) {
+        assert_error_42(s);
+        return;
+    }
+
+    while (test.writer->status().is_ok()) {
+        auto payload = test.scratch.get();
+        const auto size = test.random.get(1UL, payload->size());
+        payload->truncate(size);
+        test.writer->write(SequenceId {1}, payload);
+    }
+
+    // Blocks until the last segment is deleted.
+    assert_error_42(std::move(*test.writer).destroy());
+}
+
+template<class Test>
+static auto count_segments(Test &test) -> Size
+{
+    const auto expected = test.collection.segments().size();
+
+    std::vector<std::string> children;
+    EXPECT_TRUE(expose_message(test.store->get_children(Test::ROOT, children)));
+    EXPECT_EQ(children.size(), expected);
+    return expected;
+}
+
+TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterOpenFailure)
+{
+    interceptors::set_open(FailAfter<0> {"test/wal-"});
+    test_write_until_failure(*this);
+    ASSERT_EQ(count_segments(*this), 0);
+}
+
+TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterWriteFailure)
+{
+    interceptors::set_write(FailAfter<0> {"test/wal-"});
+    test_write_until_failure(*this);
+    ASSERT_EQ(count_segments(*this), 0);
+}
+
+TEST_F(WalWriterTests, LeavesSingleNonEmptySegmentAfterOpenFailure)
+{
+    interceptors::set_open(FailAfter<1> {"test/wal-"});
+    test_write_until_failure(*this);
+    ASSERT_EQ(count_segments(*this), 1);
+}
+
+TEST_F(WalWriterTests, LeavesSingleNonEmptySegmentAfterWriteFailure)
+{
+    interceptors::set_write(FailAfter<WAL_LIMIT / 2> {"test/wal-"});
+    test_write_until_failure(*this);
+    ASSERT_EQ(count_segments(*this), 1);
+}
+
+TEST_F(WalWriterTests, LeavesMultipleNonEmptySegmentsAfterOpenFailure)
+{
+    interceptors::set_open(FailAfter<10> {"test/wal-"});
+    test_write_until_failure(*this);
+    ASSERT_EQ(count_segments(*this), 10);
+}
+
+TEST_F(WalWriterTests, LeavesMultipleNonEmptySegmentsAfterWriteFailure)
+{
+    interceptors::set_write(FailAfter<WAL_LIMIT * 10> {"test/wal-"});
+    test_write_until_failure(*this);
+    ASSERT_GT(count_segments(*this), 2);
+}
+
+class WalReaderWriterTests : public TestWithWalSegmentsOnHeap {
+public:
+    static constexpr Size PAGE_COUNT {32};
+    static constexpr Size PAGE_SIZE {0x100};
+    static constexpr Size WAL_LIMIT {8};
+
+    WalReaderWriterTests()
+        : images(PAGE_COUNT),
+          scratch {wal_scratch_size(PAGE_SIZE)},
+          reader_data(wal_scratch_size(PAGE_SIZE), '\x00'),
+          reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
+          writer_tail(wal_block_size(PAGE_SIZE), '\x00')
+    {
+        std::generate(begin(images), end(images), [this] {
+            return random.get<std::string>('a', 'z', PAGE_SIZE);
+        });
+        committed = images;
+        has_full_image.resize(images.size());
+    }
+
+    ~WalReaderWriterTests() override = default;
+
+    [[nodiscard]]
+    auto get_reader() -> WalReader
+    {
+        return WalReader {
+            *store,
+            collection,
+            PREFIX,
+            Bytes {reader_tail},
+            Bytes {reader_data}};
+    }
+
+    [[nodiscard]]
+    auto get_writer() -> WalWriter
+    {
+        return WalWriter {
+            *store,
+            collection,
+            scratch,
+            Bytes {writer_tail},
+            flushed_lsn,
+            PREFIX,
+            WAL_LIMIT};
+    }
+
+    [[nodiscard]]
+    auto get_image(SequenceId lsn, PageId id) -> NamedScratch
+    {
+        EXPECT_LT(id.as_index(), PAGE_COUNT);
+        auto payload = scratch.get();
+        const auto size = encode_full_image_payload(lsn, id, Bytes {images[id.as_index()]}, *payload);
+        payload->truncate(size);
+        return payload;
+    }
+
+    [[nodiscard]]
+    auto get_deltas(SequenceId lsn, PageId id) -> NamedScratch
+    {
+        EXPECT_LT(id.as_index(), PAGE_COUNT);
+        auto deltas = generator.setup_deltas(Bytes {images[id.as_index()]});
+        auto payload = scratch.get();
+        const auto size = encode_deltas_payload(lsn, id, images[id.as_index()], deltas, *payload);
+        payload->truncate(size);
+        return payload;
+    }
+
+    [[nodiscard]]
+    auto get_commit(SequenceId lsn) -> NamedScratch
+    {
+        auto payload = scratch.get();
+        const auto size = encode_commit_payload(lsn, *payload);
+        payload->truncate(size);
+        return payload;
+    }
+
+    [[nodiscard]]
+    auto emit_segments(Size num_writes, Size commit_interval = 0)
+    {
+        auto writer = get_writer();
+        auto s = writer.open();
+        if (!s.is_ok()) return s;
+
+        SequenceId lsn;
+        for (Size i {}; i < num_writes && writer.status().is_ok(); ++i) {
+            const auto n = random.get(PAGE_COUNT - 1UL);
+            const auto id = PageId::from_index(n);
+            if (has_full_image[n]) {
+                ++lsn;
+                writer.write(lsn, get_deltas(lsn, id));
+            } else {
+                ++lsn;
+                writer.write(lsn, get_image(lsn, id));
+                has_full_image[n] = true;
+            }
+            // Simulate a commit. We've been modifying the images when generating delta records, so we'll just save our
+            // state at this point.
+            if (commit_interval && !lsn.is_null() && lsn.as_index() % commit_interval == 0) {
+                committed = images;
+                commit_lsn = ++lsn;
+                std::fill(begin(has_full_image), end(has_full_image), false);
+                writer.write(lsn, get_commit(lsn));
+                writer.advance();
+            }
+        }
+        return std::move(writer).destroy();
+    }
+
+    auto assert_images_match(const std::vector<std::string> &lhs, const std::vector<std::string> &rhs) const -> void
+    {
+        auto itr = cbegin(lhs);
+        for (const auto &image: rhs) {
+            CALICO_EXPECT_NE(itr, cend(lhs));
+            ASSERT_EQ(image, *itr++);
+        }
+    }
+
+    [[nodiscard]]
+    auto contains_sequence(WalReader &reader, SequenceId last_lsn) -> Status
+    {
+        auto s = Status::ok();
+        SequenceId lsn;
+        // Roll forward to the end of the WAL.
+        while (s.is_ok()) {
+            s = reader.roll([&](const PayloadDescriptor &info) {
+                SequenceId next_lsn;
+                if (std::holds_alternative<DeltasDescriptor>(info)) {
+                    const auto deltas = std::get<DeltasDescriptor>(info);
+                    next_lsn = deltas.lsn;
+                } else if (std::holds_alternative<FullImageDescriptor>(info)) {
+                    const auto image = std::get<FullImageDescriptor>(info);
+                    next_lsn = image.lsn;
+                } else if (std::holds_alternative<CommitDescriptor>(info)) {
+                    const auto image = std::get<CommitDescriptor>(info);
+                    next_lsn = image.lsn;
+                }
+                EXPECT_EQ(++lsn, next_lsn);
+                return Status::ok();
+            });
+            if (!s.is_ok()) break;
+            s = reader.seek_next();
+            if (s.is_not_found()) {
+                EXPECT_EQ(lsn, last_lsn);
+                return Status::ok();
+            } else if (!s.is_ok()) {
+                break;
+            }
+        }
+        return s;
+    }
+
+    [[nodiscard]]
+    auto roll_segments_forward(WalReader &reader, std::vector<std::string> &snapshots) -> Status
+    {
+        auto s = Status::ok();
+        // Roll forward to the end of the WAL.
+        while (s.is_ok()) {
+            s = reader.roll([&](const PayloadDescriptor &info) {
+                if (std::holds_alternative<DeltasDescriptor>(info)) {
+                    const auto deltas = std::get<DeltasDescriptor>(info);
+                    for (const auto &delta: deltas.deltas)
+                        mem_copy(Bytes {snapshots[deltas.pid.as_index()]}.range(delta.offset), delta.data);
+                } else if (std::holds_alternative<FullImageDescriptor>(info)) {
+                    const auto image = std::get<FullImageDescriptor>(info);
+                    // We shouldn't have encountered this page yet.
+                    EXPECT_EQ(image.image.to_string(), snapshots[image.pid.as_index()]);
+                }
+                return Status::ok();
+            });
+            if (!s.is_ok()) break;
+            s = reader.seek_next();
+            if (s.is_not_found()) {
+                return Status::ok();
+            } else if (!s.is_ok()) {
+                break;
+            }
+        }
+        return s;
+    }
+
+    [[nodiscard]]
+    auto roll_segments_backward(WalReader &reader, std::vector<std::string> &snapshots) -> Status
+    {
+        auto s = Status::ok();
+        // Roll back to the most-recent commit.
+        for (Size i {}; s.is_ok(); ++i) {
+
+            SequenceId first_lsn;
+            s = reader.read_first_lsn(first_lsn);
+            if (!s.is_ok()) return s;
+
+            if (first_lsn < commit_lsn)
+                break;
+
+            s = reader.roll([&](const PayloadDescriptor &info) {
+                if (std::holds_alternative<CommitDescriptor>(info)) {
+                    CALICO_EXPECT_TRUE(false);
+                    return Status::not_found("should not have hit a commit record");
+                } else if (std::holds_alternative<FullImageDescriptor>(info)) {
+                    const auto image = std::get<FullImageDescriptor>(info);
+                    mem_copy(snapshots[image.pid.as_index()], image.image);
+                } else if (std::holds_alternative<DeltasDescriptor>(info)) {
+                    const auto deltas = std::get<DeltasDescriptor>(info);
+                }
+                return Status::ok();
+            });
+            if (!s.is_ok()) {
+                if (!s.is_corruption() || i)
+                    break;
+            }
+            s = reader.seek_previous();
+            if (s.is_not_found()) {
+                return Status::ok();
+            } else if (!s.is_ok()) {
+                break;
+            }
+        }
+        return s;
+    }
+
+    SequenceId commit_lsn;
+    std::vector<std::string> committed;
+    std::vector<std::string> images;
+    std::vector<int> has_full_image;
+    WalRecordGenerator generator;
+    WalCollection collection;
+    LogScratchManager scratch;
+    std::atomic<SequenceId> flushed_lsn {};
+    std::string reader_data;
+    std::string reader_tail;
+    std::string writer_tail;
+    Random random {internal::random_seed};
+};
+
+static auto does_not_lose_records_test(WalReaderWriterTests &test, Size num_writes)
+{
+    ASSERT_TRUE(expose_message(test.emit_segments(num_writes)));
+
+    auto reader = test.get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(test.contains_sequence(reader, SequenceId {num_writes})));
+}
+
+TEST_F(WalReaderWriterTests, DoesNotLoseRecordWithinSegment)
+{
+    does_not_lose_records_test(*this, 3);
+}
+
+TEST_F(WalReaderWriterTests, DoesNotLoseRecordsAcrossSegments)
+{
+    does_not_lose_records_test(*this, 5'000);
+}
+
+static auto roll_forward_test(WalReaderWriterTests &test, Size num_writes)
+{
+    auto snapshots = test.images;
+    ASSERT_TRUE(expose_message(test.emit_segments(num_writes)));
+
+    auto reader = test.get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(test.roll_segments_forward(reader, snapshots)));
+    test.assert_images_match(snapshots, test.images);
+}
+
+TEST_F(WalReaderWriterTests, RollForwardWithinSegment)
+{
+    roll_forward_test(*this, 3);
+}
+
+TEST_F(WalReaderWriterTests, RollForwardAcrossSegments)
+{
+    roll_forward_test(*this, 5'000);
+}
+
+static auto roll_backward_test(WalReaderWriterTests &test, Size num_writes)
+{
+    auto snapshots = test.images;
+    ASSERT_TRUE(expose_message(test.emit_segments(num_writes)));
+
+    auto reader = test.get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(test.roll_segments_forward(reader, snapshots)));
+    test.assert_images_match(snapshots, test.images);
+    ASSERT_TRUE(expose_message(test.roll_segments_backward(reader, snapshots)));
+    test.assert_images_match(snapshots, test.committed);
+}
+
+TEST_F(WalReaderWriterTests, RollBackwardWithinSegment)
+{
+    roll_backward_test(*this, 3);
+}
+
+TEST_F(WalReaderWriterTests, RollBackwardAcrossSegments)
+{
+    roll_backward_test(*this, 5'000);
+}
+
+TEST_F(WalReaderWriterTests, RunsTransactionsNormally)
+{
+    auto snapshots = images;
+    ASSERT_TRUE(expose_message(emit_segments(5000, 100)));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
+    assert_images_match(snapshots, images);
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+    assert_images_match(snapshots, committed);
+}
+
+TEST_F(WalReaderWriterTests, CommitIsCheckpoint)
+{
+    auto snapshots = images;
+
+    // Should commit after the last write.
+    ASSERT_TRUE(expose_message(emit_segments(200, 99)));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
+    assert_images_match(snapshots, images);
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+    assert_images_match(snapshots, images);
+    assert_images_match(images, committed);
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterWriteError)
+{
+    interceptors::set_write(FailOnce<10> {"test/wal-"});
+
+    auto snapshots = images;
+    assert_error_42(emit_segments(5'000));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    auto s = roll_segments_forward(reader, snapshots);
+
+    // The writer may have failed in the middle of writing a record (FIRST is written but LAST is in the tail buffer)
+    // still. In this case, we'll get a corruption error during the forward pass.
+    ASSERT_TRUE(s.is_corruption() or s.is_ok());
+
+    // We should be able to roll back any changes we have made to the snapshots.
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+}
+
+TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
+{
+    interceptors::set_open(FailOnce<3> {"test/wal-"});
+
+    auto snapshots = images;
+    assert_error_42(emit_segments(5'000));
+
+    auto reader = get_reader();
+    ASSERT_TRUE(expose_message(reader.open()));
+    auto s = roll_segments_forward(reader, snapshots);
+
+    // The writer may have failed in the middle of writing a record (FIRST is written but LAST is in the tail buffer)
+    // still. In this case, we'll get a corruption error during the forward pass.
+    ASSERT_TRUE(s.is_corruption() or s.is_ok());
+
+    // We should be able to roll back any changes we have made to the snapshots.
+    ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
+}
+
 //
-//    // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
-//    WalRecordGenerator generator;
-//    std::vector<std::vector<PageDelta>> deltas;
-//    std::vector<std::string> images;
+//class BasicWalReaderWriterTests: public TestWithWalSegmentsOnHeap {
+//public:
+//    static constexpr Size PAGE_SIZE {0x100};
+//    static constexpr Size BLOCK_SIZE {PAGE_SIZE * WAL_BLOCK_SCALE};
 //
-//    for (Size i {}; ; ++i) {
-//        images.emplace_back();
-//        deltas.emplace_back(next_deltas(generator, random, images.back(), PAGE_SIZE));
-//        writer->log_deltas(SequenceId::base(), PageId::root(), stob(images.back()), deltas[i]);
-//        if (!writer->status().is_ok()) break;
+//    BasicWalReaderWriterTests()
+//        : scratch {std::make_unique<LogScratchManager>(PAGE_SIZE * WAL_SCRATCH_SCALE)}
+//    {}
+//
+//    auto SetUp() -> void override
+//    {
+//        reader = std::make_unique<BasicWalReader>(
+//            *store,
+//            ROOT,
+//            PAGE_SIZE
+//        );
+//
+//        writer = std::make_unique<BasicWalWriter>(BasicWalWriter::Parameters {
+//            store.get(),
+//            &collection,
+//            &flushed_lsn,
+//            create_logger(create_sink(), "wal"),
+//            ROOT,
+//            PAGE_SIZE,
+//            128,
+//        });
 //    }
-//    ASSERT_FALSE(writer->is_running());
-//    ASSERT_TRUE(writer->status().is_system_error());
-//    ASSERT_EQ(writer->status().what(), "42");
 //
-//    // NOOP if already closed.
+//    WalCollection collection;
+//    std::atomic<SequenceId> flushed_lsn {};
+//    std::unique_ptr<LogScratchManager> scratch;
+//    std::unique_ptr<BasicWalReader> reader;
+//    std::unique_ptr<BasicWalWriter> writer;
+//    Random random {internal::random_seed};
+//};
+//
+//TEST_F(BasicWalReaderWriterTests, NewWriterIsOk)
+//{
+//    ASSERT_TRUE(writer->status().is_ok());
 //    writer->stop();
 //}
 
+template<class Test>
+auto generate_images(Test &test, Size page_size, Size n)
+{
+    std::vector<std::string> images;
+    std::generate_n(back_inserter(images), n, [&test, page_size] {
+        return test.random.template get<std::string>('\x00', '\xFF', page_size);
+    });
+    return images;
+}
+//
+//auto generate_deltas(std::vector<std::string> &images)
+//{
+//    WalRecordGenerator generator;
+//    std::vector<std::vector<PageDelta>> deltas;
+//    for (auto &image: images)
+//        deltas.emplace_back(generator.setup_deltas(stob(image)));
+//    return deltas;
+//}
+//
+//TEST_F(BasicWalReaderWriterTests, WritesAndReadsDeltasNormally)
+//{
+//    // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
+//    static constexpr Size NUM_RECORDS {100};
+//    auto images = generate_images(*this, PAGE_SIZE, NUM_RECORDS);
+//    auto deltas = generate_deltas(images);
+//    for (Size i {}; i < NUM_RECORDS; ++i)
+//        writer->log_deltas(PageId::root(), stob(images[i]), deltas[i]);
+//
+//    // close() should cause the writer to flush the current block.
+//    writer->stop();
+//
+//    ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
+//
+//    Size i {};
+//    ASSERT_TRUE(expose_message(reader->redo([deltas, &i, images](const RedoDescriptor &descriptor) {
+//        auto lhs = cbegin(descriptor.deltas);
+//        auto rhs = cbegin(deltas[i]);
+//        for (; rhs != cend(deltas[i]); ++lhs, ++rhs) {
+//            EXPECT_NE(lhs, cend(descriptor.deltas));
+//            EXPECT_TRUE(lhs->data == stob(images[i]).range(rhs->offset, rhs->size));
+//            EXPECT_EQ(lhs->offset, rhs->offset);
+//        }
+//        i++;
+//        return Status::ok();
+//    })));
+//    ASSERT_EQ(i, images.size());
+//    ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
+//}
+//
+//TEST_F(BasicWalReaderWriterTests, WritesAndReadsFullImagesNormally)
+//{
+//    // NOTE: This test doesn't handle segmentation. If the writer segments, the test will fail!
+//    static constexpr Size NUM_RECORDS {100};
+//    auto images = generate_images(*this, PAGE_SIZE, NUM_RECORDS);
+//
+//    for (Size i {}; i < NUM_RECORDS; ++i)
+//        writer->log_full_image(PageId::from_index(i), stob(images[i]));
+//    writer->stop();
+//
+//    ASSERT_TRUE(expose_message(reader->open(SegmentId {1})));
+//    ASSERT_TRUE(expose_message(reader->redo([](const auto&) {
+//        ADD_FAILURE() << "This should not be called";
+//        return Status::logic_error("Logic error!");
+//    })));
+//
+//    Size i {};
+//    ASSERT_TRUE(expose_message(reader->undo([&i, images](const UndoDescriptor &descriptor) {
+//        EXPECT_EQ(descriptor.page_id, i + 1);
+//        EXPECT_TRUE(descriptor.image == stob(images[i]));
+//        i++;
+//        return Status::ok();
+//    })));
+//    ASSERT_EQ(i, images.size());
+//    ASSERT_EQ(get_segment_size(0UL) % BLOCK_SIZE, 0);
+//}
+//
+//auto test_undo_redo(BasicWalReaderWriterTests &test, Size num_images, Size num_deltas)
+//{
+//    const auto deltas_per_image = num_deltas / num_images;
+//
+//    std::vector<std::string> before_images;
+//    std::vector<std::string> after_images;
+//    WalRecordGenerator generator;
+//
+//    auto &reader = test.reader;
+//    auto &writer = test.writer;
+//    auto &random = test.random;
+//    auto &collection = test.collection;
+//
+//    for (Size i {}; i < num_images; ++i) {
+//        auto pid = PageId::from_index(i);
+//
+//        before_images.emplace_back(random.get<std::string>('\x00', '\xFF', BasicWalReaderWriterTests::PAGE_SIZE));
+//        writer->log_full_image(pid, stob(before_images.back()));
+//
+//        after_images.emplace_back(before_images.back());
+//        for (Size j {}; j < deltas_per_image; ++j) {
+//            const auto deltas = generator.setup_deltas(stob(after_images.back()));
+//            writer->log_deltas(pid, stob(after_images.back()), deltas);
+//        }
+//    }
+//    writer->stop();
+//
+//    // Roll forward some copies of the "before images" to match the "after images".
+//    auto images = before_images;
+//    for (const auto &[id, meta]: collection.segments()) {
+//        ASSERT_TRUE(expose_message(reader->open(id)));
+//        ASSERT_TRUE(expose_message(reader->redo([&images](const RedoDescriptor &info) {
+//            auto image = stob(images.at(info.page_id - 1));
+//            for (const auto &[offset, content]: info.deltas)
+//                mem_copy(image.range(offset, content.size()), content);
+//            return Status::ok();
+//        })));
+//        ASSERT_TRUE(expose_message(reader->close()));
+//    }
+//
+//    // Image copies should match the "after images".
+//    for (Size i {}; i < images.size(); ++i) {
+//        ASSERT_EQ(images.at(i), after_images.at(i));
+//    }
+//
+//    // Now roll them back to match the before images again.
+//    for (auto itr = crbegin(collection.segments()); itr != crend(collection.segments()); ++itr) {
+//        // Segment ID should be the same for each record position within each group.
+//        ASSERT_TRUE(expose_message(reader->open(itr->id)));
+//        ASSERT_TRUE(expose_message(reader->undo([&images](const auto &info) {
+//            const auto index = info.page_id - 1;
+//            mem_copy(stob(images[index]), info.image);
+//            return Status::ok();
+//        })));
+//        ASSERT_TRUE(expose_message(reader->close()));
+//    }
+//
+//    for (Size i {}; i < images.size(); ++i) {
+//        ASSERT_EQ(images.at(i), before_images.at(i));
+//    }
+//}
+//
+//TEST_F(BasicWalReaderWriterTests, SingleImage)
+//{
+//    // This situation should not happen in practice, but we technically should be able to handle it.
+//    test_undo_redo(*this, 1, 0);
+//}
+//
+//TEST_F(BasicWalReaderWriterTests, SingleImageSingleDelta)
+//{
+//    test_undo_redo(*this, 1, 1);
+//}
+//
+//TEST_F(BasicWalReaderWriterTests, SingleImageManyDeltas)
+//{
+//    test_undo_redo(*this, 1, 100);
+//}
+//
+//TEST_F(BasicWalReaderWriterTests, ManyImagesManyDeltas)
+//{
+//    test_undo_redo(*this, 100, 1'000);
+//}
+//
+////TEST_F(BasicWalReaderWriterTests, ManyManyImagesManyManyDeltas)
+////{
+////    test_undo_redo(*this, 10'000, 1'000'000);
+////}
+
 class BasicWalTests: public TestWithWalSegmentsOnHeap {
 public:
+    static constexpr Size PAGE_SIZE {0x100};
+
     ~BasicWalTests() override = default;
 
     auto SetUp() -> void override
@@ -1109,32 +1195,34 @@ public:
         WriteAheadLog *temp {};
 
         ASSERT_TRUE(expose_message(BasicWriteAheadLog::open({
-            ROOT,
+            PREFIX,
             store.get(),
             create_sink(),
-            0x100,
+            PAGE_SIZE,
         }, &temp)));
 
         wal.reset(temp);
 
-        ASSERT_TRUE(expose_message(wal->setup_and_recover([](const auto &) { return Status::logic_error(""); },
-                                                          [](const auto &) { return Status::logic_error(""); })));
+        ASSERT_TRUE(expose_message(wal->start_recovery([](const auto &) { return Status::logic_error(""); },
+                                                       [](const auto &) { return Status::logic_error(""); })));
     }
 
+    Random random {42};
     std::unique_ptr<WriteAheadLog> wal;
 };
 
-TEST_F(BasicWalTests, NewWalIsEmpty)
-{
-    ASSERT_EQ(wal->flushed_lsn(), 0);
-    ASSERT_EQ(wal->current_lsn(), 1);
-    ASSERT_TRUE(expose_message(wal->abort_last([](const auto &) { return Status::logic_error(""); })));
-}
-
 TEST_F(BasicWalTests, StartsAndStops)
 {
-    ASSERT_TRUE(expose_message(wal->start_writer()));
-    ASSERT_TRUE(expose_message(wal->stop_writer()));
+    ASSERT_TRUE(expose_message(wal->start_workers()));
+    ASSERT_TRUE(expose_message(wal->stop_workers()));
+}
+
+TEST_F(BasicWalTests, NewWalState)
+{
+    ASSERT_TRUE(expose_message(wal->start_workers()));
+    ASSERT_EQ(wal->flushed_lsn(), 0);
+    ASSERT_EQ(wal->current_lsn(), 1);
+    ASSERT_TRUE(expose_message(wal->stop_workers()));
 }
 
 TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
@@ -1142,14 +1230,38 @@ TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
     std::vector<std::string> children;
 
     for (Size i {}; i < 10; ++i) {
-        ASSERT_TRUE(expose_message(wal->start_writer()));
+        ASSERT_TRUE(expose_message(wal->start_workers()));
 
         // File should be deleted before this method returns, if no records were written to it.
-        ASSERT_TRUE(expose_message(wal->stop_writer()));
+        ASSERT_TRUE(expose_message(wal->stop_workers()));
         ASSERT_TRUE(expose_message(store->get_children(ROOT, children)));
         ASSERT_TRUE(children.empty());
     }
 }
 
+TEST_F(BasicWalTests, FailureDuringFirstOpen)
+{
+    interceptors::set_open(FailOnce<0> {"test/wal-"});
+    assert_error_42(wal->start_workers());
+}
+
+TEST_F(BasicWalTests, FailureDuringNthOpen)
+{
+    auto images = generate_images(*this, PAGE_SIZE, 1'000);
+    interceptors::set_open(FailEvery<5> {"test/wal-"});
+    ASSERT_TRUE(expose_message(wal->start_workers()));
+
+    Size num_writes {};
+    for (Size i {}; i < images.size(); ++i) {
+        auto s = wal->log(i, stob(images[i]));
+        if (!s.is_ok()) {
+            assert_error_42(s);
+            break;
+        }
+        num_writes++;
+    }
+    ASSERT_GT(num_writes, 5);
+    assert_error_42(wal->stop_workers());
+}
 
 } // <anonymous>

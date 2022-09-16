@@ -76,7 +76,7 @@ function run_instance() {
 
   # Let `fail` modify the database for a bit.
   inner_echo "$I" "Modifying database..."
-  usleep "$WAIT"
+  sleep "$WAIT"
 
   # Kill `fail`, leaving an uncommitted database with a WAL.
   inner_echo "$I" "Killing process..."

@@ -1,6 +1,7 @@
-#include <gtest/gtest.h>
-#include <thread>
 #include <array>
+#include <thread>
+#include <vector>
+#include <gtest/gtest.h>
 
 #include "calico/bytes.h"
 #include "calico/options.h"
@@ -14,11 +15,10 @@
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
+#include "utils/worker.h"
 #include "core/header.h"
 
-namespace {
-
-using namespace calico;
+namespace calico {
 
 TEST(AssertionDeathTest, Assert)
 {
@@ -28,9 +28,9 @@ TEST(AssertionDeathTest, Assert)
 TEST(TestEncoding, ReadsAndWrites)
 {
     Random random{0};
-    const auto u16 = random.next_int(std::numeric_limits<uint16_t>::max());
-    const auto u32 = random.next_int(std::numeric_limits<uint32_t>::max());
-    const auto u64 = random.next_int(std::numeric_limits<uint64_t>::max());
+    const auto u16 = random.get<std::uint16_t>();
+    const auto u32 = random.get<std::uint32_t>();
+    const auto u64 = random.get<std::uint64_t>();
     std::vector<calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
 
     auto dst = buffer.data();
@@ -152,6 +152,96 @@ TEST_F(SliceTests, TruncateDeathTest)
     ASSERT_DEATH(bytes.truncate(1), "Assert");
 }
 
+TEST_F(SliceTests, WithCppString)
+{
+    // Construct from and compare with C++ strings.
+    std::string s {"123"};
+    Bytes b1 {s};
+    BytesView bv1 {s};
+    ASSERT_TRUE(b1 == s); // Uses an implicit conversion.
+    ASSERT_TRUE(bv1 == s);
+
+    std::string_view sv {"123"};
+    BytesView bv2 {sv};
+    ASSERT_TRUE(bv2 == sv);
+    ASSERT_TRUE(bv2 != std::string {"321"});
+}
+
+TEST_F(SliceTests, WithCString)
+{
+    // Construct from and compare with C-style strings.
+    char a[4] {"123"}; // Null-terminated
+    Bytes b1 {a};
+    BytesView bv1 {a};
+    ASSERT_TRUE(b1 == a);
+    ASSERT_TRUE(bv1 == a);
+
+    const char *s {"123"};
+    BytesView bv2 {s};
+    ASSERT_TRUE(bv2 == s);
+}
+
+TEST_F(SliceTests, Conversions)
+{
+    std::string data {"abc"};
+    Bytes b {data};
+    BytesView bv {b};
+    ASSERT_TRUE(b == bv);
+    [](BytesView) {}(b);
+}
+
+static constexpr auto constexpr_test_write(Bytes b, BytesView answer)
+{
+    CALICO_EXPECT_EQ(b.size(), answer.size());
+    for (Size i {}; i < b.size(); ++i)
+        b[i] = answer[i];
+
+    // TODO: I have no clue why this works. std::memcmp() isn't constexpr, but starts_with(), which uses it, is...
+    (void)b.starts_with(answer);
+    (void)b.data();
+    (void)b.range(0, 0);
+    (void)b.is_empty();
+    b.advance(0);
+    b.truncate(b.size());
+}
+
+static constexpr auto constexpr_test_read(BytesView bv, BytesView answer)
+{
+    for (Size i {}; i < bv.size(); ++i)
+        CALICO_EXPECT_EQ(bv[i], answer[i]);
+
+    (void)bv.starts_with(answer);
+    (void)bv.data();
+    (void)bv.range(0, 0);
+    (void)bv.is_empty();
+    bv.advance(0);
+    bv.truncate(bv.size());
+}
+
+TEST_F(SliceTests, ConstantExpressions)
+{
+    static constexpr BytesView bv {"42"};
+    constexpr_test_read(bv, "42");
+
+    char a[] {"42"};
+    Bytes b {a};
+    constexpr_test_write(b, "ab");
+    constexpr_test_read(b, "ab");
+}
+
+TEST_F(SliceTests, SubRangesHaveProperType)
+{
+    BytesView bv1 {"42"};
+    auto bv2 = bv1.range(0);
+    // NOTE: Extra parenthesis seem to be necessary. ASSERT_*() and EXPECT_*() don't like angle brackets.
+    ASSERT_TRUE((std::is_same_v<BytesView, decltype(bv2)>));
+
+    auto s = bv1.to_string();
+    Bytes b1 {s};
+    auto b2 = b1.range(0);
+    ASSERT_TRUE((std::is_same_v<Bytes, decltype(b2)>));
+}
+
 TEST(UtilsTest, ZeroIsNotAPowerOfTwo)
 {
     ASSERT_FALSE(is_power_of_two(0));
@@ -163,6 +253,16 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
     ASSERT_TRUE(is_power_of_two(1 << 2));
     ASSERT_TRUE(is_power_of_two(1 << 10));
     ASSERT_TRUE(is_power_of_two(1 << 20));
+}
+
+TEST(ScratchTest, CanChangeUnderlyingBytesObject)
+{
+    std::string backing {"abc"};
+    Bytes bytes {backing};
+    Scratch scratch {bytes};
+    scratch->advance(1);
+    scratch->truncate(1);
+    ASSERT_TRUE(*scratch == "b");
 }
 
 TEST(MonotonicScratchTest, ScratchesAreDistinct)
@@ -198,22 +298,22 @@ TEST(ScratchTest, BehavesLikeASlice)
 
     mem_copy(*scratch, stob(MSG));
     ASSERT_TRUE(*scratch == stob(MSG));
-    ASSERT_TRUE(scratch->starts_with(stob("Hello")));
+    ASSERT_TRUE(scratch->starts_with("Hello"));
     ASSERT_TRUE(scratch->range(7, 5) == stob("world"));
     ASSERT_TRUE(scratch->advance(7).truncate(5) == stob("world"));
 }
 
 TEST(NonPrintableSliceTests, UsesStringSize)
 {
-    std::string u {"\x00\x01", 2};
-    ASSERT_EQ(stob(u).size(), 2);
+    const std::string u {"\x00\x01", 2};
+    ASSERT_EQ(BytesView {u}.size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
-    std::string u {"\x00", 1};
-    std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(stob(u), stob(v)), ThreeWayComparison::EQ);
+    const std::string u {"\x00", 1};
+    const std::string v {"\x00", 1};
+    ASSERT_EQ(compare_three_way(BytesView {u}, BytesView {v}), ThreeWayComparison::EQ);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
@@ -238,8 +338,9 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
 
 TEST(NonPrintableSliceTests, Conversions)
 {
+    // We need to pass in the size, since the first character is '\0'. Otherwise, the length will be 0.
     std::string u {"\x00\x01", 2};
-    const auto s = btos(stob(u));
+    const auto s = stob(u).to_string();
     ASSERT_EQ(s.size(), 2);
     ASSERT_EQ(s[0], '\x00');
     ASSERT_EQ(s[1], '\x01');
@@ -249,14 +350,14 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
 {
     const auto a = "ab";
     const char b[] {'4', '2', '\x00'};
-    ASSERT_EQ(stob(a).size(), 2);
-    ASSERT_EQ(stob(b).size(), 2);
+    ASSERT_EQ(BytesView {a}.size(), 2);
+    ASSERT_EQ(BytesView {b}.size(), 2);
 }
 
 TEST(NonPrintableSliceTests, ModifyCharArray)
 {
     char data[] {'a', 'b', '\x00'};
-    auto bytes = stob(data);
+    Bytes bytes {data};
     bytes[0] = '4';
     bytes.advance();
     bytes[0] = '2';
@@ -265,10 +366,11 @@ TEST(NonPrintableSliceTests, ModifyCharArray)
 
 TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
 {
-    const auto a = "a\0b";
+    const auto a = "\x12\x00\x34";
     const char b[] {'4', '\x00', '2', '\x00'};
 
-    // We use strlen() to get the length, which stops at the first NULL byte.
+    ASSERT_EQ(std::char_traits<char>::length(a), 1);
+    ASSERT_EQ(std::char_traits<char>::length(b), 1);
     ASSERT_EQ(stob(a).size(), 1);
     ASSERT_EQ(stob(b).size(), 1);
 }
@@ -537,8 +639,6 @@ TEST_F(QueueTests, SingleProducerMultipleConsumers)
     for (auto &thread: consumers)
         thread.join();
 
-    queue.wait_until_finish();
-
     Size answer {};
     ASSERT_TRUE(std::all_of(cbegin(data), cend(data), [&answer](auto result) {
         return result == answer++;
@@ -588,4 +688,165 @@ TEST(HeaderTests, EncodeAndDecodePageSize)
     }
 }
 
-} // <anonymous>
+TEST(MiscTests, StringsUseSizeParameterForComparisons)
+{
+    std::vector<std::string> v {
+        std::string {"\x11\x00\x33", 3},
+        std::string {"\x11\x00\x22", 3},
+        std::string {"\x11\x00\x11", 3},
+    };
+    std::sort(begin(v), end(v));
+    ASSERT_EQ(v[0][2], '\x11');
+    ASSERT_EQ(v[1][2], '\x22');
+    ASSERT_EQ(v[2][2], '\x33');
+}
+
+/*
+ * The Worker<Event> class provides a background thread that waits on Events from a Queue<Event>. We can dispatch an event from the
+ * main thread and either wait or return immediately. It also should provide fast access to its internal Status object.
+ */
+class BasicWorkerTests: public testing::Test {
+public:
+    BasicWorkerTests()
+        : worker {16, [this](int event) {
+            events.emplace_back(event);
+            return Status::ok();
+        }}
+    {}
+
+    Worker<int> worker;
+    std::vector<int> events;
+};
+
+TEST_F(BasicWorkerTests, CreateWorker)
+{
+    ASSERT_TRUE(expose_message(worker.status()));
+    ASSERT_TRUE(events.empty());
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+}
+
+TEST_F(BasicWorkerTests, DestroyWorker)
+{
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_TRUE(events.empty());
+}
+
+TEST_F(BasicWorkerTests, EventsGetAdded)
+{
+    worker.dispatch(1);
+    worker.dispatch(2);
+    worker.dispatch(3);
+
+    // Blocks until all events are finished and the worker thread is joined.
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_EQ(events.at(0), 1);
+    ASSERT_EQ(events.at(1), 2);
+    ASSERT_EQ(events.at(2), 3);
+}
+
+TEST_F(BasicWorkerTests, WaitOnEvent)
+{
+    worker.dispatch(1);
+    worker.dispatch(2);
+    // Let the event get processed before returning.
+    worker.dispatch(3, true);
+
+    ASSERT_EQ(events.at(0), 1);
+    ASSERT_EQ(events.at(1), 2);
+    ASSERT_EQ(events.at(2), 3);
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+}
+
+TEST_F(BasicWorkerTests, SanityCheck)
+{
+    static constexpr int NUM_EVENTS {1'000};
+    for (int i {}; i < NUM_EVENTS; ++i) {
+        worker.dispatch(i, i == NUM_EVENTS - 1);
+        ASSERT_TRUE(expose_message(worker.status()));
+    }
+
+    for (int i {}; i < NUM_EVENTS; ++i)
+        ASSERT_EQ(events.at(static_cast<Size>(i)), i);
+
+    ASSERT_TRUE(expose_message(worker.status()));
+    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+}
+
+class WorkerFaultTests: public testing::Test {
+public:
+    WorkerFaultTests()
+        : worker {16, [this](int event) {
+            if (callback_status.is_ok())
+                events.emplace_back(event);
+            return callback_status;
+        }}
+    {}
+
+    Status callback_status {Status::ok()};
+    Worker<int> worker;
+    std::vector<int> events;
+};
+
+TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
+{
+    callback_status = Status::system_error("42");
+    worker.dispatch(1, true);
+    assert_error_42(worker.status());
+    assert_error_42(std::move(worker).destroy());
+    ASSERT_TRUE(events.empty());
+}
+
+TEST_F(WorkerFaultTests, WorkerCannotBeRecovered)
+{
+    callback_status = Status::system_error("42");
+    worker.dispatch(1, true);
+
+    // Return an OK status after failing once. Worker should remain invalidated. If we need to start the worker again,
+    // we need to create a new one.
+    callback_status = Status::ok();
+    worker.dispatch(2, true);
+    assert_error_42(worker.status());
+    assert_error_42(std::move(worker).destroy());
+    ASSERT_TRUE(events.empty());
+}
+
+TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
+{
+    worker.dispatch(1);
+    worker.dispatch(2);
+    worker.dispatch(3, true);
+
+    callback_status = Status::system_error("42");
+    worker.dispatch(4);
+    worker.dispatch(5);
+    worker.dispatch(6, true);
+
+    ASSERT_EQ(events.at(0), 1);
+    ASSERT_EQ(events.at(1), 2);
+    ASSERT_EQ(events.at(2), 3);
+    ASSERT_EQ(events.size(), 3);
+
+    assert_error_42(worker.status());
+    assert_error_42(std::move(worker).destroy());
+}
+
+TEST_F(WorkerFaultTests, ErrorStatusContention)
+{
+    callback_status = Status::system_error("42");
+    worker.dispatch(1);
+    worker.dispatch(2);
+    worker.dispatch(3);
+
+    // Sketchy but seems to work in practice. I'm getting a lot of these checks in before the status is
+    // registered.
+    Size num_hits {};
+    while (worker.status().is_ok())
+        num_hits++;
+    ASSERT_GT(num_hits, 0);
+
+    assert_error_42(worker.status());
+    assert_error_42(std::move(worker).destroy());
+    ASSERT_TRUE(events.empty());
+}
+
+} // namespace calico

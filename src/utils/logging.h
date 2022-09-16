@@ -5,7 +5,7 @@
 #include "calico/status.h"
 #include "expect.h"
 #include <numeric>
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
 
 namespace calico {
 
@@ -15,8 +15,8 @@ constexpr auto LOG_FILENAME = "log";
 #define CALICO_STRINGIFY(x) CALICO_STRINGIFY_(x)
 #define CALICO_LOG_FORMAT(s) ("[" CALICO_STRINGIFY(__FILE__) ":" CALICO_STRINGIFY(__LINE__) "] "(s))
 
-auto create_logger(spdlog::sink_ptr, const std::string &) -> std::shared_ptr<spdlog::logger>;
-auto create_sink(const std::string &, spdlog::level::level_enum) -> spdlog::sink_ptr;
+auto create_logger(spdlog::sink_ptr, const std::string_view &) -> std::shared_ptr<spdlog::logger>;
+auto create_sink(const std::string_view &, LogLevel) -> spdlog::sink_ptr;
 auto create_sink() -> spdlog::sink_ptr;
 
 class ThreePartMessage {
@@ -24,19 +24,19 @@ public:
     ThreePartMessage() = default;
 
     template<class... Args>
-    auto set_primary(const std::string &format, Args &&...args) -> void
+    auto set_primary(const std::string_view &format, Args &&...args) -> void
     {
         return set_text(PRIMARY, format, std::forward<Args>(args)...);
     }
 
     template<class... Args>
-    auto set_detail(const std::string &format, Args &&...args) -> void
+    auto set_detail(const std::string_view &format, Args &&...args) -> void
     {
         return set_text(DETAIL, format, std::forward<Args>(args)...);
     }
 
     template<class... Args>
-    auto set_hint(const std::string &format, Args &&...args) -> void
+    auto set_hint(const std::string_view &format, Args &&...args) -> void
     {
         return set_text(HINT, format, std::forward<Args>(args)...);
     }
@@ -56,7 +56,7 @@ private:
     auto set_text(Size, const char *) -> void;
 
     template<class... Args>
-    auto set_text(Size index, const std::string &format, Args &&...args) -> void
+    auto set_text(Size index, const std::string_view &format, Args &&...args) -> void
     {
         set_text(index, fmt::format(format, std::forward<Args>(args)...).c_str());
     }
@@ -71,19 +71,19 @@ public:
     {}
 
     template<class... Args>
-    auto set_primary(const std::string &format, Args &&...args) -> void
+    auto set_primary(const std::string_view &format, Args &&...args) -> void
     {
         return m_message.set_primary(format, std::forward<Args>(args)...);
     }
 
     template<class... Args>
-    auto set_detail(const std::string &format, Args &&...args) -> void
+    auto set_detail(const std::string_view &format, Args &&...args) -> void
     {
         return m_message.set_detail(format, std::forward<Args>(args)...);
     }
 
     template<class... Args>
-    auto set_hint(const std::string &format, Args &&...args) -> void
+    auto set_hint(const std::string_view &format, Args &&...args) -> void
     {
         return m_message.set_hint(format, std::forward<Args>(args)...);
     }

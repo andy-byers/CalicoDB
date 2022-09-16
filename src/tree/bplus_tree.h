@@ -4,7 +4,11 @@
 
 #include "internal.h"
 #include "tree.h"
-#include <spdlog/spdlog.h>
+#include "spdlog/spdlog.h"
+
+#ifdef CALICO_BUILD_TESTS
+#  include <gtest/gtest_prod.h>
+#endif // CALICO_BUILD_TESTS
 
 namespace calico {
 
@@ -31,7 +35,9 @@ public:
     [[nodiscard]] auto find_maximum() -> Cursor override;
     auto save_state(FileHeader &header) const -> void override;
     auto load_state(const FileHeader &header) -> void override;
-    auto TEST_validate_node(PageId) -> void override;
+    auto TEST_validate_nodes() -> void override;
+    auto TEST_validate_order() -> void override;
+    auto TEST_validate_links() -> void override;
 
 private:
     struct SearchResult {

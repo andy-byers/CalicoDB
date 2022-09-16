@@ -1,29 +1,26 @@
 
 #include <map>
 #include <unordered_map>
-
 #include <gtest/gtest.h>
-
 #include "calico/cursor.h"
 #include "pager/pager.h"
 #include "tree/bplus_tree.h"
 #include "tree/node_pool.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
-
-#include "fakes.h"
 #include "pager/basic_pager.h"
 #include "random.h"
 #include "tools.h"
 #include "unit_tests.h"
-#include "validation.h"
 #include "wal/disabled_wal.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
 
-class TestHarness: public TestWithMock {
+class TestHarness: public TestOnHeap {
 public:
     static constexpr Size PAGE_SIZE {0x100};
     static constexpr Size FRAME_COUNT {16};
@@ -41,8 +38,6 @@ public:
             FRAME_COUNT,
             PAGE_SIZE
         });
-        mock = mock_store().get_mock_random_editor(PREFIX + std::string {DATA_FILENAME});
-        CALICO_EXPECT_NE(mock, nullptr);
     }
 
     Random random {0};
@@ -50,7 +45,6 @@ public:
     bool has_xact {};
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
-    MockRandomEditor *mock {};
 };
 
 class TreeTests: public TestHarness {
@@ -69,19 +63,15 @@ public:
         EXPECT_TRUE(root.has_value()) << "Error: " << root.error().what();
         auto s = pager->release(root->take());
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
-
-        using testing::AtLeast;
-        EXPECT_CALL(*mock, read).Times(AtLeast(0));
-        EXPECT_CALL(*mock, write).Times(AtLeast(0));
     }
 
     ~TreeTests() override = default;
 
     auto validate() const
     {
-//        validate_ordering(*tree);
-//        validate_siblings(*tree);
-//        validate_links(*tree);
+        tree->TEST_validate_nodes();
+        tree->TEST_validate_links();
+        tree->TEST_validate_order();
     }
 
     std::unique_ptr<Tree> tree;
@@ -144,9 +134,9 @@ TEST_F(TreeTests, InsertBetween)
 
 TEST_F(TreeTests, OverflowChains)
 {
-    const auto value_a = random_string(random, max_local, max_local * 10);
-    const auto value_b = random_string(random, max_local, max_local * 20);
-    const auto value_c = random_string(random, max_local, max_local * 30);
+    const auto value_a = random.get<std::string>('a', 'z', random.get(max_local, max_local * 10));
+    const auto value_b = random.get<std::string>('a', 'z', random.get(max_local, max_local * 20));
+    const auto value_c = random.get<std::string>('a', 'z', random.get(max_local, max_local * 30));
 
     tools::insert(*tree, "1", value_a);
     tools::insert(*tree, "2", value_b);
@@ -175,12 +165,8 @@ TEST_F(TreeTests, CursorCannotMoveInEmptyTree)
     auto cursor = tree->find_minimum();
     cursor.increment();
     ASSERT_FALSE(cursor.is_valid());
-    ASSERT_FALSE(cursor.is_first());
-    ASSERT_FALSE(cursor.is_last());
     cursor.decrement();
     ASSERT_FALSE(cursor.is_valid());
-    ASSERT_FALSE(cursor.is_first());
-    ASSERT_FALSE(cursor.is_last());
 }
 
 TEST_F(TreeTests, CanFindExtrema)
@@ -188,12 +174,12 @@ TEST_F(TreeTests, CanFindExtrema)
     insert_sequence(*tree, 0, 200);
 
     auto minimum = tree->find_minimum();
-    ASSERT_EQ(btos(minimum.key()), make_key(0));
+    ASSERT_EQ(minimum.key().to_string(), make_key(0));
     ASSERT_EQ(tools::find_exact(*tree, make_key(0)), minimum);
     ASSERT_EQ(tools::find(*tree, make_key(0)), minimum);
 
     auto maximum = tree->find_maximum();
-    ASSERT_EQ(btos(maximum.key()), make_key(199));
+    ASSERT_EQ(maximum.key().to_string(), make_key(199));
     ASSERT_EQ(tools::find_exact(*tree, make_key(199)), maximum);
     ASSERT_EQ(tools::find(*tree, make_key(199)), maximum);
 }
@@ -203,14 +189,14 @@ TEST_F(TreeTests, CanFind)
     insert_sequence(*tree, 0, 200, 2);
 
     auto cursor = tools::find(*tree, make_key(100));
-    ASSERT_EQ(btos(cursor.key()), make_key(100));
+    ASSERT_EQ(cursor.key().to_string(), make_key(100));
     cursor = tools::find(*tree, make_key(101));
-    ASSERT_EQ(btos(cursor.key()), make_key(102));
+    ASSERT_EQ(cursor.key().to_string(), make_key(102));
 
     cursor = tools::find_exact(*tree, make_key(101));
     ASSERT_FALSE(cursor.is_valid());
     cursor = tools::find_exact(*tree, make_key(102));
-    ASSERT_EQ(btos(cursor.key()), make_key(102));
+    ASSERT_EQ(cursor.key().to_string(), make_key(102));
 }
 
 TEST_F(TreeTests, CopiedCursorsAreEqual)
@@ -332,13 +318,11 @@ TEST_F(TreeTests, CanCopyInvalidCursor)
     ASSERT_TRUE(lhs.increment());
     auto rhs = lhs;
     ASSERT_FALSE(rhs.is_valid());
-    ASSERT_FALSE(rhs.is_last());
 
     lhs = tree->find_minimum();
     ASSERT_TRUE(lhs.decrement());
     rhs = lhs;
     ASSERT_FALSE(rhs.is_valid());
-    ASSERT_FALSE(rhs.is_last());
 }
 
 TEST_F(TreeTests, ReverseSequentialInserts)
@@ -382,7 +366,7 @@ TEST_F(TreeTests, RandomInserts)
     validate();
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(*tree, key);
-        ASSERT_EQ(btos(c.key()), key);
+        ASSERT_EQ(c.key().to_string(), key);
         ASSERT_EQ(c.value(), value);
     }
     ASSERT_EQ(tree->record_count(), records.size());
@@ -398,19 +382,20 @@ TEST_F(TreeTests, ModifiesValue)
 
 TEST_F(TreeTests, ModifySanityCheck)
 {
-    insert_sequence(*tree, 0, 1'000);
+    static constexpr Size NUM_RECORDS {100};
+    insert_sequence(*tree, 0, NUM_RECORDS);
+    Random random {0};
 
-    for (Size i {0}; i < tree->record_count(); ++i) {
-        const auto key = make_key(i);
-        auto cursor = tools::find_exact(*tree, key);
-        if (auto value = cursor.value(); value.empty()) {
-            tools::insert(*tree, key, std::string(123, 'x'));
-        } else {
-            tools::insert(*tree, key, value + value);
+    // Insert payloads that vary a lot in size.
+    for (Size i {}; i < 10; ++i) {
+        for (Size j {}; j < NUM_RECORDS; ++j) {
+            const auto key = make_key(j);
+            const auto value = random.get<std::string>('\x00', '\xFF', random.get(1'000UL));
+            tools::insert(*tree, key, value);
         }
     }
     validate();
-    ASSERT_EQ(tree->record_count(), 1'000);
+    ASSERT_EQ(tree->record_count(), NUM_RECORDS);
 }
 
 TEST_F(TreeTests, CollapseForward)
@@ -486,7 +471,7 @@ TEST_F(TreeTests, RemoveFromRandomPosition)
     insert_sequence(*tree, 0, n);
 
     while (tree->record_count()) {
-        const auto key = make_key(random.next_int(n));
+        const auto key = make_key(random.get(n));
 
         if (auto c = tools::find(*tree, key); c.is_valid()) {
             ASSERT_TRUE(tree->erase(c).is_ok());
@@ -502,8 +487,8 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
 
     for (Size i {}; i < num_iterations; ++i) {
         while (tree->record_count() < cutoff) {
-            const auto key = random_string(random, 7, 10);
-            const auto value = random_string(random, 20);
+            const auto key = random.get<std::string>('a', 'z', random.get(7UL, 10UL));
+            const auto value = random.get<std::string>('a', 'z', random.get(20UL));
             tools::insert(*tree, key, value);
             records[key] = value;
         }
@@ -511,7 +496,7 @@ TEST_F(TreeTests, RemoveEverythingRepeatedly)
         for (const auto &[k, v]: records) {
             auto cursor = tools::find_exact(*tree, k);
             ASSERT_TRUE(cursor.is_valid());
-            ASSERT_EQ(btos(cursor.key()), k);
+            ASSERT_EQ(cursor.key().to_string(), k);
             ASSERT_EQ(cursor.value(), v);
             CALICO_EXPECT_TRUE(tools::erase(*tree, k));
             if (counter++ % 100 == 0)
@@ -528,7 +513,7 @@ TEST_F(TreeTests, ForwardPartialIteration)
     auto i = tree->record_count() / 5;
 
     for (auto cursor = tools::find_exact(*tree, make_key(i)); cursor.is_valid(); cursor++)
-        ASSERT_EQ(btos(cursor.key()), make_key(i++));
+        ASSERT_EQ(cursor.key().to_string(), make_key(i++));
 }
 
 TEST_F(TreeTests, ForwardBoundedIteration)
@@ -539,7 +524,7 @@ TEST_F(TreeTests, ForwardBoundedIteration)
     auto upper = tools::find_exact(*tree, make_key(tree->record_count() - i));
 
     for (; lower.is_valid() && lower != upper; lower++)
-        ASSERT_EQ(btos(lower.key()), make_key(i++));
+        ASSERT_EQ(lower.key().to_string(), make_key(i++));
 }
 
 TEST_F(TreeTests, ReversePartialIteration)
@@ -549,7 +534,7 @@ TEST_F(TreeTests, ReversePartialIteration)
     auto i = count / 5;
 
     for (auto c = tools::find_exact(*tree, make_key(count - i - 1)); c.is_valid(); c--)
-        ASSERT_EQ(btos(c.key()), make_key(count - i++ - 1));
+        ASSERT_EQ(c.key().to_string(), make_key(count - i++ - 1));
 }
 
 TEST_F(TreeTests, ReverseBoundedIteration)
@@ -560,7 +545,7 @@ TEST_F(TreeTests, ReverseBoundedIteration)
     auto upper = tools::find_exact(*tree, make_key(tree->record_count() - i - 1));
 
     for (; upper.is_valid() && upper != lower; upper--)
-        ASSERT_EQ(btos(upper.key()), make_key(tree->record_count() - i++ - 1));
+        ASSERT_EQ(upper.key().to_string(), make_key(tree->record_count() - i++ - 1));
 }
 
 TEST_F(TreeTests, SanityCheck)
@@ -578,7 +563,7 @@ TEST_F(TreeTests, SanityCheck)
     const auto remove_one = [&random, this](const std::string &key) {
         if (auto c = tools::find(*tree, key); c.is_valid()) {
             ASSERT_TRUE(tree->erase(c).is_ok());
-        } else if (random.next_int(1) == 0) {
+        } else if (random.get(1) == 0) {
             ASSERT_TRUE(tree->erase(tree->find_minimum()).is_ok());
         } else {
             ASSERT_TRUE(tree->erase(tree->find_maximum()).is_ok());
@@ -587,15 +572,15 @@ TEST_F(TreeTests, SanityCheck)
 
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         for (const auto &[key, value]: generator.generate(random, NUM_RECORDS)) {
-            if (tree->record_count() < MIN_SIZE || random.next_int(5) != 0) {
+            if (tree->record_count() < MIN_SIZE || random.get(5) != 0) {
                 tools::insert(*tree, key, value);
             } else {
                 remove_one(key);
             }
         }
         while (tree->record_count())
-            remove_one(random_string(random, 1, 30));
+            remove_one(random.get<std::string>('\x00', '\xFF', random.get(1UL, 30UL)));
     }
 }
 
-} // <anonymous>
+} // namespace

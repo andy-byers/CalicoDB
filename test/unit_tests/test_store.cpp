@@ -1,20 +1,17 @@
 #include <filesystem>
 #include <fstream>
-#include <limits>
-#include <climits>
 #include <gtest/gtest.h>
-
-#include "calico/options.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "random.h"
-#include "store/disk.h"
-#include "store/heap.h"
-#include "store/system.h"
+#include "storage/posix_storage.h"
+#include "fakes.h"
 #include "unit_tests.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
 
 template<class Base, class Store>
 [[nodiscard]]
@@ -60,7 +57,7 @@ constexpr auto write_out_randomly(Random &random, Writer &writer, const std::str
     Size counter {};
 
     while (!in.is_empty()) {
-        const auto chunk_size = std::min(in.size(), random.next_int(message.size() / num_chunks));
+        const auto chunk_size = std::min(in.size(), random.get(message.size() / num_chunks));
         auto chunk = in.copy().truncate(chunk_size);
 
         if constexpr (std::is_same_v<AppendWriter, Writer>) {
@@ -81,11 +78,11 @@ auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::strin
     static constexpr Size num_chunks {20};
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
     std::string backing(size, '\x00');
-    auto out = stob(backing);
+    Bytes out {backing};
     Size counter {};
 
     while (!out.is_empty()) {
-        const auto chunk_size = std::min(out.size(), random.next_int(size / num_chunks));
+        const auto chunk_size = std::min(out.size(), random.get(size / num_chunks));
         auto chunk = out.copy().truncate(chunk_size);
         const auto s = reader.read(chunk, counter);
 
@@ -107,7 +104,7 @@ constexpr auto PATH = "/tmp/calico_test_files/name";
 class FileTests: public testing::Test {
 public:
     FileTests()
-        : storage {std::make_unique<DiskStorage>()}
+        : storage {std::make_unique<PosixStorage>()}
     {
         std::error_code ignore;
         std::filesystem::remove_all(HOME, ignore);
@@ -123,7 +120,7 @@ public:
     }
 
     std::unique_ptr<Storage> storage;
-    Random random {0};
+    Random random {internal::random_seed};
 };
 
 class RandomFileReaderTests: public FileTests {
@@ -147,7 +144,7 @@ TEST_F(RandomFileReaderTests, NewFileIsEmpty)
 
 TEST_F(RandomFileReaderTests, ReadsBackContents)
 {
-    auto data = random.next_string(500);
+    auto data = random.get<std::string>('a', 'z', 500);
     write_whole_file(PATH, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
@@ -171,7 +168,7 @@ TEST_F(RandomFileEditorTests, NewFileIsEmpty)
 
 TEST_F(RandomFileEditorTests, WritesOutAndReadsBackData)
 {
-    auto data = random.next_string(500);
+    auto data = random.get<std::string>('a', 'z', 500);
     write_out_randomly(random, *file, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
@@ -187,19 +184,19 @@ public:
 
 TEST_F(AppendFileWriterTests, WritesOutData)
 {
-    auto data = random.next_string(500);
+    auto data = random.get<std::string>('a', 'z', 500);
     write_out_randomly<AppendWriter>(random, *file, data);
     ASSERT_EQ(read_whole_file(PATH), data);
 }
 
-class DiskStorageTests: public testing::Test {
+class PosixStorageTests: public testing::Test {
 public:
-    DiskStorageTests() = default;
+    PosixStorageTests() = default;
 
-    ~DiskStorageTests() override = default;
+    ~PosixStorageTests() override = default;
 
-    DiskStorage storage;
-    Random random {0};
+    PosixStorage storage;
+    Random random {internal::random_seed};
 };
 
 class HeapTests: public testing::Test {
@@ -214,7 +211,7 @@ public:
     ~HeapTests() override = default;
 
     std::unique_ptr<Storage> storage;
-    Random random {0};
+    Random random {internal::random_seed};
 };
 
 TEST_F(HeapTests, ReaderCannotCreateBlob)
@@ -230,8 +227,8 @@ TEST_F(HeapTests, ReadsAndWrites)
     auto ra_reader = open_blob<RandomReader>(*storage, PATH);
     auto ap_writer = open_blob<AppendWriter>(*storage, PATH);
 
-    const auto first_input = random.next_string(500);
-    const auto second_input = random.next_string(500);
+    const auto first_input = random.get<std::string>('a', 'z', 500);
+    const auto second_input = random.get<std::string>('a', 'z', 500);
     write_out_randomly(random, *ra_editor, first_input);
     write_out_randomly(random, *ap_writer, second_input);
     const auto output_1 = read_back_randomly(random, *ra_reader, 1'000);
@@ -245,13 +242,13 @@ TEST_F(HeapTests, ReaderStopsAtEOF)
     auto ra_editor = open_blob<RandomEditor>(*storage, PATH);
     auto ra_reader = open_blob<RandomReader>(*storage, PATH);
 
-    const auto data = random.next_string(500);
+    const auto data = random.get<std::string>('a', 'z', 500);
     write_out_randomly(random, *ra_editor, data);
 
     std::string buffer(data.size() * 2, '\x00');
     auto bytes = stob(buffer);
     ASSERT_TRUE(expose_message(ra_reader->read(bytes, 0)));
-    ASSERT_EQ(btos(bytes), data);
+    ASSERT_EQ(bytes.to_string(), data);
 }
 
-} // <anonymous>
+} // namespace calico

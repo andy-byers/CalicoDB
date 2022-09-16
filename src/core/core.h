@@ -2,14 +2,11 @@
 #define CALICO_DB_DATABASE_IMPL_H
 
 #include "calico/database.h"
+#include "header.h"
 #include "utils/result.h"
 #include <shared_mutex>
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/spdlog.h>
-
-#ifdef CALICO_BUILD_TESTS
-#  include <gtest/gtest_prod.h>
-#endif
+#include "spdlog/sinks/basic_file_sink.h"
+#include "spdlog/spdlog.h"
 
 namespace calico {
 
@@ -17,10 +14,11 @@ class Cursor;
 class Pager;
 class Storage;
 class Tree;
+class WriteAheadLog;
 
 struct InitialState {
     FileHeader state {};
-    bool is_new {};
+    bool is_new {}; // TODO: state.page_count == 0?
 };
 
 class Core final {

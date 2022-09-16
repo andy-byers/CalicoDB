@@ -5,171 +5,156 @@
 
 namespace calico {
 
-auto BackgroundWriter::background_writer() -> void
+auto LogWriter::write(SequenceId lsn, BytesView payload) -> Status
 {
-    SegmentGuard guard {*m_store, m_prefix};
+    CALICO_EXPECT_FALSE(lsn.is_null());
+    WalRecordHeader lhs {};
+    lhs.type = WalRecordHeader::Type::FULL;
+    lhs.size = static_cast<std::uint16_t>(payload.size());
+    lhs.crc = crc_32(payload);
 
-    auto s = guard.start(m_writer, *m_collection, *m_flushed_lsn);
-    if (!s.is_ok()) {
-        handle_error(guard, s);
-        return;
-    }
+    while (!payload.is_empty()) {
+        auto rest = m_tail;
+        // Note that this modifies rest to point to [<m_offset>, <end>) in the tail buffer.
+        const auto space_remaining = rest.advance(m_offset).size();
+        const auto can_fit_some = space_remaining > sizeof(WalRecordHeader);
+        const auto can_fit_all = space_remaining >= sizeof(WalRecordHeader) + payload.size();
 
-    for (; ; ) {
-        auto event = m_state.events.dequeue();
-        if (!event.has_value()) break;
+        if (can_fit_some) {
+            WalRecordHeader rhs;
 
-        auto [
-            type,
-            lsn,
-            buffer,
-            size,
-            is_waiting
-        ] = *event;
+            if (!can_fit_all)
+                rhs = split_record(lhs, payload, space_remaining);
 
-        bool should_segment {};
-        bool has_commit {};
+            // We must have room for the whole header and at least 1 payload byte.
+            write_wal_record_header(rest, lhs);
+            rest.advance(sizeof(lhs));
+            mem_copy(rest, payload.range(0, lhs.size));
 
-        switch (type) {
-            case EventType::LOG_FULL_IMAGE:
-            case EventType::LOG_DELTAS:
-                CALICO_EXPECT_TRUE(buffer.has_value());
-                s = emit_payload(lsn, (*buffer)->truncate(size));
-                should_segment = needs_segmentation();
-                break;
-            case EventType::LOG_COMMIT:
-                s = emit_commit(lsn);
-                should_segment = s.is_ok();
-                has_commit = true;
-                break;
-            case EventType::FLUSH_BLOCK:
-                s = m_writer.append_block();
-                m_flushed_lsn->store(lsn);
-                break;
-            case EventType::STOP_WRITER:
-                s = run_stop(guard);
-                break;
-            default:
-                CALICO_EXPECT_TRUE(false && "unrecognized WAL event type");
+            m_offset += sizeof(lhs) + lhs.size;
+            payload.advance(lhs.size);
+            rest.advance(lhs.size);
+
+            if (!can_fit_all)
+                lhs = rhs;
+
+            // The new value of m_offset must be less than or equal to the start of the next block. If it is exactly
+            // at the start of the next block, we should fall through and read it into the tail buffer.
+            if (m_offset != m_tail.size()) continue;
         }
-
-        // Replace the scratch memory so that the main thread can reuse it. This is internally synchronized.
-        if (buffer) m_scratch->put(*buffer);
-
-        if (s.is_ok() && should_segment) {
-            s = advance_segment(guard, has_commit);
-            if (s.is_ok()) m_flushed_lsn->store(lsn);
-        }
-
-        if (!s.is_ok())
-            handle_error(guard, s);
-
-        if (is_waiting) {
-            m_is_waiting.store(false);
-            m_state.cv.notify_one();
-        }
-
-        // TODO: Clean up obsolete segments...
-
-    }
-}
-
-auto BackgroundWriter::handle_error(SegmentGuard &guard, Status e) -> void
-{
-    CALICO_EXPECT_FALSE(e.is_ok());
-    add_error(e);
-
-    // We still want to try and finish the segment. We may need it to roll back changes.
-    e = run_stop(guard);
-    if (!e.is_ok())
-        add_error(e);
-}
-
-auto BackgroundWriter::emit_payload(SequenceId lsn, BytesView payload) -> Status
-{
-    return m_writer.write(lsn, payload, [this](auto flushed_lsn) {
-        m_flushed_lsn->store(flushed_lsn);
-    });
-}
-
-auto BackgroundWriter::emit_commit(SequenceId lsn) -> Status
-{
-    static constexpr char payload[] {WalPayloadType::COMMIT, '\x00'};
-    return emit_payload(lsn, stob(payload));
-}
-
-auto BackgroundWriter::advance_segment(SegmentGuard &guard, bool has_commit) -> Status
-{
-    if (guard.is_started()) {
-        auto s = guard.finish(has_commit);
+        CALICO_EXPECT_LE(m_tail.size() - m_offset, sizeof(lhs));
+        auto s = flush();
         if (!s.is_ok()) return s;
     }
-    return guard.start(m_writer, *m_collection, *m_flushed_lsn);
+    // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
+    // to be all the way on disk.
+    m_last_lsn = lsn;
+    return Status::ok();
 }
 
-auto BasicWalWriter::start() -> void
+auto LogWriter::flush() -> Status
 {
-    m_last_lsn = m_flushed_lsn->load();
-    m_background.startup();
+    // Already flushed.
+    if (m_offset == 0)
+        return Status::logic_error("could not flush tail buffer: tail buffer is empty");
+
+    // Clear unused bytes at the end of the tail buffer.
+    mem_clear(m_tail.range(m_offset));
+
+    auto s = m_file->write(m_tail);
+    if (s.is_ok()) {
+        m_flushed_lsn->store(m_last_lsn);
+        m_offset = 0;
+        m_number++;
+    }
+    return s;
 }
 
-auto BasicWalWriter::stop() -> void
+auto WalWriter::open() -> Status
 {
-    m_background.dispatch(BackgroundWriter::Event {
-        BackgroundWriter::EventType::STOP_WRITER,
-        m_last_lsn,
-        std::nullopt,
-        0,
-        true,
-    });
-    m_background.teardown();
+    return open_segment(++m_segments->last());
 }
 
-auto BasicWalWriter::flush_block() -> void
+auto WalWriter::write(SequenceId lsn, NamedScratch payload) -> void
 {
-    m_background.dispatch(BackgroundWriter::Event {
-        BackgroundWriter::EventType::FLUSH_BLOCK,
-        m_last_lsn,
-        std::nullopt,
-        0,
-    });
+    m_worker.dispatch(Event {lsn, payload}, false);
 }
 
-auto BasicWalWriter::log_full_image(PageId page_id, BytesView image) -> void
+auto WalWriter::advance() -> void
 {
-    auto buffer = m_scratch.get();
-    const auto size = encode_full_image_payload(page_id, image, *buffer);
-
-    m_background.dispatch({
-        BackgroundWriter::EventType::LOG_FULL_IMAGE,
-        ++m_last_lsn,
-        buffer,
-        size,
-    });
+    m_worker.dispatch(std::nullopt, true);
 }
 
-auto BasicWalWriter::log_deltas(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas) -> void
+auto WalWriter::destroy() && -> Status
 {
-    auto buffer = m_scratch.get();
-    const auto size = encode_deltas_payload(page_id, image, deltas, *buffer);
-
-    m_background.dispatch({
-        BackgroundWriter::EventType::LOG_DELTAS,
-        ++m_last_lsn,
-        buffer,
-        size,
-    });
+    auto s = std::move(m_worker).destroy();
+    close_segment();
+    return s;
 }
 
-auto BasicWalWriter::log_commit() -> void
+auto WalWriter::on_event(const EventWrapper &event) -> Status
 {
-    m_background.dispatch({
-        BackgroundWriter::EventType::LOG_COMMIT,
-        ++m_last_lsn,
-        std::nullopt,
-        0,
-        true,
-    });
+    // std::nullopt means we need to advance to the next segment.
+    if (!event) return advance_segment();
+
+    auto [lsn, buffer] = *event;
+    auto s = m_writer->write(lsn, *buffer);
+
+    m_scratch->put(buffer);
+    if (s.is_ok() && m_writer->block_count() >= m_wal_limit)
+        return advance_segment();
+    return s;
+}
+
+auto WalWriter::open_segment(SegmentId id) -> Status
+{
+    CALICO_EXPECT_EQ(m_writer, std::nullopt);
+    AppendWriter *file {};
+    auto s = m_store->open_append_writer(m_prefix + id.to_name(), &file);
+    if (s.is_ok()) {
+        m_file.reset(file);
+        m_writer = LogWriter {*m_file, m_tail, *m_flushed_lsn};
+    }
+    return s;
+}
+
+auto WalWriter::close_segment() -> Status
+{
+    // We must have failed while opening the segment file.
+    if (!m_writer) return status();
+
+    auto s = m_writer->flush();
+    bool is_empty {};
+
+    // We get a logic error if the tail buffer was empty. In this case, it is possible
+    // that the whole segment is empty.
+    if (!s.is_ok()) {
+        is_empty = m_writer->block_count() == 0;
+        if (s.is_logic_error())
+            s = Status::ok();
+    }
+    m_writer.reset();
+    m_file.reset();
+
+    // We want to do this part, even if the flush failed. If the segment is empty, and we fail to remove
+    // it, we will end up overwriting it next time we open the writer.
+    if (auto id = ++m_segments->last(); is_empty) {
+        auto t = m_store->remove_file(m_prefix + id.to_name());
+        s = s.is_ok() ? t : s;
+    } else {
+        m_segments->add_segment(id);
+    }
+    return s;
+}
+
+auto WalWriter::advance_segment() -> Status
+{
+    auto s = close_segment();
+    if (s.is_ok()) {
+        auto id = ++m_segments->last();
+        return open_segment(id);
+    }
+    return s;
 }
 
 } // namespace calico

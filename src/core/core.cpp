@@ -1,19 +1,19 @@
 
 #include "core.h"
 #include "calico/calico.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "calico/transaction.h"
 #include "header.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
-#include "store/disk.h"
+#include "storage/posix_storage.h"
+#include "storage/helpers.h"
 #include "tree/bplus_tree.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
 #include "utils/logging.h"
 #include "wal/basic_wal.h"
 #include "wal/disabled_wal.h"
-#include <filesystem>
 
 namespace calico {
 
@@ -34,15 +34,6 @@ namespace calico {
         if (!calico_s.is_ok()) return save_and_forward_status(calico_s, message); \
     } while (0)
 
-//[[nodiscard]]
-//static auto not_supported_error(const std::string &primary)
-//{
-//    ThreePartMessage message;
-//    message.set_primary(primary);
-//    message.set_detail("action is not supported with the given database options");
-//    return message.logic_error();
-//}
-
 [[nodiscard]]
 static auto compute_header_crc(const FileHeader &state)
 {
@@ -54,8 +45,8 @@ static auto compute_header_crc(const FileHeader &state)
 static auto sanitize_options(const Options &options) -> Options
 {
     auto sanitized = options;
-    if (sanitized.log_level > MAXIMUM_LOG_LEVEL)
-        sanitized.log_level = DEFAULT_LOG_LEVEL;
+    if (sanitized.log_level >= spdlog::level::n_levels)
+        sanitized.log_level = spdlog::level::off;
     return sanitized;
 }
 
@@ -92,7 +83,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     static constexpr auto MSG = "cannot open database";
     auto sanitized = sanitize_options(options);
 
-    m_prefix = path + "/";
+    m_prefix = path + (path.back() == '/' ? "" :  "/");
     m_sink = sanitized.log_level ? create_sink(path, sanitized.log_level) : create_sink();
     m_logger = create_logger(m_sink, "core");
     initialize_log(*m_logger, path);
@@ -100,7 +91,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
 
     m_store = sanitized.store;
     if (!m_store) {
-        m_store = new DiskStorage;
+        m_store = new PosixStorage;
         m_owns_store = true;
     }
 
@@ -126,7 +117,6 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         }, &wal);
         MAYBE_FORWARD(s, MSG);
         m_wal.reset(wal);
-        m_wal->load_state(state);
     } else {
         m_wal = std::make_unique<DisabledWriteAheadLog>();
     }
@@ -142,14 +132,14 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             sanitized.frame_count,
             sanitized.page_size,
         });
-        if (!r.has_value()) return forward_status(r.error(), MSG);
+        MAYBE_FORWARD(r ? Status::ok() : r.error(), MSG);
         m_pager = std::move(*r);
         m_pager->load_state(state);
     }
 
     {
         auto r = BPlusTree::open(*m_pager, m_sink, sanitized.page_size);
-        if (!r.has_value()) return forward_status(r.error(), MSG);
+        MAYBE_FORWARD(r ? Status::ok() : r.error(), MSG);
         m_tree = std::move(*r);
         m_tree->load_state(state);
     }
@@ -158,9 +148,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     if (is_new) {
         // The first call to root() allocates the root page.
         auto root = m_tree->root(true);
+        MAYBE_FORWARD(root ? Status::ok() : root.error(), MSG);
         CALICO_EXPECT_EQ(m_pager->page_count(), 1);
-        s = !root.has_value() ? root.error() : s;
-        MAYBE_FORWARD(s, MSG);
 
         state.page_count = 1;
         state.header_crc = compute_header_crc(state);
@@ -179,7 +168,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     }
 
     if (s.is_ok() && m_wal->is_enabled())
-        s = m_wal->start_writer();
+        s = m_wal->start_workers();
 
     return forward_status(s, MSG);
 }
@@ -213,30 +202,36 @@ auto Core::destroy() -> Status
     return m_store->remove_directory(m_prefix);
 }
 
-
 auto Core::forward_status(Status s, const std::string &message) -> Status
 {
     if (!s.is_ok()) {
-        m_logger->error(message);
-        m_logger->error("(reason) {}", s.what());
+        m_logger->error("(1/2) {}", message);
+        m_logger->error("(2/2) {}", s.what());
     }
     return s;
 }
 
 auto Core::save_and_forward_status(Status s, const std::string &message) -> Status
 {
-    CALICO_EXPECT_TRUE(m_status.is_ok());
     if (!s.is_ok()) {
-        m_logger->error(message);
-        m_logger->error("(reason) {}", s.what());
-        m_status = s;
+        m_logger->error("(1/2) {}", message);
+        m_logger->error("(2/2) {}", s.what());
+
+        if (m_status.is_ok()) {
+            m_status = s;
+        } else {
+            m_logger->error("(1/2) error status is already set");
+            m_logger->error("(2/2) {}", m_status.what());
+        }
     }
     return s;
 }
 
 auto Core::status() const -> Status
 {
-    return m_pager->status();
+    auto s = m_pager->status();
+    if (s.is_ok()) return m_wal->status();
+    return s;
 }
 
 auto Core::path() const -> std::string
@@ -329,7 +324,7 @@ auto Core::commit() -> Status
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Write a commit record to the WAL.
-    s = m_wal->log_commit();
+    s = m_wal->commit();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
     m_logger->info("commit succeeded");
     m_has_xact = false;
@@ -338,99 +333,108 @@ auto Core::commit() -> Status
 
 auto Core::abort() -> Status
 {
-    CALICO_EXPECT_TRUE(m_has_xact);
     m_logger->info("received abort request");
     static constexpr auto MSG = "could not abort";
-    if (!m_wal->is_enabled()) return Status::ok();
-    auto s = Status::ok();
 
-    if (m_wal->is_writing()) {
-        s = m_wal->stop_writer();
-        MAYBE_FORWARD(s, MSG);
+    if (!m_wal->is_enabled()) {
+        LogMessage message {*m_logger};
+        message.set_primary(MSG);
+        message.set_detail("WAL is not enabled");
+        message.set_hint("WAL must be enabled when database is created");
+        return message.logic_error();
     }
 
-    // This should give us the full images of each updated page belonging to the current transaction, before any changes were made,
-    // in reverse order.
-    s = m_wal->abort_last([this](UndoDescriptor undo) {
-        const auto [id, image] = undo;
-        auto page = m_pager->acquire(PageId {id}, true);
+    if (!m_has_xact) {
+        LogMessage message {*m_logger};
+        message.set_primary(MSG);
+        message.set_detail("a transaction is not active");
+        message.set_hint("start a transaction and try again");
+        return message.logic_error();
+    }
+    auto s = Status::ok();
+
+    if (m_wal->is_working()) {
+        s = m_wal->stop_workers();
+        if (!s.is_ok())
+            forward_status(s, "WAL encountered an error when stopping workers");
+    }
+
+    // This should give us the full images of each updated page belonging to the current transaction, before any changes
+    // were made to it.
+    s = m_wal->start_abort([this](const auto &info) {
+        const auto [pid, lsn, image] = info;
+        auto page = m_pager->acquire(pid, true);
         if (!page.has_value()) return page.error();
 
-        page->undo(undo);
+        page->apply_update(info);
         return m_pager->release(std::move(*page));
     });
-    MAYBE_FORWARD(s, MSG);
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Load database state from the root page file header. We need the new page count to determine which pages we can flush.
     s = load_state();
-    MAYBE_FORWARD(s, MSG);
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     s = m_pager->flush();
-    MAYBE_FORWARD(s, MSG);
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
 
-    // Database state is ALMOST restored if we have made it here.
+    s = m_wal->finish_abort();
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
+
+    // Database state is restored if we have made it here, assuming we can start the worker threads again.
     m_status = Status::ok();
 
     m_logger->info("abort succeeded");
-    s = m_wal->start_writer();
+    s = m_wal->start_workers();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
+    // If we failed starting up the workers, we should be able to call this method again. It won't really do anything but
+    // start the workers on the second round.
     m_has_xact = false;
     return Status::ok();
 }
 
 auto Core::close() -> Status
 {
-    if (m_has_xact) {
+    if (m_has_xact && m_status.is_ok()) {
         LogMessage message {*m_logger};
         message.set_primary("could not close");
         message.set_detail("a transaction is active");
         message.set_hint("finish the transaction and try again");
         return message.logic_error();
     }
-
-    auto s = Status::ok();
-    if (m_wal->is_writing()) {
-        s = m_wal->stop_writer();
-        if (!s.is_ok()) s = forward_status(s, "cannot stop WAL");
+    if (m_wal->is_working()) {
+        auto s = m_wal->stop_workers();
+        if (!s.is_ok()) forward_status(s, "could not stop WAL workers");
     }
     // We already waited on the WAL to be done writing so this should happen immediately.
-    s = m_pager->flush();
-
-    if (!s.is_ok()) s = forward_status(s, "cannot flush pages before stop");
-
-    return s;
+    auto s = m_pager->flush();
+    MAYBE_SAVE_AND_FORWARD(s, "cannot flush pages before stop");
+    return m_status;
 }
 
 auto Core::ensure_consistent_state() -> Status
 {
     static constexpr auto MSG = "cannot ensure consistent database state";
 
-    auto s = m_wal->setup_and_recover(
-        [this](const auto &info) {
-            if (!info.is_commit) {
-                auto page = m_pager->acquire(PageId {info.page_id}, true);
-                if (!page.has_value()) return page.error();
+    const auto apply_update = [this](const auto &info) {
+        auto page = m_pager->acquire(info.pid, true);
+        if (!page.has_value()) return page.error();
 
-                page->redo(info);
-                return m_pager->release(std::move(*page));
-            }
-            return Status::ok();
-        },
-        [this](UndoDescriptor undo) {
-            const auto [id, image] = undo;
-            auto page = m_pager->acquire(PageId {id}, true);
-            if (!page.has_value()) return page.error();
+        page->apply_update(info);
+        return m_pager->release(std::move(*page));
+    };
 
-            page->undo(undo);
-            return m_pager->release(std::move(*page));
-        });
+    auto s = m_wal->start_recovery(apply_update, apply_update);
     MAYBE_FORWARD(s, MSG);
 
     s = load_state();
     MAYBE_FORWARD(s, MSG);
+
     s = m_pager->flush();
-    return forward_status(s, MSG);
+    MAYBE_FORWARD(s, MSG);
+
+    return m_wal->finish_recovery();
 }
 
 auto Core::transaction() -> Transaction
@@ -450,7 +454,6 @@ auto Core::save_state() -> Status
     auto state = read_header(*root);
     m_pager->save_state(state);
     m_tree->save_state(state);
-    m_wal->save_state(state);
     state.header_crc = compute_header_crc(state);
     write_header(*root, state);
 
@@ -476,7 +479,6 @@ auto Core::load_state() -> Status
 
     m_pager->load_state(state);
     m_tree->load_state(state);
-    m_wal->load_state(state);
 
     auto s = m_pager->release(std::move(*root));
     if (s.is_ok() && m_pager->page_count() < before_count) {

@@ -2,7 +2,7 @@
 #define CALICO_STORE_DISK_H
 
 #include "calico/status.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "utils/expect.h"
 #include <filesystem>
 
@@ -62,10 +62,10 @@ private:
     int m_file {};
 };
 
-class DiskStorage: public Storage {
+class PosixStorage : public Storage {
 public:
-    DiskStorage() = default;
-    ~DiskStorage() override = default;
+    PosixStorage() = default;
+    ~PosixStorage() override = default;
     [[nodiscard]] auto create_directory(const std::string&) -> Status override;
     [[nodiscard]] auto remove_directory(const std::string&) -> Status override;
     [[nodiscard]] auto get_children(const std::string&, std::vector<std::string>&) const -> Status override;

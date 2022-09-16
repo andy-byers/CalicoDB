@@ -3,18 +3,18 @@
 
 namespace calico {
 
-static auto copy_status(const char *status) -> std::unique_ptr<char[]>
+static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
 {
     // Status is OK, so there isn't anything to copy.
-    if (!status) return nullptr;
+    if (!data) return nullptr;
 
     // Otherwise, we have to copy a code and a message.
-    const auto size = std::strlen(status) + sizeof(char);
+    const auto size = std::strlen(data) + sizeof(char);
     auto copy = std::make_unique<char[]>(size);
     Bytes bytes {copy.get(), size};
 
-    CALICO_EXPECT_EQ(status[size - 1], '\0');
-    std::strcpy(bytes.data(), status);
+    CALICO_EXPECT_EQ(data[size - 1], '\0');
+    std::strcpy(bytes.data(), data);
     bytes[size - 1] = '\0';
     return copy;
 }
@@ -37,7 +37,7 @@ Status::Status(Code code, const std::string_view &message)
 }
 
 Status::Status(const Status &rhs)
-    : m_data {copy_status(rhs.m_data.get())}
+    : m_data {maybe_copy_data(rhs.m_data.get())}
 {}
 
 Status::Status(Status &&rhs) noexcept
@@ -47,7 +47,7 @@ Status::Status(Status &&rhs) noexcept
 auto Status::operator=(const Status &rhs) -> Status&
 {
     if (this != &rhs)
-        m_data = copy_status(rhs.m_data.get());
+        m_data = maybe_copy_data(rhs.m_data.get());
     return *this;
 }
 

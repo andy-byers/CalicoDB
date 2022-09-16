@@ -15,6 +15,7 @@ class Internal;
 class Node;
 class NodePool;
 class Page;
+struct FileHeader;
 
 // Depends on BufferPool
 class Tree {
@@ -30,7 +31,9 @@ public:
     virtual auto root(bool) -> Result<Node> = 0;
     virtual auto save_state(FileHeader &) const -> void = 0;
     virtual auto load_state(const FileHeader &) -> void = 0;
-    virtual auto TEST_validate_node(PageId) -> void = 0;
+    virtual auto TEST_validate_nodes() -> void = 0;
+    virtual auto TEST_validate_order() -> void = 0;
+    virtual auto TEST_validate_links() -> void = 0;
 };
 
 } // namespace calico

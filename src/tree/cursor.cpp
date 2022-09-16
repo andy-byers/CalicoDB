@@ -2,7 +2,7 @@
 #include "pager/pager.h"
 #include "tree/internal.h"
 #include "tree/node_pool.h"
-#include <spdlog/fmt/fmt.h>
+#include "spdlog/fmt/fmt.h"
 
 namespace calico {
 
@@ -37,7 +37,7 @@ auto CursorInternal::seek_left(Cursor &cursor) -> bool
 {
     CALICO_EXPECT_TRUE(cursor.is_valid());
     CALICO_EXPECT_EQ(cursor.m_position.index, 0);
-    if (cursor.is_first()) {
+    if (is_first(cursor)) {
         invalidate(cursor);
     } else {
         const PageId left {cursor.m_position.ids[Cursor::Position::LEFT]};
@@ -58,7 +58,7 @@ auto CursorInternal::seek_right(Cursor &cursor) -> bool
 {
     CALICO_EXPECT_TRUE(cursor.is_valid());
     CALICO_EXPECT_EQ(cursor.m_position.index, cursor.m_position.cell_count - 1);
-    if (cursor.is_last()) {
+    if (is_last(cursor)) {
         invalidate(cursor);
     } else {
         const PageId right {cursor.m_position.ids[Cursor::Position::RIGHT]};
@@ -70,6 +70,16 @@ auto CursorInternal::seek_right(Cursor &cursor) -> bool
         move_to(cursor, std::move(*next), 0);
     }
     return true;
+}
+
+auto CursorInternal::is_last(const Cursor &cursor) -> bool
+{
+    return cursor.is_valid() && cursor.m_position.is_maximum();
+}
+
+auto CursorInternal::is_first(const Cursor &cursor) -> bool
+{
+    return cursor.is_valid() && cursor.m_position.is_minimum();
 }
 
 auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
@@ -140,16 +150,6 @@ auto Cursor::is_valid() const -> bool
 auto Cursor::status() const -> Status
 {
     return m_status;
-}
-
-auto Cursor::is_last() const -> bool
-{
-    return is_valid() && m_position.is_maximum();
-}
-
-auto Cursor::is_first() const -> bool
-{
-    return is_valid() && m_position.is_minimum();
 }
 
 auto CursorInternal::move_to(Cursor &cursor, Node node, Size index) -> void

@@ -1,7 +1,7 @@
 #include "node.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
-#include <spdlog/fmt/fmt.h>
+#include "spdlog/fmt/fmt.h"
 
 namespace calico {
 
@@ -415,7 +415,7 @@ auto Node::TEST_validate() const -> void
             const auto rhs = read_cell(i + 1);
             if (lhs.key() >= rhs.key()) {
                 fmt::print("(1/2) {}: keys are out of order\n", label);
-                fmt::print("(2/2) {}: {} should be less than {}\n", label, btos(lhs.key()), btos(rhs.key()));
+                fmt::print("(2/2) {}: {} should be less than {}\n", label, lhs.key().to_string(), rhs.key().to_string());
                 std::exit(EXIT_FAILURE);
             }
         }

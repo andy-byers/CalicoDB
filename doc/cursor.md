@@ -3,7 +3,7 @@ In Calico DB, records are accessed exclusively through cursors.
 Cursors provide access to a single record at a time.
 They store their position in the database, and can be used to traverse in either direction.
 Since we are using a B<sup>+</sup>-tree, all records are stored in external nodes.
-Thus, cursors are confined to bottom row of the tree and move around using sibling node links.
+Thus, cursors are confined to the bottom row of the tree and move around using sibling node links.
 
 A valid cursor is one that is positioned on an existing database record, while an invalid cursor is one that is not.
 When a cursor moves out of range, it is marked invalid and cannot be restored.

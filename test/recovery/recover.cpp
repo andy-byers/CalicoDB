@@ -1,7 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <spdlog/fmt/fmt.h>
+#include "spdlog/fmt/fmt.h"
 #include "calico/calico.h"
 #include "tools.h"
 
@@ -48,7 +48,7 @@ auto main(int argc, const char *argv[]) -> int
     }
     Options options;
     Database db;
-    expect_ok(db.open(path, options));
+    expect_ok(db.open(path.string(), options));
     const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.
@@ -60,7 +60,7 @@ auto main(int argc, const char *argv[]) -> int
         const auto key = make_key<KEY_WIDTH>(key_counter++);
         const auto cursor = db.find_exact(stob(key));
         CALICO_EXPECT_TRUE(cursor.is_valid());
-        CALICO_EXPECT_EQ(btos(cursor.key()), key);
+        CALICO_EXPECT_EQ(cursor.key().to_string(), key);
         CALICO_EXPECT_EQ(cursor.value(), value);
         expect_ok(db.erase(stob(key)));
     }

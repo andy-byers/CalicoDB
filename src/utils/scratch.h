@@ -42,7 +42,12 @@ public:
         : m_data {data}
     {}
 
-    auto operator*() -> Bytes
+    auto operator*() -> Bytes&
+    {
+        return m_data;
+    }
+
+    auto operator*() const -> const Bytes&
     {
         return m_data;
     }

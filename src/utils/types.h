@@ -1,9 +1,3 @@
-
-/**
- * References
- * (1) https://en.cppreference.com/w/cpp/utility/exchange
- */
-
 #ifndef CALICO_UTILS_TYPES_H
 #define CALICO_UTILS_TYPES_H
 

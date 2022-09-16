@@ -105,11 +105,12 @@ Performing many modifications outside a transaction is slow, since each operatio
 
 ## TODO
 1. Get everything code reviewed!
-2. Get unit test coverage up
-3. Write documentation
-4. Work on performance
-5. Get the CMake installation to work
-6. Need some way to reduce the file size once many pages become unused
+2. Cleanup of old WAL segments
+3. Get unit test coverage up
+4. Write documentation
+5. Work on performance
+6. Get the CMake installation to work
+7. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
 
 ## Documentation

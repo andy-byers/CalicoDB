@@ -1,15 +1,10 @@
-/**
-*
-* References
-*   (1) https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log-IFile-Format
-*/
-
 #ifndef CALICO_WAL_RECORD_H
 #define CALICO_WAL_RECORD_H
 
 #include "utils/encoding.h"
 #include "utils/types.h"
 #include "wal.h"
+#include "spdlog/fmt/fmt.h"
 
 namespace calico {
 
@@ -47,7 +42,7 @@ struct SegmentId
         if (!is_valid)
             return null();
 
-        return SegmentId {std::stoull(std::string {btos(digits)})};
+        return SegmentId {std::stoull(digits.to_string())};
     }
 
     [[nodiscard]]
@@ -61,65 +56,34 @@ struct SegmentId
         return value;
     }
 
-    std::uint64_t value {};
-};
-
-struct BlockNumber: public EqualityComparableTraits<SegmentId> {
-    using Hash = IndexHash<BlockNumber>;
-
-    constexpr BlockNumber() noexcept = default;
-
-    template<class U>
-    constexpr explicit BlockNumber(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
-
-    constexpr explicit operator std::uint64_t() const
+    auto operator++() -> SegmentId&
     {
-        return value;
+        value++;
+        return *this;
+    }
+
+    auto operator++(int) -> SegmentId
+    {
+        auto temp = *this;
+        ++(*this);
+        return temp;
+    }
+
+    auto operator--() -> SegmentId&
+    {
+        CALICO_EXPECT_FALSE(is_null());
+        value--;
+        return *this;
+    }
+
+    auto operator--(int) -> SegmentId
+    {
+        auto temp = *this;
+        --(*this);
+        return temp;
     }
 
     std::uint64_t value {};
-};
-
-struct BlockOffset: public EqualityComparableTraits<SegmentId> {
-    using Hash = IndexHash<BlockNumber>;
-
-    constexpr BlockOffset() noexcept = default;
-
-    template<class U>
-    constexpr explicit BlockOffset(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
-
-    constexpr explicit operator std::uint64_t() const
-    {
-        return value;
-    }
-
-    std::uint64_t value {};
-};
-
-struct LogPosition {
-
-    [[nodiscard]]
-    auto is_start() const -> bool
-    {
-        return number == 0 && offset == 0;
-    }
-
-    BlockNumber number;
-    BlockOffset offset;
-};
-
-struct RecordPosition {
-    SegmentId id;
-    LogPosition pos;
-};
-
-struct LogSegment {
-    SegmentId id;
-    SequenceId first_lsn;
 };
 
 struct WalRecordHeader {
@@ -130,15 +94,18 @@ struct WalRecordHeader {
         LAST   = '\xD1',
     };
 
-    std::uint64_t lsn;
+    [[nodiscard]]
+    static auto contains_record(BytesView data) -> bool
+    {
+        return data.size() > sizeof(WalRecordHeader) && data[6] != '\x00';
+    }
+
     std::uint32_t crc;
     std::uint16_t size;
     Type type;
-    Byte pad; ///< Padding byte that should always be zero.
 };
 
-// TODO: May need some compiler intrinsics to make this actually true on all platforms...
-static_assert(sizeof(WalRecordHeader) == 16);
+static_assert(sizeof(WalRecordHeader) == 8);
 
 enum WalPayloadType: Byte {
     COMMIT     = '\xFF',
@@ -146,30 +113,36 @@ enum WalPayloadType: Byte {
     FULL_IMAGE = '\xDD',
 };
 
-struct WalDeltasHeader {
-    std::uint64_t page_id;
-    std::uint16_t count;
-};
-
 // Routines for working with WAL records.
 auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto contains_record(BytesView in) -> bool;
 [[nodiscard]] auto read_wal_record_header(BytesView in) -> WalRecordHeader;
-[[nodiscard]] auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
-[[nodiscard]] auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size;
-auto encode_commit_payload(Bytes in) -> void;
-[[nodiscard]] auto decode_commit_payload(const WalRecordHeader&, BytesView in) -> RedoDescriptor;
-[[nodiscard]] auto decode_deltas_payload(const WalRecordHeader&, BytesView in) -> RedoDescriptor;
-[[nodiscard]] auto decode_full_image_payload(BytesView in) -> UndoDescriptor;
 [[nodiscard]] auto split_record(WalRecordHeader &lhs, BytesView payload, Size available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 [[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
 
+// Routines for working with WAL payloads.
+[[nodiscard]] auto encode_deltas_payload(SequenceId lsn, PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
+[[nodiscard]] auto encode_full_image_payload(SequenceId lsn, PageId page_id, BytesView image, Bytes out) -> Size;
+[[nodiscard]] auto encode_commit_payload(SequenceId lsn, Bytes out) -> Size;
+[[nodiscard]] auto decode_commit_payload(BytesView in) -> CommitDescriptor;
+[[nodiscard]] auto decode_deltas_payload(BytesView in) -> DeltasDescriptor;
+[[nodiscard]] auto decode_full_image_payload(BytesView in) -> FullImageDescriptor;
+
+static constexpr Size MINIMUM_PAYLOAD_SIZE {sizeof(WalPayloadType) + sizeof(SequenceId)};
+
 [[nodiscard]]
-inline auto read_payload_type(BytesView payload) -> WalPayloadType
+inline auto decode_payload_type(BytesView in) -> WalPayloadType
 {
-    CALICO_EXPECT_FALSE(payload.is_empty());
-    return WalPayloadType {payload[0]};
+    CALICO_EXPECT_GE(in.size(), MINIMUM_PAYLOAD_SIZE);
+    return WalPayloadType {in[0]};
+}
+
+[[nodiscard]]
+inline auto decode_lsn(BytesView in) -> SequenceId
+{
+    CALICO_EXPECT_GE(in.size(), MINIMUM_PAYLOAD_SIZE);
+    return SequenceId {get_u64(in.advance())};
 }
 
 } // namespace calico

@@ -2,24 +2,23 @@
 #include <array>
 #include <filesystem>
 #include <vector>
-#include <unordered_set>
-
 #include <gtest/gtest.h>
-
-#include "calico/transaction.h"
 #include "core/core.h"
 #include "core/header.h"
 #include "fakes.h"
-#include "store/disk.h"
+#include "storage/posix_storage.h"
 #include "tools.h"
 #include "tree/bplus_tree.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
 #include "wal/basic_wal.h"
 
-namespace {
+namespace calico {
 
-using namespace calico;
+namespace internal {
+    extern std::uint32_t random_seed;
+} // namespace internal
+
 namespace fs = std::filesystem;
 
 template<class T>
@@ -38,11 +37,10 @@ public:
         options.page_size = 0x200;
         options.frame_count = 16;
 
-        store = std::make_unique<MockStorage>();
+        store = std::make_unique<HeapStorage>();
         core = std::make_unique<Core>();
         const auto s = core->open("test", options);
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
-        mock = dynamic_cast<MockStorage &>(*store).get_mock_random_editor(DATA_FILENAME);
 
 //        RecordGenerator::Parameters generator_param;
 //        generator_param.mean_key_size = 20;
@@ -67,9 +65,8 @@ public:
         ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
     }
 
-    Random random {0};
-    std::unique_ptr<MockStorage> store;
-    MockRandomEditor *mock {};
+    Random random {internal::random_seed};
+    std::unique_ptr<Storage> store;
     std::vector<Record> records;
     std::unique_ptr<Core> core;
 };
@@ -131,7 +128,7 @@ TEST_F(BasicDatabaseTests, Inserts)
     ASSERT_TRUE(expose_message(db.open(ROOT, options)));
 
     RecordGenerator generator;
-    Random random {0};
+    Random random {internal::random_seed};
 
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         const auto records = generator.generate(random, GROUP_SIZE);
@@ -155,7 +152,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
 
     auto s = Status::ok();
     RecordGenerator generator;
-    Random random {0};
+    Random random {internal::random_seed};
 
     const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
     auto itr = cbegin(records);
@@ -179,7 +176,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(db, key);
         ASSERT_TRUE(c.is_valid());
-        ASSERT_EQ(btos(c.key()), key);
+        ASSERT_EQ(c.key().to_string(), key);
         ASSERT_EQ(c.value(), value);
     }
     ASSERT_TRUE(db.close().is_ok());
@@ -260,44 +257,53 @@ public:
             Size counter {};
             for (auto c = db.first(); counter < N; ++c, ++counter) {
                 const auto key = make_key<KEY_WIDTH>(counter);
-                ASSERT_EQ(btos(c.key()), key);
+                ASSERT_EQ(c.key().to_string(), key);
                 ASSERT_EQ(c.value(), key);
             }
         }
     }
 
-    auto distributed_reader() -> void
+    auto distributed_reader(Size r) -> void
     {
         static constexpr Size MAX_ROUND_SIZE {10};
         // Try to spread the cursors out across the database.
-        const auto first = random.next_int(NUM_RECORDS - 1);
+        const auto first = r * NUM_RECORDS % NUM_RECORDS;
         for (auto i = first; i < NUM_RECORDS; ++i) {
             auto c = db.find(make_key<KEY_WIDTH>(i));
 
             for (auto j = i; j < std::min(i + MAX_ROUND_SIZE, NUM_RECORDS); ++j, ++c) {
                 const auto key = make_key<KEY_WIDTH>(j);
                 ASSERT_TRUE(c.is_valid());
-                ASSERT_EQ(btos(c.key()), key);
+                ASSERT_EQ(c.key().to_string(), key);
                 ASSERT_EQ(c.value(), key);
             }
         }
     }
 
-    Random random {42};
+    Random random {internal::random_seed};
     Database db;
 };
 
 TEST_F(ReaderTests, SingleReader)
 {
-    distributed_reader();
-    localized_reader();
+    for (Size x {}; x < 1'000; ++x) {
+
+        std::vector<std::string> strings;
+        for (Size i {}; i < NUM_RECORDS; ++i) {
+            auto c = db.find(make_key<KEY_WIDTH>(i));
+            auto s = c.value();
+            strings.emplace_back(std::move(s));
+        }
+    }
+//    distributed_reader(0);
+//    localized_reader();
 }
 
 TEST_F(ReaderTests, ManyDistributedReaders)
 {
     std::vector<std::thread> readers;
     for (Size i {}; i < options.frame_count * 2; ++i)
-        readers.emplace_back(std::thread {[this] {distributed_reader();}});
+        readers.emplace_back(std::thread {[this, i] {distributed_reader(i);}});
     for (auto &reader: readers)
         reader.join();
 }
@@ -338,7 +344,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //
 //    for (const auto &[key, value]: db.records) {
 //        auto c = tools::find(*db.core, key);
-//        ASSERT_EQ(btos(c.key()), key);
+//        ASSERT_EQ(c.key().to_string(), key);
 //        ASSERT_EQ(c.value(), value);
 //    }
 //}
@@ -509,7 +515,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //        fs::remove_all(BASE, ignore);
 //    }
 //
-//    Random random {0};
+//    Random_ random {0};
 //    Options options;
 //    RecordGenerator generator;
 //};
@@ -559,7 +565,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //    param.spread = 20;
 //    param.is_unique = true;
 //    RecordGenerator generator {param};
-//    Random random {0};
+//    Random random {internal::random_seed};
 //
 //    // Make sure the database does not exist already.
 //    std::error_code ignore;
@@ -608,7 +614,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 ////        param.spread = 15;
 ////        param.is_unique = true;
 ////        RecordGenerator generator {param};
-////        Random random {0};
+////        Random random {internal::random_seed};
 ////
 ////        // Make sure the database does not exist already.
 ////        std::error_code ignore;
@@ -704,7 +710,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //        return {};
 //    }
 //
-//    Random random {0};
+//    Random random {internal::random_seed};
 //    MockDirectory *mock {};
 //    MockFile *data_mock {};
 //    std::vector<Record> records;

@@ -2,8 +2,8 @@
  * Very loosely based off of https://medium.com/@koushikmohan/an-analysis-of-2q-cache-replacement-algorithms-21acceae672a
  */
 
-#ifndef CALICO_POOL_PAGE_CACHE_H
-#define CALICO_POOL_PAGE_CACHE_H
+#ifndef CALICO_PAGER_PAGE_CACHE_H
+#define CALICO_PAGER_PAGE_CACHE_H
 
 #include "framer.h"
 #include "utils/cache.h"
@@ -97,18 +97,17 @@ public:
         return m_hot.end();
     }
 
-    template<class Callback>
-    auto find_entry(const Callback &callback) -> Iterator
+    template<class Predicate>
+    auto find_for_replacement(const Predicate &predicate) -> Iterator
     {
-        // Search through the warm cache first. m_warm.begin() should give the last element placed into that cache, and
-        // prev(m_warm.end()) the last.
+        // Search through the warm cache first. m_warm.begin() should give the last element placed into that cache.
         for (auto itr = m_warm.begin(); itr != m_warm.end(); ++itr) {
-            auto [frame_id, dirty_itr] = itr->second;
-            if (callback(itr->first, frame_id, dirty_itr)) return itr;
+            auto [frame_id, dirty_token] = itr->second;
+            if (predicate(itr->first, frame_id, dirty_token)) return itr;
         }
         for (auto itr = m_hot.begin(); itr != m_hot.end(); ++itr) {
-            auto [frame_id, dirty_itr] = itr->second;
-            if (callback(itr->first, frame_id, dirty_itr)) return itr;
+            auto [frame_id, dirty_token] = itr->second;
+            if (predicate(itr->first, frame_id, dirty_token)) return itr;
         }
         return end();
     }
@@ -126,4 +125,4 @@ private:
 
 } // namespace calico
 
-#endif // CALICO_POOL_PAGE_CACHE_H
+#endif // CALICO_PAGER_PAGE_CACHE_H

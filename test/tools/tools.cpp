@@ -28,7 +28,8 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
     Size num_collisions {};
 
     while (itr != records.end()) {
-        auto key = random_string(random, min_ks, max_ks);
+        const auto ks = random.get(min_ks, max_ks);
+        auto key = random.get<std::string>('\x00', '\xFF', ks);
         if (is_sequential) {
             if (set.find(key) != end(set)) {
                 CALICO_EXPECT_LT(num_collisions, num_records);
@@ -37,8 +38,9 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
             }
             set.emplace(key);
         }
+        const auto vs = random.get(min_vs, max_vs);
         itr->key = std::move(key);
-        itr->value = random_string(random, min_vs, max_vs);
+        itr->value = random.get<std::string>('\x00', '\xFF', vs);
         itr++;
     }
     if (is_sequential)

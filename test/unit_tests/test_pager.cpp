@@ -100,7 +100,6 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     registry.put(PageId {3UL}, FrameNumber {3UL});
     ASSERT_EQ(registry.size(), 6);
 
-    // Reference these entries again, causing them to be placed in the hot cache.
     ASSERT_EQ(registry.get(PageId {11UL})->second.frame_id, 11UL);
     ASSERT_EQ(registry.get(PageId {12UL})->second.frame_id, 12UL);
     ASSERT_EQ(registry.get(PageId {13UL})->second.frame_id, 13UL);
@@ -115,7 +114,7 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
         return false;
     };
 
-    auto itr = registry.find_entry(callback);
+    auto itr = registry.find_for_replacement(callback);
     ASSERT_EQ(itr, registry.end());
 }
 
@@ -134,7 +133,6 @@ public:
 
     ~FramerTests() override = default;
 
-    Random random {0};
     DisabledWriteAheadLog wal;
     std::unique_ptr<HeapStorage> home;
     std::unique_ptr<Framer> framer;
@@ -184,14 +182,14 @@ auto read_from_page(const Page &page, Size size) -> std::string
     return message;
 }
 
-class PagerTests : public TestWithMock {
+class PagerTests : public TestOnHeap {
 public:
     static constexpr Size frame_count {32};
     static constexpr Size page_size {0x100};
     std::string test_message {"Hello, world!"};
 
     explicit PagerTests()
-          : wal {std::make_unique<DisabledWriteAheadLog>()}
+        : wal {std::make_unique<DisabledWriteAheadLog>()}
     {
         pager = *BasicPager::open({
             PREFIX,
@@ -203,11 +201,10 @@ public:
             frame_count,
             page_size,
         });
-        mock = mock_store().get_mock_random_editor(PREFIX + std::string(DATA_FILENAME));
     }
 
     ~PagerTests() override = default;
-    
+
     [[nodiscard]]
     auto allocate_write(const std::string &message) const
     {
@@ -216,7 +213,7 @@ public:
         write_to_page(*r, message);
         return std::move(*r);
     }
-    
+
     [[nodiscard]]
     auto allocate_write_release(const std::string &message) const
     {
@@ -253,8 +250,6 @@ public:
         return message;
     }
 
-    Random random {0};
-    MockRandomEditor *mock {};
     Status status {Status::ok()};
     bool has_xact {};
     std::unique_ptr<WriteAheadLog> wal;
@@ -357,10 +352,6 @@ TEST_F(PagerTests, SanityCheck)
 {
     const auto ids = generate_id_strings(500);
 
-    using testing::AtLeast;
-    EXPECT_CALL(*mock, read).Times(AtLeast(frame_count));
-    EXPECT_CALL(*mock, write).Times(AtLeast(frame_count));
-
     for (const auto &id: ids)
         [[maybe_unused]] const auto unused = allocate_write_release(id);
 
@@ -369,4 +360,4 @@ TEST_F(PagerTests, SanityCheck)
     }
 }
 
-} // cco
+} // namespace calico

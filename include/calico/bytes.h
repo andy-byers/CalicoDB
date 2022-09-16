@@ -1,5 +1,5 @@
 /*
- * (1) https://github.com/google/leveldb/blob/main/include/leveldb/slice.h
+ * Slice objects based off of https://github.com/google/leveldb/blob/main/include/leveldb/slice.h.
  */
 
 #ifndef CALICO_BYTES_H
@@ -7,302 +7,276 @@
 
 #include <cassert>
 #include <cstring>
-#include "options.h"
+#include <string>
+#include "common.h"
 
 namespace calico {
 
-/**
- * Specifies an ordering between two entities.
- */
 enum class ThreeWayComparison {
-    LT = -1, ///< Less than
-    EQ = 0, ///< Equal to
-    GT = 1, ///< Greater than
+    LT = -1,
+    EQ = 0,
+    GT = 1,
 };
 
 namespace impl {
 
-    /**
-     * An internal class representing an unowned sequence of bytes.
-     *
-     * This class should only be used through the Bytes and BytesView aliases, since it only works with byte sequences.
-     *
-     * @see Bytes
-     * @see BytesView
-     * @tparam Pointer The underlying pointer type. Must be a Byte* or const Byte*.
-     */
-    template<class Pointer>
-    class Slice {
+    template<
+        class SelfType,
+        class ConstType,
+        class ValueType
+    >
+    class SliceTraits {
     public:
-        using Value = std::remove_pointer_t<Pointer>;
-
-        /**
-         * Create an empty slice.
-         */
-        constexpr Slice() noexcept = default;
-
-        /**
-         * Create a slice from another slice.
-         *
-         * This constructor exists to allow implicit conversions from Bytes to BytesView.
-         *
-         * @tparam Q The other slice pointer type.
-         * @param rhs The other slice.
-         */
-        template<class Q>
-        constexpr Slice(Slice<Q> rhs) noexcept
-            : Slice {rhs.data(), rhs.size()} {}
-
-        /**
-         * Create a slice from a pointer and a length.
-         *
-         * The caller must guarantee that the memory used to create this slice is valid.
-         *
-         * @tparam Q The pointer type.
-         * @param data A pointer to the start of a sequence.
-         * @param size The length of the sequence in bytes.
-         */
-        template<class Q>
-        constexpr Slice(Q data, Size size) noexcept
-            : m_data {data},
-              m_size {size} {}
-
-        /**
-         * Get a reference to the element at a specified index.
-         *
-         * @param index The index of the element.
-         * @return A const reference to the element.
-         */
-        constexpr auto operator[](Size index) const noexcept -> const Value&
-        {
-            assert(index < m_size);
-            return m_data[index];
-        }
-
-        /**
-         * Get a reference to the element at a specified index.
-         *
-         * @param index The index of the element.
-         * @return A reference to the element.
-         */
-        constexpr auto operator[](Size index) noexcept -> Value&
-        {
-            assert(index < m_size);
-            return m_data[index];
-        }
-
-        /**
-         * Determine if the slice is empty.
-         *
-         * @return True if the slice has zero length, false otherwise.
-         */
         [[nodiscard]]
         constexpr auto is_empty() const noexcept -> bool
         {
-            return m_size == 0;
+            return self().size() == 0;
         }
 
-        /**
-         * Get the length of the slice.
-         *
-         * @return The length in elements.
-         */
-        [[nodiscard]]
-        constexpr auto size() const noexcept -> Size
+        constexpr auto operator[](Size index) const noexcept -> const ValueType&
         {
-            return m_size;
+            assert(index < self().size());
+            return self().data()[index];
         }
 
-        /**
-         * Get a copy of the slice.
-         *
-         * @return A copy of the slice.
-         */
-        [[nodiscard]]
-        constexpr auto copy() const -> Slice
+        constexpr auto operator[](Size index) noexcept -> ValueType&
         {
-            return *this;
+            assert(index < self().size());
+            return self().data()[index];
         }
 
-        /**
-         * Create another slice out of a sub-section of this slice.
-         *
-         * @param offset The offset of the view in elements.
-         * @param size The size of the view in elements.
-         * @return The new slice.
-         */
         [[nodiscard]]
-        constexpr auto range(Size offset, Size size) const noexcept -> Slice
+        constexpr auto range(Size offset, Size size) const noexcept -> SelfType
         {
-            assert(size <= m_size);
-            assert(offset <= m_size);
-            assert(offset + size <= m_size);
-            return Slice {m_data + offset, size};
+            assert(size <= self().size());
+            assert(offset <= self().size());
+            assert(offset + size <= self().size());
+
+            // TODO: Is this a valid use of const_cast()? Bytes instances must be constructed with a non-const pointer to Byte, but this method is
+            //       const, causing us to hit the const overload of data(). In Bytes, the range we get back can be used to change the underlying data,
+            //       but the act of creating the range itself does not modify anything. We're really just casting our data pointer back to its own
+            //       type. We could easily give Bytes and BytesView their own copies of this method with a bit more code.
+            return SelfType {const_cast<ValueType*>(self().data()) + offset, size};
         }
 
-        /**
-         * Create another slice out of a sub-section of this slice.
-         *
-         * @param offset The offset of the view in elements.
-         * @return The new slice, spanning from the given offset to the end.
-         */
         [[nodiscard]]
-        constexpr auto range(Size offset) const noexcept -> Slice
+        constexpr auto range(Size offset) const noexcept -> SelfType
         {
-            assert(m_size >= offset);
-            return range(offset, m_size - offset);
+            assert(offset <= self().size());
+            return range(offset, self().size() - offset);
         }
 
-        /**
-         * Get the underlying pointer.
-         *
-         * @return The underlying pointer.
-         */
         [[nodiscard]]
-        constexpr auto data() const noexcept -> Pointer
+        constexpr auto copy() const noexcept -> SelfType
         {
-            return m_data;
+            return self();
         }
 
-        /**
-         * Get the underlying pointer.
-         *
-         * @return The underlying pointer.
-         */
-        [[nodiscard]]
-        constexpr auto data() noexcept -> Pointer
-        {
-            return m_data;
-        }
-
-        /**
-         * Invalidate the slice.
-         */
         constexpr auto clear() noexcept -> void
         {
-            m_data = nullptr;
-            m_size = 0;
+            auto &base = self();
+            base.set_data(nullptr);
+            base.set_size(0);
         }
 
-        /**
-         * Move the beginning of the slice forward.
-         *
-         * @param n The number of elements to advance_cursor by.
-         * @return A copy of this slice for chaining.
-         */
-        constexpr auto advance(Size n = 1) noexcept -> Slice&
+        constexpr auto advance(Size n = 1) noexcept -> SelfType&
         {
-            assert(n <= m_size);
-            m_data += n;
-            m_size -= n;
-            return *this;
+            assert(n <= self().size());
+            self().set_data(self().data() + n);
+            self().set_size(self().size() - n);
+            return self();
         }
 
-        /**
-         * Reduce the length of the slice.
-         *
-         * @param n The number of elements to reduce the length by.
-         * @return A copy of this slice for chaining.
-         */
-        constexpr auto truncate(Size size) noexcept -> Slice&
+        constexpr auto truncate(Size size) noexcept -> SelfType&
         {
-            assert(size <= m_size);
-            m_size = size;
-            return *this;
+            assert(size <= self().size());
+            self().set_size(size);
+            return self();
         }
 
-        template<class T>
         [[nodiscard]]
-        constexpr auto starts_with(const T &rhs) const noexcept -> bool
+        constexpr auto starts_with(const ValueType *rhs) const noexcept -> bool
         {
-            if (rhs.size() > m_size)
+            // NOTE: rhs must be null-terminated.
+            const auto size = std::char_traits<ValueType>::length(rhs);
+            if (size > self().size())
                 return false;
-            return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
+            return std::memcmp(self().data(), rhs, size) == 0;
+        }
+
+        [[nodiscard]]
+        constexpr auto starts_with(ConstType rhs) const noexcept -> bool
+        {
+            if (rhs.size() > self().size())
+                return false;
+            return std::memcmp(self().data(), rhs.data(), rhs.size()) == 0;
+        }
+
+        [[nodiscard]]
+        auto to_string() const noexcept -> std::string
+        {
+            return std::string(self().data(), self().size());
         }
 
     private:
-        Pointer m_data {}; ///< Pointer to the beginning of the data.
-        Size m_size {}; ///< Number of elements in the slice.
+        [[nodiscard]]
+        constexpr auto self() -> SelfType&
+        {
+            return static_cast<SelfType&>(*this);
+        }
+
+        [[nodiscard]]
+        constexpr auto self() const -> const SelfType&
+        {
+            return static_cast<const SelfType&>(*this);
+        }
+
+        friend SelfType;
+        SliceTraits() = default;
     };
 
-} // impl
+} // namespace impl
 
-/**
- * Represents an unowned, mutable sequence of bytes.
- */
-using Bytes = impl::Slice<Byte*>;
+class Bytes;
 
-/**
- * Represents an unowned, immutable sequence of bytes.
- */
-using BytesView = impl::Slice<const Byte*>;
+class BytesView final: public impl::SliceTraits<BytesView, BytesView, const Byte> {
+public:
+    // Implicit conversion from Bytes to BytesView. Not allowed the other way.
+    constexpr BytesView(Bytes data) noexcept;
 
-/**
- * Create an immutable slice from a string.
- *
- * @param data The string.
- * @return The resulting immutable slice.
- */
-inline auto stob(const std::string &data) noexcept -> BytesView
-{
-   return {data.data(), data.size()};
-}
+    constexpr BytesView() noexcept = default;
 
-inline auto stob(const std::string_view &data) noexcept -> BytesView
+    // WARNING: The data passed in here must be null-terminated.
+    constexpr BytesView(const Byte *data) noexcept
+        : BytesView {data, std::char_traits<Byte>::length(data)}
+    {
+        assert(data != nullptr);
+    }
+
+    constexpr BytesView(const Byte *data, Size size) noexcept
+        : m_data {data},
+          m_size {size}
+    {
+        assert(data != nullptr);
+    }
+
+    constexpr BytesView(std::string_view rhs) noexcept
+        : BytesView {rhs.data(), rhs.size()} {}
+
+
+    BytesView(const std::string &rhs) noexcept
+        : BytesView {rhs.data(), rhs.size()} {}
+
+    [[nodiscard]]
+    constexpr auto data() const noexcept -> const Byte*
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    constexpr auto size() const noexcept -> Size
+    {
+        return m_size;
+    }
+
+private:
+    friend class impl::SliceTraits<BytesView, BytesView, const Byte>;
+
+    constexpr auto set_data(const Byte *data) noexcept -> void
+    {
+        m_data = data;
+    }
+
+    constexpr auto set_size(Size size) noexcept -> void
+    {
+        m_size = size;
+    }
+
+    const Byte *m_data {};
+    Size m_size {};
+};
+
+class Bytes final: public impl::SliceTraits<Bytes, BytesView, Byte> {
+public:
+    constexpr Bytes() noexcept = default;
+
+    // WARNING: The data passed in here must be null-terminated.
+    constexpr Bytes(Byte *data) noexcept
+        : Bytes {data, std::char_traits<Byte>::length(data)}
+    {
+        assert(data != nullptr);
+    }
+
+    constexpr Bytes(Byte *data, Size size) noexcept
+        : m_data {data},
+          m_size {size}
+    {
+        assert(data != nullptr);
+    }
+
+    Bytes(std::string &rhs) noexcept
+        : Bytes {rhs.data(), rhs.size()} {}
+
+    [[nodiscard]]
+    constexpr auto data() noexcept -> Byte*
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    constexpr auto data() const noexcept -> const Byte*
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    constexpr auto size() const noexcept -> Size
+    {
+        return m_size;
+    }
+
+private:
+    friend class impl::SliceTraits<Bytes, BytesView, Byte>;
+
+    constexpr auto set_data(Byte *data) noexcept -> void
+    {
+        m_data = data;
+    }
+
+    constexpr auto set_size(Size size) noexcept -> void
+    {
+        m_size = size;
+    }
+
+    Byte *m_data {};
+    Size m_size {};
+};
+
+constexpr BytesView::BytesView(Bytes data) noexcept
+    : BytesView {data.data(), data.size()} {}
+
+inline auto stob(std::string &data) noexcept -> Bytes
 {
     return {data.data(), data.size()};
 }
 
-/**
- * Create a mutable slice from a string.
- *
- * @param data The string.
- * @return The resulting mutable slice.
- */
-inline auto stob(std::string &data) noexcept -> Bytes
+inline constexpr auto stob(char *data) noexcept -> Bytes
 {
-   return {data.data(), data.size()};
+    return {data};
 }
 
-/**
-* Create a mutable slice from a C-style string.
-*
-* @param data The C-style string.
-* @return The resulting mutable slice.
-*/
-inline auto stob(char *data) noexcept -> Bytes
+inline constexpr auto stob(std::string_view data) noexcept -> BytesView
 {
-    return {data, std::strlen(data)};
+    return {data};
 }
 
-/**
- * Create an immutable slice from a C-style string.
- *
- * @param data The C-style string.
- * @return The resulting immutable slice.
- */
-inline auto stob(const char *data) noexcept -> BytesView
+inline constexpr auto stob(const char *data) noexcept -> BytesView
 {
-    return {data, std::strlen(data)};
+    return {data};
 }
 
-/**
- * Create a string out of a slice.
- *
- * @param data The slice.
- * @return The resulting string.
- */
-inline auto btos(BytesView data) -> std::string_view
-{
-   return {data.data(), data.size()};
-}
-
-/**
- * Determine if one slice is less than, equal to, or greater than, another slice.
- *
- * @param lhs The first slice.
- * @param rhs The second slice.
- * @return An enum value representing the order between the two slices.
+/*
+ * Three-way comparison based off the one in LevelDB's slice.h.
  */
 inline auto compare_three_way(BytesView lhs, BytesView rhs) noexcept -> ThreeWayComparison
 {

@@ -1,3 +1,6 @@
+/*
+ * Based off of RocksDB's WorkQueue class.
+ */
 #ifndef CALICO_UTILS_QUEUE_H
 #define CALICO_UTILS_QUEUE_H
 
@@ -10,13 +13,6 @@
 
 namespace calico {
 
-/**
- * A simple queue with internal synchronization.
- *
- * Modified from RocksDB's WorkQueue class.
- *
- * @tparam T Must be CopyConstructible!
- */
 template<class T>
 class Queue final {
 public:
@@ -57,13 +53,6 @@ public:
         return t;
     }
 
-    auto restart() -> void
-    {
-        std::lock_guard lock {m_mu};
-        CALICO_EXPECT_TRUE(m_is_finished);
-        m_is_finished = false;
-    }
-
     auto finish() -> void
     {
         {
@@ -72,15 +61,6 @@ public:
         }
         m_empty_cv.notify_all();
         m_full_cv.notify_all();
-        m_finish_cv.notify_all();
-    }
-
-    auto wait_until_finish() -> void
-    {
-        std::unique_lock lock {m_mu};
-        m_finish_cv.wait(lock, [this] {
-            return m_is_finished;
-        });
     }
 
 private:
@@ -94,7 +74,6 @@ private:
 
     std::condition_variable m_empty_cv;
     std::condition_variable m_full_cv;
-    std::condition_variable m_finish_cv;
     mutable std::mutex m_mu;
     std::deque<T> m_queue;
     Size m_capacity {};

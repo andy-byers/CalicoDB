@@ -1,10 +1,7 @@
-//
-// Created by andy-byers on 8/16/22.
-//
-
 #ifndef CALICO_PAGE_DELTAS_H
 #define CALICO_PAGE_DELTAS_H
 
+#include "utils/expect.h"
 #include "wal/wal.h"
 
 namespace calico {

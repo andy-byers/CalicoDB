@@ -1,13 +1,13 @@
-#include "disk.h"
-#include <fcntl.h>
-#include "system.h"
+#include "posix_storage.h"
+#include "posix_system.h"
 #include "utils/expect.h"
 #include "utils/logging.h"
+#include <fcntl.h>
 
 namespace calico {
 
 namespace fs = std::filesystem;
-static constexpr int FILE_PERMISSIONS {0644}; ///< -rw-r--r--
+static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
 
 static auto read_file_at(int file, Bytes &out, Size offset)
 {
@@ -85,12 +85,12 @@ auto AppendFileWriter::sync() -> Status
     return system::file_sync(m_file);
 }
 
-auto DiskStorage::resize_file(const std::string &path, Size size) -> Status
+auto PosixStorage::resize_file(const std::string &path, Size size) -> Status
 {
     return system::file_resize(path, size);
 }
 
-auto DiskStorage::rename_file(const std::string &old_path, const std::string &new_path) -> Status
+auto PosixStorage::rename_file(const std::string &old_path, const std::string &new_path) -> Status
 {
     std::error_code code;
     fs::rename(old_path, new_path, code);
@@ -98,17 +98,17 @@ auto DiskStorage::rename_file(const std::string &old_path, const std::string &ne
     return Status::ok();
 }
 
-auto DiskStorage::remove_file(const std::string &path) -> Status
+auto PosixStorage::remove_file(const std::string &path) -> Status
 {
     return system::file_remove(path);
 }
 
-auto DiskStorage::file_exists(const std::string &path) const -> Status
+auto PosixStorage::file_exists(const std::string &path) const -> Status
 {
     return system::file_exists(path);
 }
 
-auto DiskStorage::file_size(const std::string &path, Size &out) const -> Status
+auto PosixStorage::file_size(const std::string &path, Size &out) const -> Status
 {
     auto r = system::file_size(path);
     if (r.has_value()) {
@@ -118,7 +118,7 @@ auto DiskStorage::file_size(const std::string &path, Size &out) const -> Status
     return r.error();
 }
 
-auto DiskStorage::get_children(const std::string &path, std::vector<std::string> &out) const -> Status
+auto PosixStorage::get_children(const std::string &path, std::vector<std::string> &out) const -> Status
 {
     std::error_code error;
     std::filesystem::directory_iterator itr {path, error};
@@ -129,7 +129,7 @@ auto DiskStorage::get_children(const std::string &path, std::vector<std::string>
     return Status::ok();
 }
 
-auto DiskStorage::open_random_reader(const std::string &path, RandomReader **out) -> Status
+auto PosixStorage::open_random_reader(const std::string &path, RandomReader **out) -> Status
 {
     const auto fd = system::file_open(path, O_RDONLY, FILE_PERMISSIONS);
     if (fd.has_value()) {
@@ -139,7 +139,7 @@ auto DiskStorage::open_random_reader(const std::string &path, RandomReader **out
     return fd.error();
 }
 
-auto DiskStorage::open_random_editor(const std::string &path, RandomEditor **out) -> Status
+auto PosixStorage::open_random_editor(const std::string &path, RandomEditor **out) -> Status
 {
     const auto fd = system::file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS);
     if (fd.has_value()) {
@@ -149,7 +149,7 @@ auto DiskStorage::open_random_editor(const std::string &path, RandomEditor **out
     return fd.error();
 }
 
-auto DiskStorage::open_append_writer(const std::string &path, AppendWriter **out) -> Status
+auto PosixStorage::open_append_writer(const std::string &path, AppendWriter **out) -> Status
 {
     const auto fd = system::file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS);
     if (fd.has_value()) {
@@ -159,12 +159,12 @@ auto DiskStorage::open_append_writer(const std::string &path, AppendWriter **out
     return fd.error();
 }
 
-auto DiskStorage::create_directory(const std::string &path) -> Status
+auto PosixStorage::create_directory(const std::string &path) -> Status
 {
     return system::dir_create(path, 0755);
 }
 
-auto DiskStorage::remove_directory(const std::string &path) -> Status
+auto PosixStorage::remove_directory(const std::string &path) -> Status
 {
     return system::dir_remove(path);
 }

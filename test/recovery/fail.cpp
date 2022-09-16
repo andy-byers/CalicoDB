@@ -35,7 +35,7 @@ auto main(int argc, const char *argv[]) -> int
     const auto value_path = path / "values";
     const auto num_committed = std::stoul(argv[2]);
     const auto max_database_size = num_committed * 5;
-    Random random {static_cast<Random::Seed>(std::stoi(argv[3]))};
+    Random random {static_cast<std::uint32_t>(std::stoul(argv[3]))};
 
     std::error_code ignore;
     std::filesystem::remove_all(path, ignore);
@@ -45,7 +45,7 @@ auto main(int argc, const char *argv[]) -> int
     options.page_size = 0x200;
     options.frame_count = 16;
     Database db;
-    expect_ok(db.open(path, options));
+    expect_ok(db.open(path.string(), options));
     {
         std::ofstream ofs {value_path, std::ios::trunc};
         CALICO_EXPECT_TRUE(ofs.is_open());
@@ -54,7 +54,7 @@ auto main(int argc, const char *argv[]) -> int
             auto xact = db.transaction();
             for (Size j {}; j < XACT_SIZE; ++j) {
                 const auto key = make_key<KEY_WIDTH>(i + j);
-                const auto value = random_string(random, 2, 15);
+                const auto value = random.get<std::string>('a', 'z', random.get(10UL, 100UL));
                 expect_ok(db.insert(stob(key), stob(value)));
                 ofs << value << '\n';
             }
@@ -68,8 +68,8 @@ auto main(int argc, const char *argv[]) -> int
     // Modify the database until we receive a signal or hit the operation limit.
     auto xact = db.transaction();
     for (Size i {}; i < LIMIT; ++i) {
-        const auto key = std::to_string(random.next_int(num_committed * 2));
-        const auto value = random_string(random, 0, options.page_size / 2);
+        const auto key = std::to_string(random.get(num_committed * 2));
+        const auto value = random.get<std::string>('\x00', '\xFF', random.get(options.page_size / 2));
         expect_ok(db.insert(stob(key), stob(value)));
 
         // Keep the database from getting too large.

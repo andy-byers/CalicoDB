@@ -1,5 +1,5 @@
-#ifndef CALICO_POOL_INTERFACE_H
-#define CALICO_POOL_INTERFACE_H
+#ifndef CALICO_PAGER_INTERFACE_H
+#define CALICO_PAGER_INTERFACE_H
 
 #include "calico/bytes.h"
 #include "calico/status.h"
@@ -38,4 +38,4 @@ public:
 
 } // namespace calico
 
-#endif // CALICO_POOL_INTERFACE_H
+#endif // CALICO_PAGER_INTERFACE_H

@@ -1,31 +1,9 @@
 #include "reader.h"
-#include "calico/store.h"
+#include "calico/storage.h"
 #include "page/page.h"
 #include "utils/logging.h"
 
 namespace calico {
-
-auto BasicWalReader::open(SegmentId id) -> Status
-{
-    RandomReader *file {};
-    const auto path = m_prefix + id.to_name();
-    auto s = m_store->open_random_reader(path, &file);
-    if (!s.is_ok()) return s;
-
-    m_segment_id = id;
-    return m_redo_reader.attach(file);
-}
-
-auto BasicWalReader::close() -> Status
-{
-    // We only use one file pointer between the two reader objects.
-    if (m_redo_reader.is_attached()) {
-        delete m_redo_reader.detach();
-    } else if (m_undo_reader.is_attached()) {
-        delete m_undo_reader.detach();
-    }
-    return Status::ok();
-}
 
 template<class ...Args>
 [[nodiscard]]
@@ -43,168 +21,188 @@ auto unrecognized_type_error(WalPayloadType type) -> Status
     return read_corruption_error("record type \"{:02X}\" is not recognized", static_cast<Byte>(type));
 }
 
-auto BasicWalReader::read_first_lsn(SequenceId &lsn) -> Status
+[[nodiscard]]
+static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Status
 {
-    auto s = prepare_forward_traversal();
-    if (s.is_ok()) {
-        CALICO_EXPECT_TRUE(m_redo_reader.position().is_start());
-        lsn.value = read_wal_record_header(m_redo_reader.remaining()).lsn;
+    auto temp = out;
+    auto s = file.read(temp, offset);
+    if (!s.is_ok()) return s;
 
-        if (lsn.is_null()) {
-            ThreePartMessage message;
-            message.set_primary("cannot read first LSN");
-            message.set_detail("segment is empty");
-            return message.logic_error();
-        }
+    if (temp.is_empty()) {
+        return Status::not_found("reached the end of the file");
+    } else if (temp.size() != out.size()) {
+        return Status::system_error("incomplete read");
     }
     return s;
 }
 
-auto BasicWalReader::redo(PositionList &out, const RedoCallback &callback) -> Status
+auto LogReader::read(Bytes &out, Bytes tail) -> Status
 {
-    auto s = prepare_forward_traversal();
-    if (!s.is_ok()) return s;
+    // Lazily read the first block into the tail buffer.
+    if (m_offset == 0) {
+        auto s = read_exact_or_eof(*m_file, 0, tail);
+        if (!s.is_ok()) return s;
+    }
+    return read_logical_record(out, tail);
+}
+
+auto LogReader::read_first_lsn(SequenceId &out) -> Status
+{
+    // Bytes requires the array size when constructed with a C-style array.
+    char buffer [sizeof(WalRecordHeader) + MINIMUM_PAYLOAD_SIZE];
+    Bytes bytes {buffer, sizeof(buffer)};
+
+    // The LogWriter will never flush a block unless it contains at least one record, so the first record should be
+    // located at the start of the file.
+    auto s = read_exact_or_eof(*m_file, 0, bytes);
+    if (s.is_ok())
+        out = decode_lsn(bytes.advance(sizeof(WalRecordHeader)));
+    return s;
+}
+
+auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
+{
+    WalRecordHeader header {};
+    auto payload = out;
 
     for (; ; ) {
-        auto payload = stob(m_payload);
-        WalRecordHeader header {};
+        auto rest = tail;
+        const auto has_enough_space = tail.size() - m_offset > sizeof(header);
 
-        PositionList temp;
-        s = forward_read_logical_record(header, payload, temp);
-        if (s.is_logic_error()) return Status::ok(); // EOF
-        if (!s.is_ok()) return s;
+        if (has_enough_space) {
+            // Note that this modifies rest to point to [<local>, <end>) in the tail buffer.
+            if (WalRecordHeader::contains_record(rest.advance(m_offset))) {
+                const auto temp = read_wal_record_header(rest);
+                rest.advance(sizeof(temp));
 
-        const auto type = read_payload_type(payload);
-        switch (type) {
-            case WalPayloadType::DELTAS:
-                s = callback(decode_deltas_payload(header, payload));
-                break;
-            case WalPayloadType::COMMIT:
-                s = callback(decode_commit_payload(header, payload));
-                break;
-            case WalPayloadType::FULL_IMAGE:
-                break;
-            default:
-                return unrecognized_type_error(type);
-        }
-        if (!s.is_ok()) return s;
-        out.insert(cend(out), cbegin(temp), cend(temp));
-    }
-}
-
-auto BasicWalReader::undo(const UndoIterator &begin, const UndoIterator &end, const UndoCallback &callback) -> Status
-{
-    auto s = prepare_reverse_traversal();
-    if (!s.is_ok()) return s;
-
-    for (auto itr = begin; itr != end; ) {
-        CALICO_EXPECT_EQ(m_segment_id, itr->id);
-        auto payload = stob(m_payload);
-        WalRecordHeader header {};
-
-        s = reverse_read_logical_record(header, payload, itr, end);
-        if (!s.is_ok()) return s;
-
-        // We had to read into the payload buffer from the back end. Adjust so that the payload is pointing at the correct data.
-        payload = payload.range(payload.size() - header.size);
-
-        const auto type = read_payload_type(payload);
-        switch (type) {
-            case WalPayloadType::FULL_IMAGE:
-                s = callback(decode_full_image_payload(payload));
+                auto s = merge_records_left(header, temp);
                 if (!s.is_ok()) return s;
-                break;
-            case WalPayloadType::DELTAS:
-                break;
-            case WalPayloadType::COMMIT:
-                CALICO_EXPECT_TRUE(false && "error: encountered a commit record during undo");
-                break;
-            default:
-                return unrecognized_type_error(type);
+
+                mem_copy(payload, rest.truncate(temp.size));
+                m_offset += sizeof(temp) + temp.size;
+                payload.advance(temp.size);
+                rest.advance(temp.size);
+
+                if (header.type == WalRecordHeader::Type::FULL)
+                    break;
+
+                if (!rest.is_empty())
+                    continue;
+            }
+        }
+        m_offset = 0;
+        m_number++;
+
+        // Read the next block into the tail buffer.
+        auto s = read_exact_or_eof(*m_file, m_number * tail.size(), tail);
+
+        if (!s.is_ok()) {
+            // If we have any record fragments read so far, we consider this corruption.
+            if (s.is_not_found() && header.type != WalRecordHeader::Type {})
+                return read_corruption_error("logical record is incomplete");
+            return s;
         }
     }
+    // Only modify the out parameter size if we have succeeded.
+    out.truncate(out.size() - payload.size());
     return Status::ok();
 }
 
-auto BasicWalReader::prepare_forward_traversal() -> Status
+auto WalReader::open() -> Status
 {
-    if (m_undo_reader.is_attached()) {
-        auto s = m_redo_reader.attach(m_undo_reader.detach());
-        if (!s.is_ok()) return s;
-    }
-    CALICO_EXPECT_TRUE(m_redo_reader.is_attached());
-    if (!m_redo_reader.position().is_start())
-        return m_redo_reader.reset_position();
-    return Status::ok();
+    const auto first = m_segments->id_after(SegmentId::null());
+    if (first.is_null())
+        return Status::not_found("could not open WAL reader: segment collection is empty");
+    return open_segment(first);
 }
 
-auto BasicWalReader::prepare_reverse_traversal() -> Status
+auto WalReader::seek_next() -> Status
+{
+    const auto next = m_segments->id_after(m_current);
+    if (!next.is_null()) {
+        close_segment();
+        return open_segment(next);
+    }
+    return Status::not_found("could not seek to next segment: reached the last segment");
+}
+
+auto WalReader::seek_previous() -> Status
+{
+    const auto previous = m_segments->id_before(m_current);
+    if (!previous.is_null()) {
+        close_segment();
+        return open_segment(previous);
+    }
+    return Status::not_found("could not seek to previous segment: reached the first segment");
+}
+
+auto WalReader::read_first_lsn(SequenceId &out) -> Status
+{
+    prepare_traversal();
+    return m_reader->read_first_lsn(out);
+}
+
+auto WalReader::roll(const GetPayload &callback) -> Status
 {
     auto s = Status::ok();
-    if (m_redo_reader.is_attached())
-        s = m_undo_reader.attach(m_redo_reader.detach());
-    CALICO_EXPECT_TRUE(m_undo_reader.is_attached());
+    prepare_traversal();
+
+    while (s.is_ok()) {
+        Bytes payload {m_data};
+
+        // If this call succeeds, payload will be modified to point to the exact payload.
+        s = m_reader->read(payload, m_tail);
+
+        // A "not found" error means we have reached EOF.
+        if (s.is_not_found()) {
+            return Status::ok();
+        } else if (!s.is_ok()) {
+            return s;
+        }
+
+        const auto type = decode_payload_type(payload);
+        switch (type) {
+            case WalPayloadType::DELTAS:
+                s = callback(decode_deltas_payload(payload));
+                break;
+            case WalPayloadType::COMMIT:
+                s = callback(decode_commit_payload(payload));
+                break;
+            case WalPayloadType::FULL_IMAGE:
+                s = callback(decode_full_image_payload(payload));
+                break;
+            default:
+                return unrecognized_type_error(type);
+        }
+    }
     return s;
 }
 
-auto BasicWalReader::forward_read_logical_record(WalRecordHeader &header, Bytes payload, PositionList &positions) -> Status
+auto WalReader::open_segment(SegmentId id) -> Status
 {
-    CALICO_EXPECT_EQ(header.lsn, 0);
-
-    for (auto &reader = m_redo_reader; ; ) {
-        if (contains_record(reader.remaining())) {
-            positions.emplace_back(RecordPosition{ m_segment_id, reader.position()});
-            const auto temp = read_wal_record_header(reader.remaining());
-            reader.advance_cursor(sizeof(temp));
-
-            auto s = merge_records_left(header, temp);
-            if (!s.is_ok()) return s;
-
-            mem_copy(payload, reader.remaining().truncate(temp.size));
-            reader.advance_cursor(temp.size);
-            payload.advance(temp.size);
-
-            if (header.type == WalRecordHeader::Type::FULL)
-                break;
-        } else {
-            auto s = reader.advance_block();
-
-            // Just hit EOF. If we have any record fragments read so far, we consider this corruption.
-            if (!s.is_ok()) {
-                if (s.is_logic_error() && header.lsn != 0)
-                    return read_corruption_error("logical record with LSN {} is incomplete", header.lsn);
-                return s;
-            }
-        }
+    CALICO_EXPECT_EQ(m_reader, std::nullopt);
+    RandomReader *file {}; // TODO: SequentialReader could be useful for this class!
+    auto s = m_store->open_random_reader(m_prefix + id.to_name(), &file);
+    if (s.is_ok()) {
+        m_file.reset(file);
+        m_reader = LogReader {*m_file};
+        m_current = id;
     }
-    return Status::ok();
+    return s;
 }
 
-auto BasicWalReader::reverse_read_logical_record(WalRecordHeader &header, Bytes payload, UndoIterator &itr, const UndoIterator &end) -> Status
+auto WalReader::close_segment() -> void
 {
-    auto offset = payload.size();
-    auto &reader = m_undo_reader;
-    Bytes bytes;
-
-    for (; itr != end; ) {
-        // Get a slice of the reader's tail buffer at the given position.
-        auto s = reader.present(itr->pos, bytes);
-        if (!s.is_ok()) return s;
-
-        auto temp = read_wal_record_header(bytes);
-        bytes.advance(sizeof(temp));
-
-        s = merge_records_right(temp, header);
-        if (!s.is_ok()) return s;
-
-        mem_copy(payload.range(offset - temp.size, temp.size), bytes.range(0, temp.size));
-        offset -= temp.size;
-        itr++;
-
-        if (header.type == WalRecordHeader::Type::FULL)
-            break;
+    if (m_reader) {
+        m_current = SegmentId::null();
+        m_reader.reset();
+        m_file.reset();
     }
-    return Status::ok();
+}
+
+auto WalReader::prepare_traversal() -> void
+{
+    m_reader = LogReader {*m_file};
 }
 
 } // namespace calico
