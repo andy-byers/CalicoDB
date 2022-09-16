@@ -310,8 +310,6 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
     MAYBE_FORWARD(s, MSG);
 
     while (s.is_ok()) {
-        bool has_commit {};
-
         s = m_reader->roll([&](const PayloadDescriptor &info) {
             if (std::holds_alternative<DeltasDescriptor>(info)) {
                 const auto deltas = std::get<DeltasDescriptor>(info);
@@ -325,15 +323,20 @@ auto BasicWriteAheadLog::start_recovery(const GetDeltas &delta_cb, const GetFull
                 const auto commit = std::get<CommitDescriptor>(info);
                 m_last_lsn = commit.lsn;
                 m_commit_id = m_reader->segment_id();
-                has_commit = true;
             }
             return Status::ok();
         });
+        m_flushed_lsn.store(m_last_lsn);
+
+        // We found an empty segment. This happens when the program aborted before the writer could either
+        // write a block or delete the empty file. This is OK if we are on the last segment.
+        if (s.is_not_found())
+            s = Status::corruption(s.what());
+
         if (!s.is_ok()) {
             s = forward_status(s, "could not roll WAL forward");
             break;
         }
-        m_flushed_lsn.store(m_last_lsn);
         s = m_reader->seek_next();
     }
     if (!s.is_ok()) {
@@ -389,18 +392,25 @@ auto BasicWriteAheadLog::start_abort(const GetFullImage &image_cb) -> Status
 
         SequenceId first_lsn;
         s = m_reader->read_first_lsn(first_lsn);
-        MAYBE_FORWARD(s, MSG);
 
-        if (id <= m_commit_id)
-            break;
+        if (s.is_ok()) {
+            // Found the segment containing the most-recent commit.
+            if (id <= m_commit_id)
+                break;
 
-        s = m_reader->roll([&image_cb](const auto &info) {
-            if (std::holds_alternative<FullImageDescriptor>(info)) {
-                const auto image = std::get<FullImageDescriptor>(info);
-                return image_cb(image);
-            }
-            return Status::ok();
-        });
+            // Read all full image records. We can read them forward, since the pages are disjoint
+            // within each transaction.
+            s = m_reader->roll([&image_cb](const auto &info) {
+                if (std::holds_alternative<FullImageDescriptor>(info)) {
+                    const auto image = std::get<FullImageDescriptor>(info);
+                    return image_cb(image);
+                }
+                return Status::ok();
+            });
+        } else if (s.is_not_found()) {
+            // The segment file is empty.
+            s = Status::corruption(s.what());
+        }
 
         // Most-recent segment can have an incomplete record at the end.
         if (!s.is_corruption() || i != 0)

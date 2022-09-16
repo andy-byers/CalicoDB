@@ -17,8 +17,13 @@ int main(int argc, char** argv) {
 
         if (arg.starts_with(SEED_PREFIX)) {
             arg.advance(SEED_PREFIX.size());
-            const auto seed = std::stoul(arg.to_string());
-            cco::internal::random_seed = static_cast<std::uint32_t>(seed);
+            std::uint32_t seed {};
+            if (arg == "<random>") {
+                seed = static_cast<uint32_t>(rand());
+            } else {
+                seed = static_cast<uint32_t>(std::stoul(arg.to_string()));
+            }
+            cco::internal::random_seed = seed;
         }
     }
 

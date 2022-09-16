@@ -29,7 +29,7 @@ static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Sta
     if (!s.is_ok()) return s;
 
     if (temp.is_empty()) {
-        return Status::logic_error("reached the end of the file");
+        return Status::not_found("reached the end of the file");
     } else if (temp.size() != out.size()) {
         return Status::system_error("incomplete read");
     }
@@ -98,7 +98,7 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
 
         if (!s.is_ok()) {
             // If we have any record fragments read so far, we consider this corruption.
-            if (s.is_logic_error() && header.type != WalRecordHeader::Type {})
+            if (s.is_not_found() && header.type != WalRecordHeader::Type {})
                 return read_corruption_error("logical record is incomplete");
             return s;
         }
@@ -153,8 +153,8 @@ auto WalReader::roll(const GetPayload &callback) -> Status
         // If this call succeeds, payload will be modified to point to the exact payload.
         s = m_reader->read(payload, m_tail);
 
-        // A logic error means we have reached EOF.
-        if (s.is_logic_error()) {
+        // A "not found" error means we have reached EOF.
+        if (s.is_not_found()) {
             return Status::ok();
         } else if (!s.is_ok()) {
             return s;

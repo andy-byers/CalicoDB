@@ -704,6 +704,10 @@ public:
     using Base = RecoveryTestHarness<Failure>;
     using Base::GetParam;
 
+    RecoveryReentrancyTestHarness(RecoveryTestFailureType type)
+        : second_failure_type {type}
+    {}
+
     auto SetUp() -> void override
     {
         Base::SetUp();
@@ -715,7 +719,7 @@ public:
             return counter++ == target ? Status::system_error("42") : Status::ok();
         };
 
-        switch (GetParam()) {
+        switch (second_failure_type) {
             case RecoveryTestFailureType::DATA_WRITE:
                 prefix = "test/data";
                 interceptors::set_write(callback);
@@ -741,7 +745,7 @@ public:
                 interceptors::set_sync(callback);
                 break;
             default:
-                ADD_FAILURE() << "unrecognized test type \"" << int(GetParam()) << "\"";
+                ADD_FAILURE() << "unrecognized test type \"" << int(second_failure_type) << "\"";
         }
     }
 
@@ -764,6 +768,7 @@ public:
         ASSERT_GT(num_tries, 0) << "recovery should have failed at least once";
     }
 
+    RecoveryTestFailureType second_failure_type;
     std::string prefix;
     Size counter {};
     Size target {};
@@ -832,7 +837,12 @@ TEST_P(RecoveryTests_FailAfterDelay_500, BasicRecovery)
     validate();
 }
 
-class RecoveryReentrancyTests_FailImmediately_100: public RecoveryReentrancyTestHarness<FailAfter<0>, 100> {};
+class RecoveryReentrancyTests_FailImmediately_100: public RecoveryReentrancyTestHarness<FailAfter<0>, 100> {
+public:
+    RecoveryReentrancyTests_FailImmediately_100()
+        : RecoveryReentrancyTestHarness<FailAfter<0>, 100> {RecoveryTestFailureType::DATA_WRITE}
+    {}
+};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailImmediately_100,
@@ -850,7 +860,12 @@ TEST_P(RecoveryReentrancyTests_FailImmediately_100, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailImmediately_10000: public RecoveryReentrancyTestHarness<FailAfter<0>, 10000> {};
+class RecoveryReentrancyTests_FailImmediately_10000: public RecoveryReentrancyTestHarness<FailAfter<0>, 10000> {
+public:
+    RecoveryReentrancyTests_FailImmediately_10000()
+        : RecoveryReentrancyTestHarness<FailAfter<0>, 10000> {RecoveryTestFailureType::DATA_WRITE}
+    {}
+};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailImmediately_10000,
@@ -867,7 +882,12 @@ TEST_P(RecoveryReentrancyTests_FailImmediately_10000, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailAfterDelay_100: public RecoveryReentrancyTestHarness<FailAfter<100>, 100> {};
+class RecoveryReentrancyTests_FailAfterDelay_100: public RecoveryReentrancyTestHarness<FailAfter<100>, 100> {
+public:
+    RecoveryReentrancyTests_FailAfterDelay_100()
+        : RecoveryReentrancyTestHarness<FailAfter<100>, 100> {RecoveryTestFailureType::DATA_WRITE}
+    {}
+};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailAfterDelay_100,
@@ -885,7 +905,12 @@ TEST_P(RecoveryReentrancyTests_FailAfterDelay_100, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailAfterDelay_10000: public RecoveryReentrancyTestHarness<FailAfter<100>, 10000> {};
+class RecoveryReentrancyTests_FailAfterDelay_10000: public RecoveryReentrancyTestHarness<FailAfter<100>, 10000> {
+public:
+    RecoveryReentrancyTests_FailAfterDelay_10000()
+        : RecoveryReentrancyTestHarness<FailAfter<100>, 10000> {RecoveryTestFailureType::DATA_WRITE}
+    {}
+};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryReentrancyTests_FailAfterDelay_10000,
