@@ -153,16 +153,17 @@ TEST_F(XactTests, AbortRestoresPriorState)
 
 template<class Test>
 [[nodiscard]]
-auto run_random_transactions(Test &test, Size n, Size xact_size = 100)
+auto run_random_transactions(Test &test, Size n)
 {
+    static constexpr long XACT_SIZE {100};
     // Generate the records all at once, so we know that they are unique.
-    auto all_records = test.generator.generate(test.random, n * xact_size);
+    auto all_records = test.generator.generate(test.random, n * XACT_SIZE);
     std::vector<Record> committed;
 
     for (Size i {}; i < n; ++i) {
         auto xact = test.db.transaction();
-        const auto start = cbegin(all_records) + static_cast<long>(xact_size * i);
-        const auto temp = run_random_operations(test, start, start + static_cast<long>(xact_size));
+        const auto start = cbegin(all_records) + static_cast<long>(XACT_SIZE * i);
+        const auto temp = run_random_operations(test, start, start + XACT_SIZE);
         if (test.random.get(4) == 0) {
             EXPECT_TRUE(expose_message(xact.abort()));
         } else {
@@ -203,9 +204,9 @@ TEST_F(XactTests, PersistenceSanityCheck)
     ASSERT_TRUE(expose_message(db.close()));
     std::vector<Record> committed;
 
-    for (Size i {}; i < 1; ++i) {
+    for (Size i {}; i < 5; ++i) {
         ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-        const auto current = run_random_transactions(*this, 40, 10);
+        const auto current = run_random_transactions(*this, 10);
         committed.insert(cend(committed), cbegin(current), cend(current));
         ASSERT_TRUE(expose_message(db.close()));
     }

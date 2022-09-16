@@ -390,7 +390,7 @@ public:
 TEST_F(LogReaderWriterTests, DoesNotFlushEmptyBlock)
 {
     auto writer = get_writer(SegmentId {1});
-    ASSERT_TRUE(writer.flush().is_logic_error());
+    ASSERT_TRUE(expose_message(writer.flush()));
 
     Size file_size {};
     ASSERT_TRUE(expose_message(store->file_size("test/wal-000001", file_size)));
@@ -925,7 +925,7 @@ TEST_F(WalReaderWriterTests, RunsTransactionsNormally)
     ASSERT_TRUE(expose_message(roll_segments_forward(reader, snapshots)));
     assert_images_match(snapshots, images);
     ASSERT_TRUE(expose_message(roll_segments_backward(reader, snapshots)));
-    assert_images_match(snapshots, committed);
+    assert_images_match(snapshots, images);
 }
 
 TEST_F(WalReaderWriterTests, CommitIsCheckpoint)
@@ -1247,7 +1247,8 @@ TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
 TEST_F(BasicWalTests, FailureDuringFirstOpen)
 {
     interceptors::set_open(FailOnce<0> {"test/wal-"});
-    assert_error_42(wal->start_workers());
+    ASSERT_TRUE(expose_message(wal->start_workers()));
+    ASSERT_TRUE(expose_message(wal->stop_workers()));
 }
 
 TEST_F(BasicWalTests, FailureDuringNthOpen)
@@ -1266,7 +1267,7 @@ TEST_F(BasicWalTests, FailureDuringNthOpen)
         num_writes++;
     }
     ASSERT_GT(num_writes, 5);
-    assert_error_42(wal->stop_workers());
+    ASSERT_TRUE(expose_message(wal->stop_workers()));
 }
 
 } // <anonymous>
