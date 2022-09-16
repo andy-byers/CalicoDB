@@ -703,11 +703,9 @@ public:
             if (has_full_image[n]) {
                 ++lsn;
                 writer.write(lsn, get_deltas(lsn, id));
-                if(i>3000)fmt::print(stderr,"OUT dl LSN: {}\n", lsn.value);
             } else {
                 ++lsn;
                 writer.write(lsn, get_image(lsn, id));
-                if(i>3000)fmt::print(stderr,"OUT im LSN: {}\n", lsn.value);
                 has_full_image[n] = true;
             }
             // Simulate a commit. We've been modifying the images when generating delta records, so we'll just save our
@@ -718,8 +716,6 @@ public:
                 std::fill(begin(has_full_image), end(has_full_image), false);
                 writer.write(lsn, get_commit(lsn));
                 writer.advance();
-                if(i>3000)fmt::print(stderr,"OUT cm SID: {}, LSN: {}\n", collection.last().value, lsn.value);
-
             }
         }
         return std::move(writer).destroy();
@@ -818,10 +814,8 @@ public:
                 } else if (std::holds_alternative<FullImageDescriptor>(info)) {
                     const auto image = std::get<FullImageDescriptor>(info);
                     mem_copy(snapshots[image.pid.as_index()], image.image);
-                    fmt::print(stderr,"im SID:{}, LSN: {}\n", reader.segment_id().value, image.lsn.value);
                 } else if (std::holds_alternative<DeltasDescriptor>(info)) {
                     const auto deltas = std::get<DeltasDescriptor>(info);
-                    fmt::print(stderr,"dl SID:{}, LSN: {}\n", reader.segment_id().value, deltas.lsn.value);
                 }
                 return Status::ok();
             });

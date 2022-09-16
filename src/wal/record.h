@@ -86,64 +86,6 @@ struct SegmentId
     std::uint64_t value {};
 };
 
-struct BlockNumber: public EqualityComparableTraits<SegmentId> {
-    using Hash = IndexHash<BlockNumber>;
-
-    constexpr BlockNumber() noexcept = default;
-
-    template<class U>
-    constexpr explicit BlockNumber(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
-
-    constexpr explicit operator std::uint64_t() const
-    {
-        return value;
-    }
-
-    std::uint64_t value {};
-};
-
-struct BlockOffset: public EqualityComparableTraits<SegmentId> {
-    using Hash = IndexHash<BlockNumber>;
-
-    constexpr BlockOffset() noexcept = default;
-
-    template<class U>
-    constexpr explicit BlockOffset(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
-
-    constexpr explicit operator std::uint64_t() const
-    {
-        return value;
-    }
-
-    std::uint64_t value {};
-};
-
-struct LogPosition {
-
-    [[nodiscard]]
-    auto is_start() const -> bool
-    {
-        return number == 0 && offset == 0;
-    }
-
-    BlockNumber number;
-    BlockOffset offset;
-};
-
-struct RecordPosition {
-    SegmentId id;
-    LogPosition pos;
-};
-
-struct LogSegment {
-    SegmentId id;
-    SequenceId first_lsn;
-};
-
 struct WalRecordHeader {
     enum Type: Byte {
         FULL   = '\xA4',

@@ -819,8 +819,6 @@ TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
     callback_status = Status::system_error("42");
     worker.dispatch(4);
     worker.dispatch(5);
-
-    // We should be able to wait, even if we aren't processing events.
     worker.dispatch(6, true);
 
     ASSERT_EQ(events.at(0), 1);
@@ -839,7 +837,7 @@ TEST_F(WorkerFaultTests, ErrorStatusContention)
     worker.dispatch(2);
     worker.dispatch(3);
 
-    // Sketchy but seems to work in practice. I'm getting a few thousand of these checks in before the status is
+    // Sketchy but seems to work in practice. I'm getting a lot of these checks in before the status is
     // registered.
     Size num_hits {};
     while (worker.status().is_ok())

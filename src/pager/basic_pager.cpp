@@ -134,9 +134,8 @@ auto BasicPager::flushed_lsn() const -> SequenceId
 
 auto BasicPager::try_make_available() -> Result<bool>
 {
-    auto itr = m_registry.find_entry([this](auto, auto fid, auto dirty_token) {
+    auto itr = m_registry.find_for_replacement([this](auto, auto fid, auto dirty_token) {
         const auto &frame = m_framer->frame_at(fid);
-//fmt::print("hi\n");
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to consider for reuse.
         if (frame.ref_count() != 0)
             return false;
@@ -144,10 +143,8 @@ auto BasicPager::try_make_available() -> Result<bool>
         if (!dirty_token.has_value())
             return true;
 
-        if (m_wal->is_working()) {
-//fmt::print("{} <= {}\n", frame.lsn().value, m_wal->flushed_lsn());
+        if (m_wal->is_working())
             return frame.lsn() <= m_wal->flushed_lsn();
-        }
 
         return true;
     });

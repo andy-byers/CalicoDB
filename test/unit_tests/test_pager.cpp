@@ -114,7 +114,7 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
         return false;
     };
 
-    auto itr = registry.find_entry(callback);
+    auto itr = registry.find_for_replacement(callback);
     ASSERT_EQ(itr, registry.end());
 }
 

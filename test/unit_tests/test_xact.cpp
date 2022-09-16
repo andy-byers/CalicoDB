@@ -90,6 +90,34 @@ static auto test_abort_first_xact(Test &test, Size num_records)
     with_xact(test, [&test] {insert_records(test);});
 }
 
+TEST_F(XactTests, CannotUseTransactionObjectAfterSuccessfulCommit)
+{
+    auto xact = db.transaction();
+    insert_records(*this, 10);
+    ASSERT_TRUE(expose_message(xact.commit()));
+    ASSERT_TRUE(xact.abort().is_logic_error());
+    ASSERT_TRUE(xact.commit().is_logic_error());
+}
+
+TEST_F(XactTests, CannotUseTransactionObjectAfterSuccessfulAbort)
+{
+    auto xact = db.transaction();
+    insert_records(*this, 10);
+    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_TRUE(xact.abort().is_logic_error());
+    ASSERT_TRUE(xact.commit().is_logic_error());
+}
+
+TEST_F(XactTests, TransactionObjectIsMovable)
+{
+    auto xact = db.transaction();
+    auto xact2 = std::move(xact);
+    xact = std::move(xact2);
+
+    insert_records(*this, 10);
+    ASSERT_TRUE(expose_message(xact.commit()));
+}
+
 TEST_F(XactTests, AbortFirstXactWithSingleRecord)
 {
     test_abort_first_xact(*this, 1);
