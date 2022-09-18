@@ -87,6 +87,9 @@ struct SegmentId
     std::uint64_t value {};
 };
 
+/*
+ * Header fields associated with each WAL record. Based off of the WAL protocol found in RocksDB.
+ */
 struct WalRecordHeader {
     enum Type: Byte {
         FULL   = '\xA4',
@@ -95,56 +98,37 @@ struct WalRecordHeader {
         LAST   = '\xD1',
     };
 
+    static constexpr Size SIZE {7};
+
     [[nodiscard]]
     static auto contains_record(BytesView data) -> bool
     {
-        return data.size() > sizeof(WalRecordHeader) && data[6] != '\x00';
+        return data.size() > WalRecordHeader::SIZE && data[0] != '\x00';
     }
 
-    std::uint32_t crc;
-    std::uint16_t size;
-    Type type;
+    Type type {};
+    std::uint16_t size {};
+    std::uint32_t crc {};
 };
 
-static_assert(sizeof(WalRecordHeader) == 8);
+/*
+ * Header fields associated with each payload.
+ */
+struct WalPayloadHeader {
+    static constexpr Size SIZE {8};
 
-enum WalPayloadType: Byte {
-    COMMIT     = '\xFF',
-    DELTAS     = '\xEE',
-    FULL_IMAGE = '\xDD',
+    SequenceId lsn;
 };
 
 // Routines for working with WAL records.
 auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void;
-[[nodiscard]] auto contains_record(BytesView in) -> bool;
+auto write_wal_payload_header(Bytes out, const WalPayloadHeader &header) -> void;
 [[nodiscard]] auto read_wal_record_header(BytesView in) -> WalRecordHeader;
+[[nodiscard]] auto read_wal_payload_header(BytesView in) -> WalPayloadHeader;
+[[nodiscard]] auto contains_record(BytesView in) -> bool;
 [[nodiscard]] auto split_record(WalRecordHeader &lhs, BytesView payload, Size available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 [[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
-
-// Routines for working with WAL payloads.
-[[nodiscard]] auto encode_deltas_payload(SequenceId lsn, PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
-[[nodiscard]] auto encode_full_image_payload(SequenceId lsn, PageId page_id, BytesView image, Bytes out) -> Size;
-[[nodiscard]] auto encode_commit_payload(SequenceId lsn, Bytes out) -> Size;
-[[nodiscard]] auto decode_commit_payload(BytesView in) -> CommitDescriptor;
-[[nodiscard]] auto decode_deltas_payload(BytesView in) -> DeltasDescriptor;
-[[nodiscard]] auto decode_full_image_payload(BytesView in) -> FullImageDescriptor;
-
-static constexpr Size MINIMUM_PAYLOAD_SIZE {sizeof(WalPayloadType) + sizeof(SequenceId)};
-
-[[nodiscard]]
-inline auto decode_payload_type(BytesView in) -> WalPayloadType
-{
-    CALICO_EXPECT_GE(in.size(), MINIMUM_PAYLOAD_SIZE);
-    return WalPayloadType {in[0]};
-}
-
-[[nodiscard]]
-inline auto decode_lsn(BytesView in) -> SequenceId
-{
-    CALICO_EXPECT_GE(in.size(), MINIMUM_PAYLOAD_SIZE);
-    return SequenceId {get_u64(in.advance())};
-}
 
 } // namespace calico
 

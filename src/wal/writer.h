@@ -31,7 +31,7 @@ public:
 
     // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified for the most part.
     //       However, we can still query the block count to see if we've actually written out any blocks.
-    [[nodiscard]] auto write(SequenceId lsn, BytesView payload) -> Status;
+    [[nodiscard]] auto write(WalPayloadIn payload) -> Status;
     [[nodiscard]] auto flush() -> Status;
 
 private:
@@ -67,6 +67,7 @@ public:
     [[nodiscard]]
     auto status() const -> Status
     {
+        // Can be either OK or SYSTEM_ERROR.
         return m_worker.status();
     }
 
@@ -75,29 +76,26 @@ public:
     [[nodiscard]] auto open() -> Status;
     [[nodiscard]] auto destroy() && -> Status;
 
-    auto write(SequenceId lsn, NamedScratch payload) -> void;
+    auto write(WalPayloadIn payload) -> void;
 
-    // NOTE: This method will block until the writer has advanced to a new segment. It should be called after writing
+    // NOTE: advance() will block until the writer has advanced to a new segment. It should be called after writing
     //       a commit record so that everything is written to disk before we return, and the writer is set up on the
-    //       next segment.
+    //       next segment. flush() will also block until the tail buffer has been flushed.
     auto advance() -> void;
+    auto flush() -> void;
 
 private:
-    struct Event {
-        SequenceId lsn;
-        NamedScratch buffer;
-    };
+    struct AdvanceToken {};
+    struct FlushToken {};
 
-    // Represents either a "write" or an "advance" event. We don't need any information to advance to the next segment,
-    // so that state is represented by std::nullopt.
-    using EventWrapper = std::optional<Event>;
+    using Event = std::variant<WalPayloadIn, AdvanceToken, FlushToken>;
 
-    [[nodiscard]] auto on_event(const EventWrapper &event) -> Status;
+    [[nodiscard]] auto on_event(const Event &event) -> Status;
     [[nodiscard]] auto advance_segment() -> Status;
     [[nodiscard]] auto open_segment(SegmentId) -> Status;
     auto close_segment() -> Status;
 
-    Worker<EventWrapper> m_worker;
+    Worker<Event> m_worker;
     std::string m_prefix;
     std::optional<LogWriter> m_writer;
     std::atomic<SequenceId> *m_flushed_lsn {};

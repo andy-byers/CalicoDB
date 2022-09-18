@@ -81,9 +81,9 @@ TEST_F(DatabaseOpenTests, MaximumPageSize)
 
     for (Size i {}; i < 2; ++i) {
         Database db;
-        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        ASSERT_OK(db.open(ROOT, options));
         ASSERT_EQ(db.info().page_size(), MAXIMUM_PAGE_SIZE);
-        ASSERT_TRUE(expose_message(db.close()));
+        ASSERT_OK(db.close());
     }
 }
 
@@ -105,18 +105,18 @@ public:
 TEST_F(BasicDatabaseTests, OpenAndCloseDatabase)
 {
     Database db;
-    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-    ASSERT_TRUE(expose_message(db.close()));
+    ASSERT_OK(db.open(ROOT, options));
+    ASSERT_OK(db.close());
 }
 
 TEST_F(BasicDatabaseTests, ReopenDatabase)
 {
     Database db;
-    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-    ASSERT_TRUE(expose_message(db.close()));
+    ASSERT_OK(db.open(ROOT, options));
+    ASSERT_OK(db.close());
 
-    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-    ASSERT_TRUE(expose_message(db.close()));
+    ASSERT_OK(db.open(ROOT, options));
+    ASSERT_OK(db.close());
 }
 
 TEST_F(BasicDatabaseTests, Inserts)
@@ -125,7 +125,7 @@ TEST_F(BasicDatabaseTests, Inserts)
     static constexpr Size GROUP_SIZE {500};
 
     Database db;
-    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    ASSERT_OK(db.open(ROOT, options));
 
     RecordGenerator generator;
     Random random {internal::random_seed};
@@ -133,16 +133,16 @@ TEST_F(BasicDatabaseTests, Inserts)
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         const auto records = generator.generate(random, GROUP_SIZE);
         auto itr = cbegin(records);
-        ASSERT_TRUE(expose_message(db.status()));
+        ASSERT_OK(db.status());
         auto xact = db.transaction();
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
-            ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
+            ASSERT_OK(db.insert(itr->key, itr->value));
             itr++;
         }
-        ASSERT_TRUE(expose_message(xact.commit()));
+        ASSERT_OK(xact.commit());
     }
-    ASSERT_TRUE(expose_message(db.close()));
+    ASSERT_OK(db.close());
 }
 
 TEST_F(BasicDatabaseTests, DataPersists)
@@ -159,19 +159,19 @@ TEST_F(BasicDatabaseTests, DataPersists)
     Database db;
 
     for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
-        ASSERT_TRUE(expose_message(db.status()));
+        ASSERT_OK(db.open(ROOT, options));
+        ASSERT_OK(db.status());
         auto xact = db.transaction();
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
-            ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
+            ASSERT_OK(db.insert(itr->key, itr->value));
             itr++;
         }
-        ASSERT_TRUE(expose_message(xact.commit()));
-        ASSERT_TRUE(expose_message(db.close()));
+        ASSERT_OK(xact.commit());
+        ASSERT_OK(db.close());
     }
 
-    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    ASSERT_OK(db.open(ROOT, options));
     CALICO_EXPECT_EQ(db.info().record_count(), records.size());
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(db, key);
@@ -230,19 +230,19 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        ASSERT_OK(db.open(ROOT, options));
 
         auto xact = db.transaction();
         for (Size i {}; i < NUM_RECORDS; ++i) {
             const auto key = make_key<KEY_WIDTH>(i);
-            ASSERT_TRUE(expose_message(db.insert(key, key)));
+            ASSERT_OK(db.insert(key, key));
         }
-        ASSERT_TRUE(expose_message(xact.commit()));
+        ASSERT_OK(xact.commit());
     }
 
     auto TearDown() -> void override
     {
-        ASSERT_TRUE(expose_message(db.close()));
+        ASSERT_OK(db.close());
     }
 
     auto localized_reader() const -> void

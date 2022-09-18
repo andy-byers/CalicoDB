@@ -7,7 +7,7 @@
 #include "spdlog/spdlog.h"
 #include "utils/result.h"
 #include "wal/helpers.h"
-#include <shared_mutex>
+#include <unordered_set>
 
 namespace calico {
 
@@ -111,6 +111,8 @@ private:
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
     std::unique_ptr<LogScratchManager> m_scratch;
+    std::unordered_set<PageId, PageId::Hash> m_images;
+    SequenceId m_commit_lsn;
     Storage *m_store {};
     bool m_has_xact {};
     bool m_owns_store {};

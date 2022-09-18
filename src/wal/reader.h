@@ -18,7 +18,7 @@ public:
 
     // NOTE: If either of these methods returns a non-OK status, the state of this object is unspecified.
     [[nodiscard]] auto read_first_lsn(SequenceId &out) -> Status;
-    [[nodiscard]] auto read(Bytes &out, Bytes tail) -> Status;
+    [[nodiscard]] auto read(WalPayloadOut &out, Bytes payload, Bytes tail) -> Status;
 
 private:
     [[nodiscard]] auto read_logical_record(Bytes &out, Bytes tail) -> Status;
@@ -31,6 +31,8 @@ private:
 
 class WalReader final {
 public:
+    using Callback = WriteAheadLog::Callback;
+
     WalReader(Storage &store, WalCollection &segments, std::string prefix, Bytes tail, Bytes data)
         : m_prefix {std::move(prefix)},
           m_store {&store},
@@ -58,7 +60,7 @@ public:
     // TODO: LevelDB caches first LSNs of WAL segments. If we end up reading this info a lot, we may want to do the same. We could use this method
     //       for that, and store the cache in WALCollection, so it lives longer than this object, which is meant to be transient.
     [[nodiscard]] auto read_first_lsn(SequenceId&) -> Status;
-    [[nodiscard]] auto roll(const GetPayload&) -> Status;
+    [[nodiscard]] auto roll(const Callback&) -> Status;
 
 private:
     [[nodiscard]] auto open_segment(SegmentId) -> Status;

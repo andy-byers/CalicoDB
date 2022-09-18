@@ -7,6 +7,8 @@ namespace calico {
 
 template<class Index>
 struct IndexHash {
+
+    [[nodiscard]]
     auto operator()(const Index &index) const -> std::size_t
     {
         return static_cast<std::size_t>(index.value);
@@ -88,36 +90,12 @@ struct OrderableTraits {
 };
 
 template<class T>
-struct IncrementableTraits {
+struct IncrementableTraits { // TODO: Removed postfix increment. It's confusing to implement with CRTP!
 
     auto operator++() -> T&
     {
         static_cast<T&>(*this).value++;
         return static_cast<T&>(*this);
-    }
-
-    auto operator++(int) -> T
-    {
-        auto temp = *this;
-        ++(*this);
-        return static_cast<T>(temp);
-    }
-};
-
-template<class T>
-struct DecrementableTraits {
-
-    auto operator--() -> T&
-    {
-        static_cast<T&>(*this).value--;
-        return *this;
-    }
-
-    auto operator--(int) -> T
-    {
-        auto temp = *this;
-        --(*this);
-        return temp;
     }
 };
 
@@ -153,8 +131,7 @@ struct PageId
 struct SequenceId
     : public NullableId<SequenceId>,
       public EqualityComparableTraits<SequenceId>,
-      public OrderableTraits<SequenceId>,
-      public IncrementableTraits<SequenceId>
+      public OrderableTraits<SequenceId>
 {
     using Type = std::uint64_t;
     using Hash = IndexHash<SequenceId>;
@@ -165,6 +142,19 @@ struct SequenceId
     constexpr explicit SequenceId(U u) noexcept
         : value {std::uint64_t(u)}
     {}
+
+    auto operator++() -> SequenceId&
+    {
+        value++;
+        return *this;
+    }
+
+    auto operator++(int) -> SequenceId
+    {
+        const auto temp = *this;
+        ++(*this);
+        return temp;
+    }
 
     [[nodiscard]]
     static constexpr auto base() noexcept -> SequenceId

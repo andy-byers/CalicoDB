@@ -18,7 +18,7 @@ namespace calico {
 class Storage;
 class AppendWriter;
 class RandomReader;
-class BasicWalCleaner;
+class WalCleaner;
 
 class BasicWriteAheadLog: public WriteAheadLog {
 public:
@@ -43,30 +43,27 @@ public:
         return m_is_working;
     }
 
-    auto allow_cleanup(std::uint64_t pager_lsn) -> void override;
-
     ~BasicWriteAheadLog() override;
     [[nodiscard]] static auto open(const Parameters&, WriteAheadLog**) -> Status;
-    [[nodiscard]] auto status() const -> Status override;
-    [[nodiscard]] auto flushed_lsn() const -> std::uint64_t override;
-    [[nodiscard]] auto current_lsn() const -> std::uint64_t override;
+    [[nodiscard]] auto flushed_lsn() const -> SequenceId override;
+    [[nodiscard]] auto current_lsn() const -> SequenceId override;
     [[nodiscard]] auto stop_workers() -> Status override;
     [[nodiscard]] auto start_workers() -> Status override;
-    [[nodiscard]] auto log(std::uint64_t page_id, BytesView image) -> Status override;
-    [[nodiscard]] auto log(std::uint64_t page_id, BytesView image, const std::vector<PageDelta> &deltas) -> Status override;
-    [[nodiscard]] auto log(NamedScratch payload) -> Status override;
-//    [[nodiscard]] auto advance() -> Status override;
+    [[nodiscard]] auto worker_status() const -> Status override;
+    [[nodiscard]] auto log(WalPayloadIn payload) -> Status override;
+    [[nodiscard]] auto advance() -> Status override;
     [[nodiscard]] auto flush() -> Status override;
-    [[nodiscard]] auto commit() -> Status override;
-    [[nodiscard]] auto start_recovery(const GetDeltas &delta_cb, const GetFullImage &image_cb) -> Status override;
-    [[nodiscard]] auto finish_recovery() -> Status override;
-    [[nodiscard]] auto start_abort(const GetFullImage &callback) -> Status override;
-    [[nodiscard]] auto finish_abort() -> Status override;
+    [[nodiscard]] auto roll_forward(SequenceId begin_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto roll_backward(SequenceId end_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto remove_after(SequenceId lsn) -> Status override;
+    [[nodiscard]] auto remove_before(SequenceId lsn) -> Status override;
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
     [[nodiscard]] auto stop_workers_impl() -> Status;
-    [[nodiscard]] auto open_reader() -> Status;
+    [[nodiscard]] auto open_reader() -> Status; // TODO: We don't really have to store the reader as a member...
+    [[nodiscard]] auto open_writer() -> Status;
+    [[nodiscard]] auto open_cleaner() -> Status;
 
     auto forward_status(Status s, const std::string &message) -> Status
     {
@@ -82,22 +79,20 @@ private:
     std::atomic<SequenceId> m_flushed_lsn {};
     std::atomic<SequenceId> m_pager_lsn {};
     SequenceId m_last_lsn;
-    SegmentId m_commit_id;
     WalCollection m_collection;
     std::string m_prefix;
 
     Storage *m_store {};
     LogScratchManager *m_scratch {};
-    Status m_status {Status::ok()};
     std::optional<WalReader> m_reader;
     std::optional<WalWriter> m_writer;
-//    std::optional<BasicWalCleaner> m_cleaner;
+    std::optional<WalCleaner> m_cleaner;
     std::string m_reader_data;
     std::string m_reader_tail;
     std::string m_writer_tail;
     Size m_wal_limit {};
 
-    // If this is true, both m_writer and m_cleaner should exist. Otherwise, m_reader should exist. The two
+    // If this is true, both m_writer and m_cleaner should exist. Otherwise, neither should exist. The two
     // groups should never overlap.
     bool m_is_working {};
 };

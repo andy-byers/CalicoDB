@@ -1,18 +1,18 @@
 
-#include <map>
-#include <unordered_map>
-#include <gtest/gtest.h>
 #include "calico/cursor.h"
-#include "pager/pager.h"
-#include "tree/bplus_tree.h"
-#include "tree/node_pool.h"
-#include "utils/layout.h"
-#include "utils/logging.h"
 #include "pager/basic_pager.h"
+#include "pager/pager.h"
 #include "random.h"
 #include "tools.h"
+#include "tree/bplus_tree.h"
+#include "tree/node_pool.h"
 #include "unit_tests.h"
+#include "utils/info_log.h"
+#include "utils/layout.h"
 #include "wal/disabled_wal.h"
+#include <gtest/gtest.h>
+#include <map>
+#include <unordered_map>
 
 namespace calico {
 
@@ -26,11 +26,14 @@ public:
     static constexpr Size FRAME_COUNT {16};
 
     TestHarness()
-        : wal {std::make_unique<DisabledWriteAheadLog>()}
+        : wal {std::make_unique<DisabledWriteAheadLog>()},
+          scratch {wal_scratch_size(PAGE_SIZE)}
     {
         pager = *BasicPager::open({
             PREFIX,
             *store,
+            &scratch,
+            &images,
             *wal,
             status,
             has_xact,
@@ -43,8 +46,10 @@ public:
     Random random {0};
     Status status {Status::ok()};
     bool has_xact {};
+    std::unordered_set<PageId, PageId::Hash> images;
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
+    LogScratchManager scratch;
 };
 
 class TreeTests: public TestHarness {

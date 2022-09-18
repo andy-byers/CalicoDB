@@ -5,8 +5,8 @@
 #include "pager/framer.h"
 #include "pager/registry.h"
 #include "unit_tests.h"
+#include "utils/info_log.h"
 #include "utils/layout.h"
-#include "utils/logging.h"
 #include "wal/disabled_wal.h"
 #include <gtest/gtest.h>
 #include <numeric>
@@ -189,11 +189,14 @@ public:
     std::string test_message {"Hello, world!"};
 
     explicit PagerTests()
-        : wal {std::make_unique<DisabledWriteAheadLog>()}
+        : wal {std::make_unique<DisabledWriteAheadLog>()},
+          scratch {wal_scratch_size(page_size)}
     {
         pager = *BasicPager::open({
             PREFIX,
             *store,
+            &scratch,
+            &images,
             *wal,
             status,
             has_xact,
@@ -252,8 +255,10 @@ public:
 
     Status status {Status::ok()};
     bool has_xact {};
+    std::unordered_set<PageId, PageId::Hash> images;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
+    LogScratchManager scratch;
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)

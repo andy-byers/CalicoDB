@@ -22,7 +22,13 @@
 #define CALICO_EXPECT_GT(t1, t2) CALICO_EXPECT_TRUE((t1) > (t2))
 #define CALICO_EXPECT_GE(t1, t2) CALICO_EXPECT_TRUE((t1) >= (t2))
 
-#define CALICO_TRY(expr)                                                        \
+#define CALICO_TRY(expr) \
+    do { \
+        if (auto calico_try_status = (expr); !calico_try_status.is_ok()) \
+            return calico_try_status; \
+    } while (0)
+
+#define CALICO_TRY__(expr)                                                        \
     do {                                                                     \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) \
             return Err {calico_try_result.error()};                          \

@@ -1,8 +1,8 @@
 
 #include "calico/transaction.h"
-#include "utils/expect.h"
-#include "utils/logging.h"
 #include "core.h"
+#include "utils/expect.h"
+#include "utils/info_log.h"
 
 namespace calico {
 

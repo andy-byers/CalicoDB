@@ -2,7 +2,7 @@
 #define CALICO_PAGE_PAGE_H
 
 #include "utils/types.h"
-#include "wal/wal.h"
+#include "core/transaction_log.h"
 #include <optional>
 #include <vector>
 

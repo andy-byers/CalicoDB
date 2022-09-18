@@ -33,13 +33,13 @@ public:
         options.log_level = spdlog::level::trace;
         options.store = store.get();
 
-        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        ASSERT_OK(db.open(ROOT, options));
     }
 
     auto TearDown() -> void override
     {
         interceptors::reset();
-        ASSERT_TRUE(expose_message(db.close()));
+        ASSERT_OK(db.close());
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
@@ -50,7 +50,7 @@ public:
 
 TEST_F(XactTests, NewDatabaseIsOk)
 {
-    ASSERT_TRUE(expose_message(db.status()));
+    ASSERT_OK(db.status());
 }
 
 template<class Action>
@@ -58,7 +58,7 @@ static auto with_xact(XactTests &test, const Action &action)
 {
     auto xact = test.db.transaction();
     action();
-    ASSERT_TRUE(expose_message(xact.commit()));
+    ASSERT_OK(xact.commit());
 }
 
 template<class Test>
@@ -74,7 +74,7 @@ static auto insert_records(Test &test, Size n = 1'000)
 auto erase_records(XactTests &test, Size n = 1'000)
 {
     for (Size i {}; i < n; ++i) {
-        ASSERT_TRUE(expose_message(test.db.erase(test.db.first())));
+        ASSERT_OK(test.db.erase(test.db.first()));
     }
 }
 
@@ -83,7 +83,7 @@ static auto test_abort_first_xact(Test &test, Size num_records)
 {
     auto xact = test.db.transaction();
     insert_records(test, num_records);
-    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_OK(xact.abort());
     ASSERT_EQ(test.db.info().record_count(), 0);
 
     // Normal operations after abort should work.
@@ -94,7 +94,7 @@ TEST_F(XactTests, CannotUseTransactionObjectAfterSuccessfulCommit)
 {
     auto xact = db.transaction();
     insert_records(*this, 10);
-    ASSERT_TRUE(expose_message(xact.commit()));
+    ASSERT_OK(xact.commit());
     ASSERT_TRUE(xact.abort().is_logic_error());
     ASSERT_TRUE(xact.commit().is_logic_error());
 }
@@ -103,7 +103,7 @@ TEST_F(XactTests, CannotUseTransactionObjectAfterSuccessfulAbort)
 {
     auto xact = db.transaction();
     insert_records(*this, 10);
-    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_OK(xact.abort());
     ASSERT_TRUE(xact.abort().is_logic_error());
     ASSERT_TRUE(xact.commit().is_logic_error());
 }
@@ -115,7 +115,7 @@ TEST_F(XactTests, TransactionObjectIsMovable)
     xact = std::move(xact2);
 
     insert_records(*this, 10);
-    ASSERT_TRUE(expose_message(xact.commit()));
+    ASSERT_OK(xact.commit());
 }
 
 TEST_F(XactTests, AbortFirstXactWithSingleRecord)
@@ -123,31 +123,31 @@ TEST_F(XactTests, AbortFirstXactWithSingleRecord)
     test_abort_first_xact(*this, 1);
 }
 
-TEST_F(XactTests, AbortFirstXactWithMultipleRecord)
+TEST_F(XactTests, AbortFirstXactWithMultipleRecords)
 {
-    test_abort_first_xact(*this, 1'000);
+    test_abort_first_xact(*this, 8);
 }
 
 TEST_F(XactTests, CommitIsACheckpoint)
 {
-    with_xact(*this, [this] { insert_records(*this);});
+    with_xact(*this, [this] {insert_records(*this);});
 
     auto xact = db.transaction();
-    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_OK(xact.abort());
     ASSERT_EQ(db.info().record_count(), 1'000);
 }
 
 TEST_F(XactTests, KeepsCommittedRecords)
 {
-    with_xact(*this, [this] { insert_records(*this);});
+    with_xact(*this, [this] {insert_records(*this);});
 
     auto xact = db.transaction();
     erase_records(*this);
-    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_OK(xact.abort());
     ASSERT_EQ(db.info().record_count(), 1'000);
 
     // Normal operations after abort should work.
-    with_xact(*this, [this] { erase_records(*this);});
+    with_xact(*this, [this] {erase_records(*this);});
     ASSERT_EQ(db.info().record_count(), 0);
 }
 
@@ -177,11 +177,11 @@ static auto test_abort_second_xact(Test &test, Size first_xact_size, Size second
 
     auto xact = test.db.transaction();
     auto committed = run_random_operations(test, cbegin(records), cbegin(records) + static_cast<long>(first_xact_size));
-    ASSERT_TRUE(expose_message(xact.commit()));
+    ASSERT_OK(xact.commit());
 
     xact = test.db.transaction();
     run_random_operations(test, cbegin(records) + static_cast<long>(first_xact_size), cend(records));
-    ASSERT_TRUE(expose_message(xact.abort()));
+    ASSERT_OK(xact.abort());
 
     // The database should contain exactly these records.
     ASSERT_EQ(test.db.info().record_count(), committed.size());
@@ -250,7 +250,7 @@ TEST_F(XactTests, AbortSanityCheck)
         auto xact = db.transaction();
         const auto start = cbegin(records) + i;
         const auto temp = run_random_operations(*this, start, start + j);
-        ASSERT_TRUE(expose_message(xact.abort()));
+        ASSERT_OK(xact.abort());
     }
     ASSERT_EQ(db.info().record_count(), committed.size());
     for (const auto &[key, value]: committed) {
@@ -260,17 +260,17 @@ TEST_F(XactTests, AbortSanityCheck)
 
 TEST_F(XactTests, PersistenceSanityCheck)
 {
-    ASSERT_TRUE(expose_message(db.close()));
+    ASSERT_OK(db.close());
     std::vector<Record> committed;
 
     for (Size i {}; i < 5; ++i) {
-        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        ASSERT_OK(db.open(ROOT, options));
         const auto current = run_random_transactions(*this, 10);
         committed.insert(cend(committed), cbegin(current), cend(current));
-        ASSERT_TRUE(expose_message(db.close()));
+        ASSERT_OK(db.close());
     }
 
-    ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+    ASSERT_OK(db.open(ROOT, options));
     for (const auto &[key, value]: committed) {
         ASSERT_TRUE(tools::contains(db, key, value));
     }
@@ -302,7 +302,7 @@ public:
         options.frame_count = 16;
         options.store = store.get();
         options.log_level = spdlog::level::err; // TODO
-        ASSERT_TRUE(expose_message(db.open(ROOT, options)));
+        ASSERT_OK(db.open(ROOT, options));
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
@@ -314,7 +314,7 @@ auto add_sequential_records(Database &db, Size n)
 {
     for (Size i {}; i < n; ++i) {
         const auto key = make_key(i);
-        ASSERT_TRUE(expose_message(db.insert(key, key)));
+        ASSERT_OK(db.insert(key, key));
     }
 }
 
@@ -407,7 +407,7 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     assert_error_42(c.status());
 
     // The database status should still be OK. Errors during reads cannot corrupt or even modify the database state.
-    ASSERT_TRUE(expose_message(db.status()));
+    ASSERT_OK(db.status());
 }
 
 TEST_F(FailureTests, DataWriteFailureDuringQuery)
@@ -458,8 +458,8 @@ static auto run_abort_restores_state_test(Test &test) -> void
     s = test.db.status();
     assert_error_42(s);
 
-    ASSERT_TRUE(expose_message(xact.abort()));
-    ASSERT_TRUE(expose_message(test.db.status()));
+    ASSERT_OK(xact.abort());
+    ASSERT_OK(test.db.status());
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataReadError)
@@ -499,7 +499,7 @@ static auto run_abort_is_reentrant_test(Test &test, int &counter, int &counter_m
         fail_count++;
     }
     ASSERT_GT(fail_count, 5);
-    ASSERT_TRUE(expose_message(test.db.status()));
+    ASSERT_OK(test.db.status());
 
     interceptors::reset();
 }
@@ -534,14 +534,14 @@ TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
 {
     interceptors::set_read(FailOnce<2> {"test/data"});
     assert_error_42(modify_until_failure(*this));
-    ASSERT_TRUE(expose_message(db.status()));
+    ASSERT_OK(db.status());
 }
 
 TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
 {
     interceptors::set_write(FailOnce<5> {"test/data"});
     assert_error_42(modify_until_failure(*this));
-    ASSERT_TRUE(expose_message(db.status()));
+    ASSERT_OK(db.status());
 }
 
 enum class RecoveryTestFailureType {
@@ -592,7 +592,7 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_TRUE(expose_message(open_database()));
+        ASSERT_OK(open_database());
 
         static constexpr Size GROUP_SIZE {1'000};
         uncommitted = generator.generate(random, GROUP_SIZE * 2);
@@ -610,9 +610,9 @@ public:
             while (begin != cend(committed)) {
                 auto xact = db.transaction();
                 for (auto itr = begin; itr != begin + XACT_SIZE; ++itr) {
-                    ASSERT_TRUE(expose_message(db.insert(itr->key, itr->value)));
+                    ASSERT_OK(db.insert(itr->key, itr->value));
                 }
-                ASSERT_TRUE(expose_message(xact.commit()));
+                ASSERT_OK(xact.commit());
                 begin += XACT_SIZE;
             }
 
@@ -799,7 +799,7 @@ TEST_P(RecoveryTests_FailImmediately, BasicRecovery)
 
 // Only can test system calls that are called at least 5 times before and during abort(). If we don't produce 5 calls during abort(),
 // the procedure will succeed and the database will not need recovery.
-class RecoveryTests_FailAfterDelay_5: public RecoveryTestHarness<FailEvery<5>> {};
+class RecoveryTests_FailAfterDelay_5: public RecoveryTestHarness<FailAfter<5>> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryTests_FailAfterDelay_5,

@@ -458,7 +458,7 @@ struct formatter<cco::WalRecordHeader> {
 };
 
 template <>
-struct formatter<cco::WalPayloadType> {
+struct formatter<cco::XactPayloadType> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -466,11 +466,11 @@ struct formatter<cco::WalPayloadType> {
     }
 
     template <typename FormatContext>
-    auto format(const cco::WalPayloadType &type, FormatContext &ctx) {
+    auto format(const cco::XactPayloadType &type, FormatContext &ctx) {
         switch (type) {
-            case cco::WalPayloadType::FULL_IMAGE: return format_to(ctx.out(), "FULL_IMAGE");
-            case cco::WalPayloadType::DELTAS: return format_to(ctx.out(), "DELTAS");
-            case cco::WalPayloadType::COMMIT: return format_to(ctx.out(), "COMMIT");
+            case cco::XactPayloadType::FULL_IMAGE: return format_to(ctx.out(), "FULL_IMAGE");
+            case cco::XactPayloadType::DELTAS: return format_to(ctx.out(), "DELTAS");
+            case cco::XactPayloadType::COMMIT: return format_to(ctx.out(), "COMMIT");
             default: return format_to(ctx.out(), "<unrecognized>");
         }
     }

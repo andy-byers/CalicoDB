@@ -1,161 +1,54 @@
 #include "record.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
-#include "utils/logging.h"
+#include "utils/info_log.h"
 
 namespace calico {
 
-auto contains_record(BytesView in) -> bool
-{
-    if (in.size() > sizeof(WalRecordHeader))
-        return get_u64(in) != 0;
-    return false;
-}
-
 auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void
 {
-    BytesView bytes {reinterpret_cast<const Byte*>(&header), sizeof(header)};
-    mem_copy(out, bytes);
+    out[0] = header.type;
+    out.advance();
+
+    put_u16(out, header.size);
+    out.advance(sizeof(header.size));
+
+    put_u32(out, header.crc);
+}
+
+auto write_wal_payload_header(Bytes out, const WalPayloadHeader &header) -> void
+{
+    put_u64(out, header.lsn.value);
 }
 
 auto read_wal_record_header(BytesView in) -> WalRecordHeader
 {
     WalRecordHeader header {};
-    Bytes bytes {reinterpret_cast<Byte*>(&header), sizeof(header)};
-    mem_copy(bytes, in.truncate(bytes.size()));
+    header.type = WalRecordHeader::Type {in[0]};
+    in.advance();
+
+    header.size = get_u16(in);
+    in.advance(sizeof(header.size));
+
+    header.crc = get_u32(in);
     return header;
 }
 
-auto encode_deltas_payload(SequenceId lsn, PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
+auto read_wal_payload_header(BytesView in) -> WalPayloadHeader
 {
-    const auto original_size = out.size();
-
-    // Payload type (1 B)
-    out[0] = static_cast<Byte>(WalPayloadType::DELTAS);
-    out.advance();
-
-    // LSN (8 B)
-    put_u64(out, lsn.value);
-    out.advance(sizeof(lsn));
-
-    // Page ID (8 B)
-    put_u64(out, page_id.value);
-    out.advance(sizeof(page_id));
-
-    // Deltas count (2 B)
-    put_u16(out, static_cast<std::uint16_t>(deltas.size()));
-    out.advance(sizeof(std::uint16_t));
-
-    // Deltas (N B)
-    for (const auto &[offset, size]: deltas) {
-        put_u16(out, static_cast<std::uint16_t>(offset));
-        out.advance(sizeof(std::uint16_t));
-
-        put_u16(out, static_cast<std::uint16_t>(size));
-        out.advance(sizeof(std::uint16_t));
-
-        mem_copy(out, image.range(offset, size));
-        out.advance(size);
-    }
-    return original_size - out.size();
-}
-
-auto decode_deltas_payload(BytesView in) -> DeltasDescriptor
-{
-    DeltasDescriptor info;
-
-    // Payload type (1 B)
-    CALICO_EXPECT_EQ(decode_payload_type(in), WalPayloadType::DELTAS);
-    in.advance();
-
-    // LSN (8 B)
-    info.lsn.value = get_u64(in);
-    in.advance(sizeof(info.lsn));
-
-    // Page ID (8 B)
-    info.pid.value = get_u64(in);
-    in.advance(sizeof(info.pid));
-
-    // Deltas count (2 B)
-    info.deltas.resize(get_u16(in));
-    in.advance(sizeof(std::uint16_t));
-
-    // Deltas (N B)
-    for (auto &[offset, bytes]: info.deltas) {
-        offset = get_u16(in);
-        in.advance(sizeof(std::uint16_t));
-
-        const auto size = get_u16(in);
-        in.advance(sizeof(std::uint16_t));
-
-        bytes = in.range(0, size);
-        in.advance(size);
-    }
-    return info;
-}
-
-auto encode_commit_payload(SequenceId lsn, Bytes out) -> Size
-{
-    // Payload type (1 B)
-    out[0] = static_cast<Byte>(WalPayloadType::COMMIT);
-    out.advance();
-
-    // LSN (8 B)
-    put_u64(out, lsn.value);
-    return MINIMUM_PAYLOAD_SIZE;
-}
-
-auto decode_commit_payload(BytesView in) -> CommitDescriptor
-{
-    CALICO_EXPECT_EQ(decode_payload_type(in), WalPayloadType::COMMIT);
-    return CommitDescriptor {decode_lsn(in)};
-}
-
-auto encode_full_image_payload(SequenceId lsn, PageId page_id, BytesView image, Bytes out) -> Size
-{
-    const auto original_size = out.size();
-
-    // Payload type (1 B)
-    out[0] = static_cast<Byte>(WalPayloadType::FULL_IMAGE);
-    out.advance();
-
-    // LSN (8 B)
-    put_u64(out, lsn.value);
-    out.advance(sizeof(lsn));
-
-    // Page ID (8 B)
-    put_u64(out, page_id.value);
-    out.advance(sizeof(page_id));
-
-    // Image (N B)
-    mem_copy(out, image);
-    out.advance(image.size());
-
-    return original_size - out.size();
-}
-
-auto decode_full_image_payload(BytesView in) -> FullImageDescriptor
-{
-    CALICO_EXPECT_EQ(decode_payload_type(in), WalPayloadType::FULL_IMAGE);
-    in.advance();
-
-    FullImageDescriptor info {};
-    info.lsn.value = get_u64(in);
-    in.advance(sizeof(SequenceId));
-    info.pid.value = get_u64(in);
-    in.advance(sizeof(PageId));
-    info.image = in;
-    return info;
+    WalPayloadHeader header {};
+    header.lsn.value = get_u64(in);
+    return header;
 }
 
 auto split_record(WalRecordHeader &lhs, BytesView payload, Size available_size) -> WalRecordHeader
 {
     CALICO_EXPECT_NE(lhs.type, WalRecordHeader::Type::FIRST);
     CALICO_EXPECT_EQ(lhs.size, payload.size());
-    CALICO_EXPECT_LT(available_size, sizeof(lhs) + payload.size()); // Only call this if we actually need a split.
+    CALICO_EXPECT_LT(available_size, WalRecordHeader::SIZE + payload.size()); // Only call this if we actually need a split.
     auto rhs = lhs;
 
-    lhs.size = static_cast<std::uint16_t>(available_size - sizeof(lhs));
+    lhs.size = static_cast<std::uint16_t>(available_size - WalRecordHeader::SIZE);
     rhs.size = static_cast<std::uint16_t>(payload.size() - lhs.size);
     rhs.type = WalRecordHeader::Type::LAST;
 

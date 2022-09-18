@@ -4,8 +4,8 @@
 #include "page/page.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
+#include "utils/info_log.h"
 #include "utils/layout.h"
-#include "utils/logging.h"
 
 namespace calico {
 
@@ -156,7 +156,7 @@ auto Framer::write_back(FrameNumber id) -> Status
     if (s.is_ok()) {
         const auto lsn = frame.lsn();
         m_flushed_lsn = std::max(lsn, m_flushed_lsn);
-        m_wal->allow_cleanup(lsn.value);
+//        m_wal->remove_before(lsn.value); TODO TODO TODO
     }
     return s;
 }

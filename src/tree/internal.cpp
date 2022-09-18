@@ -26,7 +26,7 @@ auto Internal::collect_value(const Node &node, Size index) const -> Result<std::
     if (!cell.overflow_id().is_null()) {
         CALICO_EXPECT_GT(cell.value_size(), cell.local_value().size());
         out.advance(local.size());
-        CALICO_TRY(m_pool->collect_chain(cell.overflow_id(), out));
+        CALICO_TRY__(m_pool->collect_chain(cell.overflow_id(), out));
     }
     return result;
 }
@@ -52,7 +52,7 @@ auto Internal::find_external(BytesView key) -> Result<SearchResult>
             break;
         result.index += result.found_eq;
         const auto id = node->child_id(result.index);
-        CALICO_TRY(m_pool->release(std::move(*node)));
+        CALICO_TRY__(m_pool->release(std::move(*node)));
         node = m_pool->acquire(id, false);
         if (!node.has_value())
             return Err {node.error()};
@@ -68,7 +68,7 @@ auto Internal::find_minimum() -> Result<SearchResult>
 
     while (!node.is_external()) {
         id = node.child_id(0);
-        CALICO_TRY(m_pool->release(std::move(node)));
+        CALICO_TRY__(m_pool->release(std::move(node)));
         CALICO_TRY_STORE(node, m_pool->acquire(id, false));
     }
     auto was_found = true;
@@ -76,7 +76,7 @@ auto Internal::find_minimum() -> Result<SearchResult>
         CALICO_EXPECT_TRUE(id.is_root());
         was_found = false;
     }
-    CALICO_TRY(m_pool->release(std::move(node)));
+    CALICO_TRY__(m_pool->release(std::move(node)));
     return SearchResult {id, 0, was_found};
 }
 
@@ -88,7 +88,7 @@ auto Internal::find_maximum() -> Result<SearchResult>
     while (!node.is_external()) {
         CALICO_EXPECT_GT(node.cell_count(), 0);
         id = node.rightmost_child_id();
-        CALICO_TRY(m_pool->release(std::move(node)));
+        CALICO_TRY__(m_pool->release(std::move(node)));
         CALICO_TRY_STORE(node, m_pool->acquire(id, false));
     }
     auto was_found = true;
@@ -100,7 +100,7 @@ auto Internal::find_maximum() -> Result<SearchResult>
     } else {
         index = node.cell_count() - 1;
     }
-    CALICO_TRY(m_pool->release(std::move(node)));
+    CALICO_TRY__(m_pool->release(std::move(node)));
     return SearchResult {id, index, was_found};
 }
 
@@ -129,7 +129,7 @@ auto Internal::positioned_modify(Position position, BytesView value) -> Result<v
     CALICO_TRY_CREATE(new_cell, make_cell(stob(key), value, true));
 
     if (old_cell.overflow_size())
-        CALICO_TRY(m_pool->destroy_chain(old_cell.overflow_id(), old_cell.overflow_size()));
+        CALICO_TRY__(m_pool->destroy_chain(old_cell.overflow_id(), old_cell.overflow_size()));
 
     node.remove_at(index, old_cell.size());
     node.insert_at(index, new_cell);
@@ -152,7 +152,7 @@ auto Internal::positioned_remove(Position position) -> Result<void>
     if (cell.overflow_size()) {
         auto was_destroyed = m_pool->destroy_chain(cell.overflow_id(), cell.overflow_size());
         if (!was_destroyed.has_value()) {
-            CALICO_TRY(m_pool->release(std::move(node)));
+            CALICO_TRY__(m_pool->release(std::move(node)));
             return Err {was_destroyed.error()};
         }
     }
@@ -204,7 +204,7 @@ auto Internal::split_root(Node root) -> Result<Node>
     CALICO_TRY_CREATE(child, m_pool->allocate(root.type()));
     ::calico::split_root(root, child);
 
-    CALICO_TRY(maybe_fix_child_parent_connections(child));
+    CALICO_TRY__(maybe_fix_child_parent_connections(child));
     CALICO_EXPECT_TRUE(child.is_overflowing());
     return child;
 }
@@ -225,7 +225,7 @@ auto Internal::split_non_root(Node node) -> Result<Node>
     if (node.is_external() && !sibling.right_sibling_id().is_null()) {
         CALICO_TRY_CREATE(right, m_pool->acquire(sibling.right_sibling_id(), true));
         right.set_left_sibling_id(sibling.id());
-        CALICO_TRY(m_pool->release(std::move(right)));
+        CALICO_TRY__(m_pool->release(std::move(right)));
     }
 
     parent.insert_at(index, separator);
@@ -234,9 +234,9 @@ auto Internal::split_non_root(Node node) -> Result<Node>
 
     const auto offset = !parent.is_overflowing();
     parent.set_child_id(index + offset, sibling.id());
-    CALICO_TRY(maybe_fix_child_parent_connections(sibling));
-    CALICO_TRY(m_pool->release(std::move(sibling)));
-    CALICO_TRY(m_pool->release(std::move(node)));
+    CALICO_TRY__(maybe_fix_child_parent_connections(sibling));
+    CALICO_TRY__(m_pool->release(std::move(sibling)));
+    CALICO_TRY__(m_pool->release(std::move(node)));
     return parent;
 }
 
@@ -253,10 +253,10 @@ auto Internal::maybe_fix_child_parent_connections(Node &node) -> Result<void>
 
 
         for (Size index {}; index <= node.cell_count(); ++index)
-            CALICO_TRY(fix_connection(node.child_id(index)));
+            CALICO_TRY__(fix_connection(node.child_id(index)));
 
         if (node.is_overflowing())
-            CALICO_TRY(fix_connection(node.overflow_cell().left_child_id()));
+            CALICO_TRY__(fix_connection(node.overflow_cell().left_child_id()));
     }
     return {};
 }
@@ -289,12 +289,12 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> Result<bool>
         CALICO_TRY_CREATE(Lc, m_pool->acquire(parent.child_id(index - 1), true));
         if (can_merge_siblings(Lc, node, parent.read_cell(index - 1))) {
             merge_right(Lc, node, parent, index - 1);
-            CALICO_TRY(maybe_fix_child_parent_connections(Lc));
+            CALICO_TRY__(maybe_fix_child_parent_connections(Lc));
             if (node.is_external() && !node.right_sibling_id().is_null()) {
                 CALICO_TRY_CREATE(rc, m_pool->acquire(node.right_sibling_id(), true));
                 rc.set_left_sibling_id(Lc.id());
             }
-            CALICO_TRY(m_pool->destroy(std::move(node)));
+            CALICO_TRY__(m_pool->destroy(std::move(node)));
             return true;
         }
     }
@@ -302,12 +302,12 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> Result<bool>
         CALICO_TRY_CREATE(rc, m_pool->acquire(parent.child_id(index + 1), true));
         if (can_merge_siblings(node, rc, parent.read_cell(index))) {
             merge_left(node, rc, parent, index);
-            CALICO_TRY(maybe_fix_child_parent_connections(node));
+            CALICO_TRY__(maybe_fix_child_parent_connections(node));
             if (rc.is_external() && !rc.right_sibling_id().is_null()) {
                 CALICO_TRY_CREATE(rrc, m_pool->acquire(rc.right_sibling_id(), true));
                 rrc.set_left_sibling_id(node.id());
             }
-            CALICO_TRY(m_pool->destroy(std::move(rc)));
+            CALICO_TRY__(m_pool->destroy(std::move(rc)));
             return true;
         }
     }
@@ -318,8 +318,8 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> Result<bool>
     auto maybe_fix_parent = [&]() -> Result<bool> {
         if (parent.is_overflowing()) {
             const auto id = parent.id();
-            CALICO_TRY(m_pool->release(std::move(node)));
-            CALICO_TRY(balance_after_overflow(std::move(parent)));
+            CALICO_TRY__(m_pool->release(std::move(node)));
+            CALICO_TRY__(balance_after_overflow(std::move(parent)));
             CALICO_TRY_STORE(parent, m_pool->acquire(id, true));
             return false;
         }
@@ -354,7 +354,7 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> Result<bool>
         auto [left_sibling, cell_count] = std::move(siblings[0]);
         CALICO_EXPECT_NE(left_sibling, std::nullopt);
         siblings[1].node.reset();
-        CALICO_TRY(rotate_right(parent, *left_sibling, node, index - 1));
+        CALICO_TRY__(rotate_right(parent, *left_sibling, node, index - 1));
         CALICO_EXPECT_FALSE(node.is_overflowing());
         left_sibling.reset();
         return maybe_fix_parent();
@@ -362,7 +362,7 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> Result<bool>
         auto [right_sibling, cell_count] = std::move(siblings[1]);
         CALICO_EXPECT_NE(right_sibling, std::nullopt);
         siblings[0].node.reset();
-        CALICO_TRY(rotate_left(parent, node, *right_sibling, index));
+        CALICO_TRY__(rotate_left(parent, node, *right_sibling, index));
         CALICO_EXPECT_FALSE(node.is_overflowing());
         right_sibling.reset();
         return maybe_fix_parent();
@@ -384,15 +384,15 @@ auto Internal::fix_root(Node node) -> Result<void>
         // arbitrary cell and making it the overflow cell.
         if (child.usable_space() < node.header_offset()) {
             child.set_overflow_cell(child.extract_cell(0, m_scratch.get()));
-            CALICO_TRY(m_pool->release(std::move(node)));
-            CALICO_TRY(split_non_root(std::move(child)));
+            CALICO_TRY__(m_pool->release(std::move(node)));
+            CALICO_TRY__(split_non_root(std::move(child)));
             CALICO_TRY_STORE(node, find_root(true));
         } else {
             ::calico::merge_root(node, child);
-            CALICO_TRY(m_pool->destroy(std::move(child)));
+            CALICO_TRY__(m_pool->destroy(std::move(child)));
         }
         auto result = maybe_fix_child_parent_connections(node);
-        CALICO_TRY(m_pool->release(std::move(node)));
+        CALICO_TRY__(m_pool->release(std::move(node)));
         return result;
     }
     return m_pool->release(std::move(node));
@@ -483,7 +483,7 @@ auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     separator.set_left_child_id(Lc.rightmost_child_id());
     child.set_parent_id(Lc.id());
     Lc.set_rightmost_child_id(child.id());
-    CALICO_TRY(m_pool->release(std::move(child)));
+    CALICO_TRY__(m_pool->release(std::move(child)));
     Lc.insert_at(Lc.cell_count(), separator);
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
 
@@ -506,7 +506,7 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     CALICO_TRY_CREATE(child, m_pool->acquire(Lc.rightmost_child_id(), true));
     separator.set_left_child_id(child.id());
     child.set_parent_id(rc.id());
-    CALICO_TRY(m_pool->release(std::move(child)));
+    CALICO_TRY__(m_pool->release(std::move(child)));
     Lc.set_rightmost_child_id(Lc.child_id(Lc.cell_count() - 1));
     rc.insert_at(0, separator);
     CALICO_EXPECT_FALSE(rc.is_overflowing());

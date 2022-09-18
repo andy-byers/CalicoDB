@@ -3,11 +3,12 @@
 
 #include "pager.h"
 #include "registry.h"
+#include "spdlog/logger.h"
 #include "utils/scratch.h"
+#include "wal/helpers.h"
 #include <list>
 #include <mutex>
-#include "spdlog/logger.h"
-#include <unordered_map>
+#include <unordered_set>
 
 namespace calico {
 
@@ -18,7 +19,9 @@ class BasicPager : public Pager {
 public:
     struct Parameters {
         std::string prefix;
-        Storage &storage;
+        Storage &storage; // TODO: Make these pointers...
+        LogScratchManager *scratch {};
+        std::unordered_set<PageId, PageId::Hash> *images {};
         WriteAheadLog &wal;
         Status &status;
         bool &has_xact;
@@ -74,6 +77,8 @@ private:
     mutable std::mutex m_mutex;
     std::unique_ptr<Framer> m_framer;
     std::shared_ptr<spdlog::logger> m_logger;
+    std::unordered_set<PageId, PageId::Hash> *m_images {};
+    LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};
     PageList m_dirty;
     PageRegistry m_registry;

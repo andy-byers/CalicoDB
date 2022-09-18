@@ -720,14 +720,14 @@ public:
 
 TEST_F(BasicWorkerTests, CreateWorker)
 {
-    ASSERT_TRUE(expose_message(worker.status()));
+    ASSERT_OK(worker.status());
     ASSERT_TRUE(events.empty());
-    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_OK(std::move(worker).destroy());
 }
 
 TEST_F(BasicWorkerTests, DestroyWorker)
 {
-    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_OK(std::move(worker).destroy());
     ASSERT_TRUE(events.empty());
 }
 
@@ -738,7 +738,7 @@ TEST_F(BasicWorkerTests, EventsGetAdded)
     worker.dispatch(3);
 
     // Blocks until all events are finished and the worker thread is joined.
-    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_OK(std::move(worker).destroy());
     ASSERT_EQ(events.at(0), 1);
     ASSERT_EQ(events.at(1), 2);
     ASSERT_EQ(events.at(2), 3);
@@ -754,7 +754,7 @@ TEST_F(BasicWorkerTests, WaitOnEvent)
     ASSERT_EQ(events.at(0), 1);
     ASSERT_EQ(events.at(1), 2);
     ASSERT_EQ(events.at(2), 3);
-    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_OK(std::move(worker).destroy());
 }
 
 TEST_F(BasicWorkerTests, SanityCheck)
@@ -762,14 +762,14 @@ TEST_F(BasicWorkerTests, SanityCheck)
     static constexpr int NUM_EVENTS {1'000};
     for (int i {}; i < NUM_EVENTS; ++i) {
         worker.dispatch(i, i == NUM_EVENTS - 1);
-        ASSERT_TRUE(expose_message(worker.status()));
+        ASSERT_OK(worker.status());
     }
 
     for (int i {}; i < NUM_EVENTS; ++i)
         ASSERT_EQ(events.at(static_cast<Size>(i)), i);
 
-    ASSERT_TRUE(expose_message(worker.status()));
-    ASSERT_TRUE(expose_message(std::move(worker).destroy()));
+    ASSERT_OK(worker.status());
+    ASSERT_OK(std::move(worker).destroy());
 }
 
 class WorkerFaultTests: public testing::Test {
