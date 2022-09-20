@@ -36,7 +36,7 @@ public:
     WalReader(Storage &store, WalCollection &segments, std::string prefix, Bytes tail, Bytes data)
         : m_prefix {std::move(prefix)},
           m_store {&store},
-          m_segments {&segments},
+          m_set {&segments},
           m_tail {tail},
           m_data {data}
     {}
@@ -71,7 +71,7 @@ private:
     std::optional<LogReader> m_reader;
     std::unique_ptr<RandomReader> m_file;
     Storage *m_store {};
-    WalCollection *m_segments {};
+    WalCollection *m_set {};
     Bytes m_tail;
     Bytes m_data;
     SegmentId m_current;

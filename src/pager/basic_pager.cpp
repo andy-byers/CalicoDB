@@ -35,7 +35,6 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
 
     CALICO_TRY_STORE(pager->m_framer, Framer::open(
         std::unique_ptr<RandomEditor> {file},
-        param.wal,
         param.page_size,
         param.frame_count
     ));

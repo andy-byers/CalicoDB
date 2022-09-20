@@ -5,7 +5,7 @@ namespace calico {
 
 auto WalCleaner::on_event(const SequenceId &limit) -> Status
 {
-    auto first = m_collection->first();
+    auto first = m_set->first();
     auto current = first;
     SegmentId target;
 
@@ -22,10 +22,10 @@ auto WalCleaner::on_event(const SequenceId &limit) -> Status
         }
         if (!target.is_null()) {
             CALICO_TRY(m_store->remove_file(m_prefix + target.to_name()));
-            m_collection->remove_before(current);
+            m_set->remove_before(current);
         }
-        target = current;
-        current = m_collection->id_after(current);
+
+        target = std::exchange(current, m_set->id_after(current));
     }
     return Status::ok();
 }

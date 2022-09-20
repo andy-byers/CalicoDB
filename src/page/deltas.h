@@ -1,9 +1,9 @@
 #ifndef CALICO_PAGE_DELTAS_H
 #define CALICO_PAGE_DELTAS_H
 
-#include <algorithm>
-#include "core/transaction_log.h"
+#include "core/recovery.h"
 #include "utils/expect.h"
+#include <algorithm>
 
 namespace calico {
 

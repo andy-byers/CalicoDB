@@ -105,7 +105,7 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
 
 auto WalReader::open() -> Status
 {
-    const auto first = m_segments->id_after(SegmentId::null());
+    const auto first = m_set->id_after(SegmentId::null());
     if (first.is_null())
         return Status::not_found("could not open WAL reader: segment collection is empty");
     return open_segment(first);
@@ -113,7 +113,7 @@ auto WalReader::open() -> Status
 
 auto WalReader::seek_next() -> Status
 {
-    const auto next = m_segments->id_after(m_current);
+    const auto next = m_set->id_after(m_current);
     if (!next.is_null()) {
         close_segment();
         return open_segment(next);
@@ -123,7 +123,7 @@ auto WalReader::seek_next() -> Status
 
 auto WalReader::seek_previous() -> Status
 {
-    const auto previous = m_segments->id_before(m_current);
+    const auto previous = m_set->id_before(m_current);
     if (!previous.is_null()) {
         close_segment();
         return open_segment(previous);

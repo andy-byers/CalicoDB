@@ -116,54 +116,54 @@ private:
 
 template<Size Delay = 0>
 struct FailOnce {
-    explicit FailOnce(std::string matcher_path = {})
-        : matcher {std::move(matcher_path)}
+    explicit FailOnce(std::string filter_prefix = {})
+        : prefix {std::move(filter_prefix)}
     {}
 
     auto operator()(const std::string &path, ...) -> Status
     {
-        if (!matcher.empty() && stob(path).starts_with(matcher)) {
+        if (!prefix.empty() && stob(path).starts_with(prefix)) {
             if (index++ == Delay)
                 return error;
         }
         return Status::ok();
     }
 
-    std::string matcher;
+    std::string prefix;
     Status error {Status::system_error("42")};
     Size index {};
 };
 
 template<Size Delay = 0>
 struct FailAfter {
-    explicit FailAfter(std::string matcher_path = {})
-        : matcher {std::move(matcher_path)}
+    explicit FailAfter(std::string filter_prefix = {})
+        : prefix {std::move(filter_prefix)}
     {}
 
     auto operator()(const std::string &path, ...) -> Status
     {
-        if (!matcher.empty()) {
-            if (stob(path).starts_with(matcher) && index++ >= Delay)
+        if (!prefix.empty()) {
+            if (stob(path).starts_with(prefix) && index++ >= Delay)
                 return error;
         }
         return Status::ok();
     }
 
-    std::string matcher;
+    std::string prefix;
     Status error {Status::system_error("42")};
     Size index {};
 };
 
 template<Size Delay>
 struct FailEvery {
-    explicit FailEvery(std::string matcher_path = {})
-        : matcher {std::move(matcher_path)}
+    explicit FailEvery(std::string filter_prefix = {})
+        : prefix {std::move(filter_prefix)}
     {}
 
     auto operator()(const std::string &path, ...) -> Status
     {
-        if (!matcher.empty()) {
-            if (stob(path).starts_with(matcher) && index++ == Delay) {
+        if (!prefix.empty()) {
+            if (stob(path).starts_with(prefix) && index++ == Delay) {
                 index = 0;
                 return error;
             }
@@ -171,7 +171,7 @@ struct FailEvery {
         return Status::ok();
     }
 
-    std::string matcher;
+    std::string prefix;
     Status error {Status::system_error("42")};
     Size index {};
 };

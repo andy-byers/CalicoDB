@@ -380,10 +380,10 @@ auto Core::abort() -> Status
             forward_status(s, "WAL encountered an error when stopping workers");
     }
 
-    // This should give us the full images of each updated page belonging to the current transaction, before any changes
-    // were made to it.
+    // This should give us the full images of each updated page belonging to the current transaction,
+    // before any changes were made to it.
     s = m_wal->roll_backward(m_commit_lsn, [this](auto payload) {
-        auto info = decode_payload(payload.data());
+        auto info = decode_payload(payload);
 
         if (!info.has_value())
             return Status::corruption("");
@@ -450,11 +450,11 @@ auto Core::ensure_consistent_state() -> Status
     SequenceId last_lsn;
 
     const auto redo = [this, &last_lsn](auto payload) {
-        auto info = decode_payload(payload.data());
+        auto info = decode_payload(payload);
 
         // Payload has an invalid type.
         if (!info.has_value())
-            return Status::corruption("");
+            return Status::corruption("WAL is corrupted");
 
         last_lsn = payload.lsn();
 
@@ -471,10 +471,10 @@ auto Core::ensure_consistent_state() -> Status
     };
 
     const auto undo = [this](auto payload) {
-        auto info = decode_payload(payload.data());
+        auto info = decode_payload(payload);
 
         if (!info.has_value())
-            return Status::corruption("");
+            return Status::corruption("WAL is corrupted");
 
         if (std::holds_alternative<FullImageDescriptor>(*info)) {
             const auto image = std::get<FullImageDescriptor>(*info);

@@ -49,7 +49,7 @@ auto Frame::unref(Page &page) -> void
     m_ref_count--;
 }
 
-auto Framer::open(std::unique_ptr<RandomEditor> file, WriteAheadLog &wal, Size page_size, Size frame_count) -> Result<std::unique_ptr<Framer>>
+auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame_count) -> Result<std::unique_ptr<Framer>>
 {
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
@@ -69,13 +69,12 @@ auto Framer::open(std::unique_ptr<RandomEditor> file, WriteAheadLog &wal, Size p
         message.set_hint("tried to allocate {} bytes of cache memory", cache_size);
         return Err {message.system_error()};
     }
-    return std::unique_ptr<Framer> {new Framer {std::move(file), wal, std::move(buffer), page_size, frame_count}};
+    return std::unique_ptr<Framer> {new Framer {std::move(file), std::move(buffer), page_size, frame_count}};
 }
 
-Framer::Framer(std::unique_ptr<RandomEditor> file, WriteAheadLog &wal, AlignedBuffer buffer, Size page_size, Size frame_count)
+Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
     : m_buffer {std::move(buffer)},
       m_file {std::move(file)},
-      m_wal {&wal},
       m_page_size {page_size}
 {
     // The buffer should be aligned to the page size.
@@ -156,7 +155,6 @@ auto Framer::write_back(FrameNumber id) -> Status
     if (s.is_ok()) {
         const auto lsn = frame.lsn();
         m_flushed_lsn = std::max(lsn, m_flushed_lsn);
-//        m_wal->remove_before(lsn.value); TODO TODO TODO
     }
     return s;
 }

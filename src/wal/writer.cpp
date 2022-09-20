@@ -74,7 +74,7 @@ auto LogWriter::flush() -> Status
 
 auto WalWriter::open() -> Status
 {
-    return open_segment(++m_segments->last());
+    return open_segment(++m_set->last());
 }
 
 auto WalWriter::write(WalPayloadIn payload) -> void
@@ -153,11 +153,11 @@ auto WalWriter::close_segment() -> Status
 
     // We want to do this part, even if the flush failed. If the segment is empty, and we fail to remove
     // it, we will end up overwriting it next time we open the writer.
-    if (auto id = ++m_segments->last(); is_empty) {
+    if (auto id = ++m_set->last(); is_empty) {
         auto t = m_store->remove_file(m_prefix + id.to_name());
         s = s.is_ok() ? t : s;
     } else {
-        m_segments->add_segment(id);
+        m_set->add_segment(id);
     }
     return s;
 }
@@ -166,7 +166,7 @@ auto WalWriter::advance_segment() -> Status
 {
     auto s = close_segment();
     if (s.is_ok()) {
-        auto id = ++m_segments->last();
+        auto id = ++m_set->last();
         return open_segment(id);
     }
     return s;

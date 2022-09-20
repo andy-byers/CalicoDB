@@ -16,11 +16,6 @@ auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void
     put_u32(out, header.crc);
 }
 
-auto write_wal_payload_header(Bytes out, const WalPayloadHeader &header) -> void
-{
-    put_u64(out, header.lsn.value);
-}
-
 auto read_wal_record_header(BytesView in) -> WalRecordHeader
 {
     WalRecordHeader header {};

@@ -1,17 +1,18 @@
 
-#include <array>
-#include <filesystem>
-#include <vector>
-#include <gtest/gtest.h>
 #include "core/core.h"
 #include "core/header.h"
 #include "fakes.h"
 #include "storage/posix_storage.h"
 #include "tools.h"
 #include "tree/bplus_tree.h"
+#include "tree/cursor_internal.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
 #include "wal/basic_wal.h"
+#include <array>
+#include <filesystem>
+#include <gtest/gtest.h>
+#include <vector>
 
 namespace calico {
 
@@ -109,6 +110,22 @@ TEST_F(BasicDatabaseTests, OpenAndCloseDatabase)
     ASSERT_OK(db.close());
 }
 
+TEST_F(BasicDatabaseTests, DestroyDatabase)
+{
+    Database db;
+    ASSERT_OK(db.open(ROOT, options));
+    ASSERT_OK(Database::destroy(std::move(db)));
+}
+
+TEST_F(BasicDatabaseTests, DatabaseIsMovable)
+{
+    Database db;
+    ASSERT_OK(db.open(ROOT, options));
+    Database db2 {std::move(db)};
+    db = std::move(db2);
+    ASSERT_OK(db.close());
+}
+
 TEST_F(BasicDatabaseTests, ReopenDatabase)
 {
     Database db;
@@ -119,29 +136,50 @@ TEST_F(BasicDatabaseTests, ReopenDatabase)
     ASSERT_OK(db.close());
 }
 
-TEST_F(BasicDatabaseTests, Inserts)
+static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {
-    static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size GROUP_SIZE {500};
-
-    Database db;
-    ASSERT_OK(db.open(ROOT, options));
-
     RecordGenerator generator;
     Random random {internal::random_seed};
 
-    for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        const auto records = generator.generate(random, GROUP_SIZE);
+    for (Size iteration {}; iteration < num_groups; ++iteration) {
+        const auto records = generator.generate(random, group_size);
         auto itr = cbegin(records);
         ASSERT_OK(db.status());
         auto xact = db.transaction();
 
-        for (Size i {}; i < GROUP_SIZE; ++i) {
+        for (Size i {}; i < group_size; ++i) {
             ASSERT_OK(db.insert(itr->key, itr->value));
             itr++;
         }
         ASSERT_OK(xact.commit());
     }
+}
+
+static auto traverse_all_records(Database &db)
+{
+    for (auto c = db.first(); c.is_valid(); ++c) {
+        CursorInternal::TEST_validate(c);
+    }
+    for (auto c = db.last(); c.is_valid(); --c) {
+        CursorInternal::TEST_validate(c);
+    }
+}
+
+TEST_F(BasicDatabaseTests, InsertOneGroup)
+{
+    Database db;
+    ASSERT_OK(db.open(ROOT, options));
+    insert_random_groups(db, 1, 500);
+    traverse_all_records(db);
+    ASSERT_OK(db.close());
+}
+
+TEST_F(BasicDatabaseTests, InsertMultipleGroups)
+{
+    Database db;
+    ASSERT_OK(db.open(ROOT, options));
+    insert_random_groups(db, 10, 500);
+    traverse_all_records(db);
     ASSERT_OK(db.close());
 }
 

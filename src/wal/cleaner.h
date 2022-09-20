@@ -20,7 +20,7 @@ public:
           }},
           m_prefix {std::move(prefix)},
           m_store {&store},
-          m_collection {&collection}
+          m_set {&collection}
     {}
 
     [[nodiscard]]
@@ -46,7 +46,7 @@ private:
     Worker<SequenceId> m_worker;
     std::string m_prefix;
     Storage *m_store {};
-    WalCollection *m_collection {};
+    WalCollection *m_set {};
 };
 
 } // namespace calico

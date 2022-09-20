@@ -1,9 +1,12 @@
 #include <filesystem>
 #include <fstream>
+#include <fcntl.h>
+#include <unistd.h>
 #include <gtest/gtest.h>
 #include "calico/storage.h"
 #include "random.h"
 #include "storage/posix_storage.h"
+#include "storage/posix_system.h"
 #include "fakes.h"
 #include "unit_tests.h"
 
@@ -249,6 +252,45 @@ TEST_F(HeapTests, ReaderStopsAtEOF)
     auto bytes = stob(buffer);
     ASSERT_OK(ra_reader->read(bytes, 0));
     ASSERT_EQ(bytes.to_string(), data);
+}
+
+TEST(SystemTests, SystemErrorBehavior)
+{
+    errno = ENOENT;
+    ASSERT_TRUE(system::error().is_system_error());
+    ASSERT_EQ(errno, 0);
+
+    ASSERT_TRUE(system::error(std::errc::no_such_file_or_directory).is_system_error());
+    assert_error_42(system::error("42"));
+}
+
+TEST(SystemTests, ClosedFileErrors)
+{
+    char backing[1];
+    Bytes bytes {backing, sizeof(backing)};
+    ASSERT_TRUE(system::file_read(-1, bytes).error().is_system_error());
+    ASSERT_TRUE(system::file_write(-1, bytes).error().is_system_error());
+    ASSERT_TRUE(system::file_seek(-1, 0, SEEK_CUR).error().is_system_error());
+    ASSERT_TRUE(system::file_close(-1).is_system_error());
+    ASSERT_TRUE(system::file_sync(-1).is_system_error());
+}
+
+TEST(SystemTests, NonexistentResourceErrors)
+{
+    ASSERT_TRUE(system::file_size("__does_not_exist__").error().is_system_error());
+    ASSERT_TRUE(system::file_remove("__does_not_exist__").is_system_error());
+    ASSERT_TRUE(system::file_resize("__does_not_exist__", 0).is_system_error());
+    ASSERT_TRUE(system::dir_remove("__does_not_exist__").is_system_error());
+}
+
+TEST(SystemTests, OpenAndClose)
+{
+    static constexpr auto PATH = "/tmp/__calico_system_tests";
+    auto fd = system::file_open(PATH, O_CREAT | O_RDWR, 0666).value();
+    ASSERT_OK(system::file_close(fd));
+    ASSERT_OK(system::file_exists(PATH));
+    ASSERT_OK(system::file_remove(PATH));
+    ASSERT_TRUE(system::file_exists(PATH).is_not_found());
 }
 
 } // namespace calico

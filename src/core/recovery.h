@@ -1,12 +1,13 @@
 #ifndef CALICO_CORE_TRANSACTION_LOG_H
 #define CALICO_CORE_TRANSACTION_LOG_H
 
-#include <optional>
-#include <variant>
-#include <vector>
 #include "calico/bytes.h"
 #include "utils/encoding.h"
 #include "utils/types.h"
+#include "wal/wal.h"
+#include <optional>
+#include <variant>
+#include <vector>
 
 namespace calico {
 
@@ -22,19 +23,23 @@ struct DeltasDescriptor {
     };
 
     PageId pid;
+    SequenceId lsn;
     std::vector<Delta> deltas;
 };
 
 struct FullImageDescriptor {
     PageId pid;
+    SequenceId lsn;
     BytesView image;
 };
 
-struct CommitDescriptor {};
+struct CommitDescriptor {
+    SequenceId lsn;
+};
 
 using PayloadDescriptor = std::variant<DeltasDescriptor, FullImageDescriptor, CommitDescriptor>;
 
-[[nodiscard]] auto decode_payload(BytesView in) -> std::optional<PayloadDescriptor>;
+[[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
 [[nodiscard]] auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
 [[nodiscard]] auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size;
 [[nodiscard]] auto encode_commit_payload(Bytes out) -> Size;
@@ -52,6 +57,26 @@ inline auto encode_payload_type(Bytes out, XactPayloadType type) -> void
     CALICO_EXPECT_FALSE(out.is_empty());
     out[0] = type;
 }
+
+class Pager;
+class WriteAheadLog;
+
+class Recovery {
+public:
+    Recovery(Pager &pager, WriteAheadLog &wal)
+        : m_pager {&pager},
+          m_wal {&wal}
+    {}
+
+    [[nodiscard]] auto start_abort(SequenceId commit_lsn) -> Status;
+    [[nodiscard]] auto finish_abort(SequenceId commit_lsn) -> Status;
+    [[nodiscard]] auto start_recovery(SequenceId &commit_lsn) -> Status;
+    [[nodiscard]] auto finish_recovery(SequenceId commit_lsn) -> Status;
+
+private:
+    Pager *m_pager {};
+    WriteAheadLog *m_wal {};
+};
 
 } // namespace calico
 

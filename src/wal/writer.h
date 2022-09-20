@@ -58,7 +58,7 @@ public:
           m_prefix(std::move(prefix)),
           m_flushed_lsn {&flushed_lsn},
           m_scratch {&scratch},
-          m_segments {&segments},
+          m_set {&segments},
           m_store {&store},
           m_tail {tail},
           m_wal_limit {wal_limit}
@@ -101,7 +101,7 @@ private:
     std::atomic<SequenceId> *m_flushed_lsn {};
     std::unique_ptr<AppendWriter> m_file;
     LogScratchManager *m_scratch {};
-    WalCollection *m_segments {};
+    WalCollection *m_set {};
     Storage *m_store {};
     Bytes m_tail;
     Size m_wal_limit {};

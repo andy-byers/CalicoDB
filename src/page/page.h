@@ -1,8 +1,8 @@
 #ifndef CALICO_PAGE_PAGE_H
 #define CALICO_PAGE_PAGE_H
 
+#include "core/recovery.h"
 #include "utils/types.h"
-#include "core/transaction_log.h"
 #include <optional>
 #include <vector>
 

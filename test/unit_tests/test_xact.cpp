@@ -704,7 +704,7 @@ public:
     using Base = RecoveryTestHarness<Failure>;
     using Base::GetParam;
 
-    RecoveryReentrancyTestHarness(RecoveryTestFailureType type)
+    explicit RecoveryReentrancyTestHarness(RecoveryTestFailureType type)
         : second_failure_type {type}
     {}
 

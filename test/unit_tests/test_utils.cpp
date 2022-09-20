@@ -65,6 +65,7 @@ TEST_F(SliceTests, StartsWith)
 {
     ASSERT_TRUE(stob("Hello, world!").starts_with(stob("Hello")));
     ASSERT_FALSE(stob("Hello, world!").starts_with(stob(" Hello")));
+    ASSERT_FALSE(stob("1").starts_with(stob("123")));
 }
 
 TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)

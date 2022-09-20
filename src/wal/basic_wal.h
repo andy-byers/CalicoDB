@@ -74,12 +74,10 @@ private:
         return s;
     }
 
-    std::unordered_set<PageId, PageId::Hash> m_images;
     std::shared_ptr<spdlog::logger> m_logger;
     std::atomic<SequenceId> m_flushed_lsn {};
-    std::atomic<SequenceId> m_pager_lsn {};
     SequenceId m_last_lsn;
-    WalCollection m_collection;
+    WalCollection m_set;
     std::string m_prefix;
 
     Storage *m_store {};
