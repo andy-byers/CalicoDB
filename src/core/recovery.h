@@ -74,6 +74,8 @@ public:
     [[nodiscard]] auto finish_recovery(SequenceId commit_lsn) -> Status;
 
 private:
+    [[nodiscard]] auto finish_routine(SequenceId commit_lsn) -> Status;
+
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
 };

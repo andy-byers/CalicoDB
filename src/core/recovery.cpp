@@ -143,7 +143,6 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
     }
 }
 
-
 auto Recovery::start_abort(SequenceId commit_lsn) -> Status
 {
     static constexpr auto MSG = "could not abort";
@@ -152,7 +151,7 @@ auto Recovery::start_abort(SequenceId commit_lsn) -> Status
         ThreePartMessage message;
         message.set_primary(MSG);
         message.set_detail("WAL is not enabled");
-        message.set_hint("WAL must be enabled when database is created");
+        message.set_hint(R"("wal_limit" was set to "DISABLE_WAL" on database creation)");
         return message.logic_error();
     }
 
@@ -167,7 +166,7 @@ auto Recovery::start_abort(SequenceId commit_lsn) -> Status
         auto info = decode_payload(payload);
 
         if (!info.has_value())
-            return Status::corruption("");
+            return Status::corruption("WAL is corrupted");
 
         if (std::holds_alternative<FullImageDescriptor>(*info)) {
             const auto image = std::get<FullImageDescriptor>(*info);
@@ -182,18 +181,11 @@ auto Recovery::start_abort(SequenceId commit_lsn) -> Status
 
 auto Recovery::finish_abort(SequenceId commit_lsn) -> Status
 {
-    // Flush all dirty database pages.
-    CALICO_TRY(m_pager->flush());
-
-    // Remove obsolete segment files.
-    CALICO_TRY(m_wal->remove_after(commit_lsn));
-
-    return m_wal->start_workers();
+    return finish_routine(commit_lsn);
 }
 
 auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
 {
-    static constexpr auto MSG = "cannot ensure consistent database state";
     SequenceId last_lsn;
 
     const auto redo = [this, &last_lsn, &commit_lsn](auto payload) {
@@ -243,8 +235,16 @@ auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
 
 auto Recovery::finish_recovery(SequenceId commit_lsn) -> Status
 {
+    return finish_routine(commit_lsn);
+}
+
+auto Recovery::finish_routine(SequenceId commit_lsn) -> Status
+{
+
+    // Flush all dirty database pages.
     CALICO_TRY(m_pager->flush());
 
+    // Remove obsolete segment files.
     CALICO_TRY(m_wal->remove_after(commit_lsn));
 
     return m_wal->start_workers();

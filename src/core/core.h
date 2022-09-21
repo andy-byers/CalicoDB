@@ -13,6 +13,7 @@ namespace calico {
 
 class Cursor;
 class Pager;
+class Recovery;
 class Storage;
 class Tree;
 class WriteAheadLog;
@@ -110,6 +111,7 @@ private:
     std::unique_ptr<WriteAheadLog> m_wal;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
+    std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
     std::unordered_set<PageId, PageId::Hash> m_images;
     SequenceId m_commit_lsn;

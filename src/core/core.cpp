@@ -1,5 +1,6 @@
 
 #include "core.h"
+#include "recovery.h"
 #include "calico/calico.h"
 #include "calico/storage.h"
 #include "calico/transaction.h"
@@ -149,6 +150,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         m_tree->load_state(state);
     }
 
+    m_recovery = std::make_unique<Recovery>(*m_pager, *m_wal);
+
     auto s = Status::ok();
     if (is_new) {
         // The first call to root() allocates the root page.
@@ -166,17 +169,15 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         // to the database file.
         s = m_pager->flush();
 
+
+        if (s.is_ok() && m_wal->is_enabled())
+            s = m_wal->start_workers();
+
     } else if (m_wal->is_enabled()) {
         // This should be a no-op if the database closed normally last time.
         s = ensure_consistent_state();
-
-        // The WAL was empty.
-        if (s.is_not_found()) s = Status::ok();
         MAYBE_FORWARD(s, MSG);
     }
-
-    if (s.is_ok() && m_wal->is_enabled())
-        s = m_wal->start_workers();
 
     return forward_status(s, MSG);
 }
@@ -357,14 +358,6 @@ auto Core::abort() -> Status
     m_logger->info("received abort request");
     static constexpr auto MSG = "could not abort";
 
-    if (!m_wal->is_enabled()) {
-        LogMessage message {*m_logger};
-        message.set_primary(MSG);
-        message.set_detail("WAL is not enabled");
-        message.set_hint("WAL must be enabled when database is created");
-        return message.logic_error();
-    }
-
     if (!m_has_xact) {
         LogMessage message {*m_logger};
         message.set_primary(MSG);
@@ -372,57 +365,11 @@ auto Core::abort() -> Status
         message.set_hint("start a transaction and try again");
         return message.logic_error();
     }
-    auto s = Status::ok();
 
-    if (m_wal->is_working()) {
-        s = m_wal->stop_workers();
-        if (!s.is_ok())
-            forward_status(s, "WAL encountered an error when stopping workers");
-    }
-
-    // This should give us the full images of each updated page belonging to the current transaction,
-    // before any changes were made to it.
-    s = m_wal->roll_backward(m_commit_lsn, [this](auto payload) {
-        auto info = decode_payload(payload);
-
-        if (!info.has_value())
-            return Status::corruption("");
-
-        if (std::holds_alternative<FullImageDescriptor>(*info)) {
-            const auto image = std::get<FullImageDescriptor>(*info);
-            auto page = m_pager->acquire(image.pid, true);
-            if (!page.has_value()) return page.error();
-            page->apply_update(image);
-            return m_pager->release(std::move(*page));
-        }
-        return Status::ok();
-    });
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // Load database state from the root page file header. We need the new page count to determine which pages we can flush.
-    s = load_state();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // Flush all dirty database pages.
-    s = m_pager->flush();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // Remove obsolete segment files.
-    s = m_wal->remove_after(m_commit_lsn);
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // Database state is restored if we have made it here, assuming we can start the worker threads again.
-    m_status = Status::ok();
-
-    s = m_wal->start_workers();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // If we failed starting up the workers, we should be able to call this method again. It won't really do anything but
-    // start the workers on the second round.
-    m_has_xact = false;
-    m_images.clear();
-    m_logger->info("abort succeeded");
-    return s;
+    MAYBE_SAVE_AND_FORWARD(m_recovery->start_abort(m_commit_lsn), MSG);
+    MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
+    MAYBE_SAVE_AND_FORWARD(m_recovery->finish_abort(m_commit_lsn), MSG);
+    return Status::ok();
 }
 
 auto Core::close() -> Status
@@ -447,64 +394,71 @@ auto Core::close() -> Status
 auto Core::ensure_consistent_state() -> Status
 {
     static constexpr auto MSG = "cannot ensure consistent database state";
-    SequenceId last_lsn;
-
-    const auto redo = [this, &last_lsn](auto payload) {
-        auto info = decode_payload(payload);
-
-        // Payload has an invalid type.
-        if (!info.has_value())
-            return Status::corruption("WAL is corrupted");
-
-        last_lsn = payload.lsn();
-
-        if (std::holds_alternative<DeltasDescriptor>(*info)) {
-            const auto deltas = std::get<DeltasDescriptor>(*info);
-            auto page = m_pager->acquire(deltas.pid, true);
-            if (!page.has_value()) return page.error();
-            page->apply_update(deltas);
-            return m_pager->release(std::move(*page));
-        } else if (std::holds_alternative<CommitDescriptor>(*info)) {
-            m_commit_lsn = payload.lsn();
-        }
-        return Status::ok();
-    };
-
-    const auto undo = [this](auto payload) {
-        auto info = decode_payload(payload);
-
-        if (!info.has_value())
-            return Status::corruption("WAL is corrupted");
-
-        if (std::holds_alternative<FullImageDescriptor>(*info)) {
-            const auto image = std::get<FullImageDescriptor>(*info);
-            auto page = m_pager->acquire(image.pid, true);
-            if (!page.has_value()) return page.error();
-            page->apply_update(image);
-            return m_pager->release(std::move(*page));
-        }
-        return Status::ok();
-    };
-
-    auto s = m_wal->roll_forward(m_pager->flushed_lsn(), redo);
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // Reached the end of the WAL, but didn't find a commit record.
-    if (last_lsn != m_commit_lsn) {
-        s = m_wal->roll_backward(m_commit_lsn, undo);
-        MAYBE_SAVE_AND_FORWARD(s, MSG);
-    }
-
-    s = load_state();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    s = m_pager->flush();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    s = m_wal->remove_after(m_commit_lsn);
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    return s;
+    MAYBE_SAVE_AND_FORWARD(m_recovery->start_recovery(m_commit_lsn), MSG);
+    MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
+    MAYBE_SAVE_AND_FORWARD(m_recovery->finish_recovery(m_commit_lsn), MSG);
+    return Status::ok();
+//
+//
+//
+//    SequenceId last_lsn;
+//
+//    const auto redo = [this, &last_lsn](auto payload) {
+//        auto info = decode_payload(payload);
+//
+//        // Payload has an invalid type.
+//        if (!info.has_value())
+//            return Status::corruption("WAL is corrupted");
+//
+//        last_lsn = payload.lsn();
+//
+//        if (std::holds_alternative<DeltasDescriptor>(*info)) {
+//            const auto deltas = std::get<DeltasDescriptor>(*info);
+//            auto page = m_pager->acquire(deltas.pid, true);
+//            if (!page.has_value()) return page.error();
+//            page->apply_update(deltas);
+//            return m_pager->release(std::move(*page));
+//        } else if (std::holds_alternative<CommitDescriptor>(*info)) {
+//            m_commit_lsn = payload.lsn();
+//        }
+//        return Status::ok();
+//    };
+//
+//    const auto undo = [this](auto payload) {
+//        auto info = decode_payload(payload);
+//
+//        if (!info.has_value())
+//            return Status::corruption("WAL is corrupted");
+//
+//        if (std::holds_alternative<FullImageDescriptor>(*info)) {
+//            const auto image = std::get<FullImageDescriptor>(*info);
+//            auto page = m_pager->acquire(image.pid, true);
+//            if (!page.has_value()) return page.error();
+//            page->apply_update(image);
+//            return m_pager->release(std::move(*page));
+//        }
+//        return Status::ok();
+//    };
+//
+//    auto s = m_wal->roll_forward(m_pager->flushed_lsn(), redo);
+//    MAYBE_SAVE_AND_FORWARD(s, MSG);
+//
+//    // Reached the end of the WAL, but didn't find a commit record.
+//    if (last_lsn != m_commit_lsn) {
+//        s = m_wal->roll_backward(m_commit_lsn, undo);
+//        MAYBE_SAVE_AND_FORWARD(s, MSG);
+//    }
+//
+//    s = load_state();
+//    MAYBE_SAVE_AND_FORWARD(s, MSG);
+//
+//    s = m_pager->flush();
+//    MAYBE_SAVE_AND_FORWARD(s, MSG);
+//
+//    s = m_wal->remove_after(m_commit_lsn);
+//    MAYBE_SAVE_AND_FORWARD(s, MSG);
+//
+//    return s;
 }
 
 auto Core::transaction() -> Transaction
