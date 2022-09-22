@@ -369,12 +369,13 @@ auto Core::abort() -> Status
     MAYBE_SAVE_AND_FORWARD(m_recovery->start_abort(m_commit_lsn), MSG);
     MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
     MAYBE_SAVE_AND_FORWARD(m_recovery->finish_abort(m_commit_lsn), MSG);
-    return Status::ok();
+    m_has_xact = false;
+    return m_status = Status::ok();
 }
 
 auto Core::close() -> Status
 {
-    if (m_has_xact && m_status.is_ok()) {
+    if (m_has_xact && status().is_ok()) {
         LogMessage message {*m_logger};
         message.set_primary("could not close");
         message.set_detail("a transaction is active");
@@ -398,67 +399,6 @@ auto Core::ensure_consistent_state() -> Status
     MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
     MAYBE_SAVE_AND_FORWARD(m_recovery->finish_recovery(m_commit_lsn), MSG);
     return Status::ok();
-//
-//
-//
-//    SequenceId last_lsn;
-//
-//    const auto redo = [this, &last_lsn](auto payload) {
-//        auto info = decode_payload(payload);
-//
-//        // Payload has an invalid type.
-//        if (!info.has_value())
-//            return Status::corruption("WAL is corrupted");
-//
-//        last_lsn = payload.lsn();
-//
-//        if (std::holds_alternative<DeltasDescriptor>(*info)) {
-//            const auto deltas = std::get<DeltasDescriptor>(*info);
-//            auto page = m_pager->acquire(deltas.pid, true);
-//            if (!page.has_value()) return page.error();
-//            page->apply_update(deltas);
-//            return m_pager->release(std::move(*page));
-//        } else if (std::holds_alternative<CommitDescriptor>(*info)) {
-//            m_commit_lsn = payload.lsn();
-//        }
-//        return Status::ok();
-//    };
-//
-//    const auto undo = [this](auto payload) {
-//        auto info = decode_payload(payload);
-//
-//        if (!info.has_value())
-//            return Status::corruption("WAL is corrupted");
-//
-//        if (std::holds_alternative<FullImageDescriptor>(*info)) {
-//            const auto image = std::get<FullImageDescriptor>(*info);
-//            auto page = m_pager->acquire(image.pid, true);
-//            if (!page.has_value()) return page.error();
-//            page->apply_update(image);
-//            return m_pager->release(std::move(*page));
-//        }
-//        return Status::ok();
-//    };
-//
-//    auto s = m_wal->roll_forward(m_pager->flushed_lsn(), redo);
-//    MAYBE_SAVE_AND_FORWARD(s, MSG);
-//
-//    // Reached the end of the WAL, but didn't find a commit record.
-//    if (last_lsn != m_commit_lsn) {
-//        s = m_wal->roll_backward(m_commit_lsn, undo);
-//        MAYBE_SAVE_AND_FORWARD(s, MSG);
-//    }
-//
-//    s = load_state();
-//    MAYBE_SAVE_AND_FORWARD(s, MSG);
-//
-//    s = m_pager->flush();
-//    MAYBE_SAVE_AND_FORWARD(s, MSG);
-//
-//    s = m_wal->remove_after(m_commit_lsn);
-//    MAYBE_SAVE_AND_FORWARD(s, MSG);
-//
-//    return s;
 }
 
 auto Core::transaction() -> Transaction

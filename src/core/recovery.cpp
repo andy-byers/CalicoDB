@@ -156,9 +156,8 @@ auto Recovery::start_abort(SequenceId commit_lsn) -> Status
     }
 
     auto s = Status::ok();
-
     if (m_wal->is_working())
-        CALICO_TRY(m_wal->stop_workers());
+        (void)m_wal->stop_workers();
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
