@@ -201,8 +201,8 @@ auto Framer::write_page_to_file(PageId id, BytesView in) const -> Status
 
 auto Framer::load_state(const FileHeader &header) -> void
 {
-    m_flushed_lsn.value = header.flushed_lsn;
-    m_page_count = header.page_count;
+    m_flushed_lsn.value = header.flushed_lsn; // TODO: Consider whether this should be read here... This will cause it to decrease after a roll back.
+    m_page_count = header.page_count;         //       Right now, the XactTests are not reloading state between transactions.
 }
 
 auto Framer::save_state(FileHeader &header) -> void

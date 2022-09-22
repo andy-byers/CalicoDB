@@ -23,6 +23,8 @@ struct FileHeader {
     Byte reserved[6];
 };
 
+static_assert(sizeof(FileHeader) == 48);
+
 inline auto read_header(const Page &page) -> FileHeader
 {
     FileHeader header {};

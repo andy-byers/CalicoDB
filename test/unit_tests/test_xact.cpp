@@ -8,6 +8,7 @@
 #include "tools.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
+#include "wal/basic_wal.h"
 
 namespace calico {
 
@@ -24,7 +25,397 @@ namespace interceptors {
     extern SyncInterceptor sync;
 } // namespace interceptors
 
-class XactTests: public TestOnDisk {
+class PageWrapper {
+public:
+    static constexpr Size VALUE_SIZE {32};
+
+    explicit PageWrapper(Page page)
+        : m_page {std::move(page)}
+    {}
+
+    [[nodiscard]]
+    auto take() && -> Page
+    {
+        return std::move(m_page);
+    }
+
+    [[nodiscard]]
+    auto get_lsn() const -> SequenceId
+    {
+        return m_page.lsn();
+    }
+
+    [[nodiscard]]
+    auto get_value() -> BytesView
+    {
+        return m_page.view(m_page.size() - VALUE_SIZE);
+    }
+
+    auto set_value(BytesView value) -> void
+    {
+        mem_copy(m_page.bytes(m_page.size() - VALUE_SIZE), value);
+    }
+
+private:
+    Page m_page;
+};
+
+
+class XactTestHarness {
+public:
+    static constexpr Size PAGE_SIZE {0x100};
+    static constexpr Size PAGE_COUNT {64};
+    static constexpr Size FRAME_COUNT {32};
+    static constexpr Size WAL_LIMIT {16};
+
+    auto set_up() -> void
+    {
+        store = std::make_unique<HeapStorage>();
+        ASSERT_OK(store->create_directory("test"));
+        scratch = std::make_unique<LogScratchManager>(wal_scratch_size(PAGE_SIZE));
+
+        WriteAheadLog *temp {};
+        ASSERT_OK(BasicWriteAheadLog::open({
+            "test/",
+            store.get(),
+            scratch.get(),
+            create_sink(),
+            PAGE_SIZE,
+            WAL_LIMIT,
+        }, &temp));
+        wal.reset(temp);
+
+        auto r = BasicPager::open({
+            "test/",
+            *store,
+            scratch.get(),
+            &images,
+            *wal,
+            status,
+            has_xact,
+            create_sink(),
+            FRAME_COUNT,
+            PAGE_SIZE,
+        });
+        ASSERT_TRUE(r.has_value());
+        pager = std::move(*r);
+
+        while (pager->page_count() < PAGE_COUNT) {
+            ASSERT_OK(pager->release(pager->allocate().value()));
+        }
+
+        ASSERT_OK(wal->start_workers());
+    }
+
+    auto tear_down() -> void
+    {
+        if (wal->is_working())
+            (void)wal->stop_workers();
+        interceptors::reset();
+    }
+
+    [[nodiscard]]
+    auto get_wrapper(PageId id, bool is_writable = false) -> std::optional<PageWrapper>
+    {
+        auto page = pager->acquire(id, is_writable);
+        if (!page.has_value()) {
+            assert_error_42(page.error());
+            return {};
+        }
+        return PageWrapper {std::move(*page)};
+    }
+
+    auto commit() -> Status
+    {
+        commit_lsn.value = wal->current_lsn().value - 1;
+        CALICO_TRY(wal->advance());
+        images.clear();
+        return status;
+    }
+
+    auto set_value(PageId id, const std::string &value) -> void
+    {
+        auto wrapper = get_wrapper(id, true);
+        ASSERT_TRUE(wrapper.has_value());
+        wrapper->set_value(value);
+    }
+
+    auto try_set_value(PageId id, const std::string &value) -> bool
+    {
+        auto wrapper = get_wrapper(id, true);
+        if (!wrapper.has_value()) return false;
+        wrapper->set_value(value);
+        return true;
+    }
+
+    [[nodiscard]]
+    auto get_value(PageId id) -> std::string
+    {
+        auto wrapper = get_wrapper(id, true);
+        EXPECT_TRUE(wrapper.has_value());
+        return wrapper.value().get_value().to_string();
+    }
+
+    [[nodiscard]]
+    auto try_get_value(PageId id) -> std::string
+    {
+        auto wrapper = get_wrapper(id, true);
+        if (!wrapper.has_value()) return {};
+        return wrapper->get_value().to_string();
+    }
+
+    [[nodiscard]]
+    auto generate_value() -> std::string
+    {
+        return random.get<std::string>('a', 'z', PageWrapper::VALUE_SIZE);
+    }
+
+    Random random {internal::random_seed};
+    Status status {Status::ok()};
+    SequenceId commit_lsn;
+    FileHeader state {};
+    bool has_xact {};
+    std::unique_ptr<HeapStorage> store;
+    std::unique_ptr<Pager> pager;
+    std::unique_ptr<WriteAheadLog> wal;
+    std::unique_ptr<LogScratchManager> scratch;
+    std::unordered_set<PageId, PageId::Hash> images;
+};
+
+class NormalXactTests
+    : public testing::Test,
+      public XactTestHarness
+{
+public:
+    auto SetUp() -> void override
+    {
+        set_up();
+    }
+
+    auto TearDown() -> void override
+    {
+        tear_down();
+    }
+};
+
+TEST_F(NormalXactTests, ReadAndWriteValue)
+{
+    const auto value = generate_value();
+    set_value(PageId {1}, value);
+    ASSERT_EQ(get_value(PageId {1}), value);
+}
+
+template<class Test>
+static auto overwrite_value(Test &test, PageId id)
+{
+    std::string value;
+    test.set_value(id, test.generate_value());
+    test.set_value(id, value = test.generate_value());
+    ASSERT_EQ(test.get_value(id), value);
+}
+
+TEST_F(NormalXactTests, OverwriteValue)
+{
+    overwrite_value(*this, PageId {1});
+}
+
+TEST_F(NormalXactTests, OverwriteValuesOnMultiplePages)
+{
+    overwrite_value(*this, PageId {1});
+    overwrite_value(*this, PageId {2});
+    overwrite_value(*this, PageId {3});
+}
+
+template<class Test>
+static auto undo_xact(Test &test, SequenceId commit_id)
+{
+    Recovery recovery {*test.pager, *test.wal};
+    (void)test.wal->stop_workers();
+    CALICO_TRY(recovery.start_abort(commit_id));
+    // Don't need to load any state for these tests.
+    return recovery.finish_abort(commit_id);
+}
+
+static auto assert_blank_value(BytesView value)
+{
+    ASSERT_TRUE(value == std::string(PageWrapper::VALUE_SIZE, '\x00'));
+}
+
+TEST_F(NormalXactTests, UndoFirstValue)
+{
+    set_value(PageId {1}, generate_value());
+    ASSERT_OK(undo_xact(*this, SequenceId::null()));
+    assert_blank_value(get_value(PageId {1}));
+}
+
+TEST_F(NormalXactTests, UndoFirstXact)
+{
+    set_value(PageId {1}, generate_value());
+    set_value(PageId {2}, generate_value());
+    set_value(PageId {2}, generate_value());
+    ASSERT_OK(undo_xact(*this, SequenceId::null()));
+    assert_blank_value(get_value(PageId {1}));
+    assert_blank_value(get_value(PageId {2}));
+}
+
+template<class Test>
+static auto add_values(Test &test, Size n, bool allow_failure = false) -> std::vector<std::string>
+{
+    std::vector<std::string> values(n);
+    std::generate(begin(values), end(values), [&test] {
+        return test.generate_value();
+    });
+
+    Size index {};
+    for (const auto &value: values) {
+        if (allow_failure) {
+            if (!test.try_set_value(PageId::from_index(index), value))
+                return {};
+        } else {
+            test.set_value(PageId::from_index(index), value);
+        }
+        index = ++index % Test::PAGE_COUNT;
+    }
+    return values;
+}
+
+template<class Test>
+static auto assert_values_match(Test &test, const std::vector<std::string> &values)
+{
+    Size index {};
+    for (const auto &value: values) {
+        ASSERT_EQ(test.get_value(PageId::from_index(index)), value);
+        index = ++index % Test::PAGE_COUNT;
+    }
+}
+
+TEST_F(NormalXactTests, EmptyCommit)
+{
+    commit();
+}
+
+TEST_F(NormalXactTests, EmptyAbort)
+{
+    ASSERT_OK(undo_xact(*this, SequenceId::null()));
+}
+
+TEST_F(NormalXactTests, EmptyAbortAfterCommit)
+{
+    const auto committed = add_values(*this, 3);
+    commit();
+
+    ASSERT_OK(undo_xact(*this, commit_lsn));
+    assert_values_match(*this, committed);
+}
+
+TEST_F(NormalXactTests, UndoSecondXact)
+{
+    const auto committed = add_values(*this, 3);
+    commit();
+    add_values(*this, 3);
+
+    ASSERT_OK(undo_xact(*this, commit_lsn));
+    assert_values_match(*this, committed);
+}
+
+TEST_F(NormalXactTests, SpamCommit)
+{
+    std::vector<std::string> committed;
+    for (Size i {}; i < 50; ++i) {
+        committed = add_values(*this, PAGE_COUNT);
+        commit();
+    }
+    add_values(*this, PAGE_COUNT);
+    ASSERT_OK(undo_xact(*this, commit_lsn));
+    assert_values_match(*this, committed);
+}
+
+TEST_F(NormalXactTests, SpamAbort)
+{
+    const auto committed = add_values(*this, PAGE_COUNT);
+    commit();
+
+    for (Size i {}; i < 50; ++i) {
+        add_values(*this, PAGE_COUNT);
+        ASSERT_OK(undo_xact(*this, commit_lsn));
+    }
+    assert_values_match(*this, committed);
+}
+
+class FailedXactTests
+    : public testing::TestWithParam<Size>,
+      public XactTestHarness
+{
+public:
+    auto SetUp() -> void override
+    {
+        set_up();
+
+        for (Size i {}; i < GetParam(); ++i) {
+            committed = add_values(*this, PAGE_COUNT);
+            commit();
+        }
+    }
+
+    auto TearDown() -> void override
+    {
+        tear_down();
+    }
+
+    auto modify_until_failure()
+    {
+        for (; ; ) {
+            if (add_values(*this, PAGE_COUNT, true).empty())
+                break;
+        }
+    }
+
+    [[nodiscard]]
+    auto get_status()
+    {
+        return pager->status().is_ok() ? wal->worker_status() : pager->status();
+    }
+
+    std::vector<std::string> committed;
+};
+
+TEST_P(FailedXactTests, DataWriteFailureIsPropagated)
+{
+    interceptors::set_write(FailOnce<10> {"test/data"});
+    modify_until_failure();
+    assert_error_42(pager->status());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DataWriteFailureIsPropagated,
+    FailedXactTests,
+    ::testing::Values(0, 1, 10, 50));
+
+TEST_P(FailedXactTests, WalWriteFailureIsPropagated)
+{
+    interceptors::set_write(FailOnce<10> {"test/wal-"});
+    modify_until_failure();
+    assert_error_42(pager->status());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    WalWriteFailureIsPropagated,
+    FailedXactTests,
+    ::testing::Values(0, 1, 10, 50));
+
+TEST_P(FailedXactTests, WalOpenFailureIsPropagated)
+{
+    interceptors::set_open(FailOnce<3> {"test/wal-"});
+    modify_until_failure();
+    assert_error_42(pager->status());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    WalOpenFailureIsPropagated,
+    FailedXactTests,
+    ::testing::Values(0, 1, 10, 50));
+
+class XactTests_ : public TestOnDisk {
 public:
     auto SetUp() -> void override
     {
@@ -48,13 +439,13 @@ public:
     Core db;
 };
 
-TEST_F(XactTests, NewDatabaseIsOk)
+TEST_F(XactTests_, NewDatabaseIsOk)
 {
     ASSERT_OK(db.status());
 }
 
 template<class Action>
-static auto with_xact(XactTests &test, const Action &action)
+static auto with_xact(XactTests_ &test, const Action &action)
 {
     auto xact = test.db.transaction();
     action();
@@ -71,7 +462,7 @@ static auto insert_records(Test &test, Size n = 1'000)
     return records;
 }
 
-auto erase_records(XactTests &test, Size n = 1'000)
+auto erase_records(XactTests_ &test, Size n = 1'000)
 {
     for (Size i {}; i < n; ++i) {
         ASSERT_OK(test.db.erase(test.db.first()));
@@ -90,7 +481,7 @@ static auto test_abort_first_xact(Test &test, Size num_records)
     with_xact(test, [&test] {insert_records(test);});
 }
 
-TEST_F(XactTests, CannotUseTransactionObjectAfterSuccessfulCommit)
+TEST_F(XactTests_, CannotUseTransactionObjectAfterSuccessfulCommit)
 {
     auto xact = db.transaction();
     insert_records(*this, 10);
@@ -99,7 +490,7 @@ TEST_F(XactTests, CannotUseTransactionObjectAfterSuccessfulCommit)
     ASSERT_TRUE(xact.commit().is_logic_error());
 }
 
-TEST_F(XactTests, CannotUseTransactionObjectAfterSuccessfulAbort)
+TEST_F(XactTests_, CannotUseTransactionObjectAfterSuccessfulAbort)
 {
     auto xact = db.transaction();
     insert_records(*this, 10);
@@ -108,7 +499,7 @@ TEST_F(XactTests, CannotUseTransactionObjectAfterSuccessfulAbort)
     ASSERT_TRUE(xact.commit().is_logic_error());
 }
 
-TEST_F(XactTests, TransactionObjectIsMovable)
+TEST_F(XactTests_, TransactionObjectIsMovable)
 {
     auto xact = db.transaction();
     auto xact2 = std::move(xact);
@@ -118,17 +509,17 @@ TEST_F(XactTests, TransactionObjectIsMovable)
     ASSERT_OK(xact.commit());
 }
 
-TEST_F(XactTests, AbortFirstXactWithSingleRecord)
+TEST_F(XactTests_, AbortFirstXactWithSingleRecord)
 {
     test_abort_first_xact(*this, 1);
 }
 
-TEST_F(XactTests, AbortFirstXactWithMultipleRecords)
+TEST_F(XactTests_, AbortFirstXactWithMultipleRecords)
 {
     test_abort_first_xact(*this, 8);
 }
 
-TEST_F(XactTests, CommitIsACheckpoint)
+TEST_F(XactTests_, CommitIsACheckpoint)
 {
     with_xact(*this, [this] {insert_records(*this);});
 
@@ -137,7 +528,7 @@ TEST_F(XactTests, CommitIsACheckpoint)
     ASSERT_EQ(db.info().record_count(), 1'000);
 }
 
-TEST_F(XactTests, KeepsCommittedRecords)
+TEST_F(XactTests_, KeepsCommittedRecords)
 {
     with_xact(*this, [this] {insert_records(*this);});
 
@@ -190,22 +581,22 @@ static auto test_abort_second_xact(Test &test, Size first_xact_size, Size second
     }
 }
 
-TEST_F(XactTests, AbortSecondXact_1_1)
+TEST_F(XactTests_, AbortSecondXact_1_1)
 {
     test_abort_second_xact(*this, 1, 1);
 }
 
-TEST_F(XactTests, AbortSecondXact_1000_1)
+TEST_F(XactTests_, AbortSecondXact_1000_1)
 {
     test_abort_second_xact(*this, 1'000, 1);
 }
 
-TEST_F(XactTests, AbortSecondXact_1_1000)
+TEST_F(XactTests_, AbortSecondXact_1_1000)
 {
     test_abort_second_xact(*this, 1, 1'000);
 }
 
-TEST_F(XactTests, AbortSecondXact_1000_1000)
+TEST_F(XactTests_, AbortSecondXact_1000_1000)
 {
     test_abort_second_xact(*this, 1'000, 1'000);
 }
@@ -233,14 +624,14 @@ auto run_random_transactions(Test &test, Size n)
     return committed;
 }
 
-TEST_F(XactTests, SanityCheck)
+TEST_F(XactTests_, SanityCheck)
 {
     for (const auto &[key, value]: run_random_transactions(*this, 20)) {
         ASSERT_TRUE(tools::contains(db, key, value));
     }
 }
 
-TEST_F(XactTests, AbortSanityCheck)
+TEST_F(XactTests_, AbortSanityCheck)
 {
     static constexpr long NUM_RECORDS {5'000};
     auto records = generator.generate(random, NUM_RECORDS);
@@ -258,7 +649,7 @@ TEST_F(XactTests, AbortSanityCheck)
     }
 }
 
-TEST_F(XactTests, PersistenceSanityCheck)
+TEST_F(XactTests_, PersistenceSanityCheck)
 {
     ASSERT_OK(db.close());
     std::vector<Record> committed;
@@ -276,7 +667,7 @@ TEST_F(XactTests, PersistenceSanityCheck)
     }
 }
 
-TEST_F(XactTests, AtomicOperationSanityCheck)
+TEST_F(XactTests_, AtomicOperationSanityCheck)
 {
     const auto all_records = generator.generate(random, 500);
     const auto committed = run_random_operations(*this, cbegin(all_records), cend(all_records));

@@ -239,7 +239,6 @@ auto Recovery::finish_recovery(SequenceId commit_lsn) -> Status
 
 auto Recovery::finish_routine(SequenceId commit_lsn) -> Status
 {
-
     // Flush all dirty database pages.
     CALICO_TRY(m_pager->flush());
 

@@ -76,7 +76,7 @@ auto BasicPager::pin_frame(PageId id, bool &is_fragile) -> Status
         // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
         if (!*r) {
             m_logger->warn(MSG);
-            (void)m_wal->flush();
+            *m_status = m_wal->flush();
             return Status::not_found(MSG);
         }
     }
@@ -152,8 +152,8 @@ auto BasicPager::try_make_available() -> Result<bool>
 
     if (itr == m_registry.end()) {
         CALICO_EXPECT_TRUE(m_wal->is_working());
-        auto s = m_wal->flush();
-        save_and_forward_status(s, "could not flush WAL");
+        *m_status = m_wal->flush();
+        save_and_forward_status(*m_status, "could not flush WAL");
         return false;
     }
 
@@ -289,6 +289,8 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
             }
             return Err {s};
         }
+        s = m_wal->worker_status();
+        if (!s.is_ok()) return Err {s};
     }
 
     auto itr = m_registry.get(id);
