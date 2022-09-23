@@ -60,7 +60,6 @@ private:
     Page m_page;
 };
 
-
 class XactTestHarness {
 public:
     static constexpr Size PAGE_SIZE {0x100};
@@ -274,7 +273,7 @@ static auto add_values(Test &test, Size n, bool allow_failure = false) -> std::v
         } else {
             test.set_value(PageId::from_index(index), value);
         }
-        index = ++index % Test::PAGE_COUNT;
+        index = (index+1) % Test::PAGE_COUNT;
     }
     return values;
 }
@@ -284,8 +283,10 @@ static auto assert_values_match(Test &test, const std::vector<std::string> &valu
 {
     Size index {};
     for (const auto &value: values) {
-        ASSERT_EQ(test.get_value(PageId::from_index(index)), value);
-        index = ++index % Test::PAGE_COUNT;
+        const auto id = PageId::from_index(index);
+        ASSERT_EQ(test.get_value(id), value)
+            << "error: mismatch on page " << id.value << " (" << Test::PAGE_COUNT << " pages total)";
+        index = (index+1) % Test::PAGE_COUNT;
     }
 }
 
@@ -299,7 +300,7 @@ TEST_F(NormalXactTests, EmptyAbort)
     ASSERT_OK(undo_xact(*this, SequenceId::null()));
 }
 
-TEST_F(NormalXactTests, EmptyAbortAfterCommit)
+TEST_F(NormalXactTests, AbortEmptyTransaction)
 {
     const auto committed = add_values(*this, 3);
     commit();
@@ -308,7 +309,7 @@ TEST_F(NormalXactTests, EmptyAbortAfterCommit)
     assert_values_match(*this, committed);
 }
 
-TEST_F(NormalXactTests, UndoSecondXact)
+TEST_F(NormalXactTests, UndoSecondTransaction)
 {
     const auto committed = add_values(*this, 3);
     commit();
@@ -339,6 +340,19 @@ TEST_F(NormalXactTests, SpamAbort)
         add_values(*this, PAGE_COUNT);
         ASSERT_OK(undo_xact(*this, commit_lsn));
     }
+    assert_values_match(*this, committed);
+}
+
+TEST_F(NormalXactTests, AbortAfterMultipleOverwrites)
+{
+    const auto committed = add_values(*this, PAGE_COUNT);
+    commit();
+
+    add_values(*this, PAGE_COUNT);
+    add_values(*this, PAGE_COUNT);
+    add_values(*this, PAGE_COUNT);
+
+    ASSERT_OK(undo_xact(*this, commit_lsn));
     assert_values_match(*this, committed);
 }
 
@@ -381,31 +395,30 @@ public:
 
 TEST_P(FailedXactTests, DataWriteFailureIsPropagated)
 {
-    interceptors::set_write(FailOnce<10> {"test/data"});
+    interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/data",
+        {1, 1, 1, 0, 1},
+    });
     modify_until_failure();
     assert_error_42(pager->status());
 }
-
-INSTANTIATE_TEST_SUITE_P(
-    DataWriteFailureIsPropagated,
-    FailedXactTests,
-    ::testing::Values(0, 1, 10, 50));
 
 TEST_P(FailedXactTests, WalWriteFailureIsPropagated)
 {
-    interceptors::set_write(FailOnce<10> {"test/wal-"});
+    interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/wal",
+        {1, 1, 1, 0, 1},
+    });
     modify_until_failure();
     assert_error_42(pager->status());
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    WalWriteFailureIsPropagated,
-    FailedXactTests,
-    ::testing::Values(0, 1, 10, 50));
-
 TEST_P(FailedXactTests, WalOpenFailureIsPropagated)
 {
-    interceptors::set_open(FailOnce<3> {"test/wal-"});
+    interceptors::set_open(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/wal",
+        {1, 1, 0, 1},
+    });
     modify_until_failure();
     assert_error_42(pager->status());
 }
@@ -415,7 +428,7 @@ INSTANTIATE_TEST_SUITE_P(
     FailedXactTests,
     ::testing::Values(0, 1, 10, 50));
 
-class XactTests_ : public TestOnDisk {
+class TransactionTests : public TestOnDisk {
 public:
     auto SetUp() -> void override
     {
@@ -439,13 +452,13 @@ public:
     Core db;
 };
 
-TEST_F(XactTests_, NewDatabaseIsOk)
+TEST_F(TransactionTests, NewDatabaseIsOk)
 {
     ASSERT_OK(db.status());
 }
 
 template<class Action>
-static auto with_xact(XactTests_ &test, const Action &action)
+static auto with_xact(TransactionTests &test, const Action &action)
 {
     auto xact = test.db.transaction();
     action();
@@ -462,7 +475,7 @@ static auto insert_records(Test &test, Size n = 1'000)
     return records;
 }
 
-auto erase_records(XactTests_ &test, Size n = 1'000)
+auto erase_records(TransactionTests &test, Size n = 1'000)
 {
     for (Size i {}; i < n; ++i) {
         ASSERT_OK(test.db.erase(test.db.first()));
@@ -481,7 +494,7 @@ static auto test_abort_first_xact(Test &test, Size num_records)
     with_xact(test, [&test] {insert_records(test);});
 }
 
-TEST_F(XactTests_, CannotUseTransactionObjectAfterSuccessfulCommit)
+TEST_F(TransactionTests, CannotUseTransactionObjectAfterSuccessfulCommit)
 {
     auto xact = db.transaction();
     insert_records(*this, 10);
@@ -490,7 +503,7 @@ TEST_F(XactTests_, CannotUseTransactionObjectAfterSuccessfulCommit)
     ASSERT_TRUE(xact.commit().is_logic_error());
 }
 
-TEST_F(XactTests_, CannotUseTransactionObjectAfterSuccessfulAbort)
+TEST_F(TransactionTests, CannotUseTransactionObjectAfterSuccessfulAbort)
 {
     auto xact = db.transaction();
     insert_records(*this, 10);
@@ -499,7 +512,7 @@ TEST_F(XactTests_, CannotUseTransactionObjectAfterSuccessfulAbort)
     ASSERT_TRUE(xact.commit().is_logic_error());
 }
 
-TEST_F(XactTests_, TransactionObjectIsMovable)
+TEST_F(TransactionTests, TransactionObjectIsMovable)
 {
     auto xact = db.transaction();
     auto xact2 = std::move(xact);
@@ -509,17 +522,17 @@ TEST_F(XactTests_, TransactionObjectIsMovable)
     ASSERT_OK(xact.commit());
 }
 
-TEST_F(XactTests_, AbortFirstXactWithSingleRecord)
+TEST_F(TransactionTests, AbortFirstXactWithSingleRecord)
 {
     test_abort_first_xact(*this, 1);
 }
 
-TEST_F(XactTests_, AbortFirstXactWithMultipleRecords)
+TEST_F(TransactionTests, AbortFirstXactWithMultipleRecords)
 {
     test_abort_first_xact(*this, 8);
 }
 
-TEST_F(XactTests_, CommitIsACheckpoint)
+TEST_F(TransactionTests, CommitIsACheckpoint)
 {
     with_xact(*this, [this] {insert_records(*this);});
 
@@ -528,7 +541,7 @@ TEST_F(XactTests_, CommitIsACheckpoint)
     ASSERT_EQ(db.info().record_count(), 1'000);
 }
 
-TEST_F(XactTests_, KeepsCommittedRecords)
+TEST_F(TransactionTests, KeepsCommittedRecords)
 {
     with_xact(*this, [this] {insert_records(*this);});
 
@@ -581,22 +594,22 @@ static auto test_abort_second_xact(Test &test, Size first_xact_size, Size second
     }
 }
 
-TEST_F(XactTests_, AbortSecondXact_1_1)
+TEST_F(TransactionTests, AbortSecondXact_1_1)
 {
     test_abort_second_xact(*this, 1, 1);
 }
 
-TEST_F(XactTests_, AbortSecondXact_1000_1)
+TEST_F(TransactionTests, AbortSecondXact_1000_1)
 {
     test_abort_second_xact(*this, 1'000, 1);
 }
 
-TEST_F(XactTests_, AbortSecondXact_1_1000)
+TEST_F(TransactionTests, AbortSecondXact_1_1000)
 {
     test_abort_second_xact(*this, 1, 1'000);
 }
 
-TEST_F(XactTests_, AbortSecondXact_1000_1000)
+TEST_F(TransactionTests, AbortSecondXact_1000_1000)
 {
     test_abort_second_xact(*this, 1'000, 1'000);
 }
@@ -624,14 +637,14 @@ auto run_random_transactions(Test &test, Size n)
     return committed;
 }
 
-TEST_F(XactTests_, SanityCheck)
+TEST_F(TransactionTests, SanityCheck)
 {
     for (const auto &[key, value]: run_random_transactions(*this, 20)) {
         ASSERT_TRUE(tools::contains(db, key, value));
     }
 }
 
-TEST_F(XactTests_, AbortSanityCheck)
+TEST_F(TransactionTests, AbortSanityCheck)
 {
     static constexpr long NUM_RECORDS {5'000};
     auto records = generator.generate(random, NUM_RECORDS);
@@ -649,7 +662,7 @@ TEST_F(XactTests_, AbortSanityCheck)
     }
 }
 
-TEST_F(XactTests_, PersistenceSanityCheck)
+TEST_F(TransactionTests, PersistenceSanityCheck)
 {
     ASSERT_OK(db.close());
     std::vector<Record> committed;
@@ -667,7 +680,7 @@ TEST_F(XactTests_, PersistenceSanityCheck)
     }
 }
 
-TEST_F(XactTests_, AtomicOperationSanityCheck)
+TEST_F(TransactionTests, AtomicOperationSanityCheck)
 {
     const auto all_records = generator.generate(random, 500);
     const auto committed = run_random_operations(*this, cbegin(all_records), cend(all_records));
@@ -839,100 +852,24 @@ TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
     ASSERT_TRUE(s.is_ok()) << s.what();
 }
 
-template<class Test>
-static auto run_abort_restores_state_test(Test &test) -> void
+TEST_F(FailureTests, CannotPerformOperationsAfterFatalError)
 {
-    auto xact = test.db.transaction();
-    auto s = modify_until_failure(test);
-    assert_error_42(s);
-
-    s = test.db.status();
-    assert_error_42(s);
-
-    ASSERT_OK(xact.abort());
-    ASSERT_OK(test.db.status());
-}
-
-TEST_F(FailureTests, AbortRestoresStateAfterDataReadError)
-{
-    interceptors::set_read(FailOnce<5> {"test/data"});
-    run_abort_restores_state_test(*this);
-}
-
-TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError)
-{
-    interceptors::set_write(FailOnce<5> {"test/data"});
-    run_abort_restores_state_test(*this);
-}
-
-TEST_F(FailureTests, AbortRestoresStateAfterWalWriteError)
-{
-    interceptors::set_write(FailOnce<5> {"test/wal-"});
-    run_abort_restores_state_test(*this);
-}
-
-template<class Test>
-static auto run_abort_is_reentrant_test(Test &test, int &counter, int &counter_max) -> void
-{
-    auto xact = test.db.transaction();
-    auto s = modify_until_failure(test);
-    assert_error_42(s);
-    Size fail_count {};
-    counter_max = 0;
-
-    for (; ; ) {
-        counter = 0;
-        counter_max++;
-        if (xact.abort().is_ok())
-            break;
-        s = test.db.status();
-        assert_error_42(s);
-        fail_count++;
-    }
-    ASSERT_GT(fail_count, 5);
-    ASSERT_OK(test.db.status());
-
-    interceptors::reset();
-}
-
-TEST_F(FailureTests, AbortIsReentrantForDataReadErrors)
-{
-    int counter {};
-    int counter_max {10};
-    interceptors::set_read([&counter, &counter_max](const std::string &path, Bytes&, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ == counter_max ? Status::system_error("42") : Status::ok();
+    interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/data",
+        {1, 1, 1, 0, 1},
     });
 
-    run_abort_is_reentrant_test(*this, counter, counter_max);
-}
+    modify_until_failure(*this);
+    assert_error_42(db.status());
+    assert_error_42(db.first().status());
+    assert_error_42(db.last().status());
+    assert_error_42(db.find("key").status());
+    assert_error_42(db.insert("key", "value"));
+    assert_error_42(db.erase("key"));
 
-TEST_F(FailureTests, AbortIsReentrantForDataWriteErrors)
-{
-    int counter {};
-    int counter_max {10};
-    interceptors::set_write([&counter, &counter_max](const std::string &path, BytesView, Size) {
-        if (path != "test/data")
-            return Status::ok();
-        return counter++ == counter_max ? Status::system_error("42") : Status::ok();
-    });
-
-    run_abort_is_reentrant_test(*this, counter, counter_max);
-}
-
-TEST_F(FailureTests, AbortRestoresStateAfterDataReadError_Atomic)
-{
-    interceptors::set_read(FailOnce<2> {"test/data"});
-    assert_error_42(modify_until_failure(*this));
-    ASSERT_OK(db.status());
-}
-
-TEST_F(FailureTests, AbortRestoresStateAfterDataWriteError_Atomic)
-{
-    interceptors::set_write(FailOnce<5> {"test/data"});
-    assert_error_42(modify_until_failure(*this));
-    ASSERT_OK(db.status());
+    // If db.status() is not OK, creating a transaction object is not allowed. db.close() should
+    // return the fatal error.
+    assert_error_42(db.close());
 }
 
 enum class RecoveryTestFailureType {
@@ -999,9 +936,9 @@ public:
             // Commit NUM_XACTS transactions.
             auto begin = cbegin(committed);
             while (begin != cend(committed)) {
-                auto xact = db.transaction();
+                auto xact = db->transaction();
                 for (auto itr = begin; itr != begin + XACT_SIZE; ++itr) {
-                    ASSERT_OK(db.insert(itr->key, itr->value));
+                    ASSERT_OK(db->insert(itr->key, itr->value));
                 }
                 ASSERT_OK(xact.commit());
                 begin += XACT_SIZE;
@@ -1034,49 +971,51 @@ public:
 
             // Run transactions involving the uncommitted set until failure.
             for (; ; ) {
-                auto xact = db.transaction();
-                auto s = db.status();
+                auto xact = db->transaction();
+                auto s = db->status();
                 for (const auto &[key, value]: uncommitted) {
-                    s = db.insert(key, value);
+                    s = db->insert(key, value);
                     BREAK_IF_ERROR
                 }
                 BREAK_IF_ERROR
                 for (const auto &[key, value]: uncommitted) {
-                    s = db.erase(key);
+                    s = db->erase(key);
                     BREAK_IF_ERROR
                 }
                 if (random.get(4)) {
-                    s = db.commit();
+                    s = db->commit();
                 } else {
-                    s = db.abort();
+                    s = db->abort();
                 }
                 BREAK_IF_ERROR
 
 #undef BREAK_IF_ERROR
             }
-            assert_error_42(db.status());
+            assert_error_42(db->status());
         }
-        assert_error_42(db.close());
+        assert_error_42(db->close());
+        db.reset();
         interceptors::reset();
     }
 
     auto open_database() -> Status
     {
         options.store = store.get();
-        return db.open(ROOT, options);
+        db.emplace();
+        return db->open(ROOT, options);
     }
 
     auto validate() -> void
     {
-        db.tree().TEST_validate_nodes();
-        db.tree().TEST_validate_links();
-        db.tree().TEST_validate_order();
+        db->tree().TEST_validate_nodes();
+        db->tree().TEST_validate_links();
+        db->tree().TEST_validate_order();
 
         for (const auto &[key, value]: committed) {
-            EXPECT_TRUE(tools::contains(db, key, value)) << "database should contain " << key;
+            EXPECT_TRUE(tools::contains(*db, key, value)) << "database should contain " << key;
         }
         for (const auto &[key, value]: uncommitted) {
-            EXPECT_FALSE(db.find_exact(key).is_valid()) << "database should not contain " << key;
+            EXPECT_FALSE(db->find_exact(key).is_valid()) << "database should not contain " << key;
         }
     }
 
@@ -1086,7 +1025,7 @@ public:
     std::vector<Record> committed;
     std::vector<Record> uncommitted;
     Options options;
-    Core db;
+    std::optional<Core> db;
 };
 
 template<class Failure, Size Step>
@@ -1165,7 +1104,7 @@ public:
     Size target {};
 };
 
-class RecoveryTests_FailImmediately: public RecoveryTestHarness<FailAfter<0>> {};
+class RecoveryTests_FailImmediately: public RecoveryTestHarness<FailOnce<0>> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryTests_FailImmediately,
@@ -1190,7 +1129,7 @@ TEST_P(RecoveryTests_FailImmediately, BasicRecovery)
 
 // Only can test system calls that are called at least 5 times before and during abort(). If we don't produce 5 calls during abort(),
 // the procedure will succeed and the database will not need recovery.
-class RecoveryTests_FailAfterDelay_5: public RecoveryTestHarness<FailAfter<5>> {};
+class RecoveryTests_FailAfterDelay_5: public RecoveryTestHarness<FailOnce<5>> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryTests_FailAfterDelay_5,
@@ -1209,7 +1148,7 @@ TEST_P(RecoveryTests_FailAfterDelay_5, BasicRecovery)
     validate();
 }
 
-class RecoveryTests_FailAfterDelay_500: public RecoveryTestHarness<FailAfter<500>> {};
+class RecoveryTests_FailAfterDelay_500: public RecoveryTestHarness<FailOnce<500>> {};
 
 INSTANTIATE_TEST_SUITE_P(
     RecoveryTests_FailAfterDelay_500,
@@ -1228,10 +1167,10 @@ TEST_P(RecoveryTests_FailAfterDelay_500, BasicRecovery)
     validate();
 }
 
-class RecoveryReentrancyTests_FailImmediately_100: public RecoveryReentrancyTestHarness<FailAfter<0>, 100> {
+class RecoveryReentrancyTests_FailImmediately_100: public RecoveryReentrancyTestHarness<FailOnce<0>, 100> {
 public:
     RecoveryReentrancyTests_FailImmediately_100()
-        : RecoveryReentrancyTestHarness<FailAfter<0>, 100> {RecoveryTestFailureType::DATA_WRITE}
+        : RecoveryReentrancyTestHarness<FailOnce<0>, 100> {RecoveryTestFailureType::DATA_WRITE}
     {}
 };
 
@@ -1251,10 +1190,10 @@ TEST_P(RecoveryReentrancyTests_FailImmediately_100, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailImmediately_10000: public RecoveryReentrancyTestHarness<FailAfter<0>, 10000> {
+class RecoveryReentrancyTests_FailImmediately_10000: public RecoveryReentrancyTestHarness<FailOnce<0>, 10000> {
 public:
     RecoveryReentrancyTests_FailImmediately_10000()
-        : RecoveryReentrancyTestHarness<FailAfter<0>, 10000> {RecoveryTestFailureType::DATA_WRITE}
+        : RecoveryReentrancyTestHarness<FailOnce<0>, 10000> {RecoveryTestFailureType::DATA_WRITE}
     {}
 };
 
@@ -1273,10 +1212,10 @@ TEST_P(RecoveryReentrancyTests_FailImmediately_10000, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailAfterDelay_100: public RecoveryReentrancyTestHarness<FailAfter<100>, 100> {
+class RecoveryReentrancyTests_FailAfterDelay_100: public RecoveryReentrancyTestHarness<FailOnce<100>, 100> {
 public:
     RecoveryReentrancyTests_FailAfterDelay_100()
-        : RecoveryReentrancyTestHarness<FailAfter<100>, 100> {RecoveryTestFailureType::DATA_WRITE}
+        : RecoveryReentrancyTestHarness<FailOnce<100>, 100> {RecoveryTestFailureType::DATA_WRITE}
     {}
 };
 
@@ -1296,10 +1235,10 @@ TEST_P(RecoveryReentrancyTests_FailAfterDelay_100, RecoveryIsReentrant)
     validate();
 }
 
-class RecoveryReentrancyTests_FailAfterDelay_10000: public RecoveryReentrancyTestHarness<FailAfter<100>, 10000> {
+class RecoveryReentrancyTests_FailAfterDelay_10000: public RecoveryReentrancyTestHarness<FailOnce<100>, 10000> {
 public:
     RecoveryReentrancyTests_FailAfterDelay_10000()
-        : RecoveryReentrancyTestHarness<FailAfter<100>, 10000> {RecoveryTestFailureType::DATA_WRITE}
+        : RecoveryReentrancyTestHarness<FailOnce<100>, 10000> {RecoveryTestFailureType::DATA_WRITE}
     {}
 };
 

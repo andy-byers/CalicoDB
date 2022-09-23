@@ -267,6 +267,10 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     CALICO_EXPECT_FALSE(id.is_null());
     std::lock_guard lock {m_mutex};
 
+    // A fatal error has occurred.
+    if (!m_status->is_ok())
+        return Err {*m_status};
+
     if (auto itr = m_registry.get(id); itr != m_registry.end())
         return do_acquire(itr->second);
 

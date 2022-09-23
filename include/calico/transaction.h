@@ -22,7 +22,6 @@ public:
 
 private:
     Core *m_core {};
-    bool m_is_active {true};
 };
 
 } // namespace calico

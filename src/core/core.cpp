@@ -326,6 +326,9 @@ auto Core::commit() -> Status
     m_logger->info("received commit request");
     static constexpr auto MSG = "could not commit";
 
+    if (!m_status.is_ok())
+        return m_status;
+
     // Write database state to the root page file header.
     auto s = save_state();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
@@ -358,6 +361,9 @@ auto Core::abort() -> Status
     m_logger->info("received abort request");
     static constexpr auto MSG = "could not abort";
 
+    if (!m_status.is_ok())
+        return m_status;
+
     if (!m_has_xact) {
         LogMessage message {*m_logger};
         message.set_primary(MSG);
@@ -366,11 +372,11 @@ auto Core::abort() -> Status
         return message.logic_error();
     }
 
+    m_has_xact = false;
     MAYBE_SAVE_AND_FORWARD(m_recovery->start_abort(m_commit_lsn), MSG);
     MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
     MAYBE_SAVE_AND_FORWARD(m_recovery->finish_abort(m_commit_lsn), MSG);
-    m_has_xact = false;
-    return m_status = Status::ok();
+    return Status::ok();
 }
 
 auto Core::close() -> Status

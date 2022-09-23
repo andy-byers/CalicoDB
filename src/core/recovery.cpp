@@ -120,12 +120,7 @@ static auto decode_full_image_payload(WalPayloadOut in) -> FullImageDescriptor
 static auto decode_commit_payload(WalPayloadOut in) -> CommitDescriptor
 {
     CommitDescriptor info;
-    auto data = in.data();
     info.lsn = in.lsn();
-
-    // Payload type (1 B)
-    CALICO_EXPECT_EQ(XactPayloadType {data[0]}, XactPayloadType::COMMIT);
-
     return info;
 }
 
