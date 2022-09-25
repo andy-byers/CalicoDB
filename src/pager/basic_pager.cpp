@@ -224,12 +224,6 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
 
         auto s = m_wal->log(payload);
         save_and_forward_status(s, "could not write full image to WAL");
-
-    } else if (m_wal->is_enabled()) {
-        LogMessage message {*m_logger};
-        message.set_primary("omitting watch for page {}", page.id().value);
-        message.set_detail("WAL writer has not been started");
-        message.log(spdlog::level::info);
     }
 }
 

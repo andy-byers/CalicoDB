@@ -120,10 +120,10 @@ auto BasicWriteAheadLog::current_lsn() const -> SequenceId
     return ++SequenceId {m_last_lsn};
 }
 
-auto BasicWriteAheadLog::remove_before(SequenceId pager_lsn) -> Status
+auto BasicWriteAheadLog::remove_before(SequenceId lsn) -> Status
 {
     CALICO_EXPECT_TRUE(m_is_working);
-    m_cleaner->remove_before(pager_lsn);
+    m_cleaner->remove_before(lsn);
     return m_cleaner->status();
 }
 
@@ -256,7 +256,7 @@ auto BasicWriteAheadLog::open_cleaner() -> Status
 auto BasicWriteAheadLog::roll_forward(SequenceId begin_lsn, const Callback &callback) -> Status
 {
     static constexpr auto MSG = "cannot roll forward";
-    m_logger->info("received roll forward request");
+    m_logger->info("rolling forward from LSN {}", begin_lsn.value);
 
     if (m_is_working) {
         auto s = stop_workers();
@@ -300,11 +300,14 @@ auto BasicWriteAheadLog::roll_forward(SequenceId begin_lsn, const Callback &call
         }
         s = m_reader->seek_next();
     }
+    const auto last_id = m_reader->segment_id();
+    m_reader.reset();
+
     // Translate the error status if needed. Note that we allow an incomplete record at the end of the
     // most-recently-written segment.
     if (!s.is_ok()) {
         if (s.is_corruption()) {
-            if (m_reader->segment_id() != m_set.last())
+            if (last_id != m_set.last())
                 return s;
         } else if (!s.is_not_found()) {
             return s;
@@ -317,7 +320,7 @@ auto BasicWriteAheadLog::roll_forward(SequenceId begin_lsn, const Callback &call
 auto BasicWriteAheadLog::roll_backward(SequenceId end_lsn, const Callback &callback) -> Status
 {
     static constexpr auto MSG = "could not roll backward";
-    m_logger->info("received roll backward request");
+    m_logger->info("rolling backward to LSN {}", end_lsn.value);
 
     if (m_is_working) {
         auto s = stop_workers();
@@ -364,6 +367,7 @@ auto BasicWriteAheadLog::roll_backward(SequenceId end_lsn, const Callback &callb
 
         s = m_reader->seek_previous();
     }
+    m_reader.reset();
     return s.is_not_found() ? Status::ok() : s;
 }
 

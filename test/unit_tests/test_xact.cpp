@@ -127,8 +127,9 @@ public:
     auto commit() -> Status
     {
         commit_lsn.value = wal->current_lsn().value - 1;
-        CALICO_TRY(wal->advance());
         images.clear();
+        CALICO_TRY(wal->advance());
+        CALICO_TRY(allow_cleanup());
         return status;
     }
 
@@ -161,6 +162,18 @@ public:
         auto wrapper = get_wrapper(id, true);
         if (!wrapper.has_value()) return {};
         return wrapper->get_value().to_string();
+    }
+
+    [[nodiscard]]
+    auto oldest_lsn() const -> SequenceId
+    {
+        return std::min(commit_lsn, pager->flushed_lsn());
+    }
+
+    [[nodiscard]]
+    auto allow_cleanup() -> Status
+    {
+        return wal->remove_before(oldest_lsn());
     }
 
     [[nodiscard]]
@@ -226,13 +239,13 @@ TEST_F(NormalXactTests, OverwriteValuesOnMultiplePages)
 }
 
 template<class Test>
-static auto undo_xact(Test &test, SequenceId commit_id)
+static auto undo_xact(Test &test, SequenceId commit_lsn)
 {
     Recovery recovery {*test.pager, *test.wal};
     (void)test.wal->stop_workers();
-    CALICO_TRY(recovery.start_abort(commit_id));
+    CALICO_TRY(recovery.start_abort(commit_lsn));
     // Don't need to load any state for these tests.
-    return recovery.finish_abort(commit_id);
+    return recovery.finish_abort(commit_lsn);
 }
 
 static auto assert_blank_value(BytesView value)
@@ -270,8 +283,11 @@ static auto add_values(Test &test, Size n, bool allow_failure = false) -> std::v
         if (allow_failure) {
             if (!test.try_set_value(PageId::from_index(index), value))
                 return {};
+            if (!test.allow_cleanup().is_ok())
+                return {};
         } else {
             test.set_value(PageId::from_index(index), value);
+            EXPECT_OK(test.allow_cleanup());
         }
         index = (index+1) % Test::PAGE_COUNT;
     }
@@ -356,6 +372,68 @@ TEST_F(NormalXactTests, AbortAfterMultipleOverwrites)
     assert_values_match(*this, committed);
 }
 
+class RollForwardTests: public NormalXactTests {
+public:
+    auto get_lsn_range() -> std::pair<SequenceId, SequenceId>
+    {
+        std::vector<SequenceId> lsns;
+        EXPECT_OK(wal->stop_workers());
+        EXPECT_OK(wal->roll_forward(SequenceId::null(), [&lsns](WalPayloadOut payload) {
+            lsns.emplace_back(payload.lsn());
+            return Status::ok();
+        }));
+        EXPECT_OK(wal->start_workers());
+        EXPECT_FALSE(lsns.empty());
+        return {lsns.front(), lsns.back()};
+    }
+};
+
+TEST_F(RollForwardTests, ObsoleteSegmentsAreRemoved)
+{
+    add_values(*this, PAGE_COUNT);
+    commit();
+    ASSERT_OK(allow_cleanup());
+
+    const auto [first, last] = get_lsn_range();
+    ASSERT_GT(first.value, 1);
+    ASSERT_LE(first, pager->flushed_lsn());
+    ASSERT_EQ(last, commit_lsn);
+}
+
+TEST_F(RollForwardTests, KeepsNeededSegments)
+{
+    for (Size i {}; i < 100; ++i) {
+        add_values(*this, PAGE_COUNT);
+        commit();
+        ASSERT_OK(allow_cleanup());
+    }
+
+    const auto [first, last] = get_lsn_range();
+    ASSERT_LE(first, pager->flushed_lsn());
+    ASSERT_EQ(last, commit_lsn);
+}
+
+TEST_F(RollForwardTests, SanityCheck)
+{
+fmt::print("seed == {}\n", internal::random_seed);
+    const auto committed = add_values(*this, PAGE_COUNT);
+    commit();
+
+    // We should keep all WAL segments generated in this loop, since we are not committing. We need to
+    // be able to undo any of these changes.
+    for (Size i {}; i < 100; ++i) {
+        add_values(*this, PAGE_COUNT);
+        ASSERT_OK(allow_cleanup());
+    }
+
+    const auto [first, last] = get_lsn_range();
+    ASSERT_LE(first, commit_lsn);
+    ASSERT_EQ(SequenceId {last.value + 1}, wal->current_lsn());
+
+    ASSERT_OK(undo_xact(*this, commit_lsn));
+    assert_values_match(*this, committed);
+}
+
 class FailedXactTests
     : public testing::TestWithParam<Size>,
       public XactTestHarness
@@ -400,7 +478,7 @@ TEST_P(FailedXactTests, DataWriteFailureIsPropagated)
         {1, 1, 1, 0, 1},
     });
     modify_until_failure();
-    assert_error_42(pager->status());
+    assert_error_42(get_status());
 }
 
 TEST_P(FailedXactTests, WalWriteFailureIsPropagated)
@@ -410,7 +488,7 @@ TEST_P(FailedXactTests, WalWriteFailureIsPropagated)
         {1, 1, 1, 0, 1},
     });
     modify_until_failure();
-    assert_error_42(pager->status());
+    assert_error_42(get_status());
 }
 
 TEST_P(FailedXactTests, WalOpenFailureIsPropagated)
@@ -420,7 +498,7 @@ TEST_P(FailedXactTests, WalOpenFailureIsPropagated)
         {1, 1, 0, 1},
     });
     modify_until_failure();
-    assert_error_42(pager->status());
+    assert_error_42(get_status());
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -800,7 +878,6 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
 {
     add_sequential_records(db, 500);
 
-    // TODO: Kinda sketchy to set this after we've written...
     interceptors::set_read(FailOnce<5> {"test/data"});
 
     // Iterate until a read() call fails.

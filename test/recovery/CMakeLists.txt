@@ -5,4 +5,4 @@ add_executable(recover recover.cpp)
 target_link_libraries(recover PRIVATE test_tools)
 
 configure_file(run.sh "${CMAKE_BINARY_DIR}/test/recovery" COPYONLY)
-add_test(NAME test_recovery COMMAND bash run.sh -n 50 -r 1000 -s 42 -v -w 0.15)
+add_test(NAME test_recovery COMMAND bash run.sh -n 8 -r 1000 -s 0 -v -w 0.15)

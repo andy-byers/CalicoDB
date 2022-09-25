@@ -1,15 +1,7 @@
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
 > **Warning**: This library is not quite stable and is definitely not code reviewed. 
-> Use at your own risk!
-
-> **Note**: As of 08/26, development is really coming along.
-> After a bit of a redesign, Calico DB is now fast enough to be useful!
-> Also, I'm back at school for my final semester, so I won't have time to add more features.
-> Luckily the public API is basically finished (with the addition of the Transaction class).
-> At this point, I'll be cleaning things up and working on the error handling model.
-> Once I find someone to help me review all of this code, maybe we can finally put out a release!
-> <p align="right"><i>Andy (<b>08/26</b>)</i></p>
+> Definitely don't use this library in anything serious!
 
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.

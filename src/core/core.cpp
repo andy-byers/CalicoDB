@@ -85,7 +85,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     auto sanitized = sanitize_options(options);
 
     m_prefix = path + (path.back() == '/' ? "" :  "/");
-    m_sink = sanitized.log_level ? create_sink(path, sanitized.log_level) : create_sink();
+    m_sink = sanitized.log_level != spdlog::level::off
+         ? create_sink(path, sanitized.log_level) : create_sink();
     m_logger = create_logger(m_sink, "core");
     initialize_log(*m_logger, path);
     m_logger->info("constructing Core object");
@@ -338,6 +339,7 @@ auto Core::commit() -> Status
     WalPayloadIn payload {lsn, m_scratch->get()};
     const auto size = encode_commit_payload(payload.data());
     payload.shrink_to_fit(size);
+    m_logger->info("commit LSN is {}", lsn.value);
 
     s = m_wal->log(payload);
     MAYBE_SAVE_AND_FORWARD(s, MSG);
@@ -346,7 +348,7 @@ auto Core::commit() -> Status
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Clean up obsolete WAL segments.
-    s = m_wal->remove_before(std::min(lsn, m_pager->flushed_lsn()));
+    s = m_wal->remove_before(std::min(m_commit_lsn, m_pager->flushed_lsn()));
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     m_images.clear();
