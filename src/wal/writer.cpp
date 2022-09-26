@@ -7,7 +7,7 @@ namespace calico {
 auto LogWriter::write(WalPayloadIn payload) -> Status
 {
     const auto lsn = payload.lsn();
-    auto data = *payload.raw_data();
+    auto data = payload.raw();
 
     CALICO_EXPECT_FALSE(lsn.is_null());
     WalRecordHeader lhs {};
@@ -104,7 +104,6 @@ auto WalWriter::on_event(const Event &event) -> Status
     if (std::holds_alternative<WalPayloadIn>(event)) {
         auto payload = std::get<WalPayloadIn>(event);
         auto s = m_writer->write(payload);
-        m_scratch->put(payload.raw_data());
 
         if (s.is_ok() && m_writer->block_count() >= m_wal_limit)
             return advance_segment();

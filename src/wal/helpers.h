@@ -127,21 +127,17 @@ public:
     ~LogScratchManager() = default;
 
     [[nodiscard]]
-    auto get() -> NamedScratch
+    auto get() -> Scratch
     {
         std::lock_guard lock {m_mutex};
         return m_manager.get();
     }
 
-    auto put(NamedScratch scratch) -> void
-    {
-        std::lock_guard lock {m_mutex};
-        m_manager.put(scratch);
-    }
-
 private:
+    static constexpr Size SCRATCH_COUNT {WORKER_CAPACITY + 2};
+
     mutable std::mutex m_mutex;
-    NamedScratchManager m_manager;
+    MonotonicScratchManager<SCRATCH_COUNT> m_manager;
 };
 
 } // namespace calico

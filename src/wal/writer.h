@@ -47,10 +47,6 @@ private:
 
 class WalWriter {
 public:
-
-    // The main thread will block after the worker has queued up this number of write requests.
-    static constexpr Size WORKER_CAPACITY {16};
-
     WalWriter(Storage &store, WalCollection &segments, LogScratchManager &scratch, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix, Size wal_limit)
         : m_worker {WORKER_CAPACITY, [this](const auto &event) {
               return on_event(event);

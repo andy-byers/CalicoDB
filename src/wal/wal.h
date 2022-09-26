@@ -16,9 +16,12 @@ struct FileHeader;
 struct SequenceId;
 class WalReader;
 
+// The main thread will block after the worker has queued up this number of write requests.
+static constexpr Size WORKER_CAPACITY {16};
+
 class WalPayloadIn {
 public:
-    WalPayloadIn(SequenceId lsn, NamedScratch buffer)
+    WalPayloadIn(SequenceId lsn, Scratch buffer)
         : m_buffer {buffer}
     {
         put_u64(*buffer, lsn.value);
@@ -37,9 +40,9 @@ public:
     }
 
     [[nodiscard]]
-    auto raw_data() -> NamedScratch
+    auto raw() -> BytesView
     {
-        return m_buffer;
+        return *m_buffer;
     }
 
     auto shrink_to_fit(Size size) -> void
@@ -48,7 +51,7 @@ public:
     }
 
 private:
-    NamedScratch m_buffer;
+    Scratch m_buffer;
 };
 
 class WalPayloadOut {

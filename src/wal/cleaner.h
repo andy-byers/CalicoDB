@@ -12,8 +12,6 @@ namespace calico {
  */
 class WalCleaner {
 public:
-    static constexpr Size WORKER_CAPACITY {16};
-
     WalCleaner(Storage &store, std::string prefix, WalCollection &collection)
         : m_worker {WORKER_CAPACITY, [this](const auto &event) {
               return on_event(event);

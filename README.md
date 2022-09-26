@@ -78,11 +78,19 @@ CPUCache:   20480 KB
 ```
 
 ### Calico DB
-The `fillseq`, `fillrandom`, and `overwrite` benchmarks were run using a transaction size of 1000.
-Performing many modifications outside a transaction is slow, since each operation is guaranteed to be atomic.
 
-> **NOTE**: I'm removing Calico DB's benchmarks for now.
-> The library is unstable, so it wasn't long before they stopped being meaningful.
+| Benchmark              | Result (ops/second) |
+|:-----------------------|--------------------:|
+| fillseq<sup>1</sup>    |             304,154 |
+| fillrandom<sup>1</sup> |             121,618 |
+| overwrite<sup>1</sup>  |             192,239 |
+| readrandom             |             422,196 |
+| readseq                |           2,598,243 |
+| fillrand100K           |               1,105 |
+| fillseq100K            |               1,318 |
+
+<sup>1</sup> The `fillseq`, `fillrandom`, and `overwrite` benchmarks were run using a transaction size of 1000.
+Performing many modifications outside a transaction is slow, since each operation is atomic.
 
 ### SQLite3
 | Benchmark    | Result (ops/second) |
@@ -102,9 +110,10 @@ Performing many modifications outside a transaction is slow, since each operatio
 4. Work on performance
 5. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
+    + Look into SQLite's pointer maps
 
 ## Documentation
-Check out Calico DB's usage and design [documents](./doc).
+Check out Calico DB's [usage and design documents](./doc).
 
 ## Source Tree
 ```

@@ -29,10 +29,8 @@ public:
         });
         if (m_is_finished) return false;
         m_queue.push_back(std::forward<U>(u));
-
-        fmt::print("{}\n", m_queue.size());
-
         lock.unlock();
+
         m_empty_cv.notify_one();
         return true;
     }
