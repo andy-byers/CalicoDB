@@ -115,7 +115,6 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         auto s = BasicWriteAheadLog::open({
             wal_prefix,
             m_store,
-            m_scratch.get(),
             m_sink,
             sanitized.page_size,
             sanitized.wal_limit,

@@ -129,7 +129,7 @@ for (auto c = db.last(); c.is_valid(); c--) {}
 
 // ...or from the start to some arbitrary point. In this example, the cursor we are iterating to is not valid. This is
 // the same as iterating until we hit the end.
-for (auto c = db.first(); c.is_valid() && c != db.find("42"); c++) {}
+for (auto c = db.first(), bounds = db.find("42"); c.is_valid() && c != bounds; c++) {}
 
 // We can also use the key ordering.
 for (auto c = db.first(); c.is_valid() && c.key() < cco::stob("42"); c++) {}
@@ -159,7 +159,8 @@ xact = db.transaction();
 s = db.erase(db.first());
 assert_ok(s);
 
-// This time we'll commit the transaction.
+// This time we'll commit the transaction. Note that if the transaction object goes out of scope before either abort()
+// or commit() is called, an abort() will be attempted automatically.
 s = xact.commit();
 assert_ok(s);
 ```

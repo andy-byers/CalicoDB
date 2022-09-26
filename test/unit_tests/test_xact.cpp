@@ -77,7 +77,6 @@ public:
         ASSERT_OK(BasicWriteAheadLog::open({
             "test/",
             store.get(),
-            scratch.get(),
             create_sink(),
             PAGE_SIZE,
             WAL_LIMIT,

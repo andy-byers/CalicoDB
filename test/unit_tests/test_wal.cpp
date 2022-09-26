@@ -955,7 +955,6 @@ public:
         ASSERT_OK((BasicWriteAheadLog::open({
             PREFIX,
             store.get(),
-            &scratch,
             create_sink(),
             PAGE_SIZE,
         }, &temp)));

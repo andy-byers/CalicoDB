@@ -25,7 +25,6 @@ public:
     struct Parameters {
         std::string prefix;
         Storage *store {};
-        LogScratchManager *scratch {};
         spdlog::sink_ptr sink;
         Size page_size {};
         Size wal_limit {};
@@ -81,7 +80,6 @@ private:
     std::string m_prefix;
 
     Storage *m_store {};
-    LogScratchManager *m_scratch {};
     std::optional<WalReader> m_reader;
     std::optional<WalWriter> m_writer;
     std::optional<WalCleaner> m_cleaner;

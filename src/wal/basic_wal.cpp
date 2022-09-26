@@ -41,7 +41,6 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
     : m_logger {create_logger(param.sink, "wal")},
       m_prefix {param.prefix},
       m_store {param.store},
-      m_scratch {param.scratch},
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
