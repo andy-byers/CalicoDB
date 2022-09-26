@@ -591,13 +591,14 @@ TEST(SimpleDSLTests, Size)
 class QueueTests: public testing::Test {
 public:
     static constexpr Size NUM_ELEMENTS {500};
+    static constexpr Size CAPACITY {16};
 
     QueueTests() = default;
     ~QueueTests() override = default;
 
     std::array<Size, NUM_ELEMENTS> data {};
     mutable std::mutex mutex;
-    Queue<Size> queue;
+    Queue<Size> queue {CAPACITY};
 };
 
 struct Consumer {
