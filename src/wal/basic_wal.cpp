@@ -235,7 +235,6 @@ auto BasicWriteAheadLog::open_writer() -> Status
     m_writer.emplace(
         *m_store,
         m_set,
-        *m_scratch,
         Bytes {m_writer_tail},
         m_flushed_lsn,
         m_prefix,

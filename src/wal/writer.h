@@ -47,13 +47,12 @@ private:
 
 class WalWriter {
 public:
-    WalWriter(Storage &store, WalCollection &segments, LogScratchManager &scratch, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix, Size wal_limit)
+    WalWriter(Storage &store, WalCollection &segments, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix, Size wal_limit)
         : m_worker {WORKER_CAPACITY, [this](const auto &event) {
               return on_event(event);
           }},
           m_prefix(std::move(prefix)),
           m_flushed_lsn {&flushed_lsn},
-          m_scratch {&scratch},
           m_set {&segments},
           m_store {&store},
           m_tail {tail},
@@ -96,7 +95,6 @@ private:
     std::optional<LogWriter> m_writer;
     std::atomic<SequenceId> *m_flushed_lsn {};
     std::unique_ptr<AppendWriter> m_file;
-    LogScratchManager *m_scratch {};
     WalCollection *m_set {};
     Storage *m_store {};
     Bytes m_tail;

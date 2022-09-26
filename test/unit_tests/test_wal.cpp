@@ -519,7 +519,6 @@ public:
         writer.emplace(
             *store,
             collection,
-            scratch,
             Bytes {tail},
             flushed_lsn,
             PREFIX,
@@ -668,7 +667,6 @@ public:
         return WalWriter {
             *store,
             collection,
-            scratch,
             Bytes {writer_tail},
             flushed_lsn,
             PREFIX,
