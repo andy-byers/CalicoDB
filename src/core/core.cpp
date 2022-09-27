@@ -36,13 +36,6 @@ namespace calico {
     } while (0)
 
 [[nodiscard]]
-static auto compute_header_crc(const FileHeader &state)
-{
-    BytesView bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
-    return crc_32(bytes.range(CRC_OFFSET));
-}
-
-[[nodiscard]]
 static auto sanitize_options(const Options &options) -> Options
 {
     auto sanitized = options;

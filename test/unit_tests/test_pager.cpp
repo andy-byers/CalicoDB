@@ -34,11 +34,11 @@ TEST(UniqueCacheTests, DuplicateKeyDeathTest)
     ASSERT_DEATH(cache.put(4, 2), EXPECTATION_MATCHER);
 }
 
-TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
-{
-    impl::UniqueCache<int, int> cache;
-    ASSERT_EQ(cache.evict(), std::nullopt);
-}
+//TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
+//{
+//    impl::UniqueCache<int, int> cache;
+//    ASSERT_EQ(cache.evict(), std::nullopt);
+//}
 
 TEST(UniqueCacheTests, CannotGetNonexistentValue)
 {

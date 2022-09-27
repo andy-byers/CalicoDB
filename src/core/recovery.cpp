@@ -219,7 +219,7 @@ auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
         return Status::ok();
     };
 
-    CALICO_TRY(m_wal->roll_forward(m_pager->flushed_lsn(), redo));
+    CALICO_TRY(m_wal->roll_forward(SequenceId::null(), redo));
 
     // Reached the end of the WAL, but didn't find a commit record.
     if (last_lsn != commit_lsn)

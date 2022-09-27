@@ -260,17 +260,23 @@ auto BasicWriteAheadLog::roll_forward(SequenceId begin_lsn, const Callback &call
         auto s = stop_workers();
         MAYBE_FORWARD(s, MSG);
     }
-
-    m_last_lsn = begin_lsn;
-    m_flushed_lsn.store(m_last_lsn);
-
     if (m_set.first().is_null())
         return Status::ok();
 
+    if (m_last_lsn.is_null()) {
+        m_last_lsn = begin_lsn;
+        m_flushed_lsn.store(m_last_lsn);
+    }
     // Open the reader on the first (oldest) WAL segment file.
     if (m_reader == std::nullopt) {
         auto s = open_reader();
         MAYBE_FORWARD(s, MSG);
+    }
+    // Make sure we are on the first segment.
+    for (; ; ) {
+        auto s = m_reader->seek_previous();
+        if (s.is_not_found()) break;
+        if (!s.is_ok()) return s;
     }
 
     auto s = Status::ok();
