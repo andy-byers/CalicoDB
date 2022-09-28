@@ -3,7 +3,7 @@
 #include "framer.h"
 #include "page/page.h"
 #include "storage/posix_storage.h"
-#include "utils/logging.h"
+#include "utils/info_log.h"
 #include "utils/types.h"
 #include <thread>
 
@@ -35,7 +35,6 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
 
     CALICO_TRY_STORE(pager->m_framer, Framer::open(
         std::unique_ptr<RandomEditor> {file},
-        param.wal,
         param.page_size,
         param.frame_count
     ));
@@ -44,6 +43,8 @@ auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPa
 
 BasicPager::BasicPager(const Parameters &param)
     : m_logger {create_logger(param.log_sink, "pager")},
+      m_images {param.images},
+      m_scratch {param.scratch},
       m_wal {&param.wal},
       m_status {&param.status},
       m_has_xact {&param.has_xact}
@@ -75,7 +76,7 @@ auto BasicPager::pin_frame(PageId id, bool &is_fragile) -> Status
         // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
         if (!*r) {
             m_logger->warn(MSG);
-            (void)m_wal->flush();
+            *m_status = m_wal->flush();
             return Status::not_found(MSG);
         }
     }
@@ -151,7 +152,8 @@ auto BasicPager::try_make_available() -> Result<bool>
 
     if (itr == m_registry.end()) {
         CALICO_EXPECT_TRUE(m_wal->is_working());
-        std::this_thread::yield();
+        *m_status = m_wal->flush();
+        save_and_forward_status(*m_status, "could not flush WAL");
         return false;
     }
 
@@ -172,15 +174,21 @@ auto BasicPager::try_make_available() -> Result<bool>
 
 auto BasicPager::release(Page page) -> Status
 {
+    // This method can only fail for writable pages.
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_ref_sum, 0);
 
-    // This method can only fail for writable pages.
     auto s = Status::ok();
     if (const auto deltas = page.collect_deltas(); m_wal->is_working() && !deltas.empty()) {
         CALICO_EXPECT_TRUE(page.is_writable());
-        page.set_lsn(SequenceId {m_wal->current_lsn()});
-        s = m_wal->log(page.id().value, page.view(0), page.collect_deltas());
+        const auto lsn = m_wal->current_lsn();
+        page.set_lsn(lsn);
+
+        WalPayloadIn payload {lsn, m_scratch->get()};
+        const auto size = encode_deltas_payload(page.id(), page.view(0), page.collect_deltas(), payload.data());
+        payload.shrink_to_fit(size);
+
+        s = m_wal->log(payload);
         save_and_forward_status(s, "could not write page deltas to WAL");
     }
 
@@ -201,16 +209,21 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
         m_dirty_count++;
     }
 
-    // TODO: We also have info about whether or not we should watch this page. Like *m_has_xact? Although that may break abort() since it doesn't set *m_has_xact to false until it is totally finished...
     if (m_wal->is_working()) {
-        auto s = m_wal->log(page.id().value, page.view(0));
-        save_and_forward_status(s, "could not write full image to WAL");
+        // Don't write a full image record to the WAL if we already have one for
+        // this page during this transaction.
+        const auto itr = m_images->find(page.id());
+        if (itr != cend(*m_images))
+            return;
+        m_images->emplace(page.id());
 
-    } else if (m_wal->is_enabled()) {
-        LogMessage message {*m_logger};
-        message.set_primary("omitting watch for page {}", page.id().value);
-        message.set_detail("WAL writer has not been started");
-        message.log(spdlog::level::info);
+        WalPayloadIn payload {m_wal->current_lsn(), m_scratch->get()};
+        const auto size = encode_full_image_payload(
+            page.id(), page.view(0), payload.data());
+        payload.shrink_to_fit(size);
+
+        auto s = m_wal->log(payload);
+        save_and_forward_status(s, "could not write full image to WAL");
     }
 }
 
@@ -248,6 +261,10 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     CALICO_EXPECT_FALSE(id.is_null());
     std::lock_guard lock {m_mutex};
 
+    // A fatal error has occurred.
+    if (!m_status->is_ok())
+        return Err {*m_status};
+
     if (auto itr = m_registry.get(id); itr != m_registry.end())
         return do_acquire(itr->second);
 
@@ -270,6 +287,8 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
             }
             return Err {s};
         }
+        s = m_wal->worker_status();
+        if (!s.is_ok()) return Err {s};
     }
 
     auto itr = m_registry.get(id);

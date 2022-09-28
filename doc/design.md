@@ -31,7 +31,8 @@ See [wal.md](./wal.md) for more specifics about how the WAL is used in transacti
 Calico DB enforces certain rules to make sure that the database stays consistent through crashes and other exceptional events.
 The current policy is to lock the database if an error is encountered while working with a writable page after the database has been modified during a transaction.
 This is more restrictive than necessary, but has the benefit of covering more cases where the database could be corrupted.
-The lock can be released by performing a successful abort operation.
+Once a database has been locked due to a fatal error, further operations will immediately return with the fatal error status.
+When the database instance is next opened, recovery will be performed if necessary.
 Errors that result from passing invalid arguments to a method will never lock up the database.
 
 The database object maintains a status, represented by a `Status` object (see [Status Objects](#status-objects)).

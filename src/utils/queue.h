@@ -30,6 +30,7 @@ public:
         if (m_is_finished) return false;
         m_queue.push_back(std::forward<U>(u));
         lock.unlock();
+
         m_empty_cv.notify_one();
         return true;
     }

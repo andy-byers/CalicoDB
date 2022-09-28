@@ -1,17 +1,18 @@
 
 #include "core.h"
+#include "recovery.h"
 #include "calico/calico.h"
 #include "calico/storage.h"
 #include "calico/transaction.h"
 #include "header.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
-#include "storage/posix_storage.h"
 #include "storage/helpers.h"
+#include "storage/posix_storage.h"
 #include "tree/bplus_tree.h"
 #include "utils/crc.h"
+#include "utils/info_log.h"
 #include "utils/layout.h"
-#include "utils/logging.h"
 #include "wal/basic_wal.h"
 #include "wal/disabled_wal.h"
 
@@ -33,13 +34,6 @@ namespace calico {
         const auto &calico_s = (expr); \
         if (!calico_s.is_ok()) return save_and_forward_status(calico_s, message); \
     } while (0)
-
-[[nodiscard]]
-static auto compute_header_crc(const FileHeader &state)
-{
-    BytesView bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
-    return crc_32(bytes.range(CRC_OFFSET));
-}
 
 [[nodiscard]]
 static auto sanitize_options(const Options &options) -> Options
@@ -84,7 +78,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     auto sanitized = sanitize_options(options);
 
     m_prefix = path + (path.back() == '/' ? "" :  "/");
-    m_sink = sanitized.log_level ? create_sink(path, sanitized.log_level) : create_sink();
+    m_sink = sanitized.log_level != spdlog::level::off
+         ? create_sink(path, sanitized.log_level) : create_sink();
     m_logger = create_logger(m_sink, "core");
     initialize_log(*m_logger, path);
     m_logger->info("constructing Core object");
@@ -104,6 +99,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
 
     if (sanitized.wal_limit != DISABLE_WAL) {
+        m_scratch = std::make_unique<LogScratchManager>(wal_scratch_size(sanitized.page_size));
+
         // The WAL segments may be stored elsewhere.
         const auto wal_prefix = sanitized.wal_path.empty()
             ? m_prefix : std::string {sanitized.wal_path} + "/";
@@ -125,6 +122,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         auto r = BasicPager::open({
             m_prefix,
             *m_store,
+            m_scratch.get(),
+            &m_images,
             *m_wal,
             m_status,
             m_has_xact,
@@ -144,6 +143,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         m_tree->load_state(state);
     }
 
+    m_recovery = std::make_unique<Recovery>(*m_pager, *m_wal);
+
     auto s = Status::ok();
     if (is_new) {
         // The first call to root() allocates the root page.
@@ -161,14 +162,14 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         // to the database file.
         s = m_pager->flush();
 
+        if (s.is_ok() && m_wal->is_enabled())
+            s = m_wal->start_workers();
+
     } else if (m_wal->is_enabled()) {
         // This should be a no-op if the database closed normally last time.
         s = ensure_consistent_state();
         MAYBE_FORWARD(s, MSG);
     }
-
-    if (s.is_ok() && m_wal->is_enabled())
-        s = m_wal->start_workers();
 
     return forward_status(s, MSG);
 }
@@ -229,9 +230,7 @@ auto Core::save_and_forward_status(Status s, const std::string &message) -> Stat
 
 auto Core::status() const -> Status
 {
-    auto s = m_pager->status();
-    if (s.is_ok()) return m_wal->status();
-    return s;
+    return m_status.is_ok() ? m_wal->worker_status() : m_status;
 }
 
 auto Core::path() const -> std::string
@@ -319,15 +318,41 @@ auto Core::commit() -> Status
     m_logger->info("received commit request");
     static constexpr auto MSG = "could not commit";
 
+    if (!m_status.is_ok())
+        return m_status;
+
     // Write database state to the root page file header.
     auto s = save_state();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     // Write a commit record to the WAL.
-    s = m_wal->commit();
+    const auto lsn = m_wal->current_lsn();
+    WalPayloadIn payload {lsn, m_scratch->get()};
+    const auto size = encode_commit_payload(payload.data());
+    payload.shrink_to_fit(size);
+    m_logger->info("commit LSN is {}", lsn.value);
+
+    s = m_wal->log(payload);
     MAYBE_SAVE_AND_FORWARD(s, MSG);
-    m_logger->info("commit succeeded");
+
+    s = m_wal->advance();
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
+
+    // Clean up obsolete WAL segments.
+    s = m_wal->remove_before(std::min(m_commit_lsn, m_pager->flushed_lsn()));
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
+
+    // TODO: We need frequently used pages to be flushed eventually... It's possible for some
+    //       pages to never be flushed naturally (like the root page). This hurts performance
+    //       though, so we may want to find an alternative, like flushing pages when they get
+    //       too old.
+    s = m_pager->flush();
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
+
+    m_images.clear();
+    m_commit_lsn = lsn;
     m_has_xact = false;
+    m_logger->info("commit succeeded");
     return s;
 }
 
@@ -336,13 +361,8 @@ auto Core::abort() -> Status
     m_logger->info("received abort request");
     static constexpr auto MSG = "could not abort";
 
-    if (!m_wal->is_enabled()) {
-        LogMessage message {*m_logger};
-        message.set_primary(MSG);
-        message.set_detail("WAL is not enabled");
-        message.set_hint("WAL must be enabled when database is created");
-        return message.logic_error();
-    }
+    if (!m_status.is_ok())
+        return m_status;
 
     if (!m_has_xact) {
         LogMessage message {*m_logger};
@@ -351,52 +371,17 @@ auto Core::abort() -> Status
         message.set_hint("start a transaction and try again");
         return message.logic_error();
     }
-    auto s = Status::ok();
 
-    if (m_wal->is_working()) {
-        s = m_wal->stop_workers();
-        if (!s.is_ok())
-            forward_status(s, "WAL encountered an error when stopping workers");
-    }
-
-    // This should give us the full images of each updated page belonging to the current transaction, before any changes
-    // were made to it.
-    s = m_wal->start_abort([this](const auto &info) {
-        const auto [pid, lsn, image] = info;
-        auto page = m_pager->acquire(pid, true);
-        if (!page.has_value()) return page.error();
-
-        page->apply_update(info);
-        return m_pager->release(std::move(*page));
-    });
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // Load database state from the root page file header. We need the new page count to determine which pages we can flush.
-    s = load_state();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    s = m_pager->flush();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    s = m_wal->finish_abort();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // Database state is restored if we have made it here, assuming we can start the worker threads again.
-    m_status = Status::ok();
-
-    m_logger->info("abort succeeded");
-    s = m_wal->start_workers();
-    MAYBE_SAVE_AND_FORWARD(s, MSG);
-
-    // If we failed starting up the workers, we should be able to call this method again. It won't really do anything but
-    // start the workers on the second round.
     m_has_xact = false;
+    MAYBE_SAVE_AND_FORWARD(m_recovery->start_abort(m_commit_lsn), MSG);
+    MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
+    MAYBE_SAVE_AND_FORWARD(m_recovery->finish_abort(m_commit_lsn), MSG);
     return Status::ok();
 }
 
 auto Core::close() -> Status
 {
-    if (m_has_xact && m_status.is_ok()) {
+    if (m_has_xact && status().is_ok()) {
         LogMessage message {*m_logger};
         message.set_primary("could not close");
         message.set_detail("a transaction is active");
@@ -416,25 +401,10 @@ auto Core::close() -> Status
 auto Core::ensure_consistent_state() -> Status
 {
     static constexpr auto MSG = "cannot ensure consistent database state";
-
-    const auto apply_update = [this](const auto &info) {
-        auto page = m_pager->acquire(info.pid, true);
-        if (!page.has_value()) return page.error();
-
-        page->apply_update(info);
-        return m_pager->release(std::move(*page));
-    };
-
-    auto s = m_wal->start_recovery(apply_update, apply_update);
-    MAYBE_FORWARD(s, MSG);
-
-    s = load_state();
-    MAYBE_FORWARD(s, MSG);
-
-    s = m_pager->flush();
-    MAYBE_FORWARD(s, MSG);
-
-    return m_wal->finish_recovery();
+    MAYBE_SAVE_AND_FORWARD(m_recovery->start_recovery(m_commit_lsn), MSG);
+    MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
+    MAYBE_SAVE_AND_FORWARD(m_recovery->finish_recovery(m_commit_lsn), MSG);
+    return Status::ok();
 }
 
 auto Core::transaction() -> Transaction
@@ -567,7 +537,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         s = read_exact(*reader, bytes, 0);
         if (!s.is_ok()) return Err {s};
 
-        if (header.page_size && file_size % header.page_size) {
+        if (file_size % decode_page_size(header.page_size)) {
             message.set_detail("database has an invalid size");
             message.set_hint("database must contain an integral number of pages");
             return Err {message.corruption()};
@@ -594,14 +564,16 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         return Err {s};
     }
 
-    if (header.page_size && header.page_size < MINIMUM_PAGE_SIZE) {
-        message.set_detail("header page size {} is too small", header.page_size);
+    const auto page_size = decode_page_size(header.page_size);
+
+    if (page_size < MINIMUM_PAGE_SIZE) {
+        message.set_detail("header page size {} is too small", page_size);
         message.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
         return Err {message.corruption()};
     }
 
-    if (header.page_size && !is_power_of_two(header.page_size)) {
-        message.set_detail("header page size {} is invalid", header.page_size);
+    if (!is_power_of_two(page_size)) {
+        message.set_detail("header page size {} is invalid", page_size);
         message.set_hint("must either be 0 or a power of 2");
         return Err {message.corruption()};
     }

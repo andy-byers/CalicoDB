@@ -1,8 +1,8 @@
-#include "logging.h"
+#include "info_log.h"
 #include "expect.h"
-#include <filesystem>
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/sinks/null_sink.h"
+#include <filesystem>
 
 namespace calico {
 

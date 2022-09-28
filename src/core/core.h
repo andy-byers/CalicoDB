@@ -3,15 +3,17 @@
 
 #include "calico/database.h"
 #include "header.h"
-#include "utils/result.h"
-#include <shared_mutex>
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/spdlog.h"
+#include "utils/result.h"
+#include "wal/helpers.h"
+#include <unordered_set>
 
 namespace calico {
 
 class Cursor;
 class Pager;
+class Recovery;
 class Storage;
 class Tree;
 class WriteAheadLog;
@@ -109,6 +111,10 @@ private:
     std::unique_ptr<WriteAheadLog> m_wal;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
+    std::unique_ptr<Recovery> m_recovery;
+    std::unique_ptr<LogScratchManager> m_scratch;
+    std::unordered_set<PageId, PageId::Hash> m_images;
+    SequenceId m_commit_lsn;
     Storage *m_store {};
     bool m_has_xact {};
     bool m_owns_store {};

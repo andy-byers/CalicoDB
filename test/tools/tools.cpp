@@ -2,9 +2,9 @@
 #include "tools.h"
 #include "fakes.h"
 #include "page/node.h"
-#include "tree/tree.h"
 #include "tree/node_pool.h"
-#include "utils/logging.h"
+#include "tree/tree.h"
+#include "utils/info_log.h"
 #include <unordered_set>
 
 namespace calico {

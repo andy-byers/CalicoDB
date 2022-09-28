@@ -1,5 +1,5 @@
 #include "fakes.h"
-#include "utils/logging.h"
+#include "utils/info_log.h"
 #include "utils/utils.h"
 
 namespace calico {

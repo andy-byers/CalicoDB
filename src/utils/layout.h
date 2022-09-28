@@ -6,6 +6,7 @@
 
 namespace calico {
 
+// TODO: Get rid of this
 class FileLayout {
 public:
     static constexpr Size MAGIC_CODE_OFFSET {0};

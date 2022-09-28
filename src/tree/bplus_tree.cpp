@@ -3,8 +3,8 @@
 #include "cursor_internal.h"
 #include "page/node.h"
 #include "pager/pager.h"
+#include "utils/info_log.h"
 #include "utils/layout.h"
-#include "utils/logging.h"
 
 namespace calico {
 
@@ -100,7 +100,7 @@ auto BPlusTree::find_aux(BytesView key) -> Result<SearchResult>
     if (m_internal.cell_count() && index == node.cell_count() && !node.right_sibling_id().is_null()) {
         CALICO_EXPECT_FALSE(found_exact);
         id = node.right_sibling_id();
-        CALICO_TRY(m_pool.release(std::move(node)));
+        CALICO_TRY__(m_pool.release(std::move(node)));
         CALICO_TRY_CREATE(next, m_pool.acquire(id, false));
         node = std::move(next);
         index = 0;

@@ -5,8 +5,8 @@
 #include "pager/framer.h"
 #include "pager/registry.h"
 #include "unit_tests.h"
+#include "utils/info_log.h"
 #include "utils/layout.h"
-#include "utils/logging.h"
 #include "wal/disabled_wal.h"
 #include <gtest/gtest.h>
 #include <numeric>
@@ -34,11 +34,11 @@ TEST(UniqueCacheTests, DuplicateKeyDeathTest)
     ASSERT_DEATH(cache.put(4, 2), EXPECTATION_MATCHER);
 }
 
-TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
-{
-    impl::UniqueCache<int, int> cache;
-    ASSERT_EQ(cache.evict(), std::nullopt);
-}
+//TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
+//{
+//    impl::UniqueCache<int, int> cache;
+//    ASSERT_EQ(cache.evict(), std::nullopt);
+//}
 
 TEST(UniqueCacheTests, CannotGetNonexistentValue)
 {
@@ -128,12 +128,11 @@ public:
         EXPECT_TRUE(home->open_random_editor(DATA_FILENAME, &temp).is_ok());
         file.reset(temp);
 
-        framer = Framer::open(std::move(file), wal, 0x100, 8).value();
+        framer = Framer::open(std::move(file), 0x100, 8).value();
     }
 
     ~FramerTests() override = default;
 
-    DisabledWriteAheadLog wal;
     std::unique_ptr<HeapStorage> home;
     std::unique_ptr<Framer> framer;
 };
@@ -189,11 +188,14 @@ public:
     std::string test_message {"Hello, world!"};
 
     explicit PagerTests()
-        : wal {std::make_unique<DisabledWriteAheadLog>()}
+        : wal {std::make_unique<DisabledWriteAheadLog>()},
+          scratch {wal_scratch_size(page_size)}
     {
         pager = *BasicPager::open({
             PREFIX,
             *store,
+            &scratch,
+            &images,
             *wal,
             status,
             has_xact,
@@ -252,8 +254,10 @@ public:
 
     Status status {Status::ok()};
     bool has_xact {};
+    std::unordered_set<PageId, PageId::Hash> images;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
+    LogScratchManager scratch;
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)

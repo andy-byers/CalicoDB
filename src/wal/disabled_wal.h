@@ -22,31 +22,25 @@ public:
     }
 
     [[nodiscard]]
-    auto status() const -> Status override
+    auto worker_status() const -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto flushed_lsn() const -> std::uint64_t override
+    auto flushed_lsn() const -> SequenceId override
     {
-        return 0;
+        return SequenceId::null();
     }
 
     [[nodiscard]]
-    auto current_lsn() const -> std::uint64_t override
+    auto current_lsn() const -> SequenceId override
     {
-        return 0;
+        return SequenceId::null();
     }
 
     [[nodiscard]]
-    auto log(std::uint64_t, BytesView) -> Status override
-    {
-        return Status::ok();
-    }
-
-    [[nodiscard]]
-    auto log(std::uint64_t, BytesView, const std::vector<PageDelta> &) -> Status override
+    auto log(WalPayloadIn) -> Status override
     {
         return Status::ok();
     }
@@ -58,7 +52,7 @@ public:
     }
 
     [[nodiscard]]
-    auto commit() -> Status override
+    auto advance() -> Status override
     {
         return Status::ok();
     }
@@ -76,30 +70,28 @@ public:
     }
 
     [[nodiscard]]
-    auto start_recovery(const GetDeltas &, const GetFullImage &) -> Status override
+    auto roll_forward(SequenceId, const Callback &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto finish_recovery() -> Status override
+    auto roll_backward(SequenceId, const Callback &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto start_abort(const GetFullImage &) -> Status override
+    auto remove_before(SequenceId) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto finish_abort() -> Status override
+    auto remove_after(SequenceId) -> Status override
     {
         return Status::ok();
     }
-
-    auto allow_cleanup(std::uint64_t) -> void override {}
 };
 
 } // namespace calico

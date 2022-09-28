@@ -8,10 +8,6 @@ class Status;
 
 class Transaction final {
 public:
-
-    [[nodiscard]] auto commit() -> Status;
-    [[nodiscard]] auto abort() -> Status;
-
     ~Transaction();
     explicit Transaction(Core&);
 
@@ -21,9 +17,11 @@ public:
     Transaction(const Transaction&) = delete;
     auto operator=(const Transaction&) -> Transaction& = delete;
 
+    [[nodiscard]] auto commit() -> Status;
+    [[nodiscard]] auto abort() -> Status;
+
 private:
     Core *m_core {};
-    bool m_is_active {true};
 };
 
 } // namespace calico

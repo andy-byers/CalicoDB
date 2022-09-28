@@ -1,12 +1,15 @@
 #ifndef CALICO_UTILS_TYPES_H
 #define CALICO_UTILS_TYPES_H
 
+#include <vector>
 #include "utils.h"
 
 namespace calico {
 
 template<class Index>
 struct IndexHash {
+
+    [[nodiscard]]
     auto operator()(const Index &index) const -> std::size_t
     {
         return static_cast<std::size_t>(index.value);
@@ -87,6 +90,16 @@ struct OrderableTraits {
     }
 };
 
+template<class T>
+struct IncrementableTraits { // TODO: Removed postfix increment. It's confusing to implement with CRTP!
+
+    auto operator++() -> T&
+    {
+        static_cast<T&>(*this).value++;
+        return static_cast<T&>(*this);
+    }
+};
+
 struct PageId
     : public NullableId<PageId>,
       public EqualityComparableTraits<PageId>
@@ -131,6 +144,19 @@ struct SequenceId
         : value {std::uint64_t(u)}
     {}
 
+    auto operator++() -> SequenceId&
+    {
+        value++;
+        return *this;
+    }
+
+    auto operator++(int) -> SequenceId
+    {
+        const auto temp = *this;
+        ++(*this);
+        return temp;
+    }
+
     [[nodiscard]]
     static constexpr auto base() noexcept -> SequenceId
     {
@@ -141,19 +167,6 @@ struct SequenceId
     constexpr auto is_base() const noexcept -> bool
     {
         return value == base().value;
-    }
-
-    auto operator++() -> SequenceId&
-    {
-        value++;
-        return *this;
-    }
-
-    auto operator++(int) -> SequenceId
-    {
-        auto temp = *this;
-        ++(*this);
-        return temp;
     }
 
     std::uint64_t value {};
@@ -232,6 +245,30 @@ public:
 
 private:
     T m_resource {};
+};
+
+class ErrorBuffer {
+public:
+    [[nodiscard]]
+    auto is_ok() const -> bool
+    {
+        return m_buffer.empty();
+    }
+
+    [[nodiscard]]
+    auto buffer() const -> const std::vector<Status> &
+    {
+        return m_buffer;
+    }
+
+    auto maybe_consume(Status &&s) -> void
+    {
+        if (!s.is_ok())
+            m_buffer.emplace_back(std::move(s));
+    }
+
+private:
+    std::vector<Status> m_buffer;
 };
 
 } // namespace calico

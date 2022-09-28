@@ -3,7 +3,7 @@
 
 #include "calico/storage.h"
 #include "record.h"
-#include "utils/logging.h"
+#include "utils/info_log.h"
 #include "utils/queue.h"
 #include "utils/result.h"
 #include "utils/scratch.h"
@@ -23,6 +23,29 @@ inline constexpr auto wal_block_size(Size page_size) -> Size
 inline constexpr auto wal_scratch_size(Size page_size) -> Size
 {
     return page_size * WAL_SCRATCH_SCALE;
+}
+
+[[nodiscard]]
+inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, SequenceId &out) -> Status
+{
+    RandomReader *temp {};
+    CALICO_TRY(store.open_random_reader(prefix + id.to_name(), &temp));
+
+    char buffer[WalPayloadHeader::SIZE];
+    Bytes bytes {buffer, sizeof(buffer)};
+    std::unique_ptr<RandomReader> file {temp};
+
+    // Read the first LSN. If it exists, it will always be at the same location.
+    CALICO_TRY(file->read(bytes, WalRecordHeader::SIZE));
+
+    if (bytes.is_empty())
+        return Status::not_found("segment is empty");
+
+    if (bytes.size() != WalPayloadHeader::SIZE)
+        return Status::corruption("incomplete record");
+
+    out = read_wal_payload_header(bytes).lsn;
+    return Status::ok();
 }
 
 /*
@@ -104,21 +127,17 @@ public:
     ~LogScratchManager() = default;
 
     [[nodiscard]]
-    auto get() -> NamedScratch
+    auto get() -> Scratch
     {
         std::lock_guard lock {m_mutex};
         return m_manager.get();
     }
 
-    auto put(NamedScratch scratch) -> void
-    {
-        std::lock_guard lock {m_mutex};
-        m_manager.put(scratch);
-    }
-
 private:
+    static constexpr Size SCRATCH_COUNT {WORKER_CAPACITY + 2};
+
     mutable std::mutex m_mutex;
-    NamedScratchManager m_manager;
+    MonotonicScratchManager<SCRATCH_COUNT> m_manager;
 };
 
 } // namespace calico

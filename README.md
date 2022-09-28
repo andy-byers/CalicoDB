@@ -1,15 +1,7 @@
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
 > **Warning**: This library is not quite stable and is definitely not code reviewed. 
-> Use at your own risk!
-
-> **Note**: As of 08/26, development is really coming along.
-> After a bit of a redesign, Calico DB is now fast enough to be useful!
-> Also, I'm back at school for my final semester, so I won't have time to add more features.
-> Luckily the public API is basically finished (with the addition of the Transaction class).
-> At this point, I'll be cleaning things up and working on the error handling model.
-> Once I find someone to help me review all of this code, maybe we can finally put out a release!
-> <p align="right"><i>Andy (<b>08/26</b>)</i></p>
+> Definitely don't use this library in anything serious!
 
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
@@ -86,11 +78,18 @@ CPUCache:   20480 KB
 ```
 
 ### Calico DB
-The `fillseq`, `fillrandom`, and `overwrite` benchmarks were run using a transaction size of 1000.
-Performing many modifications outside a transaction is slow, since each operation is guaranteed to be atomic.
+| Benchmark              | Result (ops/second) |
+|:-----------------------|--------------------:|
+| fillseq<sup>1</sup>    |             304,154 |
+| fillrandom<sup>1</sup> |             121,618 |
+| overwrite<sup>1</sup>  |             192,239 |
+| readrandom             |             422,196 |
+| readseq                |           2,598,243 |
+| fillrand100K           |               1,105 |
+| fillseq100K            |               1,318 |
 
-> **NOTE**: I'm removing Calico DB's benchmarks for now.
-> The library is unstable, so it wasn't long before they stopped being meaningful.
+<sup>1</sup> The `fillseq`, `fillrandom`, and `overwrite` benchmarks were run using a transaction size of 1000.
+Performing many modifications outside a transaction is slow, since each operation is atomic.
 
 ### SQLite3
 | Benchmark    | Result (ops/second) |
@@ -105,16 +104,15 @@ Performing many modifications outside a transaction is slow, since each operatio
 
 ## TODO
 1. Get everything code reviewed!
-2. Cleanup of old WAL segments
-3. Get unit test coverage up
-4. Write documentation
-5. Work on performance
-6. Get the CMake installation to work
-7. Need some way to reduce the file size once many pages become unused
+2. Get unit test coverage up
+3. Write documentation
+4. Work on performance
+5. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
+    + Look into SQLite's pointer maps
 
 ## Documentation
-Check out Calico DB's usage and design [documents](./doc).
+Check out Calico DB's [usage and design documents](./doc).
 
 ## Source Tree
 ```

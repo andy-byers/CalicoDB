@@ -1,7 +1,7 @@
 #include "reader.h"
 #include "calico/storage.h"
 #include "page/page.h"
-#include "utils/logging.h"
+#include "utils/info_log.h"
 
 namespace calico {
 
@@ -14,11 +14,6 @@ auto read_corruption_error(const std::string &hint, Args &&...args) -> Status
     message.set_detail("record is corrupted");
     message.set_hint(hint, std::forward<Args>(args)...);
     return message.corruption();
-}
-
-auto unrecognized_type_error(WalPayloadType type) -> Status
-{
-    return read_corruption_error("record type \"{:02X}\" is not recognized", static_cast<Byte>(type));
 }
 
 [[nodiscard]]
@@ -36,27 +31,28 @@ static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Sta
     return s;
 }
 
-auto LogReader::read(Bytes &out, Bytes tail) -> Status
+auto LogReader::read(WalPayloadOut &out, Bytes payload, Bytes tail) -> Status
 {
     // Lazily read the first block into the tail buffer.
     if (m_offset == 0) {
         auto s = read_exact_or_eof(*m_file, 0, tail);
         if (!s.is_ok()) return s;
     }
-    return read_logical_record(out, tail);
+    auto s = read_logical_record(payload, tail);
+    if (s.is_ok()) out = WalPayloadOut {payload};
+    return s;
 }
 
 auto LogReader::read_first_lsn(SequenceId &out) -> Status
 {
     // Bytes requires the array size when constructed with a C-style array.
-    char buffer [sizeof(WalRecordHeader) + MINIMUM_PAYLOAD_SIZE];
+    char buffer [WalPayloadHeader::SIZE];
     Bytes bytes {buffer, sizeof(buffer)};
 
     // The LogWriter will never flush a block unless it contains at least one record, so the first record should be
     // located at the start of the file.
-    auto s = read_exact_or_eof(*m_file, 0, bytes);
-    if (s.is_ok())
-        out = decode_lsn(bytes.advance(sizeof(WalRecordHeader)));
+    auto s = read_exact_or_eof(*m_file, WalRecordHeader::SIZE, bytes);
+    if (s.is_ok()) out = read_wal_payload_header(bytes).lsn;
     return s;
 }
 
@@ -67,19 +63,19 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
 
     for (; ; ) {
         auto rest = tail;
-        const auto has_enough_space = tail.size() - m_offset > sizeof(header);
+        const auto has_enough_space = tail.size() - m_offset > WalRecordHeader::SIZE;
 
         if (has_enough_space) {
             // Note that this modifies rest to point to [<local>, <end>) in the tail buffer.
             if (WalRecordHeader::contains_record(rest.advance(m_offset))) {
                 const auto temp = read_wal_record_header(rest);
-                rest.advance(sizeof(temp));
+                rest.advance(WalRecordHeader::SIZE);
 
                 auto s = merge_records_left(header, temp);
                 if (!s.is_ok()) return s;
 
                 mem_copy(payload, rest.truncate(temp.size));
-                m_offset += sizeof(temp) + temp.size;
+                m_offset += WalRecordHeader::SIZE + temp.size;
                 payload.advance(temp.size);
                 rest.advance(temp.size);
 
@@ -90,11 +86,8 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
                     continue;
             }
         }
-        m_offset = 0;
-        m_number++;
-
         // Read the next block into the tail buffer.
-        auto s = read_exact_or_eof(*m_file, m_number * tail.size(), tail);
+        auto s = read_exact_or_eof(*m_file, (m_number+1) * tail.size(), tail);
 
         if (!s.is_ok()) {
             // If we have any record fragments read so far, we consider this corruption.
@@ -102,15 +95,17 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
                 return read_corruption_error("logical record is incomplete");
             return s;
         }
+        m_offset = 0;
+        m_number++;
     }
-    // Only modify the out parameter size if we have succeeded.
+    // Only modify the out parameter's size if we have succeeded.
     out.truncate(out.size() - payload.size());
     return Status::ok();
 }
 
 auto WalReader::open() -> Status
 {
-    const auto first = m_segments->id_after(SegmentId::null());
+    const auto first = m_set->id_after(SegmentId::null());
     if (first.is_null())
         return Status::not_found("could not open WAL reader: segment collection is empty");
     return open_segment(first);
@@ -118,7 +113,7 @@ auto WalReader::open() -> Status
 
 auto WalReader::seek_next() -> Status
 {
-    const auto next = m_segments->id_after(m_current);
+    const auto next = m_set->id_after(m_current);
     if (!next.is_null()) {
         close_segment();
         return open_segment(next);
@@ -128,7 +123,7 @@ auto WalReader::seek_next() -> Status
 
 auto WalReader::seek_previous() -> Status
 {
-    const auto previous = m_segments->id_before(m_current);
+    const auto previous = m_set->id_before(m_current);
     if (!previous.is_null()) {
         close_segment();
         return open_segment(previous);
@@ -142,16 +137,16 @@ auto WalReader::read_first_lsn(SequenceId &out) -> Status
     return m_reader->read_first_lsn(out);
 }
 
-auto WalReader::roll(const GetPayload &callback) -> Status
+auto WalReader::roll(const Callback &callback) -> Status
 {
     auto s = Status::ok();
     prepare_traversal();
 
     while (s.is_ok()) {
-        Bytes payload {m_data};
+        WalPayloadOut payload;
 
         // If this call succeeds, payload will be modified to point to the exact payload.
-        s = m_reader->read(payload, m_tail);
+        s = m_reader->read(payload, m_data, m_tail);
 
         // A "not found" error means we have reached EOF.
         if (s.is_not_found()) {
@@ -159,21 +154,7 @@ auto WalReader::roll(const GetPayload &callback) -> Status
         } else if (!s.is_ok()) {
             return s;
         }
-
-        const auto type = decode_payload_type(payload);
-        switch (type) {
-            case WalPayloadType::DELTAS:
-                s = callback(decode_deltas_payload(payload));
-                break;
-            case WalPayloadType::COMMIT:
-                s = callback(decode_commit_payload(payload));
-                break;
-            case WalPayloadType::FULL_IMAGE:
-                s = callback(decode_full_image_payload(payload));
-                break;
-            default:
-                return unrecognized_type_error(type);
-        }
+        s = callback(payload);
     }
     return s;
 }

@@ -8,7 +8,7 @@
 #include "storage/posix_storage.h"
 #include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
-#include "utils/logging.h"
+#include "utils/info_log.h"
 
 namespace calico {
 

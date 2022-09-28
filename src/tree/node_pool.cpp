@@ -3,8 +3,8 @@
 #include "page/node.h"
 #include "page/page.h"
 #include "pager/pager.h"
+#include "utils/info_log.h"
 #include "utils/layout.h"
-#include "utils/logging.h"
 
 namespace calico {
 
@@ -131,7 +131,7 @@ auto NodePool::destroy_chain(PageId id, Size size) -> Result<void>
         Link link {std::move(*page)};
         id = link.next_id();
         size -= std::min(size, link.content_view().size());
-        CALICO_TRY(m_free_list.push(link.take()));
+        CALICO_TRY__(m_free_list.push(link.take()));
     }
     return {};
 }

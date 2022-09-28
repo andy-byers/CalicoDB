@@ -3,6 +3,7 @@
 
 #include "calico/bytes.h"
 #include "page/page.h"
+#include "utils/crc.h"
 #include "utils/types.h"
 
 namespace calico {
@@ -23,6 +24,8 @@ struct FileHeader {
     Byte reserved[6];
 };
 
+static_assert(sizeof(FileHeader) == 48);
+
 inline auto read_header(const Page &page) -> FileHeader
 {
     FileHeader header {};
@@ -33,6 +36,13 @@ inline auto read_header(const Page &page) -> FileHeader
 inline auto write_header(Page &page, const FileHeader &header) -> void
 {
     std::memcpy(page.bytes(0, sizeof(header)).data(), &header, sizeof(header));
+}
+
+[[nodiscard]]
+inline auto compute_header_crc(const FileHeader &state)
+{
+    BytesView bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
+    return crc_32(bytes.range(CRC_OFFSET));
 }
 
 [[nodiscard]]

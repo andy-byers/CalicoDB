@@ -116,81 +116,6 @@ public:
 private:
     Random random {123};
 };
-//
-//struct WalPayloadWrapper {
-//    WalPayloadType type {};
-//    std::vector<PageDelta> deltas;
-//    BytesView image;
-//};
-//
-//struct WalScenario {
-//    std::vector<std::string> before_images;
-//    std::vector<std::string> after_images;
-//    std::vector<WalPayloadWrapper> payloads;
-//};
-//
-//class WalScenarioGenerator {
-//public:
-//    explicit WalScenarioGenerator(Size page_size)
-//        : m_page_size {page_size}
-//    {}
-//
-//    [[nodiscard]]
-//    auto generate_single_page(Size max_rounds) -> WalScenario
-//    {
-//        CALICO_EXPECT_GT(max_rounds, 0);
-//        WalScenario scenario;
-//        auto &[before_images, after_images, payloads] = scenario;
-//
-//        before_images.emplace_back(m_random.next_string(m_page_size));
-//        after_images.emplace_back(before_images.back());
-//        payloads.emplace_back();
-//        payloads.back().type = WalPayloadType::FULL_IMAGE;
-//        payloads.back().image = stob(pages.back());
-//
-//        const auto num_rounds = m_random.next_int(1UL, max_rounds);
-//        while (payloads.size() - 1 < num_rounds) {
-//            WalPayloadWrapper payload;
-//            payload.image = stob(after_images.back());
-//            payload.type = WalPayloadType::DELTAS;
-//            payload.deltas = generate_deltas(payload.image);
-//        }
-//    }
-//
-//    [[nodiscard]]
-//    auto generate_multiple_pages(Size num_pages, Size max_rounds_per_page) -> WalScenario
-//    {
-//        std::vector<WalScenario> scenarios(num_pages);
-//        std::generate(begin(scenarios), end(scenarios), [this, max_rounds_per_page] {
-//            return generate_single_page(max_rounds_per_page);
-//        });
-//
-//    }
-//
-//private:
-//    [[nodiscard]]
-//    auto generate_deltas(Bytes image) -> std::vector<PageDelta>
-//    {
-//        static constexpr Size MAX_WIDTH {30};
-//        static constexpr Size MAX_SPREAD {20};
-//        std::vector<PageDelta> deltas;
-//
-//        for (Size offset {m_random.next_int(image.size() / 10)}; offset < image.size(); ) {
-//            const auto rest = image.size() - offset;
-//            const auto size = m_random.next_int(1UL, std::min(rest, MAX_WIDTH));
-//            deltas.emplace_back(PageDelta {offset, size});
-//            offset += size + m_random.next_int(1UL, MAX_SPREAD);
-//        }
-//        for (const auto &[offset, size]: deltas) {
-//            const auto replacement = m_random.next_string(size);
-//            mem_copy(image.range(offset, size), stob(replacement));
-//        }
-//        return deltas;
-//    }
-//
-//    Random m_random {123};
-//    Size m_page_size {};
-//};
 
 class BPlusTree;
 
@@ -272,6 +197,39 @@ namespace tools {
         return true;
     }
 
+    inline auto write_file(Storage &store, const std::string &path, BytesView in) -> void
+    {
+        RandomEditor *file;
+        CALICO_EXPECT_TRUE(store.open_random_editor(path, &file).is_ok());
+        CALICO_EXPECT_TRUE(file->write(in, 0).is_ok());
+        delete file;
+    }
+
+    inline auto append_file(Storage &store, const std::string &path, BytesView in) -> void
+    {
+        AppendWriter *file;
+        CALICO_EXPECT_TRUE(store.open_append_writer(path, &file).is_ok());
+        CALICO_EXPECT_TRUE(file->write(in).is_ok());
+        delete file;
+    }
+
+    inline auto read_file(Storage &store, const std::string &path) -> std::string
+    {
+        RandomReader *file;
+        std::string out;
+        Size size;
+
+        CALICO_EXPECT_TRUE(store.file_size(path, size).is_ok());
+        CALICO_EXPECT_TRUE(store.open_random_reader(path, &file).is_ok());
+        out.resize(size);
+
+        Bytes temp {out};
+        CALICO_EXPECT_TRUE(file->read(temp, 0).is_ok());
+        CALICO_EXPECT_EQ(temp.size(), size);
+        delete file;
+        return out;
+    }
+
 } // tools
 
 template<std::size_t Length = 20>
@@ -281,7 +239,8 @@ auto make_key(Size key) -> std::string
     return std::string(Length - key_string.size(), '0') + key_string;
 }
 
-[[maybe_unused]] inline auto hexdump(const Byte *data, Size size, Size indent = 0) -> void
+[[maybe_unused]]
+inline auto hexdump(const Byte *data, Size size, Size indent = 0) -> void
 {
     constexpr auto chunk_size{0x10UL};
     const auto chunk_count{size / chunk_size};
@@ -458,7 +417,7 @@ struct formatter<cco::WalRecordHeader> {
 };
 
 template <>
-struct formatter<cco::WalPayloadType> {
+struct formatter<cco::XactPayloadType> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -466,11 +425,11 @@ struct formatter<cco::WalPayloadType> {
     }
 
     template <typename FormatContext>
-    auto format(const cco::WalPayloadType &type, FormatContext &ctx) {
+    auto format(const cco::XactPayloadType &type, FormatContext &ctx) {
         switch (type) {
-            case cco::WalPayloadType::FULL_IMAGE: return format_to(ctx.out(), "FULL_IMAGE");
-            case cco::WalPayloadType::DELTAS: return format_to(ctx.out(), "DELTAS");
-            case cco::WalPayloadType::COMMIT: return format_to(ctx.out(), "COMMIT");
+            case cco::XactPayloadType::FULL_IMAGE: return format_to(ctx.out(), "FULL_IMAGE");
+            case cco::XactPayloadType::DELTAS: return format_to(ctx.out(), "DELTAS");
+            case cco::XactPayloadType::COMMIT: return format_to(ctx.out(), "COMMIT");
             default: return format_to(ctx.out(), "<unrecognized>");
         }
     }

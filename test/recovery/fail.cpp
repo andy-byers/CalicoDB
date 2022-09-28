@@ -44,6 +44,7 @@ auto main(int argc, const char *argv[]) -> int
     Options options;
     options.page_size = 0x200;
     options.frame_count = 16;
+//    options.log_level = spdlog::level::info;
     Database db;
     expect_ok(db.open(path.string(), options));
     {

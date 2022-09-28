@@ -5,6 +5,7 @@
 #include "storage/posix_storage.h"
 #include "utils/utils.h"
 #include "fakes.h"
+#include "tools.h"
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <sstream>
@@ -12,6 +13,19 @@
 namespace calico {
 
 static constexpr auto EXPECTATION_MATCHER = "^expectation";
+
+#define EXPECT_OK(expr) \
+    do { \
+        const auto &expect_ok_status = (expr); \
+        EXPECT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.what(); \
+    } while (0)
+
+#define ASSERT_OK(expr) \
+    do { \
+        const auto &assert_ok_status = (expr); \
+        ASSERT_TRUE(assert_ok_status.is_ok()) << get_status_name(assert_ok_status) << ": " << assert_ok_status.what(); \
+    } while (0)
+
 
 [[nodiscard]]
 inline auto expose_message(const Status &s)
