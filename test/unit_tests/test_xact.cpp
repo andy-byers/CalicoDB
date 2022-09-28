@@ -580,6 +580,12 @@ public:
         ASSERT_OK(db.close());
     }
 
+    [[nodiscard]]
+    auto get_db() -> Core&
+    {
+        return db;
+    }
+
     RecordGenerator generator {{16, 100, 10, false, true}};
     Random random {internal::random_seed};
     Options options;
@@ -692,14 +698,16 @@ TEST_F(TransactionTests, KeepsCommittedRecords)
 template<class Test, class Itr>
 static auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
 {
+    auto &db = test.get_db();
+
     for (auto itr = begin; itr != end; ++itr) {
-        EXPECT_TRUE(expose_message(test.db.insert(stob(itr->key), stob(itr->value))));
+        EXPECT_TRUE(expose_message(db.insert(stob(itr->key), stob(itr->value))));
     }
 
     std::vector<Record> committed;
     for (auto itr = begin; itr != end; ++itr) {
         if (test.random.get(5) == 0) {
-            EXPECT_TRUE(expose_message(test.db.erase(stob(itr->key))));
+            EXPECT_TRUE(expose_message(db.erase(stob(itr->key))));
         } else {
             committed.emplace_back(*itr);
         }
@@ -756,9 +764,10 @@ auto run_random_transactions(Test &test, Size n)
     // Generate the records all at once, so we know that they are unique.
     auto all_records = test.generator.generate(test.random, n * XACT_SIZE);
     std::vector<Record> committed;
+    auto &db = test.get_db();
 
     for (Size i {}; i < n; ++i) {
-        auto xact = test.db.transaction();
+        auto xact = db.transaction();
         const auto start = cbegin(all_records) + static_cast<long>(XACT_SIZE * i);
         const auto temp = run_random_operations(test, start, start + XACT_SIZE);
         if (test.random.get(4) == 0) {
@@ -947,21 +956,22 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     ASSERT_OK(db.status());
 }
 
-TEST_F(FailureTests, DataWriteFailureDuringQuery)
-{
-    // This tests database behavior when we encounter an error while flushing a dirty page to make room for a page read
-    // during a query. In this case, we don't have a transaction we can try to abort, so we must exit the program. Next
-    // time the database is opened, it will roll forward and apply any missing updates.
-    add_sequential_records(db, 500);
-
-    interceptors::set_write(FailOnce<5> {"test/data"});
-
-    auto c = db.first();
-    for (; c.is_valid(); ++c) {}
-
-    assert_error_42(c.status());
-    assert_error_42(db.status());
-}
+// TODO: We're flushing during commit for now, so this won't ever happen...
+//TEST_F(FailureTests, DataWriteFailureDuringQuery)
+//{
+//    // This tests database behavior when we encounter an error while flushing a dirty page to make room for a page read
+//    // during a query. In this case, we don't have a transaction we can try to abort, so we must exit the program. Next
+//    // time the database is opened, it will roll forward and apply any missing updates.
+//    add_sequential_records(db, 500);
+//
+//    interceptors::set_write(FailOnce<5> {"test/data"});
+//
+//    auto c = db.first();
+//    for (; c.is_valid(); ++c) {}
+//
+//    assert_error_42(c.status());
+//    assert_error_42(db.status());
+//}
 
 TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
 {
@@ -1005,9 +1015,9 @@ TEST_F(FailureTests, CannotPerformOperationsAfterFatalError)
     assert_error_42(db.close());
 }
 
-class RecoveryTestHarness: public testing::TestWithParam<std::pair<Size, Size>> {
+class RecoveryTests : public testing::TestWithParam<std::pair<Size, Size>> {
 public:
-    RecoveryTestHarness()
+    RecoveryTests()
         : store {std::make_unique<HeapStorage>()}
     {}
 
@@ -1016,30 +1026,44 @@ public:
         options.store = store.get();
         options.page_size = 0x200;
         options.frame_count = 32;
-        ASSERT_OK(db.open("test", options));
+
+        db.emplace();
+        ASSERT_OK(db->open("test", options));
 
         const auto [xact_count, uncommitted_count] = GetParam();
         committed = run_random_transactions(*this, xact_count);
 
         const auto database_state = tools::read_file(*store, "test/data");
 
+        auto xact = db->transaction();
         const auto uncommitted = generator.generate(random, uncommitted_count);
         run_random_operations(*this, cbegin(uncommitted), cend(uncommitted));
 
         auto cloned = store->clone();
         tools::write_file(*cloned, "test/data", database_state);
 
-        ASSERT_OK(db.close());
+        ASSERT_OK(xact.abort());
+        ASSERT_OK(db->close());
         store.reset(dynamic_cast<HeapStorage*>(cloned));
         options.store = store.get();
+        db.emplace();
     }
 
     auto validate() -> void
     {
-        auto &tree = db.tree();
+        for (const auto &[key, value]: committed) {
+            ASSERT_TRUE(tools::contains(*db, key, value));
+        }
+        auto &tree = db->tree();
         tree.TEST_validate_links();
         tree.TEST_validate_nodes();
         tree.TEST_validate_order();
+    }
+
+    [[nodiscard]]
+    auto get_db() -> Core&
+    {
+        return *db;
     }
 
     Random random {42};
@@ -1047,25 +1071,24 @@ public:
     std::vector<Record> committed;
     std::unique_ptr<HeapStorage> store;
     Options options;
-    Core db;
+    std::optional<Core> db;
 };
 
-TEST_P(RecoveryTestHarness, Recovers)
+TEST_P(RecoveryTests, Recovers)
 {
-    ASSERT_OK(db.open("test", options));
+    ASSERT_OK(db->open("test", options));
     validate();
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    RecoveryTestHarness,
-    RecoveryTestHarness,
+    RecoveryTests,
+    RecoveryTests,
     ::testing::Values(
         std::make_pair(  0,   0),
-        std::make_pair(  0,   1),
-        std::make_pair(  1,   0),
-        std::make_pair(  1,   1),
-        std::make_pair( 10,   0),
         std::make_pair(  0, 100),
+        std::make_pair(  1,   0),
+        std::make_pair(  1, 100),
+        std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
 //enum class RecoveryTestFailureType {

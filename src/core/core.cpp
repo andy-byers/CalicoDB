@@ -162,7 +162,6 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         // to the database file.
         s = m_pager->flush();
 
-
         if (s.is_ok() && m_wal->is_enabled())
             s = m_wal->start_workers();
 
@@ -341,6 +340,13 @@ auto Core::commit() -> Status
 
     // Clean up obsolete WAL segments.
     s = m_wal->remove_before(std::min(m_commit_lsn, m_pager->flushed_lsn()));
+    MAYBE_SAVE_AND_FORWARD(s, MSG);
+
+    // TODO: We need frequently used pages to be flushed eventually... It's possible for some
+    //       pages to never be flushed naturally (like the root page). This hurts performance
+    //       though, so we may want to find an alternative, like flushing pages when they get
+    //       too old.
+    s = m_pager->flush();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     m_images.clear();

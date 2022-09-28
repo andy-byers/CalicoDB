@@ -78,7 +78,6 @@ CPUCache:   20480 KB
 ```
 
 ### Calico DB
-
 | Benchmark              | Result (ops/second) |
 |:-----------------------|--------------------:|
 | fillseq<sup>1</sup>    |             304,154 |

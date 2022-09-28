@@ -101,11 +101,6 @@ public:
     [[nodiscard]] auto file_size(const std::string &, Size &) const -> Status override;
     auto clone() const -> Storage*;
 
-    ReadInterceptor read_interceptor;
-    WriteInterceptor write_interceptor;
-    OpenInterceptor open_interceptor;
-    SyncInterceptor sync_interceptor;
-
 private:
     mutable std::mutex m_mutex;
     // TODO: Could use a custom allocator that is better for large contiguous chunks.

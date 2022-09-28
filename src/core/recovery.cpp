@@ -192,11 +192,13 @@ auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
         last_lsn = payload.lsn();
 
         if (std::holds_alternative<DeltasDescriptor>(*info)) {
-            const auto deltas = std::get<DeltasDescriptor>(*info);
-            auto page = m_pager->acquire(deltas.pid, true);
-            if (!page.has_value()) return page.error();
-            page->apply_update(deltas);
-            return m_pager->release(std::move(*page));
+            if (payload.lsn() > m_pager->flushed_lsn()) {
+                const auto deltas = std::get<DeltasDescriptor>(*info);
+                auto page = m_pager->acquire(deltas.pid, true);
+                if (!page.has_value()) return page.error();
+                page->apply_update(deltas);
+                return m_pager->release(std::move(*page));
+            }
         } else if (std::holds_alternative<CommitDescriptor>(*info)) {
             commit_lsn = payload.lsn();
         }
