@@ -1013,7 +1013,6 @@ public:
 
     auto SetUp() -> void override
     {
-        Options options;
         options.store = store.get();
         options.page_size = 0x200;
         options.frame_count = 32;
@@ -1022,15 +1021,52 @@ public:
         const auto [xact_count, uncommitted_count] = GetParam();
         committed = run_random_transactions(*this, xact_count);
 
+        const auto database_state = tools::read_file(*store, "test/data");
+
+        const auto uncommitted = generator.generate(random, uncommitted_count);
+        run_random_operations(*this, cbegin(uncommitted), cend(uncommitted));
+
         auto cloned = store->clone();
+        tools::write_file(*cloned, "test/data", database_state);
+
+        ASSERT_OK(db.close());
+        store.reset(dynamic_cast<HeapStorage*>(cloned));
+        options.store = store.get();
+    }
+
+    auto validate() -> void
+    {
+        auto &tree = db.tree();
+        tree.TEST_validate_links();
+        tree.TEST_validate_nodes();
+        tree.TEST_validate_order();
     }
 
     Random random {42};
     RecordGenerator generator {{16, 100, 10, false, true}};
     std::vector<Record> committed;
     std::unique_ptr<HeapStorage> store;
-    Database db;
+    Options options;
+    Core db;
 };
+
+TEST_P(RecoveryTestHarness, Recovers)
+{
+    ASSERT_OK(db.open("test", options));
+    validate();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RecoveryTestHarness,
+    RecoveryTestHarness,
+    ::testing::Values(
+        std::make_pair(  0,   0),
+        std::make_pair(  0,   1),
+        std::make_pair(  1,   0),
+        std::make_pair(  1,   1),
+        std::make_pair( 10,   0),
+        std::make_pair(  0, 100),
+        std::make_pair( 10, 100)));
 
 //enum class RecoveryTestFailureType {
 //    DATA_WRITE,

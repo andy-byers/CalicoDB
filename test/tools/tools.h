@@ -197,6 +197,39 @@ namespace tools {
         return true;
     }
 
+    inline auto write_file(Storage &store, const std::string &path, BytesView in) -> void
+    {
+        RandomEditor *file;
+        CALICO_EXPECT_TRUE(store.open_random_editor(path, &file).is_ok());
+        CALICO_EXPECT_TRUE(file->write(in, 0).is_ok());
+        delete file;
+    }
+
+    inline auto append_file(Storage &store, const std::string &path, BytesView in) -> void
+    {
+        AppendWriter *file;
+        CALICO_EXPECT_TRUE(store.open_append_writer(path, &file).is_ok());
+        CALICO_EXPECT_TRUE(file->write(in).is_ok());
+        delete file;
+    }
+
+    inline auto read_file(Storage &store, const std::string &path) -> std::string
+    {
+        RandomReader *file;
+        std::string out;
+        Size size;
+
+        CALICO_EXPECT_TRUE(store.file_size(path, size).is_ok());
+        CALICO_EXPECT_TRUE(store.open_random_reader(path, &file).is_ok());
+        out.resize(size);
+
+        Bytes temp {out};
+        CALICO_EXPECT_TRUE(file->read(temp, 0).is_ok());
+        CALICO_EXPECT_EQ(temp.size(), size);
+        delete file;
+        return out;
+    }
+
 } // tools
 
 template<std::size_t Length = 20>
