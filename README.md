@@ -78,17 +78,21 @@ CPUCache:   20480 KB
 ```
 
 ### Calico DB
-| Benchmark              | Result (ops/second) |
-|:-----------------------|--------------------:|
-| fillseq<sup>1</sup>    |             304,154 |
-| fillrandom<sup>1</sup> |             121,618 |
-| overwrite<sup>1</sup>  |             192,239 |
-| readrandom             |             422,196 |
-| readseq                |           2,598,243 |
-| fillrand100K           |               1,105 |
-| fillseq100K            |               1,318 |
+> Note: We've had a bit of a silly performance regression.
+> I've had to make the commit routine flush the whole page cache so that frequently-used pages don't get too out-of-sync with disk.
+> See [TODO](#todo).
 
-<sup>1</sup> The `fillseq`, `fillrandom`, and `overwrite` benchmarks were run using a transaction size of 1000.
+| Benchmark                | Result (ops/second) |
+|:-------------------------|--------------------:|
+| fillseq<sup>1</sup>      |             370,026 |
+| fillrandom<sup>1</sup>   |              74,731 |
+| overwrite<sup>1</sup>    |             100,204 |
+| readrandom               |             424,405 |
+| readseq                  |           2,631,493 |
+| fillrand100K<sup>1</sup> |                 698 |
+| fillseq100K<sup>1</sup>  |                 787 |
+
+<sup>1</sup> These benchmarks were run using a transaction size of 1000.
 Performing many modifications outside a transaction is slow, since each operation is atomic.
 
 ### SQLite3
@@ -103,11 +107,14 @@ Performing many modifications outside a transaction is slow, since each operatio
 | fillseq100K  |               7,572 |
 
 ## TODO
-1. Get everything code reviewed!
-2. Get unit test coverage up
-3. Write documentation
-4. Work on performance
-5. Need some way to reduce the file size once many pages become unused
+1. Figure out a way to eliminate the call to `flush()` during `commit()`
+   + This may involve flushing pages that haven't been flushed since some previous transaction when we acquire them
+   + Or, we could do the database file writes in the background as well, with periodic scans for old pages.
+2. Get everything code reviewed!
+3. Get unit test coverage up
+4. Write documentation
+5. Work on performance
+6. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
     + Look into SQLite's pointer maps
 
