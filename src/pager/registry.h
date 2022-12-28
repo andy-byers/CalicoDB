@@ -58,9 +58,8 @@ public:
         DirtyToken dirty_token {};
     };
 
-    using WarmCache = UniqueFifoCache<PageId, Entry, PageId::Hash>;
-    using HotCache = UniqueLruCache<PageId, Entry, PageId::Hash>;
-    using Iterator = HotCache::Iterator;
+    using Cache = cache<PageId, Entry, PageId::Hash>;
+    using Iterator = Cache::iterator;
 
     PageRegistry() = default;
     ~PageRegistry() = default;
@@ -68,19 +67,19 @@ public:
     [[nodiscard]]
     auto is_empty() const -> Size
     {
-        return m_warm.is_empty() && m_hot.is_empty();
+        return m_cache.is_empty();
     }
 
     [[nodiscard]]
     auto size() const -> Size
     {
-        return m_warm.size() + m_hot.size();
+        return m_cache.size();
     }
 
     [[nodiscard]]
     auto contains(PageId id) const -> bool
     {
-        return m_hot.contains(id) || m_warm.contains(id);
+        return m_cache.contains(id);
     }
 
     [[nodiscard]]
@@ -94,22 +93,22 @@ public:
     [[nodiscard]]
     auto end() -> Iterator
     {
-        return m_hot.end();
+        using std::end;
+        return end(m_cache);
     }
 
     template<class Predicate>
-    auto find_for_replacement(const Predicate &predicate) -> Iterator
+    auto evict(const Predicate &predicate) -> std::optional<Entry>
     {
-        // Search through the warm cache first. m_warm.begin() should give the last element placed into that cache.
-        for (auto itr = m_warm.begin(); itr != m_warm.end(); ++itr) {
-            auto [frame_id, dirty_token] = itr->second;
-            if (predicate(itr->first, frame_id, dirty_token)) return itr;
+        using std::rbegin, std::rend;
+        for (auto itr = rbegin(m_cache); itr != rend(m_cache); ++itr) {
+            if (predicate(itr->key, itr->value)) {
+                auto value = std::move(itr->value);
+                m_cache.erase(itr->key);
+                return value;
+            }
         }
-        for (auto itr = m_hot.begin(); itr != m_hot.end(); ++itr) {
-            auto [frame_id, dirty_token] = itr->second;
-            if (predicate(itr->first, frame_id, dirty_token)) return itr;
-        }
-        return end();
+        return std::nullopt;
     }
 
     auto put(PageId, FrameNumber) -> void;
@@ -117,8 +116,7 @@ public:
     auto erase(PageId) -> void;
 
 private:
-    WarmCache m_warm;
-    HotCache m_hot;
+    Cache m_cache;
     Size m_hits {};
     Size m_misses {};
 };

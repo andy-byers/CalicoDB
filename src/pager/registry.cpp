@@ -5,32 +5,28 @@ namespace calico {
 
 auto PageRegistry::put(PageId pid, FrameNumber fid) -> void
 {
-    CALICO_EXPECT_FALSE(m_warm.contains(pid));
-    CALICO_EXPECT_FALSE(m_hot.contains(pid));
-    m_warm.put(pid, Entry {fid});
+    CALICO_EXPECT_FALSE(m_cache.contains(pid));
+    m_cache.put(pid, Entry {fid});
 }
 
 auto PageRegistry::get(PageId id) -> Iterator
 {
-    if (auto itr = m_hot.get(id); itr != m_hot.end()) {
+    using std::end;
+
+    if (auto itr = m_cache.get(id); itr != m_cache.end()) {
         m_hits++;
         return itr;
     }
-    if (auto itr = m_warm.extract(id)) {
-        m_hits++;
-        m_hot.put(id, std::move(*itr));
-        return m_hot.get(id);
-    }
     m_misses++;
-    return end();
+    return end(*this);
 }
 
 auto PageRegistry::erase(PageId id) -> void
 {
-    if (m_hot.extract(id))
+    if (m_cache.erase(id))
         return;
-    if (m_warm.extract(id))
-        return;
+
+    // Only erase pages we know are in the registry.
     CALICO_EXPECT_TRUE(false && "erase(): cannot find entry");
 }
 

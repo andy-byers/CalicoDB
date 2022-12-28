@@ -2,7 +2,6 @@
 #define CALICO_UTILS_CACHE_H
 
 #include "calico/common.h"
-#include "utils/expect.h"
 #include <functional>
 #include <list>
 #include <optional>
@@ -10,142 +9,242 @@
 
 namespace calico {
 
-namespace impl {
+/*
+ * Implements the simplified 2Q replacement policy described in
+ *     https://arpitbhayani.me/blogs/2q-cache
+ *
+ * Uses a single std::list-std::unordered_map combination, along with an iterator into
+ * the std::list, to represent the two caches. Stores an extra boolean per entry to
+ * indicate "hot" status, and inserts new elements at the iterator, which marks
+ * std::end(<hot_queue>)/std::begin(<warm_queue>).
+ *
+ * Iteration order using begin() and end() members reflects the order of importance.
+ * That is, if the cache is not empty, *begin() refers to the most-recently-used hot
+ * element, and *std::prev(end()) refers to the element that would be evicted in a
+ * call to evict(). Also note that the warm queue will be emptied before any
+ * elements are evicted from the hot queue.
+ *
+ * Note that put() has the ability to change the value of an element. This shouldn't
+ * ever happen when using this cache as a page cache.
+ */
+template<
+    class Key,
+    class Value,
+    class Hash = std::hash<Key>
+>
+class cache { // TODO: Eventually switching over to camel_case...
+public:
+    using key_t = Key;
+    using value_t = Value;
+    using hash_t = Hash;
 
-    template<class Key, class Value, class Hash = std::hash<Key>>
-    class UniqueCache {
-    public:
-        using Iterator = typename std::list<std::pair<Key, Value>>::iterator;
-        using ConstIterator = typename std::list<std::pair<Key, Value>>::const_iterator;
-
-        UniqueCache() = default;
-        virtual ~UniqueCache() = default;
-
-        [[nodiscard]]
-        virtual auto is_empty() const -> Size
-        {
-            return m_map.size() == 0;
-        }
-
-        [[nodiscard]]
-        virtual auto size() const -> Size
-        {
-            return m_map.size();
-        }
-
-        [[nodiscard]]
-        virtual auto contains(const Key &key) const -> bool
-        {
-            using std::end;
-            return m_map.find(key) != end(m_map);
-        }
-
-        [[nodiscard]]
-        virtual auto get(const Key &key) -> Iterator
-        {
-            using std::end;
-            if (auto itr = m_map.find(key); itr != end(m_map))
-                return itr->second;
-            return end(m_list);
-        }
-
-        [[nodiscard]]
-        virtual auto extract(const Key &key) -> std::optional<Value>
-        {
-            if (auto node = m_map.extract(key)) {
-                auto value = std::move(node.mapped()->second);
-                m_list.erase(node.mapped());
-                return value;
-            }
-            return std::nullopt;
-        }
-
-        virtual auto put(const Key &key, Value &&value) -> void
-        {
-            // We don't handle duplicate keys. We only need to cache unique identifiers.
-            CALICO_EXPECT_FALSE(contains(key));
-            m_list.emplace_back(key, std::forward<Value>(value));
-            m_map.emplace(key, prev(end()));
-        }
-
-        [[nodiscard]]
-        virtual auto evict() -> std::optional<Value>
-        {
-            if (is_empty())
-                return std::nullopt;
-            auto [key, value] = std::move(m_list.front());
-            m_list.pop_front();
-            m_map.erase(key);
-            return std::move(value);
-        }
-
-        [[nodiscard]]
-        virtual auto begin() -> Iterator
-        {
-            using std::begin;
-            return begin(m_list);
-        }
-
-        [[nodiscard]]
-        virtual auto begin() const -> ConstIterator
-        {
-            using std::cbegin;
-            return cbegin(m_list);
-        }
-
-        [[nodiscard]]
-        virtual auto end() -> Iterator
-        {
-            using std::end;
-            return end(m_list);
-        }
-
-        [[nodiscard]]
-        virtual auto end() const -> ConstIterator
-        {
-            using std::cend;
-            return cend(m_list);
-        }
-
-    protected:
-        using List = std::list<std::pair<Key, Value>>;
-        using Map = std::unordered_map<Key, typename List::iterator, Hash>;
-
-        List m_list;
-        Map m_map;
+    struct entry {
+        key_t key;
+        value_t value;
+        bool hot {};
     };
 
-} // namespace impl
+    // Disallow changing values through iterator instances.
+    using iterator = typename std::list<entry>::iterator;
+    using const_iterator = typename std::list<entry>::const_iterator;
+    using reverse_iterator = typename std::list<entry>::const_reverse_iterator;
+    using const_reverse_iterator = typename std::list<entry>::const_reverse_iterator;
 
-template<class Key, class Value, class Hash = std::hash<Key>>
-class UniqueFifoCache final: public impl::UniqueCache<Key, Value, Hash> {
-public:
-    using typename impl::UniqueCache<Key, Value, Hash>::Iterator;
-    using typename impl::UniqueCache<Key, Value, Hash>::ConstIterator;
-
-    UniqueFifoCache() = default;
-    ~UniqueFifoCache() override = default;
-};
-
-template<class Key, class Value, class Hash = std::hash<Key>>
-class UniqueLruCache final: public impl::UniqueCache<Key, Value, Hash> {
-public:
-    using typename impl::UniqueCache<Key, Value, Hash>::Iterator;
-    using typename impl::UniqueCache<Key, Value, Hash>::ConstIterator;
-
-    UniqueLruCache() = default;
-    ~UniqueLruCache() override = default;
+    cache() = default;
 
     [[nodiscard]]
-    auto get(const Key &key) -> Iterator override
+    auto is_empty() const -> bool
     {
-        using Base = impl::UniqueCache<Key, Value, Hash>;
-        if (auto itr = Base::m_map.find(key); itr != end(Base::m_map)) {
-            Base::m_list.splice(end(Base::m_list), Base::m_list, itr->second);
-            return itr->second;
-        }
-        return end(Base::m_list);
+        return m_list.empty();
     }
+
+    [[nodiscard]]
+    auto size() const -> std::size_t
+    {
+        return m_list.size();
+    }
+
+    // NOTE: Use this to ask if an entry exists without altering the cache.
+    [[nodiscard]]
+    auto contains(const key_t &key) const -> bool
+    {
+        using std::end;
+        return query(key) != end(m_list);
+    }
+
+    // NOTE: Use this to ask for an entry without altering the cache.
+    [[nodiscard]]
+    auto query(const key_t &key) const -> const_iterator
+    {
+        using std::end;
+
+        if (auto itr = m_map.find(key); itr != end(m_map))
+            return itr->second;
+        return end(m_list);
+    }
+
+    [[nodiscard]]
+    auto get(const key_t &key) -> iterator
+    {
+        using std::end;
+
+        if (auto itr = m_map.find(key); itr != end(m_map))
+            return promote(itr);
+        return end(m_list);
+    }
+
+    template<class T>
+    auto put(const key_t &key, T &&value) -> std::optional<value_t>
+    {
+        using std::end;
+
+        if (auto itr = m_map.find(key); itr != end(m_map)) {
+            auto temp = std::exchange(itr->second->value, std::forward<T>(value));
+            promote(itr);
+            return temp;
+        }
+        m_sep = m_list.emplace(m_sep, entry {key, std::forward<T>(value), false});
+        m_map.emplace(key, m_sep);
+        return std::nullopt;
+    }
+
+    auto erase(const_iterator itr) -> iterator
+    {
+        using std::end;
+
+        // NOTE: itr must be a valid iterator.
+        if (auto node = m_map.extract(itr)) {
+            if (m_sep == itr)
+                m_sep = next(m_sep);
+            return m_list.erase(node.mapped());
+        }
+        return end(m_list);
+    }
+
+    auto erase(const key_t &key) -> bool
+    {
+        using std::end;
+
+        if (auto itr = m_map.find(key); itr != end(m_map)) {
+            if (m_sep == itr->second)
+                m_sep = next(m_sep);
+            m_list.erase(itr->second);
+            m_map.erase(itr);
+            return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]]
+    auto evict() -> std::optional<entry>
+    {
+        using std::end;
+
+        if (is_empty())
+            return std::nullopt;
+
+        // Adjust the separator. If there are no elements in the "warm" queue, we have
+        // to evict the LRU element from the "hot" queue. Remember, the cache is not
+        // empty (see guard above).
+        auto target = prev(end(m_list));
+
+        if (m_sep == target)
+            m_sep = next(target);
+
+        auto entry = std::move(*target);
+        m_list.erase(target);
+        m_map.erase(entry.key);
+        return entry;
+    }
+
+    [[nodiscard]]
+    auto begin() -> iterator
+    {
+        using std::begin;
+        return begin(m_list);
+    }
+
+    [[nodiscard]]
+    auto begin() const -> const_iterator
+    {
+        using std::begin;
+        return begin(m_list);
+    }
+
+    [[nodiscard]]
+    auto end() -> iterator
+    {
+        using std::end;
+        return end(m_list);
+    }
+
+    [[nodiscard]]
+    auto end() const -> const_iterator
+    {
+        using std::end;
+        return end(m_list);
+    }
+
+    [[nodiscard]]
+    auto rbegin() -> reverse_iterator
+    {
+        using std::rbegin;
+        return rbegin(m_list);
+    }
+
+    [[nodiscard]]
+    auto rbegin() const -> const_reverse_iterator
+    {
+        using std::rbegin;
+        return rbegin(m_list);
+    }
+
+    [[nodiscard]]
+    auto rend() -> reverse_iterator
+    {
+        using std::rend;
+        return rend(m_list);
+    }
+
+    [[nodiscard]]
+    auto rend() const -> const_reverse_iterator
+    {
+        using std::rend;
+        return rend(m_list);
+    }
+
+    // Need custom copy contructor/copy-assignment operator to figure out where the new
+    // iterator should point. I think this can only be done in linear time (std::list's
+    // iterator is not random-access), so we'll just disable copying for now.
+    cache(const cache &) = delete;
+    auto operator=(const cache &) -> cache & = delete;
+
+private:
+    using map_t = std::unordered_map<key_t, iterator, hash_t>;
+    using list_t = std::list<entry>;
+
+    // Make an element the most-important element.
+    auto promote(typename map_t::iterator itr) -> iterator
+    {
+        using std::begin;
+        auto &[key, value, hot] = *itr->second;
+
+        // If the entry is not hot, then make it hot. Also, if the entry was already hot, then it must
+        // not be equal to the separator.
+        if (!hot) {
+            if (m_sep == itr->second)
+                m_sep = next(m_sep);
+            hot = true;
+        }
+        // Elements always get promoted to the front of the hot queue.
+        m_list.splice(begin(m_list), m_list, itr->second);
+        itr->second = begin(m_list);
+        return itr->second;
+    }
+
+    map_t m_map;
+    list_t m_list;
+    iterator m_sep {std::end(m_list)};
 };
 
 } // namespace calico

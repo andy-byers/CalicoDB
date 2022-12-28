@@ -31,10 +31,8 @@ FetchContent_MakeAvailable(spdlog)
 add_subdirectory(src)
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    option(CALICO_INSTALL "Install the library and headers" On)
     option(CALICO_BUILD_TESTS "Build the tests" On)
     option(CALICO_BUILD_EXAMPLES "Build the examples" On)
-    option(CALICO_BUILD_FUZZERS "Build the fuzz tests" Off)
 
     if(CALICO_BUILD_EXAMPLES)
         add_subdirectory(examples)
@@ -56,34 +54,32 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     endif()
 
     # TODO: This installs spdlog alongside calico. Is that what we want?
-    if(CALICO_INSTALL)
-        set(TARGETS_NAME ${PROJECT_NAME}Targets)
-        set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
-        set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
-        set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
-        set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
+    set(TARGETS_NAME ${PROJECT_NAME}Targets)
+    set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+    set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
+    set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
+    set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
 
-        install(TARGETS calico spdlog
-            EXPORT "${TARGETS_NAME}"
-            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
-            LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-            ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-        install(DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
+    install(TARGETS calico spdlog
+        EXPORT "${TARGETS_NAME}"
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+    install(DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
-        install(DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
-                DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
-        include(CMakePackageConfigHelpers)
-        configure_package_config_file(
-            "${CONFIG_FILE_IN}" "${CONFIG_FILE_OUT}"
-            INSTALL_DESTINATION "${INSTALL_DIR}")
-        write_basic_package_version_file("${VERSION_FILE}"
-            COMPATIBILITY SameMajorVersion)
-        install(EXPORT "${TARGETS_NAME}"
-            NAMESPACE "${PROJECT_NAME}::"
-            DESTINATION "${INSTALL_DIR}")
-        install(FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
-            DESTINATION "${INSTALL_DIR}")
-    endif()
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CONFIG_FILE_IN}" "${CONFIG_FILE_OUT}"
+        INSTALL_DESTINATION "${INSTALL_DIR}")
+    write_basic_package_version_file("${VERSION_FILE}"
+        COMPATIBILITY SameMajorVersion)
+    install(EXPORT "${TARGETS_NAME}"
+        NAMESPACE "${PROJECT_NAME}::"
+        DESTINATION "${INSTALL_DIR}")
+    install(FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
+        DESTINATION "${INSTALL_DIR}")
 endif()
 

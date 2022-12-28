@@ -98,7 +98,7 @@ auto BasicPager::flush() -> Status
 
     for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
         CALICO_EXPECT_TRUE(m_registry.contains(*itr));
-        auto &entry = m_registry.get(*itr)->second;
+        auto &entry = m_registry.get(*itr)->value;
         const auto frame_id = entry.frame_id;
         const auto page_lsn = m_framer->frame_at(frame_id).lsn();
         const auto page_id = *itr;
@@ -135,13 +135,16 @@ auto BasicPager::flushed_lsn() const -> SequenceId
 
 auto BasicPager::try_make_available() -> Result<bool>
 {
-    auto itr = m_registry.find_for_replacement([this](auto, auto fid, auto dirty_token) {
-        const auto &frame = m_framer->frame_at(fid);
-        // The page/frame management happens under lock, so if this frame is not referenced, it is safe to consider for reuse.
+    PageId page_id;
+    auto evicted = m_registry.evict([&](auto id, auto entry) {
+        const auto &frame = m_framer->frame_at(entry.frame_id);
+        page_id = id;
+
+        // The page/frame management happens under lock, so if this frame is not referenced, it is safe to evict.
         if (frame.ref_count() != 0)
             return false;
 
-        if (!dirty_token.has_value())
+        if (!entry.dirty_token.has_value())
             return true;
 
         if (m_wal->is_working())
@@ -150,15 +153,14 @@ auto BasicPager::try_make_available() -> Result<bool>
         return true;
     });
 
-    if (itr == m_registry.end()) {
+    if (!evicted.has_value()) {
         CALICO_EXPECT_TRUE(m_wal->is_working());
         *m_status = m_wal->flush();
         save_and_forward_status(*m_status, "could not flush WAL");
         return false;
     }
 
-    auto &[pid, entry] = *itr;
-    auto &[frame_id, dirty_token] = entry;
+    auto &[frame_id, dirty_token] = *evicted;
     auto s = Status::ok();
     if (dirty_token.has_value()) {
         s = m_framer->write_back(frame_id);
@@ -167,7 +169,6 @@ auto BasicPager::try_make_available() -> Result<bool>
         dirty_token.reset();
     }
     m_framer->unpin(frame_id);
-    m_registry.erase(pid);
     if (!s.is_ok()) return Err {s};
     return true;
 }
@@ -193,7 +194,7 @@ auto BasicPager::release(Page page) -> Status
     }
 
     CALICO_EXPECT_TRUE(m_registry.contains(page.id()));
-    auto &entry = m_registry.get(page.id())->second;
+    const auto &entry = m_registry.get(page.id())->value;
     m_framer->unref(entry.frame_id, page);
     m_ref_sum--;
     return s;
@@ -266,7 +267,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
         return Err {*m_status};
 
     if (auto itr = m_registry.get(id); itr != m_registry.end())
-        return do_acquire(itr->second);
+        return do_acquire(itr->value);
 
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
     // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is incremented each time the WAL flushes a block.
@@ -293,7 +294,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
 
     auto itr = m_registry.get(id);
     CALICO_EXPECT_NE(itr, m_registry.end());
-    return do_acquire(itr->second);
+    return do_acquire(itr->value);
 }
 
 #undef MAYBE_FORWARD

@@ -13,74 +13,364 @@
 
 namespace calico {
 
-TEST(UniqueCacheTests, NewCacheIsEmpty)
+class CacheTests: public testing::Test {
+public:
+    cache<int, int> target;
+};
+
+
+TEST_F(CacheTests, EmptyCacheBehavior)
 {
-    impl::UniqueCache<int, int> cache;
+    calico::cache<int, int> cache;
+
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
+    ASSERT_EQ(begin(cache), end(cache));
+    ASSERT_EQ(cache.get(1), end(cache));
+    ASSERT_EQ(cache.evict(), std::nullopt);
 }
 
-TEST(UniqueCacheTests, CanGetEntry)
+TEST_F(CacheTests, NonEmptyCacheBehavior)
 {
-    impl::UniqueCache<int, int> cache;
-    cache.put(4, 2);
-    ASSERT_EQ(cache.get(4)->second, 2);
+    calico::cache<int, int> cache;
+
+    cache.put(1, 1);
+    ASSERT_FALSE(cache.is_empty());
+    ASSERT_EQ(cache.size(), 1);
+    ASSERT_NE(begin(cache), end(cache));
+    ASSERT_NE(cache.get(1), end(cache));
+    ASSERT_NE(cache.evict(), std::nullopt);
 }
 
-TEST(UniqueCacheTests, DuplicateKeyDeathTest)
+TEST_F(CacheTests, ElementsArePromotedAfterUse)
 {
-    impl::UniqueCache<int, int> cache;
-    cache.put(4, 2);
-    ASSERT_DEATH(cache.put(4, 2), EXPECTATION_MATCHER);
+    calico::cache<int, int> cache;
+
+    // 1*, 2, 3, 4, END
+    cache.put(4, 4);
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+
+    // 3, 4, 1*, 2, END
+    cache.put(4, 4);
+    cache.put(4, 4);
+    ASSERT_EQ(cache.get(3)->value, 3);
+    ASSERT_EQ(cache.size(), 4);
+
+    decltype(cache)::entry entry;
+    entry = cache.evict().value();
+    ASSERT_FALSE(entry.hot);
+    ASSERT_EQ(entry.value, 2);
+    entry = cache.evict().value();
+    ASSERT_FALSE(entry.hot);
+    ASSERT_EQ(entry.value, 1);
+    entry = cache.evict().value();
+    ASSERT_TRUE(entry.hot);
+    ASSERT_EQ(entry.value, 4);
+    entry = cache.evict().value();
+    ASSERT_TRUE(entry.hot);
+    ASSERT_EQ(entry.value, 3);
 }
 
-//TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
-//{
-//    impl::UniqueCache<int, int> cache;
-//    ASSERT_EQ(cache.evict(), std::nullopt);
-//}
-
-TEST(UniqueCacheTests, CannotGetNonexistentValue)
+TEST_F(CacheTests, IterationRespectsReplacementPolicy)
 {
-    impl::UniqueCache<int, int> cache;
-    ASSERT_EQ(cache.get(0), cache.end());
+    // 1*, 2, 3, END
+    target.put(3, 3);
+    target.put(2, 2);
+    target.put(1, 1);
+
+    // 1, 2, 3*, END
+    target.put(2, 2);
+    target.put(1, 1);
+
+    // Hottest -> coldest
+    auto itr = begin(target);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_EQ(itr, end(target));
+
+    // Coldest -> hottest
+    auto ritr = rbegin(target);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(ritr++->value, 3);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(ritr++->value, 2);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(ritr++->value, 1);
+    ASSERT_EQ(ritr, rend(target));
 }
 
-TEST(UniqueCacheTests, FifoCacheEvictsLastInElement)
+TEST_F(CacheTests, QueryDoesNotPromoteElements)
 {
-    UniqueFifoCache<int, int> cache;
-    cache.put(0, 0);
+    calico::cache<int, int> cache;
+
+    // 1*, 2, 3, END
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+
+    ASSERT_EQ(cache.query(1)->value, 1);
+    ASSERT_EQ(cache.query(2)->value, 2);
+
+    // Method is const.
+    const auto &ref = cache;
+    ASSERT_EQ(ref.query(3)->value, 3);
+
+    auto itr = begin(cache);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_EQ(itr, end(cache));
+}
+
+TEST_F(CacheTests, ModifyValue)
+{
+    calico::cache<int, int> cache;
+
+    cache.put(1, 1);
+    cache.put(1, 2);
+
+    ASSERT_EQ(cache.size(), 1);
+    ASSERT_EQ(cache.get(1)->value, 2);
+}
+
+TEST_F(CacheTests, WarmElementsAreFifoOrdered)
+{
+    calico::cache<int, int> cache;
+
+    // 1*, 2, 3, END
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+
+    auto itr = begin(cache);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_EQ(itr, end(cache));
+
+    ASSERT_EQ(cache.evict()->value, 3);
+    ASSERT_EQ(cache.evict()->value, 2);
+    ASSERT_EQ(cache.evict()->value, 1);
+}
+
+TEST_F(CacheTests, HotElementsAreLruOrdered)
+{
+    calico::cache<int, int> cache;
+
+    // 1*, 2, 3
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+
+    // 2, 3, 1*
+    ASSERT_EQ(cache.get(3)->value, 3);
+    ASSERT_EQ(cache.get(2)->value, 2);
+    ASSERT_EQ(cache.get(1)->value, 1);
+
+    auto itr = begin(cache);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_EQ(itr, end(cache));
+
+    ASSERT_EQ(cache.evict()->value, 3);
+    ASSERT_EQ(cache.evict()->value, 2);
+    ASSERT_EQ(cache.evict()->value, 1);
+}
+
+TEST_F(CacheTests, HotElementsAreEncounteredFirst)
+{
+    calico::cache<int, int> cache;
+
+    // 4*, 3, 2, 1, END
     cache.put(1, 1);
     cache.put(2, 2);
-    ASSERT_EQ(cache.evict().value(), 0);
-    ASSERT_EQ(cache.evict().value(), 1);
-    ASSERT_EQ(cache.evict().value(), 2);
+    cache.put(3, 3);
+    cache.put(4, 4);
+
+    // 3, 2, 1, 4*, END
+    ASSERT_EQ(cache.get(1)->value, 1);
+    ASSERT_EQ(cache.get(2)->value, 2);
+    ASSERT_EQ(cache.get(3)->value, 3);
+
+    // 3, 2, 1, 5*, 4, END
+    cache.put(5, 5);
+
+    auto itr = begin(cache);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 5);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 4);
+    ASSERT_EQ(itr, end(cache));
 }
 
-TEST(UniqueCacheTests, LruCacheEvictsLeastRecentlyUsedElement)
+TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 {
-    UniqueLruCache<int, int> cache;
-    cache.put(0, 0);
+    calico::cache<int, int> cache;
+
+    // 4*, 3, 2, 1, END
     cache.put(1, 1);
     cache.put(2, 2);
-    ASSERT_EQ(cache.get(0)->second, 0);
-    ASSERT_EQ(cache.get(1)->second, 1);
-    ASSERT_EQ(cache.evict().value(), 2);
-    ASSERT_EQ(cache.evict().value(), 0);
-    ASSERT_EQ(cache.evict().value(), 1);
+    cache.put(3, 3);
+    cache.put(4, 4);
+    ASSERT_FALSE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 4, 3*, 2, 1, END
+    cache.put(4, 4);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 3, 4, 2*, 1, END
+    cache.put(3, 3);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 3);
+
+    // 2, 3, 4, 1*, END
+    cache.put(2, 2);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 2);
+
+    // 1, 2, 3, 4, END*
+    cache.put(1, 1);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 1);
 }
 
-TEST(UniqueCacheTests, ExistenceCheckDoesNotCountAsUsage)
+TEST_F(CacheTests, AddWarmElements)
 {
-    UniqueLruCache<int, int> cache;
-    cache.put(0, 0);
+    calico::cache<int, int> cache;
+
+    // 4*, 3, 2, 1, END
     cache.put(1, 1);
     cache.put(2, 2);
-    ASSERT_TRUE(cache.contains(0));
-    ASSERT_TRUE(cache.contains(1));
-    ASSERT_EQ(cache.evict().value(), 0);
-    ASSERT_EQ(cache.evict().value(), 1);
-    ASSERT_EQ(cache.evict().value(), 2);
+    cache.put(3, 3);
+    cache.put(4, 4);
+    ASSERT_FALSE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 3, 4, 2*, 1, END
+    cache.put(4, 4);
+    cache.put(3, 3);
+
+    // 3, 4, 6*, 5, 2, 1, END
+    cache.put(5, 5);
+    cache.put(6, 6);
+
+    auto itr = begin(cache);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 4);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 6);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 5);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_EQ(itr, end(cache));
+}
+
+TEST_F(CacheTests, InsertAfterWarmElementsDepleted)
+{
+    calico::cache<int, int> cache;
+
+    // 4*, 3, 2, 1, END
+    cache.put(1, 1);
+    cache.put(2, 2);
+    cache.put(3, 3);
+    cache.put(4, 4);
+    ASSERT_FALSE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 3, 4, 2*, 1, END
+    cache.put(4, 4);
+    cache.put(3, 3);
+
+    // 3, 4, 2*, END
+    auto entry = cache.evict().value();
+    ASSERT_FALSE(entry.hot);
+    ASSERT_EQ(entry.value, 1);
+
+    // 3, 4, END*
+    entry = cache.evict().value();
+    ASSERT_FALSE(entry.hot);
+    ASSERT_EQ(entry.value, 2);
+
+    // 4, 3, END*
+    cache.put(4, 4);
+    ASSERT_TRUE(prev(end(cache))->hot);
+    ASSERT_EQ(prev(end(cache))->value, 3);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 4, 3, 2*, END
+    cache.put(2, 2);
+    ASSERT_FALSE(prev(end(cache))->hot);
+    ASSERT_EQ(prev(end(cache))->value, 2);
+}
+
+static auto check_cache_order(int hot_count, int warm_count)
+{
+    cache<int, int> c;
+
+    for (int i {1}; i <= hot_count + warm_count; ++i)
+        c.put(i, i);
+    for (int i {1}; i <= hot_count; ++i)
+        c.put(i, i);
+
+    // Iteration: Hot elements should be encountered first. In particular, the most-recently-
+    // used hot element (if present) should be first.
+    auto itr = begin(c);
+    ASSERT_EQ(itr->value, hot_count ? hot_count : warm_count);
+    for (int i {}; i < hot_count; ++i) {
+        ASSERT_TRUE(itr++->hot);
+    }
+    for (int i {}; i < warm_count; ++i) {
+        ASSERT_FALSE(itr++->hot);
+    }
+
+    // Eviction: Hot elements should be evicted last.
+    for (int i {}; i < warm_count; ++i) {
+        ASSERT_FALSE(c.evict()->hot);
+    }
+    for (int i {}; i < hot_count; ++i) {
+        ASSERT_TRUE(c.evict()->hot);
+    }
+}
+
+TEST(CacheOrderTests, CheckOrder)
+{
+    check_cache_order(1, 0);
+    check_cache_order(0, 1);
+    check_cache_order(2, 0);
+    check_cache_order(0, 2);
+    check_cache_order(2, 1);
+    check_cache_order(1, 2);
+    check_cache_order(1, 1);
+    check_cache_order(2, 2);
+}
+
+TEST(MoveOnlyCacheTests, WorksWithMoveOnlyValue)
+{
+    calico::cache<int, std::unique_ptr<int>> cache;
+    cache.put(1, std::make_unique<int>(1));
+    ASSERT_EQ(*cache.get(1)->value, 1);
+    ASSERT_EQ(*cache.evict()->value, 1);
 }
 
 class PageRegistryTests : public testing::Test {
@@ -100,22 +390,21 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     registry.put(PageId {3UL}, FrameNumber {3UL});
     ASSERT_EQ(registry.size(), 6);
 
-    ASSERT_EQ(registry.get(PageId {11UL})->second.frame_id, 11UL);
-    ASSERT_EQ(registry.get(PageId {12UL})->second.frame_id, 12UL);
-    ASSERT_EQ(registry.get(PageId {13UL})->second.frame_id, 13UL);
+    ASSERT_EQ(registry.get(PageId {11UL})->value.frame_id, 11UL);
+    ASSERT_EQ(registry.get(PageId {12UL})->value.frame_id, 12UL);
+    ASSERT_EQ(registry.get(PageId {13UL})->value.frame_id, 13UL);
 
     Size i {}, j {};
 
-    const auto callback = [&i, &j](auto page_id, auto frame_id, auto) {
-        EXPECT_EQ(page_id, frame_id);
+    const auto callback = [&i, &j](auto page_id, auto entry) {
+        EXPECT_EQ(page_id, entry.frame_id);
         EXPECT_EQ(page_id, i + (j >= 3)*10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
         j++;
         i = j % 3;
         return false;
     };
 
-    auto itr = registry.find_for_replacement(callback);
-    ASSERT_EQ(itr, registry.end());
+    ASSERT_FALSE(registry.evict(callback));
 }
 
 class FramerTests : public testing::Test {
@@ -183,7 +472,7 @@ auto read_from_page(const Page &page, Size size) -> std::string
 
 class PagerTests : public TestOnHeap {
 public:
-    static constexpr Size frame_count {32};
+    static constexpr Size frame_count {8};//TODO 32};
     static constexpr Size page_size {0x100};
     std::string test_message {"Hello, world!"};
 
@@ -321,22 +610,27 @@ TEST_F(PagerTests, PagesAreAutomaticallyReleased)
     ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
 }
 
-TEST_F(PagerTests, PageDataPersistsInFrame)
+template<class T>
+static auto run_root_persistence_test(T &test, Size n)
 {
-    const auto id = allocate_write_release(test_message);
-    ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
-}
-
-TEST_F(PagerTests, PageDataPersistsInFile)
-{
-    const auto id = allocate_write_release(test_message);
+    const auto id = test.allocate_write_release(test.test_message);
 
     // Cause the root page to be evicted and written back, along with some other pages.
-    while (pager->page_count() < frame_count * 2)
-        [[maybe_unused]] auto unused = allocate_write_release("...");
+    while (test.pager->page_count() < n)
+        [[maybe_unused]] auto unused = test.allocate_write_release("...");
 
     // Read the root page back from the file.
-    ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
+    ASSERT_EQ(test.acquire_read_release(id, test.test_message.size()), test.test_message);
+}
+
+TEST_F(PagerTests, RootDataPersistsInFrame)
+{
+    run_root_persistence_test(*this, frame_count);
+}
+
+TEST_F(PagerTests, RootDataPersistsInStorage)
+{
+    run_root_persistence_test(*this, frame_count * 2);
 }
 
 [[nodiscard]]
