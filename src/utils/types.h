@@ -1,6 +1,7 @@
 #ifndef CALICO_UTILS_TYPES_H
 #define CALICO_UTILS_TYPES_H
 
+#include <utility>
 #include <vector>
 #include "utils.h"
 
