@@ -96,11 +96,11 @@ TEST_F(CacheTests, IterationRespectsReplacementPolicy)
 
     // Coldest -> hottest
     auto ritr = rbegin(target);
-    ASSERT_FALSE(itr->hot);
+    ASSERT_FALSE(ritr->hot);
     ASSERT_EQ(ritr++->value, 3);
-    ASSERT_TRUE(itr->hot);
+    ASSERT_TRUE(ritr->hot);
     ASSERT_EQ(ritr++->value, 2);
-    ASSERT_TRUE(itr->hot);
+    ASSERT_TRUE(ritr->hot);
     ASSERT_EQ(ritr++->value, 1);
     ASSERT_EQ(ritr, rend(target));
 }
