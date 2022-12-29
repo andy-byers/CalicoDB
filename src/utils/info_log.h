@@ -58,7 +58,7 @@ private:
     template<class... Args>
     auto set_text(Size index, const std::string_view &format, Args &&...args) -> void
     {
-        set_text(index, fmt::format(format, std::forward<Args>(args)...).c_str());
+        set_text(index, fmt::format(fmt::runtime(format), std::forward<Args>(args)...).c_str());
     }
 
     std::string m_text[3];

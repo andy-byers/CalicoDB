@@ -1,14 +1,16 @@
 #ifndef CALICO_PAGER_PAGER_H
 #define CALICO_PAGER_PAGER_H
 
-#include "pager.h"
-#include "registry.h"
-#include "spdlog/logger.h"
-#include "utils/scratch.h"
-#include "wal/helpers.h"
-#include <list>
 #include <mutex>
 #include <unordered_set>
+
+#include "spdlog/logger.h"
+
+#include "pager.h"
+#include "registry.h"
+
+#include "utils/scratch.h"
+#include "wal/helpers.h"
 
 namespace calico {
 
@@ -19,12 +21,12 @@ class BasicPager : public Pager {
 public:
     struct Parameters {
         std::string prefix;
-        Storage &storage; // TODO: Make these pointers...
+        Storage *storage {};
         LogScratchManager *scratch {};
-        std::unordered_set<PageId, PageId::Hash> *images {};
-        WriteAheadLog &wal;
-        Status &status;
-        bool &has_xact;
+        std::unordered_set<identifier, identifier::hash> *images {};
+        WriteAheadLog *wal {};
+        Status *status {};
+        bool *has_xact {};
         spdlog::sink_ptr log_sink;
         Size frame_count {};
         Size page_size {};
@@ -32,12 +34,13 @@ public:
 
     ~BasicPager() override = default;
 
-    [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<BasicPager>>;
+    [[nodiscard]] static auto open(const Parameters &param, BasicPager **out) -> Status;
     [[nodiscard]] auto page_count() const -> Size override;
     [[nodiscard]] auto page_size() const -> Size override;
-    [[nodiscard]] auto flushed_lsn() const -> SequenceId override;
-    [[nodiscard]] auto allocate() -> Result<Page> override;
-    [[nodiscard]] auto acquire(PageId, bool) -> Result<Page> override;
+    [[nodiscard]] auto hit_ratio() const -> double override;
+    [[nodiscard]] auto flushed_lsn() const -> identifier override;
+    [[nodiscard]] auto allocate() -> tl::expected<Page, Status> override;
+    [[nodiscard]] auto acquire(identifier, bool) -> tl::expected<Page, Status> override;
     [[nodiscard]] auto release(Page) -> Status override;
     [[nodiscard]] auto flush() -> Status override;
     auto save_state(FileHeader &) -> void override;
@@ -51,10 +54,11 @@ public:
 
 private:
     explicit BasicPager(const Parameters &);
-    [[nodiscard]] auto pin_frame(PageId, bool &) -> Status;
+    [[nodiscard]] auto pin_frame(identifier, bool &) -> Status;
     [[nodiscard]] auto try_make_available() -> Result<bool>;
     auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
-
+    auto make_dirty(PageRegistry::Entry &entry, identifier pid) -> void;
+    auto make_clean(PageRegistry::Entry &entry) -> PageList::Iterator;
     auto forward_status(Status s, const std::string &message) -> Status
     {
         if (!s.is_ok()) {
@@ -77,15 +81,13 @@ private:
     mutable std::mutex m_mutex;
     std::unique_ptr<Framer> m_framer;
     std::shared_ptr<spdlog::logger> m_logger;
-    std::unordered_set<PageId, PageId::Hash> *m_images {};
+    std::unordered_set<identifier, identifier::hash> *m_images {};
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};
     PageList m_dirty;
     PageRegistry m_registry;
     Status *m_status {};
     bool *m_has_xact {};
-    Size m_dirty_count {};
-    Size m_ref_sum {};
 };
 
 } // namespace calico

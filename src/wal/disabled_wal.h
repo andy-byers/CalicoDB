@@ -28,15 +28,15 @@ public:
     }
 
     [[nodiscard]]
-    auto flushed_lsn() const -> SequenceId override
+    auto flushed_lsn() const -> identifier override
     {
-        return SequenceId::null();
+        return identifier::null();
     }
 
     [[nodiscard]]
-    auto current_lsn() const -> SequenceId override
+    auto current_lsn() const -> identifier override
     {
-        return SequenceId::null();
+        return identifier::null();
     }
 
     [[nodiscard]]
@@ -70,25 +70,25 @@ public:
     }
 
     [[nodiscard]]
-    auto roll_forward(SequenceId, const Callback &) -> Status override
+    auto roll_forward(identifier, const Callback &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto roll_backward(SequenceId, const Callback &) -> Status override
+    auto roll_backward(identifier, const Callback &) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto remove_before(SequenceId) -> Status override
+    auto remove_before(identifier) -> Status override
     {
         return Status::ok();
     }
 
     [[nodiscard]]
-    auto remove_after(SequenceId) -> Status override
+    auto remove_after(identifier) -> Status override
     {
         return Status::ok();
     }

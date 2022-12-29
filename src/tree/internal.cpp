@@ -1,5 +1,5 @@
 #include "internal.h"
-#include "core/header.h"
+#include "utils/header.h"
 #include "utils/layout.h"
 
 namespace calico {
@@ -33,13 +33,13 @@ auto Internal::collect_value(const Node &node, Size index) const -> Result<std::
 
 auto Internal::find_root(bool is_writable) -> Result<Node>
 {
-    return m_pool->acquire(PageId::root(), is_writable);
+    return m_pool->acquire(identifier::root(), is_writable);
 }
 
 auto Internal::find_external(BytesView key) -> Result<SearchResult>
 {
     if (m_cell_count == 0)
-        return SearchResult {PageId::root(), 0, false};
+        return SearchResult {identifier::root(), 0, false};
 
     auto node = find_root(false);
     if (!node.has_value())
@@ -63,7 +63,7 @@ auto Internal::find_external(BytesView key) -> Result<SearchResult>
 
 auto Internal::find_minimum() -> Result<SearchResult>
 {
-    CALICO_TRY_CREATE(node, m_pool->acquire(PageId::root(), false));
+    CALICO_TRY_CREATE(node, m_pool->acquire(identifier::root(), false));
     auto id = node.id();
 
     while (!node.is_external()) {
@@ -82,7 +82,7 @@ auto Internal::find_minimum() -> Result<SearchResult>
 
 auto Internal::find_maximum() -> Result<SearchResult>
 {
-    CALICO_TRY_CREATE(node, m_pool->acquire(PageId::root(), false));
+    CALICO_TRY_CREATE(node, m_pool->acquire(identifier::root(), false));
     auto id = node.id();
 
     while (!node.is_external()) {
@@ -245,7 +245,7 @@ auto Internal::maybe_fix_child_parent_connections(Node &node) -> Result<void>
     if (!node.is_external()) {
         const auto parent_id = node.id();
 
-        const auto fix_connection = [parent_id, this](PageId child_id) -> Result<void> {
+        const auto fix_connection = [parent_id, this](identifier child_id) -> Result<void> {
             CALICO_TRY_CREATE(child, m_pool->acquire(child_id, true));
             child.set_parent_id(parent_id);
             return m_pool->release(std::move(child));

@@ -29,24 +29,26 @@ public:
         : wal {std::make_unique<DisabledWriteAheadLog>()},
           scratch {wal_scratch_size(PAGE_SIZE)}
     {
-        pager = *BasicPager::open({
+        BasicPager *temp;
+        expect_ok(BasicPager::open({
             PREFIX,
-            *store,
+            store.get(),
             &scratch,
             &images,
-            *wal,
-            status,
-            has_xact,
+            wal.get(),
+            &status,
+            &has_xact,
             create_sink(),
             FRAME_COUNT,
             PAGE_SIZE
-        });
+        }, &temp));
+        pager.reset(temp);
     }
 
     Random random {0};
     Status status {Status::ok()};
     bool has_xact {};
-    std::unordered_set<PageId, PageId::Hash> images;
+    std::unordered_set<identifier, identifier::hash> images;
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
     LogScratchManager scratch;
@@ -59,15 +61,16 @@ public:
     TreeTests()
     {
         max_local = get_max_local(PAGE_SIZE);
-        tree = *BPlusTree::open(
+        BPlusTree *temp;
+        expect_ok(BPlusTree::open(
             *pager,
             create_sink(),
-            PAGE_SIZE
-        );
+            PAGE_SIZE,
+            &temp));
+        tree.reset(temp);
         auto root = tree->root(true);
         EXPECT_TRUE(root.has_value()) << "Error: " << root.error().what();
-        auto s = pager->release(root->take());
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        expect_ok(pager->release(root->take()));
     }
 
     ~TreeTests() override = default;

@@ -15,10 +15,16 @@ class Frame;
 
 class PageList final {
 public:
-    using Iterator = std::list<PageId>::iterator;
+    using Iterator = std::list<identifier>::iterator;
 
     PageList() = default;
     ~PageList() = default;
+
+    [[nodiscard]]
+    auto size() const -> Size
+    {
+        return m_list.size();
+    }
 
     [[nodiscard]]
     auto begin() -> Iterator
@@ -35,7 +41,7 @@ public:
     }
 
     [[nodiscard]]
-    auto insert(const PageId &id) -> Iterator
+    auto insert(const identifier &id) -> Iterator
     {
         return m_list.emplace(cend(m_list), id);
     }
@@ -46,7 +52,7 @@ public:
     }
 
 private:
-    std::list<PageId> m_list;
+    std::list<identifier> m_list;
 };
 
 class PageRegistry final {
@@ -54,11 +60,12 @@ public:
     using DirtyToken = std::optional<PageList::Iterator>;
 
     struct Entry {
-        FrameNumber frame_id;
+        Size frame_index;
+        identifier record_lsn {};
         DirtyToken dirty_token {};
     };
 
-    using Cache = cache<PageId, Entry, PageId::Hash>;
+    using Cache = cache<identifier, Entry, identifier::hash>;
     using Iterator = Cache::iterator;
 
     PageRegistry() = default;
@@ -77,7 +84,7 @@ public:
     }
 
     [[nodiscard]]
-    auto contains(PageId id) const -> bool
+    auto contains(identifier id) const -> bool
     {
         return m_cache.contains(id);
     }
@@ -111,9 +118,9 @@ public:
         return std::nullopt;
     }
 
-    auto put(PageId, FrameNumber) -> void;
-    auto get(PageId) -> Iterator;
-    auto erase(PageId) -> void;
+    auto put(identifier, Size) -> void;
+    auto get(identifier) -> Iterator;
+    auto erase(identifier) -> void;
 
 private:
     Cache m_cache;

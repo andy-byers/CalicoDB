@@ -39,7 +39,7 @@ auto NodePool::allocate(PageType type) -> Result<Node>
     return Err {page.error()};
 }
 
-auto NodePool::acquire(PageId id, bool is_writable) -> Result<Node>
+auto NodePool::acquire(identifier id, bool is_writable) -> Result<Node>
 {
     return m_pager->acquire(id, is_writable)
         .and_then([this](Page page) -> Result<Node> {
@@ -61,11 +61,11 @@ auto NodePool::destroy(Node node) -> Result<void>
     return m_free_list.push(node.take());
 }
 
-auto NodePool::allocate_chain(BytesView overflow) -> Result<PageId>
+auto NodePool::allocate_chain(BytesView overflow) -> Result<identifier>
 {
     CALICO_EXPECT_FALSE(overflow.is_empty());
     std::optional<Link> prev;
-    auto head = PageId::null();
+    auto head = identifier::null();
 
     while (!overflow.is_empty()) {
         auto page = m_free_list.pop()
@@ -99,7 +99,7 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<PageId>
     return head;
 }
 
-auto NodePool::collect_chain(PageId id, Bytes out) const -> Result<void>
+auto NodePool::collect_chain(identifier id, Bytes out) const -> Result<void>
 {
     while (!out.is_empty()) {
         CALICO_TRY_CREATE(page, m_pager->acquire(id, false));
@@ -121,7 +121,7 @@ auto NodePool::collect_chain(PageId id, Bytes out) const -> Result<void>
     return {};
 }
 
-auto NodePool::destroy_chain(PageId id, Size size) -> Result<void>
+auto NodePool::destroy_chain(identifier id, Size size) -> Result<void>
 {
     while (size) {
         auto page = m_pager->acquire(id, true);

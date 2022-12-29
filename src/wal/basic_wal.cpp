@@ -109,17 +109,17 @@ auto BasicWriteAheadLog::worker_status() const -> Status
     return Status::ok();
 }
 
-auto BasicWriteAheadLog::flushed_lsn() const -> SequenceId
+auto BasicWriteAheadLog::flushed_lsn() const -> identifier
 {
     return m_flushed_lsn.load();
 }
 
-auto BasicWriteAheadLog::current_lsn() const -> SequenceId
+auto BasicWriteAheadLog::current_lsn() const -> identifier
 {
-    return ++SequenceId {m_last_lsn};
+    return identifier {m_last_lsn.value + 1};
 }
 
-auto BasicWriteAheadLog::remove_before(SequenceId lsn) -> Status
+auto BasicWriteAheadLog::remove_before(identifier lsn) -> Status
 {
     CALICO_EXPECT_TRUE(m_is_working);
     m_cleaner->remove_before(lsn);
@@ -140,7 +140,7 @@ auto BasicWriteAheadLog::log(WalPayloadIn payload) -> Status
     static constexpr auto MSG = "could not log payload";
     HANDLE_WORKER_ERRORS;
 
-    m_last_lsn++;
+    m_last_lsn.value++;
     m_writer->write(payload);
     return m_writer->status();
 }
@@ -251,7 +251,7 @@ auto BasicWriteAheadLog::open_cleaner() -> Status
     return Status::ok();
 }
 
-auto BasicWriteAheadLog::roll_forward(SequenceId begin_lsn, const Callback &callback) -> Status
+auto BasicWriteAheadLog::roll_forward(identifier begin_lsn, const Callback &callback) -> Status
 {
     static constexpr auto MSG = "cannot roll forward";
     m_logger->info("rolling forward from LSN {}", begin_lsn.value);
@@ -281,7 +281,7 @@ auto BasicWriteAheadLog::roll_forward(SequenceId begin_lsn, const Callback &call
 
     auto s = Status::ok();
     while (s.is_ok()) {
-        SequenceId first_lsn;
+        identifier first_lsn;
         s = m_reader->read_first_lsn(first_lsn);
         if (!s.is_ok()) break;
 
@@ -321,7 +321,7 @@ auto BasicWriteAheadLog::roll_forward(SequenceId begin_lsn, const Callback &call
     return s;
 }
 
-auto BasicWriteAheadLog::roll_backward(SequenceId end_lsn, const Callback &callback) -> Status
+auto BasicWriteAheadLog::roll_backward(identifier end_lsn, const Callback &callback) -> Status
 {
     static constexpr auto MSG = "could not roll backward";
     m_logger->info("rolling backward to LSN {}", end_lsn.value);
@@ -348,7 +348,7 @@ auto BasicWriteAheadLog::roll_backward(SequenceId end_lsn, const Callback &callb
 
     auto s = Status::ok();
     for (Size i {}; s.is_ok(); i++) {
-        SequenceId first_lsn;
+        identifier first_lsn;
         s = m_reader->read_first_lsn(first_lsn);
 
         if (s.is_ok()) {
@@ -375,7 +375,7 @@ auto BasicWriteAheadLog::roll_backward(SequenceId end_lsn, const Callback &callb
     return s.is_not_found() ? Status::ok() : s;
 }
 
-auto BasicWriteAheadLog::remove_after(SequenceId limit) -> Status
+auto BasicWriteAheadLog::remove_after(identifier limit) -> Status
 {
     static constexpr auto MSG = "could not records remove after";
 
@@ -389,7 +389,7 @@ auto BasicWriteAheadLog::remove_after(SequenceId limit) -> Status
     SegmentId target;
 
     while (!current.is_null()) {
-        SequenceId first_lsn;
+        identifier first_lsn;
         auto s = read_first_lsn(
             *m_store, m_prefix, current, first_lsn);
 

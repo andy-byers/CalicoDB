@@ -9,13 +9,13 @@ Link::Link(Page page)
     : m_page {std::move(page)}
 {}
 
-auto Link::next_id() const -> PageId
+auto Link::next_id() const -> identifier
 {
     const auto offset = LinkLayout::header_offset() + LinkLayout::NEXT_ID_OFFSET;
-    return PageId {get_u64(m_page, offset)};
+    return identifier {get_u64(m_page, offset)};
 }
 
-auto Link::set_next_id(PageId id) -> void
+auto Link::set_next_id(identifier id) -> void
 {
     const auto offset = LinkLayout::header_offset() + LinkLayout::NEXT_ID_OFFSET;
     put_u64(m_page, offset, id.value);

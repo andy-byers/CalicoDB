@@ -17,37 +17,40 @@ namespace fs = std::filesystem;
         if (!calico_s.is_ok()) return forward_status(calico_s, message); \
     } while (0)
 
-auto BasicPager::open(const Parameters &param) -> Result<std::unique_ptr<BasicPager>>
+auto BasicPager::open(const Parameters &param, BasicPager **out) -> Status
 {
-    auto pager = std::unique_ptr<BasicPager> {new (std::nothrow) BasicPager {param}};
-
-    if (!pager) {
-        ThreePartMessage message;
-        message.set_primary("cannot open block pool");
-        message.set_detail("out of memory");
-        return Err {message.system_error()};
-    }
+    *out = new (std::nothrow) BasicPager {param};
+    if (*out == nullptr)
+        return Status::system_error("could not allocate pager object: out of memory");
 
     // Open the database file.
-    RandomEditor *file {};
-    auto s = param.storage.open_random_editor(param.prefix + DATA_FILENAME, &file);
-    if (!s.is_ok()) return Err {s};
+    RandomEditor *temp_file {};
+    auto s = param.storage->open_random_editor(param.prefix + DATA_FILENAME, &temp_file);
+    std::unique_ptr<RandomEditor> file {temp_file};
 
-    CALICO_TRY_STORE(pager->m_framer, Framer::open(
-        std::unique_ptr<RandomEditor> {file},
-        param.page_size,
-        param.frame_count
-    ));
-    return pager;
+    if (s.is_ok()) {
+        // Allocate the frames.
+        Framer *temp;
+        s = Framer::open(
+            std::move(file),
+            param.page_size,
+            param.frame_count,
+            &temp);
+        (*out)->m_framer.reset(temp);
+    }
+    // Caller is only responsible for freeing this memory if the returned status is OK.
+    if (!s.is_ok())
+        delete *out;
+    return s;
 }
 
 BasicPager::BasicPager(const Parameters &param)
     : m_logger {create_logger(param.log_sink, "pager")},
       m_images {param.images},
       m_scratch {param.scratch},
-      m_wal {&param.wal},
-      m_status {&param.status},
-      m_has_xact {&param.has_xact}
+      m_wal {param.wal},
+      m_status {param.status},
+      m_has_xact {param.has_xact}
 {
     m_logger->info("constructing BasicPager instance");
 }
@@ -62,7 +65,12 @@ auto BasicPager::page_size() const -> Size
     return m_framer->page_size();
 }
 
-auto BasicPager::pin_frame(PageId id, bool &is_fragile) -> Status
+auto BasicPager::hit_ratio() const -> double
+{
+    return m_registry.hit_ratio();
+}
+
+auto BasicPager::pin_frame(identifier id, bool &is_fragile) -> Status
 {
     static constexpr auto MSG = "could not pin frame: out of frames";
     CALICO_EXPECT_FALSE(m_registry.contains(id));
@@ -90,24 +98,34 @@ auto BasicPager::pin_frame(PageId id, bool &is_fragile) -> Status
     return Status::ok();
 }
 
+auto BasicPager::make_dirty(PageRegistry::Entry &entry, identifier pid) -> void
+{
+    entry.dirty_token = m_dirty.insert(pid);
+}
+
+auto BasicPager::make_clean(PageRegistry::Entry &entry) -> PageList::Iterator
+{
+    auto next = m_dirty.remove(*entry.dirty_token);
+    entry.dirty_token.reset();
+    return next;
+}
+
 auto BasicPager::flush() -> Status
 {
     static constexpr auto MSG = "could not flush";
     m_logger->info("flushing cached database pages");
-    CALICO_EXPECT_EQ(m_ref_sum, 0);
+    CALICO_EXPECT_EQ(m_framer->ref_sum(), 0);
 
     for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
         CALICO_EXPECT_TRUE(m_registry.contains(*itr));
         auto &entry = m_registry.get(*itr)->value;
-        const auto frame_id = entry.frame_id;
+        const auto frame_id = entry.frame_index;
         const auto page_lsn = m_framer->frame_at(frame_id).lsn();
         const auto page_id = *itr;
         const auto in_range = page_id.as_index() < m_framer->page_count();
         auto s = Status::ok();
 
-        // "entry" is a reference.
-        entry.dirty_token.reset();
-        itr = m_dirty.remove(itr);
+        itr = make_clean(entry);
 
         if (in_range) {
             if (page_lsn > m_wal->flushed_lsn()) {
@@ -128,23 +146,23 @@ auto BasicPager::flush() -> Status
     return m_framer->sync();
 }
 
-auto BasicPager::flushed_lsn() const -> SequenceId
+auto BasicPager::flushed_lsn() const -> identifier
 {
     return m_framer->flushed_lsn();
 }
 
-auto BasicPager::try_make_available() -> Result<bool>
+auto BasicPager::try_make_available() -> tl::expected<bool, Status>
 {
-    PageId page_id;
+    identifier page_id;
     auto evicted = m_registry.evict([&](auto id, auto entry) {
-        const auto &frame = m_framer->frame_at(entry.frame_id);
+        const auto &frame = m_framer->frame_at(entry.frame_index);
         page_id = id;
 
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to evict.
         if (frame.ref_count() != 0)
             return false;
 
-        if (!entry.dirty_token.has_value())
+        if (!entry.dirty_token)
             return true;
 
         if (m_wal->is_working())
@@ -160,13 +178,11 @@ auto BasicPager::try_make_available() -> Result<bool>
         return false;
     }
 
-    auto &[frame_id, dirty_token] = *evicted;
+    auto &[frame_id, record_lsn, dirty_token] = *evicted;
     auto s = Status::ok();
-    if (dirty_token.has_value()) {
+    if (dirty_token) {
         s = m_framer->write_back(frame_id);
-        // We remove the frame's "dirty" status, even if write_back() failed.
-        m_dirty.remove(*dirty_token);
-        dirty_token.reset();
+        make_clean(*evicted);
     }
     m_framer->unpin(frame_id);
     if (!s.is_ok()) return Err {s};
@@ -177,7 +193,7 @@ auto BasicPager::release(Page page) -> Status
 {
     // This method can only fail for writable pages.
     std::lock_guard lock {m_mutex};
-    CALICO_EXPECT_GT(m_ref_sum, 0);
+    CALICO_EXPECT_GT(m_framer->ref_sum(), 0);
 
     auto s = Status::ok();
     if (const auto deltas = page.collect_deltas(); m_wal->is_working() && !deltas.empty()) {
@@ -195,20 +211,18 @@ auto BasicPager::release(Page page) -> Status
 
     CALICO_EXPECT_TRUE(m_registry.contains(page.id()));
     const auto &entry = m_registry.get(page.id())->value;
-    m_framer->unref(entry.frame_id, page);
-    m_ref_sum--;
+    m_framer->unref(entry.frame_index, page);
     return s;
 }
 
 auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
 {
     // This function needs external synchronization!
-    CALICO_EXPECT_GT(m_ref_sum, 0);
+    CALICO_EXPECT_GT(m_framer->ref_sum(), 0);
 
-    if (!page.is_dirty()) {
-        entry.dirty_token = m_dirty.insert(page.id());
-        m_dirty_count++;
-    }
+    // Make sure this page is in the dirty list.
+    if (!entry.dirty_token)
+        make_dirty(entry, page.id());
 
     if (m_wal->is_working()) {
         // Don't write a full image record to the WAL if we already have one for
@@ -240,17 +254,17 @@ auto BasicPager::load_state(const FileHeader &header) -> void
     m_framer->load_state(header);
 }
 
-auto BasicPager::allocate() -> Result<Page>
+auto BasicPager::allocate() -> tl::expected<Page, Status>
 {
-    return acquire(PageId::from_index(m_framer->page_count()), true);
+    return acquire(identifier::from_index(m_framer->page_count()), true);
 }
 
-auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
+auto BasicPager::acquire(identifier id, bool is_writable) -> tl::expected<Page, Status>
 {
+    using std::end;
+
     const auto do_acquire = [this, is_writable](auto &entry) {
-        m_ref_sum++;
-        const auto is_frame_dirty = entry.dirty_token.has_value();
-        auto page = m_framer->ref(entry.frame_id, *this, is_writable, is_frame_dirty);
+        auto page = m_framer->ref(entry.frame_index, *this, is_writable);
 
         // We write a full image WAL record for the page if we are acquiring it as writable for the first time. This is part of the reason we should never
         // acquire a writable page unless we intend to write to it immediately. This way we keep the surface between the Pager interface and Page small
@@ -266,7 +280,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     if (!m_status->is_ok())
         return Err {*m_status};
 
-    if (auto itr = m_registry.get(id); itr != m_registry.end())
+    if (auto itr = m_registry.get(id); itr != end(m_registry))
         return do_acquire(itr->value);
 
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
@@ -293,7 +307,7 @@ auto BasicPager::acquire(PageId id, bool is_writable) -> Result<Page>
     }
 
     auto itr = m_registry.get(id);
-    CALICO_EXPECT_NE(itr, m_registry.end());
+    CALICO_EXPECT_NE(itr, end(m_registry));
     return do_acquire(itr->value);
 }
 

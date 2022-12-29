@@ -1,8 +1,8 @@
 #include "free_list.h"
-#include "core/header.h"
 #include "page/link.h"
 #include "page/page.h"
 #include "pager/pager.h"
+#include "utils/header.h"
 
 namespace calico {
 

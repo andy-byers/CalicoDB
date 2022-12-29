@@ -17,7 +17,7 @@ namespace calico {
 class LogWriter {
 public:
     // NOTE: LogWriter must always be created on an empty segment file.
-    LogWriter(AppendWriter &file, Bytes tail, std::atomic<SequenceId> &flushed_lsn)
+    LogWriter(AppendWriter &file, Bytes tail, std::atomic<identifier> &flushed_lsn)
         : m_flushed_lsn {&flushed_lsn},
           m_file {&file},
           m_tail {tail}
@@ -37,8 +37,8 @@ public:
 private:
     [[nodiscard]] auto clear_rest_and_flush(Size local_offset) -> Status;
 
-    std::atomic<SequenceId> *m_flushed_lsn {};
-    SequenceId m_last_lsn {};
+    std::atomic<identifier> *m_flushed_lsn {};
+    identifier m_last_lsn {};
     AppendWriter *m_file {};
     Bytes m_tail;
     Size m_number {};
@@ -47,7 +47,7 @@ private:
 
 class WalWriter {
 public:
-    WalWriter(Storage &store, WalCollection &segments, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix, Size wal_limit)
+    WalWriter(Storage &store, WalCollection &segments, Bytes tail, std::atomic<identifier> &flushed_lsn, std::string prefix, Size wal_limit)
         : m_worker {WORKER_CAPACITY, [this](const auto &event) {
               return on_event(event);
           }},
@@ -93,7 +93,7 @@ private:
     Worker<Event> m_worker;
     std::string m_prefix;
     std::optional<LogWriter> m_writer;
-    std::atomic<SequenceId> *m_flushed_lsn {};
+    std::atomic<identifier> *m_flushed_lsn {};
     std::unique_ptr<AppendWriter> m_file;
     WalCollection *m_set {};
     Storage *m_store {};

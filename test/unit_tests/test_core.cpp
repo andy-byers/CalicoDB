@@ -1,6 +1,5 @@
 
 #include "core/core.h"
-#include "core/header.h"
 #include "fakes.h"
 #include "storage/posix_storage.h"
 #include "tools.h"
@@ -8,6 +7,7 @@
 #include "tree/cursor_internal.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
+#include "utils/header.h"
 #include "wal/basic_wal.h"
 #include <array>
 #include <filesystem>

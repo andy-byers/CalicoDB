@@ -8,20 +8,20 @@ namespace calico {
 
 class NodeHeader final {
 public:
-    [[nodiscard]] static auto parent_id(const Page&) -> PageId;
-    [[nodiscard]] static auto right_sibling_id(const Page&) -> PageId;
-    [[nodiscard]] static auto rightmost_child_id(const Page&) -> PageId;
-    [[nodiscard]] static auto left_sibling_id(const Page&) -> PageId;
+    [[nodiscard]] static auto parent_id(const Page&) -> identifier;
+    [[nodiscard]] static auto right_sibling_id(const Page&) -> identifier;
+    [[nodiscard]] static auto rightmost_child_id(const Page&) -> identifier;
+    [[nodiscard]] static auto left_sibling_id(const Page&) -> identifier;
     [[nodiscard]] static auto reserved(const Page&) -> std::uint64_t;
     [[nodiscard]] static auto cell_count(const Page&) -> Size;
     [[nodiscard]] static auto cell_start(const Page&) -> Size;
     [[nodiscard]] static auto frag_count(const Page&) -> Size;
     [[nodiscard]] static auto free_start(const Page&) -> Size;
     [[nodiscard]] static auto free_total(const Page&) -> Size;
-    static auto set_parent_id(Page&, PageId) -> void;
-    static auto set_right_sibling_id(Page&, PageId) -> void;
-    static auto set_rightmost_child_id(Page&, PageId) -> void;
-    static auto set_left_sibling_id(Page&, PageId) -> void;
+    static auto set_parent_id(Page&, identifier) -> void;
+    static auto set_right_sibling_id(Page&, identifier) -> void;
+    static auto set_rightmost_child_id(Page&, identifier) -> void;
+    static auto set_left_sibling_id(Page&, identifier) -> void;
     static auto set_cell_count(Page&, Size) -> void;
     static auto set_cell_start(Page&, Size) -> void;
     static auto set_frag_count(Page&, Size) -> void;
@@ -82,7 +82,7 @@ public:
         reset(reset_header);
     }
 
-    [[nodiscard]] auto id() const -> PageId
+    [[nodiscard]] auto id() const -> identifier
     {
         return m_page.id();
     }
@@ -130,20 +130,20 @@ public:
     [[nodiscard]] auto is_overflowing() const -> bool;
     [[nodiscard]] auto is_underflowing() const -> bool;
     [[nodiscard]] auto is_external() const -> bool;
-    [[nodiscard]] auto child_id(Size) const -> PageId;
-    [[nodiscard]] auto parent_id() const -> PageId;
-    [[nodiscard]] auto right_sibling_id() const -> PageId;
-    [[nodiscard]] auto left_sibling_id() const -> PageId;
-    [[nodiscard]] auto rightmost_child_id() const -> PageId;
+    [[nodiscard]] auto child_id(Size) const -> identifier;
+    [[nodiscard]] auto parent_id() const -> identifier;
+    [[nodiscard]] auto right_sibling_id() const -> identifier;
+    [[nodiscard]] auto left_sibling_id() const -> identifier;
+    [[nodiscard]] auto rightmost_child_id() const -> identifier;
     [[nodiscard]] auto cell_count() const -> Size;
-    auto set_parent_id(PageId) -> void;
-    auto set_right_sibling_id(PageId) -> void;
-    auto set_left_sibling_id(PageId id) -> void
+    auto set_parent_id(identifier) -> void;
+    auto set_right_sibling_id(identifier) -> void;
+    auto set_left_sibling_id(identifier id) -> void
     {
         return NodeHeader::set_left_sibling_id(m_page, id);
     }
-    auto set_rightmost_child_id(PageId) -> void;
-    auto set_child_id(Size, PageId) -> void;
+    auto set_rightmost_child_id(identifier) -> void;
+    auto set_child_id(Size, identifier) -> void;
 
     [[nodiscard]] auto usable_space() const -> Size;
     [[nodiscard]] auto max_usable_space() const -> Size;

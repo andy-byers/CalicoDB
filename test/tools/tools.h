@@ -3,18 +3,18 @@
 #define CALICO_TEST_TOOLS_TOOLS_H
 
 #include "calico/calico.h"
-#include "core/header.h"
 #include "page/node.h"
 #include "pager/framer.h"
-#include "storage/posix_storage.h"
 #include "random.h"
+#include "storage/posix_storage.h"
+#include "utils/header.h"
 #include "utils/types.h"
 #include "utils/utils.h"
 #include "wal/record.h"
 #include <iomanip>
 #include <iostream>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 namespace calico {
 
@@ -58,12 +58,12 @@ public:
     auto get_state() -> FileHeader
     {
         CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader));
-        auto root = get_page(PageId::root());
+        auto root = get_page(identifier::root());
         return read_header(root);
     }
 
     [[nodiscard]]
-    auto get_page(PageId id) -> Page
+    auto get_page(identifier id) -> Page
     {
         const auto offset = id.as_index() * m_page_size;
         CALICO_EXPECT_LE(offset + m_page_size, m_data.size());
@@ -72,7 +72,6 @@ public:
             id,
             stob(m_data).range(offset, m_page_size),
             nullptr,
-            false,
             false,
         }};
     }
@@ -437,7 +436,6 @@ struct formatter<cco::XactPayloadType> {
 
 }  // namespace fmt
 
-auto operator<(const calico::Record&, const calico::Record&) -> bool;
 auto operator>(const calico::Record&, const calico::Record&) -> bool;
 auto operator<=(const calico::Record&, const calico::Record&) -> bool;
 auto operator>=(const calico::Record&, const calico::Record&) -> bool;

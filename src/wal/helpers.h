@@ -26,7 +26,7 @@ inline constexpr auto wal_scratch_size(Size page_size) -> Size
 }
 
 [[nodiscard]]
-inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, SequenceId &out) -> Status
+inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, identifier &out) -> Status
 {
     RandomReader *temp {};
     CALICO_TRY(store.open_random_reader(prefix + id.to_name(), &temp));

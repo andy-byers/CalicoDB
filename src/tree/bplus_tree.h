@@ -25,7 +25,7 @@ public:
         return m_internal.cell_count();
     }
 
-    [[nodiscard]] static auto open(Pager &, spdlog::sink_ptr, Size) -> Result<std::unique_ptr<BPlusTree>>;
+    [[nodiscard]] static auto open(Pager &pager, spdlog::sink_ptr sink, size_t page_size, BPlusTree **out) -> Status;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Status override;
     [[nodiscard]] auto erase(Cursor) -> Status override;
     [[nodiscard]] auto root(bool) -> Result<Node> override;

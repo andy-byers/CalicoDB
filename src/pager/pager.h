@@ -24,12 +24,13 @@ class Page;
 class Pager {
 public:
     virtual ~Pager() = default;
-    [[nodiscard]] virtual auto flushed_lsn() const -> SequenceId = 0;
+    [[nodiscard]] virtual auto flushed_lsn() const -> identifier = 0;
     [[nodiscard]] virtual auto page_count() const -> Size = 0;
     [[nodiscard]] virtual auto page_size() const -> Size = 0;
+    [[nodiscard]] virtual auto hit_ratio() const -> double = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
     virtual auto allocate() -> Result<Page> = 0;
-    virtual auto acquire(PageId, bool) -> Result<Page> = 0;
+    virtual auto acquire(identifier, bool) -> Result<Page> = 0;
     virtual auto release(Page) -> Status = 0;
     virtual auto flush() -> Status = 0;
     virtual auto save_state(FileHeader &) -> void = 0;

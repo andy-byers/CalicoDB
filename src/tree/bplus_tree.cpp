@@ -21,9 +21,12 @@ BPlusTree::~BPlusTree()
     m_logger->info("destroying BPlusTree object");
 }
 
-auto BPlusTree::open(Pager &pager, spdlog::sink_ptr log_sink, Size page_size) -> Result<std::unique_ptr<BPlusTree>>
+auto BPlusTree::open(Pager &pager, spdlog::sink_ptr sink, size_t page_size, BPlusTree **out) -> Status
 {
-    return std::unique_ptr<BPlusTree>(new BPlusTree {pager, std::move(log_sink), page_size});
+    *out = new(std::nothrow) BPlusTree {pager, std::move(sink), page_size};
+    if (*out == nullptr)
+        return Status::system_error("could not open bplus_tree: out of memory");
+    return Status::ok();
 }
 
 auto run_key_check(BytesView key, Size max_key_size, spdlog::logger &logger, const std::string &primary) -> Status
@@ -76,7 +79,7 @@ auto BPlusTree::insert(BytesView key, BytesView value) -> Status
 auto BPlusTree::erase(Cursor cursor) -> Status
 {
     if (cursor.is_valid()) {
-        auto node = m_pool.acquire(PageId {CursorInternal::id(cursor)}, true);
+        auto node = m_pool.acquire(identifier {CursorInternal::id(cursor)}, true);
         if (!node.has_value()) return node.error();
         const auto r = m_internal.positioned_remove({std::move(*node), CursorInternal::index(cursor)});
         if (!r.has_value()) return r.error();
@@ -218,7 +221,7 @@ static auto traverse_inorder_helper(NodePool &pool, Node node, const Callback &c
 
 static auto traverse_inorder(NodePool &pool, const Callback &callback) -> void
 {
-    auto root = pool.acquire(PageId::root(), false);
+    auto root = pool.acquire(identifier::root(), false);
     CALICO_EXPECT_TRUE(root.has_value());
     traverse_inorder_helper(pool, std::move(*root), callback);
 }
@@ -226,7 +229,7 @@ static auto traverse_inorder(NodePool &pool, const Callback &callback) -> void
 static auto validate_siblings(NodePool &pool) -> void
 {
     // Find the leftmost external node.
-    auto node = *pool.acquire(PageId::root(), false);
+    auto node = *pool.acquire(identifier::root(), false);
     while (!node.is_external()) {
         const auto id = node.child_id(0);
         CALICO_EXPECT_TRUE(pool.release(std::move(node)).has_value());

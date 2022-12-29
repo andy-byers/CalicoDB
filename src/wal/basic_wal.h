@@ -44,18 +44,18 @@ public:
 
     ~BasicWriteAheadLog() override;
     [[nodiscard]] static auto open(const Parameters&, WriteAheadLog**) -> Status;
-    [[nodiscard]] auto flushed_lsn() const -> SequenceId override;
-    [[nodiscard]] auto current_lsn() const -> SequenceId override;
+    [[nodiscard]] auto flushed_lsn() const -> identifier override;
+    [[nodiscard]] auto current_lsn() const -> identifier override;
     [[nodiscard]] auto stop_workers() -> Status override;
     [[nodiscard]] auto start_workers() -> Status override;
     [[nodiscard]] auto worker_status() const -> Status override;
     [[nodiscard]] auto log(WalPayloadIn payload) -> Status override;
     [[nodiscard]] auto advance() -> Status override;
     [[nodiscard]] auto flush() -> Status override;
-    [[nodiscard]] auto roll_forward(SequenceId begin_lsn, const Callback &callback) -> Status override;
-    [[nodiscard]] auto roll_backward(SequenceId end_lsn, const Callback &callback) -> Status override;
-    [[nodiscard]] auto remove_after(SequenceId lsn) -> Status override;
-    [[nodiscard]] auto remove_before(SequenceId lsn) -> Status override;
+    [[nodiscard]] auto roll_forward(identifier begin_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto roll_backward(identifier end_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto remove_after(identifier lsn) -> Status override;
+    [[nodiscard]] auto remove_before(identifier lsn) -> Status override;
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
@@ -74,8 +74,8 @@ private:
     }
 
     std::shared_ptr<spdlog::logger> m_logger;
-    std::atomic<SequenceId> m_flushed_lsn {};
-    SequenceId m_last_lsn;
+    std::atomic<identifier> m_flushed_lsn {};
+    identifier m_last_lsn;
     WalCollection m_set;
     std::string m_prefix;
 

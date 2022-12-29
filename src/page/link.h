@@ -10,7 +10,7 @@ public:
     explicit Link(Page);
 
     [[nodiscard]]
-    auto id() const -> PageId
+    auto id() const -> identifier
     {
         return m_page.id();
     }
@@ -37,10 +37,10 @@ public:
         return std::move(m_page);
     }
 
-    [[nodiscard]] auto next_id() const -> PageId;
+    [[nodiscard]] auto next_id() const -> identifier;
     [[nodiscard]] auto content_size() const -> Size;
     [[nodiscard]] auto content_view() const -> BytesView;
-    auto set_next_id(PageId) -> void;
+    auto set_next_id(identifier) -> void;
     auto content_bytes(Size) -> Bytes;
 
 private:

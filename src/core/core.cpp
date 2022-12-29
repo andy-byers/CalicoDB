@@ -1,16 +1,16 @@
 
 #include "core.h"
-#include "recovery.h"
 #include "calico/calico.h"
 #include "calico/storage.h"
 #include "calico/transaction.h"
-#include "header.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
+#include "recovery.h"
 #include "storage/helpers.h"
 #include "storage/posix_storage.h"
 #include "tree/bplus_tree.h"
 #include "utils/crc.h"
+#include "utils/header.h"
 #include "utils/info_log.h"
 #include "utils/layout.h"
 #include "wal/basic_wal.h"
@@ -62,6 +62,11 @@ auto Info::page_size() const -> Size
 auto Info::maximum_key_size() const -> Size
 {
     return get_max_local(page_size());
+}
+
+auto Info::cache_hit_ratio() const -> double
+{
+    return m_core->pager().hit_ratio();
 }
 
 auto initialize_log(spdlog::logger &logger, const std::string &base)
@@ -119,27 +124,29 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     }
 
     {
-        auto r = BasicPager::open({
+        BasicPager *temp;
+        auto s = BasicPager::open({
             m_prefix,
-            *m_store,
+            m_store,
             m_scratch.get(),
             &m_images,
-            *m_wal,
-            m_status,
-            m_has_xact,
+            m_wal.get(),
+            &m_status,
+            &m_has_xact,
             m_sink,
             sanitized.frame_count,
             sanitized.page_size,
-        });
-        MAYBE_FORWARD(r ? Status::ok() : r.error(), MSG);
-        m_pager = std::move(*r);
+        }, &temp);
+        MAYBE_FORWARD(s, MSG);
+        m_pager.reset(temp);
         m_pager->load_state(state);
     }
 
     {
-        auto r = BPlusTree::open(*m_pager, m_sink, sanitized.page_size);
-        MAYBE_FORWARD(r ? Status::ok() : r.error(), MSG);
-        m_tree = std::move(*r);
+        BPlusTree *temp;
+        const auto s = BPlusTree::open(*m_pager, m_sink, sanitized.page_size, &temp);
+        MAYBE_FORWARD(s, MSG);
+        m_tree.reset(temp);
         m_tree->load_state(state);
     }
 
@@ -418,7 +425,7 @@ auto Core::save_state() -> Status
 {
     m_logger->info("saving state to file header");
 
-    auto root = m_pager->acquire(PageId::root(), true);
+    auto root = m_pager->acquire(identifier::root(), true);
     if (!root.has_value()) return root.error();
 
     auto state = read_header(*root);
@@ -434,7 +441,7 @@ auto Core::load_state() -> Status
 {
     m_logger->info("loading state from file header");
 
-    auto root = m_pager->acquire(PageId::root(), false);
+    auto root = m_pager->acquire(identifier::root(), false);
     if (!root.has_value()) return root.error();
 
     auto state = read_header(*root);
@@ -529,9 +536,9 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         s = store.file_size(path, file_size);
         if (!s.is_ok()) return Err {s};
 
-        if (file_size < FileLayout::HEADER_SIZE) {
+        if (file_size < sizeof(FileHeader)) {
             message.set_detail("database is too small to read the file header");
-            message.set_hint("file header is {} bytes", FileLayout::HEADER_SIZE);
+            message.set_hint("file header is {} bytes", sizeof(FileHeader));
             return Err {message.corruption()};
         }
         s = read_exact(*reader, bytes, 0);
@@ -557,7 +564,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
     } else if (s.is_not_found()) {
         header.magic_code = MAGIC_CODE;
         header.page_size = encode_page_size(options.page_size);
-        header.flushed_lsn = SequenceId::base().value;
+        header.flushed_lsn = identifier::root().value;
         header.header_crc = compute_header_crc(header);
 
     } else {

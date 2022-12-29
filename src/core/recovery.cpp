@@ -6,7 +6,7 @@
 
 namespace calico {
 
-auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
+auto encode_deltas_payload(identifier page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
 {
     const auto original_size = out.size();
 
@@ -45,7 +45,7 @@ auto encode_commit_payload(Bytes out) -> Size
     return MINIMUM_PAYLOAD_SIZE;
 }
 
-auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size
+auto encode_full_image_payload(identifier page_id, BytesView image, Bytes out) -> Size
 {
     const auto original_size = out.size();
 
@@ -110,7 +110,7 @@ static auto decode_full_image_payload(WalPayloadOut in) -> FullImageDescriptor
 
     // Page ID (8 B)
     info.pid.value = get_u64(data);
-    data.advance(sizeof(PageId));
+    data.advance(sizeof(identifier));
 
     // Image (n B)
     info.image = data;
@@ -138,7 +138,7 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
     }
 }
 
-auto Recovery::start_abort(SequenceId commit_lsn) -> Status
+auto Recovery::start_abort(identifier commit_lsn) -> Status
 {
     static constexpr auto MSG = "could not abort";
 
@@ -173,14 +173,14 @@ auto Recovery::start_abort(SequenceId commit_lsn) -> Status
     });
 }
 
-auto Recovery::finish_abort(SequenceId commit_lsn) -> Status
+auto Recovery::finish_abort(identifier commit_lsn) -> Status
 {
     return finish_routine(commit_lsn);
 }
 
-auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
+auto Recovery::start_recovery(identifier &commit_lsn) -> Status
 {
-    SequenceId last_lsn;
+    identifier last_lsn;
 
     const auto redo = [this, &last_lsn, &commit_lsn](auto payload) {
         auto info = decode_payload(payload);
@@ -221,7 +221,7 @@ auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
         return Status::ok();
     };
 
-    CALICO_TRY(m_wal->roll_forward(SequenceId::null(), redo));
+    CALICO_TRY(m_wal->roll_forward(identifier::null(), redo));
 
     // Reached the end of the WAL, but didn't find a commit record.
     if (last_lsn != commit_lsn)
@@ -229,12 +229,12 @@ auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
     return Status::ok();
 }
 
-auto Recovery::finish_recovery(SequenceId commit_lsn) -> Status
+auto Recovery::finish_recovery(identifier commit_lsn) -> Status
 {
     return finish_routine(commit_lsn);
 }
 
-auto Recovery::finish_routine(SequenceId commit_lsn) -> Status
+auto Recovery::finish_routine(identifier commit_lsn) -> Status
 {
     // Flush all dirty database pages.
     CALICO_TRY(m_pager->flush());

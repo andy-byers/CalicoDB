@@ -7,170 +7,59 @@
 
 namespace calico {
 
-template<class Index>
-struct IndexHash {
+using size_t = std::size_t;
+
+struct identifier {
+    static constexpr size_t null_value {0};
+    static constexpr size_t root_value {1};
+
+    struct hash {
+        auto operator()(const identifier &id) const -> size_t
+        {
+            return id.value;
+        }
+    };
 
     [[nodiscard]]
-    auto operator()(const Index &index) const -> std::size_t
+    static constexpr auto from_index(size_t index) noexcept -> identifier
     {
-        return static_cast<std::size_t>(index.value);
+        return {index + 1};
     }
-};
-
-template<class T>
-struct NullableId {
 
     [[nodiscard]]
-    static constexpr auto null() noexcept -> T
+    static constexpr auto null() noexcept -> identifier
     {
-        return T {0};
+        return {null_value};
+    }
+
+    [[nodiscard]]
+    static constexpr auto root() noexcept -> identifier
+    {
+        return {root_value};
     }
 
     [[nodiscard]]
     constexpr auto is_null() const noexcept -> bool
     {
-        return static_cast<const T&>(*this).value == null().value;
-    }
-
-    [[nodiscard]]
-    constexpr auto as_index() const noexcept -> Size
-    {
-        const auto &t = static_cast<const T&>(*this);
-        CALICO_EXPECT_NE(t, null());
-        return t.value - 1U;
-    }
-
-    [[nodiscard]]
-    static constexpr auto from_index(Size t) noexcept -> T
-    {
-        return T {t + 1};
-    }
-};
-
-template<class T1>
-struct EqualityComparableTraits {
-
-    template<class T2>
-    auto operator==(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value == T1 {t}.value;
-    }
-
-    template<class T2>
-    auto operator!=(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value != T1 {t}.value;
-    }
-};
-
-template<class T1>
-struct OrderableTraits {
-
-    template<class T2>
-    auto operator<(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value < T1 {t}.value;
-    }
-
-    template<class T2>
-    auto operator<=(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value <= T1 {t}.value;
-    }
-
-    template<class T2>
-    auto operator>(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value > T1 {t}.value;
-    }
-
-    template<class T2>
-    auto operator>=(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value >= T1 {t}.value;
-    }
-};
-
-template<class T>
-struct IncrementableTraits { // TODO: Removed postfix increment. It's confusing to implement with CRTP!
-
-    auto operator++() -> T&
-    {
-        static_cast<T&>(*this).value++;
-        return static_cast<T&>(*this);
-    }
-};
-
-struct PageId
-    : public NullableId<PageId>,
-      public EqualityComparableTraits<PageId>
-{
-    using Type = std::uint64_t;
-    using Hash = IndexHash<PageId>;
-
-    constexpr PageId() noexcept = default;
-
-    template<class T>
-    constexpr explicit PageId(T t) noexcept
-        : value {std::uint64_t(t)}
-    {}
-
-    [[nodiscard]]
-    static constexpr auto root() noexcept -> PageId
-    {
-        return PageId {1};
+        return value == null_value;
     }
 
     [[nodiscard]]
     constexpr auto is_root() const noexcept -> bool
     {
-        return value == root().value;
-    }
-
-    std::uint64_t value {};
-};
-
-struct SequenceId
-    : public NullableId<SequenceId>,
-      public EqualityComparableTraits<SequenceId>,
-      public OrderableTraits<SequenceId>
-{
-    using Type = std::uint64_t;
-    using Hash = IndexHash<SequenceId>;
-
-    constexpr SequenceId() noexcept = default;
-
-    template<class U>
-    constexpr explicit SequenceId(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
-
-    auto operator++() -> SequenceId&
-    {
-        value++;
-        return *this;
-    }
-
-    auto operator++(int) -> SequenceId
-    {
-        const auto temp = *this;
-        ++(*this);
-        return temp;
+        return value == root_value;
     }
 
     [[nodiscard]]
-    static constexpr auto base() noexcept -> SequenceId
+    constexpr auto as_index() const noexcept -> Size
     {
-        return SequenceId {1};
+        CALICO_EXPECT_NE(value, null().value);
+        return value - 1;
     }
 
-    [[nodiscard]]
-    constexpr auto is_base() const noexcept -> bool
-    {
-        return value == base().value;
-    }
+    constexpr auto operator<=>(const identifier &) const = default;
 
-    std::uint64_t value {};
+    size_t value {};
 };
 
 struct AlignedDeleter {
@@ -246,30 +135,6 @@ public:
 
 private:
     T m_resource {};
-};
-
-class ErrorBuffer {
-public:
-    [[nodiscard]]
-    auto is_ok() const -> bool
-    {
-        return m_buffer.empty();
-    }
-
-    [[nodiscard]]
-    auto buffer() const -> const std::vector<Status> &
-    {
-        return m_buffer;
-    }
-
-    auto maybe_consume(Status &&s) -> void
-    {
-        if (!s.is_ok())
-            m_buffer.emplace_back(std::move(s));
-    }
-
-private:
-    std::vector<Status> m_buffer;
 };
 
 } // namespace calico

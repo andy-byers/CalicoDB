@@ -17,7 +17,7 @@ public:
     };
 
     struct SearchResult {
-        PageId id;
+        identifier id;
         Size index {};
         bool was_found {};
     };
@@ -53,11 +53,6 @@ public:
     }
 
 private:
-    // TODO: This implementation will need to handle arbitrary failures during the splits and merges.
-    //       The only way I can think to do this is transactionally using the WAL. We'll have to save
-    //       some state that indicates that we need recovery and refuse to continue modifying/reading
-    //       the database if that variable is set. We could also try to roll back automatically and
-    //       somehow indicate that this has happened.
     [[nodiscard]] auto balance_after_overflow(Node) -> Result<void>;
     [[nodiscard]] auto split_non_root(Node) -> Result<Node>;
     [[nodiscard]] auto split_root(Node) -> Result<Node>;

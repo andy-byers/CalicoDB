@@ -27,7 +27,7 @@ public:
         return m_worker.status();
     }
 
-    auto remove_before(SequenceId lsn, bool should_wait = false) -> void
+    auto remove_before(identifier lsn, bool should_wait = false) -> void
     {
         m_worker.dispatch(lsn, should_wait);
     }
@@ -39,9 +39,9 @@ public:
     }
 
 private:
-    [[nodiscard]] auto on_event(const SequenceId &limit) -> Status;
+    [[nodiscard]] auto on_event(const identifier &limit) -> Status;
 
-    Worker<SequenceId> m_worker;
+    Worker<identifier> m_worker;
     std::string m_prefix;
     Storage *m_store {};
     WalCollection *m_set {};

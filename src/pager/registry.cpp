@@ -3,13 +3,13 @@
 
 namespace calico {
 
-auto PageRegistry::put(PageId pid, FrameNumber fid) -> void
+auto PageRegistry::put(identifier pid, Size fid) -> void
 {
     CALICO_EXPECT_FALSE(m_cache.contains(pid));
     m_cache.put(pid, Entry {fid});
 }
 
-auto PageRegistry::get(PageId id) -> Iterator
+auto PageRegistry::get(identifier id) -> Iterator
 {
     using std::end;
 
@@ -21,7 +21,7 @@ auto PageRegistry::get(PageId id) -> Iterator
     return end(*this);
 }
 
-auto PageRegistry::erase(PageId id) -> void
+auto PageRegistry::erase(identifier id) -> void
 {
     if (m_cache.erase(id))
         return;

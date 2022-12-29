@@ -17,11 +17,10 @@ public:
     friend class calico::Frame;
 
     struct Parameters {
-        PageId id;
+        identifier id;
         Bytes data;
         Pager *source {};
         bool is_writable {};
-        bool is_dirty {};
     };
 
     ~Page();
@@ -32,20 +31,15 @@ public:
         return m_is_writable;
     }
 
-    [[nodiscard]] auto is_dirty() const -> bool
-    {
-        return m_is_dirty;
-    }
-
-    [[nodiscard]] auto id() const -> PageId;
+    [[nodiscard]] auto id() const -> identifier;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto view(Size) const -> BytesView;
     [[nodiscard]] auto view(Size, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
-    [[nodiscard]] auto lsn() const -> SequenceId;
+    [[nodiscard]] auto lsn() const -> identifier;
     [[nodiscard]] auto collect_deltas() -> std::vector<PageDelta>;
     auto set_type(PageType) -> void;
-    auto set_lsn(SequenceId) -> void;
+    auto set_lsn(identifier) -> void;
     auto read(Bytes, Size) const -> void;
     auto bytes(Size) -> Bytes;
     auto bytes(Size, Size) -> Bytes;
@@ -63,9 +57,8 @@ private:
     std::vector<PageDelta> m_deltas;
     UniqueNullable<Pager *> m_source;
     Bytes m_data;
-    PageId m_id;
+    identifier m_id;
     bool m_is_writable {};
-    bool m_is_dirty {};
 };
 
 [[nodiscard]] auto get_u16(const Page &, Size) -> std::uint16_t;

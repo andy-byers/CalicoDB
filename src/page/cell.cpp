@@ -77,19 +77,19 @@ auto Cell::size() const -> Size
            size_fields + m_key.size() + m_local_value.size();
 }
 
-auto Cell::left_child_id() const -> PageId
+auto Cell::left_child_id() const -> identifier
 {
     CALICO_EXPECT_FALSE(m_is_external);
     return m_left_child_id;
 }
 
-auto Cell::set_left_child_id(PageId left_child_id) -> void
+auto Cell::set_left_child_id(identifier left_child_id) -> void
 {
     CALICO_EXPECT_FALSE(m_is_external);
     m_left_child_id = left_child_id;
 }
 
-auto Cell::set_overflow_id(PageId id) -> void
+auto Cell::set_overflow_id(identifier id) -> void
 {
     CALICO_EXPECT_TRUE(m_is_external);
     m_overflow_id = id;
@@ -116,7 +116,7 @@ auto Cell::overflow_size() const -> Size
     return m_value_size - m_local_value.size();
 }
 
-auto Cell::overflow_id() const -> PageId
+auto Cell::overflow_id() const -> identifier
 {
     // Internal cells have a zero-length value field, so they cannot overflow.
     CALICO_EXPECT_TRUE(m_is_external);
@@ -171,7 +171,7 @@ auto Cell::set_is_external(bool is_external) -> void
     if (!m_is_external) {
         m_local_value.clear();
         m_value_size = 0;
-        m_overflow_id = PageId::null();
+        m_overflow_id = identifier::null();
     }
 }
 
@@ -190,7 +190,7 @@ auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
         CALICO_EXPECT_LT(local_value_size, value.size());
         param.local_value.truncate(local_value_size);
         // Set to an arbitrary value.
-        param.overflow_id = PageId::root();
+        param.overflow_id = identifier::root();
     }
     return Cell {param};
 }

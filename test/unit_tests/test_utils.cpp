@@ -10,13 +10,13 @@
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
+#include "utils/header.h"
 #include "utils/layout.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
 #include "utils/worker.h"
-#include "core/header.h"
 
 namespace calico {
 
@@ -393,13 +393,9 @@ auto run_equality_comparisons()
     T y {2};
 
     CALICO_EXPECT_TRUE(x == x);
-    CALICO_EXPECT_TRUE(x == 1);
     CALICO_EXPECT_TRUE(x != y);
-    CALICO_EXPECT_TRUE(x != 2);
     ASSERT_EQ(x, x);
-    ASSERT_EQ(x, 1);
     ASSERT_NE(x, y);
-    ASSERT_NE(x, 2);
 }
 
 template<class T>
@@ -408,59 +404,40 @@ auto run_ordering_comparisons()
     T x {1};
     T y {2};
 
-    CALICO_EXPECT_TRUE(x < y and x < 2);
+    CALICO_EXPECT_TRUE(x < y);
     CALICO_EXPECT_TRUE(x <= x and x <= y);
-    CALICO_EXPECT_TRUE(x <= 1 and x <= 2);
-    CALICO_EXPECT_TRUE(y > x and y > 1);
+    CALICO_EXPECT_TRUE(y > x);
     CALICO_EXPECT_TRUE(y >= y and y >= x);
-    CALICO_EXPECT_TRUE(y >= 2 and y >= 1);
     ASSERT_LT(x, y);
-    ASSERT_LT(x, 2);
     ASSERT_LE(x, x);
     ASSERT_LE(x, y);
-    ASSERT_LE(x, 1);
-    ASSERT_LE(x, 2);
     ASSERT_GT(y, x);
-    ASSERT_GT(y, 1);
     ASSERT_GE(y, y);
     ASSERT_GE(y, x);
-    ASSERT_GE(y, 2);
-    ASSERT_GE(y, 1);
 }
 
 TEST(SimpleDSLTests, TypesAreSizedCorrectly)
 {
-    static_assert(sizeof(PageId) == sizeof(PageId::Type));
-    static_assert(sizeof(SequenceId) == sizeof(SequenceId::Type));
+    identifier id {};
+    static_assert(sizeof(identifier) == sizeof(id.value));
+    static_assert(sizeof(identifier) == sizeof(id.value));
 }
 
-TEST(SimpleDSLTests, PageIdsAreNullable)
+TEST(SimpleDSLTests, IdentifiersAreNullable)
 {
-    run_nullability_check<PageId>();
-    ASSERT_FALSE(PageId::root().is_null());
-    ASSERT_TRUE(PageId::root().is_root());
+    run_nullability_check<identifier>();
+    ASSERT_FALSE(identifier::root().is_null());
+    ASSERT_TRUE(identifier::root().is_root());
 }
 
-TEST(SimpleDSLTests, SequenceIdsAreNullable)
+TEST(SimpleDSLTests, IdentifiersAreEqualityComparable)
 {
-    run_nullability_check<SequenceId>();
-    ASSERT_FALSE(SequenceId::base().is_null());
-    ASSERT_TRUE(SequenceId::base().is_base());
+    run_equality_comparisons<identifier>();
 }
 
-TEST(SimpleDSLTests, PageIdsAreEqualityComparable)
+TEST(SimpleDSLTests, IdentifiersAreOrderable)
 {
-    run_equality_comparisons<PageId>();
-}
-
-TEST(SimpleDSLTests, SequenceIdsAreEqualityComparable)
-{
-    run_equality_comparisons<SequenceId>();
-}
-
-TEST(SimpleDSLTests, SequenceIdsAreOrderable)
-{
-    run_ordering_comparisons<SequenceId>();
+    run_ordering_comparisons<identifier>();
 }
 
 TEST(TestUniqueNullable, ResourceIsMoved)
@@ -475,7 +452,7 @@ TEST(TestUniqueNullable, ResourceIsMoved)
 
 TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 {
-    const auto start = NodeLayout::header_offset(PageId {2}) +
+    const auto start = NodeLayout::header_offset(identifier {2}) +
                        NodeLayout::HEADER_SIZE +
                        CELL_POINTER_SIZE;
     Size page_size {MINIMUM_PAGE_SIZE};
@@ -579,14 +556,6 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     ASSERT_EQ(dst.what(), "status message");
 }
 
-TEST(SimpleDSLTests, Size)
-{
-    PageId a {1UL};
-    PageId b {2UL};
-    CALICO_EXPECT_EQ(a, 1UL);
-    CALICO_EXPECT_NE(b, 1UL);
-}
-
 // Modified from RocksDB.
 class QueueTests: public testing::Test {
 public:
@@ -602,7 +571,7 @@ public:
 };
 
 struct Consumer {
-    auto operator()() -> void
+    auto operator()() const -> void
     {
         std::optional<Size> next;
         while ((next = queue->dequeue())) {

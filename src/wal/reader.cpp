@@ -43,7 +43,7 @@ auto LogReader::read(WalPayloadOut &out, Bytes payload, Bytes tail) -> Status
     return s;
 }
 
-auto LogReader::read_first_lsn(SequenceId &out) -> Status
+auto LogReader::read_first_lsn(identifier &out) -> Status
 {
     // Bytes requires the array size when constructed with a C-style array.
     char buffer [WalPayloadHeader::SIZE];
@@ -131,7 +131,7 @@ auto WalReader::seek_previous() -> Status
     return Status::not_found("could not seek to previous segment: reached the first segment");
 }
 
-auto WalReader::read_first_lsn(SequenceId &out) -> Status
+auto WalReader::read_first_lsn(identifier &out) -> Status
 {
     prepare_traversal();
     return m_reader->read_first_lsn(out);

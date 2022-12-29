@@ -3,12 +3,12 @@
 #include "calico/options.h"
 #include "calico/storage.h"
 #include "core/core.h"
-#include "core/header.h"
 #include "fakes.h"
 #include "pager/basic_pager.h"
 #include "tools.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
+#include "utils/header.h"
 #include "wal/basic_wal.h"
 
 namespace calico {
@@ -41,7 +41,7 @@ public:
     }
 
     [[nodiscard]]
-    auto get_lsn() const -> SequenceId
+    auto get_lsn() const -> identifier
     {
         return m_page.lsn();
     }
@@ -74,30 +74,30 @@ public:
         ASSERT_OK(store->create_directory("test"));
         scratch = std::make_unique<LogScratchManager>(wal_scratch_size(PAGE_SIZE));
 
-        WriteAheadLog *temp {};
+        WriteAheadLog *wal_ptr {};
         ASSERT_OK(BasicWriteAheadLog::open({
             "test/",
             store.get(),
             create_sink(),
             PAGE_SIZE,
             WAL_LIMIT,
-        }, &temp));
-        wal.reset(temp);
+        }, &wal_ptr));
+        wal.reset(wal_ptr);
 
-        auto r = BasicPager::open({
+        BasicPager *pager_ptr;
+        expect_ok(BasicPager::open({
             "test/",
-            *store,
+            store.get(),
             scratch.get(),
             &images,
-            *wal,
-            status,
-            has_xact,
+            wal.get(),
+            &status,
+            &has_xact,
             create_sink(),
             FRAME_COUNT,
             PAGE_SIZE,
-        });
-        ASSERT_TRUE(r.has_value());
-        pager = std::move(*r);
+        }, &pager_ptr));
+        pager.reset(pager_ptr);
 
         while (pager->page_count() < PAGE_COUNT) {
             ASSERT_OK(pager->release(pager->allocate().value()));
@@ -106,7 +106,7 @@ public:
         ASSERT_OK(wal->start_workers());
     }
 
-    auto tear_down() -> void
+    auto tear_down() const -> void
     {
         if (wal->is_working())
             (void)wal->stop_workers();
@@ -114,7 +114,7 @@ public:
     }
 
     [[nodiscard]]
-    auto get_wrapper(PageId id, bool is_writable = false) -> std::optional<PageWrapper>
+    auto get_wrapper(identifier id, bool is_writable = false) const -> std::optional<PageWrapper>
     {
         auto page = pager->acquire(id, is_writable);
         if (!page.has_value()) {
@@ -143,9 +143,9 @@ public:
     }
 
 
-    auto save_state() -> Status
+    auto save_state() const -> Status
     {
-        auto root = pager->acquire(PageId::root(), true);
+        auto root = pager->acquire(identifier::root(), true);
         if (!root.has_value()) return root.error();
 
         auto state = read_header(*root);
@@ -156,9 +156,9 @@ public:
         return pager->release(std::move(*root));
     }
 
-    auto load_state() -> Status
+    auto load_state() const -> Status
     {
-        auto root = pager->acquire(PageId::root(), false);
+        auto root = pager->acquire(identifier::root(), false);
         if (!root.has_value()) return root.error();
 
         auto state = read_header(*root);
@@ -175,14 +175,14 @@ public:
         return s;
     }
 
-    auto set_value(PageId id, const std::string &value) -> void
+    auto set_value(identifier id, const std::string &value) const -> void
     {
         auto wrapper = get_wrapper(id, true);
         ASSERT_TRUE(wrapper.has_value());
         wrapper->set_value(value);
     }
 
-    auto try_set_value(PageId id, const std::string &value) -> bool
+    auto try_set_value(identifier id, const std::string &value) const -> bool
     {
         auto wrapper = get_wrapper(id, true);
         if (!wrapper.has_value()) return false;
@@ -191,7 +191,7 @@ public:
     }
 
     [[nodiscard]]
-    auto get_value(PageId id) -> std::string
+    auto get_value(identifier id) const -> std::string
     {
         auto wrapper = get_wrapper(id, true);
         EXPECT_TRUE(wrapper.has_value());
@@ -199,7 +199,7 @@ public:
     }
 
     [[nodiscard]]
-    auto try_get_value(PageId id) -> std::string
+    auto try_get_value(identifier id) const -> std::string
     {
         auto wrapper = get_wrapper(id, true);
         if (!wrapper.has_value()) return {};
@@ -207,13 +207,13 @@ public:
     }
 
     [[nodiscard]]
-    auto oldest_lsn() const -> SequenceId
+    auto oldest_lsn() const -> identifier
     {
         return std::min(commit_lsn, pager->flushed_lsn());
     }
 
     [[nodiscard]]
-    auto allow_cleanup() -> Status
+    auto allow_cleanup() const -> Status
     {
         return wal->remove_before(oldest_lsn());
     }
@@ -226,13 +226,13 @@ public:
 
     Random random {internal::random_seed};
     Status status {Status::ok()};
-    SequenceId commit_lsn;
+    identifier commit_lsn;
     bool has_xact {};
     std::unique_ptr<HeapStorage> store;
     std::unique_ptr<Pager> pager;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<LogScratchManager> scratch;
-    std::unordered_set<PageId, PageId::Hash> images;
+    std::unordered_set<identifier, identifier::hash> images;
 };
 
 class NormalXactTests
@@ -254,12 +254,12 @@ public:
 TEST_F(NormalXactTests, ReadAndWriteValue)
 {
     const auto value = generate_value();
-    set_value(PageId {1}, value);
-    ASSERT_EQ(get_value(PageId {1}), value);
+    set_value(identifier {1}, value);
+    ASSERT_EQ(get_value(identifier {1}), value);
 }
 
 template<class Test>
-static auto overwrite_value(Test &test, PageId id)
+static auto overwrite_value(Test &test, identifier id)
 {
     std::string value;
     test.set_value(id, test.generate_value());
@@ -269,18 +269,18 @@ static auto overwrite_value(Test &test, PageId id)
 
 TEST_F(NormalXactTests, OverwriteValue)
 {
-    overwrite_value(*this, PageId {1});
+    overwrite_value(*this, identifier {1});
 }
 
 TEST_F(NormalXactTests, OverwriteValuesOnMultiplePages)
 {
-    overwrite_value(*this, PageId {1});
-    overwrite_value(*this, PageId {2});
-    overwrite_value(*this, PageId {3});
+    overwrite_value(*this, identifier {1});
+    overwrite_value(*this, identifier {2});
+    overwrite_value(*this, identifier {3});
 }
 
 template<class Test>
-static auto undo_xact(Test &test, SequenceId commit_lsn)
+static auto undo_xact(Test &test, identifier commit_lsn)
 {
     Recovery recovery {*test.pager, *test.wal};
     (void)test.wal->stop_workers();
@@ -296,19 +296,19 @@ static auto assert_blank_value(BytesView value)
 
 TEST_F(NormalXactTests, UndoFirstValue)
 {
-    set_value(PageId {1}, generate_value());
-    ASSERT_OK(undo_xact(*this, SequenceId::null()));
-    assert_blank_value(get_value(PageId {1}));
+    set_value(identifier {1}, generate_value());
+    ASSERT_OK(undo_xact(*this, identifier::null()));
+    assert_blank_value(get_value(identifier {1}));
 }
 
 TEST_F(NormalXactTests, UndoFirstXact)
 {
-    set_value(PageId {1}, generate_value());
-    set_value(PageId {2}, generate_value());
-    set_value(PageId {2}, generate_value());
-    ASSERT_OK(undo_xact(*this, SequenceId::null()));
-    assert_blank_value(get_value(PageId {1}));
-    assert_blank_value(get_value(PageId {2}));
+    set_value(identifier {1}, generate_value());
+    set_value(identifier {2}, generate_value());
+    set_value(identifier {2}, generate_value());
+    ASSERT_OK(undo_xact(*this, identifier::null()));
+    assert_blank_value(get_value(identifier {1}));
+    assert_blank_value(get_value(identifier {2}));
 }
 
 template<class Test>
@@ -322,12 +322,12 @@ static auto add_values(Test &test, Size n, bool allow_failure = false) -> std::v
     Size index {};
     for (const auto &value: values) {
         if (allow_failure) {
-            if (!test.try_set_value(PageId::from_index(index), value))
+            if (!test.try_set_value(identifier::from_index(index), value))
                 return {};
             if (!test.allow_cleanup().is_ok())
                 return {};
         } else {
-            test.set_value(PageId::from_index(index), value);
+            test.set_value(identifier::from_index(index), value);
             EXPECT_OK(test.allow_cleanup());
         }
         index = (index+1) % Test::PAGE_COUNT;
@@ -340,7 +340,7 @@ static auto assert_values_match(Test &test, const std::vector<std::string> &valu
 {
     Size index {};
     for (const auto &value: values) {
-        const auto id = PageId::from_index(index);
+        const auto id = identifier::from_index(index);
         ASSERT_EQ(test.get_value(id), value)
             << "error: mismatch on page " << id.value << " (" << Test::PAGE_COUNT << " pages total)";
         index = (index+1) % Test::PAGE_COUNT;
@@ -354,7 +354,7 @@ TEST_F(NormalXactTests, EmptyCommit)
 
 TEST_F(NormalXactTests, EmptyAbort)
 {
-    ASSERT_OK(undo_xact(*this, SequenceId::null()));
+    ASSERT_OK(undo_xact(*this, identifier::null()));
 }
 
 TEST_F(NormalXactTests, AbortEmptyTransaction)
@@ -420,7 +420,7 @@ TEST_F(NormalXactTests, Recover)
 
     add_values(*this, PAGE_COUNT);
 
-    SequenceId lsn;
+    identifier lsn;
     Recovery recovery {*pager, *wal};
     ASSERT_OK(recovery.start_recovery(lsn));
     ASSERT_EQ(lsn, commit_lsn);
@@ -430,11 +430,11 @@ TEST_F(NormalXactTests, Recover)
 
 class RollForwardTests: public NormalXactTests {
 public:
-    auto get_lsn_range() -> std::pair<SequenceId, SequenceId>
+    auto get_lsn_range() -> std::pair<identifier, identifier>
     {
-        std::vector<SequenceId> lsns;
+        std::vector<identifier> lsns;
         EXPECT_OK(wal->stop_workers());
-        EXPECT_OK(wal->roll_forward(SequenceId::null(), [&lsns](WalPayloadOut payload) {
+        EXPECT_OK(wal->roll_forward(identifier::null(), [&lsns](WalPayloadOut payload) {
             lsns.emplace_back(payload.lsn());
             return Status::ok();
         }));
@@ -484,7 +484,7 @@ fmt::print("seed == {}\n", internal::random_seed);
 
     const auto [first, last] = get_lsn_range();
     ASSERT_LE(first, commit_lsn);
-    ASSERT_EQ(SequenceId {last.value + 1}, wal->current_lsn());
+    ASSERT_EQ(identifier {last.value + 1}, wal->current_lsn());
 
     ASSERT_OK(undo_xact(*this, commit_lsn));
     assert_values_match(*this, committed);
@@ -1106,8 +1106,8 @@ INSTANTIATE_TEST_SUITE_P(
 
 class RecoveryFailureTestRunner {
 public:
-    explicit RecoveryFailureTestRunner(const std::string &filter_prefix)
-        : prefix {filter_prefix}
+    explicit RecoveryFailureTestRunner(std::string filter_prefix)
+        : prefix {std::move(filter_prefix)}
     {}
 
     template<class Test>

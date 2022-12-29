@@ -1,9 +1,9 @@
 #include "framer.h"
 #include "calico/storage.h"
-#include "core/header.h"
 #include "page/page.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
+#include "utils/header.h"
 #include "utils/info_log.h"
 #include "utils/layout.h"
 
@@ -17,13 +17,13 @@ Frame::Frame(Byte *buffer, Size id, Size size)
     CALICO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
 }
 
-auto Frame::lsn() const -> SequenceId
+auto Frame::lsn() const -> identifier
 {
     const auto offset = PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET;
-    return SequenceId {get_u64(m_bytes.range(offset))};
+    return identifier {get_u64(m_bytes.range(offset))};
 }
 
-auto Frame::ref(Pager &source, bool is_writable, bool is_dirty) -> Page
+auto Frame::ref(Pager &source, bool is_writable) -> Page
 {
     CALICO_EXPECT_FALSE(m_is_writable);
 
@@ -32,7 +32,7 @@ auto Frame::ref(Pager &source, bool is_writable, bool is_dirty) -> Page
         m_is_writable = true;
     }
     m_ref_count++;
-    return Page {{m_page_id, data(), &source, is_writable, is_dirty}};
+    return Page {{m_page_id, data(), &source, is_writable}};
 }
 
 auto Frame::unref(Page &page) -> void
@@ -49,7 +49,7 @@ auto Frame::unref(Page &page) -> void
     m_ref_count--;
 }
 
-auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame_count) -> Result<std::unique_ptr<Framer>>
+auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame_count, Framer **out) -> Status
 {
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
@@ -57,19 +57,19 @@ auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame
     CALICO_EXPECT_GE(frame_count, MINIMUM_FRAME_COUNT);
     CALICO_EXPECT_LE(frame_count, MAXIMUM_FRAME_COUNT);
 
+    // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
+    // potentially be used for direct I/O.
     const auto cache_size = page_size * frame_count;
     AlignedBuffer buffer {
         new(static_cast<std::align_val_t>(page_size), std::nothrow) Byte[cache_size],
         AlignedDeleter {static_cast<std::align_val_t>(page_size)}};
+    if (buffer == nullptr)
+        return Status::system_error("cannot allocate frames: out of memory");
 
-    if (!buffer) {
-        ThreePartMessage message;
-        message.set_primary("cannot open pager");
-        message.set_detail("out of memory");
-        message.set_hint("tried to allocate {} bytes of cache memory", cache_size);
-        return Err {message.system_error()};
-    }
-    return std::unique_ptr<Framer> {new Framer {std::move(file), std::move(buffer), page_size, frame_count}};
+    *out = new(std::nothrow) Framer {std::move(file), std::move(buffer), page_size, frame_count};
+    if (*out == nullptr)
+        return Status::system_error("cannot allocate framer object: out of memory");
+    return Status::ok();
 }
 
 Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
@@ -85,22 +85,24 @@ Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size pa
         m_frames.emplace_back(m_buffer.get(), m_frames.size(), page_size);
     
     while (m_available.size() < m_frames.size())
-        m_available.emplace_back(FrameNumber {m_available.size()});
+        m_available.emplace_back(Size {m_available.size()});
 }
 
-auto Framer::ref(FrameNumber id, Pager &source, bool is_writable, bool is_dirty) -> Page
+auto Framer::ref(Size id, Pager &source, bool is_writable) -> Page
 {
     CALICO_EXPECT_LT(id, m_frames.size());
-    return m_frames[id].ref(source, is_writable, is_dirty);
+    m_ref_sum++;
+    return m_frames[id].ref(source, is_writable);
 }
 
-auto Framer::unref(FrameNumber id, Page &page) -> void
+auto Framer::unref(Size id, Page &page) -> void
 {
     CALICO_EXPECT_LT(id, m_frames.size());
     m_frames[id].unref(page);
+    m_ref_sum--;
 }
 
-auto Framer::pin(PageId id) -> Result<FrameNumber>
+auto Framer::pin(identifier id) -> Result<Size>
 {
     CALICO_EXPECT_FALSE(id.is_null());
     if (m_available.empty()) {
@@ -130,22 +132,22 @@ auto Framer::pin(PageId id) -> Result<FrameNumber>
     return fid;
 }
 
-auto Framer::discard(FrameNumber id) -> void
+auto Framer::discard(Size id) -> void
 {
     CALICO_EXPECT_EQ(frame_at_impl(id).ref_count(), 0);
-    frame_at_impl(id).reset(PageId::null());
+    frame_at_impl(id).reset(identifier::null());
     m_available.emplace_back(id);
 }
 
-auto Framer::unpin(FrameNumber id) -> void
+auto Framer::unpin(Size id) -> void
 {
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
-    frame.reset(PageId::null());
+    frame.reset(identifier::null());
     m_available.emplace_back(id);
 }
 
-auto Framer::write_back(FrameNumber id) -> Status
+auto Framer::write_back(Size id) -> Status
 {
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_LE(frame.ref_count(), 1);
@@ -164,11 +166,11 @@ auto Framer::sync() -> Status
     return m_file->sync();
 }
 
-auto Framer::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
+auto Framer::read_page_from_file(identifier id, Bytes out) const -> Result<bool>
 {
     CALICO_EXPECT_EQ(m_page_size, out.size());
     const auto file_size = m_page_count * m_page_size;
-    const auto offset = FileLayout::page_offset(id, out.size());
+    const auto offset = id.as_index() * out.size();
 
     // Don't even try to call read() if the file isn't large enough. The system call can be pretty slow even if it doesn't read anything.
     // This happens when we are allocating a page from the end of the file.
@@ -193,10 +195,10 @@ auto Framer::read_page_from_file(PageId id, Bytes out) const -> Result<bool>
     return Err {message.system_error()};
 }
 
-auto Framer::write_page_to_file(PageId id, BytesView in) const -> Status
+auto Framer::write_page_to_file(identifier id, BytesView in) const -> Status
 {
     CALICO_EXPECT_EQ(m_page_size, in.size());
-    return m_file->write(in, FileLayout::page_offset(id, in.size()));
+    return m_file->write(in, id.as_index() * in.size());
 }
 
 auto Framer::load_state(const FileHeader &header) -> void
@@ -205,7 +207,7 @@ auto Framer::load_state(const FileHeader &header) -> void
     m_page_count = header.page_count;         //       Right now, the XactTests are not reloading state between transactions.
 }
 
-auto Framer::save_state(FileHeader &header) -> void
+auto Framer::save_state(FileHeader &header) const -> void
 {
     header.flushed_lsn = m_flushed_lsn.value;
     header.page_count = m_page_count;

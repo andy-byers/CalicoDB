@@ -22,26 +22,26 @@ struct DeltasDescriptor {
         BytesView data {};
     };
 
-    PageId pid;
-    SequenceId lsn;
+    identifier pid;
+    identifier lsn;
     std::vector<Delta> deltas;
 };
 
 struct FullImageDescriptor {
-    PageId pid;
-    SequenceId lsn;
+    identifier pid;
+    identifier lsn;
     BytesView image;
 };
 
 struct CommitDescriptor {
-    SequenceId lsn;
+    identifier lsn;
 };
 
 using PayloadDescriptor = std::variant<DeltasDescriptor, FullImageDescriptor, CommitDescriptor>;
 
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
-[[nodiscard]] auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
-[[nodiscard]] auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size;
+[[nodiscard]] auto encode_deltas_payload(identifier page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
+[[nodiscard]] auto encode_full_image_payload(identifier page_id, BytesView image, Bytes out) -> Size;
 [[nodiscard]] auto encode_commit_payload(Bytes out) -> Size;
 
 enum XactPayloadType : Byte {
@@ -68,13 +68,13 @@ public:
           m_wal {&wal}
     {}
 
-    [[nodiscard]] auto start_abort(SequenceId commit_lsn) -> Status;
-    [[nodiscard]] auto finish_abort(SequenceId commit_lsn) -> Status;
-    [[nodiscard]] auto start_recovery(SequenceId &commit_lsn) -> Status;
-    [[nodiscard]] auto finish_recovery(SequenceId commit_lsn) -> Status;
+    [[nodiscard]] auto start_abort(identifier commit_lsn) -> Status;
+    [[nodiscard]] auto finish_abort(identifier commit_lsn) -> Status;
+    [[nodiscard]] auto start_recovery(identifier &commit_lsn) -> Status;
+    [[nodiscard]] auto finish_recovery(identifier commit_lsn) -> Status;
 
 private:
-    [[nodiscard]] auto finish_routine(SequenceId commit_lsn) -> Status;
+    [[nodiscard]] auto finish_routine(identifier commit_lsn) -> Status;
 
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
