@@ -22,8 +22,8 @@ public:
         return m_head.is_null();
     }
 
-    [[nodiscard]] auto push(Page page) -> Result<void>;
-    [[nodiscard]] auto pop() -> Result<Page>;
+    [[nodiscard]] auto push(Page page) -> tl::expected<void, Status>;
+    [[nodiscard]] auto pop() -> tl::expected<Page, Status>;
     auto save_state(FileHeader &header) const -> void;
     auto load_state(const FileHeader &header) -> void;
 

@@ -16,7 +16,7 @@ auto FreeList::load_state(const FileHeader &header) -> void
     m_head.value = header.freelist_head;
 }
 
-auto FreeList::push(Page page) -> Result<void>
+auto FreeList::push(Page page) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(page.id().is_root());
     page.set_type(PageType::FREELIST_LINK);
@@ -28,11 +28,11 @@ auto FreeList::push(Page page) -> Result<void>
     return {};
 }
 
-auto FreeList::pop() -> Result<Page>
+auto FreeList::pop() -> tl::expected<Page, Status>
 {
     if (!m_head.is_null()) {
         return m_pager->acquire(m_head, true)
-            .and_then([&](Page page) -> Result<Page> {
+            .and_then([&](Page page) -> tl::expected<Page, Status> {
                 Link link {std::move(page)};
                 m_head = link.next_id();
                 return link.take();

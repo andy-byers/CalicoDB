@@ -19,13 +19,13 @@ public:
 
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto page_count() const -> Size;
-    [[nodiscard]] auto allocate(PageType) -> Result<Node>;
-    [[nodiscard]] auto acquire(identifier, bool) -> Result<Node>;
-    [[nodiscard]] auto release(Node) -> Result<void>;
-    [[nodiscard]] auto destroy(Node) -> Result<void>;
-    [[nodiscard]] auto allocate_chain(BytesView) -> Result<identifier>;
-    [[nodiscard]] auto destroy_chain(identifier, Size) -> Result<void>;
-    [[nodiscard]] auto collect_chain(identifier, Bytes) const -> Result<void>;
+    [[nodiscard]] auto allocate(PageType) -> tl::expected<Node, Status>;
+    [[nodiscard]] auto acquire(identifier, bool) -> tl::expected<Node, Status>;
+    [[nodiscard]] auto release(Node) -> tl::expected<void, Status>;
+    [[nodiscard]] auto destroy(Node) -> tl::expected<void, Status>;
+    [[nodiscard]] auto allocate_chain(BytesView) -> tl::expected<identifier, Status>;
+    [[nodiscard]] auto destroy_chain(identifier, Size) -> tl::expected<void, Status>;
+    [[nodiscard]] auto collect_chain(identifier, Bytes) const -> tl::expected<void, Status>;
     auto save_state(FileHeader &header) -> void;
     auto load_state(const FileHeader &header) -> void;
 

@@ -89,7 +89,7 @@ auto BPlusTree::erase(Cursor cursor) -> Status
     return cursor.status();
 }
 
-auto BPlusTree::find_aux(BytesView key) -> Result<SearchResult>
+auto BPlusTree::find_aux(BytesView key) -> tl::expected<SearchResult, Status>
 {
     if (const auto r = run_key_check(key, m_internal.maximum_key_size(), *m_logger, "cannot write record"); !r.is_ok())
         return Err {r};
@@ -184,7 +184,7 @@ auto BPlusTree::find_maximum() -> Cursor
     return cursor;
 }
 
-auto BPlusTree::root(bool is_writable) -> Result<Node>
+auto BPlusTree::root(bool is_writable) -> tl::expected<Node, Status>
 {
     if (m_pool.page_count() == 0)
         return m_pool.allocate(PageType::EXTERNAL_NODE);

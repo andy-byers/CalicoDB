@@ -66,7 +66,7 @@ class Framer final {
 public:
     ~Framer() = default;
     [[nodiscard]] static auto open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame_count, Framer **out) -> Status;
-    [[nodiscard]] auto pin(identifier) -> Result<Size>;
+    [[nodiscard]] auto pin(identifier) -> tl::expected<Size, Status>;
     [[nodiscard]] auto write_back(Size) -> Status;
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto ref(Size, Pager&, bool) -> Page;
@@ -118,7 +118,7 @@ public:
 
 private:
     Framer(std::unique_ptr<RandomEditor>, AlignedBuffer, Size, Size);
-    [[nodiscard]] auto read_page_from_file(identifier, Bytes) const -> Result<bool>;
+    [[nodiscard]] auto read_page_from_file(identifier, Bytes) const -> tl::expected<bool, Status>;
     [[nodiscard]] auto write_page_to_file(identifier, BytesView) const -> Status;
 
     [[nodiscard]]

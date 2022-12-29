@@ -38,7 +38,7 @@ auto file_exists(const std::string &name) -> Status
     return Status::ok();
 }
 
-auto file_open(const std::string &name, int mode, int permissions) -> Result<int>
+auto file_open(const std::string &name, int mode, int permissions) -> tl::expected<int, Status>
 {
     if (const auto fd = ::open(name.c_str(), mode, permissions); fd != FAILURE)
         return fd;
@@ -59,7 +59,7 @@ auto file_close(int fd) -> Status
     return Status::ok();
 }
 
-auto file_size(const std::string &path) -> Result<Size>
+auto file_size(const std::string &path) -> tl::expected<Size, Status>
 {
     std::error_code code;
     const auto size = fs::file_size(path, code);
@@ -67,7 +67,7 @@ auto file_size(const std::string &path) -> Result<Size>
     return size;
 }
 
-auto file_read(int file, Bytes out) -> Result<Size>
+auto file_read(int file, Bytes out) -> tl::expected<Size, Status>
 {
     const auto target_size = out.size();
 
@@ -81,7 +81,7 @@ auto file_read(int file, Bytes out) -> Result<Size>
     return target_size - out.size();
 }
 
-auto file_write(int file, BytesView in) -> Result<Size>
+auto file_write(int file, BytesView in) -> tl::expected<Size, Status>
 {
     const auto target_size = in.size();
 
@@ -102,7 +102,7 @@ auto file_sync(int fd) -> Status
     return Status::ok();
 }
 
-auto file_seek(int fd, long offset, int whence) -> Result<Size>
+auto file_seek(int fd, long offset, int whence) -> tl::expected<Size, Status>
 {
     if (const auto position = lseek(fd, offset, whence); position != FAILURE)
         return static_cast<Size>(position);

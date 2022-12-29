@@ -152,11 +152,11 @@ namespace tools {
         const auto FMT = fmt::format("expected record ({}, {}): {{}}\n", key, value);
         if (auto c = find_exact(t, key); c.is_valid()) {
             if (c.value() != value) {
-                fmt::print(stderr, FMT, "value \"{}\" does not match", c.value());
+                fmt::print(stderr, fmt::runtime(FMT), "value \"{}\" does not match", c.value());
                 CALICO_EXPECT_TRUE(false && "expect_contains() failed to match value");
             }
         } else {
-            fmt::print(stderr, FMT, "could not find key");
+            fmt::print(stderr, fmt::runtime(FMT), "could not find key");
             CALICO_EXPECT_TRUE(false && "expect_contains() failed to find key");
         }
     }

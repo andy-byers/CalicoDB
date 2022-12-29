@@ -120,7 +120,7 @@ private:
     bool m_owns_store {};
 };
 
-auto setup(const std::string &, Storage &, const Options &, spdlog::logger &) -> Result<InitialState>;
+auto setup(const std::string &, Storage &, const Options &, spdlog::logger &) -> tl::expected<InitialState, Status>;
 
 } // namespace calico
 

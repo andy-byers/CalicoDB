@@ -31,12 +31,12 @@ auto Internal::collect_value(const Node &node, Size index) const -> Result<std::
     return result;
 }
 
-auto Internal::find_root(bool is_writable) -> Result<Node>
+auto Internal::find_root(bool is_writable) -> tl::expected<Node, Status>
 {
     return m_pool->acquire(identifier::root(), is_writable);
 }
 
-auto Internal::find_external(BytesView key) -> Result<SearchResult>
+auto Internal::find_external(BytesView key) -> tl::expected<SearchResult, Status>
 {
     if (m_cell_count == 0)
         return SearchResult {identifier::root(), 0, false};
@@ -61,7 +61,7 @@ auto Internal::find_external(BytesView key) -> Result<SearchResult>
     return SearchResult {node->id(), index, found_eq};
 }
 
-auto Internal::find_minimum() -> Result<SearchResult>
+auto Internal::find_minimum() -> tl::expected<SearchResult, Status>
 {
     CALICO_TRY_CREATE(node, m_pool->acquire(identifier::root(), false));
     auto id = node.id();
@@ -80,7 +80,7 @@ auto Internal::find_minimum() -> Result<SearchResult>
     return SearchResult {id, 0, was_found};
 }
 
-auto Internal::find_maximum() -> Result<SearchResult>
+auto Internal::find_maximum() -> tl::expected<SearchResult, Status>
 {
     CALICO_TRY_CREATE(node, m_pool->acquire(identifier::root(), false));
     auto id = node.id();
@@ -104,7 +104,7 @@ auto Internal::find_maximum() -> Result<SearchResult>
     return SearchResult {id, index, was_found};
 }
 
-auto Internal::positioned_insert(Position position, BytesView key, BytesView value) -> Result<void>
+auto Internal::positioned_insert(Position position, BytesView key, BytesView value) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_LE(key.size(), m_maximum_key_size);
     auto [node, index] = std::move(position);
@@ -118,7 +118,7 @@ auto Internal::positioned_insert(Position position, BytesView key, BytesView val
     return m_pool->release(std::move(node));
 }
 
-auto Internal::positioned_modify(Position position, BytesView value) -> Result<void>
+auto Internal::positioned_modify(Position position, BytesView value) -> tl::expected<void, Status>
 {
     auto [node, index] = std::move(position);
     auto old_cell = node.read_cell(index);
@@ -139,7 +139,7 @@ auto Internal::positioned_modify(Position position, BytesView value) -> Result<v
     return m_pool->release(std::move(node));
 }
 
-auto Internal::positioned_remove(Position position) -> Result<void>
+auto Internal::positioned_remove(Position position) -> tl::expected<void, Status>
 {
     auto [node, index] = std::move(position);
     CALICO_EXPECT_TRUE(node.is_external());
@@ -161,7 +161,7 @@ auto Internal::positioned_remove(Position position) -> Result<void>
     return balance_after_underflow(std::move(node), stob(anchor));
 }
 
-auto Internal::balance_after_overflow(Node node) -> Result<void>
+auto Internal::balance_after_overflow(Node node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_TRUE(node.is_overflowing());
     while (node.is_overflowing()) {
@@ -174,7 +174,7 @@ auto Internal::balance_after_overflow(Node node) -> Result<void>
     return m_pool->release(std::move(node));
 }
 
-auto Internal::balance_after_underflow(Node node, BytesView anchor) -> Result<void>
+auto Internal::balance_after_underflow(Node node, BytesView anchor) -> tl::expected<void, Status>
 {
     while (node.is_underflowing()) {
         if (node.id().is_root()) {
@@ -196,7 +196,7 @@ auto Internal::balance_after_underflow(Node node, BytesView anchor) -> Result<vo
     return m_pool->release(std::move(node));
 }
 
-auto Internal::split_root(Node root) -> Result<Node>
+auto Internal::split_root(Node root) -> tl::expected<Node, Status>
 {
     CALICO_EXPECT_TRUE(root.id().is_root());
     CALICO_EXPECT_TRUE(root.is_overflowing());
@@ -209,7 +209,7 @@ auto Internal::split_root(Node root) -> Result<Node>
     return child;
 }
 
-auto Internal::split_non_root(Node node) -> Result<Node>
+auto Internal::split_non_root(Node node) -> tl::expected<Node, Status>
 {
     CALICO_EXPECT_FALSE(node.id().is_root());
     CALICO_EXPECT_FALSE(node.parent_id().is_null());
@@ -240,12 +240,12 @@ auto Internal::split_non_root(Node node) -> Result<Node>
     return parent;
 }
 
-auto Internal::maybe_fix_child_parent_connections(Node &node) -> Result<void>
+auto Internal::maybe_fix_child_parent_connections(Node &node) -> tl::expected<void, Status>
 {
     if (!node.is_external()) {
         const auto parent_id = node.id();
 
-        const auto fix_connection = [parent_id, this](identifier child_id) -> Result<void> {
+        const auto fix_connection = [parent_id, this](identifier child_id) -> tl::expected<void, Status> {
             CALICO_TRY_CREATE(child, m_pool->acquire(child_id, true));
             child.set_parent_id(parent_id);
             return m_pool->release(std::move(child));
@@ -265,7 +265,7 @@ auto Internal::maybe_fix_child_parent_connections(Node &node) -> Result<void>
  * Note that the key and value must exist until the cell is safely embedded in the tree. If
  * the tree is balanced and there are no overflow cells then this is guaranteed to be true.
  */
-auto Internal::make_cell(BytesView key, BytesView value, bool is_external) -> Result<Cell>
+auto Internal::make_cell(BytesView key, BytesView value, bool is_external) -> tl::expected<Cell, Status>
 {
     if (is_external) {
         auto cell = ::calico::make_external_cell(key, value, m_pool->page_size());
@@ -280,7 +280,7 @@ auto Internal::make_cell(BytesView key, BytesView value, bool is_external) -> Re
     }
 }
 
-auto Internal::fix_non_root(Node node, Node &parent, Size index) -> Result<bool>
+auto Internal::fix_non_root(Node node, Node &parent, Size index) -> tl::expected<bool, Status>
 {
     CALICO_EXPECT_FALSE(node.id().is_root());
     CALICO_EXPECT_FALSE(node.is_overflowing());
@@ -315,7 +315,7 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> Result<bool>
     if (!node.is_underflowing())
         return true;
 
-    auto maybe_fix_parent = [&]() -> Result<bool> {
+    auto maybe_fix_parent = [&]() -> tl::expected<bool, Status> {
         if (parent.is_overflowing()) {
             const auto id = parent.id();
             CALICO_TRY__(m_pool->release(std::move(node)));
@@ -369,7 +369,7 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> Result<bool>
     }
 }
 
-auto Internal::fix_root(Node node) -> Result<void>
+auto Internal::fix_root(Node node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_TRUE(node.id().is_root());
     CALICO_EXPECT_TRUE(node.is_underflowing());
@@ -410,7 +410,7 @@ auto Internal::load_state(const FileHeader &header) -> void
     m_cell_count = header.record_count;
 }
 
-auto Internal::rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> Result<void>
+auto Internal::rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
 {
     if (Lc.is_external()) {
         return external_rotate_left(parent, Lc, rc, index);
@@ -419,7 +419,7 @@ auto Internal::rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> Resu
     }
 }
 
-auto Internal::rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> Result<void>
+auto Internal::rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
 {
     if (Lc.is_external()) {
         return external_rotate_right(parent, Lc, rc, index);
@@ -428,7 +428,7 @@ auto Internal::rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> Res
     }
 }
 
-auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> Result<void>
+auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_GT(parent.cell_count(), 0);
@@ -449,7 +449,7 @@ auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     return {};
 }
 
-auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> Result<void>
+auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_GT(parent.cell_count(), 0);
@@ -470,7 +470,7 @@ auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     return {};
 }
 
-auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> Result<void>
+auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_FALSE(Lc.is_external());
@@ -494,7 +494,7 @@ auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     return {};
 }
 
-auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> Result<void>
+auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_FALSE(Lc.is_external());

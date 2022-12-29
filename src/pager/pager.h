@@ -29,8 +29,8 @@ public:
     [[nodiscard]] virtual auto page_size() const -> Size = 0;
     [[nodiscard]] virtual auto hit_ratio() const -> double = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
-    virtual auto allocate() -> Result<Page> = 0;
-    virtual auto acquire(identifier, bool) -> Result<Page> = 0;
+    virtual auto allocate() -> tl::expected<Page, Status> = 0;
+    virtual auto acquire(identifier, bool) -> tl::expected<Page, Status> = 0;
     virtual auto release(Page) -> Status = 0;
     virtual auto flush() -> Status = 0;
     virtual auto save_state(FileHeader &) -> void = 0;

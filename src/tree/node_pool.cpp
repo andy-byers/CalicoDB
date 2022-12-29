@@ -24,10 +24,10 @@ auto NodePool::page_count() const -> Size
     return m_pager->page_count();
 }
 
-auto NodePool::allocate(PageType type) -> Result<Node>
+auto NodePool::allocate(PageType type) -> tl::expected<Node, Status>
 {
     auto page = m_free_list.pop()
-        .or_else([this](const Status &error) -> Result<Page> {
+        .or_else([this](const Status &error) -> tl::expected<Page, Status> {
             if (error.is_logic_error())
                 return m_pager->allocate();
             return Err {error};
@@ -39,15 +39,15 @@ auto NodePool::allocate(PageType type) -> Result<Node>
     return Err {page.error()};
 }
 
-auto NodePool::acquire(identifier id, bool is_writable) -> Result<Node>
+auto NodePool::acquire(identifier id, bool is_writable) -> tl::expected<Node, Status>
 {
     return m_pager->acquire(id, is_writable)
-        .and_then([this](Page page) -> Result<Node> {
+        .and_then([this](Page page) -> tl::expected<Node, Status> {
             return Node {std::move(page), false, m_scratch.data()};
         });
 }
 
-auto NodePool::release(Node node) -> Result<void>
+auto NodePool::release(Node node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(node.is_overflowing());
     const auto s = m_pager->release(node.take());
@@ -55,13 +55,13 @@ auto NodePool::release(Node node) -> Result<void>
     return {};
 }
 
-auto NodePool::destroy(Node node) -> Result<void>
+auto NodePool::destroy(Node node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(node.is_overflowing());
     return m_free_list.push(node.take());
 }
 
-auto NodePool::allocate_chain(BytesView overflow) -> Result<identifier>
+auto NodePool::allocate_chain(BytesView overflow) -> tl::expected<identifier, Status>
 {
     CALICO_EXPECT_FALSE(overflow.is_empty());
     std::optional<Link> prev;
@@ -69,7 +69,7 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<identifier>
 
     while (!overflow.is_empty()) {
         auto page = m_free_list.pop()
-            .or_else([this](const Status &error) -> Result<Page> {
+            .or_else([this](const Status &error) -> tl::expected<Page, Status> {
                 if (error.is_logic_error())
                     return m_pager->allocate();
                 return Err {error};
@@ -99,7 +99,7 @@ auto NodePool::allocate_chain(BytesView overflow) -> Result<identifier>
     return head;
 }
 
-auto NodePool::collect_chain(identifier id, Bytes out) const -> Result<void>
+auto NodePool::collect_chain(identifier id, Bytes out) const -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
         CALICO_TRY_CREATE(page, m_pager->acquire(id, false));
@@ -121,7 +121,7 @@ auto NodePool::collect_chain(identifier id, Bytes out) const -> Result<void>
     return {};
 }
 
-auto NodePool::destroy_chain(identifier id, Size size) -> Result<void>
+auto NodePool::destroy_chain(identifier id, Size size) -> tl::expected<void, Status>
 {
     while (size) {
         auto page = m_pager->acquire(id, true);

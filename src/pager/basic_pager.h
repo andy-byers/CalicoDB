@@ -55,7 +55,7 @@ public:
 private:
     explicit BasicPager(const Parameters &);
     [[nodiscard]] auto pin_frame(identifier, bool &) -> Status;
-    [[nodiscard]] auto try_make_available() -> Result<bool>;
+    [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
     auto make_dirty(PageRegistry::Entry &entry, identifier pid) -> void;
     auto make_clean(PageRegistry::Entry &entry) -> PageList::Iterator;

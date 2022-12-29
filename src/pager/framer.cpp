@@ -102,7 +102,7 @@ auto Framer::unref(Size id, Page &page) -> void
     m_ref_sum--;
 }
 
-auto Framer::pin(identifier id) -> Result<Size>
+auto Framer::pin(identifier id) -> tl::expected<Size, Status>
 {
     CALICO_EXPECT_FALSE(id.is_null());
     if (m_available.empty()) {
@@ -166,7 +166,7 @@ auto Framer::sync() -> Status
     return m_file->sync();
 }
 
-auto Framer::read_page_from_file(identifier id, Bytes out) const -> Result<bool>
+auto Framer::read_page_from_file(identifier id, Bytes out) const -> tl::expected<bool, Status>
 {
     CALICO_EXPECT_EQ(m_page_size, out.size());
     const auto file_size = m_page_count * m_page_size;

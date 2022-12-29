@@ -28,7 +28,7 @@ public:
     virtual auto find(BytesView key) -> Cursor = 0;
     virtual auto find_minimum() -> Cursor = 0;
     virtual auto find_maximum() -> Cursor = 0;
-    virtual auto root(bool) -> Result<Node> = 0;
+    virtual auto root(bool) -> tl::expected<Node, Status> = 0;
     virtual auto save_state(FileHeader &) const -> void = 0;
     virtual auto load_state(const FileHeader &) -> void = 0;
     virtual auto TEST_validate_nodes() -> void = 0;

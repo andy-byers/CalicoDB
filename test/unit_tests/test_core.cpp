@@ -737,7 +737,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //
 //    ~MockDatabase() = default;
 //
-//    auto remove_one(const std::string &key) -> Result<void>
+//    auto remove_one(const std::string &key) -> tl::expected<void, Status>
 //    {
 //        CALICO_EXPECT_GT(core->info().record_count(), 0);
 //        CALICO_TRY_CREATE(was_erased, core->erase(core->find(stob(key))));

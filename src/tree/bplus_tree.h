@@ -28,7 +28,7 @@ public:
     [[nodiscard]] static auto open(Pager &pager, spdlog::sink_ptr sink, size_t page_size, BPlusTree **out) -> Status;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Status override;
     [[nodiscard]] auto erase(Cursor) -> Status override;
-    [[nodiscard]] auto root(bool) -> Result<Node> override;
+    [[nodiscard]] auto root(bool) -> tl::expected<Node, Status> override;
     [[nodiscard]] auto find_exact(BytesView) -> Cursor override;
     [[nodiscard]] auto find(BytesView key) -> Cursor override;
     [[nodiscard]] auto find_minimum() -> Cursor override;
@@ -46,7 +46,7 @@ private:
         bool was_found {};
     };
     BPlusTree(Pager &, spdlog::sink_ptr, Size);
-    auto find_aux(BytesView) -> Result<SearchResult>;
+    auto find_aux(BytesView) -> tl::expected<SearchResult, Status>;
 
     NodePool m_pool;
     Internal m_internal;

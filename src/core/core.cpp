@@ -465,7 +465,7 @@ auto Core::load_state() -> Status
     return s;
 }
 
-auto setup(const std::string &prefix, Storage &store, const Options &options, spdlog::logger &logger) -> Result<InitialState>
+auto setup(const std::string &prefix, Storage &store, const Options &options, spdlog::logger &logger) -> tl::expected<InitialState, Status>
 {
     const auto MSG = fmt::format("cannot initialize database at \"{}\"", prefix);
     LogMessage message {logger};
