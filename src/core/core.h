@@ -5,7 +5,7 @@
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/spdlog.h"
 #include "utils/header.h"
-#include "utils/result.h"
+#include <tl/expected.hpp>
 #include "wal/helpers.h"
 #include <unordered_set>
 
@@ -114,8 +114,8 @@ private:
     std::unique_ptr<Tree> m_tree;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
-    std::unordered_set<identifier, identifier::hash> m_images;
-    identifier m_commit_lsn;
+    std::unordered_set<Id, Id::Hash> m_images;
+    Id m_commit_lsn;
     Storage *m_store {};
     bool m_has_xact {};
     bool m_owns_store {};

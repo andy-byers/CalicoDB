@@ -17,7 +17,7 @@ public:
     friend class calico::Frame;
 
     struct Parameters {
-        identifier id;
+        Id id;
         Bytes data;
         Pager *source {};
         bool is_writable {};
@@ -31,15 +31,15 @@ public:
         return m_is_writable;
     }
 
-    [[nodiscard]] auto id() const -> identifier;
+    [[nodiscard]] auto id() const -> Id;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto view(Size) const -> BytesView;
     [[nodiscard]] auto view(Size, Size) const -> BytesView;
     [[nodiscard]] auto type() const -> PageType;
-    [[nodiscard]] auto lsn() const -> identifier;
+    [[nodiscard]] auto lsn() const -> Id;
     [[nodiscard]] auto collect_deltas() -> std::vector<PageDelta>;
     auto set_type(PageType) -> void;
-    auto set_lsn(identifier) -> void;
+    auto set_lsn(Id) -> void;
     auto read(Bytes, Size) const -> void;
     auto bytes(Size) -> Bytes;
     auto bytes(Size, Size) -> Bytes;
@@ -57,7 +57,7 @@ private:
     std::vector<PageDelta> m_deltas;
     UniqueNullable<Pager *> m_source;
     Bytes m_data;
-    identifier m_id;
+    Id m_id;
     bool m_is_writable {};
 };
 

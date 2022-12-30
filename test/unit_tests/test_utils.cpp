@@ -418,26 +418,26 @@ auto run_ordering_comparisons()
 
 TEST(SimpleDSLTests, TypesAreSizedCorrectly)
 {
-    identifier id {};
-    static_assert(sizeof(identifier) == sizeof(id.value));
-    static_assert(sizeof(identifier) == sizeof(id.value));
+    Id id {};
+    static_assert(sizeof(Id) == sizeof(id.value));
+    static_assert(sizeof(Id) == sizeof(id.value));
 }
 
 TEST(SimpleDSLTests, IdentifiersAreNullable)
 {
-    run_nullability_check<identifier>();
-    ASSERT_FALSE(identifier::root().is_null());
-    ASSERT_TRUE(identifier::root().is_root());
+    run_nullability_check<Id>();
+    ASSERT_FALSE(Id::root().is_null());
+    ASSERT_TRUE(Id::root().is_root());
 }
 
 TEST(SimpleDSLTests, IdentifiersAreEqualityComparable)
 {
-    run_equality_comparisons<identifier>();
+    run_equality_comparisons<Id>();
 }
 
 TEST(SimpleDSLTests, IdentifiersAreOrderable)
 {
-    run_ordering_comparisons<identifier>();
+    run_ordering_comparisons<Id>();
 }
 
 TEST(TestUniqueNullable, ResourceIsMoved)
@@ -452,7 +452,7 @@ TEST(TestUniqueNullable, ResourceIsMoved)
 
 TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 {
-    const auto start = NodeLayout::header_offset(identifier {2}) +
+    const auto start = NodeLayout::header_offset(Id {2}) +
                        NodeLayout::HEADER_SIZE +
                        CELL_POINTER_SIZE;
     Size page_size {MINIMUM_PAGE_SIZE};
@@ -554,6 +554,12 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     ASSERT_TRUE(dst.is_invalid_argument());
     ASSERT_TRUE(src.what().empty());
     ASSERT_EQ(dst.what(), "status message");
+}
+
+TEST(StatusTests, FmtPrint)
+{
+    auto s = Status::system_error("{1}::{0}", 123, 42);
+    ASSERT_EQ(s.what(), "42::123");
 }
 
 // Modified from RocksDB.

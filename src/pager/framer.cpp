@@ -1,4 +1,5 @@
 #include "framer.h"
+#include "pager.h"
 #include "calico/storage.h"
 #include "page/page.h"
 #include "utils/encoding.h"
@@ -17,10 +18,10 @@ Frame::Frame(Byte *buffer, Size id, Size size)
     CALICO_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
 }
 
-auto Frame::lsn() const -> identifier
+auto Frame::lsn() const -> Id
 {
     const auto offset = PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET;
-    return identifier {get_u64(m_bytes.range(offset))};
+    return Id {get_u64(m_bytes.range(offset))};
 }
 
 auto Frame::ref(Pager &source, bool is_writable) -> Page
@@ -49,13 +50,17 @@ auto Frame::unref(Page &page) -> void
     m_ref_count--;
 }
 
-auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame_count, Framer **out) -> Status
+auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<Framer, Status>
 {
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
     CALICO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
     CALICO_EXPECT_GE(frame_count, MINIMUM_FRAME_COUNT);
     CALICO_EXPECT_LE(frame_count, MAXIMUM_FRAME_COUNT);
+
+    RandomEditor *temp_file {};
+    auto s = storage->open_random_editor(prefix + DATA_FILENAME, &temp_file);
+    std::unique_ptr<RandomEditor> file {temp_file};
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
@@ -64,12 +69,9 @@ auto Framer::open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame
         new(static_cast<std::align_val_t>(page_size), std::nothrow) Byte[cache_size],
         AlignedDeleter {static_cast<std::align_val_t>(page_size)}};
     if (buffer == nullptr)
-        return Status::system_error("cannot allocate frames: out of memory");
+        return tl::make_unexpected(Status::system_error("cannot allocate frames: out of memory"));
 
-    *out = new(std::nothrow) Framer {std::move(file), std::move(buffer), page_size, frame_count};
-    if (*out == nullptr)
-        return Status::system_error("cannot allocate framer object: out of memory");
-    return Status::ok();
+    return Framer {std::move(file), std::move(buffer), page_size, frame_count};
 }
 
 Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
@@ -102,7 +104,7 @@ auto Framer::unref(Size id, Page &page) -> void
     m_ref_sum--;
 }
 
-auto Framer::pin(identifier id) -> tl::expected<Size, Status>
+auto Framer::pin(Id id) -> tl::expected<Size, Status>
 {
     CALICO_EXPECT_FALSE(id.is_null());
     if (m_available.empty()) {
@@ -110,7 +112,7 @@ auto Framer::pin(identifier id) -> tl::expected<Size, Status>
         message.set_primary("could not pin page");
         message.set_detail("unable to find an available frame");
         message.set_hint("unpin a page and try again");
-        return Err {message.not_found()};
+        return tl::make_unexpected(message.not_found());
     }
 
     auto &frame = frame_at_impl(m_available.back());
@@ -123,7 +125,7 @@ auto Framer::pin(identifier id) -> tl::expected<Size, Status>
             m_page_count++;
         }
     } else {
-        return Err {r.error()};
+        return tl::make_unexpected(r.error());
     }
 
     auto fid = m_available.back();
@@ -135,7 +137,7 @@ auto Framer::pin(identifier id) -> tl::expected<Size, Status>
 auto Framer::discard(Size id) -> void
 {
     CALICO_EXPECT_EQ(frame_at_impl(id).ref_count(), 0);
-    frame_at_impl(id).reset(identifier::null());
+    frame_at_impl(id).reset(Id::null());
     m_available.emplace_back(id);
 }
 
@@ -143,7 +145,7 @@ auto Framer::unpin(Size id) -> void
 {
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
-    frame.reset(identifier::null());
+    frame.reset(Id::null());
     m_available.emplace_back(id);
 }
 
@@ -166,7 +168,7 @@ auto Framer::sync() -> Status
     return m_file->sync();
 }
 
-auto Framer::read_page_from_file(identifier id, Bytes out) const -> tl::expected<bool, Status>
+auto Framer::read_page_from_file(Id id, Bytes out) const -> tl::expected<bool, Status>
 {
     CALICO_EXPECT_EQ(m_page_size, out.size());
     const auto file_size = m_page_count * m_page_size;
@@ -178,7 +180,7 @@ auto Framer::read_page_from_file(identifier id, Bytes out) const -> tl::expected
         return false;
 
     auto s = m_file->read(out, offset);
-    if (!s.is_ok()) return Err {s};
+    if (!s.is_ok()) return tl::make_unexpected(s);
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
     if (out.size() == m_page_size)
@@ -192,10 +194,10 @@ auto Framer::read_page_from_file(identifier id, Bytes out) const -> tl::expected
     message.set_primary("could not read page {}", id.value);
     message.set_detail("incomplete read");
     message.set_hint("read {}/{} bytes", out.size(), m_page_size);
-    return Err {message.system_error()};
+    return tl::make_unexpected(message.system_error());
 }
 
-auto Framer::write_page_to_file(identifier id, BytesView in) const -> Status
+auto Framer::write_page_to_file(Id id, BytesView in) const -> Status
 {
     CALICO_EXPECT_EQ(m_page_size, in.size());
     return m_file->write(in, id.as_index() * in.size());

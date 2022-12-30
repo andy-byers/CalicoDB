@@ -17,35 +17,25 @@ namespace fs = std::filesystem;
         if (!calico_s.is_ok()) return forward_status(calico_s, message); \
     } while (0)
 
-auto BasicPager::open(const Parameters &param, BasicPager **out) -> Status
+auto BasicPager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
 {
-    *out = new (std::nothrow) BasicPager {param};
-    if (*out == nullptr)
-        return Status::system_error("could not allocate pager object: out of memory");
-
-    // Open the database file.
-    RandomEditor *temp_file {};
-    auto s = param.storage->open_random_editor(param.prefix + DATA_FILENAME, &temp_file);
-    std::unique_ptr<RandomEditor> file {temp_file};
-
-    if (s.is_ok()) {
-        // Allocate the frames.
-        Framer *temp;
-        s = Framer::open(
-            std::move(file),
-            param.page_size,
-            param.frame_count,
-            &temp);
-        (*out)->m_framer.reset(temp);
-    }
-    // Caller is only responsible for freeing this memory if the returned status is OK.
-    if (!s.is_ok())
-        delete *out;
-    return s;
+    auto framer = Framer::open(
+        param.prefix,
+        param.storage,
+        param.page_size,
+        param.frame_count);
+    if (!framer.has_value())
+        return tl::make_unexpected(framer.error());
+    
+    auto ptr = Pager::Ptr {new (std::nothrow) BasicPager {param, std::move(*framer)}};
+    if (ptr == nullptr)
+        return tl::make_unexpected(Status::system_error("could not allocate pager object: out of memory"));
+    return ptr;
 }
 
-BasicPager::BasicPager(const Parameters &param)
-    : m_logger {create_logger(param.log_sink, "pager")},
+BasicPager::BasicPager(const Parameters &param, Framer framer)
+    : m_framer {std::move(framer)},
+      m_logger {create_logger(param.log_sink, "pager")},
       m_images {param.images},
       m_scratch {param.scratch},
       m_wal {param.wal},
@@ -58,12 +48,12 @@ BasicPager::BasicPager(const Parameters &param)
 
 auto BasicPager::page_count() const -> Size
 {
-    return m_framer->page_count();
+    return m_framer.page_count();
 }
 
 auto BasicPager::page_size() const -> Size
 {
-    return m_framer->page_size();
+    return m_framer.page_size();
 }
 
 auto BasicPager::hit_ratio() const -> double
@@ -71,13 +61,13 @@ auto BasicPager::hit_ratio() const -> double
     return m_registry.hit_ratio();
 }
 
-auto BasicPager::pin_frame(identifier pid, bool &is_fragile) -> Status
+auto BasicPager::pin_frame(Id pid, bool &is_fragile) -> Status
 {
     static constexpr auto MSG = "could not pin frame: out of frames";
     CALICO_EXPECT_FALSE(m_registry.contains(pid));
     is_fragile = true;
 
-    if (!m_framer->available()) {
+    if (!m_framer.available()) {
         const auto r = try_make_available();
         if (!r.has_value()) return r.error();
 
@@ -91,7 +81,7 @@ auto BasicPager::pin_frame(identifier pid, bool &is_fragile) -> Status
     }
     // Read the page into a frame.
     is_fragile = false;
-    auto r = m_framer->pin(pid);
+    auto r = m_framer.pin(pid);
     if (!r.has_value()) return r.error();
 
     // Associate the page ID with the frame index we got from the framer.
@@ -102,16 +92,16 @@ auto BasicPager::pin_frame(identifier pid, bool &is_fragile) -> Status
 auto BasicPager::clean_page(PageRegistry::Entry &entry) -> PageList::Iterator
 {
     auto next = m_dirty.remove(*entry.dirty_token);
-    entry.record_lsn = identifier::null();
+    entry.record_lsn = Id::null();
     entry.dirty_token.reset();
     return next;
 }
 
-auto BasicPager::flush(identifier target_lsn) -> Status
+auto BasicPager::flush(Id target_lsn) -> Status
 {
     static constexpr auto MSG = "could not flush";
     m_logger->info("flushing cached database pages");
-    CALICO_EXPECT_EQ(m_framer->ref_sum(), 0);
+    CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);
 
     // An LSN of NULL causes all pages to be flushed.
     if (target_lsn.is_null())
@@ -123,13 +113,13 @@ auto BasicPager::flush(identifier target_lsn) -> Status
         auto &entry = m_registry.get(page_id)->value;
         const auto frame_id = entry.frame_index;
         const auto record_lsn = entry.record_lsn;
-        const auto page_lsn = m_framer->frame_at(frame_id).lsn();
+        const auto page_lsn = m_framer.frame_at(frame_id).lsn();
         auto s = Status::ok();
 
-        if (page_id.as_index() >= m_framer->page_count()) {
+        if (page_id.as_index() >= m_framer.page_count()) {
             // Page is out of range (abort was called and the database got smaller).
             m_registry.erase(page_id);
-            m_framer->unpin(frame_id);
+            m_framer.unpin(frame_id);
         } else if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
             LogMessage message {*m_logger};
@@ -140,7 +130,7 @@ auto BasicPager::flush(identifier target_lsn) -> Status
             continue;
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
-            s = m_framer->write_back(frame_id);
+            s = m_framer.write_back(frame_id);
             save_and_forward_status(s, MSG);
         } else {
             // Page doesn't need to be flushed yet.
@@ -151,19 +141,19 @@ auto BasicPager::flush(identifier target_lsn) -> Status
         itr = clean_page(entry);
         MAYBE_FORWARD(s, MSG);
     }
-    return m_framer->sync();
+    return m_framer.sync();
 }
 
-auto BasicPager::flushed_lsn() const -> identifier
+auto BasicPager::flushed_lsn() const -> Id
 {
-    return m_framer->flushed_lsn();
+    return m_framer.flushed_lsn();
 }
 
 auto BasicPager::try_make_available() -> tl::expected<bool, Status>
 {
-    identifier page_id;
+    Id page_id;
     auto evicted = m_registry.evict([&](auto id, auto entry) {
-        const auto &frame = m_framer->frame_at(entry.frame_index);
+        const auto &frame = m_framer.frame_at(entry.frame_index);
         page_id = id;
 
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to evict.
@@ -190,11 +180,11 @@ auto BasicPager::try_make_available() -> tl::expected<bool, Status>
     auto s = Status::ok();
     if (dirty_token) {
         // NOTE: We don't update the record LSN field because we are getting rid of this page.
-        s = m_framer->write_back(frame_index);
+        s = m_framer.write_back(frame_index);
         clean_page(*evicted);
     }
-    m_framer->unpin(frame_index);
-    if (!s.is_ok()) return Err {s};
+    m_framer.unpin(frame_index);
+    if (!s.is_ok()) return tl::make_unexpected(s);
     return true;
 }
 
@@ -206,29 +196,34 @@ auto BasicPager::release(Page page) -> Status
     if (const auto deltas = page.collect_deltas(); m_wal->is_working() && !deltas.empty()) {
         CALICO_EXPECT_TRUE(page.is_writable());
 
-        // Write the next LSN to the page. Note that this change will be recorded in the delta record we are about to write.
+        // Write the next LSN to the page. Note that this change will be recorded in the delta record we are
+        // about to write.
         const auto lsn = m_wal->current_lsn();
         page.set_lsn(lsn);
 
+        // Convert the deltas into a WAL payload, written to scratch memory.
         WalPayloadIn payload {lsn, m_scratch->get()};
-        const auto size = encode_deltas_payload(page.id(), page.view(0), page.collect_deltas(), payload.data());
+        const auto size = encode_deltas_payload(
+            page.id(), page.view(0),
+            page.collect_deltas(), payload.data());
         payload.shrink_to_fit(size);
 
+        // Log the delta record.
         s = m_wal->log(payload);
         save_and_forward_status(s, "could not write page deltas to WAL");
     }
     std::lock_guard lock {m_mutex};
-    CALICO_EXPECT_GT(m_framer->ref_sum(), 0);
+    CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
 
     // This page must already be acquired.
     auto itr = m_registry.get(page.id());
     CALICO_EXPECT_NE(itr, m_registry.end());
     auto &entry = itr->value;
-    m_framer->unref(entry.frame_index, page);
+    m_framer.unref(entry.frame_index, page);
 
     // Note that the commit LSN is always less than or equal to the WAL flushed LSN.
     if (entry.dirty_token && entry.record_lsn < *m_commit_lsn) {
-        s = m_framer->write_back(entry.frame_index);
+        s = m_framer.write_back(entry.frame_index);
         save_and_forward_status(s, "could not write back old page");
         if (s.is_ok()) clean_page(entry);
     }
@@ -238,7 +233,7 @@ auto BasicPager::release(Page page) -> Status
 auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
 {
     // This function needs external synchronization!
-    CALICO_EXPECT_GT(m_framer->ref_sum(), 0);
+    CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
 
     // Make sure this page is in the dirty list. LSN is saved to determine when the page should be written back.
     if (!entry.dirty_token) {
@@ -267,26 +262,26 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
 auto BasicPager::save_state(FileHeader &header) -> void
 {
     m_logger->info("saving header fields");
-    m_framer->save_state(header);
+    m_framer.save_state(header);
 }
 
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
     m_logger->info("loading header fields");
-    m_framer->load_state(header);
+    m_framer.load_state(header);
 }
 
 auto BasicPager::allocate() -> tl::expected<Page, Status>
 {
-    return acquire(identifier::from_index(m_framer->page_count()), true);
+    return acquire(Id::from_index(m_framer.page_count()), true);
 }
 
-auto BasicPager::acquire(identifier id, bool is_writable) -> tl::expected<Page, Status>
+auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
 {
     using std::end;
 
     const auto do_acquire = [this, is_writable](auto &entry) {
-        auto page = m_framer->ref(entry.frame_index, *this, is_writable);
+        auto page = m_framer.ref(entry.frame_index, *this, is_writable);
 
         // We write a full image WAL record for the page if we are acquiring it as writable for the first time. This is part of the reason we should never
         // acquire a writable page unless we intend to write to it immediately. This way we keep the surface between the Pager interface and Page small
@@ -300,7 +295,7 @@ auto BasicPager::acquire(identifier id, bool is_writable) -> tl::expected<Page, 
 
     // A fatal error has occurred.
     if (!m_status->is_ok())
-        return Err {*m_status};
+        return tl::make_unexpected(*m_status);
 
     if (auto itr = m_registry.get(id); itr != end(m_registry))
         return do_acquire(itr->value);
@@ -322,10 +317,10 @@ auto BasicPager::acquire(identifier id, bool is_writable) -> tl::expected<Page, 
                 m_logger->error("setting database error state");
                 *m_status = s;
             }
-            return Err {s};
+            return tl::make_unexpected(s);
         }
         s = m_wal->worker_status();
-        if (!s.is_ok()) return Err {s};
+        if (!s.is_ok()) return tl::make_unexpected(s);
     }
 
     auto itr = m_registry.get(id);

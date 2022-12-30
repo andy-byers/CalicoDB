@@ -55,7 +55,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 //
 //auto TreePrinter::print(Size indentation) -> void
 //{
-//    print_aux(m_tree.pool().acquire(identifier::root(), false).value(), 0);
+//    print_aux(m_tree.pool().acquire(Id::root(), false).value(), 0);
 //
 //    for (auto &level: m_levels)
 //        fmt::print("{}{}\n", std::string(indentation, ' '), level);

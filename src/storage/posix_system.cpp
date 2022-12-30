@@ -47,9 +47,9 @@ auto file_open(const std::string &name, int mode, int permissions) -> tl::expect
         ThreePartMessage message;
         message.set_primary("could not open file");
         message.set_detail("no such file or directory \"{}\"", name);
-        return Err {message.not_found()};
+        return tl::make_unexpected(message.not_found());
     }
-    return Err {error()};
+    return tl::make_unexpected(error());
 }
 
 auto file_close(int fd) -> Status
@@ -63,7 +63,7 @@ auto file_size(const std::string &path) -> tl::expected<Size, Status>
 {
     std::error_code code;
     const auto size = fs::file_size(path, code);
-    if (code) return Err {Status::system_error(code.message())};
+    if (code) return tl::make_unexpected(Status::system_error(code.message()));
     return size;
 }
 
@@ -75,7 +75,7 @@ auto file_read(int file, Bytes out) -> tl::expected<Size, Status>
         if (const auto n = ::read(file, out.data(), out.size()); n != FAILURE) {
             out.advance(static_cast<Size>(n));
         } else if (errno != EINTR) {
-            return Err {error()};
+            return tl::make_unexpected(error());
         }
     }
     return target_size - out.size();
@@ -89,7 +89,7 @@ auto file_write(int file, BytesView in) -> tl::expected<Size, Status>
         if (const auto n = ::write(file, in.data(), in.size()); n != FAILURE) {
             in.advance(static_cast<Size>(n));
         } else if (errno != EINTR) {
-            return Err {error()};
+            return tl::make_unexpected(error());
         }
     }
     return target_size - in.size();
@@ -106,7 +106,7 @@ auto file_seek(int fd, long offset, int whence) -> tl::expected<Size, Status>
 {
     if (const auto position = lseek(fd, offset, whence); position != FAILURE)
         return static_cast<Size>(position);
-    return Err {error()};
+    return tl::make_unexpected(error());
 }
 
 auto file_remove(const std::string &path) -> Status

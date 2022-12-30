@@ -23,11 +23,11 @@ public:
         std::string prefix;
         Storage *storage {};
         LogScratchManager *scratch {};
-        std::unordered_set<identifier, identifier::hash> *images {};
+        std::unordered_set<Id, Id::Hash> *images {};
         WriteAheadLog *wal {};
         Status *status {};
         bool *has_xact {};
-        identifier *commit_lsn {};
+        Id *commit_lsn {};
         spdlog::sink_ptr log_sink;
         Size frame_count {};
         Size page_size {};
@@ -35,15 +35,16 @@ public:
 
     ~BasicPager() override = default;
 
+    [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>;
     [[nodiscard]] static auto open(const Parameters &param, BasicPager **out) -> Status;
     [[nodiscard]] auto page_count() const -> Size override;
     [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto hit_ratio() const -> double override;
-    [[nodiscard]] auto flushed_lsn() const -> identifier override;
+    [[nodiscard]] auto flushed_lsn() const -> Id override;
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status> override;
-    [[nodiscard]] auto acquire(identifier, bool) -> tl::expected<Page, Status> override;
+    [[nodiscard]] auto acquire(Id, bool) -> tl::expected<Page, Status> override;
     [[nodiscard]] auto release(Page) -> Status override;
-    [[nodiscard]] auto flush(identifier target_lsn) -> Status override;
+    [[nodiscard]] auto flush(Id target_lsn) -> Status override;
     auto save_state(FileHeader &) -> void override;
     auto load_state(const FileHeader &) -> void override;
 
@@ -54,8 +55,8 @@ public:
     }
 
 private:
-    explicit BasicPager(const Parameters &);
-    [[nodiscard]] auto pin_frame(identifier, bool &) -> Status;
+    explicit BasicPager(const Parameters &, Framer framer);
+    [[nodiscard]] auto pin_frame(Id, bool &) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
     auto clean_page(PageRegistry::Entry &entry) -> PageList::Iterator;
@@ -79,16 +80,16 @@ private:
     }
 
     mutable std::mutex m_mutex;
-    std::unique_ptr<Framer> m_framer;
-    std::shared_ptr<spdlog::logger> m_logger;
-    std::unordered_set<identifier, identifier::hash> *m_images {};
-    LogScratchManager *m_scratch {};
-    WriteAheadLog *m_wal {};
+    Framer m_framer;
     PageList m_dirty;
     PageRegistry m_registry;
+    std::shared_ptr<spdlog::logger> m_logger;
+    std::unordered_set<Id, Id::Hash> *m_images {};
+    LogScratchManager *m_scratch {};
+    WriteAheadLog *m_wal {};
     Status *m_status {};
     bool *m_has_xact {};
-    identifier *m_commit_lsn {};
+    Id *m_commit_lsn {};
 };
 
 } // namespace calico

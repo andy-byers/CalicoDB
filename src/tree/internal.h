@@ -17,7 +17,7 @@ public:
     };
 
     struct SearchResult {
-        identifier id;
+        Id id;
         Size index {};
         bool was_found {};
     };
@@ -30,7 +30,7 @@ public:
     explicit Internal(NodePool &);
 
     ~Internal() = default;
-    [[nodiscard]] auto collect_value(const Node &, Size) const -> Result<std::string>;
+    [[nodiscard]] auto collect_value(const Node &, Size) const -> tl::expected<std::string, Status>;
     [[nodiscard]] auto find_external(BytesView) -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto find_minimum() -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto find_maximum() -> tl::expected<SearchResult, Status>;

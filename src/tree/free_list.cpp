@@ -24,7 +24,7 @@ auto FreeList::push(Page page) -> tl::expected<void, Status>
     link.set_next_id(m_head);
     m_head = link.page().id();
     const auto s = m_pager->release(link.take());
-    if (!s.is_ok()) return Err {s}; // TODO
+    if (!s.is_ok()) return tl::make_unexpected(s); // TODO
     return {};
 }
 
@@ -39,7 +39,7 @@ auto FreeList::pop() -> tl::expected<Page, Status>
             });
     }
     CALICO_EXPECT_TRUE(m_head.is_null());
-    return Err {Status::logic_error("cannot pop page: free list is empty")};
+    return tl::make_unexpected(Status::logic_error("cannot pop page: free list is empty"));
 }
 
 } // namespace calico

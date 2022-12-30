@@ -381,17 +381,17 @@ public:
 
 TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 {
-    registry.put(identifier {11UL}, {Size {11UL}});
-    registry.put(identifier {12UL}, {Size {12UL}});
-    registry.put(identifier {13UL}, {Size {13UL}});
-    registry.put(identifier {1UL}, {Size {1UL}});
-    registry.put(identifier {2UL}, {Size {2UL}});
-    registry.put(identifier {3UL}, {Size {3UL}});
+    registry.put(Id {11UL}, {Size {11UL}});
+    registry.put(Id {12UL}, {Size {12UL}});
+    registry.put(Id {13UL}, {Size {13UL}});
+    registry.put(Id {1UL}, {Size {1UL}});
+    registry.put(Id {2UL}, {Size {2UL}});
+    registry.put(Id {3UL}, {Size {3UL}});
     ASSERT_EQ(registry.size(), 6);
 
-    ASSERT_EQ(registry.get(identifier {11UL})->value.frame_index, 11UL);
-    ASSERT_EQ(registry.get(identifier {12UL})->value.frame_index, 12UL);
-    ASSERT_EQ(registry.get(identifier {13UL})->value.frame_index, 13UL);
+    ASSERT_EQ(registry.get(Id {11UL})->value.frame_index, 11UL);
+    ASSERT_EQ(registry.get(Id {12UL})->value.frame_index, 12UL);
+    ASSERT_EQ(registry.get(Id {13UL})->value.frame_index, 13UL);
 
     Size i {}, j {};
 
@@ -409,50 +409,41 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 class FramerTests : public testing::Test {
 public:
     explicit FramerTests()
-        : home {std::make_unique<HeapStorage>()}
-    {
-        std::unique_ptr<RandomEditor> file;
-        RandomEditor *temp_file {};
-        EXPECT_TRUE(home->open_random_editor(DATA_FILENAME, &temp_file).is_ok());
-        file.reset(temp_file);
-
-        Framer *temp;
-        auto s = Framer::open(std::move(file), 0x100, 8, &temp);
-        EXPECT_TRUE(s.is_ok());
-        framer.reset(temp);
-    }
+        : home {std::make_unique<HeapStorage>()},
+          framer {*Framer::open(DATA_FILENAME, home.get(), 0x100, 8)}
+    {}
 
     ~FramerTests() override = default;
 
     std::unique_ptr<HeapStorage> home;
-    std::unique_ptr<Framer> framer;
+    Framer framer;
 };
 
 TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
 {
-    ASSERT_EQ(framer->available(), 8);
-    ASSERT_EQ(framer->page_count(), 0);
-    ASSERT_TRUE(framer->flushed_lsn().is_null());
+    ASSERT_EQ(framer.available(), 8);
+    ASSERT_EQ(framer.page_count(), 0);
+    ASSERT_TRUE(framer.flushed_lsn().is_null());
 }
 
 TEST_F(FramerTests, KeepsTrackOfAvailableFrames)
 {
-    auto frame_id = framer->pin(identifier::root()).value();
-    ASSERT_EQ(framer->available(), 7);
-    framer->discard(frame_id);
-    ASSERT_EQ(framer->available(), 8);
+    auto frame_id = framer.pin(Id::root()).value();
+    ASSERT_EQ(framer.available(), 7);
+    framer.discard(frame_id);
+    ASSERT_EQ(framer.available(), 8);
 }
 
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
     for (Size i {1}; i <= 8; i++)
-        ASSERT_TRUE(framer->pin(identifier {i}));
-    const auto r = framer->pin(identifier {9UL});
+        ASSERT_TRUE(framer.pin(Id {i}));
+    const auto r = framer.pin(Id {9UL});
     ASSERT_FALSE(r.has_value());
     ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
 
-    framer->unpin(Size {1UL});
-    ASSERT_TRUE(framer->pin(identifier {9UL}));
+    framer.unpin(Size {1UL});
+    ASSERT_TRUE(framer.pin(Id {9UL}));
 }
 
 auto write_to_page(Page &page, const std::string &message) -> void
@@ -482,8 +473,7 @@ public:
         : wal {std::make_unique<DisabledWriteAheadLog>()},
           scratch {wal_scratch_size(page_size)}
     {
-        BasicPager *temp;
-        const auto s = BasicPager::open({
+        auto r = BasicPager::open({
             PREFIX,
             store.get(),
             &scratch,
@@ -495,9 +485,9 @@ public:
             create_sink(),
             frame_count,
             page_size,
-        }, &temp);
-        EXPECT_TRUE(s.is_ok());
-        pager.reset(temp);
+        });
+        EXPECT_TRUE(r.has_value());
+        pager = std::move(*r);
     }
 
     ~PagerTests() override = default;
@@ -522,7 +512,7 @@ public:
     }
 
     [[nodiscard]]
-    auto acquire_write(identifier id, const std::string &message) const
+    auto acquire_write(Id id, const std::string &message) const
     {
         auto r = pager->acquire(id, false);
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
@@ -530,7 +520,7 @@ public:
         return std::move(*r);
     }
 
-    auto acquire_write_release(identifier id, const std::string &message) const
+    auto acquire_write_release(Id id, const std::string &message) const
     {
         auto page = acquire_write(id, message);
         const auto s = pager->release(std::move(page));
@@ -538,7 +528,7 @@ public:
     }
 
     [[nodiscard]]
-    auto acquire_read_release(identifier id, Size size) const
+    auto acquire_read_release(Id id, Size size) const
     {
         auto r = pager->acquire(id, false);
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
@@ -549,8 +539,8 @@ public:
 
     Status status {Status::ok()};
     bool has_xact {};
-    identifier commit_lsn;
-    std::unordered_set<identifier, identifier::hash> images;
+    Id commit_lsn;
+    std::unordered_set<Id, Id::Hash> images;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
     LogScratchManager scratch;
@@ -559,7 +549,7 @@ public:
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
-    ASSERT_EQ(pager->flushed_lsn(), identifier::null());
+    ASSERT_EQ(pager->flushed_lsn(), Id::null());
     ASSERT_TRUE(pager->status().is_ok());
 }
 
@@ -576,7 +566,7 @@ TEST_F(PagerTests, AllocationInceasesPageCount)
 TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 {
     auto id = allocate_write_release(test_message);
-    ASSERT_EQ(id, identifier::root());
+    ASSERT_EQ(id, Id::root());
 }
 
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
@@ -584,7 +574,7 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
     const auto id = allocate_write_release(test_message);
     auto r = pager->acquire(id, false);
     ASSERT_EQ(id, r->id());
-    ASSERT_EQ(id, identifier::root());
+    ASSERT_EQ(id, Id::root());
     EXPECT_TRUE(pager->release(std::move(*r)).is_ok());
 }
 
@@ -661,7 +651,7 @@ TEST_F(PagerTests, SanityCheck)
         [[maybe_unused]] const auto unused = allocate_write_release(id);
 
     for (const auto &id: ids) { // NOTE: gtest assertion macros sometimes complain if braces are omitted.
-        ASSERT_EQ(id, acquire_read_release(identifier {std::stoull(id)}, id.size()));
+        ASSERT_EQ(id, acquire_read_release(Id {std::stoull(id)}, id.size()));
     }
 }
 

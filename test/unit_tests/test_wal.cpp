@@ -95,7 +95,7 @@ TEST_P(WalPayloadSizeLimitTests, LargestPossibleRecord)
     for (Size i {}; i < GetParam(); i += 2)
         deltas.emplace_back(PageDelta {i, 1});
 
-    auto size = encode_deltas_payload(identifier {2}, stob(image), deltas, stob(scratch));
+    auto size = encode_deltas_payload(Id {2}, stob(image), deltas, stob(scratch));
     ASSERT_GE(size + WalPayloadHeader::SIZE, min_size) << "Excessive scratch memory allocated";
     ASSERT_LE(size + WalPayloadHeader::SIZE, max_size) << "Scratch memory cannot fit maximally sized WAL record payload";
 }
@@ -201,7 +201,7 @@ public:
 
 TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
 {
-    const auto size = encode_full_image_payload(identifier::root(), image, stob(scratch).range(8));
+    const auto size = encode_full_image_payload(Id::root(), image, stob(scratch).range(8));
     put_u64(scratch, 2); // LSN
     WalPayloadOut out {Bytes {scratch}.truncate(size + 8)};
     const auto payload = decode_payload(out);
@@ -216,7 +216,7 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(image);
-    const auto size = encode_deltas_payload(identifier::root(), image, deltas, stob(scratch).range(8));
+    const auto size = encode_deltas_payload(Id::root(), image, deltas, stob(scratch).range(8));
     WalPayloadOut out {Bytes {scratch}.truncate(size + 8)};
     const auto payload = decode_payload(out);
     ASSERT_TRUE(std::holds_alternative<DeltasDescriptor>(payload.value()));
@@ -359,7 +359,7 @@ public:
     auto write_string(LogWriter &writer, const std::string &payload) -> void
     {
         auto buffer = scratch.get();
-        ASSERT_GE(buffer->size(), payload.size() + sizeof(identifier));
+        ASSERT_GE(buffer->size(), payload.size() + sizeof(Id));
         WalPayloadIn in {{++last_lsn.value}, buffer};
         mem_copy(in.data(), payload);
         in.shrink_to_fit(payload.size());
@@ -378,7 +378,7 @@ public:
         auto writer = get_writer(SegmentId {1});
         auto reader = get_reader(SegmentId {1});
         for (const auto &payload: payloads) {
-            ASSERT_LE(payload.size(), wal_scratch_size(PAGE_SIZE) - sizeof(identifier));
+            ASSERT_LE(payload.size(), wal_scratch_size(PAGE_SIZE) - sizeof(Id));
             write_string(writer, payload);
         }
         ASSERT_OK(writer.flush());
@@ -398,14 +398,14 @@ public:
         return random.get<std::string>('a', 'z', 2 * wal_scratch_size(PAGE_SIZE) / random.get(3UL, 4UL));
     }
 
-    std::atomic<identifier> flushed_lsn {};
+    std::atomic<Id> flushed_lsn {};
     std::string reader_payload;
     std::string reader_tail;
     std::string writer_tail;
     LogScratchManager scratch;
     std::unique_ptr<RandomReader> reader_file;
     std::unique_ptr<AppendWriter> writer_file;
-    identifier last_lsn;
+    Id last_lsn;
     Random random {internal::random_seed};
 };
 
@@ -529,7 +529,7 @@ public:
 
     WalCollection collection;
     LogScratchManager scratch;
-    std::atomic<identifier> flushed_lsn {};
+    std::atomic<Id> flushed_lsn {};
     std::optional<WalWriter> writer;
     std::string tail;
     Random random {internal::random_seed};
@@ -570,7 +570,7 @@ static auto test_write_until_failure(Test &test) -> void
         return;
     }
 
-    identifier last_lsn;
+    Id last_lsn;
     while (test.writer->status().is_ok()) {
         auto buffer = test.scratch.get();
         WalPayloadIn payload {{++last_lsn.value}, buffer};
@@ -700,14 +700,14 @@ public:
     }
 
     [[nodiscard]]
-    auto contains_sequence(WalReader &reader, identifier final_lsn) -> Status
+    auto contains_sequence(WalReader &reader, Id final_lsn) -> Status
     {
         auto s = Status::ok();
-        identifier lsn;
+        Id lsn;
         // Roll forward to the end of the WAL.
         while (s.is_ok()) {
             s = reader.roll([&](auto info) {
-                EXPECT_EQ(identifier {++lsn.value}, info.lsn());
+                EXPECT_EQ(Id {++lsn.value}, info.lsn());
                 return Status::ok();
             });
             if (!s.is_ok()) break;
@@ -749,7 +749,7 @@ public:
         auto s = Status::ok();
         for (Size i {}; s.is_ok(); ++i) {
 
-            identifier first_lsn;
+            Id first_lsn;
             s = reader.read_first_lsn(first_lsn);
             if (!s.is_ok()) return s;
 
@@ -771,11 +771,11 @@ public:
         return s;
     }
 
-    identifier last_lsn;
+    Id last_lsn;
     std::vector<std::string> payloads;
     WalCollection collection;
     LogScratchManager scratch;
-    std::atomic<identifier> flushed_lsn {};
+    std::atomic<Id> flushed_lsn {};
     std::string reader_data;
     std::string reader_tail;
     std::string writer_tail;
@@ -788,7 +788,7 @@ static auto does_not_lose_records_test(WalReaderWriterTests &test, Size num_writ
 
     auto reader = test.get_reader();
     ASSERT_OK(reader.open());
-    ASSERT_OK(test.contains_sequence(reader, identifier {num_writes}));
+    ASSERT_OK(test.contains_sequence(reader, Id {num_writes}));
 }
 
 TEST_F(WalReaderWriterTests, DoesNotLoseRecordWithinSegment)
@@ -904,7 +904,7 @@ public:
 
 TEST_F(WalCleanerTests, RemoveBeforeNullIdDoesNothing)
 {
-    cleaner->remove_before(identifier::null(), true);
+    cleaner->remove_before(Id::null(), true);
     ASSERT_OK(std::move(*cleaner).destroy());
 }
 
@@ -950,16 +950,14 @@ public:
 
     auto SetUp() -> void override
     {
-        WriteAheadLog *temp {};
-
-        ASSERT_OK((BasicWriteAheadLog::open({
+        auto r = BasicWriteAheadLog::open({
             PREFIX,
             store.get(),
             create_sink(),
             PAGE_SIZE,
-        }, &temp)));
-
-        wal.reset(temp);
+        });
+        ASSERT_TRUE(r.has_value()) << r.error().what();
+        wal = std::move(*r);
     }
 
     [[nodiscard]]
@@ -1013,13 +1011,13 @@ public:
 
     auto roll_forward(bool strict = true)
     {
-        identifier lsn;
+        Id lsn;
         auto s=(wal->roll_forward({++lsn.value}, [&](auto payload) {
             const auto lhs = payload.data();
             const auto rhs = payloads.at(payload.lsn().as_index());
             EXPECT_EQ(lhs.size(), rhs.size());
             EXPECT_EQ(lhs.to_string(), rhs);
-            EXPECT_EQ(identifier {lsn.value++}, payload.lsn());
+            EXPECT_EQ(Id {lsn.value++}, payload.lsn());
             return Status::ok();
         }));
         if (!s.is_ok()) {ADD_FAILURE();}
@@ -1031,7 +1029,7 @@ public:
 
     auto roll_backward(bool strict = true)
     {
-        std::vector<identifier> lsns;
+        std::vector<Id> lsns;
         ASSERT_OK(wal->roll_backward(commit_lsn, [&lsns, this](auto payload) {
             lsns.emplace_back(payload.lsn());
             EXPECT_GT(payload.lsn(), commit_lsn);
@@ -1042,7 +1040,7 @@ public:
             ASSERT_EQ(lsns.size(), payloads_since_commit);
         }
         std::sort(begin(lsns), end(lsns));
-        identifier lsn_counter {commit_lsn};
+        Id lsn_counter {commit_lsn};
         for (const auto &lsn: lsns)
             ASSERT_EQ(++lsn_counter.value, lsn.value);
     }
@@ -1092,7 +1090,7 @@ public:
 
     Random random {42};
     Size payloads_since_commit {};
-    identifier commit_lsn;
+    Id commit_lsn;
     LogScratchManager scratch;
     std::vector<std::string> payloads;
     std::unique_ptr<WriteAheadLog> wal;
@@ -1128,7 +1126,7 @@ TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
 
 TEST_F(BasicWalTests, RollWhileEmpty)
 {
-    ASSERT_OK(wal->roll_forward(identifier::null(), [](auto) {return Status::ok();}));
+    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {return Status::ok();}));
 }
 
 TEST_F(BasicWalTests, FlushWithEmptyTailBuffer)
@@ -1268,10 +1266,10 @@ TEST_F(WalFaultTests, FailOnFirstWrite)
     assert_error_42(run_operations({WalOperation::LOG}));
 
     // We never wrote anything, so the writer should have removed the segment.
-    ASSERT_OK(wal->roll_forward(identifier::null(), [](auto) {
+    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {
         return Status::corruption("");
     }));
-    ASSERT_OK(wal->roll_backward(identifier::null(), [](auto) {
+    ASSERT_OK(wal->roll_backward(Id::null(), [](auto) {
         return Status::corruption("");
     }));
 }
@@ -1281,10 +1279,10 @@ TEST_F(WalFaultTests, FailOnFirstOpen)
     interceptors::set_open(FailOnce<0> {"test/wal-"});
     assert_error_42(run_operations({WalOperation::LOG}));
 
-    ASSERT_OK(wal->roll_forward(identifier::null(), [](auto) {
+    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {
         return Status::corruption("");
     }));
-    ASSERT_OK(wal->roll_backward(identifier::null(), [](auto) {
+    ASSERT_OK(wal->roll_backward(Id::null(), [](auto) {
         return Status::corruption("");
     }));
 }
@@ -1319,13 +1317,13 @@ TEST(DisabledWalTests, ExersizeStubs)
     ASSERT_FALSE(wal.is_working());
     ASSERT_TRUE(wal.flushed_lsn().is_null());
     ASSERT_TRUE(wal.current_lsn().is_null());
-    ASSERT_OK(wal.log(WalPayloadIn {identifier::null(), scratch.get()}));
+    ASSERT_OK(wal.log(WalPayloadIn {Id::null(), scratch.get()}));
     ASSERT_OK(wal.flush());
     ASSERT_OK(wal.advance());
     ASSERT_OK(wal.start_workers());
     ASSERT_OK(wal.stop_workers());
-    ASSERT_OK(wal.roll_forward(identifier::null(), [](auto) {return Status::ok();}));
-    ASSERT_OK(wal.roll_backward(identifier::null(), [](auto) {return Status::ok();}));
+    ASSERT_OK(wal.roll_forward(Id::null(), [](auto) {return Status::ok();}));
+    ASSERT_OK(wal.roll_backward(Id::null(), [](auto) {return Status::ok();}));
 }
 
 } // <anonymous>

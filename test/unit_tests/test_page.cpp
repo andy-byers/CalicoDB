@@ -151,14 +151,14 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //        , m_scratch {page_size}
 //        , m_page_size {page_size} {}
 //
-//    auto get_page(identifier id) -> Page
+//    auto get_page(Id id) -> Page
 //    {
 //        m_map.emplace(id, std::string(m_page_size, '\x00'));
 //        return Page {{id, stob(m_map[id]), nullptr, true, false}};
 //    }
 //
 //private:
-//    std::unordered_map<identifier, std::string, identifier::hash> m_map;
+//    std::unordered_map<Id, std::string, Id::hash> m_map;
 //    RollingScratchManager m_scratch;
 //    Size m_page_size {};
 //};
@@ -170,7 +170,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //    PageTests()
 //        : m_backing {page_size} {}
 //
-//    auto get_page(identifier id) -> Page
+//    auto get_page(Id id) -> Page
 //    {
 //        return m_backing.get_page(id);
 //    }
@@ -181,14 +181,14 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //
 //TEST_F(PageTests, HeaderFields)
 //{
-//    auto page = get_page(identifier::root());
+//    auto page = get_page(Id::root());
 //    page.set_type(PageType::EXTERNAL_NODE);
 //    ASSERT_EQ(page.type(), PageType::EXTERNAL_NODE);
 //}
 //
 //TEST_F(PageTests, FreshPagesAreEmpty)
 //{
-//    auto page = get_page(identifier::root());
+//    auto page = get_page(Id::root());
 //    ASSERT_TRUE(page.view(0) == stob(std::string(page_size, '\x00')));
 //}
 //
@@ -206,11 +206,11 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //        param.is_external = false;
 //        Cell cell {param};
 //        cell.detach(scratch.get());
-//        cell.set_left_child_id(identifier {123ULL});
+//        cell.set_left_child_id(Id {123ULL});
 //        return cell;
 //    }
 //
-//    auto get_cell(const std::string &key, const std::string &value, bool is_external, identifier overflow_id = identifier::null()) -> Cell
+//    auto get_cell(const std::string &key, const std::string &value, bool is_external, Id overflow_id = Id::null()) -> Cell
 //    {
 //        const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
 //        Cell::Parameters param;
@@ -238,7 +238,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 ////public:
 ////    explicit NodeComponentBacking(Size page_size)
 ////        : PageBacking {page_size}
-////        , backing {get_page(identifier {2})}
+////        , backing {get_page(Id {2})}
 ////    {
 ////        header.set_cell_start(backing.size());
 ////        allocator.reset();
@@ -270,27 +270,27 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 ////TEST_F(NodeHeaderTests, SetChildOfExternalNodeDeathTest)
 ////{
 ////    backing.backing.set_type(PageType::EXTERNAL_NODE);
-////    ASSERT_DEATH(header().set_rightmost_child_id(identifier {123}), EXPECTATION_MATCHER);
+////    ASSERT_DEATH(header().set_rightmost_child_id(Id {123}), EXPECTATION_MATCHER);
 ////}
 ////
 ////TEST_F(NodeHeaderTests, SetSiblingOfInternalNodeDeathTest)
 ////{
 ////    backing.backing.set_type(PageType::INTERNAL_NODE);
-////    ASSERT_DEATH(header().set_right_sibling_id(identifier {123}), EXPECTATION_MATCHER);
+////    ASSERT_DEATH(header().set_right_sibling_id(Id {123}), EXPECTATION_MATCHER);
 ////}
 ////
 ////TEST_F(NodeHeaderTests, FieldsAreConsistent)
 ////{
 ////    backing.backing.set_type(PageType::EXTERNAL_NODE);
-////    header().set_parent_id(identifier {1});
-////    header().set_right_sibling_id(identifier {2});
+////    header().set_parent_id(Id {1});
+////    header().set_right_sibling_id(Id {2});
 ////    header().set_cell_start(3);
 ////    header().set_free_start(4);
 //////    header().set_free_count(5);
 ////    header().set_frag_count(6);
 ////    header().set_cell_count(7);
-////    ASSERT_EQ(header().parent_id(), identifier {1});
-////    ASSERT_EQ(header().right_sibling_id(), identifier {2});
+////    ASSERT_EQ(header().parent_id(), Id {1});
+////    ASSERT_EQ(header().right_sibling_id(), Id {2});
 ////    ASSERT_EQ(header().cell_start(), 3);
 ////    ASSERT_EQ(header().free_start(), 4);
 //////    ASSERT_EQ(header().free_count(), 5);
@@ -500,7 +500,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //          scratch(page_size, '\x00')
 //    {}
 //
-//    auto get_node(identifier id, PageType type) -> Node
+//    auto get_node(Id id, PageType type) -> Node
 //    {
 //        Node node {get_page(id), true, scratch.data()};
 //        node.page().set_type(type);
@@ -517,7 +517,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //        , cell_backing {page_size}
 //        , overflow_value(page_size, 'x') {}
 //
-//    auto make_node(identifier id, PageType type)
+//    auto make_node(Id id, PageType type)
 //    {
 //        return node_backing.get_node(id, type);
 //    }
@@ -527,12 +527,12 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //    CellBacking cell_backing;
 //    std::string normal_value {"world"};
 //    std::string overflow_value;
-//    identifier arbitrary_pid {2ULL};
+//    Id arbitrary_pid {2ULL};
 //};
 //
 //TEST_F(NodeTests, RootNodeFieldsAreDistinct)
 //{
-//    auto root = make_node(identifier::root(), PageType::EXTERNAL_NODE);
+//    auto root = make_node(Id::root(), PageType::EXTERNAL_NODE);
 //    FileHeaderReader reader {root.page().view(0, FileLayout::HEADER_SIZE)};
 //    FileHeaderWriter writer {root.page().bytes(0, FileLayout::HEADER_SIZE)};
 //
@@ -540,15 +540,15 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //                                                        std::numeric_limits<std::uint64_t>::max());
 //
 //    writer.set_page_count(number);
-//    writer.set_free_start(identifier {number * 10});
+//    writer.set_free_start(Id {number * 10});
 //    writer.set_record_count(number * 20);
 //    writer.set_flushed_lsn(SeqNum {number * 30});
 //    writer.set_page_size(0x1234);
 //    writer.update_magic_code();
 //    writer.update_header_crc();
 //    root.page().set_lsn(SeqNum {number * 40});
-//    NodeHeader::set_right_sibling_id(root.page(), identifier {number * 50});
-//    NodeHeader::set_left_sibling_id(root.page(), identifier {number * 60});
+//    NodeHeader::set_right_sibling_id(root.page(), Id {number * 50});
+//    NodeHeader::set_left_sibling_id(root.page(), Id {number * 60});
 //    NodeHeader::set_cell_count(root.page(), 0x2345);
 //    NodeHeader::set_cell_start(root.page(), 0x3456);
 //    NodeHeader::set_frag_count(root.page(), 0x4567);
@@ -563,8 +563,8 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //    ASSERT_EQ(reader.record_count(), number * 20);
 //    ASSERT_EQ(reader.flushed_lsn(), number * 30);
 //    ASSERT_EQ(reader.page_size(), 0x1234);
-//    ASSERT_EQ(NodeHeader::right_sibling_id(root.page()), identifier {number * 50});
-//    ASSERT_EQ(NodeHeader::left_sibling_id(root.page()), identifier {number * 60});
+//    ASSERT_EQ(NodeHeader::right_sibling_id(root.page()), Id {number * 50});
+//    ASSERT_EQ(NodeHeader::left_sibling_id(root.page()), Id {number * 60});
 //    ASSERT_EQ(NodeHeader::cell_count(root.page()), 0x2345);
 //    ASSERT_EQ(NodeHeader::cell_start(root.page()), 0x3456);
 //    ASSERT_EQ(NodeHeader::frag_count(root.page()), 0x4567);
@@ -574,14 +574,14 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //
 //TEST_F(NodeTests, NonRootNodeFieldsAreDistinct)
 //{
-//    auto root = make_node(++identifier::root(), PageType::EXTERNAL_NODE);
+//    auto root = make_node(++Id::root(), PageType::EXTERNAL_NODE);
 //    const auto number = random.next_int(std::numeric_limits<std::uint64_t>::max() / 2,
 //                                        std::numeric_limits<std::uint64_t>::max());
 //
 //    root.page().set_lsn(SeqNum {number * 40});
-//    NodeHeader::set_parent_id(root.page(), identifier {number * 50});
-//    NodeHeader::set_right_sibling_id(root.page(), identifier {number * 60});
-//    NodeHeader::set_left_sibling_id(root.page(), identifier {number * 80});
+//    NodeHeader::set_parent_id(root.page(), Id {number * 50});
+//    NodeHeader::set_right_sibling_id(root.page(), Id {number * 60});
+//    NodeHeader::set_left_sibling_id(root.page(), Id {number * 80});
 //    NodeHeader::set_cell_count(root.page(), 0x2345);
 //    NodeHeader::set_cell_start(root.page(), 0x3456);
 //    NodeHeader::set_frag_count(root.page(), 0x4567);
@@ -589,9 +589,9 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //    NodeHeader::set_free_total(root.page(), 0x6789);
 //    CALICO_EXPECT_EQ(root.page().lsn(), SeqNum {number * 40});
 //    CALICO_EXPECT_EQ(root.page().type(), PageType::EXTERNAL_NODE);
-//    ASSERT_EQ(NodeHeader::parent_id(root.page()), identifier {number * 50});
-//    ASSERT_EQ(NodeHeader::right_sibling_id(root.page()), identifier {number * 60});
-//    ASSERT_EQ(NodeHeader::left_sibling_id(root.page()), identifier {number * 80});
+//    ASSERT_EQ(NodeHeader::parent_id(root.page()), Id {number * 50});
+//    ASSERT_EQ(NodeHeader::right_sibling_id(root.page()), Id {number * 60});
+//    ASSERT_EQ(NodeHeader::left_sibling_id(root.page()), Id {number * 80});
 //    ASSERT_EQ(NodeHeader::cell_count(root.page()), 0x2345);
 //    ASSERT_EQ(NodeHeader::cell_start(root.page()), 0x3456);
 //    ASSERT_EQ(NodeHeader::frag_count(root.page()), 0x4567);
@@ -601,19 +601,19 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //
 //TEST_F(NodeTests, FreshNodesAreEmpty)
 //{
-//    auto node = make_node(identifier::root(), PageType::EXTERNAL_NODE);
+//    auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
 //    ASSERT_EQ(node.cell_count(), 0);
 //}
 //
 //TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 //{
-//    auto node = make_node(identifier::root(), PageType::EXTERNAL_NODE);
+//    auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
 //    ASSERT_DEATH(node.remove_at(0, MAX_CELL_HEADER_SIZE), BOOL_EXPECTATION_MATCHER);
 //}
 //
 //TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 //{
-//    auto node = make_node(identifier::root(), PageType::EXTERNAL_NODE);
+//    auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
 //    auto [index, found_eq] = node.find_ge(stob("hello"));
 //    ASSERT_FALSE(found_eq);
 //
@@ -623,7 +623,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //
 //TEST_F(NodeTests, UsableSpaceIsUpdatedOnInsert)
 //{
-//    auto node = make_node(identifier::root(), PageType::EXTERNAL_NODE);
+//    auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
 //    auto cell = cell_backing.get_cell("hello", normal_value, node.is_external());
 //    const auto usable_space_after = node.usable_space() - cell.size() - CELL_POINTER_SIZE;
 //    node.insert(std::move(cell));
@@ -634,7 +634,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //{
 //    static constexpr Size NUM_ITERATIONS {10};
 //    Random random {internal::random_seed};
-//    auto node = make_node(identifier::root(), PageType::EXTERNAL_NODE);
+//    auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
 //    for (Index i {}; i < NUM_ITERATIONS; ++i) {
 //        while (!node.is_overflowing()) {
 //            const auto key = random_string(random, 2, 5);
@@ -672,12 +672,12 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //    // cannot store part of the key on an overflow page in the current design, so we have an embedded payload of size
 //    // get_max_local(page_size), an overflow ID, and maybe a left child ID.
 //    const auto max_key_length = get_max_local(NodeTests::page_size);
-//    auto cell = test.cell_backing.get_cell(test.random.next_string(max_key_length), "", false, identifier::null());
+//    auto cell = test.cell_backing.get_cell(test.random.next_string(max_key_length), "", false, Id::null());
 //    cell.set_left_child_id(test.arbitrary_pid);
 //    return cell;
 //}
 //
-//auto run_maximally_sized_cell_test(NodeTests &test, identifier id, Size max_records_before_overflow, bool is_external)
+//auto run_maximally_sized_cell_test(NodeTests &test, Id id, Size max_records_before_overflow, bool is_external)
 //{
 //    auto node = test.make_node(id, is_external ? PageType::EXTERNAL_NODE : PageType::INTERNAL_NODE);
 //
@@ -695,22 +695,22 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //
 //TEST_F(NodeTests, InternalRootFitsAtLeastFourRecords)
 //{
-//    run_maximally_sized_cell_test(*this, identifier::root(), 4, false);
+//    run_maximally_sized_cell_test(*this, Id::root(), 4, false);
 //}
 //
 //TEST_F(NodeTests, ExternalRootFitsAtLeastThreeRecords)
 //{
-//    run_maximally_sized_cell_test(*this, identifier::root(), 3, true);
+//    run_maximally_sized_cell_test(*this, Id::root(), 3, true);
 //}
 //
 //TEST_F(NodeTests, InternalNonRootFitsAtLeastFiveRecords)
 //{
-//    run_maximally_sized_cell_test(*this, identifier {ROOT_ID_VALUE + 1}, 5, false);
+//    run_maximally_sized_cell_test(*this, Id {ROOT_ID_VALUE + 1}, 5, false);
 //}
 //
 //template<class Test>auto get_node_with_one_cell(Test &test, bool has_overflow = false)
 //{
-//    static identifier next_id {2ULL};
+//    static Id next_id {2ULL};
 //    auto value = has_overflow ? test.overflow_value : test.normal_value;
 //    auto node = test.node_backing.get_node(next_id, PageType::EXTERNAL_NODE);
 //    auto cell = test.cell_backing.get_cell("hello", value, true);
@@ -756,7 +756,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //{
 //    auto node = get_node_with_one_cell(*this);
 //    auto cell = node.read_cell(0);
-//    ASSERT_EQ(cell.overflow_id(), identifier::null());
+//    ASSERT_EQ(cell.overflow_id(), Id::null());
 //    ASSERT_TRUE(cell.key() == stob("hello"));
 //    ASSERT_TRUE(cell.local_value() == stob("world"));
 //}
@@ -771,7 +771,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
 //{
 //    std::string value {"world"};
-//    auto node = make_node(identifier::root(), PageType::EXTERNAL_NODE);
+//    auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
 //    auto cell = cell_backing.get_cell("hello", value, true);
 //    node.insert(std::move(cell));
 //    ASSERT_DEATH(node.insert(cell_backing.get_cell("hello", value, true)), BOOL_EXPECTATION_MATCHER);
@@ -793,7 +793,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //
 //TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
 //{
-//    auto node = make_node(identifier::root(), PageType::EXTERNAL_NODE);
+//    auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
 //    auto cell = cell_backing.get_cell("hello", normal_value, true);
 //    const auto usable_space_before = node.usable_space();
 //    node.insert(std::move(cell));
@@ -803,8 +803,8 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 //
 //TEST_F(NodeTests, SplitNonRootExternal)
 //{
-//    auto lhs = make_node(identifier {2ULL}, PageType::EXTERNAL_NODE);
-//    auto rhs = make_node(identifier {3ULL}, PageType::EXTERNAL_NODE);
+//    auto lhs = make_node(Id {2ULL}, PageType::EXTERNAL_NODE);
+//    auto rhs = make_node(Id {3ULL}, PageType::EXTERNAL_NODE);
 //    RollingScratchManager scratch {lhs.size()};
 //
 //    lhs.insert(cell_backing.get_cell(make_key(100), normal_value, true));

@@ -9,31 +9,31 @@ namespace calico {
 
 using size_t = std::size_t;
 
-struct identifier {
+struct Id {
     static constexpr size_t null_value {0};
     static constexpr size_t root_value {1};
 
-    struct hash {
-        auto operator()(const identifier &id) const -> size_t
+    struct Hash {
+        auto operator()(const Id &id) const -> size_t
         {
             return id.value;
         }
     };
 
     [[nodiscard]]
-    static constexpr auto from_index(size_t index) noexcept -> identifier
+    static constexpr auto from_index(size_t index) noexcept -> Id
     {
         return {index + 1};
     }
 
     [[nodiscard]]
-    static constexpr auto null() noexcept -> identifier
+    static constexpr auto null() noexcept -> Id
     {
         return {null_value};
     }
 
     [[nodiscard]]
-    static constexpr auto root() noexcept -> identifier
+    static constexpr auto root() noexcept -> Id
     {
         return {root_value};
     }
@@ -57,7 +57,7 @@ struct identifier {
         return value - 1;
     }
 
-    constexpr auto operator<=>(const identifier &) const = default;
+    constexpr auto operator<=>(const Id &) const = default;
 
     size_t value {};
 };

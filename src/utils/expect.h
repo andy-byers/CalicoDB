@@ -31,13 +31,13 @@
 #define CALICO_TRY__(expr)                                                        \
     do {                                                                     \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) \
-            return Err {calico_try_result.error()};                          \
+            return tl::make_unexpected(calico_try_result.error());                          \
     } while (0)
 
 #define CALICO_TRY_STORE(out, expr)                                               \
     do {                                                                       \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) { \
-            return Err {calico_try_result.error()};                            \
+            return tl::make_unexpected(calico_try_result.error());                            \
         } else {                                                               \
             (out) = std::move(calico_try_result.value());                      \
         }                                                                      \
@@ -46,7 +46,7 @@
 #define CALICO_TRY_CREATE(out, expr)              \
     auto calico_try_##out = (expr);            \
     if (!calico_try_##out.has_value()) {       \
-        return Err {calico_try_##out.error()}; \
+        return tl::make_unexpected(calico_try_##out.error()); \
     }                                          \
     auto out = std::move(*calico_try_##out)
 

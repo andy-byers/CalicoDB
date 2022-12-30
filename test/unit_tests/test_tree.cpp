@@ -29,8 +29,7 @@ public:
         : wal {std::make_unique<DisabledWriteAheadLog>()},
           scratch {wal_scratch_size(PAGE_SIZE)}
     {
-        BasicPager *temp;
-        expect_ok(BasicPager::open({
+        auto r = BasicPager::open({
             PREFIX,
             store.get(),
             &scratch,
@@ -42,15 +41,16 @@ public:
             create_sink(),
             FRAME_COUNT,
             PAGE_SIZE
-        }, &temp));
-        pager.reset(temp);
+        });
+        EXPECT_TRUE(r.has_value()) << r.error().what();
+        pager = std::move(*r);
     }
 
     Random random {0};
     Status status {Status::ok()};
     bool has_xact {};
-    identifier commit_lsn;
-    std::unordered_set<identifier, identifier::hash> images;
+    Id commit_lsn;
+    std::unordered_set<Id, Id::Hash> images;
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
     LogScratchManager scratch;
@@ -63,13 +63,12 @@ public:
     TreeTests()
     {
         max_local = get_max_local(PAGE_SIZE);
-        BPlusTree *temp;
-        expect_ok(BPlusTree::open(
+        auto r = BPlusTree::open(
             *pager,
             create_sink(),
-            PAGE_SIZE,
-            &temp));
-        tree.reset(temp);
+            PAGE_SIZE);
+        EXPECT_TRUE(r.has_value()) << r.error().what();
+        tree = std::move(*r);
         auto root = tree->root(true);
         EXPECT_TRUE(root.has_value()) << "Error: " << root.error().what();
         expect_ok(pager->release(root->take()));

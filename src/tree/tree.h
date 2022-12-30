@@ -3,7 +3,7 @@
 
 #include "calico/cursor.h"
 #include "calico/status.h"
-#include "utils/result.h"
+#include <tl/expected.hpp>
 #include "utils/types.h"
 #include <optional>
 
@@ -20,6 +20,8 @@ struct FileHeader;
 // Depends on BufferPool
 class Tree {
 public:
+    using Ptr = std::unique_ptr<Tree>;
+
     virtual ~Tree() = default;
     virtual auto record_count() const -> Size = 0;
     virtual auto insert(BytesView, BytesView) -> Status = 0;

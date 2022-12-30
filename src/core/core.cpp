@@ -109,23 +109,23 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         // The WAL segments may be stored elsewhere.
         const auto wal_prefix = sanitized.wal_path.empty()
             ? m_prefix : std::string {sanitized.wal_path} + "/";
-        WriteAheadLog *wal {};
-        auto s = BasicWriteAheadLog::open({
+
+        auto r = BasicWriteAheadLog::open({
             wal_prefix,
             m_store,
             m_sink,
             sanitized.page_size,
             sanitized.wal_limit,
-        }, &wal);
-        MAYBE_FORWARD(s, MSG);
-        m_wal.reset(wal);
+        });
+        if (!r.has_value())
+            return r.error();
+        m_wal = std::move(*r);
     } else {
         m_wal = std::make_unique<DisabledWriteAheadLog>();
     }
 
     {
-        BasicPager *temp;
-        auto s = BasicPager::open({
+        auto r = BasicPager::open({
             m_prefix,
             m_store,
             m_scratch.get(),
@@ -137,17 +137,18 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             m_sink,
             sanitized.frame_count,
             sanitized.page_size,
-        }, &temp);
-        MAYBE_FORWARD(s, MSG);
-        m_pager.reset(temp);
+        });
+        if (!r.has_value())
+            return r.error();
+        m_pager = std::move(*r);
         m_pager->load_state(state);
     }
 
     {
-        BPlusTree *temp;
-        const auto s = BPlusTree::open(*m_pager, m_sink, sanitized.page_size, &temp);
-        MAYBE_FORWARD(s, MSG);
-        m_tree.reset(temp);
+        auto r = BPlusTree::open(*m_pager, m_sink, sanitized.page_size);
+        if (!r.has_value())
+            return r.error();
+        m_tree = std::move(*r);
         m_tree->load_state(state);
     }
 
@@ -432,7 +433,7 @@ auto Core::save_state() -> Status
 {
     m_logger->info("saving state to file header");
 
-    auto root = m_pager->acquire(identifier::root(), true);
+    auto root = m_pager->acquire(Id::root(), true);
     if (!root.has_value()) return root.error();
 
     auto state = read_header(*root);
@@ -448,7 +449,7 @@ auto Core::load_state() -> Status
 {
     m_logger->info("loading state from file header");
 
-    auto root = m_pager->acquire(identifier::root(), false);
+    auto root = m_pager->acquire(Id::root(), false);
     if (!root.has_value()) return root.error();
 
     auto state = read_header(*root);
@@ -484,43 +485,43 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
     if (options.frame_count < MINIMUM_FRAME_COUNT) {
         message.set_detail("frame count is too small");
         message.set_hint("minimum frame count is {}", MINIMUM_FRAME_COUNT);
-        return Err {message.invalid_argument()};
+        return tl::make_unexpected(message.invalid_argument());
     }
 
     if (options.frame_count > MAXIMUM_FRAME_COUNT) {
         message.set_detail("frame count is too large");
         message.set_hint("maximum frame count is {}", MAXIMUM_FRAME_COUNT);
-        return Err {message.invalid_argument()};
+        return tl::make_unexpected(message.invalid_argument());
     }
 
     if (options.page_size < MINIMUM_PAGE_SIZE) {
         message.set_detail("page size {} is too small", options.page_size);
         message.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
-        return Err {message.invalid_argument()};
+        return tl::make_unexpected(message.invalid_argument());
     }
 
     if (options.page_size > MAXIMUM_PAGE_SIZE) {
         message.set_detail("page size {} is too large", options.page_size);
         message.set_hint("must be less than or equal to {}", MAXIMUM_PAGE_SIZE);
-        return Err {message.invalid_argument()};
+        return tl::make_unexpected(message.invalid_argument());
     }
 
     if (!is_power_of_two(options.page_size)) {
         message.set_detail("page size {} is invalid", options.page_size);
         message.set_hint("must be a power of 2");
-        return Err {message.invalid_argument()};
+        return tl::make_unexpected(message.invalid_argument());
     }
 
     if (options.wal_limit != DISABLE_WAL && options.wal_limit < MINIMUM_WAL_LIMIT) {
         message.set_detail("WAL segment limit {} is too small", options.wal_limit);
         message.set_hint("must be greater than or equal to {} blocks", MINIMUM_WAL_LIMIT);
-        return Err {message.invalid_argument()};
+        return tl::make_unexpected(message.invalid_argument());
     }
 
     if (options.wal_limit > MAXIMUM_WAL_LIMIT) {
         message.set_detail("WAL segment limit {} is too large", options.wal_limit);
         message.set_hint("must be less than or equal to {} blocks", MAXIMUM_WAL_LIMIT);
-        return Err {message.invalid_argument()};
+        return tl::make_unexpected(message.invalid_argument());
     }
 
     {   // TODO: Already getting created by the log sink...
@@ -528,7 +529,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         if (!s.is_ok() && !s.is_logic_error()) {
             logger.error("cannot create database directory");
             logger.error("(reason) {}", s.what());
-            return Err {s};
+            return tl::make_unexpected(s);
         }
     }
 
@@ -541,41 +542,41 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
         reader.reset(reader_temp);
         Size file_size {};
         s = store.file_size(path, file_size);
-        if (!s.is_ok()) return Err {s};
+        if (!s.is_ok()) return tl::make_unexpected(s);
 
         if (file_size < sizeof(FileHeader)) {
             message.set_detail("database is too small to read the file header");
             message.set_hint("file header is {} bytes", sizeof(FileHeader));
-            return Err {message.corruption()};
+            return tl::make_unexpected(message.corruption());
         }
         s = read_exact(*reader, bytes, 0);
-        if (!s.is_ok()) return Err {s};
+        if (!s.is_ok()) return tl::make_unexpected(s);
 
         if (file_size % decode_page_size(header.page_size)) {
             message.set_detail("database has an invalid size");
             message.set_hint("database must contain an integral number of pages");
-            return Err {message.corruption()};
+            return tl::make_unexpected(message.corruption());
         }
         if (header.magic_code != MAGIC_CODE) {
             message.set_detail("path does not point to a Calico DB database");
             message.set_hint("magic code is {} but should be {}", header.magic_code, MAGIC_CODE);
-            return Err {message.invalid_argument()};
+            return tl::make_unexpected(message.invalid_argument());
         }
         if (header.header_crc != compute_header_crc(header)) {
             message.set_detail("header has an inconsistent CRC");
             message.set_hint("CRC is {} but should be {}", header.header_crc, compute_header_crc(header));
-            return Err {message.corruption()};
+            return tl::make_unexpected(message.corruption());
         }
         exists = true;
 
     } else if (s.is_not_found()) {
         header.magic_code = MAGIC_CODE;
         header.page_size = encode_page_size(options.page_size);
-        header.flushed_lsn = identifier::root().value;
+        header.flushed_lsn = Id::root().value;
         header.header_crc = compute_header_crc(header);
 
     } else {
-        return Err {s};
+        return tl::make_unexpected(s);
     }
 
     const auto page_size = decode_page_size(header.page_size);
@@ -583,13 +584,13 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, sp
     if (page_size < MINIMUM_PAGE_SIZE) {
         message.set_detail("header page size {} is too small", page_size);
         message.set_hint("must be greater than or equal to {}", MINIMUM_PAGE_SIZE);
-        return Err {message.corruption()};
+        return tl::make_unexpected(message.corruption());
     }
 
     if (!is_power_of_two(page_size)) {
         message.set_detail("header page size {} is invalid", page_size);
         message.set_hint("must either be 0 or a power of 2");
-        return Err {message.corruption()};
+        return tl::make_unexpected(message.corruption());
     }
 
     return InitialState {header, !exists};

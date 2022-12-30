@@ -3,14 +3,14 @@
 
 namespace calico {
 
-auto WalCleaner::on_event(const identifier &limit) -> Status
+auto WalCleaner::on_event(const Id &limit) -> Status
 {
     auto first = m_set->first();
     auto current = first;
     SegmentId target;
 
     while (!current.is_null()) {
-        identifier first_lsn;
+        Id first_lsn;
         auto s = read_first_lsn(
             *m_store, m_prefix, current, first_lsn);
 

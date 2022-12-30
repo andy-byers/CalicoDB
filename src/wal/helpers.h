@@ -5,7 +5,7 @@
 #include "record.h"
 #include "utils/info_log.h"
 #include "utils/queue.h"
-#include "utils/result.h"
+#include <tl/expected.hpp>
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include <mutex>
@@ -26,7 +26,7 @@ inline constexpr auto wal_scratch_size(Size page_size) -> Size
 }
 
 [[nodiscard]]
-inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, identifier &out) -> Status
+inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, Id &out) -> Status
 {
     RandomReader *temp {};
     CALICO_TRY(store.open_random_reader(prefix + id.to_name(), &temp));

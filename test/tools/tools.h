@@ -58,12 +58,12 @@ public:
     auto get_state() -> FileHeader
     {
         CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader));
-        auto root = get_page(identifier::root());
+        auto root = get_page(Id::root());
         return read_header(root);
     }
 
     [[nodiscard]]
-    auto get_page(identifier id) -> Page
+    auto get_page(Id id) -> Page
     {
         const auto offset = id.as_index() * m_page_size;
         CALICO_EXPECT_LE(offset + m_page_size, m_data.size());

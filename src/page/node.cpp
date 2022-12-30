@@ -5,15 +5,15 @@
 
 namespace calico {
 
-auto NodeHeader::parent_id(const Page &page) -> identifier
+auto NodeHeader::parent_id(const Page &page) -> Id
 {
-    return identifier {get_u64(page, header_offset(page) + NodeLayout::PARENT_ID_OFFSET)};
+    return Id {get_u64(page, header_offset(page) + NodeLayout::PARENT_ID_OFFSET)};
 }
 
-auto NodeHeader::right_sibling_id(const Page &page) -> identifier
+auto NodeHeader::right_sibling_id(const Page &page) -> Id
 {
     CALICO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    return identifier {get_u64(page, header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
+    return Id {get_u64(page, header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
 }
 
 auto NodeHeader::reserved(const Page &page) -> std::uint64_t
@@ -22,16 +22,16 @@ auto NodeHeader::reserved(const Page &page) -> std::uint64_t
     return get_u64(page, header_offset(page) + NodeLayout::RESERVED_OFFSET);
 }
 
-auto NodeHeader::left_sibling_id(const Page &page) -> identifier
+auto NodeHeader::left_sibling_id(const Page &page) -> Id
 {
     CALICO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    return identifier {get_u64(page, header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
+    return Id {get_u64(page, header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
 }
 
-auto NodeHeader::rightmost_child_id(const Page &page) -> identifier
+auto NodeHeader::rightmost_child_id(const Page &page) -> Id
 {
     CALICO_EXPECT_NE(page.type(), PageType::EXTERNAL_NODE);
-    return identifier {get_u64(page, header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
+    return Id {get_u64(page, header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
 }
 
 auto NodeHeader::cell_count(const Page &page) -> Size
@@ -59,28 +59,28 @@ auto NodeHeader::free_total(const Page &page) -> Size
     return get_u16(page, header_offset(page) + NodeLayout::FREE_TOTAL_OFFSET);
 }
 
-auto NodeHeader::set_parent_id(Page &page, identifier parent_id) -> void
+auto NodeHeader::set_parent_id(Page &page, Id parent_id) -> void
 {
-    CALICO_EXPECT_NE(page.id(), identifier::root());
+    CALICO_EXPECT_NE(page.id(), Id::root());
     const auto offset = header_offset(page) + NodeLayout::PARENT_ID_OFFSET;
     put_u64(page, offset, parent_id.value);
 }
 
-auto NodeHeader::set_right_sibling_id(Page &page, identifier right_sibling_id) -> void
+auto NodeHeader::set_right_sibling_id(Page &page, Id right_sibling_id) -> void
 {
     CALICO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET;
     put_u64(page, offset, right_sibling_id.value);
 }
 
-auto NodeHeader::set_left_sibling_id(Page &page, identifier left_sibling_id) -> void
+auto NodeHeader::set_left_sibling_id(Page &page, Id left_sibling_id) -> void
 {
     CALICO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET;
     put_u64(page, offset, left_sibling_id.value);
 }
 
-auto NodeHeader::set_rightmost_child_id(Page &page, identifier rightmost_child_id) -> void
+auto NodeHeader::set_rightmost_child_id(Page &page, Id rightmost_child_id) -> void
 {
     CALICO_EXPECT_NE(page.type(), PageType::EXTERNAL_NODE);
     const auto offset = header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET;
@@ -312,22 +312,22 @@ auto BlockAllocator::free(Page &page, Size ptr, Size size) -> void
     NodeHeader::set_free_total(page, NodeHeader::free_total(page) + size);
 }
 
-auto Node::parent_id() const -> identifier
+auto Node::parent_id() const -> Id
 {
     return NodeHeader::parent_id(m_page);
 }
 
-auto Node::right_sibling_id() const -> identifier
+auto Node::right_sibling_id() const -> Id
 {
     return NodeHeader::right_sibling_id(m_page);
 }
 
-auto Node::left_sibling_id() const -> identifier
+auto Node::left_sibling_id() const -> Id
 {
     return NodeHeader::left_sibling_id(m_page);
 }
 
-auto Node::rightmost_child_id() const -> identifier
+auto Node::rightmost_child_id() const -> Id
 {
     return NodeHeader::rightmost_child_id(m_page);
 }
@@ -337,17 +337,17 @@ auto Node::cell_count() const -> Size
     return NodeHeader::cell_count(m_page);
 }
 
-auto Node::set_parent_id(identifier parent_id) -> void
+auto Node::set_parent_id(Id parent_id) -> void
 {
     NodeHeader::set_parent_id(m_page, parent_id);
 }
 
-auto Node::set_right_sibling_id(identifier right_sibling_id) -> void
+auto Node::set_right_sibling_id(Id right_sibling_id) -> void
 {
     NodeHeader::set_right_sibling_id(m_page, right_sibling_id);
 }
 
-auto Node::set_rightmost_child_id(identifier rightmost_child_id) -> void
+auto Node::set_rightmost_child_id(Id rightmost_child_id) -> void
 {
     NodeHeader::set_rightmost_child_id(m_page, rightmost_child_id);
 }
@@ -362,7 +362,7 @@ auto Node::is_external() const -> bool
     return m_page.type() == PageType::EXTERNAL_NODE;
 }
 
-auto Node::child_id(Size index) const -> identifier
+auto Node::child_id(Size index) const -> Id
 {
     CALICO_EXPECT_FALSE(is_external());
     CALICO_EXPECT_LE(index, cell_count());
@@ -493,7 +493,7 @@ auto Node::take_overflow_cell() -> Cell
     return cell;
 }
 
-auto Node::set_child_id(Size index, identifier child_id) -> void
+auto Node::set_child_id(Size index, Id child_id) -> void
 {
     CALICO_EXPECT_FALSE(is_external());
     CALICO_EXPECT_LE(index, cell_count());
@@ -774,7 +774,7 @@ auto split_root(Node &root, Node &child) -> void
     root.reset(true);
     root.page().set_type(PageType::INTERNAL_NODE);
     root.set_rightmost_child_id(child.id());
-    child.set_parent_id(identifier::root());
+    child.set_parent_id(Id::root());
 }
 
 auto merge_root(Node &root, Node &child) -> void

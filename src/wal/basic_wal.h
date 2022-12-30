@@ -7,7 +7,7 @@
 #include "record.h"
 #include "wal.h"
 #include "writer.h"
-#include "utils/result.h"
+#include <tl/expected.hpp>
 #include "utils/types.h"
 #include <atomic>
 #include <optional>
@@ -43,19 +43,19 @@ public:
     }
 
     ~BasicWriteAheadLog() override;
-    [[nodiscard]] static auto open(const Parameters&, WriteAheadLog**) -> Status;
-    [[nodiscard]] auto flushed_lsn() const -> identifier override;
-    [[nodiscard]] auto current_lsn() const -> identifier override;
+    [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>;
+    [[nodiscard]] auto flushed_lsn() const -> Id override;
+    [[nodiscard]] auto current_lsn() const -> Id override;
     [[nodiscard]] auto stop_workers() -> Status override;
     [[nodiscard]] auto start_workers() -> Status override;
     [[nodiscard]] auto worker_status() const -> Status override;
     [[nodiscard]] auto log(WalPayloadIn payload) -> Status override;
     [[nodiscard]] auto advance() -> Status override;
     [[nodiscard]] auto flush() -> Status override;
-    [[nodiscard]] auto roll_forward(identifier begin_lsn, const Callback &callback) -> Status override;
-    [[nodiscard]] auto roll_backward(identifier end_lsn, const Callback &callback) -> Status override;
-    [[nodiscard]] auto remove_after(identifier lsn) -> Status override;
-    [[nodiscard]] auto remove_before(identifier lsn) -> Status override;
+    [[nodiscard]] auto roll_forward(Id begin_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto roll_backward(Id end_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto remove_after(Id lsn) -> Status override;
+    [[nodiscard]] auto remove_before(Id lsn) -> Status override;
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
@@ -74,8 +74,8 @@ private:
     }
 
     std::shared_ptr<spdlog::logger> m_logger;
-    std::atomic<identifier> m_flushed_lsn {};
-    identifier m_last_lsn;
+    std::atomic<Id> m_flushed_lsn {};
+    Id m_last_lsn;
     WalCollection m_set;
     std::string m_prefix;
 

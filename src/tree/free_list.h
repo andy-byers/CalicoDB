@@ -29,7 +29,7 @@ public:
 
 private:
     Pager *m_pager;
-    identifier m_head;
+    Id m_head;
 };
 
 } // namespace calico

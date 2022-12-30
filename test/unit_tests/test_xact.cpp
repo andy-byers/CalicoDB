@@ -41,7 +41,7 @@ public:
     }
 
     [[nodiscard]]
-    auto get_lsn() const -> identifier
+    auto get_lsn() const -> Id
     {
         return m_page.lsn();
     }
@@ -74,18 +74,17 @@ public:
         ASSERT_OK(store->create_directory("test"));
         scratch = std::make_unique<LogScratchManager>(wal_scratch_size(PAGE_SIZE));
 
-        WriteAheadLog *wal_ptr {};
-        ASSERT_OK(BasicWriteAheadLog::open({
+        auto wal_r = BasicWriteAheadLog::open({
             "test/",
             store.get(),
             create_sink(),
             PAGE_SIZE,
             WAL_LIMIT,
-        }, &wal_ptr));
-        wal.reset(wal_ptr);
+        });
+        EXPECT_TRUE(wal_r.has_value()) << wal_r.error().what();
+        wal = std::move(*wal_r);
 
-        BasicPager *pager_ptr;
-        expect_ok(BasicPager::open({
+        auto pager_r = BasicPager::open({
             "test/",
             store.get(),
             scratch.get(),
@@ -97,8 +96,9 @@ public:
             create_sink(),
             FRAME_COUNT,
             PAGE_SIZE,
-        }, &pager_ptr));
-        pager.reset(pager_ptr);
+        });
+        EXPECT_TRUE(pager_r.has_value()) << pager_r.error().what();
+        pager = std::move(*pager_r);
 
         while (pager->page_count() < PAGE_COUNT) {
             ASSERT_OK(pager->release(pager->allocate().value()));
@@ -115,7 +115,7 @@ public:
     }
 
     [[nodiscard]]
-    auto get_wrapper(identifier id, bool is_writable = false) const -> std::optional<PageWrapper>
+    auto get_wrapper(Id id, bool is_writable = false) const -> std::optional<PageWrapper>
     {
         auto page = pager->acquire(id, is_writable);
         if (!page.has_value()) {
@@ -146,7 +146,7 @@ public:
 
     auto save_state() const -> Status
     {
-        auto root = pager->acquire(identifier::root(), true);
+        auto root = pager->acquire(Id::root(), true);
         if (!root.has_value()) return root.error();
 
         auto state = read_header(*root);
@@ -159,7 +159,7 @@ public:
 
     auto load_state() const -> Status
     {
-        auto root = pager->acquire(identifier::root(), false);
+        auto root = pager->acquire(Id::root(), false);
         if (!root.has_value()) return root.error();
 
         auto state = read_header(*root);
@@ -176,14 +176,14 @@ public:
         return s;
     }
 
-    auto set_value(identifier id, const std::string &value) const -> void
+    auto set_value(Id id, const std::string &value) const -> void
     {
         auto wrapper = get_wrapper(id, true);
         ASSERT_TRUE(wrapper.has_value());
         wrapper->set_value(value);
     }
 
-    auto try_set_value(identifier id, const std::string &value) const -> bool
+    auto try_set_value(Id id, const std::string &value) const -> bool
     {
         auto wrapper = get_wrapper(id, true);
         if (!wrapper.has_value()) return false;
@@ -192,7 +192,7 @@ public:
     }
 
     [[nodiscard]]
-    auto get_value(identifier id) const -> std::string
+    auto get_value(Id id) const -> std::string
     {
         auto wrapper = get_wrapper(id, true);
         EXPECT_TRUE(wrapper.has_value());
@@ -200,7 +200,7 @@ public:
     }
 
     [[nodiscard]]
-    auto try_get_value(identifier id) const -> std::string
+    auto try_get_value(Id id) const -> std::string
     {
         auto wrapper = get_wrapper(id, true);
         if (!wrapper.has_value()) return {};
@@ -208,7 +208,7 @@ public:
     }
 
     [[nodiscard]]
-    auto oldest_lsn() const -> identifier
+    auto oldest_lsn() const -> Id
     {
         return std::min(commit_lsn, pager->flushed_lsn());
     }
@@ -227,14 +227,14 @@ public:
 
     Random random {internal::random_seed};
     Status status {Status::ok()};
-    identifier commit_lsn; // TODO: Used from before.
-    identifier commit_lsn_;
+    Id commit_lsn; // TODO: Used from before.
+    Id commit_lsn_;
     bool has_xact {};
     std::unique_ptr<HeapStorage> store;
     std::unique_ptr<Pager> pager;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<LogScratchManager> scratch;
-    std::unordered_set<identifier, identifier::hash> images;
+    std::unordered_set<Id, Id::Hash> images;
 };
 
 class NormalXactTests
@@ -256,12 +256,12 @@ public:
 TEST_F(NormalXactTests, ReadAndWriteValue)
 {
     const auto value = generate_value();
-    set_value(identifier {1}, value);
-    ASSERT_EQ(get_value(identifier {1}), value);
+    set_value(Id {1}, value);
+    ASSERT_EQ(get_value(Id {1}), value);
 }
 
 template<class Test>
-static auto overwrite_value(Test &test, identifier id)
+static auto overwrite_value(Test &test, Id id)
 {
     std::string value;
     test.set_value(id, test.generate_value());
@@ -271,18 +271,18 @@ static auto overwrite_value(Test &test, identifier id)
 
 TEST_F(NormalXactTests, OverwriteValue)
 {
-    overwrite_value(*this, identifier {1});
+    overwrite_value(*this, Id {1});
 }
 
 TEST_F(NormalXactTests, OverwriteValuesOnMultiplePages)
 {
-    overwrite_value(*this, identifier {1});
-    overwrite_value(*this, identifier {2});
-    overwrite_value(*this, identifier {3});
+    overwrite_value(*this, Id {1});
+    overwrite_value(*this, Id {2});
+    overwrite_value(*this, Id {3});
 }
 
 template<class Test>
-static auto undo_xact(Test &test, identifier commit_lsn)
+static auto undo_xact(Test &test, Id commit_lsn)
 {
     Recovery recovery {*test.pager, *test.wal};
     (void)test.wal->stop_workers();
@@ -298,19 +298,19 @@ static auto assert_blank_value(BytesView value)
 
 TEST_F(NormalXactTests, UndoFirstValue)
 {
-    set_value(identifier {1}, generate_value());
-    ASSERT_OK(undo_xact(*this, identifier::null()));
-    assert_blank_value(get_value(identifier {1}));
+    set_value(Id {1}, generate_value());
+    ASSERT_OK(undo_xact(*this, Id::null()));
+    assert_blank_value(get_value(Id {1}));
 }
 
 TEST_F(NormalXactTests, UndoFirstXact)
 {
-    set_value(identifier {1}, generate_value());
-    set_value(identifier {2}, generate_value());
-    set_value(identifier {2}, generate_value());
-    ASSERT_OK(undo_xact(*this, identifier::null()));
-    assert_blank_value(get_value(identifier {1}));
-    assert_blank_value(get_value(identifier {2}));
+    set_value(Id {1}, generate_value());
+    set_value(Id {2}, generate_value());
+    set_value(Id {2}, generate_value());
+    ASSERT_OK(undo_xact(*this, Id::null()));
+    assert_blank_value(get_value(Id {1}));
+    assert_blank_value(get_value(Id {2}));
 }
 
 template<class Test>
@@ -324,12 +324,12 @@ static auto add_values(Test &test, Size n, bool allow_failure = false) -> std::v
     Size index {};
     for (const auto &value: values) {
         if (allow_failure) {
-            if (!test.try_set_value(identifier::from_index(index), value))
+            if (!test.try_set_value(Id::from_index(index), value))
                 return {};
             if (!test.allow_cleanup().is_ok())
                 return {};
         } else {
-            test.set_value(identifier::from_index(index), value);
+            test.set_value(Id::from_index(index), value);
             EXPECT_OK(test.allow_cleanup());
         }
         index = (index+1) % Test::PAGE_COUNT;
@@ -342,7 +342,7 @@ static auto assert_values_match(Test &test, const std::vector<std::string> &valu
 {
     Size index {};
     for (const auto &value: values) {
-        const auto id = identifier::from_index(index);
+        const auto id = Id::from_index(index);
         ASSERT_EQ(test.get_value(id), value)
             << "error: mismatch on page " << id.value << " (" << Test::PAGE_COUNT << " pages total)";
         index = (index+1) % Test::PAGE_COUNT;
@@ -356,7 +356,7 @@ TEST_F(NormalXactTests, EmptyCommit)
 
 TEST_F(NormalXactTests, EmptyAbort)
 {
-    ASSERT_OK(undo_xact(*this, identifier::null()));
+    ASSERT_OK(undo_xact(*this, Id::null()));
 }
 
 TEST_F(NormalXactTests, AbortEmptyTransaction)
@@ -422,7 +422,7 @@ TEST_F(NormalXactTests, Recover)
 
     add_values(*this, PAGE_COUNT);
 
-    identifier lsn;
+    Id lsn;
     Recovery recovery {*pager, *wal};
     ASSERT_OK(recovery.start_recovery(lsn));
     ASSERT_EQ(lsn, commit_lsn);
@@ -432,11 +432,11 @@ TEST_F(NormalXactTests, Recover)
 
 class RollForwardTests: public NormalXactTests {
 public:
-    auto get_lsn_range() -> std::pair<identifier, identifier>
+    auto get_lsn_range() -> std::pair<Id, Id>
     {
-        std::vector<identifier> lsns;
+        std::vector<Id> lsns;
         EXPECT_OK(wal->stop_workers());
-        EXPECT_OK(wal->roll_forward(identifier::null(), [&lsns](WalPayloadOut payload) {
+        EXPECT_OK(wal->roll_forward(Id::null(), [&lsns](WalPayloadOut payload) {
             lsns.emplace_back(payload.lsn());
             return Status::ok();
         }));
@@ -486,7 +486,7 @@ fmt::print("seed == {}\n", internal::random_seed);
 
     const auto [first, last] = get_lsn_range();
     ASSERT_LE(first, commit_lsn);
-    ASSERT_EQ(identifier {last.value + 1}, wal->current_lsn());
+    ASSERT_EQ(Id {last.value + 1}, wal->current_lsn());
 
     ASSERT_OK(undo_xact(*this, commit_lsn));
     assert_values_match(*this, committed);

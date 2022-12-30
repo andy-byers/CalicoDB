@@ -2,7 +2,7 @@
 #define CALICO_PAGER_FRAMER_H
 
 #include "calico/status.h"
-#include "utils/result.h"
+#include <tl/expected.hpp>
 #include "utils/types.h"
 #include <list>
 #include <memory>
@@ -15,6 +15,7 @@ struct FileHeader;
 class Page;
 class Pager;
 class RandomEditor;
+class Storage;
 class WriteAheadLog;
 
 class Frame final {
@@ -22,7 +23,7 @@ public:
     Frame(Byte *, Size, Size);
 
     [[nodiscard]]
-    auto pid() const -> identifier
+    auto pid() const -> Id
     {
         return m_page_id;
     }
@@ -45,19 +46,19 @@ public:
         return m_bytes;
     }
 
-    auto reset(identifier id) -> void
+    auto reset(Id id) -> void
     {
         CALICO_EXPECT_EQ(m_ref_count, 0);
         m_page_id = id;
     }
 
-    [[nodiscard]] auto lsn() const -> identifier;
+    [[nodiscard]] auto lsn() const -> Id;
     [[nodiscard]] auto ref(Pager&, bool) -> Page;
     auto unref(Page &page) -> void;
 
 private:
     Bytes m_bytes;
-    identifier m_page_id;
+    Id m_page_id;
     Size m_ref_count {};
     bool m_is_writable {};
 };
@@ -65,8 +66,8 @@ private:
 class Framer final {
 public:
     ~Framer() = default;
-    [[nodiscard]] static auto open(std::unique_ptr<RandomEditor> file, Size page_size, Size frame_count, Framer **out) -> Status;
-    [[nodiscard]] auto pin(identifier) -> tl::expected<Size, Status>;
+    [[nodiscard]] static auto open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<Framer, Status>;
+    [[nodiscard]] auto pin(Id) -> tl::expected<Size, Status>;
     [[nodiscard]] auto write_back(Size) -> Status;
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto ref(Size, Pager&, bool) -> Page;
@@ -77,7 +78,7 @@ public:
     auto save_state(FileHeader&) const -> void;
 
     [[nodiscard]]
-    auto flushed_lsn() const -> identifier
+    auto flushed_lsn() const -> Id
     {
         return m_flushed_lsn;
     }
@@ -118,8 +119,8 @@ public:
 
 private:
     Framer(std::unique_ptr<RandomEditor>, AlignedBuffer, Size, Size);
-    [[nodiscard]] auto read_page_from_file(identifier, Bytes) const -> tl::expected<bool, Status>;
-    [[nodiscard]] auto write_page_to_file(identifier, BytesView) const -> Status;
+    [[nodiscard]] auto read_page_from_file(Id, Bytes) const -> tl::expected<bool, Status>;
+    [[nodiscard]] auto write_page_to_file(Id, BytesView) const -> Status;
 
     [[nodiscard]]
     auto frame_at_impl(Size id) -> Frame&
@@ -132,7 +133,7 @@ private:
     std::vector<Frame> m_frames;
     std::list<Size> m_available;
     std::unique_ptr<RandomEditor> m_file;
-    identifier m_flushed_lsn;
+    Id m_flushed_lsn;
     Size m_page_count {};
     Size m_page_size {};
     Size m_ref_sum {};

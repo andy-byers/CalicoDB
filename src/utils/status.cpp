@@ -6,22 +6,20 @@ namespace calico {
 static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
 {
     // Status is OK, so there isn't anything to copy.
-    if (!data) return nullptr;
+    if (data == nullptr) return nullptr;
 
-    // Otherwise, we have to copy a code and a message.
-    const auto size = std::strlen(data) + sizeof(char);
-    auto copy = std::make_unique<char[]>(size);
-    Bytes bytes {copy.get(), size};
+    // Allocate memory for the copied message/status code.
+    const auto total_size = std::char_traits<char>::length(data) + sizeof(char);
+    auto copy = std::make_unique<char[]>(total_size);
 
-    CALICO_EXPECT_EQ(data[size - 1], '\0');
-    std::strcpy(bytes.data(), data);
-    bytes[size - 1] = '\0';
+    // Copy the status, std::make_unique<char[]>() will zero initialize, so we already have the null byte.
+    std::memcpy(copy.get(), data, total_size - sizeof(char));
     return copy;
 }
 
-Status::Status(Code code, const std::string_view &message)
+Status::Status(code code, const std::string_view &message)
 {
-    static constexpr Size EXTRA_SIZE {sizeof(Code) + sizeof(char)};
+    static constexpr Size EXTRA_SIZE {sizeof(code) + sizeof(char)};
     const auto size = message.size() + EXTRA_SIZE;
 
     m_data = std::make_unique<char[]>(size);
@@ -44,24 +42,18 @@ Status::Status(Status &&rhs) noexcept
     : m_data {std::move(rhs.m_data)}
 {}
 
-auto Status::operator=(const Status &rhs) -> Status&
+auto Status::operator=(const Status &rhs) -> Status &
 {
     if (this != &rhs)
         m_data = maybe_copy_data(rhs.m_data.get());
     return *this;
 }
 
-auto Status::operator=(Status &&rhs) noexcept -> Status&
+auto Status::operator=(Status &&rhs) noexcept -> Status &
 {
     if (this != &rhs)
         m_data = std::move(rhs.m_data);
     return *this;
-}
-
-auto Status::code() const -> Code
-{
-    CALICO_EXPECT_FALSE(is_ok());
-    return Code {m_data.get()[0]};
 }
 
 auto Status::ok() -> Status
@@ -71,52 +63,52 @@ auto Status::ok() -> Status
 
 auto Status::not_found(const std::string_view &what) -> Status
 {
-    return {Code::NOT_FOUND, what};
+    return {code::NOT_FOUND, what};
 }
 
 auto Status::invalid_argument(const std::string_view &what) -> Status
 {
-    return {Code::INVALID_ARGUMENT, what};
+    return {code::INVALID_ARGUMENT, what};
 }
 
 auto Status::system_error(const std::string_view &what) -> Status
 {
-    return {Code::SYSTEM_ERROR, what};
+    return {code::SYSTEM_ERROR, what};
 }
 
 auto Status::logic_error(const std::string_view &what) -> Status
 {
-    return {Code::LOGIC_ERROR, what};
+    return {code::LOGIC_ERROR, what};
 }
 
 auto Status::corruption(const std::string_view &what) -> Status
 {
-    return {Code::CORRUPTION, what};
+    return {code::CORRUPTION, what};
 }
 
 auto Status::is_invalid_argument() const -> bool
 {
-    return !is_ok() && code() == Code::INVALID_ARGUMENT;
+    return !is_ok() && code {m_data[0]} == code::INVALID_ARGUMENT;
 }
 
 auto Status::is_system_error() const -> bool
 {
-    return !is_ok() && code() == Code::SYSTEM_ERROR;
+    return !is_ok() && code {m_data[0]} == code::SYSTEM_ERROR;
 }
 
 auto Status::is_logic_error() const -> bool
 {
-    return !is_ok() && code() == Code::LOGIC_ERROR;
+    return !is_ok() && code {m_data[0]} == code::LOGIC_ERROR;
 }
 
 auto Status::is_corruption() const -> bool
 {
-    return !is_ok() && code() == Code::CORRUPTION;
+    return !is_ok() && code {m_data[0]} == code::CORRUPTION;
 }
 
 auto Status::is_not_found() const -> bool
 {
-    return !is_ok() && code() == Code::NOT_FOUND;
+    return !is_ok() && code {m_data[0]} == code::NOT_FOUND;
 }
 
 auto Status::is_ok() const -> bool
@@ -126,7 +118,7 @@ auto Status::is_ok() const -> bool
 
 auto Status::what() const -> std::string_view
 {
-    return is_ok() ? "" : std::string_view {m_data.get() + sizeof(Code)};
+    return is_ok() ? "" : std::string_view {m_data.get() + sizeof(code)};
 }
 
 } // namespace calico

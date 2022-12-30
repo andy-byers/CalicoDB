@@ -14,7 +14,7 @@ public:
     struct Parameters {
         BytesView key;
         BytesView local_value;
-        identifier overflow_id;
+        Id overflow_id;
         Size value_size {};
         Size page_size {};
         bool is_external {};
@@ -31,11 +31,11 @@ public:
     [[nodiscard]] auto value_size() const -> Size;
     [[nodiscard]] auto overflow_size() const -> Size;
     [[nodiscard]] auto local_value() const -> BytesView;
-    [[nodiscard]] auto overflow_id() const -> identifier;
-    [[nodiscard]] auto left_child_id() const -> identifier;
+    [[nodiscard]] auto overflow_id() const -> Id;
+    [[nodiscard]] auto left_child_id() const -> Id;
     auto set_is_external(bool) -> void;
-    auto set_left_child_id(identifier) -> void;
-    auto set_overflow_id(identifier) -> void;
+    auto set_left_child_id(Id) -> void;
+    auto set_overflow_id(Id) -> void;
     auto write(Bytes) const -> void;
     auto detach(Bytes, bool = false) -> void;
 
@@ -56,8 +56,8 @@ private:
 
     BytesView m_key;
     BytesView m_local_value;
-    identifier m_left_child_id;
-    identifier m_overflow_id;
+    Id m_left_child_id;
+    Id m_overflow_id;
     Size m_value_size {};
     Size m_page_size {};
     bool m_is_external {};

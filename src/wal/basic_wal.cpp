@@ -49,13 +49,13 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
     m_logger->info("constructing BasicWriteAheadLog object");
 }
 
-auto BasicWriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
+auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
 {
     // Get the name of every file in the database directory.
     std::vector<std::string> child_names;
     const auto path_prefix = param.prefix + WAL_PREFIX;
     auto s = param.store->get_children(param.prefix, child_names);
-    if (!s.is_ok()) return s;
+    if (!s.is_ok()) return tl::make_unexpected(s);
 
     // Filter out the segment file names.
     std::vector<std::string> segment_names;
@@ -70,16 +70,15 @@ auto BasicWriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> S
     });
     std::sort(begin(segment_ids), end(segment_ids));
 
-    auto *wal = new(std::nothrow) BasicWriteAheadLog {param};
+    std::unique_ptr<BasicWriteAheadLog> wal {new (std::nothrow) BasicWriteAheadLog {param}};
     if (wal == nullptr)
-        return Status::system_error("cannot allocate WAL object: out of memory");
+        return tl::make_unexpected(Status::system_error("cannot allocate WAL object: out of memory"));
 
     // Keep track of the segment files.
     for (const auto &id: segment_ids)
         wal->m_set.add_segment(id);
 
-    *out = wal;
-    return Status::ok();
+    return wal;
 }
 
 BasicWriteAheadLog::~BasicWriteAheadLog()
@@ -107,17 +106,17 @@ auto BasicWriteAheadLog::worker_status() const -> Status
     return Status::ok();
 }
 
-auto BasicWriteAheadLog::flushed_lsn() const -> identifier
+auto BasicWriteAheadLog::flushed_lsn() const -> Id
 {
     return m_flushed_lsn.load();
 }
 
-auto BasicWriteAheadLog::current_lsn() const -> identifier
+auto BasicWriteAheadLog::current_lsn() const -> Id
 {
-    return identifier {m_last_lsn.value + 1};
+    return Id {m_last_lsn.value + 1};
 }
 
-auto BasicWriteAheadLog::remove_before(identifier lsn) -> Status
+auto BasicWriteAheadLog::remove_before(Id lsn) -> Status
 {
     CALICO_EXPECT_TRUE(m_is_working);
     m_cleaner->remove_before(lsn);
@@ -249,7 +248,7 @@ auto BasicWriteAheadLog::open_cleaner() -> Status
     return Status::ok();
 }
 
-auto BasicWriteAheadLog::roll_forward(identifier begin_lsn, const Callback &callback) -> Status
+auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) -> Status
 {
     static constexpr auto MSG = "cannot roll forward";
     m_logger->info("rolling forward from LSN {}", begin_lsn.value);
@@ -279,7 +278,7 @@ auto BasicWriteAheadLog::roll_forward(identifier begin_lsn, const Callback &call
 
     auto s = Status::ok();
     while (s.is_ok()) {
-        identifier first_lsn;
+        Id first_lsn;
         s = m_reader->read_first_lsn(first_lsn);
         if (!s.is_ok()) break;
 
@@ -319,7 +318,7 @@ auto BasicWriteAheadLog::roll_forward(identifier begin_lsn, const Callback &call
     return s;
 }
 
-auto BasicWriteAheadLog::roll_backward(identifier end_lsn, const Callback &callback) -> Status
+auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> Status
 {
     static constexpr auto MSG = "could not roll backward";
     m_logger->info("rolling backward to LSN {}", end_lsn.value);
@@ -346,7 +345,7 @@ auto BasicWriteAheadLog::roll_backward(identifier end_lsn, const Callback &callb
 
     auto s = Status::ok();
     for (Size i {}; s.is_ok(); i++) {
-        identifier first_lsn;
+        Id first_lsn;
         s = m_reader->read_first_lsn(first_lsn);
 
         if (s.is_ok()) {
@@ -373,7 +372,7 @@ auto BasicWriteAheadLog::roll_backward(identifier end_lsn, const Callback &callb
     return s.is_not_found() ? Status::ok() : s;
 }
 
-auto BasicWriteAheadLog::remove_after(identifier limit) -> Status
+auto BasicWriteAheadLog::remove_after(Id limit) -> Status
 {
     static constexpr auto MSG = "could not records remove after";
 
@@ -387,7 +386,7 @@ auto BasicWriteAheadLog::remove_after(identifier limit) -> Status
     SegmentId target;
 
     while (!current.is_null()) {
-        identifier first_lsn;
+        Id first_lsn;
         auto s = read_first_lsn(
             *m_store, m_prefix, current, first_lsn);
 

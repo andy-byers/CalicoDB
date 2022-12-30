@@ -13,12 +13,12 @@ public:
     static constexpr Size TYPE_OFFSET {8};
     static constexpr Size HEADER_SIZE {10};
 
-    static constexpr auto header_offset(identifier page_id) noexcept -> Size
+    static constexpr auto header_offset(Id page_id) noexcept -> Size
     {
         return page_id.is_root() * sizeof(FileHeader);
     }
 
-    static constexpr auto content_offset(identifier page_id) noexcept -> Size
+    static constexpr auto content_offset(Id page_id) noexcept -> Size
     {
         return header_offset(page_id) + HEADER_SIZE;
     }
@@ -38,12 +38,12 @@ public:
     static constexpr Size FREE_TOTAL_OFFSET {32};
     static constexpr Size HEADER_SIZE {34};
 
-    static constexpr auto header_offset(identifier page_id) noexcept -> Size
+    static constexpr auto header_offset(Id page_id) noexcept -> Size
     {
         return PageLayout::content_offset(page_id);
     }
 
-    static constexpr auto content_offset(identifier page_id) noexcept -> Size
+    static constexpr auto content_offset(Id page_id) noexcept -> Size
     {
         return header_offset(page_id) + HEADER_SIZE;
     }
@@ -58,7 +58,7 @@ public:
     {
         // The root page can never become a link page, so this value is the same for
         // all pages.
-        const identifier non_root {identifier::root().value + 1};
+        const Id non_root {Id::root().value + 1};
         return PageLayout::content_offset(non_root);
     }
 

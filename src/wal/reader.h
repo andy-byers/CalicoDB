@@ -17,7 +17,7 @@ public:
     {}
 
     // NOTE: If either of these methods returns a non-OK status, the state of this object is unspecified.
-    [[nodiscard]] auto read_first_lsn(identifier &out) -> Status;
+    [[nodiscard]] auto read_first_lsn(Id &out) -> Status;
     [[nodiscard]] auto read(WalPayloadOut &out, Bytes payload, Bytes tail) -> Status;
 
 private:
@@ -59,7 +59,7 @@ public:
 
     // TODO: LevelDB caches first LSNs of WAL segments. If we end up reading this info a lot, we may want to do the same. We could use this method
     //       for that, and store the cache in WALCollection, so it lives longer than this object, which is meant to be transient.
-    [[nodiscard]] auto read_first_lsn(identifier&) -> Status;
+    [[nodiscard]] auto read_first_lsn(Id &) -> Status;
     [[nodiscard]] auto roll(const Callback&) -> Status;
 
 private:

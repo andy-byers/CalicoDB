@@ -12,26 +12,26 @@ static constexpr auto WAL_PREFIX = "wal-";
 static constexpr Size WAL_SCRATCH_SCALE {3};
 static constexpr Size WAL_BLOCK_SCALE {1};
 
-struct SegmentId: public identifier {
+struct SegmentId: public Id {
     static constexpr auto NAME_FORMAT = "{}{:06d}";
     static constexpr Size DIGITS_SIZE {6};
-    using Hash = hash;
+    using Hash = Hash;
 
     constexpr SegmentId() noexcept = default;
 
     constexpr explicit SegmentId(Size value) noexcept
-        : identifier {value}
+        : Id {value}
     {}
 
-    constexpr explicit SegmentId(identifier id) noexcept
-        : identifier {id}
+    constexpr explicit SegmentId(Id id) noexcept
+        : Id {id}
     {}
 
     // TODO: Had to shadow a few methods...
     [[nodiscard]]
     static auto from_index(size_t index) noexcept -> SegmentId
     {
-        return SegmentId {identifier::from_index(index)};
+        return SegmentId {Id::from_index(index)};
     }
 
     [[nodiscard]]
@@ -55,12 +55,12 @@ struct SegmentId: public identifier {
 
     static constexpr auto null() noexcept -> SegmentId
     {
-        return SegmentId { identifier::null().value};
+        return SegmentId {Id::null().value};
     }
 
     static constexpr auto root() noexcept -> SegmentId
     {
-        return SegmentId { identifier::root().value};
+        return SegmentId {Id::root().value};
     }
 
     [[nodiscard]]
@@ -132,7 +132,7 @@ struct WalRecordHeader {
 struct WalPayloadHeader {
     static constexpr Size SIZE {8};
 
-    identifier lsn;
+    Id lsn;
 };
 
 // Routines for working with WAL records.

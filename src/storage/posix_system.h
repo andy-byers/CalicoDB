@@ -2,7 +2,7 @@
 #define CALICO_STORE_SYSTEM_H
 
 #include "calico/storage.h"
-#include "utils/result.h"
+#include <tl/expected.hpp>
 #include <system_error>
 
 namespace calico::system {

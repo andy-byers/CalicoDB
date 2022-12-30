@@ -39,7 +39,7 @@ auto CursorInternal::seek_left(Cursor &cursor) -> bool
     if (is_first(cursor)) {
         invalidate(cursor);
     } else {
-        const identifier left {cursor.m_position.ids[Cursor::Position::LEFT]};
+        const Id left {cursor.m_position.ids[Cursor::Position::LEFT]};
         auto previous = cursor.m_pool->acquire(left, false);
         if (!previous.has_value()) {
             invalidate(cursor, previous.error());
@@ -60,7 +60,7 @@ auto CursorInternal::seek_right(Cursor &cursor) -> bool
     if (is_last(cursor)) {
         invalidate(cursor);
     } else {
-        const identifier right {cursor.m_position.ids[Cursor::Position::RIGHT]};
+        const Id right {cursor.m_position.ids[Cursor::Position::RIGHT]};
         auto next = cursor.m_pool->acquire(right, false);
         if (!next.has_value()) {
             invalidate(cursor, next.error());
@@ -86,7 +86,7 @@ auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
     if (!cursor.is_valid())
         return;
 
-    auto node = cursor.m_pool->acquire(identifier {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
+    auto node = cursor.m_pool->acquire(Id {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
     CALICO_EXPECT_TRUE(node.has_value());
     node->TEST_validate();
 }
@@ -201,7 +201,7 @@ auto Cursor::decrement() -> bool
 auto Cursor::key() const -> BytesView
 {
     CALICO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(identifier {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_pool->acquire(Id {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
@@ -212,7 +212,7 @@ auto Cursor::key() const -> BytesView
 auto Cursor::value() const -> std::string
 {
     CALICO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(identifier {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_pool->acquire(Id {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
@@ -238,13 +238,13 @@ auto Cursor::Position::operator==(const Position &rhs) const -> bool
 auto Cursor::Position::is_maximum() const -> bool
 {
     CALICO_EXPECT_NE(ids[CURRENT], 0);
-    return identifier {ids[RIGHT]}.is_null() && index + 1 == cell_count;
+    return Id {ids[RIGHT]}.is_null() && index + 1 == cell_count;
 }
 
 auto Cursor::Position::is_minimum() const -> bool
 {
     CALICO_EXPECT_NE(ids[CURRENT], 0);
-    return cell_count && identifier {ids[LEFT]}.is_null() && index == 0;
+    return cell_count && Id {ids[LEFT]}.is_null() && index == 0;
 }
 
 } // namespace calico

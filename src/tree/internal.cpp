@@ -15,7 +15,7 @@ Internal::Internal(NodePool &pool)
     m_scratch.emplace_back(scratch_size);
 }
 
-auto Internal::collect_value(const Node &node, Size index) const -> Result<std::string>
+auto Internal::collect_value(const Node &node, Size index) const -> tl::expected<std::string, Status>
 {
     auto cell = node.read_cell(index);
     const auto local = cell.local_value();
@@ -37,17 +37,17 @@ auto Internal::collect_value(const Node &node, Size index) const -> Result<std::
 
 auto Internal::find_root(bool is_writable) -> tl::expected<Node, Status>
 {
-    return m_pool->acquire(identifier::root(), is_writable);
+    return m_pool->acquire(Id::root(), is_writable);
 }
 
 auto Internal::find_external(BytesView key) -> tl::expected<SearchResult, Status>
 {
     if (m_cell_count == 0)
-        return SearchResult {identifier::root(), 0, false};
+        return SearchResult {Id::root(), 0, false};
 
     auto node = find_root(false);
     if (!node.has_value())
-        return Err {node.error()};
+        return tl::make_unexpected(node.error());
 
     Node::FindGeResult result;
     for (;;) {
@@ -59,7 +59,7 @@ auto Internal::find_external(BytesView key) -> tl::expected<SearchResult, Status
         CALICO_TRY__(m_pool->release(std::move(*node)));
         node = m_pool->acquire(id, false);
         if (!node.has_value())
-            return Err {node.error()};
+            return tl::make_unexpected(node.error());
     }
     const auto [index, found_eq] = result;
     return SearchResult {node->id(), index, found_eq};
@@ -67,7 +67,7 @@ auto Internal::find_external(BytesView key) -> tl::expected<SearchResult, Status
 
 auto Internal::find_minimum() -> tl::expected<SearchResult, Status>
 {
-    CALICO_TRY_CREATE(node, m_pool->acquire(identifier::root(), false));
+    CALICO_TRY_CREATE(node, m_pool->acquire(Id::root(), false));
     auto id = node.id();
 
     while (!node.is_external()) {
@@ -86,7 +86,7 @@ auto Internal::find_minimum() -> tl::expected<SearchResult, Status>
 
 auto Internal::find_maximum() -> tl::expected<SearchResult, Status>
 {
-    CALICO_TRY_CREATE(node, m_pool->acquire(identifier::root(), false));
+    CALICO_TRY_CREATE(node, m_pool->acquire(Id::root(), false));
     auto id = node.id();
 
     while (!node.is_external()) {
@@ -157,7 +157,7 @@ auto Internal::positioned_remove(Position position) -> tl::expected<void, Status
         auto was_destroyed = m_pool->destroy_chain(cell.overflow_id(), cell.overflow_size());
         if (!was_destroyed.has_value()) {
             CALICO_TRY__(m_pool->release(std::move(node)));
-            return Err {was_destroyed.error()};
+            return tl::make_unexpected(was_destroyed.error());
         }
     }
 
@@ -250,7 +250,7 @@ auto Internal::maybe_fix_child_parent_connections(Node &node) -> tl::expected<vo
     if (!node.is_external()) {
         const auto parent_id = node.id();
 
-        const auto fix_connection = [parent_id, this](identifier child_id) -> tl::expected<void, Status> {
+        const auto fix_connection = [parent_id, this](Id child_id) -> tl::expected<void, Status> {
             CALICO_TRY_CREATE(child, m_pool->acquire(child_id, true));
             child.set_parent_id(parent_id);
             return m_pool->release(std::move(child));

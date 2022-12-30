@@ -35,9 +35,9 @@ auto Page::type() const -> PageType
     return PageType {get_u16(*this, header_offset() + PageLayout::TYPE_OFFSET)};
 }
 
-auto Page::lsn() const -> identifier
+auto Page::lsn() const -> Id
 {
-    return identifier {get_u64(*this, header_offset() + PageLayout::LSN_OFFSET)};
+    return Id {get_u64(*this, header_offset() + PageLayout::LSN_OFFSET)};
 }
 
 auto Page::set_type(PageType type) -> void
@@ -46,14 +46,14 @@ auto Page::set_type(PageType type) -> void
     put_u16(*this, offset, static_cast<uint16_t>(type));
 }
 
-auto Page::set_lsn(identifier value) -> void
+auto Page::set_lsn(Id value) -> void
 {
     CALICO_EXPECT_LE(lsn(), value);
     const auto offset = header_offset() + PageLayout::LSN_OFFSET;
     put_u64(*this, offset, value.value);
 }
 
-auto Page::id() const -> identifier
+auto Page::id() const -> Id
 {
     return m_id;
 }
