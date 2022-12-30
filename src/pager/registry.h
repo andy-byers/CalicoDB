@@ -84,9 +84,9 @@ public:
     }
 
     [[nodiscard]]
-    auto contains(identifier id) const -> bool
+    auto contains(identifier pid) const -> bool
     {
-        return m_cache.contains(id);
+        return m_cache.contains(pid);
     }
 
     [[nodiscard]]
@@ -118,9 +118,9 @@ public:
         return std::nullopt;
     }
 
-    auto put(identifier, Size) -> void;
-    auto get(identifier) -> Iterator;
-    auto erase(identifier) -> void;
+    auto put(identifier pid, Entry entry) -> void;
+    auto get(identifier pid) -> Iterator;
+    auto erase(identifier pid) -> void;
 
 private:
     Cache m_cache;

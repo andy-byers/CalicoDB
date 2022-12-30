@@ -154,13 +154,13 @@ auto Cell::write(Bytes out) const -> void
     }
 }
 
-auto Cell::detach(Scratch scratch, bool ensure_internal) -> void
+auto Cell::detach(Bytes scratch, bool ensure_internal) -> void
 {
     if (ensure_internal && m_is_external)
         set_is_external(false);
 
-    write(*scratch);
-    *this = read_at(*scratch, m_page_size, m_is_external);
+    write(scratch);
+    *this = read_at(scratch, m_page_size, m_is_external);
     m_is_attached = false;
 }
 

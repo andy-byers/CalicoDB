@@ -133,6 +133,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             m_wal.get(),
             &m_status,
             &m_has_xact,
+            &m_commit_lsn,
             m_sink,
             sanitized.frame_count,
             sanitized.page_size,
@@ -165,16 +166,16 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         s = m_pager->release(root->take());
         MAYBE_FORWARD(s, MSG);
 
-        // This is safe right now because the WAL has not been started. If successful, we will have the root page set up and saved
-        // to the database file.
-        s = m_pager->flush();
+        // This is safe right now because the WAL has not been started. If successful, we will have the root page
+        // set up and saved to the database file.
+        s = m_pager->flush({});
 
         if (s.is_ok() && m_wal->is_enabled())
             s = m_wal->start_workers();
 
     } else if (m_wal->is_enabled()) {
         // This should be a no-op if the database closed normally last time.
-        s = ensure_consistent_state();
+        s = ensure_consistency_on_startup();
         MAYBE_FORWARD(s, MSG);
     }
 
@@ -345,15 +346,12 @@ auto Core::commit() -> Status
     s = m_wal->advance();
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
-    // Clean up obsolete WAL segments.
-    s = m_wal->remove_before(std::min(m_commit_lsn, m_pager->flushed_lsn()));
+    // Make sure every dirty page that hasn't been written back since the last commit is on disk.
+    s = m_pager->flush(lsn); // TODO: m_commit_lsn);
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
-    // TODO: We need frequently used pages to be flushed eventually... It's possible for some
-    //       pages to never be flushed naturally (like the root page). This hurts performance
-    //       though, so we may want to find an alternative, like flushing pages when they get
-    //       too old.
-    s = m_pager->flush();
+    // Clean up obsolete WAL segments.
+    s = m_wal->remove_before(m_commit_lsn);
     MAYBE_SAVE_AND_FORWARD(s, MSG);
 
     m_images.clear();
@@ -400,14 +398,23 @@ auto Core::close() -> Status
         if (!s.is_ok()) forward_status(s, "could not stop WAL workers");
     }
     // We already waited on the WAL to be done writing so this should happen immediately.
-    auto s = m_pager->flush();
+    auto s = m_pager->flush({});
     MAYBE_SAVE_AND_FORWARD(s, "cannot flush pages before stop");
     return m_status;
 }
 
-auto Core::ensure_consistent_state() -> Status
+auto Core::ensure_consistency_on_modify() -> Status
 {
-    static constexpr auto MSG = "cannot ensure consistent database state";
+    static constexpr auto MSG = "cannot ensure consistent database state after modify";
+    MAYBE_SAVE_AND_FORWARD(m_recovery->start_recovery(m_commit_lsn), MSG);
+    MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
+    MAYBE_SAVE_AND_FORWARD(m_recovery->finish_recovery(m_commit_lsn), MSG);
+    return Status::ok();
+}
+
+auto Core::ensure_consistency_on_startup() -> Status
+{
+    static constexpr auto MSG = "cannot ensure consistent database state on startup";
     MAYBE_SAVE_AND_FORWARD(m_recovery->start_recovery(m_commit_lsn), MSG);
     MAYBE_SAVE_AND_FORWARD(load_state(), MSG);
     MAYBE_SAVE_AND_FORWARD(m_recovery->finish_recovery(m_commit_lsn), MSG);

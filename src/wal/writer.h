@@ -35,8 +35,6 @@ public:
     [[nodiscard]] auto flush() -> Status;
 
 private:
-    [[nodiscard]] auto clear_rest_and_flush(Size local_offset) -> Status;
-
     std::atomic<identifier> *m_flushed_lsn {};
     identifier m_last_lsn {};
     AppendWriter *m_file {};

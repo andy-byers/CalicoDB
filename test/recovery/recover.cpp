@@ -16,7 +16,7 @@ static constexpr Size KEY_WIDTH {12};
 
 auto show_usage()
 {
-    std::cout << "usage: ensure_consistent_state PATH N\n";
+    std::cout << "usage: ensure_consistency_on_startup PATH N\n";
     std::cout << "  Parameters\n";
     std::cout << "==============\n";
     std::cout << "PATH: Path at which to look for the database\n";

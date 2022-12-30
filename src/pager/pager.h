@@ -32,7 +32,7 @@ public:
     virtual auto allocate() -> tl::expected<Page, Status> = 0;
     virtual auto acquire(identifier, bool) -> tl::expected<Page, Status> = 0;
     virtual auto release(Page) -> Status = 0;
-    virtual auto flush() -> Status = 0;
+    virtual auto flush(identifier lsn_limit) -> Status = 0;
     virtual auto save_state(FileHeader &) -> void = 0;
     virtual auto load_state(const FileHeader &) -> void = 0;
 };

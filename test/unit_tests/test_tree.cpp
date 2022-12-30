@@ -38,6 +38,7 @@ public:
             wal.get(),
             &status,
             &has_xact,
+            &commit_lsn,
             create_sink(),
             FRAME_COUNT,
             PAGE_SIZE
@@ -48,6 +49,7 @@ public:
     Random random {0};
     Status status {Status::ok()};
     bool has_xact {};
+    identifier commit_lsn;
     std::unordered_set<identifier, identifier::hash> images;
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
@@ -558,9 +560,9 @@ TEST_F(TreeTests, ReverseBoundedIteration)
 
 TEST_F(TreeTests, SanityCheck)
 {
-    static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size NUM_RECORDS {500};
-    static constexpr Size MIN_SIZE {100};
+    static constexpr Size NUM_ITERATIONS {2};
+    static constexpr Size NUM_RECORDS {5'000};
+    static constexpr Size MIN_SIZE {500};
     RecordGenerator::Parameters param;
     param.mean_key_size = 20;
     param.mean_value_size = 10;

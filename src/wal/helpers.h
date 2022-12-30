@@ -134,6 +134,9 @@ public:
     }
 
 private:
+    // NOTE: I know this seems pretty sketchy... It should be okay, because each call to get() is followed by
+    //       a call to WriteAheadLog::log(), which pushes its arguments into a WORKER_CAPACITY-length queue,
+    //       only blocking if it becomes full.
     static constexpr Size SCRATCH_COUNT {WORKER_CAPACITY + 2};
 
     mutable std::mutex m_mutex;

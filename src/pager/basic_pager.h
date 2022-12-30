@@ -27,6 +27,7 @@ public:
         WriteAheadLog *wal {};
         Status *status {};
         bool *has_xact {};
+        identifier *commit_lsn {};
         spdlog::sink_ptr log_sink;
         Size frame_count {};
         Size page_size {};
@@ -42,7 +43,7 @@ public:
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status> override;
     [[nodiscard]] auto acquire(identifier, bool) -> tl::expected<Page, Status> override;
     [[nodiscard]] auto release(Page) -> Status override;
-    [[nodiscard]] auto flush() -> Status override;
+    [[nodiscard]] auto flush(identifier target_lsn) -> Status override;
     auto save_state(FileHeader &) -> void override;
     auto load_state(const FileHeader &) -> void override;
 
@@ -57,8 +58,7 @@ private:
     [[nodiscard]] auto pin_frame(identifier, bool &) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
-    auto make_dirty(PageRegistry::Entry &entry, identifier pid) -> void;
-    auto make_clean(PageRegistry::Entry &entry) -> PageList::Iterator;
+    auto clean_page(PageRegistry::Entry &entry) -> PageList::Iterator;
     auto forward_status(Status s, const std::string &message) -> Status
     {
         if (!s.is_ok()) {
@@ -88,6 +88,7 @@ private:
     PageRegistry m_registry;
     Status *m_status {};
     bool *m_has_xact {};
+    identifier *m_commit_lsn {};
 };
 
 } // namespace calico

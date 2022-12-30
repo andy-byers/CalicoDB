@@ -37,7 +37,7 @@ public:
     auto set_left_child_id(identifier) -> void;
     auto set_overflow_id(identifier) -> void;
     auto write(Bytes) const -> void;
-    auto detach(Scratch, bool = false) -> void;
+    auto detach(Bytes, bool = false) -> void;
 
     [[nodiscard]]
     auto is_external() const -> bool

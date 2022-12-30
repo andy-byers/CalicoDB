@@ -51,36 +51,34 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
 
 auto BasicWriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
-    static constexpr auto MSG = "cannot open write-ahead log";
-    auto *temp = new (std::nothrow) BasicWriteAheadLog {param};
-
-    if (!temp) {
-        ThreePartMessage message;
-        message.set_primary(MSG);
-        message.set_detail("out of memory");
-        return message.system_error();
-    }
+    // Get the name of every file in the database directory.
     std::vector<std::string> child_names;
     const auto path_prefix = param.prefix + WAL_PREFIX;
     auto s = param.store->get_children(param.prefix, child_names);
     if (!s.is_ok()) return s;
 
+    // Filter out the segment file names.
     std::vector<std::string> segment_names;
     std::copy_if(cbegin(child_names), cend(child_names), back_inserter(segment_names), [&path_prefix](const auto &path) {
         return BytesView {path}.starts_with(path_prefix);
     });
 
+    // Convert to segment IDs.
     std::vector<SegmentId> segment_ids;
     std::transform(cbegin(segment_names), cend(segment_names), back_inserter(segment_ids), [param](const auto &name) {
         return SegmentId::from_name(BytesView {name}.advance(param.prefix.size()));
     });
     std::sort(begin(segment_ids), end(segment_ids));
 
+    auto *wal = new(std::nothrow) BasicWriteAheadLog {param};
+    if (wal == nullptr)
+        return Status::system_error("cannot allocate WAL object: out of memory");
+
     // Keep track of the segment files.
     for (const auto &id: segment_ids)
-        temp->m_set.add_segment(id);
+        wal->m_set.add_segment(id);
 
-    *out = temp;
+    *out = wal;
     return Status::ok();
 }
 

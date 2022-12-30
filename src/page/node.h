@@ -114,9 +114,9 @@ public:
 
     [[nodiscard]] auto read_key(Size) const -> BytesView;
     [[nodiscard]] auto read_cell(Size) const -> Cell;
-    [[nodiscard]] auto detach_cell(Size, Scratch) const -> Cell;
+    [[nodiscard]] auto detach_cell(Size, Bytes) const -> Cell;
     [[nodiscard]] auto find_ge(BytesView) const -> FindGeResult;
-    auto extract_cell(Size, Scratch) -> Cell;
+    auto extract_cell(Size, Bytes) -> Cell;
     auto insert(Cell) -> void;
     auto insert_at(Size, Cell) -> void;
     auto remove(BytesView) -> bool;
@@ -168,7 +168,7 @@ auto merge_left(Node &, Node &, Node &, Size) -> void;
 auto merge_right(Node &, Node &, Node &, Size) -> void;
 auto merge_root(Node &, Node &) -> void;
 auto split_root(Node &, Node &) -> void;
-[[nodiscard]] auto split_non_root(Node &, Node &, Scratch) -> Cell;
+[[nodiscard]] auto split_non_root(Node &, Node &, Bytes) -> Cell;
 
 } // namespace calico
 

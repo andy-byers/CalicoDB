@@ -113,7 +113,7 @@ public:
         using std::end;
 
         // NOTE: itr must be a valid iterator.
-        if (auto node = m_map.extract(itr)) {
+        if (auto node = m_map.extract(itr->key)) {
             if (m_sep == itr)
                 m_sep = next(m_sep);
             return m_list.erase(node.mapped());

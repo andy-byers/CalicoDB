@@ -18,7 +18,6 @@ public:
     cache<int, int> target;
 };
 
-
 TEST_F(CacheTests, EmptyCacheBehavior)
 {
     calico::cache<int, int> cache;
@@ -382,12 +381,12 @@ public:
 
 TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 {
-    registry.put(identifier {11UL}, Size {11UL});
-    registry.put(identifier {12UL}, Size {12UL});
-    registry.put(identifier {13UL}, Size {13UL});
-    registry.put(identifier {1UL}, Size {1UL});
-    registry.put(identifier {2UL}, Size {2UL});
-    registry.put(identifier {3UL}, Size {3UL});
+    registry.put(identifier {11UL}, {Size {11UL}});
+    registry.put(identifier {12UL}, {Size {12UL}});
+    registry.put(identifier {13UL}, {Size {13UL}});
+    registry.put(identifier {1UL}, {Size {1UL}});
+    registry.put(identifier {2UL}, {Size {2UL}});
+    registry.put(identifier {3UL}, {Size {3UL}});
     ASSERT_EQ(registry.size(), 6);
 
     ASSERT_EQ(registry.get(identifier {11UL})->value.frame_index, 11UL);
@@ -492,6 +491,7 @@ public:
             wal.get(),
             &status,
             &has_xact,
+            &commit_lsn,
             create_sink(),
             frame_count,
             page_size,
@@ -549,6 +549,7 @@ public:
 
     Status status {Status::ok()};
     bool has_xact {};
+    identifier commit_lsn;
     std::unordered_set<identifier, identifier::hash> images;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;

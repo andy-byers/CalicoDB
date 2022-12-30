@@ -6,10 +6,14 @@ namespace calico {
 
 Internal::Internal(NodePool &pool)
     : m_maximum_key_size {get_max_local(pool.page_size())},
-      // Scratch memory needs to be able to hold a maximally-sized cell.
-      m_scratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
       m_pool {&pool}
-{}
+{
+    // Scratch memory needs to be able to hold a maximally-sized cell.
+    const auto scratch_size = m_maximum_key_size + MAX_CELL_HEADER_SIZE;
+    m_scratch.emplace_back(scratch_size);
+    m_scratch.emplace_back(scratch_size);
+    m_scratch.emplace_back(scratch_size);
+}
 
 auto Internal::collect_value(const Node &node, Size index) const -> Result<std::string>
 {
@@ -218,7 +222,7 @@ auto Internal::split_non_root(Node node) -> tl::expected<Node, Status>
     CALICO_TRY_CREATE(parent, m_pool->acquire(node.parent_id(), true));
     CALICO_TRY_CREATE(sibling, m_pool->allocate(node.type()));
 
-    auto separator = ::calico::split_non_root(node, sibling, m_scratch.get());
+    auto separator = ::calico::split_non_root(node, sibling, *m_scratch[1]);
     auto [index, found_eq] = parent.find_ge(separator.key());
     CALICO_EXPECT_FALSE(found_eq);
 
@@ -229,6 +233,7 @@ auto Internal::split_non_root(Node node) -> tl::expected<Node, Status>
     }
 
     parent.insert_at(index, separator);
+    
     CALICO_EXPECT_FALSE(node.is_overflowing());
     CALICO_EXPECT_FALSE(sibling.is_overflowing());
 
@@ -378,14 +383,15 @@ auto Internal::fix_root(Node node) -> tl::expected<void, Status>
     if (!node.is_external()) {
         CALICO_TRY_CREATE(child, m_pool->acquire(node.rightmost_child_id(), true));
 
-        // We don't have enough room to transfer the child contents into the root, due to the storage header. In
+        // We don't have enough room to transfer the child contents into the root, due to the file header. In
         // this case, we'll just split the child and let the median cell be inserted into the root. Note that
         // the child needs an overflow cell for the split routine to work. We'll just fake it by extracting an
         // arbitrary cell and making it the overflow cell.
         if (child.usable_space() < node.header_offset()) {
-            child.set_overflow_cell(child.extract_cell(0, m_scratch.get()));
+            child.set_overflow_cell(child.extract_cell(0, *m_scratch[0]));
             CALICO_TRY__(m_pool->release(std::move(node)));
             CALICO_TRY__(split_non_root(std::move(child)));
+            
             CALICO_TRY_STORE(node, find_root(true));
         } else {
             ::calico::merge_root(node, child);
@@ -435,18 +441,18 @@ auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     CALICO_EXPECT_GT(rc.cell_count(), 1);
 
     auto old_separator = parent.read_cell(index);
-    auto lowest = rc.extract_cell(0, m_scratch.get());
+    auto lowest = rc.extract_cell(0, *m_scratch[1]);
     CALICO_TRY_CREATE(new_separator, make_cell(rc.read_key(0), {}, false));
     new_separator.set_left_child_id(Lc.id());
-    new_separator.detach(m_scratch.get(), true);
+    new_separator.detach(*m_scratch[2], true);
 
     // Parent might overflow.
     parent.remove_at(index, old_separator.size());
     parent.insert_at(index, new_separator);
-
+    
     Lc.insert_at(Lc.cell_count(), lowest);
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
-    return {};
+        return {};
 }
 
 auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
@@ -456,18 +462,18 @@ auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     CALICO_EXPECT_GT(Lc.cell_count(), 1);
 
     auto separator = parent.read_cell(index);
-    auto highest = Lc.extract_cell(Lc.cell_count() - 1, m_scratch.get());
+    auto highest = Lc.extract_cell(Lc.cell_count() - 1, *m_scratch[1]);
     CALICO_TRY_CREATE(new_separator, make_cell(highest.key(), {}, false));
     new_separator.set_left_child_id(Lc.id());
-    new_separator.detach(m_scratch.get(), true);
+    new_separator.detach(*m_scratch[2], true);
 
     // Parent might overflow.
     parent.remove_at(index, separator.size());
     parent.insert_at(index, new_separator);
-
+    
     rc.insert_at(0, highest);
     CALICO_EXPECT_FALSE(rc.is_overflowing());
-    return {};
+        return {};
 }
 
 auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
@@ -478,7 +484,7 @@ auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     CALICO_EXPECT_GT(parent.cell_count(), 0);
     CALICO_EXPECT_GT(rc.cell_count(), 1);
 
-    auto separator = parent.extract_cell(index, m_scratch.get());
+    auto separator = parent.extract_cell(index, *m_scratch[1]);
     CALICO_TRY_CREATE(child, m_pool->acquire(rc.child_id(0), true));
     separator.set_left_child_id(Lc.rightmost_child_id());
     child.set_parent_id(Lc.id());
@@ -486,12 +492,12 @@ auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     CALICO_TRY__(m_pool->release(std::move(child)));
     Lc.insert_at(Lc.cell_count(), separator);
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
-
-    auto lowest = rc.extract_cell(0, m_scratch.get());
+    
+    auto lowest = rc.extract_cell(0, *m_scratch[1]);
     lowest.set_left_child_id(Lc.id());
     // Parent might overflow.
     parent.insert_at(index, lowest);
-    return {};
+        return {};
 }
 
 auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
@@ -502,7 +508,7 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     CALICO_EXPECT_GT(parent.cell_count(), 0);
     CALICO_EXPECT_GT(Lc.cell_count(), 1);
 
-    auto separator = parent.extract_cell(index, m_scratch.get());
+    auto separator = parent.extract_cell(index, *m_scratch[1]);
     CALICO_TRY_CREATE(child, m_pool->acquire(Lc.rightmost_child_id(), true));
     separator.set_left_child_id(child.id());
     child.set_parent_id(rc.id());
@@ -510,8 +516,8 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     Lc.set_rightmost_child_id(Lc.child_id(Lc.cell_count() - 1));
     rc.insert_at(0, separator);
     CALICO_EXPECT_FALSE(rc.is_overflowing());
-
-    auto highest = Lc.extract_cell(Lc.cell_count() - 1, m_scratch.get());
+    
+    auto highest = Lc.extract_cell(Lc.cell_count() - 1, *m_scratch[1]);
     highest.set_left_child_id(Lc.id());
     // The parent might overflow.
     parent.insert_at(index, highest);

@@ -191,16 +191,36 @@ auto Recovery::start_recovery(identifier &commit_lsn) -> Status
 
         last_lsn = payload.lsn();
 
-        if (std::holds_alternative<DeltasDescriptor>(*info)) {
-            if (payload.lsn() > m_pager->flushed_lsn()) {
+//        if (std::holds_alternative<DeltasDescriptor>(*info)) {
+//            if (payload.lsn() > m_pager->flushed_lsn()) {
+//                const auto deltas = std::get<DeltasDescriptor>(*info);
+//                auto page = m_pager->acquire(deltas.pid, true);
+//                if (!page.has_value()) return page.error();
+//                page->apply_update(deltas);
+//                return m_pager->release(std::move(*page));
+//            }
+//        } else if (std::holds_alternative<CommitDescriptor>(*info)) {
+//            commit_lsn = payload.lsn();
+//        }
+
+        if (std::holds_alternative<CommitDescriptor>(*info)) {
+            commit_lsn = payload.lsn();
+        } else if (payload.lsn() > m_pager->flushed_lsn()) {
+            if (std::holds_alternative<DeltasDescriptor>(*info)) {
                 const auto deltas = std::get<DeltasDescriptor>(*info);
                 auto page = m_pager->acquire(deltas.pid, true);
                 if (!page.has_value()) return page.error();
                 page->apply_update(deltas);
                 return m_pager->release(std::move(*page));
+            } else if (std::holds_alternative<FullImageDescriptor>(*info)) { // TODO
+//                const auto image = std::get<FullImageDescriptor>(*info);
+//                auto page = m_pager->acquire(image.pid, true);
+//                if (!page.has_value()) return page.error();
+//                page->apply_update(image);
+//                return m_pager->release(std::move(*page));
+            } else {
+                return Status::corruption("unrecognized payload type");
             }
-        } else if (std::holds_alternative<CommitDescriptor>(*info)) {
-            commit_lsn = payload.lsn();
         }
         return Status::ok();
     };
@@ -237,7 +257,7 @@ auto Recovery::finish_recovery(identifier commit_lsn) -> Status
 auto Recovery::finish_routine(identifier commit_lsn) -> Status
 {
     // Flush all dirty database pages.
-    CALICO_TRY(m_pager->flush());
+    CALICO_TRY(m_pager->flush({})); // TODO: commit_lsn));
 
     // Remove obsolete segment files.
     CALICO_TRY(m_wal->remove_after(commit_lsn));

@@ -383,7 +383,7 @@ auto Node::read_cell(Size index) const -> Cell
     return Cell::read_at(*this, CellDirectory::get_pointer(m_page, index).value);
 }
 
-auto Node::detach_cell(Size index, Scratch scratch) const -> Cell
+auto Node::detach_cell(Size index, Bytes scratch) const -> Cell
 {
     CALICO_EXPECT_LT(index, cell_count());
     auto cell = read_cell(index);
@@ -391,7 +391,7 @@ auto Node::detach_cell(Size index, Scratch scratch) const -> Cell
     return cell;
 }
 
-auto Node::extract_cell(Size index, Scratch scratch) -> Cell
+auto Node::extract_cell(Size index, Bytes scratch) -> Cell
 {
     CALICO_EXPECT_LT(index, cell_count());
     auto cell = detach_cell(index, scratch);
@@ -811,7 +811,7 @@ auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> 
     }
 }
 
-auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Scratch scratch) -> Cell
+auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     transfer_cells_right_while(Ln, rn, [overflow_index](const Node &src, const Node &, Size) {
         return src.cell_count() > overflow_index;
@@ -824,7 +824,7 @@ auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overfl
     return overflow;
 }
 
-auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Scratch scratch) -> Cell
+auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     // Note that we need to insert the overflow cell into either Ln or rn no matter what, even if it ends up being the separator.
     transfer_cells_right_while(Ln, rn, [&overflow, overflow_index](const Node &src, const Node &, Size counter) {
@@ -846,7 +846,7 @@ auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overfl
     return separator;
 }
 
-auto split_external_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
@@ -888,7 +888,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     return separator;
 }
 
-auto split_internal_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
@@ -927,7 +927,7 @@ auto split_internal_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
     return separator;
 }
 
-auto split_non_root(Node &Ln, Node &rn, Scratch scratch) -> Cell
+auto split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 {
     CALICO_EXPECT_TRUE(Ln.is_overflowing());
     CALICO_EXPECT_EQ(Ln.is_external(), rn.is_external());
