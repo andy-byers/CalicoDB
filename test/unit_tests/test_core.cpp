@@ -94,7 +94,7 @@ public:
     {
         options.page_size = 0x200;
         options.frame_count = 64;
-        options.log_level = spdlog::level::trace;
+        options.log_level = LogLevel::OFF;
         options.store = store.get();
     }
 
@@ -188,7 +188,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     static constexpr Size NUM_ITERATIONS {5};
     static constexpr Size GROUP_SIZE {10};
 
-    auto s = Status::ok();
+    auto s = ok();
     RecordGenerator generator;
     Random random {internal::random_seed};
 
@@ -799,7 +799,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //    MockDatabase db;
 //    auto wal_mock = db.mock->get_mock_wal_writer_file("latest");
 //    ON_CALL(*wal_mock, write(_))
-//        .WillByDefault(Return(Err {Status::system_error("123")}));
+//        .WillByDefault(Return(Err {system_error("123")}));
 //
 //    auto r = db.core->commit();
 //    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
@@ -831,7 +831,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 ////
 ////    auto wal_mock = db.mock->get_mock_wal_writer_file("latest");
 ////    ON_CALL(*wal_mock, write(_))
-////        .WillByDefault(Return(Err {Status::system_error("123")}));
+////        .WillByDefault(Return(Err {system_error("123")}));
 ////
 ////    auto r = db.core->commit();
 ////    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
@@ -851,7 +851,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //    using testing::Return;
 //
 //    ON_CALL(mock, close)
-//        .WillByDefault(Return(Err {Status::system_error("123")}));
+//        .WillByDefault(Return(Err {system_error("123")}));
 //
 //    const auto s = db.core->close();
 //    ASSERT_FALSE(s.has_value());

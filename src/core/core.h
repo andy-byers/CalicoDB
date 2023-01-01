@@ -106,9 +106,9 @@ private:
     [[nodiscard]] auto load_state() -> Status;
 
     std::string m_prefix;
-    spdlog::sink_ptr m_sink;
-    Status m_status {Status::ok()};
-    std::shared_ptr<spdlog::logger> m_logger;
+    Status m_status {ok()};
+    LogPtr m_logger;
+    std::unique_ptr<System> m_state;
     std::unique_ptr<WriteAheadLog> m_wal;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
@@ -121,7 +121,7 @@ private:
     bool m_owns_store {};
 };
 
-auto setup(const std::string &, Storage &, const Options &, spdlog::logger &) -> tl::expected<InitialState, Status>;
+auto setup(const std::string &, Storage &, const Options &, Log &) -> tl::expected<InitialState, Status>;
 
 } // namespace calico
 

@@ -1,23 +1,58 @@
 #ifndef CALICO_UTILS_LOGGING_H
 #define CALICO_UTILS_LOGGING_H
 
+#include <numeric>
+#include <optional>
+#include <spdlog/spdlog.h>
+#include "expect.h"
 #include "calico/options.h"
 #include "calico/status.h"
-#include "expect.h"
-#include <numeric>
-#include "spdlog/spdlog.h"
 
 namespace calico {
 
 constexpr auto LOG_FILENAME = "log";
 
-#define CALICO_STRINGIFY_(x) #x
-#define CALICO_STRINGIFY(x) CALICO_STRINGIFY_(x)
-#define CALICO_LOG_FORMAT(s) ("[" CALICO_STRINGIFY(__FILE__) ":" CALICO_STRINGIFY(__LINE__) "] "(s))
+using Log = spdlog::logger;
+using LogPtr = std::shared_ptr<spdlog::logger>;
+using LogSink = spdlog::sink_ptr;
 
-auto create_logger(spdlog::sink_ptr, const std::string_view &) -> std::shared_ptr<spdlog::logger>;
-auto create_sink(const std::string_view &, LogLevel) -> spdlog::sink_ptr;
-auto create_sink() -> spdlog::sink_ptr;
+auto create_log(LogSink, const std::string_view &) -> LogPtr;
+auto create_sink(const std::string_view &, LogLevel) -> LogSink;
+auto create_sink() -> LogSink;
+
+
+struct Error {
+    enum Level: Size {
+        WARN,
+        ERROR,
+
+        // Should be used for internal errors.
+        PANIC,
+    };
+
+    Status status;
+    Level priority {};
+};
+
+class System {
+public:
+    // Number of critical sections we are currently in.
+    std::atomic<int> critical {};
+
+    //
+    std::atomic<bool> fragile {};
+
+    System(const std::string_view &base, LogLevel log_level, LogTarget log_target);
+    auto create_log(const std::string_view &name) const -> LogPtr;
+    auto push_error(Error::Level level, Status status) -> Size;
+    auto pop_error() -> std::optional<Error>;
+
+private:
+    mutable std::mutex m_mutex;
+    std::vector<Error> m_errors;
+    LogSink m_sink;
+    LogPtr m_log;
+};
 
 class ThreePartMessage {
 public:
@@ -66,7 +101,7 @@ private:
 
 class LogMessage {
 public:
-    explicit LogMessage(spdlog::logger &logger)
+    explicit LogMessage(Log &logger)
         : m_logger {&logger}
     {}
 
@@ -97,7 +132,7 @@ public:
 
 private:
     ThreePartMessage m_message;
-    spdlog::logger *m_logger {};
+    Log *m_logger {};
 };
 
 } // namespace calico

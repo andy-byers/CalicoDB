@@ -20,7 +20,7 @@ template<class Base, class Store>
 [[nodiscard]]
 auto open_blob(Store &store, const std::string &name) -> std::unique_ptr<Base>
 {
-    auto s = Status::ok();
+    auto s = ok();
     Base *temp {};
 
     if constexpr (std::is_same_v<RandomReader, Base>) {

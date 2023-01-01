@@ -24,9 +24,9 @@ static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Sta
     if (!s.is_ok()) return s;
 
     if (temp.is_empty()) {
-        return Status::not_found("reached the end of the file");
+        return not_found("reached the end of the file");
     } else if (temp.size() != out.size()) {
-        return Status::system_error("incomplete read");
+        return system_error("incomplete read");
     }
     return s;
 }
@@ -100,14 +100,14 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
     }
     // Only modify the out parameter's size if we have succeeded.
     out.truncate(out.size() - payload.size());
-    return Status::ok();
+    return ok();
 }
 
 auto WalReader::open() -> Status
 {
     const auto first = m_set->id_after(SegmentId::null());
     if (first.is_null())
-        return Status::not_found("could not open WAL reader: segment collection is empty");
+        return not_found("could not open WAL reader: segment collection is empty");
     return open_segment(first);
 }
 
@@ -118,7 +118,7 @@ auto WalReader::seek_next() -> Status
         close_segment();
         return open_segment(next);
     }
-    return Status::not_found("could not seek to next segment: reached the last segment");
+    return not_found("could not seek to next segment: reached the last segment");
 }
 
 auto WalReader::seek_previous() -> Status

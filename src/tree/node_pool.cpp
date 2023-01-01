@@ -102,7 +102,7 @@ auto NodePool::allocate_chain(BytesView overflow) -> tl::expected<Id, Status>
 auto NodePool::collect_chain(Id id, Bytes out) const -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
-        CALICO_TRY_CREATE(page, m_pager->acquire(id, false));
+        CALICO_NEW_R(page, m_pager->acquire(id, false));
         if (page.type() != PageType::OVERFLOW_LINK) {
             ThreePartMessage message;
             message.set_primary("cannot collect overflow chain");
@@ -131,7 +131,7 @@ auto NodePool::destroy_chain(Id id, Size size) -> tl::expected<void, Status>
         Link link {std::move(*page)};
         id = link.next_id();
         size -= std::min(size, link.content_view().size());
-        CALICO_TRY__(m_free_list.push(link.take()));
+        CALICO_TRY_R(m_free_list.push(link.take()));
     }
     return {};
 }

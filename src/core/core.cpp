@@ -38,10 +38,7 @@ namespace calico {
 [[nodiscard]]
 static auto sanitize_options(const Options &options) -> Options
 {
-    auto sanitized = options;
-    if (sanitized.log_level >= spdlog::level::n_levels)
-        sanitized.log_level = spdlog::level::off;
-    return sanitized;
+    return options; // TODO: NOOP for now.
 }
 
 auto Info::record_count() const -> Size
@@ -69,7 +66,7 @@ auto Info::cache_hit_ratio() const -> double
     return m_core->pager().hit_ratio();
 }
 
-auto initialize_log(spdlog::logger &logger, const std::string &base)
+auto initialize_log(Log &logger, const std::string &base)
 {
     const auto version_name = fmt::format("v{}.{}.{}", CALICO_VERSION_MAJOR, CALICO_VERSION_MINOR, CALICO_VERSION_PATCH);
     logger.info("starting CalicoDB {} at \"{}\"", version_name, base);
@@ -83,10 +80,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     auto sanitized = sanitize_options(options);
 
     m_prefix = path + (path.back() == '/' ? "" :  "/");
-    m_sink = sanitized.log_level != spdlog::level::off
-         ? create_sink(path, sanitized.log_level) : create_sink();
-    m_logger = create_logger(m_sink, "core");
-    initialize_log(*m_logger, path);
+    m_state = std::make_unique<System>(m_prefix, sanitized.log_level, sanitized.log_target);
+    m_logger = m_state->create_log("core");
     m_logger->info("constructing Core object");
 
     m_store = sanitized.store;
@@ -107,13 +102,13 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         m_scratch = std::make_unique<LogScratchManager>(wal_scratch_size(sanitized.page_size));
 
         // The WAL segments may be stored elsewhere.
-        const auto wal_prefix = sanitized.wal_path.empty()
-            ? m_prefix : std::string {sanitized.wal_path} + "/";
+        const auto wal_prefix = sanitized.wal_path.is_empty()
+            ? m_prefix : sanitized.wal_path.to_string() + "/";
 
         auto r = BasicWriteAheadLog::open({
             wal_prefix,
             m_store,
-            m_sink,
+            m_state.get(),
             sanitized.page_size,
             sanitized.wal_limit,
         });
@@ -134,7 +129,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             &m_status,
             &m_has_xact,
             &m_commit_lsn,
-            m_sink,
+            m_state.get(),
             sanitized.frame_count,
             sanitized.page_size,
         });
@@ -145,7 +140,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     }
 
     {
-        auto r = BPlusTree::open(*m_pager, m_sink, sanitized.page_size);
+        auto r = BPlusTree::open(*m_pager, *m_state, sanitized.page_size);
         if (!r.has_value())
             return r.error();
         m_tree = std::move(*r);
@@ -154,11 +149,11 @@ auto Core::open(const std::string &path, const Options &options) -> Status
 
     m_recovery = std::make_unique<Recovery>(*m_pager, *m_wal);
 
-    auto s = Status::ok();
+    auto s = ok();
     if (is_new) {
         // The first call to root() allocates the root page.
         auto root = m_tree->root(true);
-        MAYBE_FORWARD(root ? Status::ok() : root.error(), MSG);
+        MAYBE_FORWARD(root ? ok() : root.error(), MSG);
         CALICO_EXPECT_EQ(m_pager->page_count(), 1);
 
         state.page_count = 1;
@@ -194,7 +189,7 @@ Core::~Core()
 
 auto Core::destroy() -> Status
 {
-    auto s = Status::ok();
+    auto s = ok();
     m_wal.reset();
 
     std::vector<std::string> children;
@@ -473,7 +468,7 @@ auto Core::load_state() -> Status
     return s;
 }
 
-auto setup(const std::string &prefix, Storage &store, const Options &options, spdlog::logger &logger) -> tl::expected<InitialState, Status>
+auto setup(const std::string &prefix, Storage &store, const Options &options, Log &logger) -> tl::expected<InitialState, Status>
 {
     const auto MSG = fmt::format("cannot initialize database at \"{}\"", prefix);
     LogMessage message {logger};

@@ -51,14 +51,14 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
     // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
     // to be all the way on disk.
     m_last_lsn = lsn;
-    return Status::ok();
+    return ok();
 }
 
 auto LogWriter::flush() -> Status
 {
     // Already flushed.
     if (m_offset == 0)
-        return Status::logic_error("could not flush: already flushed");
+        return logic_error("could not flush: already flushed");
 
     // Clear unused bytes at the end of the tail buffer.
     mem_clear(m_tail.range(m_offset));

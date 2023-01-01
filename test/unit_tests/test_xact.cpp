@@ -77,7 +77,7 @@ public:
         auto wal_r = BasicWriteAheadLog::open({
             "test/",
             store.get(),
-            create_sink(),
+            &state,
             PAGE_SIZE,
             WAL_LIMIT,
         });
@@ -93,7 +93,7 @@ public:
             &status,
             &has_xact,
             &commit_lsn_,
-            create_sink(),
+            &state,
             FRAME_COUNT,
             PAGE_SIZE,
         });
@@ -127,16 +127,16 @@ public:
 
     auto commit() -> Status
     {
-        CALICO_TRY(save_state());
+        CALICO_TRY_S(save_state());
 
         const auto lsn = wal->current_lsn();
         WalPayloadIn payload {lsn, scratch->get()};
         const auto size = encode_commit_payload(payload.data());
         payload.shrink_to_fit(size);
 
-        CALICO_TRY(wal->log(payload));
-        CALICO_TRY(wal->advance());
-        CALICO_TRY(allow_cleanup());
+        CALICO_TRY_S(wal->log(payload));
+        CALICO_TRY_S(wal->advance());
+        CALICO_TRY_S(allow_cleanup());
 
         commit_lsn = lsn;
         images.clear();
@@ -149,10 +149,10 @@ public:
         auto root = pager->acquire(Id::root(), true);
         if (!root.has_value()) return root.error();
 
-        auto state = read_header(*root);
-        pager->save_state(state);
-        state.header_crc = compute_header_crc(state);
-        write_header(*root, state);
+        auto header = read_header(*root);
+        pager->save_state(header);
+        header.header_crc = compute_header_crc(header);
+        write_header(*root, header);
 
         return pager->release(std::move(*root));
     }
@@ -162,11 +162,11 @@ public:
         auto root = pager->acquire(Id::root(), false);
         if (!root.has_value()) return root.error();
 
-        auto state = read_header(*root);
-        EXPECT_EQ(state.header_crc, compute_header_crc(state));
+        auto header = read_header(*root);
+        EXPECT_EQ(header.header_crc, compute_header_crc(header));
         const auto before_count = pager->page_count();
 
-        pager->load_state(state);
+        pager->load_state(header);
 
         auto s = pager->release(std::move(*root));
         if (s.is_ok() && pager->page_count() < before_count) {
@@ -225,6 +225,7 @@ public:
         return random.get<std::string>('a', 'z', PageWrapper::VALUE_SIZE);
     }
 
+    System state {"test", LogLevel::OFF, {}};
     Random random {internal::random_seed};
     Status status {Status::ok()};
     Id commit_lsn; // TODO: Used from before.
@@ -286,7 +287,7 @@ static auto undo_xact(Test &test, Id commit_lsn)
 {
     Recovery recovery {*test.pager, *test.wal};
     (void)test.wal->stop_workers();
-    CALICO_TRY(recovery.start_abort(commit_lsn));
+    CALICO_TRY_S(recovery.start_abort(commit_lsn));
     // Don't need to load any state for these tests.
     return recovery.finish_abort(commit_lsn);
 }
@@ -570,7 +571,7 @@ public:
     {
         options.page_size = 0x400;
         options.frame_count = 32;
-        options.log_level = spdlog::level::trace;
+        options.log_level = LogLevel::OFF;
         options.store = store.get();
 
         ASSERT_OK(db.open(ROOT, options));
@@ -850,7 +851,8 @@ public:
         options.page_size = 0x200;
         options.frame_count = 16;
         options.store = store.get();
-        options.log_level = spdlog::level::err; // TODO
+        options.log_level = LogLevel::INFO;
+        options.log_target = LogTarget::STDOUT_COLOR;
         ASSERT_OK(db.open(ROOT, options));
     }
 

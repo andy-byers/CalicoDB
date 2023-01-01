@@ -85,7 +85,7 @@ static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> S
             lhs.type = WalRecordHeader::FULL;
     }
     lhs.size = static_cast<std::uint16_t>(lhs.size + rhs.size);
-    return Status::ok();
+    return ok();
 }
 
 auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status

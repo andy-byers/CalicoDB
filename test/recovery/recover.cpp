@@ -47,7 +47,8 @@ auto main(int argc, const char *argv[]) -> int
             values.emplace_back(line);
     }
     Options options;
-    options.log_level = spdlog::level::info;
+    options.log_level = LogLevel::INFO;
+    options.log_target = LogTarget::FILE;
     Database db;
     expect_ok(db.open(path.string(), options));
     const auto info = db.info();

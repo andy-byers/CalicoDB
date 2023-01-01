@@ -9,13 +9,23 @@ namespace calico {
 
 class Status final {
 public:
+    /*
+     * Create an OK status.
+     */
     [[nodiscard]] static auto ok() -> Status;
+
+    /*
+     * Create a non-OK status with an error message.
+     */
     [[nodiscard]] static auto invalid_argument(const std::string_view &) -> Status;
     [[nodiscard]] static auto system_error(const std::string_view &) -> Status;
     [[nodiscard]] static auto logic_error(const std::string_view &) -> Status;
     [[nodiscard]] static auto corruption(const std::string_view &) -> Status;
     [[nodiscard]] static auto not_found(const std::string_view &) -> Status;
 
+    /*
+     * Check status type.
+     */
     [[nodiscard]] auto is_ok() const -> bool;
     [[nodiscard]] auto is_invalid_argument() const -> bool;
     [[nodiscard]] auto is_system_error() const -> bool;
@@ -23,48 +33,16 @@ public:
     [[nodiscard]] auto is_corruption() const -> bool;
     [[nodiscard]] auto is_not_found() const -> bool;
 
+    /*
+     * Get the error message, if it exists.
+     */
     [[nodiscard]] auto what() const -> std::string_view;
 
+    // Status can be copied and moved.
     Status(const Status &);
     auto operator=(const Status &) -> Status &;
-
     Status(Status &&) noexcept;
     auto operator=(Status &&) noexcept -> Status &;
-
-    template<class ...Ts>
-    [[nodiscard]]
-    static auto invalid_argument(const std::string_view &fmt, Ts &&...ts) -> Status
-    {
-        return invalid_argument(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...).c_str());
-    }
-
-    template<class ...Ts>
-    [[nodiscard]]
-    static auto system_error(const std::string_view &fmt, Ts &&...ts) -> Status
-    {
-        return system_error(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...).c_str());
-    }
-
-    template<class ...Ts>
-    [[nodiscard]]
-    static auto logic_error(const std::string_view &fmt, Ts &&...ts) -> Status
-    {
-        return logic_error(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...).c_str());
-    }
-
-    template<class ...Ts>
-    [[nodiscard]]
-    static auto corruption(const std::string_view &fmt, Ts &&...ts) -> Status
-    {
-        return corruption(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...).c_str());
-    }
-
-    template<class ...Ts>
-    [[nodiscard]]
-    static auto not_found(const std::string_view &fmt, Ts &&...ts) -> Status
-    {
-        return not_found(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...).c_str());
-    }
 
 private:
     enum class code : Byte {

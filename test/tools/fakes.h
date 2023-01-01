@@ -121,11 +121,11 @@ struct FailOnce {
             if (index++ == Delay)
                 return error;
         }
-        return Status::ok();
+        return ok();
     }
 
     std::string prefix;
-    Status error {Status::system_error("42")};
+    Status error {system_error("42")};
     Size index {};
 };
 
@@ -141,11 +141,11 @@ struct FailAfter {
             if (stob(path).starts_with(prefix) && index++ >= Delay)
                 return error;
         }
-        return Status::ok();
+        return ok();
     }
 
     std::string prefix;
-    Status error {Status::system_error("42")};
+    Status error {system_error("42")};
     Size index {};
 };
 
@@ -163,11 +163,11 @@ struct FailEvery {
                 return error;
             }
         }
-        return Status::ok();
+        return ok();
     }
 
     std::string prefix;
-    Status error {Status::system_error("42")};
+    Status error {system_error("42")};
     Size index {};
 };
 
@@ -208,20 +208,20 @@ public:
     {
         if (stob(path).starts_with(m_prefix)) {
             auto status = m_pattern[m_index++] == 0
-                ? m_error : Status::ok();
+                ? m_error : ok();
 
             if (m_index == m_pattern.size())
                 m_index = Reset {}(m_index);
 
             return status;
         }
-        return Status::ok();
+        return ok();
     }
 
 private:
     std::string m_prefix;
     std::vector<Outcome> m_pattern;
-    Status m_error {Status::system_error("42")};
+    Status m_error {system_error("42")};
     Size m_index {};
 };
 

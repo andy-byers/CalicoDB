@@ -65,10 +65,10 @@ namespace interceptors {
     auto reset() -> void
     {
         std::lock_guard lock {mutex};
-        open = [](auto) {return Status::ok();};
-        read = [](auto, auto, auto) {return Status::ok();};
-        write = [](auto, auto, auto) {return Status::ok();};
-        sync = [](auto) {return Status::ok();};
+        open = [](auto) {return ok();};
+        read = [](auto, auto, auto) {return ok();};
+        write = [](auto, auto, auto) {return ok();};
+        sync = [](auto) {return ok();};
     }
 
 } // namespace interceptors
@@ -95,7 +95,7 @@ static auto read_file_at(const std::string &path, const std::string &file, Bytes
         mem_copy(out, buffer, r);
     }
     out.truncate(r);
-    return Status::ok();
+    return ok();
 }
 
 static auto write_file_at(const std::string &path, std::string &file, BytesView in, Size offset)
@@ -105,7 +105,7 @@ static auto write_file_at(const std::string &path, std::string &file, BytesView 
     if (const auto write_end = offset + in.size(); file.size() < write_end)
         file.resize(write_end);
     mem_copy(stob(file).range(offset), in);
-    return Status::ok();
+    return ok();
 }
 
 static auto format_path(std::string path)
@@ -166,7 +166,7 @@ auto HeapStorage::open_random_reader(const std::string &path, RandomReader **out
         message.set_hint("open a writer or editor to create the file");
         return message.not_found();
     }
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out) -> Status
@@ -181,7 +181,7 @@ auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out
         CALICO_EXPECT_TRUE(truthy);
         *out = new RandomHeapEditor {path, position->second};
     }
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::open_append_writer(const std::string &path, AppendWriter **out) -> Status
@@ -196,7 +196,7 @@ auto HeapStorage::open_append_writer(const std::string &path, AppendWriter **out
         CALICO_EXPECT_TRUE(truthy);
         *out = new AppendHeapWriter {path, position->second};
     }
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::remove_file(const std::string &name) -> Status
@@ -210,7 +210,7 @@ auto HeapStorage::remove_file(const std::string &name) -> Status
         return message.system_error();
     }
     m_files.erase(itr);
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::resize_file(const std::string &name, Size size) -> Status
@@ -224,7 +224,7 @@ auto HeapStorage::resize_file(const std::string &name, Size size) -> Status
         return message.system_error();
     }
     itr->second.resize(size);
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::rename_file(const std::string &old_name, const std::string &new_name) -> Status
@@ -245,7 +245,7 @@ auto HeapStorage::rename_file(const std::string &old_name, const std::string &ne
     }
     node.key() = new_name;
     m_files.insert(std::move(node));
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::file_size(const std::string &name, Size &out) const -> Status
@@ -259,7 +259,7 @@ auto HeapStorage::file_size(const std::string &name, Size &out) const -> Status
         return message.system_error();
     }
     out = itr->second.size();
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::file_exists(const std::string &name) const -> Status
@@ -272,7 +272,7 @@ auto HeapStorage::file_exists(const std::string &name) const -> Status
         message.set_detail("file \"{}\" does not exist", name);
         return message.not_found();
     }
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::string> &out) const -> Status
@@ -295,14 +295,14 @@ auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::str
     std::transform(cbegin(m_files), cend(m_files), back_inserter(out), [](auto entry) {
         return entry.first;
     });
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::create_directory(const std::string &path) -> Status
 {
     std::lock_guard lock {m_mutex};
     m_directories.insert(format_path(path));
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::remove_directory(const std::string &name) -> Status
@@ -310,7 +310,7 @@ auto HeapStorage::remove_directory(const std::string &name) -> Status
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_NE(m_directories.find(name), cend(m_directories));
     m_directories.erase(name);
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::clone() const -> Storage*

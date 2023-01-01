@@ -465,60 +465,60 @@ TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 
 TEST(StatusTests, OkStatusHasNoMessage)
 {
-    auto s = Status::ok();
+    auto s = ok();
     ASSERT_TRUE(s.what().empty());
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
 {
     static constexpr auto message = "status message";
-    auto s = Status::invalid_argument(message);
+    auto s = invalid_argument(message);
     ASSERT_EQ(s.what(), message);
     ASSERT_TRUE(s.is_invalid_argument());
 }
 
 TEST(StatusTests, StatusCanBeCopied)
 {
-    auto s = Status::invalid_argument("invalid argument");
+    auto s = invalid_argument("invalid argument");
     auto t = s;
     ASSERT_TRUE(t.is_invalid_argument());
     ASSERT_EQ(t.what(), "invalid argument");
 
-    t = Status::ok();
+    t = ok();
     ASSERT_TRUE(s.is_invalid_argument());
     ASSERT_EQ(s.what(), "invalid argument");
 }
 
 TEST(StatusTests, StatusCanBeReassigned)
 {
-    auto s = Status::ok();
+    auto s = ok();
     ASSERT_TRUE(s.is_ok());
 
-    s = Status::invalid_argument("invalid argument");
+    s = invalid_argument("invalid argument");
     ASSERT_TRUE(s.is_invalid_argument());
     ASSERT_EQ(s.what(), "invalid argument");
 
-    s = Status::logic_error("logic error");
+    s = logic_error("logic error");
     ASSERT_TRUE(s.is_logic_error());
     ASSERT_EQ(s.what(), "logic error");
 
-    s = Status::ok();
+    s = ok();
     ASSERT_TRUE(s.is_ok());
 }
 
 TEST(StatusTests, StatusCodesAreCorrect)
 {
-    ASSERT_TRUE(Status::invalid_argument("invalid argument").is_invalid_argument());
-    ASSERT_TRUE(Status::system_error("system error").is_system_error());
-    ASSERT_TRUE(Status::logic_error("logic error").is_logic_error());
-    ASSERT_TRUE(Status::corruption("corruption").is_corruption());
-    ASSERT_TRUE(Status::not_found("not found").is_not_found());
-    ASSERT_TRUE(Status::ok().is_ok());
+    ASSERT_TRUE(invalid_argument("invalid argument").is_invalid_argument());
+    ASSERT_TRUE(system_error("system error").is_system_error());
+    ASSERT_TRUE(logic_error("logic error").is_logic_error());
+    ASSERT_TRUE(corruption("corruption").is_corruption());
+    ASSERT_TRUE(not_found("not found").is_not_found());
+    ASSERT_TRUE(ok().is_ok());
 }
 
 TEST(StatusTests, OkStatusCanBeCopied)
 {
-    auto src = Status::ok();
+    auto src = ok();
     auto dst = src;
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
@@ -528,7 +528,7 @@ TEST(StatusTests, OkStatusCanBeCopied)
 
 TEST(StatusTests, NonOkStatusCanBeCopied)
 {
-    auto src = Status::invalid_argument("status message");
+    auto src = invalid_argument("status message");
     auto dst = src;
     ASSERT_TRUE(src.is_invalid_argument());
     ASSERT_TRUE(dst.is_invalid_argument());
@@ -538,7 +538,7 @@ TEST(StatusTests, NonOkStatusCanBeCopied)
 
 TEST(StatusTests, OkStatusCanBeMoved)
 {
-    auto src = Status::ok();
+    auto src = ok();
     auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
@@ -548,7 +548,7 @@ TEST(StatusTests, OkStatusCanBeMoved)
 
 TEST(StatusTests, NonOkStatusCanBeMoved)
 {
-    auto src = Status::invalid_argument("status message");
+    auto src = invalid_argument("status message");
     auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_invalid_argument());
@@ -558,7 +558,7 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
 
 TEST(StatusTests, FmtPrint)
 {
-    auto s = Status::system_error("{1}::{0}", 123, 42);
+    auto s = system_error("{1}::{0}", 123, 42);
     ASSERT_EQ(s.what(), "42::123");
 }
 
@@ -687,7 +687,7 @@ public:
     BasicWorkerTests()
         : worker {16, [this](int event) {
             events.emplace_back(event);
-            return Status::ok();
+            return ok();
         }}
     {}
 

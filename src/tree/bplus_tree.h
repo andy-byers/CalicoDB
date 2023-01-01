@@ -4,6 +4,7 @@
 
 #include "internal.h"
 #include "tree.h"
+#include "utils/info_log.h"
 #include "spdlog/spdlog.h"
 
 #ifdef CALICO_BUILD_TESTS
@@ -25,12 +26,11 @@ public:
         return m_internal.cell_count();
     }
 
-
-    [[nodiscard]] static auto open(Pager &pager, spdlog::sink_ptr sink, size_t page_size) -> tl::expected<Tree::Ptr, Status>;
-    [[nodiscard]] auto insert(BytesView, BytesView) -> Status override;
-    [[nodiscard]] auto erase(Cursor) -> Status override;
-    [[nodiscard]] auto root(bool) -> tl::expected<Node, Status> override;
-    [[nodiscard]] auto find_exact(BytesView) -> Cursor override;
+    [[nodiscard]] static auto open(Pager &pager, System &state, size_t page_size) -> tl::expected<Tree::Ptr, Status>;
+    [[nodiscard]] auto insert(BytesView key, BytesView value) -> Status override;
+    [[nodiscard]] auto erase(Cursor cursor) -> Status override;
+    [[nodiscard]] auto root(bool is_writable) -> tl::expected<Node, Status> override;
+    [[nodiscard]] auto find_exact(BytesView key) -> Cursor override;
     [[nodiscard]] auto find(BytesView key) -> Cursor override;
     [[nodiscard]] auto find_minimum() -> Cursor override;
     [[nodiscard]] auto find_maximum() -> Cursor override;
@@ -46,12 +46,13 @@ private:
         Size index {};
         bool was_found {};
     };
-    BPlusTree(Pager &, spdlog::sink_ptr, Size);
-    auto find_aux(BytesView) -> tl::expected<SearchResult, Status>;
+    BPlusTree(Pager &pager, System &state, Size page_size);
+    auto find_aux(BytesView key) -> tl::expected<SearchResult, Status>;
 
     NodePool m_pool;
     Internal m_internal;
-    std::shared_ptr<spdlog::logger> m_logger;
+    LogPtr m_logger;
+    System *m_system {};
 };
 
 } // namespace calico

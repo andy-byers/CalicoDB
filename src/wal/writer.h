@@ -18,9 +18,9 @@ class LogWriter {
 public:
     // NOTE: LogWriter must always be created on an empty segment file.
     LogWriter(AppendWriter &file, Bytes tail, std::atomic<Id> &flushed_lsn)
-        : m_flushed_lsn {&flushed_lsn},
-          m_file {&file},
-          m_tail {tail}
+        : m_tail {tail},
+          m_flushed_lsn {&flushed_lsn},
+          m_file {&file}
     {}
 
     [[nodiscard]]
@@ -29,16 +29,16 @@ public:
         return m_number;
     }
 
-    // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified for the most part.
-    //       However, we can still query the block count to see if we've actually written out any blocks.
+    // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified, except for the block
+    //       count, which remains valid.
     [[nodiscard]] auto write(WalPayloadIn payload) -> Status;
     [[nodiscard]] auto flush() -> Status;
 
 private:
-    std::atomic<Id> *m_flushed_lsn {};
-    Id m_last_lsn {};
-    AppendWriter *m_file {};
     Bytes m_tail;
+    std::atomic<Id> *m_flushed_lsn {};
+    AppendWriter *m_file {};
+    Id m_last_lsn {};
     Size m_number {};
     Size m_offset {};
 };

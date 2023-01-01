@@ -38,7 +38,7 @@ public:
             &status,
             &has_xact,
             &commit_lsn,
-            create_sink(),
+            &state,
             FRAME_COUNT,
             PAGE_SIZE
         });
@@ -47,7 +47,8 @@ public:
     }
 
     Random random {0};
-    Status status {Status::ok()};
+    System state {"test", LogLevel::OFF, {}};
+    Status status {ok()};
     bool has_xact {};
     Id commit_lsn;
     std::unordered_set<Id, Id::Hash> images;
@@ -65,7 +66,7 @@ public:
         max_local = get_max_local(PAGE_SIZE);
         auto r = BPlusTree::open(
             *pager,
-            create_sink(),
+            state,
             PAGE_SIZE);
         EXPECT_TRUE(r.has_value()) << r.error().what();
         tree = std::move(*r);
@@ -83,6 +84,7 @@ public:
         tree->TEST_validate_order();
     }
 
+    System state {"test", LogLevel::OFF, {}};
     std::unique_ptr<Tree> tree;
     Size max_local {};
 };

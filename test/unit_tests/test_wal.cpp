@@ -702,19 +702,19 @@ public:
     [[nodiscard]]
     auto contains_sequence(WalReader &reader, Id final_lsn) -> Status
     {
-        auto s = Status::ok();
+        auto s = ok();
         Id lsn;
         // Roll forward to the end of the WAL.
         while (s.is_ok()) {
             s = reader.roll([&](auto info) {
                 EXPECT_EQ(Id {++lsn.value}, info.lsn());
-                return Status::ok();
+                return ok();
             });
             if (!s.is_ok()) break;
             s = reader.seek_next();
             if (s.is_not_found()) {
                 EXPECT_EQ(lsn, final_lsn);
-                return Status::ok();
+                return ok();
             } else if (!s.is_ok()) {
                 break;
             }
@@ -725,17 +725,17 @@ public:
     [[nodiscard]]
     auto roll_segments_forward(WalReader &reader) -> Status
     {
-        auto s = Status::ok();
+        auto s = ok();
         // Roll forward to the end of the WAL.
         while (s.is_ok()) {
             s = reader.roll([&](auto info) {
                 EXPECT_EQ(info.data().to_string(), payloads[info.lsn().as_index()]);
-                return Status::ok();
+                return ok();
             });
             if (!s.is_ok()) break;
             s = reader.seek_next();
             if (s.is_not_found()) {
-                return Status::ok();
+                return ok();
             } else if (!s.is_ok()) {
                 break;
             }
@@ -746,7 +746,7 @@ public:
     [[nodiscard]]
     auto roll_segments_backward(WalReader &reader) -> Status
     {
-        auto s = Status::ok();
+        auto s = ok();
         for (Size i {}; s.is_ok(); ++i) {
 
             Id first_lsn;
@@ -755,7 +755,7 @@ public:
 
             s = reader.roll([&](auto info) {
                 EXPECT_EQ(info.data().to_string(), payloads[info.lsn().as_index()]);
-                return Status::ok();
+                return ok();
             });
             if (!s.is_ok()) {
                 if (!s.is_corruption() || i)
@@ -763,7 +763,7 @@ public:
             }
             s = reader.seek_previous();
             if (s.is_not_found()) {
-                return Status::ok();
+                return ok();
             } else if (!s.is_ok()) {
                 break;
             }
@@ -953,7 +953,7 @@ public:
         auto r = BasicWriteAheadLog::open({
             PREFIX,
             store.get(),
-            create_sink(),
+            &state,
             PAGE_SIZE,
         });
         ASSERT_TRUE(r.has_value()) << r.error().what();
@@ -1018,7 +1018,7 @@ public:
             EXPECT_EQ(lhs.size(), rhs.size());
             EXPECT_EQ(lhs.to_string(), rhs);
             EXPECT_EQ(Id {lsn.value++}, payload.lsn());
-            return Status::ok();
+            return ok();
         }));
         if (!s.is_ok()) {ADD_FAILURE();}
         // We should have hit all records.
@@ -1034,7 +1034,7 @@ public:
             lsns.emplace_back(payload.lsn());
             EXPECT_GT(payload.lsn(), commit_lsn);
             EXPECT_EQ(payload.data().to_string(), payloads[payload.lsn().as_index()]);
-            return Status::ok();
+            return ok();
         }));
         if (strict) {
             ASSERT_EQ(lsns.size(), payloads_since_commit);
@@ -1088,6 +1088,7 @@ public:
         return s.is_ok() ? t : s;
     }
 
+    System state {"test", LogLevel::OFF, {}};
     Random random {42};
     Size payloads_since_commit {};
     Id commit_lsn;

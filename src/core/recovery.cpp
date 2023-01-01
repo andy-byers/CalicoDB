@@ -140,19 +140,14 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
 
 auto Recovery::start_abort(Id commit_lsn) -> Status
 {
-    static constexpr auto MSG = "could not abort";
+    if (!m_wal->is_enabled())
+        return Status::logic_error(
+            "WAL is not enabled (wal_limit was set to DISABLE_WAL on database creation)");
 
-    if (!m_wal->is_enabled()) {
-        ThreePartMessage message;
-        message.set_primary(MSG);
-        message.set_detail("WAL is not enabled");
-        message.set_hint(R"("wal_limit" was set to "DISABLE_WAL" on database creation)");
-        return message.logic_error();
+    if (m_wal->is_working()) {
+        if (auto s = m_wal->stop_workers(); !s.is_ok())
+            return s;
     }
-
-    auto s = Status::ok();
-    if (m_wal->is_working())
-        (void)m_wal->stop_workers();
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
@@ -187,7 +182,7 @@ auto Recovery::start_recovery(Id &commit_lsn) -> Status
 
         // Payload has an invalid type.
         if (!info.has_value())
-            return Status::corruption("WAL is corrupted");
+            return corruption("WAL is corrupted");
 
         last_lsn = payload.lsn();
 
@@ -241,7 +236,7 @@ auto Recovery::start_recovery(Id &commit_lsn) -> Status
         return Status::ok();
     };
 
-    CALICO_TRY(m_wal->roll_forward(Id::null(), redo));
+    CALICO_TRY_S(m_wal->roll_forward(Id::null(), redo));
 
     // Reached the end of the WAL, but didn't find a commit record.
     if (last_lsn != commit_lsn)
@@ -257,10 +252,10 @@ auto Recovery::finish_recovery(Id commit_lsn) -> Status
 auto Recovery::finish_routine(Id commit_lsn) -> Status
 {
     // Flush all dirty database pages.
-    CALICO_TRY(m_pager->flush({})); // TODO: commit_lsn));
+    CALICO_TRY_S(m_pager->flush({})); // TODO: commit_lsn));
 
     // Remove obsolete segment files.
-    CALICO_TRY(m_wal->remove_after(commit_lsn));
+    CALICO_TRY_S(m_wal->remove_after(commit_lsn));
 
     return m_wal->start_workers();
 }

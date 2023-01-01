@@ -11,6 +11,8 @@
 
 namespace calico {
 
+class System;
+
 struct PageDelta {
     Size offset {};
     Size size {};

@@ -482,7 +482,7 @@ public:
             &status,
             &has_xact,
             &commit_lsn,
-            create_sink(),
+            &state,
             frame_count,
             page_size,
         });
@@ -537,7 +537,8 @@ public:
         return message;
     }
 
-    Status status {Status::ok()};
+    System state {"test", LogLevel::OFF, {}};
+    Status status {ok()};
     bool has_xact {};
     Id commit_lsn;
     std::unordered_set<Id, Id::Hash> images;

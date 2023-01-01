@@ -5,7 +5,6 @@
 #include "utils/encoding.h"
 #include "utils/expect.h"
 #include "utils/header.h"
-#include "utils/info_log.h"
 #include "utils/layout.h"
 
 namespace calico {
@@ -69,7 +68,7 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
         new(static_cast<std::align_val_t>(page_size), std::nothrow) Byte[cache_size],
         AlignedDeleter {static_cast<std::align_val_t>(page_size)}};
     if (buffer == nullptr)
-        return tl::make_unexpected(Status::system_error("cannot allocate frames: out of memory"));
+        return tl::make_unexpected(system_error("cannot allocate frames: out of memory"));
 
     return Framer {std::move(file), std::move(buffer), page_size, frame_count};
 }
@@ -107,13 +106,9 @@ auto Framer::unref(Size id, Page &page) -> void
 auto Framer::pin(Id id) -> tl::expected<Size, Status>
 {
     CALICO_EXPECT_FALSE(id.is_null());
-    if (m_available.empty()) {
-        ThreePartMessage message;
-        message.set_primary("could not pin page");
-        message.set_detail("unable to find an available frame");
-        message.set_hint("unpin a page and try again");
-        return tl::make_unexpected(message.not_found());
-    }
+    if (m_available.empty())
+        return tl::make_unexpected(not_found(
+            "could not pin page: unable to find an available frame (unpin a page and try again)"));
 
     auto &frame = frame_at_impl(m_available.back());
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
@@ -190,11 +185,8 @@ auto Framer::read_page_from_file(Id id, Bytes out) const -> tl::expected<bool, S
     if (out.is_empty())
         return false;
 
-    ThreePartMessage message;
-    message.set_primary("could not read page {}", id.value);
-    message.set_detail("incomplete read");
-    message.set_hint("read {}/{} bytes", out.size(), m_page_size);
-    return tl::make_unexpected(message.system_error());
+    return tl::make_unexpected(system_error(
+        "could not read page {}: incomplete read (read {}/{} B)", id.value, out.size(), m_page_size));
 }
 
 auto Framer::write_page_to_file(Id id, BytesView in) const -> Status

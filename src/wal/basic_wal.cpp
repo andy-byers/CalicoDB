@@ -4,49 +4,33 @@
 
 namespace calico {
 
-#define MAYBE_FORWARD(expr, message) \
+static auto propagate_worker_error(System &system, const WriteAheadLog &wal)
+{
+    auto s = wal.worker_status();
+
+    if (!s.is_ok())
+        system.push_error(Error::ERROR, s);
+
+    return ok();
+}
+
+#define PROPAGATE_WORKER_ERROR \
     do { \
-        const auto &calico_s = (expr); \
-        if (!calico_s.is_ok()) return forward_status(calico_s, message); \
+        CALICO_EXPECT_TRUE(m_is_working); \
+        CALICO_TRY_S(propagate_worker_error(*m_system, *this)); \
     } while (0)
 
-static auto handle_worker_error(spdlog::logger &logger, const WalWriter &writer, const WalCleaner &cleaner)
-{
-    auto s = writer.status();
-    if (!s.is_ok()) {
-        logger.error("(1/2) background writer encountered an error");
-        logger.error("(2/2) {}", s.what());
-    }
-    auto t = cleaner.status();
-    if (!t.is_ok()) {
-        logger.error("(1/2) background cleaner encountered an error");
-        logger.error("(2/2) {}", t.what());
-    }
-    return s.is_ok() ? t : s;
-}
-
-static auto handle_not_started_error(spdlog::logger &logger, bool is_working, const std::string &primary)
-{
-    if (!is_working) {
-        LogMessage message {logger};
-        message.set_primary(primary);
-        message.set_detail("background workers are not running");
-        message.set_hint("start the background workers and try again");
-        return message.logic_error();
-    }
-    return Status::ok();
-}
-
 BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
-    : m_logger {create_logger(param.sink, "wal")},
+    : m_log {param.system->create_log("wal")},
       m_prefix {param.prefix},
       m_store {param.store},
+      m_system {param.system},
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
       m_wal_limit {param.wal_limit}
 {
-    m_logger->info("constructing BasicWriteAheadLog object");
+    m_log->info("opening WAL");
 }
 
 auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
@@ -72,7 +56,7 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
 
     std::unique_ptr<BasicWriteAheadLog> wal {new (std::nothrow) BasicWriteAheadLog {param}};
     if (wal == nullptr)
-        return tl::make_unexpected(Status::system_error("cannot allocate WAL object: out of memory"));
+        return tl::make_unexpected(system_error("cannot allocate WAL object: out of memory"));
 
     // Keep track of the segment files.
     for (const auto &id: segment_ids)
@@ -83,27 +67,23 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
 
 BasicWriteAheadLog::~BasicWriteAheadLog()
 {
-    m_logger->info("destroying BasicWriteAheadLog object");
-
-    // TODO: Move this into a close() method. We probably want to know if the writer shut down okay.
+    m_log->info("closing WAL");
 
     if (m_is_working) {
-        handle_worker_error(*m_logger, *m_writer, *m_cleaner);
+        propagate_worker_error(*m_system, *this);
 
-        auto s = stop_workers_impl();
-        forward_status(s, "cannot stop workers");
+        if (auto s = stop_workers_impl(); !s.is_ok())
+            m_system->push_error(Error::WARN, s);
     }
 }
 
 auto BasicWriteAheadLog::worker_status() const -> Status
 {
     if (m_is_working) {
-        auto s = m_writer->status();
-        if (s.is_ok())
-            return m_cleaner->status();
-        return s;
+        CALICO_TRY_S(m_writer->status());
+        return m_cleaner->status();
     }
-    return Status::ok();
+    return ok();
 }
 
 auto BasicWriteAheadLog::flushed_lsn() const -> Id
@@ -118,24 +98,15 @@ auto BasicWriteAheadLog::current_lsn() const -> Id
 
 auto BasicWriteAheadLog::remove_before(Id lsn) -> Status
 {
-    CALICO_EXPECT_TRUE(m_is_working);
+    PROPAGATE_WORKER_ERROR;
+
     m_cleaner->remove_before(lsn);
-    return m_cleaner->status();
+    return m_cleaner->status(); // TODO: It's kinda pointless to return the status here, as it's likely not updated yet anyway. We should check it once each "round", whatever that means.
 }
-
-#define HANDLE_WORKER_ERRORS \
-    do { \
-        auto s = handle_not_started_error(*m_logger, m_is_working, MSG); \
-        MAYBE_FORWARD(s, MSG); \
-        s = handle_worker_error(*m_logger, *m_writer, *m_cleaner); \
-        MAYBE_FORWARD(s, MSG); \
-    } while (0)
-
 
 auto BasicWriteAheadLog::log(WalPayloadIn payload) -> Status
 {
-    static constexpr auto MSG = "could not log payload";
-    HANDLE_WORKER_ERRORS;
+    PROPAGATE_WORKER_ERROR;
 
     m_last_lsn.value++;
     m_writer->write(payload);
@@ -144,9 +115,8 @@ auto BasicWriteAheadLog::log(WalPayloadIn payload) -> Status
 
 auto BasicWriteAheadLog::flush() -> Status
 {
-    m_logger->info("flushing tail buffer");
-    static constexpr auto MSG = "could not flush";
-    HANDLE_WORKER_ERRORS;
+    m_log->info("flushing tail buffer");
+    PROPAGATE_WORKER_ERROR;
 
     // flush() blocks until the background writer is finished.
     m_writer->flush();
@@ -155,15 +125,13 @@ auto BasicWriteAheadLog::flush() -> Status
 
 auto BasicWriteAheadLog::advance() -> Status
 {
-    m_logger->info("advancing to new segment");
-    static constexpr auto MSG = "could not advance";
-    HANDLE_WORKER_ERRORS;
+    m_log->info("advancing to new segment");
+    PROPAGATE_WORKER_ERROR;
 
+    // advance() blocks until the background writer is finished.
     m_writer->advance();
     return m_writer->status();
 }
-
-#undef HANDLE_WORKER_ERRORS
 
 auto BasicWriteAheadLog::stop_workers() -> Status
 {
@@ -174,9 +142,8 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
 {
     // Stops the workers no matter what, even if an error is encountered. We should be able to call abort_last() safely after
     // this method returns.
-    static constexpr auto MSG = "could not stop background writer";
-    m_logger->info("received stop request");
-    CALICO_EXPECT_TRUE(m_is_working);
+    m_log->info("received stop request");
+    PROPAGATE_WORKER_ERROR;
 
     m_is_working = false;
 
@@ -186,32 +153,29 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
     auto t = std::move(*m_cleaner).destroy();
     m_cleaner.reset();
 
-    MAYBE_FORWARD(s, MSG);
-    MAYBE_FORWARD(t, MSG);
+    CALICO_TRY_S(s);
+    CALICO_TRY_S(t);
 
-    m_logger->info("workers are stopped");
-    return Status::ok();
+    m_log->info("workers are stopped");
+    return ok();
 }
 
 auto BasicWriteAheadLog::start_workers() -> Status
 {
-    static constexpr auto MSG = "could not start workers";
-    m_logger->info("received start request");
+    m_log->info("received start request");
     CALICO_EXPECT_FALSE(m_is_working);
 
     auto s = open_writer();
     auto t = open_cleaner();
 
     if (s.is_ok() && t.is_ok()) {
+        m_log->info("workers are started");
         m_is_working = true;
-        m_logger->info("workers are started");
-    } else {
-        m_writer.reset();
-        m_cleaner.reset();
-        MAYBE_FORWARD(s, MSG);
-        MAYBE_FORWARD(t, MSG);
+        return ok();
     }
-    return s;
+    m_writer.reset();
+    m_cleaner.reset();
+    return s.is_ok() ? t : s;
 }
 
 auto BasicWriteAheadLog::open_reader() -> Status
@@ -250,13 +214,11 @@ auto BasicWriteAheadLog::open_cleaner() -> Status
 
 auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) -> Status
 {
-    static constexpr auto MSG = "cannot roll forward";
-    m_logger->info("rolling forward from LSN {}", begin_lsn.value);
+    m_log->info("rolling forward from LSN {}", begin_lsn.value);
 
-    if (m_is_working) {
-        auto s = stop_workers();
-        MAYBE_FORWARD(s, MSG);
-    }
+    if (m_is_working)
+        CALICO_TRY_S(stop_workers());
+
     if (m_set.first().is_null())
         return Status::ok();
 
@@ -265,22 +227,21 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
         m_flushed_lsn.store(m_last_lsn);
     }
     // Open the reader on the first (oldest) WAL segment file.
-    if (m_reader == std::nullopt) {
-        auto s = open_reader();
-        MAYBE_FORWARD(s, MSG);
-    }
+    if (m_reader == std::nullopt)
+        CALICO_TRY_S(open_reader());
+
     // Make sure we are on the first segment.
     for (; ; ) {
         auto s = m_reader->seek_previous();
         if (s.is_not_found()) break;
-        if (!s.is_ok()) return s;
+        CALICO_TRY_S(s);
     }
 
     auto s = Status::ok();
     while (s.is_ok()) {
         Id first_lsn;
         s = m_reader->read_first_lsn(first_lsn);
-        if (!s.is_ok()) break;
+        CALICO_TRY_S(s);
 
         s = m_reader->roll([&callback, begin_lsn, this](auto payload) {
             m_last_lsn = payload.lsn();
@@ -320,21 +281,17 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
 
 auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> Status
 {
-    static constexpr auto MSG = "could not roll backward";
-    m_logger->info("rolling backward to LSN {}", end_lsn.value);
+    m_log->info("rolling backward to LSN {}", end_lsn.value);
+//    CALICO_EXPECT_FALSE(m_is_working); // TODO: Should stop workers manually
 
-    if (m_is_working) {
-        auto s = stop_workers();
-        MAYBE_FORWARD(s, MSG);
-    }
+    if (m_is_working)
+        CALICO_TRY_S(stop_workers());
 
     if (m_set.first().is_null())
         return Status::ok();
 
-    if (m_reader == std::nullopt) {
-        auto s = open_reader();
-        MAYBE_FORWARD(s, MSG);
-    }
+    if (m_reader == std::nullopt)
+        CALICO_TRY_S(open_reader());
 
     // Find the most-recent segment.
     for (; ; ) {
@@ -364,7 +321,7 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
         // Most-recent segment can have an incomplete record at the end.
         if (s.is_corruption() && i == 0)
             s = Status::ok();
-        MAYBE_FORWARD(s, MSG);
+        CALICO_TRY_S(s);
 
         s = m_reader->seek_previous();
     }
@@ -374,12 +331,8 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
 
 auto BasicWriteAheadLog::remove_after(Id limit) -> Status
 {
-    static constexpr auto MSG = "could not records remove after";
-
-    if (m_is_working) {
-        auto s = stop_workers();
-        MAYBE_FORWARD(s, MSG);
-    }
+    if (m_is_working)
+        CALICO_TRY_S(stop_workers());
 
     auto last = m_set.last();
     auto current = last;
@@ -397,7 +350,7 @@ auto BasicWriteAheadLog::remove_after(Id limit) -> Status
             return s;
         }
         if (!target.is_null()) {
-            CALICO_TRY(m_store->remove_file(m_prefix + target.to_name()));
+            CALICO_TRY_S(m_store->remove_file(m_prefix + target.to_name()));
             m_set.remove_after(current);
         }
         target = current;
@@ -406,6 +359,6 @@ auto BasicWriteAheadLog::remove_after(Id limit) -> Status
     return Status::ok();
 }
 
-#undef MAYBE_FORWARD
+#undef PROPAGATE_WORKER_ERROR
 
 } // namespace calico

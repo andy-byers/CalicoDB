@@ -15,7 +15,7 @@ auto read_exact(Reader &reader, Bytes out, Size offset) -> Status
     auto s = reader.read(out, offset);
 
     if (s.is_ok() && out.size() != requested)
-        return Status::system_error(fmt::format(FMT, out.size(), requested));
+        return system_error(fmt::format(FMT, out.size(), requested));
 
     return s;
 }

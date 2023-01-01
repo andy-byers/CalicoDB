@@ -1,13 +1,15 @@
 #ifndef CALICO_TREE_INTERNAL_H
 #define CALICO_TREE_INTERNAL_H
 
+#include <spdlog/spdlog.h>
 #include "node_pool.h"
-#include "page/node.h"
 #include "tree.h"
+#include "page/node.h"
 #include "utils/scratch.h"
-#include "spdlog/spdlog.h"
 
 namespace calico {
+
+class System;
 
 class Internal final {
 public:
@@ -27,7 +29,7 @@ public:
         Size cell_count {};
     };
 
-    explicit Internal(NodePool &);
+    Internal(NodePool &pool, System &state);
 
     ~Internal() = default;
     [[nodiscard]] auto collect_value(const Node &, Size) const -> tl::expected<std::string, Status>;
@@ -71,6 +73,7 @@ private:
 
     Size m_maximum_key_size {};
     std::vector<StaticScratch> m_scratch;
+    System *m_state {};
     NodePool *m_pool {};
     Size m_cell_count {};
 };

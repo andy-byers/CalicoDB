@@ -8,10 +8,11 @@
 
 namespace calico {
 
-BPlusTree::BPlusTree(Pager &pager, spdlog::sink_ptr sink, Size page_size)
+BPlusTree::BPlusTree(Pager &pager, System &state, Size page_size)
     : m_pool {pager, page_size},
-      m_internal {m_pool},
-      m_logger {create_logger(std::move(sink), "tree")}
+      m_internal {m_pool, state},
+      m_logger {state.create_log("tree")},
+      m_system {&state}
 {
     m_logger->info("constructing BPlusTree instance");
 }
@@ -21,37 +22,35 @@ BPlusTree::~BPlusTree()
     m_logger->info("destroying BPlusTree object");
 }
 
-auto BPlusTree::open(Pager &pager, spdlog::sink_ptr sink, size_t page_size) -> tl::expected<Tree::Ptr, Status>
+auto BPlusTree::open(Pager &pager, System &state, size_t page_size) -> tl::expected<Tree::Ptr, Status>
 {
-    auto ptr = Tree::Ptr {new(std::nothrow) BPlusTree {pager, std::move(sink), page_size}};
+    auto ptr = Tree::Ptr {new(std::nothrow) BPlusTree {pager, state, page_size}};
     if (ptr == nullptr)
-        return tl::make_unexpected(Status::system_error("could not allocate BPlusTree object: out of memory"));
+        return tl::make_unexpected(system_error("could not allocate BPlusTree object: out of memory"));
     return ptr;
 }
 
-auto run_key_check(BytesView key, Size max_key_size, spdlog::logger &logger, const std::string &primary) -> Status
+auto run_key_check(BytesView key, Size max_key_size, System &system, const std::string &primary) -> Status
 {
     if (key.is_empty()) {
-        LogMessage message {logger};
-        message.set_primary(primary);
-        message.set_detail("key is empty");
-        message.set_hint("use a nonempty key");
-        return message.invalid_argument();
+        auto s = invalid_argument("{}: key is empty (use a nonempty key)", primary);
+        system.push_error(Error::WARN, s);
+        return s;
     }
 
     if (key.size() > max_key_size) {
-        LogMessage message {logger};
-        message.set_primary(primary);
-        message.set_detail("key of length {} B is too long", key.size());
-        message.set_hint("maximum key length is {} B", max_key_size);
-        return message.invalid_argument();
+        auto s = invalid_argument(
+            "{}: key of length {} B is too long",
+            primary, key.size(), max_key_size);
+        system.push_error(Error::WARN, s);
+        return s;
     }
     return Status::ok();
 }
 
 auto BPlusTree::insert(BytesView key, BytesView value) -> Status
 {
-    if (auto s = run_key_check(key, m_internal.maximum_key_size(), *m_logger, "cannot write record"); !s.is_ok())
+    if (auto s = run_key_check(key, m_internal.maximum_key_size(), *m_system, "cannot write record"); !s.is_ok())
         return s;
 
     // Find the external node that the record should live in, given its key.
@@ -91,20 +90,20 @@ auto BPlusTree::erase(Cursor cursor) -> Status
 
 auto BPlusTree::find_aux(BytesView key) -> tl::expected<SearchResult, Status>
 {
-    if (const auto r = run_key_check(key, m_internal.maximum_key_size(), *m_logger, "cannot write record"); !r.is_ok())
+    if (const auto r = run_key_check(key, m_internal.maximum_key_size(), *m_system, "cannot write record"); !r.is_ok())
         return tl::make_unexpected(r);
 
-    CALICO_TRY_CREATE(find_result, m_internal.find_external(key));
+    CALICO_NEW_R(find_result, m_internal.find_external(key));
     auto [id, index, found_exact] = find_result;
-    CALICO_TRY_CREATE(node, m_pool.acquire(id, false));
+    CALICO_NEW_R(node, m_pool.acquire(id, false));
 
     // TODO: We shouldn't even need to check the cell count here. Instead, we should make sure all the pointers are updated.
     //       There shouldn't be a right sibling ID, i.e. it should be 0, if the cell count is 0.
     if (m_internal.cell_count() && index == node.cell_count() && !node.right_sibling_id().is_null()) {
         CALICO_EXPECT_FALSE(found_exact);
         id = node.right_sibling_id();
-        CALICO_TRY__(m_pool.release(std::move(node)));
-        CALICO_TRY_CREATE(next, m_pool.acquire(id, false));
+        CALICO_TRY_R(m_pool.release(std::move(node)));
+        CALICO_NEW_R(next, m_pool.acquire(id, false));
         node = std::move(next);
         index = 0;
     }

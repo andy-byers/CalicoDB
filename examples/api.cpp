@@ -74,13 +74,15 @@ auto main(int, const char *[]) -> int
         cco::Options options;
         options.page_size = 0x2000;
         options.frame_count = 256;
-        options.log_level = spdlog::level::info;
+        options.log_level = cco::LogLevel::INFO;
+        options.log_target = cco::LogTarget::STDERR_COLOR;
 
         // Open or create a database at "/tmp/cats".
         auto s = db.open("/tmp/cats", options);
 
         // Handle failure. s.what() provides information about what went wrong.
         if (!s.is_ok()) {
+
         }
     }
 

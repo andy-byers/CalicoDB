@@ -21,7 +21,7 @@ auto WalCleaner::on_event(const Id &limit) -> Status
             return s;
         }
         if (!target.is_null()) {
-            CALICO_TRY(m_store->remove_file(m_prefix + target.to_name()));
+            CALICO_TRY_S(m_store->remove_file(m_prefix + target.to_name()));
             m_set->remove_before(current);
         }
 

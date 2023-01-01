@@ -28,7 +28,7 @@ public:
         Status *status {};
         bool *has_xact {};
         Id *commit_lsn {};
-        spdlog::sink_ptr log_sink;
+        System *state {};
         Size frame_count {};
         Size page_size {};
     };
@@ -36,17 +36,16 @@ public:
     ~BasicPager() override = default;
 
     [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>;
-    [[nodiscard]] static auto open(const Parameters &param, BasicPager **out) -> Status;
     [[nodiscard]] auto page_count() const -> Size override;
     [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto hit_ratio() const -> double override;
     [[nodiscard]] auto flushed_lsn() const -> Id override;
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status> override;
-    [[nodiscard]] auto acquire(Id, bool) -> tl::expected<Page, Status> override;
-    [[nodiscard]] auto release(Page) -> Status override;
+    [[nodiscard]] auto acquire(Id pid, bool is_writable) -> tl::expected<Page, Status> override;
+    [[nodiscard]] auto release(Page page) -> Status override;
     [[nodiscard]] auto flush(Id target_lsn) -> Status override;
-    auto save_state(FileHeader &) -> void override;
-    auto load_state(const FileHeader &) -> void override;
+    auto save_state(FileHeader &header) -> void override;
+    auto load_state(const FileHeader &header) -> void override;
 
     [[nodiscard]]
     auto status() const -> Status override
@@ -55,7 +54,7 @@ public:
     }
 
 private:
-    explicit BasicPager(const Parameters &, Framer framer);
+    explicit BasicPager(const Parameters &param, Framer framer);
     [[nodiscard]] auto pin_frame(Id, bool &) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
@@ -63,8 +62,8 @@ private:
     auto forward_status(Status s, const std::string &message) -> Status
     {
         if (!s.is_ok()) {
-            m_logger->error(message);
-            m_logger->error("(reason) {}", s.what());
+            m_log->error(message);
+            m_log->error("(reason) {}", s.what());
         }
         return s;
     }
@@ -72,8 +71,8 @@ private:
     auto save_and_forward_status(Status s, const std::string &message) -> Status
     {
         if (!s.is_ok()) {
-            m_logger->error(message);
-            m_logger->error("(reason) {}", s.what());
+            m_log->error(message);
+            m_log->error("(reason) {}", s.what());
             if (m_status->is_ok()) *m_status = s;
         }
         return s;
@@ -83,10 +82,11 @@ private:
     Framer m_framer;
     PageList m_dirty;
     PageRegistry m_registry;
-    std::shared_ptr<spdlog::logger> m_logger;
+    LogPtr m_log;
     std::unordered_set<Id, Id::Hash> *m_images {};
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};
+    System *m_state {};
     Status *m_status {};
     bool *m_has_xact {};
     Id *m_commit_lsn {};

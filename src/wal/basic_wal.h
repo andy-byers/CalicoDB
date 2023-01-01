@@ -25,7 +25,7 @@ public:
     struct Parameters {
         std::string prefix;
         Storage *store {};
-        spdlog::sink_ptr sink;
+        System *system {};
         Size page_size {};
         Size wal_limit {};
     };
@@ -67,19 +67,20 @@ private:
     auto forward_status(Status s, const std::string &message) -> Status
     {
         if (!s.is_ok()) {
-            m_logger->error(message);
-            m_logger->error("(reason) {}", s.what());
+            m_log->error(message);
+            m_log->error("(reason) {}", s.what());
         }
         return s;
     }
 
-    std::shared_ptr<spdlog::logger> m_logger;
+    LogPtr m_log;
     std::atomic<Id> m_flushed_lsn {};
     Id m_last_lsn;
     WalCollection m_set;
     std::string m_prefix;
 
     Storage *m_store {};
+    System *m_system {};
     std::optional<WalReader> m_reader;
     std::optional<WalWriter> m_writer;
     std::optional<WalCleaner> m_cleaner;

@@ -29,14 +29,14 @@ inline constexpr auto wal_scratch_size(Size page_size) -> Size
 inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, Id &out) -> Status
 {
     RandomReader *temp {};
-    CALICO_TRY(store.open_random_reader(prefix + id.to_name(), &temp));
+    CALICO_TRY_S(store.open_random_reader(prefix + id.to_name(), &temp));
 
     char buffer[WalPayloadHeader::SIZE];
     Bytes bytes {buffer, sizeof(buffer)};
     std::unique_ptr<RandomReader> file {temp};
 
     // Read the first LSN. If it exists, it will always be at the same location.
-    CALICO_TRY(file->read(bytes, WalRecordHeader::SIZE));
+    CALICO_TRY_S(file->read(bytes, WalRecordHeader::SIZE));
 
     if (bytes.is_empty())
         return Status::not_found("segment is empty");
