@@ -5,7 +5,7 @@
 #include "types.h"
 #include "utils.h"
 
-namespace calico {
+namespace Calico {
 
 class PageLayout {
 public:
@@ -114,6 +114,6 @@ inline constexpr auto get_local_value_size(Size key_size, Size value_size, Size 
     return value_size;
 }
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_UTILS_LAYOUT_H

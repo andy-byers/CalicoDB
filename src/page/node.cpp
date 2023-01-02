@@ -3,7 +3,7 @@
 #include "utils/layout.h"
 #include "spdlog/fmt/fmt.h"
 
-namespace calico {
+namespace Calico {
 
 auto NodeHeader::parent_id(const Page &page) -> Id
 {
@@ -266,7 +266,7 @@ auto BlockAllocator::allocate(Page &page, Size needed_size) -> Size
 
 /* Free block layout:
  *     .---------------------.-------------.---------------------------.
- *     |  Next Pointer (2B)  |  Size (2B)  |   Free FakeFile (Size-4 B)  |
+ *     |  Next Pointer (2B)  |  Size (2B)  |   Free Memory (Size-4 B)  |
  *     '---------------------'-------------'---------------------------'
  */
 auto BlockAllocator::take_free_space(Page &page, Size ptr0, Size ptr1, Size needed_size) -> Size
@@ -414,15 +414,14 @@ auto Node::TEST_validate() const -> void
         if (i < cell_count() - 1) {
             const auto rhs = read_cell(i + 1);
             if (lhs.key() >= rhs.key()) {
-                fmt::print("(1/2) {}: keys are out of order\n", label);
-                fmt::print("(2/2) {}: {} should be less than {}\n", label, lhs.key().to_string(), rhs.key().to_string());
+                fmt::print(stderr, "{}: keys are out of order ({} should be less than {})\n",
+                           label, lhs.key().to_string(), rhs.key().to_string());
                 std::exit(EXIT_FAILURE);
             }
         }
     }
     if (used_space + usable_space != size()) {
-        fmt::print("(1/2) {}: memory is unaccounted for\n", label);
-        fmt::print("(2/2) {}: {} bytes were lost\n", label, int(size()) - int(used_space + usable_space));
+        fmt::print(stderr, "{}: memory is unaccounted for ({} bytes were lost)\n", label, int(size()) - int(used_space + usable_space));
         std::exit(EXIT_FAILURE);
     }
 }
@@ -936,4 +935,4 @@ auto split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     return split_internal_non_root(Ln, rn, scratch);
 }
 
-} // namespace calico
+} // namespace Calico

@@ -8,7 +8,7 @@
 #include "calico/options.h"
 #include <zconf.h>
 
-namespace calico {
+namespace Calico {
 
 inline auto get_u16(const Byte *in) noexcept -> std::uint16_t
 {
@@ -97,6 +97,6 @@ inline auto put_u64(Bytes out, std::uint64_t value) noexcept -> void
     put_u64(out.data(), value);
 }
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_UTILS_ENCODING_H

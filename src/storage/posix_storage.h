@@ -6,7 +6,7 @@
 #include "utils/expect.h"
 #include <filesystem>
 
-namespace calico {
+namespace Calico {
 
 class RandomFileReader : public RandomReader {
 public:
@@ -79,6 +79,6 @@ public:
     [[nodiscard]] auto file_size(const std::string &, Size &) const -> Status override;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_STORE_DISK_H

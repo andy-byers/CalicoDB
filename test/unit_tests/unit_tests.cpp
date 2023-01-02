@@ -1,13 +1,13 @@
 #include "unit_tests.h"
 
-namespace calico::internal {
+namespace Calico::internal {
 
 std::uint32_t random_seed;
 
-} // namespace calico::internal
+} // namespace Calico::internal
 
 int main(int argc, char** argv) {
-    namespace cco = calico;
+    namespace cco = Calico;
 
     // Custom parameter prefixes.
     static constexpr cco::BytesView SEED_PREFIX {"--random_seed="};

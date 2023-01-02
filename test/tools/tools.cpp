@@ -2,12 +2,12 @@
 #include "tools.h"
 #include "fakes.h"
 #include "page/node.h"
-#include "tree/node_pool.h"
+#include "tree/node_manager.h"
 #include "tree/tree.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 #include <unordered_set>
 
-namespace calico {
+namespace Calico {
 
 unsigned RecordGenerator::default_seed = 0;
 
@@ -160,31 +160,31 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 //    CALICO_EXPECT_GT(m_levels.size(), level);
 //}
 
-} // namespace calico
+} // namespace Calico
 
 
 
-auto operator>(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator>(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) > calico::stob(rhs.key);
+    return Calico::stob(lhs.key) > Calico::stob(rhs.key);
 }
 
-auto operator<=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator<=(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) <= calico::stob(rhs.key);
+    return Calico::stob(lhs.key) <= Calico::stob(rhs.key);
 }
 
-auto operator>=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator>=(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) >= calico::stob(rhs.key);
+    return Calico::stob(lhs.key) >= Calico::stob(rhs.key);
 }
 
-auto operator==(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator==(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) == calico::stob(rhs.key);
+    return Calico::stob(lhs.key) == Calico::stob(rhs.key);
 }
 
-auto operator!=(const calico::Record &lhs, const calico::Record &rhs) -> bool
+auto operator!=(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return calico::stob(lhs.key) != calico::stob(rhs.key);
+    return Calico::stob(lhs.key) != Calico::stob(rhs.key);
 }

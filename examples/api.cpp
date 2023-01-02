@@ -11,7 +11,7 @@
 #include "spdlog/spdlog.h"
 #include "spdlog/fmt/fmt.h"
 
-static auto assert_ok(const calico::Status &s)
+static auto assert_ok(const Calico::Status &s)
 {
     if (!s.is_ok()) {
         fmt::print(stderr, "{}\n", s.what());
@@ -21,7 +21,7 @@ static auto assert_ok(const calico::Status &s)
 
 auto main(int, const char *[]) -> int
 {
-    namespace cco = calico;
+    namespace cco = Calico;
 
     /* bytes-objects */
 
@@ -73,7 +73,7 @@ auto main(int, const char *[]) -> int
         // Set some initialization options. We'll use pages of size 2 KB with 2 MB of cache.
         cco::Options options;
         options.page_size = 0x2000;
-        options.frame_count = 256;
+        options.cache_size = 256;
         options.log_level = cco::LogLevel::INFO;
         options.log_target = cco::LogTarget::STDERR_COLOR;
 

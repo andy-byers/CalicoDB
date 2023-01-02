@@ -1,10 +1,10 @@
 #include "recovery.h"
 #include "page/page.h"
 #include "pager/pager.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 #include "wal/wal.h"
 
-namespace calico {
+namespace Calico {
 
 auto encode_deltas_payload(Id page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
 {
@@ -138,24 +138,25 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
     }
 }
 
-auto Recovery::start_abort(Id commit_lsn) -> Status
-{
-    if (!m_wal->is_enabled())
-        return Status::logic_error(
-            "WAL is not enabled (wal_limit was set to DISABLE_WAL on database creation)");
+#define ENSURE_ENABLED(primary) \
+    do { \
+        if (!m_wal->is_enabled()) \
+            return logic_error( \
+                "{}: WAL is not enabled (wal_limit was set to DISABLE_WAL on database creation)", primary); \
+    } while (0)
 
-    if (m_wal->is_working()) {
-        if (auto s = m_wal->stop_workers(); !s.is_ok())
-            return s;
-    }
+auto Recovery::start_abort() -> Status
+{
+    ENSURE_ENABLED("cannot start abort");
+    CALICO_TRY_S(m_wal->stop_workers());
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
-    return m_wal->roll_backward(commit_lsn, [this](auto payload) {
+    return m_wal->roll_backward(m_system->commit_lsn.load(), [this](auto payload) {
         auto info = decode_payload(payload);
 
         if (!info.has_value())
-            return Status::corruption("WAL is corrupted");
+            return corruption("WAL is corrupted");
 
         if (std::holds_alternative<FullImageDescriptor>(*info)) {
             const auto image = std::get<FullImageDescriptor>(*info);
@@ -164,20 +165,21 @@ auto Recovery::start_abort(Id commit_lsn) -> Status
             page->apply_update(image);
             return m_pager->release(std::move(*page));
         }
-        return Status::ok();
+        return ok();
     });
 }
 
-auto Recovery::finish_abort(Id commit_lsn) -> Status
+auto Recovery::finish_abort() -> Status
 {
-    return finish_routine(commit_lsn);
+    ENSURE_ENABLED("cannot finish abort");
+    return finish_routine();
 }
 
-auto Recovery::start_recovery(Id &commit_lsn) -> Status
+auto Recovery::start_recovery() -> Status
 {
     Id last_lsn;
 
-    const auto redo = [this, &last_lsn, &commit_lsn](auto payload) {
+    const auto redo = [this, &last_lsn](auto payload) {
         auto info = decode_payload(payload);
 
         // Payload has an invalid type.
@@ -186,20 +188,8 @@ auto Recovery::start_recovery(Id &commit_lsn) -> Status
 
         last_lsn = payload.lsn();
 
-//        if (std::holds_alternative<DeltasDescriptor>(*info)) {
-//            if (payload.lsn() > m_pager->flushed_lsn()) {
-//                const auto deltas = std::get<DeltasDescriptor>(*info);
-//                auto page = m_pager->acquire(deltas.pid, true);
-//                if (!page.has_value()) return page.error();
-//                page->apply_update(deltas);
-//                return m_pager->release(std::move(*page));
-//            }
-//        } else if (std::holds_alternative<CommitDescriptor>(*info)) {
-//            commit_lsn = payload.lsn();
-//        }
-
         if (std::holds_alternative<CommitDescriptor>(*info)) {
-            commit_lsn = payload.lsn();
+            m_system->commit_lsn.store(payload.lsn());
         } else if (payload.lsn() > m_pager->flushed_lsn()) {
             if (std::holds_alternative<DeltasDescriptor>(*info)) {
                 const auto deltas = std::get<DeltasDescriptor>(*info);
@@ -207,24 +197,25 @@ auto Recovery::start_recovery(Id &commit_lsn) -> Status
                 if (!page.has_value()) return page.error();
                 page->apply_update(deltas);
                 return m_pager->release(std::move(*page));
-            } else if (std::holds_alternative<FullImageDescriptor>(*info)) { // TODO
-//                const auto image = std::get<FullImageDescriptor>(*info);
-//                auto page = m_pager->acquire(image.pid, true);
-//                if (!page.has_value()) return page.error();
-//                page->apply_update(image);
-//                return m_pager->release(std::move(*page));
+            } else if (std::holds_alternative<FullImageDescriptor>(*info)) {
+                // This is not necessary in most cases, but should help with some kinds of corruption.
+                const auto image = std::get<FullImageDescriptor>(*info);
+                auto page = m_pager->acquire(image.pid, true);
+                if (!page.has_value()) return page.error();
+                page->apply_update(image);
+                return m_pager->release(std::move(*page));
             } else {
-                return Status::corruption("unrecognized payload type");
+                return corruption("unrecognized payload type");
             }
         }
-        return Status::ok();
+        return ok();
     };
 
     const auto undo = [this](auto payload) {
         auto info = decode_payload(payload);
 
         if (!info.has_value())
-            return Status::corruption("WAL is corrupted");
+            return corruption("WAL is corrupted");
 
         if (std::holds_alternative<FullImageDescriptor>(*info)) {
             const auto image = std::get<FullImageDescriptor>(*info);
@@ -233,31 +224,34 @@ auto Recovery::start_recovery(Id &commit_lsn) -> Status
             page->apply_update(image);
             return m_pager->release(std::move(*page));
         }
-        return Status::ok();
+        return ok();
     };
 
+    ENSURE_ENABLED("cannot start recovery");
     CALICO_TRY_S(m_wal->roll_forward(Id::null(), redo));
 
     // Reached the end of the WAL, but didn't find a commit record.
+    const auto commit_lsn = m_system->commit_lsn.load();
     if (last_lsn != commit_lsn)
         return m_wal->roll_backward(commit_lsn, undo);
-    return Status::ok();
+    return ok();
 }
 
-auto Recovery::finish_recovery(Id commit_lsn) -> Status
+auto Recovery::finish_recovery() -> Status
 {
-    return finish_routine(commit_lsn);
+    ENSURE_ENABLED("cannot finish recovery");
+    return finish_routine();
 }
 
-auto Recovery::finish_routine(Id commit_lsn) -> Status
+auto Recovery::finish_routine() -> Status
 {
     // Flush all dirty database pages.
     CALICO_TRY_S(m_pager->flush({})); // TODO: commit_lsn));
 
     // Remove obsolete segment files.
-    CALICO_TRY_S(m_wal->remove_after(commit_lsn));
+    CALICO_TRY_S(m_wal->remove_after(m_system->commit_lsn.load()));
 
     return m_wal->start_workers();
 }
 
-} // namespace calico
+} // namespace Calico

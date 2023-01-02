@@ -7,13 +7,13 @@
 #include "utils/types.h"
 #include <optional>
 
-namespace calico {
+namespace Calico {
 
 class Cell;
 class Link;
 class Internal;
 class Node;
-class NodePool;
+class NodeManager;
 class Page;
 struct FileHeader;
 
@@ -38,6 +38,6 @@ public:
     virtual auto TEST_validate_links() -> void = 0;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TREE_TREE_H

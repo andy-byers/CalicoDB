@@ -3,7 +3,7 @@
 
 #include "page.h"
 
-namespace calico {
+namespace Calico {
 
 class Link {
 public:
@@ -47,6 +47,6 @@ private:
     Page m_page;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGE_LINK_H

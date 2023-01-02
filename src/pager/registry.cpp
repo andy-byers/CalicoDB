@@ -1,7 +1,7 @@
 
 #include "registry.h"
 
-namespace calico {
+namespace Calico {
 
 auto PageRegistry::put(Id pid, Entry entry) -> void
 {
@@ -26,4 +26,4 @@ auto PageRegistry::erase(Id pid) -> void
     m_cache.erase(pid);
 }
 
-} // namespace calico
+} // namespace Calico

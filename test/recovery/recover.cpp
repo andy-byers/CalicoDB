@@ -9,7 +9,7 @@
 #  error "This test must run with assertions enabled"
 #endif
 
-using namespace calico;
+using namespace Calico;
 namespace fs = std::filesystem;
 
 static constexpr Size KEY_WIDTH {12};

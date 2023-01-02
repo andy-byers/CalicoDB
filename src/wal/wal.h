@@ -10,7 +10,7 @@
 #include <variant>
 #include <vector>
 
-namespace calico {
+namespace Calico {
 
 struct FileHeader;
 struct Id;
@@ -110,6 +110,6 @@ public:
     [[nodiscard]] virtual auto remove_before(Id lsn) -> Status = 0;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_H

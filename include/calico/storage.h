@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace calico {
+namespace Calico {
 
 class RandomReader {
 public:
@@ -39,7 +39,7 @@ public:
     [[nodiscard]] virtual auto open_random_reader(const std::string &path, RandomReader **out) -> Status = 0;
     [[nodiscard]] virtual auto open_random_editor(const std::string &path, RandomEditor **out) -> Status = 0;
     [[nodiscard]] virtual auto open_append_writer(const std::string &path, AppendWriter **out) -> Status = 0;
-    [[nodiscard]] virtual auto get_children(const std::string&path, std::vector<std::string> &out) const -> Status = 0;
+    [[nodiscard]] virtual auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status = 0;
     [[nodiscard]] virtual auto rename_file(const std::string &old_path, const std::string &new_path) -> Status = 0;
     [[nodiscard]] virtual auto file_exists(const std::string &path) const -> Status = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &path, Size size) -> Status = 0;
@@ -47,6 +47,6 @@ public:
     [[nodiscard]] virtual auto remove_file(const std::string &path) -> Status = 0;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_STORAGE_H

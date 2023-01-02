@@ -1,7 +1,7 @@
 #include "calico/status.h"
 #include "utils/utils.h"
 
-namespace calico {
+namespace Calico {
 
 static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
 {
@@ -121,4 +121,4 @@ auto Status::what() const -> std::string_view
     return is_ok() ? "" : std::string_view {m_data.get() + sizeof(code)};
 }
 
-} // namespace calico
+} // namespace Calico

@@ -3,15 +3,15 @@
 
 #include "calico/storage.h"
 #include "record.h"
-#include "utils/info_log.h"
 #include "utils/queue.h"
-#include <tl/expected.hpp>
 #include "utils/scratch.h"
+#include "utils/system.h"
 #include "utils/types.h"
 #include <mutex>
 #include <set>
+#include <tl/expected.hpp>
 
-namespace calico {
+namespace Calico {
 
 [[nodiscard]]
 inline constexpr auto wal_block_size(Size page_size) -> Size
@@ -39,13 +39,13 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId 
     CALICO_TRY_S(file->read(bytes, WalRecordHeader::SIZE));
 
     if (bytes.is_empty())
-        return Status::not_found("segment is empty");
+        return not_found("segment is empty");
 
     if (bytes.size() != WalPayloadHeader::SIZE)
-        return Status::corruption("incomplete record");
+        return corruption("incomplete record");
 
     out = read_wal_payload_header(bytes).lsn;
-    return Status::ok();
+    return ok();
 }
 
 /*
@@ -143,6 +143,6 @@ private:
     MonotonicScratchManager<SCRATCH_COUNT> m_manager;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_HELPERS_H

@@ -3,12 +3,12 @@
 
 #include <cstdint>
 
-namespace calico {
+namespace Calico {
 
 // Common types.
 using Byte = char;
 using Size = std::uint64_t;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_COMMON_H

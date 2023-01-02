@@ -5,7 +5,7 @@
 #include "random.h"
 #include "unit_tests.h"
 
-namespace calico {
+namespace Calico {
 
 namespace internal {
     extern std::uint32_t random_seed;

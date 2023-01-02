@@ -7,7 +7,7 @@
 #include "utils/header.h"
 #include "utils/layout.h"
 
-namespace calico {
+namespace Calico {
 
 Frame::Frame(Byte *buffer, Size id, Size size)
     : m_bytes {buffer + id*size, size}
@@ -54,8 +54,8 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
     CALICO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
-    CALICO_EXPECT_GE(frame_count, MINIMUM_FRAME_COUNT);
-    CALICO_EXPECT_LE(frame_count, MAXIMUM_FRAME_COUNT);
+    CALICO_EXPECT_GE(frame_count, MINIMUM_CACHE_SIZE);
+    CALICO_EXPECT_LE(frame_count, MAXIMUM_CACHE_SIZE);
 
     RandomEditor *temp_file {};
     auto s = storage->open_random_editor(prefix + DATA_FILENAME, &temp_file);
@@ -64,10 +64,8 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
     const auto cache_size = page_size * frame_count;
-    AlignedBuffer buffer {
-        new(static_cast<std::align_val_t>(page_size), std::nothrow) Byte[cache_size],
-        AlignedDeleter {static_cast<std::align_val_t>(page_size)}};
-    if (buffer == nullptr)
+    AlignedBuffer buffer {cache_size, page_size};
+    if (buffer.get() == nullptr)
         return tl::make_unexpected(system_error("cannot allocate frames: out of memory"));
 
     return Framer {std::move(file), std::move(buffer), page_size, frame_count};
@@ -207,4 +205,4 @@ auto Framer::save_state(FileHeader &header) const -> void
     header.page_count = m_page_count;
 }
 
-} // namespace calico
+} // namespace Calico

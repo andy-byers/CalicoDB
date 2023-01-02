@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-namespace calico {
+namespace Calico {
 
 class System;
 
@@ -65,24 +65,26 @@ class WriteAheadLog;
 
 class Recovery {
 public:
-    Recovery(Pager &pager, WriteAheadLog &wal)
+    Recovery(Pager &pager, WriteAheadLog &wal, System &system)
         : m_pager {&pager},
-          m_wal {&wal}
+          m_wal {&wal},
+          m_system {&system}
     {}
 
-    [[nodiscard]] auto start_abort(Id commit_lsn) -> Status;
-    [[nodiscard]] auto finish_abort(Id commit_lsn) -> Status;
-    [[nodiscard]] auto start_recovery(Id &commit_lsn) -> Status;
-    [[nodiscard]] auto finish_recovery(Id commit_lsn) -> Status;
+    [[nodiscard]] auto start_abort() -> Status;
+    [[nodiscard]] auto finish_abort() -> Status;
+    [[nodiscard]] auto start_recovery() -> Status;
+    [[nodiscard]] auto finish_recovery() -> Status;
 
 private:
-    [[nodiscard]] auto finish_routine(Id commit_lsn) -> Status;
+    [[nodiscard]] auto finish_routine() -> Status;
 
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
+    System *m_system {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_CORE_TRANSACTION_LOG_H
 

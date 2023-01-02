@@ -2,17 +2,14 @@
 #include "calico/transaction.h"
 #include "core.h"
 #include "utils/expect.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 
-namespace calico {
+namespace Calico {
 
 static auto already_completed_error(const std::string &action) -> Status
 {
-    ThreePartMessage message;
-    message.set_primary("cannot {} transaction", action);
-    message.set_detail("transaction is already completed");
-    message.set_hint("start a new transaction and try again");
-    return message.logic_error();
+    return logic_error(
+        "cannot {} transaction: transaction is already completed (start a new transaction and try again)", action);
 }
 
 Transaction::~Transaction()
@@ -49,4 +46,4 @@ auto Transaction::abort() -> Status
     return std::exchange(m_core, nullptr)->abort();
 }
 
-} // namespace calico
+} // namespace Calico

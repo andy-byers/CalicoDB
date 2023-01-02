@@ -8,7 +8,7 @@
 #include <optional>
 #include <thread>
 
-namespace calico {
+namespace Calico {
 
 class LogReader final {
 public:
@@ -77,6 +77,6 @@ private:
     SegmentId m_current;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_READER_H

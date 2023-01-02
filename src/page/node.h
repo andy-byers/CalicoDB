@@ -4,7 +4,7 @@
 #include "cell.h"
 #include "page.h"
 
-namespace calico {
+namespace Calico {
 
 class NodeHeader final {
 public:
@@ -170,6 +170,6 @@ auto merge_root(Node &, Node &) -> void;
 auto split_root(Node &, Node &) -> void;
 [[nodiscard]] auto split_non_root(Node &, Node &, Bytes) -> Cell;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGE_NODE_H

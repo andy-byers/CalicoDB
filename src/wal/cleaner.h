@@ -5,7 +5,7 @@
 #include "utils/worker.h"
 #include <thread>
 
-namespace calico {
+namespace Calico {
 
 /*
  * WAL component that handles cleanup of obsolete segment files in the background.
@@ -47,6 +47,6 @@ private:
     WalCollection *m_set {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_CLEANER_H

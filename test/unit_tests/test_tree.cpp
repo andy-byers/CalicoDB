@@ -5,16 +5,16 @@
 #include "random.h"
 #include "tools.h"
 #include "tree/bplus_tree.h"
-#include "tree/node_pool.h"
+#include "tree/node_manager.h"
 #include "unit_tests.h"
-#include "utils/info_log.h"
 #include "utils/layout.h"
+#include "utils/system.h"
 #include "wal/disabled_wal.h"
 #include <gtest/gtest.h>
 #include <map>
 #include <unordered_map>
 
-namespace calico {
+namespace Calico {
 
 namespace internal {
     extern std::uint32_t random_seed;
@@ -23,7 +23,7 @@ namespace internal {
 class TestHarness: public TestOnHeap {
 public:
     static constexpr Size PAGE_SIZE {0x100};
-    static constexpr Size FRAME_COUNT {16};
+    static constexpr Size CACHE_SIZE {16};
 
     TestHarness()
         : wal {std::make_unique<DisabledWriteAheadLog>()},
@@ -35,11 +35,8 @@ public:
             &scratch,
             &images,
             wal.get(),
-            &status,
-            &has_xact,
-            &commit_lsn,
             &state,
-            FRAME_COUNT,
+            CACHE_SIZE,
             PAGE_SIZE
         });
         EXPECT_TRUE(r.has_value()) << r.error().what();

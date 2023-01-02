@@ -9,7 +9,7 @@
 #include "utils/cache.h"
 #include "utils/types.h"
 
-namespace calico {
+namespace Calico {
 
 class Frame;
 
@@ -128,6 +128,6 @@ private:
     Size m_misses {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGER_PAGE_CACHE_H

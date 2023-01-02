@@ -5,7 +5,7 @@
 #include <spdlog/fmt/fmt.h>
 #include "bytes.h"
 
-namespace calico {
+namespace Calico {
 
 class Status final {
 public:
@@ -66,6 +66,6 @@ private:
 // status should be the size of a pointer.
 static_assert(sizeof(Status) == sizeof(char *));
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_STATUS_H

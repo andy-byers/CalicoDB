@@ -3,7 +3,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace calico {
+namespace Calico {
 
 Link::Link(Page page)
     : m_page {std::move(page)}
@@ -39,4 +39,4 @@ auto Link::content_bytes(Size size) -> Bytes
     return m_page.bytes(LinkLayout::content_offset(), size);
 }
 
-} // namespace calico
+} // namespace Calico

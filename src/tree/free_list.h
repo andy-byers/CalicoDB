@@ -6,7 +6,7 @@
 #include "utils/types.h"
 #include <optional>
 
-namespace calico {
+namespace Calico {
 
 class Pager;
 
@@ -32,6 +32,6 @@ private:
     Id m_head;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TREE_FREE_LIST_H

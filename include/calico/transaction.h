@@ -1,7 +1,7 @@
 #ifndef CALICO_TRANSACTION_H
 #define CALICO_TRANSACTION_H
 
-namespace calico {
+namespace Calico {
 
 class Core;
 class Status;
@@ -9,13 +9,13 @@ class Status;
 class Transaction final {
 public:
     ~Transaction();
-    explicit Transaction(Core&);
+    explicit Transaction(Core &core);
 
-    Transaction(Transaction&&) noexcept;
-    auto operator=(Transaction&&) noexcept -> Transaction&;
+    Transaction(Transaction &&rhs) noexcept;
+    auto operator=(Transaction &&rhs) noexcept -> Transaction&;
 
-    Transaction(const Transaction&) = delete;
-    auto operator=(const Transaction&) -> Transaction& = delete;
+    Transaction(const Transaction &) = delete;
+    auto operator=(const Transaction &) -> Transaction& = delete;
 
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;
@@ -24,6 +24,6 @@ private:
     Core *m_core {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TRANSACTION_H

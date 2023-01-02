@@ -6,7 +6,7 @@
 #include "calico/options.h"
 #include "utils/expect.h"
 
-namespace calico {
+namespace Calico {
 
 class Random final {
 public:
@@ -72,6 +72,6 @@ protected:
     std::default_random_engine m_rng;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TEST_TOOLS_RANDOM_H

@@ -5,7 +5,7 @@
 #include "utils/scratch.h"
 #include <optional>
 
-namespace calico {
+namespace Calico {
 
 class Node;
 
@@ -67,6 +67,6 @@ private:
 auto make_external_cell(BytesView, BytesView, Size) -> Cell;
 auto make_internal_cell(BytesView, Size) -> Cell;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGE_CELL_H

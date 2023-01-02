@@ -11,7 +11,7 @@
 #include "utils/header.h"
 #include "wal/basic_wal.h"
 
-namespace calico {
+namespace Calico {
 
 namespace fs = std::filesystem;
 
@@ -65,7 +65,7 @@ class XactTestHarness {
 public:
     static constexpr Size PAGE_SIZE {0x100};
     static constexpr Size PAGE_COUNT {64};
-    static constexpr Size FRAME_COUNT {32};
+    static constexpr Size CACHE_SIZE {32};
     static constexpr Size WAL_LIMIT {16};
 
     auto set_up() -> void
@@ -90,11 +90,8 @@ public:
             scratch.get(),
             &images,
             wal.get(),
-            &status,
-            &has_xact,
-            &commit_lsn_,
             &state,
-            FRAME_COUNT,
+            CACHE_SIZE,
             PAGE_SIZE,
         });
         EXPECT_TRUE(pager_r.has_value()) << pager_r.error().what();
@@ -138,7 +135,7 @@ public:
         CALICO_TRY_S(wal->advance());
         CALICO_TRY_S(allow_cleanup());
 
-        commit_lsn = lsn;
+        state.commit_lsn.store(lsn);
         images.clear();
         return status;
     }
@@ -210,7 +207,7 @@ public:
     [[nodiscard]]
     auto oldest_lsn() const -> Id
     {
-        return std::min(commit_lsn, pager->flushed_lsn());
+        return std::min(state.commit_lsn.load(), pager->flushed_lsn());
     }
 
     [[nodiscard]]
@@ -227,9 +224,7 @@ public:
 
     System state {"test", LogLevel::OFF, {}};
     Random random {internal::random_seed};
-    Status status {Status::ok()};
-    Id commit_lsn; // TODO: Used from before.
-    Id commit_lsn_;
+    Status status {ok()};
     bool has_xact {};
     std::unique_ptr<HeapStorage> store;
     std::unique_ptr<Pager> pager;
@@ -283,13 +278,13 @@ TEST_F(NormalXactTests, OverwriteValuesOnMultiplePages)
 }
 
 template<class Test>
-static auto undo_xact(Test &test, Id commit_lsn)
+static auto undo_xact(Test &test)
 {
-    Recovery recovery {*test.pager, *test.wal};
+    Recovery recovery {*test.pager, *test.wal, test.state};
     (void)test.wal->stop_workers();
-    CALICO_TRY_S(recovery.start_abort(commit_lsn));
+    CALICO_TRY_S(recovery.start_abort());
     // Don't need to load any state for these tests.
-    return recovery.finish_abort(commit_lsn);
+    return recovery.finish_abort();
 }
 
 static auto assert_blank_value(BytesView value)
@@ -300,7 +295,7 @@ static auto assert_blank_value(BytesView value)
 TEST_F(NormalXactTests, UndoFirstValue)
 {
     set_value(Id {1}, generate_value());
-    ASSERT_OK(undo_xact(*this, Id::null()));
+    ASSERT_OK(undo_xact(*this));
     assert_blank_value(get_value(Id {1}));
 }
 
@@ -309,7 +304,7 @@ TEST_F(NormalXactTests, UndoFirstXact)
     set_value(Id {1}, generate_value());
     set_value(Id {2}, generate_value());
     set_value(Id {2}, generate_value());
-    ASSERT_OK(undo_xact(*this, Id::null()));
+    ASSERT_OK(undo_xact(*this));
     assert_blank_value(get_value(Id {1}));
     assert_blank_value(get_value(Id {2}));
 }
@@ -357,7 +352,7 @@ TEST_F(NormalXactTests, EmptyCommit)
 
 TEST_F(NormalXactTests, EmptyAbort)
 {
-    ASSERT_OK(undo_xact(*this, Id::null()));
+    ASSERT_OK(undo_xact(*this));
 }
 
 TEST_F(NormalXactTests, AbortEmptyTransaction)
@@ -365,7 +360,7 @@ TEST_F(NormalXactTests, AbortEmptyTransaction)
     const auto committed = add_values(*this, 3);
     commit();
 
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -375,7 +370,7 @@ TEST_F(NormalXactTests, UndoSecondTransaction)
     commit();
     add_values(*this, 3);
 
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -387,7 +382,7 @@ TEST_F(NormalXactTests, SpamCommit)
         commit();
     }
     add_values(*this, PAGE_COUNT);
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -398,7 +393,7 @@ TEST_F(NormalXactTests, SpamAbort)
 
     for (Size i {}; i < 50; ++i) {
         add_values(*this, PAGE_COUNT);
-        ASSERT_OK(undo_xact(*this, commit_lsn));
+        ASSERT_OK(undo_xact(*this));
     }
     assert_values_match(*this, committed);
 }
@@ -412,7 +407,7 @@ TEST_F(NormalXactTests, AbortAfterMultipleOverwrites)
     add_values(*this, PAGE_COUNT);
     add_values(*this, PAGE_COUNT);
 
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -423,11 +418,9 @@ TEST_F(NormalXactTests, Recover)
 
     add_values(*this, PAGE_COUNT);
 
-    Id lsn;
-    Recovery recovery {*pager, *wal};
-    ASSERT_OK(recovery.start_recovery(lsn));
-    ASSERT_EQ(lsn, commit_lsn);
-    ASSERT_OK(recovery.finish_recovery(commit_lsn));
+    Recovery recovery {*pager, *wal, state};
+    ASSERT_OK(recovery.start_recovery());
+    ASSERT_OK(recovery.finish_recovery());
     assert_values_match(*this, committed);
 }
 
@@ -439,7 +432,7 @@ public:
         EXPECT_OK(wal->stop_workers());
         EXPECT_OK(wal->roll_forward(Id::null(), [&lsns](WalPayloadOut payload) {
             lsns.emplace_back(payload.lsn());
-            return Status::ok();
+            return ok();
         }));
         EXPECT_OK(wal->start_workers());
         EXPECT_FALSE(lsns.empty());
@@ -456,7 +449,7 @@ TEST_F(RollForwardTests, ObsoleteSegmentsAreRemoved)
     const auto [first, last] = get_lsn_range();
     ASSERT_GT(first.value, 1);
     ASSERT_LE(first, pager->flushed_lsn());
-    ASSERT_EQ(last, commit_lsn);
+    ASSERT_EQ(last, state.commit_lsn.load());
 }
 
 TEST_F(RollForwardTests, KeepsNeededSegments)
@@ -469,7 +462,7 @@ TEST_F(RollForwardTests, KeepsNeededSegments)
 
     const auto [first, last] = get_lsn_range();
     ASSERT_LE(first, pager->flushed_lsn());
-    ASSERT_EQ(last, commit_lsn);
+    ASSERT_EQ(last, state.commit_lsn.load());
 }
 
 TEST_F(RollForwardTests, SanityCheck)
@@ -486,10 +479,10 @@ fmt::print("seed == {}\n", internal::random_seed);
     }
 
     const auto [first, last] = get_lsn_range();
-    ASSERT_LE(first, commit_lsn);
+    ASSERT_LE(first, state.commit_lsn.load());
     ASSERT_EQ(Id {last.value + 1}, wal->current_lsn());
 
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -524,7 +517,7 @@ public:
     [[nodiscard]]
     auto get_status()
     {
-        return pager->status().is_ok() ? wal->worker_status() : pager->status();
+        return state.has_error() ? state.original_error().status : wal->worker_status();
     }
 
     std::vector<std::string> committed;
@@ -570,9 +563,9 @@ public:
     auto SetUp() -> void override
     {
         options.page_size = 0x400;
-        options.frame_count = 32;
+        options.cache_size = 32;
         options.log_level = LogLevel::OFF;
-        options.store = store.get();
+        options.storage = store.get();
 
         ASSERT_OK(db.open(ROOT, options));
     }
@@ -849,8 +842,8 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.frame_count = 16;
-        options.store = store.get();
+        options.cache_size = 16;
+        options.storage = store.get();
         options.log_level = LogLevel::INFO;
         options.log_target = LogTarget::STDOUT_COLOR;
         ASSERT_OK(db.open(ROOT, options));
@@ -879,7 +872,7 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
     RecordGenerator generator {param};
 
     const auto info = test.db.info();
-    auto s = Status::ok();
+    auto s = ok();
 
     for (Size i {}; i < limit; ++i) {
         for (const auto &[key, value]: generator.generate(test.random, 100)) {
@@ -892,7 +885,7 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
             if (!s.is_ok()) return s;
         }
     }
-    return Status::ok();
+    return ok();
 }
 
 template<class Test>
@@ -1028,18 +1021,18 @@ public:
 
     virtual auto setup(Size xact_count, Size uncommitted_count) -> void
     {
-        options.store = store.get();
+        options.storage = store.get();
         options.page_size = 0x200;
-        options.frame_count = 32;
+        options.cache_size = 32;
+        options.log_target = LogTarget::STDOUT_COLOR;
+        options.log_level = LogLevel::INFO;
 
         ASSERT_OK(db->open("test", options));
-
         committed = run_random_transactions(*this, xact_count);
-
         const auto database_state = tools::read_file(*store, "test/data");
 
         auto xact = db->transaction();
-        const auto uncommitted = generator.generate(random, uncommitted_count);
+        uncommitted = generator.generate(random, uncommitted_count);
         run_random_operations(*this, cbegin(uncommitted), cend(uncommitted));
 
         // Clone the database while there are still pages waiting to be written to the data file. We'll have
@@ -1050,7 +1043,7 @@ public:
         ASSERT_OK(xact.abort());
         ASSERT_OK(db->close());
         store.reset(dynamic_cast<HeapStorage*>(cloned));
-        options.store = store.get();
+        options.storage = store.get();
         db.reset();
 
         db = std::make_unique<Core>();
@@ -1060,6 +1053,9 @@ public:
     {
         for (const auto &[key, value]: committed) {
             ASSERT_TRUE(tools::contains(*db, key, value));
+        }
+        for (const auto &[key, value]: uncommitted) {
+            ASSERT_FALSE(tools::contains(*db, key, value));
         }
         auto &tree = db->tree();
         tree.TEST_validate_links();
@@ -1075,7 +1071,7 @@ public:
 
     Random random {42};
     RecordGenerator generator {{16, 100, 10, false, true}};
-    std::vector<Record> committed;
+    std::vector<Record> committed, uncommitted;
     std::unique_ptr<HeapStorage> store;
     Options options;
     std::unique_ptr<Core> db;
@@ -1138,7 +1134,7 @@ public:
         if (BytesView {path}.starts_with(prefix) && counter++ >= target) {
             target += step;
             counter = 0;
-            return Status::system_error("42");
+            return system_error("42");
         }
         return Status::ok();
     }
@@ -1178,7 +1174,7 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_pair(  0, 100),
         std::make_pair(  1,   0),
         std::make_pair(  1, 100),
-        std::make_pair( 10,   1), // TODO: Doesn't work with 0?
+        std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
 class RecoveryWalReadFailureTests: public RecoveryTests {
@@ -1245,5 +1241,5 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
-} // namespace calico
+} // namespace Calico
 

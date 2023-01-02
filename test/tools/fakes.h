@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace calico {
+namespace Calico {
 
 using ReadInterceptor = std::function<Status(const std::string&, Bytes&, Size)>;
 using WriteInterceptor = std::function<Status(const std::string&, BytesView, Size)>;
@@ -33,7 +33,10 @@ namespace interceptors {
 
 inline auto assert_error_42(const Status &s)
 {
-    CALICO_EXPECT_TRUE(s.is_system_error() and s.what() == "42");
+    if (!s.is_system_error() || s.what() != "42") {
+        fmt::print(stderr, "error: unexpected {} status: {}", get_status_name(s), s.what());
+        std::exit(EXIT_FAILURE);
+    }
 }
 
 class RandomHeapReader : public RandomReader {
@@ -225,6 +228,6 @@ private:
     Size m_index {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TEST_TOOLS_FAKES_H

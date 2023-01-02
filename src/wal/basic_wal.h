@@ -13,7 +13,7 @@
 #include <optional>
 #include <unordered_set>
 
-namespace calico {
+namespace Calico {
 
 class Storage;
 class AppendWriter;
@@ -94,6 +94,6 @@ private:
     bool m_is_working {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_BASIC_WAL_H

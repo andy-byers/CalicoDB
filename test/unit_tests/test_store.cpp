@@ -10,7 +10,7 @@
 #include "fakes.h"
 #include "unit_tests.h"
 
-namespace calico {
+namespace Calico {
 
 namespace internal {
     extern std::uint32_t random_seed;
@@ -261,7 +261,6 @@ TEST(SystemTests, SystemErrorBehavior)
     ASSERT_EQ(errno, 0);
 
     ASSERT_TRUE(system::error(std::errc::no_such_file_or_directory).is_system_error());
-    assert_error_42(system::error("42"));
 }
 
 TEST(SystemTests, ClosedFileErrors)
@@ -293,4 +292,4 @@ TEST(SystemTests, OpenAndClose)
     ASSERT_TRUE(system::file_exists(PATH).is_not_found());
 }
 
-} // namespace calico
+} // namespace Calico

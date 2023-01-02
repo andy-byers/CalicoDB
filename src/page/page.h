@@ -6,7 +6,7 @@
 #include <optional>
 #include <vector>
 
-namespace calico {
+namespace Calico {
 
 struct FileHeader;
 class Frame;
@@ -14,7 +14,7 @@ class Pager;
 
 class Page final {
 public:
-    friend class calico::Frame;
+    friend class Calico::Frame;
 
     struct Parameters {
         Id id;
@@ -68,6 +68,6 @@ auto put_u16(Page &, Size, std::uint16_t) -> void;
 auto put_u32(Page &, Size, std::uint32_t) -> void;
 auto put_u64(Page &, Size, std::uint64_t) -> void;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGE_PAGE_H

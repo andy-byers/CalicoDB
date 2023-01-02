@@ -3,13 +3,13 @@
 
 #include "bytes.h"
 
-namespace calico {
+namespace Calico {
 
 class Storage;
 
-static constexpr Size MINIMUM_FRAME_COUNT {0x8};
-static constexpr Size DEFAULT_FRAME_COUNT {0x80};
-static constexpr Size MAXIMUM_FRAME_COUNT {0x2000};
+static constexpr Size MINIMUM_CACHE_SIZE {0x8};
+static constexpr Size DEFAULT_CACHE_SIZE {0x80};
+static constexpr Size MAXIMUM_CACHE_SIZE {0x2000};
 static constexpr Size MINIMUM_PAGE_SIZE {0x100};
 static constexpr Size DEFAULT_PAGE_SIZE {0x2000};
 static constexpr Size MAXIMUM_PAGE_SIZE {0x10000};
@@ -35,14 +35,14 @@ enum class LogTarget {
 
 struct Options {
     Size page_size {DEFAULT_PAGE_SIZE};
-    Size frame_count {DEFAULT_FRAME_COUNT};
+    Size cache_size {DEFAULT_CACHE_SIZE};
     Size wal_limit {DEFAULT_WAL_LIMIT};
     BytesView wal_path;
     LogLevel log_level {LogLevel::OFF};
     LogTarget log_target {};
-    Storage *store {};
+    Storage *storage {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_OPTIONS_H

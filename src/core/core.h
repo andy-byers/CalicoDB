@@ -9,7 +9,7 @@
 #include "wal/helpers.h"
 #include <unordered_set>
 
-namespace calico {
+namespace Calico {
 
 class Cursor;
 class Pager;
@@ -38,7 +38,7 @@ public:
     [[nodiscard]] auto path() const -> std::string;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Status;
     [[nodiscard]] auto erase(BytesView) -> Status;
-    [[nodiscard]] auto erase(Cursor) -> Status;
+    [[nodiscard]] auto erase(const Cursor &) -> Status;
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;
     [[nodiscard]] auto find(BytesView) -> Cursor;
@@ -96,33 +96,30 @@ public:
     }
 
 private:
-    auto forward_status(Status, const std::string &) -> Status;
-    auto save_and_forward_status(Status, const std::string &) -> Status;
+    auto handle_errors() -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
-    [[nodiscard]] auto ensure_consistency_on_modify() -> Status;
     [[nodiscard]] auto atomic_insert(BytesView, BytesView) -> Status;
-    [[nodiscard]] auto atomic_erase(Cursor) -> Status;
+    [[nodiscard]] auto atomic_erase(const Cursor &) -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;
+    [[nodiscard]] auto do_commit() -> Status;
+    [[nodiscard]] auto do_abort() -> Status;
 
     std::string m_prefix;
-    Status m_status {ok()};
-    LogPtr m_logger;
-    std::unique_ptr<System> m_state;
+    LogPtr m_log;
+    std::unique_ptr<System> m_system;
     std::unique_ptr<WriteAheadLog> m_wal;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
     std::unordered_set<Id, Id::Hash> m_images;
-    Id m_commit_lsn;
     Storage *m_store {};
-    bool m_has_xact {};
     bool m_owns_store {};
 };
 
-auto setup(const std::string &, Storage &, const Options &, Log &) -> tl::expected<InitialState, Status>;
+auto setup(const std::string &, Storage &, const Options &) -> tl::expected<InitialState, Status>;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_DB_DATABASE_IMPL_H

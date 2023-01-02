@@ -1,30 +1,31 @@
-#include "node_pool.h"
+#include "node_manager.h"
 #include "page/link.h"
 #include "page/node.h"
 #include "page/page.h"
 #include "pager/pager.h"
-#include "utils/info_log.h"
 #include "utils/layout.h"
+#include "utils/system.h"
 
-namespace calico {
+namespace Calico {
 
-NodePool::NodePool(Pager &pager, Size page_size)
+NodeManager::NodeManager(Pager &pager, System &system, Size page_size)
     : m_free_list {pager},
       m_scratch(page_size, '\x00'),
-      m_pager {&pager}
+      m_pager {&pager},
+      m_system {&system}
 {}
 
-auto NodePool::page_size() const -> Size
+auto NodeManager::page_size() const -> Size
 {
     return m_scratch.size();
 }
 
-auto NodePool::page_count() const -> Size
+auto NodeManager::page_count() const -> Size
 {
     return m_pager->page_count();
 }
 
-auto NodePool::allocate(PageType type) -> tl::expected<Node, Status>
+auto NodeManager::allocate(PageType type) -> tl::expected<Node, Status>
 {
     auto page = m_free_list.pop()
         .or_else([this](const Status &error) -> tl::expected<Page, Status> {
@@ -36,32 +37,41 @@ auto NodePool::allocate(PageType type) -> tl::expected<Node, Status>
         page->set_type(type);
         return Node {std::move(*page), true, m_scratch.data()};
     }
+    CALICO_ERROR(page.error());
     return tl::make_unexpected(page.error());
 }
 
-auto NodePool::acquire(Id id, bool is_writable) -> tl::expected<Node, Status>
+auto NodeManager::acquire(Id id, bool is_writable) -> tl::expected<Node, Status>
 {
     return m_pager->acquire(id, is_writable)
         .and_then([this](Page page) -> tl::expected<Node, Status> {
             return Node {std::move(page), false, m_scratch.data()};
+        })
+        .or_else([this, is_writable](const Status &error) -> tl::expected<Node, Status> {
+            const auto is_severe = is_writable; // || TODO: in transaction?
+            m_system->push_error(is_severe ? Error::ERROR : Error::WARN, error);
+            return tl::make_unexpected(error);
         });
 }
 
-auto NodePool::release(Node node) -> tl::expected<void, Status>
+auto NodeManager::release(Node node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(node.is_overflowing());
-    const auto s = m_pager->release(node.take());
-    if (!s.is_ok()) return tl::make_unexpected(s); // TODO: Should return a Status.
+    const auto was_writable = node.page().is_writable();
+    if (auto s = m_pager->release(node.take()); !s.is_ok()) {
+        m_system->push_error(was_writable ? Error::ERROR : Error::WARN, s);
+        return tl::make_unexpected(s);
+    }
     return {};
 }
 
-auto NodePool::destroy(Node node) -> tl::expected<void, Status>
+auto NodeManager::destroy(Node node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(node.is_overflowing());
     return m_free_list.push(node.take());
 }
 
-auto NodePool::allocate_chain(BytesView overflow) -> tl::expected<Id, Status>
+auto NodeManager::allocate_chain(BytesView overflow) -> tl::expected<Id, Status>
 {
     CALICO_EXPECT_FALSE(overflow.is_empty());
     std::optional<Link> prev;
@@ -99,16 +109,14 @@ auto NodePool::allocate_chain(BytesView overflow) -> tl::expected<Id, Status>
     return head;
 }
 
-auto NodePool::collect_chain(Id id, Bytes out) const -> tl::expected<void, Status>
+auto NodeManager::collect_chain(Id id, Bytes out) const -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
         CALICO_NEW_R(page, m_pager->acquire(id, false));
-        if (page.type() != PageType::OVERFLOW_LINK) {
-            ThreePartMessage message;
-            message.set_primary("cannot collect overflow chain");
-            message.set_detail("link has an invalid page type 0x{:04X}", static_cast<unsigned>(page.type()));
-            return tl::make_unexpected(message.corruption());
-        }
+        if (page.type() != PageType::OVERFLOW_LINK)
+            return tl::make_unexpected(corruption(
+                "cannot collect overflow chain: link has an invalid page type 0x{:04X}", static_cast<unsigned>(page.type())));
+
         Link link {std::move(page)};
         auto content = link.content_view();
         const auto chunk = std::min(out.size(), content.size());
@@ -121,13 +129,17 @@ auto NodePool::collect_chain(Id id, Bytes out) const -> tl::expected<void, Statu
     return {};
 }
 
-auto NodePool::destroy_chain(Id id, Size size) -> tl::expected<void, Status>
+auto NodeManager::destroy_chain(Id id, Size size) -> tl::expected<void, Status>
 {
     while (size) {
         auto page = m_pager->acquire(id, true);
+
         if (!page.has_value())
             return tl::make_unexpected(page.error());
-        CALICO_EXPECT_EQ(page->type(), PageType::OVERFLOW_LINK); // TODO: Corruption error, not assertion. Need a logger for this class.
+
+        if (page->type() != PageType::OVERFLOW_LINK)
+            CALICO_ERROR(corruption("page {} is not an overflow link", page->id().value));
+
         Link link {std::move(*page)};
         id = link.next_id();
         size -= std::min(size, link.content_view().size());
@@ -136,14 +148,14 @@ auto NodePool::destroy_chain(Id id, Size size) -> tl::expected<void, Status>
     return {};
 }
 
-auto NodePool::save_state(FileHeader &header) -> void
+auto NodeManager::save_state(FileHeader &header) -> void
 {
     m_free_list.save_state(header);
 }
 
-auto NodePool::load_state(const FileHeader &header) -> void
+auto NodeManager::load_state(const FileHeader &header) -> void
 {
     m_free_list.load_state(header);
 }
 
-} // namespace calico
+} // namespace Calico

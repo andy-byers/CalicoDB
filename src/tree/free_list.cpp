@@ -4,7 +4,7 @@
 #include "pager/pager.h"
 #include "utils/header.h"
 
-namespace calico {
+namespace Calico {
 
 auto FreeList::save_state(FileHeader &header) const -> void
 {
@@ -39,7 +39,7 @@ auto FreeList::pop() -> tl::expected<Page, Status>
             });
     }
     CALICO_EXPECT_TRUE(m_head.is_null());
-    return tl::make_unexpected(Status::logic_error("cannot pop page: free list is empty"));
+    return tl::make_unexpected(logic_error("cannot pop page: free list is empty"));
 }
 
-} // namespace calico
+} // namespace Calico

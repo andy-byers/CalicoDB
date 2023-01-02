@@ -9,7 +9,7 @@
 #include <optional>
 #include "spdlog/spdlog.h"
 
-namespace calico {
+namespace Calico {
 
 struct FileHeader;
 class Page;
@@ -139,6 +139,6 @@ private:
     Size m_ref_sum {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGER_FRAMER_H

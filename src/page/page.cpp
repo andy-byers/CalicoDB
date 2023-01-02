@@ -4,7 +4,7 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace calico {
+namespace Calico {
 
 Page::Page(const Parameters &param)
     : m_source {param.source},
@@ -147,4 +147,4 @@ auto put_u64(Page &page, Size offset, std::uint64_t value) -> void
     put_u64(page.bytes(offset, sizeof(value)), value);
 }
 
-} // namespace calico
+} // namespace Calico

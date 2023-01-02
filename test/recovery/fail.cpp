@@ -7,7 +7,7 @@
 #  error "This test must run with assertions enabled"
 #endif
 
-using namespace calico;
+using namespace Calico;
 namespace fs = std::filesystem;
 
 static constexpr Size KEY_WIDTH {12};
@@ -43,7 +43,7 @@ auto main(int argc, const char *argv[]) -> int
     // Use small pages and few frames to cause lots of stealing.
     Options options;
     options.page_size = 0x200;
-    options.frame_count = 16;
+    options.cache_size = 16;
 //    options.log_level = spdlog::level::info;
     Database db;
     expect_ok(db.open(path.string(), options));

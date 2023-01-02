@@ -34,7 +34,7 @@
             return tl::make_unexpected(calico_try_result.error()); \
     } while (0)
 
-#define CALICO_TRY_STORE(out, expr) \
+#define CALICO_PUT_R(out, expr) \
     do { \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) { \
             return tl::make_unexpected(calico_try_result.error()); \
@@ -50,7 +50,7 @@
     } \
     auto out = std::move(*calico_try_##out)
 
-namespace calico::impl {
+namespace Calico::impl {
 
 inline constexpr auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept -> void
 {
@@ -60,6 +60,6 @@ inline constexpr auto handle_expect(bool expectation, const char *repr, const ch
     }
 }
 
-} // namespace calico::impl
+} // namespace Calico::impl
 
 #endif // CALICO_UTILS_EXPECT_H

@@ -9,7 +9,7 @@
 #include "utils/utils.h"
 #include "wal/wal.h"
 
-namespace calico {
+namespace Calico {
 
 constexpr auto DATA_FILENAME = "data";
 
@@ -30,7 +30,6 @@ public:
     [[nodiscard]] virtual auto page_count() const -> Size = 0;
     [[nodiscard]] virtual auto page_size() const -> Size = 0;
     [[nodiscard]] virtual auto hit_ratio() const -> double = 0;
-    [[nodiscard]] virtual auto status() const -> Status = 0;
     virtual auto allocate() -> tl::expected<Page, Status> = 0;
     virtual auto acquire(Id, bool) -> tl::expected<Page, Status> = 0;
     virtual auto release(Page) -> Status = 0;
@@ -39,6 +38,6 @@ public:
     virtual auto load_state(const FileHeader &) -> void = 0;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGER_INTERFACE_H

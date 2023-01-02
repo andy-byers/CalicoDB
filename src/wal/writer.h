@@ -12,7 +12,7 @@
 
 #include "utils/worker.h"
 
-namespace calico {
+namespace Calico {
 
 class LogWriter {
 public:
@@ -99,6 +99,6 @@ private:
     Size m_wal_limit {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_WAL_WRITER_H

@@ -6,7 +6,7 @@
 #include "crc.h"
 #include "types.h"
 
-namespace calico {
+namespace Calico {
 
 class Page;
 
@@ -63,6 +63,6 @@ inline auto encode_page_size(Size page_size) -> std::uint16_t
     return static_cast<std::uint16_t>(page_size);
 }
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_CORE_HEADER_H

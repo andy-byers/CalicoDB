@@ -3,55 +3,60 @@
 #include "cursor_internal.h"
 #include "page/node.h"
 #include "pager/pager.h"
-#include "utils/info_log.h"
 #include "utils/layout.h"
+#include "utils/system.h"
 
-namespace calico {
+namespace Calico {
 
-BPlusTree::BPlusTree(Pager &pager, System &state, Size page_size)
-    : m_pool {pager, page_size},
-      m_internal {m_pool, state},
-      m_logger {state.create_log("tree")},
-      m_system {&state}
+BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
+    : m_pool {pager, system, page_size},
+      m_internal {m_pool, system},
+      m_logger {system.create_log("tree")},
+      m_system {&system}
 {
-    m_logger->info("constructing BPlusTree instance");
+    m_logger->info("constructing tree");
+    m_actions.acquire = [this](auto pid, auto is_writable) {
+        return m_pool.acquire(pid, is_writable);
+    };
+    m_actions.release = [this](auto node) {
+        return m_pool.release(std::move(node));
+    };
+    m_actions.collect = [this](auto &node, auto index) {
+        return m_internal.collect_value(node, index);
+    };
 }
 
 BPlusTree::~BPlusTree()
 {
-    m_logger->info("destroying BPlusTree object");
+    m_logger->info("destroying tree");
 }
 
-auto BPlusTree::open(Pager &pager, System &state, size_t page_size) -> tl::expected<Tree::Ptr, Status>
+auto BPlusTree::open(Pager &pager, System &system, size_t page_size) -> tl::expected<Tree::Ptr, Status>
 {
-    auto ptr = Tree::Ptr {new(std::nothrow) BPlusTree {pager, state, page_size}};
+    auto ptr = Tree::Ptr {new(std::nothrow) BPlusTree {pager, system, page_size}};
     if (ptr == nullptr)
-        return tl::make_unexpected(system_error("could not allocate BPlusTree object: out of memory"));
+        return tl::make_unexpected(system_error("could not allocate tree: out of memory"));
     return ptr;
 }
 
-auto run_key_check(BytesView key, Size max_key_size, System &system, const std::string &primary) -> Status
+auto BPlusTree::check_key(BytesView key, const char *primary) -> Status
 {
     if (key.is_empty()) {
         auto s = invalid_argument("{}: key is empty (use a nonempty key)", primary);
-        system.push_error(Error::WARN, s);
+        CALICO_WARN(s);
         return s;
     }
-
-    if (key.size() > max_key_size) {
-        auto s = invalid_argument(
-            "{}: key of length {} B is too long",
-            primary, key.size(), max_key_size);
-        system.push_error(Error::WARN, s);
+    if (key.size() > m_internal.maximum_key_size()) {
+        auto s = invalid_argument("{}: key of length {} B is too long", primary, key.size(), m_internal.maximum_key_size());
+        CALICO_WARN(s);
         return s;
     }
-    return Status::ok();
+    return ok();
 }
 
 auto BPlusTree::insert(BytesView key, BytesView value) -> Status
 {
-    if (auto s = run_key_check(key, m_internal.maximum_key_size(), *m_system, "cannot write record"); !s.is_ok())
-        return s;
+    CALICO_TRY_S(check_key(key, "could not insert record"));
 
     // Find the external node that the record should live in, given its key.
     auto search_result = m_internal.find_external(key);
@@ -60,19 +65,14 @@ auto BPlusTree::insert(BytesView key, BytesView value) -> Status
     auto node = m_pool.acquire(id, true);
     if (!node.has_value()) return node.error();
 
-    auto s = Status::ok();
     if (found_eq) {
         const auto r = m_internal.positioned_modify({std::move(*node), index}, value);
-        if (!r.has_value()) s = r.error();
+        if (!r.has_value()) return r.error();
     } else {
         const auto r = m_internal.positioned_insert({std::move(*node), index}, key, value);
-        if (!r.has_value()) s = r.error();
+        if (!r.has_value()) return r.error();
     }
-    if (!s.is_ok()) {
-        m_logger->error("could not insert record");
-        m_logger->error("(reason) {}", s.what());
-    }
-    return s;
+    return ok();
 }
 
 auto BPlusTree::erase(Cursor cursor) -> Status
@@ -82,7 +82,7 @@ auto BPlusTree::erase(Cursor cursor) -> Status
         if (!node.has_value()) return node.error();
         const auto r = m_internal.positioned_remove({std::move(*node), CursorInternal::index(cursor)});
         if (!r.has_value()) return r.error();
-        return Status::ok();
+        return ok();
     }
     CALICO_EXPECT_FALSE(cursor.status().is_ok());
     return cursor.status();
@@ -90,8 +90,8 @@ auto BPlusTree::erase(Cursor cursor) -> Status
 
 auto BPlusTree::find_aux(BytesView key) -> tl::expected<SearchResult, Status>
 {
-    if (const auto r = run_key_check(key, m_internal.maximum_key_size(), *m_system, "cannot write record"); !r.is_ok())
-        return tl::make_unexpected(r);
+    if (auto s = check_key(key, "could not find key"); !s.is_ok())
+        return tl::make_unexpected(s);
 
     CALICO_NEW_R(find_result, m_internal.find_external(key));
     auto [id, index, found_exact] = find_result;
@@ -103,8 +103,7 @@ auto BPlusTree::find_aux(BytesView key) -> tl::expected<SearchResult, Status>
         CALICO_EXPECT_FALSE(found_exact);
         id = node.right_sibling_id();
         CALICO_TRY_R(m_pool.release(std::move(node)));
-        CALICO_NEW_R(next, m_pool.acquire(id, false));
-        node = std::move(next);
+        CALICO_PUT_R(node, m_pool.acquire(id, false));
         index = 0;
     }
     return SearchResult {std::move(node), index, found_exact};
@@ -112,7 +111,7 @@ auto BPlusTree::find_aux(BytesView key) -> tl::expected<SearchResult, Status>
 
 auto BPlusTree::find_exact(BytesView key) -> Cursor
 {
-    auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
+    auto cursor = CursorInternal::make_cursor(&m_actions);
     auto result = find_aux(key);
     if (!result.has_value()) {
         CursorInternal::invalidate(cursor, result.error());
@@ -126,7 +125,7 @@ auto BPlusTree::find_exact(BytesView key) -> Cursor
 
 auto BPlusTree::find(BytesView key) -> Cursor
 {
-    auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
+    auto cursor = CursorInternal::make_cursor(&m_actions);
     auto result = find_aux(key);
     if (!result.has_value()) {
         CursorInternal::invalidate(cursor, result.error());
@@ -139,7 +138,7 @@ auto BPlusTree::find(BytesView key) -> Cursor
 
 auto BPlusTree::find_minimum() -> Cursor
 {
-    auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
+    auto cursor = CursorInternal::make_cursor(&m_actions);
     auto temp = m_internal.find_minimum();
     if (!temp.has_value()) {
         CursorInternal::invalidate(cursor, temp.error());
@@ -162,7 +161,7 @@ auto BPlusTree::find_minimum() -> Cursor
 
 auto BPlusTree::find_maximum() -> Cursor
 {
-    auto cursor = CursorInternal::make_cursor(m_pool, m_internal);
+    auto cursor = CursorInternal::make_cursor(&m_actions);
     auto temp = m_internal.find_maximum();
     if (!temp.has_value()) {
         CursorInternal::invalidate(cursor, temp.error());
@@ -200,11 +199,13 @@ auto BPlusTree::load_state(const FileHeader &header) -> void
     m_internal.load_state(header);
 }
 
+#undef CHECK_KEY
+
 #if not NDEBUG
 
 using Callback = std::function<void(Node&, Size)>;
 
-static auto traverse_inorder_helper(NodePool &pool, Node node, const Callback &callback) -> void
+static auto traverse_inorder_helper(NodeManager &pool, Node node, const Callback &callback) -> void
 {
     for (Size index {}; index <= node.cell_count(); ++index) {
         if (!node.is_external()) {
@@ -218,14 +219,14 @@ static auto traverse_inorder_helper(NodePool &pool, Node node, const Callback &c
     CALICO_EXPECT_TRUE(pool.release(std::move(node)).has_value());
 }
 
-static auto traverse_inorder(NodePool &pool, const Callback &callback) -> void
+static auto traverse_inorder(NodeManager &pool, const Callback &callback) -> void
 {
     auto root = pool.acquire(Id::root(), false);
     CALICO_EXPECT_TRUE(root.has_value());
     traverse_inorder_helper(pool, std::move(*root), callback);
 }
 
-static auto validate_siblings(NodePool &pool) -> void
+static auto validate_siblings(NodeManager &pool) -> void
 {
     // Find the leftmost external node.
     auto node = *pool.acquire(Id::root(), false);
@@ -248,7 +249,7 @@ static auto validate_siblings(NodePool &pool) -> void
     CALICO_EXPECT_TRUE(pool.release(std::move(node)).has_value());
 }
 
-auto validate_parent_child(NodePool &pool) -> void
+auto validate_parent_child(NodeManager &pool) -> void
 {
     auto check_connection = [&pool](Node &node, Size index) -> void {
         auto child = *pool.acquire(node.child_id(index), false);
@@ -304,4 +305,4 @@ auto BPlusTree::TEST_validate_links() -> void
 #endif // not NDEBUG
 }
 
-} // namespace calico
+} // namespace Calico

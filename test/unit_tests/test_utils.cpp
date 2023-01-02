@@ -18,7 +18,7 @@
 #include "utils/utils.h"
 #include "utils/worker.h"
 
-namespace calico {
+namespace Calico {
 
 TEST(AssertionDeathTest, Assert)
 {
@@ -31,7 +31,7 @@ TEST(TestEncoding, ReadsAndWrites)
     const auto u16 = random.get<std::uint16_t>();
     const auto u32 = random.get<std::uint32_t>();
     const auto u64 = random.get<std::uint64_t>();
-    std::vector<calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
+    std::vector<Calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
 
     auto dst = buffer.data();
     put_u16(dst, u16);
@@ -759,14 +759,14 @@ public:
         }}
     {}
 
-    Status callback_status {Status::ok()};
+    Status callback_status {ok()};
     Worker<int> worker;
     std::vector<int> events;
 };
 
 TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
 {
-    callback_status = Status::system_error("42");
+    callback_status = system_error("42");
     worker.dispatch(1, true);
     assert_error_42(worker.status());
     assert_error_42(std::move(worker).destroy());
@@ -775,12 +775,12 @@ TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
 
 TEST_F(WorkerFaultTests, WorkerCannotBeRecovered)
 {
-    callback_status = Status::system_error("42");
+    callback_status = system_error("42");
     worker.dispatch(1, true);
 
     // Return an OK status after failing once. Worker should remain invalidated. If we need to start the worker again,
     // we need to create a new one.
-    callback_status = Status::ok();
+    callback_status = ok();
     worker.dispatch(2, true);
     assert_error_42(worker.status());
     assert_error_42(std::move(worker).destroy());
@@ -793,7 +793,7 @@ TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
     worker.dispatch(2);
     worker.dispatch(3, true);
 
-    callback_status = Status::system_error("42");
+    callback_status = system_error("42");
     worker.dispatch(4);
     worker.dispatch(5);
     worker.dispatch(6, true);
@@ -809,7 +809,7 @@ TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
 
 TEST_F(WorkerFaultTests, ErrorStatusContention)
 {
-    callback_status = Status::system_error("42");
+    callback_status = system_error("42");
     worker.dispatch(1);
     worker.dispatch(2);
     worker.dispatch(3);
@@ -826,4 +826,4 @@ TEST_F(WorkerFaultTests, ErrorStatusContention)
     ASSERT_TRUE(events.empty());
 }
 
-} // namespace calico
+} // namespace Calico

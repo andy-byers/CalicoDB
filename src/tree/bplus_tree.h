@@ -2,16 +2,17 @@
 #ifndef CALICO_TREE_BPLUS_TREE_H
 #define CALICO_TREE_BPLUS_TREE_H
 
+#include "cursor_internal.h"
 #include "internal.h"
-#include "tree.h"
-#include "utils/info_log.h"
 #include "spdlog/spdlog.h"
+#include "tree.h"
+#include "utils/system.h"
 
 #ifdef CALICO_BUILD_TESTS
 #  include <gtest/gtest_prod.h>
 #endif // CALICO_BUILD_TESTS
 
-namespace calico {
+namespace Calico {
 
 class Cursor;
 class Pager;
@@ -47,14 +48,16 @@ private:
         bool was_found {};
     };
     BPlusTree(Pager &pager, System &state, Size page_size);
-    auto find_aux(BytesView key) -> tl::expected<SearchResult, Status>;
+    [[nodiscard]] auto find_aux(BytesView key) -> tl::expected<SearchResult, Status>;
+    [[nodiscard]] auto check_key(BytesView key, const char *primary) -> Status;
 
-    NodePool m_pool;
+    CursorActions m_actions;
+    NodeManager m_pool;
     Internal m_internal;
     LogPtr m_logger;
     System *m_system {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TREE_BPLUS_TREE_H

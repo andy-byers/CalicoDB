@@ -3,11 +3,11 @@
 #include "framer.h"
 #include "page/page.h"
 #include "storage/posix_storage.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 #include "utils/types.h"
 #include <thread>
 
-namespace calico {
+namespace Calico {
 
 namespace fs = std::filesystem;
 
@@ -29,14 +29,11 @@ auto BasicPager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Statu
 
 BasicPager::BasicPager(const Parameters &param, Framer framer)
     : m_framer {std::move(framer)},
-      m_log {param.state->create_log("pager")},
+      m_log {param.system->create_log("pager")},
       m_images {param.images},
       m_scratch {param.scratch},
       m_wal {param.wal},
-      m_state {param.state},
-      m_status {param.status},
-      m_has_xact {param.has_xact},
-      m_commit_lsn {param.commit_lsn}
+      m_system {param.system}
 {
     m_log->info("constructing BasicPager instance");
 }
@@ -58,7 +55,6 @@ auto BasicPager::hit_ratio() const -> double
 
 auto BasicPager::pin_frame(Id pid, bool &is_fragile) -> Status
 {
-    static constexpr auto MSG = "could not pin frame: out of frames";
     CALICO_EXPECT_FALSE(m_registry.contains(pid));
     is_fragile = true;
 
@@ -69,10 +65,9 @@ auto BasicPager::pin_frame(Id pid, bool &is_fragile) -> Status
         // We are out of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
         // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
         if (!*r) {
-            auto s = Status::not_found("could not find a frame to use");
-            m_state->push_error(Error::WARN, s);
-            m_log->warn(MSG);
-            *m_status = m_wal->flush();
+            auto s = not_found("could not find a frame to use");
+            CALICO_WARN(s);
+            CALICO_ERROR_IF(m_wal->flush());
             return s;
         }
     }
@@ -83,7 +78,7 @@ auto BasicPager::pin_frame(Id pid, bool &is_fragile) -> Status
 
     // Associate the page ID with the frame index we got from the framer.
     m_registry.put(pid, {*r});
-    return Status::ok();
+    return ok();
 }
 
 auto BasicPager::clean_page(PageRegistry::Entry &entry) -> PageList::Iterator
@@ -96,7 +91,6 @@ auto BasicPager::clean_page(PageRegistry::Entry &entry) -> PageList::Iterator
 
 auto BasicPager::flush(Id target_lsn) -> Status
 {
-    static constexpr auto MSG = "could not flush";
     m_log->info("flushing cached database pages");
     CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);
 
@@ -111,7 +105,7 @@ auto BasicPager::flush(Id target_lsn) -> Status
         const auto frame_id = entry.frame_index;
         const auto record_lsn = entry.record_lsn;
         const auto page_lsn = m_framer.frame_at(frame_id).lsn();
-        auto s = Status::ok();
+        auto s = ok();
 
         if (page_id.as_index() >= m_framer.page_count()) {
             // Page is out of range (abort was called and the database got smaller).
@@ -119,16 +113,13 @@ auto BasicPager::flush(Id target_lsn) -> Status
             m_framer.unpin(frame_id);
         } else if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
-            LogMessage message {*m_log};
-            message.set_primary("could not flush page {}", page_id.value);
-            message.set_detail("page updates for LSN {} are not in the WAL", page_lsn.value);
-            message.log(spdlog::level::warn);
+            CALICO_WARN(logic_error(
+                "could not flush page {}: page updates for LSN {} are not in the WAL", page_id.value, page_lsn.value));
             itr = next(itr);
             continue;
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
             s = m_framer.write_back(frame_id);
-            save_and_forward_status(s, MSG);
         } else {
             // Page doesn't need to be flushed yet.
             itr = next(itr);
@@ -168,15 +159,13 @@ auto BasicPager::try_make_available() -> tl::expected<bool, Status>
 
     if (!evicted.has_value()) {
         CALICO_EXPECT_TRUE(m_wal->is_working());
-        auto s = m_wal->flush();
-        if (!s.is_ok())
-            m_state->push_error(Error::ERROR, s);
-        *m_status = m_wal->flush(); // TODO: remove
+        CALICO_ERROR_IF(m_wal->flush());
         return false;
     }
 
     auto &[frame_index, record_lsn, dirty_token] = *evicted;
-    auto s = Status::ok();
+    auto s = ok();
+
     if (dirty_token) {
         // NOTE: We don't update the record LSN field because we are getting rid of this page.
         s = m_framer.write_back(frame_index);
@@ -191,7 +180,7 @@ auto BasicPager::release(Page page) -> Status
 {
     // NOTE: This block should be safe, because we can only have 1 writable page acquired at any given time. We will not enter unless the
     //       page was written to while it was acquired.
-    auto s = Status::ok();
+    auto s = ok();
     if (const auto deltas = page.collect_deltas(); m_wal->is_working() && !deltas.empty()) {
         CALICO_EXPECT_TRUE(page.is_writable());
 
@@ -209,11 +198,7 @@ auto BasicPager::release(Page page) -> Status
 
         // Log the delta record.
         s = m_wal->log(payload);
-
-        if (!s.is_ok())
-            m_state->push_error(Error::ERROR, std::move(s));
-
-        save_and_forward_status(s, "could not write page deltas to WAL"); // TODO: remove
+        CALICO_ERROR_IF(s);
     }
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
@@ -225,14 +210,12 @@ auto BasicPager::release(Page page) -> Status
     m_framer.unref(entry.frame_index, page);
 
     // Note that the commit LSN is always less than or equal to the WAL flushed LSN.
-    if (entry.dirty_token && entry.record_lsn < *m_commit_lsn) {
+    if (entry.dirty_token && entry.record_lsn < m_system->commit_lsn) {
         s = m_framer.write_back(entry.frame_index);
-        save_and_forward_status(s, "could not write back old page"); // TODO: remove
-        if (s.is_ok()) {
+        CALICO_ERROR_IF(s);
+
+        if (s.is_ok())
             clean_page(entry);
-        } else {
-            m_state->push_error(Error::ERROR, s);
-        }
     }
     return s;
 }
@@ -261,10 +244,7 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
             page.id(), page.view(0), payload.data());
         payload.shrink_to_fit(size);
 
-        if (auto s = m_wal->log(payload); !s.is_ok()) {
-            save_and_forward_status(s, "could not write full image to WAL"); // TODO: remove
-            m_state->push_error(Error::ERROR, std::move(s));
-        }
+        CALICO_ERROR_IF(m_wal->log(payload));
     }
 }
 
@@ -302,10 +282,6 @@ auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
     CALICO_EXPECT_FALSE(id.is_null());
     std::lock_guard lock {m_mutex};
 
-    // A fatal error has occurred. TODO: Remove the status member. Just pretend like no error has occurred, and don't even enter these methods if we're already in a bad state. Otherwise, try to roll back, else abort!
-    if (!m_status->is_ok())
-        return tl::make_unexpected(*m_status);
-
     if (auto itr = m_registry.get(id); itr != end(m_registry))
         return do_acquire(itr->value);
 
@@ -317,17 +293,13 @@ auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
         if (s.is_ok()) break;
 
         if (!s.is_not_found()) {
-            m_state->push_error(Error::WARN, s);
-            m_log->error(s.what()); // TODO: remove
+            CALICO_WARN(s);
 
             // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
             // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
             // data races on this check.
-            if (*m_has_xact || is_fragile) {
-                m_state->push_error(Error::ERROR, s); // TODO: Actually, don't even do this here. Do it in the caller!!! This shouldn't have to do much logging as it is more-or-less low level
-                m_log->error("setting database error state"); // TODO: remove
-                *m_status = s; // TODO: remove
-            }
+            if (m_system->has_xact || is_fragile)
+                CALICO_ERROR(s);
             return tl::make_unexpected(s);
         }
         s = m_wal->worker_status();
@@ -339,4 +311,4 @@ auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
     return do_acquire(itr->value);
 }
 
-} // namespace calico
+} // namespace Calico

@@ -5,7 +5,7 @@
 #include "utils/expect.h"
 #include <algorithm>
 
-namespace calico {
+namespace Calico {
 
 namespace impl {
 
@@ -80,6 +80,6 @@ inline auto insert_delta(std::vector<PageDelta> &deltas, PageDelta delta) -> voi
     deltas.insert(itr, delta);
 }
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGE_DELTAS_H

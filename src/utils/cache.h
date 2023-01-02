@@ -7,7 +7,7 @@
 #include <optional>
 #include <unordered_map>
 
-namespace calico {
+namespace Calico {
 
 /*
  * Implements the simplified 2Q replacement policy described in
@@ -247,6 +247,6 @@ private:
     iterator m_sep {std::end(m_list)};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_UTILS_CACHE_H

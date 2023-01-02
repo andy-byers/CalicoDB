@@ -6,7 +6,7 @@
 #include "wal.h"
 #include "spdlog/fmt/fmt.h"
 
-namespace calico {
+namespace Calico {
 
 static constexpr auto WAL_PREFIX = "wal-";
 static constexpr Size WAL_SCRATCH_SCALE {3};
@@ -143,6 +143,6 @@ auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 [[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_RECORD_H

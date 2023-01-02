@@ -5,8 +5,8 @@
 #include "fakes.h"
 #include "tools.h"
 #include "unit_tests.h"
-#include "utils/info_log.h"
 #include "utils/layout.h"
+#include "utils/system.h"
 #include "wal/basic_wal.h"
 #include "wal/disabled_wal.h"
 #include "wal/helpers.h"
@@ -15,7 +15,7 @@
 #include <array>
 #include <gtest/gtest.h>
 
-namespace calico {
+namespace Calico {
 
 namespace internal {
     extern std::uint32_t random_seed;
@@ -1127,7 +1127,7 @@ TEST_F(BasicWalTests, WriterDoesNotLeaveEmptySegments)
 
 TEST_F(BasicWalTests, RollWhileEmpty)
 {
-    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {return Status::ok();}));
+    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {return ok();}));
 }
 
 TEST_F(BasicWalTests, FlushWithEmptyTailBuffer)
@@ -1268,10 +1268,10 @@ TEST_F(WalFaultTests, FailOnFirstWrite)
 
     // We never wrote anything, so the writer should have removed the segment.
     ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {
-        return Status::corruption("");
+        return corruption("");
     }));
     ASSERT_OK(wal->roll_backward(Id::null(), [](auto) {
-        return Status::corruption("");
+        return corruption("");
     }));
 }
 
@@ -1281,10 +1281,10 @@ TEST_F(WalFaultTests, FailOnFirstOpen)
     assert_error_42(run_operations({WalOperation::LOG}));
 
     ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {
-        return Status::corruption("");
+        return corruption("");
     }));
     ASSERT_OK(wal->roll_backward(Id::null(), [](auto) {
-        return Status::corruption("");
+        return corruption("");
     }));
 }
 

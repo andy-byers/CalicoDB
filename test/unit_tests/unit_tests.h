@@ -10,7 +10,7 @@
 #include <iomanip>
 #include <sstream>
 
-namespace calico {
+namespace Calico {
 
 static constexpr auto EXPECTATION_MATCHER = "^expectation";
 
@@ -89,6 +89,6 @@ public:
     std::unique_ptr<Storage> store;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TEST_UNIT_TESTS_H

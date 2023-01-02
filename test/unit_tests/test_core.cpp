@@ -14,7 +14,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-namespace calico {
+namespace Calico {
 
 namespace internal {
     extern std::uint32_t random_seed;
@@ -36,7 +36,7 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.frame_count = 16;
+        options.cache_size = 16;
 
         store = std::make_unique<HeapStorage>();
         core = std::make_unique<Core>();
@@ -93,9 +93,9 @@ public:
     BasicDatabaseTests()
     {
         options.page_size = 0x200;
-        options.frame_count = 64;
+        options.cache_size = 64;
         options.log_level = LogLevel::OFF;
-        options.store = store.get();
+        options.storage = store.get();
     }
 
     ~BasicDatabaseTests() override = default;
@@ -240,10 +240,10 @@ TEST_F(BasicDatabaseTests, ReportsInvalidFrameCounts)
     auto invalid = options;
 
     Database db;
-    invalid.frame_count = MINIMUM_FRAME_COUNT - 1;
+    invalid.cache_size = MINIMUM_CACHE_SIZE - 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 
-    invalid.frame_count = MAXIMUM_FRAME_COUNT + 1;
+    invalid.cache_size = MAXIMUM_CACHE_SIZE + 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 }
 
@@ -340,7 +340,7 @@ TEST_F(ReaderTests, SingleReader)
 TEST_F(ReaderTests, ManyDistributedReaders)
 {
     std::vector<std::thread> readers;
-    for (Size i {}; i < options.frame_count * 2; ++i)
+    for (Size i {}; i < options.cache_size * 2; ++i)
         readers.emplace_back(std::thread {[this, i] {distributed_reader(i);}});
     for (auto &reader: readers)
         reader.join();
@@ -349,7 +349,7 @@ TEST_F(ReaderTests, ManyDistributedReaders)
 TEST_F(ReaderTests, ManyLocalizedReaders)
 {
     std::vector<std::thread> readers;
-    for (Size i {}; i < options.frame_count * 2; ++i)
+    for (Size i {}; i < options.cache_size * 2; ++i)
         readers.emplace_back(std::thread {[this] {localized_reader();}});
     for (auto &reader: readers)
         reader.join();

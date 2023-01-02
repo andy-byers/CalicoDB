@@ -5,7 +5,7 @@
 #include "utils/expect.h"
 #include "utils/layout.h"
 
-namespace calico {
+namespace Calico {
 
 auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
 {
@@ -205,4 +205,4 @@ auto make_internal_cell(BytesView key, Size page_size) -> Cell
     return Cell {param};
 }
 
-} // namespace calico
+} // namespace Calico

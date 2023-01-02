@@ -5,7 +5,7 @@
 #include "calico/bytes.h"
 #include <filesystem>
 
-namespace calico {
+namespace Calico {
 
 static constexpr Size PAGE_ID_SIZE {sizeof(std::uint64_t)};
 static constexpr Size CELL_POINTER_SIZE {sizeof(std::uint16_t)};
@@ -150,6 +150,6 @@ auto not_found(const std::string_view &fmt, Ts &&...ts) -> Status
     return Status::not_found(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
 }
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_UTILS_UTILS_H

@@ -5,7 +5,7 @@
 #include <vector>
 #include "utils.h"
 
-namespace calico {
+namespace Calico {
 
 using size_t = std::size_t;
 
@@ -62,20 +62,42 @@ struct Id {
     size_t value {};
 };
 
-struct AlignedDeleter {
-    explicit AlignedDeleter(std::align_val_t align)
-        : alignment {align}
-    {}
-
-    auto operator()(Byte *ptr) const -> void
+class AlignedBuffer {
+public:
+    AlignedBuffer(Size size, Size alignment)
+        : m_data {
+              new(std::align_val_t {alignment}, std::nothrow) Byte[size],
+              Deleter {std::align_val_t {alignment}},
+          }
     {
-        operator delete[](ptr, alignment);
+        CALICO_EXPECT_TRUE(is_power_of_two(alignment));
+        CALICO_EXPECT_EQ(size % alignment, 0);
     }
 
-    std::align_val_t alignment;
-};
+    [[nodiscard]]
+    auto get() -> Byte *
+    {
+        return m_data.get();
+    }
 
-using AlignedBuffer = std::unique_ptr<Byte[], AlignedDeleter>;
+    [[nodiscard]]
+    auto get() const -> const Byte *
+    {
+        return m_data.get();
+    }
+
+private:
+    struct Deleter {
+        auto operator()(Byte *ptr) const -> void
+        {
+            operator delete[](ptr, alignment);
+        }
+
+        std::align_val_t alignment;
+    };
+
+    std::unique_ptr<Byte[], Deleter> m_data;
+};
 
 template<class T>
 class UniqueNullable final {
@@ -137,6 +159,6 @@ private:
     T m_resource {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_UTILS_TYPES_H

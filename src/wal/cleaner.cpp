@@ -1,7 +1,7 @@
 #include "cleaner.h"
 #include "reader.h"
 
-namespace calico {
+namespace Calico {
 
 auto WalCleaner::on_event(const Id &limit) -> Status
 {
@@ -27,7 +27,7 @@ auto WalCleaner::on_event(const Id &limit) -> Status
 
         target = std::exchange(current, m_set->id_after(current));
     }
-    return Status::ok();
+    return ok();
 }
 
-} // namespace calico
+} // namespace Calico

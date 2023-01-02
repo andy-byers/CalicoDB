@@ -62,7 +62,7 @@ Next, we call `open()` to open the database connection.
 // Set some initialization options. We'll use pages of size 2 KB with 2 MB of cache.
 cco::Options options;
 options.page_size = 0x2000;
-options.frame_count = 256;
+options.cache_size = 256;
 options.log_level = spdlog::level::info;
 
 // Open or create a database at "/tmp/cats".

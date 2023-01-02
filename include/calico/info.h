@@ -3,7 +3,7 @@
 
 #include "database.h"
 
-namespace calico {
+namespace Calico {
 
 class Info final {
 public:
@@ -24,6 +24,6 @@ private:
     Core *m_core {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_INFO_H
