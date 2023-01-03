@@ -22,22 +22,6 @@ static constexpr auto to_spdlog_level(Error::Level level)
     }
 }
 
-static constexpr auto to_spdlog_level(LogLevel level)
-{
-    switch (level) {
-        case LogLevel::TRACE:
-            return spdlog::level::trace;
-        case LogLevel::INFO:
-            return spdlog::level::info;
-        case LogLevel::WARN:
-            return spdlog::level::warn;
-        case LogLevel::ERROR:
-            return spdlog::level::err;
-        default:
-            return spdlog::level::off;
-    }
-}
-
 System::System(const std::string_view &base, LogLevel log_level, LogTarget log_target)
 {
     spdlog::level::level_enum level;
