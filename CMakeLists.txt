@@ -21,19 +21,20 @@ set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedan
 
 include(GNUInstallDirs)
 
-# Download the library dependencies if necessary.
+# Download the library dependencies.
 include(FetchContent)
-set(SPDLOG_NO_EXCEPTIONS On)
 FetchContent_Declare(spdlog
-        GIT_REPOSITORY https://github.com/gabime/spdlog.git
-        GIT_TAG v1.10.0)
-set(EXPECTED_ENABLE_TESTS Off)
-set(EXPECTED_BUILD_PACKAGE Off)
+    GIT_REPOSITORY https://github.com/gabime/spdlog.git
+    GIT_TAG v1.10.0)
 FetchContent_Declare(expected
-        GIT_REPOSITORY https://github.com/TartanLlama/expected.git
-        GIT_TAG v1.0.0)
+    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
+    GIT_TAG v1.0.0)
+set(SPDLOG_NO_EXCEPTIONS On CACHE INTERNAL "")
+set(EXPECTED_ENABLE_TESTS Off CACHE INTERNAL "")
+set(EXPECTED_BUILD_PACKAGE Off CACHE INTERNAL "")
 FetchContent_MakeAvailable(spdlog expected)
 
+# Compile the library.
 add_subdirectory(src)
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)

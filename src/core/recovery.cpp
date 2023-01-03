@@ -179,7 +179,12 @@ auto Recovery::finish_abort() -> Status
 {
     m_log->trace("finish_abort");
     ENSURE_ENABLED("cannot finish abort");
-    return finish_routine();
+//    return finish_routine();
+
+    CALICO_TRY_S(m_pager->flush({}));
+
+    CALICO_TRY_S(m_wal->remove_after(m_system->commit_lsn));
+    return m_wal->start_workers();
 }
 
 auto Recovery::start_recovery() -> Status
@@ -256,7 +261,11 @@ auto Recovery::finish_recovery() -> Status
 {
     m_log->trace("finish_recovery");
     ENSURE_ENABLED("cannot finish recovery");
-    return finish_routine();
+//    return finish_routine();
+
+    CALICO_TRY_S(m_pager->flush({}));
+    CALICO_TRY_S(m_wal->start_workers());
+    return m_wal->remove_before(m_pager->recovery_lsn());
 }
 
 auto Recovery::finish_routine() -> Status
@@ -264,10 +273,10 @@ auto Recovery::finish_routine() -> Status
     // Flush all dirty database pages.
     CALICO_TRY_S(m_pager->flush({}));
 
-    // Remove obsolete segment files.
-    CALICO_TRY_S(m_wal->remove_after(Id::null()));
+    CALICO_TRY_S(m_wal->start_workers());
 
-    return m_wal->start_workers();
+    // TODO TODO TODO TODO
+    return m_wal->remove_before(Id {m_pager->recovery_lsn().value - 1});
 }
 
 } // namespace Calico

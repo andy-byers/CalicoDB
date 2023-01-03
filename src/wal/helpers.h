@@ -77,8 +77,11 @@ public:
     auto id_before(SegmentId id) const -> SegmentId
     {
         std::lock_guard lock {m_mutex};
+        if (m_segments.empty())
+            return SegmentId::null();
+
         auto itr = m_segments.lower_bound(id);
-        if (itr == cend(m_segments) || itr == cbegin(m_segments))
+        if (itr == cbegin(m_segments))
             return SegmentId::null();
         return *prev(itr);
     }

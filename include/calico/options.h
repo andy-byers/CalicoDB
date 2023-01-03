@@ -1,7 +1,7 @@
 #ifndef CALICO_OPTIONS_H
 #define CALICO_OPTIONS_H
 
-#include "bytes.h"
+#include "common.h"
 
 namespace Calico {
 
@@ -38,7 +38,7 @@ struct Options {
     Size page_size {DEFAULT_PAGE_SIZE};
     Size cache_size {DEFAULT_CACHE_SIZE};
     Size wal_limit {DEFAULT_WAL_LIMIT};
-    BytesView wal_path;
+    std::string wal_prefix;
     LogLevel log_level {LogLevel::OFF};
     LogTarget log_target {};
     Storage *storage {};

@@ -61,8 +61,13 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     m_log->info("starting CalicoDB {} at \"{}\"", version_name, path);
     m_log->info("tree is located at \"{}{}\"", m_prefix, DATA_FILENAME);
     m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
-    if (sanitized.wal_limit != DISABLE_WAL)
-        m_log->info("WAL is located at \"{}\"", sanitized.wal_path.to_string());
+    if (sanitized.wal_limit != DISABLE_WAL) {
+        if (sanitized.wal_prefix.empty()) {
+            m_log->info("WAL prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
+        } else {
+            m_log->info("WAL prefix is \"{}\"", sanitized.wal_prefix);
+        }
+    }
 
     m_store = sanitized.storage;
     if (m_store == nullptr) {
@@ -82,8 +87,8 @@ auto Core::open(const std::string &path, const Options &options) -> Status
         m_scratch = std::make_unique<LogScratchManager>(wal_scratch_size(sanitized.page_size));
 
         // The WAL segments may be stored elsewhere.
-        const auto wal_prefix = sanitized.wal_path.is_empty()
-            ? m_prefix : sanitized.wal_path.to_string() + "/";
+        const auto wal_prefix = sanitized.wal_prefix.empty()
+            ? m_prefix : sanitized.wal_prefix + "/";
 
         auto r = BasicWriteAheadLog::open({
             wal_prefix,
@@ -353,6 +358,8 @@ auto Core::do_abort() -> Status
             "could not abort: a transaction is not active (start a transaction and try again)");
 
     m_system->has_xact = false;
+    m_images.clear();
+
     CALICO_TRY_S(handle_errors());
     CALICO_TRY_S(m_recovery->start_abort());
     CALICO_TRY_S(load_state());

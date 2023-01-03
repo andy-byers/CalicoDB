@@ -1,9 +1,10 @@
 #ifndef CALICO_UTILS_UTILS_H
 #define CALICO_UTILS_UTILS_H
 
+#include <filesystem>
+#include <spdlog/fmt/fmt.h>
 #include "expect.h"
 #include "calico/bytes.h"
-#include <filesystem>
 
 namespace Calico {
 

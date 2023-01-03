@@ -2,7 +2,6 @@
 #define CALICO_STATUS_H
 
 #include <memory>
-#include <spdlog/fmt/fmt.h>
 #include "bytes.h"
 
 namespace Calico {

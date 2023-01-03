@@ -1,5 +1,4 @@
 #include "cleaner.h"
-#include "reader.h"
 
 namespace Calico {
 
@@ -9,7 +8,7 @@ auto WalCleaner::on_event(const Id &limit) -> Status
     auto current = first;
     SegmentId target;
 
-    while (!current.is_null()) {
+    while (!current.is_null() && m_set->segments().size() > 1) { // TODO: Changed this to make sure we never remove the last segment.
         Id first_lsn;
         auto s = read_first_lsn(
             *m_store, m_prefix, current, first_lsn);
