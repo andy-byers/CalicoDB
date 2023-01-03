@@ -191,17 +191,9 @@ public:
     [[nodiscard]]
     auto get_value(Id id) const -> std::string
     {
-        auto wrapper = get_wrapper(id, true);
+        auto wrapper = get_wrapper(id, false);
         EXPECT_TRUE(wrapper.has_value());
         return wrapper.value().get_value().to_string();
-    }
-
-    [[nodiscard]]
-    auto try_get_value(Id id) const -> std::string
-    {
-        auto wrapper = get_wrapper(id, true);
-        if (!wrapper.has_value()) return {};
-        return wrapper->get_value().to_string();
     }
 
     [[nodiscard]]
@@ -222,10 +214,9 @@ public:
         return random.get<std::string>('a', 'z', PageWrapper::VALUE_SIZE);
     }
 
-    System state {"test", LogLevel::OFF, {}};
+    System state {"test", LogLevel::TRACE, LogTarget::STDOUT_COLOR};
     Random random {UnitTests::random_seed};
     Status status {ok()};
-    bool has_xact {};
     std::unique_ptr<HeapStorage> store;
     std::unique_ptr<Pager> pager;
     std::unique_ptr<WriteAheadLog> wal;
@@ -281,7 +272,6 @@ template<class Test>
 static auto undo_xact(Test &test)
 {
     Recovery recovery {*test.pager, *test.wal, test.state};
-    (void)test.wal->stop_workers();
     CALICO_TRY_S(recovery.start_abort());
     // Don't need to load any state for these tests.
     return recovery.finish_abort();
@@ -319,6 +309,7 @@ static auto add_values(Test &test, Size n, bool allow_failure = false) -> std::v
 
     Size index {};
     for (const auto &value: values) {
+        fmt::print("{}: {}\n", index, value);
         if (allow_failure) {
             if (!test.try_set_value(Id::from_index(index), value))
                 return {};

@@ -146,10 +146,6 @@ auto Framer::write_back(Size id) -> Status
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_LE(frame.ref_count(), 1);
 
-    // TODO: We sometimes write back pages with a NULL LSN. These pages were overwritten with zeros during abort() and correspond
-    //       to pages that were just allocated. We could set the page count before we start rolling back, since we know the old page
-    //       count as it is read from the WAL, then not write back pages that are going to be removed anyway, once the file is resized.
-fmt::print("wB: PID:{}, LSN:{}\n", frame.pid().value, frame.lsn().value);
     // If this fails, the caller will need to roll back the database state or exit.
     return write_page_to_file(frame.pid(), frame.data());
 }

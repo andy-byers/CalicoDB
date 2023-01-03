@@ -304,7 +304,7 @@ auto Core::commit() -> Status
 
 auto Core::do_commit() -> Status
 {
-//    const auto last_commit_lsn = m_system->commit_lsn.load();
+    const auto last_commit_lsn = m_system->commit_lsn.load();
 
     if (!m_system->has_xact)
         return logic_error("transaction has not been started");
@@ -322,10 +322,10 @@ auto Core::do_commit() -> Status
     CALICO_TRY_S(m_wal->advance());
 
     // Make sure every dirty page that hasn't been written back since the last commit is on disk.
-    CALICO_TRY_S(m_pager->flush({})); // TODO
+    CALICO_TRY_S(m_pager->flush(last_commit_lsn));
 
     // Clean up obsolete WAL segments.
-//    CALICO_TRY_S(m_wal->remove_before(last_commit_lsn));
+    CALICO_TRY_S(m_wal->remove_before(last_commit_lsn));
 
     m_images.clear();
     m_system->commit_lsn = lsn;

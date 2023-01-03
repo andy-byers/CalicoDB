@@ -210,6 +210,8 @@ auto BasicPager::release(Page page) -> Status
 
         // Log the delta record.
         CALICO_ERROR_IF(m_wal->log(payload));
+
+fmt::print("delta -> {}\n", payload.lsn().value);
     }
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
@@ -238,11 +240,9 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
     // This function needs external synchronization!
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
 
-    if (entry.dirty_token.has_value())
-        return;
-
     // Make sure this page is in the dirty list. LSN is saved to determine when the page should be written back.
-    entry.dirty_token = m_dirty.insert(page.id(), page.lsn());
+    if (!entry.dirty_token.has_value())
+        entry.dirty_token = m_dirty.insert(page.id(), page.lsn());
 
     if (m_wal->is_working()) {
         // Don't write a full image record to the WAL if we already have one for this page during this transaction.
@@ -258,6 +258,8 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
         page.set_lsn(payload.lsn());
 
         CALICO_ERROR_IF(m_wal->log(payload));
+
+fmt::print("image -> {}\n", payload.lsn().value);
     }
 }
 

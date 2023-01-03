@@ -204,10 +204,8 @@ auto Recovery::start_recovery() -> Status
             auto page = m_pager->acquire(delta.pid, true);
             if (!page.has_value())
                 return page.error();
-            if (delta.lsn > page->lsn()) {
-                fmt::print("delta {}: {} -> {}\n", page->id().value, page->lsn().value, delta.lsn.value);
+            if (delta.lsn > page->lsn())
                 page->apply_update(delta);
-            }
             return m_pager->release(std::move(*page));
         } else if (std::holds_alternative<FullImageDescriptor>(*info)) {
             // This is not necessary in most cases, but should help with some kinds of corruption.
@@ -215,10 +213,8 @@ auto Recovery::start_recovery() -> Status
             auto page = m_pager->acquire(image.pid, true);
             if (!page.has_value())
                 return page.error();
-            if (image.lsn > page->lsn()) {
-                fmt::print("IMAGE {}: {} -> {}\n", page->id().value, page->lsn().value, image.lsn.value);
+            if (image.lsn > page->lsn())
                 page->apply_update(image);
-            }
             return m_pager->release(std::move(*page));
         } else {
             return corruption("unrecognized payload type");
