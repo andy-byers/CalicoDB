@@ -83,7 +83,7 @@ auto BasicPager::pin_frame(Id pid, bool &is_fragile) -> Status
     return ok();
 }
 
-auto BasicPager::clean_page(PageRegistry::Entry &entry) -> PageList::Iterator
+auto BasicPager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
 {
     auto token = *entry.dirty_token;
     // Reset the dirty list reference.
@@ -249,7 +249,7 @@ auto BasicPager::release(Page page) -> Status
     return ok();
 }
 
-auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
+auto BasicPager::watch_page(Page &page, PageCache::Entry &entry) -> void
 {
     // This function needs external synchronization!
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);

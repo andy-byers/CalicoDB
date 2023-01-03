@@ -75,7 +75,7 @@ private:
     std::list<Entry> m_list;
 };
 
-class PageRegistry final {
+class PageCache final {
 public:
     using DirtyToken = std::optional<PageList::Iterator>;
 
@@ -84,11 +84,10 @@ public:
         DirtyToken dirty_token {};
     };
 
-    using Cache = cache<Id, Entry, Id::Hash>;
-    using Iterator = Cache::iterator;
+    using Iterator = Cache<Id, Entry, Id::Hash>::iterator;
 
-    PageRegistry() = default;
-    ~PageRegistry() = default;
+    PageCache() = default;
+    ~PageCache() = default;
 
     [[nodiscard]]
     auto is_empty() const -> Size
@@ -142,7 +141,7 @@ public:
     auto erase(Id pid) -> void;
 
 private:
-    Cache m_cache;
+    Cache<Id, Entry, Id::Hash> m_cache;
     Size m_hits {};
     Size m_misses {};
 };

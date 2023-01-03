@@ -32,9 +32,9 @@ template<
     class Value,
     class Hash = std::hash<Key>
 >
-class cache { // TODO: Eventually switching over to camel_case...
+class Cache {
 public:
-    using key_t = Key;
+    using key_t = Key; // TODO: Make these aliases PascalCase.
     using value_t = Value;
     using hash_t = Hash;
 
@@ -50,7 +50,7 @@ public:
     using reverse_iterator = typename std::list<entry>::const_reverse_iterator;
     using const_reverse_iterator = typename std::list<entry>::const_reverse_iterator;
 
-    cache() = default;
+    Cache() = default;
 
     [[nodiscard]]
     auto is_empty() const -> bool
@@ -216,8 +216,8 @@ public:
     // Need custom copy contructor/copy-assignment operator to figure out where the new
     // iterator should point. I think this can only be done in linear time (std::list's
     // iterator is not random-access), so we'll just disable copying for now.
-    cache(const cache &) = delete;
-    auto operator=(const cache &) -> cache & = delete;
+    Cache(const Cache &) = delete;
+    auto operator=(const Cache &) -> Cache & = delete;
 
 private:
     using map_t = std::unordered_map<key_t, iterator, hash_t>;

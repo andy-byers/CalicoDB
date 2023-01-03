@@ -5,9 +5,8 @@
 
 namespace Calico {
 
-Internal::Internal(NodeManager &pool, System &state)
+Internal::Internal(NodeManager &pool)
     : m_maximum_key_size {get_max_local(pool.page_size())},
-      m_state {&state},
       m_pool {&pool}
 {
     // Scratch memory needs to be able to hold a maximally-sized cell.

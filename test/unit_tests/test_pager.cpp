@@ -3,7 +3,7 @@
 #include "page/page.h"
 #include "pager/basic_pager.h"
 #include "pager/framer.h"
-#include "pager/registry.h"
+#include "pager/page_cache.h"
 #include "unit_tests.h"
 #include "utils/layout.h"
 #include "utils/system.h"
@@ -15,12 +15,12 @@ namespace Calico {
 
 class CacheTests: public testing::Test {
 public:
-    cache<int, int> target;
+    Cache<int, int> target;
 };
 
 TEST_F(CacheTests, EmptyCacheBehavior)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
@@ -31,7 +31,7 @@ TEST_F(CacheTests, EmptyCacheBehavior)
 
 TEST_F(CacheTests, NonEmptyCacheBehavior)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     cache.put(1, 1);
     ASSERT_FALSE(cache.is_empty());
@@ -43,7 +43,7 @@ TEST_F(CacheTests, NonEmptyCacheBehavior)
 
 TEST_F(CacheTests, ElementsArePromotedAfterUse)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     // 1*, 2, 3, 4, END
     cache.put(4, 4);
@@ -106,7 +106,7 @@ TEST_F(CacheTests, IterationRespectsReplacementPolicy)
 
 TEST_F(CacheTests, QueryDoesNotPromoteElements)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     // 1*, 2, 3, END
     cache.put(3, 3);
@@ -129,7 +129,7 @@ TEST_F(CacheTests, QueryDoesNotPromoteElements)
 
 TEST_F(CacheTests, ModifyValue)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     cache.put(1, 1);
     cache.put(1, 2);
@@ -140,7 +140,7 @@ TEST_F(CacheTests, ModifyValue)
 
 TEST_F(CacheTests, WarmElementsAreFifoOrdered)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     // 1*, 2, 3, END
     cache.put(3, 3);
@@ -160,7 +160,7 @@ TEST_F(CacheTests, WarmElementsAreFifoOrdered)
 
 TEST_F(CacheTests, HotElementsAreLruOrdered)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     // 1*, 2, 3
     cache.put(3, 3);
@@ -185,7 +185,7 @@ TEST_F(CacheTests, HotElementsAreLruOrdered)
 
 TEST_F(CacheTests, HotElementsAreEncounteredFirst)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -217,7 +217,7 @@ TEST_F(CacheTests, HotElementsAreEncounteredFirst)
 
 TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -250,7 +250,7 @@ TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 
 TEST_F(CacheTests, AddWarmElements)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -286,7 +286,7 @@ TEST_F(CacheTests, AddWarmElements)
 
 TEST_F(CacheTests, InsertAfterWarmElementsDepleted)
 {
-    Calico::cache<int, int> cache;
+    Calico::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -325,7 +325,7 @@ TEST_F(CacheTests, InsertAfterWarmElementsDepleted)
 
 static auto check_cache_order(int hot_count, int warm_count)
 {
-    cache<int, int> c;
+    Cache<int, int> c;
 
     for (int i {1}; i <= hot_count + warm_count; ++i)
         c.put(i, i);
@@ -366,7 +366,7 @@ TEST(CacheOrderTests, CheckOrder)
 
 TEST(MoveOnlyCacheTests, WorksWithMoveOnlyValue)
 {
-    Calico::cache<int, std::unique_ptr<int>> cache;
+    Calico::Cache<int, std::unique_ptr<int>> cache;
     cache.put(1, std::make_unique<int>(1));
     ASSERT_EQ(*cache.get(1)->value, 1);
     ASSERT_EQ(*cache.evict()->value, 1);
@@ -376,7 +376,7 @@ class PageRegistryTests : public testing::Test {
 public:
     ~PageRegistryTests() override = default;
 
-    PageRegistry registry;
+    PageCache registry;
 };
 
 TEST_F(PageRegistryTests, HotEntriesAreFoundLast)

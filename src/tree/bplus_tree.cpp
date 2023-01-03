@@ -10,7 +10,7 @@ namespace Calico {
 
 BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
     : m_pool {pager, system, page_size},
-      m_internal {m_pool, system},
+      m_internal {m_pool},
       m_logger {system.create_log("tree")},
       m_system {&system}
 {

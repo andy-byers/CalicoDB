@@ -6,8 +6,8 @@
 
 #include "spdlog/logger.h"
 
+#include "page_cache.h"
 #include "pager.h"
-#include "registry.h"
 
 #include "utils/scratch.h"
 #include "wal/helpers.h"
@@ -48,14 +48,14 @@ private:
     explicit BasicPager(const Parameters &param, Framer framer);
     [[nodiscard]] auto pin_frame(Id, bool &) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
-    auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
-    auto clean_page(PageRegistry::Entry &entry) -> PageList::Iterator;
+    auto watch_page(Page &page, PageCache::Entry &entry) -> void;
+    auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
     auto set_recovery_lsn(Id lsn) -> void;
 
     mutable std::mutex m_mutex;
     Framer m_framer;
     PageList m_dirty;
-    PageRegistry m_registry;
+    PageCache m_registry;
     LogPtr m_log;
     Id m_recovery_lsn;
     std::unordered_set<Id, Id::Hash> *m_images {};

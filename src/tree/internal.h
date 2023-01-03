@@ -29,7 +29,7 @@ public:
         Size cell_count {};
     };
 
-    Internal(NodeManager &pool, System &state);
+    explicit Internal(NodeManager &pool);
 
     ~Internal() = default;
     [[nodiscard]] auto collect_value(const Node &, Size) const -> tl::expected<std::string, Status>;
@@ -73,7 +73,6 @@ private:
 
     Size m_maximum_key_size {};
     std::vector<StaticScratch> m_scratch;
-    System *m_state {};
     NodeManager *m_pool {};
     Size m_cell_count {};
 };
