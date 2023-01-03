@@ -3,14 +3,14 @@
 
 #include "page.h"
 
-namespace calico {
+namespace Calico {
 
 class Link {
 public:
     explicit Link(Page);
 
     [[nodiscard]]
-    auto id() const -> PageId
+    auto id() const -> Id
     {
         return m_page.id();
     }
@@ -37,16 +37,16 @@ public:
         return std::move(m_page);
     }
 
-    [[nodiscard]] auto next_id() const -> PageId;
+    [[nodiscard]] auto next_id() const -> Id;
     [[nodiscard]] auto content_size() const -> Size;
     [[nodiscard]] auto content_view() const -> BytesView;
-    auto set_next_id(PageId) -> void;
+    auto set_next_id(Id) -> void;
     auto content_bytes(Size) -> Bytes;
 
 private:
     Page m_page;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGE_LINK_H

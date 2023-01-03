@@ -28,4 +28,4 @@ target_compile_definitions(calico
     CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     CALICO_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 target_link_libraries(calico
-    PRIVATE pthread spdlog)
+    PRIVATE expected pthread spdlog)

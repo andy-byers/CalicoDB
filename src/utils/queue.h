@@ -11,7 +11,7 @@
 #include <optional>
 #include "calico/common.h"
 
-namespace calico {
+namespace Calico {
 
 template<class T>
 class Queue final {
@@ -81,6 +81,6 @@ private:
     bool m_is_finished {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_UTILS_QUEUE_H

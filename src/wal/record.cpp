@@ -1,9 +1,9 @@
 #include "record.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 
-namespace calico {
+namespace Calico {
 
 auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void
 {
@@ -62,7 +62,6 @@ static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> S
     [[maybe_unused]]
     static constexpr auto FIRST_TYPE = IsLeftMerge ? WalRecordHeader::FIRST : WalRecordHeader::LAST;
     static constexpr auto LAST_TYPE = IsLeftMerge ? WalRecordHeader::LAST : WalRecordHeader::FIRST;
-    static constexpr auto MSG = "cannot merge WAL records";
     CALICO_EXPECT_NE(lhs.type, rhs.type);
 
     // First merge in the logical record.
@@ -75,17 +74,13 @@ static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> S
 
     } else {
         CALICO_EXPECT_EQ(lhs.type, FIRST_TYPE);
-        if (lhs.crc != rhs.crc) {
-            ThreePartMessage message;
-            message.set_primary(MSG);
-            message.set_detail("fragments do not belong to the same logical record");
-            return message.corruption();
-        }
+        if (lhs.crc != rhs.crc)
+            return corruption("cannot merge WAL records: fragments do not belong to the same logical record");
         if (rhs.type == LAST_TYPE)
             lhs.type = WalRecordHeader::FULL;
     }
     lhs.size = static_cast<std::uint16_t>(lhs.size + rhs.size);
-    return Status::ok();
+    return ok();
 }
 
 auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
@@ -98,4 +93,4 @@ auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> St
     return merge_records<false>(rhs, lhs);
 }
 
-} // namespace calico
+} // namespace Calico

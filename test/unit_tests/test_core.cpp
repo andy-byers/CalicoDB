@@ -1,6 +1,5 @@
 
 #include "core/core.h"
-#include "core/header.h"
 #include "fakes.h"
 #include "storage/posix_storage.h"
 #include "tools.h"
@@ -8,15 +7,16 @@
 #include "tree/cursor_internal.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
+#include "utils/header.h"
 #include "wal/basic_wal.h"
 #include <array>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <vector>
 
-namespace calico {
+namespace Calico {
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 
@@ -36,7 +36,7 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.frame_count = 16;
+        options.cache_size = 16;
 
         store = std::make_unique<HeapStorage>();
         core = std::make_unique<Core>();
@@ -66,7 +66,7 @@ public:
         ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
     }
 
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     std::unique_ptr<Storage> store;
     std::vector<Record> records;
     std::unique_ptr<Core> core;
@@ -93,9 +93,9 @@ public:
     BasicDatabaseTests()
     {
         options.page_size = 0x200;
-        options.frame_count = 64;
-        options.log_level = spdlog::level::trace;
-        options.store = store.get();
+        options.cache_size = 64;
+        options.log_level = LogLevel::OFF;
+        options.storage = store.get();
     }
 
     ~BasicDatabaseTests() override = default;
@@ -139,7 +139,7 @@ TEST_F(BasicDatabaseTests, ReopenDatabase)
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {
     RecordGenerator generator;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 
     for (Size iteration {}; iteration < num_groups; ++iteration) {
         const auto records = generator.generate(random, group_size);
@@ -188,9 +188,9 @@ TEST_F(BasicDatabaseTests, DataPersists)
     static constexpr Size NUM_ITERATIONS {5};
     static constexpr Size GROUP_SIZE {10};
 
-    auto s = Status::ok();
+    auto s = ok();
     RecordGenerator generator;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 
     const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
     auto itr = cbegin(records);
@@ -240,10 +240,10 @@ TEST_F(BasicDatabaseTests, ReportsInvalidFrameCounts)
     auto invalid = options;
 
     Database db;
-    invalid.frame_count = MINIMUM_FRAME_COUNT - 1;
+    invalid.cache_size = MINIMUM_CACHE_SIZE - 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 
-    invalid.frame_count = MAXIMUM_FRAME_COUNT + 1;
+    invalid.cache_size = MAXIMUM_CACHE_SIZE + 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 }
 
@@ -318,7 +318,7 @@ public:
         }
     }
 
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     Database db;
 };
 
@@ -340,7 +340,7 @@ TEST_F(ReaderTests, SingleReader)
 TEST_F(ReaderTests, ManyDistributedReaders)
 {
     std::vector<std::thread> readers;
-    for (Size i {}; i < options.frame_count * 2; ++i)
+    for (Size i {}; i < options.cache_size * 2; ++i)
         readers.emplace_back(std::thread {[this, i] {distributed_reader(i);}});
     for (auto &reader: readers)
         reader.join();
@@ -349,7 +349,7 @@ TEST_F(ReaderTests, ManyDistributedReaders)
 TEST_F(ReaderTests, ManyLocalizedReaders)
 {
     std::vector<std::thread> readers;
-    for (Size i {}; i < options.frame_count * 2; ++i)
+    for (Size i {}; i < options.cache_size * 2; ++i)
         readers.emplace_back(std::thread {[this] {localized_reader();}});
     for (auto &reader: readers)
         reader.join();
@@ -737,7 +737,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //
 //    ~MockDatabase() = default;
 //
-//    auto remove_one(const std::string &key) -> Result<void>
+//    auto remove_one(const std::string &key) -> tl::expected<void, Status>
 //    {
 //        CALICO_EXPECT_GT(core->info().record_count(), 0);
 //        CALICO_TRY_CREATE(was_erased, core->erase(core->find(stob(key))));
@@ -799,7 +799,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //    MockDatabase db;
 //    auto wal_mock = db.mock->get_mock_wal_writer_file("latest");
 //    ON_CALL(*wal_mock, write(_))
-//        .WillByDefault(Return(Err {Status::system_error("123")}));
+//        .WillByDefault(Return(Err {system_error("123")}));
 //
 //    auto r = db.core->commit();
 //    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
@@ -831,7 +831,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 ////
 ////    auto wal_mock = db.mock->get_mock_wal_writer_file("latest");
 ////    ON_CALL(*wal_mock, write(_))
-////        .WillByDefault(Return(Err {Status::system_error("123")}));
+////        .WillByDefault(Return(Err {system_error("123")}));
 ////
 ////    auto r = db.core->commit();
 ////    ASSERT_FALSE(r.has_value()) << "commit() should have failed";
@@ -851,7 +851,7 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 //    using testing::Return;
 //
 //    ON_CALL(mock, close)
-//        .WillByDefault(Return(Err {Status::system_error("123")}));
+//        .WillByDefault(Return(Err {system_error("123")}));
 //
 //    const auto s = db.core->close();
 //    ASSERT_FALSE(s.has_value());

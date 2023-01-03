@@ -60,7 +60,7 @@ private:
     Database m_db;
 };
 
-} // namespace calico
+} // namespace Calico
 
 
 #endif // CALICO_FUZZ_FUZZ_H

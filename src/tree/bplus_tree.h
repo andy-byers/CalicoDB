@@ -2,15 +2,17 @@
 #ifndef CALICO_TREE_BPLUS_TREE_H
 #define CALICO_TREE_BPLUS_TREE_H
 
+#include "cursor_internal.h"
 #include "internal.h"
-#include "tree.h"
 #include "spdlog/spdlog.h"
+#include "tree.h"
+#include "utils/system.h"
 
 #ifdef CALICO_BUILD_TESTS
 #  include <gtest/gtest_prod.h>
 #endif // CALICO_BUILD_TESTS
 
-namespace calico {
+namespace Calico {
 
 class Cursor;
 class Pager;
@@ -25,11 +27,11 @@ public:
         return m_internal.cell_count();
     }
 
-    [[nodiscard]] static auto open(Pager &, spdlog::sink_ptr, Size) -> Result<std::unique_ptr<BPlusTree>>;
-    [[nodiscard]] auto insert(BytesView, BytesView) -> Status override;
-    [[nodiscard]] auto erase(Cursor) -> Status override;
-    [[nodiscard]] auto root(bool) -> Result<Node> override;
-    [[nodiscard]] auto find_exact(BytesView) -> Cursor override;
+    [[nodiscard]] static auto open(Pager &pager, System &state, Size page_size) -> tl::expected<Tree::Ptr, Status>;
+    [[nodiscard]] auto insert(BytesView key, BytesView value) -> Status override;
+    [[nodiscard]] auto erase(Cursor cursor) -> Status override;
+    [[nodiscard]] auto root(bool is_writable) -> tl::expected<Node, Status> override;
+    [[nodiscard]] auto find_exact(BytesView key) -> Cursor override;
     [[nodiscard]] auto find(BytesView key) -> Cursor override;
     [[nodiscard]] auto find_minimum() -> Cursor override;
     [[nodiscard]] auto find_maximum() -> Cursor override;
@@ -45,14 +47,17 @@ private:
         Size index {};
         bool was_found {};
     };
-    BPlusTree(Pager &, spdlog::sink_ptr, Size);
-    auto find_aux(BytesView) -> Result<SearchResult>;
+    BPlusTree(Pager &pager, System &state, Size page_size);
+    [[nodiscard]] auto find_aux(BytesView key) -> tl::expected<SearchResult, Status>;
+    [[nodiscard]] auto check_key(BytesView key, const char *primary) -> Status;
 
-    NodePool m_pool;
+    CursorActions m_actions;
+    NodeManager m_pool;
     Internal m_internal;
-    std::shared_ptr<spdlog::logger> m_logger;
+    LogPtr m_logger;
+    System *m_system {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TREE_BPLUS_TREE_H

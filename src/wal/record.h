@@ -6,27 +6,28 @@
 #include "wal.h"
 #include "spdlog/fmt/fmt.h"
 
-namespace calico {
+namespace Calico {
 
 static constexpr auto WAL_PREFIX = "wal-";
 static constexpr Size WAL_SCRATCH_SCALE {3};
 static constexpr Size WAL_BLOCK_SCALE {1};
 
-struct SegmentId
-    : public NullableId<SegmentId>,
-      public EqualityComparableTraits<SegmentId>,
-      public OrderableTraits<SegmentId>
-{
-    static constexpr auto NAME_FORMAT = "{}{:06d}";
-    static constexpr Size DIGITS_SIZE {6};
-    using Hash = IndexHash<SegmentId>;
-
+struct SegmentId: public Id {
     constexpr SegmentId() noexcept = default;
 
-    template<class U>
-    constexpr explicit SegmentId(U u) noexcept
-        : value {std::uint64_t(u)}
+    constexpr explicit SegmentId(Size value) noexcept
+        : Id {value}
     {}
+
+    constexpr explicit SegmentId(Id id) noexcept
+        : Id {id}
+    {}
+
+    [[nodiscard]]
+    static auto from_index(size_t index) noexcept -> SegmentId
+    {
+        return SegmentId {Id::from_index(index)};
+    }
 
     [[nodiscard]]
     static auto from_name(BytesView name) -> SegmentId
@@ -34,7 +35,7 @@ struct SegmentId
         static constexpr Size PREFIX_SIZE {std::char_traits<char>::length(WAL_PREFIX)};
 
         if (name.size() <= PREFIX_SIZE)
-            return null();
+            return SegmentId {null().value};
 
         auto digits = name.advance(PREFIX_SIZE);
 
@@ -42,12 +43,21 @@ struct SegmentId
         const auto is_valid = std::all_of(digits.data(), digits.data() + digits.size(), [](auto c) {return std::isdigit(c);});
 
         if (!is_valid)
-            return null();
+            return SegmentId {null().value};
 
         return SegmentId {std::stoull(digits.to_string())};
     }
 
-    // TODO: Current naming scheme won't work. We'll eventually run out of names... Come up with a scheme for storing segment names!
+    static constexpr auto null() noexcept -> SegmentId
+    {
+        return SegmentId {Id::null().value};
+    }
+
+    static constexpr auto root() noexcept -> SegmentId
+    {
+        return SegmentId {Id::root().value};
+    }
+
     [[nodiscard]]
     auto to_name() const -> std::string
     {
@@ -59,34 +69,32 @@ struct SegmentId
         return value;
     }
 
-    auto operator++() -> SegmentId&
+    auto operator++() noexcept -> SegmentId&
     {
         value++;
         return *this;
     }
 
-    auto operator++(int) -> SegmentId
+    auto operator++(int) noexcept -> SegmentId
     {
         auto temp = *this;
         ++(*this);
         return temp;
     }
 
-    auto operator--() -> SegmentId&
+    auto operator--() noexcept -> SegmentId&
     {
         CALICO_EXPECT_FALSE(is_null());
         value--;
         return *this;
     }
 
-    auto operator--(int) -> SegmentId
+    auto operator--(int) noexcept -> SegmentId
     {
         auto temp = *this;
         --(*this);
         return temp;
     }
-
-    std::uint64_t value {};
 };
 
 /*
@@ -119,7 +127,7 @@ struct WalRecordHeader {
 struct WalPayloadHeader {
     static constexpr Size SIZE {8};
 
-    SequenceId lsn;
+    Id lsn;
 };
 
 // Routines for working with WAL records.
@@ -130,6 +138,6 @@ auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 [[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_RECORD_H

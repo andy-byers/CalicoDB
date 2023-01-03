@@ -7,7 +7,7 @@
 #include <optional>
 #include <thread>
 
-namespace calico {
+namespace Calico {
 
 template<class Event>
 class Worker final {
@@ -30,7 +30,7 @@ public:
     auto status() const -> Status
     {
         if (m_is_ok.load(std::memory_order_acquire))
-            return Status::ok();
+            return ok();
         // If m_is_ok is false, the background thread must already be finished
         // setting the error status.
         return m_status;
@@ -111,13 +111,13 @@ private:
     std::atomic<bool> m_is_ok {true};
     std::atomic<bool> m_is_waiting {};
     Queue<EventWrapper> m_events;
-    Status m_status {Status::ok()};
+    Status m_status {ok()};
 
     mutable std::mutex m_mu;
     std::condition_variable m_cv;
     std::thread m_thread;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_WORKER_H

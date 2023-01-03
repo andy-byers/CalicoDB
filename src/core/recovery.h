@@ -3,45 +3,46 @@
 
 #include "calico/bytes.h"
 #include "utils/encoding.h"
+#include "utils/system.h"
 #include "utils/types.h"
 #include "wal/wal.h"
 #include <optional>
 #include <variant>
 #include <vector>
 
-namespace calico {
+namespace Calico {
 
 struct PageDelta {
     Size offset {};
     Size size {};
 };
 
-struct DeltasDescriptor {
+struct DeltaDescriptor {
     struct Delta {
         Size offset {};
         BytesView data {};
     };
 
-    PageId pid;
-    SequenceId lsn;
+    Id pid;
+    Id lsn;
     std::vector<Delta> deltas;
 };
 
 struct FullImageDescriptor {
-    PageId pid;
-    SequenceId lsn;
+    Id pid;
+    Id lsn;
     BytesView image;
 };
 
 struct CommitDescriptor {
-    SequenceId lsn;
+    Id lsn;
 };
 
-using PayloadDescriptor = std::variant<DeltasDescriptor, FullImageDescriptor, CommitDescriptor>;
+using PayloadDescriptor = std::variant<DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
 
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
-[[nodiscard]] auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
-[[nodiscard]] auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size;
+[[nodiscard]] auto encode_deltas_payload(Id page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
+[[nodiscard]] auto encode_full_image_payload(Id page_id, BytesView image, Bytes out) -> Size;
 [[nodiscard]] auto encode_commit_payload(Bytes out) -> Size;
 
 enum XactPayloadType : Byte {
@@ -52,35 +53,33 @@ enum XactPayloadType : Byte {
 
 static constexpr Size MINIMUM_PAYLOAD_SIZE {sizeof(XactPayloadType)};
 
-inline auto encode_payload_type(Bytes out, XactPayloadType type) -> void
-{
-    CALICO_EXPECT_FALSE(out.is_empty());
-    out[0] = type;
-}
-
 class Pager;
 class WriteAheadLog;
 
 class Recovery {
 public:
-    Recovery(Pager &pager, WriteAheadLog &wal)
+    Recovery(Pager &pager, WriteAheadLog &wal, System &system)
         : m_pager {&pager},
-          m_wal {&wal}
+          m_wal {&wal},
+          m_system {&system},
+          m_log {system.create_log("recovery")}
     {}
 
-    [[nodiscard]] auto start_abort(SequenceId commit_lsn) -> Status;
-    [[nodiscard]] auto finish_abort(SequenceId commit_lsn) -> Status;
-    [[nodiscard]] auto start_recovery(SequenceId &commit_lsn) -> Status;
-    [[nodiscard]] auto finish_recovery(SequenceId commit_lsn) -> Status;
+    [[nodiscard]] auto start_abort() -> Status;
+    [[nodiscard]] auto finish_abort() -> Status;
+    [[nodiscard]] auto start_recovery() -> Status;
+    [[nodiscard]] auto finish_recovery() -> Status;
 
 private:
-    [[nodiscard]] auto finish_routine(SequenceId commit_lsn) -> Status;
+    [[nodiscard]] auto finish_routine() -> Status;
 
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
+    System *m_system {};
+    LogPtr m_log;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_CORE_TRANSACTION_LOG_H
 

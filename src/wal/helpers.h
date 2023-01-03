@@ -3,15 +3,15 @@
 
 #include "calico/storage.h"
 #include "record.h"
-#include "utils/info_log.h"
 #include "utils/queue.h"
-#include "utils/result.h"
 #include "utils/scratch.h"
+#include "utils/system.h"
 #include "utils/types.h"
 #include <mutex>
 #include <set>
+#include <tl/expected.hpp>
 
-namespace calico {
+namespace Calico {
 
 [[nodiscard]]
 inline constexpr auto wal_block_size(Size page_size) -> Size
@@ -26,26 +26,26 @@ inline constexpr auto wal_scratch_size(Size page_size) -> Size
 }
 
 [[nodiscard]]
-inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, SequenceId &out) -> Status
+inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, Id &out) -> Status
 {
     RandomReader *temp {};
-    CALICO_TRY(store.open_random_reader(prefix + id.to_name(), &temp));
+    CALICO_TRY_S(store.open_random_reader(prefix + id.to_name(), &temp));
 
     char buffer[WalPayloadHeader::SIZE];
     Bytes bytes {buffer, sizeof(buffer)};
     std::unique_ptr<RandomReader> file {temp};
 
     // Read the first LSN. If it exists, it will always be at the same location.
-    CALICO_TRY(file->read(bytes, WalRecordHeader::SIZE));
+    CALICO_TRY_S(file->read(bytes, WalRecordHeader::SIZE));
 
     if (bytes.is_empty())
-        return Status::not_found("segment is empty");
+        return not_found("segment is empty");
 
     if (bytes.size() != WalPayloadHeader::SIZE)
-        return Status::corruption("incomplete record");
+        return corruption("incomplete record");
 
     out = read_wal_payload_header(bytes).lsn;
-    return Status::ok();
+    return ok();
 }
 
 /*
@@ -77,8 +77,11 @@ public:
     auto id_before(SegmentId id) const -> SegmentId
     {
         std::lock_guard lock {m_mutex};
+        if (m_segments.empty())
+            return SegmentId::null();
+
         auto itr = m_segments.lower_bound(id);
-        if (itr == cend(m_segments) || itr == cbegin(m_segments))
+        if (itr == cbegin(m_segments))
             return SegmentId::null();
         return *prev(itr);
     }
@@ -134,12 +137,15 @@ public:
     }
 
 private:
+    // NOTE: I know this seems pretty sketchy... It should be okay, because each call to get() is followed by
+    //       a call to WriteAheadLog::log(), which pushes its arguments into a WORKER_CAPACITY-length queue,
+    //       only blocking if it becomes full.
     static constexpr Size SCRATCH_COUNT {WORKER_CAPACITY + 2};
 
     mutable std::mutex m_mutex;
     MonotonicScratchManager<SCRATCH_COUNT> m_manager;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_HELPERS_H

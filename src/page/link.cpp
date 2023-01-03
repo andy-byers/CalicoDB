@@ -3,19 +3,19 @@
 #include "utils/encoding.h"
 #include "utils/layout.h"
 
-namespace calico {
+namespace Calico {
 
 Link::Link(Page page)
     : m_page {std::move(page)}
 {}
 
-auto Link::next_id() const -> PageId
+auto Link::next_id() const -> Id
 {
     const auto offset = LinkLayout::header_offset() + LinkLayout::NEXT_ID_OFFSET;
-    return PageId {get_u64(m_page, offset)};
+    return Id {get_u64(m_page, offset)};
 }
 
-auto Link::set_next_id(PageId id) -> void
+auto Link::set_next_id(Id id) -> void
 {
     const auto offset = LinkLayout::header_offset() + LinkLayout::NEXT_ID_OFFSET;
     put_u64(m_page, offset, id.value);
@@ -34,9 +34,8 @@ auto Link::content_view() const -> BytesView
 
 auto Link::content_bytes(Size size) -> Bytes
 {
-    // Takes a size parameter to avoid updating more of the page than is necessary. See
-    // Page::do_change() in page.cpp.
+    // Takes a size parameter to avoid updating more of the page than is necessary.
     return m_page.bytes(LinkLayout::content_offset(), size);
 }
 
-} // namespace calico
+} // namespace Calico

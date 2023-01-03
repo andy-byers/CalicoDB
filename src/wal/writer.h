@@ -12,15 +12,15 @@
 
 #include "utils/worker.h"
 
-namespace calico {
+namespace Calico {
 
 class LogWriter {
 public:
     // NOTE: LogWriter must always be created on an empty segment file.
-    LogWriter(AppendWriter &file, Bytes tail, std::atomic<SequenceId> &flushed_lsn)
-        : m_flushed_lsn {&flushed_lsn},
-          m_file {&file},
-          m_tail {tail}
+    LogWriter(AppendWriter &file, Bytes tail, std::atomic<Id> &flushed_lsn)
+        : m_tail {tail},
+          m_flushed_lsn {&flushed_lsn},
+          m_file {&file}
     {}
 
     [[nodiscard]]
@@ -29,25 +29,23 @@ public:
         return m_number;
     }
 
-    // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified for the most part.
-    //       However, we can still query the block count to see if we've actually written out any blocks.
+    // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified, except for the block
+    //       count, which remains valid.
     [[nodiscard]] auto write(WalPayloadIn payload) -> Status;
     [[nodiscard]] auto flush() -> Status;
 
 private:
-    [[nodiscard]] auto clear_rest_and_flush(Size local_offset) -> Status;
-
-    std::atomic<SequenceId> *m_flushed_lsn {};
-    SequenceId m_last_lsn {};
-    AppendWriter *m_file {};
     Bytes m_tail;
+    std::atomic<Id> *m_flushed_lsn {};
+    AppendWriter *m_file {};
+    Id m_last_lsn {};
     Size m_number {};
     Size m_offset {};
 };
 
 class WalWriter {
 public:
-    WalWriter(Storage &store, WalCollection &segments, Bytes tail, std::atomic<SequenceId> &flushed_lsn, std::string prefix, Size wal_limit)
+    WalWriter(Storage &store, WalCollection &segments, Bytes tail, std::atomic<Id> &flushed_lsn, std::string prefix, Size wal_limit)
         : m_worker {WORKER_CAPACITY, [this](const auto &event) {
               return on_event(event);
           }},
@@ -93,7 +91,7 @@ private:
     Worker<Event> m_worker;
     std::string m_prefix;
     std::optional<LogWriter> m_writer;
-    std::atomic<SequenceId> *m_flushed_lsn {};
+    std::atomic<Id> *m_flushed_lsn {};
     std::unique_ptr<AppendWriter> m_file;
     WalCollection *m_set {};
     Storage *m_store {};
@@ -101,6 +99,6 @@ private:
     Size m_wal_limit {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_WAL_WRITER_H

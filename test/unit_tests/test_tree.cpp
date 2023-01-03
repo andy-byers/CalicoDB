@@ -5,48 +5,50 @@
 #include "random.h"
 #include "tools.h"
 #include "tree/bplus_tree.h"
-#include "tree/node_pool.h"
+#include "tree/node_manager.h"
 #include "unit_tests.h"
-#include "utils/info_log.h"
 #include "utils/layout.h"
+#include "utils/system.h"
 #include "wal/disabled_wal.h"
 #include <gtest/gtest.h>
 #include <map>
 #include <unordered_map>
 
-namespace calico {
+namespace Calico {
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 
 class TestHarness: public TestOnHeap {
 public:
     static constexpr Size PAGE_SIZE {0x100};
-    static constexpr Size FRAME_COUNT {16};
+    static constexpr Size CACHE_SIZE {16};
 
     TestHarness()
         : wal {std::make_unique<DisabledWriteAheadLog>()},
           scratch {wal_scratch_size(PAGE_SIZE)}
     {
-        pager = *BasicPager::open({
+        auto r = BasicPager::open({
             PREFIX,
-            *store,
+            store.get(),
             &scratch,
             &images,
-            *wal,
-            status,
-            has_xact,
-            create_sink(),
-            FRAME_COUNT,
+            wal.get(),
+            &state,
+            CACHE_SIZE,
             PAGE_SIZE
         });
+        EXPECT_TRUE(r.has_value()) << r.error().what();
+        pager = std::move(*r);
     }
 
     Random random {0};
-    Status status {Status::ok()};
+    System state {"test", LogLevel::OFF, {}};
+    Status status {ok()};
     bool has_xact {};
-    std::unordered_set<PageId, PageId::Hash> images;
+    Id commit_lsn;
+    std::unordered_set<Id, Id::Hash> images;
     std::unique_ptr<DisabledWriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
     LogScratchManager scratch;
@@ -59,15 +61,15 @@ public:
     TreeTests()
     {
         max_local = get_max_local(PAGE_SIZE);
-        tree = *BPlusTree::open(
+        auto r = BPlusTree::open(
             *pager,
-            create_sink(),
-            PAGE_SIZE
-        );
+            state,
+            PAGE_SIZE);
+        EXPECT_TRUE(r.has_value()) << r.error().what();
+        tree = std::move(*r);
         auto root = tree->root(true);
         EXPECT_TRUE(root.has_value()) << "Error: " << root.error().what();
-        auto s = pager->release(root->take());
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        expect_ok(pager->release(root->take()));
     }
 
     ~TreeTests() override = default;
@@ -79,6 +81,7 @@ public:
         tree->TEST_validate_order();
     }
 
+    System state {"test", LogLevel::OFF, {}};
     std::unique_ptr<Tree> tree;
     Size max_local {};
 };
@@ -555,9 +558,9 @@ TEST_F(TreeTests, ReverseBoundedIteration)
 
 TEST_F(TreeTests, SanityCheck)
 {
-    static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size NUM_RECORDS {500};
-    static constexpr Size MIN_SIZE {100};
+    static constexpr Size NUM_ITERATIONS {2};
+    static constexpr Size NUM_RECORDS {5'000};
+    static constexpr Size MIN_SIZE {500};
     RecordGenerator::Parameters param;
     param.mean_key_size = 20;
     param.mean_value_size = 10;

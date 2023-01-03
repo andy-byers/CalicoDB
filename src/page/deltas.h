@@ -5,17 +5,14 @@
 #include "utils/expect.h"
 #include <algorithm>
 
-namespace calico {
+namespace Calico {
 
 namespace impl {
 
-    inline auto can_merge_deltas(const PageDelta &lhs, const PageDelta &rhs) -> bool
+    inline auto can_merge_ordered_deltas(const PageDelta &lhs, const PageDelta &rhs) -> bool
     {
-        // TODO: Could eliminate the first check and perhaps rename the function to
-        //       reflect the precondition `lhs.offset <= rhs.offset`. We only call this on two
-        //       deltas that are already ordered by the `offset` field. Maybe we could call
-        //       it `can_merge_ordered_deltas(...)` or something.
-        return lhs.offset <= rhs.offset && rhs.offset <= lhs.offset + lhs.size;
+        CALICO_EXPECT_LE(lhs.offset, rhs.offset);
+        return rhs.offset <= lhs.offset + lhs.size;
     }
 
     inline auto merge_deltas(const PageDelta &lhs, const PageDelta &rhs) -> PageDelta
@@ -27,6 +24,9 @@ namespace impl {
 
 } // namespace impl
 
+/*
+ * Join overlapping deltas in a sorted (by offset) vector. Makes sure that delta WAL records are minimally sized.
+ */
 inline auto compress_deltas(std::vector<PageDelta> &deltas) -> void
 {
     if (deltas.size() < 2)
@@ -34,7 +34,7 @@ inline auto compress_deltas(std::vector<PageDelta> &deltas) -> void
 
     auto lhs = begin(deltas);
     for (auto rhs = next(lhs); rhs != end(deltas); ++rhs) {
-        if (impl::can_merge_deltas(*lhs, *rhs)) {
+        if (impl::can_merge_ordered_deltas(*lhs, *rhs)) {
             *lhs = impl::merge_deltas(*lhs, *rhs);
         } else {
             lhs++;
@@ -44,6 +44,12 @@ inline auto compress_deltas(std::vector<PageDelta> &deltas) -> void
     deltas.erase(next(lhs), end(deltas));
 }
 
+/*
+ * Insert a delta into a sorted vector, possibly joining it with the first overlapping delta. Only resolves
+ * the first overlap it encounters, so some edge cases will be missed (delta that overlaps multiple other
+ * deltas). Rather than trying to cover these here, just call compress_deltas() after all deltas have been
+ * collected.
+ */
 inline auto insert_delta(std::vector<PageDelta> &deltas, PageDelta delta) -> void
 {
     CALICO_EXPECT_GT(delta.size, 0);
@@ -55,7 +61,7 @@ inline auto insert_delta(std::vector<PageDelta> &deltas, PageDelta delta) -> voi
         return lhs.offset <= rhs.offset;
     });
     const auto try_merge = [&itr](const auto &lhs, const auto &rhs) {
-        if (impl::can_merge_deltas(lhs, rhs)) {
+        if (impl::can_merge_ordered_deltas(lhs, rhs)) {
             *itr = impl::merge_deltas(lhs, rhs);
             return true;
         }
@@ -74,6 +80,6 @@ inline auto insert_delta(std::vector<PageDelta> &deltas, PageDelta delta) -> voi
     deltas.insert(itr, delta);
 }
 
-} // calico
+} // namespace Calico
 
 #endif // CALICO_PAGE_DELTAS_H

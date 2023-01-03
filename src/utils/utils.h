@@ -1,11 +1,12 @@
 #ifndef CALICO_UTILS_UTILS_H
 #define CALICO_UTILS_UTILS_H
 
+#include <filesystem>
+#include <spdlog/fmt/fmt.h>
 #include "expect.h"
 #include "calico/bytes.h"
-#include <filesystem>
 
-namespace calico {
+namespace Calico {
 
 static constexpr Size PAGE_ID_SIZE {sizeof(std::uint64_t)};
 static constexpr Size CELL_POINTER_SIZE {sizeof(std::uint16_t)};
@@ -90,22 +91,6 @@ inline auto mem_clear_safe(Bytes data) noexcept -> void *
     return mem_clear_safe(data, data.size());
 }
 
-// Modified from an answer to https://stackoverflow.com/questions/29779825 by T.C..
-// Rather than depending on an additional template parameter, we restrict usage to
-// containers that expose a value_type member.
-template<class Container>
-using ElementOf = std::conditional_t<
-    std::is_lvalue_reference<Container>::value,
-    typename std::remove_reference_t<Container>::value_type&,
-    typename std::remove_reference_t<Container>::value_type&&>;
-
-template<class Container, class T>
-[[nodiscard]]
-constexpr auto forward_like(T &&t) -> ElementOf<Container>
-{
-    return std::forward<ElementOf<Container>>(std::forward<T>(t));
-}
-
 [[nodiscard]]
 inline auto get_status_name(const Status &s) noexcept -> std::string
 {
@@ -126,6 +111,46 @@ inline auto get_status_name(const Status &s) noexcept -> std::string
     }
 }
 
-} // namespace calico
+inline auto ok() -> Status
+{
+    return Status::ok();
+}
+
+template<class ...Ts>
+[[nodiscard]]
+auto invalid_argument(const std::string_view &fmt, Ts &&...ts) -> Status
+{
+    return Status::invalid_argument(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+}
+
+template<class ...Ts>
+[[nodiscard]]
+auto system_error(const std::string_view &fmt, Ts &&...ts) -> Status
+{
+    return Status::system_error(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+}
+
+template<class ...Ts>
+[[nodiscard]]
+auto logic_error(const std::string_view &fmt, Ts &&...ts) -> Status
+{
+    return Status::logic_error(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+}
+
+template<class ...Ts>
+[[nodiscard]]
+auto corruption(const std::string_view &fmt, Ts &&...ts) -> Status
+{
+    return Status::corruption(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+}
+
+template<class ...Ts>
+[[nodiscard]]
+auto not_found(const std::string_view &fmt, Ts &&...ts) -> Status
+{
+    return Status::not_found(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+}
+
+} // namespace Calico
 
 #endif // CALICO_UTILS_UTILS_H

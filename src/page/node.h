@@ -4,24 +4,24 @@
 #include "cell.h"
 #include "page.h"
 
-namespace calico {
+namespace Calico {
 
 class NodeHeader final {
 public:
-    [[nodiscard]] static auto parent_id(const Page&) -> PageId;
-    [[nodiscard]] static auto right_sibling_id(const Page&) -> PageId;
-    [[nodiscard]] static auto rightmost_child_id(const Page&) -> PageId;
-    [[nodiscard]] static auto left_sibling_id(const Page&) -> PageId;
+    [[nodiscard]] static auto parent_id(const Page&) -> Id;
+    [[nodiscard]] static auto right_sibling_id(const Page&) -> Id;
+    [[nodiscard]] static auto rightmost_child_id(const Page&) -> Id;
+    [[nodiscard]] static auto left_sibling_id(const Page&) -> Id;
     [[nodiscard]] static auto reserved(const Page&) -> std::uint64_t;
     [[nodiscard]] static auto cell_count(const Page&) -> Size;
     [[nodiscard]] static auto cell_start(const Page&) -> Size;
     [[nodiscard]] static auto frag_count(const Page&) -> Size;
     [[nodiscard]] static auto free_start(const Page&) -> Size;
     [[nodiscard]] static auto free_total(const Page&) -> Size;
-    static auto set_parent_id(Page&, PageId) -> void;
-    static auto set_right_sibling_id(Page&, PageId) -> void;
-    static auto set_rightmost_child_id(Page&, PageId) -> void;
-    static auto set_left_sibling_id(Page&, PageId) -> void;
+    static auto set_parent_id(Page&, Id) -> void;
+    static auto set_right_sibling_id(Page&, Id) -> void;
+    static auto set_rightmost_child_id(Page&, Id) -> void;
+    static auto set_left_sibling_id(Page&, Id) -> void;
     static auto set_cell_count(Page&, Size) -> void;
     static auto set_cell_start(Page&, Size) -> void;
     static auto set_frag_count(Page&, Size) -> void;
@@ -82,7 +82,7 @@ public:
         reset(reset_header);
     }
 
-    [[nodiscard]] auto id() const -> PageId
+    [[nodiscard]] auto id() const -> Id
     {
         return m_page.id();
     }
@@ -114,9 +114,9 @@ public:
 
     [[nodiscard]] auto read_key(Size) const -> BytesView;
     [[nodiscard]] auto read_cell(Size) const -> Cell;
-    [[nodiscard]] auto detach_cell(Size, Scratch) const -> Cell;
+    [[nodiscard]] auto detach_cell(Size, Bytes) const -> Cell;
     [[nodiscard]] auto find_ge(BytesView) const -> FindGeResult;
-    auto extract_cell(Size, Scratch) -> Cell;
+    auto extract_cell(Size, Bytes) -> Cell;
     auto insert(Cell) -> void;
     auto insert_at(Size, Cell) -> void;
     auto remove(BytesView) -> bool;
@@ -130,20 +130,20 @@ public:
     [[nodiscard]] auto is_overflowing() const -> bool;
     [[nodiscard]] auto is_underflowing() const -> bool;
     [[nodiscard]] auto is_external() const -> bool;
-    [[nodiscard]] auto child_id(Size) const -> PageId;
-    [[nodiscard]] auto parent_id() const -> PageId;
-    [[nodiscard]] auto right_sibling_id() const -> PageId;
-    [[nodiscard]] auto left_sibling_id() const -> PageId;
-    [[nodiscard]] auto rightmost_child_id() const -> PageId;
+    [[nodiscard]] auto child_id(Size) const -> Id;
+    [[nodiscard]] auto parent_id() const -> Id;
+    [[nodiscard]] auto right_sibling_id() const -> Id;
+    [[nodiscard]] auto left_sibling_id() const -> Id;
+    [[nodiscard]] auto rightmost_child_id() const -> Id;
     [[nodiscard]] auto cell_count() const -> Size;
-    auto set_parent_id(PageId) -> void;
-    auto set_right_sibling_id(PageId) -> void;
-    auto set_left_sibling_id(PageId id) -> void
+    auto set_parent_id(Id) -> void;
+    auto set_right_sibling_id(Id) -> void;
+    auto set_left_sibling_id(Id id) -> void
     {
         return NodeHeader::set_left_sibling_id(m_page, id);
     }
-    auto set_rightmost_child_id(PageId) -> void;
-    auto set_child_id(Size, PageId) -> void;
+    auto set_rightmost_child_id(Id) -> void;
+    auto set_child_id(Size, Id) -> void;
 
     [[nodiscard]] auto usable_space() const -> Size;
     [[nodiscard]] auto max_usable_space() const -> Size;
@@ -168,8 +168,8 @@ auto merge_left(Node &, Node &, Node &, Size) -> void;
 auto merge_right(Node &, Node &, Node &, Size) -> void;
 auto merge_root(Node &, Node &) -> void;
 auto split_root(Node &, Node &) -> void;
-[[nodiscard]] auto split_non_root(Node &, Node &, Scratch) -> Cell;
+[[nodiscard]] auto split_non_root(Node &, Node &, Bytes) -> Cell;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGE_NODE_H

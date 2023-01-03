@@ -3,10 +3,10 @@
 
 #include "calico/bytes.h"
 #include "page/page.h"
-#include "utils/crc.h"
-#include "utils/types.h"
+#include "crc.h"
+#include "types.h"
 
-namespace calico {
+namespace Calico {
 
 class Page;
 
@@ -19,7 +19,7 @@ struct FileHeader {
     std::uint64_t page_count;
     std::uint64_t freelist_head;
     std::uint64_t record_count;
-    std::uint64_t flushed_lsn;
+    std::uint64_t recovery_lsn;
     std::uint16_t page_size;
     Byte reserved[6];
 };
@@ -29,13 +29,15 @@ static_assert(sizeof(FileHeader) == 48);
 inline auto read_header(const Page &page) -> FileHeader
 {
     FileHeader header {};
-    std::memcpy(&header, page.view(0).data(), sizeof(header));
+    Bytes bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
+    mem_copy(bytes, page.view(0), bytes.size());
     return header;
 }
 
 inline auto write_header(Page &page, const FileHeader &header) -> void
 {
-    std::memcpy(page.bytes(0, sizeof(header)).data(), &header, sizeof(header));
+    BytesView bytes {reinterpret_cast<const Byte*>(&header), sizeof(FileHeader)};
+    mem_copy(page.bytes(0, sizeof(header)), bytes, bytes.size());
 }
 
 [[nodiscard]]
@@ -61,6 +63,6 @@ inline auto encode_page_size(Size page_size) -> std::uint16_t
     return static_cast<std::uint16_t>(page_size);
 }
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_CORE_HEADER_H

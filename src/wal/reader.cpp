@@ -1,49 +1,44 @@
 #include "reader.h"
 #include "calico/storage.h"
 #include "page/page.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 
-namespace calico {
+namespace Calico {
 
 template<class ...Args>
 [[nodiscard]]
-auto read_corruption_error(const std::string &hint, Args &&...args) -> Status
+auto read_corruption_error(const std::string &hint_fmt, Args &&...args) -> Status
 {
-    ThreePartMessage message;
-    message.set_primary("cannot read WAL record");
-    message.set_detail("record is corrupted");
-    message.set_hint(hint, std::forward<Args>(args)...);
-    return message.corruption();
+    const auto hint_str = fmt::format(fmt::runtime(hint_fmt), std::forward<Args>(args)...);
+    return corruption("cannot raed WAL record: record is corrupted ({})", hint_str);
 }
 
 [[nodiscard]]
 static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Status
 {
     auto temp = out;
-    auto s = file.read(temp, offset);
-    if (!s.is_ok()) return s;
+    CALICO_TRY_S(file.read(temp, offset));
 
     if (temp.is_empty()) {
-        return Status::not_found("reached the end of the file");
+        return not_found("reached the end of the file");
     } else if (temp.size() != out.size()) {
-        return Status::system_error("incomplete read");
+        return system_error("incomplete read");
     }
-    return s;
+    return ok();
 }
 
 auto LogReader::read(WalPayloadOut &out, Bytes payload, Bytes tail) -> Status
 {
     // Lazily read the first block into the tail buffer.
-    if (m_offset == 0) {
-        auto s = read_exact_or_eof(*m_file, 0, tail);
-        if (!s.is_ok()) return s;
-    }
+    if (m_offset == 0)
+        CALICO_TRY_S(read_exact_or_eof(*m_file, 0, tail));
+
     auto s = read_logical_record(payload, tail);
     if (s.is_ok()) out = WalPayloadOut {payload};
     return s;
 }
 
-auto LogReader::read_first_lsn(SequenceId &out) -> Status
+auto LogReader::read_first_lsn(Id &out) -> Status
 {
     // Bytes requires the array size when constructed with a C-style array.
     char buffer [WalPayloadHeader::SIZE];
@@ -71,8 +66,7 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
                 const auto temp = read_wal_record_header(rest);
                 rest.advance(WalRecordHeader::SIZE);
 
-                auto s = merge_records_left(header, temp);
-                if (!s.is_ok()) return s;
+                CALICO_TRY_S(merge_records_left(header, temp));
 
                 mem_copy(payload, rest.truncate(temp.size));
                 m_offset += WalRecordHeader::SIZE + temp.size;
@@ -100,14 +94,14 @@ auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
     }
     // Only modify the out parameter's size if we have succeeded.
     out.truncate(out.size() - payload.size());
-    return Status::ok();
+    return ok();
 }
 
 auto WalReader::open() -> Status
 {
     const auto first = m_set->id_after(SegmentId::null());
     if (first.is_null())
-        return Status::not_found("could not open WAL reader: segment collection is empty");
+        return not_found("could not open WAL reader: segment collection is empty");
     return open_segment(first);
 }
 
@@ -118,7 +112,7 @@ auto WalReader::seek_next() -> Status
         close_segment();
         return open_segment(next);
     }
-    return Status::not_found("could not seek to next segment: reached the last segment");
+    return not_found("could not seek to next segment: reached the last segment");
 }
 
 auto WalReader::seek_previous() -> Status
@@ -131,7 +125,7 @@ auto WalReader::seek_previous() -> Status
     return Status::not_found("could not seek to previous segment: reached the first segment");
 }
 
-auto WalReader::read_first_lsn(SequenceId &out) -> Status
+auto WalReader::read_first_lsn(Id &out) -> Status
 {
     prepare_traversal();
     return m_reader->read_first_lsn(out);
@@ -150,7 +144,7 @@ auto WalReader::roll(const Callback &callback) -> Status
 
         // A "not found" error means we have reached EOF.
         if (s.is_not_found()) {
-            return Status::ok();
+            return ok();
         } else if (!s.is_ok()) {
             return s;
         }
@@ -186,4 +180,4 @@ auto WalReader::prepare_traversal() -> void
     m_reader = LogReader {*m_file};
 }
 
-} // namespace calico
+} // namespace Calico

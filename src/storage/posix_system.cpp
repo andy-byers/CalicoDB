@@ -1,12 +1,14 @@
 #include "posix_system.h"
-#include "utils/expect.h"
-#include "utils/info_log.h"
+
 #include <fcntl.h>
 #include <filesystem>
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace calico::system {
+#include "utils/expect.h"
+#include "utils/utils.h"
+
+namespace Calico::system {
 
 namespace fs = std::filesystem;
 
@@ -17,12 +19,7 @@ auto error() -> Status
 
 auto error(std::errc code) -> Status
 {
-    return error(std::make_error_code(code).message());
-}
-
-auto error(const std::string &message) -> Status
-{
-    return Status::system_error(message);
+    return system_error(std::make_error_code(code).message());
 }
 
 auto file_exists(const std::string &name) -> Status
@@ -33,41 +30,38 @@ auto file_exists(const std::string &name) -> Status
         return error(std::errc {code.value()});
     } else if (!was_found) {
         const auto message = fmt::format("cannot find file \"{}\"", name);
-        return Status::not_found(message);
+        return not_found(message);
     }
-    return Status::ok();
+    return ok();
 }
 
-auto file_open(const std::string &name, int mode, int permissions) -> Result<int>
+auto file_open(const std::string &name, int mode, int permissions) -> tl::expected<int, Status>
 {
     if (const auto fd = ::open(name.c_str(), mode, permissions); fd != FAILURE)
         return fd;
-    if (std::exchange(errno, SUCCESS) == ENOENT) {
-        // Special case for read-only files that don't exist.
-        ThreePartMessage message;
-        message.set_primary("could not open file");
-        message.set_detail("no such file or directory \"{}\"", name);
-        return Err {message.not_found()};
-    }
-    return Err {error()};
+    // Special case for read-only files that don't exist.
+    if (std::exchange(errno, SUCCESS) == ENOENT)
+        return tl::make_unexpected(not_found(
+            "could not open file: no such file or directory \"{}\"", name));
+    return tl::make_unexpected(error());
 }
 
 auto file_close(int fd) -> Status
 {
     if (::close(fd) == FAILURE)
         return error();
-    return Status::ok();
+    return ok();
 }
 
-auto file_size(const std::string &path) -> Result<Size>
+auto file_size(const std::string &path) -> tl::expected<Size, Status>
 {
     std::error_code code;
     const auto size = fs::file_size(path, code);
-    if (code) return Err {Status::system_error(code.message())};
+    if (code) return tl::make_unexpected(system_error(code.message()));
     return size;
 }
 
-auto file_read(int file, Bytes out) -> Result<Size>
+auto file_read(int file, Bytes out) -> tl::expected<Size, Status>
 {
     const auto target_size = out.size();
 
@@ -75,13 +69,13 @@ auto file_read(int file, Bytes out) -> Result<Size>
         if (const auto n = ::read(file, out.data(), out.size()); n != FAILURE) {
             out.advance(static_cast<Size>(n));
         } else if (errno != EINTR) {
-            return Err {error()};
+            return tl::make_unexpected(error());
         }
     }
     return target_size - out.size();
 }
 
-auto file_write(int file, BytesView in) -> Result<Size>
+auto file_write(int file, BytesView in) -> tl::expected<Size, Status>
 {
     const auto target_size = in.size();
 
@@ -89,7 +83,7 @@ auto file_write(int file, BytesView in) -> Result<Size>
         if (const auto n = ::write(file, in.data(), in.size()); n != FAILURE) {
             in.advance(static_cast<Size>(n));
         } else if (errno != EINTR) {
-            return Err {error()};
+            return tl::make_unexpected(error());
         }
     }
     return target_size - in.size();
@@ -99,50 +93,46 @@ auto file_sync(int fd) -> Status
 {
     if (fsync(fd) == FAILURE)
         return error();
-    return Status::ok();
+    return ok();
 }
 
-auto file_seek(int fd, long offset, int whence) -> Result<Size>
+auto file_seek(int fd, long offset, int whence) -> tl::expected<Size, Status>
 {
     if (const auto position = lseek(fd, offset, whence); position != FAILURE)
         return static_cast<Size>(position);
-    return Err {error()};
+    return tl::make_unexpected(error());
 }
 
 auto file_remove(const std::string &path) -> Status
 {
     if (::unlink(path.c_str()) == FAILURE)
         return error();
-    return Status::ok();
+    return ok();
 }
 
 auto file_resize(const std::string &path, Size size) -> Status
 {
     std::error_code code;
     fs::resize_file(path, size, code);
-    if (code) return error(code.message());
-    return Status::ok();
+    if (code) return system_error(code.message());
+    return ok();
 }
 
 auto dir_create(const std::string &path, mode_t permissions) -> Status
 {
     if (::mkdir(path.c_str(), permissions) == FAILURE) {
-        if (std::exchange(errno, SUCCESS) == EEXIST) {
-            ThreePartMessage message;
-            message.set_primary("could not create directory");
-            message.set_detail("directory {} already exists", path);
-            return message.logic_error();
-        }
+        if (std::exchange(errno, SUCCESS) == EEXIST)
+            return logic_error("could not create directory: directory {} already exists", path);
         return error();
     }
-    return Status::ok();
+    return ok();
 }
 
 auto dir_remove(const std::string &path) -> Status
 {
     if (::rmdir(path.c_str()) == FAILURE)
         return error();
-    return Status::ok();
+    return ok();
 }
 
-} // namespace calico::system
+} // namespace Calico::system

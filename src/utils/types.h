@@ -1,191 +1,101 @@
 #ifndef CALICO_UTILS_TYPES_H
 #define CALICO_UTILS_TYPES_H
 
+#include <utility>
 #include <vector>
 #include "utils.h"
 
-namespace calico {
+namespace Calico {
 
-template<class Index>
-struct IndexHash {
+struct Id {
+    static constexpr Size null_value {0};
+    static constexpr Size root_value {1};
+
+    struct Hash {
+        auto operator()(const Id &id) const -> Size
+        {
+            return id.value;
+        }
+    };
 
     [[nodiscard]]
-    auto operator()(const Index &index) const -> std::size_t
+    static constexpr auto from_index(Size index) noexcept -> Id
     {
-        return static_cast<std::size_t>(index.value);
+        return {index + 1};
     }
-};
-
-template<class T>
-struct NullableId {
 
     [[nodiscard]]
-    static constexpr auto null() noexcept -> T
+    static constexpr auto null() noexcept -> Id
     {
-        return T {0};
+        return {null_value};
+    }
+
+    [[nodiscard]]
+    static constexpr auto root() noexcept -> Id
+    {
+        return {root_value};
     }
 
     [[nodiscard]]
     constexpr auto is_null() const noexcept -> bool
     {
-        return static_cast<const T&>(*this).value == null().value;
-    }
-
-    [[nodiscard]]
-    constexpr auto as_index() const noexcept -> Size
-    {
-        const auto &t = static_cast<const T&>(*this);
-        CALICO_EXPECT_NE(t, null());
-        return t.value - 1U;
-    }
-
-    [[nodiscard]]
-    static constexpr auto from_index(Size t) noexcept -> T
-    {
-        return T {t + 1};
-    }
-};
-
-template<class T1>
-struct EqualityComparableTraits {
-
-    template<class T2>
-    auto operator==(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value == T1 {t}.value;
-    }
-
-    template<class T2>
-    auto operator!=(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value != T1 {t}.value;
-    }
-};
-
-template<class T1>
-struct OrderableTraits {
-
-    template<class T2>
-    auto operator<(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value < T1 {t}.value;
-    }
-
-    template<class T2>
-    auto operator<=(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value <= T1 {t}.value;
-    }
-
-    template<class T2>
-    auto operator>(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value > T1 {t}.value;
-    }
-
-    template<class T2>
-    auto operator>=(const T2 &t) const noexcept -> bool
-    {
-        return static_cast<const T1&>(*this).value >= T1 {t}.value;
-    }
-};
-
-template<class T>
-struct IncrementableTraits { // TODO: Removed postfix increment. It's confusing to implement with CRTP!
-
-    auto operator++() -> T&
-    {
-        static_cast<T&>(*this).value++;
-        return static_cast<T&>(*this);
-    }
-};
-
-struct PageId
-    : public NullableId<PageId>,
-      public EqualityComparableTraits<PageId>
-{
-    using Type = std::uint64_t;
-    using Hash = IndexHash<PageId>;
-
-    constexpr PageId() noexcept = default;
-
-    template<class T>
-    constexpr explicit PageId(T t) noexcept
-        : value {std::uint64_t(t)}
-    {}
-
-    [[nodiscard]]
-    static constexpr auto root() noexcept -> PageId
-    {
-        return PageId {1};
+        return value == null_value;
     }
 
     [[nodiscard]]
     constexpr auto is_root() const noexcept -> bool
     {
-        return value == root().value;
-    }
-
-    std::uint64_t value {};
-};
-
-struct SequenceId
-    : public NullableId<SequenceId>,
-      public EqualityComparableTraits<SequenceId>,
-      public OrderableTraits<SequenceId>
-{
-    using Type = std::uint64_t;
-    using Hash = IndexHash<SequenceId>;
-
-    constexpr SequenceId() noexcept = default;
-
-    template<class U>
-    constexpr explicit SequenceId(U u) noexcept
-        : value {std::uint64_t(u)}
-    {}
-
-    auto operator++() -> SequenceId&
-    {
-        value++;
-        return *this;
-    }
-
-    auto operator++(int) -> SequenceId
-    {
-        const auto temp = *this;
-        ++(*this);
-        return temp;
+        return value == root_value;
     }
 
     [[nodiscard]]
-    static constexpr auto base() noexcept -> SequenceId
+    constexpr auto as_index() const noexcept -> Size
     {
-        return SequenceId {1};
+        CALICO_EXPECT_NE(value, null().value);
+        return value - 1;
+    }
+
+    constexpr auto operator<=>(const Id &) const = default;
+
+    Size value {};
+};
+
+class AlignedBuffer {
+public:
+    AlignedBuffer(Size size, Size alignment)
+        : m_data {
+              new(std::align_val_t {alignment}, std::nothrow) Byte[size],
+              Deleter {std::align_val_t {alignment}},
+          }
+    {
+        CALICO_EXPECT_TRUE(is_power_of_two(alignment));
+        CALICO_EXPECT_EQ(size % alignment, 0);
     }
 
     [[nodiscard]]
-    constexpr auto is_base() const noexcept -> bool
+    auto get() -> Byte *
     {
-        return value == base().value;
+        return m_data.get();
     }
 
-    std::uint64_t value {};
-};
-
-struct AlignedDeleter {
-    explicit AlignedDeleter(std::align_val_t align)
-        : alignment {align}
-    {}
-
-    auto operator()(Byte *ptr) const -> void
+    [[nodiscard]]
+    auto get() const -> const Byte *
     {
-        operator delete[](ptr, alignment);
+        return m_data.get();
     }
 
-    std::align_val_t alignment;
-};
+private:
+    struct Deleter {
+        auto operator()(Byte *ptr) const -> void
+        {
+            operator delete[](ptr, alignment);
+        }
 
-using AlignedBuffer = std::unique_ptr<Byte[], AlignedDeleter>;
+        std::align_val_t alignment;
+    };
+
+    std::unique_ptr<Byte[], Deleter> m_data;
+};
 
 template<class T>
 class UniqueNullable final {
@@ -247,30 +157,6 @@ private:
     T m_resource {};
 };
 
-class ErrorBuffer {
-public:
-    [[nodiscard]]
-    auto is_ok() const -> bool
-    {
-        return m_buffer.empty();
-    }
-
-    [[nodiscard]]
-    auto buffer() const -> const std::vector<Status> &
-    {
-        return m_buffer;
-    }
-
-    auto maybe_consume(Status &&s) -> void
-    {
-        if (!s.is_ok())
-            m_buffer.emplace_back(std::move(s));
-    }
-
-private:
-    std::vector<Status> m_buffer;
-};
-
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_UTILS_TYPES_H

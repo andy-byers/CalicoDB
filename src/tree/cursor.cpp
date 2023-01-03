@@ -1,16 +1,13 @@
 #include "cursor_internal.h"
 #include "pager/pager.h"
 #include "tree/internal.h"
-#include "tree/node_pool.h"
-#include "spdlog/fmt/fmt.h"
 
-namespace calico {
+namespace Calico {
 
-auto CursorInternal::make_cursor(NodePool &pool, Internal &internal) -> Cursor
+auto CursorInternal::make_cursor(CursorActions *actions) -> Cursor
 {
     Cursor cursor;
-    cursor.m_pool = &pool;
-    cursor.m_internal = &internal;
+    cursor.m_actions = actions;
     invalidate(cursor);
     return cursor;
 }
@@ -40,8 +37,8 @@ auto CursorInternal::seek_left(Cursor &cursor) -> bool
     if (is_first(cursor)) {
         invalidate(cursor);
     } else {
-        const PageId left {cursor.m_position.ids[Cursor::Position::LEFT]};
-        auto previous = cursor.m_pool->acquire(left, false);
+        const Id left {cursor.m_position.ids[Cursor::Position::LEFT]};
+        auto previous = cursor.m_actions->acquire(left, false);
         if (!previous.has_value()) {
             invalidate(cursor, previous.error());
             return false;
@@ -61,8 +58,8 @@ auto CursorInternal::seek_right(Cursor &cursor) -> bool
     if (is_last(cursor)) {
         invalidate(cursor);
     } else {
-        const PageId right {cursor.m_position.ids[Cursor::Position::RIGHT]};
-        auto next = cursor.m_pool->acquire(right, false);
+        const Id right {cursor.m_position.ids[Cursor::Position::RIGHT]};
+        auto next = cursor.m_actions->acquire(right, false);
         if (!next.has_value()) {
             invalidate(cursor, next.error());
             return false;
@@ -87,7 +84,7 @@ auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
     if (!cursor.is_valid())
         return;
 
-    auto node = cursor.m_pool->acquire(PageId {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
+    auto node = cursor.m_actions->acquire(Id {cursor.m_position.ids[Cursor::Position::CURRENT]}, false);
     CALICO_EXPECT_TRUE(node.has_value());
     node->TEST_validate();
 }
@@ -95,8 +92,7 @@ auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
 auto Cursor::operator==(const Cursor &rhs) const -> bool
 {
     // These cursors should come from the same database.
-    CALICO_EXPECT_EQ(m_pool, rhs.m_pool);
-    CALICO_EXPECT_EQ(m_internal, rhs.m_internal);
+    CALICO_EXPECT_EQ(m_actions, rhs.m_actions);
     const auto lhs_has_error = !m_status.is_ok() && !m_status.is_not_found();
     const auto rhs_has_error = !rhs.m_status.is_ok() && !rhs.m_status.is_not_found();
 
@@ -164,13 +160,13 @@ auto CursorInternal::move_to(Cursor &cursor, Node node, Size index) -> void
         cursor.m_position.ids[Cursor::Position::LEFT] = node.left_sibling_id().value;
         cursor.m_position.ids[Cursor::Position::CURRENT] = node.id().value;
         cursor.m_position.ids[Cursor::Position::RIGHT] = node.right_sibling_id().value;
-        cursor.m_status = Status::ok();
+        cursor.m_status = ok();
     } else {
         invalidate(cursor);
     }
 
-    if (auto result = cursor.m_pool->release(std::move(node)); !result.has_value())
-        invalidate(cursor, result.error());
+    if (auto r = cursor.m_actions->release(std::move(node)); !r.has_value())
+        invalidate(cursor, r.error());
 }
 
 auto Cursor::increment() -> bool
@@ -202,7 +198,7 @@ auto Cursor::decrement() -> bool
 auto Cursor::key() const -> BytesView
 {
     CALICO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_actions->acquire(Id {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
@@ -213,12 +209,12 @@ auto Cursor::key() const -> BytesView
 auto Cursor::value() const -> std::string
 {
     CALICO_EXPECT_TRUE(is_valid());
-    const auto node = m_pool->acquire(PageId {m_position.ids[Position::CURRENT]}, false);
+    const auto node = m_actions->acquire(Id {m_position.ids[Position::CURRENT]}, false);
     if (!node.has_value()) {
         m_status = node.error();
         return {};
     }
-    return *m_internal->collect_value(*node, m_position.index)
+    return *m_actions->collect(*node, m_position.index)
         .map_error([this](const Status &status) -> std::string {
             m_status = status;
             return {};
@@ -239,13 +235,13 @@ auto Cursor::Position::operator==(const Position &rhs) const -> bool
 auto Cursor::Position::is_maximum() const -> bool
 {
     CALICO_EXPECT_NE(ids[CURRENT], 0);
-    return PageId {ids[RIGHT]}.is_null() && index + 1 == cell_count;
+    return Id {ids[RIGHT]}.is_null() && index + 1 == cell_count;
 }
 
 auto Cursor::Position::is_minimum() const -> bool
 {
     CALICO_EXPECT_NE(ids[CURRENT], 0);
-    return cell_count && PageId {ids[LEFT]}.is_null() && index == 0;
+    return cell_count && Id {ids[LEFT]}.is_null() && index == 0;
 }
 
-} // namespace calico
+} // namespace Calico

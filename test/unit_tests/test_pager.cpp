@@ -3,165 +3,446 @@
 #include "page/page.h"
 #include "pager/basic_pager.h"
 #include "pager/framer.h"
-#include "pager/registry.h"
+#include "pager/page_cache.h"
 #include "unit_tests.h"
-#include "utils/info_log.h"
 #include "utils/layout.h"
+#include "utils/system.h"
 #include "wal/disabled_wal.h"
 #include <gtest/gtest.h>
 #include <numeric>
 
-namespace calico {
+namespace Calico {
 
-TEST(UniqueCacheTests, NewCacheIsEmpty)
+class CacheTests: public testing::Test {
+public:
+    Cache<int, int> target;
+};
+
+TEST_F(CacheTests, EmptyCacheBehavior)
 {
-    impl::UniqueCache<int, int> cache;
+    Calico::Cache<int, int> cache;
+
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
+    ASSERT_EQ(begin(cache), end(cache));
+    ASSERT_EQ(cache.get(1), end(cache));
+    ASSERT_EQ(cache.evict(), std::nullopt);
 }
 
-TEST(UniqueCacheTests, CanGetEntry)
+TEST_F(CacheTests, NonEmptyCacheBehavior)
 {
-    impl::UniqueCache<int, int> cache;
-    cache.put(4, 2);
-    ASSERT_EQ(cache.get(4)->second, 2);
+    Calico::Cache<int, int> cache;
+
+    cache.put(1, 1);
+    ASSERT_FALSE(cache.is_empty());
+    ASSERT_EQ(cache.size(), 1);
+    ASSERT_NE(begin(cache), end(cache));
+    ASSERT_NE(cache.get(1), end(cache));
+    ASSERT_NE(cache.evict(), std::nullopt);
 }
 
-TEST(UniqueCacheTests, DuplicateKeyDeathTest)
+TEST_F(CacheTests, ElementsArePromotedAfterUse)
 {
-    impl::UniqueCache<int, int> cache;
-    cache.put(4, 2);
-    ASSERT_DEATH(cache.put(4, 2), EXPECTATION_MATCHER);
+    Calico::Cache<int, int> cache;
+
+    // 1*, 2, 3, 4, END
+    cache.put(4, 4);
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+
+    // 3, 4, 1*, 2, END
+    cache.put(4, 4);
+    cache.put(4, 4);
+    ASSERT_EQ(cache.get(3)->value, 3);
+    ASSERT_EQ(cache.size(), 4);
+
+    decltype(cache)::entry entry;
+    entry = cache.evict().value();
+    ASSERT_FALSE(entry.hot);
+    ASSERT_EQ(entry.value, 2);
+    entry = cache.evict().value();
+    ASSERT_FALSE(entry.hot);
+    ASSERT_EQ(entry.value, 1);
+    entry = cache.evict().value();
+    ASSERT_TRUE(entry.hot);
+    ASSERT_EQ(entry.value, 4);
+    entry = cache.evict().value();
+    ASSERT_TRUE(entry.hot);
+    ASSERT_EQ(entry.value, 3);
 }
 
-//TEST(UniqueCacheTests, CannotEvictFromEmptyCache)
-//{
-//    impl::UniqueCache<int, int> cache;
-//    ASSERT_EQ(cache.evict(), std::nullopt);
-//}
-
-TEST(UniqueCacheTests, CannotGetNonexistentValue)
+TEST_F(CacheTests, IterationRespectsReplacementPolicy)
 {
-    impl::UniqueCache<int, int> cache;
-    ASSERT_EQ(cache.get(0), cache.end());
+    // 1*, 2, 3, END
+    target.put(3, 3);
+    target.put(2, 2);
+    target.put(1, 1);
+
+    // 1, 2, 3*, END
+    target.put(2, 2);
+    target.put(1, 1);
+
+    // Hottest -> coldest
+    auto itr = begin(target);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_EQ(itr, end(target));
+
+    // Coldest -> hottest
+    auto ritr = rbegin(target);
+    ASSERT_FALSE(ritr->hot);
+    ASSERT_EQ(ritr++->value, 3);
+    ASSERT_TRUE(ritr->hot);
+    ASSERT_EQ(ritr++->value, 2);
+    ASSERT_TRUE(ritr->hot);
+    ASSERT_EQ(ritr++->value, 1);
+    ASSERT_EQ(ritr, rend(target));
 }
 
-TEST(UniqueCacheTests, FifoCacheEvictsLastInElement)
+TEST_F(CacheTests, QueryDoesNotPromoteElements)
 {
-    UniqueFifoCache<int, int> cache;
-    cache.put(0, 0);
+    Calico::Cache<int, int> cache;
+
+    // 1*, 2, 3, END
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+
+    ASSERT_EQ(cache.query(1)->value, 1);
+    ASSERT_EQ(cache.query(2)->value, 2);
+
+    // Method is const.
+    const auto &ref = cache;
+    ASSERT_EQ(ref.query(3)->value, 3);
+
+    auto itr = begin(cache);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_EQ(itr, end(cache));
+}
+
+TEST_F(CacheTests, ModifyValue)
+{
+    Calico::Cache<int, int> cache;
+
+    cache.put(1, 1);
+    cache.put(1, 2);
+
+    ASSERT_EQ(cache.size(), 1);
+    ASSERT_EQ(cache.get(1)->value, 2);
+}
+
+TEST_F(CacheTests, WarmElementsAreFifoOrdered)
+{
+    Calico::Cache<int, int> cache;
+
+    // 1*, 2, 3, END
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+
+    auto itr = begin(cache);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_EQ(itr, end(cache));
+
+    ASSERT_EQ(cache.evict()->value, 3);
+    ASSERT_EQ(cache.evict()->value, 2);
+    ASSERT_EQ(cache.evict()->value, 1);
+}
+
+TEST_F(CacheTests, HotElementsAreLruOrdered)
+{
+    Calico::Cache<int, int> cache;
+
+    // 1*, 2, 3
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+
+    // 2, 3, 1*
+    ASSERT_EQ(cache.get(3)->value, 3);
+    ASSERT_EQ(cache.get(2)->value, 2);
+    ASSERT_EQ(cache.get(1)->value, 1);
+
+    auto itr = begin(cache);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_EQ(itr, end(cache));
+
+    ASSERT_EQ(cache.evict()->value, 3);
+    ASSERT_EQ(cache.evict()->value, 2);
+    ASSERT_EQ(cache.evict()->value, 1);
+}
+
+TEST_F(CacheTests, HotElementsAreEncounteredFirst)
+{
+    Calico::Cache<int, int> cache;
+
+    // 4*, 3, 2, 1, END
     cache.put(1, 1);
     cache.put(2, 2);
-    ASSERT_EQ(cache.evict().value(), 0);
-    ASSERT_EQ(cache.evict().value(), 1);
-    ASSERT_EQ(cache.evict().value(), 2);
+    cache.put(3, 3);
+    cache.put(4, 4);
+
+    // 3, 2, 1, 4*, END
+    ASSERT_EQ(cache.get(1)->value, 1);
+    ASSERT_EQ(cache.get(2)->value, 2);
+    ASSERT_EQ(cache.get(3)->value, 3);
+
+    // 3, 2, 1, 5*, 4, END
+    cache.put(5, 5);
+
+    auto itr = begin(cache);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 5);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 4);
+    ASSERT_EQ(itr, end(cache));
 }
 
-TEST(UniqueCacheTests, LruCacheEvictsLeastRecentlyUsedElement)
+TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 {
-    UniqueLruCache<int, int> cache;
-    cache.put(0, 0);
+    Calico::Cache<int, int> cache;
+
+    // 4*, 3, 2, 1, END
     cache.put(1, 1);
     cache.put(2, 2);
-    ASSERT_EQ(cache.get(0)->second, 0);
-    ASSERT_EQ(cache.get(1)->second, 1);
-    ASSERT_EQ(cache.evict().value(), 2);
-    ASSERT_EQ(cache.evict().value(), 0);
-    ASSERT_EQ(cache.evict().value(), 1);
+    cache.put(3, 3);
+    cache.put(4, 4);
+    ASSERT_FALSE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 4, 3*, 2, 1, END
+    cache.put(4, 4);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 3, 4, 2*, 1, END
+    cache.put(3, 3);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 3);
+
+    // 2, 3, 4, 1*, END
+    cache.put(2, 2);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 2);
+
+    // 1, 2, 3, 4, END*
+    cache.put(1, 1);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 1);
 }
 
-TEST(UniqueCacheTests, ExistenceCheckDoesNotCountAsUsage)
+TEST_F(CacheTests, AddWarmElements)
 {
-    UniqueLruCache<int, int> cache;
-    cache.put(0, 0);
+    Calico::Cache<int, int> cache;
+
+    // 4*, 3, 2, 1, END
     cache.put(1, 1);
     cache.put(2, 2);
-    ASSERT_TRUE(cache.contains(0));
-    ASSERT_TRUE(cache.contains(1));
-    ASSERT_EQ(cache.evict().value(), 0);
-    ASSERT_EQ(cache.evict().value(), 1);
-    ASSERT_EQ(cache.evict().value(), 2);
+    cache.put(3, 3);
+    cache.put(4, 4);
+    ASSERT_FALSE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 3, 4, 2*, 1, END
+    cache.put(4, 4);
+    cache.put(3, 3);
+
+    // 3, 4, 6*, 5, 2, 1, END
+    cache.put(5, 5);
+    cache.put(6, 6);
+
+    auto itr = begin(cache);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 3);
+    ASSERT_TRUE(itr->hot);
+    ASSERT_EQ(itr++->value, 4);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 6);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 5);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 2);
+    ASSERT_FALSE(itr->hot);
+    ASSERT_EQ(itr++->value, 1);
+    ASSERT_EQ(itr, end(cache));
+}
+
+TEST_F(CacheTests, InsertAfterWarmElementsDepleted)
+{
+    Calico::Cache<int, int> cache;
+
+    // 4*, 3, 2, 1, END
+    cache.put(1, 1);
+    cache.put(2, 2);
+    cache.put(3, 3);
+    cache.put(4, 4);
+    ASSERT_FALSE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 3, 4, 2*, 1, END
+    cache.put(4, 4);
+    cache.put(3, 3);
+
+    // 3, 4, 2*, END
+    auto entry = cache.evict().value();
+    ASSERT_FALSE(entry.hot);
+    ASSERT_EQ(entry.value, 1);
+
+    // 3, 4, END*
+    entry = cache.evict().value();
+    ASSERT_FALSE(entry.hot);
+    ASSERT_EQ(entry.value, 2);
+
+    // 4, 3, END*
+    cache.put(4, 4);
+    ASSERT_TRUE(prev(end(cache))->hot);
+    ASSERT_EQ(prev(end(cache))->value, 3);
+    ASSERT_TRUE(begin(cache)->hot);
+    ASSERT_EQ(begin(cache)->value, 4);
+
+    // 4, 3, 2*, END
+    cache.put(2, 2);
+    ASSERT_FALSE(prev(end(cache))->hot);
+    ASSERT_EQ(prev(end(cache))->value, 2);
+}
+
+static auto check_cache_order(int hot_count, int warm_count)
+{
+    Cache<int, int> c;
+
+    for (int i {1}; i <= hot_count + warm_count; ++i)
+        c.put(i, i);
+    for (int i {1}; i <= hot_count; ++i)
+        c.put(i, i);
+
+    // Iteration: Hot elements should be encountered first. In particular, the most-recently-
+    // used hot element (if present) should be first.
+    auto itr = begin(c);
+    ASSERT_EQ(itr->value, hot_count ? hot_count : warm_count);
+    for (int i {}; i < hot_count; ++i) {
+        ASSERT_TRUE(itr++->hot);
+    }
+    for (int i {}; i < warm_count; ++i) {
+        ASSERT_FALSE(itr++->hot);
+    }
+
+    // Eviction: Hot elements should be evicted last.
+    for (int i {}; i < warm_count; ++i) {
+        ASSERT_FALSE(c.evict()->hot);
+    }
+    for (int i {}; i < hot_count; ++i) {
+        ASSERT_TRUE(c.evict()->hot);
+    }
+}
+
+TEST(CacheOrderTests, CheckOrder)
+{
+    check_cache_order(1, 0);
+    check_cache_order(0, 1);
+    check_cache_order(2, 0);
+    check_cache_order(0, 2);
+    check_cache_order(2, 1);
+    check_cache_order(1, 2);
+    check_cache_order(1, 1);
+    check_cache_order(2, 2);
+}
+
+TEST(MoveOnlyCacheTests, WorksWithMoveOnlyValue)
+{
+    Calico::Cache<int, std::unique_ptr<int>> cache;
+    cache.put(1, std::make_unique<int>(1));
+    ASSERT_EQ(*cache.get(1)->value, 1);
+    ASSERT_EQ(*cache.evict()->value, 1);
 }
 
 class PageRegistryTests : public testing::Test {
 public:
     ~PageRegistryTests() override = default;
 
-    PageRegistry registry;
+    PageCache registry;
 };
 
 TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 {
-    registry.put(PageId {11UL}, FrameNumber {11UL});
-    registry.put(PageId {12UL}, FrameNumber {12UL});
-    registry.put(PageId {13UL}, FrameNumber {13UL});
-    registry.put(PageId {1UL}, FrameNumber {1UL});
-    registry.put(PageId {2UL}, FrameNumber {2UL});
-    registry.put(PageId {3UL}, FrameNumber {3UL});
+    registry.put(Id {11UL}, {Size {11UL}});
+    registry.put(Id {12UL}, {Size {12UL}});
+    registry.put(Id {13UL}, {Size {13UL}});
+    registry.put(Id {1UL}, {Size {1UL}});
+    registry.put(Id {2UL}, {Size {2UL}});
+    registry.put(Id {3UL}, {Size {3UL}});
     ASSERT_EQ(registry.size(), 6);
 
-    ASSERT_EQ(registry.get(PageId {11UL})->second.frame_id, 11UL);
-    ASSERT_EQ(registry.get(PageId {12UL})->second.frame_id, 12UL);
-    ASSERT_EQ(registry.get(PageId {13UL})->second.frame_id, 13UL);
+    ASSERT_EQ(registry.get(Id {11UL})->value.frame_index, 11UL);
+    ASSERT_EQ(registry.get(Id {12UL})->value.frame_index, 12UL);
+    ASSERT_EQ(registry.get(Id {13UL})->value.frame_index, 13UL);
 
     Size i {}, j {};
 
-    const auto callback = [&i, &j](auto page_id, auto frame_id, auto) {
-        EXPECT_EQ(page_id, frame_id);
-        EXPECT_EQ(page_id, i + (j >= 3)*10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
+    const auto callback = [&i, &j](auto page_id, auto entry) {
+        EXPECT_EQ(page_id.value, entry.frame_index);
+        EXPECT_EQ(page_id.value, i + (j >= 3)*10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
         j++;
         i = j % 3;
         return false;
     };
 
-    auto itr = registry.find_for_replacement(callback);
-    ASSERT_EQ(itr, registry.end());
+    ASSERT_FALSE(registry.evict(callback));
 }
 
 class FramerTests : public testing::Test {
 public:
     explicit FramerTests()
-        : home {std::make_unique<HeapStorage>()}
-    {
-        std::unique_ptr<RandomEditor> file;
-        RandomEditor *temp {};
-        EXPECT_TRUE(home->open_random_editor(DATA_FILENAME, &temp).is_ok());
-        file.reset(temp);
-
-        framer = Framer::open(std::move(file), 0x100, 8).value();
-    }
+        : home {std::make_unique<HeapStorage>()},
+          framer {*Framer::open(DATA_FILENAME, home.get(), 0x100, 8)}
+    {}
 
     ~FramerTests() override = default;
 
     std::unique_ptr<HeapStorage> home;
-    std::unique_ptr<Framer> framer;
+    Framer framer;
 };
 
 TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
 {
-    ASSERT_EQ(framer->available(), 8);
-    ASSERT_EQ(framer->page_count(), 0);
-    ASSERT_TRUE(framer->flushed_lsn().is_null());
+    ASSERT_EQ(framer.available(), 8);
+    ASSERT_EQ(framer.page_count(), 0);
 }
 
 TEST_F(FramerTests, KeepsTrackOfAvailableFrames)
 {
-    auto frame_id = framer->pin(PageId::root()).value();
-    ASSERT_EQ(framer->available(), 7);
-    framer->discard(frame_id);
-    ASSERT_EQ(framer->available(), 8);
+    auto frame_id = framer.pin(Id::root()).value();
+    ASSERT_EQ(framer.available(), 7);
+    framer.discard(frame_id);
+    ASSERT_EQ(framer.available(), 8);
 }
 
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
     for (Size i {1}; i <= 8; i++)
-        ASSERT_TRUE(framer->pin(PageId {i}));
-    const auto r = framer->pin(PageId {9UL});
+        ASSERT_TRUE(framer.pin(Id {i}));
+    const auto r = framer.pin(Id {9UL});
     ASSERT_FALSE(r.has_value());
     ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
 
-    framer->unpin(FrameNumber {1UL});
-    ASSERT_TRUE(framer->pin(PageId {9UL}));
+    framer.unpin(Size {1UL});
+    ASSERT_TRUE(framer.pin(Id {9UL}));
 }
 
 auto write_to_page(Page &page, const std::string &message) -> void
@@ -183,7 +464,7 @@ auto read_from_page(const Page &page, Size size) -> std::string
 
 class PagerTests : public TestOnHeap {
 public:
-    static constexpr Size frame_count {32};
+    static constexpr Size frame_count {8};//TODO 32};
     static constexpr Size page_size {0x100};
     std::string test_message {"Hello, world!"};
 
@@ -191,18 +472,18 @@ public:
         : wal {std::make_unique<DisabledWriteAheadLog>()},
           scratch {wal_scratch_size(page_size)}
     {
-        pager = *BasicPager::open({
+        auto r = BasicPager::open({
             PREFIX,
-            *store,
+            store.get(),
             &scratch,
             &images,
-            *wal,
-            status,
-            has_xact,
-            create_sink(),
+            wal.get(),
+            &state,
             frame_count,
             page_size,
         });
+        EXPECT_TRUE(r.has_value());
+        pager = std::move(*r);
     }
 
     ~PagerTests() override = default;
@@ -227,7 +508,7 @@ public:
     }
 
     [[nodiscard]]
-    auto acquire_write(PageId id, const std::string &message) const
+    auto acquire_write(Id id, const std::string &message) const
     {
         auto r = pager->acquire(id, false);
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
@@ -235,7 +516,7 @@ public:
         return std::move(*r);
     }
 
-    auto acquire_write_release(PageId id, const std::string &message) const
+    auto acquire_write_release(Id id, const std::string &message) const
     {
         auto page = acquire_write(id, message);
         const auto s = pager->release(std::move(page));
@@ -243,7 +524,7 @@ public:
     }
 
     [[nodiscard]]
-    auto acquire_read_release(PageId id, Size size) const
+    auto acquire_read_release(Id id, Size size) const
     {
         auto r = pager->acquire(id, false);
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
@@ -252,9 +533,11 @@ public:
         return message;
     }
 
-    Status status {Status::ok()};
+    System state {"test", LogLevel::OFF, {}};
+    Status status {ok()};
     bool has_xact {};
-    std::unordered_set<PageId, PageId::Hash> images;
+    Id commit_lsn;
+    std::unordered_set<Id, Id::Hash> images;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
     LogScratchManager scratch;
@@ -263,8 +546,8 @@ public:
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
-    ASSERT_EQ(pager->flushed_lsn(), SequenceId::null());
-    ASSERT_TRUE(pager->status().is_ok());
+    ASSERT_EQ(pager->recovery_lsn(), Id::null());
+    ASSERT_FALSE(state.has_error());
 }
 
 TEST_F(PagerTests, AllocationInceasesPageCount)
@@ -280,7 +563,7 @@ TEST_F(PagerTests, AllocationInceasesPageCount)
 TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 {
     auto id = allocate_write_release(test_message);
-    ASSERT_EQ(id, PageId::root());
+    ASSERT_EQ(id, Id::root());
 }
 
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
@@ -288,7 +571,7 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
     const auto id = allocate_write_release(test_message);
     auto r = pager->acquire(id, false);
     ASSERT_EQ(id, r->id());
-    ASSERT_EQ(id, PageId::root());
+    ASSERT_EQ(id, Id::root());
     EXPECT_TRUE(pager->release(std::move(*r)).is_ok());
 }
 
@@ -321,22 +604,46 @@ TEST_F(PagerTests, PagesAreAutomaticallyReleased)
     ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
 }
 
-TEST_F(PagerTests, PageDataPersistsInFrame)
+template<class T>
+static auto run_root_persistence_test(T &test, Size n)
 {
-    const auto id = allocate_write_release(test_message);
-    ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
-}
-
-TEST_F(PagerTests, PageDataPersistsInFile)
-{
-    const auto id = allocate_write_release(test_message);
+    const auto id = test.allocate_write_release(test.test_message);
 
     // Cause the root page to be evicted and written back, along with some other pages.
-    while (pager->page_count() < frame_count * 2)
-        [[maybe_unused]] auto unused = allocate_write_release("...");
+    while (test.pager->page_count() < n)
+        [[maybe_unused]] auto unused = test.allocate_write_release("...");
 
     // Read the root page back from the file.
-    ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
+    ASSERT_EQ(test.acquire_read_release(id, test.test_message.size()), test.test_message);
+}
+
+TEST_F(PagerTests, RootDataPersistsInFrame)
+{
+    run_root_persistence_test(*this, frame_count);
+}
+
+TEST_F(PagerTests, RootDataPersistsInStorage)
+{
+    run_root_persistence_test(*this, frame_count * 2);
+}
+
+TEST_F(PagerTests, HeaderDataPersists)
+{
+    auto root = allocate_write(test_message);
+    root.set_type(PageType::INTERNAL_NODE);
+    root.set_lsn(Id {123});
+    FileHeader header {
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        page_size,
+        {},
+    };
+    write_header(root, header);
+    pager->release(std::move(root));
 }
 
 [[nodiscard]]
@@ -360,8 +667,8 @@ TEST_F(PagerTests, SanityCheck)
         [[maybe_unused]] const auto unused = allocate_write_release(id);
 
     for (const auto &id: ids) { // NOTE: gtest assertion macros sometimes complain if braces are omitted.
-        ASSERT_EQ(id, acquire_read_release(PageId {std::stoull(id)}, id.size()));
+        ASSERT_EQ(id, acquire_read_release(Id {std::stoull(id)}, id.size()));
     }
 }
 
-} // namespace calico
+} // namespace Calico

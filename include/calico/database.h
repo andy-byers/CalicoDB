@@ -5,7 +5,7 @@
 #include "options.h"
 #include <memory>
 
-namespace calico {
+namespace Calico {
 
 class Core;
 class Cursor;
@@ -17,8 +17,8 @@ class Database final {
 public:
     Database() noexcept;
 
-    [[nodiscard]] static auto destroy(Database) -> Status;
-    [[nodiscard]] auto open(const std::string &, const Options & = {}) -> Status;
+    [[nodiscard]] static auto destroy(Database db) -> Status;
+    [[nodiscard]] auto open(const std::string &path, const Options &options = {}) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto find_exact(BytesView key) const -> Cursor;
     [[nodiscard]] auto find(BytesView key) const -> Cursor;
@@ -34,13 +34,13 @@ public:
     ~Database();
 
     // NOTE: Necessary because we have a non-trivial destructor.
-    Database(Database&&) noexcept;
-    Database& operator=(Database&&) noexcept;
+    Database(Database &&rhs) noexcept;
+    Database& operator=(Database &&rhs) noexcept;
 
 private:
     std::unique_ptr<Core> m_core;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_DATABASE_H

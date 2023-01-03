@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace calico {
+namespace Calico {
 
 using ReadInterceptor = std::function<Status(const std::string&, Bytes&, Size)>;
 using WriteInterceptor = std::function<Status(const std::string&, BytesView, Size)>;
@@ -33,7 +33,10 @@ namespace interceptors {
 
 inline auto assert_error_42(const Status &s)
 {
-    CALICO_EXPECT_TRUE(s.is_system_error() and s.what() == "42");
+    if (!s.is_system_error() || s.what() != "42") {
+        fmt::print(stderr, "error: unexpected {} status: {}", get_status_name(s), s.what());
+        std::exit(EXIT_FAILURE);
+    }
 }
 
 class RandomHeapReader : public RandomReader {
@@ -121,11 +124,11 @@ struct FailOnce {
             if (index++ == Delay)
                 return error;
         }
-        return Status::ok();
+        return ok();
     }
 
     std::string prefix;
-    Status error {Status::system_error("42")};
+    Status error {system_error("42")};
     Size index {};
 };
 
@@ -141,11 +144,11 @@ struct FailAfter {
             if (stob(path).starts_with(prefix) && index++ >= Delay)
                 return error;
         }
-        return Status::ok();
+        return ok();
     }
 
     std::string prefix;
-    Status error {Status::system_error("42")};
+    Status error {system_error("42")};
     Size index {};
 };
 
@@ -163,11 +166,11 @@ struct FailEvery {
                 return error;
             }
         }
-        return Status::ok();
+        return ok();
     }
 
     std::string prefix;
-    Status error {Status::system_error("42")};
+    Status error {system_error("42")};
     Size index {};
 };
 
@@ -208,23 +211,23 @@ public:
     {
         if (stob(path).starts_with(m_prefix)) {
             auto status = m_pattern[m_index++] == 0
-                ? m_error : Status::ok();
+                ? m_error : ok();
 
             if (m_index == m_pattern.size())
                 m_index = Reset {}(m_index);
 
             return status;
         }
-        return Status::ok();
+        return ok();
     }
 
 private:
     std::string m_prefix;
     std::vector<Outcome> m_pattern;
-    Status m_error {Status::system_error("42")};
+    Status m_error {system_error("42")};
     Size m_index {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_TEST_TOOLS_FAKES_H

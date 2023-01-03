@@ -5,11 +5,12 @@
 #include <memory>
 #include <optional>
 
-namespace calico {
+namespace Calico {
 
 class Node;
-class NodePool;
-class Internal;
+class NodeManager; // TODO: remove
+class Internal; // TODO: remove
+struct CursorActions;
 
 class Cursor final {
 public:
@@ -47,11 +48,10 @@ private:
     friend class CursorInternal;
 
     mutable Status m_status {Status::not_found("not found")};
-    NodePool *m_pool {};
-    Internal *m_internal {};
+    CursorActions *m_actions {};
     Position m_position;
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_CURSOR_H

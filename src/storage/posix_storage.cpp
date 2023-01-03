@@ -1,10 +1,10 @@
 #include "posix_storage.h"
 #include "posix_system.h"
 #include "utils/expect.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 #include <fcntl.h>
 
-namespace calico {
+namespace Calico {
 
 namespace fs = std::filesystem;
 static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
@@ -18,7 +18,7 @@ static auto read_file_at(int file, Bytes &out, Size offset)
     if (!r.has_value())
         return r.error();
     out.truncate(*r);
-    return Status::ok();
+    return ok();
 }
 
 static auto write_file(int file, BytesView in)
@@ -28,13 +28,9 @@ static auto write_file(int file, BytesView in)
     if (!r.has_value()) {
         return r.error();
     } else if (*r != in.size()) {
-        ThreePartMessage message;
-        message.set_primary("could not write to file");
-        message.set_detail("incomplete write");
-        message.set_hint("wrote {}/{} bytes", *r, in.size());
-        return message.system_error();
+        return system_error("could not write to file: incomplete write (wrote {}/{} bytes)", *r, in.size());
     }
-    return Status::ok();
+    return ok();
 }
 
 RandomFileReader::~RandomFileReader()
@@ -94,8 +90,8 @@ auto PosixStorage::rename_file(const std::string &old_path, const std::string &n
 {
     std::error_code code;
     fs::rename(old_path, new_path, code);
-    if (code) return Status::system_error(code.message());
-    return Status::ok();
+    if (code) return system_error(code.message());
+    return ok();
 }
 
 auto PosixStorage::remove_file(const std::string &path) -> Status
@@ -113,7 +109,7 @@ auto PosixStorage::file_size(const std::string &path, Size &out) const -> Status
     auto r = system::file_size(path);
     if (r.has_value()) {
         out = *r;
-        return Status::ok();
+        return ok();
     }
     return r.error();
 }
@@ -122,19 +118,21 @@ auto PosixStorage::get_children(const std::string &path, std::vector<std::string
 {
     std::error_code error;
     std::filesystem::directory_iterator itr {path, error};
-    if (error) return Status::system_error(error.message());
+    if (error) return system_error(error.message());
 
     for (auto const &entry: itr)
         out.emplace_back(entry.path());
-    return Status::ok();
+    return ok();
 }
 
 auto PosixStorage::open_random_reader(const std::string &path, RandomReader **out) -> Status
 {
     const auto fd = system::file_open(path, O_RDONLY, FILE_PERMISSIONS);
     if (fd.has_value()) {
-        *out = new RandomFileReader {path, *fd};
-        return Status::ok();
+        *out = new(std::nothrow) RandomFileReader {path, *fd};
+        if (*out == nullptr)
+            return system_error("cannot allocate file: out of memory");
+        return ok();
     }
     return fd.error();
 }
@@ -143,8 +141,10 @@ auto PosixStorage::open_random_editor(const std::string &path, RandomEditor **ou
 {
     const auto fd = system::file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS);
     if (fd.has_value()) {
-        *out = new RandomFileEditor {path, *fd};
-        return Status::ok();
+        *out = new(std::nothrow) RandomFileEditor {path, *fd};
+        if (*out == nullptr)
+            return system_error("cannot allocate file: out of memory");
+        return ok();
     }
     return fd.error();
 }
@@ -153,8 +153,10 @@ auto PosixStorage::open_append_writer(const std::string &path, AppendWriter **ou
 {
     const auto fd = system::file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS);
     if (fd.has_value()) {
-        *out = new AppendFileWriter {path, *fd};
-        return Status::ok();
+        *out = new(std::nothrow) AppendFileWriter {path, *fd};
+        if (*out == nullptr)
+            return system_error("cannot allocate file: out of memory");
+        return ok();
     }
     return fd.error();
 }
@@ -169,4 +171,4 @@ auto PosixStorage::remove_directory(const std::string &path) -> Status
     return system::dir_remove(path);
 }
 
-} // namespace calico
+} // namespace Calico

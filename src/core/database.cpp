@@ -8,9 +8,9 @@
 #include "storage/posix_storage.h"
 #include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 
-namespace calico {
+namespace Calico {
 
 namespace fs = std::filesystem;
 
@@ -109,4 +109,4 @@ auto Database::transaction() -> Transaction
     return m_core->transaction();
 }
 
-} // namespace calico
+} // namespace Calico

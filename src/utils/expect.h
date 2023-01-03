@@ -22,35 +22,35 @@
 #define CALICO_EXPECT_GT(t1, t2) CALICO_EXPECT_TRUE((t1) > (t2))
 #define CALICO_EXPECT_GE(t1, t2) CALICO_EXPECT_TRUE((t1) >= (t2))
 
-#define CALICO_TRY(expr) \
+#define CALICO_TRY_S(expr) \
     do { \
         if (auto calico_try_status = (expr); !calico_try_status.is_ok()) \
             return calico_try_status; \
     } while (0)
 
-#define CALICO_TRY__(expr)                                                        \
-    do {                                                                     \
+#define CALICO_TRY_R(expr) \
+    do { \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) \
-            return Err {calico_try_result.error()};                          \
+            return tl::make_unexpected(calico_try_result.error()); \
     } while (0)
 
-#define CALICO_TRY_STORE(out, expr)                                               \
-    do {                                                                       \
+#define CALICO_PUT_R(out, expr) \
+    do { \
         if (auto calico_try_result = (expr); !calico_try_result.has_value()) { \
-            return Err {calico_try_result.error()};                            \
-        } else {                                                               \
-            (out) = std::move(calico_try_result.value());                      \
-        }                                                                      \
+            return tl::make_unexpected(calico_try_result.error()); \
+        } else { \
+            (out) = std::move(calico_try_result.value()); \
+        } \
     } while (0)
 
-#define CALICO_TRY_CREATE(out, expr)              \
-    auto calico_try_##out = (expr);            \
-    if (!calico_try_##out.has_value()) {       \
-        return Err {calico_try_##out.error()}; \
-    }                                          \
+#define CALICO_NEW_R(out, expr) \
+    auto calico_try_##out = (expr); \
+    if (!calico_try_##out.has_value()) { \
+        return tl::make_unexpected(calico_try_##out.error()); \
+    } \
     auto out = std::move(*calico_try_##out)
 
-namespace calico::impl {
+namespace Calico::impl {
 
 inline constexpr auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept -> void
 {
@@ -60,6 +60,6 @@ inline constexpr auto handle_expect(bool expectation, const char *repr, const ch
     }
 }
 
-} // namespace calico::impl
+} // namespace Calico::impl
 
 #endif // CALICO_UTILS_EXPECT_H

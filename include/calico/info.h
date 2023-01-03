@@ -3,7 +3,7 @@
 
 #include "database.h"
 
-namespace calico {
+namespace Calico {
 
 class Info final {
 public:
@@ -12,6 +12,7 @@ public:
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto maximum_key_size() const -> Size;
+    [[nodiscard]] auto cache_hit_ratio() const -> double;
 
 private:
     friend class Core;
@@ -23,6 +24,6 @@ private:
     Core *m_core {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_INFO_H

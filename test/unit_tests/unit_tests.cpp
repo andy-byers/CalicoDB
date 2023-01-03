@@ -1,29 +1,30 @@
 #include "unit_tests.h"
 
-namespace calico::internal {
+namespace Calico::UnitTests {
 
 std::uint32_t random_seed;
 
-} // namespace calico::internal
+} // namespace Calico::UnitTests
 
-int main(int argc, char** argv) {
-    namespace cco = calico;
+int main(int argc, char** argv)
+{
+    namespace Cco = Calico;
 
     // Custom parameter prefixes.
-    static constexpr cco::BytesView SEED_PREFIX {"--random_seed="};
+    static constexpr Cco::BytesView SEED_PREFIX {"--random_seed="};
 
     for (int i {1}; i < argc; ++i) {
-        cco::BytesView arg {argv[i]};
+        Cco::BytesView arg {argv[i]};
 
         if (arg.starts_with(SEED_PREFIX)) {
             arg.advance(SEED_PREFIX.size());
-            std::uint32_t seed {};
+            std::uint32_t seed;
             if (arg == "<random>") {
                 seed = static_cast<uint32_t>(rand());
             } else {
                 seed = static_cast<uint32_t>(std::stoul(arg.to_string()));
             }
-            cco::internal::random_seed = seed;
+            Cco::UnitTests::random_seed = seed;
         }
     }
 

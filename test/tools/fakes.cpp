@@ -1,8 +1,8 @@
 #include "fakes.h"
-#include "utils/info_log.h"
+#include "utils/system.h"
 #include "utils/utils.h"
 
-namespace calico {
+namespace Calico {
 
 /*
  * System call interceptors for fault injection during testing.
@@ -65,10 +65,10 @@ namespace interceptors {
     auto reset() -> void
     {
         std::lock_guard lock {mutex};
-        open = [](auto) {return Status::ok();};
-        read = [](auto, auto, auto) {return Status::ok();};
-        write = [](auto, auto, auto) {return Status::ok();};
-        sync = [](auto) {return Status::ok();};
+        open = [](auto) {return ok();};
+        read = [](auto, auto, auto) {return ok();};
+        write = [](auto, auto, auto) {return ok();};
+        sync = [](auto) {return ok();};
     }
 
 } // namespace interceptors
@@ -95,7 +95,7 @@ static auto read_file_at(const std::string &path, const std::string &file, Bytes
         mem_copy(out, buffer, r);
     }
     out.truncate(r);
-    return Status::ok();
+    return ok();
 }
 
 static auto write_file_at(const std::string &path, std::string &file, BytesView in, Size offset)
@@ -105,7 +105,7 @@ static auto write_file_at(const std::string &path, std::string &file, BytesView 
     if (const auto write_end = offset + in.size(); file.size() < write_end)
         file.resize(write_end);
     mem_copy(stob(file).range(offset), in);
-    return Status::ok();
+    return ok();
 }
 
 static auto format_path(std::string path)
@@ -160,13 +160,9 @@ auto HeapStorage::open_random_reader(const std::string &path, RandomReader **out
     if (auto itr = m_files.find(path); itr != end(m_files)) {
         *out = new RandomHeapReader {path, itr->second};
     } else {
-        ThreePartMessage message;
-        message.set_primary("could not open file");
-        message.set_detail("file does not exist");
-        message.set_hint("open a writer or editor to create the file");
-        return message.not_found();
+        return not_found("could not open file: file does not exist (open a writer or editor to create the file)");
     }
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out) -> Status
@@ -181,7 +177,7 @@ auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out
         CALICO_EXPECT_TRUE(truthy);
         *out = new RandomHeapEditor {path, position->second};
     }
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::open_append_writer(const std::string &path, AppendWriter **out) -> Status
@@ -196,83 +192,61 @@ auto HeapStorage::open_append_writer(const std::string &path, AppendWriter **out
         CALICO_EXPECT_TRUE(truthy);
         *out = new AppendHeapWriter {path, position->second};
     }
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::remove_file(const std::string &name) -> Status
 {
     std::lock_guard lock {m_mutex};
     auto itr = m_files.find(name);
-    if (itr == end(m_files)) {
-        ThreePartMessage message;
-        message.set_primary("could not remove file");
-        message.set_detail("file does not exist");
-        return message.system_error();
-    }
+    if (itr == end(m_files))
+        return system_error("cannot remove file: file does not exist");
     m_files.erase(itr);
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::resize_file(const std::string &name, Size size) -> Status
 {
     std::lock_guard lock {m_mutex};
     auto itr = m_files.find(name);
-    if (itr == end(m_files)) {
-        ThreePartMessage message;
-        message.set_primary("could not resize file");
-        message.set_detail("file does not exist");
-        return message.system_error();
-    }
+    if (itr == end(m_files))
+        return system_error("cannot resize file: file does not exist");
     itr->second.resize(size);
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::rename_file(const std::string &old_name, const std::string &new_name) -> Status
 {
-    if (new_name.empty()) {
-        ThreePartMessage message;
-        message.set_primary("could not rename file");
-        message.set_detail("new name is empty");
-        return message.system_error();
-    }
+    if (new_name.empty())
+        return system_error("could not rename file: new name has zero length");
+
     std::lock_guard lock {m_mutex};
     auto node = m_files.extract(old_name);
-    if (node.empty()) {
-        ThreePartMessage message;
-        message.set_primary("cannot rename file");
-        message.set_detail("file \"{}\" does not exist", old_name);
-        return message.system_error();
-    }
+    if (node.empty())
+        return system_error("cannot rename file: file \"{}\" does not exist", old_name);
+
     node.key() = new_name;
     m_files.insert(std::move(node));
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::file_size(const std::string &name, Size &out) const -> Status
 {
     std::lock_guard lock {m_mutex};
     auto itr = m_files.find(name);
-    if (itr == cend(m_files)) {
-        ThreePartMessage message;
-        message.set_primary("cannot get file size");
-        message.set_detail("file \"{}\" does not exist", name);
-        return message.system_error();
-    }
+    if (itr == cend(m_files))
+        return system_error("cannot get file size: file \"{}\" does not exist", name);
     out = itr->second.size();
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::file_exists(const std::string &name) const -> Status
 {
     std::lock_guard lock {m_mutex};
     const auto itr = m_files.find(name);
-    if (itr == cend(m_files)) {
-        ThreePartMessage message;
-        message.set_primary("could not find file");
-        message.set_detail("file \"{}\" does not exist", name);
-        return message.not_found();
-    }
-    return Status::ok();
+    if (itr == cend(m_files))
+        return not_found("cannot find file: file \"{}\" does not exist", name);
+    return ok();
 }
 
 auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::string> &out) const -> Status
@@ -284,25 +258,21 @@ auto HeapStorage::get_children(const std::string &dir_path, std::vector<std::str
 
     std::lock_guard lock {m_mutex};
     auto itr = m_directories.find(format_path(dir_path));
-    if (itr == cend(m_directories)) {
-        ThreePartMessage message;
-        message.set_primary("could not get children");
-        message.set_detail("directory {} does not exist", dir_path);
-        return message.system_error();
-    }
+    if (itr == cend(m_directories))
+        return system_error("could not get children: directory {} does not exist", dir_path);
 
     std::vector<std::string> all_files(m_files.size());
     std::transform(cbegin(m_files), cend(m_files), back_inserter(out), [](auto entry) {
         return entry.first;
     });
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::create_directory(const std::string &path) -> Status
 {
     std::lock_guard lock {m_mutex};
     m_directories.insert(format_path(path));
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::remove_directory(const std::string &name) -> Status
@@ -310,7 +280,7 @@ auto HeapStorage::remove_directory(const std::string &name) -> Status
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_NE(m_directories.find(name), cend(m_directories));
     m_directories.erase(name);
-    return Status::ok();
+    return ok();
 }
 
 auto HeapStorage::clone() const -> Storage*
@@ -324,4 +294,4 @@ auto HeapStorage::clone() const -> Storage*
 
 #undef INTERCEPT
 
-} // namespace calico
+} // namespace Calico

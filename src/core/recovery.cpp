@@ -1,17 +1,22 @@
 #include "recovery.h"
 #include "page/page.h"
 #include "pager/pager.h"
-#include "utils/info_log.h"
 #include "wal/wal.h"
 
-namespace calico {
+namespace Calico {
 
-auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
+static auto encode_payload_type(Bytes out, XactPayloadType type)
+{
+    CALICO_EXPECT_FALSE(out.is_empty());
+    out[0] = type;
+}
+
+auto encode_deltas_payload(Id page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
 {
     const auto original_size = out.size();
 
     // Payload type (1 B)
-    out[0] = static_cast<Byte>(XactPayloadType::DELTAS);
+    encode_payload_type(out, XactPayloadType::DELTAS);
     out.advance();
 
     // Page ID (8 B)
@@ -39,18 +44,18 @@ auto encode_deltas_payload(PageId page_id, BytesView image, const std::vector<Pa
 auto encode_commit_payload(Bytes out) -> Size
 {
     // Payload type (1 B)
-    out[0] = static_cast<Byte>(XactPayloadType::COMMIT);
+    encode_payload_type(out, XactPayloadType::COMMIT);
     out.advance();
 
     return MINIMUM_PAYLOAD_SIZE;
 }
 
-auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Size
+auto encode_full_image_payload(Id page_id, BytesView image, Bytes out) -> Size
 {
     const auto original_size = out.size();
 
     // Payload type (1 B)
-    out[0] = static_cast<Byte>(XactPayloadType::FULL_IMAGE);
+    encode_payload_type(out, XactPayloadType::FULL_IMAGE);
     out.advance();
 
     // Page ID (8 B)
@@ -64,9 +69,9 @@ auto encode_full_image_payload(PageId page_id, BytesView image, Bytes out) -> Si
     return original_size - out.size();
 }
 
-static auto decode_deltas_payload(WalPayloadOut in) -> DeltasDescriptor
+static auto decode_deltas_payload(WalPayloadOut in) -> DeltaDescriptor
 {
-    DeltasDescriptor info;
+    DeltaDescriptor info;
     auto data = in.data();
     info.lsn = in.lsn();
 
@@ -84,7 +89,7 @@ static auto decode_deltas_payload(WalPayloadOut in) -> DeltasDescriptor
 
     // Deltas (N B)
     std::generate(begin(info.deltas), end(info.deltas), [&data] {
-        DeltasDescriptor::Delta delta;
+        DeltaDescriptor::Delta delta;
         delta.offset = get_u16(data);
         data.advance(sizeof(std::uint16_t));
 
@@ -110,7 +115,7 @@ static auto decode_full_image_payload(WalPayloadOut in) -> FullImageDescriptor
 
     // Page ID (8 B)
     info.pid.value = get_u64(data);
-    data.advance(sizeof(PageId));
+    data.advance(sizeof(Id));
 
     // Image (n B)
     info.image = data;
@@ -138,29 +143,26 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
     }
 }
 
-auto Recovery::start_abort(SequenceId commit_lsn) -> Status
+#define ENSURE_ENABLED(primary) \
+    do { \
+        if (!m_wal->is_enabled()) \
+            return logic_error( \
+                "{}: WAL is not enabled (wal_limit was set to DISABLE_WAL on database creation)", primary); \
+    } while (0)
+
+auto Recovery::start_abort() -> Status
 {
-    static constexpr auto MSG = "could not abort";
-
-    if (!m_wal->is_enabled()) {
-        ThreePartMessage message;
-        message.set_primary(MSG);
-        message.set_detail("WAL is not enabled");
-        message.set_hint(R"("wal_limit" was set to "DISABLE_WAL" on database creation)");
-        return message.logic_error();
-    }
-
-    auto s = Status::ok();
-    if (m_wal->is_working())
-        (void)m_wal->stop_workers();
+    m_log->trace("start_abort");
+    ENSURE_ENABLED("cannot start abort");
+    CALICO_TRY_S(m_wal->stop_workers());
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
-    return m_wal->roll_backward(commit_lsn, [this](auto payload) {
+    return m_wal->roll_backward(m_system->commit_lsn.load(), [this](auto payload) {
         auto info = decode_payload(payload);
 
         if (!info.has_value())
-            return Status::corruption("WAL is corrupted");
+            return corruption("WAL is corrupted");
 
         if (std::holds_alternative<FullImageDescriptor>(*info)) {
             const auto image = std::get<FullImageDescriptor>(*info);
@@ -169,47 +171,67 @@ auto Recovery::start_abort(SequenceId commit_lsn) -> Status
             page->apply_update(image);
             return m_pager->release(std::move(*page));
         }
-        return Status::ok();
+        return ok();
     });
 }
 
-auto Recovery::finish_abort(SequenceId commit_lsn) -> Status
+auto Recovery::finish_abort() -> Status
 {
-    return finish_routine(commit_lsn);
+    m_log->trace("finish_abort");
+    ENSURE_ENABLED("cannot finish abort");
+//    return finish_routine();
+
+    CALICO_TRY_S(m_pager->flush({}));
+
+    CALICO_TRY_S(m_wal->remove_after(m_system->commit_lsn));
+    return m_wal->start_workers();
 }
 
-auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
+auto Recovery::start_recovery() -> Status
 {
-    SequenceId last_lsn;
+    m_log->trace("start_recovery");
+    ENSURE_ENABLED("cannot start recovery");
+    Id last_lsn;
 
-    const auto redo = [this, &last_lsn, &commit_lsn](auto payload) {
+    const auto redo = [this, &last_lsn](auto payload) {
         auto info = decode_payload(payload);
 
         // Payload has an invalid type.
         if (!info.has_value())
-            return Status::corruption("WAL is corrupted");
+            return corruption("WAL is corrupted");
 
         last_lsn = payload.lsn();
 
-        if (std::holds_alternative<DeltasDescriptor>(*info)) {
-            if (payload.lsn() > m_pager->flushed_lsn()) {
-                const auto deltas = std::get<DeltasDescriptor>(*info);
-                auto page = m_pager->acquire(deltas.pid, true);
-                if (!page.has_value()) return page.error();
-                page->apply_update(deltas);
-                return m_pager->release(std::move(*page));
-            }
-        } else if (std::holds_alternative<CommitDescriptor>(*info)) {
-            commit_lsn = payload.lsn();
+        if (std::holds_alternative<CommitDescriptor>(*info)) {
+            m_system->commit_lsn.store(payload.lsn());
+        } else if (std::holds_alternative<DeltaDescriptor>(*info)) {
+            const auto delta = std::get<DeltaDescriptor>(*info);
+            auto page = m_pager->acquire(delta.pid, true);
+            if (!page.has_value())
+                return page.error();
+            if (delta.lsn > page->lsn())
+                page->apply_update(delta);
+            return m_pager->release(std::move(*page));
+        } else if (std::holds_alternative<FullImageDescriptor>(*info)) {
+            // This is not necessary in most cases, but should help with some kinds of corruption.
+            const auto image = std::get<FullImageDescriptor>(*info);
+            auto page = m_pager->acquire(image.pid, true);
+            if (!page.has_value())
+                return page.error();
+            if (image.lsn > page->lsn())
+                page->apply_update(image);
+            return m_pager->release(std::move(*page));
+        } else {
+            return corruption("unrecognized payload type");
         }
-        return Status::ok();
+        return ok();
     };
 
     const auto undo = [this](auto payload) {
         auto info = decode_payload(payload);
 
         if (!info.has_value())
-            return Status::corruption("WAL is corrupted");
+            return corruption("WAL is corrupted");
 
         if (std::holds_alternative<FullImageDescriptor>(*info)) {
             const auto image = std::get<FullImageDescriptor>(*info);
@@ -218,31 +240,43 @@ auto Recovery::start_recovery(SequenceId &commit_lsn) -> Status
             page->apply_update(image);
             return m_pager->release(std::move(*page));
         }
-        return Status::ok();
+        return ok();
     };
 
-    CALICO_TRY(m_wal->roll_forward(SequenceId::null(), redo));
 
-    // Reached the end of the WAL, but didn't find a commit record.
+    // Apply updates that are in the WAL but not the database.
+    auto s = m_wal->roll_forward(m_pager->recovery_lsn(), redo);
+
+    m_log->info("{} -> {}", m_pager->recovery_lsn().value, last_lsn.value);
+    CALICO_TRY_S(s);
+
+    // Reached the end of the WAL, but didn't find a commit record. Undo updates until we reach the most-recent commit.
+    const auto commit_lsn = m_system->commit_lsn.load();
     if (last_lsn != commit_lsn)
         return m_wal->roll_backward(commit_lsn, undo);
-    return Status::ok();
+    return ok();
 }
 
-auto Recovery::finish_recovery(SequenceId commit_lsn) -> Status
+auto Recovery::finish_recovery() -> Status
 {
-    return finish_routine(commit_lsn);
+    m_log->trace("finish_recovery");
+    ENSURE_ENABLED("cannot finish recovery");
+//    return finish_routine();
+
+    CALICO_TRY_S(m_pager->flush({}));
+    CALICO_TRY_S(m_wal->start_workers());
+    return m_wal->remove_before(m_pager->recovery_lsn());
 }
 
-auto Recovery::finish_routine(SequenceId commit_lsn) -> Status
+auto Recovery::finish_routine() -> Status
 {
     // Flush all dirty database pages.
-    CALICO_TRY(m_pager->flush());
+    CALICO_TRY_S(m_pager->flush({}));
 
-    // Remove obsolete segment files.
-    CALICO_TRY(m_wal->remove_after(commit_lsn));
+    CALICO_TRY_S(m_wal->start_workers());
 
-    return m_wal->start_workers();
+    // TODO TODO TODO TODO
+    return m_wal->remove_before(Id {m_pager->recovery_lsn().value - 1});
 }
 
-} // namespace calico
+} // namespace Calico

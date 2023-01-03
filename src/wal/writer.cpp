@@ -2,7 +2,7 @@
 #include "utils/types.h"
 #include <optional>
 
-namespace calico {
+namespace Calico {
 
 auto LogWriter::write(WalPayloadIn payload) -> Status
 {
@@ -51,14 +51,14 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
     // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
     // to be all the way on disk.
     m_last_lsn = lsn;
-    return Status::ok();
+    return ok();
 }
 
 auto LogWriter::flush() -> Status
 {
     // Already flushed.
     if (m_offset == 0)
-        return Status::logic_error("could not flush: already flushed");
+        return logic_error("could not flush: already flushed");
 
     // Clear unused bytes at the end of the tail buffer.
     mem_clear(m_tail.range(m_offset));
@@ -116,7 +116,7 @@ auto WalWriter::on_event(const Event &event) -> Status
         CALICO_EXPECT_TRUE((std::holds_alternative<FlushToken>(event)));
         auto s = m_writer->flush();
         // Throw away logic errors due to the tail buffer being empty.
-        return s.is_logic_error() ? Status::ok() : s;
+        return s.is_logic_error() ? ok() : s;
     }
 }
 
@@ -145,7 +145,7 @@ auto WalWriter::close_segment() -> Status
     if (!s.is_ok()) {
         is_empty = m_writer->block_count() == 0;
         if (s.is_logic_error())
-            s = Status::ok();
+            s = ok();
     }
     m_writer.reset();
     m_file.reset();
@@ -171,4 +171,4 @@ auto WalWriter::advance_segment() -> Status
     return s;
 }
 
-} // namespace calico
+} // namespace Calico

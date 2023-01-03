@@ -3,20 +3,20 @@
 #define CALICO_TEST_TOOLS_TOOLS_H
 
 #include "calico/calico.h"
-#include "core/header.h"
 #include "page/node.h"
 #include "pager/framer.h"
-#include "storage/posix_storage.h"
 #include "random.h"
+#include "storage/posix_storage.h"
+#include "utils/header.h"
 #include "utils/types.h"
 #include "utils/utils.h"
 #include "wal/record.h"
 #include <iomanip>
 #include <iostream>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
-namespace calico {
+namespace Calico {
 
 inline auto expect_ok(const Status &s) -> void
 {
@@ -58,12 +58,12 @@ public:
     auto get_state() -> FileHeader
     {
         CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader));
-        auto root = get_page(PageId::root());
+        auto root = get_page(Id::root());
         return read_header(root);
     }
 
     [[nodiscard]]
-    auto get_page(PageId id) -> Page
+    auto get_page(Id id) -> Page
     {
         const auto offset = id.as_index() * m_page_size;
         CALICO_EXPECT_LE(offset + m_page_size, m_data.size());
@@ -72,7 +72,6 @@ public:
             id,
             stob(m_data).range(offset, m_page_size),
             nullptr,
-            false,
             false,
         }};
     }
@@ -150,15 +149,15 @@ namespace tools {
     template<class T>
     auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
     {
-        const auto FMT = fmt::format("expected record ({}, {}): {{}}\n", key, value);
+        const auto MSG = fmt::format("expected record ({}, {})\n", key, value);
         if (auto c = find_exact(t, key); c.is_valid()) {
             if (c.value() != value) {
-                fmt::print(stderr, FMT, "value \"{}\" does not match", c.value());
-                CALICO_EXPECT_TRUE(false && "expect_contains() failed to match value");
+                fmt::print(stderr, "{}: value \"{}\" does not match\n", MSG, c.value());
+                std::exit(EXIT_FAILURE);
             }
         } else {
-            fmt::print(stderr, FMT, "could not find key");
-            CALICO_EXPECT_TRUE(false && "expect_contains() failed to find key");
+            fmt::print(stderr, "{}: {}\n", MSG, "could not find key");
+            std::exit(EXIT_FAILURE);
         }
     }
 
@@ -310,14 +309,14 @@ private:
     Parameters m_param;
 };
 
-} // namespace calico
+} // namespace Calico
 
 namespace fmt {
 
-namespace cco = calico;
+namespace Cco = Calico;
 
 template <>
-struct formatter<cco::FileHeader> {
+struct formatter<Cco::FileHeader> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -325,21 +324,21 @@ struct formatter<cco::FileHeader> {
     }
 
     template <typename FormatContext>
-    auto format(const cco::FileHeader &header, FormatContext &ctx) {
+    auto format(const Cco::FileHeader &header, FormatContext &ctx) {
         auto out = fmt::format("({} B) {{", sizeof(header));
         out += fmt::format("magic_code: {}, ", header.magic_code);
         out += fmt::format("header_crc: {}, ", header.header_crc);
         out += fmt::format("page_count: {}, ", header.page_count);
         out += fmt::format("freelist_head: {}, ", header.freelist_head);
         out += fmt::format("record_count: {}, ", header.record_count);
-        out += fmt::format("flushed_lsn: {}, ", header.flushed_lsn);
+        out += fmt::format("flushed_lsn: {}, ", header.recovery_lsn);
         out += fmt::format("page_size: {}", header.page_size);
         return format_to(ctx.out(), "FileHeader {}}}", out);
     }
 };
 
 template <>
-struct formatter<cco::Options> {
+struct formatter<Cco::Options> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -347,19 +346,19 @@ struct formatter<cco::Options> {
     }
 
     template <typename FormatContext>
-    auto format(const cco::Options &options, FormatContext &ctx) {
+    auto format(const Cco::Options &options, FormatContext &ctx) {
         auto out = fmt::format("({} B) {{", sizeof(options));
         out += fmt::format("wal_limit: {}", options.wal_limit);
         out += fmt::format("page_size: {}, ", options.page_size);
-        out += fmt::format("frame_count: {}, ", options.frame_count);
-        out += fmt::format("log_level: {}, ", options.log_level);
-        out += fmt::format("store: {}, ", static_cast<void*>(options.store));
+        out += fmt::format("frame_count: {}, ", options.cache_size);
+        out += fmt::format("log_level: {}, ", static_cast<int>(options.log_level));
+        out += fmt::format("store: {}, ", static_cast<void*>(options.storage));
         return format_to(ctx.out(), "Options {}}}", out);
     }
 };
 
 template <>
-struct formatter<cco::PageType> {
+struct formatter<Cco::PageType> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -367,19 +366,19 @@ struct formatter<cco::PageType> {
     }
 
     template <typename FormatContext>
-    auto format(const cco::PageType &type, FormatContext &ctx) {
+    auto format(const Cco::PageType &type, FormatContext &ctx) {
         switch (type) {
-            case cco::PageType::EXTERNAL_NODE: return format_to(ctx.out(), "EXTERNAL_NODE");
-            case cco::PageType::INTERNAL_NODE: return format_to(ctx.out(), "INTERNAL_NODE");
-            case cco::PageType::FREELIST_LINK: return format_to(ctx.out(), "FREELIST_LINK");
-            case cco::PageType::OVERFLOW_LINK: return format_to(ctx.out(), "OVERFLOW_LINK");
+            case Cco::PageType::EXTERNAL_NODE: return format_to(ctx.out(), "EXTERNAL_NODE");
+            case Cco::PageType::INTERNAL_NODE: return format_to(ctx.out(), "INTERNAL_NODE");
+            case Cco::PageType::FREELIST_LINK: return format_to(ctx.out(), "FREELIST_LINK");
+            case Cco::PageType::OVERFLOW_LINK: return format_to(ctx.out(), "OVERFLOW_LINK");
             default: return format_to(ctx.out(), "<unrecognized>");
         }
     }
 };
 
 template <>
-struct formatter<cco::WalRecordHeader::Type> {
+struct formatter<Cco::WalRecordHeader::Type> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -387,19 +386,19 @@ struct formatter<cco::WalRecordHeader::Type> {
     }
 
     template <typename FormatContext>
-    auto format(const cco::WalRecordHeader::Type &type, FormatContext &ctx) {
+    auto format(const Cco::WalRecordHeader::Type &type, FormatContext &ctx) {
         switch (type) {
-            case cco::WalRecordHeader::FULL: return format_to(ctx.out(), "FULL");
-            case cco::WalRecordHeader::FIRST: return format_to(ctx.out(), "FIRST");
-            case cco::WalRecordHeader::MIDDLE: return format_to(ctx.out(), "MIDDLE");
-            case cco::WalRecordHeader::LAST: return format_to(ctx.out(), "LAST");
+            case Cco::WalRecordHeader::FULL: return format_to(ctx.out(), "FULL");
+            case Cco::WalRecordHeader::FIRST: return format_to(ctx.out(), "FIRST");
+            case Cco::WalRecordHeader::MIDDLE: return format_to(ctx.out(), "MIDDLE");
+            case Cco::WalRecordHeader::LAST: return format_to(ctx.out(), "LAST");
             default: return format_to(ctx.out(), "<unrecognized>");
         }
     }
 };
 
 template <>
-struct formatter<cco::WalRecordHeader> {
+struct formatter<Cco::WalRecordHeader> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -407,7 +406,7 @@ struct formatter<cco::WalRecordHeader> {
     }
 
     template <typename FormatContext>
-    auto format(const cco::WalRecordHeader &header, FormatContext &ctx) {
+    auto format(const Cco::WalRecordHeader &header, FormatContext &ctx) {
         auto out = fmt::format("({} B) {{", sizeof(header));
         out += fmt::format("crc: {}, ", header.crc);
         out += fmt::format("size: {}, ", header.size);
@@ -417,7 +416,7 @@ struct formatter<cco::WalRecordHeader> {
 };
 
 template <>
-struct formatter<cco::XactPayloadType> {
+struct formatter<Cco::XactPayloadType> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -425,11 +424,11 @@ struct formatter<cco::XactPayloadType> {
     }
 
     template <typename FormatContext>
-    auto format(const cco::XactPayloadType &type, FormatContext &ctx) {
+    auto format(const Cco::XactPayloadType &type, FormatContext &ctx) {
         switch (type) {
-            case cco::XactPayloadType::FULL_IMAGE: return format_to(ctx.out(), "FULL_IMAGE");
-            case cco::XactPayloadType::DELTAS: return format_to(ctx.out(), "DELTAS");
-            case cco::XactPayloadType::COMMIT: return format_to(ctx.out(), "COMMIT");
+            case Cco::XactPayloadType::FULL_IMAGE: return format_to(ctx.out(), "FULL_IMAGE");
+            case Cco::XactPayloadType::DELTAS: return format_to(ctx.out(), "DELTAS");
+            case Cco::XactPayloadType::COMMIT: return format_to(ctx.out(), "COMMIT");
             default: return format_to(ctx.out(), "<unrecognized>");
         }
     }
@@ -437,11 +436,10 @@ struct formatter<cco::XactPayloadType> {
 
 }  // namespace fmt
 
-auto operator<(const calico::Record&, const calico::Record&) -> bool;
-auto operator>(const calico::Record&, const calico::Record&) -> bool;
-auto operator<=(const calico::Record&, const calico::Record&) -> bool;
-auto operator>=(const calico::Record&, const calico::Record&) -> bool;
-auto operator==(const calico::Record&, const calico::Record&) -> bool;
-auto operator!=(const calico::Record&, const calico::Record&) -> bool;
+auto operator>(const Calico::Record&, const Calico::Record&) -> bool;
+auto operator<=(const Calico::Record&, const Calico::Record&) -> bool;
+auto operator>=(const Calico::Record&, const Calico::Record&) -> bool;
+auto operator==(const Calico::Record&, const Calico::Record&) -> bool;
+auto operator!=(const Calico::Record&, const Calico::Record&) -> bool;
 
 #endif // CALICO_TEST_TOOLS_TOOLS_H

@@ -3,19 +3,19 @@
 #include "calico/options.h"
 #include "calico/storage.h"
 #include "core/core.h"
-#include "core/header.h"
 #include "fakes.h"
 #include "pager/basic_pager.h"
 #include "tools.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
+#include "utils/header.h"
 #include "wal/basic_wal.h"
 
-namespace calico {
+namespace Calico {
 
 namespace fs = std::filesystem;
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 
@@ -41,7 +41,7 @@ public:
     }
 
     [[nodiscard]]
-    auto get_lsn() const -> SequenceId
+    auto get_lsn() const -> Id
     {
         return m_page.lsn();
     }
@@ -65,7 +65,7 @@ class XactTestHarness {
 public:
     static constexpr Size PAGE_SIZE {0x100};
     static constexpr Size PAGE_COUNT {64};
-    static constexpr Size FRAME_COUNT {32};
+    static constexpr Size CACHE_SIZE {32};
     static constexpr Size WAL_LIMIT {16};
 
     auto set_up() -> void
@@ -74,30 +74,28 @@ public:
         ASSERT_OK(store->create_directory("test"));
         scratch = std::make_unique<LogScratchManager>(wal_scratch_size(PAGE_SIZE));
 
-        WriteAheadLog *temp {};
-        ASSERT_OK(BasicWriteAheadLog::open({
+        auto wal_r = BasicWriteAheadLog::open({
             "test/",
             store.get(),
-            create_sink(),
+            &state,
             PAGE_SIZE,
             WAL_LIMIT,
-        }, &temp));
-        wal.reset(temp);
+        });
+        EXPECT_TRUE(wal_r.has_value()) << wal_r.error().what();
+        wal = std::move(*wal_r);
 
-        auto r = BasicPager::open({
+        auto pager_r = BasicPager::open({
             "test/",
-            *store,
+            store.get(),
             scratch.get(),
             &images,
-            *wal,
-            status,
-            has_xact,
-            create_sink(),
-            FRAME_COUNT,
+            wal.get(),
+            &state,
+            CACHE_SIZE,
             PAGE_SIZE,
         });
-        ASSERT_TRUE(r.has_value());
-        pager = std::move(*r);
+        EXPECT_TRUE(pager_r.has_value()) << pager_r.error().what();
+        pager = std::move(*pager_r);
 
         while (pager->page_count() < PAGE_COUNT) {
             ASSERT_OK(pager->release(pager->allocate().value()));
@@ -106,15 +104,15 @@ public:
         ASSERT_OK(wal->start_workers());
     }
 
-    auto tear_down() -> void
+    auto tear_down() const -> void
     {
-        if (wal->is_working())
+        if (wal && wal->is_working())
             (void)wal->stop_workers();
         interceptors::reset();
     }
 
     [[nodiscard]]
-    auto get_wrapper(PageId id, bool is_writable = false) -> std::optional<PageWrapper>
+    auto get_wrapper(Id id, bool is_writable = false) const -> std::optional<PageWrapper>
     {
         auto page = pager->acquire(id, is_writable);
         if (!page.has_value()) {
@@ -126,46 +124,46 @@ public:
 
     auto commit() -> Status
     {
-        CALICO_TRY(save_state());
+        CALICO_TRY_S(save_state());
 
         const auto lsn = wal->current_lsn();
         WalPayloadIn payload {lsn, scratch->get()};
         const auto size = encode_commit_payload(payload.data());
         payload.shrink_to_fit(size);
 
-        CALICO_TRY(wal->log(payload));
-        CALICO_TRY(wal->advance());
-        CALICO_TRY(allow_cleanup());
+        CALICO_TRY_S(wal->log(payload));
+        CALICO_TRY_S(wal->advance());
+        CALICO_TRY_S(allow_cleanup());
 
-        commit_lsn = lsn;
+        state.commit_lsn.store(lsn);
         images.clear();
         return status;
     }
 
 
-    auto save_state() -> Status
+    auto save_state() const -> Status
     {
-        auto root = pager->acquire(PageId::root(), true);
+        auto root = pager->acquire(Id::root(), true);
         if (!root.has_value()) return root.error();
 
-        auto state = read_header(*root);
-        pager->save_state(state);
-        state.header_crc = compute_header_crc(state);
-        write_header(*root, state);
+        auto header = read_header(*root);
+        pager->save_state(header);
+        header.header_crc = compute_header_crc(header);
+        write_header(*root, header);
 
         return pager->release(std::move(*root));
     }
 
-    auto load_state() -> Status
+    auto load_state() const -> Status
     {
-        auto root = pager->acquire(PageId::root(), false);
+        auto root = pager->acquire(Id::root(), false);
         if (!root.has_value()) return root.error();
 
-        auto state = read_header(*root);
-        EXPECT_EQ(state.header_crc, compute_header_crc(state));
+        auto header = read_header(*root);
+        EXPECT_EQ(header.header_crc, compute_header_crc(header));
         const auto before_count = pager->page_count();
 
-        pager->load_state(state);
+        pager->load_state(header);
 
         auto s = pager->release(std::move(*root));
         if (s.is_ok() && pager->page_count() < before_count) {
@@ -175,45 +173,37 @@ public:
         return s;
     }
 
-    auto set_value(PageId id, const std::string &value) -> void
+    auto set_value(Id id, const std::string &value) const -> void
     {
         auto wrapper = get_wrapper(id, true);
         ASSERT_TRUE(wrapper.has_value());
         wrapper->set_value(value);
     }
 
-    auto try_set_value(PageId id, const std::string &value) -> bool
+    auto try_set_value(Id id, const std::string &value) const -> bool
     {
         auto wrapper = get_wrapper(id, true);
         if (!wrapper.has_value()) return false;
         wrapper->set_value(value);
-        return true;
+        return !state.has_error();
     }
 
     [[nodiscard]]
-    auto get_value(PageId id) -> std::string
+    auto get_value(Id id) const -> std::string
     {
-        auto wrapper = get_wrapper(id, true);
+        auto wrapper = get_wrapper(id, false);
         EXPECT_TRUE(wrapper.has_value());
         return wrapper.value().get_value().to_string();
     }
 
     [[nodiscard]]
-    auto try_get_value(PageId id) -> std::string
+    auto oldest_lsn() const -> Id
     {
-        auto wrapper = get_wrapper(id, true);
-        if (!wrapper.has_value()) return {};
-        return wrapper->get_value().to_string();
+        return std::min(state.commit_lsn.load(), pager->recovery_lsn()); // TODO: Changed this from flushed_lsn(), probably wrong now.
     }
 
     [[nodiscard]]
-    auto oldest_lsn() const -> SequenceId
-    {
-        return std::min(commit_lsn, pager->flushed_lsn());
-    }
-
-    [[nodiscard]]
-    auto allow_cleanup() -> Status
+    auto allow_cleanup() const -> Status
     {
         return wal->remove_before(oldest_lsn());
     }
@@ -224,15 +214,14 @@ public:
         return random.get<std::string>('a', 'z', PageWrapper::VALUE_SIZE);
     }
 
-    Random random {internal::random_seed};
-    Status status {Status::ok()};
-    SequenceId commit_lsn;
-    bool has_xact {};
+    System state {"test", LogLevel::OFF, {}};
+    Random random {UnitTests::random_seed};
+    Status status {ok()};
     std::unique_ptr<HeapStorage> store;
     std::unique_ptr<Pager> pager;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<LogScratchManager> scratch;
-    std::unordered_set<PageId, PageId::Hash> images;
+    std::unordered_set<Id, Id::Hash> images;
 };
 
 class NormalXactTests
@@ -254,12 +243,12 @@ public:
 TEST_F(NormalXactTests, ReadAndWriteValue)
 {
     const auto value = generate_value();
-    set_value(PageId {1}, value);
-    ASSERT_EQ(get_value(PageId {1}), value);
+    set_value(Id {1}, value);
+    ASSERT_EQ(get_value(Id {1}), value);
 }
 
 template<class Test>
-static auto overwrite_value(Test &test, PageId id)
+static auto overwrite_value(Test &test, Id id)
 {
     std::string value;
     test.set_value(id, test.generate_value());
@@ -269,24 +258,25 @@ static auto overwrite_value(Test &test, PageId id)
 
 TEST_F(NormalXactTests, OverwriteValue)
 {
-    overwrite_value(*this, PageId {1});
+    overwrite_value(*this, Id {1});
 }
 
 TEST_F(NormalXactTests, OverwriteValuesOnMultiplePages)
 {
-    overwrite_value(*this, PageId {1});
-    overwrite_value(*this, PageId {2});
-    overwrite_value(*this, PageId {3});
+    overwrite_value(*this, Id {1});
+    overwrite_value(*this, Id {2});
+    overwrite_value(*this, Id {3});
 }
 
 template<class Test>
-static auto undo_xact(Test &test, SequenceId commit_lsn)
+static auto undo_xact(Test &test)
 {
-    Recovery recovery {*test.pager, *test.wal};
-    (void)test.wal->stop_workers();
-    CALICO_TRY(recovery.start_abort(commit_lsn));
+    Recovery recovery {*test.pager, *test.wal, test.state};
+    CALICO_TRY_S(recovery.start_abort());
     // Don't need to load any state for these tests.
-    return recovery.finish_abort(commit_lsn);
+    CALICO_TRY_S(recovery.finish_abort());
+    test.images.clear();
+    return ok();
 }
 
 static auto assert_blank_value(BytesView value)
@@ -296,19 +286,19 @@ static auto assert_blank_value(BytesView value)
 
 TEST_F(NormalXactTests, UndoFirstValue)
 {
-    set_value(PageId {1}, generate_value());
-    ASSERT_OK(undo_xact(*this, SequenceId::null()));
-    assert_blank_value(get_value(PageId {1}));
+    set_value(Id {1}, generate_value());
+    ASSERT_OK(undo_xact(*this));
+    assert_blank_value(get_value(Id {1}));
 }
 
 TEST_F(NormalXactTests, UndoFirstXact)
 {
-    set_value(PageId {1}, generate_value());
-    set_value(PageId {2}, generate_value());
-    set_value(PageId {2}, generate_value());
-    ASSERT_OK(undo_xact(*this, SequenceId::null()));
-    assert_blank_value(get_value(PageId {1}));
-    assert_blank_value(get_value(PageId {2}));
+    set_value(Id {1}, generate_value());
+    set_value(Id {2}, generate_value());
+    set_value(Id {2}, generate_value());
+    ASSERT_OK(undo_xact(*this));
+    assert_blank_value(get_value(Id {1}));
+    assert_blank_value(get_value(Id {2}));
 }
 
 template<class Test>
@@ -322,12 +312,12 @@ static auto add_values(Test &test, Size n, bool allow_failure = false) -> std::v
     Size index {};
     for (const auto &value: values) {
         if (allow_failure) {
-            if (!test.try_set_value(PageId::from_index(index), value))
+            if (!test.try_set_value(Id::from_index(index), value))
                 return {};
             if (!test.allow_cleanup().is_ok())
                 return {};
         } else {
-            test.set_value(PageId::from_index(index), value);
+            test.set_value(Id::from_index(index), value);
             EXPECT_OK(test.allow_cleanup());
         }
         index = (index+1) % Test::PAGE_COUNT;
@@ -340,9 +330,11 @@ static auto assert_values_match(Test &test, const std::vector<std::string> &valu
 {
     Size index {};
     for (const auto &value: values) {
-        const auto id = PageId::from_index(index);
-        ASSERT_EQ(test.get_value(id), value)
-            << "error: mismatch on page " << id.value << " (" << Test::PAGE_COUNT << " pages total)";
+        const auto id = Id::from_index(index);
+        if (test.get_value(id) != value) {
+            ADD_FAILURE() << "error: mismatch on page " << id.value << " (" << Test::PAGE_COUNT << " pages total)";
+            std::exit(EXIT_FAILURE);
+        }
         index = (index+1) % Test::PAGE_COUNT;
     }
 }
@@ -354,7 +346,7 @@ TEST_F(NormalXactTests, EmptyCommit)
 
 TEST_F(NormalXactTests, EmptyAbort)
 {
-    ASSERT_OK(undo_xact(*this, SequenceId::null()));
+    ASSERT_OK(undo_xact(*this));
 }
 
 TEST_F(NormalXactTests, AbortEmptyTransaction)
@@ -362,7 +354,7 @@ TEST_F(NormalXactTests, AbortEmptyTransaction)
     const auto committed = add_values(*this, 3);
     commit();
 
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -372,7 +364,7 @@ TEST_F(NormalXactTests, UndoSecondTransaction)
     commit();
     add_values(*this, 3);
 
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -384,7 +376,7 @@ TEST_F(NormalXactTests, SpamCommit)
         commit();
     }
     add_values(*this, PAGE_COUNT);
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -395,9 +387,9 @@ TEST_F(NormalXactTests, SpamAbort)
 
     for (Size i {}; i < 50; ++i) {
         add_values(*this, PAGE_COUNT);
-        ASSERT_OK(undo_xact(*this, commit_lsn));
+        ASSERT_OK(undo_xact(*this));
+        assert_values_match(*this, committed);
     }
-    assert_values_match(*this, committed);
 }
 
 TEST_F(NormalXactTests, AbortAfterMultipleOverwrites)
@@ -409,7 +401,7 @@ TEST_F(NormalXactTests, AbortAfterMultipleOverwrites)
     add_values(*this, PAGE_COUNT);
     add_values(*this, PAGE_COUNT);
 
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -420,23 +412,21 @@ TEST_F(NormalXactTests, Recover)
 
     add_values(*this, PAGE_COUNT);
 
-    SequenceId lsn;
-    Recovery recovery {*pager, *wal};
-    ASSERT_OK(recovery.start_recovery(lsn));
-    ASSERT_EQ(lsn, commit_lsn);
-    ASSERT_OK(recovery.finish_recovery(commit_lsn));
+    Recovery recovery {*pager, *wal, state};
+    ASSERT_OK(recovery.start_recovery());
+    ASSERT_OK(recovery.finish_recovery());
     assert_values_match(*this, committed);
 }
 
 class RollForwardTests: public NormalXactTests {
 public:
-    auto get_lsn_range() -> std::pair<SequenceId, SequenceId>
+    auto get_lsn_range() -> std::pair<Id, Id>
     {
-        std::vector<SequenceId> lsns;
+        std::vector<Id> lsns;
         EXPECT_OK(wal->stop_workers());
-        EXPECT_OK(wal->roll_forward(SequenceId::null(), [&lsns](WalPayloadOut payload) {
+        EXPECT_OK(wal->roll_forward(Id::root(), [&lsns](WalPayloadOut payload) {
             lsns.emplace_back(payload.lsn());
-            return Status::ok();
+            return ok();
         }));
         EXPECT_OK(wal->start_workers());
         EXPECT_FALSE(lsns.empty());
@@ -448,12 +438,13 @@ TEST_F(RollForwardTests, ObsoleteSegmentsAreRemoved)
 {
     add_values(*this, PAGE_COUNT);
     commit();
+    ASSERT_OK(pager->flush({}));
     ASSERT_OK(allow_cleanup());
 
     const auto [first, last] = get_lsn_range();
     ASSERT_GT(first.value, 1);
-    ASSERT_LE(first, pager->flushed_lsn());
-    ASSERT_EQ(last, commit_lsn);
+    ASSERT_LE(first, pager->recovery_lsn());
+    ASSERT_EQ(last, state.commit_lsn.load());
 }
 
 TEST_F(RollForwardTests, KeepsNeededSegments)
@@ -465,13 +456,12 @@ TEST_F(RollForwardTests, KeepsNeededSegments)
     }
 
     const auto [first, last] = get_lsn_range();
-    ASSERT_LE(first, pager->flushed_lsn());
-    ASSERT_EQ(last, commit_lsn);
+    ASSERT_LE(first, pager->recovery_lsn());
+    ASSERT_EQ(last, state.commit_lsn.load());
 }
 
 TEST_F(RollForwardTests, SanityCheck)
 {
-fmt::print("seed == {}\n", internal::random_seed);
     const auto committed = add_values(*this, PAGE_COUNT);
     commit();
 
@@ -483,10 +473,10 @@ fmt::print("seed == {}\n", internal::random_seed);
     }
 
     const auto [first, last] = get_lsn_range();
-    ASSERT_LE(first, commit_lsn);
-    ASSERT_EQ(SequenceId {last.value + 1}, wal->current_lsn());
+    ASSERT_LE(first, state.commit_lsn.load());
+    ASSERT_EQ(Id {last.value + 1}, wal->current_lsn());
 
-    ASSERT_OK(undo_xact(*this, commit_lsn));
+    ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }
 
@@ -521,7 +511,7 @@ public:
     [[nodiscard]]
     auto get_status()
     {
-        return pager->status().is_ok() ? wal->worker_status() : pager->status();
+        return state.has_error() ? state.original_error().status : wal->worker_status();
     }
 
     std::vector<std::string> committed;
@@ -567,9 +557,9 @@ public:
     auto SetUp() -> void override
     {
         options.page_size = 0x400;
-        options.frame_count = 32;
-        options.log_level = spdlog::level::trace;
-        options.store = store.get();
+        options.cache_size = 32;
+        options.log_level = LogLevel::OFF;
+        options.storage = store.get();
 
         ASSERT_OK(db.open(ROOT, options));
     }
@@ -587,7 +577,7 @@ public:
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     Options options;
     Core db;
 };
@@ -846,14 +836,14 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.frame_count = 16;
-        options.store = store.get();
-        options.log_level = spdlog::level::err; // TODO
+        options.cache_size = 16;
+        options.storage = store.get();
+        options.log_level = LogLevel::OFF;
         ASSERT_OK(db.open(ROOT, options));
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     Database db;
 };
 
@@ -875,7 +865,7 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
     RecordGenerator generator {param};
 
     const auto info = test.db.info();
-    auto s = Status::ok();
+    auto s = ok();
 
     for (Size i {}; i < limit; ++i) {
         for (const auto &[key, value]: generator.generate(test.random, 100)) {
@@ -888,7 +878,7 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
             if (!s.is_ok()) return s;
         }
     }
-    return Status::ok();
+    return ok();
 }
 
 template<class Test>
@@ -956,20 +946,19 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     ASSERT_OK(db.status());
 }
 
-// TODO: We're flushing during commit for now, so this won't ever happen...
+// TODO: Get this to work.
 //TEST_F(FailureTests, DataWriteFailureDuringQuery)
 //{
 //    // This tests database behavior when we encounter an error while flushing a dirty page to make room for a page read
 //    // during a query. In this case, we don't have a transaction we can try to abort, so we must exit the program. Next
 //    // time the database is opened, it will roll forward and apply any missing updates.
-//    add_sequential_records(db, 500);
+//    add_sequential_records(db, 5'000);
 //
-//    interceptors::set_write(FailOnce<5> {"test/data"});
+//    interceptors::set_write(FailOnce<0> {"test/data"});
 //
 //    auto c = db.first();
 //    for (; c.is_valid(); ++c) {}
 //
-//    assert_error_42(c.status());
 //    assert_error_42(db.status());
 //}
 
@@ -1015,44 +1004,49 @@ TEST_F(FailureTests, CannotPerformOperationsAfterFatalError)
     assert_error_42(db.close());
 }
 
-class RecoveryTests : public testing::TestWithParam<std::pair<Size, Size>> {
+class RecoveryTestHarness {
 public:
-    RecoveryTests()
-        : store {std::make_unique<HeapStorage>()}
+    RecoveryTestHarness()
+        : store {std::make_unique<HeapStorage>()},
+          db {std::make_unique<Core>()}
     {}
 
-    auto SetUp() -> void override
+    virtual auto setup(Size xact_count, Size uncommitted_count) -> void
     {
-        options.store = store.get();
+        options.storage = store.get();
         options.page_size = 0x200;
-        options.frame_count = 32;
+        options.cache_size = 32;
+        options.log_level = LogLevel::OFF;
 
-        db.emplace();
         ASSERT_OK(db->open("test", options));
-
-        const auto [xact_count, uncommitted_count] = GetParam();
         committed = run_random_transactions(*this, xact_count);
-
         const auto database_state = tools::read_file(*store, "test/data");
 
         auto xact = db->transaction();
-        const auto uncommitted = generator.generate(random, uncommitted_count);
+        uncommitted = generator.generate(random, uncommitted_count);
         run_random_operations(*this, cbegin(uncommitted), cend(uncommitted));
 
+        // Clone the database while there are still pages waiting to be written to the data file. We'll have
+        // to use the WAL to recover.
         auto cloned = store->clone();
         tools::write_file(*cloned, "test/data", database_state);
 
         ASSERT_OK(xact.abort());
         ASSERT_OK(db->close());
         store.reset(dynamic_cast<HeapStorage*>(cloned));
-        options.store = store.get();
-        db.emplace();
+        options.storage = store.get();
+        db.reset();
+
+        db = std::make_unique<Core>();
     }
 
-    auto validate() -> void
+    virtual auto validate() -> void
     {
-        for (const auto &[key, value]: committed) {
-            ASSERT_TRUE(tools::contains(*db, key, value));
+        for (const auto &[key, value]: committed)
+            tools::expect_contains(*db, key, value);
+
+        for (const auto &[key, value]: uncommitted) {
+            ASSERT_FALSE(tools::contains(*db, key, value));
         }
         auto &tree = db->tree();
         tree.TEST_validate_links();
@@ -1061,17 +1055,29 @@ public:
     }
 
     [[nodiscard]]
-    auto get_db() -> Core&
+    virtual auto get_db() -> Core&
     {
         return *db;
     }
 
     Random random {42};
     RecordGenerator generator {{16, 100, 10, false, true}};
-    std::vector<Record> committed;
+    std::vector<Record> committed, uncommitted;
     std::unique_ptr<HeapStorage> store;
     Options options;
-    std::optional<Core> db;
+    std::unique_ptr<Core> db;
+};
+
+class RecoveryTests
+    : public testing::TestWithParam<std::pair<Size, Size>>,
+      public RecoveryTestHarness
+{
+public:
+    auto SetUp() -> void override
+    {
+        const auto [xact_count, uncommitted_count] = GetParam();
+        setup(xact_count, uncommitted_count);
+    }
 };
 
 TEST_P(RecoveryTests, Recovers)
@@ -1081,400 +1087,150 @@ TEST_P(RecoveryTests, Recovers)
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    RecoveryTests,
+    Recovers,
     RecoveryTests,
     ::testing::Values(
         std::make_pair(  0,   0),
         std::make_pair(  0, 100),
         std::make_pair(  1,   0),
         std::make_pair(  1, 100),
+        std::make_pair( 7,   0),
+        std::make_pair( 10, 100)));
+
+class RecoveryFailureTestRunner {
+public:
+    explicit RecoveryFailureTestRunner(std::string filter_prefix)
+        : prefix {std::move(filter_prefix)}
+    {}
+
+    template<class Test>
+    auto run(Test &test) -> void
+    {
+        Size num_tries {};
+        for (; ; num_tries++) {
+            if (auto s = test.db->open("test", test.options); s.is_ok()) {
+                break;
+            } else {
+                assert_error_42(s);
+            }
+            test.db.reset();
+            test.db = std::make_unique<Core>();
+        }
+        test.validate();
+        ASSERT_GT(num_tries, 0) << "recovery should have failed at least once";
+    }
+
+    auto should_syscall_succeed(const std::string &path, ...) -> Status
+    {
+        if (BytesView {path}.starts_with(prefix) && counter++ >= target) {
+            target += step;
+            counter = 0;
+            return system_error("42");
+        }
+        return Status::ok();
+    }
+
+    std::string prefix;
+    Size counter {};
+    Size target {1};
+    Size step {1};
+};
+
+class RecoveryDataWriteFailureTests: public RecoveryTests {
+
+};
+
+TEST_P(RecoveryDataWriteFailureTests, ErrorIsPropagated)
+{
+    interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/data",
+        {1, 0},
+    });
+    assert_error_42(db->open("test", options));
+}
+
+TEST_P(RecoveryDataWriteFailureTests, RecoveryIsReentrant)
+{
+    RecoveryFailureTestRunner runner {"test/data"};
+    interceptors::set_write([&runner](const auto &path, ...) {
+        return runner.should_syscall_succeed(path);
+    });
+    runner.run(*this);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Recovers,
+    RecoveryDataWriteFailureTests,
+    ::testing::Values(
+        std::make_pair(  0, 100),
+        std::make_pair(  1,   0),
+        std::make_pair(  1, 100),
         std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
-//enum class RecoveryTestFailureType {
-//    DATA_WRITE,
-//    DATA_SYNC,
-//    WAL_OPEN,
-//    WAL_READ,
-//    WAL_WRITE,
-//    WAL_SYNC,
-//};
-//
-//[[nodiscard]]
-//static constexpr auto recovery_test_failure_type_name(RecoveryTestFailureType type) -> const char*
-//{
-//    switch (type) {
-//        case RecoveryTestFailureType::DATA_WRITE:
-//            return "DATA_WRITE";
-//        case RecoveryTestFailureType::DATA_SYNC:
-//            return "DATA_SYNC";
-//        case RecoveryTestFailureType::WAL_OPEN:
-//            return "WAL_OPEN";
-//        case RecoveryTestFailureType::WAL_READ:
-//            return "WAL_READ";
-//        case RecoveryTestFailureType::WAL_WRITE:
-//            return "WAL_WRITE";
-//        case RecoveryTestFailureType::WAL_SYNC:
-//            return "WAL_SYNC";
-//        default:
-//            return "";
-//    }
-//}
-//
-//template<class Failure>
-//class RecoveryTestHarness: public testing::TestWithParam<RecoveryTestFailureType> {
-//public:
-//    static constexpr auto ROOT = "test";
-//    static constexpr auto PREFIX = "test/";
-//
-//    RecoveryTestHarness()
-//        : store {std::make_unique<HeapStorage>()}
-//    {
-//        options.page_size = 0x200;
-//        options.frame_count = 16;
-//        options.store = store.get();
-//    }
-//
-//    ~RecoveryTestHarness() override = default;
-//
-//    auto SetUp() -> void override
-//    {
-//        ASSERT_OK(open_database());
-//
-//        static constexpr Size GROUP_SIZE {1'000};
-//        uncommitted = generator.generate(random, GROUP_SIZE * 2);
-//        committed.insert(cend(committed), cbegin(uncommitted) + GROUP_SIZE, cend(uncommitted));
-//        uncommitted.resize(GROUP_SIZE);
-//
-//        // Transaction needs to go out of scope before the database is closed, hence the block.
-//        {
-//            static constexpr Size NUM_XACTS {10};
-//            static constexpr auto XACT_SIZE = GROUP_SIZE / NUM_XACTS;
-//            static_assert(GROUP_SIZE % XACT_SIZE == 0);
-//
-//            // Commit NUM_XACTS transactions.
-//            auto begin = cbegin(committed);
-//            while (begin != cend(committed)) {
-//                auto xact = db->transaction();
-//                for (auto itr = begin; itr != begin + XACT_SIZE; ++itr) {
-//                    ASSERT_OK(db->insert(itr->key, itr->value));
-//                }
-//                ASSERT_OK(xact.commit());
-//                begin += XACT_SIZE;
-//            }
-//
-//            switch (GetParam()) {
-//                case RecoveryTestFailureType::DATA_WRITE:
-//                    interceptors::set_write(Failure {"test/data"});
-//                    break;
-//                case RecoveryTestFailureType::DATA_SYNC:
-//                    interceptors::set_sync(Failure {"test/data"});
-//                    break;
-//                case RecoveryTestFailureType::WAL_OPEN:
-//                    interceptors::set_open(Failure {"test/wal-"});
-//                    break;
-//                case RecoveryTestFailureType::WAL_READ:
-//                    interceptors::set_read(Failure {"test/wal-"});
-//                    break;
-//                case RecoveryTestFailureType::WAL_WRITE:
-//                    interceptors::set_write(Failure {"test/wal-"});
-//                    break;
-//                case RecoveryTestFailureType::WAL_SYNC:
-//                    interceptors::set_sync(Failure {"test/wal-"});
-//                    break;
-//                default:
-//                    ADD_FAILURE() << "unrecognized test type \"" << int(GetParam()) << "\"";
-//            }
-//
-//#define BREAK_IF_ERROR if (!s.is_ok()) {assert_error_42(s); break;}
-//
-//            // Run transactions involving the uncommitted set until failure.
-//            for (; ; ) {
-//                auto xact = db->transaction();
-//                auto s = db->status();
-//                for (const auto &[key, value]: uncommitted) {
-//                    s = db->insert(key, value);
-//                    BREAK_IF_ERROR
-//                }
-//                BREAK_IF_ERROR
-//                for (const auto &[key, value]: uncommitted) {
-//                    s = db->erase(key);
-//                    BREAK_IF_ERROR
-//                }
-//                if (random.get(4)) {
-//                    s = db->commit();
-//                } else {
-//                    s = db->abort();
-//                }
-//                BREAK_IF_ERROR
-//
-//#undef BREAK_IF_ERROR
-//            }
-//            assert_error_42(db->status());
-//        }
-//        assert_error_42(db->close());
-//        db.reset();
-//        interceptors::reset();
-//    }
-//
-//    auto open_database() -> Status
-//    {
-//        options.store = store.get();
-//        db.emplace();
-//        return db->open(ROOT, options);
-//    }
-//
-//    auto validate() -> void
-//    {
-//        db->tree().TEST_validate_nodes();
-//        db->tree().TEST_validate_links();
-//        db->tree().TEST_validate_order();
-//
-//        for (const auto &[key, value]: committed) {
-//            EXPECT_TRUE(tools::contains(*db, key, value)) << "database should contain " << key;
-//        }
-//        for (const auto &[key, value]: uncommitted) {
-//            EXPECT_FALSE(db->find_exact(key).is_valid()) << "database should not contain " << key;
-//        }
-//    }
-//
-//    std::unique_ptr<Storage> store;
-//    RecordGenerator generator {{16, 100, 10, false, true}};
-//    Random random {internal::random_seed};
-//    std::vector<Record> committed;
-//    std::vector<Record> uncommitted;
-//    Options options;
-//    std::optional<Core> db;
-//};
-//
-//template<class Failure, Size Step>
-//class RecoveryReentrancyTestHarness: public RecoveryTestHarness<Failure> {
-//public:
-//    using Base = RecoveryTestHarness<Failure>;
-//    using Base::GetParam;
-//
-//    explicit RecoveryReentrancyTestHarness(RecoveryTestFailureType type)
-//        : second_failure_type {type}
-//    {}
-//
-//    auto SetUp() -> void override
-//    {
-//        Base::SetUp();
-//
-//        auto callback = [this](const std::string &path, ...) -> Status
-//        {
-//            if (!stob(path).starts_with(prefix))
-//                return Status::ok();
-//            return counter++ == target ? Status::system_error("42") : Status::ok();
-//        };
-//
-//        switch (second_failure_type) {
-//            case RecoveryTestFailureType::DATA_WRITE:
-//                prefix = "test/data";
-//                interceptors::set_write(callback);
-//                break;
-//            case RecoveryTestFailureType::DATA_SYNC:
-//                prefix = "test/data";
-//                interceptors::set_sync(callback);
-//                break;
-//            case RecoveryTestFailureType::WAL_OPEN:
-//                prefix = "test/wal-";
-//                interceptors::set_open(callback);
-//                break;
-//            case RecoveryTestFailureType::WAL_READ:
-//                prefix = "test/wal-";
-//                interceptors::set_read(callback);
-//                break;
-//            case RecoveryTestFailureType::WAL_WRITE:
-//                prefix = "test/wal-";
-//                interceptors::set_write(callback);
-//                break;
-//            case RecoveryTestFailureType::WAL_SYNC:
-//                prefix = "test/wal-";
-//                interceptors::set_sync(callback);
-//                break;
-//            default:
-//                ADD_FAILURE() << "unrecognized test type \"" << int(second_failure_type) << "\"";
-//        }
-//    }
-//
-//    auto run_test() -> void
-//    {
-//        Size num_tries {};
-//        for (; ; num_tries++) {
-//            auto s = Base::open_database();
-//            if (s.is_ok()) {
-//                break;
-//            } else {
-//                assert_error_42(s);
-//                counter = 0;
-//
-//                // Allow Step more calls of the target system call to succeed on the next round.
-//                target += Step;
-//            }
-//        }
-//        Base::validate();
-//        ASSERT_GT(num_tries, 0) << "recovery should have failed at least once";
-//    }
-//
-//    RecoveryTestFailureType second_failure_type;
-//    std::string prefix;
-//    Size counter {};
-//    Size target {};
-//};
-//
-//class RecoveryTests_FailImmediately: public RecoveryTestHarness<FailOnce<0>> {};
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    RecoveryTests_FailImmediately,
-//    RecoveryTests_FailImmediately,
-//    ::testing::Values(
-//        RecoveryTestFailureType::DATA_WRITE,
-//        RecoveryTestFailureType::DATA_SYNC,
-//        RecoveryTestFailureType::WAL_OPEN,
-//        RecoveryTestFailureType::WAL_READ
-//        // TODO: We can't use this test for WAL_WRITE, since we don't write during abort(). We have no way to make the
-//        //       abort procedure fail with the current setup.
-//        ),
-//    [](const auto &info) {
-//        return recovery_test_failure_type_name(info.param);
-//    });
-//
-//TEST_P(RecoveryTests_FailImmediately, BasicRecovery)
-//{
-//    open_database();
-//    validate();
-//}
-//
-//// Only can test system calls that are called at least 5 times before and during abort(). If we don't produce 5 calls during abort(),
-//// the procedure will succeed and the database will not need recovery.
-//class RecoveryTests_FailAfterDelay_5: public RecoveryTestHarness<FailOnce<5>> {};
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    RecoveryTests_FailAfterDelay_5,
-//    RecoveryTests_FailAfterDelay_5,
-//    ::testing::Values(
-//        RecoveryTestFailureType::DATA_WRITE,
-//        RecoveryTestFailureType::WAL_OPEN,
-//        RecoveryTestFailureType::WAL_READ),
-//    [](const auto &info) {
-//        return recovery_test_failure_type_name(info.param);
-//    });
-//
-//TEST_P(RecoveryTests_FailAfterDelay_5, BasicRecovery)
-//{
-//    open_database();
-//    validate();
-//}
-//
-//class RecoveryTests_FailAfterDelay_500: public RecoveryTestHarness<FailOnce<500>> {};
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    RecoveryTests_FailAfterDelay_500,
-//    RecoveryTests_FailAfterDelay_500,
-//    ::testing::Values(
-//        RecoveryTestFailureType::DATA_WRITE,
-//        RecoveryTestFailureType::WAL_OPEN,
-//        RecoveryTestFailureType::WAL_READ),
-//    [](const auto &info) {
-//        return recovery_test_failure_type_name(info.param);
-//    });
-//
-//TEST_P(RecoveryTests_FailAfterDelay_500, BasicRecovery)
-//{
-//    open_database();
-//    validate();
-//}
-//
-//class RecoveryReentrancyTests_FailImmediately_100: public RecoveryReentrancyTestHarness<FailOnce<0>, 100> {
-//public:
-//    RecoveryReentrancyTests_FailImmediately_100()
-//        : RecoveryReentrancyTestHarness<FailOnce<0>, 100> {RecoveryTestFailureType::DATA_WRITE}
-//    {}
-//};
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    RecoveryReentrancyTests_FailImmediately_100,
-//    RecoveryReentrancyTests_FailImmediately_100,
-//    ::testing::Values(
-//        RecoveryTestFailureType::DATA_WRITE,
-//        RecoveryTestFailureType::WAL_OPEN),
-//    [](const auto &info) {
-//        return recovery_test_failure_type_name(info.param);
-//    });
-//
-//TEST_P(RecoveryReentrancyTests_FailImmediately_100, RecoveryIsReentrant)
-//{
-//    run_test();
-//    validate();
-//}
-//
-//class RecoveryReentrancyTests_FailImmediately_10000: public RecoveryReentrancyTestHarness<FailOnce<0>, 10000> {
-//public:
-//    RecoveryReentrancyTests_FailImmediately_10000()
-//        : RecoveryReentrancyTestHarness<FailOnce<0>, 10000> {RecoveryTestFailureType::DATA_WRITE}
-//    {}
-//};
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    RecoveryReentrancyTests_FailImmediately_10000,
-//    RecoveryReentrancyTests_FailImmediately_10000,
-//    ::testing::Values(
-//        RecoveryTestFailureType::WAL_READ),
-//    [](const auto &info) {
-//        return recovery_test_failure_type_name(info.param);
-//    });
-//
-//TEST_P(RecoveryReentrancyTests_FailImmediately_10000, RecoveryIsReentrant)
-//{
-//    run_test();
-//    validate();
-//}
-//
-//class RecoveryReentrancyTests_FailAfterDelay_100: public RecoveryReentrancyTestHarness<FailOnce<100>, 100> {
-//public:
-//    RecoveryReentrancyTests_FailAfterDelay_100()
-//        : RecoveryReentrancyTestHarness<FailOnce<100>, 100> {RecoveryTestFailureType::DATA_WRITE}
-//    {}
-//};
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    RecoveryReentrancyTests_FailAfterDelay_100,
-//    RecoveryReentrancyTests_FailAfterDelay_100,
-//    ::testing::Values(
-//        RecoveryTestFailureType::DATA_WRITE,
-//        RecoveryTestFailureType::WAL_OPEN),
-//    [](const auto &info) {
-//        return recovery_test_failure_type_name(info.param);
-//    });
-//
-//TEST_P(RecoveryReentrancyTests_FailAfterDelay_100, RecoveryIsReentrant)
-//{
-//    run_test();
-//    validate();
-//}
-//
-//class RecoveryReentrancyTests_FailAfterDelay_10000: public RecoveryReentrancyTestHarness<FailOnce<100>, 10000> {
-//public:
-//    RecoveryReentrancyTests_FailAfterDelay_10000()
-//        : RecoveryReentrancyTestHarness<FailOnce<100>, 10000> {RecoveryTestFailureType::DATA_WRITE}
-//    {}
-//};
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    RecoveryReentrancyTests_FailAfterDelay_10000,
-//    RecoveryReentrancyTests_FailAfterDelay_10000,
-//    ::testing::Values(
-//        RecoveryTestFailureType::WAL_READ),
-//    [](const auto &info) {
-//        return recovery_test_failure_type_name(info.param);
-//    });
-//
-//TEST_P(RecoveryReentrancyTests_FailAfterDelay_10000, RecoveryIsReentrant)
-//{
-//    run_test();
-//    validate();
-//}
+class RecoveryWalReadFailureTests: public RecoveryTests {
 
-} // namespace calico
+};
+
+TEST_P(RecoveryWalReadFailureTests, ErrorIsPropagated)
+{
+    interceptors::set_read(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/wal",
+        {1, 1, 1, 0, 1},
+    });
+    assert_error_42(db->open("test", options));
+}
+
+TEST_P(RecoveryWalReadFailureTests, RecoveryIsReentrant)
+{
+    RecoveryFailureTestRunner runner {"test/wal"};
+    interceptors::set_read([&runner](const auto &path, ...) {
+        return runner.should_syscall_succeed(path);
+    });
+    runner.run(*this);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Recovers,
+    RecoveryWalReadFailureTests,
+    ::testing::Values(
+        std::make_pair(  0, 100),
+        std::make_pair(  1,   0),
+        std::make_pair(  1, 100),
+        std::make_pair( 10,   0),
+        std::make_pair( 10, 100)));
+
+class RecoveryWalOpenFailureTests: public RecoveryTests {
+
+};
+
+TEST_P(RecoveryWalOpenFailureTests, ErrorIsPropagated)
+{
+    interceptors::set_open(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/wal",
+        {1, 0, 1},
+    });
+    assert_error_42(db->open("test", options));
+}
+
+TEST_P(RecoveryWalOpenFailureTests, RecoveryIsReentrant)
+{
+    RecoveryFailureTestRunner runner {"test/wal"};
+    interceptors::set_open([&runner](const auto &path, ...) {
+        return runner.should_syscall_succeed(path);
+    });
+    runner.run(*this);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Recovers,
+    RecoveryWalOpenFailureTests,
+    ::testing::Values(
+        std::make_pair(  0, 100),
+        std::make_pair(  1,   0),
+        std::make_pair(  1, 100),
+        std::make_pair( 10,   0),
+        std::make_pair( 10, 100)));
+
+} // namespace Calico
 

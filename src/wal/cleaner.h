@@ -5,7 +5,7 @@
 #include "utils/worker.h"
 #include <thread>
 
-namespace calico {
+namespace Calico {
 
 /*
  * WAL component that handles cleanup of obsolete segment files in the background.
@@ -27,7 +27,7 @@ public:
         return m_worker.status();
     }
 
-    auto remove_before(SequenceId lsn, bool should_wait = false) -> void
+    auto remove_before(Id lsn, bool should_wait = false) -> void
     {
         m_worker.dispatch(lsn, should_wait);
     }
@@ -39,14 +39,14 @@ public:
     }
 
 private:
-    [[nodiscard]] auto on_event(const SequenceId &limit) -> Status;
+    [[nodiscard]] auto on_event(const Id &limit) -> Status;
 
-    Worker<SequenceId> m_worker;
+    Worker<Id> m_worker;
     std::string m_prefix;
     Storage *m_store {};
     WalCollection *m_set {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_CLEANER_H

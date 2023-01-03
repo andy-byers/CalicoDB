@@ -3,7 +3,7 @@
 
 #include "wal.h"
 
-namespace calico {
+namespace Calico {
 
 class DisabledWriteAheadLog: public WriteAheadLog {
 public:
@@ -24,76 +24,76 @@ public:
     [[nodiscard]]
     auto worker_status() const -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
-    auto flushed_lsn() const -> SequenceId override
+    auto flushed_lsn() const -> Id override
     {
-        return SequenceId::null();
+        return Id::null();
     }
 
     [[nodiscard]]
-    auto current_lsn() const -> SequenceId override
+    auto current_lsn() const -> Id override
     {
-        return SequenceId::null();
+        return Id::null();
     }
 
     [[nodiscard]]
     auto log(WalPayloadIn) -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
     auto flush() -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
     auto advance() -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
     auto stop_workers() -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
     auto start_workers() -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
-    auto roll_forward(SequenceId, const Callback &) -> Status override
+    auto roll_forward(Id, const Callback &) -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
-    auto roll_backward(SequenceId, const Callback &) -> Status override
+    auto roll_backward(Id, const Callback &) -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
-    auto remove_before(SequenceId) -> Status override
+    auto remove_before(Id) -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 
     [[nodiscard]]
-    auto remove_after(SequenceId) -> Status override
+    auto remove_after(Id) -> Status override
     {
-        return Status::ok();
+        return ok();
     }
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_DISABLED_WAL_H

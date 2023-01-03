@@ -1,16 +1,18 @@
 #ifndef CALICO_PAGER_PAGER_H
 #define CALICO_PAGER_PAGER_H
 
-#include "pager.h"
-#include "registry.h"
-#include "spdlog/logger.h"
-#include "utils/scratch.h"
-#include "wal/helpers.h"
-#include <list>
 #include <mutex>
 #include <unordered_set>
 
-namespace calico {
+#include "spdlog/logger.h"
+
+#include "page_cache.h"
+#include "pager.h"
+
+#include "utils/scratch.h"
+#include "wal/helpers.h"
+
+namespace Calico {
 
 class Storage;
 class Framer;
@@ -19,75 +21,49 @@ class BasicPager : public Pager {
 public:
     struct Parameters {
         std::string prefix;
-        Storage &storage; // TODO: Make these pointers...
+        Storage *storage {};
         LogScratchManager *scratch {};
-        std::unordered_set<PageId, PageId::Hash> *images {};
-        WriteAheadLog &wal;
-        Status &status;
-        bool &has_xact;
-        spdlog::sink_ptr log_sink;
+        std::unordered_set<Id, Id::Hash> *images {};
+        WriteAheadLog *wal {};
+        System *system {};
         Size frame_count {};
         Size page_size {};
     };
 
     ~BasicPager() override = default;
 
-    [[nodiscard]] static auto open(const Parameters &) -> Result<std::unique_ptr<BasicPager>>;
+    [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>;
     [[nodiscard]] auto page_count() const -> Size override;
     [[nodiscard]] auto page_size() const -> Size override;
-    [[nodiscard]] auto flushed_lsn() const -> SequenceId override;
-    [[nodiscard]] auto allocate() -> Result<Page> override;
-    [[nodiscard]] auto acquire(PageId, bool) -> Result<Page> override;
-    [[nodiscard]] auto release(Page) -> Status override;
-    [[nodiscard]] auto flush() -> Status override;
-    auto save_state(FileHeader &) -> void override;
-    auto load_state(const FileHeader &) -> void override;
-
-    [[nodiscard]]
-    auto status() const -> Status override
-    {
-        return *m_status;
-    }
+    [[nodiscard]] auto hit_ratio() const -> double override;
+    [[nodiscard]] auto recovery_lsn() -> Id override;
+    [[nodiscard]] auto allocate() -> tl::expected<Page, Status> override;
+    [[nodiscard]] auto acquire(Id pid, bool is_writable) -> tl::expected<Page, Status> override;
+    [[nodiscard]] auto release(Page page) -> Status override;
+    [[nodiscard]] auto flush(Id target_lsn) -> Status override;
+    auto save_state(FileHeader &header) -> void override;
+    auto load_state(const FileHeader &header) -> void override;
 
 private:
-    explicit BasicPager(const Parameters &);
-    [[nodiscard]] auto pin_frame(PageId, bool &) -> Status;
-    [[nodiscard]] auto try_make_available() -> Result<bool>;
-    auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
-
-    auto forward_status(Status s, const std::string &message) -> Status
-    {
-        if (!s.is_ok()) {
-            m_logger->error(message);
-            m_logger->error("(reason) {}", s.what());
-        }
-        return s;
-    }
-
-    auto save_and_forward_status(Status s, const std::string &message) -> Status
-    {
-        if (!s.is_ok()) {
-            m_logger->error(message);
-            m_logger->error("(reason) {}", s.what());
-            if (m_status->is_ok()) *m_status = s;
-        }
-        return s;
-    }
+    explicit BasicPager(const Parameters &param, Framer framer);
+    [[nodiscard]] auto pin_frame(Id, bool &) -> Status;
+    [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
+    auto watch_page(Page &page, PageCache::Entry &entry) -> void;
+    auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
+    auto set_recovery_lsn(Id lsn) -> void;
 
     mutable std::mutex m_mutex;
-    std::unique_ptr<Framer> m_framer;
-    std::shared_ptr<spdlog::logger> m_logger;
-    std::unordered_set<PageId, PageId::Hash> *m_images {};
+    Framer m_framer;
+    PageList m_dirty;
+    PageCache m_registry;
+    LogPtr m_log;
+    Id m_recovery_lsn;
+    std::unordered_set<Id, Id::Hash> *m_images {};
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};
-    PageList m_dirty;
-    PageRegistry m_registry;
-    Status *m_status {};
-    bool *m_has_xact {};
-    Size m_dirty_count {};
-    Size m_ref_sum {};
+    System *m_system {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_PAGER_PAGER_H

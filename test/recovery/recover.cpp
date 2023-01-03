@@ -9,14 +9,14 @@
 #  error "This test must run with assertions enabled"
 #endif
 
-using namespace calico;
+using namespace Calico;
 namespace fs = std::filesystem;
 
 static constexpr Size KEY_WIDTH {12};
 
 auto show_usage()
 {
-    std::cout << "usage: ensure_consistent_state PATH N\n";
+    std::cout << "usage: ensure_consistency_on_startup PATH N\n";
     std::cout << "  Parameters\n";
     std::cout << "==============\n";
     std::cout << "PATH: Path at which to look for the database\n";
@@ -47,7 +47,8 @@ auto main(int argc, const char *argv[]) -> int
             values.emplace_back(line);
     }
     Options options;
-    options.log_level = spdlog::level::info;
+    options.log_level = LogLevel::INFO;
+    options.log_target = LogTarget::FILE;
     Database db;
     expect_ok(db.open(path.string(), options));
     const auto info = db.info();

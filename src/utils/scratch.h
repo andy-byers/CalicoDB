@@ -8,30 +8,36 @@
 #include <string>
 #include <unordered_map>
 
-namespace calico {
+namespace Calico {
 
-template<Size N>
 class StaticScratch {
 public:
-    static constexpr Size Width = N;
-
-    StaticScratch()
-        : m_bytes {m_data.data(), m_data.size()}
+    explicit StaticScratch(Size size)
+        : m_data(size, '\x00'),
+          m_view {m_data}
     {}
 
+    [[nodiscard]]
     auto operator*() -> Bytes
     {
-        return m_bytes;
+        return m_view;
     }
 
-    auto operator->() -> Bytes*
+    [[nodiscard]]
+    auto operator*() const -> BytesView
     {
-        return &m_data;
+        return m_view;
+    }
+
+    [[nodiscard]]
+    auto operator->() -> Bytes *
+    {
+        return &m_view;
     }
 
 private:
-    std::array<char, N> m_data {};
-    Bytes m_bytes;
+    std::string m_data {};
+    Bytes m_view;
 };
 
 class Scratch {
@@ -84,37 +90,6 @@ private:
     Size m_counter {};
 };
 
-class NamedScratch : public Scratch {
-public:
-    NamedScratch(Size id, Bytes data)
-        : Scratch {data},
-          m_id {id}
-    {}
-
-    [[nodiscard]] auto id() const -> Size
-    {
-        return m_id;
-    }
-
-private:
-    Size m_id {};
-};
-
-class NamedScratchManager final {
-public:
-    explicit NamedScratchManager(Size scratch_size)
-        : m_scratch_size {scratch_size} {}
-
-    [[nodiscard]] auto get() -> NamedScratch;
-    auto put(NamedScratch) -> void;
-
-private:
-    std::unordered_map<Size, std::string> m_occupied;
-    std::list<std::string> m_available;
-    Size m_next_id {};
-    Size m_scratch_size;
-};
-
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_UTILS_SCRATCH_H

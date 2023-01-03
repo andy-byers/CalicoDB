@@ -10,15 +10,15 @@
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
+#include "utils/header.h"
 #include "utils/layout.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
 #include "utils/worker.h"
-#include "core/header.h"
 
-namespace calico {
+namespace Calico {
 
 TEST(AssertionDeathTest, Assert)
 {
@@ -31,7 +31,7 @@ TEST(TestEncoding, ReadsAndWrites)
     const auto u16 = random.get<std::uint16_t>();
     const auto u32 = random.get<std::uint32_t>();
     const auto u64 = random.get<std::uint64_t>();
-    std::vector<calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
+    std::vector<Calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
 
     auto dst = buffer.data();
     put_u16(dst, u16);
@@ -393,13 +393,9 @@ auto run_equality_comparisons()
     T y {2};
 
     CALICO_EXPECT_TRUE(x == x);
-    CALICO_EXPECT_TRUE(x == 1);
     CALICO_EXPECT_TRUE(x != y);
-    CALICO_EXPECT_TRUE(x != 2);
     ASSERT_EQ(x, x);
-    ASSERT_EQ(x, 1);
     ASSERT_NE(x, y);
-    ASSERT_NE(x, 2);
 }
 
 template<class T>
@@ -408,59 +404,40 @@ auto run_ordering_comparisons()
     T x {1};
     T y {2};
 
-    CALICO_EXPECT_TRUE(x < y and x < 2);
+    CALICO_EXPECT_TRUE(x < y);
     CALICO_EXPECT_TRUE(x <= x and x <= y);
-    CALICO_EXPECT_TRUE(x <= 1 and x <= 2);
-    CALICO_EXPECT_TRUE(y > x and y > 1);
+    CALICO_EXPECT_TRUE(y > x);
     CALICO_EXPECT_TRUE(y >= y and y >= x);
-    CALICO_EXPECT_TRUE(y >= 2 and y >= 1);
     ASSERT_LT(x, y);
-    ASSERT_LT(x, 2);
     ASSERT_LE(x, x);
     ASSERT_LE(x, y);
-    ASSERT_LE(x, 1);
-    ASSERT_LE(x, 2);
     ASSERT_GT(y, x);
-    ASSERT_GT(y, 1);
     ASSERT_GE(y, y);
     ASSERT_GE(y, x);
-    ASSERT_GE(y, 2);
-    ASSERT_GE(y, 1);
 }
 
 TEST(SimpleDSLTests, TypesAreSizedCorrectly)
 {
-    static_assert(sizeof(PageId) == sizeof(PageId::Type));
-    static_assert(sizeof(SequenceId) == sizeof(SequenceId::Type));
+    Id id {};
+    static_assert(sizeof(Id) == sizeof(id.value));
+    static_assert(sizeof(Id) == sizeof(id.value));
 }
 
-TEST(SimpleDSLTests, PageIdsAreNullable)
+TEST(SimpleDSLTests, IdentifiersAreNullable)
 {
-    run_nullability_check<PageId>();
-    ASSERT_FALSE(PageId::root().is_null());
-    ASSERT_TRUE(PageId::root().is_root());
+    run_nullability_check<Id>();
+    ASSERT_FALSE(Id::root().is_null());
+    ASSERT_TRUE(Id::root().is_root());
 }
 
-TEST(SimpleDSLTests, SequenceIdsAreNullable)
+TEST(SimpleDSLTests, IdentifiersAreEqualityComparable)
 {
-    run_nullability_check<SequenceId>();
-    ASSERT_FALSE(SequenceId::base().is_null());
-    ASSERT_TRUE(SequenceId::base().is_base());
+    run_equality_comparisons<Id>();
 }
 
-TEST(SimpleDSLTests, PageIdsAreEqualityComparable)
+TEST(SimpleDSLTests, IdentifiersAreOrderable)
 {
-    run_equality_comparisons<PageId>();
-}
-
-TEST(SimpleDSLTests, SequenceIdsAreEqualityComparable)
-{
-    run_equality_comparisons<SequenceId>();
-}
-
-TEST(SimpleDSLTests, SequenceIdsAreOrderable)
-{
-    run_ordering_comparisons<SequenceId>();
+    run_ordering_comparisons<Id>();
 }
 
 TEST(TestUniqueNullable, ResourceIsMoved)
@@ -475,7 +452,7 @@ TEST(TestUniqueNullable, ResourceIsMoved)
 
 TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 {
-    const auto start = NodeLayout::header_offset(PageId {2}) +
+    const auto start = NodeLayout::header_offset(Id {2}) +
                        NodeLayout::HEADER_SIZE +
                        CELL_POINTER_SIZE;
     Size page_size {MINIMUM_PAGE_SIZE};
@@ -488,60 +465,60 @@ TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 
 TEST(StatusTests, OkStatusHasNoMessage)
 {
-    auto s = Status::ok();
+    auto s = ok();
     ASSERT_TRUE(s.what().empty());
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
 {
     static constexpr auto message = "status message";
-    auto s = Status::invalid_argument(message);
+    auto s = invalid_argument(message);
     ASSERT_EQ(s.what(), message);
     ASSERT_TRUE(s.is_invalid_argument());
 }
 
 TEST(StatusTests, StatusCanBeCopied)
 {
-    auto s = Status::invalid_argument("invalid argument");
+    auto s = invalid_argument("invalid argument");
     auto t = s;
     ASSERT_TRUE(t.is_invalid_argument());
     ASSERT_EQ(t.what(), "invalid argument");
 
-    t = Status::ok();
+    t = ok();
     ASSERT_TRUE(s.is_invalid_argument());
     ASSERT_EQ(s.what(), "invalid argument");
 }
 
 TEST(StatusTests, StatusCanBeReassigned)
 {
-    auto s = Status::ok();
+    auto s = ok();
     ASSERT_TRUE(s.is_ok());
 
-    s = Status::invalid_argument("invalid argument");
+    s = invalid_argument("invalid argument");
     ASSERT_TRUE(s.is_invalid_argument());
     ASSERT_EQ(s.what(), "invalid argument");
 
-    s = Status::logic_error("logic error");
+    s = logic_error("logic error");
     ASSERT_TRUE(s.is_logic_error());
     ASSERT_EQ(s.what(), "logic error");
 
-    s = Status::ok();
+    s = ok();
     ASSERT_TRUE(s.is_ok());
 }
 
 TEST(StatusTests, StatusCodesAreCorrect)
 {
-    ASSERT_TRUE(Status::invalid_argument("invalid argument").is_invalid_argument());
-    ASSERT_TRUE(Status::system_error("system error").is_system_error());
-    ASSERT_TRUE(Status::logic_error("logic error").is_logic_error());
-    ASSERT_TRUE(Status::corruption("corruption").is_corruption());
-    ASSERT_TRUE(Status::not_found("not found").is_not_found());
-    ASSERT_TRUE(Status::ok().is_ok());
+    ASSERT_TRUE(invalid_argument("invalid argument").is_invalid_argument());
+    ASSERT_TRUE(system_error("system error").is_system_error());
+    ASSERT_TRUE(logic_error("logic error").is_logic_error());
+    ASSERT_TRUE(corruption("corruption").is_corruption());
+    ASSERT_TRUE(not_found("not found").is_not_found());
+    ASSERT_TRUE(ok().is_ok());
 }
 
 TEST(StatusTests, OkStatusCanBeCopied)
 {
-    auto src = Status::ok();
+    auto src = ok();
     auto dst = src;
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
@@ -551,7 +528,7 @@ TEST(StatusTests, OkStatusCanBeCopied)
 
 TEST(StatusTests, NonOkStatusCanBeCopied)
 {
-    auto src = Status::invalid_argument("status message");
+    auto src = invalid_argument("status message");
     auto dst = src;
     ASSERT_TRUE(src.is_invalid_argument());
     ASSERT_TRUE(dst.is_invalid_argument());
@@ -561,7 +538,7 @@ TEST(StatusTests, NonOkStatusCanBeCopied)
 
 TEST(StatusTests, OkStatusCanBeMoved)
 {
-    auto src = Status::ok();
+    auto src = ok();
     auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
@@ -571,7 +548,7 @@ TEST(StatusTests, OkStatusCanBeMoved)
 
 TEST(StatusTests, NonOkStatusCanBeMoved)
 {
-    auto src = Status::invalid_argument("status message");
+    auto src = invalid_argument("status message");
     auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_invalid_argument());
@@ -579,12 +556,10 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     ASSERT_EQ(dst.what(), "status message");
 }
 
-TEST(SimpleDSLTests, Size)
+TEST(StatusTests, FmtPrint)
 {
-    PageId a {1UL};
-    PageId b {2UL};
-    CALICO_EXPECT_EQ(a, 1UL);
-    CALICO_EXPECT_NE(b, 1UL);
+    auto s = system_error("{1}::{0}", 123, 42);
+    ASSERT_EQ(s.what(), "42::123");
 }
 
 // Modified from RocksDB.
@@ -602,7 +577,7 @@ public:
 };
 
 struct Consumer {
-    auto operator()() -> void
+    auto operator()() const -> void
     {
         std::optional<Size> next;
         while ((next = queue->dequeue())) {
@@ -712,7 +687,7 @@ public:
     BasicWorkerTests()
         : worker {16, [this](int event) {
             events.emplace_back(event);
-            return Status::ok();
+            return ok();
         }}
     {}
 
@@ -784,14 +759,14 @@ public:
         }}
     {}
 
-    Status callback_status {Status::ok()};
+    Status callback_status {ok()};
     Worker<int> worker;
     std::vector<int> events;
 };
 
 TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
 {
-    callback_status = Status::system_error("42");
+    callback_status = system_error("42");
     worker.dispatch(1, true);
     assert_error_42(worker.status());
     assert_error_42(std::move(worker).destroy());
@@ -800,12 +775,12 @@ TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
 
 TEST_F(WorkerFaultTests, WorkerCannotBeRecovered)
 {
-    callback_status = Status::system_error("42");
+    callback_status = system_error("42");
     worker.dispatch(1, true);
 
     // Return an OK status after failing once. Worker should remain invalidated. If we need to start the worker again,
     // we need to create a new one.
-    callback_status = Status::ok();
+    callback_status = ok();
     worker.dispatch(2, true);
     assert_error_42(worker.status());
     assert_error_42(std::move(worker).destroy());
@@ -818,7 +793,7 @@ TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
     worker.dispatch(2);
     worker.dispatch(3, true);
 
-    callback_status = Status::system_error("42");
+    callback_status = system_error("42");
     worker.dispatch(4);
     worker.dispatch(5);
     worker.dispatch(6, true);
@@ -834,7 +809,7 @@ TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
 
 TEST_F(WorkerFaultTests, ErrorStatusContention)
 {
-    callback_status = Status::system_error("42");
+    callback_status = system_error("42");
     worker.dispatch(1);
     worker.dispatch(2);
     worker.dispatch(3);
@@ -851,4 +826,4 @@ TEST_F(WorkerFaultTests, ErrorStatusContention)
     ASSERT_TRUE(events.empty());
 }
 
-} // namespace calico
+} // namespace Calico

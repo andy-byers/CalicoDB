@@ -2,14 +2,14 @@
 #define CALICO_DB_DATABASE_IMPL_H
 
 #include "calico/database.h"
-#include "header.h"
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/spdlog.h"
-#include "utils/result.h"
+#include "utils/header.h"
+#include <tl/expected.hpp>
 #include "wal/helpers.h"
 #include <unordered_set>
 
-namespace calico {
+namespace Calico {
 
 class Cursor;
 class Pager;
@@ -20,7 +20,7 @@ class WriteAheadLog;
 
 struct InitialState {
     FileHeader state {};
-    bool is_new {}; // TODO: state.page_count == 0?
+    bool is_new {};
 };
 
 class Core final {
@@ -38,7 +38,7 @@ public:
     [[nodiscard]] auto path() const -> std::string;
     [[nodiscard]] auto insert(BytesView, BytesView) -> Status;
     [[nodiscard]] auto erase(BytesView) -> Status;
-    [[nodiscard]] auto erase(Cursor) -> Status;
+    [[nodiscard]] auto erase(const Cursor &) -> Status;
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;
     [[nodiscard]] auto find(BytesView) -> Cursor;
@@ -96,32 +96,30 @@ public:
     }
 
 private:
-    auto forward_status(Status, const std::string &) -> Status;
-    auto save_and_forward_status(Status, const std::string &) -> Status;
-    [[nodiscard]] auto ensure_consistent_state() -> Status;
+    auto handle_errors() -> Status;
+    [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
     [[nodiscard]] auto atomic_insert(BytesView, BytesView) -> Status;
-    [[nodiscard]] auto atomic_erase(Cursor) -> Status;
+    [[nodiscard]] auto atomic_erase(const Cursor &) -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;
+    [[nodiscard]] auto do_commit() -> Status;
+    [[nodiscard]] auto do_abort() -> Status;
 
     std::string m_prefix;
-    spdlog::sink_ptr m_sink;
-    Status m_status {Status::ok()};
-    std::shared_ptr<spdlog::logger> m_logger;
+    LogPtr m_log;
+    std::unique_ptr<System> m_system;
     std::unique_ptr<WriteAheadLog> m_wal;
     std::unique_ptr<Pager> m_pager;
     std::unique_ptr<Tree> m_tree;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
-    std::unordered_set<PageId, PageId::Hash> m_images;
-    SequenceId m_commit_lsn;
+    std::unordered_set<Id, Id::Hash> m_images;
     Storage *m_store {};
-    bool m_has_xact {};
     bool m_owns_store {};
 };
 
-auto setup(const std::string &, Storage &, const Options &, spdlog::logger &) -> Result<InitialState>;
+auto setup(const std::string &, Storage &, const Options &) -> tl::expected<InitialState, Status>;
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_DB_DATABASE_IMPL_H

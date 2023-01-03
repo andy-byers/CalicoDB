@@ -10,9 +10,9 @@
 #include "fakes.h"
 #include "unit_tests.h"
 
-namespace calico {
+namespace Calico {
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 
@@ -20,7 +20,7 @@ template<class Base, class Store>
 [[nodiscard]]
 auto open_blob(Store &store, const std::string &name) -> std::unique_ptr<Base>
 {
-    auto s = Status::ok();
+    auto s = ok();
     Base *temp {};
 
     if constexpr (std::is_same_v<RandomReader, Base>) {
@@ -123,7 +123,7 @@ public:
     }
 
     std::unique_ptr<Storage> storage;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 class RandomFileReaderTests: public FileTests {
@@ -199,7 +199,7 @@ public:
     ~PosixStorageTests() override = default;
 
     PosixStorage storage;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 class HeapTests: public testing::Test {
@@ -214,7 +214,7 @@ public:
     ~HeapTests() override = default;
 
     std::unique_ptr<Storage> storage;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 TEST_F(HeapTests, ReaderCannotCreateBlob)
@@ -261,7 +261,6 @@ TEST(SystemTests, SystemErrorBehavior)
     ASSERT_EQ(errno, 0);
 
     ASSERT_TRUE(system::error(std::errc::no_such_file_or_directory).is_system_error());
-    assert_error_42(system::error("42"));
 }
 
 TEST(SystemTests, ClosedFileErrors)
@@ -293,4 +292,4 @@ TEST(SystemTests, OpenAndClose)
     ASSERT_TRUE(system::file_exists(PATH).is_not_found());
 }
 
-} // namespace calico
+} // namespace Calico

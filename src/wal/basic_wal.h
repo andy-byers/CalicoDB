@@ -7,13 +7,13 @@
 #include "record.h"
 #include "wal.h"
 #include "writer.h"
-#include "utils/result.h"
+#include <tl/expected.hpp>
 #include "utils/types.h"
 #include <atomic>
 #include <optional>
 #include <unordered_set>
 
-namespace calico {
+namespace Calico {
 
 class Storage;
 class AppendWriter;
@@ -25,7 +25,7 @@ public:
     struct Parameters {
         std::string prefix;
         Storage *store {};
-        spdlog::sink_ptr sink;
+        System *system {};
         Size page_size {};
         Size wal_limit {};
     };
@@ -43,19 +43,19 @@ public:
     }
 
     ~BasicWriteAheadLog() override;
-    [[nodiscard]] static auto open(const Parameters&, WriteAheadLog**) -> Status;
-    [[nodiscard]] auto flushed_lsn() const -> SequenceId override;
-    [[nodiscard]] auto current_lsn() const -> SequenceId override;
+    [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>;
+    [[nodiscard]] auto flushed_lsn() const -> Id override;
+    [[nodiscard]] auto current_lsn() const -> Id override;
     [[nodiscard]] auto stop_workers() -> Status override;
     [[nodiscard]] auto start_workers() -> Status override;
     [[nodiscard]] auto worker_status() const -> Status override;
     [[nodiscard]] auto log(WalPayloadIn payload) -> Status override;
     [[nodiscard]] auto advance() -> Status override;
     [[nodiscard]] auto flush() -> Status override;
-    [[nodiscard]] auto roll_forward(SequenceId begin_lsn, const Callback &callback) -> Status override;
-    [[nodiscard]] auto roll_backward(SequenceId end_lsn, const Callback &callback) -> Status override;
-    [[nodiscard]] auto remove_after(SequenceId lsn) -> Status override;
-    [[nodiscard]] auto remove_before(SequenceId lsn) -> Status override;
+    [[nodiscard]] auto roll_forward(Id begin_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto roll_backward(Id end_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto remove_after(Id lsn) -> Status override;
+    [[nodiscard]] auto remove_before(Id lsn) -> Status override;
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
@@ -67,19 +67,20 @@ private:
     auto forward_status(Status s, const std::string &message) -> Status
     {
         if (!s.is_ok()) {
-            m_logger->error(message);
-            m_logger->error("(reason) {}", s.what());
+            m_log->error(message);
+            m_log->error("(reason) {}", s.what());
         }
         return s;
     }
 
-    std::shared_ptr<spdlog::logger> m_logger;
-    std::atomic<SequenceId> m_flushed_lsn {};
-    SequenceId m_last_lsn;
+    LogPtr m_log;
+    std::atomic<Id> m_flushed_lsn {};
+    Id m_last_lsn;
     WalCollection m_set;
     std::string m_prefix;
 
     Storage *m_store {};
+    System *m_system {};
     std::optional<WalReader> m_reader;
     std::optional<WalWriter> m_writer;
     std::optional<WalCleaner> m_cleaner;
@@ -93,6 +94,6 @@ private:
     bool m_is_working {};
 };
 
-} // namespace calico
+} // namespace Calico
 
 #endif // CALICO_WAL_BASIC_WAL_H
