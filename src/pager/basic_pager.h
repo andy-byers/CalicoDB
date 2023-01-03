@@ -50,6 +50,7 @@ private:
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageRegistry::Entry &entry) -> void;
     auto clean_page(PageRegistry::Entry &entry) -> PageList::Iterator;
+    auto set_recovery_lsn(Id lsn) -> void;
 
     mutable std::mutex m_mutex;
     Framer m_framer;

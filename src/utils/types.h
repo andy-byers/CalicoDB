@@ -7,21 +7,19 @@
 
 namespace Calico {
 
-using size_t = std::size_t;
-
 struct Id {
-    static constexpr size_t null_value {0};
-    static constexpr size_t root_value {1};
+    static constexpr Size null_value {0};
+    static constexpr Size root_value {1};
 
     struct Hash {
-        auto operator()(const Id &id) const -> size_t
+        auto operator()(const Id &id) const -> Size
         {
             return id.value;
         }
     };
 
     [[nodiscard]]
-    static constexpr auto from_index(size_t index) noexcept -> Id
+    static constexpr auto from_index(Size index) noexcept -> Id
     {
         return {index + 1};
     }
@@ -59,7 +57,7 @@ struct Id {
 
     constexpr auto operator<=>(const Id &) const = default;
 
-    size_t value {};
+    Size value {};
 };
 
 class AlignedBuffer {

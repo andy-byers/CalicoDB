@@ -20,7 +20,7 @@ class WriteAheadLog;
 
 struct InitialState {
     FileHeader state {};
-    bool is_new {}; // TODO: state.page_count == 0?
+    bool is_new {};
 };
 
 class Core final {

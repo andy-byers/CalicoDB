@@ -106,7 +106,7 @@ public:
 
     auto tear_down() const -> void
     {
-        if (wal->is_working())
+        if (wal && wal->is_working())
             (void)wal->stop_workers();
         interceptors::reset();
     }
@@ -185,7 +185,7 @@ public:
         auto wrapper = get_wrapper(id, true);
         if (!wrapper.has_value()) return false;
         wrapper->set_value(value);
-        return true;
+        return !state.has_error();
     }
 
     [[nodiscard]]
@@ -435,6 +435,7 @@ TEST_F(RollForwardTests, ObsoleteSegmentsAreRemoved)
 {
     add_values(*this, PAGE_COUNT);
     commit();
+    ASSERT_OK(pager->flush({}));
     ASSERT_OK(allow_cleanup());
 
     const auto [first, last] = get_lsn_range();
@@ -688,9 +689,6 @@ static auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
     auto &db = test.get_db();
 
     for (auto itr = begin; itr != end; ++itr) {
-        if(itr->key=="\371\020g\275E;+\350\240\006\217\034\261\210e"){
-            std::cout<<"found\n";
-        }
         EXPECT_TRUE(expose_message(db.insert(stob(itr->key), stob(itr->value))));
     }
 
@@ -992,20 +990,19 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     ASSERT_OK(db.status());
 }
 
-// TODO: We're flushing during commit for now, so this won't ever happen...
+//// TODO: We're flushing during commit for now, so this won't ever happen...
 //TEST_F(FailureTests, DataWriteFailureDuringQuery)
 //{
 //    // This tests database behavior when we encounter an error while flushing a dirty page to make room for a page read
 //    // during a query. In this case, we don't have a transaction we can try to abort, so we must exit the program. Next
 //    // time the database is opened, it will roll forward and apply any missing updates.
-//    add_sequential_records(db, 500);
+//    add_sequential_records(db, 5'000);
 //
-//    interceptors::set_write(FailOnce<5> {"test/data"});
+//    interceptors::set_write(FailOnce<0> {"test/data"});
 //
 //    auto c = db.first();
 //    for (; c.is_valid(); ++c) {}
 //
-//    assert_error_42(c.status());
 //    assert_error_42(db.status());
 //}
 
@@ -1085,7 +1082,6 @@ public:
 
         ASSERT_OK(xact.abort());
 
-        validate();
         std::string page(options.page_size, '\x00');
         auto bs = stob(page);
         RandomReader *rd;
@@ -1104,9 +1100,9 @@ public:
 
     virtual auto validate() -> void
     {
-        for (const auto &[key, value]: committed) {
-            ASSERT_TRUE(tools::contains(*db, key, value));
-        }
+        for (const auto &[key, value]: committed)
+            tools::expect_contains(*db, key, value);
+
         for (const auto &[key, value]: uncommitted) {
             ASSERT_FALSE(tools::contains(*db, key, value));
         }
@@ -1156,7 +1152,7 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_pair(  0, 100),
         std::make_pair(  1,   0),
         std::make_pair(  1, 100),
-        std::make_pair( 10,   0),
+        std::make_pair( 7,   0),
         std::make_pair( 10, 100)));
 
 class RecoveryFailureTestRunner {

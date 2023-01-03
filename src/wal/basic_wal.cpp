@@ -225,21 +225,23 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
 
     // Find the segment containing the first update that hasn't been applied yet.
     auto s = ok();
-//    while (s.is_ok()) {
-//        Id first_lsn;
-//        CALICO_TRY_S(m_reader->read_first_lsn(first_lsn));
-//
-//        if (first_lsn >= begin_lsn) {
-//            if (first_lsn > begin_lsn)
-//                s = m_reader->seek_previous();
-//            break;
-//        } else {
-//            s = m_reader->seek_next();
-//        }
-//    }
-//
-//    if (s.is_not_found())
-//        s = ok();
+    while (s.is_ok()) {
+        Id first_lsn;
+        s = m_reader->read_first_lsn(first_lsn);
+        if (s.is_not_found()) return ok();
+        CALICO_TRY_S(s);
+
+        if (first_lsn >= begin_lsn) {
+            if (first_lsn > begin_lsn)
+                s = m_reader->seek_previous();
+            break;
+        } else {
+            s = m_reader->seek_next();
+        }
+    }
+
+    if (s.is_not_found())
+        s = ok();
 
     while (s.is_ok()) {
         s = m_reader->roll([&callback, begin_lsn, this](auto payload) {
@@ -290,7 +292,6 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
     for (; ; ) {
         auto s = m_reader->seek_next();
         if (s.is_not_found()) break;
-        if (!s.is_ok()) return s;
         CALICO_TRY_S(s);
     }
 
@@ -327,9 +328,7 @@ auto BasicWriteAheadLog::remove_after(Id limit) -> Status
 {
     m_log->trace("remove_after");
     CALICO_EXPECT_FALSE(m_is_working);
-    auto last = m_set.last();
-    auto current = last;
-    SegmentId target;
+    auto current = m_set.last();
 
     while (!current.is_null()) {
         Id first_lsn;
@@ -337,16 +336,17 @@ auto BasicWriteAheadLog::remove_after(Id limit) -> Status
             *m_store, m_prefix, current, first_lsn);
 
         if (s.is_ok()) {
-            if (first_lsn >= limit)
+            if (first_lsn <= limit)
                 break;
         } else if (!s.is_not_found()) {
             return s;
         }
-        if (!target.is_null()) {
-            CALICO_TRY_S(m_store->remove_file(m_prefix + target.to_name()));
-            m_set.remove_after(current);
+        if (!current.is_null()) {
+            const auto name = m_prefix + current.to_name();
+            CALICO_TRY_S(m_store->remove_file(name));
+            m_set.remove_after(SegmentId {current.value - 1});
+            m_log->info("removed segment {} with first LSN {}", name, first_lsn.value);
         }
-        target = current;
         current = m_set.id_before(current);
     }
     return ok();

@@ -13,10 +13,6 @@ static constexpr Size WAL_SCRATCH_SCALE {3};
 static constexpr Size WAL_BLOCK_SCALE {1};
 
 struct SegmentId: public Id {
-    static constexpr auto NAME_FORMAT = "{}{:06d}";
-    static constexpr Size DIGITS_SIZE {6};
-    using Hash = Hash;
-
     constexpr SegmentId() noexcept = default;
 
     constexpr explicit SegmentId(Size value) noexcept
@@ -27,7 +23,6 @@ struct SegmentId: public Id {
         : Id {id}
     {}
 
-    // TODO: Had to shadow a few methods...
     [[nodiscard]]
     static auto from_index(size_t index) noexcept -> SegmentId
     {

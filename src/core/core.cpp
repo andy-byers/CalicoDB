@@ -325,7 +325,7 @@ auto Core::do_commit() -> Status
     CALICO_TRY_S(m_pager->flush(last_commit_lsn));
 
     // Clean up obsolete WAL segments.
-    CALICO_TRY_S(m_wal->remove_before(last_commit_lsn));
+    CALICO_TRY_S(m_wal->remove_before(m_pager->recovery_lsn()));
 
     m_images.clear();
     m_system->commit_lsn = lsn;

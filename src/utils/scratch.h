@@ -12,7 +12,7 @@ namespace Calico {
 
 class StaticScratch {
 public:
-    explicit StaticScratch(size_t size)
+    explicit StaticScratch(Size size)
         : m_data(size, '\x00'),
           m_view {m_data}
     {}

@@ -149,15 +149,15 @@ namespace tools {
     template<class T>
     auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
     {
-        const auto FMT = fmt::format("expected record ({}, {}): {{}}\n", key, value);
+        const auto MSG = fmt::format("expected record ({}, {})\n", key, value);
         if (auto c = find_exact(t, key); c.is_valid()) {
             if (c.value() != value) {
-                fmt::print(stderr, fmt::runtime(FMT), "value \"{}\" does not match", c.value());
-                CALICO_EXPECT_TRUE(false && "expect_contains() failed to match value");
+                fmt::print(stderr, "{}: value \"{}\" does not match\n", MSG, c.value());
+                std::exit(EXIT_FAILURE);
             }
         } else {
-            fmt::print(stderr, fmt::runtime(FMT), "could not find key");
-            CALICO_EXPECT_TRUE(false && "expect_contains() failed to find key");
+            fmt::print(stderr, "{}: {}\n", MSG, "could not find key");
+            std::exit(EXIT_FAILURE);
         }
     }
 

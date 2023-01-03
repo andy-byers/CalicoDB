@@ -31,7 +31,7 @@ BPlusTree::~BPlusTree()
     m_logger->trace("~BPlusTree");
 }
 
-auto BPlusTree::open(Pager &pager, System &system, size_t page_size) -> tl::expected<Tree::Ptr, Status>
+auto BPlusTree::open(Pager &pager, System &system, Size page_size) -> tl::expected<Tree::Ptr, Status>
 {
     auto ptr = Tree::Ptr {new(std::nothrow) BPlusTree {pager, system, page_size}};
     if (ptr == nullptr)

@@ -27,7 +27,7 @@ public:
         return m_internal.cell_count();
     }
 
-    [[nodiscard]] static auto open(Pager &pager, System &state, size_t page_size) -> tl::expected<Tree::Ptr, Status>;
+    [[nodiscard]] static auto open(Pager &pager, System &state, Size page_size) -> tl::expected<Tree::Ptr, Status>;
     [[nodiscard]] auto insert(BytesView key, BytesView value) -> Status override;
     [[nodiscard]] auto erase(Cursor cursor) -> Status override;
     [[nodiscard]] auto root(bool is_writable) -> tl::expected<Node, Status> override;

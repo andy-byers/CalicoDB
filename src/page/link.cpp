@@ -34,8 +34,7 @@ auto Link::content_view() const -> BytesView
 
 auto Link::content_bytes(Size size) -> Bytes
 {
-    // Takes a size parameter to avoid updating more of the page than is necessary. See
-    // Page::do_change() in page.cpp.
+    // Takes a size parameter to avoid updating more of the page than is necessary.
     return m_page.bytes(LinkLayout::content_offset(), size);
 }
 

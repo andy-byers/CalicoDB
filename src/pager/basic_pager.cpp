@@ -11,6 +11,8 @@ namespace Calico {
 
 namespace fs = std::filesystem;
 
+static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
+
 auto BasicPager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
 {
     auto framer = Framer::open(
@@ -89,24 +91,32 @@ auto BasicPager::clean_page(PageRegistry::Entry &entry) -> PageList::Iterator
     return m_dirty.remove(token);
 }
 
+auto BasicPager::set_recovery_lsn(Id lsn) -> void
+{
+    CALICO_EXPECT_LE(m_recovery_lsn, lsn);
+    m_log->info("recovery_lsn: {} -> {}", m_recovery_lsn.value, lsn.value);
+    m_recovery_lsn = lsn;
+}
+
 auto BasicPager::flush(Id target_lsn) -> Status
 {
-    static constexpr Id max_lsn {std::numeric_limits<size_t>::max()};
-
     m_log->trace("flush");
     CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);
 
     // An LSN of NULL causes all pages to be flushed.
     if (target_lsn.is_null())
-        target_lsn = max_lsn;
+        target_lsn = MAX_ID;
 
+    auto largest = Id::null();
     for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
-        CALICO_EXPECT_TRUE(m_registry.contains(itr->pid));
-        const auto page_id = itr->pid;
+        const auto [page_id, record_lsn] = *itr;
+        CALICO_EXPECT_TRUE(m_registry.contains(page_id));
         auto &entry = m_registry.get(page_id)->value;
         const auto frame_id = entry.frame_index;
-//        const auto record_lsn = entry.record_lsn;
         const auto page_lsn = m_framer.frame_at(frame_id).lsn();
+
+        if (largest < page_lsn)
+            largest = page_lsn;
 
         if (page_id.as_index() >= m_framer.page_count()) {
             // Page is out of range (abort was called and the database got smaller).
@@ -118,8 +128,7 @@ auto BasicPager::flush(Id target_lsn) -> Status
             // WAL record referencing this page has not been flushed yet.
             CALICO_WARN(logic_error(
                 "could not flush page {}: page updates for LSN {} are not in the WAL", page_id.value, page_lsn.value));
-            itr = next(itr);
-        } else {//if (record_lsn <= target_lsn) {
+        } else if (record_lsn <= target_lsn) {
             // Flush the page.
             auto s = m_framer.write_back(frame_id);
 
@@ -128,25 +137,31 @@ auto BasicPager::flush(Id target_lsn) -> Status
             CALICO_TRY_S(s);
             continue;
         }
+        // Skip this page.
+        itr = next(itr);
     }
     CALICO_TRY_S(m_framer.sync());
-    if (target_lsn != max_lsn && m_recovery_lsn < target_lsn)
-        m_recovery_lsn = target_lsn;
+
+    // We have flushed the entire cache.
+    if (target_lsn == MAX_ID)
+        target_lsn = largest;
+
+    // We don't have any pages in memory with LSNs below this value.
+    if (m_recovery_lsn < target_lsn)
+        set_recovery_lsn(target_lsn);
     return ok();
 }
 
 auto BasicPager::recovery_lsn() -> Id
 {
-    static constexpr Id max_lsn {std::numeric_limits<size_t>::max()};
-
-    auto lowest = max_lsn;
+    auto lowest = MAX_ID;
     for (auto entry: m_dirty) {
         if (lowest > entry.record_lsn)
             lowest = entry.record_lsn;
     }
     // NOTE: Recovery LSN is not always up-to-date. We update it here and in flush(), making sure it is monotonically increasing.
-    if (lowest != max_lsn && m_recovery_lsn < lowest)
-        m_recovery_lsn = lowest;
+    if (lowest != MAX_ID && m_recovery_lsn < lowest)
+        set_recovery_lsn(lowest);
     return m_recovery_lsn;
 }
 
@@ -210,8 +225,6 @@ auto BasicPager::release(Page page) -> Status
 
         // Log the delta record.
         CALICO_ERROR_IF(m_wal->log(payload));
-
-fmt::print("delta -> {}\n", payload.lsn().value);
     }
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
@@ -230,6 +243,7 @@ fmt::print("delta -> {}\n", payload.lsn().value);
             clean_page(entry);
         } else {
             CALICO_ERROR(s);
+            return s;
         }
     }
     return ok();
@@ -258,8 +272,6 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
         page.set_lsn(payload.lsn());
 
         CALICO_ERROR_IF(m_wal->log(payload));
-
-fmt::print("image -> {}\n", payload.lsn().value);
     }
 }
 
@@ -273,7 +285,8 @@ auto BasicPager::save_state(FileHeader &header) -> void
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
     m_log->trace("load_state");
-    m_recovery_lsn.value = header.recovery_lsn;
+    if (m_recovery_lsn.value < header.recovery_lsn)
+        set_recovery_lsn(Id {header.recovery_lsn});
     m_framer.load_state(header);
 }
 
