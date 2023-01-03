@@ -36,7 +36,7 @@ public:
     [[nodiscard]] auto page_count() const -> Size override;
     [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto hit_ratio() const -> double override;
-    [[nodiscard]] auto flushed_lsn() const -> Id override;
+    [[nodiscard]] auto recovery_lsn() -> Id override;
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status> override;
     [[nodiscard]] auto acquire(Id pid, bool is_writable) -> tl::expected<Page, Status> override;
     [[nodiscard]] auto release(Page page) -> Status override;
@@ -56,6 +56,7 @@ private:
     PageList m_dirty;
     PageRegistry m_registry;
     LogPtr m_log;
+    Id m_recovery_lsn;
     std::unordered_set<Id, Id::Hash> *m_images {};
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};

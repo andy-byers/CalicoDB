@@ -16,7 +16,7 @@
 
 namespace Calico {
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 
@@ -66,7 +66,7 @@ public:
         ASSERT_TRUE(s.is_ok()) << "Error: " << s.what();
     }
 
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     std::unique_ptr<Storage> store;
     std::vector<Record> records;
     std::unique_ptr<Core> core;
@@ -139,7 +139,7 @@ TEST_F(BasicDatabaseTests, ReopenDatabase)
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {
     RecordGenerator generator;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 
     for (Size iteration {}; iteration < num_groups; ++iteration) {
         const auto records = generator.generate(random, group_size);
@@ -190,7 +190,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
 
     auto s = ok();
     RecordGenerator generator;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 
     const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
     auto itr = cbegin(records);
@@ -318,7 +318,7 @@ public:
         }
     }
 
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     Database db;
 };
 

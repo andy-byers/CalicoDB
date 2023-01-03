@@ -17,7 +17,7 @@
 
 namespace Calico {
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 
@@ -83,7 +83,7 @@ public:
 
     Size max_size {GetParam() * WAL_SCRATCH_SCALE};
     Size min_size {max_size - GetParam()};
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     std::string scratch;
     std::string image;
 };
@@ -194,7 +194,7 @@ public:
           scratch(PAGE_SIZE * WAL_SCRATCH_SCALE, '\x00')
     {}
 
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     std::string image;
     std::string scratch;
 };
@@ -219,8 +219,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
     const auto size = encode_deltas_payload(Id::root(), image, deltas, stob(scratch).range(8));
     WalPayloadOut out {Bytes {scratch}.truncate(size + 8)};
     const auto payload = decode_payload(out);
-    ASSERT_TRUE(std::holds_alternative<DeltasDescriptor>(payload.value()));
-    const auto descriptor = std::get<DeltasDescriptor>(*payload);
+    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload.value()));
+    const auto descriptor = std::get<DeltaDescriptor>(*payload);
     ASSERT_EQ(descriptor.pid.value, 1);
     ASSERT_EQ(descriptor.deltas.size(), deltas.size());
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const auto &delta) {
@@ -406,7 +406,7 @@ public:
     std::unique_ptr<RandomReader> reader_file;
     std::unique_ptr<AppendWriter> writer_file;
     Id last_lsn;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 TEST_F(LogReaderWriterTests, DoesNotFlushEmptyBlock)
@@ -532,7 +532,7 @@ public:
     std::atomic<Id> flushed_lsn {};
     std::optional<WalWriter> writer;
     std::string tail;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 TEST_F(WalWriterTests, OpenAndDestroy)
@@ -779,7 +779,7 @@ public:
     std::string reader_data;
     std::string reader_tail;
     std::string writer_tail;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 static auto does_not_lose_records_test(WalReaderWriterTests &test, Size num_writes)
@@ -1011,8 +1011,8 @@ public:
 
     auto roll_forward(bool strict = true)
     {
-        Id lsn;
-        auto s=(wal->roll_forward({++lsn.value}, [&](auto payload) {
+        auto lsn = Id::root();
+        ASSERT_OK(wal->roll_forward(lsn, [&](auto payload) {
             const auto lhs = payload.data();
             const auto rhs = payloads.at(payload.lsn().as_index());
             EXPECT_EQ(lhs.size(), rhs.size());
@@ -1020,7 +1020,6 @@ public:
             EXPECT_EQ(Id {lsn.value++}, payload.lsn());
             return ok();
         }));
-        if (!s.is_ok()) {ADD_FAILURE();}
         // We should have hit all records.
         if (strict) {
             ASSERT_EQ(lsn, wal->current_lsn());

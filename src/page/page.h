@@ -44,7 +44,7 @@ public:
     auto bytes(Size) -> Bytes;
     auto bytes(Size, Size) -> Bytes;
     auto write(BytesView, Size) -> void;
-    auto apply_update(const DeltasDescriptor &) -> void;
+    auto apply_update(const DeltaDescriptor &) -> void;
     auto apply_update(const FullImageDescriptor&) -> void;
 
     // NOTE: We need these because we have a user-defined destructor.

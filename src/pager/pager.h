@@ -26,7 +26,7 @@ public:
     using Ptr = std::unique_ptr<Pager>;
 
     virtual ~Pager() = default;
-    [[nodiscard]] virtual auto flushed_lsn() const -> Id = 0;
+    [[nodiscard]] virtual auto recovery_lsn() -> Id = 0;
     [[nodiscard]] virtual auto page_count() const -> Size = 0;
     [[nodiscard]] virtual auto page_size() const -> Size = 0;
     [[nodiscard]] virtual auto hit_ratio() const -> double = 0;

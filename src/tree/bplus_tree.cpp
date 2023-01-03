@@ -14,7 +14,7 @@ BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
       m_logger {system.create_log("tree")},
       m_system {&system}
 {
-    m_logger->info("constructing tree");
+    m_logger->trace("BPlusTree");
     m_actions.acquire = [this](auto pid, auto is_writable) {
         return m_pool.acquire(pid, is_writable);
     };
@@ -28,7 +28,7 @@ BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
 
 BPlusTree::~BPlusTree()
 {
-    m_logger->info("destroying tree");
+    m_logger->trace("~BPlusTree");
 }
 
 auto BPlusTree::open(Pager &pager, System &system, size_t page_size) -> tl::expected<Tree::Ptr, Status>

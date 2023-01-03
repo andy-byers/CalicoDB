@@ -2,7 +2,7 @@
 #include "calico/options.h"
 #include "framer.h"
 #include "page/page.h"
-#include "storage/posix_storage.h"
+#include "utils/header.h"
 #include "utils/system.h"
 #include "utils/types.h"
 #include <thread>
@@ -35,7 +35,7 @@ BasicPager::BasicPager(const Parameters &param, Framer framer)
       m_wal {param.wal},
       m_system {param.system}
 {
-    m_log->info("constructing BasicPager instance");
+    m_log->trace("BasicPager");
 }
 
 auto BasicPager::page_count() const -> Size
@@ -83,58 +83,71 @@ auto BasicPager::pin_frame(Id pid, bool &is_fragile) -> Status
 
 auto BasicPager::clean_page(PageRegistry::Entry &entry) -> PageList::Iterator
 {
-    auto next = m_dirty.remove(*entry.dirty_token);
-    entry.record_lsn = Id::null();
+    auto token = *entry.dirty_token;
+    // Reset the dirty list reference.
     entry.dirty_token.reset();
-    return next;
+    return m_dirty.remove(token);
 }
 
 auto BasicPager::flush(Id target_lsn) -> Status
 {
-    m_log->info("flushing cached database pages");
+    static constexpr Id max_lsn {std::numeric_limits<size_t>::max()};
+
+    m_log->trace("flush");
     CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);
 
     // An LSN of NULL causes all pages to be flushed.
     if (target_lsn.is_null())
-        target_lsn.value = std::numeric_limits<size_t>::max();
+        target_lsn = max_lsn;
 
     for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
-        CALICO_EXPECT_TRUE(m_registry.contains(*itr));
-        const auto page_id = *itr;
+        CALICO_EXPECT_TRUE(m_registry.contains(itr->pid));
+        const auto page_id = itr->pid;
         auto &entry = m_registry.get(page_id)->value;
         const auto frame_id = entry.frame_index;
-        const auto record_lsn = entry.record_lsn;
+//        const auto record_lsn = entry.record_lsn;
         const auto page_lsn = m_framer.frame_at(frame_id).lsn();
-        auto s = ok();
 
         if (page_id.as_index() >= m_framer.page_count()) {
             // Page is out of range (abort was called and the database got smaller).
             m_registry.erase(page_id);
             m_framer.unpin(frame_id);
+            itr = m_dirty.remove(itr);
+            continue;
         } else if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
             CALICO_WARN(logic_error(
                 "could not flush page {}: page updates for LSN {} are not in the WAL", page_id.value, page_lsn.value));
             itr = next(itr);
-            continue;
-        } else if (record_lsn <= target_lsn) {
+        } else {//if (record_lsn <= target_lsn) {
             // Flush the page.
-            s = m_framer.write_back(frame_id);
-        } else {
-            // Page doesn't need to be flushed yet.
-            itr = next(itr);
+            auto s = m_framer.write_back(frame_id);
+
+            // Advance to the next dirty list entry.
+            itr = clean_page(entry);
+            CALICO_TRY_S(s);
             continue;
         }
-        // Advance to the next dirty list entry.
-        itr = clean_page(entry);
-        CALICO_TRY_S(s);
     }
-    return m_framer.sync();
+    CALICO_TRY_S(m_framer.sync());
+    if (target_lsn != max_lsn && m_recovery_lsn < target_lsn)
+        m_recovery_lsn = target_lsn;
+    return ok();
 }
 
-auto BasicPager::flushed_lsn() const -> Id
+auto BasicPager::recovery_lsn() -> Id
 {
-    return m_framer.flushed_lsn();
+    static constexpr Id max_lsn {std::numeric_limits<size_t>::max()};
+
+    auto lowest = max_lsn;
+    for (auto entry: m_dirty) {
+        if (lowest > entry.record_lsn)
+            lowest = entry.record_lsn;
+    }
+    // NOTE: Recovery LSN is not always up-to-date. We update it here and in flush(), making sure it is monotonically increasing.
+    if (lowest != max_lsn && m_recovery_lsn < lowest)
+        m_recovery_lsn = lowest;
+    return m_recovery_lsn;
 }
 
 auto BasicPager::try_make_available() -> tl::expected<bool, Status>
@@ -163,7 +176,7 @@ auto BasicPager::try_make_available() -> tl::expected<bool, Status>
         return false;
     }
 
-    auto &[frame_index, record_lsn, dirty_token] = *evicted;
+    auto &[frame_index, dirty_token] = *evicted;
     auto s = ok();
 
     if (dirty_token) {
@@ -180,7 +193,6 @@ auto BasicPager::release(Page page) -> Status
 {
     // NOTE: This block should be safe, because we can only have 1 writable page acquired at any given time. We will not enter unless the
     //       page was written to while it was acquired.
-    auto s = ok();
     if (const auto deltas = page.collect_deltas(); m_wal->is_working() && !deltas.empty()) {
         CALICO_EXPECT_TRUE(page.is_writable());
 
@@ -197,8 +209,7 @@ auto BasicPager::release(Page page) -> Status
         payload.shrink_to_fit(size);
 
         // Log the delta record.
-        s = m_wal->log(payload);
-        CALICO_ERROR_IF(s);
+        CALICO_ERROR_IF(m_wal->log(payload));
     }
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
@@ -209,15 +220,17 @@ auto BasicPager::release(Page page) -> Status
     auto &entry = itr->value;
     m_framer.unref(entry.frame_index, page);
 
-    // Note that the commit LSN is always less than or equal to the WAL flushed LSN.
-    if (entry.dirty_token && entry.record_lsn < m_system->commit_lsn) {
-        s = m_framer.write_back(entry.frame_index);
-        CALICO_ERROR_IF(s);
+    // Only write back dirty pages that haven't been written since the last commit.
+    if (entry.dirty_token && (*entry.dirty_token)->record_lsn < m_system->commit_lsn) {
+        auto s = m_framer.write_back(entry.frame_index);
 
-        if (s.is_ok())
+        if (s.is_ok()) {
             clean_page(entry);
+        } else {
+            CALICO_ERROR(s);
+        }
     }
-    return s;
+    return ok();
 }
 
 auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
@@ -225,15 +238,14 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
     // This function needs external synchronization!
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
 
+    if (entry.dirty_token.has_value())
+        return;
+
     // Make sure this page is in the dirty list. LSN is saved to determine when the page should be written back.
-    if (!entry.dirty_token) {
-        entry.record_lsn = m_wal->current_lsn();
-        entry.dirty_token = m_dirty.insert(page.id());
-    }
+    entry.dirty_token = m_dirty.insert(page.id(), page.lsn());
 
     if (m_wal->is_working()) {
-        // Don't write a full image record to the WAL if we already have one for
-        // this page during this transaction.
+        // Don't write a full image record to the WAL if we already have one for this page during this transaction.
         const auto itr = m_images->find(page.id());
         if (itr != cend(*m_images))
             return;
@@ -243,6 +255,7 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
         const auto size = encode_full_image_payload(
             page.id(), page.view(0), payload.data());
         payload.shrink_to_fit(size);
+        page.set_lsn(payload.lsn());
 
         CALICO_ERROR_IF(m_wal->log(payload));
     }
@@ -250,13 +263,15 @@ auto BasicPager::watch_page(Page &page, PageRegistry::Entry &entry) -> void
 
 auto BasicPager::save_state(FileHeader &header) -> void
 {
-    m_log->info("saving header fields");
+    m_log->trace("save_state");
+    header.recovery_lsn = m_recovery_lsn.value;
     m_framer.save_state(header);
 }
 
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
-    m_log->info("loading header fields");
+    m_log->trace("load_state");
+    m_recovery_lsn.value = header.recovery_lsn;
     m_framer.load_state(header);
 }
 
@@ -302,8 +317,6 @@ auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
                 CALICO_ERROR(s);
             return tl::make_unexpected(s);
         }
-        s = m_wal->worker_status();
-        if (!s.is_ok()) return tl::make_unexpected(s);
     }
 
     auto itr = m_registry.get(id);

@@ -19,6 +19,7 @@ static constexpr Size MAXIMUM_WAL_LIMIT {0x2000};
 static constexpr Size DISABLE_WAL {};
 
 enum class LogLevel {
+    TRACE,
     INFO,
     WARN,
     ERROR,

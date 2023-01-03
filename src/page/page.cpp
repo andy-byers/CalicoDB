@@ -87,7 +87,6 @@ auto Page::bytes(Size offset, Size size) -> Bytes
 {
     CALICO_EXPECT_TRUE(m_is_writable);
     insert_delta(m_deltas, PageDelta {offset, size});
-//    m_is_dirty = true;
     return m_data.range(offset, size);
 }
 
@@ -101,10 +100,9 @@ auto Page::apply_update(const FullImageDescriptor &info) -> void
     CALICO_EXPECT_EQ(m_id, info.pid);
     CALICO_EXPECT_EQ(m_data.size(), info.image.size());
     mem_copy(m_data, info.image);
-//    m_is_dirty = true;
 }
 
-auto Page::apply_update(const DeltasDescriptor &info) -> void
+auto Page::apply_update(const DeltaDescriptor &info) -> void
 {
     CALICO_EXPECT_EQ(m_id, info.pid);
     for (const auto &[offset, delta]: info.deltas)

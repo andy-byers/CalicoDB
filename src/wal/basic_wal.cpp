@@ -4,20 +4,10 @@
 
 namespace Calico {
 
-static auto propagate_worker_error(System &system, const WriteAheadLog &wal)
-{
-    auto s = wal.worker_status();
-
-    if (!s.is_ok())
-        system.push_error(Error::ERROR, s);
-
-    return ok();
-}
-
 #define PROPAGATE_WORKER_ERROR \
     do { \
         CALICO_EXPECT_TRUE(m_is_working); \
-        CALICO_TRY_S(propagate_worker_error(*m_system, *this)); \
+        CALICO_ERROR_IF(worker_status()); \
     } while (0)
 
 BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
@@ -30,7 +20,7 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
       m_wal_limit {param.wal_limit}
 {
-    m_log->info("opening WAL");
+    m_log->trace("BasicWriteAheadLog");
 }
 
 auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
@@ -67,10 +57,12 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
 
 BasicWriteAheadLog::~BasicWriteAheadLog()
 {
-    m_log->info("closing WAL");
+    m_log->trace("~BasicWriteAheadLog");
+    m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
 
     if (m_is_working) {
-        propagate_worker_error(*m_system, *this);
+        CALICO_ERROR_IF(m_writer->status());
+        CALICO_ERROR_IF(m_cleaner->status());
         CALICO_WARN_IF(stop_workers_impl());
     }
 }
@@ -96,6 +88,7 @@ auto BasicWriteAheadLog::current_lsn() const -> Id
 
 auto BasicWriteAheadLog::remove_before(Id lsn) -> Status
 {
+    m_log->trace("remove_before");
     PROPAGATE_WORKER_ERROR;
 
     m_cleaner->remove_before(lsn);
@@ -113,7 +106,7 @@ auto BasicWriteAheadLog::log(WalPayloadIn payload) -> Status
 
 auto BasicWriteAheadLog::flush() -> Status
 {
-    m_log->info("flushing tail buffer");
+    m_log->trace("flush");
     PROPAGATE_WORKER_ERROR;
 
     // flush() blocks until the background writer is finished.
@@ -123,7 +116,7 @@ auto BasicWriteAheadLog::flush() -> Status
 
 auto BasicWriteAheadLog::advance() -> Status
 {
-    m_log->info("advancing to new segment");
+    m_log->trace("advance");
     PROPAGATE_WORKER_ERROR;
 
     // advance() blocks until the background writer is finished.
@@ -133,6 +126,7 @@ auto BasicWriteAheadLog::advance() -> Status
 
 auto BasicWriteAheadLog::stop_workers() -> Status
 {
+    m_log->trace("stop_workers");
     return stop_workers_impl();
 }
 
@@ -140,8 +134,8 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
 {
     // Stops the workers no matter what, even if an error is encountered. We should be able to call abort_last() safely after
     // this method returns.
-    m_log->info("received stop request");
-    if (!m_is_working) return ok();
+    if (!m_is_working)
+        return ok();
     PROPAGATE_WORKER_ERROR;
 
     m_is_working = false;
@@ -154,21 +148,18 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
 
     CALICO_TRY_S(s);
     CALICO_TRY_S(t);
-
-    m_log->info("workers are stopped");
     return ok();
 }
 
 auto BasicWriteAheadLog::start_workers() -> Status
 {
-    m_log->info("received start request");
+    m_log->trace("start_workers");
     CALICO_EXPECT_FALSE(m_is_working);
 
     auto s = open_writer();
     auto t = open_cleaner();
 
     if (s.is_ok() && t.is_ok()) {
-        m_log->info("workers are started");
         m_is_working = true;
         return ok();
     }
@@ -213,7 +204,7 @@ auto BasicWriteAheadLog::open_cleaner() -> Status
 
 auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) -> Status
 {
-    m_log->info("rolling forward from LSN {}", begin_lsn.value);
+    m_log->trace("roll_forward");
 
     if (m_is_working)
         CALICO_TRY_S(stop_workers());
@@ -229,19 +220,28 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
     if (m_reader == std::nullopt)
         CALICO_TRY_S(open_reader());
 
-    // Make sure we are on the first segment.
-    for (; ; ) {
-        auto s = m_reader->seek_previous();
-        if (s.is_not_found()) break;
-        CALICO_TRY_S(s);
-    }
+    // We should be on the first segment.
+    CALICO_EXPECT_TRUE(m_reader->seek_previous().is_not_found());
 
+    // Find the segment containing the first update that hasn't been applied yet.
     auto s = ok();
-    while (s.is_ok()) {
-        Id first_lsn;
-        s = m_reader->read_first_lsn(first_lsn);
-        if (!s.is_ok()) break;
+//    while (s.is_ok()) {
+//        Id first_lsn;
+//        CALICO_TRY_S(m_reader->read_first_lsn(first_lsn));
+//
+//        if (first_lsn >= begin_lsn) {
+//            if (first_lsn > begin_lsn)
+//                s = m_reader->seek_previous();
+//            break;
+//        } else {
+//            s = m_reader->seek_next();
+//        }
+//    }
+//
+//    if (s.is_not_found())
+//        s = ok();
 
+    while (s.is_ok()) {
         s = m_reader->roll([&callback, begin_lsn, this](auto payload) {
             m_last_lsn = payload.lsn();
             if (m_last_lsn >= begin_lsn)
@@ -255,11 +255,8 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
         if (s.is_not_found())
             s = corruption(s.what());
 
-        if (!s.is_ok()) {
-            CALICO_WARN(s);
-            break;
-        }
-        s = m_reader->seek_next();
+        if (s.is_ok())
+            s = m_reader->seek_next();
     }
     const auto last_id = m_reader->segment_id();
     m_reader.reset();
@@ -280,7 +277,7 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
 
 auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> Status
 {
-    m_log->info("rolling backward to LSN {}", end_lsn.value);
+    m_log->trace("roll_backward");
     CALICO_EXPECT_FALSE(m_is_working);
 
     if (m_set.first().is_null())
@@ -328,6 +325,7 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
 
 auto BasicWriteAheadLog::remove_after(Id limit) -> Status
 {
+    m_log->trace("remove_after");
     CALICO_EXPECT_FALSE(m_is_working);
     auto last = m_set.last();
     auto current = last;

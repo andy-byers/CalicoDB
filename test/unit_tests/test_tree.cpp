@@ -16,7 +16,7 @@
 
 namespace Calico {
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 

@@ -3,6 +3,7 @@
 
 #include "calico/bytes.h"
 #include "utils/encoding.h"
+#include "utils/system.h"
 #include "utils/types.h"
 #include "wal/wal.h"
 #include <optional>
@@ -11,14 +12,12 @@
 
 namespace Calico {
 
-class System;
-
 struct PageDelta {
     Size offset {};
     Size size {};
 };
 
-struct DeltasDescriptor {
+struct DeltaDescriptor {
     struct Delta {
         Size offset {};
         BytesView data {};
@@ -39,7 +38,7 @@ struct CommitDescriptor {
     Id lsn;
 };
 
-using PayloadDescriptor = std::variant<DeltasDescriptor, FullImageDescriptor, CommitDescriptor>;
+using PayloadDescriptor = std::variant<DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
 
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
 [[nodiscard]] auto encode_deltas_payload(Id page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
@@ -54,12 +53,6 @@ enum XactPayloadType : Byte {
 
 static constexpr Size MINIMUM_PAYLOAD_SIZE {sizeof(XactPayloadType)};
 
-inline auto encode_payload_type(Bytes out, XactPayloadType type) -> void
-{
-    CALICO_EXPECT_FALSE(out.is_empty());
-    out[0] = type;
-}
-
 class Pager;
 class WriteAheadLog;
 
@@ -68,7 +61,8 @@ public:
     Recovery(Pager &pager, WriteAheadLog &wal, System &system)
         : m_pager {&pager},
           m_wal {&wal},
-          m_system {&system}
+          m_system {&system},
+          m_log {system.create_log("recovery")}
     {}
 
     [[nodiscard]] auto start_abort() -> Status;
@@ -82,6 +76,7 @@ private:
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
     System *m_system {};
+    LogPtr m_log;
 };
 
 } // namespace Calico

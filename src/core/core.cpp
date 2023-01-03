@@ -156,7 +156,6 @@ auto Core::open(const std::string &path, const Options &options) -> Status
 
 Core::~Core()
 {
-    m_log->info("closing database");
     m_wal.reset();
 
     if (m_owns_store)
@@ -165,6 +164,7 @@ Core::~Core()
 
 auto Core::destroy() -> Status
 {
+    m_log->trace("destroy");
     auto s = ok();
     m_wal.reset();
 
@@ -291,20 +291,25 @@ auto Core::atomic_erase(const Cursor &cursor) -> Status
 
 auto Core::commit() -> Status
 {
-    CALICO_TRY_S(handle_errors());
+    m_log->trace("commit");
     CALICO_ERROR_IF(do_commit());
-    return status();
+
+    auto s = status();
+    if (s.is_ok()) {
+        m_log->info("commit {}", m_wal->flushed_lsn().value);
+        CALICO_EXPECT_EQ(m_system->commit_lsn, m_wal->flushed_lsn());
+    }
+    return s;
 }
 
 auto Core::do_commit() -> Status
 {
-    m_log->info("received commit request");
-    const auto last_commit_lsn = m_system->commit_lsn.load();
+//    const auto last_commit_lsn = m_system->commit_lsn.load();
 
     if (!m_system->has_xact)
         return logic_error("transaction has not been started");
 
-    // Write database state to the root page file header.
+    CALICO_TRY_S(handle_errors());
     CALICO_TRY_S(save_state());
 
     // Write a commit record to the WAL.
@@ -312,16 +317,15 @@ auto Core::do_commit() -> Status
     WalPayloadIn payload {lsn, m_scratch->get()};
     const auto size = encode_commit_payload(payload.data());
     payload.shrink_to_fit(size);
-    m_log->info("commit LSN is {}", lsn.value);
 
     CALICO_TRY_S(m_wal->log(payload));
     CALICO_TRY_S(m_wal->advance());
 
     // Make sure every dirty page that hasn't been written back since the last commit is on disk.
-    CALICO_TRY_S(m_pager->flush(lsn)); // TODO: Only flush to last_commit_lsn
+    CALICO_TRY_S(m_pager->flush({})); // TODO
 
     // Clean up obsolete WAL segments.
-    CALICO_TRY_S(m_wal->remove_before(last_commit_lsn));
+//    CALICO_TRY_S(m_wal->remove_before(last_commit_lsn));
 
     m_images.clear();
     m_system->commit_lsn = lsn;
@@ -331,21 +335,25 @@ auto Core::do_commit() -> Status
 
 auto Core::abort() -> Status
 {
-    CALICO_TRY_S(handle_errors());
+    m_log->trace("abort");
     CALICO_ERROR_IF(do_abort());
-    return status();
+
+    auto s = status();
+    if (s.is_ok()) {
+        m_log->info("abort {}", m_system->commit_lsn.load().value);
+        CALICO_EXPECT_LE(m_system->commit_lsn.load(), m_wal->flushed_lsn());
+    }
+    return s;
 }
 
 auto Core::do_abort() -> Status
 {
-    m_log->info("received abort request");
-
     if (!m_system->has_xact)
         return logic_error(
             "could not abort: a transaction is not active (start a transaction and try again)");
 
-
     m_system->has_xact = false;
+    CALICO_TRY_S(handle_errors());
     CALICO_TRY_S(m_recovery->start_abort());
     CALICO_TRY_S(load_state());
     CALICO_TRY_S(m_recovery->finish_abort());
@@ -354,6 +362,8 @@ auto Core::do_abort() -> Status
 
 auto Core::close() -> Status
 {
+    m_log->trace("close");
+
     if (m_system->has_xact && !m_system->has_error()) {
         auto s = logic_error("could not close: a transaction is active (finish the transaction and try again)");
         CALICO_WARN(s);
@@ -364,6 +374,7 @@ auto Core::close() -> Status
 
     // We already waited on the WAL to be done writing so this should happen immediately.
     CALICO_ERROR_IF(m_pager->flush({}));
+
     return status();
 }
 
@@ -377,6 +388,7 @@ auto Core::ensure_consistency_on_startup() -> Status
 
 auto Core::transaction() -> Transaction
 {
+    m_log->trace("transaction");
     CALICO_EXPECT_FALSE(m_system->has_xact);
     m_system->has_xact = true;
     return Transaction {*this};
@@ -384,7 +396,7 @@ auto Core::transaction() -> Transaction
 
 auto Core::save_state() -> Status
 {
-    m_log->info("saving state to file header");
+    m_log->trace("save_state");
     auto root = m_pager->acquire(Id::root(), true);
     if (!root.has_value()) return root.error();
 
@@ -399,7 +411,7 @@ auto Core::save_state() -> Status
 
 auto Core::load_state() -> Status
 {
-    m_log->info("loading state from file header");
+    m_log->trace("load_state");
     auto root = m_pager->acquire(Id::root(), false);
     if (!root.has_value()) return root.error();
 
@@ -499,7 +511,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     } else if (s.is_not_found()) {
         header.magic_code = MAGIC_CODE;
         header.page_size = encode_page_size(options.page_size);
-        header.flushed_lsn = Id::root().value;
+        header.recovery_lsn = Id::root().value;
         header.header_crc = compute_header_crc(header);
 
     } else {

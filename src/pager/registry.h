@@ -15,7 +15,13 @@ class Frame;
 
 class PageList final {
 public:
-    using Iterator = std::list<Id>::iterator;
+    struct Entry {
+        Id pid;
+        Id record_lsn;
+    };
+
+    using Iterator = std::list<Entry>::iterator;
+    using ConstIterator = std::list<Entry>::const_iterator;
 
     PageList() = default;
     ~PageList() = default;
@@ -34,6 +40,13 @@ public:
     }
 
     [[nodiscard]]
+    auto begin() const -> ConstIterator
+    {
+        using std::begin;
+        return begin(m_list);
+    }
+
+    [[nodiscard]]
     auto end() -> Iterator
     {
         using std::end;
@@ -41,9 +54,16 @@ public:
     }
 
     [[nodiscard]]
-    auto insert(const Id &id) -> Iterator
+    auto end() const -> ConstIterator
     {
-        return m_list.emplace(cend(m_list), id);
+        using std::end;
+        return end(m_list);
+    }
+
+    [[nodiscard]]
+    auto insert(const Id &pid, const Id &record_lsn) -> Iterator
+    {
+        return m_list.emplace(cend(m_list), Entry {pid, record_lsn});
     }
 
     auto remove(Iterator itr) -> Iterator
@@ -52,7 +72,7 @@ public:
     }
 
 private:
-    std::list<Id> m_list;
+    std::list<Entry> m_list;
 };
 
 class PageRegistry final {
@@ -61,7 +81,6 @@ public:
 
     struct Entry {
         Size frame_index;
-        Id record_lsn {};
         DirtyToken dirty_token {};
     };
 

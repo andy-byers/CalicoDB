@@ -331,7 +331,7 @@ struct formatter<Cco::FileHeader> {
         out += fmt::format("page_count: {}, ", header.page_count);
         out += fmt::format("freelist_head: {}, ", header.freelist_head);
         out += fmt::format("record_count: {}, ", header.record_count);
-        out += fmt::format("flushed_lsn: {}, ", header.flushed_lsn);
+        out += fmt::format("flushed_lsn: {}, ", header.recovery_lsn);
         out += fmt::format("page_size: {}", header.page_size);
         return format_to(ctx.out(), "FileHeader {}}}", out);
     }

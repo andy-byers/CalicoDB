@@ -12,7 +12,7 @@
 
 namespace Calico {
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 
@@ -123,7 +123,7 @@ public:
     }
 
     std::unique_ptr<Storage> storage;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 class RandomFileReaderTests: public FileTests {
@@ -199,7 +199,7 @@ public:
     ~PosixStorageTests() override = default;
 
     PosixStorage storage;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 class HeapTests: public testing::Test {
@@ -214,7 +214,7 @@ public:
     ~HeapTests() override = default;
 
     std::unique_ptr<Storage> storage;
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
 };
 
 TEST_F(HeapTests, ReaderCannotCreateBlob)

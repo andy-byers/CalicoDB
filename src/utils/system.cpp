@@ -25,6 +25,8 @@ static constexpr auto to_spdlog_level(Error::Level level)
 static constexpr auto to_spdlog_level(LogLevel level)
 {
     switch (level) {
+        case LogLevel::TRACE:
+            return spdlog::level::trace;
         case LogLevel::INFO:
             return spdlog::level::info;
         case LogLevel::WARN:
@@ -38,11 +40,15 @@ static constexpr auto to_spdlog_level(LogLevel level)
 
 System::System(const std::string_view &base, LogLevel log_level, LogTarget log_target)
 {
-    spdlog::level::level_enum level {spdlog::level::off};
+    spdlog::level::level_enum level;
+    auto s = ok();
 
     switch (log_level) {
-        case LogLevel::INFO:
+        case LogLevel::TRACE:
             level = spdlog::level::trace;
+            break;
+        case LogLevel::INFO:
+            level = spdlog::level::info;
             break;
         case LogLevel::WARN:
             level = spdlog::level::warn;
@@ -50,12 +56,12 @@ System::System(const std::string_view &base, LogLevel log_level, LogTarget log_t
         case LogLevel::ERROR:
             level = spdlog::level::err;
             break;
+        default:
+            s = invalid_argument("unrecognized log level");
+            [[fallthrough]];
         case LogLevel::OFF:
             level = spdlog::level::off;
             m_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-            break;
-        default:
-            push_error(Error::ERROR, invalid_argument("unrecognized log level"));
     }
 
     if (level != spdlog::level::off) {
@@ -77,11 +83,14 @@ System::System(const std::string_view &base, LogLevel log_level, LogTarget log_t
                 m_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
                 break;
             default:
-                push_error(Error::ERROR, invalid_argument("unrecognized log target"));
+                s =  invalid_argument("unrecognized log target");
         }
     }
     m_sink->set_level(level);
     m_log = create_log("system");
+
+    if (!s.is_ok())
+        push_error(Error::ERROR, s);
 }
 
 auto System::create_log(const std::string_view &name) const -> LogPtr

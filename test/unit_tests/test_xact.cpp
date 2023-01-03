@@ -15,7 +15,7 @@ namespace Calico {
 
 namespace fs = std::filesystem;
 
-namespace internal {
+namespace UnitTests {
     extern std::uint32_t random_seed;
 } // namespace internal
 
@@ -207,7 +207,7 @@ public:
     [[nodiscard]]
     auto oldest_lsn() const -> Id
     {
-        return std::min(state.commit_lsn.load(), pager->flushed_lsn());
+        return std::min(state.commit_lsn.load(), pager->recovery_lsn()); // TODO: Changed this from flushed_lsn(), probably wrong now.
     }
 
     [[nodiscard]]
@@ -223,7 +223,7 @@ public:
     }
 
     System state {"test", LogLevel::OFF, {}};
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     Status status {ok()};
     bool has_xact {};
     std::unique_ptr<HeapStorage> store;
@@ -430,7 +430,7 @@ public:
     {
         std::vector<Id> lsns;
         EXPECT_OK(wal->stop_workers());
-        EXPECT_OK(wal->roll_forward(Id::null(), [&lsns](WalPayloadOut payload) {
+        EXPECT_OK(wal->roll_forward(Id::root(), [&lsns](WalPayloadOut payload) {
             lsns.emplace_back(payload.lsn());
             return ok();
         }));
@@ -448,7 +448,7 @@ TEST_F(RollForwardTests, ObsoleteSegmentsAreRemoved)
 
     const auto [first, last] = get_lsn_range();
     ASSERT_GT(first.value, 1);
-    ASSERT_LE(first, pager->flushed_lsn());
+    ASSERT_LE(first, pager->recovery_lsn());
     ASSERT_EQ(last, state.commit_lsn.load());
 }
 
@@ -461,13 +461,12 @@ TEST_F(RollForwardTests, KeepsNeededSegments)
     }
 
     const auto [first, last] = get_lsn_range();
-    ASSERT_LE(first, pager->flushed_lsn());
+    ASSERT_LE(first, pager->recovery_lsn());
     ASSERT_EQ(last, state.commit_lsn.load());
 }
 
 TEST_F(RollForwardTests, SanityCheck)
 {
-fmt::print("seed == {}\n", internal::random_seed);
     const auto committed = add_values(*this, PAGE_COUNT);
     commit();
 
@@ -564,7 +563,8 @@ public:
     {
         options.page_size = 0x400;
         options.cache_size = 32;
-        options.log_level = LogLevel::OFF;
+        options.log_level = LogLevel::TRACE;
+        options.log_target = LogTarget::STDOUT_COLOR;
         options.storage = store.get();
 
         ASSERT_OK(db.open(ROOT, options));
@@ -583,7 +583,7 @@ public:
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     Options options;
     Core db;
 };
@@ -697,6 +697,9 @@ static auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
     auto &db = test.get_db();
 
     for (auto itr = begin; itr != end; ++itr) {
+        if(itr->key=="\371\020g\275E;+\350\240\006\217\034\261\210e"){
+            std::cout<<"found\n";
+        }
         EXPECT_TRUE(expose_message(db.insert(stob(itr->key), stob(itr->value))));
     }
 
@@ -808,8 +811,17 @@ TEST_F(TransactionTests, PersistenceSanityCheck)
 
     for (Size i {}; i < 5; ++i) {
         ASSERT_OK(db.open(ROOT, options));
+        for (const auto &[key, value]: committed) {
+            if (!tools::contains(db, key, value)){
+                std::cout<<db.info().record_count()<<'\n';
+            }
+            ASSERT_TRUE(tools::contains(db, key, value));
+        }
         const auto current = run_random_transactions(*this, 10);
         committed.insert(cend(committed), cbegin(current), cend(current));
+        for (const auto &[key, value]: committed) {
+            ASSERT_TRUE(tools::contains(db, key, value));
+        }
         ASSERT_OK(db.close());
     }
 
@@ -850,9 +862,45 @@ public:
     }
 
     RecordGenerator generator {{16, 100, 10, false, true}};
-    Random random {internal::random_seed};
+    Random random {UnitTests::random_seed};
     Database db;
 };
+
+TEST_F(FailureTests,A)
+{
+    Options options;
+    options.page_size = 0x200;
+    options.cache_size = 16;
+    options.storage = store.get();
+    ASSERT_OK(db.close());
+
+
+    for (size_t i {}; i < 5; ++i) {
+        ASSERT_OK(db.open(ROOT, options));
+        auto xact = db.transaction();
+        for (size_t j {}; j < 1000; ++j) {
+            ASSERT_OK(db.insert(make_key<6>(i*1000 + j), "42"));
+        }
+        ASSERT_OK(xact.commit());
+        ASSERT_OK(db.close());
+    }
+//    ASSERT_OK(db.open(ROOT, options));
+//    ASSERT_TRUE(db.find("000").is_valid());
+//    ASSERT_TRUE(db.find("001").is_valid());
+//    ASSERT_TRUE(db.find("002").is_valid());
+//    ASSERT_TRUE(db.find("100").is_valid());
+//    ASSERT_TRUE(db.find("101").is_valid());
+//    ASSERT_TRUE(db.find("102").is_valid());
+
+//    ASSERT_OK(db.close());
+//    ASSERT_OK(db.open(ROOT, options));
+//
+//    x = db.transaction();
+//    ASSERT_OK(db.insert("g", std::string(500000, '1')));
+//    ASSERT_OK(db.insert("h", std::string(500000, '2')));
+//    ASSERT_OK(db.insert("i", std::string(500000, '3')));
+//    ASSERT_OK(x.commit());
+}
 
 auto add_sequential_records(Database &db, Size n)
 {
@@ -1025,11 +1073,13 @@ public:
         options.page_size = 0x200;
         options.cache_size = 32;
         options.log_target = LogTarget::STDOUT_COLOR;
-        options.log_level = LogLevel::INFO;
+        options.log_level = LogLevel::TRACE;
 
         ASSERT_OK(db->open("test", options));
         committed = run_random_transactions(*this, xact_count);
         const auto database_state = tools::read_file(*store, "test/data");
+
+        std::cout << "* * starting * *\n";
 
         auto xact = db->transaction();
         uncommitted = generator.generate(random, uncommitted_count);
@@ -1040,7 +1090,19 @@ public:
         auto cloned = store->clone();
         tools::write_file(*cloned, "test/data", database_state);
 
+        std::cout << "* * written * *\n";
+
         ASSERT_OK(xact.abort());
+
+        validate();
+        std::string page(options.page_size, '\x00');
+        auto bs = stob(page);
+        RandomReader *rd;
+        ASSERT_OK(store->open_random_reader("test/data", &rd));
+        ASSERT_OK(rd->read(bs, 0));
+        hexdump(page.data(), page.size());
+        delete rd;
+
         ASSERT_OK(db->close());
         store.reset(dynamic_cast<HeapStorage*>(cloned));
         options.storage = store.get();

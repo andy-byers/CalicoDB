@@ -19,7 +19,7 @@ struct FileHeader {
     std::uint64_t page_count;
     std::uint64_t freelist_head;
     std::uint64_t record_count;
-    std::uint64_t flushed_lsn;
+    std::uint64_t recovery_lsn;
     std::uint16_t page_size;
     Byte reserved[6];
 };

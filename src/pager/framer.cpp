@@ -101,17 +101,18 @@ auto Framer::unref(Size id, Page &page) -> void
     m_ref_sum--;
 }
 
-auto Framer::pin(Id id) -> tl::expected<Size, Status>
+auto Framer::pin(Id pid) -> tl::expected<Size, Status>
 {
-    CALICO_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_FALSE(pid.is_null());
     if (m_available.empty())
         return tl::make_unexpected(not_found(
             "could not pin page: unable to find an available frame (unpin a page and try again)"));
 
-    auto &frame = frame_at_impl(m_available.back());
+    auto fid = m_available.back();
+    auto &frame = frame_at_impl(fid);
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
 
-    if (auto r = read_page_from_file(id, frame.data())) {
+    if (auto r = read_page_from_file(pid, frame.data())) {
         if (!*r) {
             // We just tried to read at or past EOF. This happens when we allocate a new page or roll the WAL forward.
             mem_clear(frame.data());
@@ -120,10 +121,8 @@ auto Framer::pin(Id id) -> tl::expected<Size, Status>
     } else {
         return tl::make_unexpected(r.error());
     }
-
-    auto fid = m_available.back();
     m_available.pop_back();
-    frame.reset(id);
+    frame.reset(pid);
     return fid;
 }
 
@@ -147,13 +146,12 @@ auto Framer::write_back(Size id) -> Status
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_LE(frame.ref_count(), 1);
 
-    // If this fails, the caller (buffer pool) will need to roll back the database state or exit.
-    auto s = write_page_to_file(frame.pid(), frame.data());
-    if (s.is_ok()) {
-        const auto lsn = frame.lsn();
-        m_flushed_lsn = std::max(lsn, m_flushed_lsn);
-    }
-    return s;
+    // TODO: We sometimes write back pages with a NULL LSN. These pages were overwritten with zeros during abort() and correspond
+    //       to pages that were just allocated. We could set the page count before we start rolling back, since we know the old page
+    //       count as it is read from the WAL, then not write back pages that are going to be removed anyway, once the file is resized.
+fmt::print("wB: PID:{}, LSN:{}\n", frame.pid().value, frame.lsn().value);
+    // If this fails, the caller will need to roll back the database state or exit.
+    return write_page_to_file(frame.pid(), frame.data());
 }
 
 auto Framer::sync() -> Status
@@ -195,13 +193,11 @@ auto Framer::write_page_to_file(Id id, BytesView in) const -> Status
 
 auto Framer::load_state(const FileHeader &header) -> void
 {
-    m_flushed_lsn.value = header.flushed_lsn; // TODO: Consider whether this should be read here... This will cause it to decrease after a roll back.
-    m_page_count = header.page_count;         //       Right now, the XactTests are not reloading state between transactions.
+    m_page_count = header.page_count;
 }
 
 auto Framer::save_state(FileHeader &header) const -> void
 {
-    header.flushed_lsn = m_flushed_lsn.value;
     header.page_count = m_page_count;
 }
 

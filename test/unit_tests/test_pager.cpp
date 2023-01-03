@@ -423,7 +423,6 @@ TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
 {
     ASSERT_EQ(framer.available(), 8);
     ASSERT_EQ(framer.page_count(), 0);
-    ASSERT_TRUE(framer.flushed_lsn().is_null());
 }
 
 TEST_F(FramerTests, KeepsTrackOfAvailableFrames)
@@ -547,7 +546,7 @@ public:
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
-    ASSERT_EQ(pager->flushed_lsn(), Id::null());
+    ASSERT_EQ(pager->recovery_lsn(), Id::null());
     ASSERT_FALSE(state.has_error());
 }
 
@@ -626,6 +625,25 @@ TEST_F(PagerTests, RootDataPersistsInFrame)
 TEST_F(PagerTests, RootDataPersistsInStorage)
 {
     run_root_persistence_test(*this, frame_count * 2);
+}
+
+TEST_F(PagerTests, HeaderDataPersists)
+{
+    auto root = allocate_write(test_message);
+    root.set_type(PageType::INTERNAL_NODE);
+    root.set_lsn(Id {123});
+    FileHeader header {
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        page_size,
+        {},
+    };
+    write_header(root, header);
+    pager->release(std::move(root));
 }
 
 [[nodiscard]]

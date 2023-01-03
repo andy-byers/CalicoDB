@@ -21,7 +21,7 @@ static auto assert_ok(const Calico::Status &s)
 
 auto main(int, const char *[]) -> int
 {
-    namespace cco = Calico;
+    namespace cc = Calico;
 
     /* bytes-objects */
 
@@ -30,15 +30,15 @@ auto main(int, const char *[]) -> int
         std::string_view sv {"123"};
 
         // We can create slices from existing containers...
-        cco::Bytes b {s};
-        cco::BytesView bv {sv};
+        cc::Bytes b {s};
+        cc::BytesView bv {sv};
 
         // ...or from "raw parts", i.e. a pointer and a length.
-        cco::Bytes b2 {s.data(), s.size()};
-        cco::BytesView bv2 {sv.data(), sv.size()};
+        cc::Bytes b2 {s.data(), s.size()};
+        cc::BytesView bv2 {sv.data(), sv.size()};
 
         // Conversions are allowed from Bytes to BytesView, but not the other way.
-        cco::BytesView b3 {b};
+        cc::BytesView b3 {b};
 
         // We can also create owned strings.
         auto sv2 = b.to_string();
@@ -65,17 +65,18 @@ auto main(int, const char *[]) -> int
     /* opening-a-database (1) */
 
     // Create the database object.
-    cco::Database db;
+    cc::Database db;
 
     /* opening-a-database (2) */
 
     {
         // Set some initialization options. We'll use pages of size 2 KB with 2 MB of cache.
-        cco::Options options;
+        cc::Options options;
         options.page_size = 0x2000;
         options.cache_size = 256;
-        options.log_level = cco::LogLevel::INFO;
-        options.log_target = cco::LogTarget::STDERR_COLOR;
+        options.wal_limit = 256;
+        options.log_level = cc::LogLevel::TRACE;
+        options.log_target = cc::LogTarget::STDOUT_COLOR;
 
         // Open or create a database at "/tmp/cats".
         auto s = db.open("/tmp/cats", options);
@@ -138,7 +139,7 @@ auto main(int, const char *[]) -> int
         for (auto c = db.first(), bounds = db.find("42"); c.is_valid() && c != bounds; c++) {}
 
         // We can also use key comparisons.
-        for (auto c = db.first(); c.is_valid() && c.key() < cco::stob("42"); c++) {}
+        for (auto c = db.first(); c.is_valid() && c.key() < cc::stob("42"); c++) {}
     }
 
     /* transaction-objects */
@@ -177,7 +178,7 @@ auto main(int, const char *[]) -> int
         [[maybe_unused]] const auto mk = info.maximum_key_size();
 
         // The page size is fixed at database creation time. If the database already existed, the page size passed to the
-        // constructor through cco::Options is ignored. We can query the real page size using the following line.
+        // constructor through Cco::Options is ignored. We can query the real page size using the following line.
         [[maybe_unused]] const auto ps = info.page_size();
     }
 
@@ -194,7 +195,7 @@ auto main(int, const char *[]) -> int
     /* destroying-a-database */
 
     {
-        auto s = cco::Database::destroy(std::move(db));
+        auto s = cc::Database::destroy(std::move(db));
         assert_ok(s);
     }
 

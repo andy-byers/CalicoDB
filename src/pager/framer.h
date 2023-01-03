@@ -78,12 +78,6 @@ public:
     auto save_state(FileHeader&) const -> void;
 
     [[nodiscard]]
-    auto flushed_lsn() const -> Id
-    {
-        return m_flushed_lsn;
-    }
-
-    [[nodiscard]]
     auto page_count() const -> Size
     {
         return m_page_count;
@@ -133,7 +127,6 @@ private:
     std::vector<Frame> m_frames;
     std::list<Size> m_available;
     std::unique_ptr<RandomEditor> m_file;
-    Id m_flushed_lsn;
     Size m_page_count {};
     Size m_page_size {};
     Size m_ref_sum {};
