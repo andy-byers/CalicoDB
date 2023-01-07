@@ -17,11 +17,12 @@ auto read_corruption_error(const std::string &hint_fmt, Args &&...args) -> Statu
 static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Status
 {
     auto temp = out;
-    CALICO_TRY_S(file.read(temp, offset));
+    auto read_size = out.size();
+    CALICO_TRY_S(file.read(temp.data(), read_size, offset));
 
-    if (temp.is_empty()) {
+    if (read_size == 0) {
         return not_found("reached the end of the file");
-    } else if (temp.size() != out.size()) {
+    } else if (read_size != out.size()) {
         return system_error("incomplete read");
     }
     return ok();

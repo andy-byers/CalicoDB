@@ -118,6 +118,55 @@ private:
     std::thread m_thread;
 };
 
+class TaskManager final {
+public:
+    using Task = std::function<void()>;
+    using Interval = std::chrono::duration<double>;
+
+    explicit TaskManager(Interval interval)
+        : m_thread {[interval](auto *state) {
+              for (; ; ) {
+                  std::unique_lock lock {state->mutex};
+                  state->cond.wait_for(lock, interval, [state] {
+                      return !state->enabled;
+                  });
+
+                  if (!state->enabled)
+                      break;
+
+                  for (const auto &task: state->tasks)
+                      task();
+              }
+        }, &m_state}
+    {}
+
+    ~TaskManager()
+    {
+        {
+            std::lock_guard lock {m_state.mutex};
+            m_state.enabled = false;
+        }
+        m_thread.join();
+    }
+
+    auto add(Task task) -> void
+    {
+        std::lock_guard lock {m_state.mutex};
+        m_state.tasks.emplace_back(std::move(task));
+    }
+
+private:
+    struct State {
+        std::vector<Task> tasks;
+        mutable std::mutex mutex;
+        std::condition_variable cond;
+        bool enabled {true};
+    };
+
+    State m_state;
+    std::thread m_thread;
+};
+
 } // namespace Calico
 
 #endif // CALICO_WAL_WORKER_H

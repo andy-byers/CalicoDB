@@ -67,44 +67,14 @@ See the [API documentation](doc/api.md).
 </p>
 
 ## Performance
-Benchmarks are run in a modified version of LevelDB, using the `db_bench` routines.
-Below are the results of running some of `db_bench` on Calico DB and SQLite3.
+Calico DB has a way to go performance-wise.
+Currently, we have decent performance in the following categories:
++ Sequential writes
++ Random reads
++ Sequential reads
 
-```
-Calico DB:  version 0.0.1
-SQLite:     version 3.37.2
-CPU:        16 * 12th Gen Intel(R) Core(TM) i5-12600K
-CPUCache:   20480 KB
-```
-
-### Calico DB
-> Note: We've had a bit of a silly performance regression.
-> I've had to make the commit routine flush the whole page cache so that frequently-used pages don't get too out-of-sync with disk.
-> See [TODO](#todo).
-
-| Benchmark                | Result (ops/second) |
-|:-------------------------|--------------------:|
-| fillseq<sup>1</sup>      |             370,026 |
-| fillrandom<sup>1</sup>   |              74,731 |
-| overwrite<sup>1</sup>    |             100,204 |
-| readrandom               |             424,405 |
-| readseq                  |           2,631,493 |
-| fillrand100K<sup>1</sup> |                 698 |
-| fillseq100K<sup>1</sup>  |                 787 |
-
-<sup>1</sup> These benchmarks were run using a transaction size of 1000.
-Performing many modifications outside a transaction is slow, since each operation is atomic.
-
-### SQLite3
-| Benchmark    | Result (ops/second) |
-|:-------------|--------------------:|
-| fillseq      |             352,361 |
-| fillrandom   |             186,567 |
-| overwrite    |             185,529 |
-| readrandom   |             497,265 |
-| readseq      |           7,936,508 |
-| fillrand100K |               5,185 |
-| fillseq100K  |               7,572 |
+Unfortunately, random writes are quite slow (~6 or 7 times slower than sequential writes).
+Writing in reverse-sequential order represents the worst case for the B<sup>+</sup>-tree splitting algorithm, and leads to awful performance.
 
 ## TODO
 1. Figure out a way to eliminate the call to `flush()` during `commit()`

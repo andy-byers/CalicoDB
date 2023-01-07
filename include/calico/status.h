@@ -2,7 +2,7 @@
 #define CALICO_STATUS_H
 
 #include <memory>
-#include "bytes.h"
+#include "slice.h"
 
 namespace Calico {
 
@@ -16,11 +16,11 @@ public:
     /*
      * Create a non-OK status with an error message.
      */
-    [[nodiscard]] static auto invalid_argument(const std::string_view &) -> Status;
-    [[nodiscard]] static auto system_error(const std::string_view &) -> Status;
-    [[nodiscard]] static auto logic_error(const std::string_view &) -> Status;
-    [[nodiscard]] static auto corruption(const std::string_view &) -> Status;
-    [[nodiscard]] static auto not_found(const std::string_view &) -> Status;
+    [[nodiscard]] static auto invalid_argument(Slice) -> Status;
+    [[nodiscard]] static auto system_error(Slice) -> Status;
+    [[nodiscard]] static auto logic_error(Slice) -> Status;
+    [[nodiscard]] static auto corruption(Slice) -> Status;
+    [[nodiscard]] static auto not_found(Slice) -> Status;
 
     /*
      * Check status type.
@@ -35,16 +35,16 @@ public:
     /*
      * Get the error message, if it exists.
      */
-    [[nodiscard]] auto what() const -> std::string_view;
+    [[nodiscard]] auto what() const -> Slice;
 
     // Status can be copied and moved.
-    Status(const Status &);
-    auto operator=(const Status &) -> Status &;
-    Status(Status &&) noexcept;
-    auto operator=(Status &&) noexcept -> Status &;
+    Status(const Status &rhs);
+    auto operator=(const Status &rhs) -> Status &;
+    Status(Status &&rhs) noexcept;
+    auto operator=(Status &&rhs) noexcept -> Status &;
 
 private:
-    enum class code : Byte {
+    enum class Code : Byte {
         INVALID_ARGUMENT = 1,
         SYSTEM_ERROR = 2,
         LOGIC_ERROR = 3,
@@ -56,14 +56,14 @@ private:
     Status() = default;
 
     // Construct a non-OK status.
-    Status(code, const std::string_view &);
+    Status(Code, Slice);
 
     // Storage for a status code and a message.
-    std::unique_ptr<char[]> m_data;
+    std::unique_ptr<Byte[]> m_data;
 };
 
 // status should be the size of a pointer.
-static_assert(sizeof(Status) == sizeof(char *));
+static_assert(sizeof(Status) == sizeof(Byte *));
 
 } // namespace Calico
 

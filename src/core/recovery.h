@@ -1,7 +1,7 @@
 #ifndef CALICO_CORE_TRANSACTION_LOG_H
 #define CALICO_CORE_TRANSACTION_LOG_H
 
-#include "calico/bytes.h"
+#include "calico/slice.h"
 #include "utils/encoding.h"
 #include "utils/system.h"
 #include "utils/types.h"
@@ -20,7 +20,7 @@ struct PageDelta {
 struct DeltaDescriptor {
     struct Delta {
         Size offset {};
-        BytesView data {};
+        Slice data {};
     };
 
     Id pid;
@@ -31,7 +31,7 @@ struct DeltaDescriptor {
 struct FullImageDescriptor {
     Id pid;
     Id lsn;
-    BytesView image;
+    Slice image;
 };
 
 struct CommitDescriptor {
@@ -41,8 +41,8 @@ struct CommitDescriptor {
 using PayloadDescriptor = std::variant<DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
 
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
-[[nodiscard]] auto encode_deltas_payload(Id page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
-[[nodiscard]] auto encode_full_image_payload(Id page_id, BytesView image, Bytes out) -> Size;
+[[nodiscard]] auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
+[[nodiscard]] auto encode_full_image_payload(Id page_id, Slice image, Bytes out) -> Size;
 [[nodiscard]] auto encode_commit_payload(Bytes out) -> Size;
 
 enum XactPayloadType : Byte {
@@ -71,8 +71,6 @@ public:
     [[nodiscard]] auto finish_recovery() -> Status;
 
 private:
-    [[nodiscard]] auto finish_routine() -> Status;
-
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
     System *m_system {};

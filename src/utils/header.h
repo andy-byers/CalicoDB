@@ -1,9 +1,9 @@
 #ifndef CALICO_CORE_HEADER_H
 #define CALICO_CORE_HEADER_H
 
-#include "calico/bytes.h"
-#include "page/page.h"
+#include "calico/slice.h"
 #include "crc.h"
+#include "page/page.h"
 #include "types.h"
 
 namespace Calico {
@@ -36,14 +36,14 @@ inline auto read_header(const Page &page) -> FileHeader
 
 inline auto write_header(Page &page, const FileHeader &header) -> void
 {
-    BytesView bytes {reinterpret_cast<const Byte*>(&header), sizeof(FileHeader)};
+    Slice bytes {reinterpret_cast<const Byte*>(&header), sizeof(FileHeader)};
     mem_copy(page.bytes(0, sizeof(header)), bytes, bytes.size());
 }
 
 [[nodiscard]]
 inline auto compute_header_crc(const FileHeader &state)
 {
-    BytesView bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
+    Slice bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
     return crc_32(bytes.range(CRC_OFFSET));
 }
 

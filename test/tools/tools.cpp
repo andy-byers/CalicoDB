@@ -93,7 +93,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 //        } else if (key.size() > 5) {
 //            key = key.substr(0, 3) + "..";
 //        }
-//        add_key_to_level(stob(key), level, node.is_external());
+//        add_key_to_level(Slice {key), level, node.is_external()};
 //        if (not_last) {
 //            add_key_separator_to_level(level);
 //        } else {
@@ -104,7 +104,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 //        print_aux(m_tree.pool().acquire(node.rightmost_child_id(), false).value(), level + 1);
 //}
 //
-//auto TreePrinter::add_key_to_level(BytesView key, Index level, bool has_value) -> void
+//auto TreePrinter::add_key_to_level(Slice key, Index level, bool has_value) -> void
 //{
 //    const auto key_token = make_key_token(key);
 //    const std::string value_token {has_value ? "*" : ""};
@@ -133,7 +133,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 //    add_spaces_to_other_levels(node_end_token.size(), level);
 //}
 //
-//auto TreePrinter::make_key_token(BytesView key) -> std::string
+//auto TreePrinter::make_key_token(Slice key) -> std::string
 //{
 //    return btos(key);
 //}
@@ -162,29 +162,27 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 
 } // namespace Calico
 
-
-
 auto operator>(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return Calico::stob(lhs.key) > Calico::stob(rhs.key);
+    return Calico::Slice {lhs.key} > Calico::Slice {rhs.key};
 }
 
 auto operator<=(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return Calico::stob(lhs.key) <= Calico::stob(rhs.key);
+    return Calico::Slice {lhs.key} <= Calico::Slice {rhs.key};
 }
 
 auto operator>=(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return Calico::stob(lhs.key) >= Calico::stob(rhs.key);
+    return Calico::Slice {lhs.key} >= Calico::Slice {rhs.key};
 }
 
 auto operator==(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return Calico::stob(lhs.key) == Calico::stob(rhs.key);
+    return Calico::Slice {lhs.key} == Calico::Slice {rhs.key};
 }
 
 auto operator!=(const Calico::Record &lhs, const Calico::Record &rhs) -> bool
 {
-    return Calico::stob(lhs.key) != Calico::stob(rhs.key);
+    return Calico::Slice {lhs.key} != Calico::Slice {rhs.key};
 }

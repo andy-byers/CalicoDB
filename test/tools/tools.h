@@ -21,7 +21,7 @@ namespace Calico {
 inline auto expect_ok(const Status &s) -> void
 {
     if (!s.is_ok()) {
-        fmt::print(stderr, "unexpected {} status: {}\n", get_status_name(s), s.what());
+        fmt::print(stderr, "unexpected {} status: {}\n", get_status_name(s), s.what().data());
         CALICO_EXPECT_TRUE(false && "expect_ok() failed");
     }
 }
@@ -43,9 +43,11 @@ public:
         CALICO_EXPECT_EQ(file_size % page_size, 0);
         m_data.resize(file_size);
 
-        auto bytes = stob(m_data);
-        s = m_file->read(bytes, 0);
-        CALICO_EXPECT_EQ(bytes.size(), file_size);
+        Bytes bytes {m_data};
+        auto read_size = bytes.size();
+        s = m_file->read(bytes.data(), read_size, 0);
+        CALICO_EXPECT_EQ(read_size, file_size);
+        CALICO_EXPECT_TRUE(s.is_ok());
     }
 
     [[nodiscard]]
@@ -70,7 +72,7 @@ public:
 
         return Page {{
             id,
-            stob(m_data).range(offset, m_page_size),
+            Bytes {m_data}.range(offset, m_page_size),
             nullptr,
             false,
         }};
@@ -101,16 +103,10 @@ public:
         }
         for (const auto &[offset, size]: deltas) {
             const auto replacement = random.get<std::string>('a', 'z', size);
-            mem_copy(image.range(offset, size), stob(replacement));
+            mem_copy(image.range(offset, size), Slice {replacement});
         }
         return deltas;
     }
-
-//    [[nodiscard]]
-//    auto setup_single_page_update(Bytes image)
-//    {
-//
-//    }
 
 private:
     Random random {123};
@@ -164,7 +160,7 @@ namespace tools {
     template<class T>
     auto insert(T &t, const std::string &key, const std::string &value) -> void
     {
-        auto s = t.insert(stob(key), stob(value));
+        auto s = t.insert(key, value);
         if (!s.is_ok()) {
             CALICO_EXPECT_TRUE(false && "Error: insert() failed");
         }
@@ -196,7 +192,7 @@ namespace tools {
         return true;
     }
 
-    inline auto write_file(Storage &store, const std::string &path, BytesView in) -> void
+    inline auto write_file(Storage &store, const std::string &path, Slice in) -> void
     {
         RandomEditor *file;
         CALICO_EXPECT_TRUE(store.open_random_editor(path, &file).is_ok());
@@ -204,7 +200,7 @@ namespace tools {
         delete file;
     }
 
-    inline auto append_file(Storage &store, const std::string &path, BytesView in) -> void
+    inline auto append_file(Storage &store, const std::string &path, Slice in) -> void
     {
         AppendWriter *file;
         CALICO_EXPECT_TRUE(store.open_append_writer(path, &file).is_ok());
@@ -223,8 +219,9 @@ namespace tools {
         out.resize(size);
 
         Bytes temp {out};
-        CALICO_EXPECT_TRUE(file->read(temp, 0).is_ok());
-        CALICO_EXPECT_EQ(temp.size(), size);
+        auto read_size = temp.size();
+        CALICO_EXPECT_TRUE(file->read(temp.data(), read_size, 0).is_ok());
+        CALICO_EXPECT_EQ(read_size, size);
         delete file;
         return out;
     }
@@ -282,7 +279,7 @@ inline auto hexdump(const Byte *data, Size size, Size indent = 0) -> void
 struct Record {
     inline auto operator<(const Record &rhs) const -> bool
     {
-        return stob(key) < stob(rhs.key);
+        return Slice {key} < Slice {rhs.key};
     }
 
     std::string key;

@@ -26,7 +26,7 @@ auto Link::content_size() const -> Size
     return m_page.size() - LinkLayout::content_offset();
 }
 
-auto Link::content_view() const -> BytesView
+auto Link::content_view() const -> Slice
 {
     const auto offset = LinkLayout::content_offset();
     return m_page.view(offset, m_page.size() - offset);

@@ -28,7 +28,7 @@ inline constexpr auto wal_scratch_size(Size page_size) -> Size
 [[nodiscard]]
 inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, Id &out) -> Status
 {
-    RandomReader *temp {};
+    RandomReader *temp;
     CALICO_TRY_S(store.open_random_reader(prefix + id.to_name(), &temp));
 
     char buffer[WalPayloadHeader::SIZE];
@@ -36,7 +36,9 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId 
     std::unique_ptr<RandomReader> file {temp};
 
     // Read the first LSN. If it exists, it will always be at the same location.
-    CALICO_TRY_S(file->read(bytes, WalRecordHeader::SIZE));
+    auto read_size = bytes.size();
+    CALICO_TRY_S(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
+    bytes.truncate(read_size);
 
     if (bytes.is_empty())
         return not_found("segment is empty");
@@ -51,10 +53,10 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId 
 /*
  * Stores a collection of WAL segment descriptors and provides synchronized access.
  */
-class WalCollection final {
+class WalSet final {
 public:
-    WalCollection() = default;
-    ~WalCollection() = default;
+    WalSet() = default;
+    ~WalSet() = default;
 
     auto add_segment(SegmentId id) -> void
     {
@@ -123,8 +125,8 @@ private:
 
 class LogScratchManager final {
 public:
-    explicit LogScratchManager(Size buffer_size)
-        : m_manager {buffer_size}
+    explicit LogScratchManager(Size buffer_size, Size buffer_count)
+        : m_manager {buffer_size, buffer_count + EXTRA_SIZE}
     {}
 
     ~LogScratchManager() = default;
@@ -137,13 +139,13 @@ public:
     }
 
 private:
-    // NOTE: I know this seems pretty sketchy... It should be okay, because each call to get() is followed by
-    //       a call to WriteAheadLog::log(), which pushes its arguments into a WORKER_CAPACITY-length queue,
-    //       only blocking if it becomes full.
-    static constexpr Size SCRATCH_COUNT {WORKER_CAPACITY + 2};
-
+    // Number of extra scratch buffers to allocate. We seem to need a number of buffers equal to the worker
+    // queue size N + 2. This allows N buffers to be waiting in the queue, 1 for the WAL writer to work on,
+    // and another for the pager to work on. Then we won't overwrite scratch memory that is in use, because
+    // the worker queue will block after it reaches N elements.
+    static constexpr Size EXTRA_SIZE {2};
     mutable std::mutex m_mutex;
-    MonotonicScratchManager<SCRATCH_COUNT> m_manager;
+    MonotonicScratchManager m_manager;
 };
 
 } // namespace Calico

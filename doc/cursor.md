@@ -14,7 +14,7 @@ For example, the following snippet will iterate through the whole database.
 ```C++
 // Here we assume that the database is nonempty and does not contain "xyz", or anything that compares 
 // greater than it.
-const auto bounds = db.find(calico::stob("xyz"));
+const auto bounds = db.find(calico::Slice {"xyz")};
 assert(not bounds.is_valid());
 
 // This is effectively the same as iterating while `c.is_valid()`.

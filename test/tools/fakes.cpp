@@ -88,7 +88,7 @@ static auto read_file_at(const std::string &path, const std::string &file, Bytes
     INTERCEPT(interceptors::read(path, out, offset));
 
     Size r {};
-    if (auto buffer = stob(file); offset < buffer.size()) {
+    if (Slice buffer {file}; offset < buffer.size()) {
         const auto diff = buffer.size() - offset;
         r = std::min(out.size(), diff);
         buffer.advance(offset);
@@ -98,13 +98,13 @@ static auto read_file_at(const std::string &path, const std::string &file, Bytes
     return ok();
 }
 
-static auto write_file_at(const std::string &path, std::string &file, BytesView in, Size offset)
+static auto write_file_at(const std::string &path, std::string &file, Slice in, Size offset)
 {
     INTERCEPT(interceptors::write(path, in, offset));
 
     if (const auto write_end = offset + in.size(); file.size() < write_end)
         file.resize(write_end);
-    mem_copy(stob(file).range(offset), in);
+    mem_copy(Bytes {file}.range(offset), in);
     return ok();
 }
 
@@ -117,17 +117,22 @@ static auto format_path(std::string path)
     return path;
 }
 
-auto RandomHeapReader::read(Bytes &out, Size offset) -> Status
+auto RandomHeapReader::read(Byte *out, Size &size, Size offset) -> Status
 {
-    return read_file_at(m_path, *m_file, out, offset);
+    Bytes bytes {out, size};
+    auto s = read_file_at(m_path, *m_file, bytes, offset);
+    size = bytes.size();
+    return s;
 }
 
-auto RandomHeapEditor::read(Bytes &out, Size offset) -> Status
+auto RandomHeapEditor::read(Byte *out, Size &size, Size offset) -> Status
 {
-    return read_file_at(m_path, *m_file, out, offset);
-}
+    Bytes bytes {out, size};
+    auto s = read_file_at(m_path, *m_file, bytes, offset);
+    size = bytes.size();
+    return s;}
 
-auto RandomHeapEditor::write(BytesView in, Size offset) -> Status
+auto RandomHeapEditor::write(Slice in, Size offset) -> Status
 {
     return write_file_at(m_path, *m_file, in, offset);
 }
@@ -137,7 +142,7 @@ auto RandomHeapEditor::sync() -> Status
     return interceptors::sync(m_path);
 }
 
-auto AppendHeapWriter::write(BytesView in) -> Status
+auto AppendHeapWriter::write(Slice in) -> Status
 {
     return write_file_at(m_path, *m_file, in, m_file->size());
 }

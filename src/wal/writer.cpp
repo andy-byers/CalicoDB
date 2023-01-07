@@ -95,7 +95,7 @@ auto WalWriter::advance() -> void
 auto WalWriter::destroy() && -> Status
 {
     auto s = std::move(m_worker).destroy();
-    close_segment();
+    CALICO_TRY_S(close_segment()); // TODO: Probably want to pass a reference to the System object to this class. Seems we may have multiple errors at once at times.
     return s;
 }
 
@@ -162,6 +162,89 @@ auto WalWriter::close_segment() -> Status
 }
 
 auto WalWriter::advance_segment() -> Status
+{
+    auto s = close_segment();
+    if (s.is_ok()) {
+        auto id = ++m_set->last();
+        return open_segment(id);
+    }
+    return s;
+}
+
+
+
+
+
+
+
+auto WalWriterTask::open() -> Status
+{
+    return open_segment(++m_set->last());
+}
+
+auto WalWriterTask::write(WalPayloadIn payload) -> void
+{
+    m_work.enqueue(payload);
+}
+
+auto WalWriterTask::flush() -> void
+{
+    m_work.enqueue(FlushToken {});
+}
+
+auto WalWriterTask::advance() -> void
+{
+    m_work.enqueue(AdvanceToken {});
+}
+
+auto WalWriterTask::destroy() && -> Status
+{
+    return close_segment();
+}
+
+auto WalWriterTask::open_segment(SegmentId id) -> Status
+{
+    CALICO_EXPECT_EQ(m_writer, std::nullopt);
+    AppendWriter *file {};
+    auto s = m_storage->open_append_writer(m_prefix + id.to_name(), &file);
+    if (s.is_ok()) {
+        m_file.reset(file);
+        m_writer = LogWriter {*m_file, m_tail, *m_flushed_lsn};
+    }
+    return s;
+}
+
+auto WalWriterTask::close_segment() -> Status
+{
+    // We must have failed while opening the segment file.
+    if (!m_writer)
+        return logic_error("WAL writer already failed");
+
+    auto s = m_writer->flush();
+    bool is_empty {};
+
+    // We get a logic error if the tail buffer was empty. In this case, it is possible
+    // that the whole segment is empty.
+    if (!s.is_ok()) {
+        is_empty = m_writer->block_count() == 0;
+        if (s.is_logic_error())
+            s = ok();
+    }
+    m_writer.reset();
+    m_file.reset();
+
+    // We want to do this part, even if the flush failed. If the segment is empty, and we fail to remove
+    // it, we will end up overwriting it next time we open the writer.
+    if (auto id = ++m_set->last(); is_empty) {
+        auto t = m_storage->remove_file(m_prefix + id.to_name());
+        s = s.is_ok() ? t : s;
+    } else {
+        m_set->add_segment(id);
+    }
+    return s;
+}
+
+auto WalWriterTask::advance_segment() -> Status
 {
     auto s = close_segment();
     if (s.is_ok()) {

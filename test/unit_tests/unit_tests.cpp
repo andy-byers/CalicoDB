@@ -11,10 +11,10 @@ int main(int argc, char** argv)
     namespace Cco = Calico;
 
     // Custom parameter prefixes.
-    static constexpr Cco::BytesView SEED_PREFIX {"--random_seed="};
+    static constexpr Cco::Slice SEED_PREFIX {"--random_seed="};
 
     for (int i {1}; i < argc; ++i) {
-        Cco::BytesView arg {argv[i]};
+        Cco::Slice arg {argv[i]};
 
         if (arg.starts_with(SEED_PREFIX)) {
             arg.advance(SEED_PREFIX.size());

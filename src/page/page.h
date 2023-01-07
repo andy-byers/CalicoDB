@@ -33,8 +33,8 @@ public:
 
     [[nodiscard]] auto id() const -> Id;
     [[nodiscard]] auto size() const -> Size;
-    [[nodiscard]] auto view(Size) const -> BytesView;
-    [[nodiscard]] auto view(Size, Size) const -> BytesView;
+    [[nodiscard]] auto view(Size) const -> Slice;
+    [[nodiscard]] auto view(Size, Size) const -> Slice;
     [[nodiscard]] auto type() const -> PageType;
     [[nodiscard]] auto lsn() const -> Id;
     [[nodiscard]] auto collect_deltas() -> std::vector<PageDelta>;
@@ -43,7 +43,7 @@ public:
     auto read(Bytes, Size) const -> void;
     auto bytes(Size) -> Bytes;
     auto bytes(Size, Size) -> Bytes;
-    auto write(BytesView, Size) -> void;
+    auto write(Slice, Size) -> void;
     auto apply_update(const DeltaDescriptor &) -> void;
     auto apply_update(const FullImageDescriptor&) -> void;
 

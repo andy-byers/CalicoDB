@@ -18,7 +18,7 @@ public:
     }
 
     ~RandomFileReader() override;
-    [[nodiscard]] auto read(Bytes&, Size) -> Status override;
+    [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
 
 private:
     std::string m_path;
@@ -35,8 +35,8 @@ public:
     }
 
     ~RandomFileEditor() override;
-    [[nodiscard]] auto read(Bytes&, Size) -> Status override;
-    [[nodiscard]] auto write(BytesView, Size) -> Status override;
+    [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
+    [[nodiscard]] auto write(Slice, Size) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
 private:
@@ -54,7 +54,7 @@ public:
     }
 
     ~AppendFileWriter() override;
-    [[nodiscard]] auto write(BytesView) -> Status override;
+    [[nodiscard]] auto write(Slice) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
 private:

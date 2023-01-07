@@ -18,9 +18,44 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
-      m_wal_limit {param.wal_limit}
+      m_wal_limit {param.wal_limit},
+      m_writer_capacity {param.writer_capacity},
+      m_writer_task {{
+          param.prefix,
+          m_writer_tail,
+          m_store,
+          m_system,
+          &m_set,
+          &m_flushed_lsn,
+          param.wal_limit,
+          param.writer_capacity,
+      }},
+      m_cleanup_task {{
+          param.prefix,
+          m_store,
+          m_system,
+          &m_set,
+          param.writer_capacity,
+      }},
+      m_tasks {param.interval}
 {
-    m_log->trace("BasicWriteAheadLog");
+    // m_log->trace("BasicWriteAheadLog");
+
+
+    m_log->info("page_size = {}", param.page_size);
+    m_log->info("wal_limit = {}", param.wal_limit);
+    m_log->info("writer_capacity = {}", param.writer_capacity);
+
+    CALICO_EXPECT_NE(m_store, nullptr);
+    CALICO_EXPECT_NE(m_system, nullptr);
+    CALICO_EXPECT_NE(m_writer_capacity, 0);
+    CALICO_EXPECT_NE(m_wal_limit, 0);
+
+    // TODO: Attempt cleanup on a less-frequent interval?
+    m_tasks.add([this] {
+        m_cleanup_task();
+        m_writer_task();
+    });
 }
 
 auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
@@ -34,13 +69,13 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
     // Filter out the segment file names.
     std::vector<std::string> segment_names;
     std::copy_if(cbegin(child_names), cend(child_names), back_inserter(segment_names), [&path_prefix](const auto &path) {
-        return BytesView {path}.starts_with(path_prefix);
+        return Slice {path}.starts_with(path_prefix);
     });
 
     // Convert to segment IDs.
     std::vector<SegmentId> segment_ids;
     std::transform(cbegin(segment_names), cend(segment_names), back_inserter(segment_ids), [param](const auto &name) {
-        return SegmentId::from_name(BytesView {name}.advance(param.prefix.size()));
+        return SegmentId::from_name(Slice {name}.advance(param.prefix.size()));
     });
     std::sort(begin(segment_ids), end(segment_ids));
 
@@ -57,8 +92,8 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
 
 BasicWriteAheadLog::~BasicWriteAheadLog()
 {
-    m_log->trace("~BasicWriteAheadLog");
-    m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
+    // m_log->trace("~BasicWriteAheadLog");
+    // m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
 
     if (m_is_working) {
         CALICO_ERROR_IF(m_writer->status());
@@ -88,7 +123,7 @@ auto BasicWriteAheadLog::current_lsn() const -> Id
 
 auto BasicWriteAheadLog::remove_before(Id lsn) -> Status
 {
-    m_log->trace("remove_before");
+    // m_log->trace("remove_before");
     PROPAGATE_WORKER_ERROR;
 
     m_cleaner->remove_before(lsn);
@@ -106,7 +141,7 @@ auto BasicWriteAheadLog::log(WalPayloadIn payload) -> Status
 
 auto BasicWriteAheadLog::flush() -> Status
 {
-    m_log->trace("flush");
+    // m_log->trace("flush");
     PROPAGATE_WORKER_ERROR;
 
     // flush() blocks until the background writer is finished.
@@ -116,7 +151,7 @@ auto BasicWriteAheadLog::flush() -> Status
 
 auto BasicWriteAheadLog::advance() -> Status
 {
-    m_log->trace("advance");
+    // m_log->trace("advance");
     PROPAGATE_WORKER_ERROR;
 
     // advance() blocks until the background writer is finished.
@@ -126,7 +161,7 @@ auto BasicWriteAheadLog::advance() -> Status
 
 auto BasicWriteAheadLog::stop_workers() -> Status
 {
-    m_log->trace("stop_workers");
+    // m_log->trace("stop_workers");
     return stop_workers_impl();
 }
 
@@ -153,7 +188,7 @@ auto BasicWriteAheadLog::stop_workers_impl() -> Status
 
 auto BasicWriteAheadLog::start_workers() -> Status
 {
-    m_log->trace("start_workers");
+    // m_log->trace("start_workers");
     CALICO_EXPECT_FALSE(m_is_working);
 
     auto s = open_writer();
@@ -182,14 +217,15 @@ auto BasicWriteAheadLog::open_reader() -> Status
 
 auto BasicWriteAheadLog::open_writer() -> Status
 {
-    m_writer.emplace(
-        *m_store,
-        m_set,
+    m_writer.emplace(WalWriter::Parameters {
+        m_store,
+        &m_set,
         Bytes {m_writer_tail},
-        m_flushed_lsn,
+        &m_flushed_lsn,
         m_prefix,
-        m_wal_limit
-    );
+        m_wal_limit,
+        m_writer_capacity,
+    });
     return m_writer->open();
 }
 
@@ -204,7 +240,7 @@ auto BasicWriteAheadLog::open_cleaner() -> Status
 
 auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) -> Status
 {
-    m_log->trace("roll_forward");
+    // m_log->trace("roll_forward");
 
     if (m_is_working)
         CALICO_TRY_S(stop_workers());
@@ -255,7 +291,7 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
         // We found an empty segment. This happens when the program aborted before the writer could either
         // write a block or delete the empty file. This is OK if we are on the last segment.
         if (s.is_not_found())
-            s = corruption(s.what());
+            s = corruption(s.what().data());
 
         if (s.is_ok())
             s = m_reader->seek_next();
@@ -279,7 +315,7 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
 
 auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> Status
 {
-    m_log->trace("roll_backward");
+    // m_log->trace("roll_backward");
     CALICO_EXPECT_FALSE(m_is_working);
 
     if (m_set.first().is_null())
@@ -310,7 +346,7 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
             s = m_reader->roll(callback);
         } else if (s.is_not_found()) {
             // The segment file is empty.
-            s = corruption(s.what());
+            s = corruption(s.what().data());
         }
 
         // Most-recent segment can have an incomplete record at the end.
@@ -326,7 +362,7 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
 
 auto BasicWriteAheadLog::remove_after(Id limit) -> Status
 {
-    m_log->trace("remove_after");
+    // m_log->trace("remove_after");
     CALICO_EXPECT_FALSE(m_is_working);
     auto current = m_set.last();
 
@@ -345,7 +381,7 @@ auto BasicWriteAheadLog::remove_after(Id limit) -> Status
             const auto name = m_prefix + current.to_name();
             CALICO_TRY_S(m_store->remove_file(name));
             m_set.remove_after(SegmentId {current.value - 1});
-            m_log->info("removed segment {} with first LSN {}", name, first_lsn.value);
+            // m_log->info("removed segment {} with first LSN {}", name, first_lsn.value);
         }
         current = m_set.id_before(current);
     }

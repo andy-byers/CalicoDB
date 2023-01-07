@@ -2,7 +2,7 @@
 Accessing persistent storage is expensive, so Calico DB tries to avoid that where possible.
 To that end, we reserve a portion of main memory for caching pages from disk.
 Each database page, when read into main memory, lives in a data structure called a frame.
-A frame stores the entire contents of a page along with some auxiliary information (reference count, "is writable" flag, etc.).
+A frame stores the entire contents of a page along with some auxiliary information (reference count, "is writable" enabled, etc.).
 Both pages and frames are uniquely identified by their own indices.
 A page's index, called its page ID, gives the offset of the page in the database file, while a frame's frame ID is its index in the collection of frames.
 Note that page IDs, along with several other types of identifiers, start at 1, with 0 being reserved as a "null" value.

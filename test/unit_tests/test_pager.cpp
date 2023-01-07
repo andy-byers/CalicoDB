@@ -439,7 +439,7 @@ TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
         ASSERT_TRUE(framer.pin(Id {i}));
     const auto r = framer.pin(Id {9UL});
     ASSERT_FALSE(r.has_value());
-    ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what();
+    ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what().data();
 
     framer.unpin(Size {1UL});
     ASSERT_TRUE(framer.pin(Id {9UL}));
@@ -449,7 +449,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = PageLayout::content_offset(page.id());
     CALICO_EXPECT_LE(offset + message.size(), page.size());
-    page.write(stob(message), offset);
+    page.write(Slice {message}, offset);
 }
 
 [[nodiscard]]
@@ -458,7 +458,7 @@ auto read_from_page(const Page &page, Size size) -> std::string
     const auto offset = PageLayout::content_offset(page.id());
     CALICO_EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
-    page.read(stob(message), offset);
+    page.read(Bytes {message}, offset);
     return message;
 }
 
@@ -470,7 +470,7 @@ public:
 
     explicit PagerTests()
         : wal {std::make_unique<DisabledWriteAheadLog>()},
-          scratch {wal_scratch_size(page_size)}
+          scratch {wal_scratch_size(page_size), 32}
     {
         auto r = BasicPager::open({
             PREFIX,
@@ -492,7 +492,7 @@ public:
     auto allocate_write(const std::string &message) const
     {
         auto r = pager->allocate();
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
+        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
         write_to_page(*r, message);
         return std::move(*r);
     }
@@ -503,7 +503,7 @@ public:
         auto page = allocate_write(message);
         const auto id = page.id();
         const auto s = pager->release(std::move(page));
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
         return id;
     }
 
@@ -511,7 +511,7 @@ public:
     auto acquire_write(Id id, const std::string &message) const
     {
         auto r = pager->acquire(id, false);
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
+        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
         write_to_page(*r, message);
         return std::move(*r);
     }
@@ -520,14 +520,14 @@ public:
     {
         auto page = acquire_write(id, message);
         const auto s = pager->release(std::move(page));
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
     }
 
     [[nodiscard]]
     auto acquire_read_release(Id id, Size size) const
     {
         auto r = pager->acquire(id, false);
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what();
+        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
         auto message = read_from_page(*r, size);
         EXPECT_TRUE(pager->release(std::move(*r)).is_ok());
         return message;

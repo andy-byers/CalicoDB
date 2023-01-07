@@ -1,7 +1,7 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
-#include "calico/bytes.h"
+#include "calico/slice.h"
 #include "calico/status.h"
 #include "utils/encoding.h"
 #include "utils/scratch.h"
@@ -15,9 +15,6 @@ namespace Calico {
 struct FileHeader;
 struct Id;
 class WalReader;
-
-// The main thread will block after the worker has queued up this number of write requests.
-static constexpr Size WORKER_CAPACITY {16};
 
 class WalPayloadIn {
 public:
@@ -40,7 +37,7 @@ public:
     }
 
     [[nodiscard]]
-    auto raw() -> BytesView
+    auto raw() -> Slice
     {
         return *m_buffer;
     }
@@ -58,7 +55,7 @@ class WalPayloadOut {
 public:
     WalPayloadOut() = default;
 
-    explicit WalPayloadOut(BytesView payload)
+    explicit WalPayloadOut(Slice payload)
         : m_payload {payload}
     {}
 
@@ -69,13 +66,13 @@ public:
     }
 
     [[nodiscard]]
-    auto data() -> BytesView
+    auto data() -> Slice
     {
         return m_payload.range(sizeof(Id));
     }
 
 private:
-    BytesView m_payload;
+    Slice m_payload;
 };
 
 class WriteAheadLog {

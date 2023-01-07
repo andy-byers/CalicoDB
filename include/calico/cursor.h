@@ -1,15 +1,13 @@
 #ifndef CALICO_CURSOR_H
 #define CALICO_CURSOR_H
 
-#include "status.h"
 #include <memory>
 #include <optional>
+#include "status.h"
 
 namespace Calico {
 
 class Node;
-class NodeManager; // TODO: remove
-class Internal; // TODO: remove
 struct CursorActions;
 
 class Cursor final {
@@ -17,16 +15,16 @@ public:
     ~Cursor() = default;
     [[nodiscard]] auto is_valid() const -> bool;
     [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto key() const -> BytesView;
+    [[nodiscard]] auto key() const -> Slice;
     [[nodiscard]] auto value() const -> std::string;
     auto increment() -> bool;
     auto decrement() -> bool;
-    auto operator++() -> Cursor&;
+    auto operator++() -> Cursor &;
     auto operator++(int) -> Cursor;
-    auto operator--() -> Cursor&;
+    auto operator--() -> Cursor &;
     auto operator--(int) -> Cursor;
-    auto operator==(const Cursor&) const -> bool;
-    auto operator!=(const Cursor&) const -> bool;
+    auto operator==(const Cursor &rhs) const -> bool;
+    auto operator!=(const Cursor &rhs) const -> bool;
 
 private:
     Cursor() = default;

@@ -1,10 +1,10 @@
 #ifndef CALICO_UTILS_UTILS_H
 #define CALICO_UTILS_UTILS_H
 
+#include "calico/slice.h"
+#include "expect.h"
 #include <filesystem>
 #include <spdlog/fmt/fmt.h>
-#include "expect.h"
-#include "calico/bytes.h"
 
 namespace Calico {
 
@@ -40,14 +40,166 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
     return v && !(v & (v - 1));
 }
 
-inline auto mem_copy(Bytes dst, BytesView src, size_t n) noexcept -> void *
+
+class Bytes {
+public:
+    constexpr Bytes() noexcept = default;
+
+    constexpr Bytes(Byte *data, Size size) noexcept
+        : m_data {data},
+          m_size {size}
+    {}
+
+    constexpr Bytes(Byte *data) noexcept
+        : m_data {data}
+    {
+        if (m_data != nullptr)
+            m_size = std::char_traits<Byte>::length(m_data);
+    }
+
+    template<CanSlice T>
+    constexpr Bytes(T &rhs) noexcept
+        : Bytes {rhs.data(), rhs.size()} {}
+
+    [[nodiscard]]
+    constexpr auto is_empty() const noexcept -> bool
+    {
+        return m_size == 0;
+    }
+
+    [[nodiscard]]
+    constexpr auto data() noexcept -> Byte *
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    constexpr auto data() const noexcept -> const Byte *
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    constexpr auto size() const noexcept -> Size
+    {
+        return m_size;
+    }
+
+    constexpr operator Slice() const
+    {
+        return {*this};
+    }
+
+    constexpr auto operator[](Size index) const noexcept -> const Byte &
+    {
+        assert(index < m_size);
+        return m_data[index];
+    }
+
+    constexpr auto operator[](Size index) noexcept -> Byte &
+    {
+        assert(index < m_size);
+        return m_data[index];
+    }
+
+    [[nodiscard]]
+    constexpr auto range(Size offset, Size size) const noexcept -> Slice
+    {
+        assert(size <= m_size);
+        assert(offset <= m_size);
+        assert(offset + size <= m_size);
+
+        return Slice {m_data + offset, size};
+    }
+
+    [[nodiscard]]
+    constexpr auto range(Size offset, Size size) noexcept -> Bytes
+    {
+        assert(size <= m_size);
+        assert(offset <= m_size);
+        assert(offset + size <= m_size);
+
+        return Bytes {m_data + offset, size};
+    }
+
+    [[nodiscard]]
+    constexpr auto range(Size offset) const noexcept -> Slice
+    {
+        assert(offset <= m_size);
+        return range(offset, m_size - offset);
+    }
+
+    [[nodiscard]]
+    constexpr auto range(Size offset) noexcept -> Bytes
+    {
+        assert(offset <= m_size);
+        return const_cast<Bytes *>(this)->range(offset, m_size - offset);
+    }
+
+    [[nodiscard]]
+    constexpr auto copy() const noexcept -> Bytes
+    {
+        return *this;
+    }
+
+    constexpr auto clear() noexcept -> void
+    {
+        m_data = nullptr;
+        m_size = 0;
+    }
+
+    constexpr auto advance(Size n = 1) noexcept -> Bytes
+    {
+        assert(n <= m_size);
+        m_data += n;
+        m_size -= n;
+        return *this;
+    }
+
+    constexpr auto truncate(Size size) noexcept -> Bytes
+    {
+        assert(size <= m_size);
+        m_size = size;
+        return *this;
+    }
+
+    [[nodiscard]]
+    constexpr auto starts_with(const Byte *rhs) const noexcept -> bool
+    {
+        // NOTE: rhs must be null-terminated.
+        const auto size = std::char_traits<Byte>::length(rhs);
+        if (size > m_size)
+            return false;
+        return std::memcmp(m_data, rhs, size) == 0;
+    }
+
+    [[nodiscard]]
+    constexpr auto starts_with(Slice rhs) const noexcept -> bool
+    {
+        if (rhs.size() > m_size)
+            return false;
+        return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
+    }
+
+    [[nodiscard]]
+    auto to_string() const noexcept -> std::string
+    {
+        return {m_data, m_size};
+    }
+
+private:
+    Byte *m_data {};
+    Size m_size {};
+};
+
+inline auto mem_copy(Bytes dst, Slice src, size_t n) noexcept -> void *
 {
     CALICO_EXPECT_LE(n, src.size());
     CALICO_EXPECT_LE(n, dst.size());
     return std::memcpy(dst.data(), src.data(), n);
 }
 
-inline auto mem_copy(Bytes dst, BytesView src) noexcept -> void *
+inline auto mem_copy(Bytes dst, Slice src) noexcept -> void *
 {
     CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_copy(dst, src, src.size());
@@ -64,14 +216,14 @@ inline auto mem_clear(Bytes mem) noexcept -> void *
     return mem_clear(mem, mem.size());
 }
 
-inline auto mem_move(Bytes dst, BytesView src, Size n) noexcept -> void *
+inline auto mem_move(Bytes dst, Slice src, Size n) noexcept -> void *
 {
     CALICO_EXPECT_LE(n, src.size());
     CALICO_EXPECT_LE(n, dst.size());
     return std::memmove(dst.data(), src.data(), n);
 }
 
-inline auto mem_move(Bytes dst, BytesView src) noexcept -> void *
+inline auto mem_move(Bytes dst, Slice src) noexcept -> void *
 {
     CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_move(dst, src, src.size());

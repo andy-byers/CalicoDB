@@ -71,7 +71,7 @@ auto NodeManager::destroy(Node node) -> tl::expected<void, Status>
     return m_free_list.push(node.take());
 }
 
-auto NodeManager::allocate_chain(BytesView overflow) -> tl::expected<Id, Status>
+auto NodeManager::allocate_chain(Slice overflow) -> tl::expected<Id, Status>
 {
     CALICO_EXPECT_FALSE(overflow.is_empty());
     std::optional<Link> prev;

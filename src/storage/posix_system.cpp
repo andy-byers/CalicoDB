@@ -8,7 +8,7 @@
 #include "utils/expect.h"
 #include "utils/utils.h"
 
-namespace Calico::system {
+namespace Calico::Posix {
 
 namespace fs = std::filesystem;
 
@@ -29,8 +29,7 @@ auto file_exists(const std::string &name) -> Status
     if (code) {
         return error(std::errc {code.value()});
     } else if (!was_found) {
-        const auto message = fmt::format("cannot find file \"{}\"", name);
-        return not_found(message);
+        return not_found("cannot find file \"{}\"", name);
     }
     return ok();
 }
@@ -61,21 +60,21 @@ auto file_size(const std::string &path) -> tl::expected<Size, Status>
     return size;
 }
 
-auto file_read(int file, Bytes out) -> tl::expected<Size, Status>
+auto file_read(int file, Byte *out, Size size) -> tl::expected<Size, Status>
 {
-    const auto target_size = out.size();
-
-    for (Size i {}; !out.is_empty() && i < target_size; ++i) {
-        if (const auto n = ::read(file, out.data(), out.size()); n != FAILURE) {
-            out.advance(static_cast<Size>(n));
+    auto remaining = size;
+    for (Size i {}; remaining && i < size; ++i) {
+        if (const auto n = ::read(file, out, remaining); n != FAILURE) {
+            remaining -= static_cast<Size>(n);
+            out += n;
         } else if (errno != EINTR) {
             return tl::make_unexpected(error());
         }
     }
-    return target_size - out.size();
+    return size - remaining;
 }
 
-auto file_write(int file, BytesView in) -> tl::expected<Size, Status>
+auto file_write(int file, Slice in) -> tl::expected<Size, Status>
 {
     const auto target_size = in.size();
 
@@ -135,4 +134,4 @@ auto dir_remove(const std::string &path) -> Status
     return ok();
 }
 
-} // namespace Calico::system
+} // namespace Calico::Posix

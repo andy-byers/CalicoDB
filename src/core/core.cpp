@@ -49,23 +49,26 @@ auto Info::cache_hit_ratio() const -> double
     return m_core->pager().hit_ratio();
 }
 
-auto Core::open(const std::string &path, const Options &options) -> Status
+auto Core::open(Slice path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
 
-    m_prefix = path + (path.back() == '/' ? "" : "/");
+    m_prefix = path.to_string();
+    if (!m_prefix.ends_with('/'))
+        m_prefix += '/';
+
     m_system = std::make_unique<System>(m_prefix, sanitized.log_level, sanitized.log_target);
     m_log = m_system->create_log("core");
 
-    const auto version_name = fmt::format("v{}.{}.{}", CALICO_VERSION_MAJOR, CALICO_VERSION_MINOR, CALICO_VERSION_PATCH);
-    m_log->info("starting CalicoDB {} at \"{}\"", version_name, path);
-    m_log->info("tree is located at \"{}{}\"", m_prefix, DATA_FILENAME);
-    m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
+    // m_log->info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
+    //             CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
+    // m_log->info("tree is located at \"{}{}\"", m_prefix, DATA_FILENAME);
+    // m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
     if (sanitized.wal_limit != DISABLE_WAL) {
-        if (sanitized.wal_prefix.empty()) {
-            m_log->info("WAL prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
+        if (sanitized.wal_prefix.is_empty()) {
+            // m_log->info("WAL prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
         } else {
-            m_log->info("WAL prefix is \"{}\"", sanitized.wal_prefix);
+            // m_log->info("WAL prefix is \"{}\"", sanitized.wal_prefix.to_string());
         }
     }
 
@@ -83,12 +86,28 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     // in a std::uint16_t).
     if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
 
+    static constexpr auto PRIMARY = "could not open database";
+    static constexpr auto SMALL_CACHE = "cache is too small";
+    auto cache_size = sanitized.cache_size;
+
     if (sanitized.wal_limit != DISABLE_WAL) {
-        m_scratch = std::make_unique<LogScratchManager>(wal_scratch_size(sanitized.page_size));
+        const auto wal_cache_approx = cache_size / 100 * sanitized.wal_split;
+        const auto wal_buffer_size = wal_scratch_size(sanitized.page_size);
+        const auto wal_buffer_count = wal_cache_approx / wal_buffer_size;
+        cache_size -= wal_buffer_count * wal_buffer_size;
+
+        if (wal_buffer_count < 4)
+            return invalid_argument("{}: {}", PRIMARY, SMALL_CACHE);
+
+        m_scratch = std::make_unique<LogScratchManager>(
+            wal_buffer_size,
+            wal_buffer_count);
 
         // The WAL segments may be stored elsewhere.
-        const auto wal_prefix = sanitized.wal_prefix.empty()
-            ? m_prefix : sanitized.wal_prefix + "/";
+        auto wal_prefix = sanitized.wal_prefix.is_empty()
+            ? m_prefix : sanitized.wal_prefix.to_string();
+        if (!wal_prefix.ends_with('/'))
+            wal_prefix += '/';
 
         auto r = BasicWriteAheadLog::open({
             wal_prefix,
@@ -96,6 +115,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             m_system.get(),
             sanitized.page_size,
             sanitized.wal_limit,
+            wal_buffer_count,
         });
         if (!r.has_value())
             return r.error();
@@ -103,6 +123,9 @@ auto Core::open(const std::string &path, const Options &options) -> Status
     } else {
         m_wal = std::make_unique<DisabledWriteAheadLog>();
     }
+
+    // TODO: Pager expects cache size in units of pages. Change the name after this point.
+    cache_size /= sanitized.page_size;
 
     {
         auto r = BasicPager::open({
@@ -112,7 +135,7 @@ auto Core::open(const std::string &path, const Options &options) -> Status
             &m_images,
             m_wal.get(),
             m_system.get(),
-            sanitized.cache_size,
+            cache_size,
             sanitized.page_size,
         });
         if (!r.has_value())
@@ -169,7 +192,7 @@ Core::~Core()
 
 auto Core::destroy() -> Status
 {
-    m_log->trace("destroy");
+    // m_log->trace("destroy");
     auto s = ok();
     m_wal.reset();
 
@@ -219,13 +242,13 @@ auto Core::handle_errors() -> Status
         } \
     } while (0)
 
-auto Core::find_exact(BytesView key) -> Cursor
+auto Core::find_exact(Slice key) -> Cursor
 {
     MAYBE_FORWARD_AS_CURSOR;
     return m_tree->find_exact(key);
 }
 
-auto Core::find(BytesView key) -> Cursor
+auto Core::find(Slice key) -> Cursor
 {
     MAYBE_FORWARD_AS_CURSOR;
     return m_tree->find(key);
@@ -245,7 +268,7 @@ auto Core::last() -> Cursor
 
 #undef MAYBE_FORWARD_AS_CURSOR
 
-auto Core::insert(BytesView key, BytesView value) -> Status
+auto Core::insert(Slice key, Slice value) -> Status
 {
     CALICO_TRY_S(handle_errors());
     if (m_system->has_xact) {
@@ -255,7 +278,7 @@ auto Core::insert(BytesView key, BytesView value) -> Status
     }
 }
 
-auto Core::erase(BytesView key) -> Status
+auto Core::erase(Slice key) -> Status
 {
     CALICO_TRY_S(handle_errors());
     return erase(m_tree->find_exact(key));
@@ -271,7 +294,7 @@ auto Core::erase(const Cursor &cursor) -> Status
     }
 }
 
-auto Core::atomic_insert(BytesView key, BytesView value) -> Status
+auto Core::atomic_insert(Slice key, Slice value) -> Status
 {
     auto xact = transaction();
     auto s = m_tree->insert(key, value);
@@ -296,12 +319,12 @@ auto Core::atomic_erase(const Cursor &cursor) -> Status
 
 auto Core::commit() -> Status
 {
-    m_log->trace("commit");
+    // m_log->trace("commit");
     CALICO_ERROR_IF(do_commit());
 
     auto s = status();
     if (s.is_ok()) {
-        m_log->info("commit {}", m_wal->flushed_lsn().value);
+        // m_log->info("commit {}", m_wal->flushed_lsn().value);
         CALICO_EXPECT_EQ(m_system->commit_lsn, m_wal->flushed_lsn());
     }
     return s;
@@ -340,12 +363,12 @@ auto Core::do_commit() -> Status
 
 auto Core::abort() -> Status
 {
-    m_log->trace("abort");
+    // m_log->trace("abort");
     CALICO_ERROR_IF(do_abort());
 
     auto s = status();
     if (s.is_ok()) {
-        m_log->info("abort {}", m_system->commit_lsn.load().value);
+        // m_log->info("abort {}", m_system->commit_lsn.load().value);
         CALICO_EXPECT_LE(m_system->commit_lsn.load(), m_wal->flushed_lsn());
     }
     return s;
@@ -369,7 +392,7 @@ auto Core::do_abort() -> Status
 
 auto Core::close() -> Status
 {
-    m_log->trace("close");
+    // m_log->trace("close");
 
     if (m_system->has_xact && !m_system->has_error()) {
         auto s = logic_error("could not close: a transaction is active (finish the transaction and try again)");
@@ -395,7 +418,7 @@ auto Core::ensure_consistency_on_startup() -> Status
 
 auto Core::transaction() -> Transaction
 {
-    m_log->trace("transaction");
+    // m_log->trace("transaction");
     CALICO_EXPECT_FALSE(m_system->has_xact);
     m_system->has_xact = true;
     return Transaction {*this};
@@ -403,7 +426,7 @@ auto Core::transaction() -> Transaction
 
 auto Core::save_state() -> Status
 {
-    m_log->trace("save_state");
+    // m_log->trace("save_state");
     auto root = m_pager->acquire(Id::root(), true);
     if (!root.has_value()) return root.error();
 
@@ -418,7 +441,7 @@ auto Core::save_state() -> Status
 
 auto Core::load_state() -> Status
 {
-    m_log->trace("load_state");
+    // m_log->trace("load_state");
     auto root = m_pager->acquire(Id::root(), false);
     if (!root.has_value()) return root.error();
 
@@ -448,13 +471,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     FileHeader header {};
     Bytes bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
 
-    if (options.cache_size < MINIMUM_CACHE_SIZE)
-        return tl::make_unexpected(invalid_argument(
-            "{}: frame count of {} is too small (minimum frame count is {})", MSG, options.cache_size, MINIMUM_CACHE_SIZE));
-
-    if (options.cache_size > MAXIMUM_CACHE_SIZE)
-        return tl::make_unexpected(invalid_argument(
-            "{}: frame count of {} is too large (maximum frame count is {})", MSG, options.cache_size, MAXIMUM_CACHE_SIZE));
 
     if (options.page_size < MINIMUM_PAGE_SIZE)
         return tl::make_unexpected(invalid_argument(
@@ -467,6 +483,10 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     if (!is_power_of_two(options.page_size))
         return tl::make_unexpected(invalid_argument(
             "{}: page size of {} is invalid (must be a power of 2)", MSG, options.page_size));
+
+    if (options.cache_size < options.page_size * 8) // TODO: Constant and good value for this. Should be checked in Core::open().
+        return tl::make_unexpected(invalid_argument(
+            "{}: cache size of {} is too small (minimum frame count is {})", MSG, options.cache_size, options.page_size * 8));
 
     if (options.wal_limit != DISABLE_WAL && options.wal_limit < MINIMUM_WAL_LIMIT)
         return tl::make_unexpected(invalid_argument(

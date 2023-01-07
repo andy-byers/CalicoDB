@@ -21,7 +21,7 @@ auto Internal::collect_value(const Node &node, Size index) const -> tl::expected
     auto cell = node.read_cell(index);
     const auto local = cell.local_value();
     std::string result(cell.value_size(), '\x00');
-    auto out = stob(result);
+    Bytes out {result};
 
     // Note that it is possible to have no value stored locally but have an overflow page. The happens when
     // the key is of maximal length (i.e. m_maximum_key_size).
@@ -41,7 +41,7 @@ auto Internal::find_root(bool is_writable) -> tl::expected<Node, Status>
     return m_pool->acquire(Id::root(), is_writable);
 }
 
-auto Internal::find_external(BytesView key) -> tl::expected<SearchResult, Status>
+auto Internal::find_external(Slice key) -> tl::expected<SearchResult, Status>
 {
     if (m_cell_count == 0)
         return SearchResult {Id::root(), 0, false};
@@ -109,7 +109,7 @@ auto Internal::find_maximum() -> tl::expected<SearchResult, Status>
     return SearchResult {id, index, was_found};
 }
 
-auto Internal::positioned_insert(Position position, BytesView key, BytesView value) -> tl::expected<void, Status>
+auto Internal::positioned_insert(Position position, Slice key, Slice value) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_LE(key.size(), m_maximum_key_size);
     auto [node, index] = std::move(position);
@@ -123,7 +123,7 @@ auto Internal::positioned_insert(Position position, BytesView key, BytesView val
     return m_pool->release(std::move(node));
 }
 
-auto Internal::positioned_modify(Position position, BytesView value) -> tl::expected<void, Status>
+auto Internal::positioned_modify(Position position, Slice value) -> tl::expected<void, Status>
 {
     auto [node, index] = std::move(position);
     auto old_cell = node.read_cell(index);
@@ -131,7 +131,7 @@ auto Internal::positioned_modify(Position position, BytesView value) -> tl::expe
     // remove_at() on the old cell.
     const auto key = old_cell.key().to_string();
 
-    CALICO_NEW_R(new_cell, make_cell(stob(key), value, true));
+    CALICO_NEW_R(new_cell, make_cell(key, value, true));
 
     if (old_cell.overflow_size())
         CALICO_TRY_R(m_pool->destroy_chain(old_cell.overflow_id(), old_cell.overflow_size()));
@@ -163,7 +163,7 @@ auto Internal::positioned_remove(Position position) -> tl::expected<void, Status
     }
 
     node.remove_at(index, node.read_cell(index).size());
-    return balance_after_underflow(std::move(node), stob(anchor));
+    return balance_after_underflow(std::move(node), anchor);
 }
 
 auto Internal::balance_after_overflow(Node node) -> tl::expected<void, Status>
@@ -179,7 +179,7 @@ auto Internal::balance_after_overflow(Node node) -> tl::expected<void, Status>
     return m_pool->release(std::move(node));
 }
 
-auto Internal::balance_after_underflow(Node node, BytesView anchor) -> tl::expected<void, Status>
+auto Internal::balance_after_underflow(Node node, Slice anchor) -> tl::expected<void, Status>
 {
     while (node.is_underflowing()) {
         if (node.id().is_root()) {
@@ -271,7 +271,7 @@ auto Internal::maybe_fix_child_parent_connections(Node &node) -> tl::expected<vo
  * Note that the key and value must exist until the cell is safely embedded in the tree. If
  * the tree is balanced and there are no overflow cells then this is guaranteed to be true.
  */
-auto Internal::make_cell(BytesView key, BytesView value, bool is_external) -> tl::expected<Cell, Status>
+auto Internal::make_cell(Slice key, Slice value, bool is_external) -> tl::expected<Cell, Status>
 {
     if (is_external) {
         auto cell = ::Calico::make_external_cell(key, value, m_pool->page_size());

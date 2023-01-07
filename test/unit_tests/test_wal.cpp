@@ -1,5 +1,5 @@
-#include "calico/bytes.h"
 #include "calico/options.h"
+#include "calico/slice.h"
 #include "calico/storage.h"
 #include "core/recovery.h"
 #include "fakes.h"
@@ -51,9 +51,10 @@ public:
         EXPECT_TRUE(expose_message(Base::store->open_random_reader(get_segment_name(id), &reader)));
 
         std::string data(get_segment_size(id), '\x00');
-        auto bytes = stob(data);
-        EXPECT_TRUE(expose_message(reader->read(bytes, 0)));
-        EXPECT_EQ(bytes.size(), data.size());
+        Bytes bytes {data};
+        auto read_size = bytes.size();
+        EXPECT_TRUE(expose_message(reader->read(bytes.data(), read_size, 0)));
+        EXPECT_EQ(read_size, data.size());
         delete reader;
         return data;
     }
@@ -95,7 +96,7 @@ TEST_P(WalPayloadSizeLimitTests, LargestPossibleRecord)
     for (Size i {}; i < GetParam(); i += 2)
         deltas.emplace_back(PageDelta {i, 1});
 
-    auto size = encode_deltas_payload(Id {2}, stob(image), deltas, stob(scratch));
+    auto size = encode_deltas_payload(Id {2}, image, deltas, scratch);
     ASSERT_GE(size + WalPayloadHeader::SIZE, min_size) << "Excessive scratch memory allocated";
     ASSERT_LE(size + WalPayloadHeader::SIZE, max_size) << "Scratch memory cannot fit maximally sized WAL record payload";
 }
@@ -201,7 +202,7 @@ public:
 
 TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
 {
-    const auto size = encode_full_image_payload(Id::root(), image, stob(scratch).range(8));
+    const auto size = encode_full_image_payload(Id::root(), image, Bytes {scratch}.range(8));
     put_u64(scratch, 2); // LSN
     WalPayloadOut out {Bytes {scratch}.truncate(size + 8)};
     const auto payload = decode_payload(out);
@@ -216,7 +217,7 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(image);
-    const auto size = encode_deltas_payload(Id::root(), image, deltas, stob(scratch).range(8));
+    const auto size = encode_deltas_payload(Id::root(), image, deltas, Bytes {scratch}.range(8));
     WalPayloadOut out {Bytes {scratch}.truncate(size + 8)};
     const auto payload = decode_payload(out);
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload.value()));
@@ -224,11 +225,11 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
     ASSERT_EQ(descriptor.pid.value, 1);
     ASSERT_EQ(descriptor.deltas.size(), deltas.size());
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const auto &delta) {
-        return delta.data == stob(image).range(delta.offset, delta.data.size());
+        return delta.data == Slice {image}.range(delta.offset, delta.data.size());
     }));
 }
 
-[[nodiscard]] auto get_ids(const WalCollection &c)
+[[nodiscard]] auto get_ids(const WalSet &c)
 {
     std::vector<SegmentId> ids;
     std::transform(cbegin(c.segments()), cend(c.segments()), back_inserter(ids), [](const auto &id) {
@@ -248,7 +249,7 @@ public:
         ASSERT_EQ(collection.last(), SegmentId::from_index(n - 1));
     }
 
-    WalCollection collection;
+    WalSet collection;
 };
 
 TEST_F(WalCollectionTests, NewCollectionState)
@@ -333,7 +334,7 @@ public:
         : reader_payload(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00'),
-          scratch {wal_scratch_size(PAGE_SIZE)}
+          scratch {wal_scratch_size(PAGE_SIZE), 32}
     {}
 
     // NOTE: This invalidates the most-recently-allocated log reader.
@@ -353,7 +354,7 @@ public:
         AppendWriter *temp {};
         EXPECT_TRUE(expose_message(store->open_append_writer(path, &temp)));
         writer_file.reset(temp);
-        return LogWriter {*writer_file, stob(writer_tail), flushed_lsn};
+        return LogWriter {*writer_file, writer_tail, flushed_lsn};
     }
 
     auto write_string(LogWriter &writer, const std::string &payload) -> void
@@ -513,21 +514,23 @@ public:
     static constexpr Size WAL_LIMIT {8};
 
     WalWriterTests()
-        : scratch {wal_scratch_size(PAGE_SIZE)},
+        : scratch {wal_scratch_size(PAGE_SIZE), 32},
           tail(wal_block_size(PAGE_SIZE), '\x00')
     {
-        writer.emplace(
-            *store,
-            collection,
+        writer.emplace(WalWriter::Parameters {
+            store.get(),
+            &collection,
             Bytes {tail},
-            flushed_lsn,
+            &flushed_lsn,
             PREFIX,
-            WAL_LIMIT);
+            WAL_LIMIT,
+        32,
+        });
     }
 
     ~WalWriterTests() override = default;
 
-    WalCollection collection;
+    WalSet collection;
     LogScratchManager scratch;
     std::atomic<Id> flushed_lsn {};
     std::optional<WalWriter> writer;
@@ -642,7 +645,7 @@ public:
     static constexpr Size WAL_LIMIT {8};
 
     WalReaderWriterTests()
-        : scratch {wal_scratch_size(PAGE_SIZE)},
+        : scratch {wal_scratch_size(PAGE_SIZE), 32},
           reader_data(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00')
@@ -664,13 +667,15 @@ public:
     [[nodiscard]]
     auto get_writer() -> WalWriter
     {
-        return WalWriter {
-            *store,
-            collection,
+        return WalWriter {{
+            store.get(),
+            &collection,
             Bytes {writer_tail},
-            flushed_lsn,
+            &flushed_lsn,
             PREFIX,
-            WAL_LIMIT};
+            WAL_LIMIT,
+            32,
+        }};
     }
 
     [[nodiscard]]
@@ -773,7 +778,7 @@ public:
 
     Id last_lsn;
     std::vector<std::string> payloads;
-    WalCollection collection;
+    WalSet collection;
     LogScratchManager scratch;
     std::atomic<Id> flushed_lsn {};
     std::string reader_data;
@@ -945,7 +950,7 @@ public:
     ~BasicWalTests() override = default;
 
     BasicWalTests()
-        : scratch {wal_scratch_size(PAGE_SIZE)}
+        : scratch {wal_scratch_size(PAGE_SIZE), 32}
     {}
 
     auto SetUp() -> void override
@@ -955,8 +960,10 @@ public:
             store.get(),
             &state,
             PAGE_SIZE,
+            32,
+            32,
         });
-        ASSERT_TRUE(r.has_value()) << r.error().what();
+        ASSERT_TRUE(r.has_value()) << r.error().what().data();
         wal = std::move(*r);
     }
 
@@ -1309,7 +1316,7 @@ TEST_F(WalFaultTests, FailOnNthWrite)
 
 TEST(DisabledWalTests, ExersizeStubs)
 {
-    LogScratchManager scratch {wal_scratch_size(0x100)};
+    LogScratchManager scratch {wal_scratch_size(0x100), 32};
     DisabledWriteAheadLog wal;
 
     ASSERT_OK(wal.worker_status());

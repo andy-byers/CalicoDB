@@ -46,7 +46,7 @@ public:
 
 private:
     explicit BasicPager(const Parameters &param, Framer framer);
-    [[nodiscard]] auto pin_frame(Id, bool &) -> Status;
+    [[nodiscard]] auto pin_frame(Id) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageCache::Entry &entry) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;

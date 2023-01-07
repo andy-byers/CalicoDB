@@ -37,7 +37,9 @@ BasicPager::BasicPager(const Parameters &param, Framer framer)
       m_wal {param.wal},
       m_system {param.system}
 {
-    m_log->trace("BasicPager");
+    // m_log->trace("BasicPager");
+
+    m_log->info("frame_count = {}", param.frame_count);
 }
 
 auto BasicPager::page_count() const -> Size
@@ -55,10 +57,9 @@ auto BasicPager::hit_ratio() const -> double
     return m_registry.hit_ratio();
 }
 
-auto BasicPager::pin_frame(Id pid, bool &is_fragile) -> Status
+auto BasicPager::pin_frame(Id pid) -> Status
 {
     CALICO_EXPECT_FALSE(m_registry.contains(pid));
-    is_fragile = true;
 
     if (!m_framer.available()) {
         const auto r = try_make_available();
@@ -74,7 +75,6 @@ auto BasicPager::pin_frame(Id pid, bool &is_fragile) -> Status
         }
     }
     // Read the page into a frame.
-    is_fragile = false;
     auto r = m_framer.pin(pid);
     if (!r.has_value()) return r.error();
 
@@ -94,13 +94,13 @@ auto BasicPager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
 auto BasicPager::set_recovery_lsn(Id lsn) -> void
 {
     CALICO_EXPECT_LE(m_recovery_lsn, lsn);
-    m_log->info("recovery_lsn: {} -> {}", m_recovery_lsn.value, lsn.value);
+    // m_log->info("recovery_lsn: {} -> {}", m_recovery_lsn.value, lsn.value);
     m_recovery_lsn = lsn;
 }
 
 auto BasicPager::flush(Id target_lsn) -> Status
 {
-    m_log->trace("flush");
+    // m_log->trace("flush");
     CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);
 
     // An LSN of NULL causes all pages to be flushed.
@@ -198,6 +198,7 @@ auto BasicPager::try_make_available() -> tl::expected<bool, Status>
         // NOTE: We don't update the record LSN field because we are getting rid of this page.
         s = m_framer.write_back(frame_index);
         clean_page(*evicted);
+        CALICO_ERROR_IF(s);
     }
     m_framer.unpin(frame_index);
     if (!s.is_ok()) return tl::make_unexpected(s);
@@ -277,14 +278,14 @@ auto BasicPager::watch_page(Page &page, PageCache::Entry &entry) -> void
 
 auto BasicPager::save_state(FileHeader &header) -> void
 {
-    m_log->trace("save_state");
+    // m_log->trace("save_state");
     header.recovery_lsn = m_recovery_lsn.value;
     m_framer.save_state(header);
 }
 
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
-    m_log->trace("load_state");
+    // m_log->trace("load_state");
     if (m_recovery_lsn.value < header.recovery_lsn)
         set_recovery_lsn(Id {header.recovery_lsn});
     m_framer.load_state(header);
@@ -318,8 +319,7 @@ auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
     // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is incremented each time the WAL flushes a block.
     for (; ; ) {
-        bool is_fragile {};
-        auto s = pin_frame(id, is_fragile);
+        auto s = pin_frame(id);
         if (s.is_ok()) break;
 
         if (!s.is_not_found()) {
@@ -328,7 +328,7 @@ auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
             // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
             // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
             // data races on this check.
-            if (m_system->has_xact || is_fragile)
+            if (m_system->has_xact)
                 CALICO_ERROR(s);
             return tl::make_unexpected(s);
         }

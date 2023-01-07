@@ -1,8 +1,8 @@
 #ifndef CALICO_DATABASE_H
 #define CALICO_DATABASE_H
 
-#include "bytes.h"
 #include "options.h"
+#include "slice.h"
 #include <memory>
 
 namespace Calico {
@@ -18,14 +18,14 @@ public:
     Database() noexcept;
 
     [[nodiscard]] static auto destroy(Database db) -> Status;
-    [[nodiscard]] auto open(const std::string &path, const Options &options = {}) -> Status;
+    [[nodiscard]] auto open(Slice path, const Options &options = {}) -> Status;
     [[nodiscard]] auto close() -> Status;
-    [[nodiscard]] auto find_exact(BytesView key) const -> Cursor;
-    [[nodiscard]] auto find(BytesView key) const -> Cursor;
+    [[nodiscard]] auto find_exact(Slice key) const -> Cursor;
+    [[nodiscard]] auto find(Slice key) const -> Cursor;
     [[nodiscard]] auto first() const -> Cursor;
     [[nodiscard]] auto last() const -> Cursor;
-    [[nodiscard]] auto insert(BytesView key, BytesView value) -> Status;
-    [[nodiscard]] auto erase(BytesView key) -> Status;
+    [[nodiscard]] auto insert(Slice key, Slice value) -> Status;
+    [[nodiscard]] auto erase(Slice key) -> Status;
     [[nodiscard]] auto erase(const Cursor &cursor) -> Status;
     [[nodiscard]] auto info() const -> Info;
     [[nodiscard]] auto status() const -> Status;

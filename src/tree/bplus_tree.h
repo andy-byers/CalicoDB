@@ -28,11 +28,11 @@ public:
     }
 
     [[nodiscard]] static auto open(Pager &pager, System &state, Size page_size) -> tl::expected<Tree::Ptr, Status>;
-    [[nodiscard]] auto insert(BytesView key, BytesView value) -> Status override;
+    [[nodiscard]] auto insert(Slice key, Slice value) -> Status override;
     [[nodiscard]] auto erase(Cursor cursor) -> Status override;
     [[nodiscard]] auto root(bool is_writable) -> tl::expected<Node, Status> override;
-    [[nodiscard]] auto find_exact(BytesView key) -> Cursor override;
-    [[nodiscard]] auto find(BytesView key) -> Cursor override;
+    [[nodiscard]] auto find_exact(Slice key) -> Cursor override;
+    [[nodiscard]] auto find(Slice key) -> Cursor override;
     [[nodiscard]] auto find_minimum() -> Cursor override;
     [[nodiscard]] auto find_maximum() -> Cursor override;
     auto save_state(FileHeader &header) const -> void override;
@@ -48,8 +48,8 @@ private:
         bool was_found {};
     };
     BPlusTree(Pager &pager, System &state, Size page_size);
-    [[nodiscard]] auto find_aux(BytesView key) -> tl::expected<SearchResult, Status>;
-    [[nodiscard]] auto check_key(BytesView key, const char *primary) -> Status;
+    [[nodiscard]] auto find_aux(Slice key) -> tl::expected<SearchResult, Status>;
+    [[nodiscard]] auto check_key(Slice key, const char *primary) -> Status;
 
     CursorActions m_actions;
     NodeManager m_pool;

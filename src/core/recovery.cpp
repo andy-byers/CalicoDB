@@ -11,7 +11,7 @@ static auto encode_payload_type(Bytes out, XactPayloadType type)
     out[0] = type;
 }
 
-auto encode_deltas_payload(Id page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
+auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
 {
     const auto original_size = out.size();
 
@@ -50,7 +50,7 @@ auto encode_commit_payload(Bytes out) -> Size
     return MINIMUM_PAYLOAD_SIZE;
 }
 
-auto encode_full_image_payload(Id page_id, BytesView image, Bytes out) -> Size
+auto encode_full_image_payload(Id page_id, Slice image, Bytes out) -> Size
 {
     const auto original_size = out.size();
 
@@ -152,7 +152,7 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
 
 auto Recovery::start_abort() -> Status
 {
-    m_log->trace("start_abort");
+    // m_log->trace("start_abort");
     ENSURE_ENABLED("cannot start abort");
     CALICO_TRY_S(m_wal->stop_workers());
 
@@ -177,7 +177,7 @@ auto Recovery::start_abort() -> Status
 
 auto Recovery::finish_abort() -> Status
 {
-    m_log->trace("finish_abort");
+    // m_log->trace("finish_abort");
     ENSURE_ENABLED("cannot finish abort");
 //    return finish_routine();
 
@@ -189,7 +189,7 @@ auto Recovery::finish_abort() -> Status
 
 auto Recovery::start_recovery() -> Status
 {
-    m_log->trace("start_recovery");
+    // m_log->trace("start_recovery");
     ENSURE_ENABLED("cannot start recovery");
     Id last_lsn;
 
@@ -247,7 +247,7 @@ auto Recovery::start_recovery() -> Status
     // Apply updates that are in the WAL but not the database.
     auto s = m_wal->roll_forward(m_pager->recovery_lsn(), redo);
 
-    m_log->info("{} -> {}", m_pager->recovery_lsn().value, last_lsn.value);
+    // m_log->info("{} -> {}", m_pager->recovery_lsn().value, last_lsn.value);
     CALICO_TRY_S(s);
 
     // Reached the end of the WAL, but didn't find a commit record. Undo updates until we reach the most-recent commit.
@@ -259,24 +259,13 @@ auto Recovery::start_recovery() -> Status
 
 auto Recovery::finish_recovery() -> Status
 {
-    m_log->trace("finish_recovery");
+    // m_log->trace("finish_recovery");
     ENSURE_ENABLED("cannot finish recovery");
 //    return finish_routine();
 
     CALICO_TRY_S(m_pager->flush({}));
     CALICO_TRY_S(m_wal->start_workers());
     return m_wal->remove_before(m_pager->recovery_lsn());
-}
-
-auto Recovery::finish_routine() -> Status
-{
-    // Flush all dirty database pages.
-    CALICO_TRY_S(m_pager->flush({}));
-
-    CALICO_TRY_S(m_wal->start_workers());
-
-    // TODO TODO TODO TODO
-    return m_wal->remove_before(Id {m_pager->recovery_lsn().value - 1});
 }
 
 } // namespace Calico

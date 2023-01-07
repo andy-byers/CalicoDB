@@ -10,7 +10,7 @@
 #ifdef NDEBUG
 #  define CALICO_EXPECT_(cc, file, line)
 #else
-#  define CALICO_EXPECT_(cc, file, line) impl::handle_expect(cc, #cc, file, line)
+#  define CALICO_EXPECT_(cc, file, line) Impl::handle_expect(cc, #cc, file, line)
 #endif // NDEBUG
 
 #define CALICO_EXPECT_TRUE(cc) CALICO_EXPECT_(cc, __FILE__, __LINE__)
@@ -50,7 +50,7 @@
     } \
     auto out = std::move(*calico_try_##out)
 
-namespace Calico::impl {
+namespace Calico::Impl {
 
 inline constexpr auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept -> void
 {
