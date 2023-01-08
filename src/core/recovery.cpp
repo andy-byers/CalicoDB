@@ -154,7 +154,6 @@ auto Recovery::start_abort() -> Status
 {
     // m_log->trace("start_abort");
     ENSURE_ENABLED("cannot start abort");
-    CALICO_TRY_S(m_wal->stop_workers());
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
@@ -183,8 +182,7 @@ auto Recovery::finish_abort() -> Status
 
     CALICO_TRY_S(m_pager->flush({}));
 
-    CALICO_TRY_S(m_wal->remove_after(m_system->commit_lsn));
-    return m_wal->start_workers();
+    return m_wal->remove_after(m_system->commit_lsn);
 }
 
 auto Recovery::start_recovery() -> Status
@@ -261,11 +259,10 @@ auto Recovery::finish_recovery() -> Status
 {
     // m_log->trace("finish_recovery");
     ENSURE_ENABLED("cannot finish recovery");
-//    return finish_routine();
 
     CALICO_TRY_S(m_pager->flush({}));
-    CALICO_TRY_S(m_wal->start_workers());
-    return m_wal->remove_before(m_pager->recovery_lsn());
+    m_wal->remove_before(m_pager->recovery_lsn());
+    return ok(); // TODO
 }
 
 } // namespace Calico

@@ -171,9 +171,6 @@ auto Core::open(Slice path, const Options &options) -> Status
         // set up and saved to the database file.
         s = m_pager->flush({});
 
-        if (s.is_ok() && m_wal->is_enabled())
-            s = m_wal->start_workers();
-
     } else if (m_wal->is_enabled()) {
         // This should be a no-op if the database closed normally last time.
         s = ensure_consistency_on_startup();
@@ -228,8 +225,8 @@ auto Core::info() -> Info
 
 auto Core::handle_errors() -> Status
 {
-    if (m_system->has_error())
-        return m_system->original_error().status;
+    if (auto s = status(); !s.is_ok())
+        return s;
     return ok();
 }
 
@@ -346,14 +343,19 @@ auto Core::do_commit() -> Status
     const auto size = encode_commit_payload(payload.data());
     payload.shrink_to_fit(size);
 
-    CALICO_TRY_S(m_wal->log(payload));
-    CALICO_TRY_S(m_wal->advance());
+    m_wal->log(payload);
+    m_wal->advance();
+
+
+    // advance() blocks until it is finished. If an error was encountered, it'll show up in the
+    // System object at this point.
+    CALICO_TRY_S(status());
 
     // Make sure every dirty page that hasn't been written back since the last commit is on disk.
     CALICO_TRY_S(m_pager->flush(last_commit_lsn));
 
     // Clean up obsolete WAL segments.
-    CALICO_TRY_S(m_wal->remove_before(m_pager->recovery_lsn()));
+    m_wal->remove_before(m_pager->recovery_lsn());
 
     m_images.clear();
     m_system->commit_lsn = lsn;
@@ -399,8 +401,7 @@ auto Core::close() -> Status
         CALICO_WARN(s);
         return s;
     }
-    if (m_wal->is_working())
-        CALICO_WARN_IF(m_wal->stop_workers());
+    m_wal->advance();
 
     // We already waited on the WAL to be done writing so this should happen immediately.
     CALICO_ERROR_IF(m_pager->flush({}));

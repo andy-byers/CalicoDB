@@ -1,6 +1,6 @@
 
 ## B<sup>+</sup>-Tree
-Calico DB uses a dynamic-order B<sup>+</sup>-tree to maintain an ordered collection of records on-disk.
+Calico DB uses a dynamic-order B<sup>+</sup>-tree to maintain an ordered set of records on-disk.
 The tree is contained in the `data` file and is made up of two types of nodes: internal and external.
 Nodes that have children are internal nodes, while those that do not are external nodes.
 External nodes make up the lowest level of the B<sup>+</sup>-tree and are connected as a doubly-linked list.

@@ -16,18 +16,6 @@ public:
     }
 
     [[nodiscard]]
-    auto is_working() const -> bool override
-    {
-        return false;
-    }
-
-    [[nodiscard]]
-    auto worker_status() const -> Status override
-    {
-        return ok();
-    }
-
-    [[nodiscard]]
     auto flushed_lsn() const -> Id override
     {
         return Id::null();
@@ -39,34 +27,19 @@ public:
         return Id::null();
     }
 
-    [[nodiscard]]
-    auto log(WalPayloadIn) -> Status override
+    auto log(WalPayloadIn) -> void override
     {
-        return ok();
+
     }
 
-    [[nodiscard]]
-    auto flush() -> Status override
+    auto flush() -> void override
     {
-        return ok();
+
     }
 
-    [[nodiscard]]
-    auto advance() -> Status override
+    auto advance() -> void override
     {
-        return ok();
-    }
 
-    [[nodiscard]]
-    auto stop_workers() -> Status override
-    {
-        return ok();
-    }
-
-    [[nodiscard]]
-    auto start_workers() -> Status override
-    {
-        return ok();
     }
 
     [[nodiscard]]
@@ -81,10 +54,9 @@ public:
         return ok();
     }
 
-    [[nodiscard]]
-    auto remove_before(Id) -> Status override
+    auto remove_before(Id) -> void override
     {
-        return ok();
+
     }
 
     [[nodiscard]]

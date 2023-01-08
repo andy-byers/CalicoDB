@@ -4,12 +4,6 @@
 
 namespace Calico {
 
-#define PROPAGATE_WORKER_ERROR \
-    do { \
-        CALICO_EXPECT_TRUE(m_is_working); \
-        CALICO_ERROR_IF(worker_status()); \
-    } while (0)
-
 BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
     : m_log {param.system->create_log("wal")},
       m_prefix {param.prefix},
@@ -94,21 +88,6 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
 {
     // m_log->trace("~BasicWriteAheadLog");
     // m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
-
-    if (m_is_working) {
-        CALICO_ERROR_IF(m_writer->status());
-        CALICO_ERROR_IF(m_cleaner->status());
-        CALICO_WARN_IF(stop_workers_impl());
-    }
-}
-
-auto BasicWriteAheadLog::worker_status() const -> Status
-{
-    if (m_is_working) {
-        CALICO_TRY_S(m_writer->status());
-        return m_cleaner->status();
-    }
-    return ok();
 }
 
 auto BasicWriteAheadLog::flushed_lsn() const -> Id
@@ -121,86 +100,22 @@ auto BasicWriteAheadLog::current_lsn() const -> Id
     return Id {m_last_lsn.value + 1};
 }
 
-auto BasicWriteAheadLog::remove_before(Id lsn) -> Status
+auto BasicWriteAheadLog::log(WalPayloadIn payload) -> void
 {
-    // m_log->trace("remove_before");
-    PROPAGATE_WORKER_ERROR;
-
-    m_cleaner->remove_before(lsn);
-    return m_cleaner->status(); // TODO: It's kinda pointless to return the status here, as it's likely not updated yet anyway. We should check it once each "round", whatever that means.
-}
-
-auto BasicWriteAheadLog::log(WalPayloadIn payload) -> Status
-{
-    PROPAGATE_WORKER_ERROR;
-
     m_last_lsn.value++;
-    m_writer->write(payload);
-    return m_writer->status();
+    m_writer_task.write(payload);
 }
 
-auto BasicWriteAheadLog::flush() -> Status
+auto BasicWriteAheadLog::flush() -> void
 {
-    // m_log->trace("flush");
-    PROPAGATE_WORKER_ERROR;
-
-    // flush() blocks until the background writer is finished.
-    m_writer->flush();
-    return m_writer->status();
+    m_writer_task.flush();
+    m_tasks.force();
 }
 
-auto BasicWriteAheadLog::advance() -> Status
+auto BasicWriteAheadLog::advance() -> void
 {
-    // m_log->trace("advance");
-    PROPAGATE_WORKER_ERROR;
-
-    // advance() blocks until the background writer is finished.
-    m_writer->advance();
-    return m_writer->status();
-}
-
-auto BasicWriteAheadLog::stop_workers() -> Status
-{
-    // m_log->trace("stop_workers");
-    return stop_workers_impl();
-}
-
-auto BasicWriteAheadLog::stop_workers_impl() -> Status
-{
-    // Stops the workers no matter what, even if an error is encountered. We should be able to call abort_last() safely after
-    // this method returns.
-    if (!m_is_working)
-        return ok();
-    PROPAGATE_WORKER_ERROR;
-
-    m_is_working = false;
-
-    auto s = std::move(*m_writer).destroy();
-    m_writer.reset();
-
-    auto t = std::move(*m_cleaner).destroy();
-    m_cleaner.reset();
-
-    CALICO_TRY_S(s);
-    CALICO_TRY_S(t);
-    return ok();
-}
-
-auto BasicWriteAheadLog::start_workers() -> Status
-{
-    // m_log->trace("start_workers");
-    CALICO_EXPECT_FALSE(m_is_working);
-
-    auto s = open_writer();
-    auto t = open_cleaner();
-
-    if (s.is_ok() && t.is_ok()) {
-        m_is_working = true;
-        return ok();
-    }
-    m_writer.reset();
-    m_cleaner.reset();
-    return s.is_ok() ? t : s;
+    m_writer_task.advance();
+    m_tasks.force();
 }
 
 auto BasicWriteAheadLog::open_reader() -> Status
@@ -215,35 +130,9 @@ auto BasicWriteAheadLog::open_reader() -> Status
     return m_reader->open();
 }
 
-auto BasicWriteAheadLog::open_writer() -> Status
-{
-    m_writer.emplace(WalWriter::Parameters {
-        m_store,
-        &m_set,
-        Bytes {m_writer_tail},
-        &m_flushed_lsn,
-        m_prefix,
-        m_wal_limit,
-        m_writer_capacity,
-    });
-    return m_writer->open();
-}
-
-auto BasicWriteAheadLog::open_cleaner() -> Status
-{
-    m_cleaner.emplace(
-        *m_store,
-        m_prefix,
-        m_set);
-    return ok();
-}
-
 auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) -> Status
 {
     // m_log->trace("roll_forward");
-
-    if (m_is_working)
-        CALICO_TRY_S(stop_workers());
 
     if (m_set.first().is_null())
         return ok();
@@ -360,6 +249,12 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
     return s.is_not_found() ? ok() : s;
 }
 
+auto BasicWriteAheadLog::remove_before(Id lsn) -> void
+{
+    m_log->trace("remove_before");
+    m_cleanup_task.remove_before(lsn);
+}
+
 auto BasicWriteAheadLog::remove_after(Id limit) -> Status
 {
     // m_log->trace("remove_after");
@@ -387,7 +282,5 @@ auto BasicWriteAheadLog::remove_after(Id limit) -> Status
     }
     return ok();
 }
-
-#undef PROPAGATE_WORKER_ERROR
 
 } // namespace Calico

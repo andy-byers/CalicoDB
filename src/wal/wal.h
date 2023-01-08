@@ -88,15 +88,8 @@ public:
         return true;
     }
 
-    [[nodiscard]] virtual auto worker_status() const -> Status = 0;
-    [[nodiscard]] virtual auto is_working() const -> bool = 0;
     [[nodiscard]] virtual auto flushed_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto current_lsn() const -> Id = 0;
-    [[nodiscard]] virtual auto log(WalPayloadIn payload) -> Status = 0;
-    [[nodiscard]] virtual auto flush() -> Status = 0;
-    [[nodiscard]] virtual auto advance() -> Status = 0;
-    [[nodiscard]] virtual auto start_workers() -> Status = 0;
-    [[nodiscard]] virtual auto stop_workers() -> Status = 0;
     [[nodiscard]] virtual auto roll_forward(Id begin_lsn, const Callback &callback) -> Status = 0;
     [[nodiscard]] virtual auto roll_backward(Id end_lsn, const Callback &callback) -> Status = 0;
 
@@ -104,7 +97,11 @@ public:
     // remove obsolete segments. This gives us a chance to flush the pages that
     // were made dirty while traversing.
     [[nodiscard]] virtual auto remove_after(Id lsn) -> Status = 0;
-    [[nodiscard]] virtual auto remove_before(Id lsn) -> Status = 0;
+
+    virtual auto log(WalPayloadIn payload) -> void = 0;
+    virtual auto flush() -> void = 0;
+    virtual auto advance() -> void = 0;
+    virtual auto remove_before(Id lsn) -> void = 0;
 };
 
 } // namespace Calico

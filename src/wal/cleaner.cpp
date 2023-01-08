@@ -2,31 +2,27 @@
 
 namespace Calico {
 
-auto WalCleaner::on_event(const Id &limit) -> Status
+auto WalCleanupTask::operator()() -> void
 {
-    auto first = m_set->first();
-    auto current = first;
-    SegmentId target;
+    const auto limit = m_work.try_dequeue();
 
-    while (!current.is_null() && !m_set->id_after(current).is_null()) { // TODO: Changed this to make sure we never remove the last segment.
-        Id first_lsn;
-        auto s = read_first_lsn(
-            *m_store, m_prefix, current, first_lsn);
+    if (!limit.has_value() || m_system->has_error())
+        return;
 
-        if (s.is_ok()) {
-            if (first_lsn >= limit)
-                break;
-        } else if (!s.is_not_found()) {
-            return s;
-        }
-        if (!target.is_null()) {
-            CALICO_TRY_S(m_store->remove_file(m_prefix + target.to_name()));
-            m_set->remove_before(current);
-        }
+    const auto first = m_set->first();
+    if (first.is_null() || first <= *limit)
+        return;
 
-        target = std::exchange(current, m_set->id_after(current));
+    const auto second = m_set->id_after(first);
+    if (second.is_null() || second < *limit)
+        return;
+
+    auto s = m_storage->remove_file(m_prefix + first.to_name());
+    if (s.is_ok()) {
+        m_set->remove_before(second);
+    } else {
+        CALICO_ERROR(s);
     }
-    return ok();
 }
 
 } // namespace Calico

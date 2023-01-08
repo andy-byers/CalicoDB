@@ -40,33 +40,21 @@ public:
         return m_wal_limit != DISABLE_WAL;
     }
 
-    [[nodiscard]]
-    auto is_working() const -> bool override
-    {
-        return m_is_working;
-    }
-
     ~BasicWriteAheadLog() override;
     [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>;
     [[nodiscard]] auto flushed_lsn() const -> Id override;
     [[nodiscard]] auto current_lsn() const -> Id override;
-    [[nodiscard]] auto stop_workers() -> Status override;
-    [[nodiscard]] auto start_workers() -> Status override;
-    [[nodiscard]] auto worker_status() const -> Status override;
-    [[nodiscard]] auto log(WalPayloadIn payload) -> Status override;
-    [[nodiscard]] auto advance() -> Status override;
-    [[nodiscard]] auto flush() -> Status override;
     [[nodiscard]] auto roll_forward(Id begin_lsn, const Callback &callback) -> Status override;
     [[nodiscard]] auto roll_backward(Id end_lsn, const Callback &callback) -> Status override;
     [[nodiscard]] auto remove_after(Id lsn) -> Status override;
-    [[nodiscard]] auto remove_before(Id lsn) -> Status override;
+    auto remove_before(Id lsn) -> void override;
+    auto advance() -> void override;
+    auto log(WalPayloadIn payload) -> void override;
+    auto flush() -> void override;
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
-    [[nodiscard]] auto stop_workers_impl() -> Status;
     [[nodiscard]] auto open_reader() -> Status; // TODO: We don't really have to store the reader as a member...
-    [[nodiscard]] auto open_writer() -> Status;
-    [[nodiscard]] auto open_cleaner() -> Status;
 
     LogPtr m_log;
     std::atomic<Id> m_flushed_lsn {};
@@ -77,8 +65,6 @@ private:
     Storage *m_store {};
     System *m_system {};
     std::optional<WalReader> m_reader;
-    std::optional<WalWriter> m_writer;
-    std::optional<WalCleaner> m_cleaner;
     std::string m_reader_data;
     std::string m_reader_tail;
     std::string m_writer_tail;

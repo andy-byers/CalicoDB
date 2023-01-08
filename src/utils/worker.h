@@ -124,20 +124,7 @@ public:
     using Interval = std::chrono::duration<double>;
 
     explicit TaskManager(Interval interval)
-        : m_thread {[interval](auto *state) {
-              for (; ; ) {
-                  std::unique_lock lock {state->mutex};
-                  state->cond.wait_for(lock, interval, [state] {
-                      return !state->enabled;
-                  });
-
-                  if (!state->enabled)
-                      break;
-
-                  for (const auto &task: state->tasks)
-                      task();
-              }
-        }, &m_state}
+        : m_thread {run, &m_state, interval}
     {}
 
     ~TaskManager()
@@ -155,13 +142,52 @@ public:
         m_state.tasks.emplace_back(std::move(task));
     }
 
+    auto force() -> void
+    {
+        forced_step(&m_state);
+    }
+
 private:
     struct State {
         std::vector<Task> tasks;
         mutable std::mutex mutex;
         std::condition_variable cond;
-        bool enabled {true};
+        bool enabled{true};
     };
+
+    static auto timed_step(State *state, Interval interval) -> bool
+    {
+        std::unique_lock lock {state->mutex};
+        state->cond.wait_for(lock, interval, [state] {
+            return !state->enabled;
+        });
+
+        if (!state->enabled)
+            return false;
+
+        for (const auto &task: state->tasks)
+            task();
+
+        return true;
+    }
+
+    static auto forced_step(State *state) -> bool
+    {
+        std::lock_guard lock {state->mutex};
+
+        if (!state->enabled)
+            return false;
+
+        for (const auto &task: state->tasks)
+            task();
+
+        return true;
+    }
+
+    static auto run(State *state, Interval interval) -> void
+    {
+        while (timed_step(state, interval));
+    }
 
     State m_state;
     std::thread m_thread;
