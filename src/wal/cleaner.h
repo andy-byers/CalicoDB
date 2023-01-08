@@ -15,12 +15,10 @@ public:
         Storage *storage {};
         System *system {};
         WalSet *set {};
-        Size capacity {};
     };
 
     explicit WalCleanupTask(const Parameters &param)
-        : m_work {param.capacity},
-          m_prefix {param.prefix.to_string()},
+        : m_prefix {param.prefix.to_string()},
           m_limit {param.limit},
           m_storage {param.storage},
           m_system {param.system},
@@ -32,10 +30,9 @@ public:
         CALICO_EXPECT_NE(m_set, nullptr);
     }
 
-    auto operator()() -> void;
+    auto cleanup() -> void;
 
 private:
-    Queue<Id> m_work;
     std::string m_prefix;
     std::atomic<Id> *m_limit {};
     Storage *m_storage {};

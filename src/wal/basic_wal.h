@@ -77,9 +77,16 @@ private:
     // groups should never overlap.
     bool m_is_working {};
 
+    struct AdvanceToken {};
+    struct FlushToken {};
+
+    using Event = std::variant<WalPayloadIn, AdvanceToken, FlushToken>;
+
+    auto run_task(Event event) -> void;
+
     std::unique_ptr<WalWriterTask> m_writer;
     std::unique_ptr<WalCleanupTask> m_cleanup;
-    TaskManager m_tasks; // TODO: Could store this in Core and pass it in as a parameter if we need it elsewhere.
+    std::unique_ptr<TaskManager<Event>> m_tasks;
 };
 
 } // namespace Calico

@@ -13,8 +13,7 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
       m_wal_limit {param.wal_limit},
-      m_writer_capacity {param.writer_capacity},
-      m_tasks {param.interval}
+      m_writer_capacity {param.writer_capacity}
 {
     // m_log->trace("BasicWriteAheadLog");
 
@@ -79,7 +78,6 @@ auto BasicWriteAheadLog::start_workers() -> Status
         &m_set,
         &m_flushed_lsn,
         m_wal_limit,
-        m_writer_capacity,
     }}};
     if (m_writer == nullptr)
         return system_error("cannot allocate writer object: out of memory");
@@ -90,17 +88,31 @@ auto BasicWriteAheadLog::start_workers() -> Status
         m_store,
         m_system,
         &m_set,
-        m_writer_capacity,
     }}};
     if (m_cleanup == nullptr)
         return system_error("cannot allocate cleanup object: out of memory");
 
-    m_tasks.add([this] {
-        (*m_cleanup)();
-        (*m_writer)();
-    });
+    m_tasks = std::unique_ptr<TaskManager<Event>> {new(std::nothrow) TaskManager<Event> {[this](auto event) {
+        run_task(std::move(event));
+    }, m_writer_capacity}};
+    if (m_tasks == nullptr)
+        return system_error("cannot allocate task manager object: out of memory");
 
     return ok();
+}
+
+auto BasicWriteAheadLog::run_task(Event event) -> void
+{
+    if (std::holds_alternative<WalPayloadIn>(event)) {
+        m_writer->write(std::get<WalPayloadIn>(event));
+    } else if (std::holds_alternative<FlushToken>(event)) {
+        m_writer->flush();
+    } else {
+        CALICO_EXPECT_TRUE((std::holds_alternative<AdvanceToken>(event)));
+        m_writer->advance();
+    }
+
+    m_cleanup->cleanup();
 }
 
 auto BasicWriteAheadLog::flushed_lsn() const -> Id
@@ -117,21 +129,20 @@ auto BasicWriteAheadLog::log(WalPayloadIn payload) -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_last_lsn.value++;
-    m_writer->write(payload);
+    m_tasks->dispatch(payload);
 }
 
 auto BasicWriteAheadLog::flush() -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
-    m_writer->flush();
-    m_tasks.force();
+    m_tasks->dispatch(FlushToken {}, true);
+
 }
 
 auto BasicWriteAheadLog::advance() -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
-    m_writer->advance();
-    m_tasks.force();
+    m_tasks->dispatch(AdvanceToken {}, true);
 }
 
 auto BasicWriteAheadLog::open_reader() -> Status

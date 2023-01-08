@@ -53,12 +53,10 @@ public:
         WalSet *set {};
         std::atomic<Id> *flushed_lsn {};
         Size wal_limit {};
-        Size capacity {};
     };
 
     explicit WalWriterTask(const Parameters &param)
-        : m_work {param.capacity},
-          m_prefix {param.prefix.to_string()},
+        : m_prefix {param.prefix.to_string()},
           m_flushed_lsn {param.flushed_lsn},
           m_storage {param.storage},
           m_system {param.system},
@@ -84,24 +82,12 @@ public:
     //       next segment. flush() will also block until the tail buffer has been flushed.
     auto advance() -> void;
     auto flush() -> void;
-    auto operator()() -> void;
 
 private:
-    struct AdvanceToken {};
-    struct FlushToken {};
-
-    using Event = std::variant<WalPayloadIn, AdvanceToken, FlushToken>;
-
-    [[nodiscard]] auto is_open() const -> bool
-    {
-        return m_writer.has_value();
-    }
-
     [[nodiscard]] auto advance_segment() -> Status;
     [[nodiscard]] auto open_segment(SegmentId) -> Status;
     auto close_segment() -> Status;
 
-    Queue<Event> m_work;
     std::string m_prefix;
     std::optional<LogWriter> m_writer;
     std::unique_ptr<AppendWriter> m_file;

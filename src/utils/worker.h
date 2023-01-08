@@ -118,75 +118,80 @@ private:
     std::thread m_thread;
 };
 
+template<class T>
 class TaskManager final {
 public:
-    using Task = std::function<void()>;
-    using Interval = std::chrono::duration<double>;
+    using Task = std::function<void(T)>;
 
-    explicit TaskManager(Interval interval)
-        : m_thread {run, &m_state, interval}
+    TaskManager(Task task, Size capacity)
+        : m_state {std::move(task), capacity},
+          m_thread {run, &m_state}
     {}
 
     ~TaskManager()
     {
-        {
-            std::lock_guard lock {m_state.mutex};
-            m_state.enabled = false;
-        }
+        m_state.queue.finish();
         m_thread.join();
     }
 
-    auto add(Task task) -> void
+    auto dispatch(T t, bool should_wait = false) -> void
     {
-        std::lock_guard lock {m_state.mutex};
-        m_state.tasks.emplace_back(std::move(task));
-    }
-
-    auto force() -> void
-    {
-        forced_step(&m_state);
+        // Note that we can only wait on a single event at a time.
+        if (should_wait) {
+            dispatch_and_wait(std::move(t));
+        } else {
+            dispatch_and_return(std::move(t));
+        }
     }
 
 private:
-    struct State {
-        std::vector<Task> tasks;
-        mutable std::mutex mutex;
-        std::condition_variable cond;
-        bool enabled{true};
+    struct EventWrapper {
+        T event;
+        bool needs_wait {};
     };
 
-    static auto timed_step(State *state, Interval interval) -> bool
+    struct State {
+        State(Task task_, Size capacity)
+            : task {std::move(task_)},
+              queue {capacity}
+        {}
+
+        Task task;
+        Queue<EventWrapper> queue;
+        std::atomic<bool> is_waiting {};
+        mutable std::mutex mu;
+        std::condition_variable cv;
+    };
+
+    static auto run(State *state) -> void
     {
-        std::unique_lock lock {state->mutex};
-        state->cond.wait_for(lock, interval, [state] {
-            return !state->enabled;
+        for (; ; ) {
+            auto event = state->queue.dequeue();
+            if (!event.has_value())
+                break;
+
+            state->task(std::move(event->event));
+
+            if (event->needs_wait) {
+                state->is_waiting.store(false);
+                state->cv.notify_one();
+            }
+        }
+    }
+
+    auto dispatch_and_return(T t) -> void
+    {
+        m_state.queue.enqueue(EventWrapper {std::move(t), false});
+    }
+
+    auto dispatch_and_wait(T t) -> void
+    {
+        m_state.is_waiting.store(true);
+        m_state.queue.enqueue(EventWrapper {std::move(t), true});
+        std::unique_lock lock {m_state.mu};
+        m_state.cv.wait(lock, [this] {
+            return !m_state.is_waiting.load();
         });
-
-        if (!state->enabled)
-            return false;
-
-        for (const auto &task: state->tasks)
-            task();
-
-        return true;
-    }
-
-    static auto forced_step(State *state) -> bool
-    {
-        std::lock_guard lock {state->mutex};
-
-        if (!state->enabled)
-            return false;
-
-        for (const auto &task: state->tasks)
-            task();
-
-        return true;
-    }
-
-    static auto run(State *state, Interval interval) -> void
-    {
-        while (timed_step(state, interval));
     }
 
     State m_state;

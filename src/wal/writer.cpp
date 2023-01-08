@@ -72,44 +72,23 @@ auto LogWriter::flush() -> Status
     return s;
 }
 
-auto WalWriterTask::operator()() -> void
-{
-    for (; ; ) {
-        // Empty out the entire work queue each time this method is run.
-        const auto event = m_work.try_dequeue();
-
-        if (!event.has_value() || !is_open())
-            return;
-
-        if (std::holds_alternative<WalPayloadIn>(*event)) {
-            auto payload = std::get<WalPayloadIn>(*event);
-            CALICO_ERROR_IF(m_writer->write(payload));
-            if (m_writer->block_count() >= m_wal_limit)
-                CALICO_ERROR_IF(advance_segment());
-        } else if (std::holds_alternative<AdvanceToken>(*event)) {
-            CALICO_ERROR_IF(advance_segment());
-        } else {
-            CALICO_EXPECT_TRUE(std::holds_alternative<FlushToken>(*event));
-            auto s = m_writer->flush();
-            // Throw away logic errors due to the tail buffer being empty.
-            CALICO_ERROR_IF(s.is_logic_error() ? ok() : s);
-        }
-    }
-}
-
 auto WalWriterTask::write(WalPayloadIn payload) -> void
 {
-    m_work.enqueue(payload);
+    CALICO_ERROR_IF(m_writer->write(payload));
+    if (m_writer->block_count() >= m_wal_limit)
+        CALICO_ERROR_IF(advance_segment());
 }
 
 auto WalWriterTask::flush() -> void
 {
-    m_work.enqueue(FlushToken {});
+    auto s = m_writer->flush();
+    // Throw away logic errors due to the tail buffer being empty.
+    CALICO_ERROR_IF(s.is_logic_error() ? ok() : s);
 }
 
 auto WalWriterTask::advance() -> void
 {
-    m_work.enqueue(AdvanceToken {});
+    CALICO_ERROR_IF(advance_segment());
 }
 
 auto WalWriterTask::destroy() && -> Status
