@@ -92,6 +92,7 @@ public:
     [[nodiscard]] virtual auto current_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto roll_forward(Id begin_lsn, const Callback &callback) -> Status = 0;
     [[nodiscard]] virtual auto roll_backward(Id end_lsn, const Callback &callback) -> Status = 0;
+    [[nodiscard]] virtual auto start_workers() -> Status = 0;
 
     // Since we're using callbacks to traverse the log, we need a second phase to
     // remove obsolete segments. This gives us a chance to flush the pages that
@@ -101,7 +102,7 @@ public:
     virtual auto log(WalPayloadIn payload) -> void = 0;
     virtual auto flush() -> void = 0;
     virtual auto advance() -> void = 0;
-    virtual auto remove_before(Id lsn) -> void = 0;
+    virtual auto cleanup(Id lsn) -> void = 0;
 };
 
 } // namespace Calico

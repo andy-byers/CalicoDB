@@ -92,6 +92,11 @@ private:
 
     using Event = std::variant<WalPayloadIn, AdvanceToken, FlushToken>;
 
+    [[nodiscard]] auto is_open() const -> bool
+    {
+        return m_writer.has_value();
+    }
+
     [[nodiscard]] auto advance_segment() -> Status;
     [[nodiscard]] auto open_segment(SegmentId) -> Status;
     auto close_segment() -> Status;

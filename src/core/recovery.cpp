@@ -261,7 +261,7 @@ auto Recovery::finish_recovery() -> Status
     ENSURE_ENABLED("cannot finish recovery");
 
     CALICO_TRY_S(m_pager->flush({}));
-    m_wal->remove_before(m_pager->recovery_lsn());
+    m_wal->cleanup(m_pager->recovery_lsn());
     return ok(); // TODO
 }
 

@@ -159,7 +159,7 @@ auto Core::open(Slice path, const Options &options) -> Status
         // The first call to root() allocates the root page.
         auto root = m_tree->root(true);
         if (!root.has_value())
-            CALICO_ERROR(root.error());
+            CALICO_TRY_S(root.error());
         CALICO_EXPECT_EQ(m_pager->page_count(), 1);
 
         state.page_count = 1;
@@ -175,7 +175,8 @@ auto Core::open(Slice path, const Options &options) -> Status
         // This should be a no-op if the database closed normally last time.
         s = ensure_consistency_on_startup();
     }
-
+    if (m_wal->is_enabled())
+        return m_wal->start_workers();
     return s;
 }
 
@@ -355,7 +356,7 @@ auto Core::do_commit() -> Status
     CALICO_TRY_S(m_pager->flush(last_commit_lsn));
 
     // Clean up obsolete WAL segments.
-    m_wal->remove_before(m_pager->recovery_lsn());
+    m_wal->cleanup(m_pager->recovery_lsn());
 
     m_images.clear();
     m_system->commit_lsn = lsn;
@@ -401,10 +402,13 @@ auto Core::close() -> Status
         CALICO_WARN(s);
         return s;
     }
-    m_wal->advance();
+    m_wal->flush();
 
     // We already waited on the WAL to be done writing so this should happen immediately.
     CALICO_ERROR_IF(m_pager->flush({}));
+
+    m_wal.reset();
+    m_pager.reset();
 
     return status();
 }

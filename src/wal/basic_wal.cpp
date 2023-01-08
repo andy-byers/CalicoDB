@@ -14,23 +14,6 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
       m_wal_limit {param.wal_limit},
       m_writer_capacity {param.writer_capacity},
-      m_writer_task {{
-          param.prefix,
-          m_writer_tail,
-          m_store,
-          m_system,
-          &m_set,
-          &m_flushed_lsn,
-          param.wal_limit,
-          param.writer_capacity,
-      }},
-      m_cleanup_task {{
-          param.prefix,
-          m_store,
-          m_system,
-          &m_set,
-          param.writer_capacity,
-      }},
       m_tasks {param.interval}
 {
     // m_log->trace("BasicWriteAheadLog");
@@ -44,12 +27,6 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
     CALICO_EXPECT_NE(m_system, nullptr);
     CALICO_EXPECT_NE(m_writer_capacity, 0);
     CALICO_EXPECT_NE(m_wal_limit, 0);
-
-    // TODO: Attempt cleanup on a less-frequent interval?
-    m_tasks.add([this] {
-        m_cleanup_task();
-        m_writer_task();
-    });
 }
 
 auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
@@ -88,6 +65,42 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
 {
     // m_log->trace("~BasicWriteAheadLog");
     // m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
+
+    CALICO_ERROR_IF(std::move(*m_writer).destroy());
+}
+
+auto BasicWriteAheadLog::start_workers() -> Status
+{
+    m_writer = std::unique_ptr<WalWriterTask> {new(std::nothrow) WalWriterTask {{
+        m_prefix,
+        m_writer_tail,
+        m_store,
+        m_system,
+        &m_set,
+        &m_flushed_lsn,
+        m_wal_limit,
+        m_writer_capacity,
+    }}};
+    if (m_writer == nullptr)
+        return system_error("cannot allocate writer object: out of memory");
+
+    m_cleanup = std::unique_ptr<WalCleanupTask> {new(std::nothrow) WalCleanupTask {{
+        m_prefix,
+        &m_recovery_lsn,
+        m_store,
+        m_system,
+        &m_set,
+        m_writer_capacity,
+    }}};
+    if (m_cleanup == nullptr)
+        return system_error("cannot allocate cleanup object: out of memory");
+
+    m_tasks.add([this] {
+        (*m_cleanup)();
+        (*m_writer)();
+    });
+
+    return ok();
 }
 
 auto BasicWriteAheadLog::flushed_lsn() const -> Id
@@ -102,19 +115,22 @@ auto BasicWriteAheadLog::current_lsn() const -> Id
 
 auto BasicWriteAheadLog::log(WalPayloadIn payload) -> void
 {
+    CALICO_EXPECT_NE(m_writer, nullptr);
     m_last_lsn.value++;
-    m_writer_task.write(payload);
+    m_writer->write(payload);
 }
 
 auto BasicWriteAheadLog::flush() -> void
 {
-    m_writer_task.flush();
+    CALICO_EXPECT_NE(m_writer, nullptr);
+    m_writer->flush();
     m_tasks.force();
 }
 
 auto BasicWriteAheadLog::advance() -> void
 {
-    m_writer_task.advance();
+    CALICO_EXPECT_NE(m_writer, nullptr);
+    m_writer->advance();
     m_tasks.force();
 }
 
@@ -153,7 +169,14 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
     while (s.is_ok()) {
         Id first_lsn;
         s = m_reader->read_first_lsn(first_lsn);
-        if (s.is_not_found()) return ok();
+
+        // This indicates an empty file. Try to seek back to the last segment.
+        if (s.is_not_found()) {
+            if (m_reader->segment_id() != m_set.last())
+                return corruption("missing WAL data in segment {}", m_reader->segment_id().value);
+            s = m_reader->seek_previous();
+            break;
+        }
         CALICO_TRY_S(s);
 
         if (first_lsn >= begin_lsn) {
@@ -249,10 +272,10 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
     return s.is_not_found() ? ok() : s;
 }
 
-auto BasicWriteAheadLog::remove_before(Id lsn) -> void
+auto BasicWriteAheadLog::cleanup(Id recovery_lsn) -> void
 {
-    m_log->trace("remove_before");
-    m_cleanup_task.remove_before(lsn);
+    m_log->trace("cleanup({})", recovery_lsn.value);
+    m_recovery_lsn.store(recovery_lsn);
 }
 
 auto BasicWriteAheadLog::remove_after(Id limit) -> Status

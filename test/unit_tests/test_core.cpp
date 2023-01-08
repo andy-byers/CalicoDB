@@ -131,11 +131,10 @@ TEST_F(BasicDatabaseTests, DatabaseIsMovable)
 TEST_F(BasicDatabaseTests, ReopenDatabase)
 {
     Database db;
-    ASSERT_OK(db.open(ROOT, options));
-    ASSERT_OK(db.close());
-
-    ASSERT_OK(db.open(ROOT, options));
-    ASSERT_OK(db.close());
+    for (Size i {}; i < 10; ++i) {
+        ASSERT_OK(db.open(ROOT, options));
+        ASSERT_OK(db.close());
+    }
 }
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)

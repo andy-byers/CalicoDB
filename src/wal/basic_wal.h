@@ -47,7 +47,8 @@ public:
     [[nodiscard]] auto roll_forward(Id begin_lsn, const Callback &callback) -> Status override;
     [[nodiscard]] auto roll_backward(Id end_lsn, const Callback &callback) -> Status override;
     [[nodiscard]] auto remove_after(Id lsn) -> Status override;
-    auto remove_before(Id lsn) -> void override;
+    [[nodiscard]] auto start_workers() -> Status override;
+    auto cleanup(Id recovery_lsn) -> void override;
     auto advance() -> void override;
     auto log(WalPayloadIn payload) -> void override;
     auto flush() -> void override;
@@ -58,6 +59,7 @@ private:
 
     LogPtr m_log;
     std::atomic<Id> m_flushed_lsn {};
+    std::atomic<Id> m_recovery_lsn {};
     Id m_last_lsn;
     WalSet m_set;
     std::string m_prefix;
@@ -75,8 +77,8 @@ private:
     // groups should never overlap.
     bool m_is_working {};
 
-    WalWriterTask m_writer_task;
-    WalCleanupTask m_cleanup_task;
+    std::unique_ptr<WalWriterTask> m_writer;
+    std::unique_ptr<WalCleanupTask> m_cleanup;
     TaskManager m_tasks; // TODO: Could store this in Core and pass it in as a parameter if we need it elsewhere.
 };
 

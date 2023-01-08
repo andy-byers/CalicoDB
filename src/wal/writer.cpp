@@ -78,7 +78,7 @@ auto WalWriterTask::operator()() -> void
         // Empty out the entire work queue each time this method is run.
         const auto event = m_work.try_dequeue();
 
-        if (!event.has_value() || m_system->has_error())
+        if (!event.has_value() || !is_open())
             return;
 
         if (std::holds_alternative<WalPayloadIn>(*event)) {
@@ -148,8 +148,7 @@ auto WalWriterTask::close_segment() -> Status
     m_writer.reset();
     m_file.reset();
 
-    // We want to do this part, even if the flush failed. If the segment is empty, and we fail to remove
-    // it, we will end up overwriting it next time we open the writer.
+    // We want to do this part, even if the flush failed.
     if (auto id = ++m_set->last(); is_empty) {
         auto t = m_storage->remove_file(m_prefix + id.to_name());
         s = s.is_ok() ? t : s;

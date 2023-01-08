@@ -54,9 +54,14 @@ public:
         return ok();
     }
 
-    auto remove_before(Id) -> void override
+    auto cleanup(Id) -> void override
     {
 
+    }
+
+    [[nodiscard]] auto start_workers() -> Status override
+    {
+        return ok();
     }
 
     [[nodiscard]]
