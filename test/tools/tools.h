@@ -296,6 +296,7 @@ public:
         Size spread {4};
         bool is_sequential {};
         bool is_unique {};
+        bool is_readable {true};
     };
 
     RecordGenerator() = default;
@@ -424,7 +425,7 @@ struct formatter<Cco::XactPayloadType> {
     auto format(const Cco::XactPayloadType &type, FormatContext &ctx) {
         switch (type) {
             case Cco::XactPayloadType::FULL_IMAGE: return format_to(ctx.out(), "FULL_IMAGE");
-            case Cco::XactPayloadType::DELTAS: return format_to(ctx.out(), "DELTAS");
+            case Cco::XactPayloadType::DELTA: return format_to(ctx.out(), "DELTA");
             case Cco::XactPayloadType::COMMIT: return format_to(ctx.out(), "COMMIT");
             default: return format_to(ctx.out(), "<unrecognized>");
         }

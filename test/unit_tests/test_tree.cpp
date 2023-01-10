@@ -9,7 +9,6 @@
 #include "unit_tests.h"
 #include "utils/layout.h"
 #include "utils/system.h"
-#include "wal/disabled_wal.h"
 #include <gtest/gtest.h>
 #include <map>
 #include <unordered_map>

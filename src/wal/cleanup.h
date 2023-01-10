@@ -7,7 +7,7 @@
 
 namespace Calico {
 
-class WalCleanupTask {
+class WalCleanup {
 public:
     struct Parameters {
         Slice prefix;
@@ -17,7 +17,7 @@ public:
         WalSet *set {};
     };
 
-    explicit WalCleanupTask(const Parameters &param)
+    explicit WalCleanup(const Parameters &param)
         : m_prefix {param.prefix.to_string()},
           m_limit {param.limit},
           m_storage {param.storage},
@@ -28,16 +28,21 @@ public:
         CALICO_EXPECT_NE(m_storage, nullptr);
         CALICO_EXPECT_NE(m_system, nullptr);
         CALICO_EXPECT_NE(m_set, nullptr);
+
+        (void)m_limit;
     }
 
     auto cleanup() -> void;
 
 private:
+    [[nodiscard]] auto open_reader() -> tl::expected<WalReader, Status>;
+
     std::string m_prefix;
     std::atomic<Id> *m_limit {};
     Storage *m_storage {};
     System *m_system {};
     WalSet *m_set {};
+    Id m_cache[2] {};
 };
 
 } // namespace Calico

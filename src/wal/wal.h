@@ -82,12 +82,6 @@ public:
 
     virtual ~WriteAheadLog() = default;
 
-    [[nodiscard]]
-    virtual auto is_enabled() const -> bool
-    {
-        return true;
-    }
-
     [[nodiscard]] virtual auto flushed_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto current_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto roll_forward(Id begin_lsn, const Callback &callback) -> Status = 0;
@@ -97,7 +91,7 @@ public:
     // Since we're using callbacks to traverse the log, we need a second phase to
     // remove obsolete segments. This gives us a chance to flush the pages that
     // were made dirty while traversing.
-    [[nodiscard]] virtual auto remove_after(Id lsn) -> Status = 0;
+    [[nodiscard]] virtual auto truncate(Id lsn) -> Status = 0;
 
     virtual auto log(WalPayloadIn payload) -> void = 0;
     virtual auto flush() -> void = 0;

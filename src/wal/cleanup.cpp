@@ -1,4 +1,4 @@
-#include "cleaner.h"
+#include "cleanup.h"
 
 namespace Calico {
 
@@ -8,7 +8,7 @@ namespace Calico {
 //   0 1 2
 // L
 
-auto WalCleanupTask::cleanup() -> void
+auto WalCleanup::cleanup() -> void
 {
     // TODO: Bummer, we will need to read the LSNs of the first few segments to know if we can remove the first one. We should
     //       cache this value so we only read each one once. I'll do it later, since I'm working on the writer right now!

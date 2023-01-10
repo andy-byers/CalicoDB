@@ -684,10 +684,10 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
 class BasicWorkerTests: public testing::Test {
 public:
     BasicWorkerTests()
-        : worker {16, [this](int event) {
+        : worker {[this](int event) {
             events.emplace_back(event);
             return ok();
-        }}
+        }, 16}
     {}
 
     Worker<int> worker;
@@ -696,14 +696,6 @@ public:
 
 TEST_F(BasicWorkerTests, CreateWorker)
 {
-    ASSERT_OK(worker.status());
-    ASSERT_TRUE(events.empty());
-    ASSERT_OK(std::move(worker).destroy());
-}
-
-TEST_F(BasicWorkerTests, DestroyWorker)
-{
-    ASSERT_OK(std::move(worker).destroy());
     ASSERT_TRUE(events.empty());
 }
 
@@ -711,10 +703,9 @@ TEST_F(BasicWorkerTests, EventsGetAdded)
 {
     worker.dispatch(1);
     worker.dispatch(2);
-    worker.dispatch(3);
+    worker.dispatch(3, true);
 
     // Blocks until all events are finished and the worker thread is joined.
-    ASSERT_OK(std::move(worker).destroy());
     ASSERT_EQ(events.at(0), 1);
     ASSERT_EQ(events.at(1), 2);
     ASSERT_EQ(events.at(2), 3);
@@ -730,110 +721,26 @@ TEST_F(BasicWorkerTests, WaitOnEvent)
     ASSERT_EQ(events.at(0), 1);
     ASSERT_EQ(events.at(1), 2);
     ASSERT_EQ(events.at(2), 3);
-    ASSERT_OK(std::move(worker).destroy());
 }
 
 TEST_F(BasicWorkerTests, SanityCheck)
 {
     static constexpr int NUM_EVENTS {1'000};
-    for (int i {}; i < NUM_EVENTS; ++i) {
+    for (int i {}; i < NUM_EVENTS; ++i)
         worker.dispatch(i, i == NUM_EVENTS - 1);
-        ASSERT_OK(worker.status());
-    }
 
     for (int i {}; i < NUM_EVENTS; ++i)
         ASSERT_EQ(events.at(static_cast<Size>(i)), i);
-
-    ASSERT_OK(worker.status());
-    ASSERT_OK(std::move(worker).destroy());
 }
 
-class WorkerFaultTests: public testing::Test {
-public:
-    WorkerFaultTests()
-        : worker {16, [this](int event) {
-            if (callback_status.is_ok())
-                events.emplace_back(event);
-            return callback_status;
-        }}
-    {}
-
-    Status callback_status {ok()};
-    Worker<int> worker;
-    std::vector<int> events;
-};
-
-TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
+TEST(WorkerTests, TSanTest)
 {
-    callback_status = system_error("42");
-    worker.dispatch(1, true);
-    assert_error_42(worker.status());
-    assert_error_42(std::move(worker).destroy());
-    ASSERT_TRUE(events.empty());
-}
-
-TEST_F(WorkerFaultTests, WorkerCannotBeRecovered)
-{
-    callback_status = system_error("42");
-    worker.dispatch(1, true);
-
-    // Return an OK status after failing once. Worker should remain invalidated. If we need to start the worker again,
-    // we need to create a new one.
-    callback_status = ok();
-    worker.dispatch(2, true);
-    assert_error_42(worker.status());
-    assert_error_42(std::move(worker).destroy());
-    ASSERT_TRUE(events.empty());
-}
-
-TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
-{
+    int counter {};
+    Worker<int> worker {[&counter](auto n) {counter += n;}, 32};
     worker.dispatch(1);
     worker.dispatch(2);
     worker.dispatch(3, true);
-
-    callback_status = system_error("42");
-    worker.dispatch(4);
-    worker.dispatch(5);
-    worker.dispatch(6, true);
-
-    ASSERT_EQ(events.at(0), 1);
-    ASSERT_EQ(events.at(1), 2);
-    ASSERT_EQ(events.at(2), 3);
-    ASSERT_EQ(events.size(), 3);
-
-    assert_error_42(worker.status());
-    assert_error_42(std::move(worker).destroy());
+    CALICO_EXPECT_EQ(counter, 6);
 }
-
-TEST_F(WorkerFaultTests, ErrorStatusContention)
-{
-    callback_status = system_error("42");
-    worker.dispatch(1);
-    worker.dispatch(2);
-    worker.dispatch(3);
-
-    // Sketchy but seems to work in practice. I'm getting a lot of these checks in before the status is
-    // registered.
-    Size num_hits {};
-    while (worker.status().is_ok())
-        num_hits++;
-    ASSERT_GT(num_hits, 0);
-
-    assert_error_42(worker.status());
-    assert_error_42(std::move(worker).destroy());
-    ASSERT_TRUE(events.empty());
-}
-
-// TODO: TSan complains about this test. It seems that using std::condition_variable::wait_for() causes weird problems sometimes.
-//TEST(TaskManagerTests, TSanTest)
-//{
-//    using namespace std::chrono_literals;
-//
-//    int counter {};
-//    TaskManager manager {[&counter](auto) {counter++;}, 32};
-//    std::this_thread::sleep_for(1000ms);
-//    CALICO_EXPECT_GT(counter, 0);
-//}
 
 } // namespace Calico

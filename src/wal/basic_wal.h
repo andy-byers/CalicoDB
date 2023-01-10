@@ -1,24 +1,21 @@
 #ifndef CALICO_WAL_BASIC_WAL_H
 #define CALICO_WAL_BASIC_WAL_H
 
-#include "cleaner.h"
+#include "cleanup.h"
 #include "helpers.h"
 #include "reader.h"
 #include "record.h"
+#include "utils/types.h"
 #include "wal.h"
 #include "writer.h"
-#include <tl/expected.hpp>
-#include "utils/types.h"
 #include <atomic>
 #include <optional>
+#include <tl/expected.hpp>
 #include <unordered_set>
 
 namespace Calico {
 
 class Storage;
-class AppendWriter;
-class RandomReader;
-class WalCleaner;
 
 class BasicWriteAheadLog: public WriteAheadLog {
 public:
@@ -34,20 +31,14 @@ public:
         Interval interval {};
     };
 
-    [[nodiscard]]
-    auto is_enabled() const -> bool override
-    {
-        return m_wal_limit != DISABLE_WAL;
-    }
-
     ~BasicWriteAheadLog() override;
     [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>;
     [[nodiscard]] auto flushed_lsn() const -> Id override;
     [[nodiscard]] auto current_lsn() const -> Id override;
     [[nodiscard]] auto roll_forward(Id begin_lsn, const Callback &callback) -> Status override;
     [[nodiscard]] auto roll_backward(Id end_lsn, const Callback &callback) -> Status override;
-    [[nodiscard]] auto remove_after(Id lsn) -> Status override;
     [[nodiscard]] auto start_workers() -> Status override;
+    [[nodiscard]] auto truncate(Id lsn) -> Status override;
     auto cleanup(Id recovery_lsn) -> void override;
     auto advance() -> void override;
     auto log(WalPayloadIn payload) -> void override;
@@ -55,7 +46,7 @@ public:
 
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
-    [[nodiscard]] auto open_reader() -> Status; // TODO: We don't really have to store the reader as a member...
+    [[nodiscard]] auto open_reader() -> tl::expected<WalReader, Status>;
 
     LogPtr m_log;
     std::atomic<Id> m_flushed_lsn {};
@@ -66,16 +57,11 @@ private:
 
     Storage *m_store {};
     System *m_system {};
-    std::optional<WalReader> m_reader;
     std::string m_reader_data;
     std::string m_reader_tail;
     std::string m_writer_tail;
     Size m_wal_limit {};
     Size m_writer_capacity {};
-
-    // If this is true, both m_writer and m_cleaner should exist. Otherwise, neither should exist. The two
-    // groups should never overlap.
-    bool m_is_working {};
 
     struct AdvanceToken {};
     struct FlushToken {};
@@ -84,9 +70,9 @@ private:
 
     auto run_task(Event event) -> void;
 
-    std::unique_ptr<WalWriterTask> m_writer;
-    std::unique_ptr<WalCleanupTask> m_cleanup;
-    std::unique_ptr<TaskManager<Event>> m_tasks;
+    std::unique_ptr<WalWriter> m_writer;
+    std::unique_ptr<WalCleanup> m_cleanup;
+    std::unique_ptr<Worker<Event>> m_tasks;
 };
 
 } // namespace Calico

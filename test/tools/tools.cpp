@@ -16,8 +16,11 @@ RecordGenerator::RecordGenerator(Parameters param)
 
 auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<Record>
 {
-    const auto [mks, mvs, spread, is_sequential, is_unique] = m_param;
+    const auto [mks, mvs, spread, is_sequential, is_unique, is_readable] = m_param;
     std::vector<Record> records(num_records);
+
+    const Byte min_byte = is_readable ? 'a' : '\x00';
+    const Byte max_byte = is_readable ? 'z' : '\xFF';
 
     const auto min_ks = mks < spread ? 1 : mks - spread;
     const auto min_vs = mvs < spread ? 0 : mvs - spread;
@@ -29,7 +32,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
 
     while (itr != records.end()) {
         const auto ks = random.get(min_ks, max_ks);
-        auto key = random.get<std::string>('\x00', '\xFF', ks);
+        auto key = random.get<std::string>(min_byte, max_byte, ks);
         if (is_sequential) {
             if (set.find(key) != end(set)) {
                 CALICO_EXPECT_LT(num_collisions, num_records);
@@ -40,7 +43,7 @@ auto RecordGenerator::generate(Random &random, Size num_records) -> std::vector<
         }
         const auto vs = random.get(min_vs, max_vs);
         itr->key = std::move(key);
-        itr->value = random.get<std::string>('\x00', '\xFF', vs);
+        itr->value = random.get<std::string>(min_byte, max_byte, vs);
         itr++;
     }
     if (is_sequential)

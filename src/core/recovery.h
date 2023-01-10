@@ -47,7 +47,7 @@ using PayloadDescriptor = std::variant<DeltaDescriptor, FullImageDescriptor, Com
 
 enum XactPayloadType : Byte {
     COMMIT     = '\xC0',
-    DELTAS     = '\xD0',
+    DELTA      = '\xD0',
     FULL_IMAGE = '\xF0',
 };
 

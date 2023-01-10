@@ -113,22 +113,19 @@ public:
         return *this;
     }
 
+    template<CanSlice T>
     [[nodiscard]]
-    constexpr auto starts_with(const Byte *rhs) const noexcept -> bool
+    constexpr auto starts_with(T rhs) const noexcept -> bool
     {
-        // NOTE: rhs must be null-terminated.
-        const auto size = std::char_traits<Byte>::length(rhs);
-        if (size > m_size)
+        if (rhs.size() > m_size)
             return false;
-        return std::memcmp(m_data, rhs, size) == 0;
+        return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
     }
 
     [[nodiscard]]
-    constexpr auto starts_with(Slice rhs) const noexcept -> bool
+    constexpr auto starts_with(const Byte *rhs) const noexcept -> bool
     {
-        if (rhs.m_size > m_size)
-            return false;
-        return std::memcmp(m_data, rhs.data(), rhs.m_size) == 0;
+        return starts_with(Slice {rhs});
     }
 
     [[nodiscard]]

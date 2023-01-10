@@ -16,7 +16,7 @@ auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta>
     const auto original_size = out.size();
 
     // Payload type (1 B)
-    encode_payload_type(out, XactPayloadType::DELTAS);
+    encode_payload_type(out, XactPayloadType::DELTA);
     out.advance();
 
     // Page ID (8 B)
@@ -76,7 +76,7 @@ static auto decode_deltas_payload(WalPayloadOut in) -> DeltaDescriptor
     info.lsn = in.lsn();
 
     // Payload type (1 B)
-    CALICO_EXPECT_EQ(XactPayloadType {data[0]}, XactPayloadType::DELTAS);
+    CALICO_EXPECT_EQ(XactPayloadType {data[0]}, XactPayloadType::DELTA);
     data.advance();
 
     // Page ID (8 B)
@@ -132,7 +132,7 @@ static auto decode_commit_payload(WalPayloadOut in) -> CommitDescriptor
 auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
 {
     switch (XactPayloadType {in.data()[0]}) {
-        case XactPayloadType::DELTAS:
+        case XactPayloadType::DELTA:
             return decode_deltas_payload(in);
         case XactPayloadType::FULL_IMAGE:
             return decode_full_image_payload(in);
@@ -143,17 +143,17 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
     }
 }
 
-#define ENSURE_ENABLED(primary) \
+#define ENSURE_NO_XACT(primary) \
     do { \
-        if (!m_wal->is_enabled()) \
+        if (m_system->has_xact) \
             return logic_error( \
-                "{}: WAL is not enabled (wal_limit was set to DISABLE_WAL on database creation)", primary); \
+                "{}: a transaction is active", primary); \
     } while (0)
 
 auto Recovery::start_abort() -> Status
 {
     // m_log->trace("start_abort");
-    ENSURE_ENABLED("cannot start abort");
+    ENSURE_NO_XACT("cannot start abort");
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
@@ -177,18 +177,18 @@ auto Recovery::start_abort() -> Status
 auto Recovery::finish_abort() -> Status
 {
     // m_log->trace("finish_abort");
-    ENSURE_ENABLED("cannot finish abort");
+    ENSURE_NO_XACT("cannot finish abort");
 //    return finish_routine();
 
     CALICO_TRY_S(m_pager->flush({}));
 
-    return m_wal->remove_after(m_system->commit_lsn);
+    return m_wal->truncate(m_system->commit_lsn);
 }
 
 auto Recovery::start_recovery() -> Status
 {
     // m_log->trace("start_recovery");
-    ENSURE_ENABLED("cannot start recovery");
+    ENSURE_NO_XACT("cannot start recovery");
     Id last_lsn;
 
     const auto redo = [this, &last_lsn](auto payload) {
@@ -258,11 +258,11 @@ auto Recovery::start_recovery() -> Status
 auto Recovery::finish_recovery() -> Status
 {
     // m_log->trace("finish_recovery");
-    ENSURE_ENABLED("cannot finish recovery");
+    ENSURE_NO_XACT("cannot finish recovery");
 
     CALICO_TRY_S(m_pager->flush({}));
     m_wal->cleanup(m_pager->recovery_lsn());
-    return ok(); // TODO
+    return ok();
 }
 
 } // namespace Calico

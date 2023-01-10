@@ -17,7 +17,6 @@ static constexpr Size MAXIMUM_WAL_LIMIT {0x2000};
 static constexpr Size MINIMUM_WAL_SPLIT {0};
 static constexpr Size DEFAULT_WAL_SPLIT {25};
 static constexpr Size MAXIMUM_WAL_SPLIT {50};
-static constexpr Size DISABLE_WAL {};
 
 enum class LogLevel {
     TRACE,

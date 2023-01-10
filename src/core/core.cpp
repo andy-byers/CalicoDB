@@ -15,7 +15,6 @@
 #include "utils/layout.h"
 #include "utils/system.h"
 #include "wal/basic_wal.h"
-#include "wal/disabled_wal.h"
 
 namespace Calico {
 
@@ -64,12 +63,10 @@ auto Core::open(Slice path, const Options &options) -> Status
     //             CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
     // m_log->info("tree is located at \"{}{}\"", m_prefix, DATA_FILENAME);
     // m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
-    if (sanitized.wal_limit != DISABLE_WAL) {
-        if (sanitized.wal_prefix.is_empty()) {
-            // m_log->info("WAL prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
-        } else {
-            // m_log->info("WAL prefix is \"{}\"", sanitized.wal_prefix.to_string());
-        }
+    if (sanitized.wal_prefix.is_empty()) {
+        // m_log->info("WAL prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
+    } else {
+        // m_log->info("WAL prefix is \"{}\"", sanitized.wal_prefix.to_string());
     }
 
     m_store = sanitized.storage;
@@ -90,7 +87,8 @@ auto Core::open(Slice path, const Options &options) -> Status
     static constexpr auto SMALL_CACHE = "cache is too small";
     auto cache_size = sanitized.cache_size;
 
-    if (sanitized.wal_limit != DISABLE_WAL) {
+    // Allocate the WAL object and buffers.
+    {
         const auto wal_cache_approx = cache_size / 100 * sanitized.wal_split;
         const auto wal_buffer_size = wal_scratch_size(sanitized.page_size);
         const auto wal_buffer_count = wal_cache_approx / wal_buffer_size;
@@ -105,7 +103,7 @@ auto Core::open(Slice path, const Options &options) -> Status
 
         // The WAL segments may be stored elsewhere.
         auto wal_prefix = sanitized.wal_prefix.is_empty()
-            ? m_prefix : sanitized.wal_prefix.to_string();
+                              ? m_prefix : sanitized.wal_prefix.to_string();
         if (!wal_prefix.ends_with('/'))
             wal_prefix += '/';
 
@@ -120,13 +118,9 @@ auto Core::open(Slice path, const Options &options) -> Status
         if (!r.has_value())
             return r.error();
         m_wal = std::move(*r);
-    } else {
-        m_wal = std::make_unique<DisabledWriteAheadLog>();
     }
 
-    // TODO: Pager expects cache size in units of pages. Change the name after this point.
-    cache_size /= sanitized.page_size;
-
+    // Allocate the pager object and cache frames.
     {
         auto r = BasicPager::open({
             m_prefix,
@@ -135,7 +129,7 @@ auto Core::open(Slice path, const Options &options) -> Status
             &m_images,
             m_wal.get(),
             m_system.get(),
-            cache_size,
+            cache_size / sanitized.page_size,
             sanitized.page_size,
         });
         if (!r.has_value())
@@ -144,6 +138,7 @@ auto Core::open(Slice path, const Options &options) -> Status
         m_pager->load_state(state);
     }
 
+    // Allocate the tree object.
     {
         auto r = BPlusTree::open(*m_pager, *m_system, sanitized.page_size);
         if (!r.has_value())
@@ -169,15 +164,14 @@ auto Core::open(Slice path, const Options &options) -> Status
 
         // This is safe right now because the WAL has not been started. If successful, we will have the root page
         // set up and saved to the database file.
-        s = m_pager->flush({});
+        CALICO_TRY_S(m_pager->flush({}));
 
-    } else if (m_wal->is_enabled()) {
+    } else {
         // This should be a no-op if the database closed normally last time.
-        s = ensure_consistency_on_startup();
+        CALICO_TRY_S(ensure_consistency_on_startup());
     }
-    if (m_wal->is_enabled())
-        return m_wal->start_workers();
-    return s;
+    CALICO_ERROR_IF(m_wal->start_workers());
+    return status();
 }
 
 Core::~Core()
@@ -347,12 +341,12 @@ auto Core::do_commit() -> Status
     m_wal->log(payload);
     m_wal->advance();
 
-
     // advance() blocks until it is finished. If an error was encountered, it'll show up in the
     // System object at this point.
     CALICO_TRY_S(status());
 
-    // Make sure every dirty page that hasn't been written back since the last commit is on disk.
+    // Make sure every dirty page that hasn't been written back since the last commit is on disk. Note that this will
+    // cause all dirty pages to be flushed on the first commit.
     CALICO_TRY_S(m_pager->flush(last_commit_lsn));
 
     // Clean up obsolete WAL segments.
@@ -385,6 +379,7 @@ auto Core::do_abort() -> Status
 
     m_system->has_xact = false;
     m_images.clear();
+    m_wal->advance();
 
     CALICO_TRY_S(handle_errors());
     CALICO_TRY_S(m_recovery->start_abort());
@@ -493,7 +488,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         return tl::make_unexpected(invalid_argument(
             "{}: cache size of {} is too small (minimum frame count is {})", MSG, options.cache_size, options.page_size * 8));
 
-    if (options.wal_limit != DISABLE_WAL && options.wal_limit < MINIMUM_WAL_LIMIT)
+    if (options.wal_limit < MINIMUM_WAL_LIMIT)
         return tl::make_unexpected(invalid_argument(
             "{}: WAL segment limit of {} is too small (must be greater than or equal to {} blocks)", MSG, options.wal_limit, MINIMUM_WAL_LIMIT));
 

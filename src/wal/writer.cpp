@@ -72,43 +72,68 @@ auto LogWriter::flush() -> Status
     return s;
 }
 
-auto WalWriterTask::write(WalPayloadIn payload) -> void
+WalWriter::WalWriter(const Parameters &param)
+    : m_prefix {param.prefix.to_string()},
+      m_flushed_lsn {param.flushed_lsn},
+      m_storage {param.storage},
+      m_system {param.system},
+      m_set {param.set},
+      m_tail {param.tail},
+      m_wal_limit {param.wal_limit}
 {
+    CALICO_EXPECT_FALSE(m_prefix.empty());
+    CALICO_EXPECT_NE(m_flushed_lsn, nullptr);
+    CALICO_EXPECT_NE(m_storage, nullptr);
+    CALICO_EXPECT_NE(m_system, nullptr);
+    CALICO_EXPECT_NE(m_set, nullptr);
+
+    // First segment file gets created now, but is not registered in the WAL set until the writer
+    // is finished with it.
+    CALICO_ERROR_IF(open_segment(++m_set->last()));
+}
+
+auto WalWriter::write(WalPayloadIn payload) -> void
+{
+    if (m_system->has_error())
+        return;
+
     CALICO_ERROR_IF(m_writer->write(payload));
     if (m_writer->block_count() >= m_wal_limit)
         CALICO_ERROR_IF(advance_segment());
 }
 
-auto WalWriterTask::flush() -> void
+auto WalWriter::flush() -> void
 {
     auto s = m_writer->flush();
     // Throw away logic errors due to the tail buffer being empty.
     CALICO_ERROR_IF(s.is_logic_error() ? ok() : s);
 }
 
-auto WalWriterTask::advance() -> void
+auto WalWriter::advance() -> void
 {
+    // NOTE: advance() is a NOOP if the current WAL segment hasn't been written to.
     CALICO_ERROR_IF(advance_segment());
 }
 
-auto WalWriterTask::destroy() && -> Status
+auto WalWriter::destroy() && -> Status
 {
     return close_segment();
 }
 
-auto WalWriterTask::open_segment(SegmentId id) -> Status
+auto WalWriter::open_segment(SegmentId id) -> Status
 {
     CALICO_EXPECT_EQ(m_writer, std::nullopt);
-    AppendWriter *file {};
+    AppendWriter *file;
     auto s = m_storage->open_append_writer(m_prefix + id.to_name(), &file);
     if (s.is_ok()) {
         m_file.reset(file);
         m_writer = LogWriter {*m_file, m_tail, *m_flushed_lsn};
+        m_current = id;
     }
     return s;
 }
 
-auto WalWriterTask::close_segment() -> Status
+auto WalWriter::close_segment() -> Status
 {
     // We must have failed while opening the segment file.
     if (!m_writer)
@@ -127,8 +152,10 @@ auto WalWriterTask::close_segment() -> Status
     m_writer.reset();
     m_file.reset();
 
+    auto id = std::exchange(m_current, SegmentId::null());
+
     // We want to do this part, even if the flush failed.
-    if (auto id = ++m_set->last(); is_empty) {
+    if (is_empty) {
         auto t = m_storage->remove_file(m_prefix + id.to_name());
         s = s.is_ok() ? t : s;
     } else {
@@ -137,7 +164,7 @@ auto WalWriterTask::close_segment() -> Status
     return s;
 }
 
-auto WalWriterTask::advance_segment() -> Status
+auto WalWriter::advance_segment() -> Status
 {
     auto s = close_segment();
     if (s.is_ok()) {

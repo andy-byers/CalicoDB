@@ -43,7 +43,7 @@ private:
     Size m_offset {};
 };
 
-class WalWriterTask {
+class WalWriter {
 public:
     struct Parameters {
         Slice prefix;
@@ -55,25 +55,7 @@ public:
         Size wal_limit {};
     };
 
-    explicit WalWriterTask(const Parameters &param)
-        : m_prefix {param.prefix.to_string()},
-          m_flushed_lsn {param.flushed_lsn},
-          m_storage {param.storage},
-          m_system {param.system},
-          m_set {param.set},
-          m_tail {param.tail},
-          m_wal_limit {param.wal_limit}
-    {
-        CALICO_EXPECT_FALSE(m_prefix.empty());
-        CALICO_EXPECT_NE(m_flushed_lsn, nullptr);
-        CALICO_EXPECT_NE(m_storage, nullptr);
-        CALICO_EXPECT_NE(m_system, nullptr);
-        CALICO_EXPECT_NE(m_set, nullptr);
-
-        // First segment file gets created now, but is not registered in the WAL set until the writer
-        // is finished with it.
-        CALICO_ERROR_IF(open_segment(++m_set->last()));
-    }
+    explicit WalWriter(const Parameters &param);
 
     [[nodiscard]] auto destroy() && -> Status;
     auto write(WalPayloadIn payload) -> void;
@@ -95,6 +77,7 @@ private:
     Storage *m_storage {};
     System *m_system {};
     WalSet *m_set {};
+    SegmentId m_current;
     Bytes m_tail;
     Size m_wal_limit {};
 };

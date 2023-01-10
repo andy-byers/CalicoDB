@@ -62,6 +62,10 @@ public:
     [[nodiscard]] auto read_first_lsn(Id &) -> Status;
     [[nodiscard]] auto roll(const Callback&) -> Status;
 
+    // NOTE: Necessary due to the non-trivial destructor.
+    WalReader(WalReader &&rhs) noexcept = default;
+    auto operator=(WalReader &&rhs) noexcept -> WalReader & = default;
+
 private:
     [[nodiscard]] auto open_segment(SegmentId) -> Status;
     auto prepare_traversal() -> void;
