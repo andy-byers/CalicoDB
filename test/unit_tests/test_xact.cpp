@@ -428,6 +428,7 @@ TEST_F(RollForwardTests, ObsoleteSegmentsAreRemoved)
     commit();
     ASSERT_OK(pager->flush({}));
     allow_cleanup();
+    wal->flush();
 
     const auto [first, last] = get_lsn_range();
     ASSERT_GT(first.value, 1);

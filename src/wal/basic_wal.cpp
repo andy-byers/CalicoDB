@@ -15,8 +15,7 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_wal_limit {param.wal_limit},
       m_writer_capacity {param.writer_capacity}
 {
-    // m_log->trace("BasicWriteAheadLog");
-
+    m_log->trace("BasicWriteAheadLog");
 
     m_log->info("page_size = {}", param.page_size);
     m_log->info("wal_limit = {}", param.wal_limit);
@@ -128,7 +127,6 @@ auto BasicWriteAheadLog::current_lsn() const -> Id
 
 auto BasicWriteAheadLog::log(WalPayloadIn payload) -> void
 {
-fmt::print("log {}\n", payload.lsn().value);
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_last_lsn.value++;
     m_tasks->dispatch(payload);
@@ -138,7 +136,6 @@ auto BasicWriteAheadLog::flush() -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_tasks->dispatch(FlushToken {}, true);
-
 }
 
 auto BasicWriteAheadLog::advance() -> void
