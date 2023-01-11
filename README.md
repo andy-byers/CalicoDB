@@ -1,10 +1,14 @@
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
-> **Warning**: This library is not quite stable and is definitely not code reviewed. 
-> Definitely don't use this library in anything serious!
+> **Warning**: This library is not yet stable, nor is it code reviewed. 
+> Please don't use it for anything serious!
 
 Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
+
+<p align="center">
+    <img src="doc/mascot.jpeg" width="60%" />
+<p align="center">
 
 + [Features](#features)
 + [Caveats](#caveats)
@@ -27,16 +31,16 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + Transactions provided as first-class objects
 
 ## Caveats
-+ Currently, Calico DB only runs on 64-bit Ubuntu and OSX
-+ Has a hard limit on key length (anywhere from 29 B to ~16 KB, depending on the page size)
-+ Has a hard limit on value length, equal to roughly 4 GB
++ Only tested on 64-bit Ubuntu and OSX
++ Hard limit on key length is anywhere from 29 B to ~16 KB, depending on the chosen page size
++ Hard limit on value length is roughly 4 GB
 + Only one transaction may be running at any given time
 + Doesn't provide synchronization past support for concurrent cursors
 
 ## Dependencies
 The library itself depends on `@gabime/spdlog` and `@TartanLlama/expected`.
-`spdlog` is downloaded during the build using CMake's FetchContent API, and `expected` is bundled with the source code.
-The tests depend on `@google/googletest`.
+The tests depend on `@google/googletest`, and the benchmarks depend on `@google/benchmark`.
+All dependencies are downloaded using CMake's FetchContent API.
 
 ## Build
 Calico DB is built using CMake.
@@ -63,67 +67,65 @@ See the [API documentation](doc/api.md).
 ## Architecture
 
 <p align="center">
-   <img src="./doc/architecture.png" width="75%" />
+   <img src="doc/architecture.png" width="75%" />
 </p>
 
 ## Performance
 Calico DB has a way to go performance-wise.
-Currently, we have decent performance in the following categories:
+Currently, we have decent performance ($\ge 200,000\frac{\text{ops}}{\text{second}}$) in the following categories:
 + Sequential writes
 + Random reads
 + Sequential reads
++ Overwrites
 
 Unfortunately, random writes are quite slow (~6 or 7 times slower than sequential writes).
 Writing in reverse-sequential order represents the worst case for the B<sup>+</sup>-tree splitting algorithm, and leads to awful performance.
 
 ## TODO
-1. Figure out a way to eliminate the call to `flush()` during `commit()`
-   + This may involve flushing pages that haven't been flushed since some previous transaction when we acquire them
-   + Or, we could do the database file writes in the background as well, with periodic scans for old pages.
-2. Get everything code reviewed!
-3. Get unit test coverage up
-4. Write documentation
-5. Work on performance
-6. Need some way to reduce the file size once many pages become unused
+1. Get everything code reviewed!
+2. Get unit test coverage up
+3. Update the documentation in [doc](doc), or get rid of it in favor of something like Doxygen
+4. Work on performance
+    + B<sup>+</sup>-tree splitting algorithm could be modified to favor sequential writes less
+5. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
     + Look into SQLite's pointer maps
 
 ## Documentation
-Check out Calico DB's [usage and design documents](./doc).
+Check out Calico DB's [usage and design documents](doc).
 
 ## Source Tree
 ```
 CalicoDB
+┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
-┃ ┣╸bytes.h ┄┄┄┄┄┄┄┄ Constructs for holding contiguous sequences of bytes
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
 ┃ ┣╸info.h ┄┄┄┄┄┄┄┄┄ Query information about the database
 ┃ ┣╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
+┃ ┣╸platform.h ┄┄┄┄┄ Platform-specific definitions
+┃ ┣╸slice.h ┄┄┄┄┄┄┄┄ Constructs for holding contiguous sequences of bytes
 ┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object for function returns
-┃ ┣╸store.h ┄┄┄┄┄┄┄┄ Storage interface
-┃ ┗╸transaction.h ┄┄ First-class transaction object
+┃ ┣╸storage.h ┄┄┄┄┄┄ Storage interface
+┃ ┗╸transaction.h ┄┄ Transaction object
 ┣╸src
 ┃ ┣╸core ┄┄┄┄┄┄┄┄┄┄┄ API implementation
-┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Pager module
-┃ ┣╸store ┄┄┄┄┄┄┄┄┄┄ Storage implementations
-┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization module
-┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Utility module
-┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead log implementations
+┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Cache layer
+┃ ┣╸storage ┄┄┄┄┄┄┄┄ Data storage and retrieval
+┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization
+┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Common utilities
+┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging
 ┗╸test
-  ┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄ Fuzz tests
-  ┣╸recovery ┄┄┄┄┄┄┄ Test database failure and recovery
-  ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Test tools
+  ┣╸recovery ┄┄┄┄┄┄┄ Crash recovery tests
+  ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Common test utilities
   ┗╸unit_tests ┄┄┄┄┄ Unit tests
 ```
 
 ## Contributions
 Contributions are welcome!
-The [TODO](#todo) section contains a list of things that need to be addressed.
-Also, pull requests that fix bugs or address correctness issues will always be considered.
-Feel free to create a pull request.
+Check out this repo's issues or the [TODO section](#todo) for a list of things that need to be addressed.
 
 
