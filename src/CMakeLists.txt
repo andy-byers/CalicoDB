@@ -10,7 +10,7 @@ set(CALICO_HEADERS
     "${CALICO_INCLUDE_DIR}/calico/status.h"
     "${CALICO_INCLUDE_DIR}/calico/storage.h"
     "${CALICO_INCLUDE_DIR}/calico/transaction.h")
-set(CALICO_SOURCES '')
+set(CALICO_SOURCES '' ../benchmarks/bench_calico.cpp)
 file(GLOB_RECURSE CALICO_SOURCES "./*/*.cpp" "./*/*.h")
 list(APPEND CALICO_SOURCES "${CALICO_HEADERS}")
 
