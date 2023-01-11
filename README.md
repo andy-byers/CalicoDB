@@ -72,7 +72,7 @@ See the [API documentation](doc/api.md).
 
 ## Performance
 Calico DB has a way to go performance-wise.
-Currently, we have decent performance ($\ge 200,000\frac{\text{ops}}{\text{second}}$) in the following categories:
+Currently, we have decent performance (>= 200,000 ops/second) in the following categories:
 + Sequential writes
 + Random reads
 + Sequential reads
