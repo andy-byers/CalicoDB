@@ -232,7 +232,13 @@ template<std::size_t Length = 20>
 auto make_key(Size key) -> std::string
 {
     auto key_string = std::to_string(key);
-    return std::string(Length - key_string.size(), '0') + key_string;
+    if (key_string.size() == Length) {
+        return key_string;
+    } else if (key_string.size() > Length) {
+        return key_string.substr(0, Length);
+    } else {
+        return std::string(Length - key_string.size(), '0') + key_string;
+    }
 }
 
 [[maybe_unused]]

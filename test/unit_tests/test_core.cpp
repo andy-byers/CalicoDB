@@ -322,8 +322,8 @@ TEST_F(ReaderTests, SingleReader)
             strings.emplace_back(std::move(s));
         }
     }
-//    distributed_reader(0);
-//    localized_reader();
+    distributed_reader(0);
+    localized_reader();
 }
 
 TEST_F(ReaderTests, ManyDistributedReaders)
@@ -342,6 +342,17 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
         readers.emplace_back(std::thread {[this] {localized_reader();}});
     for (auto &reader: readers)
         reader.join();
+}
+
+TEST(A, B)
+{
+    std::string value(100, ' ');
+    Calico::Database db;
+    assert(db.open("__test__calico__").is_ok());
+    for (int i {}; i < 10'000; ++i) {
+        auto key = make_key<9>(Size(rand()));
+        assert(db.insert(key, value).is_ok());
+    }
 }
 
 } // <anonymous>

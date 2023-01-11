@@ -8,7 +8,7 @@
 #include "utils/system.h"
 #include "utils/types.h"
 #include <mutex>
-#include <set>
+#include <map>
 #include <tl/expected.hpp>
 
 namespace Calico {
@@ -25,31 +25,6 @@ inline constexpr auto wal_scratch_size(Size page_size) -> Size
     return page_size * WAL_SCRATCH_SCALE;
 }
 
-[[nodiscard]]
-inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, Id &out) -> Status
-{
-    RandomReader *temp;
-    CALICO_TRY_S(store.open_random_reader(prefix + id.to_name(), &temp));
-
-    char buffer[WalPayloadHeader::SIZE];
-    Bytes bytes {buffer, sizeof(buffer)};
-    std::unique_ptr<RandomReader> file {temp};
-
-    // Read the first LSN. If it exists, it will always be at the same location.
-    auto read_size = bytes.size();
-    CALICO_TRY_S(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
-    bytes.truncate(read_size);
-
-    if (bytes.is_empty())
-        return not_found("segment is empty");
-
-    if (bytes.size() != WalPayloadHeader::SIZE)
-        return corruption("incomplete record");
-
-    out = read_wal_payload_header(bytes).lsn;
-    return ok();
-}
-
 /*
  * Stores a collection of WAL segment descriptors and provides synchronized access.
  */
@@ -61,19 +36,46 @@ public:
     auto add_segment(SegmentId id) -> void
     {
         std::lock_guard lock {m_mutex};
-        m_segments.emplace(id);
+        m_segments.emplace(id, Id::null());
+    }
+
+    auto add_segment(SegmentId id, Id first_lsn) -> void
+    {
+        std::lock_guard lock {m_mutex};
+        m_segments.emplace(id, first_lsn);
+    }
+
+    [[nodiscard]]
+    auto first_lsn(SegmentId id) const -> Id
+    {
+        std::lock_guard lock {m_mutex};
+
+        const auto itr = m_segments.find(id);
+        if (itr == end(m_segments))
+            return Id::null();
+
+        return itr->second;
+    }
+
+    auto set_first_lsn(SegmentId id, Id lsn) -> void
+    {
+        std::lock_guard lock {m_mutex};
+
+        auto itr = m_segments.find(id);
+        CALICO_EXPECT_NE(itr, end(m_segments));
+        itr->second = lsn;
     }
 
     auto first() const -> SegmentId
     {
         std::lock_guard lock {m_mutex};
-        return m_segments.empty() ? SegmentId::null() : *cbegin(m_segments);
+        return m_segments.empty() ? SegmentId::null() : cbegin(m_segments)->first;
     }
 
     auto last() const -> SegmentId
     {
         std::lock_guard lock {m_mutex};
-        return m_segments.empty() ? SegmentId::null() : *crbegin(m_segments);
+        return m_segments.empty() ? SegmentId::null() : crbegin(m_segments)->first;
     }
 
     auto id_before(SegmentId id) const -> SegmentId
@@ -85,14 +87,14 @@ public:
         auto itr = m_segments.lower_bound(id);
         if (itr == cbegin(m_segments))
             return SegmentId::null();
-        return *prev(itr);
+        return prev(itr)->first;
     }
 
     auto id_after(SegmentId id) const -> SegmentId
     {
         std::lock_guard lock {m_mutex};
         auto itr = m_segments.upper_bound(id);
-        return itr != cend(m_segments) ? *itr : SegmentId::null();
+        return itr != cend(m_segments) ? itr->first : SegmentId::null();
     }
 
     auto remove_before(SegmentId id) -> void
@@ -112,7 +114,7 @@ public:
     }
 
     [[nodiscard]]
-    auto segments() const -> const std::set<SegmentId>&
+    auto segments() const -> const std::map<SegmentId, Id> &
     {
         // WARNING: We must ensure that background threads that modify the collection are paused before using this method.
         return m_segments;
@@ -120,7 +122,7 @@ public:
 
 private:
     mutable std::mutex m_mutex;
-    std::set<SegmentId> m_segments;
+    std::map<SegmentId, Id> m_segments;
 };
 
 class LogScratchManager final {
@@ -147,6 +149,42 @@ private:
     mutable std::mutex m_mutex;
     MonotonicScratchManager m_manager;
 };
+
+
+[[nodiscard]]
+inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, WalSet &set) -> tl::expected<Id, Status>
+{
+    if (auto lsn = set.first_lsn(id); !lsn.is_null())
+        return lsn;
+
+    RandomReader *temp;
+    auto s = store.open_random_reader(prefix + id.to_name(), &temp);
+    if (!s.is_ok())
+        return tl::make_unexpected(s);
+
+    char buffer[WalPayloadHeader::SIZE];
+    Bytes bytes {buffer, sizeof(buffer)};
+    std::unique_ptr<RandomReader> file {temp};
+
+    // Read the first LSN. If it exists, it will always be at the same location.
+    auto read_size = bytes.size();
+    s = file->read(bytes.data(), read_size, WalRecordHeader::SIZE);
+    if (!s.is_ok())
+        return tl::make_unexpected(s);
+
+    bytes.truncate(read_size);
+
+    if (bytes.is_empty())
+        return tl::make_unexpected(not_found("segment is empty"));
+
+    if (bytes.size() != WalPayloadHeader::SIZE)
+        return tl::make_unexpected(corruption("incomplete record"));
+
+    auto lsn = read_wal_payload_header(bytes).lsn;
+    set.set_first_lsn(id, lsn);
+    return lsn;
+}
+
 
 } // namespace Calico
 

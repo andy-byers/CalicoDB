@@ -231,8 +231,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 [[nodiscard]] auto get_ids(const WalSet &c)
 {
     std::vector<SegmentId> ids;
-    std::transform(cbegin(c.segments()), cend(c.segments()), back_inserter(ids), [](const auto &id) {
-        return id;
+    std::transform(cbegin(c.segments()), cend(c.segments()), back_inserter(ids), [](const auto &entry) {
+        return entry.first;
     });
     return ids;
 }

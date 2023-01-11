@@ -293,14 +293,13 @@ auto BasicWriteAheadLog::truncate(Id lsn) -> Status
     auto current = m_set.last();
 
     while (!current.is_null()) {
-        Id first_lsn;
-        auto s = read_first_lsn(
-            *m_store, m_prefix, current, first_lsn);
+        auto r = read_first_lsn(
+            *m_store, m_prefix, current, m_set);
 
-        if (s.is_ok()) {
-            if (first_lsn <= lsn)
+        if (r.has_value()) {
+            if (*r <= lsn)
                 break;
-        } else if (!s.is_not_found()) {
+        } else if (auto s = r.error(); !s.is_not_found()) {
             return s;
         }
         if (!current.is_null()) {

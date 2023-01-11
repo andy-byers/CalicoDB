@@ -14,10 +14,13 @@ auto WalCleanup::cleanup() -> void
     if (second.is_null())
         return;
 
-    Id lsn;
-    CALICO_ERROR_IF(read_first_lsn(
-        *m_storage, m_prefix, second, lsn));
-    if (lsn > limit)
+    auto r = read_first_lsn(*m_storage, m_prefix, second, *m_set);
+    if (!r.has_value()) {
+        CALICO_ERROR(r.error());
+        return;
+    }
+
+    if (*r > limit)
         return;
 
     auto s = m_storage->remove_file(m_prefix + first.to_name());
