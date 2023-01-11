@@ -46,11 +46,8 @@ auto main(int argc, const char *argv[]) -> int
         while (std::getline(ifs, line))
             values.emplace_back(line);
     }
-    Options options;
-    options.log_level = LogLevel::INFO;
-    options.log_target = LogTarget::FILE;
     Database db;
-    expect_ok(db.open(path.string(), options));
+    expect_ok(db.open(path.string()));
     const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.

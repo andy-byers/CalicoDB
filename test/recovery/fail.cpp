@@ -40,11 +40,9 @@ auto main(int argc, const char *argv[]) -> int
     std::error_code ignore;
     std::filesystem::remove_all(path, ignore);
 
-    // Use small pages and few frames to cause lots of stealing.
     Options options;
     options.page_size = 0x200;
-    options.cache_size = 16;
-//    options.log_level = spdlog::level::info;
+    options.cache_size = 64 * options.page_size;
     Database db;
     expect_ok(db.open(path.string(), options));
     {

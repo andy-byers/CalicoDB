@@ -8,8 +8,6 @@ FetchContent_Declare(googletest
     GIT_TAG release-1.11.0)
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
-include(CTest)
-enable_testing()
 
 set(TEST_TOOLS_FILES '')
 file(

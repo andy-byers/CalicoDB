@@ -344,15 +344,4 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
         reader.join();
 }
 
-TEST(A, B)
-{
-    std::string value(100, ' ');
-    Calico::Database db;
-    assert(db.open("__test__calico__").is_ok());
-    for (int i {}; i < 10'000; ++i) {
-        auto key = make_key<9>(Size(rand()));
-        assert(db.insert(key, value).is_ok());
-    }
-}
-
 } // <anonymous>
