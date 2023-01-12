@@ -547,6 +547,7 @@ public:
     {
         options.page_size = 0x400;
         options.page_cache_size = 64 * options.page_size;
+        options.wal_buffer_size = 64 * options.page_size;
         options.log_level = LogLevel::OFF;
         options.storage = store.get();
 
@@ -816,6 +817,7 @@ public:
         Options options;
         options.page_size = 0x200;
         options.page_cache_size = 64 * options.page_size;
+        options.wal_buffer_size = 64 * options.page_size;
         options.storage = store.get();
         options.log_level = LogLevel::OFF;
         ASSERT_OK(db.open(ROOT, options));
@@ -986,235 +988,236 @@ TEST_F(FailureTests, CannotPerformOperationsAfterFatalError)
     // return the fatal error.
     assert_error_42(db.close());
 }
-//
-//class RecoveryTestHarness {
-//public:
-//    RecoveryTestHarness()
-//        : store {std::make_unique<HeapStorage>()},
-//          db {std::make_unique<Core>()}
-//    {}
-//
-//    virtual auto setup(Size xact_count, Size uncommitted_count) -> void
-//    {
-//        options.storage = store.get();
-//        options.page_size = 0x200;
-//        options.page_cache_size = 64 * options.page_size;
-//        options.log_level = LogLevel::OFF;
-//
-//        ASSERT_OK(db->open("test", options));
-//        committed = run_random_transactions(*this, xact_count);
-//        const auto database_state = tools::read_file(*store, "test/data");
-//
-//        auto xact = db->transaction();
-//        uncommitted = generator.generate(random, uncommitted_count);
-//        run_random_operations(*this, cbegin(uncommitted), cend(uncommitted));
-//
-//        // TODO: There's a silly data race here. The WAL is probably still being written when we call clone() below.
-//        // Clone the database while there are still pages waiting to be written to the data file. We'll have
-//        // to use the WAL to recover.
-//        auto cloned = store->clone();
-//        tools::write_file(*cloned, "test/data", database_state);
-//
-//        ASSERT_OK(xact.abort());
-//        ASSERT_OK(db->close());
-//        store.reset(dynamic_cast<HeapStorage*>(cloned));
-//        options.storage = store.get();
-//        db.reset();
-//
-//        db = std::make_unique<Core>();
-//    }
-//
-//    virtual auto validate() -> void
-//    {
-//        for (const auto &[key, value]: committed)
-//            tools::expect_contains(*db, key, value);
-//
-//        for (const auto &[key, value]: uncommitted) {
-//            ASSERT_FALSE(tools::contains(*db, key, value));
-//        }
-//        auto &tree = db->tree();
-//        tree.TEST_validate_links();
-//        tree.TEST_validate_nodes();
-//        tree.TEST_validate_order();
-//    }
-//
-//    [[nodiscard]]
-//    virtual auto get_db() -> Core&
-//    {
-//        return *db;
-//    }
-//
-//    Random random {42};
-//    RecordGenerator generator {{16, 100, 10, false, true}};
-//    std::vector<Record> committed, uncommitted;
-//    std::unique_ptr<HeapStorage> store;
-//    Options options;
-//    std::unique_ptr<Core> db;
-//};
-//
-//class RecoveryTests
-//    : public testing::TestWithParam<std::pair<Size, Size>>,
-//      public RecoveryTestHarness
-//{
-//public:
-//    auto SetUp() -> void override
-//    {
-//        const auto [xact_count, uncommitted_count] = GetParam();
-//        setup(xact_count, uncommitted_count);
-//    }
-//};
-//
-//TEST_P(RecoveryTests, Recovers)
-//{
-//    ASSERT_OK(db->open("test", options));
-//    validate();
-//}
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    Recovers,
-//    RecoveryTests,
-//    ::testing::Values(
-//        std::make_pair(  0,   0),
-//        std::make_pair(  0, 100),
-//        std::make_pair(  1,   0),
-//        std::make_pair(  1, 100),
-//        std::make_pair( 10,   0),
-//        std::make_pair( 10, 100)));
-//
-//class RecoveryFailureTestRunner {
-//public:
-//    explicit RecoveryFailureTestRunner(std::string filter_prefix)
-//        : prefix {std::move(filter_prefix)}
-//    {}
-//
-//    template<class Test>
-//    auto run(Test &test) -> void
-//    {
-//        Size num_tries {};
-//        for (; ; num_tries++) {
-//            if (auto s = test.db->open("test", test.options); s.is_ok()) {
-//                break;
-//            } else {
-//                assert_error_42(s);
-//            }
-//            test.db.reset();
-//            test.db = std::make_unique<Core>();
-//        }
-//        test.validate();
-//        ASSERT_GT(num_tries, 0) << "recovery should have failed at least once";
-//    }
-//
-//    auto should_syscall_succeed(const std::string &path, ...) -> Status
-//    {
-//        if (Slice {path}.starts_with(prefix) && counter++ >= target) {
-//            target += step;
-//            counter = 0;
-//            return system_error("42");
-//        }
-//        return Status::ok();
-//    }
-//
-//    std::string prefix;
-//    Size counter {};
-//    Size target {1};
-//    Size step {1};
-//};
-//
-//class RecoveryDataWriteFailureTests: public RecoveryTests {
-//
-//};
-//
-//TEST_P(RecoveryDataWriteFailureTests, ErrorIsPropagated)
-//{
-//    interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
-//        "test/data",
-//        {1, 0},
-//    });
-//    assert_error_42(db->open("test", options));
-//}
-//
-//TEST_P(RecoveryDataWriteFailureTests, RecoveryIsReentrant)
-//{
-//    RecoveryFailureTestRunner runner {"test/data"};
-//    interceptors::set_write([&runner](const auto &path, ...) {
-//        return runner.should_syscall_succeed(path);
-//    });
-//    runner.run(*this);
-//}
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    Recovers,
-//    RecoveryDataWriteFailureTests,
-//    ::testing::Values(
-//        std::make_pair(  0, 100),
-//        std::make_pair(  1,   0),
-//        std::make_pair(  1, 100),
-//        std::make_pair( 10,   0),
-//        std::make_pair( 10, 100)));
-//
-//class RecoveryWalReadFailureTests: public RecoveryTests {
-//
-//};
-//
-//TEST_P(RecoveryWalReadFailureTests, ErrorIsPropagated)
-//{
-//    interceptors::set_read(SystemCallOutcomes<RepeatFinalOutcome> {
-//        "test/wal",
-//        {1, 1, 1, 0, 1},
-//    });
-//    assert_error_42(db->open("test", options));
-//}
-//
-//TEST_P(RecoveryWalReadFailureTests, RecoveryIsReentrant)
-//{
-//    RecoveryFailureTestRunner runner {"test/wal"};
-//    interceptors::set_read([&runner](const auto &path, ...) {
-//        return runner.should_syscall_succeed(path);
-//    });
-//    runner.run(*this);
-//}
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    Recovers,
-//    RecoveryWalReadFailureTests,
-//    ::testing::Values(
-//        std::make_pair(  0, 100),
-//        std::make_pair(  1,   0),
-//        std::make_pair(  1, 100),
-//        std::make_pair( 10,   0),
-//        std::make_pair( 10, 100)));
-//
-//class RecoveryWalOpenFailureTests: public RecoveryTests {
-//
-//};
-//
-//TEST_P(RecoveryWalOpenFailureTests, ErrorIsPropagated)
-//{
-//    interceptors::set_open(SystemCallOutcomes<RepeatFinalOutcome> {
-//        "test/wal",
-//        {1, 0, 1},
-//    });
-//    assert_error_42(db->open("test", options));
-//}
-//
-//TEST_P(RecoveryWalOpenFailureTests, RecoveryIsReentrant)
-//{
-//    RecoveryFailureTestRunner runner {"test/wal"};
-//    interceptors::set_open([&runner](const auto &path, ...) {
-//        return runner.should_syscall_succeed(path);
-//    });
-//    runner.run(*this);
-//}
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    Recovers,
-//    RecoveryWalOpenFailureTests,
-//    ::testing::Values(
-//        std::make_pair(  0, 100),
-//        std::make_pair(  1,   0),
-//        std::make_pair(  1, 100),
-//        std::make_pair( 10,   0),
-//        std::make_pair( 10, 100)));
+
+class RecoveryTestHarness {
+public:
+    RecoveryTestHarness()
+        : store {std::make_unique<HeapStorage>()},
+          db {std::make_unique<Core>()}
+    {}
+
+    virtual auto setup(Size xact_count, Size uncommitted_count) -> void
+    {
+        options.storage = store.get();
+        options.page_size = 0x200;
+        options.page_cache_size = 64 * options.page_size;
+        options.wal_buffer_size = 64 * options.page_size;
+        options.log_level = LogLevel::OFF;
+
+        ASSERT_OK(db->open("test", options));
+        committed = run_random_transactions(*this, xact_count);
+        const auto database_state = tools::read_file(*store, "test/data");
+
+        auto xact = db->transaction();
+        uncommitted = generator.generate(random, uncommitted_count);
+        run_random_operations(*this, cbegin(uncommitted), cend(uncommitted));
+
+        // TODO: There's a silly data race here. The WAL is probably still being written when we call clone() below.
+        // Clone the database while there are still pages waiting to be written to the data file. We'll have
+        // to use the WAL to recover.
+        auto cloned = store->clone();
+        tools::write_file(*cloned, "test/data", database_state);
+
+        ASSERT_OK(xact.abort());
+        ASSERT_OK(db->close());
+        store.reset(dynamic_cast<HeapStorage*>(cloned));
+        options.storage = store.get();
+        db.reset();
+
+        db = std::make_unique<Core>();
+    }
+
+    virtual auto validate() -> void
+    {
+        for (const auto &[key, value]: committed)
+            tools::expect_contains(*db, key, value);
+
+        for (const auto &[key, value]: uncommitted) {
+            ASSERT_FALSE(tools::contains(*db, key, value));
+        }
+        auto &tree = db->tree();
+        tree.TEST_validate_links();
+        tree.TEST_validate_nodes();
+        tree.TEST_validate_order();
+    }
+
+    [[nodiscard]]
+    virtual auto get_db() -> Core&
+    {
+        return *db;
+    }
+
+    Random random {42};
+    RecordGenerator generator {{16, 100, 10, false, true}};
+    std::vector<Record> committed, uncommitted;
+    std::unique_ptr<HeapStorage> store;
+    Options options;
+    std::unique_ptr<Core> db;
+};
+
+class RecoveryTests
+    : public testing::TestWithParam<std::pair<Size, Size>>,
+      public RecoveryTestHarness
+{
+public:
+    auto SetUp() -> void override
+    {
+        const auto [xact_count, uncommitted_count] = GetParam();
+        setup(xact_count, uncommitted_count);
+    }
+};
+
+TEST_P(RecoveryTests, Recovers)
+{
+    ASSERT_OK(db->open("test", options));
+    validate();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Recovers,
+    RecoveryTests,
+    ::testing::Values(
+        std::make_pair(  0,   0),
+        std::make_pair(  0, 100),
+        std::make_pair(  1,   0),
+        std::make_pair(  1, 100),
+        std::make_pair( 10,   0),
+        std::make_pair( 10, 100)));
+
+class RecoveryFailureTestRunner {
+public:
+    explicit RecoveryFailureTestRunner(std::string filter_prefix)
+        : prefix {std::move(filter_prefix)}
+    {}
+
+    template<class Test>
+    auto run(Test &test) -> void
+    {
+        Size num_tries {};
+        for (; ; num_tries++) {
+            if (auto s = test.db->open("test", test.options); s.is_ok()) {
+                break;
+            } else {
+                assert_error_42(s);
+            }
+            test.db.reset();
+            test.db = std::make_unique<Core>();
+        }
+        test.validate();
+        ASSERT_GT(num_tries, 0) << "recovery should have failed at least once";
+    }
+
+    auto should_syscall_succeed(const std::string &path, ...) -> Status
+    {
+        if (Slice {path}.starts_with(prefix) && counter++ >= target) {
+            target += step;
+            counter = 0;
+            return system_error("42");
+        }
+        return Status::ok();
+    }
+
+    std::string prefix;
+    Size counter {};
+    Size target {1};
+    Size step {1};
+};
+
+class RecoveryDataWriteFailureTests: public RecoveryTests {
+
+};
+
+TEST_P(RecoveryDataWriteFailureTests, ErrorIsPropagated)
+{
+    interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/data",
+        {1, 0},
+    });
+    assert_error_42(db->open("test", options));
+}
+
+TEST_P(RecoveryDataWriteFailureTests, RecoveryIsReentrant)
+{
+    RecoveryFailureTestRunner runner {"test/data"};
+    interceptors::set_write([&runner](const auto &path, ...) {
+        return runner.should_syscall_succeed(path);
+    });
+    runner.run(*this);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Recovers,
+    RecoveryDataWriteFailureTests,
+    ::testing::Values(
+        std::make_pair(  0, 100),
+        std::make_pair(  1,   0),
+        std::make_pair(  1, 100),
+        std::make_pair( 10,   0),
+        std::make_pair( 10, 100)));
+
+class RecoveryWalReadFailureTests: public RecoveryTests {
+
+};
+
+TEST_P(RecoveryWalReadFailureTests, ErrorIsPropagated)
+{
+    interceptors::set_read(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/wal",
+        {1, 1, 1, 0, 1},
+    });
+    assert_error_42(db->open("test", options));
+}
+
+TEST_P(RecoveryWalReadFailureTests, RecoveryIsReentrant)
+{
+    RecoveryFailureTestRunner runner {"test/wal"};
+    interceptors::set_read([&runner](const auto &path, ...) {
+        return runner.should_syscall_succeed(path);
+    });
+    runner.run(*this);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Recovers,
+    RecoveryWalReadFailureTests,
+    ::testing::Values(
+        std::make_pair(  0, 100),
+        std::make_pair(  1,   0),
+        std::make_pair(  1, 100),
+        std::make_pair( 10,   0),
+        std::make_pair( 10, 100)));
+
+class RecoveryWalOpenFailureTests: public RecoveryTests {
+
+};
+
+TEST_P(RecoveryWalOpenFailureTests, ErrorIsPropagated)
+{
+    interceptors::set_open(SystemCallOutcomes<RepeatFinalOutcome> {
+        "test/wal",
+        {1, 0, 1},
+    });
+    assert_error_42(db->open("test", options));
+}
+
+TEST_P(RecoveryWalOpenFailureTests, RecoveryIsReentrant)
+{
+    RecoveryFailureTestRunner runner {"test/wal"};
+    interceptors::set_open([&runner](const auto &path, ...) {
+        return runner.should_syscall_succeed(path);
+    });
+    runner.run(*this);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Recovers,
+    RecoveryWalOpenFailureTests,
+    ::testing::Values(
+        std::make_pair(  0, 100),
+        std::make_pair(  1,   0),
+        std::make_pair(  1, 100),
+        std::make_pair( 10,   0),
+        std::make_pair( 10, 100)));
 
 } // namespace Calico
 
