@@ -17,6 +17,8 @@ struct PageDelta {
     Size size {};
 };
 
+static_assert(sizeof(PageDelta) == 2 * sizeof(Size));
+
 struct DeltaDescriptor {
     struct Delta {
         Size offset {};

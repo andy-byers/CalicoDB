@@ -500,7 +500,9 @@ TEST_F(LogReaderWriterTests, HandlesEarlyFlushes)
             ASSERT_TRUE(s.is_ok() or s.is_logic_error());
         }
     }
-    ASSERT_OK(writer.flush());
+    // Won't be able to flush if we just happened to flush naturally.
+    auto s = writer.flush();
+    ASSERT_OK(s.is_logic_error() ? ok() : s);
 
     for (const auto &payload: payloads) {
         ASSERT_EQ(read_string(reader), payload);
