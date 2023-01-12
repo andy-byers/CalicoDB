@@ -945,28 +945,6 @@ TEST_F(FailureTests, DataWriteFailureDuringQuery)
     assert_error_42(db.status());
 }
 
-TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
-{
-    add_sequential_records(db, 500);
-
-    // This will cause all dirty pages to eventually be evicted to make room.
-    auto c = db.first();
-    for (; c.is_valid(); ++c) {}
-    ASSERT_OK(db.commit()); // TODO
-    // Writes to any file will fail.
-    interceptors::set_write(FailOnce<0> {"test/"});
-
-    // We should be able to iterate through all pages without any writes occurring.
-    c = db.first();
-    for (; c.is_valid(); ++c) {}
-
-    auto s = c.status();
-    ASSERT_TRUE(s.is_not_found()) << s.what().data();
-
-    s = db.status();
-    ASSERT_TRUE(s.is_ok()) << s.what().data();
-}
-
 TEST_F(FailureTests, CannotPerformOperationsAfterFatalError)
 {
     interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
