@@ -136,7 +136,6 @@ public:
     [[nodiscard]]
     auto get() -> Scratch
     {
-        std::lock_guard lock {m_mutex};
         return m_manager.get();
     }
 
@@ -146,7 +145,7 @@ private:
     // and another for the pager to work on. Then we won't overwrite scratch memory that is in use, because
     // the worker queue will block after it reaches N elements.
     static constexpr Size EXTRA_SIZE {2};
-    mutable std::mutex m_mutex;
+
     MonotonicScratchManager m_manager;
 };
 

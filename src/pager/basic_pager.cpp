@@ -316,7 +316,8 @@ auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
 
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
     // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is incremented each time the WAL flushes a block.
-    for (; ; ) {
+    auto success = true;
+    while ((success = !m_system->has_error())) {
         auto s = pin_frame(id);
         if (s.is_ok()) break;
 
@@ -331,7 +332,8 @@ auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page, Status>
             return tl::make_unexpected(s);
         }
     }
-
+    if (!success)
+        return tl::make_unexpected(m_system->original_error().status);
     auto itr = m_registry.get(id);
     CALICO_EXPECT_NE(itr, end(m_registry));
     return do_acquire(itr->value);

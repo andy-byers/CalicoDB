@@ -1,5 +1,5 @@
 #include "page.h"
-#include "deltas.h"
+#include "delta.h"
 #include "pager/pager.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"

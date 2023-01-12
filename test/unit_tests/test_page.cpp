@@ -1,10 +1,10 @@
 #include <gtest/gtest.h>
 
 #include "calico/options.h"
-#include "page/deltas.h"
-#include "utils/layout.h"
+#include "page/delta.h"
 #include "random.h"
 #include "unit_tests.h"
+#include "utils/layout.h"
 
 namespace Calico {
 

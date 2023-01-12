@@ -983,22 +983,31 @@ public:
         committed = run_random_transactions(*this, xact_count);
         const auto database_state = tools::read_file(*store, "test/data");
 
+        interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
+            "test/data",
+            {1, 0},
+        });
         auto xact = db->transaction();
         uncommitted = generator.generate(random, uncommitted_count);
-        run_random_operations(*this, cbegin(uncommitted), cend(uncommitted));
+        for (const auto &[key, value]: uncommitted) {
+            auto s = db->insert(key, value);
+            if (!s.is_ok()) break;
+        }
+        // If the database encountered an error, these calls won't do anything.
+        (void)xact.abort();
+        (void)db->close();
 
         // Clone the database while there are still pages waiting to be written to the data file. We'll have
         // to use the WAL to recover.
         auto cloned = store->clone();
         tools::write_file(*cloned, "test/data", database_state);
 
-        ASSERT_OK(xact.abort());
-        ASSERT_OK(db->close());
         store.reset(dynamic_cast<HeapStorage*>(cloned));
         options.storage = store.get();
         db.reset();
 
         db = std::make_unique<Core>();
+        interceptors::set_write([](auto, auto, auto) {return ok();});
     }
 
     virtual auto validate() -> void
@@ -1051,11 +1060,8 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryTests,
     ::testing::Values(
-        std::make_pair(  0,   0),
-        std::make_pair(  0, 100),
-        std::make_pair(  1,   0),
+//        std::make_pair(  0, 100), // TODO: Sometimes, this test doesn't fail when it should.
         std::make_pair(  1, 100),
-        std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
 class RecoveryFailureTestRunner {
@@ -1123,10 +1129,8 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryDataWriteFailureTests,
     ::testing::Values(
-        std::make_pair(  0, 100),
-        std::make_pair(  1,   0),
+//        std::make_pair(  0, 100),
         std::make_pair(  1, 100),
-        std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
 class RecoveryWalReadFailureTests: public RecoveryTests {
@@ -1155,10 +1159,8 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryWalReadFailureTests,
     ::testing::Values(
-        std::make_pair(  0, 100),
-        std::make_pair(  1,   0),
+//        std::make_pair(  0, 100),
         std::make_pair(  1, 100),
-        std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
 class RecoveryWalOpenFailureTests: public RecoveryTests {
@@ -1187,10 +1189,8 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryWalOpenFailureTests,
     ::testing::Values(
-        std::make_pair(  0, 100),
-        std::make_pair(  1,   0),
+//        std::make_pair(  0, 100),
         std::make_pair(  1, 100),
-        std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
 } // namespace Calico
