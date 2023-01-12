@@ -39,7 +39,7 @@ BasicPager::BasicPager(const Parameters &param, Framer framer)
 {
     // m_log->trace("BasicPager");
 
-    m_log->info("frame_count = {}", param.frame_count);
+//    m_log->info("frame_count = {}", param.frame_count);
 }
 
 auto BasicPager::page_count() const -> Size

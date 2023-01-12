@@ -54,7 +54,7 @@ private:
     CursorActions m_actions;
     NodeManager m_pool;
     Internal m_internal;
-    LogPtr m_logger;
+    LogPtr m_log;
     System *m_system {};
 };
 

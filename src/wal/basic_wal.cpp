@@ -15,11 +15,11 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_wal_limit {param.wal_limit},
       m_writer_capacity {param.writer_capacity}
 {
-    m_log->trace("BasicWriteAheadLog");
+//    m_log->trace("BasicWriteAheadLog");
 
-    m_log->info("page_size = {}", param.page_size);
-    m_log->info("wal_limit = {}", param.wal_limit);
-    m_log->info("writer_capacity = {}", param.writer_capacity);
+//    m_log->info("page_size = {}", param.page_size);
+//    m_log->info("wal_limit = {}", param.wal_limit);
+//    m_log->info("writer_capacity = {}", param.writer_capacity);
 
     CALICO_EXPECT_NE(m_store, nullptr);
     CALICO_EXPECT_NE(m_system, nullptr);
@@ -283,7 +283,7 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
 
 auto BasicWriteAheadLog::cleanup(Id recovery_lsn) -> void
 {
-    m_log->trace("cleanup({})", recovery_lsn.value);
+//    m_log->trace("cleanup({})", recovery_lsn.value);
     m_recovery_lsn.store(recovery_lsn);
 }
 
