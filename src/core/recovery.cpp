@@ -11,12 +11,12 @@ static auto encode_payload_type(Bytes out, XactPayloadType type)
     out[0] = type;
 }
 
-auto encode_deltas_payload(Id page_id, BytesView image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
+auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
 {
     const auto original_size = out.size();
 
     // Payload type (1 B)
-    encode_payload_type(out, XactPayloadType::DELTAS);
+    encode_payload_type(out, XactPayloadType::DELTA);
     out.advance();
 
     // Page ID (8 B)
@@ -50,7 +50,7 @@ auto encode_commit_payload(Bytes out) -> Size
     return MINIMUM_PAYLOAD_SIZE;
 }
 
-auto encode_full_image_payload(Id page_id, BytesView image, Bytes out) -> Size
+auto encode_full_image_payload(Id page_id, Slice image, Bytes out) -> Size
 {
     const auto original_size = out.size();
 
@@ -76,7 +76,7 @@ static auto decode_deltas_payload(WalPayloadOut in) -> DeltaDescriptor
     info.lsn = in.lsn();
 
     // Payload type (1 B)
-    CALICO_EXPECT_EQ(XactPayloadType {data[0]}, XactPayloadType::DELTAS);
+    CALICO_EXPECT_EQ(XactPayloadType {data[0]}, XactPayloadType::DELTA);
     data.advance();
 
     // Page ID (8 B)
@@ -132,7 +132,7 @@ static auto decode_commit_payload(WalPayloadOut in) -> CommitDescriptor
 auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
 {
     switch (XactPayloadType {in.data()[0]}) {
-        case XactPayloadType::DELTAS:
+        case XactPayloadType::DELTA:
             return decode_deltas_payload(in);
         case XactPayloadType::FULL_IMAGE:
             return decode_full_image_payload(in);
@@ -143,18 +143,17 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
     }
 }
 
-#define ENSURE_ENABLED(primary) \
+#define ENSURE_NO_XACT(primary) \
     do { \
-        if (!m_wal->is_enabled()) \
+        if (m_system->has_xact) \
             return logic_error( \
-                "{}: WAL is not enabled (wal_limit was set to DISABLE_WAL on database creation)", primary); \
+                "{}: a transaction is active", primary); \
     } while (0)
 
 auto Recovery::start_abort() -> Status
 {
-    m_log->trace("start_abort");
-    ENSURE_ENABLED("cannot start abort");
-    CALICO_TRY_S(m_wal->stop_workers());
+    // m_log->trace("start_abort");
+    ENSURE_NO_XACT("cannot start abort");
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
@@ -177,20 +176,19 @@ auto Recovery::start_abort() -> Status
 
 auto Recovery::finish_abort() -> Status
 {
-    m_log->trace("finish_abort");
-    ENSURE_ENABLED("cannot finish abort");
+    // m_log->trace("finish_abort");
+    ENSURE_NO_XACT("cannot finish abort");
 //    return finish_routine();
 
     CALICO_TRY_S(m_pager->flush({}));
 
-    CALICO_TRY_S(m_wal->remove_after(m_system->commit_lsn));
-    return m_wal->start_workers();
+    return m_wal->truncate(m_system->commit_lsn);
 }
 
 auto Recovery::start_recovery() -> Status
 {
-    m_log->trace("start_recovery");
-    ENSURE_ENABLED("cannot start recovery");
+    // m_log->trace("start_recovery");
+    ENSURE_NO_XACT("cannot start recovery");
     Id last_lsn;
 
     const auto redo = [this, &last_lsn](auto payload) {
@@ -247,7 +245,7 @@ auto Recovery::start_recovery() -> Status
     // Apply updates that are in the WAL but not the database.
     auto s = m_wal->roll_forward(m_pager->recovery_lsn(), redo);
 
-    m_log->info("{} -> {}", m_pager->recovery_lsn().value, last_lsn.value);
+    // m_log->info("{} -> {}", m_pager->recovery_lsn().value, last_lsn.value);
     CALICO_TRY_S(s);
 
     // Reached the end of the WAL, but didn't find a commit record. Undo updates until we reach the most-recent commit.
@@ -259,24 +257,12 @@ auto Recovery::start_recovery() -> Status
 
 auto Recovery::finish_recovery() -> Status
 {
-    m_log->trace("finish_recovery");
-    ENSURE_ENABLED("cannot finish recovery");
-//    return finish_routine();
+    // m_log->trace("finish_recovery");
+    ENSURE_NO_XACT("cannot finish recovery");
 
     CALICO_TRY_S(m_pager->flush({}));
-    CALICO_TRY_S(m_wal->start_workers());
-    return m_wal->remove_before(m_pager->recovery_lsn());
-}
-
-auto Recovery::finish_routine() -> Status
-{
-    // Flush all dirty database pages.
-    CALICO_TRY_S(m_pager->flush({}));
-
-    CALICO_TRY_S(m_wal->start_workers());
-
-    // TODO TODO TODO TODO
-    return m_wal->remove_before(Id {m_pager->recovery_lsn().value - 1});
+    m_wal->cleanup(m_pager->recovery_lsn());
+    return ok();
 }
 
 } // namespace Calico

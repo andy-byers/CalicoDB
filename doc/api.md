@@ -11,9 +11,9 @@ Calico DB aims to provide a simple yet robust API for working with persistent, o
 
 ### Bytes Objects
 Calico DB has to deal with a lot of byte sequences (keys, values, etc.).
-We generally use `std::string` to represent owned byte sequences, and a hand-rolled slice object (either `Bytes` or `BytesView`) for unowned bytes.
+We generally use `std::string` to represent owned byte sequences, and a hand-rolled slice object (either `Bytes` or `Slice`) for unowned bytes.
 Our slice object is more-or-less a simple wrapper around a pointer and a length.
-If the pointer is const, we use a `BytesView`, which is read-only.
+If the pointer is const, we use a `Slice`, which is read-only.
 Otherwise, we use a `Bytes` object, which allows modification of the underlying data.
 
 ```C++
@@ -22,14 +22,14 @@ std::string_view sv {"123"};
 
 // We can create slices from existing containers...
 cco::Bytes b {s};
-cco::BytesView bv {sv};
+cco::Slice bv {sv};
 
 // ...or from "raw parts", i.e. a pointer and a length.
 cco::Bytes b2 {s.data(), s.size()};
-cco::BytesView bv2 {sv.data(), sv.size()};
+cco::Slice bv2 {sv.data(), sv.size()};
 
-// Conversions are allowed from Bytes to BytesView, but not the other way.
-cco::BytesView b3 {b};
+// Conversions are allowed from Bytes to Slice, but not the other way.
+cco::Slice b3 {b};
 
 // We can also create owned strings.
 auto sv2 = b.to_string();
@@ -132,7 +132,7 @@ for (auto c = db.last(); c.is_valid(); c--) {}
 for (auto c = db.first(), bounds = db.find("42"); c.is_valid() && c != bounds; c++) {}
 
 // We can also use the key ordering.
-for (auto c = db.first(); c.is_valid() && c.key() < cco::stob("42"); c++) {}
+for (auto c = db.first(); c.is_valid() && c.key() < cco::Slice {"42"); c++} {}
 ```
 
 ### Transactions

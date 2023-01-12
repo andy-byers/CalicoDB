@@ -11,11 +11,9 @@ public:
     ~Transaction();
     explicit Transaction(Core &core);
 
-    Transaction(Transaction &&rhs) noexcept;
-    auto operator=(Transaction &&rhs) noexcept -> Transaction&;
-
-    Transaction(const Transaction &) = delete;
-    auto operator=(const Transaction &) -> Transaction& = delete;
+    // Prevent copy/move.
+    Transaction(Transaction &) = delete;
+    void operator=(const Transaction &) = delete;
 
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;

@@ -24,10 +24,10 @@ public:
 
     virtual ~Tree() = default;
     virtual auto record_count() const -> Size = 0;
-    virtual auto insert(BytesView, BytesView) -> Status = 0;
+    virtual auto insert(Slice, Slice) -> Status = 0;
     virtual auto erase(Cursor) -> Status = 0;
-    virtual auto find_exact(BytesView) -> Cursor = 0;
-    virtual auto find(BytesView key) -> Cursor = 0;
+    virtual auto find_exact(Slice) -> Cursor = 0;
+    virtual auto find(Slice key) -> Cursor = 0;
     virtual auto find_minimum() -> Cursor = 0;
     virtual auto find_maximum() -> Cursor = 0;
     virtual auto root(bool) -> tl::expected<Node, Status> = 0;

@@ -33,7 +33,7 @@ class WalReader final {
 public:
     using Callback = WriteAheadLog::Callback;
 
-    WalReader(Storage &store, WalCollection &segments, std::string prefix, Bytes tail, Bytes data)
+    WalReader(Storage &store, WalSet &segments, std::string prefix, Bytes tail, Bytes data)
         : m_prefix {std::move(prefix)},
           m_store {&store},
           m_set {&segments},
@@ -62,6 +62,10 @@ public:
     [[nodiscard]] auto read_first_lsn(Id &) -> Status;
     [[nodiscard]] auto roll(const Callback&) -> Status;
 
+    // NOTE: Necessary due to the non-trivial destructor.
+    WalReader(WalReader &&rhs) noexcept = default;
+    auto operator=(WalReader &&rhs) noexcept -> WalReader & = default;
+
 private:
     [[nodiscard]] auto open_segment(SegmentId) -> Status;
     auto prepare_traversal() -> void;
@@ -71,7 +75,7 @@ private:
     std::optional<LogReader> m_reader;
     std::unique_ptr<RandomReader> m_file;
     Storage *m_store {};
-    WalCollection *m_set {};
+    WalSet *m_set {};
     Bytes m_tail;
     Bytes m_data;
     SegmentId m_current;

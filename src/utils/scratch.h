@@ -2,7 +2,7 @@
 #ifndef CALICO_UTILS_SCRATCH_H
 #define CALICO_UTILS_SCRATCH_H
 
-#include "calico/bytes.h"
+#include "calico/slice.h"
 #include "types.h"
 #include <list>
 #include <string>
@@ -24,7 +24,7 @@ public:
     }
 
     [[nodiscard]]
-    auto operator*() const -> BytesView
+    auto operator*() const -> Slice
     {
         return m_view;
     }
@@ -67,20 +67,17 @@ private:
     Bytes m_data;
 };
 
-template<Size N>
 class MonotonicScratchManager final {
 public:
-    static constexpr auto ScratchCount = N;
-
-    explicit MonotonicScratchManager(Size scratch_size)
-        : m_scratch(scratch_size * ScratchCount, '\x00'),
+    explicit MonotonicScratchManager(Size scratch_size, Size scratch_count)
+        : m_scratch(scratch_size * scratch_count, '\x00'),
           m_scratch_size {scratch_size}
     {}
 
     [[nodiscard]] auto get() -> Scratch
     {
-        auto data = stob(m_scratch).range(m_counter++ * m_scratch_size, m_scratch_size);
-        m_counter %= ScratchCount;
+        auto data = Bytes {m_scratch}.range(m_counter++ * m_scratch_size, m_scratch_size);
+        m_counter %= m_scratch.size() / m_scratch_size;
         return Scratch {data};
     }
 

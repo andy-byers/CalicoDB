@@ -13,7 +13,7 @@
 namespace Calico {
 
 using ReadInterceptor = std::function<Status(const std::string&, Bytes&, Size)>;
-using WriteInterceptor = std::function<Status(const std::string&, BytesView, Size)>;
+using WriteInterceptor = std::function<Status(const std::string&, Slice, Size)>;
 using OpenInterceptor = std::function<Status(const std::string&)>;
 using SyncInterceptor = std::function<Status(const std::string&)>;
 
@@ -33,8 +33,8 @@ namespace interceptors {
 
 inline auto assert_error_42(const Status &s)
 {
-    if (!s.is_system_error() || s.what() != "42") {
-        fmt::print(stderr, "error: unexpected {} status: {}", get_status_name(s), s.what());
+    if (!s.is_system_error() || s.what().to_string() != "42") {
+        fmt::print(stderr, "error: unexpected {} status: {}", get_status_name(s), s.is_ok() ? "NULL" : s.what().to_string());
         std::exit(EXIT_FAILURE);
     }
 }
@@ -47,7 +47,7 @@ public:
     {}
 
     ~RandomHeapReader() override = default;
-    [[nodiscard]] auto read(Bytes&, Size) -> Status override;
+    [[nodiscard]] auto read(Byte *, Size &, Size) -> Status override;
 
 private:
     std::string m_path;
@@ -62,8 +62,8 @@ public:
     {}
 
     ~RandomHeapEditor() override = default;
-    [[nodiscard]] auto read(Bytes&, Size) -> Status override;
-    [[nodiscard]] auto write(BytesView, Size) -> Status override;
+    [[nodiscard]] auto read(Byte *, Size &, Size) -> Status override;
+    [[nodiscard]] auto write(Slice, Size) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
 private:
@@ -79,7 +79,7 @@ public:
     {}
 
     ~AppendHeapWriter() override = default;
-    [[nodiscard]] auto write(BytesView) -> Status override;
+    [[nodiscard]] auto write(Slice) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
 private:
@@ -120,7 +120,7 @@ struct FailOnce {
 
     auto operator()(const std::string &path, ...) -> Status
     {
-        if (!prefix.empty() && stob(path).starts_with(prefix)) {
+        if (!prefix.empty() && Slice {path}.starts_with(prefix)) {
             if (index++ == Delay)
                 return error;
         }
@@ -141,7 +141,7 @@ struct FailAfter {
     auto operator()(const std::string &path, ...) -> Status
     {
         if (!prefix.empty()) {
-            if (stob(path).starts_with(prefix) && index++ >= Delay)
+            if (Slice {path}.starts_with(prefix) && index++ >= Delay)
                 return error;
         }
         return ok();
@@ -161,7 +161,7 @@ struct FailEvery {
     auto operator()(const std::string &path, ...) -> Status
     {
         if (!prefix.empty()) {
-            if (stob(path).starts_with(prefix) && index++ == Delay) {
+            if (Slice {path}.starts_with(prefix) && index++ == Delay) {
                 index = 0;
                 return error;
             }
@@ -209,7 +209,7 @@ public:
     [[nodiscard]]
     auto operator()(const std::string &path, ...) -> Status
     {
-        if (stob(path).starts_with(m_prefix)) {
+        if (Slice {path}.starts_with(m_prefix)) {
             auto status = m_pattern[m_index++] == 0
                 ? m_error : ok();
 
@@ -226,6 +226,67 @@ private:
     std::vector<Outcome> m_pattern;
     Status m_error {system_error("42")};
     Size m_index {};
+};
+
+
+class DisabledWriteAheadLog: public WriteAheadLog {
+public:
+    ~DisabledWriteAheadLog() override = default;
+
+    [[nodiscard]]
+    auto flushed_lsn() const -> Id override
+    {
+        return Id::null();
+    }
+
+    [[nodiscard]]
+    auto current_lsn() const -> Id override
+    {
+        return Id::null();
+    }
+
+    auto log(WalPayloadIn) -> void override
+    {
+
+    }
+
+    auto flush() -> void override
+    {
+
+    }
+
+    auto advance() -> void override
+    {
+
+    }
+
+    [[nodiscard]]
+    auto roll_forward(Id, const Callback &) -> Status override
+    {
+        return ok();
+    }
+
+    [[nodiscard]]
+    auto roll_backward(Id, const Callback &) -> Status override
+    {
+        return ok();
+    }
+
+    auto cleanup(Id) -> void override
+    {
+
+    }
+
+    [[nodiscard]] auto start_workers() -> Status override
+    {
+        return ok();
+    }
+
+    [[nodiscard]]
+    auto truncate(Id) -> Status override
+    {
+        return ok();
+    }
 };
 
 } // namespace Calico

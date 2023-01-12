@@ -17,11 +17,12 @@ auto read_corruption_error(const std::string &hint_fmt, Args &&...args) -> Statu
 static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Status
 {
     auto temp = out;
-    CALICO_TRY_S(file.read(temp, offset));
+    auto read_size = out.size();
+    CALICO_TRY_S(file.read(temp.data(), read_size, offset));
 
-    if (temp.is_empty()) {
+    if (read_size == 0) {
         return not_found("reached the end of the file");
-    } else if (temp.size() != out.size()) {
+    } else if (read_size != out.size()) {
         return system_error("incomplete read");
     }
     return ok();
@@ -29,6 +30,8 @@ static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Sta
 
 auto LogReader::read(WalPayloadOut &out, Bytes payload, Bytes tail) -> Status
 {
+    CALICO_EXPECT_NE(m_file, nullptr);
+
     // Lazily read the first block into the tail buffer.
     if (m_offset == 0)
         CALICO_TRY_S(read_exact_or_eof(*m_file, 0, tail));
@@ -110,7 +113,10 @@ auto WalReader::seek_next() -> Status
     const auto next = m_set->id_after(m_current);
     if (!next.is_null()) {
         close_segment();
-        return open_segment(next);
+
+        if (auto s = open_segment(next); !s.is_ok())
+            return s.is_not_found() ? corruption("missing WAL segment {}", next.value) : s;
+        return ok();
     }
     return not_found("could not seek to next segment: reached the last segment");
 }
@@ -156,7 +162,7 @@ auto WalReader::roll(const Callback &callback) -> Status
 auto WalReader::open_segment(SegmentId id) -> Status
 {
     CALICO_EXPECT_EQ(m_reader, std::nullopt);
-    RandomReader *file {}; // TODO: SequentialReader could be useful for this class!
+    RandomReader *file;
     auto s = m_store->open_random_reader(m_prefix + id.to_name(), &file);
     if (s.is_ok()) {
         m_file.reset(file);

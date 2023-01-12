@@ -195,7 +195,7 @@ auto Cursor::decrement() -> bool
     return false;
 }
 
-auto Cursor::key() const -> BytesView
+auto Cursor::key() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
     const auto node = m_actions->acquire(Id {m_position.ids[Position::CURRENT]}, false);

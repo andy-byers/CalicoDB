@@ -1,11 +1,11 @@
 #ifndef CALICO_UTILS_CRC_H
 #define CALICO_UTILS_CRC_H
 
-#include "calico/bytes.h"
+#include "calico/slice.h"
 
 namespace Calico {
 
-inline auto crc_32(BytesView data) noexcept -> std::uint32_t
+inline auto crc_32(Slice data) noexcept -> std::uint32_t
 {
     // TODO: I'm getting rid of the zlib dependency, so we'll need to roll our own CRC function,
     //       or depend on another library. For now, here's an Adler32 checksum copy-pasted from

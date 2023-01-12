@@ -3,8 +3,8 @@
 #include <vector>
 #include <gtest/gtest.h>
 
-#include "calico/bytes.h"
 #include "calico/options.h"
+#include "calico/slice.h"
 #include "calico/status.h"
 #include "random.h"
 #include "unit_tests.h"
@@ -48,7 +48,7 @@ TEST(TestEncoding, ReadsAndWrites)
 class SliceTests: public testing::Test {
 protected:
     std::string test_string {"Hello, world!"};
-    Bytes bytes {stob(test_string)};
+    Bytes bytes {Bytes {test_string}};
 };
 
 TEST_F(SliceTests, EqualsSelf)
@@ -58,14 +58,14 @@ TEST_F(SliceTests, EqualsSelf)
 
 TEST_F(SliceTests, StringLiteralSlice)
 {
-    ASSERT_TRUE(stob(test_string) == stob("Hello, world!"));
+    ASSERT_TRUE(Slice {test_string} == Slice {"Hello, world!"});
 }
 
 TEST_F(SliceTests, StartsWith)
 {
-    ASSERT_TRUE(stob("Hello, world!").starts_with(stob("Hello")));
-    ASSERT_FALSE(stob("Hello, world!").starts_with(stob(" Hello")));
-    ASSERT_FALSE(stob("1").starts_with(stob("123")));
+    ASSERT_TRUE(Slice {"Hello, world!"}.starts_with("Hello"));
+    ASSERT_FALSE(Slice {"Hello, world!"}.starts_with(" Hello"));
+    ASSERT_FALSE(Slice {"1"}.starts_with("123"));
 }
 
 TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
@@ -76,15 +76,15 @@ TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
 
 TEST_F(SliceTests, FirstByteIsMostSignificant)
 {
-    ASSERT_TRUE(stob("10") > stob("01"));
-    ASSERT_TRUE(stob("01") < stob("10"));
-    ASSERT_TRUE(stob("10") >= stob("01"));
-    ASSERT_TRUE(stob("01") <= stob("10"));
+    ASSERT_TRUE(Slice {"10"} > Slice {"01"});
+    ASSERT_TRUE(Slice {"01"} < Slice {"10"});
+    ASSERT_TRUE(Slice {"10"} >= Slice {"01"});
+    ASSERT_TRUE(Slice {"01"} <= Slice {"10"});
 }
 
 TEST_F(SliceTests, CanGetPartialRange)
 {
-    ASSERT_TRUE(bytes.range(7, 5) == stob("world"));
+    ASSERT_TRUE(bytes.range(7, 5) == Slice {"world"});
 }
 
 TEST_F(SliceTests, CanGetEntireRange)
@@ -100,7 +100,7 @@ TEST_F(SliceTests, EmptyRangesAreEmpty)
 
 TEST_F(SliceTests, RangeDeathTest)
 {
-    BytesView discard;
+    Slice discard;
     ASSERT_DEATH(discard = bytes.range(bytes.size() + 1), "Assert");
     ASSERT_DEATH(discard = bytes.range(bytes.size(), 1), "Assert");
     ASSERT_DEATH(discard = bytes.range(0, bytes.size() + 1), "Assert");
@@ -158,14 +158,14 @@ TEST_F(SliceTests, WithCppString)
     // Construct from and compare with C++ strings.
     std::string s {"123"};
     Bytes b1 {s};
-    BytesView bv1 {s};
+    Slice bv1 {s};
     ASSERT_TRUE(b1 == s); // Uses an implicit conversion.
     ASSERT_TRUE(bv1 == s);
 
     std::string_view sv {"123"};
-    BytesView bv2 {sv};
+    Slice bv2 {sv};
     ASSERT_TRUE(bv2 == sv);
-    ASSERT_TRUE(bv2 != std::string {"321"});
+    ASSERT_TRUE(bv2 != "321");
 }
 
 TEST_F(SliceTests, WithCString)
@@ -173,12 +173,12 @@ TEST_F(SliceTests, WithCString)
     // Construct from and compare with C-style strings.
     char a[4] {"123"}; // Null-terminated
     Bytes b1 {a};
-    BytesView bv1 {a};
+    Slice bv1 {a};
     ASSERT_TRUE(b1 == a);
     ASSERT_TRUE(bv1 == a);
 
     const char *s {"123"};
-    BytesView bv2 {s};
+    Slice bv2 {s};
     ASSERT_TRUE(bv2 == s);
 }
 
@@ -186,12 +186,12 @@ TEST_F(SliceTests, Conversions)
 {
     std::string data {"abc"};
     Bytes b {data};
-    BytesView bv {b};
+    Slice bv {b};
     ASSERT_TRUE(b == bv);
-    [](BytesView) {}(b);
+    [](Slice) {}(b);
 }
 
-static constexpr auto constexpr_test_write(Bytes b, BytesView answer)
+static constexpr auto constexpr_test_write(Bytes b, Slice answer)
 {
     CALICO_EXPECT_EQ(b.size(), answer.size());
     for (Size i {}; i < b.size(); ++i)
@@ -206,7 +206,7 @@ static constexpr auto constexpr_test_write(Bytes b, BytesView answer)
     b.truncate(b.size());
 }
 
-static constexpr auto constexpr_test_read(BytesView bv, BytesView answer)
+static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 {
     for (Size i {}; i < bv.size(); ++i)
         CALICO_EXPECT_EQ(bv[i], answer[i]);
@@ -221,7 +221,7 @@ static constexpr auto constexpr_test_read(BytesView bv, BytesView answer)
 
 TEST_F(SliceTests, ConstantExpressions)
 {
-    static constexpr BytesView bv {"42"};
+    static constexpr Slice bv {"42"};
     constexpr_test_read(bv, "42");
 
     char a[] {"42"};
@@ -232,10 +232,10 @@ TEST_F(SliceTests, ConstantExpressions)
 
 TEST_F(SliceTests, SubRangesHaveProperType)
 {
-    BytesView bv1 {"42"};
+    Slice bv1 {"42"};
     auto bv2 = bv1.range(0);
     // NOTE: Extra parenthesis seem to be necessary. ASSERT_*() and EXPECT_*() don't like angle brackets.
-    ASSERT_TRUE((std::is_same_v<BytesView, decltype(bv2)>));
+    ASSERT_TRUE((std::is_same_v<Slice, decltype(bv2)>));
 
     auto s = bv1.to_string();
     Bytes b1 {s};
@@ -268,7 +268,7 @@ TEST(ScratchTest, CanChangeUnderlyingBytesObject)
 
 TEST(MonotonicScratchTest, ScratchesAreDistinct)
 {
-    MonotonicScratchManager<3> manager {1};
+    MonotonicScratchManager manager {1, 3};
     auto s1 = manager.get();
     auto s2 = manager.get();
     auto s3 = manager.get();
@@ -282,7 +282,7 @@ TEST(MonotonicScratchTest, ScratchesAreDistinct)
 
 TEST(MonotonicScratchTest, ScratchesRepeat)
 {
-    MonotonicScratchManager<3> manager {1};
+    MonotonicScratchManager manager {1, 3};
     (*manager.get())[0] = 1;
     (*manager.get())[0] = 2;
     (*manager.get())[0] = 3;
@@ -291,37 +291,37 @@ TEST(MonotonicScratchTest, ScratchesRepeat)
     ASSERT_EQ((*manager.get())[0], 3);
 }
 
-TEST(ScratchTest, BehavesLikeASlice)
+TEST(ScratchTest, ConvertsToSlice)
 {
     static constexpr auto MSG = "Hello, world!";
-    MonotonicScratchManager<1> manager {strlen(MSG)};
+    MonotonicScratchManager manager {std::strlen(MSG), 1};
     auto scratch = manager.get();
 
-    mem_copy(*scratch, stob(MSG));
-    ASSERT_TRUE(*scratch == stob(MSG));
+    mem_copy(*scratch, Slice {MSG});
+    ASSERT_TRUE(*scratch == Slice {MSG});
     ASSERT_TRUE(scratch->starts_with("Hello"));
-    ASSERT_TRUE(scratch->range(7, 5) == stob("world"));
-    ASSERT_TRUE(scratch->advance(7).truncate(5) == stob("world"));
+    ASSERT_TRUE(scratch->range(7, 5) == Slice {"world"});
+    ASSERT_TRUE(scratch->advance(7).truncate(5) == Slice {"world"});
 }
 
 TEST(NonPrintableSliceTests, UsesStringSize)
 {
     const std::string u {"\x00\x01", 2};
-    ASSERT_EQ(BytesView {u}.size(), 2);
+    ASSERT_EQ(Slice {u}.size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
     const std::string u {"\x00", 1};
     const std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(BytesView {u}, BytesView {v}), ThreeWayComparison::EQ);
+    ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), ThreeWayComparison::EQ);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_EQ(compare_three_way(stob(u), stob(v)), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(Slice {u}, v), ThreeWayComparison::LT);
 }
 
 TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
@@ -334,14 +334,14 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_EQ(compare_three_way(stob(u), stob(v)), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(Slice {u}, v), ThreeWayComparison::LT);
 }
 
 TEST(NonPrintableSliceTests, Conversions)
 {
     // We need to pass in the size, since the first character is '\0'. Otherwise, the length will be 0.
     std::string u {"\x00\x01", 2};
-    const auto s = stob(u).to_string();
+    const Bytes s {u};
     ASSERT_EQ(s.size(), 2);
     ASSERT_EQ(s[0], '\x00');
     ASSERT_EQ(s[1], '\x01');
@@ -351,8 +351,8 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
 {
     const auto a = "ab";
     const char b[] {'4', '2', '\x00'};
-    ASSERT_EQ(BytesView {a}.size(), 2);
-    ASSERT_EQ(BytesView {b}.size(), 2);
+    ASSERT_EQ(Slice {a}.size(), 2);
+    ASSERT_EQ(Slice {b}.size(), 2);
 }
 
 TEST(NonPrintableSliceTests, ModifyCharArray)
@@ -362,7 +362,7 @@ TEST(NonPrintableSliceTests, ModifyCharArray)
     bytes[0] = '4';
     bytes.advance();
     bytes[0] = '2';
-    ASSERT_TRUE(stob(data) == stob("42"));
+    ASSERT_TRUE(Slice {data} == "42");
 }
 
 TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
@@ -372,8 +372,8 @@ TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
 
     ASSERT_EQ(std::char_traits<char>::length(a), 1);
     ASSERT_EQ(std::char_traits<char>::length(b), 1);
-    ASSERT_EQ(stob(a).size(), 1);
-    ASSERT_EQ(stob(b).size(), 1);
+    ASSERT_EQ(Slice {a}.size(), 1);
+    ASSERT_EQ(Slice {b}.size(), 1);
 }
 
 template<class T>
@@ -416,26 +416,26 @@ auto run_ordering_comparisons()
     ASSERT_GE(y, x);
 }
 
-TEST(SimpleDSLTests, TypesAreSizedCorrectly)
+TEST(IdTests, TypesAreSizedCorrectly)
 {
-    Id id {};
+    Id id;
     static_assert(sizeof(Id) == sizeof(id.value));
     static_assert(sizeof(Id) == sizeof(id.value));
 }
 
-TEST(SimpleDSLTests, IdentifiersAreNullable)
+TEST(IdTests, IdentifiersAreNullable)
 {
     run_nullability_check<Id>();
     ASSERT_FALSE(Id::root().is_null());
     ASSERT_TRUE(Id::root().is_root());
 }
 
-TEST(SimpleDSLTests, IdentifiersAreEqualityComparable)
+TEST(IdTests, IdentifiersAreEqualityComparable)
 {
     run_equality_comparisons<Id>();
 }
 
-TEST(SimpleDSLTests, IdentifiersAreOrderable)
+TEST(IdTests, IdentifiersAreOrderable)
 {
     run_ordering_comparisons<Id>();
 }
@@ -466,27 +466,26 @@ TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
 TEST(StatusTests, OkStatusHasNoMessage)
 {
     auto s = ok();
-    ASSERT_TRUE(s.what().empty());
+    ASSERT_TRUE(s.what().is_empty());
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
 {
     static constexpr auto message = "status message";
     auto s = invalid_argument(message);
-    ASSERT_EQ(s.what(), message);
+    ASSERT_EQ(s.what().to_string(), message);
     ASSERT_TRUE(s.is_invalid_argument());
 }
 
 TEST(StatusTests, StatusCanBeCopied)
 {
-    auto s = invalid_argument("invalid argument");
-    auto t = s;
+    const auto s = invalid_argument("invalid argument");
+    const auto t = s;
     ASSERT_TRUE(t.is_invalid_argument());
-    ASSERT_EQ(t.what(), "invalid argument");
+    ASSERT_EQ(t.what().to_string(), "invalid argument");
 
-    t = ok();
     ASSERT_TRUE(s.is_invalid_argument());
-    ASSERT_EQ(s.what(), "invalid argument");
+    ASSERT_EQ(s.what().to_string(), "invalid argument");
 }
 
 TEST(StatusTests, StatusCanBeReassigned)
@@ -496,11 +495,11 @@ TEST(StatusTests, StatusCanBeReassigned)
 
     s = invalid_argument("invalid argument");
     ASSERT_TRUE(s.is_invalid_argument());
-    ASSERT_EQ(s.what(), "invalid argument");
+    ASSERT_EQ(s.what().to_string(), "invalid argument");
 
     s = logic_error("logic error");
     ASSERT_TRUE(s.is_logic_error());
-    ASSERT_EQ(s.what(), "logic error");
+    ASSERT_EQ(s.what().to_string(), "logic error");
 
     s = ok();
     ASSERT_TRUE(s.is_ok());
@@ -518,48 +517,48 @@ TEST(StatusTests, StatusCodesAreCorrect)
 
 TEST(StatusTests, OkStatusCanBeCopied)
 {
-    auto src = ok();
-    auto dst = src;
+    const auto src = ok();
+    const auto dst = src;
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
-    ASSERT_TRUE(src.what().empty());
-    ASSERT_TRUE(dst.what().empty());
+    ASSERT_TRUE(src.what().is_empty());
+    ASSERT_TRUE(dst.what().is_empty());
 }
 
 TEST(StatusTests, NonOkStatusCanBeCopied)
 {
-    auto src = invalid_argument("status message");
-    auto dst = src;
+    const auto src = invalid_argument("status message");
+    const auto dst = src;
     ASSERT_TRUE(src.is_invalid_argument());
     ASSERT_TRUE(dst.is_invalid_argument());
-    ASSERT_EQ(src.what(), "status message");
-    ASSERT_EQ(dst.what(), "status message");
+    ASSERT_EQ(src.what().to_string(), "status message");
+    ASSERT_EQ(dst.what().to_string(), "status message");
 }
 
 TEST(StatusTests, OkStatusCanBeMoved)
 {
     auto src = ok();
-    auto dst = std::move(src);
+    const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
-    ASSERT_TRUE(src.what().empty());
-    ASSERT_TRUE(dst.what().empty());
+    ASSERT_TRUE(src.what().is_empty());
+    ASSERT_TRUE(dst.what().is_empty());
 }
 
 TEST(StatusTests, NonOkStatusCanBeMoved)
 {
     auto src = invalid_argument("status message");
-    auto dst = std::move(src);
+    const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_invalid_argument());
-    ASSERT_TRUE(src.what().empty());
-    ASSERT_EQ(dst.what(), "status message");
+    ASSERT_TRUE(src.what().is_empty());
+    ASSERT_EQ(dst.what().to_string(), "status message");
 }
 
 TEST(StatusTests, FmtPrint)
 {
     auto s = system_error("{1}::{0}", 123, 42);
-    ASSERT_EQ(s.what(), "42::123");
+    ASSERT_EQ(s.what().to_string(), "42::123");
 }
 
 // Modified from RocksDB.
@@ -685,10 +684,10 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
 class BasicWorkerTests: public testing::Test {
 public:
     BasicWorkerTests()
-        : worker {16, [this](int event) {
+        : worker {[this](int event) {
             events.emplace_back(event);
             return ok();
-        }}
+        }, 16}
     {}
 
     Worker<int> worker;
@@ -697,14 +696,6 @@ public:
 
 TEST_F(BasicWorkerTests, CreateWorker)
 {
-    ASSERT_OK(worker.status());
-    ASSERT_TRUE(events.empty());
-    ASSERT_OK(std::move(worker).destroy());
-}
-
-TEST_F(BasicWorkerTests, DestroyWorker)
-{
-    ASSERT_OK(std::move(worker).destroy());
     ASSERT_TRUE(events.empty());
 }
 
@@ -712,10 +703,9 @@ TEST_F(BasicWorkerTests, EventsGetAdded)
 {
     worker.dispatch(1);
     worker.dispatch(2);
-    worker.dispatch(3);
+    worker.dispatch(3, true);
 
     // Blocks until all events are finished and the worker thread is joined.
-    ASSERT_OK(std::move(worker).destroy());
     ASSERT_EQ(events.at(0), 1);
     ASSERT_EQ(events.at(1), 2);
     ASSERT_EQ(events.at(2), 3);
@@ -731,99 +721,26 @@ TEST_F(BasicWorkerTests, WaitOnEvent)
     ASSERT_EQ(events.at(0), 1);
     ASSERT_EQ(events.at(1), 2);
     ASSERT_EQ(events.at(2), 3);
-    ASSERT_OK(std::move(worker).destroy());
 }
 
 TEST_F(BasicWorkerTests, SanityCheck)
 {
     static constexpr int NUM_EVENTS {1'000};
-    for (int i {}; i < NUM_EVENTS; ++i) {
+    for (int i {}; i < NUM_EVENTS; ++i)
         worker.dispatch(i, i == NUM_EVENTS - 1);
-        ASSERT_OK(worker.status());
-    }
 
     for (int i {}; i < NUM_EVENTS; ++i)
         ASSERT_EQ(events.at(static_cast<Size>(i)), i);
-
-    ASSERT_OK(worker.status());
-    ASSERT_OK(std::move(worker).destroy());
 }
 
-class WorkerFaultTests: public testing::Test {
-public:
-    WorkerFaultTests()
-        : worker {16, [this](int event) {
-            if (callback_status.is_ok())
-                events.emplace_back(event);
-            return callback_status;
-        }}
-    {}
-
-    Status callback_status {ok()};
-    Worker<int> worker;
-    std::vector<int> events;
-};
-
-TEST_F(WorkerFaultTests, ErrorIsSavedAndPropagated)
+TEST(WorkerTests, TSanTest)
 {
-    callback_status = system_error("42");
-    worker.dispatch(1, true);
-    assert_error_42(worker.status());
-    assert_error_42(std::move(worker).destroy());
-    ASSERT_TRUE(events.empty());
-}
-
-TEST_F(WorkerFaultTests, WorkerCannotBeRecovered)
-{
-    callback_status = system_error("42");
-    worker.dispatch(1, true);
-
-    // Return an OK status after failing once. Worker should remain invalidated. If we need to start the worker again,
-    // we need to create a new one.
-    callback_status = ok();
-    worker.dispatch(2, true);
-    assert_error_42(worker.status());
-    assert_error_42(std::move(worker).destroy());
-    ASSERT_TRUE(events.empty());
-}
-
-TEST_F(WorkerFaultTests, StopsProcessingEventsAfterError)
-{
+    int counter {};
+    Worker<int> worker {[&counter](auto n) {counter += n;}, 32};
     worker.dispatch(1);
     worker.dispatch(2);
     worker.dispatch(3, true);
-
-    callback_status = system_error("42");
-    worker.dispatch(4);
-    worker.dispatch(5);
-    worker.dispatch(6, true);
-
-    ASSERT_EQ(events.at(0), 1);
-    ASSERT_EQ(events.at(1), 2);
-    ASSERT_EQ(events.at(2), 3);
-    ASSERT_EQ(events.size(), 3);
-
-    assert_error_42(worker.status());
-    assert_error_42(std::move(worker).destroy());
-}
-
-TEST_F(WorkerFaultTests, ErrorStatusContention)
-{
-    callback_status = system_error("42");
-    worker.dispatch(1);
-    worker.dispatch(2);
-    worker.dispatch(3);
-
-    // Sketchy but seems to work in practice. I'm getting a lot of these checks in before the status is
-    // registered.
-    Size num_hits {};
-    while (worker.status().is_ok())
-        num_hits++;
-    ASSERT_GT(num_hits, 0);
-
-    assert_error_42(worker.status());
-    assert_error_42(std::move(worker).destroy());
-    ASSERT_TRUE(events.empty());
+    CALICO_EXPECT_EQ(counter, 6);
 }
 
 } // namespace Calico

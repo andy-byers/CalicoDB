@@ -112,14 +112,14 @@ public:
         return std::move(m_page);
     }
 
-    [[nodiscard]] auto read_key(Size) const -> BytesView;
+    [[nodiscard]] auto read_key(Size) const -> Slice;
     [[nodiscard]] auto read_cell(Size) const -> Cell;
     [[nodiscard]] auto detach_cell(Size, Bytes) const -> Cell;
-    [[nodiscard]] auto find_ge(BytesView) const -> FindGeResult;
+    [[nodiscard]] auto find_ge(Slice) const -> FindGeResult;
     auto extract_cell(Size, Bytes) -> Cell;
     auto insert(Cell) -> void;
     auto insert_at(Size, Cell) -> void;
-    auto remove(BytesView) -> bool;
+    auto remove(Slice) -> bool;
     auto remove_at(Size, Size) -> void;
     auto defragment() -> void;
 

@@ -1,7 +1,7 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
-#include "calico/bytes.h"
+#include "calico/slice.h"
 #include "calico/status.h"
 #include "utils/encoding.h"
 #include "utils/scratch.h"
@@ -15,9 +15,6 @@ namespace Calico {
 struct FileHeader;
 struct Id;
 class WalReader;
-
-// The main thread will block after the worker has queued up this number of write requests.
-static constexpr Size WORKER_CAPACITY {16};
 
 class WalPayloadIn {
 public:
@@ -40,7 +37,7 @@ public:
     }
 
     [[nodiscard]]
-    auto raw() -> BytesView
+    auto raw() -> Slice
     {
         return *m_buffer;
     }
@@ -58,7 +55,7 @@ class WalPayloadOut {
 public:
     WalPayloadOut() = default;
 
-    explicit WalPayloadOut(BytesView payload)
+    explicit WalPayloadOut(Slice payload)
         : m_payload {payload}
     {}
 
@@ -69,13 +66,13 @@ public:
     }
 
     [[nodiscard]]
-    auto data() -> BytesView
+    auto data() -> Slice
     {
         return m_payload.range(sizeof(Id));
     }
 
 private:
-    BytesView m_payload;
+    Slice m_payload;
 };
 
 class WriteAheadLog {
@@ -85,29 +82,21 @@ public:
 
     virtual ~WriteAheadLog() = default;
 
-    [[nodiscard]]
-    virtual auto is_enabled() const -> bool
-    {
-        return true;
-    }
-
-    [[nodiscard]] virtual auto worker_status() const -> Status = 0;
-    [[nodiscard]] virtual auto is_working() const -> bool = 0;
     [[nodiscard]] virtual auto flushed_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto current_lsn() const -> Id = 0;
-    [[nodiscard]] virtual auto log(WalPayloadIn payload) -> Status = 0;
-    [[nodiscard]] virtual auto flush() -> Status = 0;
-    [[nodiscard]] virtual auto advance() -> Status = 0;
-    [[nodiscard]] virtual auto start_workers() -> Status = 0;
-    [[nodiscard]] virtual auto stop_workers() -> Status = 0;
     [[nodiscard]] virtual auto roll_forward(Id begin_lsn, const Callback &callback) -> Status = 0;
     [[nodiscard]] virtual auto roll_backward(Id end_lsn, const Callback &callback) -> Status = 0;
+    [[nodiscard]] virtual auto start_workers() -> Status = 0;
 
     // Since we're using callbacks to traverse the log, we need a second phase to
     // remove obsolete segments. This gives us a chance to flush the pages that
     // were made dirty while traversing.
-    [[nodiscard]] virtual auto remove_after(Id lsn) -> Status = 0;
-    [[nodiscard]] virtual auto remove_before(Id lsn) -> Status = 0;
+    [[nodiscard]] virtual auto truncate(Id lsn) -> Status = 0;
+
+    virtual auto log(WalPayloadIn payload) -> void = 0;
+    virtual auto flush() -> void = 0;
+    virtual auto advance() -> void = 0;
+    virtual auto cleanup(Id lsn) -> void = 0;
 };
 
 } // namespace Calico

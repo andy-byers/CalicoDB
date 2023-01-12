@@ -147,18 +147,18 @@ class PageBacking {
 public:
     explicit PageBacking(Size page_size)
         : m_map {page_size}
-        , m_scratch {page_size}
+        , m_scratch {page_size, 32}
         , m_page_size {page_size} {}
 
     auto get_page(Id id) -> Page
     {
         m_map.emplace(id, std::string(m_page_size, '\x00'));
-        return Page {{id, stob(m_map[id]), nullptr, true}};
+        return Page {{id, Bytes {m_map[id]}, nullptr, true}};
     }
 
 private:
     std::unordered_map<Id, std::string, Id::Hash> m_map;
-    MonotonicScratchManager<32> m_scratch;
+    MonotonicScratchManager m_scratch;
     Size m_page_size {};
 };
 
@@ -188,19 +188,19 @@ TEST_F(PageTests, HeaderFields)
 TEST_F(PageTests, FreshPagesAreEmpty)
 {
     auto page = get_page(Id::root());
-    ASSERT_TRUE(page.view(0) == stob(std::string(page_size, '\x00')));
+    ASSERT_TRUE(page.view(0) == Slice {std::string(page_size, '\x00')});
 }
 
 class CellBacking {
 public:
     explicit CellBacking(Size page_size)
-        : scratch {page_size}
+        : scratch {page_size, 32}
         , page_size {page_size} {}
 
     auto get_cell(const std::string &key) -> Cell
     {
         Cell::Parameters param;
-        param.key = stob(key);
+        param.key = Slice {key};
         param.page_size = page_size;
         param.is_external = false;
         Cell cell {param};
@@ -213,8 +213,8 @@ public:
     {
         const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
         Cell::Parameters param;
-        param.key = stob(key);
-        param.local_value = stob(value);
+        param.key = Slice {key};
+        param.local_value = Slice {value};
         param.value_size = value.size();
         param.page_size = page_size;
         param.is_external = is_external;
@@ -229,7 +229,7 @@ public:
         return cell;
     }
 
-    MonotonicScratchManager<32> scratch;
+    MonotonicScratchManager scratch;
     Size page_size {};
 };
 //
@@ -571,7 +571,7 @@ TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
 {
     auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
-    auto [index, found_eq] = node.find_ge(stob("hello"));
+    auto [index, found_eq] = node.find_ge(Slice {"hello"});
     ASSERT_FALSE(found_eq);
 
     // We would insert "hello" at this index.
@@ -596,7 +596,7 @@ TEST_F(NodeTests, SanityCheck)
         while (!node.is_overflowing()) {
             const auto key = random.get<std::string>('a', 'z', 5);
             const auto value = random.get<std::string>('a', 'z', 2 * overflow_value.size());
-            if (const auto [index, found_eq] = node.find_ge(stob(key)); !found_eq) {
+            if (const auto [index, found_eq] = node.find_ge(Slice {key}); !found_eq) {
                 auto cell = cell_backing.get_cell(key, value, node.is_external());
                 if (cell.local_value().size() != value.size())
                     cell.set_overflow_id(arbitrary_pid);
@@ -606,7 +606,7 @@ TEST_F(NodeTests, SanityCheck)
         (void)node.take_overflow_cell();
         while (node.cell_count()) {
             const auto key = random.get<std::string>('a', 'z', 5);
-            const auto [index, found_eq] = node.find_ge(stob(key));
+            const auto [index, found_eq] = node.find_ge(Slice {key});
             const auto to_remove = index - (index == node.cell_count());
             node.remove_at(to_remove, node.read_cell(to_remove).size());
         }
@@ -688,7 +688,7 @@ TEST_F(NodeTests, InsertingCellIncrementsCellCount)
 TEST_F(NodeTests, FindExact)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(stob("hello"));
+    auto [index, found_eq] = node.find_ge(Slice {"hello"});
     ASSERT_TRUE(found_eq);
     ASSERT_EQ(index, 0);
 }
@@ -696,7 +696,7 @@ TEST_F(NodeTests, FindExact)
 TEST_F(NodeTests, FindLessThan)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(stob("helln"));
+    auto [index, found_eq] = node.find_ge(Slice {"helln"});
     ASSERT_FALSE(found_eq);
     ASSERT_EQ(index, 0);
 }
@@ -704,7 +704,7 @@ TEST_F(NodeTests, FindLessThan)
 TEST_F(NodeTests, FindGreaterThan)
 {
     auto node = get_node_with_one_cell(*this);
-    auto [index, found_eq] = node.find_ge(stob("hellp"));
+    auto [index, found_eq] = node.find_ge(Slice {"hellp"});
     ASSERT_FALSE(found_eq);
     ASSERT_EQ(index, 1);
 }
@@ -714,8 +714,8 @@ TEST_F(NodeTests, ReadCell)
     auto node = get_node_with_one_cell(*this);
     auto cell = node.read_cell(0);
     ASSERT_EQ(cell.overflow_id(), Id::null());
-    ASSERT_TRUE(cell.key() == stob("hello"));
-    ASSERT_TRUE(cell.local_value() == stob("world"));
+    ASSERT_TRUE(cell.key() == Slice {"hello"});
+    ASSERT_TRUE(cell.local_value() == Slice {"world"});
 }
 
 TEST_F(NodeTests, ReadCellWithOverflow)
@@ -730,21 +730,21 @@ TEST_F(NodeTests, InsertDuplicateKeyDeathTest)
     std::string value {"world"};
     auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
     auto cell = cell_backing.get_cell("hello", value, true);
-    node.insert(std::move(cell));
+    node.insert(cell);
     ASSERT_DEATH(node.insert(cell_backing.get_cell("hello", value, true)), EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeTests, RemovingNonexistentCellDoesNothing)
 {
     auto node = get_node_with_one_cell(*this);
-    ASSERT_FALSE(node.remove(stob("not_found")));
+    ASSERT_FALSE(node.remove(Slice {"not_found"}));
     ASSERT_EQ(node.cell_count(), 1);
 }
 
 TEST_F(NodeTests, RemovingCellDecrementsCellCount)
 {
     auto node = get_node_with_one_cell(*this);
-    node.remove(stob("hello"));
+    node.remove(Slice {"hello"});
     ASSERT_EQ(node.cell_count(), 0);
 }
 
@@ -753,8 +753,8 @@ TEST_F(NodeTests, UsableSpaceIsUpdatedOnRemove)
     auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
     auto cell = cell_backing.get_cell("hello", normal_value, true);
     const auto usable_space_before = node.usable_space();
-    node.insert(std::move(cell));
-    node.remove(stob("hello"));
+    node.insert(cell);
+    node.remove(Slice {"hello"});
     ASSERT_EQ(node.usable_space(), usable_space_before);
 }
 
@@ -762,7 +762,7 @@ TEST_F(NodeTests, SplitNonRootExternal)
 {
     auto lhs = make_node(Id {2ULL}, PageType::EXTERNAL_NODE);
     auto rhs = make_node(Id {3ULL}, PageType::EXTERNAL_NODE);
-    MonotonicScratchManager<32> scratch {lhs.size()};
+    MonotonicScratchManager scratch {lhs.size(), 32};
 
     lhs.insert(cell_backing.get_cell(make_key(100), normal_value, true));
     lhs.insert(cell_backing.get_cell(make_key(200), normal_value, true));

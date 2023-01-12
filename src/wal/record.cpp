@@ -16,7 +16,7 @@ auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void
     put_u32(out, header.crc);
 }
 
-auto read_wal_record_header(BytesView in) -> WalRecordHeader
+auto read_wal_record_header(Slice in) -> WalRecordHeader
 {
     WalRecordHeader header {};
     header.type = WalRecordHeader::Type {in[0]};
@@ -29,14 +29,14 @@ auto read_wal_record_header(BytesView in) -> WalRecordHeader
     return header;
 }
 
-auto read_wal_payload_header(BytesView in) -> WalPayloadHeader
+auto read_wal_payload_header(Slice in) -> WalPayloadHeader
 {
     WalPayloadHeader header {};
     header.lsn.value = get_u64(in);
     return header;
 }
 
-auto split_record(WalRecordHeader &lhs, BytesView payload, Size available_size) -> WalRecordHeader
+auto split_record(WalRecordHeader &lhs, Slice payload, Size available_size) -> WalRecordHeader
 {
     CALICO_EXPECT_NE(lhs.type, WalRecordHeader::Type::FIRST);
     CALICO_EXPECT_EQ(lhs.size, payload.size());

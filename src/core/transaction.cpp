@@ -23,17 +23,6 @@ Transaction::Transaction(Core &core)
     : m_core {&core}
 {}
 
-Transaction::Transaction(Transaction &&rhs) noexcept
-    : m_core {std::exchange(rhs.m_core, nullptr)}
-{}
-
-auto Transaction::operator=(Transaction &&rhs) noexcept -> Transaction&
-{
-    if (this != &rhs)
-        m_core = std::exchange(rhs.m_core, nullptr);
-    return *this;
-}
-
 auto Transaction::commit() -> Status
 {
     if (!m_core) return already_completed_error("commit");

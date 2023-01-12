@@ -9,7 +9,6 @@
 #include "unit_tests.h"
 #include "utils/layout.h"
 #include "utils/system.h"
-#include "wal/disabled_wal.h"
 #include <gtest/gtest.h>
 #include <map>
 #include <unordered_map>
@@ -27,7 +26,7 @@ public:
 
     TestHarness()
         : wal {std::make_unique<DisabledWriteAheadLog>()},
-          scratch {wal_scratch_size(PAGE_SIZE)}
+          scratch {wal_scratch_size(PAGE_SIZE), 32}
     {
         auto r = BasicPager::open({
             PREFIX,
@@ -39,7 +38,7 @@ public:
             CACHE_SIZE,
             PAGE_SIZE
         });
-        EXPECT_TRUE(r.has_value()) << r.error().what();
+        EXPECT_TRUE(r.has_value()) << r.error().what().data();
         pager = std::move(*r);
     }
 
@@ -65,10 +64,10 @@ public:
             *pager,
             state,
             PAGE_SIZE);
-        EXPECT_TRUE(r.has_value()) << r.error().what();
+        EXPECT_TRUE(r.has_value()) << r.error().what().data();
         tree = std::move(*r);
         auto root = tree->root(true);
-        EXPECT_TRUE(root.has_value()) << "Error: " << root.error().what();
+        EXPECT_TRUE(root.has_value()) << "Error: " << root.error().what().data();
         expect_ok(pager->release(root->take()));
     }
 
@@ -106,8 +105,8 @@ TEST_F(TreeTests, InsertCell)
 
 TEST_F(TreeTests, OnlyAcceptsValidKeySizes)
 {
-    ASSERT_TRUE(tree->insert(stob(""), stob("value")).is_invalid_argument());
-    ASSERT_TRUE(tree->insert(stob(std::string(max_local + 1, 'x')), stob("value")).is_invalid_argument());
+    ASSERT_TRUE(tree->insert("", "value").is_invalid_argument());
+    ASSERT_TRUE(tree->insert(std::string(max_local + 1, 'x'), "value").is_invalid_argument());
 }
 
 TEST_F(TreeTests, RemoveRecord)

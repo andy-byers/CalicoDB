@@ -45,32 +45,20 @@ private:
 
 class WalWriter {
 public:
-    WalWriter(Storage &store, WalCollection &segments, Bytes tail, std::atomic<Id> &flushed_lsn, std::string prefix, Size wal_limit)
-        : m_worker {WORKER_CAPACITY, [this](const auto &event) {
-              return on_event(event);
-          }},
-          m_prefix(std::move(prefix)),
-          m_flushed_lsn {&flushed_lsn},
-          m_set {&segments},
-          m_store {&store},
-          m_tail {tail},
-          m_wal_limit {wal_limit}
-    {}
+    struct Parameters {
+        Slice prefix;
+        Bytes tail;
+        Storage *storage {};
+        System *system {};
+        WalSet *set {};
+        std::atomic<Id> *flushed_lsn {};
+        Size wal_limit {};
+    };
 
-    [[nodiscard]]
-    auto status() const -> Status
-    {
-        // Can be either OK or SYSTEM_ERROR.
-        return m_worker.status();
-    }
+    explicit WalWriter(const Parameters &param);
 
-    // NOTE: open() should be called immediately after construction. This object is not valid unless open() returns OK.
-    //       When this object is no longer needed, destroy() should be called.
-    [[nodiscard]] auto open() -> Status;
     [[nodiscard]] auto destroy() && -> Status;
-
     auto write(WalPayloadIn payload) -> void;
-
     // NOTE: advance() will block until the writer has advanced to a new segment. It should be called after writing
     //       a commit record so that everything is written to disk before we return, and the writer is set up on the
     //       next segment. flush() will also block until the tail buffer has been flushed.
@@ -78,23 +66,18 @@ public:
     auto flush() -> void;
 
 private:
-    struct AdvanceToken {};
-    struct FlushToken {};
-
-    using Event = std::variant<WalPayloadIn, AdvanceToken, FlushToken>;
-
-    [[nodiscard]] auto on_event(const Event &event) -> Status;
     [[nodiscard]] auto advance_segment() -> Status;
     [[nodiscard]] auto open_segment(SegmentId) -> Status;
     auto close_segment() -> Status;
 
-    Worker<Event> m_worker;
     std::string m_prefix;
     std::optional<LogWriter> m_writer;
-    std::atomic<Id> *m_flushed_lsn {};
     std::unique_ptr<AppendWriter> m_file;
-    WalCollection *m_set {};
-    Storage *m_store {};
+    std::atomic<Id> *m_flushed_lsn {};
+    Storage *m_storage {};
+    System *m_system {};
+    WalSet *m_set {};
+    SegmentId m_current;
     Bytes m_tail;
     Size m_wal_limit {};
 };

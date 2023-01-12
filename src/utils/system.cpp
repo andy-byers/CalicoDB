@@ -85,8 +85,10 @@ auto System::create_log(const std::string_view &name) const -> LogPtr
 
 auto System::push_error(Error::Level level, Status status) -> void
 {
+    CALICO_EXPECT_FALSE(status.is_ok());
+
     // All errors get logged.
-    m_log->log(to_spdlog_level(level), status.what());
+     m_log->log(to_spdlog_level(level), status.what().data());
 
     // Only severe errors get saved.
     if (level >= Error::ERROR) {

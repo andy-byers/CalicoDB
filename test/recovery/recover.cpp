@@ -46,11 +46,8 @@ auto main(int argc, const char *argv[]) -> int
         while (std::getline(ifs, line))
             values.emplace_back(line);
     }
-    Options options;
-    options.log_level = LogLevel::INFO;
-    options.log_target = LogTarget::FILE;
     Database db;
-    expect_ok(db.open(path.string(), options));
+    expect_ok(db.open(path.string()));
     const auto info = db.info();
 
     // The database should contain exactly `num_committed` records.
@@ -60,11 +57,11 @@ auto main(int argc, const char *argv[]) -> int
     auto xact = db.transaction();
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
-        const auto cursor = db.find_exact(stob(key));
+        const auto cursor = db.find_exact(key);
         CALICO_EXPECT_TRUE(cursor.is_valid());
         CALICO_EXPECT_EQ(cursor.key().to_string(), key);
         CALICO_EXPECT_EQ(cursor.value(), value);
-        expect_ok(db.erase(stob(key)));
+        expect_ok(db.erase(key));
     }
     CALICO_EXPECT_TRUE(xact.commit().is_ok());
 

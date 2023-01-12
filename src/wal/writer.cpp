@@ -58,7 +58,7 @@ auto LogWriter::flush() -> Status
 {
     // Already flushed.
     if (m_offset == 0)
-        return logic_error("could not flush: already flushed");
+        return logic_error("could not flush: nothing to flush");
 
     // Clear unused bytes at the end of the tail buffer.
     mem_clear(m_tail.range(m_offset));
@@ -72,62 +72,63 @@ auto LogWriter::flush() -> Status
     return s;
 }
 
-auto WalWriter::open() -> Status
+WalWriter::WalWriter(const Parameters &param)
+    : m_prefix {param.prefix.to_string()},
+      m_flushed_lsn {param.flushed_lsn},
+      m_storage {param.storage},
+      m_system {param.system},
+      m_set {param.set},
+      m_tail {param.tail},
+      m_wal_limit {param.wal_limit}
 {
-    return open_segment(++m_set->last());
+    CALICO_EXPECT_FALSE(m_prefix.empty());
+    CALICO_EXPECT_NE(m_flushed_lsn, nullptr);
+    CALICO_EXPECT_NE(m_storage, nullptr);
+    CALICO_EXPECT_NE(m_system, nullptr);
+    CALICO_EXPECT_NE(m_set, nullptr);
+
+    // First segment file gets created now, but is not registered in the WAL set until the writer
+    // is finished with it.
+    CALICO_ERROR_IF(open_segment(++m_set->last()));
 }
 
 auto WalWriter::write(WalPayloadIn payload) -> void
 {
-    m_worker.dispatch(Event {payload}, false);
+    if (m_system->has_error())
+        return;
+
+    CALICO_ERROR_IF(m_writer->write(payload));
+    if (m_writer->block_count() >= m_wal_limit)
+        CALICO_ERROR_IF(advance_segment());
 }
 
 auto WalWriter::flush() -> void
 {
-    m_worker.dispatch(FlushToken {}, true);
+    auto s = m_writer->flush();
+    // Throw away logic errors due to the tail buffer being empty.
+    CALICO_ERROR_IF(s.is_logic_error() ? ok() : s);
 }
 
 auto WalWriter::advance() -> void
 {
-    m_worker.dispatch(AdvanceToken {}, true);
+    // NOTE: advance() is a NOOP if the current WAL segment hasn't been written to.
+    CALICO_ERROR_IF(advance_segment());
 }
 
 auto WalWriter::destroy() && -> Status
 {
-    auto s = std::move(m_worker).destroy();
-    close_segment();
-    return s;
-}
-
-auto WalWriter::on_event(const Event &event) -> Status
-{
-    if (std::holds_alternative<WalPayloadIn>(event)) {
-        auto payload = std::get<WalPayloadIn>(event);
-        auto s = m_writer->write(payload);
-
-        if (s.is_ok() && m_writer->block_count() >= m_wal_limit)
-            return advance_segment();
-        return s;
-
-    } else if (std::holds_alternative<AdvanceToken>(event)) {
-        return advance_segment();
-
-    } else {
-        CALICO_EXPECT_TRUE((std::holds_alternative<FlushToken>(event)));
-        auto s = m_writer->flush();
-        // Throw away logic errors due to the tail buffer being empty.
-        return s.is_logic_error() ? ok() : s;
-    }
+    return close_segment();
 }
 
 auto WalWriter::open_segment(SegmentId id) -> Status
 {
     CALICO_EXPECT_EQ(m_writer, std::nullopt);
-    AppendWriter *file {};
-    auto s = m_store->open_append_writer(m_prefix + id.to_name(), &file);
+    AppendWriter *file;
+    auto s = m_storage->open_append_writer(m_prefix + id.to_name(), &file);
     if (s.is_ok()) {
         m_file.reset(file);
         m_writer = LogWriter {*m_file, m_tail, *m_flushed_lsn};
+        m_current = id;
     }
     return s;
 }
@@ -135,7 +136,8 @@ auto WalWriter::open_segment(SegmentId id) -> Status
 auto WalWriter::close_segment() -> Status
 {
     // We must have failed while opening the segment file.
-    if (!m_writer) return status();
+    if (!m_writer)
+        return logic_error("segment file is already closed");
 
     auto s = m_writer->flush();
     bool is_empty {};
@@ -150,10 +152,11 @@ auto WalWriter::close_segment() -> Status
     m_writer.reset();
     m_file.reset();
 
-    // We want to do this part, even if the flush failed. If the segment is empty, and we fail to remove
-    // it, we will end up overwriting it next time we open the writer.
-    if (auto id = ++m_set->last(); is_empty) {
-        auto t = m_store->remove_file(m_prefix + id.to_name());
+    auto id = std::exchange(m_current, SegmentId::null());
+
+    // We want to do this part, even if the flush failed.
+    if (is_empty) {
+        auto t = m_storage->remove_file(m_prefix + id.to_name());
         s = s.is_ok() ? t : s;
     } else {
         m_set->add_segment(id);

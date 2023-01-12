@@ -1,13 +1,13 @@
 #ifndef CALICO_PAGER_INTERFACE_H
 #define CALICO_PAGER_INTERFACE_H
 
-#include <optional>
-#include <tl/expected.hpp>
-#include "calico/bytes.h"
+#include "calico/slice.h"
 #include "calico/status.h"
 #include "utils/types.h"
 #include "utils/utils.h"
 #include "wal/wal.h"
+#include <optional>
+#include <tl/expected.hpp>
 
 namespace Calico {
 

@@ -39,7 +39,7 @@ auto BPlusTree::open(Pager &pager, System &system, Size page_size) -> tl::expect
     return ptr;
 }
 
-auto BPlusTree::check_key(BytesView key, const char *primary) -> Status
+auto BPlusTree::check_key(Slice key, const char *primary) -> Status
 {
     if (key.is_empty()) {
         auto s = invalid_argument("{}: key is empty (use a nonempty key)", primary);
@@ -54,7 +54,7 @@ auto BPlusTree::check_key(BytesView key, const char *primary) -> Status
     return ok();
 }
 
-auto BPlusTree::insert(BytesView key, BytesView value) -> Status
+auto BPlusTree::insert(Slice key, Slice value) -> Status
 {
     CALICO_TRY_S(check_key(key, "could not insert record"));
 
@@ -88,7 +88,7 @@ auto BPlusTree::erase(Cursor cursor) -> Status
     return cursor.status();
 }
 
-auto BPlusTree::find_aux(BytesView key) -> tl::expected<SearchResult, Status>
+auto BPlusTree::find_aux(Slice key) -> tl::expected<SearchResult, Status>
 {
     if (auto s = check_key(key, "could not find key"); !s.is_ok())
         return tl::make_unexpected(s);
@@ -109,7 +109,7 @@ auto BPlusTree::find_aux(BytesView key) -> tl::expected<SearchResult, Status>
     return SearchResult {std::move(node), index, found_exact};
 }
 
-auto BPlusTree::find_exact(BytesView key) -> Cursor
+auto BPlusTree::find_exact(Slice key) -> Cursor
 {
     auto cursor = CursorInternal::make_cursor(&m_actions);
     auto result = find_aux(key);
@@ -123,7 +123,7 @@ auto BPlusTree::find_exact(BytesView key) -> Cursor
     return cursor;
 }
 
-auto BPlusTree::find(BytesView key) -> Cursor
+auto BPlusTree::find(Slice key) -> Cursor
 {
     auto cursor = CursorInternal::make_cursor(&m_actions);
     auto result = find_aux(key);

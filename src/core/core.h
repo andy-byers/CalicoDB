@@ -30,19 +30,19 @@ public:
     Core() = default;
     ~Core();
 
-    [[nodiscard]] auto open(const std::string &path, const Options &options) -> Status;
+    [[nodiscard]] auto open(Slice path, const Options &options) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto destroy() -> Status;
     [[nodiscard]] auto transaction() -> Transaction;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
-    [[nodiscard]] auto insert(BytesView, BytesView) -> Status;
-    [[nodiscard]] auto erase(BytesView) -> Status;
+    [[nodiscard]] auto insert(Slice, Slice) -> Status;
+    [[nodiscard]] auto erase(Slice) -> Status;
     [[nodiscard]] auto erase(const Cursor &) -> Status;
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;
-    [[nodiscard]] auto find(BytesView) -> Cursor;
-    [[nodiscard]] auto find_exact(BytesView) -> Cursor;
+    [[nodiscard]] auto find(Slice) -> Cursor;
+    [[nodiscard]] auto find_exact(Slice) -> Cursor;
     [[nodiscard]] auto first() -> Cursor;
     [[nodiscard]] auto last() -> Cursor;
     [[nodiscard]] auto info() -> Info;
@@ -98,7 +98,7 @@ public:
 private:
     auto handle_errors() -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
-    [[nodiscard]] auto atomic_insert(BytesView, BytesView) -> Status;
+    [[nodiscard]] auto atomic_insert(Slice, Slice) -> Status;
     [[nodiscard]] auto atomic_erase(const Cursor &) -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;

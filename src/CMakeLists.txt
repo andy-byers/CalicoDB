@@ -1,5 +1,4 @@
 set(CALICO_HEADERS
-    "${CALICO_INCLUDE_DIR}/calico/bytes.h"
     "${CALICO_INCLUDE_DIR}/calico/calico.h"
     "${CALICO_INCLUDE_DIR}/calico/common.h"
     "${CALICO_INCLUDE_DIR}/calico/cursor.h"
@@ -7,10 +6,11 @@ set(CALICO_HEADERS
     "${CALICO_INCLUDE_DIR}/calico/info.h"
     "${CALICO_INCLUDE_DIR}/calico/options.h"
     "${CALICO_INCLUDE_DIR}/calico/platform.h"
+    "${CALICO_INCLUDE_DIR}/calico/slice.h"
     "${CALICO_INCLUDE_DIR}/calico/status.h"
     "${CALICO_INCLUDE_DIR}/calico/storage.h"
     "${CALICO_INCLUDE_DIR}/calico/transaction.h")
-set(CALICO_SOURCES '')
+set(CALICO_SOURCES '' ../benchmarks/bench_calico.cpp)
 file(GLOB_RECURSE CALICO_SOURCES "./*/*.cpp" "./*/*.h")
 list(APPEND CALICO_SOURCES "${CALICO_HEADERS}")
 

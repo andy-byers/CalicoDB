@@ -1,14 +1,8 @@
 #include "basic_wal.h"
-#include "cleaner.h"
+#include "cleanup.h"
 #include "utils/system.h"
 
 namespace Calico {
-
-#define PROPAGATE_WORKER_ERROR \
-    do { \
-        CALICO_EXPECT_TRUE(m_is_working); \
-        CALICO_ERROR_IF(worker_status()); \
-    } while (0)
 
 BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
     : m_log {param.system->create_log("wal")},
@@ -18,9 +12,19 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
-      m_wal_limit {param.wal_limit}
+      m_wal_limit {param.wal_limit},
+      m_writer_capacity {param.writer_capacity}
 {
     m_log->trace("BasicWriteAheadLog");
+
+    m_log->info("page_size = {}", param.page_size);
+    m_log->info("wal_limit = {}", param.wal_limit);
+    m_log->info("writer_capacity = {}", param.writer_capacity);
+
+    CALICO_EXPECT_NE(m_store, nullptr);
+    CALICO_EXPECT_NE(m_system, nullptr);
+    CALICO_EXPECT_NE(m_writer_capacity, 0);
+    CALICO_EXPECT_NE(m_wal_limit, 0);
 }
 
 auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
@@ -34,13 +38,13 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
     // Filter out the segment file names.
     std::vector<std::string> segment_names;
     std::copy_if(cbegin(child_names), cend(child_names), back_inserter(segment_names), [&path_prefix](const auto &path) {
-        return BytesView {path}.starts_with(path_prefix);
+        return Slice {path}.starts_with(path_prefix);
     });
 
     // Convert to segment IDs.
     std::vector<SegmentId> segment_ids;
     std::transform(cbegin(segment_names), cend(segment_names), back_inserter(segment_ids), [param](const auto &name) {
-        return SegmentId::from_name(BytesView {name}.advance(param.prefix.size()));
+        return SegmentId::from_name(Slice {name}.advance(param.prefix.size()));
     });
     std::sort(begin(segment_ids), end(segment_ids));
 
@@ -57,23 +61,58 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
 
 BasicWriteAheadLog::~BasicWriteAheadLog()
 {
-    m_log->trace("~BasicWriteAheadLog");
-    m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
+    // m_log->trace("~BasicWriteAheadLog");
+    // m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
 
-    if (m_is_working) {
-        CALICO_ERROR_IF(m_writer->status());
-        CALICO_ERROR_IF(m_cleaner->status());
-        CALICO_WARN_IF(stop_workers_impl());
-    }
+    if (m_writer != nullptr)
+        CALICO_ERROR_IF(std::move(*m_writer).destroy());
 }
 
-auto BasicWriteAheadLog::worker_status() const -> Status
+auto BasicWriteAheadLog::start_workers() -> Status
 {
-    if (m_is_working) {
-        CALICO_TRY_S(m_writer->status());
-        return m_cleaner->status();
-    }
+    m_writer = std::unique_ptr<WalWriter> {new(std::nothrow) WalWriter {{
+        m_prefix,
+        m_writer_tail,
+        m_store,
+        m_system,
+        &m_set,
+        &m_flushed_lsn,
+        m_wal_limit,
+    }}};
+    if (m_writer == nullptr)
+        return system_error("cannot allocate writer object: out of memory");
+
+    m_cleanup = std::unique_ptr<WalCleanup> {new(std::nothrow) WalCleanup {{
+        m_prefix,
+        &m_recovery_lsn,
+        m_store,
+        m_system,
+        &m_set,
+    }}};
+    if (m_cleanup == nullptr)
+        return system_error("cannot allocate cleanup object: out of memory");
+
+    m_tasks = std::unique_ptr<Worker<Event>> {new(std::nothrow) Worker<Event> {[this](auto event) {
+        run_task(std::move(event));
+    }, m_writer_capacity}};
+    if (m_tasks == nullptr)
+        return system_error("cannot allocate task manager object: out of memory");
+
     return ok();
+}
+
+auto BasicWriteAheadLog::run_task(Event event) -> void
+{
+    if (std::holds_alternative<WalPayloadIn>(event)) {
+        m_writer->write(std::get<WalPayloadIn>(event));
+    } else if (std::holds_alternative<FlushToken>(event)) {
+        m_writer->flush();
+    } else {
+        CALICO_EXPECT_TRUE((std::holds_alternative<AdvanceToken>(event)));
+        m_writer->advance();
+    }
+
+    m_cleanup->cleanup();
 }
 
 auto BasicWriteAheadLog::flushed_lsn() const -> Id
@@ -86,128 +125,41 @@ auto BasicWriteAheadLog::current_lsn() const -> Id
     return Id {m_last_lsn.value + 1};
 }
 
-auto BasicWriteAheadLog::remove_before(Id lsn) -> Status
+auto BasicWriteAheadLog::log(WalPayloadIn payload) -> void
 {
-    m_log->trace("remove_before");
-    PROPAGATE_WORKER_ERROR;
-
-    m_cleaner->remove_before(lsn);
-    return m_cleaner->status(); // TODO: It's kinda pointless to return the status here, as it's likely not updated yet anyway. We should check it once each "round", whatever that means.
-}
-
-auto BasicWriteAheadLog::log(WalPayloadIn payload) -> Status
-{
-    PROPAGATE_WORKER_ERROR;
-
+    CALICO_EXPECT_NE(m_writer, nullptr);
     m_last_lsn.value++;
-    m_writer->write(payload);
-    return m_writer->status();
+    m_tasks->dispatch(payload);
 }
 
-auto BasicWriteAheadLog::flush() -> Status
+auto BasicWriteAheadLog::flush() -> void
 {
-    m_log->trace("flush");
-    PROPAGATE_WORKER_ERROR;
-
-    // flush() blocks until the background writer is finished.
-    m_writer->flush();
-    return m_writer->status();
+    CALICO_EXPECT_NE(m_writer, nullptr);
+    m_tasks->dispatch(FlushToken {}, true);
 }
 
-auto BasicWriteAheadLog::advance() -> Status
+auto BasicWriteAheadLog::advance() -> void
 {
-    m_log->trace("advance");
-    PROPAGATE_WORKER_ERROR;
-
-    // advance() blocks until the background writer is finished.
-    m_writer->advance();
-    return m_writer->status();
+    CALICO_EXPECT_NE(m_writer, nullptr);
+    m_tasks->dispatch(AdvanceToken {}, true);
 }
 
-auto BasicWriteAheadLog::stop_workers() -> Status
+auto BasicWriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 {
-    m_log->trace("stop_workers");
-    return stop_workers_impl();
-}
-
-auto BasicWriteAheadLog::stop_workers_impl() -> Status
-{
-    // Stops the workers no matter what, even if an error is encountered. We should be able to call abort_last() safely after
-    // this method returns.
-    if (!m_is_working)
-        return ok();
-    PROPAGATE_WORKER_ERROR;
-
-    m_is_working = false;
-
-    auto s = std::move(*m_writer).destroy();
-    m_writer.reset();
-
-    auto t = std::move(*m_cleaner).destroy();
-    m_cleaner.reset();
-
-    CALICO_TRY_S(s);
-    CALICO_TRY_S(t);
-    return ok();
-}
-
-auto BasicWriteAheadLog::start_workers() -> Status
-{
-    m_log->trace("start_workers");
-    CALICO_EXPECT_FALSE(m_is_working);
-
-    auto s = open_writer();
-    auto t = open_cleaner();
-
-    if (s.is_ok() && t.is_ok()) {
-        m_is_working = true;
-        return ok();
-    }
-    m_writer.reset();
-    m_cleaner.reset();
-    return s.is_ok() ? t : s;
-}
-
-auto BasicWriteAheadLog::open_reader() -> Status
-{
-    m_reader.emplace(
+    auto reader = WalReader {
         *m_store,
         m_set,
         m_prefix,
         Bytes {m_reader_tail},
-        Bytes {m_reader_data}
-    );
-    return m_reader->open();
-}
-
-auto BasicWriteAheadLog::open_writer() -> Status
-{
-    m_writer.emplace(
-        *m_store,
-        m_set,
-        Bytes {m_writer_tail},
-        m_flushed_lsn,
-        m_prefix,
-        m_wal_limit
-    );
-    return m_writer->open();
-}
-
-auto BasicWriteAheadLog::open_cleaner() -> Status
-{
-    m_cleaner.emplace(
-        *m_store,
-        m_prefix,
-        m_set);
-    return ok();
+        Bytes {m_reader_data}};
+    if (auto s = reader.open(); !s.is_ok())
+        return tl::make_unexpected(s);
+    return reader;
 }
 
 auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) -> Status
 {
-    m_log->trace("roll_forward");
-
-    if (m_is_working)
-        CALICO_TRY_S(stop_workers());
+    // m_log->trace("roll_forward");
 
     if (m_set.first().is_null())
         return ok();
@@ -217,26 +169,34 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
         m_flushed_lsn.store(m_last_lsn);
     }
     // Open the reader on the first (oldest) WAL segment file.
-    if (m_reader == std::nullopt)
-        CALICO_TRY_S(open_reader());
+    auto reader = open_reader();
+    if (!reader.has_value())
+        return reader.error();
 
     // We should be on the first segment.
-    CALICO_EXPECT_TRUE(m_reader->seek_previous().is_not_found());
+    CALICO_EXPECT_TRUE(reader->seek_previous().is_not_found());
 
     // Find the segment containing the first update that hasn't been applied yet.
     auto s = ok();
     while (s.is_ok()) {
         Id first_lsn;
-        s = m_reader->read_first_lsn(first_lsn);
-        if (s.is_not_found()) return ok();
+        s = reader->read_first_lsn(first_lsn);
+
+        // This indicates an empty file. Try to seek back to the last segment.
+        if (s.is_not_found()) {
+            if (reader->segment_id() != m_set.last())
+                return corruption("missing WAL data in segment {}", reader->segment_id().value);
+            s = reader->seek_previous();
+            break;
+        }
         CALICO_TRY_S(s);
 
         if (first_lsn >= begin_lsn) {
             if (first_lsn > begin_lsn)
-                s = m_reader->seek_previous();
+                s = reader->seek_previous();
             break;
         } else {
-            s = m_reader->seek_next();
+            s = reader->seek_next();
         }
     }
 
@@ -244,7 +204,7 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
         s = ok();
 
     while (s.is_ok()) {
-        s = m_reader->roll([&callback, begin_lsn, this](auto payload) {
+        s = reader->roll([&callback, begin_lsn, this](auto payload) {
             m_last_lsn = payload.lsn();
             if (m_last_lsn >= begin_lsn)
                 return callback(payload);
@@ -255,13 +215,12 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
         // We found an empty segment. This happens when the program aborted before the writer could either
         // write a block or delete the empty file. This is OK if we are on the last segment.
         if (s.is_not_found())
-            s = corruption(s.what());
+            s = corruption(s.what().data());
 
         if (s.is_ok())
-            s = m_reader->seek_next();
+            s = reader->seek_next();
     }
-    const auto last_id = m_reader->segment_id();
-    m_reader.reset();
+    const auto last_id = reader->segment_id();
 
     // Translate the error status if needed. Note that we allow an incomplete record at the end of the
     // most-recently-written segment.
@@ -279,18 +238,17 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
 
 auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> Status
 {
-    m_log->trace("roll_backward");
-    CALICO_EXPECT_FALSE(m_is_working);
-
+    // m_log->trace("roll_backward");
     if (m_set.first().is_null())
         return ok();
 
-    if (m_reader == std::nullopt)
-        CALICO_TRY_S(open_reader());
+    auto reader = open_reader();
+    if (!reader.has_value())
+        return reader.error();
 
-    // Find the most-recent segment.
+    // Find the most-recent segment. TODO: Just seek all the way to the end at once.
     for (; ; ) {
-        auto s = m_reader->seek_next();
+        auto s = reader->seek_next();
         if (s.is_not_found()) break;
         CALICO_TRY_S(s);
     }
@@ -298,7 +256,7 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
     auto s = ok();
     for (Size i {}; s.is_ok(); i++) {
         Id first_lsn;
-        s = m_reader->read_first_lsn(first_lsn);
+        s = reader->read_first_lsn(first_lsn);
 
         if (s.is_ok()) {
             // Found the segment containing the end_lsn.
@@ -307,10 +265,10 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
 
             // Read all full image records. We can read them forward, since the pages are disjoint
             // within each transaction.
-            s = m_reader->roll(callback);
+            s = reader->roll(callback);
         } else if (s.is_not_found()) {
             // The segment file is empty.
-            s = corruption(s.what());
+            s = corruption(s.what().data());
         }
 
         // Most-recent segment can have an incomplete record at the end.
@@ -318,40 +276,41 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
             s = ok();
         CALICO_TRY_S(s);
 
-        s = m_reader->seek_previous();
+        s = reader->seek_previous();
     }
-    m_reader.reset();
     return s.is_not_found() ? ok() : s;
 }
 
-auto BasicWriteAheadLog::remove_after(Id limit) -> Status
+auto BasicWriteAheadLog::cleanup(Id recovery_lsn) -> void
 {
-    m_log->trace("remove_after");
-    CALICO_EXPECT_FALSE(m_is_working);
+    m_log->trace("cleanup({})", recovery_lsn.value);
+    m_recovery_lsn.store(recovery_lsn);
+}
+
+auto BasicWriteAheadLog::truncate(Id lsn) -> Status
+{
+    // m_log->trace("truncate");
     auto current = m_set.last();
 
     while (!current.is_null()) {
-        Id first_lsn;
-        auto s = read_first_lsn(
-            *m_store, m_prefix, current, first_lsn);
+        auto r = read_first_lsn(
+            *m_store, m_prefix, current, m_set);
 
-        if (s.is_ok()) {
-            if (first_lsn <= limit)
+        if (r.has_value()) {
+            if (*r <= lsn)
                 break;
-        } else if (!s.is_not_found()) {
+        } else if (auto s = r.error(); !s.is_not_found()) {
             return s;
         }
         if (!current.is_null()) {
             const auto name = m_prefix + current.to_name();
             CALICO_TRY_S(m_store->remove_file(name));
             m_set.remove_after(SegmentId {current.value - 1});
-            m_log->info("removed segment {} with first LSN {}", name, first_lsn.value);
+            // m_log->info("removed segment {} with first LSN {}", name, first_lsn.value);
         }
         current = m_set.id_before(current);
     }
     return ok();
 }
-
-#undef PROPAGATE_WORKER_ERROR
 
 } // namespace Calico

@@ -54,6 +54,20 @@ public:
         return t;
     }
 
+    [[nodiscard]]
+    auto try_dequeue() -> std::optional<T>
+    {
+        std::unique_lock lock {m_mu};
+        if (m_queue.empty())
+            return std::nullopt;
+        auto t = std::move(m_queue.front());
+        m_queue.pop_front();
+        lock.unlock();
+
+        m_full_cv.notify_one();
+        return t;
+    }
+
     auto finish() -> void
     {
         {

@@ -371,7 +371,7 @@ auto Node::child_id(Size index) const -> Id
     return rightmost_child_id();
 }
 
-auto Node::read_key(Size index) const -> BytesView
+auto Node::read_key(Size index) const -> Slice
 {
     CALICO_EXPECT_LT(index, cell_count());
     return read_cell(index).key();
@@ -426,7 +426,7 @@ auto Node::TEST_validate() const -> void
     }
 }
 
-auto Node::find_ge(BytesView key) const -> FindGeResult
+auto Node::find_ge(Slice key) const -> FindGeResult
 {
     long lower {};
     auto upper = static_cast<long>(cell_count());
@@ -594,7 +594,7 @@ auto Node::insert_at(Size index, Cell cell) -> void
     //    CALICO_VALIDATE(validate());
 }
 
-auto Node::remove(BytesView key) -> bool
+auto Node::remove(Slice key) -> bool
 {
     if (auto [index, found_eq] = find_ge(key); found_eq) {
         remove_at(index, read_cell(index).size());

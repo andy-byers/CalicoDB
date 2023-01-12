@@ -40,11 +40,9 @@ auto main(int argc, const char *argv[]) -> int
     std::error_code ignore;
     std::filesystem::remove_all(path, ignore);
 
-    // Use small pages and few frames to cause lots of stealing.
     Options options;
     options.page_size = 0x200;
-    options.cache_size = 16;
-//    options.log_level = spdlog::level::info;
+    options.cache_size = 64 * options.page_size;
     Database db;
     expect_ok(db.open(path.string(), options));
     {
@@ -56,7 +54,7 @@ auto main(int argc, const char *argv[]) -> int
             for (Size j {}; j < XACT_SIZE; ++j) {
                 const auto key = make_key<KEY_WIDTH>(i + j);
                 const auto value = random.get<std::string>('a', 'z', random.get(10UL, 100UL));
-                expect_ok(db.insert(stob(key), stob(value)));
+                expect_ok(db.insert(key, value));
                 ofs << value << '\n';
             }
             expect_ok(xact.commit());
@@ -71,7 +69,7 @@ auto main(int argc, const char *argv[]) -> int
     for (Size i {}; i < LIMIT; ++i) {
         const auto key = std::to_string(random.get(num_committed * 2));
         const auto value = random.get<std::string>('\x00', '\xFF', random.get(options.page_size / 2));
-        expect_ok(db.insert(stob(key), stob(value)));
+        expect_ok(db.insert(key, value));
 
         // Keep the database from getting too large.
         if (const auto info = db.info(); info.record_count() > max_database_size) {

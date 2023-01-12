@@ -12,25 +12,25 @@ class Node;
 class Cell {
 public:
     struct Parameters {
-        BytesView key;
-        BytesView local_value;
+        Slice key;
+        Slice local_value;
         Id overflow_id;
         Size value_size {};
         Size page_size {};
         bool is_external {};
     };
 
-    static auto read_at(BytesView, Size, bool) -> Cell;
+    static auto read_at(Slice, Size, bool) -> Cell;
     static auto read_at(const Node &, Size) -> Cell;
     explicit Cell(const Parameters &);
 
     ~Cell() = default;
     [[nodiscard]] auto copy() const -> Cell;
-    [[nodiscard]] auto key() const -> BytesView;
+    [[nodiscard]] auto key() const -> Slice;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto value_size() const -> Size;
     [[nodiscard]] auto overflow_size() const -> Size;
-    [[nodiscard]] auto local_value() const -> BytesView;
+    [[nodiscard]] auto local_value() const -> Slice;
     [[nodiscard]] auto overflow_id() const -> Id;
     [[nodiscard]] auto left_child_id() const -> Id;
     auto set_is_external(bool) -> void;
@@ -54,8 +54,8 @@ public:
 private:
     Cell() = default;
 
-    BytesView m_key;
-    BytesView m_local_value;
+    Slice m_key;
+    Slice m_local_value;
     Id m_left_child_id;
     Id m_overflow_id;
     Size m_value_size {};
@@ -64,8 +64,8 @@ private:
     bool m_is_attached {true};
 };
 
-auto make_external_cell(BytesView, BytesView, Size) -> Cell;
-auto make_internal_cell(BytesView, Size) -> Cell;
+auto make_external_cell(Slice, Slice, Size) -> Cell;
+auto make_internal_cell(Slice, Size) -> Cell;
 
 } // namespace Calico
 

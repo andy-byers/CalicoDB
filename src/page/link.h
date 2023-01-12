@@ -39,7 +39,7 @@ public:
 
     [[nodiscard]] auto next_id() const -> Id;
     [[nodiscard]] auto content_size() const -> Size;
-    [[nodiscard]] auto content_view() const -> BytesView;
+    [[nodiscard]] auto content_view() const -> Slice;
     auto set_next_id(Id) -> void;
     auto content_bytes(Size) -> Bytes;
 

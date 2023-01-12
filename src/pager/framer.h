@@ -35,7 +35,7 @@ public:
     }
 
     [[nodiscard]]
-    auto data() const -> BytesView
+    auto data() const -> Slice
     {
         return m_bytes;
     }
@@ -114,7 +114,7 @@ public:
 private:
     Framer(std::unique_ptr<RandomEditor>, AlignedBuffer, Size, Size);
     [[nodiscard]] auto read_page_from_file(Id, Bytes) const -> tl::expected<bool, Status>;
-    [[nodiscard]] auto write_page_to_file(Id, BytesView) const -> Status;
+    [[nodiscard]] auto write_page_to_file(Id, Slice) const -> Status;
 
     [[nodiscard]]
     auto frame_at_impl(Size id) -> Frame&

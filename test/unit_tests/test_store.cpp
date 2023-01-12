@@ -32,7 +32,7 @@ auto open_blob(Store &store, const std::string &name) -> std::unique_ptr<Base>
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
-    EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+    EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
     return std::unique_ptr<Base> {temp};
 }
 
@@ -56,7 +56,7 @@ constexpr auto write_out_randomly(Random &random, Writer &writer, const std::str
 {
     constexpr Size num_chunks {20};
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
-    auto in = stob(message);
+    Slice in {message};
     Size counter {};
 
     while (!in.is_empty()) {
@@ -87,12 +87,13 @@ auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::strin
     while (!out.is_empty()) {
         const auto chunk_size = std::min(out.size(), random.get(size / num_chunks));
         auto chunk = out.copy().truncate(chunk_size);
-        const auto s = reader.read(chunk, counter);
+        Size read_size = chunk.size();
+        const auto s = reader.read(chunk.data(), read_size, counter);
 
-        if (chunk.size() < chunk_size)
+        if (read_size != chunk_size)
             return backing;
 
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().data();
         EXPECT_EQ(chunk.size(), chunk_size);
         out.advance(chunk_size);
         counter += chunk_size;
@@ -140,9 +141,10 @@ public:
 TEST_F(RandomFileReaderTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    auto bytes = stob(backing);
-    ASSERT_TRUE(file->read(bytes, 0).is_ok());
-    ASSERT_TRUE(bytes.is_empty());
+    Bytes bytes {backing};
+    auto read_size = bytes.size();
+    ASSERT_TRUE(file->read(bytes.data(), read_size, 0).is_ok());
+    ASSERT_EQ(read_size, 0);
 }
 
 TEST_F(RandomFileReaderTests, ReadsBackContents)
@@ -164,9 +166,10 @@ public:
 TEST_F(RandomFileEditorTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    auto bytes = stob(backing);
-    ASSERT_TRUE(file->read(bytes, 0).is_ok());
-    ASSERT_TRUE(bytes.is_empty());
+    Bytes bytes {backing};
+    auto read_size = bytes.size();
+    ASSERT_TRUE(file->read(bytes.data(), read_size, 0).is_ok());
+    ASSERT_EQ(read_size, 0);
 }
 
 TEST_F(RandomFileEditorTests, WritesOutAndReadsBackData)
@@ -221,7 +224,7 @@ TEST_F(HeapTests, ReaderCannotCreateBlob)
 {
     RandomReader *temp {};
     const auto s = storage->open_random_reader("nonexistent", &temp);
-    ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what();
+    ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what().to_string();
 }
 
 TEST_F(HeapTests, ReadsAndWrites)
@@ -249,47 +252,49 @@ TEST_F(HeapTests, ReaderStopsAtEOF)
     write_out_randomly(random, *ra_editor, data);
 
     std::string buffer(data.size() * 2, '\x00');
-    auto bytes = stob(buffer);
-    ASSERT_OK(ra_reader->read(bytes, 0));
-    ASSERT_EQ(bytes.to_string(), data);
+    Bytes bytes {buffer};
+    auto read_size = bytes.size();
+    ASSERT_OK(ra_reader->read(bytes.data(), read_size, 0));
+    ASSERT_EQ(bytes.truncate(read_size).to_string(), data);
 }
 
 TEST(SystemTests, SystemErrorBehavior)
 {
     errno = ENOENT;
-    ASSERT_TRUE(system::error().is_system_error());
+    ASSERT_TRUE(Posix::error().is_system_error());
     ASSERT_EQ(errno, 0);
 
-    ASSERT_TRUE(system::error(std::errc::no_such_file_or_directory).is_system_error());
+    ASSERT_TRUE(Posix::error(std::errc::no_such_file_or_directory).is_system_error());
 }
 
 TEST(SystemTests, ClosedFileErrors)
 {
     char backing[1];
     Bytes bytes {backing, sizeof(backing)};
-    ASSERT_TRUE(system::file_read(-1, bytes).error().is_system_error());
-    ASSERT_TRUE(system::file_write(-1, bytes).error().is_system_error());
-    ASSERT_TRUE(system::file_seek(-1, 0, SEEK_CUR).error().is_system_error());
-    ASSERT_TRUE(system::file_close(-1).is_system_error());
-    ASSERT_TRUE(system::file_sync(-1).is_system_error());
+    auto read_size = bytes.size();
+    ASSERT_TRUE(Posix::file_read(-1, bytes.data(), read_size).error().is_system_error());
+    ASSERT_TRUE(Posix::file_write(-1, bytes).error().is_system_error());
+    ASSERT_TRUE(Posix::file_seek(-1, 0, SEEK_CUR).error().is_system_error());
+    ASSERT_TRUE(Posix::file_close(-1).is_system_error());
+    ASSERT_TRUE(Posix::file_sync(-1).is_system_error());
 }
 
 TEST(SystemTests, NonexistentResourceErrors)
 {
-    ASSERT_TRUE(system::file_size("__does_not_exist__").error().is_system_error());
-    ASSERT_TRUE(system::file_remove("__does_not_exist__").is_system_error());
-    ASSERT_TRUE(system::file_resize("__does_not_exist__", 0).is_system_error());
-    ASSERT_TRUE(system::dir_remove("__does_not_exist__").is_system_error());
+    ASSERT_TRUE(Posix::file_size("__does_not_exist__").error().is_system_error());
+    ASSERT_TRUE(Posix::file_remove("__does_not_exist__").is_system_error());
+    ASSERT_TRUE(Posix::file_resize("__does_not_exist__", 0).is_system_error());
+    ASSERT_TRUE(Posix::dir_remove("__does_not_exist__").is_system_error());
 }
 
 TEST(SystemTests, OpenAndClose)
 {
     static constexpr auto PATH = "/tmp/__calico_system_tests";
-    auto fd = system::file_open(PATH, O_CREAT | O_RDWR, 0666).value();
-    ASSERT_OK(system::file_close(fd));
-    ASSERT_OK(system::file_exists(PATH));
-    ASSERT_OK(system::file_remove(PATH));
-    ASSERT_TRUE(system::file_exists(PATH).is_not_found());
+    auto fd = Posix::file_open(PATH, O_CREAT | O_RDWR, 0666).value();
+    ASSERT_OK(Posix::file_close(fd));
+    ASSERT_OK(Posix::file_exists(PATH));
+    ASSERT_OK(Posix::file_remove(PATH));
+    ASSERT_TRUE(Posix::file_exists(PATH).is_not_found());
 }
 
 } // namespace Calico

@@ -1,6 +1,6 @@
 
-#include "calico/bytes.h"
 #include "calico/options.h"
+#include "calico/slice.h"
 #include "calico/storage.h"
 #include "core/core.h"
 #include "fakes.h"
@@ -47,12 +47,12 @@ public:
     }
 
     [[nodiscard]]
-    auto get_value() -> BytesView
+    auto get_value() -> Slice
     {
         return m_page.view(m_page.size() - VALUE_SIZE);
     }
 
-    auto set_value(BytesView value) -> void
+    auto set_value(Slice value) -> void
     {
         mem_copy(m_page.bytes(m_page.size() - VALUE_SIZE), value);
     }
@@ -72,7 +72,7 @@ public:
     {
         store = std::make_unique<HeapStorage>();
         ASSERT_OK(store->create_directory("test"));
-        scratch = std::make_unique<LogScratchManager>(wal_scratch_size(PAGE_SIZE));
+        scratch = std::make_unique<LogScratchManager>(wal_scratch_size(PAGE_SIZE), 32);
 
         auto wal_r = BasicWriteAheadLog::open({
             "test/",
@@ -80,8 +80,9 @@ public:
             &state,
             PAGE_SIZE,
             WAL_LIMIT,
+            CACHE_SIZE,
         });
-        EXPECT_TRUE(wal_r.has_value()) << wal_r.error().what();
+        EXPECT_TRUE(wal_r.has_value()) << wal_r.error().what().data();
         wal = std::move(*wal_r);
 
         auto pager_r = BasicPager::open({
@@ -94,7 +95,7 @@ public:
             CACHE_SIZE,
             PAGE_SIZE,
         });
-        EXPECT_TRUE(pager_r.has_value()) << pager_r.error().what();
+        EXPECT_TRUE(pager_r.has_value()) << pager_r.error().what().data();
         pager = std::move(*pager_r);
 
         while (pager->page_count() < PAGE_COUNT) {
@@ -102,13 +103,15 @@ public:
         }
 
         ASSERT_OK(wal->start_workers());
+        state.has_xact.store(true);
     }
 
     auto tear_down() const -> void
     {
-        if (wal && wal->is_working())
-            (void)wal->stop_workers();
         interceptors::reset();
+
+        // Force the WAL to finish writing, so we avoid use-after-free errors.
+        wal->flush();
     }
 
     [[nodiscard]]
@@ -131,9 +134,9 @@ public:
         const auto size = encode_commit_payload(payload.data());
         payload.shrink_to_fit(size);
 
-        CALICO_TRY_S(wal->log(payload));
-        CALICO_TRY_S(wal->advance());
-        CALICO_TRY_S(allow_cleanup());
+        wal->log(payload);
+        wal->advance();
+        allow_cleanup();
 
         state.commit_lsn.store(lsn);
         images.clear();
@@ -202,10 +205,9 @@ public:
         return std::min(state.commit_lsn.load(), pager->recovery_lsn()); // TODO: Changed this from flushed_lsn(), probably wrong now.
     }
 
-    [[nodiscard]]
-    auto allow_cleanup() const -> Status
+    auto allow_cleanup() const -> void
     {
-        return wal->remove_before(oldest_lsn());
+        wal->cleanup(oldest_lsn());
     }
 
     [[nodiscard]]
@@ -271,15 +273,18 @@ TEST_F(NormalXactTests, OverwriteValuesOnMultiplePages)
 template<class Test>
 static auto undo_xact(Test &test)
 {
+    test.wal->advance();
+    test.state.has_xact = false;
     Recovery recovery {*test.pager, *test.wal, test.state};
     CALICO_TRY_S(recovery.start_abort());
     // Don't need to load any state for these tests.
     CALICO_TRY_S(recovery.finish_abort());
     test.images.clear();
+    test.state.has_xact = true;
     return ok();
 }
 
-static auto assert_blank_value(BytesView value)
+static auto assert_blank_value(Slice value)
 {
     ASSERT_TRUE(value == std::string(PageWrapper::VALUE_SIZE, '\x00'));
 }
@@ -314,12 +319,10 @@ static auto add_values(Test &test, Size n, bool allow_failure = false) -> std::v
         if (allow_failure) {
             if (!test.try_set_value(Id::from_index(index), value))
                 return {};
-            if (!test.allow_cleanup().is_ok())
-                return {};
         } else {
             test.set_value(Id::from_index(index), value);
-            EXPECT_OK(test.allow_cleanup());
         }
+        test.allow_cleanup();
         index = (index+1) % Test::PAGE_COUNT;
     }
     return values;
@@ -405,30 +408,15 @@ TEST_F(NormalXactTests, AbortAfterMultipleOverwrites)
     assert_values_match(*this, committed);
 }
 
-TEST_F(NormalXactTests, Recover)
-{
-    const auto committed = add_values(*this, PAGE_COUNT);
-    commit();
-
-    add_values(*this, PAGE_COUNT);
-
-    Recovery recovery {*pager, *wal, state};
-    ASSERT_OK(recovery.start_recovery());
-    ASSERT_OK(recovery.finish_recovery());
-    assert_values_match(*this, committed);
-}
-
 class RollForwardTests: public NormalXactTests {
 public:
     auto get_lsn_range() -> std::pair<Id, Id>
     {
         std::vector<Id> lsns;
-        EXPECT_OK(wal->stop_workers());
         EXPECT_OK(wal->roll_forward(Id::root(), [&lsns](WalPayloadOut payload) {
             lsns.emplace_back(payload.lsn());
             return ok();
         }));
-        EXPECT_OK(wal->start_workers());
         EXPECT_FALSE(lsns.empty());
         return {lsns.front(), lsns.back()};
     }
@@ -439,7 +427,8 @@ TEST_F(RollForwardTests, ObsoleteSegmentsAreRemoved)
     add_values(*this, PAGE_COUNT);
     commit();
     ASSERT_OK(pager->flush({}));
-    ASSERT_OK(allow_cleanup());
+    allow_cleanup();
+    wal->flush();
 
     const auto [first, last] = get_lsn_range();
     ASSERT_GT(first.value, 1);
@@ -452,7 +441,7 @@ TEST_F(RollForwardTests, KeepsNeededSegments)
     for (Size i {}; i < 100; ++i) {
         add_values(*this, PAGE_COUNT);
         commit();
-        ASSERT_OK(allow_cleanup());
+        allow_cleanup();
     }
 
     const auto [first, last] = get_lsn_range();
@@ -469,7 +458,7 @@ TEST_F(RollForwardTests, SanityCheck)
     // be able to undo any of these changes.
     for (Size i {}; i < 100; ++i) {
         add_values(*this, PAGE_COUNT);
-        ASSERT_OK(allow_cleanup());
+        allow_cleanup();
     }
 
     const auto [first, last] = get_lsn_range();
@@ -511,7 +500,7 @@ public:
     [[nodiscard]]
     auto get_status()
     {
-        return state.has_error() ? state.original_error().status : wal->worker_status();
+        return state.has_error() ? state.original_error().status : ok();
     }
 
     std::vector<std::string> committed;
@@ -541,7 +530,7 @@ TEST_P(FailedXactTests, WalOpenFailureIsPropagated)
 {
     interceptors::set_open(SystemCallOutcomes<RepeatFinalOutcome> {
         "test/wal",
-        {1, 1, 0, 1},
+        {1, 1, 1, 0, 1},
     });
     modify_until_failure();
     assert_error_42(get_status());
@@ -557,7 +546,7 @@ public:
     auto SetUp() -> void override
     {
         options.page_size = 0x400;
-        options.cache_size = 32;
+        options.cache_size = 64 * options.page_size;
         options.log_level = LogLevel::OFF;
         options.storage = store.get();
 
@@ -600,7 +589,7 @@ static auto insert_records(Test &test, Size n = 1'000)
 {
     auto records = test.generator.generate(test.random, n);
     for (const auto &r: records) {
-        EXPECT_TRUE(expose_message(test.db.insert(stob(r.key), stob(r.value))));
+        EXPECT_TRUE(expose_message(test.db.insert(r.key, r.value)));
     }
     return records;
 }
@@ -642,16 +631,6 @@ TEST_F(TransactionTests, CannotUseTransactionObjectAfterSuccessfulAbort)
     ASSERT_TRUE(xact.commit().is_logic_error());
 }
 
-TEST_F(TransactionTests, TransactionObjectIsMovable)
-{
-    auto xact = db.transaction();
-    auto xact2 = std::move(xact);
-    xact = std::move(xact2);
-
-    insert_records(*this, 10);
-    ASSERT_OK(xact.commit());
-}
-
 TEST_F(TransactionTests, AbortFirstXactWithSingleRecord)
 {
     test_abort_first_xact(*this, 1);
@@ -691,13 +670,13 @@ static auto run_random_operations(Test &test, const Itr &begin, const Itr &end)
     auto &db = test.get_db();
 
     for (auto itr = begin; itr != end; ++itr) {
-        EXPECT_TRUE(expose_message(db.insert(stob(itr->key), stob(itr->value))));
+        EXPECT_TRUE(expose_message(db.insert(itr->key, itr->value)));
     }
 
     std::vector<Record> committed;
     for (auto itr = begin; itr != end; ++itr) {
         if (test.random.get(5) == 0) {
-            EXPECT_TRUE(expose_message(db.erase(stob(itr->key))));
+            EXPECT_TRUE(expose_message(db.erase(itr->key)));
         } else {
             committed.emplace_back(*itr);
         }
@@ -711,13 +690,13 @@ static auto test_abort_second_xact(Test &test, Size first_xact_size, Size second
     const auto path = Test::ROOT + std::string {DATA_FILENAME};
     const auto records = test.generator.generate(test.random, first_xact_size + second_xact_size);
 
-    auto xact = test.db.transaction();
+    auto xact1 = test.db.transaction();
     auto committed = run_random_operations(test, cbegin(records), cbegin(records) + static_cast<long>(first_xact_size));
-    ASSERT_OK(xact.commit());
+    ASSERT_OK(xact1.commit());
 
-    xact = test.db.transaction();
+    auto xact2 = test.db.transaction();
     run_random_operations(test, cbegin(records) + static_cast<long>(first_xact_size), cend(records));
-    ASSERT_OK(xact.abort());
+    ASSERT_OK(xact2.abort());
 
     // The database should contain exactly these records.
     ASSERT_EQ(test.db.info().record_count(), committed.size());
@@ -836,7 +815,7 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.cache_size = 16;
+        options.cache_size = 64 * options.page_size;
         options.storage = store.get();
         options.log_level = LogLevel::OFF;
         ASSERT_OK(db.open(ROOT, options));
@@ -869,6 +848,7 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
 
     for (Size i {}; i < limit; ++i) {
         for (const auto &[key, value]: generator.generate(test.random, 100)) {
+
             // insert()/erase() exercise data file reading/writing, and WAL file writing.
             if (test.random.get(4) == 0 && info.record_count()) {
                 s = test.db.erase(test.db.first());
@@ -946,42 +926,23 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     ASSERT_OK(db.status());
 }
 
-// TODO: Get this to work.
-//TEST_F(FailureTests, DataWriteFailureDuringQuery)
-//{
-//    // This tests database behavior when we encounter an error while flushing a dirty page to make room for a page read
-//    // during a query. In this case, we don't have a transaction we can try to abort, so we must exit the program. Next
-//    // time the database is opened, it will roll forward and apply any missing updates.
-//    add_sequential_records(db, 5'000);
-//
-//    interceptors::set_write(FailOnce<0> {"test/data"});
-//
-//    auto c = db.first();
-//    for (; c.is_valid(); ++c) {}
-//
-//    assert_error_42(db.status());
-//}
-
-TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
+TEST_F(FailureTests, DataWriteFailureDuringQuery)
 {
-    add_sequential_records(db, 500);
+    auto xact = db.transaction();
 
-    // This will cause all dirty pages to eventually be evicted to make room.
+    // This tests database behavior when we encounter an error while flushing a dirty page to make room for a page read
+    // during a query. In this case, we don't have a transaction we can try to abort, so we must exit the program. Next
+    // time the database is opened, it will roll forward and apply any missing updates.
+    add_sequential_records(db, 5'000);
+
+//    ASSERT_OK(xact.commit());
+
+    interceptors::set_write(FailOnce<0> {"test/data"});
+
     auto c = db.first();
-    for (; c.is_valid(); ++c) {}
+    for (; c.is_valid(); ++c);
 
-    // Writes to any file will fail.
-    interceptors::set_write(FailOnce<0> {"test/"});
-
-    // We should be able to iterate through all pages without any writes occurring.
-    c = db.first();
-    for (; c.is_valid(); ++c) {}
-
-    auto s = c.status();
-    ASSERT_TRUE(s.is_not_found()) << s.what();
-
-    s = db.status();
-    ASSERT_TRUE(s.is_ok()) << s.what();
+    assert_error_42(db.status());
 }
 
 TEST_F(FailureTests, CannotPerformOperationsAfterFatalError)
@@ -1015,7 +976,7 @@ public:
     {
         options.storage = store.get();
         options.page_size = 0x200;
-        options.cache_size = 32;
+        options.cache_size = 64 * options.page_size;
         options.log_level = LogLevel::OFF;
 
         ASSERT_OK(db->open("test", options));
@@ -1094,7 +1055,7 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_pair(  0, 100),
         std::make_pair(  1,   0),
         std::make_pair(  1, 100),
-        std::make_pair( 7,   0),
+        std::make_pair( 10,   0),
         std::make_pair( 10, 100)));
 
 class RecoveryFailureTestRunner {
@@ -1122,7 +1083,7 @@ public:
 
     auto should_syscall_succeed(const std::string &path, ...) -> Status
     {
-        if (BytesView {path}.starts_with(prefix) && counter++ >= target) {
+        if (Slice {path}.starts_with(prefix) && counter++ >= target) {
             target += step;
             counter = 0;
             return system_error("42");

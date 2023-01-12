@@ -5,7 +5,7 @@
 #include <tl/expected.hpp>
 #include <system_error>
 
-namespace Calico::system {
+namespace Calico::Posix {
 
 static constexpr int SUCCESS = 0;
 static constexpr int FAILURE = -1;
@@ -15,8 +15,8 @@ static constexpr int FAILURE = -1;
 
 [[nodiscard]] auto file_exists(const std::string &) -> Status;
 [[nodiscard]] auto file_size(const std::string &) -> tl::expected<Size, Status>;
-[[nodiscard]] auto file_read(int, Bytes) -> tl::expected<Size, Status>;
-[[nodiscard]] auto file_write(int, BytesView) -> tl::expected<Size, Status>;
+[[nodiscard]] auto file_read(int, Byte *, Size) -> tl::expected<Size, Status>;
+[[nodiscard]] auto file_write(int, Slice) -> tl::expected<Size, Status>;
 [[nodiscard]] auto file_seek(int, long, int) -> tl::expected<Size, Status>;
 [[nodiscard]] auto file_open(const std::string &, int, int) -> tl::expected<int, Status>;
 [[nodiscard]] auto file_close(int) -> Status;

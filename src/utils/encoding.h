@@ -4,9 +4,9 @@
 #ifndef CALICO_UTILS_ENCODING_H
 #define CALICO_UTILS_ENCODING_H
 
-#include "calico/bytes.h"
 #include "calico/options.h"
-#include <zconf.h>
+#include "calico/slice.h"
+#include "utils.h"
 
 namespace Calico {
 
@@ -16,7 +16,7 @@ inline auto get_u16(const Byte *in) noexcept -> std::uint16_t
     return static_cast<std::uint16_t>(src[1] | (src[0] << 8));
 }
 
-inline auto get_u16(BytesView in) noexcept -> std::uint16_t
+inline auto get_u16(Slice in) noexcept -> std::uint16_t
 {
     return get_u16(in.data());
 }
@@ -30,7 +30,7 @@ inline auto get_u32(const Byte *in) noexcept -> std::uint32_t
            (static_cast<std::uint32_t>(src[0]) << 24);
 }
 
-inline auto get_u32(BytesView in) noexcept -> std::uint32_t
+inline auto get_u32(Slice in) noexcept -> std::uint32_t
 {
     return get_u32(in.data());
 }
@@ -48,7 +48,7 @@ inline auto get_u64(const Byte *in) noexcept -> std::uint64_t
            (static_cast<std::uint64_t>(src[0]) << 56);
 }
 
-inline auto get_u64(BytesView in) noexcept -> std::uint64_t
+inline auto get_u64(Slice in) noexcept -> std::uint64_t
 {
     return get_u64(in.data());
 }

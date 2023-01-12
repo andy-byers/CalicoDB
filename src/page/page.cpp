@@ -63,12 +63,12 @@ auto Page::size() const -> Size
     return m_data.size();
 }
 
-auto Page::view(Size offset) const -> BytesView
+auto Page::view(Size offset) const -> Slice
 {
     return m_data.range(offset);
 }
 
-auto Page::view(Size offset, Size size) const -> BytesView
+auto Page::view(Size offset, Size size) const -> Slice
 {
     return m_data.range(offset, size);
 }
@@ -90,7 +90,7 @@ auto Page::bytes(Size offset, Size size) -> Bytes
     return m_data.range(offset, size);
 }
 
-auto Page::write(BytesView in, Size offset) -> void
+auto Page::write(Slice in, Size offset) -> void
 {
     mem_copy(bytes(offset, in.size()), in);
 }

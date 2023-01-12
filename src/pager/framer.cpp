@@ -54,8 +54,6 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
     CALICO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
-    CALICO_EXPECT_GE(frame_count, MINIMUM_CACHE_SIZE);
-    CALICO_EXPECT_LE(frame_count, MAXIMUM_CACHE_SIZE);
 
     RandomEditor *temp_file {};
     auto s = storage->open_random_editor(prefix + DATA_FILENAME, &temp_file);
@@ -166,22 +164,23 @@ auto Framer::read_page_from_file(Id id, Bytes out) const -> tl::expected<bool, S
     if (offset >= file_size)
         return false;
 
-    auto s = m_file->read(out, offset);
+    auto read_size = out.size();
+    auto s = m_file->read(out.data(), read_size, offset);
     if (!s.is_ok()) return tl::make_unexpected(s);
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
-    if (out.size() == m_page_size)
+    if (read_size == m_page_size)
         return true;
 
     // In that case, we will hit EOF here.
-    if (out.is_empty())
+    if (read_size == 0)
         return false;
 
     return tl::make_unexpected(system_error(
         "could not read page {}: incomplete read (read {}/{} B)", id.value, out.size(), m_page_size));
 }
 
-auto Framer::write_page_to_file(Id id, BytesView in) const -> Status
+auto Framer::write_page_to_file(Id id, Slice in) const -> Status
 {
     CALICO_EXPECT_EQ(m_page_size, in.size());
     return m_file->write(in, id.as_index() * in.size());

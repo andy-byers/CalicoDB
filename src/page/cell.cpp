@@ -7,7 +7,7 @@
 
 namespace Calico {
 
-auto Cell::read_at(BytesView in, Size page_size, bool is_external) -> Cell
+auto Cell::read_at(Slice in, Size page_size, bool is_external) -> Cell
 {
     Cell cell;
     cell.m_page_size = page_size;
@@ -95,12 +95,12 @@ auto Cell::set_overflow_id(Id id) -> void
     m_overflow_id = id;
 }
 
-auto Cell::key() const -> BytesView
+auto Cell::key() const -> Slice
 {
     return m_key;
 }
 
-auto Cell::local_value() const -> BytesView
+auto Cell::local_value() const -> Slice
 {
     CALICO_EXPECT_TRUE(m_is_external);
     return m_local_value;
@@ -175,7 +175,7 @@ auto Cell::set_is_external(bool is_external) -> void
     }
 }
 
-auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
+auto make_external_cell(Slice key, Slice value, Size page_size) -> Cell
 {
     CALICO_EXPECT_FALSE(key.is_empty());
     const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
@@ -195,7 +195,7 @@ auto make_external_cell(BytesView key, BytesView value, Size page_size) -> Cell
     return Cell {param};
 }
 
-auto make_internal_cell(BytesView key, Size page_size) -> Cell
+auto make_internal_cell(Slice key, Size page_size) -> Cell
 {
     CALICO_EXPECT_FALSE(key.is_empty());
     Cell::Parameters param;
