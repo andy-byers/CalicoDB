@@ -59,9 +59,6 @@ public:
 
     [[nodiscard]] auto destroy() && -> Status;
     auto write(WalPayloadIn payload) -> void;
-    // NOTE: advance() will block until the writer has advanced to a new segment. It should be called after writing
-    //       a commit record so that everything is written to disk before we return, and the writer is set up on the
-    //       next segment. flush() will also block until the tail buffer has been flushed.
     auto advance() -> void;
     auto flush() -> void;
 

@@ -2,6 +2,19 @@
 
 namespace Calico {
 
+WalCleanup::WalCleanup(const Parameters &param)
+    : m_prefix {param.prefix.to_string()},
+      m_limit {param.limit},
+      m_storage {param.storage},
+      m_system {param.system},
+      m_set {param.set}
+{
+    CALICO_EXPECT_FALSE(m_prefix.empty());
+    CALICO_EXPECT_NE(m_storage, nullptr);
+    CALICO_EXPECT_NE(m_system, nullptr);
+    CALICO_EXPECT_NE(m_set, nullptr);
+}
+
 auto WalCleanup::cleanup() -> void
 {
     const auto limit = m_limit->load();

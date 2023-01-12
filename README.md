@@ -87,6 +87,8 @@ Writing in reverse-sequential order represents the worst case for the B<sup>+</s
 3. Update the documentation in [doc](doc), or get rid of it in favor of something like Doxygen
 4. Work on performance
     + B<sup>+</sup>-tree splitting algorithm could be modified to favor sequential writes less
+        + This involves "splitting right" when the overflow key is greater than or equal to the median key and "splitting left" otherwise
+        + Should at least make it so inserting in reverse sequential order is about as fast as inserting in forward sequential order
 5. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
     + Look into SQLite's pointer maps

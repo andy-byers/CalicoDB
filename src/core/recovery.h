@@ -17,7 +17,11 @@ struct PageDelta {
     Size size {};
 };
 
+static_assert(sizeof(PageDelta) == 2 * sizeof(Size));
+
 struct DeltaDescriptor {
+    static constexpr Size HEADER_SIZE {2 * sizeof(Id)};
+
     struct Delta {
         Size offset {};
         Slice data {};
@@ -29,12 +33,16 @@ struct DeltaDescriptor {
 };
 
 struct FullImageDescriptor {
+    static constexpr Size HEADER_SIZE {2 * sizeof(Id)};
+
     Id pid;
     Id lsn;
     Slice image;
 };
 
 struct CommitDescriptor {
+    static constexpr Size HEADER_SIZE {sizeof(Id)};
+
     Id lsn;
 };
 

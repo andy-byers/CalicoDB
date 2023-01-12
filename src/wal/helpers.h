@@ -1,15 +1,16 @@
 #ifndef CALICO_WAL_HELPERS_H
 #define CALICO_WAL_HELPERS_H
 
-#include "calico/storage.h"
+#include <mutex>
+#include <map>
+#include <tl/expected.hpp>
 #include "record.h"
+#include "calico/storage.h"
+#include "core/recovery.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/system.h"
 #include "utils/types.h"
-#include <mutex>
-#include <map>
-#include <tl/expected.hpp>
 
 namespace Calico {
 
@@ -22,7 +23,8 @@ inline constexpr auto wal_block_size(Size page_size) -> Size
 [[nodiscard]]
 inline constexpr auto wal_scratch_size(Size page_size) -> Size
 {
-    return page_size * WAL_SCRATCH_SCALE;
+    // This returns the maximum size needed to hold a single WAL record.
+    return page_size + sizeof(PageDelta) + sizeof(DeltaDescriptor::HEADER_SIZE);
 }
 
 /*

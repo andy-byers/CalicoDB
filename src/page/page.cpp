@@ -1,5 +1,5 @@
 #include "page.h"
-#include "deltas.h"
+#include "delta.h"
 #include "pager/pager.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
@@ -111,7 +111,10 @@ auto Page::apply_update(const DeltaDescriptor &info) -> void
 
 auto Page::collect_deltas() -> std::vector<PageDelta>
 {
-    compress_deltas(m_deltas);
+    const auto compressed_size = compress_deltas(m_deltas);
+    const auto full_size = m_data.size() + sizeof(PageDelta);
+    if (compressed_size > full_size)
+        m_deltas = {{0, m_data.size()}};
     return m_deltas;
 }
 

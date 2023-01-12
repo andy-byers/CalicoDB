@@ -82,24 +82,21 @@ auto Core::open(Slice path, const Options &options) -> Status
     // The database will store 0 in the "page_size" header field if the maximum page size is used (1 << 16 cannot be held
     // in a std::uint16_t).
     if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
-
     static constexpr auto PRIMARY = "could not open database";
-    static constexpr auto SMALL_CACHE = "cache is too small";
-    auto cache_size = sanitized.cache_size;
+    static constexpr Size MIN_BUFFERS {4};
 
     // Allocate the WAL object and buffers.
     {
-        const auto wal_cache_approx = cache_size / 100 * sanitized.wal_split;
-        const auto wal_buffer_size = wal_scratch_size(sanitized.page_size);
-        const auto wal_buffer_count = wal_cache_approx / wal_buffer_size;
-        cache_size -= wal_buffer_count * wal_buffer_size;
+        const auto scratch_size = wal_scratch_size(sanitized.page_size);
+        const auto total_size = sanitized.wal_buffer_size / scratch_size * scratch_size;
+        const auto scratch_count = total_size / scratch_size;
 
-        if (wal_buffer_count < 4)
-            return invalid_argument("{}: {}", PRIMARY, SMALL_CACHE);
+        if (scratch_count < 4)
+            return invalid_argument("{}: WAL write buffer is too small (should be at least {} B)", PRIMARY, MIN_BUFFERS * scratch_size);
 
         m_scratch = std::make_unique<LogScratchManager>(
-            wal_buffer_size,
-            wal_buffer_count);
+            scratch_size,
+            scratch_count);
 
         // The WAL segments may be stored elsewhere.
         auto wal_prefix = sanitized.wal_prefix.is_empty()
@@ -113,7 +110,7 @@ auto Core::open(Slice path, const Options &options) -> Status
             m_system.get(),
             sanitized.page_size,
             sanitized.wal_limit,
-            wal_buffer_count,
+            scratch_count,
         });
         if (!r.has_value())
             return r.error();
@@ -122,6 +119,11 @@ auto Core::open(Slice path, const Options &options) -> Status
 
     // Allocate the pager object and cache frames.
     {
+        const auto frame_count = sanitized.page_cache_size / sanitized.page_size;
+
+        if (frame_count < MIN_BUFFERS)
+            return invalid_argument("{}: page cache is too small (should be at least {} B)", PRIMARY, MIN_BUFFERS * sanitized.page_size);
+
         auto r = BasicPager::open({
             m_prefix,
             m_store,
@@ -129,7 +131,7 @@ auto Core::open(Slice path, const Options &options) -> Status
             &m_images,
             m_wal.get(),
             m_system.get(),
-            cache_size / sanitized.page_size,
+            frame_count,
             sanitized.page_size,
         });
         if (!r.has_value())
@@ -483,10 +485,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     if (!is_power_of_two(options.page_size))
         return tl::make_unexpected(invalid_argument(
             "{}: page size of {} is invalid (must be a power of 2)", MSG, options.page_size));
-
-    if (options.cache_size < options.page_size * 8) // TODO: Constant and good value for this. Should be checked in Core::open().
-        return tl::make_unexpected(invalid_argument(
-            "{}: cache size of {} is too small (minimum frame count is {})", MSG, options.cache_size, options.page_size * 8));
 
     if (options.wal_limit < MINIMUM_WAL_LIMIT)
         return tl::make_unexpected(invalid_argument(

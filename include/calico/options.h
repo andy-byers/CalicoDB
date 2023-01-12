@@ -7,7 +7,8 @@ namespace Calico {
 
 class Storage;
 
-static constexpr Size DEFAULT_CACHE_SIZE {0x100000}; // 1 MiB
+static constexpr Size DEFAULT_PAGE_CACHE_SIZE {0x100000}; // 1 MiB
+static constexpr Size DEFAULT_WAL_BUFFER_SIZE {0x100000}; // 1 MiB
 static constexpr Size MINIMUM_PAGE_SIZE {0x100};
 static constexpr Size DEFAULT_PAGE_SIZE {0x2000};
 static constexpr Size MAXIMUM_PAGE_SIZE {0x10000};
@@ -36,9 +37,9 @@ enum class LogTarget {
 
 struct Options {
     Size page_size {DEFAULT_PAGE_SIZE};
-    Size cache_size {DEFAULT_CACHE_SIZE};
+    Size page_cache_size {DEFAULT_PAGE_CACHE_SIZE};
+    Size wal_buffer_size {DEFAULT_WAL_BUFFER_SIZE};
     Size wal_limit {DEFAULT_WAL_LIMIT};
-    Size wal_split {DEFAULT_WAL_SPLIT};
     Slice wal_prefix;
     LogLevel log_level {LogLevel::OFF};
     LogTarget log_target {};

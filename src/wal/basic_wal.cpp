@@ -176,19 +176,33 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
     // We should be on the first segment.
     CALICO_EXPECT_TRUE(reader->seek_previous().is_not_found());
 
-    // Find the segment containing the first update that hasn't been applied yet.
     auto s = ok();
-    while (s.is_ok()) {
+    const auto on_seek = [&] {
+        const auto id = reader->segment_id();
+
         Id first_lsn;
         s = reader->read_first_lsn(first_lsn);
 
         // This indicates an empty file. Try to seek back to the last segment.
         if (s.is_not_found()) {
-            if (reader->segment_id() != m_set.last())
-                return corruption("missing WAL data in segment {}", reader->segment_id().value);
-            s = reader->seek_previous();
-            break;
+            if (id != m_set.last()) {
+                s = corruption("missing WAL data in segment {}", reader->segment_id().value);
+            } else if (id != m_set.first()) {
+                s = reader->seek_previous();
+            } else {
+                s = ok();
+            }
+            return Id::null();
         }
+        if (s.is_ok())
+            m_set.set_first_lsn(reader->segment_id(), first_lsn);
+
+        return first_lsn;
+    };
+
+    // Find the segment containing the first update that hasn't been applied yet.
+    while (s.is_ok()) {
+        const auto first_lsn = on_seek();
         CALICO_TRY_S(s);
 
         if (first_lsn >= begin_lsn) {
@@ -204,6 +218,10 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
         s = ok();
 
     while (s.is_ok()) {
+        if (const auto first_lsn = on_seek(); first_lsn.is_null())
+            break;
+        CALICO_TRY_S(s);
+
         s = reader->roll([&callback, begin_lsn, this](auto payload) {
             m_last_lsn = payload.lsn();
             if (m_last_lsn >= begin_lsn)

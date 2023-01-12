@@ -354,7 +354,7 @@ struct formatter<Cco::Options> {
         auto out = fmt::format("({} B) {{", sizeof(options));
         out += fmt::format("wal_limit: {}", options.wal_limit);
         out += fmt::format("page_size: {}, ", options.page_size);
-        out += fmt::format("frame_count: {}, ", options.cache_size);
+        out += fmt::format("frame_count: {}, ", options.page_cache_size);
         out += fmt::format("log_level: {}, ", static_cast<int>(options.log_level));
         out += fmt::format("store: {}, ", static_cast<void*>(options.storage));
         return format_to(ctx.out(), "Options {}}}", out);

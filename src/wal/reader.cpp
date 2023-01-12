@@ -7,7 +7,7 @@ namespace Calico {
 
 template<class ...Args>
 [[nodiscard]]
-auto read_corruption_error(const std::string &hint_fmt, Args &&...args) -> Status
+static auto read_corruption_error(const std::string &hint_fmt, Args &&...args) -> Status
 {
     const auto hint_str = fmt::format(fmt::runtime(hint_fmt), std::forward<Args>(args)...);
     return corruption("cannot raed WAL record: record is corrupted ({})", hint_str);

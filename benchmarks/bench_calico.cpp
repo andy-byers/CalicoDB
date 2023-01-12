@@ -2,18 +2,13 @@
 #include <calico/calico.h>
 #include <filesystem>
 
-namespace fs = std::filesystem;
-
 static constexpr auto DB_PATH = "__bench_calico__";
 static constexpr Calico::Size DB_KEY_SIZE {12};
 static constexpr Calico::Size DB_VALUE_SIZE {88};
 static constexpr Calico::Size DB_RECORD_COUNT {10'000};
 
-// 2 MiB of cache memory.
-static constexpr Calico::Options DB_OPTIONS {
-    0x2000,
-    0x200000,
-};
+// Default database options.
+static constexpr Calico::Options DB_OPTIONS;
 
 const std::string g_value(DB_VALUE_SIZE, ' ');
 
@@ -32,11 +27,13 @@ static auto make_key(Calico::Size key) -> std::string
 
 static auto setup()
 {
-    std::error_code error;
-    std::filesystem::remove_all(DB_PATH, error);
-    assert(!error && "Failed to remove old database");
+    std::filesystem::remove_all(DB_PATH);
     Calico::Database db;
-    assert(db.open(DB_PATH, DB_OPTIONS).is_ok());
+
+    if (const auto s = db.open(DB_PATH, DB_OPTIONS); !s.is_ok()) {
+        std::fprintf(stderr, "error: %s", s.what().data());
+        std::exit(EXIT_FAILURE);
+    }
     return db;
 }
 
@@ -46,9 +43,10 @@ static auto run_sequential_writes(Calico::Database &db, benchmark::State &state)
 
     for (auto _ : state) {
         state.PauseTiming();
-        auto key = make_key<DB_KEY_SIZE>(i++);
+        const auto key = make_key<DB_KEY_SIZE>(i++);
         state.ResumeTiming();
-        assert(db.insert(key, g_value).is_ok());
+
+        benchmark::DoNotOptimize(db.insert(key, g_value));
     }
 }
 
@@ -64,7 +62,7 @@ static auto BM_SequentialWrites(benchmark::State &state)
     auto db = setup();
     auto xact = db.transaction();
     run_sequential_writes(db, state);
-    assert(xact.commit().is_ok());
+    benchmark::DoNotOptimize(xact.commit());
 }
 BENCHMARK(BM_SequentialWrites);
 
@@ -74,7 +72,7 @@ static auto run_random_writes(Calico::Database &db, benchmark::State &state)
         state.PauseTiming();
         auto key = make_key<DB_KEY_SIZE>(rand());
         state.ResumeTiming();
-        assert(db.insert(key, g_value).is_ok());
+        benchmark::DoNotOptimize(db.insert(key, g_value).is_ok());
     }
 }
 
@@ -90,7 +88,7 @@ static auto BM_RandomWrites(benchmark::State& state)
     auto db = setup();
     auto xact = db.transaction();
     run_random_writes(db, state);
-    assert(xact.commit().is_ok());
+    benchmark::DoNotOptimize(xact.commit().is_ok());
 }
 BENCHMARK(BM_RandomWrites);
 
@@ -98,14 +96,14 @@ static auto run_overwrite(Calico::Database &db, benchmark::State &state)
 {
     for (Calico::Size i {}; i < DB_RECORD_COUNT; ++i) {
         auto key = make_key<DB_KEY_SIZE>(i);
-        assert(db.insert(key, g_value).is_ok());
+        benchmark::DoNotOptimize(db.insert(key, g_value).is_ok());
     }
 
     for (auto _ : state) {
         state.PauseTiming();
         auto key = make_key<DB_KEY_SIZE>(rand() % DB_RECORD_COUNT);
         state.ResumeTiming();
-        assert(db.insert(key, g_value).is_ok());
+        benchmark::DoNotOptimize(db.insert(key, g_value).is_ok());
     }
 }
 
@@ -121,7 +119,7 @@ static auto BM_Overwrite(benchmark::State& state)
     auto db = setup();
     auto xact = db.transaction();
     run_overwrite(db, state);
-    assert(xact.commit().is_ok());
+    benchmark::DoNotOptimize(xact.commit().is_ok());
 }
 BENCHMARK(BM_Overwrite);
 
@@ -131,9 +129,9 @@ static auto setup_with_records(Calico::Size n)
     auto xact = db.transaction();
     for (Calico::Size i {}; i < n; ++i) {
         auto key = make_key<DB_KEY_SIZE>(rand());
-        assert(db.insert(key, g_value).is_ok());
+        benchmark::DoNotOptimize(db.insert(key, g_value).is_ok());
     }
-    assert(xact.commit().is_ok());
+    benchmark::DoNotOptimize(xact.commit().is_ok());
     return db;
 }
 

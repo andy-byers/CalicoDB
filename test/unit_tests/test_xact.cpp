@@ -546,7 +546,7 @@ public:
     auto SetUp() -> void override
     {
         options.page_size = 0x400;
-        options.cache_size = 64 * options.page_size;
+        options.page_cache_size = 64 * options.page_size;
         options.log_level = LogLevel::OFF;
         options.storage = store.get();
 
@@ -815,7 +815,7 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.cache_size = 64 * options.page_size;
+        options.page_cache_size = 64 * options.page_size;
         options.storage = store.get();
         options.log_level = LogLevel::OFF;
         ASSERT_OK(db.open(ROOT, options));
@@ -998,7 +998,7 @@ public:
     {
         options.storage = store.get();
         options.page_size = 0x200;
-        options.cache_size = 64 * options.page_size;
+        options.page_cache_size = 64 * options.page_size;
         options.log_level = LogLevel::OFF;
 
         ASSERT_OK(db->open("test", options));

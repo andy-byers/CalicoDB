@@ -523,9 +523,6 @@ auto Node::defragment(std::optional<Size> skipped_cid) -> void
     auto end = m_page.size();
     std::vector<Size> ptrs(n);
 
-    // TODO: We're using scratch memory for this now. We only have one scratch buffer, shared among all nodes. This is okay right now
-    //       since all tree operations happen in a single thread, so only one node can be defragmenting at any given time.
-
     for (Size index {}; index < n; ++index) {
         if (index == to_skip)
             continue;
@@ -547,9 +544,9 @@ auto Node::defragment(std::optional<Size> skipped_cid) -> void
 
 auto Node::insert(Cell cell) -> void
 {
-    const auto [index, should_be_false] = find_ge(cell.key());
+    const auto [index, falsy] = find_ge(cell.key());
     // Keys should be unique.
-    CALICO_EXPECT_FALSE(should_be_false);
+    CALICO_EXPECT_FALSE(falsy);
     insert_at(index, cell);
 }
 
@@ -634,7 +631,7 @@ auto transfer_cell(Node &src, Node &dst, Size index) -> void
     src.remove_at(index, cell_size);
 }
 
-auto accumulate_occupied_space(const Node &Ln, const Node &rn)
+static auto accumulate_occupied_space(const Node &Ln, const Node &rn)
 {
     const auto page_size = Ln.size();
     CALICO_EXPECT_EQ(page_size, rn.size());
@@ -653,14 +650,14 @@ auto accumulate_occupied_space(const Node &Ln, const Node &rn)
     return total - PageLayout::HEADER_SIZE + NodeLayout::HEADER_SIZE;
 }
 
-auto can_merge_internal_siblings(const Node &Ln, const Node &rn, const Cell &separator) -> bool
+static auto can_merge_internal_siblings(const Node &Ln, const Node &rn, const Cell &separator) -> bool
 {
     const auto total = accumulate_occupied_space(Ln, rn) +
                        separator.size() + CELL_POINTER_SIZE;
     return total <= Ln.size();
 }
 
-auto can_merge_external_siblings(const Node &Ln, const Node &rn) -> bool
+static auto can_merge_external_siblings(const Node &Ln, const Node &rn) -> bool
 {
     return accumulate_occupied_space(Ln, rn) <= Ln.size();
 }
@@ -672,7 +669,7 @@ auto can_merge_siblings(const Node &Ln, const Node &rn, const Cell &separator) -
     return can_merge_internal_siblings(Ln, rn, separator);
 }
 
-auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
+static auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
 {
     // Move the separator from the parent to the left child node.
     auto separator = parent.read_cell(index);
@@ -690,7 +687,7 @@ auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
     parent.set_child_id(index, Lc.id());
 }
 
-auto external_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
+static auto external_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
 {
     Lc.set_right_sibling_id(rc.right_sibling_id());
 
@@ -713,7 +710,7 @@ auto merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
     }
 }
 
-auto internal_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
+static auto internal_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
 {
     // Move the separator from the source to the left child node.
     auto separator = parent.read_cell(index);
@@ -732,7 +729,7 @@ auto internal_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
     }
 }
 
-auto external_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
+static auto external_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
 {
     Lc.set_right_sibling_id(rc.right_sibling_id());
 
@@ -797,7 +794,7 @@ auto merge_root(Node &root, Node &child) -> void
 }
 
 template<class Predicate>
-auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> void
+static auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> void
 {
     Size counter {};
     while (predicate(src, dst, counter++)) {
@@ -810,7 +807,7 @@ auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> 
     }
 }
 
-auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
+static auto internal_split_non_root_fast(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     transfer_cells_right_while(Ln, rn, [overflow_index](const Node &src, const Node &, Size) {
         return src.cell_count() > overflow_index;
@@ -823,7 +820,7 @@ auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overfl
     return overflow;
 }
 
-auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
+static auto external_split_non_root_fast(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     // Note that we need to insert the overflow cell into either Ln or rn no matter what, even if it ends up being the separator.
     transfer_cells_right_while(Ln, rn, [&overflow, overflow_index](const Node &src, const Node &, Size counter) {
@@ -845,13 +842,13 @@ auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overfl
     return separator;
 }
 
-auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
+static auto external_split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
     // Figure out where the overflow cell should go.
-    const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
-    CALICO_EXPECT_FALSE(should_be_false);
+    const auto [overflow_idx, falsy] = Ln.find_ge(overflow.key());
+    CALICO_EXPECT_FALSE(falsy);
 
     // Warning: We don't have access to the former right sibling of Ln, but we need to set its left child ID.
     //          We need to make sure to do that in the caller.
@@ -861,7 +858,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     rn.set_parent_id(Ln.parent_id());
 
     if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
-        return split_non_root_fast_external(Ln, rn, overflow, overflow_idx, scratch);
+        return external_split_non_root_fast(Ln, rn, overflow, overflow_idx, scratch);
 
     } else if (overflow_idx == 0) {
         // We need the `!counter` because the condition following it may not be true if we got here from split_root().
@@ -887,7 +884,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     return separator;
 }
 
-auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
+static auto internal_split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
@@ -900,7 +897,7 @@ auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 
     if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
         Ln.set_rightmost_child_id(overflow.left_child_id());
-        return split_non_root_fast_internal(Ln, rn, overflow, overflow_idx, scratch);
+        return internal_split_non_root_fast(Ln, rn, overflow, overflow_idx, scratch);
 
     } else if (overflow_idx == 0) {
         // TODO: Split the other way in this case, as we are possibly inserting reverse sequentially?
@@ -931,8 +928,8 @@ auto split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     CALICO_EXPECT_TRUE(Ln.is_overflowing());
     CALICO_EXPECT_EQ(Ln.is_external(), rn.is_external());
     if (Ln.is_external())
-        return split_external_non_root(Ln, rn, scratch);
-    return split_internal_non_root(Ln, rn, scratch);
+        return external_split_non_root(Ln, rn, scratch);
+    return internal_split_non_root(Ln, rn, scratch);
 }
 
 } // namespace Calico
