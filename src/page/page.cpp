@@ -3,6 +3,7 @@
 #include "pager/pager.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
+#include "wal/helpers.h"
 
 namespace Calico {
 
@@ -112,8 +113,8 @@ auto Page::apply_update(const DeltaDescriptor &info) -> void
 auto Page::collect_deltas() -> std::vector<PageDelta>
 {
     const auto compressed_size = compress_deltas(m_deltas);
-    const auto full_size = m_data.size() + sizeof(PageDelta);
-    if (compressed_size > full_size)
+    const auto full_size = wal_scratch_size(m_data.size());
+    if (compressed_size + sizeof(PageDelta) + DeltaDescriptor::HEADER_SIZE > full_size)
         m_deltas = {{0, m_data.size()}};
     return m_deltas;
 }

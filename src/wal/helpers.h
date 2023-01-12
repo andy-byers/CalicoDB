@@ -23,8 +23,8 @@ inline constexpr auto wal_block_size(Size page_size) -> Size
 [[nodiscard]]
 inline constexpr auto wal_scratch_size(Size page_size) -> Size
 {
-    // This returns the maximum size needed to hold a single WAL record.
-    return page_size + sizeof(PageDelta) + sizeof(DeltaDescriptor::HEADER_SIZE);
+    // This returns the maximum size needed to hold a single WAL record payload.
+    return page_size * 2; // TODO: Could be smaller.
 }
 
 /*
