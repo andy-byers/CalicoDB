@@ -167,6 +167,9 @@ auto BasicPager::recovery_lsn() -> Id
 
 auto BasicPager::try_make_available() -> tl::expected<bool, Status>
 {
+    if (m_system->has_error())
+        return tl::make_unexpected(m_system->original_error().status);
+
     Id page_id;
     auto evicted = m_registry.evict([&](auto id, auto entry) {
         const auto &frame = m_framer.frame_at(entry.frame_index);

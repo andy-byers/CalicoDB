@@ -532,7 +532,7 @@ public:
         return message;
     }
 
-    System state {"test", LogLevel::TRACE, LogTarget::STDERR_COLOR};
+    System state {"test", LogLevel::OFF, {}};
     Status status {ok()};
     bool has_xact {};
     Id commit_lsn;
