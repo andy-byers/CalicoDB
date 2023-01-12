@@ -115,9 +115,10 @@ auto WalWriter::advance() -> void
     CALICO_ERROR_IF(advance_segment());
 }
 
-auto WalWriter::destroy() && -> Status
+auto WalWriter::destroy() && -> void
 {
-    return close_segment();
+    auto s = close_segment();
+    CALICO_ERROR_IF(s.is_logic_error() ? ok() : s);
 }
 
 auto WalWriter::open_segment(SegmentId id) -> Status

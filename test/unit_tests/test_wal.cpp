@@ -516,7 +516,7 @@ public:
 
     WalWriterTests()
         : scratch {wal_scratch_size(PAGE_SIZE), 32},
-          system {"test", LogLevel::OFF, {}},
+          system {"test", LogLevel::TRACE, LogTarget::STDERR_COLOR},
           tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer {WalWriter::Parameters{
               PREFIX,
@@ -542,7 +542,8 @@ public:
 
 TEST_F(WalWriterTests, Destroy)
 {
-    ASSERT_OK(std::move(writer).destroy());
+    std::move(writer).destroy();
+    ASSERT_FALSE(system.has_error());
     ASSERT_FALSE(store->file_exists(PREFIX + SegmentId::root().to_name()).is_ok());
 }
 
@@ -555,7 +556,8 @@ TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterNormalClose)
     writer.advance();
 
     // Blocks until the last segment is deleted.
-    ASSERT_OK(std::move(writer).destroy());
+    std::move(writer).destroy();
+    ASSERT_FALSE(system.has_error());
     ASSERT_TRUE(set.segments().empty());
 
     std::vector<std::string> children;
@@ -575,7 +577,7 @@ static auto test_write_until_failure(Test &test) -> void
         test.writer.write(payload);
     }
 
-    ASSERT_FALSE(std::move(test.writer).destroy().is_ok());
+    std::move(test.writer).destroy();
     assert_error_42(test.system.original_error().status);
 }
 
@@ -684,7 +686,8 @@ public:
         for (Size i {}; i < num_writes; ++i)
             tasks.dispatch(get_payload(), i == num_writes - 1);
 
-        return std::move(writer).destroy();
+        std::move(writer).destroy();
+        return system.has_error() ? system.original_error().status : ok();
     }
 
     [[nodiscard]]
@@ -772,7 +775,7 @@ public:
     std::string reader_tail;
     std::string writer_tail;
     Random random {UnitTests::random_seed};
-    System system {PREFIX, LogLevel::OFF, {}};
+    System system {PREFIX, LogLevel::TRACE, LogTarget::STDERR_COLOR};
     WalWriter writer;
     Worker<Event> tasks;
 };
@@ -1057,7 +1060,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
 //        }
 //    }
 //
-//    System state {"test", LogLevel::OFF, {}};
+//    System state {"test", LogLevel::TRACE, LogTarget::STDERR_COLOR};
 //    Random random {42};
 //    Size payloads_since_commit {};
 //    Id commit_lsn;

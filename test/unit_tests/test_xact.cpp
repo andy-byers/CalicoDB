@@ -216,7 +216,7 @@ public:
         return random.get<std::string>('a', 'z', PageWrapper::VALUE_SIZE);
     }
 
-    System state {"test", LogLevel::OFF, {}};
+    System state {"test", LogLevel::TRACE, LogTarget::STDERR_COLOR};
     Random random {UnitTests::random_seed};
     Status status {ok()};
     std::unique_ptr<HeapStorage> store;

@@ -57,7 +57,7 @@ public:
 
     explicit WalWriter(const Parameters &param);
 
-    [[nodiscard]] auto destroy() && -> Status;
+    auto destroy() && -> void;
     auto write(WalPayloadIn payload) -> void;
     auto advance() -> void;
     auto flush() -> void;

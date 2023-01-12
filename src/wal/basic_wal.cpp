@@ -65,7 +65,7 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
     // m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
 
     if (m_writer != nullptr)
-        CALICO_ERROR_IF(std::move(*m_writer).destroy());
+        std::move(*m_writer).destroy();
 }
 
 auto BasicWriteAheadLog::start_workers() -> Status
