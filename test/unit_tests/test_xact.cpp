@@ -952,7 +952,7 @@ TEST_F(FailureTests, DatabaseNeverWritesAfterPagesAreFlushedDuringQuery)
     // This will cause all dirty pages to eventually be evicted to make room.
     auto c = db.first();
     for (; c.is_valid(); ++c) {}
-
+    ASSERT_OK(db.commit()); // TODO
     // Writes to any file will fail.
     interceptors::set_write(FailOnce<0> {"test/"});
 
