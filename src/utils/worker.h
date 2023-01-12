@@ -49,9 +49,9 @@ private:
 
         Task task;
         Queue<EventWrapper> queue;
-        std::atomic<bool> is_waiting {};
         mutable std::mutex mu;
         std::condition_variable cv;
+        bool is_waiting {};
     };
 
     static auto run(State *state) -> void
@@ -64,7 +64,8 @@ private:
             state->task(std::move(event->event));
 
             if (event->needs_wait) {
-                state->is_waiting.store(false);
+                std::lock_guard lock {state->mu};
+                state->is_waiting = false;
                 state->cv.notify_one();
             }
         }
@@ -77,11 +78,14 @@ private:
 
     auto dispatch_and_wait(T t) -> void
     {
-        m_state.is_waiting.store(true);
-        m_state.queue.enqueue(EventWrapper {std::move(t), true});
+        {
+            std::lock_guard lock {m_state.mu};
+            m_state.is_waiting = true;
+            m_state.queue.enqueue(EventWrapper {std::move(t), true});
+        }
         std::unique_lock lock {m_state.mu};
         m_state.cv.wait(lock, [this] {
-            return !m_state.is_waiting.load();
+            return !m_state.is_waiting;
         });
     }
 
