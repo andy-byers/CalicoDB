@@ -23,15 +23,14 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + Forward and reverse iteration using cursors
 + Crash protection using write-ahead logging
 + Variable-length keys and values (see [Caveats](#caveats))
-+ API only exposes objects (no pointers to deal with)
-+ Allows tuning of various parameters (page size, cache size, etc.)
++ Various parameters can be tuned (page size, cache size, etc.)
 + Transactions provided as first-class objects
 
 ## Caveats
 + Only tested on 64-bit Ubuntu and OSX
 + Maximum key length is anywhere from 29 B to ~16 KiB, depending on the chosen page size
 + Maximum value length is roughly 4 GiB
-+ Only one transaction may be running at any given time
++ Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for concurrent cursors
 
 ## Dependencies
