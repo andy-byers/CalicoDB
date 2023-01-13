@@ -46,27 +46,27 @@ namespace Calico {
     return sanitized;
 }
 
-auto Info::record_count() const -> Size
+auto Statistics::record_count() const -> Size
 {
     return m_core->tree().record_count();
 }
 
-auto Info::page_count() const -> Size
+auto Statistics::page_count() const -> Size
 {
     return m_core->pager().page_count();
 }
 
-auto Info::page_size() const -> Size
+auto Statistics::page_size() const -> Size
 {
     return m_core->pager().page_size();
 }
 
-auto Info::maximum_key_size() const -> Size
+auto Statistics::maximum_key_size() const -> Size
 {
     return get_max_local(page_size());
 }
 
-auto Info::cache_hit_ratio() const -> double
+auto Statistics::cache_hit_ratio() const -> double
 {
     return m_core->pager().hit_ratio();
 }
@@ -121,12 +121,14 @@ auto Core::open(Slice path, const Options &options) -> Status
         if (!wal_prefix.ends_with('/'))
             wal_prefix += '/';
 
+        const auto wal_limit = buffer_count * 32;
+
         auto r = BasicWriteAheadLog::open({
             wal_prefix,
             m_store,
             m_system.get(),
             sanitized.page_size,
-            sanitized.wal_buffer_size,
+            wal_limit,
             buffer_count,
         });
         if (!r.has_value())
@@ -227,9 +229,9 @@ auto Core::path() const -> std::string
     return m_prefix;
 }
 
-auto Core::info() -> Info
+auto Core::statistics() -> Statistics
 {
-    return Info {*this};
+    return Statistics {*this};
 }
 
 auto Core::handle_errors() -> Status
@@ -506,25 +508,31 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         return tl::make_unexpected(invalid_argument(
             "{}: WAL write buffer of size {} B is too small (minimum size is {} B)", MSG, options.wal_buffer_size, wal_scratch_size(options.page_size) * MINIMUM_BUFFER_COUNT));
 
-    if (options.log_max_size < MINIMUM_LOG_MAX_SIZE)
+    if (options.max_log_size < MINIMUM_LOG_MAX_SIZE)
         return tl::make_unexpected(invalid_argument(
-            "{}: log file maximum size of {} B is too small (minimum size is {} B)", MSG, options.log_max_size, MINIMUM_LOG_MAX_SIZE));
+            "{}: log file maximum size of {} B is too small (minimum size is {} B)", MSG, options.max_log_size, MINIMUM_LOG_MAX_SIZE));
 
-    if (options.log_max_size > MAXIMUM_LOG_MAX_SIZE)
+    if (options.max_log_size > MAXIMUM_LOG_MAX_SIZE)
         return tl::make_unexpected(invalid_argument(
-            "{}: log file maximum size of {} B is too large (maximum size is {} B)", MSG, options.log_max_size, MAXIMUM_LOG_MAX_SIZE));
+            "{}: log file maximum size of {} B is too large (maximum size is {} B)", MSG, options.max_log_size, MAXIMUM_LOG_MAX_SIZE));
 
-    if (options.log_max_files < MINIMUM_LOG_MAX_FILES)
+    if (options.max_log_files < MINIMUM_LOG_MAX_FILES)
         return tl::make_unexpected(invalid_argument(
-            "{}: log maximum file count of {} is too small (minimum count is {})", MSG, options.log_max_files, MINIMUM_LOG_MAX_FILES));
+            "{}: log maximum file count of {} is too small (minimum count is {})", MSG, options.max_log_files, MINIMUM_LOG_MAX_FILES));
 
-    if (options.log_max_files > MAXIMUM_LOG_MAX_FILES)
+    if (options.max_log_files > MAXIMUM_LOG_MAX_FILES)
         return tl::make_unexpected(invalid_argument(
-            "{}: log maximum file count of {} is too large (maximum count is {})", MSG, options.log_max_files, MAXIMUM_LOG_MAX_FILES));
+            "{}: log maximum file count of {} is too large (maximum count is {})", MSG, options.max_log_files, MAXIMUM_LOG_MAX_FILES));
 
     {
         // May have already been created by spdlog.
         auto s = store.create_directory(prefix);
+        if (!s.is_ok() && !s.is_logic_error())
+            return tl::make_unexpected(s);
+    }
+
+    if (!options.wal_prefix.is_empty()) {
+        auto s = store.create_directory(options.wal_prefix.to_string());
         if (!s.is_ok() && !s.is_logic_error())
             return tl::make_unexpected(s);
     }

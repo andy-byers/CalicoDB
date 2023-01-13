@@ -72,7 +72,7 @@ auto main(int argc, const char *argv[]) -> int
         expect_ok(db.insert(key, value));
 
         // Keep the database from getting too large.
-        if (const auto info = db.info(); info.record_count() > max_database_size) {
+        if (const auto info = db.statistics(); info.record_count() > max_database_size) {
             while (info.record_count() >= max_database_size / 2) {
                 const auto cursor = db.first();
                 CALICO_EXPECT_TRUE(cursor.is_valid());

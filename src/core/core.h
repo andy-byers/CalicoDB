@@ -45,7 +45,7 @@ public:
     [[nodiscard]] auto find_exact(Slice) -> Cursor;
     [[nodiscard]] auto first() -> Cursor;
     [[nodiscard]] auto last() -> Cursor;
-    [[nodiscard]] auto info() -> Info;
+    [[nodiscard]] auto statistics() -> Statistics;
 
     [[nodiscard]]
     auto store() -> Storage&

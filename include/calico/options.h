@@ -11,10 +11,10 @@ static constexpr Size MINIMUM_PAGE_SIZE {0x100};
 static constexpr Size DEFAULT_PAGE_SIZE {0x2000};
 static constexpr Size MAXIMUM_PAGE_SIZE {0x10000};
 static constexpr Size MINIMUM_LOG_MAX_SIZE {0xA000};
-static constexpr Size DEFAULT_LOG_MAX_SIZE {0x100000};
+static constexpr Size DEFAULT_MAX_LOG_SIZE {0x100000};
 static constexpr Size MAXIMUM_LOG_MAX_SIZE {0xA00000};
 static constexpr Size MINIMUM_LOG_MAX_FILES {1};
-static constexpr Size DEFAULT_LOG_MAX_FILES {4};
+static constexpr Size DEFAULT_MAX_LOG_FILES {4};
 static constexpr Size MAXIMUM_LOG_MAX_FILES {32};
 
 enum class LogLevel {
@@ -27,21 +27,21 @@ enum class LogLevel {
 
 enum class LogTarget {
     FILE,
-    STDERR,
     STDOUT,
-    STDERR_COLOR,
+    STDERR,
     STDOUT_COLOR,
+    STDERR_COLOR,
 };
 
 struct Options {
     Size page_size {DEFAULT_PAGE_SIZE};
     Size page_cache_size {};
     Size wal_buffer_size {};
-    Size log_max_size {DEFAULT_LOG_MAX_SIZE};
-    Size log_max_files {DEFAULT_LOG_MAX_FILES};
+    Slice wal_prefix;
+    Size max_log_size {DEFAULT_MAX_LOG_SIZE};
+    Size max_log_files {DEFAULT_MAX_LOG_FILES};
     LogLevel log_level {LogLevel::OFF};
     LogTarget log_target {};
-    Slice wal_prefix;
     Storage *storage {};
 };
 

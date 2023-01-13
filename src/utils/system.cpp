@@ -52,7 +52,7 @@ System::System(const std::string &prefix, const Options &options)
         switch (options.log_target) {
             case LogTarget::FILE:
                 CALICO_EXPECT_FALSE(prefix.empty());
-                m_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(prefix + LOG_FILENAME, options.log_max_size, options.log_max_files);
+                m_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(prefix + LOG_FILENAME, options.max_log_size, options.max_log_files);
                 break;
             case LogTarget::STDOUT:
                 m_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();

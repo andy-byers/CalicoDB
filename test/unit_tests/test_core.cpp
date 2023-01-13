@@ -59,7 +59,7 @@ public:
 
     auto erase_one(const std::string &maybe) -> void
     {
-        ASSERT_GT(core->info().record_count(), 0);
+        ASSERT_GT(core->statistics().record_count(), 0);
         auto s = core->erase(core->find(maybe));
         if (s.is_not_found())
             s = core->erase(core->first());
@@ -84,7 +84,7 @@ TEST_F(DatabaseOpenTests, MaximumPageSize)
     for (Size i {}; i < 2; ++i) {
         Database db;
         ASSERT_OK(db.open(ROOT, options));
-        ASSERT_EQ(db.info().page_size(), MAXIMUM_PAGE_SIZE);
+        ASSERT_EQ(db.statistics().page_size(), MAXIMUM_PAGE_SIZE);
         ASSERT_OK(db.close());
     }
 }
@@ -116,7 +116,7 @@ TEST_F(BasicDatabaseTests, DestroyDatabase)
 {
     Database db;
     ASSERT_OK(db.open(ROOT, options));
-    ASSERT_OK(Database::destroy(std::move(db)));
+    ASSERT_OK(std::move(db).destroy());
 }
 
 TEST_F(BasicDatabaseTests, DatabaseIsMovable)
@@ -211,7 +211,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     }
 
     ASSERT_OK(db.open(ROOT, options));
-    CALICO_EXPECT_EQ(db.info().record_count(), records.size());
+    CALICO_EXPECT_EQ(db.statistics().record_count(), records.size());
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(db, key);
         ASSERT_TRUE(c.is_valid());
