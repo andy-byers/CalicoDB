@@ -35,7 +35,7 @@ struct SegmentId: public Id {
         static constexpr Size PREFIX_SIZE {std::char_traits<char>::length(WAL_PREFIX)};
 
         if (name.size() <= PREFIX_SIZE)
-            return SegmentId {null().value};
+            return SegmentId::null();
 
         auto digits = name.advance(PREFIX_SIZE);
 
@@ -43,7 +43,7 @@ struct SegmentId: public Id {
         const auto is_valid = std::all_of(digits.data(), digits.data() + digits.size(), [](auto c) {return std::isdigit(c);});
 
         if (!is_valid)
-            return SegmentId {null().value};
+            return SegmentId::null();
 
         return SegmentId {std::stoull(digits.to_string())};
     }

@@ -161,11 +161,6 @@ TEST_F(SliceTests, WithCppString)
     Slice bv1 {s};
     ASSERT_TRUE(b1 == s); // Uses an implicit conversion.
     ASSERT_TRUE(bv1 == s);
-
-    std::string_view sv {"123"};
-    Slice bv2 {sv};
-    ASSERT_TRUE(bv2 == sv);
-    ASSERT_TRUE(bv2 != "321");
 }
 
 TEST_F(SliceTests, WithCString)

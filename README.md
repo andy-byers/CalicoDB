@@ -3,7 +3,7 @@
 > **Warning**: This library is not yet stable, nor is it code reviewed. 
 > Please don't use it for anything serious!
 
-Calico DB is an embedded key-value database written in C++17.
+Calico DB is an embedded key-value database written in C++20.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 
 <p align="center">

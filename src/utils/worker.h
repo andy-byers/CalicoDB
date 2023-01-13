@@ -9,7 +9,7 @@
 
 namespace Calico {
 
-template<class T>
+template<std::movable T>
 class Worker final {
 public:
     using Task = std::function<void(T)>;
@@ -36,8 +36,8 @@ public:
     }
 
 private:
-    struct EventWrapper {
-        T event;
+    struct Event {
+        T value;
         bool needs_wait {};
     };
 
@@ -48,10 +48,10 @@ private:
         {}
 
         Task task;
-        Queue<EventWrapper> queue;
-        std::atomic<bool> is_waiting {};
+        Queue<Event> queue;
         mutable std::mutex mu;
         std::condition_variable cv;
+        bool is_waiting {};
     };
 
     static auto run(State *state) -> void
@@ -61,10 +61,11 @@ private:
             if (!event.has_value())
                 break;
 
-            state->task(std::move(event->event));
+            state->task(std::move(event->value));
 
             if (event->needs_wait) {
-                state->is_waiting.store(false);
+                std::lock_guard lock {state->mu};
+                state->is_waiting = false;
                 state->cv.notify_one();
             }
         }
@@ -72,16 +73,19 @@ private:
 
     auto dispatch_and_return(T t) -> void
     {
-        m_state.queue.enqueue(EventWrapper {std::move(t), false});
+        m_state.queue.enqueue(Event {std::move(t), false});
     }
 
     auto dispatch_and_wait(T t) -> void
     {
-        m_state.is_waiting.store(true);
-        m_state.queue.enqueue(EventWrapper {std::move(t), true});
+        {
+            std::lock_guard lock {m_state.mu};
+            m_state.is_waiting = true;
+            m_state.queue.enqueue(Event {std::move(t), true});
+        }
         std::unique_lock lock {m_state.mu};
         m_state.cv.wait(lock, [this] {
-            return !m_state.is_waiting.load();
+            return !m_state.is_waiting;
         });
     }
 
