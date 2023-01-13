@@ -20,9 +20,9 @@ set(CALICO_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/test")
 set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic -Wpointer-arith)
 
 include(GNUInstallDirs)
+include(FetchContent)
 
 # Download the library dependencies.
-include(FetchContent)
 FetchContent_Declare(spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG v1.10.0)

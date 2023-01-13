@@ -44,7 +44,8 @@ inline auto write_header(Page &page, const FileHeader &header) -> void
 inline auto compute_header_crc(const FileHeader &state)
 {
     Slice bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
-    return crc_32(bytes.range(CRC_OFFSET));
+    const auto range = bytes.range(CRC_OFFSET);
+    return crc32c::Value(range.data(), range.size());
 }
 
 [[nodiscard]]

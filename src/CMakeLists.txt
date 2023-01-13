@@ -12,7 +12,6 @@ set(CALICO_HEADERS
 file(GLOB_RECURSE CALICO_SOURCES "./*/*.cpp" "./*/*.h")
 list(APPEND CALICO_SOURCES "${CALICO_HEADERS}")
 
-
 add_library(calico
     STATIC "${CALICO_SOURCES}")
 target_include_directories(calico
@@ -23,7 +22,7 @@ target_compile_options(calico
     PRIVATE "${CALICO_WARNINGS}")# -fno-rtti) # TODO: Get Calico DB to compile without exceptions, using "-fno-exceptions".
 target_compile_definitions(calico
     PUBLIC CALICO_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-    CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-    CALICO_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+           CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+           CALICO_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 target_link_libraries(calico
     PRIVATE expected pthread spdlog)
