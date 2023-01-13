@@ -561,9 +561,9 @@ TEST_F(TreeTests, SanityCheck)
     static constexpr Size NUM_RECORDS {5'000};
     static constexpr Size MIN_SIZE {500};
     RecordGenerator::Parameters param;
-    param.mean_key_size = 20;
-    param.mean_value_size = 10;
-    param.spread = 9;
+    param.mean_key_size = 10;
+    param.mean_value_size = 20;
+    param.spread = 1;
     RecordGenerator generator {param};
     Random random {0};
 
@@ -586,7 +586,7 @@ TEST_F(TreeTests, SanityCheck)
             }
         }
         while (tree->record_count())
-            remove_one(random.get<std::string>('\x00', '\xFF', random.get(1UL, 30UL)));
+            remove_one(random.get<std::string>('\x00', '\xFF', random.get(1UL, 10UL)));
     }
 }
 

@@ -1,6 +1,6 @@
 
 #include "calico/cursor.h"
-#include "calico/info.h"
+#include "calico/statistics.h"
 #include "calico/transaction.h"
 #include "core.h"
 #include "pager/basic_pager.h"
@@ -36,11 +36,11 @@ auto Database::close() -> Status
     return s;
 }
 
-auto Database::destroy(Database db) -> Status
+auto Database::destroy() && -> Status
 {
-    CALICO_EXPECT_NE(db.m_core, nullptr);
-    auto s = db.m_core->destroy();
-    db.m_core.reset();
+    CALICO_EXPECT_NE(m_core, nullptr);
+    auto s = m_core->destroy();
+    m_core.reset();
     return s;
 }
 
@@ -94,10 +94,10 @@ auto Database::erase(const Cursor &cursor) -> Status
     return m_core->erase(cursor);
 }
 
-auto Database::info() const -> Info
+auto Database::statistics() const -> Statistics
 {
     CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->info();
+    return m_core->statistics();
 }
 
 auto Database::status() const -> Status

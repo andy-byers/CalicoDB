@@ -1,13 +1,13 @@
-#ifndef CALICO_INFO_H
-#define CALICO_INFO_H
+#ifndef CALICO_STATISTICS_H
+#define CALICO_STATISTICS_H
 
 #include "database.h"
 
 namespace Calico {
 
-class Info final {
+class Statistics final {
 public:
-    ~Info() = default;
+    ~Statistics() = default;
     [[nodiscard]] auto record_count() const -> Size;
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
@@ -17,7 +17,7 @@ public:
 private:
     friend class Core;
 
-    explicit Info(Core &core)
+    explicit Statistics(Core &core)
         : m_core {&core}
     {}
 
@@ -26,4 +26,4 @@ private:
 
 } // namespace Calico
 
-#endif // CALICO_INFO_H
+#endif // CALICO_STATISTICS_H

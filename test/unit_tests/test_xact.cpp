@@ -607,7 +607,7 @@ static auto test_abort_first_xact(Test &test, Size num_records)
     auto xact = test.db.transaction();
     insert_records(test, num_records);
     ASSERT_OK(xact.abort());
-    ASSERT_EQ(test.db.info().record_count(), 0);
+    ASSERT_EQ(test.db.statistics().record_count(), 0);
 
     // Normal operations after abort should work.
     with_xact(test, [&test] {insert_records(test);});
@@ -647,7 +647,7 @@ TEST_F(TransactionTests, CommitIsACheckpoint)
 
     auto xact = db.transaction();
     ASSERT_OK(xact.abort());
-    ASSERT_EQ(db.info().record_count(), 1'000);
+    ASSERT_EQ(db.statistics().record_count(), 1'000);
 }
 
 TEST_F(TransactionTests, KeepsCommittedRecords)
@@ -657,11 +657,11 @@ TEST_F(TransactionTests, KeepsCommittedRecords)
     auto xact = db.transaction();
     erase_records(*this);
     ASSERT_OK(xact.abort());
-    ASSERT_EQ(db.info().record_count(), 1'000);
+    ASSERT_EQ(db.statistics().record_count(), 1'000);
 
     // Normal operations after abort should work.
     with_xact(*this, [this] {erase_records(*this);});
-    ASSERT_EQ(db.info().record_count(), 0);
+    ASSERT_EQ(db.statistics().record_count(), 0);
 }
 
 template<class Test, class Itr>
@@ -699,7 +699,7 @@ static auto test_abort_second_xact(Test &test, Size first_xact_size, Size second
     ASSERT_OK(xact2.abort());
 
     // The database should contain exactly these records.
-    ASSERT_EQ(test.db.info().record_count(), committed.size());
+    ASSERT_EQ(test.db.statistics().record_count(), committed.size());
     for (const auto &[key, value]: committed) {
         ASSERT_TRUE(tools::contains(test.db, key, value));
     }
@@ -768,7 +768,7 @@ TEST_F(TransactionTests, AbortSanityCheck)
         const auto temp = run_random_operations(*this, start, start + j);
         ASSERT_OK(xact.abort());
     }
-    ASSERT_EQ(db.info().record_count(), committed.size());
+    ASSERT_EQ(db.statistics().record_count(), committed.size());
     for (const auto &[key, value]: committed) {
         ASSERT_TRUE(tools::contains(db, key, value));
     }
@@ -844,7 +844,7 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
     param.spread = 0;
     RecordGenerator generator {param};
 
-    const auto info = test.db.info();
+    const auto info = test.db.statistics();
     auto s = ok();
 
     for (Size i {}; i < limit; ++i) {

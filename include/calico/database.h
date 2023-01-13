@@ -9,7 +9,7 @@ namespace Calico {
 
 class Core;
 class Cursor;
-class Info;
+class Statistics;
 class Status;
 class Transaction;
 
@@ -17,9 +17,9 @@ class Database final {
 public:
     Database() noexcept;
 
-    [[nodiscard]] static auto destroy(Database db) -> Status;
     [[nodiscard]] auto open(Slice path, const Options &options = {}) -> Status;
     [[nodiscard]] auto close() -> Status;
+    [[nodiscard]] auto destroy() && -> Status;
     [[nodiscard]] auto find_exact(Slice key) const -> Cursor;
     [[nodiscard]] auto find(Slice key) const -> Cursor;
     [[nodiscard]] auto first() const -> Cursor;
@@ -27,7 +27,7 @@ public:
     [[nodiscard]] auto insert(Slice key, Slice value) -> Status;
     [[nodiscard]] auto erase(Slice key) -> Status;
     [[nodiscard]] auto erase(const Cursor &cursor) -> Status;
-    [[nodiscard]] auto info() const -> Info;
+    [[nodiscard]] auto statistics() const -> Statistics;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto transaction() -> Transaction;
 
