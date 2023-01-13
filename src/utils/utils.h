@@ -25,14 +25,6 @@ enum class PageType : std::uint16_t {
     FREELIST_LINK = 0x4652, // "FR"
 };
 
-inline constexpr auto is_page_type_valid(PageType type) -> bool
-{
-    return type == PageType::INTERNAL_NODE ||
-           type == PageType::EXTERNAL_NODE ||
-           type == PageType::OVERFLOW_LINK ||
-           type == PageType::FREELIST_LINK;
-}
-
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 template<class T>
 constexpr auto is_power_of_two(T v) noexcept -> bool
@@ -40,7 +32,7 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
     return v && !(v & (v - 1));
 }
 
-
+// TODO: Get rid of this class.
 class Bytes {
 public:
     constexpr Bytes() noexcept = default;

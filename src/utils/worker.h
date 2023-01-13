@@ -9,7 +9,7 @@
 
 namespace Calico {
 
-template<class T>
+template<std::movable T>
 class Worker final {
 public:
     using Task = std::function<void(T)>;
@@ -36,8 +36,8 @@ public:
     }
 
 private:
-    struct EventWrapper {
-        T event;
+    struct Event {
+        T value;
         bool needs_wait {};
     };
 
@@ -48,7 +48,7 @@ private:
         {}
 
         Task task;
-        Queue<EventWrapper> queue;
+        Queue<Event> queue;
         mutable std::mutex mu;
         std::condition_variable cv;
         bool is_waiting {};
@@ -61,7 +61,7 @@ private:
             if (!event.has_value())
                 break;
 
-            state->task(std::move(event->event));
+            state->task(std::move(event->value));
 
             if (event->needs_wait) {
                 std::lock_guard lock {state->mu};
@@ -73,7 +73,7 @@ private:
 
     auto dispatch_and_return(T t) -> void
     {
-        m_state.queue.enqueue(EventWrapper {std::move(t), false});
+        m_state.queue.enqueue(Event {std::move(t), false});
     }
 
     auto dispatch_and_wait(T t) -> void
@@ -81,7 +81,7 @@ private:
         {
             std::lock_guard lock {m_state.mu};
             m_state.is_waiting = true;
-            m_state.queue.enqueue(EventWrapper {std::move(t), true});
+            m_state.queue.enqueue(Event {std::move(t), true});
         }
         std::unique_lock lock {m_state.mu};
         m_state.cv.wait(lock, [this] {

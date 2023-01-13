@@ -168,9 +168,9 @@ auto BasicPager::recovery_lsn() -> Id
 auto BasicPager::try_make_available() -> tl::expected<bool, Status>
 {
     Id page_id;
-    auto evicted = m_registry.evict([&](auto id, auto entry) {
+    auto evicted = m_registry.evict([this, &page_id](auto pid, auto entry) {
         const auto &frame = m_framer.frame_at(entry.frame_index);
-        page_id = id;
+        page_id = pid;
 
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to evict.
         if (frame.ref_count() != 0)

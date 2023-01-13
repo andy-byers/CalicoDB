@@ -51,7 +51,6 @@ class BlockAllocator final {
 public:
     ~BlockAllocator() = default;
     [[nodiscard]] static auto usable_space(const Page&) -> Size;
-    [[nodiscard]] static auto compute_free_total(const Page&) -> Size;
     static auto allocate(Page&, Size) -> Size;
     static auto free(Page&, Size, Size) -> void;
     static auto reset(Page&) -> void;

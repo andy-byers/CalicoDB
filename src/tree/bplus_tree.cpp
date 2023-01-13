@@ -251,19 +251,19 @@ static auto validate_siblings(NodeManager &pool) -> void
 
 auto validate_parent_child(NodeManager &pool) -> void
 {
-    auto check_connection = [&pool](Node &node, Size index) -> void {
+    auto check = [&pool](Node &node, Size index) -> void {
         auto child = *pool.acquire(node.child_id(index), false);
         CALICO_EXPECT_EQ(child.parent_id(), node.id());
         CALICO_EXPECT_TRUE(pool.release(std::move(child)).has_value());
     };
-    traverse_inorder(pool, [&check_connection](Node &node, Size index) -> void {
+    traverse_inorder(pool, [f = std::move(check)](Node &node, Size index) -> void {
         const auto count = node.cell_count();
         CALICO_EXPECT_LT(index, count);
         if (!node.is_external()) {
-            check_connection(node, index);
+            f(node, index);
             // Rightmost child.
             if (index == count - 1)
-                check_connection(node, index + 1);
+                f(node, index + 1);
         }
     });
 }
