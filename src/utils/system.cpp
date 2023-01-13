@@ -1,5 +1,5 @@
 #include "expect.h"
-#include "spdlog/sinks/basic_file_sink.h"
+#include "spdlog/sinks/rotating_file_sink.h"
 #include "spdlog/sinks/null_sink.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "spdlog/sinks/stdout_sinks.h"
@@ -22,12 +22,12 @@ static constexpr auto to_spdlog_level(Error::Level level)
     }
 }
 
-System::System(const std::string_view &base, LogLevel log_level, LogTarget log_target)
+System::System(const std::string &prefix, const Options &options)
 {
     spdlog::level::level_enum level;
     auto s = ok();
 
-    switch (log_level) {
+    switch (options.log_level) {
         case LogLevel::TRACE:
             level = spdlog::level::trace;
             break;
@@ -49,10 +49,10 @@ System::System(const std::string_view &base, LogLevel log_level, LogTarget log_t
     }
 
     if (level != spdlog::level::off) {
-        switch (log_target) {
+        switch (options.log_target) {
             case LogTarget::FILE:
-                CALICO_EXPECT_FALSE(base.empty());
-                m_sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(fs::path {base} / LOG_FILENAME);
+                CALICO_EXPECT_FALSE(prefix.empty());
+                m_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(prefix + LOG_FILENAME, options.log_max_size, options.log_max_files);
                 break;
             case LogTarget::STDOUT:
                 m_sink = std::make_shared<spdlog::sinks::stdout_sink_mt>();

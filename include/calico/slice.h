@@ -135,7 +135,7 @@ public:
     }
 
 private:
-    Byte const *m_data {};
+    const Byte *m_data {};
     Size m_size {};
 };
 

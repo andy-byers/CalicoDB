@@ -1,11 +1,11 @@
 
 #include "core.h"
-#include "recovery.h"
 #include "calico/calico.h"
 #include "calico/storage.h"
 #include "calico/transaction.h"
 #include "pager/basic_pager.h"
 #include "pager/pager.h"
+#include "recovery.h"
 #include "storage/helpers.h"
 #include "storage/posix_storage.h"
 #include "tree/bplus_tree.h"
@@ -20,7 +20,30 @@ namespace Calico {
 
 [[nodiscard]] static auto sanitize_options(const Options &options) -> Options
 {
-    return options; // TODO: NOOP for now.
+    static constexpr Size KiB {1024};
+
+    const auto page_size = options.page_size;
+    const auto scratch_size = wal_scratch_size(page_size);
+    auto page_cache_size = options.page_cache_size;
+    auto wal_buffer_size = options.wal_buffer_size;
+
+    if (options.page_size <= 2 * KiB) {
+        page_cache_size = 2048 * page_size;
+        wal_buffer_size = 1024 * scratch_size;
+    } else if (options.page_size <= 16 * KiB) {
+        page_cache_size = 256 * page_size;
+        wal_buffer_size = 128 * scratch_size;
+    } else {
+        page_cache_size = 128 * page_size;
+        wal_buffer_size = 64 * scratch_size;
+    }
+
+    auto sanitized = options;
+    if (sanitized.page_cache_size == 0)
+        sanitized.page_cache_size = page_cache_size;
+    if (sanitized.wal_buffer_size == 0)
+        sanitized.wal_buffer_size = wal_buffer_size;
+    return sanitized;
 }
 
 auto Info::record_count() const -> Size
@@ -56,7 +79,7 @@ auto Core::open(Slice path, const Options &options) -> Status
     if (!m_prefix.ends_with('/'))
         m_prefix += '/';
 
-    m_system = std::make_unique<System>(m_prefix, sanitized.log_level, sanitized.log_target);
+    m_system = std::make_unique<System>(m_prefix, sanitized);
     m_log = m_system->create_log("core");
 
     // m_log->info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
@@ -83,27 +106,18 @@ auto Core::open(Slice path, const Options &options) -> Status
     // in a std::uint16_t).
     if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
 
-    static constexpr auto PRIMARY = "could not open database";
-    static constexpr auto SMALL_CACHE = "cache is too small";
-    auto cache_size = sanitized.cache_size;
-
     // Allocate the WAL object and buffers.
     {
-        const auto wal_cache_approx = cache_size / 100 * sanitized.wal_split;
-        const auto wal_buffer_size = wal_scratch_size(sanitized.page_size);
-        const auto wal_buffer_count = wal_cache_approx / wal_buffer_size;
-        cache_size -= wal_buffer_count * wal_buffer_size;
-
-        if (wal_buffer_count < 4)
-            return invalid_argument("{}: {}", PRIMARY, SMALL_CACHE);
+        const auto scratch_size = wal_scratch_size(sanitized.page_size);
+        const auto buffer_count = sanitized.wal_buffer_size / scratch_size;
 
         m_scratch = std::make_unique<LogScratchManager>(
-            wal_buffer_size,
-            wal_buffer_count);
+            scratch_size,
+            buffer_count);
 
         // The WAL segments may be stored elsewhere.
         auto wal_prefix = sanitized.wal_prefix.is_empty()
-                              ? m_prefix : sanitized.wal_prefix.to_string();
+            ? m_prefix : sanitized.wal_prefix.to_string();
         if (!wal_prefix.ends_with('/'))
             wal_prefix += '/';
 
@@ -112,8 +126,8 @@ auto Core::open(Slice path, const Options &options) -> Status
             m_store,
             m_system.get(),
             sanitized.page_size,
-            sanitized.wal_limit,
-            wal_buffer_count,
+            sanitized.wal_buffer_size,
+            buffer_count,
         });
         if (!r.has_value())
             return r.error();
@@ -129,7 +143,7 @@ auto Core::open(Slice path, const Options &options) -> Status
             &m_images,
             m_wal.get(),
             m_system.get(),
-            cache_size / sanitized.page_size,
+            sanitized.page_cache_size / sanitized.page_size,
             sanitized.page_size,
         });
         if (!r.has_value())
@@ -466,11 +480,11 @@ auto Core::load_state() -> Status
 
 auto setup(const std::string &prefix, Storage &store, const Options &options) -> tl::expected<InitialState, Status>
 {
+    static constexpr Size MINIMUM_BUFFER_COUNT {16};
     const auto MSG = fmt::format("cannot initialize database at \"{}\"", prefix);
 
     FileHeader header {};
     Bytes bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
-
 
     if (options.page_size < MINIMUM_PAGE_SIZE)
         return tl::make_unexpected(invalid_argument(
@@ -484,17 +498,29 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         return tl::make_unexpected(invalid_argument(
             "{}: page size of {} is invalid (must be a power of 2)", MSG, options.page_size));
 
-    if (options.cache_size < options.page_size * 8) // TODO: Constant and good value for this. Should be checked in Core::open().
+    if (options.page_cache_size < options.page_size * MINIMUM_BUFFER_COUNT)
         return tl::make_unexpected(invalid_argument(
-            "{}: cache size of {} is too small (minimum frame count is {})", MSG, options.cache_size, options.page_size * 8));
+            "{}: page cache of size {} B is too small (minimum size is {} B)", MSG, options.page_cache_size, options.page_size * MINIMUM_BUFFER_COUNT));
 
-    if (options.wal_limit < MINIMUM_WAL_LIMIT)
+    if (options.wal_buffer_size < wal_scratch_size(options.page_size) * MINIMUM_BUFFER_COUNT)
         return tl::make_unexpected(invalid_argument(
-            "{}: WAL segment limit of {} is too small (must be greater than or equal to {} blocks)", MSG, options.wal_limit, MINIMUM_WAL_LIMIT));
+            "{}: WAL write buffer of size {} B is too small (minimum size is {} B)", MSG, options.wal_buffer_size, wal_scratch_size(options.page_size) * MINIMUM_BUFFER_COUNT));
 
-    if (options.wal_limit > MAXIMUM_WAL_LIMIT)
+    if (options.log_max_size < MINIMUM_LOG_MAX_SIZE)
         return tl::make_unexpected(invalid_argument(
-            "{}: WAL segment limit of {} is too large (must be less than or equal to {} blocks)", MSG, options.wal_limit, MAXIMUM_WAL_LIMIT));
+            "{}: log file maximum size of {} B is too small (minimum size is {} B)", MSG, options.log_max_size, MINIMUM_LOG_MAX_SIZE));
+
+    if (options.log_max_size > MAXIMUM_LOG_MAX_SIZE)
+        return tl::make_unexpected(invalid_argument(
+            "{}: log file maximum size of {} B is too large (maximum size is {} B)", MSG, options.log_max_size, MAXIMUM_LOG_MAX_SIZE));
+
+    if (options.log_max_files < MINIMUM_LOG_MAX_FILES)
+        return tl::make_unexpected(invalid_argument(
+            "{}: log maximum file count of {} is too small (minimum count is {})", MSG, options.log_max_files, MINIMUM_LOG_MAX_FILES));
+
+    if (options.log_max_files > MAXIMUM_LOG_MAX_FILES)
+        return tl::make_unexpected(invalid_argument(
+            "{}: log maximum file count of {} is too large (maximum count is {})", MSG, options.log_max_files, MAXIMUM_LOG_MAX_FILES));
 
     {
         // May have already been created by spdlog.
