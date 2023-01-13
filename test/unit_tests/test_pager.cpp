@@ -532,7 +532,7 @@ public:
         return message;
     }
 
-    System state {"test", LogLevel::OFF, {}};
+    System state {"test", {}};
     Status status {ok()};
     bool has_xact {};
     Id commit_lsn;

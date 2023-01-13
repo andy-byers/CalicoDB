@@ -36,7 +36,7 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.cache_size = 16;
+        options.page_cache_size = 16;
 
         store = std::make_unique<HeapStorage>();
         core = std::make_unique<Core>();
@@ -79,7 +79,7 @@ TEST_F(DatabaseOpenTests, MaximumPageSize)
     // Maximum page size (65,536) is represented as 0 on disk, since it cannot fit into a short integer.
     Options options;
     options.page_size = MAXIMUM_PAGE_SIZE;
-    options.cache_size = options.page_size * 64;
+    options.page_cache_size = options.page_size * 64;
 
     for (Size i {}; i < 2; ++i) {
         Database db;
@@ -94,7 +94,7 @@ public:
     BasicDatabaseTests()
     {
         options.page_size = 0x200;
-        options.cache_size = options.page_size * frame_count;
+        options.page_cache_size = options.page_size * frame_count;
         options.log_level = LogLevel::OFF;
         options.storage = store.get();
     }
@@ -233,18 +233,6 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 
     invalid.page_size = DEFAULT_PAGE_SIZE - 1;
-    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-}
-
-TEST_F(BasicDatabaseTests, ReportsInvalidWalLimits)
-{
-    auto invalid = options;
-
-    Database db;
-    invalid.wal_limit = MINIMUM_WAL_LIMIT - 1;
-    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-
-    invalid.wal_limit = MAXIMUM_WAL_LIMIT + 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 }
 

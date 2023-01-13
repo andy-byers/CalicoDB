@@ -43,7 +43,7 @@ public:
     }
 
     Random random {0};
-    System state {"test", LogLevel::OFF, {}};
+    System state {"test/", {}};
     Status status {ok()};
     bool has_xact {};
     Id commit_lsn;
@@ -80,7 +80,7 @@ public:
         tree->TEST_validate_order();
     }
 
-    System state {"test", LogLevel::OFF, {}};
+    System state {"test/", {}};
     std::unique_ptr<Tree> tree;
     Size max_local {};
 };

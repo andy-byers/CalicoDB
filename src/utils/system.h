@@ -45,7 +45,7 @@ public:
     // LSN of the last commit record written to the WAL.
     std::atomic<Id> commit_lsn {};
 
-    System(const std::string_view &base, LogLevel log_level, LogTarget log_target);
+    System(const std::string &prefix, const Options &options);
     auto create_log(const std::string_view &name) const -> LogPtr;
     auto push_error(Error::Level level, Status status) -> void;
     auto original_error() const -> Error;

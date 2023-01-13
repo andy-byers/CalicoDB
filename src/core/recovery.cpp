@@ -178,8 +178,6 @@ auto Recovery::finish_abort() -> Status
 {
     // m_log->trace("finish_abort");
     ENSURE_NO_XACT("cannot finish abort");
-//    return finish_routine();
-
     CALICO_TRY_S(m_pager->flush({}));
 
     return m_wal->truncate(m_system->commit_lsn);

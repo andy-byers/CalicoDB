@@ -42,7 +42,7 @@ auto main(int argc, const char *argv[]) -> int
 
     Options options;
     options.page_size = 0x200;
-    options.cache_size = 64 * options.page_size;
+    options.page_cache_size = 64 * options.page_size;
     Database db;
     expect_ok(db.open(path.string(), options));
     {
