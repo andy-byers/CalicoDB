@@ -1,10 +1,12 @@
-![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
+# CalicoDB
 
 > **Warning**: This library is not yet stable, nor is it code reviewed. 
 > Please don't use it for anything serious!
 
 Calico DB is an embedded key-value database written in C++20.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
+
+![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
 <div align="center">
     <img src="doc/mascot.png" style="width: 40%; max-width: 400px" />
@@ -18,10 +20,9 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + [Contributions](#contributions)
 
 ## Features
-+ Durability provided through write-ahead logging
-+ Uses a dynamic-order B<sup>+</sup>-tree to organize the data on disk
-+ Supports forward and reverse traversal using cursors
-+ Supports variable-length keys and values (with a hard limit on both)
++ Forward and reverse iteration using cursors
++ Crash protection using write-ahead logging
++ Variable-length keys and values (see [Caveats](#caveats))
 + API only exposes objects (no pointers to deal with)
 + Allows tuning of various parameters (page size, cache size, etc.)
 + Transactions provided as first-class objects
