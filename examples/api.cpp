@@ -1,15 +1,10 @@
-/* api.cpp: Example usage of the Calico DB API.
- *
- * Code from this file is automatically embedded in markdown files using @tokusumi/markdown-embed-code. When editing this file, be sure to
- * check the line numbers and comments to make sure everything is consistent. Also, this file should be kept short as it is already a bit of
- * a nightmare to edit.
- */
+/* api.cpp: Example usage of the Calico DB API. */
 
 #include "calico/calico.h"
 
 auto main(int, const char *[]) -> int
 {
-    /* slices [15-37] */
+    /* slices */
 
     {
         std::string str {"abc"};
@@ -37,7 +32,7 @@ auto main(int, const char *[]) -> int
         assert(s2 < "bc");
     }
 
-    /* opening-a-database [42-68] */
+    /* opening-a-database */
 
     // Create the database object.
     Calico::Database db;
@@ -67,7 +62,7 @@ auto main(int, const char *[]) -> int
         return 1;
     }
 
-    /* updating-a-database [73-92] */
+    /* updating-a-database */
 
     {
         // Insert a key-value pair. We can use arbitrary bytes for both the key and value, including NULL bytes, provided the slice
@@ -92,7 +87,7 @@ auto main(int, const char *[]) -> int
         }
     }
 
-    /* querying-a-database [98-126] */
+    /* querying-a-database */
 
     {
         // We can find the first record greater than or equal to a given key...
@@ -126,7 +121,7 @@ auto main(int, const char *[]) -> int
         for (auto c = db.first(); c.is_valid() && c.key() < "42"; ++c) {}
     }
 
-    /* transaction-objects [132-160] */
+    /* transaction-objects */
 
     {
         // Start a transaction. All modifications made to the database while this object is live will be part of the transaction
@@ -160,7 +155,7 @@ auto main(int, const char *[]) -> int
         }
     }
 
-    /* statistics-objects [166-175] */
+    /* statistics-objects */
 
     {
         // We can use a statistics object to get information about the database state.
@@ -175,7 +170,7 @@ auto main(int, const char *[]) -> int
         [[maybe_unused]] const auto ps = stat.page_size();
     }
 
-    /* closing-a-database [181-184] */
+    /* closing-a-database */
 
     {
         auto s = db.close();
@@ -190,7 +185,7 @@ auto main(int, const char *[]) -> int
         return 1;
     }
 
-    /* destroying-a-database [196-199] */
+    /* destroying-a-database */
 
     {
         auto s = std::move(db).destroy();

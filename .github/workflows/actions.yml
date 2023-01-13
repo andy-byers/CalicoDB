@@ -27,12 +27,6 @@ jobs:
       BINARY_PATH: ${{ github.workspace }}/build
     steps:
       - uses: actions/checkout@v2
-      - uses: tokusumi/markdown-embed-code@main
-        with:
-          markdown: "doc/doc.md"
-          token: ${{ secrets.GITHUB_TOKEN }}
-          message: "synchronizing README"
-          silent: true
       - name: Setup
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.CMAKE_BUILD_DIR }}" 
