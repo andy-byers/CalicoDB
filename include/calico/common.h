@@ -10,7 +10,8 @@
 #  endif
 #else
 #  error "error: this platform is currently unsupported"
-#endif
+#endif // (!defined(_WIN32) && ...
+
 
 namespace Calico {
 

@@ -12,6 +12,8 @@
 #include <cstddef>
 #include <cstdint>
 
+
+
 namespace Calico::crc32c {
 
     namespace {

@@ -9,12 +9,15 @@ set(CALICO_HEADERS
     "${CALICO_INCLUDE_DIR}/calico/status.h"
     "${CALICO_INCLUDE_DIR}/calico/storage.h"
     "${CALICO_INCLUDE_DIR}/calico/transaction.h")
-file(GLOB_RECURSE CALICO_SOURCES "./*/*.cpp" "./*/*.h")
+file(GLOB_RECURSE CALICO_SOURCES "*/*.cpp" "*/*.h")
 list(APPEND CALICO_SOURCES "${CALICO_HEADERS}")
 
 # @TartanLlama/expected source code.
 set(TL_EXPECTED_DIR "${CALICO_THIRD_PARTY_DIR}/tl")
 list(APPEND CALICO_SOURCES "${TL_EXPECTED_DIR}/expected.hpp")
+
+include(CheckLibraryExists)
+check_library_exists(crc32c crc32c_value "" HAVE_CRC32C)
 
 add_library(calico
     STATIC "${CALICO_SOURCES}")
@@ -28,8 +31,8 @@ target_include_directories(calico
 target_compile_options(calico
     PRIVATE "${CALICO_WARNINGS}" -fno-rtti) # TODO: Get Calico DB to compile without exceptions, using "-fno-exceptions".
 target_compile_definitions(calico
-    PUBLIC CALICO_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-           CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-           CALICO_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+    PUBLIC  CALICO_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+            CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+            CALICO_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 target_link_libraries(calico
     PRIVATE pthread spdlog)
