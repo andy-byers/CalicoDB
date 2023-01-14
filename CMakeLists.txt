@@ -12,6 +12,7 @@ project(CalicoDB
 set(CMAKE_CXX_STANDARD 20)
 
 set(CALICO_NAME calico)
+set(CALICO_THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
 set(CALICO_EXAMPLES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/examples")
 set(CALICO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(CALICO_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib")
@@ -26,13 +27,13 @@ include(FetchContent)
 FetchContent_Declare(spdlog
     GIT_REPOSITORY https://github.com/gabime/spdlog.git
     GIT_TAG v1.10.0)
-FetchContent_Declare(expected
-    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
-    GIT_TAG v1.0.0)
+#FetchContent_Declare(expected
+#    GIT_REPOSITORY https://github.com/TartanLlama/expected.git
+#    GIT_TAG v1.0.0)
 set(SPDLOG_NO_EXCEPTIONS On CACHE INTERNAL "")
-set(EXPECTED_ENABLE_TESTS Off CACHE INTERNAL "")
-set(EXPECTED_BUILD_PACKAGE Off CACHE INTERNAL "")
-FetchContent_MakeAvailable(spdlog expected)
+#set(EXPECTED_ENABLE_TESTS Off CACHE INTERNAL "")
+#set(EXPECTED_BUILD_PACKAGE Off CACHE INTERNAL "")
+FetchContent_MakeAvailable(spdlog)
 
 # Compile the library.
 add_subdirectory(src)

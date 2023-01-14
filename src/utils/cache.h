@@ -28,27 +28,27 @@ namespace Calico {
  * ever happen when using this cache as a page cache.
  */
 template<
-    class Key,
-    class Value,
-    class Hash = std::hash<Key>
+    class K,
+    class V,
+    class F = std::hash<K>
 >
 class Cache {
 public:
-    using key_t = Key; // TODO: Make these aliases PascalCase.
-    using value_t = Value;
-    using hash_t = Hash;
+    using Key = K;
+    using Value = V;
+    using Hash = F;
 
-    struct entry {
-        key_t key;
-        value_t value;
+    struct Entry {
+        Key key;
+        Value value;
         bool hot {};
     };
 
     // Disallow changing values through iterator instances.
-    using iterator = typename std::list<entry>::iterator;
-    using const_iterator = typename std::list<entry>::const_iterator;
-    using reverse_iterator = typename std::list<entry>::const_reverse_iterator;
-    using const_reverse_iterator = typename std::list<entry>::const_reverse_iterator;
+    using Iterator = typename std::list<Entry>::iterator;
+    using ConstIterator = typename std::list<Entry>::const_iterator;
+    using ReverseIterator = typename std::list<Entry>::const_reverse_iterator;
+    using ConstReverseIterator = typename std::list<Entry>::const_reverse_iterator;
 
     Cache() = default;
 
@@ -66,7 +66,7 @@ public:
 
     // NOTE: Use this to ask if an entry exists without altering the cache.
     [[nodiscard]]
-    auto contains(const key_t &key) const -> bool
+    auto contains(const Key &key) const -> bool
     {
         using std::end;
         return query(key) != end(m_list);
@@ -74,7 +74,7 @@ public:
 
     // NOTE: Use this to ask for an entry without altering the cache.
     [[nodiscard]]
-    auto query(const key_t &key) const -> const_iterator
+    auto query(const Key &key) const -> ConstIterator
     {
         using std::end;
 
@@ -84,7 +84,7 @@ public:
     }
 
     [[nodiscard]]
-    auto get(const key_t &key) -> iterator
+    auto get(const Key &key) -> Iterator
     {
         using std::end;
 
@@ -94,7 +94,7 @@ public:
     }
 
     template<class T>
-    auto put(const key_t &key, T &&value) -> std::optional<value_t>
+    auto put(const Key &key, T &&value) -> std::optional<Value>
     {
         using std::end;
 
@@ -103,12 +103,12 @@ public:
             promote(itr);
             return temp;
         }
-        m_sep = m_list.emplace(m_sep, entry {key, std::forward<T>(value), false});
+        m_sep = m_list.emplace(m_sep, Entry {key, std::forward<T>(value), false});
         m_map.emplace(key, m_sep);
         return std::nullopt;
     }
 
-    auto erase(const_iterator itr) -> iterator
+    auto erase(ConstIterator itr) -> Iterator
     {
         using std::end;
 
@@ -121,7 +121,7 @@ public:
         return end(m_list);
     }
 
-    auto erase(const key_t &key) -> bool
+    auto erase(const Key &key) -> bool
     {
         using std::end;
 
@@ -136,7 +136,7 @@ public:
     }
 
     [[nodiscard]]
-    auto evict() -> std::optional<entry>
+    auto evict() -> std::optional<Entry>
     {
         using std::end;
 
@@ -158,56 +158,56 @@ public:
     }
 
     [[nodiscard]]
-    auto begin() -> iterator
+    auto begin() -> Iterator
     {
         using std::begin;
         return begin(m_list);
     }
 
     [[nodiscard]]
-    auto begin() const -> const_iterator
+    auto begin() const -> ConstIterator
     {
         using std::begin;
         return begin(m_list);
     }
 
     [[nodiscard]]
-    auto end() -> iterator
+    auto end() -> Iterator
     {
         using std::end;
         return end(m_list);
     }
 
     [[nodiscard]]
-    auto end() const -> const_iterator
+    auto end() const -> ConstIterator
     {
         using std::end;
         return end(m_list);
     }
 
     [[nodiscard]]
-    auto rbegin() -> reverse_iterator
+    auto rbegin() -> ReverseIterator
     {
         using std::rbegin;
         return rbegin(m_list);
     }
 
     [[nodiscard]]
-    auto rbegin() const -> const_reverse_iterator
+    auto rbegin() const -> ConstReverseIterator
     {
         using std::rbegin;
         return rbegin(m_list);
     }
 
     [[nodiscard]]
-    auto rend() -> reverse_iterator
+    auto rend() -> ReverseIterator
     {
         using std::rend;
         return rend(m_list);
     }
 
     [[nodiscard]]
-    auto rend() const -> const_reverse_iterator
+    auto rend() const -> ConstReverseIterator
     {
         using std::rend;
         return rend(m_list);
@@ -220,11 +220,11 @@ public:
     auto operator=(const Cache &) -> Cache & = delete;
 
 private:
-    using map_t = std::unordered_map<key_t, iterator, hash_t>;
-    using list_t = std::list<entry>;
+    using Map = std::unordered_map<Key, Iterator, Hash>;
+    using List = std::list<Entry>;
 
     // Make an element the most-important element.
-    auto promote(typename map_t::iterator itr) -> iterator
+    auto promote(typename Map::iterator itr) -> Iterator
     {
         using std::begin;
         auto &[key, value, hot] = *itr->second;
@@ -242,9 +242,9 @@ private:
         return itr->second;
     }
 
-    map_t m_map;
-    list_t m_list;
-    iterator m_sep {std::end(m_list)};
+    Map m_map;
+    List m_list;
+    Iterator m_sep {std::end(m_list)};
 };
 
 } // namespace Calico

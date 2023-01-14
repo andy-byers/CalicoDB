@@ -8,6 +8,7 @@ static constexpr auto DB_PATH = "__bench_calico__";
 static constexpr Calico::Size DB_KEY_SIZE {12};
 static constexpr Calico::Size DB_VALUE_SIZE {88};
 static constexpr Calico::Size DB_RECORD_COUNT {10'000};
+static constexpr Calico::Size DB_XACT_SIZE {5'000};
 
 // 2 MiB of cache memory.
 static constexpr Calico::Options DB_OPTIONS {
@@ -30,6 +31,19 @@ static auto make_key(Calico::Size key) -> std::string
     }
 }
 
+static auto do_read(const Calico::Database &db, Calico::Slice key)
+{
+    if (auto c = db.find(key); c.is_valid()) {
+        benchmark::DoNotOptimize(c.key());
+        benchmark::DoNotOptimize(c.value());
+    }
+}
+
+static auto do_write(Calico::Database &db, Calico::Slice key)
+{
+    benchmark::DoNotOptimize(db.insert(key, g_value));
+}
+
 static auto setup()
 {
     std::filesystem::remove_all(DB_PATH);
@@ -37,34 +51,6 @@ static auto setup()
     benchmark::DoNotOptimize(db.open(DB_PATH, DB_OPTIONS));
     return db;
 }
-
-static auto run_sequential_writes(Calico::Database &db, benchmark::State &state)
-{
-    Calico::Size i {};
-
-    for (auto _ : state) {
-        state.PauseTiming();
-        auto key = make_key<DB_KEY_SIZE>(i++);
-        state.ResumeTiming();
-        benchmark::DoNotOptimize(db.insert(key, g_value));
-    }
-}
-
-static auto BM_AtomicSequentialWrites(benchmark::State &state)
-{
-    auto db = setup();
-    run_sequential_writes(db, state);
-}
-BENCHMARK(BM_AtomicSequentialWrites);
-
-static auto BM_SequentialWrites(benchmark::State &state)
-{
-    auto db = setup();
-    auto xact = db.transaction();
-    run_sequential_writes(db, state);
-    benchmark::DoNotOptimize(xact.commit());
-}
-BENCHMARK(BM_SequentialWrites);
 
 template<class F>
 static auto run_batches(Calico::Database &db, benchmark::State &state, Calico::Size batch_size, const F &f)
@@ -74,80 +60,69 @@ static auto run_batches(Calico::Database &db, benchmark::State &state, Calico::S
 
     for (auto _ : state) {
         state.PauseTiming();
-        const auto is_interval = i && i % batch_size == 0;
-        auto key = make_key<DB_KEY_SIZE>(f(i++));
+        const auto key = make_key<DB_KEY_SIZE>(f(i));
+        const auto is_interval = ++i % batch_size == 0;
         state.ResumeTiming();
 
         if (is_interval) {
             benchmark::DoNotOptimize(xact->commit());
             xact.emplace(db.transaction());
         }
-        benchmark::DoNotOptimize(db.insert(key, g_value));
+        do_write(db, key);
     }
     benchmark::DoNotOptimize(xact->commit());
 }
 
-static auto BM_BatchedSequentialWrites(benchmark::State &state)
+static auto BM_SequentialWrites(benchmark::State &state)
 {
     auto db = setup();
     run_batches(db, state, 1'000, [](auto i) {return i;});
 }
-BENCHMARK(BM_BatchedSequentialWrites);
+BENCHMARK(BM_SequentialWrites);
 
 static auto run_random_writes(Calico::Database &db, benchmark::State &state)
 {
     for (auto _ : state) {
         state.PauseTiming();
-        auto key = make_key<DB_KEY_SIZE>(rand());
+        const auto key = make_key<DB_KEY_SIZE>(rand());
         state.ResumeTiming();
-        benchmark::DoNotOptimize(db.insert(key, g_value));
+        do_write(db, key);
     }
 }
 
-static auto BM_AtomicRandomWrites(benchmark::State &state)
-{
-    auto db = setup();
-    run_random_writes(db, state);
-}
-BENCHMARK(BM_AtomicRandomWrites);
-
-static auto BM_RandomWrites(benchmark::State& state)
-{
-    auto db = setup();
-    auto xact = db.transaction();
-    run_random_writes(db, state);
-    benchmark::DoNotOptimize(xact.commit());
-}
-BENCHMARK(BM_RandomWrites);
-
-static auto BM_BatchedRandomWrites(benchmark::State &state)
+static auto BM_RandomWrites(benchmark::State &state)
 {
     auto db = setup();
     run_batches(db, state, 1'000, [](auto) {return rand();});
 }
-BENCHMARK(BM_BatchedRandomWrites);
+BENCHMARK(BM_RandomWrites);
 
 static auto run_overwrite(Calico::Database &db, benchmark::State &state)
 {
+    std::optional<Calico::Transaction> xact {db.transaction()};
+
     for (Calico::Size i {}; i < DB_RECORD_COUNT; ++i) {
-        auto key = make_key<DB_KEY_SIZE>(i);
+        const auto key = make_key<DB_KEY_SIZE>(i);
         benchmark::DoNotOptimize(db.insert(key, g_value));
     }
+    benchmark::DoNotOptimize(xact->commit());
+    xact.emplace(db.transaction());
+    Calico::Size i {};
 
     for (auto _ : state) {
         state.PauseTiming();
-        auto key = make_key<DB_KEY_SIZE>(rand() % DB_RECORD_COUNT);
+        const auto key = make_key<DB_KEY_SIZE>(rand() % DB_RECORD_COUNT);
+        const auto is_interval = ++i % DB_XACT_SIZE == 0;
         state.ResumeTiming();
-        benchmark::DoNotOptimize(db.insert(key, g_value));
-    }
-}
+        do_write(db, key);
 
-static auto BM_AtomicOverwrite(benchmark::State& state)
-{
-    auto db = setup();
-    run_overwrite(db, state);
+        if (is_interval) {
+            benchmark::DoNotOptimize(xact->commit());
+            xact.emplace(db.transaction());
+        }
+    }
+    benchmark::DoNotOptimize(xact->commit());
 }
-BENCHMARK(BM_AtomicOverwrite);
 
 static auto BM_Overwrite(benchmark::State& state)
 {
@@ -163,8 +138,8 @@ static auto setup_with_records(Calico::Size n)
     auto db = setup();
     auto xact = db.transaction();
     for (Calico::Size i {}; i < n; ++i) {
-        auto key = make_key<DB_KEY_SIZE>(rand());
-        benchmark::DoNotOptimize(db.insert(key, g_value));
+        const auto key = make_key<DB_KEY_SIZE>(rand());
+        do_write(db, key);
     }
     benchmark::DoNotOptimize(xact.commit());
     return db;
@@ -193,15 +168,78 @@ static auto BM_RandomReads(benchmark::State& state)
     auto db = setup_with_records(DB_RECORD_COUNT);
     for (auto _ : state) {
         state.PauseTiming();
-        auto key = make_key<DB_KEY_SIZE>(rand());
+        const auto key = make_key<DB_KEY_SIZE>(rand());
         state.ResumeTiming();
-
-        if (auto c = db.find(key); c.is_valid()) {
-            benchmark::DoNotOptimize(c.key());
-            benchmark::DoNotOptimize(c.value());
-        }
+        do_read(db, key);
     }
 }
 BENCHMARK(BM_RandomReads);
+
+
+static auto run_reads_and_writes(benchmark::State& state, int batch_size, int read_fraction, bool is_sequential)
+{
+    enum class Action {
+        READ,
+        WRITE,
+    };
+    auto db = setup_with_records(DB_RECORD_COUNT);
+    std::optional<Calico::Transaction> xact {db.transaction()};
+    int i {};
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        const auto key = make_key<DB_KEY_SIZE>(is_sequential ? i : rand());
+        const auto action = rand() % 100 < read_fraction ? Action::READ : Action::WRITE;
+        const auto is_interval = ++i % batch_size == 0;
+        state.ResumeTiming();
+
+        if (action == Action::READ) {
+            do_read(db, key);
+        } else {
+            do_write(db, key);
+        }
+        if (is_interval) {
+            benchmark::DoNotOptimize(xact->commit());
+            xact.emplace(db.transaction());
+        }
+    }
+    benchmark::DoNotOptimize(xact->commit());
+}
+
+static auto BM_SequentialReadWrite_25_75(benchmark::State& state)
+{
+    run_reads_and_writes(state, DB_XACT_SIZE, 25, true);
+}
+BENCHMARK(BM_SequentialReadWrite_25_75);
+
+static auto BM_SequentialReadWrite_50_50(benchmark::State& state)
+{
+    run_reads_and_writes(state, DB_XACT_SIZE, 50, true);
+}
+BENCHMARK(BM_SequentialReadWrite_50_50);
+
+static auto BM_SequentialReadWrite_75_25(benchmark::State& state)
+{
+    run_reads_and_writes(state, DB_XACT_SIZE, 75, true);
+}
+BENCHMARK(BM_SequentialReadWrite_75_25);
+
+static auto BM_RandomReadWrite_25_75(benchmark::State& state)
+{
+    run_reads_and_writes(state, DB_XACT_SIZE, 25, false);
+}
+BENCHMARK(BM_RandomReadWrite_25_75);
+
+static auto BM_RandomReadWrite_50_50(benchmark::State& state)
+{
+    run_reads_and_writes(state, DB_XACT_SIZE, 50, false);
+}
+BENCHMARK(BM_RandomReadWrite_50_50);
+
+static auto BM_RandomReadWrite_75_25(benchmark::State& state)
+{
+    run_reads_and_writes(state, 1'000, 75, false);
+}
+BENCHMARK(BM_RandomReadWrite_75_25);
 
 BENCHMARK_MAIN();
