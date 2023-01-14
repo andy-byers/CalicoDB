@@ -797,7 +797,7 @@ auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> 
     }
 }
 
-auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
+auto internal_split_non_root_fast(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     transfer_cells_right_while(Ln, rn, [overflow_index](const auto &src, const auto &, Size) {
         return src.cell_count() > overflow_index;
@@ -810,7 +810,7 @@ auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overfl
     return overflow;
 }
 
-auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
+auto external_split_non_root_fast(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     // Note that we need to insert the overflow cell into either Ln or rn no matter what, even if it ends up being the separator.
     transfer_cells_right_while(Ln, rn, [&overflow, overflow_index](const auto &src, const auto &, auto counter) {
@@ -832,7 +832,7 @@ auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overfl
     return separator;
 }
 
-auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
+auto external_split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
@@ -848,12 +848,12 @@ auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     rn.set_parent_id(Ln.parent_id());
 
     if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
-        return split_non_root_fast_external(Ln, rn, overflow, overflow_idx, scratch);
+        return external_split_non_root_fast(Ln, rn, overflow, overflow_idx, scratch);
 
     } else if (overflow_idx == 0) {
         // We need the `!counter` because the condition following it may not be true if we got here from split_root().
-        transfer_cells_right_while(Ln, rn, [&overflow](const auto &src, const auto &, auto counter) {
-            return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
+        transfer_cells_right_while(Ln, rn, [](const auto &src, const auto &dst, auto counter) {
+            return !counter || src.usable_space() < dst.usable_space();
         });
         Ln.insert_at(0, overflow);
         CALICO_EXPECT_FALSE(Ln.is_overflowing());
@@ -874,7 +874,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     return separator;
 }
 
-auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
+auto internal_split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
@@ -887,12 +887,11 @@ auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 
     if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
         Ln.set_rightmost_child_id(overflow.left_child_id());
-        return split_non_root_fast_internal(Ln, rn, overflow, overflow_idx, scratch);
+        return internal_split_non_root_fast(Ln, rn, overflow, overflow_idx, scratch);
 
     } else if (overflow_idx == 0) {
-        // TODO: Split the other way in this case, as we are possibly inserting reverse sequentially?
-        transfer_cells_right_while(Ln, rn, [&overflow](const auto &src, const auto &, Size counter) {
-            return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
+        transfer_cells_right_while(Ln, rn, [](const auto &src, const auto &dst, Size counter) {
+            return !counter || src.usable_space() < dst.usable_space();
         });
         Ln.insert_at(0, overflow);
         CALICO_EXPECT_FALSE(Ln.is_overflowing());
@@ -918,8 +917,8 @@ auto split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     CALICO_EXPECT_TRUE(Ln.is_overflowing());
     CALICO_EXPECT_EQ(Ln.is_external(), rn.is_external());
     if (Ln.is_external())
-        return split_external_non_root(Ln, rn, scratch);
-    return split_internal_non_root(Ln, rn, scratch);
+        return external_split_non_root(Ln, rn, scratch);
+    return internal_split_non_root(Ln, rn, scratch);
 }
 
 } // namespace Calico

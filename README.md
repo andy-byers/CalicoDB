@@ -48,7 +48,7 @@ Currently, we have decent performance (>= 200K ops/second) in the following cate
 
 Unfortunately, random writes are quite slow (~6 or 7 times slower than sequential writes).
 Writing in reverse-sequential order represents the worst case for the B<sup>+</sup>-tree splitting algorithm, and leads to awful performance.
-Performance benchmarks are provided in the [`benchmarks`](benchmarks) folder.
+Performance benchmarks are provided in the [benchmarks folder](benchmarks).
 
 ## TODO
 1. Get everything code reviewed!

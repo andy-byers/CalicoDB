@@ -1,6 +1,7 @@
 # Calico DB Documentation
 
 + [Build](#build)
++ [Examples](#examples)
 + [Architecture](#architecture)
 + [Source Tree](#source-tree)
 + [Acknowledgements](#acknowledgements)
@@ -24,8 +25,14 @@ To build the library in release mode without tests, the last command would look 
 cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
+## Examples
+Examples can be found in the [examples directory](../examples).
+
 ## Architecture
-...
+CalicoDB is organized as 6 interacting submodules, as illustrated in the [source tree diagram](#source-tree).
+The main data store is kept in a single file, called the data file, which is organized as a B<sup>+</sup>-tree.
+Info log files, if logging to a file is enabled, are kept in the same directory as the data file.
+Write-ahead log (WAL) segment files can be stored with the rest of the database, or in a separate location, depending on user preference.
 
 ## Source Tree
 ```
