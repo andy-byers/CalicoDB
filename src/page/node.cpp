@@ -797,7 +797,7 @@ auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> 
     }
 }
 
-auto internal_split_non_root_fast(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
+auto internal_split_non_root_aux(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     transfer_cells_right_while(Ln, rn, [overflow_index](const auto &src, const auto &, Size) {
         return src.cell_count() > overflow_index;
@@ -810,7 +810,7 @@ auto internal_split_non_root_fast(Node &Ln, Node &rn, Cell overflow, Size overfl
     return overflow;
 }
 
-auto external_split_non_root_fast(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
+auto external_split_non_root_aux(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     // Note that we need to insert the overflow cell into either Ln or rn no matter what, even if it ends up being the separator.
     transfer_cells_right_while(Ln, rn, [&overflow, overflow_index](const auto &src, const auto &, auto counter) {
@@ -848,7 +848,7 @@ auto external_split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     rn.set_parent_id(Ln.parent_id());
 
     if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
-        return external_split_non_root_fast(Ln, rn, overflow, overflow_idx, scratch);
+        return external_split_non_root_aux(Ln, rn, overflow, overflow_idx, scratch);
 
     } else if (overflow_idx == 0) {
         // We need the `!counter` because the condition following it may not be true if we got here from split_root().
@@ -887,7 +887,7 @@ auto internal_split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 
     if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
         Ln.set_rightmost_child_id(overflow.left_child_id());
-        return internal_split_non_root_fast(Ln, rn, overflow, overflow_idx, scratch);
+        return internal_split_non_root_aux(Ln, rn, overflow, overflow_idx, scratch);
 
     } else if (overflow_idx == 0) {
         transfer_cells_right_while(Ln, rn, [](const auto &src, const auto &dst, Size counter) {

@@ -97,6 +97,7 @@ public:
 
 private:
     auto handle_errors() -> Status;
+    [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
     [[nodiscard]] auto atomic_insert(Slice, Slice) -> Status;
     [[nodiscard]] auto atomic_erase(const Cursor &) -> Status;

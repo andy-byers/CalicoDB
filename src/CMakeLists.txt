@@ -16,8 +16,16 @@ list(APPEND CALICO_SOURCES "${CALICO_HEADERS}")
 set(TL_EXPECTED_DIR "${CALICO_THIRD_PARTY_DIR}/tl")
 list(APPEND CALICO_SOURCES "${TL_EXPECTED_DIR}/expected.hpp")
 
-include(CheckLibraryExists)
-check_library_exists(crc32c crc32c_value "" HAVE_CRC32C)
+# TODO: Get Calico DB to compile without exceptions, using "-fno-exceptions".
+
+# Only use RTTI if we are not in release mode. We need it for printing the tree, but that code is only compiled when
+# NDEBUG is set to 0.
+set(CALICO_FLAGS "${CALICO_WARNINGS}")
+string(TOLOWER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
+if(BUILD_TYPE MATCHES "^release")
+    message("Adding -fno-rtti flag")
+    list(APPEND CALICO_FLAGS -fno-rtti)
+endif()
 
 add_library(calico
     STATIC "${CALICO_SOURCES}")
@@ -29,7 +37,7 @@ target_include_directories(calico
     PUBLIC $<BUILD_INTERFACE:${TL_EXPECTED_DIR}>
            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_options(calico
-    PRIVATE "${CALICO_WARNINGS}" -fno-rtti) # TODO: Get Calico DB to compile without exceptions, using "-fno-exceptions".
+    PRIVATE "${CALICO_FLAGS}")
 target_compile_definitions(calico
     PUBLIC  CALICO_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
             CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}

@@ -547,7 +547,8 @@ public:
     {
         options.page_size = 0x400;
         options.page_cache_size = 64 * options.page_size;
-        options.log_level = LogLevel::OFF;
+        options.wal_buffer_size = 64 * options.page_size;
+        options.log_level = LogLevel::TRACE;options.log_target = LogTarget::STDOUT_COLOR;
         options.storage = store.get();
 
         ASSERT_OK(db.open(ROOT, options));

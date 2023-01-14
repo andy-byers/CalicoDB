@@ -152,7 +152,6 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
 
 auto Recovery::start_abort() -> Status
 {
-    // m_log->trace("start_abort");
     ENSURE_NO_XACT("cannot start abort");
 
     // This should give us the full images of each updated page belonging to the current transaction,
@@ -176,7 +175,6 @@ auto Recovery::start_abort() -> Status
 
 auto Recovery::finish_abort() -> Status
 {
-    // m_log->trace("finish_abort");
     ENSURE_NO_XACT("cannot finish abort");
     CALICO_TRY_S(m_pager->flush({}));
 
@@ -185,7 +183,6 @@ auto Recovery::finish_abort() -> Status
 
 auto Recovery::start_recovery() -> Status
 {
-    // m_log->trace("start_recovery");
     ENSURE_NO_XACT("cannot start recovery");
     Id last_lsn;
 
@@ -255,7 +252,6 @@ auto Recovery::start_recovery() -> Status
 
 auto Recovery::finish_recovery() -> Status
 {
-    // m_log->trace("finish_recovery");
     ENSURE_NO_XACT("cannot finish recovery");
 
     CALICO_TRY_S(m_pager->flush({}));

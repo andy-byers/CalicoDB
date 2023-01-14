@@ -46,31 +46,6 @@ namespace Calico {
     return sanitized;
 }
 
-auto Statistics::record_count() const -> Size
-{
-    return m_core->tree().record_count();
-}
-
-auto Statistics::page_count() const -> Size
-{
-    return m_core->pager().page_count();
-}
-
-auto Statistics::page_size() const -> Size
-{
-    return m_core->pager().page_size();
-}
-
-auto Statistics::maximum_key_size() const -> Size
-{
-    return get_max_local(page_size());
-}
-
-auto Statistics::cache_hit_ratio() const -> double
-{
-    return m_core->pager().hit_ratio();
-}
-
 auto Core::open(Slice path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
@@ -82,14 +57,35 @@ auto Core::open(Slice path, const Options &options) -> Status
     m_system = std::make_unique<System>(m_prefix, sanitized);
     m_log = m_system->create_log("core");
 
-    // m_log->info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
-    //             CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
-    // m_log->info("tree is located at \"{}{}\"", m_prefix, DATA_FILENAME);
-    // m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
+    m_log->info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
+                CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
+    m_log->info("tree is located at \"{}{}\"", m_prefix, DATA_FILENAME);
     if (sanitized.wal_prefix.is_empty()) {
-        // m_log->info("WAL prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
+        m_log->info("wal prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
     } else {
-        // m_log->info("WAL prefix is \"{}\"", sanitized.wal_prefix.to_string());
+        m_log->info("wal prefix is \"{}\"", sanitized.wal_prefix.to_string());
+    }
+
+    // Any error during initialization is fatal.
+    CALICO_ERROR_IF(do_open(sanitized));
+    return status();
+}
+
+auto Core::do_open(Options sanitized) -> Status
+{
+    if (sanitized.log_level != LogLevel::OFF) {
+        switch (sanitized.log_target) {
+            case LogTarget::FILE:
+                m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
+                break;
+            case LogTarget::STDOUT:
+            case LogTarget::STDOUT_COLOR:
+                m_log->info("logging to stdout");
+                break;
+            case LogTarget::STDERR:
+            case LogTarget::STDERR_COLOR:
+                m_log->info("logging to stderr");
+        }
     }
 
     m_store = sanitized.storage;
@@ -105,6 +101,7 @@ auto Core::open(Slice path, const Options &options) -> Status
     // The database will store 0 in the "page_size" header field if the maximum page size is used (1 << 16 cannot be held
     // in a std::uint16_t).
     if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
+    m_log->info("page size is {} B", sanitized.page_size);
 
     // Allocate the WAL object and buffers.
     {
@@ -167,6 +164,7 @@ auto Core::open(Slice path, const Options &options) -> Status
 
     auto s = ok();
     if (is_new) {
+        m_log->info("setting up a new database");
         // The first call to root() allocates the root page.
         auto root = m_tree->root(true);
         if (!root.has_value())
@@ -183,11 +181,21 @@ auto Core::open(Slice path, const Options &options) -> Status
         CALICO_TRY_S(m_pager->flush({}));
 
     } else {
+        m_log->info("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CALICO_TRY_S(ensure_consistency_on_startup());
     }
-    CALICO_ERROR_IF(m_wal->start_workers());
-    return status();
+    m_log->info("pager recovery lsn is {}", m_pager->recovery_lsn().value);
+    m_log->info("wal flushed lsn is {}", m_wal->flushed_lsn().value);
+    m_log->info("commit lsn is {}", m_system->commit_lsn.load().value);
+
+    s = m_wal->start_workers();
+    if (!s.is_ok()) {
+        m_log->info("failed to initialize database");
+    } else {
+        m_log->info("successfully initialized database");
+    }
+    return s;
 }
 
 Core::~Core()

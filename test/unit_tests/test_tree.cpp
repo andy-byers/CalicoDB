@@ -55,6 +55,7 @@ public:
 
 class TreeTests: public TestHarness {
 public:
+    // Intentionally use a tiny page size to force lots of splits.
     static constexpr Size PAGE_SIZE = 0x100;
 
     TreeTests()

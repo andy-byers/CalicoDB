@@ -37,9 +37,13 @@ BasicPager::BasicPager(const Parameters &param, Framer framer)
       m_wal {param.wal},
       m_system {param.system}
 {
-    // m_log->trace("BasicPager");
+    m_log->info("initializing with {} frames, each of size {} B", param.frame_count, param.page_size);
 
-//    m_log->info("frame_count = {}", param.frame_count);
+    CALICO_EXPECT_NE(param.system, nullptr);
+    CALICO_EXPECT_NE(param.scratch, nullptr);
+    CALICO_EXPECT_NE(param.images, nullptr);
+    CALICO_EXPECT_NE(param.storage, nullptr);
+    CALICO_EXPECT_NE(param.wal, nullptr);
 }
 
 auto BasicPager::page_count() const -> Size
@@ -93,14 +97,13 @@ auto BasicPager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
 
 auto BasicPager::set_recovery_lsn(Id lsn) -> void
 {
+     m_log->info("set recovery lsn to {} (was {})", m_recovery_lsn.value, lsn.value);
     CALICO_EXPECT_LE(m_recovery_lsn, lsn);
-    // m_log->info("recovery_lsn: {} -> {}", m_recovery_lsn.value, lsn.value);
     m_recovery_lsn = lsn;
 }
 
 auto BasicPager::flush(Id target_lsn) -> Status
 {
-    // m_log->trace("flush");
     CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);
 
     // An LSN of NULL causes all pages to be flushed.
@@ -276,14 +279,12 @@ auto BasicPager::watch_page(Page &page, PageCache::Entry &entry) -> void
 
 auto BasicPager::save_state(FileHeader &header) -> void
 {
-    // m_log->trace("save_state");
     header.recovery_lsn = m_recovery_lsn.value;
     m_framer.save_state(header);
 }
 
 auto BasicPager::load_state(const FileHeader &header) -> void
 {
-    // m_log->trace("load_state");
     if (m_recovery_lsn.value < header.recovery_lsn)
         set_recovery_lsn(Id {header.recovery_lsn});
     m_framer.load_state(header);

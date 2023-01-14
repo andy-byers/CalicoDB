@@ -26,8 +26,8 @@ public:
         Storage *store {};
         System *system {};
         Size page_size {};
-        Size wal_limit {};
-        Size writer_capacity {};
+        Size segment_max_blocks {};
+        Size buffer_count {};
         Interval interval {};
     };
 

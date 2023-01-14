@@ -14,7 +14,8 @@ BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
       m_log {system.create_log("tree")},
       m_system {&system}
 {
-//    m_logger->trace("BPlusTree");
+    m_log->info("initializing with maximum key size of {} B", m_internal.maximum_key_size());
+
     m_actions.acquire = [this](auto pid, auto is_writable) {
         return m_pool.acquire(pid, is_writable);
     };
@@ -24,11 +25,6 @@ BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
     m_actions.collect = [this](auto &node, auto index) {
         return m_internal.collect_value(node, index);
     };
-}
-
-BPlusTree::~BPlusTree()
-{
-//    m_log->trace("~BPlusTree");
 }
 
 auto BPlusTree::open(Pager &pager, System &system, Size page_size) -> tl::expected<Tree::Ptr, Status>
@@ -251,7 +247,7 @@ static auto validate_siblings(NodeManager &pool) -> void
 
 auto validate_parent_child(NodeManager &pool) -> void
 {
-    auto check = [&pool](Node &node, Size index) -> void {
+    auto check = [&pool](auto &node, auto index) -> void {
         auto child = *pool.acquire(node.child_id(index), false);
         CALICO_EXPECT_EQ(child.parent_id(), node.id());
         CALICO_EXPECT_TRUE(pool.release(std::move(child)).has_value());
@@ -268,11 +264,89 @@ auto validate_parent_child(NodeManager &pool) -> void
     });
 }
 
-#endif // not NDEBUG
+struct PrintData {
+    std::vector<std::string> levels;
+    std::vector<Size> spaces;
+};
+
+static auto add_to_level(PrintData &data, const std::string &message, Size target) -> void
+{
+    // If target is equal to levels.size(), add spaces to all levels.
+    CALICO_EXPECT_LE(target, data.levels.size());
+    Size i {};
+
+    auto s_itr = begin(data.spaces);
+    auto L_itr = begin(data.levels);
+    while (s_itr != end(data.spaces)) {
+        CALICO_EXPECT_NE(L_itr, end(data.levels));
+        if (i++ == target) {
+            // Don't leave trailing spaces. Only add them if there will be more text.
+            L_itr->resize(L_itr->size() + *s_itr, ' ');
+            L_itr->append(message);
+            *s_itr = 0;
+        } else {
+            *s_itr += message.size();
+        }
+        L_itr++;
+        s_itr++;
+    }
+}
+
+static auto ensure_level_exists(PrintData &data, Size level) -> void
+{
+    while (level >= data.levels.size()) {
+        data.levels.emplace_back();
+        data.spaces.emplace_back();
+    }
+    CALICO_EXPECT_GT(data.levels.size(), level);
+    CALICO_EXPECT_EQ(data.levels.size(), data.spaces.size());
+}
+
+static auto collect_levels(NodeManager &manager, PrintData &data, Node node, Size level, bool integer_keys) -> void
+{
+    ensure_level_exists(data, level);
+    for (Size cid {}; cid < node.cell_count(); ++cid) {
+        const auto is_first = cid == 0;
+        const auto not_last = cid < node.cell_count() - 1;
+        auto cell = node.read_cell(cid);
+
+        if (!node.is_external())
+            collect_levels(manager, data, *manager.acquire(cell.left_child_id(), false), level + 1, integer_keys);
+
+        if (is_first)
+            add_to_level(data, std::to_string(node.id().value) + ":[", level);
+
+        auto key = cell.key().to_string();
+        if (integer_keys) {
+            const auto k = std::stoi(key);
+            key = std::to_string(k);
+        }
+        add_to_level(data, key, level);
+
+        if (not_last) {
+            add_to_level(data, ",", level);
+        } else {
+            add_to_level(data, "]", level);
+        }
+    }
+    if (!node.is_external())
+        collect_levels(manager, data, *manager.acquire(node.rightmost_child_id(), false), level + 1, integer_keys);
+}
+
+auto BPlusTree::TEST_to_string(bool integer_keys) -> std::string
+{
+    std::string repr;
+    PrintData data;
+
+    collect_levels(m_pool, data, *root(false), 0, integer_keys);
+    for (const auto &level: data.levels)
+        repr.append(level + '\n');
+
+    return repr;
+}
 
 auto BPlusTree::TEST_validate_order() -> void
 {
-#if not NDEBUG
     // NOTE: All keys must fit in main memory (separators included). Doesn't read values.
     if (record_count() < 2)
         return;
@@ -280,29 +354,26 @@ auto BPlusTree::TEST_validate_order() -> void
     std::vector<std::string> keys;
     keys.reserve(record_count());
 
-    traverse_inorder(m_pool, [&keys](Node &node, Size index) -> void {
+    traverse_inorder(m_pool, [&keys](auto &node, auto index) -> void {
         keys.emplace_back(node.read_key(index).to_string());
     });
     CALICO_EXPECT_TRUE(std::is_sorted(cbegin(keys), cend(keys)));
-#endif // not NDEBUG
 }
 
 auto BPlusTree::TEST_validate_nodes() -> void
 {
-#if not NDEBUG
-    traverse_inorder(m_pool, [](Node &node, Size index) -> void {
+    traverse_inorder(m_pool, [](auto &node, auto index) -> void {
         // Only validate once per node.
         if (index == 0) node.TEST_validate();
     });
-#endif // not NDEBUG
 }
 
 auto BPlusTree::TEST_validate_links() -> void
 {
-#if not NDEBUG
     validate_siblings(m_pool);
     validate_parent_child(m_pool);
-#endif // not NDEBUG
 }
+
+#endif // not NDEBUG
 
 } // namespace Calico

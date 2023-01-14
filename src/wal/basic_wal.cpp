@@ -12,14 +12,10 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
-      m_wal_limit {param.wal_limit},
-      m_writer_capacity {param.writer_capacity}
+      m_wal_limit {param.segment_max_blocks},
+      m_writer_capacity {param.buffer_count}
 {
-//    m_log->trace("BasicWriteAheadLog");
-
-//    m_log->info("page_size = {}", param.page_size);
-//    m_log->info("wal_limit = {}", param.wal_limit);
-//    m_log->info("writer_capacity = {}", param.writer_capacity);
+    m_log->info("initializing wal component with {} write buffers, each of size {} B", param.buffer_count, wal_scratch_size(param.page_size));
 
     CALICO_EXPECT_NE(m_store, nullptr);
     CALICO_EXPECT_NE(m_system, nullptr);
