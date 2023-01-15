@@ -20,6 +20,7 @@ set(CALICO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(CALICO_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/test")
 set(CALICO_WARNINGS -Wall -Wconversion -Wsign-conversion -Werror -Wextra -Wpedantic -Wpointer-arith)
 
+include(CheckLibraryExists)
 include(GNUInstallDirs)
 include(FetchContent)
 
