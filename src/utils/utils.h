@@ -49,8 +49,7 @@ public:
             m_size = std::char_traits<Byte>::length(m_data);
     }
 
-    template<CanSlice T>
-    constexpr Bytes(T &rhs) noexcept
+    Bytes(std::string &rhs) noexcept
         : Bytes {rhs.data(), rhs.size()} {}
 
     [[nodiscard]]
@@ -79,7 +78,7 @@ public:
 
     constexpr operator Slice() const
     {
-        return {*this};
+        return {m_data, m_size};
     }
 
     constexpr auto operator[](Size index) const noexcept -> const Byte &

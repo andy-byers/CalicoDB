@@ -51,7 +51,7 @@ auto Core::open(Slice path, const Options &options) -> Status
     auto sanitized = sanitize_options(options);
 
     m_prefix = path.to_string();
-    if (!m_prefix.ends_with('/'))
+    if (m_prefix.back() != '/')
         m_prefix += '/';
 
     m_system = std::make_unique<System>(m_prefix, sanitized);
@@ -115,7 +115,7 @@ auto Core::do_open(Options sanitized) -> Status
         // The WAL segments may be stored elsewhere.
         auto wal_prefix = sanitized.wal_prefix.is_empty()
             ? m_prefix : sanitized.wal_prefix.to_string();
-        if (!wal_prefix.ends_with('/'))
+        if (wal_prefix.back() != '/')
             wal_prefix += '/';
 
         const auto wal_limit = buffer_count * 32;

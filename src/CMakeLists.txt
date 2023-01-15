@@ -21,6 +21,7 @@ list(APPEND CALICO_SOURCES "${TL_EXPECTED_DIR}/expected.hpp")
 # Only use RTTI if we are not in release mode. We need it for printing the tree, but that code is only compiled when
 # NDEBUG is set to 0.
 set(CALICO_FLAGS "${CALICO_WARNINGS}")
+list(APPEND CALICO_FLAGS -fno-exceptions)
 string(TOLOWER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
 if(BUILD_TYPE MATCHES "^release")
     message("Adding -fno-rtti flag")

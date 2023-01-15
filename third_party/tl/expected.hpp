@@ -795,7 +795,8 @@ struct expected_operations_base : expected_storage_base<T, E> {
       geterr().~unexpected<E>();
       construct(std::move(rhs).get());
     } else {
-      assign_common(rhs);
+      // TODO: Needed a std::move() here, it seems like this change is in main already but not in this v1.0 release (Andy).
+      assign_common(std::move(rhs));
     }
   }
 
