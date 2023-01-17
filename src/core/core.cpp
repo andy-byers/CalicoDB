@@ -46,50 +46,46 @@ namespace Calico {
     return sanitized;
 }
 
-auto Statistics::record_count() const -> Size
-{
-    return m_core->tree().record_count();
-}
-
-auto Statistics::page_count() const -> Size
-{
-    return m_core->pager().page_count();
-}
-
-auto Statistics::page_size() const -> Size
-{
-    return m_core->pager().page_size();
-}
-
-auto Statistics::maximum_key_size() const -> Size
-{
-    return get_max_local(page_size());
-}
-
-auto Statistics::cache_hit_ratio() const -> double
-{
-    return m_core->pager().hit_ratio();
-}
-
 auto Core::open(Slice path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
 
     m_prefix = path.to_string();
-    if (!m_prefix.ends_with('/'))
+    if (m_prefix.back() != '/')
         m_prefix += '/';
 
     m_system = std::make_unique<System>(m_prefix, sanitized);
     m_log = m_system->create_log("core");
 
-    // m_log->info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
-    //             CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
-    // m_log->info("tree is located at \"{}{}\"", m_prefix, DATA_FILENAME);
-    // m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
+    m_log->info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
+                CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
+    m_log->info("tree is located at \"{}{}\"", m_prefix, DATA_FILENAME);
     if (sanitized.wal_prefix.is_empty()) {
-        // m_log->info("WAL prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
+        m_log->info("wal prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
     } else {
-        // m_log->info("WAL prefix is \"{}\"", sanitized.wal_prefix.to_string());
+        m_log->info("wal prefix is \"{}\"", sanitized.wal_prefix.to_string());
+    }
+
+    // Any error during initialization is fatal.
+    CALICO_ERROR_IF(do_open(sanitized));
+    return status();
+}
+
+auto Core::do_open(Options sanitized) -> Status
+{
+    if (sanitized.log_level != LogLevel::OFF) {
+        switch (sanitized.log_target) {
+            case LogTarget::FILE:
+                m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
+                break;
+            case LogTarget::STDOUT:
+            case LogTarget::STDOUT_COLOR:
+                m_log->info("logging to stdout");
+                break;
+            case LogTarget::STDERR:
+            case LogTarget::STDERR_COLOR:
+                m_log->info("logging to stderr");
+        }
     }
 
     m_store = sanitized.storage;
@@ -105,6 +101,7 @@ auto Core::open(Slice path, const Options &options) -> Status
     // The database will store 0 in the "page_size" header field if the maximum page size is used (1 << 16 cannot be held
     // in a std::uint16_t).
     if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
+    m_log->info("page size is {} B", sanitized.page_size);
 
     // Allocate the WAL object and buffers.
     {
@@ -117,8 +114,8 @@ auto Core::open(Slice path, const Options &options) -> Status
 
         // The WAL segments may be stored elsewhere.
         auto wal_prefix = sanitized.wal_prefix.is_empty()
-            ? m_prefix : sanitized.wal_prefix.to_string();
-        if (!wal_prefix.ends_with('/'))
+                              ? m_prefix : sanitized.wal_prefix.to_string();
+        if (wal_prefix.back() != '/')
             wal_prefix += '/';
 
         const auto wal_limit = buffer_count * 32;
@@ -133,7 +130,7 @@ auto Core::open(Slice path, const Options &options) -> Status
         });
         if (!r.has_value())
             return r.error();
-        m_wal = std::move(*r);
+        wal = std::move(*r);
     }
 
     // Allocate the pager object and cache frames.
@@ -143,56 +140,67 @@ auto Core::open(Slice path, const Options &options) -> Status
             m_store,
             m_scratch.get(),
             &m_images,
-            m_wal.get(),
+            wal.get(),
             m_system.get(),
             sanitized.page_cache_size / sanitized.page_size,
             sanitized.page_size,
         });
         if (!r.has_value())
             return r.error();
-        m_pager = std::move(*r);
-        m_pager->load_state(state);
+        pager = std::move(*r);
+        pager->load_state(state);
     }
 
     // Allocate the tree object.
     {
-        auto r = BPlusTree::open(*m_pager, *m_system, sanitized.page_size);
+        auto r = BPlusTree::open(*pager, *m_system, sanitized.page_size);
         if (!r.has_value())
             return r.error();
-        m_tree = std::move(*r);
-        m_tree->load_state(state);
+        tree = std::move(*r);
+        tree->load_state(state);
     }
 
-    m_recovery = std::make_unique<Recovery>(*m_pager, *m_wal, *m_system);
+    m_recovery = std::make_unique<Recovery>(*pager, *wal, *m_system);
 
     auto s = ok();
     if (is_new) {
+        m_log->info("setting up a new database");
         // The first call to root() allocates the root page.
-        auto root = m_tree->root(true);
+        auto root = tree->root(true);
         if (!root.has_value())
             CALICO_TRY_S(root.error());
-        CALICO_EXPECT_EQ(m_pager->page_count(), 1);
+        CALICO_EXPECT_EQ(pager->page_count(), 1);
 
         state.page_count = 1;
         state.header_crc = compute_header_crc(state);
         write_header(root->page(), state);
-        CALICO_TRY_S(m_pager->release(root->take()));
+        CALICO_TRY_S(pager->release(root->take()));
 
         // This is safe right now because the WAL has not been started. If successful, we will have the root page
         // set up and saved to the database file.
-        CALICO_TRY_S(m_pager->flush({}));
+        CALICO_TRY_S(pager->flush({}));
 
     } else {
+        m_log->info("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CALICO_TRY_S(ensure_consistency_on_startup());
     }
-    CALICO_ERROR_IF(m_wal->start_workers());
-    return status();
+    m_log->info("pager recovery lsn is {}", pager->recovery_lsn().value);
+    m_log->info("wal flushed lsn is {}", wal->flushed_lsn().value);
+    m_log->info("commit lsn is {}", m_system->commit_lsn.load().value);
+
+    s = wal->start_workers();
+    if (!s.is_ok()) {
+        m_log->info("failed to initialize database");
+    } else {
+        m_log->info("successfully initialized database");
+    }
+    return s;
 }
 
 Core::~Core()
 {
-    m_wal.reset();
+    wal.reset();
 
     if (m_owns_store)
         delete m_store;
@@ -202,7 +210,7 @@ auto Core::destroy() -> Status
 {
     // m_log->trace("destroy");
     auto s = ok();
-    m_wal.reset();
+    wal.reset();
 
     std::vector<std::string> children;
     s = m_store->get_children(m_prefix, children);
@@ -217,6 +225,11 @@ auto Core::destroy() -> Status
         CALICO_ERROR(s);
     }
     return s;
+}
+
+auto Core::bytes_written() const -> Size
+{
+    return m_bytes_written;
 }
 
 auto Core::status() const -> Status
@@ -253,25 +266,25 @@ auto Core::handle_errors() -> Status
 auto Core::find_exact(Slice key) -> Cursor
 {
     MAYBE_FORWARD_AS_CURSOR;
-    return m_tree->find_exact(key);
+    return tree->find_exact(key);
 }
 
 auto Core::find(Slice key) -> Cursor
 {
     MAYBE_FORWARD_AS_CURSOR;
-    return m_tree->find(key);
+    return tree->find(key);
 }
 
 auto Core::first() -> Cursor
 {
     MAYBE_FORWARD_AS_CURSOR;
-    return m_tree->find_minimum();
+    return tree->find_minimum();
 }
 
 auto Core::last() -> Cursor
 {
     MAYBE_FORWARD_AS_CURSOR;
-    return m_tree->find_maximum();
+    return tree->find_maximum();
 }
 
 #undef MAYBE_FORWARD_AS_CURSOR
@@ -279,8 +292,9 @@ auto Core::last() -> Cursor
 auto Core::insert(Slice key, Slice value) -> Status
 {
     CALICO_TRY_S(handle_errors());
+    m_bytes_written += key.size() + value.size();
     if (m_system->has_xact) {
-        return m_tree->insert(key, value);
+        return tree->insert(key, value);
     } else {
         return atomic_insert(key, value);
     }
@@ -289,14 +303,15 @@ auto Core::insert(Slice key, Slice value) -> Status
 auto Core::erase(Slice key) -> Status
 {
     CALICO_TRY_S(handle_errors());
-    return erase(m_tree->find_exact(key));
+    return erase(tree->find_exact(key));
 }
 
 auto Core::erase(const Cursor &cursor) -> Status
 {
     CALICO_TRY_S(handle_errors());
+    CALICO_EXPECT_TRUE(cursor.is_valid());
     if (m_system->has_xact) {
-        return m_tree->erase(cursor);
+        return tree->erase(cursor);
     } else {
         return atomic_erase(cursor);
     }
@@ -305,7 +320,7 @@ auto Core::erase(const Cursor &cursor) -> Status
 auto Core::atomic_insert(Slice key, Slice value) -> Status
 {
     auto xact = transaction();
-    auto s = m_tree->insert(key, value);
+    auto s = tree->insert(key, value);
     if (s.is_ok()) {
         return xact.commit();
     } else {
@@ -316,7 +331,7 @@ auto Core::atomic_insert(Slice key, Slice value) -> Status
 auto Core::atomic_erase(const Cursor &cursor) -> Status
 {
     auto xact = transaction();
-    auto s = m_tree->erase(cursor);
+    auto s = tree->erase(cursor);
     if (s.is_ok()) {
         return xact.commit();
     } else if (!s.is_not_found()) {
@@ -332,8 +347,8 @@ auto Core::commit() -> Status
 
     auto s = status();
     if (s.is_ok()) {
-        // m_log->info("commit {}", m_wal->flushed_lsn().value);
-        CALICO_EXPECT_EQ(m_system->commit_lsn, m_wal->flushed_lsn());
+        // m_log->info("commit {}", wal->flushed_lsn().value);
+        CALICO_EXPECT_EQ(m_system->commit_lsn, wal->flushed_lsn());
     }
     return s;
 }
@@ -349,24 +364,23 @@ auto Core::do_commit() -> Status
     CALICO_TRY_S(save_state());
 
     // Write a commit record to the WAL.
-    const auto lsn = m_wal->current_lsn();
+    const auto lsn = wal->current_lsn();
     WalPayloadIn payload {lsn, m_scratch->get()};
     const auto size = encode_commit_payload(payload.data());
     payload.shrink_to_fit(size);
 
-    m_wal->log(payload);
-    m_wal->advance();
+    wal->log(payload);
+    wal->advance();
 
     // advance() blocks until it is finished. If an error was encountered, it'll show up in the
     // System object at this point.
     CALICO_TRY_S(status());
 
-    // Make sure every dirty page that hasn't been written back since the last commit is on disk. Note that this will
-    // cause all dirty pages to be flushed on the first commit.
-    CALICO_TRY_S(m_pager->flush(last_commit_lsn));
-
-    // Clean up obsolete WAL segments.
-    m_wal->cleanup(m_pager->recovery_lsn());
+    const auto checkpoint = pager->recovery_lsn().value;
+    if (static constexpr Size CUTOFF {1'024}; CUTOFF < lsn.value - checkpoint) {
+        CALICO_TRY_S(pager->flush(last_commit_lsn));
+        wal->cleanup(pager->recovery_lsn());
+    }
 
     m_images.clear();
     m_system->commit_lsn = lsn;
@@ -382,7 +396,7 @@ auto Core::abort() -> Status
     auto s = status();
     if (s.is_ok()) {
         // m_log->info("abort {}", m_system->commit_lsn.load().value);
-        CALICO_EXPECT_LE(m_system->commit_lsn.load(), m_wal->flushed_lsn());
+        CALICO_EXPECT_LE(m_system->commit_lsn.load(), wal->flushed_lsn());
     }
     return s;
 }
@@ -395,7 +409,7 @@ auto Core::do_abort() -> Status
 
     m_system->has_xact = false;
     m_images.clear();
-    m_wal->advance();
+    wal->advance();
 
     CALICO_TRY_S(handle_errors());
     CALICO_TRY_S(m_recovery->start_abort());
@@ -413,13 +427,13 @@ auto Core::close() -> Status
         CALICO_WARN(s);
         return s;
     }
-    m_wal->flush();
+    wal->flush();
 
     // We already waited on the WAL to be done writing so this should happen immediately.
-    CALICO_ERROR_IF(m_pager->flush({}));
+    CALICO_ERROR_IF(pager->flush({}));
 
-    m_wal.reset();
-    m_pager.reset();
+    wal.reset();
+    pager.reset();
 
     return status();
 }
@@ -443,22 +457,22 @@ auto Core::transaction() -> Transaction
 auto Core::save_state() -> Status
 {
     // m_log->trace("save_state");
-    auto root = m_pager->acquire(Id::root(), true);
+    auto root = pager->acquire(Id::root(), true);
     if (!root.has_value()) return root.error();
 
     auto state = read_header(*root);
-    m_pager->save_state(state);
-    m_tree->save_state(state);
+    pager->save_state(state);
+    tree->save_state(state);
     state.header_crc = compute_header_crc(state);
     write_header(*root, state);
 
-    return m_pager->release(std::move(*root));
+    return pager->release(std::move(*root));
 }
 
 auto Core::load_state() -> Status
 {
     // m_log->trace("load_state");
-    auto root = m_pager->acquire(Id::root(), false);
+    auto root = pager->acquire(Id::root(), false);
     if (!root.has_value()) return root.error();
 
     auto state = read_header(*root);
@@ -467,14 +481,14 @@ auto Core::load_state() -> Status
             "cannot load database state: file header is corrupted (header CRC is {} but should be {})",
             state.header_crc, compute_header_crc(state));
 
-    const auto before_count = m_pager->page_count();
+    const auto before_count = pager->page_count();
 
-    m_pager->load_state(state);
-    m_tree->load_state(state);
+    pager->load_state(state);
+    tree->load_state(state);
 
-    auto s = m_pager->release(std::move(*root));
-    if (s.is_ok() && m_pager->page_count() < before_count) {
-        const auto after_size = m_pager->page_count() * m_pager->page_size();
+    auto s = pager->release(std::move(*root));
+    if (s.is_ok() && pager->page_count() < before_count) {
+        const auto after_size = pager->page_count() * pager->page_size();
         return m_store->resize_file(m_prefix + DATA_FILENAME, after_size);
     }
     return s;

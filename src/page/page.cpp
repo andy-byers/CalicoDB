@@ -119,6 +119,11 @@ auto Page::collect_deltas() -> std::vector<PageDelta>
     return m_deltas;
 }
 
+auto Page::register_delta(PageDelta delta) -> void
+{
+    insert_delta(m_deltas, delta);
+}
+
 auto get_u16(const Page &page, Size offset) -> std::uint16_t
 {
     return get_u16(page.view(offset, sizeof(std::uint16_t)));
@@ -136,17 +141,20 @@ auto get_u64(const Page &page, Size offset) -> std::uint64_t
 
 auto put_u16(Page &page, Size offset, std::uint16_t value) -> void
 {
-    put_u16(page.bytes(offset, sizeof(value)), value);
+    put_u16(page.data() + offset, value);
+    page.register_delta({offset, sizeof(value)});
 }
 
 auto put_u32(Page &page, Size offset, std::uint32_t value) -> void
 {
-    put_u32(page.bytes(offset, sizeof(value)), value);
+    put_u32(page.data() + offset, value);
+    page.register_delta({offset, sizeof(value)});
 }
 
 auto put_u64(Page &page, Size offset, std::uint64_t value) -> void
 {
-    put_u64(page.bytes(offset, sizeof(value)), value);
+    put_u64(page.data() + offset, value);
+    page.register_delta({offset, sizeof(value)});
 }
 
 } // namespace Calico

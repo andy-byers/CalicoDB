@@ -2,7 +2,7 @@
 #define CALICO_STORE_SYSTEM_H
 
 #include "calico/storage.h"
-#include <tl/expected.hpp>
+#include "utils/expected.hpp"
 #include <system_error>
 
 namespace Calico::Posix {

@@ -36,7 +36,8 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.page_cache_size = 16;
+        options.page_cache_size = 32 * options.page_size;
+        options.wal_buffer_size = 32 * options.page_size;
 
         store = std::make_unique<HeapStorage>();
         core = std::make_unique<Core>();
@@ -80,6 +81,7 @@ TEST_F(DatabaseOpenTests, MaximumPageSize)
     Options options;
     options.page_size = MAXIMUM_PAGE_SIZE;
     options.page_cache_size = options.page_size * 64;
+    options.wal_buffer_size = options.page_size * 64;
 
     for (Size i {}; i < 2; ++i) {
         Database db;
@@ -95,6 +97,7 @@ public:
     {
         options.page_size = 0x200;
         options.page_cache_size = options.page_size * frame_count;
+        options.wal_buffer_size = options.page_cache_size;
         options.log_level = LogLevel::OFF;
         options.storage = store.get();
     }

@@ -15,8 +15,8 @@ static constexpr Size WAL_BLOCK_SCALE {2};
 struct SegmentId: public Id {
     constexpr SegmentId() noexcept = default;
 
-    constexpr explicit SegmentId(Size value) noexcept
-        : Id {value}
+    constexpr explicit SegmentId(Size v) noexcept
+        : Id {v}
     {}
 
     constexpr explicit SegmentId(Id id) noexcept

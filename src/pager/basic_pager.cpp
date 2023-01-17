@@ -234,15 +234,18 @@ auto BasicPager::release(Page page) -> Status
     auto &entry = itr->value;
     m_framer.unref(entry.frame_index, page);
 
-    // Only write back dirty pages that haven't been written since the last commit.
-    if (entry.dirty_token && (*entry.dirty_token)->record_lsn < m_system->commit_lsn) {
-        auto s = m_framer.write_back(entry.frame_index);
+    // TODO: Not doing this anymore. Not strictly necessary, but could allow some WAL segments can be cleaned up. Need to find a better heuristic.
+    if (entry.dirty_token) {
+        const auto checkpoint = (*entry.dirty_token)->record_lsn.value;
+        if (static constexpr Size CUTOFF {1'024}; CUTOFF < m_wal->current_lsn().value - checkpoint) {
+            auto s = m_framer.write_back(entry.frame_index);
 
-        if (s.is_ok()) {
-            clean_page(entry);
-        } else {
-            CALICO_ERROR(s);
-            return s;
+            if (s.is_ok()) {
+                clean_page(entry);
+            } else {
+                CALICO_ERROR(s);
+                return s;
+            }
         }
     }
     return ok();

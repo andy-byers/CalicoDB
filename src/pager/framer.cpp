@@ -145,6 +145,7 @@ auto Framer::write_back(Size id) -> Status
     CALICO_EXPECT_LE(frame.ref_count(), 1);
 
     // If this fails, the caller will need to roll back the database state or exit.
+    m_bytes_written += m_page_size;
     return write_page_to_file(frame.pid(), frame.data());
 }
 

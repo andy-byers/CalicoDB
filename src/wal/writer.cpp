@@ -13,7 +13,7 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
     WalRecordHeader lhs {};
     lhs.type = WalRecordHeader::Type::FULL;
     lhs.size = static_cast<std::uint16_t>(data.size());
-    lhs.crc = crc_32(data);
+    lhs.crc = crc32c::Value(data.data(), data.size());
 
     while (!data.is_empty()) {
         auto rest = m_tail;

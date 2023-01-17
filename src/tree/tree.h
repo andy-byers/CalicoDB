@@ -3,7 +3,7 @@
 
 #include "calico/cursor.h"
 #include "calico/status.h"
-#include <tl/expected.hpp>
+#include "utils/expected.hpp"
 #include "utils/types.h"
 #include <optional>
 
@@ -33,9 +33,13 @@ public:
     virtual auto root(bool) -> tl::expected<Node, Status> = 0;
     virtual auto save_state(FileHeader &) const -> void = 0;
     virtual auto load_state(const FileHeader &) -> void = 0;
+
+#if not NDEBUG
+    virtual auto TEST_to_string(bool integer_keys) -> std::string = 0;
     virtual auto TEST_validate_nodes() -> void = 0;
     virtual auto TEST_validate_order() -> void = 0;
     virtual auto TEST_validate_links() -> void = 0;
+#endif // not NDEBUG
 };
 
 } // namespace Calico

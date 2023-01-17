@@ -56,7 +56,7 @@ TEST_F(CacheTests, ElementsArePromotedAfterUse)
     ASSERT_EQ(cache.get(3)->value, 3);
     ASSERT_EQ(cache.size(), 4);
 
-    decltype(cache)::entry entry;
+    decltype(cache)::Entry entry;
     entry = cache.evict().value();
     ASSERT_FALSE(entry.hot);
     ASSERT_EQ(entry.value, 2);

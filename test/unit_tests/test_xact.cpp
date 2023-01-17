@@ -216,7 +216,7 @@ public:
         return random.get<std::string>('a', 'z', PageWrapper::VALUE_SIZE);
     }
 
-    System state {"test/", {}};
+    System state {"test", {}};
     Random random {UnitTests::random_seed};
     Status status {ok()};
     std::unique_ptr<HeapStorage> store;
@@ -547,6 +547,7 @@ public:
     {
         options.page_size = 0x400;
         options.page_cache_size = 64 * options.page_size;
+        options.wal_buffer_size = 64 * options.page_size;
         options.log_level = LogLevel::OFF;
         options.storage = store.get();
 
@@ -816,7 +817,7 @@ public:
         Options options;
         options.page_size = 0x200;
         options.page_cache_size = 64 * options.page_size;
-        options.wal_buffer_size = 64 * wal_scratch_size(options.page_size);
+        options.wal_buffer_size = 64 * options.page_size;
         options.storage = store.get();
         options.log_level = LogLevel::OFF;
         ASSERT_OK(db.open(ROOT, options));
@@ -978,6 +979,7 @@ public:
         options.storage = store.get();
         options.page_size = 0x200;
         options.page_cache_size = 64 * options.page_size;
+        options.wal_buffer_size = 64 * options.page_size;
         options.log_level = LogLevel::OFF;
 
         ASSERT_OK(db->open("test", options));
@@ -1019,10 +1021,9 @@ public:
         for (const auto &[key, value]: uncommitted) {
             ASSERT_FALSE(tools::contains(*db, key, value));
         }
-        auto &tree = db->tree();
-        tree.TEST_validate_links();
-        tree.TEST_validate_nodes();
-        tree.TEST_validate_order();
+        db->tree->TEST_validate_links();
+        db->tree->TEST_validate_nodes();
+        db->tree->TEST_validate_order();
     }
 
     [[nodiscard]]

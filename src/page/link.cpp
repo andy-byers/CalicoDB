@@ -35,7 +35,8 @@ auto Link::content_view() const -> Slice
 auto Link::content_bytes(Size size) -> Bytes
 {
     // Takes a size parameter to avoid updating more of the page than is necessary.
-    return m_page.bytes(LinkLayout::content_offset(), size);
+    m_page.register_delta({LinkLayout::content_offset(), size});
+    return {m_page.data() + LinkLayout::content_offset(), size}; // TODO: Just return a Byte *
 }
 
 } // namespace Calico

@@ -3,13 +3,14 @@
 
 #include "options.h"
 #include "slice.h"
+#include "statistics.h"
 #include <memory>
 
 namespace Calico {
 
 class Core;
 class Cursor;
-class Statistics;
+//class Statistics;
 class Status;
 class Transaction;
 

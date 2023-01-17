@@ -44,6 +44,12 @@ public:
     auto save_state(FileHeader &header) -> void override;
     auto load_state(const FileHeader &header) -> void override;
 
+    [[nodiscard]]
+    auto bytes_written() const -> Size override
+    {
+        return m_framer.bytes_written();
+    }
+
 private:
     explicit BasicPager(const Parameters &param, Framer framer);
     [[nodiscard]] auto pin_frame(Id) -> Status;

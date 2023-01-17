@@ -1,4 +1,3 @@
-
 #include "calico/transaction.h"
 #include "core.h"
 #include "utils/expect.h"

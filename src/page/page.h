@@ -47,6 +47,20 @@ public:
     auto apply_update(const DeltaDescriptor &) -> void;
     auto apply_update(const FullImageDescriptor&) -> void;
 
+    auto register_delta(PageDelta delta) -> void;
+
+    [[nodiscard]]
+    auto data() -> Byte *
+    {
+        return m_data.data();
+    }
+
+    [[nodiscard]]
+    auto data() const -> const Byte *
+    {
+        return m_data.data();
+    }
+
     // NOTE: We need these because we have a user-defined destructor.
     Page(Page &&) = default;
     auto operator=(Page &&) -> Page & = default;

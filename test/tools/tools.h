@@ -162,6 +162,7 @@ namespace tools {
     {
         auto s = t.insert(key, value);
         if (!s.is_ok()) {
+            fmt::print(stderr, "error: {}\n", s.what().data());
             CALICO_EXPECT_TRUE(false && "Error: insert() failed");
         }
     }
@@ -171,6 +172,7 @@ namespace tools {
     {
         auto s = t.erase(find_exact(t, key));
         if (!s.is_ok() && !s.is_not_found()) {
+            fmt::print(stderr, "error: {}\n", s.what().data());
             CALICO_EXPECT_TRUE(false && "Error: erase() failed");
         }
         return !s.is_not_found();

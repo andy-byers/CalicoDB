@@ -1,4 +1,3 @@
-
 #ifndef CALICO_TREE_BPLUS_TREE_H
 #define CALICO_TREE_BPLUS_TREE_H
 
@@ -8,10 +7,6 @@
 #include "tree.h"
 #include "utils/system.h"
 
-#ifdef CALICO_BUILD_TESTS
-#  include <gtest/gtest_prod.h>
-#endif // CALICO_BUILD_TESTS
-
 namespace Calico {
 
 class Cursor;
@@ -19,7 +14,7 @@ class Pager;
 
 class BPlusTree : public Tree {
 public:
-    ~BPlusTree() override;
+    ~BPlusTree() override = default;
 
     [[nodiscard]]
     auto record_count() const -> Size override
@@ -37,9 +32,13 @@ public:
     [[nodiscard]] auto find_maximum() -> Cursor override;
     auto save_state(FileHeader &header) const -> void override;
     auto load_state(const FileHeader &header) -> void override;
+
+#if not NDEBUG
+    auto TEST_to_string(bool integer_keys) -> std::string override;
     auto TEST_validate_nodes() -> void override;
     auto TEST_validate_order() -> void override;
     auto TEST_validate_links() -> void override;
+#endif // not NDEBUG
 
 private:
     struct SearchResult {

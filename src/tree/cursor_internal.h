@@ -3,7 +3,7 @@
 
 #include <calico/cursor.h>
 #include <functional>
-#include <tl/expected.hpp>
+#include "utils/expected.hpp"
 #include <utils/types.h>
 
 namespace Calico {

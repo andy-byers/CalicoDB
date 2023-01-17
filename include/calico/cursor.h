@@ -38,14 +38,14 @@ private:
         [[nodiscard]] auto is_minimum() const -> bool;
         [[nodiscard]] auto is_maximum() const -> bool;
 
-        std::uint64_t ids[3] {0, 1, 0};
+        Size ids[3] {0, 1, 0};
         std::uint16_t cell_count {};
         std::uint16_t index {};
     };
 
     friend class CursorInternal;
 
-    mutable Status m_status {Status::not_found("not found")};
+    mutable Status m_status {Status::ok()};
     CursorActions *m_actions {};
     Position m_position;
 };
