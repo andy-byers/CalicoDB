@@ -245,6 +245,13 @@ public:
         return Id::null();
     }
 
+    [[nodiscard]]
+    auto bytes_written() const -> Size override
+    {
+        return 0;
+    }
+
+
     auto log(WalPayloadIn) -> void override
     {
 

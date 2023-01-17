@@ -55,10 +55,38 @@ struct Id {
         return value - 1;
     }
 
-    constexpr auto operator<=>(const Id &) const = default;
-
     Size value {};
 };
+
+inline auto operator<(Id lhs, Id rhs) -> bool
+{
+    return lhs.value < rhs.value;
+}
+
+inline auto operator>(Id lhs, Id rhs) -> bool
+{
+    return lhs.value > rhs.value;
+}
+
+inline auto operator<=(Id lhs, Id rhs) -> bool
+{
+    return lhs.value <= rhs.value;
+}
+
+inline auto operator>=(Id lhs, Id rhs) -> bool
+{
+    return lhs.value >= rhs.value;
+}
+
+inline auto operator==(Id lhs, Id rhs) -> bool
+{
+    return lhs.value == rhs.value;
+}
+
+inline auto operator!=(Id lhs, Id rhs) -> bool
+{
+    return lhs.value != rhs.value;
+}
 
 class AlignedBuffer {
 public:

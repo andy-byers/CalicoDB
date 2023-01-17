@@ -7,7 +7,7 @@
 #include "utils/utils.h"
 #include "wal/wal.h"
 #include <optional>
-#include <tl/expected.hpp>
+#include "utils/expected.hpp"
 
 namespace Calico {
 
@@ -29,6 +29,7 @@ public:
     [[nodiscard]] virtual auto recovery_lsn() -> Id = 0;
     [[nodiscard]] virtual auto page_count() const -> Size = 0;
     [[nodiscard]] virtual auto page_size() const -> Size = 0;
+    [[nodiscard]] virtual auto bytes_written() const -> Size = 0;
     [[nodiscard]] virtual auto hit_ratio() const -> double = 0;
     virtual auto allocate() -> tl::expected<Page, Status> = 0;
     virtual auto acquire(Id, bool) -> tl::expected<Page, Status> = 0;

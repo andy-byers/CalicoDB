@@ -9,7 +9,7 @@
 #include "utils/types.h"
 #include <mutex>
 #include <map>
-#include <tl/expected.hpp>
+#include "utils/expected.hpp"
 
 namespace Calico {
 

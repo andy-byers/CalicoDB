@@ -18,7 +18,7 @@ using LogPtr = std::shared_ptr<spdlog::logger>;
 using LogSink = spdlog::sink_ptr;
 
 struct Error {
-    enum Level: Size {
+    enum Level {
         WARN,
         ERROR,
 
@@ -30,9 +30,9 @@ struct Error {
     Level priority {};
 };
 
-#define CALICO_WARN(s) m_system->push_error(Error::WARN, s);
-#define CALICO_ERROR(s) m_system->push_error(Error::ERROR, s);
-#define CALICO_PANIC(s) m_system->push_error(Error::PANIC, s);
+#define CALICO_WARN(s) m_system->push_error(Error::WARN, s)
+#define CALICO_ERROR(s) m_system->push_error(Error::ERROR, s)
+#define CALICO_PANIC(s) m_system->push_error(Error::PANIC, s)
 #define CALICO_WARN_IF(expr) do {if (auto calico_warn_s = (expr); !calico_warn_s.is_ok()) CALICO_WARN(calico_warn_s);} while (0)
 #define CALICO_ERROR_IF(expr) do {if (auto calico_error_s = (expr); !calico_error_s.is_ok()) CALICO_ERROR(calico_error_s);} while (0)
 #define CALICO_PANIC_IF(expr) do {if (auto calico_panic_s = (expr); !calico_panic_s.is_ok() CALICO_PANIC(calico_panic_s);} while (0)
@@ -45,7 +45,7 @@ public:
     // LSN of the last commit record written to the WAL.
     std::atomic<Id> commit_lsn {};
 
-    System(const std::string_view &base, LogLevel log_level, LogTarget log_target);
+    System(const std::string &prefix, const Options &options);
     auto create_log(const std::string_view &name) const -> LogPtr;
     auto push_error(Error::Level level, Status status) -> void;
     auto original_error() const -> Error;

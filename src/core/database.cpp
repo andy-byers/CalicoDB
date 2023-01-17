@@ -94,10 +94,10 @@ auto Database::erase(const Cursor &cursor) -> Status
     return m_core->erase(cursor);
 }
 
-auto Database::info() const -> Info
+auto Database::statistics() const -> Statistics
 {
     CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->info();
+    return m_core->statistics();
 }
 
 auto Database::status() const -> Status

@@ -3,13 +3,14 @@
 
 #include "options.h"
 #include "slice.h"
+#include "statistics.h"
 #include <memory>
 
 namespace Calico {
 
 class Core;
 class Cursor;
-class Info;
+//class Statistics;
 class Status;
 class Transaction;
 
@@ -27,7 +28,7 @@ public:
     [[nodiscard]] auto insert(Slice key, Slice value) -> Status;
     [[nodiscard]] auto erase(Slice key) -> Status;
     [[nodiscard]] auto erase(const Cursor &cursor) -> Status;
-    [[nodiscard]] auto info() const -> Info;
+    [[nodiscard]] auto statistics() const -> Statistics;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto transaction() -> Transaction;
 

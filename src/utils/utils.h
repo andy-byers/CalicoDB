@@ -57,8 +57,7 @@ public:
             m_size = std::char_traits<Byte>::length(m_data);
     }
 
-    template<CanSlice T>
-    constexpr Bytes(T &rhs) noexcept
+    Bytes(std::string &rhs) noexcept
         : Bytes {rhs.data(), rhs.size()} {}
 
     [[nodiscard]]
@@ -87,7 +86,7 @@ public:
 
     constexpr operator Slice() const
     {
-        return {*this};
+        return {m_data, m_size};
     }
 
     constexpr auto operator[](Size index) const noexcept -> const Byte &
@@ -133,7 +132,7 @@ public:
     constexpr auto range(Size offset) noexcept -> Bytes
     {
         assert(offset <= m_size);
-        return const_cast<Bytes *>(this)->range(offset, m_size - offset);
+        return range(offset, m_size - offset);
     }
 
     [[nodiscard]]

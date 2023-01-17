@@ -36,7 +36,8 @@ public:
     {
         Options options;
         options.page_size = 0x200;
-        options.cache_size = 16;
+        options.page_cache_size = 32 * options.page_size;
+        options.wal_buffer_size = 32 * options.page_size;
 
         store = std::make_unique<HeapStorage>();
         core = std::make_unique<Core>();
@@ -59,7 +60,7 @@ public:
 
     auto erase_one(const std::string &maybe) -> void
     {
-        ASSERT_GT(core->info().record_count(), 0);
+        ASSERT_GT(core->statistics().record_count(), 0);
         auto s = core->erase(core->find(maybe));
         if (s.is_not_found())
             s = core->erase(core->first());
@@ -79,12 +80,13 @@ TEST_F(DatabaseOpenTests, MaximumPageSize)
     // Maximum page size (65,536) is represented as 0 on disk, since it cannot fit into a short integer.
     Options options;
     options.page_size = MAXIMUM_PAGE_SIZE;
-    options.cache_size = options.page_size * 64;
+    options.page_cache_size = options.page_size * 64;
+    options.wal_buffer_size = options.page_size * 64;
 
     for (Size i {}; i < 2; ++i) {
         Database db;
         ASSERT_OK(db.open(ROOT, options));
-        ASSERT_EQ(db.info().page_size(), MAXIMUM_PAGE_SIZE);
+        ASSERT_EQ(db.statistics().page_size(), MAXIMUM_PAGE_SIZE);
         ASSERT_OK(db.close());
     }
 }
@@ -94,7 +96,8 @@ public:
     BasicDatabaseTests()
     {
         options.page_size = 0x200;
-        options.cache_size = options.page_size * frame_count;
+        options.page_cache_size = options.page_size * frame_count;
+        options.wal_buffer_size = options.page_cache_size;
         options.log_level = LogLevel::OFF;
         options.storage = store.get();
     }
@@ -211,7 +214,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     }
 
     ASSERT_OK(db.open(ROOT, options));
-    CALICO_EXPECT_EQ(db.info().record_count(), records.size());
+    CALICO_EXPECT_EQ(db.statistics().record_count(), records.size());
     for (const auto &[key, value]: records) {
         const auto c = tools::find_exact(db, key);
         ASSERT_TRUE(c.is_valid());
@@ -233,18 +236,6 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 
     invalid.page_size = DEFAULT_PAGE_SIZE - 1;
-    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-}
-
-TEST_F(BasicDatabaseTests, ReportsInvalidWalLimits)
-{
-    auto invalid = options;
-
-    Database db;
-    invalid.wal_limit = MINIMUM_WAL_LIMIT - 1;
-    ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
-
-    invalid.wal_limit = MAXIMUM_WAL_LIMIT + 1;
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 }
 

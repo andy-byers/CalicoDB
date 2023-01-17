@@ -18,13 +18,6 @@ enum class ThreeWayComparison {
     GT = 1,
 };
 
-template<class T>
-concept CanSlice = requires(T t)
-{
-    {t.data()} -> std::convertible_to<Byte const *>;
-    {t.size()} -> std::convertible_to<Size>;
-};
-
 class Slice {
 public:
     constexpr Slice() noexcept = default;
@@ -32,18 +25,25 @@ public:
     constexpr Slice(const Byte *data, Size size) noexcept
         : m_data {data},
           m_size {size}
-    {}
+    {
+        assert(m_data != nullptr);
+    }
 
     constexpr Slice(const Byte *data) noexcept
         : m_data {data}
     {
-        if (m_data != nullptr)
-            m_size = std::char_traits<Byte>::length(m_data);
+        assert(m_data != nullptr);
+
+        m_size = std::char_traits<Byte>::length(m_data);
     }
 
-    template<CanSlice T>
-    constexpr Slice(const T &rhs) noexcept
-        : Slice {rhs.data(), rhs.size()} {}
+    constexpr Slice(const std::string_view &rhs) noexcept
+        : Slice {rhs.data(), rhs.size()}
+    {}
+
+    Slice(const std::string &rhs) noexcept
+        : Slice {rhs.data(), rhs.size()}
+    {}
 
     [[nodiscard]]
     constexpr auto is_empty() const noexcept -> bool
@@ -113,19 +113,12 @@ public:
         return *this;
     }
 
-    template<CanSlice T>
     [[nodiscard]]
-    constexpr auto starts_with(T rhs) const noexcept -> bool
+    constexpr auto starts_with(Slice rhs) const noexcept -> bool
     {
         if (rhs.size() > m_size)
             return false;
         return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
-    }
-
-    [[nodiscard]]
-    constexpr auto starts_with(const Byte *rhs) const noexcept -> bool
-    {
-        return starts_with(Slice {rhs});
     }
 
     [[nodiscard]]
@@ -135,7 +128,7 @@ public:
     }
 
 private:
-    Byte const *m_data {};
+    const Byte *m_data {""};
     Size m_size {};
 };
 
@@ -158,7 +151,6 @@ inline auto compare_three_way(Slice lhs, Slice rhs) noexcept -> ThreeWayComparis
     return r < 0 ? ThreeWayComparison::LT : ThreeWayComparison::GT;
 }
 
-} // namespace Calico
 
 inline auto operator<(Calico::Slice lhs, Calico::Slice rhs) noexcept -> bool
 {
@@ -189,5 +181,7 @@ inline auto operator!=(Calico::Slice lhs, Calico::Slice rhs) noexcept -> bool
 {
     return !(lhs == rhs);
 }
+
+} // namespace Calico
 
 #endif // CALICO_SLICE_H

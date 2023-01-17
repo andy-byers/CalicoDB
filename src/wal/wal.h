@@ -84,6 +84,7 @@ public:
 
     [[nodiscard]] virtual auto flushed_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto current_lsn() const -> Id = 0;
+    [[nodiscard]] virtual auto bytes_written() const -> Size = 0;
     [[nodiscard]] virtual auto roll_forward(Id begin_lsn, const Callback &callback) -> Status = 0;
     [[nodiscard]] virtual auto roll_backward(Id end_lsn, const Callback &callback) -> Status = 0;
     [[nodiscard]] virtual auto start_workers() -> Status = 0;

@@ -516,7 +516,7 @@ public:
 
     WalWriterTests()
         : scratch {wal_scratch_size(PAGE_SIZE), 32},
-          system {"test", LogLevel::OFF, {}},
+          system {"test", {}},
           tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer {WalWriter::Parameters{
               PREFIX,
@@ -772,7 +772,7 @@ public:
     std::string reader_tail;
     std::string writer_tail;
     Random random {UnitTests::random_seed};
-    System system {PREFIX, LogLevel::OFF, {}};
+    System system {PREFIX, {}};
     WalWriter writer;
     Worker<Event> tasks;
 };

@@ -84,7 +84,7 @@ public:
         DirtyToken dirty_token {};
     };
 
-    using Iterator = Cache<Id, Entry, Id::Hash>::iterator;
+    using Iterator = Cache<Id, Entry, Id::Hash>::Iterator;
 
     PageCache() = default;
     ~PageCache() = default;

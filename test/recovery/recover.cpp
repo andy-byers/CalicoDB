@@ -48,7 +48,7 @@ auto main(int argc, const char *argv[]) -> int
     }
     Database db;
     expect_ok(db.open(path.string()));
-    const auto info = db.info();
+    const auto info = db.statistics();
 
     // The database should contain exactly `num_committed` records.
     CALICO_EXPECT_EQ(info.record_count(), num_committed);

@@ -10,7 +10,7 @@
 #include "writer.h"
 #include <atomic>
 #include <optional>
-#include <tl/expected.hpp>
+#include "utils/expected.hpp"
 #include <unordered_set>
 
 namespace Calico {
@@ -44,6 +44,12 @@ public:
     auto log(WalPayloadIn payload) -> void override;
     auto flush() -> void override;
 
+    [[nodiscard]]
+    auto bytes_written() const -> Size override
+    {
+        return m_bytes_written;
+    }
+
 private:
     explicit BasicWriteAheadLog(const Parameters &param);
     [[nodiscard]] auto open_reader() -> tl::expected<WalReader, Status>;
@@ -62,6 +68,7 @@ private:
     std::string m_writer_tail;
     Size m_wal_limit {};
     Size m_writer_capacity {};
+    Size m_bytes_written {};
 
     struct AdvanceToken {};
     struct FlushToken {};

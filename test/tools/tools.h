@@ -162,6 +162,7 @@ namespace tools {
     {
         auto s = t.insert(key, value);
         if (!s.is_ok()) {
+            fmt::print(stderr, "error: {}\n", s.what().data());
             CALICO_EXPECT_TRUE(false && "Error: insert() failed");
         }
     }
@@ -171,6 +172,7 @@ namespace tools {
     {
         auto s = t.erase(find_exact(t, key));
         if (!s.is_ok() && !s.is_not_found()) {
+            fmt::print(stderr, "error: {}\n", s.what().data());
             CALICO_EXPECT_TRUE(false && "Error: erase() failed");
         }
         return !s.is_not_found();
@@ -352,9 +354,9 @@ struct formatter<Cco::Options> {
     template <typename FormatContext>
     auto format(const Cco::Options &options, FormatContext &ctx) {
         auto out = fmt::format("({} B) {{", sizeof(options));
-        out += fmt::format("wal_limit: {}", options.wal_limit);
+        out += fmt::format("wal_buffer_size: {}", options.wal_buffer_size);
         out += fmt::format("page_size: {}, ", options.page_size);
-        out += fmt::format("frame_count: {}, ", options.cache_size);
+        out += fmt::format("page_cache_size: {}, ", options.page_cache_size);
         out += fmt::format("log_level: {}, ", static_cast<int>(options.log_level));
         out += fmt::format("store: {}, ", static_cast<void*>(options.storage));
         return format_to(ctx.out(), "Options {}}}", out);

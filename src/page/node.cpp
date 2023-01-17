@@ -366,8 +366,10 @@ auto Node::child_id(Size index) const -> Id
 {
     CALICO_EXPECT_FALSE(is_external());
     CALICO_EXPECT_LE(index, cell_count());
-    if (index < cell_count())
-        return read_cell(index).left_child_id();
+    if (index < cell_count()) {
+        const auto offset = CellDirectory::get_pointer(m_page, index).value;
+        return {get_u64(m_page.view(offset).data())};
+    }
     return rightmost_child_id();
 }
 
@@ -625,13 +627,13 @@ auto Node::reset(bool reset_header) -> void
     m_overflow.reset();
 }
 
-auto transfer_cell(Node &src, Node &dst, Size index) -> void
+static auto transfer_first_cell_left(Node &src, Node &dst) -> void
 {
     CALICO_EXPECT_EQ(src.type(), dst.type());
-    auto cell = src.read_cell(index);
+    auto cell = src.read_cell(0);
     const auto cell_size = cell.size();
-    dst.insert(cell);
-    src.remove_at(index, cell_size);
+    dst.insert_at(dst.cell_count(), cell);
+    src.remove_at(0, cell_size);
 }
 
 auto accumulate_occupied_space(const Node &Ln, const Node &rn)
@@ -678,12 +680,12 @@ auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
     auto separator = parent.read_cell(index);
     const auto separator_size = separator.size();
     separator.set_left_child_id(Lc.rightmost_child_id());
-    Lc.insert(separator);
+    Lc.insert_at(Lc.cell_count(), separator);
     parent.remove_at(index, separator_size);
 
     // Transfer the rest of the cells. Lc shouldn't overflow.
     while (rc.cell_count())
-        transfer_cell(rc, Lc, 0);
+        transfer_first_cell_left(rc, Lc);
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
 
     Lc.set_rightmost_child_id(rc.rightmost_child_id());
@@ -699,7 +701,7 @@ auto external_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
     parent.remove_at(index, separator.size());
 
     while (rc.cell_count())
-        transfer_cell(rc, Lc, 0);
+        transfer_first_cell_left(rc, Lc);
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
     parent.set_child_id(index, Lc.id());
 }
@@ -720,14 +722,14 @@ auto internal_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
     const auto separator_size = separator.size();
     separator.set_left_child_id(Lc.rightmost_child_id());
     Lc.set_rightmost_child_id(rc.rightmost_child_id());
-    Lc.insert(separator);
+    Lc.insert_at(Lc.cell_count(), separator);
     CALICO_EXPECT_EQ(parent.child_id(index + 1), rc.id());
     parent.set_child_id(index + 1, Lc.id());
     parent.remove_at(index, separator_size);
 
     // Transfer the rest of the cells. Lc shouldn't overflow.
     while (rc.cell_count()) {
-        transfer_cell(rc, Lc, 0);
+        transfer_first_cell_left(rc, Lc);
         CALICO_EXPECT_FALSE(Lc.is_overflowing());
     }
 }
@@ -742,7 +744,7 @@ auto external_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
     parent.remove_at(index, separator.size());
 
     while (rc.cell_count())
-        transfer_cell(rc, Lc, 0);
+        transfer_first_cell_left(rc, Lc);
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
 }
 

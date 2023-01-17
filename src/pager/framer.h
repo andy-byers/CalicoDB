@@ -2,7 +2,7 @@
 #define CALICO_PAGER_FRAMER_H
 
 #include "calico/status.h"
-#include <tl/expected.hpp>
+#include "utils/expected.hpp"
 #include "utils/types.h"
 #include <list>
 #include <memory>
@@ -108,6 +108,12 @@ public:
         return m_frames[id];
     }
 
+    [[nodiscard]]
+    auto bytes_written() const -> Size
+    {
+        return m_bytes_written;
+    }
+
     auto operator=(Framer &&) -> Framer & = default;
     Framer(Framer &&) = default;
 
@@ -130,6 +136,7 @@ private:
     Size m_page_count {};
     Size m_page_size {};
     Size m_ref_sum {};
+    Size m_bytes_written {};
 };
 
 } // namespace Calico

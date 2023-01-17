@@ -1,4 +1,3 @@
-
 #include "calico/transaction.h"
 #include "core.h"
 #include "utils/expect.h"
@@ -22,6 +21,17 @@ Transaction::~Transaction()
 Transaction::Transaction(Core &core)
     : m_core {&core}
 {}
+
+Transaction::Transaction(Transaction &&rhs) noexcept
+    : m_core {std::exchange(rhs.m_core, nullptr)}
+{}
+
+auto Transaction::operator=(Transaction &&rhs) noexcept -> Transaction &
+{
+    if (this != &rhs)
+        m_core = std::exchange(rhs.m_core, nullptr);
+    return *this;
+}
 
 auto Transaction::commit() -> Status
 {
