@@ -68,6 +68,6 @@ auto main(int argc, const char *argv[]) -> int
     // All records should have been reached and removed.
     CALICO_EXPECT_EQ(key_counter, num_committed);
     CALICO_EXPECT_EQ(info.record_count(), 0);
-    expect_ok(Database::destroy(std::move(db)));
+    expect_ok(std::move(db).destroy());
     return 0;
 }

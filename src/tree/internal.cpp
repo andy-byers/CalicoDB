@@ -321,7 +321,7 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> tl::expected
     if (!node.is_underflowing())
         return true;
 
-    auto maybe_fix_parent = [&]() -> tl::expected<bool, Status> {
+    auto maybe_fix_parent = [this, &node, &parent]() -> tl::expected<bool, Status> {
         if (parent.is_overflowing()) {
             const auto id = parent.id();
             CALICO_TRY_R(m_pool->release(std::move(node)));

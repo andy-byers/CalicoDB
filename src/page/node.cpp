@@ -193,17 +193,6 @@ auto BlockAllocator::reset(Page &page) -> void
     NodeHeader::set_free_total(page, 0);
 }
 
-auto BlockAllocator::compute_free_total(const Page &page) -> Size
-{
-    auto free_total = NodeHeader::frag_count(page);
-    for (Size i {}, ptr {NodeHeader::free_start(page)}; ptr; ++i) {
-        free_total += get_block_size(page, ptr);
-        ptr = get_next_pointer(page, ptr);
-    }
-    CALICO_EXPECT_LE(free_total, page.size() - NodeHeader::cell_directory_offset(page));
-    return free_total;
-}
-
 auto BlockAllocator::get_next_pointer(const Page &page, Size offset) -> Size
 {
     return get_u16(page, offset);
@@ -549,9 +538,9 @@ auto Node::defragment(std::optional<Size> skipped_cid) -> void
 
 auto Node::insert(Cell cell) -> void
 {
-    const auto [index, should_be_false] = find_ge(cell.key());
+    const auto [index, falsy] = find_ge(cell.key());
     // Keys should be unique.
-    CALICO_EXPECT_FALSE(should_be_false);
+    CALICO_EXPECT_FALSE(falsy);
     insert_at(index, cell);
 }
 
@@ -592,8 +581,6 @@ auto Node::insert_at(Size index, Cell cell) -> void
     // Adjust the start of the cell content area.
     if (offset < NodeHeader::cell_start(m_page))
         NodeHeader::set_cell_start(m_page, offset);
-
-    //    CALICO_VALIDATE(validate());
 }
 
 auto Node::remove(Slice key) -> bool
@@ -636,7 +623,7 @@ static auto transfer_first_cell_left(Node &src, Node &dst) -> void
     src.remove_at(0, cell_size);
 }
 
-auto accumulate_occupied_space(const Node &Ln, const Node &rn)
+static auto accumulate_occupied_space(const Node &Ln, const Node &rn)
 {
     const auto page_size = Ln.size();
     CALICO_EXPECT_EQ(page_size, rn.size());
@@ -814,7 +801,7 @@ auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> 
 
 auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
-    transfer_cells_right_while(Ln, rn, [overflow_index](const Node &src, const Node &, Size) {
+    transfer_cells_right_while(Ln, rn, [overflow_index](const auto &src, const auto &, Size) {
         return src.cell_count() > overflow_index;
     });
 
@@ -828,7 +815,7 @@ auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overfl
 auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
 {
     // Note that we need to insert the overflow cell into either Ln or rn no matter what, even if it ends up being the separator.
-    transfer_cells_right_while(Ln, rn, [&overflow, overflow_index](const Node &src, const Node &, Size counter) {
+    transfer_cells_right_while(Ln, rn, [&overflow, overflow_index](const auto &src, const auto &, auto counter) {
         const auto goes_in_src = src.cell_count() > overflow_index;
         const auto has_no_room = src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
         return !counter || (goes_in_src && has_no_room);
@@ -852,8 +839,8 @@ auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     auto overflow = Ln.take_overflow_cell();
 
     // Figure out where the overflow cell should go.
-    const auto [overflow_idx, should_be_false] = Ln.find_ge(overflow.key());
-    CALICO_EXPECT_FALSE(should_be_false);
+    const auto [overflow_idx, falsy] = Ln.find_ge(overflow.key());
+    CALICO_EXPECT_FALSE(falsy);
 
     // Warning: We don't have access to the former right sibling of Ln, but we need to set its left child ID.
     //          We need to make sure to do that in the caller.
@@ -867,7 +854,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 
     } else if (overflow_idx == 0) {
         // We need the `!counter` because the condition following it may not be true if we got here from split_root().
-        transfer_cells_right_while(Ln, rn, [&overflow](const Node &src, const Node &, Size counter) {
+        transfer_cells_right_while(Ln, rn, [&overflow](const auto &src, const auto &, auto counter) {
             return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
         });
         Ln.insert_at(0, overflow);
@@ -876,7 +863,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     } else if (overflow_idx == Ln.cell_count()) {
         // Just transfer a single cell in this case. This should reduce the number of splits during a sequential write, which seems to be
         // a common use case.
-        transfer_cells_right_while(Ln, rn, [](const Node &, const Node &, Size counter) {
+        transfer_cells_right_while(Ln, rn, [](const auto &, const auto &, auto counter) {
             return !counter;
         });
         rn.insert_at(rn.cell_count(), overflow);
@@ -906,7 +893,7 @@ auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
 
     } else if (overflow_idx == 0) {
         // TODO: Split the other way in this case, as we are possibly inserting reverse sequentially?
-        transfer_cells_right_while(Ln, rn, [&overflow](const Node &src, const Node &, Size counter) {
+        transfer_cells_right_while(Ln, rn, [&overflow](const auto &src, const auto &, Size counter) {
             return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
         });
         Ln.insert_at(0, overflow);
@@ -915,7 +902,7 @@ auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     } else if (overflow_idx == Ln.cell_count()) {
         // Just transfer a single cell in this case. This should reduce the number of splits during a sequential write, which seems to be
         // a common use case. If we want to change this behavior, we just need to make sure that rn still has room for the overflow cell.
-        transfer_cells_right_while(Ln, rn, [](const Node &, const Node &, Size counter) {
+        transfer_cells_right_while(Ln, rn, [](const auto &, const auto &, auto counter) {
             return !counter;
         });
         rn.insert_at(rn.cell_count(), overflow);

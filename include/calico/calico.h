@@ -5,7 +5,6 @@
 #include "cursor.h"
 #include "database.h"
 #include "options.h"
-#include "platform.h"
 #include "slice.h"
 #include "statistics.h"
 #include "status.h"

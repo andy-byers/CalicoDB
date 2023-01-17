@@ -32,7 +32,7 @@ auto FreeList::pop() -> tl::expected<Page, Status>
 {
     if (!m_head.is_null()) {
         return m_pager->acquire(m_head, true)
-            .and_then([&](Page page) -> tl::expected<Page, Status> {
+            .and_then([this](Page page) -> tl::expected<Page, Status> {
                 Link link {std::move(page)};
                 m_head = link.next_id();
                 return link.take();
