@@ -119,7 +119,7 @@ TEST_F(BasicDatabaseTests, DestroyDatabase)
 {
     Database db;
     ASSERT_OK(db.open(ROOT, options));
-    ASSERT_OK(Database::destroy(std::move(db)));
+    ASSERT_OK(std::move(db).destroy());
 }
 
 TEST_F(BasicDatabaseTests, DatabaseIsMovable)

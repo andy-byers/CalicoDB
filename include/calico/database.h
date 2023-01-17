@@ -18,9 +18,9 @@ class Database final {
 public:
     Database() noexcept;
 
-    [[nodiscard]] static auto destroy(Database db) -> Status;
     [[nodiscard]] auto open(Slice path, const Options &options = {}) -> Status;
     [[nodiscard]] auto close() -> Status;
+    [[nodiscard]] auto destroy() && -> Status;
     [[nodiscard]] auto find_exact(Slice key) const -> Cursor;
     [[nodiscard]] auto find(Slice key) const -> Cursor;
     [[nodiscard]] auto first() const -> Cursor;

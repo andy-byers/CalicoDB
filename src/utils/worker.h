@@ -9,7 +9,7 @@
 
 namespace Calico {
 
-template<std::movable T>
+template<class T>
 class Worker final {
 public:
     using Task = std::function<void(T)>;
