@@ -227,6 +227,11 @@ auto Core::destroy() -> Status
     return s;
 }
 
+auto Core::bytes_written() const -> Size
+{
+    return m_bytes_written;
+}
+
 auto Core::status() const -> Status
 {
     return m_system->has_error() ? m_system->original_error().status : ok();
@@ -287,6 +292,7 @@ auto Core::last() -> Cursor
 auto Core::insert(Slice key, Slice value) -> Status
 {
     CALICO_TRY_S(handle_errors());
+    m_bytes_written += key.size() + value.size();
     if (m_system->has_xact) {
         return tree->insert(key, value);
     } else {
@@ -303,6 +309,7 @@ auto Core::erase(Slice key) -> Status
 auto Core::erase(const Cursor &cursor) -> Status
 {
     CALICO_TRY_S(handle_errors());
+    CALICO_EXPECT_TRUE(cursor.is_valid());
     if (m_system->has_xact) {
         return tree->erase(cursor);
     } else {
@@ -369,12 +376,11 @@ auto Core::do_commit() -> Status
     // System object at this point.
     CALICO_TRY_S(status());
 
-    // Make sure every dirty page that hasn't been written back since the last commit is on disk. Note that this will
-    // cause all dirty pages to be flushed on the first commit.
-    CALICO_TRY_S(pager->flush(last_commit_lsn));
-
-    // Clean up obsolete WAL segments.
-    wal->cleanup(pager->recovery_lsn());
+    const auto checkpoint = pager->recovery_lsn().value;
+    if (static constexpr Size CUTOFF {1'024}; CUTOFF < lsn.value - checkpoint) {
+        CALICO_TRY_S(pager->flush(last_commit_lsn));
+        wal->cleanup(pager->recovery_lsn());
+    }
 
     m_images.clear();
     m_system->commit_lsn = lsn;

@@ -3,6 +3,7 @@
 #include "pager/pager.h"
 #include "utils/encoding.h"
 #include "utils/layout.h"
+#include "wal/helpers.h"
 
 namespace Calico {
 
@@ -111,8 +112,16 @@ auto Page::apply_update(const DeltaDescriptor &info) -> void
 
 auto Page::collect_deltas() -> std::vector<PageDelta>
 {
-    compress_deltas(m_deltas);
+    const auto compressed_size = compress_deltas(m_deltas);
+    const auto full_size = wal_scratch_size(m_data.size());
+    if (compressed_size + DELTA_PAYLOAD_HEADER_SIZE > full_size)
+        m_deltas = {{0, m_data.size()}};
     return m_deltas;
+}
+
+auto Page::register_delta(PageDelta delta) -> void
+{
+    insert_delta(m_deltas, delta);
 }
 
 auto get_u16(const Page &page, Size offset) -> std::uint16_t
@@ -132,17 +141,20 @@ auto get_u64(const Page &page, Size offset) -> std::uint64_t
 
 auto put_u16(Page &page, Size offset, std::uint16_t value) -> void
 {
-    put_u16(page.bytes(offset, sizeof(value)), value);
+    put_u16(page.data() + offset, value);
+    page.register_delta({offset, sizeof(value)});
 }
 
 auto put_u32(Page &page, Size offset, std::uint32_t value) -> void
 {
-    put_u32(page.bytes(offset, sizeof(value)), value);
+    put_u32(page.data() + offset, value);
+    page.register_delta({offset, sizeof(value)});
 }
 
 auto put_u64(Page &page, Size offset, std::uint64_t value) -> void
 {
-    put_u64(page.bytes(offset, sizeof(value)), value);
+    put_u64(page.data() + offset, value);
+    page.register_delta({offset, sizeof(value)});
 }
 
 } // namespace Calico

@@ -34,6 +34,7 @@ public:
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto destroy() -> Status;
     [[nodiscard]] auto transaction() -> Transaction;
+    [[nodiscard]] auto bytes_written() const -> Size;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
     [[nodiscard]] auto insert(Slice, Slice) -> Status;
@@ -69,6 +70,7 @@ private:
     std::unique_ptr<LogScratchManager> m_scratch;
     std::unordered_set<Id, Id::Hash> m_images;
     Storage *m_store {};
+    Size m_bytes_written {};
     bool m_owns_store {};
 };
 

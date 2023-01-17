@@ -2,6 +2,7 @@
 #define CALICO_WAL_HELPERS_H
 
 #include "calico/storage.h"
+#include "page/delta.h"
 #include "record.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
@@ -13,6 +14,10 @@
 
 namespace Calico {
 
+static constexpr Size DELTA_PAYLOAD_HEADER_SIZE {11};
+static constexpr Size IMAGE_PAYLOAD_HEADER_SIZE {9};
+static constexpr Size COMMIT_PAYLOAD_HEADER_SIZE {1};
+
 [[nodiscard]]
 inline constexpr auto wal_block_size(Size page_size) -> Size
 {
@@ -22,7 +27,7 @@ inline constexpr auto wal_block_size(Size page_size) -> Size
 [[nodiscard]]
 inline constexpr auto wal_scratch_size(Size page_size) -> Size
 {
-    return page_size * WAL_SCRATCH_SCALE;
+    return page_size + DELTA_PAYLOAD_HEADER_SIZE + sizeof(PageDelta);
 }
 
 /*

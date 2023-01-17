@@ -32,9 +32,19 @@ auto Statistics::cache_hit_ratio() const -> double
     return m_core->pager->hit_ratio();
 }
 
-auto Statistics::data_throughput() const -> Size
+auto Statistics::registered_updates() const -> Size
+{
+    return m_core->wal->flushed_lsn().value - m_core->pager->recovery_lsn().value;
+}
+
+auto Statistics::pager_throughput() const -> Size
 {
     return m_core->pager->bytes_written();
+}
+
+auto Statistics::data_throughput() const -> Size
+{
+    return m_core->bytes_written();
 }
 
 auto Statistics::wal_throughput() const -> Size
