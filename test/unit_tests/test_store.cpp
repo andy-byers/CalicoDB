@@ -81,7 +81,7 @@ auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::strin
     static constexpr Size num_chunks {20};
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
     std::string backing(size, '\x00');
-    Bytes out {backing};
+    Span out {backing};
     Size counter {};
 
     while (!out.is_empty()) {
@@ -141,7 +141,7 @@ public:
 TEST_F(RandomFileReaderTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    Bytes bytes {backing};
+    Span bytes {backing};
     auto read_size = bytes.size();
     ASSERT_TRUE(file->read(bytes.data(), read_size, 0).is_ok());
     ASSERT_EQ(read_size, 0);
@@ -166,7 +166,7 @@ public:
 TEST_F(RandomFileEditorTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    Bytes bytes {backing};
+    Span bytes {backing};
     auto read_size = bytes.size();
     ASSERT_TRUE(file->read(bytes.data(), read_size, 0).is_ok());
     ASSERT_EQ(read_size, 0);
@@ -252,7 +252,7 @@ TEST_F(HeapTests, ReaderStopsAtEOF)
     write_out_randomly(random, *ra_editor, data);
 
     std::string buffer(data.size() * 2, '\x00');
-    Bytes bytes {buffer};
+    Span bytes {buffer};
     auto read_size = bytes.size();
     ASSERT_OK(ra_reader->read(bytes.data(), read_size, 0));
     ASSERT_EQ(bytes.truncate(read_size).to_string(), data);
@@ -270,7 +270,7 @@ TEST(SystemTests, SystemErrorBehavior)
 TEST(SystemTests, ClosedFileErrors)
 {
     char backing[1];
-    Bytes bytes {backing, sizeof(backing)};
+    Span bytes {backing, sizeof(backing)};
     auto read_size = bytes.size();
     ASSERT_TRUE(Posix::file_read(-1, bytes.data(), read_size).error().is_system_error());
     ASSERT_TRUE(Posix::file_write(-1, bytes).error().is_system_error());

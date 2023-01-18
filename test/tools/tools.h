@@ -43,7 +43,7 @@ public:
         CALICO_EXPECT_EQ(file_size % page_size, 0);
         m_data.resize(file_size);
 
-        Bytes bytes {m_data};
+        Span bytes {m_data};
         auto read_size = bytes.size();
         s = m_file->read(bytes.data(), read_size, 0);
         CALICO_EXPECT_EQ(read_size, file_size);
@@ -72,7 +72,7 @@ public:
 
         return Page {{
             id,
-            Bytes {m_data}.range(offset, m_page_size),
+            Span {m_data}.range(offset, m_page_size),
             nullptr,
             false,
         }};
@@ -89,7 +89,7 @@ class WalRecordGenerator {
 public:
 
     [[nodiscard]]
-    auto setup_deltas(Bytes image) -> std::vector<PageDelta>
+    auto setup_deltas(Span image) -> std::vector<PageDelta>
     {
         static constexpr Size MAX_WIDTH {30};
         static constexpr Size MAX_SPREAD {20};
@@ -220,7 +220,7 @@ namespace tools {
         CALICO_EXPECT_TRUE(store.open_random_reader(path, &file).is_ok());
         out.resize(size);
 
-        Bytes temp {out};
+        Span temp {out};
         auto read_size = temp.size();
         CALICO_EXPECT_TRUE(file->read(temp.data(), read_size, 0).is_ok());
         CALICO_EXPECT_EQ(read_size, size);

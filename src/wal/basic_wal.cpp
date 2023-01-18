@@ -12,19 +12,15 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
-      m_wal_limit {param.wal_limit},
-      m_writer_capacity {param.writer_capacity}
+      m_segment_cutoff {param.segment_cutoff},
+      m_buffer_count {param.writer_capacity}
 {
-//    m_log->trace("BasicWriteAheadLog");
-
-//    m_log->info("page_size = {}", param.page_size);
-//    m_log->info("wal_limit = {}", param.wal_limit);
-//    m_log->info("writer_capacity = {}", param.writer_capacity);
+    m_log->info("initializing, write buffer size is {}", param.writer_capacity * m_reader_data.size());
 
     CALICO_EXPECT_NE(m_store, nullptr);
     CALICO_EXPECT_NE(m_system, nullptr);
-    CALICO_EXPECT_NE(m_writer_capacity, 0);
-    CALICO_EXPECT_NE(m_wal_limit, 0);
+    CALICO_EXPECT_NE(m_buffer_count, 0);
+    CALICO_EXPECT_NE(m_segment_cutoff, 0);
 }
 
 auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
@@ -61,9 +57,6 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
 
 BasicWriteAheadLog::~BasicWriteAheadLog()
 {
-    // m_log->trace("~BasicWriteAheadLog");
-    // m_log->info("flushed_lsn: {}", m_flushed_lsn.load().value);
-
     if (m_writer != nullptr)
         CALICO_ERROR_IF(std::move(*m_writer).destroy());
 }
@@ -77,7 +70,7 @@ auto BasicWriteAheadLog::start_workers() -> Status
         m_system,
         &m_set,
         &m_flushed_lsn,
-        m_wal_limit,
+        m_segment_cutoff,
     }}};
     if (m_writer == nullptr)
         return system_error("cannot allocate writer object: out of memory");
@@ -94,7 +87,8 @@ auto BasicWriteAheadLog::start_workers() -> Status
 
     m_tasks = std::unique_ptr<Worker<Event>> {new(std::nothrow) Worker<Event> {[this](auto event) {
         run_task(std::move(event));
-    }, m_writer_capacity}};
+    },
+                                                                                m_buffer_count}};
     if (m_tasks == nullptr)
         return system_error("cannot allocate task manager object: out of memory");
 
@@ -151,8 +145,8 @@ auto BasicWriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
         *m_store,
         m_set,
         m_prefix,
-        Bytes {m_reader_tail},
-        Bytes {m_reader_data}};
+        Span {m_reader_tail},
+        Span {m_reader_data}};
     if (auto s = reader.open(); !s.is_ok())
         return tl::make_unexpected(s);
     return reader;
@@ -160,8 +154,6 @@ auto BasicWriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 
 auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) -> Status
 {
-    // m_log->trace("roll_forward");
-
     if (m_set.first().is_null())
         return ok();
 
@@ -205,6 +197,8 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
         s = ok();
 
     while (s.is_ok()) {
+        m_log->info("rolling segment {} forward", reader->segment_id().value);
+
         s = reader->roll([&callback, begin_lsn, this](auto payload) {
             m_last_lsn = payload.lsn();
             if (m_last_lsn >= begin_lsn)
@@ -239,7 +233,6 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
 
 auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> Status
 {
-    // m_log->trace("roll_backward");
     if (m_set.first().is_null())
         return ok();
 
@@ -264,6 +257,8 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
             if (first_lsn <= end_lsn)
                 break;
 
+            m_log->info("rolling segment {} backward", reader->segment_id().value);
+
             // Read all full image records. We can read them forward, since the pages are disjoint
             // within each transaction.
             s = reader->roll(callback);
@@ -284,13 +279,11 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
 
 auto BasicWriteAheadLog::cleanup(Id recovery_lsn) -> void
 {
-//    m_log->trace("cleanup({})", recovery_lsn.value);
     m_recovery_lsn.store(recovery_lsn);
 }
 
 auto BasicWriteAheadLog::truncate(Id lsn) -> Status
 {
-    // m_log->trace("truncate");
     auto current = m_set.last();
 
     while (!current.is_null()) {
@@ -307,7 +300,7 @@ auto BasicWriteAheadLog::truncate(Id lsn) -> Status
             const auto name = m_prefix + current.to_name();
             CALICO_TRY_S(m_store->remove_file(name));
             m_set.remove_after(SegmentId {current.value - 1});
-            // m_log->info("removed segment {} with first LSN {}", name, first_lsn.value);
+            m_log->info("removed segment {} with first lsn {}", name, r->value);
         }
         current = m_set.id_before(current);
     }

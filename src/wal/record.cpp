@@ -5,7 +5,7 @@
 
 namespace Calico {
 
-auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void
+auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void
 {
     out[0] = header.type;
     out.advance();

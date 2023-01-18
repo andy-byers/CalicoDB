@@ -123,7 +123,7 @@ auto Cell::overflow_id() const -> Id
     return m_overflow_id;
 }
 
-auto Cell::write(Bytes out) const -> void
+auto Cell::write(Span out) const -> void
 {
     if (!m_is_external) {
         CALICO_EXPECT_FALSE(m_left_child_id.is_root());
@@ -154,7 +154,7 @@ auto Cell::write(Bytes out) const -> void
     }
 }
 
-auto Cell::detach(Bytes scratch, bool ensure_internal) -> void
+auto Cell::detach(Span scratch, bool ensure_internal) -> void
 {
     if (ensure_internal && m_is_external)
         set_is_external(false);

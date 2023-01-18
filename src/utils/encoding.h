@@ -60,7 +60,7 @@ inline auto put_u16(Byte *out, std::uint16_t value) noexcept -> void
     dst[0] = static_cast<std::uint8_t>(value >> 8);
 }
 
-inline auto put_u16(Bytes out, std::uint16_t value) noexcept -> void
+inline auto put_u16(Span out, std::uint16_t value) noexcept -> void
 {
     put_u16(out.data(), value);
 }
@@ -74,7 +74,7 @@ inline auto put_u32(Byte *out, std::uint32_t value) noexcept -> void
     dst[0] = static_cast<std::uint8_t>(value >> 24);
 }
 
-inline auto put_u32(Bytes out, std::uint32_t value) noexcept -> void
+inline auto put_u32(Span out, std::uint32_t value) noexcept -> void
 {
     put_u32(out.data(), value);
 }
@@ -92,7 +92,7 @@ inline auto put_u64(Byte *out, std::uint64_t value) noexcept -> void
     dst[0] = static_cast<std::uint8_t>(value >> 56);
 }
 
-inline auto put_u64(Bytes out, std::uint64_t value) noexcept -> void
+inline auto put_u64(Span out, std::uint64_t value) noexcept -> void
 {
     put_u64(out.data(), value);
 }

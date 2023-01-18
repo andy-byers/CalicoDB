@@ -24,7 +24,7 @@ auto FreeList::push(Page page) -> tl::expected<void, Status>
     link.set_next_id(m_head);
     m_head = link.page().id();
     const auto s = m_pager->release(link.take());
-    if (!s.is_ok()) return tl::make_unexpected(s); // TODO
+    if (!s.is_ok()) return tl::make_unexpected(s);
     return {};
 }
 
@@ -32,7 +32,7 @@ auto FreeList::pop() -> tl::expected<Page, Status>
 {
     if (!m_head.is_null()) {
         return m_pager->acquire(m_head, true)
-            .and_then([this](Page page) -> tl::expected<Page, Status> {
+            .map([this](auto page){
                 Link link {std::move(page)};
                 m_head = link.next_id();
                 return link.take();

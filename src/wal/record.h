@@ -131,7 +131,7 @@ struct WalPayloadHeader {
 };
 
 // Routines for working with WAL records.
-auto write_wal_record_header(Bytes out, const WalRecordHeader &header) -> void;
+auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto read_wal_record_header(Slice in) -> WalRecordHeader;
 [[nodiscard]] auto read_wal_payload_header(Slice in) -> WalPayloadHeader;
 [[nodiscard]] auto split_record(WalRecordHeader &lhs, Slice payload, Size available_size) -> WalRecordHeader;

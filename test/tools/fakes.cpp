@@ -83,7 +83,7 @@ namespace interceptors {
 
 namespace fs = std::filesystem;
 
-static auto read_file_at(const std::string &path, const std::string &file, Bytes &out, Size offset)
+static auto read_file_at(const std::string &path, const std::string &file, Span &out, Size offset)
 {
     INTERCEPT(interceptors::read(path, out, offset));
 
@@ -104,7 +104,7 @@ static auto write_file_at(const std::string &path, std::string &file, Slice in, 
 
     if (const auto write_end = offset + in.size(); file.size() < write_end)
         file.resize(write_end);
-    mem_copy(Bytes {file}.range(offset), in);
+    mem_copy(Span {file}.range(offset), in);
     return ok();
 }
 
@@ -119,7 +119,7 @@ static auto format_path(std::string path)
 
 auto RandomHeapReader::read(Byte *out, Size &size, Size offset) -> Status
 {
-    Bytes bytes {out, size};
+    Span bytes {out, size};
     auto s = read_file_at(m_path, *m_file, bytes, offset);
     size = bytes.size();
     return s;
@@ -127,7 +127,7 @@ auto RandomHeapReader::read(Byte *out, Size &size, Size offset) -> Status
 
 auto RandomHeapEditor::read(Byte *out, Size &size, Size offset) -> Status
 {
-    Bytes bytes {out, size};
+    Span bytes {out, size};
     auto s = read_file_at(m_path, *m_file, bytes, offset);
     size = bytes.size();
     return s;}

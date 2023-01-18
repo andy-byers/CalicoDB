@@ -17,7 +17,7 @@ namespace Calico {
 class LogWriter {
 public:
     // NOTE: LogWriter must always be created on an empty segment file.
-    LogWriter(AppendWriter &file, Bytes tail, std::atomic<Id> &flushed_lsn)
+    LogWriter(AppendWriter &file, Span tail, std::atomic<Id> &flushed_lsn)
         : m_tail {tail},
           m_flushed_lsn {&flushed_lsn},
           m_file {&file}
@@ -35,7 +35,7 @@ public:
     [[nodiscard]] auto flush() -> Status;
 
 private:
-    Bytes m_tail;
+    Span m_tail;
     std::atomic<Id> *m_flushed_lsn {};
     AppendWriter *m_file {};
     Id m_last_lsn {};
@@ -47,7 +47,7 @@ class WalWriter {
 public:
     struct Parameters {
         Slice prefix;
-        Bytes tail;
+        Span tail;
         Storage *storage {};
         System *system {};
         WalSet *set {};
@@ -78,7 +78,7 @@ private:
     System *m_system {};
     WalSet *m_set {};
     SegmentId m_current;
-    Bytes m_tail;
+    Span m_tail;
     Size m_wal_limit {};
 };
 

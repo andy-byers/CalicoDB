@@ -32,25 +32,26 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
     return v && !(v & (v - 1));
 }
 
-// TODO: Get rid of this class.
-class Bytes {
+class Span {
 public:
-    constexpr Bytes() noexcept = default;
+    constexpr Span() noexcept = default;
 
-    constexpr Bytes(Byte *data, Size size) noexcept
+    constexpr Span(Byte *data, Size size) noexcept
         : m_data {data},
           m_size {size}
-    {}
-
-    constexpr Bytes(Byte *data) noexcept
-        : m_data {data}
     {
-        if (m_data != nullptr)
-            m_size = std::char_traits<Byte>::length(m_data);
+        CALICO_EXPECT_NE(m_data, nullptr);
     }
 
-    Bytes(std::string &rhs) noexcept
-        : Bytes {rhs.data(), rhs.size()} {}
+    constexpr Span(Byte *data) noexcept
+        : m_data {data}
+    {
+        CALICO_EXPECT_NE(m_data, nullptr);
+        m_size = std::char_traits<Byte>::length(m_data);
+    }
+
+    Span(std::string &rhs) noexcept
+        : Span {rhs.data(), rhs.size()} {}
 
     [[nodiscard]]
     constexpr auto is_empty() const noexcept -> bool
@@ -104,13 +105,13 @@ public:
     }
 
     [[nodiscard]]
-    constexpr auto range(Size offset, Size size) noexcept -> Bytes
+    constexpr auto range(Size offset, Size size) noexcept -> Span
     {
         assert(size <= m_size);
         assert(offset <= m_size);
         assert(offset + size <= m_size);
 
-        return Bytes {m_data + offset, size};
+        return Span {m_data + offset, size};
     }
 
     [[nodiscard]]
@@ -121,14 +122,14 @@ public:
     }
 
     [[nodiscard]]
-    constexpr auto range(Size offset) noexcept -> Bytes
+    constexpr auto range(Size offset) noexcept -> Span
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
     }
 
     [[nodiscard]]
-    constexpr auto copy() const noexcept -> Bytes
+    constexpr auto copy() const noexcept -> Span
     {
         return *this;
     }
@@ -139,7 +140,7 @@ public:
         m_size = 0;
     }
 
-    constexpr auto advance(Size n = 1) noexcept -> Bytes
+    constexpr auto advance(Size n = 1) noexcept -> Span
     {
         assert(n <= m_size);
         m_data += n;
@@ -147,7 +148,7 @@ public:
         return *this;
     }
 
-    constexpr auto truncate(Size size) noexcept -> Bytes
+    constexpr auto truncate(Size size) noexcept -> Span
     {
         assert(size <= m_size);
         m_size = size;
@@ -183,44 +184,44 @@ private:
     Size m_size {};
 };
 
-inline auto mem_copy(Bytes dst, Slice src, size_t n) noexcept -> void *
+inline auto mem_copy(Span dst, Slice src, size_t n) noexcept -> void *
 {
     CALICO_EXPECT_LE(n, src.size());
     CALICO_EXPECT_LE(n, dst.size());
     return std::memcpy(dst.data(), src.data(), n);
 }
 
-inline auto mem_copy(Bytes dst, Slice src) noexcept -> void *
+inline auto mem_copy(Span dst, Slice src) noexcept -> void *
 {
     CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_copy(dst, src, src.size());
 }
 
-inline auto mem_clear(Bytes mem, size_t n) noexcept -> void *
+inline auto mem_clear(Span mem, size_t n) noexcept -> void *
 {
     CALICO_EXPECT_LE(n, mem.size());
     return std::memset(mem.data(), 0, n);
 }
 
-inline auto mem_clear(Bytes mem) noexcept -> void *
+inline auto mem_clear(Span mem) noexcept -> void *
 {
     return mem_clear(mem, mem.size());
 }
 
-inline auto mem_move(Bytes dst, Slice src, Size n) noexcept -> void *
+inline auto mem_move(Span dst, Slice src, Size n) noexcept -> void *
 {
     CALICO_EXPECT_LE(n, src.size());
     CALICO_EXPECT_LE(n, dst.size());
     return std::memmove(dst.data(), src.data(), n);
 }
 
-inline auto mem_move(Bytes dst, Slice src) noexcept -> void *
+inline auto mem_move(Span dst, Slice src) noexcept -> void *
 {
     CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_move(dst, src, src.size());
 }
 
-inline auto mem_clear_safe(Bytes data, Size n) noexcept -> void *
+inline auto mem_clear_safe(Span data, Size n) noexcept -> void *
 {
     CALICO_EXPECT_LE(n, data.size());
     volatile auto *p = data.data();
@@ -229,7 +230,7 @@ inline auto mem_clear_safe(Bytes data, Size n) noexcept -> void *
     return data.data();
 }
 
-inline auto mem_clear_safe(Bytes data) noexcept -> void *
+inline auto mem_clear_safe(Span data) noexcept -> void *
 {
     return mem_clear_safe(data, data.size());
 }
@@ -261,37 +262,37 @@ inline auto ok() -> Status
 
 template<class ...Ts>
 [[nodiscard]]
-auto invalid_argument(const std::string_view &fmt, Ts &&...ts) -> Status
+auto invalid_argument(const std::string_view &format, Ts &&...ts) -> Status
 {
-    return Status::invalid_argument(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+    return Status::invalid_argument(fmt::format(format, std::forward<Ts>(ts)...));
 }
 
 template<class ...Ts>
 [[nodiscard]]
-auto system_error(const std::string_view &fmt, Ts &&...ts) -> Status
+auto system_error(const std::string_view &format, Ts &&...ts) -> Status
 {
-    return Status::system_error(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+    return Status::system_error(fmt::format(format, std::forward<Ts>(ts)...));
 }
 
 template<class ...Ts>
 [[nodiscard]]
-auto logic_error(const std::string_view &fmt, Ts &&...ts) -> Status
+auto logic_error(const std::string_view &format, Ts &&...ts) -> Status
 {
-    return Status::logic_error(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+    return Status::logic_error(fmt::format(format, std::forward<Ts>(ts)...));
 }
 
 template<class ...Ts>
 [[nodiscard]]
-auto corruption(const std::string_view &fmt, Ts &&...ts) -> Status
+auto corruption(const std::string_view &format, Ts &&...ts) -> Status
 {
-    return Status::corruption(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+    return Status::corruption(fmt::format(format, std::forward<Ts>(ts)...));
 }
 
 template<class ...Ts>
 [[nodiscard]]
-auto not_found(const std::string_view &fmt, Ts &&...ts) -> Status
+auto not_found(const std::string_view &format, Ts &&...ts) -> Status
 {
-    return Status::not_found(fmt::format(fmt::runtime(fmt), std::forward<Ts>(ts)...));
+    return Status::not_found(fmt::format(format, std::forward<Ts>(ts)...));
 }
 
 } // namespace Calico

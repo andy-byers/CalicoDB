@@ -18,10 +18,10 @@ public:
 
     // NOTE: If either of these methods returns a non-OK status, the state of this object is unspecified.
     [[nodiscard]] auto read_first_lsn(Id &out) -> Status;
-    [[nodiscard]] auto read(WalPayloadOut &out, Bytes payload, Bytes tail) -> Status;
+    [[nodiscard]] auto read(WalPayloadOut &out, Span payload, Span tail) -> Status;
 
 private:
-    [[nodiscard]] auto read_logical_record(Bytes &out, Bytes tail) -> Status;
+    [[nodiscard]] auto read_logical_record(Span &out, Span tail) -> Status;
 
     // NOTE: Doesn't take ownership of the file.
     RandomReader *m_file {};
@@ -33,7 +33,7 @@ class WalReader final {
 public:
     using Callback = WriteAheadLog::Callback;
 
-    WalReader(Storage &store, WalSet &segments, std::string prefix, Bytes tail, Bytes data)
+    WalReader(Storage &store, WalSet &segments, std::string prefix, Span tail, Span data)
         : m_prefix {std::move(prefix)},
           m_store {&store},
           m_set {&segments},
@@ -76,8 +76,8 @@ private:
     std::unique_ptr<RandomReader> m_file;
     Storage *m_store {};
     WalSet *m_set {};
-    Bytes m_tail;
-    Bytes m_data;
+    Span m_tail;
+    Span m_data;
     SegmentId m_current;
 };
 

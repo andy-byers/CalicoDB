@@ -162,7 +162,7 @@ auto CellDirectory::insert_pointer(Page &page, Size index, Pointer pointer) -> v
     const auto start = NodeLayout::content_offset(page.id());
     const auto offset = start + CELL_POINTER_SIZE * index;
     const auto size = (NodeHeader::cell_count(page) - index) * CELL_POINTER_SIZE;
-    auto chunk = page.bytes(offset, size + CELL_POINTER_SIZE);
+    auto chunk = page.span(offset, size + CELL_POINTER_SIZE);
     mem_move(chunk.range(CELL_POINTER_SIZE), chunk, size);
     NodeHeader::set_cell_count(page, NodeHeader::cell_count(page) + 1);
     set_pointer(page, index, pointer);
@@ -175,7 +175,7 @@ auto CellDirectory::remove_pointer(Page &page, Size index) -> void
     const auto start = NodeLayout::header_offset(page.id()) + NodeLayout::HEADER_SIZE;
     const auto offset = start + CELL_POINTER_SIZE * index;
     const auto size = (NodeHeader::cell_count(page) - index - 1) * CELL_POINTER_SIZE;
-    auto chunk = page.bytes(offset, size + CELL_POINTER_SIZE);
+    auto chunk = page.span(offset, size + CELL_POINTER_SIZE);
     mem_move(chunk, chunk.range(CELL_POINTER_SIZE), size);
     NodeHeader::set_cell_count(page, NodeHeader::cell_count(page) - 1);
 }
@@ -374,7 +374,7 @@ auto Node::read_cell(Size index) const -> Cell
     return Cell::read_at(*this, CellDirectory::get_pointer(m_page, index).value);
 }
 
-auto Node::detach_cell(Size index, Bytes scratch) const -> Cell
+auto Node::detach_cell(Size index, Span scratch) const -> Cell
 {
     CALICO_EXPECT_LT(index, cell_count());
     auto cell = read_cell(index);
@@ -382,7 +382,7 @@ auto Node::detach_cell(Size index, Bytes scratch) const -> Cell
     return cell;
 }
 
-auto Node::extract_cell(Size index, Bytes scratch) -> Cell
+auto Node::extract_cell(Size index, Span scratch) -> Cell
 {
     CALICO_EXPECT_LT(index, cell_count());
     auto cell = detach_cell(index, scratch);
@@ -412,7 +412,7 @@ auto Node::TEST_validate() const -> void
         }
     }
     if (used_space + usable_space != size()) {
-        fmt::print(stderr, "{}: memory is unaccounted for ({} bytes were lost)\n", label, int(size()) - int(used_space + usable_space));
+        fmt::print(stderr, "{}: memory is unaccounted for ({} span were lost)\n", label, int(size()) - int(used_space + usable_space));
         std::exit(EXIT_FAILURE);
     }
 }
@@ -576,7 +576,7 @@ auto Node::insert_at(Size index, Cell cell) -> void
     }
     // Now we can fill in the dummy cell pointer and write_all the cell.
     CellDirectory::set_pointer(m_page, index, {offset});
-    cell.write(m_page.bytes(offset, cell.size()));
+    cell.write(m_page.span(offset, cell.size()));
 
     // Adjust the start of the cell content area.
     if (offset < NodeHeader::cell_start(m_page))
@@ -607,7 +607,7 @@ auto Node::reset(bool reset_header) -> void
 {
     if (reset_header) {
         CALICO_EXPECT_TRUE(m_page.is_writable());
-        auto chunk = m_page.bytes(header_offset(), NodeLayout::HEADER_SIZE);
+        auto chunk = m_page.span(header_offset(), NodeLayout::HEADER_SIZE);
         mem_clear(chunk, chunk.size());
         NodeHeader::set_cell_start(m_page, m_page.size());
     }
@@ -799,7 +799,7 @@ auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> 
     }
 }
 
-auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
+auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Span scratch) -> Cell
 {
     transfer_cells_right_while(Ln, rn, [overflow_index](const auto &src, const auto &, Size) {
         return src.cell_count() > overflow_index;
@@ -812,7 +812,7 @@ auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overfl
     return overflow;
 }
 
-auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Bytes scratch) -> Cell
+auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Span scratch) -> Cell
 {
     // Note that we need to insert the overflow cell into either Ln or rn no matter what, even if it ends up being the separator.
     transfer_cells_right_while(Ln, rn, [&overflow, overflow_index](const auto &src, const auto &, auto counter) {
@@ -834,7 +834,7 @@ auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overfl
     return separator;
 }
 
-auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
+auto split_external_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
@@ -876,7 +876,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     return separator;
 }
 
-auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
+auto split_internal_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
 {
     auto overflow = Ln.take_overflow_cell();
 
@@ -915,7 +915,7 @@ auto split_internal_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
     return separator;
 }
 
-auto split_non_root(Node &Ln, Node &rn, Bytes scratch) -> Cell
+auto split_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
 {
     CALICO_EXPECT_TRUE(Ln.is_overflowing());
     CALICO_EXPECT_EQ(Ln.is_external(), rn.is_external());

@@ -109,7 +109,7 @@ auto NodeManager::allocate_chain(Slice overflow) -> tl::expected<Id, Status>
     return head;
 }
 
-auto NodeManager::collect_chain(Id id, Bytes out) const -> tl::expected<void, Status>
+auto NodeManager::collect_chain(Id id, Span out) const -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
         CALICO_NEW_R(page, m_pager->acquire(id, false));

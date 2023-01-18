@@ -76,7 +76,7 @@ public:
 
     Node(Page page, bool reset_header, Byte *scratch)
         : m_page {std::move(page)},
-          m_scratch {Bytes {scratch, m_page.size()}}
+          m_scratch {Span {scratch, m_page.size()}}
     {
         reset(reset_header);
     }
@@ -113,9 +113,9 @@ public:
 
     [[nodiscard]] auto read_key(Size) const -> Slice;
     [[nodiscard]] auto read_cell(Size) const -> Cell;
-    [[nodiscard]] auto detach_cell(Size, Bytes) const -> Cell;
+    [[nodiscard]] auto detach_cell(Size, Span) const -> Cell;
     [[nodiscard]] auto find_ge(Slice) const -> FindGeResult;
-    auto extract_cell(Size, Bytes) -> Cell;
+    auto extract_cell(Size, Span) -> Cell;
     auto insert(Cell) -> void;
     auto insert_at(Size, Cell) -> void;
     auto remove(Slice) -> bool;
@@ -158,7 +158,7 @@ private:
 
     Page m_page;
     std::optional<Cell> m_overflow {};
-    Bytes m_scratch;
+    Span m_scratch;
 };
 
 [[nodiscard]] auto can_merge_siblings(const Node &, const Node &, const Cell &) -> bool;
@@ -167,7 +167,7 @@ auto merge_left(Node &, Node &, Node &, Size) -> void;
 auto merge_right(Node &, Node &, Node &, Size) -> void;
 auto merge_root(Node &, Node &) -> void;
 auto split_root(Node &, Node &) -> void;
-[[nodiscard]] auto split_non_root(Node &, Node &, Bytes) -> Cell;
+[[nodiscard]] auto split_non_root(Node &, Node &, Span) -> Cell;
 
 } // namespace Calico
 

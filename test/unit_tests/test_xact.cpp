@@ -54,7 +54,7 @@ public:
 
     auto set_value(Slice value) -> void
     {
-        mem_copy(m_page.bytes(m_page.size() - VALUE_SIZE), value);
+        mem_copy(m_page.span(m_page.size() - VALUE_SIZE), value);
     }
 
 private:

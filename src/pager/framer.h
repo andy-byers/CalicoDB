@@ -41,7 +41,7 @@ public:
     }
 
     [[nodiscard]]
-    auto data() -> Bytes
+    auto data() -> Span
     {
         return m_bytes;
     }
@@ -57,7 +57,7 @@ public:
     auto unref(Page &page) -> void;
 
 private:
-    Bytes m_bytes;
+    Span m_bytes;
     Id m_page_id;
     Size m_ref_count {};
     bool m_is_writable {};
@@ -119,7 +119,7 @@ public:
 
 private:
     Framer(std::unique_ptr<RandomEditor>, AlignedBuffer, Size, Size);
-    [[nodiscard]] auto read_page_from_file(Id, Bytes) const -> tl::expected<bool, Status>;
+    [[nodiscard]] auto read_page_from_file(Id, Span) const -> tl::expected<bool, Status>;
     [[nodiscard]] auto write_page_to_file(Id, Slice) const -> Status;
 
     [[nodiscard]]

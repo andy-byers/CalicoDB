@@ -457,7 +457,7 @@ auto read_from_page(const Page &page, Size size) -> std::string
     const auto offset = PageLayout::content_offset(page.id());
     CALICO_EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
-    page.read(Bytes {message}, offset);
+    mem_copy(message, page.view(offset, message.size()));
     return message;
 }
 

@@ -12,7 +12,7 @@
 
 namespace Calico {
 
-using ReadInterceptor = std::function<Status(const std::string&, Bytes&, Size)>;
+using ReadInterceptor = std::function<Status(const std::string&, Span &, Size)>;
 using WriteInterceptor = std::function<Status(const std::string&, Slice, Size)>;
 using OpenInterceptor = std::function<Status(const std::string&)>;
 using SyncInterceptor = std::function<Status(const std::string&)>;

@@ -14,7 +14,7 @@ auto read_corruption_error(const std::string &hint_fmt, Args &&...args) -> Statu
 }
 
 [[nodiscard]]
-static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Status
+static auto read_exact_or_eof(RandomReader &file, Size offset, Span out) -> Status
 {
     auto temp = out;
     auto read_size = out.size();
@@ -28,7 +28,7 @@ static auto read_exact_or_eof(RandomReader &file, Size offset, Bytes out) -> Sta
     return ok();
 }
 
-auto LogReader::read(WalPayloadOut &out, Bytes payload, Bytes tail) -> Status
+auto LogReader::read(WalPayloadOut &out, Span payload, Span tail) -> Status
 {
     CALICO_EXPECT_NE(m_file, nullptr);
 
@@ -45,7 +45,7 @@ auto LogReader::read_first_lsn(Id &out) -> Status
 {
     // Bytes requires the array size when constructed with a C-style array.
     char buffer [WalPayloadHeader::SIZE];
-    Bytes bytes {buffer, sizeof(buffer)};
+    Span bytes {buffer, sizeof(buffer)};
 
     // The LogWriter will never flush a block unless it contains at least one record, so the first record should be
     // located at the start of the file.
@@ -54,7 +54,7 @@ auto LogReader::read_first_lsn(Id &out) -> Status
     return s;
 }
 
-auto LogReader::read_logical_record(Bytes &out, Bytes tail) -> Status
+auto LogReader::read_logical_record(Span &out, Span tail) -> Status
 {
     WalRecordHeader header {};
     auto payload = out;

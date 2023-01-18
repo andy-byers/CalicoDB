@@ -154,7 +154,7 @@ auto Framer::sync() -> Status
     return m_file->sync();
 }
 
-auto Framer::read_page_from_file(Id id, Bytes out) const -> tl::expected<bool, Status>
+auto Framer::read_page_from_file(Id id, Span out) const -> tl::expected<bool, Status>
 {
     CALICO_EXPECT_EQ(m_page_size, out.size());
     const auto file_size = m_page_count * m_page_size;

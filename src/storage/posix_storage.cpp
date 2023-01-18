@@ -28,7 +28,7 @@ static auto write_file(int file, Slice in)
     if (!r.has_value()) {
         return r.error();
     } else if (*r != in.size()) {
-        return system_error("could not write to file: incomplete write (wrote {}/{} bytes)", *r, in.size());
+        return system_error("could not write to file: incomplete write (wrote {}/{} span)", *r, in.size());
     }
     return ok();
 }

@@ -18,7 +18,7 @@ public:
 
     struct Parameters {
         Id id;
-        Bytes data;
+        Span data;
         Pager *source {};
         bool is_writable {};
     };
@@ -40,26 +40,12 @@ public:
     [[nodiscard]] auto collect_deltas() -> std::vector<PageDelta>;
     auto set_type(PageType) -> void;
     auto set_lsn(Id) -> void;
-    auto read(Bytes, Size) const -> void;
-    auto bytes(Size) -> Bytes;
-    auto bytes(Size, Size) -> Bytes;
+    auto read(Span, Size) const -> void;
+    auto span(Size) -> Span;
+    auto span(Size, Size) -> Span;
     auto write(Slice, Size) -> void;
     auto apply_update(const DeltaDescriptor &) -> void;
     auto apply_update(const FullImageDescriptor&) -> void;
-
-    auto register_delta(PageDelta delta) -> void;
-
-    [[nodiscard]]
-    auto data() -> Byte *
-    {
-        return m_data.data();
-    }
-
-    [[nodiscard]]
-    auto data() const -> const Byte *
-    {
-        return m_data.data();
-    }
 
     // NOTE: We need these because we have a user-defined destructor.
     Page(Page &&) = default;
@@ -70,17 +56,17 @@ private:
 
     std::vector<PageDelta> m_deltas;
     UniqueNullable<Pager *> m_source;
-    Bytes m_data;
+    Span m_data;
     Id m_id;
     bool m_is_writable {};
 };
 
-[[nodiscard]] auto get_u16(const Page &, Size) -> std::uint16_t;
-[[nodiscard]] auto get_u32(const Page &, Size) -> std::uint32_t;
-[[nodiscard]] auto get_u64(const Page &, Size) -> std::uint64_t;
-auto put_u16(Page &, Size, std::uint16_t) -> void;
-auto put_u32(Page &, Size, std::uint32_t) -> void;
-auto put_u64(Page &, Size, std::uint64_t) -> void;
+[[nodiscard]] auto get_u16(const Page &page, Size offset) -> std::uint16_t;
+[[nodiscard]] auto get_u32(const Page &page, Size offset) -> std::uint32_t;
+[[nodiscard]] auto get_u64(const Page &page, Size offset) -> std::uint64_t;
+auto put_u16(Page &page, Size offset, std::uint16_t value) -> void;
+auto put_u32(Page &page, Size offset, std::uint32_t value) -> void;
+auto put_u64(Page &page, Size offset, std::uint64_t value) -> void;
 
 } // namespace Calico
 

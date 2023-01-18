@@ -37,9 +37,7 @@ BasicPager::BasicPager(const Parameters &param, Framer framer)
       m_wal {param.wal},
       m_system {param.system}
 {
-    // m_log->trace("BasicPager");
-
-//    m_log->info("frame_count = {}", param.frame_count);
+    m_log->info("initializing, cache size is {}", param.frame_count * param.page_size);
 }
 
 auto BasicPager::page_count() const -> Size

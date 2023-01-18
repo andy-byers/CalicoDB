@@ -7,21 +7,21 @@ namespace Calico {
 
 Internal::Internal(NodeManager &pool)
     : m_maximum_key_size {get_max_local(pool.page_size())},
+      // Scratch memory needs to be able to hold a maximally-sized cell.
+      m_scratch {{
+        StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
+        StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
+        StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
+      }},
       m_pool {&pool}
-{
-    // Scratch memory needs to be able to hold a maximally-sized cell.
-    const auto scratch_size = m_maximum_key_size + MAX_CELL_HEADER_SIZE;
-    m_scratch.emplace_back(scratch_size);
-    m_scratch.emplace_back(scratch_size);
-    m_scratch.emplace_back(scratch_size);
-}
+{}
 
 auto Internal::collect_value(const Node &node, Size index) const -> tl::expected<std::string, Status>
 {
     auto cell = node.read_cell(index);
     const auto local = cell.local_value();
     std::string result(cell.value_size(), '\x00');
-    Bytes out {result};
+    Span out {result};
 
     // Note that it is possible to have no value stored locally but have an overflow page. The happens when
     // the key is of maximal length (i.e. m_maximum_key_size).

@@ -41,7 +41,7 @@ public:
     [[nodiscard]] auto content_size() const -> Size;
     [[nodiscard]] auto content_view() const -> Slice;
     auto set_next_id(Id) -> void;
-    auto content_bytes(Size) -> Bytes;
+    auto content_bytes(Size) -> Span;
 
 private:
     Page m_page;

@@ -14,7 +14,7 @@ BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
       m_log {system.create_log("tree")},
       m_system {&system}
 {
-    m_log->info("initializing with maximum key size of {} B", m_internal.maximum_key_size());
+    m_log->info("initializing, maximum key size is {} B", m_internal.maximum_key_size());
 
     m_actions.acquire = [this](auto pid, auto is_writable) {
         return m_pool.acquire(pid, is_writable);

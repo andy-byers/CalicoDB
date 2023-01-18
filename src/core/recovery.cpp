@@ -5,13 +5,13 @@
 
 namespace Calico {
 
-static auto encode_payload_type(Bytes out, XactPayloadType type)
+static auto encode_payload_type(Span out, XactPayloadType type)
 {
     CALICO_EXPECT_FALSE(out.is_empty());
     out[0] = type;
 }
 
-auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta> &deltas, Bytes out) -> Size
+auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta> &deltas, Span out) -> Size
 {
     const auto original_size = out.size();
 
@@ -41,7 +41,7 @@ auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta>
     return original_size - out.size();
 }
 
-auto encode_commit_payload(Bytes out) -> Size
+auto encode_commit_payload(Span out) -> Size
 {
     // Payload type (1 B)
     encode_payload_type(out, XactPayloadType::COMMIT);
@@ -50,7 +50,7 @@ auto encode_commit_payload(Bytes out) -> Size
     return MINIMUM_PAYLOAD_SIZE;
 }
 
-auto encode_full_image_payload(Id page_id, Slice image, Bytes out) -> Size
+auto encode_full_image_payload(Id page_id, Slice image, Span out) -> Size
 {
     const auto original_size = out.size();
 

@@ -7,7 +7,7 @@
 #include <limits>
 #include <type_traits>
 
-#ifdef NDEBUG
+#if NDEBUG
 #  define CALICO_EXPECT_(cc, file, line)
 #else
 #  define CALICO_EXPECT_(cc, file, line) Impl::handle_expect(cc, #cc, file, line)
@@ -55,7 +55,7 @@ namespace Calico::Impl {
 inline constexpr auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept -> void
 {
     if (!expectation) {
-        fprintf(stderr, "expectation `%s` failed at %s:%d\n", repr, file, line);
+        fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
         std::abort();
     }
 }

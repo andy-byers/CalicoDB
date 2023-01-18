@@ -74,17 +74,17 @@ auto Page::view(Size offset, Size size) const -> Slice
     return m_data.range(offset, size);
 }
 
-auto Page::read(Bytes out, Size offset) const -> void
+auto Page::read(Span out, Size offset) const -> void
 {
     mem_copy(out, m_data.range(offset, out.size()));
 }
 
-auto Page::bytes(Size offset) -> Bytes
+auto Page::span(Size offset) -> Span
 {
-    return bytes(offset, size() - offset);
+    return span(offset, size() - offset);
 }
 
-auto Page::bytes(Size offset, Size size) -> Bytes
+auto Page::span(Size offset, Size size) -> Span
 {
     CALICO_EXPECT_TRUE(m_is_writable);
     insert_delta(m_deltas, PageDelta {offset, size});
@@ -93,7 +93,7 @@ auto Page::bytes(Size offset, Size size) -> Bytes
 
 auto Page::write(Slice in, Size offset) -> void
 {
-    mem_copy(bytes(offset, in.size()), in);
+    mem_copy(span(offset, in.size()), in);
 }
 
 auto Page::apply_update(const FullImageDescriptor &info) -> void
@@ -119,11 +119,6 @@ auto Page::collect_deltas() -> std::vector<PageDelta>
     return m_deltas;
 }
 
-auto Page::register_delta(PageDelta delta) -> void
-{
-    insert_delta(m_deltas, delta);
-}
-
 auto get_u16(const Page &page, Size offset) -> std::uint16_t
 {
     return get_u16(page.view(offset, sizeof(std::uint16_t)));
@@ -141,20 +136,17 @@ auto get_u64(const Page &page, Size offset) -> std::uint64_t
 
 auto put_u16(Page &page, Size offset, std::uint16_t value) -> void
 {
-    put_u16(page.data() + offset, value);
-    page.register_delta({offset, sizeof(value)});
+    put_u16(page.span(offset, sizeof(value)), value);
 }
 
 auto put_u32(Page &page, Size offset, std::uint32_t value) -> void
 {
-    put_u32(page.data() + offset, value);
-    page.register_delta({offset, sizeof(value)});
+    put_u32(page.span(offset, sizeof(value)), value);
 }
 
 auto put_u64(Page &page, Size offset, std::uint64_t value) -> void
 {
-    put_u64(page.data() + offset, value);
-    page.register_delta({offset, sizeof(value)});
+    put_u64(page.span(offset, sizeof(value)), value);
 }
 
 } // namespace Calico

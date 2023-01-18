@@ -72,7 +72,7 @@ private:
     [[nodiscard]] auto maybe_fix_child_parent_connections(Node &) -> tl::expected<void, Status>;
 
     Size m_maximum_key_size {};
-    std::vector<StaticScratch> m_scratch;
+    std::array<StaticScratch, 3> m_scratch;
     NodeManager *m_pool {};
     Size m_cell_count {};
 };

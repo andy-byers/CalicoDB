@@ -43,9 +43,9 @@ struct CommitDescriptor {
 using PayloadDescriptor = std::variant<DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
 
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
-[[nodiscard]] auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta> &deltas, Bytes out) -> Size;
-[[nodiscard]] auto encode_full_image_payload(Id page_id, Slice image, Bytes out) -> Size;
-[[nodiscard]] auto encode_commit_payload(Bytes out) -> Size;
+[[nodiscard]] auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta> &deltas, Span out) -> Size;
+[[nodiscard]] auto encode_full_image_payload(Id page_id, Slice image, Span out) -> Size;
+[[nodiscard]] auto encode_commit_payload(Span out) -> Size;
 
 enum XactPayloadType : Byte {
     COMMIT     = '\xC0',

@@ -14,6 +14,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 
 + [Features](#features)
 + [Caveats](#caveats)
++ [Documentation](#documentation)
 + [Dependencies](#dependencies)
 + [Performance](#performance)
 + [TODO](#todo)
@@ -33,10 +34,20 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + Doesn't support concurrent transactions
 + Doesn't provide synchronization past support for concurrent cursors
 
+## Caveats
++ Only tested on 64-bit Ubuntu and OSX
++ Maximum key length is anywhere from 29 B to ~16 KiB, depending on the chosen page size
++ Maximum value length is roughly 4 GiB
++ Doesn't support concurrent transactions
++ Doesn't provide synchronization past support for concurrent cursors
+
+## Documentation
+Check out the [docs](doc/doc.md).
+
 ## Dependencies
 The library itself depends on `@gabime/spdlog` and `@TartanLlama/expected`.
 The tests depend on `@google/googletest`, and the benchmarks depend on `@google/benchmark`.
-All dependencies are downloaded using CMake's FetchContent API.
+Dependencies are either downloaded using CMake's FetchContent API, or bundled with the source code.
 
 ## Performance
 Calico DB has a way to go performance-wise.

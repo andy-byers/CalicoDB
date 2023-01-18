@@ -31,7 +31,7 @@ public:
     }
 
     [[nodiscard]]
-    auto data() -> Bytes
+    auto data() -> Span
     {
         return m_buffer->range(sizeof(Id));
     }

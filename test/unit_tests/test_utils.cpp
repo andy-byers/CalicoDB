@@ -20,40 +20,40 @@
 
 namespace Calico {
 
-TEST(AssertionDeathTest, Assert)
+TEST(TestUtils, ExpectationDeathTest)
 {
     ASSERT_DEATH(CALICO_EXPECT_TRUE(false), EXPECTATION_MATCHER);
 }
 
-TEST(TestEncoding, ReadsAndWrites)
+TEST(TestUtils, EncodingIsConsistent)
 {
-    Random random{0};
+    Random random {42};
     const auto u16 = random.get<std::uint16_t>();
     const auto u32 = random.get<std::uint32_t>();
     const auto u64 = random.get<std::uint64_t>();
-    std::vector<Calico::Byte> buffer(sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t) + 1);
+    std::string buffer(sizeof(u16) + sizeof(u32) + sizeof(u64) + 1, '\x00');
 
     auto dst = buffer.data();
     put_u16(dst, u16);
-    put_u32(dst += sizeof(uint16_t), u32);
-    put_u64(dst += sizeof(uint32_t), u64);
+    put_u32(dst += sizeof(std::uint16_t), u32);
+    put_u64(dst + sizeof(std::uint32_t), u64);
 
     auto src = buffer.data();
     ASSERT_EQ(u16, get_u16(src));
-    ASSERT_EQ(u32, get_u32(src += sizeof(uint16_t)));
-    ASSERT_EQ(u64, get_u64(src += sizeof(uint32_t)));
-    ASSERT_EQ(buffer.back(), 0) << "Buffer overflow";
+    ASSERT_EQ(u32, get_u32(src += sizeof(std::uint16_t)));
+    ASSERT_EQ(u64, get_u64(src += sizeof(std::uint32_t)));
+    ASSERT_EQ(buffer.back(), 0) << "buffer overflow";
 }
 
 class SliceTests: public testing::Test {
 protected:
     std::string test_string {"Hello, world!"};
-    Bytes bytes {Bytes {test_string}};
+    Slice slice {test_string};
 };
 
 TEST_F(SliceTests, EqualsSelf)
 {
-    ASSERT_TRUE(bytes == bytes);
+    ASSERT_TRUE(slice == slice);
 }
 
 TEST_F(SliceTests, StringLiteralSlice)
@@ -63,15 +63,18 @@ TEST_F(SliceTests, StringLiteralSlice)
 
 TEST_F(SliceTests, StartsWith)
 {
-    ASSERT_TRUE(Slice {"Hello, world!"}.starts_with("Hello"));
-    ASSERT_FALSE(Slice {"Hello, world!"}.starts_with(" Hello"));
-    ASSERT_FALSE(Slice {"1"}.starts_with("123"));
+    ASSERT_TRUE(slice.starts_with(""));
+    ASSERT_TRUE(slice.starts_with("Hello"));
+    ASSERT_TRUE(slice.starts_with(test_string));
+    ASSERT_FALSE(slice.starts_with(" Hello"));
+    ASSERT_FALSE(slice.starts_with("hello"));
+    ASSERT_FALSE(slice.starts_with(test_string + ' '));
 }
 
 TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
 {
-    const auto shorter = bytes.range(0, bytes.size() - 1);
-    ASSERT_TRUE(shorter < bytes);
+    const auto shorter = slice.range(0, slice.size() - 1);
+    ASSERT_TRUE(shorter < slice);
 }
 
 TEST_F(SliceTests, FirstByteIsMostSignificant)
@@ -84,80 +87,80 @@ TEST_F(SliceTests, FirstByteIsMostSignificant)
 
 TEST_F(SliceTests, CanGetPartialRange)
 {
-    ASSERT_TRUE(bytes.range(7, 5) == Slice {"world"});
+    ASSERT_TRUE(slice.range(7, 5) == Slice {"world"});
 }
 
 TEST_F(SliceTests, CanGetEntireRange)
 {
-    ASSERT_TRUE(bytes == bytes.range(0));
-    ASSERT_TRUE(bytes == bytes.range(0, bytes.size()));
+    ASSERT_TRUE(slice == slice.range(0));
+    ASSERT_TRUE(slice == slice.range(0, slice.size()));
 }
 
 TEST_F(SliceTests, EmptyRangesAreEmpty)
 {
-    ASSERT_TRUE(bytes.range(0, 0).is_empty());
+    ASSERT_TRUE(slice.range(0, 0).is_empty());
 }
 
 TEST_F(SliceTests, RangeDeathTest)
 {
     Slice discard;
-    ASSERT_DEATH(discard = bytes.range(bytes.size() + 1), "Assert");
-    ASSERT_DEATH(discard = bytes.range(bytes.size(), 1), "Assert");
-    ASSERT_DEATH(discard = bytes.range(0, bytes.size() + 1), "Assert");
-    ASSERT_DEATH(discard = bytes.range(5, bytes.size()), "Assert");
+    ASSERT_DEATH(discard = slice.range(slice.size() + 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(slice.size(), 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(0, slice.size() + 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(5, slice.size()), "Assert");
 }
 
 TEST_F(SliceTests, AdvanceByZeroDoesNothing)
 {
-    auto copy = bytes;
-    bytes.advance(0);
-    ASSERT_TRUE(bytes == copy);
+    auto copy = slice;
+    slice.advance(0);
+    ASSERT_TRUE(slice == copy);
 }
 
 TEST_F(SliceTests, AdvancingByOwnLengthProducesEmptySlice)
 {
-    bytes.advance(bytes.size());
-    ASSERT_TRUE(bytes.is_empty());
+    slice.advance(slice.size());
+    ASSERT_TRUE(slice.is_empty());
 }
 
 TEST_F(SliceTests, AdvanceDeathTest)
 {
-    ASSERT_DEATH(bytes.advance(bytes.size() + 1), "Assert");
+    ASSERT_DEATH(slice.advance(slice.size() + 1), "Assert");
 }
 
 TEST_F(SliceTests, TruncatingToOwnLengthDoesNothing)
 {
-    auto copy = bytes;
-    bytes.truncate(bytes.size());
-    ASSERT_TRUE(bytes == copy);
+    auto copy = slice;
+    slice.truncate(slice.size());
+    ASSERT_TRUE(slice == copy);
 }
 
 TEST_F(SliceTests, TruncatingToZeroLengthProducesEmptySlice)
 {
-    bytes.truncate(0);
-    ASSERT_TRUE(bytes.is_empty());
+    slice.truncate(0);
+    ASSERT_TRUE(slice.is_empty());
 }
 
 TEST_F(SliceTests, TruncatingEmptySliceDoesNothing)
 {
-    bytes.truncate(0);
-    auto copy = bytes;
-    bytes.truncate(0);
-    ASSERT_TRUE(bytes == copy);
+    slice.truncate(0);
+    auto copy = slice;
+    slice.truncate(0);
+    ASSERT_TRUE(slice == copy);
 }
 
 TEST_F(SliceTests, TruncateDeathTest)
 {
-    ASSERT_DEATH(bytes.truncate(bytes.size() + 1), "Assert");
-    bytes.truncate(0);
-    ASSERT_DEATH(bytes.truncate(1), "Assert");
+    ASSERT_DEATH(slice.truncate(slice.size() + 1), "Assert");
+    slice.truncate(0);
+    ASSERT_DEATH(slice.truncate(1), "Assert");
 }
 
 TEST_F(SliceTests, WithCppString)
 {
     // Construct from and compare with C++ strings.
     std::string s {"123"};
-    Bytes b1 {s};
+    Span b1 {s};
     Slice bv1 {s};
     ASSERT_TRUE(b1 == s); // Uses an implicit conversion.
     ASSERT_TRUE(bv1 == s);
@@ -167,7 +170,7 @@ TEST_F(SliceTests, WithCString)
 {
     // Construct from and compare with C-style strings.
     char a[4] {"123"}; // Null-terminated
-    Bytes b1 {a};
+    Span b1 {a};
     Slice bv1 {a};
     ASSERT_TRUE(b1 == a);
     ASSERT_TRUE(bv1 == a);
@@ -180,19 +183,18 @@ TEST_F(SliceTests, WithCString)
 TEST_F(SliceTests, Conversions)
 {
     std::string data {"abc"};
-    Bytes b {data};
+    Span b {data};
     Slice bv {b};
     ASSERT_TRUE(b == bv);
     [](Slice) {}(b);
 }
 
-static constexpr auto constexpr_test_write(Bytes b, Slice answer)
+static constexpr auto constexpr_test_write(Span b, Slice answer)
 {
     CALICO_EXPECT_EQ(b.size(), answer.size());
     for (Size i {}; i < b.size(); ++i)
         b[i] = answer[i];
 
-    // TODO: I have no clue why this works. std::memcmp() isn't constexpr, but starts_with(), which uses it, is...
     (void)b.starts_with(answer);
     (void)b.data();
     (void)b.range(0, 0);
@@ -220,7 +222,7 @@ TEST_F(SliceTests, ConstantExpressions)
     constexpr_test_read(bv, "42");
 
     char a[] {"42"};
-    Bytes b {a};
+    Span b {a};
     constexpr_test_write(b, "ab");
     constexpr_test_read(b, "ab");
 }
@@ -233,9 +235,9 @@ TEST_F(SliceTests, SubRangesHaveProperType)
     ASSERT_TRUE((std::is_same_v<Slice, decltype(bv2)>));
 
     auto s = bv1.to_string();
-    Bytes b1 {s};
+    Span b1 {s};
     auto b2 = b1.range(0);
-    ASSERT_TRUE((std::is_same_v<Bytes, decltype(b2)>));
+    ASSERT_TRUE((std::is_same_v<Span, decltype(b2)>));
 }
 
 TEST(UtilsTest, ZeroIsNotAPowerOfTwo)
@@ -254,7 +256,7 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
 TEST(ScratchTest, CanChangeUnderlyingBytesObject)
 {
     std::string backing {"abc"};
-    Bytes bytes {backing};
+    Span bytes {backing};
     Scratch scratch {bytes};
     scratch->advance(1);
     scratch->truncate(1);
@@ -263,27 +265,22 @@ TEST(ScratchTest, CanChangeUnderlyingBytesObject)
 
 TEST(MonotonicScratchTest, ScratchesAreDistinct)
 {
-    MonotonicScratchManager manager {1, 3};
+    MonotonicScratchManager manager {1, 2};
     auto s1 = manager.get();
     auto s2 = manager.get();
-    auto s3 = manager.get();
     (*s1)[0] = 1;
     (*s2)[0] = 2;
-    (*s3)[0] = 3;
     ASSERT_EQ((*s1)[0], 1);
     ASSERT_EQ((*s2)[0], 2);
-    ASSERT_EQ((*s3)[0], 3);
 }
 
 TEST(MonotonicScratchTest, ScratchesRepeat)
 {
-    MonotonicScratchManager manager {1, 3};
+    MonotonicScratchManager manager {1, 2};
     (*manager.get())[0] = 1;
     (*manager.get())[0] = 2;
-    (*manager.get())[0] = 3;
     ASSERT_EQ((*manager.get())[0], 1);
     ASSERT_EQ((*manager.get())[0], 2);
-    ASSERT_EQ((*manager.get())[0], 3);
 }
 
 TEST(ScratchTest, ConvertsToSlice)
@@ -336,7 +333,7 @@ TEST(NonPrintableSliceTests, Conversions)
 {
     // We need to pass in the size, since the first character is '\0'. Otherwise, the length will be 0.
     std::string u {"\x00\x01", 2};
-    const Bytes s {u};
+    const Span s {u};
     ASSERT_EQ(s.size(), 2);
     ASSERT_EQ(s[0], '\x00');
     ASSERT_EQ(s[1], '\x01');
@@ -353,7 +350,7 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
 TEST(NonPrintableSliceTests, ModifyCharArray)
 {
     char data[] {'a', 'b', '\x00'};
-    Bytes bytes {data};
+    Span bytes {data};
     bytes[0] = '4';
     bytes.advance();
     bytes[0] = '2';
@@ -680,9 +677,9 @@ class BasicWorkerTests: public testing::Test {
 public:
     BasicWorkerTests()
         : worker {[this](int event) {
-            events.emplace_back(event);
-            return ok();
-        }, 16}
+                      events.emplace_back(event);
+                      return ok();
+                  }, 16}
     {}
 
     Worker<int> worker;

@@ -309,7 +309,6 @@ auto Core::erase(Slice key) -> Status
 auto Core::erase(const Cursor &cursor) -> Status
 {
     CALICO_TRY_S(handle_errors());
-    CALICO_EXPECT_TRUE(cursor.is_valid());
     if (m_system->has_xact) {
         return tree->erase(cursor);
     } else {
@@ -500,7 +499,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     const auto MSG = fmt::format("cannot initialize database at \"{}\"", prefix);
 
     FileHeader header {};
-    Bytes bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
+    Span bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
 
     if (options.page_size < MINIMUM_PAGE_SIZE)
         return tl::make_unexpected(invalid_argument(
@@ -564,7 +563,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
 
         if (file_size < sizeof(FileHeader))
             return tl::make_unexpected(corruption(
-                "{}: database is too small to read the file header (file header is {} bytes)", MSG, sizeof(FileHeader)));
+                "{}: database is too small to read the file header (file header is {} span)", MSG, sizeof(FileHeader)));
 
         s = read_exact(*reader, bytes, 0);
         if (!s.is_ok()) return tl::make_unexpected(s);

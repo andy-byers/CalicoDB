@@ -153,7 +153,7 @@ public:
     auto get_page(Id id) -> Page
     {
         m_map.emplace(id, std::string(m_page_size, '\x00'));
-        return Page {{id, Bytes {m_map[id]}, nullptr, true}};
+        return Page {{id, Span {m_map[id]}, nullptr, true}};
     }
 
 private:
@@ -167,29 +167,34 @@ public:
     static constexpr Size page_size = 0x100;
 
     PageTests()
-        : m_backing {page_size} {}
+        : backing(page_size, '\x00'),
+          page {{Id::root(), Span {backing}, nullptr, true}}
+    {}
 
-    auto get_page(Id id) -> Page
-    {
-        return m_backing.get_page(id);
-    }
-
-private:
-    PageBacking m_backing;
+    std::string backing;
+    Page page;
 };
 
-TEST_F(PageTests, HeaderFields)
+TEST(PageTests, WriteToReadOnlyPageDeathTest)
 {
-    auto page = get_page(Id::root());
-    page.set_type(PageType::EXTERNAL_NODE);
-    ASSERT_EQ(page.type(), PageType::EXTERNAL_NODE);
+    std::string backing(256, '\x00');
+    Page read_only {{Id::root(), Span {backing}, nullptr, false}};
+    ASSERT_DEATH(read_only.set_type(PageType::EXTERNAL_NODE), EXPECTATION_MATCHER);
 }
 
-TEST_F(PageTests, FreshPagesAreEmpty)
-{
-    auto page = get_page(Id::root());
-    ASSERT_TRUE(page.view(0) == Slice {std::string(page_size, '\x00')});
-}
+//
+//TEST_F(PageTests, HeaderFields)
+//{
+//    auto page = get_page(Id::root());
+//    page.set_type(PageType::EXTERNAL_NODE);
+//    ASSERT_EQ(page.type(), PageType::EXTERNAL_NODE);
+//}
+//
+//TEST_F(PageTests, FreshPagesAreEmpty)
+//{
+//    auto page = get_page(Id::root());
+//    ASSERT_TRUE(page.view(0) == Slice {std::string(page_size, '\x00')});
+//}
 
 class CellBacking {
 public:

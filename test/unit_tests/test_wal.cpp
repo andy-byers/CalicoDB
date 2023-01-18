@@ -50,7 +50,7 @@ public:
         EXPECT_TRUE(expose_message(Base::store->open_random_reader(get_segment_name(id), &reader)));
 
         std::string data(get_segment_size(id), '\x00');
-        Bytes bytes {data};
+        Span bytes {data};
         auto read_size = bytes.size();
         EXPECT_TRUE(expose_message(reader->read(bytes.data(), read_size, 0)));
         EXPECT_EQ(read_size, data.size());
@@ -202,9 +202,9 @@ public:
 
 TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
 {
-    const auto size = encode_full_image_payload(Id::root(), image, Bytes {scratch}.range(8));
+    const auto size = encode_full_image_payload(Id::root(), image, Span {scratch}.range(8));
     put_u64(scratch, 2); // LSN
-    WalPayloadOut out {Bytes {scratch}.truncate(size + 8)};
+    WalPayloadOut out {Span {scratch}.truncate(size + 8)};
     const auto payload = decode_payload(out);
     ASSERT_TRUE(std::holds_alternative<FullImageDescriptor>(payload.value()));
     const auto descriptor = std::get<FullImageDescriptor>(*payload);
@@ -217,8 +217,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(image);
-    const auto size = encode_deltas_payload(Id::root(), image, deltas, Bytes {scratch}.range(8));
-    WalPayloadOut out {Bytes {scratch}.truncate(size + 8)};
+    const auto size = encode_deltas_payload(Id::root(), image, deltas, Span {scratch}.range(8));
+    WalPayloadOut out {Span {scratch}.truncate(size + 8)};
     const auto payload = decode_payload(out);
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload.value()));
     const auto descriptor = std::get<DeltaDescriptor>(*payload);
@@ -370,7 +370,7 @@ public:
     auto read_string(LogReader &reader) -> std::string
     {
         WalPayloadOut payload;
-        EXPECT_TRUE(expose_message(reader.read(payload, Bytes {reader_payload}, Bytes {reader_tail})));
+        EXPECT_TRUE(expose_message(reader.read(payload, Span {reader_payload}, Span {reader_tail})));
         return payload.data().to_string();
     }
 
@@ -521,7 +521,7 @@ public:
           tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer {WalWriter::Parameters{
               PREFIX,
-              Bytes {tail},
+              Span {tail},
               store.get(),
               &system,
               &set,
@@ -638,7 +638,7 @@ public:
           writer_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer {WalWriter::Parameters{
               PREFIX,
-              Bytes {writer_tail},
+              Span {writer_tail},
               store.get(),
               &system,
               &set,
@@ -665,8 +665,8 @@ public:
             *store,
             set,
             PREFIX,
-            Bytes {reader_tail},
-            Bytes {reader_data}};
+            Span {reader_tail},
+            Span {reader_data}};
     }
 
     [[nodiscard]]

@@ -26,7 +26,7 @@ public:
         Storage *store {};
         System *system {};
         Size page_size {};
-        Size wal_limit {};
+        Size segment_cutoff {};
         Size writer_capacity {};
         Interval interval {};
     };
@@ -66,8 +66,8 @@ private:
     std::string m_reader_data;
     std::string m_reader_tail;
     std::string m_writer_tail;
-    Size m_wal_limit {};
-    Size m_writer_capacity {};
+    Size m_segment_cutoff {};
+    Size m_buffer_count {};
     Size m_bytes_written {};
 
     struct AdvanceToken {};

@@ -29,7 +29,7 @@ static_assert(sizeof(FileHeader) == 48);
 inline auto read_header(const Page &page) -> FileHeader
 {
     FileHeader header {};
-    Bytes bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
+    Span bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
     mem_copy(bytes, page.view(0), bytes.size());
     return header;
 }
@@ -37,7 +37,7 @@ inline auto read_header(const Page &page) -> FileHeader
 inline auto write_header(Page &page, const FileHeader &header) -> void
 {
     Slice bytes {reinterpret_cast<const Byte*>(&header), sizeof(FileHeader)};
-    mem_copy(page.bytes(0, sizeof(header)), bytes, bytes.size());
+    mem_copy(page.span(0, sizeof(header)), bytes, bytes.size());
 }
 
 [[nodiscard]]

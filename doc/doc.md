@@ -1,6 +1,7 @@
 # Calico DB Documentation
 
 + [Build](#build)
++ [Examples](#examples)
 + [Architecture](#architecture)
 + [Source Tree](#source-tree)
 + [Acknowledgements](#acknowledgements)
@@ -24,6 +25,9 @@ To build the library in release mode without tests, the last command would look 
 cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
+## Examples
+Usage examples can be found in the [examples directory](../examples).
+
 ## Architecture
 ...
 
@@ -38,8 +42,7 @@ CalicoDB
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
 ┃ ┣╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
-┃ ┣╸platform.h ┄┄┄┄┄ Platform-specific definitions
-┃ ┣╸slice.h ┄┄┄┄┄┄┄┄ Constructs for holding contiguous sequences of bytes
+┃ ┣╸slice.h ┄┄┄┄┄┄┄┄ Construct for holding a contiguous sequence of bytes
 ┃ ┣╸statistics.h ┄┄┄ Query database information and statistics
 ┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object for function returns
 ┃ ┣╸storage.h ┄┄┄┄┄┄ Storage interface

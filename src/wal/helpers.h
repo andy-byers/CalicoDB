@@ -167,7 +167,7 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId 
         return tl::make_unexpected(s);
 
     char buffer[WalPayloadHeader::SIZE];
-    Bytes bytes {buffer, sizeof(buffer)};
+    Span bytes {buffer, sizeof(buffer)};
     std::unique_ptr<RandomReader> file {temp};
 
     // Read the first LSN. If it exists, it will always be at the same location.

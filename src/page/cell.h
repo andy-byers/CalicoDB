@@ -36,8 +36,8 @@ public:
     auto set_is_external(bool) -> void;
     auto set_left_child_id(Id) -> void;
     auto set_overflow_id(Id) -> void;
-    auto write(Bytes) const -> void;
-    auto detach(Bytes, bool = false) -> void;
+    auto write(Span) const -> void;
+    auto detach(Span, bool = false) -> void;
 
     [[nodiscard]]
     auto is_external() const -> bool

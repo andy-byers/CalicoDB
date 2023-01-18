@@ -10,7 +10,64 @@
 
 namespace Calico {
 
-class StaticScratch {
+
+class Scratch final {
+public:
+    explicit Scratch(Byte *data, Size size)
+        : m_data {data},
+          m_size {size},
+          m_remove_me {data, size}
+    {}
+
+    [[nodiscard]]
+    auto size() const -> Size
+    {
+        return m_size;
+    }
+
+    [[nodiscard]]
+    auto data() -> Byte *
+    {
+        return m_data;
+    }
+
+    [[nodiscard]]
+    auto data() const -> const Byte *
+    {
+        return m_data;
+    }
+
+
+
+    explicit Scratch(Span data)
+        : m_data {data.data()},
+          m_size {data.size()},
+          m_remove_me {data}
+    {}
+
+    auto operator*() -> Span &
+    {
+        return m_remove_me;
+    }
+
+    auto operator*() const -> const Span &
+    {
+        return m_remove_me;
+    }
+
+    auto operator->() -> Span *
+    {
+        return &m_remove_me;
+    }
+
+private:
+    Byte *m_data {};
+    Size m_size {};
+
+    Span m_remove_me;
+};
+
+class StaticScratch final {
 public:
     explicit StaticScratch(Size size)
         : m_data(size, '\x00'),
@@ -18,7 +75,25 @@ public:
     {}
 
     [[nodiscard]]
-    auto operator*() -> Bytes
+    auto size() const -> Size
+    {
+        return m_data.size();
+    }
+
+    [[nodiscard]]
+    auto data() -> Byte *
+    {
+        return m_data.data();
+    }
+
+    [[nodiscard]]
+    auto data() const -> const Byte *
+    {
+        return m_data.data();
+    }
+
+    [[nodiscard]]
+    auto operator*() -> Span
     {
         return m_view;
     }
@@ -30,41 +105,14 @@ public:
     }
 
     [[nodiscard]]
-    auto operator->() -> Bytes *
+    auto operator->() -> Span *
     {
         return &m_view;
     }
 
 private:
     std::string m_data {};
-    Bytes m_view;
-};
-
-class Scratch {
-public:
-    ~Scratch() = default;
-
-    explicit Scratch(Bytes data)
-        : m_data {data}
-    {}
-
-    auto operator*() -> Bytes&
-    {
-        return m_data;
-    }
-
-    auto operator*() const -> const Bytes&
-    {
-        return m_data;
-    }
-
-    auto operator->() -> Bytes*
-    {
-        return &m_data;
-    }
-
-private:
-    Bytes m_data;
+    Span m_view;
 };
 
 class MonotonicScratchManager final {
@@ -76,9 +124,9 @@ public:
 
     [[nodiscard]] auto get() -> Scratch
     {
-        auto data = Bytes {m_scratch}.range(m_counter++ * m_scratch_size, m_scratch_size);
+        auto *data = m_scratch.data() + m_scratch_size*m_counter++;
         m_counter %= m_scratch.size() / m_scratch_size;
-        return Scratch {data};
+        return Scratch {data, m_scratch_size};
     }
 
 private:
