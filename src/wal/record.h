@@ -1,10 +1,12 @@
 #ifndef CALICO_WAL_RECORD_H
 #define CALICO_WAL_RECORD_H
 
+#include <optional>
+#include "spdlog/fmt/fmt.h"
+#include "wal.h"
+#include "page/delta.h"
 #include "utils/encoding.h"
 #include "utils/types.h"
-#include "wal.h"
-#include "spdlog/fmt/fmt.h"
 
 namespace Calico {
 
@@ -137,6 +139,43 @@ auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto split_record(WalRecordHeader &lhs, Slice payload, Size available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 [[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
+
+
+struct DeltaDescriptor {
+    struct Delta {
+        Size offset {};
+        Slice data {};
+    };
+
+    Id pid;
+    Lsn lsn;
+    std::vector<Delta> deltas;
+};
+
+struct FullImageDescriptor {
+    Id pid;
+    Lsn lsn;
+    Slice image;
+};
+
+struct CommitDescriptor {
+    Lsn lsn;
+};
+
+using PayloadDescriptor = std::variant<DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
+
+[[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
+[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, Slice image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn;
+[[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, Slice image, Span buffer) -> WalPayloadIn;
+[[nodiscard]] auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn;
+
+enum XactPayloadType : Byte {
+    COMMIT     = '\xC0',
+    DELTA      = '\xD0',
+    FULL_IMAGE = '\xF0',
+};
+
+static constexpr Size MINIMUM_PAYLOAD_SIZE {sizeof(XactPayloadType)};
 
 } // namespace Calico
 

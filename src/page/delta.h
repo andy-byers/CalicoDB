@@ -6,6 +6,13 @@
 
 namespace Calico {
 
+struct PageDelta {
+    Size offset {};
+    Size size {};
+};
+
+static_assert(sizeof(PageDelta) == 2 * sizeof(Size));
+
 /*
  * Join overlapping deltas in a sorted (by offset) vector. Makes sure that delta WAL records are minimally sized.
  */

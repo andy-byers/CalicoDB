@@ -32,7 +32,6 @@ auto BasicPager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Statu
 BasicPager::BasicPager(const Parameters &param, Framer framer)
     : m_framer {std::move(framer)},
       m_log {param.system->create_log("pager")},
-      m_images {param.images},
       m_scratch {param.scratch},
       m_wal {param.wal},
       m_system {param.system}
@@ -125,7 +124,7 @@ auto BasicPager::flush(Id target_lsn) -> Status
         } else if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
             CALICO_WARN(logic_error(
-                "could not flush page {}: page updates for LSN {} are not in the WAL", page_id.value, page_lsn.value));
+                "could not flush page {}: updates for lsn {} are not in the wal", page_id.value, page_lsn.value));
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
             auto s = m_framer.write_back(frame_id);
@@ -208,20 +207,10 @@ auto BasicPager::release(Page page) -> Status
     if (const auto deltas = page.collect_deltas(); m_system->has_xact && !deltas.empty()) {
         CALICO_EXPECT_TRUE(page.is_writable());
 
-        // Write the next LSN to the page. Note that this change will be recorded in the delta record we are
-        // about to write.
-        const auto lsn = m_wal->current_lsn();
-        page.set_lsn(lsn);
-
-        // Convert the deltas into a WAL payload, written to scratch memory.
-        WalPayloadIn payload {lsn, m_scratch->get()};
-        const auto size = encode_deltas_payload(
-            page.id(), page.view(0),
-            page.collect_deltas(), payload.data());
-        payload.shrink_to_fit(size);
-
-        // Log the delta record.
-        m_wal->log(payload);
+        page.set_lsn(m_wal->current_lsn());
+        m_wal->log(encode_deltas_payload(
+            page.lsn(), page.id(), page.view(0),
+            page.collect_deltas(), *m_scratch->get()));
     }
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
@@ -232,10 +221,10 @@ auto BasicPager::release(Page page) -> Status
     auto &entry = itr->value;
     m_framer.unref(entry.frame_index, page);
 
-    // TODO: Not doing this anymore. Not strictly necessary, but could allow some WAL segments can be cleaned up. Need to find a better heuristic.
+    // TODO: Need to find a better heuristic.
     if (entry.dirty_token) {
         const auto checkpoint = (*entry.dirty_token)->record_lsn.value;
-        if (static constexpr Size CUTOFF {1'024}; CUTOFF < m_wal->current_lsn().value - checkpoint) {
+        if (static constexpr Size CUTOFF {1'024}; checkpoint + CUTOFF < m_wal->current_lsn().value) {
             auto s = m_framer.write_back(entry.frame_index);
 
             if (s.is_ok()) {
@@ -260,18 +249,12 @@ auto BasicPager::watch_page(Page &page, PageCache::Entry &entry) -> void
 
     if (m_system->has_xact) {
         // Don't write a full image record to the WAL if we already have one for this page during this transaction.
-        const auto itr = m_images->find(page.id());
-        if (itr != cend(*m_images))
-            return;
-        m_images->emplace(page.id());
-
-        WalPayloadIn payload {m_wal->current_lsn(), m_scratch->get()};
-        const auto size = encode_full_image_payload(
-            page.id(), page.view(0), payload.data());
-        payload.shrink_to_fit(size);
-        page.set_lsn(payload.lsn());
-
-        m_wal->log(payload);
+        if (page.lsn() <= m_system->commit_lsn.load()) {
+            const auto next_lsn = m_wal->current_lsn();
+            m_wal->log(encode_full_image_payload(
+                next_lsn, page.id(), page.view(0), *m_scratch->get()));
+            page.set_lsn(next_lsn);
+        }
     }
 }
 

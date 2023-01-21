@@ -7,7 +7,7 @@ namespace Calico {
 auto LogWriter::write(WalPayloadIn payload) -> Status
 {
     const auto lsn = payload.lsn();
-    auto data = payload.raw();
+    auto data = payload.m_buffer;
 
     CALICO_EXPECT_FALSE(lsn.is_null());
     WalRecordHeader lhs {};

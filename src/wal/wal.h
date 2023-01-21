@@ -13,42 +13,32 @@
 namespace Calico {
 
 struct FileHeader;
-struct Id;
 class WalReader;
 
 class WalPayloadIn {
 public:
-    WalPayloadIn(Id lsn, Scratch buffer)
+    friend class LogWriter;
+
+    WalPayloadIn(Lsn lsn, Span buffer)
         : m_buffer {buffer}
     {
-        put_u64(*buffer, lsn.value);
+        put_u64(buffer, lsn.value);
     }
 
     [[nodiscard]]
-    auto lsn() const -> Id
+    auto lsn() const -> Lsn
     {
-        return Id {get_u64(*m_buffer)};
+        return Lsn {get_u64(m_buffer)};
     }
 
     [[nodiscard]]
-    auto data() -> Span
+    auto data() const -> Slice
     {
-        return m_buffer->range(sizeof(Id));
-    }
-
-    [[nodiscard]]
-    auto raw() -> Slice
-    {
-        return *m_buffer;
-    }
-
-    auto shrink_to_fit(Size size) -> void
-    {
-        m_buffer->truncate(size + sizeof(Id));
+        return m_buffer.range(sizeof(Id));
     }
 
 private:
-    Scratch m_buffer;
+    Slice m_buffer;
 };
 
 class WalPayloadOut {
@@ -60,15 +50,15 @@ public:
     {}
 
     [[nodiscard]]
-    auto lsn() const -> Id
+    auto lsn() const -> Lsn
     {
-        return Id {get_u64(m_payload)};
+        return Lsn {get_u64(m_payload)};
     }
 
     [[nodiscard]]
     auto data() -> Slice
     {
-        return m_payload.range(sizeof(Id));
+        return m_payload.range(sizeof(Lsn));
     }
 
 private:

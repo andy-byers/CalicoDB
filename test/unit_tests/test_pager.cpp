@@ -475,7 +475,6 @@ public:
             PREFIX,
             store.get(),
             &scratch,
-            &images,
             wal.get(),
             &state,
             frame_count,
@@ -536,7 +535,6 @@ public:
     Status status {ok()};
     bool has_xact {};
     Id commit_lsn;
-    std::unordered_set<Id, Id::Hash> images;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
     LogScratchManager scratch;

@@ -123,7 +123,7 @@ auto BasicWriteAheadLog::log(WalPayloadIn payload) -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_last_lsn.value++;
-    m_bytes_written += payload.raw().size();
+    m_bytes_written += payload.data().size() + sizeof(Lsn);
     m_tasks->dispatch(payload);
 }
 

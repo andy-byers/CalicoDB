@@ -1,10 +1,11 @@
 #ifndef CALICO_PAGE_PAGE_H
 #define CALICO_PAGE_PAGE_H
 
-#include "core/recovery.h"
-#include "utils/types.h"
 #include <optional>
 #include <vector>
+#include "delta.h"
+#include "utils/types.h"
+#include "wal/record.h"
 
 namespace Calico {
 

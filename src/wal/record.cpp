@@ -93,4 +93,151 @@ auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> St
     return merge_records<false>(rhs, lhs);
 }
 
+
+static auto encode_payload_type(Span out, XactPayloadType type)
+{
+    CALICO_EXPECT_FALSE(out.is_empty());
+    out[0] = type;
+}
+
+auto encode_deltas_payload(Lsn lsn, Id page_id, Slice image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn
+{
+    auto saved = buffer;
+    buffer.advance(sizeof(lsn));
+
+    // Payload type (1 B)
+    encode_payload_type(buffer, XactPayloadType::DELTA);
+    buffer.advance();
+
+    // Page ID (8 B)
+    put_u64(buffer, page_id.value);
+    buffer.advance(sizeof(page_id));
+
+    // Deltas count (2 B)
+    put_u16(buffer, static_cast<std::uint16_t>(deltas.size()));
+    buffer.advance(sizeof(std::uint16_t));
+
+    // Deltas (N B)
+    for (const auto &[offset, size]: deltas) {
+        put_u16(buffer, static_cast<std::uint16_t>(offset));
+        buffer.advance(sizeof(std::uint16_t));
+
+        put_u16(buffer, static_cast<std::uint16_t>(size));
+        buffer.advance(sizeof(std::uint16_t));
+
+        mem_copy(buffer, image.range(offset, size));
+        buffer.advance(size);
+    }
+    saved.truncate(saved.size() - buffer.size());
+    return WalPayloadIn {lsn, saved};
+}
+
+auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn
+{
+    auto saved = buffer;
+    buffer.advance(sizeof(Lsn));
+
+    // Payload type (1 B)
+    encode_payload_type(buffer, XactPayloadType::COMMIT);
+    buffer.advance();
+
+    saved.truncate(saved.size() - buffer.size());
+    return WalPayloadIn {lsn, saved};
+}
+
+auto encode_full_image_payload(Lsn lsn, Id pid, Slice image, Span buffer) -> WalPayloadIn
+{
+    auto saved = buffer;
+    buffer.advance(sizeof(lsn));
+
+    // Payload type (1 B)
+    encode_payload_type(buffer, XactPayloadType::FULL_IMAGE);
+    buffer.advance();
+
+    // Page ID (8 B)
+    put_u64(buffer, pid.value);
+    buffer.advance(sizeof(pid));
+
+    // Image (N B)
+    mem_copy(buffer, image);
+    buffer.advance(image.size());
+
+    saved.truncate(saved.size() - buffer.size());
+    return WalPayloadIn {lsn, saved};
+}
+
+static auto decode_deltas_payload(WalPayloadOut in) -> DeltaDescriptor
+{
+    DeltaDescriptor info;
+    auto data = in.data();
+    info.lsn = in.lsn();
+
+    // Payload type (1 B)
+    CALICO_EXPECT_EQ(XactPayloadType {data[0]}, XactPayloadType::DELTA);
+    data.advance();
+
+    // Page ID (8 B)
+    info.pid.value = get_u64(data);
+    data.advance(sizeof(info.pid));
+
+    // Deltas count (2 B)
+    info.deltas.resize(get_u16(data));
+    data.advance(sizeof(std::uint16_t));
+
+    // Deltas (N B)
+    std::generate(begin(info.deltas), end(info.deltas), [&data] {
+        DeltaDescriptor::Delta delta;
+        delta.offset = get_u16(data);
+        data.advance(sizeof(std::uint16_t));
+
+        const auto size = get_u16(data);
+        data.advance(sizeof(std::uint16_t));
+
+        delta.data = data.range(0, size);
+        data.advance(size);
+        return delta;
+    });
+    return info;
+}
+
+static auto decode_full_image_payload(WalPayloadOut in) -> FullImageDescriptor
+{
+    FullImageDescriptor info;
+    auto data = in.data();
+    info.lsn = in.lsn();
+
+    // Payload type (1 B)
+    CALICO_EXPECT_EQ(XactPayloadType {data[0]}, XactPayloadType::FULL_IMAGE);
+    data.advance();
+
+    // Page ID (8 B)
+    info.pid.value = get_u64(data);
+    data.advance(sizeof(Id));
+
+    // Image (n B)
+    info.image = data;
+    return info;
+}
+
+static auto decode_commit_payload(WalPayloadOut in) -> CommitDescriptor
+{
+    CommitDescriptor info;
+    info.lsn = in.lsn();
+    return info;
+}
+
+auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
+{
+    switch (XactPayloadType {in.data()[0]}) {
+        case XactPayloadType::DELTA:
+            return decode_deltas_payload(in);
+        case XactPayloadType::FULL_IMAGE:
+            return decode_full_image_payload(in);
+        case XactPayloadType::COMMIT:
+            return decode_commit_payload(in);
+        default:
+            return std::nullopt;
+    }
+}
+
 } // namespace Calico

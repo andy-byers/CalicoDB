@@ -139,7 +139,6 @@ auto Core::do_open(Options sanitized) -> Status
             m_prefix,
             m_store,
             m_scratch.get(),
-            &m_images,
             wal.get(),
             m_system.get(),
             sanitized.page_cache_size / sanitized.page_size,
@@ -364,11 +363,7 @@ auto Core::do_commit() -> Status
 
     // Write a commit record to the WAL.
     const auto lsn = wal->current_lsn();
-    WalPayloadIn payload {lsn, m_scratch->get()};
-    const auto size = encode_commit_payload(payload.data());
-    payload.shrink_to_fit(size);
-
-    wal->log(payload);
+    wal->log(encode_commit_payload(lsn, *m_scratch->get()));
     wal->advance();
 
     // advance() blocks until it is finished. If an error was encountered, it'll show up in the
@@ -381,7 +376,6 @@ auto Core::do_commit() -> Status
         wal->cleanup(pager->recovery_lsn());
     }
 
-    m_images.clear();
     m_system->commit_lsn = lsn;
     m_system->has_xact = false;
     return ok();
@@ -407,7 +401,6 @@ auto Core::do_abort() -> Status
             "could not abort: a transaction is not active (start a transaction and try again)");
 
     m_system->has_xact = false;
-    m_images.clear();
     wal->advance();
 
     CALICO_TRY_S(handle_errors());
