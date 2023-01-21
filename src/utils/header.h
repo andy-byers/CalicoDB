@@ -45,22 +45,7 @@ inline auto compute_header_crc(const FileHeader &state)
 {
     Slice bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
     const auto range = bytes.range(CRC_OFFSET);
-    return crc32c::Value(range.data(), range.size());}
-
-[[nodiscard]]
-inline auto decode_page_size(std::uint16_t value) -> Size
-{
-    if (value == 0)
-        return 1 << 16;
-    return value;
-}
-
-[[nodiscard]]
-inline auto encode_page_size(Size page_size) -> std::uint16_t
-{
-    if (page_size == 1 << 16)
-        return 0;
-    return static_cast<std::uint16_t>(page_size);
+    return crc32c::Value(range.data(), range.size());
 }
 
 } // namespace Calico

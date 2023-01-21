@@ -129,7 +129,7 @@ struct WalRecordHeader {
 struct WalPayloadHeader {
     static constexpr Size SIZE {8};
 
-    Id lsn;
+    Lsn lsn;
 };
 
 // Routines for working with WAL records.
@@ -162,9 +162,9 @@ struct CommitDescriptor {
     Lsn lsn;
 };
 
-using PayloadDescriptor = std::variant<DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
+using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
 
-[[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
+[[nodiscard]] auto decode_payload(WalPayloadOut in) -> PayloadDescriptor;
 [[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, Slice image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn;
 [[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, Slice image, Span buffer) -> WalPayloadIn;
 [[nodiscard]] auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn;

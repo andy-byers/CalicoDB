@@ -206,8 +206,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
     WalPayloadOut payload_out {Span {scratch}.truncate(payload_in.data().size() + 8)};
     ASSERT_EQ(payload_in.lsn(), payload_out.lsn());
     const auto payload = decode_payload(payload_out);
-    ASSERT_TRUE(std::holds_alternative<FullImageDescriptor>(payload.value()));
-    const auto descriptor = std::get<FullImageDescriptor>(*payload);
+    ASSERT_TRUE(std::holds_alternative<FullImageDescriptor>(payload));
+    const auto descriptor = std::get<FullImageDescriptor>(payload);
     ASSERT_EQ(descriptor.pid.value, 1);
     ASSERT_EQ(descriptor.lsn.value, 2);
     ASSERT_EQ(descriptor.image.to_string(), image);
@@ -221,8 +221,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
     WalPayloadOut payload_out {Span {scratch}.truncate(payload_in.data().size() + sizeof(Lsn))};
     ASSERT_EQ(payload_in.lsn(), payload_out.lsn());
     const auto payload = decode_payload(payload_out);
-    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload.value()));
-    const auto descriptor = std::get<DeltaDescriptor>(*payload);
+    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload));
+    const auto descriptor = std::get<DeltaDescriptor>(payload);
     ASSERT_EQ(descriptor.pid.value, 1);
     ASSERT_EQ(descriptor.deltas.size(), deltas.size());
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const auto &delta) {
@@ -692,8 +692,9 @@ public:
         Id lsn;
         // Roll forward to the end of the WAL.
         while (s.is_ok()) {
-            s = reader.roll([&](auto info) {
-                EXPECT_EQ(Id {++lsn.value}, info.lsn());
+            s = reader.roll([&](auto payload) {
+                EXPECT_EQ(Id {++lsn.value}, payload.lsn());
+                const auto descriptor = decode_payload(payload);
                 return ok();
             });
             if (!s.is_ok()) break;

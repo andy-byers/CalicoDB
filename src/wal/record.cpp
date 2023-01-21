@@ -1,5 +1,4 @@
 #include "record.h"
-#include "utils/crc.h"
 #include "utils/encoding.h"
 #include "utils/system.h"
 
@@ -11,19 +10,19 @@ auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void
     out.advance();
 
     put_u16(out, header.size);
-    out.advance(sizeof(header.size));
+    out.advance(sizeof(std::uint16_t));
 
     put_u32(out, header.crc);
 }
 
 auto read_wal_record_header(Slice in) -> WalRecordHeader
 {
-    WalRecordHeader header {};
+    WalRecordHeader header;
     header.type = WalRecordHeader::Type {in[0]};
     in.advance();
 
     header.size = get_u16(in);
-    in.advance(sizeof(header.size));
+    in.advance(sizeof(std::uint16_t));
 
     header.crc = get_u32(in);
     return header;
@@ -31,9 +30,7 @@ auto read_wal_record_header(Slice in) -> WalRecordHeader
 
 auto read_wal_payload_header(Slice in) -> WalPayloadHeader
 {
-    WalPayloadHeader header {};
-    header.lsn.value = get_u64(in);
-    return header;
+    return WalPayloadHeader {get_u64(in)};
 }
 
 auto split_record(WalRecordHeader &lhs, Slice payload, Size available_size) -> WalRecordHeader
@@ -226,7 +223,7 @@ static auto decode_commit_payload(WalPayloadOut in) -> CommitDescriptor
     return info;
 }
 
-auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
+auto decode_payload(WalPayloadOut in) -> PayloadDescriptor
 {
     switch (XactPayloadType {in.data()[0]}) {
         case XactPayloadType::DELTA:
@@ -236,7 +233,7 @@ auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>
         case XactPayloadType::COMMIT:
             return decode_commit_payload(in);
         default:
-            return std::nullopt;
+            return std::monostate {};
     }
 }
 

@@ -97,11 +97,7 @@ auto Core::do_open(Options sanitized) -> Status
     auto initial = setup(m_prefix, *m_store, sanitized);
     if (!initial.has_value()) return initial.error();
     auto [state, is_new] = *initial;
-
-    // The database will store 0 in the "page_size" header field if the maximum page size is used (1 << 16 cannot be held
-    // in a std::uint16_t).
-    if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
-    m_log->info("page size is {} B", sanitized.page_size);
+    if (!is_new) sanitized.page_size = state.page_size;
 
     // Allocate the WAL object and buffers.
     {
@@ -561,7 +557,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         s = read_exact(*reader, bytes, 0);
         if (!s.is_ok()) return tl::make_unexpected(s);
 
-        if (file_size % decode_page_size(header.page_size))
+        if (file_size % header.page_size)
             return tl::make_unexpected(corruption(
                 "{}: database size of {} B is invalid (database must contain an integral number of pages)", MSG, file_size));
 
@@ -577,7 +573,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
 
     } else if (s.is_not_found()) {
         header.magic_code = MAGIC_CODE;
-        header.page_size = encode_page_size(options.page_size);
+        header.page_size = static_cast<std::uint16_t>(options.page_size);
         header.recovery_lsn = Id::root().value;
         header.header_crc = compute_header_crc(header);
 
@@ -585,15 +581,13 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         return tl::make_unexpected(s);
     }
 
-    const auto page_size = decode_page_size(header.page_size);
-
-    if (page_size < MINIMUM_PAGE_SIZE)
+    if (header.page_size < MINIMUM_PAGE_SIZE)
         return tl::make_unexpected(corruption(
-            "{}: header page size {} is too small (must be greater than or equal to {})", MSG, page_size));
+            "{}: header page size {} is too small (must be greater than or equal to {})", MSG, header.page_size));
 
-    if (!is_power_of_two(page_size))
+    if (!is_power_of_two(header.page_size))
         return tl::make_unexpected(corruption(
-            "{}: header page size {} is invalid (must either be 0 or a power of 2)", MSG, page_size));
+            "{}: header page size {} is invalid (must either be 0 or a power of 2)", MSG, header.page_size));
 
     return InitialState {header, !exists};
 }

@@ -20,13 +20,13 @@ auto Recovery::start_abort() -> Status
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
     return m_wal->roll_backward(m_system->commit_lsn.load(), [this](auto payload) {
-        auto info = decode_payload(payload);
+        auto decoded = decode_payload(payload);
 
-        if (!info.has_value())
+        if (std::holds_alternative<std::monostate>(decoded))
             return corruption("WAL is corrupted");
 
-        if (std::holds_alternative<FullImageDescriptor>(*info)) {
-            const auto image = std::get<FullImageDescriptor>(*info);
+        if (std::holds_alternative<FullImageDescriptor>(decoded)) {
+            const auto image = std::get<FullImageDescriptor>(decoded);
             auto page = m_pager->acquire(image.pid, true);
             if (!page.has_value()) return page.error();
             page->apply_update(image);
@@ -52,27 +52,27 @@ auto Recovery::start_recovery() -> Status
     Id last_lsn;
 
     const auto redo = [this, &last_lsn](auto payload) {
-        auto info = decode_payload(payload);
+        auto decoded = decode_payload(payload);
 
         // Payload has an invalid type.
-        if (!info.has_value())
+        if (std::holds_alternative<std::monostate>(decoded))
             return corruption("WAL is corrupted");
 
         last_lsn = payload.lsn();
 
-        if (std::holds_alternative<CommitDescriptor>(*info)) {
+        if (std::holds_alternative<CommitDescriptor>(decoded)) {
             m_system->commit_lsn.store(payload.lsn());
-        } else if (std::holds_alternative<DeltaDescriptor>(*info)) {
-            const auto delta = std::get<DeltaDescriptor>(*info);
+        } else if (std::holds_alternative<DeltaDescriptor>(decoded)) {
+            const auto delta = std::get<DeltaDescriptor>(decoded);
             auto page = m_pager->acquire(delta.pid, true);
             if (!page.has_value())
                 return page.error();
             if (delta.lsn > page->lsn())
                 page->apply_update(delta);
             return m_pager->release(std::move(*page));
-        } else if (std::holds_alternative<FullImageDescriptor>(*info)) {
+        } else if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             // This is not necessary in most cases, but should help with some kinds of corruption.
-            const auto image = std::get<FullImageDescriptor>(*info);
+            const auto image = std::get<FullImageDescriptor>(decoded);
             auto page = m_pager->acquire(image.pid, true);
             if (!page.has_value())
                 return page.error();
@@ -86,13 +86,13 @@ auto Recovery::start_recovery() -> Status
     };
 
     const auto undo = [this](auto payload) {
-        auto info = decode_payload(payload);
+        auto decoded = decode_payload(payload);
 
-        if (!info.has_value())
+        if (std::holds_alternative<std::monostate>(decoded))
             return corruption("WAL is corrupted");
 
-        if (std::holds_alternative<FullImageDescriptor>(*info)) {
-            const auto image = std::get<FullImageDescriptor>(*info);
+        if (std::holds_alternative<FullImageDescriptor>(decoded)) {
+            const auto image = std::get<FullImageDescriptor>(decoded);
             auto page = m_pager->acquire(image.pid, true);
             if (!page.has_value()) return page.error();
             page->apply_update(image);

@@ -352,6 +352,7 @@ TEST_F(NormalXactTests, AbortEmptyTransaction)
     const auto committed = add_values(*this, 3);
     commit();
 
+    assert_values_match(*this, committed);
     ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }

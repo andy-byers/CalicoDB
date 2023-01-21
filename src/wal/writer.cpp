@@ -7,10 +7,10 @@ namespace Calico {
 auto LogWriter::write(WalPayloadIn payload) -> Status
 {
     const auto lsn = payload.lsn();
+    CALICO_EXPECT_FALSE(lsn.is_null());
     auto data = payload.m_buffer;
 
-    CALICO_EXPECT_FALSE(lsn.is_null());
-    WalRecordHeader lhs {};
+    WalRecordHeader lhs;
     lhs.type = WalRecordHeader::Type::FULL;
     lhs.size = static_cast<std::uint16_t>(data.size());
     lhs.crc = crc32c::Value(data.data(), data.size());

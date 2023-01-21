@@ -645,17 +645,6 @@ TEST_F(QueueTests, MultipleProducersMultipleConsumers)
     }));
 }
 
-TEST(HeaderTests, EncodeAndDecodePageSize)
-{
-    ASSERT_EQ(decode_page_size(0), 1 << 16);
-    ASSERT_EQ(encode_page_size(1 << 16), 0);
-
-    for (Size i {1}; i < 16; ++i) {
-        const auto size = 1ULL << i;
-        ASSERT_EQ(decode_page_size(encode_page_size(size)), size);
-    }
-}
-
 TEST(MiscTests, StringsUseSizeParameterForComparisons)
 {
     std::vector<std::string> v {
