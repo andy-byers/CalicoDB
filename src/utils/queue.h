@@ -27,7 +27,8 @@ public:
         m_full_cv.wait(lock, [this] {
             return !is_full() || m_is_finished;
         });
-        if (m_is_finished) return false;
+        if (m_is_finished)
+            return false;
         m_queue.push_back(std::forward<U>(u));
         lock.unlock();
 
@@ -82,9 +83,7 @@ private:
     [[nodiscard]]
     auto is_full() const -> bool
     {
-        if (m_capacity)
-            return m_queue.size() >= m_capacity;
-        return false;
+        return m_capacity && m_queue.size() >= m_capacity;
     }
 
     std::condition_variable m_empty_cv;

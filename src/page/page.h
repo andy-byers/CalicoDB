@@ -37,10 +37,10 @@ public:
     [[nodiscard]] auto view(Size) const -> Slice;
     [[nodiscard]] auto view(Size, Size) const -> Slice;
     [[nodiscard]] auto type() const -> PageType;
-    [[nodiscard]] auto lsn() const -> Id;
+    [[nodiscard]] auto lsn() const -> Lsn;
     [[nodiscard]] auto collect_deltas() -> std::vector<PageDelta>;
     auto set_type(PageType) -> void;
-    auto set_lsn(Id) -> void;
+    auto set_lsn(Lsn) -> void;
     auto read(Span, Size) const -> void;
     auto span(Size) -> Span;
     auto span(Size, Size) -> Span;
@@ -53,12 +53,11 @@ public:
     auto operator=(Page &&) -> Page & = default;
 
 private:
-    [[nodiscard]] auto header_offset() const -> Size;
-
     std::vector<PageDelta> m_deltas;
     UniqueNullable<Pager *> m_source;
     Span m_data;
     Id m_id;
+    Size m_header_offset {};
     bool m_is_writable {};
 };
 

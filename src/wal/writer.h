@@ -38,7 +38,7 @@ private:
     Span m_tail;
     std::atomic<Id> *m_flushed_lsn {};
     AppendWriter *m_file {};
-    Id m_last_lsn {};
+    Lsn m_last_lsn {};
     Size m_number {};
     Size m_offset {};
 };

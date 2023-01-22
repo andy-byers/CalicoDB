@@ -39,7 +39,7 @@ public:
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status> override;
     [[nodiscard]] auto acquire(Id pid, bool is_writable) -> tl::expected<Page, Status> override;
     [[nodiscard]] auto release(Page page) -> Status override;
-    [[nodiscard]] auto flush(Id target_lsn) -> Status override;
+    [[nodiscard]] auto flush(Lsn target_lsn) -> Status override;
     auto save_state(FileHeader &header) -> void override;
     auto load_state(const FileHeader &header) -> void override;
 
@@ -55,14 +55,14 @@ private:
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageCache::Entry &entry) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
-    auto set_recovery_lsn(Id lsn) -> void;
+    auto set_recovery_lsn(Lsn lsn) -> void;
 
     mutable std::mutex m_mutex;
     Framer m_framer;
     PageList m_dirty;
     PageCache m_registry;
     LogPtr m_log;
-    Id m_recovery_lsn;
+    Lsn m_recovery_lsn;
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};
     System *m_system {};

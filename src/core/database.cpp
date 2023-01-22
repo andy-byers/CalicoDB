@@ -19,7 +19,7 @@ Database::Database() noexcept = default;
 auto Database::open(Slice path, const Options &options) -> Status
 {
     CALICO_EXPECT_EQ(m_core, nullptr);
-    m_core = std::unique_ptr<Core>{new(std::nothrow) Core};
+    m_core = std::unique_ptr<Core> {new(std::nothrow) Core};
     if (m_core == nullptr)
         return system_error("cannot open database: out of memory");
 

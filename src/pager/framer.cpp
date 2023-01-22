@@ -64,7 +64,7 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     const auto cache_size = page_size * frame_count;
     AlignedBuffer buffer {cache_size, page_size};
     if (buffer.get() == nullptr)
-        return tl::make_unexpected(system_error("cannot allocate frames: out of memory"));
+        return tl::make_unexpected(system_error("cannot try_allocate frames: out of memory"));
 
     return Framer {std::move(file), std::move(buffer), page_size, frame_count};
 }

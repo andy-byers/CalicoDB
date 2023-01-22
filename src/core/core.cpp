@@ -203,7 +203,6 @@ Core::~Core()
 
 auto Core::destroy() -> Status
 {
-    // m_log->trace("destroy");
     auto s = ok();
     wal.reset();
 
@@ -242,7 +241,7 @@ auto Core::statistics() -> Statistics
     return Statistics {*this};
 }
 
-auto Core::handle_errors() -> Status
+auto Core::handle_errors() const -> Status
 {
     if (auto s = status(); !s.is_ok())
         return s;
@@ -336,7 +335,6 @@ auto Core::atomic_erase(const Cursor &cursor) -> Status
 
 auto Core::commit() -> Status
 {
-    // m_log->trace("commit");
     CALICO_ERROR_IF(do_commit());
 
     auto s = status();
@@ -444,7 +442,6 @@ auto Core::transaction() -> Transaction
 
 auto Core::save_state() -> Status
 {
-    // m_log->trace("save_state");
     auto root = pager->acquire(Id::root(), true);
     if (!root.has_value()) return root.error();
 
@@ -459,7 +456,6 @@ auto Core::save_state() -> Status
 
 auto Core::load_state() -> Status
 {
-    // m_log->trace("load_state");
     auto root = pager->acquire(Id::root(), false);
     if (!root.has_value()) return root.error();
 

@@ -46,7 +46,7 @@ auto BasicWriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAhea
 
     std::unique_ptr<BasicWriteAheadLog> wal {new (std::nothrow) BasicWriteAheadLog {param}};
     if (wal == nullptr)
-        return tl::make_unexpected(system_error("cannot allocate WAL object: out of memory"));
+        return tl::make_unexpected(system_error("cannot try_allocate WAL object: out of memory"));
 
     // Keep track of the segment files.
     for (const auto &id: segment_ids)
@@ -74,7 +74,7 @@ auto BasicWriteAheadLog::start_workers() -> Status
             m_segment_cutoff,
         }}};
     if (m_writer == nullptr)
-        return system_error("cannot allocate writer object: out of memory");
+        return system_error("cannot try_allocate writer object: out of memory");
 
     m_cleanup = std::unique_ptr<WalCleanup> {
         new(std::nothrow) WalCleanup {{
@@ -85,7 +85,7 @@ auto BasicWriteAheadLog::start_workers() -> Status
             &m_set,
         }}};
     if (m_cleanup == nullptr)
-        return system_error("cannot allocate cleanup object: out of memory");
+        return system_error("cannot try_allocate cleanup object: out of memory");
 
     m_tasks = std::unique_ptr<Worker<Event>> {
         new(std::nothrow) Worker<Event> {[this](auto event) {
@@ -93,7 +93,7 @@ auto BasicWriteAheadLog::start_workers() -> Status
         },
         m_buffer_count}};
     if (m_tasks == nullptr)
-        return system_error("cannot allocate task manager object: out of memory");
+        return system_error("cannot try_allocate task manager object: out of memory");
 
     return ok();
 }

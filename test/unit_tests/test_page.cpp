@@ -570,7 +570,7 @@ TEST_F(NodeTests, FreshNodesAreEmpty)
 TEST_F(NodeTests, RemoveAtFromEmptyNodeDeathTest)
 {
     auto node = make_node(Id::root(), PageType::EXTERNAL_NODE);
-    ASSERT_DEATH(node.remove_at(0, MAX_CELL_HEADER_SIZE), EXPECTATION_MATCHER);
+    ASSERT_DEATH(node.remove(0, MAX_CELL_HEADER_SIZE), EXPECTATION_MATCHER);
 }
 
 TEST_F(NodeTests, FindInEmptyNodeFindsNothing)
@@ -613,7 +613,7 @@ TEST_F(NodeTests, SanityCheck)
             const auto key = random.get<std::string>('a', 'z', 5);
             const auto [index, found_eq] = node.find_ge(Slice {key});
             const auto to_remove = index - (index == node.cell_count());
-            node.remove_at(to_remove, node.read_cell(to_remove).size());
+            node.remove(to_remove, node.read_cell(to_remove).size());
         }
         ASSERT_EQ(node.usable_space(), node.max_usable_space());
     }

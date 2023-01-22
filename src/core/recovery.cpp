@@ -14,7 +14,6 @@ namespace Calico {
 
 auto Recovery::start_abort() -> Status
 {
-    // m_log->trace("start_abort");
     ENSURE_NO_XACT("cannot start abort");
 
     // This should give us the full images of each updated page belonging to the current transaction,
@@ -38,7 +37,6 @@ auto Recovery::start_abort() -> Status
 
 auto Recovery::finish_abort() -> Status
 {
-    // m_log->trace("finish_abort");
     ENSURE_NO_XACT("cannot finish abort");
     CALICO_TRY_S(m_pager->flush({}));
 
@@ -47,9 +45,8 @@ auto Recovery::finish_abort() -> Status
 
 auto Recovery::start_recovery() -> Status
 {
-    // m_log->trace("start_recovery");
     ENSURE_NO_XACT("cannot start recovery");
-    Id last_lsn;
+    Lsn last_lsn;
 
     const auto redo = [this, &last_lsn](auto payload) {
         auto decoded = decode_payload(payload);
@@ -101,12 +98,8 @@ auto Recovery::start_recovery() -> Status
         return ok();
     };
 
-
     // Apply updates that are in the WAL but not the database.
-    auto s = m_wal->roll_forward(m_pager->recovery_lsn(), redo);
-
-    // m_log->info("{} -> {}", m_pager->recovery_lsn().value, last_lsn.value);
-    CALICO_TRY_S(s);
+    CALICO_TRY_S(m_wal->roll_forward(m_pager->recovery_lsn(), redo));
 
     // Reached the end of the WAL, but didn't find a commit record. Undo updates until we reach the most-recent commit.
     const auto commit_lsn = m_system->commit_lsn.load();
@@ -117,7 +110,6 @@ auto Recovery::start_recovery() -> Status
 
 auto Recovery::finish_recovery() -> Status
 {
-    // m_log->trace("finish_recovery");
     ENSURE_NO_XACT("cannot finish recovery");
 
     CALICO_TRY_S(m_pager->flush({}));

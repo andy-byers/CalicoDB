@@ -10,7 +10,6 @@ namespace Calico {
 
 class Core;
 class Cursor;
-//class Statistics;
 class Status;
 class Transaction;
 

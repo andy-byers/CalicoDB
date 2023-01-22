@@ -6,13 +6,13 @@ namespace Calico {
 
 auto NodeHeader::parent_id(const Page &page) -> Id
 {
-    return Id {get_u64(page, header_offset(page) + NodeLayout::PARENT_ID_OFFSET)};
+    return {get_u64(page, header_offset(page) + NodeLayout::PARENT_ID_OFFSET)};
 }
 
 auto NodeHeader::right_sibling_id(const Page &page) -> Id
 {
     CALICO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    return Id {get_u64(page, header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
+    return {get_u64(page, header_offset(page) + NodeLayout::RIGHT_SIBLING_ID_OFFSET)};
 }
 
 auto NodeHeader::reserved(const Page &page) -> std::uint64_t
@@ -24,13 +24,13 @@ auto NodeHeader::reserved(const Page &page) -> std::uint64_t
 auto NodeHeader::left_sibling_id(const Page &page) -> Id
 {
     CALICO_EXPECT_EQ(page.type(), PageType::EXTERNAL_NODE);
-    return Id {get_u64(page, header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
+    return {get_u64(page, header_offset(page) + NodeLayout::LEFT_SIBLING_ID_OFFSET)};
 }
 
 auto NodeHeader::rightmost_child_id(const Page &page) -> Id
 {
     CALICO_EXPECT_NE(page.type(), PageType::EXTERNAL_NODE);
-    return Id {get_u64(page, header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
+    return {get_u64(page, header_offset(page) + NodeLayout::RIGHTMOST_CHILD_ID_OFFSET)};
 }
 
 auto NodeHeader::cell_count(const Page &page) -> Size
@@ -364,7 +364,13 @@ auto Node::child_id(Size index) const -> Id
 auto Node::read_key(Size index) const -> Slice
 {
     CALICO_EXPECT_LT(index, cell_count());
-    return read_cell(index).key();
+    auto offset = CellDirectory::get_pointer(m_page, index).value;
+    offset += !is_external() * sizeof(Id);
+
+    const auto key_size = get_u16(m_page, offset);
+    offset += sizeof(std::uint16_t) + is_external()*sizeof(std::uint32_t);
+
+    return m_page.view(offset, key_size);
 }
 
 auto Node::read_cell(Size index) const -> Cell
@@ -385,7 +391,7 @@ auto Node::extract_cell(Size index, Span scratch) -> Cell
 {
     CALICO_EXPECT_LT(index, cell_count());
     auto cell = detach_cell(index, scratch);
-    remove_at(index, cell.size());
+    remove(index, cell.size());
     return cell;
 }
 
@@ -456,7 +462,7 @@ auto Node::max_usable_space() const -> Size
 
 auto Node::is_overflowing() const -> bool
 {
-    return m_overflow != std::nullopt;
+    return m_overflow_cell.has_value();
 }
 
 auto Node::is_underflowing() const -> bool
@@ -469,18 +475,19 @@ auto Node::is_underflowing() const -> bool
 auto Node::overflow_cell() const -> const Cell &
 {
     CALICO_EXPECT_TRUE(is_overflowing());
-    return *m_overflow;
+    return *m_overflow_cell;
 }
 
-auto Node::set_overflow_cell(Cell cell) -> void
+auto Node::set_overflow_cell(Cell cell, Size index) -> void
 {
-    m_overflow = cell;
+    m_overflow_cell = cell;
+    m_overflow_index = index;
 }
 
 auto Node::take_overflow_cell() -> Cell
 {
-    auto cell = *m_overflow;
-    m_overflow.reset();
+    auto cell = *m_overflow_cell;
+    m_overflow_cell.reset();
     return cell;
 }
 
@@ -495,11 +502,11 @@ auto Node::set_child_id(Size index, Id child_id) -> void
     }
 }
 
-auto Node::allocate(Size needed_size, std::optional<Size> skipped_cid) -> Size
+auto Node::try_allocate(Size needed_size, std::optional<Size> skip_index) -> Size
 {
     if (const auto ptr = BlockAllocator::allocate(m_page, needed_size))
         return ptr;
-    defragment(skipped_cid);
+    defragment(skip_index);
     return BlockAllocator::allocate(m_page, needed_size);
 }
 
@@ -508,15 +515,12 @@ auto Node::defragment() -> void
     defragment(std::nullopt);
 }
 
-auto Node::defragment(std::optional<Size> skipped_cid) -> void
+auto Node::defragment(std::optional<Size> skip_index) -> void
 {
     const auto n = cell_count();
-    const auto to_skip = skipped_cid ? *skipped_cid : n;
+    const auto to_skip = skip_index ? *skip_index : n;
     auto end = m_page.size();
     std::vector<Size> ptrs(n);
-
-    // TODO: We're using scratch memory for this now. We only have one scratch buffer, shared among all nodes. This is okay right now
-    //       since all tree operations happen in a single thread, so only one node can be defragmenting at any given time.
 
     for (Size index {}; index < n; ++index) {
         if (index == to_skip)
@@ -536,16 +540,16 @@ auto Node::defragment(std::optional<Size> skipped_cid) -> void
     BlockAllocator::reset(m_page);
 }
 
-
+// TODO: remove
 auto Node::insert(Cell cell) -> void
 {
     const auto [index, falsy] = find_ge(cell.key());
     // Keys should be unique.
     CALICO_EXPECT_FALSE(falsy);
-    insert_at(index, cell);
+    insert(index, cell);
 }
 
-auto Node::insert_at(Size index, Cell cell) -> void
+auto Node::insert(Size index, Cell cell) -> void
 {
     CALICO_EXPECT_FALSE(is_overflowing());
     CALICO_EXPECT_LE(index, cell_count());
@@ -557,21 +561,21 @@ auto Node::insert_at(Size index, Cell cell) -> void
     if (cell_area_offset() + CELL_POINTER_SIZE > NodeHeader::cell_start(m_page)) {
         if (BlockAllocator::usable_space(m_page) >= local_size + CELL_POINTER_SIZE) {
             defragment();
-            return insert_at(index, cell);
+            return insert(index, cell);
         }
-        set_overflow_cell(cell);
+        set_overflow_cell(cell, find_ge(cell.key()).index);
         return;
     }
     // insert a dummy cell pointer to save the slot.
     CellDirectory::insert_pointer(m_page, index, {m_page.size() - 1});
 
     // allocate space for the cell. This call may defragment the node.
-    const auto offset = allocate(local_size, index);
+    const auto offset = try_allocate(local_size, index);
 
     // We don't have room to insert the cell.
     if (!offset) {
         CALICO_EXPECT_LT(BlockAllocator::usable_space(m_page), local_size + CELL_POINTER_SIZE);
-        set_overflow_cell(cell);
+        set_overflow_cell(cell, index);
         CellDirectory::remove_pointer(m_page, index);
         return;
     }
@@ -587,13 +591,13 @@ auto Node::insert_at(Size index, Cell cell) -> void
 auto Node::remove(Slice key) -> bool
 {
     if (auto [index, found_eq] = find_ge(key); found_eq) {
-        remove_at(index, read_cell(index).size());
+        remove(index, read_cell(index).size());
         return true;
     }
     return false;
 }
 
-auto Node::remove_at(Size index, Size local_size) -> void
+auto Node::remove(Size index, Size local_size) -> void
 {
     CALICO_EXPECT_GE(local_size, MIN_CELL_HEADER_SIZE);
     CALICO_EXPECT_LE(local_size, get_max_local(m_page.size()) + MAX_CELL_HEADER_SIZE);
@@ -612,7 +616,7 @@ auto Node::reset(bool reset_header) -> void
         mem_clear(chunk, chunk.size());
         NodeHeader::set_cell_start(m_page, m_page.size());
     }
-    m_overflow.reset();
+    m_overflow_cell.reset();
 }
 
 static auto transfer_first_cell_left(Node &src, Node &dst) -> void
@@ -620,8 +624,8 @@ static auto transfer_first_cell_left(Node &src, Node &dst) -> void
     CALICO_EXPECT_EQ(src.type(), dst.type());
     auto cell = src.read_cell(0);
     const auto cell_size = cell.size();
-    dst.insert_at(dst.cell_count(), cell);
-    src.remove_at(0, cell_size);
+    dst.insert(dst.cell_count(), cell);
+    src.remove(0, cell_size);
 }
 
 static auto accumulate_occupied_space(const Node &Ln, const Node &rn)
@@ -668,8 +672,8 @@ auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
     auto separator = parent.read_cell(index);
     const auto separator_size = separator.size();
     separator.set_left_child_id(Lc.rightmost_child_id());
-    Lc.insert_at(Lc.cell_count(), separator);
-    parent.remove_at(index, separator_size);
+    Lc.insert(Lc.cell_count(), separator);
+    parent.remove(index, separator_size);
 
     // Transfer the rest of the cells. Lc shouldn't overflow.
     while (rc.cell_count())
@@ -686,7 +690,7 @@ auto external_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
 
     // Move the separator from the parent to the left child node.
     auto separator = parent.read_cell(index);
-    parent.remove_at(index, separator.size());
+    parent.remove(index, separator.size());
 
     while (rc.cell_count())
         transfer_first_cell_left(rc, Lc);
@@ -710,10 +714,10 @@ auto internal_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
     const auto separator_size = separator.size();
     separator.set_left_child_id(Lc.rightmost_child_id());
     Lc.set_rightmost_child_id(rc.rightmost_child_id());
-    Lc.insert_at(Lc.cell_count(), separator);
+    Lc.insert(Lc.cell_count(), separator);
     CALICO_EXPECT_EQ(parent.child_id(index + 1), rc.id());
     parent.set_child_id(index + 1, Lc.id());
-    parent.remove_at(index, separator_size);
+    parent.remove(index, separator_size);
 
     // Transfer the rest of the cells. Lc shouldn't overflow.
     while (rc.cell_count()) {
@@ -729,7 +733,7 @@ auto external_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
     auto separator = parent.read_cell(index);
     CALICO_EXPECT_EQ(parent.child_id(index + 1), rc.id());
     parent.set_child_id(index + 1, Lc.id());
-    parent.remove_at(index, separator.size());
+    parent.remove(index, separator.size());
 
     while (rc.cell_count())
         transfer_first_cell_left(rc, Lc);
@@ -758,7 +762,7 @@ auto split_root(Node &root, Node &child) -> void
     child.page().write(root.page().view(root.header_offset()).truncate(size), offset);
 
     CALICO_EXPECT_TRUE(root.is_overflowing());
-    child.set_overflow_cell(root.take_overflow_cell());
+    child.set_overflow_cell(root.take_overflow_cell(), root.overflow_index());
 
     root.reset(true);
     root.page().set_type(PageType::INTERNAL_NODE);
@@ -780,23 +784,23 @@ auto merge_root(Node &root, Node &child) -> void
 
     // Copy the header and cell pointers.
     offset = root.header_offset();
-    size = NodeLayout::HEADER_SIZE + child.cell_count() * CELL_POINTER_SIZE;
+    size = NodeLayout::HEADER_SIZE + child.cell_count()*CELL_POINTER_SIZE;
     root.page().write(child.page().view(child.header_offset()).truncate(size), offset);
     root.page().set_type(child.type());
     root.page().set_lsn(child.page().lsn());
 }
 
 template<class Predicate>
-auto transfer_cells_right_while(Node &src, Node &dst, Predicate &&predicate) -> void
+auto transfer_cells_right_while(Node &src, Node &dst, const Predicate &predicate) -> void
 {
     Size counter {};
     while (predicate(src, dst, counter++)) {
         const auto last = src.cell_count() - 1;
         auto cell = src.read_cell(last);
         const auto cell_size = cell.size();
-        dst.insert_at(0, cell);
+        dst.insert(0, cell);
         CALICO_EXPECT_FALSE(dst.is_overflowing());
-        src.remove_at(last, cell_size);
+        src.remove(last, cell_size);
     }
 }
 
@@ -823,10 +827,10 @@ auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overfl
     });
 
     if (Ln.cell_count() > overflow_index) {
-        Ln.insert_at(overflow_index, overflow);
+        Ln.insert(overflow_index, overflow);
         CALICO_EXPECT_FALSE(Ln.is_overflowing());
     } else {
-        rn.insert_at(0, overflow);
+        rn.insert(0, overflow);
         CALICO_EXPECT_FALSE(rn.is_overflowing());
     }
     auto separator = rn.read_cell(0);
@@ -837,11 +841,8 @@ auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overfl
 
 auto split_external_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
 {
+    const auto overflow_idx = Ln.overflow_index();
     auto overflow = Ln.take_overflow_cell();
-
-    // Figure out where the overflow cell should go.
-    const auto [overflow_idx, falsy] = Ln.find_ge(overflow.key());
-    CALICO_EXPECT_FALSE(falsy);
 
     // Warning: We don't have access to the former right sibling of Ln, but we need to set its left child ID.
     //          We need to make sure to do that in the caller.
@@ -855,10 +856,10 @@ auto split_external_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
 
     } else if (overflow_idx == 0) {
         // We need the `!counter` because the condition following it may not be true if we got here from split_root().
-        transfer_cells_right_while(Ln, rn, [&overflow](const auto &src, const auto &, auto counter) {
-            return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
+        transfer_cells_right_while(Ln, rn, [](const auto &src, const auto &dst, auto counter) {
+            return !counter || src.usable_space() < dst.usable_space();
         });
-        Ln.insert_at(0, overflow);
+        Ln.insert(0, overflow);
         CALICO_EXPECT_FALSE(Ln.is_overflowing());
 
     } else if (overflow_idx == Ln.cell_count()) {
@@ -867,7 +868,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
         transfer_cells_right_while(Ln, rn, [](const auto &, const auto &, auto counter) {
             return !counter;
         });
-        rn.insert_at(rn.cell_count(), overflow);
+        rn.insert(rn.cell_count(), overflow);
         CALICO_EXPECT_FALSE(rn.is_overflowing());
     }
 
@@ -879,11 +880,8 @@ auto split_external_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
 
 auto split_internal_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
 {
+    const auto overflow_idx = Ln.overflow_index();
     auto overflow = Ln.take_overflow_cell();
-
-    // Figure out where the overflow cell should go.
-    const auto [overflow_idx, falsy] = Ln.find_ge(overflow.key());
-    CALICO_EXPECT_FALSE(falsy);
 
     rn.set_rightmost_child_id(Ln.rightmost_child_id());
     rn.set_parent_id(Ln.parent_id());
@@ -893,11 +891,10 @@ auto split_internal_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
         return split_non_root_fast_internal(Ln, rn, overflow, overflow_idx, scratch);
 
     } else if (overflow_idx == 0) {
-        // TODO: Split the other way in this case, as we are possibly inserting reverse sequentially?
-        transfer_cells_right_while(Ln, rn, [&overflow](const auto &src, const auto &, Size counter) {
-            return !counter || src.usable_space() < overflow.size() + CELL_POINTER_SIZE;
+        transfer_cells_right_while(Ln, rn, [](const auto &src, const auto &dst, Size counter) {
+            return !counter || src.usable_space() < dst.usable_space();
         });
-        Ln.insert_at(0, overflow);
+        Ln.insert(0, overflow);
         CALICO_EXPECT_FALSE(Ln.is_overflowing());
 
     } else if (overflow_idx == Ln.cell_count()) {
@@ -906,7 +903,7 @@ auto split_internal_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
         transfer_cells_right_while(Ln, rn, [](const auto &, const auto &, auto counter) {
             return !counter;
         });
-        rn.insert_at(rn.cell_count(), overflow);
+        rn.insert(rn.cell_count(), overflow);
         CALICO_EXPECT_FALSE(rn.is_overflowing());
     }
 

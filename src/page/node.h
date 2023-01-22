@@ -56,7 +56,7 @@ public:
     static auto reset(Page&) -> void;
 
 private:
-    static constexpr Size FREE_BLOCK_HEADER_SIZE {2 * sizeof(uint16_t)};
+    static constexpr Size FREE_BLOCK_HEADER_SIZE {2 * sizeof(std::uint16_t)};
 
     [[nodiscard]] static auto get_next_pointer(const Page&, Size) -> Size;
     [[nodiscard]] static auto get_block_size(const Page&, Size) -> Size;
@@ -74,9 +74,11 @@ public:
         bool found_eq {};
     };
 
+    friend class Iterator;
+
     Node(Page page, bool reset_header, Byte *scratch)
         : m_page {std::move(page)},
-          m_scratch {Span {scratch, m_page.size()}}
+          m_scratch {scratch, m_page.size()}
     {
         reset(reset_header);
     }
@@ -117,13 +119,13 @@ public:
     [[nodiscard]] auto find_ge(Slice) const -> FindGeResult;
     auto extract_cell(Size, Span) -> Cell;
     auto insert(Cell) -> void;
-    auto insert_at(Size, Cell) -> void;
-    auto remove(Slice) -> bool;
-    auto remove_at(Size, Size) -> void;
+    auto insert(Size index, Cell cell) -> void;
+    auto remove(Slice key) -> bool;
+    auto remove(Size index, Size size) -> void;
     auto defragment() -> void;
 
     [[nodiscard]] auto overflow_cell() const -> const Cell &;
-    auto set_overflow_cell(Cell) -> void;
+    auto set_overflow_cell(Cell cell, Size index) -> void;
     auto take_overflow_cell() -> Cell;
 
     [[nodiscard]] auto is_overflowing() const -> bool;
@@ -148,16 +150,18 @@ public:
     [[nodiscard]] auto max_usable_space() const -> Size;
     [[nodiscard]] auto cell_area_offset() const -> Size;
     [[nodiscard]] auto header_offset() const -> Size;
+    [[nodiscard]] auto overflow_index() const -> Size {return m_overflow_index;}
     auto reset(bool = false) -> void;
 
     auto TEST_validate() const -> void;
 
 private:
     auto defragment(std::optional<Size>) -> void;
-    auto allocate(Size, std::optional<Size>) -> Size;
+    auto try_allocate(Size, std::optional<Size>) -> Size;
 
     Page m_page;
-    std::optional<Cell> m_overflow {};
+    std::optional<Cell> m_overflow_cell {};
+    Size m_overflow_index {};
     Span m_scratch;
 };
 

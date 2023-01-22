@@ -25,7 +25,7 @@ auto BasicPager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Statu
     
     auto ptr = Pager::Ptr {new (std::nothrow) BasicPager {param, std::move(*framer)}};
     if (ptr == nullptr)
-        return tl::make_unexpected(system_error("could not allocate pager object: out of memory"));
+        return tl::make_unexpected(system_error("could not try_allocate pager object: out of memory"));
     return ptr;
 }
 
@@ -88,14 +88,14 @@ auto BasicPager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
     return m_dirty.remove(token);
 }
 
-auto BasicPager::set_recovery_lsn(Id lsn) -> void
+auto BasicPager::set_recovery_lsn(Lsn lsn) -> void
 {
     CALICO_EXPECT_LE(m_recovery_lsn, lsn);
     // m_log->info("recovery_lsn: {} -> {}", m_recovery_lsn.value, lsn.value);
     m_recovery_lsn = lsn;
 }
 
-auto BasicPager::flush(Id target_lsn) -> Status
+auto BasicPager::flush(Lsn target_lsn) -> Status
 {
     // m_log->trace("flush");
     CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);

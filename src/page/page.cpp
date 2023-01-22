@@ -11,6 +11,7 @@ Page::Page(const Parameters &param)
     : m_source {param.source},
       m_data {param.data},
       m_id {param.id},
+      m_header_offset {PageLayout::header_offset(m_id)},
       m_is_writable {param.is_writable}
 {
     CALICO_EXPECT_TRUE(is_power_of_two(m_data.size()));
@@ -20,37 +21,30 @@ Page::Page(const Parameters &param)
 
 Page::~Page()
 {
-    if (m_source.is_valid()) {
-        const auto source = std::move(m_source);
-        [[maybe_unused]] auto s = source->release(std::move(*this));
-    }
-}
-
-auto Page::header_offset() const -> Size
-{
-    return PageLayout::header_offset(m_id);
+    if (m_source.is_valid())
+        (void)std::move(m_source)->release(std::move(*this));
 }
 
 auto Page::type() const -> PageType
 {
-    return PageType {get_u16(*this, header_offset() + PageLayout::TYPE_OFFSET)};
+    return PageType {get_u16(*this,  m_header_offset + PageLayout::TYPE_OFFSET)};
 }
 
-auto Page::lsn() const -> Id
+auto Page::lsn() const -> Lsn
 {
-    return Id {get_u64(*this, header_offset() + PageLayout::LSN_OFFSET)};
+    return Lsn {get_u64(*this,  m_header_offset + PageLayout::LSN_OFFSET)};
 }
 
 auto Page::set_type(PageType type) -> void
 {
-    const auto offset = header_offset() + PageLayout::TYPE_OFFSET;
-    put_u16(*this, offset, static_cast<uint16_t>(type));
+    const auto offset =  m_header_offset + PageLayout::TYPE_OFFSET;
+    put_u16(*this, offset, static_cast<std::uint16_t>(type));
 }
 
 auto Page::set_lsn(Id value) -> void
 {
     CALICO_EXPECT_LE(lsn(), value);
-    const auto offset = header_offset() + PageLayout::LSN_OFFSET;
+    const auto offset =  m_header_offset + PageLayout::LSN_OFFSET;
     put_u64(*this, offset, value.value);
 }
 

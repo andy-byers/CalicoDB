@@ -198,7 +198,7 @@ public:
     [[nodiscard]]
     auto oldest_lsn() const -> Id
     {
-        return std::min(state.commit_lsn.load(), pager->recovery_lsn()); // TODO: Changed this from flushed_lsn(), probably wrong now.
+        return std::min(state.commit_lsn.load(), pager->recovery_lsn());
     }
 
     auto allow_cleanup() const -> void
@@ -212,8 +212,7 @@ public:
         return random.get<std::string>('a', 'z', PageWrapper::VALUE_SIZE);
     }
 
-    Options opt {PAGE_SIZE, PAGE_SIZE * PAGE_COUNT, PAGE_SIZE * PAGE_COUNT, {}, 1024, 32, LogLevel::TRACE, LogTarget::STDERR_COLOR};
-    System state {"test", opt};
+    System state {"test", {}};
     Random random {UnitTests::random_seed};
     Status status {ok()};
     std::unique_ptr<HeapStorage> store;

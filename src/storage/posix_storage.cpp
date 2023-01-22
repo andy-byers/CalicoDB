@@ -131,7 +131,7 @@ auto PosixStorage::open_random_reader(const std::string &path, RandomReader **ou
     if (fd.has_value()) {
         *out = new(std::nothrow) RandomFileReader {path, *fd};
         if (*out == nullptr)
-            return system_error("cannot allocate file: out of memory");
+            return system_error("cannot try_allocate file: out of memory");
         return ok();
     }
     return fd.error();
@@ -143,7 +143,7 @@ auto PosixStorage::open_random_editor(const std::string &path, RandomEditor **ou
     if (fd.has_value()) {
         *out = new(std::nothrow) RandomFileEditor {path, *fd};
         if (*out == nullptr)
-            return system_error("cannot allocate file: out of memory");
+            return system_error("cannot try_allocate file: out of memory");
         return ok();
     }
     return fd.error();
@@ -155,7 +155,7 @@ auto PosixStorage::open_append_writer(const std::string &path, AppendWriter **ou
     if (fd.has_value()) {
         *out = new(std::nothrow) AppendFileWriter {path, *fd};
         if (*out == nullptr)
-            return system_error("cannot allocate file: out of memory");
+            return system_error("cannot try_allocate file: out of memory");
         return ok();
     }
     return fd.error();

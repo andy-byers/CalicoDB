@@ -31,7 +31,7 @@ auto BPlusTree::open(Pager &pager, System &system, Size page_size) -> tl::expect
 {
     auto ptr = Tree::Ptr {new(std::nothrow) BPlusTree {pager, system, page_size}};
     if (ptr == nullptr)
-        return tl::make_unexpected(system_error("could not allocate tree: out of memory"));
+        return tl::make_unexpected(system_error("could not try_allocate tree: out of memory"));
     return ptr;
 }
 
