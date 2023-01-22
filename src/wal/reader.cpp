@@ -41,7 +41,7 @@ auto LogReader::read(WalPayloadOut &out, Span payload, Span tail) -> Status
     return s;
 }
 
-auto LogReader::read_first_lsn(Id &out) -> Status
+auto LogReader::read_first_lsn(Lsn &out) -> Status
 {
     // Bytes requires the array size when constructed with a C-style array.
     char buffer [WalPayloadHeader::SIZE];
@@ -56,7 +56,7 @@ auto LogReader::read_first_lsn(Id &out) -> Status
 
 auto LogReader::read_logical_record(Span &out, Span tail) -> Status
 {
-    WalRecordHeader header {};
+    WalRecordHeader header;
     auto payload = out;
 
     for (; ; ) {
@@ -76,13 +76,16 @@ auto LogReader::read_logical_record(Span &out, Span tail) -> Status
                 payload.advance(temp.size);
                 rest.advance(temp.size);
 
-                if (header.type == WalRecordHeader::Type::FULL)
+                if (header.type == WalRecordHeader::Type::FULL) {
+                    if (header.crc != crc32c::Value(out.data(), out.truncate(header.size).size()))
+                        return corruption("crc is incorrect for record {}", get_u64(out));
                     break;
-
+                }
                 if (!rest.is_empty())
                     continue;
             }
         }
+
         // Read the next block into the tail buffer.
         auto s = read_exact_or_eof(*m_file, (m_number+1) * tail.size(), tail);
 
@@ -95,8 +98,6 @@ auto LogReader::read_logical_record(Span &out, Span tail) -> Status
         m_offset = 0;
         m_number++;
     }
-    // Only modify the out parameter's size if we have succeeded.
-    out.truncate(out.size() - payload.size());
     return ok();
 }
 

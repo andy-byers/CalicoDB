@@ -88,6 +88,8 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
     return lhs.value != rhs.value;
 }
 
+using Lsn = Id;
+
 class AlignedBuffer {
 public:
     AlignedBuffer(Size size, Size alignment)

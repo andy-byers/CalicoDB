@@ -89,7 +89,6 @@ public:
             "test/",
             store.get(),
             scratch.get(),
-            &images,
             wal.get(),
             &state,
             CACHE_SIZE,
@@ -130,16 +129,13 @@ public:
         CALICO_TRY_S(save_state());
 
         const auto lsn = wal->current_lsn();
-        WalPayloadIn payload {lsn, scratch->get()};
-        const auto size = encode_commit_payload(payload.data());
-        payload.shrink_to_fit(size);
+        const auto payload = encode_commit_payload(lsn, *scratch->get());
 
         wal->log(payload);
         wal->advance();
         allow_cleanup();
 
         state.commit_lsn.store(lsn);
-        images.clear();
         return status;
     }
 
@@ -216,14 +212,14 @@ public:
         return random.get<std::string>('a', 'z', PageWrapper::VALUE_SIZE);
     }
 
-    System state {"test", {}};
+    Options opt {PAGE_SIZE, PAGE_SIZE * PAGE_COUNT, PAGE_SIZE * PAGE_COUNT, {}, 1024, 32, LogLevel::TRACE, LogTarget::STDERR_COLOR};
+    System state {"test", opt};
     Random random {UnitTests::random_seed};
     Status status {ok()};
     std::unique_ptr<HeapStorage> store;
     std::unique_ptr<Pager> pager;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<LogScratchManager> scratch;
-    std::unordered_set<Id, Id::Hash> images;
 };
 
 class NormalXactTests
@@ -279,7 +275,6 @@ static auto undo_xact(Test &test)
     CALICO_TRY_S(recovery.start_abort());
     // Don't need to load any state for these tests.
     CALICO_TRY_S(recovery.finish_abort());
-    test.images.clear();
     test.state.has_xact = true;
     return ok();
 }
@@ -357,6 +352,7 @@ TEST_F(NormalXactTests, AbortEmptyTransaction)
     const auto committed = add_values(*this, 3);
     commit();
 
+    assert_values_match(*this, committed);
     ASSERT_OK(undo_xact(*this));
     assert_values_match(*this, committed);
 }

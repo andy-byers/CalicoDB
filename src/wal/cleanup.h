@@ -11,7 +11,7 @@ class WalCleanup {
 public:
     struct Parameters {
         Slice prefix;
-        std::atomic<Id> *limit {};
+        std::atomic<Lsn> *limit {};
         Storage *storage {};
         System *system {};
         WalSet *set {};
@@ -38,11 +38,10 @@ private:
     [[nodiscard]] auto open_reader() -> tl::expected<WalReader, Status>;
 
     std::string m_prefix;
-    std::atomic<Id> *m_limit {};
+    std::atomic<Lsn> *m_limit {};
     Storage *m_storage {};
     System *m_system {};
     WalSet *m_set {};
-    Id m_cache[2] {};
 };
 
 } // namespace Calico

@@ -97,11 +97,7 @@ auto Core::do_open(Options sanitized) -> Status
     auto initial = setup(m_prefix, *m_store, sanitized);
     if (!initial.has_value()) return initial.error();
     auto [state, is_new] = *initial;
-
-    // The database will store 0 in the "page_size" header field if the maximum page size is used (1 << 16 cannot be held
-    // in a std::uint16_t).
-    if (!is_new) sanitized.page_size = decode_page_size(state.page_size);
-    m_log->info("page size is {} B", sanitized.page_size);
+    if (!is_new) sanitized.page_size = state.page_size;
 
     // Allocate the WAL object and buffers.
     {
@@ -139,7 +135,6 @@ auto Core::do_open(Options sanitized) -> Status
             m_prefix,
             m_store,
             m_scratch.get(),
-            &m_images,
             wal.get(),
             m_system.get(),
             sanitized.page_cache_size / sanitized.page_size,
@@ -364,11 +359,7 @@ auto Core::do_commit() -> Status
 
     // Write a commit record to the WAL.
     const auto lsn = wal->current_lsn();
-    WalPayloadIn payload {lsn, m_scratch->get()};
-    const auto size = encode_commit_payload(payload.data());
-    payload.shrink_to_fit(size);
-
-    wal->log(payload);
+    wal->log(encode_commit_payload(lsn, *m_scratch->get()));
     wal->advance();
 
     // advance() blocks until it is finished. If an error was encountered, it'll show up in the
@@ -381,7 +372,6 @@ auto Core::do_commit() -> Status
         wal->cleanup(pager->recovery_lsn());
     }
 
-    m_images.clear();
     m_system->commit_lsn = lsn;
     m_system->has_xact = false;
     return ok();
@@ -407,7 +397,6 @@ auto Core::do_abort() -> Status
             "could not abort: a transaction is not active (start a transaction and try again)");
 
     m_system->has_xact = false;
-    m_images.clear();
     wal->advance();
 
     CALICO_TRY_S(handle_errors());
@@ -568,7 +557,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         s = read_exact(*reader, bytes, 0);
         if (!s.is_ok()) return tl::make_unexpected(s);
 
-        if (file_size % decode_page_size(header.page_size))
+        if (file_size % header.page_size)
             return tl::make_unexpected(corruption(
                 "{}: database size of {} B is invalid (database must contain an integral number of pages)", MSG, file_size));
 
@@ -584,7 +573,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
 
     } else if (s.is_not_found()) {
         header.magic_code = MAGIC_CODE;
-        header.page_size = encode_page_size(options.page_size);
+        header.page_size = static_cast<std::uint16_t>(options.page_size);
         header.recovery_lsn = Id::root().value;
         header.header_crc = compute_header_crc(header);
 
@@ -592,15 +581,13 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         return tl::make_unexpected(s);
     }
 
-    const auto page_size = decode_page_size(header.page_size);
-
-    if (page_size < MINIMUM_PAGE_SIZE)
+    if (header.page_size < MINIMUM_PAGE_SIZE)
         return tl::make_unexpected(corruption(
-            "{}: header page size {} is too small (must be greater than or equal to {})", MSG, page_size));
+            "{}: header page size {} is too small (must be greater than or equal to {})", MSG, header.page_size));
 
-    if (!is_power_of_two(page_size))
+    if (!is_power_of_two(header.page_size))
         return tl::make_unexpected(corruption(
-            "{}: header page size {} is invalid (must either be 0 or a power of 2)", MSG, page_size));
+            "{}: header page size {} is invalid (must either be 0 or a power of 2)", MSG, header.page_size));
 
     return InitialState {header, !exists};
 }

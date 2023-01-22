@@ -17,7 +17,7 @@ public:
     {}
 
     // NOTE: If either of these methods returns a non-OK status, the state of this object is unspecified.
-    [[nodiscard]] auto read_first_lsn(Id &out) -> Status;
+    [[nodiscard]] auto read_first_lsn(Lsn &out) -> Status;
     [[nodiscard]] auto read(WalPayloadOut &out, Span payload, Span tail) -> Status;
 
 private:

@@ -1,7 +1,6 @@
 #include "node.h"
 #include "utils/crc.h"
 #include "utils/layout.h"
-#include "spdlog/fmt/fmt.h"
 
 namespace Calico {
 
@@ -392,6 +391,7 @@ auto Node::extract_cell(Size index, Span scratch) -> Cell
 
 auto Node::TEST_validate() const -> void
 {
+#if not NDEBUG
     const auto label = fmt::format("node {}: ", m_page.id().value);
 
     // The usable space is the total of all the free blocks, fragments, and the gap space.
@@ -415,6 +415,7 @@ auto Node::TEST_validate() const -> void
         fmt::print(stderr, "{}: memory is unaccounted for ({} span were lost)\n", label, int(size()) - int(used_space + usable_space));
         std::exit(EXIT_FAILURE);
     }
+#endif // not NDEBUG
 }
 
 auto Node::find_ge(Slice key) const -> FindGeResult

@@ -9,7 +9,7 @@ class Storage;
 
 static constexpr Size MINIMUM_PAGE_SIZE {0x100};
 static constexpr Size DEFAULT_PAGE_SIZE {0x2000};
-static constexpr Size MAXIMUM_PAGE_SIZE {0x10000};
+static constexpr Size MAXIMUM_PAGE_SIZE {0x8000};
 static constexpr Size MINIMUM_LOG_MAX_SIZE {0xA000};
 static constexpr Size DEFAULT_MAX_LOG_SIZE {0x100000};
 static constexpr Size MAXIMUM_LOG_MAX_SIZE {0xA00000};

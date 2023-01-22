@@ -23,7 +23,6 @@ public:
         std::string prefix;
         Storage *storage {};
         LogScratchManager *scratch {};
-        std::unordered_set<Id, Id::Hash> *images {};
         WriteAheadLog *wal {};
         System *system {};
         Size frame_count {};
@@ -64,7 +63,6 @@ private:
     PageCache m_registry;
     LogPtr m_log;
     Id m_recovery_lsn;
-    std::unordered_set<Id, Id::Hash> *m_images {};
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};
     System *m_system {};

@@ -202,12 +202,12 @@ public:
 
 TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
 {
-    const auto size = encode_full_image_payload(Id::root(), image, Span {scratch}.range(8));
-    put_u64(scratch, 2); // LSN
-    WalPayloadOut out {Span {scratch}.truncate(size + 8)};
-    const auto payload = decode_payload(out);
-    ASSERT_TRUE(std::holds_alternative<FullImageDescriptor>(payload.value()));
-    const auto descriptor = std::get<FullImageDescriptor>(*payload);
+    const auto payload_in = encode_full_image_payload(Lsn {2}, Id::root(), image, Span {scratch});
+    WalPayloadOut payload_out {Span {scratch}.truncate(payload_in.data().size() + 8)};
+    ASSERT_EQ(payload_in.lsn(), payload_out.lsn());
+    const auto payload = decode_payload(payload_out);
+    ASSERT_TRUE(std::holds_alternative<FullImageDescriptor>(payload));
+    const auto descriptor = std::get<FullImageDescriptor>(payload);
     ASSERT_EQ(descriptor.pid.value, 1);
     ASSERT_EQ(descriptor.lsn.value, 2);
     ASSERT_EQ(descriptor.image.to_string(), image);
@@ -217,11 +217,12 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(image);
-    const auto size = encode_deltas_payload(Id::root(), image, deltas, Span {scratch}.range(8));
-    WalPayloadOut out {Span {scratch}.truncate(size + 8)};
-    const auto payload = decode_payload(out);
-    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload.value()));
-    const auto descriptor = std::get<DeltaDescriptor>(*payload);
+    const auto payload_in = encode_deltas_payload(Lsn{2}, Id::root(), image, deltas, Span {scratch});
+    WalPayloadOut payload_out {Span {scratch}.truncate(payload_in.data().size() + sizeof(Lsn))};
+    ASSERT_EQ(payload_in.lsn(), payload_out.lsn());
+    const auto payload = decode_payload(payload_out);
+    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload));
+    const auto descriptor = std::get<DeltaDescriptor>(payload);
     ASSERT_EQ(descriptor.pid.value, 1);
     ASSERT_EQ(descriptor.deltas.size(), deltas.size());
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const auto &delta) {
@@ -361,9 +362,8 @@ public:
     {
         auto buffer = scratch.get();
         ASSERT_GE(buffer->size(), payload.size() + sizeof(Id));
-        WalPayloadIn in {{++last_lsn.value}, buffer};
-        mem_copy(in.data(), payload);
-        in.shrink_to_fit(payload.size());
+        mem_copy(buffer->range(sizeof(Lsn)), payload);
+        WalPayloadIn in {{++last_lsn.value}, buffer->range(0, payload.size() + sizeof(Lsn))};
         ASSERT_OK(writer.write(in));
     }
 
@@ -385,7 +385,8 @@ public:
         ASSERT_OK(writer.flush());
 
         for (const auto &payload: payloads) {
-            ASSERT_EQ(read_string(reader), payload);
+            const auto str = read_string(reader);
+            ASSERT_EQ(str, payload);
         }
     }
 
@@ -570,10 +571,8 @@ static auto test_write_until_failure(Test &test) -> void
     Id last_lsn;
     while (!test.system.has_error()) {
         auto buffer = test.scratch.get();
-        WalPayloadIn payload {{++last_lsn.value}, buffer};
-        const auto size = test.random.get(1UL, payload.data().size());
-        payload.shrink_to_fit(size);
-        test.writer.write(payload);
+        const auto size = test.random.get(1UL, buffer->size());
+        test.writer.write(WalPayloadIn {{++last_lsn.value}, buffer->truncate(size)});
     }
 
     ASSERT_FALSE(std::move(test.writer).destroy().is_ok());
@@ -672,12 +671,11 @@ public:
     [[nodiscard]]
     auto get_payload() -> WalPayloadIn
     {
-        WalPayloadIn payload {{++last_lsn.value}, scratch.get()};
-        const auto size = random.get(payload.data().size());
-        payload.shrink_to_fit(size);
+        auto buffer = *scratch.get();
+        const auto size = random.get(1, 32);
         payloads.emplace_back(random.get<std::string>('a', 'z', size));
-        mem_copy(payload.data(), payloads.back());
-        return payload;
+        mem_copy(buffer.range(sizeof(Lsn)), payloads.back());
+        return WalPayloadIn {{++last_lsn.value}, buffer.truncate(size + sizeof(Lsn))};
     }
 
     auto emit_segments(Size num_writes)
@@ -695,8 +693,9 @@ public:
         Id lsn;
         // Roll forward to the end of the WAL.
         while (s.is_ok()) {
-            s = reader.roll([&](auto info) {
-                EXPECT_EQ(Id {++lsn.value}, info.lsn());
+            s = reader.roll([&](auto payload) {
+                EXPECT_EQ(Id {++lsn.value}, payload.lsn());
+                const auto descriptor = decode_payload(payload);
                 return ok();
             });
             if (!s.is_ok()) break;

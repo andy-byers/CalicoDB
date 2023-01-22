@@ -12,49 +12,6 @@
 
 namespace Calico {
 
-struct PageDelta {
-    Size offset {};
-    Size size {};
-};
-
-static_assert(sizeof(PageDelta) == 2 * sizeof(Size));
-
-struct DeltaDescriptor {
-    struct Delta {
-        Size offset {};
-        Slice data {};
-    };
-
-    Id pid;
-    Id lsn;
-    std::vector<Delta> deltas;
-};
-
-struct FullImageDescriptor {
-    Id pid;
-    Id lsn;
-    Slice image;
-};
-
-struct CommitDescriptor {
-    Id lsn;
-};
-
-using PayloadDescriptor = std::variant<DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
-
-[[nodiscard]] auto decode_payload(WalPayloadOut in) -> std::optional<PayloadDescriptor>;
-[[nodiscard]] auto encode_deltas_payload(Id page_id, Slice image, const std::vector<PageDelta> &deltas, Span out) -> Size;
-[[nodiscard]] auto encode_full_image_payload(Id page_id, Slice image, Span out) -> Size;
-[[nodiscard]] auto encode_commit_payload(Span out) -> Size;
-
-enum XactPayloadType : Byte {
-    COMMIT     = '\xC0',
-    DELTA      = '\xD0',
-    FULL_IMAGE = '\xF0',
-};
-
-static constexpr Size MINIMUM_PAYLOAD_SIZE {sizeof(XactPayloadType)};
-
 class Pager;
 class WriteAheadLog;
 

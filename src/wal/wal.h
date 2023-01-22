@@ -13,42 +13,32 @@
 namespace Calico {
 
 struct FileHeader;
-struct Id;
 class WalReader;
 
 class WalPayloadIn {
 public:
-    WalPayloadIn(Id lsn, Scratch buffer)
+    friend class LogWriter;
+
+    WalPayloadIn(Lsn lsn, Span buffer)
         : m_buffer {buffer}
     {
-        put_u64(*buffer, lsn.value);
+        put_u64(buffer, lsn.value);
     }
 
     [[nodiscard]]
-    auto lsn() const -> Id
+    auto lsn() const -> Lsn
     {
-        return Id {get_u64(*m_buffer)};
+        return Lsn {get_u64(m_buffer)};
     }
 
     [[nodiscard]]
-    auto data() -> Span
+    auto data() const -> Slice
     {
-        return m_buffer->range(sizeof(Id));
-    }
-
-    [[nodiscard]]
-    auto raw() -> Slice
-    {
-        return *m_buffer;
-    }
-
-    auto shrink_to_fit(Size size) -> void
-    {
-        m_buffer->truncate(size + sizeof(Id));
+        return m_buffer.range(sizeof(Id));
     }
 
 private:
-    Scratch m_buffer;
+    Slice m_buffer;
 };
 
 class WalPayloadOut {
@@ -60,15 +50,15 @@ public:
     {}
 
     [[nodiscard]]
-    auto lsn() const -> Id
+    auto lsn() const -> Lsn
     {
-        return Id {get_u64(m_payload)};
+        return {get_u64(m_payload)};
     }
 
     [[nodiscard]]
     auto data() -> Slice
     {
-        return m_payload.range(sizeof(Id));
+        return m_payload.range(sizeof(Lsn));
     }
 
 private:
@@ -85,19 +75,19 @@ public:
     [[nodiscard]] virtual auto flushed_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto current_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto bytes_written() const -> Size = 0;
-    [[nodiscard]] virtual auto roll_forward(Id begin_lsn, const Callback &callback) -> Status = 0;
-    [[nodiscard]] virtual auto roll_backward(Id end_lsn, const Callback &callback) -> Status = 0;
+    [[nodiscard]] virtual auto roll_forward(Lsn begin_lsn, const Callback &callback) -> Status = 0;
+    [[nodiscard]] virtual auto roll_backward(Lsn end_lsn, const Callback &callback) -> Status = 0;
     [[nodiscard]] virtual auto start_workers() -> Status = 0;
 
     // Since we're using callbacks to traverse the log, we need a second phase to
     // remove obsolete segments. This gives us a chance to flush the pages that
     // were made dirty while traversing.
-    [[nodiscard]] virtual auto truncate(Id lsn) -> Status = 0;
+    [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status = 0;
 
     virtual auto log(WalPayloadIn payload) -> void = 0;
     virtual auto flush() -> void = 0;
     virtual auto advance() -> void = 0;
-    virtual auto cleanup(Id lsn) -> void = 0;
+    virtual auto cleanup(Lsn lsn) -> void = 0;
 };
 
 } // namespace Calico

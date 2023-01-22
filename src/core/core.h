@@ -68,7 +68,6 @@ private:
     std::unique_ptr<System> m_system;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
-    std::unordered_set<Id, Id::Hash> m_images;
     Storage *m_store {};
     Size m_bytes_written {};
     bool m_owns_store {};
