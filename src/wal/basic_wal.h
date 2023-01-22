@@ -33,13 +33,13 @@ public:
 
     ~BasicWriteAheadLog() override;
     [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>;
-    [[nodiscard]] auto flushed_lsn() const -> Id override;
-    [[nodiscard]] auto current_lsn() const -> Id override;
-    [[nodiscard]] auto roll_forward(Id begin_lsn, const Callback &callback) -> Status override;
-    [[nodiscard]] auto roll_backward(Id end_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto flushed_lsn() const -> Lsn override;
+    [[nodiscard]] auto current_lsn() const -> Lsn override;
+    [[nodiscard]] auto roll_forward(Lsn begin_lsn, const Callback &callback) -> Status override;
+    [[nodiscard]] auto roll_backward(Lsn end_lsn, const Callback &callback) -> Status override;
     [[nodiscard]] auto start_workers() -> Status override;
-    [[nodiscard]] auto truncate(Id lsn) -> Status override;
-    auto cleanup(Id recovery_lsn) -> void override;
+    [[nodiscard]] auto truncate(Lsn lsn) -> Status override;
+    auto cleanup(Lsn recovery_lsn) -> void override;
     auto advance() -> void override;
     auto log(WalPayloadIn payload) -> void override;
     auto flush() -> void override;
@@ -55,9 +55,9 @@ private:
     [[nodiscard]] auto open_reader() -> tl::expected<WalReader, Status>;
 
     LogPtr m_log;
-    std::atomic<Id> m_flushed_lsn {};
-    std::atomic<Id> m_recovery_lsn {};
-    Id m_last_lsn;
+    std::atomic<Lsn> m_flushed_lsn {};
+    std::atomic<Lsn> m_recovery_lsn {};
+    Lsn m_last_lsn;
     WalSet m_set;
     std::string m_prefix;
 

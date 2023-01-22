@@ -385,7 +385,8 @@ public:
         ASSERT_OK(writer.flush());
 
         for (const auto &payload: payloads) {
-            ASSERT_EQ(read_string(reader), payload);
+            const auto str = read_string(reader);
+            ASSERT_EQ(str, payload);
         }
     }
 

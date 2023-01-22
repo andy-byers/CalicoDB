@@ -227,7 +227,7 @@ BENCHMARK(BM_SequentialErase);
 auto BM_RandomErase(benchmark::State& state)
 {
     auto db = setup();
-    run_batches(db, state, [](auto) {return 0;}, [](auto &db, auto key) {do_erase(db, key);}, ensure_records);
+    run_batches(db, state, [](auto) {return State::random_int();}, [](auto &db, auto key) {do_erase(db, key);}, ensure_records);
 }
 BENCHMARK(BM_RandomErase);
 

@@ -177,7 +177,7 @@ static auto decode_deltas_payload(WalPayloadOut in) -> DeltaDescriptor
     info.pid.value = get_u64(data);
     data.advance(sizeof(info.pid));
 
-    // Deltas count (2 B)
+    // Delta count (2 B)
     info.deltas.resize(get_u16(data));
     data.advance(sizeof(std::uint16_t));
 

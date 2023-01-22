@@ -162,7 +162,6 @@ private:
 };
 
 [[nodiscard]] auto can_merge_siblings(const Node &, const Node &, const Cell &) -> bool;
-auto transfer_cell(Node &, Node &, Size) -> void;
 auto merge_left(Node &, Node &, Node &, Size) -> void;
 auto merge_right(Node &, Node &, Node &, Size) -> void;
 auto merge_root(Node &, Node &) -> void;

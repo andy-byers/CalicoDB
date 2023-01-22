@@ -41,28 +41,28 @@ public:
     auto add_segment(SegmentId id) -> void
     {
         std::lock_guard lock {m_mutex};
-        m_segments.emplace(id, Id::null());
+        m_segments.emplace(id, Lsn::null());
     }
 
-    auto add_segment(SegmentId id, Id first_lsn) -> void
+    auto add_segment(SegmentId id, Lsn first_lsn) -> void
     {
         std::lock_guard lock {m_mutex};
         m_segments.emplace(id, first_lsn);
     }
 
     [[nodiscard]]
-    auto first_lsn(SegmentId id) const -> Id
+    auto first_lsn(SegmentId id) const -> Lsn
     {
         std::lock_guard lock {m_mutex};
 
         const auto itr = m_segments.find(id);
         if (itr == end(m_segments))
-            return Id::null();
+            return Lsn::null();
 
         return itr->second;
     }
 
-    auto set_first_lsn(SegmentId id, Id lsn) -> void
+    auto set_first_lsn(SegmentId id, Lsn lsn) -> void
     {
         std::lock_guard lock {m_mutex};
 
@@ -119,7 +119,7 @@ public:
     }
 
     [[nodiscard]]
-    auto segments() const -> const std::map<SegmentId, Id> &
+    auto segments() const -> const std::map<SegmentId, Lsn> &
     {
         // WARNING: We must ensure that background threads that modify the collection are paused before using this method.
         return m_segments;
@@ -127,7 +127,7 @@ public:
 
 private:
     mutable std::mutex m_mutex;
-    std::map<SegmentId, Id> m_segments;
+    std::map<SegmentId, Lsn> m_segments;
 };
 
 class LogScratchManager final {
@@ -184,7 +184,7 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId 
     if (bytes.size() != WalPayloadHeader::SIZE)
         return tl::make_unexpected(corruption("incomplete record"));
 
-    auto lsn = read_wal_payload_header(bytes).lsn;
+    const Lsn lsn {get_u64(bytes)};
     set.set_first_lsn(id, lsn);
     return lsn;
 }

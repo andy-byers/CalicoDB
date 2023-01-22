@@ -52,7 +52,7 @@ public:
     [[nodiscard]]
     auto lsn() const -> Lsn
     {
-        return Lsn {get_u64(m_payload)};
+        return {get_u64(m_payload)};
     }
 
     [[nodiscard]]
@@ -75,19 +75,19 @@ public:
     [[nodiscard]] virtual auto flushed_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto current_lsn() const -> Id = 0;
     [[nodiscard]] virtual auto bytes_written() const -> Size = 0;
-    [[nodiscard]] virtual auto roll_forward(Id begin_lsn, const Callback &callback) -> Status = 0;
-    [[nodiscard]] virtual auto roll_backward(Id end_lsn, const Callback &callback) -> Status = 0;
+    [[nodiscard]] virtual auto roll_forward(Lsn begin_lsn, const Callback &callback) -> Status = 0;
+    [[nodiscard]] virtual auto roll_backward(Lsn end_lsn, const Callback &callback) -> Status = 0;
     [[nodiscard]] virtual auto start_workers() -> Status = 0;
 
     // Since we're using callbacks to traverse the log, we need a second phase to
     // remove obsolete segments. This gives us a chance to flush the pages that
     // were made dirty while traversing.
-    [[nodiscard]] virtual auto truncate(Id lsn) -> Status = 0;
+    [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status = 0;
 
     virtual auto log(WalPayloadIn payload) -> void = 0;
     virtual auto flush() -> void = 0;
     virtual auto advance() -> void = 0;
-    virtual auto cleanup(Id lsn) -> void = 0;
+    virtual auto cleanup(Lsn lsn) -> void = 0;
 };
 
 } // namespace Calico

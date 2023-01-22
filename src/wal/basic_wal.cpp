@@ -63,32 +63,35 @@ BasicWriteAheadLog::~BasicWriteAheadLog()
 
 auto BasicWriteAheadLog::start_workers() -> Status
 {
-    m_writer = std::unique_ptr<WalWriter> {new(std::nothrow) WalWriter {{
-        m_prefix,
-        m_writer_tail,
-        m_store,
-        m_system,
-        &m_set,
-        &m_flushed_lsn,
-        m_segment_cutoff,
-    }}};
+    m_writer = std::unique_ptr<WalWriter> {
+        new(std::nothrow) WalWriter {{
+            m_prefix,
+            m_writer_tail,
+            m_store,
+            m_system,
+            &m_set,
+            &m_flushed_lsn,
+            m_segment_cutoff,
+        }}};
     if (m_writer == nullptr)
         return system_error("cannot allocate writer object: out of memory");
 
-    m_cleanup = std::unique_ptr<WalCleanup> {new(std::nothrow) WalCleanup {{
-        m_prefix,
-        &m_recovery_lsn,
-        m_store,
-        m_system,
-        &m_set,
-    }}};
+    m_cleanup = std::unique_ptr<WalCleanup> {
+        new(std::nothrow) WalCleanup {{
+            m_prefix,
+            &m_recovery_lsn,
+            m_store,
+            m_system,
+            &m_set,
+        }}};
     if (m_cleanup == nullptr)
         return system_error("cannot allocate cleanup object: out of memory");
 
-    m_tasks = std::unique_ptr<Worker<Event>> {new(std::nothrow) Worker<Event> {[this](auto event) {
-        run_task(std::move(event));
-    },
-                                                                                m_buffer_count}};
+    m_tasks = std::unique_ptr<Worker<Event>> {
+        new(std::nothrow) Worker<Event> {[this](auto event) {
+            run_task(std::move(event));
+        },
+        m_buffer_count}};
     if (m_tasks == nullptr)
         return system_error("cannot allocate task manager object: out of memory");
 
@@ -109,14 +112,14 @@ auto BasicWriteAheadLog::run_task(Event event) -> void
     m_cleanup->cleanup();
 }
 
-auto BasicWriteAheadLog::flushed_lsn() const -> Id
+auto BasicWriteAheadLog::flushed_lsn() const -> Lsn
 {
     return m_flushed_lsn.load();
 }
 
-auto BasicWriteAheadLog::current_lsn() const -> Id
+auto BasicWriteAheadLog::current_lsn() const -> Lsn
 {
-    return Id {m_last_lsn.value + 1};
+    return Lsn {m_last_lsn.value + 1};
 }
 
 auto BasicWriteAheadLog::log(WalPayloadIn payload) -> void
@@ -152,7 +155,7 @@ auto BasicWriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
     return reader;
 }
 
-auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) -> Status
+auto BasicWriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Status
 {
     if (m_set.first().is_null())
         return ok();
@@ -172,7 +175,7 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
     // Find the segment containing the first update that hasn't been applied yet.
     auto s = ok();
     while (s.is_ok()) {
-        Id first_lsn;
+        Lsn first_lsn;
         s = reader->read_first_lsn(first_lsn);
 
         // This indicates an empty file. Try to seek back to the last segment.
@@ -231,7 +234,7 @@ auto BasicWriteAheadLog::roll_forward(Id begin_lsn, const Callback &callback) ->
     return s;
 }
 
-auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> Status
+auto BasicWriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Status
 {
     if (m_set.first().is_null())
         return ok();
@@ -249,7 +252,7 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
 
     auto s = ok();
     for (Size i {}; s.is_ok(); i++) {
-        Id first_lsn;
+        Lsn first_lsn;
         s = reader->read_first_lsn(first_lsn);
 
         if (s.is_ok()) {
@@ -277,12 +280,12 @@ auto BasicWriteAheadLog::roll_backward(Id end_lsn, const Callback &callback) -> 
     return s.is_not_found() ? ok() : s;
 }
 
-auto BasicWriteAheadLog::cleanup(Id recovery_lsn) -> void
+auto BasicWriteAheadLog::cleanup(Lsn recovery_lsn) -> void
 {
     m_recovery_lsn.store(recovery_lsn);
 }
 
-auto BasicWriteAheadLog::truncate(Id lsn) -> Status
+auto BasicWriteAheadLog::truncate(Lsn lsn) -> Status
 {
     auto current = m_set.last();
 

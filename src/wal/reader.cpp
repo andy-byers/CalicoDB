@@ -56,7 +56,7 @@ auto LogReader::read_first_lsn(Lsn &out) -> Status
 
 auto LogReader::read_logical_record(Span &out, Span tail) -> Status
 {
-    WalRecordHeader header {};
+    WalRecordHeader header;
     auto payload = out;
 
     for (; ; ) {
@@ -77,9 +77,8 @@ auto LogReader::read_logical_record(Span &out, Span tail) -> Status
                 rest.advance(temp.size);
 
                 if (header.type == WalRecordHeader::Type::FULL) {
-                    out.truncate(out.size() - payload.size());
-//                    if (header.crc != crc32c::Value(out.data(), out.size()))
-//                        return corruption("crc is incorrect for record {}", get_u64(out));
+                    if (header.crc != crc32c::Value(out.data(), out.truncate(header.size).size()))
+                        return corruption("crc is incorrect for record {}", get_u64(out));
                     break;
                 }
                 if (!rest.is_empty())
