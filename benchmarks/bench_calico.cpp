@@ -21,9 +21,9 @@ constexpr Options DB_OPTIONS {
 
 auto do_read(const Database &db, Slice key)
 {
-    if (auto c = db.find(key); c.is_valid()) {
-        benchmark::DoNotOptimize(c.key());
-        benchmark::DoNotOptimize(c.value());
+    std::string value;
+    if (auto s = db.get(key, value); s.is_ok()) {
+        benchmark::DoNotOptimize(value);
     }
 }
 
@@ -53,7 +53,7 @@ auto default_init(Database &, Size)
 template<class GetKeyInteger, class PerformAction>
 auto run_batches(Database &db, benchmark::State &state, const GetKeyInteger &get_key, const PerformAction &action, decltype(default_init) init = default_init)
 {
-    std::optional<Transaction> xact {db.transaction()};
+    std::optional<Transaction> xact {db.start()};
     Size i {};
 
     for (auto _ : state) {
@@ -65,7 +65,7 @@ auto run_batches(Database &db, benchmark::State &state, const GetKeyInteger &get
 
         if (is_interval) {
             benchmark::DoNotOptimize(xact->commit());
-            xact.emplace(db.transaction());
+            xact.emplace(db.start());
         }
         action(db, key);
     }
@@ -95,7 +95,7 @@ BENCHMARK(BM_Overwrite);
 
 auto insert_records(Database &db, Size n)
 {
-    auto xact = db.transaction();
+    auto xact = db.start();
     for (Size i {}; i < n; ++i) {
         const auto key = make_key<DB_KEY_SIZE>(State::random_int());
         do_write(db, key);
@@ -107,17 +107,18 @@ auto BM_SequentialReads(benchmark::State &state)
 {
     auto db = setup();
     insert_records(db, DB_INITIAL_SIZE);
-    auto c = db.first();
+    auto c = db.cursor();
 
     for (auto _ : state) {
         state.PauseTiming();
-        if (!c.is_valid())
-            c = db.first();
+        if (!c.is_valid()) {
+            c.seek_first();
+        }
         state.ResumeTiming();
 
         benchmark::DoNotOptimize(c.key());
         benchmark::DoNotOptimize(c.value());
-        c++;
+        c.next();
     }
 }
 BENCHMARK(BM_SequentialReads);
@@ -143,7 +144,7 @@ auto run_reads_and_writes(benchmark::State& state, int batch_size, int read_frac
     };
     auto db = setup();
     insert_records(db, DB_INITIAL_SIZE);
-    std::optional<Transaction> xact {db.transaction()};
+    std::optional<Transaction> xact {db.start()};
     int i {};
 
     for (auto _ : state) {
@@ -160,7 +161,7 @@ auto run_reads_and_writes(benchmark::State& state, int batch_size, int read_frac
         }
         if (is_interval) {
             benchmark::DoNotOptimize(xact->commit());
-            xact.emplace(db.transaction());
+            xact.emplace(db.start());
         }
     }
     benchmark::DoNotOptimize(xact->commit());
@@ -215,7 +216,11 @@ auto ensure_records(Database &db, Size)
 auto BM_SequentialErase(benchmark::State& state)
 {
     auto db = setup();
-    run_batches(db, state, [](auto) {return 0;}, [](auto &db, auto) {do_erase(db, db.first().key());}, ensure_records);
+    run_batches(db, state, [](auto) {return 0;}, [](auto &db, auto) {
+        auto cursor = db.cursor();
+        cursor.seek_first();
+        do_erase(db, cursor.key());
+    }, ensure_records);
 }
 BENCHMARK(BM_SequentialErase);
 

@@ -61,36 +61,42 @@ namespace tools {
     template<class T>
     auto get(T &t, const std::string &key, std::string &value) -> Status
     {
-        return t.find_exact(key);
+        return t.get(key, value);
     }
 
     template<class T>
     auto find(T &t, const std::string &key) -> Cursor
     {
-        return t.find(key);
+        auto c = t.cursor();
+        c.seek(key);
+        return c;
     }
 
     template<class T>
     auto contains(T &t, const std::string &key) -> bool
     {
-        return get(t, key).is_valid();
+        std::string value;
+        return get(t, key, value).is_ok();
     }
 
     template<class T>
     auto contains(T &t, const std::string &key, const std::string &value) -> bool
     {
-        if (auto c = get(t, key); c.is_valid())
-            return c.value() == value;
+        std::string val;
+        if (auto s = get(t, key, val); s.is_ok()) {
+            return val == value;
+        }
         return false;
     }
 
     template<class T>
     auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
     {
+        std::string val;
         const auto MSG = fmt::format("expected record ({}, {})\n", key, value);
-        if (auto c = get(t, key); c.is_valid()) {
-            if (c.value() != value) {
-                fmt::print(stderr, "{}: value \"{}\" does not match\n", MSG, c.value());
+        if (auto s = get(t, key, val); s.is_ok()) {
+            if (val != value) {
+                fmt::print(stderr, "{}: value \"{}\" does not match\n", MSG, val);
                 std::exit(EXIT_FAILURE);
             }
         } else {

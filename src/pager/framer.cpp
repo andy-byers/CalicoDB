@@ -98,6 +98,7 @@ auto Framer::unref(Size index, Page page) -> void
 
 auto Framer::upgrade(Size index, Page &page) -> void
 {
+    CALICO_EXPECT_FALSE(page.is_writable());
     CALICO_EXPECT_LT(index, m_frames.size());
     m_frames[index].unref(page);
     page = m_frames[index].ref(true);
@@ -191,12 +192,12 @@ auto Framer::write_page_to_file(Id pid, const Slice &page) const -> Status
     return m_file->write(page, pid.as_index() * page.size());
 }
 
-auto Framer::load_state(const FileHeader__ &header) -> void
+auto Framer::load_state(const FileHeader &header) -> void
 {
     m_page_count = header.page_count;
 }
 
-auto Framer::save_state(FileHeader__ &header) const -> void
+auto Framer::save_state(FileHeader &header) const -> void
 {
     header.page_count = m_page_count;
 }

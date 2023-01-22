@@ -721,46 +721,36 @@ TEST_P(BPlusTreeTests, ReadsOverflowChains)
     }
 }
 
-TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnLeftmostPosition)
+TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnRightmostPosition)
 {
-    std::string value {"value"};
-    value.resize(param.page_size / 20);
-
-    for (Size i {}; !is_root_external(); ++i) {
-        ASSERT_TRUE(*tree->insert(make_key<3>(i), value));
+    for (Size i {}; is_root_external(); ++i) {
+        ASSERT_TRUE(*tree->insert(make_key<3>(i), make_value('v')));
         validate();
     }
 }
 
-TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnRightmostPosition)
+TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnLeftmostPosition)
 {
-    std::string value {"value"};
-    value.resize(param.page_size / 20);
-
-    for (Size i {}; !is_root_external(); ++i) {
+    for (Size i {}; is_root_external(); ++i) {
         ASSERT_LE(i, 100);
-        ASSERT_TRUE(*tree->insert(make_key<3>(100 - i), value));
+        ASSERT_TRUE(*tree->insert(make_key<3>(100 - i), make_value('v')));
     }
     validate();
 }
 
 TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnMiddlePosition)
 {
-    std::string value {"value"};
-    value.resize(param.page_size / 20);
-
-    for (Size i {}; !is_root_external(); ++i) {
+    for (Size i {}; is_root_external(); ++i) {
         ASSERT_LE(i, 100);
-        ASSERT_TRUE(*tree->insert(make_key<3>(i & 1 ? 100 - i : i), value));
+        ASSERT_TRUE(*tree->insert(make_key<3>(i & 1 ? 100 - i : i), make_value('v')));
     }
     validate();
 }
 
 TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnLeftmostPosition)
 {
-    const auto value = make_value('v');
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(*tree->insert(make_key<3>(999 - i), value));
+        ASSERT_TRUE(*tree->insert(make_key<3>(999 - i), make_value('v')));
         if (i % 100 == 99) {
             validate();
         }
@@ -769,9 +759,8 @@ TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnLeftmostPosition)
 
 TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnRightmostPosition)
 {
-    const auto value = make_value('v');
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(*tree->insert(make_key<3>(i), value));
+        ASSERT_TRUE(*tree->insert(make_key<3>(i), make_value('v')));
         if (i % 100 == 99) {
             validate();
         }
@@ -780,10 +769,86 @@ TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnRightmostPosition)
 
 TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnMiddlePosition)
 {
-    const auto value = make_value('v');
     for (Size i {}, j {999}; i < j; ++i, --j) {
-        ASSERT_TRUE(*tree->insert(make_key<3>(i), value));
-        ASSERT_TRUE(*tree->insert(make_key<3>(j), value));
+        ASSERT_TRUE(*tree->insert(make_key<3>(i), make_value('v')));
+        ASSERT_TRUE(*tree->insert(make_key<3>(j), make_value('v')));
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnRightmostPosition)
+{
+    long i {};
+    for (; is_root_external(); ++i) {
+        (void)tree->insert(make_key<3>(i), make_value('v'));
+    }
+    while (i--) {
+        ASSERT_TRUE(tree->erase(make_key<3>(i)).has_value());
+        validate();
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnLeftmostPosition)
+{
+    Size i {};
+    for (; is_root_external(); ++i) {
+        (void)tree->insert(make_key<3>(i), make_value('v'));
+    }
+    for (Size j {}; j < i; ++j) {
+        ASSERT_TRUE(tree->erase(make_key<3>(j)).has_value());
+        validate();
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnMiddlePosition)
+{
+    Size i {};
+    for (; is_root_external(); ++i) {
+        (void)tree->insert(make_key<3>(i), make_value('v'));
+    }
+    for (Size j {1}; j < i/2 - 1; ++j) {
+        ASSERT_TRUE(tree->erase(make_key<3>(i/2 - j + 1)).has_value());
+        ASSERT_TRUE(tree->erase(make_key<3>(i/2 + j)).has_value());
+        validate();
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnLeftmostPosition)
+{
+    for (Size i {}; i < 1'000; ++i) {
+        (void)*tree->insert(make_key<3>(i), make_value('v'));
+    }
+    for (Size i {}; i < 1'000; ++i) {
+        ASSERT_TRUE(tree->erase(make_key<3>(999 - i)).has_value());
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnRightmostPosition)
+{
+    for (Size i {}; i < 1'000; ++i) {
+        (void)*tree->insert(make_key<3>(i), make_value('v'));
+    }
+    for (Size i {}; i < 1'000; ++i) {
+        ASSERT_TRUE(tree->erase(make_key<3>(i)).has_value());
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnMiddlePosition)
+{
+    for (Size i {}; i < 1'000; ++i) {
+        (void)*tree->insert(make_key<3>(i), make_value('v'));
+    }
+    for (Size i {}, j {999}; i < j; ++i, --j) {
+        ASSERT_TRUE(tree->erase(make_key<3>(i)).has_value());
+        ASSERT_TRUE(tree->erase(make_key<3>(j)).has_value());
         if (i % 100 == 99) {
             validate();
         }

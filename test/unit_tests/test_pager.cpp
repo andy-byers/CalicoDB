@@ -582,7 +582,7 @@ TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
-    const auto offset = page_offset(page);
+    const auto offset = page_offset(page) + sizeof(Lsn);
     CALICO_EXPECT_LE(offset + message.size(), page.size());
     mem_copy(page.span(offset, message.size()), message);
 }
@@ -590,7 +590,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 [[nodiscard]]
 auto read_from_page(const Page &page, Size size) -> std::string
 {
-    const auto offset = page_offset(page);
+    const auto offset = page_offset(page) + sizeof(Lsn);
     CALICO_EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
     mem_copy(message, page.view(offset, message.size()));
@@ -739,8 +739,9 @@ static auto run_root_persistence_test(T &test, Size n)
     const auto id = test.allocate_write_release(test.test_message);
 
     // Cause the root page to be evicted and written back, along with some other pages.
-    while (test.pager->page_count() < n)
-        [[maybe_unused]] auto unused = test.allocate_write_release("...");
+    while (test.pager->page_count() < n) {
+        (void)test.allocate_write_release("...");
+    }
 
     // Read the root page back from the file.
     ASSERT_EQ(test.acquire_read_release(id, test.test_message.size()), test.test_message);

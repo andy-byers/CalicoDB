@@ -78,7 +78,6 @@ public:
         tree.m_pager->release(std::move(node).take());
     }
 
-
     static auto destroy_node(BPlusTree &tree, Node node) -> void
     {
         tree.m_free_list.push(std::move(node).take());
@@ -417,8 +416,8 @@ public:
         CALICO_EXPECT_EQ(src.header.is_external, dst.header.is_external);
         auto cell = read_cell(src, 0);
         write_cell(dst, dst.header.cell_count, cell);
+        CALICO_EXPECT_FALSE(is_overflowing(dst));
         erase_cell(src, 0, cell.size);
-        // TODO: Overflow???
     }
 
     static auto accumulate_occupied_space(const Node &left, const Node &right)
@@ -601,21 +600,11 @@ public:
             release_node(tree, std::move(right));
         }
 
-        if (usable_space(node) < max_usable_space(node) / 2) {
+        if (!is_underflowing(node)) {
             release_node(tree, std::move(node));
             return true;
         }
 
-        auto maybe_fix_parent = [&tree, &node, &parent]() -> tl::expected<bool, Status> {
-            if (is_overflowing(parent)) {
-                const auto id = parent.page.id();
-                release_node(tree, std::move(node));
-                CALICO_TRY_R(resolve_overflow(tree, std::move(parent)));
-                CALICO_PUT_R(parent, acquire_node(tree, id, true));
-                return false;
-            }
-            return true;
-        };
         struct SiblingInfo {
             std::optional<Node> node;
             Size cell_count {};
@@ -637,6 +626,13 @@ public:
         const auto left_has_enough_cells = siblings[0].cell_count > static_cast<Size>(node.header.cell_count + 1);
         const auto right_has_enough_cells = siblings[1].cell_count > static_cast<Size>(node.header.cell_count + 1);
         if (!left_has_enough_cells && !right_has_enough_cells) {
+            if (siblings[0].node.has_value()) {
+                release_node(tree, std::move(*siblings[0].node));
+            }
+            if (siblings[1].node.has_value()) {
+                release_node(tree, std::move(*siblings[1].node));
+            }
+            release_node(tree, std::move(node));
             return true;
         }
 
@@ -645,22 +641,31 @@ public:
         if (siblings[0].cell_count > siblings[1].cell_count) {
             auto [left_sibling, cell_count] = std::move(siblings[0]);
             CALICO_EXPECT_NE(left_sibling, std::nullopt);
-            release_node(tree, std::move(*siblings[1].node));
+            if (siblings[1].node.has_value()) {
+                release_node(tree, std::move(*siblings[1].node));
+            }
             CALICO_TRY_R(rotate_right(tree, parent, *left_sibling, node, index - 1));
             CALICO_EXPECT_FALSE(is_overflowing(node));
             release_node(tree, std::move(*left_sibling));
-            release_node(tree, std::move(node));
-            return maybe_fix_parent();
         } else {
             auto [right_sibling, cell_count] = std::move(siblings[1]);
             CALICO_EXPECT_NE(right_sibling, std::nullopt);
-            release_node(tree, std::move(*siblings[0].node));
+            if (siblings[0].node.has_value()) {
+                release_node(tree, std::move(*siblings[0].node));
+            }
             CALICO_TRY_R(rotate_left(tree, parent, node, *right_sibling, index));
             CALICO_EXPECT_FALSE(is_overflowing(node));
             release_node(tree, std::move(*right_sibling));
-            release_node(tree, std::move(node));
-            return maybe_fix_parent();
         }
+        release_node(tree, std::move(node));
+
+        if (is_overflowing(parent)) {
+            const auto id = parent.page.id();
+            CALICO_TRY_R(resolve_overflow(tree, std::move(parent)));
+            CALICO_PUT_R(parent, acquire_node(tree, id, true));
+            return false;
+        }
+        return true;
     }
 
     [[nodiscard]]
@@ -680,7 +685,8 @@ public:
                 child.overflow = read_cell(child, 0);
                 detach_cell(*child.overflow, scratch_at(tree, 0) + EXTERNAL_SHIFT);
                 release_node(tree, std::move(root));
-                CALICO_TRY_R(split_non_root(tree, std::move(child)));
+                CALICO_NEW_R(parent, split_non_root(tree, std::move(child)));
+                release_node(tree, std::move(parent));
                 CALICO_PUT_R(root, acquire_node(tree, Id::root(), true));
             } else {
                 merge_root(root, child);

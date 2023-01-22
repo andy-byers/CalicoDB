@@ -36,7 +36,7 @@ public:
 private:
     friend class DatabaseImpl;
 
-    const std::unique_ptr<DatabaseImpl> m_impl;
+    std::unique_ptr<DatabaseImpl> m_impl;
 };
 
 } // namespace Calico

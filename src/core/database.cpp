@@ -4,7 +4,6 @@
 #include "calico/transaction.h"
 #include "database_impl.h"
 #include "pager/pager.h"
-#include "storage/posix_storage.h"
 #include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
 #include "utils/system.h"
@@ -37,9 +36,9 @@ Database::~Database()
     (void)close();
 }
 
-//Database::Database(Database &&) noexcept = default;
-//
-//auto Database::operator=(Database &&) noexcept -> Database & = default;
+Database::Database(Database &&) noexcept = default;
+
+auto Database::operator=(Database &&) noexcept -> Database & = default;
 
 auto Database::cursor() const -> Cursor
 {
