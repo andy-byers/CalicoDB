@@ -116,19 +116,19 @@ public:
     [[nodiscard]] auto read_key(Size) const -> Slice;
     [[nodiscard]] auto read_cell(Size) const -> Cell;
     [[nodiscard]] auto detach_cell(Size, Span) const -> Cell;
-    [[nodiscard]] auto find_ge(Slice) const -> FindGeResult;
+    [[nodiscard]] auto find_ge(const Slice &key) const -> FindGeResult;
+    auto remove(Size index, Size size) -> void;
+    auto defragment() -> void;
+    [[nodiscard]] auto overflow_cell() const -> const Cell &;
+
+    auto set_overflow_cell(Cell cell, Size index) -> void;
+    auto take_overflow_cell() -> Cell;
+    [[nodiscard]] auto is_overflowing() const -> bool;
+
     auto extract_cell(Size, Span) -> Cell;
     auto insert(Cell) -> void;
     auto insert(Size index, Cell cell) -> void;
-    auto remove(Slice key) -> bool;
-    auto remove(Size index, Size size) -> void;
-    auto defragment() -> void;
-
-    [[nodiscard]] auto overflow_cell() const -> const Cell &;
-    auto set_overflow_cell(Cell cell, Size index) -> void;
-    auto take_overflow_cell() -> Cell;
-
-    [[nodiscard]] auto is_overflowing() const -> bool;
+    auto remove(const Slice &key) -> bool;
     [[nodiscard]] auto is_underflowing() const -> bool;
     [[nodiscard]] auto is_external() const -> bool;
     [[nodiscard]] auto child_id(Size) const -> Id;
@@ -156,8 +156,9 @@ public:
     auto TEST_validate() const -> void;
 
 private:
+    [[nodiscard]] auto allocate(Size index, Size size) -> Size;
+    [[nodiscard]] auto make_room(Size, std::optional<Size>) -> Size;
     auto defragment(std::optional<Size>) -> void;
-    auto try_allocate(Size, std::optional<Size>) -> Size;
 
     Page m_page;
     std::optional<Cell> m_overflow_cell {};

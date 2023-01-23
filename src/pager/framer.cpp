@@ -64,7 +64,7 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     const auto cache_size = page_size * frame_count;
     AlignedBuffer buffer {cache_size, page_size};
     if (buffer.get() == nullptr)
-        return tl::make_unexpected(system_error("cannot try_allocate frames: out of memory"));
+        return tl::make_unexpected(system_error("cannot make_room frames: out of memory"));
 
     return Framer {std::move(file), std::move(buffer), page_size, frame_count};
 }
@@ -181,10 +181,10 @@ auto Framer::read_page_from_file(Id id, Span out) const -> tl::expected<bool, St
         "could not read page {}: incomplete read (read {}/{} B)", id.value, out.size(), m_page_size));
 }
 
-auto Framer::write_page_to_file(Id id, Slice in) const -> Status
+auto Framer::write_page_to_file(Id pid, const Slice &page) const -> Status
 {
-    CALICO_EXPECT_EQ(m_page_size, in.size());
-    return m_file->write(in, id.as_index() * in.size());
+    CALICO_EXPECT_EQ(m_page_size, page.size());
+    return m_file->write(page, pid.as_index() * page.size());
 }
 
 auto Framer::load_state(const FileHeader &header) -> void

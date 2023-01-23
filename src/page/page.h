@@ -44,7 +44,7 @@ public:
     auto read(Span, Size) const -> void;
     auto span(Size) -> Span;
     auto span(Size, Size) -> Span;
-    auto write(Slice, Size) -> void;
+    auto write(const Slice &, Size) -> void;
     auto apply_update(const DeltaDescriptor &) -> void;
     auto apply_update(const FullImageDescriptor&) -> void;
 

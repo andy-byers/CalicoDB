@@ -210,7 +210,7 @@ public:
         param.is_external = false;
         Cell cell {param};
         cell.detach(*scratch.get());
-        cell.set_left_child_id(Id {123ULL});
+        cell.set_child_id(Id {123ULL});
         return cell;
     }
 
@@ -635,7 +635,7 @@ auto get_maximally_sized_internal_cell(NodeTests &test)
     // get_max_local(page_size), an overflow ID, and maybe a left child ID.
     const auto max_key_length = get_max_local(NodeTests::page_size);
     auto cell = test.cell_backing.get_cell(test.random.get<std::string>('a', 'z', max_key_length), "", false, Id::null());
-    cell.set_left_child_id(test.arbitrary_pid);
+    cell.set_child_id(test.arbitrary_pid);
     return cell;
 }
 
@@ -775,7 +775,7 @@ TEST_F(NodeTests, SplitNonRootExternal)
         lhs.insert(cell_backing.get_cell(make_key(100 + lhs.cell_count()), normal_value, true));
     auto separator = split_non_root(lhs, rhs, *scratch.get());
 
-    ASSERT_EQ(separator.left_child_id(), lhs.id());
+    ASSERT_EQ(separator.child_id(), lhs.id());
 }
 
 } // <anonymous>

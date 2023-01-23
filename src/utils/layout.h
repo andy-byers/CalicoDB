@@ -84,31 +84,25 @@ inline constexpr auto get_max_local(Size page_size) -> Size
            MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
 }
 
+// TODO: Get rid of this one.
 inline constexpr auto get_local_value_size(Size key_size, Size value_size, Size page_size) -> Size
 {
     CALICO_EXPECT_GT(key_size, 0);
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
 
-    /* Cases:
-         *              Byte 0     min_local(...)  get_max_local(...)
-         *                   |                  |               |
-         *                   |                  |               |
-         *                   v                  v               v
-         *     (1)  ::H::::: ::K::::::: ::V::::::::::::::::::::::
-         *     (2)  ::H::::: ::K::::::::::::::::::::::: ::V::::::
-         *     (3)  ::H::::: ::K::::::: ::V::::::**************************
-         *     (4)  ::H::::: ::K::::::::::::::::::::::::::::::::: **V******
-         *     (5)  ::H::::: ::K::::::::::::::::::::::: **V****************
-         *
-         * Everything shown as a '*' is stored on an overflow page.
-         *
-         * In (1) and (2), the entire value is stored in the cell. In (3), (4), and (5), part of V is
-         * written to an overflow page. In (3), V is truncated such that the local payload is min_local(...)
-         * in length. In (4) and (5), we try to truncate the local payload to get_min_local(...), but we never
-         * remove any of the key.
-        */
     if (const auto total = key_size + value_size; total > get_max_local(page_size)) {
         const auto nonlocal_value_size = total - std::max(key_size, get_min_local(page_size));
+        return value_size - nonlocal_value_size;
+    }
+    return value_size;
+}
+
+inline constexpr auto get_local_value_size(Size key_size, Size value_size, Size min_local, Size max_local) -> Size
+{
+    CALICO_EXPECT_GT(key_size, 0);
+
+    if (const auto total = key_size + value_size; total > max_local) {
+        const auto nonlocal_value_size = total - std::max(key_size, min_local);
         return value_size - nonlocal_value_size;
     }
     return value_size;

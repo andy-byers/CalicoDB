@@ -46,7 +46,7 @@ namespace Calico {
     return sanitized;
 }
 
-auto Core::open(Slice path, const Options &options) -> Status
+auto Core::open(const Slice &path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
 
@@ -98,6 +98,8 @@ auto Core::do_open(Options sanitized) -> Status
     if (!initial.has_value()) return initial.error();
     auto [state, is_new] = *initial;
     if (!is_new) sanitized.page_size = state.page_size;
+
+    m_maximum_key_size = get_max_local(sanitized.page_size);
 
     // Allocate the WAL object and buffers.
     {
@@ -241,6 +243,21 @@ auto Core::statistics() -> Statistics
     return Statistics {*this};
 }
 
+auto Core::check_key(const Slice &key, const char *message) const -> Status
+{
+    if (key.is_empty()) {
+        auto s = invalid_argument("{}: key is empty (use a nonempty key)", message);
+        CALICO_WARN(s);
+        return s;
+    }
+    if (key.size() > m_maximum_key_size) {
+        auto s = invalid_argument("{}: key of length {} B is too long", message, key.size(), m_maximum_key_size);
+        CALICO_WARN(s);
+        return s;
+    }
+    return ok();
+}
+
 auto Core::handle_errors() const -> Status
 {
     if (auto s = status(); !s.is_ok())
@@ -257,13 +274,13 @@ auto Core::handle_errors() const -> Status
         } \
     } while (0)
 
-auto Core::find_exact(Slice key) -> Cursor
+auto Core::find_exact(const Slice &key) -> Cursor
 {
     MAYBE_FORWARD_AS_CURSOR;
     return tree->find_exact(key);
 }
 
-auto Core::find(Slice key) -> Cursor
+auto Core::find(const Slice &key) -> Cursor
 {
     MAYBE_FORWARD_AS_CURSOR;
     return tree->find(key);
@@ -283,9 +300,10 @@ auto Core::last() -> Cursor
 
 #undef MAYBE_FORWARD_AS_CURSOR
 
-auto Core::insert(Slice key, Slice value) -> Status
+auto Core::insert(const Slice &key, const Slice &value) -> Status
 {
     CALICO_TRY_S(handle_errors());
+    CALICO_TRY_S(check_key(key, "insert"));
     m_bytes_written += key.size() + value.size();
     if (m_system->has_xact) {
         return tree->insert(key, value);
@@ -294,24 +312,20 @@ auto Core::insert(Slice key, Slice value) -> Status
     }
 }
 
-auto Core::erase(Slice key) -> Status
+auto Core::erase(const Slice &key) -> Status
 {
     CALICO_TRY_S(handle_errors());
-    return erase(tree->find_exact(key));
-}
-
-auto Core::erase(const Cursor &cursor) -> Status
-{
-    CALICO_TRY_S(handle_errors());
+    CALICO_TRY_S(check_key(key, "erase"));
     if (m_system->has_xact) {
-        return tree->erase(cursor);
+        return tree->erase(find_exact(key)); // TODO: Just erase with key
     } else {
-        return atomic_erase(cursor);
+        return atomic_erase(key);
     }
 }
 
-auto Core::atomic_insert(Slice key, Slice value) -> Status
+auto Core::atomic_insert(const Slice &key, const Slice &value) -> Status
 {
+    CALICO_TRY_S(check_key(key, "insert"));
     auto xact = transaction();
     auto s = tree->insert(key, value);
     if (s.is_ok()) {
@@ -321,10 +335,12 @@ auto Core::atomic_insert(Slice key, Slice value) -> Status
         return s;
     }
 }
-auto Core::atomic_erase(const Cursor &cursor) -> Status
+
+auto Core::atomic_erase(const Slice &key) -> Status
 {
+    CALICO_TRY_S(check_key(key, "erase"));
     auto xact = transaction();
-    auto s = tree->erase(cursor);
+    auto s = tree->erase(find_exact(key)); // TODO: Just erase with key
     if (s.is_ok()) {
         return xact.commit();
     } else if (!s.is_not_found()) {

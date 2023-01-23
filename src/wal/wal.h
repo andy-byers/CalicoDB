@@ -45,7 +45,7 @@ class WalPayloadOut {
 public:
     WalPayloadOut() = default;
 
-    explicit WalPayloadOut(Slice payload)
+    explicit WalPayloadOut(const Slice &payload)
         : m_payload {payload}
     {}
 

@@ -30,20 +30,19 @@ public:
     Core() = default;
     ~Core();
 
-    [[nodiscard]] auto open(Slice path, const Options &options) -> Status;
+    [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto destroy() -> Status;
     [[nodiscard]] auto transaction() -> Transaction;
     [[nodiscard]] auto bytes_written() const -> Size;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
-    [[nodiscard]] auto insert(Slice, Slice) -> Status;
-    [[nodiscard]] auto erase(Slice) -> Status;
-    [[nodiscard]] auto erase(const Cursor &) -> Status;
+    [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> Status;
+    [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;
-    [[nodiscard]] auto find(Slice) -> Cursor;
-    [[nodiscard]] auto find_exact(Slice) -> Cursor;
+    [[nodiscard]] auto find(const Slice &key) -> Cursor;
+    [[nodiscard]] auto find_exact(const Slice &key) -> Cursor;
     [[nodiscard]] auto first() -> Cursor;
     [[nodiscard]] auto last() -> Cursor;
     [[nodiscard]] auto statistics() -> Statistics;
@@ -54,10 +53,11 @@ public:
 
 private:
     [[nodiscard]] auto handle_errors() const -> Status;
+    [[nodiscard]] auto check_key(const Slice &key, const char *message) const -> Status;
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
-    [[nodiscard]] auto atomic_insert(Slice, Slice) -> Status;
-    [[nodiscard]] auto atomic_erase(const Cursor &) -> Status;
+    [[nodiscard]] auto atomic_insert(const Slice &key, const Slice &value) -> Status;
+    [[nodiscard]] auto atomic_erase(const Slice &key) -> Status;
     [[nodiscard]] auto save_state() -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit() -> Status;
@@ -70,6 +70,8 @@ private:
     std::unique_ptr<LogScratchManager> m_scratch;
     Storage *m_store {};
     Size m_bytes_written {};
+    Size m_maximum_key_size {};
+    Size m_record_count {};
     bool m_owns_store {};
 };
 

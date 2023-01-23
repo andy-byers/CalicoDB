@@ -18,10 +18,10 @@ static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
     return copy;
 }
 
-Status::Status(Code code, Slice message)
+Status::Status(Code code, const Slice &what)
 {
     static constexpr Size EXTRA_SIZE {sizeof(code) + sizeof(char)};
-    const auto size = message.size() + EXTRA_SIZE;
+    const auto size = what.size() + EXTRA_SIZE;
 
     // NOTE: The "()" should cause value initialization.
     m_data = std::unique_ptr<char[]> {new(std::nothrow) char[size]()};
@@ -35,7 +35,7 @@ Status::Status(Code code, Slice message)
 
     // The rest holds the message, plus a '\0'. std::make_unique<char[]>() performs value initialization, so the byte is already
     // zeroed out. See https://en.cppreference.com/w/cpp/memory/unique_ptr/make_unique, overload (2).
-    std::memcpy(ptr, message.data(), message.size());
+    std::memcpy(ptr, what.data(), what.size());
 }
 
 Status::Status(const Status &rhs)
@@ -65,27 +65,27 @@ auto Status::ok() -> Status
     return Status {};
 }
 
-auto Status::not_found(Slice what) -> Status
+auto Status::not_found(const Slice &what) -> Status
 {
     return {Code::NOT_FOUND, what};
 }
 
-auto Status::invalid_argument(Slice what) -> Status
+auto Status::invalid_argument(const Slice &what) -> Status
 {
     return {Code::INVALID_ARGUMENT, what};
 }
 
-auto Status::system_error(Slice what) -> Status
+auto Status::system_error(const Slice &what) -> Status
 {
     return {Code::SYSTEM_ERROR, what};
 }
 
-auto Status::logic_error(Slice what) -> Status
+auto Status::logic_error(const Slice &what) -> Status
 {
     return {Code::LOGIC_ERROR, what};
 }
 
-auto Status::corruption(Slice what) -> Status
+auto Status::corruption(const Slice &what) -> Status
 {
     return {Code::CORRUPTION, what};
 }

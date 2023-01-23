@@ -32,14 +32,9 @@ auto do_write(Database &db, Slice key)
     benchmark::DoNotOptimize(db.insert(key, DB_VALUE));
 }
 
-auto do_erase(Database &db, Slice key)
+auto do_erase(Database &db, const Slice &key)
 {
     benchmark::DoNotOptimize(db.erase(key));
-}
-
-auto do_erase(Database &db, const Cursor &c)
-{
-    benchmark::DoNotOptimize(db.erase(c));
 }
 
 auto setup()
@@ -220,14 +215,14 @@ auto ensure_records(Database &db, Size)
 auto BM_SequentialErase(benchmark::State& state)
 {
     auto db = setup();
-    run_batches(db, state, [](auto) {return 0;}, [](auto &db, auto) {do_erase(db, db.first());}, ensure_records);
+    run_batches(db, state, [](auto) {return 0;}, [](auto &db, auto) {do_erase(db, db.first().key());}, ensure_records);
 }
 BENCHMARK(BM_SequentialErase);
 
 auto BM_RandomErase(benchmark::State& state)
 {
     auto db = setup();
-    run_batches(db, state, [](auto) {return State::random_int();}, [](auto &db, auto key) {do_erase(db, key);}, ensure_records);
+    run_batches(db, state, [](auto) {return State::random_int();}, [](auto &db, const auto &key) {do_erase(db, key);}, ensure_records);
 }
 BENCHMARK(BM_RandomErase);
 

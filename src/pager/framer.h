@@ -120,7 +120,7 @@ public:
 private:
     Framer(std::unique_ptr<RandomEditor>, AlignedBuffer, Size, Size);
     [[nodiscard]] auto read_page_from_file(Id, Span) const -> tl::expected<bool, Status>;
-    [[nodiscard]] auto write_page_to_file(Id, Slice) const -> Status;
+    [[nodiscard]] auto write_page_to_file(Id pid, const Slice &page) const -> Status;
 
     [[nodiscard]]
     auto frame_at_impl(Size id) -> Frame&

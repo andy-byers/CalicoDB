@@ -33,13 +33,13 @@ public:
 
     ~Internal() = default;
     [[nodiscard]] auto collect_value(const Node &, Size) const -> tl::expected<std::string, Status>;
-    [[nodiscard]] auto find_external(Slice) -> tl::expected<SearchResult, Status>;
+    [[nodiscard]] auto find_external(const Slice &) -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto find_minimum() -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto find_maximum() -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto find_root(bool) -> tl::expected<Node, Status>;
-    [[nodiscard]] auto make_cell(Slice, Slice, bool) -> tl::expected<Cell, Status>;
-    [[nodiscard]] auto positioned_insert(Position, Slice, Slice) -> tl::expected<void, Status>;
-    [[nodiscard]] auto positioned_modify(Position, Slice) -> tl::expected<void, Status>;
+    [[nodiscard]] auto make_cell(const Slice &, const Slice &, bool) -> tl::expected<Cell, Status>;
+    [[nodiscard]] auto positioned_insert(Position, const Slice &, const Slice &) -> tl::expected<void, Status>;
+    [[nodiscard]] auto positioned_modify(Position, const Slice &) -> tl::expected<void, Status>;
     [[nodiscard]] auto positioned_remove(Position) -> tl::expected<void, Status>;
     auto save_state(FileHeader &header) const -> void;
     auto load_state(const FileHeader &header) -> void;
@@ -59,7 +59,7 @@ private:
     [[nodiscard]] auto split_non_root(Node) -> tl::expected<Node, Status>;
     [[nodiscard]] auto split_root(Node) -> tl::expected<Node, Status>;
 
-    [[nodiscard]] auto balance_after_underflow(Node, Slice) -> tl::expected<void, Status>;
+    [[nodiscard]] auto balance_after_underflow(Node, const Slice &) -> tl::expected<void, Status>;
     [[nodiscard]] auto fix_non_root(Node, Node &, Size) -> tl::expected<bool, Status>;
     [[nodiscard]] auto fix_root(Node) -> tl::expected<void, Status>;
     [[nodiscard]] auto rotate_left(Node &, Node &, Node &, Size) -> tl::expected<void, Status>;

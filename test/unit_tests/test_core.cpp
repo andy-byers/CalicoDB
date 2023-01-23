@@ -61,10 +61,13 @@ public:
     auto erase_one(const std::string &maybe) -> void
     {
         ASSERT_GT(core->statistics().record_count(), 0);
-        auto s = core->erase(core->find(maybe));
-        if (s.is_not_found())
-            s = core->erase(core->first());
-        ASSERT_TRUE(s.is_ok()) << "Error: " << s.what().data();
+        auto c = core->find(maybe);
+
+        if (!c.is_valid())
+            c = core->first();
+
+        ASSERT_TRUE(c.is_valid());
+        ASSERT_OK(core->erase(c.key()));
     }
 
     Random random {UnitTests::random_seed};

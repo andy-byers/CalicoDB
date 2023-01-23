@@ -85,7 +85,7 @@ auto Page::span(Size offset, Size size) -> Span
     return m_data.range(offset, size);
 }
 
-auto Page::write(Slice in, Size offset) -> void
+auto Page::write(const Slice &in, Size offset) -> void
 {
     mem_copy(span(offset, in.size()), in);
 }

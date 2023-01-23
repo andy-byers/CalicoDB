@@ -17,17 +17,16 @@ class NodeManager;
 class Page;
 struct FileHeader;
 
-// Depends on BufferPool
 class Tree {
 public:
     using Ptr = std::unique_ptr<Tree>;
 
     virtual ~Tree() = default;
     virtual auto record_count() const -> Size = 0;
-    virtual auto insert(Slice, Slice) -> Status = 0;
+    virtual auto insert(const Slice &, const Slice &) -> Status = 0;
     virtual auto erase(Cursor) -> Status = 0;
-    virtual auto find_exact(Slice) -> Cursor = 0;
-    virtual auto find(Slice key) -> Cursor = 0;
+    virtual auto find_exact(const Slice &) -> Cursor = 0;
+    virtual auto find(const Slice &key) -> Cursor = 0;
     virtual auto find_minimum() -> Cursor = 0;
     virtual auto find_maximum() -> Cursor = 0;
     virtual auto root(bool) -> tl::expected<Node, Status> = 0;
@@ -40,6 +39,25 @@ public:
     virtual auto TEST_validate_order() -> void = 0;
     virtual auto TEST_validate_links() -> void = 0;
 #endif // not NDEBUG
+};
+
+
+class Tree_ {
+public:
+    using Ptr = std::unique_ptr<Tree_>;
+
+    struct FindResult {
+        Id pid;
+        Size index {};
+        bool exact {};
+    };
+
+    virtual ~Tree_() = default;
+    [[nodiscard]] virtual auto find(const Slice &key) const -> FindResult = 0;
+    [[nodiscard]] virtual auto insert(const Slice &key, const Slice &value) -> bool = 0;
+    [[nodiscard]] virtual auto erase(const Slice &key) -> bool = 0;
+    virtual auto save_state(FileHeader &header) const -> void = 0;
+    virtual auto load_state(const FileHeader &header) -> void = 0;
 };
 
 } // namespace Calico

@@ -23,11 +23,11 @@ public:
     }
 
     [[nodiscard]] static auto open(Pager &pager, System &state, Size page_size) -> tl::expected<Tree::Ptr, Status>;
-    [[nodiscard]] auto insert(Slice key, Slice value) -> Status override;
+    [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(Cursor cursor) -> Status override;
     [[nodiscard]] auto root(bool is_writable) -> tl::expected<Node, Status> override;
-    [[nodiscard]] auto find_exact(Slice key) -> Cursor override;
-    [[nodiscard]] auto find(Slice key) -> Cursor override;
+    [[nodiscard]] auto find_exact(const Slice &key) -> Cursor override;
+    [[nodiscard]] auto find(const Slice &key) -> Cursor override;
     [[nodiscard]] auto find_minimum() -> Cursor override;
     [[nodiscard]] auto find_maximum() -> Cursor override;
     auto save_state(FileHeader &header) const -> void override;
@@ -47,13 +47,32 @@ private:
         bool was_found {};
     };
     BPlusTree(Pager &pager, System &state, Size page_size);
-    [[nodiscard]] auto find_aux(Slice key) -> tl::expected<SearchResult, Status>;
-    [[nodiscard]] auto check_key(Slice key, const char *primary) -> Status;
+    [[nodiscard]] auto find_aux(const Slice &key) -> tl::expected<SearchResult, Status>;
+    [[nodiscard]] auto check_key(const Slice &key, const char *primary) -> Status;
 
     CursorActions m_actions;
     NodeManager m_pool;
     Internal m_internal;
     LogPtr m_log;
+    System *m_system {};
+};
+
+class BPlusTree_: public Tree_ {
+public:
+    ~BPlusTree_() override = default;
+    [[nodiscard]] static auto open(Pager &pager, System &system) -> Tree_::Ptr;
+    [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> bool override;
+    [[nodiscard]] auto erase(const Slice &key) -> bool override;
+    [[nodiscard]] auto find(const Slice &key) const -> FindResult override;
+    auto save_state(FileHeader &header) const -> void override;
+    auto load_state(const FileHeader &header) -> void override;
+
+private:
+    BPlusTree_(Pager &pager, System &system);
+
+    Size m_maximum_key_size {};
+    std::array<StaticScratch, 3> m_scratch;
+    Pager *m_pager {};
     System *m_system {};
 };
 

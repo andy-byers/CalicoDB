@@ -113,7 +113,7 @@ struct WalRecordHeader {
     static constexpr Size SIZE {7};
 
     [[nodiscard]]
-    static auto contains_record(Slice data) -> bool
+    static auto contains_record(const Slice &data) -> bool
     {
         return data.size() > WalRecordHeader::SIZE && data[0] != '\x00';
     }
@@ -136,7 +136,7 @@ struct WalPayloadHeader {
 auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto read_wal_record_header(Slice in) -> WalRecordHeader;
 [[nodiscard]] auto read_wal_payload_header(Slice in) -> WalPayloadHeader;
-[[nodiscard]] auto split_record(WalRecordHeader &lhs, Slice payload, Size available_size) -> WalRecordHeader;
+[[nodiscard]] auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 [[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
 
@@ -165,8 +165,8 @@ struct CommitDescriptor {
 using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
 
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> PayloadDescriptor;
-[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, Slice image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn;
-[[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, Slice image, Span buffer) -> WalPayloadIn;
+[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn;
+[[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, const Slice &image, Span buffer) -> WalPayloadIn;
 [[nodiscard]] auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn;
 
 enum XactPayloadType : Byte {
@@ -174,8 +174,6 @@ enum XactPayloadType : Byte {
     DELTA      = '\xD0',
     FULL_IMAGE = '\xF0',
 };
-
-static constexpr Size MINIMUM_PAYLOAD_SIZE {sizeof(XactPayloadType)};
 
 } // namespace Calico
 

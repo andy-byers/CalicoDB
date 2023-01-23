@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 
 Database::Database() noexcept = default;
 
-auto Database::open(Slice path, const Options &options) -> Status
+auto Database::open(const Slice &path, const Options &options) -> Status
 {
     CALICO_EXPECT_EQ(m_core, nullptr);
     m_core = std::unique_ptr<Core> {new(std::nothrow) Core};
@@ -53,13 +53,13 @@ Database::Database(Database &&) noexcept = default;
 
 auto Database::operator=(Database &&) noexcept -> Database & = default;
 
-auto Database::find_exact(Slice key) const -> Cursor
+auto Database::find_exact(const Slice &key) const -> Cursor
 {
     CALICO_EXPECT_NE(m_core, nullptr);
     return m_core->find_exact(key);
 }
 
-auto Database::find(Slice key) const -> Cursor
+auto Database::find(const Slice &key) const -> Cursor
 {
     CALICO_EXPECT_NE(m_core, nullptr);
     return m_core->find(key);
@@ -77,21 +77,16 @@ auto Database::last() const -> Cursor
     return m_core->last();
 }
 
-auto Database::insert(Slice key, Slice value) -> Status
+auto Database::insert(const Slice &key, const Slice &value) -> Status
 {
     CALICO_EXPECT_NE(m_core, nullptr);
     return m_core->insert(key, value);
 }
 
-auto Database::erase(Slice key) -> Status
-{
-    return erase(find_exact(key));
-}
-
-auto Database::erase(const Cursor &cursor) -> Status
+auto Database::erase(const Slice &key) -> Status
 {
     CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->erase(cursor);
+    return m_core->erase(key);
 }
 
 auto Database::statistics() const -> Statistics

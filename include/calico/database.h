@@ -17,16 +17,15 @@ class Database final {
 public:
     Database() noexcept;
 
-    [[nodiscard]] auto open(Slice path, const Options &options = {}) -> Status;
+    [[nodiscard]] auto open(const Slice &path, const Options &options = {}) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto destroy() && -> Status;
-    [[nodiscard]] auto find_exact(Slice key) const -> Cursor;
-    [[nodiscard]] auto find(Slice key) const -> Cursor;
+    [[nodiscard]] auto find_exact(const Slice &key) const -> Cursor;
+    [[nodiscard]] auto find(const Slice &key) const -> Cursor;
     [[nodiscard]] auto first() const -> Cursor;
     [[nodiscard]] auto last() const -> Cursor;
-    [[nodiscard]] auto insert(Slice key, Slice value) -> Status;
-    [[nodiscard]] auto erase(Slice key) -> Status;
-    [[nodiscard]] auto erase(const Cursor &cursor) -> Status;
+    [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> Status;
+    [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto statistics() const -> Statistics;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto transaction() -> Transaction;

@@ -424,7 +424,7 @@ auto Node::TEST_validate() const -> void
 #endif // not NDEBUG
 }
 
-auto Node::find_ge(Slice key) const -> FindGeResult
+auto Node::find_ge(const Slice &key) const -> FindGeResult
 {
     long lower {};
     auto upper = static_cast<long>(cell_count());
@@ -502,7 +502,7 @@ auto Node::set_child_id(Size index, Id child_id) -> void
     }
 }
 
-auto Node::try_allocate(Size needed_size, std::optional<Size> skip_index) -> Size
+auto Node::make_room(Size needed_size, std::optional<Size> skip_index) -> Size
 {
     if (const auto ptr = BlockAllocator::allocate(m_page, needed_size))
         return ptr;
@@ -539,6 +539,22 @@ auto Node::defragment(std::optional<Size> skip_index) -> void
     NodeHeader::set_cell_start(m_page, end);
     BlockAllocator::reset(m_page);
 }
+//
+//auto Node::insert(Size index, const CellRef &cell) -> void
+//{
+//    const auto data = cell.data();
+//    const auto offset = allocate(index, data.size());
+//    if (offset) {
+//        mem_copy(m_page.span(offset, data.size()), data);
+//    } else {
+//        m_overflow_data = data;
+//    }
+//}
+//
+//auto Node::insert(Size index, const CellInput &cell) -> void
+//{
+//
+//}
 
 // TODO: remove
 auto Node::insert(Cell cell) -> void
@@ -547,6 +563,43 @@ auto Node::insert(Cell cell) -> void
     // Keys should be unique.
     CALICO_EXPECT_FALSE(falsy);
     insert(index, cell);
+}
+
+auto Node::allocate(Size index, Size size) -> Size
+{
+    CALICO_EXPECT_FALSE(is_overflowing());
+    CALICO_EXPECT_LE(index, cell_count());
+
+    // We don't have room to insert the cell pointer.
+    if (cell_area_offset() + CELL_POINTER_SIZE > NodeHeader::cell_start(m_page)) {
+        if (BlockAllocator::usable_space(m_page) >= size + CELL_POINTER_SIZE) {
+            defragment();
+            return allocate(index, size);
+        }
+        m_overflow_index = index;
+        return 0;
+    }
+    // insert a dummy cell pointer to save the slot.
+    CellDirectory::insert_pointer(m_page, index, {m_page.size() - 1});
+
+    // allocate space for the cell. This call may defragment the node.
+    const auto offset = make_room(size, index);
+
+    // We don't have room to insert the cell.
+    if (!offset) {
+        CALICO_EXPECT_LT(BlockAllocator::usable_space(m_page), size + CELL_POINTER_SIZE);
+        m_overflow_index = index;
+        CellDirectory::remove_pointer(m_page, index);
+        return 0;
+    }
+    // Now we can fill in the dummy cell pointer.
+    CellDirectory::set_pointer(m_page, index, {offset});
+
+    // Adjust the start of the cell content area.
+    if (offset < NodeHeader::cell_start(m_page))
+        NodeHeader::set_cell_start(m_page, offset);
+
+    return offset;
 }
 
 auto Node::insert(Size index, Cell cell) -> void
@@ -570,7 +623,7 @@ auto Node::insert(Size index, Cell cell) -> void
     CellDirectory::insert_pointer(m_page, index, {m_page.size() - 1});
 
     // allocate space for the cell. This call may defragment the node.
-    const auto offset = try_allocate(local_size, index);
+    const auto offset = make_room(local_size, index);
 
     // We don't have room to insert the cell.
     if (!offset) {
@@ -588,7 +641,7 @@ auto Node::insert(Size index, Cell cell) -> void
         NodeHeader::set_cell_start(m_page, offset);
 }
 
-auto Node::remove(Slice key) -> bool
+auto Node::remove(const Slice &key) -> bool
 {
     if (auto [index, found_eq] = find_ge(key); found_eq) {
         remove(index, read_cell(index).size());
@@ -671,7 +724,7 @@ auto internal_merge_left(Node &Lc, Node &rc, Node &parent, Size index) -> void
     // Move the separator from the parent to the left child node.
     auto separator = parent.read_cell(index);
     const auto separator_size = separator.size();
-    separator.set_left_child_id(Lc.rightmost_child_id());
+    separator.set_child_id(Lc.rightmost_child_id());
     Lc.insert(Lc.cell_count(), separator);
     parent.remove(index, separator_size);
 
@@ -712,9 +765,12 @@ auto internal_merge_right(Node &Lc, Node &rc, Node &parent, Size index) -> void
     // Move the separator from the source to the left child node.
     auto separator = parent.read_cell(index);
     const auto separator_size = separator.size();
-    separator.set_left_child_id(Lc.rightmost_child_id());
+    const auto saved_id = Lc.rightmost_child_id();
+
     Lc.set_rightmost_child_id(rc.rightmost_child_id());
     Lc.insert(Lc.cell_count(), separator);
+    Lc.set_child_id(Lc.cell_count() - 1, saved_id);
+
     CALICO_EXPECT_EQ(parent.child_id(index + 1), rc.id());
     parent.set_child_id(index + 1, Lc.id());
     parent.remove(index, separator_size);
@@ -804,16 +860,16 @@ auto transfer_cells_right_while(Node &src, Node &dst, const Predicate &predicate
     }
 }
 
-auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Span scratch) -> Cell
+auto split_non_root_fast_internal(Node &Ln, Node &rn, Cell overflow, Size overflow_index, Span ) -> Cell
 {
     transfer_cells_right_while(Ln, rn, [overflow_index](const auto &src, const auto &, Size) {
         return src.cell_count() > overflow_index;
     });
 
-    if (overflow.is_attached())
-        overflow.detach(scratch, true);
+//    if (overflow.is_attached())
+//        overflow.detach(scratch, true);
     overflow.set_is_external(false);
-    overflow.set_left_child_id(Ln.id());
+    overflow.set_child_id(Ln.id());
     return overflow;
 }
 
@@ -835,7 +891,7 @@ auto split_non_root_fast_external(Node &Ln, Node &rn, Cell overflow, Size overfl
     }
     auto separator = rn.read_cell(0);
     separator.detach(scratch, true);
-    separator.set_left_child_id(Ln.id());
+    separator.set_child_id(Ln.id());
     return separator;
 }
 
@@ -874,7 +930,7 @@ auto split_external_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
 
     auto separator = rn.detach_cell(0, scratch);
     separator.set_is_external(false);
-    separator.set_left_child_id(Ln.id());
+    separator.set_child_id(Ln.id());
     return separator;
 }
 
@@ -887,7 +943,7 @@ auto split_internal_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
     rn.set_parent_id(Ln.parent_id());
 
     if (overflow_idx > 0 && overflow_idx < Ln.cell_count()) {
-        Ln.set_rightmost_child_id(overflow.left_child_id());
+        Ln.set_rightmost_child_id(overflow.child_id());
         return split_non_root_fast_internal(Ln, rn, overflow, overflow_idx, scratch);
 
     } else if (overflow_idx == 0) {
@@ -908,8 +964,8 @@ auto split_internal_non_root(Node &Ln, Node &rn, Span scratch) -> Cell
     }
 
     auto separator = Ln.extract_cell(Ln.cell_count() - 1, scratch);
-    Ln.set_rightmost_child_id(separator.left_child_id());
-    separator.set_left_child_id(Ln.id());
+    Ln.set_rightmost_child_id(separator.child_id());
+    separator.set_child_id(Ln.id());
     return separator;
 }
 

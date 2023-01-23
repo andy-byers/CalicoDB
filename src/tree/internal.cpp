@@ -41,7 +41,7 @@ auto Internal::find_root(bool is_writable) -> tl::expected<Node, Status>
     return m_pool->acquire(Id::root(), is_writable);
 }
 
-auto Internal::find_external(Slice key) -> tl::expected<SearchResult, Status>
+auto Internal::find_external(const Slice &key) -> tl::expected<SearchResult, Status>
 {
     if (m_cell_count == 0)
         return SearchResult {Id::root(), 0, false};
@@ -109,7 +109,7 @@ auto Internal::find_maximum() -> tl::expected<SearchResult, Status>
     return SearchResult {id, index, was_found};
 }
 
-auto Internal::positioned_insert(Position position, Slice key, Slice value) -> tl::expected<void, Status>
+auto Internal::positioned_insert(Position position, const Slice &key, const Slice &value) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_LE(key.size(), m_maximum_key_size);
     auto [node, index] = std::move(position);
@@ -123,7 +123,7 @@ auto Internal::positioned_insert(Position position, Slice key, Slice value) -> t
     return m_pool->release(std::move(node));
 }
 
-auto Internal::positioned_modify(Position position, Slice value) -> tl::expected<void, Status>
+auto Internal::positioned_modify(Position position, const Slice &value) -> tl::expected<void, Status>
 {
     auto [node, index] = std::move(position);
     auto old_cell = node.read_cell(index);
@@ -179,7 +179,7 @@ auto Internal::balance_after_overflow(Node node) -> tl::expected<void, Status>
     return m_pool->release(std::move(node));
 }
 
-auto Internal::balance_after_underflow(Node node, Slice anchor) -> tl::expected<void, Status>
+auto Internal::balance_after_underflow(Node node, const Slice &anchor) -> tl::expected<void, Status>
 {
     while (node.is_underflowing()) {
         if (node.id().is_root()) {
@@ -262,7 +262,7 @@ auto Internal::maybe_fix_child_parent_connections(Node &node) -> tl::expected<vo
             CALICO_TRY_R(fix_connection(node.child_id(index)));
 
         if (node.is_overflowing())
-            CALICO_TRY_R(fix_connection(node.overflow_cell().left_child_id()));
+            CALICO_TRY_R(fix_connection(node.overflow_cell().child_id()));
     }
     return {};
 }
@@ -271,7 +271,7 @@ auto Internal::maybe_fix_child_parent_connections(Node &node) -> tl::expected<vo
  * Note that the key and value must exist until the cell is safely embedded in the tree. If
  * the tree is balanced and there are no overflow cells then this is guaranteed to be true.
  */
-auto Internal::make_cell(Slice key, Slice value, bool is_external) -> tl::expected<Cell, Status>
+auto Internal::make_cell(const Slice &key, const Slice &value, bool is_external) -> tl::expected<Cell, Status>
 {
     if (is_external) {
         auto cell = ::Calico::make_external_cell(key, value, m_pool->page_size());
@@ -444,7 +444,7 @@ auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     auto old_separator = parent.read_cell(index);
     auto lowest = rc.extract_cell(0, *m_scratch[1]);
     CALICO_NEW_R(new_separator, make_cell(rc.read_key(0), {}, false));
-    new_separator.set_left_child_id(Lc.id());
+    new_separator.set_child_id(Lc.id());
     new_separator.detach(*m_scratch[2], true);
 
     // Parent might overflow.
@@ -453,7 +453,7 @@ auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
 
     Lc.insert(Lc.cell_count(), lowest);
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
-        return {};
+    return {};
 }
 
 auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
@@ -465,7 +465,7 @@ auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     auto separator = parent.read_cell(index);
     auto highest = Lc.extract_cell(Lc.cell_count() - 1, *m_scratch[1]);
     CALICO_NEW_R(new_separator, make_cell(highest.key(), {}, false));
-    new_separator.set_left_child_id(Lc.id());
+    new_separator.set_child_id(Lc.id());
     new_separator.detach(*m_scratch[2], true);
 
     // Parent might overflow.
@@ -474,7 +474,7 @@ auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
 
     rc.insert(0, highest);
     CALICO_EXPECT_FALSE(rc.is_overflowing());
-        return {};
+    return {};
 }
 
 auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
@@ -487,7 +487,7 @@ auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
 
     auto separator = parent.extract_cell(index, *m_scratch[1]);
     CALICO_NEW_R(child, m_pool->acquire(rc.child_id(0), true));
-    separator.set_left_child_id(Lc.rightmost_child_id());
+    separator.set_child_id(Lc.rightmost_child_id());
     child.set_parent_id(Lc.id());
     Lc.set_rightmost_child_id(child.id());
     CALICO_TRY_R(m_pool->release(std::move(child)));
@@ -495,10 +495,10 @@ auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     CALICO_EXPECT_FALSE(Lc.is_overflowing());
     
     auto lowest = rc.extract_cell(0, *m_scratch[1]);
-    lowest.set_left_child_id(Lc.id());
+    lowest.set_child_id(Lc.id());
     // Parent might overflow.
     parent.insert(index, lowest);
-        return {};
+    return {};
 }
 
 auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
@@ -511,7 +511,7 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
 
     auto separator = parent.extract_cell(index, *m_scratch[1]);
     CALICO_NEW_R(child, m_pool->acquire(Lc.rightmost_child_id(), true));
-    separator.set_left_child_id(child.id());
+    separator.set_child_id(child.id());
     child.set_parent_id(rc.id());
     CALICO_TRY_R(m_pool->release(std::move(child)));
     Lc.set_rightmost_child_id(Lc.child_id(Lc.cell_count() - 1));
@@ -519,7 +519,7 @@ auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     CALICO_EXPECT_FALSE(rc.is_overflowing());
     
     auto highest = Lc.extract_cell(Lc.cell_count() - 1, *m_scratch[1]);
-    highest.set_left_child_id(Lc.id());
+    highest.set_child_id(Lc.id());
     // The parent might overflow.
     parent.insert(index, highest);
     return {};

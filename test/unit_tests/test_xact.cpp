@@ -593,7 +593,7 @@ static auto insert_records(Test &test, Size n = 1'000)
 auto erase_records(TransactionTests &test, Size n = 1'000)
 {
     for (Size i {}; i < n; ++i) {
-        ASSERT_OK(test.db.erase(test.db.first()));
+        ASSERT_OK(test.db.erase(test.db.first().key()));
     }
 }
 
@@ -848,7 +848,9 @@ auto modify_until_failure(FailureTests &test, Size limit = 10'000) -> Status
 
             // insert()/erase() exercise data file reading/writing, and WAL file writing.
             if (test.random.get(4) == 0 && info.record_count()) {
-                s = test.db.erase(test.db.first());
+                const auto c = test.db.first();
+                CALICO_TRY_S(c.status());
+                s = test.db.erase(c.key());
             } else {
                 s = test.db.insert(key, value);
             }

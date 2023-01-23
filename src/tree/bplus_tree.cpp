@@ -8,6 +8,54 @@
 
 namespace Calico {
 
+BPlusTree_::BPlusTree_(Pager &pager, System &system)
+    : m_maximum_key_size {get_max_local(pager.page_size())},
+      m_scratch {{
+          // Scratch memory needs to be able to hold a maximally-sized cell.
+          StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
+          StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
+          StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
+      }},
+      m_pager {&pager},
+      m_system {&system}
+{}
+
+auto BPlusTree_::open(Pager &pager, System &system) -> Tree_::Ptr
+{
+    auto ptr = Tree_::Ptr {new(std::nothrow) BPlusTree_ {pager, system}};
+    if (ptr == nullptr)
+        system.push_error(Error::Level::ERROR, system_error("could not make_room tree: out of memory"));
+    return ptr;
+}
+
+auto BPlusTree_::insert(const Slice &key, const Slice &value) -> bool
+{
+    (void)key, (void)value;
+    return true;
+}
+
+auto BPlusTree_::erase(const Slice &key) -> bool
+{
+    (void)key;
+    return true;
+}
+
+auto BPlusTree_::find(const Slice &key) const -> FindResult
+{
+    (void)key;
+    return FindResult {};
+}
+
+auto BPlusTree_::save_state(FileHeader &header) const -> void
+{
+    (void)header;
+}
+
+auto BPlusTree_::load_state(const FileHeader &header) -> void
+{
+    (void)header;
+}
+
 BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
     : m_pool {pager, system, page_size},
       m_internal {m_pool},
@@ -31,11 +79,11 @@ auto BPlusTree::open(Pager &pager, System &system, Size page_size) -> tl::expect
 {
     auto ptr = Tree::Ptr {new(std::nothrow) BPlusTree {pager, system, page_size}};
     if (ptr == nullptr)
-        return tl::make_unexpected(system_error("could not try_allocate tree: out of memory"));
+        return tl::make_unexpected(system_error("could not make_room tree: out of memory"));
     return ptr;
 }
 
-auto BPlusTree::check_key(Slice key, const char *primary) -> Status
+auto BPlusTree::check_key(const Slice &key, const char *primary) -> Status
 {
     if (key.is_empty()) {
         auto s = invalid_argument("{}: key is empty (use a nonempty key)", primary);
@@ -50,7 +98,7 @@ auto BPlusTree::check_key(Slice key, const char *primary) -> Status
     return ok();
 }
 
-auto BPlusTree::insert(Slice key, Slice value) -> Status
+auto BPlusTree::insert(const Slice &key, const Slice &value) -> Status
 {
     CALICO_TRY_S(check_key(key, "could not insert record"));
 
@@ -84,7 +132,7 @@ auto BPlusTree::erase(Cursor cursor) -> Status
     return cursor.status();
 }
 
-auto BPlusTree::find_aux(Slice key) -> tl::expected<SearchResult, Status>
+auto BPlusTree::find_aux(const Slice &key) -> tl::expected<SearchResult, Status>
 {
     if (auto s = check_key(key, "could not find key"); !s.is_ok())
         return tl::make_unexpected(s);
@@ -105,7 +153,7 @@ auto BPlusTree::find_aux(Slice key) -> tl::expected<SearchResult, Status>
     return SearchResult {std::move(node), index, found_exact};
 }
 
-auto BPlusTree::find_exact(Slice key) -> Cursor
+auto BPlusTree::find_exact(const Slice &key) -> Cursor
 {
     auto cursor = CursorInternal::make_cursor(&m_actions);
     auto result = find_aux(key);
@@ -119,7 +167,7 @@ auto BPlusTree::find_exact(Slice key) -> Cursor
     return cursor;
 }
 
-auto BPlusTree::find(Slice key) -> Cursor
+auto BPlusTree::find(const Slice &key) -> Cursor
 {
     auto cursor = CursorInternal::make_cursor(&m_actions);
     auto result = find_aux(key);
@@ -311,7 +359,7 @@ static auto collect_levels(NodeManager &manager, PrintData &data, Node node, Siz
         auto cell = node.read_cell(cid);
 
         if (!node.is_external())
-            collect_levels(manager, data, *manager.acquire(cell.left_child_id(), false), level + 1, integer_keys);
+            collect_levels(manager, data, *manager.acquire(cell.child_id(), false), level + 1, integer_keys);
 
         if (is_first)
             add_to_level(data, std::to_string(node.id().value) + ":[", level);

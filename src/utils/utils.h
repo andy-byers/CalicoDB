@@ -166,7 +166,7 @@ public:
     }
 
     [[nodiscard]]
-    constexpr auto starts_with(Slice rhs) const noexcept -> bool
+    constexpr auto starts_with(const Slice &rhs) const noexcept -> bool
     {
         if (rhs.size() > m_size)
             return false;
@@ -184,14 +184,14 @@ private:
     Size m_size {};
 };
 
-inline auto mem_copy(Span dst, Slice src, size_t n) noexcept -> void *
+inline auto mem_copy(Span dst, const Slice &src, size_t n) noexcept -> void *
 {
     CALICO_EXPECT_LE(n, src.size());
     CALICO_EXPECT_LE(n, dst.size());
     return std::memcpy(dst.data(), src.data(), n);
 }
 
-inline auto mem_copy(Span dst, Slice src) noexcept -> void *
+inline auto mem_copy(Span dst, const Slice &src) noexcept -> void *
 {
     CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_copy(dst, src, src.size());
@@ -208,14 +208,14 @@ inline auto mem_clear(Span mem) noexcept -> void *
     return mem_clear(mem, mem.size());
 }
 
-inline auto mem_move(Span dst, Slice src, Size n) noexcept -> void *
+inline auto mem_move(Span dst, const Slice &src, Size n) noexcept -> void *
 {
     CALICO_EXPECT_LE(n, src.size());
     CALICO_EXPECT_LE(n, dst.size());
     return std::memmove(dst.data(), src.data(), n);
 }
 
-inline auto mem_move(Span dst, Slice src) noexcept -> void *
+inline auto mem_move(Span dst, const Slice &src) noexcept -> void *
 {
     CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_move(dst, src, src.size());

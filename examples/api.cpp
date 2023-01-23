@@ -128,7 +128,7 @@ auto main(int, const char *[]) -> int
         // it represents.
         auto xact = db.transaction();
 
-        auto s = db.erase(db.first());
+        auto s = db.erase("");
         if (!s.is_ok()) {
 
         }
@@ -142,7 +142,7 @@ auto main(int, const char *[]) -> int
         // If we want to start another transaction, we need to make another call to the database.
         xact = db.transaction();
 
-        s = db.erase(db.first());
+        s = db.erase(db.first().key());
         if (!s.is_ok()) {
 
         }

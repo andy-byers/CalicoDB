@@ -33,7 +33,7 @@ auto read_wal_payload_header(Slice in) -> WalPayloadHeader
     return WalPayloadHeader {get_u64(in)};
 }
 
-auto split_record(WalRecordHeader &lhs, Slice payload, Size available_size) -> WalRecordHeader
+auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_size) -> WalRecordHeader
 {
     CALICO_EXPECT_NE(lhs.type, WalRecordHeader::Type::FIRST);
     CALICO_EXPECT_EQ(lhs.size, payload.size());
@@ -97,7 +97,7 @@ static auto encode_payload_type(Span out, XactPayloadType type)
     out[0] = type;
 }
 
-auto encode_deltas_payload(Lsn lsn, Id page_id, Slice image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn
+auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn
 {
     auto saved = buffer;
     buffer.advance(sizeof(lsn));
@@ -142,7 +142,7 @@ auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn
     return WalPayloadIn {lsn, saved};
 }
 
-auto encode_full_image_payload(Lsn lsn, Id pid, Slice image, Span buffer) -> WalPayloadIn
+auto encode_full_image_payload(Lsn lsn, Id pid, const Slice &image, Span buffer) -> WalPayloadIn
 {
     auto saved = buffer;
     buffer.advance(sizeof(lsn));
