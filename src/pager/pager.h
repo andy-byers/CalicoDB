@@ -15,6 +15,7 @@ constexpr auto DATA_FILENAME = "data";
 
 struct FileHeader;
 struct PageDelta;
+class Page_;
 class Page;
 
 /*
@@ -31,12 +32,17 @@ public:
     [[nodiscard]] virtual auto page_size() const -> Size = 0;
     [[nodiscard]] virtual auto bytes_written() const -> Size = 0;
     [[nodiscard]] virtual auto hit_ratio() const -> double = 0;
-    virtual auto allocate() -> tl::expected<Page, Status> = 0;
-    virtual auto acquire(Id, bool) -> tl::expected<Page, Status> = 0;
-    virtual auto release(Page) -> Status = 0;
+    virtual auto allocate() -> tl::expected<Page_, Status> = 0;
+    virtual auto acquire(Id, bool) -> tl::expected<Page_, Status> = 0;
+    virtual auto release(Page_) -> Status = 0;
     virtual auto flush(Lsn lsn_limit) -> Status = 0;
     virtual auto save_state(FileHeader &) -> void = 0;
     virtual auto load_state(const FileHeader &) -> void = 0;
+
+    [[nodiscard]] virtual auto allocate_() -> tl::expected<Page, Status> = 0;
+    [[nodiscard]] virtual auto acquire_(Id) -> tl::expected<Page, Status> = 0;
+    virtual auto upgrade_(Page &page) -> void = 0;
+    virtual auto release_(Page page) -> void = 0;
 };
 
 } // namespace Calico

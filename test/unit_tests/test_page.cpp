@@ -150,10 +150,10 @@ public:
         , m_scratch {page_size, 32}
         , m_page_size {page_size} {}
 
-    auto get_page(Id id) -> Page
+    auto get_page(Id id) -> Page_
     {
         m_map.emplace(id, std::string(m_page_size, '\x00'));
-        return Page {{id, Span {m_map[id]}, nullptr, true}};
+        return Page_ {{id, Span {m_map[id]}, nullptr, true}};
     }
 
 private:
@@ -172,13 +172,13 @@ public:
     {}
 
     std::string backing;
-    Page page;
+    Page_ page;
 };
 
 TEST(PageTests, WriteToReadOnlyPageDeathTest)
 {
     std::string backing(256, '\x00');
-    Page read_only {{Id::root(), Span {backing}, nullptr, false}};
+    Page_ read_only {{Id::root(), Span {backing}, nullptr, false}};
     ASSERT_DEATH(read_only.set_type(PageType::EXTERNAL_NODE), EXPECTATION_MATCHER);
 }
 

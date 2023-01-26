@@ -36,12 +36,17 @@ public:
     [[nodiscard]] auto page_size() const -> Size override;
     [[nodiscard]] auto hit_ratio() const -> double override;
     [[nodiscard]] auto recovery_lsn() -> Id override;
-    [[nodiscard]] auto allocate() -> tl::expected<Page, Status> override;
-    [[nodiscard]] auto acquire(Id pid, bool is_writable) -> tl::expected<Page, Status> override;
-    [[nodiscard]] auto release(Page page) -> Status override;
+    [[nodiscard]] auto allocate() -> tl::expected<Page_, Status> override;
+    [[nodiscard]] auto acquire(Id pid, bool is_writable) -> tl::expected<Page_, Status> override;
+    [[nodiscard]] auto release(Page_ page) -> Status override;
     [[nodiscard]] auto flush(Lsn target_lsn) -> Status override;
     auto save_state(FileHeader &header) -> void override;
     auto load_state(const FileHeader &header) -> void override;
+
+    [[nodiscard]] auto allocate_() -> tl::expected<Page, Status> override;
+    [[nodiscard]] auto acquire_(Id) -> tl::expected<Page, Status> override;
+    auto upgrade_(Page &page) -> void override;
+    auto release_(Page page) -> void override;
 
     [[nodiscard]]
     auto bytes_written() const -> Size override
@@ -53,7 +58,8 @@ private:
     explicit BasicPager(const Parameters &param, Framer framer);
     [[nodiscard]] auto pin_frame(Id) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
-    auto watch_page(Page &page, PageCache::Entry &entry) -> void;
+    auto watch_page_(Page &page, PageCache::Entry &entry) -> void;
+    auto watch_page(Page_ &page, PageCache::Entry &entry) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
     auto set_recovery_lsn(Lsn lsn) -> void;
 

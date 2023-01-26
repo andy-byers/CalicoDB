@@ -4,6 +4,8 @@
 #include "pager/basic_pager.h"
 #include "pager/framer.h"
 #include "pager/page_cache.h"
+#include "temp/node.h"
+#include "temp/header.h"
 #include "unit_tests.h"
 #include "utils/layout.h"
 #include "utils/system.h"
@@ -448,7 +450,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = PageLayout::content_offset(page.id());
     CALICO_EXPECT_LE(offset + message.size(), page.size());
-    page.write(Slice {message}, offset);
+    mem_copy(page.span(offset, message.size()), message);
 }
 
 [[nodiscard]]
@@ -482,6 +484,7 @@ public:
         });
         EXPECT_TRUE(r.has_value());
         pager = std::move(*r);
+        state.has_xact = true;
     }
 
     ~PagerTests() override = default;
@@ -489,8 +492,9 @@ public:
     [[nodiscard]]
     auto allocate_write(const std::string &message) const
     {
-        auto r = pager->allocate();
+        auto r = pager->allocate_();
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
+        pager->upgrade_(*r);
         write_to_page(*r, message);
         return std::move(*r);
     }
@@ -500,16 +504,17 @@ public:
     {
         auto page = allocate_write(message);
         const auto id = page.id();
-        const auto s = pager->release(std::move(page));
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
+        pager->release_(std::move(page));
+        EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
         return id;
     }
 
     [[nodiscard]]
     auto acquire_write(Id id, const std::string &message) const
     {
-        auto r = pager->acquire(id, false);
+        auto r = pager->acquire_(id);
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
+        pager->upgrade_(*r);
         write_to_page(*r, message);
         return std::move(*r);
     }
@@ -517,17 +522,18 @@ public:
     auto acquire_write_release(Id id, const std::string &message) const
     {
         auto page = acquire_write(id, message);
-        const auto s = pager->release(std::move(page));
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
+        pager->release_(std::move(page));
+        EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
     }
 
     [[nodiscard]]
     auto acquire_read_release(Id id, Size size) const
     {
-        auto r = pager->acquire(id, false);
+        auto r = pager->acquire_(id);
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
         auto message = read_from_page(*r, size);
-        EXPECT_TRUE(pager->release(std::move(*r)).is_ok());
+        pager->release_(std::move(*r));
+        EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
         return message;
     }
 
@@ -566,39 +572,31 @@ TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
 {
     const auto id = allocate_write_release(test_message);
-    auto r = pager->acquire(id, false);
+    auto r = pager->acquire_(id);
     ASSERT_EQ(id, r->id());
     ASSERT_EQ(id, Id::root());
-    EXPECT_TRUE(pager->release(std::move(*r)).is_ok());
+    pager->release_(std::move(*r));
 }
 
-TEST_F(PagerTests, MultipleWritersDeathTest)
-{
-    const auto page = allocate_write(test_message);
-    ASSERT_DEATH(const auto same_page = pager->acquire(page.id(), true), EXPECTATION_MATCHER);
-}
-
-TEST_F(PagerTests, ReaderAndWriterDeathTest)
-{
-    const auto page = allocate_write(test_message);
-    ASSERT_DEATH(const auto same_page = pager->acquire(page.id(), false), EXPECTATION_MATCHER);
-}
+//TEST_F(PagerTests, MultipleWritersDeathTest)
+//{
+//    const auto page = allocate_write(test_message);
+//    ASSERT_DEATH(const auto same_page = pager->acquire_(page.id()), EXPECTATION_MATCHER);
+//}
+//
+//TEST_F(PagerTests, ReaderAndWriterDeathTest)
+//{
+//    const auto page = allocate_write(test_message);
+//    ASSERT_DEATH(const auto same_page = pager->acquire_(page.id()), EXPECTATION_MATCHER);
+//}
 
 TEST_F(PagerTests, MultipleReaders)
 {
     const auto id = allocate_write_release(test_message);
-    auto page_1a = pager->acquire(id, false).value();
-    auto page_1b = pager->acquire(id, false).value();
-    ASSERT_TRUE(pager->release(std::move(page_1a)).is_ok());
-    ASSERT_TRUE(pager->release(std::move(page_1b)).is_ok());
-}
-
-TEST_F(PagerTests, PagesAreAutomaticallyReleased)
-{
-    // This line allocates a page, writes to it, then lets it go out of scope. The page should release itself in its destructor using the pointer it
-    // stores back to the pager object. If it doesn't, we would not be able to acquire the same page as writable again (see MultipleWritersDeathTest).
-    const auto id = allocate_write(test_message).id();
-    ASSERT_EQ(acquire_read_release(id, test_message.size()), test_message);
+    auto page_1a = pager->acquire_(id).value();
+    auto page_1b = pager->acquire_(id).value();
+    pager->release_(std::move(page_1a));
+    pager->release_(std::move(page_1b));
 }
 
 template<class T>
@@ -622,25 +620,6 @@ TEST_F(PagerTests, RootDataPersistsInFrame)
 TEST_F(PagerTests, RootDataPersistsInStorage)
 {
     run_root_persistence_test(*this, frame_count * 2);
-}
-
-TEST_F(PagerTests, HeaderDataPersists)
-{
-    auto root = allocate_write(test_message);
-    root.set_type(PageType::INTERNAL_NODE);
-    root.set_lsn(Id {123});
-    FileHeader header {
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        page_size,
-        {},
-    };
-    write_header(root, header);
-    pager->release(std::move(root));
 }
 
 [[nodiscard]]

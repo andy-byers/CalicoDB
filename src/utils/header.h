@@ -8,7 +8,7 @@
 
 namespace Calico {
 
-class Page;
+class Page_;
 
 static constexpr std::uint32_t MAGIC_CODE {0xB11924E1};
 static constexpr Size CRC_OFFSET {2 * sizeof(std::uint32_t)};
@@ -26,7 +26,7 @@ struct FileHeader {
 
 static_assert(sizeof(FileHeader) == 48);
 
-inline auto read_header(const Page &page) -> FileHeader
+inline auto read_header(const Page_ &page) -> FileHeader
 {
     FileHeader header {};
     Span bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
@@ -34,7 +34,7 @@ inline auto read_header(const Page &page) -> FileHeader
     return header;
 }
 
-inline auto write_header(Page &page, const FileHeader &header) -> void
+inline auto write_header(Page_ &page, const FileHeader &header) -> void
 {
     Slice bytes {reinterpret_cast<const Byte*>(&header), sizeof(FileHeader)};
     mem_copy(page.span(0, sizeof(header)), bytes, bytes.size());

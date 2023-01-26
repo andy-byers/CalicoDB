@@ -28,7 +28,7 @@ auto NodeManager::page_count() const -> Size
 auto NodeManager::allocate(PageType type) -> tl::expected<Node, Status>
 {
     auto page = m_free_list.pop()
-        .or_else([this](const Status &error) -> tl::expected<Page, Status> {
+        .or_else([this](const Status &error) -> tl::expected<Page_, Status> {
             if (error.is_logic_error())
                 return m_pager->allocate();
             return tl::make_unexpected(error);
@@ -44,7 +44,7 @@ auto NodeManager::allocate(PageType type) -> tl::expected<Node, Status>
 auto NodeManager::acquire(Id id, bool is_writable) -> tl::expected<Node, Status>
 {
     return m_pager->acquire(id, is_writable)
-        .and_then([this](Page page) -> tl::expected<Node, Status> {
+        .and_then([this](Page_ page) -> tl::expected<Node, Status> {
             return Node {std::move(page), false, m_scratch.data()};
         })
         .or_else([this, is_writable](const Status &error) -> tl::expected<Node, Status> {
@@ -79,7 +79,7 @@ auto NodeManager::allocate_chain(Slice overflow) -> tl::expected<Id, Status>
 
     while (!overflow.is_empty()) {
         auto page = m_free_list.pop()
-            .or_else([this](const Status &error) -> tl::expected<Page, Status> {
+            .or_else([this](const Status &error) -> tl::expected<Page_, Status> {
                 if (error.is_logic_error())
                     return m_pager->allocate();
                 return tl::make_unexpected(error);

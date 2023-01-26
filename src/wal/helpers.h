@@ -154,7 +154,6 @@ private:
     MonotonicScratchManager m_manager;
 };
 
-
 [[nodiscard]]
 inline auto read_first_lsn(Storage &store, const std::string &prefix, SegmentId id, WalSet &set) -> tl::expected<Id, Status>
 {

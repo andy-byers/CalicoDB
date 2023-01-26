@@ -14,7 +14,7 @@ class Link;
 class Internal;
 class Node;
 class NodeManager;
-class Page;
+class Page_;
 struct FileHeader;
 
 class Tree {

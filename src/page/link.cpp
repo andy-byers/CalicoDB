@@ -5,7 +5,7 @@
 
 namespace Calico {
 
-Link::Link(Page page)
+Link::Link(Page_ page)
     : m_page {std::move(page)}
 {}
 

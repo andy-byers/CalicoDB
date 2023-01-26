@@ -19,6 +19,11 @@ private:
     Size m_max_local {};
 };
 
+struct PayloadMeta {
+    Id overflow_id;
+    Size local_value_size {};
+};
+
 class Cell {
 public:
     struct Parameters {

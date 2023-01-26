@@ -30,12 +30,12 @@ class PageWrapper {
 public:
     static constexpr Size VALUE_SIZE {32};
 
-    explicit PageWrapper(Page page)
+    explicit PageWrapper(Page_ page)
         : m_page {std::move(page)}
     {}
 
     [[nodiscard]]
-    auto take() && -> Page
+    auto take() && -> Page_
     {
         return std::move(m_page);
     }
@@ -58,7 +58,7 @@ public:
     }
 
 private:
-    Page m_page;
+    Page_ m_page;
 };
 
 class XactTestHarness {

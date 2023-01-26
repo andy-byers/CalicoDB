@@ -59,18 +59,18 @@ public:
     [[nodiscard]]
     auto get_state() -> FileHeader
     {
-        CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader));
+        CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader_));
         auto root = get_page(Id::root());
         return read_header(root);
     }
 
     [[nodiscard]]
-    auto get_page(Id id) -> Page
+    auto get_page(Id id) -> Page_
     {
         const auto offset = id.as_index() * m_page_size;
         CALICO_EXPECT_LE(offset + m_page_size, m_data.size());
 
-        return Page {{
+        return Page_ {{
             id,
             Span {m_data}.range(offset, m_page_size),
             nullptr,
@@ -322,7 +322,7 @@ namespace fmt {
 namespace Cco = Calico;
 
 template <>
-struct formatter<Cco::FileHeader> {
+struct formatter<Cco::FileHeader_> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {

@@ -13,7 +13,7 @@ struct FileHeader;
 class Frame;
 class Pager;
 
-class Page final {
+class Page_ final {
 public:
     friend class Calico::Frame;
 
@@ -24,8 +24,8 @@ public:
         bool is_writable {};
     };
 
-    ~Page();
-    explicit Page(const Parameters &);
+    ~Page_();
+    explicit Page_(const Parameters &);
 
     [[nodiscard]] auto is_writable() const -> bool
     {
@@ -49,8 +49,8 @@ public:
     auto apply_update(const FullImageDescriptor&) -> void;
 
     // NOTE: We need these because we have a user-defined destructor.
-    Page(Page &&) = default;
-    auto operator=(Page &&) -> Page & = default;
+    Page_(Page_ &&) = default;
+    auto operator=(Page_ &&) -> Page_ & = default;
 
 private:
     std::vector<PageDelta> m_deltas;
@@ -61,12 +61,12 @@ private:
     bool m_is_writable {};
 };
 
-[[nodiscard]] auto get_u16(const Page &page, Size offset) -> std::uint16_t;
-[[nodiscard]] auto get_u32(const Page &page, Size offset) -> std::uint32_t;
-[[nodiscard]] auto get_u64(const Page &page, Size offset) -> std::uint64_t;
-auto put_u16(Page &page, Size offset, std::uint16_t value) -> void;
-auto put_u32(Page &page, Size offset, std::uint32_t value) -> void;
-auto put_u64(Page &page, Size offset, std::uint64_t value) -> void;
+[[nodiscard]] auto get_u16(const Page_ &page, Size offset) -> std::uint16_t;
+[[nodiscard]] auto get_u32(const Page_ &page, Size offset) -> std::uint32_t;
+[[nodiscard]] auto get_u64(const Page_ &page, Size offset) -> std::uint64_t;
+auto put_u16(Page_ &page, Size offset, std::uint16_t value) -> void;
+auto put_u32(Page_ &page, Size offset, std::uint32_t value) -> void;
+auto put_u64(Page_ &page, Size offset, std::uint64_t value) -> void;
 
 } // namespace Calico
 

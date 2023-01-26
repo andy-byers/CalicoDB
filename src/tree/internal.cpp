@@ -114,13 +114,29 @@ auto Internal::positioned_insert(Position position, const Slice &key, const Slic
     CALICO_EXPECT_LE(key.size(), m_maximum_key_size);
     auto [node, index] = std::move(position);
 
-    CALICO_NEW_R(cell, make_cell(key, value, true));
-    node.insert(index, cell);
+    PayloadMeta meta;
+    meta.local_value_size = get_local_value_size(key.size(), value.size(), m_pool->page_size());
+    if (meta.local_value_size != value.size()) {
+        CALICO_NEW_R(id, m_pool->allocate_chain(value.range(meta.local_value_size)));
+        meta.overflow_id = id;
+    }
+//    CALICO_NEW_R(cell, make_cell(key, value, true));
+//    node.insert(index, cell);
     m_cell_count++;
 
-    if (node.is_overflowing())
+    if (!node.emplace(index, key, value, meta)) {
+        auto cell = ::Calico::make_external_cell(key, value, m_pool->page_size());
+//        CALICO_NEW_R(cell, make_cell(key, value, true));
+        if (!meta.overflow_id.is_null())
+            cell.set_overflow_id(meta.overflow_id);
+        node.set_overflow_cell(cell, node.overflow_index());
         return balance_after_overflow(std::move(node));
+    }
     return m_pool->release(std::move(node));
+
+//    if (node.is_overflowing())
+//        return balance_after_overflow(std::move(node));
+//    return m_pool->release(std::move(node));
 }
 
 auto Internal::positioned_modify(Position position, const Slice &value) -> tl::expected<void, Status>
@@ -443,9 +459,10 @@ auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
 
     auto old_separator = parent.read_cell(index);
     auto lowest = rc.extract_cell(0, *m_scratch[1]);
-    CALICO_NEW_R(new_separator, make_cell(rc.read_key(0), {}, false));
-    new_separator.set_child_id(Lc.id());
+    auto new_separator = rc.read_cell(0);
+
     new_separator.detach(*m_scratch[2], true);
+    new_separator.set_child_id(Lc.id());
 
     // Parent might overflow.
     parent.remove(index, old_separator.size());
@@ -464,16 +481,16 @@ auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
 
     auto separator = parent.read_cell(index);
     auto highest = Lc.extract_cell(Lc.cell_count() - 1, *m_scratch[1]);
-    CALICO_NEW_R(new_separator, make_cell(highest.key(), {}, false));
-    new_separator.set_child_id(Lc.id());
-    new_separator.detach(*m_scratch[2], true);
-
-    // Parent might overflow.
-    parent.remove(index, separator.size());
-    parent.insert(index, new_separator);
 
     rc.insert(0, highest);
     CALICO_EXPECT_FALSE(rc.is_overflowing());
+
+    highest.detach(*m_scratch[2], true);
+    highest.set_child_id(Lc.id());
+
+    // Parent might overflow.
+    parent.remove(index, separator.size());
+    parent.insert(index, highest);
     return {};
 }
 

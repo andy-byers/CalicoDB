@@ -7,7 +7,7 @@ namespace Calico {
 
 class Link {
 public:
-    explicit Link(Page);
+    explicit Link(Page_);
 
     [[nodiscard]]
     auto id() const -> Id
@@ -22,17 +22,17 @@ public:
     }
 
     [[nodiscard]]
-    auto page() const -> const Page &
+    auto page() const -> const Page_ &
     {
         return m_page;
     }
 
-    auto page() -> Page &
+    auto page() -> Page_ &
     {
         return m_page;
     }
 
-    auto take() -> Page
+    auto take() -> Page_
     {
         return std::move(m_page);
     }
@@ -44,7 +44,7 @@ public:
     auto content_bytes(Size) -> Span;
 
 private:
-    Page m_page;
+    Page_ m_page;
 };
 
 } // namespace Calico

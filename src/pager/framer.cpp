@@ -23,7 +23,7 @@ auto Frame::lsn() const -> Id
     return Id {get_u64(m_bytes.range(offset))};
 }
 
-auto Frame::ref(Pager &source, bool is_writable) -> Page
+auto Frame::ref(Pager &source, bool is_writable) -> Page_
 {
     CALICO_EXPECT_FALSE(m_is_writable);
 
@@ -32,10 +32,10 @@ auto Frame::ref(Pager &source, bool is_writable) -> Page
         m_is_writable = true;
     }
     m_ref_count++;
-    return Page {{m_page_id, data(), &source, is_writable}};
+    return Page_ {{m_page_id, data(), &source, is_writable}};
 }
 
-auto Frame::unref(Page &page) -> void
+auto Frame::unref(Page_ &page) -> void
 {
     CALICO_EXPECT_EQ(m_page_id, page.id());
     CALICO_EXPECT_GT(m_ref_count, 0);
@@ -46,6 +46,32 @@ auto Frame::unref(Page &page) -> void
     }
     // Make sure the page doesn't get released twice.
     page.m_source.reset();
+    m_ref_count--;
+}
+
+auto Frame::ref_(bool is_writable) -> Page
+{
+    CALICO_EXPECT_FALSE(m_is_writable);
+
+    if (is_writable) {
+        CALICO_EXPECT_EQ(m_ref_count, 0);
+        m_is_writable = true;
+    }
+    m_ref_count++;
+    return Page {m_page_id, data(), is_writable};
+}
+
+auto Frame::unref_(Page &page) -> void
+{
+    CALICO_EXPECT_EQ(m_page_id, page.id());
+    CALICO_EXPECT_GT(m_ref_count, 0);
+
+    if (page.is_writable()) {
+        CALICO_EXPECT_TRUE(m_is_writable);
+        CALICO_EXPECT_EQ(m_ref_count, 1);
+        m_is_writable = false;
+        page.m_write = false;
+    }
     m_ref_count--;
 }
 
@@ -85,14 +111,35 @@ Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size pa
         m_available.emplace_back(Size {m_available.size()});
 }
 
-auto Framer::ref(Size id, Pager &source, bool is_writable) -> Page
+auto Framer::ref(Size id, Pager &source, bool is_writable) -> Page_
 {
     CALICO_EXPECT_LT(id, m_frames.size());
     m_ref_sum++;
     return m_frames[id].ref(source, is_writable);
 }
 
-auto Framer::unref(Size id, Page &page) -> void
+auto Framer::ref_(Size index) -> Page
+{
+    CALICO_EXPECT_LT(index, m_frames.size());
+    m_ref_sum++;
+    return m_frames[index].ref_(false);
+}
+
+auto Framer::unref_(Size index, Page page) -> void
+{
+    CALICO_EXPECT_LT(index, m_frames.size());
+    m_frames[index].unref_(page);
+    m_ref_sum--;
+}
+
+auto Framer::upgrade_(Size index, Page &page) -> void
+{
+    CALICO_EXPECT_LT(index, m_frames.size());
+    m_frames[index].unref_(page);
+    page = m_frames[index].ref_(true);
+}
+
+auto Framer::unref(Size id, Page_ &page) -> void
 {
     CALICO_EXPECT_LT(id, m_frames.size());
     m_frames[id].unref(page);

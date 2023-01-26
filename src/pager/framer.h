@@ -2,17 +2,18 @@
 #define CALICO_PAGER_FRAMER_H
 
 #include "calico/status.h"
+#include "spdlog/spdlog.h"
+#include "temp/page.h"
 #include "utils/expected.hpp"
 #include "utils/types.h"
 #include <list>
 #include <memory>
 #include <optional>
-#include "spdlog/spdlog.h"
 
 namespace Calico {
 
 struct FileHeader;
-class Page;
+class Page_;
 class Pager;
 class RandomEditor;
 class Storage;
@@ -53,8 +54,10 @@ public:
     }
 
     [[nodiscard]] auto lsn() const -> Id;
-    [[nodiscard]] auto ref(Pager&, bool) -> Page;
-    auto unref(Page &page) -> void;
+    [[nodiscard]] auto ref(Pager&, bool) -> Page_;
+    [[nodiscard]] auto ref_(bool) -> Page;
+    auto unref(Page_ &page) -> void;
+    auto unref_(Page &page) -> void;
 
 private:
     Span m_bytes;
@@ -67,21 +70,24 @@ class Framer final {
 public:
     ~Framer() = default;
     [[nodiscard]] static auto open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<Framer, Status>;
-    [[nodiscard]] auto pin(Id) -> tl::expected<Size, Status>;
-    [[nodiscard]] auto write_back(Size) -> Status;
+    [[nodiscard]] auto pin(Id pid) -> tl::expected<Size, Status>;
+    [[nodiscard]] auto write_back(Size index) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto ref(Size, Pager&, bool) -> Page;
+    [[nodiscard]] auto ref_(Size index) -> Page;
     auto unpin(Size) -> void;
-    auto unref(Size, Page&) -> void;
+    auto upgrade_(Size index, Page &page) -> void;
+    auto unref_(Size index, Page page) -> void;
     auto discard(Size) -> void;
-    auto load_state(const FileHeader&) -> void;
-    auto save_state(FileHeader&) const -> void;
-
+    auto load_state(const FileHeader &) -> void;
+    auto save_state(FileHeader &) const -> void;
     [[nodiscard]]
     auto page_count() const -> Size
     {
         return m_page_count;
     }
+
+    [[nodiscard]] auto ref(Size, Pager&, bool) -> Page_;
+    auto unref(Size, Page_ &) -> void;
 
     [[nodiscard]]
     auto page_size() const -> Size

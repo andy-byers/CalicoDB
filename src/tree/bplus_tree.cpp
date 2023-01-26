@@ -8,54 +8,6 @@
 
 namespace Calico {
 
-BPlusTree_::BPlusTree_(Pager &pager, System &system)
-    : m_maximum_key_size {get_max_local(pager.page_size())},
-      m_scratch {{
-          // Scratch memory needs to be able to hold a maximally-sized cell.
-          StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
-          StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
-          StaticScratch {m_maximum_key_size + MAX_CELL_HEADER_SIZE},
-      }},
-      m_pager {&pager},
-      m_system {&system}
-{}
-
-auto BPlusTree_::open(Pager &pager, System &system) -> Tree_::Ptr
-{
-    auto ptr = Tree_::Ptr {new(std::nothrow) BPlusTree_ {pager, system}};
-    if (ptr == nullptr)
-        system.push_error(Error::Level::ERROR, system_error("could not make_room tree: out of memory"));
-    return ptr;
-}
-
-auto BPlusTree_::insert(const Slice &key, const Slice &value) -> bool
-{
-    (void)key, (void)value;
-    return true;
-}
-
-auto BPlusTree_::erase(const Slice &key) -> bool
-{
-    (void)key;
-    return true;
-}
-
-auto BPlusTree_::find(const Slice &key) const -> FindResult
-{
-    (void)key;
-    return FindResult {};
-}
-
-auto BPlusTree_::save_state(FileHeader &header) const -> void
-{
-    (void)header;
-}
-
-auto BPlusTree_::load_state(const FileHeader &header) -> void
-{
-    (void)header;
-}
-
 BPlusTree::BPlusTree(Pager &pager, System &system, Size page_size)
     : m_pool {pager, system, page_size},
       m_internal {m_pool},
