@@ -17,13 +17,14 @@ class Page;
  *     36      8     recovery_lsn
  *     38      2     page_size
  */
-struct FileHeader_ {
-    static constexpr Size SIZE {40};
-    explicit FileHeader_() = default;
-    explicit FileHeader_(const Page &page);
+struct FileHeader {
+    static constexpr std::uint32_t MAGIC_CODE {0xB11924E1};
+    static constexpr Size SIZE {42};
+    explicit FileHeader() = default;
+    explicit FileHeader(const Page &page);
     auto write(Page &page) const -> void;
 
-    std::uint32_t magic_code {};
+    std::uint32_t magic_code {MAGIC_CODE};
     std::uint32_t header_crc {};
     std::uint64_t page_count {};
     std::uint64_t record_count {};
@@ -45,10 +46,10 @@ struct FileHeader_ {
  *     39      2     free_start
  *     41      2     free_total
  */
-struct NodeHeader_ {
+struct NodeHeader {
     static constexpr Size SIZE {43};
-    explicit NodeHeader_() = default;
-    explicit NodeHeader_(const Page &page);
+    explicit NodeHeader() = default;
+    explicit NodeHeader(const Page &page);
     auto write(Page &page) const -> void;
 
     Lsn page_lsn;

@@ -150,7 +150,7 @@ auto Core::do_open(Options sanitized) -> Status
 
     // Allocate the tree object.
     {
-        auto r = BPlusTree::open(*pager, *m_system, sanitized.page_size);
+        auto r = BPlusTree__::open(*pager, *m_system, sanitized.page_size);
         if (!r.has_value())
             return r.error();
         tree = std::move(*r);
@@ -499,8 +499,8 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     static constexpr Size MINIMUM_BUFFER_COUNT {16};
     const auto MSG = fmt::format("cannot initialize database at \"{}\"", prefix);
 
-    FileHeader header {};
-    Span bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
+    FileHeader__ header {};
+    Span bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader__)};
 
     if (options.page_size < MINIMUM_PAGE_SIZE)
         return tl::make_unexpected(invalid_argument(
@@ -562,9 +562,9 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         s = store.file_size(path, file_size);
         if (!s.is_ok()) return tl::make_unexpected(s);
 
-        if (file_size < sizeof(FileHeader))
+        if (file_size < sizeof(FileHeader__))
             return tl::make_unexpected(corruption(
-                "{}: database is too small to read the file header (file header is {} span)", MSG, sizeof(FileHeader)));
+                "{}: database is too small to read the file header (file header is {} bytes)", MSG, sizeof(FileHeader__)));
 
         s = read_exact(*reader, bytes, 0);
         if (!s.is_ok()) return tl::make_unexpected(s);
@@ -573,9 +573,9 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
             return tl::make_unexpected(corruption(
                 "{}: database size of {} B is invalid (database must contain an integral number of pages)", MSG, file_size));
 
-        if (header.magic_code != MAGIC_CODE)
+        if (header.magic_code != MAGIC_CODE__)
             return tl::make_unexpected(invalid_argument(
-                "{}: path does not point to a Calico DB database (magic code is {} but should be {})", MSG, header.magic_code, MAGIC_CODE));
+                "{}: path does not point to a Calico DB database (magic code is {} but should be {})", MSG, header.magic_code, MAGIC_CODE__));
 
         if (header.header_crc != compute_header_crc(header))
             return tl::make_unexpected(corruption(
@@ -584,7 +584,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         exists = true;
 
     } else if (s.is_not_found()) {
-        header.magic_code = MAGIC_CODE;
+        header.magic_code = MAGIC_CODE__;
         header.page_size = static_cast<std::uint16_t>(options.page_size);
         header.recovery_lsn = Id::root().value;
         header.header_crc = compute_header_crc(header);

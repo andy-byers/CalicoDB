@@ -19,7 +19,7 @@ class Tree;
 class WriteAheadLog;
 
 struct InitialState {
-    FileHeader state {};
+    FileHeader__ state {};
     bool is_new {};
 };
 

@@ -15,7 +15,7 @@ public:
 
     static constexpr auto header_offset(Id page_id) noexcept -> Size
     {
-        return page_id.is_root() * sizeof(FileHeader);
+        return page_id.is_root() * sizeof(FileHeader__);
     }
 
     static constexpr auto content_offset(Id page_id) noexcept -> Size

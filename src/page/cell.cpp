@@ -27,12 +27,12 @@ auto LocalValueSizeGetter::operator()(Size key_size, Size value_size) const -> S
     return get_local_value_size(key_size, value_size, m_min_local, m_max_local);
 }
 
-auto Cell::make_external(Byte *buffer, const Slice &key, const Slice &value, const LocalValueSizeGetter &lvs_getter) -> Cell
+auto Cell__::make_external(Byte *buffer, const Slice &key, const Slice &value, const LocalValueSizeGetter &lvs_getter) -> Cell__
 {
     CALICO_EXPECT_FALSE(key.is_empty());
     const auto lvs = lvs_getter(key.size(), value.size());
 
-    Cell cell;
+    Cell__ cell;
     cell.m_data = buffer;
     cell.m_key_ptr = key.data();
     cell.m_val_ptr = value.data();
@@ -53,11 +53,11 @@ auto Cell::make_external(Byte *buffer, const Slice &key, const Slice &value, con
     return cell;
 }
 
-auto Cell::make_internal(Byte *buffer, const Slice &key) -> Cell
+auto Cell__::make_internal(Byte *buffer, const Slice &key) -> Cell__
 {
     CALICO_EXPECT_FALSE(key.is_empty());
 
-    Cell cell;
+    Cell__ cell;
     cell.m_data = buffer;
     cell.m_key_ptr = key.data();
     cell.m_val_ptr = nullptr;
@@ -67,9 +67,9 @@ auto Cell::make_internal(Byte *buffer, const Slice &key) -> Cell
     return cell;
 }
 
-auto Cell::read_external(Byte *data, const LocalValueSizeGetter &lvs_getter) -> Cell
+auto Cell__::read_external(Byte *data, const LocalValueSizeGetter &lvs_getter) -> Cell__
 {
-    Cell cell;
+    Cell__ cell;
     cell.m_data = data;
 
     const auto key_size = get_u16(data);
@@ -81,17 +81,17 @@ auto Cell::read_external(Byte *data, const LocalValueSizeGetter &lvs_getter) -> 
     return cell;
 }
 
-auto Cell::read_internal(Byte *data) -> Cell
+auto Cell__::read_internal(Byte *data) -> Cell__
 {
-    Cell cell;
+    Cell__ cell;
     cell.m_data = data;
     cell.m_size = extra_size_internal() + get_u16(data + sizeof(Id));
     return cell;
 }
 
-auto Cell::read_at(Slice in, Size page_size, bool is_external) -> Cell
+auto Cell__::read_at(Slice in, Size page_size, bool is_external) -> Cell__
 {
-    Cell cell;
+    Cell__ cell;
     cell.m_page_size = page_size;
 
     if (!is_external) {
@@ -124,12 +124,12 @@ auto Cell::read_at(Slice in, Size page_size, bool is_external) -> Cell
     return cell;
 }
 
-auto Cell::read_at(const Node &node, Size offset) -> Cell
+auto Cell__::read_at(const Node__ &node, Size offset) -> Cell__
 {
     return read_at(node.page().view(offset), node.size(), node.is_external());
 }
 
-Cell::Cell(const Parameters &param)
+Cell__::Cell__(const Parameters &param)
     : m_key {param.key},
       m_local_value {param.local_value},
       m_overflow_id {param.overflow_id},
@@ -139,12 +139,12 @@ Cell::Cell(const Parameters &param)
       m_is_external {param.is_external}
 {}
 
-auto Cell::copy() const -> Cell
+auto Cell__::copy() const -> Cell__
 {
     return *this;
 }
 
-auto Cell::size() const -> Size
+auto Cell__::size() const -> Size
 {
     const auto is_internal = !m_is_external;
     const auto size_fields {sizeof(std::uint16_t) + sizeof(std::uint32_t) * m_is_external};
@@ -153,55 +153,55 @@ auto Cell::size() const -> Size
            size_fields + m_key.size() + m_local_value.size();
 }
 
-auto Cell::child_id() const -> Id
+auto Cell__::child_id() const -> Id
 {
     CALICO_EXPECT_FALSE(m_is_external);
 //    return {get_u64(m_data)};
     return m_child_id;
 }
 
-auto Cell::set_child_id(Id id) -> void
+auto Cell__::set_child_id(Id id) -> void
 {
     CALICO_EXPECT_FALSE(m_is_external);
     m_child_id = id;
 //    put_u64(m_data, id.value);
 }
 
-auto Cell::set_overflow_id(Id id) -> void
+auto Cell__::set_overflow_id(Id id) -> void
 {
     CALICO_EXPECT_TRUE(m_is_external);
     m_overflow_id = id;
 }
 
-auto Cell::key() const -> Slice
+auto Cell__::key() const -> Slice
 {
     return m_key;
 }
 
-auto Cell::local_value() const -> Slice
+auto Cell__::local_value() const -> Slice
 {
     CALICO_EXPECT_TRUE(m_is_external);
     return m_local_value;
 }
 
-auto Cell::value_size() const -> Size
+auto Cell__::value_size() const -> Size
 {
     return m_value_size;
 }
 
-auto Cell::overflow_size() const -> Size
+auto Cell__::overflow_size() const -> Size
 {
     return m_value_size - m_local_value.size();
 }
 
-auto Cell::overflow_id() const -> Id
+auto Cell__::overflow_id() const -> Id
 {
     // Internal cells have a zero-length value field, so they cannot overflow.
     CALICO_EXPECT_TRUE(m_is_external);
     return m_overflow_id;
 }
 
-auto Cell::write(Span out) const -> void
+auto Cell__::write(Span out) const -> void
 {
     if (!m_is_external) {
         CALICO_EXPECT_FALSE(m_child_id.is_root());
@@ -232,7 +232,7 @@ auto Cell::write(Span out) const -> void
     }
 }
 
-auto Cell::detach(Span scratch, bool ensure_internal) -> void
+auto Cell__::detach(Span scratch, bool ensure_internal) -> void
 {
     if (ensure_internal && m_is_external)
         set_is_external(false);
@@ -249,7 +249,7 @@ auto Cell::detach(Span scratch, bool ensure_internal) -> void
     m_is_attached = false;
 }
 
-auto Cell::set_is_external(bool is_external) -> void
+auto Cell__::set_is_external(bool is_external) -> void
 {
     m_is_external = is_external;
 
@@ -260,11 +260,11 @@ auto Cell::set_is_external(bool is_external) -> void
     }
 }
 
-auto make_external_cell(Byte *buffer, const Slice &key, const Slice &value, Size page_size) -> Cell
+auto make_external_cell(Byte *buffer, const Slice &key, const Slice &value, Size page_size) -> Cell__
 {
     CALICO_EXPECT_FALSE(key.is_empty());
     const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
-    Cell::Parameters param;
+    Cell__::Parameters param;
     param.buffer = buffer;
     param.key = key;
     param.local_value = value;
@@ -278,26 +278,26 @@ auto make_external_cell(Byte *buffer, const Slice &key, const Slice &value, Size
         // Set to an arbitrary value.
         param.overflow_id = Id::root();
     }
-    return Cell {param};
+    return Cell__ {param};
 }
 
-auto make_internal_cell(Byte *buffer, const Slice &key, Size page_size) -> Cell
+auto make_internal_cell(Byte *buffer, const Slice &key, Size page_size) -> Cell__
 {
     CALICO_EXPECT_FALSE(key.is_empty());
-    Cell::Parameters param;
+    Cell__::Parameters param;
     param.buffer = buffer;
     param.key = key;
     param.page_size = page_size;
     param.is_external = false;
-    return Cell {param};
+    return Cell__ {param};
 }
 
 
-auto make_external_cell(const Slice &key, const Slice &value, Size page_size) -> Cell
+auto make_external_cell(const Slice &key, const Slice &value, Size page_size) -> Cell__
 {
     CALICO_EXPECT_FALSE(key.is_empty());
     const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
-    Cell::Parameters param;
+    Cell__::Parameters param;
     param.key = key;
     param.local_value = value;
     param.value_size = value.size();
@@ -310,17 +310,17 @@ auto make_external_cell(const Slice &key, const Slice &value, Size page_size) ->
         // Set to an arbitrary value.
         param.overflow_id = Id::root();
     }
-    return Cell {param};
+    return Cell__ {param};
 }
 
-auto make_internal_cell(const Slice &key, Size page_size) -> Cell
+auto make_internal_cell(const Slice &key, Size page_size) -> Cell__
 {
     CALICO_EXPECT_FALSE(key.is_empty());
-    Cell::Parameters param;
+    Cell__::Parameters param;
     param.key = key;
     param.page_size = page_size;
     param.is_external = false;
-    return Cell {param};
+    return Cell__ {param};
 }
 
 } // namespace Calico

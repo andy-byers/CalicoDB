@@ -25,7 +25,7 @@ auto NodeManager::page_count() const -> Size
     return m_pager->page_count();
 }
 
-auto NodeManager::allocate(PageType type) -> tl::expected<Node, Status>
+auto NodeManager::allocate(PageType type) -> tl::expected<Node__, Status>
 {
     auto page = m_free_list.pop()
         .or_else([this](const Status &error) -> tl::expected<Page_, Status> {
@@ -35,26 +35,26 @@ auto NodeManager::allocate(PageType type) -> tl::expected<Node, Status>
         });
     if (page) {
         page->set_type(type);
-        return Node {std::move(*page), true, m_scratch.data()};
+        return Node__ {std::move(*page), true, m_scratch.data()};
     }
     CALICO_ERROR(page.error());
     return tl::make_unexpected(page.error());
 }
 
-auto NodeManager::acquire(Id id, bool is_writable) -> tl::expected<Node, Status>
+auto NodeManager::acquire(Id id, bool is_writable) -> tl::expected<Node__, Status>
 {
     return m_pager->acquire(id, is_writable)
-        .and_then([this](Page_ page) -> tl::expected<Node, Status> {
-            return Node {std::move(page), false, m_scratch.data()};
+        .and_then([this](Page_ page) -> tl::expected<Node__, Status> {
+            return Node__ {std::move(page), false, m_scratch.data()};
         })
-        .or_else([this, is_writable](const Status &error) -> tl::expected<Node, Status> {
+        .or_else([this, is_writable](const Status &error) -> tl::expected<Node__, Status> {
             const auto is_severe = is_writable; // || TODO: in transaction?
             m_system->push_error(is_severe ? Error::ERROR : Error::WARN, error);
             return tl::make_unexpected(error);
         });
 }
 
-auto NodeManager::release(Node node) -> tl::expected<void, Status>
+auto NodeManager::release(Node__ node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(node.is_overflowing());
     const auto was_writable = node.page().is_writable();
@@ -65,7 +65,7 @@ auto NodeManager::release(Node node) -> tl::expected<void, Status>
     return {};
 }
 
-auto NodeManager::destroy(Node node) -> tl::expected<void, Status>
+auto NodeManager::destroy(Node__ node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(node.is_overflowing());
     return m_free_list.push(node.take());
@@ -148,12 +148,12 @@ auto NodeManager::destroy_chain(Id id, Size size) -> tl::expected<void, Status>
     return {};
 }
 
-auto NodeManager::save_state(FileHeader &header) -> void
+auto NodeManager::save_state(FileHeader__ &header) -> void
 {
     m_free_list.save_state(header);
 }
 
-auto NodeManager::load_state(const FileHeader &header) -> void
+auto NodeManager::load_state(const FileHeader__ &header) -> void
 {
     m_free_list.load_state(header);
 }

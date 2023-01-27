@@ -6,17 +6,17 @@
 
 namespace Calico {
 
-auto FreeList::save_state(FileHeader &header) const -> void
+auto FreeList__::save_state(FileHeader__ &header) const -> void
 {
     header.freelist_head = m_head.value;
 }
 
-auto FreeList::load_state(const FileHeader &header) -> void
+auto FreeList__::load_state(const FileHeader__ &header) -> void
 {
     m_head.value = header.freelist_head;
 }
 
-auto FreeList::push(Page_ page) -> tl::expected<void, Status>
+auto FreeList__::push(Page_ page) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(page.id().is_root());
     page.set_type(PageType::FREELIST_LINK);
@@ -28,7 +28,7 @@ auto FreeList::push(Page_ page) -> tl::expected<void, Status>
     return {};
 }
 
-auto FreeList::pop() -> tl::expected<Page_, Status>
+auto FreeList__::pop() -> tl::expected<Page_, Status>
 {
     if (!m_head.is_null()) {
         return m_pager->acquire(m_head, true)

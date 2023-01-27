@@ -27,7 +27,7 @@ constexpr auto is_pod = std::is_standard_layout_v<T> && std::is_trivial_v<T>;
 
 TEST(TestFileHeader, FileHeaderIsPOD)
 {
-    ASSERT_TRUE(is_pod<FileHeader>);
+    ASSERT_TRUE(is_pod<FileHeader__>);
 }
 
 class TestDatabase {

@@ -40,8 +40,8 @@ public:
     [[nodiscard]] auto acquire(Id pid, bool is_writable) -> tl::expected<Page_, Status> override;
     [[nodiscard]] auto release(Page_ page) -> Status override;
     [[nodiscard]] auto flush(Lsn target_lsn) -> Status override;
-    auto save_state(FileHeader &header) -> void override;
-    auto load_state(const FileHeader &header) -> void override;
+    auto save_state(FileHeader__ &header) -> void override;
+    auto load_state(const FileHeader__ &header) -> void override;
 
     [[nodiscard]] auto allocate_() -> tl::expected<Page, Status> override;
     [[nodiscard]] auto acquire_(Id) -> tl::expected<Page, Status> override;

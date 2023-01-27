@@ -148,7 +148,7 @@ auto Cursor::status() const -> Status
     return m_status;
 }
 
-auto CursorInternal::move_to(Cursor &cursor, Node node, Size index) -> void
+auto CursorInternal::move_to(Cursor &cursor, Node__ node, Size index) -> void
 {
     CALICO_EXPECT_TRUE(node.is_external());
     const auto count = node.cell_count();

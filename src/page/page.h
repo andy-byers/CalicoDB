@@ -9,7 +9,7 @@
 
 namespace Calico {
 
-struct FileHeader;
+struct FileHeader__;
 class Frame;
 class Pager;
 

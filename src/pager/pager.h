@@ -13,7 +13,7 @@ namespace Calico {
 
 constexpr auto DATA_FILENAME = "data";
 
-struct FileHeader;
+struct FileHeader__;
 struct PageDelta;
 class Page_;
 class Page;
@@ -36,8 +36,8 @@ public:
     virtual auto acquire(Id, bool) -> tl::expected<Page_, Status> = 0;
     virtual auto release(Page_) -> Status = 0;
     virtual auto flush(Lsn lsn_limit) -> Status = 0;
-    virtual auto save_state(FileHeader &) -> void = 0;
-    virtual auto load_state(const FileHeader &) -> void = 0;
+    virtual auto save_state(FileHeader__ &) -> void = 0;
+    virtual auto load_state(const FileHeader__ &) -> void = 0;
 
     [[nodiscard]] virtual auto allocate_() -> tl::expected<Page, Status> = 0;
     [[nodiscard]] virtual auto acquire_(Id) -> tl::expected<Page, Status> = 0;

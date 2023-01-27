@@ -15,7 +15,7 @@ static auto node_header_offset(const Page &page)
     return page_offset(page);
 }
 
-FileHeader_::FileHeader_(const Page &page)
+FileHeader::FileHeader(const Page &page)
 {
     CALICO_EXPECT_TRUE(page.id().is_root());
     auto data = page.data() + file_header_offset(page);
@@ -41,7 +41,7 @@ FileHeader_::FileHeader_(const Page &page)
     page_size = get_u16(data);
 }
 
-auto FileHeader_::write(Page &page) const -> void
+auto FileHeader::write(Page &page) const -> void
 {
     CALICO_EXPECT_TRUE(page.id().is_root());
     auto data = page.data() + file_header_offset(page);
@@ -68,7 +68,7 @@ auto FileHeader_::write(Page &page) const -> void
     insert_delta(page.m_deltas, {file_header_offset(page), SIZE});
 }
 
-NodeHeader_::NodeHeader_(const Page &page)
+NodeHeader::NodeHeader(const Page &page)
 {
     auto data = page.data() + node_header_offset(page);
 
@@ -91,21 +91,21 @@ NodeHeader_::NodeHeader_(const Page &page)
     data += sizeof(Id);
 
     cell_count = get_u16(data);
-    data += sizeof(std::uint16_t);
+    data += sizeof(PageSize);
 
     cell_start = get_u16(data);
-    data += sizeof(std::uint16_t);
+    data += sizeof(PageSize);
 
     frag_count = get_u16(data);
-    data += sizeof(std::uint16_t);
+    data += sizeof(PageSize);
 
     free_start = get_u16(data);
-    data += sizeof(std::uint16_t);
+    data += sizeof(PageSize);
 
     free_total = get_u16(data);
 }
 
-auto NodeHeader_::write(Page &page) const -> void
+auto NodeHeader::write(Page &page) const -> void
 {
     auto *data = page.data() + node_header_offset(page);
 
@@ -124,16 +124,16 @@ auto NodeHeader_::write(Page &page) const -> void
     data += sizeof(Id);
 
     put_u16(data, cell_count);
-    data += sizeof(std::uint16_t);
+    data += sizeof(PageSize);
 
     put_u16(data, cell_start);
-    data += sizeof(std::uint16_t);
+    data += sizeof(PageSize);
 
     put_u16(data, frag_count);
-    data += sizeof(std::uint16_t);
+    data += sizeof(PageSize);
 
     put_u16(data, free_start);
-    data += sizeof(std::uint16_t);
+    data += sizeof(PageSize);
 
     put_u16(data, free_total);
     insert_delta(page.m_deltas, {node_header_offset(page), SIZE});

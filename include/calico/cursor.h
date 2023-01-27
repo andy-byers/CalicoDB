@@ -7,7 +7,7 @@
 
 namespace Calico {
 
-class Node;
+class Node__;
 struct CursorActions;
 
 class Cursor final {

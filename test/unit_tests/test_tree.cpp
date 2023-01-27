@@ -58,7 +58,7 @@ public:
     TreeTests()
     {
         max_local = get_max_local(PAGE_SIZE);
-        auto r = BPlusTree::open(
+        auto r = BPlusTree__::open(
             *pager,
             state,
             PAGE_SIZE);

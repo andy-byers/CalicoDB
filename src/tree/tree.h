@@ -9,13 +9,13 @@
 
 namespace Calico {
 
-class Cell;
+class Cell__;
 class Link;
 class Internal;
-class Node;
+class Node__;
 class NodeManager;
 class Page_;
-struct FileHeader;
+struct FileHeader__;
 
 class Tree {
 public:
@@ -29,9 +29,9 @@ public:
     virtual auto find(const Slice &key) -> Cursor = 0;
     virtual auto find_minimum() -> Cursor = 0;
     virtual auto find_maximum() -> Cursor = 0;
-    virtual auto root(bool) -> tl::expected<Node, Status> = 0;
-    virtual auto save_state(FileHeader &) const -> void = 0;
-    virtual auto load_state(const FileHeader &) -> void = 0;
+    virtual auto root(bool) -> tl::expected<Node__, Status> = 0;
+    virtual auto save_state(FileHeader__ &) const -> void = 0;
+    virtual auto load_state(const FileHeader__ &) -> void = 0;
 
 #if not NDEBUG
     virtual auto TEST_to_string(bool integer_keys) -> std::string = 0;
@@ -56,8 +56,8 @@ public:
     [[nodiscard]] virtual auto find(const Slice &key) const -> FindResult = 0;
     [[nodiscard]] virtual auto insert(const Slice &key, const Slice &value) -> bool = 0;
     [[nodiscard]] virtual auto erase(const Slice &key) -> bool = 0;
-    virtual auto save_state(FileHeader &header) const -> void = 0;
-    virtual auto load_state(const FileHeader &header) -> void = 0;
+    virtual auto save_state(FileHeader__ &header) const -> void = 0;
+    virtual auto load_state(const FileHeader__ &header) -> void = 0;
 };
 
 } // namespace Calico

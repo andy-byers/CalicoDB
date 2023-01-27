@@ -16,7 +16,7 @@ Internal::Internal(NodeManager &pool)
       m_pool {&pool}
 {}
 
-auto Internal::collect_value(const Node &node, Size index) const -> tl::expected<std::string, Status>
+auto Internal::collect_value(const Node__ &node, Size index) const -> tl::expected<std::string, Status>
 {
     auto cell = node.read_cell(index);
     const auto local = cell.local_value();
@@ -36,7 +36,7 @@ auto Internal::collect_value(const Node &node, Size index) const -> tl::expected
     return result;
 }
 
-auto Internal::find_root(bool is_writable) -> tl::expected<Node, Status>
+auto Internal::find_root(bool is_writable) -> tl::expected<Node__, Status>
 {
     return m_pool->acquire(Id::root(), is_writable);
 }
@@ -50,7 +50,7 @@ auto Internal::find_external(const Slice &key) -> tl::expected<SearchResult, Sta
     if (!node.has_value())
         return tl::make_unexpected(node.error());
 
-    Node::FindGeResult result;
+    Node__::FindGeResult result;
     for (;;) {
         result = node->find_ge(key);
         if (node->is_external())
@@ -182,7 +182,7 @@ auto Internal::positioned_remove(Position position) -> tl::expected<void, Status
     return balance_after_underflow(std::move(node), anchor);
 }
 
-auto Internal::balance_after_overflow(Node node) -> tl::expected<void, Status>
+auto Internal::balance_after_overflow(Node__ node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_TRUE(node.is_overflowing());
     while (node.is_overflowing()) {
@@ -195,7 +195,7 @@ auto Internal::balance_after_overflow(Node node) -> tl::expected<void, Status>
     return m_pool->release(std::move(node));
 }
 
-auto Internal::balance_after_underflow(Node node, const Slice &anchor) -> tl::expected<void, Status>
+auto Internal::balance_after_underflow(Node__ node, const Slice &anchor) -> tl::expected<void, Status>
 {
     while (node.is_underflowing()) {
         if (node.id().is_root()) {
@@ -217,7 +217,7 @@ auto Internal::balance_after_underflow(Node node, const Slice &anchor) -> tl::ex
     return m_pool->release(std::move(node));
 }
 
-auto Internal::split_root(Node root) -> tl::expected<Node, Status>
+auto Internal::split_root(Node__ root) -> tl::expected<Node__, Status>
 {
     CALICO_EXPECT_TRUE(root.id().is_root());
     CALICO_EXPECT_TRUE(root.is_overflowing());
@@ -230,7 +230,7 @@ auto Internal::split_root(Node root) -> tl::expected<Node, Status>
     return child;
 }
 
-auto Internal::split_non_root(Node node) -> tl::expected<Node, Status>
+auto Internal::split_non_root(Node__ node) -> tl::expected<Node__, Status>
 {
     CALICO_EXPECT_FALSE(node.id().is_root());
     CALICO_EXPECT_FALSE(node.parent_id().is_null());
@@ -262,7 +262,7 @@ auto Internal::split_non_root(Node node) -> tl::expected<Node, Status>
     return parent;
 }
 
-auto Internal::maybe_fix_child_parent_connections(Node &node) -> tl::expected<void, Status>
+auto Internal::maybe_fix_child_parent_connections(Node__ &node) -> tl::expected<void, Status>
 {
     if (!node.is_external()) {
         const auto parent_id = node.id();
@@ -287,7 +287,7 @@ auto Internal::maybe_fix_child_parent_connections(Node &node) -> tl::expected<vo
  * Note that the key and value must exist until the cell is safely embedded in the tree. If
  * the tree is balanced and there are no overflow cells then this is guaranteed to be true.
  */
-auto Internal::make_cell(const Slice &key, const Slice &value, bool is_external) -> tl::expected<Cell, Status>
+auto Internal::make_cell(const Slice &key, const Slice &value, bool is_external) -> tl::expected<Cell__, Status>
 {
     if (is_external) {
         auto cell = ::Calico::make_external_cell(key, value, m_pool->page_size());
@@ -302,7 +302,7 @@ auto Internal::make_cell(const Slice &key, const Slice &value, bool is_external)
     }
 }
 
-auto Internal::fix_non_root(Node node, Node &parent, Size index) -> tl::expected<bool, Status>
+auto Internal::fix_non_root(Node__ node, Node__ &parent, Size index) -> tl::expected<bool, Status>
 {
     CALICO_EXPECT_FALSE(node.id().is_root());
     CALICO_EXPECT_FALSE(node.is_overflowing());
@@ -348,7 +348,7 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> tl::expected
         return true;
     };
     struct SiblingInfo {
-        std::optional<Node> node;
+        std::optional<Node__> node;
         Size cell_count {};
     };
     SiblingInfo siblings[2] {};
@@ -391,7 +391,7 @@ auto Internal::fix_non_root(Node node, Node &parent, Size index) -> tl::expected
     }
 }
 
-auto Internal::fix_root(Node node) -> tl::expected<void, Status>
+auto Internal::fix_root(Node__ node) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_TRUE(node.id().is_root());
     CALICO_EXPECT_TRUE(node.is_underflowing());
@@ -421,19 +421,19 @@ auto Internal::fix_root(Node node) -> tl::expected<void, Status>
     return m_pool->release(std::move(node));
 }
 
-auto Internal::save_state(FileHeader &header) const -> void
+auto Internal::save_state(FileHeader__ &header) const -> void
 {
     m_pool->save_state(header);
     header.record_count = m_cell_count;
 }
 
-auto Internal::load_state(const FileHeader &header) -> void
+auto Internal::load_state(const FileHeader__ &header) -> void
 {
     m_pool->load_state(header);
     m_cell_count = header.record_count;
 }
 
-auto Internal::rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
+auto Internal::rotate_left(Node__ &parent, Node__ &Lc, Node__ &rc, Size index) -> tl::expected<void, Status>
 {
     if (Lc.is_external()) {
         return external_rotate_left(parent, Lc, rc, index);
@@ -442,7 +442,7 @@ auto Internal::rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::
     }
 }
 
-auto Internal::rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
+auto Internal::rotate_right(Node__ &parent, Node__ &Lc, Node__ &rc, Size index) -> tl::expected<void, Status>
 {
     if (Lc.is_external()) {
         return external_rotate_right(parent, Lc, rc, index);
@@ -451,7 +451,7 @@ auto Internal::rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl:
     }
 }
 
-auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
+auto Internal::external_rotate_left(Node__ &parent, Node__ &Lc, Node__ &rc, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_GT(parent.cell_count(), 0);
@@ -473,7 +473,7 @@ auto Internal::external_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     return {};
 }
 
-auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
+auto Internal::external_rotate_right(Node__ &parent, Node__ &Lc, Node__ &rc, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_GT(parent.cell_count(), 0);
@@ -494,7 +494,7 @@ auto Internal::external_rotate_right(Node &parent, Node &Lc, Node &rc, Size inde
     return {};
 }
 
-auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
+auto Internal::internal_rotate_left(Node__ &parent, Node__ &Lc, Node__ &rc, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_FALSE(Lc.is_external());
@@ -518,7 +518,7 @@ auto Internal::internal_rotate_left(Node &parent, Node &Lc, Node &rc, Size index
     return {};
 }
 
-auto Internal::internal_rotate_right(Node &parent, Node &Lc, Node &rc, Size index) -> tl::expected<void, Status>
+auto Internal::internal_rotate_right(Node__ &parent, Node__ &Lc, Node__ &rc, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_FALSE(parent.is_external());
     CALICO_EXPECT_FALSE(Lc.is_external());

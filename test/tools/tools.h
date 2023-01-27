@@ -57,9 +57,9 @@ public:
     }
 
     [[nodiscard]]
-    auto get_state() -> FileHeader
+    auto get_state() -> FileHeader__
     {
-        CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader_));
+        CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader));
         auto root = get_page(Id::root());
         return read_header(root);
     }
@@ -112,7 +112,7 @@ private:
     Random random {123};
 };
 
-class BPlusTree;
+class BPlusTree__;
 
 namespace tools {
 
@@ -322,7 +322,7 @@ namespace fmt {
 namespace Cco = Calico;
 
 template <>
-struct formatter<Cco::FileHeader_> {
+struct formatter<Cco::FileHeader> {
 
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx) {
@@ -330,7 +330,7 @@ struct formatter<Cco::FileHeader_> {
     }
 
     template <typename FormatContext>
-    auto format(const Cco::FileHeader &header, FormatContext &ctx) {
+    auto format(const Cco::FileHeader__ &header, FormatContext &ctx) {
         auto out = fmt::format("({} B) {{", sizeof(header));
         out += fmt::format("magic_code: {}, ", header.magic_code);
         out += fmt::format("header_crc: {}, ", header.header_crc);

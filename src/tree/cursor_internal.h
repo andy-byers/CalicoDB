@@ -8,7 +8,7 @@
 
 namespace Calico {
 
-class Node;
+class Node__;
 
 inline auto default_error_status() -> Status
 {
@@ -16,9 +16,9 @@ inline auto default_error_status() -> Status
 }
 
 struct CursorActions {
-    using CollectCallback = std::function<tl::expected<std::string, Status>(const Node &, std::uint16_t)>;
-    using AcquireCallback = std::function<tl::expected<Node, Status>(Id, bool)>;
-    using ReleaseCallback = std::function<tl::expected<void, Status>(Node)>;
+    using CollectCallback = std::function<tl::expected<std::string, Status>(const Node__ &, std::uint16_t)>;
+    using AcquireCallback = std::function<tl::expected<Node__, Status>(Id, bool)>;
+    using ReleaseCallback = std::function<tl::expected<void, Status>(Node__)>;
 
     CollectCallback collect;
     AcquireCallback acquire;
@@ -34,7 +34,7 @@ public:
     [[nodiscard]] static auto seek_right(Cursor &) -> bool;
     [[nodiscard]] static auto is_last(const Cursor &) -> bool;
     [[nodiscard]] static auto is_first(const Cursor &) -> bool;
-    static auto move_to(Cursor &, Node, Size) -> void;
+    static auto move_to(Cursor &, Node__, Size) -> void;
     static auto invalidate(Cursor &, const Status & = default_error_status()) -> void;
 
     static auto TEST_validate(const Cursor &) -> void;

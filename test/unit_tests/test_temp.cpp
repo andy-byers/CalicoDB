@@ -1,5 +1,6 @@
 #include "temp/bplus_tree.h"
 #include "temp/node.h"
+#include "temp/overflow.h"
 #include "pager/basic_pager.h"
 #include "wal/helpers.h"
 #include "unit_tests.h"
@@ -20,7 +21,7 @@ protected:
 
 TEST_F(HeaderTests, FileHeader)
 {
-    FileHeader_ source;
+    FileHeader source;
     source.magic_code = 1;
     source.header_crc = 2;
     source.page_count = 3;
@@ -31,9 +32,9 @@ TEST_F(HeaderTests, FileHeader)
 
     source.write(page);
     // Write a node header to make sure it doesn't overwrite the file header memory.
-    NodeHeader_ unused;
+    NodeHeader unused;
     unused.write(page);
-    FileHeader_ target {page};
+    FileHeader target {page};
 
     ASSERT_EQ(source.magic_code, target.magic_code);
     ASSERT_EQ(source.header_crc, target.header_crc);
@@ -46,7 +47,7 @@ TEST_F(HeaderTests, FileHeader)
 
 TEST_F(HeaderTests, NodeHeader)
 {
-    NodeHeader_ source;
+    NodeHeader source;
     source.page_lsn.value = 1;
     source.parent_id.value = 2;
     source.next_id.value = 3;
@@ -59,9 +60,9 @@ TEST_F(HeaderTests, NodeHeader)
     source.is_external = false;
 
     source.write(page);
-    FileHeader_ unused;
+    FileHeader unused;
     unused.write(page);
-    NodeHeader_ target {page};
+    NodeHeader target {page};
 
     ASSERT_EQ(source.page_lsn, target.page_lsn);
     ASSERT_EQ(source.parent_id, target.parent_id);
@@ -107,12 +108,14 @@ TEST(NodeSlotTests, SlotsAreConsistent)
     std::string backing(0x200, '\x00');
     std::string scratch(0x200, '\x00');
     Page page {Id::root(), backing, true};
-    Node_ node {std::move(page), scratch.data()};
+    Node node {std::move(page), scratch.data()};
+    const auto space = usable_space(node);
 
     node.insert_slot(0, 2);
     node.insert_slot(1, 4);
     node.insert_slot(1, 3);
     node.insert_slot(0, 1);
+    ASSERT_EQ(usable_space(node), space - 8);
 
     node.set_slot(0, node.get_slot(0) + 1);
     node.set_slot(1, node.get_slot(1) + 1);
@@ -131,7 +134,14 @@ TEST(NodeSlotTests, SlotsAreConsistent)
     node.remove_slot(0);
     ASSERT_EQ(node.get_slot(0), 5);
     node.remove_slot(0);
+    ASSERT_EQ(usable_space(node), space);
 }
+
+static constexpr Size SMALL_PAGE_SIZE {0x200};
+static constexpr Size MEDIUM_PAGE_SIZE {0x1000};
+static constexpr Size LARGE_PAGE_SIZE {0x8000};
+static constexpr Id ROOT_PID {1};
+static constexpr Id NON_ROOT_PID {2};
 
 struct ExternalNodeTestParameters {
     Id pid;
@@ -156,6 +166,7 @@ protected:
 
     ~ExternalNodeTests() override
     {
+        node.TEST_validate();
         auto page = std::move(node).take();
         (void)page.take();
     }
@@ -187,7 +198,7 @@ protected:
     auto simulate_write(const Slice &key, const Slice &value, Id overflow_id = Id {123})
     {
         const auto [cell, _] = create_cell(key, value, overflow_id);
-        Node_::Iterator itr {node};
+        Node::Iterator itr {node};
         if (itr.seek(key)) {
             erase_cell(node, itr.index());
         }
@@ -199,7 +210,7 @@ protected:
     std::string scratch1;
     std::string scratch2;
     NodeMetaManager meta;
-    Node_ node;
+    Node node;
 };
 
 TEST_P(ExternalNodeTests, ConstructsAndDestructs)
@@ -279,19 +290,19 @@ TEST_P(ExternalNodeTests, CreatesCellWithLargePayload)
 
 TEST_P(ExternalNodeTests, EmplacesCells)
 {
-    node_emplace_cell(0, "a", "bc");
-    node_emplace_cell(1, "1", "23");
-    node_emplace_cell(2, "x", "yz");
+    node_emplace_cell(0, "a", "1");
+    node_emplace_cell(1, "b", "2");
+    node_emplace_cell(2, "c", "3");
     ASSERT_EQ(node.header.cell_count, 3);
 
     auto cell = read_cell(node, 0);
-    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "abc");
+    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "a1");
 
     cell = read_cell(node, 1);
-    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "123");
+    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "b2");
 
     cell = read_cell(node, 2);
-    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "xyz");
+    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "c3");
 }
 
 TEST_P(ExternalNodeTests, ErasesCells)
@@ -307,20 +318,21 @@ TEST_P(ExternalNodeTests, ErasesCells)
     ASSERT_EQ(node.header.cell_count, 0);
 }
 
-TEST_P(ExternalNodeTests, DefragmentPreservesMemory)
+TEST_P(ExternalNodeTests, DefragmentationPreservesUsableSpace)
 {
     node_emplace_cell(0, "a", "1");
+    node_emplace_cell(1, "c", "3");
     const auto target_space = usable_space(node);
-    node_emplace_cell(1, "b", "2");
-    node_emplace_cell(2, "c", "3");
+    node_emplace_cell(2, "b", "2");
     node_emplace_cell(3, "d", "4");
-    erase_cell(node, 1);
-    erase_cell(node, 1);
-    erase_cell(node, 1);
+    ASSERT_LT(usable_space(node), target_space);
+    erase_cell(node, 3);
+    erase_cell(node, 2);
 
+    ASSERT_EQ(usable_space(node), target_space);
     manual_defragment(node);
     ASSERT_EQ(usable_space(node), target_space);
-    ASSERT_EQ(node.header.cell_count, 1);
+    ASSERT_EQ(node.header.cell_count, 2);
 }
 
 TEST_P(ExternalNodeTests, Iteration)
@@ -330,7 +342,7 @@ TEST_P(ExternalNodeTests, Iteration)
         std::string k(1, 'a' + i);
         node_emplace_cell(i, k, "");
     }
-    Node_::Iterator itr {node};
+    Node::Iterator itr {node};
 
     ASSERT_TRUE(itr.is_valid());
     ASSERT_EQ(itr.key(), "a");
@@ -375,9 +387,9 @@ TEST_P(ExternalNodeTests, HandlesOverflowIds)
     const auto cell1 = node.parse_cell(node.get_slot(0));
     const auto cell2 = node.parse_cell(node.get_slot(1));
     const auto cell3 = node.parse_cell(node.get_slot(2));
-    ASSERT_EQ(node.read_key(cell1), "a");
-    ASSERT_EQ(node.read_key(cell2), "b");
-    ASSERT_EQ(node.read_key(cell3), "c");
+    ASSERT_EQ(read_key(cell1), "a");
+    ASSERT_EQ(read_key(cell2), "b");
+    ASSERT_EQ(read_key(cell3), "c");
     ASSERT_EQ((Slice {cell1.key + 1, cell1.local_ps - 1}), std::string(cell1.local_ps - 1, '1'));
     ASSERT_EQ((Slice {cell2.key + 1, cell2.local_ps - 1}), std::string(cell2.local_ps - 1, '2'));
     ASSERT_EQ((Slice {cell3.key + 1, cell3.local_ps - 1}), std::string(cell3.local_ps - 1, '3'));
@@ -386,11 +398,28 @@ TEST_P(ExternalNodeTests, HandlesOverflowIds)
     ASSERT_EQ(get_u64(cell3.key + cell3.local_ps), 333);
 }
 
-static constexpr Size SMALL_PAGE_SIZE {0x200};
-static constexpr Size MEDIUM_PAGE_SIZE {0x1000};
-static constexpr Size LARGE_PAGE_SIZE {0x8000};
-static constexpr Id ROOT_PID {1};
-static constexpr Id NON_ROOT_PID {2};
+TEST_P(ExternalNodeTests, DefragmentsToMakeRoomForCellBody)
+{
+    simulate_write("\x01", "1");
+    simulate_write("\x02", "2");
+
+    Size i {};
+    while (!node.overflow.has_value()) {
+        simulate_write(make_key<4>(i++), "");
+    }
+    std::exchange(node.overflow, std::nullopt);
+
+    erase_cell(node, 0);
+    erase_cell(node, 1);
+    node.TEST_validate();
+
+    ASSERT_NE(usable_space(node), node.gap_size);
+    // This cell will be too big to fit either in the gap space or any available free block.
+    simulate_write("abcdef", "123456");
+
+    ASSERT_FALSE(node.overflow.has_value());
+    ASSERT_EQ(usable_space(node), node.gap_size);
+}
 
 INSTANTIATE_TEST_SUITE_P(
     ExternalNodeTests,
@@ -425,6 +454,7 @@ protected:
 
     ~CellConversionTests() override
     {
+        dst_node.TEST_validate();
         auto page = std::move(dst_node).take();
         (void)page.take();
     }
@@ -458,8 +488,8 @@ protected:
     std::string scratch1;
     std::string scratch2;
     NodeMetaManager meta;
-    Node_ dst_node;
-    Cell_ cell;
+    Node dst_node;
+    Cell cell;
 };
 
 TEST_P(CellConversionTests, WritesAndReadsBack)
@@ -501,9 +531,9 @@ struct BPlusTreeTestParameters {
     Size page_size {};
 };
 
-class BPlusTreeTests_: public TestOnHeapWithParam<BPlusTreeTestParameters> {
+class BPlusTreeTests : public TestOnHeapWithParam<BPlusTreeTestParameters> {
 public:
-    BPlusTreeTests_()
+    BPlusTreeTests()
         : param {GetParam()},
           scratch(param.page_size, '\x00'),
           log_scratch {wal_scratch_size(param.page_size), 32}
@@ -525,18 +555,55 @@ public:
         EXPECT_TRUE(r.has_value()) << r.error().what().data();
         pager = std::move(*r);
 
+        // Root page setup.
         auto root_page = pager->allocate_();
         pager->upgrade_(*root_page);
-        Node_ root_node {std::move(*root_page), scratch.data()};
+        Node root_node {std::move(*root_page), scratch.data()};
         root_node.header.is_external = true;
         pager->release_(std::move(root_node).take());
         pager->flush({});
 
-        tree = std::make_unique<BPlusTree_>(*pager);
+        tree = std::make_unique<BPlusTree>(*pager);
     }
 
-    auto validate()
+    auto TearDown() -> void override
     {
+        validate();
+    }
+
+    [[nodiscard]]
+    auto make_value(char c, bool overflow = false) const -> std::string
+    {
+        Size size {param.page_size};
+        if (overflow) {
+            size /= 3;
+        } else {
+            size /= 20;
+        }
+        return std::string(size, c);
+    }
+
+    auto acquire_node(Id pid) -> Node
+    {
+        return Node {*pager->acquire_(pid), scratch.data()};
+    }
+
+    auto release_node(Node node) -> void
+    {
+        pager->release_(std::move(node).take());
+    }
+
+    auto is_root_external() -> bool
+    {
+        auto root = acquire_node(Id::root());
+        const auto answer = root.header.is_external;
+        release_node(std::move(root));
+        return answer;
+    }
+
+    auto validate() const -> void
+    {
+        tree->TEST_check_nodes();
         tree->TEST_check_links();
         tree->TEST_check_order();
     }
@@ -547,66 +614,181 @@ public:
     DisabledWriteAheadLog wal;
     std::string scratch;
     std::unique_ptr<Pager> pager;
-    std::unique_ptr<BPlusTree_> tree;
+    std::unique_ptr<BPlusTree> tree;
+    Random random {42};
 };
 
-TEST_P(BPlusTreeTests_, ConstructsAndDestructs)
+TEST_P(BPlusTreeTests, ConstructsAndDestructs)
 {
     validate();
 }
 
-TEST_P(BPlusTreeTests_, InsertsRecords)
+TEST_P(BPlusTreeTests, InsertsRecords)
 {
-    ASSERT_TRUE(tree->insert("a", "x").value());
-    ASSERT_TRUE(tree->insert("b", "y").value());
-    ASSERT_TRUE(tree->insert("c", "z").value());
+    ASSERT_TRUE(tree->insert("a", make_value('1')).value());
+    ASSERT_TRUE(tree->insert("b", make_value('2')).value());
+    ASSERT_TRUE(tree->insert("c", make_value('3')).value());
     validate();
 }
 
-TEST_P(BPlusTreeTests_, FindsRecordPositions)
+TEST_P(BPlusTreeTests, ErasesRecords)
 {
-    ASSERT_TRUE(tree->insert("a", "x").value());
-    ASSERT_TRUE(tree->insert("b", "y").value());
-    ASSERT_TRUE(tree->insert("c", "z").value());
+    (void)tree->insert("a", make_value('1'));
+    (void)tree->insert("b", make_value('2'));
+    (void)tree->insert("c", make_value('3'));
+    ASSERT_TRUE(tree->erase("a").value());
+    ASSERT_TRUE(tree->erase("b").value());
+    ASSERT_TRUE(tree->erase("c").value());
+    validate();
+}
 
-    {
-        auto r = tree->find("a").value();
-        ASSERT_EQ(r.index, 0);
+TEST_P(BPlusTreeTests, FindsRecords)
+{
+    const auto keys = "abc";
+    const auto vals = "123";
+    (void)tree->insert(std::string(1, keys[0]), make_value(vals[0]));
+    (void)tree->insert(std::string(1, keys[1]), make_value(vals[1]));
+    (void)tree->insert(std::string(1, keys[2]), make_value(vals[2]));
+
+    for (Size i {}; i < 3; ++i) {
+        auto r = tree->find(std::string(1, keys[i])).value();
+        ASSERT_EQ(r.index, i);
         const auto s = r.node.get_slot(r.index);
         const auto c = r.node.parse_cell(s);
-        ASSERT_EQ(c.key[0], 'a');
-        ASSERT_EQ(c.key[c.key_size], 'x');
-    }
-    {
-        auto r = tree->find("b").value();
-        ASSERT_EQ(r.index, 1);
-        const auto s = r.node.get_slot(r.index);
-        const auto c = r.node.parse_cell(s);
-        ASSERT_EQ(c.key[0], 'b');
-        ASSERT_EQ(c.key[c.key_size], 'y');
-    }
-    {
-        auto r = tree->find("c").value();
-        ASSERT_EQ(r.index, 2);
-        const auto s = r.node.get_slot(r.index);
-        const auto c = r.node.parse_cell(s);
-        ASSERT_EQ(c.key[0], 'c');
-        ASSERT_EQ(c.key[c.key_size], 'z');
+        ASSERT_EQ(c.key[0], keys[i]);
+        ASSERT_EQ(c.key[c.key_size], vals[i]);
     }
 }
 
-TEST_P(BPlusTreeTests_, ResolvesOverflows)
+TEST_P(BPlusTreeTests, WritesOverflowChains)
 {
-    for (Size i {}; i < 400; ++i) {
-        ASSERT_TRUE(tree->insert(make_key<4>(i), "abc123xyzABC123XYZ").value());
-        std::cerr << tree->TEST_to_string() << "\n\n";
+    ASSERT_TRUE(tree->insert("a", make_value('1', true)).value());
+    ASSERT_TRUE(tree->insert("b", make_value('2', true)).value());
+    ASSERT_TRUE(tree->insert("c", make_value('3', true)).value());
+    validate();
+}
+
+TEST_P(BPlusTreeTests, ErasesOverflowChains)
+{
+    (void)tree->insert("a", make_value('1', true)).value();
+    (void)tree->insert("b", make_value('2', true)).value();
+    (void)tree->insert("c", make_value('3', true)).value();
+    ASSERT_TRUE(tree->erase("a").value());
+    ASSERT_TRUE(tree->erase("b").value());
+    ASSERT_TRUE(tree->erase("c").value());
+}
+
+TEST_P(BPlusTreeTests, ReadsOverflowChains)
+{
+    const auto keys = "abc";
+    const auto vals = "123";
+    std::string values[3];
+    values[0] = random.get<std::string>('a', 'z', param.page_size);
+    values[1] = random.get<std::string>('a', 'z', param.page_size);
+    values[2] = random.get<std::string>('a', 'z', param.page_size);
+    (void)tree->insert(std::string(1, keys[0]), values[0]);
+    (void)tree->insert(std::string(1, keys[1]), values[1]);
+    (void)tree->insert(std::string(1, keys[2]), values[2]);
+
+    for (Size i {}; i < 3; ++i) {
+        auto r = tree->find(std::string(1, keys[i])).value();
+        const auto s = r.node.get_slot(r.index);
+        const auto c = r.node.parse_cell(s);
+        const auto pid = read_overflow_id(c);
+        const auto local_vs = c.local_ps - c.key_size;
+        std::string value(c.key + c.key_size, local_vs);
+        value.resize(c.total_ps - c.key_size, ' ');
+        ASSERT_TRUE(read_chain(*pager, pid, Span {value}.range(local_vs)));
+        ASSERT_EQ(value, values[i]);
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnLeftmostPosition)
+{
+    std::string value {"value"};
+    value.resize(param.page_size / 20);
+
+    for (Size i {}; !is_root_external(); ++i) {
+        ASSERT_TRUE(*tree->insert(make_key<3>(i), value));
         validate();
     }
 }
 
+TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnRightmostPosition)
+{
+    std::string value {"value"};
+    value.resize(param.page_size / 20);
+
+    for (Size i {}; !is_root_external(); ++i) {
+        ASSERT_LE(i, 100);
+        ASSERT_TRUE(*tree->insert(make_key<3>(100 - i), value));
+    }
+    validate();
+}
+
+TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnMiddlePosition)
+{
+    std::string value {"value"};
+    value.resize(param.page_size / 20);
+
+    for (Size i {}; !is_root_external(); ++i) {
+        ASSERT_LE(i, 100);
+        ASSERT_TRUE(*tree->insert(make_key<3>(i & 1 ? 100 - i : i), value));
+    }
+    validate();
+}
+
+TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnLeftmostPosition)
+{
+    const auto value = make_value('v');
+    for (Size i {}; i < 1'000; ++i) {
+        ASSERT_TRUE(*tree->insert(make_key<3>(999 - i), value));
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnRightmostPosition)
+{
+    const auto value = make_value('v');
+    for (Size i {}; i < 1'000; ++i) {
+        ASSERT_TRUE(*tree->insert(make_key<3>(i), value));
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnMiddlePosition)
+{
+    const auto value = make_value('v');
+    for (Size i {}, j {999}; i < j; ++i, --j) {
+        ASSERT_TRUE(*tree->insert(make_key<3>(i), value));
+        ASSERT_TRUE(*tree->insert(make_key<3>(j), value));
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeTests, SanityCheck)
+{
+    for (Size i {}; i < 1'000; ++i) {
+        const auto key_size = random.get<Size>(1, 10);
+        const auto val_size = random.get<Size>(param.page_size / 3);
+        const auto key = random.get<std::string>('a', 'z', key_size);
+        const auto val = random.get<std::string>('a', 'z', val_size);
+        (void)tree->insert(key, val);
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
 INSTANTIATE_TEST_SUITE_P(
-    BPlusTreeTests_,
-    BPlusTreeTests_,
+    BPlusTreeTests,
+    BPlusTreeTests,
     ::testing::Values(
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},

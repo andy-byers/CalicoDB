@@ -10,10 +10,10 @@ namespace Calico {
 
 class Page_;
 
-static constexpr std::uint32_t MAGIC_CODE {0xB11924E1};
+static constexpr std::uint32_t MAGIC_CODE__ {0xB11924E1};
 static constexpr Size CRC_OFFSET {2 * sizeof(std::uint32_t)};
 
-struct FileHeader {
+struct FileHeader__ {
     std::uint32_t magic_code;
     std::uint32_t header_crc;
     std::uint64_t page_count;
@@ -24,24 +24,24 @@ struct FileHeader {
     Byte reserved[6];
 };
 
-static_assert(sizeof(FileHeader) == 48);
+static_assert(sizeof(FileHeader__) == 48);
 
-inline auto read_header(const Page_ &page) -> FileHeader
+inline auto read_header(const Page_ &page) -> FileHeader__
 {
-    FileHeader header {};
-    Span bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader)};
+    FileHeader__ header {};
+    Span bytes {reinterpret_cast<Byte*>(&header), sizeof(FileHeader__)};
     mem_copy(bytes, page.view(0), bytes.size());
     return header;
 }
 
-inline auto write_header(Page_ &page, const FileHeader &header) -> void
+inline auto write_header(Page_ &page, const FileHeader__ &header) -> void
 {
-    Slice bytes {reinterpret_cast<const Byte*>(&header), sizeof(FileHeader)};
+    Slice bytes {reinterpret_cast<const Byte*>(&header), sizeof(FileHeader__)};
     mem_copy(page.span(0, sizeof(header)), bytes, bytes.size());
 }
 
 [[nodiscard]]
-inline auto compute_header_crc(const FileHeader &state)
+inline auto compute_header_crc(const FileHeader__ &state)
 {
     Slice bytes {reinterpret_cast<const Byte*>(&state), sizeof(state)};
     const auto range = bytes.range(CRC_OFFSET);

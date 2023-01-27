@@ -372,14 +372,14 @@ auto BasicPager::release_(Page page) -> void
     }
 }
 
-auto BasicPager::save_state(FileHeader &header) -> void
+auto BasicPager::save_state(FileHeader__ &header) -> void
 {
     // m_log->trace("save_state");
     header.recovery_lsn = m_recovery_lsn.value;
     m_framer.save_state(header);
 }
 
-auto BasicPager::load_state(const FileHeader &header) -> void
+auto BasicPager::load_state(const FileHeader__ &header) -> void
 {
     // m_log->trace("load_state");
     if (m_recovery_lsn.value < header.recovery_lsn)

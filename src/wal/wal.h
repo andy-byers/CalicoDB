@@ -12,7 +12,7 @@
 
 namespace Calico {
 
-struct FileHeader;
+struct FileHeader__;
 class WalReader;
 
 class WalPayloadIn {

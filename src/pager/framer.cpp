@@ -234,12 +234,12 @@ auto Framer::write_page_to_file(Id pid, const Slice &page) const -> Status
     return m_file->write(page, pid.as_index() * page.size());
 }
 
-auto Framer::load_state(const FileHeader &header) -> void
+auto Framer::load_state(const FileHeader__ &header) -> void
 {
     m_page_count = header.page_count;
 }
 
-auto Framer::save_state(FileHeader &header) const -> void
+auto Framer::save_state(FileHeader__ &header) const -> void
 {
     header.page_count = m_page_count;
 }

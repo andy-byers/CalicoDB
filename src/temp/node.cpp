@@ -4,23 +4,19 @@
 
 namespace Calico {
 
-using PagePtr = std::uint16_t;
-using PageSize = std::uint16_t;
-using ValueSize = std::uint32_t;
-
-static auto header_offset(const Node_ &node)
+static auto header_offset(const Node &node)
 {
-    return FileHeader_::SIZE * node.page.id().is_root();
+    return FileHeader::SIZE * node.page.id().is_root();
 }
 
-static auto cell_slots_offset(const Node_ &node)
+static auto cell_slots_offset(const Node &node)
 {
-    return header_offset(node) + NodeHeader_::SIZE;
+    return header_offset(node) + NodeHeader::SIZE;
 }
 
-static auto cell_area_offset(const Node_ &node)
+static auto cell_area_offset(const Node &node)
 {
-    return cell_slots_offset(node) + node.header.cell_count*sizeof(PagePtr);
+    return cell_slots_offset(node) + node.header.cell_count*sizeof(PageSize);
 }
 
 static constexpr auto external_prefix_size() -> Size
@@ -47,7 +43,7 @@ auto external_cell_size(const NodeMeta &meta, const Byte *data) -> Size
 {
     if (const auto ps = external_payload_size(data); ps <= meta.max_local)
         return external_prefix_size() + ps;
-    return external_prefix_size() + meta.min_local + sizeof(Id);
+    return external_prefix_size() + std::max<Size>(get_u16(data + sizeof(ValueSize)), meta.min_local) + sizeof(Id);
 }
 
 auto internal_cell_size(const NodeMeta &, const Byte *data) -> Size
@@ -65,9 +61,9 @@ auto read_internal_key(const Byte *data) -> Slice
     return {data + internal_prefix_size(), get_u16(data + sizeof(Id))};
 }
 
-auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell_
+auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell
 {
-    Cell_ cell;
+    Cell cell;
     cell.ptr = data;
     cell.key = data + external_prefix_size();
     cell.total_ps = external_payload_size(data);
@@ -85,9 +81,9 @@ auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell_
     return cell;
 }
 
-auto parse_internal_cell(const NodeMeta &, Byte *data) -> Cell_
+auto parse_internal_cell(const NodeMeta &, Byte *data) -> Cell
 {
-    Cell_ cell;
+    Cell cell;
     cell.ptr = data;
     cell.key = data + internal_prefix_size();
     cell.key_size = internal_payload_size(data);
@@ -97,39 +93,194 @@ auto parse_internal_cell(const NodeMeta &, Byte *data) -> Cell_
     return cell;
 }
 
-Node_::Iterator::Iterator(Node_ &node)
+
+class BlockAllocator_ {
+    Node *m_node {};
+
+    [[nodiscard]]
+    auto get_next_pointer(Size offset) -> PageSize
+    {
+        return get_u16(m_node->page.data() + offset);
+    }
+
+    [[nodiscard]]
+    auto get_block_size(Size offset) -> PageSize
+    {
+        return get_u16(m_node->page.data() + offset + sizeof(PageSize));
+    }
+
+    auto set_next_pointer(Size offset, PageSize value) -> void
+    {
+        CALICO_EXPECT_LT(value, m_node->page.size());
+        return put_u16(m_node->page.data() + offset, value);
+    }
+
+    auto set_block_size(Size offset, PageSize value) -> void
+    {
+        CALICO_EXPECT_GE(value, 4);
+        CALICO_EXPECT_LT(value, m_node->page.size());
+        return put_u16(m_node->page.data() + offset + sizeof(PageSize), value);
+    }
+
+    [[nodiscard]] auto allocate_from_free_list(PageSize needed_size) -> PageSize;
+    [[nodiscard]] auto allocate_from_gap(PageSize needed_size) -> PageSize;
+    [[nodiscard]] auto take_free_space(PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize;
+
+public:
+    explicit BlockAllocator_(Node &node)
+        : m_node {&node}
+    {}
+
+    [[nodiscard]] auto allocate(PageSize needed_size) -> PageSize;
+    auto free(PageSize ptr, PageSize size) -> void;
+    auto defragment(std::optional<PageSize> skip_index) -> void;
+};
+
+auto BlockAllocator_::allocate_from_free_list(PageSize needed_size) -> PageSize
+{
+    PageSize prev_ptr {};
+    PageSize curr_ptr {m_node->header.free_start};
+
+    while (curr_ptr) {
+        if (needed_size <= get_block_size(curr_ptr))
+            return take_free_space(prev_ptr, curr_ptr, needed_size);
+        prev_ptr = curr_ptr;
+        curr_ptr = get_next_pointer(curr_ptr);
+    }
+    return 0;
+}
+
+auto BlockAllocator_::allocate_from_gap(PageSize needed_size) -> PageSize
+{
+    if (needed_size <= m_node->gap_size) {
+        m_node->gap_size -= needed_size;
+        return m_node->header.cell_start -= needed_size;
+    }
+    return 0;
+}
+
+auto BlockAllocator_::take_free_space(PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize
+{
+    CALICO_EXPECT_LT(ptr0, m_node->page.size());
+    CALICO_EXPECT_LT(ptr1, m_node->page.size());
+    CALICO_EXPECT_LT(needed_size, m_node->page.size());
+    const auto is_first = !ptr0;
+    const auto ptr2 = get_next_pointer(ptr1);
+    const auto free_size = get_block_size(ptr1);
+    auto &header = m_node->header;
+
+    CALICO_EXPECT_GE(free_size, needed_size);
+    const auto diff = static_cast<PageSize>(free_size - needed_size);
+
+    if (diff < 4) {
+        header.frag_count += diff;
+
+        if (is_first) {
+            header.free_start = static_cast<PageSize>(ptr2);
+        } else {
+            set_next_pointer(ptr0, ptr2);
+        }
+    } else {
+        set_block_size(ptr1, diff);
+    }
+    CALICO_EXPECT_GE(header.free_total, needed_size);
+    header.free_total -= needed_size;
+    return ptr1 + diff;
+}
+
+auto BlockAllocator_::allocate(PageSize needed_size) -> PageSize
+{
+    CALICO_EXPECT_LT(needed_size, m_node->page.size());
+
+    if (const auto offset = allocate_from_gap(needed_size))
+        return offset;
+
+    return allocate_from_free_list(needed_size);
+}
+
+auto BlockAllocator_::free(PageSize ptr, PageSize size) -> void
+{
+    CALICO_EXPECT_GE(ptr, cell_area_offset(*m_node));
+    CALICO_EXPECT_LE(ptr + size, m_node->page.size());
+    auto &header = m_node->header;
+
+    if (size < 4) {
+        header.frag_count += size;
+    } else {
+        set_next_pointer(ptr, header.free_start);
+        set_block_size(ptr, size);
+        header.free_start = ptr;
+    }
+    header.free_total += size;
+}
+
+auto BlockAllocator_::defragment(std::optional<PageSize> skip_index) -> void
+{
+    auto &header = m_node->header;
+    const auto n = header.cell_count;
+    const auto to_skip = skip_index ? *skip_index : n;
+    auto end = static_cast<PageSize>(m_node->page.size());
+    auto ptr = m_node->page.data();
+    std::vector<PageSize> ptrs(n);
+
+    for (Size index {}; index < n; ++index) {
+        if (index == to_skip)
+            continue;
+        const auto offset = m_node->get_slot(index);
+        const auto size = m_node->cell_size(offset);
+
+        end -= PageSize(size);
+        std::memcpy(m_node->scratch + end, ptr + offset, size);
+        ptrs[index] = end;
+    }
+    for (Size index {}; index < n; ++index) {
+        if (index == to_skip) continue;
+        m_node->set_slot(index, ptrs[index]);
+    }
+    const auto offset = cell_area_offset(*m_node);
+    const auto size = m_node->page.size() - offset;
+    mem_copy(m_node->page.span(offset, size), {m_node->scratch + offset, size});
+
+    header.cell_start = end;
+    header.frag_count = 0;
+    header.free_start = 0;
+    header.free_total = 0;
+    m_node->gap_size = PageSize(end - cell_area_offset(*m_node));
+}
+
+Node::Iterator::Iterator(Node &node)
     : m_node {&node}
 {}
 
-auto Node_::Iterator::is_valid() const -> bool
+auto Node::Iterator::is_valid() const -> bool
 {
     return m_index < m_node->header.cell_count;
 }
 
-auto Node_::Iterator::index() const -> Size
+auto Node::Iterator::index() const -> Size
 {
     return m_index;
 }
 
-auto Node_::Iterator::key() const -> Slice
+auto Node::Iterator::key() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
     return m_node->read_key(m_node->get_slot(m_index));
 }
 
-auto Node_::Iterator::data() -> Byte *
+auto Node::Iterator::data() -> Byte *
 {
     CALICO_EXPECT_TRUE(is_valid());
     return m_node->page.data() + m_node->get_slot(m_index);
 }
 
-auto Node_::Iterator::data() const -> const Byte *
+auto Node::Iterator::data() const -> const Byte *
 {
     CALICO_EXPECT_TRUE(is_valid());
     return m_node->page.data() + m_node->get_slot(m_index);
 }
 
-auto Node_::Iterator::seek(const Slice &key) -> bool
+auto Node::Iterator::seek(const Slice &key) -> bool
 {
     auto upper = static_cast<long>(m_node->header.cell_count);
     long lower {};
@@ -155,243 +306,152 @@ auto Node_::Iterator::seek(const Slice &key) -> bool
     return false;
 }
 
-auto Node_::Iterator::next() -> void
+auto Node::Iterator::next() -> void
 {
     if (is_valid())
         m_index++;
 }
 
-Node_::Node_(Page inner, Byte *defragmentation_space)
+Node::Node(Page inner, Byte *defragmentation_space)
     : page {std::move(inner)},
       scratch {defragmentation_space},
       header {page},
-      slots_offset {NodeHeader_::SIZE}
+      slots_offset {NodeHeader::SIZE}
 {
     CALICO_EXPECT_NE(scratch, nullptr);
 
     if (page.id().is_root())
-        slots_offset += FileHeader_::SIZE;
+        slots_offset += FileHeader::SIZE;
 
     if (header.cell_start == 0)
         header.cell_start = static_cast<PageSize>(page.size());
 
-    const auto after_header = page_offset(page) + NodeHeader_::SIZE;
-    const auto bottom = after_header + header.cell_count*sizeof(PagePtr);
+    const auto after_header = page_offset(page) + NodeHeader::SIZE;
+    const auto bottom = after_header + header.cell_count*sizeof(PageSize);
     const auto top = header.cell_start;
 
     CALICO_EXPECT_GE(top, bottom);
-    gap_size = static_cast<PagePtr>(top - bottom);
+    gap_size = static_cast<PageSize>(top - bottom);
 }
 
-auto Node_::get_slot(Size index) const -> Size
+auto Node::get_slot(Size index) const -> Size
 {
-    return get_u16(page.data() + slots_offset + index*sizeof(PagePtr));
+    return get_u16(page.data() + slots_offset + index*sizeof(PageSize));
 }
 
-auto Node_::set_slot(Size index, Size pointer) -> void
+auto Node::set_slot(Size index, Size pointer) -> void
 {
-    return put_u16(page.span(slots_offset + index*sizeof(PagePtr), sizeof(PagePtr)), static_cast<PagePtr>(pointer));
+    return put_u16(page.span(slots_offset + index*sizeof(PageSize), sizeof(PageSize)), static_cast<PageSize>(pointer));
 }
 
-auto Node_::insert_slot(Size index, Size pointer) -> void
+auto Node::insert_slot(Size index, Size pointer) -> void
 {
-    const auto offset = slots_offset + index*sizeof(PagePtr);
-    const auto size = (header.cell_count-index) * sizeof(PagePtr);
+    CALICO_EXPECT_GE(gap_size, sizeof(PageSize));
+    const auto offset = slots_offset + index*sizeof(PageSize);
+    const auto size = (header.cell_count-index) * sizeof(PageSize);
     auto *data = page.data() + offset;
 
-    std::memmove(data + sizeof(PagePtr), data, size);
-    put_u16(data, static_cast<PagePtr>(pointer));
+    std::memmove(data + sizeof(PageSize), data, size);
+    put_u16(data, static_cast<PageSize>(pointer));
 
-    insert_delta(page.m_deltas, {offset, size + sizeof(PagePtr)});
+    insert_delta(page.m_deltas, {offset, size + sizeof(PageSize)});
+    gap_size -= PageSize(sizeof(PageSize));
     header.cell_count++;
 }
 
-auto Node_::remove_slot(Size index) -> void
+auto Node::remove_slot(Size index) -> void
 {
-    const auto offset = slots_offset + index*sizeof(PagePtr);
-    const auto size = (header.cell_count-index) * sizeof(PagePtr);
+    const auto offset = slots_offset + index*sizeof(PageSize);
+    const auto size = (header.cell_count-index) * sizeof(PageSize);
     auto *data = page.data() + offset;
 
-    std::memmove(data, data + sizeof(PagePtr), size);
+    std::memmove(data, data + sizeof(PageSize), size);
 
-    insert_delta(page.m_deltas, {offset, size + sizeof(PagePtr)});
+    insert_delta(page.m_deltas, {offset, size + sizeof(PageSize)});
+    gap_size += sizeof(PageSize);
     header.cell_count--;
 }
 
-
-auto Node_::take() && -> Page
+auto Node::take() && -> Page
 {
     if (page.is_writable())
         header.write(page);
     return std::move(page);
 }
 
-class BlockAllocator {
-    Node_ *m_node {};
-
-    [[nodiscard]]
-    auto get_next_pointer(Size offset) -> PagePtr
+auto Node::TEST_validate() const -> void
+{
+    std::vector<Byte> used(page.size());
+    const auto account = [&x = used](auto from, auto size) {
+        auto lower = begin(x) + long(from);
+        auto upper = begin(x) + long(from) + long(size);
+        CALICO_EXPECT_FALSE(std::any_of(lower, upper, [](auto byte) {
+            return byte != '\x00';
+        }));
+        std::fill(lower, upper, 1);
+    };
+    // Header(s) and cell pointers.
     {
-        return get_u16(m_node->page.data() + offset);
+        account(0, cell_area_offset(*this));
     }
-
-    [[nodiscard]]
-    auto get_block_size(Size offset) -> PagePtr
+    // Gap space.
     {
-        return get_u16(m_node->page.data() + offset + sizeof(PagePtr));
+        account(cell_area_offset(*this), gap_size);
     }
-
-    auto set_next_pointer(Size offset, PagePtr value) -> void
+    // Free list blocks.
     {
-        CALICO_EXPECT_LT(value, m_node->page.size());
-        return put_u16(m_node->page.data() + offset, value);
-    }
-
-    auto set_block_size(Size offset, PagePtr value) -> void
-    {
-        CALICO_EXPECT_GE(value, 4);
-        CALICO_EXPECT_LT(value, m_node->page.size());
-        return put_u16(m_node->page.data() + offset + sizeof(PagePtr), value);
-    }
-
-    [[nodiscard]]
-    auto allocate_from_free_list(PagePtr needed_size) -> PagePtr
-    {
-        PagePtr prev_ptr {};
-        PagePtr curr_ptr {m_node->header.free_start};
-
-        while (curr_ptr) {
-            if (needed_size <= get_block_size(curr_ptr))
-                return take_free_space(prev_ptr, curr_ptr, needed_size);
-            prev_ptr = curr_ptr;
-            curr_ptr = get_next_pointer(curr_ptr);
+        PageSize i {header.free_start};
+        const Byte *data = page.data();
+        Size free_total {};
+        while (i) {
+            const auto size = get_u16(data + i + sizeof(PageSize));
+            account(i, size);
+            i = get_u16(data + i);
+            free_total += size;
         }
-        return 0;
+        CALICO_EXPECT_EQ(free_total + header.frag_count, header.free_total);
     }
+    // Cell bodies. Also makes sure the cells are in order.
+    for (Size n {}; n < header.cell_count; ++n) {
+        const auto lhs_ptr = get_slot(n);
+        const auto lhs_size = cell_size(lhs_ptr);
+        const auto lhs_key = read_key(lhs_ptr);
+        account(lhs_ptr, lhs_size);
 
-    [[nodiscard]]
-    auto allocate_from_gap(PagePtr needed_size) -> PagePtr
-    {
-        if (needed_size <= m_node->gap_size) {
-            m_node->header.cell_start -= needed_size;
-            m_node->gap_size -= needed_size;
-            return m_node->header.cell_start;
+        if (n + 1 < header.cell_count) {
+            const auto rhs_ptr = get_slot(n + 1);
+            const auto rhs_key = read_key(rhs_ptr);
+            CALICO_EXPECT_LT(lhs_key, rhs_key);
         }
-        return 0;
     }
 
-    [[nodiscard]]
-    auto take_free_space(PagePtr ptr0, PagePtr ptr1, PagePtr needed_size) -> PagePtr
-    {
-        CALICO_EXPECT_LT(ptr0, m_node->page.size());
-        CALICO_EXPECT_LT(ptr1, m_node->page.size());
-        CALICO_EXPECT_LT(needed_size, m_node->page.size());
-        const auto is_first = !ptr0;
-        const auto ptr2 = get_next_pointer(ptr1);
-        const auto free_size = get_block_size(ptr1);
-        auto &header = m_node->header;
+    // Every byte should be accounted for, except for fragments.
+    const auto total_bytes = std::accumulate(
+        begin(used),
+        end(used),
+        header.frag_count,
+        [](auto accum, auto next) {
+            return accum + next;
+        });
+    CALICO_EXPECT_EQ(page.size(), total_bytes);
+}
 
-        CALICO_EXPECT_GE(free_size, needed_size);
-        const auto diff = static_cast<PagePtr>(free_size - needed_size);
-
-        if (diff < 4) {
-            header.frag_count += diff;
-
-            if (is_first) {
-                header.free_start = static_cast<PagePtr>(ptr2);
-            } else {
-                set_next_pointer(ptr0, ptr2);
-            }
-        } else {
-            set_block_size(ptr1, diff);
-        }
-        CALICO_EXPECT_GE(header.free_total, needed_size);
-        header.free_total -= needed_size;
-        return ptr1 + diff;
-    }
-
-public:
-    explicit BlockAllocator(Node_ &node)
-        : m_node {&node}
-    {}
-
-    [[nodiscard]]
-    auto allocate(PageSize needed_size) -> PagePtr
-    {
-        CALICO_EXPECT_LT(needed_size, m_node->page.size());
-
-        if (const auto offset = allocate_from_gap(needed_size))
-            return offset;
-
-        return allocate_from_free_list(needed_size);
-    }
-
-    auto free(PagePtr ptr, PagePtr size) -> void
-    {
-        CALICO_EXPECT_GE(ptr, cell_area_offset(*m_node));
-        CALICO_EXPECT_LE(ptr + size, m_node->page.size());
-        auto &header = m_node->header;
-
-        if (size < 4) {
-            header.frag_count += size;
-        } else {
-            set_next_pointer(ptr, header.free_start);
-            set_block_size(ptr, size);
-            header.free_start = ptr;
-        }
-        header.free_total += size;
-    }
-
-    auto defragment(std::optional<PagePtr> skip_index) -> void
-    {
-        auto &header = m_node->header;
-        const auto n = header.cell_count;
-        const auto to_skip = skip_index ? *skip_index : n;
-        auto end = static_cast<PagePtr>(m_node->page.size());
-        auto ptr = m_node->page.data();
-        std::vector<PagePtr> ptrs(n);
-
-        for (Size index {}; index < n; ++index) {
-            if (index == to_skip)
-                continue;
-            const auto offset = m_node->get_slot(index);
-            const auto size = m_node->cell_size(offset);
-
-            end -= PageSize(size);
-            std::memcpy(m_node->scratch + end, ptr + offset, size);
-            ptrs[index] = end;
-        }
-        for (Size index {}; index < n; ++index) {
-            if (index == to_skip) continue;
-            m_node->set_slot(index, ptrs[index]);
-        }
-        const auto offset = cell_area_offset(*m_node);
-        const auto size = m_node->page.size() - offset;
-        mem_copy(m_node->page.span(offset, size), {m_node->scratch + offset, size});
-
-        header.cell_start = end;
-        header.frag_count = 0;
-        header.free_start = 0;
-        header.free_total = 0;
-    }
-};
-
-auto usable_space(const Node_ &node) -> bool
+auto usable_space(const Node &node) -> Size
 {
     return node.header.free_total + node.gap_size;
 }
 
-auto allocate_block(Node_ &node, PagePtr index, PagePtr size) -> Size
+auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
 {
     const auto &header = node.header;
-    const auto can_allocate = size + sizeof(PagePtr) <= usable_space(node);
-    BlockAllocator alloc {node};
+    const auto can_allocate = size + sizeof(PageSize) <= usable_space(node);
+    BlockAllocator_ alloc {node};
 
     CALICO_EXPECT_FALSE(node.overflow.has_value());
     CALICO_EXPECT_LE(index, header.cell_count);
 
     // We don't have room to insert the cell pointer.
-    if (cell_area_offset(node) + sizeof(PagePtr) > header.cell_start) {
+    if (cell_area_offset(node) + sizeof(PageSize) > header.cell_start) {
         if (!can_allocate) {
             node.overflow_index = index;
             return 0;
@@ -419,46 +479,46 @@ auto allocate_block(Node_ &node, PagePtr index, PagePtr size) -> Size
     return offset;
 }
 
-static auto free_block(Node_ &node, PagePtr index, PagePtr size) -> void
+static auto free_block(Node &node, PageSize index, PageSize size) -> void
 {
-    BlockAllocator alloc {node};
-    alloc.free(static_cast<PagePtr>(node.get_slot(index)), size);
+    BlockAllocator_ alloc {node};
+    alloc.free(static_cast<PageSize>(node.get_slot(index)), size);
     node.remove_slot(index);
 }
 
-auto read_cell(Node_ &node, Size index) -> Cell_
+auto read_cell(Node &node, Size index) -> Cell
 {
     return node.parse_cell(node.get_slot(index));
 }
 
-auto write_cell(Node_ &node, Size index, const Cell_ &cell) -> void
+auto write_cell(Node &node, Size index, const Cell &cell) -> void
 {
-    if (const auto offset = allocate_block(node, PagePtr(index), PageSize(cell.size))) {
+    if (const auto offset = allocate_block(node, PageSize(index), PageSize(cell.size))) {
         auto memory = node.page.span(offset, cell.size);
         std::memcpy(memory.data(), cell.ptr, cell.size);
     } else {
-        node.overflow_index = PagePtr(index);
+        node.overflow_index = PageSize(index);
         node.overflow = cell;
     }
 }
 
-auto erase_cell(Node_ &node, Size index) -> void
+auto erase_cell(Node &node, Size index) -> void
 {
     erase_cell(node, index, node.cell_size(node.get_slot(index)));
 }
 
-auto erase_cell(Node_ &node, Size index, Size size_hint) -> void
+auto erase_cell(Node &node, Size index, Size size_hint) -> void
 {
-    free_block(node, PagePtr(index), PageSize(size_hint));
+    free_block(node, PageSize(index), PageSize(size_hint));
 }
 
 auto emplace_cell(Byte *out, Size value_size, const Slice &key, const Slice &local_value, Id overflow_id) -> void
 {
-    put_u32(out, static_cast<std::uint32_t>(value_size));
-    out += sizeof(std::uint32_t);
+    put_u32(out, static_cast<ValueSize>(value_size));
+    out += sizeof(ValueSize);
 
-    put_u16(out, static_cast<std::uint16_t>(key.size()));
-    out += sizeof(std::uint16_t);
+    put_u16(out, static_cast<PageSize>(key.size()));
+    out += sizeof(PageSize);
 
     std::memcpy(out, key.data(), key.size());
     out += key.size();
@@ -480,16 +540,16 @@ auto determine_cell_size(Size key_size, Size &value_size, const NodeMeta &meta) 
         total_size = total_size - remote_size + sizeof(Id);
         value_size -= remote_size;
     }
-    return sizeof(ValueSize) + sizeof(PageSize) + total_size;
+    return external_prefix_size() + total_size;
 }
 
-auto manual_defragment(Node_ &node) -> void
+auto manual_defragment(Node &node) -> void
 {
-    BlockAllocator alloc {node};
+    BlockAllocator_ alloc {node};
     alloc.defragment(std::nullopt);
 }
 
-auto detach_cell(Cell_ &cell, Byte *backing) -> void
+auto detach_cell(Cell &cell, Byte *backing) -> void
 {
     std::memcpy(backing, cell.ptr, cell.size);
     const auto diff = cell.key - cell.ptr;
@@ -498,7 +558,7 @@ auto detach_cell(Cell_ &cell, Byte *backing) -> void
     cell.is_free = true;
 }
 
-auto promote_cell(Cell_ &cell) -> void
+auto promote_cell(Cell &cell) -> void
 {
     // Pretend like there is a left child ID field. Now, when this cell is inserted into an internal node,
     // it can be copied over in one chunk. The caller will need to set the actual ID value later.
@@ -508,7 +568,12 @@ auto promote_cell(Cell_ &cell) -> void
     cell.local_ps = cell.key_size;
 }
 
-auto read_child_id(const Node_ &node, Size index) -> Id
+auto read_key(const Cell &cell) -> Slice
+{
+    return {cell.key, cell.key_size};
+}
+
+auto read_child_id(const Node &node, Size index) -> Id
 {
     const auto &header = node.header;
     CALICO_EXPECT_FALSE(header.is_external);
@@ -518,27 +583,28 @@ auto read_child_id(const Node_ &node, Size index) -> Id
     return {get_u64(node.page.data() + node.get_slot(index))};
 }
 
-auto read_child_id(const Cell_ &cell) -> Id
+auto read_child_id(const Cell &cell) -> Id
 {
     return {get_u64(cell.ptr)};
 }
 
-auto read_overflow_id(const Cell_ &cell) -> Id
+auto read_overflow_id(const Cell &cell) -> Id
 {
     return {get_u64(cell.key + cell.local_ps)};
 }
 
-auto write_child_id(Node_ &node, Size index, Id child_id) -> void
+auto write_child_id(Node &node, Size index, Id child_id) -> void
 {
     auto &header = node.header;
     CALICO_EXPECT_FALSE(header.is_external);
     if (index == header.cell_count) {
         header.next_id = child_id;
+    } else {
+        put_u64(node.page.data() + node.get_slot(index), child_id.value);
     }
-    put_u64(node.page.data() + node.get_slot(index), child_id.value);
 }
 
-auto write_child_id(Cell_ &cell, Id child_id) -> void
+auto write_child_id(Cell &cell, Id child_id) -> void
 {
     put_u64(cell.ptr, child_id.value);
 }

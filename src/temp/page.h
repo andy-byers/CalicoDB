@@ -7,6 +7,8 @@
 
 namespace Calico {
 
+using PageSize = std::uint16_t;
+
 class Page {
     ChangeBuffer m_deltas;
     Span m_span;
@@ -14,9 +16,9 @@ class Page {
     bool m_write {};
 
 public:
-    friend struct FileHeader_;
-    friend struct NodeHeader_;
-    friend struct Node_;
+    friend struct FileHeader;
+    friend struct NodeHeader;
+    friend struct Node;
     friend class Frame;
 
     explicit Page(Id id, Span span, bool write)
@@ -99,7 +101,7 @@ public:
 [[nodiscard]]
 inline auto page_offset(const Page &page) -> Size
 {
-    return FileHeader_::SIZE * page.id().is_root();
+    return FileHeader::SIZE * page.id().is_root();
 }
 
 } // namespace Calico

@@ -7,7 +7,7 @@
 
 namespace Calico {
 
-class Node;
+class Node__;
 
 class LocalValueSizeGetter {
 public:
@@ -24,7 +24,7 @@ struct PayloadMeta {
     Size local_value_size {};
 };
 
-class Cell {
+class Cell__ {
 public:
     struct Parameters {
         Byte *buffer {};
@@ -36,16 +36,16 @@ public:
         bool is_external {};
     };
 
-    static auto make_external(Byte *buffer, const Slice &key, const Slice &value, const LocalValueSizeGetter &lvs_getter) -> Cell;
-    static auto make_internal(Byte *buffer, const Slice &key) -> Cell;
-    static auto read_external(Byte *data, const LocalValueSizeGetter &lvs_getter) -> Cell;
-    static auto read_internal(Byte *data) -> Cell;
-    static auto read_at(Slice, Size, bool) -> Cell;
-    static auto read_at(const Node &, Size) -> Cell;
-    explicit Cell(const Parameters &);
+    static auto make_external(Byte *buffer, const Slice &key, const Slice &value, const LocalValueSizeGetter &lvs_getter) -> Cell__;
+    static auto make_internal(Byte *buffer, const Slice &key) -> Cell__;
+    static auto read_external(Byte *data, const LocalValueSizeGetter &lvs_getter) -> Cell__;
+    static auto read_internal(Byte *data) -> Cell__;
+    static auto read_at(Slice, Size, bool) -> Cell__;
+    static auto read_at(const Node__ &, Size) -> Cell__;
+    explicit Cell__(const Parameters &);
 
-    ~Cell() = default;
-    [[nodiscard]] auto copy() const -> Cell;
+    ~Cell__() = default;
+    [[nodiscard]] auto copy() const -> Cell__;
     [[nodiscard]] auto key() const -> Slice;
     [[nodiscard]] auto size() const -> Size;
     [[nodiscard]] auto value_size() const -> Size;
@@ -72,7 +72,7 @@ public:
     }
 
 private:
-    Cell() = default;
+    Cell__() = default;
 
         Slice m_key;
         Slice m_local_value;
@@ -89,11 +89,11 @@ private:
     bool m_is_attached {true};
 };
 
-auto make_external_cell(const Slice &, const Slice &, Size) -> Cell;
-auto make_internal_cell(const Slice &, Size) -> Cell;
+auto make_external_cell(const Slice &, const Slice &, Size) -> Cell__;
+auto make_internal_cell(const Slice &, Size) -> Cell__;
 
-auto make_external_cell(Byte *buffer, const Slice &, const Slice &, Size) -> Cell;
-auto make_internal_cell(Byte *buffer, const Slice &, Size) -> Cell;
+auto make_external_cell(Byte *buffer, const Slice &, const Slice &, Size) -> Cell__;
+auto make_internal_cell(Byte *buffer, const Slice &, Size) -> Cell__;
 
 } // namespace Calico
 

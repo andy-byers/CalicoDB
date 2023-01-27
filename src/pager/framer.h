@@ -12,7 +12,7 @@
 
 namespace Calico {
 
-struct FileHeader;
+struct FileHeader__;
 class Page_;
 class Pager;
 class RandomEditor;
@@ -78,8 +78,8 @@ public:
     auto upgrade_(Size index, Page &page) -> void;
     auto unref_(Size index, Page page) -> void;
     auto discard(Size) -> void;
-    auto load_state(const FileHeader &) -> void;
-    auto save_state(FileHeader &) const -> void;
+    auto load_state(const FileHeader__ &) -> void;
+    auto save_state(FileHeader__ &) const -> void;
     [[nodiscard]]
     auto page_count() const -> Size
     {

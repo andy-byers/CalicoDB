@@ -202,22 +202,22 @@ public:
         : scratch {page_size, 32}
         , page_size {page_size} {}
 
-    auto get_cell(const std::string &key) -> Cell
+    auto get_cell(const std::string &key) -> Cell__
     {
-        Cell::Parameters param;
+        Cell__::Parameters param;
         param.key = Slice {key};
         param.page_size = page_size;
         param.is_external = false;
-        Cell cell {param};
+        Cell__ cell {param};
         cell.detach(*scratch.get());
         cell.set_child_id(Id {123ULL});
         return cell;
     }
 
-    auto get_cell(const std::string &key, const std::string &value, bool is_external, Id overflow_id = Id::null()) -> Cell
+    auto get_cell(const std::string &key, const std::string &value, bool is_external, Id overflow_id = Id::null()) -> Cell__
     {
         const auto local_value_size = get_local_value_size(key.size(), value.size(), page_size);
-        Cell::Parameters param;
+        Cell__::Parameters param;
         param.key = Slice {key};
         param.local_value = Slice {value};
         param.value_size = value.size();
@@ -229,7 +229,7 @@ public:
             param.local_value.truncate(local_value_size);
             param.overflow_id = overflow_id;
         }
-        Cell cell {param};
+        Cell__ cell {param};
         cell.detach(*scratch.get());
         return cell;
     }
@@ -504,9 +504,9 @@ public:
           scratch(page_size, '\x00')
     {}
 
-    auto get_node(Id id, PageType type) -> Node
+    auto get_node(Id id, PageType type) -> Node__
     {
-        Node node {get_page(id), true, scratch.data()};
+        Node__ node {get_page(id), true, scratch.data()};
         node.page().set_type(type);
         return node;
     }
@@ -541,24 +541,24 @@ TEST_F(NodeTests, NonRootNodeFieldsAreDistinct)
                                         std::numeric_limits<std::uint64_t>::max());
 
     root.page().set_lsn(Id {number * 40});
-    NodeHeader::set_parent_id(root.page(), Id {number * 50});
-    NodeHeader::set_right_sibling_id(root.page(), Id {number * 60});
-    NodeHeader::set_left_sibling_id(root.page(), Id {number * 80});
-    NodeHeader::set_cell_count(root.page(), 0x2345);
-    NodeHeader::set_cell_start(root.page(), 0x3456);
-    NodeHeader::set_frag_count(root.page(), 0x4567);
-    NodeHeader::set_free_start(root.page(), 0x5678);
-    NodeHeader::set_free_total(root.page(), 0x6789);
+    NodeHeader__::set_parent_id(root.page(), Id {number * 50});
+    NodeHeader__::set_right_sibling_id(root.page(), Id {number * 60});
+    NodeHeader__::set_left_sibling_id(root.page(), Id {number * 80});
+    NodeHeader__::set_cell_count(root.page(), 0x2345);
+    NodeHeader__::set_cell_start(root.page(), 0x3456);
+    NodeHeader__::set_frag_count(root.page(), 0x4567);
+    NodeHeader__::set_free_start(root.page(), 0x5678);
+    NodeHeader__::set_free_total(root.page(), 0x6789);
     CALICO_EXPECT_EQ(root.page().lsn(), Id {number * 40});
     CALICO_EXPECT_EQ(root.page().type(), PageType::EXTERNAL_NODE);
-    ASSERT_EQ(NodeHeader::parent_id(root.page()), Id {number * 50});
-    ASSERT_EQ(NodeHeader::right_sibling_id(root.page()), Id {number * 60});
-    ASSERT_EQ(NodeHeader::left_sibling_id(root.page()), Id {number * 80});
-    ASSERT_EQ(NodeHeader::cell_count(root.page()), 0x2345);
-    ASSERT_EQ(NodeHeader::cell_start(root.page()), 0x3456);
-    ASSERT_EQ(NodeHeader::frag_count(root.page()), 0x4567);
-    ASSERT_EQ(NodeHeader::free_start(root.page()), 0x5678);
-    ASSERT_EQ(NodeHeader::free_total(root.page()), 0x6789);
+    ASSERT_EQ(NodeHeader__::parent_id(root.page()), Id {number * 50});
+    ASSERT_EQ(NodeHeader__::right_sibling_id(root.page()), Id {number * 60});
+    ASSERT_EQ(NodeHeader__::left_sibling_id(root.page()), Id {number * 80});
+    ASSERT_EQ(NodeHeader__::cell_count(root.page()), 0x2345);
+    ASSERT_EQ(NodeHeader__::cell_start(root.page()), 0x3456);
+    ASSERT_EQ(NodeHeader__::frag_count(root.page()), 0x4567);
+    ASSERT_EQ(NodeHeader__::free_start(root.page()), 0x5678);
+    ASSERT_EQ(NodeHeader__::free_total(root.page()), 0x6789);
 }
 
 TEST_F(NodeTests, FreshNodesAreEmpty)

@@ -6,7 +6,7 @@
 
 namespace Calico {
 
-class NodeHeader final {
+class NodeHeader__ final {
 public:
     [[nodiscard]] static auto parent_id(const Page_ &) -> Id;
     [[nodiscard]] static auto right_sibling_id(const Page_ &) -> Id;
@@ -47,9 +47,9 @@ public:
     static auto remove_pointer(Page_ &, Size) -> void;
 };
 
-class BlockAllocator final {
+class BlockAllocator__ final {
 public:
-    ~BlockAllocator() = default;
+    ~BlockAllocator__() = default;
     [[nodiscard]] static auto usable_space(const Page_ &) -> Size;
     static auto allocate(Page_ &, Size) -> Size;
     static auto free(Page_ &, Size, Size) -> void;
@@ -67,7 +67,7 @@ private:
     static auto take_free_space(Page_ &, Size, Size, Size) -> Size;
 };
 
-class Node final {
+class Node__ final {
 public:
     struct FindGeResult {
         Size index {};
@@ -76,7 +76,7 @@ public:
 
     friend class Iterator;
 
-    Node(Page_ page, bool reset_header, Byte *scratch)
+    Node__(Page_ page, bool reset_header, Byte *scratch)
         : m_page {std::move(page)},
           m_scratch {scratch, m_page.size()}
     {
@@ -114,20 +114,20 @@ public:
     }
 
     [[nodiscard]] auto read_key(Size) const -> Slice;
-    [[nodiscard]] auto read_cell(Size) const -> Cell;
-    [[nodiscard]] auto detach_cell(Size, Span) const -> Cell;
+    [[nodiscard]] auto read_cell(Size) const -> Cell__;
+    [[nodiscard]] auto detach_cell(Size, Span) const -> Cell__;
     [[nodiscard]] auto find_ge(const Slice &key) const -> FindGeResult;
     auto remove(Size index, Size size) -> void;
     auto defragment() -> void;
-    [[nodiscard]] auto overflow_cell() const -> const Cell &;
+    [[nodiscard]] auto overflow_cell() const -> const Cell__ &;
 
-    auto set_overflow_cell(Cell cell, Size index) -> void;
-    auto take_overflow_cell() -> Cell;
+    auto set_overflow_cell(Cell__ cell, Size index) -> void;
+    auto take_overflow_cell() -> Cell__;
     [[nodiscard]] auto is_overflowing() const -> bool;
 
-    auto extract_cell(Size, Span) -> Cell;
-    auto insert(Cell) -> void;
-    auto insert(Size index, Cell cell) -> void;
+    auto extract_cell(Size, Span) -> Cell__;
+    auto insert(Cell__) -> void;
+    auto insert(Size index, Cell__ cell) -> void;
     auto remove(const Slice &key) -> bool;
     [[nodiscard]] auto is_underflowing() const -> bool;
     [[nodiscard]] auto is_external() const -> bool;
@@ -141,7 +141,7 @@ public:
     auto set_right_sibling_id(Id) -> void;
     auto set_left_sibling_id(Id id) -> void
     {
-        return NodeHeader::set_left_sibling_id(m_page, id);
+        return NodeHeader__::set_left_sibling_id(m_page, id);
     }
     auto set_rightmost_child_id(Id) -> void;
     auto set_child_id(Size, Id) -> void;
@@ -163,17 +163,17 @@ private:
     auto defragment(std::optional<Size>) -> void;
 
     Page_ m_page;
-    std::optional<Cell> m_overflow_cell {};
+    std::optional<Cell__> m_overflow_cell {};
     Size m_overflow_index {};
     Span m_scratch;
 };
 
-[[nodiscard]] auto can_merge_siblings(const Node &, const Node &, const Cell &) -> bool;
-auto merge_left(Node &, Node &, Node &, Size) -> void;
-auto merge_right(Node &, Node &, Node &, Size) -> void;
-auto merge_root(Node &, Node &) -> void;
-auto split_root(Node &, Node &) -> void;
-[[nodiscard]] auto split_non_root(Node &, Node &, Span) -> Cell;
+[[nodiscard]] auto can_merge_siblings(const Node__ &, const Node__ &, const Cell__ &) -> bool;
+auto merge_left(Node__ &, Node__ &, Node__ &, Size) -> void;
+auto merge_right(Node__ &, Node__ &, Node__ &, Size) -> void;
+auto merge_root(Node__ &, Node__ &) -> void;
+auto split_root(Node__ &, Node__ &) -> void;
+[[nodiscard]] auto split_non_root(Node__ &, Node__ &, Span) -> Cell__;
 
 } // namespace Calico
 
