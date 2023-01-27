@@ -30,9 +30,9 @@ struct Error {
     Level priority {};
 };
 
-#define CALICO_WARN(s) m_system->push_error(Error::WARN, s)
-#define CALICO_ERROR(s) m_system->push_error(Error::ERROR, s)
-#define CALICO_PANIC(s) m_system->push_error(Error::PANIC, s)
+#define CALICO_WARN(s) system->push_error(Error::WARN, s)
+#define CALICO_ERROR(s) system->push_error(Error::ERROR, s)
+#define CALICO_PANIC(s) system->push_error(Error::PANIC, s)
 #define CALICO_WARN_IF(expr) do {if (auto calico_warn_s = (expr); !calico_warn_s.is_ok()) CALICO_WARN(calico_warn_s);} while (0)
 #define CALICO_ERROR_IF(expr) do {if (auto calico_error_s = (expr); !calico_error_s.is_ok()) CALICO_ERROR(calico_error_s);} while (0)
 #define CALICO_PANIC_IF(expr) do {if (auto calico_panic_s = (expr); !calico_panic_s.is_ok() CALICO_PANIC(calico_panic_s);} while (0)

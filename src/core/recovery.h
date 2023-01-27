@@ -17,11 +17,13 @@ class WriteAheadLog;
 
 class Recovery {
 public:
-    Recovery(Pager &pager, WriteAheadLog &wal, System &system)
-        : m_pager {&pager},
+    System *system {};
+
+    Recovery(Pager &pager, WriteAheadLog &wal, System &sys)
+        : system {&sys},
+          m_pager {&pager},
           m_wal {&wal},
-          m_system {&system},
-          m_log {system.create_log("recovery")}
+          m_log {sys.create_log("recovery")}
     {}
 
     [[nodiscard]] auto start_abort() -> Status;
@@ -32,7 +34,6 @@ public:
 private:
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
-    System *m_system {};
     LogPtr m_log;
 };
 

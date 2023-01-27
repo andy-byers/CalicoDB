@@ -3,11 +3,12 @@
 #define CALICO_TEST_TOOLS_TOOLS_H
 
 #include "calico/calico.h"
-#include "page/node.h"
+#include "calico/cursor.h"
 #include "pager/framer.h"
 #include "random.h"
 #include "storage/posix_storage.h"
-#include "utils/header.h"
+#include "tree/node.h"
+#include "tree/header.h"
 #include "utils/types.h"
 #include "utils/utils.h"
 #include "wal/record.h"
@@ -25,65 +26,6 @@ inline auto expect_ok(const Status &s) -> void
         CALICO_EXPECT_TRUE(false && "expect_ok() failed");
     }
 }
-
-class DataFileInspector {
-public:
-    DataFileInspector(const std::string &path, Size page_size)
-        : m_store {std::make_unique<PosixStorage>()},
-          m_page_size {page_size}
-    {
-        RandomReader *file {};
-        auto s = m_store->open_random_reader(path, &file);
-        CALICO_EXPECT_TRUE(s.is_ok());
-        m_file = std::unique_ptr<RandomReader> {file};
-
-        Size file_size {};
-        s = m_store->file_size(path, file_size);
-        CALICO_EXPECT_TRUE(s.is_ok());
-        CALICO_EXPECT_EQ(file_size % page_size, 0);
-        m_data.resize(file_size);
-
-        Span bytes {m_data};
-        auto read_size = bytes.size();
-        s = m_file->read(bytes.data(), read_size, 0);
-        CALICO_EXPECT_EQ(read_size, file_size);
-        CALICO_EXPECT_TRUE(s.is_ok());
-    }
-
-    [[nodiscard]]
-    auto page_count() const -> Size
-    {
-        return m_data.size() / m_page_size;
-    }
-
-    [[nodiscard]]
-    auto get_state() -> FileHeader__
-    {
-        CALICO_EXPECT_GT(m_data.size(), sizeof(FileHeader));
-        auto root = get_page(Id::root());
-        return read_header(root);
-    }
-
-    [[nodiscard]]
-    auto get_page(Id id) -> Page_
-    {
-        const auto offset = id.as_index() * m_page_size;
-        CALICO_EXPECT_LE(offset + m_page_size, m_data.size());
-
-        return Page_ {{
-            id,
-            Span {m_data}.range(offset, m_page_size),
-            nullptr,
-            false,
-        }};
-    }
-
-private:
-    std::unique_ptr<Storage> m_store;
-    std::unique_ptr<RandomReader> m_file;
-    std::string m_data;
-    Size m_page_size {};
-};
 
 class WalRecordGenerator {
 public:
@@ -117,7 +59,7 @@ class BPlusTree__;
 namespace tools {
 
     template<class T>
-    auto find_exact(T &t, const std::string &key) -> Cursor
+    auto get(T &t, const std::string &key, std::string &value) -> Status
     {
         return t.find_exact(key);
     }
@@ -131,13 +73,13 @@ namespace tools {
     template<class T>
     auto contains(T &t, const std::string &key) -> bool
     {
-        return find_exact(t, key).is_valid();
+        return get(t, key).is_valid();
     }
 
     template<class T>
     auto contains(T &t, const std::string &key, const std::string &value) -> bool
     {
-        if (auto c = find_exact(t, key); c.is_valid())
+        if (auto c = get(t, key); c.is_valid())
             return c.value() == value;
         return false;
     }
@@ -146,7 +88,7 @@ namespace tools {
     auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
     {
         const auto MSG = fmt::format("expected record ({}, {})\n", key, value);
-        if (auto c = find_exact(t, key); c.is_valid()) {
+        if (auto c = get(t, key); c.is_valid()) {
             if (c.value() != value) {
                 fmt::print(stderr, "{}: value \"{}\" does not match\n", MSG, c.value());
                 std::exit(EXIT_FAILURE);
@@ -160,7 +102,7 @@ namespace tools {
     template<class T>
     auto insert(T &t, const std::string &key, const std::string &value) -> void
     {
-        auto s = t.insert(key, value);
+        auto s = t.put(key, value);
         if (!s.is_ok()) {
             fmt::print(stderr, "error: {}\n", s.what().data());
             CALICO_EXPECT_TRUE(false && "Error: insert() failed");
@@ -170,7 +112,7 @@ namespace tools {
     template<class T>
     auto erase(T &t, const std::string &key) -> bool
     {
-        auto s = t.erase(find_exact(t, key));
+        auto s = t.erase(get(t, key));
         if (!s.is_ok() && !s.is_not_found()) {
             fmt::print(stderr, "error: {}\n", s.what().data());
             CALICO_EXPECT_TRUE(false && "Error: erase() failed");
@@ -181,7 +123,7 @@ namespace tools {
     template<class T>
     auto erase_one(T &t, const std::string &key) -> bool
     {
-        auto was_erased = t.erase(find_exact(t, key));
+        auto was_erased = t.erase(get(t, key));
         CALICO_EXPECT_TRUE(was_erased.has_value());
         if (was_erased.value())
             return true;
@@ -330,12 +272,12 @@ struct formatter<Cco::FileHeader> {
     }
 
     template <typename FormatContext>
-    auto format(const Cco::FileHeader__ &header, FormatContext &ctx) {
+    auto format(const Cco::FileHeader &header, FormatContext &ctx) {
         auto out = fmt::format("({} B) {{", sizeof(header));
         out += fmt::format("magic_code: {}, ", header.magic_code);
         out += fmt::format("header_crc: {}, ", header.header_crc);
         out += fmt::format("page_count: {}, ", header.page_count);
-        out += fmt::format("freelist_head: {}, ", header.freelist_head);
+        out += fmt::format("free_list_id: {}, ", header.free_list_id);
         out += fmt::format("record_count: {}, ", header.record_count);
         out += fmt::format("flushed_lsn: {}, ", header.recovery_lsn);
         out += fmt::format("page_size: {}", header.page_size);

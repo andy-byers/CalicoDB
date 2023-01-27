@@ -1,10 +1,10 @@
 #ifndef CALICO_TREE_NODE_H
 #define CALICO_TREE_NODE_H
 
-#include <optional>
 #include "header.h"
-#include "page.h"
+#include "pager/page.h"
 #include "utils/types.h"
+#include <optional>
 
 namespace Calico {
 
@@ -96,58 +96,40 @@ struct Node {
     Node(Node &&rhs) noexcept = default;
     auto operator=(Node &&) noexcept -> Node & = default;
 
-    Page page;
-
-    Byte *scratch {};
-    const NodeMeta *meta {};
-    NodeHeader header;
-
-    std::optional<Cell> overflow;
-    PageSize overflow_index {};
-    PageSize slots_offset {};
-    PageSize gap_size {};
-
     [[nodiscard]] auto get_slot(Size index) const -> Size;
     auto set_slot(Size index, Size pointer) -> void;
     auto insert_slot(Size index, Size pointer) -> void;
     auto remove_slot(Size index) -> void;
 
-    [[nodiscard]]
-    auto cell_size(Size offset) const -> Size
-    {
-        return meta->cell_size(*meta, page.data() + offset);
-    }
-
-    [[nodiscard]]
-    auto parse_cell(Size offset) -> Cell
-    {
-        return meta->parse_cell(*meta, page.data() + offset);
-    }
-
-    [[nodiscard]]
-    auto read_key(Size offset) const -> Slice
-    {
-        return meta->read_key(page.data() + offset);
-    }
-
     auto TEST_validate() const -> void;
+
+    Page page;
+    Byte *scratch {};
+    const NodeMeta *meta {};
+    NodeHeader header;
+    std::optional<Cell> overflow;
+    PageSize overflow_index {};
+    PageSize slots_offset {};
+    PageSize gap_size {};
 };
 
 /*
  * Determine the amount of usable space remaining in the node.
  */
 [[nodiscard]] auto usable_space(const Node &node) -> Size;
+[[nodiscard]] auto max_usable_space(const Node &node) -> Size;
 
 /*
- * Read a cell from the node at the specified index. The node must remain alive for as long as the cell.
+ * Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
  */
+[[nodiscard]] auto read_cell_at(Node &node, Size offset) -> Cell;
 [[nodiscard]] auto read_cell(Node &node, Size index) -> Cell;
 
 /*
  * Write a cell to the node at the specified index. May defragment the node. The cell must be of the same
  * type as the node, or if the node is internal, promote_cell() must have been called on the cell.
  */
-auto write_cell(Node &node, Size index, const Cell &cell) -> void;
+auto write_cell(Node &node, Size index, const Cell &cell) -> Size;
 
 /*
  * Erase a cell from the node at the specified index.
@@ -185,12 +167,19 @@ auto promote_cell(Cell &cell) -> void;
  */
 auto detach_cell(Cell &cell, Byte *backing) -> void;
 
+[[nodiscard]] auto read_key_at(const Node &node, Size offset) -> Slice;
+[[nodiscard]] auto read_child_id_at(const Node &node, Size offset) -> Id;
+auto write_child_id_at(Node &node, Size offset, Id child_id) -> void;
+
+[[nodiscard]] auto read_key(const Node &node, Size index) -> Slice;
 [[nodiscard]] auto read_key(const Cell &cell) -> Slice;
 [[nodiscard]] auto read_child_id(const Node &node, Size index) -> Id;
 [[nodiscard]] auto read_child_id(const Cell &cell) -> Id;
 [[nodiscard]] auto read_overflow_id(const Cell &cell) -> Id;
 auto write_child_id(Node &node, Size index, Id child_id) -> void;
 auto write_child_id(Cell &cell, Id child_id) -> void;
+
+auto merge_root(Node &root, Node &child) -> void;
 
 } // namespace Calico
 

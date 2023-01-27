@@ -52,14 +52,16 @@ auto main(int, const char *[]) -> int
     options.log_level = Calico::LogLevel::TRACE;
     options.log_target = Calico::LogTarget::STDERR_COLOR;
 
-    // Open or create a database at "/tmp/cats".
-    auto s = db.open("/tmp/cats", options);
+    {
+        // Open or create a database at "/tmp/cats".
+        auto s = db.open("/tmp/cats", options);
 
-    // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is null-
-    // terminated, so it can be printed like in the following block.
-    if (!s.is_ok()) {
-        fprintf(stderr, "error: %s\n", s.what().data());
-        return 1;
+        // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is null-
+        // terminated, so it can be printed like in the following block.
+        if (!s.is_ok()) {
+            fprintf(stderr, "error: %s\n", s.what().data());
+            return 1;
+        }
     }
 
     /* updating-a-database */
@@ -67,7 +69,7 @@ auto main(int, const char *[]) -> int
     {
         // Insert a key-value pair. We can use arbitrary bytes for both the key and value, including NULL bytes, provided the slice
         // object knows the proper string length.
-        auto s = db.insert("\x11\x22\x33", {"\xDD\xEE\x00\xFF", 4});
+        auto s = db.put("\x11\x22\x33", {"\xDD\xEE\x00\xFF", 4});
 
         // Again, the status object reports the outcome of the operation. Since we are not inside a transaction, all modifications
         // made to the database are applied atomically. This means that if this status is OK, then our key-value pair is safely on
@@ -77,11 +79,10 @@ auto main(int, const char *[]) -> int
 
         }
 
-        // We can erase records by key, or by passing a cursor object (see Queries below). It should be noted that a cursor used to
-        // erase a key will be invalidated if the operation succeeds.
+        // We can erase records by key.
         s = db.erase("42");
 
-        // If the key is not found (or the cursor is invalid), we'll receive a "not found" status.
+        // If the key is not found, we'll receive a "not found" status.
         if (s.is_not_found()) {
 
         }
@@ -90,35 +91,49 @@ auto main(int, const char *[]) -> int
     /* querying-a-database */
 
     {
-        // We can find the first record greater than or equal to a given key...
-        auto c1 = db.find("\x10\x20\x30");
-
-        // ...or, we can try for an exact match.
-        auto c2 = db.find_exact("\x10\x20\x30");
-
-        // Both methods return cursors, which point to database records and can be used to perform range queries. We check if a
-        // cursor is valid (i.e. it points to an existing record and has an OK internal status) by writing:
-        if (c1.is_valid()) {
+        // Query a value by key.
+        std::string value;
+        if (db.get("\x10\x20\x30", value).is_ok()) {
 
         }
 
-        // As mentioned above, cursors store and provide access to a status object. We check this status using the status()
-        // method. Once a cursor's status becomes non-OK, it will stay that way and the cursor can no longer be used.
-        [[maybe_unused]] auto s = c1.status();
+        // Open a cursor. The cursor is not yet valid.
+        auto cursor = db.cursor();
 
-        // Calico DB provides methods for accessing the first and last records. Like the find*() methods, these methods return
-        // cursors. This lets us easily traverse all records in order.
-        for (auto c = db.first(); c.is_valid(); ++c) {}
+        // Seek to the first record greater than or equal to the given key.
+        cursor.seek("\x10\x20\x30");
 
-        // We can also traverse in reverse order...
-        for (auto c = db.last(); c.is_valid(); --c) {}
+        if (cursor.is_valid()) {
+            // If the cursor is valid, these methods can be called.
+            (void)cursor.key();
+            (void)cursor.value();
+        } else {
+            // Otherwise, the error status can be queried.
+            (void)cursor.status();
+        }
 
-        // ...or from the start to some arbitrary point. In this example, the cursor we are iterating to is not valid. This is
-        // the same as iterating until we hit the end.
-        for (auto c = db.first(), bounds = db.find("42"); c.is_valid() && c != bounds; ++c) {}
+        cursor.seek_first();
+        for (; cursor.is_valid(); cursor.next()) {
 
-        // We can also use key comparisons.
-        for (auto c = db.first(); c.is_valid() && c.key() < "42"; ++c) {}
+        }
+
+        cursor.seek_last();
+        for (; cursor.is_valid(); cursor.previous()) {
+
+        }
+
+        auto bounds = db.cursor();
+        bounds.seek("42");
+
+        cursor.seek_first();
+        for (; cursor.is_valid() && cursor != bounds; cursor.next()) {
+
+        }
+
+        cursor.seek_last();
+        for (; cursor.is_valid() && cursor.key() >= "42"; cursor.previous()) {
+
+        }
     }
 
     /* transaction-objects */
@@ -126,9 +141,9 @@ auto main(int, const char *[]) -> int
     {
         // Start a transaction. All modifications made to the database while this object is live will be part of the transaction
         // it represents.
-        auto xact = db.transaction();
+        auto xact = db.start();
 
-        auto s = db.erase("");
+        auto s = db.erase("k");
         if (!s.is_ok()) {
 
         }
@@ -140,9 +155,9 @@ auto main(int, const char *[]) -> int
         }
 
         // If we want to start another transaction, we need to make another call to the database.
-        xact = db.transaction();
+        xact = db.start();
 
-        s = db.erase(db.first().key());
+        s = db.erase("42");
         if (!s.is_ok()) {
 
         }
@@ -160,14 +175,17 @@ auto main(int, const char *[]) -> int
     {
         // We can use a statistics object to get information about the database state.
         const auto stat = db.statistics();
-        [[maybe_unused]] const auto rc = stat.record_count();
-        [[maybe_unused]] const auto pc = stat.page_count();
-        [[maybe_unused]] const auto ks = stat.maximum_key_size();
-        [[maybe_unused]] const auto hr = stat.cache_hit_ratio();
+        (void)stat.record_count();
+        (void)stat.page_count();
+        (void)stat.maximum_key_size();
+        (void)stat.cache_hit_ratio();
+        (void)stat.pager_throughput();
+        (void)stat.wal_throughput();
+        (void)stat.data_throughput();
 
         // The page size is fixed at database creation time. If the database already existed, the page size passed to the
         // constructor through Calico::Options is ignored. We can query the real page size using the following line.
-        [[maybe_unused]] const auto ps = stat.page_size();
+        (void)stat.page_size();
     }
 
     /* closing-a-database */

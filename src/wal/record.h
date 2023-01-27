@@ -1,12 +1,12 @@
 #ifndef CALICO_WAL_RECORD_H
 #define CALICO_WAL_RECORD_H
 
-#include <optional>
+#include "pager/delta.h"
 #include "spdlog/fmt/fmt.h"
-#include "wal.h"
-#include "page/delta.h"
 #include "utils/encoding.h"
 #include "utils/types.h"
+#include "wal.h"
+#include <optional>
 
 namespace Calico {
 

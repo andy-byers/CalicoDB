@@ -1,5 +1,5 @@
 #include "calico/transaction.h"
-#include "core.h"
+#include "database_impl.h"
 #include "utils/expect.h"
 #include "utils/system.h"
 
@@ -15,34 +15,41 @@ Transaction::~Transaction()
 {
     // If m_core is not nullptr, then we must have failed during a commit. Try to
     // fix the database by rolling back this transaction.
-    if (m_core) (void)m_core->abort();
+    if (m_impl) {
+        (void)m_impl->abort();
+    }
 }
 
-Transaction::Transaction(Core &core)
-    : m_core {&core}
+Transaction::Transaction(DatabaseImpl &core)
+    : m_impl {&core}
 {}
 
 Transaction::Transaction(Transaction &&rhs) noexcept
-    : m_core {std::exchange(rhs.m_core, nullptr)}
+    : m_impl {std::exchange(rhs.m_impl, nullptr)}
 {}
 
 auto Transaction::operator=(Transaction &&rhs) noexcept -> Transaction &
 {
-    if (this != &rhs)
-        m_core = std::exchange(rhs.m_core, nullptr);
+    if (this != &rhs) {
+        m_impl = std::exchange(rhs.m_impl, nullptr);
+    }
     return *this;
 }
 
 auto Transaction::commit() -> Status
 {
-    if (!m_core) return already_completed_error("commit");
-    return std::exchange(m_core, nullptr)->commit();
+    if (!m_impl) {
+        return already_completed_error("commit");
+    }
+    return std::exchange(m_impl, nullptr)->commit();
 }
 
 auto Transaction::abort() -> Status
 {
-    if (!m_core) return already_completed_error("abort");
-    return std::exchange(m_core, nullptr)->abort();
+    if (!m_impl) {
+        return already_completed_error("abort");
+    }
+    return std::exchange(m_impl, nullptr)->abort();
 }
 
 } // namespace Calico

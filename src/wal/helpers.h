@@ -2,15 +2,15 @@
 #define CALICO_WAL_HELPERS_H
 
 #include "calico/storage.h"
-#include "page/delta.h"
+#include "pager/delta.h"
 #include "record.h"
+#include "utils/expected.hpp"
 #include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/system.h"
 #include "utils/types.h"
-#include <mutex>
 #include <map>
-#include "utils/expected.hpp"
+#include <mutex>
 
 namespace Calico {
 

@@ -7,31 +7,15 @@
 
 namespace Calico {
 
-class Node__;
+struct Node;
 struct CursorActions;
 
 class Cursor final {
-public:
-    ~Cursor() = default;
-    [[nodiscard]] auto is_valid() const -> bool;
-    [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto key() const -> Slice;
-    [[nodiscard]] auto value() const -> std::string;
-    auto increment() -> bool;
-    auto decrement() -> bool;
-    auto operator++() -> Cursor &;
-    auto operator++(int) -> Cursor;
-    auto operator--() -> Cursor &;
-    auto operator--(int) -> Cursor;
-    auto operator==(const Cursor &rhs) const -> bool;
-    auto operator!=(const Cursor &rhs) const -> bool;
-
-private:
-    Cursor() = default;
+    friend class CursorInternal;
 
     struct Position {
         static constexpr Size LEFT {0};
-        static constexpr Size CURRENT {1};
+        static constexpr Size CENTER {1};
         static constexpr Size RIGHT {2};
 
         auto operator==(const Position &rhs) const -> bool;
@@ -43,11 +27,30 @@ private:
         std::uint16_t index {};
     };
 
-    friend class CursorInternal;
-
     mutable Status m_status {Status::ok()};
+    mutable std::string m_value;
     CursorActions *m_actions {};
     Position m_position;
+
+public:
+    Cursor() = default;
+
+    [[nodiscard]] auto is_valid() const -> bool;
+    [[nodiscard]] auto status() const -> Status;
+    [[nodiscard]] auto key() const -> Slice;
+    [[nodiscard]] auto value() const -> Slice;
+
+    auto seek(const Slice &key) -> void;
+    auto seek_first() -> void;
+    auto seek_last() -> void;
+    auto next() -> void;
+    auto previous() -> void;
+
+    /*
+     * Position-based comparison between cursors can be faster than comparing keys.
+     */
+    auto operator==(const Cursor &rhs) const -> bool;
+    auto operator!=(const Cursor &rhs) const -> bool;
 };
 
 } // namespace Calico

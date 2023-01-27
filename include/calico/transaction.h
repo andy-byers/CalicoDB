@@ -3,13 +3,12 @@
 
 namespace Calico {
 
-class Core;
+class DatabaseImpl;
 class Status;
 
 class Transaction final {
 public:
     ~Transaction();
-    explicit Transaction(Core &core);
 
     // Prevent copies.
     Transaction(const Transaction &) = delete;
@@ -22,7 +21,10 @@ public:
     [[nodiscard]] auto abort() -> Status;
 
 private:
-    Core *m_core {};
+    friend class DatabaseImpl;
+    explicit Transaction(DatabaseImpl &impl);
+
+    DatabaseImpl *m_impl {};
 };
 
 } // namespace Calico

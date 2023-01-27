@@ -4,7 +4,7 @@
 #include "calico/database.h"
 #include "spdlog/sinks/basic_file_sink.h"
 #include "spdlog/spdlog.h"
-#include "utils/header.h"
+#include "tree/header.h"
 #include "utils/expected.hpp"
 #include "wal/helpers.h"
 #include <unordered_set>
@@ -15,44 +15,45 @@ class Cursor;
 class Pager;
 class Recovery;
 class Storage;
-class Tree;
+class BPlusTree;
 class WriteAheadLog;
 
 struct InitialState {
-    FileHeader__ state {};
+    FileHeader state;
     bool is_new {};
 };
 
-class Core final {
+class DatabaseImpl final {
 public:
     friend class Database;
 
-    Core() = default;
-    ~Core();
+    DatabaseImpl() = default;
+    ~DatabaseImpl();
 
     [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto destroy() -> Status;
-    [[nodiscard]] auto transaction() -> Transaction;
-    [[nodiscard]] auto bytes_written() const -> Size;
+    [[nodiscard]] auto start() -> Transaction;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
-    [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> Status;
+    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto abort() -> Status;
-    [[nodiscard]] auto find(const Slice &key) -> Cursor;
-    [[nodiscard]] auto find_exact(const Slice &key) -> Cursor;
-    [[nodiscard]] auto first() -> Cursor;
-    [[nodiscard]] auto last() -> Cursor;
+    [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status;
+    [[nodiscard]] auto cursor() const -> Cursor;
     [[nodiscard]] auto statistics() -> Statistics;
 
+    std::unique_ptr<System> system;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
-    std::unique_ptr<Tree> tree;
+    std::unique_ptr<BPlusTree> tree;
+
+    Size bytes_written {};
+    Size record_count {};
+    Size maximum_key_size {};
 
 private:
-    [[nodiscard]] auto handle_errors() const -> Status;
     [[nodiscard]] auto check_key(const Slice &key, const char *message) const -> Status;
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
@@ -65,13 +66,9 @@ private:
 
     std::string m_prefix;
     LogPtr m_log;
-    std::unique_ptr<System> m_system;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
     Storage *m_store {};
-    Size m_bytes_written {};
-    Size m_maximum_key_size {};
-    Size m_record_count {};
     bool m_owns_store {};
 };
 

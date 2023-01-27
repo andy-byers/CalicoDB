@@ -1,10 +1,8 @@
-#include "basic_pager.h"
+#include "pager.h"
 #include "calico/options.h"
 #include "framer.h"
-#include "page/page.h"
-#include "temp/header.h"
-#include "temp/page.h"
-#include "utils/header.h"
+#include "page.h"
+#include "tree/header.h"
 #include "utils/system.h"
 #include "utils/types.h"
 #include <thread>
@@ -15,7 +13,7 @@ namespace fs = std::filesystem;
 
 static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
 
-auto BasicPager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
+auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
 {
     auto framer = Framer::open(
         param.prefix,
@@ -25,38 +23,42 @@ auto BasicPager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Statu
     if (!framer.has_value())
         return tl::make_unexpected(framer.error());
     
-    auto ptr = Pager::Ptr {new (std::nothrow) BasicPager {param, std::move(*framer)}};
+    auto ptr = Pager::Ptr {new (std::nothrow) Pager {param, std::move(*framer)}};
     if (ptr == nullptr)
         return tl::make_unexpected(system_error("could not make_room pager object: out of memory"));
     return ptr;
 }
 
-BasicPager::BasicPager(const Parameters &param, Framer framer)
-    : m_framer {std::move(framer)},
+Pager::Pager(const Parameters &param, Framer framer)
+    : system {param.system},
+      m_framer {std::move(framer)},
       m_log {param.system->create_log("pager")},
       m_scratch {param.scratch},
-      m_wal {param.wal},
-      m_system {param.system}
+      m_wal {param.wal}
 {
     m_log->info("initializing, cache size is {}", param.frame_count * param.page_size);
+
+    CALICO_EXPECT_NE(system, nullptr);
+    CALICO_EXPECT_NE(m_scratch, nullptr);
+    CALICO_EXPECT_NE(m_wal, nullptr);
 }
 
-auto BasicPager::page_count() const -> Size
+auto Pager::page_count() const -> Size
 {
     return m_framer.page_count();
 }
 
-auto BasicPager::page_size() const -> Size
+auto Pager::page_size() const -> Size
 {
     return m_framer.page_size();
 }
 
-auto BasicPager::hit_ratio() const -> double
+auto Pager::hit_ratio() const -> double
 {
     return m_registry.hit_ratio();
 }
 
-auto BasicPager::pin_frame(Id pid) -> Status
+auto Pager::pin_frame(Id pid) -> Status
 {
     CALICO_EXPECT_FALSE(m_registry.contains(pid));
 
@@ -82,7 +84,7 @@ auto BasicPager::pin_frame(Id pid) -> Status
     return ok();
 }
 
-auto BasicPager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
+auto Pager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
 {
     auto token = *entry.dirty_token;
     // Reset the dirty list reference.
@@ -90,16 +92,14 @@ auto BasicPager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
     return m_dirty.remove(token);
 }
 
-auto BasicPager::set_recovery_lsn(Lsn lsn) -> void
+auto Pager::set_recovery_lsn(Lsn lsn) -> void
 {
     CALICO_EXPECT_LE(m_recovery_lsn, lsn);
-    // m_log->info("recovery_lsn: {} -> {}", m_recovery_lsn.value, lsn.value);
     m_recovery_lsn = lsn;
 }
 
-auto BasicPager::flush(Lsn target_lsn) -> Status
+auto Pager::flush(Lsn target_lsn) -> Status
 {
-    // m_log->trace("flush");
     CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);
 
     // An LSN of NULL causes all pages to be flushed.
@@ -151,7 +151,7 @@ auto BasicPager::flush(Lsn target_lsn) -> Status
     return ok();
 }
 
-auto BasicPager::recovery_lsn() -> Id
+auto Pager::recovery_lsn() -> Id
 {
     auto lowest = MAX_ID;
     for (auto entry: m_dirty) {
@@ -164,7 +164,7 @@ auto BasicPager::recovery_lsn() -> Id
     return m_recovery_lsn;
 }
 
-auto BasicPager::try_make_available() -> tl::expected<bool, Status>
+auto Pager::try_make_available() -> tl::expected<bool, Status>
 {
     Id page_id;
     auto evicted = m_registry.evict([this, &page_id](auto pid, auto entry) {
@@ -178,7 +178,7 @@ auto BasicPager::try_make_available() -> tl::expected<bool, Status>
         if (!entry.dirty_token)
             return true;
 
-        if (m_system->has_xact)
+        if (system->has_xact)
             return frame.lsn() <= m_wal->flushed_lsn();
 
         return true;
@@ -202,65 +202,7 @@ auto BasicPager::try_make_available() -> tl::expected<bool, Status>
     return true;
 }
 
-auto BasicPager::release(Page_ page) -> Status
-{
-    // NOTE: This block should be safe, because we can only have 1 writable page acquired at any given time. We will not enter unless the
-    //       page was written to while it was acquired.
-    if (const auto deltas = page.collect_deltas(); m_system->has_xact && !deltas.empty()) {
-        CALICO_EXPECT_TRUE(page.is_writable());
-
-        page.set_lsn(m_wal->current_lsn());
-        m_wal->log(encode_deltas_payload(
-            page.lsn(), page.id(), page.view(0),
-            page.collect_deltas(), *m_scratch->get()));
-    }
-    std::lock_guard lock {m_mutex};
-    CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
-
-    // This page must already be acquired.
-    auto itr = m_registry.get(page.id());
-    CALICO_EXPECT_NE(itr, m_registry.end());
-    auto &entry = itr->value;
-    m_framer.unref(entry.frame_index, page);
-
-    // TODO: Need to find a better heuristic.
-    if (entry.dirty_token) {
-        const auto checkpoint = (*entry.dirty_token)->record_lsn.value;
-        if (static constexpr Size CUTOFF {1'024}; checkpoint + CUTOFF < m_wal->current_lsn().value) {
-            auto s = m_framer.write_back(entry.frame_index);
-
-            if (s.is_ok()) {
-                clean_page(entry);
-            } else {
-                CALICO_ERROR(s);
-                return s;
-            }
-        }
-    }
-    return ok();
-}
-
-auto BasicPager::watch_page(Page_ &page, PageCache::Entry &entry) -> void
-{
-    // This function needs external synchronization!
-    CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
-
-    // Make sure this page is in the dirty list. LSN is saved to determine when the page should be written back.
-    if (!entry.dirty_token.has_value())
-        entry.dirty_token = m_dirty.insert(page.id(), page.lsn());
-
-    if (m_system->has_xact) {
-        // Don't write a full image record to the WAL if we already have one for this page during this transaction.
-        if (page.lsn() <= m_system->commit_lsn.load()) {
-            const auto next_lsn = m_wal->current_lsn();
-            m_wal->log(encode_full_image_payload(
-                next_lsn, page.id(), page.view(0), *m_scratch->get()));
-            page.set_lsn(next_lsn);
-        }
-    }
-}
-
-auto BasicPager::watch_page_(Page &page, PageCache::Entry &entry) -> void
+auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
 {
     // This function needs external synchronization!
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
@@ -272,10 +214,10 @@ auto BasicPager::watch_page_(Page &page, PageCache::Entry &entry) -> void
     if (!entry.dirty_token.has_value())
         entry.dirty_token = m_dirty.insert(page.id(), lsn);
 
-    if (m_system->has_xact) {
+    if (system->has_xact) {
         // Don't write a full image record to the WAL if we already have one for this page during this transaction.
 
-        if (lsn <= m_system->commit_lsn.load()) {
+        if (lsn <= system->commit_lsn.load()) {
             const auto next_lsn = m_wal->current_lsn();
             m_wal->log(encode_full_image_payload(
                 next_lsn, page.id(), page.view(0), *m_scratch->get()));
@@ -286,30 +228,33 @@ auto BasicPager::watch_page_(Page &page, PageCache::Entry &entry) -> void
     }
 }
 
-auto BasicPager::allocate_() -> tl::expected<Page, Status>
+auto Pager::allocate() -> tl::expected<Page, Status>
 {
-    return acquire_(Id::from_index(m_framer.page_count()));
+    return acquire(Id::from_index(m_framer.page_count()));
 }
 
-auto BasicPager::acquire_(Id id) -> tl::expected<Page, Status>
+auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
 {
     using std::end;
 
     const auto do_acquire = [this](auto &entry) {
-        return m_framer.ref_(entry.frame_index);
+        return m_framer.ref(entry.frame_index);
     };
-    CALICO_EXPECT_FALSE(id.is_null());
+    CALICO_EXPECT_FALSE(pid.is_null());
     std::lock_guard lock {m_mutex};
 
-    if (auto itr = m_registry.get(id); itr != end(m_registry))
+    if (auto itr = m_registry.get(pid); itr != end(m_registry)) {
         return do_acquire(itr->value);
+    }
 
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
     // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is incremented each time the WAL flushes a block.
-    auto success = true;
-    while ((success = !m_system->has_error())) {
-        auto s = pin_frame(id);
-        if (s.is_ok()) break;
+    bool success;
+    while ((success = !system->has_error())) {
+        auto s = pin_frame(pid);
+        if (s.is_ok()) {
+            break;
+        }
 
         if (!s.is_not_found()) {
             CALICO_WARN(s);
@@ -317,30 +262,32 @@ auto BasicPager::acquire_(Id id) -> tl::expected<Page, Status>
             // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
             // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
             // data races on this check.
-            if (m_system->has_xact)
+            if (system->has_xact) {
                 CALICO_ERROR(s);
+            }
             return tl::make_unexpected(s);
         }
     }
-    if (!success)
-        return tl::make_unexpected(m_system->original_error().status);
-    auto itr = m_registry.get(id);
+    if (!success) {
+        return tl::make_unexpected(system->original_error().status);
+    }
+    auto itr = m_registry.get(pid);
     CALICO_EXPECT_NE(itr, end(m_registry));
     return do_acquire(itr->value);
 }
 
-auto BasicPager::upgrade_(Page &page) -> void
+auto Pager::upgrade(Page &page) -> void
 {
     std::lock_guard lock {m_mutex};
     auto itr = m_registry.get(page.id());
     CALICO_EXPECT_NE(itr, m_registry.end());
-    m_framer.upgrade_(itr->value.frame_index, page);
-    watch_page_(page, itr->value);
+    m_framer.upgrade(itr->value.frame_index, page);
+    watch_page(page, itr->value);
 }
 
-auto BasicPager::release_(Page page) -> void
+auto Pager::release(Page page) -> void
 {
-    if (page.is_writable() && m_system->has_xact) {
+    if (page.is_writable() && system->has_xact) {
         const auto next_lsn = m_wal->current_lsn();
         auto memory = page.span(page_offset(page), sizeof(Lsn));
         put_u64(memory, next_lsn.value);
@@ -355,7 +302,7 @@ auto BasicPager::release_(Page page) -> void
     auto itr = m_registry.get(page.id());
     CALICO_EXPECT_NE(itr, m_registry.end());
     auto &entry = itr->value;
-    m_framer.unref_(entry.frame_index, std::move(page));
+    m_framer.unref(entry.frame_index, std::move(page));
 
     // TODO: Need to find a better heuristic.
     if (entry.dirty_token) {
@@ -372,69 +319,17 @@ auto BasicPager::release_(Page page) -> void
     }
 }
 
-auto BasicPager::save_state(FileHeader__ &header) -> void
+auto Pager::save_state(FileHeader &header) -> void
 {
-    // m_log->trace("save_state");
-    header.recovery_lsn = m_recovery_lsn.value;
+    header.recovery_lsn = m_recovery_lsn;
     m_framer.save_state(header);
 }
 
-auto BasicPager::load_state(const FileHeader__ &header) -> void
+auto Pager::load_state(const FileHeader &header) -> void
 {
-    // m_log->trace("load_state");
-    if (m_recovery_lsn.value < header.recovery_lsn)
+    if (m_recovery_lsn.value < header.recovery_lsn.value)
         set_recovery_lsn(Id {header.recovery_lsn});
     m_framer.load_state(header);
-}
-
-auto BasicPager::allocate() -> tl::expected<Page_, Status>
-{
-    return acquire(Id::from_index(m_framer.page_count()), true);
-}
-
-auto BasicPager::acquire(Id id, bool is_writable) -> tl::expected<Page_, Status>
-{
-    using std::end;
-
-    const auto do_acquire = [this, is_writable](auto &entry) {
-        auto page = m_framer.ref(entry.frame_index, *this, is_writable);
-
-        // We write a full image WAL record for the page if we are acquiring it as writable for the first time. This is part of the reason we should never
-        // acquire a writable page unless we intend to write to it immediately. This way we keep the surface between the Pager interface and Page small
-        // (page just uses its Pager* member to call release on itself, but only if it was not already released manually).
-        if (is_writable) watch_page(page, entry);
-
-        return page;
-    };
-    CALICO_EXPECT_FALSE(id.is_null());
-    std::lock_guard lock {m_mutex};
-
-    if (auto itr = m_registry.get(id); itr != end(m_registry))
-        return do_acquire(itr->value);
-
-    // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
-    // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is incremented each time the WAL flushes a block.
-    auto success = true;
-    while ((success = !m_system->has_error())) {
-        auto s = pin_frame(id);
-        if (s.is_ok()) break;
-
-        if (!s.is_not_found()) {
-            CALICO_WARN(s);
-
-            // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
-            // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
-            // data races on this check.
-            if (m_system->has_xact)
-                CALICO_ERROR(s);
-            return tl::make_unexpected(s);
-        }
-    }
-    if (!success)
-        return tl::make_unexpected(m_system->original_error().status);
-    auto itr = m_registry.get(id);
-    CALICO_EXPECT_NE(itr, end(m_registry));
-    return do_acquire(itr->value);
 }
 
 } // namespace Calico

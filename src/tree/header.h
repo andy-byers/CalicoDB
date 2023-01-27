@@ -23,6 +23,7 @@ struct FileHeader {
     explicit FileHeader() = default;
     explicit FileHeader(const Page &page);
     auto write(Page &page) const -> void;
+    [[nodiscard]] auto compute_crc() const -> std::uint32_t;
 
     std::uint32_t magic_code {MAGIC_CODE};
     std::uint32_t header_crc {};

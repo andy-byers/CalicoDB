@@ -29,7 +29,7 @@ auto do_read(const Database &db, Slice key)
 
 auto do_write(Database &db, Slice key)
 {
-    benchmark::DoNotOptimize(db.insert(key, DB_VALUE));
+    benchmark::DoNotOptimize(db.put(key, DB_VALUE));
 }
 
 auto do_erase(Database &db, const Slice &key)

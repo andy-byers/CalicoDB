@@ -1,8 +1,8 @@
 #ifndef CALICO_TREE_PAGE_H
 #define CALICO_TREE_PAGE_H
 
-#include "header.h"
-#include "page/delta.h"
+#include "pager/delta.h"
+#include "tree/header.h"
 #include "utils/types.h"
 
 namespace Calico {
@@ -102,6 +102,17 @@ public:
 inline auto page_offset(const Page &page) -> Size
 {
     return FileHeader::SIZE * page.id().is_root();
+}
+
+[[nodiscard]]
+inline auto read_page_lsn(const Page &page) -> Lsn
+{
+    return Lsn {get_u64(page.data() + page_offset(page))};
+}
+
+inline auto write_page_lsn(Page &page, Lsn lsn) -> void
+{
+    put_u64(page.span(page_offset(page), sizeof(Lsn)), lsn.value);
 }
 
 } // namespace Calico

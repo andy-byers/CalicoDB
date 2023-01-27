@@ -2,8 +2,7 @@
 #include "calico/cursor.h"
 #include "calico/statistics.h"
 #include "calico/transaction.h"
-#include "core.h"
-#include "pager/basic_pager.h"
+#include "database_impl.h"
 #include "pager/pager.h"
 #include "storage/posix_storage.h"
 #include "tree/bplus_tree.h"
@@ -14,97 +13,67 @@ namespace Calico {
 
 namespace fs = std::filesystem;
 
-Database::Database() noexcept = default;
+Database::Database()
+    : m_impl {std::make_unique<DatabaseImpl>()}
+{}
 
 auto Database::open(const Slice &path, const Options &options) -> Status
 {
-    CALICO_EXPECT_EQ(m_core, nullptr);
-    m_core = std::unique_ptr<Core> {new(std::nothrow) Core};
-    if (m_core == nullptr)
-        return system_error("cannot open database: out of memory");
-
-    auto s = m_core->open(path, options);
-    if (!s.is_ok()) m_core.reset();
-    return s;
+    return m_impl->open(path, options);
 }
 
 auto Database::close() -> Status
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    auto s = m_core->close();
-    m_core.reset();
-    return s;
+    return m_impl->close();
 }
 
 auto Database::destroy() && -> Status
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    auto s = m_core->destroy();
-    m_core.reset();
-    return s;
+    return m_impl->destroy();
 }
 
 Database::~Database()
 {
-    if (m_core) (void)close();
+    (void)close();
 }
 
-Database::Database(Database &&) noexcept = default;
+//Database::Database(Database &&) noexcept = default;
+//
+//auto Database::operator=(Database &&) noexcept -> Database & = default;
 
-auto Database::operator=(Database &&) noexcept -> Database & = default;
-
-auto Database::find_exact(const Slice &key) const -> Cursor
+auto Database::cursor() const -> Cursor
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->find_exact(key);
+    return m_impl->cursor();
 }
 
-auto Database::find(const Slice &key) const -> Cursor
+auto Database::get(const Slice &key, std::string &value) const -> Status
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->find(key);
+    return m_impl->get(key, value);
 }
 
-auto Database::first() const -> Cursor
+auto Database::put(const Slice &key, const Slice &value) -> Status
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->first();
-}
-
-auto Database::last() const -> Cursor
-{
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->last();
-}
-
-auto Database::insert(const Slice &key, const Slice &value) -> Status
-{
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->insert(key, value);
+    return m_impl->put(key, value);
 }
 
 auto Database::erase(const Slice &key) -> Status
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->erase(key);
+    return m_impl->erase(key);
 }
 
 auto Database::statistics() const -> Statistics
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->statistics();
+    return m_impl->statistics();
 }
 
 auto Database::status() const -> Status
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->status();
+    return m_impl->status();
 }
 
-auto Database::transaction() -> Transaction
+auto Database::start() -> Transaction
 {
-    CALICO_EXPECT_NE(m_core, nullptr);
-    return m_core->transaction();
+    return m_impl->start();
 }
 
 } // namespace Calico

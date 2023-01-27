@@ -1,18 +1,152 @@
 
 #include "fakes.h"
-#include "page/page.h"
-#include "pager/basic_pager.h"
 #include "pager/framer.h"
+#include "pager/page.h"
 #include "pager/page_cache.h"
-#include "temp/node.h"
-#include "temp/header.h"
+#include "pager/pager.h"
+#include "tree/header.h"
+#include "tree/node.h"
 #include "unit_tests.h"
-#include "utils/layout.h"
 #include "utils/system.h"
 #include <gtest/gtest.h>
 #include <numeric>
 
 namespace Calico {
+
+namespace UnitTests {
+    extern std::uint32_t random_seed;
+} // namespace internal
+
+class DeltaCompressionTest: public testing::Test {
+public:
+    static constexpr Size PAGE_SIZE {0x200};
+
+    [[nodiscard]]
+    auto build_deltas(const std::vector<PageDelta> &unordered)
+    {
+        std::vector<PageDelta> deltas;
+        for (const auto &delta: unordered)
+            insert_delta(deltas, delta);
+        compress_deltas(deltas);
+        return deltas;
+    }
+
+    [[nodiscard]]
+    auto insert_random_delta(std::vector<PageDelta> &deltas)
+    {
+        static constexpr Size MIN_DELTA_SIZE {1};
+        const auto offset = random.get(PAGE_SIZE - MIN_DELTA_SIZE);
+        const auto size = random.get(PAGE_SIZE - offset);
+        insert_delta(deltas, {offset, size});
+    }
+
+    Random random {UnitTests::random_seed};
+};
+
+TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
+{
+    const auto empty = build_deltas({});
+    ASSERT_TRUE(empty.empty());
+}
+
+TEST_F(DeltaCompressionTest, InsertEmptyDeltaDeathTest)
+{
+    std::vector<PageDelta> deltas;
+    ASSERT_DEATH(insert_delta(deltas, {123, 0}), EXPECTATION_MATCHER);
+}
+
+TEST_F(DeltaCompressionTest, CompressingSingleDeltaDoesNothing)
+{
+    const auto single = build_deltas({{123, 1}});
+    ASSERT_EQ(single.size(), 1);
+    ASSERT_EQ(single.front().offset, 123);
+    ASSERT_EQ(single.front().size, 1);
+}
+
+TEST_F(DeltaCompressionTest, DeltasAreOrdered)
+{
+    const auto deltas = build_deltas({
+        {20, 2},
+        {60, 6},
+        {50, 5},
+        {10, 1},
+        {90, 9},
+        {70, 7},
+        {40, 4},
+        {80, 8},
+        {30, 3},
+    });
+
+    Size i {1};
+    ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
+        const auto j = std::exchange(i, i + 1);
+        return delta.offset == 10 * j && delta.size == j;
+    }));
+    ASSERT_EQ(deltas.size(), 9);
+}
+
+TEST_F(DeltaCompressionTest, DeltasAreNotRepeated)
+{
+    const auto deltas = build_deltas({
+        {20, 2},
+        {50, 5},
+        {40, 4},
+        {10, 1},
+        {20, 2},
+        {30, 3},
+        {50, 5},
+        {40, 4},
+        {30, 3},
+        {10, 1},
+    });
+
+    Size i {1};
+    ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
+        const auto j = std::exchange(i, i + 1);
+        return delta.offset == 10 * j && delta.size == j;
+    }));
+    ASSERT_EQ(deltas.size(), 5);
+}
+
+TEST_F(DeltaCompressionTest, OverlappingDeltasAreMerged)
+{
+    auto deltas = build_deltas({
+        {0, 10},
+        {20, 10},
+        {40, 10},
+    });
+
+    insert_delta(deltas, {5, 10});
+    insert_delta(deltas, {30, 10});
+    compress_deltas(deltas);
+
+    ASSERT_EQ(deltas.size(), 2);
+    ASSERT_EQ(deltas[0].size, 15);
+    ASSERT_EQ(deltas[0].offset, 0);
+    ASSERT_EQ(deltas[1].size, 30);
+    ASSERT_EQ(deltas[1].offset, 20);
+}
+
+TEST_F(DeltaCompressionTest, SanityCheck)
+{
+    static constexpr Size NUM_INSERTS {100};
+    static constexpr Size MAX_DELTA_SIZE {10};
+    std::vector<PageDelta> deltas;
+    for (Size i {}; i < NUM_INSERTS; ++i) {
+        const auto offset = random.get(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto size = random.get(1, MAX_DELTA_SIZE);
+        insert_delta(deltas, PageDelta {offset, size});
+    }
+    compress_deltas(deltas);
+
+    std::vector<int> covering(PAGE_SIZE);
+    for (const auto &[offset, size]: deltas) {
+        for (Size i {}; i < size; ++i) {
+            ASSERT_EQ(covering.at(offset + i), 0);
+            covering[offset + i]++;
+        }
+    }
+}
 
 class CacheTests: public testing::Test {
 public:
@@ -411,7 +545,7 @@ class FramerTests : public testing::Test {
 public:
     explicit FramerTests()
         : home {std::make_unique<HeapStorage>()},
-          framer {*Framer::open(DATA_FILENAME, home.get(), 0x100, 8)}
+          framer {*Framer::open("data", home.get(), 0x100, 8)}
     {}
 
     ~FramerTests() override = default;
@@ -448,7 +582,7 @@ TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
-    const auto offset = PageLayout::content_offset(page.id());
+    const auto offset = page_offset(page);
     CALICO_EXPECT_LE(offset + message.size(), page.size());
     mem_copy(page.span(offset, message.size()), message);
 }
@@ -456,7 +590,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 [[nodiscard]]
 auto read_from_page(const Page &page, Size size) -> std::string
 {
-    const auto offset = PageLayout::content_offset(page.id());
+    const auto offset = page_offset(page);
     CALICO_EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
     mem_copy(message, page.view(offset, message.size()));
@@ -473,7 +607,7 @@ public:
         : wal {std::make_unique<DisabledWriteAheadLog>()},
           scratch {wal_scratch_size(page_size), 32}
     {
-        auto r = BasicPager::open({
+        auto r = Pager::open({
             PREFIX,
             store.get(),
             &scratch,
@@ -492,9 +626,9 @@ public:
     [[nodiscard]]
     auto allocate_write(const std::string &message) const
     {
-        auto r = pager->allocate_();
+        auto r = pager->allocate();
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-        pager->upgrade_(*r);
+        pager->upgrade(*r);
         write_to_page(*r, message);
         return std::move(*r);
     }
@@ -504,7 +638,7 @@ public:
     {
         auto page = allocate_write(message);
         const auto id = page.id();
-        pager->release_(std::move(page));
+        pager->release(std::move(page));
         EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
         return id;
     }
@@ -512,9 +646,9 @@ public:
     [[nodiscard]]
     auto acquire_write(Id id, const std::string &message) const
     {
-        auto r = pager->acquire_(id);
+        auto r = pager->acquire(id);
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-        pager->upgrade_(*r);
+        pager->upgrade(*r);
         write_to_page(*r, message);
         return std::move(*r);
     }
@@ -522,17 +656,17 @@ public:
     auto acquire_write_release(Id id, const std::string &message) const
     {
         auto page = acquire_write(id, message);
-        pager->release_(std::move(page));
+        pager->release(std::move(page));
         EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
     }
 
     [[nodiscard]]
     auto acquire_read_release(Id id, Size size) const
     {
-        auto r = pager->acquire_(id);
+        auto r = pager->acquire(id);
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
         auto message = read_from_page(*r, size);
-        pager->release_(std::move(*r));
+        pager->release(std::move(*r));
         EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
         return message;
     }
@@ -572,10 +706,10 @@ TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
 {
     const auto id = allocate_write_release(test_message);
-    auto r = pager->acquire_(id);
+    auto r = pager->acquire(id);
     ASSERT_EQ(id, r->id());
     ASSERT_EQ(id, Id::root());
-    pager->release_(std::move(*r));
+    pager->release(std::move(*r));
 }
 
 //TEST_F(PagerTests, MultipleWritersDeathTest)
@@ -593,10 +727,10 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
 TEST_F(PagerTests, MultipleReaders)
 {
     const auto id = allocate_write_release(test_message);
-    auto page_1a = pager->acquire_(id).value();
-    auto page_1b = pager->acquire_(id).value();
-    pager->release_(std::move(page_1a));
-    pager->release_(std::move(page_1b));
+    auto page_1a = pager->acquire(id).value();
+    auto page_1b = pager->acquire(id).value();
+    pager->release(std::move(page_1a));
+    pager->release(std::move(page_1b));
 }
 
 template<class T>

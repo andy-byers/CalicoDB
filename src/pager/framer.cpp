@@ -1,11 +1,9 @@
 #include "framer.h"
-#include "pager.h"
+#include "page.h"
 #include "calico/storage.h"
-#include "page/page.h"
+#include "tree/header.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
-#include "utils/header.h"
-#include "utils/layout.h"
 
 namespace Calico {
 
@@ -19,37 +17,10 @@ Frame::Frame(Byte *buffer, Size id, Size size)
 
 auto Frame::lsn() const -> Id
 {
-    const auto offset = PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET;
-    return Id {get_u64(m_bytes.range(offset))};
+    return Id {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::SIZE))};
 }
 
-auto Frame::ref(Pager &source, bool is_writable) -> Page_
-{
-    CALICO_EXPECT_FALSE(m_is_writable);
-
-    if (is_writable) {
-        CALICO_EXPECT_EQ(m_ref_count, 0);
-        m_is_writable = true;
-    }
-    m_ref_count++;
-    return Page_ {{m_page_id, data(), &source, is_writable}};
-}
-
-auto Frame::unref(Page_ &page) -> void
-{
-    CALICO_EXPECT_EQ(m_page_id, page.id());
-    CALICO_EXPECT_GT(m_ref_count, 0);
-
-    if (page.is_writable()) {
-        CALICO_EXPECT_EQ(m_ref_count, 1);
-        m_is_writable = false;
-    }
-    // Make sure the page doesn't get released twice.
-    page.m_source.reset();
-    m_ref_count--;
-}
-
-auto Frame::ref_(bool is_writable) -> Page
+auto Frame::ref(bool is_writable) -> Page
 {
     CALICO_EXPECT_FALSE(m_is_writable);
 
@@ -61,7 +32,7 @@ auto Frame::ref_(bool is_writable) -> Page
     return Page {m_page_id, data(), is_writable};
 }
 
-auto Frame::unref_(Page &page) -> void
+auto Frame::unref(Page &page) -> void
 {
     CALICO_EXPECT_EQ(m_page_id, page.id());
     CALICO_EXPECT_GT(m_ref_count, 0);
@@ -82,7 +53,7 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     CALICO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
 
     RandomEditor *temp_file {};
-    auto s = storage->open_random_editor(prefix + DATA_FILENAME, &temp_file);
+    auto s = storage->open_random_editor(prefix + "data", &temp_file);
     std::unique_ptr<RandomEditor> file {temp_file};
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
@@ -111,39 +82,25 @@ Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size pa
         m_available.emplace_back(Size {m_available.size()});
 }
 
-auto Framer::ref(Size id, Pager &source, bool is_writable) -> Page_
-{
-    CALICO_EXPECT_LT(id, m_frames.size());
-    m_ref_sum++;
-    return m_frames[id].ref(source, is_writable);
-}
-
-auto Framer::ref_(Size index) -> Page
+auto Framer::ref(Size index) -> Page
 {
     CALICO_EXPECT_LT(index, m_frames.size());
     m_ref_sum++;
-    return m_frames[index].ref_(false);
+    return m_frames[index].ref(false);
 }
 
-auto Framer::unref_(Size index, Page page) -> void
+auto Framer::unref(Size index, Page page) -> void
 {
     CALICO_EXPECT_LT(index, m_frames.size());
-    m_frames[index].unref_(page);
+    m_frames[index].unref(page);
     m_ref_sum--;
 }
 
-auto Framer::upgrade_(Size index, Page &page) -> void
+auto Framer::upgrade(Size index, Page &page) -> void
 {
     CALICO_EXPECT_LT(index, m_frames.size());
-    m_frames[index].unref_(page);
-    page = m_frames[index].ref_(true);
-}
-
-auto Framer::unref(Size id, Page_ &page) -> void
-{
-    CALICO_EXPECT_LT(id, m_frames.size());
-    m_frames[id].unref(page);
-    m_ref_sum--;
+    m_frames[index].unref(page);
+    page = m_frames[index].ref(true);
 }
 
 auto Framer::pin(Id pid) -> tl::expected<Size, Status>

@@ -1,9 +1,8 @@
 
 #include "tools.h"
 #include "fakes.h"
-#include "page/node.h"
-#include "tree/node_manager.h"
-#include "tree/tree.h"
+#include "tree/bplus_tree.h"
+#include "tree/node.h"
 #include "utils/system.h"
 #include <unordered_set>
 

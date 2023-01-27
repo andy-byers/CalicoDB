@@ -75,7 +75,7 @@ private:
     std::unique_ptr<AppendWriter> m_file;
     std::atomic<Id> *m_flushed_lsn {};
     Storage *m_storage {};
-    System *m_system {};
+    System *system {};
     WalSet *m_set {};
     SegmentId m_current;
     Span m_tail;

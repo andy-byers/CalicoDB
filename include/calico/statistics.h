@@ -5,7 +5,7 @@
 
 namespace Calico {
 
-class Core;
+class DatabaseImpl;
 
 class Statistics final {
 public:
@@ -21,13 +21,10 @@ public:
     [[nodiscard]] auto wal_throughput() const -> Size;
 
 private:
-    friend class Core;
+    friend class DatabaseImpl;
+    explicit Statistics(DatabaseImpl &impl);
 
-    explicit Statistics(Core &core)
-        : m_core {&core}
-    {}
-
-    Core *m_core {};
+    const DatabaseImpl *m_impl {};
 };
 
 } // namespace Calico

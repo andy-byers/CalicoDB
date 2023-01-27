@@ -19,8 +19,6 @@ class Storage;
 
 class BasicWriteAheadLog: public WriteAheadLog {
 public:
-    using Interval = std::chrono::duration<double>;
-
     struct Parameters {
         std::string prefix;
         Storage *store {};
@@ -28,8 +26,9 @@ public:
         Size page_size {};
         Size segment_cutoff {};
         Size writer_capacity {};
-        Interval interval {};
     };
+
+    System *system {};
 
     ~BasicWriteAheadLog() override;
     [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>;
@@ -61,8 +60,7 @@ private:
     WalSet m_set;
     std::string m_prefix;
 
-    Storage *m_store {};
-    System *m_system {};
+    Storage *m_storage {};
     std::string m_reader_data;
     std::string m_reader_tail;
     std::string m_writer_tail;

@@ -31,12 +31,12 @@ static auto get_writable_content(Page &page, Size size_limit) -> Span
 auto read_chain(Pager &pager, Id pid, Span out) -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
-        CALICO_NEW_R(page, pager.acquire_(pid));
+        CALICO_NEW_R(page, pager.acquire(pid));
         const auto content = get_readable_content(page, out.size());
         mem_copy(out, content);
         out.advance(content.size());
         pid = read_next_id(page);
-        pager.release_(std::move(page));
+        pager.release(std::move(page));
     }
     return {};
 }
@@ -51,25 +51,25 @@ auto write_chain(Pager &pager, FreeList &free_list, Slice overflow) -> tl::expec
         CALICO_NEW_R(page, free_list.pop()
             .or_else([&pager](const Status &error) -> tl::expected<Page, Status> {
                 if (error.is_logic_error())
-                    return pager.allocate_();
+                    return pager.allocate();
                 return tl::make_unexpected(error);
             }));
 
-        pager.upgrade_(page);
+        pager.upgrade(page);
         auto content = get_writable_content(page, overflow.size());
         mem_copy(content, overflow, content.size());
         overflow.advance(content.size());
 
         if (prev) {
             write_next_id(*prev, page.id());
-            pager.release_(std::move(*prev));
+            pager.release(std::move(*prev));
         } else {
             head = page.id();
         }
         prev.emplace(std::move(page));
     }
     if (prev) {
-        pager.release_(std::move(*prev));
+        pager.release(std::move(*prev));
     }
     return head;
 }
@@ -77,10 +77,10 @@ auto write_chain(Pager &pager, FreeList &free_list, Slice overflow) -> tl::expec
 auto erase_chain(Pager &pager, FreeList &free_list, Id pid, Size size) -> tl::expected<void, Status>
 {
     while (size) {
-        CALICO_NEW_R(page, pager.acquire_(pid));
+        CALICO_NEW_R(page, pager.acquire(pid));
         size -= get_readable_content(page, size).size();
         pid = read_next_id(page);
-        pager.upgrade_(page);
+        pager.upgrade(page);
         free_list.push(std::move(page));
     }
     return {};

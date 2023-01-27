@@ -10,8 +10,8 @@
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
-#include "utils/header.h"
-#include "utils/layout.h"
+#include "tree/header.h"
+#include "utils/crc.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
@@ -440,19 +440,6 @@ TEST(TestUniqueNullable, ResourceIsMoved)
     ASSERT_FALSE(moved_from.is_valid());
     ASSERT_EQ(*moved_into, 42);
     ASSERT_TRUE(moved_into.is_valid());
-}
-
-TEST(CellSizeTests, AtLeastFourCellsCanFitInAnInternalNonRootNode)
-{
-    const auto start = NodeLayout::header_offset(Id {2}) +
-                       NodeLayout::HEADER_SIZE +
-                       CELL_POINTER_SIZE;
-    Size page_size {MINIMUM_PAGE_SIZE};
-    while (page_size <= MAXIMUM_PAGE_SIZE) {
-        const auto max_local = get_max_local(page_size) + MAX_CELL_HEADER_SIZE;
-        ASSERT_LE(max_local * 4, page_size - start);
-        page_size <<= 1;
-    }
 }
 
 TEST(StatusTests, OkStatusHasNoMessage)

@@ -5,10 +5,10 @@
 namespace Calico {
 
 BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
-    : m_log {param.system->create_log("wal")},
+    : system {param.system},
+      m_log {param.system->create_log("wal")},
       m_prefix {param.prefix},
-      m_store {param.store},
-      m_system {param.system},
+      m_storage {param.store},
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
@@ -17,8 +17,8 @@ BasicWriteAheadLog::BasicWriteAheadLog(const Parameters &param)
 {
     m_log->info("initializing, write buffer size is {}", param.writer_capacity * m_reader_data.size());
 
-    CALICO_EXPECT_NE(m_store, nullptr);
-    CALICO_EXPECT_NE(m_system, nullptr);
+    CALICO_EXPECT_NE(system, nullptr);
+    CALICO_EXPECT_NE(m_storage, nullptr);
     CALICO_EXPECT_NE(m_buffer_count, 0);
     CALICO_EXPECT_NE(m_segment_cutoff, 0);
 }
@@ -67,8 +67,8 @@ auto BasicWriteAheadLog::start_workers() -> Status
         new(std::nothrow) WalWriter {{
             m_prefix,
             m_writer_tail,
-            m_store,
-            m_system,
+            m_storage,
+            system,
             &m_set,
             &m_flushed_lsn,
             m_segment_cutoff,
@@ -80,8 +80,8 @@ auto BasicWriteAheadLog::start_workers() -> Status
         new(std::nothrow) WalCleanup {{
             m_prefix,
             &m_recovery_lsn,
-            m_store,
-            m_system,
+            m_storage,
+            system,
             &m_set,
         }}};
     if (m_cleanup == nullptr)
@@ -145,7 +145,7 @@ auto BasicWriteAheadLog::advance() -> void
 auto BasicWriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 {
     auto reader = WalReader {
-        *m_store,
+        *m_storage,
         m_set,
         m_prefix,
         Span {m_reader_tail},
@@ -291,7 +291,7 @@ auto BasicWriteAheadLog::truncate(Lsn lsn) -> Status
 
     while (!current.is_null()) {
         auto r = read_first_lsn(
-            *m_store, m_prefix, current, m_set);
+            *m_storage, m_prefix, current, m_set);
 
         if (r.has_value()) {
             if (*r <= lsn)
@@ -301,7 +301,7 @@ auto BasicWriteAheadLog::truncate(Lsn lsn) -> Status
         }
         if (!current.is_null()) {
             const auto name = m_prefix + current.to_name();
-            CALICO_TRY_S(m_store->remove_file(name));
+            CALICO_TRY_S(m_storage->remove_file(name));
             m_set.remove_after(SegmentId {current.value - 1});
             m_log->info("removed segment {} with first lsn {}", name, r->value);
         }

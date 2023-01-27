@@ -1,24 +1,15 @@
 #include "header.h"
-#include "page.h"
+#include "pager/page.h"
+#include "utils/crc.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
 
 namespace Calico {
 
-static constexpr auto file_header_offset(const Page &) -> Size
-{
-    return 0;
-}
-
-static auto node_header_offset(const Page &page)
-{
-    return page_offset(page);
-}
-
 FileHeader::FileHeader(const Page &page)
 {
     CALICO_EXPECT_TRUE(page.id().is_root());
-    auto data = page.data() + file_header_offset(page);
+    auto data = page.data();
 
     magic_code = get_u32(data);
     data += sizeof(std::uint32_t);
@@ -41,10 +32,17 @@ FileHeader::FileHeader(const Page &page)
     page_size = get_u16(data);
 }
 
+auto FileHeader::compute_crc() const -> std::uint32_t
+{
+    // TODO: This is sketchy. Probably need some pragmas to ensure certain packing for this struct.
+    const auto *data = reinterpret_cast<const Byte *>(this) + sizeof(Id);
+    return crc32c::Value(data, sizeof(FileHeader) - sizeof(Id));
+}
+
 auto FileHeader::write(Page &page) const -> void
 {
     CALICO_EXPECT_TRUE(page.id().is_root());
-    auto data = page.data() + file_header_offset(page);
+    auto data = page.data();
 
     put_u32(data, magic_code);
     data += sizeof(std::uint32_t);
@@ -65,12 +63,12 @@ auto FileHeader::write(Page &page) const -> void
     data += sizeof(Lsn);
 
     put_u16(data, page_size);
-    insert_delta(page.m_deltas, {file_header_offset(page), SIZE});
+    insert_delta(page.m_deltas, {0, SIZE});
 }
 
 NodeHeader::NodeHeader(const Page &page)
 {
-    auto data = page.data() + node_header_offset(page);
+    auto data = page.data() + page_offset(page);
 
     page_lsn.value = get_u64(data);
     data += sizeof(Id);
@@ -107,7 +105,7 @@ NodeHeader::NodeHeader(const Page &page)
 
 auto NodeHeader::write(Page &page) const -> void
 {
-    auto *data = page.data() + node_header_offset(page);
+    auto *data = page.data() + page_offset(page);
 
     put_u64(data, page_lsn.value);
     data += sizeof(Id);
@@ -136,7 +134,7 @@ auto NodeHeader::write(Page &page) const -> void
     data += sizeof(PageSize);
 
     put_u16(data, free_total);
-    insert_delta(page.m_deltas, {node_header_offset(page), SIZE});
+    insert_delta(page.m_deltas, {page_offset(page), SIZE});
 }
 
 } // namespace Calico

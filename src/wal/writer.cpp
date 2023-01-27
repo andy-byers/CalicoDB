@@ -76,7 +76,7 @@ WalWriter::WalWriter(const Parameters &param)
     : m_prefix {param.prefix.to_string()},
       m_flushed_lsn {param.flushed_lsn},
       m_storage {param.storage},
-      m_system {param.system},
+      system {param.system},
       m_set {param.set},
       m_tail {param.tail},
       m_wal_limit {param.wal_limit}
@@ -84,7 +84,7 @@ WalWriter::WalWriter(const Parameters &param)
     CALICO_EXPECT_FALSE(m_prefix.empty());
     CALICO_EXPECT_NE(m_flushed_lsn, nullptr);
     CALICO_EXPECT_NE(m_storage, nullptr);
-    CALICO_EXPECT_NE(m_system, nullptr);
+    CALICO_EXPECT_NE(system, nullptr);
     CALICO_EXPECT_NE(m_set, nullptr);
 
     // First segment file gets created now, but is not registered in the WAL set until the writer
@@ -94,7 +94,7 @@ WalWriter::WalWriter(const Parameters &param)
 
 auto WalWriter::write(WalPayloadIn payload) -> void
 {
-    if (m_system->has_error())
+    if (system->has_error())
         return;
 
     CALICO_ERROR_IF(m_writer->write(payload));
