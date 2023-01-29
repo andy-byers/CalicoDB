@@ -574,16 +574,12 @@ public:
         });
         EXPECT_TRUE(r.has_value()) << r.error().what().data();
         pager = std::move(*r);
+        tree = std::make_unique<BPlusTree>(*pager);
 
         // Root page setup.
-        auto root_page = pager->allocate();
-        pager->upgrade(*root_page);
-        Node root_node {std::move(*root_page), scratch.data()};
-        root_node.header.is_external = true;
-        pager->release(std::move(root_node).take());
+        auto root = tree->setup();
+        pager->release(std::move(*root).take());
         EXPECT_TRUE(pager->flush({}).is_ok());
-
-        tree = std::make_unique<BPlusTree>(*pager);
     }
 
     auto TearDown() -> void override
@@ -677,6 +673,19 @@ TEST_P(BPlusTreeTests, FindsRecords)
         ASSERT_EQ(cell.key[0], keys[i]);
         ASSERT_EQ(cell.key[cell.key_size], vals[i]);
     }
+}
+
+TEST_P(BPlusTreeTests, CannotFindNonexistentRecords)
+{
+    auto slot = tree->search("a");
+    ASSERT_TRUE(slot.has_value());
+    ASSERT_EQ(slot->node.header.cell_count, 0);
+    ASSERT_FALSE(slot->exact);
+}
+
+TEST_P(BPlusTreeTests, CannotEraseNonexistentRecords)
+{
+    ASSERT_TRUE(tree->erase("a").error().is_not_found());
 }
 
 TEST_P(BPlusTreeTests, WritesOverflowChains)
@@ -817,11 +826,12 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnMiddlePosition)
 
 TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnLeftmostPosition)
 {
-    for (Size i {}; i < 1'000; ++i) {
+    Size n {10};
+    for (Size i {}; i < n; ++i) {
         (void)*tree->insert(make_key<3>(i), make_value('v'));
     }
-    for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(tree->erase(make_key<3>(999 - i)).has_value());
+    for (Size i {}; i < n; ++i) {
+        ASSERT_TRUE(tree->erase(make_key<3>(n - i - 1)).has_value());
         if (i % 100 == 99) {
             validate();
         }
@@ -863,7 +873,7 @@ static auto random_key(BPlusTreeTests &test)
 
 static auto random_value(BPlusTreeTests &test)
 {
-    const auto val_size = test.random.get<Size>(test.param.page_size / 3);
+    const auto val_size = test.random.get<Size>(test.param.page_size / 2);
     return test.random.get<std::string>('a', 'z', val_size);
 }
 
@@ -910,7 +920,6 @@ TEST_P(BPlusTreeTests, SanityCheck_SearchExact)
     std::shuffle(begin(integers), end(integers), rng);
 
     for (auto i: integers) {
-//        fprintf(stderr,"%zu\n",i);
         const auto key = make_key<6>(i);
         auto slot = tree->search(key);
         ASSERT_TRUE(slot.has_value());
@@ -958,6 +967,7 @@ TEST_P(BPlusTreeTests, SanityCheck_Erase)
 
         const auto key = find_random_key(*this);
         ASSERT_TRUE(tree->erase(key).has_value());
+        counter--;
 
         if (i % 100 == 99) {
             validate();

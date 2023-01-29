@@ -38,6 +38,7 @@ public:
     };
 
     explicit BPlusTree(Pager &pager);
+    [[nodiscard]] auto setup() -> tl::expected<Node, Status>;
     [[nodiscard]] auto lowest() -> tl::expected<Node, Status>;
     [[nodiscard]] auto highest() -> tl::expected<Node, Status>;
     [[nodiscard]] auto collect(Node node, Size index) -> tl::expected<std::string, Status>;

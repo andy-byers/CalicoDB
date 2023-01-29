@@ -107,6 +107,8 @@ auto Framer::upgrade(Size index, Page &page) -> void
 auto Framer::pin(Id pid) -> tl::expected<Size, Status>
 {
     CALICO_EXPECT_FALSE(pid.is_null());
+    CALICO_EXPECT_LE(pid.as_index(), m_page_count);
+
     if (m_available.empty())
         return tl::make_unexpected(not_found(
             "could not pin page: unable to find an available frame (unpin a page and try again)"));
