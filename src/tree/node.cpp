@@ -285,20 +285,36 @@ auto Node::Iterator::data() const -> const Byte *
     return m_node->page.data() + m_node->get_slot(m_index);
 }
 
-auto Node::Iterator::seek(const Slice &key) -> bool
+struct SeekResult {
+    unsigned index {};
+    bool exact {};
+};
+
+static auto seek_linear(const Node &node, const Slice &key) -> SeekResult
 {
-    auto upper = static_cast<long>(m_node->header.cell_count);
+    for (unsigned index {}; index < node.header.cell_count; ++index) {
+        const auto rhs = read_key(node, index);
+        const auto cmp = compare_three_way(key, rhs);
+        if (cmp != ThreeWayComparison::GT) {
+            return {index, cmp == ThreeWayComparison::EQ};
+        }
+    }
+    return {node.header.cell_count, false};
+}
+
+static auto seek_binary(const Node &node, const Slice &key) -> SeekResult
+{
+    auto upper = static_cast<long>(node.header.cell_count);
     long lower {};
 
     while (lower < upper) {
         // Note that this cannot overflow since the page size is bounded by a 16-bit integer.
         const auto mid = (lower+upper) / 2;
-        const auto rhs = read_key(*m_node, static_cast<Size>(mid));
+        const auto rhs = read_key(node, static_cast<Size>(mid));
 
         switch (compare_three_way(key, rhs)) {
             case ThreeWayComparison::EQ:
-                m_index = static_cast<unsigned>(mid);
-                return true;
+                return {static_cast<unsigned>(mid), true};
             case ThreeWayComparison::LT:
                 upper = mid;
                 break;
@@ -306,27 +322,39 @@ auto Node::Iterator::seek(const Slice &key) -> bool
                 lower = mid + 1;
         }
     }
-    m_index = static_cast<unsigned>(lower);
-    return false;
+    return {static_cast<unsigned>(lower), false};
+}
+
+auto Node::Iterator::seek(const Slice &key) -> bool
+{
+    static constexpr Size CUTOFF {16};
+
+    SeekResult result;
+    if (m_node->header.cell_count <= CUTOFF) {
+        result = seek_linear(*m_node, key);
+    } else {
+        result = seek_binary(*m_node, key);
+    }
+    m_index = result.index;
+    return result.exact;
 }
 
 auto Node::Iterator::next() -> void
 {
-    if (is_valid())
+    if (is_valid()) {
         m_index++;
+    }
 }
 
 Node::Node(Page inner, Byte *defragmentation_space)
     : page {std::move(inner)},
       scratch {defragmentation_space},
       header {page},
-      slots_offset {NodeHeader::SIZE}
+      slots_offset {PageSize(page_offset(page) + NodeHeader::SIZE)}
 {
-    if (page.id().is_root())
-        slots_offset += FileHeader::SIZE;
-
-    if (header.cell_start == 0)
+    if (header.cell_start == 0) {
         header.cell_start = static_cast<PageSize>(page.size());
+    }
 
     const auto after_header = page_offset(page) + NodeHeader::SIZE;
     const auto bottom = after_header + header.cell_count*sizeof(PageSize);
@@ -387,6 +415,7 @@ auto Node::take() && -> Page
 
 auto Node::TEST_validate() const -> void
 {
+#if not NDEBUG
     std::vector<Byte> used(page.size());
     const auto account = [&x = used](auto from, auto size) {
         auto lower = begin(x) + long(from);
@@ -440,6 +469,7 @@ auto Node::TEST_validate() const -> void
             return accum + next;
         });
     CALICO_EXPECT_EQ(page.size(), total_bytes);
+#endif // not NDEBUG
 }
 
 auto usable_space(const Node &node) -> Size

@@ -152,38 +152,33 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     auto s = ok();
     if (is_new) {
         m_log->info("setting up a new database");
-        auto page = pager->allocate();
-        if (!page.has_value()) {
-            return page.error();
+        CALICO_TRY_S(wal->start_workers());
+        auto xact = start();
+
+        auto root = tree->setup();
+        if (!root.has_value()) {
+            return root.error();
         }
-        pager->upgrade(*page);
-        Node root {std::move(*page), nullptr};
         CALICO_EXPECT_EQ(pager->page_count(), 1);
 
         state.page_count = 1;
+        state.write(root->page);
         state.header_crc = state.compute_crc();
-        state.write(root.page);
-        pager->release(std::move(root).take());
-
-        // This is safe right now because the WAL has not been started. If successful, we will have the root page
-        // set up and saved to the database file.
+        state.write(root->page);
+        pager->release(std::move(*root).take());
+        CALICO_TRY_S(xact.commit());
+        wal->flush();
         CALICO_TRY_S(pager->flush({}));
 
     } else {
         m_log->info("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CALICO_TRY_S(ensure_consistency_on_startup());
+        CALICO_TRY_S(wal->start_workers());
     }
     m_log->info("pager recovery lsn is {}", pager->recovery_lsn().value);
     m_log->info("wal flushed lsn is {}", wal->flushed_lsn().value);
     m_log->info("commit lsn is {}", system->commit_lsn.load().value);
-
-    s = wal->start_workers();
-    if (!s.is_ok()) {
-        m_log->info("failed to initialize database");
-    } else {
-        m_log->info("successfully initialized database");
-    }
     return s;
 }
 
@@ -267,9 +262,12 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 {
     if (auto slot = tree->search(key)) {
         auto [node, index, exact] = std::move(*slot);
+
         if (!exact) {
+            pager->release(std::move(node.page));
             return not_found("not found");
         }
+
         if (auto result = tree->collect(std::move(node), index)) {
             value = std::move(*result);
             return ok();
@@ -312,6 +310,7 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
     CALICO_TRY_S(check_key(key, "erase"));
     if (system->has_xact) {
         if (const auto r = tree->erase(key)) {
+            record_count--;
             return ok();
         } else {
             return r.error();
@@ -375,11 +374,8 @@ auto DatabaseImpl::do_commit() -> Status
     // System object at this point.
     CALICO_TRY_S(status());
 
-    const auto checkpoint = pager->recovery_lsn().value;
-    if (static constexpr Size CUTOFF {1'024}; CUTOFF < lsn.value - checkpoint) {
-        CALICO_TRY_S(pager->flush(last_commit_lsn));
-        wal->cleanup(pager->recovery_lsn());
-    }
+    CALICO_TRY_S(pager->flush(last_commit_lsn));
+    wal->cleanup(pager->recovery_lsn());
 
     system->commit_lsn = lsn;
     system->has_xact = false;
@@ -417,18 +413,21 @@ auto DatabaseImpl::do_abort() -> Status
 
 auto DatabaseImpl::close() -> Status
 {
-    // m_log->trace("close");
-
-    if (system->has_xact && !system->has_error()) {
-        auto s = logic_error("could not close: a transaction is active (finish the transaction and try again)");
-        CALICO_WARN(s);
-        return s;
-    }
     if (wal && pager) {
-        wal->flush();
+        if (!system->has_error()) {
+            if (system->has_xact) {
+                auto s = logic_error("could not close: a transaction is active (finish the transaction and try again)");
+                CALICO_WARN(s);
+                return s;
+            }
 
-        // We already waited on the WAL to be done writing so this should happen immediately.
-        CALICO_ERROR_IF(pager->flush({}));
+            wal->flush();
+
+            // We already waited on the WAL to be done writing so this should happen immediately.
+            CALICO_ERROR_IF(pager->flush({}));
+        } else {
+            wal->flush();
+        }
     }
     wal.reset();
     pager.reset();
@@ -460,6 +459,7 @@ auto DatabaseImpl::save_state() -> Status
     FileHeader header {*root};
     pager->save_state(header);
     tree->save_state(header);
+    header.record_count = record_count;
     header.header_crc = header.compute_crc();
     header.write(*root);
 
@@ -483,6 +483,7 @@ auto DatabaseImpl::load_state() -> Status
 
     const auto before_count = pager->page_count();
 
+    record_count = header.record_count;
     pager->load_state(header);
     tree->load_state(header);
 
@@ -580,10 +581,17 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         Byte buffer[FileHeader::SIZE];
         Span span {buffer, sizeof(buffer)};
         s = read_exact(*reader, span, 0);
-        header = FileHeader {Page {Id::root(), span, false}};
+
+        header = FileHeader {
+            Page {Id::root(), span, false}
+        };
 
         if (!s.is_ok()) {
             return tl::make_unexpected(s);
+        }
+
+        if (header.page_size == 0) {
+            return tl::make_unexpected(corruption("header indicates a page size of 0"));
         }
 
         if (file_size % header.page_size) {

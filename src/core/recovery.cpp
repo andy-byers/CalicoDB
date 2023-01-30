@@ -34,8 +34,9 @@ auto Recovery::start_abort() -> Status
     return m_wal->roll_backward(system->commit_lsn.load(), [this](auto payload) {
         auto decoded = decode_payload(payload);
 
-        if (std::holds_alternative<std::monostate>(decoded))
+        if (std::holds_alternative<std::monostate>(decoded)) {
             return corruption("WAL is corrupted");
+        }
 
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
@@ -67,8 +68,9 @@ auto Recovery::start_recovery() -> Status
         auto decoded = decode_payload(payload);
 
         // Payload has an invalid type.
-        if (std::holds_alternative<std::monostate>(decoded))
+        if (std::holds_alternative<std::monostate>(decoded)) {
             return corruption("WAL is corrupted");
+        }
 
         last_lsn = payload.lsn();
 
@@ -106,8 +108,9 @@ auto Recovery::start_recovery() -> Status
     const auto undo = [this](auto payload) {
         auto decoded = decode_payload(payload);
 
-        if (std::holds_alternative<std::monostate>(decoded))
+        if (std::holds_alternative<std::monostate>(decoded)) {
             return corruption("WAL is corrupted");
+        }
 
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);

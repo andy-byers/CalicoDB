@@ -22,9 +22,9 @@ public:
     static constexpr Size PAGE_SIZE {0x200};
 
     [[nodiscard]]
-    auto build_deltas(const std::vector<PageDelta> &unordered)
+    auto build_deltas(const ChangeBuffer &unordered)
     {
-        std::vector<PageDelta> deltas;
+        ChangeBuffer deltas;
         for (const auto &delta: unordered)
             insert_delta(deltas, delta);
         compress_deltas(deltas);
@@ -32,7 +32,7 @@ public:
     }
 
     [[nodiscard]]
-    auto insert_random_delta(std::vector<PageDelta> &deltas)
+    auto insert_random_delta(ChangeBuffer &deltas)
     {
         static constexpr Size MIN_DELTA_SIZE {1};
         const auto offset = random.get(PAGE_SIZE - MIN_DELTA_SIZE);
@@ -51,7 +51,7 @@ TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
 
 TEST_F(DeltaCompressionTest, InsertEmptyDeltaDeathTest)
 {
-    std::vector<PageDelta> deltas;
+    ChangeBuffer deltas;
     ASSERT_DEATH(insert_delta(deltas, {123, 0}), EXPECTATION_MATCHER);
 }
 
@@ -131,7 +131,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 {
     static constexpr Size NUM_INSERTS {100};
     static constexpr Size MAX_DELTA_SIZE {10};
-    std::vector<PageDelta> deltas;
+    ChangeBuffer deltas;
     for (Size i {}; i < NUM_INSERTS; ++i) {
         const auto offset = random.get(PAGE_SIZE - MAX_DELTA_SIZE);
         const auto size = random.get(1, MAX_DELTA_SIZE);

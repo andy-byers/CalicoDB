@@ -21,20 +21,7 @@ public:
         return node.header.cell_count == 0;
     }
 
-    [[nodiscard]]
-    static auto make_node(BPlusTree &tree, Page page) -> Node
-    {
-        Node node {std::move(page), tree.m_scratch.back().data()};
-        if (node.header.is_external) {
-            node.meta = &tree.m_external_meta;
-        } else {
-            node.meta = &tree.m_internal_meta;
-        }
-        return node;
-    }
-
-    // TODO: remove
-    static auto init_node(Node &node) -> void
+    static auto reset_node(Node &node) -> void
     {
         CALICO_EXPECT_FALSE(is_overflowing(node));
         auto header = NodeHeader {};
@@ -101,11 +88,6 @@ public:
             tree.m_pager->upgrade(page);
         }
         return make_old_node(tree, std::move(page));
-    }
-
-    static auto upgrade_node(BPlusTree &tree, Node &node) -> void
-    {
-        tree.m_pager->upgrade(node.page);
     }
     
     static auto release_node(BPlusTree &tree, Node node) -> void
@@ -278,7 +260,7 @@ public:
         std::swap(child.overflow, root.overflow);
         child.overflow_index = root.overflow_index;
 
-        init_node(root);
+        reset_node(root);
         root.header.is_external = false;
         root.header.next_id = child.page.id();
         child.header.parent_id = root.page.id();
@@ -418,8 +400,7 @@ public:
             release_node(tree, std::move(right));
         }
         Node::Iterator itr {parent};
-        const auto exact = itr.seek(read_key(separator));
-        CALICO_EXPECT_FALSE(exact);
+        itr.seek(read_key(separator));
 
         write_cell(parent, itr.index(), separator);
 
@@ -454,7 +435,7 @@ public:
             }
             CALICO_NEW_R(parent, acquire_node(tree, node.header.parent_id, true));
             // NOTE: Searching for the anchor key from the node we took from should always
-            //       give us the correct cell ID due to the B+-tree ordering rules. TODO: Cache these indices on the way down?
+            //       give us the correct index due to the B+-tree ordering rules. TODO: Cache these indices on the way down?
             Node::Iterator itr {parent};
             const auto exact = itr.seek(anchor);
             const auto index = itr.index() + exact;
@@ -748,7 +729,7 @@ auto BPlusTree::erase(const Slice &key) -> tl::expected<void, Status>
         if (const auto remote_size = cell.total_ps - cell.local_ps) {
             CALICO_TRY_R(erase_chain(*m_pager, m_free_list, read_overflow_id(cell), remote_size));
         }
-        BPlusTreeInternal::upgrade_node(*this, node);
+        m_pager->upgrade(node.page);
         erase_cell(node, index);
         CALICO_TRY_R(BPlusTreeInternal::resolve_underflow(*this, std::move(node), anchor));
         return {};

@@ -1,6 +1,7 @@
 /* api.cpp: Example usage of the Calico DB API. */
 
 #include "calico/calico.h"
+#include <filesystem>
 
 auto main(int, const char *[]) -> int
 {
@@ -9,8 +10,8 @@ auto main(int, const char *[]) -> int
     {
         std::string str {"abc"};
 
-        // We can create slices from C-style strings, from containers of contiguous bytes that provide "data"
-        // and "size" member functions, or directly from a pointer and a length.
+        // We can create slices from C-style strings, standard library strings, or directly from a pointer and
+        // a length.
         Calico::Slice s1 {str.c_str()};
         Calico::Slice s2 {str};
         Calico::Slice s3 {str.data(), str.size()};
@@ -19,7 +20,7 @@ auto main(int, const char *[]) -> int
         printf("%s\n", s1.to_string().c_str());
 
         // Slices have methods for modifying the size and pointer position. These methods do not change the
-        // underlying data, they just change what range of bytes the slice is currently "viewing". advance()
+        // underlying data, they just change what range of bytes the slice is currently viewing. advance()
         // increments the underlying pointer...
         s1.advance(1);
 
@@ -28,8 +29,8 @@ auto main(int, const char *[]) -> int
 
         // Comparison operations are implemented.
         assert(s1 == "b");
-        assert(s2.starts_with("ab"));
         assert(s2 < "bc");
+        assert(s2.starts_with("ab"));
     }
 
     /* opening-a-database */
@@ -53,7 +54,10 @@ auto main(int, const char *[]) -> int
     options.log_target = Calico::LogTarget::STDERR_COLOR;
 
     {
-        // Open or create a database at "/tmp/cats".
+        std::filesystem::remove_all("/tmp/cats");
+        std::filesystem::remove_all(options.wal_prefix.to_string());
+
+        // Create a database at "/tmp/cats".
         auto s = db.open("/tmp/cats", options);
 
         // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is null-
@@ -97,7 +101,7 @@ auto main(int, const char *[]) -> int
 
         }
 
-        // Open a cursor. The cursor is not yet valid.
+        // Open a cursor.
         auto cursor = db.cursor();
 
         // Seek to the first record greater than or equal to the given key.
@@ -122,9 +126,12 @@ auto main(int, const char *[]) -> int
 
         }
 
-        auto bounds = db.cursor();
-        bounds.seek("42");
+        // Cursors can be copied.
+        auto bounds = cursor;
+        bounds.seek_last();
 
+        // Note that out-of-range cursors will never compare equal. If "bounds" was out of range, this would cause an infinite
+        // loop without the is_valid() check.
         cursor.seek_first();
         for (; cursor.is_valid() && cursor != bounds; cursor.next()) {
 

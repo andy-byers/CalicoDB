@@ -6,6 +6,29 @@
 
 namespace Calico {
 
+static auto write_file_header(Byte *data, const FileHeader &header) -> void
+{
+    put_u32(data, header.magic_code);
+    data += sizeof(std::uint32_t);
+
+    put_u32(data, header.header_crc);
+    data += sizeof(std::uint32_t);
+
+    put_u64(data, header.page_count);
+    data += sizeof(std::uint64_t);
+
+    put_u64(data, header.record_count);
+    data += sizeof(std::uint64_t);
+
+    put_u64(data, header.free_list_id.value);
+    data += sizeof(Id);
+
+    put_u64(data, header.recovery_lsn.value);
+    data += sizeof(Lsn);
+
+    put_u16(data, header.page_size);
+}
+
 FileHeader::FileHeader(const Page &page)
 {
     CALICO_EXPECT_TRUE(page.id().is_root());
@@ -34,35 +57,15 @@ FileHeader::FileHeader(const Page &page)
 
 auto FileHeader::compute_crc() const -> std::uint32_t
 {
-    // TODO: This is sketchy. Probably need some pragmas to ensure certain packing for this struct.
-    const auto *data = reinterpret_cast<const Byte *>(this) + sizeof(Id);
-    return crc32c::Value(data, sizeof(FileHeader) - sizeof(Id));
+    Byte data[FileHeader::SIZE];
+    write_file_header(data, *this);
+    return crc32c::Value(data + 8, FileHeader::SIZE - 8);
 }
 
 auto FileHeader::write(Page &page) const -> void
 {
     CALICO_EXPECT_TRUE(page.id().is_root());
-    auto data = page.data();
-
-    put_u32(data, magic_code);
-    data += sizeof(std::uint32_t);
-
-    put_u32(data, header_crc);
-    data += sizeof(std::uint32_t);
-
-    put_u64(data, page_count);
-    data += sizeof(std::uint64_t);
-
-    put_u64(data, record_count);
-    data += sizeof(std::uint64_t);
-
-    put_u64(data, free_list_id.value);
-    data += sizeof(Id);
-
-    put_u64(data, recovery_lsn.value);
-    data += sizeof(Lsn);
-
-    put_u16(data, page_size);
+    write_file_header(page.data(), *this);
     insert_delta(page.m_deltas, {0, SIZE});
 }
 

@@ -27,12 +27,6 @@ public:
           m_write {write}
     {}
 
-    ~Page()
-    {
-        // TODO: For debugging.
-//        CALICO_EXPECT_TRUE(m_deltas.empty());
-    }
-
     [[nodiscard]]
     auto is_writable() const -> bool
     {
@@ -84,11 +78,11 @@ public:
     }
 
     [[nodiscard]]
-    auto take() -> ChangeBuffer
+    auto deltas() -> const ChangeBuffer &
     {
         CALICO_EXPECT_TRUE(m_write);
         compress_deltas(m_deltas);
-        return std::exchange(m_deltas, {});
+        return m_deltas;
     }
 
     // Disable copies but allow moves.

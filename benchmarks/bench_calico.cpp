@@ -37,12 +37,10 @@ auto do_erase(Database &db, const Slice &key)
     benchmark::DoNotOptimize(db.erase(key));
 }
 
-auto setup()
+auto setup(Database &db)
 {
     std::filesystem::remove_all(DB_PATH);
-    Database db;
     benchmark::DoNotOptimize(db.open(DB_PATH, DB_OPTIONS));
-    return db;
 }
 
 auto default_init(Database &, Size)
@@ -74,21 +72,24 @@ auto run_batches(Database &db, benchmark::State &state, const GetKeyInteger &get
 
 auto BM_SequentialWrites(benchmark::State &state)
 {
-    auto db = setup();
+    Database db;
+    setup(db);
     run_batches(db, state, [](auto i) {return i;}, do_write);
 }
 BENCHMARK(BM_SequentialWrites);
 
 auto BM_RandomWrites(benchmark::State &state)
 {
-    auto db = setup();
+    Database db;
+    setup(db);
     run_batches(db, state, [](auto) {return State::random_int();}, do_write);
 }
 BENCHMARK(BM_RandomWrites);
 
 auto BM_Overwrite(benchmark::State& state)
 {
-    auto db = setup();
+    Database db;
+    setup(db);
     run_batches(db, state, [](auto) {return State::random_int() % DB_INITIAL_SIZE;}, do_write);
 }
 BENCHMARK(BM_Overwrite);
@@ -105,7 +106,8 @@ auto insert_records(Database &db, Size n)
 
 auto BM_SequentialReads(benchmark::State &state)
 {
-    auto db = setup();
+    Database db;
+    setup(db);
     insert_records(db, DB_INITIAL_SIZE);
     auto c = db.cursor();
 
@@ -125,7 +127,8 @@ BENCHMARK(BM_SequentialReads);
 
 auto BM_RandomReads(benchmark::State& state)
 {
-    auto db = setup();
+    Database db;
+    setup(db);
     insert_records(db, DB_INITIAL_SIZE);
     for (auto _ : state) {
         state.PauseTiming();
@@ -142,7 +145,8 @@ auto run_reads_and_writes(benchmark::State& state, int batch_size, int read_frac
         READ,
         WRITE,
     };
-    auto db = setup();
+    Database db;
+    setup(db);
     insert_records(db, DB_INITIAL_SIZE);
     std::optional<Transaction> xact {db.start()};
     int i {};
@@ -215,7 +219,8 @@ auto ensure_records(Database &db, Size)
 
 auto BM_SequentialErase(benchmark::State& state)
 {
-    auto db = setup();
+    Database db;
+    setup(db);
     run_batches(db, state, [](auto) {return 0;}, [](auto &db, auto) {
         auto cursor = db.cursor();
         cursor.seek_first();
@@ -226,7 +231,8 @@ BENCHMARK(BM_SequentialErase);
 
 auto BM_RandomErase(benchmark::State& state)
 {
-    auto db = setup();
+    Database db;
+    setup(db);
     run_batches(db, state, [](auto) {return State::random_int();}, [](auto &db, const auto &key) {do_erase(db, key);}, ensure_records);
 }
 BENCHMARK(BM_RandomErase);

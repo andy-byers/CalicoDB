@@ -60,8 +60,9 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     // potentially be used for direct I/O.
     const auto cache_size = page_size * frame_count;
     AlignedBuffer buffer {cache_size, page_size};
-    if (buffer.get() == nullptr)
+    if (buffer.get() == nullptr) {
         return tl::make_unexpected(system_error("cannot make_room frames: out of memory"));
+    }
 
     return Framer {std::move(file), std::move(buffer), page_size, frame_count};
 }
@@ -75,11 +76,13 @@ Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size pa
     CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
     mem_clear({m_buffer.get(), page_size * frame_count});
 
-    while (m_frames.size() < frame_count)
+    while (m_frames.size() < frame_count) {
         m_frames.emplace_back(m_buffer.get(), m_frames.size(), page_size);
-    
-    while (m_available.size() < m_frames.size())
-        m_available.emplace_back(Size {m_available.size()});
+    }
+
+    while (m_available.size() < m_frames.size()) {
+        m_available.emplace_back(m_available.size());
+    }
 }
 
 auto Framer::ref(Size index) -> Page
@@ -109,9 +112,10 @@ auto Framer::pin(Id pid) -> tl::expected<Size, Status>
     CALICO_EXPECT_FALSE(pid.is_null());
     CALICO_EXPECT_LE(pid.as_index(), m_page_count);
 
-    if (m_available.empty())
+    if (m_available.empty()) {
         return tl::make_unexpected(not_found(
             "could not pin page: unable to find an available frame (unpin a page and try again)"));
+    }
 
     auto fid = m_available.back();
     auto &frame = frame_at_impl(fid);
@@ -174,15 +178,19 @@ auto Framer::read_page_from_file(Id id, Span out) const -> tl::expected<bool, St
 
     auto read_size = out.size();
     auto s = m_file->read(out.data(), read_size, offset);
-    if (!s.is_ok()) return tl::make_unexpected(s);
+    if (!s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
-    if (read_size == m_page_size)
+    if (read_size == m_page_size) {
         return true;
+    }
 
     // In that case, we will hit EOF here.
-    if (read_size == 0)
+    if (read_size == 0) {
         return false;
+    }
 
     return tl::make_unexpected(system_error(
         "could not read page {}: incomplete read (read {}/{} B)", id.value, out.size(), m_page_size));

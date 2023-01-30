@@ -89,7 +89,7 @@ struct Node {
         [[nodiscard]] auto key() const -> Slice;
         [[nodiscard]] auto data() -> Byte *;
         [[nodiscard]] auto data() const -> const Byte *;
-        [[nodiscard]] auto seek(const Slice &key) -> bool;
+        auto seek(const Slice &key) -> bool;
         auto next() -> void;
     };
 

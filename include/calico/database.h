@@ -29,14 +29,10 @@ public:
     [[nodiscard]] auto statistics() const -> Statistics;
     [[nodiscard]] auto status() const -> Status;
 
-    // NOTE: Necessary because we have a non-trivial destructor.
-    Database(Database &&rhs) noexcept;
-    Database& operator=(Database &&rhs) noexcept;
-
 private:
     friend class DatabaseImpl;
 
-    std::unique_ptr<DatabaseImpl> m_impl;
+    const std::unique_ptr<DatabaseImpl> m_impl;
 };
 
 } // namespace Calico

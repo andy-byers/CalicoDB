@@ -24,12 +24,12 @@ TEST_F(HeaderTests, FileHeader)
 {
     FileHeader source;
     source.magic_code = 1;
-    source.header_crc = 2;
     source.page_count = 3;
     source.record_count = 4;
     source.free_list_id.value = 5;
     source.recovery_lsn.value = 6;
     source.page_size = backing.size();
+    source.header_crc = source.compute_crc();
 
     source.write(page);
     // Write a node header to make sure it doesn't overwrite the file header memory.
@@ -44,6 +44,7 @@ TEST_F(HeaderTests, FileHeader)
     ASSERT_EQ(source.free_list_id, target.free_list_id);
     ASSERT_EQ(source.recovery_lsn, target.recovery_lsn);
     ASSERT_EQ(source.page_size, target.page_size);
+    ASSERT_EQ(source.compute_crc(), target.header_crc);
 }
 
 TEST_F(HeaderTests, NodeHeader)
@@ -169,7 +170,7 @@ protected:
     {
         node.TEST_validate();
         auto page = std::move(node).take();
-        (void)page.take();
+        (void)page.deltas();
     }
 
     auto create_cell(const Slice &key, const Slice &value, Id overflow_id = Id {123})
@@ -476,7 +477,7 @@ protected:
     {
         dst_node.TEST_validate();
         auto page = std::move(dst_node).take();
-        (void)page.take();
+        (void)page.deltas();
     }
 
     auto SetUp() -> void override
@@ -972,6 +973,29 @@ protected:
     }
 };
 
+TEST_P(CursorTests, InvalidCursorsAreNeverEqual)
+{
+    auto lhs = CursorInternal::make_cursor(*tree);
+    auto rhs = CursorInternal::make_cursor(*tree);
+    ASSERT_NE(lhs, rhs);
+
+    lhs.seek_first();
+    rhs.seek_first();
+    ASSERT_EQ(lhs, rhs);
+
+    lhs.previous();
+    rhs.previous();
+    ASSERT_NE(lhs, rhs);
+
+    lhs.seek_last();
+    rhs.seek_last();
+    ASSERT_EQ(lhs, rhs);
+
+    lhs.next();
+    rhs.next();
+    ASSERT_NE(lhs, rhs);
+}
+
 TEST_P(CursorTests, SeeksForward)
 {
     auto cursor = CursorInternal::make_cursor(*tree);
@@ -999,7 +1023,7 @@ TEST_P(CursorTests, SeeksForwardFromBoundary)
 TEST_P(CursorTests, SeeksForwardToBoundary)
 {
     auto cursor = CursorInternal::make_cursor(*tree);
-    auto bounds = CursorInternal::make_cursor(*tree);
+    auto bounds = cursor;
     cursor.seek_first();
     bounds.seek(make_key(RECORD_COUNT * 3 / 4));
     for (Size i {}; i < RECORD_COUNT * 3 / 4; ++i) {
@@ -1013,8 +1037,8 @@ TEST_P(CursorTests, SeeksForwardToBoundary)
 TEST_P(CursorTests, SeeksForwardBetweenBoundaries)
 {
     auto cursor = CursorInternal::make_cursor(*tree);
-    auto bounds = CursorInternal::make_cursor(*tree);
     cursor.seek(make_key(250));
+    auto bounds = cursor;
     bounds.seek(make_key(750));
     for (Size i {}; i < 500; ++i) {
         ASSERT_TRUE(cursor.is_valid());
@@ -1052,8 +1076,8 @@ TEST_P(CursorTests, SeeksBackwardFromBoundary)
 TEST_P(CursorTests, SeeksBackwardToBoundary)
 {
     auto cursor = CursorInternal::make_cursor(*tree);
-    auto bounds = CursorInternal::make_cursor(*tree);
     cursor.seek_last();
+    auto bounds = cursor;
     bounds.seek(make_key(RECORD_COUNT / 4));
     for (Size i {}; i < RECORD_COUNT*3/4 - 1; ++i) {
         ASSERT_TRUE(cursor.is_valid());

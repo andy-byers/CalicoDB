@@ -63,6 +63,41 @@ public:
         ASSERT_OK(core->erase(c.key()));
     }
 
+    [[nodiscard]]
+    auto time_independent_snapshot() const -> std::string
+    {
+        Size file_size;
+        EXPECT_OK(store->file_size("test/data", file_size));
+
+        std::unique_ptr<RandomReader> reader;
+        {
+            RandomReader *temp;
+            EXPECT_OK(store->open_random_reader("test/data", &temp));
+            reader.reset(temp);
+        }
+
+        std::string buffer(file_size, '\x00');
+        auto read_size = file_size;
+        EXPECT_OK(reader->read(buffer.data(), read_size, 0));
+        EXPECT_EQ(read_size, file_size);
+
+        const auto page_size = core->statistics().page_size();
+        EXPECT_EQ(file_size % page_size, 0);
+        auto offset = FileHeader::SIZE;
+        for (Size i {}; i < file_size / page_size; ++i) {
+            put_u64(buffer.data() + i*page_size + offset, 0);
+            offset = 0;
+        }
+
+        Page root {Id::root(), {buffer.data(), page_size}, true};
+        FileHeader header {root};
+        header.header_crc = 0;
+        header.recovery_lsn.value = 0;
+        header.write(root);
+
+        return buffer;
+    }
+
     Random random {UnitTests::random_seed};
     std::unique_ptr<Storage> store;
     std::vector<Record> records;
@@ -103,36 +138,25 @@ public:
     Options options;
 };
 
-TEST_F(BasicDatabaseTests, OpenAndCloseDatabase)
-{
-    Database db;
-    ASSERT_OK(db.open(ROOT, options));
-    ASSERT_OK(db.close());
-}
-
-TEST_F(BasicDatabaseTests, DestroyDatabase)
-{
-    Database db;
-    ASSERT_OK(db.open(ROOT, options));
-    ASSERT_OK(std::move(db).destroy());
-}
-
-TEST_F(BasicDatabaseTests, DatabaseIsMovable)
-{
-    Database db;
-    ASSERT_OK(db.open(ROOT, options));
-    Database db2 {std::move(db)};
-    db = std::move(db2);
-    ASSERT_OK(db.close());
-}
-
-TEST_F(BasicDatabaseTests, ReopenDatabase)
+TEST_F(BasicDatabaseTests, OpensAndCloses)
 {
     Database db;
     for (Size i {}; i < 10; ++i) {
         ASSERT_OK(db.open(ROOT, options));
         ASSERT_OK(db.close());
     }
+    ASSERT_TRUE(store->file_exists(std::string {PREFIX} + "data").is_ok());
+}
+
+TEST_F(BasicDatabaseTests, IsDestroyed)
+{
+    const auto filename = std::string {PREFIX} + "data";
+
+    Database db;
+    ASSERT_OK(db.open(ROOT, options));
+    ASSERT_TRUE(store->file_exists(filename).is_ok());
+    ASSERT_OK(std::move(db).destroy());
+    ASSERT_TRUE(store->file_exists(filename).is_not_found());
 }
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)

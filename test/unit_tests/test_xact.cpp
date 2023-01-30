@@ -1076,7 +1076,7 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryTests,
     ::testing::Values(
-//        std::make_pair(  0, 100), // TODO: Sometimes, this test doesn't fail when it should.
+        std::make_pair(  0, 100),
         std::make_pair(  1, 100),
         std::make_pair( 10, 100)));
 
@@ -1175,7 +1175,7 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryWalReadFailureTests,
     ::testing::Values(
-//        std::make_pair(  0, 100),
+        std::make_pair(  0, 100),
         std::make_pair(  1, 100),
         std::make_pair( 10, 100)));
 

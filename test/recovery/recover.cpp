@@ -54,10 +54,11 @@ auto main(int argc, const char *argv[]) -> int
     CALICO_EXPECT_EQ(info.record_count(), num_committed);
 
     Size key_counter {};
-    auto xact = db.transaction();
+    auto xact = db.start();
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
-        const auto cursor = db.find_exact(key);
+        auto cursor = db.cursor();
+        cursor.seek(key);
         CALICO_EXPECT_TRUE(cursor.is_valid());
         CALICO_EXPECT_EQ(cursor.key().to_string(), key);
         CALICO_EXPECT_EQ(cursor.value(), value);

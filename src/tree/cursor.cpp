@@ -188,16 +188,9 @@ auto Cursor::operator==(const Cursor &rhs) const -> bool
 {
     // These cursors should come from the same database.
     CALICO_EXPECT_EQ(m_actions, rhs.m_actions);
-    const auto lhs_has_error = !m_status.is_ok() && !m_status.is_not_found();
-    const auto rhs_has_error = !rhs.m_status.is_ok() && !rhs.m_status.is_not_found();
 
     if (m_status.is_ok() && rhs.m_status.is_ok()) {
         return m_loc == rhs.m_loc;
-    } else if (lhs_has_error || rhs_has_error) {
-        // A cursor in an exceptional state is never equal to another cursor.
-        return false;
-    } else if (m_status.is_not_found() || rhs.m_status.is_not_found()) {
-        return m_status.is_not_found() == rhs.m_status.is_not_found();
     }
     return false;
 }
@@ -250,7 +243,7 @@ auto Cursor::key() const -> Slice
         CursorInternal::action_release(*this, std::move(*node));
         return m_buffer;
     } else {
-        m_status = node.error();
+        CursorInternal::invalidate(*this, node.error());
         return {};
     }
 }

@@ -36,10 +36,6 @@ Database::~Database()
     (void)close();
 }
 
-Database::Database(Database &&) noexcept = default;
-
-auto Database::operator=(Database &&) noexcept -> Database & = default;
-
 auto Database::cursor() const -> Cursor
 {
     return m_impl->cursor();
