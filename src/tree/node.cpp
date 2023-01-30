@@ -117,14 +117,14 @@ class BlockAllocator {
     auto set_next_pointer(Size offset, PageSize value) -> void
     {
         CALICO_EXPECT_LT(value, m_node->page.size());
-        return put_u16(m_node->page.data() + offset, value);
+        return put_u16(m_node->page.span(offset, sizeof(PageSize)), value);
     }
 
     auto set_block_size(Size offset, PageSize value) -> void
     {
         CALICO_EXPECT_GE(value, 4);
         CALICO_EXPECT_LT(value, m_node->page.size());
-        return put_u16(m_node->page.data() + offset + sizeof(PageSize), value);
+        return put_u16(m_node->page.span(offset + sizeof(PageSize), sizeof(PageSize)), value);
     }
 
     [[nodiscard]] auto allocate_from_free_list(PageSize needed_size) -> PageSize;
@@ -325,18 +325,28 @@ static auto seek_binary(const Node &node, const Slice &key) -> SeekResult
     return {static_cast<unsigned>(lower), false};
 }
 
+using Seek = SeekResult (*)(const Node &, const Slice &);
+
+static constexpr Seek SEEK_TABLE[] {
+    seek_linear, seek_linear,
+    seek_linear, seek_linear,
+    seek_linear, seek_linear,
+    seek_linear, seek_linear,
+    seek_linear, seek_linear,
+    seek_linear, seek_linear,
+    seek_linear, seek_linear,
+    seek_linear, seek_binary,
+};
+
+static constexpr auto SEEK_MAX = sizeof(SEEK_TABLE)/sizeof(Seek) - 1;
+
 auto Node::Iterator::seek(const Slice &key) -> bool
 {
-    static constexpr Size CUTOFF {16};
+    const auto seek_type = std::min<Size>(m_node->header.cell_count, SEEK_MAX);
+    const auto [index, exact] = SEEK_TABLE[seek_type](*m_node, key);
 
-    SeekResult result;
-    if (m_node->header.cell_count <= CUTOFF) {
-        result = seek_linear(*m_node, key);
-    } else {
-        result = seek_binary(*m_node, key);
-    }
-    m_index = result.index;
-    return result.exact;
+    m_index = index;
+    return exact;
 }
 
 auto Node::Iterator::next() -> void

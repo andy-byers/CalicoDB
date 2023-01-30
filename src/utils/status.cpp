@@ -6,7 +6,9 @@ namespace Calico {
 static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
 {
     // Status is OK, so there isn't anything to copy.
-    if (data == nullptr) return nullptr;
+    if (data == nullptr) {
+        return nullptr;
+    }
 
     // Allocate memory for the copied message/status code.
     const auto total_size = std::char_traits<char>::length(data) + sizeof(char);
@@ -48,15 +50,17 @@ Status::Status(Status &&rhs) noexcept
 
 auto Status::operator=(const Status &rhs) -> Status &
 {
-    if (this != &rhs)
+    if (this != &rhs) {
         m_data = maybe_copy_data(rhs.m_data.get());
+    }
     return *this;
 }
 
 auto Status::operator=(Status &&rhs) noexcept -> Status &
 {
-    if (this != &rhs)
+    if (this != &rhs) {
         m_data = std::move(rhs.m_data);
+    }
     return *this;
 }
 

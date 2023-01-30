@@ -217,9 +217,7 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
 {
     // This function needs external synchronization!
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
-
-    auto offset = page_offset(page);
-    const Lsn lsn {get_u64(page.data() + offset)};
+    const auto lsn = read_page_lsn(page);
 
     // Make sure this page is in the dirty list. LSN is saved to determine when the page should be written back.
     if (!entry.dirty_token.has_value()) {
@@ -228,14 +226,11 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
 
     if (system->has_xact) {
         // Don't write a full image record to the WAL if we already have one for this page during this transaction.
-
         if (lsn <= system->commit_lsn.load()) {
             const auto next_lsn = m_wal->current_lsn();
             m_wal->log(encode_full_image_payload(
                 next_lsn, page.id(), page.view(0), *m_scratch->get()));
-
-            auto memory = page.span(offset, sizeof(Lsn));
-            put_u64(memory, next_lsn.value);
+            write_page_lsn(page, next_lsn);
         }
     }
 }
@@ -306,8 +301,7 @@ auto Pager::release(Page page) -> void
 {
     if (page.is_writable() && system->has_xact) {
         const auto next_lsn = m_wal->current_lsn();
-        auto memory = page.span(page_offset(page), sizeof(Lsn));
-        put_u64(memory, next_lsn.value);
+        write_page_lsn(page, next_lsn);
         m_wal->log(encode_deltas_payload(
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch->get()));
@@ -325,7 +319,7 @@ auto Pager::release(Page page) -> void
         const auto checkpoint = (*entry.dirty_token)->record_lsn.value;
         const auto cutoff = system->commit_lsn.load().value;
 
-        if (checkpoint < cutoff) {
+        if (checkpoint <= cutoff) {
             auto s = m_framer.write_back(entry.frame_index);
 
             if (s.is_ok()) {

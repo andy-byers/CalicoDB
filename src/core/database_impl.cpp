@@ -359,8 +359,9 @@ auto DatabaseImpl::do_commit() -> Status
 {
     const auto last_commit_lsn = system->commit_lsn.load();
 
-    if (!system->has_xact)
+    if (!system->has_xact) {
         return logic_error("transaction has not been started");
+    }
 
     CALICO_TRY_S(status());
     CALICO_TRY_S(save_state());
@@ -397,9 +398,10 @@ auto DatabaseImpl::abort() -> Status
 
 auto DatabaseImpl::do_abort() -> Status
 {
-    if (!system->has_xact)
+    if (!system->has_xact) {
         return logic_error(
             "could not abort: a transaction is not active (start a transaction and try again)");
+    }
 
     system->has_xact = false;
     wal->advance();
