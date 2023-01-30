@@ -1,7 +1,6 @@
 #ifndef CALICO_TREE_BPLUS_TREE_H
 #define CALICO_TREE_BPLUS_TREE_H
 
-#include "cursor_internal.h"
 #include "free_list.h"
 #include "node.h"
 #include "utils/expected.hpp"
@@ -9,7 +8,30 @@
 namespace Calico {
 
 struct FileHeader;
+class BPlusTree;
 class Pager;
+
+struct SearchResult {
+    Node node;
+    Size index {};
+    bool exact {};
+};
+
+struct CursorActions {
+    using Collect = tl::expected<std::string, Status> (*)(BPlusTree &, Node, Size);
+    using Acquire = tl::expected<Node, Status> (*)(BPlusTree &, Id, bool);
+    using Search = tl::expected<SearchResult, Status> (*)(BPlusTree &, const Slice &);
+    using Extremum = tl::expected<Node, Status> (*)(BPlusTree &);
+    using Release = void (*)(BPlusTree &, Node);
+
+    BPlusTree *tree {};
+    Collect collect {};
+    Search search {};
+    Acquire acquire {};
+    Release release {};
+    Extremum lowest {};
+    Extremum highest {};
+};
 
 class BPlusTree {
     /*
@@ -31,16 +53,8 @@ public:
     friend class BPlusTreeInternal;
     friend class CursorInternal;
 
-    struct SearchResult {
-        Node node;
-        Size index {};
-        bool exact {};
-    };
-
     explicit BPlusTree(Pager &pager);
     [[nodiscard]] auto setup() -> tl::expected<Node, Status>;
-    [[nodiscard]] auto lowest() -> tl::expected<Node, Status>;
-    [[nodiscard]] auto highest() -> tl::expected<Node, Status>;
     [[nodiscard]] auto collect(Node node, Size index) -> tl::expected<std::string, Status>;
     [[nodiscard]] auto search(const Slice &key) -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> tl::expected<bool, Status>;

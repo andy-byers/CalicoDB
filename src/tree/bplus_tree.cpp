@@ -138,14 +138,14 @@ public:
     }
 
     [[nodiscard]]
-    static auto find_external_slot(BPlusTree &tree, const Slice &key, Node node) -> tl::expected<BPlusTree::SearchResult, Status>
+    static auto find_external_slot(BPlusTree &tree, const Slice &key, Node node) -> tl::expected<SearchResult, Status>
     {
         for (; ; ) {
             Node::Iterator itr {node};
             const auto exact = itr.seek(key);
 
             if (node.header.is_external) {
-                return BPlusTree::SearchResult {std::move(node), itr.index(), exact};
+                return SearchResult {std::move(node), itr.index(), exact};
             }
 
             const auto next_id = read_child_id(node, itr.index() + exact);
@@ -154,10 +154,32 @@ public:
         }
     }
     
-    static auto find_external_slot(BPlusTree &tree, const Slice &key) -> tl::expected<BPlusTree::SearchResult, Status>
+    static auto find_external_slot(BPlusTree &tree, const Slice &key) -> tl::expected<SearchResult, Status>
     {
         CALICO_NEW_R(root, BPlusTreeInternal::acquire_node(tree, Id::root()));
         return find_external_slot(tree, key, std::move(root));
+    }
+
+    static auto lowest(BPlusTree &tree) -> tl::expected<Node, Status>
+    {
+        CALICO_NEW_R(node, BPlusTreeInternal::acquire_node(tree, Id::root()));
+        while (!node.header.is_external) {
+            const auto next_id = read_child_id(node, 0);
+            BPlusTreeInternal::release_node(tree, std::move(node));
+            CALICO_PUT_R(node, BPlusTreeInternal::acquire_node(tree, next_id));
+        }
+        return node;
+    }
+
+    static auto highest(BPlusTree &tree) -> tl::expected<Node, Status>
+    {
+        CALICO_NEW_R(node, BPlusTreeInternal::acquire_node(tree, Id::root()));
+        while (!node.header.is_external) {
+            const auto next_id = node.header.next_id;
+            BPlusTreeInternal::release_node(tree, std::move(node));
+            CALICO_PUT_R(node, BPlusTreeInternal::acquire_node(tree, next_id));
+        }
+        return node;
     }
 
     [[nodiscard]]
@@ -671,10 +693,13 @@ BPlusTree::BPlusTree(Pager &pager)
     m_internal_meta.read_key = read_internal_key;
     m_internal_meta.parse_cell = parse_internal_cell;
 
-    m_actions.tree_ptr = this;
-    m_actions.acquire_ptr = BPlusTreeInternal::acquire_node;
-    m_actions.release_ptr = BPlusTreeInternal::release_node;
-    m_actions.collect_ptr = BPlusTreeInternal::collect_value;
+    m_actions.tree = this;
+    m_actions.search = BPlusTreeInternal::find_external_slot;
+    m_actions.acquire = BPlusTreeInternal::acquire_node;
+    m_actions.release = BPlusTreeInternal::release_node;
+    m_actions.collect = BPlusTreeInternal::collect_value;
+    m_actions.lowest = BPlusTreeInternal::lowest;
+    m_actions.highest = BPlusTreeInternal::highest;
 
     // Scratch memory for defragmenting nodes and storing cells.
     m_scratch[0].resize(pager.page_size());
@@ -730,28 +755,6 @@ auto BPlusTree::erase(const Slice &key) -> tl::expected<void, Status>
     }
     BPlusTreeInternal::release_node(*this, std::move(node));
     return tl::make_unexpected(not_found("not found"));
-}
-
-auto BPlusTree::lowest() -> tl::expected<Node, Status>
-{
-    CALICO_NEW_R(node, BPlusTreeInternal::acquire_node(*this, Id::root()));
-    while (!node.header.is_external) {
-        const auto next_id = read_child_id(node, 0);
-        BPlusTreeInternal::release_node(*this, std::move(node));
-        CALICO_PUT_R(node, BPlusTreeInternal::acquire_node(*this, next_id));
-    }
-    return node;
-}
-
-auto BPlusTree::highest() -> tl::expected<Node, Status>
-{
-    CALICO_NEW_R(node, BPlusTreeInternal::acquire_node(*this, Id::root()));
-    while (!node.header.is_external) {
-        const auto next_id = node.header.next_id;
-        BPlusTreeInternal::release_node(*this, std::move(node));
-        CALICO_PUT_R(node, BPlusTreeInternal::acquire_node(*this, next_id));
-    }
-    return node;
 }
 
 auto BPlusTree::collect(Node node, Size index) -> tl::expected<std::string, Status>

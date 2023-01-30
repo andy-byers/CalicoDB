@@ -10,51 +10,155 @@ static auto default_error_status() -> Status
     return Status::not_found("cursor is invalid");
 }
 
-auto CursorActions::collect(Node node, Size index) -> tl::expected<std::string, Status>
+auto CursorInternal::action_collect(const Cursor &cursor, Node node, Size index) -> tl::expected<std::string, Status>
 {
-    return collect_ptr(*tree_ptr, std::move(node), index);
+    return cursor.m_actions->collect(*cursor.m_actions->tree, std::move(node), index);
 }
 
-auto CursorActions::acquire(Id pid, bool upgrade) -> tl::expected<Node, Status>
+auto CursorInternal::action_acquire(const Cursor &cursor, Id pid) -> tl::expected<Node, Status>
 {
-    return acquire_ptr(*tree_ptr, pid, upgrade);
+    return cursor.m_actions->acquire(*cursor.m_actions->tree, pid, false);
 }
 
-auto CursorActions::release(Node node) -> void
+auto CursorInternal::action_search(const Cursor &cursor, const Slice &key) -> tl::expected<SearchResult, Status>
 {
-    release_ptr(*tree_ptr, std::move(node));
+    return cursor.m_actions->search(*cursor.m_actions->tree, key);
 }
 
-auto CursorInternal::find_first(BPlusTree &tree) -> Cursor
+auto CursorInternal::action_lowest(const Cursor &cursor) -> tl::expected<Node, Status>
 {
-    auto cursor = make_cursor(tree);
-    if (auto lowest = tree.lowest()) {
+    return cursor.m_actions->lowest(*cursor.m_actions->tree);
+}
+
+auto CursorInternal::action_highest(const Cursor &cursor) -> tl::expected<Node, Status>
+{
+    return cursor.m_actions->highest(*cursor.m_actions->tree);
+}
+
+auto CursorInternal::action_release(const Cursor &cursor, Node node) -> void
+{
+    cursor.m_actions->release(*cursor.m_actions->tree, std::move(node));
+}
+
+auto CursorInternal::seek_first(Cursor &cursor) -> void
+{
+    if (auto lowest = action_lowest(cursor)) {
         if (lowest->header.cell_count) {
-            move_to(cursor, std::move(*lowest), 0);
+            seek_to(cursor, std::move(*lowest), 0);
         } else {
             invalidate(cursor, not_found("database is empty"));
+            action_release(cursor, std::move(*lowest));
         }
-        tree.m_actions.release(std::move(*lowest));
     } else {
         invalidate(cursor, lowest.error());
     }
-    return cursor;
 }
 
-auto CursorInternal::find_last(BPlusTree &tree) -> Cursor
+auto CursorInternal::seek_last(Cursor &cursor) -> void
 {
-    auto cursor = make_cursor(tree);
-    if (auto highest = tree.highest()) {
+    if (auto highest = action_highest(cursor)) {
         if (const auto count = highest->header.cell_count) {
-            move_to(cursor, std::move(*highest), count - 1);
+            seek_to(cursor, std::move(*highest), count - 1);
         } else {
             invalidate(cursor, not_found("database is empty"));
+            action_release(cursor, std::move(*highest));
         }
-        tree.m_actions.release(std::move(*highest));
     } else {
         invalidate(cursor, highest.error());
     }
-    return cursor;
+}
+
+auto CursorInternal::seek_left(Cursor &cursor) -> void
+{
+    CALICO_EXPECT_TRUE(cursor.is_valid());
+    if (cursor.m_loc.index != 0) {
+        cursor.m_loc.index--;
+    } else if (auto node = action_acquire(cursor, Id {cursor.m_loc.pid})) {
+        const auto prev_id = node->header.prev_id;
+        action_release(cursor, std::move(*node));
+
+        if (prev_id.is_null()) {
+            invalidate(cursor, default_error_status());
+            return;
+        }
+        node = action_acquire(cursor, prev_id);
+        if (!node.has_value()) {
+            invalidate(cursor, node.error());
+            return;
+        }
+        cursor.m_loc.pid = node->page.id().value;
+        cursor.m_loc.count = node->header.cell_count;
+        cursor.m_loc.index = node->header.cell_count - 1;
+        action_release(cursor, std::move(*node));
+    } else {
+        invalidate(cursor, node.error());
+    }
+}
+
+auto CursorInternal::seek_right(Cursor &cursor) -> void
+{
+    CALICO_EXPECT_TRUE(cursor.is_valid());
+    if (++cursor.m_loc.index < cursor.m_loc.count) {
+        return;
+    }
+    if (auto node = action_acquire(cursor, Id {cursor.m_loc.pid})) {
+        const auto next_id = node->header.next_id;
+        action_release(cursor, std::move(*node));
+
+        if (next_id.is_null()) {
+            invalidate(cursor, default_error_status());
+            return;
+        }
+        node = action_acquire(cursor, next_id);
+        if (!node.has_value()) {
+            invalidate(cursor, node.error());
+            return;
+        }
+        cursor.m_loc.pid = node->page.id().value;
+        cursor.m_loc.count = node->header.cell_count;
+        cursor.m_loc.index = 0;
+        action_release(cursor, std::move(*node));
+    } else {
+        invalidate(cursor, node.error());
+    }
+}
+
+auto CursorInternal::seek_to(Cursor &cursor, Node node, Size index) -> void
+{
+    CALICO_EXPECT_TRUE(node.header.is_external);
+    const auto pid = node.page.id();
+    const auto count = node.header.cell_count;
+    action_release(cursor, std::move(node));
+
+    if (count && index < count) {
+        cursor.m_loc.index = static_cast<PageSize>(index);
+        cursor.m_loc.count = static_cast<PageSize>(count);
+        cursor.m_loc.pid = pid.value;
+        cursor.m_status = ok();
+    } else {
+        invalidate(cursor, default_error_status());
+    }
+}
+
+auto CursorInternal::seek(Cursor &cursor, const Slice &key) -> void
+{
+    if (auto slot = action_search(cursor, key)) {
+        auto [node, index, exact] = std::move(*slot);
+        const auto count = node.header.cell_count;
+        const auto pid = node.page.id();
+        action_release(cursor, std::move(node));
+
+        if (count && index < count) {
+            cursor.m_loc.index = static_cast<PageSize>(index);
+            cursor.m_loc.count = static_cast<PageSize>(count);
+            cursor.m_loc.pid = pid.value;
+            cursor.m_status = ok();
+        } else {
+            invalidate(cursor, default_error_status());
+        }
+    } else {
+        invalidate(cursor, slot.error());
+    }
 }
 
 auto CursorInternal::make_cursor(BPlusTree &tree) -> Cursor
@@ -65,79 +169,18 @@ auto CursorInternal::make_cursor(BPlusTree &tree) -> Cursor
     return cursor;
 }
 
-auto CursorInternal::id(const Cursor &cursor) -> Size
-{
-    CALICO_EXPECT_TRUE(cursor.is_valid());
-    return cursor.m_position.ids[Cursor::Position::CENTER];
-}
-
-auto CursorInternal::index(const Cursor &cursor) -> Size
-{
-    CALICO_EXPECT_TRUE(cursor.is_valid());
-    return cursor.m_position.index;
-}
-
-auto CursorInternal::invalidate(Cursor &cursor, const Status &status) -> void
+auto CursorInternal::invalidate(const Cursor &cursor, const Status &status) -> void
 {
     CALICO_EXPECT_FALSE(status.is_ok());
     cursor.m_status = status;
 }
 
-auto CursorInternal::seek_left(Cursor &cursor) -> bool
-{
-    CALICO_EXPECT_TRUE(cursor.is_valid());
-    CALICO_EXPECT_EQ(cursor.m_position.index, 0);
-    if (is_first(cursor)) {
-        invalidate(cursor, default_error_status());
-    } else {
-        const Id left {cursor.m_position.ids[Cursor::Position::LEFT]};
-        auto previous = cursor.m_actions->acquire(left, false);
-        if (!previous.has_value()) {
-            invalidate(cursor, previous.error());
-            return false;
-        }
-        move_to(cursor, std::move(*previous), 0);
-        CALICO_EXPECT_GT(cursor.m_position.cell_count, 0);
-        cursor.m_position.index = cursor.m_position.cell_count;
-        cursor.m_position.index--;
-    }
-    return true;
-}
-
-auto CursorInternal::seek_right(Cursor &cursor) -> bool
-{
-    CALICO_EXPECT_TRUE(cursor.is_valid());
-    CALICO_EXPECT_EQ(cursor.m_position.index, cursor.m_position.cell_count - 1);
-    if (is_last(cursor)) {
-        invalidate(cursor, default_error_status());
-    } else {
-        const Id right {cursor.m_position.ids[Cursor::Position::RIGHT]};
-        auto next = cursor.m_actions->acquire(right, false);
-        if (!next.has_value()) {
-            invalidate(cursor, next.error());
-            return false;
-        }
-        move_to(cursor, std::move(*next), 0);
-    }
-    return true;
-}
-
-auto CursorInternal::is_last(const Cursor &cursor) -> bool
-{
-    return cursor.is_valid() && cursor.m_position.is_maximum();
-}
-
-auto CursorInternal::is_first(const Cursor &cursor) -> bool
-{
-    return cursor.is_valid() && cursor.m_position.is_minimum();
-}
-
 auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
 {
     if (cursor.is_valid()) {
-        auto node = cursor.m_actions->acquire(Id {cursor.m_position.ids[Cursor::Position::CENTER]}, false);
-        CALICO_EXPECT_TRUE(node.has_value());
-        node->TEST_validate();
+        auto node = action_acquire(cursor, Id {cursor.m_loc.pid}).value();
+        node.TEST_validate();
+        action_release(cursor, std::move(node));
     }
 }
 
@@ -149,7 +192,7 @@ auto Cursor::operator==(const Cursor &rhs) const -> bool
     const auto rhs_has_error = !rhs.m_status.is_ok() && !rhs.m_status.is_not_found();
 
     if (m_status.is_ok() && rhs.m_status.is_ok()) {
-        return m_position == rhs.m_position;
+        return m_loc == rhs.m_loc;
     } else if (lhs_has_error || rhs_has_error) {
         // A cursor in an exceptional state is never equal to another cursor.
         return false;
@@ -176,110 +219,65 @@ auto Cursor::status() const -> Status
 
 auto Cursor::seek(const Slice &key) -> void
 {
-    (void)key;
+    CursorInternal::seek(*this, key);
 }
 
 auto Cursor::seek_first() -> void
 {
-
+    CursorInternal::seek_first(*this);
 }
 
 auto Cursor::seek_last() -> void
 {
-
-}
-
-auto CursorInternal::move_to(Cursor &cursor, Node node, Size index) -> void
-{
-    CALICO_EXPECT_TRUE(node.header.is_external);
-    const auto count = node.header.cell_count;
-    auto is_valid = count && index < count;
-
-    if (is_valid) {
-        cursor.m_position.index = static_cast<std::uint16_t>(index);
-        cursor.m_position.cell_count = static_cast<std::uint16_t>(count);
-        cursor.m_position.ids[Cursor::Position::LEFT] = node.header.prev_id.value;
-        cursor.m_position.ids[Cursor::Position::CENTER] = node.page.id().value;
-        cursor.m_position.ids[Cursor::Position::RIGHT] = node.header.next_id.value;
-        cursor.m_status = ok();
-    } else {
-        invalidate(cursor, default_error_status());
-    }
-
-    cursor.m_actions->release(std::move(node));
+    CursorInternal::seek_last(*this);
 }
 
 auto Cursor::next() -> void
 {
-    if (is_valid()) {
-        if (m_position.index == m_position.cell_count - 1) {
-            CursorInternal::seek_right(*this);
-            return;
-        } else {
-            m_position.index++;
-        }
-    }
+    CursorInternal::seek_right(*this);
 }
 
 auto Cursor::previous() -> void
 {
-    if (is_valid()) {
-        if (m_position.index == 0) {
-            CursorInternal::seek_left(*this);
-            return;
-        } else {
-            m_position.index--;
-        }
-    }
+    CursorInternal::seek_left(*this);
 }
 
 auto Cursor::key() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
-    const auto node = m_actions->acquire(Id {m_position.ids[Position::CENTER]}, false);
-    if (!node.has_value()) {
+    if (auto node = CursorInternal::action_acquire(*this, Id {m_loc.pid})) {
+        m_buffer = read_key(*node, m_loc.index).to_string();
+        CursorInternal::action_release(*this, std::move(*node));
+        return m_buffer;
+    } else {
         m_status = node.error();
         return {};
     }
-    return read_key(*node, m_position.index);
 }
 
 auto Cursor::value() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
-    auto node = m_actions->acquire(Id {m_position.ids[Position::CENTER]}, false);
-    if (!node.has_value()) {
-        m_status = node.error();
-        return {};
+    if (auto node = CursorInternal::action_acquire(*this, Id {m_loc.pid})) {
+        if (auto value = CursorInternal::action_collect(*this, std::move(*node), m_loc.index)) {
+            m_buffer = *value;
+            return m_buffer;
+        } else {
+            CursorInternal::invalidate(*this, value.error());
+        }
+    } else {
+        CursorInternal::invalidate(*this, node.error());
     }
-    return *m_actions->collect(std::move(*node), m_position.index)
-        .map_error([this](const Status &status) -> std::string {
-            m_status = status;
-            return {};
-        });
+    return {};
 }
 
 auto Cursor::Position::operator==(const Position &rhs) const -> bool
 {
-    if (ids[CENTER] == rhs.ids[CENTER]) {
-        CALICO_EXPECT_EQ(ids[LEFT], rhs.ids[LEFT]);
-        CALICO_EXPECT_EQ(ids[RIGHT], rhs.ids[RIGHT]);
-        CALICO_EXPECT_EQ(cell_count, rhs.cell_count);
+    if (pid == rhs.pid) {
+        CALICO_EXPECT_EQ(count, rhs.count);
         return index == rhs.index;
     }
     return false;
-}
-
-auto Cursor::Position::is_maximum() const -> bool
-{
-    CALICO_EXPECT_NE(ids[CENTER], 0);
-    return Id {ids[RIGHT]}.is_null() && index + 1 == cell_count;
-}
-
-auto Cursor::Position::is_minimum() const -> bool
-{
-    CALICO_EXPECT_NE(ids[CENTER], 0);
-    return cell_count && Id {ids[LEFT]}.is_null() && index == 0;
 }
 
 } // namespace Calico

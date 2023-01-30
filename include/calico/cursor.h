@@ -7,31 +7,9 @@
 
 namespace Calico {
 
-struct Node;
 struct CursorActions;
 
 class Cursor final {
-    friend class CursorInternal;
-
-    struct Position {
-        static constexpr Size LEFT {0};
-        static constexpr Size CENTER {1};
-        static constexpr Size RIGHT {2};
-
-        auto operator==(const Position &rhs) const -> bool;
-        [[nodiscard]] auto is_minimum() const -> bool;
-        [[nodiscard]] auto is_maximum() const -> bool;
-
-        Size ids[3] {0, 1, 0};
-        std::uint16_t cell_count {};
-        std::uint16_t index {};
-    };
-
-    mutable Status m_status {Status::ok()};
-    mutable std::string m_value;
-    CursorActions *m_actions {};
-    Position m_position;
-
 public:
     Cursor() = default;
 
@@ -51,6 +29,22 @@ public:
      */
     auto operator==(const Cursor &rhs) const -> bool;
     auto operator!=(const Cursor &rhs) const -> bool;
+
+private:
+    friend class CursorInternal;
+
+    struct Position {
+        auto operator==(const Position &rhs) const -> bool;
+
+        Size pid {};
+        std::uint16_t index {};
+        std::uint16_t count {};
+    };
+
+    mutable Status m_status {Status::ok()};
+    mutable std::string m_buffer;
+    CursorActions *m_actions {};
+    Position m_loc;
 };
 
 } // namespace Calico
