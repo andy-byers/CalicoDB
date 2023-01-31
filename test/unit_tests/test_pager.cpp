@@ -1,5 +1,6 @@
 
 #include "fakes.h"
+#include "tools.h"
 #include "pager/framer.h"
 #include "pager/page.h"
 #include "pager/page_cache.h"
@@ -609,7 +610,7 @@ public:
     {
         auto r = Pager::open({
             PREFIX,
-            store.get(),
+            storage.get(),
             &scratch,
             wal.get(),
             &state,

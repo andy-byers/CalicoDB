@@ -22,21 +22,21 @@ namespace fs = std::filesystem;
 template<class Base>
 class TestWithWalSegments : public Base {
 public:
-    [[nodiscard]] static auto get_segment_name(SegmentId id) -> std::string
+    [[nodiscard]] static auto get_segment_name(Id id) -> std::string
     {
-        return Base::PREFIX + id.to_name();
+        return Base::PREFIX + encode_segment_name(id);
     }
 
     [[nodiscard]] static auto get_segment_name(Size index) -> std::string
     {
-        return Base::PREFIX + SegmentId::from_index(index).to_name();
+        return Base::PREFIX + encode_segment_name(Id::from_index(index));
     }
 
     template<class Id>
     [[nodiscard]] auto get_segment_size(const Id &id) const -> Size
     {
         Size size {};
-        EXPECT_TRUE(expose_message(Base::store->file_size(get_segment_name(id), size)));
+        EXPECT_TRUE(expose_message(Base::storage->file_size(get_segment_name(id), size)));
         return size;
     }
 
@@ -44,7 +44,7 @@ public:
     [[nodiscard]] auto get_segment_data(const Id &id) const -> std::string
     {
         RandomReader *reader {};
-        EXPECT_TRUE(expose_message(Base::store->open_random_reader(get_segment_name(id), &reader)));
+        EXPECT_TRUE(expose_message(Base::storage->open_random_reader(get_segment_name(id), &reader)));
 
         std::string data(get_segment_size(id), '\x00');
         Span bytes {data};
@@ -60,10 +60,10 @@ using TestWithWalSegmentsOnHeap = TestWithWalSegments<TestOnHeap>;
 using TestWithWalSegmentsOnDisk = TestWithWalSegments<TestOnDisk>;
 
 //template<class Store>
-//[[nodiscard]] static auto get_file_size(const Store &store, const std::string &path) -> Size
+//[[nodiscard]] static auto get_file_size(const Store &storage, const std::string &path) -> Size
 //{
 //    Size size {};
-//    EXPECT_TRUE(expose_message(store.file_size(path, size)));
+//    EXPECT_TRUE(expose_message(storage.file_size(path, size)));
 //    return size;
 //}
 
@@ -189,7 +189,7 @@ public:
 
     WalPayloadTests()
         : image {random.get<std::string>('\x00', '\xFF', PAGE_SIZE)},
-          scratch(PAGE_SIZE * WAL_SCRATCH_SCALE, '\x00')
+          scratch(wal_scratch_size(PAGE_SIZE), '\x00')
     {}
 
     Random random {UnitTests::random_seed};
@@ -229,7 +229,7 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 
 [[nodiscard]] auto get_ids(const WalSet &c)
 {
-    std::vector<SegmentId> ids;
+    std::vector<Id> ids;
     std::transform(cbegin(c.segments()), cend(c.segments()), back_inserter(ids), [](const auto &entry) {
         return entry.first;
     });
@@ -241,10 +241,10 @@ public:
     auto add_segments(Size n)
     {
         for (Size i {}; i < n; ++i) {
-            auto id = SegmentId::from_index(i);
+            auto id = Id::from_index(i);
             set.add_segment(id);
         }
-        ASSERT_EQ(set.last(), SegmentId::from_index(n - 1));
+        ASSERT_EQ(set.last(), Id::from_index(n - 1));
     }
 
     WalSet set;
@@ -257,18 +257,18 @@ TEST_F(WalSetTests, NewCollectionState)
 
 TEST_F(WalSetTests, AddSegment)
 {
-    set.add_segment(SegmentId {1});
+    set.add_segment(Id {1});
     ASSERT_EQ(set.last().value, 1);
 }
 
-TEST_F(WalSetTests, RecordsMostRecentSegmentId)
+TEST_F(WalSetTests, RecordsMostRecentId)
 {
     add_segments(20);
-    ASSERT_EQ(set.last(), SegmentId::from_index(19));
+    ASSERT_EQ(set.last(), Id::from_index(19));
 }
 
 template<class Itr>
-[[nodiscard]] auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, SegmentId id, Size n)
+[[nodiscard]] auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, Id id, Size n)
 {
     return std::distance(begin, end) == std::ptrdiff_t(n) && std::all_of(begin, end, [&id](auto current) {
                return current.value == id.value++;
@@ -283,14 +283,14 @@ TEST_F(WalSetTests, RecordsSegmentInfoCorrectly)
     ASSERT_EQ(ids.size(), 20);
 
     const auto result = get_ids(set);
-    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(result), cend(result), SegmentId {1}, 20));
+    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(result), cend(result), Id {1}, 20));
 }
 
 TEST_F(WalSetTests, RemovesAllSegmentsFromLeft)
 {
     add_segments(20);
-    // SegmentId::from_index(20) is one past the end.
-    set.remove_before(SegmentId::from_index(20));
+    // Id::from_index(20) is one past the end.
+    set.remove_before(Id::from_index(20));
 
     const auto ids = get_ids(set);
     ASSERT_TRUE(ids.empty());
@@ -299,8 +299,8 @@ TEST_F(WalSetTests, RemovesAllSegmentsFromLeft)
 TEST_F(WalSetTests, RemovesAllSegmentsFromRight)
 {
     add_segments(20);
-    // SegmentId::null() is one before the beginning.
-    set.remove_after(SegmentId::null());
+    // Id::null() is one before the beginning.
+    set.remove_after(Id::null());
 
     const auto ids = get_ids(set);
     ASSERT_TRUE(ids.empty());
@@ -309,19 +309,19 @@ TEST_F(WalSetTests, RemovesAllSegmentsFromRight)
 TEST_F(WalSetTests, RemovesSomeSegmentsFromLeft)
 {
     add_segments(20);
-    set.remove_before(SegmentId::from_index(10));
+    set.remove_before(Id::from_index(10));
 
     const auto ids = get_ids(set);
-    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), SegmentId::from_index(10), 10));
+    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), Id::from_index(10), 10));
 }
 
 TEST_F(WalSetTests, RemovesSomeSegmentsFromRight)
 {
     add_segments(20);
-    set.remove_after(SegmentId::from_index(9));
+    set.remove_after(Id::from_index(9));
 
     const auto ids = get_ids(set);
-    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), SegmentId::from_index(0), 10));
+    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), Id::from_index(0), 10));
 }
 
 class LogReaderWriterTests : public TestWithWalSegmentsOnHeap {
@@ -336,21 +336,21 @@ public:
     {}
 
     // NOTE: This invalidates the most-recently-allocated log reader.
-    auto get_reader(SegmentId id) -> LogReader
+    auto get_reader(Id id) -> LogReader
     {
         const auto path = get_segment_name(id);
         RandomReader *temp {};
-        EXPECT_TRUE(expose_message(store->open_random_reader(path, &temp)));
+        EXPECT_TRUE(expose_message(storage->open_random_reader(path, &temp)));
         reader_file.reset(temp);
         return LogReader {*reader_file};
     }
 
     // NOTE: This invalidates the most-recently-allocated log writer.
-    auto get_writer(SegmentId id) -> LogWriter
+    auto get_writer(Id id) -> LogWriter
     {
         const auto path = get_segment_name(id);
         AppendWriter *temp {};
-        EXPECT_TRUE(expose_message(store->open_append_writer(path, &temp)));
+        EXPECT_TRUE(expose_message(storage->open_append_writer(path, &temp)));
         writer_file.reset(temp);
         return LogWriter {*writer_file, writer_tail, flushed_lsn};
     }
@@ -373,8 +373,8 @@ public:
 
     auto run_basic_test(const std::vector<std::string> &payloads) -> void
     {
-        auto writer = get_writer(SegmentId {1});
-        auto reader = get_reader(SegmentId {1});
+        auto writer = get_writer(Id {1});
+        auto reader = get_reader(Id {1});
         for (const auto &payload: payloads) {
             ASSERT_LE(payload.size(), wal_scratch_size(PAGE_SIZE) - sizeof(Id));
             write_string(writer, payload);
@@ -410,22 +410,22 @@ public:
 
 TEST_F(LogReaderWriterTests, DoesNotFlushEmptyBlock)
 {
-    auto writer = get_writer(SegmentId {1});
+    auto writer = get_writer(Id {1});
     ASSERT_TRUE(writer.flush().is_logic_error());
 
     Size file_size {};
-    ASSERT_OK(store->file_size("test/wal-1", file_size));
+    ASSERT_OK(storage->file_size("test/wal-1", file_size));
     ASSERT_EQ(file_size, 0);
 }
 
 TEST_F(LogReaderWriterTests, WritesMultipleBlocks)
 {
-    auto writer = get_writer(SegmentId {1});
+    auto writer = get_writer(Id {1});
     write_string(writer, get_large_payload());
     ASSERT_OK(writer.flush());
 
     Size file_size {};
-    ASSERT_OK(store->file_size("test/wal-1", file_size));
+    ASSERT_OK(storage->file_size("test/wal-1", file_size));
     ASSERT_EQ(file_size % writer_tail.size(), 0);
     ASSERT_GT(file_size / writer_tail.size(), 0);
 }
@@ -489,8 +489,8 @@ TEST_F(LogReaderWriterTests, HandlesEarlyFlushes)
         return random.get(4) ? get_small_payload() : get_large_payload();
     });
 
-    auto writer = get_writer(SegmentId {1});
-    auto reader = get_reader(SegmentId {1});
+    auto writer = get_writer(Id {1});
+    auto reader = get_reader(Id {1});
     for (const auto &payload: payloads) {
         ASSERT_LE(payload.size(), wal_scratch_size(PAGE_SIZE));
         write_string(writer, payload);
@@ -520,7 +520,7 @@ public:
           writer {WalWriter::Parameters{
               PREFIX,
               Span {tail},
-              store.get(),
+              storage.get(),
               &system,
               &set,
               &flushed_lsn,
@@ -542,7 +542,7 @@ public:
 TEST_F(WalWriterTests, Destroy)
 {
     ASSERT_OK(std::move(writer).destroy());
-    ASSERT_FALSE(store->file_exists(PREFIX + SegmentId::root().to_name()).is_ok());
+    ASSERT_FALSE(storage->file_exists(PREFIX + encode_segment_name(Id::root())).is_ok());
 }
 
 TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterNormalClose)
@@ -558,7 +558,7 @@ TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterNormalClose)
     ASSERT_TRUE(set.segments().empty());
 
     std::vector<std::string> children;
-    ASSERT_OK(store->get_children(ROOT, children));
+    ASSERT_OK(storage->get_children(ROOT, children));
     ASSERT_TRUE(children.empty());
 }
 
@@ -573,7 +573,7 @@ static auto test_write_until_failure(Test &test) -> void
     }
 
     ASSERT_FALSE(std::move(test.writer).destroy().is_ok());
-    assert_error_42(test.system.original_error().status);
+    assert_special_error(test.system.original_error().status);
 }
 
 template<class Test>
@@ -582,7 +582,7 @@ static auto count_segments(Test &test) -> Size
     const auto expected = test.set.segments().size();
 
     std::vector<std::string> children;
-    EXPECT_TRUE(expose_message(test.store->get_children(Test::ROOT, children)));
+    EXPECT_TRUE(expose_message(test.storage->get_children(Test::ROOT, children)));
     EXPECT_EQ(children.size(), expected);
     return expected;
 }
@@ -635,7 +635,7 @@ public:
           writer {WalWriter::Parameters{
               PREFIX,
               Span {writer_tail},
-              store.get(),
+              storage.get(),
               &system,
               &set,
               &flushed_lsn,
@@ -658,7 +658,7 @@ public:
     auto get_reader() -> WalReader
     {
         return WalReader {
-            *store,
+            *storage,
             set,
             PREFIX,
             Span {reader_tail},
@@ -848,7 +848,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterWriteError)
 
     emit_segments(5'000);
     ASSERT_TRUE(system.has_error());
-    assert_error_42(system.original_error().status);
+    assert_special_error(system.original_error().status);
     system.pop_error();
 
     auto reader = get_reader();
@@ -863,7 +863,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
     interceptors::set_open(FailOnce<3> {"test/wal-"});
 
     ASSERT_FALSE(emit_segments(5'000).is_ok());
-    assert_error_42(system.pop_error().status);
+    assert_special_error(system.pop_error().status);
 
     auto reader = get_reader();
     ASSERT_OK(reader.open());
@@ -878,7 +878,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
 ////        : cleanup {WalCleanup::Parameters{
 ////              PREFIX,
 ////              nullptr, // TODO
-////              store.get(),
+////              storage.get(),
 ////              &system,
 ////              &set,
 ////          }}
@@ -939,9 +939,9 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
 //
 //    auto SetUp() -> void override
 //    {
-//        auto r = BasicWriteAheadLog::open({
+//        auto r = WriteAheadLog::open({
 //            PREFIX,
-//            store.get(),
+//            storage.get(),
 //            &state,
 //            PAGE_SIZE,
 //            32,
@@ -1193,7 +1193,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
 ////TEST_F(WalFaultTests, FailOnFirstWrite)
 ////{
 ////    interceptors::set_write(FailOnce<0> {"test/wal-"});
-////    assert_error_42(run_operations({WalOperation::LOG}));
+////    assert_special_error(run_operations({WalOperation::LOG}));
 ////
 ////    // We never wrote anything, so the writer should have removed the segment.
 ////    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {
@@ -1207,7 +1207,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
 ////TEST_F(WalFaultTests, FailOnFirstOpen)
 ////{
 ////    interceptors::set_open(FailOnce<0> {"test/wal-"});
-////    assert_error_42(run_operations({WalOperation::LOG}));
+////    assert_special_error(run_operations({WalOperation::LOG}));
 ////
 ////    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {
 ////        return corruption("");
@@ -1220,7 +1220,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
 ////TEST_F(WalFaultTests, FailOnNthOpen)
 ////{
 ////    interceptors::set_open(FailOnce<10> {"test/wal-"});
-////    assert_error_42(run_operations(std::vector<WalOperation>(1'000, WalOperation::LOG)));
+////    assert_special_error(run_operations(std::vector<WalOperation>(1'000, WalOperation::LOG)));
 ////
 ////    // We should have full records in the WAL, so these tests will work.
 ////    roll_forward(false);
@@ -1230,7 +1230,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
 ////TEST_F(WalFaultTests, FailOnNthWrite)
 ////{
 ////    interceptors::set_write(FailOnce<10> {"test/wal-"});
-////    assert_error_42(run_operations(std::vector<WalOperation>(1'000, WalOperation::LOG)));
+////    assert_special_error(run_operations(std::vector<WalOperation>(1'000, WalOperation::LOG)));
 ////
 ////    // We may have a partial record at the end. The WAL will stop short of it.
 ////    roll_forward(false);

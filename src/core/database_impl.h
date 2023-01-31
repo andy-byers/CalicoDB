@@ -2,12 +2,13 @@
 #define CALICO_DB_DATABASE_IMPL_H
 
 #include "calico/database.h"
-#include "spdlog/sinks/basic_file_sink.h"
-#include "spdlog/spdlog.h"
+#include "recovery.h"
+#include <unordered_set>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/spdlog.h>
 #include "tree/header.h"
 #include "utils/expected.hpp"
-#include "wal/helpers.h"
-#include <unordered_set>
+#include "wal/wal.h"
 
 namespace Calico {
 

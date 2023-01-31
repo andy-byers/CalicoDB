@@ -28,15 +28,11 @@ public:
         CALICO_EXPECT_NE(m_storage, nullptr);
         CALICO_EXPECT_NE(system, nullptr);
         CALICO_EXPECT_NE(m_set, nullptr);
-
-        (void)m_limit;
     }
 
     auto cleanup() -> void;
 
 private:
-    [[nodiscard]] auto open_reader() -> tl::expected<WalReader, Status>;
-
     std::string m_prefix;
     std::atomic<Lsn> *m_limit {};
     Storage *m_storage {};

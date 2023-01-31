@@ -2,7 +2,8 @@
 #include "calico/statistics.h"
 #include "database_impl.h"
 #include "pager/pager.h"
-#include "tree/bplus_tree.h"
+#include "tree/tree.h"
+#include "wal/wal.h"
 
 namespace Calico {
 

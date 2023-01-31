@@ -67,7 +67,7 @@ public:
 
 private:
     [[nodiscard]] auto advance_segment() -> Status;
-    [[nodiscard]] auto open_segment(SegmentId) -> Status;
+    [[nodiscard]] auto open_segment(Id) -> Status;
     auto close_segment() -> Status;
 
     std::string m_prefix;
@@ -77,7 +77,7 @@ private:
     Storage *m_storage {};
     System *system {};
     WalSet *m_set {};
-    SegmentId m_current;
+    Id m_current;
     Span m_tail;
     Size m_wal_limit {};
 };

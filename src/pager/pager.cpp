@@ -5,6 +5,7 @@
 #include "tree/header.h"
 #include "utils/system.h"
 #include "utils/types.h"
+#include "wal/wal.h"
 #include <thread>
 
 namespace Calico {
@@ -101,8 +102,6 @@ auto Pager::set_recovery_lsn(Lsn lsn) -> void
 
 auto Pager::flush(Lsn target_lsn) -> Status
 {
-    CALICO_EXPECT_EQ(m_framer.ref_sum(), 0);
-
     // An LSN of NULL causes all pages to be flushed.
     if (target_lsn.is_null()) {
         target_lsn = MAX_ID;
@@ -224,14 +223,11 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
         entry.dirty_token = m_dirty.insert(page.id(), lsn);
     }
 
-    if (system->has_xact) {
-        // Don't write a full image record to the WAL if we already have one for this page during this transaction.
-        if (lsn <= system->commit_lsn.load()) {
-            const auto next_lsn = m_wal->current_lsn();
-            m_wal->log(encode_full_image_payload(
-                next_lsn, page.id(), page.view(0), *m_scratch->get()));
-            write_page_lsn(page, next_lsn);
-        }
+    if (system->has_xact && lsn <= system->commit_lsn) {
+        const auto next_lsn = m_wal->current_lsn();
+        m_wal->log(encode_full_image_payload(
+            next_lsn, page.id(), page.view(0), *m_scratch->get()));
+        write_page_lsn(page, next_lsn);
     }
 }
 
@@ -316,8 +312,8 @@ auto Pager::release(Page page) -> void
     m_framer.unref(entry.frame_index, std::move(page));
 
     if (entry.dirty_token) {
-        const auto checkpoint = (*entry.dirty_token)->record_lsn.value;
-        const auto cutoff = system->commit_lsn.load().value;
+        const auto checkpoint = (*entry.dirty_token)->record_lsn;
+        const auto cutoff = system->commit_lsn;
 
         if (checkpoint <= cutoff) {
             auto s = m_framer.write_back(entry.frame_index);

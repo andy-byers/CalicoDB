@@ -2,8 +2,6 @@
 #define CALICO_UTILS_WORKER_H
 
 #include "utils/queue.h"
-#include "wal/helpers.h"
-#include "wal/wal.h"
 #include <optional>
 #include <thread>
 
@@ -58,8 +56,9 @@ private:
     {
         for (; ; ) {
             auto event = state->queue.dequeue();
-            if (!event.has_value())
+            if (!event.has_value()) {
                 break;
+            }
 
             state->task(std::move(event->value));
 

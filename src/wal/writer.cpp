@@ -25,8 +25,9 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
         if (can_fit_some) {
             WalRecordHeader rhs;
 
-            if (!can_fit_all)
+            if (!can_fit_all) {
                 rhs = split_record(lhs, data, space_remaining);
+            }
 
             // We must have room for the whole header and at least 1 payload byte.
             write_wal_record_header(rest, lhs);
@@ -37,16 +38,20 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
             data.advance(lhs.size);
             rest.advance(lhs.size);
 
-            if (!can_fit_all)
+            if (!can_fit_all) {
                 lhs = rhs;
+            }
 
             // The new value of m_offset must be less than or equal to the start of the next block. If it is exactly
             // at the start of the next block, we should fall through and read it into the tail buffer.
-            if (m_offset != m_tail.size()) continue;
+            if (m_offset != m_tail.size()) {
+                continue;
+            }
         }
         CALICO_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::SIZE);
-        auto s = flush();
-        if (!s.is_ok()) return s;
+        if (auto s = flush(); !s.is_ok()) {
+            return s;
+        }
     }
     // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
     // to be all the way on disk.
@@ -57,8 +62,9 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
 auto LogWriter::flush() -> Status
 {
     // Already flushed.
-    if (m_offset == 0)
+    if (m_offset == 0) {
         return logic_error("could not flush: nothing to flush");
+    }
 
     // Clear unused bytes at the end of the tail buffer.
     mem_clear(m_tail.range(m_offset));
@@ -89,17 +95,19 @@ WalWriter::WalWriter(const Parameters &param)
 
     // First segment file gets created now, but is not registered in the WAL set until the writer
     // is finished with it.
-    CALICO_ERROR_IF(open_segment(++m_set->last()));
+    CALICO_ERROR_IF(open_segment({m_set->last().value + 1}));
 }
 
 auto WalWriter::write(WalPayloadIn payload) -> void
 {
-    if (system->has_error())
+    if (system->has_error()) {
         return;
+    }
 
     CALICO_ERROR_IF(m_writer->write(payload));
-    if (m_writer->block_count() >= m_wal_limit)
+    if (m_writer->block_count() >= m_wal_limit) {
         CALICO_ERROR_IF(advance_segment());
+    }
 }
 
 auto WalWriter::flush() -> void
@@ -120,11 +128,11 @@ auto WalWriter::destroy() && -> Status
     return close_segment();
 }
 
-auto WalWriter::open_segment(SegmentId id) -> Status
+auto WalWriter::open_segment(Id id) -> Status
 {
     CALICO_EXPECT_EQ(m_writer, std::nullopt);
     AppendWriter *file;
-    auto s = m_storage->open_append_writer(m_prefix + id.to_name(), &file);
+    auto s = m_storage->open_append_writer(m_prefix + encode_segment_name(id), &file);
     if (s.is_ok()) {
         m_file.reset(file);
         m_writer = LogWriter {*m_file, m_tail, *m_flushed_lsn};
@@ -136,8 +144,9 @@ auto WalWriter::open_segment(SegmentId id) -> Status
 auto WalWriter::close_segment() -> Status
 {
     // We must have failed while opening the segment file.
-    if (!m_writer)
+    if (!m_writer) {
         return logic_error("segment file is already closed");
+    }
 
     auto s = m_writer->flush();
     bool is_empty {};
@@ -146,17 +155,18 @@ auto WalWriter::close_segment() -> Status
     // that the whole segment is empty.
     if (!s.is_ok()) {
         is_empty = m_writer->block_count() == 0;
-        if (s.is_logic_error())
+        if (s.is_logic_error()) {
             s = ok();
+        }
     }
     m_writer.reset();
     m_file.reset();
 
-    auto id = std::exchange(m_current, SegmentId::null());
+    auto id = std::exchange(m_current, Id::null());
 
     // We want to do this part, even if the flush failed.
     if (is_empty) {
-        auto t = m_storage->remove_file(m_prefix + id.to_name());
+        auto t = m_storage->remove_file(m_prefix + encode_segment_name(id));
         s = s.is_ok() ? t : s;
     } else {
         m_set->add_segment(id);
@@ -168,8 +178,7 @@ auto WalWriter::advance_segment() -> Status
 {
     auto s = close_segment();
     if (s.is_ok()) {
-        auto id = ++m_set->last();
-        return open_segment(id);
+        return open_segment(Id {m_set->last().value + 1});
     }
     return s;
 }

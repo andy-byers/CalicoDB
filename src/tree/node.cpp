@@ -1,4 +1,6 @@
 #include "node.h"
+#include <algorithm>
+#include <numeric>
 #include "pager/delta.h"
 #include "utils/encoding.h"
 
@@ -229,8 +231,9 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip_index) -> void
     std::vector<PageSize> ptrs(n);
 
     for (Size index {}; index < n; ++index) {
-        if (index == to_skip)
+        if (index == to_skip) {
             continue;
+        }
         const auto offset = m_node->get_slot(index);
         const auto size = cell_size_direct(*m_node, offset);
 
@@ -239,7 +242,9 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip_index) -> void
         ptrs[index] = end;
     }
     for (Size index {}; index < n; ++index) {
-        if (index == to_skip) continue;
+        if (index == to_skip) {
+            continue;
+        }
         m_node->set_slot(index, ptrs[index]);
     }
     const auto offset = cell_area_offset(*m_node);
@@ -638,7 +643,7 @@ auto read_child_id_at(const Node &node, Size offset) -> Id
 
 auto write_child_id_at(Node &node, Size offset, Id child_id) -> void
 {
-    put_u64(node.page.data() + offset, child_id.value);
+    put_u64(node.page.span(offset, sizeof(Id)), child_id.value);
 }
 
 auto read_key(const Node &node, Size index) -> Slice

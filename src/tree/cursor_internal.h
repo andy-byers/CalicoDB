@@ -1,11 +1,11 @@
 #ifndef CALICO_TREE_CURSOR_INTERNAL_H
 #define CALICO_TREE_CURSOR_INTERNAL_H
 
-#include <calico/cursor.h>
-#include "bplus_tree.h"
 #include "node.h"
-#include <functional>
+#include "tree.h"
 #include "utils/expected.hpp"
+#include <calico/cursor.h>
+#include <functional>
 #include <utils/types.h>
 
 namespace Calico {

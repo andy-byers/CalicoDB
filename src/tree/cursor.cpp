@@ -1,6 +1,6 @@
 #include "cursor_internal.h"
-#include "bplus_tree.h"
 #include "node.h"
+#include "tree.h"
 
 namespace Calico {
 

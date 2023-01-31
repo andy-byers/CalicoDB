@@ -7,12 +7,11 @@
 #include "recovery.h"
 #include "storage/helpers.h"
 #include "storage/posix_storage.h"
-#include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
 #include "tree/header.h"
-#include "utils/crc.h"
+#include "tree/tree.h"
 #include "utils/system.h"
-#include "wal/basic_wal.h"
+#include "wal/wal.h"
 
 namespace Calico {
 
@@ -114,7 +113,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
             wal_prefix += '/';
         }
 
-        auto r = BasicWriteAheadLog::open({
+        auto r = WriteAheadLog::open({
             wal_prefix,
             m_store,
             system.get(),
@@ -178,7 +177,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     }
     m_log->info("pager recovery lsn is {}", pager->recovery_lsn().value);
     m_log->info("wal flushed lsn is {}", wal->flushed_lsn().value);
-    m_log->info("commit lsn is {}", system->commit_lsn.load().value);
+    m_log->info("commit lsn is {}", system->commit_lsn.value);
     return s;
 }
 
@@ -351,23 +350,22 @@ auto DatabaseImpl::atomic_erase(const Slice &key) -> Status
 
 auto DatabaseImpl::commit() -> Status
 {
+    if (!system->has_xact) {
+        return logic_error("transaction has not been started");
+    }
     CALICO_ERROR_IF(do_commit());
     return status();
 }
 
 auto DatabaseImpl::do_commit() -> Status
 {
-    const auto last_commit_lsn = system->commit_lsn.load();
-
-    if (!system->has_xact) {
-        return logic_error("transaction has not been started");
-    }
-
+    CALICO_EXPECT_TRUE(system->has_xact);
     CALICO_TRY_S(status());
     CALICO_TRY_S(save_state());
 
     // Write a commit record to the WAL.
     const auto lsn = wal->current_lsn();
+    m_log->info("commit at lsn {}", lsn.value);
     wal->log(encode_commit_payload(lsn, *m_scratch->get()));
     wal->advance();
 
@@ -375,9 +373,10 @@ auto DatabaseImpl::do_commit() -> Status
     // System object at this point.
     CALICO_TRY_S(status());
 
-    CALICO_TRY_S(pager->flush(last_commit_lsn));
+    CALICO_TRY_S(pager->flush(system->commit_lsn));
     wal->cleanup(pager->recovery_lsn());
 
+    m_log->info("commit successful");
     system->commit_lsn = lsn;
     system->has_xact = false;
     return ok();
@@ -385,23 +384,17 @@ auto DatabaseImpl::do_commit() -> Status
 
 auto DatabaseImpl::abort() -> Status
 {
-    // m_log->trace("abort");
-    CALICO_ERROR_IF(do_abort());
-
-    auto s = status();
-    if (s.is_ok()) {
-        // m_log->info("abort {}", system->commit_lsn.load().value);
-        CALICO_EXPECT_LE(system->commit_lsn.load(), wal->flushed_lsn());
+    if (!system->has_xact) {
+        return logic_error("transaction has not been started");
     }
-    return s;
+    CALICO_ERROR_IF(do_abort());
+    return status();
 }
 
 auto DatabaseImpl::do_abort() -> Status
 {
-    if (!system->has_xact) {
-        return logic_error(
-            "could not abort: a transaction is not active (start a transaction and try again)");
-    }
+    CALICO_EXPECT_TRUE(system->has_xact);
+    m_log->info("roll back to lsn {}", system->commit_lsn.value);
 
     system->has_xact = false;
     wal->advance();
@@ -410,6 +403,7 @@ auto DatabaseImpl::do_abort() -> Status
     CALICO_TRY_S(m_recovery->start_abort());
     CALICO_TRY_S(load_state());
     CALICO_TRY_S(m_recovery->finish_abort());
+    m_log->info("abort successful");
     return ok();
 }
 
@@ -623,11 +617,15 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
 
     if (header.page_size < MINIMUM_PAGE_SIZE) {
         return tl::make_unexpected(corruption(
-            "header page size {} is too small (must be greater than or equal to {})", header.page_size));
+            "header page size {} is too small (must be greater than or equal to {})", header.page_size, MINIMUM_PAGE_SIZE));
+    }
+    if (header.page_size > MAXIMUM_PAGE_SIZE) {
+        return tl::make_unexpected(corruption(
+            "header page size {} is too large (must be less than or equal to {})", header.page_size, MAXIMUM_PAGE_SIZE));
     }
     if (!is_power_of_two(header.page_size)) {
         return tl::make_unexpected(corruption(
-            "header page size {} is invalid (must either be 0 or a power of 2)", header.page_size));
+            "header page size {} is invalid (must be a power of 2)", header.page_size));
     }
     return InitialState {header, !exists};
 }

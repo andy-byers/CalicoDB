@@ -3,6 +3,7 @@
 
 #include "pager/delta.h"
 #include "tree/header.h"
+#include "utils/encoding.h"
 #include "utils/types.h"
 
 namespace Calico {

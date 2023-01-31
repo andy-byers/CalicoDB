@@ -54,8 +54,6 @@ private:
     Random random {123};
 };
 
-class BPlusTree__;
-
 namespace tools {
 
     template<class T>
@@ -142,30 +140,30 @@ namespace tools {
         return true;
     }
 
-    inline auto write_file(Storage &store, const std::string &path, Slice in) -> void
+    inline auto write_file(Storage &storage, const std::string &path, Slice in) -> void
     {
         RandomEditor *file;
-        CALICO_EXPECT_TRUE(store.open_random_editor(path, &file).is_ok());
+        CALICO_EXPECT_TRUE(storage.open_random_editor(path, &file).is_ok());
         CALICO_EXPECT_TRUE(file->write(in, 0).is_ok());
         delete file;
     }
 
-    inline auto append_file(Storage &store, const std::string &path, Slice in) -> void
+    inline auto append_file(Storage &storage, const std::string &path, Slice in) -> void
     {
         AppendWriter *file;
-        CALICO_EXPECT_TRUE(store.open_append_writer(path, &file).is_ok());
+        CALICO_EXPECT_TRUE(storage.open_append_writer(path, &file).is_ok());
         CALICO_EXPECT_TRUE(file->write(in).is_ok());
         delete file;
     }
 
-    inline auto read_file(Storage &store, const std::string &path) -> std::string
+    inline auto read_file(Storage &storage, const std::string &path) -> std::string
     {
         RandomReader *file;
         std::string out;
         Size size;
 
-        CALICO_EXPECT_TRUE(store.file_size(path, size).is_ok());
-        CALICO_EXPECT_TRUE(store.open_random_reader(path, &file).is_ok());
+        CALICO_EXPECT_TRUE(storage.file_size(path, size).is_ok());
+        CALICO_EXPECT_TRUE(storage.open_random_reader(path, &file).is_ok());
         out.resize(size);
 
         Span temp {out};
@@ -175,6 +173,45 @@ namespace tools {
         delete file;
         return out;
     }
+
+    [[nodiscard]]
+    inline auto snapshot(Storage &storage, Size page_size) -> std::string
+    {
+        static constexpr Size CODE {0x1234567887654321};
+
+        Size file_size;
+        CALICO_EXPECT_TRUE(storage.file_size("test/data", file_size).is_ok());
+
+        std::unique_ptr<RandomReader> reader;
+        {
+            RandomReader *temp;
+            expect_ok(storage.open_random_reader("test/data", &temp));
+            reader.reset(temp);
+        }
+
+        std::string buffer(file_size, '\x00');
+        auto read_size = file_size;
+        expect_ok(reader->read(buffer.data(), read_size, 0));
+        CALICO_EXPECT_EQ(read_size, file_size);
+
+        CALICO_EXPECT_EQ(file_size % page_size, 0);
+
+        auto offset = FileHeader::SIZE;
+        for (Size i {}; i < file_size / page_size; ++i) {
+            put_u64(buffer.data() + i*page_size + offset, CODE);
+            offset = 0;
+        }
+
+        // Clear header fields that might be inconsistent, despite identical database contents.
+        Page root {Id::root(),{buffer.data(), page_size}, true};
+        FileHeader header {root};
+        header.header_crc = 0;
+        header.recovery_lsn.value = CODE;
+        header.write(root);
+
+        return buffer;
+    }
+
 
 } // tools
 
@@ -306,7 +343,7 @@ struct formatter<Cco::Options> {
         out += fmt::format("page_size: {}, ", options.page_size);
         out += fmt::format("page_cache_size: {}, ", options.page_cache_size);
         out += fmt::format("log_level: {}, ", static_cast<int>(options.log_level));
-        out += fmt::format("store: {}, ", static_cast<void*>(options.storage));
+        out += fmt::format("storage: {}, ", static_cast<void*>(options.storage));
         return format_to(ctx.out(), "Options {}}}", out);
     }
 };

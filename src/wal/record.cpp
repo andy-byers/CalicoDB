@@ -71,10 +71,12 @@ static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> S
 
     } else {
         CALICO_EXPECT_EQ(lhs.type, FIRST_TYPE);
-        if (lhs.crc != rhs.crc)
+        if (lhs.crc != rhs.crc) {
             return corruption("cannot merge WAL records: fragments do not belong to the same logical record");
-        if (rhs.type == LAST_TYPE)
+        }
+        if (rhs.type == LAST_TYPE) {
             lhs.type = WalRecordHeader::FULL;
+        }
     }
     lhs.size = static_cast<std::uint16_t>(lhs.size + rhs.size);
     return ok();
@@ -89,7 +91,6 @@ auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> St
 {
     return merge_records<false>(rhs, lhs);
 }
-
 
 static auto encode_payload_type(Span out, XactPayloadType type)
 {

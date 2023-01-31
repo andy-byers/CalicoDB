@@ -18,17 +18,17 @@ namespace UnitTests {
 
 template<class Base, class Store>
 [[nodiscard]]
-auto open_blob(Store &store, const std::string &name) -> std::unique_ptr<Base>
+auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
 {
     auto s = ok();
     Base *temp {};
 
     if constexpr (std::is_same_v<RandomReader, Base>) {
-        s = store.open_random_reader(name, &temp);
+        s = storage.open_random_reader(name, &temp);
     } else if constexpr (std::is_same_v<RandomEditor, Base>) {
-        s = store.open_random_editor(name, &temp);
+        s = storage.open_random_editor(name, &temp);
     } else if constexpr (std::is_same_v<AppendWriter, Base>) {
-        s = store.open_append_writer(name, &temp);
+        s = storage.open_append_writer(name, &temp);
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }

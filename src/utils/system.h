@@ -40,10 +40,10 @@ struct Error {
 class System {
 public:
     // True if we are currently in a transaction, false otherwise.
-    std::atomic<bool> has_xact {};
+    bool has_xact {};
 
     // LSN of the last commit record written to the WAL.
-    std::atomic<Id> commit_lsn {};
+    Lsn commit_lsn {};
 
     System(const std::string &prefix, const Options &options);
     auto create_log(const std::string_view &name) const -> LogPtr;

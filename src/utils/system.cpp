@@ -73,8 +73,9 @@ System::System(const std::string &prefix, const Options &options)
     m_sink->set_level(level);
     m_log = create_log("system");
 
-    if (!s.is_ok())
+    if (!s.is_ok()) {
         push_error(Error::ERROR, s);
+    }
 }
 
 auto System::create_log(const std::string_view &name) const -> LogPtr
@@ -111,8 +112,9 @@ auto System::pop_error() -> Error
     CALICO_EXPECT_FALSE(m_errors.empty());
     auto error = std::move(m_errors.back());
     m_errors.pop_back();
-    if (m_errors.empty())
+    if (m_errors.empty()) {
         m_has_error.store(false);
+    }
     return error;
 }
 

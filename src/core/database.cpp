@@ -4,8 +4,8 @@
 #include "calico/transaction.h"
 #include "database_impl.h"
 #include "pager/pager.h"
-#include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
+#include "tree/tree.h"
 #include "utils/system.h"
 
 namespace Calico {

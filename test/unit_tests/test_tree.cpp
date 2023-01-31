@@ -1,8 +1,8 @@
 #include "pager/pager.h"
-#include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
 #include "tree/node.h"
 #include "tree/overflow.h"
+#include "tree/tree.h"
 #include "unit_tests.h"
 #include "wal/helpers.h"
 #include <gtest/gtest.h>
@@ -566,7 +566,7 @@ public:
 
         auto r = Pager::open({
             PREFIX,
-            store.get(),
+            storage.get(),
             &log_scratch,
             &wal,
             &system,

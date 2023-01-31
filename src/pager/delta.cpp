@@ -1,5 +1,6 @@
 #include "delta.h"
 #include <algorithm>
+#include <numeric>
 
 namespace Calico {
 

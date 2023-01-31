@@ -1,7 +1,7 @@
 #ifndef CALICO_PAGE_DELTA_H
 #define CALICO_PAGE_DELTA_H
 
-#include "core/recovery.h"
+#include <vector>
 #include "utils/expect.h"
 
 namespace Calico {

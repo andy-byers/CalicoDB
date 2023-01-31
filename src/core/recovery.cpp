@@ -17,6 +17,18 @@ static auto apply_redo(Page &page, const DeltaDescriptor &deltas)
     }
 }
 
+template<class Descriptor, class Callback>
+static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
+{
+    if (auto page = pager.acquire(descriptor.pid)) {
+        callback(*page);
+        pager.release(std::move(*page));
+        return ok();
+    } else {
+        return page.error();
+    }
+}
+
 #define ENSURE_NO_XACT(primary) \
     do { \
         if (system->has_xact) { \
@@ -28,10 +40,11 @@ static auto apply_redo(Page &page, const DeltaDescriptor &deltas)
 auto Recovery::start_abort() -> Status
 {
     ENSURE_NO_XACT("cannot start abort");
+    m_log->info("rolling back from lsn {}", m_wal->current_lsn().value);
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
-    return m_wal->roll_backward(system->commit_lsn.load(), [this](auto payload) {
+    return m_wal->roll_backward(system->commit_lsn, [this](auto payload) {
         auto decoded = decode_payload(payload);
 
         if (std::holds_alternative<std::monostate>(decoded)) {
@@ -40,13 +53,10 @@ auto Recovery::start_abort() -> Status
 
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
-            auto page = m_pager->acquire(image.pid);
-            if (!page.has_value()) {
-                return page.error();
-            }
-            m_pager->upgrade(*page);
-            apply_undo(*page, image);
-            m_pager->release(std::move(*page));
+            CALICO_TRY_S(with_page(*m_pager, image, [this, &image](auto &page) {
+                m_pager->upgrade(page);
+                apply_undo(page, image);
+            }));
         }
         return ok();
     });
@@ -56,7 +66,9 @@ auto Recovery::finish_abort() -> Status
 {
     ENSURE_NO_XACT("cannot finish abort");
     CALICO_TRY_S(m_pager->flush({}));
-    return m_wal->truncate(system->commit_lsn);
+    CALICO_TRY_S(m_wal->truncate(system->commit_lsn));
+    m_log->info("rolled back to lsn {}", system->commit_lsn.value);
+    return ok();
 }
 
 auto Recovery::start_recovery() -> Status
@@ -75,30 +87,24 @@ auto Recovery::start_recovery() -> Status
         last_lsn = payload.lsn();
 
         if (std::holds_alternative<CommitDescriptor>(decoded)) {
-            system->commit_lsn.store(payload.lsn());
+            system->commit_lsn = payload.lsn();
         } else if (std::holds_alternative<DeltaDescriptor>(decoded)) {
             const auto delta = std::get<DeltaDescriptor>(decoded);
-            auto page = m_pager->acquire(delta.pid);
-            if (!page.has_value()) {
-                return page.error();
-            }
-            if (delta.lsn > read_page_lsn(*page)) {
-                m_pager->upgrade(*page);
-                apply_redo(*page, delta);
-            }
-            m_pager->release(std::move(*page));
+            CALICO_TRY_S(with_page(*m_pager, delta, [this, &delta](auto &page) {
+                if (delta.lsn > read_page_lsn(page)) {
+                    m_pager->upgrade(page);
+                    apply_redo(page, delta);
+                }
+            }));
         } else if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             // This is not necessary in most cases, but should help with some kinds of corruption.
             const auto image = std::get<FullImageDescriptor>(decoded);
-            auto page = m_pager->acquire(image.pid);
-            if (!page.has_value()) {
-                return page.error();
-            }
-            if (image.lsn > read_page_lsn(*page)) {
-                m_pager->upgrade(*page);
-                apply_undo(*page, image);
-            }
-            m_pager->release(std::move(*page));
+            CALICO_TRY_S(with_page(*m_pager, image, [this, &image](auto &page) {
+                if (image.lsn > read_page_lsn(page)) {
+                    m_pager->upgrade(page);
+                    apply_undo(page, image);
+                }
+            }));
         } else {
             return corruption("unrecognized payload type");
         }
@@ -114,23 +120,24 @@ auto Recovery::start_recovery() -> Status
 
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
-            auto page = m_pager->acquire(image.pid);
-            if (!page.has_value()) {
-                return page.error();
-            }
-            m_pager->upgrade(*page);
-            apply_undo(*page, image);
-            m_pager->release(std::move(*page));
+            CALICO_TRY_S(with_page(*m_pager, image, [this, &image](auto &page) {
+                m_pager->upgrade(page);
+                apply_undo(page, image);
+            }));
         }
         return ok();
     };
+    m_log->info("rolling forward from lsn {}", m_pager->recovery_lsn().value);
 
     // Apply updates that are in the WAL but not the database.
     CALICO_TRY_S(m_wal->roll_forward(m_pager->recovery_lsn(), redo));
+    m_log->info("rolled forward to lsn {}", last_lsn.value);
 
     // Reached the end of the WAL, but didn't find a commit record. Undo updates until we reach the most-recent commit.
-    if (const auto commit_lsn = system->commit_lsn.load(); last_lsn != commit_lsn) {
-        return m_wal->roll_backward(commit_lsn, undo);
+    if (last_lsn != system->commit_lsn) {
+        m_log->warn("missing commit record: rolling backward");
+        CALICO_TRY_S(m_wal->roll_backward(system->commit_lsn, undo));
+        m_log->info("rolled backward to lsn {}", system->commit_lsn.value);
     }
     return ok();
 }

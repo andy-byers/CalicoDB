@@ -4,6 +4,9 @@
 #include "calico/calico.h"
 #include "calico/storage.h"
 #include "pager/pager.h"
+#include "wal/cleanup.h"
+#include "wal/writer.h"
+#include "wal/wal.h"
 #include "random.h"
 #include <filesystem>
 #include <mutex>
@@ -12,10 +15,10 @@
 
 namespace Calico {
 
-using ReadInterceptor = std::function<Status(const std::string&, Span &, Size)>;
-using WriteInterceptor = std::function<Status(const std::string&, Slice, Size)>;
-using OpenInterceptor = std::function<Status(const std::string&)>;
-using SyncInterceptor = std::function<Status(const std::string&)>;
+using ReadInterceptor = std::function<Status(const std::string &, Span &, Size)>;
+using WriteInterceptor = std::function<Status(const std::string &, Slice, Size)>;
+using OpenInterceptor = std::function<Status(const std::string &)>;
+using SyncInterceptor = std::function<Status(const std::string &)>;
 
 namespace interceptors {
     auto set_read(ReadInterceptor callback) -> void;
@@ -31,9 +34,15 @@ namespace interceptors {
     auto reset() -> void;
 } // namespace interceptors
 
-inline auto assert_error_42(const Status &s)
+[[nodiscard]]
+inline auto special_error()
 {
-    if (!s.is_system_error() || s.what().to_string() != "42") {
+    return system_error("42");
+}
+
+inline auto assert_special_error(const Status &s)
+{
+    if (!s.is_system_error() || s.what() != special_error().what()) {
         fmt::print(stderr, "error: unexpected {} status: {}", get_status_name(s), s.is_ok() ? "NULL" : s.what().to_string());
         std::exit(EXIT_FAILURE);
     }
@@ -210,12 +219,10 @@ public:
     auto operator()(const std::string &path, ...) -> Status
     {
         if (Slice {path}.starts_with(m_prefix)) {
-            auto status = m_pattern[m_index++] == 0
-                ? m_error : ok();
-
-            if (m_index == m_pattern.size())
+            auto status = !m_pattern[m_index++] ? m_error : ok();
+            if (m_index == m_pattern.size()) {
                 m_index = Reset {}(m_index);
-
+            }
             return status;
         }
         return ok();
@@ -231,6 +238,7 @@ private:
 
 class DisabledWriteAheadLog: public WriteAheadLog {
 public:
+    DisabledWriteAheadLog() = default;
     ~DisabledWriteAheadLog() override = default;
 
     [[nodiscard]]

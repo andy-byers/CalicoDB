@@ -27,8 +27,9 @@ public:
         m_full_cv.wait(lock, [this] {
             return !is_full() || m_is_finished;
         });
-        if (m_is_finished)
+        if (m_is_finished) {
             return false;
+        }
         m_queue.push_back(std::forward<U>(u));
         lock.unlock();
 
@@ -59,8 +60,9 @@ public:
     auto try_dequeue() -> std::optional<T>
     {
         std::unique_lock lock {m_mu};
-        if (m_queue.empty())
+        if (m_queue.empty()) {
             return std::nullopt;
+        }
         auto t = std::move(m_queue.front());
         m_queue.pop_front();
         lock.unlock();

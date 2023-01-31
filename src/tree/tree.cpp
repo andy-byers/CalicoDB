@@ -1,4 +1,4 @@
-#include "bplus_tree.h"
+#include "tree.h"
 #include "overflow.h"
 #include "pager/pager.h"
 #include "utils/utils.h"
@@ -144,22 +144,22 @@ public:
 
     static auto lowest(BPlusTree &tree) -> tl::expected<Node, Status>
     {
-        CALICO_NEW_R(node, BPlusTreeInternal::acquire_node(tree, Id::root()));
+        CALICO_NEW_R(node, acquire_node(tree, Id::root()));
         while (!node.header.is_external) {
             const auto next_id = read_child_id(node, 0);
-            BPlusTreeInternal::release_node(tree, std::move(node));
-            CALICO_PUT_R(node, BPlusTreeInternal::acquire_node(tree, next_id));
+            release_node(tree, std::move(node));
+            CALICO_PUT_R(node, acquire_node(tree, next_id));
         }
         return node;
     }
 
     static auto highest(BPlusTree &tree) -> tl::expected<Node, Status>
     {
-        CALICO_NEW_R(node, BPlusTreeInternal::acquire_node(tree, Id::root()));
+        CALICO_NEW_R(node, acquire_node(tree, Id::root()));
         while (!node.header.is_external) {
             const auto next_id = node.header.next_id;
-            BPlusTreeInternal::release_node(tree, std::move(node));
-            CALICO_PUT_R(node, BPlusTreeInternal::acquire_node(tree, next_id));
+            release_node(tree, std::move(node));
+            CALICO_PUT_R(node, acquire_node(tree, next_id));
         }
         return node;
     }
@@ -933,6 +933,5 @@ auto BPlusTree::TEST_check_nodes() -> void
         }
     });
 }
-
 
 } // namespace Calico

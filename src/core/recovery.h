@@ -1,10 +1,6 @@
 #ifndef CALICO_CORE_TRANSACTION_LOG_H
 #define CALICO_CORE_TRANSACTION_LOG_H
 
-#include "calico/slice.h"
-#include "utils/encoding.h"
-#include "utils/system.h"
-#include "utils/types.h"
 #include "wal/wal.h"
 #include <optional>
 #include <variant>

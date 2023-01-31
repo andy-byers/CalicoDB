@@ -1,103 +1,52 @@
 #ifndef CALICO_WAL_RECORD_H
 #define CALICO_WAL_RECORD_H
 
+#include "calico/storage.h"
 #include "pager/delta.h"
-#include "spdlog/fmt/fmt.h"
+#include "utils/expected.hpp"
 #include "utils/encoding.h"
+#include "utils/scratch.h"
 #include "utils/types.h"
-#include "wal.h"
+#include <algorithm>
+#include <map>
+#include <mutex>
 #include <optional>
+#include <spdlog/fmt/fmt.h>
+#include <variant>
 
 namespace Calico {
 
 static constexpr auto WAL_PREFIX = "wal-";
-static constexpr Size WAL_SCRATCH_SCALE {3};
 static constexpr Size WAL_BLOCK_SCALE {2};
 
-struct SegmentId: public Id {
-    constexpr SegmentId() noexcept = default;
+[[nodiscard]]
+inline auto decode_segment_name(Slice name) -> Id
+{
+    static constexpr Size PREFIX_SIZE {std::char_traits<Byte>::length(WAL_PREFIX)};
 
-    constexpr explicit SegmentId(Size v) noexcept
-        : Id {v}
-    {}
-
-    constexpr explicit SegmentId(Id id) noexcept
-        : Id {id}
-    {}
-
-    [[nodiscard]]
-    static auto from_index(size_t index) noexcept -> SegmentId
-    {
-        return SegmentId {Id::from_index(index)};
+    if (name.size() <= PREFIX_SIZE) {
+        return Id::null();
     }
 
-    [[nodiscard]]
-    static auto from_name(Slice name) -> SegmentId
-    {
-        static constexpr Size PREFIX_SIZE {std::char_traits<char>::length(WAL_PREFIX)};
+    name.advance(PREFIX_SIZE);
 
-        if (name.size() <= PREFIX_SIZE)
-            return SegmentId::null();
+    // Don't call std::stoul() if it's going to throw an exception.
+    const auto is_valid = std::all_of(name.data(), name.data() + name.size(), [](auto c) {
+        return std::isdigit(c);
+    });
 
-        auto digits = name.advance(PREFIX_SIZE);
-
-        // Don't call std::stoul() if it's going to throw an exception.
-        const auto is_valid = std::all_of(digits.data(), digits.data() + digits.size(), [](auto c) {return std::isdigit(c);});
-
-        if (!is_valid)
-            return SegmentId::null();
-
-        return SegmentId {std::stoull(digits.to_string())};
+    if (!is_valid) {
+        return Id::null();
     }
 
-    static constexpr auto null() noexcept -> SegmentId
-    {
-        return SegmentId {Id::null().value};
-    }
+    return {std::stoull(name.to_string())};
+}
 
-    static constexpr auto root() noexcept -> SegmentId
-    {
-        return SegmentId {Id::root().value};
-    }
-
-    [[nodiscard]]
-    auto to_name() const -> std::string
-    {
-        return WAL_PREFIX + std::to_string(value);
-    }
-
-    constexpr explicit operator std::uint64_t() const
-    {
-        return value;
-    }
-
-    auto operator++() noexcept -> SegmentId&
-    {
-        value++;
-        return *this;
-    }
-
-    auto operator++(int) noexcept -> SegmentId
-    {
-        auto temp = *this;
-        ++(*this);
-        return temp;
-    }
-
-    auto operator--() noexcept -> SegmentId&
-    {
-        CALICO_EXPECT_FALSE(is_null());
-        value--;
-        return *this;
-    }
-
-    auto operator--(int) noexcept -> SegmentId
-    {
-        auto temp = *this;
-        --(*this);
-        return temp;
-    }
-};
+[[nodiscard]]
+inline auto encode_segment_name(Id id) -> std::string
+{
+    return WAL_PREFIX + std::to_string(id.value);
+}
 
 /*
  * Header fields associated with each WAL record. Based off of the WAL protocol found in RocksDB.
@@ -140,7 +89,6 @@ auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 [[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
 
-
 struct DeltaDescriptor {
     struct Delta {
         Size offset {};
@@ -164,8 +112,58 @@ struct CommitDescriptor {
 
 using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
 
+class WalPayloadIn {
+public:
+    friend class LogWriter;
+
+    WalPayloadIn(Lsn lsn, Span buffer)
+        : m_buffer {buffer}
+    {
+        put_u64(buffer, lsn.value);
+    }
+
+    [[nodiscard]]
+    auto lsn() const -> Lsn
+    {
+        return Lsn {get_u64(m_buffer)};
+    }
+
+    [[nodiscard]]
+    auto data() const -> Slice
+    {
+        return m_buffer.range(sizeof(Id));
+    }
+
+private:
+    Slice m_buffer;
+};
+
+class WalPayloadOut {
+public:
+    WalPayloadOut() = default;
+
+    explicit WalPayloadOut(const Slice &payload)
+        : m_payload {payload}
+    {}
+
+    [[nodiscard]]
+    auto lsn() const -> Lsn
+    {
+        return {get_u64(m_payload)};
+    }
+
+    [[nodiscard]]
+    auto data() -> Slice
+    {
+        return m_payload.range(sizeof(Lsn));
+    }
+
+private:
+    Slice m_payload;
+};
+
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> PayloadDescriptor;
-[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn;
+[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, Span buffer) -> WalPayloadIn;
 [[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, const Slice &image, Span buffer) -> WalPayloadIn;
 [[nodiscard]] auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn;
 
@@ -174,6 +172,172 @@ enum XactPayloadType : Byte {
     DELTA      = '\xD0',
     FULL_IMAGE = '\xF0',
 };
+
+/*
+ * Stores a collection of WAL segment descriptors and provides synchronized access.
+ */
+class WalSet final {
+public:
+    WalSet() = default;
+    ~WalSet() = default;
+
+    auto add_segment(Id id) -> void
+    {
+        std::lock_guard lock {m_mutex};
+        m_segments.emplace(id, Lsn::null());
+    }
+
+    auto add_segment(Id id, Lsn first_lsn) -> void
+    {
+        std::lock_guard lock {m_mutex};
+        m_segments.emplace(id, first_lsn);
+    }
+
+    [[nodiscard]]
+    auto first_lsn(Id id) const -> Lsn
+    {
+        std::lock_guard lock {m_mutex};
+
+        const auto itr = m_segments.find(id);
+        if (itr == end(m_segments)) {
+            return Lsn::null();
+        }
+
+        return itr->second;
+    }
+
+    auto set_first_lsn(Id id, Lsn lsn) -> void
+    {
+        std::lock_guard lock {m_mutex};
+
+        auto itr = m_segments.find(id);
+        CALICO_EXPECT_NE(itr, end(m_segments));
+        itr->second = lsn;
+    }
+
+    auto first() const -> Id
+    {
+        std::lock_guard lock {m_mutex};
+        return m_segments.empty() ? Id::null() : cbegin(m_segments)->first;
+    }
+
+    auto last() const -> Id
+    {
+        std::lock_guard lock {m_mutex};
+        return m_segments.empty() ? Id::null() : crbegin(m_segments)->first;
+    }
+
+    auto id_before(Id id) const -> Id
+    {
+        std::lock_guard lock {m_mutex};
+        if (m_segments.empty()) {
+            return Id::null();
+        }
+
+        auto itr = m_segments.lower_bound(id);
+        if (itr == cbegin(m_segments)) {
+            return Id::null();
+        }
+        return prev(itr)->first;
+    }
+
+    auto id_after(Id id) const -> Id
+    {
+        std::lock_guard lock {m_mutex};
+        auto itr = m_segments.upper_bound(id);
+        return itr != cend(m_segments) ? itr->first : Id::null();
+    }
+
+    auto remove_before(Id id) -> void
+    {
+        // Removes segments in [<begin>, id).
+        std::lock_guard lock {m_mutex};
+        auto itr = m_segments.lower_bound(id);
+        m_segments.erase(cbegin(m_segments), itr);
+    }
+
+    auto remove_after(Id id) -> void
+    {
+        // Removes segments in (id, <end>).
+        std::lock_guard lock {m_mutex};
+        auto itr = m_segments.upper_bound(id);
+        m_segments.erase(itr, cend(m_segments));
+    }
+
+    [[nodiscard]]
+    auto segments() const -> const std::map<Id, Lsn> &
+    {
+        // WARNING: We must ensure that background threads that modify the collection are paused before using this method.
+        return m_segments;
+    }
+
+private:
+    mutable std::mutex m_mutex;
+    std::map<Id, Lsn> m_segments;
+};
+
+class LogScratchManager final {
+public:
+    explicit LogScratchManager(Size buffer_size, Size buffer_count)
+        : m_manager {buffer_size, buffer_count + EXTRA_SIZE}
+    {}
+
+    ~LogScratchManager() = default;
+
+    [[nodiscard]]
+    auto get() -> Scratch
+    {
+        return m_manager.get();
+    }
+
+private:
+    // Number of extra scratch buffers to allocate. We seem to need a number of buffers equal to the worker
+    // queue size N + 2. This allows N buffers to be waiting in the queue, 1 for the WAL writer to work on,
+    // and another for the pager to work on. Then we won't overwrite scratch memory that is in use, because
+    // the worker queue will block after it reaches N elements.
+    static constexpr Size EXTRA_SIZE {2};
+
+    MonotonicScratchManager m_manager;
+};
+
+[[nodiscard]]
+inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, WalSet &set) -> tl::expected<Id, Status>
+{
+    if (auto lsn = set.first_lsn(id); !lsn.is_null()) {
+        return lsn;
+    }
+
+    RandomReader *temp;
+    auto s = store.open_random_reader(prefix + encode_segment_name(id), &temp);
+    if (!s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
+
+    char buffer[WalPayloadHeader::SIZE];
+    Span bytes {buffer, sizeof(buffer)};
+    std::unique_ptr<RandomReader> file {temp};
+
+    // Read the first LSN. If it exists, it will always be at the same location.
+    auto read_size = bytes.size();
+    s = file->read(bytes.data(), read_size, WalRecordHeader::SIZE);
+    if (!s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
+
+    bytes.truncate(read_size);
+
+    if (bytes.is_empty()) {
+        return tl::make_unexpected(not_found("segment is empty"));
+    }
+
+    if (bytes.size() != WalPayloadHeader::SIZE) {
+        return tl::make_unexpected(corruption("incomplete record"));
+    }
+
+    const Lsn lsn {get_u64(bytes)};
+    set.set_first_lsn(id, lsn);
+    return lsn;
+}
 
 } // namespace Calico
 

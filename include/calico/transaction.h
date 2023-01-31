@@ -10,7 +10,6 @@ class Transaction final {
 public:
     ~Transaction();
 
-    // Prevent copies.
     Transaction(const Transaction &) = delete;
     auto operator=(const Transaction &) -> Transaction & = delete;
 

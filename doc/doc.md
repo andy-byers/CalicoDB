@@ -35,11 +35,12 @@ Usage examples can be found in the [examples directory](../examples).
 ```
 CalicoDB
 ┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
+┣╸cmake ┄┄┄┄┄┄┄┄┄┄┄┄ CMake utilities/config files
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
 ┣╸include/calico
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
-┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor__ for database traversal
+┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
 ┃ ┣╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┃ ┣╸slice.h ┄┄┄┄┄┄┄┄ Construct for holding a contiguous sequence of bytes

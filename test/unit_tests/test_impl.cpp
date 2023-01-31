@@ -3,11 +3,11 @@
 #include "fakes.h"
 #include "storage/posix_storage.h"
 #include "tools.h"
-#include "tree/bplus_tree.h"
 #include "tree/cursor_internal.h"
 #include "tree/header.h"
+#include "tree/tree.h"
 #include "unit_tests.h"
-#include "wal/basic_wal.h"
+#include "wal/wal.h"
 #include <array>
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -46,7 +46,7 @@ public:
         options.page_cache_size = options.page_size * frame_count;
         options.wal_buffer_size = options.page_cache_size;
         options.log_level = LogLevel::OFF;
-        options.storage = store.get();
+        options.storage = storage.get();
     }
 
     ~BasicDatabaseTests() override = default;
@@ -62,7 +62,7 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
         ASSERT_OK(db.open(ROOT, options));
         ASSERT_OK(db.close());
     }
-    ASSERT_TRUE(store->file_exists(std::string {PREFIX} + "data").is_ok());
+    ASSERT_TRUE(storage->file_exists(std::string {PREFIX} + "data").is_ok());
 }
 
 TEST_F(BasicDatabaseTests, IsDestroyed)
@@ -71,9 +71,9 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
 
     Database db;
     ASSERT_OK(db.open(ROOT, options));
-    ASSERT_TRUE(store->file_exists(filename).is_ok());
+    ASSERT_TRUE(storage->file_exists(filename).is_ok());
     ASSERT_OK(std::move(db).destroy());
-    ASSERT_TRUE(store->file_exists(filename).is_not_found());
+    ASSERT_TRUE(storage->file_exists(filename).is_not_found());
 }
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
@@ -280,8 +280,6 @@ TEST_F(ReaderTests, ManyLocalizedReaders)
 
 class TestDatabase {
 public:
-    static constexpr Size CODE {0x1234567887654321};
-
     explicit TestDatabase(Storage &storage)
     {
         options.page_size = 0x200;
@@ -297,42 +295,9 @@ public:
     ~TestDatabase() = default;
 
     [[nodiscard]]
-    auto time_independent_snapshot() const -> std::string
+    auto snapshot() const -> std::string
     {
-        auto &store = *options.storage;
-
-        Size file_size;
-        EXPECT_OK(store.file_size("test/data", file_size));
-
-        std::unique_ptr<RandomReader> reader;
-        {
-            RandomReader *temp;
-            EXPECT_OK(store.open_random_reader("test/data", &temp));
-            reader.reset(temp);
-        }
-
-        std::string buffer(file_size, '\x00');
-        auto read_size = file_size;
-        EXPECT_OK(reader->read(buffer.data(), read_size, 0));
-        EXPECT_EQ(read_size, file_size);
-
-        const auto stat = impl->statistics();
-        EXPECT_EQ(file_size % stat.page_size(), 0);
-
-        auto offset = FileHeader::SIZE;
-        for (Size i {}; i < file_size / stat.page_size(); ++i) {
-            put_u64(buffer.data() + i*stat.page_size() + offset, CODE);
-            offset = 0;
-        }
-
-        // Clear header fields that might be inconsistent, despite identical database contents.
-        Page root {Id::root(),{buffer.data(), stat.page_size()}, true};
-        FileHeader header {root};
-        header.header_crc = 0;
-        header.recovery_lsn.value = CODE;
-        header.write(root);
-
-        return buffer;
+        return tools::snapshot(*options.storage, options.page_size);
     }
 
     Options options;
@@ -368,95 +333,58 @@ static auto add_records(TestDatabase &test, Size n, Size max_value_size, const s
     return records;
 }
 
-TEST_F(DbAbortTests, RevertsEmbeddedRecords)
+TEST_F(DbAbortTests, RevertsFirstBatch)
 {
-    const auto snapshot = db->time_independent_snapshot();
+    const auto snapshot = db->snapshot();
     auto xact = db->impl->start();
-    add_records(*db, 3, 10);
+    add_records(*db, 3, 0x400);
     ASSERT_OK(xact.abort());
-    ASSERT_EQ(snapshot, db->time_independent_snapshot());
+    ASSERT_EQ(snapshot, db->snapshot());
 }
 
-TEST_F(DbAbortTests, RevertsOverflowPages)
-{
-    const auto snapshot = db->time_independent_snapshot();
-    auto xact = db->impl->start();
-    add_records(*db, 3, 10 * db->options.page_size);
-    ASSERT_OK(xact.abort());
-    ASSERT_EQ(snapshot, db->time_independent_snapshot());
-}
-
-TEST_F(DbAbortTests, RevertsSecondBatchOfEmbeddedRecords)
+TEST_F(DbAbortTests, RevertsSecondBatch)
 {
     auto committed = db->impl->start();
-    add_records(*db, 3, 10, "_");
+    add_records(*db, 3, 0x400, "_");
     ASSERT_OK(committed.commit());
 
     // Hack to make sure the database file is up-to-date.
     (void)db->impl->pager->flush({});
 
-    const auto snapshot = db->time_independent_snapshot();
+    const auto snapshot = db->snapshot();
     auto xact = db->impl->start();
-    add_records(*db, 3, 10);
+    add_records(*db, 3, 0x400);
     ASSERT_OK(xact.abort());
-    ASSERT_EQ(snapshot, db->time_independent_snapshot());
+    ASSERT_EQ(snapshot, db->snapshot());
 }
 
-TEST_F(DbAbortTests, RevertsSecondBatchOfOverflowPages)
+TEST_F(DbAbortTests, RevertsNthBatch)
 {
-    auto committed = db->impl->start();
-    add_records(*db, 3, 10 * db->options.page_size, "_");
-    ASSERT_OK(committed.commit());
-
+    for (Size i {}; i < 10; ++i) {
+        auto xact = db->impl->start();
+        add_records(*db, 100, 0x400, "_");
+        ASSERT_OK(xact.commit());
+    }
     // Hack to make sure the database file is up-to-date.
     (void)db->impl->pager->flush({});
 
-    const auto snapshot = db->time_independent_snapshot();
+    const auto snapshot = db->snapshot();
     auto xact = db->impl->start();
-    add_records(*db, 3, 10 * db->options.page_size);
+    add_records(*db, 1'000, 0x400);
     ASSERT_OK(xact.abort());
-    ASSERT_EQ(snapshot, db->time_independent_snapshot());
-}
-
-TEST_F(DbAbortTests, RevertsNthBatchOfEmbeddedRecords)
-{
-    // Don't explicitly use a transaction. This causes 100 single-insert transactions to be run.
-    add_records(*db, 100, 10, "_");
-
-    // Hack to make sure the database file is up-to-date.
-    (void)db->impl->pager->flush({});
-
-    const auto snapshot = db->time_independent_snapshot();
-    auto xact = db->impl->start();
-    add_records(*db, 1'000, 10);
-    ASSERT_OK(xact.abort());
-    ASSERT_EQ(snapshot, db->time_independent_snapshot());
-}
-
-TEST_F(DbAbortTests, RevertsNthBatchOfOverflowPages)
-{
-    add_records(*db, 100, 10 * db->options.page_size, "_");
-
-    // Hack to make sure the database file is up-to-date.
-    (void)db->impl->pager->flush({});
-
-    const auto snapshot = db->time_independent_snapshot();
-    auto xact = db->impl->start();
-    add_records(*db, 1'000, 10 * db->options.page_size);
-    ASSERT_OK(xact.abort());
-    ASSERT_EQ(snapshot, db->time_independent_snapshot());
+    ASSERT_EQ(snapshot, db->snapshot());
 }
 
 class DbRecoveryTests: public testing::Test {
 protected:
     DbRecoveryTests()
     {
-        store = std::make_unique<HeapStorage>();
-        EXPECT_OK(store->create_directory("test"));
+        storage = std::make_unique<HeapStorage>();
+        EXPECT_OK(storage->create_directory("test"));
     }
     ~DbRecoveryTests() override = default;
 
-    std::unique_ptr<Storage> store;
+    std::unique_ptr<Storage> storage;
 };
 
 TEST_F(DbRecoveryTests, RecoversFirstBatch)
@@ -465,20 +393,20 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
     std::string snapshot;
 
     {
-        TestDatabase db {*store};
+        TestDatabase db {*storage};
         auto xact = db.impl->start();
         add_records(db, 100, 10 * db.options.page_size);
         ASSERT_OK(xact.commit());
 
         // Simulate a crash by cloning the database before cleanup has occurred.
-        clone.reset(dynamic_cast<const HeapStorage &>(*store).clone());
+        clone.reset(dynamic_cast<const HeapStorage &>(*storage).clone());
 
         (void)db.impl->pager->flush({});
-        snapshot = db.time_independent_snapshot();
+        snapshot = db.snapshot();
     }
     // Create a new database from the cloned data. This database will need to roll the WAL forward to become
     // consistent.
-    ASSERT_EQ(snapshot, TestDatabase {*clone}.time_independent_snapshot());
+    ASSERT_EQ(snapshot, TestDatabase {*clone}.snapshot());
 }
 
 TEST_F(DbRecoveryTests, RecoversNthBatch)
@@ -487,7 +415,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
     std::string snapshot;
 
     {
-        TestDatabase db {*store};
+        TestDatabase db {*storage};
 
         for (Size i {}; i < 10; ++i) {
             auto xact = db.impl->start();
@@ -495,12 +423,12 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
             ASSERT_OK(xact.commit());
         }
 
-        clone.reset(dynamic_cast<const HeapStorage &>(*store).clone());
+        clone.reset(dynamic_cast<const HeapStorage &>(*storage).clone());
 
         (void)db.impl->pager->flush({});
-        snapshot = db.time_independent_snapshot();
+        snapshot = db.snapshot();
     }
-    ASSERT_EQ(snapshot, TestDatabase {*clone}.time_independent_snapshot());
+    ASSERT_EQ(snapshot, TestDatabase {*clone}.snapshot());
 }
 
 } // <anonymous>

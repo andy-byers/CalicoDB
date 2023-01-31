@@ -6,10 +6,10 @@
 #include "fakes.h"
 #include "pager/pager.h"
 #include "tools.h"
-#include "tree/bplus_tree.h"
 #include "tree/header.h"
+#include "tree/tree.h"
 #include "unit_tests.h"
-#include "wal/basic_wal.h"
+#include "wal/wal.h"
 
 namespace Calico {
 
@@ -70,13 +70,13 @@ public:
 
     auto set_up() -> void
     {
-        store = std::make_unique<HeapStorage>();
-        ASSERT_OK(store->create_directory("test"));
+        storage = std::make_unique<HeapStorage>();
+        ASSERT_OK(storage->create_directory("test"));
         scratch = std::make_unique<LogScratchManager>(wal_scratch_size(PAGE_SIZE), 32);
 
-        auto wal_r = BasicWriteAheadLog::open({
+        auto wal_r = WriteAheadLog::open({
             "test/",
-            store.get(),
+            storage.get(),
             &state,
             PAGE_SIZE,
             WAL_LIMIT,
@@ -87,7 +87,7 @@ public:
 
         auto pager_r = Pager::open({
             "test/",
-            store.get(),
+            storage.get(),
             scratch.get(),
             wal.get(),
             &state,
@@ -102,7 +102,7 @@ public:
         }
 
         ASSERT_OK(wal->start_workers());
-        state.has_xact.store(true);
+        state.has_xact = true;
     }
 
     auto tear_down() const -> void
@@ -118,7 +118,7 @@ public:
     {
         auto page = pager->acquire(id);
         if (!page.has_value()) {
-            assert_error_42(page.error());
+            assert_special_error(page.error());
             return {};
         }
         if (is_writable) {
@@ -138,7 +138,7 @@ public:
         wal->advance();
         allow_cleanup();
 
-        state.commit_lsn.store(lsn);
+        state.commit_lsn = lsn;
         return status;
     }
 
@@ -174,7 +174,7 @@ public:
         pager->release(std::move(*root));
         if (pager->page_count() < before_count) {
             const auto after_size = pager->page_count() * pager->page_size();
-            return store->resize_file("test/data", after_size);
+            return storage->resize_file("test/data", after_size);
         }
         return ok();
     }
@@ -209,7 +209,7 @@ public:
     [[nodiscard]]
     auto oldest_lsn() const -> Id
     {
-        return std::min(state.commit_lsn.load(), pager->recovery_lsn());
+        return std::min(state.commit_lsn, pager->recovery_lsn());
     }
 
     auto allow_cleanup() const -> void
@@ -226,7 +226,7 @@ public:
     System state {"test", {}};
     Random random {UnitTests::random_seed};
     Status status {ok()};
-    std::unique_ptr<HeapStorage> store;
+    std::unique_ptr<HeapStorage> storage;
     std::unique_ptr<Pager> pager;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<LogScratchManager> scratch;
@@ -439,7 +439,7 @@ TEST_F(RollForwardTests, ObsoleteSegmentsAreRemoved)
     const auto [first, last] = get_lsn_range();
     ASSERT_GT(first.value, 1);
     ASSERT_LE(first, pager->recovery_lsn());
-    ASSERT_EQ(last, state.commit_lsn.load());
+    ASSERT_EQ(last, state.commit_lsn);
 }
 
 TEST_F(RollForwardTests, KeepsNeededSegments)
@@ -452,7 +452,7 @@ TEST_F(RollForwardTests, KeepsNeededSegments)
 
     const auto [first, last] = get_lsn_range();
     ASSERT_LE(first, pager->recovery_lsn());
-    ASSERT_EQ(last, state.commit_lsn.load());
+    ASSERT_EQ(last, state.commit_lsn);
 }
 
 TEST_F(RollForwardTests, SanityCheck)
@@ -468,7 +468,7 @@ TEST_F(RollForwardTests, SanityCheck)
     }
 
     const auto [first, last] = get_lsn_range();
-    ASSERT_LE(first, state.commit_lsn.load());
+    ASSERT_LE(first, state.commit_lsn);
     ASSERT_EQ(Id {last.value + 1}, wal->current_lsn());
 
     ASSERT_OK(undo_xact(*this));
@@ -519,7 +519,7 @@ TEST_P(FailedXactTests, DataWriteFailureIsPropagated)
         {1, 1, 1, 0, 1},
     });
     modify_until_failure();
-    assert_error_42(get_status());
+    assert_special_error(get_status());
 }
 
 TEST_P(FailedXactTests, WalWriteFailureIsPropagated)
@@ -529,7 +529,7 @@ TEST_P(FailedXactTests, WalWriteFailureIsPropagated)
         {1, 1, 1, 0, 1},
     });
     modify_until_failure();
-    assert_error_42(get_status());
+    assert_special_error(get_status());
 }
 
 TEST_P(FailedXactTests, WalOpenFailureIsPropagated)
@@ -539,7 +539,7 @@ TEST_P(FailedXactTests, WalOpenFailureIsPropagated)
         {1, 1, 1, 0, 1},
     });
     modify_until_failure();
-    assert_error_42(get_status());
+    assert_special_error(get_status());
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -555,7 +555,7 @@ public:
         options.page_cache_size = 64 * options.page_size;
         options.wal_buffer_size = 64 * options.page_size;
         options.log_level = LogLevel::OFF;
-        options.storage = store.get();
+        options.storage = storage.get();
 
         ASSERT_OK(db.open(ROOT, options));
     }
@@ -827,7 +827,7 @@ public:
         options.page_size = 0x200;
         options.page_cache_size = 64 * options.page_size;
         options.wal_buffer_size = 64 * options.page_size;
-        options.storage = store.get();
+        options.storage = storage.get();
         options.log_level = LogLevel::OFF;
         ASSERT_OK(db.open(ROOT, options));
     }
@@ -881,10 +881,10 @@ static auto run_propagate_test(Test &test)
     // Modify the database until a system call fails.
     auto xact = test.db.start();
     const auto s = modify_until_failure(test);
-    assert_error_42(s);
+    assert_special_error(s);
 
     // The database status should reflect the error returned by write().
-    assert_error_42(test.db.status());
+    assert_special_error(test.db.status());
     (void)xact.abort();
 }
 
@@ -919,8 +919,8 @@ TEST_F(FailureTests, WalReadErrorIsPropagatedDuringAbort)
 
     interceptors::set_read(FailOnce<0> {"test/wal-"});
 
-    assert_error_42(xact.abort());
-    assert_error_42(db.status());
+    assert_special_error(xact.abort());
+    assert_special_error(db.status());
 }
 
 TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
@@ -935,7 +935,7 @@ TEST_F(FailureTests, DataReadErrorIsNotPropagatedDuringQuery)
     for (; c.is_valid(); c.next()) {}
 
     // The error in the cursor should reflect the read() error.
-    assert_error_42(c.status());
+    assert_special_error(c.status());
 
     // The database status should still be OK. Errors during reads cannot corrupt or even modify the database state.
     ASSERT_OK(db.status());
@@ -958,7 +958,7 @@ TEST_F(FailureTests, DataWriteFailureDuringQuery)
     c.seek_first();
     for (; c.is_valid(); c.next());
 
-    assert_error_42(db.status());
+    assert_special_error(db.status());
 }
 
 TEST_F(FailureTests, CannotPerformOperationsAfterFatalError)
@@ -971,31 +971,29 @@ TEST_F(FailureTests, CannotPerformOperationsAfterFatalError)
     modify_until_failure(*this);
     auto c = db.cursor();
     c.seek_first();
-    assert_error_42(db.status());
-    assert_error_42(c.status());
-    assert_error_42(db.put("key", "value"));
-    assert_error_42(db.erase("key"));
+    assert_special_error(db.status());
+    assert_special_error(c.status());
+    assert_special_error(db.put("key", "value"));
+    assert_special_error(db.erase("key"));
 
     // If db.status() is not OK, creating a transaction object is not allowed. db.close() should
     // return the fatal error.
-    assert_error_42(db.close());
+    assert_special_error(db.close());
 }
 
 class RecoveryTestHarness {
 public:
     RecoveryTestHarness()
-        : store {std::make_unique<HeapStorage>()},
+        : storage {std::make_unique<HeapStorage>()},
           db {std::make_unique<DatabaseImpl>()}
     {}
 
     auto setup(Size xact_count, Size uncommitted_count) -> void
     {
-        options.storage = store.get();
+        options.storage = storage.get();
         options.page_size = 0x200;
         options.page_cache_size = 64 * options.page_size;
         options.wal_buffer_size = 64 * options.page_size;
-        options.log_level = LogLevel::TRACE;
-        options.log_target = LogTarget::STDERR_COLOR;
 
         ASSERT_OK(db->open("test", options));
         committed = run_random_transactions(*this, xact_count);
@@ -1014,16 +1012,16 @@ public:
 
         // Clone the database while there are still pages waiting to be written to the database file. We'll have
         // to use the WAL to recover.
-        auto cloned = store->clone();
+        auto cloned = storage->clone();
 
         (void)xact.abort();
         db.reset();
 
-        store.reset(dynamic_cast<HeapStorage*>(cloned));
-        options.storage = store.get();
+        storage.reset(dynamic_cast<HeapStorage *>(cloned));
+        options.storage = storage.get();
 
         db = std::make_unique<DatabaseImpl>();
-        interceptors::set_write([](auto, auto, auto) {return ok();});
+        interceptors::set_write([](...) {return ok();});
     }
 
     auto validate() -> void
@@ -1031,17 +1029,16 @@ public:
         for (const auto &[key, value]: committed) {
             tools::expect_contains(*db, key, value);
         }
-
-//        for (const auto &[key, value]: uncommitted) {
-//            ASSERT_FALSE(tools::contains(*db, key, value));
-//        }
+        for (const auto &[key, value]: uncommitted) {
+            ASSERT_FALSE(tools::contains(*db, key, value));
+        }
         db->tree->TEST_check_links();
         db->tree->TEST_check_nodes();
         db->tree->TEST_check_order();
     }
 
     [[nodiscard]]
-    virtual auto get_db() -> DatabaseImpl &
+    auto get_db() const -> DatabaseImpl &
     {
         return *db;
     }
@@ -1049,7 +1046,7 @@ public:
     Random random {42};
     RecordGenerator generator {{16, 100, 10, false, true}};
     std::vector<Record> committed, uncommitted;
-    std::unique_ptr<HeapStorage> store;
+    std::unique_ptr<HeapStorage> storage;
     Options options;
     std::unique_ptr<DatabaseImpl> db;
 };
@@ -1076,9 +1073,9 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryTests,
     ::testing::Values(
-        std::make_pair(  0, 100),
-        std::make_pair(  1, 100),
-        std::make_pair( 10, 100)));
+        std::make_pair( 0, 100),
+        std::make_pair( 1, 100),
+        std::make_pair(10, 100)));
 
 class RecoveryFailureTestRunner {
 public:
@@ -1094,7 +1091,7 @@ public:
             if (auto s = test.db->open("test", test.options); s.is_ok()) {
                 break;
             } else {
-                assert_error_42(s);
+                assert_special_error(s);
             }
             test.db.reset();
             test.db = std::make_unique<DatabaseImpl>();
@@ -1127,9 +1124,9 @@ TEST_P(RecoveryDataWriteFailureTests, ErrorIsPropagated)
 {
     interceptors::set_write(SystemCallOutcomes<RepeatFinalOutcome> {
         "test/data",
-        {1, 0},
+        {0},
     });
-    assert_error_42(db->open("test", options));
+    assert_special_error(db->open("test", options));
 }
 
 TEST_P(RecoveryDataWriteFailureTests, RecoveryIsReentrant)
@@ -1159,7 +1156,7 @@ TEST_P(RecoveryWalReadFailureTests, ErrorIsPropagated)
         "test/wal",
         {1, 1, 1, 0, 1},
     });
-    assert_error_42(db->open("test", options));
+    assert_special_error(db->open("test", options));
 }
 
 TEST_P(RecoveryWalReadFailureTests, RecoveryIsReentrant)
@@ -1189,7 +1186,7 @@ TEST_P(RecoveryWalOpenFailureTests, ErrorIsPropagated)
         "test/wal",
         {1, 0, 1},
     });
-    assert_error_42(db->open("test", options));
+    assert_special_error(db->open("test", options));
 }
 
 TEST_P(RecoveryWalOpenFailureTests, RecoveryIsReentrant)

@@ -98,7 +98,7 @@ auto insert_records(Database &db, Size n)
 {
     auto xact = db.start();
     for (Size i {}; i < n; ++i) {
-        const auto key = make_key<DB_KEY_SIZE>(State::random_int());
+        const auto key = make_key<DB_KEY_SIZE>(i);
         do_write(db, key);
     }
     benchmark::DoNotOptimize(xact.commit());
@@ -132,7 +132,7 @@ auto BM_RandomReads(benchmark::State& state)
     insert_records(db, DB_INITIAL_SIZE);
     for (auto _ : state) {
         state.PauseTiming();
-        const auto key = make_key<DB_KEY_SIZE>(State::random_int());
+        const auto key = make_key<DB_KEY_SIZE>(State::random_int() % DB_INITIAL_SIZE);
         state.ResumeTiming();
         do_read(db, key);
     }

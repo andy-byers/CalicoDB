@@ -40,14 +40,14 @@ public:
     static constexpr auto PREFIX = "test/";
 
     TestOnHeap()
-        : store {std::make_unique<HeapStorage>()}
+        : storage {std::make_unique<HeapStorage>()}
     {
-        CALICO_EXPECT_TRUE(expose_message(store->create_directory(ROOT)));
+        CALICO_EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
     ~TestOnHeap() override = default;
 
-    std::unique_ptr<Storage> store;
+    std::unique_ptr<Storage> storage;
 };
 
 template<class ...Param>
@@ -57,14 +57,14 @@ public:
     static constexpr auto PREFIX = "test/";
 
     TestOnHeapWithParam()
-        : store {std::make_unique<HeapStorage>()}
+        : storage {std::make_unique<HeapStorage>()}
     {
-        CALICO_EXPECT_TRUE(expose_message(store->create_directory(ROOT)));
+        CALICO_EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
     ~TestOnHeapWithParam() override = default;
 
-    std::unique_ptr<Storage> store;
+    std::unique_ptr<Storage> storage;
 };
 
 class TestOnDisk : public testing::Test {
@@ -76,8 +76,8 @@ public:
     {
         std::error_code ignore;
         std::filesystem::remove_all(ROOT, ignore);
-        store = std::make_unique<PosixStorage>();
-        CALICO_EXPECT_TRUE(expose_message(store->create_directory(ROOT)));
+        storage = std::make_unique<PosixStorage>();
+        CALICO_EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
     ~TestOnDisk() override
@@ -86,7 +86,7 @@ public:
         std::filesystem::remove_all(ROOT, ignore);
     }
 
-    std::unique_ptr<Storage> store;
+    std::unique_ptr<Storage> storage;
 };
 
 } // namespace Calico
