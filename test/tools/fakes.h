@@ -259,7 +259,6 @@ public:
         return 0;
     }
 
-
     auto log(WalPayloadIn) -> void override
     {
 

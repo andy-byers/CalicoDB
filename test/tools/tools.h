@@ -229,42 +229,42 @@ auto make_key(Size key) -> std::string
 }
 
 [[maybe_unused]]
-inline auto hexdump(const Byte *data, Size size, Size indent = 0) -> void
+inline auto hexdump(std::ostream &os, const Byte *data, Size size, Size indent = 0) -> void
 {
     constexpr auto chunk_size{0x10UL};
     const auto chunk_count{size / chunk_size};
     const auto rest_size{size % chunk_size};
     const std::string spaces(static_cast<Size>(indent), ' ');
 
-    auto emit_line = [data, spaces](Size i, Size line_size) {
-        if (!line_size)
-            return;
-        auto offset{i * chunk_size};
+    const auto emit_line = [&os, data, spaces](Size i, Size line_size) {
+        if (line_size) {
+            const auto offset = i * chunk_size;
 
-        std::cout
-            << spaces
-            << std::hex
-            << std::setw(8)
-            << std::setfill('0')
-            << std::uppercase
-            << offset
-            << ": ";
-
-        for (Size j{}; j < line_size; ++j) {
-            const auto byte{static_cast<uint8_t>(data[offset+j])};
-            std::cout
+            os
+                << spaces
                 << std::hex
-                << std::setw(2)
+                << std::setw(8)
                 << std::setfill('0')
                 << std::uppercase
-                << static_cast<uint32_t>(byte)
-                << ' ';
+                << offset
+                << ": ";
+
+            for (Size j {}; j < line_size; ++j) {
+                os
+                    << std::hex
+                    << std::setw(2)
+                    << std::setfill('0')
+                    << std::uppercase
+                    << static_cast<uint32_t>(data[offset + j])
+                    << ' ';
+            }
+            os << '\n';
         }
-        std::cout << '\n';
     };
-    Size i{};
-    for (; i < chunk_count; ++i)
+    Size i {};
+    for (; i < chunk_count; ++i) {
         emit_line(i, chunk_size);
+    }
     // Last line may be partially filled.
     emit_line(i, rest_size);
 }

@@ -49,7 +49,7 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
 
     std::unique_ptr<WriteAheadLog> wal {new (std::nothrow) WriteAheadLog {param}};
     if (wal == nullptr) {
-        return tl::make_unexpected(system_error("cannot make_room WAL object: out of memory"));
+        return tl::make_unexpected(system_error("cannot allocate WAL object: out of memory"));
     }
 
     // Keep track of the segment files.
@@ -80,7 +80,7 @@ auto WriteAheadLog::start_workers() -> Status
             m_segment_cutoff,
         }}};
     if (m_writer == nullptr) {
-        return system_error("cannot make_room writer object: out of memory");
+        return system_error("cannot allocate writer object: out of memory");
     }
 
     m_cleanup = std::unique_ptr<WalCleanup> {
@@ -92,7 +92,7 @@ auto WriteAheadLog::start_workers() -> Status
             &m_set,
         }}};
     if (m_cleanup == nullptr) {
-        return system_error("cannot make_room cleanup object: out of memory");
+        return system_error("cannot allocate cleanup object: out of memory");
     }
 
     m_tasks = std::unique_ptr<Worker<Event>> {
@@ -101,7 +101,7 @@ auto WriteAheadLog::start_workers() -> Status
         },
         m_buffer_count}};
     if (m_tasks == nullptr) {
-        return system_error("cannot make_room task manager object: out of memory");
+        return system_error("cannot allocate task manager object: out of memory");
     }
     return ok();
 }
@@ -127,7 +127,7 @@ auto WriteAheadLog::flushed_lsn() const -> Lsn
 
 auto WriteAheadLog::current_lsn() const -> Lsn
 {
-    return Lsn {m_last_lsn.value + 1};
+    return {m_last_lsn.value + 1};
 }
 
 auto WriteAheadLog::log(WalPayloadIn payload) -> void
@@ -226,7 +226,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
         // We found an empty segment. This happens when the program aborted before the writer could either
         // write a block or delete the empty file. This is OK if we are on the last segment.
         if (s.is_not_found()) {
-            s = corruption(s.what().data());
+            s = corruption("encountered an empty segment file {}", encode_segment_name(reader->segment_id()));
         }
 
         if (s.is_ok()) {

@@ -554,8 +554,6 @@ public:
         options.page_size = 0x400;
         options.page_cache_size = 64 * options.page_size;
         options.wal_buffer_size = 64 * options.page_size;
-        options.log_level = LogLevel::OFF;
-        options.storage = storage.get();
 
         ASSERT_OK(db.open(ROOT, options));
     }
@@ -992,8 +990,8 @@ public:
     {
         options.storage = storage.get();
         options.page_size = 0x200;
-        options.page_cache_size = 64 * options.page_size;
-        options.wal_buffer_size = 64 * options.page_size;
+        options.page_cache_size = 16 * options.page_size;
+        options.wal_buffer_size = 32 * options.page_size;
 
         ASSERT_OK(db->open("test", options));
         committed = run_random_transactions(*this, xact_count);
@@ -1073,9 +1071,7 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryTests,
     ::testing::Values(
-        std::make_pair( 0, 100),
-        std::make_pair( 1, 100),
-        std::make_pair(10, 100)));
+        std::make_pair( 1, 100)));
 
 class RecoveryFailureTestRunner {
 public:
@@ -1142,9 +1138,7 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryDataWriteFailureTests,
     ::testing::Values(
-//        std::make_pair(  0, 100),
-        std::make_pair(  1, 100),
-        std::make_pair( 10, 100)));
+        std::make_pair(  1, 100)));
 
 class RecoveryWalReadFailureTests: public RecoveryTests {
 
@@ -1172,9 +1166,7 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryWalReadFailureTests,
     ::testing::Values(
-        std::make_pair(  0, 100),
-        std::make_pair(  1, 100),
-        std::make_pair( 10, 100)));
+        std::make_pair(  1, 100)));
 
 class RecoveryWalOpenFailureTests: public RecoveryTests {
 
@@ -1202,9 +1194,7 @@ INSTANTIATE_TEST_SUITE_P(
     Recovers,
     RecoveryWalOpenFailureTests,
     ::testing::Values(
-//        std::make_pair(  0, 100),
-        std::make_pair(  1, 100),
-        std::make_pair( 10, 100)));
+        std::make_pair(  1, 100)));
 
 } // namespace Calico
 

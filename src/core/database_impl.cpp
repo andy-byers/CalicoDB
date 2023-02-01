@@ -48,8 +48,9 @@ auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
     auto sanitized = sanitize_options(options);
 
     m_prefix = path.to_string();
-    if (m_prefix.back() != '/')
+    if (m_prefix.back() != '/') {
         m_prefix += '/';
+    }
 
     system = std::make_unique<System>(m_prefix, sanitized);
     m_log = system->create_log("core");
@@ -184,6 +185,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 DatabaseImpl::~DatabaseImpl()
 {
     wal.reset();
+    pager.reset();
 
     if (m_owns_store) {
         delete m_store;
@@ -234,28 +236,12 @@ auto DatabaseImpl::check_key(const Slice &key, const char *message) const -> Sta
         return s;
     }
     if (key.size() > maximum_key_size) {
-        auto s = invalid_argument("{}: key of length {} B is too long", message, key.size(), maximum_key_size);
+        auto s = invalid_argument("{}: key of length {} is too long", message, key.size(), maximum_key_size);
         CALICO_WARN(s);
         return s;
     }
     return ok();
 }
-
-#define MAYBE_FORWARD_AS_STATUS \
-    do { \
-        if (auto calico_s = status(); !calico_s.is_ok()) { \
-            return calico_s; \
-        } \
-    } while (0)
-
-#define MAYBE_FORWARD_AS_CURSOR \
-    do { \
-        if (auto calico_s = status(); !calico_s.is_ok()) { \
-            auto calico_c = CursorInternal::make_cursor(*tree); \
-            CursorInternal::invalidate(calico_c, calico_s); \
-            return calico_c; \
-        } \
-    } while (0)
 
 auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 {
@@ -280,11 +266,12 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 
 auto DatabaseImpl::cursor() const -> Cursor
 {
-    MAYBE_FORWARD_AS_CURSOR;
-    return CursorInternal::make_cursor(*tree);
+    auto cursor = CursorInternal::make_cursor(*tree);
+    if (system->has_error()) {
+        CursorInternal::invalidate(cursor, status());
+    }
+    return cursor;
 }
-
-#undef MAYBE_FORWARD_AS_CURSOR
 
 auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 {
@@ -292,11 +279,11 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
     CALICO_TRY_S(check_key(key, "insert"));
     bytes_written += key.size() + value.size();
     if (system->has_xact) {
-        if (const auto r = tree->insert(key, value)) {
-            record_count += *r;
+        if (const auto inserted = tree->insert(key, value)) {
+            record_count += *inserted;
             return ok();
         } else {
-            return r.error();
+            return inserted.error();
         }
     } else {
         return atomic_insert(key, value);
@@ -308,11 +295,11 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
     CALICO_TRY_S(status());
     CALICO_TRY_S(check_key(key, "erase"));
     if (system->has_xact) {
-        if (const auto r = tree->erase(key)) {
+        if (const auto erased = tree->erase(key)) {
             record_count--;
             return ok();
         } else {
-            return r.error();
+            return erased.error();
         }
     } else {
         return atomic_erase(key);
@@ -324,12 +311,12 @@ auto DatabaseImpl::atomic_insert(const Slice &key, const Slice &value) -> Status
     CALICO_TRY_S(check_key(key, "insert"));
     auto xact = start();
 
-    if (const auto r = tree->insert(key, value)) {
-        record_count += *r;
+    if (const auto inserted = tree->insert(key, value)) {
+        record_count += *inserted;
         return xact.commit();
     } else {
         CALICO_ERROR_IF(xact.abort());
-        return r.error();
+        return inserted.error();
     }
 }
 
@@ -337,14 +324,14 @@ auto DatabaseImpl::atomic_erase(const Slice &key) -> Status
 {
     CALICO_TRY_S(check_key(key, "erase"));
     auto xact = start();
-    if (const auto r = tree->erase(key)) {
+    if (const auto erased = tree->erase(key)) {
         record_count--;
         return xact.commit();
     } else {
-        if (!r.error().is_not_found()) {
+        if (!erased.error().is_not_found()) {
             CALICO_ERROR_IF(xact.abort());
         }
-        return r.error();
+        return erased.error();
     }
 }
 
@@ -365,7 +352,7 @@ auto DatabaseImpl::do_commit() -> Status
 
     // Write a commit record to the WAL.
     const auto lsn = wal->current_lsn();
-    m_log->info("commit at lsn {}", lsn.value);
+    m_log->info("commit requested at lsn {}", lsn.value);
     wal->log(encode_commit_payload(lsn, *m_scratch->get()));
     wal->advance();
 
@@ -394,7 +381,7 @@ auto DatabaseImpl::abort() -> Status
 auto DatabaseImpl::do_abort() -> Status
 {
     CALICO_EXPECT_TRUE(system->has_xact);
-    m_log->info("roll back to lsn {}", system->commit_lsn.value);
+    m_log->info("abort requested (last commit was {})", system->commit_lsn.value);
 
     system->has_xact = false;
     wal->advance();

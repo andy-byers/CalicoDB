@@ -17,7 +17,7 @@ Frame::Frame(Byte *buffer, Size id, Size size)
 
 auto Frame::lsn() const -> Id
 {
-    return Id {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::SIZE))};
+    return {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::SIZE))};
 }
 
 auto Frame::ref(bool is_writable) -> Page
@@ -61,7 +61,7 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     const auto cache_size = page_size * frame_count;
     AlignedBuffer buffer {cache_size, page_size};
     if (buffer.get() == nullptr) {
-        return tl::make_unexpected(system_error("cannot make_room frames: out of memory"));
+        return tl::make_unexpected(system_error("cannot allocate frames: out of memory"));
     }
 
     return Framer {std::move(file), std::move(buffer), page_size, frame_count};
@@ -155,7 +155,6 @@ auto Framer::write_back(Size id) -> Status
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_LE(frame.ref_count(), 1);
 
-    // If this fails, the caller will need to roll back the database state or exit.
     m_bytes_written += m_page_size;
     return write_page_to_file(frame.pid(), frame.data());
 }
@@ -173,8 +172,9 @@ auto Framer::read_page_from_file(Id id, Span out) const -> tl::expected<bool, St
 
     // Don't even try to call read() if the file isn't large enough. The system call can be pretty slow even if it doesn't read anything.
     // This happens when we are allocating a page from the end of the file.
-    if (offset >= file_size)
+    if (offset >= file_size) {
         return false;
+    }
 
     auto read_size = out.size();
     auto s = m_file->read(out.data(), read_size, offset);

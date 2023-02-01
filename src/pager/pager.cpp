@@ -26,7 +26,7 @@ auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
     
     auto ptr = Pager::Ptr {new (std::nothrow) Pager {param, std::move(*framer)}};
     if (ptr == nullptr)
-        return tl::make_unexpected(system_error("could not make_room pager object: out of memory"));
+        return tl::make_unexpected(system_error("could not allocate pager object: out of memory"));
     return ptr;
 }
 

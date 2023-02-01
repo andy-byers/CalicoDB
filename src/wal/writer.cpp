@@ -63,7 +63,7 @@ auto LogWriter::flush() -> Status
 {
     // Already flushed.
     if (m_offset == 0) {
-        return logic_error("could not flush: nothing to flush");
+        return ok();
     }
 
     // Clear unused bytes at the end of the tail buffer.
@@ -112,9 +112,7 @@ auto WalWriter::write(WalPayloadIn payload) -> void
 
 auto WalWriter::flush() -> void
 {
-    auto s = m_writer->flush();
-    // Throw away logic errors due to the tail buffer being empty.
-    CALICO_ERROR_IF(s.is_logic_error() ? ok() : s);
+    CALICO_ERROR_IF(m_writer->flush());
 }
 
 auto WalWriter::advance() -> void
@@ -148,37 +146,25 @@ auto WalWriter::close_segment() -> Status
         return logic_error("segment file is already closed");
     }
 
-    auto s = m_writer->flush();
-    bool is_empty {};
+    flush();
+    const auto written = m_writer->block_count() != 0;
 
-    // We get a logic error if the tail buffer was empty. In this case, it is possible
-    // that the whole segment is empty.
-    if (!s.is_ok()) {
-        is_empty = m_writer->block_count() == 0;
-        if (s.is_logic_error()) {
-            s = ok();
-        }
-    }
     m_writer.reset();
     m_file.reset();
 
-    auto id = std::exchange(m_current, Id::null());
-
-    // We want to do this part, even if the flush failed.
-    if (is_empty) {
-        auto t = m_storage->remove_file(m_prefix + encode_segment_name(id));
-        s = s.is_ok() ? t : s;
-    } else {
+    if (const auto id = std::exchange(m_current, Id::null()); written) {
         m_set->add_segment(id);
+    } else {
+        CALICO_TRY_S(m_storage->remove_file(m_prefix + encode_segment_name(id)));
     }
-    return s;
+    return ok();
 }
 
 auto WalWriter::advance_segment() -> Status
 {
     auto s = close_segment();
     if (s.is_ok()) {
-        return open_segment(Id {m_set->last().value + 1});
+        return open_segment({m_set->last().value + 1});
     }
     return s;
 }

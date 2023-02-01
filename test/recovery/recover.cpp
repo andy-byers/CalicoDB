@@ -34,7 +34,7 @@ auto main(int argc, const char *argv[]) -> int
     const auto num_committed = std::stoul(argv[2]);
 
     if (!fs::exists(value_path)) {
-        fmt::print("cannot run recovery: database from `fail` does not exist (run `fail` first)\n");
+        fmt::print(stderr, "cannot run recovery: database from `fail` does not exist (run `fail` first)\n");
         return 1;
     }
 
