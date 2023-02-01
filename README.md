@@ -50,10 +50,11 @@ Performance benchmarks are provided in the [`benchmarks`](benchmarks) folder.
 ## TODO
 1. Get everything code reviewed!
 2. Get unit test coverage up
-3. Work on the documentation in [doc](doc)
-4. Work on performance
+3. Support Windows
+4. Work on the documentation in [doc](doc)
+5. Work on performance
     + B<sup>+</sup>-tree splitting algorithm could be modified to favor sequential writes less
-5. Need some way to reduce the file size once many pages become unused
+6. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
     + Look into SQLite's pointer maps
 

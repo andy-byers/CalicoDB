@@ -100,25 +100,27 @@ WalWriter::WalWriter(const Parameters &param)
 
 auto WalWriter::write(WalPayloadIn payload) -> void
 {
-    if (system->has_error()) {
-        return;
-    }
-
-    CALICO_ERROR_IF(m_writer->write(payload));
-    if (m_writer->block_count() >= m_wal_limit) {
-        CALICO_ERROR_IF(advance_segment());
+    if (m_writer.has_value()) {
+        CALICO_ERROR_IF(m_writer->write(payload));
+        if (m_writer->block_count() >= m_wal_limit) {
+            CALICO_ERROR_IF(advance_segment());
+        }
     }
 }
 
 auto WalWriter::flush() -> void
 {
-    CALICO_ERROR_IF(m_writer->flush());
+    if (m_writer.has_value()) {
+        CALICO_ERROR_IF(m_writer->flush());
+    }
 }
 
 auto WalWriter::advance() -> void
 {
-    // NOTE: advance() is a NOOP if the current WAL segment hasn't been written to.
-    CALICO_ERROR_IF(advance_segment());
+    if (m_writer.has_value()) {
+        // NOTE: advance() is a NOOP if the current WAL segment hasn't been written to.
+        CALICO_ERROR_IF(advance_segment());
+    }
 }
 
 auto WalWriter::destroy() && -> Status

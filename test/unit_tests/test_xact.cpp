@@ -1007,13 +1007,12 @@ public:
                 break;
             }
         }
+        (void)xact.abort();
+        assert_special_error(db->close());
 
         // Clone the database while there are still pages waiting to be written to the database file. We'll have
         // to use the WAL to recover.
         auto cloned = storage->clone();
-
-        (void)xact.abort();
-        db.reset();
 
         storage.reset(dynamic_cast<HeapStorage *>(cloned));
         options.storage = storage.get();

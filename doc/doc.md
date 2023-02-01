@@ -50,7 +50,7 @@ CalicoDB
 ┃ ┗╸transaction.h ┄┄ Transaction object
 ┣╸src
 ┃ ┣╸core ┄┄┄┄┄┄┄┄┄┄┄ API implementation
-┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Cache layer
+┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Database page cache
 ┃ ┣╸storage ┄┄┄┄┄┄┄┄ Data storage and retrieval
 ┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Common utilities

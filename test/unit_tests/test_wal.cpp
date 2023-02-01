@@ -677,14 +677,15 @@ public:
 
     auto emit_segments(Size num_writes)
     {
-        for (Size i {}; i < num_writes; ++i)
+        for (Size i {}; i < num_writes; ++i) {
             tasks.dispatch(get_payload(), i == num_writes - 1);
+        }
 
         return std::move(writer).destroy();
     }
 
     [[nodiscard]]
-    auto contains_sequence(WalReader &reader, Id final_lsn) -> Status
+    static auto contains_sequence(WalReader &reader, Id final_lsn) -> Status
     {
         auto s = ok();
         Id lsn;

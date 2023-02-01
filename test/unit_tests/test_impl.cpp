@@ -178,8 +178,6 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     ASSERT_TRUE(db.open(ROOT, invalid).is_invalid_argument());
 }
 
-// TODO: It would be nice to have better parallelism in the pager for multiple readers. Currently, we lock a mutex around all pager operations,
-//       causing a lot of contention. Maybe we could use some kind of per-frame locks?
 class ReaderTests: public BasicDatabaseTests {
 public:
     static constexpr Size KEY_WIDTH {6};
@@ -222,7 +220,7 @@ public:
         }
     }
 
-    auto distributed_reader(Size r) -> void
+    auto distributed_reader(Size r) const -> void
     {
         static constexpr Size MAX_ROUND_SIZE {10};
         // Try to spread the cursors out across the database.
@@ -247,7 +245,6 @@ public:
 TEST_F(ReaderTests, SingleReader)
 {
     for (Size x {}; x < 1'000; ++x) {
-
         std::vector<std::string> strings;
         for (Size i {}; i < NUM_RECORDS; ++i) {
             auto c = db.cursor();
@@ -260,20 +257,27 @@ TEST_F(ReaderTests, SingleReader)
     localized_reader();
 }
 
-TEST_F(ReaderTests, ManyDistributedReaders)
+TEST_F(ReaderTests, DistributedReaders)
 {
     std::vector<std::thread> readers;
-    for (Size i {}; i < frame_count * 2; ++i)
-        readers.emplace_back(std::thread {[this, i] {distributed_reader(i);}});
-    for (auto &reader: readers)
+    for (Size i {}; i < frame_count * 2; ++i) {
+        readers.emplace_back(std::thread {[this, i] {
+            distributed_reader(i);
+        }});
+    }
+    for (auto &reader: readers) {
         reader.join();
+    }
 }
 
-TEST_F(ReaderTests, ManyLocalizedReaders)
+TEST_F(ReaderTests, LocalizedReaders)
 {
     std::vector<std::thread> readers;
-    for (Size i {}; i < frame_count * 2; ++i)
-        readers.emplace_back(std::thread {[this] {localized_reader();}});
+    for (Size i {}; i < frame_count * 2; ++i) {
+        readers.emplace_back(std::thread {[this] {
+            localized_reader();
+        }});
+    }
     for (auto &reader: readers)
         reader.join();
 }
@@ -430,5 +434,198 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
     }
     ASSERT_EQ(snapshot, TestDatabase {*clone}.snapshot());
 }
+
+enum class ErrorTarget {
+    DATA_WRITE,
+    DATA_READ,
+    WAL_WRITE,
+    WAL_READ,
+};
+
+struct ErrorWrapper {
+    ErrorTarget target {};
+    Size successes {};
+};
+
+class DbErrorTests: public testing::TestWithParam<ErrorWrapper> {
+protected:
+    DbErrorTests()
+    {
+        storage = std::make_unique<HeapStorage>();
+        EXPECT_OK(storage->create_directory("test"));
+        db = std::make_unique<TestDatabase>(*storage);
+
+        auto xact = db->impl->start();
+        committed = add_records(*db, 5'000, 10);
+        EXPECT_OK(xact.commit());
+
+        interceptors::set_read([this](const auto &prefix, ...) {
+            if (prefix == "test/data") {
+                if (counter++ >= GetParam().successes) {
+                    return special_error();
+                }
+            }
+            return ok();
+        });
+    }
+    ~DbErrorTests() override = default;
+
+    std::unique_ptr<Storage> storage;
+    std::unique_ptr<TestDatabase> db;
+    std::vector<Record> committed;
+    Size counter {};
+};
+
+TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
+{
+    const auto stat = db->impl->statistics();
+
+    for (Size iteration {}; iteration < 2; ++iteration) {
+        for (Size i {}, n = stat.record_count(); i < n; ++i) {
+            std::string value;
+            const auto s = db->impl->get(make_key(i), value);
+
+            if (!s.is_ok()) {
+                assert_special_error(s);
+                break;
+            }
+        }
+        ASSERT_OK(db->impl->status());
+        counter = 0;
+    }
+}
+
+TEST_P(DbErrorTests, HandlesReadErrorDuringIteration)
+{
+    auto cursor = db->impl->cursor();
+    cursor.seek_first();
+    while (cursor.is_valid()) {
+        (void)cursor.key();
+        (void)cursor.value();
+        cursor.next();
+    }
+    assert_special_error(cursor.status());
+    ASSERT_OK(db->impl->status());
+    counter = 0;
+
+    cursor.seek_last();
+    while (cursor.is_valid()) {
+        (void)cursor.key();
+        (void)cursor.value();
+        cursor.previous();
+    }
+    assert_special_error(cursor.status());
+    ASSERT_OK(db->impl->status());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DbErrorTests,
+    DbErrorTests,
+    ::testing::Values(
+        ErrorWrapper {{}, 0},
+        ErrorWrapper {{}, 1},
+        ErrorWrapper {{}, 10},
+        ErrorWrapper {{}, 100}));
+
+class DbFatalErrorTests: public testing::TestWithParam<ErrorWrapper> {
+protected:
+    DbFatalErrorTests()
+    {
+        storage = std::make_unique<HeapStorage>();
+        EXPECT_OK(storage->create_directory("test"));
+        db = std::make_unique<TestDatabase>(*storage);
+
+        auto xact = db->impl->start();
+        committed = add_records(*db, 5'000, 10);
+        EXPECT_OK(xact.commit());
+
+        const auto make_interceptor = [this](const auto &prefix) {
+            return [this, prefix](const auto &filename, ...) {
+                if (Slice {filename}.starts_with(prefix)) {
+                    if (counter++ == GetParam().successes) {
+                        return special_error();
+                    }
+                }
+                return ok();
+            };
+        };
+
+        switch (GetParam().target) {
+            case ErrorTarget::DATA_READ:
+                interceptors::set_read(make_interceptor("test/data"));
+                break;
+            case ErrorTarget::DATA_WRITE:
+                interceptors::set_write(make_interceptor("test/data"));
+                break;
+            case ErrorTarget::WAL_READ:
+                interceptors::set_read(make_interceptor("test/wal"));
+                break;
+            case ErrorTarget::WAL_WRITE:
+                interceptors::set_write(make_interceptor("test/wal"));
+                break;
+        }
+    }
+
+    ~DbFatalErrorTests() override = default;
+
+    std::unique_ptr<Storage> storage;
+    std::unique_ptr<TestDatabase> db;
+    std::vector<Record> committed;
+    Size counter {};
+};
+
+TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
+{
+    const auto count = db->impl->statistics().record_count();
+
+    while (db->impl->status().is_ok()) {
+        for (Size i {}; i < count && db->impl->erase(make_key(i)).is_ok(); ++i) {
+
+        }
+        for (Size i {}; i < count && db->impl->put(make_key(i), "value").is_ok(); ++i) {
+
+        }
+    }
+    assert_special_error(db->impl->status());
+    assert_special_error(db->impl->put("key", "value"));
+}
+
+TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
+{
+    const auto count = db->impl->statistics().record_count();
+
+    auto xact = db->impl->start();
+    Size i {};
+    while (i < count && db->impl->erase(make_key(i++)).is_ok()) {
+
+    }
+    assert_special_error(db->impl->status());
+    assert_special_error(xact.commit());
+    assert_special_error(db->impl->put("key", "value"));
+    assert_special_error(db->impl->close());
+
+    ASSERT_OK(db->impl->open("test", db->options));
+    for (const auto &[key, value]: committed) {
+        tools::expect_contains(*db->impl, key, value);
+    }
+    ASSERT_EQ(db->impl->statistics().record_count(), committed.size());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DbFatalErrorTests,
+    DbFatalErrorTests,
+    ::testing::Values(
+        ErrorWrapper {ErrorTarget::DATA_READ, 0},
+        ErrorWrapper {ErrorTarget::DATA_READ, 1},
+        ErrorWrapper {ErrorTarget::DATA_READ, 10},
+        ErrorWrapper {ErrorTarget::DATA_READ, 100},
+        ErrorWrapper {ErrorTarget::DATA_WRITE, 0},
+        ErrorWrapper {ErrorTarget::DATA_WRITE, 1},
+        ErrorWrapper {ErrorTarget::DATA_WRITE, 10},
+        ErrorWrapper {ErrorTarget::DATA_WRITE, 100},
+        ErrorWrapper {ErrorTarget::WAL_WRITE, 0},
+        ErrorWrapper {ErrorTarget::WAL_WRITE, 1},
+        ErrorWrapper {ErrorTarget::WAL_WRITE, 10},
+        ErrorWrapper {ErrorTarget::WAL_WRITE, 100}));
 
 } // <anonymous>
