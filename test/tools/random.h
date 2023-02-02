@@ -23,8 +23,13 @@ public:
         using Result = std::common_type_t<T1, T2>;
         static_assert(std::is_integral_v<Result> || std::is_floating_point_v<Result>);
 
-        Distribution<Result> distribution {Result(lower), Result(upper)};
-        return distribution(m_rng);
+        if constexpr (std::is_same_v<Result, Byte>) {
+            Distribution<int> distribution {int(lower), int(upper)};
+            return distribution(m_rng);
+        } else {
+            Distribution<Result> distribution {Result(lower), Result(upper)};
+            return distribution(m_rng);
+        }
     }
 
     template<class Container, class T1, class T2>

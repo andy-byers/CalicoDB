@@ -1018,7 +1018,7 @@ public:
         options.storage = storage.get();
 
         db = std::make_unique<DatabaseImpl>();
-        interceptors::set_write([](...) {return ok();});
+        interceptors::set_write([](auto, auto, auto) {return ok();});
     }
 
     auto validate() -> void

@@ -93,11 +93,13 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     }
 
     auto initial = setup(m_prefix, *m_storage, sanitized);
-    if (!initial.has_value())
+    if (!initial.has_value()) {
         return initial.error();
+    }
     auto [state, is_new] = *initial;
-    if (!is_new)
+    if (!is_new) {
         sanitized.page_size = state.page_size;
+    }
 
     maximum_key_size = compute_max_local(sanitized.page_size);
 
@@ -106,8 +108,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         const auto buffer_count = sanitized.wal_buffer_size / scratch_size;
 
         m_scratch = std::make_unique<LogScratchManager>(
-            scratch_size,
-            buffer_count);
+            scratch_size, buffer_count);
 
         // The WAL segments may be stored elsewhere.
         auto wal_prefix = sanitized.wal_prefix.is_empty()

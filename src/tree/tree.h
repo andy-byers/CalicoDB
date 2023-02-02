@@ -1,6 +1,7 @@
 #ifndef CALICO_TREE_H
 #define CALICO_TREE_H
 
+#include <array>
 #include "free_list.h"
 #include "node.h"
 #include "utils/expected.hpp"
