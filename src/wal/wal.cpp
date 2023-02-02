@@ -166,8 +166,9 @@ auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 
 auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Status
 {
-    if (m_set.first().is_null())
+    if (m_set.first().is_null()) {
         return ok();
+    }
 
     if (m_last_lsn.is_null()) {
         m_last_lsn = begin_lsn;
@@ -235,8 +236,6 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
     }
     const auto last_id = reader->segment_id();
 
-    // Translate the error status if needed. Note that we allow an incomplete record at the end of the
-    // most-recently-written segment.
     if (!s.is_ok()) {
         if (s.is_corruption()) {
             if (last_id != m_set.last()) {
@@ -261,7 +260,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
         return reader.error();
     }
 
-    // Find the most-recent segment.
+    // Find the most-recent segment and cache the first LSNs.
     for (; ; ) {
         auto s = reader->seek_next();
         if (s.is_not_found()) {

@@ -3,14 +3,11 @@
 #include <vector>
 #include <gtest/gtest.h>
 
-#include "calico/options.h"
 #include "calico/slice.h"
-#include "calico/status.h"
 #include "random.h"
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/expect.h"
-#include "tree/header.h"
 #include "utils/crc.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
@@ -758,5 +755,44 @@ namespace crc32c {
     }
 
 }  // namespace crc32c
+
+[[nodiscard]]
+auto describe_size(Size size, int precision = 4) -> std::string
+{
+    static constexpr Size KiB {1'024};
+    static constexpr auto MiB = KiB * KiB;
+    static constexpr auto GiB = MiB * KiB;
+
+    std::ostringstream oss;
+    oss.precision(precision);
+
+    if (size < KiB) {
+        oss << size << " B";
+    } else if (size < MiB) {
+        oss << static_cast<double>(size) / KiB << " KiB";
+    } else if (size < GiB) {
+        oss << static_cast<double>(size) / MiB << " MiB";
+    } else {
+        oss << static_cast<double>(size) / GiB << " GiB";
+    }
+    return oss.str();
+}
+
+TEST(SizeDescriptorTests, ProducesSensibleResults)
+{
+    const auto high_precision = 13;
+    ASSERT_EQ(describe_size(1ULL, high_precision), "1 B");
+    ASSERT_EQ(describe_size(1'024ULL, high_precision), "1 KiB");
+    ASSERT_EQ(describe_size(1'048'576ULL, high_precision), "1 MiB");
+    ASSERT_EQ(describe_size(1'073'741'824ULL, high_precision), "1 GiB");
+
+    ASSERT_EQ(describe_size(11 * 1ULL, high_precision), "11 B");
+    ASSERT_EQ(describe_size(22 * 1'024ULL, high_precision), "22 KiB");
+    ASSERT_EQ(describe_size(33 * 1'048'576ULL, high_precision), "33 MiB");
+    ASSERT_EQ(describe_size(44 * 1'073'741'824ULL, high_precision), "44 GiB");
+
+    ASSERT_EQ(describe_size(1'000ULL, 1), "1000 B");
+    ASSERT_EQ(describe_size(10'000ULL, 3), "9.77 KiB");
+}
 
 } // namespace Calico

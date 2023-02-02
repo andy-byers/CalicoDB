@@ -1,4 +1,4 @@
-/* 
+/*
  * encoding.h: Simple serialization/deserialization procedures based on those found in LevelDB.
  */
 #ifndef CALICO_UTILS_ENCODING_H
@@ -13,7 +13,7 @@ namespace Calico {
 inline auto get_u16(const Byte *in) noexcept -> std::uint16_t
 {
     const auto src = reinterpret_cast<const std::uint8_t *>(in);
-    return static_cast<std::uint16_t>(src[0] | (src[1] << 8));
+    return static_cast<std::uint16_t>(src[0] | src[1] << 8);
 }
 
 inline auto get_u16(const Slice &in) noexcept -> std::uint16_t
@@ -25,9 +25,9 @@ inline auto get_u32(const Byte *in) noexcept -> std::uint32_t
 {
     const auto src = reinterpret_cast<const std::uint8_t *>(in);
     return static_cast<std::uint32_t>(src[0]) |
-           (static_cast<std::uint32_t>(src[1]) << 8) |
-           (static_cast<std::uint32_t>(src[2]) << 16) |
-           (static_cast<std::uint32_t>(src[3]) << 24);
+           static_cast<std::uint32_t>(src[1]) << 8 |
+           static_cast<std::uint32_t>(src[2]) << 16 |
+           static_cast<std::uint32_t>(src[3]) << 24;
 }
 
 inline auto get_u32(const Slice &in) noexcept -> std::uint32_t
@@ -39,13 +39,13 @@ inline auto get_u64(const Byte *in) noexcept -> std::uint64_t
 {
     const auto src = reinterpret_cast<const std::uint8_t *>(in);
     return static_cast<std::uint64_t>(src[0]) |
-           (static_cast<std::uint64_t>(src[1]) << 8) |
-           (static_cast<std::uint64_t>(src[2]) << 16) |
-           (static_cast<std::uint64_t>(src[3]) << 24) |
-           (static_cast<std::uint64_t>(src[4]) << 32) |
-           (static_cast<std::uint64_t>(src[5]) << 40) |
-           (static_cast<std::uint64_t>(src[6]) << 48) |
-           (static_cast<std::uint64_t>(src[7]) << 56);
+           static_cast<std::uint64_t>(src[1]) << 8 |
+           static_cast<std::uint64_t>(src[2]) << 16 |
+           static_cast<std::uint64_t>(src[3]) << 24 |
+           static_cast<std::uint64_t>(src[4]) << 32 |
+           static_cast<std::uint64_t>(src[5]) << 40 |
+           static_cast<std::uint64_t>(src[6]) << 48 |
+           static_cast<std::uint64_t>(src[7]) << 56;
 }
 
 inline auto get_u64(const Slice &in) noexcept -> std::uint64_t

@@ -1,5 +1,5 @@
-#ifndef CALICO_DB_DATABASE_IMPL_H
-#define CALICO_DB_DATABASE_IMPL_H
+#ifndef CALICO_CORE_DATABASE_IMPL_H
+#define CALICO_CORE_DATABASE_IMPL_H
 
 #include "calico/database.h"
 #include "recovery.h"
@@ -64,17 +64,18 @@ private:
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_abort() -> Status;
+    [[nodiscard]] auto do_close() -> Status;
 
     std::string m_prefix;
     LogPtr m_log;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
-    Storage *m_store {};
-    bool m_owns_store {};
+    Storage *m_storage {};
+    bool m_owns_storage {};
 };
 
 auto setup(const std::string &, Storage &, const Options &) -> tl::expected<InitialState, Status>;
 
 } // namespace Calico
 
-#endif // CALICO_DB_DATABASE_IMPL_H
+#endif // CALICO_CORE_DATABASE_IMPL_H

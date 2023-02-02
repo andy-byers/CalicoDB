@@ -256,7 +256,7 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
     }
 
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
-    // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is incremented each time the WAL flushes a block.
+    // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is increased each time the WAL flushes a block.
     bool success;
     while ((success = !system->has_error())) {
         auto s = pin_frame(pid);

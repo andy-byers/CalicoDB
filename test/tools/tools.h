@@ -1,6 +1,6 @@
 
-#ifndef CALICO_TEST_TOOLS_TOOLS_H
-#define CALICO_TEST_TOOLS_TOOLS_H
+#ifndef CALICO_TEST_TOOLS_H
+#define CALICO_TEST_TOOLS_H
 
 #include "calico/calico.h"
 #include "calico/cursor.h"
@@ -23,7 +23,7 @@ inline auto expect_ok(const Status &s) -> void
 {
     if (!s.is_ok()) {
         fmt::print(stderr, "unexpected {} status: {}\n", get_status_name(s), s.what().data());
-        CALICO_EXPECT_TRUE(false && "expect_ok() failed");
+        std::abort();
     }
 }
 
@@ -433,4 +433,4 @@ auto operator>=(const Calico::Record&, const Calico::Record&) -> bool;
 auto operator==(const Calico::Record&, const Calico::Record&) -> bool;
 auto operator!=(const Calico::Record&, const Calico::Record&) -> bool;
 
-#endif // CALICO_TEST_TOOLS_TOOLS_H
+#endif // CALICO_TEST_TOOLS_H

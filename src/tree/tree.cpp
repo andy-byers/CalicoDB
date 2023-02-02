@@ -405,7 +405,7 @@ public:
         write_cell(parent, itr.index(), separator);
 
         if (parent.overflow) {
-            // Only detach the cell if it couldn't fit in the parent. In this case, we want to release "node" before
+            // Only detach the cell if it couldn't fit in the parent. In this case, we want to release node before
             // we return, so cell cannot be attached to it anymore. The separator should have already been promoted.
             if (!separator.is_free) {
                 detach_cell(*parent.overflow, scratch_at(tree, 0));
@@ -435,7 +435,7 @@ public:
             }
             CALICO_NEW_R(parent, acquire_node(tree, node.header.parent_id, true));
             // NOTE: Searching for the anchor key from the node we took from should always
-            //       give us the correct index due to the B+-tree ordering rules. TODO: Cache these indices on the way down?
+            //       give us the correct index due to the B+-tree ordering rules.
             Node::Iterator itr {parent};
             const auto exact = itr.seek(anchor);
             const auto index = itr.index() + exact;

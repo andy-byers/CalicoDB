@@ -1,5 +1,5 @@
-#ifndef CALICO_UTILS_UTILS_H
-#define CALICO_UTILS_UTILS_H
+#ifndef CALICO_UTILS_H
+#define CALICO_UTILS_H
 
 #include "calico/slice.h"
 #include "expect.h"
@@ -297,4 +297,4 @@ auto not_found(const std::string_view &format, Ts &&...ts) -> Status
 
 } // namespace Calico
 
-#endif // CALICO_UTILS_UTILS_H
+#endif // CALICO_UTILS_H

@@ -46,13 +46,13 @@ public:
     Lsn commit_lsn {};
 
     System(const std::string &prefix, const Options &options);
-    auto create_log(const std::string_view &name) const -> LogPtr;
+    auto create_log(const std::string &name) const -> LogPtr;
     auto push_error(Error::Level level, Status status) -> void;
     auto original_error() const -> Error;
     auto pop_error() -> Error;
 
     // Check if the system has an error. We should only pop errors from one thread, so if this returns true, it is
-    // safe to call pop_error() and top_error().
+    // safe to call pop_error() or original_error().
     [[nodiscard]] auto has_error() const -> bool;
 
 private:

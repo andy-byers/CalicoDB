@@ -1,5 +1,5 @@
-#ifndef CALICO_WAL_WAL_H
-#define CALICO_WAL_WAL_H
+#ifndef CALICO_WAL_H
+#define CALICO_WAL_H
 
 #include <atomic>
 #include <functional>
@@ -90,4 +90,4 @@ private:
 
 } // namespace Calico
 
-#endif // CALICO_WAL_WAL_H
+#endif // CALICO_WAL_H

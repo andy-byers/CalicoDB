@@ -37,6 +37,7 @@ CalicoDB
 ┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
 ┣╸cmake ┄┄┄┄┄┄┄┄┄┄┄┄ CMake utilities/config files
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
+┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄┄┄ libFuzzer fuzzers
 ┣╸include/calico
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants

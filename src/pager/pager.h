@@ -1,5 +1,5 @@
-#ifndef CALICO_PAGER_PAGER_H
-#define CALICO_PAGER_PAGER_H
+#ifndef CALICO_PAGER_H
+#define CALICO_PAGER_H
 
 #include <mutex>
 #include <unordered_set>
@@ -74,4 +74,4 @@ private:
 
 } // namespace Calico
 
-#endif // CALICO_PAGER_PAGER_H
+#endif // CALICO_PAGER_H

@@ -1,5 +1,5 @@
-#ifndef CALICO_TREE_BPLUS_TREE_H
-#define CALICO_TREE_BPLUS_TREE_H
+#ifndef CALICO_TREE_H
+#define CALICO_TREE_H
 
 #include "free_list.h"
 #include "node.h"
@@ -71,4 +71,4 @@ public:
 
 } // namespace Calico
 
-#endif // CALICO_TREE_BPLUS_TREE_H
+#endif // CALICO_TREE_H

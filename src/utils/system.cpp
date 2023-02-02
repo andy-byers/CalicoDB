@@ -78,10 +78,10 @@ System::System(const std::string &prefix, const Options &options)
     }
 }
 
-auto System::create_log(const std::string_view &name) const -> LogPtr
+auto System::create_log(const std::string &name) const -> LogPtr
 {
     CALICO_EXPECT_FALSE(name.empty());
-    return std::make_shared<Log>(std::string {name}, m_sink);
+    return std::make_shared<Log>(name, m_sink);
 }
 
 auto System::push_error(Error::Level level, Status status) -> void
@@ -91,7 +91,7 @@ auto System::push_error(Error::Level level, Status status) -> void
     // All errors get logged.
     m_log->log(to_spdlog_level(level), status.what().data());
 
-    // Only severe errors get saved.
+    // Only fatal errors get saved.
     if (level >= Error::ERROR) {
         std::lock_guard lock {m_mutex};
         m_errors.emplace_back(Error {std::move(status), level});

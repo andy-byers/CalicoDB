@@ -86,16 +86,18 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         }
     }
 
-    m_store = sanitized.storage;
-    if (m_store == nullptr) {
-        m_store = new PosixStorage;
-        m_owns_store = true;
+    m_storage = sanitized.storage;
+    if (m_storage == nullptr) {
+        m_storage = new PosixStorage;
+        m_owns_storage = true;
     }
 
-    auto initial = setup(m_prefix, *m_store, sanitized);
-    if (!initial.has_value()) return initial.error();
+    auto initial = setup(m_prefix, *m_storage, sanitized);
+    if (!initial.has_value())
+        return initial.error();
     auto [state, is_new] = *initial;
-    if (!is_new) sanitized.page_size = state.page_size;
+    if (!is_new)
+        sanitized.page_size = state.page_size;
 
     maximum_key_size = compute_max_local(sanitized.page_size);
 
@@ -109,14 +111,15 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
         // The WAL segments may be stored elsewhere.
         auto wal_prefix = sanitized.wal_prefix.is_empty()
-            ? m_prefix : sanitized.wal_prefix.to_string();
+                              ? m_prefix
+                              : sanitized.wal_prefix.to_string();
         if (wal_prefix.back() != '/') {
             wal_prefix += '/';
         }
 
         auto r = WriteAheadLog::open({
             wal_prefix,
-            m_store,
+            m_storage,
             system.get(),
             sanitized.page_size,
             buffer_count * 32,
@@ -131,7 +134,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     {
         auto r = Pager::open({
             m_prefix,
-            m_store,
+            m_storage,
             m_scratch.get(),
             wal.get(),
             system.get(),
@@ -184,12 +187,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
 DatabaseImpl::~DatabaseImpl()
 {
-    wal.reset();
-    pager.reset();
-
-    if (m_owns_store) {
-        delete m_store;
-    }
+    (void)do_close();
 }
 
 auto DatabaseImpl::destroy() -> Status
@@ -198,15 +196,15 @@ auto DatabaseImpl::destroy() -> Status
     wal.reset();
 
     std::vector<std::string> children;
-    s = m_store->get_children(m_prefix, children);
+    s = m_storage->get_children(m_prefix, children);
 
     if (s.is_ok()) {
         for (const auto &name: children) {
-            CALICO_WARN_IF(m_store->remove_file(name));
+            CALICO_WARN_IF(m_storage->remove_file(name));
         }
 
         // Remove the directory, which should be empty now.
-        CALICO_ERROR_IF(m_store->remove_directory(m_prefix));
+        CALICO_ERROR_IF(m_storage->remove_directory(m_prefix));
     } else {
         CALICO_ERROR(s);
     }
@@ -335,6 +333,18 @@ auto DatabaseImpl::atomic_erase(const Slice &key) -> Status
     }
 }
 
+auto DatabaseImpl::do_close() -> Status
+{
+    wal.reset();
+    pager.reset();
+
+    if (m_owns_storage) {
+        m_owns_storage = false;
+        delete m_storage;
+    }
+    return status();
+}
+
 auto DatabaseImpl::commit() -> Status
 {
     if (!system->has_xact) {
@@ -412,9 +422,7 @@ auto DatabaseImpl::close() -> Status
             wal->flush();
         }
     }
-    wal.reset();
-    pager.reset();
-    return status();
+    return do_close();
 }
 
 auto DatabaseImpl::ensure_consistency_on_startup() -> Status
@@ -473,7 +481,7 @@ auto DatabaseImpl::load_state() -> Status
     pager->release(std::move(*root));
     if (pager->page_count() < before_count) {
         const auto after_size = pager->page_count() * pager->page_size();
-        return m_store->resize_file(m_prefix + "data", after_size);
+        return m_storage->resize_file(m_prefix + "data", after_size);
     }
     return ok();
 }
