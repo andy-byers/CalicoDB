@@ -614,6 +614,7 @@ public:
             &scratch,
             wal.get(),
             &state,
+            &status,
             frame_count,
             page_size,
         });

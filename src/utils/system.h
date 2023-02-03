@@ -37,6 +37,36 @@ struct Error {
 #define CALICO_ERROR_IF(expr) do {if (auto calico_error_s = (expr); !calico_error_s.is_ok()) CALICO_ERROR(calico_error_s);} while (0)
 #define CALICO_PANIC_IF(expr) do {if (auto calico_panic_s = (expr); !calico_panic_s.is_ok() CALICO_PANIC(calico_panic_s);} while (0)
 
+class ErrorBuffer {
+public:
+    [[nodiscard]]
+    auto is_ok() const -> bool
+    {
+        std::lock_guard lock {m_mutex};
+        return m_status.is_ok();
+    }
+
+    [[nodiscard]]
+    auto get() const -> const Status &
+    {
+        std::lock_guard lock {m_mutex};
+        return m_status;
+    }
+
+    auto set(Status status) -> void
+    {
+        CALICO_EXPECT_FALSE(status.is_ok());
+        std::lock_guard lock {m_mutex};
+        if (m_status.is_ok()) {
+            m_status = std::move(status);
+        }
+    }
+
+private:
+    mutable std::mutex m_mutex;
+    Status m_status {ok()};
+};
+
 class System {
 public:
     // True if we are currently in a transaction, false otherwise.

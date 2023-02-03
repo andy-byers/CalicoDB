@@ -521,7 +521,7 @@ public:
               PREFIX,
               Span {tail},
               storage.get(),
-              &system,
+              &error_buffer,
               &set,
               &flushed_lsn,
               WAL_LIMIT,
@@ -531,6 +531,7 @@ public:
     ~WalWriterTests() override = default;
 
     WalSet set;
+    ErrorBuffer error_buffer;
     LogScratchManager scratch;
     System system;
     std::atomic<Id> flushed_lsn {};
@@ -541,7 +542,7 @@ public:
 
 TEST_F(WalWriterTests, Destroy)
 {
-    ASSERT_OK(std::move(writer).destroy());
+    std::move(writer).destroy();
     ASSERT_FALSE(storage->file_exists(PREFIX + encode_segment_name(Id::root())).is_ok());
 }
 
@@ -554,7 +555,7 @@ TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterNormalClose)
     writer.advance();
 
     // Blocks until the last segment is deleted.
-    ASSERT_OK(std::move(writer).destroy());
+    std::move(writer).destroy();
     ASSERT_TRUE(set.segments().empty());
 
     std::vector<std::string> children;
@@ -566,14 +567,14 @@ template<class Test>
 static auto test_write_until_failure(Test &test) -> void
 {
     Id last_lsn;
-    while (!test.system.has_error()) {
+    while (test.error_buffer.is_ok()) {
         auto buffer = test.scratch.get();
         const auto size = test.random.get(1UL, buffer->size());
         test.writer.write(WalPayloadIn {{++last_lsn.value}, buffer->truncate(size)});
     }
 
     (void)std::move(test.writer).destroy();
-    assert_special_error(test.system.original_error().status);
+    assert_special_error(test.error_buffer.get());
 }
 
 template<class Test>
@@ -629,6 +630,7 @@ public:
 
     WalReaderWriterTests()
         : scratch {wal_scratch_size(PAGE_SIZE), 32},
+          error_buffer {std::make_unique<ErrorBuffer>()},
           reader_data(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00'),
@@ -636,7 +638,7 @@ public:
               PREFIX,
               Span {writer_tail},
               storage.get(),
-              &system,
+              error_buffer.get(),
               &set,
               &flushed_lsn,
               WAL_LIMIT,
@@ -681,7 +683,8 @@ public:
             tasks.dispatch(get_payload(), i == num_writes - 1);
         }
 
-        return std::move(writer).destroy();
+        std::move(writer).destroy();
+        return error_buffer->get();
     }
 
     [[nodiscard]]
@@ -764,6 +767,7 @@ public:
     Id last_lsn;
     std::vector<std::string> payloads;
     WalSet set;
+    std::unique_ptr<ErrorBuffer> error_buffer;
     LogScratchManager scratch;
     std::atomic<Id> flushed_lsn {};
     std::string reader_data;
@@ -848,9 +852,9 @@ TEST_F(WalReaderWriterTests, RollWalAfterWriteError)
     interceptors::set_write(FailOnce<1> {"test/wal-"});
 
     emit_segments(5'000);
-    ASSERT_TRUE(system.has_error());
-    assert_special_error(system.original_error().status);
-    system.pop_error();
+    ASSERT_FALSE(error_buffer->is_ok());
+    assert_special_error(error_buffer->get());
+    error_buffer = std::make_unique<ErrorBuffer>();
 
     auto reader = get_reader();
     ASSERT_OK(reader.open());
@@ -864,7 +868,8 @@ TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
     interceptors::set_open(FailOnce<3> {"test/wal-"});
 
     ASSERT_FALSE(emit_segments(5'000).is_ok());
-    assert_special_error(system.pop_error().status);
+    assert_special_error(error_buffer->get());
+    error_buffer = std::make_unique<ErrorBuffer>();
 
     auto reader = get_reader();
     ASSERT_OK(reader.open());
@@ -880,7 +885,7 @@ public:
               PREFIX,
               &limit,
               storage.get(),
-              &system,
+              &error_buffer,
               &set,
           }}
     {}
@@ -898,6 +903,7 @@ public:
         return out;
     }
 
+    ErrorBuffer error_buffer;
     std::atomic<Lsn> limit;
     WalCleanup cleanup;
 };
@@ -926,7 +932,7 @@ TEST_F(WalCleanupTests, RemovesObsoleteSegments)
     writer.write(get_payload());
     writer.advance();
 
-    ASSERT_OK(std::move(writer).destroy());
+    std::move(writer).destroy();
     ASSERT_EQ(set.segments().size(), 3);
 
     limit.store({3});
@@ -1065,14 +1071,11 @@ public:
             if (keep_clean) {
                 wal->cleanup(commit_lsn);
             }
-            if (state.has_error()) {
+            if (!wal->status().is_ok()) {
                 break;
             }
         }
-        if (state.has_error()) {
-            return state.original_error().status;
-        }
-        return ok();
+        return wal->status();
     }
 
     System state {"test", {}};

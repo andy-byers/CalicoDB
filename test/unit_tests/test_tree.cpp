@@ -570,6 +570,7 @@ public:
             &log_scratch,
             &wal,
             &system,
+            &status,
             8,
             param.page_size,
         });
@@ -628,6 +629,7 @@ public:
     BPlusTreeTestParameters param;
     LogScratchManager log_scratch;
     System system {PREFIX, {}};
+    Status status {ok()};
     DisabledWriteAheadLog wal;
     std::string scratch;
     std::unique_ptr<Pager> pager;

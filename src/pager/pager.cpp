@@ -14,6 +14,13 @@ namespace fs = std::filesystem;
 
 static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
 
+#define MAYBE_ERROR(expr) \
+    do { \
+        if (auto calico_s = (expr); !calico_s.is_ok()) { \
+            m_error->set(std::move(calico_s)); \
+        } \
+    } while (0)
+
 auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
 {
     auto framer = Framer::open(
@@ -21,12 +28,14 @@ auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
         param.storage,
         param.page_size,
         param.frame_count);
-    if (!framer.has_value())
+    if (!framer.has_value()) {
         return tl::make_unexpected(framer.error());
-    
+    }
+
     auto ptr = Pager::Ptr {new (std::nothrow) Pager {param, std::move(*framer)}};
-    if (ptr == nullptr)
+    if (ptr == nullptr) {
         return tl::make_unexpected(system_error("could not allocate pager object: out of memory"));
+    }
     return ptr;
 }
 
@@ -34,12 +43,14 @@ Pager::Pager(const Parameters &param, Framer framer)
     : system {param.system},
       m_framer {std::move(framer)},
       m_log {param.system->create_log("pager")},
+      m_status {param.status},
       m_scratch {param.scratch},
       m_wal {param.wal}
 {
     m_log->info("initializing, cache size is {}", param.frame_count * param.page_size);
 
     CALICO_EXPECT_NE(system, nullptr);
+    CALICO_EXPECT_NE(m_status, nullptr);
     CALICO_EXPECT_NE(m_scratch, nullptr);
     CALICO_EXPECT_NE(m_wal, nullptr);
 }
@@ -70,8 +81,7 @@ auto Pager::pin_frame(Id pid) -> Status
             if (!*success) {
                 auto s = not_found("could not find a frame to use");
                 CALICO_WARN(s);
-                m_wal->flush();
-                return s;
+                return m_wal->flush();
             }
         } else {
             return success.error();
@@ -193,7 +203,9 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
     });
 
     if (!evicted.has_value()) {
-        m_wal->flush();
+        if (auto s = m_wal->flush(); !s.is_ok()) {
+            *m_status = std::move(s);
+        }
         return false;
     }
 
@@ -240,10 +252,6 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
 {
     using std::end;
 
-    if (system->has_error()) {
-        return tl::make_unexpected(system->original_error().status);
-    }
-
     const auto do_acquire = [this](auto &entry) {
         return m_framer.ref(entry.frame_index);
     };
@@ -251,33 +259,43 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
     CALICO_EXPECT_FALSE(pid.is_null());
     std::lock_guard lock {m_mutex};
 
+    if (auto s = m_wal->status(); !s.is_ok()) {
+        *m_status = s;
+        return tl::make_unexpected(std::move(s));
+    }
+
+    if (auto s = *m_status; !s.is_ok()) {
+        return tl::make_unexpected(std::move(s));
+    }
+
     if (auto itr = m_registry.get(pid); itr != end(m_registry)) {
         return do_acquire(itr->value);
     }
 
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
     // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is increased each time the WAL flushes a block.
-    bool success;
-    while ((success = !system->has_error())) {
+    auto status = ok();
+    while ((status = m_wal->status()).is_ok()) {
         auto s = pin_frame(pid);
         if (s.is_ok()) {
             break;
         }
 
         if (!s.is_not_found()) {
-            CALICO_WARN(s);
+            m_log->warn("{}", s.what().data());
 
             // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
             // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
             // data races on this check.
             if (system->has_xact) {
-                CALICO_ERROR(s);
+                *m_status = s;
             }
-            return tl::make_unexpected(s);
+            return tl::make_unexpected(std::move(s));
         }
     }
-    if (!success) {
-        return tl::make_unexpected(system->original_error().status);
+    if (!status.is_ok()) {
+        *m_status = status;
+        return tl::make_unexpected(status);
     }
     auto itr = m_registry.get(pid);
     CALICO_EXPECT_NE(itr, end(m_registry));
@@ -321,7 +339,7 @@ auto Pager::release(Page page) -> void
             if (s.is_ok()) {
                 clean_page(entry);
             } else {
-                CALICO_ERROR(s);
+                *m_status = std::move(s);
             }
         }
     }
@@ -340,5 +358,7 @@ auto Pager::load_state(const FileHeader &header) -> void
     }
     m_framer.load_state(header);
 }
+
+#undef MAYBE_ERROR
 
 } // namespace Calico

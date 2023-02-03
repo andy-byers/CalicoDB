@@ -264,14 +264,14 @@ public:
 
     }
 
-    auto flush() -> void override
+    auto flush() -> Status override
     {
-
+        return ok();
     }
 
-    auto advance() -> void override
+    auto advance() -> Status override
     {
-
+        return ok();
     }
 
     [[nodiscard]]

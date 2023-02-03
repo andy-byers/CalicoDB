@@ -3,27 +3,15 @@
 
 namespace Calico {
 
-class DatabaseImpl;
 class Status;
 
-class Transaction final {
+class Transaction {
 public:
-    ~Transaction();
+    Transaction() = default;
+    virtual ~Transaction();
 
-    Transaction(const Transaction &) = delete;
-    auto operator=(const Transaction &) -> Transaction & = delete;
-
-    Transaction(Transaction &&rhs) noexcept;
-    auto operator=(Transaction &&rhs) noexcept -> Transaction &;
-
-    [[nodiscard]] auto commit() -> Status;
-    [[nodiscard]] auto abort() -> Status;
-
-private:
-    friend class DatabaseImpl;
-    explicit Transaction(DatabaseImpl &impl);
-
-    DatabaseImpl *m_impl {};
+    [[nodiscard]] virtual auto commit() -> Status = 0;
+    [[nodiscard]] virtual auto abort() -> Status = 0;
 };
 
 } // namespace Calico

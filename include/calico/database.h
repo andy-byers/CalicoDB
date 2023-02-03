@@ -13,26 +13,20 @@ class DatabaseImpl;
 class Status;
 class Transaction;
 
-class Database final {
+class Database {
 public:
-    Database();
-    ~Database();
+    virtual ~Database();
+    [[nodiscard]] static auto open(const Slice &path, const Options &options, Database **db) -> Status;
+    [[nodiscard]] static auto destroy(const Slice &path, const Options &options) -> Status;
 
-    [[nodiscard]] auto open(const Slice &path, const Options &options = {}) -> Status;
-    [[nodiscard]] auto close() -> Status;
-    [[nodiscard]] auto destroy() && -> Status;
-    [[nodiscard]] auto cursor() const -> Cursor;
-    [[nodiscard]] auto start() -> Transaction;
-    [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status;
-    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
-    [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto statistics() const -> Statistics;
-    [[nodiscard]] auto status() const -> Status;
+    [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
+    [[nodiscard]] virtual auto transaction() -> Transaction & = 0;
 
-private:
-    friend class DatabaseImpl;
-
-    const std::unique_ptr<DatabaseImpl> m_impl;
+    [[nodiscard]] virtual auto get(const Slice &key, std::string &out) const -> Status = 0;
+    [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
+    [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
+    [[nodiscard]] virtual auto statistics() const -> Statistics = 0;
+    [[nodiscard]] virtual auto status() const -> Status = 0;
 };
 
 } // namespace Calico

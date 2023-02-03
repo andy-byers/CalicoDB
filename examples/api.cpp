@@ -35,9 +35,6 @@ auto main(int, const char *[]) -> int
 
     /* opening-a-database */
 
-    // Create the database object.
-    Calico::Database db;
-
     // Set some initialization options.
     Calico::Options options;
 
@@ -53,12 +50,14 @@ auto main(int, const char *[]) -> int
     options.log_level = Calico::LogLevel::TRACE;
     options.log_target = Calico::LogTarget::STDERR_COLOR;
 
+    Calico::Database *db;
+
     {
         std::filesystem::remove_all("/tmp/cats");
         std::filesystem::remove_all(options.wal_prefix.to_string());
 
         // Create a database at "/tmp/cats".
-        auto s = db.open("/tmp/cats", options);
+        auto s = Calico::Database::open("/tmp/cats", options, &db);
 
         // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is null-
         // terminated, so it can be printed like in the following block.
@@ -73,7 +72,7 @@ auto main(int, const char *[]) -> int
     {
         // Insert a key-value pair. We can use arbitrary bytes for both the key and value, including NULL bytes, provided the slice
         // object knows the proper string length.
-        auto s = db.put("\x11\x22\x33", {"\xDD\xEE\x00\xFF", 4});
+        auto s = db->put("\x11\x22\x33", {"\xDD\xEE\x00\xFF", 4});
 
         // Again, the status object reports the outcome of the operation. Since we are not inside a transaction, all modifications
         // made to the database are applied atomically. This means that if this status is OK, then our key-value pair is safely on
@@ -84,7 +83,7 @@ auto main(int, const char *[]) -> int
         }
 
         // We can erase records by key.
-        s = db.erase("42");
+        s = db->erase("42");
 
         // If the key is not found, we'll receive a "not found" status.
         if (s.is_not_found()) {
@@ -97,12 +96,12 @@ auto main(int, const char *[]) -> int
     {
         // Query a value by key.
         std::string value;
-        if (db.get("\x10\x20\x30", value).is_ok()) {
+        if (db->get("\x10\x20\x30", value).is_ok()) {
 
         }
 
         // Open a cursor.
-        auto cursor = db.cursor();
+        auto cursor = db->cursor();
 
         // Seek to the first record greater than or equal to the given key.
         cursor.seek("\x10\x20\x30");
@@ -148,9 +147,9 @@ auto main(int, const char *[]) -> int
     {
         // Start a transaction. All modifications made to the database while this object is live will be part of the transaction
         // it represents.
-        auto xact = db.start();
+        auto xact = db->start();
 
-        auto s = db.erase("k");
+        auto s = db->erase("k");
         if (!s.is_ok()) {
 
         }
@@ -162,15 +161,14 @@ auto main(int, const char *[]) -> int
         }
 
         // If we want to start another transaction, we need to make another call to the database.
-        xact = db.start();
+        xact = db->start();
 
-        s = db.erase("42");
+        s = db->erase("42");
         if (!s.is_ok()) {
 
         }
 
-        // This time we'll commit the transaction. Note that if the transaction object goes out of scope before either abort()
-        // or commit() is called, an abort() will be attempted automatically.
+        // This time we'll commit the transaction.
         s = xact.commit();
         if (!s.is_ok()) {
 
@@ -181,7 +179,7 @@ auto main(int, const char *[]) -> int
 
     {
         // We can use a statistics object to get information about the database state.
-        const auto stat = db.statistics();
+        const auto stat = db->statistics();
         (void)stat.record_count();
         (void)stat.page_count();
         (void)stat.maximum_key_size();
@@ -198,22 +196,13 @@ auto main(int, const char *[]) -> int
     /* closing-a-database */
 
     {
-        auto s = db.close();
-        if (!s.is_ok()) {
-
-        }
-    }
-
-    // NOTE: Reopen the database so destroy() works.
-    if (auto s = db.open("/tmp/cats", options); !s.is_ok()) {
-        fprintf(stderr, "error: %s\n", s.what().data());
-        return 1;
+        delete db;
     }
 
     /* destroying-a-database */
 
     {
-        auto s = std::move(db).destroy();
+        auto s = Calico::Database::destroy("/tmp/cats", options);
         if (!s.is_ok()) {
 
         }

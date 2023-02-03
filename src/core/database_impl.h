@@ -24,23 +24,23 @@ struct InitialState {
     bool is_new {};
 };
 
-class DatabaseImpl final {
+class DatabaseImpl: public Database {
 public:
     friend class Database;
 
     DatabaseImpl() = default;
-    ~DatabaseImpl();
+    virtual ~DatabaseImpl() = default;
 
+    [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
     [[nodiscard]] auto close() -> Status;
-    [[nodiscard]] auto destroy() -> Status;
     [[nodiscard]] auto start() -> Transaction;
     [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto path() const -> std::string;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto commit() -> Status;
-    [[nodiscard]] auto abort() -> Status;
+    [[nodiscard]] auto commit(Size id) -> Status;
+    [[nodiscard]] auto abort(Size id) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status;
     [[nodiscard]] auto cursor() const -> Cursor;
     [[nodiscard]] auto statistics() -> Statistics;
@@ -64,13 +64,14 @@ private:
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_abort() -> Status;
-    [[nodiscard]] auto do_close() -> Status;
 
+    mutable Status m_status {ok()};
     std::string m_prefix;
     LogPtr m_log;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
     Storage *m_storage {};
+    Size m_txn_number {1};
     bool m_owns_storage {};
 };
 

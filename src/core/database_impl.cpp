@@ -12,10 +12,13 @@
 #include "tree/tree.h"
 #include "utils/system.h"
 #include "wal/wal.h"
+#include "wal/cleanup.h"
+#include "wal/writer.h"
 
 namespace Calico {
 
-[[nodiscard]] static auto sanitize_options(const Options &options) -> Options
+[[nodiscard]]
+static auto sanitize_options(const Options &options) -> Options
 {
     static constexpr Size KiB {1024};
 
@@ -65,8 +68,7 @@ auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
     }
 
     // Any error during initialization is fatal.
-    CALICO_ERROR_IF(do_open(sanitized));
-    return status();
+    return do_open(sanitized);
 }
 
 auto DatabaseImpl::do_open(Options sanitized) -> Status
@@ -92,7 +94,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         m_owns_storage = true;
     }
 
-    auto initial = setup(m_prefix, *m_storage, sanitized);
+    const auto initial = setup(m_prefix, *m_storage, sanitized);
     if (!initial.has_value()) {
         return initial.error();
     }
@@ -112,8 +114,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
         // The WAL segments may be stored elsewhere.
         auto wal_prefix = sanitized.wal_prefix.is_empty()
-                              ? m_prefix
-                              : sanitized.wal_prefix.to_string();
+            ? m_prefix : sanitized.wal_prefix.to_string();
         if (wal_prefix.back() != '/') {
             wal_prefix += '/';
         }
@@ -139,6 +140,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
             m_scratch.get(),
             wal.get(),
             system.get(),
+            &m_status,
             sanitized.page_cache_size / sanitized.page_size,
             sanitized.page_size,
         });
@@ -170,8 +172,9 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         state.header_crc = state.compute_crc();
         state.write(root->page);
         pager->release(std::move(*root).take());
+
         CALICO_TRY_S(xact.commit());
-        wal->flush();
+        CALICO_TRY_S(wal->flush());
         CALICO_TRY_S(pager->flush({}));
 
     } else {
@@ -183,38 +186,64 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     m_log->info("pager recovery lsn is {}", pager->recovery_lsn().value);
     m_log->info("wal flushed lsn is {}", wal->flushed_lsn().value);
     m_log->info("commit lsn is {}", system->commit_lsn.value);
-    return s;
+    return status();
 }
 
-DatabaseImpl::~DatabaseImpl()
+auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> Status
 {
-    (void)do_close();
-}
+    bool owns_storage {};
+    Storage *storage;
 
-auto DatabaseImpl::destroy() -> Status
-{
-    auto s = ok();
-    wal.reset();
+    if (options.storage) {
+        storage = options.storage;
+    } else {
+        storage = new PosixStorage;
+        owns_storage = true;
+    }
 
     std::vector<std::string> children;
-    s = m_storage->get_children(m_prefix, children);
-
-    if (s.is_ok()) {
+    if (auto s = storage->get_children(path, children); s.is_ok()) {
         for (const auto &name: children) {
-            CALICO_WARN_IF(m_storage->remove_file(name));
-        }
+            s = storage->remove_file(name);
+            if (!s.is_ok()) {
 
-        // Remove the directory, which should be empty now.
-        CALICO_ERROR_IF(m_storage->remove_directory(m_prefix));
+            }
+        }
     } else {
-        CALICO_ERROR(s);
+
+    }
+    if (!options.wal_prefix.is_empty()) {
+        children.clear();
+
+        if (auto s = storage->get_children(options.wal_prefix.to_string(), children); s.is_ok()) {
+            for (const auto &name: children) {
+                if (name.find("wal-") != std::string::npos) {
+                    s = storage->remove_file(name);
+                    if (!s.is_ok()) {
+
+                    }
+                }
+            }
+        } else {
+
+        }
+    }
+    auto s = storage->remove_directory(path);
+    if (!s.is_ok()) {
+
+    }
+    if (owns_storage) {
+        delete storage;
     }
     return s;
 }
 
 auto DatabaseImpl::status() const -> Status
 {
-    return system->has_error() ? system->original_error().status : ok();
+    if (auto s = wal->status(); !s.is_ok()) {
+        m_status = std::move(s);
+    }
+    return m_status;
 }
 
 auto DatabaseImpl::path() const -> std::string
@@ -334,58 +363,53 @@ auto DatabaseImpl::atomic_erase(const Slice &key) -> Status
     }
 }
 
-auto DatabaseImpl::do_close() -> Status
-{
-    wal.reset();
-    pager.reset();
-
-    if (m_owns_storage) {
-        m_owns_storage = false;
-        delete m_storage;
-    }
-    return status();
-}
-
-auto DatabaseImpl::commit() -> Status
+auto DatabaseImpl::commit(Size id) -> Status
 {
     if (!system->has_xact) {
         return logic_error("transaction has not been started");
     }
-    CALICO_ERROR_IF(do_commit());
+    if (id != m_txn_number) {
+        return already_completed_error("commit");
+    }
+    if (auto s = do_commit(); !s.is_ok()) {
+        m_status = std::move(s);
+    }
     return status();
 }
 
 auto DatabaseImpl::do_commit() -> Status
 {
     CALICO_EXPECT_TRUE(system->has_xact);
+    m_log->info("commit requested at lsn {}", wal->current_lsn().value + 1);
+
+    m_txn_number++;
+    system->has_xact = false;
     CALICO_TRY_S(status());
     CALICO_TRY_S(save_state());
 
-    // Write a commit record to the WAL.
     const auto lsn = wal->current_lsn();
-    m_log->info("commit requested at lsn {}", lsn.value);
     wal->log(encode_commit_payload(lsn, *m_scratch->get()));
-    wal->advance();
-
-    // advance() blocks until it is finished. If an error was encountered, it'll show up in the
-    // System object at this point.
-    CALICO_TRY_S(status());
+    CALICO_TRY_S(wal->advance());
 
     CALICO_TRY_S(pager->flush(system->commit_lsn));
     wal->cleanup(pager->recovery_lsn());
 
     m_log->info("commit successful");
     system->commit_lsn = lsn;
-    system->has_xact = false;
     return ok();
 }
 
-auto DatabaseImpl::abort() -> Status
+auto DatabaseImpl::abort(Size id) -> Status
 {
     if (!system->has_xact) {
         return logic_error("transaction has not been started");
     }
-    CALICO_ERROR_IF(do_abort());
+    if (id != m_txn_number) {
+        return already_completed_error("abort");
+    }
+    if (auto s = do_abort(); !s.is_ok()) {
+        m_status = std::move(s);
+    }
     return status();
 }
 
@@ -394,10 +418,11 @@ auto DatabaseImpl::do_abort() -> Status
     CALICO_EXPECT_TRUE(system->has_xact);
     m_log->info("abort requested (last commit was {})", system->commit_lsn.value);
 
+    m_txn_number++;
     system->has_xact = false;
-    wal->advance();
-
     CALICO_TRY_S(status());
+    CALICO_TRY_S(wal->advance());
+
     CALICO_TRY_S(m_recovery->start_abort());
     CALICO_TRY_S(load_state());
     CALICO_TRY_S(m_recovery->finish_abort());
@@ -407,23 +432,19 @@ auto DatabaseImpl::do_abort() -> Status
 
 auto DatabaseImpl::close() -> Status
 {
-    if (wal && pager) {
-        if (!system->has_error()) {
-            if (system->has_xact) {
-                auto s = logic_error("could not close: a transaction is active (finish the transaction and try again)");
-                CALICO_WARN(s);
-                return s;
-            }
-
-            wal->flush();
-
-            // We already waited on the WAL to be done writing so this should happen immediately.
-            CALICO_ERROR_IF(pager->flush({}));
-        } else {
-            wal->flush();
-        }
+    if (!m_recovery) {
+        // We failed during open().
+        return m_status;
     }
-    return do_close();
+
+    CALICO_TRY_S(wal->close());
+    CALICO_TRY_S(pager->flush({}));
+
+    if (m_owns_storage) {
+        m_owns_storage = false;
+        delete m_storage;
+    }
+    return m_status;
 }
 
 auto DatabaseImpl::ensure_consistency_on_startup() -> Status
@@ -438,7 +459,7 @@ auto DatabaseImpl::start() -> Transaction
 {
     CALICO_EXPECT_FALSE(system->has_xact);
     system->has_xact = true;
-    return Transaction {*this};
+    return Transaction {m_txn_number, *this};
 }
 
 auto DatabaseImpl::save_state() -> Status

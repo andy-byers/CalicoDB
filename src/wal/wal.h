@@ -37,19 +37,26 @@ public:
 
     System *system {};
 
-    virtual ~WriteAheadLog();
     WriteAheadLog() = default;
+    virtual ~WriteAheadLog() = default;
     [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>;
+    [[nodiscard]] virtual auto close() -> Status;
     [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;
     [[nodiscard]] virtual auto roll_forward(Lsn begin_lsn, const Callback &callback) -> Status;
     [[nodiscard]] virtual auto roll_backward(Lsn end_lsn, const Callback &callback) -> Status;
     [[nodiscard]] virtual auto start_workers() -> Status;
     [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status;
+    [[nodiscard]] virtual auto advance() -> Status;
+    [[nodiscard]] virtual auto flush() -> Status;
     virtual auto cleanup(Lsn recovery_lsn) -> void;
-    virtual auto advance() -> void;
     virtual auto log(WalPayloadIn payload) -> void;
-    virtual auto flush() -> void;
+
+    [[nodiscard]]
+    virtual auto status() const -> Status
+    {
+        return m_error.get();
+    }
 
     [[nodiscard]]
     virtual auto bytes_written() const -> Size
@@ -64,6 +71,7 @@ private:
     LogPtr m_log;
     std::atomic<Lsn> m_flushed_lsn {};
     std::atomic<Lsn> m_recovery_lsn {};
+    ErrorBuffer m_error;
     Lsn m_last_lsn;
     WalSet m_set;
     std::string m_prefix;

@@ -18,7 +18,7 @@ auto WalCleanup::cleanup() -> void
 
     auto first_lsn = read_first_lsn(*m_storage, m_prefix, second, *m_set);
     if (!first_lsn.has_value()) {
-        CALICO_ERROR(first_lsn.error());
+        m_error->set(std::move(first_lsn.error()));
         return;
     }
 
@@ -30,7 +30,7 @@ auto WalCleanup::cleanup() -> void
     if (s.is_ok()) {
         m_set->remove_before(second);
     } else {
-        CALICO_ERROR(s);
+        m_error->set(std::move(s));
     }
 }
 

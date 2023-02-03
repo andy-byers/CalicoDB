@@ -6,7 +6,8 @@
 #include "pager/pager.h"
 #include "tree/cursor_internal.h"
 #include "tree/tree.h"
-#include "utils/system.h"
+#include "wal/cleanup.h"
+#include "wal/writer.h"
 
 namespace Calico {
 
@@ -16,24 +17,28 @@ Database::Database()
     : m_impl {std::make_unique<DatabaseImpl>()}
 {}
 
-auto Database::open(const Slice &path, const Options &options) -> Status
+auto Database::open(const Slice &path, const Options &options, Database **db) -> Status
 {
-    return m_impl->open(path, options);
+    auto *ptr = new(std::nothrow) Database;
+    if (ptr == nullptr) {
+        return system_error("cannot allocate database object: out of memory");
+    }
+    if (auto s = ptr->m_impl->open(path, options); !s.is_ok()) {
+        delete ptr;
+        return s;
+    }
+    *db = ptr;
+    return ok();
 }
 
-auto Database::close() -> Status
+auto Database::destroy(const Slice &path, const Options &options) -> Status
 {
-    return m_impl->close();
-}
-
-auto Database::destroy() && -> Status
-{
-    return m_impl->destroy();
+    return DatabaseImpl::destroy(path.to_string(), options);
 }
 
 Database::~Database()
 {
-    (void)close();
+    (void)m_impl->close();
 }
 
 auto Database::cursor() const -> Cursor

@@ -60,11 +60,12 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
     return wal;
 }
 
-WriteAheadLog::~WriteAheadLog()
+auto WriteAheadLog::close() -> Status
 {
-    if (m_writer != nullptr) {
-        CALICO_ERROR_IF(std::move(*m_writer).destroy());
+    if (m_writer) {
+        std::move(*m_writer).destroy();
     }
+    return status();
 }
 
 auto WriteAheadLog::start_workers() -> Status
@@ -74,7 +75,7 @@ auto WriteAheadLog::start_workers() -> Status
             m_prefix,
             m_writer_tail,
             m_storage,
-            system,
+            &m_error,
             &m_set,
             &m_flushed_lsn,
             m_segment_cutoff,
@@ -88,7 +89,7 @@ auto WriteAheadLog::start_workers() -> Status
             m_prefix,
             &m_recovery_lsn,
             m_storage,
-            system,
+            &m_error,
             &m_set,
         }}};
     if (m_cleanup == nullptr) {
@@ -138,16 +139,18 @@ auto WriteAheadLog::log(WalPayloadIn payload) -> void
     m_tasks->dispatch(payload);
 }
 
-auto WriteAheadLog::flush() -> void
+auto WriteAheadLog::flush() -> Status
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_tasks->dispatch(FlushToken {}, true);
+    return m_error.get();
 }
 
-auto WriteAheadLog::advance() -> void
+auto WriteAheadLog::advance() -> Status
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_tasks->dispatch(AdvanceToken {}, true);
+    return m_error.get();
 }
 
 auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>

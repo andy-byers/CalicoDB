@@ -27,6 +27,7 @@ public:
         LogScratchManager *scratch {};
         WriteAheadLog *wal {};
         System *system {};
+        Status *status {};
         Size frame_count {};
         Size page_size {};
     };
@@ -68,6 +69,7 @@ private:
     PageCache m_registry;
     LogPtr m_log;
     Lsn m_recovery_lsn;
+    Status *m_status {};
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};
 };

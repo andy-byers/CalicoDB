@@ -13,7 +13,7 @@ public:
         Slice prefix;
         std::atomic<Lsn> *limit {};
         Storage *storage {};
-        System *system {};
+        ErrorBuffer *error {};
         WalSet *set {};
     };
 
@@ -21,12 +21,12 @@ public:
         : m_prefix {param.prefix.to_string()},
           m_limit {param.limit},
           m_storage {param.storage},
-          system {param.system},
+          m_error {param.error},
           m_set {param.set}
     {
         CALICO_EXPECT_FALSE(m_prefix.empty());
         CALICO_EXPECT_NE(m_storage, nullptr);
-        CALICO_EXPECT_NE(system, nullptr);
+        CALICO_EXPECT_NE(m_error, nullptr);
         CALICO_EXPECT_NE(m_set, nullptr);
     }
 
@@ -36,7 +36,7 @@ private:
     std::string m_prefix;
     std::atomic<Lsn> *m_limit {};
     Storage *m_storage {};
-    System *system {};
+    ErrorBuffer *m_error {};
     WalSet *m_set {};
 };
 
