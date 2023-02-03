@@ -2,9 +2,11 @@
 #define CALICO_STATUS_H
 
 #include <memory>
-#include "slice.h"
+#include "common.h"
 
 namespace Calico {
+
+class Slice;
 
 class Status final {
 public:

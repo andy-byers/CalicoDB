@@ -25,7 +25,6 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + Crash protection using write-ahead logging
 + Variable-length keys and values (see [Caveats](#caveats))
 + Various parameters can be tuned (page size, cache size, etc.)
-+ Transactions provided as first-class objects
 
 ## Caveats
 + Only tested on 64-bit Ubuntu and OSX

@@ -100,23 +100,23 @@ auto main(int, const char *[]) -> int
 
         }
 
-        // Open a cursor.
-        auto cursor = db->cursor();
+        // Allocate a cursor.
+        auto *cursor = db->new_cursor();
 
         // Seek to the first record greater than or equal to the given key.
-        cursor.seek("\x10\x20\x30");
+        cursor->seek("\x10\x20\x30");
 
-        if (cursor.is_valid()) {
+        if (cursor->is_valid()) {
             // If the cursor is valid, these methods can be called.
-            (void)cursor.key();
-            (void)cursor.value();
+            (void)cursor->key();
+            (void)cursor->value();
         } else {
             // Otherwise, the error status can be queried.
-            (void)cursor.status();
+            (void)cursor->status();
         }
 
-        cursor.seek_first();
-        for (; cursor.is_valid(); cursor.next()) {
+        cursor->seek_first();
+        for (; cursor->is_valid(); cursor.next()) {
 
         }
 
@@ -127,49 +127,44 @@ auto main(int, const char *[]) -> int
 
         // Cursors can be copied.
         auto bounds = cursor;
-        bounds.seek_last();
+        bounds->seek_last();
 
         // Note that out-of-range cursors will never compare equal. If "bounds" was out of range, this would cause an infinite
         // loop without the is_valid() check.
-        cursor.seek_first();
-        for (; cursor.is_valid() && cursor != bounds; cursor.next()) {
+        cursor->seek_first();
+        for (; cursor->is_valid() && cursor != bounds; cursor->next()) {
 
         }
 
-        cursor.seek_last();
-        for (; cursor.is_valid() && cursor.key() >= "42"; cursor.previous()) {
+        cursor->seek_last();
+        for (; cursor->is_valid() && cursor->key() >= "42"; cursor->previous()) {
 
         }
+
+        delete cursor;
     }
 
-    /* transaction-objects */
+    /* transactions */
 
     {
-        // Start a transaction. All modifications made to the database while this object is live will be part of the transaction
-        // it represents.
-        auto xact = db->start();
-
         auto s = db->erase("k");
         if (!s.is_ok()) {
 
         }
 
-        // If this status is OK, every change made in the transaction will be undone.
-        s = xact.abort();
+        // If this status is OK, every change made since the last call to commit (or abort) will be undone.
+        s = db->abort();
         if (!s.is_ok()) {
 
         }
-
-        // If we want to start another transaction, we need to make another call to the database.
-        xact = db->start();
 
         s = db->erase("42");
         if (!s.is_ok()) {
 
         }
 
-        // This time we'll commit the transaction.
-        s = xact.commit();
+        // This time we'll commit the change.
+        s = db->commit();
         if (!s.is_ok()) {
 
         }
@@ -178,7 +173,7 @@ auto main(int, const char *[]) -> int
     /* statistics-objects */
 
     {
-        // We can use a statistics object to get information about the database state.
+        // We can use a statistics object to get information about the database.
         const auto stat = db->statistics();
         (void)stat.record_count();
         (void)stat.page_count();

@@ -1,11 +1,10 @@
 #ifndef CALICO_CURSOR_H
 #define CALICO_CURSOR_H
 
-#include <memory>
-#include <optional>
-#include "status.h"
-
 namespace Calico {
+
+class Slice;
+class Status;
 
 class Cursor {
 public:
@@ -22,9 +21,6 @@ public:
     virtual auto seek_last() -> void = 0;
     virtual auto next() -> void = 0;
     virtual auto previous() -> void = 0;
-
-    virtual auto operator==(const Cursor &rhs) const -> bool = 0;
-    virtual auto operator!=(const Cursor &rhs) const -> bool = 0;
 };
 
 } // namespace Calico

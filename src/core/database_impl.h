@@ -34,16 +34,15 @@ public:
     [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
     [[nodiscard]] auto close() -> Status;
-    [[nodiscard]] auto start() -> Transaction;
-    [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto path() const -> std::string;
-    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
-    [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto commit(Size id) -> Status;
-    [[nodiscard]] auto abort(Size id) -> Status;
-    [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status;
-    [[nodiscard]] auto cursor() const -> Cursor;
-    [[nodiscard]] auto statistics() -> Statistics;
+
+    [[nodiscard]] auto status() const -> Status override;
+    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
+    [[nodiscard]] auto erase(const Slice &key) -> Status override;
+    [[nodiscard]] auto commit() -> Status override;
+    [[nodiscard]] auto abort() -> Status override;
+    [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status override;
+    [[nodiscard]] auto new_cursor() const -> Cursor * override;
+    [[nodiscard]] auto get_property(const Slice &name) const -> std::string override;
 
     std::unique_ptr<System> system;
     std::unique_ptr<WriteAheadLog> wal;

@@ -46,6 +46,23 @@ static auto sanitize_options(const Options &options) -> Options
     return sanitized;
 }
 
+auto Database::open(const Slice &path, const Options &options, Database **db) -> Status
+{
+    auto *ptr = new(std::nothrow) DatabaseImpl;
+    if (ptr == nullptr) {
+        return system_error("cannot allocate database object: out of memory");
+    }
+    
+    auto s = ptr->open(path, options);
+    if (!s.is_ok()) {
+        delete ptr;
+	return s;
+    }
+
+    *db = ptr;
+    return ok();
+}
+
 auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
@@ -189,6 +206,11 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     return status();
 }
 
+auto DatabaseImpl::~DatabaseImpl()
+{
+    (void)close();
+}
+
 auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> Status
 {
     bool owns_storage {};
@@ -246,16 +268,6 @@ auto DatabaseImpl::status() const -> Status
     return m_status;
 }
 
-auto DatabaseImpl::path() const -> std::string
-{
-    return m_prefix;
-}
-
-auto DatabaseImpl::statistics() -> Statistics
-{
-    return Statistics {*this};
-}
-
 auto DatabaseImpl::check_key(const Slice &key, const char *message) const -> Status
 {
     if (key.is_empty()) {
@@ -292,10 +304,10 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
     }
 }
 
-auto DatabaseImpl::cursor() const -> Cursor
+auto DatabaseImpl::new_cursor() const -> Cursor *
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
-    if (system->has_error()) {
+    auto *cursor = CursorInternal::make_cursor(*tree);
+    if (cursor && system->has_error()) {
         CursorInternal::invalidate(cursor, status());
     }
     return cursor;

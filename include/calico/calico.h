@@ -6,9 +6,7 @@
 #include "database.h"
 #include "options.h"
 #include "slice.h"
-#include "statistics.h"
 #include "status.h"
 #include "storage.h"
-#include "transaction.h"
 
 #endif // CALICO_CALICO_H

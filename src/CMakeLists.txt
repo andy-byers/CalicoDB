@@ -5,10 +5,8 @@ set(CALICO_HEADERS
         "${CALICO_INCLUDE_DIR}/calico/database.h"
         "${CALICO_INCLUDE_DIR}/calico/options.h"
         "${CALICO_INCLUDE_DIR}/calico/slice.h"
-        "${CALICO_INCLUDE_DIR}/calico/statistics.h"
         "${CALICO_INCLUDE_DIR}/calico/status.h"
-        "${CALICO_INCLUDE_DIR}/calico/storage.h"
-        "${CALICO_INCLUDE_DIR}/calico/transaction.h")
+        "${CALICO_INCLUDE_DIR}/calico/storage.h")
 file(GLOB_RECURSE CALICO_SOURCES "*/*.cpp" "*/*.h")
 list(APPEND CALICO_SOURCES "${CALICO_HEADERS}")
 

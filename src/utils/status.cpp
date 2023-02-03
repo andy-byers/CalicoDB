@@ -1,4 +1,5 @@
 #include "calico/status.h"
+#include "calico/slice.h"
 #include "utils/utils.h"
 
 namespace Calico {
@@ -126,7 +127,7 @@ auto Status::is_ok() const -> bool
 
 auto Status::what() const -> Slice
 {
-    return Slice {is_ok() ? "" : m_data.get() + sizeof(Code)};
+    return {m_data ? m_data.get() + sizeof(Code) : ""};
 }
 
 } // namespace Calico
