@@ -4,11 +4,14 @@
 #ifndef CALICO_STORAGE_H
 #define CALICO_STORAGE_H
 
-#include "calico/status.h"
 #include <string>
 #include <vector>
+#include "common.h"
 
 namespace Calico {
+
+class Slice;
+class Status;
 
 class RandomReader {
 public:

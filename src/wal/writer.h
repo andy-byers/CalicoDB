@@ -38,7 +38,7 @@ private:
     Span m_tail;
     std::atomic<Id> *m_flushed_lsn {};
     AppendWriter *m_file {};
-    Id m_last_lsn {};
+    Lsn m_last_lsn {};
     Size m_number {};
     Size m_offset {};
 };
@@ -49,7 +49,7 @@ public:
         Slice prefix;
         Span tail;
         Storage *storage {};
-        System *system {};
+        ErrorBuffer *error {};
         WalSet *set {};
         std::atomic<Id> *flushed_lsn {};
         Size wal_limit {};
@@ -57,7 +57,7 @@ public:
 
     explicit WalWriter(const Parameters &param);
 
-    [[nodiscard]] auto destroy() && -> Status;
+    auto destroy() && -> void;
     auto write(WalPayloadIn payload) -> void;
     // NOTE: advance() will block until the writer has advanced to a new segment. It should be called after writing
     //       a commit record so that everything is written to disk before we return, and the writer is set up on the
@@ -67,7 +67,7 @@ public:
 
 private:
     [[nodiscard]] auto advance_segment() -> Status;
-    [[nodiscard]] auto open_segment(SegmentId) -> Status;
+    [[nodiscard]] auto open_segment(Id) -> Status;
     auto close_segment() -> Status;
 
     std::string m_prefix;
@@ -75,9 +75,9 @@ private:
     std::unique_ptr<AppendWriter> m_file;
     std::atomic<Id> *m_flushed_lsn {};
     Storage *m_storage {};
-    System *m_system {};
+    ErrorBuffer *m_error {};
     WalSet *m_set {};
-    SegmentId m_current;
+    Id m_current;
     Span m_tail;
     Size m_wal_limit {};
 };

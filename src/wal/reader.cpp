@@ -1,15 +1,15 @@
 #include "reader.h"
 #include "calico/storage.h"
-#include "page/page.h"
+#include "pager/page.h"
 #include "utils/system.h"
 
 namespace Calico {
 
 template<class ...Args>
 [[nodiscard]]
-auto read_corruption_error(const std::string &hint_fmt, Args &&...args) -> Status
+static auto read_corruption_error(const char *hint_fmt, Args &&...args) -> Status
 {
-    const auto hint_str = fmt::format(fmt::runtime(hint_fmt), std::forward<Args>(args)...);
+    const auto hint_str = fmt::format(hint_fmt, std::forward<Args>(args)...);
     return corruption("cannot raed WAL record: record is corrupted ({})", hint_str);
 }
 
@@ -18,7 +18,7 @@ static auto read_exact_or_eof(RandomReader &file, Size offset, Span out) -> Stat
 {
     auto temp = out;
     auto read_size = out.size();
-    CALICO_TRY_S(file.read(temp.data(), read_size, offset));
+    Calico_Try_S(file.read(temp.data(), read_size, offset));
 
     if (read_size == 0) {
         return not_found("reached the end of the file");
@@ -33,11 +33,14 @@ auto LogReader::read(WalPayloadOut &out, Span payload, Span tail) -> Status
     CALICO_EXPECT_NE(m_file, nullptr);
 
     // Lazily read the first block into the tail buffer.
-    if (m_offset == 0)
-        CALICO_TRY_S(read_exact_or_eof(*m_file, 0, tail));
+    if (m_offset == 0) {
+        Calico_Try_S(read_exact_or_eof(*m_file, 0, tail));
+    }
 
     auto s = read_logical_record(payload, tail);
-    if (s.is_ok()) out = WalPayloadOut {payload};
+    if (s.is_ok()) {
+        out = WalPayloadOut {payload};
+    }
     return s;
 }
 
@@ -50,7 +53,9 @@ auto LogReader::read_first_lsn(Lsn &out) -> Status
     // The LogWriter will never flush a block unless it contains at least one record, so the first record should be
     // located at the start of the file.
     auto s = read_exact_or_eof(*m_file, WalRecordHeader::SIZE, bytes);
-    if (s.is_ok()) out = read_wal_payload_header(bytes).lsn;
+    if (s.is_ok()) {
+        out = read_wal_payload_header(bytes).lsn;
+    }
     return s;
 }
 
@@ -69,20 +74,24 @@ auto LogReader::read_logical_record(Span &out, Span tail) -> Status
                 const auto temp = read_wal_record_header(rest);
                 rest.advance(WalRecordHeader::SIZE);
 
-                CALICO_TRY_S(merge_records_left(header, temp));
-
+                Calico_Try_S(merge_records_left(header, temp));
+                if (!temp.size || temp.size > rest.size()) {
+                    return corruption("fragment size is invalid");
+                }
                 mem_copy(payload, rest.truncate(temp.size));
                 m_offset += WalRecordHeader::SIZE + temp.size;
                 payload.advance(temp.size);
                 rest.advance(temp.size);
 
                 if (header.type == WalRecordHeader::Type::FULL) {
-                    if (header.crc != crc32c::Value(out.data(), out.truncate(header.size).size()))
+                    if (header.crc != crc32c::Value(out.data(), out.truncate(header.size).size())) {
                         return corruption("crc is incorrect for record {}", get_u64(out));
+                    }
                     break;
                 }
-                if (!rest.is_empty())
+                if (!rest.is_empty()) {
                     continue;
+                }
             }
         }
 
@@ -91,8 +100,9 @@ auto LogReader::read_logical_record(Span &out, Span tail) -> Status
 
         if (!s.is_ok()) {
             // If we have any record fragments read so far, we consider this corruption.
-            if (s.is_not_found() && header.type != WalRecordHeader::Type {})
+            if (s.is_not_found() && header.type != WalRecordHeader::Type {}) {
                 return read_corruption_error("logical record is incomplete");
+            }
             return s;
         }
         m_offset = 0;
@@ -103,9 +113,10 @@ auto LogReader::read_logical_record(Span &out, Span tail) -> Status
 
 auto WalReader::open() -> Status
 {
-    const auto first = m_set->id_after(SegmentId::null());
-    if (first.is_null())
+    const auto first = m_set->id_after(Id::null());
+    if (first.is_null()) {
         return not_found("could not open WAL reader: segment collection is empty");
+    }
     return open_segment(first);
 }
 
@@ -115,8 +126,9 @@ auto WalReader::seek_next() -> Status
     if (!next.is_null()) {
         close_segment();
 
-        if (auto s = open_segment(next); !s.is_ok())
+        if (auto s = open_segment(next); !s.is_ok()) {
             return s.is_not_found() ? corruption("missing WAL segment {}", next.value) : s;
+        }
         return ok();
     }
     return not_found("could not seek to next segment: reached the last segment");
@@ -135,7 +147,9 @@ auto WalReader::seek_previous() -> Status
 auto WalReader::read_first_lsn(Id &out) -> Status
 {
     prepare_traversal();
-    return m_reader->read_first_lsn(out);
+    Calico_Try_S(m_reader->read_first_lsn(out));
+    m_set->set_first_lsn(m_current, out);
+    return ok();
 }
 
 auto WalReader::roll(const Callback &callback) -> Status
@@ -160,11 +174,11 @@ auto WalReader::roll(const Callback &callback) -> Status
     return s;
 }
 
-auto WalReader::open_segment(SegmentId id) -> Status
+auto WalReader::open_segment(Id id) -> Status
 {
     CALICO_EXPECT_EQ(m_reader, std::nullopt);
     RandomReader *file;
-    auto s = m_store->open_random_reader(m_prefix + id.to_name(), &file);
+    auto s = m_store->open_random_reader(m_prefix + encode_segment_name(id), &file);
     if (s.is_ok()) {
         m_file.reset(file);
         m_reader = LogReader {*m_file};
@@ -176,7 +190,7 @@ auto WalReader::open_segment(SegmentId id) -> Status
 auto WalReader::close_segment() -> void
 {
     if (m_reader) {
-        m_current = SegmentId::null();
+        m_current = Id::null();
         m_reader.reset();
         m_file.reset();
     }

@@ -291,10 +291,10 @@ auto HeapStorage::remove_directory(const std::string &name) -> Status
 auto HeapStorage::clone() const -> Storage*
 {
     std::lock_guard lock {m_mutex};
-    auto *store = new HeapStorage;
-    store->m_files = m_files;
-    store->m_directories = m_directories;
-    return store;
+    auto *storage = new HeapStorage;
+    storage->m_files = m_files;
+    storage->m_directories = m_directories;
+    return storage;
 }
 
 #undef INTERCEPT

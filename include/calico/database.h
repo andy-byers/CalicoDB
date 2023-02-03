@@ -1,45 +1,31 @@
 #ifndef CALICO_DATABASE_H
 #define CALICO_DATABASE_H
 
-#include "options.h"
-#include "slice.h"
-#include "statistics.h"
-#include <memory>
+#include <string>
 
 namespace Calico {
 
-class Core;
+struct Options;
 class Cursor;
-//class Statistics;
+class Slice;
 class Status;
-class Transaction;
 
-class Database final {
+class Database {
 public:
-    Database() noexcept;
+    virtual ~Database() = default;
+    [[nodiscard]] static auto open(const Slice &path, const Options &options, Database **db) -> Status;
+    [[nodiscard]] static auto destroy(const Slice &path, const Options &options) -> Status;
 
-    [[nodiscard]] auto open(Slice path, const Options &options = {}) -> Status;
-    [[nodiscard]] auto close() -> Status;
-    [[nodiscard]] auto destroy() && -> Status;
-    [[nodiscard]] auto find_exact(Slice key) const -> Cursor;
-    [[nodiscard]] auto find(Slice key) const -> Cursor;
-    [[nodiscard]] auto first() const -> Cursor;
-    [[nodiscard]] auto last() const -> Cursor;
-    [[nodiscard]] auto insert(Slice key, Slice value) -> Status;
-    [[nodiscard]] auto erase(Slice key) -> Status;
-    [[nodiscard]] auto erase(const Cursor &cursor) -> Status;
-    [[nodiscard]] auto statistics() const -> Statistics;
-    [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto transaction() -> Transaction;
+    [[nodiscard]] virtual auto get_property(const Slice &name) const -> std::string = 0;
+    [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
 
-    ~Database();
+    [[nodiscard]] virtual auto status() const -> Status = 0;
+    [[nodiscard]] virtual auto commit() -> Status = 0;
+    [[nodiscard]] virtual auto abort() -> Status = 0;
 
-    // NOTE: Necessary because we have a non-trivial destructor.
-    Database(Database &&rhs) noexcept;
-    Database& operator=(Database &&rhs) noexcept;
-
-private:
-    std::unique_ptr<Core> m_core;
+    [[nodiscard]] virtual auto get(const Slice &key, std::string &value) const -> Status = 0;
+    [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
+    [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
 };
 
 } // namespace Calico

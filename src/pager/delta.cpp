@@ -1,5 +1,6 @@
 #include "delta.h"
 #include <algorithm>
+#include <numeric>
 
 namespace Calico {
 
@@ -16,7 +17,7 @@ static auto merge_deltas(const PageDelta &lhs, const PageDelta &rhs) -> PageDelt
     return PageDelta {lhs.offset, new_dx};
 }
 
-auto compress_deltas(std::vector<PageDelta> &deltas) -> Size
+auto compress_deltas(ChangeBuffer &deltas) -> Size
 {
     if (deltas.empty()) {
         return 0;
@@ -39,7 +40,7 @@ auto compress_deltas(std::vector<PageDelta> &deltas) -> Size
     });
 }
 
-auto insert_delta(std::vector<PageDelta> &deltas, PageDelta delta) -> void
+auto insert_delta(ChangeBuffer &deltas, PageDelta delta) -> void
 {
     CALICO_EXPECT_GT(delta.size, 0);
     if (deltas.empty()) {

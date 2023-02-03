@@ -1,53 +1,26 @@
 #ifndef CALICO_CURSOR_H
 #define CALICO_CURSOR_H
 
-#include <memory>
-#include <optional>
-#include "status.h"
-
 namespace Calico {
 
-class Node;
-struct CursorActions;
+class Slice;
+class Status;
 
-class Cursor final {
+class Cursor {
 public:
-    ~Cursor() = default;
-    [[nodiscard]] auto is_valid() const -> bool;
-    [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto key() const -> Slice;
-    [[nodiscard]] auto value() const -> std::string;
-    auto increment() -> bool;
-    auto decrement() -> bool;
-    auto operator++() -> Cursor &;
-    auto operator++(int) -> Cursor;
-    auto operator--() -> Cursor &;
-    auto operator--(int) -> Cursor;
-    auto operator==(const Cursor &rhs) const -> bool;
-    auto operator!=(const Cursor &rhs) const -> bool;
-
-private:
     Cursor() = default;
+    virtual ~Cursor() = default;
 
-    struct Position {
-        static constexpr Size LEFT {0};
-        static constexpr Size CURRENT {1};
-        static constexpr Size RIGHT {2};
+    [[nodiscard]] virtual auto is_valid() const -> bool = 0;
+    [[nodiscard]] virtual auto status() const -> Status = 0;
+    [[nodiscard]] virtual auto key() const -> Slice = 0;
+    [[nodiscard]] virtual auto value() const -> Slice = 0;
 
-        auto operator==(const Position &rhs) const -> bool;
-        [[nodiscard]] auto is_minimum() const -> bool;
-        [[nodiscard]] auto is_maximum() const -> bool;
-
-        Size ids[3] {0, 1, 0};
-        std::uint16_t cell_count {};
-        std::uint16_t index {};
-    };
-
-    friend class CursorInternal;
-
-    mutable Status m_status {Status::ok()};
-    CursorActions *m_actions {};
-    Position m_position;
+    virtual auto seek(const Slice &key) -> void = 0;
+    virtual auto seek_first() -> void = 0;
+    virtual auto seek_last() -> void = 0;
+    virtual auto next() -> void = 0;
+    virtual auto previous() -> void = 0;
 };
 
 } // namespace Calico

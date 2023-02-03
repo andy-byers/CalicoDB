@@ -34,7 +34,7 @@ auto main(int argc, const char *argv[]) -> int
     const auto num_committed = std::stoul(argv[2]);
 
     if (!fs::exists(value_path)) {
-        fmt::print("cannot run recovery: database from `fail` does not exist (run `fail` first)\n");
+        fmt::print(stderr, "cannot run recovery: database from `fail` does not exist (run `fail` first)\n");
         return 1;
     }
 
@@ -46,28 +46,30 @@ auto main(int argc, const char *argv[]) -> int
         while (std::getline(ifs, line))
             values.emplace_back(line);
     }
-    Database db;
-    expect_ok(db.open(path.string()));
-    const auto info = db.statistics();
+    Database *db;
+    expect_ok(Database::open(path.string(), {}, &db));
+    auto record_count = std::stoi(db->get_property("record_count"));
 
     // The database should contain exactly `num_committed` records.
-    CALICO_EXPECT_EQ(info.record_count(), num_committed);
+    CALICO_EXPECT_EQ(record_count, num_committed);
 
     Size key_counter {};
-    auto xact = db.transaction();
+    auto *cursor = db->new_cursor();
     for (const auto &value: values) {
         const auto key = make_key<KEY_WIDTH>(key_counter++);
-        const auto cursor = db.find_exact(key);
-        CALICO_EXPECT_TRUE(cursor.is_valid());
-        CALICO_EXPECT_EQ(cursor.key().to_string(), key);
-        CALICO_EXPECT_EQ(cursor.value(), value);
-        expect_ok(db.erase(key));
+        cursor->seek(key);
+        CALICO_EXPECT_TRUE(cursor->is_valid());
+        CALICO_EXPECT_EQ(cursor->key().to_string(), key);
+        CALICO_EXPECT_EQ(cursor->value(), value);
+        expect_ok(db->erase(key));
     }
-    CALICO_EXPECT_TRUE(xact.commit().is_ok());
+    CALICO_EXPECT_TRUE(db->commit().is_ok());
+    delete cursor;
 
     // All records should have been reached and removed.
+    record_count = std::stoi(db->get_property("record_count"));
     CALICO_EXPECT_EQ(key_counter, num_committed);
-    CALICO_EXPECT_EQ(info.record_count(), 0);
-    expect_ok(std::move(db).destroy());
+    CALICO_EXPECT_EQ(record_count, 0);
+    expect_ok(Database::destroy(path.string(), {}));
     return 0;
 }

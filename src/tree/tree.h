@@ -1,47 +1,75 @@
-#ifndef CALICO_TREE_TREE_H
-#define CALICO_TREE_TREE_H
+#ifndef CALICO_TREE_H
+#define CALICO_TREE_H
 
-#include "calico/cursor.h"
-#include "calico/status.h"
+#include <array>
+#include "free_list.h"
+#include "node.h"
 #include "utils/expected.hpp"
-#include "utils/types.h"
-#include <optional>
 
 namespace Calico {
 
-class Cell;
-class Link;
-class Internal;
-class Node;
-class NodeManager;
-class Page;
 struct FileHeader;
+class BPlusTree;
+class Pager;
 
-// Depends on BufferPool
-class Tree {
+struct SearchResult {
+    Node node;
+    Size index {};
+    bool exact {};
+};
+
+struct CursorActions {
+    using Collect = tl::expected<std::string, Status> (*)(BPlusTree &, Node, Size);
+    using Acquire = tl::expected<Node, Status> (*)(BPlusTree &, Id, bool);
+    using Search = tl::expected<SearchResult, Status> (*)(BPlusTree &, const Slice &);
+    using Extremum = tl::expected<Node, Status> (*)(BPlusTree &);
+    using Release = void (*)(BPlusTree &, Node);
+
+    BPlusTree *tree {};
+    Collect collect {};
+    Search search {};
+    Acquire acquire {};
+    Release release {};
+    Extremum lowest {};
+    Extremum highest {};
+};
+
+class BPlusTree {
+    /*
+     * m_scratch[0]: Overflow cell scratch
+     * m_scratch[1]: Extra overflow cell scratch
+     * m_scratch[2]: Root fixing routine scratch
+     * m_scratch[3]: Defragmentation scratch
+     */
+    std::array<std::string, 4> m_scratch;
+
+    NodeMeta m_external_meta;
+    NodeMeta m_internal_meta;
+    CursorActions m_actions;
+    FreeList m_free_list;
+
+    Pager *m_pager {};
+
 public:
-    using Ptr = std::unique_ptr<Tree>;
+    friend class BPlusTreeInternal;
+    friend class CursorInternal;
 
-    virtual ~Tree() = default;
-    virtual auto record_count() const -> Size = 0;
-    virtual auto insert(Slice, Slice) -> Status = 0;
-    virtual auto erase(Cursor) -> Status = 0;
-    virtual auto find_exact(Slice) -> Cursor = 0;
-    virtual auto find(Slice key) -> Cursor = 0;
-    virtual auto find_minimum() -> Cursor = 0;
-    virtual auto find_maximum() -> Cursor = 0;
-    virtual auto root(bool) -> tl::expected<Node, Status> = 0;
-    virtual auto save_state(FileHeader &) const -> void = 0;
-    virtual auto load_state(const FileHeader &) -> void = 0;
+    explicit BPlusTree(Pager &pager);
+    [[nodiscard]] auto setup() -> tl::expected<Node, Status>;
+    [[nodiscard]] auto collect(Node node, Size index) -> tl::expected<std::string, Status>;
+    [[nodiscard]] auto search(const Slice &key) -> tl::expected<SearchResult, Status>;
+    [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> tl::expected<bool, Status>;
+    [[nodiscard]] auto erase(const Slice &key) -> tl::expected<void, Status>;
 
-#if not NDEBUG
-    virtual auto TEST_to_string(bool integer_keys) -> std::string = 0;
-    virtual auto TEST_validate_nodes() -> void = 0;
-    virtual auto TEST_validate_order() -> void = 0;
-    virtual auto TEST_validate_links() -> void = 0;
-#endif // not NDEBUG
+    auto save_state(FileHeader &header) const -> void;
+    auto load_state(const FileHeader &header) -> void;
+
+    auto TEST_to_string() -> std::string;
+    auto TEST_check_order() -> void;
+    auto TEST_check_links() -> void;
+    auto TEST_check_nodes() -> void;
 };
 
 } // namespace Calico
 
-#endif // CALICO_TREE_TREE_H
+#endif // CALICO_TREE_H

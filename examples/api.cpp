@@ -1,6 +1,7 @@
 /* api.cpp: Example usage of the Calico DB API. */
 
 #include "calico/calico.h"
+#include <filesystem>
 
 auto main(int, const char *[]) -> int
 {
@@ -9,8 +10,8 @@ auto main(int, const char *[]) -> int
     {
         std::string str {"abc"};
 
-        // We can create slices from C-style strings, from containers of contiguous bytes that provide "data"
-        // and "size" member functions, or directly from a pointer and a length.
+        // We can create slices from C-style strings, standard library strings, or directly from a pointer and
+        // a length.
         Calico::Slice s1 {str.c_str()};
         Calico::Slice s2 {str};
         Calico::Slice s3 {str.data(), str.size()};
@@ -19,7 +20,7 @@ auto main(int, const char *[]) -> int
         printf("%s\n", s1.to_string().c_str());
 
         // Slices have methods for modifying the size and pointer position. These methods do not change the
-        // underlying data, they just change what range of bytes the slice is currently "viewing". advance()
+        // underlying data, they just change what range of bytes the slice is currently viewing. advance()
         // increments the underlying pointer...
         s1.advance(1);
 
@@ -28,14 +29,11 @@ auto main(int, const char *[]) -> int
 
         // Comparison operations are implemented.
         assert(s1 == "b");
-        assert(s2.starts_with("ab"));
         assert(s2 < "bc");
+        assert(s2.starts_with("ab"));
     }
 
     /* opening-a-database */
-
-    // Create the database object.
-    Calico::Database db;
 
     // Set some initialization options.
     Calico::Options options;
@@ -52,14 +50,21 @@ auto main(int, const char *[]) -> int
     options.log_level = Calico::LogLevel::TRACE;
     options.log_target = Calico::LogTarget::STDERR_COLOR;
 
-    // Open or create a database at "/tmp/cats".
-    auto s = db.open("/tmp/cats", options);
+    Calico::Database *db;
 
-    // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is null-
-    // terminated, so it can be printed like in the following block.
-    if (!s.is_ok()) {
-        fprintf(stderr, "error: %s\n", s.what().data());
-        return 1;
+    {
+        std::filesystem::remove_all("/tmp/cats");
+        std::filesystem::remove_all(options.wal_prefix.to_string());
+
+        // Create a database at "/tmp/cats".
+        auto s = Calico::Database::open("/tmp/cats", options, &db);
+
+        // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is null-
+        // terminated, so it can be printed like in the following block.
+        if (!s.is_ok()) {
+            fprintf(stderr, "error: %s\n", s.what().data());
+            return 1;
+        }
     }
 
     /* updating-a-database */
@@ -67,7 +72,7 @@ auto main(int, const char *[]) -> int
     {
         // Insert a key-value pair. We can use arbitrary bytes for both the key and value, including NULL bytes, provided the slice
         // object knows the proper string length.
-        auto s = db.insert("\x11\x22\x33", {"\xDD\xEE\x00\xFF", 4});
+        auto s = db->put("\x11\x22\x33", {"\xDD\xEE\x00\xFF", 4});
 
         // Again, the status object reports the outcome of the operation. Since we are not inside a transaction, all modifications
         // made to the database are applied atomically. This means that if this status is OK, then our key-value pair is safely on
@@ -77,11 +82,10 @@ auto main(int, const char *[]) -> int
 
         }
 
-        // We can erase records by key, or by passing a cursor object (see Queries below). It should be noted that a cursor used to
-        // erase a key will be invalidated if the operation succeeds.
-        s = db.erase("42");
+        // We can erase records by key.
+        s = db->erase("42");
 
-        // If the key is not found (or the cursor is invalid), we'll receive a "not found" status.
+        // If the key is not found, we'll receive a "not found" status.
         if (s.is_not_found()) {
 
         }
@@ -90,105 +94,109 @@ auto main(int, const char *[]) -> int
     /* querying-a-database */
 
     {
-        // We can find the first record greater than or equal to a given key...
-        auto c1 = db.find("\x10\x20\x30");
-
-        // ...or, we can try for an exact match.
-        auto c2 = db.find_exact("\x10\x20\x30");
-
-        // Both methods return cursors, which point to database records and can be used to perform range queries. We check if a
-        // cursor is valid (i.e. it points to an existing record and has an OK internal status) by writing:
-        if (c1.is_valid()) {
+        // Query a value by key.
+        std::string value;
+        if (db->get("\x10\x20\x30", value).is_ok()) {
 
         }
 
-        // As mentioned above, cursors store and provide access to a status object. We check this status using the status()
-        // method. Once a cursor's status becomes non-OK, it will stay that way and the cursor can no longer be used.
-        [[maybe_unused]] auto s = c1.status();
+        // Allocate a cursor.
+        auto *cursor = db->new_cursor();
 
-        // Calico DB provides methods for accessing the first and last records. Like the find*() methods, these methods return
-        // cursors. This lets us easily traverse all records in order.
-        for (auto c = db.first(); c.is_valid(); ++c) {}
+        // Seek to the first record greater than or equal to the given key.
+        cursor->seek("\x10\x20\x30");
 
-        // We can also traverse in reverse order...
-        for (auto c = db.last(); c.is_valid(); --c) {}
+        if (cursor->is_valid()) {
+            // If the cursor is valid, these methods can be called.
+            (void)cursor->key();
+            (void)cursor->value();
+        } else {
+            // Otherwise, the error status can be queried.
+            (void)cursor->status();
+        }
 
-        // ...or from the start to some arbitrary point. In this example, the cursor we are iterating to is not valid. This is
-        // the same as iterating until we hit the end.
-        for (auto c = db.first(), bounds = db.find("42"); c.is_valid() && c != bounds; ++c) {}
+        cursor->seek_first();
+        for (; cursor->is_valid(); cursor->next()) {
 
-        // We can also use key comparisons.
-        for (auto c = db.first(); c.is_valid() && c.key() < "42"; ++c) {}
+        }
+
+        cursor->seek_last();
+        for (; cursor->is_valid(); cursor->previous()) {
+
+        }
+
+        // Cursors can be copied.
+        auto bounds = cursor;
+        bounds->seek_last();
+
+        // Note that out-of-range cursors will never compare equal. If "bounds" was out of range, this would cause an infinite
+        // loop without the is_valid() check.
+        cursor->seek_first();
+        for (; cursor->is_valid() && cursor != bounds; cursor->next()) {
+
+        }
+
+        cursor->seek_last();
+        for (; cursor->is_valid() && cursor->key() >= "42"; cursor->previous()) {
+
+        }
+
+        delete cursor;
     }
 
-    /* transaction-objects */
+    /* transactions */
 
     {
-        // Start a transaction. All modifications made to the database while this object is live will be part of the transaction
-        // it represents.
-        auto xact = db.transaction();
-
-        auto s = db.erase(db.first());
+        auto s = db->erase("k");
         if (!s.is_ok()) {
 
         }
 
-        // If this status is OK, every change made in the transaction will be undone.
-        s = xact.abort();
+        // If this status is OK, every change made since the last call to commit (or abort) will be undone.
+        s = db->abort();
         if (!s.is_ok()) {
 
         }
 
-        // If we want to start another transaction, we need to make another call to the database.
-        xact = db.transaction();
-
-        s = db.erase(db.first());
+        s = db->erase("42");
         if (!s.is_ok()) {
 
         }
 
-        // This time we'll commit the transaction. Note that if the transaction object goes out of scope before either abort()
-        // or commit() is called, an abort() will be attempted automatically.
-        s = xact.commit();
+        // This time we'll commit the change.
+        s = db->commit();
         if (!s.is_ok()) {
 
         }
     }
 
-    /* statistics-objects */
+    /* query-properties */
 
     {
-        // We can use a statistics object to get information about the database state.
-        const auto stat = db.statistics();
-        [[maybe_unused]] const auto rc = stat.record_count();
-        [[maybe_unused]] const auto pc = stat.page_count();
-        [[maybe_unused]] const auto ks = stat.maximum_key_size();
-        [[maybe_unused]] const auto hr = stat.cache_hit_ratio();
+        // We can use a statistics object to get information about the database.
+        (void)db->get_property("record_count");
+        (void)db->get_property("page_count");
+        (void)db->get_property("maximum_key_size");
+        (void)db->get_property("cache_hit_ratio");
+        (void)db->get_property("pager_throughput");
+        (void)db->get_property("wal_throughput");
+        (void)db->get_property("data_throughput");
 
         // The page size is fixed at database creation time. If the database already existed, the page size passed to the
         // constructor through Calico::Options is ignored. We can query the real page size using the following line.
-        [[maybe_unused]] const auto ps = stat.page_size();
+        (void)db->get_property("page_size");
     }
 
     /* closing-a-database */
 
     {
-        auto s = db.close();
-        if (!s.is_ok()) {
-
-        }
-    }
-
-    // NOTE: Reopen the database so destroy() works.
-    if (auto s = db.open("/tmp/cats", options); !s.is_ok()) {
-        fprintf(stderr, "error: %s\n", s.what().data());
-        return 1;
+        delete db;
     }
 
     /* destroying-a-database */
 
     {
-        auto s = std::move(db).destroy();
+        auto s = Calico::Database::destroy("/tmp/cats", options);
         if (!s.is_ok()) {
 
         }

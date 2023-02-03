@@ -2,9 +2,11 @@
 #define CALICO_STATUS_H
 
 #include <memory>
-#include "slice.h"
+#include "common.h"
 
 namespace Calico {
+
+class Slice;
 
 class Status final {
 public:
@@ -16,11 +18,11 @@ public:
     /*
      * Create a non-OK status with an error message.
      */
-    [[nodiscard]] static auto invalid_argument(Slice) -> Status;
-    [[nodiscard]] static auto system_error(Slice) -> Status;
-    [[nodiscard]] static auto logic_error(Slice) -> Status;
-    [[nodiscard]] static auto corruption(Slice) -> Status;
-    [[nodiscard]] static auto not_found(Slice) -> Status;
+    [[nodiscard]] static auto invalid_argument(const Slice &what) -> Status;
+    [[nodiscard]] static auto system_error(const Slice &what) -> Status;
+    [[nodiscard]] static auto logic_error(const Slice &what) -> Status;
+    [[nodiscard]] static auto corruption(const Slice &what) -> Status;
+    [[nodiscard]] static auto not_found(const Slice &what) -> Status;
 
     /*
      * Check status type.
@@ -56,14 +58,14 @@ private:
     Status() = default;
 
     // Construct a non-OK status.
-    Status(Code, Slice);
+    Status(Code code, const Slice &what);
 
     // Storage for a status code and a message.
     std::unique_ptr<Byte[]> m_data;
 };
 
-// status should be the size of a pointer.
-static_assert(sizeof(Status) == sizeof(Byte *));
+// Status object should be the size of a pointer.
+static_assert(sizeof(Status) == sizeof(void *));
 
 } // namespace Calico
 

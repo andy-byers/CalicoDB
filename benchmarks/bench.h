@@ -20,8 +20,7 @@ static_assert(DB_VALUE_SIZE < DB_PAYLOAD_SIZE);
 
 static constexpr auto DB_KEY_SIZE = DB_PAYLOAD_SIZE - DB_VALUE_SIZE;
 static constexpr Size DB_INITIAL_SIZE {10'000};
-static constexpr Size DB_BATCH_SIZE {250};
-
+static constexpr Size DB_BATCH_SIZE {1'000};
 
 struct State {
     static std::default_random_engine s_rng;

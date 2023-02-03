@@ -14,7 +14,7 @@ auto read_exact(Reader &reader, Span out, Size offset) -> Status
     auto s = reader.read(out.data(), requested, offset);
 
     if (s.is_ok() && out.size() != requested)
-        return system_error(fmt::format("could not read exact: read {}/{} span", out.size(), requested));
+        return system_error("could not read exact: read {}/{} bytes", out.size(), requested);
 
     return s;
 }

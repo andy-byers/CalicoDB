@@ -44,21 +44,21 @@ auto main(int argc, const char *argv[]) -> int
     options.page_size = 0x200;
     options.page_cache_size = 64 * options.page_size;
     options.wal_buffer_size = 64 * options.page_size;
-    Database db;
-    expect_ok(db.open(path.string(), options));
+
+    Database *db;
+    expect_ok(Database::open(path.string(), options, &db));
     {
         std::ofstream ofs {value_path, std::ios::trunc};
         CALICO_EXPECT_TRUE(ofs.is_open());
 
         for (Size i {}; i < num_committed; i += XACT_SIZE) {
-            auto xact = db.transaction();
             for (Size j {}; j < XACT_SIZE; ++j) {
                 const auto key = make_key<KEY_WIDTH>(i + j);
                 const auto value = random.get<std::string>('a', 'z', random.get(10UL, 100UL));
-                expect_ok(db.insert(key, value));
+                expect_ok(db->put(key, value));
                 ofs << value << '\n';
             }
-            expect_ok(xact.commit());
+            expect_ok(db->commit());
         }
     }
 
@@ -66,21 +66,26 @@ auto main(int argc, const char *argv[]) -> int
     fflush(stdout);
 
     // Modify the database until we receive a signal or hit the operation limit.
-    auto xact = db.transaction();
     for (Size i {}; i < LIMIT; ++i) {
         const auto key = std::to_string(random.get(num_committed * 2));
         const auto value = random.get<std::string>('\x00', '\xFF', random.get(options.page_size / 2));
-        expect_ok(db.insert(key, value));
+        expect_ok(db->put(key, value));
 
         // Keep the database from getting too large.
-        if (const auto info = db.statistics(); info.record_count() > max_database_size) {
-            while (info.record_count() >= max_database_size / 2) {
-                const auto cursor = db.first();
-                CALICO_EXPECT_TRUE(cursor.is_valid());
-                expect_ok(db.erase(cursor.key()));
+        if (const auto property = db->get_property("record_count"); !property.empty()) {
+            const auto record_count = std::stoi(property);
+            if (record_count > max_database_size) {
+                auto *cursor = db->new_cursor();
+                for (Size j {}; j < record_count / 2; ++j) {
+                    cursor->seek_first();
+                    CALICO_EXPECT_TRUE(cursor->is_valid());
+                    expect_ok(db->erase(cursor->key()));
+                }
+                delete cursor;
             }
         }
     }
     // We should never get here.
+    delete db;
     return 1;
 }

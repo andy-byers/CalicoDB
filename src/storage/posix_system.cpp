@@ -5,7 +5,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "utils/expect.h"
+#include "calico/slice.h"
+#include "calico/status.h"
 #include "utils/utils.h"
 
 namespace Calico::Posix {

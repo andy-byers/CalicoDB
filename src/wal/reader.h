@@ -48,7 +48,7 @@ public:
     }
 
     [[nodiscard]]
-    auto segment_id() const -> SegmentId
+    auto segment_id() const -> Id
     {
         return m_current;
     }
@@ -67,7 +67,7 @@ public:
     auto operator=(WalReader &&rhs) noexcept -> WalReader & = default;
 
 private:
-    [[nodiscard]] auto open_segment(SegmentId) -> Status;
+    [[nodiscard]] auto open_segment(Id) -> Status;
     auto prepare_traversal() -> void;
     auto close_segment() -> void;
 
@@ -78,7 +78,7 @@ private:
     WalSet *m_set {};
     Span m_tail;
     Span m_data;
-    SegmentId m_current;
+    Id m_current;
 };
 
 } // namespace Calico

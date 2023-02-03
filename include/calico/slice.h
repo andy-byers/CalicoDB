@@ -151,33 +151,32 @@ inline auto compare_three_way(Slice lhs, Slice rhs) noexcept -> ThreeWayComparis
     return r < 0 ? ThreeWayComparison::LT : ThreeWayComparison::GT;
 }
 
-
-inline auto operator<(Calico::Slice lhs, Calico::Slice rhs) noexcept -> bool
+inline auto operator<(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return Calico::compare_three_way(lhs, rhs) == Calico::ThreeWayComparison::LT;
+    return compare_three_way(lhs, rhs) == ThreeWayComparison::LT;
 }
 
-inline auto operator<=(Calico::Slice lhs, Calico::Slice rhs) noexcept -> bool
+inline auto operator<=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return Calico::compare_three_way(lhs, rhs) != Calico::ThreeWayComparison::GT;
+    return compare_three_way(lhs, rhs) != ThreeWayComparison::GT;
 }
 
-inline auto operator>(Calico::Slice lhs, Calico::Slice rhs) noexcept -> bool
+inline auto operator>(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return Calico::compare_three_way(lhs, rhs) == Calico::ThreeWayComparison::GT;
+    return compare_three_way(lhs, rhs) == ThreeWayComparison::GT;
 }
 
-inline auto operator>=(Calico::Slice lhs, Calico::Slice rhs) noexcept -> bool
+inline auto operator>=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return Calico::compare_three_way(lhs, rhs) != Calico::ThreeWayComparison::LT;
+    return compare_three_way(lhs, rhs) != ThreeWayComparison::LT;
 }
 
-inline auto operator==(Calico::Slice lhs, Calico::Slice rhs) noexcept -> bool
+inline auto operator==(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return Calico::compare_three_way(lhs, rhs) == Calico::ThreeWayComparison::EQ;
+    return compare_three_way(lhs, rhs) == ThreeWayComparison::EQ;
 }
 
-inline auto operator!=(Calico::Slice lhs, Calico::Slice rhs) noexcept -> bool
+inline auto operator!=(Slice lhs, Slice rhs) noexcept -> bool
 {
     return !(lhs == rhs);
 }

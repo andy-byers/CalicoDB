@@ -2,7 +2,8 @@
 #define CALICO_TREE_FREE_LIST_H
 
 #include "calico/status.h"
-#include "tree.h"
+#include "pager/page.h"
+#include "utils/expected.hpp"
 #include "utils/types.h"
 #include <optional>
 
@@ -11,8 +12,11 @@ namespace Calico {
 class Pager;
 
 class FreeList {
+    Pager *m_pager {};
+    Id m_head;
+
 public:
-    ~FreeList() = default;
+    friend class BPlusTree;
 
     explicit FreeList(Pager &pager)
         : m_pager {&pager} {}
@@ -22,14 +26,8 @@ public:
         return m_head.is_null();
     }
 
-    [[nodiscard]] auto push(Page page) -> tl::expected<void, Status>;
     [[nodiscard]] auto pop() -> tl::expected<Page, Status>;
-    auto save_state(FileHeader &header) const -> void;
-    auto load_state(const FileHeader &header) -> void;
-
-private:
-    Pager *m_pager;
-    Id m_head;
+    auto push(Page page) -> void;
 };
 
 } // namespace Calico

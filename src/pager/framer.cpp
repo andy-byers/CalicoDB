@@ -1,11 +1,8 @@
 #include "framer.h"
-#include "pager.h"
+#include "page.h"
 #include "calico/storage.h"
-#include "page/page.h"
+#include "tree/header.h"
 #include "utils/encoding.h"
-#include "utils/expect.h"
-#include "utils/header.h"
-#include "utils/layout.h"
 
 namespace Calico {
 
@@ -19,11 +16,10 @@ Frame::Frame(Byte *buffer, Size id, Size size)
 
 auto Frame::lsn() const -> Id
 {
-    const auto offset = PageLayout::header_offset(m_page_id) + PageLayout::LSN_OFFSET;
-    return Id {get_u64(m_bytes.range(offset))};
+    return {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::SIZE))};
 }
 
-auto Frame::ref(Pager &source, bool is_writable) -> Page
+auto Frame::ref(bool is_writable) -> Page
 {
     CALICO_EXPECT_FALSE(m_is_writable);
 
@@ -32,7 +28,7 @@ auto Frame::ref(Pager &source, bool is_writable) -> Page
         m_is_writable = true;
     }
     m_ref_count++;
-    return Page {{m_page_id, data(), &source, is_writable}};
+    return Page {m_page_id, data(), is_writable};
 }
 
 auto Frame::unref(Page &page) -> void
@@ -41,11 +37,11 @@ auto Frame::unref(Page &page) -> void
     CALICO_EXPECT_GT(m_ref_count, 0);
 
     if (page.is_writable()) {
+        CALICO_EXPECT_TRUE(m_is_writable);
         CALICO_EXPECT_EQ(m_ref_count, 1);
         m_is_writable = false;
+        page.m_write = false;
     }
-    // Make sure the page doesn't get released twice.
-    page.m_source.reset();
     m_ref_count--;
 }
 
@@ -56,15 +52,16 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
     CALICO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
 
     RandomEditor *temp_file {};
-    auto s = storage->open_random_editor(prefix + DATA_FILENAME, &temp_file);
+    auto s = storage->open_random_editor(prefix + "data", &temp_file);
     std::unique_ptr<RandomEditor> file {temp_file};
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
     const auto cache_size = page_size * frame_count;
     AlignedBuffer buffer {cache_size, page_size};
-    if (buffer.get() == nullptr)
+    if (buffer.get() == nullptr) {
         return tl::make_unexpected(system_error("cannot allocate frames: out of memory"));
+    }
 
     return Framer {std::move(file), std::move(buffer), page_size, frame_count};
 }
@@ -78,33 +75,46 @@ Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size pa
     CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
     mem_clear({m_buffer.get(), page_size * frame_count});
 
-    while (m_frames.size() < frame_count)
+    while (m_frames.size() < frame_count) {
         m_frames.emplace_back(m_buffer.get(), m_frames.size(), page_size);
-    
-    while (m_available.size() < m_frames.size())
-        m_available.emplace_back(Size {m_available.size()});
+    }
+
+    while (m_available.size() < m_frames.size()) {
+        m_available.emplace_back(m_available.size());
+    }
 }
 
-auto Framer::ref(Size id, Pager &source, bool is_writable) -> Page
+auto Framer::ref(Size index) -> Page
 {
-    CALICO_EXPECT_LT(id, m_frames.size());
+    CALICO_EXPECT_LT(index, m_frames.size());
     m_ref_sum++;
-    return m_frames[id].ref(source, is_writable);
+    return m_frames[index].ref(false);
 }
 
-auto Framer::unref(Size id, Page &page) -> void
+auto Framer::unref(Size index, Page page) -> void
 {
-    CALICO_EXPECT_LT(id, m_frames.size());
-    m_frames[id].unref(page);
+    CALICO_EXPECT_LT(index, m_frames.size());
+    m_frames[index].unref(page);
     m_ref_sum--;
+}
+
+auto Framer::upgrade(Size index, Page &page) -> void
+{
+    CALICO_EXPECT_FALSE(page.is_writable());
+    CALICO_EXPECT_LT(index, m_frames.size());
+    m_frames[index].unref(page);
+    page = m_frames[index].ref(true);
 }
 
 auto Framer::pin(Id pid) -> tl::expected<Size, Status>
 {
     CALICO_EXPECT_FALSE(pid.is_null());
-    if (m_available.empty())
+    CALICO_EXPECT_LE(pid.as_index(), m_page_count);
+
+    if (m_available.empty()) {
         return tl::make_unexpected(not_found(
             "could not pin page: unable to find an available frame (unpin a page and try again)"));
+    }
 
     auto fid = m_available.back();
     auto &frame = frame_at_impl(fid);
@@ -144,7 +154,6 @@ auto Framer::write_back(Size id) -> Status
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_LE(frame.ref_count(), 1);
 
-    // If this fails, the caller will need to roll back the database state or exit.
     m_bytes_written += m_page_size;
     return write_page_to_file(frame.pid(), frame.data());
 }
@@ -162,29 +171,34 @@ auto Framer::read_page_from_file(Id id, Span out) const -> tl::expected<bool, St
 
     // Don't even try to call read() if the file isn't large enough. The system call can be pretty slow even if it doesn't read anything.
     // This happens when we are allocating a page from the end of the file.
-    if (offset >= file_size)
+    if (offset >= file_size) {
         return false;
+    }
 
     auto read_size = out.size();
     auto s = m_file->read(out.data(), read_size, offset);
-    if (!s.is_ok()) return tl::make_unexpected(s);
+    if (!s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
-    if (read_size == m_page_size)
+    if (read_size == m_page_size) {
         return true;
+    }
 
     // In that case, we will hit EOF here.
-    if (read_size == 0)
+    if (read_size == 0) {
         return false;
+    }
 
     return tl::make_unexpected(system_error(
         "could not read page {}: incomplete read (read {}/{} B)", id.value, out.size(), m_page_size));
 }
 
-auto Framer::write_page_to_file(Id id, Slice in) const -> Status
+auto Framer::write_page_to_file(Id pid, const Slice &page) const -> Status
 {
-    CALICO_EXPECT_EQ(m_page_size, in.size());
-    return m_file->write(in, id.as_index() * in.size());
+    CALICO_EXPECT_EQ(m_page_size, page.size());
+    return m_file->write(page, pid.as_index() * page.size());
 }
 
 auto Framer::load_state(const FileHeader &header) -> void

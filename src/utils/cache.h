@@ -78,8 +78,9 @@ public:
     {
         using std::end;
 
-        if (auto itr = m_map.find(key); itr != end(m_map))
+        if (auto itr = m_map.find(key); itr != end(m_map)) {
             return itr->second;
+        }
         return end(m_list);
     }
 
@@ -88,8 +89,9 @@ public:
     {
         using std::end;
 
-        if (auto itr = m_map.find(key); itr != end(m_map))
+        if (auto itr = m_map.find(key); itr != end(m_map)) {
             return promote(itr);
+        }
         return end(m_list);
     }
 
@@ -114,8 +116,9 @@ public:
 
         // NOTE: itr must be a valid iterator.
         if (auto node = m_map.extract(itr->key)) {
-            if (m_sep == itr)
+            if (m_sep == itr) {
                 m_sep = next(m_sep);
+            }
             return m_list.erase(node.mapped());
         }
         return end(m_list);
@@ -126,8 +129,9 @@ public:
         using std::end;
 
         if (auto itr = m_map.find(key); itr != end(m_map)) {
-            if (m_sep == itr->second)
+            if (m_sep == itr->second) {
                 m_sep = next(m_sep);
+            }
             m_list.erase(itr->second);
             m_map.erase(itr);
             return true;
@@ -140,16 +144,18 @@ public:
     {
         using std::end;
 
-        if (is_empty())
+        if (is_empty()) {
             return std::nullopt;
+        }
 
         // Adjust the separator. If there are no elements in the "warm" queue, we have
         // to evict the LRU element from the "hot" queue. Remember, the cache is not
         // empty (see guard above).
         auto target = prev(end(m_list));
 
-        if (m_sep == target)
+        if (m_sep == target) {
             m_sep = next(target);
+        }
 
         auto entry = std::move(*target);
         m_list.erase(target);
@@ -232,8 +238,9 @@ private:
         // If the entry is not hot, then make it hot. Also, if the entry was already hot, then it must
         // not be equal to the separator.
         if (!hot) {
-            if (m_sep == itr->second)
+            if (m_sep == itr->second) {
                 m_sep = next(m_sep);
+            }
             hot = true;
         }
         // Elements always get promoted to the front of the hot queue.

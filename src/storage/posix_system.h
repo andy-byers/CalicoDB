@@ -1,5 +1,5 @@
-#ifndef CALICO_STORE_SYSTEM_H
-#define CALICO_STORE_SYSTEM_H
+#ifndef CALICO_STORAGE_POSIX_SYSTEM_H
+#define CALICO_STORAGE_POSIX_SYSTEM_H
 
 #include "calico/storage.h"
 #include "utils/expected.hpp"
@@ -28,4 +28,4 @@ static constexpr int FAILURE = -1;
 
 } // namespace Calico::system
 
-#endif // CALICO_STORE_SYSTEM_H
+#endif // CALICO_STORAGE_POSIX_SYSTEM_H

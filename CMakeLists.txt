@@ -12,9 +12,7 @@ project(CalicoDB
 set(CMAKE_CXX_STANDARD 17)
 
 set(CALICO_NAME calico)
-set(CALICO_EXAMPLES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/examples")
 set(CALICO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-set(CALICO_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib")
 set(CALICO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(CALICO_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/test")
 
@@ -35,6 +33,7 @@ add_subdirectory(src)
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     option(CALICO_BUILD_BENCHMARKS "Build the benchmarks" On)
     option(CALICO_BUILD_EXAMPLES "Build the examples" On)
+    option(CALICO_BUILD_FUZZERS "Build the fuzzers" Off)
     option(CALICO_BUILD_TESTS "Build the tests" On)
 
     if(CALICO_BUILD_BENCHMARKS)
@@ -43,6 +42,10 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
 
     if(CALICO_BUILD_EXAMPLES)
         add_subdirectory(examples)
+    endif()
+
+    if(CALICO_BUILD_FUZZERS)
+        add_subdirectory(fuzz)
     endif()
 
     if(CALICO_BUILD_TESTS)

@@ -17,7 +17,7 @@ class PageList final {
 public:
     struct Entry {
         Id pid;
-        Id record_lsn;
+        Lsn record_lsn;
     };
 
     using Iterator = std::list<Entry>::iterator;
@@ -61,7 +61,7 @@ public:
     }
 
     [[nodiscard]]
-    auto insert(const Id &pid, const Id &record_lsn) -> Iterator
+    auto insert(const Id &pid, const Lsn &record_lsn) -> Iterator
     {
         return m_list.emplace(cend(m_list), Entry {pid, record_lsn});
     }

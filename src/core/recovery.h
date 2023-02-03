@@ -1,10 +1,6 @@
 #ifndef CALICO_CORE_TRANSACTION_LOG_H
 #define CALICO_CORE_TRANSACTION_LOG_H
 
-#include "calico/slice.h"
-#include "utils/encoding.h"
-#include "utils/system.h"
-#include "utils/types.h"
 #include "wal/wal.h"
 #include <optional>
 #include <variant>
@@ -17,11 +13,14 @@ class WriteAheadLog;
 
 class Recovery {
 public:
-    Recovery(Pager &pager, WriteAheadLog &wal, System &system)
-        : m_pager {&pager},
+    System *system {};
+
+    Recovery(Pager &pager, WriteAheadLog &wal, System &sys, Lsn &commit_lsn)
+        : system {&sys},
+          m_pager {&pager},
           m_wal {&wal},
-          m_system {&system},
-          m_log {system.create_log("recovery")}
+          m_commit_lsn {&commit_lsn},
+          m_log {sys.create_log("recovery")}
     {}
 
     [[nodiscard]] auto start_abort() -> Status;
@@ -32,7 +31,7 @@ public:
 private:
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
-    System *m_system {};
+    Lsn *m_commit_lsn {};
     LogPtr m_log;
 };
 

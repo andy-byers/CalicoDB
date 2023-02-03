@@ -35,7 +35,9 @@ Usage examples can be found in the [examples directory](../examples).
 ```
 CalicoDB
 ┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
+┣╸cmake ┄┄┄┄┄┄┄┄┄┄┄┄ CMake utilities/config files
 ┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
+┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄┄┄ libFuzzer fuzzers
 ┣╸include/calico
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
@@ -49,7 +51,7 @@ CalicoDB
 ┃ ┗╸transaction.h ┄┄ Transaction object
 ┣╸src
 ┃ ┣╸core ┄┄┄┄┄┄┄┄┄┄┄ API implementation
-┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Cache layer
+┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Database page cache
 ┃ ┣╸storage ┄┄┄┄┄┄┄┄ Data storage and retrieval
 ┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Common utilities

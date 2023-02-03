@@ -3,7 +3,7 @@
 > **Warning**: This library is not yet stable, nor is it code reviewed. 
 > Please don't use it for anything serious!
 
-Calico DB is an embedded key-value database written in C++20.
+Calico DB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of variable-length byte sequences.
 
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
@@ -25,14 +25,6 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + Crash protection using write-ahead logging
 + Variable-length keys and values (see [Caveats](#caveats))
 + Various parameters can be tuned (page size, cache size, etc.)
-+ Transactions provided as first-class objects
-
-## Caveats
-+ Only tested on 64-bit Ubuntu and OSX
-+ Maximum key length is anywhere from 29 B to ~16 KiB, depending on the chosen page size
-+ Maximum value length is roughly 4 GiB
-+ Doesn't support concurrent transactions
-+ Doesn't provide synchronization past support for concurrent cursors
 
 ## Caveats
 + Only tested on 64-bit Ubuntu and OSX
@@ -50,24 +42,18 @@ The tests depend on `@google/googletest`, and the benchmarks depend on `@google/
 Dependencies are either downloaded using CMake's FetchContent API, or bundled with the source code.
 
 ## Performance
-Calico DB has a way to go performance-wise.
-Currently, we have decent performance (>= 200K ops/second) in the following categories:
-+ Sequential write
-+ Random read
-+ Sequential read
-+ Overwrite
-
-Unfortunately, random writes are quite slow (~6 or 7 times slower than sequential writes).
-Writing in reverse-sequential order represents the worst case for the B<sup>+</sup>-tree splitting algorithm, and leads to awful performance.
+Calico DB is optimized for read-heavy workloads with intermittent batches of sequential writes.
+Synchronization for multiple writers, or for simultaneous readers and writers, must be provided externally.
 Performance benchmarks are provided in the [`benchmarks`](benchmarks) folder.
 
 ## TODO
 1. Get everything code reviewed!
 2. Get unit test coverage up
-3. Work on the documentation in [doc](doc)
-4. Work on performance
+3. Support Windows
+4. Work on the documentation in [doc](doc)
+5. Work on performance
     + B<sup>+</sup>-tree splitting algorithm could be modified to favor sequential writes less
-5. Need some way to reduce the file size once many pages become unused
+6. Need some way to reduce the file size once many pages become unused
     + We need some way to collect freelist pages at the end of the file so that we can truncate
     + Look into SQLite's pointer maps
 
