@@ -3,7 +3,6 @@
 #include "calico/storage.h"
 #include "tree/header.h"
 #include "utils/encoding.h"
-#include "utils/expect.h"
 
 namespace Calico {
 

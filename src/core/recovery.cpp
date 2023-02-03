@@ -29,22 +29,13 @@ static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback
     }
 }
 
-#define ENSURE_NO_XACT(primary) \
-    do { \
-        if (system->has_xact) { \
-            return logic_error( \
-                "{}: a transaction is active", primary); \
-        } \
-    } while (0)
-
 auto Recovery::start_abort() -> Status
 {
-    ENSURE_NO_XACT("cannot start abort");
-    m_log->info("rolling back from lsn {}", m_wal->current_lsn().value);
+    Calico_Info("rolling back from lsn {}", m_wal->current_lsn().value);
 
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
-    return m_wal->roll_backward(system->commit_lsn, [this](auto payload) {
+    return m_wal->roll_backward(*m_commit_lsn, [this](auto payload) {
         auto decoded = decode_payload(payload);
 
         if (std::holds_alternative<std::monostate>(decoded)) {
@@ -53,7 +44,7 @@ auto Recovery::start_abort() -> Status
 
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
-            CALICO_TRY_S(with_page(*m_pager, image, [this, &image](auto &page) {
+            Calico_Try_S(with_page(*m_pager, image, [this, &image](auto &page) {
                 m_pager->upgrade(page);
                 apply_undo(page, image);
             }));
@@ -64,16 +55,14 @@ auto Recovery::start_abort() -> Status
 
 auto Recovery::finish_abort() -> Status
 {
-    ENSURE_NO_XACT("cannot finish abort");
-    CALICO_TRY_S(m_pager->flush({}));
-    CALICO_TRY_S(m_wal->truncate(system->commit_lsn));
-    m_log->info("rolled back to lsn {}", system->commit_lsn.value);
+    Calico_Try_S(m_pager->flush({}));
+    Calico_Try_S(m_wal->truncate(*m_commit_lsn));
+    Calico_Info("rolled back to lsn {}", m_commit_lsn->value);
     return ok();
 }
 
 auto Recovery::start_recovery() -> Status
 {
-    ENSURE_NO_XACT("cannot start recovery");
     Lsn last_lsn;
 
     const auto redo = [this, &last_lsn](auto payload) {
@@ -87,10 +76,10 @@ auto Recovery::start_recovery() -> Status
         last_lsn = payload.lsn();
 
         if (std::holds_alternative<CommitDescriptor>(decoded)) {
-            system->commit_lsn = payload.lsn();
+            *m_commit_lsn = payload.lsn();
         } else if (std::holds_alternative<DeltaDescriptor>(decoded)) {
             const auto delta = std::get<DeltaDescriptor>(decoded);
-            CALICO_TRY_S(with_page(*m_pager, delta, [this, &delta](auto &page) {
+            Calico_Try_S(with_page(*m_pager, delta, [this, &delta](auto &page) {
                 if (delta.lsn > read_page_lsn(page)) {
                     m_pager->upgrade(page);
                     apply_redo(page, delta);
@@ -99,7 +88,7 @@ auto Recovery::start_recovery() -> Status
         } else if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             // This is not necessary in most cases, but should help with some kinds of corruption.
             const auto image = std::get<FullImageDescriptor>(decoded);
-            CALICO_TRY_S(with_page(*m_pager, image, [this, &image](auto &page) {
+            Calico_Try_S(with_page(*m_pager, image, [this, &image](auto &page) {
                 if (image.lsn > read_page_lsn(page)) {
                     m_pager->upgrade(page);
                     apply_undo(page, image);
@@ -120,32 +109,31 @@ auto Recovery::start_recovery() -> Status
 
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
-            CALICO_TRY_S(with_page(*m_pager, image, [this, &image](auto &page) {
+            Calico_Try_S(with_page(*m_pager, image, [this, &image](auto &page) {
                 m_pager->upgrade(page);
                 apply_undo(page, image);
             }));
         }
         return ok();
     };
-    m_log->info("rolling forward from lsn {}", m_pager->recovery_lsn().value);
+    Calico_Info("rolling forward from lsn {}", m_pager->recovery_lsn().value);
 
     // Apply updates that are in the WAL but not the database.
-    CALICO_TRY_S(m_wal->roll_forward(m_pager->recovery_lsn(), redo));
-    m_log->info("rolled forward to lsn {}", last_lsn.value);
+    Calico_Try_S(m_wal->roll_forward(m_pager->recovery_lsn(), redo));
+    Calico_Info("rolled forward to lsn {}", last_lsn.value);
 
     // Reached the end of the WAL, but didn't find a commit record. Undo updates until we reach the most-recent commit.
-    if (last_lsn != system->commit_lsn) {
-        m_log->warn("missing commit record: rolling backward");
-        CALICO_TRY_S(m_wal->roll_backward(system->commit_lsn, undo));
-        m_log->info("rolled backward to lsn {}", system->commit_lsn.value);
+    if (last_lsn != *m_commit_lsn) {
+        Calico_Warn("missing commit record: rolling backward");
+        Calico_Try_S(m_wal->roll_backward(*m_commit_lsn, undo));
+        Calico_Info("rolled backward to lsn {}", m_commit_lsn->value);
     }
     return ok();
 }
 
 auto Recovery::finish_recovery() -> Status
 {
-    ENSURE_NO_XACT("cannot finish recovery");
-    CALICO_TRY_S(m_pager->flush({}));
+    Calico_Try_S(m_pager->flush({}));
     m_wal->cleanup(m_pager->recovery_lsn());
     return ok();
 }

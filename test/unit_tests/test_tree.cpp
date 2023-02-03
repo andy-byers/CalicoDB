@@ -562,8 +562,6 @@ public:
 
     auto SetUp() -> void override
     {
-        system.has_xact = true;
-
         auto r = Pager::open({
             PREFIX,
             storage.get(),
@@ -571,6 +569,8 @@ public:
             &wal,
             &system,
             &status,
+            &commit_lsn,
+            &in_xact,
             8,
             param.page_size,
         });
@@ -630,6 +630,8 @@ public:
     LogScratchManager log_scratch;
     System system {PREFIX, {}};
     Status status {ok()};
+    bool in_xact {true};
+    Lsn commit_lsn;
     DisabledWriteAheadLog wal;
     std::string scratch;
     std::unique_ptr<Pager> pager;
@@ -975,153 +977,130 @@ protected:
     }
 };
 
-TEST_P(CursorTests, InvalidCursorsAreNeverEqual)
-{
-    auto lhs = CursorInternal::make_cursor(*tree);
-    auto rhs = CursorInternal::make_cursor(*tree);
-    ASSERT_NE(lhs, rhs);
-
-    lhs.seek_first();
-    rhs.seek_first();
-    ASSERT_EQ(lhs, rhs);
-
-    lhs.previous();
-    rhs.previous();
-    ASSERT_NE(lhs, rhs);
-
-    lhs.seek_last();
-    rhs.seek_last();
-    ASSERT_EQ(lhs, rhs);
-
-    lhs.next();
-    rhs.next();
-    ASSERT_NE(lhs, rhs);
-}
-
 TEST_P(CursorTests, SeeksForward)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
-    cursor.seek_first();
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    cursor->seek_first();
     for (Size i {}; i < RECORD_COUNT; ++i) {
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_EQ(cursor.key().to_string(), make_key(i));
-        ASSERT_EQ(cursor.value().to_string(), make_value('v'));
-        cursor.next();
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_EQ(cursor->key().to_string(), make_key(i));
+        ASSERT_EQ(cursor->value().to_string(), make_value('v'));
+        cursor->next();
     }
-    ASSERT_FALSE(cursor.is_valid());
+    ASSERT_FALSE(cursor->is_valid());
 }
 
 TEST_P(CursorTests, SeeksForwardFromBoundary)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
-    cursor.seek(make_key(RECORD_COUNT / 4));
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    cursor->seek(make_key(RECORD_COUNT / 4));
     for (Size i {}; i < RECORD_COUNT * 3 / 4; ++i) {
-        ASSERT_TRUE(cursor.is_valid());
-        cursor.next();
+        ASSERT_TRUE(cursor->is_valid());
+        cursor->next();
     }
-    ASSERT_FALSE(cursor.is_valid());
-}
+    ASSERT_FALSE(cursor->is_valid());
+    }
 
 TEST_P(CursorTests, SeeksForwardToBoundary)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
-    auto bounds = cursor;
-    cursor.seek_first();
-    bounds.seek(make_key(RECORD_COUNT * 3 / 4));
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    std::unique_ptr<Cursor> bounds {CursorInternal::make_cursor(*tree)};
+    cursor->seek_first();
+    bounds->seek(make_key(RECORD_COUNT * 3 / 4));
     for (Size i {}; i < RECORD_COUNT * 3 / 4; ++i) {
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_NE(cursor, bounds);
-        cursor.next();
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_NE(cursor->key(), bounds->key());
+        cursor->next();
     }
-    ASSERT_EQ(cursor, bounds);
+    ASSERT_EQ(cursor->key(), bounds->key());
 }
 
 TEST_P(CursorTests, SeeksForwardBetweenBoundaries)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
-    cursor.seek(make_key(250));
-    auto bounds = cursor;
-    bounds.seek(make_key(750));
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    cursor->seek(make_key(250));
+    std::unique_ptr<Cursor> bounds {CursorInternal::make_cursor(*tree)};
+    bounds->seek(make_key(750));
     for (Size i {}; i < 500; ++i) {
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_NE(cursor, bounds);
-        cursor.next();
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_NE(cursor->key(), bounds->key());
+        cursor->next();
     }
-    ASSERT_EQ(cursor, bounds);
+    ASSERT_EQ(cursor->key(), bounds->key());
 }
 
 TEST_P(CursorTests, SeeksBackward)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
-    cursor.seek_last();
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    cursor->seek_last();
     for (Size i {}; i < RECORD_COUNT; ++i) {
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_EQ(cursor.key().to_string(), make_key(RECORD_COUNT - i - 1));
-        ASSERT_EQ(cursor.value().to_string(), make_value('v'));
-        cursor.previous();
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_EQ(cursor->key().to_string(), make_key(RECORD_COUNT - i - 1));
+        ASSERT_EQ(cursor->value().to_string(), make_value('v'));
+        cursor->previous();
     }
-    ASSERT_FALSE(cursor.is_valid());
+    ASSERT_FALSE(cursor->is_valid());
 }
 
 TEST_P(CursorTests, SeeksBackwardFromBoundary)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     const auto bounds = RECORD_COUNT * 3 / 4;
-    cursor.seek(make_key(bounds));
+    cursor->seek(make_key(bounds));
     for (Size i {}; i <= bounds; ++i) {
-        ASSERT_TRUE(cursor.is_valid());
-        cursor.previous();
+        ASSERT_TRUE(cursor->is_valid());
+        cursor->previous();
     }
-    ASSERT_FALSE(cursor.is_valid());
+    ASSERT_FALSE(cursor->is_valid());
 }
 
 TEST_P(CursorTests, SeeksBackwardToBoundary)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
-    cursor.seek_last();
-    auto bounds = cursor;
-    bounds.seek(make_key(RECORD_COUNT / 4));
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    cursor->seek_last();
+    std::unique_ptr<Cursor> bounds {CursorInternal::make_cursor(*tree)};
+    bounds->seek(make_key(RECORD_COUNT / 4));
     for (Size i {}; i < RECORD_COUNT*3/4 - 1; ++i) {
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_NE(cursor, bounds);
-        cursor.previous();
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_NE(cursor->key(), bounds->key());
+        cursor->previous();
     }
-    ASSERT_EQ(cursor, bounds);
+    ASSERT_EQ(cursor->key(), bounds->key());
 }
 
 TEST_P(CursorTests, SeeksBackwardBetweenBoundaries)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
-    auto bounds = CursorInternal::make_cursor(*tree);
-    cursor.seek(make_key(RECORD_COUNT * 3 / 4));
-    bounds.seek(make_key(RECORD_COUNT / 4));
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    std::unique_ptr<Cursor> bounds {CursorInternal::make_cursor(*tree)};
+    cursor->seek(make_key(RECORD_COUNT * 3 / 4));
+    bounds->seek(make_key(RECORD_COUNT / 4));
     for (Size i {}; i < RECORD_COUNT / 2; ++i) {
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_NE(cursor, bounds);
-        cursor.previous();
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_NE(cursor->key(), bounds->key());
+        cursor->previous();
     }
-    ASSERT_EQ(cursor, bounds);
+    ASSERT_EQ(cursor->key(), bounds->key());
 }
 
 TEST_P(CursorTests, SanityCheck_Forward)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (Size iteration {}; iteration < 100; ++iteration) {
         const auto i = random.get<Size>(RECORD_COUNT);
         const auto key = make_key(i);
-        cursor.seek(key);
+        cursor->seek(key);
 
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_EQ(cursor.key(), key);
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_EQ(cursor->key(), key);
 
         for (Size n {}; n < random.get<Size>(10); ++n) {
-            cursor.next();
+            cursor->next();
 
             if (const auto j = i + n + 1; j < RECORD_COUNT) {
-                ASSERT_TRUE(cursor.is_valid());
-                ASSERT_EQ(cursor.key(), make_key(j));
+                ASSERT_TRUE(cursor->is_valid());
+                ASSERT_EQ(cursor->key(), make_key(j));
             } else {
-                ASSERT_FALSE(cursor.is_valid());
+                ASSERT_FALSE(cursor->is_valid());
             }
         }
     }
@@ -1129,23 +1108,23 @@ TEST_P(CursorTests, SanityCheck_Forward)
 
 TEST_P(CursorTests, SanityCheck_Backward)
 {
-    auto cursor = CursorInternal::make_cursor(*tree);
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (Size iteration {}; iteration < 100; ++iteration) {
         const auto i = random.get<Size>(RECORD_COUNT);
         const auto key = make_key(i);
-        cursor.seek(key);
+        cursor->seek(key);
 
-        ASSERT_TRUE(cursor.is_valid());
-        ASSERT_EQ(cursor.key(), key);
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_EQ(cursor->key(), key);
 
         for (Size n {}; n < random.get<Size>(10); ++n) {
-            cursor.previous();
+            cursor->previous();
 
             if (i > n) {
-                ASSERT_TRUE(cursor.is_valid());
-                ASSERT_EQ(cursor.key(), make_key(i - n - 1));
+                ASSERT_TRUE(cursor->is_valid());
+                ASSERT_EQ(cursor->key(), make_key(i - n - 1));
             } else {
-                ASSERT_FALSE(cursor.is_valid());
+                ASSERT_FALSE(cursor->is_valid());
                 break;
             }
         }

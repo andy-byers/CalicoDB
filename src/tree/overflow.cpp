@@ -31,7 +31,7 @@ static auto get_writable_content(Page &page, Size size_limit) -> Span
 auto read_chain(Pager &pager, Id pid, Span out) -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
-        CALICO_NEW_R(page, pager.acquire(pid));
+        Calico_New_R(page, pager.acquire(pid));
         const auto content = get_readable_content(page, out.size());
         mem_copy(out, content);
         out.advance(content.size());
@@ -48,7 +48,7 @@ auto write_chain(Pager &pager, FreeList &free_list, Slice overflow) -> tl::expec
     auto head = Id::null();
 
     while (!overflow.is_empty()) {
-        CALICO_NEW_R(page, free_list.pop()
+        Calico_New_R(page, free_list.pop()
             .or_else([&pager](const Status &error) -> tl::expected<Page, Status> {
                 if (error.is_logic_error())
                     return pager.allocate();
@@ -77,7 +77,7 @@ auto write_chain(Pager &pager, FreeList &free_list, Slice overflow) -> tl::expec
 auto erase_chain(Pager &pager, FreeList &free_list, Id pid, Size size) -> tl::expected<void, Status>
 {
     while (size) {
-        CALICO_NEW_R(page, pager.acquire(pid));
+        Calico_New_R(page, pager.acquire(pid));
         size -= get_readable_content(page, size).size();
         pid = read_next_id(page);
         pager.upgrade(page);

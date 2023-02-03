@@ -14,7 +14,7 @@ auto FreeList::push(Page page) -> void
 auto FreeList::pop() -> tl::expected<Page, Status>
 {
     if (!m_head.is_null()) {
-        CALICO_NEW_R(page, m_pager->acquire(m_head));
+        Calico_New_R(page, m_pager->acquire(m_head));
         m_head.value = get_u64(page.data() + sizeof(Id));
         return page;
     }

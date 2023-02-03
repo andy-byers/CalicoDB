@@ -1,7 +1,5 @@
 #include "posix_storage.h"
 #include "posix_system.h"
-#include "utils/expect.h"
-#include "utils/system.h"
 #include <fcntl.h>
 
 namespace Calico {

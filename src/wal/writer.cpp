@@ -164,7 +164,7 @@ auto WalWriter::close_segment() -> Status
     if (const auto id = std::exchange(m_current, Id::null()); written) {
         m_set->add_segment(id);
     } else {
-        CALICO_TRY_S(m_storage->remove_file(m_prefix + encode_segment_name(id)));
+        Calico_Try_S(m_storage->remove_file(m_prefix + encode_segment_name(id)));
     }
     return ok();
 }

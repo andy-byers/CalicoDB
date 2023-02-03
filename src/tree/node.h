@@ -10,12 +10,17 @@ namespace Calico {
 
 struct Node;
 
+static constexpr Size MAX_CELL_HEADER_SIZE =
+    sizeof(std::uint32_t) + // Value size  (4 B)
+    sizeof(std::uint16_t) + // Key size    (2 B)
+    sizeof(Id);             // Overflow ID (8 B)
+
 inline constexpr auto compute_min_local(Size page_size) -> Size
 {
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
     return (page_size - NodeHeader::SIZE) * 32 / 256 -
-           MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
+           MAX_CELL_HEADER_SIZE - sizeof(PageSize);
 }
 
 inline constexpr auto compute_max_local(Size page_size) -> Size
@@ -23,7 +28,7 @@ inline constexpr auto compute_max_local(Size page_size) -> Size
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
     return (page_size - NodeHeader::SIZE) * 64 / 256 -
-           MAX_CELL_HEADER_SIZE - CELL_POINTER_SIZE;
+           MAX_CELL_HEADER_SIZE - sizeof(PageSize);
 }
 
 /* Internal Cell Format:

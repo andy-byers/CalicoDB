@@ -1,6 +1,8 @@
 #ifndef CALICO_DATABASE_H
 #define CALICO_DATABASE_H
 
+#include <string>
+
 namespace Calico {
 
 struct Options;
@@ -10,7 +12,7 @@ class Status;
 
 class Database {
 public:
-    virtual ~Database();
+    virtual ~Database() = default;
     [[nodiscard]] static auto open(const Slice &path, const Options &options, Database **db) -> Status;
     [[nodiscard]] static auto destroy(const Slice &path, const Options &options) -> Status;
 
@@ -21,7 +23,7 @@ public:
     [[nodiscard]] virtual auto commit() -> Status = 0;
     [[nodiscard]] virtual auto abort() -> Status = 0;
 
-    [[nodiscard]] virtual auto get(const Slice &key, std::string &out) const -> Status = 0;
+    [[nodiscard]] virtual auto get(const Slice &key, std::string &value) const -> Status = 0;
     [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
     [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
 };

@@ -1,21 +1,21 @@
 
 #include "database_impl.h"
+#include <spdlog/fmt/fmt.h>
 #include "calico/calico.h"
 #include "calico/storage.h"
-#include "calico/transaction.h"
-#include "pager/pager.h"
-#include "recovery.h"
 #include "storage/helpers.h"
 #include "storage/posix_storage.h"
 #include "tree/cursor_internal.h"
-#include "tree/header.h"
-#include "tree/tree.h"
 #include "utils/system.h"
-#include "wal/wal.h"
-#include "wal/cleanup.h"
-#include "wal/writer.h"
 
 namespace Calico {
+
+#define Maybe_Set_Error(s) \
+    do {                   \
+        if (m_status.is_ok()) { \
+            m_status = s;  \
+        }                  \
+    } while (0)
 
 [[nodiscard]]
 static auto sanitize_options(const Options &options) -> Options
@@ -46,23 +46,6 @@ static auto sanitize_options(const Options &options) -> Options
     return sanitized;
 }
 
-auto Database::open(const Slice &path, const Options &options, Database **db) -> Status
-{
-    auto *ptr = new(std::nothrow) DatabaseImpl;
-    if (ptr == nullptr) {
-        return system_error("cannot allocate database object: out of memory");
-    }
-    
-    auto s = ptr->open(path, options);
-    if (!s.is_ok()) {
-        delete ptr;
-	return s;
-    }
-
-    *db = ptr;
-    return ok();
-}
-
 auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
@@ -75,13 +58,13 @@ auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
     system = std::make_unique<System>(m_prefix, sanitized);
     m_log = system->create_log("core");
 
-    m_log->info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
+    Calico_Info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
                 CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
-    m_log->info("tree is located at \"{}data\"", m_prefix);
+    Calico_Info("tree is located at \"{}data\"", m_prefix);
     if (sanitized.wal_prefix.is_empty()) {
-        m_log->info("wal prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
+        Calico_Info("wal prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
     } else {
-        m_log->info("wal prefix is \"{}\"", sanitized.wal_prefix.to_string());
+        Calico_Info("wal prefix is \"{}\"", sanitized.wal_prefix.to_string());
     }
 
     // Any error during initialization is fatal.
@@ -93,15 +76,15 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     if (sanitized.log_level != LogLevel::OFF) {
         switch (sanitized.log_target) {
             case LogTarget::FILE:
-                m_log->info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
+                Calico_Info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
                 break;
             case LogTarget::STDOUT:
             case LogTarget::STDOUT_COLOR:
-                m_log->info("logging to stdout");
+                Calico_Info("logging to stdout");
                 break;
             case LogTarget::STDERR:
             case LogTarget::STDERR_COLOR:
-                m_log->info("logging to stderr");
+                Calico_Info("logging to stderr");
         }
     }
 
@@ -158,6 +141,8 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
             wal.get(),
             system.get(),
             &m_status,
+            &m_commit_lsn,
+            &m_in_txn,
             sanitized.page_cache_size / sanitized.page_size,
             sanitized.page_size,
         });
@@ -170,14 +155,12 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     tree = std::make_unique<BPlusTree>(*pager);
     tree->load_state(state);
-    m_recovery = std::make_unique<Recovery>(*pager, *wal, *system);
+    m_recovery = std::make_unique<Recovery>(*pager, *wal, *system, m_commit_lsn);
 
     auto s = ok();
     if (is_new) {
-        m_log->info("setting up a new database");
-        CALICO_TRY_S(wal->start_workers());
-        auto xact = start();
-
+        Calico_Info("setting up a new database");
+        Calico_Try_S(wal->start_workers());
         auto root = tree->setup();
         if (!root.has_value()) {
             return root.error();
@@ -190,23 +173,23 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         state.write(root->page);
         pager->release(std::move(*root).take());
 
-        CALICO_TRY_S(xact.commit());
-        CALICO_TRY_S(wal->flush());
-        CALICO_TRY_S(pager->flush({}));
+        Calico_Try_S(do_commit());
+        Calico_Try_S(wal->flush());
+        Calico_Try_S(pager->flush({}));
 
     } else {
-        m_log->info("ensuring consistency of an existing database");
+        Calico_Info("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
-        CALICO_TRY_S(ensure_consistency_on_startup());
-        CALICO_TRY_S(wal->start_workers());
+        Calico_Try_S(ensure_consistency_on_startup());
+        Calico_Try_S(wal->start_workers());
     }
-    m_log->info("pager recovery lsn is {}", pager->recovery_lsn().value);
-    m_log->info("wal flushed lsn is {}", wal->flushed_lsn().value);
-    m_log->info("commit lsn is {}", system->commit_lsn.value);
+    Calico_Info("pager recovery lsn is {}", pager->recovery_lsn().value);
+    Calico_Info("wal flushed lsn is {}", wal->flushed_lsn().value);
+    Calico_Info("commit lsn is {}", m_commit_lsn.value);
     return status();
 }
 
-auto DatabaseImpl::~DatabaseImpl()
+DatabaseImpl::~DatabaseImpl()
 {
     (void)close();
 }
@@ -263,21 +246,43 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
 auto DatabaseImpl::status() const -> Status
 {
     if (auto s = wal->status(); !s.is_ok()) {
-        m_status = std::move(s);
+        Maybe_Set_Error(std::move(s));
     }
     return m_status;
+}
+
+auto DatabaseImpl::get_property(const Slice &name) const -> std::string
+{
+    if (name == "record_count") {
+        return fmt::format("{}", record_count);
+    } else if (name == "page_count") {
+        return fmt::format("{}", pager->page_count());
+    } else if (name == "maximum_key_size") {
+        return fmt::format("{}", maximum_key_size);
+    } else if (name == "cache_hit_ratio") {
+        return fmt::format("{}", pager->hit_ratio());
+    } else if (name == "pager_throughput") {
+        return fmt::format("{}", pager->bytes_written());
+    } else if (name == "wal_throughput") {
+        return fmt::format("{}", wal->bytes_written());
+    } else if (name == "data_throughput") {
+        return fmt::format("{}", bytes_written);
+    } else if (name == "page_size") {
+        return fmt::format("{}", pager->page_size());
+    }
+    return "";
 }
 
 auto DatabaseImpl::check_key(const Slice &key, const char *message) const -> Status
 {
     if (key.is_empty()) {
         auto s = invalid_argument("{}: key is empty (use a nonempty key)", message);
-        CALICO_WARN(s);
+        Calico_Warn("{}", s.what().data());
         return s;
     }
     if (key.size() > maximum_key_size) {
         auto s = invalid_argument("{}: key of length {} is too long", message, key.size(), maximum_key_size);
-        CALICO_WARN(s);
+        Calico_Warn("{}", s.what().data());
         return s;
     }
     return ok();
@@ -307,138 +312,97 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 auto DatabaseImpl::new_cursor() const -> Cursor *
 {
     auto *cursor = CursorInternal::make_cursor(*tree);
-    if (cursor && system->has_error()) {
-        CursorInternal::invalidate(cursor, status());
+    if (auto s = status(); cursor && !s.is_ok()) {
+        CursorInternal::invalidate(*cursor, s);
     }
     return cursor;
 }
 
 auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 {
-    CALICO_TRY_S(status());
-    CALICO_TRY_S(check_key(key, "insert"));
+    Calico_Try_S(status());
+    Calico_Try_S(check_key(key, "insert"));
     bytes_written += key.size() + value.size();
-    if (system->has_xact) {
-        if (const auto inserted = tree->insert(key, value)) {
-            record_count += *inserted;
-            return ok();
-        } else {
-            return inserted.error();
-        }
+    if (const auto inserted = tree->insert(key, value)) {
+        record_count += *inserted;
+        m_txn_size++;
+        return ok();
     } else {
-        return atomic_insert(key, value);
+        Maybe_Set_Error(inserted.error());
+        return inserted.error();
     }
 }
 
 auto DatabaseImpl::erase(const Slice &key) -> Status
 {
-    CALICO_TRY_S(status());
-    CALICO_TRY_S(check_key(key, "erase"));
-    if (system->has_xact) {
-        if (const auto erased = tree->erase(key)) {
-            record_count--;
-            return ok();
-        } else {
-            return erased.error();
-        }
-    } else {
-        return atomic_erase(key);
-    }
-}
-
-auto DatabaseImpl::atomic_insert(const Slice &key, const Slice &value) -> Status
-{
-    CALICO_TRY_S(check_key(key, "insert"));
-    auto xact = start();
-
-    if (const auto inserted = tree->insert(key, value)) {
-        record_count += *inserted;
-        return xact.commit();
-    } else {
-        CALICO_ERROR_IF(xact.abort());
-        return inserted.error();
-    }
-}
-
-auto DatabaseImpl::atomic_erase(const Slice &key) -> Status
-{
-    CALICO_TRY_S(check_key(key, "erase"));
-    auto xact = start();
+    Calico_Try_S(status());
+    Calico_Try_S(check_key(key, "erase"));
     if (const auto erased = tree->erase(key)) {
         record_count--;
-        return xact.commit();
+        m_txn_size++;
+        return ok();
     } else {
         if (!erased.error().is_not_found()) {
-            CALICO_ERROR_IF(xact.abort());
+            Maybe_Set_Error(erased.error());
         }
         return erased.error();
     }
 }
 
-auto DatabaseImpl::commit(Size id) -> Status
+auto DatabaseImpl::commit() -> Status
 {
-    if (!system->has_xact) {
-        return logic_error("transaction has not been started");
-    }
-    if (id != m_txn_number) {
-        return already_completed_error("commit");
-    }
-    if (auto s = do_commit(); !s.is_ok()) {
-        m_status = std::move(s);
+    if (m_txn_size != 0) {
+        if (auto s = do_commit(); !s.is_ok()) {
+            Maybe_Set_Error(std::move(s));
+        }
     }
     return status();
 }
 
 auto DatabaseImpl::do_commit() -> Status
 {
-    CALICO_EXPECT_TRUE(system->has_xact);
-    m_log->info("commit requested at lsn {}", wal->current_lsn().value + 1);
+    Calico_Info("commit requested at lsn {}", wal->current_lsn().value + 1);
 
-    m_txn_number++;
-    system->has_xact = false;
-    CALICO_TRY_S(status());
-    CALICO_TRY_S(save_state());
+    m_txn_size = 0;
+    Calico_Try_S(status());
+    Calico_Try_S(save_state());
 
     const auto lsn = wal->current_lsn();
     wal->log(encode_commit_payload(lsn, *m_scratch->get()));
-    CALICO_TRY_S(wal->advance());
+    Calico_Try_S(wal->advance());
 
-    CALICO_TRY_S(pager->flush(system->commit_lsn));
+    Calico_Try_S(pager->flush(m_commit_lsn));
     wal->cleanup(pager->recovery_lsn());
 
-    m_log->info("commit successful");
-    system->commit_lsn = lsn;
+    Calico_Info("commit successful");
+    m_commit_lsn = lsn;
     return ok();
 }
 
-auto DatabaseImpl::abort(Size id) -> Status
+auto DatabaseImpl::abort() -> Status
 {
-    if (!system->has_xact) {
-        return logic_error("transaction has not been started");
-    }
-    if (id != m_txn_number) {
-        return already_completed_error("abort");
-    }
-    if (auto s = do_abort(); !s.is_ok()) {
-        m_status = std::move(s);
+    if (m_txn_size != 0) {
+        if (auto s = do_abort(); !s.is_ok()) {
+            Maybe_Set_Error(std::move(s));
+        }
     }
     return status();
 }
 
 auto DatabaseImpl::do_abort() -> Status
 {
-    CALICO_EXPECT_TRUE(system->has_xact);
-    m_log->info("abort requested (last commit was {})", system->commit_lsn.value);
+    Calico_Info("abort requested (last commit was {})", m_commit_lsn.value);
 
-    m_txn_number++;
-    system->has_xact = false;
-    CALICO_TRY_S(status());
-    CALICO_TRY_S(wal->advance());
+    m_txn_size = 0;
+    Calico_Try_S(status());
+    Calico_Try_S(wal->advance());
 
-    CALICO_TRY_S(m_recovery->start_abort());
-    CALICO_TRY_S(load_state());
-    CALICO_TRY_S(m_recovery->finish_abort());
-    m_log->info("abort successful");
+    m_in_txn = false;
+    Calico_Try_S(m_recovery->start_abort());
+    Calico_Try_S(load_state());
+    Calico_Try_S(m_recovery->finish_abort());
+    m_in_txn = true;
+    Calico_Info("abort successful");
     return ok();
 }
 
@@ -449,8 +413,8 @@ auto DatabaseImpl::close() -> Status
         return m_status;
     }
 
-    CALICO_TRY_S(wal->close());
-    CALICO_TRY_S(pager->flush({}));
+    Calico_Try_S(wal->close());
+    Calico_Try_S(pager->flush({}));
 
     if (m_owns_storage) {
         m_owns_storage = false;
@@ -461,20 +425,15 @@ auto DatabaseImpl::close() -> Status
 
 auto DatabaseImpl::ensure_consistency_on_startup() -> Status
 {
-    CALICO_TRY_S(m_recovery->start_recovery());
-    CALICO_TRY_S(load_state());
-    CALICO_TRY_S(m_recovery->finish_recovery());
+    m_in_txn = false;
+    Calico_Try_S(m_recovery->start_recovery());
+    Calico_Try_S(load_state());
+    Calico_Try_S(m_recovery->finish_recovery());
+    m_in_txn = true;
     return ok();
 }
 
-auto DatabaseImpl::start() -> Transaction
-{
-    CALICO_EXPECT_FALSE(system->has_xact);
-    system->has_xact = true;
-    return Transaction {m_txn_number, *this};
-}
-
-auto DatabaseImpl::save_state() -> Status
+auto DatabaseImpl::save_state() const -> Status
 {
     auto root = pager->acquire(Id::root());
     if (!root.has_value()) {
@@ -597,7 +556,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         if (!s.is_ok()) {
             return tl::make_unexpected(s);
         }
-
         if (file_size < FileHeader::SIZE) {
             return tl::make_unexpected(corruption(
                 "database is too small to read the file header (file header is {} bytes)", FileHeader::SIZE));
@@ -614,16 +572,13 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         if (!s.is_ok()) {
             return tl::make_unexpected(s);
         }
-
         if (header.page_size == 0) {
             return tl::make_unexpected(corruption("header indicates a page size of 0"));
         }
-
         if (file_size % header.page_size) {
             return tl::make_unexpected(corruption(
                 "database size of {} is invalid (database must contain an integral number of pages)", file_size));
         }
-
         if (header.magic_code != FileHeader::MAGIC_CODE) {
             return tl::make_unexpected(invalid_argument(
                 "path does not point to a Calico DB database (magic code is {} but should be {})", header.magic_code, FileHeader::MAGIC_CODE));
@@ -632,7 +587,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
             return tl::make_unexpected(corruption(
                 "header has an inconsistent CRC (CRC is {} but should be {})", header.header_crc, header.compute_crc()));
         }
-
         exists = true;
 
     } else if (s.is_not_found()) {
@@ -658,5 +612,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     }
     return InitialState {header, !exists};
 }
+
+#undef Maybe_Set_Error
 
 } // namespace Calico

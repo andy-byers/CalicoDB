@@ -6,7 +6,7 @@
 
 #include "calico/options.h"
 #include "calico/slice.h"
-#include "utils.h"
+#include "types.h"
 
 namespace Calico {
 

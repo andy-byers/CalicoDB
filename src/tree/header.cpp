@@ -2,7 +2,6 @@
 #include "pager/page.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
-#include "utils/expect.h"
 
 namespace Calico {
 

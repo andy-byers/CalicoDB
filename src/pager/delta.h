@@ -2,7 +2,7 @@
 #define CALICO_PAGE_DELTA_H
 
 #include <vector>
-#include "utils/expect.h"
+#include "utils/utils.h"
 
 namespace Calico {
 

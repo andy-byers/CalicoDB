@@ -43,11 +43,13 @@ Pager::Pager(const Parameters &param, Framer framer)
     : system {param.system},
       m_framer {std::move(framer)},
       m_log {param.system->create_log("pager")},
+      m_commit_lsn {param.commit_lsn},
+      m_in_txn {param.in_txn},
       m_status {param.status},
       m_scratch {param.scratch},
       m_wal {param.wal}
 {
-    m_log->info("initializing, cache size is {}", param.frame_count * param.page_size);
+    Calico_Info("initializing, cache size is {}", param.frame_count * param.page_size);
 
     CALICO_EXPECT_NE(system, nullptr);
     CALICO_EXPECT_NE(m_status, nullptr);
@@ -80,7 +82,7 @@ auto Pager::pin_frame(Id pid) -> Status
             // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
             if (!*success) {
                 auto s = not_found("could not find a frame to use");
-                CALICO_WARN(s);
+                Calico_Warn("{}", s.what().data());
                 return m_wal->flush();
             }
         } else {
@@ -136,8 +138,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
             itr = m_dirty.remove(itr);
         } else if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
-            CALICO_WARN(logic_error(
-                "could not flush page {}: updates for lsn {} are not in the wal", page_id.value, page_lsn.value));
+            Calico_Warn("could not flush page {}: updates for lsn {} are not in the wal", page_id.value, page_lsn.value);
             itr = next(itr);
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
@@ -145,12 +146,12 @@ auto Pager::flush(Lsn target_lsn) -> Status
 
             // Advance to the next dirty list entry.
             itr = clean_page(entry); // TODO: We will clean the page regardless of error.
-            CALICO_TRY_S(s);
+            Calico_Try_S(s);
         } else {
             itr = next(itr);
         }
     }
-    CALICO_TRY_S(m_framer.sync());
+    Calico_Try_S(m_framer.sync());
 
     // We have flushed the entire cache.
     if (target_lsn == MAX_ID) {
@@ -195,10 +196,9 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
             return true;
         }
 
-        if (system->has_xact) {
+        if (*m_in_txn) {
             return frame.lsn() <= m_wal->flushed_lsn();
         }
-
         return true;
     });
 
@@ -235,7 +235,7 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
         entry.dirty_token = m_dirty.insert(page.id(), lsn);
     }
 
-    if (system->has_xact && lsn <= system->commit_lsn) {
+    if (*m_in_txn && lsn <= *m_commit_lsn) {
         const auto next_lsn = m_wal->current_lsn();
         m_wal->log(encode_full_image_payload(
             next_lsn, page.id(), page.view(0), *m_scratch->get()));
@@ -250,25 +250,32 @@ auto Pager::allocate() -> tl::expected<Page, Status>
 
 auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
 {
-    using std::end;
+    const auto do_acquire = [this](auto &entry) -> tl::expected<Page, Status> {
+        auto page = m_framer.ref(entry.frame_index);
 
-    const auto do_acquire = [this](auto &entry) {
-        return m_framer.ref(entry.frame_index);
+        if (entry.dirty_token) {
+            const auto lsn = read_page_lsn(page);
+            const auto checkpoint = (*entry.dirty_token)->record_lsn;
+            const auto cutoff = *m_commit_lsn;
+
+            if (checkpoint <= cutoff && lsn <= m_wal->flushed_lsn()) {
+                auto s = m_framer.write_back(entry.frame_index);
+
+                if (s.is_ok()) {
+                    clean_page(entry);
+                } else {
+                    *m_status = std::move(s);
+                    return tl::make_unexpected(*m_status);
+                }
+            }
+        }
+        return page;
     };
 
     CALICO_EXPECT_FALSE(pid.is_null());
     std::lock_guard lock {m_mutex};
 
-    if (auto s = m_wal->status(); !s.is_ok()) {
-        *m_status = s;
-        return tl::make_unexpected(std::move(s));
-    }
-
-    if (auto s = *m_status; !s.is_ok()) {
-        return tl::make_unexpected(std::move(s));
-    }
-
-    if (auto itr = m_registry.get(pid); itr != end(m_registry)) {
+    if (auto itr = m_registry.get(pid); itr != m_registry.end()) {
         return do_acquire(itr->value);
     }
 
@@ -282,24 +289,14 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
         }
 
         if (!s.is_not_found()) {
-            m_log->warn("{}", s.what().data());
-
-            // Only set the database error state if we are in a transaction. Otherwise, there is no chance of corruption, so we just
-            // return the error. Also, we should be in the same thread that controls the core component, so we shouldn't have any
-            // data races on this check.
-            if (system->has_xact) {
-                *m_status = s;
-            }
             return tl::make_unexpected(std::move(s));
         }
     }
     if (!status.is_ok()) {
-        *m_status = status;
         return tl::make_unexpected(status);
     }
-    auto itr = m_registry.get(pid);
-    CALICO_EXPECT_NE(itr, end(m_registry));
-    return do_acquire(itr->value);
+    CALICO_EXPECT_TRUE(m_registry.contains(pid));
+    return do_acquire(m_registry.get(pid)->value);
 }
 
 auto Pager::upgrade(Page &page) -> void
@@ -313,13 +310,15 @@ auto Pager::upgrade(Page &page) -> void
 
 auto Pager::release(Page page) -> void
 {
-    if (page.is_writable() && system->has_xact) {
+    if (page.is_writable() && *m_in_txn) {
         const auto next_lsn = m_wal->current_lsn();
         write_page_lsn(page, next_lsn);
         m_wal->log(encode_deltas_payload(
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch->get()));
     }
+//    const auto lsn = read_page_lsn(page);
+
     std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
 
@@ -328,21 +327,6 @@ auto Pager::release(Page page) -> void
     CALICO_EXPECT_NE(itr, m_registry.end());
     auto &entry = itr->value;
     m_framer.unref(entry.frame_index, std::move(page));
-
-    if (entry.dirty_token) {
-        const auto checkpoint = (*entry.dirty_token)->record_lsn;
-        const auto cutoff = system->commit_lsn;
-
-        if (checkpoint <= cutoff) {
-            auto s = m_framer.write_back(entry.frame_index);
-
-            if (s.is_ok()) {
-                clean_page(entry);
-            } else {
-                *m_status = std::move(s);
-            }
-        }
-    }
 }
 
 auto Pager::save_state(FileHeader &header) -> void

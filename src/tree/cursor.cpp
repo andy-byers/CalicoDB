@@ -234,18 +234,19 @@ auto CursorInternal::make_cursor(BPlusTree &tree) -> Cursor *
     return cursor;
 }
 
-auto CursorInternal::invalidate(const CursorImpl &cursor, const Status &status) -> void
+auto CursorInternal::invalidate(const Cursor &cursor, const Status &status) -> void
 {
     CALICO_EXPECT_FALSE(status.is_ok());
-    cursor.m_status = status;
+    reinterpret_cast<const CursorImpl &>(cursor).m_status = status;
 }
 
-auto CursorInternal::TEST_validate(const CursorImpl &cursor) -> void
+auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
 {
     if (cursor.is_valid()) {
-        auto node = action_acquire(cursor, Id {cursor.m_loc.pid}).value();
+        const auto &impl = reinterpret_cast<const CursorImpl &>(cursor);
+        auto node = action_acquire(impl, Id {impl.m_loc.pid}).value();
         node.TEST_validate();
-        action_release(cursor, std::move(node));
+        action_release(impl, std::move(node));
     }
 }
 

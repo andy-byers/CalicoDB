@@ -18,7 +18,7 @@ static auto read_exact_or_eof(RandomReader &file, Size offset, Span out) -> Stat
 {
     auto temp = out;
     auto read_size = out.size();
-    CALICO_TRY_S(file.read(temp.data(), read_size, offset));
+    Calico_Try_S(file.read(temp.data(), read_size, offset));
 
     if (read_size == 0) {
         return not_found("reached the end of the file");
@@ -34,7 +34,7 @@ auto LogReader::read(WalPayloadOut &out, Span payload, Span tail) -> Status
 
     // Lazily read the first block into the tail buffer.
     if (m_offset == 0) {
-        CALICO_TRY_S(read_exact_or_eof(*m_file, 0, tail));
+        Calico_Try_S(read_exact_or_eof(*m_file, 0, tail));
     }
 
     auto s = read_logical_record(payload, tail);
@@ -74,8 +74,10 @@ auto LogReader::read_logical_record(Span &out, Span tail) -> Status
                 const auto temp = read_wal_record_header(rest);
                 rest.advance(WalRecordHeader::SIZE);
 
-                CALICO_TRY_S(merge_records_left(header, temp));
-
+                Calico_Try_S(merge_records_left(header, temp));
+                if (!temp.size || temp.size > rest.size()) {
+                    return corruption("fragment size is invalid");
+                }
                 mem_copy(payload, rest.truncate(temp.size));
                 m_offset += WalRecordHeader::SIZE + temp.size;
                 payload.advance(temp.size);
@@ -145,7 +147,7 @@ auto WalReader::seek_previous() -> Status
 auto WalReader::read_first_lsn(Id &out) -> Status
 {
     prepare_traversal();
-    CALICO_TRY_S(m_reader->read_first_lsn(out));
+    Calico_Try_S(m_reader->read_first_lsn(out));
     m_set->set_first_lsn(m_current, out);
     return ok();
 }

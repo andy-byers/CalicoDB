@@ -1,5 +1,5 @@
-#ifndef CALICO_TREE_PAGE_H
-#define CALICO_TREE_PAGE_H
+#ifndef CALICO_PAGER_PAGE_H
+#define CALICO_PAGER_PAGE_H
 
 #include "pager/delta.h"
 #include "tree/header.h"
@@ -112,4 +112,4 @@ inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 
 } // namespace Calico
 
-#endif // CALICO_TREE_PAGE_H
+#endif // CALICO_PAGER_PAGE_H

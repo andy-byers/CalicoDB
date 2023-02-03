@@ -17,7 +17,7 @@ WriteAheadLog::WriteAheadLog(const Parameters &param)
       m_segment_cutoff {param.segment_cutoff},
       m_buffer_count {param.writer_capacity}
 {
-    m_log->info("initializing, write buffer size is {}", param.writer_capacity * m_reader_data.size());
+    Calico_Info("initializing, write buffer size is {}", param.writer_capacity * m_reader_data.size());
 
     CALICO_EXPECT_NE(system, nullptr);
     CALICO_EXPECT_NE(m_storage, nullptr);
@@ -200,7 +200,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
             s = reader->seek_previous();
             break;
         }
-        CALICO_TRY_S(s);
+        Calico_Try_S(s);
 
         if (first_lsn >= begin_lsn) {
             if (first_lsn > begin_lsn) {
@@ -216,7 +216,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
         s = ok();
 
     while (s.is_ok()) {
-        m_log->info("rolling segment {} forward", reader->segment_id().value);
+        Calico_Info("rolling segment {} forward", reader->segment_id().value);
 
         s = reader->roll([&callback, begin_lsn, this](auto payload) {
             m_last_lsn = payload.lsn();
@@ -269,7 +269,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
         if (s.is_not_found()) {
             break;
         }
-        CALICO_TRY_S(s);
+        Calico_Try_S(s);
     }
 
     auto s = ok();
@@ -282,7 +282,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
                 break;
             }
 
-            m_log->info("rolling segment {} backward", reader->segment_id().value);
+            Calico_Info("rolling segment {} backward", reader->segment_id().value);
 
             // Read all full image records. We can read them forward, since the pages are disjoint
             // within each transaction.
@@ -296,7 +296,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
         if (s.is_corruption() && i == 0) {
             s = ok();
         }
-        CALICO_TRY_S(s);
+        Calico_Try_S(s);
 
         s = reader->seek_previous();
     }
@@ -325,9 +325,9 @@ auto WriteAheadLog::truncate(Lsn lsn) -> Status
         }
         if (!current.is_null()) {
             const auto name = m_prefix + encode_segment_name(current);
-            CALICO_TRY_S(m_storage->remove_file(name));
+            Calico_Try_S(m_storage->remove_file(name));
             m_set.remove_after(Id {current.value - 1});
-            m_log->info("removed segment {} with first lsn {}", name, first_lsn->value);
+            Calico_Info("removed segment {} with first lsn {}", name, first_lsn->value);
         }
         current = m_set.id_before(current);
     }

@@ -1,9 +1,10 @@
-#ifndef CALICO_STORE_DISK_H
-#define CALICO_STORE_DISK_H
+#ifndef CALICO_STORAGE_POSIX_STORAGE_H
+#define CALICO_STORAGE_POSIX_STORAGE_H
 
+#include "calico/slice.h"
 #include "calico/status.h"
 #include "calico/storage.h"
-#include "utils/expect.h"
+#include "utils/utils.h"
 #include <filesystem>
 
 namespace Calico {
@@ -81,4 +82,4 @@ public:
 
 } // namespace Calico
 
-#endif // CALICO_STORE_DISK_H
+#endif // CALICO_STORAGE_POSIX_STORAGE_H

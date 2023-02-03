@@ -615,12 +615,13 @@ public:
             wal.get(),
             &state,
             &status,
+            &commit_lsn,
+            &in_txn,
             frame_count,
             page_size,
         });
         EXPECT_TRUE(r.has_value());
         pager = std::move(*r);
-        state.has_xact = true;
     }
 
     ~PagerTests() override = default;
@@ -641,7 +642,7 @@ public:
         auto page = allocate_write(message);
         const auto id = page.id();
         pager->release(std::move(page));
-        EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
+        EXPECT_OK(status);
         return id;
     }
 
@@ -659,7 +660,7 @@ public:
     {
         auto page = acquire_write(id, message);
         pager->release(std::move(page));
-        EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
+        EXPECT_OK(status);
     }
 
     [[nodiscard]]
@@ -669,14 +670,14 @@ public:
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
         auto message = read_from_page(*r, size);
         pager->release(std::move(*r));
-        EXPECT_FALSE(state.has_error()) << "Error: " << state.original_error().status.what().to_string();
+        EXPECT_OK(status);
         return message;
     }
 
     System state {"test", {}};
     Status status {ok()};
-    bool has_xact {};
-    Id commit_lsn;
+    bool in_txn {true};
+    Lsn commit_lsn;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
     LogScratchManager scratch;
@@ -686,7 +687,7 @@ TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
     ASSERT_EQ(pager->recovery_lsn(), Id::null());
-    ASSERT_FALSE(state.has_error());
+    EXPECT_OK(status);
 }
 
 TEST_F(PagerTests, AllocationInceasesPageCount)

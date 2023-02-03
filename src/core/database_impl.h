@@ -2,21 +2,24 @@
 #define CALICO_CORE_DATABASE_IMPL_H
 
 #include "calico/database.h"
-#include "recovery.h"
-#include <unordered_set>
+
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/spdlog.h>
+
+#include "recovery.h"
+#include "pager/pager.h"
 #include "tree/header.h"
+#include "tree/tree.h"
 #include "utils/expected.hpp"
 #include "wal/wal.h"
+#include "wal/cleanup.h"
+#include "wal/writer.h"
 
 namespace Calico {
 
 class Cursor;
-class Pager;
 class Recovery;
 class Storage;
-class BPlusTree;
 class WriteAheadLog;
 
 struct InitialState {
@@ -29,7 +32,7 @@ public:
     friend class Database;
 
     DatabaseImpl() = default;
-    virtual ~DatabaseImpl() = default;
+    ~DatabaseImpl() override;
 
     [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
@@ -57,20 +60,20 @@ private:
     [[nodiscard]] auto check_key(const Slice &key, const char *message) const -> Status;
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
-    [[nodiscard]] auto atomic_insert(const Slice &key, const Slice &value) -> Status;
-    [[nodiscard]] auto atomic_erase(const Slice &key) -> Status;
-    [[nodiscard]] auto save_state() -> Status;
+    [[nodiscard]] auto save_state() const -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_abort() -> Status;
 
     mutable Status m_status {ok()};
     std::string m_prefix;
-    LogPtr m_log;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
     Storage *m_storage {};
-    Size m_txn_number {1};
+    Size m_txn_size {};
+    Lsn m_commit_lsn;
+    LogPtr m_log;
+    bool m_in_txn {true};
     bool m_owns_storage {};
 };
 

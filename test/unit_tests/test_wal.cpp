@@ -142,10 +142,10 @@ public:
     WalRecordHeader rhs {};
 };
 
-TEST_F(WalRecordMergeTests, MergeEmptyRecordsDeathTest)
+TEST_F(WalRecordMergeTests, MergingEmptyRecordsIndicatesCorruption)
 {
-    ASSERT_DEATH(const auto ignore = merge_records_left(lhs, rhs), EXPECTATION_MATCHER);
-    ASSERT_DEATH(const auto ignore = merge_records_right(lhs, rhs), EXPECTATION_MATCHER);
+    ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
+    ASSERT_TRUE(merge_records_right(lhs, rhs).is_corruption());
 }
 
 TEST_F(WalRecordMergeTests, ValidLeftMerges)
@@ -166,21 +166,21 @@ TEST_F(WalRecordMergeTests, ValidRightMerges)
     }));
 }
 
-TEST_F(WalRecordMergeTests, MergeInvalidTypesDeathTest)
+TEST_F(WalRecordMergeTests, MergingInvalidTypesIndicatesCorruption)
 {
     setup({WalRecordHeader::Type::FIRST, WalRecordHeader::Type::FIRST});
-    ASSERT_DEATH(const auto ignore = merge_records_left(lhs, rhs), EXPECTATION_MATCHER);
-    ASSERT_DEATH(const auto ignore = merge_records_right(lhs, rhs), EXPECTATION_MATCHER);
+    ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
+    ASSERT_TRUE(merge_records_right(lhs, rhs).is_corruption());
 
     setup({WalRecordHeader::Type {}, WalRecordHeader::Type::MIDDLE});
-    ASSERT_DEATH(const auto ignore = merge_records_left(lhs, rhs), EXPECTATION_MATCHER);
-    ASSERT_DEATH(const auto ignore = merge_records_right(lhs, rhs), EXPECTATION_MATCHER);
+    ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
+    ASSERT_TRUE(merge_records_right(lhs, rhs).is_corruption());
 
     setup({WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::FIRST});
-    ASSERT_DEATH(const auto ignore = merge_records_left(lhs, rhs), EXPECTATION_MATCHER);
+    ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
 
     setup({WalRecordHeader::Type::FIRST, WalRecordHeader::Type::MIDDLE});
-    ASSERT_DEATH(const auto ignore = merge_records_right(lhs, rhs), EXPECTATION_MATCHER);
+    ASSERT_TRUE(merge_records_right(lhs, rhs).is_corruption());
 }
 
 class WalPayloadTests : public testing::Test {

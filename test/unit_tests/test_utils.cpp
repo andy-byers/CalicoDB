@@ -7,7 +7,6 @@
 #include "random.h"
 #include "unit_tests.h"
 #include "utils/encoding.h"
-#include "utils/expect.h"
 #include "utils/crc.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"

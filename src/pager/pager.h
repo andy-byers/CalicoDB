@@ -28,6 +28,8 @@ public:
         WriteAheadLog *wal {};
         System *system {};
         Status *status {};
+        Lsn *commit_lsn {};
+        bool *in_txn {};
         Size frame_count {};
         Size page_size {};
     };
@@ -69,6 +71,8 @@ private:
     PageCache m_registry;
     LogPtr m_log;
     Lsn m_recovery_lsn;
+    Lsn *m_commit_lsn {};
+    bool *m_in_txn {};
     Status *m_status {};
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};

@@ -116,12 +116,12 @@ auto main(int, const char *[]) -> int
         }
 
         cursor->seek_first();
-        for (; cursor->is_valid(); cursor.next()) {
+        for (; cursor->is_valid(); cursor->next()) {
 
         }
 
-        cursor.seek_last();
-        for (; cursor.is_valid(); cursor.previous()) {
+        cursor->seek_last();
+        for (; cursor->is_valid(); cursor->previous()) {
 
         }
 
@@ -170,22 +170,21 @@ auto main(int, const char *[]) -> int
         }
     }
 
-    /* statistics-objects */
+    /* query-properties */
 
     {
         // We can use a statistics object to get information about the database.
-        const auto stat = db->statistics();
-        (void)stat.record_count();
-        (void)stat.page_count();
-        (void)stat.maximum_key_size();
-        (void)stat.cache_hit_ratio();
-        (void)stat.pager_throughput();
-        (void)stat.wal_throughput();
-        (void)stat.data_throughput();
+        (void)db->get_property("record_count");
+        (void)db->get_property("page_count");
+        (void)db->get_property("maximum_key_size");
+        (void)db->get_property("cache_hit_ratio");
+        (void)db->get_property("pager_throughput");
+        (void)db->get_property("wal_throughput");
+        (void)db->get_property("data_throughput");
 
         // The page size is fixed at database creation time. If the database already existed, the page size passed to the
         // constructor through Calico::Options is ignored. We can query the real page size using the following line.
-        (void)stat.page_size();
+        (void)db->get_property("page_size");
     }
 
     /* closing-a-database */

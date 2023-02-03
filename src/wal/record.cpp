@@ -56,23 +56,30 @@ auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_siz
 template<bool IsLeftMerge>
 static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
 {
+    static constexpr auto MESSAGE = "cannot merge wal records";
+
     [[maybe_unused]]
     static constexpr auto FIRST_TYPE = IsLeftMerge ? WalRecordHeader::FIRST : WalRecordHeader::LAST;
     static constexpr auto LAST_TYPE = IsLeftMerge ? WalRecordHeader::LAST : WalRecordHeader::FIRST;
-    CALICO_EXPECT_NE(lhs.type, rhs.type);
+    if (lhs.type == rhs.type) {
+        return corruption("{}: records should not have same type", MESSAGE);
+    }
 
     // First merge in the logical record.
     if (lhs.type == WalRecordHeader::Type {}) {
-        CALICO_EXPECT_TRUE(rhs.type != WalRecordHeader::MIDDLE &&
-                           rhs.type != LAST_TYPE);
+        if (rhs.type == WalRecordHeader::MIDDLE || rhs.type == LAST_TYPE) {
+            return corruption("{}: right record has invalid type", MESSAGE);
+        }
 
         lhs.type = rhs.type;
         lhs.crc = rhs.crc;
 
     } else {
-        CALICO_EXPECT_EQ(lhs.type, FIRST_TYPE);
+        if (lhs.type != FIRST_TYPE) {
+            return corruption("{}: left record has invalid type", MESSAGE);
+        }
         if (lhs.crc != rhs.crc) {
-            return corruption("cannot merge WAL records: fragments do not belong to the same logical record");
+            return corruption("{}: fragment crc mismatch", MESSAGE);
         }
         if (rhs.type == LAST_TYPE) {
             lhs.type = WalRecordHeader::FULL;

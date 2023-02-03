@@ -63,11 +63,13 @@ namespace tools {
     }
 
     template<class T>
-    auto find(T &t, const std::string &key) -> Cursor
+    auto find(T &t, const std::string &key) -> Cursor *
     {
-        auto c = t.cursor();
-        c.seek(key);
-        return c;
+        auto *cursor = t.new_cursor();
+        if (cursor) {
+            cursor->seek(key);
+        }
+        return cursor;
     }
 
     template<class T>
@@ -345,26 +347,6 @@ struct formatter<Cco::Options> {
         out += fmt::format("log_level: {}, ", static_cast<int>(options.log_level));
         out += fmt::format("storage: {}, ", static_cast<void*>(options.storage));
         return format_to(ctx.out(), "Options {}}}", out);
-    }
-};
-
-template <>
-struct formatter<Cco::PageType> {
-
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const Cco::PageType &type, FormatContext &ctx) {
-        switch (type) {
-            case Cco::PageType::EXTERNAL_NODE: return format_to(ctx.out(), "EXTERNAL_NODE");
-            case Cco::PageType::INTERNAL_NODE: return format_to(ctx.out(), "INTERNAL_NODE");
-            case Cco::PageType::FREELIST_LINK: return format_to(ctx.out(), "FREELIST_LINK");
-            case Cco::PageType::OVERFLOW_LINK: return format_to(ctx.out(), "OVERFLOW_LINK");
-            default: return format_to(ctx.out(), "<unrecognized>");
-        }
     }
 };
 

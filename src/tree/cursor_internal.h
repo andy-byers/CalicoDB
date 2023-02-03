@@ -62,9 +62,9 @@ class CursorInternal {
 
 public:
     [[nodiscard]] static auto make_cursor(BPlusTree &tree) -> Cursor *;
-    static auto invalidate(const CursorImpl &cursor, const Status &error) -> void;
+    static auto invalidate(const Cursor &cursor, const Status &error) -> void;
 
-    static auto TEST_validate(const CursorImpl &cursor) -> void;
+    static auto TEST_validate(const Cursor &cursor) -> void;
 };
 
 } // namespace Calico
