@@ -5,7 +5,7 @@
 #include <optional>
 #include <spdlog/spdlog.h>
 #include "types.h"
-#include "calico/options.h"
+#include "calico/database.h"
 #include "calico/status.h"
 
 namespace Calico {

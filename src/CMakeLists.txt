@@ -3,7 +3,6 @@ set(CALICO_HEADERS
         "${CALICO_INCLUDE_DIR}/calico/common.h"
         "${CALICO_INCLUDE_DIR}/calico/cursor.h"
         "${CALICO_INCLUDE_DIR}/calico/database.h"
-        "${CALICO_INCLUDE_DIR}/calico/options.h"
         "${CALICO_INCLUDE_DIR}/calico/slice.h"
         "${CALICO_INCLUDE_DIR}/calico/status.h"
         "${CALICO_INCLUDE_DIR}/calico/storage.h")

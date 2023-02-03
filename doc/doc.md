@@ -69,7 +69,7 @@ CalicoDB
     + Much of this project was inspired by SQLite3, both the architecture design documents and the source code
     + Especially see the B-tree design document, as well as `btree.h`, `btree.c`, and `btreeInt.h`
 3. https://github.com/google/leveldb
-    + The slice object and the task queue object are inspired by similar objects in LevelDB
+    + Much of the API is inspired by LevelDB
     + Some parts of the CMake build process is taken from their `CMakeLists.txt`
 4. https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log
     + Nice explanation of RocksDB's WAL

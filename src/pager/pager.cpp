@@ -1,5 +1,4 @@
 #include "pager.h"
-#include "calico/options.h"
 #include "framer.h"
 #include "page.h"
 #include "tree/header.h"

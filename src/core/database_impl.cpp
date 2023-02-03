@@ -11,16 +11,16 @@
 namespace Calico {
 
 #define Maybe_Set_Error(s) \
-    do {                   \
+    do { \
         if (m_status.is_ok()) { \
             m_status = s;  \
-        }                  \
+        } \
     } while (0)
 
 [[nodiscard]]
 static auto sanitize_options(const Options &options) -> Options
 {
-    static constexpr Size KiB {1024};
+    static constexpr Size KiB {1'024};
 
     const auto page_size = options.page_size;
     const auto scratch_size = wal_scratch_size(page_size);
@@ -39,10 +39,12 @@ static auto sanitize_options(const Options &options) -> Options
     }
 
     auto sanitized = options;
-    if (sanitized.page_cache_size == 0)
+    if (sanitized.page_cache_size == 0) {
         sanitized.page_cache_size = page_cache_size;
-    if (sanitized.wal_buffer_size == 0)
+    }
+    if (sanitized.wal_buffer_size == 0) {
         sanitized.wal_buffer_size = wal_buffer_size;
+    }
     return sanitized;
 }
 
@@ -413,8 +415,14 @@ auto DatabaseImpl::close() -> Status
         return m_status;
     }
 
-    Calico_Try_S(wal->close());
-    Calico_Try_S(pager->flush({}));
+    auto s = wal->close();
+    if (s.is_ok()) {
+        s = pager->flush({});
+    }
+
+    if (!s.is_ok()){
+        Calico_Warn("{}", s.what().data());
+    }
 
     if (m_owns_storage) {
         m_owns_storage = false;
@@ -508,33 +516,30 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         return tl::make_unexpected(invalid_argument(
             "WAL write buffer of size {} is too small (minimum size is {})", options.wal_buffer_size, wal_scratch_size(options.page_size) * MINIMUM_BUFFER_COUNT));
     }
-
-    if (options.max_log_size < MINIMUM_LOG_MAX_SIZE) {
-        return tl::make_unexpected(invalid_argument(
-            "log file maximum size of {} is too small (minimum size is {})", options.max_log_size, MINIMUM_LOG_MAX_SIZE));
-    }
-
-    if (options.max_log_size > MAXIMUM_LOG_MAX_SIZE) {
-        return tl::make_unexpected(invalid_argument(
-            "log file maximum size of {} is too large (maximum size is {})", options.max_log_size, MAXIMUM_LOG_MAX_SIZE));
-    }
-
-    if (options.max_log_files < MINIMUM_LOG_MAX_FILES) {
-        return tl::make_unexpected(invalid_argument(
-            "log maximum file count of {} is too small (minimum count is {})", options.max_log_files, MINIMUM_LOG_MAX_FILES));
-    }
-
-    if (options.max_log_files > MAXIMUM_LOG_MAX_FILES) {
-        return tl::make_unexpected(invalid_argument(
-            "log maximum file count of {} is too large (maximum count is {})", options.max_log_files, MAXIMUM_LOG_MAX_FILES));
-    }
-
-    {
-        // May have already been created by spdlog.
-        auto s = store.create_directory(prefix);
-        if (!s.is_ok() && !s.is_logic_error()) {
-            return tl::make_unexpected(s);
+    if (options.log_level != LogLevel::OFF && options.log_target == LogTarget::FILE) {
+        if (options.max_log_size < MINIMUM_LOG_MAX_SIZE) {
+            return tl::make_unexpected(invalid_argument(
+                "log file maximum size of {} is too small (minimum size is {})", options.max_log_size, MINIMUM_LOG_MAX_SIZE));
         }
+
+        if (options.max_log_size > MAXIMUM_LOG_MAX_SIZE) {
+            return tl::make_unexpected(invalid_argument(
+                "log file maximum size of {} is too large (maximum size is {})", options.max_log_size, MAXIMUM_LOG_MAX_SIZE));
+        }
+
+        if (options.max_log_files < MINIMUM_LOG_MAX_FILES) {
+            return tl::make_unexpected(invalid_argument(
+                "log maximum file count of {} is too small (minimum count is {})", options.max_log_files, MINIMUM_LOG_MAX_FILES));
+        }
+
+        if (options.max_log_files > MAXIMUM_LOG_MAX_FILES) {
+            return tl::make_unexpected(invalid_argument(
+                "log maximum file count of {} is too large (maximum count is {})", options.max_log_files, MAXIMUM_LOG_MAX_FILES));
+        }
+    }
+
+    if (auto s = store.create_directory(prefix); !s.is_ok() && !s.is_logic_error()) {
+        return tl::make_unexpected(s);
     }
 
     if (!options.wal_prefix.is_empty()) {

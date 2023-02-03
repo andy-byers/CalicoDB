@@ -4,7 +4,6 @@
 #ifndef CALICO_UTILS_ENCODING_H
 #define CALICO_UTILS_ENCODING_H
 
-#include "calico/options.h"
 #include "calico/slice.h"
 #include "types.h"
 

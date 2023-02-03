@@ -156,7 +156,8 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     invalid.page_size = MAXIMUM_PAGE_SIZE * 2;
     ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
 
-    invalid.page_size = DEFAULT_PAGE_SIZE - 1;
+    Options options;
+    invalid.page_size = options.page_size - 1;
     ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
 }
 

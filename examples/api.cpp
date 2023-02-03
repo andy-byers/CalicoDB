@@ -53,9 +53,6 @@ auto main(int, const char *[]) -> int
     Calico::Database *db;
 
     {
-        std::filesystem::remove_all("/tmp/cats");
-        std::filesystem::remove_all(options.wal_prefix.to_string());
-
         // Create a database at "/tmp/cats".
         auto s = Calico::Database::open("/tmp/cats", options, &db);
 

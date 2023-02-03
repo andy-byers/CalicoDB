@@ -62,8 +62,12 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
 
 auto WriteAheadLog::close() -> Status
 {
+    // ~Worker<T>() will block until the thread is joined.
+    m_worker.reset();
+    m_cleanup.reset();
     if (m_writer) {
         std::move(*m_writer).destroy();
+        m_writer.reset();
     }
     return status();
 }
@@ -96,12 +100,12 @@ auto WriteAheadLog::start_workers() -> Status
         return system_error("cannot allocate cleanup object: out of memory");
     }
 
-    m_tasks = std::unique_ptr<Worker<Event>> {
+    m_worker = std::unique_ptr<Worker<Event>> {
         new(std::nothrow) Worker<Event> {[this](auto event) {
             run_task(std::move(event));
         },
         m_buffer_count}};
-    if (m_tasks == nullptr) {
+    if (m_worker == nullptr) {
         return system_error("cannot allocate task manager object: out of memory");
     }
     return ok();
@@ -136,20 +140,20 @@ auto WriteAheadLog::log(WalPayloadIn payload) -> void
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_last_lsn.value++;
     m_bytes_written += payload.data().size() + sizeof(Lsn);
-    m_tasks->dispatch(payload);
+    m_worker->dispatch(payload);
 }
 
 auto WriteAheadLog::flush() -> Status
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
-    m_tasks->dispatch(FlushToken {}, true);
+    m_worker->dispatch(FlushToken {}, true);
     return m_error.get();
 }
 
 auto WriteAheadLog::advance() -> Status
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
-    m_tasks->dispatch(AdvanceToken {}, true);
+    m_worker->dispatch(AdvanceToken {}, true);
     return m_error.get();
 }
 
