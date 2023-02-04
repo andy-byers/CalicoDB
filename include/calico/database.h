@@ -8,7 +8,6 @@ namespace Calico {
 
 struct Options;
 class Cursor;
-class Slice;
 class Status;
 class Storage;
 

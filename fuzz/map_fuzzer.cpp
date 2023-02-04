@@ -108,8 +108,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     added.emplace(key, value);
                 } else {
                     reopen_db();
-                    added.clear();
-                    erased.clear();
                 }
                 break;
             case ERASE:
@@ -120,8 +118,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     erased.emplace(key);
                 } else if (!s.is_not_found()) {
                     reopen_db();
-                    added.clear();
-                    erased.clear();
                 }
                 break;
             case COMMIT:
