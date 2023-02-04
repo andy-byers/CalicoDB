@@ -48,7 +48,7 @@ auto main(int argc, const char *argv[]) -> int
     }
     Database *db;
     expect_ok(Database::open(path.string(), {}, &db));
-    auto record_count = std::stoi(db->get_property("record_count"));
+    auto record_count = std::stoi(db->get_property("calico.count.records"));
 
     // The database should contain exactly `num_committed` records.
     CALICO_EXPECT_EQ(record_count, num_committed);
@@ -67,7 +67,7 @@ auto main(int argc, const char *argv[]) -> int
     delete cursor;
 
     // All records should have been reached and removed.
-    record_count = std::stoi(db->get_property("record_count"));
+    record_count = std::stoi(db->get_property("calico.count.records"));
     CALICO_EXPECT_EQ(key_counter, num_committed);
     CALICO_EXPECT_EQ(record_count, 0);
     expect_ok(Database::destroy(path.string(), {}));

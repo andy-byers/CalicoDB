@@ -536,6 +536,17 @@ TEST(StatusTests, FmtPrint)
     ASSERT_EQ(s.what().to_string(), "42::123");
 }
 
+TEST(StatusTests, MessageIsNullTerminated)
+{
+    auto s = system_error("hello");
+    const auto msg = s.what();
+    ASSERT_EQ(msg, "hello");
+    ASSERT_EQ(msg.size(), 5);
+
+    // This byte is not technically part of the slice, but should be owned by the Status object.
+    ASSERT_EQ(msg.data()[5], '\0');
+}
+
 // Modified from RocksDB.
 class QueueTests: public testing::Test {
 public:

@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <random>
-#include "calico/options.h"
 #include "utils/utils.h"
 
 namespace Calico {

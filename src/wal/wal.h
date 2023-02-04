@@ -93,7 +93,7 @@ private:
 
     std::unique_ptr<WalWriter> m_writer;
     std::unique_ptr<WalCleanup> m_cleanup;
-    std::unique_ptr<Worker<Event>> m_tasks;
+    std::unique_ptr<Worker<Event>> m_worker;
 };
 
 } // namespace Calico

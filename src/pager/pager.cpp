@@ -1,5 +1,4 @@
 #include "pager.h"
-#include "calico/options.h"
 #include "framer.h"
 #include "page.h"
 #include "tree/header.h"
@@ -100,9 +99,9 @@ auto Pager::pin_frame(Id pid) -> Status
 
 auto Pager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
 {
-    auto token = *entry.dirty_token;
+    auto token = *entry.token;
     // Reset the dirty list reference.
-    entry.dirty_token.reset();
+    entry.token.reset();
     return m_dirty.remove(token);
 }
 
@@ -124,7 +123,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
         const auto [page_id, record_lsn] = *itr;
         CALICO_EXPECT_TRUE(m_registry.contains(page_id));
         auto &entry = m_registry.get(page_id)->value;
-        const auto frame_id = entry.frame_index;
+        const auto frame_id = entry.index;
         const auto page_lsn = m_framer.frame_at(frame_id).lsn();
 
         if (largest < page_lsn) {
@@ -184,7 +183,7 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
 {
     Id page_id;
     auto evicted = m_registry.evict([this, &page_id](auto pid, auto entry) {
-        const auto &frame = m_framer.frame_at(entry.frame_index);
+        const auto &frame = m_framer.frame_at(entry.index);
         page_id = pid;
 
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to evict.
@@ -192,7 +191,7 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
             return false;
         }
 
-        if (!entry.dirty_token) {
+        if (!entry.token) {
             return true;
         }
 
@@ -231,8 +230,8 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
     const auto lsn = read_page_lsn(page);
 
     // Make sure this page is in the dirty list. LSN is saved to determine when the page should be written back.
-    if (!entry.dirty_token.has_value()) {
-        entry.dirty_token = m_dirty.insert(page.id(), lsn);
+    if (!entry.token.has_value()) {
+        entry.token = m_dirty.insert(page.id(), lsn);
     }
 
     if (*m_in_txn && lsn <= *m_commit_lsn) {
@@ -251,15 +250,15 @@ auto Pager::allocate() -> tl::expected<Page, Status>
 auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
 {
     const auto do_acquire = [this](auto &entry) -> tl::expected<Page, Status> {
-        auto page = m_framer.ref(entry.frame_index);
+        auto page = m_framer.ref(entry.index);
 
-        if (entry.dirty_token) {
+        if (entry.token) {
             const auto lsn = read_page_lsn(page);
-            const auto checkpoint = (*entry.dirty_token)->record_lsn;
+            const auto checkpoint = (*entry.token)->record_lsn;
             const auto cutoff = *m_commit_lsn;
 
             if (checkpoint <= cutoff && lsn <= m_wal->flushed_lsn()) {
-                auto s = m_framer.write_back(entry.frame_index);
+                auto s = m_framer.write_back(entry.index);
 
                 if (s.is_ok()) {
                     clean_page(entry);
@@ -304,7 +303,7 @@ auto Pager::upgrade(Page &page) -> void
     std::lock_guard lock {m_mutex};
     auto itr = m_registry.get(page.id());
     CALICO_EXPECT_NE(itr, m_registry.end());
-    m_framer.upgrade(itr->value.frame_index, page);
+    m_framer.upgrade(itr->value.index, page);
     watch_page(page, itr->value);
 }
 
@@ -326,7 +325,7 @@ auto Pager::release(Page page) -> void
     auto itr = m_registry.get(page.id());
     CALICO_EXPECT_NE(itr, m_registry.end());
     auto &entry = itr->value;
-    m_framer.unref(entry.frame_index, std::move(page));
+    m_framer.unref(entry.index, std::move(page));
 }
 
 auto Pager::save_state(FileHeader &header) -> void

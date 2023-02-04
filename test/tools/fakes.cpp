@@ -7,12 +7,13 @@ namespace Calico {
 /*
  * System call interceptors for fault injection during testing.
  */
-namespace interceptors {
+namespace Interceptors {
     std::mutex mutex;
     ReadInterceptor read;
     WriteInterceptor write;
     OpenInterceptor open;
     SyncInterceptor sync;
+    UnlinkInterceptor unlink;
 
     auto set_read(ReadInterceptor callback) -> void
     {
@@ -36,6 +37,12 @@ namespace interceptors {
     {
         std::lock_guard lock {mutex};
         sync = std::move(callback);
+    }
+
+    auto set_unlink(UnlinkInterceptor callback) -> void
+    {
+        std::lock_guard lock {mutex};
+        unlink = std::move(callback);
     }
 
     auto get_read() -> ReadInterceptor
@@ -62,6 +69,12 @@ namespace interceptors {
         return sync;
     }
 
+    auto get_unlink() -> UnlinkInterceptor
+    {
+        std::lock_guard lock {mutex};
+        return unlink;
+    }
+
     auto reset() -> void
     {
         std::lock_guard lock {mutex};
@@ -69,13 +82,14 @@ namespace interceptors {
         read = [](auto, auto, auto) {return ok();};
         write = [](auto, auto, auto) {return ok();};
         sync = [](auto) {return ok();};
+        unlink = [](auto) {return ok();};
     }
 
-} // namespace interceptors
+} // namespace Interceptors
 
 #define INTERCEPT(expr) \
     do { \
-        std::lock_guard intercept_lock {interceptors::mutex}; \
+        std::lock_guard intercept_lock {Interceptors::mutex}; \
         auto intercept_status = (expr); \
         if (!intercept_status.is_ok()) \
             return intercept_status; \
@@ -85,7 +99,7 @@ namespace fs = std::filesystem;
 
 static auto read_file_at(const std::string &path, const std::string &file, Span &out, Size offset)
 {
-    INTERCEPT(interceptors::read(path, out, offset));
+    INTERCEPT(Interceptors::read(path, out, offset));
 
     Size r {};
     if (Slice buffer {file}; offset < buffer.size()) {
@@ -100,7 +114,7 @@ static auto read_file_at(const std::string &path, const std::string &file, Span 
 
 static auto write_file_at(const std::string &path, std::string &file, Slice in, Size offset)
 {
-    INTERCEPT(interceptors::write(path, in, offset));
+    INTERCEPT(Interceptors::write(path, in, offset));
 
     if (const auto write_end = offset + in.size(); file.size() < write_end)
         file.resize(write_end);
@@ -139,7 +153,7 @@ auto RandomHeapEditor::write(Slice in, Size offset) -> Status
 
 auto RandomHeapEditor::sync() -> Status
 {
-    return interceptors::sync(m_path);
+    return Interceptors::sync(m_path);
 }
 
 auto AppendHeapWriter::write(Slice in) -> Status
@@ -149,17 +163,17 @@ auto AppendHeapWriter::write(Slice in) -> Status
 
 auto AppendHeapWriter::sync() -> Status
 {
-    return interceptors::sync(m_path);
+    return Interceptors::sync(m_path);
 }
 
 HeapStorage::HeapStorage()
 {
-    interceptors::reset();
+    Interceptors::reset();
 }
 
 auto HeapStorage::open_random_reader(const std::string &path, RandomReader **out) -> Status
 {
-    INTERCEPT(interceptors::open(path));
+    INTERCEPT(Interceptors::open(path));
     std::lock_guard lock {m_mutex};
 
     if (auto itr = m_files.find(path); itr != end(m_files)) {
@@ -173,7 +187,7 @@ auto HeapStorage::open_random_reader(const std::string &path, RandomReader **out
 auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out) -> Status
 {
     std::lock_guard lock {m_mutex};
-    INTERCEPT(interceptors::open(path));
+    INTERCEPT(Interceptors::open(path));
 
     if (auto itr = m_files.find(path); itr != end(m_files)) {
         *out = new RandomHeapEditor {path, itr->second};
@@ -187,7 +201,7 @@ auto HeapStorage::open_random_editor(const std::string &path, RandomEditor **out
 
 auto HeapStorage::open_append_writer(const std::string &path, AppendWriter **out) -> Status
 {
-    INTERCEPT(interceptors::open(path));
+    INTERCEPT(Interceptors::open(path));
     std::lock_guard lock {m_mutex};
 
     if (auto itr = m_files.find(path); itr != end(m_files)) {
@@ -202,7 +216,9 @@ auto HeapStorage::open_append_writer(const std::string &path, AppendWriter **out
 
 auto HeapStorage::remove_file(const std::string &name) -> Status
 {
+    INTERCEPT(Interceptors::unlink(name));
     std::lock_guard lock {m_mutex};
+
     auto itr = m_files.find(name);
     if (itr == end(m_files))
         return system_error("cannot remove file: file does not exist");

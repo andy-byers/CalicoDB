@@ -2,8 +2,8 @@
  * Very loosely based off of https://medium.com/@koushikmohan/an-analysis-of-2q-cache-replacement-algorithms-21acceae672a
  */
 
-#ifndef CALICO_PAGER_PAGE_CACHE_H
-#define CALICO_PAGER_PAGE_CACHE_H
+#ifndef CALICO_PAGER_CACHE_H
+#define CALICO_PAGER_CACHE_H
 
 #include "framer.h"
 #include "utils/cache.h"
@@ -77,14 +77,15 @@ private:
 
 class PageCache final {
 public:
-    using DirtyToken = std::optional<PageList::Iterator>;
+    using Token = std::optional<PageList::Iterator>;
 
     struct Entry {
-        Size frame_index;
-        DirtyToken dirty_token {};
+        Size index;
+        Token token {};
     };
 
-    using Iterator = Cache<Id, Entry, Id::Hash>::Iterator;
+    using Base = Cache<Id, Entry, Id::Hash>;
+    using Iterator = Base::Iterator;
 
     PageCache() = default;
     ~PageCache() = default;
@@ -136,16 +137,36 @@ public:
         return std::nullopt;
     }
 
-    auto put(Id pid, Entry entry) -> void;
-    auto get(Id pid) -> Iterator;
-    auto erase(Id pid) -> void;
+    [[nodiscard]]
+    auto get(Id pid) -> Iterator
+    {
+        using std::end;
+        if (auto itr = m_cache.get(pid); itr != end(m_cache)) {
+            m_hits++;
+            return itr;
+        }
+        m_misses++;
+        return end(*this);
+    }
+
+    auto put(Id pid, Entry entry) -> void
+    {
+        CALICO_EXPECT_FALSE(m_cache.contains(pid));
+        m_cache.put(pid, entry);
+    }
+
+    auto erase(Id pid) -> void
+    {
+        CALICO_EXPECT_TRUE(m_cache.contains(pid));
+        m_cache.erase(pid);
+    }
 
 private:
-    Cache<Id, Entry, Id::Hash> m_cache;
+    Base m_cache;
     Size m_hits {};
     Size m_misses {};
 };
 
 } // namespace Calico
 
-#endif // CALICO_PAGER_PAGE_CACHE_H
+#endif // CALICO_PAGER_CACHE_H

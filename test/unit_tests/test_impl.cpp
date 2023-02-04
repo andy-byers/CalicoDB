@@ -156,7 +156,8 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     invalid.page_size = MAXIMUM_PAGE_SIZE * 2;
     ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
 
-    invalid.page_size = DEFAULT_PAGE_SIZE - 1;
+    Options options;
+    invalid.page_size = options.page_size - 1;
     ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
 }
 
@@ -429,7 +430,7 @@ protected:
         committed = add_records(*db, 5'000, 10);
         EXPECT_OK(db->impl->commit());
 
-        interceptors::set_read([this](const auto &prefix, ...) {
+        Interceptors::set_read([this](const auto &prefix, ...) {
             if (prefix == "test/data") {
                 if (counter++ >= GetParam().successes) {
                     return special_error();
@@ -519,16 +520,16 @@ protected:
 
         switch (GetParam().target) {
             case ErrorTarget::DATA_READ:
-                interceptors::set_read(make_interceptor("test/data"));
+                Interceptors::set_read(make_interceptor("test/data"));
                 break;
             case ErrorTarget::DATA_WRITE:
-                interceptors::set_write(make_interceptor("test/data"));
+                Interceptors::set_write(make_interceptor("test/data"));
                 break;
             case ErrorTarget::WAL_READ:
-                interceptors::set_read(make_interceptor("test/wal"));
+                Interceptors::set_read(make_interceptor("test/wal"));
                 break;
             case ErrorTarget::WAL_WRITE:
-                interceptors::set_write(make_interceptor("test/wal"));
+                Interceptors::set_write(make_interceptor("test/wal"));
                 break;
         }
     }
@@ -691,6 +692,12 @@ public:
     auto status() const -> Status override
     {
         return m_base->status();
+    }
+
+    [[nodiscard]]
+    auto vacuum() -> Status override
+    {
+        return m_base->vacuum();
     }
 
     [[nodiscard]]

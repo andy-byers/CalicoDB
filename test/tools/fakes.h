@@ -19,20 +19,23 @@ using ReadInterceptor = std::function<Status(const std::string &, Span &, Size)>
 using WriteInterceptor = std::function<Status(const std::string &, Slice, Size)>;
 using OpenInterceptor = std::function<Status(const std::string &)>;
 using SyncInterceptor = std::function<Status(const std::string &)>;
+using UnlinkInterceptor = std::function<Status(const std::string &)>;
 
-namespace interceptors {
+namespace Interceptors {
     auto set_read(ReadInterceptor callback) -> void;
     auto set_write(WriteInterceptor callback) -> void;
     auto set_open(OpenInterceptor callback) -> void;
     auto set_sync(SyncInterceptor callback) -> void;
+    auto set_unlink(UnlinkInterceptor callback) -> void;
 
     [[nodiscard]] auto get_read() -> ReadInterceptor;
     [[nodiscard]] auto get_write() -> WriteInterceptor;
     [[nodiscard]] auto get_open() -> OpenInterceptor;
     [[nodiscard]] auto get_sync() -> SyncInterceptor;
+    [[nodiscard]] auto get_unlink() -> UnlinkInterceptor;
 
     auto reset() -> void;
-} // namespace interceptors
+} // namespace Interceptors
 
 [[nodiscard]]
 inline auto special_error()

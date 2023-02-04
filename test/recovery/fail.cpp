@@ -72,7 +72,7 @@ auto main(int argc, const char *argv[]) -> int
         expect_ok(db->put(key, value));
 
         // Keep the database from getting too large.
-        if (const auto property = db->get_property("record_count"); !property.empty()) {
+        if (const auto property = db->get_property("calico.count.records"); !property.empty()) {
             const auto record_count = std::stoi(property);
             if (record_count > max_database_size) {
                 auto *cursor = db->new_cursor();

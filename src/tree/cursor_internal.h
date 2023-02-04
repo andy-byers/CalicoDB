@@ -14,8 +14,8 @@ class CursorImpl : public Cursor {
 public:
     friend class CursorInternal;
 
-    CursorImpl(const CursorActions &actions)
-	: m_actions {&actions}
+    explicit CursorImpl(const CursorActions &actions)
+        : m_actions {&actions}
     {}
 
     ~CursorImpl() override = default;

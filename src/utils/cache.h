@@ -31,7 +31,7 @@ template<
     class K,
     class V,
     class F = std::hash<K>
-    >
+>
 class Cache {
 public:
     using Key = K;
@@ -69,6 +69,7 @@ public:
     auto contains(const Key &key) const -> bool
     {
         using std::end;
+
         return query(key) != end(m_list);
     }
 

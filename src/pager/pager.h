@@ -6,7 +6,7 @@
 
 #include "spdlog/logger.h"
 
-#include "page_cache.h"
+#include "cache.h"
 #include "pager.h"
 
 #include "utils/scratch.h"

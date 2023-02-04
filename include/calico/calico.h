@@ -4,7 +4,6 @@
 #include "common.h"
 #include "cursor.h"
 #include "database.h"
-#include "options.h"
 #include "slice.h"
 #include "status.h"
 #include "storage.h"

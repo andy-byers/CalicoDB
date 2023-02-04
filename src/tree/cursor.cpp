@@ -25,11 +25,11 @@ auto CursorImpl::key() const -> Slice
     CALICO_EXPECT_TRUE(is_valid());
     if (auto node = CursorInternal::action_acquire(*this, m_loc.pid)) {
         m_buffer = read_key(*node, m_loc.index).to_string();
-	CursorInternal::action_release(*this, std::move(*node));
-	return m_buffer;
+        CursorInternal::action_release(*this, std::move(*node));
+        return m_buffer;
     } else {
         CursorInternal::invalidate(*this, node.error());
-	return {};
+        return {};
     }
 }
 

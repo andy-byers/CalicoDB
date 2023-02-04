@@ -590,35 +590,35 @@ static auto count_segments(Test &test) -> Size
 
 TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterWriteFailure)
 {
-    interceptors::set_write(FailAfter<0> {"test/wal-"});
+    Interceptors::set_write(FailAfter<0> {"test/wal-"});
     test_write_until_failure(*this);
     ASSERT_EQ(count_segments(*this), 0);
 }
 
 TEST_F(WalWriterTests, LeavesSingleNonEmptySegmentAfterOpenFailure)
 {
-    interceptors::set_open(FailAfter<0> {"test/wal-"});
+    Interceptors::set_open(FailAfter<0> {"test/wal-"});
     test_write_until_failure(*this);
     ASSERT_EQ(count_segments(*this), 1);
 }
 
 TEST_F(WalWriterTests, LeavesSingleNonEmptySegmentAfterWriteFailure)
 {
-    interceptors::set_write(FailAfter<WAL_LIMIT / 2> {"test/wal-"});
+    Interceptors::set_write(FailAfter<WAL_LIMIT / 2> {"test/wal-"});
     test_write_until_failure(*this);
     ASSERT_EQ(count_segments(*this), 1);
 }
 
 TEST_F(WalWriterTests, LeavesMultipleNonEmptySegmentsAfterOpenFailure)
 {
-    interceptors::set_open(FailAfter<10> {"test/wal-"});
+    Interceptors::set_open(FailAfter<10> {"test/wal-"});
     test_write_until_failure(*this);
     ASSERT_EQ(count_segments(*this), 11);
 }
 
 TEST_F(WalWriterTests, LeavesMultipleNonEmptySegmentsAfterWriteFailure)
 {
-    interceptors::set_write(FailAfter<WAL_LIMIT * 10> {"test/wal-"});
+    Interceptors::set_write(FailAfter<WAL_LIMIT * 10> {"test/wal-"});
     test_write_until_failure(*this);
     ASSERT_GT(count_segments(*this), 2);
 }
@@ -849,7 +849,7 @@ TEST_F(WalReaderWriterTests, RunsTransactionsNormally)
 
 TEST_F(WalReaderWriterTests, RollWalAfterWriteError)
 {
-    interceptors::set_write(FailOnce<1> {"test/wal-"});
+    Interceptors::set_write(FailOnce<1> {"test/wal-"});
 
     emit_segments(5'000);
     ASSERT_FALSE(error_buffer->is_ok());
@@ -865,7 +865,7 @@ TEST_F(WalReaderWriterTests, RollWalAfterWriteError)
 
 TEST_F(WalReaderWriterTests, RollWalAfterOpenError)
 {
-    interceptors::set_open(FailOnce<3> {"test/wal-"});
+    Interceptors::set_open(FailOnce<3> {"test/wal-"});
 
     ASSERT_FALSE(emit_segments(5'000).is_ok());
     assert_special_error(error_buffer->get());
@@ -948,6 +948,40 @@ TEST_F(WalCleanupTests, RemovesObsoleteSegments)
     cleanup.cleanup();
     ASSERT_EQ(set.segments().size(), 1);
     ASSERT_EQ(set.first(), Id {3});
+}
+
+TEST_F(WalCleanupTests, ReportsErrorOnReadFirstLsn)
+{
+    writer.write(get_payload());
+    writer.advance();
+
+    writer.write(get_payload());
+    writer.advance();
+
+    std::move(writer).destroy();
+    limit.store({3});
+
+    Interceptors::set_read(FailOnce<0> {"test/wal"});
+    cleanup.cleanup();
+
+    assert_special_error(error_buffer.get());
+}
+
+TEST_F(WalCleanupTests, ReportsErrorOnUnlink)
+{
+    writer.write(get_payload());
+    writer.advance();
+
+    writer.write(get_payload());
+    writer.advance();
+
+    std::move(writer).destroy();
+    limit.store({3});
+
+    Interceptors::set_unlink(FailOnce<0> {"test/wal"});
+    cleanup.cleanup();
+
+    assert_special_error(error_buffer.get());
 }
 
 class BasicWalTests: public TestWithWalSegmentsOnHeap {
@@ -1060,7 +1094,7 @@ public:
                     const auto payload = get_commit_payload();
                     const auto lsn = payload.lsn();
                     wal->log(payload);
-                    wal->advance();
+                    (void)wal->advance();
                     commit_lsn = lsn;
                     break;
                 }
@@ -1216,7 +1250,7 @@ public:
 
 TEST_F(WalFaultTests, FailOnFirstWrite)
 {
-    interceptors::set_write(FailOnce<0> {"test/wal-"});
+    Interceptors::set_write(FailOnce<0> {"test/wal-"});
     assert_special_error(run_operations({WalOperation::LOG, WalOperation::FLUSH}));
 
     // We never wrote anything, so the writer should have removed the segment.
@@ -1230,7 +1264,7 @@ TEST_F(WalFaultTests, FailOnFirstWrite)
 
 TEST_F(WalFaultTests, FailOnFirstOpen)
 {
-    interceptors::set_open(FailOnce<0> {"test/wal-"});
+    Interceptors::set_open(FailOnce<0> {"test/wal-"});
     assert_special_error(run_operations({WalOperation::LOG, WalOperation::SEGMENT}));
 
     ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {
@@ -1243,7 +1277,7 @@ TEST_F(WalFaultTests, FailOnFirstOpen)
 
 TEST_F(WalFaultTests, FailOnNthOpen)
 {
-    interceptors::set_open(FailOnce<10> {"test/wal-"});
+    Interceptors::set_open(FailOnce<10> {"test/wal-"});
     assert_special_error(run_operations(std::vector<WalOperation>(5'000, WalOperation::LOG)));
 
     // We should have full records in the WAL, so these tests will work.
@@ -1253,7 +1287,7 @@ TEST_F(WalFaultTests, FailOnNthOpen)
 
 TEST_F(WalFaultTests, FailOnNthWrite)
 {
-    interceptors::set_write(FailOnce<100> {"test/wal-"});
+    Interceptors::set_write(FailOnce<100> {"test/wal-"});
     assert_special_error(run_operations(std::vector<WalOperation>(5'000, WalOperation::LOG)));
 
     // We may have a partial record at the end. The WAL will stop short of it.

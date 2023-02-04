@@ -23,6 +23,11 @@ auto Database::open(const Slice &path, const Options &options, Database **db) ->
     return ok();
 }
 
+auto Database::repair(const Slice &path, const Options &options) -> Status
+{
+    return DatabaseImpl::repair(path.to_string(), options);
+}
+
 auto Database::destroy(const Slice &path, const Options &options) -> Status
 {
     return DatabaseImpl::destroy(path.to_string(), options);

@@ -65,6 +65,13 @@ namespace Impl {
 
 } // namespace impl
 
+static constexpr Size MINIMUM_PAGE_SIZE {0x100};
+static constexpr Size MAXIMUM_PAGE_SIZE {0x8000};
+static constexpr Size MINIMUM_LOG_MAX_SIZE {0xA000};
+static constexpr Size MAXIMUM_LOG_MAX_SIZE {0xA00000};
+static constexpr Size MINIMUM_LOG_MAX_FILES {1};
+static constexpr Size MAXIMUM_LOG_MAX_FILES {32};
+
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 template<class T>
 constexpr auto is_power_of_two(T v) noexcept -> bool
