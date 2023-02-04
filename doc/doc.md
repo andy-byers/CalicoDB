@@ -1,6 +1,14 @@
 # Calico DB Documentation
 
 + [Build](#build)
++ [API](#api)
+  + [Slices](#slices)
+  + [Opening a database](#opening-a-database)
+  + [Updating a database](#updating-a-database)
+  + [Querying a database](#querying-a-database)
+  + [Closing a database](#closing-a-database)
+  + [Transactions](#transactions)
+  + [Destroying a database](#destroying-a-database)
 + [Examples](#examples)
 + [Architecture](#architecture)
 + [Source Tree](#source-tree)
@@ -25,8 +33,200 @@ To build the library in release mode without tests, the last command would look 
 cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
 ```
 
+## API
+
+### Slices
+```C++
+std::string str {"abc"};
+
+// We can create slices from C-style strings, standard library strings, or directly from a pointer and a length.
+Calico::Slice s1 {str.c_str()};
+Calico::Slice s2 {str};
+Calico::Slice s3 {str.data(), str.size()};
+
+// Slices can be converted back to owned strings using Slice::to_string().
+printf("%s\n", s1.to_string().c_str());
+
+// Slices have methods for modifying the size and pointer position. These methods do not change the underlying data, 
+// they just change what range of bytes the slice is currently viewing. Slice::advance() increments the underlying 
+// pointer...
+s1.advance(1);
+
+// ...and truncate() decreases the size.
+s1.truncate(1);
+
+// Comparison operations are implemented.
+assert(s1 == "b");
+assert(s2 < "bc");
+assert(s2.starts_with("ab"));
+```
+
+### Opening a database
+```C++
+// Set some initialization options.
+Calico::Options options;
+
+// Use pages of size 2 KiB, a 2 MiB page cache, and a 1 MiB WAL write buffer.
+options.page_size = 0x2000;
+options.page_cache_size = 0x200000;
+options.wal_buffer_size = 0x100000;
+
+// Store the WAL segments in a separate location.
+options.wal_prefix = "/tmp/cats_wal";
+
+// Write colorful log messages to stderr.
+options.log_level = Calico::LogLevel::TRACE;
+options.log_target = Calico::LogTarget::STDERR_COLOR;
+
+// Create a database at "/tmp/cats".
+Calico::Database *db;
+auto s = Calico::Database::open("/tmp/cats", options, &db);
+
+// Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is 
+// null-terminated, so it can be printed like in the following block.
+if (!s.is_ok()) {
+    fprintf(stderr, "error: %s\n", s.what().data());
+    return 1;
+}
+```
+
+### Updating a database
+
+```C++
+// Insert some key-value pairs.
+if (const auto s = db->put("a", "1"); !s.is_ok()) {
+
+}
+if (const auto s = db->put("b", "2"); !s.is_ok()) {
+
+}
+if (const auto s = db->put("c", "3"); !s.is_ok()) {
+
+}
+
+// Keys are unique within the entire database instance, so inserting a record with a key already in the database will 
+// cause the old record to be overwritten.
+if (const auto s = db->put("c", "123"); !s.is_ok()) {
+
+}
+
+// Erase a record by key. If the key is not found, we'll receive a "not found" status.
+if (const auto s = db->erase("c"); !s.is_ok() && !s.is_not_found()) {
+   
+}
+
+
+```
+
+### Querying a database
+
+```C++
+// Query a value by key.
+std::string value;
+if (db->get("a", value).is_ok()) {
+
+}
+
+// Allocate a cursor.
+auto *cursor = db->new_cursor();
+
+// Seek to the first record greater than or equal to the given key.
+cursor->seek("a");
+
+if (cursor->is_valid()) {
+   // If the cursor is valid, these calls can be made:
+   //     cursor->key()
+   //     cursor->value()
+} else {
+   // Otherwise, the error status can be queried. If the searched-for key was
+   // greater than any key in the database, a "not found" status will be returned.
+   //     cursor->status()
+}
+
+// Iterate through the whole database.
+cursor->seek_first();
+for (; cursor->is_valid(); cursor->next()) {
+
+}
+
+// Iterate in reverse.
+cursor->seek_last();
+for (; cursor->is_valid(); cursor->previous()) {
+
+}
+
+// Iterate through a half-open range of keys.
+cursor->seek("a");
+for (; cursor->is_valid() && cursor->key() < "f"; cursor->next()) {
+
+}
+
+// Free the cursor.
+delete cursor;
+```
+
+### Transactions
+
+```C++
+// In Calico DB, every modification is part of a transaction. The first transaction is started when
+// the database is opened. Otherwise, transaction boundaries are defined by calls to Database::commit()
+// and Database::abort().
+if (const auto s = db->erase("b"); !s.is_ok()) {
+
+}
+
+// If this status is OK, every change made since the last call to Database::commit() will be undone (or since the 
+// database was opened, if Database::commit() hasn't been called).
+if (const auto s = db->abort(); !s.is_ok()) {
+
+}
+
+if (const auto s = db->put("c", "3"); !s.is_ok()) {
+    
+}
+if (const auto s = db->put("d", "4"); !s.is_ok()) {
+    
+}
+
+// This time we'll commit the changes.
+if (const auto s = db->commit(); !s.is_ok()) {
+
+}
+```
+
+### Database properties
+
+```C++
+// Database properties are made available as strings.
+(void)db->get_property("calico.count.records");
+(void)db->get_property("calico.count.pages");
+(void)db->get_property("calico.limit.max_key_length");
+(void)db->get_property("calico.stat.cache_hit_ratio");
+(void)db->get_property("calico.stat.pager_throughput");
+(void)db->get_property("calico.stat.wal_throughput");
+(void)db->get_property("calico.stat.data_throughput");
+
+// The page size is fixed at database creation time. If the database already existed, the page size passed to the
+// constructor through Calico::Options is ignored. We can query the real page size using the following line.
+(void)db->get_property("calico.limit.page_size");
+```
+
+### Closing a database 
+
+```C++
+delete db;
+```
+
+### Destroying a database
+
+```C++
+if (const auto s = Calico::Database::destroy("/tmp/cats", options); !s.is_ok()) {
+
+}
+```
+
 ## Examples
-Usage examples can be found in the [examples directory](../examples).
+Examples and use-cases can be found in the [examples directory](../examples).
 
 ## Architecture
 ...
@@ -56,10 +256,10 @@ CalicoDB
 ┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Common utilities
 ┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging
-┗╸test
-  ┣╸recovery ┄┄┄┄┄┄┄ Crash recovery tests
-  ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Common test utilities
-  ┗╸unit_tests ┄┄┄┄┄ Unit tests
+┣╸test
+┃ ┣╸recovery ┄┄┄┄┄┄┄ Crash recovery tests
+┃ ┗╸unit_tests ┄┄┄┄┄ Unit tests
+┗╸tools ┄┄┄┄┄┄┄┄┄┄┄┄ Non-core utilities
 ```
 
 ## Acknowledgements

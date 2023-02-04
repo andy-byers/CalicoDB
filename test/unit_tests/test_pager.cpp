@@ -1,10 +1,10 @@
 
 #include "fakes.h"
-#include "tools.h"
+#include "pager/cache.h"
 #include "pager/framer.h"
 #include "pager/page.h"
-#include "pager/page_cache.h"
 #include "pager/pager.h"
+#include "tools.h"
 #include "tree/header.h"
 #include "tree/node.h"
 #include "unit_tests.h"
@@ -525,14 +525,14 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     registry.put(Id {3UL}, {Size {3UL}});
     ASSERT_EQ(registry.size(), 6);
 
-    ASSERT_EQ(registry.get(Id {11UL})->value.frame_index, 11UL);
-    ASSERT_EQ(registry.get(Id {12UL})->value.frame_index, 12UL);
-    ASSERT_EQ(registry.get(Id {13UL})->value.frame_index, 13UL);
+    ASSERT_EQ(registry.get(Id {11UL})->value.index, 11UL);
+    ASSERT_EQ(registry.get(Id {12UL})->value.index, 12UL);
+    ASSERT_EQ(registry.get(Id {13UL})->value.index, 13UL);
 
     Size i {}, j {};
 
     const auto callback = [&i, &j](auto page_id, auto entry) {
-        EXPECT_EQ(page_id.value, entry.frame_index);
+        EXPECT_EQ(page_id.value, entry.index);
         EXPECT_EQ(page_id.value, i + (j >= 3)*10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
         j++;
         i = j % 3;

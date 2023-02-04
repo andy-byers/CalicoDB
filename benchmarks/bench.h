@@ -8,29 +8,17 @@
 
 namespace Calico {
 
-static constexpr Size DB_PAYLOAD_SIZE {100};
-static constexpr auto DB_VALUE =
-    "____________________"
-    "____________________"
-    "____________________"
-    "____________________"
-    "________";
-static constexpr auto DB_VALUE_SIZE = std::char_traits<Byte>::length(DB_VALUE);
-static_assert(DB_VALUE_SIZE < DB_PAYLOAD_SIZE);
-
-static constexpr auto DB_KEY_SIZE = DB_PAYLOAD_SIZE - DB_VALUE_SIZE;
 static constexpr Size DB_INITIAL_SIZE {10'000};
 static constexpr Size DB_BATCH_SIZE {1'000};
+static constexpr Size DB_PAYLOAD_SIZE {100};
+static constexpr auto DB_VALUE = /* <88 characters> */
+    ".## .##. #  ::::::::::"
+    "#   #  # #  # .## .##."
+    "'## '### ## # #   #  #"
+    "::::::::::: # '## '##'";
+static constexpr Size DB_KEY_SIZE {12};
 
-struct State {
-    static std::default_random_engine s_rng;
-
-    static auto random_int() -> int
-    {
-        std::uniform_int_distribution<int> dist;
-        return dist(s_rng);
-    }
-};
+static_assert(DB_KEY_SIZE + std::char_traits<Byte>::length(DB_VALUE) == DB_PAYLOAD_SIZE);
 
 template<std::size_t Length = DB_KEY_SIZE>
 static auto make_key(Size key) -> std::string
@@ -53,6 +41,7 @@ private:
 
 public:
     RandomGenerator()
+        : m_data(4 * 1'024 * 1'024, '\0')
     {
         // We use a limited amount of data over and over again and ensure
         // that it is larger than the compression window (32KB), and also

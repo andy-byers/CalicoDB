@@ -728,9 +728,7 @@ TEST_P(BPlusTreeTests, ReadsOverflowChains)
         const auto cell = read_cell(r.node, r.index);
         const auto pid = read_overflow_id(cell);
         const auto local_vs = cell.local_ps - cell.key_size;
-        std::string value(cell.key + cell.key_size, local_vs);
-        value.resize(cell.total_ps - cell.key_size, ' ');
-        ASSERT_TRUE(read_chain(*pager, pid, Span {value}.range(local_vs)));
+        const auto value = tree->collect(std::move(r.node), r.index);
         ASSERT_EQ(value, values[i]);
     }
 }

@@ -105,7 +105,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         sanitized.page_size = state.page_size;
     }
 
-    maximum_key_size = compute_max_local(sanitized.page_size);
+    max_key_length = compute_max_local(sanitized.page_size);
 
     {
         const auto scratch_size = wal_scratch_size(sanitized.page_size);
@@ -196,6 +196,12 @@ DatabaseImpl::~DatabaseImpl()
     (void)close();
 }
 
+auto DatabaseImpl::repair(const std::string &path, const Options &options) -> Status
+{
+    (void)path;(void)options;
+    return logic_error("<NOT IMPLEMENTED>"); // TODO: repair() operation attempts to fix a database that could not be opened due to corruption that couldn't/shouldn't be rolled back.
+}
+
 auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> Status
 {
     bool owns_storage {};
@@ -211,34 +217,23 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
     std::vector<std::string> children;
     if (auto s = storage->get_children(path, children); s.is_ok()) {
         for (const auto &name: children) {
-            s = storage->remove_file(name);
-            if (!s.is_ok()) {
-
-            }
+            (void)storage->remove_file(name);
         }
-    } else {
-
     }
+
     if (!options.wal_prefix.is_empty()) {
         children.clear();
 
         if (auto s = storage->get_children(options.wal_prefix.to_string(), children); s.is_ok()) {
             for (const auto &name: children) {
                 if (name.find("wal-") != std::string::npos) {
-                    s = storage->remove_file(name);
-                    if (!s.is_ok()) {
-
-                    }
+                    (void)storage->remove_file(name);
                 }
             }
-        } else {
-
         }
     }
     auto s = storage->remove_directory(path);
-    if (!s.is_ok()) {
 
-    }
     if (owns_storage) {
         delete storage;
     }
@@ -255,22 +250,39 @@ auto DatabaseImpl::status() const -> Status
 
 auto DatabaseImpl::get_property(const Slice &name) const -> std::string
 {
-    if (name == "record_count") {
-        return fmt::format("{}", record_count);
-    } else if (name == "page_count") {
-        return fmt::format("{}", pager->page_count());
-    } else if (name == "maximum_key_size") {
-        return fmt::format("{}", maximum_key_size);
-    } else if (name == "cache_hit_ratio") {
-        return fmt::format("{}", pager->hit_ratio());
-    } else if (name == "pager_throughput") {
-        return fmt::format("{}", pager->bytes_written());
-    } else if (name == "wal_throughput") {
-        return fmt::format("{}", wal->bytes_written());
-    } else if (name == "data_throughput") {
-        return fmt::format("{}", bytes_written);
-    } else if (name == "page_size") {
-        return fmt::format("{}", pager->page_size());
+    Slice prop {name};
+    if (prop.starts_with("calico.")) {
+        prop.advance(7);
+
+        if (prop.starts_with("count.")) {
+            prop.advance(6);
+
+            if (prop == "records") {
+                return fmt::format("{}", record_count);
+            } else if (prop == "pages") {
+                return fmt::format("{}", pager->page_count());
+            }
+        } else if (prop.starts_with("limit.")) {
+            prop.advance(6);
+
+            if (prop == "max_key_length") {
+                return fmt::format("{}", max_key_length);
+            } else if (prop == "page_size") {
+                return fmt::format("{}", pager->page_size());
+            }
+        } else if (prop.starts_with("stat.")) {
+            prop.advance(5);
+
+            if (prop == "cache_hit_ratio") {
+                return fmt::format("{}", pager->hit_ratio());
+            } else if (prop == "data_throughput") {
+                return fmt::format("{}", bytes_written);
+            } else if (prop == "pager_throughput") {
+                return fmt::format("{}", pager->bytes_written());
+            } else if (prop == "wal_throughput") {
+                return fmt::format("{}", wal->bytes_written());
+            }
+        }
     }
     return "";
 }
@@ -282,8 +294,8 @@ auto DatabaseImpl::check_key(const Slice &key, const char *message) const -> Sta
         Calico_Warn("{}", s.what().data());
         return s;
     }
-    if (key.size() > maximum_key_size) {
-        auto s = invalid_argument("{}: key of length {} is too long", message, key.size(), maximum_key_size);
+    if (key.size() > max_key_length) {
+        auto s = invalid_argument("{}: key of length {} is too long", message, key.size(), max_key_length);
         Calico_Warn("{}", s.what().data());
         return s;
     }
@@ -349,6 +361,11 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
         }
         return erased.error();
     }
+}
+
+auto DatabaseImpl::vacuum() -> Status
+{
+    return logic_error("<NOT IMPLEMENTED>"); // TODO: vacuum() operation collects some freelist pages at the end of the file and truncates.
 }
 
 auto DatabaseImpl::commit() -> Status

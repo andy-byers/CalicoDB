@@ -138,7 +138,7 @@ public:
     
     static auto find_external_slot(BPlusTree &tree, const Slice &key) -> tl::expected<SearchResult, Status>
     {
-        Calico_New_R(root, BPlusTreeInternal::acquire_node(tree, Id::root()));
+        Calico_New_R(root, acquire_node(tree, Id::root()));
         return find_external_slot(tree, key, std::move(root));
     }
 

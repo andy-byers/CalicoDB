@@ -178,7 +178,7 @@ inline auto operator==(Slice lhs, Slice rhs) noexcept -> bool
 
 inline auto operator!=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return !(lhs == rhs);
+    return compare_three_way(lhs, rhs) != ThreeWayComparison::EQ;
 }
 
 } // namespace Calico
