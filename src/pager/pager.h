@@ -42,20 +42,16 @@ public:
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto hit_ratio() const -> double;
+    [[nodiscard]] auto recovery_lsn() -> Id;
+    [[nodiscard]] auto bytes_written() const -> Size;
+    [[nodiscard]] auto flush(Lsn target_lsn) -> Status;
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status>;
     [[nodiscard]] auto acquire(Id pid) -> tl::expected<Page, Status>;
-    [[nodiscard]] auto recovery_lsn() -> Id;
-    [[nodiscard]] auto flush(Lsn target_lsn) -> Status;
     auto upgrade(Page &page) -> void;
     auto release(Page page) -> void;
     auto save_state(FileHeader &header) -> void;
-    auto load_state(const FileHeader &header) -> void;
 
-    [[nodiscard]]
-    auto bytes_written() const -> Size
-    {
-        return m_framer.bytes_written();
-    }
+    auto load_state(const FileHeader &header) -> void;
 
 private:
     explicit Pager(const Parameters &param, Framer framer);

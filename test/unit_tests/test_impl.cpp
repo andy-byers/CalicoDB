@@ -1,6 +1,5 @@
 
-#include "core/database_impl.h"
-#include "fakes.h"
+#include "database/database_impl.h"
 #include "storage/posix_storage.h"
 #include "tools.h"
 #include "tree/cursor_internal.h"
@@ -15,13 +14,9 @@
 
 namespace Calico {
 
-namespace UnitTests {
-    extern std::uint32_t random_seed;
-} // namespace internal
-
 namespace fs = std::filesystem;
 
-class BasicDatabaseTests: public TestOnDisk {
+class BasicDatabaseTests: public OnDiskTest {
 public:
     BasicDatabaseTests()
     {
@@ -65,7 +60,7 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {
     RecordGenerator generator;
-    Random random {UnitTests::random_seed};
+    Tools::RandomGenerator random {4 * 1'024 * 1'024};
 
     for (Size iteration {}; iteration < num_groups; ++iteration) {
         const auto records = generator.generate(random, group_size);
@@ -118,7 +113,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
 
     auto s = ok();
     RecordGenerator generator;
-    Random random {UnitTests::random_seed};
+    Tools::RandomGenerator random {4 * 1'024 * 1'024};
 
     const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
     auto itr = cbegin(records);
@@ -139,7 +134,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     ASSERT_OK(Database::open(ROOT, options, &db));
     for (const auto &[key, value]: records) {
         std::string value_out;
-        ASSERT_OK(tools::get(*db, key, value_out));
+        ASSERT_OK(TestTools::get(*db, key, value_out));
         ASSERT_EQ(value_out, value);
     }
     delete db;
@@ -173,7 +168,7 @@ public:
         db.reset(temp);
 
         for (Size i {}; i < NUM_RECORDS; ++i) {
-            const auto key = make_key<KEY_WIDTH>(i);
+            const auto key = Tools::integral_key<KEY_WIDTH>(i);
             ASSERT_OK(db->put(key, key));
         }
         ASSERT_OK(db->commit());
@@ -192,7 +187,7 @@ public:
             std::unique_ptr<Cursor> c {db->new_cursor()};
             c->seek_first();
             for (; counter < N; c->next(), ++counter) {
-                const auto key = make_key<KEY_WIDTH>(counter);
+                const auto key = Tools::integral_key<KEY_WIDTH>(counter);
                 ASSERT_EQ(c->key().to_string(), key);
                 ASSERT_EQ(c->value(), key);
             }
@@ -206,10 +201,10 @@ public:
         const auto first = r * NUM_RECORDS % NUM_RECORDS;
         for (auto i = first; i < NUM_RECORDS; ++i) {
             std::unique_ptr<Cursor> c {db->new_cursor()};
-            c->seek(make_key<KEY_WIDTH>(i));
+            c->seek(Tools::integral_key<KEY_WIDTH>(i));
 
             for (auto j = i; j < std::min(i + MAX_ROUND_SIZE, NUM_RECORDS); ++j, c->next()) {
-                const auto key = make_key<KEY_WIDTH>(j);
+                const auto key = Tools::integral_key<KEY_WIDTH>(j);
                 ASSERT_TRUE(c->is_valid());
                 ASSERT_EQ(c->key().to_string(), key);
                 ASSERT_EQ(c->value(), key);
@@ -217,7 +212,7 @@ public:
         }
     }
 
-    Random random {UnitTests::random_seed};
+    Tools::RandomGenerator random {4 * 1'024 * 1'024};
     std::unique_ptr<Database> db;
 };
 
@@ -227,7 +222,7 @@ TEST_F(ReaderTests, SingleReader)
         std::vector<std::string> strings;
         for (Size i {}; i < NUM_RECORDS; ++i) {
             std::unique_ptr<Cursor> c {db->new_cursor()};
-            c->seek(make_key<KEY_WIDTH>(i));
+            c->seek(Tools::integral_key<KEY_WIDTH>(i));
             ASSERT_TRUE(c->is_valid());
             strings.emplace_back(c->value().to_string());
         }
@@ -280,26 +275,23 @@ public:
     [[nodiscard]]
     auto snapshot() const -> std::string
     {
-        return tools::snapshot(*options.storage, options.page_size);
+        return TestTools::snapshot(*options.storage, options.page_size);
     }
 
     Options options;
-    Random random {UnitTests::random_seed};
+    Tools::RandomGenerator random {4 * 1'024 * 1'024};
     std::vector<Record> records;
     std::unique_ptr<DatabaseImpl> impl;
 };
 
-class DbAbortTests: public testing::Test {
+class DbAbortTests: public InMemoryTest {
 protected:
     DbAbortTests()
     {
-        storage = std::make_unique<HeapStorage>();
-        EXPECT_OK(storage->create_directory("test"));
         db = std::make_unique<TestDatabase>(*storage);
     }
     ~DbAbortTests() override = default;
 
-    std::unique_ptr<Storage> storage;
     std::unique_ptr<TestDatabase> db;
 };
 
@@ -308,9 +300,9 @@ static auto add_records(TestDatabase &test, Size n, Size max_value_size, const s
     std::vector<Record> records(n);
 
     for (Size i {}; i < n; ++i) {
-        const auto value_size = test.random.get(max_value_size);
-        records[i].key = prefix + make_key(i);
-        records[i].value = test.random.get<std::string>('a', 'z', value_size);
+        const auto value_size = test.random.GenerateInteger<Size>(max_value_size);
+        records[i].key = prefix + Tools::integral_key(i);
+        records[i].value = test.random.Generate(value_size).to_string();
         EXPECT_OK(test.impl->put(records[i].key, records[i].value));
     }
     return records;
@@ -353,16 +345,9 @@ TEST_F(DbAbortTests, RevertsNthBatch)
     ASSERT_EQ(snapshot, db->snapshot());
 }
 
-class DbRecoveryTests: public testing::Test {
+class DbRecoveryTests: public InMemoryTest {
 protected:
-    DbRecoveryTests()
-    {
-        storage = std::make_unique<HeapStorage>();
-        EXPECT_OK(storage->create_directory("test"));
-    }
     ~DbRecoveryTests() override = default;
-
-    std::unique_ptr<Storage> storage;
 };
 
 TEST_F(DbRecoveryTests, RecoversFirstBatch)
@@ -376,7 +361,7 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
         ASSERT_OK(db.impl->commit());
 
         // Simulate a crash by cloning the database before cleanup has occurred.
-        clone.reset(dynamic_cast<const HeapStorage &>(*storage).clone());
+        clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*storage).clone());
 
         (void)db.impl->pager->flush({});
         snapshot = db.snapshot();
@@ -399,7 +384,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
             ASSERT_OK(db.impl->commit());
         }
 
-        clone.reset(dynamic_cast<const HeapStorage &>(*storage).clone());
+        clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*storage).clone());
 
         (void)db.impl->pager->flush({});
         snapshot = db.snapshot();
@@ -414,34 +399,30 @@ enum class ErrorTarget {
     WAL_READ,
 };
 
-struct ErrorWrapper {
-    ErrorTarget target {};
-    Size successes {};
-};
-
-class DbErrorTests: public testing::TestWithParam<ErrorWrapper> {
+class DbErrorTests: public ParameterizedInMemoryTest<Size> {
 protected:
     DbErrorTests()
     {
-        storage = std::make_unique<HeapStorage>();
+        storage = std::make_unique<Tools::DynamicMemory>();
         EXPECT_OK(storage->create_directory("test"));
         db = std::make_unique<TestDatabase>(*storage);
 
         committed = add_records(*db, 5'000, 10);
         EXPECT_OK(db->impl->commit());
 
-        Interceptors::set_read([this](const auto &prefix, ...) {
-            if (prefix == "test/data") {
-                if (counter++ >= GetParam().successes) {
-                    return special_error();
-                }
-            }
-            return ok();
-        });
+        storage_handle().add_interceptor(
+            Tools::Interceptor {
+                "test/data",
+                Tools::Interceptor::READ,
+                [this] {
+                    if (counter++ >= GetParam()) {
+                        return special_error();
+                    }
+                    return ok();
+                }});
     }
     ~DbErrorTests() override = default;
 
-    std::unique_ptr<Storage> storage;
     std::unique_ptr<TestDatabase> db;
     std::vector<Record> committed;
     Size counter {};
@@ -452,7 +433,7 @@ TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
     for (Size iteration {}; iteration < 2; ++iteration) {
         for (Size i {}; i < committed.size(); ++i) {
             std::string value;
-            const auto s = db->impl->get(make_key(i), value);
+            const auto s = db->impl->get(Tools::integral_key(i), value);
 
             if (!s.is_ok()) {
                 assert_special_error(s);
@@ -491,52 +472,52 @@ INSTANTIATE_TEST_SUITE_P(
     DbErrorTests,
     DbErrorTests,
     ::testing::Values(
-        ErrorWrapper {{}, 0},
-        ErrorWrapper {{}, 1},
-        ErrorWrapper {{}, 10},
-        ErrorWrapper {{}, 100}));
+        0,
+        1,
+        10,
+        100));
 
-class DbFatalErrorTests: public testing::TestWithParam<ErrorWrapper> {
+struct ErrorWrapper {
+    ErrorTarget target {};
+    Size successes {};
+};
+
+class DbFatalErrorTests: public ParameterizedInMemoryTest<ErrorWrapper> {
 protected:
     DbFatalErrorTests()
     {
-        storage = std::make_unique<HeapStorage>();
-        EXPECT_OK(storage->create_directory("test"));
         db = std::make_unique<TestDatabase>(*storage);
 
         committed = add_records(*db, 5'000, 10);
         EXPECT_OK(db->impl->commit());
 
-        const auto make_interceptor = [this](const auto &prefix) {
-            return [this, prefix](const auto &filename, ...) {
-                if (Slice {filename}.starts_with(prefix)) {
-                    if (counter++ == GetParam().successes) {
-                        return special_error();
-                    }
+        const auto make_interceptor = [this](const auto &prefix, auto type) {
+            return Tools::Interceptor {prefix, type, [this] {
+                if (counter++ >= GetParam().successes) {
+                    return special_error();
                 }
                 return ok();
-            };
+            }};
         };
 
         switch (GetParam().target) {
             case ErrorTarget::DATA_READ:
-                Interceptors::set_read(make_interceptor("test/data"));
+                storage_handle().add_interceptor(make_interceptor("test/data", Tools::Interceptor::READ));
                 break;
             case ErrorTarget::DATA_WRITE:
-                Interceptors::set_write(make_interceptor("test/data"));
+                storage_handle().add_interceptor(make_interceptor("test/data", Tools::Interceptor::WRITE));
                 break;
             case ErrorTarget::WAL_READ:
-                Interceptors::set_read(make_interceptor("test/wal"));
+                storage_handle().add_interceptor(make_interceptor("test/wal", Tools::Interceptor::READ));
                 break;
             case ErrorTarget::WAL_WRITE:
-                Interceptors::set_write(make_interceptor("test/wal"));
+                storage_handle().add_interceptor(make_interceptor("test/wal", Tools::Interceptor::WRITE));
                 break;
         }
     }
 
     ~DbFatalErrorTests() override = default;
 
-    std::unique_ptr<Storage> storage;
     std::unique_ptr<TestDatabase> db;
     std::vector<Record> committed;
     Size counter {};
@@ -545,8 +526,8 @@ protected:
 TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
 {
     while (db->impl->status().is_ok()) {
-        for (Size i {}; i < committed.size() && db->impl->erase(make_key(i)).is_ok(); ++i);
-        for (Size i {}; i < committed.size() && db->impl->put(make_key(i), "value").is_ok(); ++i);
+        for (Size i {}; i < committed.size() && db->impl->erase(Tools::integral_key(i)).is_ok(); ++i);
+        for (Size i {}; i < committed.size() && db->impl->put(Tools::integral_key(i), "value").is_ok(); ++i);
     }
     assert_special_error(db->impl->status());
     assert_special_error(db->impl->put("key", "value"));
@@ -555,17 +536,18 @@ TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
 TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
 {
     Size i {};
-    while (i < committed.size() && db->impl->erase(make_key(i++)).is_ok());
+    while (i < committed.size() && db->impl->erase(Tools::integral_key(i++)).is_ok());
     assert_special_error(db->impl->status());
     assert_special_error(db->impl->commit());
     assert_special_error(db->impl->put("key", "value"));
     assert_special_error(db->impl->close());
 
+    storage_handle().clear_interceptors();
     db->impl = std::make_unique<DatabaseImpl>();
     ASSERT_OK(db->impl->open("test", db->options));
 
     for (const auto &[key, value]: committed) {
-        tools::expect_contains(*db->impl, key, value);
+        TestTools::expect_contains(*db->impl, key, value);
     }
 }
 
@@ -650,7 +632,7 @@ public:
 };
 
 class ExtendedDatabase : public Database {
-    std::unique_ptr<HeapStorage> m_storage;
+    std::unique_ptr<Tools::DynamicMemory> m_storage;
     std::unique_ptr<Database> m_base;
 
 public:
@@ -662,7 +644,7 @@ public:
         if (ext == nullptr) {
             return system_error("cannot allocate extension database: out of memory");
         }
-        auto storage = std::make_unique<HeapStorage>();
+        auto storage = std::make_unique<Tools::DynamicMemory>();
         options.storage = storage.get();
 
         Database *db;

@@ -3,12 +3,10 @@
 #include <set>
 #include <calico/calico.h>
 
-#include "../test/tools/fakes.h"
-#include "../test/tools/tools.h"
-
 namespace {
 
 using namespace Calico;
+using namespace Calico::Tools;
 
 enum OperationType {
     PUT,
@@ -30,35 +28,37 @@ enum FailureTarget {
     TARGET_COUNT
 };
 
-static constexpr auto DB_PATH = "test";
-static constexpr auto DB_DATA_PATH = "test/data";
-static constexpr auto DB_WAL_PREFIX = "test/wal";
+constexpr auto DB_PATH = "test";
+constexpr auto DB_DATA_PATH = "test/data";
+constexpr auto DB_WAL_PREFIX = "test/wal";
 
 using Set = std::set<std::string>;
 using Map = std::map<std::string, std::string>;
 
+auto storage_base(Storage *storage) -> DynamicMemory &
+{
+    return reinterpret_cast<DynamicMemory &>(*storage);
+}
+
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
-    Storage *storage;
-    storage = new(std::nothrow) HeapStorage;
-    assert(storage != nullptr);
-
     auto options = DB_OPTIONS;
-    options.storage = storage;
+    options.storage = new(std::nothrow) DynamicMemory;
+    assert(options.storage != nullptr);
 
     Database *db;
-    assert_ok(Database::open(DB_PATH, options, &db));
+    expect_ok(Database::open(DB_PATH, options, &db));
 
     Set erased;
     Map added;
     Map map;
 
-    const auto reopen_db = [&]
+    const auto reopen_and_clear_pending = [&added, &db, &erased, options]
     {
         delete db;
 
-        Interceptors::reset();
-        assert_ok(Database::open(DB_PATH, options, &db));
+        storage_base(options.storage).clear_interceptors();
+        expect_ok(Database::open(DB_PATH, options, &db));
 
         added.clear();
         erased.clear();
@@ -74,22 +74,34 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
             
             switch (failure_target) {
                 case DATA_READ:
-                    Interceptors::set_read(FailOnce<0> {DB_DATA_PATH});
+                    storage_base(options.storage).add_interceptor(Interceptor {DB_DATA_PATH, Interceptor::READ, [] {
+                        return Status::system_error(std::string {"READ "} + DB_DATA_PATH);
+                    }});
                     break;
                 case DATA_WRITE:
-                    Interceptors::set_write(FailOnce<0> {DB_DATA_PATH});
+                    storage_base(options.storage).add_interceptor(Interceptor {DB_DATA_PATH, Interceptor::WRITE, [] {
+                        return Status::system_error(std::string {"WRITE "} + DB_DATA_PATH);
+                    }});
                     break;
                 case WAL_READ:
-                    Interceptors::set_read(FailOnce<0> {DB_WAL_PREFIX});
+                    storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::READ, [] {
+                        return Status::system_error(std::string {"READ "} + DB_WAL_PREFIX);
+                    }});
                     break;
                 case WAL_WRITE:
-                    Interceptors::set_write(FailOnce<0> {DB_WAL_PREFIX});
+                    storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::WRITE, [] {
+                        return Status::system_error(std::string {"WRITE "} + DB_WAL_PREFIX);
+                    }});
                     break;
                 case WAL_UNLINK:
-                    Interceptors::set_unlink(FailOnce<0> {DB_WAL_PREFIX});
+                    storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::UNLINK, [] {
+                        return Status::system_error(std::string {"UNLINK "} + DB_WAL_PREFIX);
+                    }});
                     break;
                 default:
-                    Interceptors::set_open(FailOnce<0> {DB_WAL_PREFIX});
+                    storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::OPEN, [] {
+                        return Status::system_error(std::string {"OPEN "} + DB_WAL_PREFIX);
+                    }});
             }
             continue;
         }
@@ -107,9 +119,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     }
                     added.emplace(key, value);
                 } else {
-                    reopen_db();
-                    added.clear();
-                    erased.clear();
+                    reopen_and_clear_pending();
                 }
                 break;
             case ERASE:
@@ -119,9 +129,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     }
                     erased.emplace(key);
                 } else if (!s.is_not_found()) {
-                    reopen_db();
-                    added.clear();
-                    erased.clear();
+                    reopen_and_clear_pending();
                 }
                 break;
             case COMMIT:
@@ -133,7 +141,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     added.clear();
                     erased.clear();
                 } else {
-                    reopen_db();
+                    reopen_and_clear_pending();
                 }
                 break;
             case ABORT:
@@ -141,15 +149,15 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     added.clear();
                     erased.clear();
                 } else {
-                    reopen_db();
+                    reopen_and_clear_pending();
                 }
                 break;
             default: // REOPEN
-                reopen_db();
+                reopen_and_clear_pending();
         }
-        assert_ok(db->status());
+        expect_ok(db->status());
     }
-    reopen_db();
+    reopen_and_clear_pending();
 
     // Ensure that the database and the std::map have identical contents.
     assert(map.size() == std::stoi(db->get_property("calico.count.records")));
@@ -160,9 +168,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         assert(cursor->key() == key);
         assert(cursor->value() == value);
     }
-    assert(not cursor->is_valid());
+    Tools::expect_non_error(cursor->status());
     delete cursor;
     delete db;
+    delete options.storage;
     return 0;
 }
 

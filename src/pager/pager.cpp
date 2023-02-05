@@ -31,11 +31,10 @@ auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
         return tl::make_unexpected(framer.error());
     }
 
-    auto ptr = Pager::Ptr {new (std::nothrow) Pager {param, std::move(*framer)}};
-    if (ptr == nullptr) {
-        return tl::make_unexpected(system_error("could not allocate pager object: out of memory"));
+    if (auto ptr = Pager::Ptr {new (std::nothrow) Pager {param, std::move(*framer)}}) {
+        return ptr;
     }
-    return ptr;
+    return tl::make_unexpected(system_error("could not allocate pager object: out of memory"));
 }
 
 Pager::Pager(const Parameters &param, Framer framer)
@@ -54,6 +53,11 @@ Pager::Pager(const Parameters &param, Framer framer)
     CALICO_EXPECT_NE(m_status, nullptr);
     CALICO_EXPECT_NE(m_scratch, nullptr);
     CALICO_EXPECT_NE(m_wal, nullptr);
+}
+
+auto Pager::bytes_written() const -> Size
+{
+    return m_framer.bytes_written();
 }
 
 auto Pager::page_count() const -> Size

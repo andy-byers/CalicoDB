@@ -2,6 +2,7 @@
 #define CALICO_FUZZ_FUZZER_H
 
 #include <calico/calico.h>
+#include "tools.h"
 
 namespace Calico {
 
@@ -18,22 +19,6 @@ static constexpr Options DB_OPTIONS {
     {},
     nullptr,
 };
-
-static auto assert_ok(const Status &s)
-{
-    if (!s.is_ok()) {
-        std::fprintf(stderr, "error: %s\n", s.what().data());
-        std::abort();
-    }
-}
-
-static auto assert_non_error(const Status &s)
-{
-    if (!s.is_ok() && !s.is_not_found()) {
-        std::fprintf(stderr, "error: %s\n", s.what().data());
-        std::abort();
-    }
-}
 
 static auto extract_payload(const std::uint8_t *&data, Size &size, Size max_size)
 {

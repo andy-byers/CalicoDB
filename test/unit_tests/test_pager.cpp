@@ -1,10 +1,8 @@
 
-#include "fakes.h"
 #include "pager/cache.h"
 #include "pager/framer.h"
 #include "pager/page.h"
 #include "pager/pager.h"
-#include "tools.h"
 #include "tree/header.h"
 #include "tree/node.h"
 #include "unit_tests.h"
@@ -23,7 +21,7 @@ public:
     static constexpr Size PAGE_SIZE {0x200};
 
     [[nodiscard]]
-    auto build_deltas(const ChangeBuffer &unordered)
+    auto build_deltas(const ChangeBuffer &unordered) const
     {
         ChangeBuffer deltas;
         for (const auto &delta: unordered)
@@ -33,15 +31,15 @@ public:
     }
 
     [[nodiscard]]
-    auto insert_random_delta(ChangeBuffer &deltas)
+    auto insert_random_delta(ChangeBuffer &deltas) const
     {
         static constexpr Size MIN_DELTA_SIZE {1};
-        const auto offset = random.get(PAGE_SIZE - MIN_DELTA_SIZE);
-        const auto size = random.get(PAGE_SIZE - offset);
+        const auto offset = random.GenerateInteger<Size>(PAGE_SIZE - MIN_DELTA_SIZE);
+        const auto size = random.GenerateInteger<Size>(PAGE_SIZE - offset);
         insert_delta(deltas, {offset, size});
     }
 
-    Random random {UnitTests::random_seed};
+    Tools::RandomGenerator random;
 };
 
 TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
@@ -134,8 +132,8 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     static constexpr Size MAX_DELTA_SIZE {10};
     ChangeBuffer deltas;
     for (Size i {}; i < NUM_INSERTS; ++i) {
-        const auto offset = random.get(PAGE_SIZE - MAX_DELTA_SIZE);
-        const auto size = random.get(1, MAX_DELTA_SIZE);
+        const auto offset = random.GenerateInteger<Size>(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto size = random.GenerateInteger<Size>(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);
@@ -542,16 +540,14 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     ASSERT_FALSE(registry.evict(callback));
 }
 
-class FramerTests : public testing::Test {
+class FramerTests : public InMemoryTest {
 public:
     explicit FramerTests()
-        : home {std::make_unique<HeapStorage>()},
-          framer {*Framer::open("data", home.get(), 0x100, 8)}
+        : framer {*Framer::open("test/data", storage.get(), 0x100, 8)}
     {}
 
     ~FramerTests() override = default;
 
-    std::unique_ptr<HeapStorage> home;
     Framer framer;
 };
 
@@ -598,9 +594,9 @@ auto read_from_page(const Page &page, Size size) -> std::string
     return message;
 }
 
-class PagerTests : public TestOnHeap {
+class PagerTests : public InMemoryTest {
 public:
-    static constexpr Size frame_count {8};//TODO 32};
+    static constexpr Size frame_count {8};
     static constexpr Size page_size {0x100};
     std::string test_message {"Hello, world!"};
 

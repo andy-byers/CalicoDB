@@ -17,12 +17,12 @@ enum OperationType {
     TYPE_COUNT
 };
 
-static constexpr auto DB_PATH = "/tmp/_db_fuzzer";
+constexpr auto DB_PATH = "/tmp/_db_fuzzer";
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     Database *db;
-    assert_ok(Database::open(DB_PATH, DB_OPTIONS, &db));
+    Tools::expect_ok(Database::open(DB_PATH, DB_OPTIONS, &db));
 
     while (size > 1) {
         const auto record_count = std::stoi(db->get_property("calico.count.records"));
@@ -35,14 +35,14 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 
         switch (operation_type) {
             case GET:
-                assert_non_error(db->get(extract_key(data, size), value));
+                Tools::expect_non_error(db->get(extract_key(data, size), value));
                 break;
             case PUT:
                 key = extract_key(data, size).to_string();
-                assert_ok(db->put(key, extract_value(data, size)));
+                Tools::expect_ok(db->put(key, extract_value(data, size)));
                 break;
             case ERASE:
-                assert_non_error(db->erase(extract_key(data, size)));
+                Tools::expect_non_error(db->erase(extract_key(data, size)));
                 break;
             case SEEK_ITER:
                 key = extract_key(data, size).to_string();
@@ -79,19 +79,19 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 delete cursor;
                 break;
             case COMMIT:
-                assert_ok(db->commit());
+                Tools::expect_ok(db->commit());
                 break;
             case ABORT:
-                assert_ok(db->abort());
+                Tools::expect_ok(db->abort());
                 break;
             default: // REOPEN
                 delete db;
-                assert_ok(Database::open(DB_PATH, DB_OPTIONS, &db));
+                Tools::expect_ok(Database::open(DB_PATH, DB_OPTIONS, &db));
         }
-        assert_ok(db->status());
+        Tools::expect_ok(db->status());
     }
     delete db;
-    assert_ok(Database::destroy(DB_PATH, DB_OPTIONS));
+    Tools::expect_ok(Database::destroy(DB_PATH, DB_OPTIONS));
     return 0;
 }
 
