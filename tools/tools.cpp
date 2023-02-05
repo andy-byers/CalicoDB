@@ -50,7 +50,7 @@ auto RandomMemoryReader::read(Byte *out, Size &size, Size offset) -> Status
 {
     {
         std::lock_guard lock {m_parent->m_mutex};
-        Try_Intercept_From(*m_parent, Interceptor::WRITE, m_path);
+        Try_Intercept_From(*m_parent, Interceptor::READ, m_path);
     }
     return m_parent->read_file_at(*m_mem, out, size, offset);
 }
@@ -160,9 +160,12 @@ auto DynamicMemory::remove_file(const std::string &path) -> Status
 
     auto itr = m_memory.find(path);
     if (itr == end(m_memory)) {
-        return system_error("cannot remove file");
+        return not_found("cannot remove file");
     }
-    m_memory.erase(itr);
+    // Don't actually get rid of any memory. We should be able to unlink a file and still access it
+    // through open file descriptors, so if any readers or writers have this file open, they should
+    // still be able to use it.
+    itr->second.created = false;
     return ok();
 }
 

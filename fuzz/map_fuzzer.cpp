@@ -3,6 +3,8 @@
 #include <set>
 #include <calico/calico.h>
 
+#define NO_FAILURES
+
 namespace {
 
 using namespace Calico;
@@ -40,6 +42,19 @@ auto storage_base(Storage *storage) -> DynamicMemory &
     return reinterpret_cast<DynamicMemory &>(*storage);
 }
 
+auto translate_op(std::uint8_t code) -> OperationType
+{
+    auto type = static_cast<OperationType>(code % OperationType::TYPE_COUNT);
+
+#ifdef NO_FAILURES
+    if (type == FAIL) {
+        type = REOPEN;
+    }
+#endif // NO_FAILURES
+
+    return type;
+}
+
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     auto options = DB_OPTIONS;
@@ -65,7 +80,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
     };
 
     while (size > 1) {
-        const auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
+        const auto operation_type = translate_op(*data++);
         size--;
 
         if (operation_type == FAIL) {
@@ -98,7 +113,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                         return Status::system_error(std::string {"UNLINK "} + DB_WAL_PREFIX);
                     }});
                     break;
-                default:
+                default: // WAL_OPEN
                     storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::OPEN, [] {
                         return Status::system_error(std::string {"OPEN "} + DB_WAL_PREFIX);
                     }});
@@ -160,7 +175,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
     reopen_and_clear_pending();
 
     // Ensure that the database and the std::map have identical contents.
-    assert(map.size() == std::stoi(db->get_property("calico.count.records")));
+    const auto record_count = db->get_property("calico.count.records");
+    assert(not record_count.empty());
+    assert(map.size() == std::stoi(record_count));
     auto *cursor = db->new_cursor();
     cursor->seek_first();
     for (const auto &[key, value]: map) {
@@ -169,6 +186,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         assert(cursor->value() == value);
     }
     Tools::expect_non_error(cursor->status());
+
     delete cursor;
     delete db;
     delete options.storage;

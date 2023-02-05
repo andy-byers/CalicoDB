@@ -12,10 +12,6 @@
 
 namespace Calico {
 
-namespace UnitTests {
-    extern std::uint32_t random_seed;
-} // namespace internal
-
 class DeltaCompressionTest: public testing::Test {
 public:
     static constexpr Size PAGE_SIZE {0x200};
@@ -34,8 +30,8 @@ public:
     auto insert_random_delta(ChangeBuffer &deltas) const
     {
         static constexpr Size MIN_DELTA_SIZE {1};
-        const auto offset = random.GenerateInteger<Size>(PAGE_SIZE - MIN_DELTA_SIZE);
-        const auto size = random.GenerateInteger<Size>(PAGE_SIZE - offset);
+        const auto offset = random.Next<Size>(PAGE_SIZE - MIN_DELTA_SIZE);
+        const auto size = random.Next<Size>(PAGE_SIZE - offset);
         insert_delta(deltas, {offset, size});
     }
 
@@ -132,8 +128,8 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     static constexpr Size MAX_DELTA_SIZE {10};
     ChangeBuffer deltas;
     for (Size i {}; i < NUM_INSERTS; ++i) {
-        const auto offset = random.GenerateInteger<Size>(PAGE_SIZE - MAX_DELTA_SIZE);
-        const auto size = random.GenerateInteger<Size>(1, MAX_DELTA_SIZE);
+        const auto offset = random.Next<Size>(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto size = random.Next<Size>(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);

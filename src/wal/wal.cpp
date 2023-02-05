@@ -277,7 +277,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
     }
 
     auto s = ok();
-    for (Size i {}; s.is_ok(); i++) {
+    for (auto first = true; s.is_ok(); first = false) {
         Lsn first_lsn;
         s = reader->read_first_lsn(first_lsn);
 
@@ -296,15 +296,20 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
             s = corruption(s.what().data());
         }
 
-        // Most-recent segment can have an incomplete record at the end.
-        if (s.is_corruption() && i == 0) {
+        // Most-recent segment can be empty or corrupted.
+        if (s.is_corruption() && first) {
             s = ok();
         }
         Calico_Try_S(s);
 
         s = reader->seek_previous();
     }
-    return s.is_not_found() ? ok() : s;
+    // Indicates that we have hit the beginning of the WAL.
+    if (s.is_not_found()) {
+        s = corruption("{}", s.what().data());
+    }
+
+    return s;
 }
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void

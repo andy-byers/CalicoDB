@@ -15,6 +15,12 @@
 
 namespace Calico {
 
+#define Clear_Interceptors() \
+    do { \
+        dynamic_cast<Tools::DynamicMemory &>(*storage).clear_interceptors(); \
+    } while (0)
+
+
 #define Quick_Interceptor(prefix__, type__) \
     do { \
         dynamic_cast<Tools::DynamicMemory &>(*storage) \

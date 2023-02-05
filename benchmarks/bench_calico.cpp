@@ -90,7 +90,7 @@ auto BM_Overwrite(benchmark::State& state)
 {
     Database *db;
     setup(&db);
-    run_batches(*db, state, [](auto) {return std::to_string(rng.GenerateInteger<Size>(DB_INITIAL_SIZE));}, do_write);
+    run_batches(*db, state, [](auto) {return std::to_string(rng.Next<Size>(DB_INITIAL_SIZE));}, do_write);
     delete db;
 }
 BENCHMARK(BM_Overwrite);

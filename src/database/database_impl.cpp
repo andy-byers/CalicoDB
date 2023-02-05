@@ -336,6 +336,12 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 {
     Calico_Try_S(status());
     Calico_Try_S(check_key(key, "insert"));
+
+    // Value is greater than 4 GiB in length.
+    if (value.size() > std::numeric_limits<ValueSize>::max()) {
+        return invalid_argument("cannot insert record: value is too long");
+    }
+
     bytes_written += key.size() + value.size();
     if (const auto inserted = tree->insert(key, value)) {
         record_count += *inserted;

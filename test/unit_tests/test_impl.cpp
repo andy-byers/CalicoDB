@@ -1,10 +1,8 @@
 
 #include "database/database_impl.h"
-#include "storage/posix_storage.h"
 #include "tools.h"
 #include "tree/cursor_internal.h"
 #include "tree/header.h"
-#include "tree/tree.h"
 #include "unit_tests.h"
 #include "wal/wal.h"
 #include <array>
@@ -300,7 +298,7 @@ static auto add_records(TestDatabase &test, Size n, Size max_value_size, const s
     std::vector<Record> records(n);
 
     for (Size i {}; i < n; ++i) {
-        const auto value_size = test.random.GenerateInteger<Size>(max_value_size);
+        const auto value_size = test.random.Next<Size>(max_value_size);
         records[i].key = prefix + Tools::integral_key(i);
         records[i].value = test.random.Generate(value_size).to_string();
         EXPECT_OK(test.impl->put(records[i].key, records[i].value));

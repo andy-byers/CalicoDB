@@ -24,7 +24,7 @@ RUN mkdir build && \
     export CC=/usr/bin/clang \
     export CXX=/usr/bin/clang++ && \
     cmake -DCMAKE_CXX_FLAGS="-fsanitize=fuzzer,address,undefined" \
-          -DCMAKE_BUILD_TYPE=RelWithAssertions \
+          -DCMAKE_BUILD_TYPE=Debug \
           -DCALICO_BUILD_BENCHMARKS=Off \
           -DCALICO_BUILD_EXAMPLES=Off \
           -DCALICO_BUILD_FUZZERS=On \

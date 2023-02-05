@@ -184,7 +184,7 @@ public:
 
     // Not in LevelDB.
     template<class T>
-    auto GenerateInteger(T t_max) const -> T
+    auto Next(T t_max) const -> T
     {
         std::uniform_int_distribution<T> dist {std::numeric_limits<T>::min(), t_max};
         return dist(m_rng);
@@ -192,7 +192,7 @@ public:
 
     // Not in LevelDB.
     template<class T>
-    auto GenerateInteger(T t_min, T t_max) const -> T
+    auto Next(T t_min, T t_max) const -> T
     {
         std::uniform_int_distribution<T> dist {t_min, t_max};
         return dist(m_rng);

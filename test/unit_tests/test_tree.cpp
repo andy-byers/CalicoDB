@@ -436,7 +436,7 @@ TEST_P(ExternalNodeTests, SanityCheck)
         std::exchange(node.overflow, std::nullopt);
 
         while (node.header.cell_count) {
-            erase_cell(node, random.GenerateInteger<Size>(node.header.cell_count - 1));
+            erase_cell(node, random.Next<Size>(node.header.cell_count - 1));
             node.TEST_validate();
         }
     }
@@ -871,13 +871,13 @@ TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnMiddlePosition)
 
 static auto random_key(BPlusTreeTests &test)
 {
-    const auto key_size = test.random.GenerateInteger<Size>(1, 10);
+    const auto key_size = test.random.Next<Size>(1, 10);
     return test.random.Generate(key_size);
 }
 
 static auto random_value(BPlusTreeTests &test)
 {
-    const auto val_size = test.random.GenerateInteger<Size>(test.param.page_size / 2);
+    const auto val_size = test.random.Next<Size>(test.param.page_size / 2);
     return test.random.Generate(val_size);
 }
 
@@ -1085,14 +1085,14 @@ TEST_P(CursorTests, SanityCheck_Forward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (Size iteration {}; iteration < 100; ++iteration) {
-        const auto i = random.GenerateInteger<Size>(RECORD_COUNT);
+        const auto i = random.Next<Size>(RECORD_COUNT);
         const auto key = Tools::integral_key(i);
         cursor->seek(key);
 
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_EQ(cursor->key(), key);
 
-        for (Size n {}; n < random.GenerateInteger<Size>(10); ++n) {
+        for (Size n {}; n < random.Next<Size>(10); ++n) {
             cursor->next();
 
             if (const auto j = i + n + 1; j < RECORD_COUNT) {
@@ -1109,14 +1109,14 @@ TEST_P(CursorTests, SanityCheck_Backward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (Size iteration {}; iteration < 100; ++iteration) {
-        const auto i = random.GenerateInteger<Size>(RECORD_COUNT);
+        const auto i = random.Next<Size>(RECORD_COUNT);
         const auto key = Tools::integral_key(i);
         cursor->seek(key);
 
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_EQ(cursor->key(), key);
 
-        for (Size n {}; n < random.GenerateInteger<Size>(10); ++n) {
+        for (Size n {}; n < random.Next<Size>(10); ++n) {
             cursor->previous();
 
             if (i > n) {
