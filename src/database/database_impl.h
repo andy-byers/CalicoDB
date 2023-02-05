@@ -1,5 +1,5 @@
-#ifndef CALICO_CORE_DATABASE_IMPL_H
-#define CALICO_CORE_DATABASE_IMPL_H
+#ifndef CALICO_DATABASE_IMPL_H
+#define CALICO_DATABASE_IMPL_H
 
 #include "calico/database.h"
 
@@ -83,4 +83,4 @@ auto setup(const std::string &, Storage &, const Options &) -> tl::expected<Init
 
 } // namespace Calico
 
-#endif // CALICO_CORE_DATABASE_IMPL_H
+#endif // CALICO_DATABASE_IMPL_H

@@ -86,12 +86,6 @@ public:
         return range(offset, m_size - offset);
     }
 
-    [[nodiscard]]
-    constexpr auto copy() const noexcept -> Slice
-    {
-        return *this;
-    }
-
     constexpr auto clear() noexcept -> void
     {
         m_data = nullptr;

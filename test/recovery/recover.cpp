@@ -1,8 +1,9 @@
 #include <filesystem>
 #include <fstream>
-#include <sstream>
+#include <iostream>
 #include "spdlog/fmt/fmt.h"
 #include "calico/calico.h"
+#include "utils/utils.h"
 #include "tools.h"
 
 #ifdef NDEBUG
@@ -43,11 +44,12 @@ auto main(int argc, const char *argv[]) -> int
         std::string line;
         std::ifstream ifs {value_path};
         CALICO_EXPECT_TRUE(ifs.is_open());
-        while (std::getline(ifs, line))
+        while (std::getline(ifs, line)) {
             values.emplace_back(line);
+        }
     }
     Database *db;
-    expect_ok(Database::open(path.string(), {}, &db));
+    CALICO_EXPECT_TRUE(Database::open(path.string(), {}, &db).is_ok());
     auto record_count = std::stoi(db->get_property("calico.count.records"));
 
     // The database should contain exactly `num_committed` records.
@@ -56,12 +58,12 @@ auto main(int argc, const char *argv[]) -> int
     Size key_counter {};
     auto *cursor = db->new_cursor();
     for (const auto &value: values) {
-        const auto key = make_key<KEY_WIDTH>(key_counter++);
+        const auto key = Tools::integral_key<KEY_WIDTH>(key_counter++);
         cursor->seek(key);
         CALICO_EXPECT_TRUE(cursor->is_valid());
         CALICO_EXPECT_EQ(cursor->key().to_string(), key);
         CALICO_EXPECT_EQ(cursor->value(), value);
-        expect_ok(db->erase(key));
+        CALICO_EXPECT_TRUE(db->erase(key).is_ok());
     }
     CALICO_EXPECT_TRUE(db->commit().is_ok());
     delete cursor;
@@ -70,6 +72,6 @@ auto main(int argc, const char *argv[]) -> int
     record_count = std::stoi(db->get_property("calico.count.records"));
     CALICO_EXPECT_EQ(key_counter, num_committed);
     CALICO_EXPECT_EQ(record_count, 0);
-    expect_ok(Database::destroy(path.string(), {}));
+    CALICO_EXPECT_TRUE(Database::destroy(path.string(), {}).is_ok());
     return 0;
 }

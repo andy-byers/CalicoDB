@@ -9,4 +9,4 @@ FetchContent_Declare(benchmark
 FetchContent_MakeAvailable(benchmark)
 
 add_executable(bench_calico bench_calico.cpp)
-target_link_libraries(bench_calico PRIVATE calico benchmark)
+target_link_libraries(bench_calico PRIVATE calico_tools benchmark)

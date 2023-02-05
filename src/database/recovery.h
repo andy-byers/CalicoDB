@@ -1,5 +1,5 @@
-#ifndef CALICO_CORE_TRANSACTION_LOG_H
-#define CALICO_CORE_TRANSACTION_LOG_H
+#ifndef CALICO_DATABASE_RECOVERY_H
+#define CALICO_DATABASE_RECOVERY_H
 
 #include "wal/wal.h"
 #include <optional>
@@ -37,5 +37,5 @@ private:
 
 } // namespace Calico
 
-#endif // CALICO_CORE_TRANSACTION_LOG_H
+#endif // CALICO_DATABASE_RECOVERY_H
 

@@ -1,9 +1,9 @@
 #ifndef CALICO_UTILS_WORKER_H
 #define CALICO_UTILS_WORKER_H
 
-#include "utils/queue.h"
 #include <optional>
 #include <thread>
+#include "utils/queue.h"
 
 namespace Calico {
 

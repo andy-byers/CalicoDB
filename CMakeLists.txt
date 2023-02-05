@@ -35,6 +35,11 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     option(CALICO_BUILD_EXAMPLES "Build the examples" On)
     option(CALICO_BUILD_FUZZERS "Build the fuzzers" Off)
     option(CALICO_BUILD_TESTS "Build the tests" On)
+    option(CALICO_BUILD_TOOLS "Build the tools" On)
+
+    if(CALICO_BUILD_TOOLS OR CALICO_BUILD_BENCHMARKS OR CALICO_BUILD_FUZZERS OR CALICO_BUILD_TESTS)
+        add_subdirectory(tools)
+    endif()
 
     if(CALICO_BUILD_BENCHMARKS)
         add_subdirectory(benchmarks)

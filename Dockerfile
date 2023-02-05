@@ -17,6 +17,7 @@ ADD ./fuzz ./fuzz
 ADD ./include ./include
 ADD ./src ./src
 ADD ./test ./test
+ADD ./tools ./tools
 
 RUN mkdir build && \
     cd build && \
@@ -27,5 +28,5 @@ RUN mkdir build && \
           -DCALICO_BUILD_BENCHMARKS=Off \
           -DCALICO_BUILD_EXAMPLES=Off \
           -DCALICO_BUILD_FUZZERS=On \
-          -DCALICO_BUILD_TESTS=On .. && \
+          -DCALICO_BUILD_TESTS=Off .. && \
     cmake --build . \

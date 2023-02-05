@@ -4,7 +4,6 @@
 #include <gtest/gtest.h>
 
 #include "calico/slice.h"
-#include "random.h"
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/crc.h"
@@ -23,10 +22,10 @@ TEST(TestUtils, ExpectationDeathTest)
 
 TEST(TestUtils, EncodingIsConsistent)
 {
-    Random random {42};
-    const auto u16 = random.get<std::uint16_t>();
-    const auto u32 = random.get<std::uint32_t>();
-    const auto u64 = random.get<std::uint64_t>();
+    Tools::RandomGenerator random;
+    const auto u16 = random.GenerateInteger<std::uint16_t>(std::uint16_t(-1));
+    const auto u32 = random.GenerateInteger<std::uint32_t>(std::uint32_t(-1));
+    const auto u64 = random.GenerateInteger<std::uint64_t>(std::uint64_t(-1));
     std::string buffer(sizeof(u16) + sizeof(u32) + sizeof(u64) + 1, '\x00');
 
     auto dst = buffer.data();
@@ -803,6 +802,30 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
 
     ASSERT_EQ(describe_size(1'000ULL, 1), "1000 B");
     ASSERT_EQ(describe_size(10'000ULL, 3), "9.77 KiB");
+}
+
+class InterceptorTests : public InMemoryTest {
+
+};
+
+TEST_F(InterceptorTests, RespectsPrefix)
+{
+    Quick_Interceptor("test/data", Tools::Interceptor::OPEN);
+
+    RandomEditor *editor;
+    assert_special_error(storage_handle().open_random_editor("test/data", &editor));
+    expect_ok(storage_handle().open_random_editor("test/wal", &editor));
+    delete editor;
+}
+
+TEST_F(InterceptorTests, RespectsSyscallType)
+{
+    Quick_Interceptor("test/data", Tools::Interceptor::WRITE);
+
+    RandomEditor *editor;
+    expect_ok(storage_handle().open_random_editor("test/data", &editor));
+    assert_special_error(editor->write({}, 0));
+    delete editor;
 }
 
 } // namespace Calico

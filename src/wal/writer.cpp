@@ -78,7 +78,7 @@ auto LogWriter::flush() -> Status
     return s;
 }
 
-#define MAYBE_ERROR(expr) \
+#define Maybe_Set_Error(expr) \
     do { \
         if (auto calico_s = (expr); !calico_s.is_ok()) { \
             m_error->set(std::move(calico_s)); \
@@ -102,15 +102,15 @@ WalWriter::WalWriter(const Parameters &param)
 
     // First segment file gets created now, but is not registered in the WAL set until the writer
     // is finished with it.
-    MAYBE_ERROR(open_segment({m_set->last().value + 1}));
+    Maybe_Set_Error(open_segment({m_set->last().value + 1}));
 }
 
 auto WalWriter::write(WalPayloadIn payload) -> void
 {
     if (m_writer.has_value()) {
-        MAYBE_ERROR(m_writer->write(payload));
+        Maybe_Set_Error(m_writer->write(payload));
         if (m_writer->block_count() >= m_wal_limit) {
-            MAYBE_ERROR(advance_segment());
+            Maybe_Set_Error(advance_segment());
         }
     }
 }
@@ -118,7 +118,7 @@ auto WalWriter::write(WalPayloadIn payload) -> void
 auto WalWriter::flush() -> void
 {
     if (m_writer.has_value()) {
-        MAYBE_ERROR(m_writer->flush());
+        Maybe_Set_Error(m_writer->flush());
     }
 }
 
@@ -126,13 +126,13 @@ auto WalWriter::advance() -> void
 {
     if (m_writer.has_value()) {
         // NOTE: advance() is a NOOP if the current WAL segment hasn't been written to.
-        MAYBE_ERROR(advance_segment());
+        Maybe_Set_Error(advance_segment());
     }
 }
 
 auto WalWriter::destroy() && -> void
 {
-    MAYBE_ERROR(close_segment());
+    Maybe_Set_Error(close_segment());
 }
 
 auto WalWriter::open_segment(Id id) -> Status
@@ -171,13 +171,10 @@ auto WalWriter::close_segment() -> Status
 
 auto WalWriter::advance_segment() -> Status
 {
-    auto s = close_segment();
-    if (s.is_ok()) {
-        return open_segment({m_set->last().value + 1});
-    }
-    return s;
+    Calico_Try_S(close_segment());
+    return open_segment({m_set->last().value + 1});
 }
 
-#undef MAYBE_ERROR
+#undef Maybe_Set_Error
 
 } // namespace Calico

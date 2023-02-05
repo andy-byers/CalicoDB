@@ -1,20 +1,13 @@
+#include "calico/storage.h"
+#include "tools.h"
+#include "unit_tests.h"
+#include "utils/types.h"
+#include "utils/utils.h"
 #include <filesystem>
 #include <fstream>
-#include <fcntl.h>
-#include <unistd.h>
 #include <gtest/gtest.h>
-#include "calico/storage.h"
-#include "random.h"
-#include "storage/posix_storage.h"
-#include "storage/posix_system.h"
-#include "fakes.h"
-#include "unit_tests.h"
 
 namespace Calico {
-
-namespace UnitTests {
-    extern std::uint32_t random_seed;
-} // namespace internal
 
 template<class Base, class Store>
 [[nodiscard]]
@@ -32,14 +25,14 @@ auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
-    EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
+    EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().data();
     return std::unique_ptr<Base> {temp};
 }
 
-auto write_whole_file(const std::string &path, const std::string &message) -> void
+auto write_whole_file(const std::string &path, const Slice &message) -> void
 {
     std::ofstream ofs {path, std::ios::trunc};
-    ofs << message;
+    ofs << message.to_string();
 }
 
 [[nodiscard]]
@@ -47,12 +40,15 @@ auto read_whole_file(const std::string &path) -> std::string
 {
     std::string message;
     std::ifstream ifs {path};
-    ifs >> message;
+    ifs.seekg(0, std::ios::end);
+    message.resize(ifs.tellg());
+    ifs.seekg(0, std::ios::beg);
+    ifs.read(message.data(), message.size());
     return message;
 }
 
 template<class Writer>
-constexpr auto write_out_randomly(Random &random, Writer &writer, const std::string &message) -> void
+constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer, const Slice &message) -> void
 {
     constexpr Size num_chunks {20};
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
@@ -60,10 +56,10 @@ constexpr auto write_out_randomly(Random &random, Writer &writer, const std::str
     Size counter {};
 
     while (!in.is_empty()) {
-        const auto chunk_size = std::min(in.size(), random.get(message.size() / num_chunks));
-        auto chunk = in.copy().truncate(chunk_size);
+        const auto chunk_size = std::min(in.size(), random.GenerateInteger<Size>(message.size() / num_chunks));
+        auto chunk = in.range(0, chunk_size);
 
-        if constexpr (std::is_same_v<AppendWriter, Writer>) {
+        if constexpr (std::is_base_of_v<AppendWriter, Writer>) {
             ASSERT_TRUE(writer.write(chunk).is_ok());
         } else {
             ASSERT_TRUE(writer.write(chunk, counter).is_ok());
@@ -76,7 +72,7 @@ constexpr auto write_out_randomly(Random &random, Writer &writer, const std::str
 
 template<class Reader>
 [[nodiscard]]
-auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::string
+auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, Size size) -> std::string
 {
     static constexpr Size num_chunks {20};
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
@@ -85,13 +81,14 @@ auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::strin
     Size counter {};
 
     while (!out.is_empty()) {
-        const auto chunk_size = std::min(out.size(), random.get(size / num_chunks));
-        auto chunk = out.copy().truncate(chunk_size);
+        const auto chunk_size = std::min(out.size(), random.GenerateInteger<Size>(size / num_chunks));
+        auto chunk = out.range(0, chunk_size);
         Size read_size = chunk.size();
         const auto s = reader.read(chunk.data(), read_size, counter);
 
-        if (read_size != chunk_size)
+        if (read_size != chunk_size) {
             return backing;
+        }
 
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().data();
         EXPECT_EQ(chunk.size(), chunk_size);
@@ -102,37 +99,24 @@ auto read_back_randomly(Random &random, Reader &reader, Size size) -> std::strin
     return backing;
 }
 
-constexpr auto HOME = "/tmp/calico_test_files";
-constexpr auto PATH = "/tmp/calico_test_files/name";
-
-class FileTests: public testing::Test {
+class FileTests: public OnDiskTest {
 public:
     FileTests()
-        : storage {std::make_unique<PosixStorage>()}
-    {
-        std::error_code ignore;
-        std::filesystem::remove_all(HOME, ignore);
+        : filename {PREFIX + std::string {"file"}}
+    {}
 
-        const auto s = storage->create_directory(HOME);
-        EXPECT_TRUE(s.is_ok());
-    }
+    ~FileTests() override = default;
 
-    ~FileTests() override
-    {
-        std::error_code ignore;
-        std::filesystem::remove_all(HOME, ignore);
-    }
-
-    std::unique_ptr<Storage> storage;
-    Random random {UnitTests::random_seed};
+    std::string filename;
+    Tools::RandomGenerator random;
 };
 
 class RandomFileReaderTests: public FileTests {
 public:
     RandomFileReaderTests()
     {
-        write_whole_file(PATH, "");
-        file = open_blob<RandomReader>(*storage, PATH);
+        write_whole_file(filename, "");
+        file = open_blob<RandomReader>(*storage, filename);
     }
 
     std::unique_ptr<RandomReader> file;
@@ -149,15 +133,15 @@ TEST_F(RandomFileReaderTests, NewFileIsEmpty)
 
 TEST_F(RandomFileReaderTests, ReadsBackContents)
 {
-    auto data = random.get<std::string>('a', 'z', 500);
-    write_whole_file(PATH, data);
+    auto data = random.Generate(500);
+    write_whole_file(filename, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
 class RandomFileEditorTests: public FileTests {
 public:
     RandomFileEditorTests()
-        : file {open_blob<RandomEditor>(*storage, PATH)}
+        : file {open_blob<RandomEditor>(*storage, filename)}
     {}
 
     std::unique_ptr<RandomEditor> file;
@@ -174,7 +158,7 @@ TEST_F(RandomFileEditorTests, NewFileIsEmpty)
 
 TEST_F(RandomFileEditorTests, WritesOutAndReadsBackData)
 {
-    auto data = random.get<std::string>('a', 'z', 500);
+    auto data = random.Generate(500);
     write_out_randomly(random, *file, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
@@ -182,7 +166,7 @@ TEST_F(RandomFileEditorTests, WritesOutAndReadsBackData)
 class AppendFileWriterTests: public FileTests {
 public:
     AppendFileWriterTests()
-        : file {open_blob<AppendWriter>(*storage, PATH)}
+        : file {open_blob<AppendWriter>(*storage, filename)}
     {}
 
     std::unique_ptr<AppendWriter> file;
@@ -190,111 +174,71 @@ public:
 
 TEST_F(AppendFileWriterTests, WritesOutData)
 {
-    auto data = random.get<std::string>('a', 'z', 500);
+    auto data = random.Generate(500);
     write_out_randomly<AppendWriter>(random, *file, data);
-    ASSERT_EQ(read_whole_file(PATH), data);
+    ASSERT_EQ(read_whole_file(filename), data.to_string());
 }
 
-class PosixStorageTests: public testing::Test {
+class PosixStorageTests: public OnDiskTest {
 public:
-    PosixStorageTests() = default;
+    PosixStorageTests()
+        : filename {PREFIX + std::string {"file"}}
+    {}
 
     ~PosixStorageTests() override = default;
 
-    PosixStorage storage;
-    Random random {UnitTests::random_seed};
+    std::string filename;
+    Tools::RandomGenerator random;
 };
 
-class HeapTests: public testing::Test {
+class DynamicStorageTests : public InMemoryTest {
 public:
-    HeapTests()
-        : storage {std::make_unique<HeapStorage>()}
-    {
-        const auto s = storage->create_directory(HOME);
-        EXPECT_TRUE(s.is_ok());
-    }
+    DynamicStorageTests()
+        : filename {PREFIX + std::string {"file"}}
+    {}
 
-    ~HeapTests() override = default;
+    ~DynamicStorageTests() override = default;
 
-    std::unique_ptr<Storage> storage;
-    Random random {UnitTests::random_seed};
+    std::string filename;
+    Tools::RandomGenerator random;
 };
 
-TEST_F(HeapTests, ReaderCannotCreateBlob)
+TEST_F(DynamicStorageTests, ReaderCannotCreateFile)
 {
-    RandomReader *temp {};
+    RandomReader *temp;
     const auto s = storage->open_random_reader("nonexistent", &temp);
-    ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what().to_string();
+    ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what().data();
 }
 
-TEST_F(HeapTests, ReadsAndWrites)
+TEST_F(DynamicStorageTests, ReadsAndWrites)
 {
-    auto ra_editor = open_blob<RandomEditor>(*storage, PATH);
-    auto ra_reader = open_blob<RandomReader>(*storage, PATH);
-    auto ap_writer = open_blob<AppendWriter>(*storage, PATH);
+    auto ra_editor = open_blob<RandomEditor>(*storage, filename);
+    auto ra_reader = open_blob<RandomReader>(*storage, filename);
+    auto ap_writer = open_blob<AppendWriter>(*storage, filename);
 
-    const auto first_input = random.get<std::string>('a', 'z', 500);
-    const auto second_input = random.get<std::string>('a', 'z', 500);
+    const auto first_input = random.Generate(500);
+    const auto second_input = random.Generate(500);
     write_out_randomly(random, *ra_editor, first_input);
     write_out_randomly(random, *ap_writer, second_input);
     const auto output_1 = read_back_randomly(random, *ra_reader, 1'000);
     const auto output_2 = read_back_randomly(random, *ra_editor, 1'000);
     ASSERT_EQ(output_1, output_2);
-    ASSERT_EQ(output_1, first_input + second_input);
+    ASSERT_EQ(output_1, first_input.to_string() + second_input.to_string());
 }
 
-TEST_F(HeapTests, ReaderStopsAtEOF)
+TEST_F(DynamicStorageTests, ReaderStopsAtEOF)
 {
-    auto ra_editor = open_blob<RandomEditor>(*storage, PATH);
-    auto ra_reader = open_blob<RandomReader>(*storage, PATH);
+    auto ra_editor = open_blob<RandomEditor>(*storage, filename);
+    auto ra_reader = open_blob<RandomReader>(*storage, filename);
 
-    const auto data = random.get<std::string>('a', 'z', 500);
+    const auto data = random.Generate(500);
     write_out_randomly(random, *ra_editor, data);
 
     std::string buffer(data.size() * 2, '\x00');
     Span bytes {buffer};
     auto read_size = bytes.size();
     ASSERT_OK(ra_reader->read(bytes.data(), read_size, 0));
-    ASSERT_EQ(bytes.truncate(read_size).to_string(), data);
-}
-
-TEST(SystemTests, SystemErrorBehavior)
-{
-    errno = ENOENT;
-    ASSERT_TRUE(Posix::error().is_system_error());
-    ASSERT_EQ(errno, 0);
-
-    ASSERT_TRUE(Posix::error(std::errc::no_such_file_or_directory).is_system_error());
-}
-
-TEST(SystemTests, ClosedFileErrors)
-{
-    char backing[1];
-    Span bytes {backing, sizeof(backing)};
-    auto read_size = bytes.size();
-    ASSERT_TRUE(Posix::file_read(-1, bytes.data(), read_size).error().is_system_error());
-    ASSERT_TRUE(Posix::file_write(-1, bytes).error().is_system_error());
-    ASSERT_TRUE(Posix::file_seek(-1, 0, SEEK_CUR).error().is_system_error());
-    ASSERT_TRUE(Posix::file_close(-1).is_system_error());
-    ASSERT_TRUE(Posix::file_sync(-1).is_system_error());
-}
-
-TEST(SystemTests, NonexistentResourceErrors)
-{
-    ASSERT_TRUE(Posix::file_size("__does_not_exist__").error().is_system_error());
-    ASSERT_TRUE(Posix::file_remove("__does_not_exist__").is_system_error());
-    ASSERT_TRUE(Posix::file_resize("__does_not_exist__", 0).is_system_error());
-    ASSERT_TRUE(Posix::dir_remove("__does_not_exist__").is_system_error());
-}
-
-TEST(SystemTests, OpenAndClose)
-{
-    static constexpr auto PATH = "/tmp/__calico_system_tests";
-    auto fd = Posix::file_open(PATH, O_CREAT | O_RDWR, 0666).value();
-    ASSERT_OK(Posix::file_close(fd));
-    ASSERT_OK(Posix::file_exists(PATH));
-    ASSERT_OK(Posix::file_remove(PATH));
-    ASSERT_TRUE(Posix::file_exists(PATH).is_not_found());
+    ASSERT_EQ(bytes.truncate(read_size), data);
 }
 
 } // namespace Calico

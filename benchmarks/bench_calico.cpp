@@ -6,10 +6,11 @@
 
 namespace {
 
-const Calico::RandomGenerator rng;
+using namespace Calico;
 
 constexpr auto DB_PATH = "__bench_calico__";
-using namespace Calico;
+
+const Calico::Tools::RandomGenerator rng { 4 * 1'024 * 1'024};
 
 // 3 MiB of page cache + write buffer memory.
 constexpr Options DB_OPTIONS {
@@ -71,7 +72,7 @@ auto BM_SequentialWrites(benchmark::State &state)
 {
     Database *db;
     setup(&db);
-    run_batches(*db, state, [](auto i) {return make_key<DB_KEY_SIZE>(i);}, do_write);
+    run_batches(*db, state, [](auto i) {return Tools::integral_key<DB_KEY_SIZE>(i);}, do_write);
     delete db;
 }
 BENCHMARK(BM_SequentialWrites);
@@ -89,7 +90,7 @@ auto BM_Overwrite(benchmark::State& state)
 {
     Database *db;
     setup(&db);
-    run_batches(*db, state, [](auto) {return std::to_string(rand() % 50);}, do_write);
+    run_batches(*db, state, [](auto) {return std::to_string(rng.GenerateInteger<Size>(DB_INITIAL_SIZE));}, do_write);
     delete db;
 }
 BENCHMARK(BM_Overwrite);
@@ -97,7 +98,7 @@ BENCHMARK(BM_Overwrite);
 auto insert_records(Database &db, Size n)
 {
     for (Size i {}; i < n; ++i) {
-        const auto key = make_key<DB_KEY_SIZE>(i);
+        const auto key = Tools::integral_key<DB_KEY_SIZE>(i);
         do_write(db, key);
     }
     benchmark::DoNotOptimize(db.commit());
@@ -132,7 +133,7 @@ auto BM_RandomReads(benchmark::State& state)
     insert_records(*db, DB_INITIAL_SIZE);
     for (auto _ : state) {
         state.PauseTiming();
-        const auto key = make_key<DB_KEY_SIZE>(rand() % DB_INITIAL_SIZE);
+        const auto key = Tools::integral_key<DB_KEY_SIZE>(rand() % DB_INITIAL_SIZE);
         state.ResumeTiming();
         do_read(*db, key);
     }
@@ -152,7 +153,7 @@ auto run_reads_and_writes(benchmark::State& state, int batch_size, int read_frac
 
     for (auto _ : state) {
         state.PauseTiming();
-        const auto key = make_key<DB_KEY_SIZE>(is_sequential ? i : rand());
+        const auto key = Tools::integral_key<DB_KEY_SIZE>(is_sequential ? i : rand());
         const auto action = rand() % 100 < read_fraction ? Action::READ : Action::WRITE;
         const auto is_interval = ++i % batch_size == 0;
         state.ResumeTiming();
@@ -210,7 +211,7 @@ auto ensure_records(Database &db, Size)
 {
     if (const auto count = db.get_property("calico.count.records"); std::stoi(count) < DB_INITIAL_SIZE / 2) {
         for (Size i {}; i < DB_INITIAL_SIZE; ++i) {
-            const auto key = make_key<DB_KEY_SIZE>(rand());
+            const auto key = Tools::integral_key<DB_KEY_SIZE>(rand());
             do_write(db, key);
         }
     }
