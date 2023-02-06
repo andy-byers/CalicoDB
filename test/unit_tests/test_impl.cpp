@@ -366,7 +366,10 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
     }
     // Create a new database from the cloned data. This database will need to roll the WAL forward to become
     // consistent.
-    ASSERT_EQ(snapshot, TestDatabase {*clone}.snapshot());
+    TestDatabase clone_db {*clone};
+    ASSERT_OK(clone_db.impl->status());
+    auto s = clone_db.snapshot();
+    ASSERT_EQ(snapshot, s);
 }
 
 TEST_F(DbRecoveryTests, RecoversNthBatch)
@@ -566,7 +569,6 @@ INSTANTIATE_TEST_SUITE_P(
         ErrorWrapper {ErrorTarget::WAL_WRITE, 10},
         ErrorWrapper {ErrorTarget::WAL_WRITE, 100}));
 
-
 class ExtendedCursor : public Cursor {
     friend class ExtendedDatabase;
 
@@ -738,6 +740,138 @@ TEST(ExtensionTests, Extensions)
 
     ASSERT_OK(db->commit());
     delete db;
+}
+
+class ApiTests: public InMemoryTest {
+protected:
+    ApiTests()
+    {
+        options.storage = storage.get();
+    }
+
+    ~ApiTests() override
+    {
+        delete db;
+    }
+
+    auto SetUp() -> void override
+    {
+        ASSERT_OK(Calico::Database::open(ROOT, options, &db));
+    }
+
+    Options options;
+    Database *db;
+};
+
+TEST_F(ApiTests, IsConstCorrect)
+{
+    ASSERT_OK(db->put("key", "value"));
+
+    std::string value;
+    const auto *const_db = db;
+    ASSERT_OK(const_db->get("key", value));
+    ASSERT_EQ(const_db->get_property("calico.count.records"), "1");
+    ASSERT_OK(const_db->status());
+
+    auto *cursor = const_db->new_cursor();
+    cursor->seek_first();
+
+    const auto *const_cursor = cursor;
+    ASSERT_TRUE(const_cursor->is_valid());
+    ASSERT_OK(const_cursor->status());
+    ASSERT_EQ(const_cursor->key(), "key");
+    ASSERT_EQ(const_cursor->value(), "value");
+    delete const_cursor;
+}
+
+TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
+{
+    ASSERT_OK(db->put("a", "1"));
+    ASSERT_OK(db->put("b", "2"));
+    ASSERT_OK(db->put("c", "3"));
+    ASSERT_OK(db->commit());
+
+    ASSERT_OK(db->put("a", "x"));
+    ASSERT_OK(db->put("b", "y"));
+    ASSERT_OK(db->put("c", "z"));
+    delete db;
+
+    ASSERT_OK(Calico::Database::open(ROOT, options, &db));
+    auto *cursor = db->new_cursor();
+    cursor->seek_first();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "a");
+    ASSERT_EQ(cursor->value(), "1");
+
+    cursor->next();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "b");
+    ASSERT_EQ(cursor->value(), "2");
+
+    cursor->next();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "c");
+    ASSERT_EQ(cursor->value(), "3");
+
+    cursor->next();
+    ASSERT_FALSE(cursor->is_valid());
+    delete cursor;
+}
+
+TEST_F(ApiTests, EmptyTransactionsAreOk)
+{
+    ASSERT_OK(db->commit());
+    ASSERT_OK(db->abort());
+}
+
+TEST_F(ApiTests, KeysCanBeArbitraryBytes)
+{
+    const std::string key_1 {"\x00\x00", 2};
+    const std::string key_2 {"\x00\x01", 2};
+    const std::string key_3 {"\x01\x00", 2};
+
+    ASSERT_OK(db->put(key_1, "1"));
+    ASSERT_OK(db->put(key_2, "2"));
+    ASSERT_OK(db->put(key_3, "3"));
+    ASSERT_OK(db->commit());
+
+    auto *cursor = db->new_cursor();
+    cursor->seek_first();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_1);
+    ASSERT_EQ(cursor->value(), "1");
+    cursor->next();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_2);
+    ASSERT_EQ(cursor->value(), "2");
+    cursor->next();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_3);
+    ASSERT_EQ(cursor->value(), "3");
+    cursor->next();
+    delete cursor;
+}
+
+TEST_F(ApiTests, MapFuzzer)
+{
+    ASSERT_OK(db->put(std::string("\x00", 1), ""));
+    ASSERT_OK(db->abort());
+
+    ASSERT_OK(db->put(std::string("\x00", 1), std::string("\x00", 1)));
+    ASSERT_OK(db->commit());
+
+    delete db;
+    ASSERT_OK(Calico::Database::open(ROOT, options, &db));
+    ASSERT_OK(db->put(std::string("\x00", 1), ""));
+
+    delete db;
+    ASSERT_OK(Calico::Database::open(ROOT, options, &db));
+    std::string value;
+    ASSERT_OK(db->get(std::string("\x00", 1), value));
+    ASSERT_EQ(value, std::string("\x00", 1));
 }
 
 } // <anonymous>

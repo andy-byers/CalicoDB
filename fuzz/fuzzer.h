@@ -7,11 +7,11 @@
 namespace Calico {
 
 static constexpr Size MAX_KEY_SIZE {12};
-static constexpr Size MAX_VALUE_SIZE {0x400};
+static constexpr Size MAX_VALUE_SIZE {255};
 static constexpr Options DB_OPTIONS {
-    0x400,
-    0x400 * 32,
-    0x400 * 32,
+    0x200,
+    0x200 * 32,
+    0x200 * 32,
     {},
     0,
     0,

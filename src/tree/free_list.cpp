@@ -1,4 +1,5 @@
 #include "free_list.h"
+#include "node.h"
 #include "pager/pager.h"
 
 namespace Calico {

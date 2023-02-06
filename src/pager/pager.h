@@ -21,6 +21,8 @@ class Pager {
 public:
     using Ptr = std::unique_ptr<Pager>;
 
+    friend class Recovery;
+
     struct Parameters {
         std::string prefix;
         Storage *storage {};

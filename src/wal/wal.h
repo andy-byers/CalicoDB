@@ -23,6 +23,8 @@ class WalWriter;
 
 class WriteAheadLog {
 public:
+    friend class Recovery;
+
     struct Parameters {
         std::string prefix;
         Storage *store {};

@@ -6,6 +6,8 @@ namespace Calico {
 
 auto LogWriter::write(WalPayloadIn payload) -> Status
 {
+    fprintf(stderr,"writing %zu to block %zu at offset %zu\n", payload.lsn().value, m_number, m_offset);
+
     const auto lsn = payload.lsn();
     CALICO_EXPECT_FALSE(lsn.is_null());
     auto data = payload.m_buffer;
@@ -137,6 +139,10 @@ auto WalWriter::destroy() && -> void
 
 auto WalWriter::open_segment(Id id) -> Status
 {
+
+    fprintf(stderr,"open segment %zu\n",id.value);
+
+
     CALICO_EXPECT_EQ(m_writer, std::nullopt);
     AppendWriter *file;
     auto s = m_storage->open_append_writer(m_prefix + encode_segment_name(id), &file);

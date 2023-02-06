@@ -1,14 +1,14 @@
 
-add_executable(db_fuzzer
-        db_fuzzer.cpp fuzzer.h)
-target_link_libraries(db_fuzzer
-        PRIVATE calico_tools)
-add_test(NAME db_fuzzer
-        COMMAND db_fuzzer -runs 25)
+option(CALICO_FUZZER_STANDALONE "Build with the standalone main() for reproducing fuzzer runs" On)
 
-add_executable(map_fuzzer
-        map_fuzzer.cpp fuzzer.h)
-target_link_libraries(map_fuzzer
-        PUBLIC calico_tools)
-add_test(NAME map_fuzzer
-        COMMAND map_fuzzer -runs 25)
+# Based off of the fuzzer CMakeLists.txt in fmt.
+function(build_fuzzer NAME)
+    add_executable(${NAME} ${NAME}.cpp fuzzer.h)
+    if(CALICO_FUZZER_STANDALONE)
+        target_sources(${NAME} PRIVATE main.cpp)
+    endif()
+    target_link_libraries(${NAME} PRIVATE calico_tools)
+endfunction()
+
+build_fuzzer(db_fuzzer)
+build_fuzzer(map_fuzzer)

@@ -1047,6 +1047,17 @@ public:
 
         ASSERT_OK(wal->start_workers());
     }
+    
+    auto initialize() -> void
+    {
+        // Initialize the WAL with a few records. This is to simulate new database setup.
+        run_operations({
+            WalOperation::LOG,
+            WalOperation::LOG,
+            WalOperation::COMMIT,
+            WalOperation::ADVANCE,
+        });
+    }
 
     [[nodiscard]]
     auto get_data_payload(const std::string &data) -> WalPayloadIn
@@ -1114,19 +1125,19 @@ public:
 
     enum class WalOperation: int {
         FLUSH = 1,
-        SEGMENT = 2,
+        ADVANCE = 2,
         COMMIT = 3,
         LOG = 4,
     };
 
-    auto run_operations(const std::vector<WalOperation> &operations, bool keep_clean = false)
+    auto run_operations(const std::vector<WalOperation> &operations, bool keep_clean = false) -> Status
     {
         for (auto operation: operations) {
             switch (operation) {
                 case WalOperation::FLUSH:
                     (void)wal->flush();
                     break;
-                case WalOperation::SEGMENT:
+                case WalOperation::ADVANCE:
                     (void)wal->advance();
                     break;
                 case WalOperation::COMMIT: {
@@ -1172,17 +1183,18 @@ TEST_F(BasicWalTests, NewWalState)
 
 TEST_F(BasicWalTests, RollWhileEmpty)
 {
+    // TODO: Should be an error.
     ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {return ok();}));
 }
 
-TEST_F(BasicWalTests, FlushWithEmptyTailBuffer)
+TEST_F(BasicWalTests, FlushesWithEmptyTailBuffer)
 {
     run_operations({WalOperation::FLUSH});
 }
 
-TEST_F(BasicWalTests, SegmentWithEmptyTailBuffer)
+TEST_F(BasicWalTests, AdvancesWithEmptyTailBuffer)
 {
-    run_operations({WalOperation::SEGMENT});
+    run_operations({WalOperation::ADVANCE});
 }
 
 TEST_F(BasicWalTests, RollSingleRecord)
@@ -1238,7 +1250,7 @@ static auto generate_transaction(Test &test, Size n, bool add_commit = false)
             if (r == 0) {
                 operations.emplace_back(BasicWalTests::WalOperation::FLUSH);
             } else {
-                operations.emplace_back(BasicWalTests::WalOperation::SEGMENT);
+                operations.emplace_back(BasicWalTests::WalOperation::ADVANCE);
             }
         }
     }
@@ -1249,9 +1261,7 @@ static auto generate_transaction(Test &test, Size n, bool add_commit = false)
 
 TEST_F(BasicWalTests, SanityCheckSingleTransaction)
 {
-    // There needs to be a commit record somewhere in the WAL at all times. If there isn't, we either failed in
-    // Database::open(), or the WAL is corrupted.
-    run_operations(generate_transaction(*this, 1, true));
+    initialize();
     run_operations(generate_transaction(*this, 1'000));
 
     roll_forward(false);
@@ -1260,6 +1270,7 @@ TEST_F(BasicWalTests, SanityCheckSingleTransaction)
 
 TEST_F(BasicWalTests, SanityCheckSingleTransactionWithCommit)
 {
+    initialize();
     run_operations(generate_transaction(*this, 1'000, true));
 
     roll_forward();
@@ -1268,6 +1279,7 @@ TEST_F(BasicWalTests, SanityCheckSingleTransactionWithCommit)
 
 TEST_F(BasicWalTests, SanityCheckMultipleTransactions)
 {
+    initialize();
     for (Size i {}; i < 10; ++i) {
         run_operations(generate_transaction(*this, 1'000, i == 3 || i == 6));
     }
@@ -1278,6 +1290,7 @@ TEST_F(BasicWalTests, SanityCheckMultipleTransactions)
 
 TEST_F(BasicWalTests, SanityCheckMultipleTransactionsWithCommit)
 {
+    initialize();
     for (Size i {}; i < 10; ++i) {
         run_operations(generate_transaction(*this, 1'000, true));
     }
@@ -1307,7 +1320,7 @@ TEST_F(WalFaultTests, FailOnFirstWrite)
 TEST_F(WalFaultTests, FailOnFirstOpen)
 {
     Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
-    assert_special_error(run_operations({WalOperation::LOG, WalOperation::SEGMENT}));
+    assert_special_error(run_operations({WalOperation::LOG, WalOperation::ADVANCE}));
     Clear_Interceptors();
 
     roll_forward(false);
@@ -1319,6 +1332,7 @@ TEST_F(WalFaultTests, FailOnFirstOpen)
 
 TEST_F(WalFaultTests, FailOnNthOpen)
 {
+    initialize();
     std::vector<WalOperation> ops(5'000, WalOperation::LOG);
     ops.emplace_back(WalOperation::COMMIT);
     run_operations(ops);
@@ -1357,10 +1371,10 @@ TEST_F(WalFaultTests, FailsIfMissingSegment)
 
     ASSERT_OK(storage->remove_file("test/wal-1"));
 
-    ASSERT_FALSE(wal->roll_forward(Id::null(), [](auto) {
+    ASSERT_FALSE(wal->roll_forward(Id::root(), [](auto) {
         return ok();
     }).is_ok());
-    ASSERT_FALSE(wal->roll_backward(Id::null(), [](auto) {
+    ASSERT_FALSE(wal->roll_backward(Id::root(), [](auto) {
         return ok();
     }).is_ok());
 }

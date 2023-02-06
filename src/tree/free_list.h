@@ -21,7 +21,8 @@ public:
     explicit FreeList(Pager &pager)
         : m_pager {&pager} {}
 
-    [[nodiscard]] auto is_empty() const -> bool
+    [[nodiscard]]
+    auto is_empty() const -> bool
     {
         return m_head.is_null();
     }

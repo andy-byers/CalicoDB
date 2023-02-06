@@ -380,7 +380,6 @@ namespace TestTools {
         auto read_size = file_size;
         expect_ok(reader->read(buffer.data(), read_size, 0));
         CALICO_EXPECT_EQ(read_size, file_size);
-
         CALICO_EXPECT_EQ(file_size % page_size, 0);
 
         auto offset = FileHeader::SIZE;

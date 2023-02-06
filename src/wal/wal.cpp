@@ -138,7 +138,10 @@ auto WriteAheadLog::current_lsn() const -> Lsn
 auto WriteAheadLog::log(WalPayloadIn payload) -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
+
     m_last_lsn.value++;
+    CALICO_EXPECT_EQ(payload.lsn(), m_last_lsn);
+
     m_bytes_written += payload.data().size() + sizeof(Lsn);
     m_worker->dispatch(payload);
 }
@@ -177,10 +180,6 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
         return ok();
     }
 
-    if (m_last_lsn.is_null()) {
-        m_last_lsn = begin_lsn;
-        m_flushed_lsn.store(m_last_lsn);
-    }
     // Open the reader on the first (oldest) WAL segment file.
     auto reader = open_reader();
     if (!reader.has_value()) {
@@ -219,10 +218,15 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
     if (s.is_not_found())
         s = ok();
 
+    auto first = true;
     while (s.is_ok()) {
         Calico_Info("rolling segment {} forward", reader->segment_id().value);
 
-        s = reader->roll([&callback, begin_lsn, this](auto payload) {
+        s = reader->roll([&callback, &first, begin_lsn, this](auto payload) {
+            if (!first && m_last_lsn.value + 1 != payload.lsn().value) {
+                return corruption("missing wal record (missing lsn is {})", m_last_lsn.value + 1);
+            }
+            first = false;
             m_last_lsn = payload.lsn();
             if (m_last_lsn >= begin_lsn) {
                 return callback(payload);
@@ -288,7 +292,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
 
             Calico_Info("rolling segment {} backward", reader->segment_id().value);
 
-            // Read all full image records. We can read them forward, since the pages are disjoint
+            // Read all full image records. We can read them forward, since the page IDs are disjoint
             // within each transaction.
             s = reader->roll(callback);
         } else if (s.is_not_found()) {
@@ -296,8 +300,13 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
             s = corruption(s.what().data());
         }
 
+        if (s.is_ok()) {
+            m_last_lsn.value = first_lsn.value - 1;
+            m_flushed_lsn.store(m_last_lsn);
+//            m_last_lsn = first_lsn;
+//            m_flushed_lsn.store({first_lsn.value - 1});
         // Most-recent segment can be empty or corrupted.
-        if (s.is_corruption() && first) {
+        } else if (s.is_corruption() && first) {
             s = ok();
         }
         Calico_Try_S(s);
@@ -340,6 +349,8 @@ auto WriteAheadLog::truncate(Lsn lsn) -> Status
         }
         current = m_set.id_before(current);
     }
+    m_last_lsn = lsn;
+    m_flushed_lsn.store({lsn.value - 1});
     return ok();
 }
 

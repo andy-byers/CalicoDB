@@ -28,5 +28,6 @@ RUN mkdir build && \
           -DCALICO_BUILD_BENCHMARKS=Off \
           -DCALICO_BUILD_EXAMPLES=Off \
           -DCALICO_BUILD_FUZZERS=On \
-          -DCALICO_BUILD_TESTS=Off .. && \
+          -DCALICO_BUILD_TESTS=Off \
+          -DCALICO_FUZZER_STANDALONE=Off .. && \
     cmake --build . \

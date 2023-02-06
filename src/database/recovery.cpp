@@ -1,7 +1,6 @@
 #include "recovery.h"
 #include "pager/page.h"
 #include "pager/pager.h"
-#include "wal/wal.h"
 
 namespace Calico {
 
@@ -58,6 +57,10 @@ auto Recovery::finish_abort() -> Status
     Calico_Try_S(m_pager->flush({}));
     Calico_Try_S(m_wal->truncate(*m_commit_lsn));
     Calico_Info("rolled back to lsn {}", m_commit_lsn->value);
+
+    if (m_pager->recovery_lsn() > *m_commit_lsn) {
+        m_pager->set_recovery_lsn(*m_commit_lsn); // TODO
+    }
     return ok();
 }
 
@@ -133,6 +136,7 @@ auto Recovery::start_recovery() -> Status
 
 auto Recovery::finish_recovery() -> Status
 {
+    fprintf(stderr,"recovered: wal flushed lsn is %zu\n", m_wal->flushed_lsn().value);
     Calico_Try_S(m_pager->flush({}));
     m_wal->cleanup(m_pager->recovery_lsn());
     return ok();

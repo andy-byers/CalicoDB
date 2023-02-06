@@ -1,3 +1,7 @@
+/*
+ * db_fuzzer.cpp: Checks the happy path.
+ */
+
 #include "fuzzer.h"
 
 namespace {
