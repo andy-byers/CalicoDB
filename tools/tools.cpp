@@ -136,7 +136,10 @@ auto DynamicMemory::open_random_editor(const std::string &path, RandomEditor **o
     auto &mem = get_memory(path);
     Try_Intercept_From(*this, Interceptor::OPEN, path);
 
-    mem.created = true;
+    if (!mem.created) {
+        mem.buffer.clear();
+        mem.created = true;
+    }
     *out = new RandomMemoryEditor {path, *this, mem};
     return ok();
 }
@@ -147,7 +150,10 @@ auto DynamicMemory::open_append_writer(const std::string &path, AppendWriter **o
     auto &mem = get_memory(path);
     Try_Intercept_From(*this, Interceptor::OPEN, path);
 
-    mem.created = true;
+    if (!mem.created) {
+        mem.buffer.clear();
+        mem.created = true;
+    }
     *out = new AppendMemoryWriter {path, *this, mem};
     return ok();
 }
@@ -225,7 +231,7 @@ auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::s
     }
     for (const auto &[path, mem]: m_memory) {
         if (mem.created && Slice {path}.starts_with(prefix)) {
-            out.emplace_back(path);
+            out.emplace_back(path.substr(prefix.size()));
         }
     }
     return ok();

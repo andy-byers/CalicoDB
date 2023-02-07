@@ -136,8 +136,8 @@ auto Recovery::start_recovery() -> Status
 
 auto Recovery::finish_recovery() -> Status
 {
-    fprintf(stderr,"recovered: wal flushed lsn is %zu\n", m_wal->flushed_lsn().value);
     Calico_Try_S(m_pager->flush({}));
+    Calico_Try_S(m_wal->truncate(*m_commit_lsn));
     m_wal->cleanup(m_pager->recovery_lsn());
     return ok();
 }

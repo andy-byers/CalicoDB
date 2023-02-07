@@ -70,8 +70,9 @@ const Calico::Options options {
     .page_cache_size = 0x200000,
     .wal_buffer_size = 0x100000,
     
-    // Store the WAL segments in a separate location.
-    .wal_prefix = "/tmp/cats_wal",
+    // Store the WAL segments in a separate location. The directory calico_wal must already exist.
+    // WAL segments will look like "calico_wal_#", where # is the segment ID.
+    .wal_prefix = "calico_wal_",
     
     // These are only pertinent when logging to a file (log_target option).
     .max_log_size = 0,

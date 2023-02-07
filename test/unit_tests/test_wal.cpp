@@ -18,12 +18,12 @@ class TestWithWalSegments : public Base {
 public:
     [[nodiscard]] static auto get_segment_name(Id id) -> std::string
     {
-        return Base::PREFIX + encode_segment_name(id);
+        return encode_segment_name(Base::PREFIX + std::string {"wal-"}, id);
     }
 
     [[nodiscard]] static auto get_segment_name(Size index) -> std::string
     {
-        return Base::PREFIX + encode_segment_name(Id::from_index(index));
+        return encode_segment_name(Base::PREFIX + std::string {"wal-"}, Id::from_index(index));
     }
 
     template<class Id>
@@ -541,7 +541,7 @@ public:
           system {"test", {}},
           tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer {WalWriter::Parameters{
-              PREFIX,
+              "test/wal-",
               Span {tail},
               storage.get(),
               &error_buffer,
@@ -566,7 +566,7 @@ public:
 TEST_F(WalWriterTests, Destroy)
 {
     std::move(writer).destroy();
-    ASSERT_FALSE(storage->file_exists(PREFIX + encode_segment_name(Id::root())).is_ok());
+    ASSERT_FALSE(storage->file_exists(get_segment_name(Id::root())).is_ok());
 }
 
 TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterNormalClose)
@@ -663,7 +663,7 @@ public:
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer {WalWriter::Parameters{
-              PREFIX,
+              "test/wal-",
               Span {writer_tail},
               storage.get(),
               error_buffer.get(),
@@ -690,7 +690,7 @@ public:
         return WalReader {
             *storage,
             set,
-            PREFIX,
+            "test/wal-",
             Span {reader_tail},
             Span {reader_data}};
     }
@@ -920,7 +920,7 @@ class WalCleanupTests : public WalReaderWriterTests {
 public:
     WalCleanupTests()
         : cleanup {WalCleanup::Parameters{
-              PREFIX,
+              "test/wal-",
               &limit,
               storage.get(),
               &error_buffer,
@@ -1035,7 +1035,7 @@ public:
     auto SetUp() -> void override
     {
         auto r = WriteAheadLog::open({
-            PREFIX,
+            "test/wal-",
             storage.get(),
             &state,
             PAGE_SIZE,

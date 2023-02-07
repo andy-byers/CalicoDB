@@ -828,4 +828,44 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     delete editor;
 }
 
+TEST(LoggingTests, StringifiesNumbers)
+{
+    auto message = number_to_string(123);
+    append_number(message, 4);
+    append_number(message, 56);
+    ASSERT_EQ(message, "123456");
+}
+
+TEST(LoggingTests, StringifiesMaximumNumber)
+{
+    auto n = std::numeric_limits<Size>::max();
+    auto s = number_to_string(n);
+    while (!s.empty()) {
+        ASSERT_EQ(s.back(), n%10 + '0');
+        s.pop_back();
+        n /= 10;
+    }
+}
+
+TEST(LoggingTests, EscapesStrings)
+{
+    auto message = escape_string("\x01\x02\x03");
+    append_escaped_string(message, "\x04");
+    append_escaped_string(message, "\x05\x06");
+    ASSERT_EQ(message, "\\x01\\x02\\x03\\x04\\x05\\x06");
+}
+
+TEST(LoggingTests, OnlyEscapesUnprintableCharacters)
+{
+    for (Size i {}; i < 256; ++i) {
+        char data[] {static_cast<char>(i)};
+        const auto str = escape_string({data, 1});
+        if (std::isprint(*data)) {
+            ASSERT_EQ(str.front(), *data);
+        } else {
+            ASSERT_EQ(str.front(), '\\');
+        }
+    }
+}
+
 } // namespace Calico

@@ -52,22 +52,22 @@ auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
 
-    m_prefix = path.to_string();
-    if (m_prefix.back() != '/') {
-        m_prefix += '/';
+    m_db_prefix = path.to_string();
+    if (m_db_prefix.back() != '/') {
+        m_db_prefix += '/';
+    }
+    m_wal_prefix = options.wal_prefix.to_string();
+    if (m_wal_prefix.empty()) {
+        m_wal_prefix = m_db_prefix + "wal-";
     }
 
-    system = std::make_unique<System>(m_prefix, sanitized);
+    system = std::make_unique<System>(m_db_prefix, sanitized);
     m_log = system->create_log("core");
 
     Calico_Info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
                 CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
-    Calico_Info("tree is located at \"{}data\"", m_prefix);
-    if (sanitized.wal_prefix.is_empty()) {
-        Calico_Info("wal prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
-    } else {
-        Calico_Info("wal prefix is \"{}\"", sanitized.wal_prefix.to_string());
-    }
+    Calico_Info("tree is located at \"{}data\"", m_db_prefix);
+    Calico_Info("wal prefix is \"{}\"", m_wal_prefix);
 
     // Any error during initialization is fatal.
     return do_open(sanitized);
@@ -78,7 +78,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     if (sanitized.log_level != LogLevel::OFF) {
         switch (sanitized.log_target) {
             case LogTarget::FILE:
-                Calico_Info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
+                Calico_Info("log is located at \"{}{}\"", m_db_prefix, LOG_FILENAME);
                 break;
             case LogTarget::STDOUT:
             case LogTarget::STDOUT_COLOR:
@@ -96,7 +96,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         m_owns_storage = true;
     }
 
-    const auto initial = setup(m_prefix, *m_storage, sanitized);
+    const auto initial = setup(m_db_prefix, *m_storage, sanitized);
     if (!initial.has_value()) {
         return initial.error();
     }
@@ -114,15 +114,8 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         m_scratch = std::make_unique<LogScratchManager>(
             scratch_size, buffer_count);
 
-        // The WAL segments may be stored elsewhere.
-        auto wal_prefix = sanitized.wal_prefix.is_empty()
-            ? m_prefix : sanitized.wal_prefix.to_string();
-        if (wal_prefix.back() != '/') {
-            wal_prefix += '/';
-        }
-
         auto r = WriteAheadLog::open({
-            wal_prefix,
+            m_wal_prefix,
             m_storage,
             system.get(),
             sanitized.page_size,
@@ -137,7 +130,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     {
         auto r = Pager::open({
-            m_prefix,
+            m_db_prefix,
             m_storage,
             m_scratch.get(),
             wal.get(),
@@ -214,20 +207,32 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
         owns_storage = true;
     }
 
+    auto prefix = path;
+    if (prefix.back() != '/') {
+        prefix += '/';
+    }
+
     std::vector<std::string> children;
     if (auto s = storage->get_children(path, children); s.is_ok()) {
         for (const auto &name: children) {
-            (void)storage->remove_file(name);
+            (void)storage->remove_file(prefix + name);
         }
     }
 
     if (!options.wal_prefix.is_empty()) {
         children.clear();
 
-        if (auto s = storage->get_children(options.wal_prefix.to_string(), children); s.is_ok()) {
+        auto dir_path = options.wal_prefix.to_string();
+        if (auto pos = dir_path.rfind('/'); pos != std::string::npos) {
+            dir_path.erase(pos + 1);
+        }
+
+        // TODO: The WAL prefix is not correct. If that option is used, we shouldn't use 'wal-' in the filename, we should just use the "wal_prefix + <segment_id>".
+        if (auto s = storage->get_children(dir_path, children); s.is_ok()) {
             for (const auto &name: children) {
-                if (name.find("wal-") != std::string::npos) {
-                    (void)storage->remove_file(name);
+                const auto filename = dir_path + name;
+                if (Slice {filename}.starts_with(options.wal_prefix)) {
+                    (void)storage->remove_file(filename);
                 }
             }
         }
@@ -505,7 +510,7 @@ auto DatabaseImpl::load_state() -> Status
     pager->release(std::move(*root));
     if (pager->page_count() < before_count) {
         const auto after_size = pager->page_count() * pager->page_size();
-        return m_storage->resize_file(m_prefix + "data", after_size);
+        return m_storage->resize_file(m_db_prefix + "data", after_size);
     }
     return ok();
 }
@@ -563,13 +568,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
 
     if (auto s = store.create_directory(prefix); !s.is_ok() && !s.is_logic_error()) {
         return tl::make_unexpected(s);
-    }
-
-    if (!options.wal_prefix.is_empty()) {
-        auto s = store.create_directory(options.wal_prefix.to_string());
-        if (!s.is_ok() && !s.is_logic_error()) {
-            return tl::make_unexpected(s);
-        }
     }
 
     const auto path = prefix + "data";

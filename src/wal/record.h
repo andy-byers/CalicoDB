@@ -16,19 +16,15 @@
 
 namespace Calico {
 
-static constexpr auto WAL_PREFIX = "wal-";
 static constexpr Size WAL_BLOCK_SCALE {2};
 
 [[nodiscard]]
-inline auto decode_segment_name(Slice name) -> Id
+inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
 {
-    static constexpr Size PREFIX_SIZE {std::char_traits<Byte>::length(WAL_PREFIX)};
-
-    if (name.size() <= PREFIX_SIZE) {
+    if (path.size() <= prefix.size()) {
         return Id::null();
     }
-
-    name.advance(PREFIX_SIZE);
+    auto name = path.range(prefix.size());
 
     // Don't call std::stoul() if it's going to throw an exception.
     const auto is_valid = std::all_of(name.data(), name.data() + name.size(), [](auto c) {
@@ -43,9 +39,9 @@ inline auto decode_segment_name(Slice name) -> Id
 }
 
 [[nodiscard]]
-inline auto encode_segment_name(Id id) -> std::string
+inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
 {
-    return WAL_PREFIX + std::to_string(id.value);
+    return prefix.to_string() + std::to_string(id.value);
 }
 
 /*
@@ -308,7 +304,7 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, Wal
     }
 
     RandomReader *temp;
-    auto s = store.open_random_reader(prefix + encode_segment_name(id), &temp);
+    auto s = store.open_random_reader(encode_segment_name(prefix, id), &temp);
     if (!s.is_ok()) {
         return tl::make_unexpected(s);
     }

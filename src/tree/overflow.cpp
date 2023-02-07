@@ -23,6 +23,7 @@ static auto get_readable_content(const Page &page, Size size_limit) -> Slice
     return page.view(HEADER_SIZE, std::min(size_limit, page.size() - HEADER_SIZE));
 }
 
+[[nodiscard]]
 static auto get_writable_content(Page &page, Size size_limit) -> Span
 {
     return page.span(HEADER_SIZE, std::min(size_limit, page.size() - HEADER_SIZE));

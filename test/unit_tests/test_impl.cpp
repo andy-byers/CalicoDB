@@ -27,6 +27,7 @@ public:
 
     ~BasicDatabaseTests() override = default;
 
+    std::string prefix {PREFIX};
     Size frame_count {64};
     Options options;
 };
@@ -38,21 +39,26 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
         ASSERT_OK(Database::open(ROOT, options, &db));
         delete db;
     }
-    ASSERT_TRUE(storage->file_exists(std::string {PREFIX} + "data").is_ok());
+    ASSERT_TRUE(storage->file_exists(prefix + "data").is_ok());
 }
 
 TEST_F(BasicDatabaseTests, IsDestroyed)
 {
-    const auto filename = std::string {PREFIX} + "data";
+    std::error_code code;
+    fs::remove_all("/tmp/calico_test_wal", code);
+    ASSERT_OK(storage->create_directory("/tmp/calico_test_wal"));
+    options.wal_prefix = "/tmp/calico_test_wal/wal_file_";
 
     Database *db;
     ASSERT_OK(Database::open(ROOT, options, &db));
-    ASSERT_TRUE(storage->file_exists(filename).is_ok());
+    ASSERT_TRUE(storage->file_exists(prefix + "data").is_ok());
+    ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_ok());
     delete db;
 
     // TODO: Ensure that WAL files stored in a separate location are deleted as well.
     ASSERT_OK(Database::destroy(ROOT, options));
-    ASSERT_TRUE(storage->file_exists(filename).is_not_found());
+    ASSERT_TRUE(storage->file_exists(prefix + "data").is_not_found());
+    ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
@@ -872,6 +878,23 @@ TEST_F(ApiTests, MapFuzzer)
     std::string value;
     ASSERT_OK(db->get(std::string("\x00", 1), value));
     ASSERT_EQ(value, std::string("\x00", 1));
+}
+
+class WalPrefixTests : public OnDiskTest {
+public:
+    WalPrefixTests()
+    {
+        options.storage = storage.get();
+    }
+
+    Options options;
+    Database *db {};
+};
+
+TEST_F(WalPrefixTests, WalDirectoryMustExist)
+{
+    options.wal_prefix = "nonexistent";
+    ASSERT_TRUE(Calico::Database::open(ROOT, options, &db).is_not_found());
 }
 
 } // <anonymous>

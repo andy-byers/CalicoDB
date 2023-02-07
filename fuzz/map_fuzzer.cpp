@@ -71,64 +71,11 @@ auto translate_op(std::uint8_t code) -> OperationType
 }
 
 
-void append_number(std::string &out, Size value) {
-    Byte buffer[30];
-    std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(value));
-    out.append(buffer);
-}
-
-void append_escaped_string(std::string &out, const Slice &value) {
-    for (Size i {}; i < value.size(); ++i) {
-        const auto chr = value[i];
-        if (chr >= ' ' && chr <= '~') {
-            out.push_back(chr);
-        } else {
-            char buffer[10];
-            std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
-            out.append(buffer);
-        }
-    }
-}
-
-auto number_to_string(Size value) -> std::string
-{
-    std::string out;
-    append_number(out, value);
-    return out;
-}
-
-auto escape_string(const Slice &value) -> std::string
-{
-    std::string out;
-    append_escaped_string(out, value);
-    return out;
-}
-
-auto print_db(const Database &db)
-{
-    std::string out;
-    auto *cursor = db.new_cursor();
-    cursor->seek_first();
-    while (cursor->is_valid()) {
-        out += "K: ";
-        append_escaped_string(out, cursor->key());
-        out += ", V: ";
-        append_escaped_string(out, cursor->value());
-        out += "\n\n";
-        cursor->next();
-    }
-    fprintf(stderr, "%s\n", out.c_str());
-    delete cursor;
-}
-
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     auto options = DB_OPTIONS;
     options.storage = new(std::nothrow) DynamicMemory;
     assert(options.storage != nullptr);
-
-    options.log_level = LogLevel::TRACE;
-    options.log_target = LogTarget::STDERR_COLOR;
 
     Database *db;
     expect_ok(Database::open(DB_PATH, options, &db));
@@ -201,17 +148,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     if (const auto itr = erased.find(key); itr != end(erased)) {
                         erased.erase(itr);
                     }
-                    if (value.empty()) {
-                        fprintf(stderr, "empty:::");
-                        print_db(*db);
-                    }
-                    fprintf(stderr, "%zu\n", value.size());
                     added[key] = value;
-
-                    if (value.empty()) {
-                        fprintf(stderr, "empty:::");
-                        print_db(*db);
-                    }
 
                 } else {
                     handle_failure();
@@ -219,7 +156,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 }
                 break;
             case ERASE:
-                fprintf(stderr, "er\n");
                 key = extract_key(data, size).to_string();
                 if (const auto s = db->erase(key); s.is_ok()) {
                     if (const auto itr = added.find(key); itr != end(added)) {
@@ -232,7 +168,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 }
                 break;
             case COMMIT:
-                fprintf(stderr, "cm\n");
                 if (db->commit().is_ok()) {
                     for (const auto &[k, v]: added) {
                         map[k] = v;
@@ -242,15 +177,12 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     }
                     added.clear();
                     erased.clear();
-
-                    print_db(*db);
                 } else {
                     handle_failure();
                     reopen_and_clear_pending();
                 }
                 break;
             case ABORT:
-                fprintf(stderr, "ab\n");
                 if (db->abort().is_ok()) {
                     added.clear();
                     erased.clear();
@@ -260,16 +192,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 }
                 break;
             default: // REOPEN
-                fprintf(stderr, "op\n");
                 reopen_and_clear_pending();
-                print_db(*db);
-                fprintf(stderr, "op**done\n");
-                print_db(*db);
         }
         expect_ok(db->status());
     }
     reopen_and_clear_pending();
-    print_db(*db);
 
     const auto record_count = db->get_property("calico.count.records");
     assert(not record_count.empty());

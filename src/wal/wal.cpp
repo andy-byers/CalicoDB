@@ -27,24 +27,46 @@ WriteAheadLog::WriteAheadLog(const Parameters &param)
 
 auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
 {
-    // Get the name of every file in the database directory.
+    auto path = param.prefix;
+    if (auto pos = path.rfind('/'); pos != std::string::npos) {
+        path.erase(pos + 1);
+    }
+
     std::vector<std::string> child_names;
-    const auto path_prefix = param.prefix + WAL_PREFIX;
-    if (auto s = param.store->get_children(param.prefix, child_names); !s.is_ok()) {
+    if (auto s = param.store->get_children(path, child_names); !s.is_ok()) {
         return tl::make_unexpected(s);
     }
 
+
+
     // Filter out the segment file names.
     std::vector<std::string> segment_names;
-    std::copy_if(cbegin(child_names), cend(child_names), back_inserter(segment_names), [&path_prefix](const auto &path) {
-        return Slice {path}.starts_with(path_prefix);
-    });
+//    std::copy_if(
+//        cbegin(child_names),
+//        cend(child_names),
+//        back_inserter(segment_names),
+//        [&param](const auto &child) {
+//            return Slice {child}.starts_with(param.prefix);
+//        });
+
+    for (auto &name: child_names) {
+        name.insert(0, path);
+        if (Slice {name}.starts_with(param.prefix)) {
+            segment_names.emplace_back(name);
+        }
+    }
+
+
 
     // Convert to segment IDs.
     std::vector<Id> segment_ids;
-    std::transform(cbegin(segment_names), cend(segment_names), back_inserter(segment_ids), [param](const auto &name) {
-        return decode_segment_name(Slice {name}.advance(param.prefix.size()));
-    });
+    std::transform(
+        cbegin(segment_names),
+        cend(segment_names),
+        back_inserter(segment_ids),
+        [&param](const auto &name) {
+            return decode_segment_name(param.prefix, name);
+        });
     std::sort(begin(segment_ids), end(segment_ids));
 
     std::unique_ptr<WriteAheadLog> wal {new (std::nothrow) WriteAheadLog {param}};
@@ -218,28 +240,17 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
     if (s.is_not_found())
         s = ok();
 
-    auto first = true;
-    while (s.is_ok()) {
+    for (auto first = true; s.is_ok(); first = false) {
         Calico_Info("rolling segment {} forward", reader->segment_id().value);
 
-        s = reader->roll([&callback, &first, begin_lsn, this](auto payload) {
+        s = reader->roll([&callback, &first, this](const auto &payload) {
             if (!first && m_last_lsn.value + 1 != payload.lsn().value) {
                 return corruption("missing wal record (missing lsn is {})", m_last_lsn.value + 1);
             }
-            first = false;
             m_last_lsn = payload.lsn();
-            if (m_last_lsn >= begin_lsn) {
-                return callback(payload);
-            }
-            return ok();
+            return callback(payload);
         });
         m_flushed_lsn.store(m_last_lsn);
-
-        // We found an empty segment. This happens when the program aborted before the writer could either
-        // write a block or delete the empty file. This is OK if we are on the last segment.
-        if (s.is_not_found()) {
-            s = corruption("encountered an empty segment file {}", encode_segment_name(reader->segment_id()));
-        }
 
         if (s.is_ok()) {
             s = reader->seek_next();
@@ -247,15 +258,11 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
     }
     const auto last_id = reader->segment_id();
 
-    if (!s.is_ok()) {
-        if (s.is_corruption()) {
-            if (last_id != m_set.last()) {
-                return s;
-            }
-        } else if (!s.is_not_found()) {
-            return s;
+    if (s.is_not_found()) {
+        // Allow the last segment to be empty or contain an incomplete record.
+        if (last_id == m_set.last()) {
+            s = ok();
         }
-        s = ok();
     }
     return s;
 }
@@ -303,10 +310,8 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
         if (s.is_ok()) {
             m_last_lsn.value = first_lsn.value - 1;
             m_flushed_lsn.store(m_last_lsn);
-//            m_last_lsn = first_lsn;
-//            m_flushed_lsn.store({first_lsn.value - 1});
-        // Most-recent segment can be empty or corrupted.
         } else if (s.is_corruption() && first) {
+            // Most-recent segment can be empty or corrupted.
             s = ok();
         }
         Calico_Try_S(s);
@@ -341,16 +346,14 @@ auto WriteAheadLog::truncate(Lsn lsn) -> Status
         } else if (auto s = first_lsn.error(); !s.is_not_found()) {
             return s;
         }
-        if (!current.is_null()) {
-            const auto name = m_prefix + encode_segment_name(current);
-            Calico_Try_S(m_storage->remove_file(name));
-            m_set.remove_after(Id {current.value - 1});
-            Calico_Info("removed segment {} with first lsn {}", name, first_lsn->value);
-        }
+        const auto name = encode_segment_name(m_prefix, current);
+        Calico_Try_S(m_storage->remove_file(name));
+        m_set.remove_after(Id {current.value - 1});
+        Calico_Info("removed segment {} with first lsn {}", name, first_lsn->value);
         current = m_set.id_before(current);
     }
     m_last_lsn = lsn;
-    m_flushed_lsn.store({lsn.value - 1});
+    m_flushed_lsn.store(lsn);
     return ok();
 }
 

@@ -5,7 +5,6 @@
 #include "calico/status.h"
 #include "calico/storage.h"
 #include "utils/utils.h"
-#include <filesystem>
 
 namespace Calico {
 
