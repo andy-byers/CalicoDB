@@ -76,7 +76,7 @@ public:
         assert(offset <= m_size);
         assert(offset + size <= m_size);
 
-        return Slice {m_data + offset, size};
+        return {m_data + offset, size};
     }
 
     [[nodiscard]]
@@ -110,8 +110,9 @@ public:
     [[nodiscard]]
     constexpr auto starts_with(Slice rhs) const noexcept -> bool
     {
-        if (rhs.size() > m_size)
+        if (rhs.size() > m_size) {
             return false;
+        }
         return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
     }
 

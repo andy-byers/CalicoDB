@@ -6,7 +6,7 @@
 
 #include "spdlog/logger.h"
 
-#include "cache.h"
+#include "page_cache.h"
 #include "pager.h"
 
 #include "utils/scratch.h"
@@ -15,11 +15,13 @@
 namespace Calico {
 
 class Storage;
-class Framer;
+class FrameBuffer;
 
 class Pager {
 public:
     using Ptr = std::unique_ptr<Pager>;
+
+    friend class Recovery;
 
     struct Parameters {
         std::string prefix;
@@ -54,7 +56,7 @@ public:
     auto load_state(const FileHeader &header) -> void;
 
 private:
-    explicit Pager(const Parameters &param, Framer framer);
+    explicit Pager(const Parameters &param, FrameBuffer framer);
     [[nodiscard]] auto pin_frame(Id) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageCache::Entry &entry) -> void;
@@ -62,7 +64,7 @@ private:
     auto set_recovery_lsn(Lsn lsn) -> void;
 
     mutable std::mutex m_mutex;
-    Framer m_framer;
+    FrameBuffer m_framer;
     PageList m_dirty;
     PageCache m_registry;
     LogPtr m_log;

@@ -1,19 +1,26 @@
 #ifndef CALICO_TEST_UNIT_TESTS_H
 #define CALICO_TEST_UNIT_TESTS_H
 
+#include <filesystem>
+#include <iomanip>
+#include <sstream>
+#include <gtest/gtest.h>
 #include "calico/status.h"
 #include "pager/page.h"
 #include "storage/posix_storage.h"
+#include "tools.h"
 #include "utils/utils.h"
 #include "wal/cleanup.h"
 #include "wal/wal.h"
 #include "wal/writer.h"
-#include "tools.h"
-#include <gtest/gtest.h>
-#include <iomanip>
-#include <sstream>
 
 namespace Calico {
+
+#define Clear_Interceptors() \
+    do { \
+        dynamic_cast<Tools::DynamicMemory &>(*storage).clear_interceptors(); \
+    } while (0)
+
 
 #define Quick_Interceptor(prefix__, type__) \
     do { \
@@ -62,7 +69,7 @@ public:
     InMemoryTest()
         : storage {std::make_unique<Tools::DynamicMemory>()}
     {
-        CALICO_EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
+        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
     ~InMemoryTest() override = default;
@@ -85,7 +92,7 @@ public:
     ParameterizedInMemoryTest()
         : storage {std::make_unique<Tools::DynamicMemory>()}
     {
-        CALICO_EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
+        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
     ~ParameterizedInMemoryTest() override = default;
@@ -109,7 +116,7 @@ public:
     {
         std::error_code ignore;
         std::filesystem::remove_all(ROOT, ignore);
-        CALICO_EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
+        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
     ~OnDiskTest() override
@@ -132,7 +139,7 @@ public:
     {
         std::error_code ignore;
         std::filesystem::remove_all(ROOT, ignore);
-        CALICO_EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
+        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
     ~ParameterizedOnDiskTest() override
@@ -177,9 +184,9 @@ public:
         return ok();
     }
 
-    auto advance() -> Status override
+    auto advance() -> void override
     {
-        return ok();
+
     }
 
     [[nodiscard]]
@@ -280,7 +287,7 @@ namespace TestTools {
             }
         } else {
             fmt::print(stderr, "{}: {}\n", MSG, "could not find key");
-            std::exit(EXIT_FAILURE);
+            std::abort();
         }
     }
 
@@ -290,7 +297,7 @@ namespace TestTools {
         auto s = t.put(key, value);
         if (!s.is_ok()) {
             fmt::print(stderr, "error: {}\n", s.what().data());
-            CALICO_EXPECT_TRUE(false && "Error: insert() failed");
+            std::abort();
         }
     }
 
@@ -300,7 +307,7 @@ namespace TestTools {
         auto s = t.erase(get(t, key));
         if (!s.is_ok() && !s.is_not_found()) {
             fmt::print(stderr, "error: {}\n", s.what().data());
-            CALICO_EXPECT_TRUE(false && "Error: erase() failed");
+            std::abort();
         }
         return !s.is_not_found();
     }
@@ -309,31 +316,31 @@ namespace TestTools {
     auto erase_one(T &t, const std::string &key) -> bool
     {
         auto was_erased = t.erase(get(t, key));
-        CALICO_EXPECT_TRUE(was_erased.has_value());
+        EXPECT_TRUE(was_erased.has_value());
         if (was_erased.value())
             return true;
         auto cursor = t.first();
-        CALICO_EXPECT_EQ(cursor.error(), std::nullopt);
+        EXPECT_EQ(cursor.error(), std::nullopt);
         if (!cursor.is_valid())
             return false;
         was_erased = t.erase(cursor);
-        CALICO_EXPECT_TRUE(was_erased.value());
+        EXPECT_TRUE(was_erased.value());
         return true;
     }
 
     inline auto write_file(Storage &storage, const std::string &path, Slice in) -> void
     {
         RandomEditor *file;
-        CALICO_EXPECT_TRUE(storage.open_random_editor(path, &file).is_ok());
-        CALICO_EXPECT_TRUE(file->write(in, 0).is_ok());
+        ASSERT_TRUE(storage.open_random_editor(path, &file).is_ok());
+        ASSERT_TRUE(file->write(in, 0).is_ok());
         delete file;
     }
 
     inline auto append_file(Storage &storage, const std::string &path, Slice in) -> void
     {
         AppendWriter *file;
-        CALICO_EXPECT_TRUE(storage.open_append_writer(path, &file).is_ok());
-        CALICO_EXPECT_TRUE(file->write(in).is_ok());
+        ASSERT_TRUE(storage.open_append_writer(path, &file).is_ok());
+        ASSERT_TRUE(file->write(in).is_ok());
         delete file;
     }
 
@@ -343,14 +350,14 @@ namespace TestTools {
         std::string out;
         Size size;
 
-        CALICO_EXPECT_TRUE(storage.file_size(path, size).is_ok());
-        CALICO_EXPECT_TRUE(storage.open_random_reader(path, &file).is_ok());
+        EXPECT_TRUE(storage.file_size(path, size).is_ok());
+        EXPECT_TRUE(storage.open_random_reader(path, &file).is_ok());
         out.resize(size);
 
         Span temp {out};
         auto read_size = temp.size();
-        CALICO_EXPECT_TRUE(file->read(temp.data(), read_size, 0).is_ok());
-        CALICO_EXPECT_EQ(read_size, size);
+        EXPECT_TRUE(file->read(temp.data(), read_size, 0).is_ok());
+        EXPECT_EQ(read_size, size);
         delete file;
         return out;
     }
@@ -361,7 +368,7 @@ namespace TestTools {
         static constexpr Size CODE {0x1234567887654321};
 
         Size file_size;
-        CALICO_EXPECT_TRUE(storage.file_size("test/data", file_size).is_ok());
+        EXPECT_TRUE(storage.file_size("test/data", file_size).is_ok());
 
         std::unique_ptr<RandomReader> reader;
         {
@@ -373,9 +380,8 @@ namespace TestTools {
         std::string buffer(file_size, '\x00');
         auto read_size = file_size;
         expect_ok(reader->read(buffer.data(), read_size, 0));
-        CALICO_EXPECT_EQ(read_size, file_size);
-
-        CALICO_EXPECT_EQ(file_size % page_size, 0);
+        EXPECT_EQ(read_size, file_size);
+        EXPECT_EQ(file_size % page_size, 0);
 
         auto offset = FileHeader::SIZE;
         for (Size i {}; i < file_size / page_size; ++i) {

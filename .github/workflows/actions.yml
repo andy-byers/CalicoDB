@@ -32,9 +32,9 @@ jobs:
           cmake -S "${{ github.workspace }}" -B "${{ env.CMAKE_BUILD_DIR }}" 
           -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }}
           -DCMAKE_CXXFLAGS='-fsanitize=address,undefined'
-          -DCALICO_BUILD_BENCHMARKS=On
+          -DCALICO_BuildBenchmarks=On
           -DCALICO_BUILD_EXAMPLES=On
-          -DCALICO_BUILD_TESTS=On
+          -DCALICO_BuildTests=On
       - name: Build
         run: >-
           cmake --build "${{ env.CMAKE_BUILD_DIR }}" 

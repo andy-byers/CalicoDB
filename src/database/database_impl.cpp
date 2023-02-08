@@ -52,22 +52,22 @@ auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
 
-    m_prefix = path.to_string();
-    if (m_prefix.back() != '/') {
-        m_prefix += '/';
+    m_db_prefix = path.to_string();
+    if (m_db_prefix.back() != '/') {
+        m_db_prefix += '/';
+    }
+    m_wal_prefix = options.wal_prefix.to_string();
+    if (m_wal_prefix.empty()) {
+        m_wal_prefix = m_db_prefix + "wal-";
     }
 
-    system = std::make_unique<System>(m_prefix, sanitized);
+    system = std::make_unique<System>(m_db_prefix, sanitized);
     m_log = system->create_log("core");
 
     Calico_Info("starting CalicoDB v{}.{}.{} at \"{}\"", CALICO_VERSION_MAJOR,
                 CALICO_VERSION_MINOR, CALICO_VERSION_PATCH, path.to_string());
-    Calico_Info("tree is located at \"{}data\"", m_prefix);
-    if (sanitized.wal_prefix.is_empty()) {
-        Calico_Info("wal prefix is \"{}{}\"", m_prefix, WAL_PREFIX);
-    } else {
-        Calico_Info("wal prefix is \"{}\"", sanitized.wal_prefix.to_string());
-    }
+    Calico_Info("tree is located at \"{}data\"", m_db_prefix);
+    Calico_Info("wal prefix is \"{}\"", m_wal_prefix);
 
     // Any error during initialization is fatal.
     return do_open(sanitized);
@@ -78,7 +78,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     if (sanitized.log_level != LogLevel::OFF) {
         switch (sanitized.log_target) {
             case LogTarget::FILE:
-                Calico_Info("log is located at \"{}{}\"", m_prefix, LOG_FILENAME);
+                Calico_Info("log is located at \"{}{}\"", m_db_prefix, LOG_FILENAME);
                 break;
             case LogTarget::STDOUT:
             case LogTarget::STDOUT_COLOR:
@@ -96,7 +96,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         m_owns_storage = true;
     }
 
-    const auto initial = setup(m_prefix, *m_storage, sanitized);
+    const auto initial = setup(m_db_prefix, *m_storage, sanitized);
     if (!initial.has_value()) {
         return initial.error();
     }
@@ -114,15 +114,8 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         m_scratch = std::make_unique<LogScratchManager>(
             scratch_size, buffer_count);
 
-        // The WAL segments may be stored elsewhere.
-        auto wal_prefix = sanitized.wal_prefix.is_empty()
-            ? m_prefix : sanitized.wal_prefix.to_string();
-        if (wal_prefix.back() != '/') {
-            wal_prefix += '/';
-        }
-
         auto r = WriteAheadLog::open({
-            wal_prefix,
+            m_wal_prefix,
             m_storage,
             system.get(),
             sanitized.page_size,
@@ -137,7 +130,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     {
         auto r = Pager::open({
-            m_prefix,
+            m_db_prefix,
             m_storage,
             m_scratch.get(),
             wal.get(),
@@ -214,20 +207,31 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
         owns_storage = true;
     }
 
+    auto prefix = path;
+    if (prefix.back() != '/') {
+        prefix += '/';
+    }
+
     std::vector<std::string> children;
     if (auto s = storage->get_children(path, children); s.is_ok()) {
         for (const auto &name: children) {
-            (void)storage->remove_file(name);
+            (void)storage->remove_file(prefix + name);
         }
     }
 
     if (!options.wal_prefix.is_empty()) {
         children.clear();
 
-        if (auto s = storage->get_children(options.wal_prefix.to_string(), children); s.is_ok()) {
+        auto dir_path = options.wal_prefix.to_string();
+        if (auto pos = dir_path.rfind('/'); pos != std::string::npos) {
+            dir_path.erase(pos + 1);
+        }
+
+        if (auto s = storage->get_children(dir_path, children); s.is_ok()) {
             for (const auto &name: children) {
-                if (name.find("wal-") != std::string::npos) {
-                    (void)storage->remove_file(name);
+                const auto filename = dir_path + name;
+                if (Slice {filename}.starts_with(options.wal_prefix)) {
+                    (void)storage->remove_file(filename);
                 }
             }
         }
@@ -273,7 +277,9 @@ auto DatabaseImpl::get_property(const Slice &name) const -> std::string
         } else if (prop.starts_with("stat.")) {
             prop.advance(5);
 
-            if (prop == "cache_hit_ratio") {
+            if (prop == "updates") {
+                return fmt::format("{}", m_txn_size);
+            } else if (prop == "cache_hit_ratio") {
                 return fmt::format("{}", pager->hit_ratio());
             } else if (prop == "data_throughput") {
                 return fmt::format("{}", bytes_written);
@@ -336,6 +342,12 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 {
     Calico_Try_S(status());
     Calico_Try_S(check_key(key, "insert"));
+
+    // Value is greater than 4 GiB in length.
+    if (value.size() > std::numeric_limits<ValueSize>::max()) {
+        return invalid_argument("cannot insert record: value is too long");
+    }
+
     bytes_written += key.size() + value.size();
     if (const auto inserted = tree->insert(key, value)) {
         record_count += *inserted;
@@ -370,36 +382,44 @@ auto DatabaseImpl::vacuum() -> Status
 
 auto DatabaseImpl::commit() -> Status
 {
+    Calico_Try_S(status());
     if (m_txn_size != 0) {
         if (auto s = do_commit(); !s.is_ok()) {
-            Maybe_Set_Error(std::move(s));
+            Maybe_Set_Error(s);
+            return s;
         }
     }
-    return status();
+    return ok();
 }
 
+/*
+ * NOTE: This method only returns an error status if the commit record could not be flushed to the WAL, since this
+ *       is what ultimately determines the transaction outcome. If a different failure occurs, that status will be
+ *       returned on the next access to the database object.
+ */
 auto DatabaseImpl::do_commit() -> Status
 {
     Calico_Info("commit requested at lsn {}", wal->current_lsn().value + 1);
 
     m_txn_size = 0;
-    Calico_Try_S(status());
     Calico_Try_S(save_state());
 
     const auto lsn = wal->current_lsn();
     wal->log(encode_commit_payload(lsn, *m_scratch->get()));
-    Calico_Try_S(wal->advance());
+    Calico_Try_S(wal->flush());
+    wal->advance();
 
-    Calico_Try_S(pager->flush(m_commit_lsn));
+    Maybe_Set_Error(pager->flush(m_commit_lsn));
     wal->cleanup(pager->recovery_lsn());
+    m_commit_lsn = lsn;
 
     Calico_Info("commit successful");
-    m_commit_lsn = lsn;
     return ok();
 }
 
 auto DatabaseImpl::abort() -> Status
 {
+    Calico_Try_S(status());
     if (m_txn_size != 0) {
         if (auto s = do_abort(); !s.is_ok()) {
             Maybe_Set_Error(std::move(s));
@@ -413,8 +433,7 @@ auto DatabaseImpl::do_abort() -> Status
     Calico_Info("abort requested (last commit was {})", m_commit_lsn.value);
 
     m_txn_size = 0;
-    Calico_Try_S(status());
-    Calico_Try_S(wal->advance());
+    wal->advance();
 
     m_in_txn = false;
     Calico_Try_S(m_recovery->start_abort());
@@ -499,7 +518,7 @@ auto DatabaseImpl::load_state() -> Status
     pager->release(std::move(*root));
     if (pager->page_count() < before_count) {
         const auto after_size = pager->page_count() * pager->page_size();
-        return m_storage->resize_file(m_prefix + "data", after_size);
+        return m_storage->resize_file(m_db_prefix + "data", after_size);
     }
     return ok();
 }
@@ -557,13 +576,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
 
     if (auto s = store.create_directory(prefix); !s.is_ok() && !s.is_logic_error()) {
         return tl::make_unexpected(s);
-    }
-
-    if (!options.wal_prefix.is_empty()) {
-        auto s = store.create_directory(options.wal_prefix.to_string());
-        if (!s.is_ok() && !s.is_logic_error()) {
-            return tl::make_unexpected(s);
-        }
     }
 
     const auto path = prefix + "data";

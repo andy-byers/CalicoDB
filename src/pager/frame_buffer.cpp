@@ -1,6 +1,6 @@
-#include "framer.h"
-#include "page.h"
+#include "frame_buffer.h"
 #include "calico/storage.h"
+#include "page.h"
 #include "tree/header.h"
 #include "utils/encoding.h"
 
@@ -45,7 +45,7 @@ auto Frame::unref(Page &page) -> void
     m_ref_count--;
 }
 
-auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<Framer, Status>
+auto FrameBuffer::open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<FrameBuffer, Status>
 {
     CALICO_EXPECT_TRUE(is_power_of_two(page_size));
     CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
@@ -63,10 +63,10 @@ auto Framer::open(const std::string &prefix, Storage *storage, Size page_size, S
         return tl::make_unexpected(system_error("cannot allocate frames: out of memory"));
     }
 
-    return Framer {std::move(file), std::move(buffer), page_size, frame_count};
+    return FrameBuffer {std::move(file), std::move(buffer), page_size, frame_count};
 }
 
-Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
+FrameBuffer::FrameBuffer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
     : m_buffer {std::move(buffer)},
       m_file {std::move(file)},
       m_page_size {page_size}
@@ -84,21 +84,21 @@ Framer::Framer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size pa
     }
 }
 
-auto Framer::ref(Size index) -> Page
+auto FrameBuffer::ref(Size index) -> Page
 {
     CALICO_EXPECT_LT(index, m_frames.size());
     m_ref_sum++;
     return m_frames[index].ref(false);
 }
 
-auto Framer::unref(Size index, Page page) -> void
+auto FrameBuffer::unref(Size index, Page page) -> void
 {
     CALICO_EXPECT_LT(index, m_frames.size());
     m_frames[index].unref(page);
     m_ref_sum--;
 }
 
-auto Framer::upgrade(Size index, Page &page) -> void
+auto FrameBuffer::upgrade(Size index, Page &page) -> void
 {
     CALICO_EXPECT_FALSE(page.is_writable());
     CALICO_EXPECT_LT(index, m_frames.size());
@@ -106,7 +106,7 @@ auto Framer::upgrade(Size index, Page &page) -> void
     page = m_frames[index].ref(true);
 }
 
-auto Framer::pin(Id pid) -> tl::expected<Size, Status>
+auto FrameBuffer::pin(Id pid) -> tl::expected<Size, Status>
 {
     CALICO_EXPECT_FALSE(pid.is_null());
     CALICO_EXPECT_LE(pid.as_index(), m_page_count);
@@ -134,14 +134,14 @@ auto Framer::pin(Id pid) -> tl::expected<Size, Status>
     return fid;
 }
 
-auto Framer::discard(Size id) -> void
+auto FrameBuffer::discard(Size id) -> void
 {
     CALICO_EXPECT_EQ(frame_at_impl(id).ref_count(), 0);
     frame_at_impl(id).reset(Id::null());
     m_available.emplace_back(id);
 }
 
-auto Framer::unpin(Size id) -> void
+auto FrameBuffer::unpin(Size id) -> void
 {
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
@@ -149,7 +149,7 @@ auto Framer::unpin(Size id) -> void
     m_available.emplace_back(id);
 }
 
-auto Framer::write_back(Size id) -> Status
+auto FrameBuffer::write_back(Size id) -> Status
 {
     auto &frame = frame_at_impl(id);
     CALICO_EXPECT_LE(frame.ref_count(), 1);
@@ -158,12 +158,12 @@ auto Framer::write_back(Size id) -> Status
     return write_page_to_file(frame.pid(), frame.data());
 }
 
-auto Framer::sync() -> Status
+auto FrameBuffer::sync() -> Status
 {
     return m_file->sync();
 }
 
-auto Framer::read_page_from_file(Id id, Span out) const -> tl::expected<bool, Status>
+auto FrameBuffer::read_page_from_file(Id id, Span out) const -> tl::expected<bool, Status>
 {
     CALICO_EXPECT_EQ(m_page_size, out.size());
     const auto file_size = m_page_count * m_page_size;
@@ -195,18 +195,18 @@ auto Framer::read_page_from_file(Id id, Span out) const -> tl::expected<bool, St
         "could not read page {}: incomplete read (read {}/{} B)", id.value, out.size(), m_page_size));
 }
 
-auto Framer::write_page_to_file(Id pid, const Slice &page) const -> Status
+auto FrameBuffer::write_page_to_file(Id pid, const Slice &page) const -> Status
 {
     CALICO_EXPECT_EQ(m_page_size, page.size());
     return m_file->write(page, pid.as_index() * page.size());
 }
 
-auto Framer::load_state(const FileHeader &header) -> void
+auto FrameBuffer::load_state(const FileHeader &header) -> void
 {
     m_page_count = header.page_count;
 }
 
-auto Framer::save_state(FileHeader &header) const -> void
+auto FrameBuffer::save_state(FileHeader &header) const -> void
 {
     header.page_count = m_page_count;
 }

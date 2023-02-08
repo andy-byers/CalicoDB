@@ -41,8 +41,8 @@ public:
 
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get_property(const Slice &name) const -> std::string override;
-    [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
+    [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto commit() -> Status override;
     [[nodiscard]] auto abort() -> Status override;
     [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status override;
@@ -68,7 +68,8 @@ private:
     [[nodiscard]] auto do_abort() -> Status;
 
     mutable Status m_status {ok()};
-    std::string m_prefix;
+    std::string m_db_prefix;
+    std::string m_wal_prefix;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
     Storage *m_storage {};

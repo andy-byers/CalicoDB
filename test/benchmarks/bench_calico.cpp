@@ -1,8 +1,10 @@
 #include "bench.h"
-#include <benchmark/benchmark.h>
-#include <calico/calico.h>
+#include "benchmark/benchmark.h"
+#include "calico/calico.h"
 #include <filesystem>
 #include <random>
+
+#define RUN_CHECKS
 
 namespace {
 
@@ -12,11 +14,11 @@ constexpr auto DB_PATH = "__bench_calico__";
 
 const Calico::Tools::RandomGenerator rng { 4 * 1'024 * 1'024};
 
-// 3 MiB of page cache + write buffer memory.
+// 4 MiB of page cache + write buffer memory.
 constexpr Options DB_OPTIONS {
     0x2000,
     0x200000,
-    0x100000,
+    0x200000,
 };
 
 auto do_read(const Database &db, Slice key)
@@ -73,6 +75,21 @@ auto BM_SequentialWrites(benchmark::State &state)
     Database *db;
     setup(&db);
     run_batches(*db, state, [](auto i) {return Tools::integral_key<DB_KEY_SIZE>(i);}, do_write);
+
+#ifdef RUN_CHECKS
+    // Make sure every record was actually inserted.
+    auto *cursor = db->new_cursor();
+    cursor->seek_first();
+
+    Size i {};
+    while (cursor->is_valid()) {
+        assert(cursor->key() == Tools::integral_key<DB_KEY_SIZE>(i++));
+        assert(cursor->value() == DB_VALUE);
+        cursor->next();
+    }
+    assert(i == state.iterations());
+#endif // RUN_CHECKS
+
     delete db;
 }
 BENCHMARK(BM_SequentialWrites);
@@ -82,6 +99,19 @@ auto BM_RandomWrites(benchmark::State &state)
     Database *db;
     setup(&db);
     run_batches(*db, state, [](auto) {return rng.Generate(DB_KEY_SIZE);}, do_write);
+
+#ifdef RUN_CHECKS
+    auto *cursor = db->new_cursor();
+    cursor->seek_first();
+
+    Size i {};
+    for (; cursor->is_valid(); ++i) {
+        assert(cursor->value() == DB_VALUE);
+        cursor->next();
+    }
+    assert(i == state.iterations());
+#endif // RUN_CHECKS
+
     delete db;
 }
 BENCHMARK(BM_RandomWrites);
@@ -90,7 +120,7 @@ auto BM_Overwrite(benchmark::State& state)
 {
     Database *db;
     setup(&db);
-    run_batches(*db, state, [](auto) {return std::to_string(rng.GenerateInteger<Size>(DB_INITIAL_SIZE));}, do_write);
+    run_batches(*db, state, [](auto) {return std::to_string(rng.Next<Size>(DB_INITIAL_SIZE));}, do_write);
     delete db;
 }
 BENCHMARK(BM_Overwrite);
@@ -211,7 +241,7 @@ auto ensure_records(Database &db, Size)
 {
     if (const auto count = db.get_property("calico.count.records"); std::stoi(count) < DB_INITIAL_SIZE / 2) {
         for (Size i {}; i < DB_INITIAL_SIZE; ++i) {
-            const auto key = Tools::integral_key<DB_KEY_SIZE>(rand());
+            const auto key = Tools::integral_key<DB_KEY_SIZE>(rng.Next<Size>(1'000'000));
             do_write(db, key);
         }
     }
@@ -234,7 +264,22 @@ auto BM_RandomErase(benchmark::State& state)
 {
     Database *db;
     setup(&db);
-    run_batches(*db, state, [](auto) {return std::to_string(rand());}, [](auto &db, const auto &key) {do_erase(db, key);}, ensure_records);
+
+    run_batches(
+        *db,
+        state,
+        [&db](auto i) {
+            auto *cursor = db->new_cursor();
+            while (!cursor->is_valid()) {
+                cursor->seek(rng.Generate(DB_KEY_SIZE));
+            }
+            auto key = cursor->key().to_string();
+            delete cursor;
+            return key;
+
+        },
+        [](auto &db, const auto &key) {do_erase(db, key);},
+        ensure_records);
 }
 BENCHMARK(BM_RandomErase);
 
@@ -242,7 +287,6 @@ BENCHMARK(BM_RandomErase);
 
 auto main(int argc, char *argv[]) -> int
 {
-    srand(42);
     benchmark::Initialize(&argc, argv);
     benchmark::RunSpecifiedBenchmarks();
     benchmark::Shutdown();

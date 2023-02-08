@@ -26,7 +26,7 @@ auto WalCleanup::cleanup() -> void
         return;
     }
 
-    auto s = m_storage->remove_file(m_prefix + encode_segment_name(first));
+    auto s = m_storage->remove_file(encode_segment_name(m_prefix, first));
     if (s.is_ok()) {
         m_set->remove_before(second);
     } else {

@@ -56,7 +56,7 @@ constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer
     Size counter {};
 
     while (!in.is_empty()) {
-        const auto chunk_size = std::min(in.size(), random.GenerateInteger<Size>(message.size() / num_chunks));
+        const auto chunk_size = std::min(in.size(), random.Next<Size>(message.size() / num_chunks));
         auto chunk = in.range(0, chunk_size);
 
         if constexpr (std::is_base_of_v<AppendWriter, Writer>) {
@@ -81,7 +81,7 @@ auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, Size siz
     Size counter {};
 
     while (!out.is_empty()) {
-        const auto chunk_size = std::min(out.size(), random.GenerateInteger<Size>(size / num_chunks));
+        const auto chunk_size = std::min(out.size(), random.Next<Size>(size / num_chunks));
         auto chunk = out.range(0, chunk_size);
         Size read_size = chunk.size();
         const auto s = reader.read(chunk.data(), read_size, counter);

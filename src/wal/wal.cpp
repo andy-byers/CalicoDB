@@ -27,24 +27,23 @@ WriteAheadLog::WriteAheadLog(const Parameters &param)
 
 auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
 {
-    // Get the name of every file in the database directory.
+    auto path = param.prefix;
+    if (auto pos = path.rfind('/'); pos != std::string::npos) {
+        path.erase(pos + 1);
+    }
+
     std::vector<std::string> child_names;
-    const auto path_prefix = param.prefix + WAL_PREFIX;
-    if (auto s = param.store->get_children(param.prefix, child_names); !s.is_ok()) {
+    if (auto s = param.store->get_children(path, child_names); !s.is_ok()) {
         return tl::make_unexpected(s);
     }
 
-    // Filter out the segment file names.
-    std::vector<std::string> segment_names;
-    std::copy_if(cbegin(child_names), cend(child_names), back_inserter(segment_names), [&path_prefix](const auto &path) {
-        return Slice {path}.starts_with(path_prefix);
-    });
-
-    // Convert to segment IDs.
     std::vector<Id> segment_ids;
-    std::transform(cbegin(segment_names), cend(segment_names), back_inserter(segment_ids), [param](const auto &name) {
-        return decode_segment_name(Slice {name}.advance(param.prefix.size()));
-    });
+    for (auto &name: child_names) {
+        name.insert(0, path);
+        if (Slice {name}.starts_with(param.prefix)) {
+            segment_ids.emplace_back(decode_segment_name(param.prefix, name));
+        }
+    }
     std::sort(begin(segment_ids), end(segment_ids));
 
     std::unique_ptr<WriteAheadLog> wal {new (std::nothrow) WriteAheadLog {param}};
@@ -138,7 +137,10 @@ auto WriteAheadLog::current_lsn() const -> Lsn
 auto WriteAheadLog::log(WalPayloadIn payload) -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
+
     m_last_lsn.value++;
+    CALICO_EXPECT_EQ(payload.lsn(), m_last_lsn);
+
     m_bytes_written += payload.data().size() + sizeof(Lsn);
     m_worker->dispatch(payload);
 }
@@ -150,21 +152,23 @@ auto WriteAheadLog::flush() -> Status
     return m_error.get();
 }
 
-auto WriteAheadLog::advance() -> Status
+auto WriteAheadLog::advance() -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_worker->dispatch(AdvanceToken {}, true);
-    return m_error.get();
 }
 
 auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 {
+    if (auto s = status(); !s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
     auto reader = WalReader {
         *m_storage,
         m_set,
         m_prefix,
-        Span {m_reader_tail},
-        Span {m_reader_data}};
+        m_reader_tail,
+        m_reader_data};
     if (auto s = reader.open(); !s.is_ok()) {
         return tl::make_unexpected(s);
     }
@@ -174,13 +178,9 @@ auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Status
 {
     if (m_set.first().is_null()) {
-        return ok();
+        return corruption("log is empty");
     }
 
-    if (m_last_lsn.is_null()) {
-        m_last_lsn = begin_lsn;
-        m_flushed_lsn.store(m_last_lsn);
-    }
     // Open the reader on the first (oldest) WAL segment file.
     auto reader = open_reader();
     if (!reader.has_value()) {
@@ -216,26 +216,21 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
         }
     }
 
-    if (s.is_not_found())
+    if (s.is_not_found()) {
         s = ok();
+    }
 
-    while (s.is_ok()) {
+    for (auto first = true; s.is_ok(); first = false) {
         Calico_Info("rolling segment {} forward", reader->segment_id().value);
 
-        s = reader->roll([&callback, begin_lsn, this](auto payload) {
-            m_last_lsn = payload.lsn();
-            if (m_last_lsn >= begin_lsn) {
-                return callback(payload);
+        s = reader->roll([&callback, &first, this](const auto &payload) {
+            if (!first && m_last_lsn.value + 1 != payload.lsn().value) {
+                return corruption("missing wal record (missing lsn is {})", m_last_lsn.value + 1);
             }
-            return ok();
+            m_last_lsn = payload.lsn();
+            return callback(payload);
         });
         m_flushed_lsn.store(m_last_lsn);
-
-        // We found an empty segment. This happens when the program aborted before the writer could either
-        // write a block or delete the empty file. This is OK if we are on the last segment.
-        if (s.is_not_found()) {
-            s = corruption("encountered an empty segment file {}", encode_segment_name(reader->segment_id()));
-        }
 
         if (s.is_ok()) {
             s = reader->seek_next();
@@ -243,15 +238,11 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
     }
     const auto last_id = reader->segment_id();
 
-    if (!s.is_ok()) {
-        if (s.is_corruption()) {
-            if (last_id != m_set.last()) {
-                return s;
-            }
-        } else if (!s.is_not_found()) {
-            return s;
+    if (s.is_not_found()) {
+        // Allow the last segment to be empty or contain an incomplete record.
+        if (last_id == m_set.last()) {
+            s = ok();
         }
-        s = ok();
     }
     return s;
 }
@@ -259,7 +250,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
 auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Status
 {
     if (m_set.first().is_null()) {
-        return ok();
+        return corruption("log is empty");
     }
 
     auto reader = open_reader();
@@ -277,7 +268,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
     }
 
     auto s = ok();
-    for (Size i {}; s.is_ok(); i++) {
+    for (auto first = true; s.is_ok(); first = false) {
         Lsn first_lsn;
         s = reader->read_first_lsn(first_lsn);
 
@@ -288,7 +279,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
 
             Calico_Info("rolling segment {} backward", reader->segment_id().value);
 
-            // Read all full image records. We can read them forward, since the pages are disjoint
+            // Read all full image records. We can read them forward, since the page IDs are disjoint
             // within each transaction.
             s = reader->roll(callback);
         } else if (s.is_not_found()) {
@@ -296,15 +287,23 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
             s = corruption(s.what().data());
         }
 
-        // Most-recent segment can have an incomplete record at the end.
-        if (s.is_corruption() && i == 0) {
+        if (s.is_ok()) {
+            m_last_lsn.value = first_lsn.value - 1;
+            m_flushed_lsn.store(m_last_lsn);
+        } else if (s.is_corruption() && first) {
+            // Most-recent segment can be empty or corrupted.
             s = ok();
         }
         Calico_Try_S(s);
 
         s = reader->seek_previous();
     }
-    return s.is_not_found() ? ok() : s;
+    // Indicates that we have hit the beginning of the WAL.
+    if (s.is_not_found()) {
+        s = corruption("{}", s.what().data());
+    }
+
+    return s;
 }
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void
@@ -327,14 +326,14 @@ auto WriteAheadLog::truncate(Lsn lsn) -> Status
         } else if (auto s = first_lsn.error(); !s.is_not_found()) {
             return s;
         }
-        if (!current.is_null()) {
-            const auto name = m_prefix + encode_segment_name(current);
-            Calico_Try_S(m_storage->remove_file(name));
-            m_set.remove_after(Id {current.value - 1});
-            Calico_Info("removed segment {} with first lsn {}", name, first_lsn->value);
-        }
+        const auto name = encode_segment_name(m_prefix, current);
+        Calico_Try_S(m_storage->remove_file(name));
+        m_set.remove_after(Id {current.value - 1});
+        Calico_Info("removed segment {} with first lsn {}", name, first_lsn->value);
         current = m_set.id_before(current);
     }
+    m_last_lsn = lsn;
+    m_flushed_lsn.store(lsn);
     return ok();
 }
 

@@ -1,7 +1,7 @@
 #include "pager/pager.h"
 #include "tree/cursor_internal.h"
 #include "tree/node.h"
-#include "tree/overflow.h"
+#include "tree/memory.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
 #include "wal/helpers.h"
@@ -436,7 +436,7 @@ TEST_P(ExternalNodeTests, SanityCheck)
         std::exchange(node.overflow, std::nullopt);
 
         while (node.header.cell_count) {
-            erase_cell(node, random.GenerateInteger<Size>(node.header.cell_count - 1));
+            erase_cell(node, random.Next<Size>(node.header.cell_count - 1));
             node.TEST_validate();
         }
     }
@@ -871,13 +871,13 @@ TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnMiddlePosition)
 
 static auto random_key(BPlusTreeTests &test)
 {
-    const auto key_size = test.random.GenerateInteger<Size>(1, 10);
+    const auto key_size = test.random.Next<Size>(1, 10);
     return test.random.Generate(key_size);
 }
 
 static auto random_value(BPlusTreeTests &test)
 {
-    const auto val_size = test.random.GenerateInteger<Size>(test.param.page_size / 2);
+    const auto val_size = test.random.Next<Size>(test.param.page_size / 2);
     return test.random.Generate(val_size);
 }
 
@@ -1085,14 +1085,14 @@ TEST_P(CursorTests, SanityCheck_Forward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (Size iteration {}; iteration < 100; ++iteration) {
-        const auto i = random.GenerateInteger<Size>(RECORD_COUNT);
+        const auto i = random.Next<Size>(RECORD_COUNT);
         const auto key = Tools::integral_key(i);
         cursor->seek(key);
 
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_EQ(cursor->key(), key);
 
-        for (Size n {}; n < random.GenerateInteger<Size>(10); ++n) {
+        for (Size n {}; n < random.Next<Size>(10); ++n) {
             cursor->next();
 
             if (const auto j = i + n + 1; j < RECORD_COUNT) {
@@ -1109,14 +1109,14 @@ TEST_P(CursorTests, SanityCheck_Backward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (Size iteration {}; iteration < 100; ++iteration) {
-        const auto i = random.GenerateInteger<Size>(RECORD_COUNT);
+        const auto i = random.Next<Size>(RECORD_COUNT);
         const auto key = Tools::integral_key(i);
         cursor->seek(key);
 
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_EQ(cursor->key(), key);
 
-        for (Size n {}; n < random.GenerateInteger<Size>(10); ++n) {
+        for (Size n {}; n < random.Next<Size>(10); ++n) {
             cursor->previous();
 
             if (i > n) {
@@ -1133,6 +1133,103 @@ TEST_P(CursorTests, SanityCheck_Backward)
 INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,
+    ::testing::Values(
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+
+class MemoryTests : public BPlusTreeTests {
+protected:
+    auto SetUp() -> void override
+    {
+        BPlusTreeTests::SetUp();
+        free_list = std::make_unique<FreeList>(*pager);
+    }
+
+    auto expect_linked(Id head) -> Size
+    {
+        auto id = head;
+        Size count {};
+
+        while (!id.is_null()) {
+            auto lhs = pager->acquire(id);
+            EXPECT_TRUE(lhs.has_value());
+
+            if (count++ == 0) {
+                EXPECT_EQ(prev_id(*lhs), Id::null());
+            }
+
+            id = next_id(*lhs);
+            if (!id.is_null()) {
+                auto rhs = pager->acquire(id);
+                EXPECT_TRUE(rhs.has_value());
+                EXPECT_EQ(lhs->id(), prev_id(*rhs));
+                pager->release(std::move(*rhs));
+            }
+            pager->release(std::move(*lhs));
+        }
+        return count;
+    }
+
+    [[nodiscard]]
+    static auto prev_id(const Page &page) -> Id
+    {
+        return {get_u64(page.data() + sizeof(Lsn) + sizeof(Byte))};
+    }
+
+    [[nodiscard]]
+    static auto next_id(const Page &page) -> Id
+    {
+        return {get_u64(page.data() + sizeof(Lsn) + sizeof(Byte) + sizeof(Id))};
+    }
+
+    auto allocate_and_push() -> void
+    {
+        auto page = pager->allocate();
+        ASSERT_TRUE(page.has_value());
+        pager->upgrade(*page);
+        ASSERT_TRUE(free_list->push(std::move(*page)).has_value());
+    }
+
+    std::unique_ptr<FreeList> free_list;
+};
+
+TEST_P(MemoryTests, FreeListPagesAreDoublyLinked)
+{
+    allocate_and_push();
+    ASSERT_EQ(expect_linked(Id {2}), 1);
+
+    allocate_and_push();
+    ASSERT_EQ(expect_linked(Id {3}), 2);
+
+    allocate_and_push();
+    ASSERT_EQ(expect_linked(Id {4}), 3);
+
+    auto page = free_list->pop();
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(expect_linked(Id {3}), 2);
+
+    page = free_list->pop();
+    ASSERT_TRUE(page.has_value());
+    ASSERT_EQ(expect_linked(Id {2}), 1);
+
+    page = free_list->pop();
+    ASSERT_TRUE(page.has_value());
+    ASSERT_TRUE(free_list->is_empty());
+}
+
+TEST_P(MemoryTests, Vacuum)
+{
+    allocate_and_push();
+    allocate_and_push();
+    allocate_and_push();
+    (void)free_list->vacuum(3);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MemoryTests,
+    MemoryTests,
     ::testing::Values(
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},

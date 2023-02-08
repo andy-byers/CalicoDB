@@ -78,8 +78,8 @@ NodeHeader::NodeHeader(const Page &page)
     const auto flags = *data;
     data++;
 
-    // Flags byte (only 1 bit is needed right now).
-    is_external = flags & 1;
+    // Flags byte.
+    is_external = (flags & 0b111) == EXTERNAL_BITS;
 
     parent_id.value = get_u64(data);
     data += sizeof(Id);
@@ -112,7 +112,9 @@ auto NodeHeader::write(Page &page) const -> void
     put_u64(data, page_lsn.value);
     data += sizeof(Id);
 
-    *data++ = static_cast<Byte>(is_external);
+    *data++ = is_external
+        ? EXTERNAL_BITS
+        : INTERNAL_BITS;
 
     put_u64(data, parent_id.value);
     data += sizeof(Id);
@@ -137,6 +139,36 @@ auto NodeHeader::write(Page &page) const -> void
 
     put_u16(data, free_total);
     insert_delta(page.m_deltas, {page_offset(page), SIZE});
+}
+
+
+LinkHeader::LinkHeader(const Page &page)
+{
+    CALICO_EXPECT_TRUE(is_link(page));
+    auto in = page.view(sizeof(Lsn) + sizeof(Byte), SIZE);
+
+    prev_id.value = get_u64(in);
+    in.advance(sizeof(Id));
+
+    next_id.value = get_u64(in);
+    in.advance(sizeof(Id));
+}
+
+auto LinkHeader::write(Page &page) const -> void
+{
+    auto out = page.span(sizeof(Lsn) + sizeof(Byte), SIZE);
+
+    put_u64(out, prev_id.value);
+    out.advance(sizeof(Id));
+
+    put_u64(out, next_id.value);
+    out.advance(sizeof(Id));
+}
+
+auto LinkHeader::is_link(const Page &page) -> bool
+{
+    // Node pages will never have a null byte here.
+    return page.data()[sizeof(Lsn)] == '\x00';
 }
 
 } // namespace Calico

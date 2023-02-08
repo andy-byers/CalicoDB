@@ -30,9 +30,6 @@ inline constexpr auto wal_scratch_size(Size page_size) -> Size
     return page_size + DELTA_PAYLOAD_HEADER_SIZE + sizeof(PageDelta);
 }
 
-
-
-
 } // namespace Calico
 
 #endif // CALICO_WAL_HELPERS_H

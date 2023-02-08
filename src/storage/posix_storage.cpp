@@ -1,49 +1,47 @@
 #include "posix_storage.h"
 #include "utils/expected.hpp"
-#include <filesystem>
-#include <fcntl.h>
 #include <sys/stat.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 namespace Calico {
 
-namespace fs = std::filesystem;
 static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
 
-static auto fetch_and_clear_errno() -> int
+[[nodiscard]]
+static auto to_status(int code) -> Status
+{
+    switch (code) {
+        case ENOENT:
+            return not_found(strerror(code));
+        case EINVAL:
+            return invalid_argument(strerror(code));
+        case EEXIST:
+            return logic_error(strerror(code));
+        default:
+            return system_error(strerror(code));
+    }
+}
+
+[[nodiscard]]
+static auto fetch_errno() -> int
 {
     return std::exchange(errno, 0);
 }
 
-auto error(std::error_code code) -> Status
+[[nodiscard]]
+static auto errno_to_status() -> Status
 {
-    if (code == std::errc::no_such_file_or_directory) {
-        return not_found(code.message());
-    } else if (code == std::errc::invalid_argument) {
-        return invalid_argument(code.message());
-    }
-    return system_error(code.message());
-}
-
-template<class Code>
-static auto error(Code code) -> Status
-{
-    return error(std::make_error_code(std::errc {code}));
-}
-
-auto error() -> Status
-{
-    return error(fetch_and_clear_errno());
+    return to_status(fetch_errno());
 }
 
 auto file_exists(const std::string &path) -> Status
 {
-    if (std::error_code code; fs::exists(path, code)) {
-        return ok();
-    } else if (code) {
-        return error(code);
+    if (struct stat st; stat(path.c_str(), &st) != 0) {
+        return not_found("not found");
     }
-    return not_found("cannot find file \"{}\"", path);
+    return ok();
 }
 
 auto file_open(const std::string &name, int mode, int permissions) -> tl::expected<int, Status>
@@ -51,36 +49,35 @@ auto file_open(const std::string &name, int mode, int permissions) -> tl::expect
     if (const auto fd = open(name.c_str(), mode, permissions); fd != -1) {
         return fd;
     }
-    return tl::make_unexpected(error());
+    return tl::make_unexpected(errno_to_status());
 }
 
 auto file_close(int fd) -> Status
 {
-    if (close(fd) == -1) {
-        return error();
+    if (close(fd)) {
+        return errno_to_status();
     }
     return ok();
 }
 
 auto file_size(const std::string &path) -> tl::expected<Size, Status>
 {
-    std::error_code code;
-    const auto size = fs::file_size(path, code);
-    if (code) {
-        return tl::make_unexpected(error(code));
+    struct stat st;
+    if (stat(path.c_str(), &st)) {
+        return tl::make_unexpected(errno_to_status());
     }
-    return size;
+    return static_cast<Size>(st.st_size);
 }
 
 auto file_read(int file, Byte *out, Size size) -> tl::expected<Size, Status>
 {
     auto remaining = size;
     for (Size i {}; remaining && i < size; ++i) {
-        if (const auto n = ::read(file, out, remaining); n != -1) {
+        if (const auto n = read(file, out, remaining); n != -1) {
             remaining -= static_cast<Size>(n);
             out += n;
-        } else if (errno != EINTR) {
-            return tl::make_unexpected(error());
+        } else if (const auto code = fetch_errno(); code != EINTR) {
+            return tl::make_unexpected(to_status(code));
         }
     }
     return size - remaining;
@@ -89,12 +86,11 @@ auto file_read(int file, Byte *out, Size size) -> tl::expected<Size, Status>
 auto file_write(int file, Slice in) -> tl::expected<Size, Status>
 {
     const auto target_size = in.size();
-
     for (Size i {}; !in.is_empty() && i < target_size; ++i) {
-        if (const auto n = ::write(file, in.data(), in.size()); n != -1) {
+        if (const auto n = write(file, in.data(), in.size()); n != -1) {
             in.advance(static_cast<Size>(n));
-        } else if (errno != EINTR) {
-            return tl::make_unexpected(error());
+        } else if (const auto code = fetch_errno(); code != EINTR) {
+            return tl::make_unexpected(to_status(code));
         }
     }
     return target_size - in.size();
@@ -103,7 +99,7 @@ auto file_write(int file, Slice in) -> tl::expected<Size, Status>
 auto file_sync(int fd) -> Status
 {
     if (fsync(fd) == -1) {
-        return error();
+        return errno_to_status();
     }
     return ok();
 }
@@ -113,46 +109,43 @@ auto file_seek(int fd, long offset, int whence) -> tl::expected<Size, Status>
     if (const auto position = lseek(fd, offset, whence); position != -1) {
         return static_cast<Size>(position);
     }
-    return tl::make_unexpected(error());
+    return tl::make_unexpected(errno_to_status());
 }
 
 auto file_remove(const std::string &path) -> Status
 {
-    if (::unlink(path.c_str()) == -1) {
-        return error();
+    if (unlink(path.c_str())) {
+        return errno_to_status();
     }
     return ok();
 }
 
 auto file_resize(const std::string &path, Size size) -> Status
 {
-    std::error_code code;
-    fs::resize_file(path, size, code);
-    if (code) {
-        return error(code);
+    if (truncate(path.c_str(), static_cast<off_t>(size))) {
+        return errno_to_status();
     }
     return ok();
 }
 
 auto dir_create(const std::string &path, mode_t permissions) -> Status
 {
-    if (mkdir(path.c_str(), permissions) == -1) {
-        if (fetch_and_clear_errno() == EEXIST) {
+    if (mkdir(path.c_str(), permissions)) {
+        if (fetch_errno() == EEXIST) {
             return logic_error("could not create directory: directory {} already exists", path);
         }
-        return error();
+        return errno_to_status();
     }
     return ok();
 }
 
 auto dir_remove(const std::string &path) -> Status
 {
-    if (::rmdir(path.c_str()) == -1) {
-        return error();
+    if (rmdir(path.c_str())) {
+        return errno_to_status();
     }
     return ok();
 }
-
 
 static auto read_file_at(int file, Byte *out, Size &requested, Size offset)
 {
@@ -236,9 +229,10 @@ auto PosixStorage::resize_file(const std::string &path, Size size) -> Status
 
 auto PosixStorage::rename_file(const std::string &old_path, const std::string &new_path) -> Status
 {
-    std::error_code code;
-    fs::rename(old_path, new_path, code);
-    return error(code);
+    if (rename(old_path.c_str(), new_path.c_str())) {
+        return errno_to_status();
+    }
+    return ok();
 }
 
 auto PosixStorage::remove_file(const std::string &path) -> Status
@@ -263,15 +257,22 @@ auto PosixStorage::file_size(const std::string &path, Size &out) const -> Status
 
 auto PosixStorage::get_children(const std::string &path, std::vector<std::string> &out) const -> Status
 {
-    std::error_code code;
-    fs::directory_iterator itr {path, code};
-    if (code) {
-        return error(code);
-    }
+    const auto skip = [](const auto *s) {
+        return !std::strcmp(s, ".") || !std::strcmp(s, "..");
+    };
 
-    for (auto const &entry: itr) {
-        out.emplace_back(entry.path());
+    auto *dir = opendir(path.c_str());
+    if (dir == nullptr) {
+        return errno_to_status();
     }
+    struct dirent *ent;
+    while ((ent = readdir(dir))) {
+        if (skip(ent->d_name)) {
+            continue;
+        }
+        out.emplace_back(ent->d_name);
+    }
+    closedir(dir);
     return ok();
 }
 

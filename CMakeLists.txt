@@ -27,45 +27,37 @@ FetchContent_Declare(spdlog
 set(SPDLOG_NO_EXCEPTIONS On CACHE INTERNAL "")
 FetchContent_MakeAvailable(spdlog)
 
-# Compile the library.
+set(MAIN_PROJECT OFF)
+if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    set(MAIN_PROJECT ON)
+endif()
+
+option(CALICO_BuildTests "Build the tests when BUILD_TESTING is set" ${MAIN_PROJECT})
+option(CALICO_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
+
 add_subdirectory(src)
 
-if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    option(CALICO_BUILD_BENCHMARKS "Build the benchmarks" On)
-    option(CALICO_BUILD_EXAMPLES "Build the examples" On)
-    option(CALICO_BUILD_FUZZERS "Build the fuzzers" Off)
-    option(CALICO_BUILD_TESTS "Build the tests" On)
-    option(CALICO_BUILD_TOOLS "Build the tools" On)
+if(CALICO_BuildTests)
+    include(CTest)
+    enable_testing()
+    add_subdirectory(test)
+endif()
 
-    if(CALICO_BUILD_TOOLS OR CALICO_BUILD_BENCHMARKS OR CALICO_BUILD_FUZZERS OR CALICO_BUILD_TESTS)
-        add_subdirectory(tools)
-    endif()
+# TODO: This installs spdlog alongside calico. Is that what we want?
+set(TARGETS_NAME ${PROJECT_NAME}Targets)
+set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
+set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
+set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
+set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
 
-    if(CALICO_BUILD_BENCHMARKS)
-        add_subdirectory(benchmarks)
-    endif()
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+        "${CONFIG_FILE_IN}" "${CONFIG_FILE_OUT}"
+        INSTALL_DESTINATION "${INSTALL_DIR}")
+write_basic_package_version_file("${VERSION_FILE}"
+        COMPATIBILITY SameMajorVersion)
 
-    if(CALICO_BUILD_EXAMPLES)
-        add_subdirectory(examples)
-    endif()
-
-    if(CALICO_BUILD_FUZZERS)
-        add_subdirectory(fuzz)
-    endif()
-
-    if(CALICO_BUILD_TESTS)
-        include(CTest)
-        enable_testing()
-        add_subdirectory(test)
-    endif()
-
-    # TODO: This installs spdlog alongside calico. Is that what we want?
-    set(TARGETS_NAME ${PROJECT_NAME}Targets)
-    set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
-    set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
-    set(CONFIG_FILE_OUT "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}Config.cmake")
-    set(VERSION_FILE "${PROJECT_BINARY_DIR}/cmake/${PROJECT_NAME}ConfigVersion.cmake")
-
+if(CALICO_Install)
     install(TARGETS calico spdlog
             EXPORT "${TARGETS_NAME}"
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
@@ -76,16 +68,10 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     install(DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
-    include(CMakePackageConfigHelpers)
-    configure_package_config_file(
-            "${CONFIG_FILE_IN}" "${CONFIG_FILE_OUT}"
-            INSTALL_DESTINATION "${INSTALL_DIR}")
-    write_basic_package_version_file("${VERSION_FILE}"
-            COMPATIBILITY SameMajorVersion)
+
     install(EXPORT "${TARGETS_NAME}"
             NAMESPACE "${PROJECT_NAME}::"
             DESTINATION "${INSTALL_DIR}")
     install(FILES "${CONFIG_FILE_OUT}" "${VERSION_FILE}"
             DESTINATION "${INSTALL_DIR}")
 endif()
-

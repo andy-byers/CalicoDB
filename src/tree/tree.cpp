@@ -1,5 +1,4 @@
 #include "tree.h"
-#include "overflow.h"
 #include "pager/pager.h"
 #include "utils/utils.h"
 
@@ -16,8 +15,6 @@ public:
     [[nodiscard]]
     static auto is_underflowing(const Node &node) -> bool
     {
-        // TODO: This is a hack to avoid having to rotate cells. It works, but will allow the tree to become pretty
-        //       unbalanced after erases. I'll have to rewrite the rotation code to use the new API at some point.
         return node.header.cell_count == 0;
     }
 
@@ -89,15 +86,16 @@ public:
         }
         return make_old_node(tree, std::move(page));
     }
-    
+
     static auto release_node(BPlusTree &tree, Node node) -> void
     {
         tree.m_pager->release(std::move(node).take());
     }
 
-    static auto destroy_node(BPlusTree &tree, Node node) -> void
+    [[nodiscard]]
+    static auto destroy_node(BPlusTree &tree, Node node) -> tl::expected<void, Status>
     {
-        tree.m_free_list.push(std::move(node).take());
+        return tree.m_free_list.push(std::move(node).take());
     }
 
     [[nodiscard]]
@@ -605,7 +603,7 @@ public:
                     release_node(tree, std::move(right));
                 }
                 release_node(tree, std::move(left));
-                destroy_node(tree, std::move(node));
+                Calico_Try_R(destroy_node(tree, std::move(node)));
                 CALICO_EXPECT_FALSE(is_overflowing(parent));
                 return {};
             }
@@ -625,7 +623,7 @@ public:
                     release_node(tree, std::move(right_right));
                 }
                 release_node(tree, std::move(node));
-                destroy_node(tree, std::move(right));
+                Calico_Try_R(destroy_node(tree, std::move(right)));
                 CALICO_EXPECT_FALSE(is_overflowing(parent));
                 return {};
             }
@@ -667,7 +665,7 @@ public:
                 Calico_Put_R(root, acquire_node(tree, Id::root(), true));
             } else {
                 merge_root(root, child);
-                destroy_node(tree, std::move(child));
+                Calico_Try_R(destroy_node(tree, std::move(child)));
             }
             Calico_Try_R(maybe_fix_child_parent_links(tree, root));
         }
@@ -901,6 +899,18 @@ auto BPlusTree::save_state(FileHeader &header) const -> void
 auto BPlusTree::load_state(const FileHeader &header) -> void
 {
     m_free_list.m_head = header.free_list_id;
+}
+
+/* Routine for fixing back references. For a given page with page X, all pages containing references to X
+ * must be updated so that X can replace a free list page during vacuum. To this end, every reference between
+ * pages must be two-way. This requirement is already satisfied for node pages, since we keep both left and
+ * right sibling links in the external nodes. For overflow and free list pages, we just keep a back pointer.
+ */
+[[nodiscard]]
+auto fix_node_back_refs(Pager &pager, Page &page, Id swap_pid) -> tl::expected<void, Status>
+{
+    fprintf(stderr,"hello\n");
+    (void)pager;(void)page;(void)swap_pid;return {};
 }
 
 using Callback = std::function<void(Node &, Size)>;

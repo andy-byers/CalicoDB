@@ -1,10 +1,8 @@
 
 #include "database/database_impl.h"
-#include "storage/posix_storage.h"
 #include "tools.h"
 #include "tree/cursor_internal.h"
 #include "tree/header.h"
-#include "tree/tree.h"
 #include "unit_tests.h"
 #include "wal/wal.h"
 #include <array>
@@ -29,6 +27,7 @@ public:
 
     ~BasicDatabaseTests() override = default;
 
+    std::string prefix {PREFIX};
     Size frame_count {64};
     Options options;
 };
@@ -40,21 +39,26 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
         ASSERT_OK(Database::open(ROOT, options, &db));
         delete db;
     }
-    ASSERT_TRUE(storage->file_exists(std::string {PREFIX} + "data").is_ok());
+    ASSERT_TRUE(storage->file_exists(prefix + "data").is_ok());
 }
 
 TEST_F(BasicDatabaseTests, IsDestroyed)
 {
-    const auto filename = std::string {PREFIX} + "data";
+    std::error_code code;
+    fs::remove_all("/tmp/calico_test_wal", code);
+    ASSERT_OK(storage->create_directory("/tmp/calico_test_wal"));
+    options.wal_prefix = "/tmp/calico_test_wal/wal_file_";
 
     Database *db;
     ASSERT_OK(Database::open(ROOT, options, &db));
-    ASSERT_TRUE(storage->file_exists(filename).is_ok());
+    ASSERT_TRUE(storage->file_exists(prefix + "data").is_ok());
+    ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_ok());
     delete db;
 
     // TODO: Ensure that WAL files stored in a separate location are deleted as well.
     ASSERT_OK(Database::destroy(ROOT, options));
-    ASSERT_TRUE(storage->file_exists(filename).is_not_found());
+    ASSERT_TRUE(storage->file_exists(prefix + "data").is_not_found());
+    ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
@@ -300,7 +304,7 @@ static auto add_records(TestDatabase &test, Size n, Size max_value_size, const s
     std::vector<Record> records(n);
 
     for (Size i {}; i < n; ++i) {
-        const auto value_size = test.random.GenerateInteger<Size>(max_value_size);
+        const auto value_size = test.random.Next<Size>(max_value_size);
         records[i].key = prefix + Tools::integral_key(i);
         records[i].value = test.random.Generate(value_size).to_string();
         EXPECT_OK(test.impl->put(records[i].key, records[i].value));
@@ -368,7 +372,10 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
     }
     // Create a new database from the cloned data. This database will need to roll the WAL forward to become
     // consistent.
-    ASSERT_EQ(snapshot, TestDatabase {*clone}.snapshot());
+    TestDatabase clone_db {*clone};
+    ASSERT_OK(clone_db.impl->status());
+    auto s = clone_db.snapshot();
+    ASSERT_EQ(snapshot, s);
 }
 
 TEST_F(DbRecoveryTests, RecoversNthBatch)
@@ -568,7 +575,6 @@ INSTANTIATE_TEST_SUITE_P(
         ErrorWrapper {ErrorTarget::WAL_WRITE, 10},
         ErrorWrapper {ErrorTarget::WAL_WRITE, 100}));
 
-
 class ExtendedCursor : public Cursor {
     friend class ExtendedDatabase;
 
@@ -740,6 +746,179 @@ TEST(ExtensionTests, Extensions)
 
     ASSERT_OK(db->commit());
     delete db;
+}
+
+class ApiTests: public InMemoryTest {
+protected:
+    ApiTests()
+    {
+        options.storage = storage.get();
+    }
+
+    ~ApiTests() override
+    {
+        delete db;
+    }
+
+    auto SetUp() -> void override
+    {
+        ASSERT_OK(Calico::Database::open(ROOT, options, &db));
+    }
+
+    Options options;
+    Database *db;
+};
+
+TEST_F(ApiTests, IsConstCorrect)
+{
+    ASSERT_OK(db->put("key", "value"));
+
+    std::string value;
+    const auto *const_db = db;
+    ASSERT_OK(const_db->get("key", value));
+    ASSERT_EQ(const_db->get_property("calico.count.records"), "1");
+    ASSERT_OK(const_db->status());
+
+    auto *cursor = const_db->new_cursor();
+    cursor->seek_first();
+
+    const auto *const_cursor = cursor;
+    ASSERT_TRUE(const_cursor->is_valid());
+    ASSERT_OK(const_cursor->status());
+    ASSERT_EQ(const_cursor->key(), "key");
+    ASSERT_EQ(const_cursor->value(), "value");
+    delete const_cursor;
+}
+
+TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
+{
+    ASSERT_OK(db->put("a", "1"));
+    ASSERT_OK(db->put("b", "2"));
+    ASSERT_OK(db->put("c", "3"));
+    ASSERT_OK(db->commit());
+
+    ASSERT_OK(db->put("a", "x"));
+    ASSERT_OK(db->put("b", "y"));
+    ASSERT_OK(db->put("c", "z"));
+    delete db;
+
+    ASSERT_OK(Calico::Database::open(ROOT, options, &db));
+    auto *cursor = db->new_cursor();
+    cursor->seek_first();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "a");
+    ASSERT_EQ(cursor->value(), "1");
+
+    cursor->next();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "b");
+    ASSERT_EQ(cursor->value(), "2");
+
+    cursor->next();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "c");
+    ASSERT_EQ(cursor->value(), "3");
+
+    cursor->next();
+    ASSERT_FALSE(cursor->is_valid());
+    delete cursor;
+}
+
+TEST_F(ApiTests, EmptyTransactionsAreOk)
+{
+    ASSERT_OK(db->commit());
+    ASSERT_OK(db->abort());
+}
+
+TEST_F(ApiTests, KeysCanBeArbitraryBytes)
+{
+    const std::string key_1 {"\x00\x00", 2};
+    const std::string key_2 {"\x00\x01", 2};
+    const std::string key_3 {"\x01\x00", 2};
+
+    ASSERT_OK(db->put(key_1, "1"));
+    ASSERT_OK(db->put(key_2, "2"));
+    ASSERT_OK(db->put(key_3, "3"));
+    ASSERT_OK(db->commit());
+
+    auto *cursor = db->new_cursor();
+    cursor->seek_first();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_1);
+    ASSERT_EQ(cursor->value(), "1");
+    cursor->next();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_2);
+    ASSERT_EQ(cursor->value(), "2");
+    cursor->next();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_3);
+    ASSERT_EQ(cursor->value(), "3");
+    cursor->next();
+    delete cursor;
+}
+
+class CommitTests : public ApiTests {
+protected:
+    ~CommitTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        ApiTests::SetUp();
+        ASSERT_OK(db->put("a", "1"));
+        ASSERT_OK(db->put("b", "2"));
+        ASSERT_OK(db->put("c", "3"));
+    }
+
+    auto TearDown() -> void override
+    {
+        ASSERT_OK(db->commit());
+        assert_special_error(db->put("d", "4"));
+        delete db;
+
+        storage_handle().clear_interceptors();
+        ASSERT_OK(Database::open("test", options, &db));
+
+        std::string value;
+        ASSERT_OK(db->get("a", value));
+        ASSERT_EQ(value, "1");
+        ASSERT_OK(db->get("b", value));
+        ASSERT_EQ(value, "2");
+        ASSERT_OK(db->get("c", value));
+        ASSERT_EQ(value, "3");
+    }
+};
+
+TEST_F(CommitTests, WalAdvanceFailure)
+{
+    // Write the commit record and flush successfully, but fail to open the next segment file.
+    Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
+}
+
+TEST_F(CommitTests, PagerFlushFailure)
+{
+    // Write the commit record and flush successfully, but fail to flush old pages from the page cache.
+    Quick_Interceptor("test/data", Tools::Interceptor::WRITE);
+}
+
+class WalPrefixTests : public OnDiskTest {
+public:
+    WalPrefixTests()
+    {
+        options.storage = storage.get();
+    }
+
+    Options options;
+    Database *db {};
+};
+
+TEST_F(WalPrefixTests, WalDirectoryMustExist)
+{
+    options.wal_prefix = "nonexistent";
+    ASSERT_TRUE(Calico::Database::open(ROOT, options, &db).is_not_found());
 }
 
 } // <anonymous>

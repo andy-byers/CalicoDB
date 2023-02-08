@@ -66,7 +66,7 @@ auto main(int argc, const char *argv[]) -> int
         for (Size i {}; i < num_committed; i += XACT_SIZE) {
             for (Size j {}; j < XACT_SIZE; ++j) {
                 const auto key = Tools::integral_key<KEY_WIDTH>(i + j);
-                const auto value = generate_lowercase(random, random.GenerateInteger<Size>(10, 100));
+                const auto value = generate_lowercase(random, random.Next<Size>(10, 100));
                 CALICO_EXPECT_TRUE(db->put(key, value).is_ok());
                 ofs << value << '\n';
             }
@@ -79,8 +79,8 @@ auto main(int argc, const char *argv[]) -> int
 
     // Modify the database until we receive a signal or hit the operation limit.
     for (Size i {}; i < LIMIT; ++i) {
-        const auto key = std::to_string(random.GenerateInteger<Size>(num_committed * 2));
-        const auto value = generate_lowercase(random, random.GenerateInteger<Size>(options.page_size / 2));
+        const auto key = std::to_string(random.Next<Size>(num_committed * 2));
+        const auto value = generate_lowercase(random, random.Next<Size>(options.page_size / 2));
         CALICO_EXPECT_TRUE(db->put(key, value).is_ok());
 
         // Keep the database from getting too large.

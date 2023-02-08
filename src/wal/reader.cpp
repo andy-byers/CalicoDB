@@ -99,10 +99,6 @@ auto LogReader::read_logical_record(Span &out, Span tail) -> Status
         auto s = read_exact_or_eof(*m_file, (m_number+1) * tail.size(), tail);
 
         if (!s.is_ok()) {
-            // If we have any record fragments read so far, we consider this corruption.
-            if (s.is_not_found() && header.type != WalRecordHeader::Type {}) {
-                return read_corruption_error("logical record is incomplete");
-            }
             return s;
         }
         m_offset = 0;
@@ -178,7 +174,7 @@ auto WalReader::open_segment(Id id) -> Status
 {
     CALICO_EXPECT_EQ(m_reader, std::nullopt);
     RandomReader *file;
-    auto s = m_store->open_random_reader(m_prefix + encode_segment_name(id), &file);
+    auto s = m_store->open_random_reader(encode_segment_name(m_prefix, id), &file);
     if (s.is_ok()) {
         m_file.reset(file);
         m_reader = LogReader {*m_file};

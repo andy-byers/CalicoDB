@@ -15,17 +15,19 @@
 
 namespace Calico {
 
+#if not NDEBUG
 TEST(TestUtils, ExpectationDeathTest)
 {
     ASSERT_DEATH(CALICO_EXPECT_TRUE(false), EXPECTATION_MATCHER);
 }
+#endif // not NDEBUG
 
 TEST(TestUtils, EncodingIsConsistent)
 {
     Tools::RandomGenerator random;
-    const auto u16 = random.GenerateInteger<std::uint16_t>(std::uint16_t(-1));
-    const auto u32 = random.GenerateInteger<std::uint32_t>(std::uint32_t(-1));
-    const auto u64 = random.GenerateInteger<std::uint64_t>(std::uint64_t(-1));
+    const auto u16 = random.Next<std::uint16_t>(std::uint16_t(-1));
+    const auto u32 = random.Next<std::uint32_t>(std::uint32_t(-1));
+    const auto u64 = random.Next<std::uint64_t>(std::uint64_t(-1));
     std::string buffer(sizeof(u16) + sizeof(u32) + sizeof(u64) + 1, '\x00');
 
     auto dst = buffer.data();
@@ -96,15 +98,6 @@ TEST_F(SliceTests, EmptyRangesAreEmpty)
     ASSERT_TRUE(slice.range(0, 0).is_empty());
 }
 
-TEST_F(SliceTests, RangeDeathTest)
-{
-    Slice discard;
-    ASSERT_DEATH(discard = slice.range(slice.size() + 1), "Assert");
-    ASSERT_DEATH(discard = slice.range(slice.size(), 1), "Assert");
-    ASSERT_DEATH(discard = slice.range(0, slice.size() + 1), "Assert");
-    ASSERT_DEATH(discard = slice.range(5, slice.size()), "Assert");
-}
-
 TEST_F(SliceTests, AdvanceByZeroDoesNothing)
 {
     auto copy = slice;
@@ -116,11 +109,6 @@ TEST_F(SliceTests, AdvancingByOwnLengthProducesEmptySlice)
 {
     slice.advance(slice.size());
     ASSERT_TRUE(slice.is_empty());
-}
-
-TEST_F(SliceTests, AdvanceDeathTest)
-{
-    ASSERT_DEATH(slice.advance(slice.size() + 1), "Assert");
 }
 
 TEST_F(SliceTests, TruncatingToOwnLengthDoesNothing)
@@ -144,12 +132,28 @@ TEST_F(SliceTests, TruncatingEmptySliceDoesNothing)
     ASSERT_TRUE(slice == copy);
 }
 
+#if not NDEBUG
+TEST_F(SliceTests, AdvanceDeathTest)
+{
+    ASSERT_DEATH(slice.advance(slice.size() + 1), "Assert");
+}
+
+TEST_F(SliceTests, RangeDeathTest)
+{
+    Slice discard;
+    ASSERT_DEATH(discard = slice.range(slice.size() + 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(slice.size(), 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(0, slice.size() + 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(5, slice.size()), "Assert");
+}
+
 TEST_F(SliceTests, TruncateDeathTest)
 {
     ASSERT_DEATH(slice.truncate(slice.size() + 1), "Assert");
     slice.truncate(0);
     ASSERT_DEATH(slice.truncate(1), "Assert");
 }
+#endif // not NDEBUG
 
 TEST_F(SliceTests, WithCppString)
 {
@@ -826,6 +830,46 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     expect_ok(storage_handle().open_random_editor("test/data", &editor));
     assert_special_error(editor->write({}, 0));
     delete editor;
+}
+
+TEST(LoggingTests, StringifiesNumbers)
+{
+    auto message = number_to_string(123);
+    append_number(message, 4);
+    append_number(message, 56);
+    ASSERT_EQ(message, "123456");
+}
+
+TEST(LoggingTests, StringifiesMaximumNumber)
+{
+    auto n = std::numeric_limits<Size>::max();
+    auto s = number_to_string(n);
+    while (!s.empty()) {
+        ASSERT_EQ(s.back(), n%10 + '0');
+        s.pop_back();
+        n /= 10;
+    }
+}
+
+TEST(LoggingTests, EscapesStrings)
+{
+    auto message = escape_string("\x01\x02\x03");
+    append_escaped_string(message, "\x04");
+    append_escaped_string(message, "\x05\x06");
+    ASSERT_EQ(message, "\\x01\\x02\\x03\\x04\\x05\\x06");
+}
+
+TEST(LoggingTests, OnlyEscapesUnprintableCharacters)
+{
+    for (Size i {}; i < 256; ++i) {
+        char data[] {static_cast<char>(i)};
+        const auto str = escape_string({data, 1});
+        if (std::isprint(*data)) {
+            ASSERT_EQ(str.front(), *data);
+        } else {
+            ASSERT_EQ(str.front(), '\\');
+        }
+    }
 }
 
 } // namespace Calico

@@ -1,7 +1,16 @@
+/*
+ * map_fuzzer.cpp: Checks database consistency with a std::map. This fuzzer will inject faults, unless NO_FAILURES is defined.
+ *
+ * The std::map represents the records that are committed to the database. The contents of the std::map and the database should
+ * be exactly the same after (a) a transaction has finished, or (b) the database is reopened.
+ */
+
 #include "fuzzer.h"
+
 #include <map>
 #include <set>
-#include <calico/calico.h>
+
+#include "calico/calico.h"
 
 namespace {
 
@@ -40,6 +49,27 @@ auto storage_base(Storage *storage) -> DynamicMemory &
     return reinterpret_cast<DynamicMemory &>(*storage);
 }
 
+auto handle_failure() -> void
+{
+#ifdef NO_FAILURES
+    std::fputs("error: unexpected failure\n", stderr);
+    std::abort();
+#endif // NO_FAILURES
+}
+
+auto translate_op(std::uint8_t code) -> OperationType
+{
+    auto type = static_cast<OperationType>(code % OperationType::TYPE_COUNT);
+
+#ifdef NO_FAILURES
+    if (type == FAIL) {
+        type = REOPEN;
+    }
+#endif // NO_FAILURES
+
+    return type;
+}
+
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     auto options = DB_OPTIONS;
@@ -64,14 +94,36 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         erased.clear();
     };
 
+    const auto expect_equal_sizes = [&db, &map]
+    {
+        const auto record_count = db->get_property("calico.count.records");
+        assert(not record_count.empty());
+        assert(map.size() == std::stoi(record_count));
+    };
+
+    const auto expect_equal_contents = [&db, &map]
+    {
+        auto *cursor = db->new_cursor();
+        cursor->seek_first();
+        for (const auto &[key, value]: map) {
+            assert(cursor->is_valid());
+            assert(cursor->key() == key);
+            assert(cursor->value() == value);
+            cursor->next();
+        }
+        assert(not cursor->is_valid());
+        assert(cursor->status().is_not_found());
+        delete cursor;
+    };
+
     while (size > 1) {
-        const auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
+        const auto operation_type = translate_op(*data++);
         size--;
 
         if (operation_type == FAIL) {
             const auto failure_target = static_cast<FailureTarget>(*data++ % FailureTarget::TARGET_COUNT);
             size--;
-            
+
             switch (failure_target) {
                 case DATA_READ:
                     storage_base(options.storage).add_interceptor(Interceptor {DB_DATA_PATH, Interceptor::READ, [] {
@@ -98,14 +150,14 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                         return Status::system_error(std::string {"UNLINK "} + DB_WAL_PREFIX);
                     }});
                     break;
-                default:
+                default: // WAL_OPEN
                     storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::OPEN, [] {
                         return Status::system_error(std::string {"OPEN "} + DB_WAL_PREFIX);
                     }});
             }
             continue;
         }
-        
+
         std::string key;
         std::string value;
 
@@ -117,59 +169,65 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     if (const auto itr = erased.find(key); itr != end(erased)) {
                         erased.erase(itr);
                     }
-                    added.emplace(key, value);
+                    added[key] = value;
+
                 } else {
+                    handle_failure();
                     reopen_and_clear_pending();
                 }
                 break;
             case ERASE:
-                if (const auto s = db->erase(extract_key(data, size)); s.is_ok()) {
+                key = extract_key(data, size).to_string();
+                if (const auto s = db->erase(key); s.is_ok()) {
                     if (const auto itr = added.find(key); itr != end(added)) {
                         added.erase(itr);
                     }
-                    erased.emplace(key);
+                    erased.insert(key);
                 } else if (!s.is_not_found()) {
+                    handle_failure();
                     reopen_and_clear_pending();
                 }
                 break;
             case COMMIT:
                 if (db->commit().is_ok()) {
-                    map.insert(begin(added), end(added));
+                    for (const auto &[k, v]: added) {
+                        map[k] = v;
+                    }
                     for (const auto &k: erased) {
                         map.erase(k);
                     }
                     added.clear();
                     erased.clear();
                 } else {
+                    handle_failure();
                     reopen_and_clear_pending();
                 }
+                expect_equal_sizes();
                 break;
             case ABORT:
                 if (db->abort().is_ok()) {
                     added.clear();
                     erased.clear();
                 } else {
+                    handle_failure();
                     reopen_and_clear_pending();
                 }
+                expect_equal_sizes();
                 break;
             default: // REOPEN
                 reopen_and_clear_pending();
+                expect_equal_contents();
         }
-        expect_ok(db->status());
+        if (!db->status().is_ok()) {
+            handle_failure();
+            reopen_and_clear_pending();
+            expect_equal_contents();
+        }
     }
     reopen_and_clear_pending();
+    expect_equal_sizes();
+    expect_equal_contents();
 
-    // Ensure that the database and the std::map have identical contents.
-    assert(map.size() == std::stoi(db->get_property("calico.count.records")));
-    auto *cursor = db->new_cursor();
-    cursor->seek_first();
-    for (const auto &[key, value]: map) {
-        assert(cursor->is_valid());
-        assert(cursor->key() == key);
-        assert(cursor->value() == value);
-    }
-    Tools::expect_non_error(cursor->status());
-    delete cursor;
     delete db;
     delete options.storage;
     return 0;

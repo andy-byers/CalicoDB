@@ -309,25 +309,25 @@ static auto seek_linear(const Node &node, const Slice &key) -> SeekResult
 
 static auto seek_binary(const Node &node, const Slice &key) -> SeekResult
 {
-    auto upper = static_cast<long>(node.header.cell_count);
-    long lower {};
+    unsigned upper {node.header.cell_count};
+    unsigned lower {};
 
     while (lower < upper) {
-        // Note that this cannot overflow since the page size is bounded by a 16-bit integer.
         const auto mid = (lower+upper) / 2;
-        const auto rhs = read_key(node, static_cast<Size>(mid));
+        const auto rhs = read_key(node, mid);
 
         switch (compare_three_way(key, rhs)) {
-            case ThreeWayComparison::EQ:
-                return {static_cast<unsigned>(mid), true};
             case ThreeWayComparison::LT:
                 upper = mid;
                 break;
             case ThreeWayComparison::GT:
                 lower = mid + 1;
+                break;
+            case ThreeWayComparison::EQ:
+                return {mid, true};
         }
     }
-    return {static_cast<unsigned>(lower), false};
+    return {lower, false};
 }
 
 using Seek = SeekResult (*)(const Node &, const Slice &);

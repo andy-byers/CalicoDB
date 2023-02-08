@@ -30,7 +30,7 @@ to build the library and tests.
 Note that the tests must be built with assertions, hence the `RelWithAssertions`.
 To build the library in release mode without tests, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BuildTests=Off .. && cmake --build .
 ```
 
 ## API
@@ -64,58 +64,72 @@ assert(s2.starts_with("ab"));
 ### Opening a database
 ```C++
 // Set some initialization options.
-Calico::Options options;
+const Calico::Options options {
+    // Use pages of size 2 KiB, a 2 MiB page cache, and a 1 MiB WAL write buffer.
+    .page_size = 0x2000,
+    .page_cache_size = 0x200000,
+    .wal_buffer_size = 0x100000,
+    
+    // Store the WAL segments in a separate location. The directory calico_wal must already exist.
+    // WAL segments will look like "calico_wal_#", where # is the segment ID.
+    .wal_prefix = "calico_wal_",
+    
+    // These are only pertinent when logging to a file (log_target option).
+    .max_log_size = 0,
+    .max_log_files = 0,
 
-// Use pages of size 2 KiB, a 2 MiB page cache, and a 1 MiB WAL write buffer.
-options.page_size = 0x2000;
-options.page_cache_size = 0x200000;
-options.wal_buffer_size = 0x100000;
+    // Write colorful log messages to stderr.
+    .log_level = Calico::LogLevel::TRACE,
+    .log_target = Calico::LogTarget::FILE,
+    
+    // This can be used to inject a custom storage implementation. (see the DynamicMemory class in
+    // tools/tools.h for an example that stores its files in-memory)
+    .storage = nullptr,
+};
 
-// Store the WAL segments in a separate location.
-options.wal_prefix = "/tmp/cats_wal";
-
-// Write colorful log messages to stderr.
-options.log_level = Calico::LogLevel::TRACE;
-options.log_target = Calico::LogTarget::STDERR_COLOR;
-
-// Create a database at "/tmp/cats".
+// Create or open a database at "/tmp/cats".
 Calico::Database *db;
 auto s = Calico::Database::open("/tmp/cats", options, &db);
 
 // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is 
 // null-terminated, so it can be printed like in the following block.
 if (!s.is_ok()) {
-    fprintf(stderr, "error: %s\n", s.what().data());
+    std::fprintf(stderr, "error: %s\n", s.what().data());
     return 1;
 }
 ```
 
 ### Updating a database
+Errors returned by methods that modify the database are fatal and the database will refuse to perform any more work.
+The next time that the database is opened, recovery will be run to undo any uncommitted changes.
 
 ```C++
 // Insert some key-value pairs.
-if (const auto s = db->put("a", "1"); !s.is_ok()) {
-
+if (const Calico::Status s = db->put("a", "1"); s.is_system_error()) {
+    // Handle a system-level or I/O error.
+} else if (s.is_invalid_argument()) {
+    // Key was too long. This can be prevented by querying the maximum key size after database creation.
 }
-if (const auto s = db->put("b", "2"); !s.is_ok()) {
 
+if (const auto s = db->put("b", "2"); s.is_ok()) {
+    // Record was inserted.
 }
-if (const auto s = db->put("c", "3"); !s.is_ok()) {
+if (const auto s = db->put("c", "3"); s.is_ok()) {
 
 }
 
 // Keys are unique within the entire database instance, so inserting a record with a key already in the database will 
 // cause the old record to be overwritten.
-if (const auto s = db->put("c", "123"); !s.is_ok()) {
+if (const auto s = db->put("c", "123"); s.is_ok()) {
 
 }
 
-// Erase a record by key. If the key is not found, we'll receive a "not found" status.
-if (const auto s = db->erase("c"); !s.is_ok() && !s.is_not_found()) {
-   
+// Erase a record by key.
+if (const auto s = db->erase("c"); s.is_ok()) {
+    // Record was erased.
+} else if (s.is_not_found()) {
+    // Key does not exist.
 }
-
-
 ```
 
 ### Querying a database
@@ -123,39 +137,43 @@ if (const auto s = db->erase("c"); !s.is_ok() && !s.is_not_found()) {
 ```C++
 // Query a value by key.
 std::string value;
-if (db->get("a", value).is_ok()) {
-
+if (const auto s = db->get("a", value); s.is_ok()) {
+    // value is populated with the record's value.
+} else if (s.is_not_found()) {
+    // Key does not exist.
+} else {
+    // Actual error.
 }
 
 // Allocate a cursor.
-auto *cursor = db->new_cursor();
+Calico::Cursor *cursor = db->new_cursor();
 
 // Seek to the first record greater than or equal to the given key.
 cursor->seek("a");
 
 if (cursor->is_valid()) {
-   // If the cursor is valid, these calls can be made:
-   //     cursor->key()
-   //     cursor->value()
+    // If the cursor is valid, these calls can be made:
+    const Calico::Slice k = cursor->key();
+    const Calico::Slice v = cursor->value();
+} else if (cursor->status().is_not_found()) {
+    // Key was greater than any key in the database.
 } else {
-   // Otherwise, the error status can be queried. If the searched-for key was
-   // greater than any key in the database, a "not found" status will be returned.
-   //     cursor->status()
+    // Handle a system-level read error. These are not considered fatal errors.
 }
 
-// Iterate through the whole database.
+// Iterate through the whole database in order.
 cursor->seek_first();
 for (; cursor->is_valid(); cursor->next()) {
 
 }
 
-// Iterate in reverse.
+// Iterate in reverse order.
 cursor->seek_last();
 for (; cursor->is_valid(); cursor->previous()) {
 
 }
 
-// Iterate through a half-open range of keys.
+// Iterate through a half-open range of keys [a, f).
 cursor->seek("a");
 for (; cursor->is_valid() && cursor->key() < "f"; cursor->next()) {
 
@@ -172,13 +190,13 @@ delete cursor;
 // the database is opened. Otherwise, transaction boundaries are defined by calls to Database::commit()
 // and Database::abort().
 if (const auto s = db->erase("b"); !s.is_ok()) {
-
+    // If there was a fatal error here, the transaction would be rolled back during recovery.
 }
 
-// If this status is OK, every change made since the last call to Database::commit() will be undone (or since the 
-// database was opened, if Database::commit() hasn't been called).
-if (const auto s = db->abort(); !s.is_ok()) {
 
+if (const auto s = db->abort(); s.is_ok()) {
+    // Every change made since the last call to Database::commit() (or since the database was opened, if
+    // Database::commit() hasn't been called) is reverted.
 }
 
 if (const auto s = db->put("c", "3"); !s.is_ok()) {
@@ -188,9 +206,9 @@ if (const auto s = db->put("d", "4"); !s.is_ok()) {
     
 }
 
-// This time we'll commit the changes.
-if (const auto s = db->commit(); !s.is_ok()) {
-
+if (const auto s = db->commit(); s.is_ok()) {
+    // Changes are safely on disk (in the WAL). If we crash from here on out, the changes will be reapplied
+    // during recovery.
 }
 ```
 
@@ -220,8 +238,12 @@ delete db;
 ### Destroying a database
 
 ```C++
-if (const auto s = Calico::Database::destroy("/tmp/cats", options); !s.is_ok()) {
-
+if (const auto s = Calico::Database::destroy("/tmp/cats", options); s.is_ok()) {
+    // Database has been destroyed.
+} else if (s.is_not_found()) {
+    // The database does not exist.
+} else if (s.is_system_error()) {
+    // A system-level error has occurred.
 }
 ```
 
@@ -234,10 +256,7 @@ Examples and use-cases can be found in the [examples directory](../examples).
 ## Source Tree
 ```
 CalicoDB
-┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
 ┣╸cmake ┄┄┄┄┄┄┄┄┄┄┄┄ CMake utilities/config files
-┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
-┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄┄┄ libFuzzer fuzzers
 ┣╸include/calico
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
@@ -250,13 +269,15 @@ CalicoDB
 ┃ ┣╸storage.h ┄┄┄┄┄┄ Storage interface
 ┃ ┗╸transaction.h ┄┄ Transaction object
 ┣╸src
-┃ ┣╸core ┄┄┄┄┄┄┄┄┄┄┄ API implementation
+┃ ┣╸database ┄┄┄┄┄┄┄ API implementation
 ┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Database page cache
 ┃ ┣╸storage ┄┄┄┄┄┄┄┄ Data storage and retrieval
 ┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Common utilities
 ┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging
 ┣╸test
+┃ ┣╸benchmarks ┄┄┄┄┄ Performance benchmarks
+┃ ┣╸fuzzers ┄┄┄┄┄┄┄┄ libFuzzer fuzzers
 ┃ ┣╸recovery ┄┄┄┄┄┄┄ Crash recovery tests
 ┃ ┗╸unit_tests ┄┄┄┄┄ Unit tests
 ┗╸tools ┄┄┄┄┄┄┄┄┄┄┄┄ Non-core utilities
