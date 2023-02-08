@@ -11,5 +11,5 @@ function(build_fuzzer NAME)
     target_include_directories(${NAME} PRIVATE "${CALICO_SOURCE_DIR}")
 endfunction()
 
-build_fuzzer(db_fuzzer)
+build_fuzzer(ops_fuzzer)
 build_fuzzer(map_fuzzer)

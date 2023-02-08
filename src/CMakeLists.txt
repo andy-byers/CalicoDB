@@ -48,6 +48,8 @@ endif()
 
 add_library(calico
         STATIC "${CALICO_SOURCES}")
+add_library(calico::calico
+        ALIAS calico)
 target_include_directories(calico
         PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

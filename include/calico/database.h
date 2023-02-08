@@ -46,7 +46,7 @@ public:
     [[nodiscard]] static auto destroy(const Slice &path, const Options &options) -> Status;
 
     virtual ~Database() = default;
-    [[nodiscard]] virtual auto get_property(const Slice &name) const -> std::string = 0;
+    [[nodiscard]] virtual auto get_property(const Slice &name, std::string &out) const -> bool = 0;
     [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
     [[nodiscard]] virtual auto vacuum() -> Status = 0;

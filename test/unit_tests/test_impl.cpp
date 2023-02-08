@@ -160,106 +160,6 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
 }
 
-class ReaderTests: public BasicDatabaseTests {
-public:
-    static constexpr Size KEY_WIDTH {6};
-    static constexpr Size NUM_RECORDS {200};
-
-    auto SetUp() -> void override
-    {
-        Database *temp;
-        ASSERT_OK(Database::open(ROOT, options, &temp));
-        db.reset(temp);
-
-        for (Size i {}; i < NUM_RECORDS; ++i) {
-            const auto key = Tools::integral_key<KEY_WIDTH>(i);
-            ASSERT_OK(db->put(key, key));
-        }
-        ASSERT_OK(db->commit());
-    }
-
-    auto localized_reader() const -> void
-    {
-        static constexpr Size NUM_ROUNDS {2};
-
-        // Concentrate the cursors on the first N records.
-        static constexpr Size N {10};
-        static_assert(NUM_RECORDS >= N);
-
-        for (Size i {}; i < NUM_ROUNDS; ++i) {
-            Size counter {};
-            std::unique_ptr<Cursor> c {db->new_cursor()};
-            c->seek_first();
-            for (; counter < N; c->next(), ++counter) {
-                const auto key = Tools::integral_key<KEY_WIDTH>(counter);
-                ASSERT_EQ(c->key().to_string(), key);
-                ASSERT_EQ(c->value(), key);
-            }
-        }
-    }
-
-    auto distributed_reader(Size r) const -> void
-    {
-        static constexpr Size MAX_ROUND_SIZE {10};
-        // Try to spread the cursors out across the database.
-        const auto first = r * NUM_RECORDS % NUM_RECORDS;
-        for (auto i = first; i < NUM_RECORDS; ++i) {
-            std::unique_ptr<Cursor> c {db->new_cursor()};
-            c->seek(Tools::integral_key<KEY_WIDTH>(i));
-
-            for (auto j = i; j < std::min(i + MAX_ROUND_SIZE, NUM_RECORDS); ++j, c->next()) {
-                const auto key = Tools::integral_key<KEY_WIDTH>(j);
-                ASSERT_TRUE(c->is_valid());
-                ASSERT_EQ(c->key().to_string(), key);
-                ASSERT_EQ(c->value(), key);
-            }
-        }
-    }
-
-    Tools::RandomGenerator random {4 * 1'024 * 1'024};
-    std::unique_ptr<Database> db;
-};
-
-TEST_F(ReaderTests, SingleReader)
-{
-    for (Size x {}; x < 1'000; ++x) {
-        std::vector<std::string> strings;
-        for (Size i {}; i < NUM_RECORDS; ++i) {
-            std::unique_ptr<Cursor> c {db->new_cursor()};
-            c->seek(Tools::integral_key<KEY_WIDTH>(i));
-            ASSERT_TRUE(c->is_valid());
-            strings.emplace_back(c->value().to_string());
-        }
-    }
-    distributed_reader(0);
-    localized_reader();
-}
-
-TEST_F(ReaderTests, DistributedReaders)
-{
-    std::vector<std::thread> readers;
-    for (Size i {}; i < frame_count * 2; ++i) {
-        readers.emplace_back(std::thread {[this, i] {
-            distributed_reader(i);
-        }});
-    }
-    for (auto &reader: readers) {
-        reader.join();
-    }
-}
-
-TEST_F(ReaderTests, LocalizedReaders)
-{
-    std::vector<std::thread> readers;
-    for (Size i {}; i < frame_count * 2; ++i) {
-        readers.emplace_back(std::thread {[this] {
-            localized_reader();
-        }});
-    }
-    for (auto &reader: readers)
-        reader.join();
-}
-
 class TestDatabase {
 public:
     explicit TestDatabase(Storage &storage)
@@ -665,9 +565,9 @@ public:
     ~ExtendedDatabase() override = default;
 
     [[nodiscard]]
-    auto get_property(const Slice &name) const -> std::string override
+    auto get_property(const Slice &name, std::string &out) const -> bool override
     {
-        return m_base->get_property(name);
+        return m_base->get_property(name, out);
     }
 
     [[nodiscard]]
@@ -776,7 +676,9 @@ TEST_F(ApiTests, IsConstCorrect)
     std::string value;
     const auto *const_db = db;
     ASSERT_OK(const_db->get("key", value));
-    ASSERT_EQ(const_db->get_property("calico.count.records"), "1");
+    std::string property;
+    ASSERT_TRUE(const_db->get_property("calico.count.records", property));
+    ASSERT_EQ(property, "1");
     ASSERT_OK(const_db->status());
 
     auto *cursor = const_db->new_cursor();

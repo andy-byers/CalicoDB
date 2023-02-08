@@ -7,6 +7,7 @@
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/crc.h"
+#include "utils/lock_table.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
@@ -870,6 +871,59 @@ TEST(LoggingTests, OnlyEscapesUnprintableCharacters)
             ASSERT_EQ(str.front(), '\\');
         }
     }
+}
+
+class LockTableTests : public testing::Test {
+protected:
+    static constexpr Size PAGE_COUNT {16};
+
+    struct SharedResource {
+        Size data[PAGE_COUNT] {};
+    };
+
+//    static auto spawn_reader(LockTable &table, SharedResource &resource, Id pid) -> void
+//    {
+//        Size value;
+//
+//        std::thread thread {[pid, &resource, &table, &value] {
+//            table.lock(pid, LockMode::READ);
+//            value = resource.data[pid.as_index()];
+//            table.unlock(pid, LockMode::READ);
+//        }};
+//        thread.detach();
+//        (void)value;
+//    }
+//
+//    static auto spawn_writer(LockTable &table, Id pid) -> void
+//    {
+//        std::thread thread {[pid, &table] {
+//            table.lock(pid, LockMode::READ);
+//            busy_wait();
+//            table.unlock(pid, LockMode::READ);
+//        }};
+//    }
+//
+//    static auto spawn_updater(LockTable &table, Id pid) -> void
+//    {
+//        std::thread thread {[pid, &table] {
+//            table.lock(pid, LockMode::UPDATE);
+//            busy_wait();
+//            table.upgrade(pid);
+//            busy_wait();
+//            table.unlock(pid, LockMode::WRITE);
+//        }};
+//    }
+
+    LockTable table;
+};
+
+TEST_F(LockTableTests, MultipleReadersAreAllowed)
+{
+    table.lock(Id::root(), LockMode::READ);
+    table.lock(Id::root(), LockMode::READ);
+
+    table.unlock(Id::root(), LockMode::READ);
+    table.unlock(Id::root(), LockMode::READ);
 }
 
 } // namespace Calico

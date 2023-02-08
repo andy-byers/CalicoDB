@@ -276,7 +276,6 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
     };
 
     CALICO_EXPECT_FALSE(pid.is_null());
-    std::lock_guard lock {m_mutex};
 
     if (auto itr = m_registry.get(pid); itr != m_registry.end()) {
         return do_acquire(itr->value);
@@ -304,7 +303,6 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
 
 auto Pager::upgrade(Page &page) -> void
 {
-    std::lock_guard lock {m_mutex};
     auto itr = m_registry.get(page.id());
     CALICO_EXPECT_NE(itr, m_registry.end());
     m_framer.upgrade(itr->value.index, page);
@@ -320,9 +318,6 @@ auto Pager::release(Page page) -> void
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch->get()));
     }
-//    const auto lsn = read_page_lsn(page);
-
-    std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
 
     // This page must already be acquired.

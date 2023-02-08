@@ -10,38 +10,28 @@ static auto header_offset() -> Size
     return sizeof(Lsn) + sizeof(Byte);
 }
 
-//static auto read_prev_id(const Page &page) -> Id
-//{
-//    return {get_u64(page.view(header_offset()))};
-//}
-
 [[nodiscard]]
 static auto read_next_id(const Page &page) -> Id
 {
-    return {get_u64(page.view(header_offset() + sizeof(Id)))};
-}
-
-static auto write_prev_id(Page &page, Id prev_id) -> void
-{
-    put_u64(page.span(header_offset(), sizeof(Id)), prev_id.value);
+    return {get_u64(page.view(header_offset()))};
 }
 
 static auto write_next_id(Page &page, Id next_id) -> void
 {
-    put_u64(page.span(header_offset() + sizeof(Id), sizeof(Id)), next_id.value);
+    put_u64(page.span(header_offset(), sizeof(Id)), next_id.value);
 }
 
 [[nodiscard]]
 static auto get_readable_content(const Page &page, Size size_limit) -> Slice
 {
-    const auto offset = header_offset() + LinkHeader::SIZE;
+    const auto offset = header_offset() + sizeof(Lsn);
     return page.view(offset, std::min(size_limit, page.size() - offset));
 }
 
 [[nodiscard]]
 static auto get_writable_content(Page &page, Size size_limit) -> Span
 {
-    const auto offset = header_offset() + LinkHeader::SIZE;
+    const auto offset = header_offset() + sizeof(Lsn);
     return page.span(offset, std::min(size_limit, page.size() - offset));
 }
 
@@ -70,22 +60,12 @@ auto fix_back_refs(Pager &pager, Page &page, Id swap_pid) -> tl::expected<void, 
 //    }
 }
 
-auto FreeList::push(Page page) -> tl::expected<void, Status>
+auto FreeList::push(Page page) -> void
 {
     CALICO_EXPECT_FALSE(page.id().is_root());
-    const auto head = m_head;
-    write_prev_id(page, Id::null());
-    write_next_id(page, head);
+    write_next_id(page, m_head);
     m_head = page.id();
     m_pager->release(std::move(page));
-
-    if (!head.is_null()) {
-        Calico_Put_R(page, m_pager->acquire(head));
-        m_pager->upgrade(page);
-        write_prev_id(page, m_head);
-        m_pager->release(std::move(page));
-    }
-    return {};
 }
 
 auto FreeList::pop() -> tl::expected<Page, Status>
@@ -93,24 +73,10 @@ auto FreeList::pop() -> tl::expected<Page, Status>
     if (!m_head.is_null()) {
         Calico_New_R(page, m_pager->acquire(m_head));
         m_head = read_next_id(page);
-
-        if (!m_head.is_null()) {
-            Calico_New_R(head, m_pager->acquire(m_head));
-            m_pager->upgrade(head);
-            write_prev_id(head, Id::null());
-            m_pager->release(std::move(head));
-        }
         return page;
     }
     CALICO_EXPECT_TRUE(m_head.is_null());
     return tl::make_unexpected(logic_error("cannot pop page: free list is empty"));
-}
-
-auto FreeList::vacuum(Size target) -> tl::expected<Size, Status>
-{
-//    Id last_id {m_pager->page_count()};
-
-    return target;
 }
 
 auto read_chain(Pager &pager, Id pid, Span out) -> tl::expected<void, Status>
@@ -148,17 +114,9 @@ auto write_chain(Pager &pager, FreeList &free_list, Slice overflow) -> tl::expec
 
         if (prev) {
             write_next_id(*prev, page.id());
-            write_prev_id(page, prev->id());
             pager.release(std::move(*prev));
         } else {
-            // TODO: We need to link back to the node that holds the overflow chain start ID (for vacuum). This can't be
-            //       done here because we don't know where the cell will ultimately end up. We'll need some routine to fix
-            //       the start of an overflow chain when a cell is moved.
-            write_prev_id(page, Id::null());
             head = page.id();
-        }
-        if (overflow.is_empty()) {
-            write_next_id(page, Id::null());
         }
         prev.emplace(std::move(page));
     }
@@ -175,8 +133,7 @@ auto erase_chain(Pager &pager, FreeList &free_list, Id pid, Size size) -> tl::ex
         size -= get_readable_content(page, size).size();
         pid = read_next_id(page);
         pager.upgrade(page);
-
-        Calico_Try_R(free_list.push(std::move(page)));
+        free_list.push(std::move(page));
     }
     return {};
 }

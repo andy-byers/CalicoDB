@@ -40,7 +40,7 @@ public:
     [[nodiscard]] auto close() -> Status;
 
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
-    [[nodiscard]] auto get_property(const Slice &name) const -> std::string override;
+    [[nodiscard]] auto get_property(const Slice &name, std::string &out) const -> bool override;
     [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto commit() -> Status override;

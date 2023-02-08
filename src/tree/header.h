@@ -64,24 +64,6 @@ struct NodeHeader {
     std::uint16_t free_start {};
     std::uint16_t free_total {};
     bool is_external {true};
-
-private:
-    static constexpr Byte EXTERNAL_BITS {0b01'1};
-    static constexpr Byte INTERNAL_BITS {0b10'1};
-};
-
-/*
- * Used as metadata for both overflow chain pages and freelist pages. The backward connection is only
- * necessary for implementing the vacuum functionality. The root page cannot be a link page.
- */
-struct LinkHeader {
-    static constexpr Size SIZE {16};
-    static auto is_link(const Page &page) -> bool;
-    explicit LinkHeader(const Page &page);
-    auto write(Page &page) const -> void;
-
-    Id prev_id;
-    Id next_id;
 };
 
 } // namespace Calico

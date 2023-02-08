@@ -247,9 +247,6 @@ if (const auto s = Calico::Database::destroy("/tmp/cats", options); s.is_ok()) {
 }
 ```
 
-## Examples
-Examples and use-cases can be found in the [examples directory](../examples).
-
 ## Architecture
 ...
 
@@ -262,12 +259,9 @@ CalicoDB
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
 ┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
 ┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
-┃ ┣╸options.h ┄┄┄┄┄┄ Options for the toplevel database object
 ┃ ┣╸slice.h ┄┄┄┄┄┄┄┄ Construct for holding a contiguous sequence of bytes
-┃ ┣╸statistics.h ┄┄┄ Query database information and statistics
 ┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object for function returns
-┃ ┣╸storage.h ┄┄┄┄┄┄ Storage interface
-┃ ┗╸transaction.h ┄┄ Transaction object
+┃ ┗╸storage.h ┄┄┄┄┄┄ Storage interface
 ┣╸src
 ┃ ┣╸database ┄┄┄┄┄┄┄ API implementation
 ┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Database page cache
@@ -275,12 +269,12 @@ CalicoDB
 ┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Common utilities
 ┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging
-┣╸test
-┃ ┣╸benchmarks ┄┄┄┄┄ Performance benchmarks
-┃ ┣╸fuzzers ┄┄┄┄┄┄┄┄ libFuzzer fuzzers
-┃ ┣╸recovery ┄┄┄┄┄┄┄ Crash recovery tests
-┃ ┗╸unit_tests ┄┄┄┄┄ Unit tests
-┗╸tools ┄┄┄┄┄┄┄┄┄┄┄┄ Non-core utilities
+┗╸test
+  ┣╸benchmarks ┄┄┄┄┄ Performance benchmarks
+  ┣╸fuzzers ┄┄┄┄┄┄┄┄ libFuzzer fuzzers
+  ┣╸recovery ┄┄┄┄┄┄┄ Crash recovery tests
+  ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Non-core utilities
+  ┗╸unit_tests ┄┄┄┄┄ Unit tests
 ```
 
 ## Acknowledgements

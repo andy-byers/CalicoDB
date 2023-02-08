@@ -74,7 +74,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     auto options = DB_OPTIONS;
     options.storage = new(std::nothrow) DynamicMemory;
-    assert(options.storage != nullptr);
+    ASSERT_TRUE(options.storage != nullptr);
 
     Database *db;
     expect_ok(Database::open(DB_PATH, options, &db));
@@ -96,9 +96,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 
     const auto expect_equal_sizes = [&db, &map]
     {
-        const auto record_count = db->get_property("calico.count.records");
-        assert(not record_count.empty());
-        assert(map.size() == std::stoi(record_count));
+        std::string record_count;
+        const auto found = db->get_property("calico.count.records", record_count);
+        ASSERT_TRUE(found);
+        ASSERT_FALSE(record_count.empty());
+        ASSERT_EQ(map.size(), std::stoi(record_count));
     };
 
     const auto expect_equal_contents = [&db, &map]
@@ -106,13 +108,13 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         auto *cursor = db->new_cursor();
         cursor->seek_first();
         for (const auto &[key, value]: map) {
-            assert(cursor->is_valid());
-            assert(cursor->key() == key);
-            assert(cursor->value() == value);
+            ASSERT_TRUE(cursor->is_valid());
+            ASSERT_EQ(cursor->key(), key);
+            ASSERT_EQ(cursor->value(), value);
             cursor->next();
         }
-        assert(not cursor->is_valid());
-        assert(cursor->status().is_not_found());
+        ASSERT_FALSE(cursor->is_valid());
+        ASSERT_TRUE(cursor->status().is_not_found());
         delete cursor;
     };
 
@@ -170,7 +172,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                         erased.erase(itr);
                     }
                     added[key] = value;
-
                 } else {
                     handle_failure();
                     reopen_and_clear_pending();

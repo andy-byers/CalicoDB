@@ -252,8 +252,10 @@ auto DatabaseImpl::status() const -> Status
     return m_status;
 }
 
-auto DatabaseImpl::get_property(const Slice &name) const -> std::string
+auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bool
 {
+    out.clear();
+
     Slice prop {name};
     if (prop.starts_with("calico.")) {
         prop.advance(7);
@@ -262,35 +264,36 @@ auto DatabaseImpl::get_property(const Slice &name) const -> std::string
             prop.advance(6);
 
             if (prop == "records") {
-                return fmt::format("{}", record_count);
+                out = fmt::format("{}", record_count);
             } else if (prop == "pages") {
-                return fmt::format("{}", pager->page_count());
+                out = fmt::format("{}", pager->page_count());
+            } else if (prop == "updates") {
+                out = fmt::format("{}", m_txn_size);
             }
         } else if (prop.starts_with("limit.")) {
             prop.advance(6);
 
             if (prop == "max_key_length") {
-                return fmt::format("{}", max_key_length);
+                out = fmt::format("{}", max_key_length);
             } else if (prop == "page_size") {
-                return fmt::format("{}", pager->page_size());
+                out = fmt::format("{}", pager->page_size());
             }
         } else if (prop.starts_with("stat.")) {
             prop.advance(5);
 
-            if (prop == "updates") {
-                return fmt::format("{}", m_txn_size);
-            } else if (prop == "cache_hit_ratio") {
-                return fmt::format("{}", pager->hit_ratio());
+            if (prop == "cache_hit_ratio") {
+                out = fmt::format("{}", pager->hit_ratio());
             } else if (prop == "data_throughput") {
-                return fmt::format("{}", bytes_written);
+                out = fmt::format("{}", bytes_written);
             } else if (prop == "pager_throughput") {
-                return fmt::format("{}", pager->bytes_written());
+                out = fmt::format("{}", pager->bytes_written());
             } else if (prop == "wal_throughput") {
-                return fmt::format("{}", wal->bytes_written());
+                out = fmt::format("{}", wal->bytes_written());
             }
         }
     }
-    return "";
+    // None of the calico properties should ever be an empty string.
+    return !out.empty();
 }
 
 auto DatabaseImpl::check_key(const Slice &key, const char *message) const -> Status

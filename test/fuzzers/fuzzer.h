@@ -1,8 +1,36 @@
 #ifndef CALICO_FUZZ_FUZZER_H
 #define CALICO_FUZZ_FUZZER_H
 
+#include <iostream>
 #include "calico/calico.h"
 #include "tools.h"
+
+#define ASSERT_TRUE(cond) \
+    do { \
+        if (!(cond)) {     \
+            std::fputs(#cond " is false\n", stderr); \
+            std::abort(); \
+        } \
+    } while (0)
+
+#define ASSERT_FALSE(cond) \
+    ASSERT_TRUE(!(cond))
+
+#define ASSERT_OK(expr) \
+    do { \
+        if (auto assert_s = (expr); !assert_s.is_ok()) { \
+            std::fputs(assert_s.what().data(), stderr); \
+            std::abort(); \
+        } \
+    } while (0)
+
+#define ASSERT_EQ(lhs, rhs) \
+    do { \
+        if ((lhs) != (rhs)) { \
+            std::fputs(#lhs " != " #rhs, stderr); \
+            std::abort(); \
+        } \
+    } while (0)
 
 namespace Calico {
 

@@ -239,7 +239,9 @@ BENCHMARK(BM_RandomReadWrite_75_25);
 
 auto ensure_records(Database &db, Size)
 {
-    if (const auto count = db.get_property("calico.count.records"); std::stoi(count) < DB_INITIAL_SIZE / 2) {
+    std::string property;
+    (void)db.get_property("calico.count.records", property);
+    if (std::stoi(property) < DB_INITIAL_SIZE / 2) {
         for (Size i {}; i < DB_INITIAL_SIZE; ++i) {
             const auto key = Tools::integral_key<DB_KEY_SIZE>(rng.Next<Size>(1'000'000));
             do_write(db, key);

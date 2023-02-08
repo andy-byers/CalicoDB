@@ -63,7 +63,6 @@ private:
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
     auto set_recovery_lsn(Lsn lsn) -> void;
 
-    mutable std::mutex m_mutex;
     FrameBuffer m_framer;
     PageList m_dirty;
     PageCache m_registry;

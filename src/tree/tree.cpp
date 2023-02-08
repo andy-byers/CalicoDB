@@ -92,10 +92,9 @@ public:
         tree.m_pager->release(std::move(node).take());
     }
 
-    [[nodiscard]]
-    static auto destroy_node(BPlusTree &tree, Node node) -> tl::expected<void, Status>
+    static auto destroy_node(BPlusTree &tree, Node node) -> void
     {
-        return tree.m_free_list.push(std::move(node).take());
+        tree.m_free_list.push(std::move(node).take());
     }
 
     [[nodiscard]]
@@ -603,7 +602,7 @@ public:
                     release_node(tree, std::move(right));
                 }
                 release_node(tree, std::move(left));
-                Calico_Try_R(destroy_node(tree, std::move(node)));
+                destroy_node(tree, std::move(node));
                 CALICO_EXPECT_FALSE(is_overflowing(parent));
                 return {};
             }
@@ -623,7 +622,7 @@ public:
                     release_node(tree, std::move(right_right));
                 }
                 release_node(tree, std::move(node));
-                Calico_Try_R(destroy_node(tree, std::move(right)));
+                destroy_node(tree, std::move(right));
                 CALICO_EXPECT_FALSE(is_overflowing(parent));
                 return {};
             }
@@ -665,7 +664,7 @@ public:
                 Calico_Put_R(root, acquire_node(tree, Id::root(), true));
             } else {
                 merge_root(root, child);
-                Calico_Try_R(destroy_node(tree, std::move(child)));
+                destroy_node(tree, std::move(child));
             }
             Calico_Try_R(maybe_fix_child_parent_links(tree, root));
         }
@@ -909,7 +908,6 @@ auto BPlusTree::load_state(const FileHeader &header) -> void
 [[nodiscard]]
 auto fix_node_back_refs(Pager &pager, Page &page, Id swap_pid) -> tl::expected<void, Status>
 {
-    fprintf(stderr,"hello\n");
     (void)pager;(void)page;(void)swap_pid;return {};
 }
 
