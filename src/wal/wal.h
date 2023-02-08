@@ -49,10 +49,10 @@ public:
     [[nodiscard]] virtual auto roll_backward(Lsn end_lsn, const Callback &callback) -> Status;
     [[nodiscard]] virtual auto start_workers() -> Status;
     [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status;
-    [[nodiscard]] virtual auto advance() -> Status;
     [[nodiscard]] virtual auto flush() -> Status;
     virtual auto cleanup(Lsn recovery_lsn) -> void;
     virtual auto log(WalPayloadIn payload) -> void;
+    virtual auto advance() -> void;
 
     [[nodiscard]]
     virtual auto status() const -> Status

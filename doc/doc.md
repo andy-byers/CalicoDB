@@ -30,7 +30,7 @@ to build the library and tests.
 Note that the tests must be built with assertions, hence the `RelWithAssertions`.
 To build the library in release mode without tests, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BUILD_TESTS=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BuildTests=Off .. && cmake --build .
 ```
 
 ## API
@@ -94,7 +94,7 @@ auto s = Calico::Database::open("/tmp/cats", options, &db);
 // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is 
 // null-terminated, so it can be printed like in the following block.
 if (!s.is_ok()) {
-    fprintf(stderr, "error: %s\n", s.what().data());
+    std::fprintf(stderr, "error: %s\n", s.what().data());
     return 1;
 }
 ```
@@ -256,10 +256,7 @@ Examples and use-cases can be found in the [examples directory](../examples).
 ## Source Tree
 ```
 CalicoDB
-┣╸benchmarks ┄┄┄┄┄┄┄ Performance benchmarks
 ┣╸cmake ┄┄┄┄┄┄┄┄┄┄┄┄ CMake utilities/config files
-┣╸examples ┄┄┄┄┄┄┄┄┄ Examples and use cases
-┣╸fuzz ┄┄┄┄┄┄┄┄┄┄┄┄┄ libFuzzer fuzzers
 ┣╸include/calico
 ┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
 ┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
@@ -272,13 +269,15 @@ CalicoDB
 ┃ ┣╸storage.h ┄┄┄┄┄┄ Storage interface
 ┃ ┗╸transaction.h ┄┄ Transaction object
 ┣╸src
-┃ ┣╸core ┄┄┄┄┄┄┄┄┄┄┄ API implementation
+┃ ┣╸database ┄┄┄┄┄┄┄ API implementation
 ┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Database page cache
 ┃ ┣╸storage ┄┄┄┄┄┄┄┄ Data storage and retrieval
 ┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization
 ┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Common utilities
 ┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging
 ┣╸test
+┃ ┣╸benchmarks ┄┄┄┄┄ Performance benchmarks
+┃ ┣╸fuzzers ┄┄┄┄┄┄┄┄ libFuzzer fuzzers
 ┃ ┣╸recovery ┄┄┄┄┄┄┄ Crash recovery tests
 ┃ ┗╸unit_tests ┄┄┄┄┄ Unit tests
 ┗╸tools ┄┄┄┄┄┄┄┄┄┄┄┄ Non-core utilities

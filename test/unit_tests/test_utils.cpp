@@ -15,10 +15,12 @@
 
 namespace Calico {
 
+#if not NDEBUG
 TEST(TestUtils, ExpectationDeathTest)
 {
     ASSERT_DEATH(CALICO_EXPECT_TRUE(false), EXPECTATION_MATCHER);
 }
+#endif // not NDEBUG
 
 TEST(TestUtils, EncodingIsConsistent)
 {
@@ -96,15 +98,6 @@ TEST_F(SliceTests, EmptyRangesAreEmpty)
     ASSERT_TRUE(slice.range(0, 0).is_empty());
 }
 
-TEST_F(SliceTests, RangeDeathTest)
-{
-    Slice discard;
-    ASSERT_DEATH(discard = slice.range(slice.size() + 1), "Assert");
-    ASSERT_DEATH(discard = slice.range(slice.size(), 1), "Assert");
-    ASSERT_DEATH(discard = slice.range(0, slice.size() + 1), "Assert");
-    ASSERT_DEATH(discard = slice.range(5, slice.size()), "Assert");
-}
-
 TEST_F(SliceTests, AdvanceByZeroDoesNothing)
 {
     auto copy = slice;
@@ -116,11 +109,6 @@ TEST_F(SliceTests, AdvancingByOwnLengthProducesEmptySlice)
 {
     slice.advance(slice.size());
     ASSERT_TRUE(slice.is_empty());
-}
-
-TEST_F(SliceTests, AdvanceDeathTest)
-{
-    ASSERT_DEATH(slice.advance(slice.size() + 1), "Assert");
 }
 
 TEST_F(SliceTests, TruncatingToOwnLengthDoesNothing)
@@ -144,12 +132,28 @@ TEST_F(SliceTests, TruncatingEmptySliceDoesNothing)
     ASSERT_TRUE(slice == copy);
 }
 
+#if not NDEBUG
+TEST_F(SliceTests, AdvanceDeathTest)
+{
+    ASSERT_DEATH(slice.advance(slice.size() + 1), "Assert");
+}
+
+TEST_F(SliceTests, RangeDeathTest)
+{
+    Slice discard;
+    ASSERT_DEATH(discard = slice.range(slice.size() + 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(slice.size(), 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(0, slice.size() + 1), "Assert");
+    ASSERT_DEATH(discard = slice.range(5, slice.size()), "Assert");
+}
+
 TEST_F(SliceTests, TruncateDeathTest)
 {
     ASSERT_DEATH(slice.truncate(slice.size() + 1), "Assert");
     slice.truncate(0);
     ASSERT_DEATH(slice.truncate(1), "Assert");
 }
+#endif // not NDEBUG
 
 TEST_F(SliceTests, WithCppString)
 {

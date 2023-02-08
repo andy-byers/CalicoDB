@@ -1,5 +1,5 @@
 #include "pager.h"
-#include "framer.h"
+#include "frame_buffer.h"
 #include "page.h"
 #include "tree/header.h"
 #include "utils/system.h"
@@ -22,7 +22,7 @@ static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
 
 auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
 {
-    auto framer = Framer::open(
+    auto framer = FrameBuffer::open(
         param.prefix,
         param.storage,
         param.page_size,
@@ -37,7 +37,7 @@ auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
     return tl::make_unexpected(system_error("could not allocate pager object: out of memory"));
 }
 
-Pager::Pager(const Parameters &param, Framer framer)
+Pager::Pager(const Parameters &param, FrameBuffer framer)
     : system {param.system},
       m_framer {std::move(framer)},
       m_log {param.system->create_log("pager")},

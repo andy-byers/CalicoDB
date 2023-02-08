@@ -1,8 +1,10 @@
 #include "bench.h"
-#include <benchmark/benchmark.h>
-#include <calico/calico.h>
+#include "benchmark/benchmark.h"
+#include "calico/calico.h"
 #include <filesystem>
 #include <random>
+
+#define RUN_CHECKS
 
 namespace {
 

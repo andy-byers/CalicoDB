@@ -2,15 +2,13 @@
 #define CALICO_TREE_H
 
 #include <array>
-#include "free_list.h"
+#include "memory.h"
 #include "node.h"
-#include "utils/expected.hpp"
 
 namespace Calico {
 
 struct FileHeader;
 class BPlusTree;
-class Pager;
 
 struct SearchResult {
     Node node;

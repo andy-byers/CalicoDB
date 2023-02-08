@@ -54,7 +54,7 @@ auto file_open(const std::string &name, int mode, int permissions) -> tl::expect
 
 auto file_close(int fd) -> Status
 {
-    if (close(fd) == -1) {
+    if (close(fd)) {
         return errno_to_status();
     }
     return ok();
@@ -130,7 +130,7 @@ auto file_resize(const std::string &path, Size size) -> Status
 
 auto dir_create(const std::string &path, mode_t permissions) -> Status
 {
-    if (mkdir(path.c_str(), permissions) == -1) {
+    if (mkdir(path.c_str(), permissions)) {
         if (fetch_errno() == EEXIST) {
             return logic_error("could not create directory: directory {} already exists", path);
         }
@@ -141,7 +141,7 @@ auto dir_create(const std::string &path, mode_t permissions) -> Status
 
 auto dir_remove(const std::string &path) -> Status
 {
-    if (rmdir(path.c_str()) == -1) {
+    if (rmdir(path.c_str())) {
         return errno_to_status();
     }
     return ok();

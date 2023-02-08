@@ -44,7 +44,7 @@ Dependencies are either downloaded using CMake's FetchContent API, or bundled wi
 ## Performance
 Calico DB is optimized for read-heavy workloads with intermittent batches of sequential writes.
 Synchronization for multiple writers, or for simultaneous readers and writers, must be provided externally.
-Performance benchmarks are provided in the [`benchmarks`](benchmarks) folder.
+Performance benchmarks are provided in the [`benchmarks`](test/benchmarks) folder.
 
 ## TODO
 1. Get everything code reviewed!

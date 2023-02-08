@@ -1,5 +1,8 @@
 /*
  * map_fuzzer.cpp: Checks database consistency with a std::map. This fuzzer will inject faults, unless NO_FAILURES is defined.
+ *
+ * The std::map represents the records that are committed to the database. The contents of the std::map and the database should
+ * be exactly the same after (a) a transaction has finished, or (b) the database is reopened.
  */
 
 #include "fuzzer.h"
@@ -7,10 +10,7 @@
 #include <map>
 #include <set>
 
-#include <calico/calico.h>
-
-// TODO
-#define NO_FAILURES 1
+#include "calico/calico.h"
 
 namespace {
 
@@ -70,7 +70,6 @@ auto translate_op(std::uint8_t code) -> OperationType
     return type;
 }
 
-
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     auto options = DB_OPTIONS;
@@ -93,6 +92,28 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 
         added.clear();
         erased.clear();
+    };
+
+    const auto expect_equal_sizes = [&db, &map]
+    {
+        const auto record_count = db->get_property("calico.count.records");
+        assert(not record_count.empty());
+        assert(map.size() == std::stoi(record_count));
+    };
+
+    const auto expect_equal_contents = [&db, &map]
+    {
+        auto *cursor = db->new_cursor();
+        cursor->seek_first();
+        for (const auto &[key, value]: map) {
+            assert(cursor->is_valid());
+            assert(cursor->key() == key);
+            assert(cursor->value() == value);
+            cursor->next();
+        }
+        assert(not cursor->is_valid());
+        assert(cursor->status().is_not_found());
+        delete cursor;
     };
 
     while (size > 1) {
@@ -181,6 +202,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     handle_failure();
                     reopen_and_clear_pending();
                 }
+                expect_equal_sizes();
                 break;
             case ABORT:
                 if (db->abort().is_ok()) {
@@ -190,30 +212,22 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     handle_failure();
                     reopen_and_clear_pending();
                 }
+                expect_equal_sizes();
                 break;
             default: // REOPEN
                 reopen_and_clear_pending();
+                expect_equal_contents();
         }
-        expect_ok(db->status());
+        if (!db->status().is_ok()) {
+            handle_failure();
+            reopen_and_clear_pending();
+            expect_equal_contents();
+        }
     }
     reopen_and_clear_pending();
+    expect_equal_sizes();
+    expect_equal_contents();
 
-    const auto record_count = db->get_property("calico.count.records");
-    assert(not record_count.empty());
-    assert(map.size() == std::stoi(record_count));
-
-    auto *cursor = db->new_cursor();
-    cursor->seek_first();
-    for (const auto &[key, value]: map) {
-        assert(cursor->is_valid());
-        assert(cursor->key() == key);
-        assert(cursor->value() == value);
-        cursor->next();
-    }
-    assert(not cursor->is_valid());
-    assert(cursor->status().is_not_found());
-
-    delete cursor;
     delete db;
     delete options.storage;
     return 0;

@@ -1,7 +1,7 @@
 #ifndef CALICO_FUZZ_FUZZER_H
 #define CALICO_FUZZ_FUZZER_H
 
-#include <calico/calico.h>
+#include "calico/calico.h"
 #include "tools.h"
 
 namespace Calico {

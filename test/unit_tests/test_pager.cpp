@@ -1,7 +1,7 @@
 
-#include "pager/cache.h"
-#include "pager/framer.h"
+#include "pager/frame_buffer.h"
 #include "pager/page.h"
+#include "pager/page_cache.h"
 #include "pager/pager.h"
 #include "tree/header.h"
 #include "tree/node.h"
@@ -44,11 +44,13 @@ TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
     ASSERT_TRUE(empty.empty());
 }
 
+#if not NDEBUG
 TEST_F(DeltaCompressionTest, InsertEmptyDeltaDeathTest)
 {
     ChangeBuffer deltas;
     ASSERT_DEATH(insert_delta(deltas, {123, 0}), EXPECTATION_MATCHER);
 }
+#endif // not NDEBUG
 
 TEST_F(DeltaCompressionTest, CompressingSingleDeltaDoesNothing)
 {
@@ -539,12 +541,12 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 class FramerTests : public InMemoryTest {
 public:
     explicit FramerTests()
-        : framer {*Framer::open("test/data", storage.get(), 0x100, 8)}
+        : framer {*FrameBuffer::open("test/data", storage.get(), 0x100, 8)}
     {}
 
     ~FramerTests() override = default;
 
-    Framer framer;
+    FrameBuffer framer;
 };
 
 TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
@@ -706,18 +708,6 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
     ASSERT_EQ(id, Id::root());
     pager->release(std::move(*r));
 }
-
-//TEST_F(PagerTests, MultipleWritersDeathTest)
-//{
-//    const auto page = allocate_write(test_message);
-//    ASSERT_DEATH(const auto same_page = pager->acquire_(page.id()), EXPECTATION_MATCHER);
-//}
-//
-//TEST_F(PagerTests, ReaderAndWriterDeathTest)
-//{
-//    const auto page = allocate_write(test_message);
-//    ASSERT_DEATH(const auto same_page = pager->acquire_(page.id()), EXPECTATION_MATCHER);
-//}
 
 TEST_F(PagerTests, MultipleReaders)
 {

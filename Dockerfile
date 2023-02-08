@@ -13,11 +13,11 @@ RUN apt update && \
 
 ADD ./CMakeLists.txt ./CMakeLists.txt
 ADD ./cmake ./cmake
-ADD ./fuzz ./fuzz
+ADD test/fuzz ./fuzz
 ADD ./include ./include
 ADD ./src ./src
 ADD ./test ./test
-ADD ./tools ./tools
+ADD test/tools ./tools
 
 RUN mkdir build && \
     cd build && \
@@ -25,9 +25,9 @@ RUN mkdir build && \
     export CXX=/usr/bin/clang++ && \
     cmake -DCMAKE_CXX_FLAGS="-fsanitize=fuzzer,address,undefined" \
           -DCMAKE_BUILD_TYPE=Debug \
-          -DCALICO_BUILD_BENCHMARKS=Off \
+          -DCALICO_BuildBenchmarks=Off \
           -DCALICO_BUILD_EXAMPLES=Off \
-          -DCALICO_BUILD_FUZZERS=On \
-          -DCALICO_BUILD_TESTS=Off \
-          -DCALICO_FUZZER_STANDALONE=Off .. && \
+          -DCALICO_BuildFuzzers=On \
+          -DCALICO_BuildTests=Off \
+          -DCALICO_FuzzerStandalone=Off .. && \
     cmake --build . \

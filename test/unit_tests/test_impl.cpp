@@ -861,23 +861,47 @@ TEST_F(ApiTests, KeysCanBeArbitraryBytes)
     delete cursor;
 }
 
-TEST_F(ApiTests, MapFuzzer)
+class CommitTests : public ApiTests {
+protected:
+    ~CommitTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        ApiTests::SetUp();
+        ASSERT_OK(db->put("a", "1"));
+        ASSERT_OK(db->put("b", "2"));
+        ASSERT_OK(db->put("c", "3"));
+    }
+
+    auto TearDown() -> void override
+    {
+        ASSERT_OK(db->commit());
+        assert_special_error(db->put("d", "4"));
+        delete db;
+
+        storage_handle().clear_interceptors();
+        ASSERT_OK(Database::open("test", options, &db));
+
+        std::string value;
+        ASSERT_OK(db->get("a", value));
+        ASSERT_EQ(value, "1");
+        ASSERT_OK(db->get("b", value));
+        ASSERT_EQ(value, "2");
+        ASSERT_OK(db->get("c", value));
+        ASSERT_EQ(value, "3");
+    }
+};
+
+TEST_F(CommitTests, WalAdvanceFailure)
 {
-    ASSERT_OK(db->put(std::string("\x00", 1), ""));
-    ASSERT_OK(db->abort());
+    // Write the commit record and flush successfully, but fail to open the next segment file.
+    Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
+}
 
-    ASSERT_OK(db->put(std::string("\x00", 1), std::string("\x00", 1)));
-    ASSERT_OK(db->commit());
-
-    delete db;
-    ASSERT_OK(Calico::Database::open(ROOT, options, &db));
-    ASSERT_OK(db->put(std::string("\x00", 1), ""));
-
-    delete db;
-    ASSERT_OK(Calico::Database::open(ROOT, options, &db));
-    std::string value;
-    ASSERT_OK(db->get(std::string("\x00", 1), value));
-    ASSERT_EQ(value, std::string("\x00", 1));
+TEST_F(CommitTests, PagerFlushFailure)
+{
+    // Write the commit record and flush successfully, but fail to flush old pages from the page cache.
+    Quick_Interceptor("test/data", Tools::Interceptor::WRITE);
 }
 
 class WalPrefixTests : public OnDiskTest {

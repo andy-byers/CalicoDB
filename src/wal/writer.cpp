@@ -107,7 +107,7 @@ WalWriter::WalWriter(const Parameters &param)
 
 auto WalWriter::write(WalPayloadIn payload) -> void
 {
-    if (m_writer.has_value()) {
+    if (m_writer.has_value() && m_error->is_ok()) {
         Maybe_Set_Error(m_writer->write(payload));
         if (m_writer->block_count() >= m_wal_limit) {
             Maybe_Set_Error(advance_segment());
@@ -117,7 +117,7 @@ auto WalWriter::write(WalPayloadIn payload) -> void
 
 auto WalWriter::flush() -> void
 {
-    if (m_writer.has_value()) {
+    if (m_writer.has_value() && m_error->is_ok()) {
         Maybe_Set_Error(m_writer->flush());
     }
 }

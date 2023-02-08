@@ -9,11 +9,9 @@ set(CALICO_HEADERS
 file(GLOB_RECURSE CALICO_SOURCES "*/*.cpp" "*/*.h")
 list(APPEND CALICO_SOURCES "${CALICO_HEADERS}")
 
-# Only use RTTI if we are not in release mode. We need it for printing the tree (useful for debugging). Exceptions are
-# always disabled.
 set(CALICO_OPTIONS -fno-exceptions)
 string(TOLOWER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
-if(BUILD_TYPE MATCHES "^release")
+if(NOT CALICO_BuildTests)
     list(APPEND CALICO_OPTIONS -fno-rtti)
 endif()
 

@@ -9,5 +9,17 @@ FetchContent_Declare(googletest
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
 
-add_subdirectory(unit_tests)
+option(CALICO_BuildBenchmarks "Build the benchmarks" On)
+option(CALICO_BuildFuzzers "Build the fuzz targets" Off)
+
+add_subdirectory(tools)
 add_subdirectory(recovery)
+add_subdirectory(unit_tests)
+
+if(CALICO_BuildBenchmarks)
+    add_subdirectory(benchmarks)
+endif()
+
+if(CALICO_BuildFuzzers)
+    add_subdirectory(fuzzers)
+endif()

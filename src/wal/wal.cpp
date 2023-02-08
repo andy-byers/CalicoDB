@@ -37,36 +37,13 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
         return tl::make_unexpected(s);
     }
 
-
-
-    // Filter out the segment file names.
-    std::vector<std::string> segment_names;
-//    std::copy_if(
-//        cbegin(child_names),
-//        cend(child_names),
-//        back_inserter(segment_names),
-//        [&param](const auto &child) {
-//            return Slice {child}.starts_with(param.prefix);
-//        });
-
+    std::vector<Id> segment_ids;
     for (auto &name: child_names) {
         name.insert(0, path);
         if (Slice {name}.starts_with(param.prefix)) {
-            segment_names.emplace_back(name);
+            segment_ids.emplace_back(decode_segment_name(param.prefix, name));
         }
     }
-
-
-
-    // Convert to segment IDs.
-    std::vector<Id> segment_ids;
-    std::transform(
-        cbegin(segment_names),
-        cend(segment_names),
-        back_inserter(segment_ids),
-        [&param](const auto &name) {
-            return decode_segment_name(param.prefix, name);
-        });
     std::sort(begin(segment_ids), end(segment_ids));
 
     std::unique_ptr<WriteAheadLog> wal {new (std::nothrow) WriteAheadLog {param}};
@@ -175,21 +152,23 @@ auto WriteAheadLog::flush() -> Status
     return m_error.get();
 }
 
-auto WriteAheadLog::advance() -> Status
+auto WriteAheadLog::advance() -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_worker->dispatch(AdvanceToken {}, true);
-    return m_error.get();
 }
 
 auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 {
+    if (auto s = status(); !s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
     auto reader = WalReader {
         *m_storage,
         m_set,
         m_prefix,
-        Span {m_reader_tail},
-        Span {m_reader_data}};
+        m_reader_tail,
+        m_reader_data};
     if (auto s = reader.open(); !s.is_ok()) {
         return tl::make_unexpected(s);
     }
@@ -199,7 +178,7 @@ auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Status
 {
     if (m_set.first().is_null()) {
-        return ok();
+        return corruption("log is empty");
     }
 
     // Open the reader on the first (oldest) WAL segment file.
@@ -237,8 +216,9 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
         }
     }
 
-    if (s.is_not_found())
+    if (s.is_not_found()) {
         s = ok();
+    }
 
     for (auto first = true; s.is_ok(); first = false) {
         Calico_Info("rolling segment {} forward", reader->segment_id().value);
@@ -270,7 +250,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
 auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Status
 {
     if (m_set.first().is_null()) {
-        return ok();
+        return corruption("log is empty");
     }
 
     auto reader = open_reader();

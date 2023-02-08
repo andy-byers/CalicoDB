@@ -1183,8 +1183,7 @@ TEST_F(BasicWalTests, NewWalState)
 
 TEST_F(BasicWalTests, RollWhileEmpty)
 {
-    // TODO: Should be an error.
-    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {return ok();}));
+    ASSERT_TRUE(wal->roll_forward(Id::null(), [](auto) {return ok();}).is_corruption());
 }
 
 TEST_F(BasicWalTests, FlushesWithEmptyTailBuffer)
@@ -1309,12 +1308,12 @@ TEST_F(WalFaultTests, FailOnFirstWrite)
     assert_special_error(run_operations({WalOperation::LOG, WalOperation::FLUSH}));
 
     // We never wrote anything, so the writer should have removed the segment.
-    ASSERT_OK(wal->roll_forward(Id::null(), [](auto) {
-        return corruption("");
-    }));
-    ASSERT_OK(wal->roll_backward(Id::null(), [](auto) {
-        return corruption("");
-    }));
+    ASSERT_TRUE(wal->roll_forward(Id::null(), [](auto) {
+        return ok();
+    }).is_corruption());
+    ASSERT_TRUE(wal->roll_backward(Id::null(), [](auto) {
+        return ok();
+    }).is_corruption());
 }
 
 TEST_F(WalFaultTests, FailOnFirstOpen)
@@ -1322,6 +1321,7 @@ TEST_F(WalFaultTests, FailOnFirstOpen)
     Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
     assert_special_error(run_operations({WalOperation::LOG, WalOperation::ADVANCE}));
     Clear_Interceptors();
+    SetUp();
 
     roll_forward(false);
     // Hits the beginning of the WAL without finding a commit.
@@ -1341,6 +1341,7 @@ TEST_F(WalFaultTests, FailOnNthOpen)
     Counting_Interceptor("test/wal", Tools::Interceptor::OPEN, counter);
     assert_special_error(run_operations(ops));
     Clear_Interceptors();
+    SetUp();
 
     // We should have full records in the WAL, so these tests will work.
     roll_forward(false);
@@ -1357,6 +1358,7 @@ TEST_F(WalFaultTests, FailOnNthWrite)
     Counting_Interceptor("test/wal", Tools::Interceptor::WRITE, counter);
     assert_special_error(run_operations(ops));
     Clear_Interceptors();
+    SetUp();
 
     // We may have a partial record at the end. The WAL will stop short of it.
     roll_forward(false);

@@ -1,11 +1,11 @@
 #ifndef CALICO_BENCHMARKS_H
 #define CALICO_BENCHMARKS_H
 
+#include "calico/slice.h"
+#include "tools.h"
 #include <algorithm>
-#include <calico/slice.h>
 #include <climits>
 #include <random>
-#include "tools.h"
 
 namespace Calico {
 

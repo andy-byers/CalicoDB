@@ -227,7 +227,6 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
             dir_path.erase(pos + 1);
         }
 
-        // TODO: The WAL prefix is not correct. If that option is used, we shouldn't use 'wal-' in the filename, we should just use the "wal_prefix + <segment_id>".
         if (auto s = storage->get_children(dir_path, children); s.is_ok()) {
             for (const auto &name: children) {
                 const auto filename = dir_path + name;
@@ -278,7 +277,9 @@ auto DatabaseImpl::get_property(const Slice &name) const -> std::string
         } else if (prop.starts_with("stat.")) {
             prop.advance(5);
 
-            if (prop == "cache_hit_ratio") {
+            if (prop == "updates") {
+                return fmt::format("{}", m_txn_size);
+            } else if (prop == "cache_hit_ratio") {
                 return fmt::format("{}", pager->hit_ratio());
             } else if (prop == "data_throughput") {
                 return fmt::format("{}", bytes_written);
@@ -381,36 +382,44 @@ auto DatabaseImpl::vacuum() -> Status
 
 auto DatabaseImpl::commit() -> Status
 {
+    Calico_Try_S(status());
     if (m_txn_size != 0) {
         if (auto s = do_commit(); !s.is_ok()) {
-            Maybe_Set_Error(std::move(s));
+            Maybe_Set_Error(s);
+            return s;
         }
     }
-    return status();
+    return ok();
 }
 
+/*
+ * NOTE: This method only returns an error status if the commit record could not be flushed to the WAL, since this
+ *       is what ultimately determines the transaction outcome. If a different failure occurs, that status will be
+ *       returned on the next access to the database object.
+ */
 auto DatabaseImpl::do_commit() -> Status
 {
     Calico_Info("commit requested at lsn {}", wal->current_lsn().value + 1);
 
     m_txn_size = 0;
-    Calico_Try_S(status());
     Calico_Try_S(save_state());
 
     const auto lsn = wal->current_lsn();
     wal->log(encode_commit_payload(lsn, *m_scratch->get()));
-    Calico_Try_S(wal->advance());
+    Calico_Try_S(wal->flush());
+    wal->advance();
 
-    Calico_Try_S(pager->flush(m_commit_lsn));
+    Maybe_Set_Error(pager->flush(m_commit_lsn));
     wal->cleanup(pager->recovery_lsn());
+    m_commit_lsn = lsn;
 
     Calico_Info("commit successful");
-    m_commit_lsn = lsn;
     return ok();
 }
 
 auto DatabaseImpl::abort() -> Status
 {
+    Calico_Try_S(status());
     if (m_txn_size != 0) {
         if (auto s = do_abort(); !s.is_ok()) {
             Maybe_Set_Error(std::move(s));
@@ -424,8 +433,7 @@ auto DatabaseImpl::do_abort() -> Status
     Calico_Info("abort requested (last commit was {})", m_commit_lsn.value);
 
     m_txn_size = 0;
-    Calico_Try_S(status());
-    Calico_Try_S(wal->advance());
+    wal->advance();
 
     m_in_txn = false;
     Calico_Try_S(m_recovery->start_abort());
