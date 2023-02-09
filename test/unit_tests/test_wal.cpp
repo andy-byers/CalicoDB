@@ -1,13 +1,13 @@
-#include <array>
-#include <gtest/gtest.h>
 #include "calico/slice.h"
 #include "calico/storage.h"
-#include "utils/system.h"
+#include "tools.h"
+#include "unit_tests.h"
+#include "utils/logging.h"
 #include "wal/helpers.h"
 #include "wal/reader.h"
 #include "wal/writer.h"
-#include "unit_tests.h"
-#include "tools.h"
+#include <array>
+#include <gtest/gtest.h>
 
 namespace Calico {
 
@@ -372,8 +372,8 @@ public:
     auto get_writer(Id id) -> LogWriter
     {
         const auto path = get_segment_name(id);
-        AppendWriter *temp {};
-        EXPECT_TRUE(expose_message(storage->open_append_writer(path, &temp)));
+        Logger *temp {};
+        EXPECT_TRUE(expose_message(storage->open_logger(path, &temp)));
         writer_file.reset(temp);
         return LogWriter {*writer_file, writer_tail, flushed_lsn};
     }
@@ -426,7 +426,7 @@ public:
     std::string writer_tail;
     LogScratchManager scratch;
     std::unique_ptr<RandomReader> reader_file;
-    std::unique_ptr<AppendWriter> writer_file;
+    std::unique_ptr<Logger> writer_file;
     Id last_lsn;
     Tools::RandomGenerator random;
 };
@@ -538,7 +538,6 @@ public:
 
     WalWriterTests()
         : scratch {wal_scratch_size(PAGE_SIZE), 32},
-          system {"test", {}},
           tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer {WalWriter::Parameters{
               "test/wal-",
@@ -556,7 +555,6 @@ public:
     WalSet set;
     ErrorBuffer error_buffer;
     LogScratchManager scratch;
-    System system;
     std::atomic<Id> flushed_lsn {};
     std::string tail;
     Tools::RandomGenerator random;
@@ -718,13 +716,13 @@ public:
     [[nodiscard]]
     static auto contains_sequence(WalReader &reader, Id final_lsn) -> Status
     {
-        auto s = ok();
+        auto s = Status::ok();
         Id lsn;
         // Roll forward to the end of the WAL.
         while (s.is_ok()) {
             s = reader.roll([&](auto payload) {
                 EXPECT_EQ(Id {++lsn.value}, payload.lsn());
-                return ok();
+                return Status::ok();
             });
             if (!s.is_ok()) {
                 break;
@@ -732,7 +730,7 @@ public:
             s = reader.seek_next();
             if (s.is_not_found()) {
                 EXPECT_EQ(lsn, final_lsn);
-                return ok();
+                return Status::ok();
             } else if (!s.is_ok()) {
                 break;
             }
@@ -743,17 +741,17 @@ public:
     [[nodiscard]]
     auto roll_segments_forward(WalReader &reader) -> Status
     {
-        auto s = ok();
+        auto s = Status::ok();
         // Roll forward to the end of the WAL.
         while (s.is_ok()) {
             s = reader.roll([&](auto info) {
                 EXPECT_EQ(info.data().to_string(), payloads[info.lsn().as_index()]);
-                return ok();
+                return Status::ok();
             });
             if (!s.is_ok()) break;
             s = reader.seek_next();
             if (s.is_not_found()) {
-                return ok();
+                return Status::ok();
             } else if (!s.is_ok()) {
                 break;
             }
@@ -764,7 +762,7 @@ public:
     [[nodiscard]]
     auto roll_segments_backward(WalReader &reader) -> Status
     {
-        auto s = ok();
+        auto s = Status::ok();
         for (Size i {}; s.is_ok(); ++i) {
 
             Id first_lsn;
@@ -775,7 +773,7 @@ public:
 
             s = reader.roll([&](auto info) {
                 EXPECT_EQ(info.data().to_string(), payloads[info.lsn().as_index()]);
-                return ok();
+                return Status::ok();
             });
             if (!s.is_ok()) {
                 if (!s.is_corruption() || i) {
@@ -784,7 +782,7 @@ public:
             }
             s = reader.seek_previous();
             if (s.is_not_found()) {
-                return ok();
+                return Status::ok();
             } else if (!s.is_ok()) {
                 break;
             }
@@ -807,7 +805,6 @@ public:
     std::string writer_tail;
     Tools::RandomGenerator random;
     WalRecordGenerator generator;
-    System system {PREFIX, {}};
     WalWriter writer;
     Worker<Event> tasks;
 };
@@ -1037,7 +1034,6 @@ public:
         auto r = WriteAheadLog::open({
             "test/wal-",
             storage.get(),
-            &state,
             PAGE_SIZE,
             32,
             32,
@@ -1096,7 +1092,7 @@ public:
             EXPECT_EQ(lhs.size(), rhs.size());
             EXPECT_EQ(lhs.to_string(), rhs);
             EXPECT_EQ(Id {lsn.value++}, payload.lsn());
-            return ok();
+            return Status::ok();
         }));
         // We should have hit all records.
         if (strict) {
@@ -1111,7 +1107,7 @@ public:
             lsns.emplace_back(payload.lsn());
             EXPECT_GT(payload.lsn(), commit_lsn);
             EXPECT_EQ(payload.data().to_string(), payloads[payload.lsn().as_index()]);
-            return ok();
+            return Status::ok();
         }));
         if (strict) {
             ASSERT_EQ(lsns.size(), payloads_since_commit);
@@ -1161,7 +1157,6 @@ public:
         return wal->status();
     }
 
-    System state {"test", {}};
     Tools::RandomGenerator random;
     Size payloads_since_commit {};
     Id commit_lsn;
@@ -1183,7 +1178,7 @@ TEST_F(BasicWalTests, NewWalState)
 
 TEST_F(BasicWalTests, RollWhileEmpty)
 {
-    ASSERT_TRUE(wal->roll_forward(Id::null(), [](auto) {return ok();}).is_corruption());
+    ASSERT_TRUE(wal->roll_forward(Id::null(), [](auto) {return Status::ok();}).is_corruption());
 }
 
 TEST_F(BasicWalTests, FlushesWithEmptyTailBuffer)
@@ -1309,10 +1304,10 @@ TEST_F(WalFaultTests, FailOnFirstWrite)
 
     // We never wrote anything, so the writer should have removed the segment.
     ASSERT_TRUE(wal->roll_forward(Id::null(), [](auto) {
-        return ok();
+        return Status::ok();
     }).is_corruption());
     ASSERT_TRUE(wal->roll_backward(Id::null(), [](auto) {
-        return ok();
+        return Status::ok();
     }).is_corruption());
 }
 
@@ -1326,7 +1321,7 @@ TEST_F(WalFaultTests, FailOnFirstOpen)
     roll_forward(false);
     // Hits the beginning of the WAL without finding a commit.
     ASSERT_TRUE(wal->roll_backward(Id::null(), [](auto) {
-        return ok();
+        return Status::ok();
     }).is_corruption());
 }
 
@@ -1374,10 +1369,10 @@ TEST_F(WalFaultTests, FailsIfMissingSegment)
     ASSERT_OK(storage->remove_file("test/wal-1"));
 
     ASSERT_FALSE(wal->roll_forward(Id::root(), [](auto) {
-        return ok();
+        return Status::ok();
     }).is_ok());
     ASSERT_FALSE(wal->roll_backward(Id::root(), [](auto) {
-        return ok();
+        return Status::ok();
     }).is_ok());
 }
 

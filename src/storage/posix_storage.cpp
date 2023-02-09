@@ -14,13 +14,13 @@ static auto to_status(int code) -> Status
 {
     switch (code) {
         case ENOENT:
-            return not_found(strerror(code));
+            return Status::not_found(strerror(code));
         case EINVAL:
-            return invalid_argument(strerror(code));
+            return Status::invalid_argument(strerror(code));
         case EEXIST:
-            return logic_error(strerror(code));
+            return Status::logic_error(strerror(code));
         default:
-            return system_error(strerror(code));
+            return Status::system_error(strerror(code));
     }
 }
 
@@ -39,9 +39,9 @@ static auto errno_to_status() -> Status
 auto file_exists(const std::string &path) -> Status
 {
     if (struct stat st; stat(path.c_str(), &st) != 0) {
-        return not_found("not found");
+        return Status::not_found("not found");
     }
-    return ok();
+    return Status::ok();
 }
 
 auto file_open(const std::string &name, int mode, int permissions) -> tl::expected<int, Status>
@@ -57,7 +57,7 @@ auto file_close(int fd) -> Status
     if (close(fd)) {
         return errno_to_status();
     }
-    return ok();
+    return Status::ok();
 }
 
 auto file_size(const std::string &path) -> tl::expected<Size, Status>
@@ -101,7 +101,7 @@ auto file_sync(int fd) -> Status
     if (fsync(fd) == -1) {
         return errno_to_status();
     }
-    return ok();
+    return Status::ok();
 }
 
 auto file_seek(int fd, long offset, int whence) -> tl::expected<Size, Status>
@@ -117,7 +117,7 @@ auto file_remove(const std::string &path) -> Status
     if (unlink(path.c_str())) {
         return errno_to_status();
     }
-    return ok();
+    return Status::ok();
 }
 
 auto file_resize(const std::string &path, Size size) -> Status
@@ -125,18 +125,18 @@ auto file_resize(const std::string &path, Size size) -> Status
     if (truncate(path.c_str(), static_cast<off_t>(size))) {
         return errno_to_status();
     }
-    return ok();
+    return Status::ok();
 }
 
 auto dir_create(const std::string &path, mode_t permissions) -> Status
 {
     if (mkdir(path.c_str(), permissions)) {
         if (fetch_errno() == EEXIST) {
-            return logic_error("could not create directory: directory {} already exists", path);
+            return Status::logic_error("directory already exists");
         }
         return errno_to_status();
     }
-    return ok();
+    return Status::ok();
 }
 
 auto dir_remove(const std::string &path) -> Status
@@ -144,7 +144,7 @@ auto dir_remove(const std::string &path) -> Status
     if (rmdir(path.c_str())) {
         return errno_to_status();
     }
-    return ok();
+    return Status::ok();
 }
 
 static auto read_file_at(int file, Byte *out, Size &requested, Size offset)
@@ -158,7 +158,7 @@ static auto read_file_at(int file, Byte *out, Size &requested, Size offset)
         return r.error();
     }
     requested = *r;
-    return ok();
+    return Status::ok();
 }
 
 static auto write_file(int file, Slice in)
@@ -168,9 +168,9 @@ static auto write_file(int file, Slice in)
     if (!r.has_value()) {
         return r.error();
     } else if (*r != in.size()) {
-        return system_error("could not write to file: incomplete write (wrote {}/{} bytes)", *r, in.size());
+        return Status::system_error("incomplete write");
     }
-    return ok();
+    return Status::ok();
 }
 
 RandomFileReader::~RandomFileReader()
@@ -232,7 +232,7 @@ auto PosixStorage::rename_file(const std::string &old_path, const std::string &n
     if (rename(old_path.c_str(), new_path.c_str())) {
         return errno_to_status();
     }
-    return ok();
+    return Status::ok();
 }
 
 auto PosixStorage::remove_file(const std::string &path) -> Status
@@ -249,7 +249,7 @@ auto PosixStorage::file_size(const std::string &path, Size &out) const -> Status
 {
     if (auto r = ::Calico::file_size(path)) {
         out = *r;
-        return ok();
+        return Status::ok();
     } else {
         return r.error();
     }
@@ -273,7 +273,7 @@ auto PosixStorage::get_children(const std::string &path, std::vector<std::string
         out.emplace_back(ent->d_name);
     }
     closedir(dir);
-    return ok();
+    return Status::ok();
 }
 
 auto PosixStorage::open_random_reader(const std::string &path, RandomReader **out) -> Status
@@ -282,9 +282,9 @@ auto PosixStorage::open_random_reader(const std::string &path, RandomReader **ou
     if (fd.has_value()) {
         *out = new(std::nothrow) RandomFileReader {path, *fd};
         if (*out == nullptr) {
-            return system_error("cannot allocate file: out of memory");
+            return Status::system_error("out of memory");
         }
-        return ok();
+        return Status::ok();
     }
     return fd.error();
 }
@@ -295,22 +295,22 @@ auto PosixStorage::open_random_editor(const std::string &path, RandomEditor **ou
     if (fd.has_value()) {
         *out = new(std::nothrow) RandomFileEditor {path, *fd};
         if (*out == nullptr) {
-            return system_error("cannot allocate file: out of memory");
+            return Status::system_error("out of memory");
         }
-        return ok();
+        return Status::ok();
     }
     return fd.error();
 }
 
-auto PosixStorage::open_append_writer(const std::string &path, AppendWriter **out) -> Status
+auto PosixStorage::open_logger(const std::string &path, Logger **out) -> Status
 {
     const auto fd = file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS);
     if (fd.has_value()) {
         *out = new(std::nothrow) AppendFileWriter {path, *fd};
         if (*out == nullptr) {
-            return system_error("cannot allocate file: out of memory");
+            return Status::system_error("out of memory");
         }
-        return ok();
+        return Status::ok();
     }
     return fd.error();
 }

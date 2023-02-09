@@ -877,7 +877,7 @@ auto BPlusTree::erase(const Slice &key) -> tl::expected<void, Status>
         return {};
     }
     BPlusTreeInternal::release_node(*this, std::move(node));
-    return tl::make_unexpected(not_found("not found"));
+    return tl::make_unexpected(Status::not_found("not found"));
 }
 
 auto BPlusTree::collect(Node node, Size index) -> tl::expected<std::string, Status>

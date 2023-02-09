@@ -567,7 +567,7 @@ public:
             storage.get(),
             &log_scratch,
             &wal,
-            &system,
+            nullptr,
             &status,
             &commit_lsn,
             &in_xact,
@@ -628,8 +628,7 @@ public:
 
     BPlusTreeTestParameters param;
     LogScratchManager log_scratch;
-    System system {PREFIX, {}};
-    Status status {ok()};
+    Status status;
     bool in_xact {true};
     Lsn commit_lsn;
     DisabledWriteAheadLog wal;

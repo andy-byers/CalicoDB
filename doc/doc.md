@@ -74,13 +74,10 @@ const Calico::Options options {
     // WAL segments will look like "calico_wal_#", where # is the segment ID.
     .wal_prefix = "calico_wal_",
     
-    // These are only pertinent when logging to a file (log_target option).
-    .max_log_size = 0,
-    .max_log_files = 0,
-
-    // Write colorful log messages to stderr.
+    // The database instance will write info log messages at the specified log level, to the object
+    // passed in the "info_log" member.
     .log_level = Calico::LogLevel::TRACE,
-    .log_target = Calico::LogTarget::FILE,
+    .info_log = nullptr,
     
     // This can be used to inject a custom storage implementation. (see the DynamicMemory class in
     // tools/tools.h for an example that stores its files in-memory)
@@ -215,18 +212,21 @@ if (const auto s = db->commit(); s.is_ok()) {
 ### Database properties
 
 ```C++
+std::string prop;
+bool exists;
+
 // Database properties are made available as strings.
-(void)db->get_property("calico.count.records");
-(void)db->get_property("calico.count.pages");
-(void)db->get_property("calico.limit.max_key_length");
-(void)db->get_property("calico.stat.cache_hit_ratio");
-(void)db->get_property("calico.stat.pager_throughput");
-(void)db->get_property("calico.stat.wal_throughput");
-(void)db->get_property("calico.stat.data_throughput");
+exists = db->get_property("calico.count.records", prop);
+exists = db->get_property("calico.count.pages", prop);
+exists = db->get_property("calico.limit.max_key_length", prop);
+exists = db->get_property("calico.stat.cache_hit_ratio", prop);
+exists = db->get_property("calico.stat.pager_throughput", prop);
+exists = db->get_property("calico.stat.wal_throughput", prop);
+exists = db->get_property("calico.stat.data_throughput", prop);
 
 // The page size is fixed at database creation time. If the database already existed, the page size passed to the
 // constructor through Calico::Options is ignored. We can query the real page size using the following line.
-(void)db->get_property("calico.limit.page_size");
+exists = db->get_property("calico.limit.page_size", prop);
 ```
 
 ### Closing a database 

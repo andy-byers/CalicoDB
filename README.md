@@ -36,7 +36,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 Check out the [docs](doc/doc.md).
 
 ## Dependencies
-The library itself depends on `@gabime/spdlog` and `@TartanLlama/expected`.
+The library itself depends on `@TartanLlama/expected`.
 The tests depend on `@google/googletest`, and the benchmarks depend on `@google/benchmark`.
 Dependencies are either downloaded using CMake's FetchContent API, or bundled with the source code.
 

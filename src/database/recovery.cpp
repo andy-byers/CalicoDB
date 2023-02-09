@@ -22,7 +22,7 @@ static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback
     if (auto page = pager.acquire(descriptor.pid)) {
         callback(*page);
         pager.release(std::move(*page));
-        return ok();
+        return Status::ok();
     } else {
         return page.error();
     }
@@ -30,15 +30,13 @@ static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback
 
 auto Recovery::start_abort() -> Status
 {
-    Calico_Info("rolling back from lsn {}", m_wal->current_lsn().value);
-
     // This should give us the full images of each updated page belonging to the current transaction,
     // before any changes were made to it.
     return m_wal->roll_backward(*m_commit_lsn, [this](auto payload) {
         auto decoded = decode_payload(payload);
 
         if (std::holds_alternative<std::monostate>(decoded)) {
-            return corruption("WAL is corrupted");
+            return Status::corruption("wal is corrupted");
         }
 
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
@@ -48,7 +46,7 @@ auto Recovery::start_abort() -> Status
                 apply_undo(page, image);
             }));
         }
-        return ok();
+        return Status::ok();
     });
 }
 
@@ -56,12 +54,11 @@ auto Recovery::finish_abort() -> Status
 {
     Calico_Try_S(m_pager->flush({}));
     Calico_Try_S(m_wal->truncate(*m_commit_lsn));
-    Calico_Info("rolled back to lsn {}", m_commit_lsn->value);
 
     if (m_pager->recovery_lsn() > *m_commit_lsn) {
         m_pager->set_recovery_lsn(*m_commit_lsn); // TODO
     }
-    return ok();
+    return Status::ok();
 }
 
 auto Recovery::start_recovery() -> Status
@@ -73,7 +70,7 @@ auto Recovery::start_recovery() -> Status
 
         // Payload has an invalid type.
         if (std::holds_alternative<std::monostate>(decoded)) {
-            return corruption("WAL is corrupted");
+            return Status::corruption("wal is corrupted");
         }
 
         last_lsn = payload.lsn();
@@ -98,16 +95,16 @@ auto Recovery::start_recovery() -> Status
                 }
             }));
         } else {
-            return corruption("unrecognized payload type");
+            return Status::corruption("unrecognized payload type");
         }
-        return ok();
+        return Status::ok();
     };
 
     const auto undo = [this](auto payload) {
         auto decoded = decode_payload(payload);
 
         if (std::holds_alternative<std::monostate>(decoded)) {
-            return corruption("WAL is corrupted");
+            return Status::corruption("wal is corrupted");
         }
 
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
@@ -117,21 +114,16 @@ auto Recovery::start_recovery() -> Status
                 apply_undo(page, image);
             }));
         }
-        return ok();
+        return Status::ok();
     };
-    Calico_Info("rolling forward from lsn {}", m_pager->recovery_lsn().value);
-
     // Apply updates that are in the WAL but not the database.
     Calico_Try_S(m_wal->roll_forward(m_pager->recovery_lsn(), redo));
-    Calico_Info("rolled forward to lsn {}", last_lsn.value);
 
     // Reached the end of the WAL, but didn't find a commit record. Undo updates until we reach the most-recent commit.
     if (last_lsn != *m_commit_lsn) {
-        Calico_Warn("missing commit record: rolling backward");
         Calico_Try_S(m_wal->roll_backward(*m_commit_lsn, undo));
-        Calico_Info("rolled backward to lsn {}", m_commit_lsn->value);
     }
-    return ok();
+    return Status::ok();
 }
 
 auto Recovery::finish_recovery() -> Status
@@ -139,7 +131,7 @@ auto Recovery::finish_recovery() -> Status
     Calico_Try_S(m_pager->flush({}));
     Calico_Try_S(m_wal->truncate(*m_commit_lsn));
     m_wal->cleanup(m_pager->recovery_lsn());
-    return ok();
+    return Status::ok();
 }
 
 #undef ENSURE_NO_XACT

@@ -28,7 +28,6 @@ public:
     struct Parameters {
         std::string prefix;
         Storage *store {};
-        System *system {};
         Size page_size {};
         Size segment_cutoff {};
         Size writer_capacity {};
@@ -36,8 +35,6 @@ public:
 
     using Ptr = std::unique_ptr<WriteAheadLog>;
     using Callback = std::function<Status(WalPayloadOut)>;
-
-    System *system {};
 
     WriteAheadLog() = default;
     virtual ~WriteAheadLog() = default;
@@ -70,7 +67,6 @@ private:
     explicit WriteAheadLog(const Parameters &param);
     [[nodiscard]] auto open_reader() -> tl::expected<WalReader, Status>;
 
-    LogPtr m_log;
     std::atomic<Lsn> m_flushed_lsn {};
     std::atomic<Lsn> m_recovery_lsn {};
     ErrorBuffer m_error;

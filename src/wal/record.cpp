@@ -1,6 +1,6 @@
 #include "record.h"
 #include "utils/encoding.h"
-#include "utils/system.h"
+#include "utils/logging.h"
 
 namespace Calico {
 
@@ -56,19 +56,17 @@ auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_siz
 template<bool IsLeftMerge>
 static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
 {
-    static constexpr auto MESSAGE = "cannot merge wal records";
-
     [[maybe_unused]]
     static constexpr auto FIRST_TYPE = IsLeftMerge ? WalRecordHeader::FIRST : WalRecordHeader::LAST;
     static constexpr auto LAST_TYPE = IsLeftMerge ? WalRecordHeader::LAST : WalRecordHeader::FIRST;
     if (lhs.type == rhs.type) {
-        return corruption("{}: records should not have same type", MESSAGE);
+        return Status::corruption("records should not have same type");
     }
 
     // First merge in the logical record.
     if (lhs.type == WalRecordHeader::Type {}) {
         if (rhs.type == WalRecordHeader::MIDDLE || rhs.type == LAST_TYPE) {
-            return corruption("{}: right record has invalid type", MESSAGE);
+            return Status::corruption("right record has invalid type");
         }
 
         lhs.type = rhs.type;
@@ -76,17 +74,17 @@ static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> S
 
     } else {
         if (lhs.type != FIRST_TYPE) {
-            return corruption("{}: left record has invalid type", MESSAGE);
+            return Status::corruption("left record has invalid type");
         }
         if (lhs.crc != rhs.crc) {
-            return corruption("{}: fragment crc mismatch", MESSAGE);
+            return Status::corruption("fragment crc mismatch");
         }
         if (rhs.type == LAST_TYPE) {
             lhs.type = WalRecordHeader::FULL;
         }
     }
     lhs.size = static_cast<std::uint16_t>(lhs.size + rhs.size);
-    return ok();
+    return Status::ok();
 }
 
 auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status

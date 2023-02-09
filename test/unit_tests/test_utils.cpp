@@ -7,7 +7,6 @@
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/crc.h"
-#include "utils/lock_table.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
@@ -444,21 +443,21 @@ TEST(TestUniqueNullable, ResourceIsMoved)
 
 TEST(StatusTests, OkStatusHasNoMessage)
 {
-    auto s = ok();
+    auto s = Status::ok();
     ASSERT_TRUE(s.what().is_empty());
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
 {
     static constexpr auto message = "status message";
-    auto s = invalid_argument(message);
+    auto s = Status::invalid_argument(message);
     ASSERT_EQ(s.what().to_string(), message);
     ASSERT_TRUE(s.is_invalid_argument());
 }
 
 TEST(StatusTests, StatusCanBeCopied)
 {
-    const auto s = invalid_argument("invalid argument");
+    const auto s = Status::invalid_argument("invalid argument");
     const auto t = s;
     ASSERT_TRUE(t.is_invalid_argument());
     ASSERT_EQ(t.what().to_string(), "invalid argument");
@@ -469,34 +468,34 @@ TEST(StatusTests, StatusCanBeCopied)
 
 TEST(StatusTests, StatusCanBeReassigned)
 {
-    auto s = ok();
+    auto s = Status::ok();
     ASSERT_TRUE(s.is_ok());
 
-    s = invalid_argument("invalid argument");
+    s = Status::invalid_argument("invalid argument");
     ASSERT_TRUE(s.is_invalid_argument());
     ASSERT_EQ(s.what().to_string(), "invalid argument");
 
-    s = logic_error("logic error");
+    s = Status::logic_error("logic error");
     ASSERT_TRUE(s.is_logic_error());
     ASSERT_EQ(s.what().to_string(), "logic error");
 
-    s = ok();
+    s = Status::ok();
     ASSERT_TRUE(s.is_ok());
 }
 
 TEST(StatusTests, StatusCodesAreCorrect)
 {
-    ASSERT_TRUE(invalid_argument("invalid argument").is_invalid_argument());
-    ASSERT_TRUE(system_error("system error").is_system_error());
-    ASSERT_TRUE(logic_error("logic error").is_logic_error());
-    ASSERT_TRUE(corruption("corruption").is_corruption());
-    ASSERT_TRUE(not_found("not found").is_not_found());
-    ASSERT_TRUE(ok().is_ok());
+    ASSERT_TRUE(Status::invalid_argument("invalid argument").is_invalid_argument());
+    ASSERT_TRUE(Status::system_error("system error").is_system_error());
+    ASSERT_TRUE(Status::logic_error("logic error").is_logic_error());
+    ASSERT_TRUE(Status::corruption("corruption").is_corruption());
+    ASSERT_TRUE(Status::not_found("not found").is_not_found());
+    ASSERT_TRUE(Status::ok().is_ok());
 }
 
 TEST(StatusTests, OkStatusCanBeCopied)
 {
-    const auto src = ok();
+    const auto src = Status::ok();
     const auto dst = src;
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
@@ -506,7 +505,7 @@ TEST(StatusTests, OkStatusCanBeCopied)
 
 TEST(StatusTests, NonOkStatusCanBeCopied)
 {
-    const auto src = invalid_argument("status message");
+    const auto src = Status::invalid_argument("status message");
     const auto dst = src;
     ASSERT_TRUE(src.is_invalid_argument());
     ASSERT_TRUE(dst.is_invalid_argument());
@@ -516,7 +515,7 @@ TEST(StatusTests, NonOkStatusCanBeCopied)
 
 TEST(StatusTests, OkStatusCanBeMoved)
 {
-    auto src = ok();
+    auto src = Status::ok();
     const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
@@ -526,7 +525,7 @@ TEST(StatusTests, OkStatusCanBeMoved)
 
 TEST(StatusTests, NonOkStatusCanBeMoved)
 {
-    auto src = invalid_argument("status message");
+    auto src = Status::invalid_argument("status message");
     const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_invalid_argument());
@@ -534,15 +533,9 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     ASSERT_EQ(dst.what().to_string(), "status message");
 }
 
-TEST(StatusTests, FmtPrint)
-{
-    auto s = system_error("{1}::{0}", 123, 42);
-    ASSERT_EQ(s.what().to_string(), "42::123");
-}
-
 TEST(StatusTests, MessageIsNullTerminated)
 {
-    auto s = system_error("hello");
+    auto s = Status::system_error("hello");
     const auto msg = s.what();
     ASSERT_EQ(msg, "hello");
     ASSERT_EQ(msg.size(), 5);
@@ -665,7 +658,7 @@ public:
     BasicWorkerTests()
         : worker {[this](int event) {
                       events.emplace_back(event);
-                      return ok();
+                      return Status::ok();
                   }, 16}
     {}
 
@@ -871,59 +864,6 @@ TEST(LoggingTests, OnlyEscapesUnprintableCharacters)
             ASSERT_EQ(str.front(), '\\');
         }
     }
-}
-
-class LockTableTests : public testing::Test {
-protected:
-    static constexpr Size PAGE_COUNT {16};
-
-    struct SharedResource {
-        Size data[PAGE_COUNT] {};
-    };
-
-//    static auto spawn_reader(LockTable &table, SharedResource &resource, Id pid) -> void
-//    {
-//        Size value;
-//
-//        std::thread thread {[pid, &resource, &table, &value] {
-//            table.lock(pid, LockMode::READ);
-//            value = resource.data[pid.as_index()];
-//            table.unlock(pid, LockMode::READ);
-//        }};
-//        thread.detach();
-//        (void)value;
-//    }
-//
-//    static auto spawn_writer(LockTable &table, Id pid) -> void
-//    {
-//        std::thread thread {[pid, &table] {
-//            table.lock(pid, LockMode::READ);
-//            busy_wait();
-//            table.unlock(pid, LockMode::READ);
-//        }};
-//    }
-//
-//    static auto spawn_updater(LockTable &table, Id pid) -> void
-//    {
-//        std::thread thread {[pid, &table] {
-//            table.lock(pid, LockMode::UPDATE);
-//            busy_wait();
-//            table.upgrade(pid);
-//            busy_wait();
-//            table.unlock(pid, LockMode::WRITE);
-//        }};
-//    }
-
-    LockTable table;
-};
-
-TEST_F(LockTableTests, MultipleReadersAreAllowed)
-{
-    table.lock(Id::root(), LockMode::READ);
-    table.lock(Id::root(), LockMode::READ);
-
-    table.unlock(Id::root(), LockMode::READ);
-    table.unlock(Id::root(), LockMode::READ);
 }
 
 } // namespace Calico

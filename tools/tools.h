@@ -74,7 +74,7 @@ public:
     [[nodiscard]] auto remove_directory(const std::string &path) -> Status override;
     [[nodiscard]] auto open_random_reader(const std::string &path, RandomReader **out) -> Status override;
     [[nodiscard]] auto open_random_editor(const std::string &path, RandomEditor **out) -> Status override;
-    [[nodiscard]] auto open_append_writer(const std::string &path, AppendWriter **out) -> Status override;
+    [[nodiscard]] auto open_logger(const std::string &path, Logger **out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
@@ -121,7 +121,7 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class AppendMemoryWriter : public AppendWriter {
+class AppendMemoryWriter : public Logger {
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;

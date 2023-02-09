@@ -115,7 +115,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     static constexpr Size NUM_ITERATIONS {5};
     static constexpr Size GROUP_SIZE {10};
 
-    auto s = ok();
+    auto s = Status::ok();
     RecordGenerator generator;
     Tools::RandomGenerator random {4 * 1'024 * 1'024};
 
@@ -325,7 +325,7 @@ protected:
                     if (counter++ >= GetParam()) {
                         return special_error();
                     }
-                    return ok();
+                    return Status::ok();
                 }});
     }
     ~DbErrorTests() override = default;
@@ -403,7 +403,7 @@ protected:
                 if (counter++ >= GetParam().successes) {
                     return special_error();
                 }
-                return ok();
+                return Status::ok();
             }};
         };
 
@@ -548,7 +548,7 @@ public:
         const auto prefix = base.to_string() + "_";
         auto *ext = new(std::nothrow) ExtendedDatabase;
         if (ext == nullptr) {
-            return system_error("cannot allocate extension database: out of memory");
+            return Status::system_error("cannot allocate extension database: out of memory");
         }
         auto storage = std::make_unique<Tools::DynamicMemory>();
         options.storage = storage.get();

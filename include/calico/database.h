@@ -6,8 +6,8 @@
 
 namespace Calico {
 
-struct Options;
 class Cursor;
+class Logger;
 class Status;
 class Storage;
 
@@ -19,23 +19,13 @@ enum class LogLevel {
     OFF,
 };
 
-enum class LogTarget {
-    FILE,
-    STDOUT,
-    STDERR,
-    STDOUT_COLOR,
-    STDERR_COLOR,
-};
-
 struct Options {
     Size page_size {0x2000};
     Size page_cache_size {};
     Size wal_buffer_size {};
     Slice wal_prefix;
-    Size max_log_size {0x100000};
-    Size max_log_files {4};
     LogLevel log_level {LogLevel::OFF};
-    LogTarget log_target {};
+    Logger *info_log {};
     Storage *storage {};
 };
 

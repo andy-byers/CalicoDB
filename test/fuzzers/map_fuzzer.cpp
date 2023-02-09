@@ -74,7 +74,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     auto options = DB_OPTIONS;
     options.storage = new(std::nothrow) DynamicMemory;
-    ASSERT_TRUE(options.storage != nullptr);
+    CHECK_TRUE(options.storage != nullptr);
 
     Database *db;
     expect_ok(Database::open(DB_PATH, options, &db));
@@ -98,9 +98,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
     {
         std::string record_count;
         const auto found = db->get_property("calico.count.records", record_count);
-        ASSERT_TRUE(found);
-        ASSERT_FALSE(record_count.empty());
-        ASSERT_EQ(map.size(), std::stoi(record_count));
+        CHECK_TRUE(found);
+        CHECK_FALSE(record_count.empty());
+        CHECK_EQ(map.size(), std::stoi(record_count));
     };
 
     const auto expect_equal_contents = [&db, &map]
@@ -108,13 +108,13 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         auto *cursor = db->new_cursor();
         cursor->seek_first();
         for (const auto &[key, value]: map) {
-            ASSERT_TRUE(cursor->is_valid());
-            ASSERT_EQ(cursor->key(), key);
-            ASSERT_EQ(cursor->value(), value);
+            CHECK_TRUE(cursor->is_valid());
+            CHECK_EQ(cursor->key(), key);
+            CHECK_EQ(cursor->value(), value);
             cursor->next();
         }
-        ASSERT_FALSE(cursor->is_valid());
-        ASSERT_TRUE(cursor->status().is_not_found());
+        CHECK_FALSE(cursor->is_valid());
+        CHECK_TRUE(cursor->status().is_not_found());
         delete cursor;
     };
 

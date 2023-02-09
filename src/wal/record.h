@@ -11,7 +11,6 @@
 #include <map>
 #include <mutex>
 #include <optional>
-#include <spdlog/fmt/fmt.h>
 #include <variant>
 
 namespace Calico {
@@ -323,11 +322,11 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, Wal
     bytes.truncate(read_size);
 
     if (bytes.is_empty()) {
-        return tl::make_unexpected(not_found("segment is empty"));
+        return tl::make_unexpected(Status::not_found("segment is empty"));
     }
 
     if (bytes.size() != WalPayloadHeader::SIZE) {
-        return tl::make_unexpected(corruption("incomplete record"));
+        return tl::make_unexpected(Status::corruption("incomplete record"));
     }
 
     const Lsn lsn {get_u64(bytes)};

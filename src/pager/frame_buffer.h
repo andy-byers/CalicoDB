@@ -2,7 +2,6 @@
 #define CALICO_PAGER_FRAMER_H
 
 #include "calico/status.h"
-#include "spdlog/spdlog.h"
 #include "utils/expected.hpp"
 #include "utils/types.h"
 #include <list>

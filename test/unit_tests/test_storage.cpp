@@ -13,15 +13,15 @@ template<class Base, class Store>
 [[nodiscard]]
 auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
 {
-    auto s = ok();
+    auto s = Status::ok();
     Base *temp {};
 
     if constexpr (std::is_same_v<RandomReader, Base>) {
         s = storage.open_random_reader(name, &temp);
     } else if constexpr (std::is_same_v<RandomEditor, Base>) {
         s = storage.open_random_editor(name, &temp);
-    } else if constexpr (std::is_same_v<AppendWriter, Base>) {
-        s = storage.open_append_writer(name, &temp);
+    } else if constexpr (std::is_same_v<Logger, Base>) {
+        s = storage.open_logger(name, &temp);
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
@@ -59,7 +59,7 @@ constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer
         const auto chunk_size = std::min(in.size(), random.Next<Size>(message.size() / num_chunks));
         auto chunk = in.range(0, chunk_size);
 
-        if constexpr (std::is_base_of_v<AppendWriter, Writer>) {
+        if constexpr (std::is_base_of_v<Logger, Writer>) {
             ASSERT_TRUE(writer.write(chunk).is_ok());
         } else {
             ASSERT_TRUE(writer.write(chunk, counter).is_ok());
@@ -166,16 +166,16 @@ TEST_F(RandomFileEditorTests, WritesOutAndReadsBackData)
 class AppendFileWriterTests: public FileTests {
 public:
     AppendFileWriterTests()
-        : file {open_blob<AppendWriter>(*storage, filename)}
+        : file {open_blob<Logger>(*storage, filename)}
     {}
 
-    std::unique_ptr<AppendWriter> file;
+    std::unique_ptr<Logger> file;
 };
 
 TEST_F(AppendFileWriterTests, WritesOutData)
 {
     auto data = random.Generate(500);
-    write_out_randomly<AppendWriter>(random, *file, data);
+    write_out_randomly<Logger>(random, *file, data);
     ASSERT_EQ(read_whole_file(filename), data.to_string());
 }
 
@@ -214,7 +214,7 @@ TEST_F(DynamicStorageTests, ReadsAndWrites)
 {
     auto ra_editor = open_blob<RandomEditor>(*storage, filename);
     auto ra_reader = open_blob<RandomReader>(*storage, filename);
-    auto ap_writer = open_blob<AppendWriter>(*storage, filename);
+    auto ap_writer = open_blob<Logger>(*storage, filename);
 
     const auto first_input = random.Generate(500);
     const auto second_input = random.Generate(500);

@@ -34,7 +34,7 @@ auto DynamicMemory::read_file_at(const Memory &memory, Byte *data_out, Size &siz
         std::memcpy(data_out, buffer.advance(offset).data(), read_size);
     }
     size_out = read_size;
-    return ok();
+    return Status::ok();
 }
 
 auto DynamicMemory::write_file_at(Memory &memory, Slice in, Size offset) -> Status
@@ -43,7 +43,7 @@ auto DynamicMemory::write_file_at(Memory &memory, Slice in, Size offset) -> Stat
         memory.buffer.resize(write_end);
     }
     std::memcpy(memory.buffer.data() + offset, in.data(), in.size());
-    return ok();
+    return Status::ok();
 }
 
 auto RandomMemoryReader::read(Byte *out, Size &size, Size offset) -> Status
@@ -77,7 +77,7 @@ auto RandomMemoryEditor::sync() -> Status
 {
     std::lock_guard lock {m_parent->m_mutex};
     Try_Intercept_From(*m_parent, Interceptor::SYNC, m_path);
-    return ok();
+    return Status::ok();
 }
 
 auto AppendMemoryWriter::write(Slice in) -> Status
@@ -95,7 +95,7 @@ auto AppendMemoryWriter::sync() -> Status
 {
     std::lock_guard lock {m_parent->m_mutex};
     Try_Intercept_From(*m_parent, Interceptor::SYNC, m_path);
-    return ok();
+    return Status::ok();
 }
 
 auto DynamicMemory::get_memory(const std::string &path) const -> Memory &
@@ -125,9 +125,9 @@ auto DynamicMemory::open_random_reader(const std::string &path, RandomReader **o
     
     if (mem.created) {
         *out = new RandomMemoryReader {path, *this, mem};
-        return ok();
+        return Status::ok();
     }
-    return not_found("cannot open file");
+    return Status::not_found("cannot open file");
 }
 
 auto DynamicMemory::open_random_editor(const std::string &path, RandomEditor **out) -> Status
@@ -138,10 +138,10 @@ auto DynamicMemory::open_random_editor(const std::string &path, RandomEditor **o
 
     mem.created = true;
     *out = new RandomMemoryEditor {path, *this, mem};
-    return ok();
+    return Status::ok();
 }
 
-auto DynamicMemory::open_append_writer(const std::string &path, AppendWriter **out) -> Status
+auto DynamicMemory::open_logger(const std::string &path, Logger **out) -> Status
 {
     std::lock_guard lock {m_mutex};
     auto &mem = get_memory(path);
@@ -149,7 +149,7 @@ auto DynamicMemory::open_append_writer(const std::string &path, AppendWriter **o
 
     mem.created = true;
     *out = new AppendMemoryWriter {path, *this, mem};
-    return ok();
+    return Status::ok();
 }
 
 auto DynamicMemory::remove_file(const std::string &path) -> Status
@@ -160,10 +160,10 @@ auto DynamicMemory::remove_file(const std::string &path) -> Status
 
     auto itr = m_memory.find(path);
     if (itr == end(m_memory)) {
-        return system_error("cannot remove file");
+        return Status::system_error("cannot remove file");
     }
     m_memory.erase(itr);
-    return ok();
+    return Status::ok();
 }
 
 auto DynamicMemory::resize_file(const std::string &path, Size size) -> Status
@@ -171,27 +171,27 @@ auto DynamicMemory::resize_file(const std::string &path, Size size) -> Status
     std::lock_guard lock {m_mutex};
     auto itr = m_memory.find(path);
     if (itr == end(m_memory)) {
-        return system_error("cannot resize file");
+        return Status::system_error("cannot resize file");
     }
     itr->second.buffer.resize(size);
-    return ok();
+    return Status::ok();
 }
 
 auto DynamicMemory::rename_file(const std::string &old_path, const std::string &new_path) -> Status
 {
     if (new_path.empty()) {
-        return system_error("could not rename file: new name has zero length");
+        return Status::system_error("could not rename file: new name has zero length");
     }
 
     std::lock_guard lock {m_mutex};
     auto node = m_memory.extract(old_path);
     if (node.empty()) {
-        return system_error("cannot rename file: file \"{}\" does not exist", old_path);
+        return Status::system_error("cannot rename file: file \"{}\" does not exist", old_path);
     }
 
     node.key() = new_path;
     m_memory.insert(std::move(node));
-    return ok();
+    return Status::ok();
 }
 
 auto DynamicMemory::file_size(const std::string &path, Size &out) const -> Status
@@ -199,19 +199,19 @@ auto DynamicMemory::file_size(const std::string &path, Size &out) const -> Statu
     std::lock_guard lock {m_mutex};
     auto itr = m_memory.find(path);
     if (itr == cend(m_memory)) {
-        return system_error("cannot get file size: file \"{}\" does not exist", path);
+        return Status::system_error("cannot get file size: file \"{}\" does not exist", path);
     }
     out = itr->second.buffer.size();
-    return ok();
+    return Status::ok();
 }
 
 auto DynamicMemory::file_exists(const std::string &path) const -> Status
 {
     std::lock_guard lock {m_mutex};
     if (const auto &mem = get_memory(path); mem.created) {
-        return ok();
+        return Status::ok();
     }
-    return not_found("cannot find file: file \"{}\" does not exist", path);
+    return Status::not_found("cannot find file: file \"{}\" does not exist", path);
 }
 
 auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::string> &out) const -> Status
@@ -225,7 +225,7 @@ auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::s
             out.emplace_back(path);
         }
     }
-    return ok();
+    return Status::ok();
 }
 
 auto DynamicMemory::clone() const -> Storage*

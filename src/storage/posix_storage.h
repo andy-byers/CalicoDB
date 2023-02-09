@@ -44,7 +44,7 @@ private:
     int m_file {};
 };
 
-class AppendFileWriter : public AppendWriter {
+class AppendFileWriter : public Logger {
 public:
     AppendFileWriter(std::string path, int file)
         : m_path {std::move(path)},
@@ -71,7 +71,7 @@ public:
     [[nodiscard]] auto get_children(const std::string&, std::vector<std::string>&) const -> Status override;
     [[nodiscard]] auto open_random_reader(const std::string &, RandomReader **) -> Status override;
     [[nodiscard]] auto open_random_editor(const std::string &, RandomEditor**) -> Status override;
-    [[nodiscard]] auto open_append_writer(const std::string &, AppendWriter**) -> Status override;
+    [[nodiscard]] auto open_logger(const std::string &, Logger**) -> Status override;
     [[nodiscard]] auto rename_file(const std::string &, const std::string &) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &, Size) -> Status override;

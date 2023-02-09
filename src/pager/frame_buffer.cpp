@@ -60,7 +60,7 @@ auto FrameBuffer::open(const std::string &prefix, Storage *storage, Size page_si
     const auto cache_size = page_size * frame_count;
     AlignedBuffer buffer {cache_size, page_size};
     if (buffer.get() == nullptr) {
-        return tl::make_unexpected(system_error("cannot allocate frames: out of memory"));
+        return tl::make_unexpected(Status::system_error("out of memory"));
     }
 
     return FrameBuffer {std::move(file), std::move(buffer), page_size, frame_count};
@@ -112,8 +112,7 @@ auto FrameBuffer::pin(Id pid) -> tl::expected<Size, Status>
     CALICO_EXPECT_LE(pid.as_index(), m_page_count);
 
     if (m_available.empty()) {
-        return tl::make_unexpected(not_found(
-            "could not pin page: unable to find an available frame (unpin a page and try again)"));
+        return tl::make_unexpected(Status::not_found("out of frames"));
     }
 
     auto fid = m_available.back();
@@ -191,8 +190,7 @@ auto FrameBuffer::read_page_from_file(Id id, Span out) const -> tl::expected<boo
         return false;
     }
 
-    return tl::make_unexpected(system_error(
-        "could not read page {}: incomplete read (read {}/{} B)", id.value, out.size(), m_page_size));
+    return tl::make_unexpected(Status::system_error("incomplete read"));
 }
 
 auto FrameBuffer::write_page_to_file(Id pid, const Slice &page) const -> Status

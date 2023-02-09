@@ -26,11 +26,11 @@ constexpr auto DB_PATH = "/tmp/_db_fuzzer";
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     Database *db;
-    ASSERT_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
+    CHECK_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
 
     while (size > 1) {
         std::string property;
-        ASSERT_TRUE(db->get_property("calico.count.records", property));
+        CHECK_TRUE(db->get_property("calico.count.records", property));
         const auto record_count = std::stoi(property);
         const auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
         size--;
@@ -45,7 +45,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 break;
             case PUT:
                 key = extract_key(data, size).to_string();
-                ASSERT_OK(db->put(key, extract_value(data, size)));
+                CHECK_OK(db->put(key, extract_value(data, size)));
                 break;
             case ERASE:
                 Tools::expect_non_error(db->erase(extract_key(data, size)));
@@ -61,43 +61,43 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                         cursor->previous();
                     }
                 }
-                ASSERT_TRUE(cursor->status().is_not_found());
+                CHECK_TRUE(cursor->status().is_not_found());
                 delete cursor;
                 break;
             case ITER_FORWARD:
                 cursor = db->new_cursor();
                 cursor->seek_first();
-                ASSERT_EQ(cursor->is_valid(), record_count != 0);
+                CHECK_EQ(cursor->is_valid(), record_count != 0);
                 while (cursor->is_valid()) {
                     cursor->next();
                 }
-                ASSERT_TRUE(cursor->status().is_not_found());
+                CHECK_TRUE(cursor->status().is_not_found());
                 delete cursor;
                 break;
             case ITER_REVERSE:
                 cursor = db->new_cursor();
                 cursor->seek_last();
-                ASSERT_EQ(cursor->is_valid(), record_count != 0);
+                CHECK_EQ(cursor->is_valid(), record_count != 0);
                 while (cursor->is_valid()) {
                     cursor->previous();
                 }
-                ASSERT_TRUE(cursor->status().is_not_found());
+                CHECK_TRUE(cursor->status().is_not_found());
                 delete cursor;
                 break;
             case COMMIT:
-                ASSERT_OK(db->commit());
+                CHECK_OK(db->commit());
                 break;
             case ABORT:
-                ASSERT_OK(db->abort());
+                CHECK_OK(db->abort());
                 break;
             default: // REOPEN
                 delete db;
-                ASSERT_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
+                CHECK_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
         }
-        ASSERT_OK(db->status());
+        CHECK_OK(db->status());
     }
     delete db;
-    ASSERT_OK(Database::destroy(DB_PATH, DB_OPTIONS));
+    CHECK_OK(Database::destroy(DB_PATH, DB_OPTIONS));
     return 0;
 }
 

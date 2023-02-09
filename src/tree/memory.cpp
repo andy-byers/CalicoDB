@@ -76,7 +76,7 @@ auto FreeList::pop() -> tl::expected<Page, Status>
         return page;
     }
     CALICO_EXPECT_TRUE(m_head.is_null());
-    return tl::make_unexpected(logic_error("cannot pop page: free list is empty"));
+    return tl::make_unexpected(Status::logic_error("free list is empty"));
 }
 
 auto read_chain(Pager &pager, Id pid, Span out) -> tl::expected<void, Status>

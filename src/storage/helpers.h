@@ -14,7 +14,7 @@ auto read_exact(Reader &reader, Span out, Size offset) -> Status
     auto s = reader.read(out.data(), requested, offset);
 
     if (s.is_ok() && out.size() != requested) {
-        return system_error("incomplete read: read {}/{} bytes", out.size(), requested);
+        return Status::system_error("incomplete read");
     }
     return s;
 }

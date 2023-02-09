@@ -35,7 +35,7 @@ namespace Calico {
                 if (n-- <= 0) { \
                     return special_error(); \
                 } \
-                return ok(); \
+                return Status::ok(); \
             }}); \
     } while (0)
 
@@ -181,7 +181,7 @@ public:
 
     auto flush() -> Status override
     {
-        return ok();
+        return Status::ok();
     }
 
     auto advance() -> void override
@@ -192,13 +192,13 @@ public:
     [[nodiscard]]
     auto roll_forward(Id, const Callback &) -> Status override
     {
-        return ok();
+        return Status::ok();
     }
 
     [[nodiscard]]
     auto roll_backward(Id, const Callback &) -> Status override
     {
-        return ok();
+        return Status::ok();
     }
 
     auto cleanup(Id) -> void override
@@ -208,20 +208,20 @@ public:
 
     [[nodiscard]] auto start_workers() -> Status override
     {
-        return ok();
+        return Status::ok();
     }
 
     [[nodiscard]]
     auto truncate(Id) -> Status override
     {
-        return ok();
+        return Status::ok();
     }
 };
 
 inline auto expect_ok(const Status &s) -> void
 {
     if (!s.is_ok()) {
-        fmt::print(stderr, "unexpected {} status: {}\n", get_status_name(s), s.what().data());
+        std::fprintf(stderr, "unexpected %s status: %s\n", get_status_name(s), s.what().data());
         std::abort();
     }
 }
@@ -229,14 +229,14 @@ inline auto expect_ok(const Status &s) -> void
 [[nodiscard]]
 inline auto special_error()
 {
-    return system_error("42");
+    return Status::system_error("42");
 }
 
 inline auto assert_special_error(const Status &s)
 {
     if (!s.is_system_error() || s.what() != special_error().what()) {
-        fmt::print(stderr, "error: unexpected {} status: {}", get_status_name(s), s.is_ok() ? "NULL" : s.what().to_string());
-        std::exit(EXIT_FAILURE);
+        std::fprintf(stderr, "error: unexpected %s status: %s", get_status_name(s), s.is_ok() ? "NULL" : s.what().data());
+        std::abort();
     }
 }
 
@@ -279,14 +279,13 @@ namespace TestTools {
     auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
     {
         std::string val;
-        const auto MSG = fmt::format("expected record ({}, {})\n", key, value);
         if (auto s = get(t, key, val); s.is_ok()) {
             if (val != value) {
-                fmt::print(stderr, "{}: value \"{}\" does not match\n", MSG, val);
-                std::exit(EXIT_FAILURE);
+                std::cerr << "value does not match (\"" << value << "\" != \"" << val << "\")\n";
+                std::abort();
             }
         } else {
-            fmt::print(stderr, "{}: {}\n", MSG, "could not find key");
+            std::cerr << "could not find key " << key << '\n';
             std::abort();
         }
     }
@@ -296,7 +295,7 @@ namespace TestTools {
     {
         auto s = t.put(key, value);
         if (!s.is_ok()) {
-            fmt::print(stderr, "error: {}\n", s.what().data());
+            std::fputs(s.what().data(), stderr);
             std::abort();
         }
     }
@@ -306,7 +305,7 @@ namespace TestTools {
     {
         auto s = t.erase(get(t, key));
         if (!s.is_ok() && !s.is_not_found()) {
-            fmt::print(stderr, "error: {}\n", s.what().data());
+            std::fputs(s.what().data(), stderr);
             std::abort();
         }
         return !s.is_not_found();
@@ -338,8 +337,8 @@ namespace TestTools {
 
     inline auto append_file(Storage &storage, const std::string &path, Slice in) -> void
     {
-        AppendWriter *file;
-        ASSERT_TRUE(storage.open_append_writer(path, &file).is_ok());
+        Logger *file;
+        ASSERT_TRUE(storage.open_logger(path, &file).is_ok());
         ASSERT_TRUE(file->write(in).is_ok());
         delete file;
     }

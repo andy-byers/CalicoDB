@@ -5,9 +5,9 @@
 #include "pager/delta.h"
 #include "record.h"
 #include "utils/expected.hpp"
+#include "utils/logging.h"
 #include "utils/queue.h"
 #include "utils/scratch.h"
-#include "utils/system.h"
 #include "utils/types.h"
 #include <map>
 #include <mutex>

@@ -5,33 +5,6 @@
 #include "calico/calico.h"
 #include "tools.h"
 
-#define ASSERT_TRUE(cond) \
-    do { \
-        if (!(cond)) {     \
-            std::fputs(#cond " is false\n", stderr); \
-            std::abort(); \
-        } \
-    } while (0)
-
-#define ASSERT_FALSE(cond) \
-    ASSERT_TRUE(!(cond))
-
-#define ASSERT_OK(expr) \
-    do { \
-        if (auto assert_s = (expr); !assert_s.is_ok()) { \
-            std::fputs(assert_s.what().data(), stderr); \
-            std::abort(); \
-        } \
-    } while (0)
-
-#define ASSERT_EQ(lhs, rhs) \
-    do { \
-        if ((lhs) != (rhs)) { \
-            std::fputs(#lhs " != " #rhs, stderr); \
-            std::abort(); \
-        } \
-    } while (0)
-
 namespace Calico {
 
 static constexpr Size MAX_KEY_SIZE {12};
@@ -41,10 +14,8 @@ static constexpr Options DB_OPTIONS {
     0x200 * 32,
     0x200 * 32,
     {},
-    0,
-    0,
     LogLevel::OFF,
-    {},
+    nullptr,
     nullptr,
 };
 

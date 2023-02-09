@@ -3,9 +3,6 @@
 
 #include "calico/database.h"
 
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/spdlog.h>
-
 #include "recovery.h"
 #include "pager/pager.h"
 #include "tree/header.h"
@@ -49,7 +46,6 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
-    std::unique_ptr<System> system;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
     std::unique_ptr<BPlusTree> tree;
@@ -59,7 +55,7 @@ public:
     Size max_key_length {};
 
 private:
-    [[nodiscard]] auto check_key(const Slice &key, const char *message) const -> Status;
+    [[nodiscard]] auto check_key(const Slice &key) const -> Status;
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
     [[nodiscard]] auto save_state() const -> Status;
@@ -67,17 +63,18 @@ private:
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_abort() -> Status;
 
-    mutable Status m_status {ok()};
+    mutable Status m_status;
     std::string m_db_prefix;
     std::string m_wal_prefix;
     std::unique_ptr<Recovery> m_recovery;
     std::unique_ptr<LogScratchManager> m_scratch;
     Storage *m_storage {};
+    Logger *m_info_log {};
     Size m_txn_size {};
     Lsn m_commit_lsn;
-    LogPtr m_log;
     bool m_in_txn {true};
     bool m_owns_storage {};
+    bool m_owns_info_log {};
 };
 
 auto setup(const std::string &, Storage &, const Options &) -> tl::expected<InitialState, Status>;

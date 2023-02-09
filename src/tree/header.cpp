@@ -5,12 +5,6 @@
 
 namespace Calico {
 
-static constexpr Byte NODE_EXTERNAL_BITS {0b01'00};
-static constexpr Byte NODE_INTERNAL_BITS {0b10'00};
-static constexpr Byte LINK_FREELIST_BITS {0b00'01};
-static constexpr Byte LINK_OVERFLOW_BITS {0b00'10};
-static constexpr Byte FLAGS_MASK {0b11'11};
-
 static auto write_file_header(Byte *data, const FileHeader &header) -> void
 {
     put_u32(data, header.magic_code);
@@ -82,7 +76,7 @@ NodeHeader::NodeHeader(const Page &page)
     data += sizeof(Id);
 
     // Flags byte.
-    is_external = (*data++ & FLAGS_MASK) == NODE_EXTERNAL_BITS;
+    is_external = *data++;
 
     parent_id.value = get_u64(data);
     data += sizeof(Id);
@@ -115,9 +109,7 @@ auto NodeHeader::write(Page &page) const -> void
     put_u64(data, page_lsn.value);
     data += sizeof(Id);
 
-    *data++ = is_external
-        ? NODE_EXTERNAL_BITS
-        : NODE_INTERNAL_BITS;
+    *data++ = static_cast<Byte>(is_external);
 
     put_u64(data, parent_id.value);
     data += sizeof(Id);

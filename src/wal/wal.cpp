@@ -1,15 +1,13 @@
 #include "wal.h"
 #include "cleanup.h"
 #include "reader.h"
+#include "utils/logging.h"
 #include "writer.h"
-#include "utils/system.h"
 
 namespace Calico {
 
 WriteAheadLog::WriteAheadLog(const Parameters &param)
-    : system {param.system},
-      m_log {param.system->create_log("wal")},
-      m_prefix {param.prefix},
+    : m_prefix {param.prefix},
       m_storage {param.store},
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
@@ -17,9 +15,6 @@ WriteAheadLog::WriteAheadLog(const Parameters &param)
       m_segment_cutoff {param.segment_cutoff},
       m_buffer_count {param.writer_capacity}
 {
-    Calico_Info("initializing, write buffer size is {}", param.writer_capacity * m_reader_data.size());
-
-    CALICO_EXPECT_NE(system, nullptr);
     CALICO_EXPECT_NE(m_storage, nullptr);
     CALICO_EXPECT_NE(m_buffer_count, 0);
     CALICO_EXPECT_NE(m_segment_cutoff, 0);
@@ -48,7 +43,7 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
 
     std::unique_ptr<WriteAheadLog> wal {new (std::nothrow) WriteAheadLog {param}};
     if (wal == nullptr) {
-        return tl::make_unexpected(system_error("cannot allocate WAL object: out of memory"));
+        return tl::make_unexpected(Status::system_error("out of memory"));
     }
 
     // Keep track of the segment files.
@@ -84,7 +79,7 @@ auto WriteAheadLog::start_workers() -> Status
             m_segment_cutoff,
         }}};
     if (m_writer == nullptr) {
-        return system_error("cannot allocate writer object: out of memory");
+        return Status::system_error("cannot allocate writer object: out of memory");
     }
 
     m_cleanup = std::unique_ptr<WalCleanup> {
@@ -96,7 +91,7 @@ auto WriteAheadLog::start_workers() -> Status
             &m_set,
         }}};
     if (m_cleanup == nullptr) {
-        return system_error("cannot allocate cleanup object: out of memory");
+        return Status::system_error("cannot allocate cleanup object: out of memory");
     }
 
     m_worker = std::unique_ptr<Worker<Event>> {
@@ -105,9 +100,9 @@ auto WriteAheadLog::start_workers() -> Status
         },
         m_buffer_count}};
     if (m_worker == nullptr) {
-        return system_error("cannot allocate task manager object: out of memory");
+        return Status::system_error("cannot allocate task manager object: out of memory");
     }
-    return ok();
+    return Status::ok();
 }
 
 auto WriteAheadLog::run_task(Event event) -> void
@@ -178,7 +173,7 @@ auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
 auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Status
 {
     if (m_set.first().is_null()) {
-        return corruption("log is empty");
+        return Status::corruption("wal is empty");
     }
 
     // Open the reader on the first (oldest) WAL segment file.
@@ -191,7 +186,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
     CALICO_EXPECT_TRUE(reader->seek_previous().is_not_found());
 
     // Find the segment containing the first update that hasn't been applied yet.
-    auto s = ok();
+    auto s = Status::ok();
     while (s.is_ok()) {
         Lsn first_lsn;
         s = reader->read_first_lsn(first_lsn);
@@ -199,7 +194,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
         // This indicates an empty file. Try to seek back to the last segment.
         if (s.is_not_found()) {
             if (reader->segment_id() != m_set.last()) {
-                return corruption("missing WAL data in segment {}", reader->segment_id().value);
+                return Status::corruption("missing segment");
             }
             s = reader->seek_previous();
             break;
@@ -217,15 +212,13 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
     }
 
     if (s.is_not_found()) {
-        s = ok();
+        s = Status::ok();
     }
 
     for (auto first = true; s.is_ok(); first = false) {
-        Calico_Info("rolling segment {} forward", reader->segment_id().value);
-
         s = reader->roll([&callback, &first, this](const auto &payload) {
             if (!first && m_last_lsn.value + 1 != payload.lsn().value) {
-                return corruption("missing wal record (missing lsn is {})", m_last_lsn.value + 1);
+                return Status::corruption("missing wal record");
             }
             m_last_lsn = payload.lsn();
             return callback(payload);
@@ -241,7 +234,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
     if (s.is_not_found()) {
         // Allow the last segment to be empty or contain an incomplete record.
         if (last_id == m_set.last()) {
-            s = ok();
+            s = Status::ok();
         }
     }
     return s;
@@ -250,7 +243,7 @@ auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Sta
 auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Status
 {
     if (m_set.first().is_null()) {
-        return corruption("log is empty");
+        return Status::corruption("wal is empty");
     }
 
     auto reader = open_reader();
@@ -267,7 +260,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
         Calico_Try_S(s);
     }
 
-    auto s = ok();
+    auto s = Status::ok();
     for (auto first = true; s.is_ok(); first = false) {
         Lsn first_lsn;
         s = reader->read_first_lsn(first_lsn);
@@ -277,14 +270,12 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
                 break;
             }
 
-            Calico_Info("rolling segment {} backward", reader->segment_id().value);
-
             // Read all full image records. We can read them forward, since the page IDs are disjoint
             // within each transaction.
             s = reader->roll(callback);
         } else if (s.is_not_found()) {
             // The segment file is empty.
-            s = corruption(s.what().data());
+            s = Status::corruption(s.what().data());
         }
 
         if (s.is_ok()) {
@@ -292,7 +283,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
             m_flushed_lsn.store(m_last_lsn);
         } else if (s.is_corruption() && first) {
             // Most-recent segment can be empty or corrupted.
-            s = ok();
+            s = Status::ok();
         }
         Calico_Try_S(s);
 
@@ -300,7 +291,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
     }
     // Indicates that we have hit the beginning of the WAL.
     if (s.is_not_found()) {
-        s = corruption("{}", s.what().data());
+        s = Status::corruption(s.what().data());
     }
 
     return s;
@@ -329,12 +320,11 @@ auto WriteAheadLog::truncate(Lsn lsn) -> Status
         const auto name = encode_segment_name(m_prefix, current);
         Calico_Try_S(m_storage->remove_file(name));
         m_set.remove_after(Id {current.value - 1});
-        Calico_Info("removed segment {} with first lsn {}", name, first_lsn->value);
         current = m_set.id_before(current);
     }
     m_last_lsn = lsn;
     m_flushed_lsn.store(lsn);
-    return ok();
+    return Status::ok();
 }
 
 } // namespace Calico

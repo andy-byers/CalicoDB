@@ -1,8 +1,10 @@
 #ifndef CALICO_UTILS_H
 #define CALICO_UTILS_H
 
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include "calico/status.h"
-#include <spdlog/fmt/fmt.h>
 
 #if NDEBUG
 #  define CALICO_EXPECT_(expr, file, line)
@@ -58,7 +60,7 @@ namespace Impl {
     inline constexpr auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept -> void
     {
         if (!expectation) {
-            fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
+            std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
             std::abort();
         }
     }
@@ -67,10 +69,6 @@ namespace Impl {
 
 static constexpr Size MINIMUM_PAGE_SIZE {0x100};
 static constexpr Size MAXIMUM_PAGE_SIZE {0x8000};
-static constexpr Size MINIMUM_LOG_MAX_SIZE {0xA000};
-static constexpr Size MAXIMUM_LOG_MAX_SIZE {0xA00000};
-static constexpr Size MINIMUM_LOG_MAX_FILES {1};
-static constexpr Size MAXIMUM_LOG_MAX_FILES {32};
 
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 template<class T>
@@ -80,11 +78,9 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
 }
 
 [[nodiscard]]
-inline auto get_status_name(const Status &s) noexcept -> std::string
+inline auto get_status_name(const Status &s) noexcept -> const char *
 {
-    if (s.is_ok()) {
-        return "OK";
-    } else if (s.is_not_found()) {
+    if (s.is_not_found()) {
         return "not found";
     } else if (s.is_system_error()) {
         return "system error";
@@ -94,49 +90,9 @@ inline auto get_status_name(const Status &s) noexcept -> std::string
         return "corruption";
     } else if (s.is_invalid_argument()) {
         return "invalid argument";
-    } else {
-        return "unknown";
     }
-}
-
-inline auto ok() -> Status
-{
-    return Status::ok();
-}
-
-template<class ...Ts>
-[[nodiscard]]
-auto invalid_argument(const std::string_view &format, Ts &&...ts) -> Status
-{
-    return Status::invalid_argument(fmt::format(format, std::forward<Ts>(ts)...));
-}
-
-template<class ...Ts>
-[[nodiscard]]
-auto system_error(const std::string_view &format, Ts &&...ts) -> Status
-{
-    return Status::system_error(fmt::format(format, std::forward<Ts>(ts)...));
-}
-
-template<class ...Ts>
-[[nodiscard]]
-auto logic_error(const std::string_view &format, Ts &&...ts) -> Status
-{
-    return Status::logic_error(fmt::format(format, std::forward<Ts>(ts)...));
-}
-
-template<class ...Ts>
-[[nodiscard]]
-auto corruption(const std::string_view &format, Ts &&...ts) -> Status
-{
-    return Status::corruption(fmt::format(format, std::forward<Ts>(ts)...));
-}
-
-template<class ...Ts>
-[[nodiscard]]
-auto not_found(const std::string_view &format, Ts &&...ts) -> Status
-{
-    return Status::not_found(fmt::format(format, std::forward<Ts>(ts)...));
+    CALICO_EXPECT_TRUE(s.is_ok());
+    return "ok";
 }
 
 } // namespace Calico
