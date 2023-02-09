@@ -86,7 +86,7 @@ public:
         return runner->m_key;
     }
 
-    static auto reopen() -> void
+    static auto reopen(Size n = 0) -> void
     {
         delete runner->db;
         if (runner->use_fresh_db) {
@@ -95,7 +95,7 @@ public:
         CHECK_OK(Database::open(runner->path, runner->options, &runner->db));
         runner->counter = 0;
 
-        for (Size i {}; i < runner->record_count; ++i) {
+        for (Size i {}; i < n; ++i) {
             write(next_key());
         }
         CHECK_OK(runner->db->commit());
@@ -141,31 +141,48 @@ std::unique_ptr<Benchmark> Benchmark::runner;
 
 auto BM_RandomReads_(benchmark::State &state)
 {
-    Benchmark::runner->reopen();
-    
-    Slice key;
-    for (auto _ : state) {
-        state.PauseTiming();
-        key = Benchmark::runner->rand_key();
-        state.ResumeTiming();
-        Benchmark::runner->read(key);
-    }
-}
-BENCHMARK(BM_RandomReads_);
-
-auto BM_SequentialReads_(benchmark::State &state)
-{
-    Benchmark::runner->reopen();
+    const auto count = Benchmark::runner->record_count;
+    Benchmark::runner->reopen(count);
     
     Slice key;
     Size found {};
 
     for (auto _ : state) {
         state.PauseTiming();
+        Benchmark::runner->counter = Benchmark::runner->random.Next(count - 1);
+        key = Benchmark::runner->next_key();
+        state.ResumeTiming();
+
+        found += Benchmark::runner->read(key);
+    }
+
+#ifdef RUN_CHECKS
+    CHECK_EQ(found, state.iterations());
+#endif // RUN_CHECKS
+}
+BENCHMARK(BM_RandomReads_);
+
+auto BM_SequentialReads_(benchmark::State &state)
+{
+    const auto count = Benchmark::runner->record_count;
+    Benchmark::runner->reopen(count);
+    
+    Slice key;
+    Size found {};
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        if (Benchmark::runner->counter >= count) {
+            Benchmark::runner->counter = 0;
+        }
         key = Benchmark::runner->next_key();
         state.ResumeTiming();
         found += Benchmark::runner->read(key);
     }
+
+#ifdef RUN_CHECKS
+    CHECK_EQ(found, state.iterations());
+#endif // RUN_CHECKS
 }
 BENCHMARK(BM_SequentialReads_);
 
