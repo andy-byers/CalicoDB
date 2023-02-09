@@ -6,7 +6,7 @@
 #include "tree/header.h"
 #include "tree/node.h"
 #include "unit_tests.h"
-#include "utils/system.h"
+#include "utils/logging.h"
 #include <gtest/gtest.h>
 #include <numeric>
 
@@ -607,7 +607,7 @@ public:
             storage.get(),
             &scratch,
             wal.get(),
-            &state,
+            nullptr,
             &status,
             &commit_lsn,
             &in_txn,
@@ -668,8 +668,7 @@ public:
         return message;
     }
 
-    System state {"test", {}};
-    Status status {ok()};
+    Status status;
     bool in_txn {true};
     Lsn commit_lsn;
     std::unique_ptr<WriteAheadLog> wal;
@@ -750,7 +749,9 @@ auto generate_id_strings(Size n)
 
     std::vector<std::string> id_strs;
     std::transform(cbegin(id_ints), cend(id_ints), back_inserter(id_strs), [](auto id) {
-        return fmt::format("{:06}", id);
+        auto result = std::to_string(id);
+        CALICO_EXPECT_LE(result.size(), 6);
+        return std::string(6 - result.size(), '0') + result;
     });
     return id_strs;
 }

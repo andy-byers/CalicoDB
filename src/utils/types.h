@@ -1,6 +1,7 @@
 #ifndef CALICO_UTILS_TYPES_H
 #define CALICO_UTILS_TYPES_H
 
+#include <mutex>
 #include <utility>
 #include <vector>
 #include "calico/slice.h"
@@ -377,6 +378,37 @@ inline auto mem_move(Span dst, const Slice &src) noexcept -> void *
     CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_move(dst, src, src.size());
 }
+
+
+class ErrorBuffer {
+public:
+    [[nodiscard]]
+    auto is_ok() const -> bool
+    {
+        std::lock_guard lock {m_mutex};
+        return m_status.is_ok();
+    }
+
+    [[nodiscard]]
+    auto get() const -> const Status &
+    {
+        std::lock_guard lock {m_mutex};
+        return m_status;
+    }
+
+    auto set(Status status) -> void
+    {
+        CALICO_EXPECT_FALSE(status.is_ok());
+        std::lock_guard lock {m_mutex};
+        if (m_status.is_ok()) {
+            m_status = std::move(status);
+        }
+    }
+
+private:
+    mutable std::mutex m_mutex;
+    Status m_status;
+};
 
 } // namespace Calico
 

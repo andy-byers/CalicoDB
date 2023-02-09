@@ -27,8 +27,7 @@ public:
     }
 
     [[nodiscard]] auto pop() -> tl::expected<Page, Status>;
-    [[nodiscard]] auto push(Page page) -> tl::expected<void, Status>;
-    [[nodiscard]] auto vacuum(Size target) -> tl::expected<Size, Status>;
+    auto push(Page page) -> void;
 };
 
 [[nodiscard]] auto read_chain(Pager &pager, Id pid, Span out) -> tl::expected<void, Status>;

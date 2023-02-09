@@ -1,20 +1,9 @@
 
-set(gtest_force_shared_crt On CACHE BOOL "" FORCE)
-set(INSTALL_GTEST Off CACHE INTERNAL "" FORCE)
-set(INSTALL_GMOCK Off CACHE INTERNAL "" FORCE)
-set(BUILD_GMOCK Off CACHE INTERNAL "" FORCE)
-FetchContent_Declare(googletest
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG release-1.11.0)
-FetchContent_MakeAvailable(googletest)
-include(GoogleTest)
-
 option(CALICO_BuildBenchmarks "Build the benchmarks" On)
 option(CALICO_BuildFuzzers "Build the fuzz targets" Off)
+option(CALICO_BuildUnitTests "Build the unit tests" On)
 
 add_subdirectory(tools)
-add_subdirectory(recovery)
-add_subdirectory(unit_tests)
 
 if(CALICO_BuildBenchmarks)
     add_subdirectory(benchmarks)
@@ -22,4 +11,8 @@ endif()
 
 if(CALICO_BuildFuzzers)
     add_subdirectory(fuzzers)
+endif()
+
+if(CALICO_BuildUnitTests)
+    add_subdirectory(unit_tests)
 endif()

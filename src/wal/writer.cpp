@@ -49,21 +49,19 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
             }
         }
         CALICO_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::SIZE);
-        if (auto s = flush(); !s.is_ok()) {
-            return s;
-        }
+        Calico_Try_S(flush());
     }
     // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
     // to be all the way on disk.
     m_last_lsn = lsn;
-    return ok();
+    return Status::ok();
 }
 
 auto LogWriter::flush() -> Status
 {
     // Already flushed.
     if (m_offset == 0) {
-        return ok();
+        return Status::ok();
     }
 
     // Clear unused bytes at the end of the tail buffer.
@@ -119,6 +117,7 @@ auto WalWriter::flush() -> void
 {
     if (m_writer.has_value() && m_error->is_ok()) {
         Maybe_Set_Error(m_writer->flush());
+        Maybe_Set_Error(m_file->sync());
     }
 }
 
@@ -138,8 +137,8 @@ auto WalWriter::destroy() && -> void
 auto WalWriter::open_segment(Id id) -> Status
 {
     CALICO_EXPECT_EQ(m_writer, std::nullopt);
-    AppendWriter *file;
-    auto s = m_storage->open_append_writer(encode_segment_name(m_prefix, id), &file);
+    Logger *file;
+    auto s = m_storage->new_logger(encode_segment_name(m_prefix, id), &file);
     if (s.is_ok()) {
         m_file.reset(file);
         m_writer = LogWriter {*m_file, m_tail, *m_flushed_lsn};
@@ -152,7 +151,7 @@ auto WalWriter::close_segment() -> Status
 {
     // We must have failed while opening the segment file.
     if (!m_writer) {
-        return logic_error("segment file is already closed");
+        return Status::logic_error("segment file is already closed");
     }
 
     flush();
@@ -166,7 +165,7 @@ auto WalWriter::close_segment() -> Status
     } else {
         Calico_Try_S(m_storage->remove_file(encode_segment_name(m_prefix, id)));
     }
-    return ok();
+    return Status::ok();
 }
 
 auto WalWriter::advance_segment() -> Status

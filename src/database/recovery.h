@@ -13,14 +13,10 @@ class WriteAheadLog;
 
 class Recovery {
 public:
-    System *system {};
-
-    Recovery(Pager &pager, WriteAheadLog &wal, System &sys, Lsn &commit_lsn)
-        : system {&sys},
-          m_pager {&pager},
+    Recovery(Pager &pager, WriteAheadLog &wal, Lsn &commit_lsn)
+        : m_pager {&pager},
           m_wal {&wal},
-          m_commit_lsn {&commit_lsn},
-          m_log {sys.create_log("recovery")}
+          m_commit_lsn {&commit_lsn}
     {}
 
     [[nodiscard]] auto start_abort() -> Status;
@@ -32,7 +28,6 @@ private:
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
     Lsn *m_commit_lsn {};
-    LogPtr m_log;
 };
 
 } // namespace Calico

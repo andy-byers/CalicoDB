@@ -567,7 +567,7 @@ public:
             storage.get(),
             &log_scratch,
             &wal,
-            &system,
+            nullptr,
             &status,
             &commit_lsn,
             &in_xact,
@@ -628,8 +628,7 @@ public:
 
     BPlusTreeTestParameters param;
     LogScratchManager log_scratch;
-    System system {PREFIX, {}};
-    Status status {ok()};
+    Status status;
     bool in_xact {true};
     Lsn commit_lsn;
     DisabledWriteAheadLog wal;
@@ -1133,103 +1132,6 @@ TEST_P(CursorTests, SanityCheck_Backward)
 INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,
-    ::testing::Values(
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
-
-class MemoryTests : public BPlusTreeTests {
-protected:
-    auto SetUp() -> void override
-    {
-        BPlusTreeTests::SetUp();
-        free_list = std::make_unique<FreeList>(*pager);
-    }
-
-    auto expect_linked(Id head) -> Size
-    {
-        auto id = head;
-        Size count {};
-
-        while (!id.is_null()) {
-            auto lhs = pager->acquire(id);
-            EXPECT_TRUE(lhs.has_value());
-
-            if (count++ == 0) {
-                EXPECT_EQ(prev_id(*lhs), Id::null());
-            }
-
-            id = next_id(*lhs);
-            if (!id.is_null()) {
-                auto rhs = pager->acquire(id);
-                EXPECT_TRUE(rhs.has_value());
-                EXPECT_EQ(lhs->id(), prev_id(*rhs));
-                pager->release(std::move(*rhs));
-            }
-            pager->release(std::move(*lhs));
-        }
-        return count;
-    }
-
-    [[nodiscard]]
-    static auto prev_id(const Page &page) -> Id
-    {
-        return {get_u64(page.data() + sizeof(Lsn) + sizeof(Byte))};
-    }
-
-    [[nodiscard]]
-    static auto next_id(const Page &page) -> Id
-    {
-        return {get_u64(page.data() + sizeof(Lsn) + sizeof(Byte) + sizeof(Id))};
-    }
-
-    auto allocate_and_push() -> void
-    {
-        auto page = pager->allocate();
-        ASSERT_TRUE(page.has_value());
-        pager->upgrade(*page);
-        ASSERT_TRUE(free_list->push(std::move(*page)).has_value());
-    }
-
-    std::unique_ptr<FreeList> free_list;
-};
-
-TEST_P(MemoryTests, FreeListPagesAreDoublyLinked)
-{
-    allocate_and_push();
-    ASSERT_EQ(expect_linked(Id {2}), 1);
-
-    allocate_and_push();
-    ASSERT_EQ(expect_linked(Id {3}), 2);
-
-    allocate_and_push();
-    ASSERT_EQ(expect_linked(Id {4}), 3);
-
-    auto page = free_list->pop();
-    ASSERT_TRUE(page.has_value());
-    ASSERT_EQ(expect_linked(Id {3}), 2);
-
-    page = free_list->pop();
-    ASSERT_TRUE(page.has_value());
-    ASSERT_EQ(expect_linked(Id {2}), 1);
-
-    page = free_list->pop();
-    ASSERT_TRUE(page.has_value());
-    ASSERT_TRUE(free_list->is_empty());
-}
-
-TEST_P(MemoryTests, Vacuum)
-{
-    allocate_and_push();
-    allocate_and_push();
-    allocate_and_push();
-    (void)free_list->vacuum(3);
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    MemoryTests,
-    MemoryTests,
     ::testing::Values(
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},

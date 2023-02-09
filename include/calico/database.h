@@ -6,8 +6,8 @@
 
 namespace Calico {
 
-struct Options;
 class Cursor;
+class Logger;
 class Status;
 class Storage;
 
@@ -19,24 +19,15 @@ enum class LogLevel {
     OFF,
 };
 
-enum class LogTarget {
-    FILE,
-    STDOUT,
-    STDERR,
-    STDOUT_COLOR,
-    STDERR_COLOR,
-};
-
 struct Options {
     Size page_size {0x2000};
     Size page_cache_size {};
     Size wal_buffer_size {};
     Slice wal_prefix;
-    Size max_log_size {0x100000};
-    Size max_log_files {4};
     LogLevel log_level {LogLevel::OFF};
-    LogTarget log_target {};
+    Logger *info_log {};
     Storage *storage {};
+    bool sync {};
 };
 
 class Database {
@@ -46,7 +37,7 @@ public:
     [[nodiscard]] static auto destroy(const Slice &path, const Options &options) -> Status;
 
     virtual ~Database() = default;
-    [[nodiscard]] virtual auto get_property(const Slice &name) const -> std::string = 0;
+    [[nodiscard]] virtual auto get_property(const Slice &name, std::string &out) const -> bool = 0;
     [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
     [[nodiscard]] virtual auto vacuum() -> Status = 0;

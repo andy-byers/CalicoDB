@@ -110,7 +110,7 @@ auto CursorInternal::seek_first(CursorImpl &cursor) -> void
         if (lowest->header.cell_count) {
             seek_to(cursor, std::move(*lowest), 0);
         } else {
-            invalidate(cursor, not_found("database is empty"));
+            invalidate(cursor, Status::not_found("database is empty"));
             action_release(cursor, std::move(*lowest));
         }
     } else {
@@ -124,7 +124,7 @@ auto CursorInternal::seek_last(CursorImpl &cursor) -> void
         if (const auto count = highest->header.cell_count) {
             seek_to(cursor, std::move(*highest), count - 1);
         } else {
-            invalidate(cursor, not_found("database is empty"));
+            invalidate(cursor, Status::not_found("database is empty"));
             action_release(cursor, std::move(*highest));
         }
     } else {
@@ -198,7 +198,7 @@ auto CursorInternal::seek_to(CursorImpl &cursor, Node node, Size index) -> void
         cursor.m_loc.index = static_cast<PageSize>(index);
         cursor.m_loc.count = static_cast<PageSize>(count);
         cursor.m_loc.pid = pid;
-        cursor.m_status = ok();
+        cursor.m_status = Status::ok();
     } else {
         invalidate(cursor, default_error_status());
     }
@@ -216,7 +216,7 @@ auto CursorInternal::seek(CursorImpl &cursor, const Slice &key) -> void
             cursor.m_loc.index = static_cast<PageSize>(index);
             cursor.m_loc.count = static_cast<PageSize>(count);
             cursor.m_loc.pid = pid;
-            cursor.m_status = ok();
+            cursor.m_status = Status::ok();
         } else {
             invalidate(cursor, default_error_status());
         }

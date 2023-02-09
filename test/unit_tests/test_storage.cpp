@@ -13,15 +13,15 @@ template<class Base, class Store>
 [[nodiscard]]
 auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
 {
-    auto s = ok();
+    auto s = Status::ok();
     Base *temp {};
 
-    if constexpr (std::is_same_v<RandomReader, Base>) {
-        s = storage.open_random_reader(name, &temp);
-    } else if constexpr (std::is_same_v<RandomEditor, Base>) {
-        s = storage.open_random_editor(name, &temp);
-    } else if constexpr (std::is_same_v<AppendWriter, Base>) {
-        s = storage.open_append_writer(name, &temp);
+    if constexpr (std::is_same_v<Reader, Base>) {
+        s = storage.new_reader(name, &temp);
+    } else if constexpr (std::is_same_v<Editor, Base>) {
+        s = storage.new_editor(name, &temp);
+    } else if constexpr (std::is_same_v<Logger, Base>) {
+        s = storage.new_logger(name, &temp);
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
@@ -59,7 +59,7 @@ constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer
         const auto chunk_size = std::min(in.size(), random.Next<Size>(message.size() / num_chunks));
         auto chunk = in.range(0, chunk_size);
 
-        if constexpr (std::is_base_of_v<AppendWriter, Writer>) {
+        if constexpr (std::is_base_of_v<Logger, Writer>) {
             ASSERT_TRUE(writer.write(chunk).is_ok());
         } else {
             ASSERT_TRUE(writer.write(chunk, counter).is_ok());
@@ -111,18 +111,18 @@ public:
     Tools::RandomGenerator random;
 };
 
-class RandomFileReaderTests: public FileTests {
+class PosixReaderTests: public FileTests {
 public:
-    RandomFileReaderTests()
+    PosixReaderTests()
     {
         write_whole_file(filename, "");
-        file = open_blob<RandomReader>(*storage, filename);
+        file = open_blob<Reader>(*storage, filename);
     }
 
-    std::unique_ptr<RandomReader> file;
+    std::unique_ptr<Reader> file;
 };
 
-TEST_F(RandomFileReaderTests, NewFileIsEmpty)
+TEST_F(PosixReaderTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
     Span bytes {backing};
@@ -131,23 +131,23 @@ TEST_F(RandomFileReaderTests, NewFileIsEmpty)
     ASSERT_EQ(read_size, 0);
 }
 
-TEST_F(RandomFileReaderTests, ReadsBackContents)
+TEST_F(PosixReaderTests, ReadsBackContents)
 {
     auto data = random.Generate(500);
     write_whole_file(filename, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-class RandomFileEditorTests: public FileTests {
+class PosixEditorTests: public FileTests {
 public:
-    RandomFileEditorTests()
-        : file {open_blob<RandomEditor>(*storage, filename)}
+    PosixEditorTests()
+        : file {open_blob<Editor>(*storage, filename)}
     {}
 
-    std::unique_ptr<RandomEditor> file;
+    std::unique_ptr<Editor> file;
 };
 
-TEST_F(RandomFileEditorTests, NewFileIsEmpty)
+TEST_F(PosixEditorTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
     Span bytes {backing};
@@ -156,26 +156,26 @@ TEST_F(RandomFileEditorTests, NewFileIsEmpty)
     ASSERT_EQ(read_size, 0);
 }
 
-TEST_F(RandomFileEditorTests, WritesOutAndReadsBackData)
+TEST_F(PosixEditorTests, WritesOutAndReadsBackData)
 {
     auto data = random.Generate(500);
     write_out_randomly(random, *file, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-class AppendFileWriterTests: public FileTests {
+class PosixLoggerTests: public FileTests {
 public:
-    AppendFileWriterTests()
-        : file {open_blob<AppendWriter>(*storage, filename)}
+    PosixLoggerTests()
+        : file {open_blob<Logger>(*storage, filename)}
     {}
 
-    std::unique_ptr<AppendWriter> file;
+    std::unique_ptr<Logger> file;
 };
 
-TEST_F(AppendFileWriterTests, WritesOutData)
+TEST_F(PosixLoggerTests, WritesOutData)
 {
     auto data = random.Generate(500);
-    write_out_randomly<AppendWriter>(random, *file, data);
+    write_out_randomly<Logger>(random, *file, data);
     ASSERT_EQ(read_whole_file(filename), data.to_string());
 }
 
@@ -205,16 +205,16 @@ public:
 
 TEST_F(DynamicStorageTests, ReaderCannotCreateFile)
 {
-    RandomReader *temp;
-    const auto s = storage->open_random_reader("nonexistent", &temp);
+    Reader *temp;
+    const auto s = storage->new_reader("nonexistent", &temp);
     ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what().data();
 }
 
 TEST_F(DynamicStorageTests, ReadsAndWrites)
 {
-    auto ra_editor = open_blob<RandomEditor>(*storage, filename);
-    auto ra_reader = open_blob<RandomReader>(*storage, filename);
-    auto ap_writer = open_blob<AppendWriter>(*storage, filename);
+    auto ra_editor = open_blob<Editor>(*storage, filename);
+    auto ra_reader = open_blob<Reader>(*storage, filename);
+    auto ap_writer = open_blob<Logger>(*storage, filename);
 
     const auto first_input = random.Generate(500);
     const auto second_input = random.Generate(500);
@@ -228,8 +228,8 @@ TEST_F(DynamicStorageTests, ReadsAndWrites)
 
 TEST_F(DynamicStorageTests, ReaderStopsAtEOF)
 {
-    auto ra_editor = open_blob<RandomEditor>(*storage, filename);
-    auto ra_reader = open_blob<RandomReader>(*storage, filename);
+    auto ra_editor = open_blob<Editor>(*storage, filename);
+    auto ra_reader = open_blob<Reader>(*storage, filename);
 
     const auto data = random.Generate(500);
     write_out_randomly(random, *ra_editor, data);

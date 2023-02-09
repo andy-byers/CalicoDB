@@ -7,7 +7,6 @@
 #include <memory>
 #include <optional>
 #include <queue>
-#include <spdlog/logger.h>
 #include <thread>
 
 #include "utils/worker.h"
@@ -17,7 +16,7 @@ namespace Calico {
 class LogWriter {
 public:
     // NOTE: LogWriter must always be created on an empty segment file.
-    LogWriter(AppendWriter &file, Span tail, std::atomic<Id> &flushed_lsn)
+    LogWriter(Logger &file, Span tail, std::atomic<Id> &flushed_lsn)
         : m_tail {tail},
           m_flushed_lsn {&flushed_lsn},
           m_file {&file}
@@ -37,7 +36,7 @@ public:
 private:
     Span m_tail;
     std::atomic<Id> *m_flushed_lsn {};
-    AppendWriter *m_file {};
+    Logger *m_file {};
     Lsn m_last_lsn {};
     Size m_number {};
     Size m_offset {};
@@ -72,7 +71,7 @@ private:
 
     std::string m_prefix;
     std::optional<LogWriter> m_writer;
-    std::unique_ptr<AppendWriter> m_file;
+    std::unique_ptr<Logger> m_file;
     std::atomic<Id> *m_flushed_lsn {};
     Storage *m_storage {};
     ErrorBuffer *m_error {};

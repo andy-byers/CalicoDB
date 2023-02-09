@@ -10,6 +10,8 @@ class Slice;
 
 class Status final {
 public:
+    Status() = default;
+
     /*
      * Create an OK status.
      */
@@ -53,9 +55,6 @@ private:
         CORRUPTION = 4,
         NOT_FOUND = 5,
     };
-
-    // Construct an OK status. No allocation is needed.
-    Status() = default;
 
     // Construct a non-OK status.
     Status(Code code, const Slice &what);

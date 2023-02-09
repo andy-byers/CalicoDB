@@ -2,6 +2,7 @@
 #include "benchmark/benchmark.h"
 #include "calico/calico.h"
 #include <filesystem>
+#include <fstream>
 #include <random>
 
 #define RUN_CHECKS
@@ -12,281 +13,399 @@ using namespace Calico;
 
 constexpr auto DB_PATH = "__bench_calico__";
 
-const Calico::Tools::RandomGenerator rng { 4 * 1'024 * 1'024};
+class Benchmark {
+public:
+    static std::unique_ptr<Benchmark> runner;
 
-// 4 MiB of page cache + write buffer memory.
-constexpr Options DB_OPTIONS {
-    0x2000,
-    0x200000,
-    0x200000,
+    Benchmark(int argc, char **argv)
+    {
+        for (int i {1}; i < argc; ++i) {
+            if (Slice arg {argv[i]}; arg.starts_with("-db_path=")) {
+                arg.advance(9);
+                // arg is still null-terminated.
+                path = arg.to_string();
+            } else if (arg.starts_with("-page_size=")) {
+                arg.advance(11);
+                // arg is still null-terminated.
+                options.page_size = std::stoi(arg.data());
+            } else if (arg.starts_with("-page_cache_size=")) {
+                arg.advance(17);
+                options.page_cache_size = std::stoi(arg.data());
+            } else if (arg.starts_with("-wal_buffer_size=")) {
+                arg.advance(17);
+                options.wal_buffer_size = std::stoi(arg.data());
+            } else if (arg.starts_with("-wal_prefix=")) {
+                options.wal_prefix = arg;
+            } else if (arg.starts_with("-record_count=")) {
+                arg.advance(14);
+                readable_records = std::stoi(arg.data());
+            } else if (arg.starts_with("-key_size=")) {
+                arg.advance(10);
+                m_key_size = std::stoi(arg.data());
+            } else if (arg.starts_with("-value_size=")) {
+                arg.advance(12);
+                value = std::string(std::stoi(arg.data()), 'x');
+            } else if (arg.starts_with("-batch_size=")) {
+                arg.advance(18);
+                m_batch_size = std::stoi(arg.data());
+            } else if (arg == "--use_fresh_db") {
+                use_fresh_db = true;
+            }
+        }
+
+        std::error_code code;
+        std::filesystem::remove_all(path, code);
+
+        CHECK_OK(Database::open(path, options, &db));
+    }
+
+    ~Benchmark()
+    {
+        delete db;
+    }
+
+    static auto make_key(Size i) -> std::string
+    {
+        const auto key = std::to_string(i);
+        CHECK_TRUE(key.size() <= runner->m_key_size);
+        return std::string(runner->m_key_size - key.size(), '0') + key;
+    }
+
+    static auto next_key() -> Slice
+    {
+        runner->m_key = make_key(runner->counter++);
+        return runner->m_key;
+    }
+
+    static auto rand_key() -> Slice
+    {
+        runner->m_key = runner->random.Generate(runner->m_key_size).to_string();
+        return runner->m_key;
+    }
+
+    static auto reopen(Size n = 0) -> void
+    {
+        delete runner->db;
+        if (runner->use_fresh_db) {
+            CHECK_OK(Database::destroy(runner->path, runner->options));
+        }
+        CHECK_OK(Database::open(runner->path, runner->options, &runner->db));
+        runner->counter = 0;
+
+        for (Size i {}; i < n; ++i) {
+            write(next_key());
+        }
+        CHECK_OK(runner->db->commit());
+    }
+
+    static auto read(const Slice &key) -> bool
+    {
+        auto s = runner->db->get(key, runner->m_read_buffer);
+        runner->bytes_read += key.size() + runner->m_read_buffer.size();
+        return s.is_ok();
+    }
+
+    static auto read(const Cursor &cursor) -> bool
+    {
+        const auto k = cursor.key();
+        const auto v = cursor.value();
+        runner->bytes_read += k.size() + v.size();
+        return true;
+    }
+
+    static auto write(const Slice &key) -> void
+    {
+        runner->bytes_written += key.size() + runner->value.size();
+        const auto s = runner->db->put(key, runner->value);
+
+#ifdef RUN_CHECKS
+        CHECK_OK(s);
+#else
+        benchmark::DoNotOptimize(s);
+#endif // RUN_CHECKS
+    }
+
+    static auto erase(const Slice &key) -> bool
+    {
+        return runner->db->erase(key).is_ok();
+    }
+
+    static auto maybe_commit(Size &i) -> void
+    {
+        if (i++ >= runner->m_batch_size) {
+            benchmark::DoNotOptimize(runner->db->commit());
+            runner->commits++;
+            i = 0;
+        }
+    }
+
+    static auto db_file_size() -> Size
+    {
+        auto prefix = runner->path;
+        if (prefix.back() != '/') {
+            prefix += '/';
+        }
+
+        std::error_code code;
+        const auto size = std::filesystem::file_size(prefix + "data", code);
+        CHECK_FALSE(code);
+
+        return size;
+    }
+
+    static auto set_read_rate_counter(benchmark::State &state)
+    {
+        state.counters["ReadRate"] = benchmark::Counter {
+            double(runner->bytes_read),
+            benchmark::Counter::kIsRate,
+            benchmark::Counter::OneK::kIs1024};
+    }
+
+    static auto set_write_rate_counter(benchmark::State &state)
+    {
+        state.counters["WriteRate"] = benchmark::Counter {
+            double(runner->bytes_written),
+            benchmark::Counter::kIsRate,
+            benchmark::Counter::OneK::kIs1024};
+    }
+
+    static auto set_file_size_counter(benchmark::State &state)
+    {
+        state.counters["DbFileSize"] = benchmark::Counter {
+            double(runner->db_file_size()),
+            {},
+            benchmark::Counter::OneK::kIs1024};
+    }
+
+    static auto set_commit_counter(benchmark::State &state)
+    {
+        state.counters["Commits"] = double(runner->commits);
+    }
+
+    std::string path {DB_PATH};
+    std::string value {DB_VALUE};
+    Tools::RandomGenerator random {8 * 1'024 * 1'024};
+    Options options;
+    Database *db {};
+    Size readable_records {DB_INITIAL_SIZE};
+    Size bytes_read {};
+    Size bytes_written {};
+    Size commits {};
+    Size counter {};
+    bool use_fresh_db {};
+
+private:
+    std::string m_key;
+    std::string m_read_buffer;
+    Size m_key_size {DB_KEY_SIZE};
+    Size m_batch_size {DB_BATCH_SIZE};
 };
 
-auto do_read(const Database &db, Slice key)
-{
-    std::string value;
-    if (auto s = db.get(key, value); s.is_ok()) {
-        benchmark::DoNotOptimize(value);
-    }
-}
+#define Runner Benchmark::runner
+std::unique_ptr<Benchmark> Benchmark::runner;
 
-auto do_write(Database &db, Slice key)
+auto BM_RandomReads(benchmark::State &state)
 {
-    benchmark::DoNotOptimize(db.put(key, DB_VALUE));
-}
-
-auto do_erase(Database &db, const Slice &key)
-{
-    benchmark::DoNotOptimize(db.erase(key));
-}
-
-auto setup(Database **db)
-{
-    std::filesystem::remove_all(DB_PATH);
-    benchmark::DoNotOptimize(Database::open(DB_PATH, DB_OPTIONS, db));
-}
-
-auto default_init(Database &, Size)
-{
-
-}
-
-template<class GetKey, class PerformAction>
-auto run_batches(Database &db, benchmark::State &state, const GetKey &get_key, const PerformAction &action, decltype(default_init) init = default_init)
-{
-    Size i {};
+    const auto count = Runner->readable_records;
+    Runner->reopen(count);
+    
+    Size found {};
 
     for (auto _ : state) {
         state.PauseTiming();
-        init(db, i);
-        const auto key = get_key(i);
-        const auto is_interval = ++i % DB_BATCH_SIZE == 0;
+        const auto key = Runner->make_key(Runner->random.Next(count - 1));
         state.ResumeTiming();
 
-        if (is_interval) {
-            benchmark::DoNotOptimize(db.commit());
-        }
-        action(db, key);
+        found += Runner->read(key);
     }
-    benchmark::DoNotOptimize(db.commit());
-}
-
-auto BM_SequentialWrites(benchmark::State &state)
-{
-    Database *db;
-    setup(&db);
-    run_batches(*db, state, [](auto i) {return Tools::integral_key<DB_KEY_SIZE>(i);}, do_write);
 
 #ifdef RUN_CHECKS
-    // Make sure every record was actually inserted.
-    auto *cursor = db->new_cursor();
-    cursor->seek_first();
-
-    Size i {};
-    while (cursor->is_valid()) {
-        assert(cursor->key() == Tools::integral_key<DB_KEY_SIZE>(i++));
-        assert(cursor->value() == DB_VALUE);
-        cursor->next();
-    }
-    assert(i == state.iterations());
+    CHECK_EQ(found, state.iterations());
 #endif // RUN_CHECKS
 
-    delete db;
-}
-BENCHMARK(BM_SequentialWrites);
-
-auto BM_RandomWrites(benchmark::State &state)
-{
-    Database *db;
-    setup(&db);
-    run_batches(*db, state, [](auto) {return rng.Generate(DB_KEY_SIZE);}, do_write);
-
-#ifdef RUN_CHECKS
-    auto *cursor = db->new_cursor();
-    cursor->seek_first();
-
-    Size i {};
-    for (; cursor->is_valid(); ++i) {
-        assert(cursor->value() == DB_VALUE);
-        cursor->next();
-    }
-    assert(i == state.iterations());
-#endif // RUN_CHECKS
-
-    delete db;
-}
-BENCHMARK(BM_RandomWrites);
-
-auto BM_Overwrite(benchmark::State& state)
-{
-    Database *db;
-    setup(&db);
-    run_batches(*db, state, [](auto) {return std::to_string(rng.Next<Size>(DB_INITIAL_SIZE));}, do_write);
-    delete db;
-}
-BENCHMARK(BM_Overwrite);
-
-auto insert_records(Database &db, Size n)
-{
-    for (Size i {}; i < n; ++i) {
-        const auto key = Tools::integral_key<DB_KEY_SIZE>(i);
-        do_write(db, key);
-    }
-    benchmark::DoNotOptimize(db.commit());
-}
-
-auto BM_SequentialReads(benchmark::State &state)
-{
-    Database *db;
-    setup(&db);
-    insert_records(*db, DB_INITIAL_SIZE);
-    auto *c = db->new_cursor();
-
-    for (auto _ : state) {
-        state.PauseTiming();
-        if (!c->is_valid()) {
-            c->seek_first();
-        }
-        state.ResumeTiming();
-
-        benchmark::DoNotOptimize(c->key());
-        benchmark::DoNotOptimize(c->value());
-        c->next();
-    }
-    delete c;
-}
-BENCHMARK(BM_SequentialReads);
-
-auto BM_RandomReads(benchmark::State& state)
-{
-    Database *db;
-    setup(&db);
-    insert_records(*db, DB_INITIAL_SIZE);
-    for (auto _ : state) {
-        state.PauseTiming();
-        const auto key = Tools::integral_key<DB_KEY_SIZE>(rand() % DB_INITIAL_SIZE);
-        state.ResumeTiming();
-        do_read(*db, key);
-    }
+    Runner->set_read_rate_counter(state);
 }
 BENCHMARK(BM_RandomReads);
 
-auto run_reads_and_writes(benchmark::State& state, int batch_size, int read_fraction, bool is_sequential)
+auto BM_SequentialReads(benchmark::State &state)
 {
-    enum class Action {
-        READ,
-        WRITE,
-    };
-    Database *db;
-    setup(&db);
-    insert_records(*db, DB_INITIAL_SIZE);
-    int i {};
+    const auto count = Runner->readable_records;
+    Runner->reopen(count);
+    
+    Size found {};
 
     for (auto _ : state) {
         state.PauseTiming();
-        const auto key = Tools::integral_key<DB_KEY_SIZE>(is_sequential ? i : rand());
-        const auto action = rand() % 100 < read_fraction ? Action::READ : Action::WRITE;
-        const auto is_interval = ++i % batch_size == 0;
+        Runner->counter %= count;
+        const auto key = Runner->next_key();
         state.ResumeTiming();
 
-        if (action == Action::READ) {
-            do_read(*db, key);
-        } else {
-            do_write(*db, key);
-        }
-        if (is_interval) {
-            benchmark::DoNotOptimize(db->commit());
-        }
+        found += Runner->read(key);
     }
-    benchmark::DoNotOptimize(db->commit());
-    delete db;
-}
 
-auto BM_SequentialReadWrite_25_75(benchmark::State& state)
-{
-    run_reads_and_writes(state, DB_BATCH_SIZE, 25, true);
-}
-BENCHMARK(BM_SequentialReadWrite_25_75);
+#ifdef RUN_CHECKS
+    CHECK_EQ(found, state.iterations());
+#endif // RUN_CHECKS
 
-auto BM_SequentialReadWrite_50_50(benchmark::State& state)
-{
-    run_reads_and_writes(state, DB_BATCH_SIZE, 50, true);
+    Runner->set_read_rate_counter(state);
 }
-BENCHMARK(BM_SequentialReadWrite_50_50);
+BENCHMARK(BM_SequentialReads);
 
-auto BM_SequentialReadWrite_75_25(benchmark::State& state)
+auto BM_RandomWrites(benchmark::State &state)
 {
-    run_reads_and_writes(state, DB_BATCH_SIZE, 75, true);
-}
-BENCHMARK(BM_SequentialReadWrite_75_25);
+    Runner->reopen();
 
-auto BM_RandomReadWrite_25_75(benchmark::State& state)
-{
-    run_reads_and_writes(state, DB_BATCH_SIZE, 25, false);
-}
-BENCHMARK(BM_RandomReadWrite_25_75);
+    Size i {};
 
-auto BM_RandomReadWrite_50_50(benchmark::State& state)
-{
-    run_reads_and_writes(state, DB_BATCH_SIZE, 50, false);
-}
-BENCHMARK(BM_RandomReadWrite_50_50);
+    for (auto _ : state) {
+        state.PauseTiming();
+        const auto key = Runner->rand_key();
+        state.ResumeTiming();
 
-auto BM_RandomReadWrite_75_25(benchmark::State& state)
-{
-    run_reads_and_writes(state, DB_BATCH_SIZE, 75, false);
-}
-BENCHMARK(BM_RandomReadWrite_75_25);
-
-auto ensure_records(Database &db, Size)
-{
-    if (const auto count = db.get_property("calico.count.records"); std::stoi(count) < DB_INITIAL_SIZE / 2) {
-        for (Size i {}; i < DB_INITIAL_SIZE; ++i) {
-            const auto key = Tools::integral_key<DB_KEY_SIZE>(rng.Next<Size>(1'000'000));
-            do_write(db, key);
-        }
+        Runner->write(key);
+        Benchmark::maybe_commit(i);
     }
+
+    Runner->set_write_rate_counter(state);
+    Runner->set_file_size_counter(state);
+    Runner->set_commit_counter(state);
 }
+BENCHMARK(BM_RandomWrites);
 
-auto BM_SequentialErase(benchmark::State& state)
+auto BM_SequentialWrites(benchmark::State &state)
 {
-    Database *db;
-    setup(&db);
-    run_batches(*db, state, [](auto) {return 0;}, [](auto &db, auto) {
-        auto *cursor = db.new_cursor();
-        cursor->seek_first();
-        do_erase(db, cursor->key());
-        delete cursor;
-    }, ensure_records);
+    Size i {};
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        const auto key = Runner->next_key();
+        state.ResumeTiming();
+
+        Runner->write(key);
+        Benchmark::maybe_commit(i);
+    }
+
+    Runner->set_write_rate_counter(state);
+    Runner->set_file_size_counter(state);
+    Runner->set_commit_counter(state);
 }
-BENCHMARK(BM_SequentialErase);
+BENCHMARK(BM_SequentialWrites);
 
-auto BM_RandomErase(benchmark::State& state)
+auto BM_Overwrite(benchmark::State &state)
 {
-    Database *db;
-    setup(&db);
+    const auto count = Runner->readable_records;
+    Runner->reopen(count);
 
-    run_batches(
-        *db,
-        state,
-        [&db](auto i) {
-            auto *cursor = db->new_cursor();
-            while (!cursor->is_valid()) {
-                cursor->seek(rng.Generate(DB_KEY_SIZE));
+    Size i {};
+    Slice key;
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        key = Runner->make_key(Runner->random.Next(count));
+        state.ResumeTiming();
+
+        Runner->write(key);
+        Benchmark::maybe_commit(i);
+    }
+
+    Runner->set_write_rate_counter(state);
+    Runner->set_file_size_counter(state);
+    Runner->set_commit_counter(state);
+}
+BENCHMARK(BM_Overwrite);
+
+auto BM_Erase(benchmark::State &state)
+{
+    const auto count = Runner->readable_records;
+    Runner->reopen(count);
+
+    std::vector<std::string> erased;
+
+    Size total {};
+    Size i {};
+    Slice key;
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        if (erased.size() >= count / 3) {
+            for (const auto &k: erased) {
+                Runner->write(k);
             }
-            auto key = cursor->key().to_string();
-            delete cursor;
-            return key;
+            erased.clear();
+        }
+        key = Runner->make_key(Runner->random.Next(count));
+        state.ResumeTiming();
 
-        },
-        [](auto &db, const auto &key) {do_erase(db, key);},
-        ensure_records);
+        bool found = Runner->erase(key);
+        Benchmark::maybe_commit(i);
+
+        state.PauseTiming();
+        if (found) {
+            erased.emplace_back(key.to_string());
+            total++;
+        }
+        state.ResumeTiming();
+    }
+
+    state.counters["RecordsErased"] = benchmark::Counter {
+        double(total),
+        benchmark::Counter::kIsRate};
 }
-BENCHMARK(BM_RandomErase);
+BENCHMARK(BM_Erase);
+
+auto BM_IterateForward(benchmark::State &state)
+{
+    const auto count = Runner->readable_records;
+    Runner->reopen(count);
+
+    auto *cursor = Runner->db->new_cursor();
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        if (!cursor->is_valid()) {
+            cursor->seek_first();
+        }
+        state.ResumeTiming();
+
+        Runner->read(*cursor);
+        cursor->next();
+    }
+    delete cursor;
+
+    Runner->set_read_rate_counter(state);
+}
+BENCHMARK(BM_IterateForward);
+
+
+auto BM_IterateBackward(benchmark::State &state)
+{
+    const auto count = Runner->readable_records;
+    Runner->reopen(count);
+
+    auto *cursor = Runner->db->new_cursor();
+
+    for (auto _ : state) {
+        state.PauseTiming();
+        if (!cursor->is_valid()) {
+            cursor->seek_last();
+        }
+        state.ResumeTiming();
+
+        Runner->read(*cursor);
+        cursor->previous();
+    }
+    delete cursor;
+
+    Runner->set_read_rate_counter(state);
+}
+BENCHMARK(BM_IterateBackward);
 
 } // <anonymous namespace>
 
 auto main(int argc, char *argv[]) -> int
 {
+    Benchmark::runner = std::make_unique<Benchmark>(argc, argv);
+
     benchmark::Initialize(&argc, argv);
     benchmark::RunSpecifiedBenchmarks();
     benchmark::Shutdown();

@@ -4,8 +4,6 @@
 #include <mutex>
 #include <unordered_set>
 
-#include "spdlog/logger.h"
-
 #include "page_cache.h"
 #include "pager.h"
 
@@ -28,15 +26,13 @@ public:
         Storage *storage {};
         LogScratchManager *scratch {};
         WriteAheadLog *wal {};
-        System *system {};
+        Logger *info_log {};
         Status *status {};
         Lsn *commit_lsn {};
         bool *in_txn {};
         Size frame_count {};
         Size page_size {};
     };
-
-    System *system {};
 
     ~Pager() = default;
 
@@ -47,6 +43,7 @@ public:
     [[nodiscard]] auto recovery_lsn() -> Id;
     [[nodiscard]] auto bytes_written() const -> Size;
     [[nodiscard]] auto flush(Lsn target_lsn) -> Status;
+    [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status>;
     [[nodiscard]] auto acquire(Id pid) -> tl::expected<Page, Status>;
     auto upgrade(Page &page) -> void;
@@ -63,17 +60,16 @@ private:
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
     auto set_recovery_lsn(Lsn lsn) -> void;
 
-    mutable std::mutex m_mutex;
     FrameBuffer m_framer;
     PageList m_dirty;
     PageCache m_registry;
-    LogPtr m_log;
     Lsn m_recovery_lsn;
     Lsn *m_commit_lsn {};
     bool *m_in_txn {};
     Status *m_status {};
     LogScratchManager *m_scratch {};
     WriteAheadLog *m_wal {};
+    Logger *m_info_log {};
 };
 
 } // namespace Calico

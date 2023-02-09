@@ -16,20 +16,9 @@ set(CALICO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(CALICO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(CALICO_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/test")
 
-include(CheckLibraryExists)
-include(GNUInstallDirs)
-include(FetchContent)
-
-# Download the library dependencies.
-FetchContent_Declare(spdlog
-        GIT_REPOSITORY https://github.com/gabime/spdlog.git
-        GIT_TAG v1.10.0)
-set(SPDLOG_NO_EXCEPTIONS On CACHE INTERNAL "")
-FetchContent_MakeAvailable(spdlog)
-
-set(MAIN_PROJECT OFF)
+set(MAIN_PROJECT Off)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-    set(MAIN_PROJECT ON)
+    set(MAIN_PROJECT On)
 endif()
 
 option(CALICO_BuildTests "Build the tests when BUILD_TESTING is set" ${MAIN_PROJECT})
@@ -38,12 +27,14 @@ option(CALICO_Install "Install the CMake targets during the install step" ${MAIN
 add_subdirectory(src)
 
 if(CALICO_BuildTests)
+    include(FetchContent)
     include(CTest)
     enable_testing()
     add_subdirectory(test)
 endif()
 
-# TODO: This installs spdlog alongside calico. Is that what we want?
+include(GNUInstallDirs)
+
 set(TARGETS_NAME ${PROJECT_NAME}Targets)
 set(INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}")
 set(CONFIG_FILE_IN "${PROJECT_SOURCE_DIR}/cmake/${PROJECT_NAME}Config.cmake.in")
@@ -58,16 +49,13 @@ write_basic_package_version_file("${VERSION_FILE}"
         COMPATIBILITY SameMajorVersion)
 
 if(CALICO_Install)
-    install(TARGETS calico spdlog
+    install(TARGETS calico
             EXPORT "${TARGETS_NAME}"
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
             LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
             ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
     install(DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
-    install(DIRECTORY "${spdlog_SOURCE_DIR}/include/spdlog"
-            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
-
 
     install(EXPORT "${TARGETS_NAME}"
             NAMESPACE "${PROJECT_NAME}::"

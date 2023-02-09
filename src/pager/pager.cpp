@@ -2,7 +2,7 @@
 #include "frame_buffer.h"
 #include "page.h"
 #include "tree/header.h"
-#include "utils/system.h"
+#include "utils/logging.h"
 #include "utils/types.h"
 #include "wal/wal.h"
 #include <thread>
@@ -34,22 +34,17 @@ auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
     if (auto ptr = Pager::Ptr {new (std::nothrow) Pager {param, std::move(*framer)}}) {
         return ptr;
     }
-    return tl::make_unexpected(system_error("could not allocate pager object: out of memory"));
+    return tl::make_unexpected(Status::system_error("could not allocate pager object: out of memory"));
 }
 
 Pager::Pager(const Parameters &param, FrameBuffer framer)
-    : system {param.system},
-      m_framer {std::move(framer)},
-      m_log {param.system->create_log("pager")},
+    : m_framer {std::move(framer)},
       m_commit_lsn {param.commit_lsn},
       m_in_txn {param.in_txn},
       m_status {param.status},
       m_scratch {param.scratch},
       m_wal {param.wal}
 {
-    Calico_Info("initializing, cache size is {}", param.frame_count * param.page_size);
-
-    CALICO_EXPECT_NE(system, nullptr);
     CALICO_EXPECT_NE(m_status, nullptr);
     CALICO_EXPECT_NE(m_scratch, nullptr);
     CALICO_EXPECT_NE(m_wal, nullptr);
@@ -84,8 +79,7 @@ auto Pager::pin_frame(Id pid) -> Status
             // We are out of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
             // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
             if (!*success) {
-                auto s = not_found("could not find a frame to use");
-                Calico_Warn("{}", s.what().data());
+                logv(m_info_log, "out of frames");
                 return m_wal->flush();
             }
         } else {
@@ -95,7 +89,7 @@ auto Pager::pin_frame(Id pid) -> Status
     if (const auto index = m_framer.pin(pid)) {
         // Associate the page ID with the frame index we got from the framer.
         m_registry.put(pid, {*index});
-        return ok();
+        return Status::ok();
     } else {
         return index.error();
     }
@@ -113,6 +107,11 @@ auto Pager::set_recovery_lsn(Lsn lsn) -> void
 {
     CALICO_EXPECT_LE(m_recovery_lsn, lsn);
     m_recovery_lsn = lsn;
+}
+
+auto Pager::sync() -> Status
+{
+    return m_framer.sync();
 }
 
 auto Pager::flush(Lsn target_lsn) -> Status
@@ -141,7 +140,9 @@ auto Pager::flush(Lsn target_lsn) -> Status
             itr = m_dirty.remove(itr);
         } else if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
-            Calico_Warn("could not flush page {}: updates for lsn {} are not in the wal", page_id.value, page_lsn.value);
+            logv(m_info_log, "could not flush page ",
+                 page_id.value, ": updates for lsn ",
+                 page_lsn.value, " are not in the wal");
             itr = next(itr);
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
@@ -154,7 +155,6 @@ auto Pager::flush(Lsn target_lsn) -> Status
             itr = next(itr);
         }
     }
-    Calico_Try_S(m_framer.sync());
 
     // We have flushed the entire cache.
     if (target_lsn == MAX_ID) {
@@ -165,7 +165,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
     if (m_recovery_lsn < target_lsn) {
         set_recovery_lsn(target_lsn);
     }
-    return ok();
+    return Status::ok();
 }
 
 auto Pager::recovery_lsn() -> Id
@@ -213,7 +213,7 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
     }
 
     auto &[frame_index, dirty_token] = *evicted;
-    auto s = ok();
+    auto s = Status::ok();
 
     if (dirty_token) {
         // NOTE: We don't update the record LSN field because we are getting rid of this page.
@@ -256,6 +256,7 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
     const auto do_acquire = [this](auto &entry) -> tl::expected<Page, Status> {
         auto page = m_framer.ref(entry.index);
 
+        // Write back pages that are too old. This is so that old WAL segments can be removed.
         if (entry.token) {
             const auto lsn = read_page_lsn(page);
             const auto checkpoint = (*entry.token)->record_lsn;
@@ -276,7 +277,6 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
     };
 
     CALICO_EXPECT_FALSE(pid.is_null());
-    std::lock_guard lock {m_mutex};
 
     if (auto itr = m_registry.get(pid); itr != m_registry.end()) {
         return do_acquire(itr->value);
@@ -284,7 +284,7 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
 
     // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
     // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is increased each time the WAL flushes a block.
-    auto status = ok();
+    auto status = Status::ok();
     while ((status = m_wal->status()).is_ok()) {
         auto s = pin_frame(pid);
         if (s.is_ok()) {
@@ -304,7 +304,6 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
 
 auto Pager::upgrade(Page &page) -> void
 {
-    std::lock_guard lock {m_mutex};
     auto itr = m_registry.get(page.id());
     CALICO_EXPECT_NE(itr, m_registry.end());
     m_framer.upgrade(itr->value.index, page);
@@ -320,9 +319,6 @@ auto Pager::release(Page page) -> void
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch->get()));
     }
-//    const auto lsn = read_page_lsn(page);
-
-    std::lock_guard lock {m_mutex};
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
 
     // This page must already be acquired.

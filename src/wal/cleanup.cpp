@@ -1,4 +1,5 @@
 #include "cleanup.h"
+#include <atomic>
 
 namespace Calico {
 

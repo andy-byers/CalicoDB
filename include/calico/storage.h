@@ -13,23 +13,23 @@ namespace Calico {
 class Slice;
 class Status;
 
-class RandomReader {
+class Reader {
 public:
-   virtual ~RandomReader() = default;
+   virtual ~Reader() = default;
    [[nodiscard]] virtual auto read(Byte *out, Size &size, Size offset) -> Status = 0;
 };
 
-class RandomEditor {
+class Editor {
 public:
-   virtual ~RandomEditor() = default;
+   virtual ~Editor() = default;
    [[nodiscard]] virtual auto read(Byte *out, Size &size, Size offset) -> Status = 0;
    [[nodiscard]] virtual auto write(Slice in, Size offset) -> Status = 0;
    [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
-class AppendWriter {
+class Logger {
 public:
-   virtual ~AppendWriter() = default;
+   virtual ~Logger() = default;
    [[nodiscard]] virtual auto write(Slice in) -> Status = 0;
    [[nodiscard]] virtual auto sync() -> Status = 0;
 };
@@ -39,9 +39,9 @@ public:
    virtual ~Storage() = default;
    [[nodiscard]] virtual auto create_directory(const std::string &path) -> Status = 0;
    [[nodiscard]] virtual auto remove_directory(const std::string &path) -> Status = 0;
-   [[nodiscard]] virtual auto open_random_reader(const std::string &path, RandomReader **out) -> Status = 0;
-   [[nodiscard]] virtual auto open_random_editor(const std::string &path, RandomEditor **out) -> Status = 0;
-   [[nodiscard]] virtual auto open_append_writer(const std::string &path, AppendWriter **out) -> Status = 0;
+   [[nodiscard]] virtual auto new_reader(const std::string &path, Reader **out) -> Status = 0;
+   [[nodiscard]] virtual auto new_editor(const std::string &path, Editor **out) -> Status = 0;
+   [[nodiscard]] virtual auto new_logger(const std::string &path, Logger **out) -> Status = 0;
    [[nodiscard]] virtual auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status = 0;
    [[nodiscard]] virtual auto rename_file(const std::string &old_path, const std::string &new_path) -> Status = 0;
    [[nodiscard]] virtual auto file_exists(const std::string &path) const -> Status = 0;

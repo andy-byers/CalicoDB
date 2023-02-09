@@ -1,6 +1,7 @@
 #ifndef CALICO_FUZZ_FUZZER_H
 #define CALICO_FUZZ_FUZZER_H
 
+#include <iostream>
 #include "calico/calico.h"
 #include "tools.h"
 
@@ -13,10 +14,8 @@ static constexpr Options DB_OPTIONS {
     0x200 * 32,
     0x200 * 32,
     {},
-    0,
-    0,
     LogLevel::OFF,
-    {},
+    nullptr,
     nullptr,
 };
 

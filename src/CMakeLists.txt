@@ -48,9 +48,11 @@ endif()
 
 add_library(calico
         STATIC "${CALICO_SOURCES}")
+add_library(calico::calico
+        ALIAS calico)
 target_include_directories(calico
         PUBLIC  $<BUILD_INTERFACE:${CALICO_INCLUDE_DIR}>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE "${CALICO_SOURCE_DIR}")
 target_compile_options(calico
         PRIVATE "${CALICO_OPTIONS}")
@@ -59,4 +61,4 @@ target_compile_definitions(calico
         CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}
         CALICO_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 target_link_libraries(calico
-        PRIVATE pthread spdlog)
+        PRIVATE pthread)

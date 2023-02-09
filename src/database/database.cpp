@@ -10,7 +10,7 @@ auto Database::open(const Slice &path, const Options &options, Database **db) ->
 {
     auto *ptr = new(std::nothrow) DatabaseImpl;
     if (ptr == nullptr) {
-        return system_error("cannot allocate database object: out of memory");
+        return Status::system_error("cannot allocate database object: out of memory");
     }
 
     auto s = ptr->open(path, options);
@@ -20,7 +20,7 @@ auto Database::open(const Slice &path, const Options &options, Database **db) ->
     }
 
     *db = ptr;
-    return ok();
+    return Status::ok();
 }
 
 auto Database::repair(const Slice &path, const Options &options) -> Status
