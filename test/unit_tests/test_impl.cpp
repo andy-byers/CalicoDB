@@ -447,7 +447,7 @@ TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
     assert_special_error(db->impl->status());
     assert_special_error(db->impl->commit());
     assert_special_error(db->impl->put("key", "value"));
-    assert_special_error(db->impl->close());
+    db->impl.reset();
 
     storage_handle().clear_interceptors();
     db->impl = std::make_unique<DatabaseImpl>();

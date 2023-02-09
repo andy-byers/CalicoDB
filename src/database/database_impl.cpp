@@ -173,7 +173,26 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
 DatabaseImpl::~DatabaseImpl()
 {
-    (void)close();
+    if (!m_recovery) {
+        // We failed during open().
+        return;
+    }
+
+    auto s = wal->close();
+    if (s.is_ok()) {
+        s = pager->flush({});
+    }
+
+    if (!s.is_ok()){
+        logv(m_info_log, "closed with non-ok status %s", s.what().to_string());
+    }
+
+    if (m_owns_info_log) {
+        delete m_info_log;
+    }
+    if (m_owns_storage) {
+        delete m_storage;
+    }
 }
 
 auto DatabaseImpl::repair(const std::string &path, const Options &options) -> Status
@@ -428,29 +447,6 @@ auto DatabaseImpl::do_abort() -> Status
     m_in_txn = true;
     logv(m_info_log, "abort successful");
     return Status::ok();
-}
-
-auto DatabaseImpl::close() -> Status
-{
-    if (!m_recovery) {
-        // We failed during open().
-        return m_status;
-    }
-
-    auto s = wal->close();
-    if (s.is_ok()) {
-        s = pager->flush({});
-    }
-
-    if (!s.is_ok()){
-        logv(m_info_log, "closed with non-ok status %s", s.what().to_string());
-    }
-
-    if (m_owns_storage) {
-        m_owns_storage = false;
-        delete m_storage;
-    }
-    return m_status;
 }
 
 auto DatabaseImpl::ensure_consistency_on_startup() -> Status

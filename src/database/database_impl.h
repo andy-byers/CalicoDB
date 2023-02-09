@@ -34,7 +34,6 @@ public:
     [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] static auto repair(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
-    [[nodiscard]] auto close() -> Status;
 
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get_property(const Slice &name, std::string &out) const -> bool override;

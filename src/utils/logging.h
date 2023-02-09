@@ -3,6 +3,7 @@
 
 #include <sstream>
 #include "calico/slice.h"
+#include "calico/status.h"
 #include "calico/storage.h"
 
 namespace Calico {
