@@ -1188,7 +1188,7 @@ protected:
         auto page = pager->allocate();
         ASSERT_TRUE(page.has_value());
         pager->upgrade(*page);
-        ASSERT_TRUE(free_list->push(std::move(*page)).has_value());
+        free_list->push(std::move(*page));
     }
 
     std::unique_ptr<FreeList> free_list;
@@ -1216,14 +1216,6 @@ TEST_P(MemoryTests, FreeListPagesAreDoublyLinked)
     page = free_list->pop();
     ASSERT_TRUE(page.has_value());
     ASSERT_TRUE(free_list->is_empty());
-}
-
-TEST_P(MemoryTests, Vacuum)
-{
-    allocate_and_push();
-    allocate_and_push();
-    allocate_and_push();
-    (void)free_list->vacuum(3);
 }
 
 INSTANTIATE_TEST_SUITE_P(
