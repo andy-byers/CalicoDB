@@ -810,9 +810,9 @@ TEST_F(InterceptorTests, RespectsPrefix)
 {
     Quick_Interceptor("test/data", Tools::Interceptor::OPEN);
 
-    RandomEditor *editor;
-    assert_special_error(storage_handle().open_random_editor("test/data", &editor));
-    expect_ok(storage_handle().open_random_editor("test/wal", &editor));
+    Editor *editor;
+    assert_special_error(storage_handle().new_editor("test/data", &editor));
+    expect_ok(storage_handle().new_editor("test/wal", &editor));
     delete editor;
 }
 
@@ -820,8 +820,8 @@ TEST_F(InterceptorTests, RespectsSyscallType)
 {
     Quick_Interceptor("test/data", Tools::Interceptor::WRITE);
 
-    RandomEditor *editor;
-    expect_ok(storage_handle().open_random_editor("test/data", &editor));
+    Editor *editor;
+    expect_ok(storage_handle().new_editor("test/data", &editor));
     assert_special_error(editor->write({}, 0));
     delete editor;
 }

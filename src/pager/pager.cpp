@@ -109,6 +109,11 @@ auto Pager::set_recovery_lsn(Lsn lsn) -> void
     m_recovery_lsn = lsn;
 }
 
+auto Pager::sync() -> Status
+{
+    return m_framer.sync();
+}
+
 auto Pager::flush(Lsn target_lsn) -> Status
 {
     // An LSN of NULL causes all pages to be flushed.
@@ -150,7 +155,6 @@ auto Pager::flush(Lsn target_lsn) -> Status
             itr = next(itr);
         }
     }
-    Calico_Try_S(m_framer.sync());
 
     // We have flushed the entire cache.
     if (target_lsn == MAX_ID) {
@@ -252,6 +256,7 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
     const auto do_acquire = [this](auto &entry) -> tl::expected<Page, Status> {
         auto page = m_framer.ref(entry.index);
 
+        // Write back pages that are too old. This is so that old WAL segments can be removed.
         if (entry.token) {
             const auto lsn = read_page_lsn(page);
             const auto checkpoint = (*entry.token)->record_lsn;

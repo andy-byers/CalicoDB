@@ -173,27 +173,27 @@ static auto write_file(int file, Slice in)
     return Status::ok();
 }
 
-RandomFileReader::~RandomFileReader()
+PosixReader::~PosixReader()
 {
     (void)file_close(m_file);
 }
 
-auto RandomFileReader::read(Byte *out, Size &size, Size offset) -> Status
+auto PosixReader::read(Byte *out, Size &size, Size offset) -> Status
 {
     return read_file_at(m_file, out, size, offset);
 }
 
-RandomFileEditor::~RandomFileEditor()
+PosixEditor::~PosixEditor()
 {
     (void)file_close(m_file);
 }
 
-auto RandomFileEditor::read(Byte *out, Size &size, Size offset) -> Status
+auto PosixEditor::read(Byte *out, Size &size, Size offset) -> Status
 {
     return read_file_at(m_file, out, size, offset);
 }
 
-auto RandomFileEditor::write(Slice in, Size offset) -> Status
+auto PosixEditor::write(Slice in, Size offset) -> Status
 {
     auto r = file_seek(m_file, static_cast<long>(offset), SEEK_SET);
     if (r.has_value()) {
@@ -202,22 +202,22 @@ auto RandomFileEditor::write(Slice in, Size offset) -> Status
     return r.error();
 }
 
-auto RandomFileEditor::sync() -> Status
+auto PosixEditor::sync() -> Status
 {
     return file_sync(m_file);
 }
 
-AppendFileWriter::~AppendFileWriter()
+PosixLogger::~PosixLogger()
 {
     (void)file_close(m_file);
 }
 
-auto AppendFileWriter::write(Slice in) -> Status
+auto PosixLogger::write(Slice in) -> Status
 {
     return write_file(m_file, in);
 }
 
-auto AppendFileWriter::sync() -> Status
+auto PosixLogger::sync() -> Status
 {
     return file_sync(m_file);
 }
@@ -276,11 +276,11 @@ auto PosixStorage::get_children(const std::string &path, std::vector<std::string
     return Status::ok();
 }
 
-auto PosixStorage::open_random_reader(const std::string &path, RandomReader **out) -> Status
+auto PosixStorage::new_reader(const std::string &path, Reader **out) -> Status
 {
     const auto fd = file_open(path, O_RDONLY, FILE_PERMISSIONS);
     if (fd.has_value()) {
-        *out = new(std::nothrow) RandomFileReader {path, *fd};
+        *out = new(std::nothrow) PosixReader {path, *fd};
         if (*out == nullptr) {
             return Status::system_error("out of memory");
         }
@@ -289,11 +289,11 @@ auto PosixStorage::open_random_reader(const std::string &path, RandomReader **ou
     return fd.error();
 }
 
-auto PosixStorage::open_random_editor(const std::string &path, RandomEditor **out) -> Status
+auto PosixStorage::new_editor(const std::string &path, Editor **out) -> Status
 {
     const auto fd = file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS);
     if (fd.has_value()) {
-        *out = new(std::nothrow) RandomFileEditor {path, *fd};
+        *out = new(std::nothrow) PosixEditor {path, *fd};
         if (*out == nullptr) {
             return Status::system_error("out of memory");
         }
@@ -302,11 +302,11 @@ auto PosixStorage::open_random_editor(const std::string &path, RandomEditor **ou
     return fd.error();
 }
 
-auto PosixStorage::open_logger(const std::string &path, Logger **out) -> Status
+auto PosixStorage::new_logger(const std::string &path, Logger **out) -> Status
 {
     const auto fd = file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS);
     if (fd.has_value()) {
-        *out = new(std::nothrow) AppendFileWriter {path, *fd};
+        *out = new(std::nothrow) PosixLogger {path, *fd};
         if (*out == nullptr) {
             return Status::system_error("out of memory");
         }

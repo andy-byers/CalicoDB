@@ -12,7 +12,7 @@ namespace Calico {
 
 class LogReader final {
 public:
-    explicit LogReader(RandomReader &file)
+    explicit LogReader(Reader &file)
         : m_file {&file}
     {}
 
@@ -24,7 +24,7 @@ private:
     [[nodiscard]] auto read_logical_record(Span &out, Span tail) -> Status;
 
     // NOTE: Doesn't take ownership of the file.
-    RandomReader *m_file {};
+    Reader *m_file {};
     Size m_number {};
     Size m_offset {};
 };
@@ -73,7 +73,7 @@ private:
 
     std::string m_prefix;
     std::optional<LogReader> m_reader;
-    std::unique_ptr<RandomReader> m_file;
+    std::unique_ptr<Reader> m_file;
     Storage *m_store {};
     WalSet *m_set {};
     Span m_tail;

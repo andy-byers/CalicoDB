@@ -55,9 +55,9 @@ class DynamicMemory : public Storage {
     mutable std::unordered_map<std::string, Memory> m_memory;
     mutable std::mutex m_mutex;
 
-    friend class RandomMemoryEditor;
-    friend class RandomMemoryReader;
-    friend class AppendMemoryWriter;
+    friend class MemoryEditor;
+    friend class MemoryReader;
+    friend class MemoryLogger;
 
     [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &path) -> Status;
     [[nodiscard]] auto get_memory(const std::string &path) const -> Memory &;
@@ -72,9 +72,9 @@ public:
     ~DynamicMemory() override = default;
     [[nodiscard]] auto create_directory(const std::string &path) -> Status override;
     [[nodiscard]] auto remove_directory(const std::string &path) -> Status override;
-    [[nodiscard]] auto open_random_reader(const std::string &path, RandomReader **out) -> Status override;
-    [[nodiscard]] auto open_random_editor(const std::string &path, RandomEditor **out) -> Status override;
-    [[nodiscard]] auto open_logger(const std::string &path, Logger **out) -> Status override;
+    [[nodiscard]] auto new_reader(const std::string &path, RandomReader **out) -> Status override;
+    [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &path, Logger **out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
@@ -83,12 +83,12 @@ public:
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
 };
 
-class RandomMemoryReader : public RandomReader {
+class MemoryReader : public RandomReader {
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
 
-    RandomMemoryReader(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
+    MemoryReader(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
@@ -97,16 +97,16 @@ class RandomMemoryReader : public RandomReader {
     friend class DynamicMemory;
 
 public:
-    ~RandomMemoryReader() override = default;
+    ~MemoryReader() override = default;
     [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
 };
 
-class RandomMemoryEditor : public RandomEditor {
+class MemoryEditor : public Editor {
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
 
-    RandomMemoryEditor(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
+    MemoryEditor(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
@@ -115,18 +115,18 @@ class RandomMemoryEditor : public RandomEditor {
     friend class DynamicMemory;
 
 public:
-    ~RandomMemoryEditor() override = default;
+    ~MemoryEditor() override = default;
     [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
     [[nodiscard]] auto write(Slice in, Size offset) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class AppendMemoryWriter : public Logger {
+class MemoryLogger : public Logger {
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
 
-    AppendMemoryWriter(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
+    MemoryLogger(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
@@ -135,7 +135,7 @@ class AppendMemoryWriter : public Logger {
     friend class DynamicMemory;
 
 public:
-    ~AppendMemoryWriter() override = default;
+    ~MemoryLogger() override = default;
     [[nodiscard]] auto write(Slice in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };

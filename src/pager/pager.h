@@ -43,6 +43,7 @@ public:
     [[nodiscard]] auto recovery_lsn() -> Id;
     [[nodiscard]] auto bytes_written() const -> Size;
     [[nodiscard]] auto flush(Lsn target_lsn) -> Status;
+    [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status>;
     [[nodiscard]] auto acquire(Id pid) -> tl::expected<Page, Status>;
     auto upgrade(Page &page) -> void;

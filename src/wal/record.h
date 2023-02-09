@@ -15,7 +15,7 @@
 
 namespace Calico {
 
-static constexpr Size WAL_BLOCK_SCALE {2};
+static constexpr Size WAL_BLOCK_SCALE {4};
 
 [[nodiscard]]
 inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
@@ -302,15 +302,15 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, Wal
         return lsn;
     }
 
-    RandomReader *temp;
-    auto s = store.open_random_reader(encode_segment_name(prefix, id), &temp);
+    Reader *temp;
+    auto s = store.new_reader(encode_segment_name(prefix, id), &temp);
     if (!s.is_ok()) {
         return tl::make_unexpected(s);
     }
 
     char buffer[WalPayloadHeader::SIZE];
     Span bytes {buffer, sizeof(buffer)};
-    std::unique_ptr<RandomReader> file {temp};
+    std::unique_ptr<Reader> file {temp};
 
     // Read the first LSN. If it exists, it will always be at the same location.
     auto read_size = bytes.size();

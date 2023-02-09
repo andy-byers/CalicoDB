@@ -55,10 +55,11 @@ auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
     if (m_db_prefix.back() != '/') {
         m_db_prefix += '/';
     }
-    m_wal_prefix = options.wal_prefix.to_string();
+    m_wal_prefix = sanitized.wal_prefix.to_string();
     if (m_wal_prefix.empty()) {
         m_wal_prefix = m_db_prefix + "wal-";
     }
+    m_sync = sanitized.sync;
 
     // Any error during initialization is fatal.
     return do_open(sanitized);
@@ -79,7 +80,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     m_info_log = sanitized.info_log;
     if (m_info_log == nullptr) {
-        Calico_Try_S(m_storage->open_logger(m_db_prefix + "log", &m_info_log));
+        Calico_Try_S(m_storage->new_logger(m_db_prefix + "log", &m_info_log));
         sanitized.info_log = m_info_log;
         m_owns_info_log = true;
     }
@@ -178,13 +179,14 @@ DatabaseImpl::~DatabaseImpl()
         return;
     }
 
-    auto s = wal->close();
-    if (s.is_ok()) {
-        s = pager->flush({});
+    if (auto s = wal->close(); !s.is_ok()) {
+        logv(m_info_log, "failed to flush wal: %s", s.what().to_string());
     }
-
-    if (!s.is_ok()){
-        logv(m_info_log, "closed with non-ok status %s", s.what().to_string());
+    if (auto s = pager->flush({}); !s.is_ok()) {
+        logv(m_info_log, "failed to flush pager: %s", s.what().to_string());
+    }
+    if (auto s = pager->sync(); !s.is_ok()) {
+        logv(m_info_log, "failed to sync pager: %s", s.what().to_string());
     }
 
     if (m_owns_info_log) {
@@ -414,7 +416,10 @@ auto DatabaseImpl::do_commit() -> Status
     Calico_Try_S(wal->flush());
     wal->advance();
 
-    Maybe_Set_Error(pager->flush(m_commit_lsn));
+    if (m_sync) {
+        Maybe_Set_Error(pager->sync());
+    }
+
     wal->cleanup(pager->recovery_lsn());
     m_commit_lsn = lsn;
 
@@ -535,11 +540,11 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     }
 
     const auto path = prefix + "data";
-    std::unique_ptr<RandomReader> reader;
-    RandomReader *reader_temp {};
+    std::unique_ptr<Reader> reader;
+    Reader *reader_temp {};
     bool exists {};
 
-    if (auto s = store.open_random_reader(path, &reader_temp); s.is_ok()) {
+    if (auto s = store.new_reader(path, &reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
         Size file_size {};
         s = store.file_size(path, file_size);
@@ -552,7 +557,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
 
         Byte buffer[FileHeader::SIZE];
         Span span {buffer, sizeof(buffer)};
-        s = read_exact(*reader, span, 0);
+        s = read_exact_at(*reader, span, 0);
 
         header = FileHeader {
             Page {Id::root(), span, false}

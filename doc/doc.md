@@ -1,4 +1,6 @@
 # Calico DB Documentation
+Calico DB is designed to be as simple as possible.
+The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
 
 + [Build](#build)
 + [API](#api)
@@ -11,7 +13,6 @@
   + [Destroying a database](#destroying-a-database)
 + [Examples](#examples)
 + [Architecture](#architecture)
-+ [Source Tree](#source-tree)
 + [Acknowledgements](#acknowledgements)
 
 ## Build
@@ -181,15 +182,15 @@ delete cursor;
 ```
 
 ### Transactions
+A transaction represents a unit of work in Calico DB.
+The first transaction is started when the database is opened. 
+Otherwise, transaction boundaries are defined by calls to `Database::commit()` and `Database::abort()`.
+All updates that haven't been committed will be rolled back during WAL traversal on the next startup.
 
 ```C++
-// In Calico DB, every modification is part of a transaction. The first transaction is started when
-// the database is opened. Otherwise, transaction boundaries are defined by calls to Database::commit()
-// and Database::abort().
 if (const auto s = db->erase("b"); !s.is_ok()) {
     // If there was a fatal error here, the transaction would be rolled back during recovery.
 }
-
 
 if (const auto s = db->abort(); s.is_ok()) {
     // Every change made since the last call to Database::commit() (or since the database was opened, if
@@ -216,6 +217,7 @@ std::string prop;
 bool exists;
 
 // Database properties are made available as strings.
+exists = db->get_property("calico.count.updates", prop);
 exists = db->get_property("calico.count.records", prop);
 exists = db->get_property("calico.count.pages", prop);
 exists = db->get_property("calico.limit.max_key_length", prop);
@@ -248,34 +250,47 @@ if (const auto s = Calico::Database::destroy("/tmp/cats", options); s.is_ok()) {
 ```
 
 ## Architecture
-...
+Calico DB uses a B<sup>+</sup>-tree backend and a write-ahead log (WAL).
+Other core modules are located in the `src` directory.
+The database is generally represented on disk by a single directory.
+The B<sup>+</sup>-tree containing the record store is located in a file called `data` in the main directory.
+The WAL segment files can either be located in the main directory, or in a different location, depending on the `wal_prefix` initialization option.
+The info log will be created in the main directory as well, unless a custom `Logger *` is passed to the database.
+Calico DB will spawn an additional thead to do the write-ahead logging and obsolete WAL cleanup.
 
-## Source Tree
-```
-CalicoDB
-┣╸cmake ┄┄┄┄┄┄┄┄┄┄┄┄ CMake utilities/config files
-┣╸include/calico
-┃ ┣╸calico.h ┄┄┄┄┄┄┄ Pulls in the rest of the API
-┃ ┣╸common.h ┄┄┄┄┄┄┄ Common types and constants
-┃ ┣╸cursor.h ┄┄┄┄┄┄┄ Cursor for database traversal
-┃ ┣╸database.h ┄┄┄┄┄ Toplevel database object
-┃ ┣╸slice.h ┄┄┄┄┄┄┄┄ Construct for holding a contiguous sequence of bytes
-┃ ┣╸status.h ┄┄┄┄┄┄┄ Status object for function returns
-┃ ┗╸storage.h ┄┄┄┄┄┄ Storage interface
-┣╸src
-┃ ┣╸database ┄┄┄┄┄┄┄ API implementation
-┃ ┣╸pager ┄┄┄┄┄┄┄┄┄┄ Database page cache
-┃ ┣╸storage ┄┄┄┄┄┄┄┄ Data storage and retrieval
-┃ ┣╸tree ┄┄┄┄┄┄┄┄┄┄┄ Data organization
-┃ ┣╸utils ┄┄┄┄┄┄┄┄┄┄ Common utilities
-┃ ┗╸wal ┄┄┄┄┄┄┄┄┄┄┄┄ Write-ahead logging
-┗╸test
-  ┣╸benchmarks ┄┄┄┄┄ Performance benchmarks
-  ┣╸fuzzers ┄┄┄┄┄┄┄┄ libFuzzer fuzzers
-  ┣╸recovery ┄┄┄┄┄┄┄ Crash recovery tests
-  ┣╸tools ┄┄┄┄┄┄┄┄┄┄ Non-core utilities
-  ┗╸unit_tests ┄┄┄┄┄ Unit tests
-```
+### Storage
+The storage module handles platform-specific filesystem operations and I/O.
+Users can override classes in [`calico/storage.h`](../include/calico/storage.h).
+Then, a pointer to the custom `Storage` object can be passed to the database during when it is opened.
+See [`test/tools`](../test/tools) for an example that stores the database in memory.
+
+### Pager
+The pager module provides in-memory caching for database pages read by the `storage` module.
+It is the pager's job to maintain consistency between database pages on disk and in memory.
+
+### WAL
+The WAL record format is similar to that of `RocksDB`.
+Additionally, we have 2 WAL payload types: deltas and full images.
+A full image is generated the first time a page is modified during a transaction.
+A full image contain a copy of the page, before anything was changed, and can be used to undo all modifications made during the transaction.
+Further modifications to the page will produce deltas, which record only the changed portions of the page (just the "after" contents).
+Note that full image records are always disjoint (w.r.t. the affected page IDs) within a single transaction.
+This means that they can be applied to the database in any order and produce the same results.
+Deltas are not disjoint, so they must be read in order.
+
+### Consistency
+Calico DB must enforce certain rules to maintain consistency between the WAL and the database.
+First, we need to make sure that all updates are written to the WAL before affected pages are written back to the database file.
+The WAL keeps track of the last LSN it flushed to disk (the `flushed_lsn`).
+This value is queried by the pager to make sure that unprotected pages are never written back.
+The pager keeps track of a few more variables to ensure consistency: the `page_lsn`, the `record_lsn`, the `commit_lsn`, and the `recovery_lsn`.
+The `page_lsn` (per page) represents the LSN of the last WAL record generated for the page.
+This is the value that is compared with the WAL's `flushed_lsn` to make sure the page is safe to write out.
+The `record_lsn` (also per page) is the last `page_lsn` value that we already have on disk.
+It is saved (in-memory only) when the page is first read into memory, and each time the page is written back.
+Then, the lowest `record_lsn` is tracked in the pager's `recovery_lsn`.
+The `recovery_lsn` represents the oldest WAL record that we still need.
+It is reported back to the WAL intermittently so that obsolete segment files can be removed.
 
 ## Acknowledgements
 1. https://cstack.github.io/db_tutorial/

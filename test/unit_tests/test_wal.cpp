@@ -37,8 +37,8 @@ public:
     template<class Id>
     [[nodiscard]] auto get_segment_data(const Id &id) const -> std::string
     {
-        RandomReader *reader {};
-        EXPECT_TRUE(expose_message(Base::storage->open_random_reader(get_segment_name(id), &reader)));
+        Reader *reader {};
+        EXPECT_TRUE(expose_message(Base::storage->new_reader(get_segment_name(id), &reader)));
 
         std::string data(get_segment_size(id), '\x00');
         Span bytes {data};
@@ -362,8 +362,8 @@ public:
     auto get_reader(Id id) -> LogReader
     {
         const auto path = get_segment_name(id);
-        RandomReader *temp {};
-        EXPECT_TRUE(expose_message(storage->open_random_reader(path, &temp)));
+        Reader *temp {};
+        EXPECT_TRUE(expose_message(storage->new_reader(path, &temp)));
         reader_file.reset(temp);
         return LogReader {*reader_file};
     }
@@ -373,7 +373,7 @@ public:
     {
         const auto path = get_segment_name(id);
         Logger *temp {};
-        EXPECT_TRUE(expose_message(storage->open_logger(path, &temp)));
+        EXPECT_TRUE(expose_message(storage->new_logger(path, &temp)));
         writer_file.reset(temp);
         return LogWriter {*writer_file, writer_tail, flushed_lsn};
     }
@@ -425,7 +425,7 @@ public:
     std::string reader_tail;
     std::string writer_tail;
     LogScratchManager scratch;
-    std::unique_ptr<RandomReader> reader_file;
+    std::unique_ptr<Reader> reader_file;
     std::unique_ptr<Logger> writer_file;
     Id last_lsn;
     Tools::RandomGenerator random;

@@ -49,9 +49,7 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
             }
         }
         CALICO_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::SIZE);
-        if (auto s = flush(); !s.is_ok()) {
-            return s;
-        }
+        Calico_Try_S(flush());
     }
     // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
     // to be all the way on disk.
@@ -119,6 +117,7 @@ auto WalWriter::flush() -> void
 {
     if (m_writer.has_value() && m_error->is_ok()) {
         Maybe_Set_Error(m_writer->flush());
+        Maybe_Set_Error(m_file->sync());
     }
 }
 
@@ -139,7 +138,7 @@ auto WalWriter::open_segment(Id id) -> Status
 {
     CALICO_EXPECT_EQ(m_writer, std::nullopt);
     Logger *file;
-    auto s = m_storage->open_logger(encode_segment_name(m_prefix, id), &file);
+    auto s = m_storage->new_logger(encode_segment_name(m_prefix, id), &file);
     if (s.is_ok()) {
         m_file.reset(file);
         m_writer = LogWriter {*m_file, m_tail, *m_flushed_lsn};

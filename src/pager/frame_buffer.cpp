@@ -51,9 +51,9 @@ auto FrameBuffer::open(const std::string &prefix, Storage *storage, Size page_si
     CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
     CALICO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
 
-    RandomEditor *temp_file {};
-    auto s = storage->open_random_editor(prefix + "data", &temp_file);
-    std::unique_ptr<RandomEditor> file {temp_file};
+    Editor *temp_file {};
+    auto s = storage->new_editor(prefix + "data", &temp_file);
+    std::unique_ptr<Editor> file {temp_file};
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
@@ -66,7 +66,7 @@ auto FrameBuffer::open(const std::string &prefix, Storage *storage, Size page_si
     return FrameBuffer {std::move(file), std::move(buffer), page_size, frame_count};
 }
 
-FrameBuffer::FrameBuffer(std::unique_ptr<RandomEditor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
+FrameBuffer::FrameBuffer(std::unique_ptr<Editor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
     : m_buffer {std::move(buffer)},
       m_file {std::move(file)},
       m_page_size {page_size}

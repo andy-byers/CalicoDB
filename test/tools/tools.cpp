@@ -46,7 +46,7 @@ auto DynamicMemory::write_file_at(Memory &memory, Slice in, Size offset) -> Stat
     return Status::ok();
 }
 
-auto RandomMemoryReader::read(Byte *out, Size &size, Size offset) -> Status
+auto MemoryReader::read(Byte *out, Size &size, Size offset) -> Status
 {
     {
         std::lock_guard lock {m_parent->m_mutex};
@@ -55,7 +55,7 @@ auto RandomMemoryReader::read(Byte *out, Size &size, Size offset) -> Status
     return m_parent->read_file_at(*m_mem, out, size, offset);
 }
 
-auto RandomMemoryEditor::read(Byte *out, Size &size, Size offset) -> Status
+auto MemoryEditor::read(Byte *out, Size &size, Size offset) -> Status
 {
     {
         std::lock_guard lock {m_parent->m_mutex};
@@ -64,7 +64,7 @@ auto RandomMemoryEditor::read(Byte *out, Size &size, Size offset) -> Status
     return m_parent->read_file_at(*m_mem, out, size, offset);
 }
 
-auto RandomMemoryEditor::write(Slice in, Size offset) -> Status
+auto MemoryEditor::write(Slice in, Size offset) -> Status
 {
     {
         std::lock_guard lock {m_parent->m_mutex};
@@ -73,14 +73,14 @@ auto RandomMemoryEditor::write(Slice in, Size offset) -> Status
     return m_parent->write_file_at(*m_mem, in, offset);
 }
 
-auto RandomMemoryEditor::sync() -> Status
+auto MemoryEditor::sync() -> Status
 {
     std::lock_guard lock {m_parent->m_mutex};
     Try_Intercept_From(*m_parent, Interceptor::SYNC, m_path);
     return Status::ok();
 }
 
-auto AppendMemoryWriter::write(Slice in) -> Status
+auto MemoryLogger::write(Slice in) -> Status
 {
     {
         std::lock_guard lock {m_parent->m_mutex};
@@ -91,7 +91,7 @@ auto AppendMemoryWriter::write(Slice in) -> Status
     return m_parent->write_file_at(*m_mem, in, m_mem->buffer.size());
 }
 
-auto AppendMemoryWriter::sync() -> Status
+auto MemoryLogger::sync() -> Status
 {
     std::lock_guard lock {m_parent->m_mutex};
     Try_Intercept_From(*m_parent, Interceptor::SYNC, m_path);
@@ -117,20 +117,20 @@ auto DynamicMemory::remove_directory(const std::string &) -> Status
     return Status::ok();
 }
 
-auto DynamicMemory::open_random_reader(const std::string &path, RandomReader **out) -> Status
+auto DynamicMemory::new_reader(const std::string &path, Reader **out) -> Status
 {
     std::lock_guard lock {m_mutex};
     auto &mem = get_memory(path);
     Try_Intercept_From(*this, Interceptor::OPEN, path);
     
     if (mem.created) {
-        *out = new RandomMemoryReader {path, *this, mem};
+        *out = new MemoryReader {path, *this, mem};
         return Status::ok();
     }
     return Status::not_found("cannot open file");
 }
 
-auto DynamicMemory::open_random_editor(const std::string &path, RandomEditor **out) -> Status
+auto DynamicMemory::new_editor(const std::string &path, Editor **out) -> Status
 {
     std::lock_guard lock {m_mutex};
     auto &mem = get_memory(path);
@@ -140,11 +140,11 @@ auto DynamicMemory::open_random_editor(const std::string &path, RandomEditor **o
         mem.buffer.clear();
         mem.created = true;
     }
-    *out = new RandomMemoryEditor {path, *this, mem};
+    *out = new MemoryEditor {path, *this, mem};
     return Status::ok();
 }
 
-auto DynamicMemory::open_logger(const std::string &path, Logger **out) -> Status
+auto DynamicMemory::new_logger(const std::string &path, Logger **out) -> Status
 {
     std::lock_guard lock {m_mutex};
     auto &mem = get_memory(path);
@@ -154,7 +154,7 @@ auto DynamicMemory::open_logger(const std::string &path, Logger **out) -> Status
         mem.buffer.clear();
         mem.created = true;
     }
-    *out = new AppendMemoryWriter {path, *this, mem};
+    *out = new MemoryLogger {path, *this, mem};
     return Status::ok();
 }
 

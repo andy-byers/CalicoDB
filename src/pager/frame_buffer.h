@@ -13,7 +13,7 @@ namespace Calico {
 struct FileHeader;
 class Page;
 class Pager;
-class RandomEditor;
+class Editor;
 class Storage;
 class WriteAheadLog;
 
@@ -118,7 +118,7 @@ public:
     FrameBuffer(FrameBuffer &&) = default;
 
 private:
-    FrameBuffer(std::unique_ptr<RandomEditor>, AlignedBuffer, Size, Size);
+    FrameBuffer(std::unique_ptr<Editor>, AlignedBuffer, Size, Size);
     [[nodiscard]] auto read_page_from_file(Id, Span) const -> tl::expected<bool, Status>;
     [[nodiscard]] auto write_page_to_file(Id pid, const Slice &page) const -> Status;
 
@@ -132,7 +132,7 @@ private:
     AlignedBuffer m_buffer;
     std::vector<Frame> m_frames;
     std::list<Size> m_available;
-    std::unique_ptr<RandomEditor> m_file;
+    std::unique_ptr<Editor> m_file;
     Size m_page_count {};
     Size m_page_size {};
     Size m_ref_sum {};

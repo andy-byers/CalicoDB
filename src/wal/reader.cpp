@@ -6,7 +6,7 @@
 namespace Calico {
 
 [[nodiscard]]
-static auto read_exact_or_eof(RandomReader &file, Size offset, Span out) -> Status
+static auto read_exact_or_eof(Reader &file, Size offset, Span out) -> Status
 {
     auto temp = out;
     auto read_size = out.size();
@@ -38,8 +38,7 @@ auto LogReader::read(WalPayloadOut &out, Span payload, Span tail) -> Status
 
 auto LogReader::read_first_lsn(Lsn &out) -> Status
 {
-    // Bytes requires the array size when constructed with a C-style array.
-    char buffer [WalPayloadHeader::SIZE];
+    char buffer [WalRecordHeader::SIZE + WalPayloadHeader::SIZE];
     Span bytes {buffer, sizeof(buffer)};
 
     // The LogWriter will never flush a block unless it contains at least one record, so the first record should be
@@ -165,8 +164,8 @@ auto WalReader::roll(const Callback &callback) -> Status
 auto WalReader::open_segment(Id id) -> Status
 {
     CALICO_EXPECT_EQ(m_reader, std::nullopt);
-    RandomReader *file;
-    auto s = m_store->open_random_reader(encode_segment_name(m_prefix, id), &file);
+    Reader *file;
+    auto s = m_store->new_reader(encode_segment_name(m_prefix, id), &file);
     if (s.is_ok()) {
         m_file.reset(file);
         m_reader = LogReader {*m_file};

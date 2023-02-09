@@ -74,6 +74,7 @@ private:
     bool m_in_txn {true};
     bool m_owns_storage {};
     bool m_owns_info_log {};
+    bool m_sync {};
 };
 
 auto setup(const std::string &, Storage &, const Options &) -> tl::expected<InitialState, Status>;

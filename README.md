@@ -1,6 +1,6 @@
 # CalicoDB
 
-> **Warning**: This library is not yet stable, nor is it code reviewed. 
+> **Warning**: This library is not quite stable, nor is it code reviewed. 
 > Please don't use it for anything serious!
 
 Calico DB is an embedded key-value database written in C++17.
@@ -21,15 +21,14 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + [Contributions](#contributions)
 
 ## Features
-+ Forward and reverse iteration using cursors
++ Bidirectional iteration using cursors
 + Crash protection via write-ahead logging
 + Variable-length keys and values (see [Caveats](#caveats))
 + Various parameters can be tuned (page size, cache size, etc.)
 
 ## Caveats
-+ Only tested on 64-bit Ubuntu and OSX
 + Maximum key length is anywhere from 37 B to ~8 KiB, depending on the chosen page size
-+ Maximum value length is roughly 4 GiB
++ Maximum value length is ~4 GiB
 + Concurrency control must be provided externally
 
 ## Documentation
@@ -46,23 +45,16 @@ Performance benchmarks are provided in the [`benchmarks`](test/benchmarks) folde
 
 ## TODO
 1. Get everything code reviewed!
-2. Get unit test coverage up
-3. Need to implement compaction (`Status Database::vacuum()`)
+2. Need to implement compaction (`Status Database::vacuum()`)
     + We need some way to collect freelist pages at the end of the file so that we can truncate
     + Look into SQLite's pointer maps
-4. Need to implement repair (`Status Database::repair()`)
+3. Need to implement repair (`Status Database::repair()`)
     + Run when a database cannot be opened due to corruption (not the same as recovery)
-5. Support Windows
-6. Support accelerated CRCs
-7. Work on the documentation in [doc](doc)
-8. Work on performance
-   + B<sup>+</sup>-tree splitting algorithm (specifically `BPlusTreeInternal::split_non_root()`) could be modified to make smarter decisions about which way to split
-   
+4. Support Windows (write a `Storage` implementation)
+
 ## Documentation
 Check out Calico DB's [usage and design documents](doc).
 
 ## Contributions
 Contributions are welcome!
 Check out this repo's issues or the [TODO section](#todo) for a list of things that need to be addressed.
-
-

@@ -329,8 +329,8 @@ namespace TestTools {
 
     inline auto write_file(Storage &storage, const std::string &path, Slice in) -> void
     {
-        RandomEditor *file;
-        ASSERT_TRUE(storage.open_random_editor(path, &file).is_ok());
+        Editor *file;
+        ASSERT_TRUE(storage.new_editor(path, &file).is_ok());
         ASSERT_TRUE(file->write(in, 0).is_ok());
         delete file;
     }
@@ -338,19 +338,19 @@ namespace TestTools {
     inline auto append_file(Storage &storage, const std::string &path, Slice in) -> void
     {
         Logger *file;
-        ASSERT_TRUE(storage.open_logger(path, &file).is_ok());
+        ASSERT_TRUE(storage.new_logger(path, &file).is_ok());
         ASSERT_TRUE(file->write(in).is_ok());
         delete file;
     }
 
     inline auto read_file(Storage &storage, const std::string &path) -> std::string
     {
-        RandomReader *file;
+        Reader *file;
         std::string out;
         Size size;
 
         EXPECT_TRUE(storage.file_size(path, size).is_ok());
-        EXPECT_TRUE(storage.open_random_reader(path, &file).is_ok());
+        EXPECT_TRUE(storage.new_reader(path, &file).is_ok());
         out.resize(size);
 
         Span temp {out};
@@ -369,10 +369,10 @@ namespace TestTools {
         Size file_size;
         EXPECT_TRUE(storage.file_size("test/data", file_size).is_ok());
 
-        std::unique_ptr<RandomReader> reader;
+        std::unique_ptr<Reader> reader;
         {
-            RandomReader *temp;
-            expect_ok(storage.open_random_reader("test/data", &temp));
+            Reader *temp;
+            expect_ok(storage.new_reader("test/data", &temp));
             reader.reset(temp);
         }
 
