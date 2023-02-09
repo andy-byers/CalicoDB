@@ -1,5 +1,9 @@
 /*
+<<<<<<<< HEAD:test/fuzzers/ops_fuzzer.cpp
  * ops_fuzzer.cpp: Runs normal database operations.
+========
+ * db_fuzzer.cpp: Checks the happy path.
+>>>>>>>> origin/main:test/fuzzers/db_fuzzer.cpp
  */
 
 #include "fuzzer.h"
