@@ -174,24 +174,22 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
 DatabaseImpl::~DatabaseImpl()
 {
-    if (!m_recovery) {
-        // We failed during open().
-        return;
-    }
-
-    if (auto s = wal->close(); !s.is_ok()) {
-        logv(m_info_log, "failed to flush wal: %s", s.what().to_string());
-    }
-    if (auto s = pager->flush({}); !s.is_ok()) {
-        logv(m_info_log, "failed to flush pager: %s", s.what().to_string());
-    }
-    if (auto s = pager->sync(); !s.is_ok()) {
-        logv(m_info_log, "failed to sync pager: %s", s.what().to_string());
+    if (m_recovery) {
+        if (auto s = wal->close(); !s.is_ok()) {
+            logv(m_info_log, "failed to flush wal: %s", s.what().to_string());
+        }
+        if (auto s = pager->flush({}); !s.is_ok()) {
+            logv(m_info_log, "failed to flush pager: %s", s.what().to_string());
+        }
+        if (auto s = pager->sync(); !s.is_ok()) {
+            logv(m_info_log, "failed to sync pager: %s", s.what().to_string());
+        }
     }
 
     if (m_owns_info_log) {
         delete m_info_log;
     }
+
     if (m_owns_storage) {
         delete m_storage;
     }
@@ -262,46 +260,31 @@ auto DatabaseImpl::status() const -> Status
 
 auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bool
 {
-    out.clear();
-
-    Slice prop {name};
-    if (prop.starts_with("calico.")) {
+    if (Slice prop {name}; prop.starts_with("calico.")) {
         prop.advance(7);
 
-        if (prop.starts_with("count.")) {
-            prop.advance(6);
+        if (prop == "counts") {
+            out.append("records:");
+            append_number(out, record_count);
+            out.append(",pages:");
+            append_number(out, pager->page_count());
+            out.append(",updates:");
+            append_number(out, m_txn_size);
+            return true;
 
-            if (prop == "records") {
-                out = number_to_string(record_count);
-            } else if (prop == "pages") {
-                out = number_to_string(pager->page_count());
-            } else if (prop == "updates") {
-                out = number_to_string(m_txn_size);
-            }
-        } else if (prop.starts_with("limit.")) {
-            prop.advance(6);
-
-            if (prop == "max_key_length") {
-                out = number_to_string(max_key_length);
-            } else if (prop == "page_size") {
-                out = number_to_string(pager->page_size());
-            }
-        } else if (prop.starts_with("stat.")) {
-            prop.advance(5);
-
-            if (prop == "cache_hit_ratio") {
-                out = "0.0"; // TODO
-            } else if (prop == "data_throughput") {
-                out = number_to_string(bytes_written);
-            } else if (prop == "pager_throughput") {
-                out = number_to_string(pager->bytes_written());
-            } else if (prop == "wal_throughput") {
-                out = number_to_string(wal->bytes_written());
-            }
+        } else if (prop == "stats") {
+            out.append("cache_hit_ratio:");
+            append_double(out, pager->hit_ratio());
+            out.append(",data_throughput:");
+            append_number(out, bytes_written);
+            out.append(",pager_throughput:");
+            append_number(out, pager->bytes_written());
+            out.append(",wal_throughput:");
+            append_number(out, wal->bytes_written());
+            return true;
         }
     }
-    // None of the calico properties should ever be an empty string.
-    return !out.empty();
+    return false;
 }
 
 auto DatabaseImpl::check_key(const Slice &key) const -> Status

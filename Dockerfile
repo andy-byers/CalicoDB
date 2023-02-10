@@ -24,9 +24,9 @@ RUN mkdir build && \
     export CXX=/usr/bin/clang++ && \
     cmake -DCMAKE_CXX_FLAGS="-fsanitize=fuzzer,address,undefined" \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCALICO_BuildBenchmarks=Off \
-          -DCALICO_BuildFuzzers=On \
           -DCALICO_BuildTests=On \
-          -DBUILD_TESTING=Off \
+          -DCALICO_BuildFuzzers=On \
+          -DCALICO_BuildBenchmarks=Off \
+          -DCALICO_BuildUnitTests=Off \
           -DCALICO_FuzzerStandalone=Off .. && \
     cmake --build . \

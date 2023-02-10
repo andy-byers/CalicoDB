@@ -228,6 +228,83 @@ public:
     }
 };
 
+
+struct DatabaseCounts {
+    Size records {};
+    Size pages {};
+    Size updates {};
+};
+
+[[nodiscard]]
+inline auto parse_db_counts(std::string prop) -> DatabaseCounts
+{
+    DatabaseCounts counts;
+
+    CHECK_EQ(prop.find("records:"), 0);
+    prop = prop.substr(8);
+    auto pos = prop.find(',');
+    CHECK_TRUE(pos != std::string::npos);
+    counts.records = std::stoi(prop.substr(0, pos));
+    prop = prop.substr(pos);
+
+    CHECK_EQ(prop.find(",pages:"), 0);
+    prop = prop.substr(7);
+    pos = prop.find(',');
+    CHECK_TRUE(pos != std::string::npos);
+    counts.pages = std::stoi(prop.substr(0, pos));
+    prop = prop.substr(pos);
+
+    CHECK_EQ(prop.find(",updates:"), 0);
+    prop = prop.substr(9);
+    pos = prop.find(',');
+    CHECK_EQ(pos, std::string::npos);
+    counts.updates = std::stoi(prop);
+
+    return counts;
+}
+
+struct DatabaseStats {
+    double cache_hit_ratio {};
+    Size data_throughput {};
+    Size pager_throughput {};
+    Size wal_throughput {};
+};
+
+[[nodiscard]]
+inline auto parse_db_stats(std::string prop) -> DatabaseStats
+{
+    DatabaseStats stats;
+
+    CHECK_EQ(prop.find("cache_hit_ratio:"), 0);
+    prop = prop.substr(16);
+    auto pos = prop.find(',');
+    CHECK_TRUE(pos != std::string::npos);
+    stats.cache_hit_ratio = std::stod(prop.substr(0, pos));
+    prop = prop.substr(pos);
+
+    CHECK_EQ(prop.find(",data_throughput:"), 0);
+    prop = prop.substr(17);
+    pos = prop.find(',');
+    CHECK_TRUE(pos != std::string::npos);
+    stats.data_throughput = std::stoi(prop.substr(0, pos));
+    prop = prop.substr(pos);
+
+    CHECK_EQ(prop.find(",pager_throughput:"), 0);
+    prop = prop.substr(18);
+    pos = prop.find(',');
+    CHECK_TRUE(pos != std::string::npos);
+    stats.pager_throughput = std::stoi(prop.substr(0, pos));
+    prop = prop.substr(pos);
+
+    CHECK_EQ(prop.find(",wal_throughput:"), 0);
+    prop = prop.substr(16);
+    pos = prop.find(',');
+    CHECK_EQ(pos, std::string::npos);
+    stats.wal_throughput = std::stoi(prop);
+
+    return stats;
+}
+
 } // namespace Calico::Tools
 
 #endif // CALICO_TOOLS_H

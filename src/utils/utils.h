@@ -67,7 +67,7 @@ namespace Impl {
 
 } // namespace impl
 
-static constexpr Size MINIMUM_PAGE_SIZE {0x100};
+static constexpr Size MINIMUM_PAGE_SIZE {0x200};
 static constexpr Size MAXIMUM_PAGE_SIZE {0x8000};
 
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2

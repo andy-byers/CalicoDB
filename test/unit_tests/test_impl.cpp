@@ -169,14 +169,19 @@ public:
         options.wal_buffer_size = 32 * options.page_size;
         options.storage = &storage;
 
-        impl = std::make_unique<DatabaseImpl>();
-        const auto s = impl->open("test", options);
+        const auto s = reopen();
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
     }
 
     ~TestDatabase() = default;
 
     [[nodiscard]]
+    auto reopen() -> Status
+    {
+        impl = std::make_unique<DatabaseImpl>();
+        return impl->open("test", options);
+    }
+
     auto snapshot() const -> std::string
     {
         return TestTools::snapshot(*options.storage, options.page_size);
@@ -215,21 +220,21 @@ static auto add_records(TestDatabase &test, Size n, Size max_value_size, const s
 TEST_F(DbAbortTests, RevertsFirstBatch)
 {
     const auto snapshot = db->snapshot();
-    add_records(*db, 3, 0x400);
+    add_records(*db, 100, 0x400);
     ASSERT_OK(db->impl->abort());
     ASSERT_EQ(snapshot, db->snapshot());
 }
 
 TEST_F(DbAbortTests, RevertsSecondBatch)
 {
-    add_records(*db, 3, 0x400, "_");
+    add_records(*db, 100, 0x400, "_");
     ASSERT_OK(db->impl->commit());
 
     // Hack to make sure the database file is up-to-date.
     (void)db->impl->pager->flush({});
 
     const auto snapshot = db->snapshot();
-    add_records(*db, 3, 0x400);
+    add_records(*db, 1'000, 0x400);
     ASSERT_OK(db->impl->abort());
     ASSERT_EQ(snapshot, db->snapshot());
 }
@@ -246,6 +251,20 @@ TEST_F(DbAbortTests, RevertsNthBatch)
     const auto snapshot = db->snapshot();
     add_records(*db, 1'000, 0x400);
     ASSERT_OK(db->impl->abort());
+    ASSERT_EQ(snapshot, db->snapshot());
+}
+
+TEST_F(DbAbortTests, RevertsUncommittedBatch)
+{
+    add_records(*db, 100, 0x400, "_");
+    ASSERT_OK(db->impl->commit());
+
+    // Hack to make sure the database file is up-to-date.
+    (void)db->impl->pager->flush({});
+
+    const auto snapshot = db->snapshot();
+    add_records(*db, 1'000, 0x400);
+    ASSERT_OK(db->reopen());
     ASSERT_EQ(snapshot, db->snapshot());
 }
 
@@ -677,8 +696,8 @@ TEST_F(ApiTests, IsConstCorrect)
     const auto *const_db = db;
     ASSERT_OK(const_db->get("key", value));
     std::string property;
-    ASSERT_TRUE(const_db->get_property("calico.count.records", property));
-    ASSERT_EQ(property, "1");
+    ASSERT_TRUE(const_db->get_property("calico.counts", property));
+    ASSERT_EQ(property, "records:1,pages:1,updates:1");
     ASSERT_OK(const_db->status());
 
     auto *cursor = const_db->new_cursor();

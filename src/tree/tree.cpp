@@ -471,16 +471,6 @@ public:
         return total - NodeHeader::SIZE;
     }
 
-    static auto can_merge_siblings(const Node &left, const Node &right, const Cell &separator) -> bool
-    {
-        CALICO_EXPECT_EQ(left.header.is_external, right.header.is_external);
-        auto occupied = accumulate_occupied_space(left, right);
-        if (!left.header.is_external) {
-            occupied += separator.size + sizeof(PageSize);
-        }
-        return occupied <= left.page.size();
-    }
-
     static auto internal_merge_left(Node &left, Node &right, Node &parent, Size index) -> void
     {
         CALICO_EXPECT_TRUE(is_underflowing(left));

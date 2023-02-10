@@ -76,11 +76,12 @@ auto Pager::pin_frame(Id pid) -> Status
 
     if (!m_framer.available()) {
         if (const auto success = try_make_available()) {
-            // We are out of frames! We may need to wait until the WAL has performed another flush. This really shouldn't happen
-            // very often, if at all, since we don't let the WAL get more than a fixed distance behind the pager.
             if (!*success) {
                 logv(m_info_log, "out of frames");
-                return m_wal->flush();
+                // This call blocks, so the WAL will be caught up when it returns. The recursive call to
+                // pin_frame() should succeed.
+                Calico_Try_S(m_wal->flush());
+                return pin_frame(pid);
             }
         } else {
             return success.error();
@@ -282,22 +283,10 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
         return do_acquire(itr->value);
     }
 
-    // Spin until a frame becomes available. This may depend on the WAL writing out more WAL records so that we can flush those pages and
-    // reuse the frames they were in. pin_frame() checks the WAL flushed LSN, which is increased each time the WAL flushes a block.
-    auto status = Status::ok();
-    while ((status = m_wal->status()).is_ok()) {
-        auto s = pin_frame(pid);
-        if (s.is_ok()) {
-            break;
-        }
+    if (auto s = pin_frame(pid); !s.is_ok()) {
+        return tl::make_unexpected(std::move(s));
+    }
 
-        if (!s.is_not_found()) {
-            return tl::make_unexpected(std::move(s));
-        }
-    }
-    if (!status.is_ok()) {
-        return tl::make_unexpected(status);
-    }
     CALICO_EXPECT_TRUE(m_registry.contains(pid));
     return do_acquire(m_registry.get(pid)->value);
 }

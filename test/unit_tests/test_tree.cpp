@@ -453,6 +453,18 @@ INSTANTIATE_TEST_SUITE_P(
         ExternalNodeTestParameters {NON_ROOT_PID, MEDIUM_PAGE_SIZE},
         ExternalNodeTestParameters {NON_ROOT_PID, LARGE_PAGE_SIZE}));
 
+TEST(MaximumKeySizeTest, SizeTableIsCorrect)
+{
+    ASSERT_EQ(101, compute_max_local(MINIMUM_PAGE_SIZE));
+    ASSERT_EQ(229, compute_max_local(MINIMUM_PAGE_SIZE << 1));
+    ASSERT_EQ(485, compute_max_local(MINIMUM_PAGE_SIZE << 2));
+    ASSERT_EQ(997, compute_max_local(MINIMUM_PAGE_SIZE << 3));
+    ASSERT_EQ(2021, compute_max_local(MINIMUM_PAGE_SIZE << 4));
+    ASSERT_EQ(4069, compute_max_local(MINIMUM_PAGE_SIZE << 5));
+    ASSERT_EQ(8165, compute_max_local(MINIMUM_PAGE_SIZE << 6));
+    ASSERT_EQ(MAXIMUM_PAGE_SIZE, MINIMUM_PAGE_SIZE << 6);
+}
+
 struct CellConversionTestParameters {
     bool is_src_external {};
     bool is_dst_external {};
