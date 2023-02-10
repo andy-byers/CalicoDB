@@ -83,10 +83,9 @@ public:
     
     static auto use_100k_values() -> void
     {
-        static constexpr Size KiB {1'024};
-        if (runner->m_value.size() != 100 * KiB) {
-            runner->m_value = std::string(100 * KiB, 'x');
-            runner->m_reads /= KiB;
+        if (runner->m_value.size() != 100'000) {
+            runner->m_value = std::string(100'000, 'x');
+            runner->m_reads /= 1'000;
         }
     }
 
@@ -146,49 +145,6 @@ public:
         }
     }
 
-    static auto db_file_size() -> Size
-    {
-        auto prefix = runner->m_path;
-        if (prefix.back() != '/') {
-            prefix += '/';
-        }
-
-        std::error_code code;
-        const auto size = std::filesystem::file_size(prefix + "data", code);
-        CHECK_FALSE(code);
-
-        return size;
-    }
-
-    static auto set_read_rate_counter(benchmark::State &state)
-    {
-        state.counters["ReadRate"] = benchmark::Counter {
-            double(runner->m_bytes_read),
-            benchmark::Counter::kIsRate,
-            benchmark::Counter::OneK::kIs1024};
-    }
-
-    static auto set_write_rate_counter(benchmark::State &state)
-    {
-        state.counters["WriteRate"] = benchmark::Counter {
-            double(runner->m_bytes_written),
-            benchmark::Counter::kIsRate,
-            benchmark::Counter::OneK::kIs1024};
-    }
-
-    static auto set_file_size_counter(benchmark::State &state)
-    {
-        state.counters["DbFileSize"] = benchmark::Counter {
-            double(runner->db_file_size()),
-            {},
-            benchmark::Counter::OneK::kIs1024};
-    }
-
-    static auto set_commit_counter(benchmark::State &state)
-    {
-        state.counters["Commits"] = double(runner->m_commits);
-    }
-
 private:
     friend auto BM_SequentialRead(benchmark::State &);
     friend auto BM_RandomRead(benchmark::State &);
@@ -241,8 +197,6 @@ auto BM_RandomRead(benchmark::State &state)
 #ifdef RUN_CHECKS
     CHECK_EQ(found, state.iterations());
 #endif // RUN_CHECKS
-
-    Runner->set_read_rate_counter(state);
 }
 BENCHMARK(BM_RandomRead);
 
@@ -265,8 +219,6 @@ auto BM_SequentialRead(benchmark::State &state)
 #ifdef RUN_CHECKS
     CHECK_EQ(found, state.iterations());
 #endif // RUN_CHECKS
-
-    Runner->set_read_rate_counter(state);
 }
 BENCHMARK(BM_SequentialRead);
 
@@ -284,10 +236,6 @@ auto BM_RandomWrite(benchmark::State &state)
         Runner->write(key);
         Benchmark::maybe_commit(i);
     }
-
-    Runner->set_write_rate_counter(state);
-    Runner->set_file_size_counter(state);
-    Runner->set_commit_counter(state);
 }
 BENCHMARK(BM_RandomWrite);
 
@@ -303,10 +251,6 @@ auto BM_SequentialWrite(benchmark::State &state)
         Runner->write(key);
         Benchmark::maybe_commit(i);
     }
-
-    Runner->set_write_rate_counter(state);
-    Runner->set_file_size_counter(state);
-    Runner->set_commit_counter(state);
 }
 BENCHMARK(BM_SequentialWrite);
 
@@ -326,10 +270,6 @@ auto BM_Overwrite(benchmark::State &state)
         Runner->write(key);
         Benchmark::maybe_commit(i);
     }
-
-    Runner->set_write_rate_counter(state);
-    Runner->set_file_size_counter(state);
-    Runner->set_commit_counter(state);
 }
 BENCHMARK(BM_Overwrite);
 
@@ -340,9 +280,9 @@ auto BM_Erase(benchmark::State &state)
 
     std::vector<std::string> erased;
 
+    std::string key;
     Size total {};
     Size i {};
-    Slice key;
 
     for (auto _ : state) {
         state.PauseTiming();
@@ -360,15 +300,12 @@ auto BM_Erase(benchmark::State &state)
 
         state.PauseTiming();
         if (found) {
-            erased.emplace_back(key.to_string());
+            erased.emplace_back(key);
             total++;
         }
         state.ResumeTiming();
     }
-
-    state.counters["RecordsErased"] = benchmark::Counter {
-        double(total),
-        benchmark::Counter::kIsRate};
+    state.counters["RecordsErased"] = double(total);
 }
 BENCHMARK(BM_Erase);
 
@@ -390,8 +327,6 @@ auto BM_IterateForward(benchmark::State &state)
         cursor->next();
     }
     delete cursor;
-
-    Runner->set_read_rate_counter(state);
 }
 BENCHMARK(BM_IterateForward);
 
@@ -414,8 +349,6 @@ auto BM_IterateBackward(benchmark::State &state)
         cursor->previous();
     }
     delete cursor;
-
-    Runner->set_read_rate_counter(state);
 }
 BENCHMARK(BM_IterateBackward);
 
@@ -438,8 +371,6 @@ auto BM_RandomRead100K(benchmark::State &state)
 #ifdef RUN_CHECKS
     CHECK_EQ(found, state.iterations());
 #endif // RUN_CHECKS
-
-    Runner->set_read_rate_counter(state);
 }
 BENCHMARK(BM_RandomRead100K);
 
@@ -463,8 +394,6 @@ auto BM_SequentialRead100K(benchmark::State &state)
 #ifdef RUN_CHECKS
     CHECK_EQ(found, state.iterations());
 #endif // RUN_CHECKS
-
-    Runner->set_read_rate_counter(state);
 }
 BENCHMARK(BM_SequentialRead100K);
 
@@ -483,10 +412,6 @@ auto BM_RandomWrite100K(benchmark::State &state)
         Runner->write(key);
         Benchmark::maybe_commit(i);
     }
-
-    Runner->set_write_rate_counter(state);
-    Runner->set_file_size_counter(state);
-    Runner->set_commit_counter(state);
 }
 BENCHMARK(BM_RandomWrite100K);
 
@@ -503,10 +428,6 @@ auto BM_SequentialWrite100K(benchmark::State &state)
         Runner->write(key);
         Benchmark::maybe_commit(i);
     }
-
-    Runner->set_write_rate_counter(state);
-    Runner->set_file_size_counter(state);
-    Runner->set_commit_counter(state);
 }
 BENCHMARK(BM_SequentialWrite100K);
 

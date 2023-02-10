@@ -880,6 +880,18 @@ TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnMiddlePosition)
     }
 }
 
+TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
+{
+    for (Size i {}; i < 1'000; ++i) {
+        ASSERT_TRUE(tree->insert(Tools::integral_key(i), "v").has_value());
+    }
+    // Replace the small values with very large ones.
+    for (Size i {}; i < 1'000; ++i) {
+        ASSERT_TRUE(tree->insert(Tools::integral_key(i), make_value('v', true)).has_value());
+    }
+    validate();
+}
+
 static auto random_key(BPlusTreeTests &test)
 {
     const auto key_size = test.random.Next<Size>(1, 10);
