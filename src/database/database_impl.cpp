@@ -400,6 +400,7 @@ auto DatabaseImpl::do_commit() -> Status
     wal->advance();
 
     if (m_sync) {
+        Maybe_Set_Error(pager->flush({}));
         Maybe_Set_Error(pager->sync());
     }
 
