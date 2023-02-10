@@ -541,7 +541,7 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 class FramerTests : public InMemoryTest {
 public:
     explicit FramerTests()
-        : framer {*FrameBuffer::open("test/data", storage.get(), 0x100, 8)}
+        : framer {*FrameBuffer::open("test/data", storage.get(), 0x200, 8)}
     {}
 
     ~FramerTests() override = default;
@@ -595,7 +595,7 @@ auto read_from_page(const Page &page, Size size) -> std::string
 class PagerTests : public InMemoryTest {
 public:
     static constexpr Size frame_count {8};
-    static constexpr Size page_size {0x100};
+    static constexpr Size page_size {0x200};
     std::string test_message {"Hello, world!"};
 
     explicit PagerTests()

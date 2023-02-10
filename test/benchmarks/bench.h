@@ -9,7 +9,7 @@
 
 namespace Calico {
 
-static constexpr Size DB_INITIAL_SIZE {10'000};
+static constexpr Size DB_INITIAL_SIZE {100'000};
 static constexpr Size DB_BATCH_SIZE {1'000};
 static constexpr Size DB_PAYLOAD_SIZE {100};
 static constexpr auto DB_VALUE = /* <88 characters> */

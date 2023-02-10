@@ -27,7 +27,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 + Various parameters can be tuned (page size, cache size, etc.)
 
 ## Caveats
-+ Maximum key length is anywhere from 37 B to ~8 KiB, depending on the chosen page size
++ Maximum key length is anywhere from 101 B to ~8 KiB, depending on the chosen page size
 + Maximum value length is ~4 GiB
 + Concurrency control must be provided externally
 

@@ -35,31 +35,6 @@ static auto get_writable_content(Page &page, Size size_limit) -> Span
     return page.span(offset, std::min(size_limit, page.size() - offset));
 }
 
-static auto fix_link_back_refs(Pager &pager, Page &page, Id swap_pid) -> tl::expected<void, Status>
-{
-    (void)pager;(void)page;(void)swap_pid;return {};
-}
-
-extern auto fix_node_back_refs(Pager &pager, Page &page, Id swap_pid) -> tl::expected<void, Status>;
-
-
-auto fix_back_refs(Pager &pager, Page &page, Id swap_pid) -> tl::expected<void, Status>
-{
-    fix_node_back_refs(pager, page, swap_pid);
-    fix_link_back_refs(pager, page, swap_pid);return {};
-//    if (LinkHeader::is_link(page)) {
-//
-//    } else {
-//
-//    }
-//    const auto prev_id = read_prev_id(page);
-//
-//    // We hit the start of an overflow chain.
-//    if (prev_id.is_null()) {
-//
-//    }
-}
-
 auto FreeList::push(Page page) -> void
 {
     CALICO_EXPECT_FALSE(page.id().is_root());

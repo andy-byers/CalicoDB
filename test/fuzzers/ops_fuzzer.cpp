@@ -1,9 +1,5 @@
 /*
-<<<<<<<< HEAD:test/fuzzers/ops_fuzzer.cpp
  * ops_fuzzer.cpp: Runs normal database operations.
-========
- * db_fuzzer.cpp: Checks the happy path.
->>>>>>>> origin/main:test/fuzzers/db_fuzzer.cpp
  */
 
 #include "fuzzer.h"
@@ -25,7 +21,8 @@ enum OperationType {
     TYPE_COUNT
 };
 
-constexpr auto DB_PATH = "/tmp/_db_fuzzer";
+constexpr auto DB_PATH = "__ops_fuzzer";
+constexpr Size DB_MAX_RECORDS {5'000};
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
@@ -33,16 +30,19 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
     CHECK_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
 
     while (size > 1) {
-        std::string property;
-        CHECK_TRUE(db->get_property("calico.count.records", property));
-        const auto record_count = std::stoi(property);
-        const auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
+        std::string prop;
+        CHECK_TRUE(db->get_property("calico.counts", prop));
+        const auto counts = Tools::parse_db_counts(prop);
+        auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
         size--;
 
         std::string key;
         std::string value;
         Cursor *cursor;
 
+        if (counts.records > DB_MAX_RECORDS) {
+            operation_type = ERASE;
+        }
         switch (operation_type) {
             case GET:
                 Tools::expect_non_error(db->get(extract_key(data, size), value));
@@ -71,7 +71,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
             case ITER_FORWARD:
                 cursor = db->new_cursor();
                 cursor->seek_first();
-                CHECK_EQ(cursor->is_valid(), record_count != 0);
+                CHECK_EQ(cursor->is_valid(), counts.records != 0);
                 while (cursor->is_valid()) {
                     cursor->next();
                 }
@@ -81,7 +81,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
             case ITER_REVERSE:
                 cursor = db->new_cursor();
                 cursor->seek_last();
-                CHECK_EQ(cursor->is_valid(), record_count != 0);
+                CHECK_EQ(cursor->is_valid(), counts.records != 0);
                 while (cursor->is_valid()) {
                     cursor->previous();
                 }

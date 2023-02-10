@@ -40,6 +40,7 @@ enum FailureTarget {
 constexpr auto DB_PATH = "test";
 constexpr auto DB_DATA_PATH = "test/data";
 constexpr auto DB_WAL_PREFIX = "test/wal";
+constexpr Size DB_MAX_RECORDS {5'000};
 
 using Set = std::set<std::string>;
 using Map = std::map<std::string, std::string>;
@@ -96,11 +97,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 
     const auto expect_equal_sizes = [&db, &map]
     {
-        std::string record_count;
-        const auto found = db->get_property("calico.count.records", record_count);
-        CHECK_TRUE(found);
-        CHECK_FALSE(record_count.empty());
-        CHECK_EQ(map.size(), std::stoi(record_count));
+        std::string prop;
+        CHECK_TRUE(db->get_property("calico.counts", prop));
+        const auto counts = Tools::parse_db_counts(prop);
+        CHECK_EQ(map.size(), counts.records);
     };
 
     const auto expect_equal_contents = [&db, &map]
@@ -119,7 +119,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
     };
 
     while (size > 1) {
-        const auto operation_type = translate_op(*data++);
+        auto operation_type = translate_op(*data++);
         size--;
 
         if (operation_type == FAIL) {
@@ -163,10 +163,15 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         std::string key;
         std::string value;
 
+        // Limit memory used by the fuzzer.
+        if (operation_type == PUT && map.size() + added.size() > erased.size() + DB_MAX_RECORDS) {
+            operation_type = ERASE;
+        }
+
         switch (operation_type) {
             case PUT:
                 key = extract_key(data, size).to_string();
-                value = extract_value(data, size).to_string();
+                value = extract_value(data, size);
                 if (db->put(key, value).is_ok()) {
                     if (const auto itr = erased.find(key); itr != end(erased)) {
                         erased.erase(itr);
