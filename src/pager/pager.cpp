@@ -78,6 +78,7 @@ auto Pager::pin_frame(Id pid) -> Status
         if (const auto success = try_make_available()) {
             if (!*success) {
                 logv(m_info_log, "out of frames");
+
                 // This call blocks, so the WAL will be caught up when it returns. The recursive call to
                 // pin_frame() should succeed.
                 Calico_Try_S(m_wal->flush());

@@ -419,7 +419,6 @@ auto BM_IterateBackward(benchmark::State &state)
 }
 BENCHMARK(BM_IterateBackward);
 
-
 auto BM_RandomRead100K(benchmark::State &state)
 {
     Runner->use_100k_values();

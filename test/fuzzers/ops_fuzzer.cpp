@@ -1,9 +1,5 @@
 /*
-<<<<<<<< HEAD:test/fuzzers/ops_fuzzer.cpp
  * ops_fuzzer.cpp: Runs normal database operations.
-========
- * db_fuzzer.cpp: Checks the happy path.
->>>>>>>> origin/main:test/fuzzers/db_fuzzer.cpp
  */
 
 #include "fuzzer.h"
@@ -47,7 +43,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         if (counts.records > DB_MAX_RECORDS) {
             operation_type = ERASE;
         }
-
         switch (operation_type) {
             case GET:
                 Tools::expect_non_error(db->get(extract_key(data, size), value));
