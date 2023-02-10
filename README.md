@@ -41,7 +41,24 @@ Dependencies are either downloaded using CMake's FetchContent API, or bundled wi
 
 ## Performance
 Calico DB is optimized for read-heavy workloads with intermittent batches of sequential writes.
-Performance benchmarks are provided in the [`benchmarks`](test/benchmarks) folder.
+Performance benchmarks are run in a modified version of LevelDB's benchmark suite, which can be found [here](https://github.com/andy-byers/leveldb/tree/db_bench_calico).
+Here are some results from an analysis where CalicoDB was benchmarked against SQLite3 and TreeDB.
+A commit was performed on the CalicoDB instance every 1,000 writes.
+
+| Benchmark name           | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
+|:-------------------------|-----------------------------:|----------------------------:|---------------------------:|
+| `fillseq`<sup>*</sup>    |                      542,299 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup> |                      174,095 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>  |                       73,249 |                     173,461 |                    288,684 |
+| `readrandom`             |                      458,505 |                     515,198 |                    413,907 |
+| `readseq`                |                    2,369,668 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`           |                          425 |                       5,215 |                     11,387 |
+| `fillseq100k`            |                          285 |                       6,731 |                      9,560 |
+| `readseq100k`            |                       14,292 |                      49,232 |                     65,557 |
+| `readrand100k`           |                       17,509 |                      10,894 |                     66,028 |
+
+<sup>*</sup> These benchmarks are affected by the fact that we only commit every 1,000 writes.
+For this reason, the SQLite3 benchmarks actually list the results for the much faster batched versions, which commit every 1,000 writes (i.e. `fillseq` is actually `fillseqbatch` for SQLite3).
 
 ## TODO
 1. Get everything code reviewed!
