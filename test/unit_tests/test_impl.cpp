@@ -93,11 +93,7 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {
-    RecordGenerator::Parameters param;
-    param.is_unique=true;
-    param.mean_value_size = 0;
-    param.spread=0;
-    RecordGenerator generator {param};
+    RecordGenerator generator;
     Tools::RandomGenerator random {4 * 1'024 * 1'024};
 
     for (Size iteration {}; iteration < num_groups; ++iteration) {

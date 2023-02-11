@@ -54,15 +54,15 @@ Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name           | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:-------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>    |                      154,895 |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup> |                      100,331 |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>  |                       93,093 |                     173,461 |                    288,684 |
-| `readrandom`             |                      459,770 |                     515,198 |                    413,907 |
-| `readseq`                |                    2,386,635 |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`           |                          356 |                       5,215 |                     11,387 |
-| `fillseq100k`            |                          285 |                       6,731 |                      9,560 |
-| `readseq100k`            |                       18,239 |                      49,232 |                     65,557 |
-| `readrand100k`           |                       20,263 |                      10,894 |                     66,028 |
+| `fillseq`<sup>*</sup>    |                      616,523 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup> |                      261,097 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>  |                      194,704 |                     173,461 |                    288,684 |
+| `readrandom`             |                      472,590 |                     515,198 |                    413,907 |
+| `readseq`                |                    2,469,136 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`           |                        1,724 |                       5,215 |                     11,387 |
+| `fillseq100k`            |                          864 |                       6,731 |                      9,560 |
+| `readseq100k`            |                       18,916 |                      49,232 |                     65,557 |
+| `readrand100k`           |                       20,188 |                      10,894 |                     66,028 |
 
 <sup>*</sup> These benchmarks are affected by the fact that we don't commit.
 The call to `Database::commit()` will flush pages from older transactions, advance the WAL to a new segment, and possibly remove obsolete WAL segments, so it has quite a bit of overhead.
