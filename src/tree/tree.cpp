@@ -382,7 +382,6 @@ public:
     [[nodiscard]]
     static auto try_fix_by_rotation(BPlusTree &tree, Node &node, Node &parent) -> tl::expected<bool, Status>
     {
-        return false;
         CALICO_EXPECT_TRUE(node.page.is_writable());
         CALICO_EXPECT_TRUE(parent.page.is_writable());
 
