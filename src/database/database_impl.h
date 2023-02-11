@@ -68,7 +68,7 @@ private:
     std::string m_db_prefix;
     std::string m_wal_prefix;
     std::unique_ptr<Recovery> m_recovery;
-    std::unique_ptr<LogScratchManager> m_scratch;
+    std::string m_scratch;
     Storage *m_storage {};
     Logger *m_info_log {};
     Size m_txn_size {};

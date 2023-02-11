@@ -569,7 +569,7 @@ public:
     BPlusTreeTests()
         : param {GetParam()},
           scratch(param.page_size, '\x00'),
-          log_scratch {wal_scratch_size(param.page_size), 32}
+          log_scratch(wal_scratch_size(param.page_size), '\x00')
     {}
 
     auto SetUp() -> void override
@@ -639,7 +639,7 @@ public:
     }
 
     BPlusTreeTestParameters param;
-    LogScratchManager log_scratch;
+    std::string log_scratch;
     Status status;
     bool in_xact {true};
     Lsn commit_lsn;

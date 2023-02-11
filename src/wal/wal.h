@@ -13,7 +13,6 @@
 #include "utils/expected.hpp"
 #include "utils/scratch.h"
 #include "utils/types.h"
-#include "utils/worker.h"
 
 namespace Calico {
 
@@ -30,7 +29,6 @@ public:
         Storage *store {};
         Size page_size {};
         Size segment_cutoff {};
-        Size writer_capacity {};
     };
 
     using Ptr = std::unique_ptr<WriteAheadLog>;
@@ -79,19 +77,10 @@ private:
     std::string m_reader_tail;
     std::string m_writer_tail;
     Size m_segment_cutoff {};
-    Size m_buffer_count {};
     Size m_bytes_written {};
-
-    struct AdvanceToken {};
-    struct FlushToken {};
-
-    using Event = std::variant<WalPayloadIn, AdvanceToken, FlushToken>;
-
-    auto run_task(Event event) -> void;
 
     std::unique_ptr<WalWriter> m_writer;
     std::unique_ptr<WalCleanup> m_cleanup;
-    std::unique_ptr<Worker<Event>> m_worker;
 };
 
 } // namespace Calico

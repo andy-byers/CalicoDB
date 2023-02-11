@@ -130,6 +130,7 @@ auto Recovery::finish_recovery() -> Status
 {
     Calico_Try_S(m_pager->flush({}));
     Calico_Try_S(m_wal->truncate(*m_commit_lsn));
+    Calico_Try_S(m_wal->start_workers());
     m_wal->cleanup(m_pager->recovery_lsn());
     return Status::ok();
 }

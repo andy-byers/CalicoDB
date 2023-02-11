@@ -243,7 +243,7 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
     if (*m_in_txn && lsn <= *m_commit_lsn) {
         const auto next_lsn = m_wal->current_lsn();
         m_wal->log(encode_full_image_payload(
-            next_lsn, page.id(), page.view(0), *m_scratch->get()));
+            next_lsn, page.id(), page.view(0), *m_scratch));
         write_page_lsn(page, next_lsn);
     }
 }
@@ -307,7 +307,7 @@ auto Pager::release(Page page) -> void
         write_page_lsn(page, next_lsn);
         m_wal->log(encode_deltas_payload(
             next_lsn, page.id(), page.view(0),
-            page.deltas(), *m_scratch->get()));
+            page.deltas(), *m_scratch));
     }
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
 

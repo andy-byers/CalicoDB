@@ -12,11 +12,9 @@ WriteAheadLog::WriteAheadLog(const Parameters &param)
       m_reader_data(wal_scratch_size(param.page_size), '\x00'),
       m_reader_tail(wal_block_size(param.page_size), '\x00'),
       m_writer_tail(wal_block_size(param.page_size), '\x00'),
-      m_segment_cutoff {param.segment_cutoff},
-      m_buffer_count {param.writer_capacity}
+      m_segment_cutoff {param.segment_cutoff}
 {
     CALICO_EXPECT_NE(m_storage, nullptr);
-    CALICO_EXPECT_NE(m_buffer_count, 0);
     CALICO_EXPECT_NE(m_segment_cutoff, 0);
 }
 
@@ -56,8 +54,6 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
 
 auto WriteAheadLog::close() -> Status
 {
-    // ~Worker<T>() will block until the thread is joined.
-    m_worker.reset();
     m_cleanup.reset();
     if (m_writer) {
         std::move(*m_writer).destroy();
@@ -94,29 +90,7 @@ auto WriteAheadLog::start_workers() -> Status
         return Status::system_error("cannot allocate cleanup object: out of memory");
     }
 
-    m_worker = std::unique_ptr<Worker<Event>> {
-        new(std::nothrow) Worker<Event> {[this](auto event) {
-            run_task(std::move(event));
-        },
-        m_buffer_count}};
-    if (m_worker == nullptr) {
-        return Status::system_error("cannot allocate task manager object: out of memory");
-    }
     return Status::ok();
-}
-
-auto WriteAheadLog::run_task(Event event) -> void
-{
-    if (std::holds_alternative<WalPayloadIn>(event)) {
-        m_writer->write(std::get<WalPayloadIn>(event));
-    } else if (std::holds_alternative<FlushToken>(event)) {
-        m_writer->flush();
-    } else {
-        CALICO_EXPECT_TRUE((std::holds_alternative<AdvanceToken>(event)));
-        m_writer->advance();
-    }
-
-    m_cleanup->cleanup();
 }
 
 auto WriteAheadLog::flushed_lsn() const -> Lsn
@@ -137,20 +111,20 @@ auto WriteAheadLog::log(WalPayloadIn payload) -> void
     CALICO_EXPECT_EQ(payload.lsn(), m_last_lsn);
 
     m_bytes_written += payload.data().size() + sizeof(Lsn);
-    m_worker->dispatch(payload);
+    m_writer->write(payload);
 }
 
 auto WriteAheadLog::flush() -> Status
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
-    m_worker->dispatch(FlushToken {}, true);
+    m_writer->flush();
     return m_error.get();
 }
 
 auto WriteAheadLog::advance() -> void
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
-    m_worker->dispatch(AdvanceToken {}, true);
+    m_writer->advance();
 }
 
 auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
@@ -300,6 +274,7 @@ auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Stat
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void
 {
     m_recovery_lsn.store(recovery_lsn);
+    m_cleanup->cleanup();
 }
 
 auto WriteAheadLog::truncate(Lsn lsn) -> Status

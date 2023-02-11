@@ -24,7 +24,7 @@ public:
     struct Parameters {
         std::string prefix;
         Storage *storage {};
-        LogScratchManager *scratch {};
+        std::string *scratch {};
         WriteAheadLog *wal {};
         Logger *info_log {};
         Status *status {};
@@ -67,7 +67,7 @@ private:
     Lsn *m_commit_lsn {};
     bool *m_in_txn {};
     Status *m_status {};
-    LogScratchManager *m_scratch {};
+    std::string *m_scratch {};
     WriteAheadLog *m_wal {};
     Logger *m_info_log {};
 };

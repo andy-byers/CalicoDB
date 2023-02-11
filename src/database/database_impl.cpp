@@ -95,20 +95,14 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     }
 
     max_key_length = compute_max_local(sanitized.page_size);
+    m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
     {
-        const auto scratch_size = wal_scratch_size(sanitized.page_size);
-        const auto buffer_count = sanitized.wal_buffer_size / scratch_size;
-
-        m_scratch = std::make_unique<LogScratchManager>(
-            scratch_size, buffer_count);
-
         auto r = WriteAheadLog::open({
             m_wal_prefix,
             m_storage,
             sanitized.page_size,
-            buffer_count * 32,
-            buffer_count,
+            256,
         });
         if (!r.has_value()) {
             return r.error();
@@ -120,7 +114,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         auto r = Pager::open({
             m_db_prefix,
             m_storage,
-            m_scratch.get(),
+            &m_scratch,
             wal.get(),
             m_info_log,
             &m_status,
@@ -164,7 +158,6 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         logv(m_info_log, "ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         Calico_Try_S(ensure_consistency_on_startup());
-        Calico_Try_S(wal->start_workers());
     }
     logv(m_info_log, "pager recovery lsn is ", pager->recovery_lsn().value);
     logv(m_info_log, "wal flushed lsn is ", wal->flushed_lsn().value);
@@ -395,7 +388,7 @@ auto DatabaseImpl::do_commit() -> Status
     Calico_Try_S(save_state());
 
     const auto lsn = wal->current_lsn();
-    wal->log(encode_commit_payload(lsn, *m_scratch->get()));
+    wal->log(encode_commit_payload(lsn, m_scratch));
     Calico_Try_S(wal->flush());
     wal->advance();
 

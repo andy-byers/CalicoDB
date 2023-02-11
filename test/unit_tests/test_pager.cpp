@@ -593,7 +593,7 @@ public:
 
     explicit PagerTests()
         : wal {std::make_unique<DisabledWriteAheadLog>()},
-          scratch {wal_scratch_size(page_size), 32}
+          scratch(wal_scratch_size(page_size), '\x00')
     {
         auto r = Pager::open({
             PREFIX,
@@ -666,7 +666,7 @@ public:
     Lsn commit_lsn;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
-    LogScratchManager scratch;
+    std::string scratch;
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)

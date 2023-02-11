@@ -6,7 +6,6 @@
 #include "record.h"
 #include "utils/expected.hpp"
 #include "utils/logging.h"
-#include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include <map>
