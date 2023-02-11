@@ -105,12 +105,6 @@ auto Pager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
     return m_dirty.remove(token);
 }
 
-auto Pager::set_recovery_lsn(Lsn lsn) -> void
-{
-    CALICO_EXPECT_LE(m_recovery_lsn, lsn);
-    m_recovery_lsn = lsn;
-}
-
 auto Pager::sync() -> Status
 {
     return m_framer.sync();
@@ -165,23 +159,13 @@ auto Pager::flush(Lsn target_lsn) -> Status
 
     // We don't have any pages in memory with LSNs below this value.
     if (m_recovery_lsn < target_lsn) {
-        set_recovery_lsn(target_lsn);
+        m_recovery_lsn = target_lsn;
     }
     return Status::ok();
 }
 
 auto Pager::recovery_lsn() -> Id
 {
-    auto lowest = MAX_ID;
-    for (auto entry: m_dirty) { // TODO
-        if (lowest > entry.record_lsn) {
-            lowest = entry.record_lsn;
-        }
-    }
-    // NOTE: Recovery LSN is not always up-to-date. We update it here and in flush(), making sure it is monotonically increasing.
-    if (lowest != MAX_ID && m_recovery_lsn < lowest) {
-        set_recovery_lsn(lowest);
-    }
     return m_recovery_lsn;
 }
 
@@ -325,7 +309,7 @@ auto Pager::save_state(FileHeader &header) -> void
 auto Pager::load_state(const FileHeader &header) -> void
 {
     if (m_recovery_lsn.value < header.recovery_lsn.value) {
-        set_recovery_lsn(Id {header.recovery_lsn});
+        m_recovery_lsn = header.recovery_lsn;
     }
     m_framer.load_state(header);
 }

@@ -57,7 +57,6 @@ private:
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageCache::Entry &entry) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
-    auto set_recovery_lsn(Lsn lsn) -> void;
 
     FrameBuffer m_framer;
     PageList m_dirty;

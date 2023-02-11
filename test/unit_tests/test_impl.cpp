@@ -59,7 +59,7 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
     ASSERT_TRUE(storage->file_exists(prefix + "data").is_not_found());
     ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
-//
+
 //TEST(ExpensiveTests, OneMillionRecords)
 //{
 //    const auto path = "/tmp/calico_one_million";

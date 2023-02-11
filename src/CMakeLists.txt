@@ -60,5 +60,3 @@ target_compile_definitions(calico
         PUBLIC CALICO_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
         CALICO_VERSION_MINOR=${PROJECT_VERSION_MINOR}
         CALICO_VERSION_PATCH=${PROJECT_VERSION_PATCH})
-target_link_libraries(calico
-        PRIVATE pthread)

@@ -56,7 +56,7 @@ auto Recovery::finish_abort() -> Status
     Calico_Try_S(m_wal->truncate(*m_commit_lsn));
 
     if (m_pager->recovery_lsn() > *m_commit_lsn) {
-        m_pager->set_recovery_lsn(*m_commit_lsn); // TODO
+        m_pager->m_recovery_lsn = *m_commit_lsn;
     }
     return Status::ok();
 }
