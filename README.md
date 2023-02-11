@@ -42,8 +42,15 @@ Dependencies are either downloaded using CMake's FetchContent API, or bundled wi
 ## Performance
 Calico DB is optimized for read-heavy workloads with intermittent batches of sequential writes.
 Performance benchmarks are run in a modified version of LevelDB's benchmark suite, which can be found [here](https://github.com/andy-byers/leveldb/tree/db_bench_calico).
-Here are some results from an analysis where CalicoDB was benchmarked against SQLite3 and TreeDB.
-A commit was performed on the CalicoDB instance every 1,000 writes.
+These results are from an analysis where CalicoDB was benchmarked against SQLite3 and TreeDB.
+`db_bench` prints the following line describing the CPU and cache:
+```
+CPU:            16 * 12th Gen Intel(R) Core(TM) i5-12600K
+CPUCache:       20480 KB
+```
+
+A commit was performed on the CalicoDB instance every 1,000 writes. 
+Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name           | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:-------------------------|-----------------------------:|----------------------------:|---------------------------:|
