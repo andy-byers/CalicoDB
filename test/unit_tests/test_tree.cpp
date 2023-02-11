@@ -892,6 +892,34 @@ TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
     validate();
 }
 
+TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnRight)
+{
+    // Populate the internal nodes with small keys.
+    for (unsigned i {}; i < 10'000; ++i) {
+        char key[3] {};
+        put_u16(key, i);
+        ASSERT_TRUE(tree->insert({key, 2}, "v").has_value());
+    }
+    // Overflow with a bunch of large keys.
+    for (unsigned i {}; i < 10'000; ++i) {
+        ASSERT_TRUE(tree->insert(Tools::integral_key<100>(i), "v").has_value());
+    }
+    validate();
+}
+
+TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnLeft)
+{
+    for (unsigned i {}; i < 10'000; ++i) {
+        char key[3] {};
+        put_u16(key, 9'999 - i);
+        ASSERT_TRUE(tree->insert({key, 2}, "v").has_value());
+    }
+    for (unsigned i {}; i < 10'000; ++i) {
+        ASSERT_TRUE(tree->insert(Tools::integral_key<100>(9'999 - i), "v").has_value());
+    }
+    validate();
+}
+
 static auto random_key(BPlusTreeTests &test)
 {
     const auto key_size = test.random.Next<Size>(1, 10);

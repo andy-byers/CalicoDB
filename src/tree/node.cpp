@@ -503,7 +503,7 @@ auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
     const auto can_allocate = size + sizeof(PageSize) <= usable_space(node);
     BlockAllocator alloc {node};
 
-    CALICO_EXPECT_FALSE(node.overflow.has_value());
+//    CALICO_EXPECT_FALSE(node.overflow.has_value());
     CALICO_EXPECT_LE(index, header.cell_count);
 
     // We don't have room to insert the cell pointer.

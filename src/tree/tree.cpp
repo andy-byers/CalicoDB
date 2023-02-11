@@ -128,6 +128,7 @@ public:
             }
 
             const auto next_id = read_child_id(node, itr.index() + exact);
+            CALICO_EXPECT_NE(next_id, node.page.id()); // Infinite loop.
             release_node(tree, std::move(node));
             Calico_Put_R(node, acquire_node(tree, next_id));
         }
@@ -379,6 +380,57 @@ public:
     }
 
     [[nodiscard]]
+    static auto try_fix_by_rotation(BPlusTree &tree, Node &node, Node &parent) -> tl::expected<bool, Status>
+    {
+        CALICO_EXPECT_TRUE(node.page.is_writable());
+        CALICO_EXPECT_TRUE(parent.page.is_writable());
+
+        // TODO: Special cases.
+        if (node.overflow_index == 0 || node.overflow_index == node.header.cell_count) {
+            return false;
+        }
+
+        Node::Iterator itr {parent};
+        itr.seek(read_key(*node.overflow)); // Could be any key in node.
+
+        if (itr.index() > 0) {
+            Calico_New_R(left, acquire_node(tree, read_child_id(parent, itr.index() - 1)));
+            if (usable_space(left) > max_usable_space(left) / 2) {
+                const auto first = read_cell(node, 0);
+                if (first.size >= node.overflow->size) {
+                    tree.m_pager->upgrade(left.page);
+                    Calico_Try_R(internal_rotate_left(tree, parent, left, node, itr.index() - 1));
+                    write_cell(node, node.overflow_index - 1, *std::exchange(node.overflow, std::nullopt));
+                    CALICO_EXPECT_FALSE(is_overflowing(node));
+                    CALICO_EXPECT_FALSE(is_overflowing(left));
+                    release_node(tree, std::move(left));
+                    return true;
+                }
+                // TODO: Node has overflowed and is internal so it should have at least 4 cells, not including the overflow cell. At least it's
+                //       more than 2. We should be able to iterate with an integer index starting at 1, checking if (a) the separator + the 0th
+                //       cell + all the cells up to the i-1th cell can fit in "left", until we can fit the overflow cell in "node".
+            }
+            release_node(tree, std::move(left));
+        }
+        if (itr.index() < parent.header.cell_count) {
+            Calico_New_R(right, acquire_node(tree, read_child_id(parent, itr.index() + 1)));
+            if (usable_space(right) > max_usable_space(right) / 2) {
+                if (read_cell(node, node.header.cell_count - 1).size >= node.overflow->size) {
+                    tree.m_pager->upgrade(right.page);
+                    Calico_Try_R(internal_rotate_right(tree, parent, node, right, itr.index()));
+                    write_cell(node, node.overflow_index, *std::exchange(node.overflow, std::nullopt));
+                    CALICO_EXPECT_FALSE(is_overflowing(node));
+                    CALICO_EXPECT_FALSE(is_overflowing(right));
+                    release_node(tree, std::move(right));
+                    return true;
+                }
+            }
+            release_node(tree, std::move(right));
+        }
+        return false;
+    }
+
+    [[nodiscard]]
     static auto split_non_root(BPlusTree &tree, Node node) -> tl::expected<Node, Status>
     {
         CALICO_EXPECT_FALSE(node.page.id().is_root());
@@ -386,6 +438,15 @@ public:
         CALICO_EXPECT_TRUE(is_overflowing(node));
 
         Calico_New_R(parent, acquire_node(tree, node.header.parent_id, true));
+        if (!node.header.is_external) {
+            // TODO: Needs benchmarking. Should be worthwhile, as internal nodes are likely to be in, and stay in, the cache, so trying to rotate into
+            //       one of them should be fast.
+            Calico_New_R(fixed, try_fix_by_rotation(tree, node, parent));
+            if (fixed) {
+                release_node(tree, std::move(node));
+                return parent;
+            }
+        }
         Calico_New_R(sibling, allocate_node(tree, node.header.is_external));
 
         Cell separator;
@@ -401,7 +462,6 @@ public:
         }
         Node::Iterator itr {parent};
         itr.seek(read_key(separator));
-
         write_cell(parent, itr.index(), separator);
 
         if (parent.overflow) {
@@ -893,26 +953,21 @@ auto BPlusTree::load_state(const FileHeader &header) -> void
     m_free_list.m_head = header.free_list_id;
 }
 
-/* Routine for fixing back references. For a given page with page X, all pages containing references to X
- * must be updated so that X can replace a free list page during vacuum. To this end, every reference between
- * pages must be two-way. This requirement is already satisfied for node pages, since we keep both left and
- * right sibling links in the external nodes. For overflow and free list pages, we just keep a back pointer.
- */
-[[nodiscard]]
-auto fix_node_back_refs(Pager &pager, Page &page, Id swap_pid) -> tl::expected<void, Status>
-{
-    (void)pager;(void)page;(void)swap_pid;return {};
-}
-
 using Callback = std::function<void(Node &, Size)>;
 
 static auto traverse_inorder_helper(BPlusTree &tree, Node node, const Callback &callback) -> void
 {
     for (Size index {}; index <= node.header.cell_count; ++index) {
         if (!node.header.is_external) {
-            auto next = BPlusTreeInternal::acquire_node(tree, read_child_id(node, index), false);
+            const auto saved_id = node.page.id();
+            const auto next_id = read_child_id(node, index);
+            // "node" must be released while we traverse, otherwise we are limited in how long of a traversal we can
+            // perform by the number of pager frames.
+            BPlusTreeInternal::release_node(tree, std::move(node));
+            auto next = BPlusTreeInternal::acquire_node(tree, next_id, false);
             CALICO_EXPECT_TRUE(next.has_value());
             traverse_inorder_helper(tree, std::move(*next), callback);
+            node = BPlusTreeInternal::acquire_node(tree, saved_id, false).value();
         }
         if (index < node.header.cell_count) {
             callback(node, index);

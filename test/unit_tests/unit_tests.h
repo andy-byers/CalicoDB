@@ -159,7 +159,7 @@ public:
     [[nodiscard]]
     auto flushed_lsn() const -> Id override
     {
-        return Id::null();
+        return {std::numeric_limits<Size>::max()};
     }
 
     [[nodiscard]]

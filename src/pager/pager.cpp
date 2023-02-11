@@ -72,6 +72,20 @@ auto Pager::hit_ratio() const -> double
 
 auto Pager::pin_frame(Id pid) -> Status
 {
+    if (auto s = do_pin_frame(pid); s.is_not_found()) {
+        logv(m_info_log, s.what().data());
+
+        // This call blocks, so the WAL will be caught up when it returns. The recursive call to
+        // pin_frame() should succeed.
+        Calico_Try_S(m_wal->flush());
+        return do_pin_frame(pid);
+    } else {
+        return s;
+    }
+}
+
+auto Pager::do_pin_frame(Id pid) -> Status
+{
     CALICO_EXPECT_FALSE(m_registry.contains(pid));
 
     if (!m_framer.available()) {
@@ -82,7 +96,7 @@ auto Pager::pin_frame(Id pid) -> Status
                 // This call blocks, so the WAL will be caught up when it returns. The recursive call to
                 // pin_frame() should succeed.
                 Calico_Try_S(m_wal->flush());
-                return pin_frame(pid);
+                return Status::not_found("out of frames");
             }
         } else {
             return success.error();
