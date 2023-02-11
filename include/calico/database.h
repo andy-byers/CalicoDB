@@ -21,8 +21,7 @@ enum class LogLevel {
 
 struct Options {
     Size page_size {0x2000};
-    Size page_cache_size {};
-    Size wal_buffer_size {};
+    Size cache_size {};
     Slice wal_prefix;
     LogLevel log_level {LogLevel::OFF};
     Logger *info_log {};

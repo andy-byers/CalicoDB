@@ -167,8 +167,11 @@ public:
         if (!node.header.is_external) {
             const auto parent_id = node.page.id();
             const auto fix_connection = [&](Id child_id) -> tl::expected<void, Status> {
-                Calico_New_R(child, acquire_node(tree, child_id, true));
-                child.header.parent_id = parent_id;
+                Calico_New_R(child, acquire_node(tree, child_id, false));
+                if (child.header.parent_id != parent_id) {
+                    tree.m_pager->upgrade(child.page);
+                    child.header.parent_id = parent_id;
+                }
                 release_node(tree, std::move(child));
                 return {};
             };

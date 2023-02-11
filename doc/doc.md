@@ -68,7 +68,7 @@ assert(s2.starts_with("ab"));
 const Calico::Options options {
     // Use pages of size 2 KiB, a 2 MiB page cache, and a 1 MiB WAL write buffer.
     .page_size = 0x2000,
-    .page_cache_size = 0x200000,
+    .cache_size = 0x200000,
     .wal_buffer_size = 0x100000,
     
     // Store the WAL segments in a separate location. The directory calico_wal must already exist.

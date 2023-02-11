@@ -22,27 +22,19 @@ static auto sanitize_options(const Options &options) -> Options
     static constexpr Size KiB {1'024};
 
     const auto page_size = options.page_size;
-    const auto scratch_size = wal_scratch_size(page_size);
-    auto page_cache_size = options.page_cache_size;
-    auto wal_buffer_size = options.wal_buffer_size;
+    auto cache_size = options.cache_size;
 
     if (options.page_size <= 2 * KiB) {
-        page_cache_size = 2048 * page_size;
-        wal_buffer_size = 1024 * scratch_size;
+        cache_size = 2048 * page_size;
     } else if (options.page_size <= 16 * KiB) {
-        page_cache_size = 256 * page_size;
-        wal_buffer_size = 128 * scratch_size;
+        cache_size = 256 * page_size;
     } else {
-        page_cache_size = 128 * page_size;
-        wal_buffer_size = 64 * scratch_size;
+        cache_size = 128 * page_size;
     }
 
     auto sanitized = options;
-    if (sanitized.page_cache_size == 0) {
-        sanitized.page_cache_size = page_cache_size;
-    }
-    if (sanitized.wal_buffer_size == 0) {
-        sanitized.wal_buffer_size = wal_buffer_size;
+    if (sanitized.cache_size == 0) {
+        sanitized.cache_size = cache_size;
     }
     return sanitized;
 }
@@ -120,7 +112,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
             &m_status,
             &m_commit_lsn,
             &m_in_txn,
-            sanitized.page_cache_size / sanitized.page_size,
+            sanitized.cache_size / sanitized.page_size,
             sanitized.page_size,
         });
         if (!r.has_value()) {
@@ -511,12 +503,8 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         return tl::make_unexpected(Status::invalid_argument("page size is not a power of 2"));
     }
 
-    if (options.page_cache_size < options.page_size * MINIMUM_BUFFER_COUNT) {
+    if (options.cache_size < options.page_size * MINIMUM_BUFFER_COUNT) {
         return tl::make_unexpected(Status::invalid_argument("page cache is too small"));
-    }
-
-    if (options.wal_buffer_size < wal_scratch_size(options.page_size) * MINIMUM_BUFFER_COUNT) {
-        return tl::make_unexpected(Status::invalid_argument("wal write buffer is too small"));
     }
 
     if (auto s = store.create_directory(prefix); !s.is_ok() && !s.is_logic_error()) {

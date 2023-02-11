@@ -19,8 +19,7 @@ public:
     BasicDatabaseTests()
     {
         options.page_size = 0x200;
-        options.page_cache_size = options.page_size * frame_count;
-        options.wal_buffer_size = options.page_cache_size;
+        options.cache_size = options.page_size * frame_count;
         options.log_level = LogLevel::OFF;
         options.storage = storage.get();
     }
@@ -165,8 +164,7 @@ public:
     explicit TestDatabase(Storage &storage)
     {
         options.page_size = 0x200;
-        options.page_cache_size = 32 * options.page_size;
-        options.wal_buffer_size = 32 * options.page_size;
+        options.cache_size = 32 * options.page_size;
         options.storage = &storage;
 
         const auto s = reopen();
