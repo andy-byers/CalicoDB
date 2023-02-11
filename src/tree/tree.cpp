@@ -128,6 +128,7 @@ public:
             }
 
             const auto next_id = read_child_id(node, itr.index() + exact);
+            CALICO_EXPECT_NE(next_id, node.page.id()); // Infinite loop.
             release_node(tree, std::move(node));
             Calico_Put_R(node, acquire_node(tree, next_id));
         }
@@ -381,6 +382,7 @@ public:
     [[nodiscard]]
     static auto try_fix_by_rotation(BPlusTree &tree, Node &node, Node &parent) -> tl::expected<bool, Status>
     {
+        return false;
         CALICO_EXPECT_TRUE(node.page.is_writable());
         CALICO_EXPECT_TRUE(parent.page.is_writable());
 
@@ -396,7 +398,7 @@ public:
             Calico_New_R(left, acquire_node(tree, read_child_id(parent, itr.index() - 1)));
             if (usable_space(left) > 3 * max_usable_space(left) / 4) { // TODO: This restriction should be relaxed.
                 if (read_cell(node, 0).size >= node.overflow->size) {    // TODO: We should try to rotate multiple times if necessary.
-                    tree.m_pager->upgrade(left.page);
+                    tree.m_pager->upgrade(left.page);                          // TODO: It's worth it to spend a decent amount of time determining a good splitting pattern it seems.
                     Calico_Try_R(internal_rotate_left(tree, parent, left, node, itr.index() - 1));
                     write_cell(node, node.overflow_index - 1, *std::exchange(node.overflow, std::nullopt));
                     CALICO_EXPECT_FALSE(is_overflowing(node));
@@ -954,9 +956,15 @@ static auto traverse_inorder_helper(BPlusTree &tree, Node node, const Callback &
 {
     for (Size index {}; index <= node.header.cell_count; ++index) {
         if (!node.header.is_external) {
-            auto next = BPlusTreeInternal::acquire_node(tree, read_child_id(node, index), false);
+            const auto saved_id = node.page.id();
+            const auto next_id = read_child_id(node, index);
+            // "node" must be released while we traverse, otherwise we are limited in how long of a traversal we can
+            // perform by the number of pager frames.
+            BPlusTreeInternal::release_node(tree, std::move(node));
+            auto next = BPlusTreeInternal::acquire_node(tree, next_id, false);
             CALICO_EXPECT_TRUE(next.has_value());
             traverse_inorder_helper(tree, std::move(*next), callback);
+            node = BPlusTreeInternal::acquire_node(tree, saved_id, false).value();
         }
         if (index < node.header.cell_count) {
             callback(node, index);
