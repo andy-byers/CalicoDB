@@ -151,7 +151,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
             auto s = m_framer.write_back(frame_id);
 
             // Advance to the next dirty list entry.
-            itr = clean_page(entry); // TODO: We will clean the page regardless of error.
+            itr = clean_page(entry);
             Calico_Try_S(s);
         } else {
             itr = next(itr);
@@ -173,7 +173,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
 auto Pager::recovery_lsn() -> Id
 {
     auto lowest = MAX_ID;
-    for (auto entry: m_dirty) {
+    for (auto entry: m_dirty) { // TODO
         if (lowest > entry.record_lsn) {
             lowest = entry.record_lsn;
         }
@@ -302,6 +302,10 @@ auto Pager::upgrade(Page &page) -> void
 
 auto Pager::release(Page page) -> void
 {
+    CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
+    CALICO_EXPECT_TRUE(m_registry.contains(page.id()));
+    auto [index, token] = m_registry.get(page.id())->value;
+
     if (page.is_writable() && *m_in_txn) {
         const auto next_lsn = m_wal->current_lsn();
         write_page_lsn(page, next_lsn);
@@ -309,13 +313,7 @@ auto Pager::release(Page page) -> void
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch));
     }
-    CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
-
-    // This page must already be acquired.
-    auto itr = m_registry.get(page.id());
-    CALICO_EXPECT_NE(itr, m_registry.end());
-    auto &entry = itr->value;
-    m_framer.unref(entry.index, std::move(page));
+    m_framer.unref(index, std::move(page));
 }
 
 auto Pager::save_state(FileHeader &header) -> void

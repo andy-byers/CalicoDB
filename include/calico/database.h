@@ -26,7 +26,6 @@ struct Options {
     LogLevel log_level {LogLevel::OFF};
     Logger *info_log {};
     Storage *storage {};
-    bool sync {};
 };
 
 class Database {

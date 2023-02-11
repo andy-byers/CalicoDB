@@ -7,31 +7,32 @@ auto WalCleanup::cleanup() -> void
 {
     const auto limit = m_limit->load();
 
-    const auto first = m_set->first();
-    if (first.is_null()) {
-        return;
-    }
+    for (; ; ) {
+        const auto id = m_set->first();
+        if (id.is_null()) {
+            return;
+        }
+        const auto next_id = m_set->id_after(id);
+        if (next_id.is_null()) {
+            return;
+        }
 
-    const auto second = m_set->id_after(first);
-    if (second.is_null()) {
-        return;
-    }
+        auto lsn = read_first_lsn(*m_storage, m_prefix, next_id, *m_set);
+        if (!lsn.has_value()) {
+            m_error->set(std::move(lsn.error()));
+            return;
+        }
 
-    auto first_lsn = read_first_lsn(*m_storage, m_prefix, second, *m_set);
-    if (!first_lsn.has_value()) {
-        m_error->set(std::move(first_lsn.error()));
-        return;
-    }
-
-    if (*first_lsn > limit) {
-        return;
-    }
-
-    auto s = m_storage->remove_file(encode_segment_name(m_prefix, first));
-    if (s.is_ok()) {
-        m_set->remove_before(second);
-    } else {
-        m_error->set(std::move(s));
+        if (*lsn > limit) {
+            return;
+        }
+        auto s = m_storage->remove_file(encode_segment_name(m_prefix, id));
+        if (s.is_ok()) {
+            m_set->remove_before(next_id);
+        } else {
+            m_error->set(std::move(s));
+            return;
+        }
     }
 }
 

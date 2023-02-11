@@ -59,6 +59,37 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
     ASSERT_TRUE(storage->file_exists(prefix + "data").is_not_found());
     ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
+//
+//TEST(ExpensiveTests, OneMillionRecords)
+//{
+//    const auto path = "/tmp/calico_one_million";
+//    std::filesystem::remove_all(path);
+//
+//    Database *db;
+//    expect_ok(Database::open(path, {}, &db));
+//
+//    const Slice value {"value"};
+//    for (Size i {}; i < 1'000'000; ++i) {
+//        expect_ok(db->put(Tools::integral_key(i), value));
+//        if (i % 10'000 == 9'999) {
+//            expect_ok(db->commit());
+//        }
+//    }
+//    expect_ok(db->commit());
+//
+//    auto *cursor = db->new_cursor();
+//    cursor->seek_first();
+//    for (Size i {}; i < 1'000'000; ++i) {
+//        expect_ok(cursor->status());
+//        ASSERT_EQ(cursor->key(), Tools::integral_key(i));
+//        ASSERT_EQ(cursor->value(), value);
+//        cursor->next();
+//    }
+//    delete cursor;
+//    delete db;
+//
+////    expect_ok(Database::destroy(path, {}));
+//}
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {

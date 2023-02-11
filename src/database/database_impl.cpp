@@ -51,7 +51,6 @@ auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
     if (m_wal_prefix.empty()) {
         m_wal_prefix = m_db_prefix + "wal-";
     }
-    m_sync = sanitized.sync;
 
     // Any error during initialization is fatal.
     return do_open(sanitized);
@@ -384,11 +383,7 @@ auto DatabaseImpl::do_commit() -> Status
     Calico_Try_S(wal->flush());
     wal->advance();
 
-    if (m_sync) {
-        Maybe_Set_Error(pager->flush({}));
-        Maybe_Set_Error(pager->sync());
-    }
-
+    Maybe_Set_Error(pager->flush(m_commit_lsn));
     wal->cleanup(pager->recovery_lsn());
     m_commit_lsn = lsn;
 
