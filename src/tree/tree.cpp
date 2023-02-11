@@ -167,8 +167,11 @@ public:
         if (!node.header.is_external) {
             const auto parent_id = node.page.id();
             const auto fix_connection = [&](Id child_id) -> tl::expected<void, Status> {
-                Calico_New_R(child, acquire_node(tree, child_id, true));
-                child.header.parent_id = parent_id;
+                Calico_New_R(child, acquire_node(tree, child_id, false));
+                if (child.header.parent_id != parent_id) {
+                    tree.m_pager->upgrade(child.page);
+                    child.header.parent_id = parent_id;
+                }
                 release_node(tree, std::move(child));
                 return {};
             };
@@ -928,7 +931,7 @@ static auto traverse_inorder(BPlusTree &tree, const Callback &callback) -> void
 static auto validate_siblings(BPlusTree &tree) -> void
 {
     // Find the leftmost external node.
-    auto node = *BPlusTreeInternal::acquire_node(tree, Id::root(), false);
+    auto node = BPlusTreeInternal::acquire_node(tree, Id::root(), false).value();
     while (!node.header.is_external) {
         const auto id = read_child_id(node, 0);
         BPlusTreeInternal::release_node(tree, std::move(node));

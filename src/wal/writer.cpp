@@ -117,7 +117,6 @@ auto WalWriter::flush() -> void
 {
     if (m_writer.has_value() && m_error->is_ok()) {
         Maybe_Set_Error(m_writer->flush());
-        Maybe_Set_Error(m_file->sync());
     }
 }
 
@@ -155,6 +154,7 @@ auto WalWriter::close_segment() -> Status
     }
 
     flush();
+    Maybe_Set_Error(m_file->sync());
     const auto written = m_writer->block_count() != 0;
 
     m_writer.reset();

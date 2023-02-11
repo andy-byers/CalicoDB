@@ -19,8 +19,7 @@ public:
     BasicDatabaseTests()
     {
         options.page_size = 0x200;
-        options.page_cache_size = options.page_size * frame_count;
-        options.wal_buffer_size = options.page_cache_size;
+        options.cache_size = options.page_size * frame_count;
         options.log_level = LogLevel::OFF;
         options.storage = storage.get();
     }
@@ -60,6 +59,37 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
     ASSERT_TRUE(storage->file_exists(prefix + "data").is_not_found());
     ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
+
+//TEST(ExpensiveTests, OneMillionRecords)
+//{
+//    const auto path = "/tmp/calico_one_million";
+//    std::filesystem::remove_all(path);
+//
+//    Database *db;
+//    expect_ok(Database::open(path, {}, &db));
+//
+//    const Slice value {"value"};
+//    for (Size i {}; i < 1'000'000; ++i) {
+//        expect_ok(db->put(Tools::integral_key(i), value));
+//        if (i % 10'000 == 9'999) {
+//            expect_ok(db->commit());
+//        }
+//    }
+//    expect_ok(db->commit());
+//
+//    auto *cursor = db->new_cursor();
+//    cursor->seek_first();
+//    for (Size i {}; i < 1'000'000; ++i) {
+//        expect_ok(cursor->status());
+//        ASSERT_EQ(cursor->key(), Tools::integral_key(i));
+//        ASSERT_EQ(cursor->value(), value);
+//        cursor->next();
+//    }
+//    delete cursor;
+//    delete db;
+//
+////    expect_ok(Database::destroy(path, {}));
+//}
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {
@@ -165,8 +195,7 @@ public:
     explicit TestDatabase(Storage &storage)
     {
         options.page_size = 0x200;
-        options.page_cache_size = 32 * options.page_size;
-        options.wal_buffer_size = 32 * options.page_size;
+        options.cache_size = 32 * options.page_size;
         options.storage = &storage;
 
         const auto s = reopen();
@@ -475,6 +504,7 @@ TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
     for (const auto &[key, value]: committed) {
         TestTools::expect_contains(*db->impl, key, value);
     }
+    Tools::validate_db(*db->impl);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -602,9 +632,9 @@ public:
     }
 
     [[nodiscard]]
-    auto vacuum() -> Status override
+    static auto vacuum(const Slice &, const Options &) -> Status
     {
-        return m_base->vacuum();
+        return Status::ok();
     }
 
     [[nodiscard]]

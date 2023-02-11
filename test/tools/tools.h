@@ -3,13 +3,13 @@
 #define CALICO_TOOLS_H
 
 #include <calico/calico.h>
+#include "database/database_impl.h"
 #include <climits>
 #include <functional>
 #include <mutex>
 #include <random>
 #include <string>
 #include <unordered_map>
-
 
 #define CHECK_TRUE(cond) \
     do { \
@@ -81,7 +81,6 @@ class DynamicMemory : public Storage {
 
     std::vector<Interceptor> m_interceptors;
     mutable std::unordered_map<std::string, Memory> m_memory;
-    mutable std::mutex m_mutex;
 
     friend class MemoryEditor;
     friend class MemoryReader;
@@ -196,6 +195,11 @@ inline auto expect_non_error(const Status &s)
         std::fprintf(stderr, "error: %s\n", s.what().data());
         std::abort();
     }
+}
+
+inline auto validate_db(const Database &db)
+{
+    reinterpret_cast<const DatabaseImpl &>(db).TEST_validate();
 }
 
 // Modified from LevelDB.

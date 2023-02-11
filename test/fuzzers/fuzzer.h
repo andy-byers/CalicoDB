@@ -12,7 +12,6 @@ static constexpr Size MAX_VALUE_SIZE {0x200};
 static constexpr Options DB_OPTIONS {
     0x200,
     0x200 * 32,
-    0x200 * 32,
     {},
     LogLevel::OFF,
     nullptr,

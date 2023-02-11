@@ -555,18 +555,11 @@ TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
     ASSERT_EQ(framer.page_count(), 0);
 }
 
-TEST_F(FramerTests, KeepsTrackOfAvailableFrames)
-{
-    auto frame_id = framer.pin(Id::root()).value();
-    ASSERT_EQ(framer.available(), 7);
-    framer.discard(frame_id);
-    ASSERT_EQ(framer.available(), 8);
-}
-
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
-    for (Size i {1}; i <= 8; i++)
+    for (Size i {1}; i <= 8; i++) {
         ASSERT_TRUE(framer.pin(Id {i}));
+    }
     const auto r = framer.pin(Id {9UL});
     ASSERT_FALSE(r.has_value());
     ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what().data();
@@ -600,7 +593,7 @@ public:
 
     explicit PagerTests()
         : wal {std::make_unique<DisabledWriteAheadLog>()},
-          scratch {wal_scratch_size(page_size), 32}
+          scratch(wal_scratch_size(page_size), '\x00')
     {
         auto r = Pager::open({
             PREFIX,
@@ -673,7 +666,7 @@ public:
     Lsn commit_lsn;
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
-    LogScratchManager scratch;
+    std::string scratch;
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)

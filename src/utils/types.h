@@ -1,7 +1,6 @@
 #ifndef CALICO_UTILS_TYPES_H
 #define CALICO_UTILS_TYPES_H
 
-#include <mutex>
 #include <utility>
 #include <vector>
 #include "calico/slice.h"
@@ -96,7 +95,7 @@ class AlignedBuffer {
 public:
     AlignedBuffer(Size size, Size alignment)
         : m_data {
-              new(std::align_val_t {alignment}, std::nothrow) Byte[size],
+              new(std::align_val_t {alignment}, std::nothrow) Byte[size](),
               Deleter {std::align_val_t {alignment}},
           }
     {
@@ -385,28 +384,24 @@ public:
     [[nodiscard]]
     auto is_ok() const -> bool
     {
-        std::lock_guard lock {m_mutex};
         return m_status.is_ok();
     }
 
     [[nodiscard]]
     auto get() const -> const Status &
     {
-        std::lock_guard lock {m_mutex};
         return m_status;
     }
 
     auto set(Status status) -> void
     {
         CALICO_EXPECT_FALSE(status.is_ok());
-        std::lock_guard lock {m_mutex};
         if (m_status.is_ok()) {
             m_status = std::move(status);
         }
     }
 
 private:
-    mutable std::mutex m_mutex;
     Status m_status;
 };
 

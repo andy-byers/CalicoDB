@@ -21,18 +21,17 @@ enum class LogLevel {
 
 struct Options {
     Size page_size {0x2000};
-    Size page_cache_size {};
-    Size wal_buffer_size {};
+    Size cache_size {};
     Slice wal_prefix;
     LogLevel log_level {LogLevel::OFF};
     Logger *info_log {};
     Storage *storage {};
-    bool sync {};
 };
 
 class Database {
 public:
     [[nodiscard]] static auto open(const Slice &path, const Options &options, Database **db) -> Status;
+    [[nodiscard]] static auto vacuum(const Slice &path, const Options &options) -> Status;
     [[nodiscard]] static auto repair(const Slice &path, const Options &options) -> Status;
     [[nodiscard]] static auto destroy(const Slice &path, const Options &options) -> Status;
 
@@ -40,7 +39,6 @@ public:
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string &out) const -> bool = 0;
     [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
-    [[nodiscard]] virtual auto vacuum() -> Status = 0;
     [[nodiscard]] virtual auto commit() -> Status = 0;
     [[nodiscard]] virtual auto abort() -> Status = 0;
     [[nodiscard]] virtual auto get(const Slice &key, std::string &value) const -> Status = 0;

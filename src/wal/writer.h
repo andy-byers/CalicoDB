@@ -9,8 +9,6 @@
 #include <queue>
 #include <thread>
 
-#include "utils/worker.h"
-
 namespace Calico {
 
 class LogWriter {

@@ -7,11 +7,9 @@
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/crc.h"
-#include "utils/queue.h"
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
-#include "utils/worker.h"
 
 namespace Calico {
 
@@ -544,98 +542,6 @@ TEST(StatusTests, MessageIsNullTerminated)
     ASSERT_EQ(msg.data()[5], '\0');
 }
 
-// Modified from RocksDB.
-class QueueTests: public testing::Test {
-public:
-    static constexpr Size NUM_ELEMENTS {500};
-    static constexpr Size CAPACITY {16};
-
-    QueueTests() = default;
-    ~QueueTests() override = default;
-
-    std::array<Size, NUM_ELEMENTS> data {};
-    mutable std::mutex mutex;
-    Queue<Size> queue {CAPACITY};
-};
-
-struct Consumer {
-    auto operator()() const -> void
-    {
-        std::optional<Size> next;
-        while ((next = queue->dequeue())) {
-            std::lock_guard lock {*mu};
-            out[*next] = *next;
-        }
-    }
-
-    std::mutex *mu {};
-    Queue<Size> *queue {};
-    Size *out {};
-};
-
-TEST_F(QueueTests, EnqueueAndDequeueST)
-{
-    queue.enqueue(1UL);
-    queue.enqueue(2UL);
-    queue.enqueue(3UL);
-    ASSERT_EQ(queue.dequeue(), 1);
-    ASSERT_EQ(queue.dequeue(), 2);
-    ASSERT_EQ(queue.dequeue(), 3);
-}
-
-TEST_F(QueueTests, SingleProducerMultipleConsumers)
-{
-    static constexpr Size NUM_GROUPS {5};
-    std::vector<std::thread> consumers;
-    for (Size i {}; i < NUM_GROUPS; ++i)
-        consumers.emplace_back(Consumer {&mutex, &queue, data.data()});
-
-    for (Size i {}; i < NUM_ELEMENTS; ++i)
-        queue.enqueue(i);
-
-    queue.finish();
-
-    for (auto &thread: consumers)
-        thread.join();
-
-    Size answer {};
-    ASSERT_TRUE(std::all_of(cbegin(data), cend(data), [&answer](auto result) {
-        return result == answer++;
-    }));
-}
-
-TEST_F(QueueTests, MultipleProducersMultipleConsumers)
-{
-    static constexpr Size NUM_GROUPS {5};
-    static constexpr auto GROUP_SIZE = NUM_ELEMENTS / NUM_GROUPS;
-    static_assert(GROUP_SIZE * NUM_GROUPS == NUM_ELEMENTS);
-
-    std::vector<std::thread> consumers;
-    for (Size i {}; i < NUM_GROUPS; ++i)
-        consumers.emplace_back(Consumer {&mutex, &queue, data.data()});
-
-    std::vector<std::thread> producers;
-    for (Size i {}; i < NUM_GROUPS; ++i) {
-        producers.emplace_back([i, this] {
-            for (Size j {}; j < GROUP_SIZE; ++j)
-                queue.enqueue(j + i*GROUP_SIZE);
-        });
-    }
-
-    for (auto &thread: producers)
-        thread.join();
-
-    queue.finish();
-
-    for (auto &thread: consumers)
-        thread.join();
-
-    Size answer {};
-    ASSERT_TRUE(std::all_of(cbegin(data), cend(data), [&answer](auto result) {
-        return result == answer++;
-    }));
-}
-
 TEST(MiscTests, StringsUseSizeParameterForComparisons)
 {
     std::vector<std::string> v {
@@ -647,72 +553,6 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
     ASSERT_EQ(v[0][2], '\x11');
     ASSERT_EQ(v[1][2], '\x22');
     ASSERT_EQ(v[2][2], '\x33');
-}
-
-/*
- * The Worker<Event> class provides a background thread that waits on Events from a Queue<Event>. We can dispatch an event from the
- * main thread and either wait or return immediately. It also should provide fast access to its internal Status object.
- */
-class BasicWorkerTests: public testing::Test {
-public:
-    BasicWorkerTests()
-        : worker {[this](int event) {
-                      events.emplace_back(event);
-                      return Status::ok();
-                  }, 16}
-    {}
-
-    Worker<int> worker;
-    std::vector<int> events;
-};
-
-TEST_F(BasicWorkerTests, CreateWorker)
-{
-    ASSERT_TRUE(events.empty());
-}
-
-TEST_F(BasicWorkerTests, EventsGetAdded)
-{
-    worker.dispatch(1);
-    worker.dispatch(2);
-    worker.dispatch(3, true);
-
-    // Blocks until all events are finished and the worker thread is joined.
-    ASSERT_EQ(events.at(0), 1);
-    ASSERT_EQ(events.at(1), 2);
-    ASSERT_EQ(events.at(2), 3);
-}
-
-TEST_F(BasicWorkerTests, WaitOnEvent)
-{
-    worker.dispatch(1);
-    worker.dispatch(2);
-    // Let the event get processed before returning.
-    worker.dispatch(3, true);
-
-    ASSERT_EQ(events.at(0), 1);
-    ASSERT_EQ(events.at(1), 2);
-    ASSERT_EQ(events.at(2), 3);
-}
-
-TEST_F(BasicWorkerTests, SanityCheck)
-{
-    static constexpr int NUM_EVENTS {1'000};
-    for (int i {}; i < NUM_EVENTS; ++i)
-        worker.dispatch(i, i == NUM_EVENTS - 1);
-
-    for (int i {}; i < NUM_EVENTS; ++i)
-        ASSERT_EQ(events.at(static_cast<Size>(i)), i);
-}
-
-TEST(WorkerTests, TSanTest)
-{
-    int counter {};
-    Worker<int> worker {[&counter](auto n) {counter += n;}, 32};
-    worker.dispatch(1);
-    worker.dispatch(2);
-    worker.dispatch(3, true);
-    CALICO_EXPECT_EQ(counter, 6);
 }
 
 // CRC tests from LevelDB.

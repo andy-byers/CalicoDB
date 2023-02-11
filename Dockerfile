@@ -26,7 +26,6 @@ RUN mkdir build && \
           -DCMAKE_BUILD_TYPE=Release \
           -DCALICO_BuildTests=On \
           -DCALICO_BuildFuzzers=On \
-          -DCALICO_BuildBenchmarks=Off \
           -DCALICO_BuildUnitTests=Off \
           -DCALICO_FuzzerStandalone=Off .. && \
     cmake --build . \

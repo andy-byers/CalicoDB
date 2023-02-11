@@ -68,7 +68,7 @@ assert(s2.starts_with("ab"));
 const Calico::Options options {
     // Use pages of size 2 KiB, a 2 MiB page cache, and a 1 MiB WAL write buffer.
     .page_size = 0x2000,
-    .page_cache_size = 0x200000,
+    .cache_size = 0x200000,
     .wal_buffer_size = 0x100000,
     
     // Store the WAL segments in a separate location. The directory calico_wal must already exist.
@@ -272,7 +272,7 @@ The database is generally represented on disk by a single directory.
 The B<sup>+</sup>-tree containing the record store is located in a file called `data` in the main directory.
 The WAL segment files can either be located in the main directory, or in a different location, depending on the `wal_prefix` initialization option.
 The info log will be created in the main directory as well, unless a custom `Logger *` is passed to the database.
-Calico DB will spawn an additional thead to do the write-ahead logging and obsolete WAL cleanup.
+Calico DB runs in a single thread.
 
 ### Storage
 The storage module handles platform-specific filesystem operations and I/O.

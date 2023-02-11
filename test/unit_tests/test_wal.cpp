@@ -355,7 +355,7 @@ public:
         : reader_payload(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00'),
-          scratch {wal_scratch_size(PAGE_SIZE), 32}
+          scratch(wal_scratch_size(PAGE_SIZE), '\x00')
     {}
 
     // NOTE: This invalidates the most-recently-allocated log reader.
@@ -380,10 +380,10 @@ public:
 
     auto write_string(LogWriter &writer, const std::string &payload) -> void
     {
-        auto buffer = scratch.get();
-        ASSERT_GE(buffer->size(), payload.size() + sizeof(Id));
-        mem_copy(buffer->range(sizeof(Lsn)), payload);
-        WalPayloadIn in {{++last_lsn.value}, buffer->range(0, payload.size() + sizeof(Lsn))};
+        Span buffer {scratch};
+        ASSERT_GE(buffer.size(), payload.size() + sizeof(Id));
+        mem_copy(buffer.range(sizeof(Lsn)), payload);
+        WalPayloadIn in {{++last_lsn.value}, buffer.range(0, payload.size() + sizeof(Lsn))};
         ASSERT_OK(writer.write(in));
     }
 
@@ -424,7 +424,7 @@ public:
     std::string reader_payload;
     std::string reader_tail;
     std::string writer_tail;
-    LogScratchManager scratch;
+    std::string scratch;
     std::unique_ptr<Reader> reader_file;
     std::unique_ptr<Logger> writer_file;
     Id last_lsn;
@@ -537,7 +537,7 @@ public:
     static constexpr Size WAL_LIMIT {8};
 
     WalWriterTests()
-        : scratch {wal_scratch_size(PAGE_SIZE), 32},
+        : scratch(wal_scratch_size(PAGE_SIZE), '\x00'),
           tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer {WalWriter::Parameters{
               "test/wal-",
@@ -554,7 +554,7 @@ public:
 
     WalSet set;
     ErrorBuffer error_buffer;
-    LogScratchManager scratch;
+    std::string scratch;
     std::atomic<Id> flushed_lsn {};
     std::string tail;
     Tools::RandomGenerator random;
@@ -589,9 +589,9 @@ static auto test_write_until_failure(Test &test) -> void
 {
     Id last_lsn;
     while (test.error_buffer.is_ok()) {
-        auto buffer = test.scratch.get();
-        const auto size = test.random.template Next<Size>(1, buffer->size());
-        test.writer.write(WalPayloadIn {{++last_lsn.value}, buffer->truncate(size)});
+        Span buffer {test.scratch};
+        const auto size = test.random.template Next<Size>(1, buffer.size());
+        test.writer.write(WalPayloadIn {{++last_lsn.value}, buffer.truncate(size)});
     }
 
     (void)std::move(test.writer).destroy();
@@ -655,7 +655,7 @@ public:
     static constexpr Size WAL_LIMIT {8};
 
     WalReaderWriterTests()
-        : scratch {wal_scratch_size(PAGE_SIZE), 32},
+        : scratch(wal_scratch_size(PAGE_SIZE), '\x00'),
           error_buffer {std::make_unique<ErrorBuffer>()},
           reader_data(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
@@ -668,16 +668,7 @@ public:
               &set,
               &flushed_lsn,
               WAL_LIMIT,
-          }},
-          tasks {[this](auto event) {
-              if (std::holds_alternative<WalPayloadIn>(event)) {
-                  writer.write(std::get<WalPayloadIn>(event));
-              } else if (std::holds_alternative<FlushToken>(event)) {
-                  writer.flush();
-              } else if (std::holds_alternative<AdvanceToken>(event)) {
-                  writer.advance();
-              }
-          }, 32}
+          }}
     {}
 
     ~WalReaderWriterTests() override = default;
@@ -696,7 +687,7 @@ public:
     [[nodiscard]]
     auto get_payload() -> WalPayloadIn
     {
-        auto buffer = *scratch.get();
+        Span buffer {scratch};
         const auto size = random.Next<Size>(1, 32);
         payloads.emplace_back(random.Generate(size).to_string());
         mem_copy(buffer.range(sizeof(Lsn)), payloads.back());
@@ -706,7 +697,7 @@ public:
     auto emit_segments(Size num_writes)
     {
         for (Size i {}; i < num_writes; ++i) {
-            tasks.dispatch(get_payload(), i == num_writes - 1);
+            writer.write(get_payload());
         }
 
         std::move(writer).destroy();
@@ -798,7 +789,7 @@ public:
     std::vector<std::string> payloads;
     WalSet set;
     std::unique_ptr<ErrorBuffer> error_buffer;
-    LogScratchManager scratch;
+    std::string scratch;
     std::atomic<Id> flushed_lsn {};
     std::string reader_data;
     std::string reader_tail;
@@ -806,7 +797,6 @@ public:
     Tools::RandomGenerator random;
     WalRecordGenerator generator;
     WalWriter writer;
-    Worker<Event> tasks;
 };
 
 static auto does_not_lose_records_test(WalReaderWriterTests &test, Size num_writes)
@@ -1026,7 +1016,7 @@ public:
     ~BasicWalTests() override = default;
 
     BasicWalTests()
-        : scratch {wal_scratch_size(PAGE_SIZE), 32}
+        : scratch(wal_scratch_size(PAGE_SIZE), '\x00')
     {}
 
     auto SetUp() -> void override
@@ -1035,7 +1025,6 @@ public:
             "test/wal-",
             storage.get(),
             PAGE_SIZE,
-            32,
             32,
         });
         ASSERT_TRUE(r.has_value()) << r.error().what().data();
@@ -1058,7 +1047,8 @@ public:
     [[nodiscard]]
     auto get_data_payload(const std::string &data) -> WalPayloadIn
     {
-        auto buffer = scratch.get()->truncate(sizeof(Lsn) + 1 + data.size());
+        Span buffer {scratch};
+        buffer.truncate(sizeof(Lsn) + 1 + data.size());
         payloads.emplace_back("p" + data);
         mem_copy(buffer.range(sizeof(Lsn)), payloads.back());
         payloads_since_commit++;
@@ -1076,7 +1066,8 @@ public:
     [[nodiscard]]
     auto get_commit_payload() -> WalPayloadIn
     {
-        auto buffer = scratch.get()->truncate(sizeof(Lsn) + 1);
+        Span buffer {scratch};
+        buffer.truncate(sizeof(Lsn) + 1);
         payloads_since_commit = 0;
         payloads.emplace_back("c");
         buffer.data()[sizeof(Lsn)] = 'c';
@@ -1160,7 +1151,7 @@ public:
     Tools::RandomGenerator random;
     Size payloads_since_commit {};
     Id commit_lsn;
-    LogScratchManager scratch;
+    std::string scratch;
     std::vector<std::string> payloads;
     std::unique_ptr<WriteAheadLog> wal;
 };

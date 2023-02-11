@@ -1,7 +1,6 @@
 #ifndef CALICO_PAGER_H
 #define CALICO_PAGER_H
 
-#include <mutex>
 #include <unordered_set>
 
 #include "page_cache.h"
@@ -24,7 +23,7 @@ public:
     struct Parameters {
         std::string prefix;
         Storage *storage {};
-        LogScratchManager *scratch {};
+        std::string *scratch {};
         WriteAheadLog *wal {};
         Logger *info_log {};
         Status *status {};
@@ -58,7 +57,6 @@ private:
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
     auto watch_page(Page &page, PageCache::Entry &entry) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
-    auto set_recovery_lsn(Lsn lsn) -> void;
 
     FrameBuffer m_framer;
     PageList m_dirty;
@@ -67,7 +65,7 @@ private:
     Lsn *m_commit_lsn {};
     bool *m_in_txn {};
     Status *m_status {};
-    LogScratchManager *m_scratch {};
+    std::string *m_scratch {};
     WriteAheadLog *m_wal {};
     Logger *m_info_log {};
 };

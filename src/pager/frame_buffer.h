@@ -19,7 +19,7 @@ class WriteAheadLog;
 
 class Frame final {
 public:
-    Frame(Byte *, Size, Size);
+    Frame(Byte *buffer, Size id, Size size);
 
     [[nodiscard]]
     auto pid() const -> Id
@@ -52,7 +52,8 @@ public:
     }
 
     [[nodiscard]] auto lsn() const -> Id;
-    [[nodiscard]] auto ref(bool) -> Page;
+    [[nodiscard]] auto ref(bool is_writable) -> Page;
+    auto upgrade(Page &page) -> void;
     auto unref(Page &page) -> void;
 
 private:
@@ -73,9 +74,8 @@ public:
     auto unpin(Size) -> void;
     auto upgrade(Size index, Page &page) -> void;
     auto unref(Size index, Page page) -> void;
-    auto discard(Size) -> void;
-    auto load_state(const FileHeader &) -> void;
-    auto save_state(FileHeader &) const -> void;
+    auto load_state(const FileHeader &header) -> void;
+    auto save_state(FileHeader &header) const -> void;
 
     [[nodiscard]]
     auto page_count() const -> Size
@@ -102,10 +102,10 @@ public:
     }
 
     [[nodiscard]]
-    auto frame_at(Size id) const -> const Frame&
+    auto get_frame(Size index) const -> const Frame &
     {
-        CALICO_EXPECT_LT(id, m_frames.size());
-        return m_frames[id];
+        CALICO_EXPECT_LT(index, m_frames.size());
+        return m_frames[index];
     }
 
     [[nodiscard]]
@@ -118,16 +118,9 @@ public:
     FrameBuffer(FrameBuffer &&) = default;
 
 private:
-    FrameBuffer(std::unique_ptr<Editor>, AlignedBuffer, Size, Size);
+    FrameBuffer(std::unique_ptr<Editor> file, AlignedBuffer buffer, Size page_size, Size frame_count);
     [[nodiscard]] auto read_page_from_file(Id, Span) const -> tl::expected<bool, Status>;
     [[nodiscard]] auto write_page_to_file(Id pid, const Slice &page) const -> Status;
-
-    [[nodiscard]]
-    auto frame_at_impl(Size id) -> Frame&
-    {
-        CALICO_EXPECT_LT(id, m_frames.size());
-        return m_frames[id];
-    }
 
     AlignedBuffer m_buffer;
     std::vector<Frame> m_frames;

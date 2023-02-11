@@ -9,7 +9,6 @@
 #include "utils/types.h"
 #include <algorithm>
 #include <map>
-#include <mutex>
 #include <optional>
 #include <variant>
 
@@ -25,7 +24,7 @@ inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
     }
     auto name = path.range(prefix.size());
 
-    // Don't call std::stoul() if it's going to throw an exception.
+    // Don't call std::stoul() if it's going to fail.
     const auto is_valid = std::all_of(name.data(), name.data() + name.size(), [](auto c) {
         return std::isdigit(c);
     });
@@ -178,21 +177,17 @@ public:
 
     auto add_segment(Id id) -> void
     {
-        std::lock_guard lock {m_mutex};
         m_segments.emplace(id, Lsn::null());
     }
 
     auto add_segment(Id id, Lsn first_lsn) -> void
     {
-        std::lock_guard lock {m_mutex};
         m_segments.emplace(id, first_lsn);
     }
 
     [[nodiscard]]
     auto first_lsn(Id id) const -> Lsn
     {
-        std::lock_guard lock {m_mutex};
-
         const auto itr = m_segments.find(id);
         if (itr == end(m_segments)) {
             return Lsn::null();
@@ -203,8 +198,6 @@ public:
 
     auto set_first_lsn(Id id, Lsn lsn) -> void
     {
-        std::lock_guard lock {m_mutex};
-
         auto itr = m_segments.find(id);
         CALICO_EXPECT_NE(itr, end(m_segments));
         itr->second = lsn;
@@ -212,19 +205,16 @@ public:
 
     auto first() const -> Id
     {
-        std::lock_guard lock {m_mutex};
         return m_segments.empty() ? Id::null() : cbegin(m_segments)->first;
     }
 
     auto last() const -> Id
     {
-        std::lock_guard lock {m_mutex};
         return m_segments.empty() ? Id::null() : crbegin(m_segments)->first;
     }
 
     auto id_before(Id id) const -> Id
     {
-        std::lock_guard lock {m_mutex};
         if (m_segments.empty()) {
             return Id::null();
         }
@@ -238,7 +228,6 @@ public:
 
     auto id_after(Id id) const -> Id
     {
-        std::lock_guard lock {m_mutex};
         auto itr = m_segments.upper_bound(id);
         return itr != cend(m_segments) ? itr->first : Id::null();
     }
@@ -246,7 +235,6 @@ public:
     auto remove_before(Id id) -> void
     {
         // Removes segments in [<begin>, id).
-        std::lock_guard lock {m_mutex};
         auto itr = m_segments.lower_bound(id);
         m_segments.erase(cbegin(m_segments), itr);
     }
@@ -254,7 +242,6 @@ public:
     auto remove_after(Id id) -> void
     {
         // Removes segments in (id, <end>).
-        std::lock_guard lock {m_mutex};
         auto itr = m_segments.upper_bound(id);
         m_segments.erase(itr, cend(m_segments));
     }
@@ -267,32 +254,7 @@ public:
     }
 
 private:
-    mutable std::mutex m_mutex;
     std::map<Id, Lsn> m_segments;
-};
-
-class LogScratchManager final {
-public:
-    explicit LogScratchManager(Size buffer_size, Size buffer_count)
-        : m_manager {buffer_size, buffer_count + EXTRA_SIZE}
-    {}
-
-    ~LogScratchManager() = default;
-
-    [[nodiscard]]
-    auto get() -> Scratch
-    {
-        return m_manager.get();
-    }
-
-private:
-    // Number of extra scratch buffers to allocate. We seem to need a number of buffers equal to the worker
-    // queue size N + 2. This allows N buffers to be waiting in the queue, 1 for the WAL writer to work on,
-    // and another for the pager to work on. Then we won't overwrite scratch memory that is in use, because
-    // the worker queue will block after it reaches N elements.
-    static constexpr Size EXTRA_SIZE {2};
-
-    MonotonicScratchManager m_manager;
 };
 
 [[nodiscard]]

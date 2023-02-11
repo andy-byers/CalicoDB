@@ -31,6 +31,14 @@ auto Frame::ref(bool is_writable) -> Page
     return Page {m_page_id, data(), is_writable};
 }
 
+auto Frame::upgrade(Page &page) -> void
+{
+    CALICO_EXPECT_FALSE(page.is_writable());
+    CALICO_EXPECT_FALSE(m_is_writable);
+    m_is_writable = true;
+    page.m_write = true;
+}
+
 auto Frame::unref(Page &page) -> void
 {
     CALICO_EXPECT_EQ(m_page_id, page.id());
@@ -73,7 +81,6 @@ FrameBuffer::FrameBuffer(std::unique_ptr<Editor> file, AlignedBuffer buffer, Siz
 {
     // The buffer should be aligned to the page size.
     CALICO_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
-    mem_clear({m_buffer.get(), page_size * frame_count});
 
     while (m_frames.size() < frame_count) {
         m_frames.emplace_back(m_buffer.get(), m_frames.size(), page_size);
@@ -86,8 +93,8 @@ FrameBuffer::FrameBuffer(std::unique_ptr<Editor> file, AlignedBuffer buffer, Siz
 
 auto FrameBuffer::ref(Size index) -> Page
 {
-    CALICO_EXPECT_LT(index, m_frames.size());
     m_ref_sum++;
+    CALICO_EXPECT_LT(index, m_frames.size());
     return m_frames[index].ref(false);
 }
 
@@ -102,8 +109,7 @@ auto FrameBuffer::upgrade(Size index, Page &page) -> void
 {
     CALICO_EXPECT_FALSE(page.is_writable());
     CALICO_EXPECT_LT(index, m_frames.size());
-    m_frames[index].unref(page);
-    page = m_frames[index].ref(true);
+    m_frames[index].upgrade(page);
 }
 
 auto FrameBuffer::pin(Id pid) -> tl::expected<Size, Status>
@@ -116,7 +122,8 @@ auto FrameBuffer::pin(Id pid) -> tl::expected<Size, Status>
     }
 
     auto fid = m_available.back();
-    auto &frame = frame_at_impl(fid);
+    CALICO_EXPECT_LT(fid, m_frames.size());
+    auto &frame = m_frames[fid];
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
 
     if (auto r = read_page_from_file(pid, frame.data())) {
@@ -133,16 +140,10 @@ auto FrameBuffer::pin(Id pid) -> tl::expected<Size, Status>
     return fid;
 }
 
-auto FrameBuffer::discard(Size id) -> void
-{
-    CALICO_EXPECT_EQ(frame_at_impl(id).ref_count(), 0);
-    frame_at_impl(id).reset(Id::null());
-    m_available.emplace_back(id);
-}
-
 auto FrameBuffer::unpin(Size id) -> void
 {
-    auto &frame = frame_at_impl(id);
+    CALICO_EXPECT_LT(id, m_frames.size());
+    auto &frame = m_frames[id];
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
     frame.reset(Id::null());
     m_available.emplace_back(id);
@@ -150,7 +151,7 @@ auto FrameBuffer::unpin(Size id) -> void
 
 auto FrameBuffer::write_back(Size id) -> Status
 {
-    auto &frame = frame_at_impl(id);
+    auto &frame = get_frame(id);
     CALICO_EXPECT_LE(frame.ref_count(), 1);
 
     m_bytes_written += m_page_size;

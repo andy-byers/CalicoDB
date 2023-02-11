@@ -105,12 +105,6 @@ auto Pager::clean_page(PageCache::Entry &entry) -> PageList::Iterator
     return m_dirty.remove(token);
 }
 
-auto Pager::set_recovery_lsn(Lsn lsn) -> void
-{
-    CALICO_EXPECT_LE(m_recovery_lsn, lsn);
-    m_recovery_lsn = lsn;
-}
-
 auto Pager::sync() -> Status
 {
     return m_framer.sync();
@@ -129,7 +123,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
         CALICO_EXPECT_TRUE(m_registry.contains(page_id));
         auto &entry = m_registry.get(page_id)->value;
         const auto frame_id = entry.index;
-        const auto page_lsn = m_framer.frame_at(frame_id).lsn();
+        const auto page_lsn = m_framer.get_frame(frame_id).lsn();
 
         if (largest < page_lsn) {
             largest = page_lsn;
@@ -151,7 +145,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
             auto s = m_framer.write_back(frame_id);
 
             // Advance to the next dirty list entry.
-            itr = clean_page(entry); // TODO: We will clean the page regardless of error.
+            itr = clean_page(entry);
             Calico_Try_S(s);
         } else {
             itr = next(itr);
@@ -165,23 +159,13 @@ auto Pager::flush(Lsn target_lsn) -> Status
 
     // We don't have any pages in memory with LSNs below this value.
     if (m_recovery_lsn < target_lsn) {
-        set_recovery_lsn(target_lsn);
+        m_recovery_lsn = target_lsn;
     }
     return Status::ok();
 }
 
 auto Pager::recovery_lsn() -> Id
 {
-    auto lowest = MAX_ID;
-    for (auto entry: m_dirty) {
-        if (lowest > entry.record_lsn) {
-            lowest = entry.record_lsn;
-        }
-    }
-    // NOTE: Recovery LSN is not always up-to-date. We update it here and in flush(), making sure it is monotonically increasing.
-    if (lowest != MAX_ID && m_recovery_lsn < lowest) {
-        set_recovery_lsn(lowest);
-    }
     return m_recovery_lsn;
 }
 
@@ -189,7 +173,7 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
 {
     Id page_id;
     auto evicted = m_registry.evict([this, &page_id](auto pid, auto entry) {
-        const auto &frame = m_framer.frame_at(entry.index);
+        const auto &frame = m_framer.get_frame(entry.index);
         page_id = pid;
 
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to evict.
@@ -243,7 +227,7 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
     if (*m_in_txn && lsn <= *m_commit_lsn) {
         const auto next_lsn = m_wal->current_lsn();
         m_wal->log(encode_full_image_payload(
-            next_lsn, page.id(), page.view(0), *m_scratch->get()));
+            next_lsn, page.id(), page.view(0), *m_scratch));
         write_page_lsn(page, next_lsn);
     }
 }
@@ -302,20 +286,18 @@ auto Pager::upgrade(Page &page) -> void
 
 auto Pager::release(Page page) -> void
 {
+    CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
+    CALICO_EXPECT_TRUE(m_registry.contains(page.id()));
+    auto [index, token] = m_registry.get(page.id())->value;
+
     if (page.is_writable() && *m_in_txn) {
         const auto next_lsn = m_wal->current_lsn();
         write_page_lsn(page, next_lsn);
         m_wal->log(encode_deltas_payload(
             next_lsn, page.id(), page.view(0),
-            page.deltas(), *m_scratch->get()));
+            page.deltas(), *m_scratch));
     }
-    CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
-
-    // This page must already be acquired.
-    auto itr = m_registry.get(page.id());
-    CALICO_EXPECT_NE(itr, m_registry.end());
-    auto &entry = itr->value;
-    m_framer.unref(entry.index, std::move(page));
+    m_framer.unref(index, std::move(page));
 }
 
 auto Pager::save_state(FileHeader &header) -> void
@@ -327,7 +309,7 @@ auto Pager::save_state(FileHeader &header) -> void
 auto Pager::load_state(const FileHeader &header) -> void
 {
     if (m_recovery_lsn.value < header.recovery_lsn.value) {
-        set_recovery_lsn(Id {header.recovery_lsn});
+        m_recovery_lsn = header.recovery_lsn;
     }
     m_framer.load_state(header);
 }

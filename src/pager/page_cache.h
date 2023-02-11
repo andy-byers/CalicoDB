@@ -111,8 +111,9 @@ public:
     [[nodiscard]]
     auto hit_ratio() const -> double
     {
-        if (const auto total = static_cast<double>(m_hits + m_misses); total != 0.0)
+        if (const auto total = static_cast<double>(m_hits + m_misses); total != 0.0) {
             return static_cast<double>(m_hits) / total;
+        }
         return 0.0;
     }
 

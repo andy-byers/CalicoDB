@@ -33,17 +33,19 @@ public:
 
     [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] static auto repair(const std::string &path, const Options &options) -> Status;
+    [[nodiscard]] static auto vacuum(std::string path, const Options &options) -> Status;
     [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
 
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get_property(const Slice &name, std::string &out) const -> bool override;
-    [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto commit() -> Status override;
     [[nodiscard]] auto abort() -> Status override;
     [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status override;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
+
+    auto TEST_validate() const -> void;
 
     std::unique_ptr<WriteAheadLog> wal;
     std::unique_ptr<Pager> pager;
@@ -66,7 +68,7 @@ private:
     std::string m_db_prefix;
     std::string m_wal_prefix;
     std::unique_ptr<Recovery> m_recovery;
-    std::unique_ptr<LogScratchManager> m_scratch;
+    std::string m_scratch;
     Storage *m_storage {};
     Logger *m_info_log {};
     Size m_txn_size {};
