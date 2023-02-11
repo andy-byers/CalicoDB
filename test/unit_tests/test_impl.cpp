@@ -160,22 +160,6 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
 }
 
-TEST_F(BasicDatabaseTests, a)
-{
-    Database *db;
-    options.page_size = 0x2000;
-    options.page_cache_size = 1024 * 1024 * 2;
-    options.wal_buffer_size = 1024 * 1024 * 2;
-    expect_ok(Database::open(ROOT, options, &db));
-
-    for (Size i {}; i < 1'000'000; ++i) {
-        expect_ok(db->put(Tools::integral_key(i), Tools::integral_key(i)));
-    }
-    expect_ok(db->commit());
-
-    delete db;
-}
-
 class TestDatabase {
 public:
     explicit TestDatabase(Storage &storage)

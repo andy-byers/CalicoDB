@@ -1,7 +1,6 @@
 #ifndef CALICO_PAGER_H
 #define CALICO_PAGER_H
 
-#include <mutex>
 #include <unordered_set>
 
 #include "page_cache.h"

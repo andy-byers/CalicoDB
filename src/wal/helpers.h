@@ -9,7 +9,6 @@
 #include "utils/scratch.h"
 #include "utils/types.h"
 #include <map>
-#include <mutex>
 
 namespace Calico {
 

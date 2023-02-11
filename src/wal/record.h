@@ -9,7 +9,6 @@
 #include "utils/types.h"
 #include <algorithm>
 #include <map>
-#include <mutex>
 #include <optional>
 #include <variant>
 
@@ -25,7 +24,7 @@ inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
     }
     auto name = path.range(prefix.size());
 
-    // Don't call std::stoul() if it's going to throw an exception.
+    // Don't call std::stoul() if it's going to fail.
     const auto is_valid = std::all_of(name.data(), name.data() + name.size(), [](auto c) {
         return std::isdigit(c);
     });

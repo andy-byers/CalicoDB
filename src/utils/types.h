@@ -1,7 +1,6 @@
 #ifndef CALICO_UTILS_TYPES_H
 #define CALICO_UTILS_TYPES_H
 
-#include <mutex>
 #include <utility>
 #include <vector>
 #include "calico/slice.h"

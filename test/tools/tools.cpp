@@ -7,13 +7,11 @@ namespace Calico::Tools {
 
 auto DynamicMemory::add_interceptor(Interceptor interceptor) -> void
 {
-    std::lock_guard lock {m_mutex};
     m_interceptors.emplace_back(std::move(interceptor));
 }
 
 auto DynamicMemory::clear_interceptors() -> void
 {
-    std::lock_guard lock {m_mutex};
     m_interceptors.clear();
 }
 
@@ -49,7 +47,6 @@ auto DynamicMemory::write_file_at(Memory &memory, Slice in, Size offset) -> Stat
 auto MemoryReader::read(Byte *out, Size &size, Size offset) -> Status
 {
     {
-        std::lock_guard lock {m_parent->m_mutex};
         Try_Intercept_From(*m_parent, Interceptor::READ, m_path);
     }
     return m_parent->read_file_at(*m_mem, out, size, offset);
@@ -57,35 +54,25 @@ auto MemoryReader::read(Byte *out, Size &size, Size offset) -> Status
 
 auto MemoryEditor::read(Byte *out, Size &size, Size offset) -> Status
 {
-    {
-        std::lock_guard lock {m_parent->m_mutex};
-        Try_Intercept_From(*m_parent, Interceptor::READ, m_path);
-    }
+    Try_Intercept_From(*m_parent, Interceptor::READ, m_path);
     return m_parent->read_file_at(*m_mem, out, size, offset);
 }
 
 auto MemoryEditor::write(Slice in, Size offset) -> Status
 {
-    {
-        std::lock_guard lock {m_parent->m_mutex};
-        Try_Intercept_From(*m_parent, Interceptor::WRITE, m_path);
-    }
+    Try_Intercept_From(*m_parent, Interceptor::WRITE, m_path);
     return m_parent->write_file_at(*m_mem, in, offset);
 }
 
 auto MemoryEditor::sync() -> Status
 {
-    std::lock_guard lock {m_parent->m_mutex};
     Try_Intercept_From(*m_parent, Interceptor::SYNC, m_path);
     return Status::ok();
 }
 
 auto MemoryLogger::write(Slice in) -> Status
 {
-    {
-        std::lock_guard lock {m_parent->m_mutex};
-        Try_Intercept_From(*m_parent, Interceptor::WRITE, m_path);
-    }
+    Try_Intercept_From(*m_parent, Interceptor::WRITE, m_path);
     // TODO: Could produce incorrect results if the file size is changed after it is queried here. That really shouldn't ever happen
     //       in the library code, so it should be okay.
     return m_parent->write_file_at(*m_mem, in, m_mem->buffer.size());
@@ -93,7 +80,6 @@ auto MemoryLogger::write(Slice in) -> Status
 
 auto MemoryLogger::sync() -> Status
 {
-    std::lock_guard lock {m_parent->m_mutex};
     Try_Intercept_From(*m_parent, Interceptor::SYNC, m_path);
     return Status::ok();
 }
@@ -119,7 +105,6 @@ auto DynamicMemory::remove_directory(const std::string &) -> Status
 
 auto DynamicMemory::new_reader(const std::string &path, Reader **out) -> Status
 {
-    std::lock_guard lock {m_mutex};
     auto &mem = get_memory(path);
     Try_Intercept_From(*this, Interceptor::OPEN, path);
     
@@ -132,7 +117,6 @@ auto DynamicMemory::new_reader(const std::string &path, Reader **out) -> Status
 
 auto DynamicMemory::new_editor(const std::string &path, Editor **out) -> Status
 {
-    std::lock_guard lock {m_mutex};
     auto &mem = get_memory(path);
     Try_Intercept_From(*this, Interceptor::OPEN, path);
 
@@ -146,7 +130,6 @@ auto DynamicMemory::new_editor(const std::string &path, Editor **out) -> Status
 
 auto DynamicMemory::new_logger(const std::string &path, Logger **out) -> Status
 {
-    std::lock_guard lock {m_mutex};
     auto &mem = get_memory(path);
     Try_Intercept_From(*this, Interceptor::OPEN, path);
 
@@ -160,7 +143,6 @@ auto DynamicMemory::new_logger(const std::string &path, Logger **out) -> Status
 
 auto DynamicMemory::remove_file(const std::string &path) -> Status
 {
-    std::lock_guard lock {m_mutex};
     auto &mem = get_memory(path);
     Try_Intercept_From(*this, Interceptor::UNLINK, path);
 
@@ -177,7 +159,6 @@ auto DynamicMemory::remove_file(const std::string &path) -> Status
 
 auto DynamicMemory::resize_file(const std::string &path, Size size) -> Status
 {
-    std::lock_guard lock {m_mutex};
     auto itr = m_memory.find(path);
     if (itr == end(m_memory)) {
         return Status::system_error("cannot resize file");
@@ -192,7 +173,6 @@ auto DynamicMemory::rename_file(const std::string &old_path, const std::string &
         return Status::invalid_argument("name has zero length");
     }
 
-    std::lock_guard lock {m_mutex};
     auto node = m_memory.extract(old_path);
     if (node.empty()) {
         return Status::not_found("file does not exist");
@@ -205,7 +185,6 @@ auto DynamicMemory::rename_file(const std::string &old_path, const std::string &
 
 auto DynamicMemory::file_size(const std::string &path, Size &out) const -> Status
 {
-    std::lock_guard lock {m_mutex};
     auto itr = m_memory.find(path);
     if (itr == cend(m_memory)) {
         return Status::not_found("file does not exist");
@@ -216,7 +195,6 @@ auto DynamicMemory::file_size(const std::string &path, Size &out) const -> Statu
 
 auto DynamicMemory::file_exists(const std::string &path) const -> Status
 {
-    std::lock_guard lock {m_mutex};
     if (const auto &mem = get_memory(path); mem.created) {
         return Status::ok();
     }
@@ -240,10 +218,7 @@ auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::s
 auto DynamicMemory::clone() const -> Storage*
 {
     auto *storage = new DynamicMemory;
-    {
-        std::lock_guard lock {m_mutex};
-        storage->m_memory = m_memory;
-    }
+    storage->m_memory = m_memory;
     return storage;
 }
 

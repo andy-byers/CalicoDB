@@ -81,7 +81,6 @@ class DynamicMemory : public Storage {
 
     std::vector<Interceptor> m_interceptors;
     mutable std::unordered_map<std::string, Memory> m_memory;
-    mutable std::mutex m_mutex;
 
     friend class MemoryEditor;
     friend class MemoryReader;
