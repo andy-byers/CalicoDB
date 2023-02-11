@@ -379,6 +379,53 @@ public:
     }
 
     [[nodiscard]]
+    static auto try_fix_by_rotation(BPlusTree &tree, Node &node, Node &parent) -> tl::expected<bool, Status>
+    {
+        CALICO_EXPECT_TRUE(node.page.is_writable());
+        CALICO_EXPECT_TRUE(parent.page.is_writable());
+
+        // TODO: Special cases.
+        if (node.overflow_index == 0 || node.overflow_index == node.header.cell_count) {
+            return false;
+        }
+
+        Node::Iterator itr {parent};
+        itr.seek(read_key(*node.overflow)); // Could be any key in node.
+
+        if (itr.index() > 0) {
+            Calico_New_R(left, acquire_node(tree, read_child_id(parent, itr.index() - 1)));
+            if (usable_space(left) > 3 * max_usable_space(left) / 4) { // TODO: This restriction should be relaxed.
+                if (read_cell(node, 0).size >= node.overflow->size) {    // TODO: We should try to rotate multiple times if necessary.
+                    tree.m_pager->upgrade(left.page);
+                    Calico_Try_R(internal_rotate_left(tree, parent, left, node, itr.index() - 1));
+                    write_cell(node, node.overflow_index - 1, *std::exchange(node.overflow, std::nullopt));
+                    CALICO_EXPECT_FALSE(is_overflowing(node));
+                    CALICO_EXPECT_FALSE(is_overflowing(left));
+                    release_node(tree, std::move(left));
+                    return true;
+                }
+            }
+            release_node(tree, std::move(left));
+        }
+        if (itr.index() < parent.header.cell_count) {
+            Calico_New_R(right, acquire_node(tree, read_child_id(parent, itr.index() + 1)));
+            if (usable_space(right) > 3 * max_usable_space(right) / 4) {
+                if (read_cell(node, node.header.cell_count - 1).size >= node.overflow->size) {
+                    tree.m_pager->upgrade(right.page);
+                    Calico_Try_R(internal_rotate_right(tree, parent, node, right, itr.index()));
+                    write_cell(node, node.overflow_index, *std::exchange(node.overflow, std::nullopt));
+                    CALICO_EXPECT_FALSE(is_overflowing(node));
+                    CALICO_EXPECT_FALSE(is_overflowing(right));
+                    release_node(tree, std::move(right));
+                    return true;
+                }
+            }
+            release_node(tree, std::move(right));
+        }
+        return false;
+    }
+
+    [[nodiscard]]
     static auto split_non_root(BPlusTree &tree, Node node) -> tl::expected<Node, Status>
     {
         CALICO_EXPECT_FALSE(node.page.id().is_root());
@@ -386,6 +433,15 @@ public:
         CALICO_EXPECT_TRUE(is_overflowing(node));
 
         Calico_New_R(parent, acquire_node(tree, node.header.parent_id, true));
+        if (!node.header.is_external) {
+            // TODO: Needs benchmarking. Should be worthwhile, as internal nodes are likely to be in, and stay in, the cache, so trying to rotate into
+            //       one of them should be fast.
+            Calico_New_R(fixed, try_fix_by_rotation(tree, node, parent));
+            if (fixed) {
+                release_node(tree, std::move(node));
+                return parent;
+            }
+        }
         Calico_New_R(sibling, allocate_node(tree, node.header.is_external));
 
         Cell separator;
@@ -401,7 +457,6 @@ public:
         }
         Node::Iterator itr {parent};
         itr.seek(read_key(separator));
-
         write_cell(parent, itr.index(), separator);
 
         if (parent.overflow) {
@@ -891,17 +946,6 @@ auto BPlusTree::save_state(FileHeader &header) const -> void
 auto BPlusTree::load_state(const FileHeader &header) -> void
 {
     m_free_list.m_head = header.free_list_id;
-}
-
-/* Routine for fixing back references. For a given page with page X, all pages containing references to X
- * must be updated so that X can replace a free list page during vacuum. To this end, every reference between
- * pages must be two-way. This requirement is already satisfied for node pages, since we keep both left and
- * right sibling links in the external nodes. For overflow and free list pages, we just keep a back pointer.
- */
-[[nodiscard]]
-auto fix_node_back_refs(Pager &pager, Page &page, Id swap_pid) -> tl::expected<void, Status>
-{
-    (void)pager;(void)page;(void)swap_pid;return {};
 }
 
 using Callback = std::function<void(Node &, Size)>;
