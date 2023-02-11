@@ -129,7 +129,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
         CALICO_EXPECT_TRUE(m_registry.contains(page_id));
         auto &entry = m_registry.get(page_id)->value;
         const auto frame_id = entry.index;
-        const auto page_lsn = m_framer.frame_at(frame_id).lsn();
+        const auto page_lsn = m_framer.get_frame(frame_id).lsn();
 
         if (largest < page_lsn) {
             largest = page_lsn;
@@ -189,7 +189,7 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
 {
     Id page_id;
     auto evicted = m_registry.evict([this, &page_id](auto pid, auto entry) {
-        const auto &frame = m_framer.frame_at(entry.index);
+        const auto &frame = m_framer.get_frame(entry.index);
         page_id = pid;
 
         // The page/frame management happens under lock, so if this frame is not referenced, it is safe to evict.

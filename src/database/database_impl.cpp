@@ -365,9 +365,9 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
     }
 }
 
-auto DatabaseImpl::vacuum() -> Status
+auto DatabaseImpl::vacuum(std::string, const Options &) -> Status
 {
-    return Status::logic_error("<NOT IMPLEMENTED>"); // TODO: vacuum() operation collects some freelist pages at the end of the file and truncates.
+    return Status::logic_error("<NOT IMPLEMENTED>");
 }
 
 auto DatabaseImpl::commit() -> Status
@@ -492,6 +492,13 @@ auto DatabaseImpl::load_state() -> Status
         return m_storage->resize_file(m_db_prefix + "data", after_size);
     }
     return Status::ok();
+}
+
+auto DatabaseImpl::TEST_validate() const -> void
+{
+    tree->TEST_check_links();
+    tree->TEST_check_order();
+    tree->TEST_check_nodes();
 }
 
 auto setup(const std::string &prefix, Storage &store, const Options &options) -> tl::expected<InitialState, Status>

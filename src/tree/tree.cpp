@@ -928,7 +928,7 @@ static auto traverse_inorder(BPlusTree &tree, const Callback &callback) -> void
 static auto validate_siblings(BPlusTree &tree) -> void
 {
     // Find the leftmost external node.
-    auto node = *BPlusTreeInternal::acquire_node(tree, Id::root(), false);
+    auto node = BPlusTreeInternal::acquire_node(tree, Id::root(), false).value();
     while (!node.header.is_external) {
         const auto id = read_child_id(node, 0);
         BPlusTreeInternal::release_node(tree, std::move(node));

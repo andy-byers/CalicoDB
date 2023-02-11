@@ -475,6 +475,7 @@ TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
     for (const auto &[key, value]: committed) {
         TestTools::expect_contains(*db->impl, key, value);
     }
+    Tools::validate_db(*db->impl);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -602,9 +603,9 @@ public:
     }
 
     [[nodiscard]]
-    auto vacuum() -> Status override
+    static auto vacuum(const Slice &, const Options &) -> Status
     {
-        return m_base->vacuum();
+        return Status::ok();
     }
 
     [[nodiscard]]

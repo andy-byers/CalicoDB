@@ -99,7 +99,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 CHECK_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
         }
         CHECK_OK(db->status());
+        Tools::validate_db(*db);
     }
+    Tools::validate_db(*db);
     delete db;
     CHECK_OK(Database::destroy(DB_PATH, DB_OPTIONS));
     return 0;

@@ -96,7 +96,7 @@ class AlignedBuffer {
 public:
     AlignedBuffer(Size size, Size alignment)
         : m_data {
-              new(std::align_val_t {alignment}, std::nothrow) Byte[size],
+              new(std::align_val_t {alignment}, std::nothrow) Byte[size](),
               Deleter {std::align_val_t {alignment}},
           }
     {

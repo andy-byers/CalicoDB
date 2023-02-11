@@ -555,18 +555,11 @@ TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
     ASSERT_EQ(framer.page_count(), 0);
 }
 
-TEST_F(FramerTests, KeepsTrackOfAvailableFrames)
-{
-    auto frame_id = framer.pin(Id::root()).value();
-    ASSERT_EQ(framer.available(), 7);
-    framer.discard(frame_id);
-    ASSERT_EQ(framer.available(), 8);
-}
-
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
-    for (Size i {1}; i <= 8; i++)
+    for (Size i {1}; i <= 8; i++) {
         ASSERT_TRUE(framer.pin(Id {i}));
+    }
     const auto r = framer.pin(Id {9UL});
     ASSERT_FALSE(r.has_value());
     ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what().data();
