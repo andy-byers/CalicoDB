@@ -395,9 +395,10 @@ public:
 
         if (itr.index() > 0) {
             Calico_New_R(left, acquire_node(tree, read_child_id(parent, itr.index() - 1)));
-            if (usable_space(left) > 3 * max_usable_space(left) / 4) { // TODO: This restriction should be relaxed.
-                if (read_cell(node, 0).size >= node.overflow->size) {    // TODO: We should try to rotate multiple times if necessary.
-                    tree.m_pager->upgrade(left.page);                          // TODO: It's worth it to spend a decent amount of time determining a good splitting pattern it seems.
+            if (usable_space(left) > max_usable_space(left) / 2) {
+                const auto first = read_cell(node, 0);
+                if (first.size >= node.overflow->size) {
+                    tree.m_pager->upgrade(left.page);
                     Calico_Try_R(internal_rotate_left(tree, parent, left, node, itr.index() - 1));
                     write_cell(node, node.overflow_index - 1, *std::exchange(node.overflow, std::nullopt));
                     CALICO_EXPECT_FALSE(is_overflowing(node));
@@ -405,12 +406,15 @@ public:
                     release_node(tree, std::move(left));
                     return true;
                 }
+                // TODO: Node has overflowed and is internal so it should have at least 4 cells, not including the overflow cell. At least it's
+                //       more than 2. We should be able to iterate with an integer index starting at 1, checking if (a) the separator + the 0th
+                //       cell + all the cells up to the i-1th cell can fit in "left", until we can fit the overflow cell in "node".
             }
             release_node(tree, std::move(left));
         }
         if (itr.index() < parent.header.cell_count) {
             Calico_New_R(right, acquire_node(tree, read_child_id(parent, itr.index() + 1)));
-            if (usable_space(right) > 3 * max_usable_space(right) / 4) {
+            if (usable_space(right) > max_usable_space(right) / 2) {
                 if (read_cell(node, node.header.cell_count - 1).size >= node.overflow->size) {
                     tree.m_pager->upgrade(right.page);
                     Calico_Try_R(internal_rotate_right(tree, parent, node, right, itr.index()));
