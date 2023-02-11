@@ -49,23 +49,28 @@ CPU:            16 * 12th Gen Intel(R) Core(TM) i5-12600K
 CPUCache:       20480 KB
 ```
 
-A commit was performed on the CalicoDB instance every 1,000 writes. 
+The CalicoDB instance was only committed after all writes were finished (the call to `kyotocabinet::TreeDB::synchronize()` in `DBSynchronize()` was replaced with a call to `Calico::Database::commit()`). 
 Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name           | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:-------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>    |                      542,299 |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup> |                      174,095 |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>  |                       73,249 |                     173,461 |                    288,684 |
-| `readrandom`             |                      458,505 |                     515,198 |                    413,907 |
-| `readseq`                |                    2,369,668 |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`           |                          425 |                       5,215 |                     11,387 |
+| `fillseq`<sup>*</sup>    |                      154,895 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup> |                      100,331 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>  |                       93,093 |                     173,461 |                    288,684 |
+| `readrandom`             |                      459,770 |                     515,198 |                    413,907 |
+| `readseq`                |                    2,386,635 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`           |                          356 |                       5,215 |                     11,387 |
 | `fillseq100k`            |                          285 |                       6,731 |                      9,560 |
-| `readseq100k`            |                       14,292 |                      49,232 |                     65,557 |
-| `readrand100k`           |                       17,509 |                      10,894 |                     66,028 |
+| `readseq100k`            |                       18,239 |                      49,232 |                     65,557 |
+| `readrand100k`           |                       20,263 |                      10,894 |                     66,028 |
 
-<sup>*</sup> These benchmarks are affected by the fact that we only commit every 1,000 writes.
+<sup>*</sup> These benchmarks are affected by the fact that we don't commit.
+The call to `Database::commit()` will flush pages from older transactions, advance the WAL to a new segment, and possibly remove obsolete WAL segments, so it has quite a bit of overhead.
 For this reason, the SQLite3 benchmarks actually list the results for the much faster batched versions, which commit every 1,000 writes (i.e. `fillseq` is actually `fillseqbatch` for SQLite3).
+
+Additional work will need to be done to reduce the overhead of committing a transaction, among other things.
+These benchmark results can be the baseline, with the right two columns as eventual targets.
+CalicoDB shouldn't ever be slower than this.
 
 ## TODO
 1. Get everything code reviewed!
