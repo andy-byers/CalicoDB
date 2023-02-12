@@ -920,6 +920,22 @@ TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnLeft)
     validate();
 }
 
+TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnMiddle)
+{
+//    for (unsigned i {}; i < 10'000; ++i) {
+//        char key[3] {};
+//        put_u16(key, 9'999 - i);
+//        ASSERT_TRUE(tree->insert({key, 2}, "v").has_value());
+//    }
+    for (Size i {}, j {9'999}; i < j; ++i, --j) {
+        ASSERT_TRUE(tree->insert(Tools::integral_key<100>(i), "v").has_value());
+        ASSERT_TRUE(tree->insert(Tools::integral_key<100>(j), "v").has_value());
+        if (i % 1'000 == 99) {
+            validate();
+        }
+    }
+}
+
 static auto random_key(BPlusTreeTests &test)
 {
     const auto key_size = test.random.Next<Size>(1, 10);

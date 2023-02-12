@@ -396,8 +396,7 @@ public:
         if (itr.index() > 0) {
             Calico_New_R(left, acquire_node(tree, read_child_id(parent, itr.index() - 1)));
             if (usable_space(left) > max_usable_space(left) / 2) {
-                const auto first = read_cell(node, 0);
-                if (first.size >= node.overflow->size) {
+                if (read_cell(node, 0).size >= node.overflow->size) {
                     tree.m_pager->upgrade(left.page);
                     Calico_Try_R(internal_rotate_left(tree, parent, left, node, itr.index() - 1));
                     write_cell(node, node.overflow_index - 1, *std::exchange(node.overflow, std::nullopt));
@@ -406,6 +405,12 @@ public:
                     release_node(tree, std::move(left));
                     return true;
                 }
+                //         94:[48,          84,                      9910]
+                // 25:[...]       72:[60,72]   133:[96,105,9898,9904]     115:[...]
+
+                //         94:[48,             96,                      9910]
+                // 25:[...]       72:[60,72,84]   133:[105,96,9898,9904]     115:[...]
+
                 // TODO: Node has overflowed and is internal so it should have at least 4 cells, not including the overflow cell. At least it's
                 //       more than 2. We should be able to iterate with an integer index starting at 1, checking if (a) the separator + the 0th
                 //       cell + all the cells up to the i-1th cell can fit in "left", until we can fit the overflow cell in "node".
@@ -779,8 +784,14 @@ public:
         write_child_id(left, left.header.cell_count - 1, saved_id);
         erase_cell(parent, index, separator.size);
 
+        //         94:[48,          84,                      9910]
+        // 25:[...]       72:[60,72]   133:[96,105,9898,9904]     115:[...]
+        //                           118
+        //         94:[48,             96,                      9910]
+        // 25:[...]       72:[60,72,84]   133:[105,96,9898,9904]     115:[...]
+
         auto lowest = read_cell(right, 0);
-        detach_cell(lowest, scratch_at(tree, 1));
+        detach_cell(lowest, scratch_at(tree, 2));
         erase_cell(right, 0);
         write_child_id(lowest, left.page.id());
         write_cell(parent, index, lowest);
@@ -845,7 +856,7 @@ public:
         erase_cell(parent, index, separator.size);
 
         auto highest = read_cell(left, left.header.cell_count - 1);
-        detach_cell(highest, scratch_at(tree, 1));
+        detach_cell(highest, scratch_at(tree, 2));
         write_child_id(highest, left.page.id());
         erase_cell(left, left.header.cell_count - 1, highest.size);
         write_cell(parent, index, highest);
