@@ -10,6 +10,33 @@ namespace Calico {
 
 class Pager;
 
+/*
+ *
+ */
+class PointerMap {
+    Size m_usable_size {};
+
+public:
+    enum Type: Byte {
+        NODE = 1,
+        OVERFLOW_LINK,
+        FREELIST_LINK,
+    };
+
+    struct Entry {
+        Id back_ptr;
+        Type type {};
+    };
+
+    explicit PointerMap(Size page_size)
+        : m_usable_size {page_size - sizeof(Lsn)}
+    {}
+
+    [[nodiscard]] auto lookup_map(Id pid) const -> Id;
+    [[nodiscard]] auto read_entry(const Page &map, Id pid) -> Entry;
+    auto write_entry(Pager *pager, Page &map, Id pid, Entry entry) -> void;
+};
+
 class FreeList {
     Pager *m_pager {};
     Id m_head;

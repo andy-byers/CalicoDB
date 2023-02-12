@@ -87,7 +87,6 @@ auto write_chain(Pager &pager, FreeList &free_list, Slice overflow) -> tl::expec
                 return tl::make_unexpected(error);
             }));
 
-//        pager.upgrade(page);
         auto content = get_writable_content(page, overflow.size());
         mem_copy(content, overflow, content.size());
         overflow.advance(content.size());
@@ -116,6 +115,65 @@ auto erase_chain(Pager &pager, FreeList &free_list, Id pid, Size size) -> tl::ex
         free_list.push(std::move(page));
     }
     return {};
+}
+
+static constexpr auto ENTRY_SIZE =
+    sizeof(Byte) + // Type
+    sizeof(Id);    // Back pointer
+
+static auto entry_offset(Id map_id, Id pid) -> Size
+{
+    CALICO_EXPECT_GT(pid, map_id);
+
+    // Account for the page LSN.
+    return sizeof(Lsn) + (pid.value-map_id.value-1)*ENTRY_SIZE;
+}
+
+static auto decode_entry(const Byte *data) -> PointerMap::Entry
+{
+    PointerMap::Entry entry;
+    entry.type = PointerMap::Type {*data++};
+    entry.back_ptr.value = get_u64(data);
+    return entry;
+}
+
+auto PointerMap::read_entry(const Page &map, Id pid) -> Entry
+{
+    CALICO_EXPECT_NE(lookup_map(pid), pid);
+    CALICO_EXPECT_EQ(lookup_map(pid), map.id());
+    const auto offset = entry_offset(map.id(), pid);
+    CALICO_EXPECT_LE(offset + ENTRY_SIZE, m_usable_size + sizeof(Lsn));
+    return decode_entry(map.data() + offset);
+}
+
+auto PointerMap::write_entry(Pager *pager, Page &map, Id pid, Entry entry) -> void
+{
+    CALICO_EXPECT_NE(lookup_map(pid), pid);
+    CALICO_EXPECT_EQ(lookup_map(pid), map.id());
+    const auto offset = entry_offset(map.id(), pid);
+    CALICO_EXPECT_LE(offset + ENTRY_SIZE, m_usable_size + sizeof(Lsn));
+    const auto [back_ptr, type] = decode_entry(map.data() + offset);
+    if (entry.back_ptr != back_ptr || entry.type != type) {
+        if (!map.is_writable()) {
+            CALICO_EXPECT_NE(pager, nullptr);
+            pager->upgrade(map);
+        }
+        auto data = map.span(offset, ENTRY_SIZE).data();
+        *data++ = entry.type;
+        put_u64(data, entry.back_ptr.value);
+    }
+}
+
+auto PointerMap::lookup_map(Id pid) const -> Id
+{
+    // Root page (1) has no parents, and page 2 is the first pointer map page. If "pid" is a pointer map
+    // page, "pid" will be returned.
+    if (pid.value < 2) {
+        return Id::null();
+    }
+    const auto inc = m_usable_size/ENTRY_SIZE + 1;
+    const auto idx = (pid.value-2) / inc;
+    return {idx*inc + 2};
 }
 
 } // namespace Calico

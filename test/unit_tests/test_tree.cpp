@@ -1216,4 +1216,103 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
 
+class PointerMapTests: public testing::TestWithParam<Size> {
+public:
+    [[nodiscard]]
+    static auto map_size() -> Size
+    {
+        return (GetParam()-sizeof(Lsn)) / (sizeof(Byte)+sizeof(Id));
+    }
+
+    PointerMap map {GetParam()};
+};
+
+TEST_P(PointerMapTests, FirstPointerMapIsPage2)
+{
+    ASSERT_EQ(map.lookup_map(Id {0}), Id {0});
+    ASSERT_EQ(map.lookup_map(Id {1}), Id {0});
+    ASSERT_EQ(map.lookup_map(Id {2}), Id {2});
+    ASSERT_EQ(map.lookup_map(Id {3}), Id {2});
+    ASSERT_EQ(map.lookup_map(Id {4}), Id {2});
+    ASSERT_EQ(map.lookup_map(Id {5}), Id {2});
+}
+
+TEST_P(PointerMapTests, ReadsAndWritesEntries)
+{
+    std::string buffer(GetParam(), '\0');
+    Page map_page {Id {2}, buffer, true};
+
+    ASSERT_EQ(map.lookup_map(Id {0}), Id {0});
+    ASSERT_EQ(map.lookup_map(Id {1}), Id {0});
+    ASSERT_EQ(map.lookup_map(Id {2}), Id {2});
+    ASSERT_EQ(map.lookup_map(Id {3}), Id {2});
+    ASSERT_EQ(map.lookup_map(Id {4}), Id {2});
+    ASSERT_EQ(map.lookup_map(Id {5}), Id {2});
+}
+
+TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
+{
+    std::string buffer(GetParam() + 8, '\0');
+    auto backing = Span {buffer}.truncate(GetParam());
+    Page map_page {Id {2}, backing, true};
+
+    for (Size i {}; i < map_size(); ++i) {
+        const Id id {i + 3};
+        auto map_id = map.lookup_map(id);
+        ASSERT_EQ(map_id.value, 2);
+        const PointerMap::Entry entry {id, PointerMap::NODE};
+        map.write_entry(nullptr, map_page, id, entry);
+    }
+    for (Size i {}; i < map_size(); ++i) {
+        const Id id {i + 3};
+        auto map_id = map.lookup_map(id);
+        ASSERT_EQ(map_id.value, 2);
+        const auto entry = map.read_entry(map_page, id);
+        ASSERT_EQ(entry.back_ptr.value, id.value);
+        ASSERT_EQ(entry.type, PointerMap::NODE);
+    }
+    const auto result = Slice{buffer}.advance(GetParam());
+    const Slice blank {"\0\0\0\0\0\0\0\0", 8};
+    ASSERT_EQ(blank, result);
+}
+
+TEST_P(PointerMapTests, MapPagesAreRecognized)
+{
+    Id id {2};
+    ASSERT_EQ(map.lookup_map(id), id);
+
+    // Back pointers for the next "map.map_size()" pages are stored on page 2. The next pointermap page is
+    // the page following the last page whose back pointer is on page 2. This pattern continues forever.
+    for (Size i {}; i < 1'000'000; ++i) {
+        id.value += map_size() + 1;
+        ASSERT_EQ(map.lookup_map(id), id);
+    }
+}
+
+TEST_P(PointerMapTests, FindsCorrectMapPages)
+{
+    Size counter {};
+    Id map_id {2};
+
+    for (Id pid {3}; pid.value <= 100 * map_size(); ++pid.value) {
+        if (counter++ == map_size()) {
+            // Found a map page. Calls to find() with a page ID between this page and the next map page
+            // should map to this page ID.
+            map_id.value += map_size() + 1;
+            counter = 0;
+        } else {
+            ASSERT_EQ(map.lookup_map(pid), map_id);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PointerMapTests,
+    PointerMapTests,
+    ::testing::Values(
+        MINIMUM_PAGE_SIZE,
+        MINIMUM_PAGE_SIZE * 2,
+        MAXIMUM_PAGE_SIZE / 2,
+        MAXIMUM_PAGE_SIZE));
+
 } // namespace Calico
