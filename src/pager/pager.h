@@ -45,7 +45,7 @@ public:
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status>;
     [[nodiscard]] auto acquire(Id pid) -> tl::expected<Page, Status>;
-    auto upgrade(Page &page) -> void;
+    auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
     auto save_state(FileHeader &header) -> void;
 
@@ -56,7 +56,7 @@ private:
     [[nodiscard]] auto pin_frame(Id pid) -> Status;
     [[nodiscard]] auto do_pin_frame(Id pid) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
-    auto watch_page(Page &page, PageCache::Entry &entry) -> void;
+    auto watch_page(Page &page, PageCache::Entry &entry, int important) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
 
     FrameBuffer m_framer;

@@ -72,7 +72,7 @@ public:
             }
         };
         Calico_New_R(page, fetch_unused_page());
-        tree.m_pager->upgrade(page);
+//        tree.m_pager->upgrade(page);
 
         return make_new_node(tree, std::move(page), is_external);
     }

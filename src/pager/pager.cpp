@@ -227,11 +227,18 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
     return true;
 }
 
-auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
+auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> void
 {
     // This function needs external synchronization!
     CALICO_EXPECT_GT(m_framer.ref_sum(), 0);
     const auto lsn = read_page_lsn(page);
+
+    Size watch_size;
+    if (important < 0) {
+        watch_size = page.size();
+    } else {
+        watch_size = static_cast<Size>(important);
+    }
 
     // Make sure this page is in the dirty list. LSN is saved to determine when the page should be written back.
     if (!entry.token.has_value()) {
@@ -240,15 +247,18 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry) -> void
 
     if (*m_in_txn && lsn <= *m_commit_lsn) {
         const auto next_lsn = m_wal->current_lsn();
+        const auto image = page.view(0, watch_size);
         m_wal->log(encode_full_image_payload(
-            next_lsn, page.id(), page.view(0), *m_scratch));
+            next_lsn, page.id(), image, *m_scratch));
         write_page_lsn(page, next_lsn);
     }
 }
 
 auto Pager::allocate() -> tl::expected<Page, Status>
 {
-    return acquire(Id::from_index(m_framer.page_count()));
+    Calico_New_R(page, acquire(Id::from_index(m_framer.page_count())));
+    upgrade(page, 0);
+    return page;
 }
 
 auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
@@ -290,12 +300,13 @@ auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
     return do_acquire(m_registry.get(pid)->value);
 }
 
-auto Pager::upgrade(Page &page) -> void
+auto Pager::upgrade(Page &page, int important) -> void
 {
+    CALICO_EXPECT_LE(important, static_cast<int>(page.size()));
     auto itr = m_registry.get(page.id());
     CALICO_EXPECT_NE(itr, m_registry.end());
     m_framer.upgrade(itr->value.index, page);
-    watch_page(page, itr->value);
+    watch_page(page, itr->value, important);
 }
 
 auto Pager::release(Page page) -> void

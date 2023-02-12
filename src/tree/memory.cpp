@@ -5,9 +5,15 @@
 namespace Calico {
 
 [[nodiscard]]
-static auto header_offset() -> Size
+static constexpr auto header_offset() -> Size
 {
-    return sizeof(Lsn) + sizeof(Byte);
+    return sizeof(Lsn);
+}
+
+[[nodiscard]]
+static constexpr auto content_offset() -> Size
+{
+    return header_offset() + sizeof(Id);
 }
 
 [[nodiscard]]
@@ -24,15 +30,13 @@ static auto write_next_id(Page &page, Id next_id) -> void
 [[nodiscard]]
 static auto get_readable_content(const Page &page, Size size_limit) -> Slice
 {
-    const auto offset = header_offset() + sizeof(Lsn);
-    return page.view(offset, std::min(size_limit, page.size() - offset));
+    return page.view(content_offset(), std::min(size_limit, page.size() - content_offset()));
 }
 
 [[nodiscard]]
 static auto get_writable_content(Page &page, Size size_limit) -> Span
 {
-    const auto offset = header_offset() + sizeof(Lsn);
-    return page.span(offset, std::min(size_limit, page.size() - offset));
+    return page.span(content_offset(), std::min(size_limit, page.size() - content_offset()));
 }
 
 auto FreeList::push(Page page) -> void
@@ -47,6 +51,7 @@ auto FreeList::pop() -> tl::expected<Page, Status>
 {
     if (!m_head.is_null()) {
         Calico_New_R(page, m_pager->acquire(m_head));
+        m_pager->upgrade(page, content_offset());
         m_head = read_next_id(page);
         return page;
     }
@@ -82,7 +87,7 @@ auto write_chain(Pager &pager, FreeList &free_list, Slice overflow) -> tl::expec
                 return tl::make_unexpected(error);
             }));
 
-        pager.upgrade(page);
+//        pager.upgrade(page);
         auto content = get_writable_content(page, overflow.size());
         mem_copy(content, overflow, content.size());
         overflow.advance(content.size());

@@ -44,13 +44,12 @@ TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
     ASSERT_TRUE(empty.empty());
 }
 
-#if not NDEBUG
-TEST_F(DeltaCompressionTest, InsertEmptyDeltaDeathTest)
+TEST_F(DeltaCompressionTest, InsertingEmptyDeltaDoesNothing)
 {
     ChangeBuffer deltas;
-    ASSERT_DEATH(insert_delta(deltas, {123, 0}), EXPECTATION_MATCHER);
+    insert_delta(deltas, {123, 0});
+    ASSERT_TRUE(deltas.empty());
 }
-#endif // not NDEBUG
 
 TEST_F(DeltaCompressionTest, CompressingSingleDeltaDoesNothing)
 {
@@ -618,7 +617,7 @@ public:
     {
         auto r = pager->allocate();
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-        pager->upgrade(*r);
+//        pager->upgrade(*r);
         write_to_page(*r, message);
         return std::move(*r);
     }

@@ -6,7 +6,11 @@ namespace Calico {
 
 static auto apply_undo(Page &page, const FullImageDescriptor &image)
 {
-    mem_copy(page.span(0, page.size()), image.image);
+    const auto data = image.image;
+    mem_copy(page.span(0, data.size()), data);
+    if (page.size() > data.size()) {
+        mem_clear(page.span(data.size(), page.size() - data.size()));
+    }
 }
 
 static auto apply_redo(Page &page, const DeltaDescriptor &deltas)
