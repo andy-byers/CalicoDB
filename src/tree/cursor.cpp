@@ -23,10 +23,20 @@ auto CursorImpl::status() const -> Status
 auto CursorImpl::key() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
+    if (!m_key.empty()) {
+        return m_key;
+    }
     if (auto node = CursorInternal::action_acquire(*this, m_loc.pid)) {
-        m_buffer = read_key(*node, m_loc.index).to_string();
+        auto cell = read_cell(*node, m_loc.index);
+        m_key = read_key(cell).to_string();
+        if (m_value.empty() && cell.local_ps == cell.total_ps) {
+            m_value = Slice {
+                cell.key + cell.key_size,
+                cell.total_ps - cell.key_size,
+            }.to_string();
+        }
         CursorInternal::action_release(*this, std::move(*node));
-        return m_buffer;
+        return m_key;
     } else {
         CursorInternal::invalidate(*this, node.error());
         return {};
@@ -36,10 +46,13 @@ auto CursorImpl::key() const -> Slice
 auto CursorImpl::value() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
+    if (!m_value.empty()) {
+        return m_value;
+    }
     if (auto node = CursorInternal::action_acquire(*this, m_loc.pid)) {
         if (auto value = CursorInternal::action_collect(*this, std::move(*node), m_loc.index)) {
-            m_buffer = *value;
-            return m_buffer;
+            m_value = *value;
+            return m_value;
         } else {
             CursorInternal::invalidate(*this, value.error());
         }
@@ -135,6 +148,8 @@ auto CursorInternal::seek_last(CursorImpl &cursor) -> void
 auto CursorInternal::seek_left(CursorImpl &cursor) -> void
 {
     CALICO_EXPECT_TRUE(cursor.is_valid());
+    cursor.m_key.clear();
+    cursor.m_value.clear();
     if (cursor.m_loc.index != 0) {
         cursor.m_loc.index--;
     } else if (auto node = action_acquire(cursor, Id {cursor.m_loc.pid})) {
@@ -162,6 +177,8 @@ auto CursorInternal::seek_left(CursorImpl &cursor) -> void
 auto CursorInternal::seek_right(CursorImpl &cursor) -> void
 {
     CALICO_EXPECT_TRUE(cursor.is_valid());
+    cursor.m_key.clear();
+    cursor.m_value.clear();
     if (++cursor.m_loc.index < cursor.m_loc.count) {
         return;
     }
@@ -194,6 +211,9 @@ auto CursorInternal::seek_to(CursorImpl &cursor, Node node, Size index) -> void
     const auto count = node.header.cell_count;
     action_release(cursor, std::move(node));
 
+    cursor.m_key.clear();
+    cursor.m_value.clear();
+
     if (count && index < count) {
         cursor.m_loc.index = static_cast<PageSize>(index);
         cursor.m_loc.count = static_cast<PageSize>(count);
@@ -207,19 +227,8 @@ auto CursorInternal::seek_to(CursorImpl &cursor, Node node, Size index) -> void
 auto CursorInternal::seek(CursorImpl &cursor, const Slice &key) -> void
 {
     if (auto slot = action_search(cursor, key)) {
-        auto [node, index, exact] = std::move(*slot);
-        const auto count = node.header.cell_count;
-        const auto pid = node.page.id();
-        action_release(cursor, std::move(node));
-
-        if (count && index < count) {
-            cursor.m_loc.index = static_cast<PageSize>(index);
-            cursor.m_loc.count = static_cast<PageSize>(count);
-            cursor.m_loc.pid = pid;
-            cursor.m_status = Status::ok();
-        } else {
-            invalidate(cursor, default_error_status());
-        }
+        auto [node, index, _] = std::move(*slot);
+        seek_to(cursor, std::move(node), index);
     } else {
         invalidate(cursor, slot.error());
     }

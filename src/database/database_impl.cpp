@@ -349,9 +349,9 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
     }
 }
 
-auto DatabaseImpl::vacuum(std::string, const Options &) -> Status
+auto DatabaseImpl::vacuum(std::string, Options) -> Status
 {
-    return Status::logic_error("<NOT IMPLEMENTED>");
+    return Status::logic_error("<NOT IMPLEMENTED>"); // TODO
 }
 
 auto DatabaseImpl::commit() -> Status

@@ -38,7 +38,8 @@ private:
         PageSize count {};
     };
     mutable Status m_status;
-    mutable std::string m_buffer;
+    mutable std::string m_key;
+    mutable std::string m_value;
     const CursorActions *m_actions {};
     Location m_loc;
 };

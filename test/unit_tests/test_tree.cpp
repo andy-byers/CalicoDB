@@ -1043,14 +1043,24 @@ protected:
     }
 };
 
+TEST_P(CursorTests, KeyAndValueUseSeparateStorage)
+{
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    cursor->seek_first();
+    ASSERT_TRUE(cursor->is_valid());
+    const auto k = cursor->key();
+    const auto v = cursor->value();
+    ASSERT_NE(k, v);
+}
+
 TEST_P(CursorTests, SeeksForward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     cursor->seek_first();
     for (Size i {}; i < RECORD_COUNT; ++i) {
         ASSERT_TRUE(cursor->is_valid());
-        ASSERT_EQ(cursor->key().to_string(), Tools::integral_key(i));
-        ASSERT_EQ(cursor->value().to_string(), make_value('v'));
+        ASSERT_EQ(cursor->key(), Tools::integral_key(i));
+        ASSERT_EQ(cursor->value(), make_value('v'));
         cursor->next();
     }
     ASSERT_FALSE(cursor->is_valid());

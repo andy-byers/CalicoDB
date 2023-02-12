@@ -33,7 +33,7 @@ public:
 
     [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] static auto repair(const std::string &path, const Options &options) -> Status;
-    [[nodiscard]] static auto vacuum(std::string path, const Options &options) -> Status;
+    [[nodiscard]] static auto vacuum(std::string path, Options options) -> Status;
     [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
 
     [[nodiscard]] auto new_cursor() const -> Cursor * override;

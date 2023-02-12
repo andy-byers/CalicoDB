@@ -59,7 +59,7 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
     ASSERT_TRUE(storage->file_exists(prefix + "data").is_not_found());
     ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
-
+//
 //TEST(ExpensiveTests, OneMillionRecords)
 //{
 //    const auto path = "/tmp/calico_one_million";
@@ -89,6 +89,30 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
 //    delete db;
 //
 ////    expect_ok(Database::destroy(path, {}));
+//}
+//
+//TEST(ExpensiveTests, Vacuum)
+//{
+//    const auto path = "/tmp/calico_vacuum";
+//    std::filesystem::remove_all(path);
+//
+//    Database *db;
+//    expect_ok(Database::open(path, {}, &db));
+//
+//    const Slice value {"value"};
+//    for (Size i {}; i < 1'000; ++i) {
+//        expect_ok(db->put(Tools::integral_key(i), value));
+//        if (i % 100 == 9'999) {
+//            expect_ok(db->commit());
+//        }
+//    }
+//    expect_ok(db->commit());
+//
+//    delete db;
+//
+//    expect_ok(Database::vacuum(path, {}));
+//
+//    //    expect_ok(Database::destroy(path, {}));
 //}
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
@@ -189,6 +213,50 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     Options options;
     invalid.page_size = options.page_size - 1;
     ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
+}
+
+TEST_F(BasicDatabaseTests, TwoDatabases)
+{
+    Database *lhs;
+    expect_ok(Database::open("/tmp/calico_test_1", options, &lhs));
+
+    Database *rhs;
+    expect_ok(Database::open("/tmp/calico_test_2", options, &rhs));
+
+    for (Size i {}; i < 10; ++i) {
+        expect_ok(lhs->put(Tools::integral_key(i), "value"));
+    }
+    expect_ok(lhs->commit());
+
+    auto *cursor = lhs->new_cursor();
+    cursor->seek_first();
+    while (cursor->is_valid()) {
+        const auto k = cursor->key();
+        const auto v = cursor->value();
+        expect_ok(rhs->put(k, v));
+        cursor->next();
+    }
+    delete cursor;
+
+    expect_ok(rhs->commit());
+
+    Size i {};
+    cursor = rhs->new_cursor();
+    cursor->seek_first();
+    while (cursor->is_valid()) {
+        const auto k = cursor->key();
+        const auto v = cursor->value();
+        ASSERT_EQ(k, Tools::integral_key(i++));
+        ASSERT_EQ(v, "value");
+        cursor->next();
+    }
+    delete cursor;
+
+    delete lhs;
+    delete rhs;
+
+    expect_ok(Database::destroy("/tmp/calico_test_1", options));
+    expect_ok(Database::destroy("/tmp/calico_test_2", options));
 }
 
 class TestDatabase {
