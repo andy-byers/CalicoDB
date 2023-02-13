@@ -183,6 +183,7 @@ auto write_child_id_at(Node &node, Size offset, Id child_id) -> void;
 [[nodiscard]] auto read_overflow_id(const Cell &cell) -> Id;
 auto write_child_id(Node &node, Size index, Id child_id) -> void;
 auto write_child_id(Cell &cell, Id child_id) -> void;
+auto write_overflow_id(Cell &cell, Id overflow_id) -> void;
 
 auto merge_root(Node &root, Node &child) -> void;
 

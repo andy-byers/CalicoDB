@@ -39,23 +39,26 @@ struct FileHeader {
  *     Offset  Size  Name
  *     0       8     page_lsn
  *     8       1     flags
- *     9       8     parent_id
- *     17      8     next_id
- *     25      8     prev_id
- *     33      2     cell_count
- *     35      2     cell_start
- *     37      2     frag_count
- *     39      2     free_start
- *     41      2     free_total
+ *     9       8     next_id
+ *     17      8     prev_id
+ *     25      2     cell_count
+ *     27      2     cell_start
+ *     29      2     frag_count
+ *     31      2     free_start
+ *     33      2     free_total
+ *
+ * TODO: We don't need so many header fields. For instance, instead of caching the total free block bytes, we can just limit the
+ *       list length and null out the last "next pointer". The fragment count can be a single byte. We generally don't accumulate
+ *       too many fragments. We can just defragment when the byte would overflow. The "prev_id" field can be placed at the end
+ *       and omitted in external nodes.
  */
 struct NodeHeader {
-    static constexpr Size SIZE {43};
+    static constexpr Size SIZE {35};
     explicit NodeHeader() = default;
     explicit NodeHeader(const Page &page);
     auto write(Page &page) const -> void;
 
     Lsn page_lsn;
-    Id parent_id;
     Id next_id;
     Id prev_id;
     std::uint16_t cell_count {};

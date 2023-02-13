@@ -27,9 +27,11 @@ class BPlusTree {
     NodeMeta m_internal_meta;
     FreeList m_freelist;
     PointerMap m_pointers;
+    OverflowList m_overflow;
 
     Pager *m_pager {};
 
+    [[nodiscard]] auto write_external_cell(Node &node, Size index, const Cell &cell) -> tl::expected<void, Status>;
     [[nodiscard]] auto make_existing_node(Page page) -> Node;
     [[nodiscard]] auto make_fresh_node(Page page, bool is_external) -> Node;
     [[nodiscard]] auto scratch(Size index) -> Byte *;

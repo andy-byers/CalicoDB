@@ -57,6 +57,24 @@ public:
     auto push(Page page) -> void;
 };
 
+class OverflowList {
+    Pager *m_pager {};
+    FreeList *m_freelist {};
+    PointerMap *m_pointers {};
+
+public:
+    friend class BPlusTree;
+
+    explicit OverflowList(Pager &pager, FreeList &freelist, PointerMap &pointers)
+        : m_pager {&pager},
+          m_freelist {&freelist},
+          m_pointers {&pointers} {}
+
+    [[nodiscard]] auto read_chain(Id pid, Span out) -> tl::expected<void, Status>;
+    [[nodiscard]] auto write_chain(Slice overflow) -> tl::expected<Id, Status>;
+    [[nodiscard]] auto erase_chain(Id pid, Size size) -> tl::expected<void, Status>;
+};
+
 [[nodiscard]] auto read_chain(Pager &pager, Id pid, Span out) -> tl::expected<void, Status>;
 [[nodiscard]] auto write_chain(Pager &pager, FreeList &free_list, Slice overflow) -> tl::expected<Id, Status>;
 [[nodiscard]] auto erase_chain(Pager &pager, FreeList &free_list, Id pid, Size size) -> tl::expected<void, Status>;

@@ -78,9 +78,6 @@ NodeHeader::NodeHeader(const Page &page)
     // Flags byte.
     is_external = *data++;
 
-    parent_id.value = get_u64(data);
-    data += sizeof(Id);
-
     next_id.value = get_u64(data);
     data += sizeof(Id);
 
@@ -110,9 +107,6 @@ auto NodeHeader::write(Page &page) const -> void
     data += sizeof(Id);
 
     *data++ = static_cast<Byte>(is_external);
-
-    put_u64(data, parent_id.value);
-    data += sizeof(Id);
 
     put_u64(data, next_id.value);
     data += sizeof(Id);
