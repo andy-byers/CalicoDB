@@ -59,9 +59,9 @@ private:
     auto watch_page(Page &page, PageCache::Entry &entry, int important) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
 
-    FrameBuffer m_framer;
+    FrameBuffer m_frames;
     PageList m_dirty;
-    PageCache m_registry;
+    PageCache m_cache;
     Lsn m_recovery_lsn;
     Lsn *m_commit_lsn {};
     bool *m_in_txn {};

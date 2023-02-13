@@ -53,6 +53,17 @@ static constexpr auto EXPECTATION_MATCHER = "^expectation";
         ASSERT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.what().data(); \
     } while (0)
 
+#define EXPECT_HAS_VALUE(expr) \
+    do { \
+        const auto &expect_has_value_status = (expr); \
+        EXPECT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().what().data(); \
+    } while (0)
+
+#define ASSERT_HAS_VALUE(expr) \
+    do { \
+        const auto &expect_has_value_status = (expr); \
+        ASSERT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().what().data(); \
+    } while (0)
 
 [[nodiscard]]
 inline auto expose_message(const Status &s)

@@ -25,8 +25,8 @@ class BPlusTree {
 
     NodeMeta m_external_meta;
     NodeMeta m_internal_meta;
-    FreeList m_freelist;
     PointerMap m_pointers;
+    FreeList m_freelist;
     OverflowList m_overflow;
 
     Pager *m_pager {};
@@ -39,8 +39,9 @@ class BPlusTree {
     [[nodiscard]] auto acquire(Id pid, bool upgrade = false) -> tl::expected<Node, Status>;
     [[nodiscard]] auto lowest() -> tl::expected<Node, Status>;
     [[nodiscard]] auto highest() -> tl::expected<Node, Status>;
+    [[nodiscard]] auto destroy(Node node) -> tl::expected<void, Status>;
     auto release(Node node) const -> void;
-    auto destroy(Node node) -> void;
+
 public:
 
     explicit BPlusTree(Pager &pager);

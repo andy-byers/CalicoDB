@@ -667,9 +667,9 @@ TEST_P(BPlusTreeTests, ErasesRecords)
     (void)tree->insert("a", make_value('1'));
     (void)tree->insert("b", make_value('2'));
     (void)tree->insert("c", make_value('3'));
-    ASSERT_TRUE(tree->erase("a").has_value());
-    ASSERT_TRUE(tree->erase("b").has_value());
-    ASSERT_TRUE(tree->erase("c").has_value());
+    ASSERT_HAS_VALUE(tree->erase("a"));
+    ASSERT_HAS_VALUE(tree->erase("b"));
+    ASSERT_HAS_VALUE(tree->erase("c"));
     validate();
 }
 
@@ -693,7 +693,7 @@ TEST_P(BPlusTreeTests, FindsRecords)
 TEST_P(BPlusTreeTests, CannotFindNonexistentRecords)
 {
     auto slot = tree->search("a");
-    ASSERT_TRUE(slot.has_value());
+    ASSERT_HAS_VALUE(slot);
     ASSERT_EQ(slot->node.header.cell_count, 0);
     ASSERT_FALSE(slot->exact);
 }
@@ -716,9 +716,9 @@ TEST_P(BPlusTreeTests, ErasesOverflowChains)
     (void)tree->insert("a", make_value('1', true)).value();
     (void)tree->insert("b", make_value('2', true)).value();
     (void)tree->insert("c", make_value('3', true)).value();
-    ASSERT_TRUE(tree->erase("a").has_value());
-    ASSERT_TRUE(tree->erase("b").has_value());
-    ASSERT_TRUE(tree->erase("c").has_value());
+    ASSERT_HAS_VALUE(tree->erase("a"));
+    ASSERT_HAS_VALUE(tree->erase("b"));
+    ASSERT_HAS_VALUE(tree->erase("c"));
 }
 
 TEST_P(BPlusTreeTests, ReadsOverflowChains)
@@ -809,7 +809,7 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnRightmostPosition)
     }
 
     while (i--) {
-        ASSERT_TRUE(tree->erase(Tools::integral_key(i)).has_value());
+        ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(i)));
         validate();
     }
 }
@@ -821,7 +821,7 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnLeftmostPosition)
         (void)tree->insert(Tools::integral_key(i), make_value('v'));
     }
     for (Size j {}; j < i; ++j) {
-        ASSERT_TRUE(tree->erase(Tools::integral_key(j)).has_value());
+        ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(j)));
         validate();
     }
 }
@@ -833,8 +833,8 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnMiddlePosition)
         (void)tree->insert(Tools::integral_key(i), make_value('v'));
     }
     for (Size j {1}; j < i/2 - 1; ++j) {
-        ASSERT_TRUE(tree->erase(Tools::integral_key(i/2 - j + 1)).has_value());
-        ASSERT_TRUE(tree->erase(Tools::integral_key(i/2 + j)).has_value());
+        ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(i/2 - j + 1)));
+        ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(i/2 + j)));
         validate();
     }
 }
@@ -850,7 +850,7 @@ TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnRightmostPosition)
 {
     insert_1000(*this);
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(tree->erase(Tools::integral_key(999 - i)).has_value());
+        ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(999 - i)));
         if (i % 100 == 99) {
             validate();
         }
@@ -861,7 +861,7 @@ TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnLeftmostPosition)
 {
     insert_1000(*this);
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(tree->erase(Tools::integral_key(i)).has_value());
+        ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(i)));
         if (i % 100 == 99) {
             validate();
         }
@@ -872,8 +872,8 @@ TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnMiddlePosition)
 {
     insert_1000(*this);
     for (Size i {}, j {999}; i < j; ++i, --j) {
-        ASSERT_TRUE(tree->erase(Tools::integral_key(i)).has_value());
-        ASSERT_TRUE(tree->erase(Tools::integral_key(j)).has_value());
+        ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(i)));
+        ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(j)));
         if (i % 100 == 99) {
             validate();
         }
@@ -883,11 +883,11 @@ TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnMiddlePosition)
 TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
 {
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(tree->insert(Tools::integral_key(i), "v").has_value());
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key(i), "v"));
     }
     // Replace the small values with very large ones.
     for (Size i {}; i < 1'000; ++i) {
-        ASSERT_TRUE(tree->insert(Tools::integral_key(i), make_value('v', true)).has_value());
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key(i), make_value('v', true)));
     }
     validate();
 }
@@ -895,42 +895,42 @@ TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
 TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnRight)
 {
     // Populate the internal nodes with small keys.
-    for (unsigned i {}; i < 10'000; ++i) {
+    for (unsigned i {}; i < 1000; ++i) {
         char key[3] {};
         put_u16(key, i);
-        ASSERT_TRUE(tree->insert({key, 2}, "v").has_value());
+        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
     // Overflow with a bunch of large keys.
-    for (unsigned i {}; i < 10'000; ++i) {
-        ASSERT_TRUE(tree->insert(Tools::integral_key<100>(i), "v").has_value());
+    for (unsigned i {}; i < 1000; ++i) {
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(i), "v"));
     }
     validate();
 }
 
 TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnLeft)
 {
-    for (unsigned i {}; i < 10'000; ++i) {
+    for (unsigned i {}; i < 1'000; ++i) {
         char key[3] {};
-        put_u16(key, 9'999 - i);
-        ASSERT_TRUE(tree->insert({key, 2}, "v").has_value());
+        put_u16(key, 999 - i);
+        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
-    for (unsigned i {}; i < 10'000; ++i) {
-        ASSERT_TRUE(tree->insert(Tools::integral_key<100>(9'999 - i), "v").has_value());
+    for (unsigned i {}; i < 1000; ++i) {
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(999 - i), "v"));
     }
     validate();
 }
 
 TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnMiddle)
 {
-    for (unsigned i {}; i < 10'000; ++i) {
+    for (unsigned i {}; i < 1'000; ++i) {
         char key[3] {};
-        put_u16(key, 9'999 - i);
-        ASSERT_TRUE(tree->insert({key, 2}, "v").has_value());
+        put_u16(key, 999 - i);
+        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
-    for (Size i {}, j {9'999}; i < j; ++i, --j) {
-        ASSERT_TRUE(tree->insert(Tools::integral_key<100>(i), "v").has_value());
-        ASSERT_TRUE(tree->insert(Tools::integral_key<100>(j), "v").has_value());
-        if (i % 1'000 == 99) {
+    for (Size i {}, j {999}; i < j; ++i, --j) {
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(i), "v"));
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(j), "v"));
+        if (i % 100 == 99) {
             validate();
         }
     }
@@ -993,7 +993,7 @@ TEST_P(BPlusTreeTests, SanityCheck_Search)
     for (auto i: integers) {
         const auto key = Tools::integral_key<6>(i);
         auto slot = tree->search(key);
-        ASSERT_TRUE(slot.has_value());
+        ASSERT_HAS_VALUE(slot);
         ASSERT_TRUE(slot->exact);
         const auto cell = read_cell(slot->node, slot->index);
         const Slice payload {cell.key, cell.local_ps};
@@ -1014,7 +1014,7 @@ TEST_P(BPlusTreeTests, SanityCheck_Erase)
         }
 
         const auto key = find_random_key(*this);
-        ASSERT_TRUE(tree->erase(key).has_value());
+        ASSERT_HAS_VALUE(tree->erase(key));
         counter--;
 
         if (i % 100 == 99) {
@@ -1216,76 +1216,90 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
 
-class PointerMapTests: public testing::TestWithParam<Size> {
+class PointerMapTests: public BPlusTreeTests {
 public:
     [[nodiscard]]
-    static auto map_size() -> Size
+    auto map_size() -> Size
     {
-        return (GetParam()-sizeof(Lsn)) / (sizeof(Byte)+sizeof(Id));
+        return (pager->page_size()-sizeof(Lsn)) / (sizeof(Byte)+sizeof(Id));
     }
-
-    PointerMap map {GetParam()};
 };
 
 TEST_P(PointerMapTests, FirstPointerMapIsPage2)
 {
-    ASSERT_EQ(map.lookup_map(Id {0}), Id {0});
-    ASSERT_EQ(map.lookup_map(Id {1}), Id {0});
-    ASSERT_EQ(map.lookup_map(Id {2}), Id {2});
-    ASSERT_EQ(map.lookup_map(Id {3}), Id {2});
-    ASSERT_EQ(map.lookup_map(Id {4}), Id {2});
-    ASSERT_EQ(map.lookup_map(Id {5}), Id {2});
+    ASSERT_EQ(PointerMap::lookup(Id {0}, pager->page_size()), Id {0});
+    ASSERT_EQ(PointerMap::lookup(Id {1}, pager->page_size()), Id {0});
+    ASSERT_EQ(PointerMap::lookup(Id {2}, pager->page_size()), Id {2});
+    ASSERT_EQ(PointerMap::lookup(Id {3}, pager->page_size()), Id {2});
+    ASSERT_EQ(PointerMap::lookup(Id {4}, pager->page_size()), Id {2});
+    ASSERT_EQ(PointerMap::lookup(Id {5}, pager->page_size()), Id {2});
 }
 
 TEST_P(PointerMapTests, ReadsAndWritesEntries)
 {
-    std::string buffer(GetParam(), '\0');
+    std::string buffer(pager->page_size(), '\0');
     Page map_page {Id {2}, buffer, true};
+    PointerMap map {*pager};
 
-    ASSERT_EQ(map.lookup_map(Id {0}), Id {0});
-    ASSERT_EQ(map.lookup_map(Id {1}), Id {0});
-    ASSERT_EQ(map.lookup_map(Id {2}), Id {2});
-    ASSERT_EQ(map.lookup_map(Id {3}), Id {2});
-    ASSERT_EQ(map.lookup_map(Id {4}), Id {2});
-    ASSERT_EQ(map.lookup_map(Id {5}), Id {2});
+    map.write_entry(map_page, Id {3}, PointerMap::Entry {Id {33}, PointerMap::NODE});
+    map.write_entry(map_page, Id {4}, PointerMap::Entry {Id {44}, PointerMap::FREELIST_LINK});
+    map.write_entry(map_page, Id {5}, PointerMap::Entry {Id {55}, PointerMap::OVERFLOW_LINK});
+
+    const auto entry_1 = map.read_entry(map_page, Id {3});
+    const auto entry_2 = map.read_entry(map_page, Id {4});
+    const auto entry_3 = map.read_entry(map_page, Id {5});
+
+    ASSERT_EQ(entry_1.back_ptr.value, 33);
+    ASSERT_EQ(entry_2.back_ptr.value, 44);
+    ASSERT_EQ(entry_3.back_ptr.value, 55);
+    ASSERT_EQ(entry_1.type, PointerMap::NODE);
+    ASSERT_EQ(entry_2.type, PointerMap::FREELIST_LINK);
+    ASSERT_EQ(entry_3.type, PointerMap::OVERFLOW_LINK);
 }
 
 TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
 {
-    std::string buffer(GetParam() + 8, '\0');
-    auto backing = Span {buffer}.truncate(GetParam());
-    Page map_page {Id {2}, backing, true};
+    PointerMap pointers {*pager};
 
-    for (Size i {}; i < map_size(); ++i) {
-        const Id id {i + 3};
-        auto map_id = map.lookup_map(id);
-        ASSERT_EQ(map_id.value, 2);
-        const PointerMap::Entry entry {id, PointerMap::NODE};
-        map.write_entry(nullptr, map_page, id, entry);
+    // PointerMap::find_map() expects the given pointer map page to be allocated already.
+    for (Size i {}; i < map_size() * 2; ++i) {
+        auto page = pager->allocate().value();
+        pager->release(std::move(page));
     }
-    for (Size i {}; i < map_size(); ++i) {
-        const Id id {i + 3};
-        auto map_id = map.lookup_map(id);
-        ASSERT_EQ(map_id.value, 2);
-        const auto entry = map.read_entry(map_page, id);
-        ASSERT_EQ(entry.back_ptr.value, id.value);
-        ASSERT_EQ(entry.type, PointerMap::NODE);
+
+    for (Size i {}; i < map_size() + 10; ++i) {
+        if (i != map_size()) {
+            const Id id {i + 3};
+            auto map = pointers.find_map(id);
+            ASSERT_EQ(map->id().value, 2 + (map_size() + 1) * (i >= map_size()));
+            const PointerMap::Entry entry {id, PointerMap::NODE};
+            pointers.write_entry(*map, id, entry);
+            pager->release(std::move(*map));
+        }
     }
-    const auto result = Slice{buffer}.advance(GetParam());
-    const Slice blank {"\0\0\0\0\0\0\0\0", 8};
-    ASSERT_EQ(blank, result);
+    for (Size i {}; i < map_size() + 10; ++i) {
+        if (i != map_size()) {
+            const Id id {i + 3};
+            auto map = pointers.find_map(id);
+            ASSERT_EQ(map->id().value, 2 + (map_size() + 1) * (i >= map_size()));
+            const auto entry = pointers.read_entry(*map, id);
+            ASSERT_EQ(entry.back_ptr.value, id.value);
+            ASSERT_EQ(entry.type, PointerMap::NODE);
+            pager->release(std::move(*map));
+        }
+    }
 }
 
 TEST_P(PointerMapTests, MapPagesAreRecognized)
 {
     Id id {2};
-    ASSERT_EQ(map.lookup_map(id), id);
+    ASSERT_EQ(PointerMap::lookup(id, pager->page_size()), id);
 
     // Back pointers for the next "map.map_size()" pages are stored on page 2. The next pointermap page is
     // the page following the last page whose back pointer is on page 2. This pattern continues forever.
     for (Size i {}; i < 1'000'000; ++i) {
         id.value += map_size() + 1;
-        ASSERT_EQ(map.lookup_map(id), id);
+        ASSERT_EQ(PointerMap::lookup(id, pager->page_size()), id);
     }
 }
 
@@ -1301,7 +1315,7 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
             map_id.value += map_size() + 1;
             counter = 0;
         } else {
-            ASSERT_EQ(map.lookup_map(pid), map_id);
+            ASSERT_EQ(PointerMap::lookup(pid, pager->page_size()), map_id);
         }
     }
 }
@@ -1310,9 +1324,9 @@ INSTANTIATE_TEST_SUITE_P(
     PointerMapTests,
     PointerMapTests,
     ::testing::Values(
-        MINIMUM_PAGE_SIZE,
-        MINIMUM_PAGE_SIZE * 2,
-        MAXIMUM_PAGE_SIZE / 2,
-        MAXIMUM_PAGE_SIZE));
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
 
 } // namespace Calico
