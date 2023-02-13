@@ -14,8 +14,8 @@ class CursorImpl : public Cursor {
 public:
     friend class CursorInternal;
 
-    explicit CursorImpl(const CursorActions &actions)
-        : m_actions {&actions}
+    explicit CursorImpl(BPlusTree &tree)
+        : m_tree {&tree}
     {}
 
     ~CursorImpl() override = default;
@@ -40,7 +40,7 @@ private:
     mutable Status m_status;
     mutable std::string m_key;
     mutable std::string m_value;
-    const CursorActions *m_actions {};
+    BPlusTree *m_tree {};
     Location m_loc;
 };
 

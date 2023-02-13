@@ -89,32 +89,32 @@ auto CursorImpl::previous() -> void
 
 auto CursorInternal::action_collect(const CursorImpl &cursor, Node node, Size index) -> tl::expected<std::string, Status>
 {
-    return cursor.m_actions->collect(*cursor.m_actions->tree, std::move(node), index);
+    return cursor.m_tree->collect(std::move(node), index);
 }
 
 auto CursorInternal::action_acquire(const CursorImpl &cursor, Id pid) -> tl::expected<Node, Status>
 {
-    return cursor.m_actions->acquire(*cursor.m_actions->tree, pid, false);
+    return cursor.m_tree->acquire(pid, false);
 }
 
 auto CursorInternal::action_search(const CursorImpl &cursor, const Slice &key) -> tl::expected<SearchResult, Status>
 {
-    return cursor.m_actions->search(*cursor.m_actions->tree, key);
+    return cursor.m_tree->search(key);
 }
 
 auto CursorInternal::action_lowest(const CursorImpl &cursor) -> tl::expected<Node, Status>
 {
-    return cursor.m_actions->lowest(*cursor.m_actions->tree);
+    return cursor.m_tree->lowest();
 }
 
 auto CursorInternal::action_highest(const CursorImpl &cursor) -> tl::expected<Node, Status>
 {
-    return cursor.m_actions->highest(*cursor.m_actions->tree);
+    return cursor.m_tree->highest();
 }
 
 auto CursorInternal::action_release(const CursorImpl &cursor, Node node) -> void
 {
-    cursor.m_actions->release(*cursor.m_actions->tree, std::move(node));
+    cursor.m_tree->release(std::move(node));
 }
 
 auto CursorInternal::seek_first(CursorImpl &cursor) -> void
@@ -236,7 +236,7 @@ auto CursorInternal::seek(CursorImpl &cursor, const Slice &key) -> void
 
 auto CursorInternal::make_cursor(BPlusTree &tree) -> Cursor *
 {
-    auto *cursor = new(std::nothrow) CursorImpl {tree.m_actions};
+    auto *cursor = new(std::nothrow) CursorImpl {tree};
     if (cursor != nullptr) {
         invalidate(*cursor, default_error_status());
     }

@@ -1017,9 +1017,9 @@ TEST_P(BPlusTreeTests, SanityCheck_Erase)
         ASSERT_TRUE(tree->erase(key).has_value());
         counter--;
 
-        if (i % 100 == 99) {
-            validate();
-        }
+//        if (i % 100 == 99) {
+//        }
+        validate();
     }
 }
 
