@@ -259,6 +259,42 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
     expect_ok(Database::destroy("/tmp/calico_test_2", options));
 }
 
+TEST_F(BasicDatabaseTests, VacuumSanityCheck)
+{
+    const Size LOWER_BOUNDS {500};
+    const auto UPPER_BOUNDS = LOWER_BOUNDS * 2;
+
+    std::unordered_map<std::string, std::string> map;
+    Tools::RandomGenerator random {1'024 * 1'024 * 4};
+
+    Database *db;
+    for (Size iteration {}; iteration < 5; ++iteration) {
+        ASSERT_OK(Database::open(ROOT, options, &db));
+
+        while (map.size() < UPPER_BOUNDS) {
+            const auto key = random.Generate(17);
+            const auto value = random.Generate(options.page_size * 5);
+            ASSERT_OK(db->put(key, value));
+            map[key.to_string()] = value.to_string();
+        }
+        while (map.size() > LOWER_BOUNDS) {
+            const auto key = begin(map)->first;
+            map.erase(key);
+            ASSERT_OK(db->erase(key));
+        }
+        ASSERT_OK(db->commit());
+        ASSERT_OK(db->vacuum());
+        dynamic_cast<DatabaseImpl &>(*db).TEST_validate();
+
+        for (const auto &[key, value]: map) {
+            std::string result;
+            ASSERT_OK(db->get(key, result));
+            ASSERT_EQ(result, value);
+        }
+        delete db;
+    }
+}
+
 class TestDatabase {
 public:
     explicit TestDatabase(Storage &storage)

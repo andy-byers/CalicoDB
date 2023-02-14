@@ -76,6 +76,15 @@ CalicoDB shouldn't ever be slower than this.
 2. Need to implement repair (`Status Database::repair()`)
     + Run when a database cannot be opened due to corruption (not the same as recovery)
 3. Support Windows (write a `Storage` implementation)
+4. When we roll back a transaction, we shouldn't undo any vacuum operations that have occurred
+   + Add a new WAL record type: a "meta" record that signals some operation and maybe a payload specific to the operation type
+   + This record type can signal commit, vacuum start, or vacuum end, or even other things as needed
+   + We should still roll vacuum operations forward during recovery
+5. Reduce the overhead of the commit operation
+   + Don't advance to a new WAL segment on commit
+   + We need to break out of the WAL rolling loop after a commit record is reached, so we should save the offset in the segment file and pass it in as an argument to the WAL reader
+   + When committing, just write the WAL record, flush the tail buffer, and then call `fsync()` on the file handle
+   + This will also make rolling the WAL faster since, depending on the commit frequency, we could end up with far fewer segment files
 
 ## Documentation
 Check out Calico DB's [usage and design documents](doc).

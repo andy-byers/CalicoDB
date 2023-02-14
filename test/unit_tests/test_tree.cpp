@@ -1447,6 +1447,8 @@ TEST_F(VacuumTests, OverflowChainRegistersBackPointers)
 
     ASSERT_TRUE(head_entry->back_ptr.is_root());
     ASSERT_EQ(tail_entry->back_ptr, Id {3});
+    ASSERT_EQ(head_entry->type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(tail_entry->type, PointerMap::OVERFLOW_LINK);
 }
 
 TEST_F(VacuumTests, OverflowChainIsNullTerminated)
@@ -1646,7 +1648,30 @@ TEST_F(VacuumTests, VacuumsOverflowChain_A)
     ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
     ASSERT_HAS_VALUE(c.freelist->push(std::move(node_4.page)));
 
+    // Page Types:     n   p   2   1   A   B
+    // Page Contents: [a] [b] [c] [d] [e] [f]
+    // Page IDs:       1   2   3   4   5   6
+
+    // Page Types:     n   p   1   B   A
+    // Page Contents: [a] [b] [c] [f] [e] [ ]
+    // Page IDs:       1   2   3   4   5   6
+
+    // Page Types:     n   p   A   B
+    // Page Contents: [a] [b] [e] [f] [ ] [ ]
+    // Page IDs:       1   2   3   4   5   6
+
+    // Page Types:     n   p   A   B
+    // Page Contents: [a] [b] [e] [f]
+    // Page IDs:       1   2   3   4
     vacuum_and_validate(*this, overflow_data);
+
+    const auto head_entry = c.pointers->read_entry(Id {3});
+    const auto tail_entry = c.pointers->read_entry(Id {4});
+
+    ASSERT_TRUE(head_entry->back_ptr.is_root());
+    ASSERT_EQ(tail_entry->back_ptr, Id {3});
+    ASSERT_EQ(head_entry->type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(tail_entry->type, PointerMap::OVERFLOW_LINK);
 }
 
 TEST_F(VacuumTests, VacuumsOverflowChain_B)
@@ -1660,7 +1685,7 @@ TEST_F(VacuumTests, VacuumsOverflowChain_B)
     ASSERT_HAS_VALUE(c.freelist->push(std::move(node_5.page)));
     ASSERT_HAS_VALUE(c.freelist->push(std::move(node_6.page)));
 
-    std::string overflow_data(PAGE_SIZE + meta(true).max_local, 'x');
+    std::string overflow_data(PAGE_SIZE * 2, 'x');
     ASSERT_HAS_VALUE(tree->insert("a", "value"));
     ASSERT_HAS_VALUE(tree->insert("b", overflow_data));
 
@@ -1682,6 +1707,177 @@ TEST_F(VacuumTests, VacuumsOverflowChain_B)
     // Page Contents: [a] [b] [e] [f]
     // Page IDs:       1   2   3   4
     vacuum_and_validate(*this, overflow_data);
+
+    const auto head_entry = c.pointers->read_entry(Id {4});
+    const auto tail_entry = c.pointers->read_entry(Id {3});
+
+    ASSERT_TRUE(head_entry->back_ptr.is_root());
+    ASSERT_EQ(tail_entry->back_ptr, Id {4});
+    ASSERT_EQ(head_entry->type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(tail_entry->type, PointerMap::OVERFLOW_LINK);
+}
+
+TEST_F(VacuumTests, VacuumOverflowChainSanityCheck)
+{
+    std::vector<Node> reserved;
+    reserved.emplace_back(allocate_node(true));
+    reserved.emplace_back(allocate_node(true));
+    reserved.emplace_back(allocate_node(true));
+    reserved.emplace_back(allocate_node(true));
+    reserved.emplace_back(allocate_node(true));
+    ASSERT_EQ(reserved.back().page.id().value, 7);
+
+    // Create overflow chains, but don't overflow the root node. Should create 3 chains, 1 of length 1, and 2 of length 2.
+    std::vector<std::string> values;
+    for (Size i {}; i < 3; ++i) {
+        const auto value = random.Generate(PAGE_SIZE * std::min<Size>(i + 1, 2));
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<1>(i), value));
+        values.emplace_back(value.to_string());
+    }
+
+    while (!reserved.empty()) {
+        ASSERT_HAS_VALUE(c.freelist->push(std::move(reserved.back().page)));
+        reserved.pop_back();
+    }
+
+    ASSERT_EQ(pager->page_count(), 12);
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {12}));
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {11}));
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {10}));
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {9}));
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {8}));
+    ASSERT_HAS_VALUE(pager->truncate(7));
+    ASSERT_EQ(pager->page_count(), 7);
+
+    auto *cursor = CursorInternal::make_cursor(*tree);
+    cursor->seek_first();
+    for (Size i {}; i < values.size(); ++i) {
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_EQ(cursor->key(), Tools::integral_key<1>(i));
+        ASSERT_EQ(cursor->value(), values[i]);
+        cursor->next();
+    }
+    ASSERT_FALSE(cursor->is_valid());
+    delete cursor;
+}
+
+TEST_F(VacuumTests, VacuumsNodes)
+{
+    auto node_3 = allocate_node(true);
+    auto node_4 = allocate_node(true);
+    ASSERT_EQ(node_4.page.id().value, 4);
+
+    std::vector<std::string> values;
+    for (Size i {}; i < 4; ++i) {
+        const auto key = Tools::integral_key(i);
+        const auto value = random.Generate(meta(true).max_local - key.size());
+        ASSERT_HAS_VALUE(tree->insert(key, value));
+        values.emplace_back(value.to_string());
+    }
+
+    // Page Types:     n   p   2   1   n   n
+    // Page Contents: [a] [b] [c] [d] [e] [f]
+    // Page IDs:       1   2   3   4   5   6
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_4.page)));
+
+    // Page Types:     n   p   1   n   n
+    // Page Contents: [a] [b] [c] [f] [e] [ ]
+    // Page IDs:       1   2   3   4   5   6
+
+    // Page Types:     n   p   n   n
+    // Page Contents: [a] [b] [e] [f] [ ] [ ]
+    // Page IDs:       1   2   3   4   5   6
+
+    // Page Types:     n   p   n   n
+    // Page Contents: [a] [b] [e] [f]
+    // Page IDs:       1   2   3   4
+    ASSERT_EQ(pager->page_count(), 6);
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {6}));
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {5}));
+    ASSERT_HAS_VALUE(pager->truncate(4));
+
+    auto *cursor = CursorInternal::make_cursor(*tree);
+    cursor->seek_first();
+    for (Size i {}; i < values.size(); ++i) {
+        ASSERT_TRUE(cursor->is_valid());
+        ASSERT_EQ(cursor->key(), Tools::integral_key(i));
+        ASSERT_EQ(cursor->value(), values[i]);
+        cursor->next();
+    }
+    ASSERT_FALSE(cursor->is_valid());
+    delete cursor;
+}
+
+static auto print_references(Pager &pager, PointerMap &pointers)
+{
+    for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
+        std::cerr << std::setw(6) << pid.value << ": ";
+        if (pointers.lookup(pid) == pid) {
+            std::cerr << "pointer map\n";
+            continue;
+        }
+        if (pid.is_root()) {
+            std::cerr << "node -> NULL\n";
+            continue;
+        }
+        const auto entry = pointers.read_entry(pid).value();
+        switch (entry.type) {
+            case PointerMap::NODE:
+                std::cerr << "node";
+                break;
+            case PointerMap::FREELIST_LINK:
+                std::cerr << "freelist link";
+                break;
+            case PointerMap::OVERFLOW_HEAD:
+                std::cerr << "overflow head";
+                break;
+            case PointerMap::OVERFLOW_LINK:
+                std::cerr << "overflow link";
+                break;
+        }
+        std::cerr << " -> " << entry.back_ptr.value << '\n';
+    }
+}
+
+TEST_F(VacuumTests, SanityCheck)
+{
+    const Size LOWER_BOUNDS {500};
+    const auto UPPER_BOUNDS = LOWER_BOUNDS * 2;
+    std::unordered_map<std::string, std::string> map;
+
+    for (Size iteration {}; iteration < 5; ++iteration) {
+        while (map.size() < UPPER_BOUNDS) {
+            const auto key = random.Generate(16);
+            const auto value = random.Generate(PAGE_SIZE * 2);
+            ASSERT_HAS_VALUE(tree->insert(key, value));
+            map[key.to_string()] = value.to_string();
+        }
+
+        auto itr = begin(map);
+        while (map.size() > LOWER_BOUNDS) {
+            ASSERT_HAS_VALUE(tree->erase(itr->first));
+            itr = map.erase(itr);
+        }
+
+        Id target {pager->page_count()};
+        while (tree->vacuum_one(target).value()) {
+            tree->TEST_check_links();
+            tree->TEST_check_nodes();
+            tree->TEST_check_order();
+            target.value--;
+        }
+        ASSERT_HAS_VALUE(pager->truncate(target.value));
+
+        auto *cursor = CursorInternal::make_cursor(*tree);
+        for (const auto &[key, value]: map) {
+            cursor->seek(key);
+            ASSERT_TRUE(cursor->is_valid());
+            ASSERT_EQ(cursor->key(), key);
+            ASSERT_EQ(cursor->value(), value);
+        }
+        delete cursor;
+    }
 }
 
 } // namespace Calico

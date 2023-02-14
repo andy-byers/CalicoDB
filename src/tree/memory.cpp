@@ -34,12 +34,12 @@ auto FreeList::push(Page page) -> tl::expected<void, Status>
     write_next_id(page, m_head);
 
     // Write the parent of the old head, if it exists.
+    PointerMap::Entry entry {page.id(), PointerMap::FREELIST_LINK};
     if (!m_head.is_null()) {
-        const PointerMap::Entry entry {page.id(), PointerMap::FREELIST_LINK};
         Calico_Try_R(m_pointers->write_entry(m_head, entry));
     }
     // Clear the parent of the new head.
-    const PointerMap::Entry entry {Id::null(), PointerMap::FREELIST_LINK};
+    entry.back_ptr = Id::null();
     Calico_Try_R(m_pointers->write_entry(page.id(), entry));
 
     m_head = page.id();
