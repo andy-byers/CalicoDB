@@ -73,12 +73,9 @@ CalicoDB shouldn't ever be slower than this.
 
 ## TODO
 1. Get everything code reviewed!
-2. Need to implement compaction (`Status Database::vacuum_one()`)
-    + We need some way to collect freelist pages at the end of the file so that we can truncate
-    + Look into SQLite's pointer maps
-3. Need to implement repair (`Status Database::repair()`)
+2. Need to implement repair (`Status Database::repair()`)
     + Run when a database cannot be opened due to corruption (not the same as recovery)
-4. Support Windows (write a `Storage` implementation)
+3. Support Windows (write a `Storage` implementation)
 
 ## Documentation
 Check out Calico DB's [usage and design documents](doc).

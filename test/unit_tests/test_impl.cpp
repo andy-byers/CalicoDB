@@ -702,7 +702,7 @@ public:
     }
 
     [[nodiscard]]
-    static auto vacuum(const Slice &, const Options &) -> Status
+    auto vacuum() -> Status override
     {
         return Status::ok();
     }

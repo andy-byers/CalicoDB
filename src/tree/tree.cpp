@@ -1014,42 +1014,100 @@ auto BPlusTree::search(const Slice &key) -> tl::expected<SearchResult, Status>
 
 auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status>
 {
+    // Need to fix the "next pointer" of the parent page of "last_id".
     Calico_New_R(entry, m_pointers.read_entry(last_id));
 
-    // "old_entry.type" contains the type of the last page.
+    const auto fix_basic_link = [&entry, &free, this]() -> tl::expected<void, Status> {
+        Calico_New_R(parent, m_pager->acquire(entry.back_ptr));
+        m_pager->upgrade(parent);
+        write_next_id(parent, free.id());
+        m_pager->release(std::move(parent));
+        return {};
+    };
+
+    // "entry.type" contains the type of the last page.
     switch (entry.type) {
-        // It is possible that the parent of this page is itself the freelist head.
-        case PointerMap::FREELIST_LINK: {
-            // CASES:
-            //     1. Back pointer = head
-            //     2. Back pointer = freelist head
-            //     3. Back pointer = freelist body
-//            Calico_New_R(last, m_pager->acquire(last_id));
-//            const auto next_id = read_next_id(last);
-//            Calico_New_R(next, m_pager->acquire(next_id));
-
+        case PointerMap::FREELIST_LINK:
             if (entry.back_ptr == free.id()) {
-
-            } else if (entry.back_ptr == m_freelist.m_head) {
-
-            } else {
-                Calico_New_R(parent, m_pager->acquire(entry.back_ptr));
-                m_pager->upgrade(parent);
-                write_next_id(parent, free.id());
-                m_pager->release(std::move(parent));
+                // Back pointer points to NULL.
+                CALICO_EXPECT_EQ(last_id, m_freelist.m_head);
+            } else if (!entry.back_ptr.is_null()) {
+                // Back pointer points to another freelist page.
+                Calico_Try_R(fix_basic_link());
             }
+            break;
+        case PointerMap::OVERFLOW_LINK: {
+            // Back pointer points to another overflow chain page.
+            Calico_Try_R(fix_basic_link());
+            Calico_New_R(last, m_pager->acquire(last_id));
+            if (const auto next_id = read_next_id(last); !next_id.is_null()) {
+                const PointerMap::Entry next_entry {free.id(), PointerMap::OVERFLOW_LINK};
+                Calico_Try_R(m_pointers.write_entry(next_id, next_entry));
+            }
+            m_pager->release(std::move(last));
             break;
         }
         case PointerMap::OVERFLOW_HEAD: {
-            break;
-        }
-        case PointerMap::OVERFLOW_LINK: {
+            // Back pointer points to the node that the overflow chain is rooted in. Search through that nodes cells
+            // for the target overflow cell.
+            Calico_New_R(parent, acquire(entry.back_ptr, true));
+            CALICO_EXPECT_TRUE(parent.header.is_external);
+            bool found {};
+            for (Size i {}; i < parent.header.cell_count; ++i) {
+                auto cell = read_cell(parent, i);
+                found = cell.local_ps != cell.total_ps &&
+                        read_overflow_id(cell) == last_id;
+                if (found) {
+                    write_overflow_id(cell, free.id());
+                    break;
+                }
+            }
+            CALICO_EXPECT_TRUE(found);
+            release(std::move(parent));
+            // Update the back pointer for the next link in the chain, if it exists.
+            Calico_New_R(last, m_pager->acquire(last_id));
+            if (const auto next_id = read_next_id(last); !next_id.is_null()) {
+                const PointerMap::Entry next_entry {free.id(), PointerMap::OVERFLOW_LINK};
+                Calico_Try_R(m_pointers.write_entry(next_id, next_entry));
+            }
+            m_pager->release(std::move(last));
             break;
         }
         case PointerMap::NODE: {
-
+            // Back pointer points to another node. Search through that node for the target child pointer.
+            Calico_New_R(parent, acquire(entry.back_ptr, true));
+            CALICO_EXPECT_FALSE(parent.header.is_external);
+            for (Size i {}; i <= parent.header.cell_count; ++i) {
+                const auto child_id = read_child_id(parent, i);
+                if (child_id == last_id) {
+                    write_child_id(parent, i, free.id());
+                    break;
+                }
+            }
+            release(std::move(parent));
+            // Search through the node we are moving and update the back references for its overflow chains or
+            // children, depending on the node type.
+            Calico_New_R(last, acquire(entry.back_ptr, true));
+            if (last.header.is_external) {
+                for (Size i {}; i < last.header.cell_count; ++i) {
+                    auto cell = read_cell(last, i);
+                    if (cell.local_ps != cell.total_ps) {
+                        const auto overflow_id = read_overflow_id(cell);
+                        const PointerMap::Entry overflow_entry {free.id(), PointerMap::NODE};
+                        Calico_Try_R(m_pointers.write_entry(overflow_id, overflow_entry));
+                    }
+                }
+            } else {
+                for (Size i {}; i <= last.header.cell_count; ++i) {
+                    const auto child_id = read_child_id(last, i);
+                    const PointerMap::Entry child_entry {free.id(), PointerMap::NODE};
+                    Calico_Try_R(m_pointers.write_entry(child_id, child_entry));
+                }
+            }
+            release(std::move(last));
         }
     }
+    Calico_Try_R(m_pointers.write_entry(last_id, {}));
     Calico_Try_R(m_pointers.write_entry(free.id(), entry));
     Calico_New_R(last, m_pager->acquire(last_id));
     mem_copy(free.span(0, free.size()),
@@ -1058,13 +1116,14 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
     return {};
 }
 
-auto BPlusTree::vacuum_one(Id target) -> tl::expected<void, Status>
+auto BPlusTree::vacuum_one(Id target) -> tl::expected<bool, Status>
 {
     if (BPlusTreeInternal::is_pointer_map(*this, target)) {
-        return {};
+        return true;
     }
-    CALICO_EXPECT_FALSE(target.is_root());
-    CALICO_EXPECT_FALSE(m_freelist.is_empty());
+    if (target.is_root() || m_freelist.is_empty()) {
+        return false;
+    }
 
     // Swap the head of the freelist with the last page in the file.
     Calico_New_R(head, m_freelist.pop());
@@ -1073,7 +1132,7 @@ auto BPlusTree::vacuum_one(Id target) -> tl::expected<void, Status>
         Calico_Try_R(vacuum_step(head, target));
     }
     m_pager->release(std::move(head));
-    return {};
+    return true;
 }
 
 auto BPlusTree::save_state(FileHeader &header) const -> void

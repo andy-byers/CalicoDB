@@ -120,6 +120,8 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
         prev.emplace(std::move(page));
     }
     if (prev) {
+        // "prev" contains the last page in the chain.
+        write_next_id(*prev, Id::null());
         m_pager->release(std::move(*prev));
     }
     return head;

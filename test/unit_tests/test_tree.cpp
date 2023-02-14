@@ -1435,6 +1435,44 @@ TEST_F(VacuumTests, FreelistRegistersBackPointers)
     ASSERT_EQ(entry.back_ptr, Id::null());
 }
 
+TEST_F(VacuumTests, OverflowChainRegistersBackPointers)
+{
+    // Creates an overflow chain of length 2, rooted at the second cell on the root page.
+    std::string overflow_data(PAGE_SIZE * 2, 'x');
+    ASSERT_HAS_VALUE(tree->insert("a", "value"));
+    ASSERT_HAS_VALUE(tree->insert("b", overflow_data));
+
+    const auto head_entry = c.pointers->read_entry(Id {3});
+    const auto tail_entry = c.pointers->read_entry(Id {4});
+
+    ASSERT_TRUE(head_entry->back_ptr.is_root());
+    ASSERT_EQ(tail_entry->back_ptr, Id {3});
+}
+
+TEST_F(VacuumTests, OverflowChainIsNullTerminated)
+{
+    {
+        // allocate_node() accounts for the first pointer map page.
+        auto node_3 = allocate_node(true);
+        auto page_4 = pager->allocate().value();
+        ASSERT_EQ(page_4.id().value, 4);
+        write_next_id(node_3.page, Id {123});
+        write_next_id(page_4, Id {123});
+        ASSERT_HAS_VALUE(c.freelist->push(std::move(page_4)));
+        ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
+    }
+
+    ASSERT_HAS_VALUE(tree->insert("a", "value"));
+    ASSERT_HAS_VALUE(tree->insert("b", std::string(PAGE_SIZE * 2, 'x')));
+
+    auto page_3 = pager->acquire(Id {3}).value();
+    auto page_4 = pager->acquire(Id {4}).value();
+    ASSERT_EQ(read_next_id(page_3), Id {4});
+    ASSERT_EQ(read_next_id(page_4), Id::null());
+    pager->release(std::move(page_3));
+    pager->release(std::move(page_4));
+}
+
 TEST_F(VacuumTests, VacuumsFreelistInOrder)
 {
     auto node_3 = allocate_node(true);
@@ -1442,37 +1480,43 @@ TEST_F(VacuumTests, VacuumsFreelistInOrder)
     auto node_5 = allocate_node(true);
     ASSERT_EQ(node_5.page.id().value, 5);
 
-    //  N   P   3   2   1
-    // [1] [2] [3] [4] [5]
+    // Page Types:     N   P   3   2   1
+    // Page Contents: [1] [2] [3] [4] [5]
+    // Page IDs:       1   2   3   4   5
     ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
     ASSERT_HAS_VALUE(c.freelist->push(std::move(node_4.page)));
     ASSERT_HAS_VALUE(c.freelist->push(std::move(node_5.page)));
 
-    //  N   P   2   1
-    // [1] [2] [3] [4] [X]
+    // Page Types:     N   P   2   1
+    // Page Contents: [1] [2] [3] [4] [X]
+    // Page IDs:       1   2   3   4   5
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {5}));
     auto entry = c.pointers->read_entry(Id {4}).value();
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
-    //  N   P   1
-    // [1] [2] [3] [X] [X]
+    // Page Types:     N   P   1
+    // Page Contents: [1] [2] [3] [X] [X]
+    // Page IDs:       1   2   3   4   5
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {4}));
     entry = c.pointers->read_entry(Id {3}).value();
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
-    //  N   P
-    // [1] [2] [X] [X] [X]
+    // Page Types:     N   P
+    // Page Contents: [1] [2] [X] [X] [X]
+    // Page IDs:       1   2   3   4   5
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {3}));
     ASSERT_TRUE(c.freelist->is_empty());
 
-    //  N
-    // [1] [X] [X] [X] [X]
+    // Page Types:     N
+    // Page Contents: [1] [X] [X] [X] [X]
+    // Page IDs:       1   2   3   4   5
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {2}));
 
-    //  N
-    // [1]
+    // Page Types:     N
+    // Page Contents: [1]
+    // Page IDs:       1
     ASSERT_HAS_VALUE(pager->truncate(1));
     ASSERT_EQ(pager->page_count(), 1);
 }
@@ -1537,45 +1581,107 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
 
 TEST_F(VacuumTests, VacuumFreelistSanityCheck)
 {
-    std::vector<Node> nodes;
-    for (Size i {}; i < FRAME_COUNT; ++i) {
-        nodes.emplace_back(allocate_node(true));
-    }
-
     std::default_random_engine rng {42};
-    std::shuffle(begin(nodes), end(nodes), rng);
 
-    for (auto &node: nodes) {
-        ASSERT_HAS_VALUE(c.freelist->push(std::move(node.page)));
-    }
+    for (Size iteration {}; iteration < 1'000; ++iteration) {
+        std::vector<Node> nodes;
+        for (Size i {}; i < FRAME_COUNT - 1; ++i) {
+            nodes.emplace_back(allocate_node(true));
+        }
 
-    for (Size i {}; i < FRAME_COUNT; ++i) {
-        const Id target {pager->page_count()};
-        ASSERT_HAS_VALUE(tree->vacuum_one(target));
+        std::shuffle(begin(nodes), end(nodes), rng);
+
+        for (auto &node: nodes) {
+            ASSERT_HAS_VALUE(c.freelist->push(std::move(node.page)));
+        }
+
+        // This will vacuum the whole freelist, as well as the pointer map page on page 2.
+        Id target {pager->page_count()};
+        for (Size i {}; i < FRAME_COUNT; ++i) {
+            ASSERT_TRUE(tree->vacuum_one(target).value());
+            target.value--;
+        }
+        ASSERT_FALSE(tree->vacuum_one(target).value());
+        ASSERT_HAS_VALUE(pager->truncate(1));
+        ASSERT_EQ(pager->page_count(), 1);
     }
-    ASSERT_HAS_VALUE(pager->truncate(1));
-    ASSERT_EQ(pager->page_count(), 1);
 }
 
-// Page to vacuum is the head of an overflow chain.
-//
-//      N   P   1   a
-//     [1] [2] [3] [4]
-//
-//
-TEST_F(VacuumTests, VacuumOne_OverflowHead)
+static auto vacuum_and_validate(VacuumTests &test, const std::string &value)
 {
+    ASSERT_EQ(test.pager->page_count(), 6);
+    ASSERT_HAS_VALUE(test.tree->vacuum_one(Id {6}));
+    ASSERT_HAS_VALUE(test.tree->vacuum_one(Id {5}));
+    ASSERT_HAS_VALUE(test.pager->truncate(4));
+    ASSERT_EQ(test.pager->page_count(), 4);
 
+    auto *cursor = CursorInternal::make_cursor(*test.tree);
+    cursor->seek_first();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "a");
+    ASSERT_EQ(cursor->value(), "value");
+    cursor->next();
+
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "b");
+    ASSERT_EQ(cursor->value(), value);
+    cursor->next();
+
+    ASSERT_FALSE(cursor->is_valid());
+    delete cursor;
 }
 
-// Page to vacuum is part of the body of an overflow chain.
-//
-//      N   P   1   a   b
-//     [1] [2] [3] [4] [5]
-//
-TEST_F(VacuumTests, VacuumOne_OverflowBody)
+TEST_F(VacuumTests, VacuumsOverflowChain_A)
 {
+    // Save these pages until the overflow chain is created, otherwise they will be used for it.
+    auto node_3 = allocate_node(true);
+    auto node_4 = allocate_node(true);
+    ASSERT_EQ(node_4.page.id().value, 4);
 
+    // Creates an overflow chain of length 2, rooted at the second cell on the root page.
+    std::string overflow_data(PAGE_SIZE * 2, 'x');
+    ASSERT_HAS_VALUE(tree->insert("a", "value"));
+    ASSERT_HAS_VALUE(tree->insert("b", overflow_data));
+
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_4.page)));
+
+    vacuum_and_validate(*this, overflow_data);
+}
+
+TEST_F(VacuumTests, VacuumsOverflowChain_B)
+{
+    // This time, we'll force the head of the overflow chain to be the last page in the file.
+    auto node_3 = allocate_node(true);
+    auto node_4 = allocate_node(true);
+    auto node_5 = allocate_node(true);
+    auto node_6 = allocate_node(true);
+    ASSERT_EQ(node_6.page.id().value, 6);
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_5.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_6.page)));
+
+    std::string overflow_data(PAGE_SIZE + meta(true).max_local, 'x');
+    ASSERT_HAS_VALUE(tree->insert("a", "value"));
+    ASSERT_HAS_VALUE(tree->insert("b", overflow_data));
+
+    // Page Types:     n   p   2   1   B   A
+    // Page Contents: [a] [b] [c] [d] [e] [f]
+    // Page IDs:       1   2   3   4   5   6
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_4.page)));
+
+    // Page Types:     n   p   1   A   B
+    // Page Contents: [a] [b] [c] [f] [e] [ ]
+    // Page IDs:       1   2   3   4   5   6
+
+    // Page Types:     n   p   B   A
+    // Page Contents: [a] [b] [e] [f] [ ] [ ]
+    // Page IDs:       1   2   3   4   5   6
+
+    // Page Types:     n   p   B   A
+    // Page Contents: [a] [b] [e] [f]
+    // Page IDs:       1   2   3   4
+    vacuum_and_validate(*this, overflow_data);
 }
 
 } // namespace Calico

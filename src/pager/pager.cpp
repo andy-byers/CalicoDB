@@ -192,15 +192,12 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
         const auto &frame = m_frames.get_frame(entry.index);
         page_id = pid;
 
-        // The page/frame management happens under lock, so if this frame is not referenced, it is safe to evict.
         if (frame.ref_count() != 0) {
             return false;
         }
-
         if (!entry.token) {
             return true;
         }
-
         if (*m_in_txn) {
             return frame.lsn() <= m_wal->flushed_lsn();
         }
@@ -335,6 +332,25 @@ auto Pager::truncate(Size page_count) -> tl::expected<void, Status>
         return tl::make_unexpected(s);
     }
     m_frames.m_page_count = page_count;
+
+    const auto predicate = [this](auto pid, auto entry) {
+        const auto &frame = m_frames.get_frame(entry.index);
+        CALICO_EXPECT_EQ(frame.ref_count(), 0);
+        CALICO_EXPECT_TRUE(*m_in_txn);
+        return pid.value > m_frames.page_count();
+    };
+    std::optional<PageCache::Entry> entry;
+    while ((entry = m_cache.evict(predicate))) {
+        m_frames.unpin(entry->index);
+        if (entry->token) {
+            m_dirty.remove(*entry->token);
+        }
+    }
+
+    s = flush({});
+    if (!s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
     return {};
 }
 

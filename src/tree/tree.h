@@ -51,7 +51,7 @@ public:
     [[nodiscard]] auto search(const Slice &key) -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> tl::expected<bool, Status>;
     [[nodiscard]] auto erase(const Slice &key) -> tl::expected<void, Status>;
-    [[nodiscard]] auto vacuum_one(Id target) -> tl::expected<void, Status>;
+    [[nodiscard]] auto vacuum_one(Id target) -> tl::expected<bool, Status>;
 
     auto save_state(FileHeader &header) const -> void;
     auto load_state(const FileHeader &header) -> void;

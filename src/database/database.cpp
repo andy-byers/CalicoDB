@@ -28,11 +28,6 @@ auto Database::repair(const Slice &path, const Options &options) -> Status
     return DatabaseImpl::repair(path.to_string(), options);
 }
 
-auto Database::vacuum(const Slice &path, const Options &options) -> Status
-{
-    return DatabaseImpl::vacuum(path.to_string(), options);
-}
-
 auto Database::destroy(const Slice &path, const Options &options) -> Status
 {
     return DatabaseImpl::destroy(path.to_string(), options);
