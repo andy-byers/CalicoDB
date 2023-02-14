@@ -64,7 +64,7 @@ auto BPlusTree::allocate(bool is_external) -> tl::expected<Node, Status>
             // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
             // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
             // following it are used.
-            if (PointerMap::lookup(page.id(), m_pager->page_size()) == page.id()) {
+            if (m_pointers.lookup(page.id()) == page.id()) {
                 m_pager->release(std::move(page));
                 Calico_Put_R(page, m_pager->allocate());
             }
@@ -75,14 +75,14 @@ auto BPlusTree::allocate(bool is_external) -> tl::expected<Node, Status>
         }
     };
     Calico_New_R(page, fetch_unused_page());
-    CALICO_EXPECT_NE(PointerMap::lookup(page.id(), m_pager->page_size()), page.id());
+    CALICO_EXPECT_NE(m_pointers.lookup(page.id()), page.id());
     return make_fresh_node(std::move(page), is_external);
 }
 
 auto BPlusTree::acquire(Id pid, bool upgrade) -> tl::expected<Node, Status>
 {
     Calico_New_R(page, m_pager->acquire(pid));
-    CALICO_EXPECT_NE(PointerMap::lookup(pid, m_pager->page_size()), pid);
+    CALICO_EXPECT_NE(m_pointers.lookup(pid), pid);
 
     if (upgrade) {
         m_pager->upgrade(page);
@@ -98,7 +98,7 @@ auto BPlusTree::release(Node node) const -> void
 auto BPlusTree::destroy(Node node) -> tl::expected<void, Status>
 {
     // Pointer map pages should never be explicitly destroyed.
-    CALICO_EXPECT_NE(PointerMap::lookup(node.page.id(), m_pager->page_size()), node.page.id());
+    CALICO_EXPECT_NE(m_pointers.lookup(node.page.id()), node.page.id());
     return m_freelist.push(std::move(node).take());
 }
 
@@ -107,7 +107,7 @@ public:
     [[nodiscard]]
     static auto is_pointer_map(BPlusTree &tree, Id pid) -> bool
     {
-        return PointerMap::lookup(pid, tree.m_pager->page_size()) == pid;
+        return tree.m_pointers.lookup(pid) == pid;
     }
 
     [[nodiscard]]
@@ -155,19 +155,15 @@ public:
     [[nodiscard]]
     static auto find_parent_id(BPlusTree &tree, Id pid) -> tl::expected<Id, Status>
     {
-        Calico_New_R(map, tree.m_pointers.find_map(pid));
-        const auto entry = tree.m_pointers.read_entry(map, pid);
-        tree.m_pager->release(std::move(map));
+        Calico_New_R(entry, tree.m_pointers.read_entry(pid));
         return entry.back_ptr;
     }
 
     [[nodiscard]]
     static auto fix_parent_id(BPlusTree &tree, Id pid, Id parent_id) -> tl::expected<void, Status>
     {
-        Calico_New_R(map, tree.m_pointers.find_map(pid));
         PointerMap::Entry entry {parent_id, PointerMap::NODE};
-        tree.m_pointers.write_entry(map, pid, entry);
-        tree.m_pager->release(std::move(map));
+        Calico_Try_R(tree.m_pointers.write_entry(pid, entry));
         return {};
     }
 
@@ -1016,6 +1012,70 @@ auto BPlusTree::search(const Slice &key) -> tl::expected<SearchResult, Status>
     return BPlusTreeInternal::find_external_slot(*this, key);
 }
 
+auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status>
+{
+    Calico_New_R(entry, m_pointers.read_entry(last_id));
+
+    // "old_entry.type" contains the type of the last page.
+    switch (entry.type) {
+        // It is possible that the parent of this page is itself the freelist head.
+        case PointerMap::FREELIST_LINK: {
+            // CASES:
+            //     1. Back pointer = head
+            //     2. Back pointer = freelist head
+            //     3. Back pointer = freelist body
+//            Calico_New_R(last, m_pager->acquire(last_id));
+//            const auto next_id = read_next_id(last);
+//            Calico_New_R(next, m_pager->acquire(next_id));
+
+            if (entry.back_ptr == free.id()) {
+
+            } else if (entry.back_ptr == m_freelist.m_head) {
+
+            } else {
+                Calico_New_R(parent, m_pager->acquire(entry.back_ptr));
+                m_pager->upgrade(parent);
+                write_next_id(parent, free.id());
+                m_pager->release(std::move(parent));
+            }
+            break;
+        }
+        case PointerMap::OVERFLOW_HEAD: {
+            break;
+        }
+        case PointerMap::OVERFLOW_LINK: {
+            break;
+        }
+        case PointerMap::NODE: {
+
+        }
+    }
+    Calico_Try_R(m_pointers.write_entry(free.id(), entry));
+    Calico_New_R(last, m_pager->acquire(last_id));
+    mem_copy(free.span(0, free.size()),
+             last.view(0, last.size()));
+    m_pager->release(std::move(last));
+    return {};
+}
+
+auto BPlusTree::vacuum_one(Id target) -> tl::expected<void, Status>
+{
+    if (BPlusTreeInternal::is_pointer_map(*this, target)) {
+        return {};
+    }
+    CALICO_EXPECT_FALSE(target.is_root());
+    CALICO_EXPECT_FALSE(m_freelist.is_empty());
+
+    // Swap the head of the freelist with the last page in the file.
+    Calico_New_R(head, m_freelist.pop());
+    if (target != head.id()) {
+        // Swap the last page with the freelist head.
+        Calico_Try_R(vacuum_step(head, target));
+    }
+    m_pager->release(std::move(head));
+    return {};
+}
+
 auto BPlusTree::save_state(FileHeader &header) const -> void
 {
     header.free_list_id = m_freelist.m_head;
@@ -1276,6 +1336,11 @@ auto BPlusTree::TEST_check_nodes() -> void
             node.TEST_validate();
         }
     });
+}
+
+auto BPlusTree::TEST_components() -> Components
+{
+    return {&m_freelist, &m_overflow, &m_pointers};
 }
 
 } // namespace Calico

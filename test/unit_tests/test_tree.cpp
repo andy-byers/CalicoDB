@@ -614,6 +614,7 @@ public:
 
     auto acquire_node(Id pid)
     {
+        // Warning: Using one of these nodes will likely cause a crash, as the meta stuff doesn't get set up.
         return Node {*pager->acquire(pid), scratch.data()};
     }
 
@@ -1227,12 +1228,13 @@ public:
 
 TEST_P(PointerMapTests, FirstPointerMapIsPage2)
 {
-    ASSERT_EQ(PointerMap::lookup(Id {0}, pager->page_size()), Id {0});
-    ASSERT_EQ(PointerMap::lookup(Id {1}, pager->page_size()), Id {0});
-    ASSERT_EQ(PointerMap::lookup(Id {2}, pager->page_size()), Id {2});
-    ASSERT_EQ(PointerMap::lookup(Id {3}, pager->page_size()), Id {2});
-    ASSERT_EQ(PointerMap::lookup(Id {4}, pager->page_size()), Id {2});
-    ASSERT_EQ(PointerMap::lookup(Id {5}, pager->page_size()), Id {2});
+    PointerMap pointers {*pager};
+    ASSERT_EQ(pointers.lookup(Id {0}), Id {0});
+    ASSERT_EQ(pointers.lookup(Id {1}), Id {0});
+    ASSERT_EQ(pointers.lookup(Id {2}), Id {2});
+    ASSERT_EQ(pointers.lookup(Id {3}), Id {2});
+    ASSERT_EQ(pointers.lookup(Id {4}), Id {2});
+    ASSERT_EQ(pointers.lookup(Id {5}), Id {2});
 }
 
 TEST_P(PointerMapTests, ReadsAndWritesEntries)
@@ -1241,13 +1243,13 @@ TEST_P(PointerMapTests, ReadsAndWritesEntries)
     Page map_page {Id {2}, buffer, true};
     PointerMap map {*pager};
 
-    map.write_entry(map_page, Id {3}, PointerMap::Entry {Id {33}, PointerMap::NODE});
-    map.write_entry(map_page, Id {4}, PointerMap::Entry {Id {44}, PointerMap::FREELIST_LINK});
-    map.write_entry(map_page, Id {5}, PointerMap::Entry {Id {55}, PointerMap::OVERFLOW_LINK});
+    ASSERT_HAS_VALUE(map.write_entry(Id {3}, PointerMap::Entry {Id {33}, PointerMap::NODE}));
+    ASSERT_HAS_VALUE(map.write_entry(Id {4}, PointerMap::Entry {Id {44}, PointerMap::FREELIST_LINK}));
+    ASSERT_HAS_VALUE(map.write_entry(Id {5}, PointerMap::Entry {Id {55}, PointerMap::OVERFLOW_LINK}));
 
-    const auto entry_1 = map.read_entry(map_page, Id {3});
-    const auto entry_2 = map.read_entry(map_page, Id {4});
-    const auto entry_3 = map.read_entry(map_page, Id {5});
+    const auto entry_1 = map.read_entry(Id {3}).value();
+    const auto entry_2 = map.read_entry(Id {4}).value();
+    const auto entry_3 = map.read_entry(Id {5}).value();
 
     ASSERT_EQ(entry_1.back_ptr.value, 33);
     ASSERT_EQ(entry_2.back_ptr.value, 44);
@@ -1270,22 +1272,16 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
     for (Size i {}; i < map_size() + 10; ++i) {
         if (i != map_size()) {
             const Id id {i + 3};
-            auto map = pointers.find_map(id);
-            ASSERT_EQ(map->id().value, 2 + (map_size() + 1) * (i >= map_size()));
             const PointerMap::Entry entry {id, PointerMap::NODE};
-            pointers.write_entry(*map, id, entry);
-            pager->release(std::move(*map));
+            ASSERT_HAS_VALUE(pointers.write_entry(id, entry));
         }
     }
     for (Size i {}; i < map_size() + 10; ++i) {
         if (i != map_size()) {
             const Id id {i + 3};
-            auto map = pointers.find_map(id);
-            ASSERT_EQ(map->id().value, 2 + (map_size() + 1) * (i >= map_size()));
-            const auto entry = pointers.read_entry(*map, id);
+            const auto entry = pointers.read_entry(id).value();
             ASSERT_EQ(entry.back_ptr.value, id.value);
             ASSERT_EQ(entry.type, PointerMap::NODE);
-            pager->release(std::move(*map));
         }
     }
 }
@@ -1293,13 +1289,14 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
 TEST_P(PointerMapTests, MapPagesAreRecognized)
 {
     Id id {2};
-    ASSERT_EQ(PointerMap::lookup(id, pager->page_size()), id);
+    PointerMap pointers {*pager};
+    ASSERT_EQ(pointers.lookup(id), id);
 
     // Back pointers for the next "map.map_size()" pages are stored on page 2. The next pointermap page is
     // the page following the last page whose back pointer is on page 2. This pattern continues forever.
     for (Size i {}; i < 1'000'000; ++i) {
         id.value += map_size() + 1;
-        ASSERT_EQ(PointerMap::lookup(id, pager->page_size()), id);
+        ASSERT_EQ(pointers.lookup(id), id);
     }
 }
 
@@ -1307,6 +1304,7 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
 {
     Size counter {};
     Id map_id {2};
+    PointerMap pointers {*pager};
 
     for (Id pid {3}; pid.value <= 100 * map_size(); ++pid.value) {
         if (counter++ == map_size()) {
@@ -1315,7 +1313,7 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
             map_id.value += map_size() + 1;
             counter = 0;
         } else {
-            ASSERT_EQ(PointerMap::lookup(pid, pager->page_size()), map_id);
+            ASSERT_EQ(pointers.lookup(pid), map_id);
         }
     }
 }
@@ -1328,5 +1326,256 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+
+class VacuumTests: public InMemoryTest {
+public:
+    static constexpr Size PAGE_SIZE {0x200};
+    static constexpr Size FRAME_COUNT {8};
+
+    VacuumTests()
+        : scratch(PAGE_SIZE, '\x00'),
+          meta {PAGE_SIZE},
+          log_scratch(wal_scratch_size(PAGE_SIZE), '\x00')
+    {}
+
+    auto SetUp() -> void override
+    {
+        auto r = Pager::open({
+            PREFIX,
+            storage.get(),
+            &log_scratch,
+            &wal,
+            nullptr,
+            &status,
+            &commit_lsn,
+            &in_xact,
+            FRAME_COUNT,
+            PAGE_SIZE,
+        });
+        ASSERT_TRUE(r.has_value()) << r.error().what().data();
+        pager = std::move(*r);
+
+        tree = std::make_unique<BPlusTree>(*pager);
+        auto root = tree->setup();
+        pager->release(std::move(*root).take());
+        ASSERT_TRUE(pager->flush({}).is_ok());
+
+        c = tree->TEST_components();
+    }
+
+    auto acquire_node(Id pid, bool is_writable)
+    {
+        Node node {*pager->acquire(pid), scratch.data()};
+        node.meta = &meta(node.header.is_external);
+        if (is_writable) {
+            pager->upgrade(node.page);
+        }
+        return node;
+    }
+
+    auto allocate_node(bool is_external)
+    {
+        auto page = pager->allocate().value();
+        if (c.pointers->lookup(page.id()) == page.id()) {
+            pager->release(std::move(page));
+            page = pager->allocate().value();
+        }
+        NodeHeader header;
+        header.is_external = is_external;
+        header.cell_start = static_cast<PageSize>(page.size());
+        header.write(page);
+        const auto pid = page.id();
+        pager->release(std::move(page));
+        return acquire_node(pid, true);
+    }
+
+    auto release_node(Node node) const
+    {
+        pager->release(std::move(node).take());
+    }
+
+    std::string scratch;
+    std::string log_scratch;
+    Status status;
+    bool in_xact {true};
+    Lsn commit_lsn;
+    NodeMetaManager meta;
+    DisabledWriteAheadLog wal;
+    std::unique_ptr<Pager> pager;
+    std::unique_ptr<BPlusTree> tree;
+    BPlusTree::Components c;
+    Tools::RandomGenerator random {1'024 * 1'024 * 8};
+};
+
+//      P   1   2   3
+// [1] [2] [3] [4] [5]
+//
+TEST_F(VacuumTests, FreelistRegistersBackPointers)
+{
+    // Should skip page 2, leaving it available for use as a pointer map.
+    auto node_3 = allocate_node(true);
+    auto node_4 = allocate_node(true);
+    auto node_5 = allocate_node(true);
+    ASSERT_EQ(node_5.page.id().value, 5);
+
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_5.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_4.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
+
+    auto entry = c.pointers->read_entry(Id {5}).value();
+    ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
+    ASSERT_EQ(entry.back_ptr, Id {4});
+
+    entry = c.pointers->read_entry(Id {4}).value();
+    ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
+    ASSERT_EQ(entry.back_ptr, Id {3});
+
+    entry = c.pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
+    ASSERT_EQ(entry.back_ptr, Id::null());
+}
+
+TEST_F(VacuumTests, VacuumsFreelistInOrder)
+{
+    auto node_3 = allocate_node(true);
+    auto node_4 = allocate_node(true);
+    auto node_5 = allocate_node(true);
+    ASSERT_EQ(node_5.page.id().value, 5);
+
+    //  N   P   3   2   1
+    // [1] [2] [3] [4] [5]
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_4.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_5.page)));
+
+    //  N   P   2   1
+    // [1] [2] [3] [4] [X]
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {5}));
+    auto entry = c.pointers->read_entry(Id {4}).value();
+    ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
+    ASSERT_EQ(entry.back_ptr, Id::null());
+
+    //  N   P   1
+    // [1] [2] [3] [X] [X]
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {4}));
+    entry = c.pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
+    ASSERT_EQ(entry.back_ptr, Id::null());
+
+    //  N   P
+    // [1] [2] [X] [X] [X]
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {3}));
+    ASSERT_TRUE(c.freelist->is_empty());
+
+    //  N
+    // [1] [X] [X] [X] [X]
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {2}));
+
+    //  N
+    // [1]
+    ASSERT_HAS_VALUE(pager->truncate(1));
+    ASSERT_EQ(pager->page_count(), 1);
+}
+
+TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
+{
+    auto node_3 = allocate_node(true);
+    auto node_4 = allocate_node(true);
+    auto node_5 = allocate_node(true);
+
+    // Page Types:     N   P   1   2   3
+    // Page Contents: [a] [b] [c] [d] [e]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_5.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_4.page)));
+    ASSERT_HAS_VALUE(c.freelist->push(std::move(node_3.page)));
+
+    // Step 1:
+    //     Page Types:     N   P       1   2
+    //     Page Contents: [a] [b] [e] [d] [e]
+    //     Page IDs:       1   2   3   4   5
+
+    // Step 2:
+    //     Page Types:     N   P   2   1
+    //     Page Contents: [a] [b] [e] [d] [ ]
+    //     Page IDs:       1   2   3   4   5
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {5}));
+    auto entry = c.pointers->read_entry(Id {4}).value();
+    ASSERT_EQ(entry.back_ptr, Id::null());
+    ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
+    {
+        auto page = pager->acquire(Id {4}).value();
+        ASSERT_EQ(read_next_id(page), Id {3});
+        pager->release(std::move(page));
+    }
+
+    // Page Types:     N   P   1
+    // Page Contents: [a] [b] [e] [ ] [ ]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {4}));
+    entry = c.pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
+    ASSERT_EQ(entry.back_ptr, Id::null());
+
+    // Page Types:     N   P
+    // Page Contents: [a] [b] [ ] [ ] [ ]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {3}));
+    ASSERT_TRUE(c.freelist->is_empty());
+
+    // Page Types:     N
+    // Page Contents: [a] [ ] [ ] [ ] [ ]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_HAS_VALUE(tree->vacuum_one(Id {2}));
+
+    // Page Types:     N
+    // Page Contents: [a]
+    // Page IDs:       1
+    ASSERT_HAS_VALUE(pager->truncate(1));
+    ASSERT_EQ(pager->page_count(), 1);
+}
+
+TEST_F(VacuumTests, VacuumFreelistSanityCheck)
+{
+    std::vector<Node> nodes;
+    for (Size i {}; i < FRAME_COUNT; ++i) {
+        nodes.emplace_back(allocate_node(true));
+    }
+
+    std::default_random_engine rng {42};
+    std::shuffle(begin(nodes), end(nodes), rng);
+
+    for (auto &node: nodes) {
+        ASSERT_HAS_VALUE(c.freelist->push(std::move(node.page)));
+    }
+
+    for (Size i {}; i < FRAME_COUNT; ++i) {
+        const Id target {pager->page_count()};
+        ASSERT_HAS_VALUE(tree->vacuum_one(target));
+    }
+    ASSERT_HAS_VALUE(pager->truncate(1));
+    ASSERT_EQ(pager->page_count(), 1);
+}
+
+// Page to vacuum is the head of an overflow chain.
+//
+//      N   P   1   a
+//     [1] [2] [3] [4]
+//
+//
+TEST_F(VacuumTests, VacuumOne_OverflowHead)
+{
+
+}
+
+// Page to vacuum is part of the body of an overflow chain.
+//
+//      N   P   1   a   b
+//     [1] [2] [3] [4] [5]
+//
+TEST_F(VacuumTests, VacuumOne_OverflowBody)
+{
+
+}
 
 } // namespace Calico

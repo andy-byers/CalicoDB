@@ -1,5 +1,5 @@
 #include "pager.h"
-#include "frame_buffer.h"
+#include "frames.h"
 #include "page.h"
 #include "tree/header.h"
 #include "utils/logging.h"
@@ -22,7 +22,7 @@ static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
 
 auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
 {
-    auto framer = FrameBuffer::open(
+    auto framer = FrameManager::open(
         param.prefix,
         param.storage,
         param.page_size,
@@ -37,13 +37,15 @@ auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
     return tl::make_unexpected(Status::system_error("could not allocate pager object: out of memory"));
 }
 
-Pager::Pager(const Parameters &param, FrameBuffer framer)
-    : m_frames {std::move(framer)},
+Pager::Pager(const Parameters &param, FrameManager framer)
+    : m_path {param.prefix + "data"},
+      m_frames {std::move(framer)},
       m_commit_lsn {param.commit_lsn},
       m_in_txn {param.in_txn},
       m_status {param.status},
       m_scratch {param.scratch},
-      m_wal {param.wal}
+      m_wal {param.wal},
+      m_storage {param.storage}
 {
     CALICO_EXPECT_NE(m_status, nullptr);
     CALICO_EXPECT_NE(m_scratch, nullptr);
@@ -323,6 +325,17 @@ auto Pager::release(Page page) -> void
             page.deltas(), *m_scratch));
     }
     m_frames.unref(index, std::move(page));
+}
+
+auto Pager::truncate(Size page_count) -> tl::expected<void, Status>
+{
+    CALICO_EXPECT_GT(page_count, 0);
+    auto s = m_storage->resize_file(m_path, page_count * m_frames.page_size());
+    if (!s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
+    m_frames.m_page_count = page_count;
+    return {};
 }
 
 auto Pager::save_state(FileHeader &header) -> void

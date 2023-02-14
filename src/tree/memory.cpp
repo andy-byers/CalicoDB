@@ -17,17 +17,6 @@ static constexpr auto content_offset() -> Size
 }
 
 [[nodiscard]]
-static auto read_next_id(const Page &page) -> Id
-{
-    return {get_u64(page.view(header_offset()))};
-}
-
-static auto write_next_id(Page &page, Id next_id) -> void
-{
-    put_u64(page.span(header_offset(), sizeof(Id)), next_id.value);
-}
-
-[[nodiscard]]
 static auto get_readable_content(const Page &page, Size size_limit) -> Slice
 {
     return page.view(content_offset(), std::min(size_limit, page.size() - content_offset()));
@@ -46,15 +35,12 @@ auto FreeList::push(Page page) -> tl::expected<void, Status>
 
     // Write the parent of the old head, if it exists.
     if (!m_head.is_null()) {
-        Calico_New_R(map, m_pointers->find_map(m_head));
         const PointerMap::Entry entry {page.id(), PointerMap::FREELIST_LINK};
-        m_pointers->write_entry(map, m_head, entry);
-        m_pager->release(std::move(map));
+        Calico_Try_R(m_pointers->write_entry(m_head, entry));
     }
     // Clear the parent of the new head.
-    Calico_New_R(map, m_pointers->find_map(page.id()));
-    m_pointers->write_entry(map, page.id(), {});
-    m_pager->release(std::move(map));
+    const PointerMap::Entry entry {Id::null(), PointerMap::FREELIST_LINK};
+    Calico_Try_R(m_pointers->write_entry(page.id(), entry));
 
     m_head = page.id();
     m_pager->release(std::move(page));
@@ -71,9 +57,8 @@ auto FreeList::pop() -> tl::expected<Page, Status>
         if (!m_head.is_null()) {
             // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
             // node's back pointer at some point.
-            Calico_New_R(map, m_pointers->find_map(m_head));
-            m_pointers->write_entry(map, m_head, {});
-            m_pager->release(std::move(map));
+            const PointerMap::Entry entry {Id::null(), PointerMap::FREELIST_LINK};
+            Calico_Try_R(m_pointers->write_entry(m_head, entry));
         }
         return page;
     }
@@ -105,7 +90,7 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
             .or_else([this](const Status &error) -> tl::expected<Page, Status> {
                 if (error.is_logic_error()) {
                     Calico_New_R(page, m_pager->allocate());
-                    if (PointerMap::lookup(page.id(), m_pager->page_size()) == page.id()) {
+                    if (m_pointers->lookup(page.id()) == page.id()) {
                         m_pager->release(std::move(page));
                         Calico_Put_R(page, m_pager->allocate());
                     }
@@ -124,17 +109,13 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
             m_pager->release(std::move(*prev));
 
             // Update overflow link back pointers.
-            Calico_New_R(map, m_pointers->find_map(page.id()));
-            PointerMap::Entry entry {prev->id(), PointerMap::OVERFLOW_LINK};
-            m_pointers->write_entry(map, page.id(), entry);
-            m_pager->release(std::move(map));
+            const PointerMap::Entry entry {prev->id(), PointerMap::OVERFLOW_LINK};
+            Calico_Try_R(m_pointers->write_entry(page.id(), entry));
         } else {
             head = page.id();
 
-            Calico_New_R(map, m_pointers->find_map(page.id()));
-            PointerMap::Entry entry {pid, PointerMap::NODE};
-            m_pointers->write_entry(map, page.id(), entry);
-            m_pager->release(std::move(map));
+            const PointerMap::Entry entry {pid, PointerMap::OVERFLOW_HEAD};
+            Calico_Try_R(m_pointers->write_entry(page.id(), entry));
         }
         prev.emplace(std::move(page));
     }
@@ -176,21 +157,25 @@ static auto decode_entry(const Byte *data) -> PointerMap::Entry
     return entry;
 }
 
-auto PointerMap::read_entry(const Page &map, Id pid) -> Entry
+auto PointerMap::read_entry(Id pid) -> tl::expected<Entry, Status>
 {
-    CALICO_EXPECT_NE(PointerMap::lookup(pid, m_pager->page_size()), pid);
-    CALICO_EXPECT_EQ(PointerMap::lookup(pid, m_pager->page_size()), map.id());
-    const auto offset = entry_offset(map.id(), pid);
+    const auto mid = lookup(pid);
+    CALICO_EXPECT_NE(mid, pid);
+    const auto offset = entry_offset(mid, pid);
     CALICO_EXPECT_LE(offset + ENTRY_SIZE, m_pager->page_size());
-    return decode_entry(map.data() + offset);
+    Calico_New_R(map, m_pager->acquire(mid));
+    const auto entry = decode_entry(map.data() + offset);
+    m_pager->release(std::move(map));
+    return entry;
 }
 
-auto PointerMap::write_entry(Page &map, Id pid, Entry entry) -> void
+auto PointerMap::write_entry(Id pid, Entry entry) -> tl::expected<void, Status>
 {
-    CALICO_EXPECT_NE(PointerMap::lookup(pid, m_pager->page_size()), pid);
-    CALICO_EXPECT_EQ(PointerMap::lookup(pid, m_pager->page_size()), map.id());
-    const auto offset = entry_offset(map.id(), pid);
+    const auto mid = lookup(pid);
+    CALICO_EXPECT_NE(mid, pid);
+    const auto offset = entry_offset(mid, pid);
     CALICO_EXPECT_LE(offset + ENTRY_SIZE, m_pager->page_size());
+    Calico_New_R(map, m_pager->acquire(mid));
     const auto [back_ptr, type] = decode_entry(map.data() + offset);
     if (entry.back_ptr != back_ptr || entry.type != type) {
         if (!map.is_writable()) {
@@ -200,24 +185,32 @@ auto PointerMap::write_entry(Page &map, Id pid, Entry entry) -> void
         *data++ = entry.type;
         put_u64(data, entry.back_ptr.value);
     }
+    m_pager->release(std::move(map));
+    return {};
 }
 
-auto PointerMap::find_map(Id pid) -> tl::expected<Page, Status>
-{
-    return m_pager->acquire(PointerMap::lookup(pid, m_pager->page_size()));
-}
-
-auto PointerMap::lookup(Id pid, Size page_size) -> Id
+auto PointerMap::lookup(Id pid) -> Id
 {
     // Root page (1) has no parents, and page 2 is the first pointer map page. If "pid" is a pointer map
     // page, "pid" will be returned.
     if (pid.value < 2) {
         return Id::null();
     }
-    const auto usable_size = page_size - sizeof(Lsn);
+    const auto usable_size = m_pager->page_size() - sizeof(Lsn);
     const auto inc = usable_size/ENTRY_SIZE + 1;
     const auto idx = (pid.value-2) / inc;
     return {idx*inc + 2};
+}
+
+[[nodiscard]]
+auto read_next_id(const Page &page) -> Id
+{
+    return {get_u64(page.view(header_offset()))};
+}
+
+auto write_next_id(Page &page, Id next_id) -> void
+{
+    put_u64(page.span(header_offset(), sizeof(Id)), next_id.value);
 }
 
 } // namespace Calico

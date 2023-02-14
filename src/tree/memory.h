@@ -32,6 +32,7 @@ class PointerMap {
 public:
     enum Type: Byte {
         NODE = 1,
+        OVERFLOW_HEAD,
         OVERFLOW_LINK,
         FREELIST_LINK,
     };
@@ -46,17 +47,13 @@ public:
     {}
 
     // Find the page ID of the pointer map that holds the back pointer for page "pid".
-    [[nodiscard]] static auto lookup(Id pid, Size page_size) -> Id;
-
-    // Find the pointer map for page "pid".
-    [[nodiscard]] auto find_map(Id pid) -> tl::expected<Page, Status>;
+    [[nodiscard]] auto lookup(Id pid) -> Id;
 
     // Read an entry from a pointer map.
-    [[nodiscard]] auto read_entry(const Page &map, Id pid) -> Entry;
+    [[nodiscard]] auto read_entry(Id pid) -> tl::expected<Entry, Status>;
 
-    // Write an entry to a pointer map. "map" does not need to be writable: this method will upgrade it if, and only if,
-    // "entry" doesn't match what is already on the page.
-    auto write_entry(Page &map, Id pid, Entry entry) -> void;
+    // Write an entry to a pointer map.
+    [[nodiscard]] auto write_entry(Id pid, Entry entry) -> tl::expected<void, Status>;
 };
 
 /* Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
@@ -108,6 +105,9 @@ public:
     [[nodiscard]] auto write_chain(Id pid, Slice overflow) -> tl::expected<Id, Status>;
     [[nodiscard]] auto erase_chain(Id pid, Size size) -> tl::expected<void, Status>;
 };
+
+[[nodiscard]] auto read_next_id(const Page &page) -> Id;
+auto write_next_id(Page &page, Id) -> void;
 
 } // namespace Calico
 

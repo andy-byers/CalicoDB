@@ -1,5 +1,5 @@
 
-#include "pager/frame_buffer.h"
+#include "pager/frames.h"
 #include "pager/page.h"
 #include "pager/page_cache.h"
 #include "pager/pager.h"
@@ -540,12 +540,12 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 class FramerTests : public InMemoryTest {
 public:
     explicit FramerTests()
-        : framer {*FrameBuffer::open("test/data", storage.get(), 0x200, 8)}
+        : framer {*FrameManager::open("test/data", storage.get(), 0x200, 8)}
     {}
 
     ~FramerTests() override = default;
 
-    FrameBuffer framer;
+    FrameManager framer;
 };
 
 TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
