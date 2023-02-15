@@ -332,7 +332,6 @@ auto Pager::truncate(Size page_count) -> tl::expected<void, Status>
     m_frames.m_page_count = page_count;
 
     const auto predicate = [this](auto pid, auto) {
-        CALICO_EXPECT_TRUE(*m_in_txn);
         return pid.value > m_frames.page_count();
     };
     std::optional<PageCache::Entry> entry;

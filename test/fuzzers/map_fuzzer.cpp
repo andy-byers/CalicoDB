@@ -12,8 +12,7 @@
 
 #include "calico/calico.h"
 
-// TODO: Polishing up normal vacuum operation first, then turn failures back on and work on failures during vacuum.
-#define NO_FAILURES 1
+#define NO_FAILURES 0
 
 namespace {
 

@@ -65,6 +65,7 @@ private:
 
 class FrameManager final {
 public:
+    friend class DatabaseImpl;
     friend class Pager;
 
     ~FrameManager() = default;

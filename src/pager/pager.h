@@ -18,6 +18,7 @@ class Pager {
 public:
     using Ptr = std::unique_ptr<Pager>;
 
+    friend class DatabaseImpl;
     friend class Recovery;
 
     struct Parameters {

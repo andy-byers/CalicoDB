@@ -136,6 +136,12 @@ auto Recovery::finish_recovery() -> Status
     Calico_Try_S(m_wal->truncate(*m_commit_lsn));
     Calico_Try_S(m_wal->start_workers());
     m_wal->cleanup(m_pager->recovery_lsn());
+
+    // Make sure the file size matches the header page count, which should be correct if we made it this far.
+    auto r = m_pager->truncate(m_pager->page_count());
+    if (!r.has_value()) {
+        return r.error();
+    }
     return Status::ok();
 }
 

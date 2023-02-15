@@ -10,10 +10,10 @@
 
 namespace Calico {
 
-#define Maybe_Set_Error(s) \
+#define Maybe_Set_Error(expr) \
     do { \
-        if (m_status.is_ok()) { \
-            m_status = s;  \
+        if (auto maybe_error_s = (expr); m_status.is_ok() && !maybe_error_s.is_ok()) { \
+            m_status = maybe_error_s; \
         } \
     } while (0)
 
@@ -234,9 +234,7 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
 
 auto DatabaseImpl::status() const -> Status
 {
-    if (auto s = wal->status(); !s.is_ok()) {
-        Maybe_Set_Error(std::move(s));
-    }
+    Maybe_Set_Error(wal->status());
     return m_status;
 }
 
@@ -282,6 +280,7 @@ auto DatabaseImpl::check_key(const Slice &key) const -> Status
 
 auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 {
+    Calico_Try_S(status());
     if (auto slot = tree->search(key)) {
         auto [node, index, exact] = std::move(*slot);
 
@@ -349,37 +348,49 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
 
 auto DatabaseImpl::vacuum() -> Status
 {
+    Calico_Try_S(status());
     if (m_txn_size) {
-        return Status::logic_error("vacuum must immediately follow commit, abort, or open");
+        return Status::logic_error("transaction must be empty");
     }
-    for (Id target {pager->page_count()}; ; target.value--) {
+    Maybe_Set_Error(do_vacuum());
+    return status();
+}
+
+auto DatabaseImpl::do_vacuum() -> Status
+{
+    Id target {pager->page_count()};
+    if (target.is_root()) {
+        return Status::ok();
+    }
+    for (; ; target.value--) {
         if (auto r = tree->vacuum_one(target)) {
             if (!*r) {
-                Calico_Try_S(do_commit(m_commit_lsn));
-                if (auto s = pager->truncate(target.value)) {
-                    Calico_Try_S(do_commit({}));
-                    break;
-                } else {
-                    return s.error();
-                }
+                break;
             }
         } else {
             return r.error();
         }
     }
-    return Status::ok();
+    // Make sure the vacuum updates are in the WAL. If this succeeds, we should be able to reapply the
+    // whole vacuum operation if the truncation fails. The recovery routine should truncate the file
+    // to match the header if necessary.
+    pager->m_frames.m_page_count = target.value;
+    Calico_Try_S(do_commit(m_commit_lsn));
+    if (auto r = pager->truncate(pager->page_count())) {
+        // The file size now matches the header page count.
+    } else {
+        return r.error();
+    }
+    return do_commit({});
 }
 
 auto DatabaseImpl::commit() -> Status
 {
     Calico_Try_S(status());
     if (m_txn_size != 0) {
-        if (auto s = do_commit(m_commit_lsn); !s.is_ok()) {
-            Maybe_Set_Error(s);
-            return s;
-        }
+        Maybe_Set_Error(do_commit(m_commit_lsn));
     }
-    return Status::ok();
+    return status();
 }
 
 /*

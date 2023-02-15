@@ -62,6 +62,7 @@ private:
     [[nodiscard]] auto save_state() const -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
+    [[nodiscard]] auto do_vacuum() -> Status;
     [[nodiscard]] auto do_abort() -> Status;
 
     mutable Status m_status;
