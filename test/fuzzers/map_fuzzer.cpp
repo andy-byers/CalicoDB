@@ -23,6 +23,7 @@ enum OperationType {
     COMMIT,
     ABORT,
     REOPEN,
+    VACUUM,
     FAIL,
     TYPE_COUNT
 };
@@ -215,6 +216,13 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     added.clear();
                     erased.clear();
                 } else {
+                    handle_failure();
+                    reopen_and_clear_pending();
+                }
+                expect_equal_sizes();
+                break;
+            case VACUUM:
+                if (!db->vacuum().is_ok()) {
                     handle_failure();
                     reopen_and_clear_pending();
                 }

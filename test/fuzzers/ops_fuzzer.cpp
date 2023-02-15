@@ -90,13 +90,16 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 break;
             case COMMIT:
                 CHECK_OK(db->commit());
+                CHECK_OK(db->vacuum());
                 break;
             case ABORT:
                 CHECK_OK(db->abort());
+                CHECK_OK(db->vacuum());
                 break;
             default: // REOPEN
                 delete db;
                 CHECK_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
+                CHECK_OK(db->vacuum());
         }
         CHECK_OK(db->status());
         Tools::validate_db(*db);

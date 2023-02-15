@@ -290,67 +290,74 @@ auto print_references(std::string pmap)
     std::cerr << "nodes: " << ns << "\nfreelist links: " << fs << "\noverflow heads: " << ohs << "\noverflow links: " << ols << "\n\n";
 }
 
-TEST_F(BasicDatabaseTests, VacuumSanityCheck)
+class DbVacuumTests: public ParameterizedOnDiskTest<std::tuple<Size, Size, bool>>
 {
-    const Size LOWER_BOUNDS {20};
-    const auto UPPER_BOUNDS = LOWER_BOUNDS * 2;
+public:
+    DbVacuumTests()
+        : lower_bounds {std::get<0>(GetParam())},
+          upper_bounds {std::get<1>(GetParam())},
+          reopen {std::get<2>(GetParam())}
+    {
+        options.page_size = 0x200;
+        options.cache_size = 0x200 * 16;
+    }
 
     std::unordered_map<std::string, std::string> map;
     Tools::RandomGenerator random {1'024 * 1'024 * 8};
-
     Database *db;
-    for (Size iteration {}; iteration < 4; ++iteration) {
-        ASSERT_OK(Database::open(ROOT, options, &db));
+    Options options;
+    Size lower_bounds {};
+    Size upper_bounds {};
+    bool reopen {};
+};
 
-        while (map.size() < UPPER_BOUNDS) {
+TEST_P(DbVacuumTests, SanityCheck)
+{
+    ASSERT_OK(Database::open(ROOT, options, &db));
+
+    for (Size iteration {}; iteration < 4; ++iteration) {
+        if (reopen) {
+            delete db;
+            ASSERT_OK(Database::open(ROOT, options, &db));
+        }
+        while (map.size() < upper_bounds) {
             const auto key = random.Generate(10);
             const auto value = random.Generate(options.page_size * 2);
             ASSERT_OK(db->put(key, value));
             map[key.to_string()] = value.to_string();
         }
-        while (map.size() > LOWER_BOUNDS) {
+        while (map.size() > lower_bounds) {
             const auto key = begin(map)->first;
             map.erase(key);
             ASSERT_OK(db->erase(key));
         }
         ASSERT_OK(db->commit());
-
-        {
-            Reader *reader;
-            ASSERT_OK(storage->new_reader(PREFIX + std::string {"data"}, &reader));
-            Size size {options.page_size};
-            std::string page(size, '\x00');
-            ASSERT_OK(reader->read(page.data(), size, size));
-            ASSERT_EQ(size, options.page_size);
-            print_references(page);
-            delete reader;
-        }
-
-
         ASSERT_OK(db->vacuum());
         dynamic_cast<DatabaseImpl &>(*db).TEST_validate();
 
-        {
-            Reader *reader;
-            ASSERT_OK(storage->new_reader(PREFIX + std::string {"data"}, &reader));
-            Size size {options.page_size};
-            std::string page(size, '\x00');
-            ASSERT_OK(reader->read(page.data(), size, size));
-            ASSERT_EQ(size, options.page_size);
-            print_references(page);
-            delete reader;
-        }
-
-Size i {};
+        Size i {};
         for (const auto &[key, value]: map) {
             i++;
             std::string result;
             ASSERT_OK(db->get(key, result));
             CALICO_EXPECT_EQ(result, value);
         }
-        delete db;
     }
+    delete db;
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    DbVacuumTests,
+    DbVacuumTests,
+    ::testing::Values(
+        std::make_tuple(1, 2, false),
+        std::make_tuple(1, 2, true),
+        std::make_tuple(10, 20, false),
+        std::make_tuple(10, 20, true),
+        std::make_tuple(100, 200, false),
+        std::make_tuple(100, 200, true),
+        std::make_tuple(90, 110, false),
+        std::make_tuple(90, 110, true)));
 
 class TestDatabase {
 public:

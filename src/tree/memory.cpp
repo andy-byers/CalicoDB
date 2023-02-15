@@ -107,7 +107,9 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
         auto content = get_writable_content(page, overflow.size());
         mem_copy(content, overflow, content.size());
         overflow.advance(content.size());
-
+if(page.id().value==60){
+std::fprintf(stderr, "for 60: %s\n", escape_string(content.to_string()).c_str());
+}
         if (prev) {
             write_next_id(*prev, page.id());
             m_pager->release(std::move(*prev));

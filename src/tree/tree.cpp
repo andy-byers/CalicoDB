@@ -1198,6 +1198,7 @@ public:
     {
         auto &pager = *m_tree->m_pager;
         CALICO_EXPECT_EQ(BPlusTreeInternal::find_parent_id(*m_tree, overflow_id).value(), parent_id);
+        (void)parent_id;
         auto page = pager.acquire(overflow_id).value();
         for (Size n {}; n < overflow_size; ) {
             const Id next_id {get_u64(page.data() + sizeof(Lsn))};

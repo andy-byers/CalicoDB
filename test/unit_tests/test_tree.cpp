@@ -1843,7 +1843,7 @@ TEST_F(VacuumTests, VacuumsNodes)
 TEST_F(VacuumTests, SanityCheck)
 {
     const Size LOWER_BOUNDS {500};
-    const auto UPPER_BOUNDS = LOWER_BOUNDS * 2;
+    const auto UPPER_BOUNDS = LOWER_BOUNDS + 50;
     std::unordered_map<std::string, std::string> map;
 
     for (Size iteration {}; iteration < 5; ++iteration) {

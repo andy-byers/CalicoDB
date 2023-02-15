@@ -351,10 +351,15 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
 
 auto DatabaseImpl::vacuum() -> Status
 {
+    if (m_txn_size) {
+        return Status::logic_error("vacuum must immediately follow commit, abort, or open");
+    }
     for (Id target {pager->page_count()}; ; target.value--) {
         if (auto r = tree->vacuum_one(target)) {
             if (!*r) {
                 if (auto s = pager->truncate(target.value)) {
+                    Calico_Try_S(commit());
+                    Calico_Try_S(pager->flush({}));
                     break;
                 } else {
                     return s.error();
