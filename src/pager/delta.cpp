@@ -42,7 +42,9 @@ auto compress_deltas(ChangeBuffer &deltas) -> Size
 
 auto insert_delta(ChangeBuffer &deltas, PageDelta delta) -> void
 {
-    CALICO_EXPECT_GT(delta.size, 0);
+    if (delta.size == 0) {
+        return;
+    }
     if (deltas.empty()) {
         deltas.emplace_back(delta);
         return;

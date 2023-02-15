@@ -16,6 +16,7 @@ enum OperationType {
     ITER_FORWARD,
     ITER_REVERSE,
     COMMIT,
+    VACUUM,
     ABORT,
     REOPEN,
     TYPE_COUNT
@@ -87,6 +88,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 }
                 CHECK_TRUE(cursor->status().is_not_found());
                 delete cursor;
+                break;
+            case VACUUM:
+                CHECK_OK(db->commit());
+                CHECK_OK(db->vacuum());
                 break;
             case COMMIT:
                 CHECK_OK(db->commit());

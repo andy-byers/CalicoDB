@@ -678,6 +678,11 @@ auto read_overflow_id(const Cell &cell) -> Id
     return {get_u64(cell.key + cell.local_ps)};
 }
 
+auto write_overflow_id(Cell &cell, Id overflow_id) -> void
+{
+    put_u64(cell.key + cell.local_ps, overflow_id.value);
+}
+
 auto write_child_id(Node &node, Size index, Id child_id) -> void
 {
     auto &header = node.header;

@@ -12,6 +12,8 @@
 
 #include "calico/calico.h"
 
+#define NO_FAILURES 0
+
 namespace {
 
 using namespace Calico;
@@ -23,6 +25,7 @@ enum OperationType {
     COMMIT,
     ABORT,
     REOPEN,
+    VACUUM,
     FAIL,
     TYPE_COUNT
 };
@@ -84,8 +87,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
     Map added;
     Map map;
 
-    const auto reopen_and_clear_pending = [&added, &db, &erased, options]
-    {
+    const auto reopen_and_clear_pending = [&added, &db, &erased, options] {
         delete db;
 
         storage_base(options.storage).clear_interceptors();
@@ -95,16 +97,14 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         erased.clear();
     };
 
-    const auto expect_equal_sizes = [&db, &map]
-    {
+    const auto expect_equal_sizes = [&db, &map] {
         std::string prop;
         CHECK_TRUE(db->get_property("calico.counts", prop));
         const auto counts = Tools::parse_db_counts(prop);
         CHECK_EQ(map.size(), counts.records);
     };
 
-    const auto expect_equal_contents = [&db, &map]
-    {
+    const auto expect_equal_contents = [&db, &map] {
         auto *cursor = db->new_cursor();
         cursor->seek_first();
         for (const auto &[key, value]: map) {
@@ -116,6 +116,22 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         CHECK_FALSE(cursor->is_valid());
         CHECK_TRUE(cursor->status().is_not_found());
         delete cursor;
+    };
+
+    const auto commit = [&] {
+        if (db->commit().is_ok()) {
+            for (const auto &[k, v]: added) {
+                map[k] = v;
+            }
+            for (const auto &k: erased) {
+                map.erase(k);
+            }
+            added.clear();
+            erased.clear();
+        } else {
+            handle_failure();
+            reopen_and_clear_pending();
+        }
     };
 
     while (size > 1) {
@@ -195,13 +211,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 }
                 break;
             case COMMIT:
-                if (db->commit().is_ok()) {
-                    for (const auto &[k, v]: added) {
-                        map[k] = v;
-                    }
-                    for (const auto &k: erased) {
-                        map.erase(k);
-                    }
+                commit();
+                expect_equal_sizes();
+                break;
+            case ABORT:
+                if (db->abort().is_ok()) {
                     added.clear();
                     erased.clear();
                 } else {
@@ -210,11 +224,10 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 }
                 expect_equal_sizes();
                 break;
-            case ABORT:
-                if (db->abort().is_ok()) {
-                    added.clear();
-                    erased.clear();
-                } else {
+            case VACUUM:
+                commit();
+                if (auto s = db->vacuum(); !s.is_ok()) {
+                    CHECK_FALSE(s.is_logic_error());
                     handle_failure();
                     reopen_and_clear_pending();
                 }

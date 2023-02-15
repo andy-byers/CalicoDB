@@ -14,8 +14,8 @@ class CursorImpl : public Cursor {
 public:
     friend class CursorInternal;
 
-    explicit CursorImpl(const CursorActions &actions)
-        : m_actions {&actions}
+    explicit CursorImpl(BPlusTree &tree)
+        : m_tree {&tree}
     {}
 
     ~CursorImpl() override = default;
@@ -38,8 +38,9 @@ private:
         PageSize count {};
     };
     mutable Status m_status;
-    mutable std::string m_buffer;
-    const CursorActions *m_actions {};
+    mutable std::string m_key;
+    mutable std::string m_value;
+    BPlusTree *m_tree {};
     Location m_loc;
 };
 

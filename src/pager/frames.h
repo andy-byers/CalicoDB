@@ -63,10 +63,13 @@ private:
     bool m_is_writable {};
 };
 
-class FrameBuffer final {
+class FrameManager final {
 public:
-    ~FrameBuffer() = default;
-    [[nodiscard]] static auto open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<FrameBuffer, Status>;
+    friend class DatabaseImpl;
+    friend class Pager;
+
+    ~FrameManager() = default;
+    [[nodiscard]] static auto open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<FrameManager, Status>;
     [[nodiscard]] auto pin(Id pid) -> tl::expected<Size, Status>;
     [[nodiscard]] auto write_back(Size index) -> Status;
     [[nodiscard]] auto sync() -> Status;
@@ -114,11 +117,11 @@ public:
         return m_bytes_written;
     }
 
-    auto operator=(FrameBuffer &&) -> FrameBuffer & = default;
-    FrameBuffer(FrameBuffer &&) = default;
+    auto operator=(FrameManager &&) -> FrameManager & = default;
+    FrameManager(FrameManager &&) = default;
 
 private:
-    FrameBuffer(std::unique_ptr<Editor> file, AlignedBuffer buffer, Size page_size, Size frame_count);
+    FrameManager(std::unique_ptr<Editor> file, AlignedBuffer buffer, Size page_size, Size frame_count);
     [[nodiscard]] auto read_page_from_file(Id, Span) const -> tl::expected<bool, Status>;
     [[nodiscard]] auto write_page_to_file(Id pid, const Slice &page) const -> Status;
 

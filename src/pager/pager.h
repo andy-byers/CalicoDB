@@ -12,12 +12,13 @@
 namespace Calico {
 
 class Storage;
-class FrameBuffer;
+class FrameManager;
 
 class Pager {
 public:
     using Ptr = std::unique_ptr<Pager>;
 
+    friend class DatabaseImpl;
     friend class Recovery;
 
     struct Parameters {
@@ -41,33 +42,36 @@ public:
     [[nodiscard]] auto hit_ratio() const -> double;
     [[nodiscard]] auto recovery_lsn() -> Id;
     [[nodiscard]] auto bytes_written() const -> Size;
+    [[nodiscard]] auto truncate(Size page_count) -> tl::expected<void, Status>;
     [[nodiscard]] auto flush(Lsn target_lsn) -> Status;
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto allocate() -> tl::expected<Page, Status>;
     [[nodiscard]] auto acquire(Id pid) -> tl::expected<Page, Status>;
-    auto upgrade(Page &page) -> void;
+    auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
     auto save_state(FileHeader &header) -> void;
 
     auto load_state(const FileHeader &header) -> void;
 
 private:
-    explicit Pager(const Parameters &param, FrameBuffer framer);
+    explicit Pager(const Parameters &param, FrameManager framer);
     [[nodiscard]] auto pin_frame(Id pid) -> Status;
     [[nodiscard]] auto do_pin_frame(Id pid) -> Status;
     [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
-    auto watch_page(Page &page, PageCache::Entry &entry) -> void;
+    auto watch_page(Page &page, PageCache::Entry &entry, int important) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
 
-    FrameBuffer m_framer;
+    std::string m_path;
+    FrameManager m_frames;
     PageList m_dirty;
-    PageCache m_registry;
+    PageCache m_cache;
     Lsn m_recovery_lsn;
     Lsn *m_commit_lsn {};
     bool *m_in_txn {};
     Status *m_status {};
     std::string *m_scratch {};
     WriteAheadLog *m_wal {};
+    Storage *m_storage {};
     Logger *m_info_log {};
 };
 

@@ -33,12 +33,12 @@ public:
 
     [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] static auto repair(const std::string &path, const Options &options) -> Status;
-    [[nodiscard]] static auto vacuum(std::string path, const Options &options) -> Status;
     [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
 
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get_property(const Slice &name, std::string &out) const -> bool override;
     [[nodiscard]] auto status() const -> Status override;
+    [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
     [[nodiscard]] auto abort() -> Status override;
     [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status override;
@@ -61,7 +61,8 @@ private:
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
     [[nodiscard]] auto save_state() const -> Status;
     [[nodiscard]] auto load_state() -> Status;
-    [[nodiscard]] auto do_commit() -> Status;
+    [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
+    [[nodiscard]] auto do_vacuum() -> Status;
     [[nodiscard]] auto do_abort() -> Status;
 
     mutable Status m_status;

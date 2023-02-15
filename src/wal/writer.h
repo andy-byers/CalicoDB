@@ -6,8 +6,6 @@
 #include "wal.h"
 #include <memory>
 #include <optional>
-#include <queue>
-#include <thread>
 
 namespace Calico {
 

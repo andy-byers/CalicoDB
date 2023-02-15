@@ -32,6 +32,15 @@ auto read_exact(Reader &reader, Span out) -> Status
     return s;
 }
 
+inline auto make_path_prefix(std::string path) -> std::string
+{
+    // TODO: Hack
+    while (path.back() == '/') {
+        path.erase(end(path) - 1);
+    }
+    return path + '/';
+}
+
 } // namespace Calico
 
 #endif // CALICO_STORAGE_HELPERS_H

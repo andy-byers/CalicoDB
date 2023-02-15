@@ -5,7 +5,7 @@
 #ifndef CALICO_PAGER_CACHE_H
 #define CALICO_PAGER_CACHE_H
 
-#include "frame_buffer.h"
+#include "frames.h"
 #include "utils/cache.h"
 #include "utils/types.h"
 

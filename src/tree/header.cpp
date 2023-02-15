@@ -19,7 +19,7 @@ static auto write_file_header(Byte *data, const FileHeader &header) -> void
     put_u64(data, header.record_count);
     data += sizeof(std::uint64_t);
 
-    put_u64(data, header.free_list_id.value);
+    put_u64(data, header.freelist_head.value);
     data += sizeof(Id);
 
     put_u64(data, header.recovery_lsn.value);
@@ -45,7 +45,7 @@ FileHeader::FileHeader(const Page &page)
     record_count = get_u64(data);
     data += sizeof(std::uint64_t);
 
-    free_list_id.value = get_u64(data);
+    freelist_head.value = get_u64(data);
     data += sizeof(Id);
 
     recovery_lsn.value = get_u64(data);
@@ -78,9 +78,6 @@ NodeHeader::NodeHeader(const Page &page)
     // Flags byte.
     is_external = *data++;
 
-    parent_id.value = get_u64(data);
-    data += sizeof(Id);
-
     next_id.value = get_u64(data);
     data += sizeof(Id);
 
@@ -110,9 +107,6 @@ auto NodeHeader::write(Page &page) const -> void
     data += sizeof(Id);
 
     *data++ = static_cast<Byte>(is_external);
-
-    put_u64(data, parent_id.value);
-    data += sizeof(Id);
 
     put_u64(data, next_id.value);
     data += sizeof(Id);

@@ -60,37 +60,6 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
     ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
 
-//TEST(ExpensiveTests, OneMillionRecords)
-//{
-//    const auto path = "/tmp/calico_one_million";
-//    std::filesystem::remove_all(path);
-//
-//    Database *db;
-//    expect_ok(Database::open(path, {}, &db));
-//
-//    const Slice value {"value"};
-//    for (Size i {}; i < 1'000'000; ++i) {
-//        expect_ok(db->put(Tools::integral_key(i), value));
-//        if (i % 10'000 == 9'999) {
-//            expect_ok(db->commit());
-//        }
-//    }
-//    expect_ok(db->commit());
-//
-//    auto *cursor = db->new_cursor();
-//    cursor->seek_first();
-//    for (Size i {}; i < 1'000'000; ++i) {
-//        expect_ok(cursor->status());
-//        ASSERT_EQ(cursor->key(), Tools::integral_key(i));
-//        ASSERT_EQ(cursor->value(), value);
-//        cursor->next();
-//    }
-//    delete cursor;
-//    delete db;
-//
-////    expect_ok(Database::destroy(path, {}));
-//}
-
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {
     RecordGenerator generator;
@@ -191,6 +160,119 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
     ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
 }
 
+TEST_F(BasicDatabaseTests, TwoDatabases)
+{
+    Database *lhs;
+    expect_ok(Database::open("/tmp/calico_test_1", options, &lhs));
+
+    Database *rhs;
+    expect_ok(Database::open("/tmp/calico_test_2", options, &rhs));
+
+    for (Size i {}; i < 10; ++i) {
+        expect_ok(lhs->put(Tools::integral_key(i), "value"));
+    }
+    expect_ok(lhs->commit());
+
+    auto *cursor = lhs->new_cursor();
+    cursor->seek_first();
+    while (cursor->is_valid()) {
+        const auto k = cursor->key();
+        const auto v = cursor->value();
+        expect_ok(rhs->put(k, v));
+        cursor->next();
+    }
+    delete cursor;
+
+    expect_ok(rhs->commit());
+
+    Size i {};
+    cursor = rhs->new_cursor();
+    cursor->seek_first();
+    while (cursor->is_valid()) {
+        const auto k = cursor->key();
+        const auto v = cursor->value();
+        ASSERT_EQ(k, Tools::integral_key(i++));
+        ASSERT_EQ(v, "value");
+        cursor->next();
+    }
+    delete cursor;
+
+    delete lhs;
+    delete rhs;
+
+    expect_ok(Database::destroy("/tmp/calico_test_1", options));
+    expect_ok(Database::destroy("/tmp/calico_test_2", options));
+}
+
+class DbVacuumTests: public ParameterizedOnDiskTest<std::tuple<Size, Size, bool>>
+{
+public:
+    DbVacuumTests()
+        : lower_bounds {std::get<0>(GetParam())},
+          upper_bounds {std::get<1>(GetParam())},
+          reopen {std::get<2>(GetParam())}
+    {
+        options.page_size = 0x200;
+        options.cache_size = 0x200 * 16;
+    }
+
+    std::unordered_map<std::string, std::string> map;
+    Tools::RandomGenerator random {1'024 * 1'024 * 8};
+    Database *db;
+    Options options;
+    Size lower_bounds {};
+    Size upper_bounds {};
+    bool reopen {};
+};
+
+TEST_P(DbVacuumTests, SanityCheck)
+{
+    ASSERT_OK(Database::open(ROOT, options, &db));
+
+    for (Size iteration {}; iteration < 4; ++iteration) {
+        if (reopen) {
+            delete db;
+            ASSERT_OK(Database::open(ROOT, options, &db));
+        }
+        while (map.size() < upper_bounds) {
+            const auto key = random.Generate(10);
+            const auto value = random.Generate(options.page_size * 2);
+            ASSERT_OK(db->put(key, value));
+            map[key.to_string()] = value.to_string();
+        }
+        while (map.size() > lower_bounds) {
+            const auto key = begin(map)->first;
+            map.erase(key);
+            ASSERT_OK(db->erase(key));
+        }
+        ASSERT_OK(db->commit());
+        ASSERT_OK(db->vacuum());
+        dynamic_cast<DatabaseImpl &>(*db).TEST_validate();
+
+        Size i {};
+        for (const auto &[key, value]: map) {
+            i++;
+            std::string result;
+            ASSERT_OK(db->get(key, result));
+            CALICO_EXPECT_EQ(result, value);
+        }
+    }
+    delete db;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DbVacuumTests,
+    DbVacuumTests,
+    ::testing::Values(
+        std::make_tuple(1, 2, false),
+        std::make_tuple(1, 2, true),
+        std::make_tuple(10, 20, false),
+        std::make_tuple(10, 20, true),
+        std::make_tuple(100, 200, false),
+        std::make_tuple(100, 200, true),
+        std::make_tuple(90, 110, false),
+        std::make_tuple(90, 110, true)));
+
 class TestDatabase {
 public:
     explicit TestDatabase(Storage &storage)
@@ -236,13 +318,14 @@ protected:
 
 static auto add_records(TestDatabase &test, Size n, Size max_value_size, const std::string &prefix = {})
 {
-    std::vector<Record> records(n);
+    std::map<std::string, std::string> records;
 
     for (Size i {}; i < n; ++i) {
         const auto value_size = test.random.Next<Size>(max_value_size);
-        records[i].key = prefix + Tools::integral_key(i);
-        records[i].value = test.random.Generate(value_size).to_string();
-        EXPECT_OK(test.impl->put(records[i].key, records[i].value));
+        const auto key = prefix + Tools::integral_key(i);
+        const auto value = test.random.Generate(value_size).to_string();
+        EXPECT_OK(test.impl->put(key, value));
+        records[key] = value;
     }
     return records;
 }
@@ -269,20 +352,21 @@ TEST_F(DbAbortTests, RevertsSecondBatch)
     ASSERT_EQ(snapshot, db->snapshot());
 }
 
-TEST_F(DbAbortTests, RevertsNthBatch)
-{
-    for (Size i {}; i < 10; ++i) {
-        add_records(*db, 100, 0x400, "_");
-        ASSERT_OK(db->impl->commit());
-    }
-    // Hack to make sure the database file is up-to-date.
-    (void)db->impl->pager->flush({});
-
-    const auto snapshot = db->snapshot();
-    add_records(*db, 1'000, 0x400);
-    ASSERT_OK(db->impl->abort());
-    ASSERT_EQ(snapshot, db->snapshot());
-}
+// TODO: This type of test won't work anymore. Some bytes can change after a rollback.
+//TEST_F(DbAbortTests, RevertsNthBatch)
+//{
+//    for (Size i {}; i < 10; ++i) {
+//        add_records(*db, 100, 0x400, "_");
+//        ASSERT_OK(db->impl->commit());
+//    }
+//    // Hack to make sure the database file is up-to-date.
+//    (void)db->impl->pager->flush({});
+//
+//    const auto snapshot = db->snapshot();
+//    add_records(*db, 1'000, 0x400);
+//    ASSERT_OK(db->impl->abort());
+//    ASSERT_EQ(snapshot, db->snapshot());
+//}
 
 TEST_F(DbAbortTests, RevertsUncommittedBatch)
 {
@@ -380,7 +464,7 @@ protected:
     ~DbErrorTests() override = default;
 
     std::unique_ptr<TestDatabase> db;
-    std::vector<Record> committed;
+    std::map<std::string, std::string> committed;
     Size counter {};
 };
 
@@ -444,7 +528,14 @@ protected:
     {
         db = std::make_unique<TestDatabase>(*storage);
 
-        committed = add_records(*db, 5'000, 10);
+        // Make sure all page types are represented in the database.
+        committed = add_records(*db, 5'000, db->options.page_size * 2);
+        for (Size i {}; i < 500; ++i) {
+            const auto itr = begin(committed);
+            EXPECT_OK(db->impl->erase(itr->first));
+            committed.erase(itr);
+        }
+
         EXPECT_OK(db->impl->commit());
 
         const auto make_interceptor = [this](const auto &prefix, auto type) {
@@ -475,7 +566,7 @@ protected:
     ~DbFatalErrorTests() override = default;
 
     std::unique_ptr<TestDatabase> db;
-    std::vector<Record> committed;
+    std::map<std::string, std::string> committed;
     Size counter {};
 };
 
@@ -489,13 +580,34 @@ TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
     assert_special_error(db->impl->put("key", "value"));
 }
 
-TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
+TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 {
-    Size i {};
-    while (i < committed.size() && db->impl->erase(Tools::integral_key(i++)).is_ok());
+    auto itr = begin(committed);
+    while (db->impl->erase(itr++->first).is_ok()) {
+        ASSERT_NE(itr, end(committed));
+    }
     assert_special_error(db->impl->status());
     assert_special_error(db->impl->commit());
+    assert_special_error(db->impl->abort());
     assert_special_error(db->impl->put("key", "value"));
+    std::string value;
+    assert_special_error(db->impl->get("key", value));
+    auto *cursor = db->impl->new_cursor();
+    assert_special_error(cursor->status());
+    delete cursor;
+}
+
+TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
+{
+    auto itr = begin(committed);
+    for (; ; ) {
+        auto s = db->impl->erase(itr++->first);
+        if (!s.is_ok()) {
+            assert_special_error(s);
+            break;
+        }
+        ASSERT_NE(itr, end(committed));
+    }
     db->impl.reset();
 
     storage_handle().clear_interceptors();
@@ -506,6 +618,36 @@ TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
         TestTools::expect_contains(*db->impl, key, value);
     }
     Tools::validate_db(*db->impl);
+}
+
+TEST_P(DbFatalErrorTests, VacuumReportsErrors)
+{
+    assert_special_error(db->impl->vacuum());
+    assert_special_error(db->impl->status());
+}
+
+// TODO: This doesn't exercise much of what can go wrong here. Need a test for failure to truncate the file, so the
+//       header page count is left incorrect. We should be able to recover from that.
+TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
+{
+    assert_special_error(db->impl->vacuum());
+    db->impl.reset();
+
+    storage_handle().clear_interceptors();
+    db->impl = std::make_unique<DatabaseImpl>();
+    ASSERT_OK(db->impl->open("test", db->options));
+
+    for (const auto &[key, value]: committed) {
+        TestTools::expect_contains(*db->impl, key, value);
+    }
+    Tools::validate_db(*db->impl);
+
+    Size file_size;
+    ASSERT_OK(storage->file_size("test/data", file_size));
+    std::string property;
+    ASSERT_TRUE(db->impl->get_property("calico.counts", property));
+    const auto counts = Tools::parse_db_counts(property);
+    ASSERT_EQ(file_size, counts.pages * db->options.page_size);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -633,7 +775,7 @@ public:
     }
 
     [[nodiscard]]
-    static auto vacuum(const Slice &, const Options &) -> Status
+    auto vacuum() -> Status override
     {
         return Status::ok();
     }
@@ -813,9 +955,9 @@ TEST_F(ApiTests, KeysCanBeArbitraryBytes)
     delete cursor;
 }
 
-class CommitTests : public ApiTests {
+class CommitFailureTests : public ApiTests {
 protected:
-    ~CommitTests() override = default;
+    ~CommitFailureTests() override = default;
 
     auto SetUp() -> void override
     {
@@ -827,8 +969,7 @@ protected:
 
     auto TearDown() -> void override
     {
-        ASSERT_OK(db->commit());
-        assert_special_error(db->put("d", "4"));
+        assert_special_error(db->commit());
         delete db;
 
         storage_handle().clear_interceptors();
@@ -844,13 +985,13 @@ protected:
     }
 };
 
-TEST_F(CommitTests, WalAdvanceFailure)
+TEST_F(CommitFailureTests, WalAdvanceFailure)
 {
     // Write the commit record and flush successfully, but fail to open the next segment file.
     Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
 }
 
-TEST_F(CommitTests, PagerFlushFailure)
+TEST_F(CommitFailureTests, PagerFlushFailure)
 {
     // Write the commit record and flush successfully, but fail to flush old pages from the page cache.
     Quick_Interceptor("test/data", Tools::Interceptor::WRITE);

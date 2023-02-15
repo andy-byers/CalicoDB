@@ -8,6 +8,7 @@ The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree 
   + [Opening a database](#opening-a-database)
   + [Updating a database](#updating-a-database)
   + [Querying a database](#querying-a-database)
+  + [Vacuuming a database](#vacuuming-a-database)
   + [Closing a database](#closing-a-database)
   + [Transactions](#transactions)
   + [Destroying a database](#destroying-a-database)
@@ -181,6 +182,15 @@ for (; cursor->is_valid() && cursor->key() < "f"; cursor->next()) {
 delete cursor;
 ```
 
+### Vacuuming a database
+
+```C++
+if (const auto s = db->vacuum(); s.is_ok()) {
+    // Unused database pages have been reclaimed and the file truncated. Note that calls to vacuum() must occur first
+    // in a transaction, i.e. vacuum() must follow a successful call to commit(), abort(), or open().
+}
+```
+
 ### Transactions
 A transaction represents a unit of work in Calico DB.
 The first transaction is started when the database is opened. 
@@ -217,18 +227,8 @@ std::string prop;
 bool exists;
 
 // Database properties are made available as strings.
-exists = db->get_property("calico.count.updates", prop);
-exists = db->get_property("calico.count.records", prop);
-exists = db->get_property("calico.count.pages", prop);
-exists = db->get_property("calico.limit.max_key_length", prop);
-exists = db->get_property("calico.stat.cache_hit_ratio", prop);
-exists = db->get_property("calico.stat.pager_throughput", prop);
-exists = db->get_property("calico.stat.wal_throughput", prop);
-exists = db->get_property("calico.stat.data_throughput", prop);
-
-// The page size is fixed at database creation time. If the database already existed, the page size passed to the
-// constructor through Calico::Options is ignored. We can query the real page size using the following line.
-exists = db->get_property("calico.limit.page_size", prop);
+exists = db->get_property("calico.counts", prop);
+exists = db->get_property("calico.stats", prop);
 ```
 
 ### Closing a database 
@@ -255,13 +255,13 @@ The page size must be a power-of-two, so here are the possible maximum key lengt
 
 | Page size (B) | Maximum key length (B) |
 |--------------:|-----------------------:|
-|           512 |                    101 |
-|         1,024 |                    229 |
-|         2,048 |                    485 |
-|         4,096 |                    997 |
-|         8,192 |                  2,021 |
-|        16,384 |                  4,069 |
-|        32,768 |                  8,165 |
+|           512 |                    103 |
+|         1,024 |                    231 |
+|         2,048 |                    487 |
+|         4,096 |                    999 |
+|         8,192 |                  2,023 |
+|        16,384 |                  4,071 |
+|        32,768 |                  8,167 |
 
 The database instance will report an "invalid argument" error if the key is too long (or if it has zero length).
 
@@ -283,6 +283,13 @@ See [`test/tools`](../test/tools) for an example that stores the database in mem
 ### Pager
 The pager module provides in-memory caching for database pages read by the `storage` module.
 It is the pager's job to maintain consistency between database pages on disk and in memory.
+
+### Tree
+The B<sup>+</sup>-tree logic can be found in the tree module.
+The tree is of variable order, so splits are performed when nodes have run out of physical space.
+The implementation is pretty straightforward.
+We basically do as little as possible to make sure that the tree ordering remains correct.
+This results in a less-balanced tree, but seems to be good for write performance.
 
 ### WAL
 The WAL record format is similar to that of `RocksDB`.

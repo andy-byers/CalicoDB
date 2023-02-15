@@ -1,5 +1,5 @@
 
-#include "pager/frame_buffer.h"
+#include "pager/frames.h"
 #include "pager/page.h"
 #include "pager/page_cache.h"
 #include "pager/pager.h"
@@ -44,13 +44,12 @@ TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
     ASSERT_TRUE(empty.empty());
 }
 
-#if not NDEBUG
-TEST_F(DeltaCompressionTest, InsertEmptyDeltaDeathTest)
+TEST_F(DeltaCompressionTest, InsertingEmptyDeltaDoesNothing)
 {
     ChangeBuffer deltas;
-    ASSERT_DEATH(insert_delta(deltas, {123, 0}), EXPECTATION_MATCHER);
+    insert_delta(deltas, {123, 0});
+    ASSERT_TRUE(deltas.empty());
 }
-#endif // not NDEBUG
 
 TEST_F(DeltaCompressionTest, CompressingSingleDeltaDoesNothing)
 {
@@ -541,12 +540,12 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 class FramerTests : public InMemoryTest {
 public:
     explicit FramerTests()
-        : framer {*FrameBuffer::open("test/data", storage.get(), 0x200, 8)}
+        : framer {*FrameManager::open("test/data", storage.get(), 0x200, 8)}
     {}
 
     ~FramerTests() override = default;
 
-    FrameBuffer framer;
+    FrameManager framer;
 };
 
 TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
@@ -618,7 +617,7 @@ public:
     {
         auto r = pager->allocate();
         EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-        pager->upgrade(*r);
+//        pager->upgrade(*r);
         write_to_page(*r, message);
         return std::move(*r);
     }

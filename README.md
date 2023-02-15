@@ -23,7 +23,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 ## Features
 + Bidirectional iteration using cursors
 + Crash protection via write-ahead logging
-+ Variable-length keys and values (see [Caveats](#caveats))
++ Vacuum operation to reclaim unused pages while running
 + Various parameters can be tuned (page size, cache size, etc.)
 
 ## Caveats
@@ -49,22 +49,22 @@ CPU:            16 * 12th Gen Intel(R) Core(TM) i5-12600K
 CPUCache:       20480 KB
 ```
 
-The CalicoDB instance was only committed after all writes were finished (the call to `kyotocabinet::TreeDB::synchronize()` in `DBSynchronize()` was replaced with a call to `Calico::Database::commit()`). 
+The CalicoDB instance was committed every 1,000 writes.
 Only benchmarks relevant to CalicoDB are included.
 
-| Benchmark name           | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
-|:-------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>    |                      616,523 |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup> |                      261,097 |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>  |                      194,704 |                     173,461 |                    288,684 |
-| `readrandom`             |                      472,590 |                     515,198 |                    413,907 |
-| `readseq`                |                    2,469,136 |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`           |                        1,724 |                       5,215 |                     11,387 |
-| `fillseq100k`            |                          864 |                       6,731 |                      9,560 |
-| `readseq100k`            |                       18,916 |                      49,232 |                     65,557 |
-| `readrand100k`           |                       20,188 |                      10,894 |                     66,028 |
+| Benchmark name             | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
+|:---------------------------|-----------------------------:|----------------------------:|---------------------------:|
+| `fillseq`<sup>*</sup>      |                      714,796 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup>   |                      134,807 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>    |                      155,400 |                     173,461 |                    288,684 |
+| `readrandom`               |                      523,286 |                     515,198 |                    413,907 |
+| `readseq`                  |                    2,941,176 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`<sup>*</sup> |                        3,415 |                       5,215 |                     11,387 |
+| `fillseq100k`<sup>*</sup>  |                        3,668 |                       6,731 |                      9,560 |
+| `readseq100k`              |                       19,056 |                      49,232 |                     65,557 |
+| `readrand100k`             |                       19,889 |                      10,894 |                     66,028 |
 
-<sup>*</sup> These benchmarks are affected by the fact that we don't commit.
+<sup>*</sup> These benchmarks are affected by the fact that we use a batch size of 1,000.
 The call to `Database::commit()` will flush pages from older transactions, advance the WAL to a new segment, and possibly remove obsolete WAL segments, so it has quite a bit of overhead.
 For this reason, the SQLite3 benchmarks actually list the results for the much faster batched versions, which commit every 1,000 writes (i.e. `fillseq` is actually `fillseqbatch` for SQLite3).
 
@@ -74,12 +74,17 @@ CalicoDB shouldn't ever be slower than this.
 
 ## TODO
 1. Get everything code reviewed!
-2. Need to implement compaction (`Status Database::vacuum()`)
-    + We need some way to collect freelist pages at the end of the file so that we can truncate
-    + Look into SQLite's pointer maps
-3. Need to implement repair (`Status Database::repair()`)
+2. Need to implement repair (`Status Database::repair()`)
     + Run when a database cannot be opened due to corruption (not the same as recovery)
-4. Support Windows (write a `Storage` implementation)
+3. Support Windows (write a `Storage` implementation)
+4. When we roll back a transaction, we shouldn't undo any vacuum operations that have occurred
+   + Add a new WAL record type: a "meta" record that signals some operation and maybe a payload specific to the operation type
+   + This record type can signal commit, vacuum start, or vacuum end, or even other things as needed
+   + We should still roll vacuum operations forward during recovery
+5. Reduce the overhead of the commit operation
+   + Don't advance to a new WAL segment on commit
+   + When committing, just write the WAL record, flush the tail buffer, and then call `fsync()` on the file handle
+   + This will also make rolling the WAL faster since, depending on the commit frequency, we could end up with far fewer segment files
 
 ## Documentation
 Check out Calico DB's [usage and design documents](doc).
