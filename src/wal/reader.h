@@ -6,7 +6,6 @@
 #include "utils/crc.h"
 #include "wal.h"
 #include <optional>
-#include <thread>
 
 namespace Calico {
 

@@ -1103,7 +1103,6 @@ auto BPlusTree::vacuum_one(Id target) -> tl::expected<bool, Status>
     // Swap the head of the freelist with the last page in the file.
     Calico_New_R(head, m_freelist.pop());
     if (target != head.id()) {
-std::fprintf(stderr,"%zu\n",target.value);
         // Swap the last page with the freelist head.
         Calico_Try_R(vacuum_step(head, target));
     }

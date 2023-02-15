@@ -1,5 +1,6 @@
 
 #include "database_impl.h"
+#include <limits>
 #include "calico/calico.h"
 #include "calico/storage.h"
 #include "storage/helpers.h"
@@ -140,10 +141,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         state.header_crc = state.compute_crc();
         state.write(root->page);
         pager->release(std::move(*root).take());
-
-        Calico_Try_S(do_commit());
-        Calico_Try_S(wal->flush());
-        Calico_Try_S(pager->flush({}));
+        Calico_Try_S(do_commit({}));
 
     } else {
         logv(m_info_log, "ensuring consistency of an existing database");
@@ -357,9 +355,9 @@ auto DatabaseImpl::vacuum() -> Status
     for (Id target {pager->page_count()}; ; target.value--) {
         if (auto r = tree->vacuum_one(target)) {
             if (!*r) {
+                Calico_Try_S(do_commit(m_commit_lsn));
                 if (auto s = pager->truncate(target.value)) {
-                    Calico_Try_S(commit());
-                    Calico_Try_S(pager->flush({}));
+                    Calico_Try_S(do_commit({}));
                     break;
                 } else {
                     return s.error();
@@ -376,7 +374,7 @@ auto DatabaseImpl::commit() -> Status
 {
     Calico_Try_S(status());
     if (m_txn_size != 0) {
-        if (auto s = do_commit(); !s.is_ok()) {
+        if (auto s = do_commit(m_commit_lsn); !s.is_ok()) {
             Maybe_Set_Error(s);
             return s;
         }
@@ -389,7 +387,7 @@ auto DatabaseImpl::commit() -> Status
  *       is what ultimately determines the transaction outcome. If a different failure occurs, that status will be
  *       returned on the next access to the database object.
  */
-auto DatabaseImpl::do_commit() -> Status
+auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
 {
     logv(m_info_log, "commit requested at lsn ", wal->current_lsn().value + 1);
 
@@ -401,7 +399,7 @@ auto DatabaseImpl::do_commit() -> Status
     Calico_Try_S(wal->flush());
     wal->advance();
 
-    Maybe_Set_Error(pager->flush(m_commit_lsn));
+    Maybe_Set_Error(pager->flush(flush_lsn));
     wal->cleanup(pager->recovery_lsn());
     m_commit_lsn = lsn;
 

@@ -59,61 +59,6 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
     ASSERT_TRUE(storage->file_exists(prefix + "data").is_not_found());
     ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
-//
-//TEST(ExpensiveTests, OneMillionRecords)
-//{
-//    const auto path = "/tmp/calico_one_million";
-//    std::filesystem::remove_all(path);
-//
-//    Database *db;
-//    expect_ok(Database::open(path, {}, &db));
-//
-//    const Slice value {"value"};
-//    for (Size i {}; i < 1'000'000; ++i) {
-//        expect_ok(db->put(Tools::integral_key(i), value));
-//        if (i % 10'000 == 9'999) {
-//            expect_ok(db->commit());
-//        }
-//    }
-//    expect_ok(db->commit());
-//
-//    auto *cursor = db->new_cursor();
-//    cursor->seek_first();
-//    for (Size i {}; i < 1'000'000; ++i) {
-//        expect_ok(cursor->status());
-//        ASSERT_EQ(cursor->key(), Tools::integral_key(i));
-//        ASSERT_EQ(cursor->value(), value);
-//        cursor->next();
-//    }
-//    delete cursor;
-//    delete db;
-//
-////    expect_ok(Database::destroy(path, {}));
-//}
-//
-//TEST(ExpensiveTests, Vacuum)
-//{
-//    const auto path = "/tmp/calico_vacuum";
-//    std::filesystem::remove_all(path);
-//
-//    Database *db;
-//    expect_ok(Database::open(path, {}, &db));
-//
-//    const Slice value {"value"};
-//    for (Size i {}; i < 1'000; ++i) {
-//        expect_ok(db->put(Tools::integral_key(i), value));
-//        if (i % 100 == 9'999) {
-//            expect_ok(db->commit());
-//        }
-//    }
-//    expect_ok(db->commit());
-//
-//    delete db;
-//
-//    expect_ok(Database::vacuum(path, {}));
-//
-//    //    expect_ok(Database::destroy(path, {}));
-//}
 
 static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 {
@@ -257,37 +202,6 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
 
     expect_ok(Database::destroy("/tmp/calico_test_1", options));
     expect_ok(Database::destroy("/tmp/calico_test_2", options));
-}
-
-auto print_references(std::string pmap)
-{
-    Size ns {}, fs {}, ohs {}, ols {};
-    Id pid {3};
-    for (Size i {sizeof(Lsn)}; i + 9 <= pmap.size(); i += 9) {
-        std::cerr << std::setw(6) << pid.value++ << ": ";
-        PointerMap::Type type {pmap[i]};
-        const Id back_ptr {get_u64(pmap.substr(i + 1, 8))};
-        switch (type) {
-            case PointerMap::NODE:
-                std::cerr << "node";
-                ns++;
-                break;
-            case PointerMap::FREELIST_LINK:
-                std::cerr << "freelist link";
-                fs++;
-                break;
-            case PointerMap::OVERFLOW_HEAD:
-                std::cerr << "overflow head";
-                ohs++;
-                break;
-            case PointerMap::OVERFLOW_LINK:
-                std::cerr << "overflow link";
-                ols++;
-                break;
-        }
-        std::cerr << " -> " << back_ptr.value << '\n';
-    }
-    std::cerr << "nodes: " << ns << "\nfreelist links: " << fs << "\noverflow heads: " << ohs << "\noverflow links: " << ols << "\n\n";
 }
 
 class DbVacuumTests: public ParameterizedOnDiskTest<std::tuple<Size, Size, bool>>

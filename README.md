@@ -23,6 +23,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 ## Features
 + Bidirectional iteration using cursors
 + Crash protection via write-ahead logging
++ Vacuum operation to reclaim unused pages while running
 + Various parameters can be tuned (page size, cache size, etc.)
 
 ## Caveats
@@ -82,7 +83,6 @@ CalicoDB shouldn't ever be slower than this.
    + We should still roll vacuum operations forward during recovery
 5. Reduce the overhead of the commit operation
    + Don't advance to a new WAL segment on commit
-   + We need to break out of the WAL rolling loop after a commit record is reached, so we should save the offset in the segment file and pass it in as an argument to the WAL reader
    + When committing, just write the WAL record, flush the tail buffer, and then call `fsync()` on the file handle
    + This will also make rolling the WAL faster since, depending on the commit frequency, we could end up with far fewer segment files
 

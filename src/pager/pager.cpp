@@ -1,15 +1,13 @@
 #include "pager.h"
+#include <limits>
 #include "frames.h"
 #include "page.h"
 #include "tree/header.h"
 #include "utils/logging.h"
 #include "utils/types.h"
 #include "wal/wal.h"
-#include <thread>
 
 namespace Calico {
-
-namespace fs = std::filesystem;
 
 static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
 

@@ -69,10 +69,6 @@ auto FreeList::pop() -> tl::expected<Page, Status>
 auto OverflowList::read_chain(Id pid, Span out) -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
-        Calico_New_R(ent, m_pointers->read_entry(pid));
-        fprintf(stderr, "PID:%zu, BP:%zu, %s\n",pid.value,ent.back_ptr.value,ent.type==PointerMap::NODE?"node":(ent.type==PointerMap::FREELIST_LINK?"freelist_link":(ent.type==PointerMap::OVERFLOW_HEAD?"overflow_head":"overflow_link")));
-
-
         Calico_New_R(page, m_pager->acquire(pid));
         const auto content = get_readable_content(page, out.size());
         mem_copy(out, content);
@@ -107,9 +103,7 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
         auto content = get_writable_content(page, overflow.size());
         mem_copy(content, overflow, content.size());
         overflow.advance(content.size());
-if(page.id().value==60){
-std::fprintf(stderr, "for 60: %s\n", escape_string(content.to_string()).c_str());
-}
+
         if (prev) {
             write_next_id(*prev, page.id());
             m_pager->release(std::move(*prev));

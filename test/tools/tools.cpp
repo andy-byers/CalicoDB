@@ -1,6 +1,8 @@
 
 #include "tools.h"
 #include <algorithm>
+#include <iomanip>
+#include <iostream>
 #include "utils/types.h"
 
 namespace Calico::Tools {
@@ -251,6 +253,37 @@ auto RandomGenerator::Generate(Size len) const -> Slice
     }
     m_pos += len;
     return {m_data.data() + m_pos - len, static_cast<Size>(len)};
+}
+
+auto print_references(Pager &pager, PointerMap &pointers)
+{
+    for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
+        std::cerr << std::setw(6) << pid.value << ": ";
+        if (pointers.lookup(pid) == pid) {
+            std::cerr << "pointer map\n";
+            continue;
+        }
+        if (pid.is_root()) {
+            std::cerr << "node -> NULL\n";
+            continue;
+        }
+        const auto entry = pointers.read_entry(pid).value();
+        switch (entry.type) {
+            case PointerMap::NODE:
+                std::cerr << "node";
+                break;
+            case PointerMap::FREELIST_LINK:
+                std::cerr << "freelist link";
+                break;
+            case PointerMap::OVERFLOW_HEAD:
+                std::cerr << "overflow head";
+                break;
+            case PointerMap::OVERFLOW_LINK:
+                std::cerr << "overflow link";
+                break;
+        }
+        std::cerr << " -> " << entry.back_ptr.value << '\n';
+    }
 }
 
 } // namespace Calico::Tools

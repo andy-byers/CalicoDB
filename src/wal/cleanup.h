@@ -2,7 +2,6 @@
 #define CALICO_WAL_CLEANER_H
 
 #include "helpers.h"
-#include <thread>
 
 namespace Calico {
 

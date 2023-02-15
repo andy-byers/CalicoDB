@@ -309,6 +309,8 @@ inline auto parse_db_stats(std::string prop) -> DatabaseStats
     return stats;
 }
 
+auto print_references(Pager &pager, PointerMap &pointers);
+
 } // namespace Calico::Tools
 
 #endif // CALICO_TOOLS_H

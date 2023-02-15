@@ -451,18 +451,17 @@ INSTANTIATE_TEST_SUITE_P(
         ExternalNodeTestParameters {NON_ROOT_PID, MEDIUM_PAGE_SIZE},
         ExternalNodeTestParameters {NON_ROOT_PID, LARGE_PAGE_SIZE}));
 
-// TODO: Making changes, no longer correct.
-//TEST(MaximumKeySizeTest, SizeTableIsCorrect)
-//{
-//    ASSERT_EQ(101, compute_max_local(MINIMUM_PAGE_SIZE));
-//    ASSERT_EQ(229, compute_max_local(MINIMUM_PAGE_SIZE << 1));
-//    ASSERT_EQ(485, compute_max_local(MINIMUM_PAGE_SIZE << 2));
-//    ASSERT_EQ(997, compute_max_local(MINIMUM_PAGE_SIZE << 3));
-//    ASSERT_EQ(2021, compute_max_local(MINIMUM_PAGE_SIZE << 4));
-//    ASSERT_EQ(4069, compute_max_local(MINIMUM_PAGE_SIZE << 5));
-//    ASSERT_EQ(8165, compute_max_local(MINIMUM_PAGE_SIZE << 6));
-//    ASSERT_EQ(MAXIMUM_PAGE_SIZE, MINIMUM_PAGE_SIZE << 6);
-//}
+TEST(MaximumKeySizeTest, SizeTableIsCorrect)
+{
+    ASSERT_EQ(103, compute_max_local(MINIMUM_PAGE_SIZE));
+    ASSERT_EQ(231, compute_max_local(MINIMUM_PAGE_SIZE << 1));
+    ASSERT_EQ(487, compute_max_local(MINIMUM_PAGE_SIZE << 2));
+    ASSERT_EQ(999, compute_max_local(MINIMUM_PAGE_SIZE << 3));
+    ASSERT_EQ(2'023, compute_max_local(MINIMUM_PAGE_SIZE << 4));
+    ASSERT_EQ(4'071, compute_max_local(MINIMUM_PAGE_SIZE << 5));
+    ASSERT_EQ(8'167, compute_max_local(MINIMUM_PAGE_SIZE << 6));
+    ASSERT_EQ(MAXIMUM_PAGE_SIZE, MINIMUM_PAGE_SIZE << 6);
+}
 
 struct CellConversionTestParameters {
     bool is_src_external {};
@@ -1394,6 +1393,45 @@ public:
         pager->release(std::move(node).take());
     }
 
+    auto sanity_check(Size lower_bounds, Size record_count, Size max_value_size) const
+    {
+        std::unordered_map<std::string, std::string> map;
+
+        for (Size iteration {}; iteration < 5; ++iteration) {
+            while (map.size() < lower_bounds + record_count) {
+                const auto key = random.Generate(16);
+                const auto value_size = random.Next<Size>(max_value_size);
+                const auto value = random.Generate(value_size);
+                ASSERT_HAS_VALUE(tree->insert(key, value));
+                map[key.to_string()] = value.to_string();
+            }
+
+            auto itr = begin(map);
+            while (map.size() > lower_bounds) {
+                ASSERT_HAS_VALUE(tree->erase(itr->first));
+                itr = map.erase(itr);
+            }
+
+            Id target {pager->page_count()};
+            while (tree->vacuum_one(target).value()) {
+                tree->TEST_check_links();
+                tree->TEST_check_nodes();
+                tree->TEST_check_order();
+                target.value--;
+            }
+            ASSERT_HAS_VALUE(pager->truncate(target.value));
+
+            auto *cursor = CursorInternal::make_cursor(*tree);
+            for (const auto &[key, value]: map) {
+                cursor->seek(key);
+                ASSERT_TRUE(cursor->is_valid());
+                ASSERT_EQ(cursor->key(), key);
+                ASSERT_EQ(cursor->value(), value);
+            }
+            delete cursor;
+        }
+    }
+
     std::string scratch;
     std::string log_scratch;
     Status status;
@@ -1809,75 +1847,39 @@ TEST_F(VacuumTests, VacuumsNodes)
     delete cursor;
 }
 
-//auto print_references(Pager &pager, PointerMap &pointers)
-//{
-//    for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
-//        std::cerr << std::setw(6) << pid.value << ": ";
-//        if (pointers.lookup(pid) == pid) {
-//            std::cerr << "pointer map\n";
-//            continue;
-//        }
-//        if (pid.is_root()) {
-//            std::cerr << "node -> NULL\n";
-//            continue;
-//        }
-//        const auto entry = pointers.read_entry(pid).value();
-//        switch (entry.type) {
-//            case PointerMap::NODE:
-//                std::cerr << "node";
-//                break;
-//            case PointerMap::FREELIST_LINK:
-//                std::cerr << "freelist link";
-//                break;
-//            case PointerMap::OVERFLOW_HEAD:
-//                std::cerr << "overflow head";
-//                break;
-//            case PointerMap::OVERFLOW_LINK:
-//                std::cerr << "overflow link";
-//                break;
-//        }
-//        std::cerr << " -> " << entry.back_ptr.value << '\n';
-//    }
-//}
-
-TEST_F(VacuumTests, SanityCheck)
+TEST_F(VacuumTests, SanityCheck_Freelist)
 {
-    const Size LOWER_BOUNDS {500};
-    const auto UPPER_BOUNDS = LOWER_BOUNDS + 50;
-    std::unordered_map<std::string, std::string> map;
+    sanity_check(0, 50, 10);
+}
 
-    for (Size iteration {}; iteration < 5; ++iteration) {
-        while (map.size() < UPPER_BOUNDS) {
-            const auto key = random.Generate(16);
-            const auto value = random.Generate(PAGE_SIZE * 2);
-            ASSERT_HAS_VALUE(tree->insert(key, value));
-            map[key.to_string()] = value.to_string();
-        }
+TEST_F(VacuumTests, SanityCheck_Freelist_OverflowHead)
+{
+    sanity_check(0, 50, PAGE_SIZE / 2);
+}
 
-        auto itr = begin(map);
-        while (map.size() > LOWER_BOUNDS) {
-            ASSERT_HAS_VALUE(tree->erase(itr->first));
-            itr = map.erase(itr);
-        }
+TEST_F(VacuumTests, SanityCheck_Freelist_OverflowLink)
+{
+    sanity_check(0, 50, PAGE_SIZE * 2);
+}
 
-        Id target {pager->page_count()};
-        while (tree->vacuum_one(target).value()) {
-            tree->TEST_check_links();
-            tree->TEST_check_nodes();
-            tree->TEST_check_order();
-            target.value--;
-        }
-        ASSERT_HAS_VALUE(pager->truncate(target.value));
+TEST_F(VacuumTests, SanityCheck_Nodes_1)
+{
+    sanity_check(50, 50, 10);
+}
 
-        auto *cursor = CursorInternal::make_cursor(*tree);
-        for (const auto &[key, value]: map) {
-            cursor->seek(key);
-            ASSERT_TRUE(cursor->is_valid());
-            ASSERT_EQ(cursor->key(), key);
-            ASSERT_EQ(cursor->value(), value);
-        }
-        delete cursor;
-    }
+TEST_F(VacuumTests, SanityCheck_Nodes_2)
+{
+    sanity_check(200, 50, 10);
+}
+
+TEST_F(VacuumTests, SanityCheck_Nodes_Overflow_1)
+{
+    sanity_check(50, 50, PAGE_SIZE * 2);
+}
+
+TEST_F(VacuumTests, SanityCheck_Nodes_Overflow_2)
+{
+    sanity_check(200, 50, PAGE_SIZE * 2);
 }
 
 } // namespace Calico
