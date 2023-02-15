@@ -49,22 +49,22 @@ CPU:            16 * 12th Gen Intel(R) Core(TM) i5-12600K
 CPUCache:       20480 KB
 ```
 
-The CalicoDB instance was only committed after all writes were finished (the call to `kyotocabinet::TreeDB::synchronize()` in `DBSynchronize()` was replaced with a call to `Calico::Database::commit()`). 
+The CalicoDB instance was committed every 1,000 writes.
 Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name             | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:---------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>      |                      604,595 |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup>   |                      214,638 |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>    |                      274,650 |                     173,461 |                    288,684 |
-| `readrandom`               |                      539,957 |                     515,198 |                    413,907 |
-| `readseq`                  |                    3,134,796 |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`<sup>*</sup> |                        2,268 |                       5,215 |                     11,387 |
-| `fillseq100k`<sup>*</sup>  |                        1,976 |                       6,731 |                      9,560 |
-| `readseq100k`              |                       19,504 |                      49,232 |                     65,557 |
-| `readrand100k`             |                       21,011 |                      10,894 |                     66,028 |
+| `fillseq`<sup>*</sup>      |                      714,796 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup>   |                      134,807 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>    |                      155,400 |                     173,461 |                    288,684 |
+| `readrandom`               |                      523,286 |                     515,198 |                    413,907 |
+| `readseq`                  |                    2,941,176 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`<sup>*</sup> |                        3,415 |                       5,215 |                     11,387 |
+| `fillseq100k`<sup>*</sup>  |                        3,668 |                       6,731 |                      9,560 |
+| `readseq100k`              |                       19,056 |                      49,232 |                     65,557 |
+| `readrand100k`             |                       19,889 |                      10,894 |                     66,028 |
 
-<sup>*</sup> These benchmarks are affected by the fact that we don't commit.
+<sup>*</sup> These benchmarks are affected by the fact that we use a batch size of 1,000.
 The call to `Database::commit()` will flush pages from older transactions, advance the WAL to a new segment, and possibly remove obsolete WAL segments, so it has quite a bit of overhead.
 For this reason, the SQLite3 benchmarks actually list the results for the much faster batched versions, which commit every 1,000 writes (i.e. `fillseq` is actually `fillseqbatch` for SQLite3).
 
