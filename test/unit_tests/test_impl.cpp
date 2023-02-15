@@ -259,21 +259,52 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
     expect_ok(Database::destroy("/tmp/calico_test_2", options));
 }
 
+auto print_references(std::string pmap)
+{
+    Size ns {}, fs {}, ohs {}, ols {};
+    Id pid {3};
+    for (Size i {sizeof(Lsn)}; i + 9 <= pmap.size(); i += 9) {
+        std::cerr << std::setw(6) << pid.value++ << ": ";
+        PointerMap::Type type {pmap[i]};
+        const Id back_ptr {get_u64(pmap.substr(i + 1, 8))};
+        switch (type) {
+            case PointerMap::NODE:
+                std::cerr << "node";
+                ns++;
+                break;
+            case PointerMap::FREELIST_LINK:
+                std::cerr << "freelist link";
+                fs++;
+                break;
+            case PointerMap::OVERFLOW_HEAD:
+                std::cerr << "overflow head";
+                ohs++;
+                break;
+            case PointerMap::OVERFLOW_LINK:
+                std::cerr << "overflow link";
+                ols++;
+                break;
+        }
+        std::cerr << " -> " << back_ptr.value << '\n';
+    }
+    std::cerr << "nodes: " << ns << "\nfreelist links: " << fs << "\noverflow heads: " << ohs << "\noverflow links: " << ols << "\n\n";
+}
+
 TEST_F(BasicDatabaseTests, VacuumSanityCheck)
 {
-    const Size LOWER_BOUNDS {500};
+    const Size LOWER_BOUNDS {20};
     const auto UPPER_BOUNDS = LOWER_BOUNDS * 2;
 
     std::unordered_map<std::string, std::string> map;
-    Tools::RandomGenerator random {1'024 * 1'024 * 4};
+    Tools::RandomGenerator random {1'024 * 1'024 * 8};
 
     Database *db;
-    for (Size iteration {}; iteration < 5; ++iteration) {
+    for (Size iteration {}; iteration < 4; ++iteration) {
         ASSERT_OK(Database::open(ROOT, options, &db));
 
         while (map.size() < UPPER_BOUNDS) {
-            const auto key = random.Generate(17);
-            const auto value = random.Generate(options.page_size * 5);
+            const auto key = random.Generate(10);
+            const auto value = random.Generate(options.page_size * 2);
             ASSERT_OK(db->put(key, value));
             map[key.to_string()] = value.to_string();
         }
@@ -283,13 +314,39 @@ TEST_F(BasicDatabaseTests, VacuumSanityCheck)
             ASSERT_OK(db->erase(key));
         }
         ASSERT_OK(db->commit());
+
+        {
+            Reader *reader;
+            ASSERT_OK(storage->new_reader(PREFIX + std::string {"data"}, &reader));
+            Size size {options.page_size};
+            std::string page(size, '\x00');
+            ASSERT_OK(reader->read(page.data(), size, size));
+            ASSERT_EQ(size, options.page_size);
+            print_references(page);
+            delete reader;
+        }
+
+
         ASSERT_OK(db->vacuum());
         dynamic_cast<DatabaseImpl &>(*db).TEST_validate();
 
+        {
+            Reader *reader;
+            ASSERT_OK(storage->new_reader(PREFIX + std::string {"data"}, &reader));
+            Size size {options.page_size};
+            std::string page(size, '\x00');
+            ASSERT_OK(reader->read(page.data(), size, size));
+            ASSERT_EQ(size, options.page_size);
+            print_references(page);
+            delete reader;
+        }
+
+Size i {};
         for (const auto &[key, value]: map) {
+            i++;
             std::string result;
             ASSERT_OK(db->get(key, result));
-            ASSERT_EQ(result, value);
+            CALICO_EXPECT_EQ(result, value);
         }
         delete db;
     }

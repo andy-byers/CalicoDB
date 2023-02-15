@@ -997,9 +997,9 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
         case PointerMap::FREELIST_LINK: {
             if (last_id == m_freelist.m_head) {
                 m_freelist.m_head = free.id();
-            }
-            if (!entry.back_ptr.is_null()) {
+            } else {
                 // Back pointer points to another freelist page.
+                CALICO_EXPECT_FALSE(entry.back_ptr.is_null());
                 Calico_Try_R(fix_basic_link());
                 Calico_New_R(last, m_pager->acquire(last_id));
                 if (const auto next_id = read_next_id(last); !next_id.is_null()) {
@@ -1008,25 +1008,11 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
                 }
                 m_pager->release(std::move(last));
             }
-            Calico_New_R(last, m_pager->acquire(last_id));
-            if (const auto next_id = read_next_id(last); !next_id.is_null()) {
-                Calico_New_R(next_entry, m_pointers.read_entry(next_id));
-                next_entry.back_ptr = free.id();
-                Calico_Try_R(m_pointers.write_entry(next_id, next_entry));
-            }
-            m_pager->release(std::move(last));
             break;
         }
         case PointerMap::OVERFLOW_LINK: {
             // Back pointer points to another overflow chain link, or the head of the chain.
             Calico_Try_R(fix_basic_link());
-            Calico_New_R(last, m_pager->acquire(last_id));
-            if (const auto next_id = read_next_id(last); !next_id.is_null()) {
-                Calico_New_R(next_entry, m_pointers.read_entry(next_id));
-                next_entry.back_ptr = free.id();
-                Calico_Try_R(m_pointers.write_entry(next_id, next_entry));
-            }
-            m_pager->release(std::move(last));
             break;
         }
         case PointerMap::OVERFLOW_HEAD: {
@@ -1046,15 +1032,6 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
             }
             CALICO_EXPECT_TRUE(found);
             release(std::move(parent));
-            // Update the back pointer for the next link in the chain, if it exists.
-            Calico_New_R(last, m_pager->acquire(last_id));
-            if (const auto next_id = read_next_id(last); !next_id.is_null()) {
-                Calico_New_R(next_entry, m_pointers.read_entry(next_id));
-                CALICO_EXPECT_EQ(next_entry.type, PointerMap::OVERFLOW_LINK);
-                next_entry.back_ptr = free.id();
-                Calico_Try_R(m_pointers.write_entry(next_id, next_entry));
-            }
-            m_pager->release(std::move(last));
             break;
         }
         case PointerMap::NODE: {
@@ -1101,8 +1078,15 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
     Calico_Try_R(m_pointers.write_entry(last_id, {}));
     Calico_Try_R(m_pointers.write_entry(free.id(), entry));
     Calico_New_R(last, m_pager->acquire(last_id));
-    mem_copy(free.span(0, free.size()),
-             last.view(0, last.size()));
+    if (entry.type != PointerMap::NODE) {
+        if (const auto next_id = read_next_id(last); !next_id.is_null()) {
+            Calico_New_R(next_entry, m_pointers.read_entry(next_id));
+            next_entry.back_ptr = free.id();
+            Calico_Try_R(m_pointers.write_entry(next_id, next_entry));
+        }
+    }
+    mem_copy(free.span(sizeof(Lsn), free.size() - sizeof(Lsn)),
+             last.view(sizeof(Lsn), last.size() - sizeof(Lsn)));
     m_pager->release(std::move(last));
     return {};
 }
@@ -1119,6 +1103,7 @@ auto BPlusTree::vacuum_one(Id target) -> tl::expected<bool, Status>
     // Swap the head of the freelist with the last page in the file.
     Calico_New_R(head, m_freelist.pop());
     if (target != head.id()) {
+std::fprintf(stderr,"%zu\n",target.value);
         // Swap the last page with the freelist head.
         Calico_Try_R(vacuum_step(head, target));
     }
@@ -1128,12 +1113,12 @@ auto BPlusTree::vacuum_one(Id target) -> tl::expected<bool, Status>
 
 auto BPlusTree::save_state(FileHeader &header) const -> void
 {
-    header.free_list_id = m_freelist.m_head;
+    header.freelist_head = m_freelist.m_head;
 }
 
 auto BPlusTree::load_state(const FileHeader &header) -> void
 {
-    m_freelist.m_head = header.free_list_id;
+    m_freelist.m_head = header.freelist_head;
 }
 
 using Callback = std::function<void(Node &, Size)>;
@@ -1218,6 +1203,7 @@ public:
             const Id next_id {get_u64(page.data() + sizeof(Lsn))};
             n += pager.page_size() - sizeof(Lsn) - sizeof(Id);
             if (n >= overflow_size) {
+                CALICO_EXPECT_TRUE(next_id.is_null());
                 break;
             }
             CALICO_EXPECT_EQ(BPlusTreeInternal::find_parent_id(*m_tree, next_id).value(), page.id());

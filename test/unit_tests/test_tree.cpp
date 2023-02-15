@@ -26,7 +26,7 @@ TEST_F(HeaderTests, FileHeader)
     source.magic_code = 1;
     source.page_count = 3;
     source.record_count = 4;
-    source.free_list_id.value = 5;
+    source.freelist_head.value = 5;
     source.recovery_lsn.value = 6;
     source.page_size = backing.size();
     source.header_crc = source.compute_crc();
@@ -41,7 +41,7 @@ TEST_F(HeaderTests, FileHeader)
     ASSERT_EQ(source.header_crc, target.header_crc);
     ASSERT_EQ(source.page_count, target.page_count);
     ASSERT_EQ(source.record_count, target.record_count);
-    ASSERT_EQ(source.free_list_id, target.free_list_id);
+    ASSERT_EQ(source.freelist_head, target.freelist_head);
     ASSERT_EQ(source.recovery_lsn, target.recovery_lsn);
     ASSERT_EQ(source.page_size, target.page_size);
     ASSERT_EQ(source.compute_crc(), target.header_crc);
@@ -1809,36 +1809,36 @@ TEST_F(VacuumTests, VacuumsNodes)
     delete cursor;
 }
 
-static auto print_references(Pager &pager, PointerMap &pointers)
-{
-    for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
-        std::cerr << std::setw(6) << pid.value << ": ";
-        if (pointers.lookup(pid) == pid) {
-            std::cerr << "pointer map\n";
-            continue;
-        }
-        if (pid.is_root()) {
-            std::cerr << "node -> NULL\n";
-            continue;
-        }
-        const auto entry = pointers.read_entry(pid).value();
-        switch (entry.type) {
-            case PointerMap::NODE:
-                std::cerr << "node";
-                break;
-            case PointerMap::FREELIST_LINK:
-                std::cerr << "freelist link";
-                break;
-            case PointerMap::OVERFLOW_HEAD:
-                std::cerr << "overflow head";
-                break;
-            case PointerMap::OVERFLOW_LINK:
-                std::cerr << "overflow link";
-                break;
-        }
-        std::cerr << " -> " << entry.back_ptr.value << '\n';
-    }
-}
+//auto print_references(Pager &pager, PointerMap &pointers)
+//{
+//    for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
+//        std::cerr << std::setw(6) << pid.value << ": ";
+//        if (pointers.lookup(pid) == pid) {
+//            std::cerr << "pointer map\n";
+//            continue;
+//        }
+//        if (pid.is_root()) {
+//            std::cerr << "node -> NULL\n";
+//            continue;
+//        }
+//        const auto entry = pointers.read_entry(pid).value();
+//        switch (entry.type) {
+//            case PointerMap::NODE:
+//                std::cerr << "node";
+//                break;
+//            case PointerMap::FREELIST_LINK:
+//                std::cerr << "freelist link";
+//                break;
+//            case PointerMap::OVERFLOW_HEAD:
+//                std::cerr << "overflow head";
+//                break;
+//            case PointerMap::OVERFLOW_LINK:
+//                std::cerr << "overflow link";
+//                break;
+//        }
+//        std::cerr << " -> " << entry.back_ptr.value << '\n';
+//    }
+//}
 
 TEST_F(VacuumTests, SanityCheck)
 {

@@ -69,6 +69,10 @@ auto FreeList::pop() -> tl::expected<Page, Status>
 auto OverflowList::read_chain(Id pid, Span out) -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
+        Calico_New_R(ent, m_pointers->read_entry(pid));
+        fprintf(stderr, "PID:%zu, BP:%zu, %s\n",pid.value,ent.back_ptr.value,ent.type==PointerMap::NODE?"node":(ent.type==PointerMap::FREELIST_LINK?"freelist_link":(ent.type==PointerMap::OVERFLOW_HEAD?"overflow_head":"overflow_link")));
+
+
         Calico_New_R(page, m_pager->acquire(pid));
         const auto content = get_readable_content(page, out.size());
         mem_copy(out, content);
@@ -162,6 +166,7 @@ static auto decode_entry(const Byte *data) -> PointerMap::Entry
 auto PointerMap::read_entry(Id pid) -> tl::expected<Entry, Status>
 {
     const auto mid = lookup(pid);
+    CALICO_EXPECT_GE(mid.value, 2);
     CALICO_EXPECT_NE(mid, pid);
     const auto offset = entry_offset(mid, pid);
     CALICO_EXPECT_LE(offset + ENTRY_SIZE, m_pager->page_size());
@@ -174,6 +179,7 @@ auto PointerMap::read_entry(Id pid) -> tl::expected<Entry, Status>
 auto PointerMap::write_entry(Id pid, Entry entry) -> tl::expected<void, Status>
 {
     const auto mid = lookup(pid);
+    CALICO_EXPECT_GE(mid.value, 2);
     CALICO_EXPECT_NE(mid, pid);
     const auto offset = entry_offset(mid, pid);
     CALICO_EXPECT_LE(offset + ENTRY_SIZE, m_pager->page_size());

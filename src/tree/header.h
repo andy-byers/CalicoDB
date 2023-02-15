@@ -30,7 +30,7 @@ struct FileHeader {
     std::uint32_t header_crc {};
     std::uint64_t page_count {};
     std::uint64_t record_count {};
-    Id free_list_id;
+    Id freelist_head;
     Lsn recovery_lsn;
     std::uint16_t page_size {};
 };

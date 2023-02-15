@@ -352,15 +352,16 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
 auto DatabaseImpl::vacuum() -> Status
 {
     for (Id target {pager->page_count()}; ; target.value--) {
-        auto r = tree->vacuum_one(target);
-        if (!r.has_value()) {
-            return r.error();
-        } else if (!*r) {
-            auto s = pager->truncate(target.value);
-            if (!s.has_value()) {
-                return s.error();
+        if (auto r = tree->vacuum_one(target)) {
+            if (!*r) {
+                if (auto s = pager->truncate(target.value)) {
+                    break;
+                } else {
+                    return s.error();
+                }
             }
-            break;
+        } else {
+            return r.error();
         }
     }
     return Status::ok();
