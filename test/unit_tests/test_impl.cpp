@@ -923,7 +923,12 @@ protected:
 
     auto TearDown() -> void override
     {
-        assert_special_error(db->commit());
+        // This should return an OK status, since the data made it to disk.
+        ASSERT_OK(db->commit());
+
+        // This should fail, because the database could not continue with the next transaction.
+        assert_special_error(db->status());
+
         delete db;
 
         storage_handle().clear_interceptors();
@@ -943,6 +948,7 @@ TEST_F(CommitFailureTests, WalAdvanceFailure)
 {
     // Write the commit record and flush successfully, but fail to open the next segment file.
     Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
+
 }
 
 TEST_F(CommitFailureTests, PagerFlushFailure)

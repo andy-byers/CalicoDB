@@ -75,8 +75,6 @@ auto MemoryEditor::sync() -> Status
 auto MemoryLogger::write(Slice in) -> Status
 {
     Try_Intercept_From(*m_parent, Interceptor::WRITE, m_path);
-    // TODO: Could produce incorrect results if the file size is changed after it is queried here. That really shouldn't ever happen
-    //       in the library code, so it should be okay.
     return m_parent->write_file_at(*m_mem, in, m_mem->buffer.size());
 }
 

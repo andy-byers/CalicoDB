@@ -112,6 +112,4 @@ auto Recovery::finish_recovery() -> Status
     return Status::ok();
 }
 
-#undef ENSURE_NO_XACT
-
 } // namespace Calico

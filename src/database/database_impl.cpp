@@ -371,6 +371,9 @@ auto DatabaseImpl::do_vacuum() -> Status
             return r.error();
         }
     }
+    if (target.value == pager->page_count()) {
+        return Status::ok();
+    }
     // Make sure the vacuum updates are in the WAL. If this succeeds, we should be able to reapply the
     // whole vacuum operation if the truncation fails. The recovery routine should truncate the file
     // to match the header if necessary.

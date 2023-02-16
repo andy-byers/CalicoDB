@@ -38,7 +38,7 @@ public:
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string &out) const -> bool = 0;
     [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
-    [[nodiscard]] virtual auto vacuum() -> Status = 0; // TODO: # of pages or # of bytes hint?
+    [[nodiscard]] virtual auto vacuum() -> Status = 0;
     [[nodiscard]] virtual auto commit() -> Status = 0;
     [[nodiscard]] virtual auto get(const Slice &key, std::string &value) const -> Status = 0;
     [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
