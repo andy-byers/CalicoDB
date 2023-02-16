@@ -187,26 +187,17 @@ delete cursor;
 ```C++
 if (const auto s = db->vacuum(); s.is_ok()) {
     // Unused database pages have been reclaimed and the file truncated. Note that calls to vacuum() must occur first
-    // in a transaction, i.e. vacuum() must follow a successful call to commit(), abort(), or open().
+    // in a transaction, i.e. vacuum() must follow a successful call to commit(), or open().
 }
 ```
 
 ### Transactions
 A transaction represents a unit of work in Calico DB.
 The first transaction is started when the database is opened. 
-Otherwise, transaction boundaries are defined by calls to `Database::commit()` and `Database::abort()`.
-All updates that haven't been committed will be rolled back during WAL traversal on the next startup.
+Otherwise, transaction boundaries are defined by calls to `Database::commit()`.
+All updates that haven't been committed when the database is closed will be reverted on the next startup.
 
 ```C++
-if (const auto s = db->erase("b"); !s.is_ok()) {
-    // If there was a fatal error here, the transaction would be rolled back during recovery.
-}
-
-if (const auto s = db->abort(); s.is_ok()) {
-    // Every change made since the last call to Database::commit() (or since the database was opened, if
-    // Database::commit() hasn't been called) is reverted.
-}
-
 if (const auto s = db->put("c", "3"); !s.is_ok()) {
     
 }

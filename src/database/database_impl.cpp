@@ -388,9 +388,9 @@ auto DatabaseImpl::commit() -> Status
 {
     Calico_Try_S(status());
     if (m_txn_size != 0) {
-        Maybe_Set_Error(do_commit(m_commit_lsn));
+        return do_commit(m_commit_lsn);
     }
-    return status();
+    return Status::ok();
 }
 
 /*
@@ -415,33 +415,6 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
     m_commit_lsn = lsn;
 
     logv(m_info_log, "commit successful");
-    return Status::ok();
-}
-
-auto DatabaseImpl::abort() -> Status
-{
-    Calico_Try_S(status());
-    if (m_txn_size != 0) {
-        if (auto s = do_abort(); !s.is_ok()) {
-            Maybe_Set_Error(std::move(s));
-        }
-    }
-    return status();
-}
-
-auto DatabaseImpl::do_abort() -> Status
-{
-    logv(m_info_log, "abort requested (last commit was ", m_commit_lsn.value, ")");
-
-    m_txn_size = 0;
-    wal->advance();
-
-    m_in_txn = false;
-    Calico_Try_S(m_recovery->start_abort());
-    Calico_Try_S(load_state());
-    Calico_Try_S(m_recovery->finish_abort());
-    m_in_txn = true;
-    logv(m_info_log, "abort successful");
     return Status::ok();
 }
 

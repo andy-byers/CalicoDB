@@ -144,7 +144,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
         }
 
         if (page_id.as_index() >= m_frames.page_count()) {
-            // Page is out of range (abort was called and the database got smaller).
+            // Page is out of range.
             m_cache.erase(page_id);
             m_frames.unpin(frame_id);
             itr = m_dirty.remove(itr);

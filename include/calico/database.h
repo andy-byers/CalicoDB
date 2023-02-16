@@ -40,7 +40,6 @@ public:
     [[nodiscard]] virtual auto status() const -> Status = 0;
     [[nodiscard]] virtual auto vacuum() -> Status = 0; // TODO: # of pages or # of bytes hint?
     [[nodiscard]] virtual auto commit() -> Status = 0;
-    [[nodiscard]] virtual auto abort() -> Status = 0;
     [[nodiscard]] virtual auto get(const Slice &key, std::string &value) const -> Status = 0;
     [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
     [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;

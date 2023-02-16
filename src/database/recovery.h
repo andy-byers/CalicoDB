@@ -19,8 +19,6 @@ public:
           m_commit_lsn {&commit_lsn}
     {}
 
-    [[nodiscard]] auto start_abort() -> Status;
-    [[nodiscard]] auto finish_abort() -> Status;
     [[nodiscard]] auto start_recovery() -> Status;
     [[nodiscard]] auto finish_recovery() -> Status;
 

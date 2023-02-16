@@ -23,7 +23,6 @@ enum OperationType {
     PUT,
     ERASE,
     COMMIT,
-    ABORT,
     REOPEN,
     VACUUM,
     FAIL,
@@ -55,7 +54,7 @@ auto storage_base(Storage *storage) -> DynamicMemory &
 
 auto handle_failure() -> void
 {
-#ifdef NO_FAILURES
+#if NO_FAILURES
     std::fputs("error: unexpected failure\n", stderr);
     std::abort();
 #endif // NO_FAILURES
@@ -65,7 +64,7 @@ auto translate_op(std::uint8_t code) -> OperationType
 {
     auto type = static_cast<OperationType>(code % OperationType::TYPE_COUNT);
 
-#ifdef NO_FAILURES
+#if NO_FAILURES
     if (type == FAIL) {
         type = REOPEN;
     }
@@ -212,16 +211,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 break;
             case COMMIT:
                 commit();
-                expect_equal_sizes();
-                break;
-            case ABORT:
-                if (db->abort().is_ok()) {
-                    added.clear();
-                    erased.clear();
-                } else {
-                    handle_failure();
-                    reopen_and_clear_pending();
-                }
                 expect_equal_sizes();
                 break;
             case VACUUM:

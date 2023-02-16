@@ -40,7 +40,6 @@ public:
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
-    [[nodiscard]] auto abort() -> Status override;
     [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status override;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
@@ -63,7 +62,6 @@ private:
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
-    [[nodiscard]] auto do_abort() -> Status;
 
     mutable Status m_status;
     std::string m_db_prefix;
