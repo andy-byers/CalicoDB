@@ -305,13 +305,13 @@ public:
     std::unique_ptr<DatabaseImpl> impl;
 };
 
-class DbAbortTests: public InMemoryTest {
+class DbRevertTests: public InMemoryTest {
 protected:
-    DbAbortTests()
+    DbRevertTests()
     {
         db = std::make_unique<TestDatabase>(*storage);
     }
-    ~DbAbortTests() override = default;
+    ~DbRevertTests() override = default;
 
     std::unique_ptr<TestDatabase> db;
 };
@@ -330,45 +330,7 @@ static auto add_records(TestDatabase &test, Size n, Size max_value_size, const s
     return records;
 }
 
-TEST_F(DbAbortTests, RevertsFirstBatch)
-{
-    const auto snapshot = db->snapshot();
-    add_records(*db, 100, 0x400);
-    ASSERT_OK(db->impl->abort());
-    ASSERT_EQ(snapshot, db->snapshot());
-}
-
-TEST_F(DbAbortTests, RevertsSecondBatch)
-{
-    add_records(*db, 100, 0x400, "_");
-    ASSERT_OK(db->impl->commit());
-
-    // Hack to make sure the database file is up-to-date.
-    (void)db->impl->pager->flush({});
-
-    const auto snapshot = db->snapshot();
-    add_records(*db, 1'000, 0x400);
-    ASSERT_OK(db->impl->abort());
-    ASSERT_EQ(snapshot, db->snapshot());
-}
-
-// TODO: This type of test won't work anymore. Some bytes can change after a rollback.
-//TEST_F(DbAbortTests, RevertsNthBatch)
-//{
-//    for (Size i {}; i < 10; ++i) {
-//        add_records(*db, 100, 0x400, "_");
-//        ASSERT_OK(db->impl->commit());
-//    }
-//    // Hack to make sure the database file is up-to-date.
-//    (void)db->impl->pager->flush({});
-//
-//    const auto snapshot = db->snapshot();
-//    add_records(*db, 1'000, 0x400);
-//    ASSERT_OK(db->impl->abort());
-//    ASSERT_EQ(snapshot, db->snapshot());
-//}
-
-TEST_F(DbAbortTests, RevertsUncommittedBatch)
+TEST_F(DbRevertTests, RevertsUncommittedBatch)
 {
     add_records(*db, 100, 0x400, "_");
     ASSERT_OK(db->impl->commit());
@@ -588,7 +550,6 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
     }
     assert_special_error(db->impl->status());
     assert_special_error(db->impl->commit());
-    assert_special_error(db->impl->abort());
     assert_special_error(db->impl->put("key", "value"));
     std::string value;
     assert_special_error(db->impl->get("key", value));
@@ -787,12 +748,6 @@ public:
     }
 
     [[nodiscard]]
-    auto abort() -> Status override
-    {
-        return m_base->abort();
-    }
-
-    [[nodiscard]]
     auto get(const Slice &key, std::string &value) const -> Status override
     {
         return m_base->get(key, value);
@@ -921,7 +876,6 @@ TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 TEST_F(ApiTests, EmptyTransactionsAreOk)
 {
     ASSERT_OK(db->commit());
-    ASSERT_OK(db->abort());
 }
 
 TEST_F(ApiTests, KeysCanBeArbitraryBytes)
@@ -969,7 +923,12 @@ protected:
 
     auto TearDown() -> void override
     {
-        assert_special_error(db->commit());
+        // This should return an OK status, since the data made it to disk.
+        ASSERT_OK(db->commit());
+
+        // This should fail, because the database could not continue with the next transaction.
+        assert_special_error(db->status());
+
         delete db;
 
         storage_handle().clear_interceptors();
@@ -989,6 +948,7 @@ TEST_F(CommitFailureTests, WalAdvanceFailure)
 {
     // Write the commit record and flush successfully, but fail to open the next segment file.
     Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
+
 }
 
 TEST_F(CommitFailureTests, PagerFlushFailure)

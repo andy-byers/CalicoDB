@@ -17,7 +17,6 @@ enum OperationType {
     ITER_REVERSE,
     COMMIT,
     VACUUM,
-    ABORT,
     REOPEN,
     TYPE_COUNT
 };
@@ -95,9 +94,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 break;
             case COMMIT:
                 CHECK_OK(db->commit());
-                break;
-            case ABORT:
-                CHECK_OK(db->abort());
                 break;
             default: // REOPEN
                 delete db;

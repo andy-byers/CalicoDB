@@ -187,26 +187,17 @@ delete cursor;
 ```C++
 if (const auto s = db->vacuum(); s.is_ok()) {
     // Unused database pages have been reclaimed and the file truncated. Note that calls to vacuum() must occur first
-    // in a transaction, i.e. vacuum() must follow a successful call to commit(), abort(), or open().
+    // in a transaction, i.e. vacuum() must follow a successful call to commit(), or open().
 }
 ```
 
 ### Transactions
 A transaction represents a unit of work in Calico DB.
 The first transaction is started when the database is opened. 
-Otherwise, transaction boundaries are defined by calls to `Database::commit()` and `Database::abort()`.
-All updates that haven't been committed will be rolled back during WAL traversal on the next startup.
+Otherwise, transaction boundaries are defined by calls to `Database::commit()`.
+All updates that haven't been committed when the database is closed will be reverted on the next startup.
 
 ```C++
-if (const auto s = db->erase("b"); !s.is_ok()) {
-    // If there was a fatal error here, the transaction would be rolled back during recovery.
-}
-
-if (const auto s = db->abort(); s.is_ok()) {
-    // Every change made since the last call to Database::commit() (or since the database was opened, if
-    // Database::commit() hasn't been called) is reverted.
-}
-
 if (const auto s = db->put("c", "3"); !s.is_ok()) {
     
 }
@@ -307,7 +298,7 @@ First, we need to make sure that all updates are written to the WAL before affec
 The WAL keeps track of the last LSN it flushed to disk (the `flushed_lsn`).
 This value is queried by the pager to make sure that unprotected pages are never written back.
 The pager keeps track of a few more variables to ensure consistency: the `page_lsn`, the `record_lsn`, the `commit_lsn`, and the `recovery_lsn`.
-The `page_lsn` (per page) represents the LSN of the last WAL record generated for the page.
+The `page_lsn` (per page) is the LSN of the last WAL record generated for the page.
 This is the value that is compared with the WAL's `flushed_lsn` to make sure the page is safe to write out.
 The `record_lsn` (also per page) is the last `page_lsn` value that we already have on disk.
 It is saved (in-memory only) when the page is first read into memory, and each time the page is written back.

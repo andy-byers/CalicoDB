@@ -23,7 +23,6 @@ enum OperationType {
     PUT,
     ERASE,
     COMMIT,
-    ABORT,
     REOPEN,
     VACUUM,
     FAIL,
@@ -55,7 +54,7 @@ auto storage_base(Storage *storage) -> DynamicMemory &
 
 auto handle_failure() -> void
 {
-#ifdef NO_FAILURES
+#if NO_FAILURES
     std::fputs("error: unexpected failure\n", stderr);
     std::abort();
 #endif // NO_FAILURES
@@ -65,7 +64,7 @@ auto translate_op(std::uint8_t code) -> OperationType
 {
     auto type = static_cast<OperationType>(code % OperationType::TYPE_COUNT);
 
-#ifdef NO_FAILURES
+#if NO_FAILURES
     if (type == FAIL) {
         type = REOPEN;
     }
@@ -97,14 +96,12 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         erased.clear();
     };
 
-    const auto expect_equal_sizes = [&db, &map] {
+    const auto expect_equal_contents = [&db, &map] {
         std::string prop;
         CHECK_TRUE(db->get_property("calico.counts", prop));
         const auto counts = Tools::parse_db_counts(prop);
         CHECK_EQ(map.size(), counts.records);
-    };
 
-    const auto expect_equal_contents = [&db, &map] {
         auto *cursor = db->new_cursor();
         cursor->seek_first();
         for (const auto &[key, value]: map) {
@@ -130,8 +127,8 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
             erased.clear();
         } else {
             handle_failure();
-            reopen_and_clear_pending();
         }
+        reopen_and_clear_pending();
     };
 
     while (size > 1) {
@@ -212,17 +209,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                 break;
             case COMMIT:
                 commit();
-                expect_equal_sizes();
-                break;
-            case ABORT:
-                if (db->abort().is_ok()) {
-                    added.clear();
-                    erased.clear();
-                } else {
-                    handle_failure();
-                    reopen_and_clear_pending();
-                }
-                expect_equal_sizes();
+                expect_equal_contents();
                 break;
             case VACUUM:
                 commit();
@@ -231,7 +218,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
                     handle_failure();
                     reopen_and_clear_pending();
                 }
-                expect_equal_sizes();
+                expect_equal_contents();
                 break;
             default: // REOPEN
                 reopen_and_clear_pending();
@@ -244,7 +231,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         }
     }
     reopen_and_clear_pending();
-    expect_equal_sizes();
     expect_equal_contents();
 
     delete db;
