@@ -19,8 +19,8 @@ public:
           m_commit_lsn {&commit_lsn}
     {}
 
-    [[nodiscard]] auto start_recovery() -> Status;
-    [[nodiscard]] auto finish_recovery() -> Status;
+    [[nodiscard]] auto start() -> Status;
+    [[nodiscard]] auto finish() -> Status;
 
 private:
     Pager *m_pager {};

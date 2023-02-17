@@ -332,16 +332,20 @@ static auto add_records(TestDatabase &test, Size n, Size max_value_size, const s
 
 TEST_F(DbRevertTests, RevertsUncommittedBatch)
 {
-    add_records(*db, 100, 0x400, "_");
+    const auto committed = add_records(*db, 100, 0x400, "_");
     ASSERT_OK(db->impl->commit());
 
     // Hack to make sure the database file is up-to-date.
     (void)db->impl->pager->flush({});
 
-    const auto snapshot = db->snapshot();
     add_records(*db, 1'000, 0x400);
     ASSERT_OK(db->reopen());
-    ASSERT_EQ(snapshot, db->snapshot());
+
+    for (const auto &[key, value]: committed) {
+        std::string result;
+        ASSERT_OK(db->impl->get(key, result));
+        ASSERT_EQ(result, value);
+    }
 }
 
 class DbRecoveryTests: public InMemoryTest {

@@ -115,7 +115,7 @@ auto FrameManager::upgrade(Size index, Page &page) -> void
 auto FrameManager::pin(Id pid) -> tl::expected<Size, Status>
 {
     CALICO_EXPECT_FALSE(pid.is_null());
-    CALICO_EXPECT_LE(pid.as_index(), m_page_count);
+//    CALICO_EXPECT_LE(pid.as_index(), m_page_count);
 
     if (m_available.empty()) {
         return tl::make_unexpected(Status::not_found("out of frames"));

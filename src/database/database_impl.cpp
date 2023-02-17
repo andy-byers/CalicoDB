@@ -124,12 +124,10 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     tree = std::make_unique<BPlusTree>(*pager);
     tree->load_state(state);
-    m_recovery = std::make_unique<Recovery>(*pager, *wal, m_commit_lsn);
 
     Status s;
     if (is_new) {
         logv(m_info_log, "setting up a new database");
-        Calico_Try_S(wal->start_workers());
         auto root = tree->setup();
         if (!root.has_value()) {
             return root.error();
@@ -156,7 +154,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
 DatabaseImpl::~DatabaseImpl()
 {
-    if (m_recovery) {
+    if (tree) {
         if (auto s = wal->close(); !s.is_ok()) {
             logv(m_info_log, "failed to flush wal: %s", s.what().to_string());
         }
@@ -423,10 +421,12 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
 
 auto DatabaseImpl::ensure_consistency_on_startup() -> Status
 {
+    Recovery recovery {*pager, *wal, m_commit_lsn};
+
     m_in_txn = false;
-    Calico_Try_S(m_recovery->start_recovery());
+    Calico_Try_S(recovery.start());
     Calico_Try_S(load_state());
-    Calico_Try_S(m_recovery->finish_recovery());
+    Calico_Try_S(recovery.finish());
     m_in_txn = true;
     return Status::ok();
 }

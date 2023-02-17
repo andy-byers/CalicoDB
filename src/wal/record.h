@@ -78,10 +78,8 @@ struct WalPayloadHeader {
 // Routines for working with WAL records.
 auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto read_wal_record_header(Slice in) -> WalRecordHeader;
-[[nodiscard]] auto read_wal_payload_header(Slice in) -> WalPayloadHeader;
 [[nodiscard]] auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
-[[nodiscard]] auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status;
 
 struct DeltaDescriptor {
     struct Delta {
@@ -180,11 +178,6 @@ public:
         m_segments.emplace(id, Lsn::null());
     }
 
-    auto add_segment(Id id, Lsn first_lsn) -> void
-    {
-        m_segments.emplace(id, first_lsn);
-    }
-
     [[nodiscard]]
     auto first_lsn(Id id) const -> Lsn
     {
@@ -203,16 +196,19 @@ public:
         itr->second = lsn;
     }
 
+    [[nodiscard]]
     auto first() const -> Id
     {
         return m_segments.empty() ? Id::null() : cbegin(m_segments)->first;
     }
 
+    [[nodiscard]]
     auto last() const -> Id
     {
         return m_segments.empty() ? Id::null() : crbegin(m_segments)->first;
     }
 
+    [[nodiscard]]
     auto id_before(Id id) const -> Id
     {
         if (m_segments.empty()) {
@@ -226,6 +222,7 @@ public:
         return prev(itr)->first;
     }
 
+    [[nodiscard]]
     auto id_after(Id id) const -> Id
     {
         auto itr = m_segments.upper_bound(id);

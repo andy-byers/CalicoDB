@@ -66,7 +66,6 @@ private:
     mutable Status m_status;
     std::string m_db_prefix;
     std::string m_wal_prefix;
-    std::unique_ptr<Recovery> m_recovery;
     std::string m_scratch;
     Storage *m_storage {};
     Logger *m_info_log {};

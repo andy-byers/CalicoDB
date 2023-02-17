@@ -1,6 +1,5 @@
 #include "record.h"
 #include "utils/encoding.h"
-#include "utils/logging.h"
 
 namespace Calico {
 
@@ -28,11 +27,6 @@ auto read_wal_record_header(Slice in) -> WalRecordHeader
     return header;
 }
 
-auto read_wal_payload_header(Slice in) -> WalPayloadHeader
-{
-    return WalPayloadHeader {get_u64(in)};
-}
-
 auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_size) -> WalRecordHeader
 {
     CALICO_EXPECT_NE(lhs.type, WalRecordHeader::Type::FIRST);
@@ -53,19 +47,15 @@ auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_siz
     return rhs;
 }
 
-template<bool IsLeftMerge>
-static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
+auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
 {
-    [[maybe_unused]]
-    static constexpr auto FIRST_TYPE = IsLeftMerge ? WalRecordHeader::FIRST : WalRecordHeader::LAST;
-    static constexpr auto LAST_TYPE = IsLeftMerge ? WalRecordHeader::LAST : WalRecordHeader::FIRST;
     if (lhs.type == rhs.type) {
         return Status::corruption("records should not have same type");
     }
 
     // First merge in the logical record.
     if (lhs.type == WalRecordHeader::Type {}) {
-        if (rhs.type == WalRecordHeader::MIDDLE || rhs.type == LAST_TYPE) {
+        if (rhs.type == WalRecordHeader::MIDDLE || rhs.type == WalRecordHeader::LAST) {
             return Status::corruption("right record has invalid type");
         }
 
@@ -73,28 +63,18 @@ static auto merge_records(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> S
         lhs.crc = rhs.crc;
 
     } else {
-        if (lhs.type != FIRST_TYPE) {
+        if (lhs.type != WalRecordHeader::FIRST) {
             return Status::corruption("left record has invalid type");
         }
         if (lhs.crc != rhs.crc) {
             return Status::corruption("fragment crc mismatch");
         }
-        if (rhs.type == LAST_TYPE) {
+        if (rhs.type == WalRecordHeader::LAST) {
             lhs.type = WalRecordHeader::FULL;
         }
     }
     lhs.size = static_cast<std::uint16_t>(lhs.size + rhs.size);
     return Status::ok();
-}
-
-auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
-{
-    return merge_records<true>(lhs, rhs);
-}
-
-auto merge_records_right(const WalRecordHeader &lhs, WalRecordHeader &rhs) -> Status
-{
-    return merge_records<false>(rhs, lhs);
 }
 
 static auto encode_payload_type(Span out, XactPayloadType type)

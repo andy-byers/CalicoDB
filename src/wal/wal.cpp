@@ -48,7 +48,10 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
     for (const auto &id: segment_ids) {
         wal->m_set.add_segment(id);
     }
-
+    auto s = wal->start_workers();
+    if (!s.is_ok()) {
+        return tl::make_unexpected(s);
+    }
     return wal;
 }
 
@@ -127,148 +130,17 @@ auto WriteAheadLog::advance() -> void
     m_writer->advance();
 }
 
-auto WriteAheadLog::open_reader() -> tl::expected<WalReader, Status>
+auto WriteAheadLog::new_reader(WalReader **out) -> Status
 {
-    if (auto s = status(); !s.is_ok()) {
-        return tl::make_unexpected(s);
-    }
-    auto reader = WalReader {
-        *m_storage,
-        m_set,
+    Calico_Try_S(status());
+    const auto param = WalReader::Parameters {
         m_prefix,
         m_reader_tail,
-        m_reader_data};
-    if (auto s = reader.open(); !s.is_ok()) {
-        return tl::make_unexpected(s);
-    }
-    return reader;
-}
-
-auto WriteAheadLog::roll_forward(Lsn begin_lsn, const Callback &callback) -> Status
-{
-    if (m_set.first().is_null()) {
-        return Status::corruption("wal is empty");
-    }
-
-    // Open the reader on the first (oldest) WAL segment file.
-    auto reader = open_reader();
-    if (!reader.has_value()) {
-        return reader.error();
-    }
-
-    // We should be on the first segment.
-    CALICO_EXPECT_TRUE(reader->seek_previous().is_not_found());
-
-    // Find the segment containing the first update that hasn't been applied yet.
-    auto s = Status::ok();
-    while (s.is_ok()) {
-        Lsn first_lsn;
-        s = reader->read_first_lsn(first_lsn);
-
-        // This indicates an empty file. Try to seek back to the last segment.
-        if (s.is_not_found()) {
-            if (reader->segment_id() != m_set.last()) {
-                return Status::corruption("missing segment");
-            }
-            s = reader->seek_previous();
-            break;
-        }
-        Calico_Try_S(s);
-
-        if (first_lsn >= begin_lsn) {
-            if (first_lsn > begin_lsn) {
-                s = reader->seek_previous();
-            }
-            break;
-        } else {
-            s = reader->seek_next();
-        }
-    }
-
-    if (s.is_not_found()) {
-        s = Status::ok();
-    }
-
-    for (auto first = true; s.is_ok(); first = false) {
-        s = reader->roll([&callback, &first, this](const auto &payload) {
-            if (!first && m_last_lsn.value + 1 != payload.lsn().value) {
-                return Status::corruption("missing wal record");
-            }
-            m_last_lsn = payload.lsn();
-            return callback(payload);
-        });
-        m_flushed_lsn.store(m_last_lsn);
-
-        if (s.is_ok()) {
-            s = reader->seek_next();
-        }
-    }
-    const auto last_id = reader->segment_id();
-
-    if (s.is_not_found()) {
-        // Allow the last segment to be empty or contain an incomplete record.
-        if (last_id == m_set.last()) {
-            s = Status::ok();
-        }
-    }
-    return s;
-}
-
-auto WriteAheadLog::roll_backward(Lsn end_lsn, const Callback &callback) -> Status
-{
-    if (m_set.first().is_null()) {
-        return Status::corruption("wal is empty");
-    }
-
-    auto reader = open_reader();
-    if (!reader.has_value()) {
-        return reader.error();
-    }
-
-    // Find the most-recent segment and cache the first LSNs.
-    for (; ; ) {
-        auto s = reader->seek_next();
-        if (s.is_not_found()) {
-            break;
-        }
-        Calico_Try_S(s);
-    }
-
-    auto s = Status::ok();
-    for (auto first = true; s.is_ok(); first = false) {
-        Lsn first_lsn;
-        s = reader->read_first_lsn(first_lsn);
-
-        if (s.is_ok()) {
-            if (first_lsn <= end_lsn) {
-                break;
-            }
-
-            // Read all full image records. We can read them forward, since the page IDs are disjoint
-            // within each transaction.
-            s = reader->roll(callback);
-        } else if (s.is_not_found()) {
-            // The segment file is empty.
-            s = Status::corruption(s.what().data());
-        }
-
-        if (s.is_ok()) {
-            m_last_lsn.value = first_lsn.value - 1;
-            m_flushed_lsn.store(m_last_lsn);
-        } else if (s.is_corruption() && first) {
-            // Most-recent segment can be empty or corrupted.
-            s = Status::ok();
-        }
-        Calico_Try_S(s);
-
-        s = reader->seek_previous();
-    }
-    // Indicates that we have hit the beginning of the WAL.
-    if (s.is_not_found()) {
-        s = Status::corruption(s.what().data());
-    }
-
-    return s;
+        m_reader_data,
+        m_storage,
+        &m_set,
+    };
+    return WalReader::open(param, out);
 }
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void
