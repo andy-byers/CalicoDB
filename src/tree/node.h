@@ -122,7 +122,6 @@ struct Node {
  * Determine the amount of usable space remaining in the node.
  */
 [[nodiscard]] auto usable_space(const Node &node) -> Size;
-[[nodiscard]] auto max_usable_space(const Node &node) -> Size;
 
 /*
  * Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.

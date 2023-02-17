@@ -492,19 +492,12 @@ auto usable_space(const Node &node) -> Size
     return node.header.free_total + node.gap_size;
 }
 
-auto max_usable_space(const Node &node) -> Size
-{
-    return node.page.size() - cell_slots_offset(node);
-}
-
 auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
 {
     const auto &header = node.header;
+    CALICO_EXPECT_LE(index, header.cell_count);
     const auto can_allocate = size + sizeof(PageSize) <= usable_space(node);
     BlockAllocator alloc {node};
-
-//    CALICO_EXPECT_FALSE(node.overflow.has_value());
-    CALICO_EXPECT_LE(index, header.cell_count);
 
     // We don't have room to insert the cell pointer.
     if (cell_area_offset(node) + sizeof(PageSize) > header.cell_start) {

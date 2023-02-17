@@ -51,6 +51,16 @@
 #define TL_EXPECTED_GCC55
 #endif
 
+#if !defined(TL_ASSERT)
+//can't have assert in constexpr in C++11 and GCC 4.9 has a compiler bug
+#if (__cplusplus > 201103L) && !defined(TL_EXPECTED_GCC49)
+#include <cassert>
+#define TL_ASSERT(x) assert(x)
+#else
+#define TL_ASSERT(x)
+#endif
+#endif
+
 #if (defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ <= 9 &&              \
      !defined(__clang__))
 // GCC < 5 doesn't support overloading on const&& for member functions
@@ -1454,6 +1464,49 @@ public:
     }
 #endif
 #endif
+#if defined(TL_EXPECTED_CXX14) && !defined(TL_EXPECTED_GCC49) &&               \
+    !defined(TL_EXPECTED_GCC54) && !defined(TL_EXPECTED_GCC55)
+    template <class F> TL_EXPECTED_11_CONSTEXPR auto transform_error(F &&f) & {
+        return map_error_impl(*this, std::forward<F>(f));
+    }
+    template <class F> TL_EXPECTED_11_CONSTEXPR auto transform_error(F &&f) && {
+        return map_error_impl(std::move(*this), std::forward<F>(f));
+    }
+    template <class F> constexpr auto transform_error(F &&f) const & {
+        return map_error_impl(*this, std::forward<F>(f));
+    }
+    template <class F> constexpr auto transform_error(F &&f) const && {
+        return map_error_impl(std::move(*this), std::forward<F>(f));
+    }
+#else
+    template <class F>
+    TL_EXPECTED_11_CONSTEXPR decltype(map_error_impl(std::declval<expected &>(),
+                                                     std::declval<F &&>()))
+    transform_error(F &&f) & {
+        return map_error_impl(*this, std::forward<F>(f));
+    }
+    template <class F>
+    TL_EXPECTED_11_CONSTEXPR decltype(map_error_impl(std::declval<expected &&>(),
+                                                     std::declval<F &&>()))
+    transform_error(F &&f) && {
+        return map_error_impl(std::move(*this), std::forward<F>(f));
+    }
+    template <class F>
+    constexpr decltype(map_error_impl(std::declval<const expected &>(),
+                                      std::declval<F &&>()))
+    transform_error(F &&f) const & {
+        return map_error_impl(*this, std::forward<F>(f));
+    }
+
+#ifndef TL_EXPECTED_NO_CONSTRR
+    template <class F>
+    constexpr decltype(map_error_impl(std::declval<const expected &&>(),
+                                      std::declval<F &&>()))
+    transform_error(F &&f) const && {
+        return map_error_impl(std::move(*this), std::forward<F>(f));
+    }
+#endif
+#endif
     template <class F> expected TL_EXPECTED_11_CONSTEXPR or_else(F &&f) & {
         return or_else_impl(*this, std::forward<F>(f));
     }
@@ -1891,27 +1944,37 @@ public:
         }
     }
 
-    constexpr const T *operator->() const { return valptr(); }
-    TL_EXPECTED_11_CONSTEXPR T *operator->() { return valptr(); }
+    constexpr const T *operator->() const {
+        TL_ASSERT(has_value());
+        return valptr();
+    }
+    TL_EXPECTED_11_CONSTEXPR T *operator->() {
+        TL_ASSERT(has_value());
+        return valptr();
+    }
 
     template <class U = T,
              detail::enable_if_t<!std::is_void<U>::value> * = nullptr>
     constexpr const U &operator*() const & {
+        TL_ASSERT(has_value());
         return val();
     }
     template <class U = T,
              detail::enable_if_t<!std::is_void<U>::value> * = nullptr>
     TL_EXPECTED_11_CONSTEXPR U &operator*() & {
+        TL_ASSERT(has_value());
         return val();
     }
     template <class U = T,
              detail::enable_if_t<!std::is_void<U>::value> * = nullptr>
     constexpr const U &&operator*() const && {
+        TL_ASSERT(has_value());
         return std::move(val());
     }
     template <class U = T,
              detail::enable_if_t<!std::is_void<U>::value> * = nullptr>
     TL_EXPECTED_11_CONSTEXPR U &&operator*() && {
+        TL_ASSERT(has_value());
         return std::move(val());
     }
 
@@ -1947,10 +2010,22 @@ public:
         return std::move(val());
     }
 
-    constexpr const E &error() const & { return err().value(); }
-    TL_EXPECTED_11_CONSTEXPR E &error() & { return err().value(); }
-    constexpr const E &&error() const && { return std::move(err().value()); }
-    TL_EXPECTED_11_CONSTEXPR E &&error() && { return std::move(err().value()); }
+    constexpr const E &error() const & {
+        TL_ASSERT(!has_value());
+        return err().value();
+    }
+    TL_EXPECTED_11_CONSTEXPR E &error() & {
+        TL_ASSERT(!has_value());
+        return err().value();
+    }
+    constexpr const E &&error() const && {
+        TL_ASSERT(!has_value());
+        return std::move(err().value());
+    }
+    TL_EXPECTED_11_CONSTEXPR E &&error() && {
+        TL_ASSERT(!has_value());
+        return std::move(err().value());
+    }
 
     template <class U> constexpr T value_or(U &&v) const & {
         static_assert(std::is_copy_constructible<T>::value &&

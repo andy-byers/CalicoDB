@@ -895,13 +895,13 @@ TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
 TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnRight)
 {
     // Populate the internal nodes with small keys.
-    for (unsigned i {}; i < 1000; ++i) {
+    for (unsigned i {}; i < 5'000; ++i) {
         char key[3] {};
         put_u16(key, i);
         ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
     // Overflow with a bunch of large keys.
-    for (unsigned i {}; i < 1000; ++i) {
+    for (unsigned i {}; i < 1'000; ++i) {
         ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(i), "v"));
     }
     validate();
@@ -909,12 +909,12 @@ TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnRight)
 
 TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnLeft)
 {
-    for (unsigned i {}; i < 1'000; ++i) {
+    for (unsigned i {}; i < 5'000; ++i) {
         char key[3] {};
-        put_u16(key, 999 - i);
+        put_u16(key, 4'999 - i);
         ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
-    for (unsigned i {}; i < 1000; ++i) {
+    for (unsigned i {}; i < 1'000; ++i) {
         ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(999 - i), "v"));
     }
     validate();
@@ -922,9 +922,9 @@ TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnLeft)
 
 TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnMiddle)
 {
-    for (unsigned i {}; i < 1'000; ++i) {
+    for (unsigned i {}; i < 5'000; ++i) {
         char key[3] {};
-        put_u16(key, 999 - i);
+        put_u16(key, 4'999 - i);
         ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
     for (Size i {}, j {999}; i < j; ++i, --j) {
