@@ -15,7 +15,6 @@ class Page;
 class Pager;
 class Editor;
 class Storage;
-class WriteAheadLog;
 
 class Frame final {
 public:

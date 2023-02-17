@@ -124,18 +124,16 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     tree = std::make_unique<BPlusTree>(*pager);
     tree->load_state(state);
-    m_recovery = std::make_unique<Recovery>(*pager, *wal, m_commit_lsn);
 
     Status s;
     if (is_new) {
         logv(m_info_log, "setting up a new database");
-        Calico_Try_S(wal->start_workers());
+        Calico_Try_S(wal->start_writing());
         auto root = tree->setup();
         if (!root.has_value()) {
             return root.error();
         }
         CALICO_EXPECT_EQ(pager->page_count(), 1);
-
         state.page_count = 1;
         state.write(root->page);
         state.header_crc = state.compute_crc();
@@ -156,15 +154,15 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
 DatabaseImpl::~DatabaseImpl()
 {
-    if (m_recovery) {
+    if (tree) {
         if (auto s = wal->close(); !s.is_ok()) {
-            logv(m_info_log, "failed to flush wal: %s", s.what().to_string());
+            logv(m_info_log, "failed to flush wal: ", s.what().data());
         }
         if (auto s = pager->flush({}); !s.is_ok()) {
-            logv(m_info_log, "failed to flush pager: %s", s.what().to_string());
+            logv(m_info_log, "failed to flush pager: ", s.what().data());
         }
         if (auto s = pager->sync(); !s.is_ok()) {
-            logv(m_info_log, "failed to sync pager: %s", s.what().to_string());
+            logv(m_info_log, "failed to sync pager: ", s.what().data());
         }
     }
 
@@ -423,10 +421,12 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
 
 auto DatabaseImpl::ensure_consistency_on_startup() -> Status
 {
+    Recovery recovery {*pager, *wal, m_commit_lsn};
+
     m_in_txn = false;
-    Calico_Try_S(m_recovery->start_recovery());
+    Calico_Try_S(recovery.start());
     Calico_Try_S(load_state());
-    Calico_Try_S(m_recovery->finish_recovery());
+    Calico_Try_S(recovery.finish());
     m_in_txn = true;
     return Status::ok();
 }

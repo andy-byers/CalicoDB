@@ -13,6 +13,7 @@ namespace Calico {
 
 class Storage;
 class FrameManager;
+class WriteAheadLog;
 
 class Pager {
 public:
@@ -50,7 +51,6 @@ public:
     auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
     auto save_state(FileHeader &header) -> void;
-
     auto load_state(const FileHeader &header) -> void;
 
 private:

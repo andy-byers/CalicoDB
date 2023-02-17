@@ -200,26 +200,9 @@ public:
 
     }
 
-    [[nodiscard]]
-    auto roll_forward(Id, const Callback &) -> Status override
-    {
-        return Status::ok();
-    }
-
-    [[nodiscard]]
-    auto roll_backward(Id, const Callback &) -> Status override
-    {
-        return Status::ok();
-    }
-
     auto cleanup(Id) -> void override
     {
 
-    }
-
-    [[nodiscard]] auto start_workers() -> Status override
-    {
-        return Status::ok();
     }
 
     [[nodiscard]]

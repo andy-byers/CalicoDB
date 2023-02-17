@@ -27,81 +27,6 @@ static auto reset_node(Node &node) -> void
     node.header = header;
 }
 
-auto BPlusTree::make_fresh_node(Page page, bool is_external) -> Node
-{
-    NodeHeader header;
-    header.is_external = is_external;
-    header.cell_start = static_cast<PageSize>(page.size());
-    header.write(page);
-
-    return make_existing_node(std::move(page));
-}
-
-auto BPlusTree::make_existing_node(Page page) -> Node
-{
-    Node node {std::move(page), m_scratch.back().data()};
-    if (node.header.is_external) {
-        node.meta = &m_external_meta;
-    } else {
-        node.meta = &m_internal_meta;
-    }
-    return node;
-}
-
-auto BPlusTree::scratch(Size index) -> Byte *
-{
-    // Reserve the last scratch buffer for defragmentation. Also, reserve 4 bytes at the front in case the cell
-    // needs to be promoted.
-    CALICO_EXPECT_LT(index, m_scratch.size() - 1);
-    return m_scratch[index].data() + EXTERNAL_SHIFT;
-}
-
-auto BPlusTree::allocate(bool is_external) -> tl::expected<Node, Status>
-{
-    const auto fetch_unused_page = [this]() -> tl::expected<Page, Status> {
-        if (m_freelist.is_empty()) {
-            Calico_New_R(page, m_pager->allocate());
-            // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
-            // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
-            // following it are used.
-            if (m_pointers.lookup(page.id()) == page.id()) {
-                m_pager->release(std::move(page));
-                Calico_Put_R(page, m_pager->allocate());
-            }
-            return page;
-        } else {
-            Calico_New_R(page, m_freelist.pop());
-            return page;
-        }
-    };
-    Calico_New_R(page, fetch_unused_page());
-    CALICO_EXPECT_NE(m_pointers.lookup(page.id()), page.id());
-    return make_fresh_node(std::move(page), is_external);
-}
-
-auto BPlusTree::acquire(Id pid, bool upgrade) -> tl::expected<Node, Status>
-{
-    Calico_New_R(page, m_pager->acquire(pid));
-    CALICO_EXPECT_NE(m_pointers.lookup(pid), pid);
-
-    if (upgrade) {
-        m_pager->upgrade(page);
-    }
-    return make_existing_node(std::move(page));
-}
-
-auto BPlusTree::release(Node node) const -> void
-{
-    m_pager->release(std::move(node).take());
-}
-
-auto BPlusTree::destroy(Node node) -> tl::expected<void, Status>
-{
-    // Pointer map pages should never be explicitly destroyed.
-    CALICO_EXPECT_NE(m_pointers.lookup(node.page.id()), node.page.id());
-    return m_freelist.push(std::move(node).take());
-}
-
 class BPlusTreeInternal {
 public:
     [[nodiscard]]
@@ -842,6 +767,81 @@ auto BPlusTree::setup() -> tl::expected<Node, Status>
     Calico_New_R(root, allocate(true));
     CALICO_EXPECT_EQ(m_pager->page_count(), 1);
     return root;
+}
+
+
+auto BPlusTree::make_fresh_node(Page page, bool is_external) -> Node
+{
+    NodeHeader header;
+    header.is_external = is_external;
+    header.cell_start = static_cast<PageSize>(page.size());
+    header.write(page);
+
+    return make_existing_node(std::move(page));
+}
+
+auto BPlusTree::make_existing_node(Page page) -> Node
+{
+    Node node {std::move(page), m_scratch.back().data()};
+    if (node.header.is_external) {
+        node.meta = &m_external_meta;
+    } else {
+        node.meta = &m_internal_meta;
+    }
+    return node;
+}
+
+auto BPlusTree::scratch(Size index) -> Byte *
+{
+    // Reserve the last scratch buffer for defragmentation. Also, reserve 4 bytes at the front in case the cell
+    // needs to be promoted.
+    CALICO_EXPECT_LT(index, m_scratch.size() - 1);
+    return m_scratch[index].data() + EXTERNAL_SHIFT;
+}
+
+auto BPlusTree::allocate(bool is_external) -> tl::expected<Node, Status>
+{
+    const auto fetch_unused_page = [this]() -> tl::expected<Page, Status> {
+        if (m_freelist.is_empty()) {
+            Calico_New_R(page, m_pager->allocate());
+            // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
+            // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
+            // following it are used.
+            if (BPlusTreeInternal::is_pointer_map(*this, page.id())) {
+                m_pager->release(std::move(page));
+                Calico_Put_R(page, m_pager->allocate());
+            }
+            return page;
+        } else {
+            return m_freelist.pop();
+        }
+    };
+    Calico_New_R(page, fetch_unused_page());
+    CALICO_EXPECT_FALSE(BPlusTreeInternal::is_pointer_map(*this, page.id()));
+    return make_fresh_node(std::move(page), is_external);
+}
+
+auto BPlusTree::acquire(Id pid, bool upgrade) -> tl::expected<Node, Status>
+{
+    CALICO_EXPECT_FALSE(BPlusTreeInternal::is_pointer_map(*this, pid));
+    Calico_New_R(page, m_pager->acquire(pid));
+
+    if (upgrade) {
+        m_pager->upgrade(page);
+    }
+    return make_existing_node(std::move(page));
+}
+
+auto BPlusTree::release(Node node) const -> void
+{
+    m_pager->release(std::move(node).take());
+}
+
+auto BPlusTree::destroy(Node node) -> tl::expected<void, Status>
+{
+    // Pointer map pages should never be explicitly destroyed.
+    CALICO_EXPECT_FALSE(BPlusTreeInternal::is_pointer_map(*this, node.page.id()));
+    return m_freelist.push(std::move(node).take());
 }
 
 auto BPlusTree::insert(const Slice &key, const Slice &value) -> tl::expected<bool, Status>

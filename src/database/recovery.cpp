@@ -1,6 +1,7 @@
 #include "recovery.h"
 #include "pager/page.h"
 #include "pager/pager.h"
+#include "wal/reader.h"
 
 namespace Calico {
 
@@ -32,12 +33,39 @@ static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback
     }
 }
 
-auto Recovery::start_recovery() -> Status
+auto Recovery::start() -> Status
 {
+    WalReader *temp;
+    Calico_Try_S(m_wal->new_reader(&temp));
+    std::unique_ptr<WalReader> reader {temp};
+    const auto &set = m_wal->m_set;
     Lsn last_lsn;
+    Status s;
 
-    const auto redo = [this, &last_lsn](auto payload) {
-        auto decoded = decode_payload(payload);
+    const auto translate_status = [&s, &reader, last = set.last()] {
+        CALICO_EXPECT_FALSE(s.is_ok());
+        if (s.is_not_found() || s.is_corruption()) {
+            if (reader->id() == last) {
+                s = Status::ok();
+            }
+        }
+        return s;
+    };
+
+    // Skip updates that are already in the database.
+    s = reader->seek(m_pager->recovery_lsn());
+    if (s.is_not_found()) {
+        s = Status::ok();
+    }
+
+    // Roll forward and apply missing updates.
+    for (; ; ) {
+        WalPayloadOut payload;
+        s = reader->read(payload);
+        if (!s.is_ok()) {
+            break;
+        }
+        const auto decoded = decode_payload(payload);
 
         // Payload has an invalid type.
         if (std::holds_alternative<std::monostate>(decoded)) {
@@ -56,28 +84,33 @@ auto Recovery::start_recovery() -> Status
                     apply_redo(page, delta);
                 }
             }));
-        } else if (std::holds_alternative<FullImageDescriptor>(decoded)) {
-            // This is not necessary in most cases, but should help with some kinds of corruption.
-            const auto image = std::get<FullImageDescriptor>(decoded);
-            Calico_Try_S(with_page(*m_pager, image, [this, &image](auto &page) {
-                if (image.lsn > read_page_lsn(page)) {
-                    m_pager->upgrade(page);
-                    apply_undo(page, image);
-                }
-            }));
-        } else {
-            return Status::corruption("unrecognized payload type");
         }
-        return Status::ok();
-    };
+    }
 
-    const auto undo = [this](auto payload) {
-        auto decoded = decode_payload(payload);
+    // The reader either hit the end of the WAL or errored out. It may have encountered a corrupted or incomplete
+    // last record if the database crashed while in the middle of writing that record.
+    Calico_Try_S(translate_status());
+
+    if (*m_commit_lsn == last_lsn) {
+        return Status::ok();
+    }
+
+    // Put the reader at the segment right after the most-recent commit. We can read the last transaction forward
+    // to revert it, because the full image records are disjoint w.r.t. the pages they reference.
+    Calico_Try_S(reader->seek(*m_commit_lsn));
+    Calico_Try_S(reader->skip());
+
+    for (; ; ) {
+        WalPayloadOut payload;
+        s = reader->read(payload);
+        if (!s.is_ok()) {
+            break;
+        }
+        const auto decoded = decode_payload(payload);
 
         if (std::holds_alternative<std::monostate>(decoded)) {
             return Status::corruption("wal is corrupted");
         }
-
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
             Calico_Try_S(with_page(*m_pager, image, [this, &image](auto &page) {
@@ -85,23 +118,16 @@ auto Recovery::start_recovery() -> Status
                 apply_undo(page, image);
             }));
         }
-        return Status::ok();
-    };
-    // Apply updates that are in the WAL but not the database.
-    Calico_Try_S(m_wal->roll_forward(m_pager->recovery_lsn(), redo));
-
-    // Reached the end of the WAL, but didn't find a commit record. Undo updates until we reach the most-recent commit.
-    if (last_lsn != *m_commit_lsn) {
-        Calico_Try_S(m_wal->roll_backward(*m_commit_lsn, undo));
     }
-    return Status::ok();
+
+    return translate_status();
 }
 
-auto Recovery::finish_recovery() -> Status
+auto Recovery::finish() -> Status
 {
     Calico_Try_S(m_pager->flush({}));
     Calico_Try_S(m_wal->truncate(*m_commit_lsn));
-    Calico_Try_S(m_wal->start_workers());
+    Calico_Try_S(m_wal->start_writing());
     m_wal->cleanup(m_pager->recovery_lsn());
 
     // Make sure the file size matches the header page count, which should be correct if we made it this far.

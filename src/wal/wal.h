@@ -18,6 +18,7 @@ namespace Calico {
 
 class WalCleanup;
 class WalReader;
+class WalReader;
 class WalWriter;
 
 class WriteAheadLog {
@@ -40,9 +41,8 @@ public:
     [[nodiscard]] virtual auto close() -> Status;
     [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;
-    [[nodiscard]] virtual auto roll_forward(Lsn begin_lsn, const Callback &callback) -> Status;
-    [[nodiscard]] virtual auto roll_backward(Lsn end_lsn, const Callback &callback) -> Status;
-    [[nodiscard]] virtual auto start_workers() -> Status;
+    [[nodiscard]] virtual auto start_writing() -> Status;
+    [[nodiscard]] virtual auto new_reader(WalReader **out) -> Status;
     [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status;
     [[nodiscard]] virtual auto flush() -> Status;
     virtual auto cleanup(Lsn recovery_lsn) -> void;
@@ -63,7 +63,6 @@ public:
 
 private:
     explicit WriteAheadLog(const Parameters &param);
-    [[nodiscard]] auto open_reader() -> tl::expected<WalReader, Status>;
 
     std::atomic<Lsn> m_flushed_lsn {};
     std::atomic<Lsn> m_recovery_lsn {};
