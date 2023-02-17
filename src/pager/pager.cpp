@@ -226,10 +226,12 @@ auto Pager::try_make_available() -> tl::expected<bool, Status>
 
 auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> void
 {
-    // This function needs external synchronization!
     CALICO_EXPECT_GT(m_frames.ref_sum(), 0);
     const auto lsn = read_page_lsn(page);
 
+    // The "important" parameter should be used when we don't need to track the before contents of the whole
+    // page. For example, when allocating a page from the freelist, we only care about the page LSN stored in
+    // the first 8 bytes; the rest is junk.
     Size watch_size;
     if (important < 0) {
         watch_size = page.size();
@@ -237,11 +239,13 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
         watch_size = static_cast<Size>(important);
     }
 
-    // Make sure this page is in the dirty list. LSN is saved to determine when the page should be written back.
+    // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
     if (!entry.token.has_value()) {
         entry.token = m_dirty.insert(page.id(), lsn);
     }
 
+    // We only write a full image if the WAL does not already contain one for this page. If the page was modified
+    // during this transaction, then we already have one written.
     if (*m_in_txn && lsn <= *m_commit_lsn) {
         const auto next_lsn = m_wal->current_lsn();
         const auto image = page.view(0, watch_size);

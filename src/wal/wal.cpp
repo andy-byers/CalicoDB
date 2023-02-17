@@ -48,10 +48,6 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
     for (const auto &id: segment_ids) {
         wal->m_set.add_segment(id);
     }
-    auto s = wal->start_workers();
-    if (!s.is_ok()) {
-        return tl::make_unexpected(s);
-    }
     return wal;
 }
 
@@ -65,7 +61,7 @@ auto WriteAheadLog::close() -> Status
     return status();
 }
 
-auto WriteAheadLog::start_workers() -> Status
+auto WriteAheadLog::start_writing() -> Status
 {
     m_writer = std::unique_ptr<WalWriter> {
         new(std::nothrow) WalWriter {{

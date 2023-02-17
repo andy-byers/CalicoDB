@@ -49,6 +49,7 @@ auto Recovery::start() -> Status
                 s = Status::ok();
             }
         }
+        return s;
     };
 
     // Skip updates that are already in the database.
@@ -88,9 +89,7 @@ auto Recovery::start() -> Status
 
     // The reader either hit the end of the WAL or errored out. It may have encountered a corrupted or incomplete
     // last record if the database crashed while in the middle of writing that record.
-    CALICO_EXPECT_FALSE(s.is_ok());
-    translate_status();
-    Calico_Try_S(s);
+    Calico_Try_S(translate_status());
 
     if (*m_commit_lsn == last_lsn) {
         return Status::ok();
@@ -121,14 +120,14 @@ auto Recovery::start() -> Status
         }
     }
 
-    translate_status();
-    return s;
+    return translate_status();
 }
 
 auto Recovery::finish() -> Status
 {
     Calico_Try_S(m_pager->flush({}));
     Calico_Try_S(m_wal->truncate(*m_commit_lsn));
+    Calico_Try_S(m_wal->start_writing());
     m_wal->cleanup(m_pager->recovery_lsn());
 
     // Make sure the file size matches the header page count, which should be correct if we made it this far.

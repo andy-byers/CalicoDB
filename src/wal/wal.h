@@ -41,6 +41,7 @@ public:
     [[nodiscard]] virtual auto close() -> Status;
     [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;
+    [[nodiscard]] virtual auto start_writing() -> Status;
     [[nodiscard]] virtual auto new_reader(WalReader **out) -> Status;
     [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status;
     [[nodiscard]] virtual auto flush() -> Status;
@@ -62,7 +63,6 @@ public:
 
 private:
     explicit WriteAheadLog(const Parameters &param);
-    [[nodiscard]] auto start_workers() -> Status;
 
     std::atomic<Lsn> m_flushed_lsn {};
     std::atomic<Lsn> m_recovery_lsn {};

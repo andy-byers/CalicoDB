@@ -330,21 +330,64 @@ static auto add_records(TestDatabase &test, Size n, Size max_value_size, const s
     return records;
 }
 
-TEST_F(DbRevertTests, RevertsUncommittedBatch)
+static auto expect_contains_records(const Database &db, const std::map<std::string, std::string> &committed)
 {
-    const auto committed = add_records(*db, 100, 0x400, "_");
-    ASSERT_OK(db->impl->commit());
-
-    // Hack to make sure the database file is up-to-date.
-    (void)db->impl->pager->flush({});
-
-    add_records(*db, 1'000, 0x400);
-    ASSERT_OK(db->reopen());
-
     for (const auto &[key, value]: committed) {
         std::string result;
-        ASSERT_OK(db->impl->get(key, result));
+        ASSERT_OK(db.get(key, result));
         ASSERT_EQ(result, value);
+    }
+}
+
+static auto run_revert_test(TestDatabase &db)
+{
+    const auto committed = add_records(db, 1'000, db.options.page_size, "_");
+    ASSERT_OK(db.impl->commit());
+
+    // Hack to make sure the database file is up-to-date.
+    (void)db.impl->pager->flush({});
+
+    add_records(db, 1'000, db.options.page_size);
+    ASSERT_OK(db.reopen());
+
+    expect_contains_records(*db.impl, committed);
+}
+
+TEST_F(DbRevertTests, RevertsUncommittedBatch_1)
+{
+    run_revert_test(*db);
+}
+
+TEST_F(DbRevertTests, RevertsUncommittedBatch_2)
+{
+    add_records(*db, 1'000, 100);
+    ASSERT_OK(db->impl->commit());
+    run_revert_test(*db);
+}
+
+TEST_F(DbRevertTests, RevertsUncommittedBatch_3)
+{
+    run_revert_test(*db);
+    add_records(*db, 1'000, 100);
+}
+
+TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
+{
+    add_records(*db, 1'000, 100);
+    ASSERT_OK(db->impl->commit());
+    run_revert_test(*db);
+    add_records(*db, 1'000, 100);
+}
+
+TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
+{
+    for (Size i {}; i < 100; ++i) {
+        add_records(*db, 100, 100);
+        ASSERT_OK(db->impl->commit());
+    }
+    run_revert_test(*db);
+    for (Size i {}; i < 100; ++i) {
+        add_records(*db, 100, 100);
     }
 }
 
@@ -356,46 +399,46 @@ protected:
 TEST_F(DbRecoveryTests, RecoversFirstBatch)
 {
     std::unique_ptr<Storage> clone;
-    std::string snapshot;
+    std::map<std::string, std::string> snapshot;
 
     {
         TestDatabase db {*storage};
-        add_records(db, 100, 10 * db.options.page_size);
+        snapshot = add_records(db, 100, 10 * db.options.page_size);
         ASSERT_OK(db.impl->commit());
 
         // Simulate a crash by cloning the database before cleanup has occurred.
         clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*storage).clone());
 
         (void)db.impl->pager->flush({});
-        snapshot = db.snapshot();
     }
     // Create a new database from the cloned data. This database will need to roll the WAL forward to become
     // consistent.
     TestDatabase clone_db {*clone};
     ASSERT_OK(clone_db.impl->status());
-    auto s = clone_db.snapshot();
-    ASSERT_EQ(snapshot, s);
+    expect_contains_records(*clone_db.impl, snapshot);
 }
 
 TEST_F(DbRecoveryTests, RecoversNthBatch)
 {
     std::unique_ptr<Storage> clone;
-    std::string snapshot;
+    std::map<std::string, std::string> snapshot;
 
     {
         TestDatabase db {*storage};
 
         for (Size i {}; i < 10; ++i) {
-            add_records(db, 100, 10 * db.options.page_size);
+            for (const auto &[k, v]: add_records(db, 100, 10 * db.options.page_size)) {
+                snapshot[k] = v;
+            }
             ASSERT_OK(db.impl->commit());
         }
 
         clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*storage).clone());
 
         (void)db.impl->pager->flush({});
-        snapshot = db.snapshot();
     }
-    ASSERT_EQ(snapshot, TestDatabase {*clone}.snapshot());
+    TestDatabase clone_db {*clone};
+    expect_contains_records(*clone_db.impl, snapshot);
 }
 
 enum class ErrorTarget {
