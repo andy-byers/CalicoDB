@@ -16,16 +16,6 @@ static auto is_underflowing(const Node &node) -> bool
     return node.header.cell_count == 0;
 }
 
-[[nodiscard]]
-static auto take_overflow_cell(Node &node) -> Cell
-{
-    CALICO_EXPECT_TRUE(node.overflow.has_value());
-    const auto cell = *node.overflow;
-    node.overflow.reset();
-    return cell;
-}
-
-
 static auto reset_node(Node &node) -> void
 {
     CALICO_EXPECT_FALSE(is_overflowing(node));
@@ -416,88 +406,6 @@ public:
     }
 
     [[nodiscard]]
-    static auto try_fix_by_rotation(BPlusTree &tree, Node &node, Node &parent) -> tl::expected<bool, Status>
-    {
-        CALICO_EXPECT_TRUE(node.page.is_writable());
-        CALICO_EXPECT_TRUE(parent.page.is_writable());
-
-        if (node.overflow_index == 0 || node.overflow_index == node.header.cell_count) {
-            return false;
-        }
-
-        Node::Iterator itr {parent};
-        itr.seek(read_key(*node.overflow)); // Could be any key in node.
-
-        if (itr.index() > 0) {
-            Calico_New_R(left, tree.acquire(read_child_id(parent, itr.index() - 1)));
-
-            const auto separator = read_cell(parent, itr.index() - 1);
-            const auto first = read_cell(node, 0);
-            Size lhs {separator.size}, rhs {first.size}, index {1};
-            for (; index < node.overflow_index; ++index) {
-                const auto prev = read_cell(node, index - 1);
-                if (usable_space(parent) + separator.size < prev.size) {
-                    break;
-                }
-                if (!can_write_cells(left, lhs, index)) {
-                    break;
-                }
-                // rhs doesn't account for cell pointers. That's okay, it's just slightly more conservative than necessary.
-                if (rhs >= node.overflow->size) {
-                    tree.m_pager->upgrade(left.page);
-                    for (Size i {}; i < index; ++i) {
-                        Calico_Try_R(internal_rotate_left(tree, parent, left, node, itr.index() - 1));
-                    }
-                    CALICO_EXPECT_FALSE(is_overflowing(parent));
-                    CALICO_EXPECT_FALSE(is_overflowing(left));
-                    const auto overflow = take_overflow_cell(node);
-                    write_cell(node, node.overflow_index - index, overflow);
-                    CALICO_EXPECT_FALSE(is_overflowing(node));
-                    tree.release(std::move(left));
-                    return true;
-                }
-                lhs += prev.size;
-                rhs += read_cell(node, index).size;
-            }
-            tree.release(std::move(left));
-        }
-        if (itr.index() < parent.header.cell_count) {
-            Calico_New_R(right, tree.acquire(read_child_id(parent, itr.index() + 1)));
-
-            const auto count = node.header.cell_count;
-            const auto separator = read_cell(parent, itr.index());
-            const auto last = read_cell(node, count - 1);
-            Size lhs {last.size}, rhs {separator.size}, index = count - 2;
-            for (; index >= node.overflow_index; --index) {
-                const auto prev = read_cell(node, index + 1);
-                if (usable_space(parent) + separator.size < prev.size) {
-                    break;
-                }
-                if (!can_write_cells(right, rhs, count - index - 1)) {
-                    break;
-                }
-                if (lhs >= node.overflow->size) {
-                    tree.m_pager->upgrade(right.page);
-                    for (Size i {index}; i + 1 < count; ++i) {
-                        Calico_Try_R(internal_rotate_right(tree, parent, node, right, itr.index()));
-                    }
-                    CALICO_EXPECT_FALSE(is_overflowing(parent));
-                    CALICO_EXPECT_FALSE(is_overflowing(right));
-                    const auto overflow = take_overflow_cell(node);
-                    write_cell(node, node.overflow_index, overflow);
-                    CALICO_EXPECT_FALSE(is_overflowing(node));
-                    tree.release(std::move(right));
-                    return true;
-                }
-                lhs += read_cell(node, index).size;
-                rhs += prev.size;
-            }
-            tree.release(std::move(right));
-        }
-        return false;
-    }
-
-    [[nodiscard]]
     static auto split_non_root(BPlusTree &tree, Node node) -> tl::expected<Node, Status>
     {
         CALICO_EXPECT_FALSE(node.page.id().is_root());
@@ -507,13 +415,6 @@ public:
         CALICO_EXPECT_FALSE(parent_id.is_null());
 
         Calico_New_R(parent, tree.acquire(parent_id, true));
-        if (!node.header.is_external) {
-            Calico_New_R(fixed, try_fix_by_rotation(tree, node, parent));
-            if (fixed) {
-                tree.release(std::move(node));
-                return parent;
-            }
-        }
         Calico_New_R(sibling, tree.allocate(node.header.is_external));
 
         Cell separator;

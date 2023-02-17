@@ -492,16 +492,6 @@ auto usable_space(const Node &node) -> Size
     return node.header.free_total + node.gap_size;
 }
 
-auto max_usable_space(const Node &node) -> Size
-{
-    return node.page.size() - cell_slots_offset(node);
-}
-
-auto can_write_cells(const Node &node, Size total_size, Size count) -> Size
-{
-    return usable_space(node) >= total_size + count*sizeof(PageSize);
-}
-
 auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
 {
     const auto &header = node.header;
