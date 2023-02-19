@@ -95,7 +95,7 @@ class OverflowList {
     FreeList *m_freelist {};
     PointerMap *m_pointers {};
 
-    std::string m_scratch; // TODO: should be a pointer, reuse same scratch as something else, like a key buffer
+    std::string m_scratch; // TODO: Only needed for copy_chain(). Not actually necessary, it just makes it easier. Should fix that at some point.
 
 public:
     explicit OverflowList(Pager &pager, FreeList &freelist, PointerMap &pointers)

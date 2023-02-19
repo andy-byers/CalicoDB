@@ -26,7 +26,9 @@ auto internal_cell_size(const NodeMeta &meta, const Byte *data) -> Size
     Size key_size;
     const auto *ptr = decode_varint(data + sizeof(Id), key_size);
     const auto local_size = compute_local_size(key_size, meta.min_local, meta.max_local);
-    return local_size + static_cast<Size>(ptr - data);
+    const auto extra_size = (local_size < key_size) * sizeof(Id);
+    const auto header_size = static_cast<Size>(ptr - data);
+    return header_size + local_size + extra_size;
 }
 
 auto external_cell_size(const NodeMeta &meta, const Byte *data) -> Size
@@ -36,12 +38,9 @@ auto external_cell_size(const NodeMeta &meta, const Byte *data) -> Size
     ptr = decode_varint(ptr, key_size);
     const auto payload_size = key_size + value_size;
     const auto local_size = compute_local_size(payload_size, meta.min_local, meta.max_local);
+    const auto extra_size = (local_size < payload_size) * sizeof(Id);
     const auto header_size = static_cast<Size>(ptr - data);
-    Size extra_size {};
-    if (local_size != payload_size) {
-        extra_size += sizeof(Id);
-    }
-    return header_size + extra_size + local_size;
+    return header_size + local_size + extra_size;
 }
 
 auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell
@@ -386,7 +385,7 @@ auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
     BlockAllocator alloc {node};
 
     // We don't have room to insert the cell pointer.
-    if (cell_area_offset(node) + sizeof(PageSize) > header.cell_start) {
+    if (node.gap_size < header.cell_start) {
         if (!can_allocate) {
             node.overflow_index = index;
             return 0;
@@ -480,6 +479,9 @@ auto manual_defragment(Node &node) -> void
 
 auto detach_cell(Cell &cell, Byte *backing) -> void
 {
+    if (cell.is_free) {
+        return;
+    }
     std::memcpy(backing, cell.ptr, cell.size);
     const auto diff = cell.key - cell.ptr;
     cell.ptr = backing;

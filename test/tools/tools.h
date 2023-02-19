@@ -309,7 +309,7 @@ inline auto parse_db_stats(std::string prop) -> DatabaseStats
     return stats;
 }
 
-auto print_references(Pager &pager, PointerMap &pointers);
+auto print_references(Pager &pager, PointerMap &pointers) -> void;
 
 } // namespace Calico::Tools
 

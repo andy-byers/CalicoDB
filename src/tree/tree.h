@@ -44,7 +44,6 @@ public:
 class PayloadManager {
     const NodeMeta *m_meta {};
     OverflowList *m_overflow {};
-    std::string m_scratch {}; // TODO: share
 
 public:
     explicit PayloadManager(const NodeMeta &meta, OverflowList &overflow);
@@ -53,26 +52,27 @@ public:
      * memory and set as the node's overflow cell. May allocate an overflow chain with its back pointer
      * pointing to "node".
      */
-    [[nodiscard]] auto emplace(Node &node, const Slice &key, const Slice &value, Size index) -> tl::expected<void, Status>;
+    [[nodiscard]] auto emplace(Byte *scratch, Node &node, const Slice &key, const Slice &value, Size index) -> tl::expected<void, Status>;
 
     /* Prepare a cell read from an external node to be posted into its parent as a separator. Will
      * allocate a new overflow chain for overflowing keys, pointing back to "parent_id".
      */
-    [[nodiscard]] auto promote(Cell &cell, Id parent_id) -> tl::expected<void, Status>;
+    [[nodiscard]] auto promote(Byte *scratch, Cell &cell, Id parent_id) -> tl::expected<void, Status>;
 
-    [[nodiscard]] auto collect_key(const Cell &cell) -> tl::expected<std::string, Status>;
-    [[nodiscard]] auto collect_value(const Cell &cell) -> tl::expected<std::string, Status>;
+    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>;
+    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>;
 };
 
 class BPlusTree {
     friend class BPlusTreeInternal;
     friend class BPlusTreeValidator;
     friend class CursorInternal;
+    friend class CursorImpl;
 
-    Status m_status;
     std::array<std::string, 4> m_scratch;
     std::string m_lhs_key;
     std::string m_rhs_key;
+    std::string m_anchor;
 
     NodeMeta m_external_meta;
     NodeMeta m_internal_meta;
@@ -98,8 +98,8 @@ public:
     explicit BPlusTree(Pager &pager);
 
     [[nodiscard]] auto setup() -> tl::expected<Node, Status>;
-    [[nodiscard]] auto collect_key(const Cell &cell) -> tl::expected<std::string, Status>;
-    [[nodiscard]] auto collect_value(const Cell &cell) -> tl::expected<std::string, Status>;
+    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>;
+    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>;
     [[nodiscard]] auto search(const Slice &key) -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> tl::expected<bool, Status>;
     [[nodiscard]] auto erase(const Slice &key) -> tl::expected<void, Status>;

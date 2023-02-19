@@ -234,6 +234,9 @@ public:
                 Calico_Try_R(fix_parent_id(tree, read_child_id(cell), node.page.id()));
             }
         }
+        if (!node.header.is_external) {
+            Calico_Try_R(fix_parent_id(tree, node.header.next_id, node.page.id()));
+        }
         if (node.overflow) {
             Calico_Try_R(maybe_fix_overflow_chain(tree, *node.overflow, node.page.id()));
             if (!node.header.is_external) {
@@ -303,7 +306,6 @@ public:
         while (count && predicate(left, right, counter++)) {
             const auto cell = read_cell(left, count - 1);
             Calico_Try_R(insert_cell(tree, right, 0, cell));
-            // Fix the back pointer for an overflow chain that was previously rooted at "left".
             CALICO_EXPECT_FALSE(is_overflowing(right));
             erase_cell(left, count - 1, cell.size);
         }
@@ -311,7 +313,7 @@ public:
     }
 
     [[nodiscard]]
-    static auto split_external_non_root(BPlusTree &tree, Node &left, Node &right, Id parent_id) -> tl::expected<Cell, Status>
+    static auto split_external_non_root(BPlusTree &tree, Node &left, Node &right) -> tl::expected<Cell, Status>
     {
         CALICO_EXPECT_TRUE(left.header.is_external);
         CALICO_EXPECT_TRUE(right.header.is_external);
@@ -329,8 +331,6 @@ public:
             right_right.header.prev_id = right.page.id();
             tree.release(std::move(right_right));
         }
-
-        Calico_Try_R(fix_parent_id(tree, right.page.id(), parent_id));
 
         if (overflow_idx == left.header.cell_count) {
             // Just transfer a single cell in this case. This should reduce the number of splits during a sequential write.
@@ -365,12 +365,11 @@ public:
 
         auto separator = read_cell(right, 0);
         detach_cell(separator, tree.scratch(1));
-        Calico_Try_R(tree.m_payloads.promote(separator, parent_id));
         return separator;
     }
 
     [[nodiscard]]
-    static auto split_internal_non_root(BPlusTree &tree, Node &left, Node &right, Id parent_id) -> tl::expected<Cell, Status>
+    static auto split_internal_non_root(BPlusTree &tree, Node &left, Node &right) -> tl::expected<Cell, Status>
     {
         CALICO_EXPECT_FALSE(left.header.is_external);
         CALICO_EXPECT_FALSE(right.header.is_external);
@@ -381,8 +380,6 @@ public:
 
         // In internal nodes, the next_id field refers to the rightmost child ID, and the prev_id field is unused.
         right.header.next_id = left.header.next_id;
-
-        Calico_Try_R(fix_parent_id(tree, right.page.id(), parent_id));
 
         if (overflow_idx == left.header.cell_count) {
             Calico_Try_R(transfer_cells_right_while(tree, left, right, [](const auto &, const auto &, auto counter) {
@@ -422,20 +419,21 @@ public:
 
         Calico_New_R(parent, tree.acquire(parent_id, true));
         Calico_New_R(sibling, tree.allocate(node.header.is_external));
+        Calico_Try_R(fix_parent_id(tree, sibling.page.id(), parent_id));
 
         Cell separator;
         if (node.header.is_external) {
-            Calico_Put_R(separator, split_external_non_root(tree, node, sibling, parent_id));
+            Calico_Put_R(separator, split_external_non_root(tree, node, sibling));
+            Calico_Try_R(tree.m_payloads.promote(nullptr, separator, parent_id));
         } else {
-            Calico_Put_R(separator, split_internal_non_root(tree, node, sibling, parent_id));
+            Calico_Put_R(separator, split_internal_non_root(tree, node, sibling));
         }
         NodeIterator itr {parent, {
             &tree.m_overflow,
             &tree.m_lhs_key,
             &tree.m_rhs_key,
         }};
-        Calico_New_R(separator_key, tree.collect_key(separator));
-        Calico_Try_R(itr.seek(separator_key));
+        Calico_Try_R(itr.seek(separator));
 
         CALICO_EXPECT_TRUE(separator.is_free);
         write_child_id(separator, node.page.id());
@@ -527,16 +525,24 @@ public:
             Calico_Try_R(transfer_first_cell_left(tree, right, left));
         }
         write_child_id(parent, index, left.page.id());
+
+        if (!right.header.next_id.is_null()) {
+            Calico_New_R(right_sibling, tree.acquire(right.header.next_id, true));
+            right_sibling.header.prev_id = left.page.id();
+            tree.release(std::move(right_sibling));
+        }
         return {};
     }
 
-    static auto merge_left(BPlusTree &tree, Node &left, Node &right, Node &parent, Size index) -> tl::expected<void, Status>
+    static auto merge_left(BPlusTree &tree, Node &left, Node right, Node &parent, Size index) -> tl::expected<void, Status>
     {
         if (left.header.is_external) {
-            return external_merge_left(tree, left, right, parent, index);
+            Calico_Try_R(external_merge_left(tree, left, right, parent, index));
         } else {
-            return internal_merge_left(tree, left, right, parent, index);
+            Calico_Try_R(internal_merge_left(tree, left, right, parent, index));
         }
+        Calico_Try_R(fix_links(tree, left));
+        return tree.destroy(std::move(right));
     }
 
     static auto internal_merge_right(BPlusTree &tree, Node &left, Node &right, Node &parent, Size index) -> tl::expected<void, Status>
@@ -581,16 +587,23 @@ public:
         while (right.header.cell_count) {
             Calico_Try_R(transfer_first_cell_left(tree, right, left));
         }
+        if (!right.header.next_id.is_null()) {
+            Calico_New_R(right_sibling, tree.acquire(right.header.next_id, true));
+            right_sibling.header.prev_id = left.page.id();
+            tree.release(std::move(right_sibling));
+        }
         return {};
     }
 
-    static auto merge_right(BPlusTree &tree, Node &left, Node &right, Node &parent, Size index) -> tl::expected<void, Status>
+    static auto merge_right(BPlusTree &tree, Node &left, Node right, Node &parent, Size index) -> tl::expected<void, Status>
     {
         if (left.header.is_external) {
-            return external_merge_right(tree, left, right, parent, index);
+            Calico_Try_R(external_merge_right(tree, left, right, parent, index));
         } else {
-            return internal_merge_right(tree, left, right, parent, index);
+            Calico_Try_R(internal_merge_right(tree, left, right, parent, index));
         }
+        Calico_Try_R(fix_links(tree, left));
+        return tree.destroy(std::move(right));
     }
 
     [[nodiscard]]
@@ -603,15 +616,8 @@ public:
         if (index > 0) {
             Calico_New_R(left, tree.acquire(read_child_id(parent, index - 1), true));
             if (left.header.cell_count == 1) {
-                Calico_Try_R(merge_right(tree, left, node, parent, index - 1));
-                Calico_Try_R(fix_links(tree, left));
-                if (node.header.is_external && !node.header.next_id.is_null()) {
-                    Calico_New_R(right, tree.acquire(node.header.next_id, true));
-                    right.header.prev_id = left.page.id();
-                    tree.release(std::move(right));
-                }
+                Calico_Try_R(merge_right(tree, left, std::move(node), parent, index - 1));
                 tree.release(std::move(left));
-                Calico_Try_R(tree.destroy(std::move(node)));
                 CALICO_EXPECT_FALSE(is_overflowing(parent));
                 return {};
             }
@@ -623,15 +629,8 @@ public:
 
             Calico_New_R(right, tree.acquire(read_child_id(parent, index + 1), true));
             if (right.header.cell_count == 1) {
-                Calico_Try_R(merge_left(tree, node, right, parent, index));
-                Calico_Try_R(fix_links(tree, node));
-                if (right.header.is_external && !right.header.next_id.is_null()) {
-                    Calico_New_R(right_right, tree.acquire(right.header.next_id, true));
-                    right_right.header.prev_id = node.page.id();
-                    tree.release(std::move(right_right));
-                }
+                Calico_Try_R(merge_left(tree, node, std::move(right), parent, index));
                 tree.release(std::move(node));
-                Calico_Try_R(tree.destroy(std::move(right)));
                 CALICO_EXPECT_FALSE(is_overflowing(parent));
                 return {};
             }
@@ -705,13 +704,11 @@ public:
         erase_cell(right, 0);
 
         auto separator = read_cell(right, 0);
-        detach_cell(separator, tree.scratch(1));
-        Calico_Try_R(tree.m_payloads.promote(separator, parent.page.id()));
+        Calico_Try_R(tree.m_payloads.promote(tree.scratch(1), separator, parent.page.id()));
         write_child_id(separator, left.page.id());
 
         erase_cell(parent, index, read_cell(parent, index).size);
         Calico_Try_R(insert_cell(tree, parent, index, separator));
-        Calico_Try_R(maybe_fix_overflow_chain(tree, separator, parent.page.id()));
         return {};
     }
 
@@ -767,12 +764,8 @@ public:
         Calico_Try_R(insert_cell(tree, right, 0, highest));
         CALICO_EXPECT_FALSE(is_overflowing(right));
 
-        // Update the back pointer for the overflow chain, if it exists.
-        Calico_Try_R(maybe_fix_overflow_chain(tree, highest, right.page.id()));
-
         auto separator = highest;
-        detach_cell(separator, tree.scratch(1));
-        Calico_Try_R(tree.m_payloads.promote(separator, parent.page.id()));
+        Calico_Try_R(tree.m_payloads.promote(tree.scratch(1), separator, parent.page.id()));
         write_child_id(separator, left.page.id());
 
         // Don't erase the cell until it has been detached.
@@ -780,7 +773,6 @@ public:
 
         erase_cell(parent, index, read_cell(parent, index).size);
         Calico_Try_R(insert_cell(tree, parent, index, separator));
-        Calico_Try_R(maybe_fix_overflow_chain(tree, separator, parent.page.id()));
         return {};
     }
 
@@ -801,7 +793,6 @@ public:
 
         auto separator = read_cell(parent, index);
         Calico_Try_R(insert_cell(tree, right, 0, separator));
-        Calico_Try_R(maybe_fix_overflow_chain(tree, separator, right.page.id()));
         CALICO_EXPECT_FALSE(is_overflowing(right));
         write_child_id(right, 0, child_id);
         erase_cell(parent, index, separator.size);
@@ -811,7 +802,6 @@ public:
         write_child_id(highest, left.page.id());
         erase_cell(left, left.header.cell_count - 1, highest.size);
         Calico_Try_R(insert_cell(tree, parent, index, highest));
-        Calico_Try_R(maybe_fix_overflow_chain(tree, highest, parent.page.id()));
         return {};
     }
 };
@@ -821,7 +811,7 @@ PayloadManager::PayloadManager(const NodeMeta &meta, OverflowList &overflow)
       m_overflow {&overflow}
 {}
 
-auto PayloadManager::emplace(Node &node, const Slice &key, const Slice &value, Size index) -> tl::expected<void, Status>
+auto PayloadManager::emplace(Byte *scratch, Node &node, const Slice &key, const Slice &value, Size index) -> tl::expected<void, Status>
 {
     CALICO_EXPECT_TRUE(node.header.is_external);
 
@@ -855,18 +845,18 @@ auto PayloadManager::emplace(Node &node, const Slice &key, const Slice &value, S
         emplace(node.page.data() + offset);
     } else {
         // The node has overflowed. Write the cell to scratch memory.
-        m_scratch.resize(total_size); // TODO: shared and presized
-        emplace(m_scratch.data());
-        node.overflow = parse_external_cell(*node.meta, m_scratch.data());
+        emplace(scratch);
+        node.overflow = parse_external_cell(*node.meta, scratch);
         node.overflow->is_free = true;
     }
     return {};
 }
 
-auto PayloadManager::promote(Cell &cell, Id parent_id) -> tl::expected<void, Status>
+auto PayloadManager::promote(Byte *scratch, Cell &cell, Id parent_id) -> tl::expected<void, Status>
 {
-    // "cell" should not be attached to a node. It must be written to scratch memory with enough room before the key size
-    // to write a left child pointer.
+    detach_cell(cell, scratch);
+
+    // "scratch" should have enough room before its "m_data" member to write the left child ID.
     const auto header_size = sizeof(Id) + varint_length(cell.key_size);
     cell.ptr = cell.key - header_size;
     cell.local_size = compute_local_size(cell.key_size, m_meta->min_local, m_meta->max_local);
@@ -874,7 +864,7 @@ auto PayloadManager::promote(Cell &cell, Id parent_id) -> tl::expected<void, Sta
     cell.has_remote = false;
 
     if (cell.key_size > cell.local_size) {
-        // Part of the key is on an overflow page.
+        // Part of the key is on an overflow page. No value is stored locally in this case, so the local size computation is still correct.
         Calico_New_R(overflow_id, m_overflow->copy_chain(parent_id, read_overflow_id(cell), cell.key_size - cell.local_size));
         write_overflow_id(cell, overflow_id);
         cell.size += sizeof(Id);
@@ -883,39 +873,37 @@ auto PayloadManager::promote(Cell &cell, Id parent_id) -> tl::expected<void, Sta
     return {};
 }
 
-auto PayloadManager::collect_key(const Cell &cell) -> tl::expected<std::string, Status>
+auto PayloadManager::collect_key(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
 {
     if (!cell.has_remote || cell.key_size <= cell.local_size) {
-        const Slice key {cell.key, cell.key_size};
-        return key.to_string();
+        return Slice {cell.key, cell.key_size};
     }
-    Size remote_key_size {};
-    if (cell.key_size > cell.local_size) {
-        remote_key_size = cell.key_size - cell.local_size;
+    if (scratch.size() < cell.key_size) {
+        scratch.resize(cell.key_size);
     }
-    std::string buffer(remote_key_size, '\0');
-    Span span {buffer};
+    Span span {scratch};
+    mem_copy(span, cell.key, cell.local_size);
 
-    Calico_Try_R(m_overflow->read_chain(read_overflow_id(cell), span));
-    const Slice local_key {cell.key, cell.local_size};
-    return local_key.to_string() + buffer;
+    Calico_Try_R(m_overflow->read_chain(read_overflow_id(cell), span.range(cell.local_size)));
+    return span;
 }
 
-auto PayloadManager::collect_value(const Cell &cell) -> tl::expected<std::string, Status>
+auto PayloadManager::collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
 {
     Size value_size;
     decode_varint(cell.ptr, value_size);
 
     if (!cell.has_remote) {
-        const Slice value {cell.key + cell.key_size, value_size};
-        return value.to_string();
+        return Slice {cell.key + cell.key_size, value_size};
     }
     Size remote_key_size {};
     if (cell.key_size > cell.local_size) {
         remote_key_size = cell.key_size - cell.local_size;
     }
-    std::string buffer(remote_key_size + value_size, '\0');
-    Span span {buffer};
+    if (scratch.size() < remote_key_size + value_size) {
+        scratch.resize(remote_key_size + value_size);
+    }
+    Span span {scratch};
 
     if (remote_key_size == 0) {
         const auto local_value_size = cell.local_size - cell.key_size;
@@ -924,7 +912,7 @@ auto PayloadManager::collect_value(const Cell &cell) -> tl::expected<std::string
     }
 
     Calico_Try_R(m_overflow->read_chain(read_overflow_id(cell), span));
-    return buffer.substr(remote_key_size);
+    return Span {scratch}.range(remote_key_size);
 }
 
 BPlusTree::BPlusTree(Pager &pager)
@@ -1048,10 +1036,7 @@ auto BPlusTree::insert(const Slice &key, const Slice &value) -> tl::expected<boo
         erase_cell(node, index, cell.size);
     }
 
-    Calico_Try_R(m_payloads.emplace(node, key, value, index));
-    if (!m_status.is_ok()) {
-        return tl::make_unexpected(m_status);
-    }
+    Calico_Try_R(m_payloads.emplace(scratch(0), node, key, value, index));
     Calico_Try_R(BPlusTreeInternal::resolve_overflow(*this, std::move(node)));
     return !exact;
 }
@@ -1063,7 +1048,7 @@ auto BPlusTree::erase(const Slice &key) -> tl::expected<void, Status>
 
     if (exact) {
         const auto cell = read_cell(node, index);
-        Calico_New_R(anchor, collect_key(cell));
+        Calico_New_R(anchor, collect_key(m_anchor, cell));
         Size value_size;
         decode_varint(cell.ptr, value_size);
         if (const auto remote_size = cell.key_size + value_size - cell.local_size) {
@@ -1100,14 +1085,14 @@ auto BPlusTree::highest() -> tl::expected<Node, Status>
     return node;
 }
 
-auto BPlusTree::collect_key(const Cell &cell) -> tl::expected<std::string, Status>
+auto BPlusTree::collect_key(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
 {
-    return m_payloads.collect_key(cell);
+    return m_payloads.collect_key(scratch, cell);
 }
 
-auto BPlusTree::collect_value(const Cell &cell) -> tl::expected<std::string, Status>
+auto BPlusTree::collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
 {
-    return m_payloads.collect_value(cell);
+    return m_payloads.collect_value(scratch, cell);
 }
 
 auto BPlusTree::search(const Slice &key) -> tl::expected<SearchResult, Status>
@@ -1137,8 +1122,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
                 Calico_Try_R(fix_basic_link());
                 Calico_New_R(last, m_pager->acquire(last_id));
                 if (const auto next_id = read_next_id(last); !next_id.is_null()) {
-                    const PointerMap::Entry next_entry {free.id(), PointerMap::FREELIST_LINK};
-                    Calico_Try_R(m_pointers.write_entry(next_id, next_entry));
+                    Calico_Try_R(BPlusTreeInternal::fix_parent_id(*this, next_id, free.id(), PointerMap::FREELIST_LINK));
                 }
                 m_pager->release(std::move(last));
             }
@@ -1157,8 +1141,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
             bool found {};
             for (Size i {}; i < parent.header.cell_count; ++i) {
                 auto cell = read_cell(parent, i);
-                found = cell.has_remote &&
-                        read_overflow_id(cell) == last_id;
+                found = cell.has_remote && read_overflow_id(cell) == last_id;
                 if (found) {
                     write_overflow_id(cell, free.id());
                     break;
@@ -1184,11 +1167,14 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
             release(std::move(parent));
             // Update references.
             Calico_New_R(last, acquire(last_id, true));
-            if (last.header.is_external) {
-                for (Size i {}; i < last.header.cell_count; ++i) {
-                    const auto cell = read_cell(last, i);
-                    Calico_Try_R(BPlusTreeInternal::maybe_fix_overflow_chain(*this, cell, free.id()));
+            for (Size i {}; i < last.header.cell_count; ++i) {
+                const auto cell = read_cell(last, i);
+                Calico_Try_R(BPlusTreeInternal::maybe_fix_overflow_chain(*this, cell, free.id()));
+                if (!last.header.is_external) {
+                    Calico_Try_R(BPlusTreeInternal::fix_parent_id(*this, read_child_id(last, i), free.id()));
                 }
+            }
+            if (last.header.is_external) {
                 if (!last.header.prev_id.is_null()) {
                     Calico_New_R(prev, acquire(last.header.prev_id, true));
                     prev.header.next_id = free.id();
@@ -1198,13 +1184,6 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> tl::expected<void, Status
                     Calico_New_R(next, acquire(last.header.next_id, true));
                     next.header.prev_id = free.id();
                     release(std::move(next));
-                }
-            } else {
-                for (Size i {}; i <= last.header.cell_count; ++i) {
-                    const auto cell = read_cell(last, i);
-                    const auto child_id = read_child_id(cell);
-                    Calico_Try_R(BPlusTreeInternal::fix_parent_id(*this, child_id, free.id()));
-                    Calico_Try_R(BPlusTreeInternal::maybe_fix_overflow_chain(*this, cell, free.id()));
                 }
             }
             release(std::move(last));
@@ -1377,8 +1356,9 @@ public:
             validate_possible_overflows(node);
             auto right = m_tree->acquire(node.header.next_id, false);
             CALICO_EXPECT_TRUE(right.has_value());
-            const auto lhs_key = m_tree->collect_key(read_cell(node, 0)).value();
-            const auto rhs_key = m_tree->collect_key(read_cell(*right, 0)).value();
+            std::string buffer;
+            const auto lhs_key = m_tree->collect_key(buffer, read_cell(node, 0)).value();
+            const auto rhs_key = m_tree->collect_key(buffer, read_cell(*right, 0)).value();
             CALICO_EXPECT_LT(lhs_key, rhs_key);
             CALICO_EXPECT_EQ(right->header.prev_id, node.page.id());
             m_tree->release(std::move(node));
@@ -1490,7 +1470,9 @@ auto BPlusTree::TEST_check_order() -> void
     BPlusTreeValidator validator {*this};
 
     validator.traverse_inorder([&keys, this](auto &node, auto index) -> void {
-        keys.emplace_back(collect_key(read_cell(node, index)).value());
+        std::string buffer;
+        CALICO_EXPECT_TRUE(collect_key(buffer, read_cell(node, index)).has_value());
+        keys.emplace_back(buffer);
     });
     CALICO_EXPECT_TRUE(std::is_sorted(cbegin(keys), cend(keys)));
 }

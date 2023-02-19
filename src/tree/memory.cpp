@@ -120,19 +120,16 @@ auto OverflowList::write_chain(Id pid, Slice first, Slice second) -> tl::expecte
                 first.advance(limit);
             }
         }
+        PointerMap::Entry entry {pid, PointerMap::OVERFLOW_HEAD};
         if (prev) {
             write_next_id(*prev, page.id());
             m_pager->release(std::move(*prev));
-
-            // Update overflow link back pointers.
-            const PointerMap::Entry entry {prev->id(), PointerMap::OVERFLOW_LINK};
-            Calico_Try_R(m_pointers->write_entry(page.id(), entry));
+            entry.back_ptr = prev->id();
+            entry.type = PointerMap::OVERFLOW_LINK;
         } else {
             head = page.id();
-
-            const PointerMap::Entry entry {pid, PointerMap::OVERFLOW_HEAD};
-            Calico_Try_R(m_pointers->write_entry(page.id(), entry));
         }
+        Calico_Try_R(m_pointers->write_entry(page.id(), entry));
         prev.emplace(std::move(page));
     }
     if (prev) {
@@ -145,11 +142,14 @@ auto OverflowList::write_chain(Id pid, Slice first, Slice second) -> tl::expecte
 
 auto OverflowList::copy_chain(Id pid, Id overflow_id, Size size) -> tl::expected<Id, Status>
 {
-    if (m_scratch.size() != size) {
+    if (m_scratch.size() < size) {
         m_scratch.resize(size);
     }
-    Calico_Try_R(read_chain(overflow_id, m_scratch));
-    return write_chain(pid, m_scratch);
+    Span buffer {m_scratch};
+    buffer.truncate(size);
+
+    Calico_Try_R(read_chain(overflow_id, buffer));
+    return write_chain(pid, buffer);
 }
 
 auto OverflowList::erase_chain(Id pid, Size size) -> tl::expected<void, Status>

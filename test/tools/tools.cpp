@@ -253,7 +253,7 @@ auto RandomGenerator::Generate(Size len) const -> Slice
     return {m_data.data() + m_pos - len, static_cast<Size>(len)};
 }
 
-auto print_references(Pager &pager, PointerMap &pointers)
+auto print_references(Pager &pager, PointerMap &pointers) -> void
 {
     for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
         std::cerr << std::setw(6) << pid.value << ": ";

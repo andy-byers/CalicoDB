@@ -168,6 +168,7 @@ public:
     Lsn commit_lsn;
     DisabledWriteAheadLog wal;
     std::string scratch;
+    std::string collect_scratch;
     std::unique_ptr<Pager> pager;
     Tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
@@ -178,6 +179,8 @@ public:
 
     auto SetUp() -> void override
     {
+        collect_scratch.resize(PAGE_SIZE);
+
         TestWithPager::SetUp();
         pointers = std::make_unique<PointerMap>(*pager);
         freelist = std::make_unique<FreeList>(*pager, *pointers);
@@ -277,10 +280,10 @@ TEST_F(ComponentTests, EmplacesCellWithOverflowKey)
 TEST_F(ComponentTests, CollectsPayload)
 {
     auto root = acquire_node(Id::root(), true);
-    ASSERT_HAS_VALUE(payloads->emplace(root, "hello", "world", 0));
+    ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, "hello", "world", 0));
     const auto cell = read_cell(root, 0);
-    ASSERT_EQ(payloads->collect_key(cell).value(), "hello");
-    ASSERT_EQ(payloads->collect_value(cell).value(), "world");
+    ASSERT_EQ(payloads->collect_key(scratch, cell).value(), "hello");
+    ASSERT_EQ(payloads->collect_value(scratch, cell).value(), "world");
     root.TEST_validate();
     release_node(std::move(root));
 }
@@ -289,10 +292,10 @@ TEST_F(ComponentTests, CollectsPayloadWithOverflowValue)
 {
     auto root = acquire_node(Id::root(), true);
     const auto value = random.Generate(PAGE_SIZE * 100).to_string();
-    ASSERT_HAS_VALUE(payloads->emplace(root, "hello", value, 0));
+    ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, "hello", value, 0));
     const auto cell = read_cell(root, 0);
-    ASSERT_EQ(payloads->collect_key(cell).value(), "hello");
-    ASSERT_EQ(payloads->collect_value(cell).value(), value);
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), "hello");
+    ASSERT_EQ(payloads->collect_value(collect_scratch, cell).value(), value);
     root.TEST_validate();
     release_node(std::move(root));
 }
@@ -301,10 +304,10 @@ TEST_F(ComponentTests, CollectsPayloadWithOverflowKey)
 {
     auto root = acquire_node(Id::root(), true);
     const auto key = random.Generate(PAGE_SIZE * 100).to_string();
-    ASSERT_HAS_VALUE(payloads->emplace(root, key, "world", 0));
+    ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, key, "world", 0));
     const auto cell = read_cell(root, 0);
-    ASSERT_EQ(payloads->collect_key(cell).value(), key);
-    ASSERT_EQ(payloads->collect_value(cell).value(), "world");
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+    ASSERT_EQ(payloads->collect_value(collect_scratch, cell).value(), "world");
     root.TEST_validate();
     release_node(std::move(root));
 }
@@ -314,10 +317,10 @@ TEST_F(ComponentTests, CollectsPayloadWithOverflowKeyValue)
     auto root = acquire_node(Id::root(), true);
     const auto key = random.Generate(PAGE_SIZE * 100).to_string();
     const auto value = random.Generate(PAGE_SIZE * 100).to_string();
-    ASSERT_HAS_VALUE(payloads->emplace(root, key, value, 0));
+    ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, key, value, 0));
     const auto cell = read_cell(root, 0);
-    ASSERT_EQ(payloads->collect_key(cell).value(), key);
-    ASSERT_EQ(payloads->collect_value(cell).value(), value);
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+    ASSERT_EQ(payloads->collect_value(collect_scratch, cell).value(), value);
     root.TEST_validate();
     release_node(std::move(root));
 }
@@ -329,7 +332,7 @@ TEST_F(ComponentTests, CollectsMultiple)
     for (Size i {}; i < 3; ++i) {
         const auto key = random.Generate(PAGE_SIZE * 10);
         const auto value = random.Generate(PAGE_SIZE * 10);
-        ASSERT_HAS_VALUE(payloads->emplace(root, key, value, i));
+        ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, key, value, i));
         data.emplace_back(key.to_string());
         data.emplace_back(value.to_string());
     }
@@ -337,8 +340,8 @@ TEST_F(ComponentTests, CollectsMultiple)
         const auto &key = data[2 * i];
         const auto &value = data[2*i + 1];
         const auto cell = read_cell(root, i);
-        ASSERT_EQ(payloads->collect_key(cell).value(), key);
-        ASSERT_EQ(payloads->collect_value(cell).value(), value);
+        ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+        ASSERT_EQ(payloads->collect_value(collect_scratch, cell).value(), value);
     }
     root.TEST_validate();
     release_node(std::move(root));
@@ -349,17 +352,77 @@ TEST_F(ComponentTests, PromotesCell)
     auto root = acquire_node(Id::root(), true);
     const auto key = random.Generate(PAGE_SIZE * 100).to_string();
     const auto value = random.Generate(PAGE_SIZE * 100).to_string();
-    ASSERT_HAS_VALUE(payloads->emplace(root, key, value, 0));
+    auto *scratch = collect_scratch.data() + 10;
+    ASSERT_HAS_VALUE(payloads->emplace(scratch, root, key, value, 0));
     auto cell = read_cell(root, 0);
-    ASSERT_HAS_VALUE(payloads->promote(cell, Id::root()));
+    ASSERT_HAS_VALUE(payloads->promote(scratch, cell, Id::root()));
     // Needs to consult overflow pages for the key.
-    ASSERT_EQ(payloads->collect_key(cell).value(), key);
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
     root.TEST_validate();
     release_node(std::move(root));
 }
 
+static auto run_promotion_test(ComponentTests &test, Size key_size, Size value_size)
+{
+    auto root = test.acquire_node(Id::root(), true);
+    const auto key = test.random.Generate(key_size).to_string();
+    const auto value = test.random.Generate(value_size).to_string();
+    auto *scratch = test.collect_scratch.data() + 10;
+    ASSERT_HAS_VALUE(test.payloads->emplace(scratch, root, key, value, 0));
+    auto external_cell = read_cell(root, 0);
+    ASSERT_EQ(external_cell.size, varint_length(key.size()) + varint_length(value.size()) + external_cell.local_size + external_cell.has_remote*8);
+    auto internal_cell = external_cell;
+    ASSERT_HAS_VALUE(test.payloads->promote(scratch, internal_cell, Id::root()));
+    ASSERT_EQ(internal_cell.size, sizeof(Id) + varint_length(key.size()) + internal_cell.local_size + internal_cell.has_remote*8);
+    test.release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CellIsPromoted)
+{
+    run_promotion_test(*this, 10, 10);
+}
+
+TEST_F(ComponentTests, PromotionCopiesOverflowKey)
+{
+    run_promotion_test(*this, PAGE_SIZE, 10);
+    const auto old_head = pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(old_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(old_head.back_ptr, Id::root());
+
+    // Copy of the overflow key.
+    const auto new_head = pointers->read_entry(Id {4}).value();
+    ASSERT_EQ(new_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(new_head.back_ptr, Id::root());
+}
+
+TEST_F(ComponentTests, PromotionIgnoresOverflowValue)
+{
+    run_promotion_test(*this, 10, PAGE_SIZE);
+    const auto old_head = pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(old_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(old_head.back_ptr, Id::root());
+
+    // No overflow key, so the chain didn't need to be copied.
+    const auto nothing = pointers->read_entry(Id {4}).value();
+    ASSERT_EQ(nothing.back_ptr, Id::null());
+}
+
+TEST_F(ComponentTests, PromotionCopiesOverflowKeyButIgnoresOverflowValue)
+{
+    run_promotion_test(*this, PAGE_SIZE, PAGE_SIZE);
+    const auto old_head = pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(old_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(old_head.back_ptr, Id::root());
+
+    // 1 overflow page needed for the key, and 1 for the value.
+    const auto new_head = pointers->read_entry(Id {5}).value();
+    ASSERT_EQ(new_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(new_head.back_ptr, Id::root());
+}
+
 struct BPlusTreeTestParameters {
     Size page_size {};
+    Size extra {};
 };
 
 class BPlusTreeTests : public ParameterizedInMemoryTest<BPlusTreeTestParameters> {
@@ -367,6 +430,7 @@ public:
     BPlusTreeTests()
         : param {GetParam()},
           scratch(param.page_size, '\x00'),
+          collect_scratch(param.page_size, '\x00'),
           log_scratch(wal_scratch_size(param.page_size), '\x00')
     {}
 
@@ -439,6 +503,7 @@ public:
 
     BPlusTreeTestParameters param;
     std::string log_scratch;
+    std::string collect_scratch;
     Status status;
     bool in_xact {true};
     Lsn commit_lsn;
@@ -521,7 +586,7 @@ TEST_P(BPlusTreeTests, ErasesOverflowChains)
     ASSERT_HAS_VALUE(tree->erase("c"));
 }
 
-TEST_P(BPlusTreeTests, ReadsOverflowChains)
+TEST_P(BPlusTreeTests, ReadsValuesFromOverflowChains)
 {
     const auto keys = "abc";
     const auto vals = "123";
@@ -537,7 +602,7 @@ TEST_P(BPlusTreeTests, ReadsOverflowChains)
         auto r = tree->search(std::string(1, keys[i])).value();
         const auto cell = read_cell(r.node, r.index);
         const auto pid = read_overflow_id(cell);
-        const auto value = tree->collect_value(read_cell(r.node, r.index));
+        const auto value = tree->collect_value(collect_scratch, cell).value();
         pager->release(std::move(r.node.page));
         ASSERT_EQ(value, values[i]);
     }
@@ -547,8 +612,8 @@ TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnRightmostPosition)
 {
     for (Size i {}; is_root_external(); ++i) {
         ASSERT_TRUE(*tree->insert(Tools::integral_key(i), make_value('v')));
-        validate();
     }
+    validate();
 }
 
 TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnLeftmostPosition)
@@ -692,158 +757,27 @@ TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
     validate();
 }
 
-TEST_P(BPlusTreeTests, SplitLeftLongKeys)
+TEST_P(BPlusTreeTests, SplitWithLongKeys)
 {
     for (unsigned i {}; i < 1'000; ++i) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(i), "v"));
-    }
-    validate();
-}
-
-TEST_P(BPlusTreeTests, SplitLeftShortAndLongKeys)
-{
-    // Populate the internal nodes with small keys.
-    for (unsigned i {}; i < 5'000; ++i) {
-        char key[3] {};
-        put_u16(key, i);
-        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
-    }
-    // Overflow with a bunch of large keys.
-    for (unsigned i {}; i < 1'000; ++i) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(i), "v"));
-    }
-    validate();
-}
-
-TEST_P(BPlusTreeTests, SplitRightLongKeys)
-{
-    for (unsigned i {}; i < 1'000; ++i) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(999 - i), "v"));
-    }
-    validate();
-}
-
-TEST_P(BPlusTreeTests, SplitRightShortAndLongKeys)
-{
-    for (unsigned i {}; i < 5'000; ++i) {
-        char key[3] {};
-        put_u16(key, 4'999 - i);
-        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
-    }
-    for (unsigned i {}; i < 1'000; ++i) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(999 - i), "v"));
-    }
-    validate();
-}
-
-TEST_P(BPlusTreeTests, SplitMiddleLongKeys)
-{
-    for (Size i {}, j {999}; i < j; ++i, --j) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(i), "v"));
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(j), "v"));
+        const auto key = random.Generate(GetParam().page_size * 2);
+        ASSERT_HAS_VALUE(tree->insert(key, "v"));
         if (i % 100 == 99) {
             validate();
         }
     }
 }
 
-TEST_P(BPlusTreeTests, SplitMiddleShortAndLongKeys)
+TEST_P(BPlusTreeTests, SplitWithShortAndLongKeys)
 {
-    for (unsigned i {}; i < 5'000; ++i) {
+    for (unsigned i {}; i < 1'000; ++i) {
         char key[3] {};
-        put_u16(key, 4'999 - i);
+        put_u16(key, 999 - i);
         ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
-    for (Size i {}, j {999}; i < j; ++i, --j) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(i), "v"));
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(j), "v"));
-        if (i % 100 == 99) {
-            validate();
-        }
-    }
-}
-
-static auto random_key(BPlusTreeTests &test)
-{
-    const auto key_size = test.random.Next<Size>(1, 10);
-    return test.random.Generate(key_size);
-}
-
-static auto random_value(BPlusTreeTests &test)
-{
-    const auto val_size = test.random.Next<Size>(test.param.page_size / 2);
-    return test.random.Generate(val_size);
-}
-
-static auto random_write(BPlusTreeTests &test)
-{
-    const auto key = random_key(test);
-    const auto val = random_value(test);
-    (void)test.tree->insert(key, val);
-}
-
-static auto find_random_key(BPlusTreeTests &test)
-{
-    auto slot = test.tree->search(random_key(test));
-    EXPECT_TRUE(slot.has_value());
-
-    auto [node, index, exact] = std::move(*slot);
-    EXPECT_LE(index, node.header.cell_count);
-    index -= index == node.header.cell_count;
-
-    auto key = test.tree->collect_key(read_cell(node, index)).value();
-    test.pager->release(std::move(node).take());
-    return key;
-}
-
-TEST_P(BPlusTreeTests, SanityCheck_Insert)
-{
-    for (Size i {}; i < 1'000; ++i) {
-        random_write(*this);
-        if (i % 100 == 99) {
-            validate();
-        }
-    }
-}
-
-TEST_P(BPlusTreeTests, SanityCheck_Search)
-{
-    std::vector<Size> integers(1'000);
-    std::iota(begin(integers), end(integers), 0);
-    for (auto i: integers) {
-        const auto key = Tools::integral_key<6>(i);
-        ASSERT_TRUE(tree->insert(key, key).value());
-    }
-    std::default_random_engine rng {42};
-    std::shuffle(begin(integers), end(integers), rng);
-
-    for (auto i: integers) {
-        const auto key = Tools::integral_key<6>(i);
-        auto slot = tree->search(key);
-        ASSERT_HAS_VALUE(slot);
-        ASSERT_TRUE(slot->exact);
-        const auto cell = read_cell(slot->node, slot->index);
-        const Slice payload {cell.key, cell.local_size};
-        ASSERT_EQ(payload, key + key);
-        release_node(std::move(slot->node));
-    }
-}
-
-TEST_P(BPlusTreeTests, SanityCheck_Erase)
-{
-    Size counter {};
-    for (Size i {}; i < 1'000; ++i) {
-        if (counter < 500) {
-            while (counter < 1'000) {
-                random_write(*this);
-                counter++;
-            }
-        }
-
-        const auto key = find_random_key(*this);
-        ASSERT_HAS_VALUE(tree->erase(key));
-        counter--;
-
+    for (unsigned i {}; i < 1'000; ++i) {
+        const auto key = random.Generate(GetParam().page_size);
+        ASSERT_HAS_VALUE(tree->insert(key, "v"));
         if (i % 100 == 99) {
             validate();
         }
@@ -858,6 +792,82 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+
+class BPlusTreeSanityChecks: public BPlusTreeTests {
+public:
+    auto random_chunk(bool overflow, bool nonzero = true)
+    {
+        const auto val_size = random.Next<Size>(nonzero, param.page_size*overflow + 12);
+        return random.Generate(val_size);
+    }
+
+    auto random_write() -> Record
+    {
+        const auto key = random_chunk(overflow_keys);
+        const auto val = random_chunk(overflow_values, false);
+        EXPECT_HAS_VALUE(tree->insert(key, val));
+        return {key.to_string(), val.to_string()};
+    }
+
+    bool overflow_keys = GetParam().extra & 0b10;
+    bool overflow_values = GetParam().extra & 0b01;
+};
+
+TEST_P(BPlusTreeSanityChecks, Insert)
+{
+    for (Size i {}; i < 1'000; ++i) {
+        random_write();
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeSanityChecks, Search)
+{
+    std::unordered_map<std::string, std::string> records;
+    for (Size i {}; i < 1'000; ++i) {
+        const auto [k, v] = random_write();
+        records[k] = v;
+    }
+    validate();
+
+    for (const auto &[key, value]: records) {
+        auto slot = tree->search(key);
+        ASSERT_HAS_VALUE(slot);
+        ASSERT_TRUE(slot->exact);
+        const auto cell = read_cell(slot->node, slot->index);
+        ASSERT_EQ(key, tree->collect_key(collect_scratch, cell).value());
+        ASSERT_EQ(value, tree->collect_value(collect_scratch, cell).value());
+        release_node(std::move(slot->node));
+    }
+}
+
+TEST_P(BPlusTreeSanityChecks, Erase)
+{
+    std::unordered_map<std::string, std::string> records;
+    for (Size i {}; i < 1'000; ++i) {
+        const auto [k, v] = random_write();
+        records[k] = v;
+    }
+
+    Size i {};
+    for (const auto &[key, value]: records) {
+        ASSERT_HAS_VALUE(tree->erase(key));
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BPlusTreeSanityChecks,
+    BPlusTreeSanityChecks,
+    ::testing::Values(
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b00},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b01},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b10},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b11}));
 
 class CursorTests: public BPlusTreeTests {
 protected:
@@ -1607,7 +1617,7 @@ TEST_F(VacuumTests, VacuumsNodes)
     ASSERT_EQ(node_4.page.id().value, 4);
 
     std::vector<std::string> values;
-    for (Size i {}; i < 4; ++i) {
+    for (Size i {}; i < 5; ++i) {
         const auto key = Tools::integral_key(i);
         const auto value = random.Generate(meta(true).max_local - key.size());
         ASSERT_HAS_VALUE(tree->insert(key, value));
