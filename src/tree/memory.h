@@ -106,7 +106,7 @@ public:
     [[nodiscard]] auto write_chain(Id pid, Slice first, Slice second = {}) -> tl::expected<Id, Status>;
     [[nodiscard]] auto copy_chain(Id pid, Id overflow_id, Size size) -> tl::expected<Id, Status>;
     [[nodiscard]] auto read_chain(Id pid, Span out) -> tl::expected<void, Status>;
-    [[nodiscard]] auto erase_chain(Id pid, Size size) -> tl::expected<void, Status>;
+    [[nodiscard]] auto erase_chain(Id pid) -> tl::expected<void, Status>;
 };
 
 [[nodiscard]] auto read_next_id(const Page &page) -> Id;

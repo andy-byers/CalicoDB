@@ -152,11 +152,10 @@ auto OverflowList::copy_chain(Id pid, Id overflow_id, Size size) -> tl::expected
     return write_chain(pid, buffer);
 }
 
-auto OverflowList::erase_chain(Id pid, Size size) -> tl::expected<void, Status>
+auto OverflowList::erase_chain(Id pid) -> tl::expected<void, Status>
 {
-    while (size) {
+    while (!pid.is_null()) {
         Calico_New_R(page, m_pager->acquire(pid));
-        size -= get_readable_content(page, size).size();
         pid = read_next_id(page);
         m_pager->upgrade(page);
         Calico_Try_R(m_freelist->push(std::move(page)));

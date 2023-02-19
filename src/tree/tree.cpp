@@ -225,6 +225,17 @@ public:
     }
 
     [[nodiscard]]
+    static auto remove_cell(BPlusTree &tree, Node &node, Size index) -> tl::expected<void, Status>
+    {
+        const auto cell = read_cell(node, index);
+        if (cell.has_remote) {
+            Calico_Try_R(tree.m_overflow.erase_chain(read_overflow_id(cell)));
+        }
+        erase_cell(node, index, cell.size);
+        return {};
+    }
+
+    [[nodiscard]]
     static auto fix_links(BPlusTree &tree, Node &node) -> tl::expected<void, Status>
     {
         for (Size index {}; index < node.header.cell_count; ++index) {
@@ -403,6 +414,9 @@ public:
 
         auto separator = read_cell(left, left.header.cell_count - 1);
         detach_cell(separator, tree.scratch(1));
+        // TODO: Everywhere that we fail to erase overflow chains from keys, vacuum will not be able to continue. Use remove_cell() instead of erase_cell() to fix the chains.
+        //       Note that we only need to do this when the key needs to be discarded. If we are transferring a cell from one node to another, we can leave the chain and
+        //       fix the head back pointer when we call insert_cell().
         erase_cell(left, left.header.cell_count - 1, separator.size);
         left.header.next_id = read_child_id(separator);
         return separator;
@@ -623,10 +637,9 @@ public:
             }
             Calico_Try_R(rotate_right(tree, parent, left, node, index - 1));
             tree.release(std::move(left));
-        } else {
-            // B+-tree rules guarantee a right sibling in this case.
-            CALICO_EXPECT_LT(index, parent.header.cell_count);
+        }
 
+        if (index < parent.header.cell_count) {
             Calico_New_R(right, tree.acquire(read_child_id(parent, index + 1), true));
             if (right.header.cell_count == 1) {
                 Calico_Try_R(merge_left(tree, node, std::move(right), parent, index));
@@ -882,7 +895,7 @@ auto PayloadManager::collect_key(std::string &scratch, const Cell &cell) -> tl::
         scratch.resize(cell.key_size);
     }
     Span span {scratch};
-    mem_copy(span, cell.key, cell.local_size);
+    mem_copy(span, {cell.key, cell.local_size});
 
     Calico_Try_R(m_overflow->read_chain(read_overflow_id(cell), span.range(cell.local_size)));
     return span;
@@ -1026,14 +1039,7 @@ auto BPlusTree::insert(const Slice &key, const Slice &value) -> tl::expected<boo
     m_pager->upgrade(node.page);
 
     if (exact) {
-        const auto cell = read_cell(node, index);
-        if (cell.has_remote) {
-            Size value_size;
-            decode_varint(cell.ptr, value_size);
-            const auto overflow_id = read_overflow_id(cell);
-            Calico_Try_R(m_overflow.erase_chain(overflow_id, cell.key_size + value_size - cell.local_size));
-        }
-        erase_cell(node, index, cell.size);
+        Calico_Try_R(BPlusTreeInternal::remove_cell(*this, node, index));
     }
 
     Calico_Try_R(m_payloads.emplace(scratch(0), node, key, value, index));
@@ -1049,13 +1055,9 @@ auto BPlusTree::erase(const Slice &key) -> tl::expected<void, Status>
     if (exact) {
         const auto cell = read_cell(node, index);
         Calico_New_R(anchor, collect_key(m_anchor, cell));
-        Size value_size;
-        decode_varint(cell.ptr, value_size);
-        if (const auto remote_size = cell.key_size + value_size - cell.local_size) {
-            Calico_Try_R(m_overflow.erase_chain(read_overflow_id(cell), remote_size));
-        }
+
         m_pager->upgrade(node.page);
-        erase_cell(node, index);
+        Calico_Try_R(BPlusTreeInternal::remove_cell(*this, node, index));
         Calico_Try_R(BPlusTreeInternal::resolve_underflow(*this, std::move(node), anchor));
         return {};
     }
@@ -1356,9 +1358,9 @@ public:
             validate_possible_overflows(node);
             auto right = m_tree->acquire(node.header.next_id, false);
             CALICO_EXPECT_TRUE(right.has_value());
-            std::string buffer;
-            const auto lhs_key = m_tree->collect_key(buffer, read_cell(node, 0)).value();
-            const auto rhs_key = m_tree->collect_key(buffer, read_cell(*right, 0)).value();
+            std::string lhs_buffer, rhs_buffer;
+            const auto lhs_key = m_tree->collect_key(lhs_buffer, read_cell(node, 0)).value();
+            const auto rhs_key = m_tree->collect_key(rhs_buffer, read_cell(*right, 0)).value();
             CALICO_EXPECT_LT(lhs_key, rhs_key);
             CALICO_EXPECT_EQ(right->header.prev_id, node.page.id());
             m_tree->release(std::move(node));
@@ -1465,16 +1467,21 @@ auto BPlusTree::TEST_to_string() -> std::string
 
 auto BPlusTree::TEST_check_order() -> void
 {
-    // NOTE: All keys must fit in main memory (separators included). Doesn't read values.
-    std::vector<std::string> keys;
     BPlusTreeValidator validator {*this};
+    std::string last_key;
+    auto is_first = true;
 
-    validator.traverse_inorder([&keys, this](auto &node, auto index) -> void {
+    validator.traverse_inorder([&](auto &node, auto index) -> void {
         std::string buffer;
-        CALICO_EXPECT_TRUE(collect_key(buffer, read_cell(node, index)).has_value());
-        keys.emplace_back(buffer);
+        const auto key = collect_key(buffer, read_cell(node, index)).value();
+        if (is_first) {
+            is_first = false;
+        } else {
+            CALICO_EXPECT_FALSE(key.is_empty());
+            CALICO_EXPECT_LE(last_key, key);
+        }
+        last_key = key.to_string();
     });
-    CALICO_EXPECT_TRUE(std::is_sorted(cbegin(keys), cend(keys)));
 }
 
 auto BPlusTree::TEST_check_links() -> void

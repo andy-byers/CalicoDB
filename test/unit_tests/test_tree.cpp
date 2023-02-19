@@ -674,7 +674,10 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnRightmostPosition)
     }
 
     while (i--) {
+        std::cerr<<tree->TEST_to_string()<<"\n\n";
         ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(i)));
+        std::cerr<<tree->TEST_to_string()<<"\n\n";
+        Tools::print_references(*pager,*tree->TEST_components().pointers);
         validate();
     }
 }
@@ -797,8 +800,7 @@ class BPlusTreeSanityChecks: public BPlusTreeTests {
 public:
     auto random_chunk(bool overflow, bool nonzero = true)
     {
-        const auto val_size = random.Next<Size>(nonzero, param.page_size*overflow + 12);
-        return random.Generate(val_size);
+        return random.Generate(random.Next<Size>(nonzero, param.page_size*overflow + 12));
     }
 
     auto random_write() -> Record
@@ -817,8 +819,8 @@ TEST_P(BPlusTreeSanityChecks, Insert)
 {
     for (Size i {}; i < 1'000; ++i) {
         random_write();
+        validate();
         if (i % 100 == 99) {
-            validate();
         }
     }
 }
@@ -865,8 +867,12 @@ INSTANTIATE_TEST_SUITE_P(
     BPlusTreeSanityChecks,
     ::testing::Values(
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b00},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b01},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b01},
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b10},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b11},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b00},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b01},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b10},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b11}));
 
 class CursorTests: public BPlusTreeTests {
