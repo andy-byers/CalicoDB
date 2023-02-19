@@ -85,8 +85,6 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     if (!is_new) {
         sanitized.page_size = state.page_size;
     }
-
-    max_key_length = compute_max_local(sanitized.page_size);
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
     {
@@ -265,17 +263,6 @@ auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bo
     return false;
 }
 
-auto DatabaseImpl::check_key(const Slice &key) const -> Status
-{
-    if (key.is_empty()) {
-        return Status::invalid_argument("key is empty");
-    }
-    if (key.size() > max_key_length) {
-        return Status::invalid_argument("key is too long");
-    }
-    return Status::ok();
-}
-
 auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 {
     Calico_Try_S(status());
@@ -287,10 +274,12 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
             return Status::not_found("not found");
         }
 
-        if (auto result = tree->collect(std::move(node), index)) {
+        if (auto result = tree->collect_value(read_cell(node, index))) {
             value = std::move(*result);
+            pager->release(std::move(node.page));
             return Status::ok();
         } else {
+            pager->release(std::move(node.page));
             return result.error();
         }
     } else {
@@ -310,13 +299,6 @@ auto DatabaseImpl::new_cursor() const -> Cursor *
 auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 {
     Calico_Try_S(status());
-    Calico_Try_S(check_key(key));
-
-    // Value is greater than 4 GiB in length.
-    if (value.size() > std::numeric_limits<ValueSize>::max()) {
-        return Status::invalid_argument("cannot insert record: value is too long");
-    }
-
     bytes_written += key.size() + value.size();
     if (const auto inserted = tree->insert(key, value)) {
         record_count += *inserted;
@@ -331,7 +313,6 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 auto DatabaseImpl::erase(const Slice &key) -> Status
 {
     Calico_Try_S(status());
-    Calico_Try_S(check_key(key));
     if (const auto erased = tree->erase(key)) {
         record_count--;
         m_txn_size++;

@@ -52,10 +52,8 @@ public:
 
     Size bytes_written {};
     Size record_count {};
-    Size max_key_length {};
 
 private:
-    [[nodiscard]] auto check_key(const Slice &key) const -> Status;
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
     [[nodiscard]] auto save_state() const -> Status;

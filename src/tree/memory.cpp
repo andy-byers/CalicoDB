@@ -79,13 +79,17 @@ auto OverflowList::read_chain(Id pid, Span out) -> tl::expected<void, Status>
     return {};
 }
 
-auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Status>
+auto OverflowList::write_chain(Id pid, Slice first, Slice second) -> tl::expected<Id, Status>
 {
-    CALICO_EXPECT_FALSE(overflow.is_empty());
     std::optional<Page> prev;
     auto head = Id::null();
 
-    while (!overflow.is_empty()) {
+    if (first.is_empty()) {
+        first = second;
+        second.clear();
+    }
+
+    while (!first.is_empty()) {
         auto r = m_freelist->pop()
             .or_else([this](const Status &error) -> tl::expected<Page, Status> {
                 if (error.is_logic_error()) {
@@ -100,10 +104,22 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
             });
         Calico_New_R(page, std::move(r));
 
-        auto content = get_writable_content(page, overflow.size());
-        mem_copy(content, overflow, content.size());
-        overflow.advance(content.size());
+        auto content = get_writable_content(page, first.size() + second.size());
+        auto limit = std::min(first.size(), content.size());
+        mem_copy(content, first, limit);
+        first.advance(limit);
 
+        if (first.is_empty()) {
+            first = second;
+            second.clear();
+
+            if (!first.is_empty()) {
+                content.advance(limit);
+                limit = std::min(first.size(), content.size());
+                mem_copy(content, first, limit);
+                first.advance(limit);
+            }
+        }
         if (prev) {
             write_next_id(*prev, page.id());
             m_pager->release(std::move(*prev));
@@ -125,6 +141,15 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
         m_pager->release(std::move(*prev));
     }
     return head;
+}
+
+auto OverflowList::copy_chain(Id pid, Id overflow_id, Size size) -> tl::expected<Id, Status>
+{
+    if (m_scratch.size() != size) {
+        m_scratch.resize(size);
+    }
+    Calico_Try_R(read_chain(overflow_id, m_scratch));
+    return write_chain(pid, m_scratch);
 }
 
 auto OverflowList::erase_chain(Id pid, Size size) -> tl::expected<void, Status>

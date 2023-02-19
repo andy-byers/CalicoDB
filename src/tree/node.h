@@ -10,9 +10,14 @@ namespace Calico {
 
 struct Node;
 
+/*
+ * Simplified version of SQLite's local payload size computations. Doesn't attempt to exactly fill the
+ * last overflow page.
+ */
+
 static constexpr Size MAX_CELL_HEADER_SIZE =
-    sizeof(std::uint32_t) + // Value size  (4 B)
-    sizeof(std::uint16_t) + // Key size    (2 B)
+    sizeof(std::uint64_t) + // Value size  (varint)
+    sizeof(std::uint64_t) + // Key size    (varint)
     sizeof(Id);             // Overflow ID (8 B)
 
 inline constexpr auto compute_min_local(Size page_size) -> Size
@@ -31,36 +36,43 @@ inline constexpr auto compute_max_local(Size page_size) -> Size
            MAX_CELL_HEADER_SIZE - sizeof(PageSize);
 }
 
+inline constexpr auto compute_local_size(Size payload_size, Size min_local, Size max_local) -> Size
+{
+    if (payload_size <= max_local) {
+        return payload_size;
+    }
+    return min_local;
+}
+
 /* Internal Cell Format:
- *     Offset  Size  Name
- *     0       8     child_id
- *     8       2     key_size (n)
- *     10      n     key
+ *     Size    Name
+ *     8       child_id
+ *     varint  key_size
+ *     n       key
+ *     8       [overflow_id]
  *
  * External Cell Format:
- *     Offset  Size  Name
- *     0       4     value_size (m)
- *     4       2     key_size (n)
- *     6       n     key
- *     6+n     m     value
- *     6+n+m   8     [overflow_id]
+ *     Size    Name
+ *     varint  value_size
+ *     varint  key_size
+ *     n       key
+ *     m       value
+ *     8       [overflow_id]
  */
 struct Cell {
     Byte *ptr {};
     Byte *key {};
-    Size total_ps {};
-    Size local_ps {};
+    Size local_size {};
     Size key_size {};
     Size size {};
     bool is_free {};
+    bool has_remote {};
 };
 
 struct NodeMeta {
-    using ReadKey = Slice (*)(const Byte *);
     using CellSize = Size (*)(const NodeMeta &, const Byte *);
     using ParseCell = Cell (*)(const NodeMeta &, Byte *);
 
-    ReadKey read_key {};
     CellSize cell_size {};
     ParseCell parse_cell {};
     Size min_local {};
@@ -71,32 +83,10 @@ auto internal_cell_size(const NodeMeta &meta, const Byte *data) -> Size;
 auto external_cell_size(const NodeMeta &meta, const Byte *data) -> Size;
 auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell;
 auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell;
-auto read_internal_key(const Byte *data) -> Slice;
-auto read_external_key(const Byte *data) -> Slice;
-
-using ValueSize = std::uint32_t;
 
 struct Node {
     explicit Node(Page inner, Byte *defragmentation_space);
     [[nodiscard]] auto take() && -> Page;
-
-    /*
-     * Construct for searching for a key within a node.
-     */
-    class Iterator {
-        Node *m_node {};
-        unsigned m_index {};
-
-    public:
-        explicit Iterator(Node &node);
-        [[nodiscard]] auto is_valid() const -> bool;
-        [[nodiscard]] auto index() const -> Size;
-        [[nodiscard]] auto key() const -> Slice;
-        [[nodiscard]] auto data() -> Byte *;
-        [[nodiscard]] auto data() const -> const Byte *;
-        auto seek(const Slice &key) -> bool;
-        auto next() -> void;
-    };
 
     Node(Node &&rhs) noexcept = default;
     auto operator=(Node &&) noexcept -> Node & = default;
@@ -106,7 +96,7 @@ struct Node {
     auto insert_slot(Size index, Size pointer) -> void;
     auto remove_slot(Size index) -> void;
 
-    auto TEST_validate() const -> void;
+    auto TEST_validate() -> void;
 
     Page page;
     Byte *scratch {};
@@ -152,31 +142,16 @@ auto manual_defragment(Node &node) -> void;
  * up to the caller to determine if one is needed, allocate it, and provide its value here.
  */
 [[nodiscard]] auto allocate_block(Node &node, std::uint16_t index, std::uint16_t size) -> Size;
-[[nodiscard]] auto determine_cell_size(Size key_size, Size &value_size, const NodeMeta &meta) -> Size;
-auto emplace_cell(Byte *out, Size value_size, const Slice &key, const Slice &local_value, Id overflow_id = Id::null()) -> void;
-
-/*
- * If an external cell that requires promotion is written into scratch memory, it should be written at an offset
- * of this many bytes from the start. This is to account for the discrepancy between cell header sizes.
- */
-static constexpr Size EXTERNAL_SHIFT {4};
-
-/*
- * Prepare a cell embedded in an external node for transfer into an internal node ("posting" a separator key).
- */
-auto promote_cell(Cell &cell) -> void;
+auto emplace_cell(Byte *out, Size key_size, Size value_size, const Slice &local_key, const Slice &local_value, Id overflow_id = Id::null()) -> Byte *;
 
 /*
  * Write the cell into backing memory and update its pointers.
  */
 auto detach_cell(Cell &cell, Byte *backing) -> void;
 
-[[nodiscard]] auto read_key_at(const Node &node, Size offset) -> Slice;
 [[nodiscard]] auto read_child_id_at(const Node &node, Size offset) -> Id;
 auto write_child_id_at(Node &node, Size offset, Id child_id) -> void;
 
-[[nodiscard]] auto read_key(const Node &node, Size index) -> Slice;
-[[nodiscard]] auto read_key(const Cell &cell) -> Slice;
 [[nodiscard]] auto read_child_id(const Node &node, Size index) -> Id;
 [[nodiscard]] auto read_child_id(const Cell &cell) -> Id;
 [[nodiscard]] auto read_overflow_id(const Cell &cell) -> Id;

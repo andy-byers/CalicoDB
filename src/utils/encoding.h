@@ -96,6 +96,44 @@ inline auto put_u64(Span out, std::uint64_t value) noexcept -> void
     put_u64(out.data(), value);
 }
 
+[[nodiscard]]
+inline auto varint_length(std::uint64_t value) -> Size
+{
+    Size length {1};
+    while (value >= 0x80) {
+        value >>= 7;
+        length++;
+    }
+    return length;
+}
+
+inline auto encode_varint(Byte *out, std::uint64_t value) -> Byte *
+{
+    auto *ptr = reinterpret_cast<std::uint8_t *>(out);
+    while (value >= 0x80) {
+        *ptr++ = std::uint8_t(value) | 0x80;
+        value >>= 7;
+    }
+    *ptr++ = static_cast<std::uint8_t>(value);
+    return reinterpret_cast<Byte *>(ptr);
+}
+
+inline auto decode_varint(const Byte *in, std::uint64_t &value) -> const Byte *
+{
+    value = 0;
+    for (std::uint32_t shift {}; shift < 64; shift += 7) {
+        std::uint64_t c = *reinterpret_cast<const std::uint8_t *>(in);
+        in++;
+        if (c & 0x80) {
+            value |= (c & 0x7F) << shift;
+        } else {
+            value |= c << shift;
+            return in;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace Calico
 
 #endif // CALICO_UTILS_ENCODING_H

@@ -12,7 +12,6 @@ The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree 
   + [Closing a database](#closing-a-database)
   + [Transactions](#transactions)
   + [Destroying a database](#destroying-a-database)
-  + [Key length restrictions](#key-length-restrictions)
 + [Architecture](#architecture)
 + [Acknowledgements](#acknowledgements)
 
@@ -239,22 +238,6 @@ if (const auto s = Calico::Database::destroy("/tmp/cats", options); s.is_ok()) {
     // A system-level error has occurred.
 }
 ```
-
-### Key length restrictions
-Calico DB restricts the maximum key length based on the page size.
-The page size must be a power-of-two, so here are the possible maximum key lengths:
-
-| Page size (B) | Maximum key length (B) |
-|--------------:|-----------------------:|
-|           512 |                    103 |
-|         1,024 |                    231 |
-|         2,048 |                    487 |
-|         4,096 |                    999 |
-|         8,192 |                  2,023 |
-|        16,384 |                  4,071 |
-|        32,768 |                  8,167 |
-
-The database instance will report an "invalid argument" error if the key is too long (or if it has zero length).
 
 ## Architecture
 Calico DB uses a B<sup>+</sup>-tree backend and a write-ahead log (WAL).

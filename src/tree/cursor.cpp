@@ -1,6 +1,7 @@
 #include "cursor_internal.h"
 #include "node.h"
 #include "tree.h"
+#include "pager/pager.h"
 
 namespace Calico {
 
@@ -28,11 +29,16 @@ auto CursorImpl::key() const -> Slice
     }
     if (auto node = CursorInternal::action_acquire(*this, m_loc.pid)) {
         auto cell = read_cell(*node, m_loc.index);
-        m_key = read_key(cell).to_string();
-        if (m_value.empty() && cell.local_ps == cell.total_ps) {
+        auto r = m_tree->collect_key(cell);
+        if (!r.has_value()) {
+            m_status = r.error();
+            return {};
+        }
+        m_key = *r;
+        if (m_value.empty() && !cell.has_remote) {
             m_value = Slice {
                 cell.key + cell.key_size,
-                cell.total_ps - cell.key_size,
+                get_u32(cell.ptr),
             }.to_string();
         }
         CursorInternal::action_release(*this, std::move(*node));
@@ -89,7 +95,9 @@ auto CursorImpl::previous() -> void
 
 auto CursorInternal::action_collect(const CursorImpl &cursor, Node node, Size index) -> tl::expected<std::string, Status>
 {
-    return cursor.m_tree->collect(std::move(node), index);
+    Calico_New_R(value, cursor.m_tree->collect_value(read_cell(node, index)));
+    cursor.m_tree->m_pager->release(std::move(node.page));
+    return value;
 }
 
 auto CursorInternal::action_acquire(const CursorImpl &cursor, Id pid) -> tl::expected<Node, Status>
