@@ -20,27 +20,25 @@ struct SearchResult {
 //       This isn't necessary: we could iterate through, page by page, and compare bytes as we encounter
 //       them. It's just a bit more complicated.
 class NodeIterator {
-    mutable Status *m_status {};
     OverflowList *m_overflow {};
     std::string *m_lhs_key {};
     std::string *m_rhs_key {};
     Node *m_node {};
     Size m_index {};
 
-    [[nodiscard]] auto fetch_key(std::string &buffer, const Cell &cell) const -> Slice;
+    [[nodiscard]] auto fetch_key(std::string &buffer, const Cell &cell) const -> tl::expected<Slice, Status>;
 
 public:
     struct Parameters {
         OverflowList *overflow {};
         std::string *lhs_key {};
         std::string *rhs_key {};
-        Status *status {};
     };
     explicit NodeIterator(Node &node, const Parameters &param);
     [[nodiscard]] auto is_valid() const -> bool;
     [[nodiscard]] auto index() const -> Size;
-    auto seek(const Slice &key) -> bool;
-    auto seek(const Cell &cell) -> bool;
+    [[nodiscard]] auto seek(const Slice &key) -> tl::expected<bool, Status>;
+    [[nodiscard]] auto seek(const Cell &cell) -> tl::expected<bool, Status>;
 };
 
 class PayloadManager {
@@ -86,7 +84,6 @@ class BPlusTree {
     Pager *m_pager {};
 
     [[nodiscard]] auto vacuum_step(Page &head, Id last_id) -> tl::expected<void, Status>;
-    [[nodiscard]] auto write_external_cell(Node &node, Size index, const Cell &cell) -> tl::expected<void, Status>;
     [[nodiscard]] auto make_existing_node(Page page) -> Node;
     [[nodiscard]] auto make_fresh_node(Page page, bool is_external) -> Node;
     [[nodiscard]] auto scratch(Size index) -> Byte *;

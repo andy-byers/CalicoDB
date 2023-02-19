@@ -692,7 +692,15 @@ TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
     validate();
 }
 
-TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnRight)
+TEST_P(BPlusTreeTests, SplitLeftLongKeys)
+{
+    for (unsigned i {}; i < 1'000; ++i) {
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(i), "v"));
+    }
+    validate();
+}
+
+TEST_P(BPlusTreeTests, SplitLeftShortAndLongKeys)
 {
     // Populate the internal nodes with small keys.
     for (unsigned i {}; i < 5'000; ++i) {
@@ -702,12 +710,20 @@ TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnRight)
     }
     // Overflow with a bunch of large keys.
     for (unsigned i {}; i < 1'000; ++i) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(i), "v"));
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(i), "v"));
     }
     validate();
 }
 
-TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnLeft)
+TEST_P(BPlusTreeTests, SplitRightLongKeys)
+{
+    for (unsigned i {}; i < 1'000; ++i) {
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(999 - i), "v"));
+    }
+    validate();
+}
+
+TEST_P(BPlusTreeTests, SplitRightShortAndLongKeys)
 {
     for (unsigned i {}; i < 5'000; ++i) {
         char key[3] {};
@@ -715,12 +731,23 @@ TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnLeft)
         ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
     for (unsigned i {}; i < 1'000; ++i) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(999 - i), "v"));
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(999 - i), "v"));
     }
     validate();
 }
 
-TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnMiddle)
+TEST_P(BPlusTreeTests, SplitMiddleLongKeys)
+{
+    for (Size i {}, j {999}; i < j; ++i, --j) {
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(i), "v"));
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(j), "v"));
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeTests, SplitMiddleShortAndLongKeys)
 {
     for (unsigned i {}; i < 5'000; ++i) {
         char key[3] {};
@@ -728,8 +755,8 @@ TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnMiddle)
         ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
     for (Size i {}, j {999}; i < j; ++i, --j) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(i), "v"));
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(j), "v"));
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(i), "v"));
+        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<120>(j), "v"));
         if (i % 100 == 99) {
             validate();
         }

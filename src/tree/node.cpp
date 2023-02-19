@@ -26,8 +26,7 @@ auto internal_cell_size(const NodeMeta &meta, const Byte *data) -> Size
     Size key_size;
     const auto *ptr = decode_varint(data + sizeof(Id), key_size);
     const auto local_size = compute_local_size(key_size, meta.min_local, meta.max_local);
-    const auto header_size = Size(ptr - data) + sizeof(Id);
-    return local_size + header_size;
+    return local_size + static_cast<Size>(ptr - data);
 }
 
 auto external_cell_size(const NodeMeta &meta, const Byte *data) -> Size
@@ -37,7 +36,7 @@ auto external_cell_size(const NodeMeta &meta, const Byte *data) -> Size
     ptr = decode_varint(ptr, key_size);
     const auto payload_size = key_size + value_size;
     const auto local_size = compute_local_size(payload_size, meta.min_local, meta.max_local);
-    const auto header_size = Size(ptr - data);
+    const auto header_size = static_cast<Size>(ptr - data);
     Size extra_size {};
     if (local_size != payload_size) {
         extra_size += sizeof(Id);
@@ -59,8 +58,8 @@ auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell
 
     cell.key_size = key_size;
     cell.local_size = compute_local_size(payload_size, meta.min_local, meta.max_local);
-    cell.has_remote = cell.local_size != payload_size;
-    cell.size = cell.local_size + cell.has_remote*sizeof(Id) + header_size;
+    cell.has_remote = cell.local_size < payload_size;
+    cell.size = header_size + cell.local_size + cell.has_remote*sizeof(Id);
     return cell;
 }
 
@@ -77,8 +76,8 @@ auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell
 
     cell.key_size = key_size;
     cell.local_size = compute_local_size(key_size, meta.min_local, meta.max_local);
-    cell.has_remote = cell.local_size != key_size;
-    cell.size = cell.local_size + cell.has_remote*sizeof(Id) + header_size;
+    cell.has_remote = cell.local_size < key_size;
+    cell.size = header_size + cell.local_size + cell.has_remote*sizeof(Id);
     return cell;
 }
 
