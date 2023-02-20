@@ -28,6 +28,7 @@ It exposes a small API that allows storage and retrieval of variable-length byte
 
 ## Caveats
 + Concurrency control must be provided externally
++ Multiple simultaneous transactions are not supported
 
 ## Documentation
 Check out the [docs](doc/doc.md).
@@ -52,15 +53,15 @@ Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name             | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:---------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>      |  `<Needs to be recomputed!>` |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup>   |  `<Needs to be recomputed!>` |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>    |  `<Needs to be recomputed!>` |                     173,461 |                    288,684 |
-| `readrandom`               |  `<Needs to be recomputed!>` |                     515,198 |                    413,907 |
-| `readseq`                  |  `<Needs to be recomputed!>` |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`<sup>*</sup> |  `<Needs to be recomputed!>` |                       5,215 |                     11,387 |
-| `fillseq100k`<sup>*</sup>  |  `<Needs to be recomputed!>` |                       6,731 |                      9,560 |
-| `readseq100k`              |  `<Needs to be recomputed!>` |                      49,232 |                     65,557 |
-| `readrand100k`             |  `<Needs to be recomputed!>` |                      10,894 |                     66,028 |
+| `fillseq`<sup>*</sup>      |                      333,667 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup>   |                      142,613 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>    |                      143,575 |                     173,461 |                    288,684 |
+| `readrandom`               |                      504,541 |                     515,198 |                    413,907 |
+| `readseq`                  |                    3,215,434 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`<sup>*</sup> |                        2,085 |                       5,215 |                     11,387 |
+| `fillseq100k`<sup>*</sup>  |                        1,746 |                       6,731 |                      9,560 |
+| `readseq100k`              |                       19,814 |                      49,232 |                     65,557 |
+| `readrand100k`             |                       20,427 |                      10,894 |                     66,028 |
 
 <sup>*</sup> These benchmarks are affected by the fact that we use a batch size of 1,000.
 The call to `Database::commit()` will flush pages from older transactions, advance the WAL to a new segment, and possibly remove obsolete WAL segments, so it has quite a bit of overhead.

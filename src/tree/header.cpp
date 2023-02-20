@@ -90,13 +90,13 @@ NodeHeader::NodeHeader(const Page &page)
     cell_start = get_u16(data);
     data += sizeof(PageSize);
 
-    frag_count = get_u16(data);
-    data += sizeof(PageSize);
-
     free_start = get_u16(data);
     data += sizeof(PageSize);
 
     free_total = get_u16(data);
+    data += sizeof(PageSize);
+
+    frag_count = static_cast<std::uint8_t>(*data);
 }
 
 auto NodeHeader::write(Page &page) const -> void
@@ -120,13 +120,13 @@ auto NodeHeader::write(Page &page) const -> void
     put_u16(data, cell_start);
     data += sizeof(PageSize);
 
-    put_u16(data, frag_count);
-    data += sizeof(PageSize);
-
     put_u16(data, free_start);
     data += sizeof(PageSize);
 
     put_u16(data, free_total);
+    data += sizeof(PageSize);
+
+    *data = static_cast<Byte>(frag_count);
     insert_delta(page.m_deltas, {page_offset(page), SIZE});
 }
 

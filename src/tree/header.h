@@ -43,17 +43,16 @@ struct FileHeader {
  *     17      8     prev_id
  *     25      2     cell_count
  *     27      2     cell_start
- *     29      2     frag_count
- *     31      2     free_start
- *     33      2     free_total
+ *     29      2     free_start
+ *     31      2     free_total
+ *     33      1     frag_count
  *
  * TODO: We don't need so many header fields. For instance, instead of caching the total free block bytes, we can just limit the
- *       list length and null out the last "next pointer". The fragment count can be a single byte. We generally don't accumulate
- *       too many fragments. We can just defragment when the byte would overflow. The "prev_id" field can be placed at the end
+ *       list length and null out the last "next pointer". The "prev_id" field can be placed at the end
  *       and omitted in external nodes.
  */
 struct NodeHeader {
-    static constexpr Size SIZE {35};
+    static constexpr Size SIZE {34};
     explicit NodeHeader() = default;
     explicit NodeHeader(const Page &page);
     auto write(Page &page) const -> void;
@@ -63,28 +62,14 @@ struct NodeHeader {
     Id prev_id;
     std::uint16_t cell_count {};
     std::uint16_t cell_start {};
-    std::uint16_t frag_count {};
     std::uint16_t free_start {};
     std::uint16_t free_total {};
+    std::uint8_t frag_count {};
     bool is_external {true};
 
 private:
     static constexpr Byte EXTERNAL_BITS {0b01'1};
     static constexpr Byte INTERNAL_BITS {0b10'1};
-};
-
-/*
- * Used as metadata for both overflow chain pages and freelist pages. The backward connection is only
- * necessary for implementing the vacuum functionality. The root page cannot be a link page.
- */
-struct LinkHeader {
-    static constexpr Size SIZE {16};
-    static auto is_link(const Page &page) -> bool;
-    explicit LinkHeader(const Page &page);
-    auto write(Page &page) const -> void;
-
-    Id prev_id;
-    Id next_id;
 };
 
 } // namespace Calico
