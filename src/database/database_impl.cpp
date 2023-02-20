@@ -265,6 +265,8 @@ auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bo
 
 auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 {
+    value.clear();
+
     Calico_Try_S(status());
     if (auto slot = tree->search(key)) {
         auto [node, index, exact] = std::move(*slot);
@@ -274,17 +276,15 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
             return Status::not_found("not found");
         }
 
+        Status s;
         const auto cell = read_cell(node, index);
         if (auto result = tree->collect_value(value, cell)) {
-            if (!cell.has_remote) {
-                value = result->to_string();
-            }
-            pager->release(std::move(node.page));
-            return Status::ok();
+            // "value" contains the value associated with "key".
         } else {
-            pager->release(std::move(node.page));
-            return result.error();
+            s = result.error();
         }
+        pager->release(std::move(node.page));
+        return s;
     } else {
         return slot.error();
     }
@@ -354,6 +354,7 @@ auto DatabaseImpl::do_vacuum() -> Status
         }
     }
     if (target.value == pager->page_count()) {
+        // No pages available to vacuum: database is minimally sized.
         return Status::ok();
     }
     // Make sure the vacuum updates are in the WAL. If this succeeds, we should be able to reapply the

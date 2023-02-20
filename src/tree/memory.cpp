@@ -66,13 +66,22 @@ auto FreeList::pop() -> tl::expected<Page, Status>
     return tl::make_unexpected(Status::logic_error("free list is empty"));
 }
 
-auto OverflowList::read_chain(Id pid, Span out) -> tl::expected<void, Status>
+auto OverflowList::read_chain(Id pid, Span out, Size offset) -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
         Calico_New_R(page, m_pager->acquire(pid));
-        const auto content = get_readable_content(page, out.size());
-        mem_copy(out, content);
-        out.advance(content.size());
+        auto content = get_readable_content(page, page.size());
+
+        if (offset) {
+            const auto max = std::min(offset, content.size());
+            content.advance(max);
+            offset -= max;
+        }
+        if (!content.is_empty()) {
+            const auto size = std::min(out.size(), content.size());
+            mem_copy(out, content, size);
+            out.advance(size);
+        }
         pid = read_next_id(page);
         m_pager->release(std::move(page));
     }

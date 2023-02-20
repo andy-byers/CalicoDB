@@ -41,11 +41,7 @@ auto CursorImpl::key() const -> Slice
             }.to_string();
         }
         m_tree->release(std::move(*node));
-        if (cell.key_size <= cell.local_size) {
-            m_key = key->to_string();
-        } else {
-            m_key.resize(key->size());
-        }
+        m_key.resize(key->size());
         return m_key;
     } else {
         CursorInternal::invalidate(*this, node.error());
@@ -62,11 +58,7 @@ auto CursorImpl::value() const -> Slice
     if (auto node = m_tree->acquire(m_loc.pid)) {
         const auto cell = read_cell(*node, m_loc.index);
         if (auto value = m_tree->collect_value(m_value, cell)) {
-            if (cell.has_remote) {
-                m_value.resize(value->size());
-            } else {
-                m_value = value->to_string();
-            }
+            m_value.resize(value->size());
             m_tree->release(std::move(*node));
             return m_value;
         } else {

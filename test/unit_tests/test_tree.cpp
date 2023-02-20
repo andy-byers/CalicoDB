@@ -921,20 +921,26 @@ TEST_P(BPlusTreeSanityChecks, Search)
 TEST_P(BPlusTreeSanityChecks, Erase)
 {
     std::unordered_map<std::string, std::string> records;
-    for (Size i {}; i < 1'000; ++i) {
-        const auto [k, v] = random_write();
-        records[k] = v;
-    }
-
-    Size i {};
-    for (const auto &[key, value]: records) {
-        ASSERT_HAS_VALUE(tree->erase(key));
-        if (i % 100 == 99) {
-            validate();
+    for (Size iteration {}; iteration < 3; ++iteration) {
+        for (Size i {}; i < 1'000; ++i) {
+            const auto [k, v] = random_write();
+            records[k] = v;
         }
+
+        Size i {};
+        for (const auto &[key, value]: records) {
+            ASSERT_HAS_VALUE(tree->erase(key));
+            if (i % 100 == 99) {
+                validate();
+            }
+        }
+        records.clear();
     }
 }
 
+// "extra" parameter bits:
+//     0b01: Use overflowing values
+//     0b10: Use overflowing keys
 INSTANTIATE_TEST_SUITE_P(
     BPlusTreeSanityChecks,
     BPlusTreeSanityChecks,

@@ -3,52 +3,34 @@
 
 #include <iostream>
 #include "calico/calico.h"
+#include "utils/encoding.h"
 #include "tools.h"
 
 namespace Calico {
 
-static constexpr Size MAX_KEY_SIZE {12};
-static constexpr Size MAX_VALUE_SIZE {0x200};
+static constexpr auto PAGE_SIZE = MINIMUM_PAGE_SIZE;
+
 static constexpr Options DB_OPTIONS {
-    0x200,
-    0x200 * 32,
+    PAGE_SIZE,
+    PAGE_SIZE * 32,
     {},
     LogLevel::OFF,
     nullptr,
     nullptr,
 };
 
-static auto extract_payload(const std::uint8_t *&data, Size &size, Size max_size)
-{
-    if (size == 0) {
-        return Slice {};
-    }
-    Size actual {1};
-
-    // If possible, use the first byte to denote the payload size.
-    if (size > 1) {
-        const auto requested = std::min<Size>(data[0], max_size);
-        actual = std::min(requested + !requested, size - 1);
-        data++;
-        size--;
-    }
-    const Slice payload {reinterpret_cast<const Byte *>(data), actual};
-    data += actual;
-    size -= actual;
-    return payload;
-}
-
 static auto extract_key(const std::uint8_t *&data, Size &size)
 {
     assert(size != 0);
-    Size actual {1};
-
-    // If possible, use the first byte to denote the payload size.
-    if (size > 1) {
-        const auto requested = std::min<Size>(data[0], MAX_KEY_SIZE);
-        actual = std::min(requested + !requested, size - 1);
-        data++;
-        size--;
+    if (size == 1) {
+        return Slice {reinterpret_cast<const Byte *>(data), size};
+    }
+    Size actual {2};
+    if (size > 2) {
+        const auto requested = std::min<Size>(data[0] << 8 | data[1], PAGE_SIZE * 2);
+        actual = std::min(requested + !requested, size - 2);
+        data += 2;
+        size -= 2;
     }
     const Slice payload {reinterpret_cast<const Byte *>(data), actual};
     data += actual;
@@ -70,12 +52,15 @@ static auto extract_value(const std::uint8_t *&data, Size &size)
     } else {
         result_size = data[0] << 8 | data[1];
     }
-    result_size %= MAX_VALUE_SIZE;
+    result_size %= PAGE_SIZE * 2;
     data += needed_size;
     size -= needed_size;
-    return std::string(result_size, 'x');
+
+    std::string result(result_size, '_');
+    result.append(std::to_string(result_size));
+    return result;
 }
 
 } // namespace Calico
 
-#endif //CALICO_FUZZ_FUZZER_H
+#endif // CALICO_FUZZ_FUZZER_H

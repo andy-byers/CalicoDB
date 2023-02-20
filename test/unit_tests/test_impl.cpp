@@ -959,6 +959,39 @@ TEST_F(ApiTests, KeysCanBeArbitraryBytes)
     delete cursor;
 }
 
+TEST_F(ApiTests, HandlesLargeKeys)
+{
+    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+
+    const auto key_1 = '\x01' + random.Generate(options.page_size * 100).to_string();
+    const auto key_2 = '\x02' + random.Generate(options.page_size * 100).to_string();
+    const auto key_3 = '\x03' + random.Generate(options.page_size * 100).to_string();
+
+    ASSERT_OK(db->put(key_1, "1"));
+    ASSERT_OK(db->put(key_2, "2"));
+    ASSERT_OK(db->put(key_3, "3"));
+    ASSERT_OK(db->commit());
+
+    auto *cursor = db->new_cursor();
+    cursor->seek_first();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_1);
+    ASSERT_EQ(cursor->value(), "1");
+    cursor->next();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_2);
+    ASSERT_EQ(cursor->value(), "2");
+    cursor->next();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_3);
+    ASSERT_EQ(cursor->value(), "3");
+    cursor->next();
+    delete cursor;
+}
+
 class CommitFailureTests : public ApiTests {
 protected:
     ~CommitFailureTests() override = default;
@@ -998,7 +1031,6 @@ TEST_F(CommitFailureTests, WalAdvanceFailure)
 {
     // Write the commit record and flush successfully, but fail to open the next segment file.
     Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
-
 }
 
 TEST_F(CommitFailureTests, PagerFlushFailure)

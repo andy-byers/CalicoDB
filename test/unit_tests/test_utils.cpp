@@ -557,7 +557,7 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
 // CRC tests from LevelDB.
 namespace crc32c {
 
-    TEST(CRC, StandardResults) {
+    TEST(LevelDB_CRC, StandardResults) {
         // From rfc3720 section B.4.
         char buf[32];
 
@@ -586,13 +586,13 @@ namespace crc32c {
         ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char*>(data), sizeof(data)));
     }
 
-    TEST(CRC, Values) { ASSERT_NE(Value("a", 1), Value("foo", 3)); }
+    TEST(LevelDB_CRC, Values) { ASSERT_NE(Value("a", 1), Value("foo", 3)); }
 
-    TEST(CRC, Extend) {
+    TEST(LevelDB_CRC, Extend) {
         ASSERT_EQ(Value("hello world", 11), Extend(Value("hello ", 6), "world", 5));
     }
 
-    TEST(CRC, Mask) {
+    TEST(LevelDB_CRC, Mask) {
         uint32_t crc = Value("foo", 3);
         ASSERT_NE(crc, Mask(crc));
         ASSERT_NE(crc, Mask(Mask(crc)));
