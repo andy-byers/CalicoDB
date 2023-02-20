@@ -24,51 +24,47 @@ auto CursorImpl::status() const -> Status
 auto CursorImpl::key() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
-    if (!m_key.empty()) {
-        return m_key;
-    }
-    if (auto node = m_tree->acquire(m_loc.pid)) {
-        auto cell = read_cell(*node, m_loc.index);
-        auto key = m_tree->collect_key(m_key, cell);
-        if (!key.has_value()) {
-            m_status = key.error();
-            return {};
+    if (m_key_size == 0) {
+        if (auto node = m_tree->acquire(m_loc.pid)) {
+            auto cell = read_cell(*node, m_loc.index);
+            if (auto key = m_tree->collect_key(m_key, cell)) {
+                m_key_size = key->size();
+                // Go ahead and read the value if it isn't on overflow pages.
+                if (m_value.empty() && !cell.has_remote) {
+                    m_value = Slice {
+                        cell.key + cell.key_size,
+                        cell.local_size - cell.key_size,
+                    }.to_string();
+                    m_value_size = m_value.size();
+                }
+            } else if (m_status.is_ok()) {
+                m_status = key.error();
+            }
+            m_tree->release(std::move(*node));
+        } else if (m_status.is_ok()) {
+            m_status = node.error();
         }
-        if (m_value.empty() && !cell.has_remote) {
-            m_value = Slice {
-                cell.key + cell.key_size,
-                cell.local_size - cell.key_size,
-            }.to_string();
-        }
-        m_tree->release(std::move(*node));
-        m_key.resize(key->size());
-        return m_key;
-    } else {
-        CursorInternal::invalidate(*this, node.error());
-        return {};
     }
+    return Slice {m_key}.truncate(m_key_size);
 }
 
 auto CursorImpl::value() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
-    if (!m_value.empty()) {
-        return m_value;
-    }
-    if (auto node = m_tree->acquire(m_loc.pid)) {
-        const auto cell = read_cell(*node, m_loc.index);
-        if (auto value = m_tree->collect_value(m_value, cell)) {
-            m_value.resize(value->size());
+    if (m_value_size == 0) {
+        if (auto node = m_tree->acquire(m_loc.pid)) {
+            const auto cell = read_cell(*node, m_loc.index);
+            if (auto value = m_tree->collect_value(m_value, cell)) {
+                m_value_size = value->size();
+            } else if (m_status.is_ok()) {
+                m_status = value.error();
+            }
             m_tree->release(std::move(*node));
-            return m_value;
-        } else {
-            CursorInternal::invalidate(*this, value.error());
+        } else if (m_status.is_ok()) {
+            m_status = node.error();
         }
-        m_tree->release(std::move(*node));
-    } else {
-        CursorInternal::invalidate(*this, node.error());
     }
-    return {};
+    return Slice {m_value}.truncate(m_value_size);
 }
 
 auto CursorImpl::seek(const Slice &key) -> void
@@ -127,8 +123,8 @@ auto CursorInternal::seek_last(CursorImpl &cursor) -> void
 auto CursorInternal::seek_left(CursorImpl &cursor) -> void
 {
     CALICO_EXPECT_TRUE(cursor.is_valid());
-    cursor.m_key.clear();
-    cursor.m_value.clear();
+    cursor.m_key_size = 0;
+    cursor.m_value_size = 0;
     if (cursor.m_loc.index != 0) {
         cursor.m_loc.index--;
     } else if (auto node = cursor.m_tree->acquire(Id {cursor.m_loc.pid})) {
@@ -156,8 +152,8 @@ auto CursorInternal::seek_left(CursorImpl &cursor) -> void
 auto CursorInternal::seek_right(CursorImpl &cursor) -> void
 {
     CALICO_EXPECT_TRUE(cursor.is_valid());
-    cursor.m_key.clear();
-    cursor.m_value.clear();
+    cursor.m_key_size = 0;
+    cursor.m_value_size = 0;
     if (++cursor.m_loc.index < cursor.m_loc.count) {
         return;
     }
@@ -190,8 +186,8 @@ auto CursorInternal::seek_to(CursorImpl &cursor, Node node, Size index) -> void
     const auto count = node.header.cell_count;
     cursor.m_tree->release(std::move(node));
 
-    cursor.m_key.clear();
-    cursor.m_value.clear();
+    cursor.m_key_size = 0;
+    cursor.m_value_size = 0;
 
     if (count && index < count) {
         cursor.m_loc.index = static_cast<PageSize>(index);

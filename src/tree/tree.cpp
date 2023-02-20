@@ -11,18 +11,6 @@ struct SeekResult {
 
 using FetchKey = std::function<Slice (Size)>;
 
-static auto seek_linear(Size n, const Slice &key, const FetchKey &fetch) -> SeekResult
-{
-    for (unsigned index {}; index < n; ++index) {
-        const auto rhs = fetch(index);
-        const auto cmp = compare_three_way(key, rhs);
-        if (cmp != ThreeWayComparison::GT) {
-            return {index, cmp == ThreeWayComparison::EQ};
-        }
-    }
-    return {unsigned(n), false};
-}
-
 static auto seek_binary(Size n, const Slice &key, const FetchKey &fetch) -> SeekResult
 {
     auto upper = unsigned(n);
@@ -45,21 +33,6 @@ static auto seek_binary(Size n, const Slice &key, const FetchKey &fetch) -> Seek
     }
     return {lower, false};
 }
-
-using Seek = SeekResult (*)(Size n, const Slice &, const FetchKey &);
-
-static constexpr Seek SEEK_TABLE[] {
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_binary,
-};
-
-static constexpr auto SEEK_MAX = sizeof(SEEK_TABLE)/sizeof(Seek) - 1;
 
 NodeIterator::NodeIterator(Node &node, const Parameters &param)
     : m_overflow {param.overflow},
@@ -112,9 +85,8 @@ auto NodeIterator::seek(const Slice &key) -> tl::expected<bool, Status>
         }
     };
 
-    const Size count = m_node->header.cell_count;
-    const auto seek_type = std::min(count, SEEK_MAX);
-    const auto [index, exact] = SEEK_TABLE[seek_type](count, key, fetch);
+    const auto [index, exact] = seek_binary(
+        m_node->header.cell_count, key, fetch);
 
     if (!s.is_ok()) {
         return tl::make_unexpected(s);

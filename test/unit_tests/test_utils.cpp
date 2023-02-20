@@ -705,4 +705,59 @@ TEST(LoggingTests, OnlyEscapesUnprintableCharacters)
     }
 }
 
+TEST(LevelDB_Coding, Varint64) {
+    // Construct the list of values to check
+    std::vector<uint64_t> values;
+    // Some special values
+    values.push_back(0);
+    values.push_back(100);
+    values.push_back(~static_cast<uint64_t>(0));
+    values.push_back(~static_cast<uint64_t>(0) - 1);
+    for (uint32_t k = 0; k < 64; k++) {
+        // Test values near powers of two
+        const uint64_t power = 1ull << k;
+        values.push_back(power);
+        values.push_back(power - 1);
+        values.push_back(power + 1);
+    }
+    Size total_size {};
+    for (auto v: values) {
+        total_size += varint_length(v);
+    }
+
+    std::string s(total_size, '\0');
+    auto *ptr = s.data();
+    for (size_t i = 0; i < values.size(); i++) {
+        ptr = encode_varint(ptr, values[i]);
+    }
+
+    const char* p = s.data();
+    const char* limit = p + s.size();
+    for (size_t i = 0; i < values.size(); i++) {
+        ASSERT_TRUE(p < limit);
+        uint64_t actual;
+        const char* start = p;
+        p = decode_varint(p, actual);
+        ASSERT_TRUE(p != nullptr);
+        ASSERT_EQ(values[i], actual);
+        ASSERT_EQ(varint_length(actual), p - start);
+    }
+    ASSERT_EQ(p, limit);
+}
+
+TEST(LevelDB_Coding, Varint64Overflow) {
+    uint64_t result;
+    std::string input("\x81\x82\x83\x84\x85\x81\x82\x83\x84\x85\x11");
+    ASSERT_TRUE(decode_varint(input.data(), result) == nullptr);
+}
+
+TEST(Encoding, MaxVarintValue) {
+    const std::uint64_t max_value {0xFFFFFFFFFFFFFF};
+
+    uint64_t result;
+    std::string input("\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
+    ASSERT_FALSE(decode_varint(input.data(), result) == nullptr);
+    ASSERT_EQ(result, max_value);
+}
+
 } // namespace Calico
