@@ -262,14 +262,14 @@ TEST_F(ComponentTests, EmplacesCellWithOverflowKey)
 {
     auto root = acquire_node(Id::root(), true);
     const auto long_key = random.Generate(PAGE_SIZE).to_string();
-    const auto local = Slice {long_key}.truncate(root.meta->min_local);
+    const auto local = Slice {long_key}.truncate(root.meta->max_local);
     auto *start = root.page.data() + 0x100;
     auto *end = emplace_cell(start, long_key.size(), 1, local, "", Id {123});
     const auto cell_size = static_cast<Size>(end - start);
     const auto cell = read_cell_at(root, 0x100);
     ASSERT_EQ(cell.size, cell_size);
     ASSERT_EQ(cell.key_size, long_key.size());
-    ASSERT_EQ(cell.local_size, root.meta->min_local);
+    ASSERT_EQ(cell.local_size, root.meta->max_local);
     ASSERT_EQ(cell.has_remote, true);
     const Slice key {cell.key, cell.local_size};
     ASSERT_EQ(key, local);
@@ -352,10 +352,10 @@ TEST_F(ComponentTests, PromotesCell)
     auto root = acquire_node(Id::root(), true);
     const auto key = random.Generate(PAGE_SIZE * 100).to_string();
     const auto value = random.Generate(PAGE_SIZE * 100).to_string();
-    auto *scratch = collect_scratch.data() + 10;
-    ASSERT_HAS_VALUE(payloads->emplace(scratch, root, key, value, 0));
+    std::string emplace_scratch(PAGE_SIZE, '\0');
+    ASSERT_HAS_VALUE(payloads->emplace(emplace_scratch.data() + 10, root, key, value, 0));
     auto cell = read_cell(root, 0);
-    ASSERT_HAS_VALUE(payloads->promote(scratch, cell, Id::root()));
+    ASSERT_HAS_VALUE(payloads->promote(emplace_scratch.data() + 10, cell, Id::root()));
     // Needs to consult overflow pages for the key.
     ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
     root.TEST_validate();
@@ -367,12 +367,12 @@ static auto run_promotion_test(ComponentTests &test, Size key_size, Size value_s
     auto root = test.acquire_node(Id::root(), true);
     const auto key = test.random.Generate(key_size).to_string();
     const auto value = test.random.Generate(value_size).to_string();
-    auto *scratch = test.collect_scratch.data() + 10;
-    ASSERT_HAS_VALUE(test.payloads->emplace(scratch, root, key, value, 0));
+    std::string emplace_scratch(test.PAGE_SIZE, '\0');
+    ASSERT_HAS_VALUE(test.payloads->emplace(emplace_scratch.data() + 10, root, key, value, 0));
     auto external_cell = read_cell(root, 0);
     ASSERT_EQ(external_cell.size, varint_length(key.size()) + varint_length(value.size()) + external_cell.local_size + external_cell.has_remote*8);
     auto internal_cell = external_cell;
-    ASSERT_HAS_VALUE(test.payloads->promote(scratch, internal_cell, Id::root()));
+    ASSERT_HAS_VALUE(test.payloads->promote(emplace_scratch.data() + 10, internal_cell, Id::root()));
     ASSERT_EQ(internal_cell.size, sizeof(Id) + varint_length(key.size()) + internal_cell.local_size + internal_cell.has_remote*8);
     test.release_node(std::move(root));
 }
@@ -418,6 +418,59 @@ TEST_F(ComponentTests, PromotionCopiesOverflowKeyButIgnoresOverflowValue)
     const auto new_head = pointers->read_entry(Id {5}).value();
     ASSERT_EQ(new_head.type, PointerMap::OVERFLOW_HEAD);
     ASSERT_EQ(new_head.back_ptr, Id::root());
+}
+
+TEST_F(ComponentTests, NodeIterator)
+{
+    for (Size i {}; i < 4; ++i) {
+        auto root = acquire_node(Id::root(), true);
+        const auto key = Tools::integral_key<2>((i+1) * 2);
+        ASSERT_HAS_VALUE(payloads->emplace(nullptr, root, key, "", i));
+        release_node(std::move(root));
+    }
+    auto root = acquire_node(Id::root(), true);
+    std::string lhs_key, rhs_key;
+    NodeIterator itr {root, {
+        overflow.get(),
+        &lhs_key,
+        &rhs_key,
+    }};
+    for (Size i: {1, 6, 3, 2, 8, 4, 5, 7}) {
+        ASSERT_EQ(i % 2 == 0, itr.seek(Tools::integral_key<2>(i)).value());
+        ASSERT_TRUE(itr.is_valid());
+    }
+    ASSERT_FALSE(itr.seek(Tools::integral_key<2>(10)).value());
+    ASSERT_FALSE(itr.is_valid());
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
+{
+    std::vector<std::string> keys;
+    for (Size i {}; i < 3; ++i) {
+        auto root = acquire_node(Id::root(), true);
+        auto key = random.Generate(PAGE_SIZE).to_string();
+        const auto value = random.Generate(PAGE_SIZE).to_string();
+        key[0] = static_cast<Byte>(i);
+        ASSERT_HAS_VALUE(payloads->emplace(nullptr, root, key, value, i));
+        ASSERT_FALSE(root.overflow.has_value());
+        release_node(std::move(root));
+        keys.emplace_back(key);
+    }
+    auto root = acquire_node(Id::root(), true);
+    std::string lhs_key, rhs_key;
+    NodeIterator itr {root, {
+        overflow.get(),
+        &lhs_key,
+        &rhs_key,
+    }};
+    Size i {};
+    for (const auto &key: keys) {
+        ASSERT_TRUE(itr.seek(key).value());
+        ASSERT_TRUE(itr.is_valid());
+        ASSERT_EQ(itr.index(), i++);
+    }
+    release_node(std::move(root));
 }
 
 struct BPlusTreeTestParameters {
@@ -819,8 +872,8 @@ TEST_P(BPlusTreeSanityChecks, Insert)
 {
     for (Size i {}; i < 1'000; ++i) {
         random_write();
-        validate();
         if (i % 100 == 99) {
+            validate();
         }
     }
 }

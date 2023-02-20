@@ -274,7 +274,11 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
             return Status::not_found("not found");
         }
 
-        if (auto result = tree->collect_value(value, read_cell(node, index))) {
+        const auto cell = read_cell(node, index);
+        if (auto result = tree->collect_value(value, cell)) {
+            if (!cell.has_remote) {
+                value = result->to_string();
+            }
             pager->release(std::move(node.page));
             return Status::ok();
         } else {

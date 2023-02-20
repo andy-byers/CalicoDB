@@ -36,12 +36,14 @@ inline constexpr auto compute_max_local(Size page_size) -> Size
            MAX_CELL_HEADER_SIZE - sizeof(PageSize);
 }
 
-inline constexpr auto compute_local_size(Size payload_size, Size min_local, Size max_local) -> Size
+inline constexpr auto compute_local_size(Size key_size, Size value_size, Size min_local, Size max_local) -> Size
 {
-    if (payload_size <= max_local) {
-        return payload_size;
+    if (key_size + value_size <= max_local) {
+        return key_size + value_size;
+    } else if (key_size > max_local) {
+        return max_local;
     }
-    return min_local;
+    return std::max(min_local, key_size);
 }
 
 /* Internal Cell Format:

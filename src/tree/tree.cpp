@@ -87,7 +87,7 @@ auto NodeIterator::fetch_key(std::string &buffer, const Cell &cell) const -> tl:
     key.advance(cell.local_size);
 
     Calico_Try_R(m_overflow->read_chain(read_overflow_id(cell), key));
-    return buffer;
+    return Slice {buffer}.truncate(cell.key_size);
 }
 
 auto NodeIterator::is_valid() const -> bool
@@ -835,7 +835,7 @@ auto PayloadManager::emplace(Byte *scratch, Node &node, const Slice &key, const 
 
     auto k = key.size();
     auto v = value.size();
-    const auto local_size = compute_local_size(k + v, node.meta->min_local, node.meta->max_local);
+    const auto local_size = compute_local_size(k, v, node.meta->min_local, node.meta->max_local);
     const auto has_remote = k + v > local_size;
 
     if (k > local_size) {
@@ -877,7 +877,7 @@ auto PayloadManager::promote(Byte *scratch, Cell &cell, Id parent_id) -> tl::exp
     // "scratch" should have enough room before its "m_data" member to write the left child ID.
     const auto header_size = sizeof(Id) + varint_length(cell.key_size);
     cell.ptr = cell.key - header_size;
-    cell.local_size = compute_local_size(cell.key_size, m_meta->min_local, m_meta->max_local);
+    cell.local_size = compute_local_size(cell.key_size, 0, m_meta->min_local, m_meta->max_local);
     cell.size = header_size + cell.local_size;
     cell.has_remote = false;
 
@@ -904,7 +904,7 @@ auto PayloadManager::collect_key(std::string &scratch, const Cell &cell) -> tl::
     mem_copy(span, {cell.key, cell.local_size});
 
     Calico_Try_R(m_overflow->read_chain(read_overflow_id(cell), span.range(cell.local_size)));
-    return span;
+    return span.range(0, cell.key_size);
 }
 
 auto PayloadManager::collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
@@ -923,6 +923,7 @@ auto PayloadManager::collect_value(std::string &scratch, const Cell &cell) -> tl
         scratch.resize(remote_key_size + value_size);
     }
     Span span {scratch};
+    span.truncate(remote_key_size + value_size);
 
     if (remote_key_size == 0) {
         const auto local_value_size = cell.local_size - cell.key_size;
@@ -931,7 +932,7 @@ auto PayloadManager::collect_value(std::string &scratch, const Cell &cell) -> tl
     }
 
     Calico_Try_R(m_overflow->read_chain(read_overflow_id(cell), span));
-    return Span {scratch}.range(remote_key_size);
+    return Span {scratch}.range(remote_key_size, value_size);
 }
 
 BPlusTree::BPlusTree(Pager &pager)
