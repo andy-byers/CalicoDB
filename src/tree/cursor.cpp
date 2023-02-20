@@ -67,10 +67,12 @@ auto CursorImpl::value() const -> Slice
             } else {
                 m_value = value->to_string();
             }
+            m_tree->release(std::move(*node));
             return m_value;
         } else {
             CursorInternal::invalidate(*this, value.error());
         }
+        m_tree->release(std::move(*node));
     } else {
         CursorInternal::invalidate(*this, node.error());
     }

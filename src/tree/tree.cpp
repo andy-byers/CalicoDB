@@ -1062,6 +1062,8 @@ auto BPlusTree::erase(const Slice &key) -> tl::expected<void, Status>
     if (exact) {
         const auto cell = read_cell(node, index);
         Calico_New_R(anchor, collect_key(m_anchor, cell));
+        m_anchor = anchor.to_string();
+        anchor = m_anchor;
 
         m_pager->upgrade(node.page);
         Calico_Try_R(BPlusTreeInternal::remove_cell(*this, node, index));
