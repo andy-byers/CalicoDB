@@ -227,7 +227,12 @@ public:
     [[nodiscard]]
     static auto remove_cell(BPlusTree &tree, Node &node, Size index) -> tl::expected<void, Status>
     {
-        const auto cell = read_cell(node, index);
+        return remove_cell(tree, node, index, read_cell(node, index));
+    }
+
+    [[nodiscard]]
+    static auto remove_cell(BPlusTree &tree, Node &node, Size index, const Cell &cell) -> tl::expected<void, Status>
+    {
         if (cell.has_remote) {
             Calico_Try_R(tree.m_overflow.erase_chain(read_overflow_id(cell)));
         }
@@ -876,6 +881,7 @@ auto PayloadManager::promote(Byte *scratch, Cell &cell, Id parent_id) -> tl::exp
     cell.size = header_size + cell.local_size;
     cell.has_remote = false;
 
+    // TODO: Case where key_size > min_local && key_size < max_local && value_size > 0 isn't handled!!! Cannot determine how much key is supposed to be there... Could transfer some back to satisfy expectations...
     if (cell.key_size > cell.local_size) {
         // Part of the key is on an overflow page. No value is stored locally in this case, so the local size computation is still correct.
         Calico_New_R(overflow_id, m_overflow->copy_chain(parent_id, read_overflow_id(cell), cell.key_size - cell.local_size));
