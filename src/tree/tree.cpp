@@ -1371,6 +1371,8 @@ public:
             std::string lhs_buffer, rhs_buffer;
             const auto lhs_key = m_tree->collect_key(lhs_buffer, read_cell(node, 0)).value();
             const auto rhs_key = m_tree->collect_key(rhs_buffer, read_cell(*right, 0)).value();
+            (void)lhs_key;
+            (void)rhs_key;
             CALICO_EXPECT_LT(lhs_key, rhs_key);
             CALICO_EXPECT_EQ(right->header.prev_id, node.page.id());
             m_tree->release(std::move(node));
