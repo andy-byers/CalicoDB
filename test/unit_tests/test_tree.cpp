@@ -83,9 +83,10 @@ class NodeMetaManager {
 public:
     explicit NodeMetaManager(Size page_size)
     {
-        // min_local and max_local fields are only needed in external nodes.
         m_external_meta.min_local = compute_min_local(page_size);
         m_external_meta.max_local = compute_max_local(page_size);
+        m_internal_meta.min_local = m_external_meta.min_local;
+        m_internal_meta.max_local = m_external_meta.max_local;
 
         m_external_meta.cell_size = external_cell_size;
         m_external_meta.parse_cell = parse_external_cell;
@@ -356,6 +357,28 @@ TEST_F(ComponentTests, PromotesCell)
     ASSERT_HAS_VALUE(payloads->emplace(emplace_scratch.data() + 10, root, key, value, 0));
     auto cell = read_cell(root, 0);
     ASSERT_HAS_VALUE(payloads->promote(emplace_scratch.data() + 10, cell, Id::root()));
+    // Needs to consult overflow pages for the key.
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, PromotedCellSize)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
+    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
+    std::string emplace_scratch(PAGE_SIZE, '\0');
+    ASSERT_HAS_VALUE(payloads->emplace(nullptr, root, key, value, 0));
+    auto cell = read_cell(root, 0);
+    ASSERT_HAS_VALUE(payloads->promote(emplace_scratch.data() + 20, cell, Id::root()));
+    erase_cell(root, 0);
+
+    root.header.is_external = false;
+    root.meta = &meta(false);
+    write_cell(root, 0, cell);
+    cell = read_cell(root, 0);
+
     // Needs to consult overflow pages for the key.
     ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
     root.TEST_validate();
@@ -727,10 +750,7 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnRightmostPosition)
     }
 
     while (i--) {
-        std::cerr<<tree->TEST_to_string()<<"\n\n";
         ASSERT_HAS_VALUE(tree->erase(Tools::integral_key(i)));
-        std::cerr<<tree->TEST_to_string()<<"\n\n";
-        Tools::print_references(*pager,*tree->TEST_components().pointers);
         validate();
     }
 }

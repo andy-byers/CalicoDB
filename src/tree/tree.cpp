@@ -642,9 +642,7 @@ public:
             }
             Calico_Try_R(rotate_right(tree, parent, left, node, index - 1));
             tree.release(std::move(left));
-        }
-
-        if (index < parent.header.cell_count) {
+        } else {
             Calico_New_R(right, tree.acquire(read_child_id(parent, index + 1), true));
             if (right.header.cell_count == 1) {
                 Calico_Try_R(merge_left(tree, node, std::move(right), parent, index));
@@ -690,6 +688,7 @@ public:
                 Calico_Put_R(root, tree.acquire(Id::root(), true));
             } else {
                 merge_root(root, child);
+                root.meta = child.meta; // TODO: Don't parse the cell incorrectly when fixing links in the root!!!
                 Calico_Try_R(tree.destroy(std::move(child)));
             }
             Calico_Try_R(fix_links(tree, root));
@@ -901,6 +900,7 @@ auto PayloadManager::collect_key(std::string &scratch, const Cell &cell) -> tl::
         scratch.resize(cell.key_size);
     }
     Span span {scratch};
+    span.truncate(cell.key_size);
     mem_copy(span, {cell.key, cell.local_size});
 
     Calico_Try_R(m_overflow->read_chain(read_overflow_id(cell), span.range(cell.local_size)));
@@ -1063,7 +1063,7 @@ auto BPlusTree::erase(const Slice &key) -> tl::expected<void, Status>
         const auto cell = read_cell(node, index);
         Calico_New_R(anchor, collect_key(m_anchor, cell));
         m_anchor = anchor.to_string();
-        anchor = m_anchor;
+        anchor = m_anchor; // TODO
 
         m_pager->upgrade(node.page);
         Calico_Try_R(BPlusTreeInternal::remove_cell(*this, node, index));

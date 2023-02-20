@@ -162,6 +162,9 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
 
 TEST_F(BasicDatabaseTests, TwoDatabases)
 {
+    fs::remove_all("/tmp/calico_test_1");
+    fs::remove_all("/tmp/calico_test_2");
+
     Database *lhs;
     expect_ok(Database::open("/tmp/calico_test_1", options, &lhs));
 
