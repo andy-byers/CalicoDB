@@ -607,7 +607,8 @@ TEST_F(WalReaderWriterTests, IterateFromMiddle)
     ASSERT_OK(storage->new_reader(encode_segment_name("test/wal-", Id {2}), &file));
     WalIterator itr {*file, reader_tail};
 
-    auto lsn = read_first_lsn(*storage, "test/wal-", Id {2}, set).value();
+    Lsn lsn;
+    ASSERT_OK(read_first_lsn(*storage, "test/wal-", Id {2}, set, lsn));
     for (; ; lsn.value++) {
         Span payload {reader_data};
         auto s = itr.read(payload);
@@ -766,14 +767,14 @@ public:
 
     auto SetUp() -> void override
     {
-        auto r = WriteAheadLog::open({
+        WriteAheadLog *temp;
+        ASSERT_OK(WriteAheadLog::open({
             "test/wal-",
             storage.get(),
             PAGE_SIZE,
             32,
-        });
-        ASSERT_TRUE(r.has_value()) << r.error().what().data();
-        wal = std::move(*r);
+        }, &temp));
+        wal.reset(temp);
 
         ASSERT_OK(wal->start_writing());
     }

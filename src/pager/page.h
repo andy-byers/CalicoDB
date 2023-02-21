@@ -22,6 +22,8 @@ public:
     friend struct Node;
     friend class Frame;
 
+    Page() = default;
+
     explicit Page(Id id, Span span, bool write)
         : m_span {span},
           m_id {id},

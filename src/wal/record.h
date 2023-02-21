@@ -255,17 +255,15 @@ private:
 };
 
 [[nodiscard]]
-inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, WalSet &set) -> tl::expected<Id, Status>
+inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
 {
     if (auto lsn = set.first_lsn(id); !lsn.is_null()) {
-        return lsn;
+        out = lsn;
+        return Status::ok();
     }
 
     Reader *temp;
-    auto s = store.new_reader(encode_segment_name(prefix, id), &temp);
-    if (!s.is_ok()) {
-        return tl::make_unexpected(s);
-    }
+    Calico_Try_S(store.new_reader(encode_segment_name(prefix, id), &temp));
 
     char buffer[WalPayloadHeader::SIZE];
     Span bytes {buffer, sizeof(buffer)};
@@ -273,24 +271,22 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, Wal
 
     // Read the first LSN. If it exists, it will always be at the same location.
     auto read_size = bytes.size();
-    s = file->read(bytes.data(), read_size, WalRecordHeader::SIZE);
-    if (!s.is_ok()) {
-        return tl::make_unexpected(s);
-    }
+    Calico_Try_S(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
 
     bytes.truncate(read_size);
 
     if (bytes.is_empty()) {
-        return tl::make_unexpected(Status::not_found("segment is empty"));
+        return Status::not_found("segment is empty");
     }
 
     if (bytes.size() != WalPayloadHeader::SIZE) {
-        return tl::make_unexpected(Status::corruption("incomplete record"));
+        return Status::corruption("incomplete record");
     }
 
     const Lsn lsn {get_u64(bytes)};
     set.set_first_lsn(id, lsn);
-    return lsn;
+    out = lsn;
+    return Status::ok();
 }
 
 } // namespace Calico

@@ -75,7 +75,7 @@ private:
     bool m_sync {};
 };
 
-auto setup(const std::string &, Storage &, const Options &) -> tl::expected<InitialState, Status>;
+auto setup(const std::string &, Storage &, const Options &, InitialState &init) -> Status;
 
 } // namespace Calico
 

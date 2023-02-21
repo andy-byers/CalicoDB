@@ -284,8 +284,7 @@ public:
         options.cache_size = 32 * options.page_size;
         options.storage = &storage;
 
-        const auto s = reopen();
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
+        EXPECT_OK(reopen());
     }
 
     ~TestDatabase() = default;

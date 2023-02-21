@@ -131,11 +131,7 @@ auto Recovery::finish() -> Status
     m_wal->cleanup(m_pager->recovery_lsn());
 
     // Make sure the file size matches the header page count, which should be correct if we made it this far.
-    auto r = m_pager->truncate(m_pager->page_count());
-    if (!r.has_value()) {
-        return r.error();
-    }
-    return Status::ok();
+    return m_pager->truncate(m_pager->page_count());
 }
 
 } // namespace Calico

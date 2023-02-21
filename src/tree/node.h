@@ -82,6 +82,7 @@ auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell;
 auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell;
 
 struct Node {
+    Node() = default;
     explicit Node(Page inner, Byte *defragmentation_space);
     [[nodiscard]] auto take() && -> Page;
 

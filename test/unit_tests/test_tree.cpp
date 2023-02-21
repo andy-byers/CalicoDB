@@ -147,7 +147,8 @@ public:
 
     auto SetUp() -> void override
     {
-        auto r = Pager::open({
+        Pager *temp;
+        EXPECT_OK(Pager::open({
             PREFIX,
             storage.get(),
             &log_scratch,
@@ -158,9 +159,8 @@ public:
             &in_xact,
             8,
             PAGE_SIZE,
-        });
-        ASSERT_TRUE(r.has_value()) << r.error().what().data();
-        pager = std::move(*r);
+        }, &temp));
+        pager.reset(temp);
     }
 
     std::string log_scratch;
@@ -512,7 +512,8 @@ public:
 
     auto SetUp() -> void override
     {
-        auto r = Pager::open({
+        Pager *temp;
+        EXPECT_OK(Pager::open({
             PREFIX,
             storage.get(),
             &log_scratch,
@@ -523,9 +524,8 @@ public:
             &in_xact,
             8,
             param.page_size,
-        });
-        ASSERT_TRUE(r.has_value()) << r.error().what().data();
-        pager = std::move(*r);
+        }, &temp));
+        pager.reset(temp);
         tree = std::make_unique<BPlusTree>(*pager);
 
         // Root page setup.
@@ -1323,7 +1323,7 @@ public:
                 tree->TEST_check_order();
                 target.value--;
             }
-            ASSERT_HAS_VALUE(pager->truncate(target.value));
+            ASSERT_OK(pager->truncate(target.value));
 
             auto *cursor = CursorInternal::make_cursor(*tree);
             for (const auto &[key, value]: map) {
@@ -1453,7 +1453,7 @@ TEST_F(VacuumTests, VacuumsFreelistInOrder)
     // Page Types:     N
     // Page Contents: [1]
     // Page IDs:       1
-    ASSERT_HAS_VALUE(pager->truncate(1));
+    ASSERT_OK(pager->truncate(1));
     ASSERT_EQ(pager->page_count(), 1);
 }
 
@@ -1511,7 +1511,7 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
     // Page Types:     N
     // Page Contents: [a]
     // Page IDs:       1
-    ASSERT_HAS_VALUE(pager->truncate(1));
+    ASSERT_OK(pager->truncate(1));
     ASSERT_EQ(pager->page_count(), 1);
 }
 
@@ -1538,7 +1538,7 @@ TEST_F(VacuumTests, VacuumFreelistSanityCheck)
             target.value--;
         }
         ASSERT_FALSE(tree->vacuum_one(target).value());
-        ASSERT_HAS_VALUE(pager->truncate(1));
+        ASSERT_OK(pager->truncate(1));
         ASSERT_EQ(pager->page_count(), 1);
     }
 }
@@ -1548,7 +1548,7 @@ static auto vacuum_and_validate(VacuumTests &test, const std::string &value)
     ASSERT_EQ(test.pager->page_count(), 6);
     ASSERT_HAS_VALUE(test.tree->vacuum_one(Id {6}));
     ASSERT_HAS_VALUE(test.tree->vacuum_one(Id {5}));
-    ASSERT_HAS_VALUE(test.pager->truncate(4));
+    ASSERT_OK(test.pager->truncate(4));
     ASSERT_EQ(test.pager->page_count(), 4);
 
     auto *cursor = CursorInternal::make_cursor(*test.tree);
@@ -1680,7 +1680,7 @@ TEST_F(VacuumTests, VacuumOverflowChainSanityCheck)
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {10}));
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {9}));
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {8}));
-    ASSERT_HAS_VALUE(pager->truncate(7));
+    ASSERT_OK(pager->truncate(7));
     ASSERT_EQ(pager->page_count(), 7);
 
     auto *cursor = CursorInternal::make_cursor(*tree);
@@ -1729,7 +1729,7 @@ TEST_F(VacuumTests, VacuumsNodes)
     ASSERT_EQ(pager->page_count(), 6);
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {6}));
     ASSERT_HAS_VALUE(tree->vacuum_one(Id {5}));
-    ASSERT_HAS_VALUE(pager->truncate(4));
+    ASSERT_OK(pager->truncate(4));
 
     auto *cursor = CursorInternal::make_cursor(*tree);
     cursor->seek_first();

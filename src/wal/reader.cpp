@@ -95,13 +95,12 @@ auto WalReader::seek(Lsn lsn) -> Status
     m_id = m_set->first();
     while (!m_id.is_null()) {
         // Caches the first LSN of each segment encountered here.
-        const auto first = read_first_lsn(*m_storage, m_prefix, m_id, *m_set);
-        if (!first.has_value()) {
-            return first.error();
-        }
-        if (*first == lsn) {
+        Lsn first;
+        Calico_Try_S(read_first_lsn(*m_storage, m_prefix, m_id, *m_set, first));
+
+        if (first == lsn) {
             return Status::ok();
-        } else if (*first > lsn) {
+        } else if (first > lsn) {
             if (m_id > m_set->first()) {
                 m_id.value--;
                 return reopen();

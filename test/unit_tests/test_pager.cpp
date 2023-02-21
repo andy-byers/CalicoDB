@@ -540,31 +540,37 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 class FramerTests : public InMemoryTest {
 public:
     explicit FramerTests()
-        : framer {*FrameManager::open("test/data", storage.get(), 0x200, 8)}
-    {}
+    {
+
+        Editor *file {};
+        EXPECT_OK(storage->new_editor("test/data", &file));
+
+        AlignedBuffer buffer {0x200 * 8, 0x200};
+
+        frames = std::make_unique<FrameManager>(file, std::move(buffer), 0x200, 8);
+    }
 
     ~FramerTests() override = default;
 
-    FrameManager framer;
+    std::unique_ptr<FrameManager> frames;
 };
 
 TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
 {
-    ASSERT_EQ(framer.available(), 8);
-    ASSERT_EQ(framer.page_count(), 0);
+    ASSERT_EQ(frames->available(), 8);
+    ASSERT_EQ(frames->page_count(), 0);
 }
 
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
+    Size fid;
     for (Size i {1}; i <= 8; i++) {
-        ASSERT_TRUE(framer.pin(Id {i}));
+        ASSERT_OK(frames->pin(Id {i}, fid));
     }
-    const auto r = framer.pin(Id {9UL});
-    ASSERT_FALSE(r.has_value());
-    ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what().data();
+    ASSERT_TRUE(frames->pin(Id {9UL}, fid).is_not_found());
 
-    framer.unpin(Size {1UL});
-    ASSERT_TRUE(framer.pin(Id {9UL}));
+    frames->unpin(Size {1UL});
+    ASSERT_OK(frames->pin(Id {9UL}, fid));
 }
 
 auto write_to_page(Page &page, const std::string &message) -> void
@@ -594,7 +600,8 @@ public:
         : wal {std::make_unique<DisabledWriteAheadLog>()},
           scratch(wal_scratch_size(page_size), '\x00')
     {
-        auto r = Pager::open({
+        Pager *temp;
+        EXPECT_OK(Pager::open({
             PREFIX,
             storage.get(),
             &scratch,
@@ -605,9 +612,8 @@ public:
             &in_txn,
             frame_count,
             page_size,
-        });
-        EXPECT_TRUE(r.has_value());
-        pager = std::move(*r);
+        }, &temp));
+        pager.reset(temp);
     }
 
     ~PagerTests() override = default;

@@ -67,9 +67,9 @@ public:
     friend class DatabaseImpl;
     friend class Pager;
 
+    explicit FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, Size frame_count);
     ~FrameManager() = default;
-    [[nodiscard]] static auto open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<FrameManager, Status>;
-    [[nodiscard]] auto pin(Id pid) -> tl::expected<Size, Status>;
+    [[nodiscard]] auto pin(Id pid, Size &fid) -> Status;
     [[nodiscard]] auto write_back(Size index) -> Status;
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto ref(Size index) -> Page;
@@ -120,8 +120,7 @@ public:
     FrameManager(FrameManager &&) = default;
 
 private:
-    FrameManager(std::unique_ptr<Editor> file, AlignedBuffer buffer, Size page_size, Size frame_count);
-    [[nodiscard]] auto read_page_from_file(Id, Span) const -> tl::expected<bool, Status>;
+    [[nodiscard]] auto read_page_from_file(Id, Span) const -> Status;
     [[nodiscard]] auto write_page_to_file(Id pid, const Slice &page) const -> Status;
 
     AlignedBuffer m_buffer;

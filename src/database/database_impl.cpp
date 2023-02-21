@@ -77,31 +77,28 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         m_owns_info_log = true;
     }
 
-    const auto initial = setup(m_db_prefix, *m_storage, sanitized);
-    if (!initial.has_value()) {
-        return initial.error();
-    }
-    auto [state, is_new] = *initial;
+    InitialState initial;
+    Calico_Try_S(setup(m_db_prefix, *m_storage, sanitized, initial));
+    auto [state, is_new] = initial;
     if (!is_new) {
         sanitized.page_size = state.page_size;
     }
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
     {
-        auto r = WriteAheadLog::open({
+        WriteAheadLog *temp;
+        Calico_Try_S(WriteAheadLog::open({
             m_wal_prefix,
             m_storage,
             sanitized.page_size,
             256,
-        });
-        if (!r.has_value()) {
-            return r.error();
-        }
-        wal = std::move(*r);
+        }, &temp));
+        wal.reset(temp);
     }
 
     {
-        auto r = Pager::open({
+        Pager *temp;
+        Calico_Try_S(Pager::open({
             m_db_prefix,
             m_storage,
             &m_scratch,
@@ -112,11 +109,8 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
             &m_in_txn,
             sanitized.cache_size / sanitized.page_size,
             sanitized.page_size,
-        });
-        if (!r.has_value()) {
-            return r.error();
-        }
-        pager = std::move(*r);
+        }, &temp));
+        pager.reset(temp);
         pager->load_state(state);
     }
 
@@ -362,11 +356,7 @@ auto DatabaseImpl::do_vacuum() -> Status
     // to match the header if necessary.
     pager->m_frames.m_page_count = target.value;
     Calico_Try_S(do_commit(m_commit_lsn));
-    if (auto r = pager->truncate(pager->page_count())) {
-        // The file size now matches the header page count.
-    } else {
-        return r.error();
-    }
+    Calico_Try_S(pager->truncate(pager->page_count()));
     return do_commit({});
 }
 
@@ -469,29 +459,29 @@ auto DatabaseImpl::TEST_validate() const -> void
     tree->TEST_check_nodes();
 }
 
-auto setup(const std::string &prefix, Storage &store, const Options &options) -> tl::expected<InitialState, Status>
+auto setup(const std::string &prefix, Storage &store, const Options &options, InitialState &init) -> Status
 {
     static constexpr Size MINIMUM_BUFFER_COUNT {16};
     FileHeader header;
 
     if (options.page_size < MINIMUM_PAGE_SIZE) {
-        return tl::make_unexpected(Status::invalid_argument("page size is too small"));
+        return Status::invalid_argument("page size is too small");
     }
 
     if (options.page_size > MAXIMUM_PAGE_SIZE) {
-        return tl::make_unexpected(Status::invalid_argument("page size is too large"));
+        return Status::invalid_argument("page size is too large");
     }
 
     if (!is_power_of_two(options.page_size)) {
-        return tl::make_unexpected(Status::invalid_argument("page size is not a power of 2"));
+        return Status::invalid_argument("page size is not a power of 2");
     }
 
     if (options.cache_size < options.page_size * MINIMUM_BUFFER_COUNT) {
-        return tl::make_unexpected(Status::invalid_argument("page cache is too small"));
+        return Status::invalid_argument("page cache is too small");
     }
 
     if (auto s = store.create_directory(prefix); !s.is_ok() && !s.is_logic_error()) {
-        return tl::make_unexpected(s);
+        return s;
     }
 
     const auto path = prefix + "data";
@@ -502,36 +492,31 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
     if (auto s = store.new_reader(path, &reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
         Size file_size {};
-        s = store.file_size(path, file_size);
-        if (!s.is_ok()) {
-            return tl::make_unexpected(s);
-        }
+        Calico_Try_S(store.file_size(path, file_size));
+
         if (file_size < FileHeader::SIZE) {
-            return tl::make_unexpected(Status::corruption("database is smaller than file header"));
+            return Status::corruption("database is smaller than file header");
         }
 
         Byte buffer[FileHeader::SIZE];
         Span span {buffer, sizeof(buffer)};
-        s = read_exact_at(*reader, span, 0);
+        Calico_Try_S(read_exact_at(*reader, span, 0));
 
         header = FileHeader {
             Page {Id::root(), span, false}
         };
 
-        if (!s.is_ok()) {
-            return tl::make_unexpected(s);
-        }
         if (header.page_size == 0) {
-            return tl::make_unexpected(Status::corruption("header indicates a page size of 0"));
+            return Status::corruption("header indicates a page size of 0");
         }
         if (file_size % header.page_size) {
-            return tl::make_unexpected(Status::corruption("database size is invalid"));
+            return Status::corruption("database size is invalid");
         }
         if (header.magic_code != FileHeader::MAGIC_CODE) {
-            return tl::make_unexpected(Status::invalid_argument("magic code is invalid"));
+            return Status::invalid_argument("magic code is invalid");
         }
         if (header.header_crc != header.compute_crc()) {
-            return tl::make_unexpected(Status::corruption("file header is corrupted"));
+            return Status::corruption("file header is corrupted");
         }
         exists = true;
 
@@ -541,19 +526,20 @@ auto setup(const std::string &prefix, Storage &store, const Options &options) ->
         header.header_crc = header.compute_crc();
 
     } else {
-        return tl::make_unexpected(s);
+        return s;
     }
 
     if (header.page_size < MINIMUM_PAGE_SIZE) {
-        return tl::make_unexpected(Status::corruption("header page size is too small"));
+        return Status::corruption("header page size is too small");
     }
     if (header.page_size > MAXIMUM_PAGE_SIZE) {
-        return tl::make_unexpected(Status::corruption("header page size is too large"));
+        return Status::corruption("header page size is too large");
     }
     if (!is_power_of_two(header.page_size)) {
-        return tl::make_unexpected(Status::corruption("header page size is not a power of 2"));
+        return Status::corruption("header page size is not a power of 2");
     }
-    return InitialState {header, !exists};
+    init = InitialState {header, !exists};
+    return Status::ok();
 }
 
 #undef Maybe_Set_Error

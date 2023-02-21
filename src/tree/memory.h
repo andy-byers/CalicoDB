@@ -51,9 +51,11 @@ public:
 
     // Read an entry from a pointer map.
     [[nodiscard]] auto read_entry(Id pid) const -> tl::expected<Entry, Status>;
+    [[nodiscard]] auto read_entry(Id pid, Entry &entry) const -> Status;
 
     // Write an entry to a pointer map.
     [[nodiscard]] auto write_entry(Id pid, Entry entry) -> tl::expected<void, Status>;
+    [[nodiscard]] auto write_entry_(Id pid, Entry entry) -> Status;
 };
 
 /* Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
@@ -82,6 +84,9 @@ public:
 
     [[nodiscard]] auto pop() -> tl::expected<Page, Status>;
     [[nodiscard]] auto push(Page page) -> tl::expected<void, Status>;
+
+    [[nodiscard]] auto pop(Page &page) -> Status;
+    [[nodiscard]] auto push_(Page page) -> Status;
 };
 
 /* Overflow chain management. The tree engine attempts to store all data in external node pages. If the user inserts
@@ -107,6 +112,11 @@ public:
     [[nodiscard]] auto write_chain(Id pid, Slice first, Slice second = {}) -> tl::expected<Id, Status>;
     [[nodiscard]] auto copy_chain(Id pid, Id overflow_id, Size size) -> tl::expected<Id, Status>;
     [[nodiscard]] auto erase_chain(Id pid) -> tl::expected<void, Status>;
+
+    [[nodiscard]] auto read_chain_(Span out, Id pid, Size offset = 0) const -> Status;
+    [[nodiscard]] auto write_chain(Id &out, Id pid, Slice first, Slice second = {}) -> Status;
+    [[nodiscard]] auto copy_chain(Id &out, Id pid, Id overflow_id, Size size) -> Status;
+    [[nodiscard]] auto erase_chain_(Id pid) -> Status;
 };
 
 [[nodiscard]] auto read_next_id(const Page &page) -> Id;

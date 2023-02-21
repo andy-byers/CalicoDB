@@ -18,7 +18,7 @@ WriteAheadLog::WriteAheadLog(const Parameters &param)
     CALICO_EXPECT_NE(m_segment_cutoff, 0);
 }
 
-auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>
+auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
     auto path = param.prefix;
     if (auto pos = path.rfind('/'); pos != std::string::npos) {
@@ -26,9 +26,7 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
     }
 
     std::vector<std::string> child_names;
-    if (auto s = param.store->get_children(path, child_names); !s.is_ok()) {
-        return tl::make_unexpected(s);
-    }
+    Calico_Try_S(param.store->get_children(path, child_names));
 
     std::vector<Id> segment_ids;
     for (auto &name: child_names) {
@@ -39,16 +37,17 @@ auto WriteAheadLog::open(const Parameters &param) -> tl::expected<WriteAheadLog:
     }
     std::sort(begin(segment_ids), end(segment_ids));
 
-    std::unique_ptr<WriteAheadLog> wal {new (std::nothrow) WriteAheadLog {param}};
+    auto *wal = new (std::nothrow) WriteAheadLog {param};
     if (wal == nullptr) {
-        return tl::make_unexpected(Status::system_error("out of memory"));
+        return Status::system_error("out of memory");
     }
 
     // Keep track of the segment files.
     for (const auto &id: segment_ids) {
         wal->m_set.add_segment(id);
     }
-    return wal;
+    *out = wal;
+    return Status::ok();
 }
 
 auto WriteAheadLog::close() -> Status
@@ -150,15 +149,13 @@ auto WriteAheadLog::truncate(Lsn lsn) -> Status
     auto current = m_set.last();
 
     while (!current.is_null()) {
-        auto first_lsn = read_first_lsn(
-            *m_storage, m_prefix, current, m_set);
-
-        if (first_lsn) {
-            if (*first_lsn <= lsn) {
-                break;
-            }
-        } else if (auto s = first_lsn.error(); !s.is_not_found()) {
+        Lsn first_lsn;
+        auto s = read_first_lsn(*m_storage, m_prefix, current, m_set, first_lsn);
+        if (!s.is_ok() && !s.is_not_found()) {
             return s;
+        }
+        if (first_lsn <= lsn) {
+            break;
         }
         const auto name = encode_segment_name(m_prefix, current);
         Calico_Try_S(m_storage->remove_file(name));
