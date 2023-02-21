@@ -57,7 +57,9 @@ static auto extract_value(const std::uint8_t *&data, Size &size)
     size -= needed_size;
 
     std::string result(result_size, '_');
-    result.append(std::to_string(result_size));
+    if (result_size) {
+        result.append(std::to_string(result_size));
+    }
     return result;
 }
 

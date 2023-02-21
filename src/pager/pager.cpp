@@ -264,7 +264,6 @@ auto Pager::allocate() -> tl::expected<Page, Status>
 
 auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
 {
-//    CALICO_EXPECT_LE(pid.as_index(), m_frames.page_count());
     const auto do_acquire = [this](auto &entry) -> tl::expected<Page, Status> {
         auto page = m_frames.ref(entry.index);
 
