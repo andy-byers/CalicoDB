@@ -10,11 +10,6 @@ namespace Calico {
 
 struct Node;
 
-/*
- * Simplified version of SQLite's local payload size computations. Doesn't attempt to exactly fill the
- * last overflow page.
- */
-
 static constexpr Size MAX_CELL_HEADER_SIZE =
     sizeof(std::uint64_t) + // Value size  (varint)
     sizeof(std::uint64_t) + // Key size    (varint)
@@ -87,7 +82,8 @@ auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell;
 auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell;
 
 struct Node {
-    explicit Node(Page inner, Byte *defragmentation_space);
+    Node() = default;
+    auto initialize() -> void;
     [[nodiscard]] auto take() && -> Page;
 
     Node(Node &&rhs) noexcept = default;

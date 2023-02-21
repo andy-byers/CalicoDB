@@ -37,27 +37,27 @@ public:
 
     ~Pager() = default;
 
-    [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>;
+    [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
     [[nodiscard]] auto page_count() const -> Size;
     [[nodiscard]] auto page_size() const -> Size;
     [[nodiscard]] auto hit_ratio() const -> double;
     [[nodiscard]] auto recovery_lsn() -> Id;
     [[nodiscard]] auto bytes_written() const -> Size;
-    [[nodiscard]] auto truncate(Size page_count) -> tl::expected<void, Status>;
+    [[nodiscard]] auto truncate(Size page_count) -> Status;
     [[nodiscard]] auto flush(Lsn target_lsn) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto allocate() -> tl::expected<Page, Status>;
-    [[nodiscard]] auto acquire(Id pid) -> tl::expected<Page, Status>;
+    [[nodiscard]] auto allocate(Page &page) -> Status;
+    [[nodiscard]] auto acquire(Id pid, Page &page) -> Status;
     auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
     auto save_state(FileHeader &header) -> void;
     auto load_state(const FileHeader &header) -> void;
 
 private:
-    explicit Pager(const Parameters &param, FrameManager framer);
+    explicit Pager(const Parameters &param, Editor *file, AlignedBuffer buffer);
     [[nodiscard]] auto pin_frame(Id pid) -> Status;
     [[nodiscard]] auto do_pin_frame(Id pid) -> Status;
-    [[nodiscard]] auto try_make_available() -> tl::expected<bool, Status>;
+    [[nodiscard]] auto make_frame_available() -> bool;
     auto watch_page(Page &page, PageCache::Entry &entry, int important) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
 

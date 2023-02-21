@@ -1,7 +1,7 @@
 
 #include "database/database_impl.h"
 #include "tools.h"
-#include "tree/cursor_internal.h"
+#include "tree/cursor_impl.h"
 #include "tree/header.h"
 #include "unit_tests.h"
 #include "wal/wal.h"
@@ -284,8 +284,7 @@ public:
         options.cache_size = 32 * options.page_size;
         options.storage = &storage;
 
-        const auto s = reopen();
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().to_string();
+        EXPECT_OK(reopen());
     }
 
     ~TestDatabase() = default;
@@ -295,11 +294,6 @@ public:
     {
         impl = std::make_unique<DatabaseImpl>();
         return impl->open("test", options);
-    }
-
-    auto snapshot() const -> std::string
-    {
-        return TestTools::snapshot(*options.storage, options.page_size);
     }
 
     Options options;
@@ -757,7 +751,7 @@ public:
         options.storage = storage.get();
 
         Database *db;
-        Calico_Try_S(Database::open(base, options, &db));
+        Calico_Try(Database::open(base, options, &db));
 
         ext->m_base.reset(db);
         ext->m_storage = std::move(storage);

@@ -2,7 +2,6 @@
 #define CALICO_PAGER_FRAMER_H
 
 #include "calico/status.h"
-#include "utils/expected.hpp"
 #include "utils/types.h"
 #include <list>
 #include <memory>
@@ -51,7 +50,7 @@ public:
     }
 
     [[nodiscard]] auto lsn() const -> Id;
-    [[nodiscard]] auto ref(bool is_writable) -> Page;
+    auto ref(Page &page, bool is_writable) -> void;
     auto upgrade(Page &page) -> void;
     auto unref(Page &page) -> void;
 
@@ -67,15 +66,15 @@ public:
     friend class DatabaseImpl;
     friend class Pager;
 
+    explicit FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, Size frame_count);
     ~FrameManager() = default;
-    [[nodiscard]] static auto open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<FrameManager, Status>;
-    [[nodiscard]] auto pin(Id pid) -> tl::expected<Size, Status>;
     [[nodiscard]] auto write_back(Size index) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto ref(Size index) -> Page;
+    [[nodiscard]] auto pin(Id pid, Size &fid) -> Status;
     auto unpin(Size) -> void;
-    auto upgrade(Size index, Page &page) -> void;
+    auto ref(Size index, Page &out) -> void;
     auto unref(Size index, Page page) -> void;
+    auto upgrade(Size index, Page &page) -> void;
     auto load_state(const FileHeader &header) -> void;
     auto save_state(FileHeader &header) const -> void;
 
@@ -120,8 +119,7 @@ public:
     FrameManager(FrameManager &&) = default;
 
 private:
-    FrameManager(std::unique_ptr<Editor> file, AlignedBuffer buffer, Size page_size, Size frame_count);
-    [[nodiscard]] auto read_page_from_file(Id, Span) const -> tl::expected<bool, Status>;
+    [[nodiscard]] auto read_page_from_file(Id, Span) const -> Status;
     [[nodiscard]] auto write_page_to_file(Id pid, const Slice &page) const -> Status;
 
     AlignedBuffer m_buffer;

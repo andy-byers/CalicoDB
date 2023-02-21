@@ -227,7 +227,7 @@ auto DynamicMemory::try_intercept_syscall(Interceptor::Type type, const std::str
     Slice filename {path};
     for (const auto &interceptor: m_interceptors) {
         if (interceptor.type == type && filename.starts_with(interceptor.prefix)) {
-            Calico_Try_S(interceptor());
+            Calico_Try(interceptor());
         }
     }
     return Status::ok();
@@ -265,7 +265,8 @@ auto print_references(Pager &pager, PointerMap &pointers) -> void
             std::cerr << "node -> NULL\n";
             continue;
         }
-        const auto entry = pointers.read_entry(pid).value();
+        PointerMap::Entry entry;
+        CHECK_OK(pointers.read_entry(pid, entry));
         switch (entry.type) {
             case PointerMap::NODE:
                 std::cerr << "node";

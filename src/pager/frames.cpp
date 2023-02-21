@@ -19,7 +19,7 @@ auto Frame::lsn() const -> Id
     return {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::SIZE))};
 }
 
-auto Frame::ref(bool is_writable) -> Page
+auto Frame::ref(Page &page, bool is_writable) -> void
 {
     CALICO_EXPECT_FALSE(m_is_writable);
 
@@ -27,8 +27,10 @@ auto Frame::ref(bool is_writable) -> Page
         CALICO_EXPECT_EQ(m_ref_count, 0);
         m_is_writable = true;
     }
+    page.m_id = m_page_id;
+    page.m_span = m_bytes;
+    page.m_write = is_writable;
     m_ref_count++;
-    return Page {m_page_id, data(), is_writable};
 }
 
 auto Frame::upgrade(Page &page) -> void
@@ -53,30 +55,9 @@ auto Frame::unref(Page &page) -> void
     m_ref_count--;
 }
 
-auto FrameManager::open(const std::string &prefix, Storage *storage, Size page_size, Size frame_count) -> tl::expected<FrameManager, Status>
-{
-    CALICO_EXPECT_TRUE(is_power_of_two(page_size));
-    CALICO_EXPECT_GE(page_size, MINIMUM_PAGE_SIZE);
-    CALICO_EXPECT_LE(page_size, MAXIMUM_PAGE_SIZE);
-
-    Editor *temp_file {};
-    auto s = storage->new_editor(prefix + "data", &temp_file);
-    std::unique_ptr<Editor> file {temp_file};
-
-    // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
-    // potentially be used for direct I/O.
-    const auto cache_size = page_size * frame_count;
-    AlignedBuffer buffer {cache_size, page_size};
-    if (buffer.get() == nullptr) {
-        return tl::make_unexpected(Status::system_error("out of memory"));
-    }
-
-    return FrameManager {std::move(file), std::move(buffer), page_size, frame_count};
-}
-
-FrameManager::FrameManager(std::unique_ptr<Editor> file, AlignedBuffer buffer, Size page_size, Size frame_count)
+FrameManager::FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, Size frame_count)
     : m_buffer {std::move(buffer)},
-      m_file {std::move(file)},
+      m_file {file},
       m_page_size {page_size}
 {
     // The buffer should be aligned to the page size.
@@ -91,11 +72,11 @@ FrameManager::FrameManager(std::unique_ptr<Editor> file, AlignedBuffer buffer, S
     }
 }
 
-auto FrameManager::ref(Size index) -> Page
+auto FrameManager::ref(Size index, Page &out) -> void
 {
     m_ref_sum++;
     CALICO_EXPECT_LT(index, m_frames.size());
-    return m_frames[index].ref(false);
+    m_frames[index].ref(out, false);
 }
 
 auto FrameManager::unref(Size index, Page page) -> void
@@ -112,31 +93,30 @@ auto FrameManager::upgrade(Size index, Page &page) -> void
     m_frames[index].upgrade(page);
 }
 
-auto FrameManager::pin(Id pid) -> tl::expected<Size, Status>
+auto FrameManager::pin(Id pid, Size &fid) -> Status
 {
     CALICO_EXPECT_FALSE(pid.is_null());
 
     if (m_available.empty()) {
-        return tl::make_unexpected(Status::not_found("out of frames"));
+        return Status::not_found("out of frames");
     }
 
-    auto fid = m_available.back();
+    fid = m_available.back();
     CALICO_EXPECT_LT(fid, m_frames.size());
     auto &frame = m_frames[fid];
     CALICO_EXPECT_EQ(frame.ref_count(), 0);
 
-    if (auto r = read_page_from_file(pid, frame.data())) {
-        if (!*r) {
-            // We just tried to read at or past EOF. This happens when we allocate a new page or roll the WAL forward.
-            mem_clear(frame.data());
-            m_page_count++;
-        }
-    } else {
-        return tl::make_unexpected(r.error());
+    auto s = read_page_from_file(pid, frame.data());
+    if (s.is_not_found()) {
+        // We just tried to read at or past EOF. This happens when we allocate a new page or roll the WAL forward.
+        mem_clear(frame.data());
+        m_page_count++;
+    } else if (!s.is_ok()) {
+        return s;
     }
     m_available.pop_back();
     frame.reset(pid);
-    return fid;
+    return Status::ok();
 }
 
 auto FrameManager::unpin(Size id) -> void
@@ -162,35 +142,32 @@ auto FrameManager::sync() -> Status
     return m_file->sync();
 }
 
-auto FrameManager::read_page_from_file(Id id, Span out) const -> tl::expected<bool, Status>
+
+auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
 {
     CALICO_EXPECT_EQ(m_page_size, out.size());
-    const auto file_size = m_page_count * m_page_size;
     const auto offset = id.as_index() * out.size();
 
     // Don't even try to call read() if the file isn't large enough. The system call can be pretty slow even if it doesn't read anything.
     // This happens when we are allocating a page from the end of the file.
-    if (offset >= file_size) {
-        return false;
+    if (offset >= m_page_count * m_page_size) {
+        return Status::not_found("end of file");
     }
 
     auto read_size = out.size();
-    auto s = m_file->read(out.data(), read_size, offset);
-    if (!s.is_ok()) {
-        return tl::make_unexpected(s);
-    }
+    Calico_Try(m_file->read(out.data(), read_size, offset));
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
     if (read_size == m_page_size) {
-        return true;
+        return Status::ok();
     }
 
     // In that case, we will hit EOF here.
     if (read_size == 0) {
-        return false;
+        return Status::not_found("end of file");
     }
 
-    return tl::make_unexpected(Status::system_error("incomplete read"));
+    return Status::system_error("incomplete read");
 }
 
 auto FrameManager::write_page_to_file(Id pid, const Slice &page) const -> Status

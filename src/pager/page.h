@@ -22,11 +22,7 @@ public:
     friend struct Node;
     friend class Frame;
 
-    explicit Page(Id id, Span span, bool write)
-        : m_span {span},
-          m_id {id},
-          m_write {write}
-    {}
+    Page() = default;
 
     [[nodiscard]]
     auto is_writable() const -> bool

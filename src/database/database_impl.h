@@ -7,7 +7,6 @@
 #include "pager/pager.h"
 #include "tree/header.h"
 #include "tree/tree.h"
-#include "utils/expected.hpp"
 #include "wal/wal.h"
 #include "wal/cleanup.h"
 #include "wal/writer.h"
@@ -75,7 +74,7 @@ private:
     bool m_sync {};
 };
 
-auto setup(const std::string &, Storage &, const Options &) -> tl::expected<InitialState, Status>;
+auto setup(const std::string &, Storage &, const Options &, InitialState &init) -> Status;
 
 } // namespace Calico
 

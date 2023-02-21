@@ -540,31 +540,37 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 class FramerTests : public InMemoryTest {
 public:
     explicit FramerTests()
-        : framer {*FrameManager::open("test/data", storage.get(), 0x200, 8)}
-    {}
+    {
+
+        Editor *file {};
+        EXPECT_OK(storage->new_editor("test/data", &file));
+
+        AlignedBuffer buffer {0x200 * 8, 0x200};
+
+        frames = std::make_unique<FrameManager>(file, std::move(buffer), 0x200, 8);
+    }
 
     ~FramerTests() override = default;
 
-    FrameManager framer;
+    std::unique_ptr<FrameManager> frames;
 };
 
 TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
 {
-    ASSERT_EQ(framer.available(), 8);
-    ASSERT_EQ(framer.page_count(), 0);
+    ASSERT_EQ(frames->available(), 8);
+    ASSERT_EQ(frames->page_count(), 0);
 }
 
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
+    Size fid;
     for (Size i {1}; i <= 8; i++) {
-        ASSERT_TRUE(framer.pin(Id {i}));
+        ASSERT_OK(frames->pin(Id {i}, fid));
     }
-    const auto r = framer.pin(Id {9UL});
-    ASSERT_FALSE(r.has_value());
-    ASSERT_TRUE(r.error().is_not_found()) << "Unexpected Error: " << r.error().what().data();
+    ASSERT_TRUE(frames->pin(Id {9UL}, fid).is_not_found());
 
-    framer.unpin(Size {1UL});
-    ASSERT_TRUE(framer.pin(Id {9UL}));
+    frames->unpin(Size {1UL});
+    ASSERT_OK(frames->pin(Id {9UL}, fid));
 }
 
 auto write_to_page(Page &page, const std::string &message) -> void
@@ -594,7 +600,8 @@ public:
         : wal {std::make_unique<DisabledWriteAheadLog>()},
           scratch(wal_scratch_size(page_size), '\x00')
     {
-        auto r = Pager::open({
+        Pager *temp;
+        EXPECT_OK(Pager::open({
             PREFIX,
             storage.get(),
             &scratch,
@@ -605,9 +612,8 @@ public:
             &in_txn,
             frame_count,
             page_size,
-        });
-        EXPECT_TRUE(r.has_value());
-        pager = std::move(*r);
+        }, &temp));
+        pager.reset(temp);
     }
 
     ~PagerTests() override = default;
@@ -615,11 +621,10 @@ public:
     [[nodiscard]]
     auto allocate_write(const std::string &message) const
     {
-        auto r = pager->allocate();
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-//        pager->upgrade(*r);
-        write_to_page(*r, message);
-        return std::move(*r);
+        Page page;
+        EXPECT_OK(pager->allocate(page));
+        write_to_page(page, message);
+        return page;
     }
 
     [[nodiscard]]
@@ -635,11 +640,11 @@ public:
     [[nodiscard]]
     auto acquire_write(Id id, const std::string &message) const
     {
-        auto r = pager->acquire(id);
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-        pager->upgrade(*r);
-        write_to_page(*r, message);
-        return std::move(*r);
+        Page page;
+        EXPECT_OK(pager->acquire(id, page));
+        pager->upgrade(page);
+        write_to_page(page, message);
+        return page;
     }
 
     auto acquire_write_release(Id id, const std::string &message) const
@@ -652,10 +657,10 @@ public:
     [[nodiscard]]
     auto acquire_read_release(Id id, Size size) const
     {
-        auto r = pager->acquire(id);
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-        auto message = read_from_page(*r, size);
-        pager->release(std::move(*r));
+        Page page;
+        EXPECT_OK(pager->acquire(id, page));
+        auto message = read_from_page(page, size);
+        pager->release(std::move(page));
         EXPECT_OK(status);
         return message;
     }
@@ -694,19 +699,21 @@ TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
 {
     const auto id = allocate_write_release(test_message);
-    auto r = pager->acquire(id);
-    ASSERT_EQ(id, r->id());
+    Page page;
+    ASSERT_OK(pager->acquire(id, page));
+    ASSERT_EQ(id, page.id());
     ASSERT_EQ(id, Id::root());
-    pager->release(std::move(*r));
+    pager->release(std::move(page));
 }
 
 TEST_F(PagerTests, MultipleReaders)
 {
     const auto id = allocate_write_release(test_message);
-    auto page_1a = pager->acquire(id).value();
-    auto page_1b = pager->acquire(id).value();
-    pager->release(std::move(page_1a));
-    pager->release(std::move(page_1b));
+    Page page_a, page_b;
+    ASSERT_OK(pager->acquire(id, page_a));
+    ASSERT_OK(pager->acquire(id, page_b));
+    pager->release(std::move(page_a));
+    pager->release(std::move(page_b));
 }
 
 template<class T>

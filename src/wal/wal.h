@@ -10,7 +10,6 @@
 #include "helpers.h"
 #include "record.h"
 #include "utils/encoding.h"
-#include "utils/expected.hpp"
 #include "utils/scratch.h"
 #include "utils/types.h"
 
@@ -32,12 +31,9 @@ public:
         Size segment_cutoff {};
     };
 
-    using Ptr = std::unique_ptr<WriteAheadLog>;
-    using Callback = std::function<Status(WalPayloadOut)>;
-
     WriteAheadLog() = default;
     virtual ~WriteAheadLog() = default;
-    [[nodiscard]] static auto open(const Parameters &param) -> tl::expected<WriteAheadLog::Ptr, Status>;
+    [[nodiscard]] static auto open(const Parameters &param, WriteAheadLog **out) -> Status;
     [[nodiscard]] virtual auto close() -> Status;
     [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;

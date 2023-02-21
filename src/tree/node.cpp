@@ -123,7 +123,7 @@ public:
 
     [[nodiscard]] auto allocate(PageSize needed_size) -> PageSize;
     auto free(PageSize ptr, PageSize size) -> void;
-    auto defragment(std::optional<PageSize> skip_index) -> void;
+    auto defragment(std::optional<PageSize> skip = std::nullopt) -> void;
 };
 
 auto BlockAllocator::allocate_from_free_list(PageSize needed_size) -> PageSize
@@ -208,11 +208,11 @@ auto BlockAllocator::free(PageSize ptr, PageSize size) -> void
     header.free_total += size;
 }
 
-auto BlockAllocator::defragment(std::optional<PageSize> skip_index) -> void
+auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
 {
     auto &header = m_node->header;
     const auto n = header.cell_count;
-    const auto to_skip = skip_index ? *skip_index : n;
+    const auto to_skip = skip.has_value() ? *skip : n;
     auto end = static_cast<PageSize>(m_node->page.size());
     auto ptr = m_node->page.data();
     std::vector<PageSize> ptrs(n);
@@ -242,15 +242,14 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip_index) -> void
     header.frag_count = 0;
     header.free_start = 0;
     header.free_total = 0;
-    m_node->gap_size = PageSize(end - cell_area_offset(*m_node));
+    m_node->gap_size = static_cast<PageSize>(end - cell_area_offset(*m_node));
 }
 
-Node::Node(Page inner, Byte *defragmentation_space)
-    : page {std::move(inner)},
-      scratch {defragmentation_space},
-      header {page},
-      slots_offset {PageSize(page_offset(page) + NodeHeader::SIZE)}
+auto Node::initialize() -> void
 {
+
+    slots_offset = static_cast<PageSize>(page_offset(page) + NodeHeader::SIZE);
+
     if (header.cell_start == 0) {
         header.cell_start = static_cast<PageSize>(page.size());
     }
@@ -287,7 +286,7 @@ auto Node::insert_slot(Size index, Size pointer) -> void
     put_u16(data, static_cast<PageSize>(pointer));
 
     insert_delta(page.m_deltas, {offset, size + sizeof(PageSize)});
-    gap_size -= PageSize(sizeof(PageSize));
+    gap_size -= static_cast<PageSize>(sizeof(PageSize));
     header.cell_count++;
 }
 
@@ -307,8 +306,9 @@ auto Node::remove_slot(Size index) -> void
 
 auto Node::take() && -> Page
 {
-    if (page.is_writable())
+    if (page.is_writable()) {
         header.write(page);
+    }
     return std::move(page);
 }
 
@@ -382,9 +382,13 @@ auto usable_space(const Node &node) -> Size
 
 auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
 {
-    const auto &header = node.header;
-    CALICO_EXPECT_LE(index, header.cell_count);
-    const auto can_allocate = size + sizeof(PageSize) <= usable_space(node);
+    CALICO_EXPECT_LE(index, node.header.cell_count);
+
+    if (size + sizeof(PageSize) > usable_space(node)) {
+        node.overflow_index = index;
+        return 0;
+    }
+
     BlockAllocator alloc {node};
 
     // Ensure that the fragment count byte doesn't overflow.
@@ -393,27 +397,20 @@ auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
     }
 
     // We don't have room to insert the cell pointer.
-    if (node.gap_size < header.cell_start) {
-        if (!can_allocate) {
-            node.overflow_index = index;
-            return 0;
-        }
+    if (node.gap_size < sizeof(PageSize)) {
         alloc.defragment(std::nullopt);
     }
     // insert a dummy cell pointer to save the slot.
     node.insert_slot(index, node.page.size() - 1);
 
     auto offset = alloc.allocate(size);
-    if (!offset && can_allocate) {
+    if (offset == 0) {
         alloc.defragment(index);
         offset = alloc.allocate(size);
     }
-
-    if (!offset) {
-        node.overflow_index = index;
-        node.remove_slot(index);
-        return 0;
-    }
+    // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
+    // to allocate() following defragmentation should succeed.
+    CALICO_EXPECT_NE(offset, 0);
     node.set_slot(index, offset);
 
     // Signal that there will be a change here, but don't write anything yet.
@@ -440,7 +437,7 @@ auto read_cell(Node &node, Size index) -> Cell
 
 auto write_cell(Node &node, Size index, const Cell &cell) -> Size
 {
-    if (const auto offset = allocate_block(node, PageSize(index), PageSize(cell.size))) {
+    if (const auto offset = allocate_block(node, static_cast<PageSize>(index), static_cast<PageSize>(cell.size))) {
         auto memory = node.page.span(offset, cell.size);
         std::memcpy(memory.data(), cell.ptr, cell.size);
         return offset;
@@ -482,7 +479,7 @@ auto emplace_cell(Byte *out, Size key_size, Size value_size, const Slice &local_
 auto manual_defragment(Node &node) -> void
 {
     BlockAllocator alloc {node};
-    alloc.defragment(std::nullopt);
+    alloc.defragment();
 }
 
 auto detach_cell(Cell &cell, Byte *backing) -> void
