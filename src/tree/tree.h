@@ -59,8 +59,8 @@ public:
      */
     [[nodiscard]] auto promote(Byte *scratch, Cell &cell, Id parent_id) -> tl::expected<void, Status>;
 
-    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>;
-    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>;
+    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>;
+    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>;
 };
 
 class BPlusTree {
@@ -69,10 +69,10 @@ class BPlusTree {
     friend class CursorInternal;
     friend class CursorImpl;
 
-    std::array<std::string, 4> m_scratch;
-    std::string m_lhs_key;
-    std::string m_rhs_key;
-    std::string m_anchor;
+    mutable std::array<std::string, 4> m_scratch;
+    mutable std::string m_lhs_key;
+    mutable std::string m_rhs_key;
+    mutable std::string m_anchor;
 
     NodeMeta m_external_meta;
     NodeMeta m_internal_meta;
@@ -84,13 +84,13 @@ class BPlusTree {
     Pager *m_pager {};
 
     [[nodiscard]] auto vacuum_step(Page &head, Id last_id) -> tl::expected<void, Status>;
-    [[nodiscard]] auto make_existing_node(Page page) -> Node;
-    [[nodiscard]] auto make_fresh_node(Page page, bool is_external) -> Node;
+    [[nodiscard]] auto make_existing_node(Page page) const -> Node;
+    [[nodiscard]] auto make_fresh_node(Page page, bool is_external) const -> Node;
     [[nodiscard]] auto scratch(Size index) -> Byte *;
     [[nodiscard]] auto allocate(bool is_external) -> tl::expected<Node, Status>;
-    [[nodiscard]] auto acquire(Id pid, bool upgrade = false) -> tl::expected<Node, Status>;
-    [[nodiscard]] auto lowest() -> tl::expected<Node, Status>;
-    [[nodiscard]] auto highest() -> tl::expected<Node, Status>;
+    [[nodiscard]] auto acquire(Id pid, bool upgrade = false) const -> tl::expected<Node, Status>;
+    [[nodiscard]] auto lowest() const -> tl::expected<Node, Status>;
+    [[nodiscard]] auto highest() const -> tl::expected<Node, Status>;
     [[nodiscard]] auto destroy(Node node) -> tl::expected<void, Status>;
     auto release(Node node) const -> void;
 
@@ -98,8 +98,8 @@ public:
     explicit BPlusTree(Pager &pager);
 
     [[nodiscard]] auto setup() -> tl::expected<Node, Status>;
-    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>;
-    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>;
+    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>;
+    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>;
     [[nodiscard]] auto search(const Slice &key) -> tl::expected<SearchResult, Status>;
     [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> tl::expected<bool, Status>;
     [[nodiscard]] auto erase(const Slice &key) -> tl::expected<void, Status>;

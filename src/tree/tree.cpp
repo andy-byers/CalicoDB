@@ -130,7 +130,7 @@ static auto reset_node(Node &node) -> void
 class BPlusTreeInternal {
 public:
     [[nodiscard]]
-    static auto is_pointer_map(BPlusTree &tree, Id pid) -> bool
+    static auto is_pointer_map(const BPlusTree &tree, Id pid) -> bool
     {
         return tree.m_pointers.lookup(pid) == pid;
     }
@@ -862,7 +862,7 @@ auto PayloadManager::promote(Byte *scratch, Cell &cell, Id parent_id) -> tl::exp
     return {};
 }
 
-auto PayloadManager::collect_key(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
+auto PayloadManager::collect_key(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>
 {
     if (scratch.size() < cell.key_size) {
         scratch.resize(cell.key_size);
@@ -879,7 +879,7 @@ auto PayloadManager::collect_key(std::string &scratch, const Cell &cell) -> tl::
     return span.range(0, cell.key_size);
 }
 
-auto PayloadManager::collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
+auto PayloadManager::collect_value(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>
 {
     Size value_size;
     decode_varint(cell.ptr, value_size);
@@ -938,7 +938,7 @@ auto BPlusTree::setup() -> tl::expected<Node, Status>
     return root;
 }
 
-auto BPlusTree::make_fresh_node(Page page, bool is_external) -> Node
+auto BPlusTree::make_fresh_node(Page page, bool is_external) const -> Node
 {
     NodeHeader header;
     header.is_external = is_external;
@@ -948,7 +948,7 @@ auto BPlusTree::make_fresh_node(Page page, bool is_external) -> Node
     return make_existing_node(std::move(page));
 }
 
-auto BPlusTree::make_existing_node(Page page) -> Node
+auto BPlusTree::make_existing_node(Page page) const  -> Node
 {
     Node node {std::move(page), m_scratch.back().data()};
     if (node.header.is_external) {
@@ -988,7 +988,7 @@ auto BPlusTree::allocate(bool is_external) -> tl::expected<Node, Status>
     return make_fresh_node(std::move(page), is_external);
 }
 
-auto BPlusTree::acquire(Id pid, bool upgrade) -> tl::expected<Node, Status>
+auto BPlusTree::acquire(Id pid, bool upgrade) const -> tl::expected<Node, Status>
 {
     CALICO_EXPECT_FALSE(BPlusTreeInternal::is_pointer_map(*this, pid));
     Calico_New_R(page, m_pager->acquire(pid));
@@ -1046,7 +1046,7 @@ auto BPlusTree::erase(const Slice &key) -> tl::expected<void, Status>
     return tl::make_unexpected(Status::not_found("not found"));
 }
 
-auto BPlusTree::lowest() -> tl::expected<Node, Status>
+auto BPlusTree::lowest() const -> tl::expected<Node, Status>
 {
     Calico_New_R(node, acquire(Id::root()));
     while (!node.header.is_external) {
@@ -1057,7 +1057,7 @@ auto BPlusTree::lowest() -> tl::expected<Node, Status>
     return node;
 }
 
-auto BPlusTree::highest() -> tl::expected<Node, Status>
+auto BPlusTree::highest() const -> tl::expected<Node, Status>
 {
     Calico_New_R(node, acquire(Id::root()));
     while (!node.header.is_external) {
@@ -1068,12 +1068,12 @@ auto BPlusTree::highest() -> tl::expected<Node, Status>
     return node;
 }
 
-auto BPlusTree::collect_key(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
+auto BPlusTree::collect_key(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>
 {
     return m_payloads.collect_key(scratch, cell);
 }
 
-auto BPlusTree::collect_value(std::string &scratch, const Cell &cell) -> tl::expected<Slice, Status>
+auto BPlusTree::collect_value(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>
 {
     return m_payloads.collect_value(scratch, cell);
 }

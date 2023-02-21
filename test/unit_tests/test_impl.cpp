@@ -992,6 +992,51 @@ TEST_F(ApiTests, HandlesLargeKeys)
     delete cursor;
 }
 
+class LargePayloadTests: public ApiTests {
+public:
+    [[nodiscard]]
+    auto random_string(Size max_size) const -> std::string
+    {
+        return random.Generate(random.Next<Size>(1, max_size)).to_string();
+    }
+
+    auto run_test(Size max_key_size, Size max_value_size)
+    {
+        std::unordered_map<std::string, std::string> map;
+        for (Size i {}; i < 100; ++i) {
+            const auto key = random_string(max_key_size);
+            const auto value = random_string(max_value_size);
+            ASSERT_OK(db->put(key, value));
+        }
+        ASSERT_OK(db->commit());
+
+        for (const auto &[key, value]: map) {
+            std::string result;
+            ASSERT_OK(db->get(key, result));
+            ASSERT_EQ(result, value);
+            ASSERT_OK(db->erase(key));
+        }
+        ASSERT_OK(db->commit());
+    }
+
+    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+};
+
+TEST_F(LargePayloadTests, LargeKeys)
+{
+    run_test(100 * options.page_size, 100);
+}
+
+TEST_F(LargePayloadTests, LargeValues)
+{
+    run_test(100, 100 * options.page_size);
+}
+
+TEST_F(LargePayloadTests, LargePayloads)
+{
+    run_test(100 * options.page_size, 100 * options.page_size);
+}
+
 class CommitFailureTests : public ApiTests {
 protected:
     ~CommitFailureTests() override = default;

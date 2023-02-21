@@ -4,7 +4,7 @@
 > Please don't use it for anything serious!
 
 Calico DB is an embedded key-value database written in C++17.
-It exposes a small API that allows storage and retrieval of variable-length byte sequences.
+It exposes a small API that allows storage and retrieval of arbitrary byte sequences.
 
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
@@ -53,15 +53,15 @@ Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name             | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:---------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>      |                      333,667 |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup>   |                      142,613 |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>    |                      143,575 |                     173,461 |                    288,684 |
-| `readrandom`               |                      504,541 |                     515,198 |                    413,907 |
-| `readseq`                  |                    3,215,434 |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`<sup>*</sup> |                        2,085 |                       5,215 |                     11,387 |
-| `fillseq100k`<sup>*</sup>  |                        1,746 |                       6,731 |                      9,560 |
-| `readseq100k`              |                       19,814 |                      49,232 |                     65,557 |
-| `readrand100k`             |                       20,427 |                      10,894 |                     66,028 |
+| `fillseq`<sup>*</sup>      |                      335,909 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup>   |                      105,764 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>    |                      125,960 |                     173,461 |                    288,684 |
+| `readrandom`               |                      478,469 |                     515,198 |                    413,907 |
+| `readseq`                  |                    2,710,027 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`<sup>*</sup> |                        3,463 |                       5,215 |                     11,387 |
+| `fillseq100k`<sup>*</sup>  |                        3,808 |                       6,731 |                      9,560 |
+| `readseq100k`              |                       21,228 |                      49,232 |                     65,557 |
+| `readrand100k`             |                       20,927 |                      10,894 |                     66,028 |
 
 <sup>*</sup> These benchmarks are affected by the fact that we use a batch size of 1,000.
 The call to `Database::commit()` will flush pages from older transactions, advance the WAL to a new segment, and possibly remove obsolete WAL segments, so it has quite a bit of overhead.

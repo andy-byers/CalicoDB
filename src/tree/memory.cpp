@@ -66,7 +66,7 @@ auto FreeList::pop() -> tl::expected<Page, Status>
     return tl::make_unexpected(Status::logic_error("free list is empty"));
 }
 
-auto OverflowList::read_chain(Id pid, Span out, Size offset) -> tl::expected<void, Status>
+auto OverflowList::read_chain(Id pid, Span out, Size offset) const -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
         Calico_New_R(page, m_pager->acquire(pid));
@@ -192,7 +192,7 @@ static auto decode_entry(const Byte *data) -> PointerMap::Entry
     return entry;
 }
 
-auto PointerMap::read_entry(Id pid) -> tl::expected<Entry, Status>
+auto PointerMap::read_entry(Id pid) const -> tl::expected<Entry, Status>
 {
     const auto mid = lookup(pid);
     CALICO_EXPECT_GE(mid.value, 2);
@@ -226,7 +226,7 @@ auto PointerMap::write_entry(Id pid, Entry entry) -> tl::expected<void, Status>
     return {};
 }
 
-auto PointerMap::lookup(Id pid) -> Id
+auto PointerMap::lookup(Id pid) const -> Id
 {
     // Root page (1) has no parents, and page 2 is the first pointer map page. If "pid" is a pointer map
     // page, "pid" will be returned.

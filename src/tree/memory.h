@@ -47,10 +47,10 @@ public:
     {}
 
     // Find the page ID of the pointer map that holds the back pointer for page "pid".
-    [[nodiscard]] auto lookup(Id pid) -> Id;
+    [[nodiscard]] auto lookup(Id pid) const -> Id;
 
     // Read an entry from a pointer map.
-    [[nodiscard]] auto read_entry(Id pid) -> tl::expected<Entry, Status>;
+    [[nodiscard]] auto read_entry(Id pid) const -> tl::expected<Entry, Status>;
 
     // Write an entry to a pointer map.
     [[nodiscard]] auto write_entry(Id pid, Entry entry) -> tl::expected<void, Status>;
@@ -103,9 +103,9 @@ public:
           m_freelist {&freelist},
           m_pointers {&pointers} {}
 
+    [[nodiscard]] auto read_chain(Id pid, Span out, Size offset = 0) const -> tl::expected<void, Status>;
     [[nodiscard]] auto write_chain(Id pid, Slice first, Slice second = {}) -> tl::expected<Id, Status>;
     [[nodiscard]] auto copy_chain(Id pid, Id overflow_id, Size size) -> tl::expected<Id, Status>;
-    [[nodiscard]] auto read_chain(Id pid, Span out, Size offset = 0) -> tl::expected<void, Status>;
     [[nodiscard]] auto erase_chain(Id pid) -> tl::expected<void, Status>;
 };
 
