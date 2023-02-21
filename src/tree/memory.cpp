@@ -66,26 +66,39 @@ auto FreeList::pop() -> tl::expected<Page, Status>
     return tl::make_unexpected(Status::logic_error("free list is empty"));
 }
 
-auto OverflowList::read_chain(Id pid, Span out) -> tl::expected<void, Status>
+auto OverflowList::read_chain(Id pid, Span out, Size offset) const -> tl::expected<void, Status>
 {
     while (!out.is_empty()) {
         Calico_New_R(page, m_pager->acquire(pid));
-        const auto content = get_readable_content(page, out.size());
-        mem_copy(out, content);
-        out.advance(content.size());
+        auto content = get_readable_content(page, page.size());
+
+        if (offset) {
+            const auto max = std::min(offset, content.size());
+            content.advance(max);
+            offset -= max;
+        }
+        if (!content.is_empty()) {
+            const auto size = std::min(out.size(), content.size());
+            mem_copy(out, content, size);
+            out.advance(size);
+        }
         pid = read_next_id(page);
         m_pager->release(std::move(page));
     }
     return {};
 }
 
-auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Status>
+auto OverflowList::write_chain(Id pid, Slice first, Slice second) -> tl::expected<Id, Status>
 {
-    CALICO_EXPECT_FALSE(overflow.is_empty());
     std::optional<Page> prev;
     auto head = Id::null();
 
-    while (!overflow.is_empty()) {
+    if (first.is_empty()) {
+        first = second;
+        second.clear();
+    }
+
+    while (!first.is_empty()) {
         auto r = m_freelist->pop()
             .or_else([this](const Status &error) -> tl::expected<Page, Status> {
                 if (error.is_logic_error()) {
@@ -100,23 +113,32 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
             });
         Calico_New_R(page, std::move(r));
 
-        auto content = get_writable_content(page, overflow.size());
-        mem_copy(content, overflow, content.size());
-        overflow.advance(content.size());
+        auto content = get_writable_content(page, first.size() + second.size());
+        auto limit = std::min(first.size(), content.size());
+        mem_copy(content, first, limit);
+        first.advance(limit);
 
+        if (first.is_empty()) {
+            first = second;
+            second.clear();
+
+            if (!first.is_empty()) {
+                content.advance(limit);
+                limit = std::min(first.size(), content.size());
+                mem_copy(content, first, limit);
+                first.advance(limit);
+            }
+        }
+        PointerMap::Entry entry {pid, PointerMap::OVERFLOW_HEAD};
         if (prev) {
             write_next_id(*prev, page.id());
             m_pager->release(std::move(*prev));
-
-            // Update overflow link back pointers.
-            const PointerMap::Entry entry {prev->id(), PointerMap::OVERFLOW_LINK};
-            Calico_Try_R(m_pointers->write_entry(page.id(), entry));
+            entry.back_ptr = prev->id();
+            entry.type = PointerMap::OVERFLOW_LINK;
         } else {
             head = page.id();
-
-            const PointerMap::Entry entry {pid, PointerMap::OVERFLOW_HEAD};
-            Calico_Try_R(m_pointers->write_entry(page.id(), entry));
         }
+        Calico_Try_R(m_pointers->write_entry(page.id(), entry));
         prev.emplace(std::move(page));
     }
     if (prev) {
@@ -127,11 +149,22 @@ auto OverflowList::write_chain(Id pid, Slice overflow) -> tl::expected<Id, Statu
     return head;
 }
 
-auto OverflowList::erase_chain(Id pid, Size size) -> tl::expected<void, Status>
+auto OverflowList::copy_chain(Id pid, Id overflow_id, Size size) -> tl::expected<Id, Status>
 {
-    while (size) {
+    if (m_scratch.size() < size) {
+        m_scratch.resize(size);
+    }
+    Span buffer {m_scratch};
+    buffer.truncate(size);
+
+    Calico_Try_R(read_chain(overflow_id, buffer));
+    return write_chain(pid, buffer);
+}
+
+auto OverflowList::erase_chain(Id pid) -> tl::expected<void, Status>
+{
+    while (!pid.is_null()) {
         Calico_New_R(page, m_pager->acquire(pid));
-        size -= get_readable_content(page, size).size();
         pid = read_next_id(page);
         m_pager->upgrade(page);
         Calico_Try_R(m_freelist->push(std::move(page)));
@@ -159,7 +192,7 @@ static auto decode_entry(const Byte *data) -> PointerMap::Entry
     return entry;
 }
 
-auto PointerMap::read_entry(Id pid) -> tl::expected<Entry, Status>
+auto PointerMap::read_entry(Id pid) const -> tl::expected<Entry, Status>
 {
     const auto mid = lookup(pid);
     CALICO_EXPECT_GE(mid.value, 2);
@@ -193,7 +226,7 @@ auto PointerMap::write_entry(Id pid, Entry entry) -> tl::expected<void, Status>
     return {};
 }
 
-auto PointerMap::lookup(Id pid) -> Id
+auto PointerMap::lookup(Id pid) const -> Id
 {
     // Root page (1) has no parents, and page 2 is the first pointer map page. If "pid" is a pointer map
     // page, "pid" will be returned.

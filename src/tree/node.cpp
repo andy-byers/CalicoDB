@@ -21,77 +21,60 @@ static auto cell_area_offset(const Node &node)
     return cell_slots_offset(node) + node.header.cell_count*sizeof(PageSize);
 }
 
-static constexpr auto external_prefix_size() -> Size
+auto internal_cell_size(const NodeMeta &meta, const Byte *data) -> Size
 {
-    return sizeof(ValueSize) + sizeof(PageSize);
-}
-
-static constexpr auto internal_prefix_size() -> Size
-{
-    return sizeof(Id) + sizeof(PageSize);
-}
-
-static auto internal_payload_size(const Byte *data) -> Size
-{
-    return get_u16(data + sizeof(Id));
-}
-
-static auto external_payload_size(const Byte *data) -> Size
-{
-    return get_u32(data) + get_u16(data + sizeof(ValueSize));
+    Size key_size;
+    const auto *ptr = decode_varint(data + sizeof(Id), key_size);
+    const auto local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
+    const auto extra_size = (local_size < key_size) * sizeof(Id);
+    const auto header_size = static_cast<Size>(ptr - data);
+    return header_size + local_size + extra_size;
 }
 
 auto external_cell_size(const NodeMeta &meta, const Byte *data) -> Size
 {
-    if (const auto ps = external_payload_size(data); ps <= meta.max_local)
-        return external_prefix_size() + ps;
-    return external_prefix_size() + std::max<Size>(get_u16(data + sizeof(ValueSize)), meta.min_local) + sizeof(Id);
-}
-
-auto internal_cell_size(const NodeMeta &, const Byte *data) -> Size
-{
-    return internal_prefix_size() + internal_payload_size(data);
-}
-
-auto read_external_key(const Byte *data) -> Slice
-{
-    return {data + external_prefix_size(), get_u16(data + sizeof(ValueSize))};
-}
-
-auto read_internal_key(const Byte *data) -> Slice
-{
-    return {data + internal_prefix_size(), get_u16(data + sizeof(Id))};
+    Size key_size, value_size;
+    const auto *ptr = decode_varint(data, value_size);
+    ptr = decode_varint(ptr, key_size);
+    const auto local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
+    const auto extra_size = (local_size < key_size + value_size) * sizeof(Id);
+    const auto header_size = static_cast<Size>(ptr - data);
+    return header_size + local_size + extra_size;
 }
 
 auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell
 {
+    Size key_size, value_size;
+    const auto *ptr = decode_varint(data, value_size);
+    ptr = decode_varint(ptr, key_size);
+    const auto header_size = static_cast<Size>(ptr - data);
+
     Cell cell;
     cell.ptr = data;
-    cell.key = data + external_prefix_size();
-    cell.total_ps = external_payload_size(data);
-    cell.key_size = get_u16(data + sizeof(ValueSize));
-    if (cell.total_ps > meta.max_local) {
-        cell.local_ps = meta.min_local;
-        // The entire key must be stored directly in the external node (none on an overflow page).
-        if (cell.local_ps < cell.key_size)
-            cell.local_ps = cell.key_size;
-        cell.size = sizeof(Id);
-    } else {
-        cell.local_ps = cell.total_ps;
-    }
-    cell.size += cell.local_ps + external_prefix_size();
+    cell.key = data + header_size;
+
+    cell.key_size = key_size;
+    cell.local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
+    cell.has_remote = cell.local_size < key_size + value_size;
+    cell.size = header_size + cell.local_size + cell.has_remote*sizeof(Id);
     return cell;
 }
 
-auto parse_internal_cell(const NodeMeta &, Byte *data) -> Cell
+auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell
 {
+    Size key_size;
+    const auto *ptr = data + sizeof(Id);
+    ptr = decode_varint(ptr, key_size);
+    const auto header_size = static_cast<Size>(ptr - data);
+
     Cell cell;
     cell.ptr = data;
-    cell.key = data + internal_prefix_size();
-    cell.key_size = internal_payload_size(data);
-    cell.total_ps = cell.key_size;
-    cell.local_ps = cell.key_size;
-    cell.size = cell.key_size + internal_prefix_size();
+    cell.key = data + header_size;
+
+    cell.key_size = key_size;
+    cell.local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
+    cell.has_remote = cell.local_size < key_size;
+    cell.size = header_size + cell.local_size + cell.has_remote*sizeof(Id);
     return cell;
 }
 
@@ -149,8 +132,9 @@ auto BlockAllocator::allocate_from_free_list(PageSize needed_size) -> PageSize
     PageSize curr_ptr {m_node->header.free_start};
 
     while (curr_ptr) {
-        if (needed_size <= get_block_size(curr_ptr))
+        if (needed_size <= get_block_size(curr_ptr)) {
             return take_free_space(prev_ptr, curr_ptr, needed_size);
+        }
         prev_ptr = curr_ptr;
         curr_ptr = get_next_pointer(curr_ptr);
     }
@@ -180,7 +164,9 @@ auto BlockAllocator::take_free_space(PageSize ptr0, PageSize ptr1, PageSize need
     const auto diff = static_cast<PageSize>(free_size - needed_size);
 
     if (diff < 4) {
-        header.frag_count += diff;
+        // Caller should make sure it isn't possible to overflow this byte.
+        CALICO_EXPECT_LE(header.frag_count + 3, 0xFF);
+        header.frag_count = static_cast<std::uint8_t>(header.frag_count + diff);
 
         if (is_first) {
             header.free_start = static_cast<PageSize>(ptr2);
@@ -199,9 +185,9 @@ auto BlockAllocator::allocate(PageSize needed_size) -> PageSize
 {
     CALICO_EXPECT_LT(needed_size, m_node->page.size());
 
-    if (const auto offset = allocate_from_gap(needed_size))
+    if (const auto offset = allocate_from_gap(needed_size)) {
         return offset;
-
+    }
     return allocate_from_free_list(needed_size);
 }
 
@@ -212,7 +198,8 @@ auto BlockAllocator::free(PageSize ptr, PageSize size) -> void
     auto &header = m_node->header;
 
     if (size < 4) {
-        header.frag_count += size;
+        CALICO_EXPECT_LE(header.frag_count + 3, 0xFF);
+        header.frag_count = static_cast<std::uint8_t>(header.frag_count + size);
     } else {
         set_next_pointer(ptr, header.free_start);
         set_block_size(ptr, size);
@@ -256,109 +243,6 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip_index) -> void
     header.free_start = 0;
     header.free_total = 0;
     m_node->gap_size = PageSize(end - cell_area_offset(*m_node));
-}
-
-Node::Iterator::Iterator(Node &node)
-    : m_node {&node}
-{}
-
-auto Node::Iterator::is_valid() const -> bool
-{
-    return m_index < m_node->header.cell_count;
-}
-
-auto Node::Iterator::index() const -> Size
-{
-    return m_index;
-}
-
-auto Node::Iterator::key() const -> Slice
-{
-    CALICO_EXPECT_TRUE(is_valid());
-    return read_key(*m_node, m_index);
-}
-
-auto Node::Iterator::data() -> Byte *
-{
-    CALICO_EXPECT_TRUE(is_valid());
-    return m_node->page.data() + m_node->get_slot(m_index);
-}
-
-auto Node::Iterator::data() const -> const Byte *
-{
-    CALICO_EXPECT_TRUE(is_valid());
-    return m_node->page.data() + m_node->get_slot(m_index);
-}
-
-struct SeekResult {
-    unsigned index {};
-    bool exact {};
-};
-
-static auto seek_linear(const Node &node, const Slice &key) -> SeekResult
-{
-    for (unsigned index {}; index < node.header.cell_count; ++index) {
-        const auto rhs = read_key(node, index);
-        const auto cmp = compare_three_way(key, rhs);
-        if (cmp != ThreeWayComparison::GT) {
-            return {index, cmp == ThreeWayComparison::EQ};
-        }
-    }
-    return {node.header.cell_count, false};
-}
-
-static auto seek_binary(const Node &node, const Slice &key) -> SeekResult
-{
-    unsigned upper {node.header.cell_count};
-    unsigned lower {};
-
-    while (lower < upper) {
-        const auto mid = (lower+upper) / 2;
-        const auto rhs = read_key(node, mid);
-
-        switch (compare_three_way(key, rhs)) {
-            case ThreeWayComparison::LT:
-                upper = mid;
-                break;
-            case ThreeWayComparison::GT:
-                lower = mid + 1;
-                break;
-            case ThreeWayComparison::EQ:
-                return {mid, true};
-        }
-    }
-    return {lower, false};
-}
-
-using Seek = SeekResult (*)(const Node &, const Slice &);
-
-static constexpr Seek SEEK_TABLE[] {
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_linear,
-    seek_linear, seek_binary,
-};
-
-static constexpr auto SEEK_MAX = sizeof(SEEK_TABLE)/sizeof(Seek) - 1;
-
-auto Node::Iterator::seek(const Slice &key) -> bool
-{
-    const auto seek_type = std::min<Size>(m_node->header.cell_count, SEEK_MAX);
-    const auto [index, exact] = SEEK_TABLE[seek_type](*m_node, key);
-
-    m_index = index;
-    return exact;
-}
-
-auto Node::Iterator::next() -> void
-{
-    if (is_valid()) {
-        m_index++;
-    }
 }
 
 Node::Node(Page inner, Byte *defragmentation_space)
@@ -428,9 +312,10 @@ auto Node::take() && -> Page
     return std::move(page);
 }
 
-auto Node::TEST_validate() const -> void
+auto Node::TEST_validate() -> void
 {
 #if not NDEBUG
+    CALICO_EXPECT_LE(header.frag_count + 3, 0xFF);
     std::vector<Byte> used(page.size());
     const auto account = [&x = used](auto from, auto size) {
         auto lower = begin(x) + long(from);
@@ -464,14 +349,17 @@ auto Node::TEST_validate() const -> void
     // Cell bodies. Also makes sure the cells are in order.
     for (Size n {}; n < header.cell_count; ++n) {
         const auto lhs_ptr = get_slot(n);
-        const auto lhs_size = cell_size_direct(*this, lhs_ptr);
-        const auto lhs_key = read_key_at(*this, lhs_ptr);
-        account(lhs_ptr, lhs_size);
+        const auto lhs_cell = read_cell_at(*this, lhs_ptr);
+        account(lhs_ptr, lhs_cell.size);
 
         if (n + 1 < header.cell_count) {
             const auto rhs_ptr = get_slot(n + 1);
-            const auto rhs_key = read_key_at(*this, rhs_ptr);
-            CALICO_EXPECT_LT(lhs_key, rhs_key);
+            const auto rhs_cell = read_cell_at(*this, rhs_ptr);
+            if (!lhs_cell.has_remote && !rhs_cell.has_remote) {
+                Slice lhs_key {lhs_cell.key, lhs_cell.key_size};
+                Slice rhs_key {rhs_cell.key, rhs_cell.key_size};
+                CALICO_EXPECT_LT(lhs_key, rhs_key);
+            }
         }
     }
 
@@ -479,11 +367,11 @@ auto Node::TEST_validate() const -> void
     const auto total_bytes = std::accumulate(
         begin(used),
         end(used),
-        header.frag_count,
+        int(header.frag_count),
         [](auto accum, auto next) {
             return accum + next;
         });
-    CALICO_EXPECT_EQ(page.size(), total_bytes);
+    CALICO_EXPECT_EQ(page.size(), Size(total_bytes));
 #endif // not NDEBUG
 }
 
@@ -499,8 +387,13 @@ auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
     const auto can_allocate = size + sizeof(PageSize) <= usable_space(node);
     BlockAllocator alloc {node};
 
+    // Ensure that the fragment count byte doesn't overflow.
+    if (node.header.frag_count + 3 >= 0x100) {
+        alloc.defragment(std::nullopt);
+    }
+
     // We don't have room to insert the cell pointer.
-    if (cell_area_offset(node) + sizeof(PageSize) > header.cell_start) {
+    if (node.gap_size < header.cell_start) {
         if (!can_allocate) {
             node.overflow_index = index;
             return 0;
@@ -568,35 +461,22 @@ auto erase_cell(Node &node, Size index, Size size_hint) -> void
     free_block(node, PageSize(index), PageSize(size_hint));
 }
 
-auto emplace_cell(Byte *out, Size value_size, const Slice &key, const Slice &local_value, Id overflow_id) -> void
+auto emplace_cell(Byte *out, Size key_size, Size value_size, const Slice &local_key, const Slice &local_value, Id overflow_id) -> Byte *
 {
-    put_u32(out, static_cast<ValueSize>(value_size));
-    out += sizeof(ValueSize);
+    out = encode_varint(out, value_size);
+    out = encode_varint(out, key_size);
 
-    put_u16(out, static_cast<PageSize>(key.size()));
-    out += sizeof(PageSize);
-
-    std::memcpy(out, key.data(), key.size());
-    out += key.size();
+    std::memcpy(out, local_key.data(), local_key.size());
+    out += local_key.size();
 
     std::memcpy(out, local_value.data(), local_value.size());
+    out += local_value.size();
 
-    if (!overflow_id.is_null())
-        put_u64(out + local_value.size(), overflow_id.value);
-}
-
-auto determine_cell_size(Size key_size, Size &value_size, const NodeMeta &meta) -> Size
-{
-    CALICO_EXPECT_NE(key_size, 0);
-    CALICO_EXPECT_LE(key_size, meta.max_local);
-
-    auto total_size = key_size + value_size;
-    if (total_size > meta.max_local) {
-        const auto remote_size = total_size - std::max(key_size, meta.min_local);
-        total_size = total_size - remote_size + sizeof(Id);
-        value_size -= remote_size;
+    if (!overflow_id.is_null()) {
+        put_u64(out, overflow_id.value);
+        out += sizeof(overflow_id);
     }
-    return external_prefix_size() + total_size;
+    return out;
 }
 
 auto manual_defragment(Node &node) -> void
@@ -607,26 +487,14 @@ auto manual_defragment(Node &node) -> void
 
 auto detach_cell(Cell &cell, Byte *backing) -> void
 {
+    if (cell.is_free) {
+        return;
+    }
     std::memcpy(backing, cell.ptr, cell.size);
     const auto diff = cell.key - cell.ptr;
     cell.ptr = backing;
     cell.key = backing + diff;
     cell.is_free = true;
-}
-
-auto promote_cell(Cell &cell) -> void
-{
-    // Pretend like there is a left child ID field. Now, when this cell is inserted into an internal node,
-    // it can be copied over in one chunk. The caller will need to set the actual ID value later.
-    cell.ptr -= EXTERNAL_SHIFT;
-    cell.size = cell.key_size + internal_prefix_size();
-    cell.total_ps = cell.key_size;
-    cell.local_ps = cell.key_size;
-}
-
-auto read_key_at(const Node &node, Size offset) -> Slice
-{
-    return node.meta->read_key(node.page.data() + offset);
 }
 
 auto read_child_id_at(const Node &node, Size offset) -> Id
@@ -637,17 +505,6 @@ auto read_child_id_at(const Node &node, Size offset) -> Id
 auto write_child_id_at(Node &node, Size offset, Id child_id) -> void
 {
     put_u64(node.page.span(offset, sizeof(Id)), child_id.value);
-}
-
-auto read_key(const Node &node, Size index) -> Slice
-{
-    CALICO_EXPECT_LT(index, node.header.cell_count);
-    return read_key_at(node, node.get_slot(index));
-}
-
-auto read_key(const Cell &cell) -> Slice
-{
-    return {cell.key, cell.key_size};
 }
 
 auto read_child_id(const Node &node, Size index) -> Id
@@ -668,12 +525,12 @@ auto read_child_id(const Cell &cell) -> Id
 
 auto read_overflow_id(const Cell &cell) -> Id
 {
-    return {get_u64(cell.key + cell.local_ps)};
+    return {get_u64(cell.key + cell.local_size)};
 }
 
 auto write_overflow_id(Cell &cell, Id overflow_id) -> void
 {
-    put_u64(cell.key + cell.local_ps, overflow_id.value);
+    put_u64(cell.key + cell.local_size, overflow_id.value);
 }
 
 auto write_child_id(Node &node, Size index, Id child_id) -> void

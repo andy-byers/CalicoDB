@@ -83,16 +83,15 @@ class NodeMetaManager {
 public:
     explicit NodeMetaManager(Size page_size)
     {
-        // min_local and max_local fields are only needed in external nodes.
         m_external_meta.min_local = compute_min_local(page_size);
         m_external_meta.max_local = compute_max_local(page_size);
+        m_internal_meta.min_local = m_external_meta.min_local;
+        m_internal_meta.max_local = m_external_meta.max_local;
 
         m_external_meta.cell_size = external_cell_size;
-        m_external_meta.read_key = read_external_key;
         m_external_meta.parse_cell = parse_external_cell;
 
         m_internal_meta.cell_size = internal_cell_size;
-        m_internal_meta.read_key = read_internal_key;
         m_internal_meta.parse_cell = parse_internal_cell;
     }
 
@@ -137,429 +136,369 @@ TEST(NodeSlotTests, SlotsAreConsistent)
     ASSERT_EQ(usable_space(node), space);
 }
 
-static constexpr Size SMALL_PAGE_SIZE {0x200};
-static constexpr Size MEDIUM_PAGE_SIZE {0x1000};
-static constexpr Size LARGE_PAGE_SIZE {0x8000};
-static constexpr Id ROOT_PID {1};
-static constexpr Id NON_ROOT_PID {2};
+class TestWithPager: public InMemoryTest {
+public:
+    const Size PAGE_SIZE {0x200};
 
-struct ExternalNodeTestParameters {
-    Id pid;
-    Size page_size {};
-};
-
-/*
- * Make sure we can create new cells and write them to external nodes.
- */
-class ExternalNodeTests: public testing::TestWithParam<ExternalNodeTestParameters> {
-protected:
-    ExternalNodeTests()
-        : param {GetParam()},
-          backing(param.page_size, '\x00'),
-          scratch1(param.page_size, '\x00'),
-          scratch2(param.page_size, '\x00'),
-          meta {param.page_size},
-          node {Page {param.pid, backing, true}, scratch1.data()}
-    {
-        node.meta = &meta(true);
-    }
-
-    ~ExternalNodeTests() override
-    {
-        node.TEST_validate();
-        auto page = std::move(node).take();
-        (void)page.deltas();
-    }
-
-    auto create_cell(const Slice &key, const Slice &value, Id overflow_id = Id {123})
-    {
-        auto value_size = value.size();
-        const auto cell_size = determine_cell_size(key.size(), value_size, *node.meta);
-        const auto needs_overflow_id = value.size() != value_size;
-        emplace_cell(scratch2.data(), value.size(), key, value.range(0, value_size), Id {needs_overflow_id * overflow_id.value});
-        auto cell = node.meta->parse_cell(*node.meta, scratch2.data());
-        EXPECT_EQ(cell.size, cell_size);
-        return std::make_tuple(cell, value_size);
-    }
-
-    auto node_emplace_cell(Size index, const Slice &key, const Slice &value, Id overflow_id = Id {123})
-    {
-        auto value_size = value.size();
-        const auto cell_size = determine_cell_size(key.size(), value_size, *node.meta);
-        const auto needs_overflow_id = value.size() != value_size;
-        auto *ptr = scratch2.data();
-
-        if (const auto offset = allocate_block(node, index, cell_size)) {
-            ptr = node.page.data() + offset;
-        }
-        emplace_cell(ptr, value.size(), key, value.range(0, value_size), Id {needs_overflow_id * overflow_id.value});
-    }
-
-    auto simulate_write(const Slice &key, const Slice &value, Id overflow_id = Id {123})
-    {
-        const auto [cell, _] = create_cell(key, value, overflow_id);
-        Node::Iterator itr {node};
-        if (itr.seek(key)) {
-            erase_cell(node, itr.index());
-        }
-        write_cell(node, itr.index(), cell);
-    }
-
-    ExternalNodeTestParameters param;
-    std::string backing;
-    std::string scratch1;
-    std::string scratch2;
-    NodeMetaManager meta;
-    Node node;
-};
-
-TEST_P(ExternalNodeTests, ConstructsAndDestructs)
-{}
-
-TEST_P(ExternalNodeTests, CreatesCell)
-{
-    const Slice key {"hello"};
-    const Slice value {"world"};
-
-    const auto [cell, value_size] = create_cell(key, value);
-
-    ASSERT_EQ(value_size, value.size());
-    ASSERT_EQ(cell.key_size, key.size());
-    ASSERT_EQ(cell.total_ps, key.size() + value.size());
-    ASSERT_EQ(cell.local_ps, cell.total_ps);
-    ASSERT_EQ(cell.size, 6 + cell.local_ps);
-}
-
-TEST_P(ExternalNodeTests, CreatesCellWithLargeValue)
-{
-    const auto min_local = meta(true).min_local;
-
-    const Slice key {"hello"};
-    const std::string value_buffer(param.page_size, 'x');
-    const Slice value {value_buffer};
-
-    const auto [cell, value_size] = create_cell(key, value);
-
-    ASSERT_LT(value_size, value.size());
-    ASSERT_EQ(key.size() + value_size, min_local);
-    ASSERT_EQ(cell.key_size, key.size());
-    ASSERT_EQ(cell.total_ps, key.size() + value_buffer.size());
-    ASSERT_EQ(cell.local_ps, min_local);
-    ASSERT_EQ(cell.size, 6 + cell.local_ps + sizeof(Id));
-    ASSERT_EQ(get_u64(cell.key + cell.local_ps), 123);
-}
-
-TEST_P(ExternalNodeTests, CreatesCellWithLargeKey)
-{
-    const auto max_local = meta(true).max_local;
-
-    const std::string key_buffer(max_local, 'x');
-    const Slice key {key_buffer};
-    const Slice value {"world"};
-
-    const auto [cell, value_size] = create_cell(key, value);
-
-    ASSERT_EQ(value_size, 0);
-    ASSERT_EQ(cell.key_size, key.size());
-    ASSERT_EQ(cell.total_ps, key.size() + 5);
-    ASSERT_EQ(cell.local_ps, key.size());
-    ASSERT_EQ(cell.size, 6 + cell.local_ps + sizeof(Id));
-    ASSERT_EQ(get_u64(cell.key + cell.local_ps), 123);
-}
-
-TEST_P(ExternalNodeTests, CreatesCellWithLargePayload)
-{
-    const auto min_local = meta(true).min_local;
-    const auto max_local = meta(true).max_local;
-    const auto diff = 10;
-
-    const std::string key_buffer(min_local - diff, 'x');
-    const std::string value_buffer(max_local - diff, 'x');
-    const Slice key {key_buffer};
-    const Slice value {value_buffer};
-
-    const auto [cell, value_size] = create_cell(key, value);
-
-    ASSERT_EQ(key.size() + value_size, min_local);
-    ASSERT_EQ(cell.key_size, key.size());
-    ASSERT_EQ(cell.total_ps, key.size() + value.size());
-    ASSERT_EQ(cell.local_ps, min_local);
-    ASSERT_EQ(cell.size, 6 + cell.local_ps + sizeof(Id));
-    ASSERT_EQ(get_u64(cell.key + cell.local_ps), 123);
-}
-
-TEST_P(ExternalNodeTests, EmplacesCells)
-{
-    node_emplace_cell(0, "a", "1");
-    node_emplace_cell(1, "b", "2");
-    node_emplace_cell(2, "c", "3");
-    ASSERT_EQ(node.header.cell_count, 3);
-
-    auto cell = read_cell(node, 0);
-    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "a1");
-
-    cell = read_cell(node, 1);
-    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "b2");
-
-    cell = read_cell(node, 2);
-    ASSERT_EQ((Slice {cell.key, cell.local_ps}), "c3");
-}
-
-TEST_P(ExternalNodeTests, ErasesCells)
-{
-    node_emplace_cell(0, "a", "1");
-    node_emplace_cell(1, "b", "2");
-    node_emplace_cell(2, "c", "3");
-    node_emplace_cell(3, "d", "4");
-    erase_cell(node, 3);
-    erase_cell(node, 1);
-    erase_cell(node, 0);
-    erase_cell(node, 0);
-    ASSERT_EQ(node.header.cell_count, 0);
-}
-
-TEST_P(ExternalNodeTests, DefragmentationPreservesUsableSpace)
-{
-    node_emplace_cell(0, "a", "1");
-    node_emplace_cell(1, "c", "3");
-    const auto target_space = usable_space(node);
-    node_emplace_cell(2, "b", "2");
-    node_emplace_cell(3, "d", "4");
-    ASSERT_LT(usable_space(node), target_space);
-    erase_cell(node, 3);
-    erase_cell(node, 2);
-
-    ASSERT_EQ(usable_space(node), target_space);
-    manual_defragment(node);
-    ASSERT_EQ(usable_space(node), target_space);
-    ASSERT_EQ(node.header.cell_count, 2);
-}
-
-TEST_P(ExternalNodeTests, Iteration)
-{
-    // a, b, c, d, e, f, g
-    for (Size i {}; i < 7; ++i) {
-        std::string k(1, 'a' + i);
-        node_emplace_cell(i, k, "");
-    }
-    Node::Iterator itr {node};
-
-    ASSERT_TRUE(itr.is_valid());
-    ASSERT_EQ(itr.key(), "a");
-    ASSERT_EQ(itr.index(), 0);
-
-    ASSERT_TRUE(itr.seek("c"));
-    ASSERT_TRUE(itr.is_valid());
-    ASSERT_EQ(itr.key(), "c");
-    ASSERT_EQ(itr.index(), 2);
-
-    ASSERT_TRUE(itr.seek("f"));
-    ASSERT_TRUE(itr.is_valid());
-    ASSERT_EQ(itr.key(), "f");
-    ASSERT_EQ(itr.index(), 5);
-
-    itr.next();
-    ASSERT_TRUE(itr.is_valid());
-    ASSERT_EQ(itr.key(), "g");
-    ASSERT_EQ(itr.index(), 6);
-
-    itr.next();
-    ASSERT_FALSE(itr.is_valid());
-    ASSERT_EQ(itr.index(), 7);
-}
-
-TEST_P(ExternalNodeTests, WritesCellsInOrder)
-{
-    simulate_write("b", "2");
-    simulate_write("c", "3");
-    simulate_write("a", "1");
-    ASSERT_EQ(read_key(node, 0), "a");
-    ASSERT_EQ(read_key(node, 1), "b");
-    ASSERT_EQ(read_key(node, 2), "c");
-}
-
-TEST_P(ExternalNodeTests, HandlesOverflowIds)
-{
-    simulate_write("a", std::string(node.page.size(), '1'), Id {111});
-    simulate_write("b", std::string(node.page.size(), '2'), Id {222});
-    simulate_write("c", std::string(node.page.size(), '3'), Id {333});
-
-    const auto cell1 = read_cell(node, 0);
-    const auto cell2 = read_cell(node, 1);
-    const auto cell3 = read_cell(node, 2);
-    ASSERT_EQ(read_key(cell1), "a");
-    ASSERT_EQ(read_key(cell2), "b");
-    ASSERT_EQ(read_key(cell3), "c");
-    ASSERT_EQ((Slice {cell1.key + 1, cell1.local_ps - 1}), std::string(cell1.local_ps - 1, '1'));
-    ASSERT_EQ((Slice {cell2.key + 1, cell2.local_ps - 1}), std::string(cell2.local_ps - 1, '2'));
-    ASSERT_EQ((Slice {cell3.key + 1, cell3.local_ps - 1}), std::string(cell3.local_ps - 1, '3'));
-    ASSERT_EQ(get_u64(cell1.key + cell1.local_ps), 111);
-    ASSERT_EQ(get_u64(cell2.key + cell2.local_ps), 222);
-    ASSERT_EQ(get_u64(cell3.key + cell3.local_ps), 333);
-}
-
-TEST_P(ExternalNodeTests, DefragmentsToMakeRoomForCellBody)
-{
-    simulate_write("\x01", "1");
-    simulate_write("\x02", "2");
-
-    Size i {};
-    while (!node.overflow.has_value()) {
-        simulate_write(Tools::integral_key<4>(i++), "");
-    }
-    std::exchange(node.overflow, std::nullopt);
-
-    erase_cell(node, 0);
-    erase_cell(node, 1);
-    node.TEST_validate();
-
-    ASSERT_NE(usable_space(node), node.gap_size);
-    // This cell will be too big to fit either in the gap space or any available free block.
-    simulate_write("abcdef", "123456");
-
-    ASSERT_FALSE(node.overflow.has_value());
-    ASSERT_EQ(usable_space(node), node.gap_size);
-}
-
-TEST_P(ExternalNodeTests, SanityCheck)
-{
-    Tools::RandomGenerator random { 1'024 * 1'024 * 4};
-    for (int iteration {}; iteration < 10; ++iteration) {
-        while (!node.overflow.has_value()) {
-            const auto key = random.Generate(12);
-            const auto val = random.Generate(param.page_size / 10);
-            simulate_write(key, val);
-            node.TEST_validate();
-        }
-        std::exchange(node.overflow, std::nullopt);
-
-        while (node.header.cell_count) {
-            erase_cell(node, random.Next<Size>(node.header.cell_count - 1));
-            node.TEST_validate();
-        }
-    }
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    ExternalNodeTests,
-    ExternalNodeTests,
-    ::testing::Values(
-        ExternalNodeTestParameters {ROOT_PID, SMALL_PAGE_SIZE},
-        ExternalNodeTestParameters {ROOT_PID, MEDIUM_PAGE_SIZE},
-        ExternalNodeTestParameters {ROOT_PID, LARGE_PAGE_SIZE},
-        ExternalNodeTestParameters {NON_ROOT_PID, SMALL_PAGE_SIZE},
-        ExternalNodeTestParameters {NON_ROOT_PID, MEDIUM_PAGE_SIZE},
-        ExternalNodeTestParameters {NON_ROOT_PID, LARGE_PAGE_SIZE}));
-
-TEST(MaximumKeySizeTest, SizeTableIsCorrect)
-{
-    ASSERT_EQ(103, compute_max_local(MINIMUM_PAGE_SIZE));
-    ASSERT_EQ(231, compute_max_local(MINIMUM_PAGE_SIZE << 1));
-    ASSERT_EQ(487, compute_max_local(MINIMUM_PAGE_SIZE << 2));
-    ASSERT_EQ(999, compute_max_local(MINIMUM_PAGE_SIZE << 3));
-    ASSERT_EQ(2'023, compute_max_local(MINIMUM_PAGE_SIZE << 4));
-    ASSERT_EQ(4'071, compute_max_local(MINIMUM_PAGE_SIZE << 5));
-    ASSERT_EQ(8'167, compute_max_local(MINIMUM_PAGE_SIZE << 6));
-    ASSERT_EQ(MAXIMUM_PAGE_SIZE, MINIMUM_PAGE_SIZE << 6);
-}
-
-struct CellConversionTestParameters {
-    bool is_src_external {};
-    bool is_dst_external {};
-    Size page_size {};
-};
-
-class CellConversionTests: public testing::TestWithParam<CellConversionTestParameters> {
-protected:
-    CellConversionTests()
-        : param {GetParam()},
-          backing(param.page_size, '\x00'),
-          scratch1(param.page_size, '\x00'),
-          scratch2(param.page_size, '\x00'),
-          meta {param.page_size},
-          dst_node {Page {Id {2}, backing, true}, scratch2.data()}
-    {
-        dst_node.header.is_external = param.is_dst_external;
-        dst_node.meta = &meta(param.is_dst_external);
-    }
-
-    ~CellConversionTests() override
-    {
-        dst_node.TEST_validate();
-        auto page = std::move(dst_node).take();
-        (void)page.deltas();
-    }
+    TestWithPager()
+        : scratch(PAGE_SIZE, '\x00'),
+          log_scratch(wal_scratch_size(PAGE_SIZE), '\x00')
+    {}
 
     auto SetUp() -> void override
     {
-        const Slice key {"hello"};
-        const Slice value {"world"};
-
-        if (param.is_src_external) {
-            auto value_size = value.size();
-            const auto cell_size = determine_cell_size(key.size(), value_size, meta(param.is_src_external));
-            const auto is_overflowing = Size(value.size() != value_size);
-            emplace_cell(scratch1.data() + 4, value.size(), key, value.range(0, value_size), Id {123 * is_overflowing});
-            cell = meta(true).parse_cell(meta(true), scratch1.data() + 4);
-            EXPECT_EQ(cell.size, cell_size);
-
-        } else {
-            const auto cell_size = key.size() + sizeof(Id) + 2;
-            put_u64(scratch1.data(), 123);
-            put_u16(scratch1.data() + 8, key.size());
-            std::memcpy(scratch1.data() + 10, key.data(), key.size());
-            cell = meta(false).parse_cell(meta(false), scratch1.data());
-            EXPECT_EQ(cell.size, cell_size);
-        }
-
+        auto r = Pager::open({
+            PREFIX,
+            storage.get(),
+            &log_scratch,
+            &wal,
+            nullptr,
+            &status,
+            &commit_lsn,
+            &in_xact,
+            8,
+            PAGE_SIZE,
+        });
+        ASSERT_TRUE(r.has_value()) << r.error().what().data();
+        pager = std::move(*r);
     }
 
-    CellConversionTestParameters param;
-    std::string backing;
-    std::string scratch1;
-    std::string scratch2;
-    NodeMetaManager meta;
-    Node dst_node;
-    Cell cell;
+    std::string log_scratch;
+    Status status;
+    bool in_xact {true};
+    Lsn commit_lsn;
+    DisabledWriteAheadLog wal;
+    std::string scratch;
+    std::string collect_scratch;
+    std::unique_ptr<Pager> pager;
+    Tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
 
-TEST_P(CellConversionTests, WritesAndReadsBack)
+class ComponentTests: public TestWithPager {
+public:
+    ~ComponentTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        collect_scratch.resize(PAGE_SIZE);
+
+        TestWithPager::SetUp();
+        pointers = std::make_unique<PointerMap>(*pager);
+        freelist = std::make_unique<FreeList>(*pager, *pointers);
+        overflow = std::make_unique<OverflowList>(*pager, *freelist, *pointers);
+        payloads = std::make_unique<PayloadManager>(meta(true), *overflow);
+
+        auto root = pager->allocate().value();
+        Node node {std::move(root), scratch.data()};
+        node.header.is_external = true;
+        node.header.write(node.page);
+        pager->release(std::move(node.page));
+    }
+
+    auto acquire_node(Id pid, bool writable = false)
+    {
+        Node node {pager->acquire(pid).value(), scratch.data()};
+        node.meta = &meta(node.header.is_external);
+        if (writable) {
+            pager->upgrade(node.page);
+        }
+        return node;
+    }
+
+    auto release_node(Node node) const
+    {
+        if (node.page.is_writable()) {
+            node.header.write(node.page);
+        }
+        pager->release(std::move(node).take());
+    }
+
+    NodeMetaManager meta {PAGE_SIZE};
+    std::unique_ptr<PointerMap> pointers;
+    std::unique_ptr<FreeList> freelist;
+    std::unique_ptr<OverflowList> overflow;
+    std::unique_ptr<PayloadManager> payloads;
+};
+
+TEST_F(ComponentTests, EmplacesCell)
 {
-    if (param.is_src_external != param.is_dst_external) {
-        CALICO_EXPECT_FALSE(param.is_dst_external);
-        promote_cell(cell);
-    }
-
-    write_cell(dst_node, 0, cell);
-    ASSERT_EQ(dst_node.header.cell_count, 1);
-    const auto out = read_cell(dst_node, 0);
-
-    if (param.is_dst_external) {
-        ASSERT_EQ((Slice {out.key, cell.local_ps}), "helloworld");
-    } else {
-        ASSERT_EQ((Slice {out.key, cell.local_ps}), "hello");
-    }
+    auto root = acquire_node(Id::root(), true);
+    auto *start = root.page.data() + 0x100;
+    const auto *end = emplace_cell(start, 1, 1, "a", "1");
+    const auto cell_size = static_cast<Size>(end - start);
+    const auto cell = read_cell_at(root, 0x100);
+    ASSERT_EQ(cell.size, cell_size);
+    ASSERT_EQ(cell.key_size, 1);
+    ASSERT_EQ(cell.local_size, 2);
+    ASSERT_EQ(cell.has_remote, false);
+    const Slice key {cell.key, 1};
+    const Slice val {cell.key + 1, 1};
+    ASSERT_EQ(key, "a");
+    ASSERT_EQ(val, "1");
+    release_node(std::move(root));
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    CellConversionTests,
-    CellConversionTests,
-    ::testing::Values(
-        // Possible transfers between nodes of the same type.
-        CellConversionTestParameters {true, true, SMALL_PAGE_SIZE},
-        CellConversionTestParameters {true, true, MEDIUM_PAGE_SIZE},
-        CellConversionTestParameters {true, true, LARGE_PAGE_SIZE},
-        CellConversionTestParameters {false, false, SMALL_PAGE_SIZE},
-        CellConversionTestParameters {false, false, MEDIUM_PAGE_SIZE},
-        CellConversionTestParameters {false, false, LARGE_PAGE_SIZE},
+TEST_F(ComponentTests, EmplacesCellWithOverflowValue)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto value = random.Generate(PAGE_SIZE).to_string();
+    const auto local = Slice {value}.truncate(root.meta->min_local - 1);
+    auto *start = root.page.data() + 0x100;
+    const auto *end = emplace_cell(start, 1, value.size(), "a", local, Id {123});
+    const auto cell_size = static_cast<Size>(end - start);
+    const auto cell = read_cell_at(root, 0x100);
+    ASSERT_EQ(cell.size, cell_size);
+    ASSERT_EQ(cell.key_size, 1);
+    ASSERT_EQ(cell.local_size, root.meta->min_local);
+    ASSERT_EQ(cell.has_remote, true);
+    const Slice key {cell.key, 1};
+    const Slice val {cell.key + 1, cell.local_size - cell.key_size};
+    ASSERT_EQ(key, "a");
+    ASSERT_EQ(val, local);
+    ASSERT_EQ(read_overflow_id(cell), Id {123});
+    release_node(std::move(root));
+}
 
-        // Possible transfers between nodes of different types (only external to internal is needed).
-        CellConversionTestParameters {true, false, SMALL_PAGE_SIZE},
-        CellConversionTestParameters {true, false, MEDIUM_PAGE_SIZE},
-        CellConversionTestParameters {true, false, LARGE_PAGE_SIZE}));
+TEST_F(ComponentTests, EmplacesCellWithOverflowKey)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto long_key = random.Generate(PAGE_SIZE).to_string();
+    const auto local = Slice {long_key}.truncate(root.meta->max_local);
+    auto *start = root.page.data() + 0x100;
+    auto *end = emplace_cell(start, long_key.size(), 1, local, "", Id {123});
+    const auto cell_size = static_cast<Size>(end - start);
+    const auto cell = read_cell_at(root, 0x100);
+    ASSERT_EQ(cell.size, cell_size);
+    ASSERT_EQ(cell.key_size, long_key.size());
+    ASSERT_EQ(cell.local_size, root.meta->max_local);
+    ASSERT_EQ(cell.has_remote, true);
+    const Slice key {cell.key, cell.local_size};
+    ASSERT_EQ(key, local);
+    ASSERT_EQ(read_overflow_id(cell), Id {123});
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CollectsPayload)
+{
+    auto root = acquire_node(Id::root(), true);
+    ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, "hello", "world", 0));
+    const auto cell = read_cell(root, 0);
+    ASSERT_EQ(payloads->collect_key(scratch, cell).value(), "hello");
+    ASSERT_EQ(payloads->collect_value(scratch, cell).value(), "world");
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CollectsPayloadWithOverflowValue)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
+    ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, "hello", value, 0));
+    const auto cell = read_cell(root, 0);
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), "hello");
+    ASSERT_EQ(payloads->collect_value(collect_scratch, cell).value(), value);
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CollectsPayloadWithOverflowKey)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
+    ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, key, "world", 0));
+    const auto cell = read_cell(root, 0);
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+    ASSERT_EQ(payloads->collect_value(collect_scratch, cell).value(), "world");
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CollectsPayloadWithOverflowKeyValue)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
+    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
+    ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, key, value, 0));
+    const auto cell = read_cell(root, 0);
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+    ASSERT_EQ(payloads->collect_value(collect_scratch, cell).value(), value);
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CollectsMultiple)
+{
+    std::vector<std::string> data;
+    auto root = acquire_node(Id::root(), true);
+    for (Size i {}; i < 3; ++i) {
+        const auto key = random.Generate(PAGE_SIZE * 10);
+        const auto value = random.Generate(PAGE_SIZE * 10);
+        ASSERT_HAS_VALUE(payloads->emplace(collect_scratch.data(), root, key, value, i));
+        data.emplace_back(key.to_string());
+        data.emplace_back(value.to_string());
+    }
+    for (Size i {}; i < 3; ++i) {
+        const auto &key = data[2 * i];
+        const auto &value = data[2*i + 1];
+        const auto cell = read_cell(root, i);
+        ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+        ASSERT_EQ(payloads->collect_value(collect_scratch, cell).value(), value);
+    }
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, PromotesCell)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
+    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
+    std::string emplace_scratch(PAGE_SIZE, '\0');
+    ASSERT_HAS_VALUE(payloads->emplace(emplace_scratch.data() + 10, root, key, value, 0));
+    auto cell = read_cell(root, 0);
+    ASSERT_HAS_VALUE(payloads->promote(emplace_scratch.data() + 10, cell, Id::root()));
+    // Needs to consult overflow pages for the key.
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, PromotedCellSize)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
+    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
+    std::string emplace_scratch(PAGE_SIZE, '\0');
+    ASSERT_HAS_VALUE(payloads->emplace(nullptr, root, key, value, 0));
+    auto cell = read_cell(root, 0);
+    ASSERT_HAS_VALUE(payloads->promote(emplace_scratch.data() + 20, cell, Id::root()));
+    erase_cell(root, 0);
+
+    root.header.is_external = false;
+    root.meta = &meta(false);
+    write_cell(root, 0, cell);
+    cell = read_cell(root, 0);
+
+    // Needs to consult overflow pages for the key.
+    ASSERT_EQ(payloads->collect_key(collect_scratch, cell).value(), key);
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+static auto run_promotion_test(ComponentTests &test, Size key_size, Size value_size)
+{
+    auto root = test.acquire_node(Id::root(), true);
+    const auto key = test.random.Generate(key_size).to_string();
+    const auto value = test.random.Generate(value_size).to_string();
+    std::string emplace_scratch(test.PAGE_SIZE, '\0');
+    ASSERT_HAS_VALUE(test.payloads->emplace(emplace_scratch.data() + 10, root, key, value, 0));
+    auto external_cell = read_cell(root, 0);
+    ASSERT_EQ(external_cell.size, varint_length(key.size()) + varint_length(value.size()) + external_cell.local_size + external_cell.has_remote*8);
+    auto internal_cell = external_cell;
+    ASSERT_HAS_VALUE(test.payloads->promote(emplace_scratch.data() + 10, internal_cell, Id::root()));
+    ASSERT_EQ(internal_cell.size, sizeof(Id) + varint_length(key.size()) + internal_cell.local_size + internal_cell.has_remote*8);
+    test.release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CellIsPromoted)
+{
+    run_promotion_test(*this, 10, 10);
+}
+
+TEST_F(ComponentTests, PromotionCopiesOverflowKey)
+{
+    run_promotion_test(*this, PAGE_SIZE, 10);
+    const auto old_head = pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(old_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(old_head.back_ptr, Id::root());
+
+    // Copy of the overflow key.
+    const auto new_head = pointers->read_entry(Id {4}).value();
+    ASSERT_EQ(new_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(new_head.back_ptr, Id::root());
+}
+
+TEST_F(ComponentTests, PromotionIgnoresOverflowValue)
+{
+    run_promotion_test(*this, 10, PAGE_SIZE);
+    const auto old_head = pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(old_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(old_head.back_ptr, Id::root());
+
+    // No overflow key, so the chain didn't need to be copied.
+    const auto nothing = pointers->read_entry(Id {4}).value();
+    ASSERT_EQ(nothing.back_ptr, Id::null());
+}
+
+TEST_F(ComponentTests, PromotionCopiesOverflowKeyButIgnoresOverflowValue)
+{
+    run_promotion_test(*this, PAGE_SIZE, PAGE_SIZE);
+    const auto old_head = pointers->read_entry(Id {3}).value();
+    ASSERT_EQ(old_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(old_head.back_ptr, Id::root());
+
+    // 1 overflow page needed for the key, and 1 for the value.
+    const auto new_head = pointers->read_entry(Id {5}).value();
+    ASSERT_EQ(new_head.type, PointerMap::OVERFLOW_HEAD);
+    ASSERT_EQ(new_head.back_ptr, Id::root());
+}
+
+TEST_F(ComponentTests, NodeIterator)
+{
+    for (Size i {}; i < 4; ++i) {
+        auto root = acquire_node(Id::root(), true);
+        const auto key = Tools::integral_key<2>((i+1) * 2);
+        ASSERT_HAS_VALUE(payloads->emplace(nullptr, root, key, "", i));
+        release_node(std::move(root));
+    }
+    auto root = acquire_node(Id::root(), true);
+    std::string lhs_key, rhs_key;
+    NodeIterator itr {root, {
+        overflow.get(),
+        &lhs_key,
+        &rhs_key,
+    }};
+    for (Size i: {1, 6, 3, 2, 8, 4, 5, 7}) {
+        ASSERT_EQ(i % 2 == 0, itr.seek(Tools::integral_key<2>(i)).value());
+        ASSERT_TRUE(itr.is_valid());
+    }
+    ASSERT_FALSE(itr.seek(Tools::integral_key<2>(10)).value());
+    ASSERT_FALSE(itr.is_valid());
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
+{
+    std::vector<std::string> keys;
+    for (Size i {}; i < 3; ++i) {
+        auto root = acquire_node(Id::root(), true);
+        auto key = random.Generate(PAGE_SIZE).to_string();
+        const auto value = random.Generate(PAGE_SIZE).to_string();
+        key[0] = static_cast<Byte>(i);
+        ASSERT_HAS_VALUE(payloads->emplace(nullptr, root, key, value, i));
+        ASSERT_FALSE(root.overflow.has_value());
+        release_node(std::move(root));
+        keys.emplace_back(key);
+    }
+    auto root = acquire_node(Id::root(), true);
+    std::string lhs_key, rhs_key;
+    NodeIterator itr {root, {
+        overflow.get(),
+        &lhs_key,
+        &rhs_key,
+    }};
+    Size i {};
+    for (const auto &key: keys) {
+        ASSERT_TRUE(itr.seek(key).value());
+        ASSERT_TRUE(itr.is_valid());
+        ASSERT_EQ(itr.index(), i++);
+    }
+    release_node(std::move(root));
+}
 
 struct BPlusTreeTestParameters {
     Size page_size {};
+    Size extra {};
 };
 
 class BPlusTreeTests : public ParameterizedInMemoryTest<BPlusTreeTestParameters> {
@@ -567,6 +506,7 @@ public:
     BPlusTreeTests()
         : param {GetParam()},
           scratch(param.page_size, '\x00'),
+          collect_scratch(param.page_size, '\x00'),
           log_scratch(wal_scratch_size(param.page_size), '\x00')
     {}
 
@@ -584,14 +524,14 @@ public:
             8,
             param.page_size,
         });
-        EXPECT_TRUE(r.has_value()) << r.error().what().data();
+        ASSERT_TRUE(r.has_value()) << r.error().what().data();
         pager = std::move(*r);
         tree = std::make_unique<BPlusTree>(*pager);
 
         // Root page setup.
         auto root = tree->setup();
         pager->release(std::move(*root).take());
-        EXPECT_TRUE(pager->flush({}).is_ok());
+        ASSERT_TRUE(pager->flush({}).is_ok());
     }
 
     auto TearDown() -> void override
@@ -639,6 +579,7 @@ public:
 
     BPlusTreeTestParameters param;
     std::string log_scratch;
+    std::string collect_scratch;
     Status status;
     bool in_xact {true};
     Lsn commit_lsn;
@@ -721,7 +662,7 @@ TEST_P(BPlusTreeTests, ErasesOverflowChains)
     ASSERT_HAS_VALUE(tree->erase("c"));
 }
 
-TEST_P(BPlusTreeTests, ReadsOverflowChains)
+TEST_P(BPlusTreeTests, ReadsValuesFromOverflowChains)
 {
     const auto keys = "abc";
     const auto vals = "123";
@@ -737,8 +678,8 @@ TEST_P(BPlusTreeTests, ReadsOverflowChains)
         auto r = tree->search(std::string(1, keys[i])).value();
         const auto cell = read_cell(r.node, r.index);
         const auto pid = read_overflow_id(cell);
-        const auto local_vs = cell.local_ps - cell.key_size;
-        const auto value = tree->collect(std::move(r.node), r.index);
+        const auto value = tree->collect_value(collect_scratch, cell).value();
+        pager->release(std::move(r.node.page));
         ASSERT_EQ(value, values[i]);
     }
 }
@@ -747,8 +688,8 @@ TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnRightmostPosition)
 {
     for (Size i {}; is_root_external(); ++i) {
         ASSERT_TRUE(*tree->insert(Tools::integral_key(i), make_value('v')));
-        validate();
     }
+    validate();
 }
 
 TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnLeftmostPosition)
@@ -892,131 +833,27 @@ TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
     validate();
 }
 
-TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnRight)
+TEST_P(BPlusTreeTests, SplitWithLongKeys)
 {
-    // Populate the internal nodes with small keys.
-    for (unsigned i {}; i < 5'000; ++i) {
-        char key[3] {};
-        put_u16(key, i);
-        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
-    }
-    // Overflow with a bunch of large keys.
     for (unsigned i {}; i < 1'000; ++i) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(i), "v"));
-    }
-    validate();
-}
-
-TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnLeft)
-{
-    for (unsigned i {}; i < 5'000; ++i) {
-        char key[3] {};
-        put_u16(key, 4'999 - i);
-        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
-    }
-    for (unsigned i {}; i < 1'000; ++i) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(999 - i), "v"));
-    }
-    validate();
-}
-
-TEST_P(BPlusTreeTests, InternalRotationAfterSplitOnMiddle)
-{
-    for (unsigned i {}; i < 5'000; ++i) {
-        char key[3] {};
-        put_u16(key, 4'999 - i);
-        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
-    }
-    for (Size i {}, j {999}; i < j; ++i, --j) {
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(i), "v"));
-        ASSERT_HAS_VALUE(tree->insert(Tools::integral_key<100>(j), "v"));
+        const auto key = random.Generate(GetParam().page_size * 2);
+        ASSERT_HAS_VALUE(tree->insert(key, "v"));
         if (i % 100 == 99) {
             validate();
         }
     }
 }
 
-static auto random_key(BPlusTreeTests &test)
+TEST_P(BPlusTreeTests, SplitWithShortAndLongKeys)
 {
-    const auto key_size = test.random.Next<Size>(1, 10);
-    return test.random.Generate(key_size);
-}
-
-static auto random_value(BPlusTreeTests &test)
-{
-    const auto val_size = test.random.Next<Size>(test.param.page_size / 2);
-    return test.random.Generate(val_size);
-}
-
-static auto random_write(BPlusTreeTests &test)
-{
-    const auto key = random_key(test);
-    const auto val = random_value(test);
-    (void)test.tree->insert(key, val);
-}
-
-static auto find_random_key(BPlusTreeTests &test)
-{
-    auto slot = test.tree->search(random_key(test));
-    EXPECT_TRUE(slot.has_value());
-
-    auto [node, index, exact] = std::move(*slot);
-    EXPECT_LE(index, node.header.cell_count);
-    index -= index == node.header.cell_count;
-
-    auto key = read_key(node, index).to_string();
-    test.pager->release(std::move(node).take());
-    return key;
-}
-
-TEST_P(BPlusTreeTests, SanityCheck_Insert)
-{
-    for (Size i {}; i < 1'000; ++i) {
-        random_write(*this);
-        if (i % 100 == 99) {
-            validate();
-        }
+    for (unsigned i {}; i < 1'000; ++i) {
+        char key[3] {};
+        put_u16(key, 999 - i);
+        ASSERT_HAS_VALUE(tree->insert({key, 2}, "v"));
     }
-}
-
-TEST_P(BPlusTreeTests, SanityCheck_Search)
-{
-    std::vector<Size> integers(1'000);
-    std::iota(begin(integers), end(integers), 0);
-    for (auto i: integers) {
-        const auto key = Tools::integral_key<6>(i);
-        ASSERT_TRUE(tree->insert(key, key).value());
-    }
-    std::default_random_engine rng {42};
-    std::shuffle(begin(integers), end(integers), rng);
-
-    for (auto i: integers) {
-        const auto key = Tools::integral_key<6>(i);
-        auto slot = tree->search(key);
-        ASSERT_HAS_VALUE(slot);
-        ASSERT_TRUE(slot->exact);
-        const auto cell = read_cell(slot->node, slot->index);
-        const Slice payload {cell.key, cell.local_ps};
-        ASSERT_EQ(payload, key + key);
-        release_node(std::move(slot->node));
-    }
-}
-
-TEST_P(BPlusTreeTests, SanityCheck_Erase)
-{
-    Size counter {};
-    for (Size i {}; i < 1'000; ++i) {
-        if (counter < 500) {
-            while (counter < 1'000) {
-                random_write(*this);
-                counter++;
-            }
-        }
-
-        const auto key = find_random_key(*this);
-        ASSERT_HAS_VALUE(tree->erase(key));
-        counter--;
-
+    for (unsigned i {}; i < 1'000; ++i) {
+        const auto key = random.Generate(GetParam().page_size);
+        ASSERT_HAS_VALUE(tree->insert(key, "v"));
         if (i % 100 == 99) {
             validate();
         }
@@ -1031,6 +868,91 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+
+class BPlusTreeSanityChecks: public BPlusTreeTests {
+public:
+    auto random_chunk(bool overflow, bool nonzero = true)
+    {
+        return random.Generate(random.Next<Size>(nonzero, param.page_size*overflow + 12));
+    }
+
+    auto random_write() -> Record
+    {
+        const auto key = random_chunk(overflow_keys);
+        const auto val = random_chunk(overflow_values, false);
+        EXPECT_HAS_VALUE(tree->insert(key, val));
+        return {key.to_string(), val.to_string()};
+    }
+
+    bool overflow_keys = GetParam().extra & 0b10;
+    bool overflow_values = GetParam().extra & 0b01;
+};
+
+TEST_P(BPlusTreeSanityChecks, Insert)
+{
+    for (Size i {}; i < 1'000; ++i) {
+        random_write();
+        if (i % 100 == 99) {
+            validate();
+        }
+    }
+}
+
+TEST_P(BPlusTreeSanityChecks, Search)
+{
+    std::unordered_map<std::string, std::string> records;
+    for (Size i {}; i < 1'000; ++i) {
+        const auto [k, v] = random_write();
+        records[k] = v;
+    }
+    validate();
+
+    for (const auto &[key, value]: records) {
+        auto slot = tree->search(key);
+        ASSERT_HAS_VALUE(slot);
+        ASSERT_TRUE(slot->exact);
+        const auto cell = read_cell(slot->node, slot->index);
+        ASSERT_EQ(key, tree->collect_key(collect_scratch, cell).value());
+        ASSERT_EQ(value, tree->collect_value(collect_scratch, cell).value());
+        release_node(std::move(slot->node));
+    }
+}
+
+TEST_P(BPlusTreeSanityChecks, Erase)
+{
+    std::unordered_map<std::string, std::string> records;
+    for (Size iteration {}; iteration < 3; ++iteration) {
+        for (Size i {}; i < 1'000; ++i) {
+            const auto [k, v] = random_write();
+            records[k] = v;
+        }
+
+        Size i {};
+        for (const auto &[key, value]: records) {
+            ASSERT_HAS_VALUE(tree->erase(key));
+            if (i % 100 == 99) {
+                validate();
+            }
+        }
+        records.clear();
+    }
+}
+
+// "extra" parameter bits:
+//     0b01: Use overflowing values
+//     0b10: Use overflowing keys
+INSTANTIATE_TEST_SUITE_P(
+    BPlusTreeSanityChecks,
+    BPlusTreeSanityChecks,
+    ::testing::Values(
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b00},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b01},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b10},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b11},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b00},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b01},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b10},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b11}));
 
 class CursorTests: public BPlusTreeTests {
 protected:
@@ -1326,39 +1248,21 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
 
-class VacuumTests: public InMemoryTest {
+class VacuumTests: public TestWithPager {
 public:
-    static constexpr Size PAGE_SIZE {0x200};
     static constexpr Size FRAME_COUNT {8};
 
     VacuumTests()
-        : scratch(PAGE_SIZE, '\x00'),
-          meta {PAGE_SIZE},
-          log_scratch(wal_scratch_size(PAGE_SIZE), '\x00')
+        : meta {PAGE_SIZE}
     {}
 
     auto SetUp() -> void override
     {
-        auto r = Pager::open({
-            PREFIX,
-            storage.get(),
-            &log_scratch,
-            &wal,
-            nullptr,
-            &status,
-            &commit_lsn,
-            &in_xact,
-            FRAME_COUNT,
-            PAGE_SIZE,
-        });
-        ASSERT_TRUE(r.has_value()) << r.error().what().data();
-        pager = std::move(*r);
-
+        TestWithPager::SetUp();
         tree = std::make_unique<BPlusTree>(*pager);
         auto root = tree->setup();
         pager->release(std::move(*root).take());
         ASSERT_TRUE(pager->flush({}).is_ok());
-
         c = tree->TEST_components();
     }
 
@@ -1432,17 +1336,9 @@ public:
         }
     }
 
-    std::string scratch;
-    std::string log_scratch;
-    Status status;
-    bool in_xact {true};
-    Lsn commit_lsn;
     NodeMetaManager meta;
-    DisabledWriteAheadLog wal;
-    std::unique_ptr<Pager> pager;
     std::unique_ptr<BPlusTree> tree;
     BPlusTree::Components c;
-    Tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
 
 //      P   1   2   3
@@ -1806,7 +1702,7 @@ TEST_F(VacuumTests, VacuumsNodes)
     ASSERT_EQ(node_4.page.id().value, 4);
 
     std::vector<std::string> values;
-    for (Size i {}; i < 4; ++i) {
+    for (Size i {}; i < 5; ++i) {
         const auto key = Tools::integral_key(i);
         const auto value = random.Generate(meta(true).max_local - key.size());
         ASSERT_HAS_VALUE(tree->insert(key, value));

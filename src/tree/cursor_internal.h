@@ -32,6 +32,13 @@ public:
     auto previous() -> void override;
 
 private:
+    auto seek_left() -> void;
+    auto seek_right() -> void;
+    auto do_seek_first() -> void;
+    auto do_seek_last() -> void;
+    auto seek_to(Node node, Size index) -> void;
+    auto do_seek(const Slice &key) -> void;
+
     struct Location {
         Id pid {};
         PageSize index {};
@@ -40,27 +47,13 @@ private:
     mutable Status m_status;
     mutable std::string m_key;
     mutable std::string m_value;
+    mutable Size m_key_size;
+    mutable Size m_value_size;
     BPlusTree *m_tree {};
     Location m_loc;
 };
 
 class CursorInternal {
-    friend class CursorImpl;
-
-    [[nodiscard]] static auto action_collect(const CursorImpl &cursor, Node node, Size index) -> tl::expected<std::string, Status>;
-    [[nodiscard]] static auto action_acquire(const CursorImpl &cursor, Id pid) -> tl::expected<Node, Status>;
-    [[nodiscard]] static auto action_search(const CursorImpl &cursor, const Slice &key) -> tl::expected<SearchResult, Status>;
-    [[nodiscard]] static auto action_lowest(const CursorImpl &cursor) -> tl::expected<Node, Status>;
-    [[nodiscard]] static auto action_highest(const CursorImpl &cursor) -> tl::expected<Node, Status>;
-    static auto action_release(const CursorImpl &cursor, Node node) -> void;
-
-    static auto seek_left(CursorImpl &cursor) -> void;
-    static auto seek_right(CursorImpl &cursor) -> void;
-    static auto seek_first(CursorImpl &cursor) -> void;
-    static auto seek_last(CursorImpl &cursor) -> void;
-    static auto seek_to(CursorImpl &cursor, Node node, Size index) -> void;
-    static auto seek(CursorImpl &cursor, const Slice &key) -> void;
-
 public:
     [[nodiscard]] static auto make_cursor(BPlusTree &tree) -> Cursor *;
     static auto invalidate(const Cursor &cursor, const Status &error) -> void;

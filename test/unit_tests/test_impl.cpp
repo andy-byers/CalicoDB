@@ -162,6 +162,9 @@ TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
 
 TEST_F(BasicDatabaseTests, TwoDatabases)
 {
+    fs::remove_all("/tmp/calico_test_1");
+    fs::remove_all("/tmp/calico_test_2");
+
     Database *lhs;
     expect_ok(Database::open("/tmp/calico_test_1", options, &lhs));
 
@@ -956,6 +959,84 @@ TEST_F(ApiTests, KeysCanBeArbitraryBytes)
     delete cursor;
 }
 
+TEST_F(ApiTests, HandlesLargeKeys)
+{
+    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+
+    const auto key_1 = '\x01' + random.Generate(options.page_size * 100).to_string();
+    const auto key_2 = '\x02' + random.Generate(options.page_size * 100).to_string();
+    const auto key_3 = '\x03' + random.Generate(options.page_size * 100).to_string();
+
+    ASSERT_OK(db->put(key_1, "1"));
+    ASSERT_OK(db->put(key_2, "2"));
+    ASSERT_OK(db->put(key_3, "3"));
+    ASSERT_OK(db->commit());
+
+    auto *cursor = db->new_cursor();
+    cursor->seek_first();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_1);
+    ASSERT_EQ(cursor->value(), "1");
+    cursor->next();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_2);
+    ASSERT_EQ(cursor->value(), "2");
+    cursor->next();
+
+    ASSERT_OK(cursor->status());
+    ASSERT_EQ(cursor->key(), key_3);
+    ASSERT_EQ(cursor->value(), "3");
+    cursor->next();
+    delete cursor;
+}
+
+class LargePayloadTests: public ApiTests {
+public:
+    [[nodiscard]]
+    auto random_string(Size max_size) const -> std::string
+    {
+        return random.Generate(random.Next<Size>(1, max_size)).to_string();
+    }
+
+    auto run_test(Size max_key_size, Size max_value_size)
+    {
+        std::unordered_map<std::string, std::string> map;
+        for (Size i {}; i < 100; ++i) {
+            const auto key = random_string(max_key_size);
+            const auto value = random_string(max_value_size);
+            ASSERT_OK(db->put(key, value));
+        }
+        ASSERT_OK(db->commit());
+
+        for (const auto &[key, value]: map) {
+            std::string result;
+            ASSERT_OK(db->get(key, result));
+            ASSERT_EQ(result, value);
+            ASSERT_OK(db->erase(key));
+        }
+        ASSERT_OK(db->commit());
+    }
+
+    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+};
+
+TEST_F(LargePayloadTests, LargeKeys)
+{
+    run_test(100 * options.page_size, 100);
+}
+
+TEST_F(LargePayloadTests, LargeValues)
+{
+    run_test(100, 100 * options.page_size);
+}
+
+TEST_F(LargePayloadTests, LargePayloads)
+{
+    run_test(100 * options.page_size, 100 * options.page_size);
+}
+
 class CommitFailureTests : public ApiTests {
 protected:
     ~CommitFailureTests() override = default;
@@ -995,7 +1076,6 @@ TEST_F(CommitFailureTests, WalAdvanceFailure)
 {
     // Write the commit record and flush successfully, but fail to open the next segment file.
     Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
-
 }
 
 TEST_F(CommitFailureTests, PagerFlushFailure)
