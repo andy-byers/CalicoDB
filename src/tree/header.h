@@ -22,6 +22,7 @@ struct FileHeader {
     static constexpr Size SIZE {42};
     explicit FileHeader() = default;
     explicit FileHeader(const Page &page);
+    explicit FileHeader(const Byte *data);
     auto write(Page &page) const -> void;
 
     [[nodiscard]] auto compute_crc() const -> std::uint32_t;
@@ -50,7 +51,7 @@ struct FileHeader {
 struct NodeHeader {
     static constexpr Size SIZE {34};
     explicit NodeHeader() = default;
-    explicit NodeHeader(const Page &page);
+    auto read(const Page &page) -> void;
     auto write(Page &page) const -> void;
 
     Lsn page_lsn;

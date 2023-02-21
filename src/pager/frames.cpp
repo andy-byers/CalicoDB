@@ -19,7 +19,7 @@ auto Frame::lsn() const -> Id
     return {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::SIZE))};
 }
 
-auto Frame::ref(bool is_writable) -> Page
+auto Frame::ref(Page &page, bool is_writable) -> void
 {
     CALICO_EXPECT_FALSE(m_is_writable);
 
@@ -27,8 +27,10 @@ auto Frame::ref(bool is_writable) -> Page
         CALICO_EXPECT_EQ(m_ref_count, 0);
         m_is_writable = true;
     }
+    page.m_id = m_page_id;
+    page.m_span = m_bytes;
+    page.m_write = is_writable;
     m_ref_count++;
-    return Page {m_page_id, data(), is_writable};
 }
 
 auto Frame::upgrade(Page &page) -> void
@@ -70,11 +72,11 @@ FrameManager::FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, S
     }
 }
 
-auto FrameManager::ref(Size index) -> Page
+auto FrameManager::ref(Size index, Page &out) -> void
 {
     m_ref_sum++;
     CALICO_EXPECT_LT(index, m_frames.size());
-    return m_frames[index].ref(false);
+    m_frames[index].ref(out, false);
 }
 
 auto FrameManager::unref(Size index, Page page) -> void
@@ -153,7 +155,7 @@ auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
     }
 
     auto read_size = out.size();
-    Calico_Try_S(m_file->read(out.data(), read_size, offset));
+    Calico_Try(m_file->read(out.data(), read_size, offset));
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
     if (read_size == m_page_size) {

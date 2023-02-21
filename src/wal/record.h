@@ -262,7 +262,7 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, Wal
     }
 
     Reader *temp;
-    Calico_Try_S(store.new_reader(encode_segment_name(prefix, id), &temp));
+    Calico_Try(store.new_reader(encode_segment_name(prefix, id), &temp));
 
     char buffer[WalPayloadHeader::SIZE];
     Span bytes {buffer, sizeof(buffer)};
@@ -270,7 +270,7 @@ inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, Wal
 
     // Read the first LSN. If it exists, it will always be at the same location.
     auto read_size = bytes.size();
-    Calico_Try_S(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
+    Calico_Try(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
 
     bytes.truncate(read_size);
 

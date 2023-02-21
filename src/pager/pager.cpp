@@ -18,7 +18,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
     CALICO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
 
     Editor *file;
-    Calico_Try_S(param.storage->new_editor(param.prefix + "data", &file));
+    Calico_Try(param.storage->new_editor(param.prefix + "data", &file));
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
@@ -76,7 +76,7 @@ auto Pager::pin_frame(Id pid) -> Status
 {
     if (auto s = do_pin_frame(pid); s.is_not_found()) {
         logv(m_info_log, s.what().data());
-        Calico_Try_S(m_wal->flush());
+        Calico_Try(m_wal->flush());
         return do_pin_frame(pid);
     } else {
         return s;
@@ -89,15 +89,15 @@ auto Pager::do_pin_frame(Id pid) -> Status
 
     if (!m_frames.available()) {
         if (!make_frame_available()) {
-            Calico_Try_S(*m_status);
+            Calico_Try(*m_status);
             logv(m_info_log, "out of frames");
-            Calico_Try_S(m_wal->flush());
+            Calico_Try(m_wal->flush());
             return Status::not_found("out of frames");
         }
     }
 
     Size fid;
-    Calico_Try_S(m_frames.pin(pid, fid));
+    Calico_Try(m_frames.pin(pid, fid));
 
     // Associate the page ID with the frame index we got from the framer.
     m_cache.put(pid, {fid});
@@ -153,7 +153,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
 
             // Advance to the next dirty list entry.
             itr = clean_page(entry);
-            Calico_Try_S(s);
+            Calico_Try(s);
         } else {
             itr = next(itr);
         }
@@ -251,7 +251,7 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
 
 auto Pager::allocate(Page &page) -> Status
 {
-    Calico_Try_S(acquire(Id::from_index(m_frames.page_count()), page));
+    Calico_Try(acquire(Id::from_index(m_frames.page_count()), page));
     upgrade(page, 0);
     return Status::ok();
 }
@@ -261,7 +261,7 @@ auto Pager::acquire(Id pid, Page &page) -> Status
     CALICO_EXPECT_FALSE(pid.is_null());
 
     const auto do_acquire = [this, &page](auto &entry) {
-        page = m_frames.ref(entry.index);
+        m_frames.ref(entry.index, page);
 
         // Write back pages that are too old. This is so that old WAL segments can be removed.
         if (entry.token) {
@@ -287,7 +287,7 @@ auto Pager::acquire(Id pid, Page &page) -> Status
         return do_acquire(itr->value);
     }
 
-    Calico_Try_S(pin_frame(pid));
+    Calico_Try(pin_frame(pid));
     CALICO_EXPECT_TRUE(m_cache.contains(pid));
     return do_acquire(m_cache.get(pid)->value);
 }
@@ -320,7 +320,7 @@ auto Pager::release(Page page) -> void
 auto Pager::truncate(Size page_count) -> Status
 {
     CALICO_EXPECT_GT(page_count, 0);
-    Calico_Try_S(m_storage->resize_file(m_path, page_count * m_frames.page_size()));
+    Calico_Try(m_storage->resize_file(m_path, page_count * m_frames.page_size()));
     m_frames.m_page_count = page_count;
 
     const auto predicate = [this](auto pid, auto) {

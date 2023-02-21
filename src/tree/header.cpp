@@ -29,10 +29,10 @@ static auto write_file_header(Byte *data, const FileHeader &header) -> void
 }
 
 FileHeader::FileHeader(const Page &page)
-{
-    CALICO_EXPECT_TRUE(page.id().is_root());
-    auto data = page.data();
+    : FileHeader {page.data()} {}
 
+FileHeader::FileHeader(const Byte *data)
+{
     magic_code = get_u32(data);
     data += sizeof(std::uint32_t);
 
@@ -68,7 +68,7 @@ auto FileHeader::write(Page &page) const -> void
     insert_delta(page.m_deltas, {0, SIZE});
 }
 
-NodeHeader::NodeHeader(const Page &page)
+auto NodeHeader::read(const Page &page) -> void
 {
     auto data = page.data() + page_offset(page);
 

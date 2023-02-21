@@ -132,7 +132,7 @@ PosixReader::~PosixReader()
 
 auto PosixReader::read(Byte *out, Size &size, Size offset) -> Status
 {
-    Calico_Try_S(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    Calico_Try(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, out, size);
 }
 
@@ -143,13 +143,13 @@ PosixEditor::~PosixEditor()
 
 auto PosixEditor::read(Byte *out, Size &size, Size offset) -> Status
 {
-    Calico_Try_S(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    Calico_Try(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, out, size);
 }
 
 auto PosixEditor::write(Slice in, Size offset) -> Status
 {
-    Calico_Try_S(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    Calico_Try(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_write(m_file, in);
 }
 
@@ -233,7 +233,7 @@ auto PosixStorage::get_children(const std::string &path, std::vector<std::string
 auto PosixStorage::new_reader(const std::string &path, Reader **out) -> Status
 {
     int file {};
-    Calico_Try_S(file_open(path, O_RDONLY, FILE_PERMISSIONS, file));
+    Calico_Try(file_open(path, O_RDONLY, FILE_PERMISSIONS, file));
     *out = new(std::nothrow) PosixReader {path, file};
     if (*out == nullptr) {
         return Status::system_error("out of memory");
@@ -244,7 +244,7 @@ auto PosixStorage::new_reader(const std::string &path, Reader **out) -> Status
 auto PosixStorage::new_editor(const std::string &path, Editor **out) -> Status
 {
     int file {};
-    Calico_Try_S(file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS, file));
+    Calico_Try(file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS, file));
     *out = new(std::nothrow) PosixEditor {path, file};
     if (*out == nullptr) {
         return Status::system_error("out of memory");
@@ -255,7 +255,7 @@ auto PosixStorage::new_editor(const std::string &path, Editor **out) -> Status
 auto PosixStorage::new_logger(const std::string &path, Logger **out) -> Status
 {
     int file {};
-    Calico_Try_S(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
+    Calico_Try(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
     *out = new(std::nothrow) PosixLogger {path, file};
     if (*out == nullptr) {
         return Status::system_error("out of memory");

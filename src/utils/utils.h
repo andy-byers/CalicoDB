@@ -21,37 +21,12 @@
 #define CALICO_EXPECT_GT(lhs, rhs) CALICO_EXPECT_TRUE((lhs) > (rhs))
 #define CALICO_EXPECT_GE(lhs, rhs) CALICO_EXPECT_TRUE((lhs) >= (rhs))
 
-#define Calico_Try_S(expr) \
+#define Calico_Try(expr) \
     do { \
-        if (auto __try_s = (expr); !__try_s.is_ok()) { \
-            return __try_s; \
+        if (auto __calico_try_s = (expr); !__calico_try_s.is_ok()) { \
+            return __calico_try_s; \
         } \
     } while (0)
-
-#define Calico_Try_R(expr) \
-    do { \
-        if (auto __try_r = (expr); !__try_r.has_value()) { \
-            return tl::make_unexpected(__try_r.error()); \
-        } \
-    } while (0)
-
-// "out" must be an existing identifier.
-#define Calico_Put_R(out, expr) \
-    do { \
-        if (auto __put_r = (expr); !__put_r.has_value()) { \
-            return tl::make_unexpected(__put_r.error()); \
-        } else { \
-            (out) = std::move(__put_r.value()); \
-        } \
-    } while (0)
-
-// "out" must be a nonexistent identifier.
-#define Calico_New_R(out, expr) \
-    auto __new_##out = (expr); \
-    if (!__new_##out.has_value()) { \
-        return tl::make_unexpected(__new_##out.error()); \
-    } \
-    auto out = std::move(*__new_##out)
 
 namespace Calico {
 

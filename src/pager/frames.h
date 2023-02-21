@@ -50,7 +50,7 @@ public:
     }
 
     [[nodiscard]] auto lsn() const -> Id;
-    [[nodiscard]] auto ref(bool is_writable) -> Page;
+    auto ref(Page &page, bool is_writable) -> void;
     auto upgrade(Page &page) -> void;
     auto unref(Page &page) -> void;
 
@@ -68,13 +68,13 @@ public:
 
     explicit FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, Size frame_count);
     ~FrameManager() = default;
-    [[nodiscard]] auto pin(Id pid, Size &fid) -> Status;
     [[nodiscard]] auto write_back(Size index) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto ref(Size index) -> Page;
+    [[nodiscard]] auto pin(Id pid, Size &fid) -> Status;
     auto unpin(Size) -> void;
-    auto upgrade(Size index, Page &page) -> void;
+    auto ref(Size index, Page &out) -> void;
     auto unref(Size index, Page page) -> void;
+    auto upgrade(Size index, Page &page) -> void;
     auto load_state(const FileHeader &header) -> void;
     auto save_state(FileHeader &header) const -> void;
 

@@ -354,43 +354,6 @@ namespace TestTools {
         delete file;
         return out;
     }
-
-    [[nodiscard]]
-    inline auto snapshot(Storage &storage, Size page_size) -> std::string
-    {
-        static constexpr Size CODE {0x1234567887654321};
-
-        Size file_size;
-        EXPECT_TRUE(storage.file_size("test/data", file_size).is_ok());
-
-        std::unique_ptr<Reader> reader;
-        {
-            Reader *temp;
-            expect_ok(storage.new_reader("test/data", &temp));
-            reader.reset(temp);
-        }
-
-        std::string buffer(file_size, '\x00');
-        auto read_size = file_size;
-        expect_ok(reader->read(buffer.data(), read_size, 0));
-        EXPECT_EQ(read_size, file_size);
-        EXPECT_EQ(file_size % page_size, 0);
-
-        auto offset = FileHeader::SIZE;
-        for (Size i {}; i < file_size / page_size; ++i) {
-            put_u64(buffer.data() + i*page_size + offset, CODE);
-            offset = 0;
-        }
-
-        // Clear header fields that might be inconsistent, despite identical database contents.
-        Page root {Id::root(),{buffer.data(), page_size}, true};
-        FileHeader header {root};
-        header.header_crc = 0;
-        header.recovery_lsn.value = CODE;
-        header.write(root);
-
-        return buffer;
-    }
 } // UnitTests
 
 struct Record {

@@ -27,7 +27,7 @@ auto CursorImpl::fetch_key() const -> Status
         return Status::ok();
     }
     Node node;
-    Calico_Try_S(m_tree->acquire(node, m_loc.pid));
+    Calico_Try(m_tree->acquire(node, m_loc.pid));
 
     Slice key;
     auto cell = read_cell(node, m_loc.index);
@@ -52,7 +52,7 @@ auto CursorImpl::fetch_value() const -> Status
         return Status::ok();
     }
     Node node;
-    Calico_Try_S(m_tree->acquire(node, m_loc.pid));
+    Calico_Try(m_tree->acquire(node, m_loc.pid));
 
     Slice value;
     const auto cell = read_cell(node, m_loc.index);

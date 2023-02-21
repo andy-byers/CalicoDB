@@ -89,14 +89,10 @@ class BPlusTree {
 
     [[nodiscard]] auto vacuum_step(Page &head, Id last_id) -> Status;
     [[nodiscard]] auto scratch(Size index) -> Byte *;
-    [[nodiscard]] auto allocate(Node &out, bool is_external) -> Status;
-    [[nodiscard]] auto acquire(Node &out, Id pid, bool upgrade = false) const -> Status;
     [[nodiscard]] auto lowest(Node &out) const -> Status;
     [[nodiscard]] auto highest(Node &out) const -> Status;
-    [[nodiscard]] auto destroy(Node node) -> Status;
-    auto release(Node node) const -> void;
-    auto make_existing_node(Node &out, Page page) const -> void;
-    auto make_fresh_node(Node &out, Page page, bool is_external) const -> void;
+    auto make_existing_node(Node &out) const -> void;
+    auto make_fresh_node(Node &out, bool is_external) const -> void;
 
 public:
     explicit BPlusTree(Pager &pager);
@@ -108,6 +104,11 @@ public:
     [[nodiscard]] auto insert(const Slice &key, const Slice &value, bool &exists) -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, bool &vacuumed) -> Status;
+
+    [[nodiscard]] auto allocate(Node &out, bool is_external) -> Status;
+    [[nodiscard]] auto acquire(Node &out, Id pid, bool upgrade = false) const -> Status;
+    [[nodiscard]] auto destroy(Node node) -> Status;
+    auto release(Node node) const -> void;
 
     auto save_state(FileHeader &header) const -> void;
     auto load_state(const FileHeader &header) -> void;

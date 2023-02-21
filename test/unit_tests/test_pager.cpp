@@ -621,11 +621,10 @@ public:
     [[nodiscard]]
     auto allocate_write(const std::string &message) const
     {
-        auto r = pager->allocate();
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-//        pager->upgrade(*r);
-        write_to_page(*r, message);
-        return std::move(*r);
+        Page page;
+        EXPECT_OK(pager->allocate(page));
+        write_to_page(page, message);
+        return page;
     }
 
     [[nodiscard]]
@@ -641,11 +640,11 @@ public:
     [[nodiscard]]
     auto acquire_write(Id id, const std::string &message) const
     {
-        auto r = pager->acquire(id);
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-        pager->upgrade(*r);
-        write_to_page(*r, message);
-        return std::move(*r);
+        Page page;
+        EXPECT_OK(pager->acquire(id, page));
+        pager->upgrade(page);
+        write_to_page(page, message);
+        return page;
     }
 
     auto acquire_write_release(Id id, const std::string &message) const
@@ -658,10 +657,10 @@ public:
     [[nodiscard]]
     auto acquire_read_release(Id id, Size size) const
     {
-        auto r = pager->acquire(id);
-        EXPECT_TRUE(r.has_value()) << "Error: " << r.error().what().data();
-        auto message = read_from_page(*r, size);
-        pager->release(std::move(*r));
+        Page page;
+        EXPECT_OK(pager->acquire(id, page));
+        auto message = read_from_page(page, size);
+        pager->release(std::move(page));
         EXPECT_OK(status);
         return message;
     }
@@ -700,19 +699,21 @@ TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
 {
     const auto id = allocate_write_release(test_message);
-    auto r = pager->acquire(id);
-    ASSERT_EQ(id, r->id());
+    Page page;
+    ASSERT_OK(pager->acquire(id, page));
+    ASSERT_EQ(id, page.id());
     ASSERT_EQ(id, Id::root());
-    pager->release(std::move(*r));
+    pager->release(std::move(page));
 }
 
 TEST_F(PagerTests, MultipleReaders)
 {
     const auto id = allocate_write_release(test_message);
-    auto page_1a = pager->acquire(id).value();
-    auto page_1b = pager->acquire(id).value();
-    pager->release(std::move(page_1a));
-    pager->release(std::move(page_1b));
+    Page page_a, page_b;
+    ASSERT_OK(pager->acquire(id, page_a));
+    ASSERT_OK(pager->acquire(id, page_b));
+    pager->release(std::move(page_a));
+    pager->release(std::move(page_b));
 }
 
 template<class T>

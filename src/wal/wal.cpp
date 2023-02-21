@@ -26,7 +26,7 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
     }
 
     std::vector<std::string> child_names;
-    Calico_Try_S(param.store->get_children(path, child_names));
+    Calico_Try(param.store->get_children(path, child_names));
 
     std::vector<Id> segment_ids;
     for (auto &name: child_names) {
@@ -127,7 +127,7 @@ auto WriteAheadLog::advance() -> void
 
 auto WriteAheadLog::new_reader(WalReader **out) -> Status
 {
-    Calico_Try_S(status());
+    Calico_Try(status());
     const auto param = WalReader::Parameters {
         m_prefix,
         m_reader_tail,
@@ -158,7 +158,7 @@ auto WriteAheadLog::truncate(Lsn lsn) -> Status
             break;
         }
         const auto name = encode_segment_name(m_prefix, current);
-        Calico_Try_S(m_storage->remove_file(name));
+        Calico_Try(m_storage->remove_file(name));
         m_set.remove_after(Id {current.value - 1});
         current = m_set.id_before(current);
     }

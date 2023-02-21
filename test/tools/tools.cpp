@@ -227,7 +227,7 @@ auto DynamicMemory::try_intercept_syscall(Interceptor::Type type, const std::str
     Slice filename {path};
     for (const auto &interceptor: m_interceptors) {
         if (interceptor.type == type && filename.starts_with(interceptor.prefix)) {
-            Calico_Try_S(interceptor());
+            Calico_Try(interceptor());
         }
     }
     return Status::ok();

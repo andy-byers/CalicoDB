@@ -296,11 +296,6 @@ public:
         return impl->open("test", options);
     }
 
-    auto snapshot() const -> std::string
-    {
-        return TestTools::snapshot(*options.storage, options.page_size);
-    }
-
     Options options;
     Tools::RandomGenerator random {4 * 1'024 * 1'024};
     std::vector<Record> records;
@@ -756,7 +751,7 @@ public:
         options.storage = storage.get();
 
         Database *db;
-        Calico_Try_S(Database::open(base, options, &db));
+        Calico_Try(Database::open(base, options, &db));
 
         ext->m_base.reset(db);
         ext->m_storage = std::move(storage);

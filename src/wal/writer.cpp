@@ -49,7 +49,7 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
             }
         }
         CALICO_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::SIZE);
-        Calico_Try_S(flush());
+        Calico_Try(flush());
     }
     // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
     // to be all the way on disk.
@@ -163,14 +163,14 @@ auto WalWriter::close_segment() -> Status
     if (const auto id = std::exchange(m_current, Id::null()); written) {
         m_set->add_segment(id);
     } else {
-        Calico_Try_S(m_storage->remove_file(encode_segment_name(m_prefix, id)));
+        Calico_Try(m_storage->remove_file(encode_segment_name(m_prefix, id)));
     }
     return Status::ok();
 }
 
 auto WalWriter::advance_segment() -> Status
 {
-    Calico_Try_S(close_segment());
+    Calico_Try(close_segment());
     return open_segment({m_set->last().value + 1});
 }
 
