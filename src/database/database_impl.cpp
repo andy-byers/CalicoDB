@@ -1,12 +1,12 @@
 
 #include "database_impl.h"
-#include <limits>
 #include "calico/calico.h"
 #include "calico/storage.h"
 #include "storage/helpers.h"
 #include "storage/posix_storage.h"
-#include "tree/cursor_internal.h"
+#include "tree/cursor_impl.h"
 #include "utils/logging.h"
+#include <limits>
 
 namespace Calico {
 

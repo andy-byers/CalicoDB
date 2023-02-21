@@ -1,7 +1,7 @@
-#include "cursor_internal.h"
+#include "cursor_impl.h"
 #include "node.h"
-#include "tree.h"
 #include "pager/pager.h"
+#include "tree.h"
 
 namespace Calico {
 

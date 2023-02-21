@@ -11,6 +11,21 @@
 namespace Calico {
 
 class CursorImpl : public Cursor {
+    struct Location {
+        Id pid;
+        PageSize index {};
+        PageSize count {};
+    };
+    mutable Status m_status;
+    mutable std::string m_key;
+    mutable std::string m_value;
+    mutable Size m_key_size {};
+    mutable Size m_value_size {};
+    BPlusTree *m_tree {};
+    Location m_loc;
+
+    auto seek_to(Node node, Size index) -> void;
+
 public:
     friend class CursorInternal;
 
@@ -30,27 +45,6 @@ public:
     auto seek_last() -> void override;
     auto next() -> void override;
     auto previous() -> void override;
-
-private:
-    auto seek_left() -> void;
-    auto seek_right() -> void;
-    auto do_seek_first() -> void;
-    auto do_seek_last() -> void;
-    auto seek_to(Node node, Size index) -> void;
-    auto do_seek(const Slice &key) -> void;
-
-    struct Location {
-        Id pid {};
-        PageSize index {};
-        PageSize count {};
-    };
-    mutable Status m_status;
-    mutable std::string m_key;
-    mutable std::string m_value;
-    mutable Size m_key_size;
-    mutable Size m_value_size;
-    BPlusTree *m_tree {};
-    Location m_loc;
 };
 
 class CursorInternal {

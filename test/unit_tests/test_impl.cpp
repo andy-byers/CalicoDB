@@ -1,7 +1,7 @@
 
 #include "database/database_impl.h"
 #include "tools.h"
-#include "tree/cursor_internal.h"
+#include "tree/cursor_impl.h"
 #include "tree/header.h"
 #include "unit_tests.h"
 #include "wal/wal.h"

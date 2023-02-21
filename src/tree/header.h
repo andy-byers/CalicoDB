@@ -11,11 +11,11 @@ class Page;
  *     Offset  Size  Name
  *     0       4     magic_code
  *     4       4     header_crc
- *     12      8     page_count
- *     20      8     record_count
- *     28      8     free_list_id
- *     36      8     recovery_lsn
- *     38      2     page_size
+ *     8       8     page_count
+ *     16      8     record_count
+ *     24      8     free_list_id
+ *     32      8     recovery_lsn
+ *     40      2     page_size
  */
 struct FileHeader {
     static constexpr std::uint32_t MAGIC_CODE {0xB11924E1};
@@ -46,10 +46,6 @@ struct FileHeader {
  *     29      2     free_start
  *     31      2     free_total
  *     33      1     frag_count
- *
- * TODO: We don't need so many header fields. For instance, instead of caching the total free block bytes, we can just limit the
- *       list length and null out the last "next pointer". The "prev_id" field can be placed at the end
- *       and omitted in external nodes.
  */
 struct NodeHeader {
     static constexpr Size SIZE {34};
@@ -66,10 +62,6 @@ struct NodeHeader {
     std::uint16_t free_total {};
     std::uint8_t frag_count {};
     bool is_external {true};
-
-private:
-    static constexpr Byte EXTERNAL_BITS {0b01'1};
-    static constexpr Byte INTERNAL_BITS {0b10'1};
 };
 
 } // namespace Calico

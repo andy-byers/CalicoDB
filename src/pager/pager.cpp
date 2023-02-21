@@ -11,13 +11,6 @@ namespace Calico {
 
 static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
 
-#define MAYBE_ERROR(expr) \
-    do { \
-        if (auto calico_s = (expr); !calico_s.is_ok()) { \
-            m_error->set(std::move(calico_s)); \
-        } \
-    } while (0)
-
 auto Pager::open(const Parameters &param) -> tl::expected<Pager::Ptr, Status>
 {
     auto framer = FrameManager::open(
@@ -74,9 +67,6 @@ auto Pager::pin_frame(Id pid) -> Status
 {
     if (auto s = do_pin_frame(pid); s.is_not_found()) {
         logv(m_info_log, s.what().data());
-
-        // This call blocks, so the WAL will be caught up when it returns. The recursive call to
-        // pin_frame() should succeed.
         Calico_Try_S(m_wal->flush());
         return do_pin_frame(pid);
     } else {
@@ -366,7 +356,5 @@ auto Pager::load_state(const FileHeader &header) -> void
     }
     m_frames.load_state(header);
 }
-
-#undef MAYBE_ERROR
 
 } // namespace Calico
