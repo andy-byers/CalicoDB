@@ -26,7 +26,9 @@ static auto to_status(int code) -> Status
 [[nodiscard]]
 static auto errno_to_status() -> Status
 {
-    return to_status(std::exchange(errno, 0));
+    const auto code = errno;
+    errno = 0;
+    return to_status(code);
 }
 
 static auto file_open(const std::string &name, int mode, int permissions, int &out) -> Status
