@@ -20,13 +20,14 @@ struct SearchResult {
 //       This isn't necessary: we could iterate through, page by page, and compare bytes as we encounter
 //       them. It's just a bit more complicated.
 class NodeIterator {
+    mutable Status m_status;
     OverflowList *m_overflow {};
     std::string *m_lhs_key {};
     std::string *m_rhs_key {};
     Node *m_node {};
     Size m_index {};
 
-    [[nodiscard]] auto fetch_key(std::string &buffer, const Cell &cell) const -> tl::expected<Slice, Status>;
+    [[nodiscard]] auto fetch_key(std::string &buffer, const Cell &cell, Slice &out) const -> Status;
 
 public:
     struct Parameters {
@@ -35,10 +36,13 @@ public:
         std::string *rhs_key {};
     };
     explicit NodeIterator(Node &node, const Parameters &param);
+    // NOTE: Status must be checked regardless of what is returned by seek(). is_valid() only checks the index vs.
+    //       the cell count, not the status value.
+    [[nodiscard]] auto status() const -> Status;
     [[nodiscard]] auto is_valid() const -> bool;
     [[nodiscard]] auto index() const -> Size;
-    [[nodiscard]] auto seek(const Slice &key) -> tl::expected<bool, Status>;
-    [[nodiscard]] auto seek(const Cell &cell) -> tl::expected<bool, Status>;
+    auto seek(const Slice &key) -> bool;
+    auto seek(const Cell &cell) -> bool;
 };
 
 class PayloadManager {
@@ -52,15 +56,15 @@ public:
      * memory and set as the node's overflow cell. May allocate an overflow chain with its back pointer
      * pointing to "node".
      */
-    [[nodiscard]] auto emplace(Byte *scratch, Node &node, const Slice &key, const Slice &value, Size index) -> tl::expected<void, Status>;
+    [[nodiscard]] auto emplace(Byte *scratch, Node &node, const Slice &key, const Slice &value, Size index) -> Status;
 
     /* Prepare a cell read from an external node to be posted into its parent as a separator. Will
      * allocate a new overflow chain for overflowing keys, pointing back to "parent_id".
      */
-    [[nodiscard]] auto promote(Byte *scratch, Cell &cell, Id parent_id) -> tl::expected<void, Status>;
+    [[nodiscard]] auto promote(Byte *scratch, Cell &cell, Id parent_id) -> Status;
 
-    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>;
-    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>;
+    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
+    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
 };
 
 class BPlusTree {
@@ -83,27 +87,27 @@ class BPlusTree {
 
     Pager *m_pager {};
 
-    [[nodiscard]] auto vacuum_step(Page &head, Id last_id) -> tl::expected<void, Status>;
-    [[nodiscard]] auto make_existing_node(Page page) const -> Node;
-    [[nodiscard]] auto make_fresh_node(Page page, bool is_external) const -> Node;
+    [[nodiscard]] auto vacuum_step(Page &head, Id last_id) -> Status;
     [[nodiscard]] auto scratch(Size index) -> Byte *;
-    [[nodiscard]] auto allocate(bool is_external) -> tl::expected<Node, Status>;
-    [[nodiscard]] auto acquire(Id pid, bool upgrade = false) const -> tl::expected<Node, Status>;
-    [[nodiscard]] auto lowest() const -> tl::expected<Node, Status>;
-    [[nodiscard]] auto highest() const -> tl::expected<Node, Status>;
-    [[nodiscard]] auto destroy(Node node) -> tl::expected<void, Status>;
+    [[nodiscard]] auto allocate(Node &out, bool is_external) -> Status;
+    [[nodiscard]] auto acquire(Node &out, Id pid, bool upgrade = false) const -> Status;
+    [[nodiscard]] auto lowest(Node &out) const -> Status;
+    [[nodiscard]] auto highest(Node &out) const -> Status;
+    [[nodiscard]] auto destroy(Node node) -> Status;
     auto release(Node node) const -> void;
+    auto make_existing_node(Node &out, Page page) const -> void;
+    auto make_fresh_node(Node &out, Page page, bool is_external) const -> void;
 
 public:
     explicit BPlusTree(Pager &pager);
 
-    [[nodiscard]] auto setup() -> tl::expected<Node, Status>;
-    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>;
-    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell) const -> tl::expected<Slice, Status>;
-    [[nodiscard]] auto search(const Slice &key) -> tl::expected<SearchResult, Status>;
-    [[nodiscard]] auto insert(const Slice &key, const Slice &value) -> tl::expected<bool, Status>;
-    [[nodiscard]] auto erase(const Slice &key) -> tl::expected<void, Status>;
-    [[nodiscard]] auto vacuum_one(Id target) -> tl::expected<bool, Status>;
+    [[nodiscard]] auto setup(Node &out) -> Status;
+    [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
+    [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
+    [[nodiscard]] auto search(const Slice &key, SearchResult &out) -> Status;
+    [[nodiscard]] auto insert(const Slice &key, const Slice &value, bool &exists) -> Status;
+    [[nodiscard]] auto erase(const Slice &key) -> Status;
+    [[nodiscard]] auto vacuum_one(Id target, bool &vacuumed) -> Status;
 
     auto save_state(FileHeader &header) const -> void;
     auto load_state(const FileHeader &header) -> void;

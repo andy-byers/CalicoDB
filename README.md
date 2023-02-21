@@ -34,9 +34,8 @@ It exposes a small API that allows storage and retrieval of arbitrary byte seque
 Check out the [docs](doc/doc.md).
 
 ## Dependencies
-The library itself depends on `@TartanLlama/expected`.
-The tests depend on `@google/googletest`, and the benchmarks depend on `@google/benchmark`.
-Dependencies are either downloaded using CMake's FetchContent API, or bundled with the source code.
+The library itself has no dependencies.
+The tests depend on `@google/googletest`, which is downloaded using CMake's FetchContent API.
 
 ## Performance
 Calico DB is optimized for read-heavy workloads with intermittent batches of sequential writes.

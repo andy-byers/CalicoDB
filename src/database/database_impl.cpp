@@ -121,16 +121,16 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     if (is_new) {
         logv(m_info_log, "setting up a new database");
         Calico_Try_S(wal->start_writing());
-        auto root = tree->setup();
-        if (!root.has_value()) {
-            return root.error();
-        }
+
+        Node root;
+        Calico_Try_S(tree->setup(root));
+
         CALICO_EXPECT_EQ(pager->page_count(), 1);
         state.page_count = 1;
-        state.write(root->page);
+        state.write(root.page);
         state.header_crc = state.compute_crc();
-        state.write(root->page);
-        pager->release(std::move(*root).take());
+        state.write(root.page);
+        pager->release(std::move(root).take());
         Calico_Try_S(do_commit({}));
 
     } else {
@@ -259,29 +259,23 @@ auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bo
 
 auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 {
+    Calico_Try_S(status());
     value.clear();
 
-    Calico_Try_S(status());
-    if (auto slot = tree->search(key)) {
-        auto [node, index, exact] = std::move(*slot);
+    SearchResult slot;
+    Calico_Try_S(tree->search(key, slot));
+    auto [node, index, exact] = std::move(slot);
 
-        if (!exact) {
-            pager->release(std::move(node.page));
-            return Status::not_found("not found");
-        }
-
-        Status s;
-        const auto cell = read_cell(node, index);
-        if (auto result = tree->collect_value(value, cell)) {
-            // "value" contains the value associated with "key".
-        } else {
-            s = result.error();
-        }
+    if (!exact) {
         pager->release(std::move(node.page));
-        return s;
-    } else {
-        return slot.error();
+        return Status::not_found("not found");
     }
+
+    Slice _;
+    const auto cell = read_cell(node, index);
+    Calico_Try_S(tree->collect_value(value, cell, _));
+    pager->release(std::move(node.page));
+    return Status::ok();
 }
 
 auto DatabaseImpl::new_cursor() const -> Cursor *
@@ -296,30 +290,30 @@ auto DatabaseImpl::new_cursor() const -> Cursor *
 auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 {
     Calico_Try_S(status());
-    bytes_written += key.size() + value.size();
-    if (const auto inserted = tree->insert(key, value)) {
-        record_count += *inserted;
-        m_txn_size++;
-        return Status::ok();
-    } else {
-        Maybe_Set_Error(inserted.error());
-        return inserted.error();
+
+    bool exists {};
+    if (auto s = tree->insert(key, value, exists); !s.is_ok()) {
+        Maybe_Set_Error(s);
+        return s;
     }
+    bytes_written += key.size()*exists + value.size();
+    record_count += exists;
+    m_txn_size++;
+    return Status::ok();
 }
 
 auto DatabaseImpl::erase(const Slice &key) -> Status
 {
     Calico_Try_S(status());
-    if (const auto erased = tree->erase(key)) {
+
+    auto s = tree->erase(key);
+    if (s.is_ok()) {
         record_count--;
         m_txn_size++;
-        return Status::ok();
-    } else {
-        if (!erased.error().is_not_found()) {
-            Maybe_Set_Error(erased.error());
-        }
-        return erased.error();
+    } else if (!s.is_not_found()) {
+        Maybe_Set_Error(s);
     }
+    return s;
 }
 
 auto DatabaseImpl::vacuum() -> Status
@@ -339,12 +333,10 @@ auto DatabaseImpl::do_vacuum() -> Status
         return Status::ok();
     }
     for (; ; target.value--) {
-        if (auto r = tree->vacuum_one(target)) {
-            if (!*r) {
-                break;
-            }
-        } else {
-            return r.error();
+        bool vacuumed {};
+        Calico_Try_S(tree->vacuum_one(target, vacuumed));
+        if (!vacuumed) {
+            break;
         }
     }
     if (target.value == pager->page_count()) {
@@ -408,30 +400,27 @@ auto DatabaseImpl::ensure_consistency_on_startup() -> Status
 
 auto DatabaseImpl::save_state() const -> Status
 {
-    auto root = pager->acquire(Id::root());
-    if (!root.has_value()) {
-        return root.error();
-    }
-    pager->upgrade(*root);
-    FileHeader header {*root};
+    Page root;
+    Calico_Try_S(pager->acquire(Id::root(), root));
+
+    pager->upgrade(root);
+    FileHeader header {root};
     pager->save_state(header);
     tree->save_state(header);
     header.record_count = record_count;
     header.header_crc = header.compute_crc();
-    header.write(*root);
+    header.write(root);
 
-    pager->release(std::move(*root));
+    pager->release(std::move(root));
     return Status::ok();
 }
 
 auto DatabaseImpl::load_state() -> Status
 {
-    auto root = pager->acquire(Id::root());
-    if (!root.has_value()) {
-        return root.error();
-    }
+    Page root;
+    Calico_Try_S(pager->acquire(Id::root(), root));
 
-    FileHeader header {*root};
+    FileHeader header {root};
     if (header.header_crc != header.compute_crc()) {
         auto s = Status::corruption("file header is corrupted");
         logv(m_info_log, "cannot load database state: ", s.what().to_string());
@@ -444,7 +433,7 @@ auto DatabaseImpl::load_state() -> Status
     pager->load_state(header);
     tree->load_state(header);
 
-    pager->release(std::move(*root));
+    pager->release(std::move(root));
     if (pager->page_count() < before_count) {
         const auto after_size = pager->page_count() * pager->page_size();
         return m_storage->resize_file(m_db_prefix + "data", after_size);

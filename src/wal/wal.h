@@ -10,7 +10,6 @@
 #include "helpers.h"
 #include "record.h"
 #include "utils/encoding.h"
-#include "utils/expected.hpp"
 #include "utils/scratch.h"
 #include "utils/types.h"
 

@@ -3,7 +3,6 @@
 
 #include "node.h"
 #include "tree.h"
-#include "utils/expected.hpp"
 #include <calico/cursor.h>
 #include <functional>
 #include <utils/types.h>
@@ -25,6 +24,8 @@ class CursorImpl : public Cursor {
     Location m_loc;
 
     auto seek_to(Node node, Size index) -> void;
+    auto fetch_key() const -> Status;
+    auto fetch_value() const -> Status;
 
 public:
     friend class CursorInternal;

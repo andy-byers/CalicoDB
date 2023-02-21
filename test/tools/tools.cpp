@@ -265,7 +265,8 @@ auto print_references(Pager &pager, PointerMap &pointers) -> void
             std::cerr << "node -> NULL\n";
             continue;
         }
-        const auto entry = pointers.read_entry(pid).value();
+        PointerMap::Entry entry;
+        CHECK_OK(pointers.read_entry(pid, entry));
         switch (entry.type) {
             case PointerMap::NODE:
                 std::cerr << "node";

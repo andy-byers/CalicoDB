@@ -292,52 +292,6 @@ auto Pager::acquire(Id pid, Page &page) -> Status
     return do_acquire(m_cache.get(pid)->value);
 }
 
-auto Pager::allocate() -> tl::expected<Page, Status>
-{
-    Calico_New_R(page, acquire(Id::from_index(m_frames.page_count())));
-    upgrade(page, 0);
-    return page;
-}
-
-auto Pager::acquire(Id pid) -> tl::expected<Page, Status>
-{
-    const auto do_acquire = [this](auto &entry) -> tl::expected<Page, Status> {
-        auto page = m_frames.ref(entry.index);
-
-        // Write back pages that are too old. This is so that old WAL segments can be removed.
-        if (entry.token) {
-            const auto lsn = read_page_lsn(page);
-            const auto checkpoint = (*entry.token)->record_lsn;
-            const auto cutoff = *m_commit_lsn;
-
-            if (checkpoint <= cutoff && lsn <= m_wal->flushed_lsn()) {
-                auto s = m_frames.write_back(entry.index);
-
-                if (s.is_ok()) {
-                    clean_page(entry);
-                } else {
-                    *m_status = std::move(s);
-                    return tl::make_unexpected(*m_status);
-                }
-            }
-        }
-        return page;
-    };
-
-    CALICO_EXPECT_FALSE(pid.is_null());
-
-    if (auto itr = m_cache.get(pid); itr != m_cache.end()) {
-        return do_acquire(itr->value);
-    }
-
-    if (auto s = pin_frame(pid); !s.is_ok()) {
-        return tl::make_unexpected(std::move(s));
-    }
-
-    CALICO_EXPECT_TRUE(m_cache.contains(pid));
-    return do_acquire(m_cache.get(pid)->value);
-}
-
 auto Pager::upgrade(Page &page, int important) -> void
 {
     CALICO_EXPECT_LE(important, static_cast<int>(page.size()));

@@ -7,7 +7,6 @@
 #include "pager/pager.h"
 #include "tree/header.h"
 #include "tree/tree.h"
-#include "utils/expected.hpp"
 #include "wal/wal.h"
 #include "wal/cleanup.h"
 #include "wal/writer.h"

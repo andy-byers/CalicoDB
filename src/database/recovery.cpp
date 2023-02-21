@@ -24,13 +24,12 @@ static auto apply_redo(Page &page, const DeltaDescriptor &deltas)
 template<class Descriptor, class Callback>
 static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
 {
-    if (auto page = pager.acquire(descriptor.pid)) {
-        callback(*page);
-        pager.release(std::move(*page));
-        return Status::ok();
-    } else {
-        return page.error();
-    }
+    Page page;
+    Calico_Try_S(pager.acquire(descriptor.pid, page));
+
+    callback(page);
+    pager.release(std::move(page));
+    return Status::ok();
 }
 
 auto Recovery::start() -> Status

@@ -3,7 +3,6 @@
 
 #include "calico/storage.h"
 #include "pager/delta.h"
-#include "utils/expected.hpp"
 #include "utils/encoding.h"
 #include "utils/scratch.h"
 #include "utils/types.h"

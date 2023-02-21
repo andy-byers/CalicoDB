@@ -48,8 +48,6 @@ public:
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Id pid, Page &page) -> Status;
-    [[nodiscard]] auto allocate() -> tl::expected<Page, Status>; // TODO: remove
-    [[nodiscard]] auto acquire(Id pid) -> tl::expected<Page, Status>; // TODO: remove
     auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
     auto save_state(FileHeader &header) -> void;

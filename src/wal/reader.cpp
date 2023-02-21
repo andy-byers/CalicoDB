@@ -1,7 +1,6 @@
 #include "reader.h"
 #include "calico/storage.h"
 #include "pager/page.h"
-#include "utils/expected.hpp"
 
 namespace Calico {
 
