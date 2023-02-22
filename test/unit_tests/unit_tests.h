@@ -204,12 +204,6 @@ public:
     {
 
     }
-
-    [[nodiscard]]
-    auto truncate(Id) -> Status override
-    {
-        return Status::ok();
-    }
 };
 
 inline auto expect_ok(const Status &s) -> void

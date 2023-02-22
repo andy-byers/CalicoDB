@@ -32,6 +32,14 @@ static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback
     return Status::ok();
 }
 
+Recovery::Recovery(Pager &pager, WriteAheadLog &wal, Lsn &commit_lsn)
+    : m_reader_data(wal_scratch_size(pager.page_size()), '\x00'),
+      m_reader_tail(wal_block_size(pager.page_size()), '\x00'),
+      m_pager {&pager},
+      m_wal {&wal},
+      m_commit_lsn {&commit_lsn}
+{}
+
 auto Recovery::open_reader(Id segment, std::unique_ptr<Reader> &out) -> Status
 {
     Reader *file;
@@ -55,7 +63,7 @@ auto Recovery::recover() -> Status
  */
 auto Recovery::recover_phase_1() -> Status
 {
-    const auto &set = m_wal->m_set;
+    auto &set = m_wal->m_set;
     auto &storage = *m_pager->m_storage;
 
     if (set.is_empty()) {
@@ -116,7 +124,7 @@ auto Recovery::recover_phase_1() -> Status
                 }));
             } else if (std::holds_alternative<CommitDescriptor>(decoded)) {
                 const auto commit = std::get<CommitDescriptor>(decoded);
-                *m_commit_lsn = commit.lsn;
+                commit_lsn = commit.lsn;
                 commit_offset = reader.offset();
                 commit_segment = segment;
             }
@@ -133,12 +141,10 @@ auto Recovery::recover_phase_1() -> Status
         return Status::corruption("wal could not be read");
     }
 
-    if (commit_lsn == *m_commit_lsn) {
-        return Status::ok();
+    if (commit_lsn >= *m_commit_lsn) {
+        *m_commit_lsn = commit_lsn;
+        return m_pager->flush({});
     }
-
-    m_wal->m_last_lsn = last_lsn;
-    m_wal->m_flushed_lsn = last_lsn;
 
     /* Roll backward, reverting misapplied updates until we reach either the beginning, or the saved
      * commit offset. The first segment we read may contain a partial/corrupted record.
@@ -161,11 +167,12 @@ auto Recovery::recover_phase_1() -> Status
             last_lsn = payload.lsn();
 
             // We may encounter records from older transactions. Just ignore them.
-            if (last_lsn <= commit_lsn) {
+            if (last_lsn <= *m_commit_lsn) {
                 continue;
             }
 
             const auto decoded = decode_payload(payload);
+            CALICO_EXPECT_FALSE(std::holds_alternative<CommitDescriptor>(decoded));
             if (std::holds_alternative<std::monostate>(decoded)) {
                 Calico_Try(translate_status(Status::corruption("wal is corrupted"), last_lsn));
                 break;
@@ -197,107 +204,21 @@ auto Recovery::recover_phase_1() -> Status
             const auto block_number = commit_offset / m_reader_tail.size();
             const auto block_end = (block_number+1) * m_reader_tail.size();
             Calico_Try(storage.resize_file(name, commit_offset));
+            // TODO: If this call fails, we will need to fix the database in Database::repair().
             Calico_Try(storage.resize_file(name, block_end));
             break;
         }
+        // This whole segment must belong to the transaction we are reverting.
         Calico_Try(storage.remove_file(name));
     }
+    set.remove_after(segment);
+    m_wal->m_last_lsn = *m_commit_lsn;
+    m_wal->m_flushed_lsn = *m_commit_lsn;
     return Status::ok();
-
-//    WalReader_ *temp;
-//    Calico_Try(m_wal->new_reader_(&temp));
-//    std::unique_ptr<WalReader_> reader {temp};
-//    Lsn last_lsn;
-//    Status s;
-//
-//    const auto translate_status = [&s, &reader, last = set.last()] {
-//        CALICO_EXPECT_FALSE(s.is_ok());
-//        if (s.is_not_found() || s.is_corruption()) {
-//            if (reader->id() == last) {
-//                s = Status::ok();
-//            }
-//        }
-//        return s;
-//    };
-//
-//    // Skip updates that are already in the database.
-//    s = reader->seek(*m_commit_lsn);
-//    if (s.is_not_found()) {
-//        s = Status::ok();
-//    }
-//
-//    // Roll forward and apply missing updates.
-//    for (Size i {}; ; i++) {
-//        WalPayloadOut payload;
-//        s = reader->read(payload);
-//        if (!s.is_ok()) {
-//            break;
-//        }
-//        const auto decoded = decode_payload(payload);
-//
-//        // Payload has an invalid type.
-//        if (std::holds_alternative<std::monostate>(decoded)) {
-//            return Status::corruption("wal is corrupted");
-//        }
-//
-//        if (i && last_lsn.value + 1 != payload.lsn().value) {
-//            return Status::corruption("missing wal record");
-//        }
-//        last_lsn = payload.lsn();
-//
-//        if (std::holds_alternative<CommitDescriptor>(decoded)) {
-//            *m_commit_lsn = payload.lsn();
-//        } else if (std::holds_alternative<DeltaDescriptor>(decoded)) {
-//            const auto delta = std::get<DeltaDescriptor>(decoded);
-//            Calico_Try(with_page(*m_pager, delta, [this, &delta](auto &page) {
-//                if (delta.lsn > read_page_lsn(page)) {
-//                    m_pager->upgrade(page);
-//                    apply_redo(page, delta);
-//                }
-//            }));
-//        }
-//    }
-//
-//    // The reader either hit the end of the WAL or errored out. It may have encountered a corrupted or incomplete
-//    // last record if the database crashed while in the middle of writing that record.
-//    Calico_Try(translate_status());
-//
-//    if (*m_commit_lsn == last_lsn) {
-//        return Status::ok();
-//    }
-//
-//    // Put the reader at the segment right after the most-recent commit. We can read the last transaction forward
-//    // to revert it, because the full image records are disjoint w.r.t. the pages they reference.
-//    Calico_Try(reader->seek(*m_commit_lsn));
-//    Calico_Try(reader->skip());
-//
-//    for (; ; ) {
-//        WalPayloadOut payload;
-//        s = reader->read(payload);
-//        if (!s.is_ok()) {
-//            break;
-//        }
-//        const auto decoded = decode_payload(payload);
-//
-//        if (std::holds_alternative<std::monostate>(decoded)) {
-//            return Status::corruption("wal is corrupted");
-//        }
-//        if (std::holds_alternative<FullImageDescriptor>(decoded)) {
-//            const auto image = std::get<FullImageDescriptor>(decoded);
-//            Calico_Try(with_page(*m_pager, image, [this, &image](auto &page) {
-//                m_pager->upgrade(page);
-//                apply_undo(page, image);
-//            }));
-//        }
-//    }
-//
-//    return translate_status();
 }
 
 auto Recovery::recover_phase_2() -> Status
 {
-    Calico_Try(m_pager->flush({}));
-//    Calico_Try(m_wal->truncate(*m_commit_lsn));
     Calico_Try(m_wal->start_writing());
     m_pager->m_recovery_lsn = *m_commit_lsn;
     m_wal->cleanup( *m_commit_lsn);

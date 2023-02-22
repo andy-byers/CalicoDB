@@ -9,9 +9,7 @@ namespace Calico {
 WriteAheadLog::WriteAheadLog(const Parameters &param)
     : m_prefix {param.prefix},
       m_storage {param.store},
-      m_reader_data(wal_scratch_size(param.page_size), '\x00'),
-      m_reader_tail(wal_block_size(param.page_size), '\x00'),
-      m_writer_tail(wal_block_size(param.page_size), '\x00'),
+      m_tail(wal_block_size(param.page_size), '\x00'),
       m_segment_cutoff {param.segment_cutoff}
 {
     CALICO_EXPECT_NE(m_storage, nullptr);
@@ -66,10 +64,10 @@ auto WriteAheadLog::close() -> Status
 
 auto WriteAheadLog::start_writing() -> Status
 {
-    m_writer = std::unique_ptr<WalWriter_> {
-        new(std::nothrow) WalWriter_ {{
+    m_writer = std::unique_ptr<WalWriter> {
+        new(std::nothrow) WalWriter {{
             m_prefix,
-            m_writer_tail,
+            m_tail,
             m_storage,
             &m_error,
             &m_set,
@@ -130,45 +128,9 @@ auto WriteAheadLog::advance() -> void
     m_writer->advance();
 }
 
-auto WriteAheadLog::new_reader_(WalReader_ **out) -> Status
-{
-    Calico_Try(status());
-    const auto param = WalReader_::Parameters {
-        m_prefix,
-        m_reader_tail,
-        m_reader_data,
-        m_storage,
-        &m_set,
-    };
-    return WalReader_::open(param, out);
-}
-
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void
 {
     m_cleanup->cleanup(recovery_lsn);
-}
-
-auto WriteAheadLog::truncate(Lsn lsn) -> Status
-{
-    auto current = m_set.last();
-
-    while (!current.is_null()) {
-        Lsn first_lsn;
-        auto s = read_first_lsn(*m_storage, m_prefix, current, m_set, first_lsn);
-        if (!s.is_ok() && !s.is_not_found()) {
-            return s;
-        }
-        if (first_lsn <= lsn) {
-            break;
-        }
-        const auto name = encode_segment_name(m_prefix, current);
-        Calico_Try(m_storage->remove_file(name));
-        m_set.remove_after(Id {current.value - 1});
-        current = m_set.id_before(current);
-    }
-    m_last_lsn = lsn;
-    m_flushed_lsn = lsn;
-    return Status::ok();
 }
 
 } // namespace Calico

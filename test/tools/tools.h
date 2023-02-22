@@ -93,6 +93,14 @@ class DynamicMemory : public Storage {
     [[nodiscard]] auto write_file_at(Memory &mem, Slice in, Size offset) -> Status;
 
 public:
+    [[nodiscard]] auto memory() -> std::unordered_map<std::string, Memory> &
+    {
+        return m_memory;
+    }
+    [[nodiscard]] auto memory() const -> const std::unordered_map<std::string, Memory> &
+    {
+        return m_memory;
+    }
     [[nodiscard]] auto clone() const -> Storage *;
     auto add_interceptor(Interceptor interceptor) -> void;
     auto clear_interceptors() -> void;
@@ -178,14 +186,6 @@ static auto integral_key(Size key) -> std::string
         return key_string.substr(0, Length);
     } else {
         return std::string(Length - key_string.size(), '0') + key_string;
-    }
-}
-
-inline auto expect_ok(const Status &s)
-{
-    if (!s.is_ok()) {
-        std::fprintf(stderr, "error: %s\n", s.what().data());
-        std::abort();
     }
 }
 

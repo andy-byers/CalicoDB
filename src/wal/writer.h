@@ -9,9 +9,9 @@
 
 namespace Calico {
 
-class WalWriter {
+class LogWriter {
 public:
-    WalWriter(Logger &file, Span tail, Size file_size = 0)
+    LogWriter(Logger &file, Span tail, Size file_size = 0)
         : m_tail {tail},
           m_file {&file},
           m_block {file_size / tail.size()},
@@ -44,7 +44,7 @@ private:
     Size m_offset {};
 };
 
-class WalWriter_ {
+class WalWriter {
 public:
     struct Parameters {
         Slice prefix;
@@ -55,7 +55,7 @@ public:
         Size wal_limit {};
     };
 
-    explicit WalWriter_(const Parameters &param);
+    explicit WalWriter(const Parameters &param);
 
     auto destroy() && -> void;
     auto write(WalPayloadIn payload) -> void;
@@ -73,7 +73,7 @@ private:
     auto close_segment() -> Status;
 
     std::string m_prefix;
-    std::optional<WalWriter> m_writer;
+    std::optional<LogWriter> m_writer;
     std::unique_ptr<Logger> m_file;
     Storage *m_storage {};
     ErrorBuffer *m_error {};

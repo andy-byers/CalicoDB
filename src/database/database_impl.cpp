@@ -409,7 +409,7 @@ auto DatabaseImpl::save_state(Lsn commit_lsn) const -> Status
     tree->save_state(header);
     header.commit_lsn = commit_lsn;
     header.record_count = record_count;
-    header.header_crc = header.compute_crc();
+    header.header_crc = crc32c::Mask(header.compute_crc());
     header.write(root);
 
     pager->release(std::move(root));
@@ -422,7 +422,7 @@ auto DatabaseImpl::load_state() -> Status
     Calico_Try(pager->acquire(Id::root(), root));
 
     FileHeader header {root};
-    if (header.header_crc != header.compute_crc()) {
+    if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
         auto s = Status::corruption("file header is corrupted");
         logv(m_info_log, "cannot load database state: ", s.what().to_string());
         return s;
@@ -430,6 +430,7 @@ auto DatabaseImpl::load_state() -> Status
 
     const auto before_count = pager->page_count();
 
+    m_commit_lsn = header.commit_lsn;
     record_count = header.record_count;
     pager->load_state(header);
     tree->load_state(header);
@@ -502,7 +503,7 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, In
         if (header.magic_code != FileHeader::MAGIC_CODE) {
             return Status::invalid_argument("magic code is invalid");
         }
-        if (header.header_crc != header.compute_crc()) {
+        if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
             return Status::corruption("file header is corrupted");
         }
         exists = true;

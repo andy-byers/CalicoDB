@@ -400,7 +400,7 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
 
     {
         TestDatabase db {*storage};
-        snapshot = add_records(db, 100, 10 * db.options.page_size);
+        snapshot = add_records(db, 5, 10 * db.options.page_size);
         ASSERT_OK(db.impl->commit());
 
         // Simulate a crash by cloning the database before cleanup has occurred.

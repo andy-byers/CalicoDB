@@ -38,6 +38,7 @@ inline constexpr auto compute_local_size(Size key_size, Size value_size, Size mi
     } else if (key_size > max_local) {
         return max_local;
     }
+    // Try to prevent the key from being split.
     return std::max(min_local, key_size);
 }
 

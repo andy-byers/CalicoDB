@@ -17,7 +17,7 @@ namespace Calico {
 
 class WalCleanup;
 class WalReader_;
-class WalWriter_;
+class WalWriter;
 
 class WriteAheadLog {
 public:
@@ -37,8 +37,6 @@ public:
     [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;
     [[nodiscard]] virtual auto start_writing() -> Status;
-    [[nodiscard]] virtual auto new_reader_(WalReader_ **out) -> Status;
-    [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status;
     [[nodiscard]] virtual auto flush() -> Status;
     virtual auto cleanup(Lsn recovery_lsn) -> void;
     virtual auto log(WalPayloadIn payload) -> void;
@@ -66,13 +64,11 @@ private:
     std::string m_prefix;
 
     Storage *m_storage {};
-    std::string m_reader_data;
-    std::string m_reader_tail;
-    std::string m_writer_tail;
+    std::string m_tail;
     Size m_segment_cutoff {};
     Size m_bytes_written {};
 
-    std::unique_ptr<WalWriter_> m_writer;
+    std::unique_ptr<WalWriter> m_writer;
     std::unique_ptr<WalCleanup> m_cleanup;
 };
 

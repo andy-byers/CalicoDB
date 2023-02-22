@@ -13,12 +13,7 @@ class WriteAheadLog;
 
 class Recovery {
 public:
-    Recovery(Pager &pager, WriteAheadLog &wal, Lsn &commit_lsn)
-        : m_pager {&pager},
-          m_wal {&wal},
-          m_commit_lsn {&commit_lsn}
-    {}
-
+    explicit Recovery(Pager &pager, WriteAheadLog &wal, Lsn &commit_lsn);
     [[nodiscard]] auto recover() -> Status;
 
 private:

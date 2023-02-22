@@ -343,7 +343,7 @@ public:
     WalWriterTests()
         : scratch(wal_scratch_size(PAGE_SIZE), '\x00'),
           tail(wal_block_size(PAGE_SIZE), '\x00'),
-          writer {WalWriter_::Parameters{
+          writer {WalWriter::Parameters{
               "test/wal-",
               Span {tail},
               storage.get(),
@@ -360,7 +360,7 @@ public:
     std::string scratch;
     std::string tail;
     Tools::RandomGenerator random;
-    WalWriter_ writer;
+    WalWriter writer;
 };
 
 TEST_F(WalWriterTests, Destroy)
@@ -463,7 +463,7 @@ public:
           reader_data(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00'),
-          writer {WalWriter_::Parameters{
+          writer {WalWriter::Parameters{
               "test/wal-",
               Span {writer_tail},
               storage.get(),
@@ -474,21 +474,6 @@ public:
     {}
 
     ~WalReaderWriterTests() override = default;
-
-    [[nodiscard]]
-    auto get_reader_() -> std::unique_ptr<WalReader_>
-    {
-        const auto param = WalReader_::Parameters {
-            "test/wal-",
-            Span {reader_tail},
-            Span {reader_data},
-            storage.get(),
-            &set,
-        };
-        WalReader_ *reader;
-        EXPECT_OK(WalReader_::open(param, &reader));
-        return std::unique_ptr<WalReader_> {reader};
-    }
 
     [[nodiscard]]
     auto get_payload() -> WalPayloadIn
@@ -511,50 +496,6 @@ public:
     }
 
     [[nodiscard]]
-    static auto contains_sequence(WalReader_ &reader, Id final_lsn) -> Status
-    {
-        auto s = Status::ok();
-        // Roll forward to the end of the WAL.
-        for (auto lsn = Lsn::root(); ; lsn.value++) {
-            WalPayloadOut payload;
-            s = reader.read(payload);
-            if (s.is_not_found()) {
-                if (lsn.value != final_lsn.value + 1) {
-                    return Status::corruption("missing record");
-                }
-                return Status::ok();
-            } else if (!s.is_ok()) {
-                return s;
-            }
-            if (lsn != payload.lsn()) {
-                return Status::corruption("missing record");
-            }
-        }
-    }
-
-    [[nodiscard]]
-    auto roll_segments_forward(WalReader_ &reader, Size write_count) -> Status
-    {
-        auto s = Status::ok();
-        // Roll forward to the end of the WAL.
-        for (Size found {}; s.is_ok(); ) {
-            WalPayloadOut payload;
-            s = reader.read(payload);
-            if (s.is_not_found()) {
-                if (found != write_count) {
-                    return Status::corruption("missing records");
-                }
-                return Status::ok();
-            } else if (!s.is_ok()) {
-                return s;
-            }
-            EXPECT_EQ(payload.data().to_string(), payloads[payload.lsn().as_index()]);
-            found++;
-        }
-        return s;
-    }
-
-    [[nodiscard]]
     auto get_reader(Id id) -> WalReader
     {
         Reader *reader;
@@ -572,7 +513,7 @@ public:
         return WalPayloadOut {buffer};
     }
 
-    auto write_record(WalWriter &writer_, Lsn lsn, const std::string &payload) -> void
+    auto write_record(LogWriter &writer_, Lsn lsn, const std::string &payload) -> void
     {
         Span buffer {writer_data};
         mem_copy(buffer.range(sizeof(Lsn)), payload);
@@ -581,12 +522,12 @@ public:
     }
 
     [[nodiscard]]
-    auto get_writer(Id id, Size file_size) -> WalWriter
+    auto get_writer(Id id, Size file_size) -> LogWriter
     {
         Logger *logger;
         EXPECT_OK(storage->new_logger(encode_segment_name("test/wal-", id), &logger));
         writer_file.reset(logger);
-        return WalWriter {*writer_file, writer_tail, file_size};
+        return LogWriter {*writer_file, writer_tail, file_size};
     }
 
     Id last_lsn;
@@ -603,7 +544,7 @@ public:
     std::string writer_tail;
     Tools::RandomGenerator random;
     WalRecordGenerator generator;
-    WalWriter_ writer;
+    WalWriter writer;
 };
 
 TEST_F(WalReaderWriterTests, ReadsRecordsInBlock)
@@ -677,12 +618,18 @@ TEST_F(WalReaderWriterTests, HandlesFlushes)
     ASSERT_EQ(payload_2.data(), "world");
 }
 
-static auto does_not_lose_records_test(WalReaderWriterTests &test, Size num_writes)
+TEST_F(WalReaderWriterTests, HandlesCorruptedRecord)
 {
-    ASSERT_OK(test.random_writes(num_writes));
+    auto writer = get_writer(Id {1}, 0);
+    write_record(writer, Lsn {1}, "hello");
+    ASSERT_OK(writer.flush());
 
-    auto reader = test.get_reader_();
-    ASSERT_OK(test.contains_sequence(*reader, Id {num_writes}));
+    // Corrupt the payload.
+    storage_handle().memory()["test/wal-1"].buffer[WalRecordHeader::SIZE]++;
+
+    Span payload {reader_data};
+    auto reader = get_reader(Id {1});
+    ASSERT_TRUE(reader.read(payload).is_corruption());
 }
 
 TEST_F(WalReaderWriterTests, IterateFromBeginning)
@@ -726,34 +673,6 @@ TEST_F(WalReaderWriterTests, IterateFromMiddle)
         ASSERT_OK(s);
     }
     delete file;
-}
-
-TEST_F(WalReaderWriterTests, DoesNotLoseRecordWithinSegment)
-{
-    does_not_lose_records_test(*this, 3);
-}
-
-TEST_F(WalReaderWriterTests, DoesNotLoseRecordsAcrossSegments)
-{
-    does_not_lose_records_test(*this, 5'000);
-}
-
-static auto roll_forward_test(WalReaderWriterTests &test, Size num_writes)
-{
-    ASSERT_OK(test.random_writes(num_writes));
-
-    auto reader = test.get_reader_();
-    ASSERT_OK(test.roll_segments_forward(*reader, num_writes));
-}
-
-TEST_F(WalReaderWriterTests, RollForwardWithinSegment)
-{
-    roll_forward_test(*this, 3);
-}
-
-TEST_F(WalReaderWriterTests, RollForwardAcrossSegments)
-{
-    roll_forward_test(*this, 5'000);
 }
 
 class WalCleanupTests : public WalReaderWriterTests {
@@ -853,294 +772,6 @@ TEST_F(WalCleanupTests, ReportsErrorOnUnlink)
     cleanup.cleanup(Lsn {3});
 
     assert_special_error(error_buffer.get());
-}
-
-class BasicWalTests: public TestWithWalSegmentsOnHeap {
-public:
-    static constexpr Size PAGE_SIZE {0x100};
-
-    ~BasicWalTests() override = default;
-
-    BasicWalTests()
-        : scratch(wal_scratch_size(PAGE_SIZE), '\x00')
-    {}
-
-    auto SetUp() -> void override
-    {
-        WriteAheadLog *temp;
-        ASSERT_OK(WriteAheadLog::open({
-            "test/wal-",
-            storage.get(),
-            PAGE_SIZE,
-            32,
-        }, &temp));
-        wal.reset(temp);
-
-        ASSERT_OK(wal->start_writing());
-    }
-
-    auto initialize() -> void
-    {
-        // Initialize the WAL with a few records. This is to simulate new database setup.
-        run_operations({
-            WalOperation::LOG,
-            WalOperation::LOG,
-            WalOperation::COMMIT,
-            WalOperation::ADVANCE,
-        });
-    }
-
-    [[nodiscard]]
-    auto get_data_payload(const std::string &data) -> WalPayloadIn
-    {
-        Span buffer {scratch};
-        buffer.truncate(sizeof(Lsn) + 1 + data.size());
-        payloads.emplace_back("p" + data);
-        mem_copy(buffer.range(sizeof(Lsn)), payloads.back());
-        payloads_since_commit++;
-        return WalPayloadIn {wal->current_lsn(), buffer};
-    }
-
-    [[nodiscard]]
-    auto get_random_data_payload() -> WalPayloadIn
-    {
-        const auto max_size = wal_scratch_size(PAGE_SIZE) - WalPayloadHeader::SIZE - 1;
-        const auto size = random.Next<Size>(1, max_size);
-        return get_data_payload(random.Generate(size).to_string());
-    }
-
-    [[nodiscard]]
-    auto get_commit_payload() -> WalPayloadIn
-    {
-        Span buffer {scratch};
-        buffer.truncate(sizeof(Lsn) + 1);
-        payloads_since_commit = 0;
-        payloads.emplace_back("c");
-        buffer.data()[sizeof(Lsn)] = 'c';
-        return WalPayloadIn {wal->current_lsn(), buffer};
-    }
-
-    auto roll_forward(bool strict = true)
-    {
-        auto lsn = Id::root();
-        WalReader_ *temp;
-        ASSERT_OK(wal->new_reader_(&temp));
-        std::unique_ptr<WalReader_> reader {temp};
-        for (; ; ) {
-            WalPayloadOut payload;
-            auto s = reader->read(payload);
-            if (s.is_not_found()) {
-                break;
-            }
-            const auto lhs = payload.data();
-            const auto rhs = payloads.at(payload.lsn().as_index());
-            EXPECT_EQ(lhs.size(), rhs.size());
-            EXPECT_EQ(lhs.to_string(), rhs);
-            EXPECT_EQ(Id {lsn.value++}, payload.lsn());
-        }
-        // We should have hit all records.
-        if (strict) {
-            ASSERT_EQ(lsn, wal->current_lsn());
-        }
-    }
-
-    enum class WalOperation: int {
-        FLUSH = 1,
-        ADVANCE = 2,
-        COMMIT = 3,
-        LOG = 4,
-    };
-
-    auto run_operations(const std::vector<WalOperation> &operations, bool keep_clean = false) -> Status
-    {
-        for (auto operation: operations) {
-            switch (operation) {
-                case WalOperation::FLUSH:
-                    (void)wal->flush();
-                    break;
-                case WalOperation::ADVANCE:
-                    (void)wal->advance();
-                    break;
-                case WalOperation::COMMIT: {
-                    const auto payload = get_commit_payload();
-                    const auto lsn = payload.lsn();
-                    wal->log(payload);
-                    (void)wal->advance();
-                    commit_lsn = lsn;
-                    break;
-                }
-                case WalOperation::LOG:
-                    wal->log(get_random_data_payload());
-            }
-            if (keep_clean) {
-                wal->cleanup(commit_lsn);
-            }
-            if (!wal->status().is_ok()) {
-                break;
-            }
-        }
-        return wal->status();
-    }
-
-    Tools::RandomGenerator random;
-    Size payloads_since_commit {};
-    Id commit_lsn;
-    std::string scratch;
-    std::vector<std::string> payloads;
-    std::unique_ptr<WriteAheadLog> wal;
-};
-
-TEST_F(BasicWalTests, OpensAndCloses)
-{
-
-}
-
-TEST_F(BasicWalTests, NewWalState)
-{
-    ASSERT_EQ(wal->flushed_lsn().value, 0);
-    ASSERT_EQ(wal->current_lsn().value, 1);
-}
-
-TEST_F(BasicWalTests, FlushesWithEmptyTailBuffer)
-{
-    run_operations({WalOperation::FLUSH});
-}
-
-TEST_F(BasicWalTests, AdvancesWithEmptyTailBuffer)
-{
-    run_operations({WalOperation::ADVANCE});
-}
-
-TEST_F(BasicWalTests, RollSingleRecord)
-{
-    run_operations({
-        WalOperation::LOG,
-        WalOperation::COMMIT,
-    });
-
-    roll_forward();
-}
-
-TEST_F(BasicWalTests, RollMultipleRecords)
-{
-    run_operations({
-        WalOperation::LOG,
-        WalOperation::LOG,
-        WalOperation::LOG,
-        WalOperation::COMMIT,
-    });
-
-    roll_forward();
-}
-
-TEST_F(BasicWalTests, RollMultipleCommits)
-{
-    run_operations({
-        WalOperation::LOG,
-        WalOperation::LOG,
-        WalOperation::COMMIT,
-        WalOperation::LOG,
-        WalOperation::LOG,
-        WalOperation::COMMIT,
-    });
-
-    roll_forward();
-}
-
-template<class Test>
-static auto generate_transaction(Test &test, Size n, bool add_commit = false)
-{
-    std::vector<BasicWalTests::WalOperation> operations;
-    operations.reserve(n);
-
-    while (operations.size() < n) {
-        const auto r = test.random.template Next<Size>(20);
-        if (r >= 2 || operations.empty() || operations.back() != BasicWalTests::WalOperation::LOG) {
-            operations.emplace_back(BasicWalTests::WalOperation::LOG);
-        } else {
-            if (r == 0) {
-                operations.emplace_back(BasicWalTests::WalOperation::FLUSH);
-            } else {
-                operations.emplace_back(BasicWalTests::WalOperation::ADVANCE);
-            }
-        }
-    }
-    if (add_commit)
-        operations.emplace_back(BasicWalTests::WalOperation::COMMIT);
-    return operations;
-}
-
-TEST_F(BasicWalTests, SanityCheckSingleTransaction)
-{
-    initialize();
-    run_operations(generate_transaction(*this, 1'000));
-
-    roll_forward(false);
-}
-
-TEST_F(BasicWalTests, SanityCheckSingleTransactionWithCommit)
-{
-    initialize();
-    run_operations(generate_transaction(*this, 1'000, true));
-
-    roll_forward();
-}
-
-TEST_F(BasicWalTests, SanityCheckMultipleTransactions)
-{
-    initialize();
-    for (Size i {}; i < 10; ++i) {
-        run_operations(generate_transaction(*this, 1'000, i == 3 || i == 6));
-    }
-
-    roll_forward(false);
-}
-
-TEST_F(BasicWalTests, SanityCheckMultipleTransactionsWithCommit)
-{
-    initialize();
-    for (Size i {}; i < 10; ++i) {
-        run_operations(generate_transaction(*this, 1'000, true));
-    }
-
-    roll_forward();
-}
-
-class WalFaultTests: public BasicWalTests {
-
-};
-
-TEST_F(WalFaultTests, FailOnNthOpen)
-{
-    initialize();
-    std::vector<WalOperation> ops(5'000, WalOperation::LOG);
-    ops.emplace_back(WalOperation::COMMIT);
-    run_operations(ops);
-
-    int counter {10};
-    Counting_Interceptor("test/wal", Tools::Interceptor::OPEN, counter);
-    assert_special_error(run_operations(ops));
-    Clear_Interceptors();
-    SetUp();
-
-    // We should have full records in the WAL, so these tests will work.
-    roll_forward(false);
-}
-
-TEST_F(WalFaultTests, FailOnNthWrite)
-{
-    std::vector<WalOperation> ops(5'000, WalOperation::LOG);
-    ops.emplace_back(WalOperation::COMMIT);
-    run_operations(ops);
-
-    int counter {100};
-    Counting_Interceptor("test/wal", Tools::Interceptor::WRITE, counter);
-    assert_special_error(run_operations(ops));
-    Clear_Interceptors();
-    SetUp();
-
-    // We may have a partial record at the end. The WAL will stop short of it.
-    roll_forward(false);
 }
 
 } // <anonymous>
