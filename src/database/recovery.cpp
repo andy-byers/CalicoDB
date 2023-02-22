@@ -141,9 +141,13 @@ auto Recovery::recover_phase_1() -> Status
         return Status::corruption("wal could not be read");
     }
 
-    if (commit_lsn >= *m_commit_lsn) {
-        *m_commit_lsn = commit_lsn;
-        return m_pager->flush({});
+    if (last_lsn == commit_lsn) {
+        if (*m_commit_lsn <= commit_lsn) {
+            *m_commit_lsn = commit_lsn;
+            return m_pager->flush({});
+        } else {
+            return Status::corruption("wal could not be read");
+        }
     }
 
     /* Roll backward, reverting misapplied updates until we reach either the beginning, or the saved

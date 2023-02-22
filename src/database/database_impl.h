@@ -49,13 +49,16 @@ public:
     std::unique_ptr<Pager> pager;
     std::unique_ptr<BPlusTree> tree;
 
-    Size bytes_written {};
-    Size record_count {};
+    [[nodiscard]]
+    auto record_count() const -> Size
+    {
+        return m_record_count;
+    }
 
 private:
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
-    [[nodiscard]] auto save_state(Lsn commit_lsn) const -> Status;
+    [[nodiscard]] auto save_state(Page root, Lsn commit_lsn) const -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
@@ -67,11 +70,12 @@ private:
     Storage *m_storage {};
     Logger *m_info_log {};
     Size m_txn_size {};
+    Size m_record_count {};
+    Size m_bytes_written {};
     Lsn m_commit_lsn;
     bool m_in_txn {true};
     bool m_owns_storage {};
     bool m_owns_info_log {};
-    bool m_sync {};
 };
 
 auto setup(const std::string &, Storage &, const Options &, InitialState &init) -> Status;

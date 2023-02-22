@@ -1038,12 +1038,26 @@ protected:
     auto SetUp() -> void override
     {
         ApiTests::SetUp();
+        ASSERT_OK(db->put("A", "x"));
+        ASSERT_OK(db->put("B", "y"));
+        ASSERT_OK(db->put("C", "z"));
+        ASSERT_OK(db->commit());
+
         ASSERT_OK(db->put("a", "1"));
         ASSERT_OK(db->put("b", "2"));
         ASSERT_OK(db->put("c", "3"));
     }
 
-    auto TearDown() -> void override
+    auto assert_contains_exactly(const std::vector<std::string> &keys) -> void
+    {
+        for (const auto &key: keys) {
+            std::string value;
+            ASSERT_OK(db->get(key, value));
+        }
+        ASSERT_EQ(reinterpret_cast<const DatabaseImpl *>(db)->record_count(), keys.size());
+    }
+
+    auto run_success_path() -> void
     {
         // This should return an OK status, since the data made it to disk.
         ASSERT_OK(db->commit());
@@ -1056,26 +1070,39 @@ protected:
         storage_handle().clear_interceptors();
         ASSERT_OK(Database::open("test", options, &db));
 
-        std::string value;
-        ASSERT_OK(db->get("a", value));
-        ASSERT_EQ(value, "1");
-        ASSERT_OK(db->get("b", value));
-        ASSERT_EQ(value, "2");
-        ASSERT_OK(db->get("c", value));
-        ASSERT_EQ(value, "3");
+        assert_contains_exactly({"A", "B", "C", "a", "b", "c"});
+    }
+
+    auto run_failure_path() -> void
+    {
+        assert_special_error(db->commit());
+        assert_special_error(db->status());
+
+        delete db;
+
+        storage_handle().clear_interceptors();
+        ASSERT_OK(Database::open("test", options, &db));
+
+        assert_contains_exactly({"A", "B", "C"});
+    }
+
+    auto TearDown() -> void override
+    {
+
     }
 };
 
-TEST_F(CommitFailureTests, WalAdvanceFailure)
+TEST_F(CommitFailureTests, WalFlushFailure)
 {
-    // Write the commit record and flush successfully, but fail to open the next segment file.
-    Quick_Interceptor("test/wal", Tools::Interceptor::OPEN);
+    Quick_Interceptor("test/wal", Tools::Interceptor::WRITE);
+    run_failure_path();
 }
 
 TEST_F(CommitFailureTests, PagerFlushFailure)
 {
     // Write the commit record and flush successfully, but fail to flush old pages from the page cache.
     Quick_Interceptor("test/data", Tools::Interceptor::WRITE);
+    run_success_path();
 }
 
 class WalPrefixTests : public OnDiskTest {

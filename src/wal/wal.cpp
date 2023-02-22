@@ -119,13 +119,8 @@ auto WriteAheadLog::flush() -> Status
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
     m_writer->flush();
+    m_writer->sync();
     return m_error.get();
-}
-
-auto WriteAheadLog::advance() -> void
-{
-    CALICO_EXPECT_NE(m_writer, nullptr);
-    m_writer->advance();
 }
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void

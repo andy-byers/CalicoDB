@@ -16,7 +16,6 @@
 namespace Calico {
 
 class WalCleanup;
-class WalReader_;
 class WalWriter;
 
 class WriteAheadLog {
@@ -40,7 +39,6 @@ public:
     [[nodiscard]] virtual auto flush() -> Status;
     virtual auto cleanup(Lsn recovery_lsn) -> void;
     virtual auto log(WalPayloadIn payload) -> void;
-    virtual auto advance() -> void;
 
     [[nodiscard]]
     virtual auto status() const -> Status

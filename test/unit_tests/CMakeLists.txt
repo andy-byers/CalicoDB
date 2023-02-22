@@ -12,6 +12,7 @@ include(GoogleTest)
 add_executable(unit_tests
         test_impl.cpp
         test_pager.cpp
+        test_recovery.cpp
         test_storage.cpp
         test_tree.cpp
         test_utils.cpp

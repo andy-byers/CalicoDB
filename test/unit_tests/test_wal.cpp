@@ -377,7 +377,6 @@ TEST_F(WalWriterTests, DoesNotLeaveEmptySegmentsAfterNormalClose)
     writer.advance();
     writer.advance();
 
-    // Blocks until the last segment is deleted.
     std::move(writer).destroy();
     ASSERT_TRUE(set.segments().empty());
 

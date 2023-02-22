@@ -162,7 +162,7 @@ auto WalWriter::close_segment() -> Status
     }
 
     flush();
-    Maybe_Set_Error(m_file->sync());
+    sync();
     const auto written = m_writer->block_count() != 0;
 
     m_writer.reset();
@@ -180,6 +180,11 @@ auto WalWriter::advance_segment() -> Status
 {
     Calico_Try(close_segment());
     return open_segment({m_set->last().value + 1});
+}
+
+auto WalWriter::sync() -> void
+{
+    Maybe_Set_Error(m_file->sync());
 }
 
 #undef Maybe_Set_Error

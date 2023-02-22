@@ -80,6 +80,8 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     InitialState initial;
     Calico_Try(setup(m_db_prefix, *m_storage, sanitized, initial));
     auto [state, is_new] = initial;
+    m_commit_lsn = state.commit_lsn;
+    m_record_count = state.record_count;
     if (!is_new) {
         sanitized.page_size = state.page_size;
     }
@@ -147,11 +149,14 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 DatabaseImpl::~DatabaseImpl()
 {
     if (tree) {
-        if (auto s = wal->close(); !s.is_ok()) {
+        if (auto s = wal->flush(); !s.is_ok()) {
             logv(m_info_log, "failed to flush wal: ", s.what().data());
         }
-        if (auto s = pager->flush({}); !s.is_ok()) {
+        if (auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
             logv(m_info_log, "failed to flush pager: ", s.what().data());
+        }
+        if (auto s = wal->close(); !s.is_ok()) {
+            logv(m_info_log, "failed to close wal: ", s.what().data());
         }
         if (auto s = pager->sync(); !s.is_ok()) {
             logv(m_info_log, "failed to sync pager: ", s.what().data());
@@ -235,7 +240,7 @@ auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bo
 
         if (prop == "counts") {
             out.append("records:");
-            append_number(out, record_count);
+            append_number(out, m_record_count);
             out.append(",pages:");
             append_number(out, pager->page_count());
             out.append(",updates:");
@@ -246,7 +251,7 @@ auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bo
             out.append("cache_hit_ratio:");
             append_double(out, pager->hit_ratio());
             out.append(",data_throughput:");
-            append_number(out, bytes_written);
+            append_number(out, m_bytes_written);
             out.append(",pager_throughput:");
             append_number(out, pager->bytes_written());
             out.append(",wal_throughput:");
@@ -297,8 +302,8 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
         return s;
     }
     const auto inserted = !exists;
-    bytes_written += key.size()*inserted + value.size();
-    record_count += inserted;
+    m_bytes_written += key.size()*inserted + value.size();
+    m_record_count += inserted;
     m_txn_size++;
     return Status::ok();
 }
@@ -309,7 +314,7 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
 
     auto s = tree->erase(key);
     if (s.is_ok()) {
-        record_count--;
+        m_record_count--;
         m_txn_size++;
     } else if (!s.is_not_found()) {
         Maybe_Set_Error(s);
@@ -369,13 +374,20 @@ auto DatabaseImpl::commit() -> Status
  */
 auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
 {
+    m_txn_size = 0;
+
+    Page root;
+    Calico_Try(pager->acquire(Id::root(), root));
+    pager->upgrade(root);
+
+    // The root page is guaranteed to have a full image in the WAL. The LSN after the current one (the delta that
+    // corresponds to the file header update) will be the commit LSN.
     auto commit_lsn = wal->current_lsn();
     commit_lsn.value++;
 
     logv(m_info_log, "commit requested at lsn ", commit_lsn.value);
-    m_txn_size = 0;
 
-    Calico_Try(save_state(commit_lsn));
+    Calico_Try(save_state(std::move(root), commit_lsn));
     wal->log(encode_commit_payload(commit_lsn, m_scratch));
     Calico_Try(wal->flush());
 
@@ -398,20 +410,15 @@ auto DatabaseImpl::ensure_consistency_on_startup() -> Status
     return Status::ok();
 }
 
-auto DatabaseImpl::save_state(Lsn commit_lsn) const -> Status
+auto DatabaseImpl::save_state(Page root, Lsn commit_lsn) const -> Status
 {
-    Page root;
-    Calico_Try(pager->acquire(Id::root(), root));
-
-    pager->upgrade(root);
     FileHeader header {root};
     pager->save_state(header);
     tree->save_state(header);
     header.commit_lsn = commit_lsn;
-    header.record_count = record_count;
+    header.record_count = m_record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
     header.write(root);
-
     pager->release(std::move(root));
     return Status::ok();
 }
@@ -431,7 +438,7 @@ auto DatabaseImpl::load_state() -> Status
     const auto before_count = pager->page_count();
 
     m_commit_lsn = header.commit_lsn;
-    record_count = header.record_count;
+    m_record_count = header.record_count;
     pager->load_state(header);
     tree->load_state(header);
 

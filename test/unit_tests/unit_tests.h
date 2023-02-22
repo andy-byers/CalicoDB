@@ -195,11 +195,6 @@ public:
         return Status::ok();
     }
 
-    auto advance() -> void override
-    {
-
-    }
-
     auto cleanup(Id) -> void override
     {
 

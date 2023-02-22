@@ -44,7 +44,6 @@ public:
         bool hot {};
     };
 
-    // Disallow changing values through iterator instances.
     using Iterator = typename std::list<Entry>::iterator;
     using ConstIterator = typename std::list<Entry>::const_iterator;
     using ReverseIterator = typename std::list<Entry>::const_reverse_iterator;
