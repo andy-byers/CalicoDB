@@ -40,9 +40,9 @@ auto Recovery::start() -> Status
         return Status::ok();
     }
 
-    WalReader *temp;
-    Calico_Try(m_wal->new_reader(&temp));
-    std::unique_ptr<WalReader> reader {temp};
+    WalReader_ *temp;
+    Calico_Try(m_wal->new_reader_(&temp));
+    std::unique_ptr<WalReader_> reader {temp};
     Lsn last_lsn;
     Status s;
 

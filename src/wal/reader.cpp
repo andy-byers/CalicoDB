@@ -19,15 +19,18 @@ static auto read_tail(Reader &file, Size number, Span tail) -> Status
     return Status::ok();
 }
 
-WalIterator::WalIterator(Reader &file, Span tail)
+WalReader::WalReader(Reader &file, Span tail, Size start)
     : m_tail {tail},
-      m_file {&file}
+      m_file {&file},
+      m_offset {start % tail.size()},
+      m_block {start / tail.size()},
+      m_start {start}
 {}
 
-auto WalIterator::read(Span &payload) -> Status
+auto WalReader::read(Span &payload) -> Status
 {
-    if (m_block + m_offset == 0) {
-        Calico_Try(read_tail(*m_file, 0, m_tail));
+    if (offset() == m_start) {
+        Calico_Try(read_tail(*m_file, m_block, m_tail));
     }
     auto out = payload;
     WalRecordHeader header;
@@ -66,18 +69,18 @@ auto WalIterator::read(Span &payload) -> Status
     return Status::ok();
 }
 
-auto WalIterator::offset() const -> Size
+auto WalReader::offset() const -> Size
 {
-    return m_offset;
+    return m_offset + m_block*m_tail.size();
 }
 
-auto WalReader::open(const Parameters &param, WalReader **out) -> Status
+auto WalReader_::open(const Parameters &param, WalReader_ **out) -> Status
 {
     const auto id = param.set->first();
     if (id.is_null()) {
         return Status::corruption("wal is empty");
     }
-    auto *reader = new WalReader;
+    auto *reader = new WalReader_;
     reader->m_storage = param.storage;
     reader->m_prefix = param.prefix;
     reader->m_id = param.set->first();
@@ -89,7 +92,7 @@ auto WalReader::open(const Parameters &param, WalReader **out) -> Status
     return Status::ok();
 }
 
-auto WalReader::seek(Lsn lsn) -> Status
+auto WalReader_::seek(Lsn lsn) -> Status
 {
     m_id = m_set->first();
     while (!m_id.is_null()) {
@@ -112,7 +115,7 @@ auto WalReader::seek(Lsn lsn) -> Status
     return Status::not_found("segment does not exist");
 }
 
-auto WalReader::skip() -> Status
+auto WalReader_::skip() -> Status
 {
     const auto next_id = m_set->id_after(m_id);
     if (next_id.is_null()) {
@@ -122,16 +125,16 @@ auto WalReader::skip() -> Status
     return reopen();
 }
 
-auto WalReader::reopen() -> Status
+auto WalReader_::reopen() -> Status
 {
     Reader *file;
     Calico_Try(m_storage->new_reader(encode_segment_name(m_prefix, m_id), &file));
     m_file.reset(file);
-    m_itr = WalIterator {*m_file, m_tail};
+    m_itr = WalReader {*m_file, m_tail};
     return Status::ok();
 }
 
-auto WalReader::read(WalPayloadOut &payload) -> Status
+auto WalReader_::read(WalPayloadOut &payload) -> Status
 {
     if (!m_itr.has_value()) {
         Calico_Try(reopen());

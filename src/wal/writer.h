@@ -9,19 +9,22 @@
 
 namespace Calico {
 
-class LogWriter {
+class WalWriter {
 public:
-    // NOTE: LogWriter must always be created on an empty segment file.
-    LogWriter(Logger &file, Span tail, Lsn &flushed_lsn)
+    WalWriter(Logger &file, Span tail, Size file_size = 0)
         : m_tail {tail},
-          m_flushed_lsn {&flushed_lsn},
-          m_file {&file}
-    {}
+          m_file {&file},
+          m_block {file_size / tail.size()},
+          m_offset {file_size % tail.size()}
+    {
+        // NOTE: File must be a multiple of the block size.
+        CALICO_EXPECT_EQ(m_offset, 0);
+    }
 
     [[nodiscard]]
     auto block_count() const -> Size
     {
-        return m_number;
+        return m_block;
     }
 
     // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified, except for the block
@@ -29,16 +32,19 @@ public:
     [[nodiscard]] auto write(WalPayloadIn payload) -> Status;
     [[nodiscard]] auto flush() -> Status;
 
+    // NOTE: Only valid if the writer has flushed.
+    [[nodiscard]] auto flushed_lsn() const -> Lsn;
+
 private:
     Span m_tail;
-    Lsn *m_flushed_lsn {};
+    Lsn m_flushed_lsn;
     Logger *m_file {};
     Lsn m_last_lsn {};
-    Size m_number {};
+    Size m_block {};
     Size m_offset {};
 };
 
-class WalWriter {
+class WalWriter_ {
 public:
     struct Parameters {
         Slice prefix;
@@ -50,7 +56,7 @@ public:
         Size wal_limit {};
     };
 
-    explicit WalWriter(const Parameters &param);
+    explicit WalWriter_(const Parameters &param);
 
     auto destroy() && -> void;
     auto write(WalPayloadIn payload) -> void;
@@ -66,7 +72,7 @@ private:
     auto close_segment() -> Status;
 
     std::string m_prefix;
-    std::optional<LogWriter> m_writer;
+    std::optional<WalWriter> m_writer;
     std::unique_ptr<Logger> m_file;
     Lsn *m_flushed_lsn {};
     Storage *m_storage {};

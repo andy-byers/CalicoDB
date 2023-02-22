@@ -284,6 +284,7 @@ public:
 
         Calico_Try(fix_parent_id(tree, child.page.id(), root.page.id()));
         tree.release(std::move(root));
+
         Calico_Try(fix_links(tree, child));
         out = std::move(child);
         return Status::ok();

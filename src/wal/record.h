@@ -105,7 +105,7 @@ using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImag
 
 class WalPayloadIn {
 public:
-    friend class LogWriter;
+    friend class WalWriter;
 
     WalPayloadIn(Lsn lsn, Span buffer)
         : m_buffer {buffer}

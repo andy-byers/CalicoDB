@@ -17,7 +17,7 @@ auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
     Base *temp {};
 
     if constexpr (std::is_same_v<Reader, Base>) {
-        s = storage.new_reader(name, &temp);
+        s = storage.new_reader_(name, &temp);
     } else if constexpr (std::is_same_v<Editor, Base>) {
         s = storage.new_editor(name, &temp);
     } else if constexpr (std::is_same_v<Logger, Base>) {

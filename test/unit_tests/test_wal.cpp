@@ -38,7 +38,7 @@ public:
     [[nodiscard]] auto get_segment_data(const Id &id) const -> std::string
     {
         Reader *reader {};
-        EXPECT_TRUE(expose_message(Base::storage->new_reader(get_segment_name(id), &reader)));
+        EXPECT_TRUE(expose_message(Base::storage->new_reader_(get_segment_name(id), &reader)));
 
         std::string data(get_segment_size(id), '\x00');
         Span bytes {data};
@@ -343,7 +343,7 @@ public:
     WalWriterTests()
         : scratch(wal_scratch_size(PAGE_SIZE), '\x00'),
           tail(wal_block_size(PAGE_SIZE), '\x00'),
-          writer {WalWriter::Parameters{
+          writer {WalWriter_::Parameters{
               "test/wal-",
               Span {tail},
               storage.get(),
@@ -362,7 +362,7 @@ public:
     Lsn flushed_lsn;
     std::string tail;
     Tools::RandomGenerator random;
-    WalWriter writer;
+    WalWriter_ writer;
 };
 
 TEST_F(WalWriterTests, Destroy)
@@ -464,7 +464,7 @@ public:
           reader_data(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00'),
-          writer {WalWriter::Parameters{
+          writer {WalWriter_::Parameters{
               "test/wal-",
               Span {writer_tail},
               storage.get(),
@@ -478,18 +478,18 @@ public:
     ~WalReaderWriterTests() override = default;
 
     [[nodiscard]]
-    auto get_reader() -> std::unique_ptr<WalReader>
+    auto get_reader() -> std::unique_ptr<WalReader_>
     {
-        const auto param = WalReader::Parameters {
+        const auto param = WalReader_::Parameters {
             "test/wal-",
             Span {reader_tail},
             Span {reader_data},
             storage.get(),
             &set,
         };
-        WalReader *reader;
-        EXPECT_OK(WalReader::open(param, &reader));
-        return std::unique_ptr<WalReader> {reader};
+        WalReader_ *reader;
+        EXPECT_OK(WalReader_::open(param, &reader));
+        return std::unique_ptr<WalReader_> {reader};
     }
 
     [[nodiscard]]
@@ -513,7 +513,7 @@ public:
     }
 
     [[nodiscard]]
-    static auto contains_sequence(WalReader &reader, Id final_lsn) -> Status
+    static auto contains_sequence(WalReader_ &reader, Id final_lsn) -> Status
     {
         auto s = Status::ok();
         // Roll forward to the end of the WAL.
@@ -535,7 +535,7 @@ public:
     }
 
     [[nodiscard]]
-    auto roll_segments_forward(WalReader &reader, Size write_count) -> Status
+    auto roll_segments_forward(WalReader_ &reader, Size write_count) -> Status
     {
         auto s = Status::ok();
         // Roll forward to the end of the WAL.
@@ -567,7 +567,7 @@ public:
     std::string writer_tail;
     Tools::RandomGenerator random;
     WalRecordGenerator generator;
-    WalWriter writer;
+    WalWriter_ writer;
 };
 
 static auto does_not_lose_records_test(WalReaderWriterTests &test, Size num_writes)
@@ -584,7 +584,7 @@ TEST_F(WalReaderWriterTests, IterateFromBeginning)
 
     Reader *file;
     ASSERT_OK(storage->new_reader(encode_segment_name("test/wal-", Id::root()), &file));
-    WalIterator itr {*file, reader_tail};
+    WalReader itr {*file, reader_tail};
 
     for (auto lsn = Lsn::root(); ; lsn.value++) {
         Span payload {reader_data};
@@ -605,7 +605,7 @@ TEST_F(WalReaderWriterTests, IterateFromMiddle)
 
     Reader *file;
     ASSERT_OK(storage->new_reader(encode_segment_name("test/wal-", Id {2}), &file));
-    WalIterator itr {*file, reader_tail};
+    WalReader itr {*file, reader_tail};
 
     Lsn lsn;
     ASSERT_OK(read_first_lsn(*storage, "test/wal-", Id {2}, set, lsn));
@@ -816,9 +816,9 @@ public:
     auto roll_forward(bool strict = true)
     {
         auto lsn = Id::root();
-        WalReader *temp;
-        ASSERT_OK(wal->new_reader(&temp));
-        std::unique_ptr<WalReader> reader {temp};
+        WalReader_ *temp;
+        ASSERT_OK(wal->new_reader_(&temp));
+        std::unique_ptr<WalReader_> reader {temp};
         for (; ; ) {
             WalPayloadOut payload;
             auto s = reader->read(payload);

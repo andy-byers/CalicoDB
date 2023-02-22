@@ -66,8 +66,8 @@ auto WriteAheadLog::close() -> Status
 
 auto WriteAheadLog::start_writing() -> Status
 {
-    m_writer = std::unique_ptr<WalWriter> {
-        new(std::nothrow) WalWriter {{
+    m_writer = std::unique_ptr<WalWriter_> {
+        new(std::nothrow) WalWriter_ {{
             m_prefix,
             m_writer_tail,
             m_storage,
@@ -128,17 +128,17 @@ auto WriteAheadLog::advance() -> void
     m_writer->advance();
 }
 
-auto WriteAheadLog::new_reader(WalReader **out) -> Status
+auto WriteAheadLog::new_reader_(WalReader_ **out) -> Status
 {
     Calico_Try(status());
-    const auto param = WalReader::Parameters {
+    const auto param = WalReader_::Parameters {
         m_prefix,
         m_reader_tail,
         m_reader_data,
         m_storage,
         &m_set,
     };
-    return WalReader::open(param, out);
+    return WalReader_::open(param, out);
 }
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void

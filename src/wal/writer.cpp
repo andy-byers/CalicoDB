@@ -4,7 +4,7 @@
 
 namespace Calico {
 
-auto LogWriter::write(WalPayloadIn payload) -> Status
+auto WalWriter::write(WalPayloadIn payload) -> Status
 {
     const auto lsn = payload.lsn();
     CALICO_EXPECT_FALSE(lsn.is_null());
@@ -56,7 +56,7 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
     return Status::ok();
 }
 
-auto LogWriter::flush() -> Status
+auto WalWriter::flush() -> Status
 {
     // Already flushed.
     if (m_offset == 0) {
@@ -68,11 +68,16 @@ auto LogWriter::flush() -> Status
 
     auto s = m_file->write(m_tail);
     if (s.is_ok()) {
-        *m_flushed_lsn = m_last_lsn;
+        m_flushed_lsn = m_last_lsn;
         m_offset = 0;
-        m_number++;
+        m_block++;
     }
     return s;
+}
+
+auto WalWriter::flushed_lsn() const -> Lsn
+{
+    return m_flushed_lsn;
 }
 
 #define Maybe_Set_Error(expr) \
@@ -82,7 +87,7 @@ auto LogWriter::flush() -> Status
         } \
     } while (0)
 
-WalWriter::WalWriter(const Parameters &param)
+WalWriter_::WalWriter_(const Parameters &param)
     : m_prefix {param.prefix.to_string()},
       m_flushed_lsn {param.flushed_lsn},
       m_storage {param.storage},
@@ -102,7 +107,7 @@ WalWriter::WalWriter(const Parameters &param)
     Maybe_Set_Error(open_segment({m_set->last().value + 1}));
 }
 
-auto WalWriter::write(WalPayloadIn payload) -> void
+auto WalWriter_::write(WalPayloadIn payload) -> void
 {
     if (m_writer.has_value() && m_error->is_ok()) {
         Maybe_Set_Error(m_writer->write(payload));
@@ -112,14 +117,14 @@ auto WalWriter::write(WalPayloadIn payload) -> void
     }
 }
 
-auto WalWriter::flush() -> void
+auto WalWriter_::flush() -> void
 {
     if (m_writer.has_value() && m_error->is_ok()) {
         Maybe_Set_Error(m_writer->flush());
     }
 }
 
-auto WalWriter::advance() -> void
+auto WalWriter_::advance() -> void
 {
     if (m_writer.has_value()) {
         // NOTE: advance() is a NOOP if the current WAL segment hasn't been written to.
@@ -127,25 +132,25 @@ auto WalWriter::advance() -> void
     }
 }
 
-auto WalWriter::destroy() && -> void
+auto WalWriter_::destroy() && -> void
 {
     Maybe_Set_Error(close_segment());
 }
 
-auto WalWriter::open_segment(Id id) -> Status
+auto WalWriter_::open_segment(Id id) -> Status
 {
     CALICO_EXPECT_EQ(m_writer, std::nullopt);
     Logger *file;
     auto s = m_storage->new_logger(encode_segment_name(m_prefix, id), &file);
     if (s.is_ok()) {
         m_file.reset(file);
-        m_writer = LogWriter {*m_file, m_tail, *m_flushed_lsn};
+        m_writer = WalWriter {*m_file, m_tail, *m_flushed_lsn};
         m_current = id;
     }
     return s;
 }
 
-auto WalWriter::close_segment() -> Status
+auto WalWriter_::close_segment() -> Status
 {
     // We must have failed while opening the segment file.
     if (!m_writer) {
@@ -167,7 +172,7 @@ auto WalWriter::close_segment() -> Status
     return Status::ok();
 }
 
-auto WalWriter::advance_segment() -> Status
+auto WalWriter_::advance_segment() -> Status
 {
     Calico_Try(close_segment());
     return open_segment({m_set->last().value + 1});
