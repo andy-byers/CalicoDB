@@ -275,8 +275,8 @@ auto Pager::acquire(Id pid, Page &page) -> Status
                 if (s.is_ok()) {
                     clean_page(entry);
                 } else {
-                    *m_status = std::move(s);
-                    return *m_status;
+                    *m_status = s;
+                    return s;
                 }
             }
         }

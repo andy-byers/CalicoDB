@@ -58,8 +58,7 @@ auto Recovery::recover() -> Status
 /* Recovery routine. This routine is run on startup, and is meant to ensure that the database is in a
  * consistent state. If any WAL segments are found containing updates that are not present in the
  * database, these segments are read and the updates applied. If the final transaction is missing a
- * commit record, then those updates are reverted and the whole log cleared.
- *
+ * commit record, then those updates are reverted and the log is truncated.
  */
 auto Recovery::recover_phase_1() -> Status
 {
@@ -89,10 +88,46 @@ auto Recovery::recover_phase_1() -> Status
         return s;
     };
 
-    /* Roll forward, applying missing updates until we reach the end. The final segment may contain
-     * a partial/corrupted record.
-     */
-    for (; ; ) {
+    const auto redo = [&](const auto &payload, auto offset) {
+        const auto decoded = decode_payload(payload);
+        if (std::holds_alternative<DeltaDescriptor>(decoded)) {
+            const auto deltas = std::get<DeltaDescriptor>(decoded);
+            return with_page(*m_pager, deltas, [this, &deltas](auto &page) {
+                if (read_page_lsn(page) < deltas.lsn) {
+                    m_pager->upgrade(page);
+                    apply_redo(page, deltas);
+                }
+            });
+        } else if (std::holds_alternative<CommitDescriptor>(decoded)) {
+            const auto commit = std::get<CommitDescriptor>(decoded);
+            commit_lsn = commit.lsn;
+            commit_offset = offset;
+            commit_segment = segment;
+        } else if (std::holds_alternative<std::monostate>(decoded)) {
+            Calico_Try(translate_status(Status::corruption("wal is corrupted"), last_lsn));
+            return Status::not_found("finished");
+        }
+        return Status::ok();
+    };
+
+    const auto undo = [&](const auto &payload, auto) {
+        const auto decoded = decode_payload(payload);
+        if (std::holds_alternative<FullImageDescriptor>(decoded)) {
+            const auto image = std::get<FullImageDescriptor>(decoded);
+            return with_page(*m_pager, image, [this, &image](auto &page) {
+                if (read_page_lsn(page) >= image.lsn) {
+                    m_pager->upgrade(page);
+                    apply_undo(page, image);
+                }
+            });
+        } else if (std::holds_alternative<std::monostate>(decoded)) {
+            Calico_Try(translate_status(Status::corruption("wal is corrupted"), last_lsn));
+            return Status::not_found("finished");
+        }
+        return Status::ok();
+    };
+
+    const auto roll = [&](const auto &action) {
         Calico_Try(open_reader(segment, file));
         WalReader reader {*file, m_reader_tail};
 
@@ -109,31 +144,24 @@ auto Recovery::recover_phase_1() -> Status
             WalPayloadOut payload {buffer};
             last_lsn = payload.lsn();
 
-            const auto decoded = decode_payload(payload);
-            if (std::holds_alternative<std::monostate>(decoded)) {
-                Calico_Try(translate_status(Status::corruption("wal is corrupted"), last_lsn));
+            s = action(payload, reader.offset());
+            if (s.is_not_found()) {
                 break;
-            }
-            if (std::holds_alternative<DeltaDescriptor>(decoded)) {
-                const auto deltas = std::get<DeltaDescriptor>(decoded);
-                Calico_Try(with_page(*m_pager, deltas, [this, &deltas](auto &page) {
-                    if (read_page_lsn(page) < deltas.lsn) {
-                        m_pager->upgrade(page);
-                        apply_redo(page, deltas);
-                    }
-                }));
-            } else if (std::holds_alternative<CommitDescriptor>(decoded)) {
-                const auto commit = std::get<CommitDescriptor>(decoded);
-                commit_lsn = commit.lsn;
-                commit_offset = reader.offset();
-                commit_segment = segment;
+            } else if (!s.is_ok()) {
+                return s;
             }
         }
+        return Status::ok();
+    };
 
+    /* Roll forward, applying missing updates until we reach the end. The final segment may contain
+     * a partial/corrupted record.
+     */
+    for (; ; segment = set.id_after(segment)) {
+        Calico_Try(roll(redo));
         if (segment == set.last()) {
             break;
         }
-        segment = set.id_after(segment);
     }
 
     // Didn't make it to the end of the WAL.
@@ -153,47 +181,9 @@ auto Recovery::recover_phase_1() -> Status
     /* Roll backward, reverting misapplied updates until we reach either the beginning, or the saved
      * commit offset. The first segment we read may contain a partial/corrupted record.
      */
-    for (; !segment.is_null(); segment = set.id_before(segment)) {
-        Calico_Try(open_reader(segment, file));
-        WalReader reader {*file, m_reader_tail};
-
-        for (; ; ) {
-            Span buffer {m_reader_data};
-            auto s = reader.read(buffer);
-
-            if (s.is_not_found()) {
-                break;
-            } else if (!s.is_ok()) {
-                Calico_Try(translate_status(s, last_lsn));
-            }
-
-            WalPayloadOut payload {buffer};
-            last_lsn = payload.lsn();
-
-            // We may encounter records from older transactions. Just ignore them.
-            if (last_lsn <= *m_commit_lsn) {
-                continue;
-            }
-
-            const auto decoded = decode_payload(payload);
-            CALICO_EXPECT_FALSE(std::holds_alternative<CommitDescriptor>(decoded));
-            if (std::holds_alternative<std::monostate>(decoded)) {
-                Calico_Try(translate_status(Status::corruption("wal is corrupted"), last_lsn));
-                break;
-            }
-            if (std::holds_alternative<FullImageDescriptor>(decoded)) {
-                const auto image = std::get<FullImageDescriptor>(decoded);
-                Calico_Try(with_page(*m_pager, image, [this, &image](auto &page) {
-                    if (read_page_lsn(page) >= image.lsn) {
-                        m_pager->upgrade(page);
-                        apply_undo(page, image);
-                    }
-                }));
-            }
-        }
-        if (segment == commit_segment) {
-            break;
-        }
+    segment = commit_segment;
+    for (; !segment.is_null(); segment = set.id_after(segment)) {
+        Calico_Try(roll(undo));
     }
 
     /* Make sure all changes have made it to disk, then remove WAL segments from the right. Once we
