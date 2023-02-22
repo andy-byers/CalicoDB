@@ -55,7 +55,7 @@ public:
 private:
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
-    [[nodiscard]] auto save_state() const -> Status;
+    [[nodiscard]] auto save_state(Lsn commit_lsn) const -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;

@@ -89,7 +89,6 @@ auto WalWriter::flushed_lsn() const -> Lsn
 
 WalWriter_::WalWriter_(const Parameters &param)
     : m_prefix {param.prefix.to_string()},
-      m_flushed_lsn {param.flushed_lsn},
       m_storage {param.storage},
       m_error {param.error},
       m_set {param.set},
@@ -97,7 +96,6 @@ WalWriter_::WalWriter_(const Parameters &param)
       m_wal_limit {param.wal_limit}
 {
     CALICO_EXPECT_FALSE(m_prefix.empty());
-    CALICO_EXPECT_NE(m_flushed_lsn, nullptr);
     CALICO_EXPECT_NE(m_storage, nullptr);
     CALICO_EXPECT_NE(m_error, nullptr);
     CALICO_EXPECT_NE(m_set, nullptr);
@@ -124,6 +122,11 @@ auto WalWriter_::flush() -> void
     }
 }
 
+auto WalWriter_::flushed_lsn() const -> Lsn
+{
+    return m_writer->flushed_lsn();
+}
+
 auto WalWriter_::advance() -> void
 {
     if (m_writer.has_value()) {
@@ -144,7 +147,7 @@ auto WalWriter_::open_segment(Id id) -> Status
     auto s = m_storage->new_logger(encode_segment_name(m_prefix, id), &file);
     if (s.is_ok()) {
         m_file.reset(file);
-        m_writer = WalWriter {*m_file, m_tail, *m_flushed_lsn};
+        m_writer = WalWriter {*m_file, m_tail};
         m_current = id;
     }
     return s;

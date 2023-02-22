@@ -22,7 +22,7 @@ static auto write_file_header(Byte *data, const FileHeader &header) -> void
     put_u64(data, header.freelist_head.value);
     data += sizeof(Id);
 
-    put_u64(data, header.recovery_lsn.value);
+    put_u64(data, header.commit_lsn.value);
     data += sizeof(Lsn);
 
     put_u16(data, header.page_size);
@@ -48,7 +48,7 @@ FileHeader::FileHeader(const Byte *data)
     freelist_head.value = get_u64(data);
     data += sizeof(Id);
 
-    recovery_lsn.value = get_u64(data);
+    commit_lsn.value = get_u64(data);
     data += sizeof(Lsn);
 
     page_size = get_u16(data);

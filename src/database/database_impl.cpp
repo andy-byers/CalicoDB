@@ -369,21 +369,21 @@ auto DatabaseImpl::commit() -> Status
  */
 auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
 {
-    logv(m_info_log, "commit requested at lsn ", wal->current_lsn().value + 1);
+    auto commit_lsn = wal->current_lsn();
+    commit_lsn.value++;
 
+    logv(m_info_log, "commit requested at lsn ", commit_lsn.value);
     m_txn_size = 0;
-    Calico_Try(save_state());
 
-    const auto lsn = wal->current_lsn();
-    wal->log(encode_commit_payload(lsn, m_scratch));
+    Calico_Try(save_state(commit_lsn));
+    wal->log(encode_commit_payload(commit_lsn, m_scratch));
     Calico_Try(wal->flush());
-    wal->advance();
+
+    logv(m_info_log, "commit successful");
+    m_commit_lsn = commit_lsn;
 
     Maybe_Set_Error(pager->flush(flush_lsn));
     wal->cleanup(pager->recovery_lsn());
-    m_commit_lsn = lsn;
-
-    logv(m_info_log, "commit successful");
     return Status::ok();
 }
 
@@ -392,14 +392,13 @@ auto DatabaseImpl::ensure_consistency_on_startup() -> Status
     Recovery recovery {*pager, *wal, m_commit_lsn};
 
     m_in_txn = false;
-    Calico_Try(recovery.start());
+    Calico_Try(recovery.recover());
     Calico_Try(load_state());
-    Calico_Try(recovery.finish());
     m_in_txn = true;
     return Status::ok();
 }
 
-auto DatabaseImpl::save_state() const -> Status
+auto DatabaseImpl::save_state(Lsn commit_lsn) const -> Status
 {
     Page root;
     Calico_Try(pager->acquire(Id::root(), root));
@@ -408,6 +407,7 @@ auto DatabaseImpl::save_state() const -> Status
     FileHeader header {root};
     pager->save_state(header);
     tree->save_state(header);
+    header.commit_lsn = commit_lsn;
     header.record_count = record_count;
     header.header_crc = header.compute_crc();
     header.write(root);
@@ -509,7 +509,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, In
 
     } else if (s.is_not_found()) {
         header.page_size = static_cast<std::uint16_t>(options.page_size);
-        header.recovery_lsn = Id::root();
         header.header_crc = header.compute_crc();
 
     } else {

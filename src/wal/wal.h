@@ -17,7 +17,6 @@ namespace Calico {
 
 class WalCleanup;
 class WalReader_;
-class WalReader_;
 class WalWriter_;
 
 class WriteAheadLog {
@@ -39,8 +38,6 @@ public:
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;
     [[nodiscard]] virtual auto start_writing() -> Status;
     [[nodiscard]] virtual auto new_reader_(WalReader_ **out) -> Status;
-    [[nodiscard]] virtual auto new_reader(WalReader_ **out) -> Status;
-    [[nodiscard]] virtual auto new_writer(WalWriter_ **out) -> Status;
     [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status;
     [[nodiscard]] virtual auto flush() -> Status;
     virtual auto cleanup(Lsn recovery_lsn) -> void;
@@ -62,7 +59,7 @@ public:
 private:
     explicit WriteAheadLog(const Parameters &param);
 
-    Lsn m_flushed_lsn {};
+    mutable Lsn m_flushed_lsn;
     ErrorBuffer m_error;
     Lsn m_last_lsn;
     WalSet m_set;

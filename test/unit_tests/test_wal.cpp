@@ -349,7 +349,6 @@ public:
               storage.get(),
               &error_buffer,
               &set,
-              &flushed_lsn,
               WAL_LIMIT,
           }}
     {}
@@ -359,7 +358,6 @@ public:
     WalSet set;
     ErrorBuffer error_buffer;
     std::string scratch;
-    Lsn flushed_lsn;
     std::string tail;
     Tools::RandomGenerator random;
     WalWriter_ writer;
@@ -461,6 +459,7 @@ public:
     WalReaderWriterTests()
         : scratch(wal_scratch_size(PAGE_SIZE), '\x00'),
           error_buffer {std::make_unique<ErrorBuffer>()},
+          writer_data(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_data(wal_scratch_size(PAGE_SIZE), '\x00'),
           reader_tail(wal_block_size(PAGE_SIZE), '\x00'),
           writer_tail(wal_block_size(PAGE_SIZE), '\x00'),
@@ -470,7 +469,6 @@ public:
               storage.get(),
               error_buffer.get(),
               &set,
-              &flushed_lsn,
               WAL_LIMIT,
           }}
     {}
@@ -478,7 +476,7 @@ public:
     ~WalReaderWriterTests() override = default;
 
     [[nodiscard]]
-    auto get_reader() -> std::unique_ptr<WalReader_>
+    auto get_reader_() -> std::unique_ptr<WalReader_>
     {
         const auto param = WalReader_::Parameters {
             "test/wal-",
@@ -502,7 +500,7 @@ public:
         return WalPayloadIn {{++last_lsn.value}, buffer.truncate(size + sizeof(Lsn))};
     }
 
-    auto emit_segments(Size num_writes)
+    auto random_writes(Size num_writes)
     {
         for (Size i {}; i < num_writes; ++i) {
             writer.write(get_payload());
@@ -556,13 +554,51 @@ public:
         return s;
     }
 
+    [[nodiscard]]
+    auto get_reader(Id id) -> WalReader
+    {
+        Reader *reader;
+        EXPECT_OK(storage->new_reader(encode_segment_name("test/wal-", id), &reader));
+        reader_file.reset(reader);
+        return WalReader {*reader_file, reader_tail};
+    }
+
+    [[nodiscard]]
+    auto read_record(WalReader &reader) -> WalPayloadOut
+    {
+        // Only supports reading 1 record at a time.
+        Span buffer {reader_data};
+        EXPECT_OK(reader.read(buffer));
+        return WalPayloadOut {buffer};
+    }
+
+    auto write_record(WalWriter &writer_, Lsn lsn, const std::string &payload) -> void
+    {
+        Span buffer {writer_data};
+        mem_copy(buffer.range(sizeof(Lsn)), payload);
+        buffer.truncate(sizeof(Lsn) + payload.size());
+        ASSERT_OK(writer_.write(WalPayloadIn {lsn, buffer}));
+    }
+
+    [[nodiscard]]
+    auto get_writer(Id id, Size file_size) -> WalWriter
+    {
+        Logger *logger;
+        EXPECT_OK(storage->new_logger(encode_segment_name("test/wal-", id), &logger));
+        writer_file.reset(logger);
+        return WalWriter {*writer_file, writer_tail, file_size};
+    }
+
     Id last_lsn;
     std::vector<std::string> payloads;
     WalSet set;
     std::unique_ptr<ErrorBuffer> error_buffer;
+    std::unique_ptr<Reader> reader_file;
+    std::unique_ptr<Logger> writer_file;
     std::string scratch;
     Lsn flushed_lsn;
     std::string reader_data;
+    std::string writer_data;
     std::string reader_tail;
     std::string writer_tail;
     Tools::RandomGenerator random;
@@ -570,17 +606,88 @@ public:
     WalWriter_ writer;
 };
 
+TEST_F(WalReaderWriterTests, ReadsRecordsInBlock)
+{
+    auto writer = get_writer(Id {1}, 0);
+    write_record(writer, Lsn {1}, "1");
+    write_record(writer, Lsn {2}, "22");
+    write_record(writer, Lsn {3}, "333");
+    ASSERT_OK(writer.flush());
+
+    auto reader = get_reader(Id {1});
+    auto payload = read_record(reader);
+    ASSERT_EQ(payload.lsn(), Lsn {1});
+    ASSERT_EQ(payload.data(), "1");
+    payload = read_record(reader);
+    ASSERT_EQ(payload.lsn(), Lsn {2});
+    ASSERT_EQ(payload.data(), "22");
+    payload = read_record(reader);
+    ASSERT_EQ(payload.lsn(), Lsn {3});
+    ASSERT_EQ(payload.data(), "333");
+}
+
+static auto setup_scenario(WalReaderWriterTests &test)
+{
+    std::vector<std::string> data;
+    data.emplace_back(test.random.Generate(WalReaderWriterTests::PAGE_SIZE).to_string());
+    data.emplace_back(test.random.Generate(WalReaderWriterTests::PAGE_SIZE).to_string());
+    data.emplace_back(test.random.Generate(WalReaderWriterTests::PAGE_SIZE).to_string());
+    data.emplace_back(test.random.Generate(10).to_string());
+    data.emplace_back(test.random.Generate(10).to_string());
+
+    auto writer = test.get_writer(Id {1}, 0);
+    test.write_record(writer, Lsn {1}, data[0]);
+    test.write_record(writer, Lsn {2}, data[1]);
+    EXPECT_OK(writer.flush());
+    test.write_record(writer, Lsn {3}, data[2]);
+    test.write_record(writer, Lsn {4}, data[3]);
+    EXPECT_OK(writer.flush());
+    test.write_record(writer, Lsn {5}, data[4]);
+    EXPECT_OK(writer.flush());
+
+    return data;
+}
+
+TEST_F(WalReaderWriterTests, ReadsRecordsBetweenBlocks)
+{
+    const auto data = setup_scenario(*this);
+
+    auto reader = get_reader(Id {1});
+    for (Size i {}; i < data.size(); ++i) {
+        auto payload = read_record(reader);
+        ASSERT_EQ(payload.lsn(), Lsn {i + 1});
+        ASSERT_EQ(payload.data(), data[i]);
+    }
+}
+
+TEST_F(WalReaderWriterTests, HandlesFlushes)
+{
+    auto writer = get_writer(Id {1}, 0);
+    write_record(writer, Lsn {1}, "hello");
+    ASSERT_OK(writer.flush());
+    write_record(writer, Lsn {2}, "world");
+    ASSERT_OK(writer.flush());
+
+    auto reader = get_reader(Id {1});
+    auto payload_1 = read_record(reader);
+    ASSERT_EQ(payload_1.lsn(), Lsn {1});
+    ASSERT_EQ(payload_1.data(), "hello");
+    auto payload_2 = read_record(reader);
+    ASSERT_EQ(payload_2.lsn(), Lsn {2});
+    ASSERT_EQ(payload_2.data(), "world");
+}
+
 static auto does_not_lose_records_test(WalReaderWriterTests &test, Size num_writes)
 {
-    ASSERT_OK(test.emit_segments(num_writes));
+    ASSERT_OK(test.random_writes(num_writes));
 
-    auto reader = test.get_reader();
+    auto reader = test.get_reader_();
     ASSERT_OK(test.contains_sequence(*reader, Id {num_writes}));
 }
 
 TEST_F(WalReaderWriterTests, IterateFromBeginning)
 {
-    ASSERT_OK(emit_segments(50));
+    ASSERT_OK(random_writes(50));
 
     Reader *file;
     ASSERT_OK(storage->new_reader(encode_segment_name("test/wal-", Id::root()), &file));
@@ -601,7 +708,7 @@ TEST_F(WalReaderWriterTests, IterateFromBeginning)
 
 TEST_F(WalReaderWriterTests, IterateFromMiddle)
 {
-    ASSERT_OK(emit_segments(5'000));
+    ASSERT_OK(random_writes(5'000));
 
     Reader *file;
     ASSERT_OK(storage->new_reader(encode_segment_name("test/wal-", Id {2}), &file));
@@ -633,9 +740,9 @@ TEST_F(WalReaderWriterTests, DoesNotLoseRecordsAcrossSegments)
 
 static auto roll_forward_test(WalReaderWriterTests &test, Size num_writes)
 {
-    ASSERT_OK(test.emit_segments(num_writes));
+    ASSERT_OK(test.random_writes(num_writes));
 
-    auto reader = test.get_reader();
+    auto reader = test.get_reader_();
     ASSERT_OK(test.roll_segments_forward(*reader, num_writes));
 }
 

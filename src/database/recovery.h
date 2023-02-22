@@ -19,10 +19,15 @@ public:
           m_commit_lsn {&commit_lsn}
     {}
 
-    [[nodiscard]] auto start() -> Status;
-    [[nodiscard]] auto finish() -> Status;
+    [[nodiscard]] auto recover() -> Status;
 
 private:
+    [[nodiscard]] auto open_reader(Id segment, std::unique_ptr<Reader> &out) -> Status;
+    [[nodiscard]] auto recover_phase_1() -> Status;
+    [[nodiscard]] auto recover_phase_2() -> Status;
+
+    std::string m_reader_data;
+    std::string m_reader_tail;
     Pager *m_pager {};
     WriteAheadLog *m_wal {};
     Lsn *m_commit_lsn {};

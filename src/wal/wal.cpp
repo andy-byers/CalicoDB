@@ -73,7 +73,6 @@ auto WriteAheadLog::start_writing() -> Status
             m_storage,
             &m_error,
             &m_set,
-            &m_flushed_lsn,
             m_segment_cutoff,
         }}};
     if (m_writer == nullptr) {
@@ -96,6 +95,9 @@ auto WriteAheadLog::start_writing() -> Status
 
 auto WriteAheadLog::flushed_lsn() const -> Lsn
 {
+    if (m_writer) {
+        m_flushed_lsn = m_writer->flushed_lsn();
+    }
     return m_flushed_lsn;
 }
 

@@ -338,15 +338,11 @@ auto Pager::truncate(Size page_count) -> Status
 
 auto Pager::save_state(FileHeader &header) -> void
 {
-    header.recovery_lsn = m_recovery_lsn;
     m_frames.save_state(header);
 }
 
 auto Pager::load_state(const FileHeader &header) -> void
 {
-    if (m_recovery_lsn.value < header.recovery_lsn.value) {
-        m_recovery_lsn = header.recovery_lsn;
-    }
     m_frames.load_state(header);
 }
 

@@ -52,7 +52,6 @@ public:
         Storage *storage {};
         ErrorBuffer *error {};
         WalSet *set {};
-        Lsn *flushed_lsn {};
         Size wal_limit {};
     };
 
@@ -66,6 +65,8 @@ public:
     auto advance() -> void;
     auto flush() -> void;
 
+    [[nodiscard]] auto flushed_lsn() const -> Lsn;
+
 private:
     [[nodiscard]] auto advance_segment() -> Status;
     [[nodiscard]] auto open_segment(Id) -> Status;
@@ -74,7 +75,6 @@ private:
     std::string m_prefix;
     std::optional<WalWriter> m_writer;
     std::unique_ptr<Logger> m_file;
-    Lsn *m_flushed_lsn {};
     Storage *m_storage {};
     ErrorBuffer *m_error {};
     WalSet *m_set {};

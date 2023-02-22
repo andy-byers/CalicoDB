@@ -19,18 +19,15 @@ static auto read_tail(Reader &file, Size number, Span tail) -> Status
     return Status::ok();
 }
 
-WalReader::WalReader(Reader &file, Span tail, Size start)
+WalReader::WalReader(Reader &file, Span tail)
     : m_tail {tail},
-      m_file {&file},
-      m_offset {start % tail.size()},
-      m_block {start / tail.size()},
-      m_start {start}
+      m_file {&file}
 {}
 
 auto WalReader::read(Span &payload) -> Status
 {
-    if (offset() == m_start) {
-        Calico_Try(read_tail(*m_file, m_block, m_tail));
+    if (m_offset + m_block == 0) {
+        Calico_Try(read_tail(*m_file, 0, m_tail));
     }
     auto out = payload;
     WalRecordHeader header;

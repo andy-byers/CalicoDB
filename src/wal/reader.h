@@ -12,13 +12,11 @@ namespace Calico {
 class WalReader {
     Span m_tail;
     Reader *m_file {};
-    Size m_last_offset {};
     Size m_offset {};
     Size m_block {};
-    Size m_start {};
 
 public:
-    explicit WalReader(Reader &file, Span tail, Size start = 0);
+    explicit WalReader(Reader &file, Span tail);
     [[nodiscard]] auto read(Span &payload) -> Status;
     [[nodiscard]] auto offset() const -> Size;
 };

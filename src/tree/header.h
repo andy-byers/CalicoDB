@@ -14,7 +14,7 @@ class Page;
  *     8       8     page_count
  *     16      8     record_count
  *     24      8     free_list_id
- *     32      8     recovery_lsn       TODO: Look into writing the commit LSN here instead (call it the checkpoint LSN). We can start from there during recovery. Don't think we need to store the recovery LSN really.
+ *     32      8     commit_lsn
  *     40      2     page_size
  */
 struct FileHeader {
@@ -32,7 +32,7 @@ struct FileHeader {
     std::uint64_t page_count {};
     std::uint64_t record_count {};
     Id freelist_head;
-    Lsn recovery_lsn;
+    Lsn commit_lsn;
     std::uint16_t page_size {};
 };
 
