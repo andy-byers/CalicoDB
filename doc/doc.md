@@ -281,7 +281,7 @@ First, we need to make sure that all updates are written to the WAL before affec
 The WAL keeps track of the last LSN it flushed to disk (the `flushed_lsn`).
 This value is queried by the pager to make sure that unprotected pages are never written back.
 The pager keeps track of a few more variables to ensure consistency: the `page_lsn`, the `record_lsn`, the `commit_lsn`, and the `recovery_lsn`.
-The `page_lsn` (per page) is the LSN of the last WAL record generated for the page.
+The `page_lsn` (per page) is the LSN of the last WAL record generated for a given page.
 This is the value that is compared with the WAL's `flushed_lsn` to make sure the page is safe to write out.
 The `record_lsn` (also per page) is the last `page_lsn` value that we already have on disk.
 It is saved (in-memory only) when the page is first read into memory, and each time the page is written back.

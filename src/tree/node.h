@@ -43,6 +43,7 @@ inline constexpr auto compute_local_size(Size key_size, Size value_size, Size mi
 
 /* Internal Cell Format:
  *     Size    Name
+ *    -----------------------
  *     8       child_id
  *     varint  key_size
  *     n       key
@@ -50,6 +51,7 @@ inline constexpr auto compute_local_size(Size key_size, Size value_size, Size mi
  *
  * External Cell Format:
  *     Size    Name
+ *    -----------------------
  *     varint  value_size
  *     varint  key_size
  *     n       key

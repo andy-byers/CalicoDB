@@ -32,7 +32,11 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
     for (auto &name: child_names) {
         name.insert(0, path);
         if (Slice {name}.starts_with(param.prefix)) {
-            segment_ids.emplace_back(decode_segment_name(param.prefix, name));
+            Size file_size;
+            Calico_Try(param.store->file_size(name, file_size));
+            if (file_size) {
+                segment_ids.emplace_back(decode_segment_name(param.prefix, name));
+            }
         }
     }
     std::sort(begin(segment_ids), end(segment_ids));
@@ -79,7 +83,6 @@ auto WriteAheadLog::start_writing() -> Status
     m_cleanup = std::unique_ptr<WalCleanup> {
         new(std::nothrow) WalCleanup {{
             m_prefix,
-            &m_recovery_lsn,
             m_storage,
             &m_error,
             &m_set,
@@ -93,7 +96,7 @@ auto WriteAheadLog::start_writing() -> Status
 
 auto WriteAheadLog::flushed_lsn() const -> Lsn
 {
-    return m_flushed_lsn.load();
+    return m_flushed_lsn;
 }
 
 auto WriteAheadLog::current_lsn() const -> Lsn
@@ -140,8 +143,7 @@ auto WriteAheadLog::new_reader(WalReader **out) -> Status
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void
 {
-    m_recovery_lsn.store(recovery_lsn);
-    m_cleanup->cleanup();
+    m_cleanup->cleanup(recovery_lsn);
 }
 
 auto WriteAheadLog::truncate(Lsn lsn) -> Status
@@ -163,7 +165,7 @@ auto WriteAheadLog::truncate(Lsn lsn) -> Status
         current = m_set.id_before(current);
     }
     m_last_lsn = lsn;
-    m_flushed_lsn.store(lsn);
+    m_flushed_lsn = lsn;
     return Status::ok();
 }
 

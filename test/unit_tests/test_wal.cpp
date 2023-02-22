@@ -359,7 +359,7 @@ public:
     WalSet set;
     ErrorBuffer error_buffer;
     std::string scratch;
-    std::atomic<Id> flushed_lsn {};
+    Lsn flushed_lsn;
     std::string tail;
     Tools::RandomGenerator random;
     WalWriter writer;
@@ -561,7 +561,7 @@ public:
     WalSet set;
     std::unique_ptr<ErrorBuffer> error_buffer;
     std::string scratch;
-    std::atomic<Id> flushed_lsn {};
+    Lsn flushed_lsn;
     std::string reader_data;
     std::string reader_tail;
     std::string writer_tail;
@@ -654,7 +654,6 @@ public:
     WalCleanupTests()
         : cleanup {WalCleanup::Parameters{
               "test/wal-",
-              &limit,
               storage.get(),
               &error_buffer,
               &set,
@@ -675,14 +674,13 @@ public:
     }
 
     ErrorBuffer error_buffer;
-    std::atomic<Lsn> limit;
     WalCleanup cleanup;
 };
 
 TEST_F(WalCleanupTests, DoesNothingWhenSetIsEmpty)
 {
     ASSERT_TRUE(collect_wal_segment_ids().empty());
-    cleanup.cleanup();
+    cleanup.cleanup(Lsn {123});
     ASSERT_TRUE(collect_wal_segment_ids().empty());
 }
 
@@ -706,17 +704,14 @@ TEST_F(WalCleanupTests, RemovesObsoleteSegments)
     std::move(writer).destroy();
     ASSERT_EQ(set.segments().size(), 3);
 
-    limit.store({3});
-    cleanup.cleanup();
+    cleanup.cleanup(Lsn {3});
     ASSERT_EQ(set.segments().size(), 3);
 
-    limit.store({4});
-    cleanup.cleanup();
+    cleanup.cleanup(Lsn {4});
     ASSERT_EQ(set.segments().size(), 2);
 
-    // Always keep the most-recent segment.
-    limit.store({100});
-    cleanup.cleanup();
+    // Always keep the most-recent segment. TODO: No longer important
+    cleanup.cleanup(Lsn {100});
     ASSERT_EQ(set.segments().size(), 1);
     ASSERT_EQ(set.first(), Id {3});
 }
@@ -730,10 +725,9 @@ TEST_F(WalCleanupTests, ReportsErrorOnLsnRead)
     writer.advance();
 
     std::move(writer).destroy();
-    limit.store({3});
 
     Quick_Interceptor("test/wal", Tools::Interceptor::READ);
-    cleanup.cleanup();
+    cleanup.cleanup(Lsn {3});
 
     assert_special_error(error_buffer.get());
 }
@@ -747,10 +741,9 @@ TEST_F(WalCleanupTests, ReportsErrorOnUnlink)
     writer.advance();
 
     std::move(writer).destroy();
-    limit.store({3});
 
     Quick_Interceptor("test/wal", Tools::Interceptor::UNLINK);
-    cleanup.cleanup();
+    cleanup.cleanup(Lsn {3});
 
     assert_special_error(error_buffer.get());
 }

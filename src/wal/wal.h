@@ -60,8 +60,7 @@ public:
 private:
     explicit WriteAheadLog(const Parameters &param);
 
-    std::atomic<Lsn> m_flushed_lsn {};
-    std::atomic<Lsn> m_recovery_lsn {};
+    Lsn m_flushed_lsn {};
     ErrorBuffer m_error;
     Lsn m_last_lsn;
     WalSet m_set;

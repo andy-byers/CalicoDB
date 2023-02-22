@@ -3,10 +3,8 @@
 
 namespace Calico {
 
-auto WalCleanup::cleanup() -> void
+auto WalCleanup::cleanup(Lsn limit) -> void
 {
-    const auto limit = m_limit->load();
-
     for (; ; ) {
         const auto id = m_set->first();
         if (id.is_null()) {

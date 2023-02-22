@@ -748,7 +748,6 @@ TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnLeftmostPosition)
     for (Size i {}; is_root_external(); ++i) {
         ASSERT_LE(i, 100);
         ASSERT_OK(tree->insert(Tools::integral_key(100 - i), make_value('v'), _));
-        std::cerr << tree->TEST_to_string() << "\n\n";
     }
     validate();
 }

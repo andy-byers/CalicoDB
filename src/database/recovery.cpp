@@ -34,10 +34,15 @@ static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback
 
 auto Recovery::start() -> Status
 {
+    const auto &set = m_wal->m_set;
+
+    if (set.first().is_null()) {
+        return Status::ok();
+    }
+
     WalReader *temp;
     Calico_Try(m_wal->new_reader(&temp));
     std::unique_ptr<WalReader> reader {temp};
-    const auto &set = m_wal->m_set;
     Lsn last_lsn;
     Status s;
 
@@ -58,7 +63,7 @@ auto Recovery::start() -> Status
     }
 
     // Roll forward and apply missing updates.
-    for (; ; ) {
+    for (Size i {}; ; i++) {
         WalPayloadOut payload;
         s = reader->read(payload);
         if (!s.is_ok()) {
@@ -71,6 +76,9 @@ auto Recovery::start() -> Status
             return Status::corruption("wal is corrupted");
         }
 
+        if (i && last_lsn.value + 1 != payload.lsn().value) {
+            return Status::corruption("missing wal record");
+        }
         last_lsn = payload.lsn();
 
         if (std::holds_alternative<CommitDescriptor>(decoded)) {

@@ -80,7 +80,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
     CHECK_TRUE(options.storage != nullptr);
 
     Database *db;
-    expect_ok(Database::open(DB_PATH, options, &db));
+    CHECK_OK(Database::open(DB_PATH, options, &db));
 
     Set erased;
     Map added;
@@ -90,7 +90,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         delete db;
 
         storage_base(options.storage).clear_interceptors();
-        expect_ok(Database::open(DB_PATH, options, &db));
+        CHECK_OK(Database::open(DB_PATH, options, &db));
 
         added.clear();
         erased.clear();

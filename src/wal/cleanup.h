@@ -9,7 +9,6 @@ class WalCleanup {
 public:
     struct Parameters {
         Slice prefix;
-        std::atomic<Lsn> *limit {};
         Storage *storage {};
         ErrorBuffer *error {};
         WalSet *set {};
@@ -17,7 +16,6 @@ public:
 
     explicit WalCleanup(const Parameters &param)
         : m_prefix {param.prefix.to_string()},
-          m_limit {param.limit},
           m_storage {param.storage},
           m_error {param.error},
           m_set {param.set}
@@ -28,11 +26,10 @@ public:
         CALICO_EXPECT_NE(m_set, nullptr);
     }
 
-    auto cleanup() -> void;
+    auto cleanup(Lsn limit) -> void;
 
 private:
     std::string m_prefix;
-    std::atomic<Lsn> *m_limit {};
     Storage *m_storage {};
     ErrorBuffer *m_error {};
     WalSet *m_set {};

@@ -34,6 +34,11 @@ class WalReader {
     Id m_id {};
 
 public:
+    struct Position {
+        Id id;
+        Size offset {};
+    };
+
     struct Parameters {
         std::string prefix;
         Span tail;

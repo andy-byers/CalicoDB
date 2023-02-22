@@ -12,7 +12,7 @@ namespace Calico {
 class LogWriter {
 public:
     // NOTE: LogWriter must always be created on an empty segment file.
-    LogWriter(Logger &file, Span tail, std::atomic<Id> &flushed_lsn)
+    LogWriter(Logger &file, Span tail, Lsn &flushed_lsn)
         : m_tail {tail},
           m_flushed_lsn {&flushed_lsn},
           m_file {&file}
@@ -31,7 +31,7 @@ public:
 
 private:
     Span m_tail;
-    std::atomic<Id> *m_flushed_lsn {};
+    Lsn *m_flushed_lsn {};
     Logger *m_file {};
     Lsn m_last_lsn {};
     Size m_number {};
@@ -46,7 +46,7 @@ public:
         Storage *storage {};
         ErrorBuffer *error {};
         WalSet *set {};
-        std::atomic<Id> *flushed_lsn {};
+        Lsn *flushed_lsn {};
         Size wal_limit {};
     };
 
@@ -68,7 +68,7 @@ private:
     std::string m_prefix;
     std::optional<LogWriter> m_writer;
     std::unique_ptr<Logger> m_file;
-    std::atomic<Id> *m_flushed_lsn {};
+    Lsn *m_flushed_lsn {};
     Storage *m_storage {};
     ErrorBuffer *m_error {};
     WalSet *m_set {};

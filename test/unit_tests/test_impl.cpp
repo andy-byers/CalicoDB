@@ -1095,4 +1095,42 @@ TEST_F(WalPrefixTests, WalDirectoryMustExist)
     ASSERT_TRUE(Calico::Database::open(ROOT, options, &db).is_not_found());
 }
 
+class WalCorruptionTests : public InMemoryTest {
+public:
+    WalCorruptionTests()
+    {
+        options.storage = storage.get();
+    }
+
+    [[nodiscard]]
+    auto get_sorted_wal_ids() -> std::vector<Id>
+    {
+        std::vector<std::string> children;
+        EXPECT_OK(storage->get_children("test", children));
+
+        std::vector<Id> wals;
+        for (auto &child: children) {
+            if (Slice {child}.starts_with("wal")) {
+                wals.emplace_back(decode_segment_name("wal-", child));
+            }
+        }
+        std::sort(begin(wals), end(wals));
+        return wals;
+    }
+
+    Options options;
+    Database *db {};
+};
+
+TEST_F(WalCorruptionTests, CreatesWals)
+{
+    ASSERT_OK(Calico::Database::open(ROOT, options, &db));
+    for (Size i {}; i < 100; ++i) {
+        ASSERT_OK(db->put(Tools::integral_key(i), "value"));
+    }
+    ASSERT_OK(db->commit());
+    auto s = get_sorted_wal_ids();
+    (void)s;
+}
+
 } // <anonymous>

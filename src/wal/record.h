@@ -165,7 +165,7 @@ enum XactPayloadType : Byte {
 };
 
 /*
- * Stores a collection of WAL segment descriptors and provides synchronized access.
+ * Stores a collection of WAL segment descriptors and caches their first LSNs.
  */
 class WalSet final {
 public:
@@ -193,6 +193,12 @@ public:
         auto itr = m_segments.find(id);
         CALICO_EXPECT_NE(itr, end(m_segments));
         itr->second = lsn;
+    }
+
+    [[nodiscard]]
+    auto is_empty() const -> bool
+    {
+        return m_segments.empty();
     }
 
     [[nodiscard]]
@@ -245,7 +251,6 @@ public:
     [[nodiscard]]
     auto segments() const -> const std::map<Id, Lsn> &
     {
-        // WARNING: We must ensure that background threads that modify the collection are paused before using this method.
         return m_segments;
     }
 

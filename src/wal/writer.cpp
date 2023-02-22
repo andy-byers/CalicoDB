@@ -19,13 +19,12 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
         auto rest = m_tail;
         // Note that this modifies rest to point to [<m_offset>, <end>) in the tail buffer.
         const auto space_remaining = rest.advance(m_offset).size();
-        const auto can_fit_some = space_remaining > WalRecordHeader::SIZE;
-        const auto can_fit_all = space_remaining >= WalRecordHeader::SIZE + data.size();
+        const auto needs_split = space_remaining < WalRecordHeader::SIZE + data.size();
 
-        if (can_fit_some) {
+        if (space_remaining > WalRecordHeader::SIZE) {
             WalRecordHeader rhs;
 
-            if (!can_fit_all) {
+            if (needs_split) {
                 rhs = split_record(lhs, data, space_remaining);
             }
 
@@ -38,7 +37,7 @@ auto LogWriter::write(WalPayloadIn payload) -> Status
             data.advance(lhs.size);
             rest.advance(lhs.size);
 
-            if (!can_fit_all) {
+            if (needs_split) {
                 lhs = rhs;
             }
 
@@ -69,7 +68,7 @@ auto LogWriter::flush() -> Status
 
     auto s = m_file->write(m_tail);
     if (s.is_ok()) {
-        m_flushed_lsn->store(m_last_lsn);
+        *m_flushed_lsn = m_last_lsn;
         m_offset = 0;
         m_number++;
     }

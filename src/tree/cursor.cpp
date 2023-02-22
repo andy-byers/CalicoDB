@@ -227,7 +227,11 @@ auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
     if (cursor.is_valid()) {
         const auto &impl = reinterpret_cast<const CursorImpl &>(cursor);
         Node node;
-        CALICO_EXPECT_TRUE(impl.m_tree->acquire(node, impl.m_loc.pid).is_ok());
+        auto s = impl.m_tree->acquire(node, impl.m_loc.pid);
+        if (!s.is_ok()) {
+            std::fputs(s.what().data(), stderr);
+            std::abort();
+        }
         node.TEST_validate();
         impl.m_tree->release(std::move(node));
     }
