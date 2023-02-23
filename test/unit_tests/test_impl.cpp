@@ -21,7 +21,6 @@ public:
         options.page_size = 0x200;
         options.cache_size = options.page_size * frame_count;
         options.log_level = LogLevel::OFF;
-        options.info_log = new Tools::StderrLogger;
         options.storage = storage.get();
     }
 

@@ -178,12 +178,14 @@ auto FrameManager::write_page_to_file(Id pid, const Slice &page) const -> Status
 
 auto FrameManager::load_state(const FileHeader &header) -> void
 {
+    // Page size should already be correct.
     m_page_count = header.page_count;
 }
 
 auto FrameManager::save_state(FileHeader &header) const -> void
 {
     header.page_count = m_page_count;
+    header.page_size = static_cast<PageSize>(m_page_size);
 }
 
 } // namespace Calico

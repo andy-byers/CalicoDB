@@ -63,7 +63,7 @@ Only benchmarks relevant to CalicoDB are included.
 | `readrand100k`             |                       19,545 |                      10,894 |                     66,028 |
 
 <sup>*</sup> These benchmarks are affected by the fact that we use a batch size of 1,000.
-The call to `Database::commit()` will flush pages from older transactions, advance the WAL to a new segment, and possibly remove obsolete WAL segments, so it has quite a bit of overhead.
+Calico DB is designed to make use of batched writes.
 For this reason, the SQLite3 benchmarks actually list the results for the much faster batched versions, which commit every 1,000 writes (i.e. `fillseq` is actually `fillseqbatch` for SQLite3).
 
 Additional work will need to be done to reduce the overhead of committing a transaction, among other things.

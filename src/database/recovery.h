@@ -24,6 +24,8 @@ private:
     std::string m_reader_data;
     std::string m_reader_tail;
     Pager *m_pager {};
+    Storage *m_storage {};
+    WalSet *m_set {};
     WriteAheadLog *m_wal {};
     Lsn *m_commit_lsn {};
 };

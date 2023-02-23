@@ -7,10 +7,10 @@
 
 namespace Calico {
 
-class RecoveryTests: public InMemoryTest {
+class RecoveryTests: public OnDiskTest {
 public:
     RecoveryTests()  
-        : db_prefix {"test/"}
+        : db_prefix {PREFIX}
     {
         db_options.storage = storage.get();
         open();
@@ -141,13 +141,15 @@ public:
 
 TEST_F(RecoveryTests, NormalShutdown)
 {
+    ASSERT_EQ(num_logs(), 1);
+
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
     ASSERT_OK(db->commit());
     close();
 
-    ASSERT_EQ(num_logs(), 1);
+    ASSERT_EQ(num_logs(), 0);
 }
 
 TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)

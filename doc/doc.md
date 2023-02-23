@@ -194,7 +194,7 @@ if (const auto s = db->vacuum(); s.is_ok()) {
 A transaction represents a unit of work in Calico DB.
 The first transaction is started when the database is opened. 
 Otherwise, transaction boundaries are defined by calls to `Database::commit()`.
-All updates that haven't been committed when the database is closed will be reverted on the next startup.
+All updates that haven't been committed when the database is closed will be reverted.
 
 ```C++
 if (const auto s = db->put("c", "3"); !s.is_ok()) {
@@ -274,6 +274,10 @@ Further modifications to the page will produce deltas, which record only the cha
 Note that full image records are always disjoint (w.r.t. the affected page IDs) within a single transaction.
 This means that they can be applied to the database in any order and produce the same results.
 Deltas are not disjoint, so they must be read in order.
+Commits are signified by a special delta record: one that updates exactly the file header on the root page.
+The delta modifies the database commit LSN, which is the LSN of the commit record.
+This way we don't actually have to find a commit record in the WAL to be able to trust the commit LSN (otherwise, it would be possible to have flushed the delta containing the updated commit LSN, but not the commit record itself).
+This allows us to get rid of the WAL when the database is closed properly.
 
 ### Consistency
 Calico DB must enforce certain rules to maintain consistency between the WAL and the database.
@@ -288,6 +292,8 @@ It is saved (in-memory only) when the page is first read into memory, and each t
 Then, the lowest `record_lsn` is tracked in the pager's `recovery_lsn`.
 The `recovery_lsn` represents the oldest WAL record that we still need.
 It is reported back to the WAL intermittently so that obsolete segment files can be removed.
+Finally, the `commit_lsn` is the LSN of the most-recent commit record (the special delta record mentioned in [WAL](#wal)).
+This value is saved in the database file header and is used to determine how the logical contents of the database should look.
 
 ## Acknowledgements
 1. https://cstack.github.io/db_tutorial/

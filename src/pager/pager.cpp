@@ -51,7 +51,6 @@ Pager::Pager(const Parameters &param, Editor *file, AlignedBuffer buffer)
     CALICO_EXPECT_NE(m_wal, nullptr);
     CALICO_EXPECT_NE(m_status, nullptr);
     CALICO_EXPECT_NE(m_scratch, nullptr);
-    CALICO_EXPECT_NE(m_info_log, nullptr);
 }
 
 auto Pager::bytes_written() const -> Size

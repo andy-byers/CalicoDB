@@ -120,19 +120,17 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
         Node root;
         Calico_Try(tree->setup(root));
-
-        CALICO_EXPECT_EQ(pager->page_count(), 1);
-        state.page_count = 1;
-        state.write(root.page);
-        state.header_crc = state.compute_crc();
-        state.write(root.page);
         pager->release(std::move(root).take());
+        CALICO_EXPECT_EQ(pager->page_count(), 1);
+
         Calico_Try(do_commit({}));
 
     } else {
         logv(m_info_log, "ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         Calico_Try(ensure_consistency());
+        Calico_Try(load_state());
+        Calico_Try(wal->start_writing());
     }
     logv(m_info_log, "pager recovery lsn is ", pager->recovery_lsn().value);
     logv(m_info_log, "wal flushed lsn is ", wal->flushed_lsn().value);
@@ -145,7 +143,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
 DatabaseImpl::~DatabaseImpl()
 {
-    if (m_is_setup) {
+    if (m_is_setup && m_status.is_ok()) {
         if (auto s = wal->flush(); !s.is_ok()) {
             logv(m_info_log, "failed to flush wal: ", s.what().data());
         }
@@ -155,15 +153,14 @@ DatabaseImpl::~DatabaseImpl()
         if (auto s = wal->close(); !s.is_ok()) {
             logv(m_info_log, "failed to close wal: ", s.what().data());
         }
-        if (auto s = pager->sync(); !s.is_ok()) {
-            logv(m_info_log, "failed to sync pager: ", s.what().data());
+        if (auto s = ensure_consistency(); !s.is_ok()) {
+            logv(m_info_log, "failed to ensure consistency: ", s.what().data());
         }
     }
 
     if (m_owns_info_log) {
         delete m_info_log;
     }
-
     if (m_owns_storage) {
         delete m_storage;
     }
@@ -385,15 +382,12 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
     Calico_Try(pager->acquire(Id::root(), root));
     pager->upgrade(root);
 
-    // The root page is guaranteed to have a full image in the WAL. The LSN after the current one (the delta that
-    // corresponds to the file header update) will be the commit LSN.
+    // The root page is guaranteed to have a full image in the WAL. The current LSN is now guaranteed to be
+    // the commit LSN.
     auto commit_lsn = wal->current_lsn();
-    commit_lsn.value++;
-
     logv(m_info_log, "commit requested at lsn ", commit_lsn.value);
 
     Calico_Try(save_state(std::move(root), commit_lsn));
-    Calico_Try(wal->log(encode_commit_payload(commit_lsn, m_scratch)));
     Calico_Try(wal->flush());
 
     logv(m_info_log, "commit successful");
@@ -423,6 +417,7 @@ auto DatabaseImpl::save_state(Page root, Lsn commit_lsn) const -> Status
     FileHeader header {root};
     pager->save_state(header);
     tree->save_state(header);
+    header.magic_code = FileHeader::MAGIC_CODE;
     header.commit_lsn = commit_lsn;
     header.record_count = m_record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());

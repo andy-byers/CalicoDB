@@ -21,6 +21,14 @@ static auto apply_redo(Page &page, const DeltaDescriptor &deltas)
     }
 }
 
+static auto is_commit(const DeltaDescriptor &deltas)
+{
+    return deltas.pid.is_root() &&
+           deltas.deltas.size() == 1 &&
+           deltas.deltas.front().offset == 0 &&
+           deltas.deltas.front().data.size() == FileHeader::SIZE + sizeof(Lsn);
+}
+
 template<class Descriptor, class Callback>
 static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
 {
@@ -36,6 +44,8 @@ Recovery::Recovery(Pager &pager, WriteAheadLog &wal, Lsn &commit_lsn)
     : m_reader_data(wal_scratch_size(pager.page_size()), '\x00'),
       m_reader_tail(wal_block_size(pager.page_size()), '\x00'),
       m_pager {&pager},
+      m_storage {wal.m_storage},
+      m_set {&wal.m_set},
       m_wal {&wal},
       m_commit_lsn {&commit_lsn}
 {}
@@ -62,47 +72,44 @@ auto Recovery::recover() -> Status
  */
 auto Recovery::recover_phase_1() -> Status
 {
-    auto &set = m_wal->m_set;
-    auto &storage = *m_pager->m_storage;
-
-    if (set.is_empty()) {
+    if (m_set->is_empty()) {
         return Status::ok();
     }
 
-    Size commit_offset {};
     Id commit_segment;
     Lsn commit_lsn;
     Lsn last_lsn;
 
     std::unique_ptr<Reader> file;
-    auto segment = set.first();
+    auto segment = m_set->first();
 
-    const auto translate_status = [&, last = set.last()](auto s, Lsn lsn) {
+    const auto translate_status = [&segment, this](auto s, Lsn lsn) {
         CALICO_EXPECT_FALSE(s.is_ok());
         if (s.is_corruption()) {
             // Allow corruption/incomplete records on the last segment, past the most-recent successful commit.
-            if (segment == last && lsn >= *m_commit_lsn) {
+            if (segment == m_set->last() && lsn >= *m_commit_lsn) {
                 return Status::ok();
             }
         }
         return s;
     };
 
-    const auto redo = [&](const auto &payload, auto offset) {
+    const auto redo = [&](const auto &payload) {
         const auto decoded = decode_payload(payload);
         if (std::holds_alternative<DeltaDescriptor>(decoded)) {
             const auto deltas = std::get<DeltaDescriptor>(decoded);
+            if (is_commit(deltas)) {
+                commit_lsn = deltas.lsn;
+                commit_segment = segment;
+            }
+            // WARNING: Applying these updates can cause the in-memory file header variables to be incorrect. This
+            //          must be fixed by the caller after this method returns.
             return with_page(*m_pager, deltas, [this, &deltas](auto &page) {
                 if (read_page_lsn(page) < deltas.lsn) {
                     m_pager->upgrade(page);
                     apply_redo(page, deltas);
                 }
             });
-        } else if (std::holds_alternative<CommitDescriptor>(decoded)) {
-            const auto commit = std::get<CommitDescriptor>(decoded);
-            commit_lsn = commit.lsn;
-            commit_offset = offset;
-            commit_segment = segment;
         } else if (std::holds_alternative<std::monostate>(decoded)) {
             Calico_Try(translate_status(Status::corruption("wal is corrupted"), last_lsn));
             return Status::not_found("finished");
@@ -110,7 +117,7 @@ auto Recovery::recover_phase_1() -> Status
         return Status::ok();
     };
 
-    const auto undo = [&](const auto &payload, auto) {
+    const auto undo = [&](const auto &payload) {
         const auto decoded = decode_payload(payload);
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
@@ -144,7 +151,7 @@ auto Recovery::recover_phase_1() -> Status
             WalPayloadOut payload {buffer};
             last_lsn = payload.lsn();
 
-            s = action(payload, reader.offset());
+            s = action(payload);
             if (s.is_not_found()) {
                 break;
             } else if (!s.is_ok()) {
@@ -157,15 +164,15 @@ auto Recovery::recover_phase_1() -> Status
     /* Roll forward, applying missing updates until we reach the end. The final segment may contain
      * a partial/corrupted record.
      */
-    for (; ; segment = set.id_after(segment)) {
+    for (; ; segment = m_set->id_after(segment)) {
         Calico_Try(roll(redo));
-        if (segment == set.last()) {
+        if (segment == m_set->last()) {
             break;
         }
     }
 
     // Didn't make it to the end of the WAL.
-    if (segment != set.last()) {
+    if (segment != m_set->last()) {
         return Status::corruption("wal could not be read");
     }
 
@@ -182,43 +189,37 @@ auto Recovery::recover_phase_1() -> Status
      * commit offset. The first segment we read may contain a partial/corrupted record.
      */
     segment = commit_segment;
-    for (; !segment.is_null(); segment = set.id_after(segment)) {
+    for (; !segment.is_null(); segment = m_set->id_after(segment)) {
         Calico_Try(roll(undo));
     }
-
-    /* Make sure all changes have made it to disk, then remove WAL segments from the right. Once we
-     * hit the segment containing the most-recent commit record, truncate the file, respecting the
-     * fact that the log file length must be a multiple of the block size.
-     */
-    Calico_Try(m_pager->flush({}));
-    segment = set.last();
-    for (; !segment.is_null(); segment = set.id_before(segment)) {
-        const auto name = encode_segment_name(m_wal->m_prefix, segment);
-        if (segment == commit_segment) {
-            const auto block_number = commit_offset / m_reader_tail.size();
-            const auto block_end = (block_number+1) * m_reader_tail.size();
-            Calico_Try(storage.resize_file(name, commit_offset));
-            // TODO: If this call fails, we will need to fix the database in Database::repair().
-            Calico_Try(storage.resize_file(name, block_end));
-            break;
-        }
-        // This whole segment must belong to the transaction we are reverting.
-        Calico_Try(storage.remove_file(name));
-    }
-    set.remove_after(segment);
     return Status::ok();
 }
 
 auto Recovery::recover_phase_2() -> Status
 {
+    /* Make sure all changes have made it to disk, then remove WAL segments from the left. This should be
+     * reentrant.
+     */
+    Calico_Try(m_pager->flush({}));
+    for (auto id = m_set->first(); !id.is_null(); id = m_set->id_after(id)) {
+        Calico_Try(m_storage->remove_file(encode_segment_name(m_wal->m_prefix, id)));
+    }
+    m_set->remove_after(Id::null());
+
     m_wal->m_last_lsn = *m_commit_lsn;
     m_wal->m_flushed_lsn = *m_commit_lsn;
     m_pager->m_recovery_lsn = *m_commit_lsn;
-    Calico_Try(m_wal->start_writing());
-    Calico_Try(m_wal->cleanup( *m_commit_lsn));
+
+    // Pager needs its updated state to determine the page count.
+    Page root;
+    Calico_Try(m_pager->acquire(Id::root(), root));
+    FileHeader header {root};
+    m_pager->load_state(header);
+    m_pager->release(std::move(root));
 
     // Make sure the file size matches the header page count, which should be correct if we made it this far.
-    return m_pager->truncate(m_pager->page_count());
+    Calico_Try(m_pager->truncate(m_pager->page_count()));
+    return m_pager->sync();
 }
 
 } // namespace Calico
