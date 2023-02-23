@@ -1,6 +1,4 @@
 #include "wal.h"
-#include "cleanup.h"
-#include "reader.h"
 #include "utils/logging.h"
 #include "writer.h"
 
@@ -54,40 +52,27 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 
 auto WriteAheadLog::close() -> Status
 {
-    m_cleanup.reset();
     if (m_writer) {
-        std::move(*m_writer).destroy();
-        m_writer.reset();
+        Calico_Try(m_writer->flush());
+        delete m_writer;
+        delete m_file;
     }
-    return status();
+    return Status::ok();
 }
 
 auto WriteAheadLog::start_writing() -> Status
 {
-    m_writer = std::unique_ptr<WalWriter> {
-        new(std::nothrow) WalWriter {{
-            m_prefix,
-            m_tail,
-            m_storage,
-            &m_error,
-            &m_set,
-            m_segment_cutoff,
-        }}};
+    CALICO_EXPECT_EQ(m_writer, nullptr);
+
+    auto id = m_set.last();
+    id.value++;
+
+    Calico_Try(m_storage->new_logger(encode_segment_name(m_prefix, id), &m_file));
+    m_writer = new(std::nothrow) WalWriter {*m_file, m_tail};
     if (m_writer == nullptr) {
-        return Status::system_error("cannot allocate writer object: out of memory");
+        delete m_file;
+        return Status::system_error("out of memory");
     }
-
-    m_cleanup = std::unique_ptr<WalCleanup> {
-        new(std::nothrow) WalCleanup {{
-            m_prefix,
-            m_storage,
-            &m_error,
-            &m_set,
-        }}};
-    if (m_cleanup == nullptr) {
-        return Status::system_error("cannot allocate cleanup object: out of memory");
-    }
-
     return Status::ok();
 }
 
@@ -104,28 +89,79 @@ auto WriteAheadLog::current_lsn() const -> Lsn
     return {m_last_lsn.value + 1};
 }
 
-auto WriteAheadLog::log(WalPayloadIn payload) -> void
+auto WriteAheadLog::log(WalPayloadIn payload) -> Status
 {
+    m_last_lsn.value++;
+    m_bytes_written += sizeof(Lsn) + payload.data().size();
+    CALICO_EXPECT_EQ(payload.lsn(), m_last_lsn);
     CALICO_EXPECT_NE(m_writer, nullptr);
 
-    m_last_lsn.value++;
-    CALICO_EXPECT_EQ(payload.lsn(), m_last_lsn);
-
-    m_bytes_written += payload.data().size() + sizeof(Lsn);
-    m_writer->write(payload);
+    Calico_Try(m_writer->write(payload));
+    if (m_writer->block_count() >= m_segment_cutoff) {
+        return advance();
+    }
+    return Status::ok();
 }
 
 auto WriteAheadLog::flush() -> Status
 {
     CALICO_EXPECT_NE(m_writer, nullptr);
-    m_writer->flush();
-    m_writer->sync();
-    return m_error.get();
+    Calico_Try(m_writer->flush());
+    return m_file->sync();
 }
 
-auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> void
+auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
 {
-    m_cleanup->cleanup(recovery_lsn);
+    for (; ; ) {
+        const auto id = m_set.first();
+        if (id.is_null()) {
+            return Status::ok();
+        }
+        const auto next_id = m_set.id_after(id);
+        if (next_id.is_null()) {
+            return Status::ok();
+        }
+
+        Lsn lsn;
+        auto s = read_first_lsn(*m_storage, m_prefix, next_id, m_set, lsn);
+        if (!s.is_ok() && !s.is_not_found()) {
+            return s;
+        }
+
+        if (lsn > recovery_lsn) {
+            return Status::ok();
+        }
+        Calico_Try(m_storage->remove_file(encode_segment_name(m_prefix, id)));
+        m_set.remove_before(next_id);
+    }
+}
+
+auto WriteAheadLog::advance() -> Status
+{
+    Calico_Try(m_writer->flush());
+    Calico_Try(m_file->sync());
+    const auto written = m_writer->block_count() != 0;
+
+    delete m_file;
+    delete m_writer;
+    m_writer = nullptr;
+
+    auto id = m_set.last();
+    id.value++;
+
+    if (written) {
+        m_set.add_segment(id);
+    } else {
+        Calico_Try(m_storage->remove_file(encode_segment_name(m_prefix, id)));
+    }
+    id.value++;
+
+    Calico_Try(m_storage->new_logger(encode_segment_name(m_prefix, id), &m_file));
+    m_writer = new(std::nothrow) WalWriter {*m_file, m_tail};
+    if (m_writer == nullptr) {
+        return Status::system_error("out of memory");
+    }
+    return Status::ok();
 }
 
 } // namespace Calico

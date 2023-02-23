@@ -6,7 +6,6 @@
 #include "page_cache.h"
 #include "pager.h"
 
-#include "utils/scratch.h"
 #include "wal/helpers.h"
 
 namespace Calico {

@@ -9,7 +9,7 @@
 #if NDEBUG
 #  define CALICO_EXPECT_(expr, file, line)
 #else
-#  define CALICO_EXPECT_(expr, file, line) Impl::handle_expect(expr, #expr, file, line)
+#  define CALICO_EXPECT_(expr, file, line) Impl::expect(expr, #expr, file, line)
 #endif // NDEBUG
 
 #define CALICO_EXPECT_TRUE(expr) CALICO_EXPECT_(expr, __FILE__, __LINE__)
@@ -32,15 +32,15 @@ namespace Calico {
 
 namespace Impl {
 
-    inline constexpr auto handle_expect(bool expectation, const char *repr, const char *file, int line) noexcept -> void
+    inline constexpr auto expect(bool cond, const char *repr, const char *file, int line) noexcept -> void
     {
-        if (!expectation) {
+        if (!cond) {
             std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
             std::abort();
         }
     }
 
-} // namespace impl
+} // namespace Impl
 
 static constexpr Size MINIMUM_PAGE_SIZE {0x200};
 static constexpr Size MAXIMUM_PAGE_SIZE {0x8000};

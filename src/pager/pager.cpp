@@ -243,9 +243,14 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
     if (*m_in_txn && lsn <= *m_commit_lsn) {
         const auto next_lsn = m_wal->current_lsn();
         const auto image = page.view(0, watch_size);
-        m_wal->log(encode_full_image_payload(
+        auto s = m_wal->log(encode_full_image_payload(
             next_lsn, page.id(), image, *m_scratch));
-        write_page_lsn(page, next_lsn);
+
+        if (s.is_ok()) {
+            write_page_lsn(page, next_lsn);
+        } else {
+            *m_status = s;
+        }
     }
 }
 
@@ -310,9 +315,12 @@ auto Pager::release(Page page) -> void
     if (page.is_writable() && *m_in_txn) {
         const auto next_lsn = m_wal->current_lsn();
         write_page_lsn(page, next_lsn);
-        m_wal->log(encode_deltas_payload(
+        auto s = m_wal->log(encode_deltas_payload(
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch));
+        if (!s.is_ok()) {
+            *m_status = s;
+        }
     }
     m_frames.unref(index, std::move(page));
 }

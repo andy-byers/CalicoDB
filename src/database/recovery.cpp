@@ -115,7 +115,7 @@ auto Recovery::recover_phase_1() -> Status
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
             return with_page(*m_pager, image, [this, &image](auto &page) {
-                if (read_page_lsn(page) >= image.lsn) {
+                if (read_page_lsn(page) > image.lsn && image.lsn > *m_commit_lsn) {
                     m_pager->upgrade(page);
                     apply_undo(page, image);
                 }

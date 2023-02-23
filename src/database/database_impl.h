@@ -8,7 +8,6 @@
 #include "tree/header.h"
 #include "tree/tree.h"
 #include "wal/wal.h"
-#include "wal/cleanup.h"
 #include "wal/writer.h"
 
 namespace Calico {
@@ -17,11 +16,6 @@ class Cursor;
 class Recovery;
 class Storage;
 class WriteAheadLog;
-
-struct InitialState {
-    FileHeader state;
-    bool is_new {};
-};
 
 class DatabaseImpl: public Database {
 public:
@@ -57,7 +51,7 @@ public:
 
 private:
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
-    [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
+    [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto save_state(Page root, Lsn commit_lsn) const -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
@@ -78,7 +72,7 @@ private:
     bool m_owns_info_log {};
 };
 
-auto setup(const std::string &, Storage &, const Options &, InitialState &init) -> Status;
+auto setup(const std::string &, Storage &, const Options &, FileHeader &state) -> Status;
 
 } // namespace Calico
 

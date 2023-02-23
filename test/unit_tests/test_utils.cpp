@@ -6,7 +6,6 @@
 #include "unit_tests.h"
 #include "utils/encoding.h"
 #include "utils/crc.h"
-#include "utils/scratch.h"
 #include "utils/types.h"
 #include "utils/utils.h"
 
@@ -247,49 +246,6 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
     ASSERT_TRUE(is_power_of_two(1 << 2));
     ASSERT_TRUE(is_power_of_two(1 << 10));
     ASSERT_TRUE(is_power_of_two(1 << 20));
-}
-
-TEST(ScratchTest, CanChangeUnderlyingBytesObject)
-{
-    std::string backing {"abc"};
-    Span bytes {backing};
-    Scratch scratch {bytes};
-    scratch->advance(1);
-    scratch->truncate(1);
-    ASSERT_TRUE(*scratch == "b");
-}
-
-TEST(MonotonicScratchTest, ScratchesAreDistinct)
-{
-    MonotonicScratchManager manager {1, 2};
-    auto s1 = manager.get();
-    auto s2 = manager.get();
-    (*s1)[0] = 1;
-    (*s2)[0] = 2;
-    ASSERT_EQ((*s1)[0], 1);
-    ASSERT_EQ((*s2)[0], 2);
-}
-
-TEST(MonotonicScratchTest, ScratchesRepeat)
-{
-    MonotonicScratchManager manager {1, 2};
-    (*manager.get())[0] = 1;
-    (*manager.get())[0] = 2;
-    ASSERT_EQ((*manager.get())[0], 1);
-    ASSERT_EQ((*manager.get())[0], 2);
-}
-
-TEST(ScratchTest, ConvertsToSlice)
-{
-    static constexpr auto MSG = "Hello, world!";
-    MonotonicScratchManager manager {std::strlen(MSG), 1};
-    auto scratch = manager.get();
-
-    mem_copy(*scratch, Slice {MSG});
-    ASSERT_TRUE(*scratch == Slice {MSG});
-    ASSERT_TRUE(scratch->starts_with("Hello"));
-    ASSERT_TRUE(scratch->range(7, 5) == Slice {"world"});
-    ASSERT_TRUE(scratch->advance(7).truncate(5) == Slice {"world"});
 }
 
 TEST(NonPrintableSliceTests, UsesStringSize)

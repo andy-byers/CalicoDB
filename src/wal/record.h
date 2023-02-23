@@ -4,7 +4,6 @@
 #include "calico/storage.h"
 #include "pager/delta.h"
 #include "utils/encoding.h"
-#include "utils/scratch.h"
 #include "utils/types.h"
 #include <algorithm>
 #include <map>
@@ -105,7 +104,7 @@ using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImag
 
 class WalPayloadIn {
 public:
-    friend class LogWriter;
+    friend class WalWriter;
 
     WalPayloadIn(Lsn lsn, Span buffer)
         : m_buffer {buffer}

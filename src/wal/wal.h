@@ -1,21 +1,11 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
-#include <atomic>
-#include <functional>
-#include <optional>
-#include <unordered_set>
-#include <variant>
-#include <vector>
 #include "helpers.h"
 #include "record.h"
-#include "utils/encoding.h"
-#include "utils/scratch.h"
-#include "utils/types.h"
 
 namespace Calico {
 
-class WalCleanup;
 class WalWriter;
 
 class WriteAheadLog {
@@ -37,14 +27,8 @@ public:
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;
     [[nodiscard]] virtual auto start_writing() -> Status;
     [[nodiscard]] virtual auto flush() -> Status;
-    virtual auto cleanup(Lsn recovery_lsn) -> void;
-    virtual auto log(WalPayloadIn payload) -> void;
-
-    [[nodiscard]]
-    virtual auto status() const -> Status
-    {
-        return m_error.get();
-    }
+    [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
+    [[nodiscard]] virtual auto log(WalPayloadIn payload) -> Status;
 
     [[nodiscard]]
     virtual auto bytes_written() const -> Size
@@ -54,9 +38,9 @@ public:
 
 private:
     explicit WriteAheadLog(const Parameters &param);
+    [[nodiscard]] auto advance() -> Status;
 
     mutable Lsn m_flushed_lsn;
-    ErrorBuffer m_error;
     Lsn m_last_lsn;
     WalSet m_set;
     std::string m_prefix;
@@ -66,8 +50,8 @@ private:
     Size m_segment_cutoff {};
     Size m_bytes_written {};
 
-    std::unique_ptr<WalWriter> m_writer;
-    std::unique_ptr<WalCleanup> m_cleanup;
+    WalWriter *m_writer {};
+    Logger *m_file {};
 };
 
 } // namespace Calico

@@ -188,7 +188,6 @@ private:
     T m_resource {};
 };
 
-
 class Span {
 public:
     constexpr Span() noexcept = default;
@@ -377,33 +376,6 @@ inline auto mem_move(Span dst, const Slice &src) noexcept -> void *
     CALICO_EXPECT_LE(src.size(), dst.size());
     return mem_move(dst, src, src.size());
 }
-
-
-class ErrorBuffer {
-public:
-    [[nodiscard]]
-    auto is_ok() const -> bool
-    {
-        return m_status.is_ok();
-    }
-
-    [[nodiscard]]
-    auto get() const -> const Status &
-    {
-        return m_status;
-    }
-
-    auto set(Status status) -> void
-    {
-        CALICO_EXPECT_FALSE(status.is_ok());
-        if (m_status.is_ok()) {
-            m_status = std::move(status);
-        }
-    }
-
-private:
-    Status m_status;
-};
 
 } // namespace Calico
 

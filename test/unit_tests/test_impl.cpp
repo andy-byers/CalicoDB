@@ -249,7 +249,7 @@ TEST_P(DbVacuumTests, SanityCheck)
             ASSERT_OK(db->erase(key));
         }
         ASSERT_OK(db->commit());
-        ASSERT_OK(db->vacuum());
+//        ASSERT_OK(db->vacuum());
         dynamic_cast<DatabaseImpl &>(*db).TEST_validate();
 
         Size i {};

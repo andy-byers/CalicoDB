@@ -72,27 +72,27 @@ auto Status::ok() -> Status
 
 auto Status::not_found(const Slice &what) -> Status
 {
-    return {Code::NOT_FOUND, what};
+    return Status {Code::NOT_FOUND, what};
 }
 
 auto Status::invalid_argument(const Slice &what) -> Status
 {
-    return {Code::INVALID_ARGUMENT, what};
+    return Status {Code::INVALID_ARGUMENT, what};
 }
 
 auto Status::system_error(const Slice &what) -> Status
 {
-    return {Code::SYSTEM_ERROR, what};
+    return Status {Code::SYSTEM_ERROR, what};
 }
 
 auto Status::logic_error(const Slice &what) -> Status
 {
-    return {Code::LOGIC_ERROR, what};
+    return Status {Code::LOGIC_ERROR, what};
 }
 
 auto Status::corruption(const Slice &what) -> Status
 {
-    return {Code::CORRUPTION, what};
+    return Status {Code::CORRUPTION, what};
 }
 
 auto Status::is_invalid_argument() const -> bool

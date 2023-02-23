@@ -126,7 +126,7 @@ public:
         Span buffer {commit_record};
         const auto payload = encode_commit_payload(seq, buffer);
 
-        LogWriter writer {*file, tail};
+        WalWriter writer {*file, tail};
         ASSERT_OK(writer.write(encode_commit_payload(seq, buffer)));
         ASSERT_OK(writer.flush());
         delete file;
@@ -144,6 +144,7 @@ TEST_F(RecoveryTests, NormalShutdown)
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
+    ASSERT_OK(db->commit());
     close();
 
     ASSERT_EQ(num_logs(), 1);
@@ -164,6 +165,37 @@ TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
     ASSERT_EQ(get("b"), "2");
     ASSERT_EQ(get("c"), "3");
     ASSERT_EQ(get("d"), "NOT_FOUND");
+}
+
+TEST_F(RecoveryTests, PacksMultipleTransactionsIntoSegment)
+{
+    ASSERT_OK(put("a", "1"));
+    ASSERT_OK(db->commit());
+    ASSERT_OK(put("b", "2"));
+    ASSERT_OK(db->commit());
+    ASSERT_OK(put("c", "3"));
+    ASSERT_OK(db->commit());
+
+    ASSERT_EQ(num_logs(), 1);
+    open();
+
+    ASSERT_EQ(get("a"), "1");
+    ASSERT_EQ(get("b"), "2");
+    ASSERT_EQ(get("c"), "3");
+}
+
+TEST_F(RecoveryTests, RevertsNthTransaction)
+{
+    ASSERT_OK(put("a", "1"));
+    ASSERT_OK(db->commit());
+    ASSERT_OK(put("b", "2"));
+    ASSERT_OK(db->commit());
+    ASSERT_OK(put("c", "3"));
+    open();
+
+    ASSERT_EQ(get("a"), "1");
+    ASSERT_EQ(get("b"), "2");
+    ASSERT_EQ(get("c"), "NOT_FOUND");
 }
 
 }  // namespace Calico

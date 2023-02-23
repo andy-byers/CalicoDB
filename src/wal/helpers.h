@@ -5,7 +5,6 @@
 #include "pager/delta.h"
 #include "record.h"
 #include "utils/logging.h"
-#include "utils/scratch.h"
 #include "utils/types.h"
 #include <map>
 

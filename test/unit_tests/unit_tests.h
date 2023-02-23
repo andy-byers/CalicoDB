@@ -10,7 +10,6 @@
 #include "storage/posix_storage.h"
 #include "tools.h"
 #include "utils/utils.h"
-#include "wal/cleanup.h"
 #include "wal/wal.h"
 #include "wal/writer.h"
 
@@ -185,9 +184,9 @@ public:
         return 0;
     }
 
-    auto log(WalPayloadIn) -> void override
+    auto log(WalPayloadIn) -> Status override
     {
-
+        return Status::ok();
     }
 
     auto flush() -> Status override
@@ -195,9 +194,9 @@ public:
         return Status::ok();
     }
 
-    auto cleanup(Id) -> void override
+    auto cleanup(Id) -> Status override
     {
-
+        return Status::ok();
     }
 };
 
