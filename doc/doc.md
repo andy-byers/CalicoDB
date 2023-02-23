@@ -256,11 +256,13 @@ See [`test/tools`](../test/tools) for an example that stores the database in mem
 
 ### Pager
 The pager module provides in-memory caching for database pages read by the `storage` module.
-It is the pager's job to maintain consistency between database pages on disk and in memory.
+It is the pager's job to maintain consistency between database pages on disk and in memory, and to coordinate with the WAL.
+The pager contains logic to make sure that updates hit the WAL before the database file, ensuring that we can always recover from a crash.
 
 ### Tree
 The B<sup>+</sup>-tree logic can be found in the tree module.
-The tree is of variable order, so splits are performed when nodes have run out of physical space.
+The tree works similarly to an index B-tree in SQLite3.
+It is of variable order, so splits are performed when nodes have run out of physical space.
 The implementation is pretty straightforward.
 We basically do as little as possible to make sure that the tree ordering remains correct.
 This results in a less-balanced tree, but seems to be good for write performance.
@@ -269,15 +271,16 @@ This results in a less-balanced tree, but seems to be good for write performance
 The WAL record format is similar to that of `RocksDB`.
 Additionally, we have 2 WAL payload types: deltas and full images.
 A full image is generated the first time a page is modified during a transaction.
-A full image contain a copy of the page, before anything was changed, and can be used to undo all modifications made during the transaction.
+A full image contain a copy of the page before anything was changed, and can be used to undo all modifications made during the transaction.
 Further modifications to the page will produce deltas, which record only the changed portions of the page (just the "after" contents).
 Note that full image records are always disjoint (w.r.t. the affected page IDs) within a single transaction.
 This means that they can be applied to the database in any order and produce the same results.
 Deltas are not disjoint, so they must be read in order.
 Commits are signified by a special delta record: one that updates exactly the file header on the root page.
 The delta modifies the database commit LSN, which is the LSN of the commit record.
-This way we don't actually have to find a commit record in the WAL to be able to trust the commit LSN (otherwise, it would be possible to have flushed the delta containing the updated commit LSN, but not the commit record itself).
-This allows us to get rid of the WAL when the database is closed properly.
+This way we don't actually have to find a commit record in the WAL to be able to trust the commit LSN from the header (otherwise, it would be possible to have flushed the delta containing the updated commit LSN, but not the commit record itself).
+This allows the WAL segments to be removed on (normal) database shutdown.
+During startup, if the database has WAL segments, then we know something went wrong last time.
 
 ### Consistency
 Calico DB must enforce certain rules to maintain consistency between the WAL and the database.
@@ -297,17 +300,17 @@ This value is saved in the database file header and is used to determine how the
 
 ## Acknowledgements
 1. https://cstack.github.io/db_tutorial/
-    + Awesome tutorial on database development in C
+    + Tutorial on database development in C
 2. https://www.sqlite.org/arch.html
     + Much of this project was inspired by SQLite3, both the architecture design documents and the source code
     + Especially see the B-tree design document, as well as `btree.h`, `btree.c`, and `btreeInt.h`
 3. https://github.com/google/leveldb
     + Much of the API is inspired by LevelDB
-    + Some parts of the CMake build process is taken from their `CMakeLists.txt`
+    + Some parts of the CMake build process are taken from their `CMakeLists.txt`
 4. https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log
-    + Nice explanation of RocksDB's WAL
+    + Explanation of RocksDB's WAL
     + The idea to have multiple different record types and to use a "tail" buffer are from this document
 5. https://arpitbhayani.me/blogs/2q-cache
-    + Nice description of the 2Q cache replacement policy
+    + Description of the 2Q cache replacement policy
 6. https://stablecog.com/
     + Used to generate the original calico cat image, which was then further modified to produce [mascot.png](mascot.png)

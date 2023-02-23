@@ -52,23 +52,20 @@ Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name             | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:---------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>      |                      735,294 |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup>   |                      192,012 |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>    |                      178,031 |                     173,461 |                    288,684 |
-| `readrandom`               |                      480,307 |                     515,198 |                    413,907 |
-| `readseq`                  |                    2,985,075 |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`<sup>*</sup> |                          777 |                       5,215 |                     11,387 |
-| `fillseq100k`<sup>*</sup>  |                          786 |                       6,731 |                      9,560 |
-| `readseq100k`              |                       18,282 |                      49,232 |                     65,557 |
-| `readrand100k`             |                       19,545 |                      10,894 |                     66,028 |
+| `fillseq`<sup>*</sup>      |                      612,745 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup>   |                      183,318 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>    |                      183,824 |                     173,461 |                    288,684 |
+| `readrandom`               |                      510,986 |                     515,198 |                    413,907 |
+| `readseq`                  |                    2,840,909 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`<sup>*</sup> |                        2,127 |                       5,215 |                     11,387 |
+| `fillseq100k`<sup>*</sup>  |                        1,866 |                       6,731 |                      9,560 |
+| `readseq100k`              |                       19,241 |                      49,232 |                     65,557 |
+| `readrand100k`             |                       19,710 |                      10,894 |                     66,028 |
 
 <sup>*</sup> These benchmarks are affected by the fact that we use a batch size of 1,000.
-Calico DB is designed to make use of batched writes.
-For this reason, the SQLite3 benchmarks actually list the results for the much faster batched versions, which commit every 1,000 writes (i.e. `fillseq` is actually `fillseqbatch` for SQLite3).
-
-Additional work will need to be done to reduce the overhead of committing a transaction, among other things.
-These benchmark results can be the baseline, with the right two columns as eventual targets.
-CalicoDB shouldn't ever be slower than this.
+Calico DB batches database updates together into transactions, based on the user's use of the `Database::commit()` method.
+This seems to be necessary to achieve adequate write performance, since Calico DB runs in a single thread and must `fsync()` the log file to ensure durability on each commit.
+For this reason, the SQLite3 benchmarks actually list the results for the batched versions, which commit every 1,000 writes (i.e. `fillseq` is actually `fillseqbatch` for SQLite3).
 
 ## TODO
 1. Get everything code reviewed!
@@ -77,12 +74,8 @@ CalicoDB shouldn't ever be slower than this.
 3. Support Windows (write a `Storage` implementation)
 4. When we roll back a transaction, we shouldn't undo any vacuum operations that have occurred
    + Add a new WAL record type: a "meta" record that signals some operation and maybe a payload specific to the operation type
-   + This record type can signal commit, vacuum start, or vacuum end, or even other things as needed
+   + This record type can signal vacuum start, vacuum end, or even other things as needed
    + We should still roll vacuum operations forward during recovery
-5. Reduce the overhead of the commit operation
-   + Don't advance to a new WAL segment on commit
-   + When committing, just write the WAL record, flush the tail buffer, and then call `fsync()` on the file handle
-   + This will also make rolling the WAL faster since, depending on the commit frequency, we could end up with far fewer segment files
 
 ## Documentation
 Check out Calico DB's [usage and design documents](doc).
