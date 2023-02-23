@@ -14,6 +14,12 @@ WriteAheadLog::WriteAheadLog(const Parameters &param)
     CALICO_EXPECT_NE(m_segment_cutoff, 0);
 }
 
+WriteAheadLog::~WriteAheadLog()
+{
+    delete m_writer;
+    delete m_file;
+}
+
 auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
     auto path = param.prefix;
@@ -28,11 +34,7 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
     for (auto &name: child_names) {
         name.insert(0, path);
         if (Slice {name}.starts_with(param.prefix)) {
-            Size file_size;
-            Calico_Try(param.store->file_size(name, file_size));
-            if (file_size) {
-                segment_ids.emplace_back(decode_segment_name(param.prefix, name));
-            }
+            segment_ids.emplace_back(decode_segment_name(param.prefix, name));
         }
     }
     std::sort(begin(segment_ids), end(segment_ids));
@@ -52,12 +54,8 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 
 auto WriteAheadLog::close() -> Status
 {
-    if (m_writer) {
-        Calico_Try(m_writer->flush());
-        delete m_writer;
-        delete m_file;
-    }
-    return Status::ok();
+    CALICO_EXPECT_NE(m_writer, nullptr);
+    return close_writer();
 }
 
 auto WriteAheadLog::start_writing() -> Status
@@ -70,7 +68,6 @@ auto WriteAheadLog::start_writing() -> Status
     Calico_Try(m_storage->new_logger(encode_segment_name(m_prefix, id), &m_file));
     m_writer = new(std::nothrow) WalWriter {*m_file, m_tail};
     if (m_writer == nullptr) {
-        delete m_file;
         return Status::system_error("out of memory");
     }
     return Status::ok();
@@ -79,7 +76,10 @@ auto WriteAheadLog::start_writing() -> Status
 auto WriteAheadLog::flushed_lsn() const -> Lsn
 {
     if (m_writer) {
-        m_flushed_lsn = m_writer->flushed_lsn();
+        const auto lsn = m_writer->flushed_lsn();
+        if (!lsn.is_null()) {
+            m_flushed_lsn = lsn;
+        }
     }
     return m_flushed_lsn;
 }
@@ -98,14 +98,14 @@ auto WriteAheadLog::log(WalPayloadIn payload) -> Status
 
     Calico_Try(m_writer->write(payload));
     if (m_writer->block_count() >= m_segment_cutoff) {
-        return advance();
+        Calico_Try(close_writer());
+        return open_writer();
     }
     return Status::ok();
 }
 
 auto WriteAheadLog::flush() -> Status
 {
-    CALICO_EXPECT_NE(m_writer, nullptr);
     Calico_Try(m_writer->flush());
     return m_file->sync();
 }
@@ -136,7 +136,7 @@ auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
     }
 }
 
-auto WriteAheadLog::advance() -> Status
+auto WriteAheadLog::close_writer() -> Status
 {
     Calico_Try(m_writer->flush());
     Calico_Try(m_file->sync());
@@ -144,6 +144,7 @@ auto WriteAheadLog::advance() -> Status
 
     delete m_file;
     delete m_writer;
+    m_file = nullptr;
     m_writer = nullptr;
 
     auto id = m_set.last();
@@ -154,6 +155,12 @@ auto WriteAheadLog::advance() -> Status
     } else {
         Calico_Try(m_storage->remove_file(encode_segment_name(m_prefix, id)));
     }
+    return Status::ok();
+}
+
+auto WriteAheadLog::open_writer() -> Status
+{
+    auto id = m_set.last();
     id.value++;
 
     Calico_Try(m_storage->new_logger(encode_segment_name(m_prefix, id), &m_file));

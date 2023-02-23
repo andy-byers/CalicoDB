@@ -9,73 +9,6 @@
 
 namespace Calico {
 
-//class HeaderTests: public testing::Test {
-//protected:
-//    HeaderTests()
-//        : backing(0x200, '\x00'),
-//          page {backing.data()}
-//    {}
-//
-//    std::string backing;
-//    Byte *page {};
-//};
-//
-//TEST_F(HeaderTests, FileHeader)
-//{
-//    FileHeader source;
-//    source.magic_code = 1;
-//    source.page_count = 3;
-//    source.record_count = 4;
-//    source.freelist_head.value = 5;
-//    source.recovery_lsn.value = 6;
-//    source.page_size = backing.size();
-//    source.header_crc = source.compute_crc();
-//
-//    source.write(page);
-//    // Write a node header to make sure it doesn't overwrite the file header memory.
-//    NodeHeader unused;
-//    unused.write(page);
-//    FileHeader target {page};
-//
-//    ASSERT_EQ(source.magic_code, target.magic_code);
-//    ASSERT_EQ(source.header_crc, target.header_crc);
-//    ASSERT_EQ(source.page_count, target.page_count);
-//    ASSERT_EQ(source.record_count, target.record_count);
-//    ASSERT_EQ(source.freelist_head, target.freelist_head);
-//    ASSERT_EQ(source.recovery_lsn, target.recovery_lsn);
-//    ASSERT_EQ(source.page_size, target.page_size);
-//    ASSERT_EQ(source.compute_crc(), target.header_crc);
-//}
-//
-//TEST_F(HeaderTests, NodeHeader)
-//{
-//    NodeHeader source;
-//    source.page_lsn.value = 1;
-//    source.next_id.value = 3;
-//    source.prev_id.value = 4;
-//    source.cell_count = 5;
-//    source.cell_start = 6;
-//    source.frag_count = 7;
-//    source.free_start = 8;
-//    source.free_total = 9;
-//    source.is_external = false;
-//
-//    source.write(page);
-//    FileHeader unused;
-//    unused.write(page);
-//    NodeHeader target {page};
-//
-//    ASSERT_EQ(source.page_lsn, target.page_lsn);
-//    ASSERT_EQ(source.next_id, target.next_id);
-//    ASSERT_EQ(source.prev_id, target.prev_id);
-//    ASSERT_EQ(source.cell_count, target.cell_count);
-//    ASSERT_EQ(source.cell_start, target.cell_start);
-//    ASSERT_EQ(source.frag_count, target.frag_count);
-//    ASSERT_EQ(source.free_start, target.free_start);
-//    ASSERT_EQ(source.free_total, target.free_total);
-//    ASSERT_EQ(source.is_external, target.is_external);
-//}
-
 class NodeMetaManager {
     NodeMeta m_external_meta;
     NodeMeta m_internal_meta;
@@ -101,78 +34,51 @@ public:
         return is_external ? m_external_meta : m_internal_meta;
     }
 };
-//
-//TEST(NodeSlotTests, SlotsAreConsistent)
-//{
-//    std::string backing(0x200, '\x00');
-//    std::string scratch(0x200, '\x00');
-//    Page page {Id::root(), backing, true};
-//    Node node {std::move(page), scratch.data()};
-//    const auto space = usable_space(node);
-//
-//    node.insert_slot(0, 2);
-//    node.insert_slot(1, 4);
-//    node.insert_slot(1, 3);
-//    node.insert_slot(0, 1);
-//    ASSERT_EQ(usable_space(node), space - 8);
-//
-//    node.set_slot(0, node.get_slot(0) + 1);
-//    node.set_slot(1, node.get_slot(1) + 1);
-//    node.set_slot(2, node.get_slot(2) + 1);
-//    node.set_slot(3, node.get_slot(3) + 1);
-//
-//    ASSERT_EQ(node.get_slot(0), 2);
-//    ASSERT_EQ(node.get_slot(1), 3);
-//    ASSERT_EQ(node.get_slot(2), 4);
-//    ASSERT_EQ(node.get_slot(3), 5);
-//
-//    node.remove_slot(0);
-//    ASSERT_EQ(node.get_slot(0), 3);
-//    node.remove_slot(0);
-//    ASSERT_EQ(node.get_slot(0), 4);
-//    node.remove_slot(0);
-//    ASSERT_EQ(node.get_slot(0), 5);
-//    node.remove_slot(0);
-//    ASSERT_EQ(usable_space(node), space);
-//}
 
-class TestWithPager: public InMemoryTest {
-public:
-    const Size PAGE_SIZE {0x200};
+class NodeSlotTests: public TestWithPager {
 
-    TestWithPager()
-        : scratch(PAGE_SIZE, '\x00'),
-          log_scratch(wal_scratch_size(PAGE_SIZE), '\x00')
-    {}
-
-    auto SetUp() -> void override
-    {
-        Pager *temp;
-        EXPECT_OK(Pager::open({
-            PREFIX,
-            storage.get(),
-            &log_scratch,
-            &wal,
-            nullptr,
-            &status,
-            &commit_lsn,
-            &in_xact,
-            8,
-            PAGE_SIZE,
-        }, &temp));
-        pager.reset(temp);
-    }
-
-    std::string log_scratch;
-    Status status;
-    bool in_xact {true};
-    Lsn commit_lsn;
-    DisabledWriteAheadLog wal;
-    std::string scratch;
-    std::string collect_scratch;
-    std::unique_ptr<Pager> pager;
-    Tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
+
+TEST_F(NodeSlotTests, SlotsAreConsistent)
+{
+    std::string backing(0x200, '\x00');
+    std::string scratch(0x200, '\x00');
+
+    Page page;
+    ASSERT_OK(pager->allocate(page));
+
+    Node node;
+    node.header.cell_start = node.page.size();
+    node.page = std::move(page);
+    node.scratch = scratch.data();
+    node.initialize();
+    const auto space = usable_space(node);
+
+    node.insert_slot(0, 2);
+    node.insert_slot(1, 4);
+    node.insert_slot(1, 3);
+    node.insert_slot(0, 1);
+    ASSERT_EQ(usable_space(node), space - 8);
+
+    node.set_slot(0, node.get_slot(0) + 1);
+    node.set_slot(1, node.get_slot(1) + 1);
+    node.set_slot(2, node.get_slot(2) + 1);
+    node.set_slot(3, node.get_slot(3) + 1);
+
+    ASSERT_EQ(node.get_slot(0), 2);
+    ASSERT_EQ(node.get_slot(1), 3);
+    ASSERT_EQ(node.get_slot(2), 4);
+    ASSERT_EQ(node.get_slot(3), 5);
+
+    node.remove_slot(0);
+    ASSERT_EQ(node.get_slot(0), 3);
+    node.remove_slot(0);
+    ASSERT_EQ(node.get_slot(0), 4);
+    node.remove_slot(0);
+    ASSERT_EQ(node.get_slot(0), 5);
+    node.remove_slot(0);
+    ASSERT_EQ(usable_space(node), space);
+}
 
 class ComponentTests: public TestWithPager {
 public:

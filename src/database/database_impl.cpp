@@ -10,32 +10,20 @@
 
 namespace Calico {
 
-#define Maybe_Set_Error(expr) \
+#define Set_Error(s) \
     do { \
-        if (auto maybe_error_s = (expr); m_status.is_ok() && !maybe_error_s.is_ok()) { \
-            m_status = maybe_error_s; \
+        if (m_status.is_ok()) { \
+            CALICO_EXPECT_FALSE(s.is_ok()); \
+            m_status = s; \
         } \
     } while (0)
 
 [[nodiscard]]
 static auto sanitize_options(const Options &options) -> Options
 {
-    static constexpr Size KiB {1'024};
-
-    const auto page_size = options.page_size;
-    auto cache_size = options.cache_size;
-
-    if (options.page_size <= 2 * KiB) {
-        cache_size = 2048 * page_size;
-    } else if (options.page_size <= 16 * KiB) {
-        cache_size = 256 * page_size;
-    } else {
-        cache_size = 128 * page_size;
-    }
-
     auto sanitized = options;
     if (sanitized.cache_size == 0) {
-        sanitized.cache_size = cache_size;
+        sanitized.cache_size = options.page_size * 64;
     }
     return sanitized;
 }
@@ -68,7 +56,19 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         m_owns_storage = true;
     }
 
-    (void)m_storage->create_directory(m_db_prefix);
+    if (auto s = m_storage->file_exists(m_db_prefix); s.is_not_found()) {
+        if (sanitized.create_if_missing) {
+            Calico_Try(m_storage->create_directory(m_db_prefix));
+        } else {
+            return Status::invalid_argument("database does not exist");
+        }
+    } else if (s.is_ok()) {
+        if (sanitized.error_if_exists) {
+            return Status::invalid_argument("database already exists");
+        }
+    } else {
+        return s;
+    }
 
     m_info_log = sanitized.info_log;
     if (m_info_log == nullptr) {
@@ -86,36 +86,31 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     }
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
-    {
-        WriteAheadLog *temp;
-        Calico_Try(WriteAheadLog::open({
-            m_wal_prefix,
-            m_storage,
-            sanitized.page_size,
-            256,
-        }, &temp));
-        wal.reset(temp);
-    }
+    Calico_Try(WriteAheadLog::open({
+        m_wal_prefix,
+        m_storage,
+        sanitized.page_size,
+        256,
+    }, &wal));
 
-    {
-        Pager *temp;
-        Calico_Try(Pager::open({
-            m_db_prefix,
-            m_storage,
-            &m_scratch,
-            wal.get(),
-            m_info_log,
-            &m_status,
-            &m_commit_lsn,
-            &m_in_txn,
-            sanitized.cache_size / sanitized.page_size,
-            sanitized.page_size,
-        }, &temp));
-        pager.reset(temp);
-        pager->load_state(state);
-    }
+    Calico_Try(Pager::open({
+        m_db_prefix,
+        m_storage,
+        &m_scratch,
+        wal,
+        m_info_log,
+        &m_status,
+        &m_commit_lsn,
+        &m_in_txn,
+        sanitized.cache_size / sanitized.page_size,
+        sanitized.page_size,
+    }, &pager));
+    pager->load_state(state);
 
-    tree = std::make_unique<BPlusTree>(*pager);
+    tree = new(std::nothrow) BPlusTree {*pager};
+    if (tree == nullptr) {
+        return Status::system_error("out of memory");
+    }
     tree->load_state(state);
 
     Status s;
@@ -142,12 +137,15 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     logv(m_info_log, "pager recovery lsn is ", pager->recovery_lsn().value);
     logv(m_info_log, "wal flushed lsn is ", wal->flushed_lsn().value);
     logv(m_info_log, "commit lsn is ", m_commit_lsn.value);
-    return status();
+
+    Calico_Try(m_status);
+    m_is_setup = true;
+    return Status::ok();
 }
 
 DatabaseImpl::~DatabaseImpl()
 {
-    if (tree) {
+    if (m_is_setup) {
         if (auto s = wal->flush(); !s.is_ok()) {
             logv(m_info_log, "failed to flush wal: ", s.what().data());
         }
@@ -169,6 +167,10 @@ DatabaseImpl::~DatabaseImpl()
     if (m_owns_storage) {
         delete m_storage;
     }
+
+    delete pager;
+    delete tree;
+    delete wal;
 }
 
 auto DatabaseImpl::repair(const std::string &path, const Options &options) -> Status
@@ -296,7 +298,7 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 
     bool exists {};
     if (auto s = tree->insert(key, value, exists); !s.is_ok()) {
-        Maybe_Set_Error(s);
+        Set_Error(s);
         return s;
     }
     const auto inserted = !exists;
@@ -315,7 +317,7 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
         m_record_count--;
         m_txn_size++;
     } else if (!s.is_not_found()) {
-        Maybe_Set_Error(s);
+        Set_Error(s);
     }
     return s;
 }
@@ -326,8 +328,10 @@ auto DatabaseImpl::vacuum() -> Status
     if (m_txn_size) {
         return Status::logic_error("transaction must be empty");
     }
-    Maybe_Set_Error(do_vacuum());
-    return status();
+    if (auto s = do_vacuum(); !s.is_ok()) {
+        Set_Error(s);
+    }
+    return m_status;
 }
 
 auto DatabaseImpl::do_vacuum() -> Status
@@ -360,7 +364,10 @@ auto DatabaseImpl::commit() -> Status
 {
     Calico_Try(status());
     if (m_txn_size != 0) {
-        return do_commit(m_commit_lsn);
+        if (auto s = do_commit(m_commit_lsn); !s.is_ok()) {
+            Set_Error(s);
+            return s;
+        }
     }
     return Status::ok();
 }
@@ -392,8 +399,12 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
     logv(m_info_log, "commit successful");
     m_commit_lsn = commit_lsn;
 
-    Maybe_Set_Error(pager->flush(flush_lsn));
-    Maybe_Set_Error(wal->cleanup(pager->recovery_lsn()));
+    if (auto s = pager->flush(flush_lsn); !s.is_ok()) {
+        Set_Error(s);
+    }
+    if (auto s = wal->cleanup(pager->recovery_lsn()); !s.is_ok()) {
+        Set_Error(s);
+    }
     return Status::ok();
 }
 
@@ -470,10 +481,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, Fi
         return Status::invalid_argument("page cache is too small");
     }
 
-    if (auto s = store.create_directory(prefix); !s.is_ok() && !s.is_logic_error()) {
-        return s;
-    }
-
     const auto path = prefix + "data";
     std::unique_ptr<Reader> reader;
     Reader *reader_temp {};
@@ -525,6 +532,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, Fi
     return Status::ok();
 }
 
-#undef Maybe_Set_Error
+#undef Set_Error
 
 } // namespace Calico

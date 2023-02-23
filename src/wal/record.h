@@ -45,6 +45,7 @@ inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
  */
 struct WalRecordHeader {
     enum Type: Byte {
+        EMPTY  = '\x00',
         FULL   = '\xA4',
         FIRST  = '\xB3',
         MIDDLE = '\xC2',

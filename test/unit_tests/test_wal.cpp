@@ -13,98 +13,6 @@ namespace Calico {
 
 namespace fs = std::filesystem;
 
-template<class Base>
-class TestWithWalSegments : public Base {
-public:
-    [[nodiscard]] static auto get_segment_name(Id id) -> std::string
-    {
-        return encode_segment_name(Base::PREFIX + std::string {"wal-"}, id);
-    }
-
-    [[nodiscard]] static auto get_segment_name(Size index) -> std::string
-    {
-        return encode_segment_name(Base::PREFIX + std::string {"wal-"}, Id::from_index(index));
-    }
-
-    template<class Id>
-    [[nodiscard]] auto get_segment_size(const Id &id) const -> Size
-    {
-        Size size {};
-        EXPECT_TRUE(expose_message(Base::storage->file_size(get_segment_name(id), size)));
-        return size;
-    }
-
-    template<class Id>
-    [[nodiscard]] auto get_segment_data(const Id &id) const -> std::string
-    {
-        Reader *reader {};
-        EXPECT_TRUE(expose_message(Base::storage->new_reader_(get_segment_name(id), &reader)));
-
-        std::string data(get_segment_size(id), '\x00');
-        Span bytes {data};
-        auto read_size = bytes.size();
-        EXPECT_TRUE(expose_message(reader->read(bytes.data(), read_size, 0)));
-        EXPECT_EQ(read_size, data.size());
-        delete reader;
-        return data;
-    }
-};
-
-using TestWithWalSegmentsOnHeap = TestWithWalSegments<InMemoryTest>;
-using TestWithWalSegmentsOnDisk = TestWithWalSegments<OnDiskTest>;
-
-//template<class Store>
-//[[nodiscard]] static auto get_file_size(const Store &storage, const std::string &path) -> Size
-//{
-//    Size size {};
-//    EXPECT_TRUE(expose_message(storage.file_size(path, size)));
-//    return size;
-//}
-
-// TODO: Needs to be rewritten, but I guess we should make sure Page is correctly limiting the size of the record it creates.
-//class WalPayloadSizeLimitTests : public testing::TestWithParam<Size> {
-//public:
-//    WalPayloadSizeLimitTests()
-//        : scratch(max_size, '\x00'),
-//          image {random.get<std::string>('\x00', '\xFF', GetParam())}
-//    {
-//        static_assert(WAL_SCRATCH_SCALE >= 1);
-//    }
-//
-//    ~WalPayloadSizeLimitTests() override = default;
-//
-//    Size max_size {GetParam() * WAL_SCRATCH_SCALE};
-//    Size min_size {max_size - GetParam()};
-//    Random random {UnitTests::random_seed};
-//    std::string scratch;
-//    std::string image;
-//};
-//
-//TEST_P(WalPayloadSizeLimitTests, LargestPossibleRecord)
-//{
-//    std::vector<PageDelta> deltas;
-//
-//    for (Size i {}; i < GetParam(); i += 2)
-//        deltas.emplace_back(PageDelta {i, 1});
-//
-//    auto size = encode_deltas_payload(Id {2}, image, deltas, scratch);
-//    ASSERT_GE(size + WalPayloadHeader::SIZE, min_size) << "Excessive scratch memory allocated";
-//    ASSERT_LE(size + WalPayloadHeader::SIZE, max_size) << "Scratch memory cannot fit maximally sized WAL record payload";
-//}
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    LargestPossibleRecord,
-//    WalPayloadSizeLimitTests,
-//    ::testing::Values(
-//        0x100,
-//        0x100 << 1,
-//        0x100 << 2,
-//        0x100 << 3,
-//        0x100 << 4,
-//        0x100 << 5,
-//        0x100 << 6,
-//        0x100 << 7));
-
 class WalRecordMergeTests : public testing::Test {
 public:
     auto setup(const std::array<WalRecordHeader::Type, 3> &types) -> void
@@ -124,12 +32,6 @@ public:
         std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type {}, WalRecordHeader::Type::FIRST, WalRecordHeader::Type::FIRST},
         std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type {}, WalRecordHeader::Type::FULL, WalRecordHeader::Type::FULL},
         std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::FIRST},
-        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::LAST, WalRecordHeader::Type::FULL},
-    };
-    std::vector<std::array<WalRecordHeader::Type, 3>> valid_right_merges {
-        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::LAST, WalRecordHeader::Type {}, WalRecordHeader::Type::LAST},
-        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FULL, WalRecordHeader::Type {}, WalRecordHeader::Type::FULL},
-        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::LAST, WalRecordHeader::Type::LAST},
         std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::LAST, WalRecordHeader::Type::FULL},
     };
     WalRecordHeader lhs {};
@@ -161,7 +63,6 @@ TEST_F(WalRecordMergeTests, MergingInvalidTypesIndicatesCorruption)
     setup({WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::FIRST});
     ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
 }
-
 
 class WalRecordGenerator {
 public:
@@ -331,6 +232,173 @@ TEST_F(WalSetTests, RemovesSomeSegmentsFromRight)
 
     const auto ids = get_ids(set);
     ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), Id::from_index(0), 10));
+}
+
+class WalComponentTests: public InMemoryTest {
+public:
+    static constexpr Size PAGE_SIZE {0x200};
+    const std::string WAL_PREFIX {"test/wal-"};
+
+    WalComponentTests()
+        : m_writer_tail(wal_block_size(PAGE_SIZE), '\0'),
+          m_reader_tail(wal_block_size(PAGE_SIZE), '\0'),
+          m_reader_data(wal_block_size(PAGE_SIZE), '\0')
+    {}
+
+    ~WalComponentTests() override
+    {
+        delete m_reader_file;
+        delete m_writer_file;
+    }
+
+    static auto assert_reader_is_done(WalReader &reader) -> void
+    {
+        std::string _;
+        ASSERT_TRUE(wal_read_with_status(reader, _).is_not_found());
+        ASSERT_TRUE(wal_read_with_status(reader, _).is_not_found());
+    }
+
+    [[nodiscard]]
+    auto make_reader(Id id) -> WalReader
+    {
+        EXPECT_OK(storage->new_reader(encode_segment_name(WAL_PREFIX, id), &m_reader_file));
+        return WalReader {*m_reader_file, m_reader_tail};
+    }
+
+    [[nodiscard]]
+    auto make_writer(Id id) -> WalWriter
+    {
+        EXPECT_OK(storage->new_logger(encode_segment_name(WAL_PREFIX, id), &m_writer_file));
+        return WalWriter {*m_writer_file, m_writer_tail};
+    }
+
+    [[nodiscard]]
+    static auto wal_write(WalWriter &writer, Lsn lsn, const Slice &data) -> Status
+    {
+        std::string buffer(sizeof(lsn), '\0');
+        buffer.append(data.to_string());
+        WalPayloadIn payload {lsn, buffer};
+        return writer.write(payload);
+    }
+
+    [[nodiscard]]
+    static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
+    {
+        out.resize(wal_scratch_size(PAGE_SIZE));
+        Span buffer {out};
+
+        Calico_Try(reader.read(buffer));
+        WalPayloadOut payload {buffer};
+        if (lsn != nullptr) {
+            *lsn = payload.lsn();
+        }
+        out = payload.data().to_string();
+        return Status::ok();
+    }
+
+    [[nodiscard]]
+    static auto wal_read(WalReader &reader, Lsn *lsn = nullptr) -> std::string
+    {
+        std::string out;
+        EXPECT_OK(wal_read_with_status(reader, out, lsn));
+        return out;
+    }
+
+private:
+    std::string m_writer_tail;
+    std::string m_reader_tail;
+    std::string m_reader_data;
+    Reader *m_reader_file {};
+    Logger *m_writer_file {};
+};
+
+TEST_F(WalComponentTests, ManualFlush)
+{
+    auto writer = make_writer(Id::root());
+    ASSERT_EQ(writer.flushed_lsn(), Lsn::null());
+    ASSERT_OK(wal_write(writer, Lsn {1}, "hello"));
+    ASSERT_OK(wal_write(writer, Lsn {2}, "world"));
+    ASSERT_EQ(writer.flushed_lsn(), Lsn::null());
+    ASSERT_OK(writer.flush());
+    ASSERT_EQ(writer.flushed_lsn(), Lsn {2});
+}
+
+TEST_F(WalComponentTests, AutomaticFlush)
+{
+    auto writer = make_writer(Id::root());
+
+    auto lsn = Lsn::root();
+    for (; lsn.value < PAGE_SIZE * 5; ++lsn.value) {
+        ASSERT_OK(wal_write(writer, lsn, "=^.^="));
+    }
+    ASSERT_GT(writer.flushed_lsn(), Lsn::null());
+    ASSERT_LE(writer.flushed_lsn(), lsn);
+}
+
+TEST_F(WalComponentTests, HandlesRecordsWithinBlock)
+{
+    auto writer = make_writer(Id::root());
+    ASSERT_OK(wal_write(writer, Lsn {1}, "hello"));
+    ASSERT_OK(wal_write(writer, Lsn {2}, "world"));
+    ASSERT_OK(writer.flush());
+
+    auto reader = make_reader(Id::root());
+    ASSERT_EQ(wal_read(reader), "hello");
+    ASSERT_EQ(wal_read(reader), "world");
+    assert_reader_is_done(reader);
+}
+
+TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
+{
+    auto writer = make_writer(Id::root());
+    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+        ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
+    }
+    ASSERT_OK(writer.flush());
+    auto reader = make_reader(Id::root());
+    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+        ASSERT_EQ(wal_read(reader), Tools::integral_key(i));
+    }
+    assert_reader_is_done(reader);
+}
+
+TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
+{
+    auto writer = make_writer(Id::root());
+    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+        ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
+        if (rand() % 8 == 0) {
+            ASSERT_OK(writer.flush());
+        }
+    }
+    ASSERT_OK(writer.flush());
+    auto reader = make_reader(Id::root());
+    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+        ASSERT_EQ(wal_read(reader), Tools::integral_key(i));
+    }
+    assert_reader_is_done(reader);
+}
+
+TEST_F(WalComponentTests, Corruption)
+{
+    // Don't flush the writer, so it leaves a partial record in the WAL.
+    auto writer = make_writer(Id::root());
+    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+        ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
+    }
+    ASSERT_LT(writer.flushed_lsn(), Lsn {PAGE_SIZE*2 - 1});
+
+    auto reader = make_reader(Id::root());
+    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+        std::string data;
+        auto s = wal_read_with_status(reader, data);
+        if (s.is_corruption()) {
+            break;
+        }
+        ASSERT_OK(s);
+        ASSERT_EQ(data, Tools::integral_key(i));
+    }
+    assert_reader_is_done(reader);
 }
 
 } // <anonymous>

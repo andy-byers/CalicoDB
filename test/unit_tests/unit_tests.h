@@ -200,6 +200,44 @@ public:
     }
 };
 
+class TestWithPager: public InMemoryTest {
+public:
+    const Size PAGE_SIZE {0x200};
+
+    TestWithPager()
+        : scratch(PAGE_SIZE, '\x00'),
+          log_scratch(wal_scratch_size(PAGE_SIZE), '\x00')
+    {}
+
+    auto SetUp() -> void override
+    {
+        Pager *temp;
+        EXPECT_OK(Pager::open({
+            PREFIX,
+            storage.get(),
+            &log_scratch,
+            &wal,
+            nullptr,
+            &status,
+            &commit_lsn,
+            &in_xact,
+            8,
+            PAGE_SIZE,
+        }, &temp));
+        pager.reset(temp);
+    }
+
+    std::string log_scratch;
+    Status status;
+    bool in_xact {true};
+    Lsn commit_lsn;
+    DisabledWriteAheadLog wal;
+    std::string scratch;
+    std::string collect_scratch;
+    std::unique_ptr<Pager> pager;
+    Tools::RandomGenerator random {1'024 * 1'024 * 8};
+};
+
 inline auto expect_ok(const Status &s) -> void
 {
     if (!s.is_ok()) {

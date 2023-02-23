@@ -54,7 +54,7 @@ auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Sta
     }
 
     // First merge in the logical record.
-    if (lhs.type == WalRecordHeader::Type {}) {
+    if (lhs.type == WalRecordHeader::EMPTY) {
         if (rhs.type == WalRecordHeader::MIDDLE || rhs.type == WalRecordHeader::LAST) {
             return Status::corruption("right record has invalid type");
         }

@@ -11,15 +11,10 @@ namespace Calico {
 
 class WalWriter {
 public:
-    WalWriter(Logger &file, Span tail, Size file_size = 0)
+    WalWriter(Logger &file, Span tail)
         : m_tail {tail},
-          m_file {&file},
-          m_block {file_size / tail.size()},
-          m_offset {file_size % tail.size()}
-    {
-        // NOTE: File must be a multiple of the block size.
-        CALICO_EXPECT_EQ(m_offset, 0);
-    }
+          m_file {&file}
+    {}
 
     [[nodiscard]]
     auto block_count() const -> Size

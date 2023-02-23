@@ -206,16 +206,16 @@ auto Recovery::recover_phase_1() -> Status
         Calico_Try(storage.remove_file(name));
     }
     set.remove_after(segment);
-    m_wal->m_last_lsn = *m_commit_lsn;
-    m_wal->m_flushed_lsn = *m_commit_lsn;
     return Status::ok();
 }
 
 auto Recovery::recover_phase_2() -> Status
 {
-    Calico_Try(m_wal->start_writing());
+    m_wal->m_last_lsn = *m_commit_lsn;
+    m_wal->m_flushed_lsn = *m_commit_lsn;
     m_pager->m_recovery_lsn = *m_commit_lsn;
-    m_wal->cleanup( *m_commit_lsn);
+    Calico_Try(m_wal->start_writing());
+    Calico_Try(m_wal->cleanup( *m_commit_lsn));
 
     // Make sure the file size matches the header page count, which should be correct if we made it this far.
     return m_pager->truncate(m_pager->page_count());

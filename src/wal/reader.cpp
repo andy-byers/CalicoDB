@@ -62,7 +62,13 @@ auto WalReader::read(Span &payload) -> Status
             }
         }
         // Read the next block into the tail buffer.
-        Calico_Try(read_tail(*m_file, ++m_block, m_tail));
+        auto s = read_tail(*m_file, ++m_block, m_tail);
+        if (!s.is_ok()) {
+            if (s.is_not_found() && header.type != WalRecordHeader::EMPTY) {
+                return Status::corruption("encountered a partial record");
+            }
+            return s;
+        }
         m_offset = 0;
     }
     return Status::ok();

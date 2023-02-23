@@ -21,10 +21,14 @@ public:
         options.page_size = 0x200;
         options.cache_size = options.page_size * frame_count;
         options.log_level = LogLevel::OFF;
+        options.info_log = new Tools::StderrLogger;
         options.storage = storage.get();
     }
 
-    ~BasicDatabaseTests() override = default;
+    ~BasicDatabaseTests() override
+    {
+        delete options.info_log;
+    }
 
     std::string prefix {PREFIX};
     Size frame_count {64};
@@ -603,7 +607,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 }
 
 TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
-{
+{//Commit LSN: 34481
     auto itr = begin(committed);
     for (; ; ) {
         auto s = db->impl->erase(itr++->first);
@@ -837,6 +841,49 @@ TEST(ExtensionTests, Extensions)
 
     ASSERT_OK(db->commit());
     delete db;
+}
+
+class DbOpenTests: public OnDiskTest {
+protected:
+    DbOpenTests()
+    {
+        options.storage = storage.get();
+        (void)Database::destroy(PREFIX, options);
+    }
+
+    ~DbOpenTests() override = default;
+
+    Options options;
+    Database *db;
+};
+
+TEST_F(DbOpenTests, CreatesMissingDb)
+{
+    options.error_if_exists = false;
+    options.create_if_missing = true;
+    ASSERT_OK(Database::open(PREFIX, options, &db));
+    delete db;
+
+    options.create_if_missing = false;
+    ASSERT_OK(Database::open(PREFIX, options, &db));
+    delete db;
+}
+
+TEST_F(DbOpenTests, FailsIfMissingDb)
+{
+    options.create_if_missing = false;
+    ASSERT_TRUE(Database::open(PREFIX, options, &db).is_invalid_argument());
+}
+
+TEST_F(DbOpenTests, FailsIfDbExists)
+{
+    options.create_if_missing = true;
+    options.error_if_exists = true;
+    ASSERT_OK(Database::open(PREFIX, options, &db));
+    delete db;
+
+    options.create_if_missing = false;
+    ASSERT_TRUE(Database::open(PREFIX, options, &db).is_invalid_argument());
 }
 
 class ApiTests: public InMemoryTest {
@@ -1085,11 +1132,6 @@ protected:
 
         assert_contains_exactly({"A", "B", "C"});
     }
-
-    auto TearDown() -> void override
-    {
-
-    }
 };
 
 TEST_F(CommitFailureTests, WalFlushFailure)
@@ -1120,44 +1162,6 @@ TEST_F(WalPrefixTests, WalDirectoryMustExist)
 {
     options.wal_prefix = "nonexistent";
     ASSERT_TRUE(Calico::Database::open(ROOT, options, &db).is_not_found());
-}
-
-class WalCorruptionTests : public InMemoryTest {
-public:
-    WalCorruptionTests()
-    {
-        options.storage = storage.get();
-    }
-
-    [[nodiscard]]
-    auto get_sorted_wal_ids() -> std::vector<Id>
-    {
-        std::vector<std::string> children;
-        EXPECT_OK(storage->get_children("test", children));
-
-        std::vector<Id> wals;
-        for (auto &child: children) {
-            if (Slice {child}.starts_with("wal")) {
-                wals.emplace_back(decode_segment_name("wal-", child));
-            }
-        }
-        std::sort(begin(wals), end(wals));
-        return wals;
-    }
-
-    Options options;
-    Database *db {};
-};
-
-TEST_F(WalCorruptionTests, CreatesWals)
-{
-    ASSERT_OK(Calico::Database::open(ROOT, options, &db));
-    for (Size i {}; i < 100; ++i) {
-        ASSERT_OK(db->put(Tools::integral_key(i), "value"));
-    }
-    ASSERT_OK(db->commit());
-    auto s = get_sorted_wal_ids();
-    (void)s;
 }
 
 } // <anonymous>

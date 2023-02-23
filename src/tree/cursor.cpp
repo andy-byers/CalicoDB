@@ -36,11 +36,12 @@ auto CursorImpl::fetch_key() const -> Status
     m_key_size = key.size();
     // Go ahead and read the value if it is entirely local.
     if (m_value.empty() && !cell.has_remote) {
-        m_value = Slice {
-            cell.key + cell.key_size,
-            cell.local_size - cell.key_size,
-        }.to_string();
-        m_value_size = m_value.size();
+        m_value_size = cell.local_size - cell.key_size;
+        if (m_value.size() < m_value_size) {
+            m_value.resize(m_value_size);
+        }
+        const Slice value {cell.key + cell.key_size, m_value_size};
+        mem_copy(m_value, value);
     }
     m_tree->release(std::move(node));
     return s;

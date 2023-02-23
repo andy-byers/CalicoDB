@@ -6,6 +6,7 @@
 #include "database/database_impl.h"
 #include <climits>
 #include <functional>
+#include <cstdio>
 #include <mutex>
 #include <random>
 #include <string>
@@ -175,6 +176,24 @@ public:
     [[nodiscard]] auto write(Slice in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
+
+class StderrLogger: public Logger {
+public:
+    ~StderrLogger() override = default;
+
+    [[nodiscard]] auto write(Slice in) -> Status
+    {
+        std::fputs(in.to_string().c_str(), stderr);
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto sync() -> Status
+    {
+        std::fflush(stderr);
+        return Status::ok();
+    }
+};
+
 
 template<std::size_t Length = 12>
 static auto integral_key(Size key) -> std::string

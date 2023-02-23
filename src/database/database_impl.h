@@ -37,17 +37,17 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
-    auto TEST_validate() const -> void;
-
-    std::unique_ptr<WriteAheadLog> wal;
-    std::unique_ptr<Pager> pager;
-    std::unique_ptr<BPlusTree> tree;
-
     [[nodiscard]]
     auto record_count() const -> Size
     {
         return m_record_count;
     }
+
+    auto TEST_validate() const -> void;
+
+    WriteAheadLog *wal {};
+    BPlusTree *tree {};
+    Pager *pager {};
 
 private:
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
@@ -70,6 +70,7 @@ private:
     bool m_in_txn {true};
     bool m_owns_storage {};
     bool m_owns_info_log {};
+    bool m_is_setup {};
 };
 
 auto setup(const std::string &, Storage &, const Options &, FileHeader &state) -> Status;

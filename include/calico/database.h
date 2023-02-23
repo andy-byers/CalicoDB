@@ -26,6 +26,8 @@ struct Options {
     LogLevel log_level {LogLevel::OFF};
     Logger *info_log {};
     Storage *storage {};
+    bool create_if_missing {true};
+    bool error_if_exists {};
 };
 
 class Database {

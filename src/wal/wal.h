@@ -20,7 +20,7 @@ public:
     };
 
     WriteAheadLog() = default;
-    virtual ~WriteAheadLog() = default;
+    virtual ~WriteAheadLog();
     [[nodiscard]] static auto open(const Parameters &param, WriteAheadLog **out) -> Status;
     [[nodiscard]] virtual auto close() -> Status;
     [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
@@ -38,7 +38,8 @@ public:
 
 private:
     explicit WriteAheadLog(const Parameters &param);
-    [[nodiscard]] auto advance() -> Status;
+    [[nodiscard]] auto close_writer() -> Status;
+    [[nodiscard]] auto open_writer() -> Status;
 
     mutable Lsn m_flushed_lsn;
     Lsn m_last_lsn;
