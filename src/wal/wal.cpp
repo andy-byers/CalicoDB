@@ -91,10 +91,12 @@ auto WriteAheadLog::current_lsn() const -> Lsn
 
 auto WriteAheadLog::log(WalPayloadIn payload) -> Status
 {
+    if (m_writer == nullptr) {
+        return Status::logic_error("already failed");
+    }
     m_last_lsn.value++;
     m_bytes_written += sizeof(Lsn) + payload.data().size();
     CALICO_EXPECT_EQ(payload.lsn(), m_last_lsn);
-    CALICO_EXPECT_NE(m_writer, nullptr);
 
     Calico_Try(m_writer->write(payload));
     if (m_writer->block_count() >= m_segment_cutoff) {

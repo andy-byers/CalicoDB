@@ -7,11 +7,13 @@
 
 namespace Calico {
 
-class RecoveryTests: public OnDiskTest {
+class RecoveryTests: public InMemoryTest {
 public:
     RecoveryTests()  
         : db_prefix {PREFIX}
     {
+        db_options.page_size = MINIMUM_PAGE_SIZE;
+        db_options.cache_size = MINIMUM_PAGE_SIZE * 16;
         db_options.storage = storage.get();
         open();
     }
@@ -198,6 +200,141 @@ TEST_F(RecoveryTests, RevertsNthTransaction)
     ASSERT_EQ(get("a"), "1");
     ASSERT_EQ(get("b"), "2");
     ASSERT_EQ(get("c"), "NOT_FOUND");
+}
+
+class RecoverySanityCheck: public RecoveryTests {
+public:
+    RecoverySanityCheck()
+        : wal_prefix {db_prefix + "wal-"}
+    {
+        Tools::RandomGenerator random {1'024 * 1'024 * 8};
+        const Size N {100};
+
+        for (Size i {}; i < N; ++i) {
+            const auto k = random.Generate(db_options.page_size * 2);
+            const auto v = random.Generate(db_options.page_size * 2);
+            map[k.to_string()] = v.to_string();
+        }
+    }
+
+    auto setup()
+    {
+        auto record = begin(map);
+        for (Size index {}; record != end(map); ++index, ++record) {
+            ASSERT_OK(db->put(record->first, record->second));
+            if (record->first.size() & 1) {
+                ASSERT_OK(db->commit());
+            }
+        }
+        ASSERT_OK(db->commit());
+    }
+
+    auto run_and_validate()
+    {
+        for (const auto &[k, v]: map) {
+            auto s = db->erase(k);
+            if (!s.is_ok()) {
+                assert_special_error(s);
+                break;
+            }
+        }
+        assert_special_error(db->status());
+        Clear_Interceptors();
+        open();
+
+        for (const auto &[k, v]: map) {
+            std::string value;
+            ASSERT_OK(db->get(k, value));
+            ASSERT_EQ(value, v);
+        }
+    }
+
+    std::string wal_prefix;
+    std::map<std::string, std::string> map;
+};
+
+TEST_F(RecoverySanityCheck, SanityCheck)
+{
+    for (Size commit {}; commit < map.size(); ++commit) {
+        open();
+
+        auto record = begin(map);
+        for (Size index {}; record != end(map); ++index, ++record) {
+            if (index == commit) {
+                ASSERT_OK(db->commit());
+            } else {
+                ASSERT_OK(db->put(record->first, record->second));
+            }
+        }
+        open();
+
+        record = begin(map);
+        for (Size index {}; record != end(map); ++index, ++record) {
+            std::string value;
+            if (index < commit) {
+                ASSERT_OK(db->get(record->first, value));
+                ASSERT_EQ(value, record->second);
+            } else {
+                ASSERT_TRUE(db->get(record->first, value).is_not_found());
+            }
+        }
+        close();
+
+        ASSERT_OK(Database::destroy(db_prefix, db_options));
+    }
+}
+
+TEST_F(RecoverySanityCheck, SanityCheck_WalWriteError)
+{
+    setup();
+    Quick_Interceptor(wal_prefix, Tools::Interceptor::WRITE);
+    run_and_validate();
+}
+
+TEST_F(RecoverySanityCheck, SanityCheck_DelayedWalWriteError)
+{
+    setup();
+    int count {10};
+    Counting_Interceptor(wal_prefix, Tools::Interceptor::WRITE, count);
+    run_and_validate();
+}
+
+TEST_F(RecoverySanityCheck, SanityCheck_DataWriteError)
+{
+    setup();
+    Quick_Interceptor(db_prefix + "data", Tools::Interceptor::WRITE);
+    run_and_validate();
+}
+
+TEST_F(RecoverySanityCheck, SanityCheck_DelayedDataWriteError)
+{
+    setup();
+    int count {10};
+    Counting_Interceptor(db_prefix + "data", Tools::Interceptor::WRITE, count);
+    run_and_validate();
+}
+
+TEST_F(RecoverySanityCheck, SanityCheck_DataReadError)
+{
+    setup();
+    Quick_Interceptor(db_prefix + "data", Tools::Interceptor::READ);
+    run_and_validate();
+}
+
+TEST_F(RecoverySanityCheck, SanityCheck_DelayedDataReadError)
+{
+    setup();
+    int count {10};
+    Counting_Interceptor(db_prefix + "data", Tools::Interceptor::READ, count);
+    run_and_validate();
+}
+
+
+TEST_F(RecoverySanityCheck, SanityCheck_WalOpenError)
+{
+    setup();
+    Quick_Interceptor(wal_prefix, Tools::Interceptor::OPEN);
+    run_and_validate();
 }
 
 }  // namespace Calico

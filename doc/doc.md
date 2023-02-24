@@ -277,9 +277,8 @@ Note that full image records are always disjoint (w.r.t. the affected page IDs) 
 This means that they can be applied to the database in any order and produce the same results.
 Deltas are not disjoint, so they must be read in order.
 Commits are signified by a special delta record: one that updates exactly the file header on the root page.
-The delta modifies the database commit LSN, which is the LSN of the commit record.
-This way we don't actually have to find a commit record in the WAL to be able to trust the commit LSN from the header (otherwise, it would be possible to have flushed the delta containing the updated commit LSN, but not the commit record itself).
-This allows the WAL segments to be removed on (normal) database shutdown.
+The delta modifies the database commit LSN, which is the LSN of the most recent commit record.
+On normal database shutdown, we remove read through the WAL and undo all uncommitted updates.
 During startup, if the database has WAL segments, then we know something went wrong last time.
 
 ### Consistency

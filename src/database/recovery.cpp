@@ -76,12 +76,11 @@ auto Recovery::recover_phase_1() -> Status
         return Status::ok();
     }
 
-    Id commit_segment;
-    Lsn commit_lsn;
-    Lsn last_lsn;
-
     std::unique_ptr<Reader> file;
     auto segment = m_set->first();
+    auto commit_lsn = *m_commit_lsn;
+    auto commit_segment = segment;
+    Lsn last_lsn;
 
     const auto translate_status = [&segment, this](auto s, Lsn lsn) {
         CALICO_EXPECT_FALSE(s.is_ok());
@@ -146,6 +145,7 @@ auto Recovery::recover_phase_1() -> Status
                 break;
             } else if (!s.is_ok()) {
                 Calico_Try(translate_status(s, last_lsn));
+                return Status::ok();
             }
 
             WalPayloadOut payload {buffer};
@@ -197,11 +197,10 @@ auto Recovery::recover_phase_1() -> Status
 
 auto Recovery::recover_phase_2() -> Status
 {
-    /* Make sure all changes have made it to disk, then remove WAL segments from the left. This should be
-     * reentrant.
+    /* Make sure all changes have made it to disk, then remove WAL segments from the right.
      */
     Calico_Try(m_pager->flush({}));
-    for (auto id = m_set->first(); !id.is_null(); id = m_set->id_after(id)) {
+    for (auto id = m_set->last(); !id.is_null(); id = m_set->id_before(id)) {
         Calico_Try(m_storage->remove_file(encode_segment_name(m_wal->m_prefix, id)));
     }
     m_set->remove_after(Id::null());

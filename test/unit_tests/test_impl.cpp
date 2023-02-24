@@ -606,7 +606,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 }
 
 TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
-{//Commit LSN: 34481
+{
     auto itr = begin(committed);
     for (; ; ) {
         auto s = db->impl->erase(itr++->first);

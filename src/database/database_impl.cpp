@@ -10,10 +10,9 @@
 
 namespace Calico {
 
-#define Set_Error(s) \
+#define Set_Status(s) \
     do { \
         if (m_status.is_ok()) { \
-            CALICO_EXPECT_FALSE(s.is_ok()); \
             m_status = s; \
         } \
     } while (0)
@@ -295,7 +294,7 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 
     bool exists {};
     if (auto s = tree->insert(key, value, exists); !s.is_ok()) {
-        Set_Error(s);
+        Set_Status(s);
         return s;
     }
     const auto inserted = !exists;
@@ -314,7 +313,7 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
         m_record_count--;
         m_txn_size++;
     } else if (!s.is_not_found()) {
-        Set_Error(s);
+        Set_Status(s);
     }
     return s;
 }
@@ -326,7 +325,7 @@ auto DatabaseImpl::vacuum() -> Status
         return Status::logic_error("transaction must be empty");
     }
     if (auto s = do_vacuum(); !s.is_ok()) {
-        Set_Error(s);
+        Set_Status(s);
     }
     return m_status;
 }
@@ -362,7 +361,7 @@ auto DatabaseImpl::commit() -> Status
     Calico_Try(status());
     if (m_txn_size != 0) {
         if (auto s = do_commit(m_commit_lsn); !s.is_ok()) {
-            Set_Error(s);
+            Set_Status(s);
             return s;
         }
     }
@@ -394,10 +393,10 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
     m_commit_lsn = commit_lsn;
 
     if (auto s = pager->flush(flush_lsn); !s.is_ok()) {
-        Set_Error(s);
+        Set_Status(s);
     }
     if (auto s = wal->cleanup(pager->recovery_lsn()); !s.is_ok()) {
-        Set_Error(s);
+        Set_Status(s);
     }
     return Status::ok();
 }
@@ -527,6 +526,6 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, Fi
     return Status::ok();
 }
 
-#undef Set_Error
+#undef Set_Status
 
 } // namespace Calico

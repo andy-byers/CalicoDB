@@ -9,6 +9,13 @@
 
 namespace Calico {
 
+#define Set_Status(s) \
+    do { \
+        if (m_status->is_ok()) { \
+            *m_status = s; \
+        } \
+    } while (0)
+
 static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
 
 auto Pager::open(const Parameters &param, Pager **out) -> Status
@@ -198,7 +205,7 @@ auto Pager::make_frame_available() -> bool
 
     if (!evicted.has_value()) {
         if (auto s = m_wal->flush(); !s.is_ok()) {
-            *m_status = s;
+            Set_Status(s);
         }
         return false;
     }
@@ -213,7 +220,7 @@ auto Pager::make_frame_available() -> bool
     }
     m_frames.unpin(frame_index);
     if (!s.is_ok()) {
-        *m_status = s;
+        Set_Status(s);
         return false;
     }
     return true;
@@ -250,7 +257,7 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
         if (s.is_ok()) {
             write_page_lsn(page, next_lsn);
         } else {
-            *m_status = s;
+            Set_Status(s);
         }
     }
 }
@@ -281,7 +288,7 @@ auto Pager::acquire(Id pid, Page &page) -> Status
                 if (s.is_ok()) {
                     clean_page(entry);
                 } else {
-                    *m_status = s;
+                    Set_Status(s);
                     return s;
                 }
             }
@@ -320,7 +327,7 @@ auto Pager::release(Page page) -> void
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch));
         if (!s.is_ok()) {
-            *m_status = s;
+            Set_Status(s);
         }
     }
     m_frames.unref(index, std::move(page));
