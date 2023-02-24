@@ -1,10 +1,10 @@
 #ifndef CALICO_FUZZ_FUZZER_H
 #define CALICO_FUZZ_FUZZER_H
 
-#include <iostream>
 #include "calico/calico.h"
-#include "utils/encoding.h"
 #include "tools.h"
+#include "utils/encoding.h"
+#include <iostream>
 
 namespace Calico {
 

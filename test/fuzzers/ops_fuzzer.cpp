@@ -24,7 +24,7 @@ enum OperationType {
 constexpr auto DB_PATH = "__ops_fuzzer";
 constexpr Size DB_MAX_RECORDS {5'000};
 
-extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
+extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     Database *db;
     CHECK_OK(Database::open(DB_PATH, DB_OPTIONS, &db));

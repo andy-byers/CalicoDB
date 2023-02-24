@@ -1,8 +1,8 @@
 #ifndef CALICO_DATABASE_H
 #define CALICO_DATABASE_H
 
-#include <string>
 #include "slice.h"
+#include <string>
 
 namespace Calico {
 

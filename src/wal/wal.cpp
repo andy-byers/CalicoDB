@@ -108,7 +108,7 @@ auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
     if (m_set.segments().size() <= 1) {
         return Status::ok();
     }
-    for (; ; ) {
+    for (;;) {
         const auto id = m_set.first();
         if (id.is_null()) {
             return Status::ok();

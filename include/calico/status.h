@@ -1,8 +1,8 @@
 #ifndef CALICO_STATUS_H
 #define CALICO_STATUS_H
 
-#include <memory>
 #include "common.h"
+#include <memory>
 
 namespace Calico {
 

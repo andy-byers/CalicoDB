@@ -10,15 +10,14 @@
 
 namespace Calico {
 
-#define Set_Status(s) \
-    do { \
+#define Set_Status(s)           \
+    do {                        \
         if (m_status.is_ok()) { \
-            m_status = s; \
-        } \
+            m_status = s;       \
+        }                       \
     } while (0)
 
-[[nodiscard]]
-static auto sanitize_options(const Options &options) -> Options
+[[nodiscard]] static auto sanitize_options(const Options &options) -> Options
 {
     auto sanitized = options;
     if (sanitized.cache_size == 0) {
@@ -83,24 +82,26 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
     Calico_Try(WriteAheadLog::open({
-        m_wal_prefix,
-        m_storage,
-        sanitized.page_size,
-        256,
-    }, &wal));
+                                       m_wal_prefix,
+                                       m_storage,
+                                       sanitized.page_size,
+                                       256,
+                                   },
+                                   &wal));
 
     Calico_Try(Pager::open({
-        m_db_prefix,
-        m_storage,
-        &m_scratch,
-        wal,
-        m_info_log,
-        &m_status,
-        &m_commit_lsn,
-        &m_in_txn,
-        sanitized.cache_size / sanitized.page_size,
-        sanitized.page_size,
-    }, &pager));
+                               m_db_prefix,
+                               m_storage,
+                               &m_scratch,
+                               wal,
+                               m_info_log,
+                               &m_status,
+                               &m_commit_lsn,
+                               &m_in_txn,
+                               sanitized.cache_size / sanitized.page_size,
+                               sanitized.page_size,
+                           },
+                           &pager));
     pager->load_state(state);
 
     tree = new BPlusTree {*pager};
@@ -165,7 +166,8 @@ DatabaseImpl::~DatabaseImpl()
 
 auto DatabaseImpl::repair(const std::string &path, const Options &options) -> Status
 {
-    (void)path;(void)options;
+    (void)path;
+    (void)options;
     return Status::logic_error("<NOT IMPLEMENTED>"); // TODO: repair() operation attempts to fix a database that could not be opened due to corruption that couldn't/shouldn't be rolled back.
 }
 
@@ -292,7 +294,7 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
         return s;
     }
     const auto inserted = !exists;
-    m_bytes_written += key.size()*inserted + value.size();
+    m_bytes_written += key.size() * inserted + value.size();
     m_record_count += inserted;
     m_txn_size++;
     return Status::ok();
@@ -330,7 +332,7 @@ auto DatabaseImpl::do_vacuum() -> Status
     if (target.is_root()) {
         return Status::ok();
     }
-    for (; ; target.value--) {
+    for (;; target.value--) {
         bool vacuumed {};
         Calico_Try(tree->vacuum_one(target, vacuumed));
         if (!vacuumed) {

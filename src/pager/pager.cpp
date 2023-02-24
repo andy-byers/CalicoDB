@@ -1,19 +1,19 @@
 #include "pager.h"
-#include <limits>
 #include "frames.h"
 #include "page.h"
 #include "tree/header.h"
 #include "utils/logging.h"
 #include "utils/types.h"
 #include "wal/wal.h"
+#include <limits>
 
 namespace Calico {
 
-#define Set_Status(s) \
-    do { \
+#define Set_Status(s)            \
+    do {                         \
         if (m_status->is_ok()) { \
-            *m_status = s; \
-        } \
+            *m_status = s;       \
+        }                        \
     } while (0)
 
 static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
@@ -130,7 +130,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
     }
 
     auto largest = Id::null();
-    for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
+    for (auto itr = m_dirty.begin(); itr != m_dirty.end();) {
         const auto [page_id, record_lsn] = *itr;
         CALICO_EXPECT_TRUE(m_cache.contains(page_id));
         auto &entry = m_cache.get(page_id)->value;

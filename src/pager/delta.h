@@ -1,8 +1,8 @@
 #ifndef CALICO_PAGE_DELTA_H
 #define CALICO_PAGE_DELTA_H
 
-#include <vector>
 #include "utils/utils.h"
+#include <vector>
 
 namespace Calico {
 

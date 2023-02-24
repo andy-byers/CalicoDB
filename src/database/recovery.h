@@ -33,4 +33,3 @@ private:
 } // namespace Calico
 
 #endif // CALICO_DATABASE_RECOVERY_H
-

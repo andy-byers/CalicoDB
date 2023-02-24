@@ -29,7 +29,7 @@ class PointerMap {
     Pager *m_pager {};
 
 public:
-    enum Type: Byte {
+    enum Type : Byte {
         NODE = 1,
         OVERFLOW_HEAD,
         OVERFLOW_LINK,
@@ -73,8 +73,7 @@ public:
           m_pointers {&pointers}
     {}
 
-    [[nodiscard]]
-    auto is_empty() const -> bool
+    [[nodiscard]] auto is_empty() const -> bool
     {
         return m_head.is_null();
     }
@@ -100,7 +99,8 @@ public:
     explicit OverflowList(Pager &pager, FreeList &freelist, PointerMap &pointers)
         : m_pager {&pager},
           m_freelist {&freelist},
-          m_pointers {&pointers} {}
+          m_pointers {&pointers}
+    {}
 
     [[nodiscard]] auto read_chain(Span out, Id pid, Size offset = 0) const -> Status;
     [[nodiscard]] auto write_chain(Id &out, Id pid, Slice first, Slice second = {}) -> Status;

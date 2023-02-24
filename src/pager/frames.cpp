@@ -7,7 +7,7 @@
 namespace Calico {
 
 Frame::Frame(Byte *buffer, Size id, Size size)
-    : m_bytes {buffer + id*size, size}
+    : m_bytes {buffer + id * size, size}
 {
     CALICO_EXPECT_TRUE(is_power_of_two(size));
     CALICO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
@@ -141,7 +141,6 @@ auto FrameManager::sync() -> Status
 {
     return m_file->sync();
 }
-
 
 auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
 {

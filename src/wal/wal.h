@@ -30,8 +30,7 @@ public:
     [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
     [[nodiscard]] virtual auto log(WalPayloadIn payload) -> Status;
 
-    [[nodiscard]]
-    virtual auto bytes_written() const -> Size
+    [[nodiscard]] virtual auto bytes_written() const -> Size
     {
         return m_bytes_written;
     }

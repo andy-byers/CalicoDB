@@ -1,9 +1,9 @@
 
 #include "tools.h"
+#include "utils/types.h"
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
-#include "utils/types.h"
 
 namespace Calico::Tools {
 
@@ -17,11 +17,11 @@ auto DynamicMemory::clear_interceptors() -> void
     m_interceptors.clear();
 }
 
-#define Try_Intercept_From(source, type, path) \
-    do { \
+#define Try_Intercept_From(source, type, path)                                                     \
+    do {                                                                                           \
         if (auto intercept_s = (source).try_intercept_syscall(type, path); !intercept_s.is_ok()) { \
-            return intercept_s; \
-        } \
+            return intercept_s;                                                                    \
+        }                                                                                          \
     } while (0)
 
 namespace fs = std::filesystem;
@@ -107,7 +107,7 @@ auto DynamicMemory::new_reader(const std::string &path, Reader **out) -> Status
 {
     auto &mem = get_memory(path);
     Try_Intercept_From(*this, Interceptor::OPEN, path);
-    
+
     if (mem.created) {
         *out = new MemoryReader {path, *this, mem};
         return Status::ok();
@@ -217,7 +217,7 @@ auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::s
     return Status::ok();
 }
 
-auto DynamicMemory::clone() const -> Storage*
+auto DynamicMemory::clone() const -> Storage *
 {
     auto *storage = new DynamicMemory;
     storage->m_memory = m_memory;

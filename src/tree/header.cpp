@@ -29,7 +29,8 @@ static auto write_file_header(Byte *data, const FileHeader &header) -> void
 }
 
 FileHeader::FileHeader(const Page &page)
-    : FileHeader {page.data()} {}
+    : FileHeader {page.data()}
+{}
 
 FileHeader::FileHeader(const Byte *data)
 {

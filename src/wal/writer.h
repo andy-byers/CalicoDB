@@ -16,8 +16,7 @@ public:
           m_file {&file}
     {}
 
-    [[nodiscard]]
-    auto block_count() const -> Size
+    [[nodiscard]] auto block_count() const -> Size
     {
         return m_block;
     }

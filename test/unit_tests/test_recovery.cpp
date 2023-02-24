@@ -1,13 +1,13 @@
 /*
  * Recovery tests (harness is modified from LevelDB).
  */
-#include "unit_tests.h"
 #include "calico/calico.h"
 #include "tools.h"
+#include "unit_tests.h"
 
 namespace Calico {
 
-class RecoveryTestHarness: public InMemoryTest {
+class RecoveryTestHarness : public InMemoryTest {
 public:
     RecoveryTestHarness()
         : db_prefix {PREFIX}
@@ -23,18 +23,18 @@ public:
         close();
     }
 
-    auto impl() const -> DatabaseImpl * 
+    auto impl() const -> DatabaseImpl *
     {
-        return reinterpret_cast<DatabaseImpl*>(db); 
+        return reinterpret_cast<DatabaseImpl *>(db);
     }
-    
-    void close() 
+
+    void close()
     {
         delete db;
         db = nullptr;
     }
 
-    auto open_with_status(Options* options = nullptr)  -> Status
+    auto open_with_status(Options *options = nullptr) -> Status
     {
         close();
         Options opts = db_options;
@@ -48,17 +48,17 @@ public:
         return Database::open(db_prefix, opts, &db);
     }
 
-    auto open(Options* options = nullptr) -> void
+    auto open(Options *options = nullptr) -> void
     {
         ASSERT_OK(open_with_status(options));
     }
 
-    auto put(const std::string& k, const std::string& v) const -> Status
+    auto put(const std::string &k, const std::string &v) const -> Status
     {
         return db->put(k, v);
     }
 
-    auto get(const std::string& k) const -> std::string
+    auto get(const std::string &k) const -> std::string
     {
         std::string result;
         Status s = db->get(k, result);
@@ -87,11 +87,6 @@ public:
         return logs.size();
     }
 
-    auto first_log_file() -> Id
-    {
-        return get_logs()[0];
-    }
-
     auto get_logs() -> std::vector<Id>
     {
         std::vector<std::string> filenames;
@@ -106,11 +101,11 @@ public:
     }
 
     auto num_logs() -> Size
-    { 
-        return get_logs().size(); 
+    {
+        return get_logs().size();
     }
 
-    auto file_size(const std::string& fname) -> Size 
+    auto file_size(const std::string &fname) -> Size
     {
         Size result;
         EXPECT_OK(storage->file_size(fname, result));
@@ -126,9 +121,7 @@ public:
 
 class RecoveryTests
     : public RecoveryTestHarness,
-      public testing::Test
-{
-
+      public testing::Test {
 };
 
 TEST_F(RecoveryTests, NormalShutdown)
@@ -234,13 +227,11 @@ TEST_F(RecoveryTests, SanityCheck)
 
 class RecoverySanityCheck
     : public RecoveryTestHarness,
-      public testing::TestWithParam<std::tuple<std::string, Tools::Interceptor::Type, int>>
-{
+      public testing::TestWithParam<std::tuple<std::string, Tools::Interceptor::Type, int>> {
 public:
     RecoverySanityCheck()
         : interceptor_prefix {db_prefix + std::get<0>(GetParam())}
     {
-        db_options.info_log = new Tools::StderrLogger;
         open();
 
         Tools::RandomGenerator random {1'024 * 1'024 * 8};
@@ -253,10 +244,7 @@ public:
         }
     }
 
-    ~RecoverySanityCheck()
-    {
-        delete db_options.info_log;
-    }
+    ~RecoverySanityCheck() override = default;
 
     auto SetUp() -> void override
     {
@@ -333,4 +321,4 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 10)));
 
-}  // namespace Calico
+} // namespace Calico

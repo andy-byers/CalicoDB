@@ -2,41 +2,41 @@
 #ifndef CALICO_TOOLS_H
 #define CALICO_TOOLS_H
 
-#include <calico/calico.h>
 #include "database/database_impl.h"
+#include <calico/calico.h>
 #include <climits>
-#include <functional>
 #include <cstdio>
+#include <functional>
 #include <mutex>
 #include <random>
 #include <string>
 #include <unordered_map>
 
-#define CHECK_TRUE(cond) \
-    do { \
-        if (!(cond)) {     \
+#define CHECK_TRUE(cond)                             \
+    do {                                             \
+        if (!(cond)) {                               \
             std::fputs(#cond " is false\n", stderr); \
-            std::abort(); \
-        } \
+            std::abort();                            \
+        }                                            \
     } while (0)
 
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr) \
-    do { \
+#define CHECK_OK(expr)                                   \
+    do {                                                 \
         if (auto assert_s = (expr); !assert_s.is_ok()) { \
-            std::fputs(assert_s.what().data(), stderr); \
-            std::abort(); \
-        } \
+            std::fputs(assert_s.what().data(), stderr);  \
+            std::abort();                                \
+        }                                                \
     } while (0)
 
-#define CHECK_EQ(lhs, rhs) \
-    do { \
-        if ((lhs) != (rhs)) { \
+#define CHECK_EQ(lhs, rhs)                        \
+    do {                                          \
+        if ((lhs) != (rhs)) {                     \
             std::fputs(#lhs " != " #rhs, stderr); \
-            std::abort(); \
-        } \
+            std::abort();                         \
+        }                                         \
     } while (0)
 
 namespace Calico::Tools {
@@ -62,8 +62,7 @@ struct Interceptor {
           type {type_}
     {}
 
-    [[nodiscard]]
-    auto operator()() const -> Status
+    [[nodiscard]] auto operator()() const -> Status
     {
         return callback();
     }
@@ -177,7 +176,7 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class StderrLogger: public Logger {
+class StderrLogger : public Logger {
 public:
     ~StderrLogger() override = default;
 
@@ -193,7 +192,6 @@ public:
         return Status::ok();
     }
 };
-
 
 template<std::size_t Length = 12>
 static auto integral_key(Size key) -> std::string
@@ -251,15 +249,13 @@ public:
     }
 };
 
-
 struct DatabaseCounts {
     Size records {};
     Size pages {};
     Size updates {};
 };
 
-[[nodiscard]]
-inline auto parse_db_counts(std::string prop) -> DatabaseCounts
+[[nodiscard]] inline auto parse_db_counts(std::string prop) -> DatabaseCounts
 {
     DatabaseCounts counts;
 
@@ -293,8 +289,7 @@ struct DatabaseStats {
     Size wal_throughput {};
 };
 
-[[nodiscard]]
-inline auto parse_db_stats(std::string prop) -> DatabaseStats
+[[nodiscard]] inline auto parse_db_stats(std::string prop) -> DatabaseStats
 {
     DatabaseStats stats;
 

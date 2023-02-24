@@ -7,8 +7,7 @@
 namespace Calico {
 
 template<class Reader>
-[[nodiscard]]
-auto read_exact_at(Reader &reader, Span out, Size offset) -> Status
+[[nodiscard]] auto read_exact_at(Reader &reader, Span out, Size offset) -> Status
 {
     auto requested = out.size();
     auto s = reader.read(out.data(), requested, offset);
@@ -20,8 +19,7 @@ auto read_exact_at(Reader &reader, Span out, Size offset) -> Status
 }
 
 template<class Reader>
-[[nodiscard]]
-auto read_exact(Reader &reader, Span out) -> Status
+[[nodiscard]] auto read_exact(Reader &reader, Span out) -> Status
 {
     auto requested = out.size();
     auto s = reader.read(out.data(), requested);

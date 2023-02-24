@@ -5,10 +5,10 @@
 #ifndef CALICO_SLICE_H
 #define CALICO_SLICE_H
 
+#include "common.h"
 #include <cassert>
 #include <cstring>
 #include <string>
-#include "common.h"
 
 namespace Calico {
 
@@ -44,20 +44,17 @@ public:
         : Slice {rhs.data(), rhs.size()}
     {}
 
-    [[nodiscard]]
-    constexpr auto is_empty() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_empty() const noexcept -> bool
     {
         return m_size == 0;
     }
 
-    [[nodiscard]]
-    constexpr auto data() const noexcept -> const Byte *
+    [[nodiscard]] constexpr auto data() const noexcept -> const Byte *
     {
         return m_data;
     }
 
-    [[nodiscard]]
-    constexpr auto size() const noexcept -> Size
+    [[nodiscard]] constexpr auto size() const noexcept -> Size
     {
         return m_size;
     }
@@ -68,8 +65,7 @@ public:
         return m_data[index];
     }
 
-    [[nodiscard]]
-    constexpr auto range(Size offset, Size size) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(Size offset, Size size) const noexcept -> Slice
     {
         assert(size <= m_size);
         assert(offset <= m_size);
@@ -77,8 +73,7 @@ public:
         return {m_data + offset, size};
     }
 
-    [[nodiscard]]
-    constexpr auto range(Size offset) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(Size offset) const noexcept -> Slice
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
@@ -105,8 +100,7 @@ public:
         return *this;
     }
 
-    [[nodiscard]]
-    constexpr auto starts_with(Slice rhs) const noexcept -> bool
+    [[nodiscard]] constexpr auto starts_with(Slice rhs) const noexcept -> bool
     {
         if (rhs.size() > m_size) {
             return false;
@@ -114,8 +108,7 @@ public:
         return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
     }
 
-    [[nodiscard]]
-    auto to_string() const noexcept -> std::string
+    [[nodiscard]] auto to_string() const noexcept -> std::string
     {
         return {m_data, m_size};
     }

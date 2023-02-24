@@ -1,10 +1,10 @@
 #ifndef CALICO_UTILS_TYPES_H
 #define CALICO_UTILS_TYPES_H
 
-#include <utility>
-#include <vector>
 #include "calico/slice.h"
 #include "utils.h"
+#include <utility>
+#include <vector>
 
 namespace Calico {
 
@@ -19,38 +19,32 @@ struct Id {
         }
     };
 
-    [[nodiscard]]
-    static constexpr auto from_index(Size index) noexcept -> Id
+    [[nodiscard]] static constexpr auto from_index(Size index) noexcept -> Id
     {
         return {index + 1};
     }
 
-    [[nodiscard]]
-    static constexpr auto null() noexcept -> Id
+    [[nodiscard]] static constexpr auto null() noexcept -> Id
     {
         return {null_value};
     }
 
-    [[nodiscard]]
-    static constexpr auto root() noexcept -> Id
+    [[nodiscard]] static constexpr auto root() noexcept -> Id
     {
         return {root_value};
     }
 
-    [[nodiscard]]
-    constexpr auto is_null() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_null() const noexcept -> bool
     {
         return value == null_value;
     }
 
-    [[nodiscard]]
-    constexpr auto is_root() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_root() const noexcept -> bool
     {
         return value == root_value;
     }
 
-    [[nodiscard]]
-    constexpr auto as_index() const noexcept -> Size
+    [[nodiscard]] constexpr auto as_index() const noexcept -> Size
     {
         CALICO_EXPECT_NE(value, null().value);
         return value - 1;
@@ -95,7 +89,7 @@ class AlignedBuffer {
 public:
     AlignedBuffer(Size size, Size alignment)
         : m_data {
-              new(std::align_val_t {alignment}, std::nothrow) Byte[size](),
+              new (std::align_val_t {alignment}, std::nothrow) Byte[size](),
               Deleter {std::align_val_t {alignment}},
           }
     {
@@ -103,14 +97,12 @@ public:
         CALICO_EXPECT_EQ(size % alignment, 0);
     }
 
-    [[nodiscard]]
-    auto get() -> Byte *
+    [[nodiscard]] auto get() -> Byte *
     {
         return m_data.get();
     }
 
-    [[nodiscard]]
-    auto get() const -> const Byte *
+    [[nodiscard]] auto get() const -> const Byte *
     {
         return m_data.get();
     }
@@ -207,28 +199,25 @@ public:
     }
 
     Span(std::string &rhs) noexcept
-        : Span {rhs.data(), rhs.size()} {}
+        : Span {rhs.data(), rhs.size()}
+    {}
 
-    [[nodiscard]]
-    constexpr auto is_empty() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_empty() const noexcept -> bool
     {
         return m_size == 0;
     }
 
-    [[nodiscard]]
-    constexpr auto data() noexcept -> Byte *
+    [[nodiscard]] constexpr auto data() noexcept -> Byte *
     {
         return m_data;
     }
 
-    [[nodiscard]]
-    constexpr auto data() const noexcept -> const Byte *
+    [[nodiscard]] constexpr auto data() const noexcept -> const Byte *
     {
         return m_data;
     }
 
-    [[nodiscard]]
-    constexpr auto size() const noexcept -> Size
+    [[nodiscard]] constexpr auto size() const noexcept -> Size
     {
         return m_size;
     }
@@ -250,8 +239,7 @@ public:
         return m_data[index];
     }
 
-    [[nodiscard]]
-    constexpr auto range(Size offset, Size size) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(Size offset, Size size) const noexcept -> Slice
     {
         assert(size <= m_size);
         assert(offset <= m_size);
@@ -260,8 +248,7 @@ public:
         return Slice {m_data + offset, size};
     }
 
-    [[nodiscard]]
-    constexpr auto range(Size offset, Size size) noexcept -> Span
+    [[nodiscard]] constexpr auto range(Size offset, Size size) noexcept -> Span
     {
         assert(size <= m_size);
         assert(offset <= m_size);
@@ -270,22 +257,19 @@ public:
         return Span {m_data + offset, size};
     }
 
-    [[nodiscard]]
-    constexpr auto range(Size offset) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(Size offset) const noexcept -> Slice
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
     }
 
-    [[nodiscard]]
-    constexpr auto range(Size offset) noexcept -> Span
+    [[nodiscard]] constexpr auto range(Size offset) noexcept -> Span
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
     }
 
-    [[nodiscard]]
-    constexpr auto copy() const noexcept -> Span
+    [[nodiscard]] constexpr auto copy() const noexcept -> Span
     {
         return *this;
     }
@@ -311,8 +295,7 @@ public:
         return *this;
     }
 
-    [[nodiscard]]
-    constexpr auto starts_with(const Byte *rhs) const noexcept -> bool
+    [[nodiscard]] constexpr auto starts_with(const Byte *rhs) const noexcept -> bool
     {
         // NOTE: rhs must be null-terminated.
         const auto size = std::char_traits<Byte>::length(rhs);
@@ -321,16 +304,14 @@ public:
         return std::memcmp(m_data, rhs, size) == 0;
     }
 
-    [[nodiscard]]
-    constexpr auto starts_with(const Slice &rhs) const noexcept -> bool
+    [[nodiscard]] constexpr auto starts_with(const Slice &rhs) const noexcept -> bool
     {
         if (rhs.size() > m_size)
             return false;
         return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
     }
 
-    [[nodiscard]]
-    auto to_string() const noexcept -> std::string
+    [[nodiscard]] auto to_string() const noexcept -> std::string
     {
         return {m_data, m_size};
     }

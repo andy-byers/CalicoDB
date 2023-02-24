@@ -1,15 +1,14 @@
 #include "posix_storage.h"
-#include <sys/stat.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace Calico {
 
 static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
 
-[[nodiscard]]
-static auto to_status(int code) -> Status
+[[nodiscard]] static auto to_status(int code) -> Status
 {
     switch (code) {
         case ENOENT:
@@ -23,8 +22,7 @@ static auto to_status(int code) -> Status
     }
 }
 
-[[nodiscard]]
-static auto errno_to_status() -> Status
+[[nodiscard]] static auto errno_to_status() -> Status
 {
     const auto code = errno;
     errno = 0;

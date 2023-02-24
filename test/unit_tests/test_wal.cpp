@@ -66,15 +66,13 @@ TEST_F(WalRecordMergeTests, MergingInvalidTypesIndicatesCorruption)
 
 class WalRecordGenerator {
 public:
-
-    [[nodiscard]]
-    auto setup_deltas(Span image) -> std::vector<PageDelta>
+    [[nodiscard]] auto setup_deltas(Span image) -> std::vector<PageDelta>
     {
         static constexpr Size MAX_WIDTH {30};
         static constexpr Size MAX_SPREAD {20};
         std::vector<PageDelta> deltas;
 
-        for (auto offset = random.Next<Size>(image.size() / 10); offset < image.size(); ) {
+        for (auto offset = random.Next<Size>(image.size() / 10); offset < image.size();) {
             const auto rest = image.size() - offset;
             const auto size = random.Next<Size>(1, std::min(rest, MAX_WIDTH));
             deltas.emplace_back(PageDelta {offset, size});
@@ -122,7 +120,7 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(image);
-    const auto payload_in = encode_deltas_payload(Lsn{2}, Id::root(), image, deltas, Span {scratch});
+    const auto payload_in = encode_deltas_payload(Lsn {2}, Id::root(), image, deltas, Span {scratch});
     WalPayloadOut payload_out {Span {scratch}.truncate(payload_in.data().size() + sizeof(Lsn))};
     ASSERT_EQ(payload_in.lsn(), payload_out.lsn());
     const auto payload = decode_payload(payload_out);
@@ -135,8 +133,7 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
     }));
 }
 
-[[nodiscard]]
- auto get_ids(const WalSet &c)
+[[nodiscard]] auto get_ids(const WalSet &c)
 {
     std::vector<Id> ids;
     std::transform(cbegin(c.segments()), cend(c.segments()), back_inserter(ids), [](const auto &entry) {
@@ -177,8 +174,7 @@ TEST_F(WalSetTests, RecordsMostRecentId)
 }
 
 template<class Itr>
-[[nodiscard]]
-auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, Id id, Size n)
+[[nodiscard]] auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, Id id, Size n)
 {
     return std::distance(begin, end) == std::ptrdiff_t(n) && std::all_of(begin, end, [&id](auto current) {
                return current.value == id.value++;
@@ -236,8 +232,7 @@ TEST_F(WalSetTests, RemovesSomeSegmentsFromRight)
 
 class WalComponentTests
     : public InMemoryTest,
-      public testing::Test
-{
+      public testing::Test {
 public:
     static constexpr Size PAGE_SIZE {0x200};
     const std::string WAL_PREFIX {"test/wal-"};
@@ -261,22 +256,19 @@ public:
         ASSERT_TRUE(wal_read_with_status(reader, _).is_not_found());
     }
 
-    [[nodiscard]]
-    auto make_reader(Id id) -> WalReader
+    [[nodiscard]] auto make_reader(Id id) -> WalReader
     {
         EXPECT_OK(storage->new_reader(encode_segment_name(WAL_PREFIX, id), &m_reader_file));
         return WalReader {*m_reader_file, m_reader_tail};
     }
 
-    [[nodiscard]]
-    auto make_writer(Id id) -> WalWriter
+    [[nodiscard]] auto make_writer(Id id) -> WalWriter
     {
         EXPECT_OK(storage->new_logger(encode_segment_name(WAL_PREFIX, id), &m_writer_file));
         return WalWriter {*m_writer_file, m_writer_tail};
     }
 
-    [[nodiscard]]
-    static auto wal_write(WalWriter &writer, Lsn lsn, const Slice &data) -> Status
+    [[nodiscard]] static auto wal_write(WalWriter &writer, Lsn lsn, const Slice &data) -> Status
     {
         std::string buffer(sizeof(lsn), '\0');
         buffer.append(data.to_string());
@@ -284,8 +276,7 @@ public:
         return writer.write(payload);
     }
 
-    [[nodiscard]]
-    static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
+    [[nodiscard]] static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
     {
         out.resize(wal_scratch_size(PAGE_SIZE));
         Span buffer {out};
@@ -299,8 +290,7 @@ public:
         return Status::ok();
     }
 
-    [[nodiscard]]
-    static auto wal_read(WalReader &reader, Lsn *lsn = nullptr) -> std::string
+    [[nodiscard]] static auto wal_read(WalReader &reader, Lsn *lsn = nullptr) -> std::string
     {
         std::string out;
         EXPECT_OK(wal_read_with_status(reader, out, lsn));
@@ -389,7 +379,7 @@ TEST_F(WalComponentTests, Corruption)
     for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
     }
-    ASSERT_LT(writer.flushed_lsn(), Lsn {PAGE_SIZE*2 - 1});
+    ASSERT_LT(writer.flushed_lsn(), Lsn {PAGE_SIZE * 2 - 1});
 
     auto reader = make_reader(Id::root());
     for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
@@ -404,4 +394,4 @@ TEST_F(WalComponentTests, Corruption)
     assert_reader_is_done(reader);
 }
 
-} // <anonymous>
+} // namespace Calico

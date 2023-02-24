@@ -30,8 +30,7 @@ namespace Calico {
 template<
     class K,
     class V,
-    class F = std::hash<K>
->
+    class F = std::hash<K>>
 class Cache {
 public:
     using Key = K;
@@ -51,21 +50,18 @@ public:
 
     Cache() = default;
 
-    [[nodiscard]]
-    auto is_empty() const -> bool
+    [[nodiscard]] auto is_empty() const -> bool
     {
         return m_list.empty();
     }
 
-    [[nodiscard]]
-    auto size() const -> std::size_t
+    [[nodiscard]] auto size() const -> std::size_t
     {
         return m_list.size();
     }
 
     // NOTE: Use this to ask if an entry exists without altering the cache.
-    [[nodiscard]]
-    auto contains(const Key &key) const -> bool
+    [[nodiscard]] auto contains(const Key &key) const -> bool
     {
         using std::end;
 
@@ -73,8 +69,7 @@ public:
     }
 
     // NOTE: Use this to ask for an entry without altering the cache.
-    [[nodiscard]]
-    auto query(const Key &key) const -> ConstIterator
+    [[nodiscard]] auto query(const Key &key) const -> ConstIterator
     {
         using std::end;
 
@@ -84,8 +79,7 @@ public:
         return end(m_list);
     }
 
-    [[nodiscard]]
-    auto get(const Key &key) -> Iterator
+    [[nodiscard]] auto get(const Key &key) -> Iterator
     {
         using std::end;
 
@@ -139,8 +133,7 @@ public:
         return false;
     }
 
-    [[nodiscard]]
-    auto evict() -> std::optional<Entry>
+    [[nodiscard]] auto evict() -> std::optional<Entry>
     {
         using std::end;
 
@@ -163,57 +156,49 @@ public:
         return entry;
     }
 
-    [[nodiscard]]
-    auto begin() -> Iterator
+    [[nodiscard]] auto begin() -> Iterator
     {
         using std::begin;
         return begin(m_list);
     }
 
-    [[nodiscard]]
-    auto begin() const -> ConstIterator
+    [[nodiscard]] auto begin() const -> ConstIterator
     {
         using std::begin;
         return begin(m_list);
     }
 
-    [[nodiscard]]
-    auto end() -> Iterator
+    [[nodiscard]] auto end() -> Iterator
     {
         using std::end;
         return end(m_list);
     }
 
-    [[nodiscard]]
-    auto end() const -> ConstIterator
+    [[nodiscard]] auto end() const -> ConstIterator
     {
         using std::end;
         return end(m_list);
     }
 
-    [[nodiscard]]
-    auto rbegin() -> ReverseIterator
+    [[nodiscard]] auto rbegin() -> ReverseIterator
     {
         using std::rbegin;
         return rbegin(m_list);
     }
 
-    [[nodiscard]]
-    auto rbegin() const -> ConstReverseIterator
+    [[nodiscard]] auto rbegin() const -> ConstReverseIterator
     {
         using std::rbegin;
         return rbegin(m_list);
     }
 
-    [[nodiscard]]
-    auto rend() -> ReverseIterator
+    [[nodiscard]] auto rend() -> ReverseIterator
     {
         using std::rend;
         return rend(m_list);
     }
 
-    [[nodiscard]]
-    auto rend() const -> ConstReverseIterator
+    [[nodiscard]] auto rend() const -> ConstReverseIterator
     {
         using std::rend;
         return rend(m_list);

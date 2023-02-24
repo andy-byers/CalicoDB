@@ -16,8 +16,7 @@ namespace fs = std::filesystem;
 
 class BasicDatabaseTests
     : public OnDiskTest,
-      public testing::Test
-{
+      public testing::Test {
 public:
     BasicDatabaseTests()
     {
@@ -32,8 +31,7 @@ public:
         delete options.info_log;
     }
 
-    [[nodiscard]]
-    static auto db_impl(const Database *db) -> const DatabaseImpl *
+    [[nodiscard]] static auto db_impl(const Database *db) -> const DatabaseImpl *
     {
         return reinterpret_cast<const DatabaseImpl *>(db);
     }
@@ -239,8 +237,7 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
 
 class DbVacuumTests
     : public OnDiskTest,
-      public testing::TestWithParam<std::tuple<Size, Size, bool>>
-{
+      public testing::TestWithParam<std::tuple<Size, Size, bool>> {
 public:
     DbVacuumTests()
         : lower_bounds {std::get<0>(GetParam())},
@@ -321,8 +318,7 @@ public:
 
     ~TestDatabase() = default;
 
-    [[nodiscard]]
-    auto reopen() -> Status
+    [[nodiscard]] auto reopen() -> Status
     {
         impl = std::make_unique<DatabaseImpl>();
         return impl->open("test", options);
@@ -336,8 +332,7 @@ public:
 
 class DbRevertTests
     : public InMemoryTest,
-      public testing::Test
-{
+      public testing::Test {
 protected:
     DbRevertTests()
     {
@@ -426,8 +421,7 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 
 class DbRecoveryTests
     : public InMemoryTest,
-      public testing::Test
-{
+      public testing::Test {
 protected:
     ~DbRecoveryTests() override = default;
 };
@@ -486,8 +480,7 @@ enum class ErrorTarget {
 
 class DbErrorTests
     : public InMemoryTest,
-      public testing::TestWithParam<Size>
-{
+      public testing::TestWithParam<Size> {
 protected:
     DbErrorTests()
     {
@@ -586,8 +579,7 @@ struct ErrorWrapper {
 
 class DbFatalErrorTests
     : public InMemoryTest,
-      public testing::TestWithParam<ErrorWrapper>
-{
+      public testing::TestWithParam<ErrorWrapper> {
 protected:
     DbFatalErrorTests()
     {
@@ -605,11 +597,11 @@ protected:
 
         const auto make_interceptor = [this](const auto &prefix, auto type) {
             return Tools::Interceptor {prefix, type, [this] {
-                if (counter++ >= GetParam().successes) {
-                    return special_error();
-                }
-                return Status::ok();
-            }};
+                                           if (counter++ >= GetParam().successes) {
+                                               return special_error();
+                                           }
+                                           return Status::ok();
+                                       }};
         };
 
         switch (GetParam().target) {
@@ -639,8 +631,10 @@ TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
 {
     while (db->impl->status().is_ok()) {
         auto itr = begin(committed);
-        for (Size i {}; i < committed.size() && db->impl->erase((itr++)->first).is_ok(); ++i);
-        for (Size i {}; i < committed.size() && db->impl->put((itr++)->first, "value").is_ok(); ++i);
+        for (Size i {}; i < committed.size() && db->impl->erase((itr++)->first).is_ok(); ++i)
+            ;
+        for (Size i {}; i < committed.size() && db->impl->put((itr++)->first, "value").is_ok(); ++i)
+            ;
     }
     assert_special_error(db->impl->status());
     assert_special_error(db->impl->put("key", "value"));
@@ -665,7 +659,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
 {
     auto itr = begin(committed);
-    for (; ; ) {
+    for (;;) {
         auto s = db->impl->erase(itr++->first);
         if (!s.is_ok()) {
             assert_special_error(s);
@@ -744,26 +738,22 @@ class ExtendedCursor : public Cursor {
 public:
     ~ExtendedCursor() override = default;
 
-    [[nodiscard]]
-    auto is_valid() const -> bool override
+    [[nodiscard]] auto is_valid() const -> bool override
     {
         return m_base->is_valid();
     }
 
-    [[nodiscard]]
-    auto status() const -> Status override
+    [[nodiscard]] auto status() const -> Status override
     {
         return m_base->status();
     }
 
-    [[nodiscard]]
-    auto key() const -> Slice override
+    [[nodiscard]] auto key() const -> Slice override
     {
         return m_base->key();
     }
 
-    [[nodiscard]]
-    auto value() const -> Slice override
+    [[nodiscard]] auto value() const -> Slice override
     {
         return m_base->value();
     }
@@ -799,11 +789,10 @@ class ExtendedDatabase : public Database {
     std::unique_ptr<Database> m_base;
 
 public:
-    [[nodiscard]]
-    static auto open(const Slice &base, Options options, ExtendedDatabase **out) -> Status
+    [[nodiscard]] static auto open(const Slice &base, Options options, ExtendedDatabase **out) -> Status
     {
         const auto prefix = base.to_string() + "_";
-        auto *ext = new(std::nothrow) ExtendedDatabase;
+        auto *ext = new (std::nothrow) ExtendedDatabase;
         if (ext == nullptr) {
             return Status::system_error("cannot allocate extension database: out of memory");
         }
@@ -821,50 +810,42 @@ public:
 
     ~ExtendedDatabase() override = default;
 
-    [[nodiscard]]
-    auto get_property(const Slice &name, std::string &out) const -> bool override
+    [[nodiscard]] auto get_property(const Slice &name, std::string &out) const -> bool override
     {
         return m_base->get_property(name, out);
     }
 
-    [[nodiscard]]
-    auto new_cursor() const -> Cursor * override
+    [[nodiscard]] auto new_cursor() const -> Cursor * override
     {
         return new ExtendedCursor {m_base->new_cursor()};
     }
 
-    [[nodiscard]]
-    auto status() const -> Status override
+    [[nodiscard]] auto status() const -> Status override
     {
         return m_base->status();
     }
 
-    [[nodiscard]]
-    auto vacuum() -> Status override
+    [[nodiscard]] auto vacuum() -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]]
-    auto commit() -> Status override
+    [[nodiscard]] auto commit() -> Status override
     {
         return m_base->commit();
     }
 
-    [[nodiscard]]
-    auto get(const Slice &key, std::string &value) const -> Status override
+    [[nodiscard]] auto get(const Slice &key, std::string &value) const -> Status override
     {
         return m_base->get(key, value);
     }
 
-    [[nodiscard]]
-    auto put(const Slice &key, const Slice &value) -> Status override
+    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override
     {
         return m_base->put(key, value);
     }
 
-    [[nodiscard]]
-    auto erase(const Slice &key) -> Status override
+    [[nodiscard]] auto erase(const Slice &key) -> Status override
     {
         return m_base->erase(key);
     }
@@ -901,8 +882,7 @@ TEST(ExtensionTests, Extensions)
 
 class DbOpenTests
     : public OnDiskTest,
-      public testing::Test
-{
+      public testing::Test {
 protected:
     DbOpenTests()
     {
@@ -947,8 +927,7 @@ TEST_F(DbOpenTests, FailsIfDbExists)
 
 class ApiTests
     : public InMemoryTest,
-      public testing::Test
-{
+      public testing::Test {
 protected:
     ApiTests()
     {
@@ -1095,10 +1074,9 @@ TEST_F(ApiTests, HandlesLargeKeys)
     delete cursor;
 }
 
-class LargePayloadTests: public ApiTests {
+class LargePayloadTests : public ApiTests {
 public:
-    [[nodiscard]]
-    auto random_string(Size max_size) const -> std::string
+    [[nodiscard]] auto random_string(Size max_size) const -> std::string
     {
         return random.Generate(random.Next<Size>(1, max_size)).to_string();
     }
@@ -1204,8 +1182,7 @@ TEST_F(CommitFailureTests, WalFlushFailure)
 
 class WalPrefixTests
     : public OnDiskTest,
-      public testing::Test
-{
+      public testing::Test {
 public:
     WalPrefixTests()
     {
@@ -1222,4 +1199,4 @@ TEST_F(WalPrefixTests, WalDirectoryMustExist)
     ASSERT_TRUE(Calico::Database::open(ROOT, options, &db).is_not_found());
 }
 
-} // <anonymous>
+} // namespace Calico

@@ -1,15 +1,15 @@
 #ifndef CALICO_UTILS_H
 #define CALICO_UTILS_H
 
+#include "calico/status.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
-#include "calico/status.h"
 
 #if NDEBUG
-#  define CALICO_EXPECT_(expr, file, line)
+#define CALICO_EXPECT_(expr, file, line)
 #else
-#  define CALICO_EXPECT_(expr, file, line) Impl::expect(expr, #expr, file, line)
+#define CALICO_EXPECT_(expr, file, line) Impl::expect(expr, #expr, file, line)
 #endif // NDEBUG
 
 #define CALICO_EXPECT_TRUE(expr) CALICO_EXPECT_(expr, __FILE__, __LINE__)
@@ -21,11 +21,11 @@
 #define CALICO_EXPECT_GT(lhs, rhs) CALICO_EXPECT_TRUE((lhs) > (rhs))
 #define CALICO_EXPECT_GE(lhs, rhs) CALICO_EXPECT_TRUE((lhs) >= (rhs))
 
-#define Calico_Try(expr) \
-    do { \
+#define Calico_Try(expr)                                             \
+    do {                                                             \
         if (auto __calico_try_s = (expr); !__calico_try_s.is_ok()) { \
-            return __calico_try_s; \
-        } \
+            return __calico_try_s;                                   \
+        }                                                            \
     } while (0)
 
 namespace Calico {
@@ -52,8 +52,7 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
     return v && !(v & (v - 1));
 }
 
-[[nodiscard]]
-inline auto get_status_name(const Status &s) noexcept -> const char *
+[[nodiscard]] inline auto get_status_name(const Status &s) noexcept -> const char *
 {
     if (s.is_not_found()) {
         return "not found";

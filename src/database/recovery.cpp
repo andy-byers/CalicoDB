@@ -76,6 +76,14 @@ auto Recovery::recover_phase_1() -> Status
         return Status::ok();
     }
 
+    // We are starting up the database, so these should be set now. They may be updated if we find a
+    // commit record in the WAL past what was applied to the database.
+    if (m_wal->current_lsn().is_null()) {
+        m_wal->m_last_lsn = *m_commit_lsn;
+        m_wal->m_flushed_lsn = *m_commit_lsn;
+        m_pager->m_recovery_lsn = *m_commit_lsn;
+    }
+
     std::unique_ptr<Reader> file;
     auto segment = m_set->first();
     auto commit_lsn = *m_commit_lsn;
@@ -137,7 +145,7 @@ auto Recovery::recover_phase_1() -> Status
         Calico_Try(open_reader(segment, file));
         WalReader reader {*file, m_reader_tail};
 
-        for (; ; ) {
+        for (;;) {
             Span buffer {m_reader_data};
             auto s = reader.read(buffer);
 
@@ -164,7 +172,7 @@ auto Recovery::recover_phase_1() -> Status
     /* Roll forward, applying missing updates until we reach the end. The final segment may contain
      * a partial/corrupted record.
      */
-    for (; ; segment = m_set->id_after(segment)) {
+    for (;; segment = m_set->id_after(segment)) {
         Calico_Try(roll(redo));
         if (segment == m_set->last()) {
             break;
@@ -199,11 +207,23 @@ auto Recovery::recover_phase_1() -> Status
 auto Recovery::recover_phase_2() -> Status
 {
     // Pager needs the updated state to determine the page count.
-    Page root;
-    Calico_Try(m_pager->acquire(Id::root(), root));
-    FileHeader header {root};
+    Page page;
+    Calico_Try(m_pager->acquire(Id::root(), page));
+    FileHeader header {page};
     m_pager->load_state(header);
-    m_pager->release(std::move(root));
+    m_pager->release(std::move(page));
+
+    // TODO: This is too expensive for large databases. Look into a WAL index?
+    // Make sure we aren't missing any WAL records.
+    //for (auto id = Id::root(); id.value <= m_pager->page_count(); id.value++) {
+    //    Calico_Try(m_pager->acquire(Id::root(), page));
+    //    const auto lsn = read_page_lsn(page);
+    //    m_pager->release(std::move(page));
+    //
+    //    if (lsn > *m_commit_lsn) {
+    //        return Status::corruption("missing wal updates");
+    //    }
+    //}
 
     /* Make sure all changes have made it to disk, then remove WAL segments from the right.
      */

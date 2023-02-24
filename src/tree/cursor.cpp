@@ -5,8 +5,7 @@
 
 namespace Calico {
 
-[[nodiscard]]
-static auto default_error_status() -> Status
+[[nodiscard]] static auto default_error_status() -> Status
 {
     return Status::not_found("cursor is invalid");
 }

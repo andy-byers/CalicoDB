@@ -3,8 +3,8 @@
 
 #include "calico/database.h"
 
-#include "recovery.h"
 #include "pager/pager.h"
+#include "recovery.h"
 #include "tree/header.h"
 #include "tree/tree.h"
 #include "wal/wal.h"
@@ -17,7 +17,7 @@ class Recovery;
 class Storage;
 class WriteAheadLog;
 
-class DatabaseImpl: public Database {
+class DatabaseImpl : public Database {
 public:
     friend class Database;
 
@@ -37,8 +37,7 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
-    [[nodiscard]]
-    auto record_count() const -> Size
+    [[nodiscard]] auto record_count() const -> Size
     {
         return m_record_count;
     }

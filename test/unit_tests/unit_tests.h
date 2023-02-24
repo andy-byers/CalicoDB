@@ -1,10 +1,6 @@
 #ifndef CALICO_TEST_UNIT_TESTS_H
 #define CALICO_TEST_UNIT_TESTS_H
 
-#include <filesystem>
-#include <iomanip>
-#include <sstream>
-#include <gtest/gtest.h>
 #include "calico/status.h"
 #include "pager/page.h"
 #include "storage/posix_storage.h"
@@ -12,60 +8,64 @@
 #include "utils/utils.h"
 #include "wal/wal.h"
 #include "wal/writer.h"
+#include <filesystem>
+#include <gtest/gtest.h>
+#include <iomanip>
+#include <sstream>
 
 namespace Calico {
 
-#define Clear_Interceptors() \
-    do { \
+#define Clear_Interceptors()                                                 \
+    do {                                                                     \
         dynamic_cast<Tools::DynamicMemory &>(*storage).clear_interceptors(); \
     } while (0)
 
-
-#define Quick_Interceptor(prefix__, type__) \
-    do { \
-        dynamic_cast<Tools::DynamicMemory &>(*storage) \
-            .add_interceptor(Tools::Interceptor {(prefix__), (type__), [] {return special_error();}}); \
+#define Quick_Interceptor(prefix__, type__)                                  \
+    do {                                                                     \
+        dynamic_cast<Tools::DynamicMemory &>(*storage)                       \
+            .add_interceptor(Tools::Interceptor {(prefix__), (type__), [] {  \
+                                                     return special_error(); \
+                                                 }});                        \
     } while (0)
 
-#define Counting_Interceptor(prefix__, type__, n__) \
-    do { \
-        dynamic_cast<Tools::DynamicMemory &>(*storage) \
+#define Counting_Interceptor(prefix__, type__, n__)                                   \
+    do {                                                                              \
+        dynamic_cast<Tools::DynamicMemory &>(*storage)                                \
             .add_interceptor(Tools::Interceptor {(prefix__), (type__), [&n = (n__)] { \
-                if (n-- <= 0) { \
-                    return special_error(); \
-                } \
-                return Status::ok(); \
-            }}); \
+                                                     if (n-- <= 0) {                  \
+                                                         return special_error();      \
+                                                     }                                \
+                                                     return Status::ok();             \
+                                                 }});                                 \
     } while (0)
 
 static constexpr auto EXPECTATION_MATCHER = "^expectation";
 
-#define EXPECT_OK(expr) \
-    do { \
-        const auto &expect_ok_status = (expr); \
+#define EXPECT_OK(expr)                                                                                                       \
+    do {                                                                                                                      \
+        const auto &expect_ok_status = (expr);                                                                                \
         EXPECT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.what().data(); \
     } while (0)
 
-#define ASSERT_OK(expr) \
-    do { \
-        const auto &expect_ok_status = (expr); \
+#define ASSERT_OK(expr)                                                                                                       \
+    do {                                                                                                                      \
+        const auto &expect_ok_status = (expr);                                                                                \
         ASSERT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.what().data(); \
     } while (0)
 
-#define EXPECT_HAS_VALUE(expr) \
-    do { \
-        const auto &expect_has_value_status = (expr); \
+#define EXPECT_HAS_VALUE(expr)                                                                                                                                         \
+    do {                                                                                                                                                               \
+        const auto &expect_has_value_status = (expr);                                                                                                                  \
         EXPECT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().what().data(); \
     } while (0)
 
-#define ASSERT_HAS_VALUE(expr) \
-    do { \
-        const auto &expect_has_value_status = (expr); \
+#define ASSERT_HAS_VALUE(expr)                                                                                                                                         \
+    do {                                                                                                                                                               \
+        const auto &expect_has_value_status = (expr);                                                                                                                  \
         ASSERT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().what().data(); \
     } while (0)
 
-[[nodiscard]]
-inline auto expose_message(const Status &s)
+[[nodiscard]] inline auto expose_message(const Status &s)
 {
     EXPECT_TRUE(s.is_ok()) << "Unexpected " << get_status_name(s) << " status: " << s.what().data();
     return s.is_ok();
@@ -84,8 +84,7 @@ public:
 
     virtual ~InMemoryTest() = default;
 
-    [[nodiscard]]
-    auto storage_handle() -> Tools::DynamicMemory &
+    [[nodiscard]] auto storage_handle() -> Tools::DynamicMemory &
     {
         return dynamic_cast<Tools::DynamicMemory &>(*storage);
     }
@@ -115,25 +114,22 @@ public:
     std::unique_ptr<Storage> storage;
 };
 
-class DisabledWriteAheadLog: public WriteAheadLog {
+class DisabledWriteAheadLog : public WriteAheadLog {
 public:
     DisabledWriteAheadLog() = default;
     ~DisabledWriteAheadLog() override = default;
 
-    [[nodiscard]]
-    auto flushed_lsn() const -> Id override
+    [[nodiscard]] auto flushed_lsn() const -> Id override
     {
         return {std::numeric_limits<Size>::max()};
     }
 
-    [[nodiscard]]
-    auto current_lsn() const -> Id override
+    [[nodiscard]] auto current_lsn() const -> Id override
     {
         return Id::null();
     }
 
-    [[nodiscard]]
-    auto bytes_written() const -> Size override
+    [[nodiscard]] auto bytes_written() const -> Size override
     {
         return 0;
     }
@@ -154,7 +150,7 @@ public:
     }
 };
 
-class TestWithPager: public InMemoryTest {
+class TestWithPager : public InMemoryTest {
 public:
     const Size PAGE_SIZE {0x200};
     const Size FRAME_COUNT {16};
@@ -165,23 +161,24 @@ public:
     {
         Pager *temp;
         EXPECT_OK(Pager::open({
-            PREFIX,
-            storage.get(),
-            &log_scratch,
-            &wal,
-            nullptr,
-            &status,
-            &commit_lsn,
-            &in_xact,
-            FRAME_COUNT,
-            PAGE_SIZE,
-        }, &temp));
+                                  PREFIX,
+                                  storage.get(),
+                                  &log_scratch,
+                                  &wal,
+                                  nullptr,
+                                  &status,
+                                  &commit_lsn,
+                                  &in_txn,
+                                  FRAME_COUNT,
+                                  PAGE_SIZE,
+                              },
+                              &temp));
         pager.reset(temp);
     }
 
     std::string log_scratch;
     Status status;
-    bool in_xact {true};
+    bool in_txn {};
     Lsn commit_lsn;
     DisabledWriteAheadLog wal;
     std::string scratch;
@@ -198,8 +195,7 @@ inline auto expect_ok(const Status &s) -> void
     }
 }
 
-[[nodiscard]]
-inline auto special_error()
+[[nodiscard]] inline auto special_error()
 {
     return Status::system_error("42");
 }
@@ -332,7 +328,7 @@ namespace TestTools {
         delete file;
         return out;
     }
-} // UnitTests
+} // namespace TestTools
 
 struct Record {
     inline auto operator<(const Record &rhs) const -> bool
@@ -344,11 +340,11 @@ struct Record {
     std::string value;
 };
 
-auto operator>(const Record&, const Record&) -> bool;
-auto operator<=(const Record&, const Record&) -> bool;
-auto operator>=(const Record&, const Record&) -> bool;
-auto operator==(const Record&, const Record&) -> bool;
-auto operator!=(const Record&, const Record&) -> bool;
+auto operator>(const Record &, const Record &) -> bool;
+auto operator<=(const Record &, const Record &) -> bool;
+auto operator>=(const Record &, const Record &) -> bool;
+auto operator==(const Record &, const Record &) -> bool;
+auto operator!=(const Record &, const Record &) -> bool;
 
 class RecordGenerator {
 public:

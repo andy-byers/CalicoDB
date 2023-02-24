@@ -1,7 +1,7 @@
 
-#include "database_impl.h"
 #include "calico/calico.h"
 #include "calico/storage.h"
+#include "database_impl.h"
 #include "utils/utils.h"
 
 namespace Calico {

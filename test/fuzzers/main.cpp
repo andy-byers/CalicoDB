@@ -1,13 +1,12 @@
 // Based off of StandaloneFuzzTargetMain.c in libFuzzer.
 
-#include <cassert>
+#include "tools.h"
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
-#include "tools.h"
 
-extern "C" int LLVMFuzzerTestOneInput(const unsigned char *data, size_t size);
+extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size);
 
 auto main(int argc, const char *argv[]) -> int
 {
@@ -46,5 +45,3 @@ auto main(int argc, const char *argv[]) -> int
     }
     return 0;
 }
-
-

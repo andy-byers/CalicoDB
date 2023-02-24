@@ -4,8 +4,7 @@
 
 namespace Calico {
 
-[[nodiscard]]
-static auto read_tail(Reader &file, Size number, Span tail) -> Status
+[[nodiscard]] static auto read_tail(Reader &file, Size number, Span tail) -> Status
 {
     auto temp = tail;
     auto read_size = tail.size();
@@ -32,7 +31,7 @@ auto WalReader::read(Span &payload) -> Status
     auto out = payload;
     WalRecordHeader header;
 
-    for (; ; ) {
+    for (;;) {
         const auto has_enough_space = m_tail.size() > m_offset + WalRecordHeader::SIZE;
         auto rest = m_tail.range(m_offset);
 
@@ -76,7 +75,7 @@ auto WalReader::read(Span &payload) -> Status
 
 auto WalReader::offset() const -> Size
 {
-    return m_offset + m_block*m_tail.size();
+    return m_offset + m_block * m_tail.size();
 }
 
 } // namespace Calico
