@@ -4,7 +4,6 @@
 #include "calico/storage.h"
 #include "pager/delta.h"
 #include "utils/encoding.h"
-#include "utils/scratch.h"
 #include "utils/types.h"
 #include <algorithm>
 #include <map>
@@ -15,8 +14,7 @@ namespace Calico {
 
 static constexpr Size WAL_BLOCK_SCALE {4};
 
-[[nodiscard]]
-inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
+[[nodiscard]] inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
 {
     if (path.size() <= prefix.size()) {
         return Id::null();
@@ -35,8 +33,7 @@ inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
     return {std::stoull(name.to_string())};
 }
 
-[[nodiscard]]
-inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
+[[nodiscard]] inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
 {
     return prefix.to_string() + std::to_string(id.value);
 }
@@ -45,17 +42,17 @@ inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
  * Header fields associated with each WAL record. Based off of the WAL protocol found in RocksDB.
  */
 struct WalRecordHeader {
-    enum Type: Byte {
-        FULL   = '\xA4',
-        FIRST  = '\xB3',
+    enum Type : Byte {
+        EMPTY = '\x00',
+        FULL = '\xA4',
+        FIRST = '\xB3',
         MIDDLE = '\xC2',
-        LAST   = '\xD1',
+        LAST = '\xD1',
     };
 
     static constexpr Size SIZE {7};
 
-    [[nodiscard]]
-    static auto contains_record(const Slice &data) -> bool
+    [[nodiscard]] static auto contains_record(const Slice &data) -> bool
     {
         return data.size() > WalRecordHeader::SIZE && data[0] != '\x00';
     }
@@ -97,15 +94,11 @@ struct FullImageDescriptor {
     Slice image;
 };
 
-struct CommitDescriptor {
-    Lsn lsn;
-};
-
-using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
+using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor>;
 
 class WalPayloadIn {
 public:
-    friend class LogWriter;
+    friend class WalWriter;
 
     WalPayloadIn(Lsn lsn, Span buffer)
         : m_buffer {buffer}
@@ -113,14 +106,12 @@ public:
         put_u64(buffer, lsn.value);
     }
 
-    [[nodiscard]]
-    auto lsn() const -> Lsn
+    [[nodiscard]] auto lsn() const -> Lsn
     {
         return Lsn {get_u64(m_buffer)};
     }
 
-    [[nodiscard]]
-    auto data() const -> Slice
+    [[nodiscard]] auto data() const -> Slice
     {
         return m_buffer.range(sizeof(Id));
     }
@@ -137,14 +128,12 @@ public:
         : m_payload {payload}
     {}
 
-    [[nodiscard]]
-    auto lsn() const -> Lsn
+    [[nodiscard]] auto lsn() const -> Lsn
     {
         return {get_u64(m_payload)};
     }
 
-    [[nodiscard]]
-    auto data() -> Slice
+    [[nodiscard]] auto data() -> Slice
     {
         return m_payload.range(sizeof(Lsn));
     }
@@ -156,16 +145,14 @@ private:
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> PayloadDescriptor;
 [[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, Span buffer) -> WalPayloadIn;
 [[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, const Slice &image, Span buffer) -> WalPayloadIn;
-[[nodiscard]] auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn;
 
 enum XactPayloadType : Byte {
-    COMMIT     = '\xC0',
-    DELTA      = '\xD0',
+    DELTA = '\xD0',
     FULL_IMAGE = '\xF0',
 };
 
 /*
- * Stores a collection of WAL segment descriptors and provides synchronized access.
+ * Stores a collection of WAL segment descriptors and caches their first LSNs.
  */
 class WalSet final {
 public:
@@ -177,8 +164,7 @@ public:
         m_segments.emplace(id, Lsn::null());
     }
 
-    [[nodiscard]]
-    auto first_lsn(Id id) const -> Lsn
+    [[nodiscard]] auto first_lsn(Id id) const -> Lsn
     {
         const auto itr = m_segments.find(id);
         if (itr == end(m_segments)) {
@@ -195,20 +181,22 @@ public:
         itr->second = lsn;
     }
 
-    [[nodiscard]]
-    auto first() const -> Id
+    [[nodiscard]] auto is_empty() const -> bool
+    {
+        return m_segments.empty();
+    }
+
+    [[nodiscard]] auto first() const -> Id
     {
         return m_segments.empty() ? Id::null() : cbegin(m_segments)->first;
     }
 
-    [[nodiscard]]
-    auto last() const -> Id
+    [[nodiscard]] auto last() const -> Id
     {
         return m_segments.empty() ? Id::null() : crbegin(m_segments)->first;
     }
 
-    [[nodiscard]]
-    auto id_before(Id id) const -> Id
+    [[nodiscard]] auto id_before(Id id) const -> Id
     {
         if (m_segments.empty()) {
             return Id::null();
@@ -221,8 +209,7 @@ public:
         return prev(itr)->first;
     }
 
-    [[nodiscard]]
-    auto id_after(Id id) const -> Id
+    [[nodiscard]] auto id_after(Id id) const -> Id
     {
         auto itr = m_segments.upper_bound(id);
         return itr != cend(m_segments) ? itr->first : Id::null();
@@ -242,10 +229,8 @@ public:
         m_segments.erase(itr, cend(m_segments));
     }
 
-    [[nodiscard]]
-    auto segments() const -> const std::map<Id, Lsn> &
+    [[nodiscard]] auto segments() const -> const std::map<Id, Lsn> &
     {
-        // WARNING: We must ensure that background threads that modify the collection are paused before using this method.
         return m_segments;
     }
 
@@ -253,8 +238,7 @@ private:
     std::map<Id, Lsn> m_segments;
 };
 
-[[nodiscard]]
-inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
+[[nodiscard]] inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
 {
     if (auto lsn = set.first_lsn(id); !lsn.is_null()) {
         out = lsn;

@@ -4,26 +4,22 @@
 
 namespace Calico {
 
-[[nodiscard]]
-static constexpr auto header_offset() -> Size
+[[nodiscard]] static constexpr auto header_offset() -> Size
 {
     return sizeof(Lsn);
 }
 
-[[nodiscard]]
-static constexpr auto content_offset() -> Size
+[[nodiscard]] static constexpr auto content_offset() -> Size
 {
     return header_offset() + sizeof(Id);
 }
 
-[[nodiscard]]
-static auto get_readable_content(const Page &page, Size size_limit) -> Slice
+[[nodiscard]] static auto get_readable_content(const Page &page, Size size_limit) -> Slice
 {
     return page.view(content_offset(), std::min(size_limit, page.size() - content_offset()));
 }
 
-[[nodiscard]]
-static auto get_writable_content(Page &page, Size size_limit) -> Span
+[[nodiscard]] static auto get_writable_content(Page &page, Size size_limit) -> Span
 {
     return page.span(content_offset(), std::min(size_limit, page.size() - content_offset()));
 }
@@ -181,7 +177,7 @@ static auto entry_offset(Id map_id, Id pid) -> Size
     CALICO_EXPECT_GT(pid, map_id);
 
     // Account for the page LSN.
-    return sizeof(Lsn) + (pid.value-map_id.value-1)*ENTRY_SIZE;
+    return sizeof(Lsn) + (pid.value - map_id.value - 1) * ENTRY_SIZE;
 }
 
 static auto decode_entry(const Byte *data) -> PointerMap::Entry
@@ -236,13 +232,12 @@ auto PointerMap::lookup(Id pid) const -> Id
         return Id::null();
     }
     const auto usable_size = m_pager->page_size() - sizeof(Lsn);
-    const auto inc = usable_size/ENTRY_SIZE + 1;
-    const auto idx = (pid.value-2) / inc;
-    return {idx*inc + 2};
+    const auto inc = usable_size / ENTRY_SIZE + 1;
+    const auto idx = (pid.value - 2) / inc;
+    return {idx * inc + 2};
 }
 
-[[nodiscard]]
-auto read_next_id(const Page &page) -> Id
+[[nodiscard]] auto read_next_id(const Page &page) -> Id
 {
     return {get_u64(page.view(header_offset()))};
 }

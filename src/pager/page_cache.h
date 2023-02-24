@@ -26,42 +26,36 @@ public:
     PageList() = default;
     ~PageList() = default;
 
-    [[nodiscard]]
-    auto size() const -> Size
+    [[nodiscard]] auto size() const -> Size
     {
         return m_list.size();
     }
 
-    [[nodiscard]]
-    auto begin() -> Iterator
+    [[nodiscard]] auto begin() -> Iterator
     {
         using std::begin;
         return begin(m_list);
     }
 
-    [[nodiscard]]
-    auto begin() const -> ConstIterator
+    [[nodiscard]] auto begin() const -> ConstIterator
     {
         using std::begin;
         return begin(m_list);
     }
 
-    [[nodiscard]]
-    auto end() -> Iterator
+    [[nodiscard]] auto end() -> Iterator
     {
         using std::end;
         return end(m_list);
     }
 
-    [[nodiscard]]
-    auto end() const -> ConstIterator
+    [[nodiscard]] auto end() const -> ConstIterator
     {
         using std::end;
         return end(m_list);
     }
 
-    [[nodiscard]]
-    auto insert(const Id &pid, const Lsn &record_lsn) -> Iterator
+    [[nodiscard]] auto insert(const Id &pid, const Lsn &record_lsn) -> Iterator
     {
         return m_list.emplace(cend(m_list), Entry {pid, record_lsn});
     }
@@ -90,26 +84,22 @@ public:
     PageCache() = default;
     ~PageCache() = default;
 
-    [[nodiscard]]
-    auto is_empty() const -> Size
+    [[nodiscard]] auto is_empty() const -> Size
     {
         return m_cache.is_empty();
     }
 
-    [[nodiscard]]
-    auto size() const -> Size
+    [[nodiscard]] auto size() const -> Size
     {
         return m_cache.size();
     }
 
-    [[nodiscard]]
-    auto contains(Id pid) const -> bool
+    [[nodiscard]] auto contains(Id pid) const -> bool
     {
         return m_cache.contains(pid);
     }
 
-    [[nodiscard]]
-    auto hit_ratio() const -> double
+    [[nodiscard]] auto hit_ratio() const -> double
     {
         if (const auto total = static_cast<double>(m_hits + m_misses); total != 0.0) {
             return static_cast<double>(m_hits) / total;
@@ -117,8 +107,7 @@ public:
         return 0.0;
     }
 
-    [[nodiscard]]
-    auto end() -> Iterator
+    [[nodiscard]] auto end() -> Iterator
     {
         using std::end;
         return end(m_cache);
@@ -138,8 +127,7 @@ public:
         return std::nullopt;
     }
 
-    [[nodiscard]]
-    auto get(Id pid) -> Iterator
+    [[nodiscard]] auto get(Id pid) -> Iterator
     {
         using std::end;
         if (auto itr = m_cache.get(pid); itr != end(m_cache)) {

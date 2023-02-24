@@ -19,26 +19,22 @@ class Frame final {
 public:
     Frame(Byte *buffer, Size id, Size size);
 
-    [[nodiscard]]
-    auto pid() const -> Id
+    [[nodiscard]] auto pid() const -> Id
     {
         return m_page_id;
     }
 
-    [[nodiscard]]
-    auto ref_count() const -> Size
+    [[nodiscard]] auto ref_count() const -> Size
     {
         return m_ref_count;
     }
 
-    [[nodiscard]]
-    auto data() const -> Slice
+    [[nodiscard]] auto data() const -> Slice
     {
         return m_bytes;
     }
 
-    [[nodiscard]]
-    auto data() -> Span
+    [[nodiscard]] auto data() -> Span
     {
         return m_bytes;
     }
@@ -78,39 +74,33 @@ public:
     auto load_state(const FileHeader &header) -> void;
     auto save_state(FileHeader &header) const -> void;
 
-    [[nodiscard]]
-    auto page_count() const -> Size
+    [[nodiscard]] auto page_count() const -> Size
     {
         return m_page_count;
     }
 
-    [[nodiscard]]
-    auto page_size() const -> Size
+    [[nodiscard]] auto page_size() const -> Size
     {
         return m_page_size;
     }
-    
-    [[nodiscard]]
-    auto available() const -> Size
+
+    [[nodiscard]] auto available() const -> Size
     {
         return m_available.size();
     }
 
-    [[nodiscard]]
-    auto ref_sum() const -> Size
+    [[nodiscard]] auto ref_sum() const -> Size
     {
         return m_ref_sum;
     }
 
-    [[nodiscard]]
-    auto get_frame(Size index) const -> const Frame &
+    [[nodiscard]] auto get_frame(Size index) const -> const Frame &
     {
         CALICO_EXPECT_LT(index, m_frames.size());
         return m_frames[index];
     }
 
-    [[nodiscard]]
-    auto bytes_written() const -> Size
+    [[nodiscard]] auto bytes_written() const -> Size
     {
         return m_bytes_written;
     }

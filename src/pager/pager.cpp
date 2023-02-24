@@ -1,13 +1,20 @@
 #include "pager.h"
-#include <limits>
 #include "frames.h"
 #include "page.h"
 #include "tree/header.h"
 #include "utils/logging.h"
 #include "utils/types.h"
 #include "wal/wal.h"
+#include <limits>
 
 namespace Calico {
+
+#define Set_Status(s)            \
+    do {                         \
+        if (m_status->is_ok()) { \
+            *m_status = s;       \
+        }                        \
+    } while (0)
 
 static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
 
@@ -29,10 +36,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
         return Status::system_error("out of memory");
     }
 
-    auto *ptr = new (std::nothrow) Pager {param, file, std::move(buffer)};
-    if (ptr == nullptr) {
-        return Status::system_error("out of memory");
-    }
+    auto *ptr = new Pager {param, file, std::move(buffer)};
     *out = ptr;
     return Status::ok();
 }
@@ -45,11 +49,12 @@ Pager::Pager(const Parameters &param, Editor *file, AlignedBuffer buffer)
       m_status {param.status},
       m_scratch {param.scratch},
       m_wal {param.wal},
-      m_storage {param.storage}
+      m_storage {param.storage},
+      m_info_log {param.info_log}
 {
+    CALICO_EXPECT_NE(m_wal, nullptr);
     CALICO_EXPECT_NE(m_status, nullptr);
     CALICO_EXPECT_NE(m_scratch, nullptr);
-    CALICO_EXPECT_NE(m_wal, nullptr);
 }
 
 auto Pager::bytes_written() const -> Size
@@ -125,7 +130,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
     }
 
     auto largest = Id::null();
-    for (auto itr = m_dirty.begin(); itr != m_dirty.end(); ) {
+    for (auto itr = m_dirty.begin(); itr != m_dirty.end();) {
         const auto [page_id, record_lsn] = *itr;
         CALICO_EXPECT_TRUE(m_cache.contains(page_id));
         auto &entry = m_cache.get(page_id)->value;
@@ -137,15 +142,13 @@ auto Pager::flush(Lsn target_lsn) -> Status
         }
 
         if (page_id.as_index() >= m_frames.page_count()) {
-            // Page is out of range.
+            logv(m_info_log, "removing page ", page_id.value,
+                 ", which is out of range (page count is ", m_frames.page_count(), ")");
             m_cache.erase(page_id);
             m_frames.unpin(frame_id);
             itr = m_dirty.remove(itr);
         } else if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
-            logv(m_info_log, "could not flush page ",
-                 page_id.value, ": updates for lsn ",
-                 page_lsn.value, " are not in the wal");
             itr = next(itr);
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
@@ -197,7 +200,7 @@ auto Pager::make_frame_available() -> bool
 
     if (!evicted.has_value()) {
         if (auto s = m_wal->flush(); !s.is_ok()) {
-            *m_status = s;
+            Set_Status(s);
         }
         return false;
     }
@@ -212,7 +215,7 @@ auto Pager::make_frame_available() -> bool
     }
     m_frames.unpin(frame_index);
     if (!s.is_ok()) {
-        *m_status = s;
+        Set_Status(s);
         return false;
     }
     return true;
@@ -243,9 +246,15 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
     if (*m_in_txn && lsn <= *m_commit_lsn) {
         const auto next_lsn = m_wal->current_lsn();
         const auto image = page.view(0, watch_size);
-        m_wal->log(encode_full_image_payload(
+        auto s = m_wal->log(encode_full_image_payload(
             next_lsn, page.id(), image, *m_scratch));
-        write_page_lsn(page, next_lsn);
+
+        if (s.is_ok()) {
+            s = m_wal->cleanup(m_recovery_lsn);
+        }
+        if (!s.is_ok()) {
+            Set_Status(s);
+        }
     }
 }
 
@@ -275,8 +284,8 @@ auto Pager::acquire(Id pid, Page &page) -> Status
                 if (s.is_ok()) {
                     clean_page(entry);
                 } else {
-                    *m_status = std::move(s);
-                    return *m_status;
+                    Set_Status(s);
+                    return s;
                 }
             }
         }
@@ -288,8 +297,10 @@ auto Pager::acquire(Id pid, Page &page) -> Status
     }
 
     Calico_Try(pin_frame(pid));
-    CALICO_EXPECT_TRUE(m_cache.contains(pid));
-    return do_acquire(m_cache.get(pid)->value);
+
+    const auto itr = m_cache.get(pid);
+    CALICO_EXPECT_NE(itr, m_cache.end());
+    return do_acquire(itr->value);
 }
 
 auto Pager::upgrade(Page &page, int important) -> void
@@ -310,9 +321,12 @@ auto Pager::release(Page page) -> void
     if (page.is_writable() && *m_in_txn) {
         const auto next_lsn = m_wal->current_lsn();
         write_page_lsn(page, next_lsn);
-        m_wal->log(encode_deltas_payload(
+        auto s = m_wal->log(encode_deltas_payload(
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch));
+        if (!s.is_ok()) {
+            Set_Status(s);
+        }
     }
     m_frames.unref(index, std::move(page));
 }
@@ -338,15 +352,11 @@ auto Pager::truncate(Size page_count) -> Status
 
 auto Pager::save_state(FileHeader &header) -> void
 {
-    header.recovery_lsn = m_recovery_lsn;
     m_frames.save_state(header);
 }
 
 auto Pager::load_state(const FileHeader &header) -> void
 {
-    if (m_recovery_lsn.value < header.recovery_lsn.value) {
-        m_recovery_lsn = header.recovery_lsn;
-    }
     m_frames.load_state(header);
 }
 

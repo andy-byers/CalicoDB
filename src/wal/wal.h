@@ -1,23 +1,11 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
-#include <atomic>
-#include <functional>
-#include <optional>
-#include <unordered_set>
-#include <variant>
-#include <vector>
 #include "helpers.h"
 #include "record.h"
-#include "utils/encoding.h"
-#include "utils/scratch.h"
-#include "utils/types.h"
 
 namespace Calico {
 
-class WalCleanup;
-class WalReader;
-class WalReader;
 class WalWriter;
 
 class WriteAheadLog {
@@ -32,50 +20,38 @@ public:
     };
 
     WriteAheadLog() = default;
-    virtual ~WriteAheadLog() = default;
+    virtual ~WriteAheadLog();
     [[nodiscard]] static auto open(const Parameters &param, WriteAheadLog **out) -> Status;
     [[nodiscard]] virtual auto close() -> Status;
     [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;
     [[nodiscard]] virtual auto start_writing() -> Status;
-    [[nodiscard]] virtual auto new_reader(WalReader **out) -> Status;
-    [[nodiscard]] virtual auto truncate(Lsn lsn) -> Status;
     [[nodiscard]] virtual auto flush() -> Status;
-    virtual auto cleanup(Lsn recovery_lsn) -> void;
-    virtual auto log(WalPayloadIn payload) -> void;
-    virtual auto advance() -> void;
+    [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
+    [[nodiscard]] virtual auto log(WalPayloadIn payload) -> Status;
 
-    [[nodiscard]]
-    virtual auto status() const -> Status
-    {
-        return m_error.get();
-    }
-
-    [[nodiscard]]
-    virtual auto bytes_written() const -> Size
+    [[nodiscard]] virtual auto bytes_written() const -> Size
     {
         return m_bytes_written;
     }
 
 private:
     explicit WriteAheadLog(const Parameters &param);
+    [[nodiscard]] auto close_writer() -> Status;
+    [[nodiscard]] auto open_writer() -> Status;
 
-    std::atomic<Lsn> m_flushed_lsn {};
-    std::atomic<Lsn> m_recovery_lsn {};
-    ErrorBuffer m_error;
+    mutable Lsn m_flushed_lsn;
     Lsn m_last_lsn;
     WalSet m_set;
     std::string m_prefix;
 
     Storage *m_storage {};
-    std::string m_reader_data;
-    std::string m_reader_tail;
-    std::string m_writer_tail;
+    std::string m_tail;
     Size m_segment_cutoff {};
     Size m_bytes_written {};
 
-    std::unique_ptr<WalWriter> m_writer;
-    std::unique_ptr<WalCleanup> m_cleanup;
+    WalWriter *m_writer {};
+    Logger *m_file {};
 };
 
 } // namespace Calico

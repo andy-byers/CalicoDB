@@ -1,12 +1,11 @@
 #include <array>
-#include <vector>
 #include <gtest/gtest.h>
+#include <vector>
 
 #include "calico/slice.h"
 #include "unit_tests.h"
-#include "utils/encoding.h"
 #include "utils/crc.h"
-#include "utils/scratch.h"
+#include "utils/encoding.h"
 #include "utils/types.h"
 #include "utils/utils.h"
 
@@ -39,7 +38,7 @@ TEST(TestUtils, EncodingIsConsistent)
     ASSERT_EQ(buffer.back(), 0) << "buffer overflow";
 }
 
-class SliceTests: public testing::Test {
+class SliceTests : public testing::Test {
 protected:
     std::string test_string {"Hello, world!"};
     Slice slice {test_string};
@@ -247,49 +246,6 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
     ASSERT_TRUE(is_power_of_two(1 << 2));
     ASSERT_TRUE(is_power_of_two(1 << 10));
     ASSERT_TRUE(is_power_of_two(1 << 20));
-}
-
-TEST(ScratchTest, CanChangeUnderlyingBytesObject)
-{
-    std::string backing {"abc"};
-    Span bytes {backing};
-    Scratch scratch {bytes};
-    scratch->advance(1);
-    scratch->truncate(1);
-    ASSERT_TRUE(*scratch == "b");
-}
-
-TEST(MonotonicScratchTest, ScratchesAreDistinct)
-{
-    MonotonicScratchManager manager {1, 2};
-    auto s1 = manager.get();
-    auto s2 = manager.get();
-    (*s1)[0] = 1;
-    (*s2)[0] = 2;
-    ASSERT_EQ((*s1)[0], 1);
-    ASSERT_EQ((*s2)[0], 2);
-}
-
-TEST(MonotonicScratchTest, ScratchesRepeat)
-{
-    MonotonicScratchManager manager {1, 2};
-    (*manager.get())[0] = 1;
-    (*manager.get())[0] = 2;
-    ASSERT_EQ((*manager.get())[0], 1);
-    ASSERT_EQ((*manager.get())[0], 2);
-}
-
-TEST(ScratchTest, ConvertsToSlice)
-{
-    static constexpr auto MSG = "Hello, world!";
-    MonotonicScratchManager manager {std::strlen(MSG), 1};
-    auto scratch = manager.get();
-
-    mem_copy(*scratch, Slice {MSG});
-    ASSERT_TRUE(*scratch == Slice {MSG});
-    ASSERT_TRUE(scratch->starts_with("Hello"));
-    ASSERT_TRUE(scratch->range(7, 5) == Slice {"world"});
-    ASSERT_TRUE(scratch->advance(7).truncate(5) == Slice {"world"});
 }
 
 TEST(NonPrintableSliceTests, UsesStringSize)
@@ -557,7 +513,8 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
 // CRC tests from LevelDB.
 namespace crc32c {
 
-    TEST(LevelDB_CRC, StandardResults) {
+    TEST(LevelDB_CRC, StandardResults)
+    {
         // From rfc3720 section B.4.
         char buf[32];
 
@@ -578,21 +535,70 @@ namespace crc32c {
         ASSERT_EQ(0x113fdb5c, Value(buf, sizeof(buf)));
 
         uint8_t data[48] = {
-            0x01, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00,
-            0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x18, 0x28, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x01,
+            0xc0,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x14,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x04,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x14,
+            0x00,
+            0x00,
+            0x00,
+            0x18,
+            0x28,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x02,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
         };
-        ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char*>(data), sizeof(data)));
+        ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char *>(data), sizeof(data)));
     }
 
-    TEST(LevelDB_CRC, Values) { ASSERT_NE(Value("a", 1), Value("foo", 3)); }
+    TEST(LevelDB_CRC, Values)
+    {
+        ASSERT_NE(Value("a", 1), Value("foo", 3));
+    }
 
-    TEST(LevelDB_CRC, Extend) {
+    TEST(LevelDB_CRC, Extend)
+    {
         ASSERT_EQ(Value("hello world", 11), Extend(Value("hello ", 6), "world", 5));
     }
 
-    TEST(LevelDB_CRC, Mask) {
+    TEST(LevelDB_CRC, Mask)
+    {
         uint32_t crc = Value("foo", 3);
         ASSERT_NE(crc, Mask(crc));
         ASSERT_NE(crc, Mask(Mask(crc)));
@@ -600,10 +606,9 @@ namespace crc32c {
         ASSERT_EQ(crc, Unmask(Unmask(Mask(Mask(crc)))));
     }
 
-}  // namespace crc32c
+} // namespace crc32c
 
-[[nodiscard]]
-auto describe_size(Size size, int precision = 4) -> std::string
+[[nodiscard]] auto describe_size(Size size, int precision = 4) -> std::string
 {
     static constexpr Size KiB {1'024};
     static constexpr auto MiB = KiB * KiB;
@@ -641,8 +646,9 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
     ASSERT_EQ(describe_size(10'000ULL, 3), "9.77 KiB");
 }
 
-class InterceptorTests : public InMemoryTest {
-
+class InterceptorTests
+    : public InMemoryTest,
+      public testing::Test {
 };
 
 TEST_F(InterceptorTests, RespectsPrefix)
@@ -678,7 +684,7 @@ TEST(LoggingTests, StringifiesMaximumNumber)
     auto n = std::numeric_limits<Size>::max();
     auto s = number_to_string(n);
     while (!s.empty()) {
-        ASSERT_EQ(s.back(), n%10 + '0');
+        ASSERT_EQ(s.back(), n % 10 + '0');
         s.pop_back();
         n /= 10;
     }
@@ -705,7 +711,8 @@ TEST(LoggingTests, OnlyEscapesUnprintableCharacters)
     }
 }
 
-TEST(LevelDB_Coding, Varint64) {
+TEST(LevelDB_Coding, Varint64)
+{
     // Construct the list of values to check
     std::vector<uint64_t> values;
     // Some special values
@@ -731,12 +738,12 @@ TEST(LevelDB_Coding, Varint64) {
         ptr = encode_varint(ptr, values[i]);
     }
 
-    const char* p = s.data();
-    const char* limit = p + s.size();
+    const char *p = s.data();
+    const char *limit = p + s.size();
     for (size_t i = 0; i < values.size(); i++) {
         ASSERT_TRUE(p < limit);
         uint64_t actual;
-        const char* start = p;
+        const char *start = p;
         p = decode_varint(p, actual);
         ASSERT_TRUE(p != nullptr);
         ASSERT_EQ(values[i], actual);
@@ -745,13 +752,15 @@ TEST(LevelDB_Coding, Varint64) {
     ASSERT_EQ(p, limit);
 }
 
-TEST(LevelDB_Coding, Varint64Overflow) {
+TEST(LevelDB_Coding, Varint64Overflow)
+{
     uint64_t result;
     std::string input("\x81\x82\x83\x84\x85\x81\x82\x83\x84\x85\x11");
     ASSERT_TRUE(decode_varint(input.data(), result) == nullptr);
 }
 
-TEST(Encoding, MaxVarintValue) {
+TEST(Encoding, MaxVarintValue)
+{
     const std::uint64_t max_value {0xFFFFFFFFFFFFFF};
 
     uint64_t result;

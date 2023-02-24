@@ -12,12 +12,11 @@
 
 namespace Calico {
 
-class DeltaCompressionTest: public testing::Test {
+class DeltaCompressionTest : public testing::Test {
 public:
     static constexpr Size PAGE_SIZE {0x200};
 
-    [[nodiscard]]
-    auto build_deltas(const ChangeBuffer &unordered) const
+    [[nodiscard]] auto build_deltas(const ChangeBuffer &unordered) const
     {
         ChangeBuffer deltas;
         for (const auto &delta: unordered)
@@ -26,8 +25,7 @@ public:
         return deltas;
     }
 
-    [[nodiscard]]
-    auto insert_random_delta(ChangeBuffer &deltas) const
+    [[nodiscard]] auto insert_random_delta(ChangeBuffer &deltas) const
     {
         static constexpr Size MIN_DELTA_SIZE {1};
         const auto offset = random.Next<Size>(PAGE_SIZE - MIN_DELTA_SIZE);
@@ -144,7 +142,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     }
 }
 
-class CacheTests: public testing::Test {
+class CacheTests : public testing::Test {
 public:
     Cache<int, int> target;
 };
@@ -528,7 +526,7 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 
     const auto callback = [&i, &j](auto page_id, auto entry) {
         EXPECT_EQ(page_id.value, entry.index);
-        EXPECT_EQ(page_id.value, i + (j >= 3)*10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
+        EXPECT_EQ(page_id.value, i + (j >= 3) * 10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
         j++;
         i = j % 3;
         return false;
@@ -537,7 +535,9 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     ASSERT_FALSE(registry.evict(callback));
 }
 
-class FramerTests : public InMemoryTest {
+class FramerTests
+    : public InMemoryTest,
+      public testing::Test {
 public:
     explicit FramerTests()
     {
@@ -580,8 +580,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
     mem_copy(page.span(offset, message.size()), message);
 }
 
-[[nodiscard]]
-auto read_from_page(const Page &page, Size size) -> std::string
+[[nodiscard]] auto read_from_page(const Page &page, Size size) -> std::string
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
     CALICO_EXPECT_LE(offset + size, page.size());
@@ -590,36 +589,15 @@ auto read_from_page(const Page &page, Size size) -> std::string
     return message;
 }
 
-class PagerTests : public InMemoryTest {
+class PagerTests
+    : public TestWithPager,
+      public testing::Test {
 public:
-    static constexpr Size frame_count {8};
-    static constexpr Size page_size {0x200};
     std::string test_message {"Hello, world!"};
-
-    explicit PagerTests()
-        : wal {std::make_unique<DisabledWriteAheadLog>()},
-          scratch(wal_scratch_size(page_size), '\x00')
-    {
-        Pager *temp;
-        EXPECT_OK(Pager::open({
-            PREFIX,
-            storage.get(),
-            &scratch,
-            wal.get(),
-            nullptr,
-            &status,
-            &commit_lsn,
-            &in_txn,
-            frame_count,
-            page_size,
-        }, &temp));
-        pager.reset(temp);
-    }
 
     ~PagerTests() override = default;
 
-    [[nodiscard]]
-    auto allocate_write(const std::string &message) const
+    [[nodiscard]] auto allocate_write(const std::string &message) const
     {
         Page page;
         EXPECT_OK(pager->allocate(page));
@@ -627,8 +605,7 @@ public:
         return page;
     }
 
-    [[nodiscard]]
-    auto allocate_write_release(const std::string &message) const
+    [[nodiscard]] auto allocate_write_release(const std::string &message) const
     {
         auto page = allocate_write(message);
         const auto id = page.id();
@@ -637,8 +614,7 @@ public:
         return id;
     }
 
-    [[nodiscard]]
-    auto acquire_write(Id id, const std::string &message) const
+    [[nodiscard]] auto acquire_write(Id id, const std::string &message) const
     {
         Page page;
         EXPECT_OK(pager->acquire(id, page));
@@ -654,8 +630,7 @@ public:
         EXPECT_OK(status);
     }
 
-    [[nodiscard]]
-    auto acquire_read_release(Id id, Size size) const
+    [[nodiscard]] auto acquire_read_release(Id id, Size size) const
     {
         Page page;
         EXPECT_OK(pager->acquire(id, page));
@@ -664,13 +639,6 @@ public:
         EXPECT_OK(status);
         return message;
     }
-
-    Status status;
-    bool in_txn {true};
-    Lsn commit_lsn;
-    std::unique_ptr<WriteAheadLog> wal;
-    std::unique_ptr<Pager> pager;
-    std::string scratch;
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
@@ -732,16 +700,15 @@ static auto run_root_persistence_test(T &test, Size n)
 
 TEST_F(PagerTests, RootDataPersistsInFrame)
 {
-    run_root_persistence_test(*this, frame_count);
+    run_root_persistence_test(*this, FRAME_COUNT);
 }
 
 TEST_F(PagerTests, RootDataPersistsInStorage)
 {
-    run_root_persistence_test(*this, frame_count * 2);
+    run_root_persistence_test(*this, FRAME_COUNT * 2);
 }
 
-[[nodiscard]]
-auto generate_id_strings(Size n)
+[[nodiscard]] auto generate_id_strings(Size n)
 {
     std::vector<Size> id_ints(n);
     std::iota(begin(id_ints), end(id_ints), 1);

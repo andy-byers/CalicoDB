@@ -7,7 +7,7 @@
 namespace Calico {
 
 Frame::Frame(Byte *buffer, Size id, Size size)
-    : m_bytes {buffer + id*size, size}
+    : m_bytes {buffer + id * size, size}
 {
     CALICO_EXPECT_TRUE(is_power_of_two(size));
     CALICO_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
@@ -142,7 +142,6 @@ auto FrameManager::sync() -> Status
     return m_file->sync();
 }
 
-
 auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
 {
     CALICO_EXPECT_EQ(m_page_size, out.size());
@@ -178,12 +177,14 @@ auto FrameManager::write_page_to_file(Id pid, const Slice &page) const -> Status
 
 auto FrameManager::load_state(const FileHeader &header) -> void
 {
+    // Page size should already be correct.
     m_page_count = header.page_count;
 }
 
 auto FrameManager::save_state(FileHeader &header) const -> void
 {
     header.page_count = m_page_count;
+    header.page_size = static_cast<PageSize>(m_page_size);
 }
 
 } // namespace Calico

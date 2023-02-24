@@ -1,8 +1,8 @@
 #ifndef CALICO_STATUS_H
 #define CALICO_STATUS_H
 
-#include <memory>
 #include "common.h"
+#include <memory>
 
 namespace Calico {
 
@@ -57,7 +57,7 @@ private:
     };
 
     // Construct a non-OK status.
-    Status(Code code, const Slice &what);
+    explicit Status(Code code, const Slice &what);
 
     // Storage for a status code and a null-terminated message.
     std::unique_ptr<Byte[]> m_data;

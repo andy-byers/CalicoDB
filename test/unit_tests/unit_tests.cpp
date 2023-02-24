@@ -5,7 +5,8 @@ namespace Calico {
 unsigned RecordGenerator::default_seed = 0;
 
 RecordGenerator::RecordGenerator(Parameters param)
-    : m_param {param} {}
+    : m_param {param}
+{}
 
 auto RecordGenerator::generate(Tools::RandomGenerator &random, Size num_records) const -> std::vector<Record>
 {
@@ -44,7 +45,7 @@ auto RecordGenerator::generate(Tools::RandomGenerator &random, Size num_records)
 
 } // namespace Calico
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
     testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();

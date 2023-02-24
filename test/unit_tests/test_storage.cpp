@@ -10,8 +10,7 @@
 namespace Calico {
 
 template<class Base, class Store>
-[[nodiscard]]
-auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
+[[nodiscard]] auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
 {
     auto s = Status::ok();
     Base *temp {};
@@ -35,8 +34,7 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
     ofs << message.to_string();
 }
 
-[[nodiscard]]
-auto read_whole_file(const std::string &path) -> std::string
+[[nodiscard]] auto read_whole_file(const std::string &path) -> std::string
 {
     std::string message;
     std::ifstream ifs {path};
@@ -71,8 +69,7 @@ constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer
 }
 
 template<class Reader>
-[[nodiscard]]
-auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, Size size) -> std::string
+[[nodiscard]] auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, Size size) -> std::string
 {
     static constexpr Size num_chunks {20};
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
@@ -99,7 +96,9 @@ auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, Size siz
     return backing;
 }
 
-class FileTests: public OnDiskTest {
+class FileTests
+    : public OnDiskTest,
+      public testing::Test {
 public:
     FileTests()
         : filename {PREFIX + std::string {"file"}}
@@ -111,7 +110,7 @@ public:
     Tools::RandomGenerator random;
 };
 
-class PosixReaderTests: public FileTests {
+class PosixReaderTests : public FileTests {
 public:
     PosixReaderTests()
     {
@@ -138,7 +137,7 @@ TEST_F(PosixReaderTests, ReadsBackContents)
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-class PosixEditorTests: public FileTests {
+class PosixEditorTests : public FileTests {
 public:
     PosixEditorTests()
         : file {open_blob<Editor>(*storage, filename)}
@@ -163,7 +162,7 @@ TEST_F(PosixEditorTests, WritesOutAndReadsBackData)
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-class PosixLoggerTests: public FileTests {
+class PosixLoggerTests : public FileTests {
 public:
     PosixLoggerTests()
         : file {open_blob<Logger>(*storage, filename)}
@@ -179,7 +178,7 @@ TEST_F(PosixLoggerTests, WritesOutData)
     ASSERT_EQ(read_whole_file(filename), data.to_string());
 }
 
-class PosixStorageTests: public OnDiskTest {
+class PosixStorageTests : public OnDiskTest {
 public:
     PosixStorageTests()
         : filename {PREFIX + std::string {"file"}}
@@ -191,7 +190,9 @@ public:
     Tools::RandomGenerator random;
 };
 
-class DynamicStorageTests : public InMemoryTest {
+class DynamicStorageTests
+    : public InMemoryTest,
+      public testing::Test {
 public:
     DynamicStorageTests()
         : filename {PREFIX + std::string {"file"}}

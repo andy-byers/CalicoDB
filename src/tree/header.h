@@ -7,14 +7,18 @@ namespace Calico {
 
 class Page;
 
-/* File Header Format:
+/* The file header is located at offset 0 on the root page, which is always the first page in the database file. The root
+ * page is also a node page, so it will have additional headers following the file header.
+ *
+ * File Header Format:
  *     Offset  Size  Name
+ *    ----------------------------
  *     0       4     magic_code
  *     4       4     header_crc
  *     8       8     page_count
  *     16      8     record_count
  *     24      8     free_list_id
- *     32      8     recovery_lsn
+ *     32      8     commit_lsn
  *     40      2     page_size
  */
 struct FileHeader {
@@ -32,21 +36,34 @@ struct FileHeader {
     std::uint64_t page_count {};
     std::uint64_t record_count {};
     Id freelist_head;
-    Lsn recovery_lsn;
+    Lsn commit_lsn;
     std::uint16_t page_size {};
 };
 
+/* Every page has a page header, which consists of just the page LSN.
+ *
+ * Page Header Format:
+ *     Offset  Size  Name
+ *    --------------------------
+ *     0       8     page_lsn
+ */
+
 /* Node Header Format:
  *     Offset  Size  Name
- *     0       8     page_lsn
- *     8       1     flags
- *     9       8     next_id
- *     17      8     prev_id
- *     25      2     cell_count
- *     27      2     cell_start
- *     29      2     free_start
- *     31      2     free_total
- *     33      1     frag_count
+ *    --------------------------
+ *     0       1     flags
+ *     1       8     next_id
+ *     9       8     prev_id
+ *     17      2     cell_count
+ *     19      2     cell_start
+ *     21      2     free_start
+ *     23      2     free_total
+ *     25      1     frag_count
+ *
+ * NOTE: The page_lsn from the page header is included in the node header size for convenience. Also, it should
+ *       be noted that internal nodes do not use the prev_id field. In external nodes, the prev_id and next_id
+ *       are used to refer to the left and right siblings, respectively. In internal nodes, the next_id field
+ *       refers to the rightmost child ID.
  */
 struct NodeHeader {
     static constexpr Size SIZE {34};
@@ -54,7 +71,6 @@ struct NodeHeader {
     auto read(const Page &page) -> void;
     auto write(Page &page) const -> void;
 
-    Lsn page_lsn;
     Id next_id;
     Id prev_id;
     std::uint16_t cell_count {};

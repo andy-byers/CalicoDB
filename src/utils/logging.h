@@ -1,10 +1,10 @@
 #ifndef CALICO_UTILS_LOGGING_H
 #define CALICO_UTILS_LOGGING_H
 
-#include <sstream>
 #include "calico/slice.h"
 #include "calico/status.h"
 #include "calico/storage.h"
+#include <sstream>
 
 namespace Calico {
 
@@ -22,7 +22,7 @@ namespace Impl {
         os << '\n';
     }
 
-    template<class First, class ...Rest>
+    template<class First, class... Rest>
     auto logv(std::ostream &os, First &&first, Rest &&...rest) -> void
     {
         os << first;
@@ -31,7 +31,7 @@ namespace Impl {
 
 } // namespace Impl
 
-template<class ...Param>
+template<class... Param>
 auto logv(Logger *log, Param &&...param) -> void
 {
     if (log) {

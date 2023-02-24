@@ -3,12 +3,11 @@
 
 #include "calico/database.h"
 
-#include "recovery.h"
 #include "pager/pager.h"
+#include "recovery.h"
 #include "tree/header.h"
 #include "tree/tree.h"
 #include "wal/wal.h"
-#include "wal/cleanup.h"
 #include "wal/writer.h"
 
 namespace Calico {
@@ -18,12 +17,7 @@ class Recovery;
 class Storage;
 class WriteAheadLog;
 
-struct InitialState {
-    FileHeader state;
-    bool is_new {};
-};
-
-class DatabaseImpl: public Database {
+class DatabaseImpl : public Database {
 public:
     friend class Database;
 
@@ -43,19 +37,21 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
+    [[nodiscard]] auto record_count() const -> Size
+    {
+        return m_record_count;
+    }
+
     auto TEST_validate() const -> void;
 
-    std::unique_ptr<WriteAheadLog> wal;
-    std::unique_ptr<Pager> pager;
-    std::unique_ptr<BPlusTree> tree;
-
-    Size bytes_written {};
-    Size record_count {};
+    WriteAheadLog *wal {};
+    BPlusTree *tree {};
+    Pager *pager {};
 
 private:
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
-    [[nodiscard]] auto ensure_consistency_on_startup() -> Status;
-    [[nodiscard]] auto save_state() const -> Status;
+    [[nodiscard]] auto ensure_consistency() -> Status;
+    [[nodiscard]] auto save_state(Page root, Lsn commit_lsn) const -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
@@ -67,14 +63,16 @@ private:
     Storage *m_storage {};
     Logger *m_info_log {};
     Size m_txn_size {};
+    Size m_record_count {};
+    Size m_bytes_written {};
     Lsn m_commit_lsn;
     bool m_in_txn {true};
     bool m_owns_storage {};
     bool m_owns_info_log {};
-    bool m_sync {};
+    bool m_is_setup {};
 };
 
-auto setup(const std::string &, Storage &, const Options &, InitialState &init) -> Status;
+auto setup(const std::string &, Storage &, const Options &, FileHeader &state) -> Status;
 
 } // namespace Calico
 

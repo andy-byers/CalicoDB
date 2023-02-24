@@ -73,4 +73,3 @@ auto insert_delta(ChangeBuffer &deltas, PageDelta delta) -> void
 }
 
 } // namespace Calico
-

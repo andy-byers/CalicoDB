@@ -2,40 +2,41 @@
 #ifndef CALICO_TOOLS_H
 #define CALICO_TOOLS_H
 
-#include <calico/calico.h>
 #include "database/database_impl.h"
+#include <calico/calico.h>
 #include <climits>
+#include <cstdio>
 #include <functional>
 #include <mutex>
 #include <random>
 #include <string>
 #include <unordered_map>
 
-#define CHECK_TRUE(cond) \
-    do { \
-        if (!(cond)) {     \
+#define CHECK_TRUE(cond)                             \
+    do {                                             \
+        if (!(cond)) {                               \
             std::fputs(#cond " is false\n", stderr); \
-            std::abort(); \
-        } \
+            std::abort();                            \
+        }                                            \
     } while (0)
 
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr) \
-    do { \
+#define CHECK_OK(expr)                                   \
+    do {                                                 \
         if (auto assert_s = (expr); !assert_s.is_ok()) { \
-            std::fputs(assert_s.what().data(), stderr); \
-            std::abort(); \
-        } \
+            std::fputs(assert_s.what().data(), stderr);  \
+            std::abort();                                \
+        }                                                \
     } while (0)
 
-#define CHECK_EQ(lhs, rhs) \
-    do { \
-        if ((lhs) != (rhs)) { \
+#define CHECK_EQ(lhs, rhs)                        \
+    do {                                          \
+        if ((lhs) != (rhs)) {                     \
             std::fputs(#lhs " != " #rhs, stderr); \
-            std::abort(); \
-        } \
+            std::abort();                         \
+        }                                         \
     } while (0)
 
 namespace Calico::Tools {
@@ -61,8 +62,7 @@ struct Interceptor {
           type {type_}
     {}
 
-    [[nodiscard]]
-    auto operator()() const -> Status
+    [[nodiscard]] auto operator()() const -> Status
     {
         return callback();
     }
@@ -93,6 +93,14 @@ class DynamicMemory : public Storage {
     [[nodiscard]] auto write_file_at(Memory &mem, Slice in, Size offset) -> Status;
 
 public:
+    [[nodiscard]] auto memory() -> std::unordered_map<std::string, Memory> &
+    {
+        return m_memory;
+    }
+    [[nodiscard]] auto memory() const -> const std::unordered_map<std::string, Memory> &
+    {
+        return m_memory;
+    }
     [[nodiscard]] auto clone() const -> Storage *;
     auto add_interceptor(Interceptor interceptor) -> void;
     auto clear_interceptors() -> void;
@@ -168,6 +176,23 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 };
 
+class StderrLogger : public Logger {
+public:
+    ~StderrLogger() override = default;
+
+    [[nodiscard]] auto write(Slice in) -> Status override
+    {
+        std::fputs(in.to_string().c_str(), stderr);
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto sync() -> Status override
+    {
+        std::fflush(stderr);
+        return Status::ok();
+    }
+};
+
 template<std::size_t Length = 12>
 static auto integral_key(Size key) -> std::string
 {
@@ -178,14 +203,6 @@ static auto integral_key(Size key) -> std::string
         return key_string.substr(0, Length);
     } else {
         return std::string(Length - key_string.size(), '0') + key_string;
-    }
-}
-
-inline auto expect_ok(const Status &s)
-{
-    if (!s.is_ok()) {
-        std::fprintf(stderr, "error: %s\n", s.what().data());
-        std::abort();
     }
 }
 
@@ -232,15 +249,13 @@ public:
     }
 };
 
-
 struct DatabaseCounts {
     Size records {};
     Size pages {};
     Size updates {};
 };
 
-[[nodiscard]]
-inline auto parse_db_counts(std::string prop) -> DatabaseCounts
+[[nodiscard]] inline auto parse_db_counts(std::string prop) -> DatabaseCounts
 {
     DatabaseCounts counts;
 
@@ -274,8 +289,7 @@ struct DatabaseStats {
     Size wal_throughput {};
 };
 
-[[nodiscard]]
-inline auto parse_db_stats(std::string prop) -> DatabaseStats
+[[nodiscard]] inline auto parse_db_stats(std::string prop) -> DatabaseStats
 {
     DatabaseStats stats;
 

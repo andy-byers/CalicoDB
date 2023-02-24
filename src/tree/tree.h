@@ -1,9 +1,9 @@
 #ifndef CALICO_TREE_H
 #define CALICO_TREE_H
 
-#include <array>
 #include "memory.h"
 #include "node.h"
+#include <array>
 
 namespace Calico {
 

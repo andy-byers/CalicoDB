@@ -1,78 +1,77 @@
 #ifndef CALICO_TEST_UNIT_TESTS_H
 #define CALICO_TEST_UNIT_TESTS_H
 
-#include <filesystem>
-#include <iomanip>
-#include <sstream>
-#include <gtest/gtest.h>
 #include "calico/status.h"
 #include "pager/page.h"
 #include "storage/posix_storage.h"
 #include "tools.h"
 #include "utils/utils.h"
-#include "wal/cleanup.h"
 #include "wal/wal.h"
 #include "wal/writer.h"
+#include <filesystem>
+#include <gtest/gtest.h>
+#include <iomanip>
+#include <sstream>
 
 namespace Calico {
 
-#define Clear_Interceptors() \
-    do { \
+#define Clear_Interceptors()                                                 \
+    do {                                                                     \
         dynamic_cast<Tools::DynamicMemory &>(*storage).clear_interceptors(); \
     } while (0)
 
-
-#define Quick_Interceptor(prefix__, type__) \
-    do { \
-        dynamic_cast<Tools::DynamicMemory &>(*storage) \
-            .add_interceptor(Tools::Interceptor {(prefix__), (type__), [] {return special_error();}}); \
+#define Quick_Interceptor(prefix__, type__)                                  \
+    do {                                                                     \
+        dynamic_cast<Tools::DynamicMemory &>(*storage)                       \
+            .add_interceptor(Tools::Interceptor {(prefix__), (type__), [] {  \
+                                                     return special_error(); \
+                                                 }});                        \
     } while (0)
 
-#define Counting_Interceptor(prefix__, type__, n__) \
-    do { \
-        dynamic_cast<Tools::DynamicMemory &>(*storage) \
+#define Counting_Interceptor(prefix__, type__, n__)                                   \
+    do {                                                                              \
+        dynamic_cast<Tools::DynamicMemory &>(*storage)                                \
             .add_interceptor(Tools::Interceptor {(prefix__), (type__), [&n = (n__)] { \
-                if (n-- <= 0) { \
-                    return special_error(); \
-                } \
-                return Status::ok(); \
-            }}); \
+                                                     if (n-- <= 0) {                  \
+                                                         return special_error();      \
+                                                     }                                \
+                                                     return Status::ok();             \
+                                                 }});                                 \
     } while (0)
 
 static constexpr auto EXPECTATION_MATCHER = "^expectation";
 
-#define EXPECT_OK(expr) \
-    do { \
-        const auto &expect_ok_status = (expr); \
+#define EXPECT_OK(expr)                                                                                                       \
+    do {                                                                                                                      \
+        const auto &expect_ok_status = (expr);                                                                                \
         EXPECT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.what().data(); \
     } while (0)
 
-#define ASSERT_OK(expr) \
-    do { \
-        const auto &expect_ok_status = (expr); \
+#define ASSERT_OK(expr)                                                                                                       \
+    do {                                                                                                                      \
+        const auto &expect_ok_status = (expr);                                                                                \
         ASSERT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.what().data(); \
     } while (0)
 
-#define EXPECT_HAS_VALUE(expr) \
-    do { \
-        const auto &expect_has_value_status = (expr); \
+#define EXPECT_HAS_VALUE(expr)                                                                                                                                         \
+    do {                                                                                                                                                               \
+        const auto &expect_has_value_status = (expr);                                                                                                                  \
         EXPECT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().what().data(); \
     } while (0)
 
-#define ASSERT_HAS_VALUE(expr) \
-    do { \
-        const auto &expect_has_value_status = (expr); \
+#define ASSERT_HAS_VALUE(expr)                                                                                                                                         \
+    do {                                                                                                                                                               \
+        const auto &expect_has_value_status = (expr);                                                                                                                  \
         ASSERT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().what().data(); \
     } while (0)
 
-[[nodiscard]]
-inline auto expose_message(const Status &s)
+[[nodiscard]] inline auto expose_message(const Status &s)
 {
     EXPECT_TRUE(s.is_ok()) << "Unexpected " << get_status_name(s) << " status: " << s.what().data();
     return s.is_ok();
 }
 
-class InMemoryTest : public testing::Test {
+class InMemoryTest {
 public:
     static constexpr auto ROOT = "test";
     static constexpr auto PREFIX = "test/";
@@ -83,10 +82,9 @@ public:
         EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
-    ~InMemoryTest() override = default;
+    virtual ~InMemoryTest() = default;
 
-    [[nodiscard]]
-    auto storage_handle() -> Tools::DynamicMemory &
+    [[nodiscard]] auto storage_handle() -> Tools::DynamicMemory &
     {
         return dynamic_cast<Tools::DynamicMemory &>(*storage);
     }
@@ -94,30 +92,7 @@ public:
     std::unique_ptr<Storage> storage;
 };
 
-template<class ...Param>
-class ParameterizedInMemoryTest : public testing::TestWithParam<Param...> {
-public:
-    static constexpr auto ROOT = "test";
-    static constexpr auto PREFIX = "test/";
-
-    ParameterizedInMemoryTest()
-        : storage {std::make_unique<Tools::DynamicMemory>()}
-    {
-        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
-    }
-
-    ~ParameterizedInMemoryTest() override = default;
-
-    [[nodiscard]]
-    auto storage_handle() -> Tools::DynamicMemory &
-    {
-        return dynamic_cast<Tools::DynamicMemory &>(*storage);
-    }
-
-    std::unique_ptr<Storage> storage;
-};
-
-class OnDiskTest : public testing::Test {
+class OnDiskTest {
 public:
     static constexpr auto ROOT = "/tmp/__calico_test__";
     static constexpr auto PREFIX = "/tmp/__calico_test__/";
@@ -130,7 +105,7 @@ public:
         EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
-    ~OnDiskTest() override
+    virtual ~OnDiskTest()
     {
         std::error_code ignore;
         std::filesystem::remove_all(ROOT, ignore);
@@ -139,55 +114,29 @@ public:
     std::unique_ptr<Storage> storage;
 };
 
-template<class ...Param>
-class ParameterizedOnDiskTest : public testing::TestWithParam<Param...> {
-public:
-    static constexpr auto ROOT = "/tmp/__calico_test__";
-    static constexpr auto PREFIX = "/tmp/__calico_test__/";
-
-    ParameterizedOnDiskTest()
-        : storage {std::make_unique<PosixStorage>()}
-    {
-        std::error_code ignore;
-        std::filesystem::remove_all(ROOT, ignore);
-        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
-    }
-
-    ~ParameterizedOnDiskTest() override
-    {
-        std::error_code ignore;
-        std::filesystem::remove_all(ROOT, ignore);
-    }
-
-    std::unique_ptr<Storage> storage;
-};
-
-class DisabledWriteAheadLog: public WriteAheadLog {
+class DisabledWriteAheadLog : public WriteAheadLog {
 public:
     DisabledWriteAheadLog() = default;
     ~DisabledWriteAheadLog() override = default;
 
-    [[nodiscard]]
-    auto flushed_lsn() const -> Id override
+    [[nodiscard]] auto flushed_lsn() const -> Id override
     {
         return {std::numeric_limits<Size>::max()};
     }
 
-    [[nodiscard]]
-    auto current_lsn() const -> Id override
+    [[nodiscard]] auto current_lsn() const -> Id override
     {
         return Id::null();
     }
 
-    [[nodiscard]]
-    auto bytes_written() const -> Size override
+    [[nodiscard]] auto bytes_written() const -> Size override
     {
         return 0;
     }
 
-    auto log(WalPayloadIn) -> void override
+    auto log(WalPayloadIn) -> Status override
     {
-
+        return Status::ok();
     }
 
     auto flush() -> Status override
@@ -195,21 +144,47 @@ public:
         return Status::ok();
     }
 
-    auto advance() -> void override
-    {
-
-    }
-
-    auto cleanup(Id) -> void override
-    {
-
-    }
-
-    [[nodiscard]]
-    auto truncate(Id) -> Status override
+    auto cleanup(Id) -> Status override
     {
         return Status::ok();
     }
+};
+
+class TestWithPager : public InMemoryTest {
+public:
+    const Size PAGE_SIZE {0x200};
+    const Size FRAME_COUNT {16};
+
+    TestWithPager()
+        : scratch(PAGE_SIZE, '\x00'),
+          log_scratch(wal_scratch_size(PAGE_SIZE), '\x00')
+    {
+        Pager *temp;
+        EXPECT_OK(Pager::open({
+                                  PREFIX,
+                                  storage.get(),
+                                  &log_scratch,
+                                  &wal,
+                                  nullptr,
+                                  &status,
+                                  &commit_lsn,
+                                  &in_txn,
+                                  FRAME_COUNT,
+                                  PAGE_SIZE,
+                              },
+                              &temp));
+        pager.reset(temp);
+    }
+
+    std::string log_scratch;
+    Status status;
+    bool in_txn {};
+    Lsn commit_lsn;
+    DisabledWriteAheadLog wal;
+    std::string scratch;
+    std::string collect_scratch;
+    std::unique_ptr<Pager> pager;
+    Tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
 
 inline auto expect_ok(const Status &s) -> void
@@ -220,8 +195,7 @@ inline auto expect_ok(const Status &s) -> void
     }
 }
 
-[[nodiscard]]
-inline auto special_error()
+[[nodiscard]] inline auto special_error()
 {
     return Status::system_error("42");
 }
@@ -354,7 +328,7 @@ namespace TestTools {
         delete file;
         return out;
     }
-} // UnitTests
+} // namespace TestTools
 
 struct Record {
     inline auto operator<(const Record &rhs) const -> bool
@@ -366,11 +340,11 @@ struct Record {
     std::string value;
 };
 
-auto operator>(const Record&, const Record&) -> bool;
-auto operator<=(const Record&, const Record&) -> bool;
-auto operator>=(const Record&, const Record&) -> bool;
-auto operator==(const Record&, const Record&) -> bool;
-auto operator!=(const Record&, const Record&) -> bool;
+auto operator>(const Record &, const Record &) -> bool;
+auto operator<=(const Record &, const Record &) -> bool;
+auto operator>=(const Record &, const Record &) -> bool;
+auto operator==(const Record &, const Record &) -> bool;
+auto operator!=(const Record &, const Record &) -> bool;
 
 class RecordGenerator {
 public:

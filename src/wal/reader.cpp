@@ -4,8 +4,7 @@
 
 namespace Calico {
 
-[[nodiscard]]
-static auto read_tail(Reader &file, Size number, Span tail) -> Status
+[[nodiscard]] static auto read_tail(Reader &file, Size number, Span tail) -> Status
 {
     auto temp = tail;
     auto read_size = tail.size();
@@ -19,20 +18,20 @@ static auto read_tail(Reader &file, Size number, Span tail) -> Status
     return Status::ok();
 }
 
-WalIterator::WalIterator(Reader &file, Span tail)
+WalReader::WalReader(Reader &file, Span tail)
     : m_tail {tail},
       m_file {&file}
 {}
 
-auto WalIterator::read(Span &payload) -> Status
+auto WalReader::read(Span &payload) -> Status
 {
-    if (m_block + m_offset == 0) {
+    if (m_offset + m_block == 0) {
         Calico_Try(read_tail(*m_file, 0, m_tail));
     }
     auto out = payload;
     WalRecordHeader header;
 
-    for (; ; ) {
+    for (;;) {
         const auto has_enough_space = m_tail.size() > m_offset + WalRecordHeader::SIZE;
         auto rest = m_tail.range(m_offset);
 
@@ -50,8 +49,10 @@ auto WalIterator::read(Span &payload) -> Status
 
             if (header.type == WalRecordHeader::Type::FULL) {
                 payload.truncate(header.size);
-                if (header.crc != crc32c::Value(payload.data(), header.size)) {
-                    return Status::corruption("crc is incorrect");
+                const auto expected_crc = crc32c::Unmask(header.crc);
+                const auto computed_crc = crc32c::Value(payload.data(), header.size);
+                if (expected_crc != computed_crc) {
+                    return Status::corruption("crc mismatch");
                 }
                 break;
             }
@@ -60,94 +61,21 @@ auto WalIterator::read(Span &payload) -> Status
             }
         }
         // Read the next block into the tail buffer.
-        Calico_Try(read_tail(*m_file, ++m_block, m_tail));
+        auto s = read_tail(*m_file, ++m_block, m_tail);
+        if (!s.is_ok()) {
+            if (s.is_not_found() && header.type != WalRecordHeader::EMPTY) {
+                return Status::corruption("encountered a partial record");
+            }
+            return s;
+        }
         m_offset = 0;
     }
     return Status::ok();
 }
 
-auto WalIterator::offset() const -> Size
+auto WalReader::offset() const -> Size
 {
-    return m_offset;
-}
-
-auto WalReader::open(const Parameters &param, WalReader **out) -> Status
-{
-    const auto id = param.set->first();
-    if (id.is_null()) {
-        return Status::corruption("wal is empty");
-    }
-    auto *reader = new WalReader;
-    reader->m_storage = param.storage;
-    reader->m_prefix = param.prefix;
-    reader->m_id = param.set->first();
-    reader->m_set = param.set;
-    reader->m_data = param.data;
-    reader->m_tail = param.tail;
-    *out = reader;
-
-    return Status::ok();
-}
-
-auto WalReader::seek(Lsn lsn) -> Status
-{
-    m_id = m_set->first();
-    while (!m_id.is_null()) {
-        // Caches the first LSN of each segment encountered here.
-        Lsn first;
-        Calico_Try(read_first_lsn(*m_storage, m_prefix, m_id, *m_set, first));
-
-        if (first == lsn) {
-            return Status::ok();
-        } else if (first > lsn) {
-            if (m_id > m_set->first()) {
-                m_id.value--;
-                return reopen();
-            }
-            return Status::not_found("not found");
-        }
-        Calico_Try(skip());
-    }
-    m_id = m_set->last();
-    return Status::not_found("segment does not exist");
-}
-
-auto WalReader::skip() -> Status
-{
-    const auto next_id = m_set->id_after(m_id);
-    if (next_id.is_null()) {
-        return Status::not_found("end of wal");
-    }
-    m_id = next_id;
-    return reopen();
-}
-
-auto WalReader::reopen() -> Status
-{
-    Reader *file;
-    Calico_Try(m_storage->new_reader(encode_segment_name(m_prefix, m_id), &file));
-    m_file.reset(file);
-    m_itr = WalIterator {*m_file, m_tail};
-    return Status::ok();
-}
-
-auto WalReader::read(WalPayloadOut &payload) -> Status
-{
-    if (!m_itr.has_value()) {
-        Calico_Try(reopen());
-    }
-
-    auto data = m_data;
-    auto s = m_itr->read(data);
-
-    if (s.is_not_found()) {
-        Calico_Try(skip());
-        s = m_itr->read(data);
-    }
-    if (s.is_ok()) {
-        payload = WalPayloadOut {data};
-    }
-    return s;
+    return m_offset + m_block * m_tail.size();
 }
 
 } // namespace Calico

@@ -1,6 +1,4 @@
-# Calico DB Documentation
-Calico DB is designed to be as simple as possible.
-The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
+# CalicoDB Documentation
 
 + [Build](#build)
 + [API](#api)
@@ -9,14 +7,14 @@ The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree 
   + [Updating a database](#updating-a-database)
   + [Querying a database](#querying-a-database)
   + [Vacuuming a database](#vacuuming-a-database)
-  + [Closing a database](#closing-a-database)
   + [Transactions](#transactions)
+  + [Database properties](#database-properties)
+  + [Closing a database](#closing-a-database)
   + [Destroying a database](#destroying-a-database)
-+ [Architecture](#architecture)
 + [Acknowledgements](#acknowledgements)
 
 ## Build
-Calico DB is built using CMake.
+CalicoDB is built using CMake.
 In the project root directory, run
 ```bash
 mkdir -p build && cd ./build
@@ -71,9 +69,9 @@ const Calico::Options options {
     .cache_size = 0x200000,
     .wal_buffer_size = 0x100000,
     
-    // Store the WAL segments in a separate location. The directory calico_wal must already exist.
-    // WAL segments will look like "calico_wal_#", where # is the segment ID.
-    .wal_prefix = "calico_wal_",
+    // Store the WAL segments in a separate location. The directory "location" must already exist.
+    // WAL segments will look like "/location/calico_wal_#", where # is the segment ID.
+    .wal_prefix = "/location/calico_wal_",
     
     // The database instance will write info log messages at the specified log level, to the object
     // passed in the "info_log" member.
@@ -191,10 +189,10 @@ if (const auto s = db->vacuum(); s.is_ok()) {
 ```
 
 ### Transactions
-A transaction represents a unit of work in Calico DB.
+A transaction represents a unit of work in CalicoDB.
 The first transaction is started when the database is opened. 
 Otherwise, transaction boundaries are defined by calls to `Database::commit()`.
-All updates that haven't been committed when the database is closed will be reverted on the next startup.
+All updates that haven't been committed when the database is closed will be reverted.
 
 ```C++
 if (const auto s = db->put("c", "3"); !s.is_ok()) {
@@ -239,69 +237,19 @@ if (const auto s = Calico::Database::destroy("/tmp/cats", options); s.is_ok()) {
 }
 ```
 
-## Architecture
-Calico DB uses a B<sup>+</sup>-tree backend and a write-ahead log (WAL).
-Other core modules are located in the `src` directory.
-The database is generally represented on disk by a single directory.
-The B<sup>+</sup>-tree containing the record store is located in a file called `data` in the main directory.
-The WAL segment files can either be located in the main directory, or in a different location, depending on the `wal_prefix` initialization option.
-The info log will be created in the main directory as well, unless a custom `Logger *` is passed to the database.
-Calico DB runs in a single thread.
-
-### Storage
-The storage module handles platform-specific filesystem operations and I/O.
-Users can override classes in [`calico/storage.h`](../include/calico/storage.h).
-Then, a pointer to the custom `Storage` object can be passed to the database during when it is opened.
-See [`test/tools`](../test/tools) for an example that stores the database in memory.
-
-### Pager
-The pager module provides in-memory caching for database pages read by the `storage` module.
-It is the pager's job to maintain consistency between database pages on disk and in memory.
-
-### Tree
-The B<sup>+</sup>-tree logic can be found in the tree module.
-The tree is of variable order, so splits are performed when nodes have run out of physical space.
-The implementation is pretty straightforward.
-We basically do as little as possible to make sure that the tree ordering remains correct.
-This results in a less-balanced tree, but seems to be good for write performance.
-
-### WAL
-The WAL record format is similar to that of `RocksDB`.
-Additionally, we have 2 WAL payload types: deltas and full images.
-A full image is generated the first time a page is modified during a transaction.
-A full image contain a copy of the page, before anything was changed, and can be used to undo all modifications made during the transaction.
-Further modifications to the page will produce deltas, which record only the changed portions of the page (just the "after" contents).
-Note that full image records are always disjoint (w.r.t. the affected page IDs) within a single transaction.
-This means that they can be applied to the database in any order and produce the same results.
-Deltas are not disjoint, so they must be read in order.
-
-### Consistency
-Calico DB must enforce certain rules to maintain consistency between the WAL and the database.
-First, we need to make sure that all updates are written to the WAL before affected pages are written back to the database file.
-The WAL keeps track of the last LSN it flushed to disk (the `flushed_lsn`).
-This value is queried by the pager to make sure that unprotected pages are never written back.
-The pager keeps track of a few more variables to ensure consistency: the `page_lsn`, the `record_lsn`, the `commit_lsn`, and the `recovery_lsn`.
-The `page_lsn` (per page) is the LSN of the last WAL record generated for the page.
-This is the value that is compared with the WAL's `flushed_lsn` to make sure the page is safe to write out.
-The `record_lsn` (also per page) is the last `page_lsn` value that we already have on disk.
-It is saved (in-memory only) when the page is first read into memory, and each time the page is written back.
-Then, the lowest `record_lsn` is tracked in the pager's `recovery_lsn`.
-The `recovery_lsn` represents the oldest WAL record that we still need.
-It is reported back to the WAL intermittently so that obsolete segment files can be removed.
-
 ## Acknowledgements
 1. https://cstack.github.io/db_tutorial/
-    + Awesome tutorial on database development in C
+    + Tutorial on database development in C
 2. https://www.sqlite.org/arch.html
     + Much of this project was inspired by SQLite3, both the architecture design documents and the source code
     + Especially see the B-tree design document, as well as `btree.h`, `btree.c`, and `btreeInt.h`
 3. https://github.com/google/leveldb
     + Much of the API is inspired by LevelDB
-    + Some parts of the CMake build process is taken from their `CMakeLists.txt`
+    + Some parts of the CMake build process are taken from their `CMakeLists.txt`
 4. https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log
-    + Nice explanation of RocksDB's WAL
+    + Explanation of RocksDB's WAL
     + The idea to have multiple different record types and to use a "tail" buffer are from this document
 5. https://arpitbhayani.me/blogs/2q-cache
-    + Nice description of the 2Q cache replacement policy
+    + Description of the 2Q cache replacement policy
 6. https://stablecog.com/
     + Used to generate the original calico cat image, which was then further modified to produce [mascot.png](mascot.png)

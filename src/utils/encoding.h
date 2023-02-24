@@ -96,8 +96,7 @@ inline auto put_u64(Span out, std::uint64_t value) noexcept -> void
     put_u64(out.data(), value);
 }
 
-[[nodiscard]]
-inline auto varint_length(std::uint64_t value) -> Size
+[[nodiscard]] inline auto varint_length(std::uint64_t value) -> Size
 {
     Size length {1};
     while (value >= 0x80) {

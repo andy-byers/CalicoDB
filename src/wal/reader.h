@@ -9,49 +9,16 @@
 
 namespace Calico {
 
-class WalIterator {
+class WalReader {
     Span m_tail;
     Reader *m_file {};
-    Size m_block {};
     Size m_offset {};
+    Size m_block {};
 
 public:
-    explicit WalIterator(Reader &file, Span tail);
+    explicit WalReader(Reader &file, Span tail);
     [[nodiscard]] auto read(Span &payload) -> Status;
     [[nodiscard]] auto offset() const -> Size;
-};
-
-class WalReader {
-    [[nodiscard]] auto reopen() -> Status;
-
-    std::optional<WalIterator> m_itr;
-    std::unique_ptr<Reader> m_file {};
-    std::string m_prefix;
-    Span m_tail;
-    Span m_data;
-    Storage *m_storage {};
-    WalSet *m_set {};
-    Id m_id {};
-
-public:
-    struct Parameters {
-        std::string prefix;
-        Span tail;
-        Span data;
-        Storage *storage {};
-        WalSet *set {};
-    };
-
-    [[nodiscard]] auto id() const -> Id
-    {
-        // Not valid until reader has had skip() or read() called once.
-        return m_id;
-    }
-
-    [[nodiscard]] static auto open(const Parameters &param, WalReader **out) -> Status;
-    [[nodiscard]] auto read(WalPayloadOut &payload) -> Status;
-    [[nodiscard]] auto seek(Lsn lsn) -> Status;
-    [[nodiscard]] auto skip() -> Status;
 };
 
 } // namespace Calico

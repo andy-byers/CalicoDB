@@ -73,14 +73,15 @@ auto translate_op(std::uint8_t code) -> OperationType
     return type;
 }
 
-extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
+extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     auto options = DB_OPTIONS;
-    options.storage = new(std::nothrow) DynamicMemory;
+    options.storage = new (std::nothrow) DynamicMemory;
+    //    options.info_log = new(std::nothrow) StderrLogger;
     CHECK_TRUE(options.storage != nullptr);
 
     Database *db;
-    expect_ok(Database::open(DB_PATH, options, &db));
+    CHECK_OK(Database::open(DB_PATH, options, &db));
 
     Set erased;
     Map added;
@@ -90,7 +91,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
         delete db;
 
         storage_base(options.storage).clear_interceptors();
-        expect_ok(Database::open(DB_PATH, options, &db));
+        CHECK_OK(Database::open(DB_PATH, options, &db));
 
         added.clear();
         erased.clear();
@@ -142,33 +143,33 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
             switch (failure_target) {
                 case DATA_READ:
                     storage_base(options.storage).add_interceptor(Interceptor {DB_DATA_PATH, Interceptor::READ, [] {
-                        return Status::system_error(std::string {"READ "} + DB_DATA_PATH);
-                    }});
+                                                                                   return Status::system_error(std::string {"READ "} + DB_DATA_PATH);
+                                                                               }});
                     break;
                 case DATA_WRITE:
                     storage_base(options.storage).add_interceptor(Interceptor {DB_DATA_PATH, Interceptor::WRITE, [] {
-                        return Status::system_error(std::string {"WRITE "} + DB_DATA_PATH);
-                    }});
+                                                                                   return Status::system_error(std::string {"WRITE "} + DB_DATA_PATH);
+                                                                               }});
                     break;
                 case WAL_READ:
                     storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::READ, [] {
-                        return Status::system_error(std::string {"READ "} + DB_WAL_PREFIX);
-                    }});
+                                                                                   return Status::system_error(std::string {"READ "} + DB_WAL_PREFIX);
+                                                                               }});
                     break;
                 case WAL_WRITE:
                     storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::WRITE, [] {
-                        return Status::system_error(std::string {"WRITE "} + DB_WAL_PREFIX);
-                    }});
+                                                                                   return Status::system_error(std::string {"WRITE "} + DB_WAL_PREFIX);
+                                                                               }});
                     break;
                 case WAL_UNLINK:
                     storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::UNLINK, [] {
-                        return Status::system_error(std::string {"UNLINK "} + DB_WAL_PREFIX);
-                    }});
+                                                                                   return Status::system_error(std::string {"UNLINK "} + DB_WAL_PREFIX);
+                                                                               }});
                     break;
                 default: // WAL_OPEN
                     storage_base(options.storage).add_interceptor(Interceptor {DB_WAL_PREFIX, Interceptor::OPEN, [] {
-                        return Status::system_error(std::string {"OPEN "} + DB_WAL_PREFIX);
-                    }});
+                                                                                   return Status::system_error(std::string {"OPEN "} + DB_WAL_PREFIX);
+                                                                               }});
             }
             continue;
         }
@@ -235,6 +236,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 
     delete db;
     delete options.storage;
+    delete options.info_log;
     return 0;
 }
 

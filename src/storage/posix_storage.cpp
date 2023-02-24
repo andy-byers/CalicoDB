@@ -1,15 +1,14 @@
 #include "posix_storage.h"
-#include <sys/stat.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace Calico {
 
 static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
 
-[[nodiscard]]
-static auto to_status(int code) -> Status
+[[nodiscard]] static auto to_status(int code) -> Status
 {
     switch (code) {
         case ENOENT:
@@ -23,8 +22,7 @@ static auto to_status(int code) -> Status
     }
 }
 
-[[nodiscard]]
-static auto errno_to_status() -> Status
+[[nodiscard]] static auto errno_to_status() -> Status
 {
     const auto code = errno;
     errno = 0;
@@ -236,10 +234,7 @@ auto PosixStorage::new_reader(const std::string &path, Reader **out) -> Status
 {
     int file {};
     Calico_Try(file_open(path, O_RDONLY, FILE_PERMISSIONS, file));
-    *out = new(std::nothrow) PosixReader {path, file};
-    if (*out == nullptr) {
-        return Status::system_error("out of memory");
-    }
+    *out = new PosixReader {path, file};
     return Status::ok();
 }
 
@@ -247,10 +242,7 @@ auto PosixStorage::new_editor(const std::string &path, Editor **out) -> Status
 {
     int file {};
     Calico_Try(file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS, file));
-    *out = new(std::nothrow) PosixEditor {path, file};
-    if (*out == nullptr) {
-        return Status::system_error("out of memory");
-    }
+    *out = new PosixEditor {path, file};
     return Status::ok();
 }
 
@@ -258,10 +250,7 @@ auto PosixStorage::new_logger(const std::string &path, Logger **out) -> Status
 {
     int file {};
     Calico_Try(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
-    *out = new(std::nothrow) PosixLogger {path, file};
-    if (*out == nullptr) {
-        return Status::system_error("out of memory");
-    }
+    *out = new PosixLogger {path, file};
     return Status::ok();
 }
 

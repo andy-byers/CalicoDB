@@ -29,20 +29,20 @@ auto read_wal_record_header(Slice in) -> WalRecordHeader
 
 auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_size) -> WalRecordHeader
 {
-    CALICO_EXPECT_NE(lhs.type, WalRecordHeader::Type::FIRST);
+    CALICO_EXPECT_NE(lhs.type, WalRecordHeader::FIRST);
     CALICO_EXPECT_EQ(lhs.size, payload.size());
     CALICO_EXPECT_LT(available_size, WalRecordHeader::SIZE + payload.size()); // Only call this if we actually need a split.
     auto rhs = lhs;
 
     lhs.size = static_cast<std::uint16_t>(available_size - WalRecordHeader::SIZE);
     rhs.size = static_cast<std::uint16_t>(payload.size() - lhs.size);
-    rhs.type = WalRecordHeader::Type::LAST;
+    rhs.type = WalRecordHeader::LAST;
 
-    if (lhs.type == WalRecordHeader::Type::FULL) {
-        lhs.type = WalRecordHeader::Type::FIRST;
+    if (lhs.type == WalRecordHeader::FULL) {
+        lhs.type = WalRecordHeader::FIRST;
     } else {
-        CALICO_EXPECT_EQ(lhs.type, WalRecordHeader::Type::LAST);
-        lhs.type = WalRecordHeader::Type::MIDDLE;
+        CALICO_EXPECT_EQ(lhs.type, WalRecordHeader::LAST);
+        lhs.type = WalRecordHeader::MIDDLE;
     }
     return rhs;
 }
@@ -54,7 +54,7 @@ auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Sta
     }
 
     // First merge in the logical record.
-    if (lhs.type == WalRecordHeader::Type {}) {
+    if (lhs.type == WalRecordHeader::EMPTY) {
         if (rhs.type == WalRecordHeader::MIDDLE || rhs.type == WalRecordHeader::LAST) {
             return Status::corruption("right record has invalid type");
         }
@@ -111,19 +111,6 @@ auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::v
         mem_copy(buffer, image.range(offset, size));
         buffer.advance(size);
     }
-    saved.truncate(saved.size() - buffer.size());
-    return WalPayloadIn {lsn, saved};
-}
-
-auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn
-{
-    auto saved = buffer;
-    buffer.advance(sizeof(Lsn));
-
-    // Payload type (1 B)
-    encode_payload_type(buffer, XactPayloadType::COMMIT);
-    buffer.advance();
-
     saved.truncate(saved.size() - buffer.size());
     return WalPayloadIn {lsn, saved};
 }
@@ -202,13 +189,6 @@ static auto decode_full_image_payload(WalPayloadOut in) -> FullImageDescriptor
     return info;
 }
 
-static auto decode_commit_payload(WalPayloadOut in) -> CommitDescriptor
-{
-    CommitDescriptor info;
-    info.lsn = in.lsn();
-    return info;
-}
-
 auto decode_payload(WalPayloadOut in) -> PayloadDescriptor
 {
     switch (XactPayloadType {in.data()[0]}) {
@@ -216,8 +196,6 @@ auto decode_payload(WalPayloadOut in) -> PayloadDescriptor
             return decode_deltas_payload(in);
         case XactPayloadType::FULL_IMAGE:
             return decode_full_image_payload(in);
-        case XactPayloadType::COMMIT:
-            return decode_commit_payload(in);
         default:
             return std::monostate {};
     }

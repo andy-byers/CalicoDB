@@ -1,14 +1,14 @@
 #include "node.h"
-#include <algorithm>
-#include <numeric>
 #include "pager/delta.h"
 #include "utils/encoding.h"
+#include <algorithm>
+#include <numeric>
 
 namespace Calico {
 
 static auto header_offset(const Node &node)
 {
-    return FileHeader::SIZE * node.page.id().is_root();
+    return page_offset(node.page);
 }
 
 static auto cell_slots_offset(const Node &node)
@@ -18,7 +18,7 @@ static auto cell_slots_offset(const Node &node)
 
 static auto cell_area_offset(const Node &node)
 {
-    return cell_slots_offset(node) + node.header.cell_count*sizeof(PageSize);
+    return cell_slots_offset(node) + node.header.cell_count * sizeof(PageSize);
 }
 
 auto internal_cell_size(const NodeMeta &meta, const Byte *data) -> Size
@@ -56,7 +56,7 @@ auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell
     cell.key_size = key_size;
     cell.local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
     cell.has_remote = cell.local_size < key_size + value_size;
-    cell.size = header_size + cell.local_size + cell.has_remote*sizeof(Id);
+    cell.size = header_size + cell.local_size + cell.has_remote * sizeof(Id);
     return cell;
 }
 
@@ -74,12 +74,11 @@ auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell
     cell.key_size = key_size;
     cell.local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
     cell.has_remote = cell.local_size < key_size;
-    cell.size = header_size + cell.local_size + cell.has_remote*sizeof(Id);
+    cell.size = header_size + cell.local_size + cell.has_remote * sizeof(Id);
     return cell;
 }
 
-[[nodiscard]]
-static auto cell_size_direct(const Node &node, Size offset) -> Size
+[[nodiscard]] static auto cell_size_direct(const Node &node, Size offset) -> Size
 {
     return node.meta->cell_size(*node.meta, node.page.data() + offset);
 }
@@ -87,14 +86,12 @@ static auto cell_size_direct(const Node &node, Size offset) -> Size
 class BlockAllocator {
     Node *m_node {};
 
-    [[nodiscard]]
-    auto get_next_pointer(Size offset) -> PageSize
+    [[nodiscard]] auto get_next_pointer(Size offset) -> PageSize
     {
         return get_u16(m_node->page.data() + offset);
     }
 
-    [[nodiscard]]
-    auto get_block_size(Size offset) -> PageSize
+    [[nodiscard]] auto get_block_size(Size offset) -> PageSize
     {
         return get_u16(m_node->page.data() + offset + sizeof(PageSize));
     }
@@ -255,7 +252,7 @@ auto Node::initialize() -> void
     }
 
     const auto after_header = page_offset(page) + NodeHeader::SIZE;
-    const auto bottom = after_header + header.cell_count*sizeof(PageSize);
+    const auto bottom = after_header + header.cell_count * sizeof(PageSize);
     const auto top = header.cell_start;
 
     CALICO_EXPECT_GE(top, bottom);
@@ -265,21 +262,21 @@ auto Node::initialize() -> void
 auto Node::get_slot(Size index) const -> Size
 {
     CALICO_EXPECT_LT(index, header.cell_count);
-    return get_u16(page.data() + slots_offset + index*sizeof(PageSize));
+    return get_u16(page.data() + slots_offset + index * sizeof(PageSize));
 }
 
 auto Node::set_slot(Size index, Size pointer) -> void
 {
     CALICO_EXPECT_LT(index, header.cell_count);
-    return put_u16(page.span(slots_offset + index*sizeof(PageSize), sizeof(PageSize)), static_cast<PageSize>(pointer));
+    return put_u16(page.span(slots_offset + index * sizeof(PageSize), sizeof(PageSize)), static_cast<PageSize>(pointer));
 }
 
 auto Node::insert_slot(Size index, Size pointer) -> void
 {
     CALICO_EXPECT_LE(index, header.cell_count);
     CALICO_EXPECT_GE(gap_size, sizeof(PageSize));
-    const auto offset = slots_offset + index*sizeof(PageSize);
-    const auto size = (header.cell_count-index) * sizeof(PageSize);
+    const auto offset = slots_offset + index * sizeof(PageSize);
+    const auto size = (header.cell_count - index) * sizeof(PageSize);
     auto *data = page.data() + offset;
 
     std::memmove(data + sizeof(PageSize), data, size);
@@ -293,8 +290,8 @@ auto Node::insert_slot(Size index, Size pointer) -> void
 auto Node::remove_slot(Size index) -> void
 {
     CALICO_EXPECT_LT(index, header.cell_count);
-    const auto offset = slots_offset + index*sizeof(PageSize);
-    const auto size = (header.cell_count-index) * sizeof(PageSize);
+    const auto offset = slots_offset + index * sizeof(PageSize);
+    const auto size = (header.cell_count - index) * sizeof(PageSize);
     auto *data = page.data() + offset;
 
     std::memmove(data, data + sizeof(PageSize), size);
@@ -550,20 +547,20 @@ auto write_child_id(Cell &cell, Id child_id) -> void
 auto merge_root(Node &root, Node &child) -> void
 {
     CALICO_EXPECT_EQ(root.header.next_id, child.page.id());
-    if (child.header.free_total) {
+    const auto &header = child.header;
+    if (header.free_total) {
         manual_defragment(child);
     }
 
     // Copy the cell content area.
-    const auto offset = cell_area_offset(child);
-    auto memory = root.page.span(offset, child.page.size() - offset);
-    std::memcpy(memory.data(), child.page.data() + offset, memory.size());
+    CALICO_EXPECT_GE(header.cell_start, FileHeader::SIZE + NodeHeader::SIZE);
+    auto memory = root.page.span(header.cell_start, child.page.size() - header.cell_start);
+    std::memcpy(memory.data(), child.page.data() + header.cell_start, memory.size());
 
     // Copy the header and cell pointers.
-    memory = root.page.span(FileHeader::SIZE + NodeHeader::SIZE, child.header.cell_count * sizeof(PageSize));
+    memory = root.page.span(FileHeader::SIZE + NodeHeader::SIZE, header.cell_count * sizeof(PageSize));
     std::memcpy(memory.data(), child.page.data() + cell_slots_offset(child), memory.size());
-    root.header = child.header;
+    root.header = header;
 }
 
 } // namespace Calico
-

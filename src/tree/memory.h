@@ -18,7 +18,7 @@ class Pager;
  * Special care must be taken to ensure that the pointer maps stay correct. Pointer map entries must be updated in
  * the following situations:
  *     (1) A parent-child tree connection is changed
- *     (2) A cell with an overflow chain is moved between (external) nodes
+ *     (2) A cell with an overflow chain is moved between nodes
  *     (3) During all freelist and some overflow chain operations
  *
  * NOTE: The purpose of this data structure is to make the vacuum operation possible. It lets us swap any 2 pages,
@@ -29,7 +29,7 @@ class PointerMap {
     Pager *m_pager {};
 
 public:
-    enum Type: Byte {
+    enum Type : Byte {
         NODE = 1,
         OVERFLOW_HEAD,
         OVERFLOW_LINK,
@@ -73,8 +73,7 @@ public:
           m_pointers {&pointers}
     {}
 
-    [[nodiscard]]
-    auto is_empty() const -> bool
+    [[nodiscard]] auto is_empty() const -> bool
     {
         return m_head.is_null();
     }
@@ -84,7 +83,7 @@ public:
 };
 
 /* Overflow chain management. The tree engine attempts to store all data in external node pages. If the user inserts
- * a record that is too large, part of the payload value (not the key) will be transferred to one or more overflow
+ * a record that is too large, part of the payload key and/or value will be transferred to one or more overflow
  * chain pages. Like the freelist, an overflow chain forms a singly-linked list of pages. The difference is that
  * each overflow chain page contains both a pointer and payload data, while each freelist page only contains a
  * "next" pointer.
@@ -100,7 +99,8 @@ public:
     explicit OverflowList(Pager &pager, FreeList &freelist, PointerMap &pointers)
         : m_pager {&pager},
           m_freelist {&freelist},
-          m_pointers {&pointers} {}
+          m_pointers {&pointers}
+    {}
 
     [[nodiscard]] auto read_chain(Span out, Id pid, Size offset = 0) const -> Status;
     [[nodiscard]] auto write_chain(Id &out, Id pid, Slice first, Slice second = {}) -> Status;
