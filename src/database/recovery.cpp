@@ -179,7 +179,7 @@ auto Recovery::recover_phase_1() -> Status
     if (last_lsn == commit_lsn) {
         if (*m_commit_lsn <= commit_lsn) {
             *m_commit_lsn = commit_lsn;
-            return m_pager->flush({});
+            return Status::ok();
         } else {
             return Status::corruption("missing commit record");
         }
@@ -198,6 +198,13 @@ auto Recovery::recover_phase_1() -> Status
 
 auto Recovery::recover_phase_2() -> Status
 {
+    // Pager needs the updated state to determine the page count.
+    Page root;
+    Calico_Try(m_pager->acquire(Id::root(), root));
+    FileHeader header {root};
+    m_pager->load_state(header);
+    m_pager->release(std::move(root));
+
     /* Make sure all changes have made it to disk, then remove WAL segments from the right.
      */
     Calico_Try(m_pager->flush({}));
@@ -209,13 +216,6 @@ auto Recovery::recover_phase_2() -> Status
     m_wal->m_last_lsn = *m_commit_lsn;
     m_wal->m_flushed_lsn = *m_commit_lsn;
     m_pager->m_recovery_lsn = *m_commit_lsn;
-
-    // Pager needs the updated state to determine the page count.
-    Page root;
-    Calico_Try(m_pager->acquire(Id::root(), root));
-    FileHeader header {root};
-    m_pager->load_state(header);
-    m_pager->release(std::move(root));
 
     // Make sure the file size matches the header page count, which should be correct if we made it this far.
     Calico_Try(m_pager->truncate(m_pager->page_count()));

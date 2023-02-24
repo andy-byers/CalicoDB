@@ -142,7 +142,8 @@ auto Pager::flush(Lsn target_lsn) -> Status
         }
 
         if (page_id.as_index() >= m_frames.page_count()) {
-            // Page is out of range.
+            logv(m_info_log, "removing page ", page_id.value,
+                 ", which is out of range (page count is ", m_frames.page_count(), ")");
             m_cache.erase(page_id);
             m_frames.unpin(frame_id);
             itr = m_dirty.remove(itr);

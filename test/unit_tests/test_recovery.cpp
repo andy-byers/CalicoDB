@@ -240,6 +240,9 @@ public:
     RecoverySanityCheck()
         : interceptor_prefix {db_prefix + std::get<0>(GetParam())}
     {
+        db_options.info_log = new Tools::StderrLogger;
+        open();
+
         Tools::RandomGenerator random {1'024 * 1'024 * 8};
         const Size N {5'000};
 
@@ -250,42 +253,27 @@ public:
         }
     }
 
-    auto setup()
+    ~RecoverySanityCheck()
+    {
+        delete db_options.info_log;
+    }
+
+    auto SetUp() -> void override
     {
         auto record = begin(map);
         for (Size index {}; record != end(map); ++index, ++record) {
             ASSERT_OK(db->put(record->first, record->second));
-            if (record->first.front() & 1) {
+            if (record->first.front() % 20 == 1) {
                 ASSERT_OK(db->commit());
             }
         }
         ASSERT_OK(db->commit());
+
+        Counting_Interceptor(interceptor_prefix, interceptor_type, interceptor_count);
     }
 
-    auto run_and_validate() -> void
+    auto validate() -> void
     {
-        for (const auto &[k, v]: map) {
-            auto s = db->erase(k);
-            if (!s.is_ok()) {
-                assert_special_error(s);
-                break;
-            }
-        }
-        if (db->status().is_ok()) {
-            for (const auto &[k, v]: map) {
-                auto s = db->put(k, v);
-                if (!s.is_ok()) {
-                    assert_special_error(s);
-                    break;
-                }
-            }
-            if (db->status().is_ok()) {
-                run_and_validate();
-                return;
-            }
-        }
-        assert_special_error(db->status());
-
         Clear_Interceptors();
         open();
 
@@ -302,11 +290,30 @@ public:
     std::map<std::string, std::string> map;
 };
 
-TEST_P(RecoverySanityCheck, SanityCheck)
+TEST_P(RecoverySanityCheck, FailureWhileRunning)
 {
-    setup();
-    Counting_Interceptor(interceptor_prefix, interceptor_type, interceptor_count);
-    run_and_validate();
+    for (const auto &[k, v]: map) {
+        auto s = db->erase(k);
+        if (!s.is_ok()) {
+            assert_special_error(s);
+            break;
+        }
+    }
+    assert_special_error(db->status());
+
+    validate();
+}
+
+// TODO: Find some way to determine if an error occurred during the destructor. It happens in each
+//       instance except for when we attempt to fail due to a WAL write error, since the WAL is not
+//       written during the close/recovery routine.
+TEST_P(RecoverySanityCheck, FailureDuringClose)
+{
+    // The final transaction committed successfully, so the data we added should persist.
+    delete db;
+    db = nullptr;
+
+    validate();
 }
 
 INSTANTIATE_TEST_SUITE_P(

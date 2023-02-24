@@ -33,7 +33,6 @@ public:
         : m_data {data}
     {
         assert(m_data != nullptr);
-
         m_size = std::char_traits<Byte>::length(m_data);
     }
 
@@ -75,7 +74,6 @@ public:
         assert(size <= m_size);
         assert(offset <= m_size);
         assert(offset + size <= m_size);
-
         return {m_data + offset, size};
     }
 
@@ -88,7 +86,7 @@ public:
 
     constexpr auto clear() noexcept -> void
     {
-        m_data = nullptr;
+        m_data = "";
         m_size = 0;
     }
 

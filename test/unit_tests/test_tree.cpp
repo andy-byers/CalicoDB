@@ -1085,6 +1085,17 @@ TEST_P(CursorTests, SanityCheck_Backward)
     }
 }
 
+#if not NDEBUG
+TEST_P(CursorTests, InvalidCursorDeathTest)
+{
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    ASSERT_DEATH((void)cursor->key(), EXPECTATION_MATCHER);
+    ASSERT_DEATH((void)cursor->value(), EXPECTATION_MATCHER);
+    ASSERT_DEATH((void)cursor->next(), EXPECTATION_MATCHER);
+    ASSERT_DEATH((void)cursor->previous(), EXPECTATION_MATCHER);
+}
+#endif // NDEBUG
+
 INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,

@@ -556,6 +556,20 @@ TEST_P(DbErrorTests, HandlesReadErrorDuringIteration)
     ASSERT_OK(db->impl->status());
 }
 
+TEST_P(DbErrorTests, HandlesReadErrorDuringSeek)
+{
+    std::unique_ptr<Cursor> cursor {db->impl->new_cursor()};
+
+    for (const auto &[k, v]: committed) {
+        cursor->seek(k);
+        if (!cursor->is_valid()) {
+            break;
+        }
+    }
+    assert_special_error(cursor->status());
+    ASSERT_OK(db->impl->status());
+}
+
 INSTANTIATE_TEST_SUITE_P(
     DbErrorTests,
     DbErrorTests,

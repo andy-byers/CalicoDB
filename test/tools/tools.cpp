@@ -195,8 +195,10 @@ auto DynamicMemory::file_size(const std::string &path, Size &out) const -> Statu
 
 auto DynamicMemory::file_exists(const std::string &path) const -> Status
 {
-    if (const auto &mem = get_memory(path); mem.created) {
-        return Status::ok();
+    if (const auto &itr = m_memory.find(path); itr != end(m_memory)) {
+        if (itr->second.created) {
+            return Status::ok();
+        }
     }
     return Status::not_found("file does not exist");
 }
