@@ -23,9 +23,8 @@ auto CursorImpl::status() const -> Status
 
 auto CursorImpl::fetch_key() const -> Status
 {
-    if (m_key_size) {
-        return Status::ok();
-    }
+    CALICO_EXPECT_EQ(m_key_size, 0);
+
     Node node;
     Calico_Try(m_tree->acquire(node, m_loc.pid));
 
@@ -49,9 +48,8 @@ auto CursorImpl::fetch_key() const -> Status
 
 auto CursorImpl::fetch_value() const -> Status
 {
-    if (m_value_size) {
-        return Status::ok();
-    }
+    CALICO_EXPECT_EQ(m_value_size, 0);
+
     Node node;
     Calico_Try(m_tree->acquire(node, m_loc.pid));
 
@@ -67,19 +65,20 @@ auto CursorImpl::fetch_value() const -> Status
 auto CursorImpl::key() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
-    m_status = fetch_key();
     return Slice {m_key}.truncate(m_key_size);
 }
 
 auto CursorImpl::value() const -> Slice
 {
     CALICO_EXPECT_TRUE(is_valid());
-    m_status = fetch_value();
     return Slice {m_value}.truncate(m_value_size);
 }
 
 auto CursorImpl::seek_first() -> void
 {
+    m_key_size = 0;
+    m_value_size = 0;
+
     Node lowest;
     auto s = m_tree->lowest(lowest);
     if (!s.is_ok()) {
@@ -96,6 +95,9 @@ auto CursorImpl::seek_first() -> void
 
 auto CursorImpl::seek_last() -> void
 {
+    m_key_size = 0;
+    m_value_size = 0;
+
     Node highest;
     auto s = m_tree->highest(highest);
     if (!s.is_ok()) {
@@ -115,13 +117,15 @@ auto CursorImpl::next() -> void
     CALICO_EXPECT_TRUE(is_valid());
     m_key_size = 0;
     m_value_size = 0;
-    if (++m_loc.index < m_loc.count) {
-        return;
-    }
+
     Node node;
     auto s = m_tree->acquire(node, Id {m_loc.pid});
     if (!s.is_ok()) {
         m_status = s;
+        return;
+    }
+    if (++m_loc.index < m_loc.count) {
+        seek_to(std::move(node), m_loc.index);
         return;
     }
     const auto next_id = node.header.next_id;
@@ -136,27 +140,23 @@ auto CursorImpl::next() -> void
         m_status = s;
         return;
     }
-    m_loc.pid = node.page.id();
-    m_loc.count = node.header.cell_count;
-    m_loc.index = 0;
-    m_tree->release(std::move(node));
+    seek_to(std::move(node), 0);
 }
 
 auto CursorImpl::previous() -> void
 {
-    if (!is_valid()) {
-        return;
-    }
+    CALICO_EXPECT_TRUE(is_valid());
     m_key_size = 0;
     m_value_size = 0;
-    if (m_loc.index != 0) {
-        m_loc.index--;
-        return;
-    }
+
     Node node;
     auto s = m_tree->acquire(node, m_loc.pid);
     if (!s.is_ok()) {
         m_status = s;
+        return;
+    }
+    if (m_loc.index != 0) {
+        seek_to(std::move(node), m_loc.index - 1);
         return;
     }
     const auto prev_id = node.header.prev_id;
@@ -171,34 +171,40 @@ auto CursorImpl::previous() -> void
         m_status = s;
         return;
     }
-    m_loc.pid = node.page.id();
-    m_loc.count = node.header.cell_count;
-    m_loc.index = node.header.cell_count - 1;
-    m_tree->release(std::move(node));
+    const auto count = node.header.cell_count;
+    seek_to(std::move(node), count - 1);
 }
 
 auto CursorImpl::seek_to(Node node, Size index) -> void
 {
+    CALICO_EXPECT_EQ(m_key_size, 0);
+    CALICO_EXPECT_EQ(m_value_size, 0);
     CALICO_EXPECT_TRUE(node.header.is_external);
+
     const auto pid = node.page.id();
     const auto count = node.header.cell_count;
-    m_tree->release(std::move(node));
-
-    m_key_size = 0;
-    m_value_size = 0;
 
     if (count && index < count) {
         m_loc.index = static_cast<PageSize>(index);
         m_loc.count = static_cast<PageSize>(count);
         m_loc.pid = pid;
-        m_status = Status::ok();
+
+        auto s = fetch_key();
+        if (s.is_ok() && m_value_size == 0) {
+            s = fetch_value();
+        }
+        m_status = s;
     } else {
         m_status = default_error_status();
     }
+    m_tree->release(std::move(node));
 }
 
 auto CursorImpl::seek(const Slice &key) -> void
 {
+    m_key_size = 0;
+    m_value_size = 0;
+
     SearchResult slot;
     auto s = m_tree->search(key, slot);
     if (!s.is_ok()) {
@@ -210,10 +216,8 @@ auto CursorImpl::seek(const Slice &key) -> void
 
 auto CursorInternal::make_cursor(BPlusTree &tree) -> Cursor *
 {
-    auto *cursor = new(std::nothrow) CursorImpl {tree};
-    if (cursor != nullptr) {
-        invalidate(*cursor, default_error_status());
-    }
+    auto *cursor = new CursorImpl {tree};
+    invalidate(*cursor, default_error_status());
     return cursor;
 }
 

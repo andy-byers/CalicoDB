@@ -48,10 +48,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 {
     m_storage = sanitized.storage;
     if (m_storage == nullptr) {
-        m_storage = new(std::nothrow) PosixStorage;
-        if (m_storage == nullptr) {
-            return Status::system_error("out of memory");
-        }
+        m_storage = new PosixStorage;
         m_owns_storage = true;
     }
 
@@ -106,10 +103,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     }, &pager));
     pager->load_state(state);
 
-    tree = new(std::nothrow) BPlusTree {*pager};
-    if (tree == nullptr) {
-        return Status::system_error("out of memory");
-    }
+    tree = new BPlusTree {*pager};
     tree->load_state(state);
 
     Status s;
@@ -410,6 +404,9 @@ auto DatabaseImpl::ensure_consistency() -> Status
 
 auto DatabaseImpl::save_state(Page root, Lsn commit_lsn) const -> Status
 {
+    CALICO_EXPECT_TRUE(root.id().is_root());
+    CALICO_EXPECT_FALSE(commit_lsn.is_null());
+
     FileHeader header {root};
     pager->save_state(header);
     tree->save_state(header);
@@ -452,7 +449,7 @@ auto DatabaseImpl::TEST_validate() const -> void
     tree->TEST_check_nodes();
 }
 
-auto setup(const std::string &prefix, Storage &store, const Options &options, FileHeader &header) -> Status
+auto setup(const std::string &prefix, Storage &storage, const Options &options, FileHeader &header) -> Status
 {
     static constexpr Size MINIMUM_FRAME_COUNT {16};
 
@@ -476,10 +473,10 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, Fi
     std::unique_ptr<Reader> reader;
     Reader *reader_temp {};
 
-    if (auto s = store.new_reader(path, &reader_temp); s.is_ok()) {
+    if (auto s = storage.new_reader(path, &reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
         Size file_size {};
-        Calico_Try(store.file_size(path, file_size));
+        Calico_Try(storage.file_size(path, file_size));
 
         if (file_size < FileHeader::SIZE) {
             return Status::corruption("database is smaller than file header");
@@ -490,17 +487,17 @@ auto setup(const std::string &prefix, Storage &store, const Options &options, Fi
         Calico_Try(read_exact_at(*reader, span, 0));
         header = FileHeader {span.data()};
 
-        if (header.page_size == 0) {
-            return Status::corruption("header indicates a page size of 0");
-        }
-        if (file_size % header.page_size) {
-            return Status::corruption("database size is invalid");
-        }
         if (header.magic_code != FileHeader::MAGIC_CODE) {
             return Status::invalid_argument("magic code is invalid");
         }
         if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
             return Status::corruption("file header is corrupted");
+        }
+        if (header.page_size == 0) {
+            return Status::corruption("header indicates a page size of 0");
+        }
+        if (file_size % header.page_size) {
+            return Status::corruption("database size is invalid");
         }
 
     } else if (s.is_not_found()) {

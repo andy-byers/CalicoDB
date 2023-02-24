@@ -54,7 +54,7 @@ auto Recovery::open_reader(Id segment, std::unique_ptr<Reader> &out) -> Status
 {
     Reader *file;
     const auto name = encode_segment_name(m_wal->m_prefix, segment);
-    Calico_Try(m_pager->m_storage->new_reader(name, &file));
+    Calico_Try(m_storage->new_reader(name, &file));
     out.reset(file);
     return Status::ok();
 }

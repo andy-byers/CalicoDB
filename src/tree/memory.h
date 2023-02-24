@@ -18,7 +18,7 @@ class Pager;
  * Special care must be taken to ensure that the pointer maps stay correct. Pointer map entries must be updated in
  * the following situations:
  *     (1) A parent-child tree connection is changed
- *     (2) A cell with an overflow chain is moved between (external) nodes
+ *     (2) A cell with an overflow chain is moved between nodes
  *     (3) During all freelist and some overflow chain operations
  *
  * NOTE: The purpose of this data structure is to make the vacuum operation possible. It lets us swap any 2 pages,
@@ -84,7 +84,7 @@ public:
 };
 
 /* Overflow chain management. The tree engine attempts to store all data in external node pages. If the user inserts
- * a record that is too large, part of the payload value (not the key) will be transferred to one or more overflow
+ * a record that is too large, part of the payload key and/or value will be transferred to one or more overflow
  * chain pages. Like the freelist, an overflow chain forms a singly-linked list of pages. The difference is that
  * each overflow chain page contains both a pointer and payload data, while each freelist page only contains a
  * "next" pointer.

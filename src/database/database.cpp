@@ -8,11 +8,7 @@ namespace Calico {
 
 auto Database::open(const Slice &path, const Options &options, Database **db) -> Status
 {
-    auto *ptr = new(std::nothrow) DatabaseImpl;
-    if (ptr == nullptr) {
-        return Status::system_error("cannot allocate database object: out of memory");
-    }
-
+    auto *ptr = new DatabaseImpl;
     auto s = ptr->open(path, options);
     if (!s.is_ok()) {
         delete ptr;

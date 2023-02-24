@@ -36,10 +36,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
         return Status::system_error("out of memory");
     }
 
-    auto *ptr = new (std::nothrow) Pager {param, file, std::move(buffer)};
-    if (ptr == nullptr) {
-        return Status::system_error("out of memory");
-    }
+    auto *ptr = new Pager {param, file, std::move(buffer)};
     *out = ptr;
     return Status::ok();
 }

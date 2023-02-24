@@ -35,7 +35,10 @@ public:
     }
 };
 
-class NodeSlotTests: public TestWithPager {
+class NodeSlotTests
+    : public TestWithPager,
+      public testing::Test
+{
 
 };
 
@@ -80,7 +83,10 @@ TEST_F(NodeSlotTests, SlotsAreConsistent)
     ASSERT_EQ(usable_space(node), space);
 }
 
-class ComponentTests: public TestWithPager {
+class ComponentTests
+    : public TestWithPager,
+      public testing::Test
+{
 public:
     ~ComponentTests() override = default;
 
@@ -88,7 +94,6 @@ public:
     {
         collect_scratch.resize(PAGE_SIZE);
 
-        TestWithPager::SetUp();
         pointers = std::make_unique<PointerMap>(*pager);
         freelist = std::make_unique<FreeList>(*pager, *pointers);
         overflow = std::make_unique<OverflowList>(*pager, *freelist, *pointers);
@@ -438,31 +443,18 @@ struct BPlusTreeTestParameters {
     Size extra {};
 };
 
-class BPlusTreeTests : public ParameterizedInMemoryTest<BPlusTreeTestParameters> {
+class BPlusTreeTests
+    : public TestWithPager,
+      public testing::TestWithParam<BPlusTreeTestParameters>
+{
 public:
     BPlusTreeTests()
         : param {GetParam()},
-          scratch(param.page_size, '\x00'),
-          collect_scratch(param.page_size, '\x00'),
-          log_scratch(wal_scratch_size(param.page_size), '\x00')
+          collect_scratch(param.page_size, '\x00')
     {}
 
     auto SetUp() -> void override
     {
-        Pager *temp;
-        EXPECT_OK(Pager::open({
-            PREFIX,
-            storage.get(),
-            &log_scratch,
-            &wal,
-            nullptr,
-            &status,
-            &commit_lsn,
-            &in_xact,
-            8,
-            param.page_size,
-        }, &temp));
-        pager.reset(temp);
         tree = std::make_unique<BPlusTree>(*pager);
 
         // Root page setup.
@@ -521,16 +513,8 @@ public:
 
     BPlusTreeTestParameters param;
     NodeMetaManager meta {GetParam().page_size};
-    std::string log_scratch;
     std::string collect_scratch;
-    Status status;
-    bool in_xact {true};
-    Lsn commit_lsn;
-    DisabledWriteAheadLog wal;
-    std::string scratch;
-    std::unique_ptr<Pager> pager;
     std::unique_ptr<BPlusTree> tree;
-    Tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
 
 TEST_P(BPlusTreeTests, ConstructsAndDestructs)
@@ -1223,7 +1207,10 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
 
-class VacuumTests: public TestWithPager {
+class VacuumTests
+    : public TestWithPager,
+      public testing::Test
+{
 public:
     static constexpr Size FRAME_COUNT {8};
 
@@ -1233,7 +1220,6 @@ public:
 
     auto SetUp() -> void override
     {
-        TestWithPager::SetUp();
         tree = std::make_unique<BPlusTree>(*pager);
         Node root;
         ASSERT_OK(tree->setup(root));

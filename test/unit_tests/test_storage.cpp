@@ -99,7 +99,10 @@ auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, Size siz
     return backing;
 }
 
-class FileTests: public OnDiskTest {
+class FileTests
+    : public OnDiskTest,
+      public testing::Test
+{
 public:
     FileTests()
         : filename {PREFIX + std::string {"file"}}
@@ -191,7 +194,10 @@ public:
     Tools::RandomGenerator random;
 };
 
-class DynamicStorageTests : public InMemoryTest {
+class DynamicStorageTests
+    : public InMemoryTest,
+      public testing::Test
+{
 public:
     DynamicStorageTests()
         : filename {PREFIX + std::string {"file"}}

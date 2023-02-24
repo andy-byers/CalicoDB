@@ -7,9 +7,9 @@
 
 namespace Calico {
 
-class RecoveryTests: public InMemoryTest {
+class RecoveryTestHarness: public InMemoryTest {
 public:
-    RecoveryTests()  
+    RecoveryTestHarness()
         : db_prefix {PREFIX}
     {
         db_options.page_size = MINIMUM_PAGE_SIZE;
@@ -18,7 +18,7 @@ public:
         open();
     }
 
-    ~RecoveryTests() override
+    ~RecoveryTestHarness() override
     {
         close();
     }
@@ -53,12 +53,12 @@ public:
         ASSERT_OK(open_with_status(options));
     }
 
-    auto put(const std::string& k, const std::string& v) -> Status 
+    auto put(const std::string& k, const std::string& v) const -> Status
     {
         return db->put(k, v);
     }
 
-    auto get(const std::string& k) -> std::string
+    auto get(const std::string& k) const -> std::string
     {
         std::string result;
         Status s = db->get(k, result);
@@ -70,7 +70,7 @@ public:
         return result;
     }
 
-    auto log_name(Id id) -> std::string
+    auto log_name(Id id) const -> std::string
     {
         return encode_segment_name(db_prefix + "wal-", id);
     }
@@ -81,8 +81,8 @@ public:
         // Closing the db allows for file deletion.
         close();
         std::vector<Id> logs = get_logs();
-        for (size_t i = 0; i < logs.size(); i++) {
-            EXPECT_OK(storage->remove_file(encode_segment_name(db_prefix + "wal-", logs[i])));
+        for (const auto &log: logs) {
+            EXPECT_OK(storage->remove_file(encode_segment_name(db_prefix + "wal-", log)));
         }
         return logs.size();
     }
@@ -117,28 +117,18 @@ public:
         return result;
     }
 
-    // Write a commit record to a new segment.
-    auto make_segment(Id lognum, Lsn seq) -> void
-    {
-        std::string fname = encode_segment_name(db_prefix + "wal-", lognum);
-        Logger *file;
-        ASSERT_OK(storage->new_logger(fname, &file));
-
-        Byte commit_record[32] {};
-        Span buffer {commit_record};
-        const auto payload = encode_commit_payload(seq, buffer);
-
-        WalWriter writer {*file, tail};
-        ASSERT_OK(writer.write(encode_commit_payload(seq, buffer)));
-        ASSERT_OK(writer.flush());
-        delete file;
-    }
-
     Tools::RandomGenerator random {1024 * 1024 * 4};
     Options db_options;
     std::string db_prefix;
     std::string tail;
     Database *db {};
+};
+
+class RecoveryTests
+    : public RecoveryTestHarness,
+      public testing::Test
+{
+
 };
 
 TEST_F(RecoveryTests, NormalShutdown)
@@ -202,59 +192,17 @@ TEST_F(RecoveryTests, RevertsNthTransaction)
     ASSERT_EQ(get("c"), "NOT_FOUND");
 }
 
-class RecoverySanityCheck: public RecoveryTests {
-public:
-    RecoverySanityCheck()
-        : wal_prefix {db_prefix + "wal-"}
-    {
-        Tools::RandomGenerator random {1'024 * 1'024 * 8};
-        const Size N {100};
-
-        for (Size i {}; i < N; ++i) {
-            const auto k = random.Generate(db_options.page_size * 2);
-            const auto v = random.Generate(db_options.page_size * 2);
-            map[k.to_string()] = v.to_string();
-        }
-    }
-
-    auto setup()
-    {
-        auto record = begin(map);
-        for (Size index {}; record != end(map); ++index, ++record) {
-            ASSERT_OK(db->put(record->first, record->second));
-            if (record->first.size() & 1) {
-                ASSERT_OK(db->commit());
-            }
-        }
-        ASSERT_OK(db->commit());
-    }
-
-    auto run_and_validate()
-    {
-        for (const auto &[k, v]: map) {
-            auto s = db->erase(k);
-            if (!s.is_ok()) {
-                assert_special_error(s);
-                break;
-            }
-        }
-        assert_special_error(db->status());
-        Clear_Interceptors();
-        open();
-
-        for (const auto &[k, v]: map) {
-            std::string value;
-            ASSERT_OK(db->get(k, value));
-            ASSERT_EQ(value, v);
-        }
-    }
-
-    std::string wal_prefix;
-    std::map<std::string, std::string> map;
-};
-
-TEST_F(RecoverySanityCheck, SanityCheck)
+TEST_F(RecoveryTests, SanityCheck)
 {
+    std::map<std::string, std::string> map;
+    const Size N {100};
+
+    for (Size i {}; i < N; ++i) {
+        const auto k = random.Generate(db_options.page_size * 2);
+        const auto v = random.Generate(db_options.page_size * 4);
+        map[k.to_string()] = v.to_string();
+    }
+
     for (Size commit {}; commit < map.size(); ++commit) {
         open();
 
@@ -284,57 +232,98 @@ TEST_F(RecoverySanityCheck, SanityCheck)
     }
 }
 
-TEST_F(RecoverySanityCheck, SanityCheck_WalWriteError)
+class RecoverySanityCheck
+    : public RecoveryTestHarness,
+      public testing::TestWithParam<std::tuple<std::string, Tools::Interceptor::Type, int>>
+{
+public:
+    RecoverySanityCheck()
+        : interceptor_prefix {db_prefix + std::get<0>(GetParam())}
+    {
+        Tools::RandomGenerator random {1'024 * 1'024 * 8};
+        const Size N {5'000};
+
+        for (Size i {}; i < N; ++i) {
+            const auto k = random.Generate(db_options.page_size * 2);
+            const auto v = random.Generate(db_options.page_size * 4);
+            map[k.to_string()] = v.to_string();
+        }
+    }
+
+    auto setup()
+    {
+        auto record = begin(map);
+        for (Size index {}; record != end(map); ++index, ++record) {
+            ASSERT_OK(db->put(record->first, record->second));
+            if (record->first.front() & 1) {
+                ASSERT_OK(db->commit());
+            }
+        }
+        ASSERT_OK(db->commit());
+    }
+
+    auto run_and_validate() -> void
+    {
+        for (const auto &[k, v]: map) {
+            auto s = db->erase(k);
+            if (!s.is_ok()) {
+                assert_special_error(s);
+                break;
+            }
+        }
+        if (db->status().is_ok()) {
+            for (const auto &[k, v]: map) {
+                auto s = db->put(k, v);
+                if (!s.is_ok()) {
+                    assert_special_error(s);
+                    break;
+                }
+            }
+            if (db->status().is_ok()) {
+                run_and_validate();
+                return;
+            }
+        }
+        assert_special_error(db->status());
+
+        Clear_Interceptors();
+        open();
+
+        for (const auto &[k, v]: map) {
+            std::string value;
+            ASSERT_OK(db->get(k, value));
+            ASSERT_EQ(value, v);
+        }
+    }
+
+    std::string interceptor_prefix;
+    Tools::Interceptor::Type interceptor_type {std::get<1>(GetParam())};
+    int interceptor_count {std::get<2>(GetParam())};
+    std::map<std::string, std::string> map;
+};
+
+TEST_P(RecoverySanityCheck, SanityCheck)
 {
     setup();
-    Quick_Interceptor(wal_prefix, Tools::Interceptor::WRITE);
+    Counting_Interceptor(interceptor_prefix, interceptor_type, interceptor_count);
     run_and_validate();
 }
 
-TEST_F(RecoverySanityCheck, SanityCheck_DelayedWalWriteError)
-{
-    setup();
-    int count {10};
-    Counting_Interceptor(wal_prefix, Tools::Interceptor::WRITE, count);
-    run_and_validate();
-}
-
-TEST_F(RecoverySanityCheck, SanityCheck_DataWriteError)
-{
-    setup();
-    Quick_Interceptor(db_prefix + "data", Tools::Interceptor::WRITE);
-    run_and_validate();
-}
-
-TEST_F(RecoverySanityCheck, SanityCheck_DelayedDataWriteError)
-{
-    setup();
-    int count {10};
-    Counting_Interceptor(db_prefix + "data", Tools::Interceptor::WRITE, count);
-    run_and_validate();
-}
-
-TEST_F(RecoverySanityCheck, SanityCheck_DataReadError)
-{
-    setup();
-    Quick_Interceptor(db_prefix + "data", Tools::Interceptor::READ);
-    run_and_validate();
-}
-
-TEST_F(RecoverySanityCheck, SanityCheck_DelayedDataReadError)
-{
-    setup();
-    int count {10};
-    Counting_Interceptor(db_prefix + "data", Tools::Interceptor::READ, count);
-    run_and_validate();
-}
-
-
-TEST_F(RecoverySanityCheck, SanityCheck_WalOpenError)
-{
-    setup();
-    Quick_Interceptor(wal_prefix, Tools::Interceptor::OPEN);
-    run_and_validate();
-}
+INSTANTIATE_TEST_SUITE_P(
+    RecoverySanityCheck,
+    RecoverySanityCheck,
+    ::testing::Values(
+        std::make_tuple("data", Tools::Interceptor::READ, 0),
+        std::make_tuple("data", Tools::Interceptor::READ, 1),
+        std::make_tuple("data", Tools::Interceptor::READ, 10),
+        std::make_tuple("data", Tools::Interceptor::WRITE, 0),
+        std::make_tuple("data", Tools::Interceptor::WRITE, 1),
+        std::make_tuple("data", Tools::Interceptor::WRITE, 10),
+        std::make_tuple("wal-", Tools::Interceptor::WRITE, 0),
+        std::make_tuple("wal-", Tools::Interceptor::WRITE, 1),
+        std::make_tuple("wal-", Tools::Interceptor::WRITE, 10),
+        std::make_tuple("wal-", Tools::Interceptor::OPEN, 0),
+        std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
+        std::make_tuple("wal-", Tools::Interceptor::OPEN, 10)));
 
 }  // namespace Calico

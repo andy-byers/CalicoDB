@@ -13,8 +13,7 @@ static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
 
     // Allocate memory for the copied message/status code.
     const auto total_size = std::char_traits<char>::length(data) + sizeof(char);
-    auto copy = std::unique_ptr<char[]> {new(std::nothrow) char[total_size]()};
-    CALICO_EXPECT_NE(copy, nullptr);
+    auto copy = std::unique_ptr<char[]> {new char[total_size]()};
 
     // Copy the status, std::make_unique<char[]>() will zero initialize, so we already have the null byte.
     std::memcpy(copy.get(), data, total_size - sizeof(char));
@@ -27,11 +26,8 @@ Status::Status(Code code, const Slice &what)
     const auto size = what.size() + EXTRA_SIZE;
 
     // NOTE: The "()" should cause value initialization.
-    m_data = std::unique_ptr<char[]> {new(std::nothrow) char[size]()};
+    m_data = std::unique_ptr<char[]> {new char[size]()};
     auto *ptr = m_data.get();
-
-    // Failure to allocate here is a fatal error.
-    CALICO_EXPECT_NE(ptr, nullptr);
 
     // The first byte holds the status type.
     *ptr++ = static_cast<char>(code);

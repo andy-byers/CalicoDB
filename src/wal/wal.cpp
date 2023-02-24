@@ -39,10 +39,7 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
     }
     std::sort(begin(segment_ids), end(segment_ids));
 
-    auto *wal = new (std::nothrow) WriteAheadLog {param};
-    if (wal == nullptr) {
-        return Status::system_error("out of memory");
-    }
+    auto *wal = new WriteAheadLog {param};
 
     // Keep track of the segment files.
     for (const auto &id: segment_ids) {
@@ -61,16 +58,7 @@ auto WriteAheadLog::close() -> Status
 auto WriteAheadLog::start_writing() -> Status
 {
     CALICO_EXPECT_EQ(m_writer, nullptr);
-
-    auto id = m_set.last();
-    id.value++;
-
-    Calico_Try(m_storage->new_logger(encode_segment_name(m_prefix, id), &m_file));
-    m_writer = new(std::nothrow) WalWriter {*m_file, m_tail};
-    if (m_writer == nullptr) {
-        return Status::system_error("out of memory");
-    }
-    return Status::ok();
+    return open_writer();
 }
 
 auto WriteAheadLog::flushed_lsn() const -> Lsn
@@ -92,7 +80,7 @@ auto WriteAheadLog::current_lsn() const -> Lsn
 auto WriteAheadLog::log(WalPayloadIn payload) -> Status
 {
     if (m_writer == nullptr) {
-        return Status::logic_error("already failed");
+        return Status::logic_error("segment file is not open");
     }
     m_last_lsn.value++;
     m_bytes_written += sizeof(Lsn) + payload.data().size();
@@ -108,6 +96,9 @@ auto WriteAheadLog::log(WalPayloadIn payload) -> Status
 
 auto WriteAheadLog::flush() -> Status
 {
+    if (m_writer == nullptr) {
+        return Status::logic_error("segment file is not open");
+    }
     Calico_Try(m_writer->flush());
     return m_file->sync();
 }
@@ -169,10 +160,7 @@ auto WriteAheadLog::open_writer() -> Status
     id.value++;
 
     Calico_Try(m_storage->new_logger(encode_segment_name(m_prefix, id), &m_file));
-    m_writer = new(std::nothrow) WalWriter {*m_file, m_tail};
-    if (m_writer == nullptr) {
-        return Status::system_error("out of memory");
-    }
+    m_writer = new WalWriter {*m_file, m_tail};
     return Status::ok();
 }
 

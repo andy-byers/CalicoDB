@@ -13,6 +13,8 @@ using FetchKey = std::function<Slice (Size)>;
 
 static auto seek_binary(unsigned n, const Slice &key, const FetchKey &fetch) -> SeekResult
 {
+    // NOTE: If fetch() encounters an error, an empty slice will be returned and the iterator status set. Callers should check the
+    //       iterator status to see if the results were valid or not.
     auto upper{n};
     unsigned lower {};
 
@@ -81,7 +83,10 @@ auto NodeIterator::seek(const Slice &key) -> bool
 
     const auto fetch = [this](auto index) {
         Slice out;
-        m_status = fetch_key(*m_lhs_key, read_cell(*m_node, index), out);
+        auto s = fetch_key(*m_lhs_key, read_cell(*m_node, index), out);
+        if (m_status.is_ok()) {
+            m_status = s;
+        }
         return out;
     };
 
@@ -267,7 +272,7 @@ public:
         auto data = child.page.span(after_root_headers, root.page.size() - after_root_headers);
         mem_copy(data, root.page.view(after_root_headers, data.size()));
 
-        // Copy the header and cell pointers.
+        // Copy the header and cell pointers. Doesn't copy the page LSN.
         child.header = root.header;
         data = child.page.span(NodeHeader::SIZE, root.header.cell_count * sizeof(PageSize));
         mem_copy(data, root.page.view(after_root_headers, data.size()));

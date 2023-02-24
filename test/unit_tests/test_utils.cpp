@@ -597,7 +597,10 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
     ASSERT_EQ(describe_size(10'000ULL, 3), "9.77 KiB");
 }
 
-class InterceptorTests : public InMemoryTest {
+class InterceptorTests
+    : public InMemoryTest,
+      public testing::Test
+{
 
 };
 

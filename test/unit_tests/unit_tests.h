@@ -71,7 +71,7 @@ inline auto expose_message(const Status &s)
     return s.is_ok();
 }
 
-class InMemoryTest : public testing::Test {
+class InMemoryTest {
 public:
     static constexpr auto ROOT = "test";
     static constexpr auto PREFIX = "test/";
@@ -82,7 +82,7 @@ public:
         EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
-    ~InMemoryTest() override = default;
+    virtual ~InMemoryTest() = default;
 
     [[nodiscard]]
     auto storage_handle() -> Tools::DynamicMemory &
@@ -93,30 +93,7 @@ public:
     std::unique_ptr<Storage> storage;
 };
 
-template<class ...Param>
-class ParameterizedInMemoryTest : public testing::TestWithParam<Param...> {
-public:
-    static constexpr auto ROOT = "test";
-    static constexpr auto PREFIX = "test/";
-
-    ParameterizedInMemoryTest()
-        : storage {std::make_unique<Tools::DynamicMemory>()}
-    {
-        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
-    }
-
-    ~ParameterizedInMemoryTest() override = default;
-
-    [[nodiscard]]
-    auto storage_handle() -> Tools::DynamicMemory &
-    {
-        return dynamic_cast<Tools::DynamicMemory &>(*storage);
-    }
-
-    std::unique_ptr<Storage> storage;
-};
-
-class OnDiskTest : public testing::Test {
+class OnDiskTest {
 public:
     static constexpr auto ROOT = "/tmp/__calico_test__";
     static constexpr auto PREFIX = "/tmp/__calico_test__/";
@@ -129,30 +106,7 @@ public:
         EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
     }
 
-    ~OnDiskTest() override
-    {
-        std::error_code ignore;
-        std::filesystem::remove_all(ROOT, ignore);
-    }
-
-    std::unique_ptr<Storage> storage;
-};
-
-template<class ...Param>
-class ParameterizedOnDiskTest : public testing::TestWithParam<Param...> {
-public:
-    static constexpr auto ROOT = "/tmp/__calico_test__";
-    static constexpr auto PREFIX = "/tmp/__calico_test__/";
-
-    ParameterizedOnDiskTest()
-        : storage {std::make_unique<PosixStorage>()}
-    {
-        std::error_code ignore;
-        std::filesystem::remove_all(ROOT, ignore);
-        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
-    }
-
-    ~ParameterizedOnDiskTest() override
+    virtual ~OnDiskTest()
     {
         std::error_code ignore;
         std::filesystem::remove_all(ROOT, ignore);
@@ -203,13 +157,11 @@ public:
 class TestWithPager: public InMemoryTest {
 public:
     const Size PAGE_SIZE {0x200};
+    const Size FRAME_COUNT {16};
 
     TestWithPager()
         : scratch(PAGE_SIZE, '\x00'),
           log_scratch(wal_scratch_size(PAGE_SIZE), '\x00')
-    {}
-
-    auto SetUp() -> void override
     {
         Pager *temp;
         EXPECT_OK(Pager::open({
@@ -221,7 +173,7 @@ public:
             &status,
             &commit_lsn,
             &in_xact,
-            8,
+            FRAME_COUNT,
             PAGE_SIZE,
         }, &temp));
         pager.reset(temp);

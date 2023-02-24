@@ -70,10 +70,7 @@ auto FileHeader::write(Page &page) const -> void
 
 auto NodeHeader::read(const Page &page) -> void
 {
-    auto data = page.data() + page_offset(page);
-
-    page_lsn.value = get_u64(data);
-    data += sizeof(Id);
+    auto data = page.data() + page_offset(page) + sizeof(Lsn);
 
     // Flags byte.
     is_external = *data++;
@@ -101,10 +98,7 @@ auto NodeHeader::read(const Page &page) -> void
 
 auto NodeHeader::write(Page &page) const -> void
 {
-    auto *data = page.data() + page_offset(page);
-
-    put_u64(data, page_lsn.value);
-    data += sizeof(Id);
+    auto *data = page.data() + page_offset(page) + sizeof(Lsn);
 
     *data++ = static_cast<Byte>(is_external);
 

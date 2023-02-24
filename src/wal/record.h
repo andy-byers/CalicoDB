@@ -97,11 +97,7 @@ struct FullImageDescriptor {
     Slice image;
 };
 
-struct CommitDescriptor {
-    Lsn lsn;
-};
-
-using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor, CommitDescriptor>;
+using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor>;
 
 class WalPayloadIn {
 public:
@@ -156,10 +152,8 @@ private:
 [[nodiscard]] auto decode_payload(WalPayloadOut in) -> PayloadDescriptor;
 [[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, Span buffer) -> WalPayloadIn;
 [[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, const Slice &image, Span buffer) -> WalPayloadIn;
-[[nodiscard]] auto encode_commit_payload(Lsn lsn, Span buffer) -> WalPayloadIn;
 
 enum XactPayloadType : Byte {
-    COMMIT     = '\xC0',
     DELTA      = '\xD0',
     FULL_IMAGE = '\xF0',
 };

@@ -537,7 +537,10 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     ASSERT_FALSE(registry.evict(callback));
 }
 
-class FramerTests : public InMemoryTest {
+class FramerTests
+    : public InMemoryTest,
+      public testing::Test
+{
 public:
     explicit FramerTests()
     {
@@ -590,31 +593,12 @@ auto read_from_page(const Page &page, Size size) -> std::string
     return message;
 }
 
-class PagerTests : public InMemoryTest {
+class PagerTests
+    : public TestWithPager,
+      public testing::Test
+{
 public:
-    static constexpr Size frame_count {8};
-    static constexpr Size page_size {0x200};
     std::string test_message {"Hello, world!"};
-
-    explicit PagerTests()
-        : wal {std::make_unique<DisabledWriteAheadLog>()},
-          scratch(wal_scratch_size(page_size), '\x00')
-    {
-        Pager *temp;
-        EXPECT_OK(Pager::open({
-            PREFIX,
-            storage.get(),
-            &scratch,
-            wal.get(),
-            nullptr,
-            &status,
-            &commit_lsn,
-            &in_txn,
-            frame_count,
-            page_size,
-        }, &temp));
-        pager.reset(temp);
-    }
 
     ~PagerTests() override = default;
 
@@ -664,13 +648,6 @@ public:
         EXPECT_OK(status);
         return message;
     }
-
-    Status status;
-    bool in_txn {true};
-    Lsn commit_lsn;
-    std::unique_ptr<WriteAheadLog> wal;
-    std::unique_ptr<Pager> pager;
-    std::string scratch;
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
@@ -732,12 +709,12 @@ static auto run_root_persistence_test(T &test, Size n)
 
 TEST_F(PagerTests, RootDataPersistsInFrame)
 {
-    run_root_persistence_test(*this, frame_count);
+    run_root_persistence_test(*this, FRAME_COUNT);
 }
 
 TEST_F(PagerTests, RootDataPersistsInStorage)
 {
-    run_root_persistence_test(*this, frame_count * 2);
+    run_root_persistence_test(*this, FRAME_COUNT * 2);
 }
 
 [[nodiscard]]

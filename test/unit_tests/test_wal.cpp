@@ -234,7 +234,10 @@ TEST_F(WalSetTests, RemovesSomeSegmentsFromRight)
     ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), Id::from_index(0), 10));
 }
 
-class WalComponentTests: public InMemoryTest {
+class WalComponentTests
+    : public InMemoryTest,
+      public testing::Test
+{
 public:
     static constexpr Size PAGE_SIZE {0x200};
     const std::string WAL_PREFIX {"test/wal-"};
