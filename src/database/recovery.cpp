@@ -173,7 +173,7 @@ auto Recovery::recover_phase_1() -> Status
 
     // Didn't make it to the end of the WAL.
     if (segment != m_set->last()) {
-        return Status::corruption("wal could not be read");
+        return Status::corruption("wal could not be read to the end");
     }
 
     if (last_lsn == commit_lsn) {
@@ -181,12 +181,13 @@ auto Recovery::recover_phase_1() -> Status
             *m_commit_lsn = commit_lsn;
             return m_pager->flush({});
         } else {
-            return Status::corruption("wal could not be read");
+            return Status::corruption("missing commit record");
         }
     }
 
-    /* Roll backward, reverting misapplied updates until we reach either the beginning, or the saved
-     * commit offset. The first segment we read may contain a partial/corrupted record.
+    /* Roll backward, reverting misapplied updates until we reach the most-recent commit. We are able to
+     * read the log forward, since the full images are disjoint. Again, the last segment we read may
+     * contain a partial/corrupted record.
      */
     segment = commit_segment;
     for (; !segment.is_null(); segment = m_set->id_after(segment)) {
@@ -209,7 +210,7 @@ auto Recovery::recover_phase_2() -> Status
     m_wal->m_flushed_lsn = *m_commit_lsn;
     m_pager->m_recovery_lsn = *m_commit_lsn;
 
-    // Pager needs its updated state to determine the page count.
+    // Pager needs the updated state to determine the page count.
     Page root;
     Calico_Try(m_pager->acquire(Id::root(), root));
     FileHeader header {root};

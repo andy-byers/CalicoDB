@@ -151,9 +151,6 @@ auto Pager::flush(Lsn target_lsn) -> Status
             itr = m_dirty.remove(itr);
         } else if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
-            logv(m_info_log, "could not flush page ",
-                 page_id.value, ": updates for lsn ",
-                 page_lsn.value, " are not in the wal");
             itr = next(itr);
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
@@ -255,8 +252,9 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
             next_lsn, page.id(), image, *m_scratch));
 
         if (s.is_ok()) {
-            write_page_lsn(page, next_lsn);
-        } else {
+            s = m_wal->cleanup(m_recovery_lsn);
+        }
+        if (!s.is_ok()) {
             Set_Status(s);
         }
     }
@@ -301,8 +299,10 @@ auto Pager::acquire(Id pid, Page &page) -> Status
     }
 
     Calico_Try(pin_frame(pid));
-    CALICO_EXPECT_TRUE(m_cache.contains(pid));
-    return do_acquire(m_cache.get(pid)->value);
+
+    const auto itr = m_cache.get(pid);
+    CALICO_EXPECT_NE(itr, m_cache.end());
+    return do_acquire(itr->value);
 }
 
 auto Pager::upgrade(Page &page, int important) -> void

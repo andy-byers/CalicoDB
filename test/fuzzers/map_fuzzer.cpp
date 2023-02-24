@@ -77,7 +77,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 {
     auto options = DB_OPTIONS;
     options.storage = new(std::nothrow) DynamicMemory;
-//    options.info_log = new(std::nothrow) StderrLogger;
+    options.info_log = new(std::nothrow) StderrLogger;
     CHECK_TRUE(options.storage != nullptr);
 
     Database *db;
@@ -236,6 +236,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, Size size)
 
     delete db;
     delete options.storage;
+    delete options.info_log;
     return 0;
 }
 

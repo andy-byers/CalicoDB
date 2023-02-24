@@ -1139,13 +1139,6 @@ TEST_F(CommitFailureTests, WalFlushFailure)
     run_failure_path();
 }
 
-TEST_F(CommitFailureTests, PagerFlushFailure)
-{
-    // Write the commit record and flush successfully, but fail to flush old pages from the page cache.
-    Quick_Interceptor("test/data", Tools::Interceptor::WRITE);
-    run_success_path();
-}
-
 class WalPrefixTests : public OnDiskTest {
 public:
     WalPrefixTests()

@@ -395,9 +395,6 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
     if (auto s = pager->flush(flush_lsn); !s.is_ok()) {
         Set_Status(s);
     }
-    if (auto s = wal->cleanup(pager->recovery_lsn()); !s.is_ok()) {
-        Set_Status(s);
-    }
     return Status::ok();
 }
 
