@@ -2,11 +2,9 @@
  * ops_fuzzer.cpp: Runs normal database operations.
  */
 
-#include "fuzzer.h"
+#include "ops_fuzzer.h"
 
-namespace {
-
-using namespace Calico;
+namespace Calico {
 
 enum OperationType {
     PUT,
@@ -21,90 +19,90 @@ enum OperationType {
     TYPE_COUNT
 };
 
-constexpr auto DB_PATH = "__ops_fuzzer";
 constexpr Size DB_MAX_RECORDS {5'000};
+
+OpsFuzzer::OpsFuzzer(std::string path, Options *options)
+    : DbFuzzer {std::move(path), options}
+{}
+
+auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
+{
+    std::string prop;
+    const auto record_count = reinterpret_cast<const DatabaseImpl *>(m_db)->record_count();
+    auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
+    size--;
+
+    std::string key;
+    std::string value;
+    Cursor *cursor;
+
+    if (record_count > DB_MAX_RECORDS) {
+        operation_type = ERASE;
+    }
+    switch (operation_type) {
+        case GET:
+            Tools::expect_non_error(m_db->get(extract_key(data, size), value));
+            break;
+        case PUT:
+            key = extract_key(data, size).to_string();
+            CHECK_OK(m_db->put(key, extract_value(data, size)));
+            break;
+        case ERASE:
+            Tools::expect_non_error(m_db->erase(extract_key(data, size)));
+            break;
+        case SEEK_ITER:
+            key = extract_key(data, size).to_string();
+            cursor = m_db->new_cursor();
+            cursor->seek(key);
+            while (cursor->is_valid()) {
+                if (key.front() & 1) {
+                    cursor->next();
+                } else {
+                    cursor->previous();
+                }
+            }
+            CHECK_TRUE(cursor->status().is_not_found());
+            delete cursor;
+            break;
+        case ITER_FORWARD:
+            cursor = m_db->new_cursor();
+            cursor->seek_first();
+            CHECK_EQ(cursor->is_valid(), record_count != 0);
+            while (cursor->is_valid()) {
+                cursor->next();
+            }
+            CHECK_TRUE(cursor->status().is_not_found());
+            delete cursor;
+            break;
+        case ITER_REVERSE:
+            cursor = m_db->new_cursor();
+            cursor->seek_last();
+            CHECK_EQ(cursor->is_valid(), record_count != 0);
+            while (cursor->is_valid()) {
+                cursor->previous();
+            }
+            CHECK_TRUE(cursor->status().is_not_found());
+            delete cursor;
+            break;
+        case VACUUM:
+            if (auto s = m_db->commit(); s.is_ok()) {
+                return m_db->vacuum();
+            }
+            break;
+        case COMMIT:
+            return m_db->commit();
+            break;
+        default: // REOPEN
+            return reopen();
+    }
+}
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
-    Database *db;
-    CHECK_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
-
+    OpsFuzzer fuzzer {"__ops_fuzzer"};
     while (size > 1) {
-        std::string prop;
-        CHECK_TRUE(db->get_property("calico.counts", prop));
-        const auto counts = Tools::parse_db_counts(prop);
-        auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
-        size--;
-
-        std::string key;
-        std::string value;
-        Cursor *cursor;
-
-        if (counts.records > DB_MAX_RECORDS) {
-            operation_type = ERASE;
-        }
-        switch (operation_type) {
-            case GET:
-                Tools::expect_non_error(db->get(extract_key(data, size), value));
-                break;
-            case PUT:
-                key = extract_key(data, size).to_string();
-                CHECK_OK(db->put(key, extract_value(data, size)));
-                break;
-            case ERASE:
-                Tools::expect_non_error(db->erase(extract_key(data, size)));
-                break;
-            case SEEK_ITER:
-                key = extract_key(data, size).to_string();
-                cursor = db->new_cursor();
-                cursor->seek(key);
-                while (cursor->is_valid()) {
-                    if (key.front() & 1) {
-                        cursor->next();
-                    } else {
-                        cursor->previous();
-                    }
-                }
-                CHECK_TRUE(cursor->status().is_not_found());
-                delete cursor;
-                break;
-            case ITER_FORWARD:
-                cursor = db->new_cursor();
-                cursor->seek_first();
-                CHECK_EQ(cursor->is_valid(), counts.records != 0);
-                while (cursor->is_valid()) {
-                    cursor->next();
-                }
-                CHECK_TRUE(cursor->status().is_not_found());
-                delete cursor;
-                break;
-            case ITER_REVERSE:
-                cursor = db->new_cursor();
-                cursor->seek_last();
-                CHECK_EQ(cursor->is_valid(), counts.records != 0);
-                while (cursor->is_valid()) {
-                    cursor->previous();
-                }
-                CHECK_TRUE(cursor->status().is_not_found());
-                delete cursor;
-                break;
-            case VACUUM:
-                CHECK_OK(db->commit());
-                CHECK_OK(db->vacuum());
-                break;
-            case COMMIT:
-                CHECK_OK(db->commit());
-                break;
-            default: // REOPEN
-                delete db;
-                CHECK_OK(Database::open(DB_PATH, DB_OPTIONS, &db));
-        }
-        CHECK_OK(db->status());
-        Tools::validate_db(*db);
+        fuzzer.step(data, size);
     }
-    Tools::validate_db(*db);
-    delete db;
-    CHECK_OK(Database::destroy(DB_PATH, DB_OPTIONS));
     return 0;
 }
 

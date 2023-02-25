@@ -347,7 +347,7 @@ auto Pager::truncate(Size page_count) -> Status
             m_dirty.remove(*entry->token);
         }
     }
-    return flush({});
+    return flush();
 }
 
 auto Pager::save_state(FileHeader &header) -> void

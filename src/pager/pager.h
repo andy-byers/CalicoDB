@@ -43,7 +43,7 @@ public:
     [[nodiscard]] auto recovery_lsn() -> Id;
     [[nodiscard]] auto bytes_written() const -> Size;
     [[nodiscard]] auto truncate(Size page_count) -> Status;
-    [[nodiscard]] auto flush(Lsn target_lsn) -> Status;
+    [[nodiscard]] auto flush(Lsn target_lsn = Lsn::null()) -> Status;
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Id pid, Page &page) -> Status;

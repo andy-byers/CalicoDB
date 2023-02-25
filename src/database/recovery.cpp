@@ -192,6 +192,7 @@ auto Recovery::recover_phase_1() -> Status
             return Status::corruption("missing commit record");
         }
     }
+    *m_commit_lsn = commit_lsn;
 
     /* Roll backward, reverting misapplied updates until we reach the most-recent commit. We are able to
      * read the log forward, since the full images are disjoint. Again, the last segment we read may

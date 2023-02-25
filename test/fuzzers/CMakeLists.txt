@@ -3,7 +3,7 @@ option(CALICO_FuzzerStandalone "Build with the standalone main() for reproducing
 
 # Based off of the fuzzer CMakeLists.txt in fmt.
 function(build_fuzzer NAME)
-    add_executable(${NAME} ${NAME}.cpp fuzzer.h)
+    add_executable(${NAME} ${NAME}.cpp ${NAME}.h fuzzer.h)
     if(CALICO_FuzzerStandalone)
         target_sources(${NAME} PRIVATE main.cpp)
     endif()

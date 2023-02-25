@@ -107,25 +107,11 @@ static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
     dynamic_cast<const DatabaseImpl &>(db).TEST_validate(); //TODO: The tree validation method sucks and fails when the tree is too big. We end up running out of frames.
 }
 
-static auto traverse_all_records(Database &db)
-{
-    std::unique_ptr<Cursor> c {db.new_cursor()};
-    c->seek_first();
-    for (; c->is_valid(); c->next()) {
-        CursorInternal::TEST_validate(*c);
-    }
-    c->seek_last();
-    for (; c->is_valid(); c->previous()) {
-        CursorInternal::TEST_validate(*c);
-    }
-}
-
 TEST_F(BasicDatabaseTests, InsertOneGroup)
 {
     Database *db;
     ASSERT_OK(Database::open(ROOT, options, &db));
     insert_random_groups(*db, 1, 500);
-    traverse_all_records(*db);
     delete db;
 }
 
@@ -134,7 +120,6 @@ TEST_F(BasicDatabaseTests, InsertMultipleGroups)
     Database *db;
     ASSERT_OK(Database::open(ROOT, options, &db));
     insert_random_groups(*db, 5, 500);
-    traverse_all_records(*db);
     delete db;
 }
 

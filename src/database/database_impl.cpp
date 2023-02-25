@@ -117,7 +117,8 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         pager->release(std::move(root).take());
         CALICO_EXPECT_EQ(pager->page_count(), 1);
 
-        Calico_Try(do_commit({}));
+        Calico_Try(do_commit());
+        Calico_Try(pager->flush());
 
     } else {
         logv(m_info_log, "ensuring consistency of an existing database");
@@ -347,16 +348,22 @@ auto DatabaseImpl::do_vacuum() -> Status
     // whole vacuum operation if the truncation fails. The recovery routine should truncate the file
     // to match the header if necessary.
     pager->m_frames.m_page_count = target.value;
-    Calico_Try(do_commit(m_commit_lsn));
-    Calico_Try(pager->truncate(pager->page_count()));
-    return do_commit({});
+    Calico_Try(do_commit());
+    Calico_Try(pager->flush());
+    Calico_Try(pager->truncate(target.value));
+    Calico_Try(do_commit());
+    return pager->flush();
 }
 
 auto DatabaseImpl::commit() -> Status
 {
     Calico_Try(status());
     if (m_txn_size != 0) {
-        if (auto s = do_commit(m_commit_lsn); !s.is_ok()) {
+        if (auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
+            Set_Status(s);
+            return s;
+        }
+        if (auto s = do_commit(); !s.is_ok()) {
             Set_Status(s);
             return s;
         }
@@ -364,12 +371,7 @@ auto DatabaseImpl::commit() -> Status
     return Status::ok();
 }
 
-/*
- * NOTE: This method only returns an error status if the commit record could not be flushed to the WAL, since this
- *       is what ultimately determines the transaction outcome. If a different failure occurs, that status will be
- *       returned on the next access to the database object.
- */
-auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
+auto DatabaseImpl::do_commit() -> Status
 {
     m_txn_size = 0;
 
@@ -387,10 +389,6 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
 
     logv(m_info_log, "commit successful");
     m_commit_lsn = commit_lsn;
-
-    if (auto s = pager->flush(flush_lsn); !s.is_ok()) {
-        Set_Status(s);
-    }
     return Status::ok();
 }
 

@@ -1,5 +1,5 @@
-#ifndef CALICO_FUZZ_FUZZER_H
-#define CALICO_FUZZ_FUZZER_H
+#ifndef CALICO_FUZZERS_FUZZER_H
+#define CALICO_FUZZERS_FUZZER_H
 
 #include "calico/calico.h"
 #include "tools.h"
@@ -63,6 +63,19 @@ static auto extract_value(const std::uint8_t *&data, Size &size)
     return result;
 }
 
+class DbFuzzer {
+public:
+    virtual ~DbFuzzer();
+    explicit DbFuzzer(std::string path, Options *options = nullptr);
+    [[nodiscard]] virtual auto step(const std::uint8_t *&data, std::size_t &size) -> Status = 0;
+    [[nodiscard]] virtual auto reopen() -> Status;
+
+protected:
+    std::string m_path;
+    Options m_options;
+    Database *m_db {};
+};
+
 } // namespace Calico
 
-#endif // CALICO_FUZZ_FUZZER_H
+#endif // CALICO_FUZZERS_FUZZER_H

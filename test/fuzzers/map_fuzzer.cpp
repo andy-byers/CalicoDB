@@ -5,14 +5,12 @@
  * be exactly the same after (a) a transaction has finished, or (b) the database is reopened.
  */
 
-#include "fuzzer.h"
+#include "map_fuzzer.h"
 
 #include <map>
 #include <set>
 
 #include "calico/calico.h"
-
-#define NO_FAILURES 0
 
 namespace {
 
@@ -39,13 +37,7 @@ enum FailureTarget {
     TARGET_COUNT
 };
 
-constexpr auto DB_PATH = "test";
-constexpr auto DB_DATA_PATH = "test/data";
-constexpr auto DB_WAL_PREFIX = "test/wal";
 constexpr Size DB_MAX_RECORDS {5'000};
-
-using Set = std::set<std::string>;
-using Map = std::map<std::string, std::string>;
 
 auto storage_base(Storage *storage) -> DynamicMemory &
 {

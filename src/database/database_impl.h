@@ -53,7 +53,7 @@ private:
     [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto save_state(Page root, Lsn commit_lsn) const -> Status;
     [[nodiscard]] auto load_state() -> Status;
-    [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
+    [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
 
     mutable Status m_status;
