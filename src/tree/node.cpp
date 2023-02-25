@@ -561,6 +561,7 @@ auto merge_root(Node &root, Node &child) -> void
     memory = root.page.span(FileHeader::SIZE + NodeHeader::SIZE, header.cell_count * sizeof(PageSize));
     std::memcpy(memory.data(), child.page.data() + cell_slots_offset(child), memory.size());
     root.header = header;
+    root.meta = child.meta;
 }
 
 } // namespace Calico

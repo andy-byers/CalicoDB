@@ -659,9 +659,10 @@ public:
             // Note that the child needs an overflow cell for the split routine to work. We'll just fake it by
             // extracting an arbitrary cell and making it the overflow cell.
             if (usable_space(child) < FileHeader::SIZE) {
-                child.overflow = read_cell(child, 0);
+                child.overflow_index = child.header.cell_count / 2;
+                child.overflow = read_cell(child, child.overflow_index);
                 detach_cell(*child.overflow, tree.scratch(0));
-                erase_cell(child, 0);
+                erase_cell(child, child.overflow_index);
                 tree.release(std::move(root));
                 Node parent;
                 Calico_Try(split_non_root(tree, std::move(child), parent));
@@ -669,7 +670,6 @@ public:
                 Calico_Try(tree.acquire(root, Id::root(), true));
             } else {
                 merge_root(root, child);
-                root.meta = child.meta; // TODO: Don't parse the cell incorrectly when fixing links in the root!!!
                 Calico_Try(tree.destroy(std::move(child)));
             }
             Calico_Try(fix_links(tree, root));
@@ -922,7 +922,11 @@ BPlusTree::BPlusTree(Pager &pager)
           external_cell_size, parse_external_cell,
           compute_min_local(pager.page_size()),
           compute_max_local(pager.page_size())},
-      m_internal_meta {internal_cell_size, parse_internal_cell, m_external_meta.min_local, m_external_meta.max_local},
+      m_internal_meta {
+          internal_cell_size,
+          parse_internal_cell,
+          m_external_meta.min_local,
+          m_external_meta.max_local},
       m_pointers {pager},
       m_freelist {pager, m_pointers},
       m_overflow {pager, m_freelist, m_pointers},
