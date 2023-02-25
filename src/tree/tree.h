@@ -73,10 +73,11 @@ class BPlusTree {
     friend class CursorInternal;
     friend class CursorImpl;
 
-    mutable std::array<std::string, 4> m_scratch;
     mutable std::string m_lhs_key;
     mutable std::string m_rhs_key;
     mutable std::string m_anchor;
+    mutable std::string m_node_scratch;
+    mutable std::string m_cell_scratch;
 
     NodeMeta m_external_meta;
     NodeMeta m_internal_meta;
@@ -88,7 +89,7 @@ class BPlusTree {
     Pager *m_pager {};
 
     [[nodiscard]] auto vacuum_step(Page &head, Id last_id) -> Status;
-    [[nodiscard]] auto scratch(Size index) -> Byte *;
+    [[nodiscard]] auto cell_scratch() -> Byte *;
     [[nodiscard]] auto lowest(Node &out) const -> Status;
     [[nodiscard]] auto highest(Node &out) const -> Status;
     auto make_existing_node(Node &out) const -> void;
@@ -108,6 +109,7 @@ public:
     [[nodiscard]] auto allocate(Node &out, bool is_external) -> Status;
     [[nodiscard]] auto acquire(Node &out, Id pid, bool upgrade = false) const -> Status;
     [[nodiscard]] auto destroy(Node node) -> Status;
+    auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
 
     auto save_state(FileHeader &header) const -> void;

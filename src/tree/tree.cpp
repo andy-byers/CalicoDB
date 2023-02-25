@@ -351,7 +351,7 @@ public:
         }
 
         separator = read_cell(right, 0);
-        detach_cell(separator, tree.scratch(1));
+        detach_cell(separator, tree.cell_scratch());
         return Status::ok();
     }
 
@@ -389,7 +389,7 @@ public:
         }
 
         separator = read_cell(left, left.header.cell_count - 1);
-        detach_cell(separator, tree.scratch(1));
+        detach_cell(separator, tree.cell_scratch());
         // TODO: Everywhere that we fail to erase overflow chains from keys, vacuum will not be able to continue. Use remove_cell() instead of erase_cell() to fix the chains.
         //       Note that we only need to do this when the key needs to be discarded. If we are transferring a cell from one node to another, we can leave the chain and
         //       fix the head back pointer when we call insert_cell().
@@ -490,11 +490,10 @@ public:
         CALICO_EXPECT_FALSE(parent.header.is_external);
 
         auto separator = read_cell(parent, index);
-        const auto sep_index = left.header.cell_count;
-
-        detach_cell(separator, tree.scratch(2));
-        write_child_id(separator, left.header.next_id);
-        Calico_Try(insert_cell(tree, left, sep_index, separator));
+        write_cell(left, left.header.cell_count, separator);
+        write_child_id(left, left.header.cell_count - 1, left.header.next_id);
+        Calico_Try(fix_parent_id(tree, left.header.next_id, left.page.id()));
+        Calico_Try(maybe_fix_overflow_chain(tree, separator, left.page.id()));
         erase_cell(parent, index, separator.size);
 
         while (right.header.cell_count) {
@@ -550,11 +549,10 @@ public:
         CALICO_EXPECT_FALSE(parent.header.is_external);
 
         auto separator = read_cell(parent, index);
-        const auto sep_index = left.header.cell_count;
-
-        detach_cell(separator, tree.scratch(2));
-        write_child_id(separator, left.header.next_id);
-        Calico_Try(insert_cell(tree, left, sep_index, separator));
+        write_cell(left, left.header.cell_count, separator);
+        write_child_id(left, left.header.cell_count - 1, left.header.next_id);
+        Calico_Try(fix_parent_id(tree, left.header.next_id, left.page.id()));
+        Calico_Try(maybe_fix_overflow_chain(tree, separator, left.page.id()));
         left.header.next_id = right.header.next_id;
 
         CALICO_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
@@ -661,7 +659,7 @@ public:
             if (usable_space(child) < FileHeader::SIZE) {
                 child.overflow_index = child.header.cell_count / 2;
                 child.overflow = read_cell(child, child.overflow_index);
-                detach_cell(*child.overflow, tree.scratch(0));
+                detach_cell(*child.overflow, tree.cell_scratch());
                 erase_cell(child, child.overflow_index);
                 tree.release(std::move(root));
                 Node parent;
@@ -701,7 +699,7 @@ public:
         erase_cell(right, 0);
 
         auto separator = read_cell(right, 0);
-        Calico_Try(tree.m_payloads.promote(tree.scratch(1), separator, parent.page.id()));
+        Calico_Try(tree.m_payloads.promote(tree.cell_scratch(), separator, parent.page.id()));
         write_child_id(separator, left.page.id());
 
         erase_cell(parent, index, read_cell(parent, index).size);
@@ -730,7 +728,7 @@ public:
         erase_cell(parent, index, separator.size);
 
         auto lowest = read_cell(right, 0);
-        detach_cell(lowest, tree.scratch(2));
+        detach_cell(lowest, tree.cell_scratch());
         erase_cell(right, 0);
         write_child_id(lowest, left.page.id());
         return insert_cell(tree, parent, index, lowest);
@@ -758,7 +756,7 @@ public:
         CALICO_EXPECT_FALSE(is_overflowing(right));
 
         auto separator = highest;
-        Calico_Try(tree.m_payloads.promote(tree.scratch(1), separator, parent.page.id()));
+        Calico_Try(tree.m_payloads.promote(tree.cell_scratch(), separator, parent.page.id()));
         write_child_id(separator, left.page.id());
 
         // Don't erase the cell until it has been detached.
@@ -791,7 +789,7 @@ public:
         erase_cell(parent, index, separator.size);
 
         auto highest = read_cell(left, left.header.cell_count - 1);
-        detach_cell(highest, tree.scratch(2));
+        detach_cell(highest, tree.cell_scratch());
         write_child_id(highest, left.page.id());
         erase_cell(left, left.header.cell_count - 1, highest.size);
         Calico_Try(insert_cell(tree, parent, index, highest));
@@ -917,8 +915,10 @@ auto PayloadManager::collect_value(std::string &scratch, const Cell &cell, Slice
 }
 
 BPlusTree::BPlusTree(Pager &pager)
+    : m_node_scratch(pager.page_size(), '\0'),
+      m_cell_scratch(pager.page_size(), '\0'),
     // min_local and max_local fields are only needed in external nodes.
-    : m_external_meta {
+      m_external_meta {
           external_cell_size, parse_external_cell,
           compute_min_local(pager.page_size()),
           compute_max_local(pager.page_size())},
@@ -932,13 +932,7 @@ BPlusTree::BPlusTree(Pager &pager)
       m_overflow {pager, m_freelist, m_pointers},
       m_payloads {m_external_meta, m_overflow},
       m_pager {&pager}
-{
-    // Scratch memory for defragmenting nodes and storing cells.
-    m_scratch[0].resize(pager.page_size());
-    m_scratch[1].resize(pager.page_size());
-    m_scratch[2].resize(pager.page_size());
-    m_scratch[3].resize(pager.page_size());
-}
+{}
 
 auto BPlusTree::setup(Node &out) -> Status
 {
@@ -952,7 +946,7 @@ auto BPlusTree::make_fresh_node(Node &out, bool is_external) const -> void
 {
     out.header = NodeHeader {};
     out.header.is_external = is_external;
-    out.scratch = m_scratch.back().data();
+    out.scratch = m_node_scratch.data();
     if (out.header.is_external) {
         out.meta = &m_external_meta;
     } else {
@@ -963,7 +957,7 @@ auto BPlusTree::make_fresh_node(Node &out, bool is_external) const -> void
 
 auto BPlusTree::make_existing_node(Node &out) const -> void
 {
-    out.scratch = m_scratch.back().data();
+    out.scratch = m_node_scratch.data();
     out.header.read(out.page);
     if (out.header.is_external) {
         out.meta = &m_external_meta;
@@ -973,11 +967,9 @@ auto BPlusTree::make_existing_node(Node &out) const -> void
     out.initialize();
 }
 
-auto BPlusTree::scratch(Size index) -> Byte *
+auto BPlusTree::cell_scratch() -> Byte *
 {
-    // Reserve the last scratch buffer for defragmentation.
-    CALICO_EXPECT_LT(index, m_scratch.size() - 1);
-    return m_scratch[index].data() + sizeof(Id) - 1;
+    return m_cell_scratch.data() + sizeof(Id) - 1;
 }
 
 auto BPlusTree::allocate(Node &out, bool is_external) -> Status
@@ -1003,16 +995,27 @@ auto BPlusTree::allocate(Node &out, bool is_external) -> Status
     return Status::ok();
 }
 
-auto BPlusTree::acquire(Node &out, Id pid, bool upgrade) const -> Status
+auto BPlusTree::acquire(Node &out, Id pid, bool needs_upgrade) const -> Status
 {
     CALICO_EXPECT_FALSE(BPlusTreeInternal::is_pointer_map(*this, pid));
     Calico_Try(m_pager->acquire(pid, out.page));
-
-    if (upgrade) {
-        m_pager->upgrade(out.page);
-    }
     make_existing_node(out);
+
+    if (needs_upgrade) {
+        upgrade(out);
+    }
     return Status::ok();
+}
+
+auto BPlusTree::upgrade(Node &node) const -> void
+{
+    m_pager->upgrade(node.page);
+
+    // Ensure that the fragment count byte doesn't overflow. We have to account for the possible addition of
+    // 2 fragments.
+    if (node.header.frag_count + 6 >= 0xFF) {
+        manual_defragment(node);
+    }
 }
 
 auto BPlusTree::release(Node node) const -> void
@@ -1034,13 +1037,13 @@ auto BPlusTree::insert(const Slice &key, const Slice &value, bool &exists) -> St
     SearchResult slot;
     Calico_Try(BPlusTreeInternal::find_external_slot(*this, key, slot));
     auto [node, index, exact] = std::move(slot);
-    m_pager->upgrade(node.page);
+    upgrade(node);
 
     if (exact) {
         Calico_Try(BPlusTreeInternal::remove_cell(*this, node, index));
     }
 
-    Calico_Try(m_payloads.emplace(scratch(0), node, key, value, index));
+    Calico_Try(m_payloads.emplace(cell_scratch(), node, key, value, index));
     Calico_Try(BPlusTreeInternal::resolve_overflow(*this, std::move(node)));
     exists = exact;
     return Status::ok();
@@ -1057,7 +1060,7 @@ auto BPlusTree::erase(const Slice &key) -> Status
         Slice anchor;
         Calico_Try(collect_key(m_anchor, cell, anchor));
 
-        m_pager->upgrade(node.page);
+        upgrade(node);
         Calico_Try(BPlusTreeInternal::remove_cell(*this, node, index));
         return BPlusTreeInternal::resolve_underflow(*this, std::move(node), anchor);
     }

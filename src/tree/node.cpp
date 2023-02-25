@@ -152,17 +152,19 @@ auto BlockAllocator::take_free_space(PageSize ptr0, PageSize ptr1, PageSize need
     CALICO_EXPECT_LT(ptr0, m_node->page.size());
     CALICO_EXPECT_LT(ptr1, m_node->page.size());
     CALICO_EXPECT_LT(needed_size, m_node->page.size());
+
     const auto is_first = !ptr0;
     const auto ptr2 = get_next_pointer(ptr1);
     const auto free_size = get_block_size(ptr1);
     auto &header = m_node->header;
 
+    // Caller should make sure it isn't possible to overflow this byte.
+    CALICO_EXPECT_LE(header.frag_count + 3, 0xFF);
+
     CALICO_EXPECT_GE(free_size, needed_size);
     const auto diff = static_cast<PageSize>(free_size - needed_size);
 
     if (diff < 4) {
-        // Caller should make sure it isn't possible to overflow this byte.
-        CALICO_EXPECT_LE(header.frag_count + 3, 0xFF);
         header.frag_count = static_cast<std::uint8_t>(header.frag_count + diff);
 
         if (is_first) {
@@ -193,9 +195,9 @@ auto BlockAllocator::free(PageSize ptr, PageSize size) -> void
     CALICO_EXPECT_GE(ptr, cell_area_offset(*m_node));
     CALICO_EXPECT_LE(ptr + size, m_node->page.size());
     auto &header = m_node->header;
+    CALICO_EXPECT_LE(header.frag_count + 3, 0xFF);
 
     if (size < 4) {
-        CALICO_EXPECT_LE(header.frag_count + 3, 0xFF);
         header.frag_count = static_cast<std::uint8_t>(header.frag_count + size);
     } else {
         set_next_pointer(ptr, header.free_start);
@@ -387,11 +389,6 @@ auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
     }
 
     BlockAllocator alloc {node};
-
-    // Ensure that the fragment count byte doesn't overflow.
-    if (node.header.frag_count + 3 >= 0x100) {
-        alloc.defragment(std::nullopt);
-    }
 
     // We don't have room to insert the cell pointer.
     if (node.gap_size < sizeof(PageSize)) {
