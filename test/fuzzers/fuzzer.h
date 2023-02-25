@@ -8,17 +8,6 @@
 
 namespace Calico {
 
-static constexpr auto PAGE_SIZE = MINIMUM_PAGE_SIZE;
-
-static constexpr Options DB_OPTIONS {
-    PAGE_SIZE,
-    PAGE_SIZE * 32,
-    {},
-    LogLevel::OFF,
-    nullptr,
-    nullptr,
-};
-
 static auto extract_key(const std::uint8_t *&data, Size &size)
 {
     assert(size != 0);
@@ -27,7 +16,7 @@ static auto extract_key(const std::uint8_t *&data, Size &size)
     }
     Size actual {2};
     if (size > 2) {
-        const auto requested = std::min<Size>(data[0] << 8 | data[1], PAGE_SIZE * 2);
+        const auto requested = std::min<Size>(data[0] << 8 | data[1], MAXIMUM_PAGE_SIZE);
         actual = std::min(requested + !requested, size - 2);
         data += 2;
         size -= 2;
@@ -52,7 +41,7 @@ static auto extract_value(const std::uint8_t *&data, Size &size)
     } else {
         result_size = data[0] << 8 | data[1];
     }
-    result_size %= PAGE_SIZE * 2;
+    result_size %= MAXIMUM_PAGE_SIZE;
     data += needed_size;
     size -= needed_size;
 

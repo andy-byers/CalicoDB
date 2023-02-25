@@ -13,6 +13,8 @@ DbFuzzer::DbFuzzer(std::string path, Options *options)
 
 DbFuzzer::~DbFuzzer()
 {
+    Tools::validate_db(*m_db);
+
     delete m_db;
 
     CHECK_OK(Database::destroy(m_path, m_options));

@@ -36,6 +36,8 @@ public:
 
 class Storage {
 public:
+    static auto default_storage() -> Storage *;
+
     virtual ~Storage() = default;
     [[nodiscard]] virtual auto create_directory(const std::string &path) -> Status = 0;
     [[nodiscard]] virtual auto remove_directory(const std::string &path) -> Status = 0;

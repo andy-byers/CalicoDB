@@ -318,9 +318,6 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
 auto DatabaseImpl::vacuum() -> Status
 {
     Calico_Try(status());
-    if (m_txn_size) {
-        return Status::logic_error("transaction must be empty");
-    }
     if (auto s = do_vacuum(); !s.is_ok()) {
         Set_Status(s);
     }
@@ -346,13 +343,9 @@ auto DatabaseImpl::do_vacuum() -> Status
     }
     // Make sure the vacuum updates are in the WAL. If this succeeds, we should be able to reapply the
     // whole vacuum operation if the truncation fails. The recovery routine should truncate the file
-    // to match the header if necessary.
-    pager->m_frames.m_page_count = target.value;
-    Calico_Try(do_commit());
-    Calico_Try(pager->flush());
-    Calico_Try(pager->truncate(target.value));
-    Calico_Try(do_commit());
-    return pager->flush();
+    // to match the header page count if necessary.
+    Calico_Try(wal->flush());
+    return pager->truncate(target.value);
 }
 
 auto DatabaseImpl::commit() -> Status

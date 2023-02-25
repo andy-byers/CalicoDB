@@ -262,7 +262,6 @@ TEST_P(DbVacuumTests, SanityCheck)
             map.erase(key);
             ASSERT_OK(db->erase(key));
         }
-        ASSERT_OK(db->commit());
         ASSERT_OK(db->vacuum());
         dynamic_cast<DatabaseImpl &>(*db).TEST_validate();
 
@@ -271,7 +270,7 @@ TEST_P(DbVacuumTests, SanityCheck)
             i++;
             std::string result;
             ASSERT_OK(db->get(key, result));
-            CALICO_EXPECT_EQ(result, value);
+            ASSERT_EQ(result, value);
         }
     }
     delete db;
@@ -564,7 +563,8 @@ struct ErrorWrapper {
 
 class DbFatalErrorTests
     : public InMemoryTest,
-      public testing::TestWithParam<ErrorWrapper> {
+      public testing::TestWithParam<ErrorWrapper>
+{
 protected:
     DbFatalErrorTests()
     {

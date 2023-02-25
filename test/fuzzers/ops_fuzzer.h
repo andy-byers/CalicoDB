@@ -7,7 +7,7 @@ namespace Calico {
 
 class OpsFuzzer : public DbFuzzer {
 public:
-    ~OpsFuzzer() override;
+    ~OpsFuzzer() override = default;
     explicit OpsFuzzer(std::string path, Options *options = nullptr);
     [[nodiscard]] auto step(const std::uint8_t *&data, std::size_t &size) -> Status override;
 };

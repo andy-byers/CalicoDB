@@ -7,19 +7,16 @@
 
 namespace Calico {
 
-using Set = std::set<std::string>;
-using Map = std::map<std::string, std::string>;
-
-class MapFuzzer : public Fuzzer {
+class MapFuzzer : public DbFuzzer {
 public:
     ~MapFuzzer() override = default;
     explicit MapFuzzer(std::string path, Options *options = nullptr);
-    auto step(const std::uint8_t *&data, std::size_t &size) -> void override;
+    auto step(const std::uint8_t *&data, std::size_t &size) -> Status override;
 
 private:
-    std::string m_path;
-    Options m_options;
-    Database *m_db {};
+    std::map<std::string, std::string> m_map;
+    std::map<std::string, std::string> m_added;
+    std::set<std::string> m_erased;
 };
 
 } // namespace Calico
