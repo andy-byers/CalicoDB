@@ -8,7 +8,7 @@
 
 namespace Calico {
 
-static auto extract_key(const std::uint8_t *&data, Size &size)
+inline auto extract_key(const std::uint8_t *&data, Size &size)
 {
     assert(size != 0);
     if (size == 1) {
@@ -27,7 +27,7 @@ static auto extract_key(const std::uint8_t *&data, Size &size)
     return payload;
 }
 
-static auto extract_value(const std::uint8_t *&data, Size &size)
+inline auto extract_value(const std::uint8_t *&data, Size &size)
 {
     // Allow zero-length values.
     if (size == 0) {

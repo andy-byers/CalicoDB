@@ -1,5 +1,5 @@
 /*
- * map_fuzzer.cpp: Checks database consistency with a std::map. This fuzzer will inject faults, unless NO_FAILURES is defined.
+ * map_fuzzer.cpp: Checks database consistency with a std::map.
  *
  * The std::map represents the records that are committed to the database. The contents of the std::map and the database should
  * be exactly the same after (a) a transaction has finished, or (b) the database is reopened.

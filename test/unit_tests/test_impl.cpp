@@ -221,7 +221,7 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
 }
 
 class DbVacuumTests
-    : public OnDiskTest,
+    : public InMemoryTest,
       public testing::TestWithParam<std::tuple<Size, Size, bool>> {
 public:
     DbVacuumTests()
@@ -231,6 +231,7 @@ public:
     {
         options.page_size = 0x200;
         options.cache_size = 0x200 * 16;
+        options.storage = storage.get();
     }
 
     std::unordered_map<std::string, std::string> map;
@@ -264,6 +265,7 @@ TEST_P(DbVacuumTests, SanityCheck)
         }
         ASSERT_OK(db->vacuum());
         dynamic_cast<DatabaseImpl &>(*db).TEST_validate();
+        ASSERT_OK(db->commit());
 
         Size i {};
         for (const auto &[key, value]: map) {
