@@ -166,6 +166,7 @@ public:
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
     [[nodiscard]] auto split_non_root(Node node, Node &out) -> Status;
+    [[nodiscard]] auto split_non_root_fast(Node node, Node &out) -> Status;
 
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto fix_non_root(Node node, Node &parent, Size index) -> Status;

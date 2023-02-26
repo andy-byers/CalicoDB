@@ -331,8 +331,10 @@ auto BPlusTreeInternal::resolve_overflow(Node node) -> Status
     while (is_overflowing(node)) {
         if (node.page.id().is_root()) {
             Calico_Try(split_root(std::move(node), next));
-        } else {
+        } else if (node.overflow_index < node.header.cell_count) {
             Calico_Try(split_non_root(std::move(node), next));
+        } else {
+            Calico_Try(split_non_root_fast(std::move(node), next));
         }
         node = std::move(next);
     }
@@ -383,10 +385,13 @@ auto BPlusTreeInternal::transfer_left(Node &left, Node &right) -> Status
     return Status::ok();
 }
 
-auto BPlusTreeInternal::split_non_root(Node node, Node &out) -> Status
+auto BPlusTreeInternal::split_non_root_fast(Node node, Node &out) -> Status
 {
+    return split_non_root(std::move(node), out);
+
     CALICO_EXPECT_FALSE(node.page.id().is_root());
     CALICO_EXPECT_TRUE(is_overflowing(node));
+    const auto &header = node.header;
 
     Id parent_id;
     Calico_Try(find_parent_id(node.page.id(), parent_id));
@@ -396,7 +401,33 @@ auto BPlusTreeInternal::split_non_root(Node node, Node &out) -> Status
     Calico_Try(acquire(parent, parent_id, true));
     Calico_Try(allocate(sibling, node.header.is_external));
 
+    CALICO_EXPECT_EQ(node.overflow_index, header.cell_count);
+    auto overflow = *node.overflow;
+    node.overflow.reset();
+
+    Calico_Try(insert_cell(sibling, 0, overflow));
+
+    // TODO: Finish fast split method. We have allocated a new node, "sibling", which now contains the
+    //       overflow cell. That's all it needs, just need to fix pointers and post a separator. This
+    //       is an optimization for sequential writes. Reverse sequential writes should be pretty quick
+    //       naturally.
+    (void)header;
+}
+
+auto BPlusTreeInternal::split_non_root(Node node, Node &out) -> Status
+{
+    CALICO_EXPECT_FALSE(node.page.id().is_root());
+    CALICO_EXPECT_TRUE(is_overflowing(node));
     const auto &header = node.header;
+
+    Id parent_id;
+    Calico_Try(find_parent_id(node.page.id(), parent_id));
+    CALICO_EXPECT_FALSE(parent_id.is_null());
+
+    Node parent, sibling;
+    Calico_Try(acquire(parent, parent_id, true));
+    Calico_Try(allocate(sibling, header.is_external));
+
     const auto overflow_index = node.overflow_index;
     auto overflow = *node.overflow;
     node.overflow.reset();
@@ -413,12 +444,10 @@ auto BPlusTreeInternal::split_non_root(Node node, Node &out) -> Status
                 Calico_Try(insert_cell(sibling, sibling.header.cell_count - 1, overflow));
             }
             break;
-        } else {
+        } else if (usable_space(node) >= overflow.size + 2) {
             // Overflow cell goes in the right node.
-            if (usable_space(node) >= overflow.size + 2) {
-                Calico_Try(insert_cell(node, overflow_index - i - 1, overflow));
-                break;
-            }
+            Calico_Try(insert_cell(node, overflow_index - i - 1, overflow));
+            break;
         }
     }
     CALICO_EXPECT_FALSE(is_overflowing(node));
