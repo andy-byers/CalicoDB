@@ -58,6 +58,7 @@ public:
     explicit DbFuzzer(std::string path, Options *options = nullptr);
     [[nodiscard]] virtual auto step(const std::uint8_t *&data, std::size_t &size) -> Status = 0;
     [[nodiscard]] virtual auto reopen() -> Status;
+    virtual auto validate() -> void;
 
 protected:
     std::string m_path;

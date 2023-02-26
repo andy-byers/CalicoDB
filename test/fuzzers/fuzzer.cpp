@@ -32,4 +32,9 @@ auto DbFuzzer::reopen() -> Status
     return s;
 }
 
+auto DbFuzzer::validate() -> void
+{
+    Tools::validate_db(*m_db);
+}
+
 } // namespace Calico

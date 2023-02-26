@@ -228,7 +228,7 @@ auto Recovery::recover_phase_2() -> Status
 
     /* Make sure all changes have made it to disk, then remove WAL segments from the right.
      */
-    Calico_Try(m_pager->flush({}));
+    Calico_Try(m_pager->flush());
     for (auto id = m_set->last(); !id.is_null(); id = m_set->id_before(id)) {
         Calico_Try(m_storage->remove_file(encode_segment_name(m_wal->m_prefix, id)));
     }

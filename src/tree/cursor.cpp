@@ -20,7 +20,7 @@ auto CursorImpl::status() const -> Status
     return m_status;
 }
 
-auto CursorImpl::fetch_key() const -> Status
+auto CursorImpl::fetch_key() const -> Status//TODO: Combine with fetch_value(): no need for 2 methods anymore
 {
     CALICO_EXPECT_EQ(m_key_size, 0);
 

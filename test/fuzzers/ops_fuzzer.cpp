@@ -108,6 +108,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
 
         while (size > 1) {
             CHECK_OK(fuzzer.step(data, size));
+            fuzzer.validate();
         }
     }
     delete options.storage;
