@@ -88,13 +88,8 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             }
             break;
         case VACUUM:
-Tools::print_references(*reinterpret_cast<const DatabaseImpl *>(m_db)->pager,*reinterpret_cast<const DatabaseImpl *>(m_db)->tree->TEST_components().pointers);
             s = m_db->vacuum();
-std::fputs("\n",stderr);
-Tools::print_references(*reinterpret_cast<const DatabaseImpl *>(m_db)->pager,*reinterpret_cast<const DatabaseImpl *>(m_db)->tree->TEST_components().pointers);
-std::fputs("\n",stderr);
             break;
-
         case COMMIT:
             s = m_db->commit();
             if (s.is_ok()) {
@@ -113,10 +108,6 @@ std::fputs("\n",stderr);
             m_added.clear();
             m_erased.clear();
             s = reopen();
-
-std::fputs("\nreeee\n",stderr);
-Tools::print_references(*reinterpret_cast<const DatabaseImpl *>(m_db)->pager,*reinterpret_cast<const DatabaseImpl *>(m_db)->tree->TEST_components().pointers);
-std::fputs("\n",stderr);
             if (s.is_ok()) {
                 expect_equal_contents();
             }
@@ -133,7 +124,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
 {
     Options options;
     options.storage = new Tools::DynamicMemory;
-    options.info_log = new Tools::StderrLogger;
 
     {
         MapFuzzer fuzzer {"map_fuzzer", &options};
@@ -145,7 +135,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
     }
 
     delete options.storage;
-    delete options.info_log;
     return 0;
 }
 

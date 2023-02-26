@@ -1207,6 +1207,9 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
     Calico_Try(m_pointers.write_entry(free.id(), entry));
     Page last;
     Calico_Try(m_pager->acquire(last_id, last));
+    // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
+    // which we will need if we crash during vacuum and need to roll back.
+    m_pager->upgrade(last);
     if (entry.type != PointerMap::NODE) {
         if (const auto next_id = read_next_id(last); !next_id.is_null()) {
             PointerMap::Entry next_entry;
