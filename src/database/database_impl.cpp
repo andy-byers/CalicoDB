@@ -81,27 +81,29 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     }
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
-    Calico_Try(WriteAheadLog::open({
-                                       m_wal_prefix,
-                                       m_storage,
-                                       sanitized.page_size,
-                                       256,
-                                   },
-                                   &wal));
+    Calico_Try(WriteAheadLog::open(
+        {
+            m_wal_prefix,
+            m_storage,
+            sanitized.page_size,
+            256,
+        },
+        &wal));
 
-    Calico_Try(Pager::open({
-                               m_db_prefix,
-                               m_storage,
-                               &m_scratch,
-                               wal,
-                               m_info_log,
-                               &m_status,
-                               &m_commit_lsn,
-                               &m_in_txn,
-                               sanitized.cache_size / sanitized.page_size,
-                               sanitized.page_size,
-                           },
-                           &pager));
+    Calico_Try(Pager::open(
+        {
+            m_db_prefix,
+            m_storage,
+            &m_scratch,
+            wal,
+            m_info_log,
+            &m_status,
+            &m_commit_lsn,
+            &m_in_txn,
+            sanitized.cache_size / sanitized.page_size,
+            sanitized.page_size,
+        },
+        &pager));
     pager->load_state(state);
 
     tree = new BPlusTree {*pager};
@@ -139,16 +141,16 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 DatabaseImpl::~DatabaseImpl()
 {
     if (m_is_setup && m_status.is_ok()) {
-        if (auto s = wal->flush(); !s.is_ok()) {
+        if (const auto s = wal->flush(); !s.is_ok()) {
             logv(m_info_log, "failed to flush wal: ", s.what().data());
         }
-        if (auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
+        if (const auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
             logv(m_info_log, "failed to flush pager: ", s.what().data());
         }
-        if (auto s = wal->close(); !s.is_ok()) {
+        if (const auto s = wal->close(); !s.is_ok()) {
             logv(m_info_log, "failed to close wal: ", s.what().data());
         }
-        if (auto s = ensure_consistency(); !s.is_ok()) {
+        if (const auto s = ensure_consistency(); !s.is_ok()) {
             logv(m_info_log, "failed to ensure consistency: ", s.what().data());
         }
     }
@@ -190,7 +192,7 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
     }
 
     std::vector<std::string> children;
-    if (auto s = storage->get_children(path, children); s.is_ok()) {
+    if (const auto s = storage->get_children(path, children); s.is_ok()) {
         for (const auto &name: children) {
             (void)storage->remove_file(prefix + name);
         }
@@ -200,11 +202,11 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
         children.clear();
 
         auto dir_path = options.wal_prefix.to_string();
-        if (auto pos = dir_path.rfind('/'); pos != std::string::npos) {
+        if (const auto pos = dir_path.rfind('/'); pos != std::string::npos) {
             dir_path.erase(pos + 1);
         }
 
-        if (auto s = storage->get_children(dir_path, children); s.is_ok()) {
+        if (const auto s = storage->get_children(dir_path, children); s.is_ok()) {
             for (const auto &name: children) {
                 const auto filename = dir_path + name;
                 if (Slice {filename}.starts_with(options.wal_prefix)) {
@@ -257,7 +259,7 @@ auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bo
 
 auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
     value.clear();
 
     SearchResult slot;
@@ -279,15 +281,15 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 auto DatabaseImpl::new_cursor() const -> Cursor *
 {
     auto *cursor = CursorInternal::make_cursor(*tree);
-    if (auto s = status(); cursor && !s.is_ok()) {
-        CursorInternal::invalidate(*cursor, s);
+    if (!m_status.is_ok()) {
+        CursorInternal::invalidate(*cursor, m_status);
     }
     return cursor;
 }
 
 auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
 
     bool exists {};
     if (auto s = tree->insert(key, value, exists); !s.is_ok()) {
@@ -303,7 +305,7 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 
 auto DatabaseImpl::erase(const Slice &key) -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
 
     auto s = tree->erase(key);
     if (s.is_ok()) {
@@ -317,7 +319,7 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
 
 auto DatabaseImpl::vacuum() -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
     if (auto s = do_vacuum(); !s.is_ok()) {
         Set_Status(s);
     }
@@ -350,7 +352,7 @@ auto DatabaseImpl::do_vacuum() -> Status
 
 auto DatabaseImpl::commit() -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
     if (m_txn_size != 0) {
         if (auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
             Set_Status(s);

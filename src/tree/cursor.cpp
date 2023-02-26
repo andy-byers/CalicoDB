@@ -20,43 +20,22 @@ auto CursorImpl::status() const -> Status
     return m_status;
 }
 
-auto CursorImpl::fetch_key() const -> Status//TODO: Combine with fetch_value(): no need for 2 methods anymore
+auto CursorImpl::fetch_payload() -> Status
 {
     CALICO_EXPECT_EQ(m_key_size, 0);
-
-    Node node;
-    Calico_Try(m_tree->acquire(node, m_loc.pid));
-
-    Slice key;
-    auto cell = read_cell(node, m_loc.index);
-    auto s = m_tree->collect_key(m_key, cell, key);
-
-    m_key_size = key.size();
-    // Go ahead and read the value if it is entirely local.
-    if (m_value.empty() && !cell.has_remote) {
-        m_value_size = cell.local_size - cell.key_size;
-        if (m_value.size() < m_value_size) {
-            m_value.resize(m_value_size);
-        }
-        const Slice value {cell.key + cell.key_size, m_value_size};
-        mem_copy(m_value, value);
-    }
-    m_tree->release(std::move(node));
-    return s;
-}
-
-auto CursorImpl::fetch_value() const -> Status
-{
     CALICO_EXPECT_EQ(m_value_size, 0);
 
     Node node;
     Calico_Try(m_tree->acquire(node, m_loc.pid));
 
-    Slice value;
-    const auto cell = read_cell(node, m_loc.index);
-    auto s = m_tree->collect_value(m_value, cell, value);
-
-    m_value_size = value.size();
+    Slice key, value;
+    auto cell = read_cell(node, m_loc.index);
+    auto s = m_tree->collect_key(m_key, cell, key);
+    m_key_size = key.size();
+    if (s.is_ok()) {
+        s = m_tree->collect_value(m_value, cell, value);
+        m_value_size = value.size();
+    }
     m_tree->release(std::move(node));
     return s;
 }
@@ -187,12 +166,7 @@ auto CursorImpl::seek_to(Node node, Size index) -> void
         m_loc.index = static_cast<PageSize>(index);
         m_loc.count = static_cast<PageSize>(count);
         m_loc.pid = pid;
-
-        auto s = fetch_key();
-        if (s.is_ok() && m_value_size == 0) {
-            s = fetch_value();
-        }
-        m_status = s;
+        m_status = fetch_payload();
     } else {
         m_status = default_error_status();
     }
@@ -220,10 +194,10 @@ auto CursorInternal::make_cursor(BPlusTree &tree) -> Cursor *
     return cursor;
 }
 
-auto CursorInternal::invalidate(const Cursor &cursor, const Status &status) -> void
+auto CursorInternal::invalidate(const Cursor &cursor, Status status) -> void
 {
     CALICO_EXPECT_FALSE(status.is_ok());
-    reinterpret_cast<const CursorImpl &>(cursor).m_status = status;
+    reinterpret_cast<const CursorImpl &>(cursor).m_status = std::move(status);
 }
 
 } // namespace Calico

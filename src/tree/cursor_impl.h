@@ -16,16 +16,15 @@ class CursorImpl : public Cursor {
         PageSize count {};
     };
     mutable Status m_status;
-    mutable std::string m_key;
-    mutable std::string m_value;
-    mutable Size m_key_size {};
-    mutable Size m_value_size {};
+    std::string m_key;
+    std::string m_value;
+    Size m_key_size {};
+    Size m_value_size {};
     BPlusTree *m_tree {};
     Location m_loc;
 
     auto seek_to(Node node, Size index) -> void;
-    auto fetch_key() const -> Status;
-    auto fetch_value() const -> Status;
+    auto fetch_payload() -> Status;
 
 public:
     friend class CursorInternal;
@@ -51,7 +50,7 @@ public:
 class CursorInternal {
 public:
     [[nodiscard]] static auto make_cursor(BPlusTree &tree) -> Cursor *;
-    static auto invalidate(const Cursor &cursor, const Status &error) -> void;
+    static auto invalidate(const Cursor &cursor, Status error) -> void;
 };
 
 } // namespace Calico
