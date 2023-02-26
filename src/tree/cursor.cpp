@@ -155,17 +155,13 @@ auto CursorImpl::previous() -> void
 
 auto CursorImpl::seek_to(Node node, Size index) -> void
 {
-    CALICO_EXPECT_EQ(m_key_size, 0);
-    CALICO_EXPECT_EQ(m_value_size, 0);
-    CALICO_EXPECT_TRUE(node.header.is_external);
+    const auto &header = node.header;
+    CALICO_EXPECT_TRUE(header.is_external);
 
-    const auto pid = node.page.id();
-    const auto count = node.header.cell_count;
-
-    if (count && index < count) {
+    if (header.cell_count && index < header.cell_count) {
         m_loc.index = static_cast<PageSize>(index);
-        m_loc.count = static_cast<PageSize>(count);
-        m_loc.pid = pid;
+        m_loc.count = header.cell_count;
+        m_loc.pid = node.page.id();
         m_status = fetch_payload();
     } else {
         m_status = default_error_status();

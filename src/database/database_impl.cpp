@@ -2,11 +2,9 @@
 #include "database_impl.h"
 #include "calico/calico.h"
 #include "calico/storage.h"
-#include "storage/helpers.h"
 #include "storage/posix_storage.h"
 #include "tree/cursor_impl.h"
 #include "utils/logging.h"
-#include <limits>
 
 namespace Calico {
 
@@ -478,9 +476,12 @@ auto setup(const std::string &prefix, Storage &storage, const Options &options, 
         }
 
         Byte buffer[FileHeader::SIZE];
-        Span span {buffer, sizeof(buffer)};
-        Calico_Try(read_exact_at(*reader, span, 0));
-        header = FileHeader {span.data()};
+        auto read_size = sizeof(buffer);
+        Calico_Try(reader->read(buffer, read_size, 0));
+        if (read_size != sizeof(buffer)) {
+            return Status::system_error("incomplete read of file header");
+        }
+        header = FileHeader(buffer);
 
         if (header.magic_code != FileHeader::MAGIC_CODE) {
             return Status::invalid_argument("magic code is invalid");
