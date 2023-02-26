@@ -90,27 +90,18 @@ class BPlusTree {
 
     [[nodiscard]] auto vacuum_step(Page &head, Id last_id) -> Status;
     [[nodiscard]] auto cell_scratch() -> Byte *;
-    [[nodiscard]] auto lowest(Node &out) const -> Status;
-    [[nodiscard]] auto highest(Node &out) const -> Status;
-    auto make_existing_node(Node &out) const -> void;
-    auto make_fresh_node(Node &out, bool is_external) const -> void;
+    [[nodiscard]] auto lowest(Node &out) -> Status;
+    [[nodiscard]] auto highest(Node &out) -> Status;
 
 public:
     explicit BPlusTree(Pager &pager);
 
-    [[nodiscard]] auto setup(Node &out) -> Status;
     [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
     [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
     [[nodiscard]] auto search(const Slice &key, SearchResult &out) -> Status;
     [[nodiscard]] auto insert(const Slice &key, const Slice &value, bool &exists) -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, bool &vacuumed) -> Status;
-
-    [[nodiscard]] auto allocate(Node &out, bool is_external) -> Status;
-    [[nodiscard]] auto acquire(Node &out, Id pid, bool upgrade = false) const -> Status;
-    [[nodiscard]] auto destroy(Node node) -> Status;
-    auto upgrade(Node &node) const -> void;
-    auto release(Node node) const -> void;
 
     auto save_state(FileHeader &header) const -> void;
     auto load_state(const FileHeader &header) -> void;
@@ -126,6 +117,81 @@ public:
     auto TEST_check_order() -> void;
     auto TEST_check_links() -> void;
     auto TEST_check_nodes() -> void;
+};
+
+class BPlusTreeInternal {
+public:
+    explicit BPlusTreeInternal(BPlusTree &tree);
+
+    [[nodiscard]] auto pointers() const -> const PointerMap *
+    {
+        return m_pointers;
+    }
+
+    [[nodiscard]] auto overflow() const -> const OverflowList *
+    {
+        return m_overflow;
+    }
+
+    [[nodiscard]] auto payloads() const -> const PayloadManager *
+    {
+        return m_payloads;
+    }
+
+    [[nodiscard]] auto freelist() const -> const FreeList *
+    {
+        return m_freelist;
+    }
+
+    [[nodiscard]] auto node_iterator(Node &node) const -> NodeIterator;
+    [[nodiscard]] auto is_pointer_map(Id pid) const -> bool;
+    [[nodiscard]] auto find_external_slot(const Slice &key, SearchResult &out) const -> Status;
+    [[nodiscard]] auto find_parent_id(Id pid, Id &out) const -> Status;
+    [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type = PointerMap::NODE) -> Status;
+    [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
+    [[nodiscard]] auto insert_cell(Node &node, Size index, const Cell &cell) -> Status;
+    [[nodiscard]] auto remove_cell(Node &node, Size index) -> Status;
+    [[nodiscard]] auto fix_links(Node &node) -> Status;
+
+    auto make_existing_node(Node &out) const -> void;
+    auto make_fresh_node(Node &out, bool is_external) const -> void;
+
+    [[nodiscard]] auto allocate_root(Node &out) -> Status;
+    [[nodiscard]] auto allocate(Node &out, bool is_external) -> Status;
+    [[nodiscard]] auto acquire(Node &out, Id pid, bool upgrade = false) const -> Status;
+    [[nodiscard]] auto destroy(Node node) -> Status;
+    auto upgrade(Node &node) const -> void;
+    auto release(Node node) const -> void;
+
+    [[nodiscard]] auto resolve_overflow(Node node) -> Status;
+    [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
+    [[nodiscard]] auto split_non_root(Node node, Node &out) -> Status;
+
+    [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
+    [[nodiscard]] auto fix_non_root(Node node, Node &parent, Size index) -> Status;
+    [[nodiscard]] auto fix_root(Node root) -> Status;
+    [[nodiscard]] auto merge_left(Node &left, Node right, Node &parent, Size index) -> Status;
+    [[nodiscard]] auto merge_right(Node &left, Node right, Node &parent, Size index) -> Status;
+    [[nodiscard]] auto rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status;
+    [[nodiscard]] auto rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status;
+
+private:
+    [[nodiscard]] auto find_external_slot(const Slice &key, Node node, SearchResult &out) const -> Status;
+    [[nodiscard]] auto transfer_left(Node &left, Node &right) -> Status;
+    [[nodiscard]] auto internal_merge_left(Node &left, Node &right, Node &parent, Size index) -> Status;
+    [[nodiscard]] auto external_merge_left(Node &left, Node &right, Node &parent, Size index) -> Status;
+    [[nodiscard]] auto internal_merge_right(Node &left, Node &right, Node &parent, Size index) -> Status;
+    [[nodiscard]] auto external_merge_right(Node &left, Node &right, Node &parent, Size index) -> Status;
+    [[nodiscard]] auto external_rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status;
+    [[nodiscard]] auto internal_rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status;
+    [[nodiscard]] auto external_rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status;
+    [[nodiscard]] auto internal_rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status;
+
+    BPlusTree *m_tree {};
+    PointerMap *m_pointers {};
+    OverflowList *m_overflow {};
+    PayloadManager *m_payloads {};
+    FreeList *m_freelist {};
 };
 
 } // namespace Calico

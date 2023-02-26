@@ -434,6 +434,236 @@ TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
     release_node(std::move(root));
 }
 
+class NodeTests
+    : public TestWithPager,
+      public testing::Test
+{
+public:
+    static constexpr auto PAGE_SIZE = MINIMUM_PAGE_SIZE;
+
+    NodeTests()
+        : collect_scratch(PAGE_SIZE, '\x00')
+    {}
+
+    auto SetUp() -> void override
+    {
+        tree = std::make_unique<BPlusTree>(*pager);
+
+        // Root page setup.
+        Node root;
+        BPlusTreeInternal internal {*tree};
+        ASSERT_OK(internal.allocate_root(root));
+        internal.release(std::move(root));
+        ASSERT_TRUE(pager->flush({}).is_ok());
+    }
+
+    auto TearDown() -> void override
+    {
+        validate();
+    }
+
+    auto validate() const -> void
+    {
+        tree->TEST_check_nodes();
+        tree->TEST_check_links();
+        tree->TEST_check_order();
+    }
+
+    std::string collect_scratch;
+    std::unique_ptr<BPlusTree> tree;
+};
+
+class ExternalRootSplitTests : public NodeTests {
+public:
+    ExternalRootSplitTests() = default;
+
+    auto SetUp() -> void override
+    {
+        // <cell_pointer> + <value_size> + <key_size> + <key> + <value> + <overflow_id>
+        static constexpr Size min_cell_size {2 + 1 + 1 + 1 + 0 + 0};
+
+        NodeTests::SetUp();
+        BPlusTreeInternal internal {*tree};
+        bool exists {};
+        bool done {};
+        Node root;
+
+        ASSERT_OK(internal.acquire(root, Id::root()));
+        auto space = usable_space(root);
+        internal.release(std::move(root));
+
+        for (Size i {}; space >= min_cell_size; ++i) {
+            ASSERT_LT(i, 0x100);
+            keys.emplace_back(1, static_cast<Byte>(i));
+            space -= min_cell_size;
+        }
+
+        // Create the worst case for splitting.
+        for (const auto &key: keys) {
+            ASSERT_OK(tree->insert(key, "", exists));
+            ASSERT_FALSE(exists);
+        }
+        ASSERT_OK(internal.acquire(root, Id::root()));
+        ASSERT_TRUE(root.header.is_external);
+        ASSERT_LT(usable_space(root), min_cell_size);
+        internal.release(std::move(root));
+    }
+
+    auto TearDown() -> void override
+    {
+        Node root;
+        BPlusTreeInternal internal {*tree};
+        ASSERT_OK(internal.acquire(root, Id::root()));
+        ASSERT_FALSE(root.header.is_external);
+        internal.release(std::move(root));
+
+        for (const auto &key: keys) {
+            assert_contains({key, ""});
+        }
+
+        NodeTests::TearDown();
+    }
+
+    virtual auto large_payload(const std::string &base_key) -> Record
+    {
+        std::string key(PAGE_SIZE * 2, '\0');
+        mem_copy(key, base_key);
+        return {key, key};
+    }
+
+    auto assert_contains(const Record &record) -> void
+    {
+        SearchResult slot;
+        ASSERT_OK(tree->search(record.key, slot));
+        ASSERT_TRUE(slot.exact);
+
+        Slice key, value;
+        const auto cell = read_cell(slot.node, slot.index);
+        ASSERT_OK(tree->collect_key(collect_scratch, cell, key));
+        ASSERT_EQ(key, record.key);
+        ASSERT_OK(tree->collect_value(collect_scratch, cell, value));
+        ASSERT_EQ(value, record.value);
+
+        BPlusTreeInternal internal {*tree};
+        internal.release(std::move(slot.node));
+    }
+
+    std::vector<std::string> keys;
+    bool _;
+};
+
+TEST_F(ExternalRootSplitTests, SplitOnLeftmost)
+{
+    const auto record = large_payload(keys.front());
+    ASSERT_OK(tree->insert(record.key, record.value, _));
+    assert_contains(record);
+}
+
+TEST_F(ExternalRootSplitTests, SplitLeftOfMiddle)
+{
+    const auto record = large_payload(keys[keys.size() / 2 - 10]);
+    ASSERT_OK(tree->insert(record.key, record.value, _));
+    assert_contains(record);
+}
+
+TEST_F(ExternalRootSplitTests, SplitOnRightmost)
+{
+    const auto record = large_payload(keys.back());
+    ASSERT_OK(tree->insert(record.key, record.value, _));
+    assert_contains(record);
+}
+
+TEST_F(ExternalRootSplitTests, SplitRightOfMiddle)
+{
+    const auto record = large_payload(keys[keys.size() / 2 + 10]);
+    ASSERT_OK(tree->insert(record.key, record.value, _));
+    assert_contains(record);
+}
+
+class InternalRootSplitTests: public ExternalRootSplitTests {
+public:
+    auto SetUp() -> void override
+    {
+        ExternalRootSplitTests::SetUp();
+
+        // Cause the root to overflow and become an internal node.
+        const auto record = large_payload(std::string(1, '\0'));
+        ASSERT_OK(tree->insert(record.key, record.value, _));
+
+        // The key needs to be 2 bytes, there aren't enough possible 1-byte keys to make the root split again.
+        // <cell_pointer> + <child_id> + <key_size> + <key>
+        const auto min_cell_size = 2 + 8 + 1 + 2;
+        ASSERT_EQ(varint_length(2), 1);
+
+        BPlusTreeInternal internal {*tree};
+        bool exists {};
+        bool done {};
+        Node root;
+
+        for (auto i = key_range_start; ; i += 2) {
+            ASSERT_OK(internal.acquire(root, Id::root()));
+            base_usable_space = usable_space(root);
+            internal.release(std::move(root));
+            if (base_usable_space < min_cell_size) {
+                break;
+            }
+            ASSERT_LE(i, key_range_max);
+            keys_2.emplace_back(base_key(i));
+
+            ASSERT_OK(tree->insert(keys_2.back(), "", exists));
+            ASSERT_FALSE(exists);
+        }
+    }
+
+    auto TearDown() -> void override
+    {
+        ASSERT_TRUE(is_finished());
+        for (const auto &key: keys_2) {
+            assert_contains({key, ""});
+        }
+        ExternalRootSplitTests::TearDown();
+    }
+
+    static auto base_key(Size index) -> std::string
+    {
+       std::string key(2, '\0');
+       key[0] = static_cast<Byte>(index >> 8);
+       key[1] = static_cast<Byte>(index);
+       return key;
+    }
+
+    [[nodiscard]] auto is_finished() -> bool
+    {
+        Node root;
+        BPlusTreeInternal internal {*tree};
+        EXPECT_OK(internal.acquire(root, Id::root()));
+        const auto space = usable_space(root);
+        internal.release(std::move(root));
+        return space != base_usable_space;
+    }
+
+    std::vector<std::string> keys_2;
+    Size base_usable_space {};
+    Size key_range_start {4'000};
+    Size key_range_max {6'000};
+};
+
+TEST_F(InternalRootSplitTests, Split_1)
+{
+    for (Size i {}; !is_finished(); ++i) {
+        const auto record = large_payload(keys_2[i]);
+        ASSERT_OK(tree->insert(record.key, record.value, _));
+    }
+}
+
+TEST_F(InternalRootSplitTests, Split_2)
+{
+    for (auto itr = --end(keys_2); !is_finished(); --itr) {
+        const auto record = large_payload(*itr);
+        ASSERT_OK(tree->insert(record.key, record.value, _));
+    }
+}
+
 struct BPlusTreeTestParameters {
     Size page_size {};
     Size extra {};
@@ -454,8 +684,9 @@ public:
 
         // Root page setup.
         Node root;
-        ASSERT_OK(tree->setup(root));
-        pager->release(std::move(root).take());
+        BPlusTreeInternal internal {*tree};
+        ASSERT_OK(internal.allocate_root(root));
+        internal.release(std::move(root));
         ASSERT_TRUE(pager->flush({}).is_ok());
     }
 
@@ -622,8 +853,8 @@ TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnRightmostPosition)
     bool _;
     for (Size i {}; is_root_external(); ++i) {
         ASSERT_OK(tree->insert(Tools::integral_key(i), make_value('v'), _));
+        validate();
     }
-    validate();
 }
 
 TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnLeftmostPosition)
@@ -800,6 +1031,7 @@ TEST_P(BPlusTreeTests, SplitWithShortAndLongKeys)
     for (unsigned i {}; i < 1'000; ++i) {
         const auto key = random.Generate(GetParam().page_size);
         ASSERT_OK(tree->insert(key, "v", _));
+
         if (i % 100 == 99) {
             validate();
         }
@@ -1225,8 +1457,9 @@ public:
     {
         tree = std::make_unique<BPlusTree>(*pager);
         Node root;
-        ASSERT_OK(tree->setup(root));
-        pager->release(std::move(root).take());
+        BPlusTreeInternal internal {*tree};
+        ASSERT_OK(internal.allocate_root(root));
+        internal.release(std::move(root));
         ASSERT_TRUE(pager->flush({}).is_ok());
         c = tree->TEST_components();
     }

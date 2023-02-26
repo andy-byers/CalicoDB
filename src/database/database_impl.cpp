@@ -113,9 +113,9 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         Calico_Try(wal->start_writing());
 
         Node root;
-        Calico_Try(tree->setup(root));
-        pager->release(std::move(root).take());
-        CALICO_EXPECT_EQ(pager->page_count(), 1);
+        BPlusTreeInternal internal {*tree};
+        Calico_Try(internal.allocate_root(root));
+        internal.release(std::move(root));
 
         Calico_Try(do_commit());
         Calico_Try(pager->flush());
