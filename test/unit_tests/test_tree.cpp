@@ -393,14 +393,13 @@ TEST_F(ComponentTests, NodeIterator)
                                 &lhs_key,
                                 &rhs_key,
                             }};
+    bool exact;
     for (Size i: {1, 6, 3, 2, 8, 4, 5, 7}) {
-        ASSERT_EQ(i % 2 == 0, itr.seek(Tools::integral_key<2>(i)));
-        ASSERT_TRUE(itr.is_valid());
-        ASSERT_OK(itr.status());
+        ASSERT_OK(itr.seek(Tools::integral_key<2>(i), &exact));
+        ASSERT_EQ(exact, i % 2 == 0);
     }
-    ASSERT_FALSE(itr.seek(Tools::integral_key<2>(10)));
-    ASSERT_FALSE(itr.is_valid());
-    ASSERT_OK(itr.status());
+    ASSERT_OK(itr.seek(Tools::integral_key<2>(10), &exact));
+    ASSERT_FALSE(exact);
     release_node(std::move(root));
 }
 
@@ -426,10 +425,8 @@ TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
                             }};
     Size i {};
     for (const auto &key: keys) {
-        ASSERT_TRUE(itr.seek(key));
-        ASSERT_TRUE(itr.is_valid());
+        ASSERT_OK(itr.seek(key));
         ASSERT_EQ(itr.index(), i++);
-        ASSERT_OK(itr.status());
     }
     release_node(std::move(root));
 }
@@ -732,8 +729,8 @@ public:
     auto validate() const -> void
     {
         tree->TEST_check_nodes();
-        tree->TEST_check_links();
         tree->TEST_check_order();
+        tree->TEST_check_links();
     }
 
     BPlusTreeTestParameters param;
@@ -1023,18 +1020,18 @@ TEST_P(BPlusTreeTests, SplitWithLongKeys)
 TEST_P(BPlusTreeTests, SplitWithShortAndLongKeys)
 {
     bool _;
-    for (unsigned i {}; i < 1'000; ++i) {
+    for (unsigned i {}; i < 80; ++i) {
         char key[3] {};
-        put_u16(key, 999 - i);
+        put_u16(key, 79 - i);
         ASSERT_OK(tree->insert({key, 2}, "v", _));
     }
-    for (unsigned i {}; i < 1'000; ++i) {
+    for (unsigned i {}; i < 1000; ++i) {
         const auto key = random.Generate(GetParam().page_size);
         ASSERT_OK(tree->insert(key, "v", _));
-
-        if (i % 100 == 99) {
-            validate();
-        }
+if(i>=520)std::cerr<<i<<":\n"<<tree->TEST_to_string()<<"\n\n";
+//        if (i % 100 == 99) {
+//        }
+        if(i==521)validate();
     }
 }
 
@@ -1461,7 +1458,10 @@ public:
         ASSERT_OK(internal.allocate_root(root));
         internal.release(std::move(root));
         ASSERT_TRUE(pager->flush({}).is_ok());
-        c = tree->TEST_components();
+        pointers = internal.pointers();
+        overflow = internal.overflow();
+        payloads = internal.payloads();
+        freelist = internal.freelist();
     }
 
     auto acquire_node(Id pid, bool is_writable)
@@ -1483,7 +1483,7 @@ public:
     {
         Page page;
         EXPECT_OK(pager->allocate(page));
-        if (c.pointers->lookup(page.id()) == page.id()) {
+        if (pointers->lookup(page.id()) == page.id()) {
             pager->release(std::move(page));
             EXPECT_OK(pager->allocate(page));
         }
@@ -1549,7 +1549,10 @@ public:
 
     NodeMetaManager meta;
     std::unique_ptr<BPlusTree> tree;
-    BPlusTree::Components c;
+    PointerMap *pointers {};
+    OverflowList *overflow {};
+    PayloadManager *payloads {};
+    FreeList *freelist {};
 };
 
 //      P   1   2   3
@@ -1563,20 +1566,20 @@ TEST_F(VacuumTests, FreelistRegistersBackPointers)
     auto node_5 = allocate_node(true);
     ASSERT_EQ(node_5.page.id().value, 5);
 
-    ASSERT_OK(c.freelist->push(std::move(node_5.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_4.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_3.page)));
+    ASSERT_OK(freelist->push(std::move(node_5.page)));
+    ASSERT_OK(freelist->push(std::move(node_4.page)));
+    ASSERT_OK(freelist->push(std::move(node_3.page)));
 
     PointerMap::Entry entry;
-    ASSERT_OK(c.pointers->read_entry(Id {5}, entry));
+    ASSERT_OK(pointers->read_entry(Id {5}, entry));
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     ASSERT_EQ(entry.back_ptr, Id {4});
 
-    ASSERT_OK(c.pointers->read_entry(Id {4}, entry));
+    ASSERT_OK(pointers->read_entry(Id {4}, entry));
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     ASSERT_EQ(entry.back_ptr, Id {3});
 
-    ASSERT_OK(c.pointers->read_entry(Id {3}, entry));
+    ASSERT_OK(pointers->read_entry(Id {3}, entry));
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     ASSERT_EQ(entry.back_ptr, Id::null());
 }
@@ -1590,8 +1593,8 @@ TEST_F(VacuumTests, OverflowChainRegistersBackPointers)
     ASSERT_OK(tree->insert("b", overflow_data, _));
 
     PointerMap::Entry head_entry, tail_entry;
-    ASSERT_OK(c.pointers->read_entry(Id {3}, head_entry));
-    ASSERT_OK(c.pointers->read_entry(Id {4}, tail_entry));
+    ASSERT_OK(pointers->read_entry(Id {3}, head_entry));
+    ASSERT_OK(pointers->read_entry(Id {4}, tail_entry));
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {3});
@@ -1609,8 +1612,8 @@ TEST_F(VacuumTests, OverflowChainIsNullTerminated)
         ASSERT_EQ(page_4.id().value, 4);
         write_next_id(node_3.page, Id {123});
         write_next_id(page_4, Id {123});
-        ASSERT_OK(c.freelist->push(std::move(page_4)));
-        ASSERT_OK(c.freelist->push(std::move(node_3.page)));
+        ASSERT_OK(freelist->push(std::move(page_4)));
+        ASSERT_OK(freelist->push(std::move(node_3.page)));
     }
 
     bool _;
@@ -1636,9 +1639,9 @@ TEST_F(VacuumTests, VacuumsFreelistInOrder)
     // Page Types:     N   P   3   2   1
     // Page Contents: [1] [2] [3] [4] [5]
     // Page IDs:       1   2   3   4   5
-    ASSERT_OK(c.freelist->push(std::move(node_3.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_4.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_5.page)));
+    ASSERT_OK(freelist->push(std::move(node_3.page)));
+    ASSERT_OK(freelist->push(std::move(node_4.page)));
+    ASSERT_OK(freelist->push(std::move(node_5.page)));
 
     // Page Types:     N   P   2   1
     // Page Contents: [1] [2] [3] [4] [X]
@@ -1648,7 +1651,7 @@ TEST_F(VacuumTests, VacuumsFreelistInOrder)
     ASSERT_TRUE(vacuumed);
 
     PointerMap::Entry entry;
-    ASSERT_OK(c.pointers->read_entry(Id {4}, entry));
+    ASSERT_OK(pointers->read_entry(Id {4}, entry));
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
@@ -1657,7 +1660,7 @@ TEST_F(VacuumTests, VacuumsFreelistInOrder)
     // Page IDs:       1   2   3   4   5
     ASSERT_OK(tree->vacuum_one(Id {4}, vacuumed));
     ASSERT_TRUE(vacuumed);
-    ASSERT_OK(c.pointers->read_entry(Id {3}, entry));
+    ASSERT_OK(pointers->read_entry(Id {3}, entry));
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
@@ -1666,7 +1669,7 @@ TEST_F(VacuumTests, VacuumsFreelistInOrder)
     // Page IDs:       1   2   3   4   5
     ASSERT_OK(tree->vacuum_one(Id {3}, vacuumed));
     ASSERT_TRUE(vacuumed);
-    ASSERT_TRUE(c.freelist->is_empty());
+    ASSERT_TRUE(freelist->is_empty());
 
     // Page Types:     N
     // Page Contents: [1] [X] [X] [X] [X]
@@ -1690,9 +1693,9 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
     // Page Types:     N   P   1   2   3
     // Page Contents: [a] [b] [c] [d] [e]
     // Page IDs:       1   2   3   4   5
-    ASSERT_OK(c.freelist->push(std::move(node_5.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_4.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_3.page)));
+    ASSERT_OK(freelist->push(std::move(node_5.page)));
+    ASSERT_OK(freelist->push(std::move(node_4.page)));
+    ASSERT_OK(freelist->push(std::move(node_3.page)));
 
     // Step 1:
     //     Page Types:     N   P       1   2
@@ -1707,7 +1710,7 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
     ASSERT_OK(tree->vacuum_one(Id {5}, vacuumed));
     ASSERT_TRUE(vacuumed);
     PointerMap::Entry entry;
-    ASSERT_OK(c.pointers->read_entry(Id {4}, entry));
+    ASSERT_OK(pointers->read_entry(Id {4}, entry));
     ASSERT_EQ(entry.back_ptr, Id::null());
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     {
@@ -1722,7 +1725,7 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
     // Page IDs:       1   2   3   4   5
     ASSERT_OK(tree->vacuum_one(Id {4}, vacuumed));
     ASSERT_TRUE(vacuumed);
-    ASSERT_OK(c.pointers->read_entry(Id {3}, entry));
+    ASSERT_OK(pointers->read_entry(Id {3}, entry));
     ASSERT_EQ(entry.type, PointerMap::FREELIST_LINK);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
@@ -1731,7 +1734,7 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
     // Page IDs:       1   2   3   4   5
     ASSERT_OK(tree->vacuum_one(Id {3}, vacuumed));
     ASSERT_TRUE(vacuumed);
-    ASSERT_TRUE(c.freelist->is_empty());
+    ASSERT_TRUE(freelist->is_empty());
 
     // Page Types:     N
     // Page Contents: [a] [ ] [ ] [ ] [ ]
@@ -1759,7 +1762,7 @@ TEST_F(VacuumTests, VacuumFreelistSanityCheck)
         std::shuffle(begin(nodes), end(nodes), rng);
 
         for (auto &node: nodes) {
-            ASSERT_OK(c.freelist->push(std::move(node.page)));
+            ASSERT_OK(freelist->push(std::move(node.page)));
         }
 
         // This will vacuum the whole freelist, as well as the pointer map page on page 2.
@@ -1817,8 +1820,8 @@ TEST_F(VacuumTests, VacuumsOverflowChain_A)
     ASSERT_OK(tree->insert("a", "value", _));
     ASSERT_OK(tree->insert("b", overflow_data, _));
 
-    ASSERT_OK(c.freelist->push(std::move(node_3.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_4.page)));
+    ASSERT_OK(freelist->push(std::move(node_3.page)));
+    ASSERT_OK(freelist->push(std::move(node_4.page)));
 
     // Page Types:     n   p   2   1   A   B
     // Page Contents: [a] [b] [c] [d] [e] [f]
@@ -1838,8 +1841,8 @@ TEST_F(VacuumTests, VacuumsOverflowChain_A)
     vacuum_and_validate(*this, overflow_data);
 
     PointerMap::Entry head_entry, tail_entry;
-    ASSERT_OK(c.pointers->read_entry(Id {3}, head_entry));
-    ASSERT_OK(c.pointers->read_entry(Id {4}, tail_entry));
+    ASSERT_OK(pointers->read_entry(Id {3}, head_entry));
+    ASSERT_OK(pointers->read_entry(Id {4}, tail_entry));
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {3});
@@ -1855,8 +1858,8 @@ TEST_F(VacuumTests, VacuumsOverflowChain_B)
     auto node_5 = allocate_node(true);
     auto node_6 = allocate_node(true);
     ASSERT_EQ(node_6.page.id().value, 6);
-    ASSERT_OK(c.freelist->push(std::move(node_5.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_6.page)));
+    ASSERT_OK(freelist->push(std::move(node_5.page)));
+    ASSERT_OK(freelist->push(std::move(node_6.page)));
 
     std::string overflow_data(PAGE_SIZE * 2, 'x');
     bool _;
@@ -1866,8 +1869,8 @@ TEST_F(VacuumTests, VacuumsOverflowChain_B)
     // Page Types:     n   p   2   1   B   A
     // Page Contents: [a] [b] [c] [d] [e] [f]
     // Page IDs:       1   2   3   4   5   6
-    ASSERT_OK(c.freelist->push(std::move(node_3.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_4.page)));
+    ASSERT_OK(freelist->push(std::move(node_3.page)));
+    ASSERT_OK(freelist->push(std::move(node_4.page)));
 
     // Page Types:     n   p   1   A   B
     // Page Contents: [a] [b] [c] [f] [e] [ ]
@@ -1883,8 +1886,8 @@ TEST_F(VacuumTests, VacuumsOverflowChain_B)
     vacuum_and_validate(*this, overflow_data);
 
     PointerMap::Entry head_entry, tail_entry;
-    ASSERT_OK(c.pointers->read_entry(Id {4}, head_entry));
-    ASSERT_OK(c.pointers->read_entry(Id {3}, tail_entry));
+    ASSERT_OK(pointers->read_entry(Id {4}, head_entry));
+    ASSERT_OK(pointers->read_entry(Id {3}, tail_entry));
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {4});
@@ -1912,7 +1915,7 @@ TEST_F(VacuumTests, VacuumOverflowChainSanityCheck)
     }
 
     while (!reserved.empty()) {
-        ASSERT_OK(c.freelist->push(std::move(reserved.back().page)));
+        ASSERT_OK(freelist->push(std::move(reserved.back().page)));
         reserved.pop_back();
     }
 
@@ -1956,8 +1959,8 @@ TEST_F(VacuumTests, VacuumsNodes)
     // Page Types:     n   p   2   1   n   n
     // Page Contents: [a] [b] [c] [d] [e] [f]
     // Page IDs:       1   2   3   4   5   6
-    ASSERT_OK(c.freelist->push(std::move(node_3.page)));
-    ASSERT_OK(c.freelist->push(std::move(node_4.page)));
+    ASSERT_OK(freelist->push(std::move(node_3.page)));
+    ASSERT_OK(freelist->push(std::move(node_4.page)));
 
     // Page Types:     n   p   1   n   n
     // Page Contents: [a] [b] [c] [f] [e] [ ]

@@ -20,7 +20,6 @@ struct SearchResult {
 //       This isn't necessary: we could iterate through, page by page, and compare bytes as we encounter
 //       them. It's just a bit more complicated.
 class NodeIterator {
-    mutable Status m_status;
     OverflowList *m_overflow {};
     std::string *m_lhs_key {};
     std::string *m_rhs_key {};
@@ -36,13 +35,9 @@ public:
         std::string *rhs_key {};
     };
     explicit NodeIterator(Node &node, const Parameters &param);
-    // NOTE: Status must be checked regardless of what is returned by seek(). is_valid() only checks the index vs.
-    //       the cell count, not the status value.
-    [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto is_valid() const -> bool;
     [[nodiscard]] auto index() const -> Size;
-    auto seek(const Slice &key) -> bool;
-    auto seek(const Cell &cell) -> bool;
+    [[nodiscard]] auto seek(const Slice &key, bool *found = nullptr) -> Status;
+    [[nodiscard]] auto seek(const Cell &cell, bool *found = nullptr) -> Status;
 };
 
 class PayloadManager {
@@ -106,14 +101,7 @@ public:
     auto save_state(FileHeader &header) const -> void;
     auto load_state(const FileHeader &header) -> void;
 
-    struct Components {
-        FreeList *freelist {};
-        OverflowList *overflow {};
-        PointerMap *pointers {};
-    };
-
     auto TEST_to_string() -> std::string;
-    auto TEST_components() -> Components;
     auto TEST_check_order() -> void;
     auto TEST_check_links() -> void;
     auto TEST_check_nodes() -> void;
@@ -123,22 +111,22 @@ class BPlusTreeInternal {
 public:
     explicit BPlusTreeInternal(BPlusTree &tree);
 
-    [[nodiscard]] auto pointers() const -> const PointerMap *
+    [[nodiscard]] auto pointers() -> PointerMap *
     {
         return m_pointers;
     }
 
-    [[nodiscard]] auto overflow() const -> const OverflowList *
+    [[nodiscard]] auto overflow() -> OverflowList *
     {
         return m_overflow;
     }
 
-    [[nodiscard]] auto payloads() const -> const PayloadManager *
+    [[nodiscard]] auto payloads() -> PayloadManager *
     {
         return m_payloads;
     }
 
-    [[nodiscard]] auto freelist() const -> const FreeList *
+    [[nodiscard]] auto freelist() -> FreeList *
     {
         return m_freelist;
     }
@@ -166,11 +154,10 @@ public:
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
     [[nodiscard]] auto split_non_root(Node node, Node &out) -> Status;
-    [[nodiscard]] auto split_non_root_fast(Node node, Node &out) -> Status;
 
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
-    [[nodiscard]] auto fix_non_root(Node node, Node &parent, Size index) -> Status;
     [[nodiscard]] auto fix_root(Node root) -> Status;
+    [[nodiscard]] auto fix_non_root(Node node, Node &parent, Size index) -> Status;
     [[nodiscard]] auto merge_left(Node &left, Node right, Node &parent, Size index) -> Status;
     [[nodiscard]] auto merge_right(Node &left, Node right, Node &parent, Size index) -> Status;
     [[nodiscard]] auto rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status;
@@ -193,6 +180,7 @@ private:
     OverflowList *m_overflow {};
     PayloadManager *m_payloads {};
     FreeList *m_freelist {};
+    Pager *m_pager {};
 };
 
 } // namespace Calico
