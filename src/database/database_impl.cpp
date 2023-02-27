@@ -478,7 +478,7 @@ auto setup(const std::string &prefix, Storage &storage, const Options &options, 
         }
 
         Byte buffer[FileHeader::SIZE];
-        auto read_size = sizeof(buffer);
+        Size read_size = sizeof(buffer);
         Calico_Try(reader->read(buffer, read_size, 0));
         if (read_size != sizeof(buffer)) {
             return Status::system_error("incomplete read of file header");

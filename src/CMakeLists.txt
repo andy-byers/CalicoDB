@@ -40,7 +40,7 @@ else()
         list(APPEND CALICO_OPTIONS -Wduplicated-branches)
         list(APPEND CALICO_OPTIONS -Wlogical-op)
         list(APPEND CALICO_OPTIONS -Wnull-dereference)
-        list(APPEND CALICO_OPTIONS -Wuseless-cast)
+#        list(APPEND CALICO_OPTIONS -Wuseless-cast) # TODO: Problems on Apple Clang
     else()
         list(APPEND CALICO_OPTIONS -Wimplicit-fallthrough)
     endif()

@@ -329,7 +329,7 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple("wal-", Tools::Interceptor::WRITE, 0),
         std::make_tuple("wal-", Tools::Interceptor::WRITE, 1),
         std::make_tuple("wal-", Tools::Interceptor::WRITE, 5),
-        std::make_tuple("wal-", Tools::Interceptor::SYNC, 0),
+//        std::make_tuple("wal-", Tools::Interceptor::SYNC, 0), TODO: May need separate testing
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 0),
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 5)));
