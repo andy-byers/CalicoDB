@@ -13,8 +13,6 @@ using FetchKey = std::function<Slice(Size)>;
 
 static auto seek_binary(unsigned n, const Slice &key, const FetchKey &fetch) -> SeekResult
 {
-    // NOTE: If fetch() encounters an error, an empty slice will be returned and the iterator status set. Callers should check the
-    //       iterator status to see if the results were valid or not.
     auto upper {n};
     unsigned lower {};
 
@@ -293,7 +291,8 @@ auto BPlusTreeInternal::remove_cell(Node &node, Size index) -> Status
         Calico_Try(m_overflow->erase_chain(read_overflow_id(cell)));
     }
     erase_cell(node, index, cell.size);
-    return Status::ok();}
+    return Status::ok();
+}
 
 auto BPlusTreeInternal::fix_links(Node &node) -> Status
 {
@@ -396,7 +395,17 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
     auto overflow = *right.overflow;
     right.overflow.reset();
 
-    for (Size i {}; i < header.cell_count; ++i) {
+//    if (overflow_index == header.cell_count) {
+//        // Note the reversal of the "left" and "right" parameters. We are splitting the other way.
+//        return split_non_root_fast(
+//            std::move(parent),
+//            std::move(right),
+//            std::move(left),
+//            overflow,
+//            out);
+//    }
+
+    for (Size i {}, n = header.cell_count; i < n; ++i) {
         Calico_Try(transfer_left(left, right));
 
         if (i == overflow_index) {
@@ -412,6 +421,7 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
             Calico_Try(insert_cell(right, overflow_index - i - 1, overflow));
             break;
         }
+        CALICO_EXPECT_NE(i + 1, n);
     }
     CALICO_EXPECT_FALSE(is_overflowing(left));
     CALICO_EXPECT_FALSE(is_overflowing(right));
@@ -447,6 +457,12 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
     release(std::move(right));
     out = std::move(parent);
     return Status::ok();
+}
+
+auto BPlusTreeInternal::split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status
+{
+    (void)parent, (void)left, (void)right, (void)overflow, (void)out;
+    return Status::logic_error("not implemented");
 }
 
 auto BPlusTreeInternal::resolve_underflow(Node node, const Slice &anchor) -> Status

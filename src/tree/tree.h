@@ -154,7 +154,6 @@ public:
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
     [[nodiscard]] auto split_non_root(Node node, Node &out) -> Status;
-
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto fix_root(Node root) -> Status;
     [[nodiscard]] auto fix_non_root(Node node, Node &parent, Size index) -> Status;
@@ -164,6 +163,7 @@ public:
     [[nodiscard]] auto rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status;
 
 private:
+    [[nodiscard]] auto split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status;
     [[nodiscard]] auto find_external_slot(const Slice &key, Node node, SearchResult &out) const -> Status;
     [[nodiscard]] auto transfer_left(Node &left, Node &right) -> Status;
     [[nodiscard]] auto internal_merge_left(Node &left, Node &right, Node &parent, Size index) -> Status;

@@ -1028,10 +1028,9 @@ TEST_P(BPlusTreeTests, SplitWithShortAndLongKeys)
     for (unsigned i {}; i < 1000; ++i) {
         const auto key = random.Generate(GetParam().page_size);
         ASSERT_OK(tree->insert(key, "v", _));
-if(i>=520)std::cerr<<i<<":\n"<<tree->TEST_to_string()<<"\n\n";
-//        if (i % 100 == 99) {
-//        }
-        if(i==521)validate();
+        if (i % 100 == 99) {
+            validate();
+        }
     }
 }
 
