@@ -1,4 +1,5 @@
 #include "tree.h"
+#include <functional>
 #include "pager/pager.h"
 #include "utils/logging.h"
 #include "utils/utils.h"
