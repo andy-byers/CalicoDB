@@ -61,7 +61,7 @@ private:
     std::string m_wal_prefix;
     std::string m_scratch;
     Storage *m_storage {};
-    Logger *m_info_log {};
+    InfoLogger *m_info_log {};
     Size m_txn_size {};
     Size m_record_count {};
     Size m_bytes_written {};

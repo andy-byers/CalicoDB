@@ -1,11 +1,7 @@
 #ifndef CALICO_WAL_WAL_WRITER_H
 #define CALICO_WAL_WAL_WRITER_H
 
-#include "helpers.h"
-#include "utils/crc.h"
-#include "wal.h"
-#include <memory>
-#include <optional>
+#include "record.h"
 
 namespace Calico {
 

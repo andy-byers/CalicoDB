@@ -1,11 +1,7 @@
 #ifndef CALICO_WAL_READER_H
 #define CALICO_WAL_READER_H
 
-#include "helpers.h"
 #include "record.h"
-#include "utils/crc.h"
-#include "wal.h"
-#include <optional>
 
 namespace Calico {
 

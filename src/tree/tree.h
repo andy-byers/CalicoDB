@@ -3,7 +3,6 @@
 
 #include "memory.h"
 #include "node.h"
-#include <array>
 
 namespace Calico {
 

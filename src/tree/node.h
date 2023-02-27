@@ -3,7 +3,6 @@
 
 #include "header.h"
 #include "pager/page.h"
-#include "utils/types.h"
 #include <optional>
 
 namespace Calico {

@@ -1,4 +1,5 @@
 #include "writer.h"
+#include "utils/crc.h"
 #include "utils/types.h"
 
 namespace Calico {

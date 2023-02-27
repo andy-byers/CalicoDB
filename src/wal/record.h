@@ -7,12 +7,22 @@
 #include "utils/types.h"
 #include <algorithm>
 #include <map>
-#include <optional>
 #include <variant>
 
 namespace Calico {
 
 static constexpr Size WAL_BLOCK_SCALE {4};
+
+[[nodiscard]] inline constexpr auto wal_block_size(Size page_size) -> Size
+{
+    return std::min(MAXIMUM_PAGE_SIZE, page_size * WAL_BLOCK_SCALE);
+}
+
+[[nodiscard]] inline constexpr auto wal_scratch_size(Size page_size) -> Size
+{
+    const Size DELTA_PAYLOAD_HEADER_SIZE {11};
+    return page_size + DELTA_PAYLOAD_HEADER_SIZE + sizeof(PageDelta);
+}
 
 [[nodiscard]] inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
 {
@@ -248,11 +258,12 @@ private:
     Reader *temp;
     Calico_Try(store.new_reader(encode_segment_name(prefix, id), &temp));
 
-    char buffer[WalPayloadHeader::SIZE];
+    char buffer[sizeof(Lsn)];
     Span bytes {buffer, sizeof(buffer)};
     std::unique_ptr<Reader> file {temp};
 
-    // Read the first LSN. If it exists, it will always be at the same location.
+    // Read the first LSN. If it exists, it will always be at the same location: right after the first
+    // record header, which is written at offset 0.
     auto read_size = bytes.size();
     Calico_Try(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
 

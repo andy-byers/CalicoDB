@@ -4,6 +4,7 @@
 #include "calico/storage.h"
 #include "storage/posix_storage.h"
 #include "tree/cursor_impl.h"
+#include "utils/crc.h"
 #include "utils/logging.h"
 
 namespace Calico {
@@ -65,7 +66,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     m_info_log = sanitized.info_log;
     if (m_info_log == nullptr) {
-        Calico_Try(m_storage->new_logger(m_db_prefix + "log", &m_info_log));
+        Calico_Try(m_storage->new_info_logger(m_db_prefix + "log", &m_info_log));
         sanitized.info_log = m_info_log;
         m_owns_info_log = true;
     }
@@ -109,7 +110,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     Status s;
     if (m_commit_lsn.is_null()) {
-        logv(m_info_log, "setting up a new database");
+        m_info_log->logv("setting up a new database");
         Calico_Try(wal->start_writing());
 
         Node root;
@@ -121,15 +122,15 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         Calico_Try(pager->flush());
 
     } else {
-        logv(m_info_log, "ensuring consistency of an existing database");
+        m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         Calico_Try(ensure_consistency());
         Calico_Try(load_state());
         Calico_Try(wal->start_writing());
     }
-    logv(m_info_log, "pager recovery lsn is ", pager->recovery_lsn().value);
-    logv(m_info_log, "wal flushed lsn is ", wal->flushed_lsn().value);
-    logv(m_info_log, "commit lsn is ", m_commit_lsn.value);
+    m_info_log->logv("pager recovery lsn is %llu", pager->recovery_lsn().value);
+    m_info_log->logv("wal flushed lsn is %llu", wal->flushed_lsn().value);
+    m_info_log->logv("commit lsn is %llu", m_commit_lsn.value);
 
     Calico_Try(m_status);
     m_is_setup = true;
@@ -140,16 +141,16 @@ DatabaseImpl::~DatabaseImpl()
 {
     if (m_is_setup && m_status.is_ok()) {
         if (const auto s = wal->flush(); !s.is_ok()) {
-            logv(m_info_log, "failed to flush wal: ", s.what().data());
+            m_info_log->logv("failed to flush wal: %s", s.what().data());
         }
         if (const auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
-            logv(m_info_log, "failed to flush pager: ", s.what().data());
+            m_info_log->logv("failed to flush pager: %s", s.what().data());
         }
         if (const auto s = wal->close(); !s.is_ok()) {
-            logv(m_info_log, "failed to close wal: ", s.what().data());
+            m_info_log->logv("failed to close wal: %s", s.what().data());
         }
         if (const auto s = ensure_consistency(); !s.is_ok()) {
-            logv(m_info_log, "failed to ensure consistency: ", s.what().data());
+            m_info_log->logv("failed to ensure consistency: %s", s.what().data());
         }
     }
 
@@ -375,12 +376,12 @@ auto DatabaseImpl::do_commit() -> Status
     // The root page is guaranteed to have a full image in the WAL. The current LSN is now guaranteed to be
     // the commit LSN.
     auto commit_lsn = wal->current_lsn();
-    logv(m_info_log, "commit requested at lsn ", commit_lsn.value);
+    m_info_log->logv("commit requested at lsn %llu", commit_lsn.value);
 
     Calico_Try(save_state(std::move(root), commit_lsn));
     Calico_Try(wal->flush());
 
-    logv(m_info_log, "commit successful");
+    m_info_log->logv("commit successful");
     m_commit_lsn = commit_lsn;
     return Status::ok();
 }
@@ -421,8 +422,9 @@ auto DatabaseImpl::load_state() -> Status
     const auto expected_crc = crc32c::Unmask(header.header_crc);
     const auto computed_crc = header.compute_crc();
     if (expected_crc != computed_crc) {
-        logv(m_info_log, "file header crc mismatch (expected ",
-             expected_crc, " but computed ", computed_crc, ")");
+        m_info_log->logv(
+            "file header crc mismatch (expected %u but computed %u)",
+            expected_crc, computed_crc);
         return Status::corruption("crc mismatch");
     }
 

@@ -2,6 +2,7 @@
 #include "pager/page.h"
 #include "pager/pager.h"
 #include "wal/reader.h"
+#include "wal/wal.h"
 
 namespace Calico {
 

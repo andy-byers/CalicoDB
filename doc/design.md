@@ -29,6 +29,16 @@ It is of variable order, so splits are performed when nodes have run out of phys
 The implementation is pretty straightforward: we basically do as little as possible to make sure that the tree ordering remains correct.
 This results in a less-balanced tree, but seems to be good for write performance.
 
+#### Fixing Overflows
+As previously mentioned, tree nodes are split when they run out of room.
+To keep things simple, we allow each node to overflow by a single cell.
+Once a node overflows, we will work to resolve it immediately.
+
+#### Fixing Underflows
+We merge 2 nodes together when one of them has become empty.
+Since a merge involves addition of the separator cell, this may not be possible if the second node is very full.
+In this case, we will perform a single rotation.
+
 ### WAL
 The WAL record format is similar to that of `RocksDB`.
 Additionally, we have 2 WAL payload types: deltas and full images.

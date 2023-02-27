@@ -1,5 +1,6 @@
 #include "tree.h"
 #include "pager/pager.h"
+#include "utils/logging.h"
 #include "utils/utils.h"
 
 namespace Calico {
@@ -405,6 +406,7 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
 //            out);
 //    }
 
+    // Fix the overflow. "left" is empty, so this should always be possible.
     for (Size i {}, n = header.cell_count; i < n; ++i) {
         Calico_Try(transfer_left(left, right));
 
@@ -923,7 +925,6 @@ auto PayloadManager::collect_value(std::string &scratch, const Cell &cell, Slice
 BPlusTree::BPlusTree(Pager &pager)
     : m_node_scratch(pager.page_size(), '\0'),
       m_cell_scratch(pager.page_size(), '\0'),
-    // min_local and max_local fields are only needed in external nodes.
       m_external_meta {
           external_cell_size, parse_external_cell,
           compute_min_local(pager.page_size()),
@@ -942,6 +943,7 @@ BPlusTree::BPlusTree(Pager &pager)
 
 auto BPlusTree::cell_scratch() -> Byte *
 {
+    // Leave space for a child ID (maximum difference between the size of a varint and an Id).
     return m_cell_scratch.data() + sizeof(Id) - 1;
 }
 
@@ -974,8 +976,8 @@ auto BPlusTree::erase(const Slice &key) -> Status
     auto [node, index, exact] = std::move(slot);
 
     if (exact) {
-        const auto cell = read_cell(node, index);
         Slice anchor;
+        const auto cell = read_cell(node, index);
         Calico_Try(collect_key(m_anchor, cell, anchor));
 
         internal.upgrade(node);

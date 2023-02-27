@@ -34,6 +34,12 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
+class InfoLogger {
+public:
+    virtual ~InfoLogger() = default;
+    virtual auto logv(const char *fmt, ...) -> void = 0;
+};
+
 class Storage {
 public:
     static auto default_storage() -> Storage *;
@@ -44,6 +50,7 @@ public:
     [[nodiscard]] virtual auto new_reader(const std::string &path, Reader **out) -> Status = 0;
     [[nodiscard]] virtual auto new_editor(const std::string &path, Editor **out) -> Status = 0;
     [[nodiscard]] virtual auto new_logger(const std::string &path, Logger **out) -> Status = 0;
+    [[nodiscard]] virtual auto new_info_logger(const std::string &path, InfoLogger **out) -> Status = 0;
     [[nodiscard]] virtual auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status = 0;
     [[nodiscard]] virtual auto rename_file(const std::string &old_path, const std::string &new_path) -> Status = 0;
     [[nodiscard]] virtual auto file_exists(const std::string &path) const -> Status = 0;

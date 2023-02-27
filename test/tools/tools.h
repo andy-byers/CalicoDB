@@ -5,6 +5,7 @@
 #include "database/database_impl.h"
 #include <calico/calico.h>
 #include <climits>
+#include <cstdarg>
 #include <cstdio>
 #include <functional>
 #include <mutex>
@@ -108,6 +109,7 @@ public:
     ~DynamicMemory() override = default;
     [[nodiscard]] auto create_directory(const std::string &path) -> Status override;
     [[nodiscard]] auto remove_directory(const std::string &path) -> Status override;
+    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger **out) -> Status override;
     [[nodiscard]] auto new_reader(const std::string &path, Reader **out) -> Status override;
     [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;
     [[nodiscard]] auto new_logger(const std::string &path, Logger **out) -> Status override;
@@ -176,20 +178,23 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class StderrLogger : public Logger {
+class MemoryInfoLogger : public InfoLogger {
+public:
+    ~MemoryInfoLogger() override = default;
+    auto logv(const char *, ...) -> void override {}
+};
+
+class StderrLogger : public InfoLogger {
 public:
     ~StderrLogger() override = default;
 
-    [[nodiscard]] auto write(Slice in) -> Status override
+    auto logv(const char *fmt, ...) -> void override
     {
-        std::fputs(in.to_string().c_str(), stderr);
-        return Status::ok();
-    }
-
-    [[nodiscard]] auto sync() -> Status override
-    {
+        std::va_list args;
+        va_start(args, fmt);
+        std::vfprintf(stderr, fmt, args);
+        va_end(args);
         std::fflush(stderr);
-        return Status::ok();
     }
 };
 

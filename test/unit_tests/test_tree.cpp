@@ -1,10 +1,8 @@
-#include "pager/pager.h"
 #include "tree/cursor_impl.h"
 #include "tree/memory.h"
 #include "tree/node.h"
 #include "tree/tree.h"
 #include "unit_tests.h"
-#include "wal/helpers.h"
 #include <gtest/gtest.h>
 
 namespace Calico {

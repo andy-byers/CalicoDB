@@ -30,7 +30,7 @@ else()
     list(APPEND CALICO_OPTIONS -Wcast-align)
     list(APPEND CALICO_OPTIONS -Wunused)
     list(APPEND CALICO_OPTIONS -Woverloaded-virtual)
-    list(APPEND CALICO_OPTIONS -Wformat=2)
+#    list(APPEND CALICO_OPTIONS -Wformat=2) TODO: Attribute to suppress warning from posix_storage.cpp.
     list(APPEND CALICO_OPTIONS -Wdouble-promotion)
 
     if(COMPILER_VENDOR STREQUAL GNU)

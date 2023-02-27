@@ -4,7 +4,6 @@
 #include "calico/status.h"
 #include <cstdio>
 #include <cstdlib>
-#include <string>
 
 #if NDEBUG
 #define CALICO_EXPECT_(expr, file, line)

@@ -14,6 +14,27 @@ namespace Calico {
 
 namespace fs = std::filesystem;
 
+TEST(LeakTests, DestroysOwnObjects)
+{
+    Database *db;
+    ASSERT_OK(Database::open("__calico_test", {}, &db));
+    delete db;
+}
+
+TEST(LeakTests, LeavesUserObjects)
+{
+    Options options;
+    options.storage = new Tools::DynamicMemory;
+    options.info_log = new Tools::StderrLogger;
+
+    Database *db;
+    ASSERT_OK(Database::open("__calico_test", options, &db));
+    delete db;
+
+    delete options.info_log;
+    delete options.storage;
+}
+
 class BasicDatabaseTests
     : public OnDiskTest,
       public testing::Test {

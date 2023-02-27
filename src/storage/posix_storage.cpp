@@ -1,4 +1,5 @@
 #include "posix_storage.h"
+#include <cstdarg>
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -35,6 +36,7 @@ static auto file_open(const std::string &name, int mode, int permissions, int &o
         out = fd;
         return Status::ok();
     }
+    out = -1;
     return errno_to_status();
 }
 
@@ -173,6 +175,46 @@ auto PosixLogger::sync() -> Status
     return file_sync(m_file);
 }
 
+PosixInfoLogger::~PosixInfoLogger()
+{
+    (void)file_close(m_file);
+}
+
+// Based off LevelDB.
+auto PosixInfoLogger::logv(const char *fmt, ...) -> void
+{
+    std::va_list args;
+    for (int iteration {}; iteration < 2; ++iteration) {
+        va_start(args, fmt);
+        const auto rc = std::vsnprintf(m_buffer.data(), m_buffer.size(), fmt, args);
+        va_end(args);
+
+        if (rc < 0) {
+            break;
+        }
+        auto length = static_cast<Size>(rc);
+
+        if (length >= m_buffer.size() - 1) {
+            // The message did not fit into the buffer.
+            if (iteration == 0) {
+                m_buffer.resize(length + 2);
+                continue;
+            }
+        }
+
+        // Add a newline if necessary.
+        if (m_buffer[length - 1] != '\n') {
+            m_buffer[length] = '\n';
+            length++;
+        }
+
+        CALICO_EXPECT_LE(length, m_buffer.size());
+        file_write(m_file, Slice {m_buffer.data(), length});
+        break;
+    }
+    m_buffer.resize(BUFFER_SIZE);
+}
+
 auto PosixStorage::resize_file(const std::string &path, Size size) -> Status
 {
     return file_resize(path, size);
@@ -232,7 +274,7 @@ auto PosixStorage::get_children(const std::string &path, std::vector<std::string
 
 auto PosixStorage::new_reader(const std::string &path, Reader **out) -> Status
 {
-    int file {};
+    int file;
     Calico_Try(file_open(path, O_RDONLY, FILE_PERMISSIONS, file));
     *out = new PosixReader {path, file};
     return Status::ok();
@@ -240,7 +282,7 @@ auto PosixStorage::new_reader(const std::string &path, Reader **out) -> Status
 
 auto PosixStorage::new_editor(const std::string &path, Editor **out) -> Status
 {
-    int file {};
+    int file;
     Calico_Try(file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS, file));
     *out = new PosixEditor {path, file};
     return Status::ok();
@@ -248,9 +290,17 @@ auto PosixStorage::new_editor(const std::string &path, Editor **out) -> Status
 
 auto PosixStorage::new_logger(const std::string &path, Logger **out) -> Status
 {
-    int file {};
+    int file;
     Calico_Try(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
     *out = new PosixLogger {path, file};
+    return Status::ok();
+}
+
+auto PosixStorage::new_info_logger(const std::string &path, InfoLogger **out) -> Status
+{
+    int file;
+    Calico_Try(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
+    *out = new PosixInfoLogger {path, file};
     return Status::ok();
 }
 

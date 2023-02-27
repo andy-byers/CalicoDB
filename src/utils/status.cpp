@@ -1,6 +1,5 @@
 #include "calico/status.h"
 #include "calico/slice.h"
-#include "utils/utils.h"
 
 namespace Calico {
 

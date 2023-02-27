@@ -6,7 +6,7 @@
 #include "page_cache.h"
 #include "pager.h"
 
-#include "wal/helpers.h"
+#include "wal/record.h"
 
 namespace Calico {
 
@@ -16,8 +16,6 @@ class WriteAheadLog;
 
 class Pager {
 public:
-    using Ptr = std::unique_ptr<Pager>;
-
     friend class DatabaseImpl;
     friend class Recovery;
 
@@ -26,7 +24,7 @@ public:
         Storage *storage {};
         std::string *scratch {};
         WriteAheadLog *wal {};
-        Logger *info_log {};
+        InfoLogger *info_log {};
         Status *status {};
         Lsn *commit_lsn {};
         bool *in_txn {};
@@ -71,7 +69,7 @@ private:
     std::string *m_scratch {};
     WriteAheadLog *m_wal {};
     Storage *m_storage {};
-    Logger *m_info_log {};
+    InfoLogger *m_info_log {};
 };
 
 } // namespace Calico
