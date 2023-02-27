@@ -251,7 +251,7 @@ public:
         auto record = begin(map);
         for (Size index {}; record != end(map); ++index, ++record) {
             ASSERT_OK(db->put(record->first, record->second));
-            if (record->first.front() % 20 == 1) {
+            if (record->first.front() % 10 == 1) {
                 ASSERT_OK(db->commit());
             }
         }
@@ -304,21 +304,71 @@ TEST_P(RecoverySanityCheck, FailureDuringClose)
     validate();
 }
 
+TEST_P(RecoverySanityCheck, FailureDuringCloseWithUncommittedUpdates)
+{
+    while (db->status().is_ok()) {
+        (void)db->put(random.Generate(16), random.Generate(100));
+    }
+
+    delete db;
+    db = nullptr;
+
+    validate();
+}
+
 INSTANTIATE_TEST_SUITE_P(
     RecoverySanityCheck,
     RecoverySanityCheck,
     ::testing::Values(
         std::make_tuple("data", Tools::Interceptor::READ, 0),
         std::make_tuple("data", Tools::Interceptor::READ, 1),
-        std::make_tuple("data", Tools::Interceptor::READ, 10),
+        std::make_tuple("data", Tools::Interceptor::READ, 5),
         std::make_tuple("data", Tools::Interceptor::WRITE, 0),
         std::make_tuple("data", Tools::Interceptor::WRITE, 1),
-        std::make_tuple("data", Tools::Interceptor::WRITE, 10),
+        std::make_tuple("data", Tools::Interceptor::WRITE, 5),
         std::make_tuple("wal-", Tools::Interceptor::WRITE, 0),
         std::make_tuple("wal-", Tools::Interceptor::WRITE, 1),
-        std::make_tuple("wal-", Tools::Interceptor::WRITE, 10),
+        std::make_tuple("wal-", Tools::Interceptor::WRITE, 5),
+//        std::make_tuple("wal-", Tools::Interceptor::SYNC, 0), TODO: May need separate testing
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 0),
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
-        std::make_tuple("wal-", Tools::Interceptor::OPEN, 10)));
+        std::make_tuple("wal-", Tools::Interceptor::OPEN, 5)));
+
+class OpenErrorTests: public RecoverySanityCheck {
+public:
+    ~OpenErrorTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        RecoverySanityCheck::SetUp();
+        const auto saved_count = interceptor_count;
+        interceptor_count = 0;
+
+        delete db;
+        db = nullptr;
+
+        interceptor_count = saved_count;
+    }
+};
+
+TEST_P(OpenErrorTests, FailureDuringOpen)
+{
+    assert_special_error(open_with_status());
+    validate();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    OpenErrorTests,
+    OpenErrorTests,
+    ::testing::Values(
+        std::make_tuple("data", Tools::Interceptor::READ, 0),
+        std::make_tuple("data", Tools::Interceptor::READ, 1),
+        std::make_tuple("data", Tools::Interceptor::READ, 5),
+        std::make_tuple("data", Tools::Interceptor::WRITE, 0),
+        std::make_tuple("data", Tools::Interceptor::WRITE, 1),
+        std::make_tuple("data", Tools::Interceptor::WRITE, 5),
+        std::make_tuple("wal-", Tools::Interceptor::OPEN, 0),
+        std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
+        std::make_tuple("wal-", Tools::Interceptor::OPEN, 5)));
 
 } // namespace Calico

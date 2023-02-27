@@ -80,7 +80,7 @@ auto Pager::hit_ratio() const -> double
 auto Pager::pin_frame(Id pid) -> Status
 {
     if (auto s = do_pin_frame(pid); s.is_not_found()) {
-        logv(m_info_log, s.what().data());
+        m_info_log->logv("failed to pin frame: %s", s.what().data());
         Calico_Try(m_wal->flush());
         return do_pin_frame(pid);
     } else {
@@ -95,7 +95,7 @@ auto Pager::do_pin_frame(Id pid) -> Status
     if (!m_frames.available()) {
         if (!make_frame_available()) {
             Calico_Try(*m_status);
-            logv(m_info_log, "out of frames");
+            m_info_log->logv("out of frames: flushing wal");
             Calico_Try(m_wal->flush());
             return Status::not_found("out of frames");
         }
@@ -142,8 +142,9 @@ auto Pager::flush(Lsn target_lsn) -> Status
         }
 
         if (page_id.as_index() >= m_frames.page_count()) {
-            logv(m_info_log, "removing page ", page_id.value,
-                 ", which is out of range (page count is ", m_frames.page_count(), ")");
+            m_info_log->logv(
+                "removing page %llu, which is out of range (page count is %llu)",
+                page_id.value, m_frames.page_count());
             m_cache.erase(page_id);
             m_frames.unpin(frame_id);
             itr = m_dirty.remove(itr);
@@ -347,7 +348,7 @@ auto Pager::truncate(Size page_count) -> Status
             m_dirty.remove(*entry->token);
         }
     }
-    return flush({});
+    return flush();
 }
 
 auto Pager::save_state(FileHeader &header) -> void

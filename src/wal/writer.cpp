@@ -1,4 +1,5 @@
 #include "writer.h"
+#include "utils/crc.h"
 #include "utils/types.h"
 
 namespace Calico {
@@ -8,6 +9,7 @@ auto WalWriter::write(WalPayloadIn payload) -> Status
     const auto lsn = payload.lsn();
     CALICO_EXPECT_FALSE(lsn.is_null());
     auto data = payload.m_buffer;
+    CALICO_EXPECT_FALSE(data.is_empty());
 
     WalRecordHeader lhs;
     lhs.type = WalRecordHeader::Type::FULL;
@@ -21,38 +23,35 @@ auto WalWriter::write(WalPayloadIn payload) -> Status
         const auto space_remaining = rest.advance(m_offset).size();
         const auto needs_split = space_remaining < WalRecordHeader::SIZE + data.size();
 
-        if (space_remaining > WalRecordHeader::SIZE) {
-            WalRecordHeader rhs;
-
-            if (needs_split) {
-                rhs = split_record(lhs, data, space_remaining);
-            }
-
-            // We must have room for the whole header and at least 1 payload byte.
-            write_wal_record_header(rest, lhs);
-            rest.advance(WalRecordHeader::SIZE);
-            mem_copy(rest, data.range(0, lhs.size));
-
-            m_offset += WalRecordHeader::SIZE + lhs.size;
-            data.advance(lhs.size);
-            rest.advance(lhs.size);
-
-            if (needs_split) {
-                lhs = rhs;
-            }
-
-            // The new value of m_offset must be less than or equal to the start of the next block. If it is exactly
-            // at the start of the next block, we should fall through and read it into the tail buffer.
-            if (m_offset != m_tail.size()) {
-                continue;
-            }
+        if (space_remaining <= WalRecordHeader::SIZE) {
+            CALICO_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::SIZE);
+            Calico_Try(flush());
+            continue;
         }
-        CALICO_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::SIZE);
-        Calico_Try(flush());
+        WalRecordHeader rhs;
+
+        if (needs_split) {
+            rhs = split_record(lhs, data, space_remaining);
+        }
+
+        // We must have room for the whole header and at least 1 payload byte.
+        write_wal_record_header(rest, lhs);
+        rest.advance(WalRecordHeader::SIZE);
+        mem_copy(rest, data.range(0, lhs.size));
+
+        m_offset += WalRecordHeader::SIZE + lhs.size;
+        data.advance(lhs.size);
+        rest.advance(lhs.size);
+
+        if (needs_split) {
+            lhs = rhs;
+        } else {
+            CALICO_EXPECT_TRUE(data.is_empty());
+            // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
+            // to be all the way on disk.
+            m_last_lsn = lsn;
+        }
     }
-    // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
-    // to be all the way on disk.
-    m_last_lsn = lsn;
     return Status::ok();
 }
 

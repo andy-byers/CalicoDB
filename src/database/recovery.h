@@ -1,15 +1,14 @@
 #ifndef CALICO_DATABASE_RECOVERY_H
 #define CALICO_DATABASE_RECOVERY_H
 
-#include "wal/wal.h"
-#include <optional>
-#include <variant>
-#include <vector>
+#include "calico/storage.h"
+#include "utils/types.h"
 
 namespace Calico {
 
 class Pager;
 class WriteAheadLog;
+class WalSet;
 
 class Recovery {
 public:

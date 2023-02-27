@@ -30,7 +30,7 @@ else()
     list(APPEND CALICO_OPTIONS -Wcast-align)
     list(APPEND CALICO_OPTIONS -Wunused)
     list(APPEND CALICO_OPTIONS -Woverloaded-virtual)
-    list(APPEND CALICO_OPTIONS -Wformat=2)
+#    list(APPEND CALICO_OPTIONS -Wformat=2) TODO: Attribute to suppress warning from posix_storage.cpp.
     list(APPEND CALICO_OPTIONS -Wdouble-promotion)
 
     if(COMPILER_VENDOR STREQUAL GNU)
@@ -40,7 +40,7 @@ else()
         list(APPEND CALICO_OPTIONS -Wduplicated-branches)
         list(APPEND CALICO_OPTIONS -Wlogical-op)
         list(APPEND CALICO_OPTIONS -Wnull-dereference)
-        list(APPEND CALICO_OPTIONS -Wuseless-cast)
+#        list(APPEND CALICO_OPTIONS -Wuseless-cast) # TODO: Problems on Apple Clang
     else()
         list(APPEND CALICO_OPTIONS -Wimplicit-fallthrough)
     endif()

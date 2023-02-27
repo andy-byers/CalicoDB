@@ -141,6 +141,12 @@ auto DynamicMemory::new_logger(const std::string &path, Logger **out) -> Status
     return Status::ok();
 }
 
+auto DynamicMemory::new_info_logger(const std::string &, InfoLogger **out) -> Status
+{
+    *out = new MemoryInfoLogger;
+    return Status::ok();
+}
+
 auto DynamicMemory::remove_file(const std::string &path) -> Status
 {
     auto &mem = get_memory(path);

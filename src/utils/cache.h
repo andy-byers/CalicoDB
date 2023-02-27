@@ -2,10 +2,10 @@
 #define CALICO_UTILS_CACHE_H
 
 #include "calico/common.h"
-#include <functional>
 #include <list>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 
 namespace Calico {
 

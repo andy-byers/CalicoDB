@@ -2,8 +2,6 @@
 #include "calico/storage.h"
 #include "tools.h"
 #include "unit_tests.h"
-#include "utils/logging.h"
-#include "wal/helpers.h"
 #include "wal/reader.h"
 #include "wal/writer.h"
 #include <array>

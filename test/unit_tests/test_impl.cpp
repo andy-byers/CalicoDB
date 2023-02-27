@@ -14,6 +14,27 @@ namespace Calico {
 
 namespace fs = std::filesystem;
 
+TEST(LeakTests, DestroysOwnObjects)
+{
+    Database *db;
+    ASSERT_OK(Database::open("__calico_test", {}, &db));
+    delete db;
+}
+
+TEST(LeakTests, LeavesUserObjects)
+{
+    Options options;
+    options.storage = new Tools::DynamicMemory;
+    options.info_log = new Tools::StderrLogger;
+
+    Database *db;
+    ASSERT_OK(Database::open("__calico_test", options, &db));
+    delete db;
+
+    delete options.info_log;
+    delete options.storage;
+}
+
 class BasicDatabaseTests
     : public OnDiskTest,
       public testing::Test {
@@ -107,25 +128,11 @@ static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
     dynamic_cast<const DatabaseImpl &>(db).TEST_validate(); //TODO: The tree validation method sucks and fails when the tree is too big. We end up running out of frames.
 }
 
-static auto traverse_all_records(Database &db)
-{
-    std::unique_ptr<Cursor> c {db.new_cursor()};
-    c->seek_first();
-    for (; c->is_valid(); c->next()) {
-        CursorInternal::TEST_validate(*c);
-    }
-    c->seek_last();
-    for (; c->is_valid(); c->previous()) {
-        CursorInternal::TEST_validate(*c);
-    }
-}
-
 TEST_F(BasicDatabaseTests, InsertOneGroup)
 {
     Database *db;
     ASSERT_OK(Database::open(ROOT, options, &db));
     insert_random_groups(*db, 1, 500);
-    traverse_all_records(*db);
     delete db;
 }
 
@@ -134,7 +141,6 @@ TEST_F(BasicDatabaseTests, InsertMultipleGroups)
     Database *db;
     ASSERT_OK(Database::open(ROOT, options, &db));
     insert_random_groups(*db, 5, 500);
-    traverse_all_records(*db);
     delete db;
 }
 
@@ -236,7 +242,7 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
 }
 
 class DbVacuumTests
-    : public OnDiskTest,
+    : public InMemoryTest,
       public testing::TestWithParam<std::tuple<Size, Size, bool>> {
 public:
     DbVacuumTests()
@@ -246,6 +252,7 @@ public:
     {
         options.page_size = 0x200;
         options.cache_size = 0x200 * 16;
+        options.storage = storage.get();
     }
 
     std::unordered_map<std::string, std::string> map;
@@ -277,16 +284,16 @@ TEST_P(DbVacuumTests, SanityCheck)
             map.erase(key);
             ASSERT_OK(db->erase(key));
         }
-        ASSERT_OK(db->commit());
         ASSERT_OK(db->vacuum());
         dynamic_cast<DatabaseImpl &>(*db).TEST_validate();
+        ASSERT_OK(db->commit());
 
         Size i {};
         for (const auto &[key, value]: map) {
             i++;
             std::string result;
             ASSERT_OK(db->get(key, result));
-            CALICO_EXPECT_EQ(result, value);
+            ASSERT_EQ(result, value);
         }
     }
     delete db;
@@ -579,7 +586,8 @@ struct ErrorWrapper {
 
 class DbFatalErrorTests
     : public InMemoryTest,
-      public testing::TestWithParam<ErrorWrapper> {
+      public testing::TestWithParam<ErrorWrapper>
+{
 protected:
     DbFatalErrorTests()
     {

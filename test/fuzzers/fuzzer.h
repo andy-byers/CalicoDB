@@ -1,5 +1,5 @@
-#ifndef CALICO_FUZZ_FUZZER_H
-#define CALICO_FUZZ_FUZZER_H
+#ifndef CALICO_FUZZERS_FUZZER_H
+#define CALICO_FUZZERS_FUZZER_H
 
 #include "calico/calico.h"
 #include "tools.h"
@@ -8,18 +8,7 @@
 
 namespace Calico {
 
-static constexpr auto PAGE_SIZE = MINIMUM_PAGE_SIZE;
-
-static constexpr Options DB_OPTIONS {
-    PAGE_SIZE,
-    PAGE_SIZE * 32,
-    {},
-    LogLevel::OFF,
-    nullptr,
-    nullptr,
-};
-
-static auto extract_key(const std::uint8_t *&data, Size &size)
+inline auto extract_key(const std::uint8_t *&data, Size &size)
 {
     assert(size != 0);
     if (size == 1) {
@@ -27,7 +16,7 @@ static auto extract_key(const std::uint8_t *&data, Size &size)
     }
     Size actual {2};
     if (size > 2) {
-        const auto requested = std::min<Size>(data[0] << 8 | data[1], PAGE_SIZE * 2);
+        const auto requested = std::min<Size>(data[0] << 8 | data[1], MAXIMUM_PAGE_SIZE);
         actual = std::min(requested + !requested, size - 2);
         data += 2;
         size -= 2;
@@ -38,7 +27,7 @@ static auto extract_key(const std::uint8_t *&data, Size &size)
     return payload;
 }
 
-static auto extract_value(const std::uint8_t *&data, Size &size)
+inline auto extract_value(const std::uint8_t *&data, Size &size)
 {
     // Allow zero-length values.
     if (size == 0) {
@@ -52,7 +41,7 @@ static auto extract_value(const std::uint8_t *&data, Size &size)
     } else {
         result_size = data[0] << 8 | data[1];
     }
-    result_size %= PAGE_SIZE * 2;
+    result_size %= MAXIMUM_PAGE_SIZE;
     data += needed_size;
     size -= needed_size;
 
@@ -63,6 +52,20 @@ static auto extract_value(const std::uint8_t *&data, Size &size)
     return result;
 }
 
+class DbFuzzer {
+public:
+    virtual ~DbFuzzer();
+    explicit DbFuzzer(std::string path, Options *options = nullptr);
+    [[nodiscard]] virtual auto step(const std::uint8_t *&data, std::size_t &size) -> Status = 0;
+    [[nodiscard]] virtual auto reopen() -> Status;
+    virtual auto validate() -> void;
+
+protected:
+    std::string m_path;
+    Options m_options;
+    Database *m_db {};
+};
+
 } // namespace Calico
 
-#endif // CALICO_FUZZ_FUZZER_H
+#endif // CALICO_FUZZERS_FUZZER_H

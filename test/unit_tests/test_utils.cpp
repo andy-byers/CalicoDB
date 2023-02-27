@@ -3,11 +3,12 @@
 #include <vector>
 
 #include "calico/slice.h"
-#include "unit_tests.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
+#include "utils/logging.h"
 #include "utils/types.h"
 #include "utils/utils.h"
+#include "unit_tests.h"
 
 namespace Calico {
 

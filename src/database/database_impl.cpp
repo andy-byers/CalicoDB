@@ -2,11 +2,10 @@
 #include "database_impl.h"
 #include "calico/calico.h"
 #include "calico/storage.h"
-#include "storage/helpers.h"
 #include "storage/posix_storage.h"
 #include "tree/cursor_impl.h"
+#include "utils/crc.h"
 #include "utils/logging.h"
-#include <limits>
 
 namespace Calico {
 
@@ -67,7 +66,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     m_info_log = sanitized.info_log;
     if (m_info_log == nullptr) {
-        Calico_Try(m_storage->new_logger(m_db_prefix + "log", &m_info_log));
+        Calico_Try(m_storage->new_info_logger(m_db_prefix + "log", &m_info_log));
         sanitized.info_log = m_info_log;
         m_owns_info_log = true;
     }
@@ -81,27 +80,29 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     }
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
-    Calico_Try(WriteAheadLog::open({
-                                       m_wal_prefix,
-                                       m_storage,
-                                       sanitized.page_size,
-                                       256,
-                                   },
-                                   &wal));
+    Calico_Try(WriteAheadLog::open(
+        {
+            m_wal_prefix,
+            m_storage,
+            sanitized.page_size,
+            256,
+        },
+        &wal));
 
-    Calico_Try(Pager::open({
-                               m_db_prefix,
-                               m_storage,
-                               &m_scratch,
-                               wal,
-                               m_info_log,
-                               &m_status,
-                               &m_commit_lsn,
-                               &m_in_txn,
-                               sanitized.cache_size / sanitized.page_size,
-                               sanitized.page_size,
-                           },
-                           &pager));
+    Calico_Try(Pager::open(
+        {
+            m_db_prefix,
+            m_storage,
+            &m_scratch,
+            wal,
+            m_info_log,
+            &m_status,
+            &m_commit_lsn,
+            &m_in_txn,
+            sanitized.cache_size / sanitized.page_size,
+            sanitized.page_size,
+        },
+        &pager));
     pager->load_state(state);
 
     tree = new BPlusTree {*pager};
@@ -109,26 +110,27 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     Status s;
     if (m_commit_lsn.is_null()) {
-        logv(m_info_log, "setting up a new database");
+        m_info_log->logv("setting up a new database");
         Calico_Try(wal->start_writing());
 
         Node root;
-        Calico_Try(tree->setup(root));
-        pager->release(std::move(root).take());
-        CALICO_EXPECT_EQ(pager->page_count(), 1);
+        BPlusTreeInternal internal {*tree};
+        Calico_Try(internal.allocate_root(root));
+        internal.release(std::move(root));
 
-        Calico_Try(do_commit({}));
+        Calico_Try(do_commit());
+        Calico_Try(pager->flush());
 
     } else {
-        logv(m_info_log, "ensuring consistency of an existing database");
+        m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         Calico_Try(ensure_consistency());
         Calico_Try(load_state());
         Calico_Try(wal->start_writing());
     }
-    logv(m_info_log, "pager recovery lsn is ", pager->recovery_lsn().value);
-    logv(m_info_log, "wal flushed lsn is ", wal->flushed_lsn().value);
-    logv(m_info_log, "commit lsn is ", m_commit_lsn.value);
+    m_info_log->logv("pager recovery lsn is %llu", pager->recovery_lsn().value);
+    m_info_log->logv("wal flushed lsn is %llu", wal->flushed_lsn().value);
+    m_info_log->logv("commit lsn is %llu", m_commit_lsn.value);
 
     Calico_Try(m_status);
     m_is_setup = true;
@@ -138,17 +140,17 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 DatabaseImpl::~DatabaseImpl()
 {
     if (m_is_setup && m_status.is_ok()) {
-        if (auto s = wal->flush(); !s.is_ok()) {
-            logv(m_info_log, "failed to flush wal: ", s.what().data());
+        if (const auto s = wal->flush(); !s.is_ok()) {
+            m_info_log->logv("failed to flush wal: %s", s.what().data());
         }
-        if (auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
-            logv(m_info_log, "failed to flush pager: ", s.what().data());
+        if (const auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
+            m_info_log->logv("failed to flush pager: %s", s.what().data());
         }
-        if (auto s = wal->close(); !s.is_ok()) {
-            logv(m_info_log, "failed to close wal: ", s.what().data());
+        if (const auto s = wal->close(); !s.is_ok()) {
+            m_info_log->logv("failed to close wal: %s", s.what().data());
         }
-        if (auto s = ensure_consistency(); !s.is_ok()) {
-            logv(m_info_log, "failed to ensure consistency: ", s.what().data());
+        if (const auto s = ensure_consistency(); !s.is_ok()) {
+            m_info_log->logv("failed to ensure consistency: %s", s.what().data());
         }
     }
 
@@ -189,7 +191,7 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
     }
 
     std::vector<std::string> children;
-    if (auto s = storage->get_children(path, children); s.is_ok()) {
+    if (const auto s = storage->get_children(path, children); s.is_ok()) {
         for (const auto &name: children) {
             (void)storage->remove_file(prefix + name);
         }
@@ -199,11 +201,11 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
         children.clear();
 
         auto dir_path = options.wal_prefix.to_string();
-        if (auto pos = dir_path.rfind('/'); pos != std::string::npos) {
+        if (const auto pos = dir_path.rfind('/'); pos != std::string::npos) {
             dir_path.erase(pos + 1);
         }
 
-        if (auto s = storage->get_children(dir_path, children); s.is_ok()) {
+        if (const auto s = storage->get_children(dir_path, children); s.is_ok()) {
             for (const auto &name: children) {
                 const auto filename = dir_path + name;
                 if (Slice {filename}.starts_with(options.wal_prefix)) {
@@ -256,7 +258,7 @@ auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bo
 
 auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
     value.clear();
 
     SearchResult slot;
@@ -278,15 +280,15 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 auto DatabaseImpl::new_cursor() const -> Cursor *
 {
     auto *cursor = CursorInternal::make_cursor(*tree);
-    if (auto s = status(); cursor && !s.is_ok()) {
-        CursorInternal::invalidate(*cursor, s);
+    if (!m_status.is_ok()) {
+        CursorInternal::invalidate(*cursor, m_status);
     }
     return cursor;
 }
 
 auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
 
     bool exists {};
     if (auto s = tree->insert(key, value, exists); !s.is_ok()) {
@@ -302,7 +304,7 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
 
 auto DatabaseImpl::erase(const Slice &key) -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
 
     auto s = tree->erase(key);
     if (s.is_ok()) {
@@ -316,10 +318,7 @@ auto DatabaseImpl::erase(const Slice &key) -> Status
 
 auto DatabaseImpl::vacuum() -> Status
 {
-    Calico_Try(status());
-    if (m_txn_size) {
-        return Status::logic_error("transaction must be empty");
-    }
+    Calico_Try(m_status);
     if (auto s = do_vacuum(); !s.is_ok()) {
         Set_Status(s);
     }
@@ -345,18 +344,20 @@ auto DatabaseImpl::do_vacuum() -> Status
     }
     // Make sure the vacuum updates are in the WAL. If this succeeds, we should be able to reapply the
     // whole vacuum operation if the truncation fails. The recovery routine should truncate the file
-    // to match the header if necessary.
-    pager->m_frames.m_page_count = target.value;
-    Calico_Try(do_commit(m_commit_lsn));
-    Calico_Try(pager->truncate(pager->page_count()));
-    return do_commit({});
+    // to match the header page count if necessary.
+    Calico_Try(wal->flush());
+    return pager->truncate(target.value);
 }
 
 auto DatabaseImpl::commit() -> Status
 {
-    Calico_Try(status());
+    Calico_Try(m_status);
     if (m_txn_size != 0) {
-        if (auto s = do_commit(m_commit_lsn); !s.is_ok()) {
+        if (auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
+            Set_Status(s);
+            return s;
+        }
+        if (auto s = do_commit(); !s.is_ok()) {
             Set_Status(s);
             return s;
         }
@@ -364,12 +365,7 @@ auto DatabaseImpl::commit() -> Status
     return Status::ok();
 }
 
-/*
- * NOTE: This method only returns an error status if the commit record could not be flushed to the WAL, since this
- *       is what ultimately determines the transaction outcome. If a different failure occurs, that status will be
- *       returned on the next access to the database object.
- */
-auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
+auto DatabaseImpl::do_commit() -> Status
 {
     m_txn_size = 0;
 
@@ -380,17 +376,13 @@ auto DatabaseImpl::do_commit(Lsn flush_lsn) -> Status
     // The root page is guaranteed to have a full image in the WAL. The current LSN is now guaranteed to be
     // the commit LSN.
     auto commit_lsn = wal->current_lsn();
-    logv(m_info_log, "commit requested at lsn ", commit_lsn.value);
+    m_info_log->logv("commit requested at lsn %llu", commit_lsn.value);
 
     Calico_Try(save_state(std::move(root), commit_lsn));
     Calico_Try(wal->flush());
 
-    logv(m_info_log, "commit successful");
+    m_info_log->logv("commit successful");
     m_commit_lsn = commit_lsn;
-
-    if (auto s = pager->flush(flush_lsn); !s.is_ok()) {
-        Set_Status(s);
-    }
     return Status::ok();
 }
 
@@ -430,8 +422,9 @@ auto DatabaseImpl::load_state() -> Status
     const auto expected_crc = crc32c::Unmask(header.header_crc);
     const auto computed_crc = header.compute_crc();
     if (expected_crc != computed_crc) {
-        logv(m_info_log, "file header crc mismatch (expected ",
-             expected_crc, " but computed ", computed_crc, ")");
+        m_info_log->logv(
+            "file header crc mismatch (expected %u but computed %u)",
+            expected_crc, computed_crc);
         return Status::corruption("crc mismatch");
     }
 
@@ -485,9 +478,12 @@ auto setup(const std::string &prefix, Storage &storage, const Options &options, 
         }
 
         Byte buffer[FileHeader::SIZE];
-        Span span {buffer, sizeof(buffer)};
-        Calico_Try(read_exact_at(*reader, span, 0));
-        header = FileHeader {span.data()};
+        Size read_size = sizeof(buffer);
+        Calico_Try(reader->read(buffer, read_size, 0));
+        if (read_size != sizeof(buffer)) {
+            return Status::system_error("incomplete read of file header");
+        }
+        header = FileHeader(buffer);
 
         if (header.magic_code != FileHeader::MAGIC_CODE) {
             return Status::invalid_argument("magic code is invalid");

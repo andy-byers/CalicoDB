@@ -20,44 +20,24 @@ auto CursorImpl::status() const -> Status
     return m_status;
 }
 
-auto CursorImpl::fetch_key() const -> Status
+auto CursorImpl::fetch_payload() -> Status
 {
     CALICO_EXPECT_EQ(m_key_size, 0);
+    CALICO_EXPECT_EQ(m_value_size, 0);
+    BPlusTreeInternal internal {*m_tree};
 
     Node node;
-    Calico_Try(m_tree->acquire(node, m_loc.pid));
+    Calico_Try(internal.acquire(node, m_loc.pid));
 
-    Slice key;
+    Slice key, value;
     auto cell = read_cell(node, m_loc.index);
     auto s = m_tree->collect_key(m_key, cell, key);
-
     m_key_size = key.size();
-    // Go ahead and read the value if it is entirely local.
-    if (m_value.empty() && !cell.has_remote) {
-        m_value_size = cell.local_size - cell.key_size;
-        if (m_value.size() < m_value_size) {
-            m_value.resize(m_value_size);
-        }
-        const Slice value {cell.key + cell.key_size, m_value_size};
-        mem_copy(m_value, value);
+    if (s.is_ok()) {
+        s = m_tree->collect_value(m_value, cell, value);
+        m_value_size = value.size();
     }
-    m_tree->release(std::move(node));
-    return s;
-}
-
-auto CursorImpl::fetch_value() const -> Status
-{
-    CALICO_EXPECT_EQ(m_value_size, 0);
-
-    Node node;
-    Calico_Try(m_tree->acquire(node, m_loc.pid));
-
-    Slice value;
-    const auto cell = read_cell(node, m_loc.index);
-    auto s = m_tree->collect_value(m_value, cell, value);
-
-    m_value_size = value.size();
-    m_tree->release(std::move(node));
+    internal.release(std::move(node));
     return s;
 }
 
@@ -87,7 +67,8 @@ auto CursorImpl::seek_first() -> void
     if (lowest.header.cell_count) {
         seek_to(std::move(lowest), 0);
     } else {
-        m_tree->release(std::move(lowest));
+        BPlusTreeInternal internal {*m_tree};
+        internal.release(std::move(lowest));
         m_status = Status::not_found("database is empty");
     }
 }
@@ -106,7 +87,8 @@ auto CursorImpl::seek_last() -> void
     if (const auto count = highest.header.cell_count) {
         seek_to(std::move(highest), count - 1);
     } else {
-        m_tree->release(std::move(highest));
+        BPlusTreeInternal internal {*m_tree};
+        internal.release(std::move(highest));
         m_status = Status::not_found("database is empty");
     }
 }
@@ -114,11 +96,12 @@ auto CursorImpl::seek_last() -> void
 auto CursorImpl::next() -> void
 {
     CALICO_EXPECT_TRUE(is_valid());
+    BPlusTreeInternal internal {*m_tree};
     m_key_size = 0;
     m_value_size = 0;
 
     Node node;
-    auto s = m_tree->acquire(node, Id {m_loc.pid});
+    auto s = internal.acquire(node, Id {m_loc.pid});
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -128,13 +111,13 @@ auto CursorImpl::next() -> void
         return;
     }
     const auto next_id = node.header.next_id;
-    m_tree->release(std::move(node));
+    internal.release(std::move(node));
 
     if (next_id.is_null()) {
         m_status = default_error_status();
         return;
     }
-    s = m_tree->acquire(node, next_id);
+    s = internal.acquire(node, next_id);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -145,11 +128,12 @@ auto CursorImpl::next() -> void
 auto CursorImpl::previous() -> void
 {
     CALICO_EXPECT_TRUE(is_valid());
+    BPlusTreeInternal internal {*m_tree};
     m_key_size = 0;
     m_value_size = 0;
 
     Node node;
-    auto s = m_tree->acquire(node, m_loc.pid);
+    auto s = internal.acquire(node, m_loc.pid);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -159,13 +143,13 @@ auto CursorImpl::previous() -> void
         return;
     }
     const auto prev_id = node.header.prev_id;
-    m_tree->release(std::move(node));
+    internal.release(std::move(node));
 
     if (prev_id.is_null()) {
         m_status = default_error_status();
         return;
     }
-    s = m_tree->acquire(node, prev_id);
+    s = internal.acquire(node, prev_id);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -176,27 +160,19 @@ auto CursorImpl::previous() -> void
 
 auto CursorImpl::seek_to(Node node, Size index) -> void
 {
-    CALICO_EXPECT_EQ(m_key_size, 0);
-    CALICO_EXPECT_EQ(m_value_size, 0);
-    CALICO_EXPECT_TRUE(node.header.is_external);
+    const auto &header = node.header;
+    CALICO_EXPECT_TRUE(header.is_external);
 
-    const auto pid = node.page.id();
-    const auto count = node.header.cell_count;
-
-    if (count && index < count) {
+    if (header.cell_count && index < header.cell_count) {
         m_loc.index = static_cast<PageSize>(index);
-        m_loc.count = static_cast<PageSize>(count);
-        m_loc.pid = pid;
-
-        auto s = fetch_key();
-        if (s.is_ok() && m_value_size == 0) {
-            s = fetch_value();
-        }
-        m_status = s;
+        m_loc.count = header.cell_count;
+        m_loc.pid = node.page.id();
+        m_status = fetch_payload();
     } else {
         m_status = default_error_status();
     }
-    m_tree->release(std::move(node));
+    BPlusTreeInternal internal {*m_tree};
+    internal.release(std::move(node));
 }
 
 auto CursorImpl::seek(const Slice &key) -> void
@@ -220,25 +196,10 @@ auto CursorInternal::make_cursor(BPlusTree &tree) -> Cursor *
     return cursor;
 }
 
-auto CursorInternal::invalidate(const Cursor &cursor, const Status &status) -> void
+auto CursorInternal::invalidate(const Cursor &cursor, Status status) -> void
 {
     CALICO_EXPECT_FALSE(status.is_ok());
-    reinterpret_cast<const CursorImpl &>(cursor).m_status = status;
-}
-
-auto CursorInternal::TEST_validate(const Cursor &cursor) -> void
-{
-    if (cursor.is_valid()) {
-        const auto &impl = reinterpret_cast<const CursorImpl &>(cursor);
-        Node node;
-        auto s = impl.m_tree->acquire(node, impl.m_loc.pid);
-        if (!s.is_ok()) {
-            std::fputs(s.what().data(), stderr);
-            std::abort();
-        }
-        node.TEST_validate();
-        impl.m_tree->release(std::move(node));
-    }
+    reinterpret_cast<const CursorImpl &>(cursor).m_status = std::move(status);
 }
 
 } // namespace Calico

@@ -55,15 +55,15 @@ Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name             | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:---------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>      |                      618,812 |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup>   |                      190,512 |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>    |                      192,419 |                     173,461 |                    288,684 |
-| `readrandom`               |                      519,211 |                     515,198 |                    413,907 |
-| `readseq`                  |                    3,164,557 |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`<sup>*</sup> |                        2,169 |                       5,215 |                     11,387 |
-| `fillseq100k`<sup>*</sup>  |                        1,901 |                       6,731 |                      9,560 |
-| `readseq100k`              |                       22,136 |                      49,232 |                     65,557 |
-| `readrand100k`             |                       21,452 |                      10,894 |                     66,028 |
+| `fillseq`<sup>*</sup>      |                      632,511 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup>   |                      193,686 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>    |                      195,963 |                     173,461 |                    288,684 |
+| `readrandom`               |                      523,013 |                     515,198 |                    413,907 |
+| `readseq`                  |                    3,389,831 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`<sup>*</sup> |                        2,167 |                       5,215 |                     11,387 |
+| `fillseq100k`<sup>*</sup>  |                        1,865 |                       6,731 |                      9,560 |
+| `readseq100k`              |                       22,130 |                      49,232 |                     65,557 |
+| `readrand100k`             |                       21,519 |                      10,894 |                     66,028 |
 
 <sup>*</sup> These benchmarks are affected by the fact that we use a batch size of 1,000.
 CalicoDB batches database updates together into transactions, based on use of the `Database::commit()` method.

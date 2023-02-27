@@ -10,7 +10,7 @@ namespace Calico {
 
 class PosixReader : public Reader {
 public:
-    PosixReader(std::string path, int file)
+    explicit PosixReader(std::string path, int file)
         : m_path {std::move(path)},
           m_file {file}
     {
@@ -27,7 +27,7 @@ private:
 
 class PosixEditor : public Editor {
 public:
-    PosixEditor(std::string path, int file)
+    explicit PosixEditor(std::string path, int file)
         : m_path {std::move(path)},
           m_file {file}
     {
@@ -46,7 +46,7 @@ private:
 
 class PosixLogger : public Logger {
 public:
-    PosixLogger(std::string path, int file)
+    explicit PosixLogger(std::string path, int file)
         : m_path {std::move(path)},
           m_file {file}
     {
@@ -62,6 +62,26 @@ private:
     int m_file {};
 };
 
+class PosixInfoLogger : public InfoLogger {
+public:
+    explicit PosixInfoLogger(std::string path, int file)
+        : m_buffer(BUFFER_SIZE, '\0'),
+          m_path {std::move(path)},
+          m_file {file}
+    {
+        CALICO_EXPECT_GE(file, 0);
+    }
+
+    ~PosixInfoLogger() override;
+    auto logv(const char *fmt, ...) -> void override;
+
+private:
+    static constexpr Size BUFFER_SIZE {512};
+    std::string m_buffer;
+    std::string m_path;
+    int m_file {};
+};
+
 class PosixStorage : public Storage {
 public:
     PosixStorage() = default;
@@ -72,6 +92,7 @@ public:
     [[nodiscard]] auto new_reader(const std::string &path, Reader **out) -> Status override;
     [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;
     [[nodiscard]] auto new_logger(const std::string &path, Logger **out) -> Status override;
+    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger **out) -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &path, Size size) -> Status override;

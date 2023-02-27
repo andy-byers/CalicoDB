@@ -110,6 +110,40 @@ public:
     Tools::RandomGenerator random;
 };
 
+class PosixInfoLoggerTests : public FileTests {
+public:
+    PosixInfoLoggerTests()
+    {
+        std::filesystem::remove_all(filename);
+
+        InfoLogger *temp;
+        EXPECT_OK(storage->new_info_logger(filename, &temp));
+        file.reset(temp);
+    }
+
+    std::string filename {"__test_info_logger"};
+    std::unique_ptr<InfoLogger> file;
+};
+
+TEST_F(PosixInfoLoggerTests, WritesFormattedText)
+{
+    file->logv("test %03d %.03f %s\n", 12, 0.21f, "abc");
+    ASSERT_EQ("test 012 0.210 abc\n", read_whole_file(filename));
+}
+
+TEST_F(PosixInfoLoggerTests, AddsNewline)
+{
+    file->logv("test");
+    ASSERT_EQ("test\n", read_whole_file(filename));
+}
+
+TEST_F(PosixInfoLoggerTests, ResizesBuffer)
+{
+    const std::string message(512 * 10, 'x');
+    file->logv("%s", message.c_str());
+    ASSERT_EQ(message + '\n', read_whole_file(filename));
+}
+
 class PosixReaderTests : public FileTests {
 public:
     PosixReaderTests()

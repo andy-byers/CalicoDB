@@ -53,7 +53,7 @@ private:
     [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto save_state(Page root, Lsn commit_lsn) const -> Status;
     [[nodiscard]] auto load_state() -> Status;
-    [[nodiscard]] auto do_commit(Lsn flush_lsn) -> Status;
+    [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
 
     mutable Status m_status;
@@ -61,7 +61,7 @@ private:
     std::string m_wal_prefix;
     std::string m_scratch;
     Storage *m_storage {};
-    Logger *m_info_log {};
+    InfoLogger *m_info_log {};
     Size m_txn_size {};
     Size m_record_count {};
     Size m_bytes_written {};

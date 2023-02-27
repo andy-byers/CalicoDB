@@ -1,7 +1,6 @@
 #ifndef CALICO_WAL_H
 #define CALICO_WAL_H
 
-#include "helpers.h"
 #include "record.h"
 
 namespace Calico {

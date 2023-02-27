@@ -7,7 +7,7 @@
 namespace Calico {
 
 class Cursor;
-class Logger;
+class InfoLogger;
 class Status;
 class Storage;
 
@@ -24,7 +24,7 @@ struct Options {
     Size cache_size {};
     Slice wal_prefix;
     LogLevel log_level {LogLevel::OFF};
-    Logger *info_log {};
+    InfoLogger *info_log {};
     Storage *storage {};
     bool create_if_missing {true};
     bool error_if_exists {};

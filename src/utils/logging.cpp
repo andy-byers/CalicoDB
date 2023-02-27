@@ -1,6 +1,4 @@
 #include "logging.h"
-#include "calico/storage.h"
-#include <cstdarg>
 
 namespace Calico {
 

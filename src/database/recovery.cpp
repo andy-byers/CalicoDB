@@ -2,6 +2,7 @@
 #include "pager/page.h"
 #include "pager/pager.h"
 #include "wal/reader.h"
+#include "wal/wal.h"
 
 namespace Calico {
 
@@ -192,6 +193,7 @@ auto Recovery::recover_phase_1() -> Status
             return Status::corruption("missing commit record");
         }
     }
+    *m_commit_lsn = commit_lsn;
 
     /* Roll backward, reverting misapplied updates until we reach the most-recent commit. We are able to
      * read the log forward, since the full images are disjoint. Again, the last segment we read may
@@ -227,7 +229,7 @@ auto Recovery::recover_phase_2() -> Status
 
     /* Make sure all changes have made it to disk, then remove WAL segments from the right.
      */
-    Calico_Try(m_pager->flush({}));
+    Calico_Try(m_pager->flush());
     for (auto id = m_set->last(); !id.is_null(); id = m_set->id_before(id)) {
         Calico_Try(m_storage->remove_file(encode_segment_name(m_wal->m_prefix, id)));
     }
