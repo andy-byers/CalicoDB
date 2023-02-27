@@ -3,6 +3,8 @@
 
 #include "calico/slice.h"
 #include "utils.h"
+#include <utility>
+#include <vector>
 
 namespace Calico {
 
