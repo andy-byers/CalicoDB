@@ -23,13 +23,13 @@ static auto seek_binary(unsigned n, const Slice &key, const FetchKey &fetch) -> 
         const auto rhs = fetch(mid);
 
         switch (compare_three_way(key, rhs)) {
-            case ThreeWayComparison::LT:
+            case Comparison::LT:
                 upper = mid;
                 break;
-            case ThreeWayComparison::GT:
+            case Comparison::GT:
                 lower = mid + 1;
                 break;
-            case ThreeWayComparison::EQ:
+            case Comparison::EQ:
                 return {mid, true};
         }
     }
@@ -397,15 +397,15 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
     auto overflow = *right.overflow;
     right.overflow.reset();
 
-//    if (overflow_index == header.cell_count) {
-//        // Note the reversal of the "left" and "right" parameters. We are splitting the other way.
-//        return split_non_root_fast(
-//            std::move(parent),
-//            std::move(right),
-//            std::move(left),
-//            overflow,
-//            out);
-//    }
+    if (overflow_index == header.cell_count) {
+        // Note the reversal of the "left" and "right" parameters. We are splitting the other way.
+        return split_non_root_fast(
+            std::move(parent),
+            std::move(right),
+            std::move(left),
+            overflow,
+            out);
+    }
 
     // Fix the overflow. "left" is empty, so this should always be possible.
     for (Size i {}, n = header.cell_count; i < n; ++i) {
@@ -413,10 +413,10 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
 
         if (i == overflow_index) {
             // We must decide where to put the overflow cell.
-            if (usable_space(right) > usable_space(left)) {
-                Calico_Try(insert_cell(right, 0, overflow));
-            } else {
+            if (usable_space(right) < usable_space(left)) {
                 Calico_Try(insert_cell(left, left.header.cell_count - 1, overflow));
+            } else {
+                Calico_Try(insert_cell(right, 0, overflow));
             }
             break;
         } else if (usable_space(right) >= overflow.size + 2) {
@@ -464,8 +464,53 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
 
 auto BPlusTreeInternal::split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status
 {
-    (void)parent, (void)left, (void)right, (void)overflow, (void)out;
-    return Status::logic_error("not implemented");
+    const auto &header = left.header;
+    Calico_Try(insert_cell(right, 0, overflow));
+
+    CALICO_EXPECT_FALSE(is_overflowing(left));
+    CALICO_EXPECT_FALSE(is_overflowing(right));
+
+    Cell separator;
+    if (header.is_external) {
+        if (!header.next_id.is_null()) {
+            Node right_sibling;
+            Calico_Try(acquire(right_sibling, header.next_id, true));
+            right_sibling.header.prev_id = right.page.id();
+            right.header.next_id = right_sibling.page.id();
+            release(std::move(right_sibling));
+        }
+        right.header.prev_id = left.page.id();
+        left.header.next_id = right.page.id();
+
+        separator = read_cell(right, 0);
+        detach_cell(separator, m_tree->cell_scratch());
+        Calico_Try(m_payloads->promote(nullptr, separator, parent.page.id()));
+    } else {
+        separator = read_cell(left, header.cell_count - 1);
+        detach_cell(separator, m_tree->cell_scratch());
+        erase_cell(left, header.cell_count - 1);
+
+        right.header.next_id = left.header.next_id;
+        left.header.next_id = read_child_id(separator);
+        Calico_Try(fix_parent_id(right.header.next_id, right.page.id()));
+        Calico_Try(fix_parent_id(left.header.next_id, left.page.id()));
+    }
+
+    auto itr = node_iterator(parent);
+    Calico_Try(itr.seek(separator));
+
+    // Post the separator into the parent node. This call will fix the sibling's parent pointer.
+    write_child_id(separator, left.page.id());
+    Calico_Try(insert_cell(parent, itr.index(), separator));
+
+    const auto offset = !is_overflowing(parent);
+    write_child_id(parent, itr.index() + offset, right.page.id());
+    Calico_Try(fix_parent_id(right.page.id(), parent.page.id()));
+
+    release(std::move(left));
+    release(std::move(right));
+    out = std::move(parent);
+    return Status::ok();
 }
 
 auto BPlusTreeInternal::resolve_underflow(Node node, const Slice &anchor) -> Status
@@ -1184,12 +1229,12 @@ auto BPlusTree::load_state(const FileHeader &header) -> void
     m_freelist.m_head = header.freelist_head;
 }
 
-#define CHECK_OK(expr)                                                                                                      \
-    do {                                                                                                                    \
-        if (const auto check_s = (expr); !check_s.is_ok()) {                                                                \
-            std::fprintf(stderr, "error: encountered %s status \"%s\"\n", get_status_name(check_s), check_s.what().data()); \
-            std::abort();                                                                                                   \
-        }                                                                                                                   \
+#define CHECK_OK(expr)                                                                                                            \
+    do {                                                                                                                          \
+        if (const auto check_s = (expr); !check_s.is_ok()) {                                                                      \
+            std::fprintf(stderr, "error: encountered %s status \"%s\"\n", get_status_name(check_s), check_s.to_string().c_str()); \
+            std::abort();                                                                                                         \
+        }                                                                                                                         \
     } while (0)
 
 #define CHECK_TRUE(expr)                                              \
@@ -1431,8 +1476,8 @@ private:
             } else {
                 *s_itr += message.size();
             }
-            L_itr++;
-            s_itr++;
+            ++L_itr;
+            ++s_itr;
         }
     }
 

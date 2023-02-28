@@ -888,8 +888,8 @@ TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnRightmostPosition)
     bool _;
     for (Size i {}; i < 1'000; ++i) {
         ASSERT_OK(tree->insert(Tools::integral_key(i), make_value('v'), _));
+        validate();
         if (i % 100 == 99) {
-            validate();
         }
     }
 }
@@ -1528,7 +1528,7 @@ public:
                 tree->TEST_check_links();
                 tree->TEST_check_nodes();
                 tree->TEST_check_order();
-                target.value--;
+                --target.value;
             }
 
             ASSERT_OK(pager->truncate(target.value));
@@ -1768,7 +1768,7 @@ TEST_F(VacuumTests, VacuumFreelistSanityCheck)
         for (Size i {}; i < FRAME_COUNT; ++i) {
             ASSERT_OK(tree->vacuum_one(target, vacuumed));
             ASSERT_TRUE(vacuumed);
-            target.value--;
+            --target.value;
         }
         ASSERT_OK(tree->vacuum_one(target, vacuumed));
         ASSERT_FALSE(vacuumed);

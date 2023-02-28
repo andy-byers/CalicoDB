@@ -46,7 +46,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 {
     m_storage = sanitized.storage;
     if (m_storage == nullptr) {
-        m_storage = new PosixStorage;
+        m_storage = Storage::default_storage();
         m_owns_storage = true;
     }
 
@@ -141,16 +141,16 @@ DatabaseImpl::~DatabaseImpl()
 {
     if (m_is_setup && m_status.is_ok()) {
         if (const auto s = wal->flush(); !s.is_ok()) {
-            m_info_log->logv("failed to flush wal: %s", s.what().data());
+            m_info_log->logv("failed to flush wal: %s", s.to_string().data());
         }
         if (const auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
-            m_info_log->logv("failed to flush pager: %s", s.what().data());
+            m_info_log->logv("failed to flush pager: %s", s.to_string().data());
         }
         if (const auto s = wal->close(); !s.is_ok()) {
-            m_info_log->logv("failed to close wal: %s", s.what().data());
+            m_info_log->logv("failed to close wal: %s", s.to_string().data());
         }
         if (const auto s = ensure_consistency(); !s.is_ok()) {
-            m_info_log->logv("failed to ensure consistency: %s", s.what().data());
+            m_info_log->logv("failed to ensure consistency: %s", s.to_string().data());
         }
     }
 
@@ -353,10 +353,6 @@ auto DatabaseImpl::commit() -> Status
 {
     Calico_Try(m_status);
     if (m_txn_size != 0) {
-        if (auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
-            Set_Status(s);
-            return s;
-        }
         if (auto s = do_commit(); !s.is_ok()) {
             Set_Status(s);
             return s;
@@ -373,8 +369,8 @@ auto DatabaseImpl::do_commit() -> Status
     Calico_Try(pager->acquire(Id::root(), root));
     pager->upgrade(root);
 
-    // The root page is guaranteed to have a full image in the WAL. The current LSN is now guaranteed to be
-    // the commit LSN.
+    // The root page is guaranteed to have a full image in the WAL. The current LSN
+    // is now the same as the commit LSN.
     auto commit_lsn = wal->current_lsn();
     m_info_log->logv("commit requested at lsn %llu", commit_lsn.value);
 
@@ -474,7 +470,7 @@ auto setup(const std::string &prefix, Storage &storage, const Options &options, 
         Calico_Try(storage.file_size(path, file_size));
 
         if (file_size < FileHeader::SIZE) {
-            return Status::corruption("database is smaller than file header");
+            return Status::invalid_argument("file is not a database");
         }
 
         Byte buffer[FileHeader::SIZE];
@@ -486,7 +482,7 @@ auto setup(const std::string &prefix, Storage &storage, const Options &options, 
         header = FileHeader(buffer);
 
         if (header.magic_code != FileHeader::MAGIC_CODE) {
-            return Status::invalid_argument("magic code is invalid");
+            return Status::invalid_argument("file is not a database");
         }
         if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
             return Status::corruption("file header is corrupted");

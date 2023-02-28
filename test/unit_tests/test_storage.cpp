@@ -24,7 +24,7 @@ template<class Base, class Store>
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
-    EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().data();
+    EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
     return std::unique_ptr<Base> {temp};
 }
 
@@ -87,7 +87,7 @@ template<class Reader>
             return backing;
         }
 
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.what().data();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
         EXPECT_EQ(chunk.size(), chunk_size);
         out.advance(chunk_size);
         counter += chunk_size;
@@ -242,7 +242,7 @@ TEST_F(DynamicStorageTests, ReaderCannotCreateFile)
 {
     Reader *temp;
     const auto s = storage->new_reader("nonexistent", &temp);
-    ASSERT_TRUE(s.is_not_found()) << "Error: " << s.what().data();
+    ASSERT_TRUE(s.is_not_found()) << "Error: " << s.to_string().data();
 }
 
 TEST_F(DynamicStorageTests, ReadsAndWrites)

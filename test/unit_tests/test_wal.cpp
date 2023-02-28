@@ -2,6 +2,7 @@
 #include "calico/storage.h"
 #include "tools.h"
 #include "unit_tests.h"
+#include "utils/crc.h"
 #include "wal/reader.h"
 #include "wal/writer.h"
 #include <array>
@@ -153,6 +154,12 @@ public:
 
     WalSet set;
 };
+
+TEST_F(WalSetTests, NullMarksEnd)
+{
+    ASSERT_TRUE(set.id_before(Id::null()).is_null());
+    ASSERT_TRUE(set.id_after(Id::null()).is_null());
+}
 
 TEST_F(WalSetTests, NewCollectionState)
 {
@@ -353,6 +360,120 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
     assert_reader_is_done(reader);
 }
 
+TEST_F(WalComponentTests, ReaderReportsMismatchedCrc)
+{
+    auto writer = make_writer(Id::root());
+    ASSERT_OK(wal_write(writer, Lsn {1}, "test"));
+    ASSERT_OK(writer.flush());
+
+    Editor *editor;
+    ASSERT_OK(storage->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(editor->write("TEST", WalRecordHeader::SIZE + sizeof(Lsn)));
+    delete editor;
+
+    std::string buffer;
+    auto reader = make_reader(Id::root());
+    ASSERT_TRUE(wal_read_with_status(reader, buffer).is_corruption());
+}
+
+TEST_F(WalComponentTests, ReaderReportsEmptyFile)
+{
+    Editor *editor;
+    ASSERT_OK(storage->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    delete editor;
+
+    std::string buffer;
+    auto reader = make_reader(Id::root());
+    ASSERT_TRUE(wal_read_with_status(reader, buffer).is_not_found());
+}
+
+TEST_F(WalComponentTests, ReaderReportsIncompleteBlock)
+{
+    Editor *editor;
+    ASSERT_OK(storage->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(editor->write("\x01\x02\x03", 0));
+    delete editor;
+
+    std::string buffer(wal_scratch_size(PAGE_SIZE), '\0');
+    auto reader = make_reader(Id::root());
+    ASSERT_TRUE(wal_read_with_status(reader, buffer).is_corruption());
+}
+
+TEST_F(WalComponentTests, ReaderReportsInvalidSize)
+{
+    auto writer = make_writer(Id::root());
+    ASSERT_OK(wal_write(writer, Lsn {1}, "test"));
+    ASSERT_OK(writer.flush());
+
+    WalRecordHeader header;
+    header.type = WalRecordHeader::FULL;
+    header.size = -1;
+    std::string buffer(WalRecordHeader::SIZE, '\0');
+    write_wal_record_header(buffer, header);
+
+    Editor *editor;
+    ASSERT_OK(storage->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(editor->write(buffer, 0));
+    delete editor;
+
+    auto reader = make_reader(Id::root());
+    ASSERT_TRUE(wal_read_with_status(reader, buffer).is_corruption());
+}
+
+TEST_F(WalComponentTests, ReadsFirstLsn)
+{
+    auto writer = make_writer(Id::root());
+    ASSERT_OK(wal_write(writer, Lsn {42}, "test"));
+    ASSERT_OK(writer.flush());
+
+    WalSet set;
+    set.add_segment(Id::root());
+
+    Lsn first_lsn;
+    ASSERT_OK(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn));
+    ASSERT_EQ(first_lsn, Lsn {42});
+    ASSERT_EQ(set.first_lsn(Id::root()), Lsn {42});
+}
+
+TEST_F(WalComponentTests, FailureToReadFirstLsn)
+{
+    WalSet set;
+    set.add_segment(Id::root());
+
+    // File does not exist in storage, so the reader can't be opened.
+    Lsn first_lsn;
+    ASSERT_TRUE(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn).is_not_found());
+
+    // File exists, but is empty.
+    Logger *logger;
+    ASSERT_OK(storage->new_logger(encode_segment_name(WAL_PREFIX, Id::root()), &logger));
+    ASSERT_TRUE(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+
+    // File is too small to read the LSN.
+    std::string buffer(WalRecordHeader::SIZE + 3, '\0');
+    ASSERT_OK(logger->write(buffer));
+    ASSERT_TRUE(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+
+    // LSN is NULL.
+    buffer.resize(wal_block_size(PAGE_SIZE) - buffer.size());
+    ASSERT_OK(logger->write(buffer));
+    ASSERT_TRUE(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+
+    delete logger;
+}
+
+TEST_F(WalComponentTests, PrefersToGetLsnFromCache)
+{
+    WalSet set;
+    set.add_segment(Id::root());
+    set.set_first_lsn(Id::root(), Lsn {42});
+
+    // File doesn't exist, but the LSN is cached.
+    Lsn first_lsn;
+    ASSERT_OK(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn));
+    ASSERT_EQ(first_lsn, Lsn {42});
+}
+
 TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
 {
     auto writer = make_writer(Id::root());
@@ -390,6 +511,48 @@ TEST_F(WalComponentTests, Corruption)
         ASSERT_EQ(data, Tools::integral_key(i));
     }
     assert_reader_is_done(reader);
+}
+
+class WalTests
+    : public InMemoryTest,
+      public testing::Test
+{
+public:
+    static constexpr auto WAL_PREFIX = "test/wal-";
+    static constexpr auto PAGE_SIZE = MINIMUM_PAGE_SIZE;
+    static constexpr auto SEGMENT_CUTOFF {4};
+
+    auto SetUp() -> void override
+    {
+        WriteAheadLog *temp;
+        WriteAheadLog::Parameters param {
+            WAL_PREFIX,
+            storage.get(),
+            PAGE_SIZE,
+            SEGMENT_CUTOFF
+        };
+        ASSERT_OK(WriteAheadLog::open(param, &temp));
+        wal.reset(temp);
+    }
+
+    auto make_payload(Lsn lsn, const std::string &data) -> WalPayloadIn
+    {
+        payload_buffer.resize(sizeof(Lsn));
+        payload_buffer.append(data);
+        return WalPayloadIn {lsn, payload_buffer};
+    }
+
+    std::string payload_buffer;
+    std::unique_ptr<WriteAheadLog> wal;
+};
+
+TEST_F(WalTests, KeepsTrackOfBytesWritten)
+{
+    ASSERT_OK(wal->start_writing());
+    ASSERT_EQ(wal->bytes_written(), 0);
+    const auto payload = make_payload(Lsn {1}, "test");
+    ASSERT_OK(wal->log(payload));
+    ASSERT_EQ(wal->bytes_written(), sizeof(Lsn) + payload.data().size());
 }
 
 } // namespace Calico

@@ -12,7 +12,7 @@ namespace Calico {
     if (read_size == 0) {
         return Status::not_found("end of file");
     } else if (read_size != tail.size()) {
-        return Status::system_error("incomplete read");
+        return Status::corruption("incomplete block");
     }
     return Status::ok();
 }
@@ -70,11 +70,6 @@ auto WalReader::read(Span &payload) -> Status
         m_offset = 0;
     }
     return Status::ok();
-}
-
-auto WalReader::offset() const -> Size
-{
-    return m_offset + m_block * m_tail.size();
 }
 
 } // namespace Calico

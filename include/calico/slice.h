@@ -12,7 +12,7 @@
 
 namespace Calico {
 
-enum class ThreeWayComparison {
+enum class Comparison {
     LT = -1,
     EQ = 0,
     GT = 1,
@@ -121,7 +121,7 @@ private:
 /*
  * Three-way comparison based off the one in LevelDB's slice.h.
  */
-inline auto compare_three_way(Slice lhs, Slice rhs) noexcept -> ThreeWayComparison
+inline auto compare_three_way(Slice lhs, Slice rhs) noexcept -> Comparison
 {
     const auto min_length = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
     auto r = std::memcmp(lhs.data(), rhs.data(), min_length);
@@ -131,40 +131,40 @@ inline auto compare_three_way(Slice lhs, Slice rhs) noexcept -> ThreeWayComparis
         } else if (lhs.size() > rhs.size()) {
             r = 1;
         } else {
-            return ThreeWayComparison::EQ;
+            return Comparison::EQ;
         }
     }
-    return r < 0 ? ThreeWayComparison::LT : ThreeWayComparison::GT;
+    return r < 0 ? Comparison::LT : Comparison::GT;
 }
 
 inline auto operator<(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == ThreeWayComparison::LT;
+    return compare_three_way(lhs, rhs) == Comparison::LT;
 }
 
 inline auto operator<=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) != ThreeWayComparison::GT;
+    return compare_three_way(lhs, rhs) != Comparison::GT;
 }
 
 inline auto operator>(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == ThreeWayComparison::GT;
+    return compare_three_way(lhs, rhs) == Comparison::GT;
 }
 
 inline auto operator>=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) != ThreeWayComparison::LT;
+    return compare_three_way(lhs, rhs) != Comparison::LT;
 }
 
 inline auto operator==(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == ThreeWayComparison::EQ;
+    return compare_three_way(lhs, rhs) == Comparison::EQ;
 }
 
 inline auto operator!=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) != ThreeWayComparison::EQ;
+    return compare_three_way(lhs, rhs) != Comparison::EQ;
 }
 
 } // namespace Calico

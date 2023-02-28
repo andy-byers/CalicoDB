@@ -14,11 +14,60 @@ namespace Calico {
 
 namespace fs = std::filesystem;
 
+class SetupTests
+    : public InMemoryTest,
+      public testing::Test
+{
+public:
+//    auto write_header(const FileHeader &header) -> void
+//    {
+//        Editor *editor;
+//        ASSERT_OK(storage->new_editor("test/data", &editor));
+//        Byte buffer[FileHeader::SIZE];
+//        header.write(buffer);
+//        editor->write()
+//        delete editor;
+//    }
+};
+
+TEST_F(SetupTests, ReportsInvalidPageSizes)
+{
+    FileHeader header;
+    Options options;
+
+    options.page_size = MINIMUM_PAGE_SIZE / 2;
+    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+
+    options.page_size = MAXIMUM_PAGE_SIZE * 2;
+    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+
+    options.page_size = MINIMUM_PAGE_SIZE + 1;
+    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+}
+
+TEST_F(SetupTests, ReportsInvalidCacheSize)
+{
+    FileHeader header;
+    Options options;
+
+    options.cache_size = 1;
+    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+}
+
+TEST_F(SetupTests, ReportsInvalidFileHeader)
+{
+    FileHeader header;
+    Options options;
+
+    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+}
+
 TEST(LeakTests, DestroysOwnObjects)
 {
     Database *db;
     ASSERT_OK(Database::open("__calico_test", {}, &db));
     delete db;
+    ASSERT_OK(Database::destroy("__calico_test", {}));
 }
 
 TEST(LeakTests, LeavesUserObjects)
@@ -121,7 +170,7 @@ static auto insert_random_groups(Database &db, Size num_groups, Size group_size)
 
         for (Size i {}; i < group_size; ++i) {
             ASSERT_OK(db.put(itr->key, itr->value));
-            itr++;
+            ++itr;
         }
         ASSERT_OK(db.commit());
     }
@@ -163,7 +212,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
 
         for (Size i {}; i < GROUP_SIZE; ++i) {
             ASSERT_OK(db->put(itr->key, itr->value));
-            itr++;
+            ++itr;
         }
         ASSERT_OK(db->commit());
         delete db;
@@ -176,22 +225,6 @@ TEST_F(BasicDatabaseTests, DataPersists)
         ASSERT_EQ(value_out, value);
     }
     delete db;
-}
-
-TEST_F(BasicDatabaseTests, ReportsInvalidPageSizes)
-{
-    auto invalid = options;
-
-    Database *db;
-    invalid.page_size = MINIMUM_PAGE_SIZE / 2;
-    ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
-
-    invalid.page_size = MAXIMUM_PAGE_SIZE * 2;
-    ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
-
-    Options options;
-    invalid.page_size = options.page_size - 1;
-    ASSERT_TRUE(Database::open(ROOT, invalid, &db).is_invalid_argument());
 }
 
 TEST_F(BasicDatabaseTests, TwoDatabases)
@@ -290,7 +323,7 @@ TEST_P(DbVacuumTests, SanityCheck)
 
         Size i {};
         for (const auto &[key, value]: map) {
-            i++;
+            ++i;
             std::string result;
             ASSERT_OK(db->get(key, result));
             ASSERT_EQ(result, value);

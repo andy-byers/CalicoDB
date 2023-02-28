@@ -205,7 +205,7 @@ auto PosixInfoLogger::logv(const char *fmt, ...) -> void
         // Add a newline if necessary.
         if (m_buffer[length - 1] != '\n') {
             m_buffer[length] = '\n';
-            length++;
+            ++length;
         }
 
         CALICO_EXPECT_LE(length, m_buffer.size());

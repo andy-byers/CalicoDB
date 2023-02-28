@@ -31,7 +31,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
 
     const auto record_count = reinterpret_cast<const DatabaseImpl *>(m_db)->record_count();
     auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
-    size--;
+    --size;
 
     std::string key;
     std::string value;

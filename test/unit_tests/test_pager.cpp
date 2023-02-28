@@ -527,7 +527,7 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     const auto callback = [&i, &j](auto page_id, auto entry) {
         EXPECT_EQ(page_id.value, entry.index);
         EXPECT_EQ(page_id.value, i + (j >= 3) * 10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
-        j++;
+        ++j;
         i = j % 3;
         return false;
     };
@@ -576,14 +576,14 @@ TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
-    CALICO_EXPECT_LE(offset + message.size(), page.size());
+    EXPECT_LE(offset + message.size(), page.size());
     mem_copy(page.span(offset, message.size()), message);
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, Size size) -> std::string
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
-    CALICO_EXPECT_LE(offset + size, page.size());
+    EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
     mem_copy(message, page.view(offset, message.size()));
     return message;
@@ -644,6 +644,7 @@ public:
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
+    ASSERT_EQ(pager->bytes_written(), 0);
     ASSERT_EQ(pager->recovery_lsn(), Id::null());
     EXPECT_OK(status);
 }

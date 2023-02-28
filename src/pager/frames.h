@@ -48,7 +48,7 @@ public:
     }
 
     [[nodiscard]] auto lsn() const -> Id;
-    auto ref(Page &page, bool is_writable) -> void;
+    auto ref(Page &pagez) -> void;
     auto upgrade(Page &page) -> void;
     auto unref(Page &page) -> void;
 

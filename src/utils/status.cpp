@@ -55,11 +55,6 @@ auto Status::operator=(Status &&rhs) noexcept -> Status &
     return *this;
 }
 
-auto Status::ok() -> Status
-{
-    return Status {};
-}
-
 auto Status::not_found(const Slice &what) -> Status
 {
     return Status {Code::NOT_FOUND, what};
@@ -110,14 +105,9 @@ auto Status::is_not_found() const -> bool
     return !is_ok() && Code {m_data[0]} == Code::NOT_FOUND;
 }
 
-auto Status::is_ok() const -> bool
+auto Status::to_string() const -> std::string
 {
-    return m_data == nullptr;
-}
-
-auto Status::what() const -> Slice
-{
-    return {m_data ? m_data.get() + sizeof(Code) : ""};
+    return {m_data ? m_data.get() + sizeof(Code) : "ok"};
 }
 
 } // namespace Calico

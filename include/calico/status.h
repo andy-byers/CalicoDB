@@ -13,9 +13,17 @@ public:
     Status() = default;
 
     /*
-     * Create an OK status.
+     * Create/check for an OK status.
      */
-    [[nodiscard]] static auto ok() -> Status;
+    static auto ok() -> Status
+    {
+        return {};
+    }
+
+    [[nodiscard]] auto is_ok() const -> bool
+    {
+        return m_data == nullptr;
+    }
 
     /*
      * Create a non-OK status with an error message.
@@ -27,9 +35,8 @@ public:
     [[nodiscard]] static auto not_found(const Slice &what) -> Status;
 
     /*
-     * Check status type.
+     * Check error status type.
      */
-    [[nodiscard]] auto is_ok() const -> bool;
     [[nodiscard]] auto is_invalid_argument() const -> bool;
     [[nodiscard]] auto is_system_error() const -> bool;
     [[nodiscard]] auto is_logic_error() const -> bool;
@@ -37,9 +44,9 @@ public:
     [[nodiscard]] auto is_not_found() const -> bool;
 
     /*
-     * Get the error message, if it exists.
+     * Convert the status to a printable string.
      */
-    [[nodiscard]] auto what() const -> Slice;
+    [[nodiscard]] auto to_string() const -> std::string;
 
     // Status can be copied and moved.
     Status(const Status &rhs);

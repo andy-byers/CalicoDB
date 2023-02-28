@@ -30,7 +30,7 @@ auto compress_deltas(ChangeBuffer &deltas) -> Size
         if (can_merge_ordered_deltas(*lhs, *rhs)) {
             *lhs = merge_deltas(*lhs, *rhs);
         } else {
-            lhs++;
+            ++lhs;
             *lhs = *rhs;
         }
     }
@@ -64,10 +64,10 @@ auto insert_delta(ChangeBuffer &deltas, PageDelta delta) -> void
             return;
     }
     if (itr != begin(deltas)) {
-        itr--;
+        --itr;
         if (try_merge(*itr, delta))
             return;
-        itr++;
+        ++itr;
     }
     deltas.insert(itr, delta);
 }

@@ -248,7 +248,7 @@ private:
     std::map<Id, Lsn> m_segments;
 };
 
-[[nodiscard]] inline auto read_first_lsn(Storage &store, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
+[[nodiscard]] inline auto read_first_lsn(Storage &storage, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
 {
     if (auto lsn = set.first_lsn(id); !lsn.is_null()) {
         out = lsn;
@@ -256,7 +256,7 @@ private:
     }
 
     Reader *temp;
-    Calico_Try(store.new_reader(encode_segment_name(prefix, id), &temp));
+    Calico_Try(storage.new_reader(encode_segment_name(prefix, id), &temp));
 
     char buffer[sizeof(Lsn)];
     Span bytes {buffer, sizeof(buffer)};
@@ -270,14 +270,16 @@ private:
     bytes.truncate(read_size);
 
     if (bytes.is_empty()) {
-        return Status::not_found("segment is empty");
+        return Status::corruption("segment is empty");
     }
-
     if (bytes.size() != WalPayloadHeader::SIZE) {
-        return Status::corruption("incomplete record");
+        return Status::corruption("incomplete block");
+    }
+    const Lsn lsn {get_u64(bytes)};
+    if (lsn.is_null()) {
+        return Status::corruption("lsn is null");
     }
 
-    const Lsn lsn {get_u64(bytes)};
     set.set_first_lsn(id, lsn);
     out = lsn;
     return Status::ok();

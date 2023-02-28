@@ -259,14 +259,14 @@ TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
     const std::string u {"\x00", 1};
     const std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), ThreeWayComparison::EQ);
+    ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), Comparison::EQ);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_EQ(compare_three_way(Slice {u}, v), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::LT);
 }
 
 TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
@@ -279,7 +279,7 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_EQ(compare_three_way(Slice {u}, v), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::LT);
 }
 
 TEST(NonPrintableSliceTests, Conversions)
@@ -395,17 +395,17 @@ TEST(TestUniqueNullable, ResourceIsMoved)
     ASSERT_TRUE(moved_into.is_valid());
 }
 
-TEST(StatusTests, OkStatusHasNoMessage)
+TEST(StatusTests, OkStatusMessage)
 {
     auto s = Status::ok();
-    ASSERT_TRUE(s.what().is_empty());
+    ASSERT_EQ(s.to_string(), "ok");
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
 {
     static constexpr auto message = "status message";
     auto s = Status::invalid_argument(message);
-    ASSERT_EQ(s.what().to_string(), message);
+    ASSERT_EQ(s.to_string(), message);
     ASSERT_TRUE(s.is_invalid_argument());
 }
 
@@ -414,10 +414,10 @@ TEST(StatusTests, StatusCanBeCopied)
     const auto s = Status::invalid_argument("invalid argument");
     const auto t = s;
     ASSERT_TRUE(t.is_invalid_argument());
-    ASSERT_EQ(t.what().to_string(), "invalid argument");
+    ASSERT_EQ(t.to_string(), "invalid argument");
 
     ASSERT_TRUE(s.is_invalid_argument());
-    ASSERT_EQ(s.what().to_string(), "invalid argument");
+    ASSERT_EQ(s.to_string(), "invalid argument");
 }
 
 TEST(StatusTests, StatusCanBeReassigned)
@@ -427,11 +427,11 @@ TEST(StatusTests, StatusCanBeReassigned)
 
     s = Status::invalid_argument("invalid argument");
     ASSERT_TRUE(s.is_invalid_argument());
-    ASSERT_EQ(s.what().to_string(), "invalid argument");
+    ASSERT_EQ(s.to_string(), "invalid argument");
 
     s = Status::logic_error("logic error");
     ASSERT_TRUE(s.is_logic_error());
-    ASSERT_EQ(s.what().to_string(), "logic error");
+    ASSERT_EQ(s.to_string(), "logic error");
 
     s = Status::ok();
     ASSERT_TRUE(s.is_ok());
@@ -453,8 +453,8 @@ TEST(StatusTests, OkStatusCanBeCopied)
     const auto dst = src;
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
-    ASSERT_TRUE(src.what().is_empty());
-    ASSERT_TRUE(dst.what().is_empty());
+    ASSERT_EQ(src.to_string(), "ok");
+    ASSERT_EQ(dst.to_string(), "ok");
 }
 
 TEST(StatusTests, NonOkStatusCanBeCopied)
@@ -463,8 +463,8 @@ TEST(StatusTests, NonOkStatusCanBeCopied)
     const auto dst = src;
     ASSERT_TRUE(src.is_invalid_argument());
     ASSERT_TRUE(dst.is_invalid_argument());
-    ASSERT_EQ(src.what().to_string(), "status message");
-    ASSERT_EQ(dst.what().to_string(), "status message");
+    ASSERT_EQ(src.to_string(), "status message");
+    ASSERT_EQ(dst.to_string(), "status message");
 }
 
 TEST(StatusTests, OkStatusCanBeMoved)
@@ -473,8 +473,8 @@ TEST(StatusTests, OkStatusCanBeMoved)
     const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
-    ASSERT_TRUE(src.what().is_empty());
-    ASSERT_TRUE(dst.what().is_empty());
+    ASSERT_EQ(src.to_string(), "ok");
+    ASSERT_EQ(dst.to_string(), "ok");
 }
 
 TEST(StatusTests, NonOkStatusCanBeMoved)
@@ -483,19 +483,29 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_invalid_argument());
-    ASSERT_TRUE(src.what().is_empty());
-    ASSERT_EQ(dst.what().to_string(), "status message");
+    ASSERT_EQ(src.to_string(), "ok");
+    ASSERT_EQ(dst.to_string(), "status message");
 }
 
 TEST(StatusTests, MessageIsNullTerminated)
 {
     auto s = Status::system_error("hello");
-    const auto msg = s.what();
+    const auto msg = s.to_string();
     ASSERT_EQ(msg, "hello");
     ASSERT_EQ(msg.size(), 5);
 
     // This byte is not technically part of the slice, but should be owned by the Status object.
     ASSERT_EQ(msg.data()[5], '\0');
+}
+
+TEST(StatusTests, ExpectedStatusNames)
+{
+    ASSERT_EQ(get_status_name(Status::ok()), "ok");
+    ASSERT_EQ(get_status_name(Status::not_found("")), "not found");
+    ASSERT_EQ(get_status_name(Status::invalid_argument("")), "invalid argument");
+    ASSERT_EQ(get_status_name(Status::corruption("")), "corruption");
+    ASSERT_EQ(get_status_name(Status::logic_error("")), "logic error");
+    ASSERT_EQ(get_status_name(Status::system_error("")), "system error");
 }
 
 TEST(MiscTests, StringsUseSizeParameterForComparisons)

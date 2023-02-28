@@ -69,7 +69,7 @@ auto WalWriter::flush() -> Status
     if (s.is_ok()) {
         m_flushed_lsn = m_last_lsn;
         m_offset = 0;
-        m_block++;
+        ++m_block;
     }
     return s;
 }

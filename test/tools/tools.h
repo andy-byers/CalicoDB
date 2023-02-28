@@ -24,12 +24,12 @@
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                   \
-    do {                                                 \
-        if (auto assert_s = (expr); !assert_s.is_ok()) { \
-            std::fputs(assert_s.what().data(), stderr);  \
-            std::abort();                                \
-        }                                                \
+#define CHECK_OK(expr)                                         \
+    do {                                                       \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {       \
+            std::fputs(assert_s.to_string().c_str(), stderr);  \
+            std::abort();                                      \
+        }                                                      \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                        \
@@ -214,7 +214,7 @@ static auto integral_key(Size key) -> std::string
 inline auto expect_non_error(const Status &s)
 {
     if (!s.is_ok() && !s.is_not_found()) {
-        std::fprintf(stderr, "error: %s\n", s.what().data());
+        std::fprintf(stderr, "error: %s\n", s.to_string().data());
         std::abort();
     }
 }

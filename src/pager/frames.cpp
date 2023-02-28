@@ -19,18 +19,13 @@ auto Frame::lsn() const -> Id
     return {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::SIZE))};
 }
 
-auto Frame::ref(Page &page, bool is_writable) -> void
+auto Frame::ref(Page &page) -> void
 {
     CALICO_EXPECT_FALSE(m_is_writable);
-
-    if (is_writable) {
-        CALICO_EXPECT_EQ(m_ref_count, 0);
-        m_is_writable = true;
-    }
     page.m_id = m_page_id;
     page.m_span = m_bytes;
-    page.m_write = is_writable;
-    m_ref_count++;
+    page.m_write = false;
+    ++m_ref_count;
 }
 
 auto Frame::upgrade(Page &page) -> void
@@ -52,7 +47,7 @@ auto Frame::unref(Page &page) -> void
         m_is_writable = false;
         page.m_write = false;
     }
-    m_ref_count--;
+    --m_ref_count;
 }
 
 FrameManager::FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, Size frame_count)
@@ -74,16 +69,16 @@ FrameManager::FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, S
 
 auto FrameManager::ref(Size index, Page &out) -> void
 {
-    m_ref_sum++;
+    ++m_ref_sum;
     CALICO_EXPECT_LT(index, m_frames.size());
-    m_frames[index].ref(out, false);
+    m_frames[index].ref(out);
 }
 
 auto FrameManager::unref(Size index, Page page) -> void
 {
     CALICO_EXPECT_LT(index, m_frames.size());
     m_frames[index].unref(page);
-    m_ref_sum--;
+    --m_ref_sum;
 }
 
 auto FrameManager::upgrade(Size index, Page &page) -> void
@@ -110,7 +105,7 @@ auto FrameManager::pin(Id pid, Size &fid) -> Status
     if (s.is_not_found()) {
         // We just tried to read at or past EOF. This happens when we allocate a new page or roll the WAL forward.
         mem_clear(frame.data());
-        m_page_count++;
+        ++m_page_count;
     } else if (!s.is_ok()) {
         return s;
     }

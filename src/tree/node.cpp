@@ -286,7 +286,7 @@ auto Node::insert_slot(Size index, Size pointer) -> void
 
     insert_delta(page.m_deltas, {offset, size + sizeof(PageSize)});
     gap_size -= static_cast<PageSize>(sizeof(PageSize));
-    header.cell_count++;
+    ++header.cell_count;
 }
 
 auto Node::remove_slot(Size index) -> void
@@ -300,7 +300,7 @@ auto Node::remove_slot(Size index) -> void
 
     insert_delta(page.m_deltas, {offset, size + sizeof(PageSize)});
     gap_size += sizeof(PageSize);
-    header.cell_count--;
+    --header.cell_count;
 }
 
 auto Node::take() && -> Page

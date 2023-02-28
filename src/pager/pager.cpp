@@ -80,7 +80,7 @@ auto Pager::hit_ratio() const -> double
 auto Pager::pin_frame(Id pid) -> Status
 {
     if (auto s = do_pin_frame(pid); s.is_not_found()) {
-        m_info_log->logv("failed to pin frame: %s", s.what().data());
+        m_info_log->logv("failed to pin frame: %s", s.to_string().data());
         Calico_Try(m_wal->flush());
         return do_pin_frame(pid);
     } else {

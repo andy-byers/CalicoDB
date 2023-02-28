@@ -52,7 +52,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     };
 
     auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
-    size--;
+    --size;
 
     std::string key;
     std::string value;

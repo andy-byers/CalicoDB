@@ -44,30 +44,30 @@ static constexpr auto EXPECTATION_MATCHER = "^expectation";
 #define EXPECT_OK(expr)                                                                                                       \
     do {                                                                                                                      \
         const auto &expect_ok_status = (expr);                                                                                \
-        EXPECT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.what().data(); \
+        EXPECT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.to_string(); \
     } while (0)
 
 #define ASSERT_OK(expr)                                                                                                       \
     do {                                                                                                                      \
         const auto &expect_ok_status = (expr);                                                                                \
-        ASSERT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.what().data(); \
+        ASSERT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.to_string(); \
     } while (0)
 
 #define EXPECT_HAS_VALUE(expr)                                                                                                                                         \
     do {                                                                                                                                                               \
         const auto &expect_has_value_status = (expr);                                                                                                                  \
-        EXPECT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().what().data(); \
+        EXPECT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().to_string(); \
     } while (0)
 
 #define ASSERT_HAS_VALUE(expr)                                                                                                                                         \
     do {                                                                                                                                                               \
         const auto &expect_has_value_status = (expr);                                                                                                                  \
-        ASSERT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().what().data(); \
+        ASSERT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().to_string(); \
     } while (0)
 
 [[nodiscard]] inline auto expose_message(const Status &s)
 {
-    EXPECT_TRUE(s.is_ok()) << "Unexpected " << get_status_name(s) << " status: " << s.what().data();
+    EXPECT_TRUE(s.is_ok()) << "Unexpected " << get_status_name(s) << " status: " << s.to_string().data();
     return s.is_ok();
 }
 
@@ -190,7 +190,7 @@ public:
 inline auto expect_ok(const Status &s) -> void
 {
     if (!s.is_ok()) {
-        std::fprintf(stderr, "unexpected %s status: %s\n", get_status_name(s), s.what().data());
+        std::fprintf(stderr, "unexpected %s status: %s\n", get_status_name(s), s.to_string().data());
         std::abort();
     }
 }
@@ -202,8 +202,8 @@ inline auto expect_ok(const Status &s) -> void
 
 inline auto assert_special_error(const Status &s)
 {
-    if (!s.is_system_error() || s.what() != special_error().what()) {
-        std::fprintf(stderr, "error: unexpected %s status: %s", get_status_name(s), s.is_ok() ? "NULL" : s.what().data());
+    if (!s.is_system_error() || s.to_string() != special_error().to_string()) {
+        std::fprintf(stderr, "error: unexpected %s status: %s", get_status_name(s), s.is_ok() ? "NULL" : s.to_string().data());
         std::abort();
     }
 }
@@ -263,7 +263,7 @@ namespace TestTools {
     {
         auto s = t.put(key, value);
         if (!s.is_ok()) {
-            std::fputs(s.what().data(), stderr);
+            std::fputs(s.to_string().data(), stderr);
             std::abort();
         }
     }
@@ -273,7 +273,7 @@ namespace TestTools {
     {
         auto s = t.erase(get(t, key));
         if (!s.is_ok() && !s.is_not_found()) {
-            std::fputs(s.what().data(), stderr);
+            std::fputs(s.to_string().data(), stderr);
             std::abort();
         }
         return !s.is_not_found();

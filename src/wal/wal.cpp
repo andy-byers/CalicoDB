@@ -82,7 +82,7 @@ auto WriteAheadLog::log(WalPayloadIn payload) -> Status
     if (m_writer == nullptr) {
         return Status::logic_error("segment file is not open");
     }
-    m_last_lsn.value++;
+    ++m_last_lsn.value;
     m_bytes_written += sizeof(Lsn) + payload.data().size();
     CALICO_EXPECT_EQ(payload.lsn(), m_last_lsn);
 
@@ -144,7 +144,7 @@ auto WriteAheadLog::close_writer() -> Status
     m_writer = nullptr;
 
     auto id = m_set.last();
-    id.value++;
+    ++id.value;
 
     if (written) {
         m_set.add_segment(id);
@@ -157,7 +157,7 @@ auto WriteAheadLog::close_writer() -> Status
 auto WriteAheadLog::open_writer() -> Status
 {
     auto id = m_set.last();
-    id.value++;
+    ++id.value;
 
     Calico_Try(m_storage->new_logger(encode_segment_name(m_prefix, id), &m_file));
     m_writer = new WalWriter {*m_file, m_tail};

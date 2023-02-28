@@ -14,7 +14,6 @@ class WalReader {
 public:
     explicit WalReader(Reader &file, Span tail);
     [[nodiscard]] auto read(Span &payload) -> Status;
-    [[nodiscard]] auto offset() const -> Size;
 };
 
 } // namespace Calico

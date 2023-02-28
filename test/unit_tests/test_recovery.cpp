@@ -65,7 +65,7 @@ public:
         if (s.is_not_found()) {
             result = "NOT_FOUND";
         } else if (!s.is_ok()) {
-            result = s.what().to_string();
+            result = s.to_string();
         }
         return result;
     }

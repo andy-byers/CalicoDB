@@ -131,10 +131,10 @@ public:
     {
         using std::end;
         if (auto itr = m_cache.get(pid); itr != end(m_cache)) {
-            m_hits++;
+            ++m_hits;
             return itr;
         }
-        m_misses++;
+        ++m_misses;
         return end(*this);
     }
 
