@@ -1,6 +1,7 @@
 #include "fuzzer.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 DbFuzzer::DbFuzzer(std::string path, Options *options)
     : m_path {std::move(path)}
@@ -8,7 +9,7 @@ DbFuzzer::DbFuzzer(std::string path, Options *options)
     if (options != nullptr) {
         m_options = *options;
     }
-    CHECK_OK(Database::open(m_path, m_options, &m_db));
+    CHECK_OK(DB::open(m_path, m_options, &m_db));
 }
 
 DbFuzzer::~DbFuzzer()
@@ -17,7 +18,7 @@ DbFuzzer::~DbFuzzer()
 
     delete m_db;
 
-    CHECK_OK(Database::destroy(m_path, m_options));
+    CHECK_OK(DB::destroy(m_path, m_options));
 }
 
 auto DbFuzzer::reopen() -> Status
@@ -25,7 +26,7 @@ auto DbFuzzer::reopen() -> Status
     delete m_db;
     m_db = nullptr;
 
-    auto s = Database::open(m_path, m_options, &m_db);
+    auto s = DB::open(m_path, m_options, &m_db);
     if (s.is_ok()) {
         Tools::validate_db(*m_db);
     }
@@ -37,4 +38,4 @@ auto DbFuzzer::validate() -> void
     Tools::validate_db(*m_db);
 }
 
-} // namespace Calico
+} // namespace calicodb

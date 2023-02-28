@@ -29,7 +29,7 @@ to build the library and tests.
 Note that the tests must be built with assertions, hence the `RelWithAssertions`.
 To build the library in release mode without tests, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BuildTests=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_BuildTests=Off .. && cmake --build .
 ```
 
 ## API
@@ -39,12 +39,12 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BuildTests=Off .. && cmake --build .
 std::string str {"abc"};
 
 // We can create slices from C-style strings, standard library strings, or directly from a pointer and a length.
-Calico::Slice s1 {str.c_str()};
-Calico::Slice s2 {str};
-Calico::Slice s3 {str.data(), str.size()};
+calicodb::Slice s1 {str.c_str()};
+calicodb::Slice s2 {str};
+calicodb::Slice s3 {str.data(), str.size()};
 
 // Slices can be converted back to owned strings using Slice::to_string().
-printf("%s\n", s1.to_string().c_str());
+std::cout << s1.to_string() << '\n';
 
 // Slices have methods for modifying the size and pointer position. These methods do not change the underlying data, 
 // they just change what range of bytes the slice is currently viewing. Slice::advance() increments the underlying 
@@ -63,19 +63,19 @@ assert(s2.starts_with("ab"));
 ### Opening a database
 ```C++
 // Set some initialization options.
-const Calico::Options options {
+const calicodb::Options options {
     // Use pages of size 2 KiB, a 2 MiB page cache, and a 1 MiB WAL write buffer.
     .page_size = 0x2000,
     .cache_size = 0x200000,
     .wal_buffer_size = 0x100000,
     
     // Store the WAL segments in a separate location. The directory "location" must already exist.
-    // WAL segments will look like "/location/calico_wal_#", where # is the segment ID.
-    .wal_prefix = "/location/calico_wal_",
+    // WAL segments will look like "/location/calicodb_wal_#", where # is the segment ID.
+    .wal_prefix = "/location/calicodb_wal_",
     
     // The database instance will write info log messages at the specified log level, to the object
     // passed in the "info_log" member.
-    .log_level = Calico::LogLevel::TRACE,
+    .log_level = calicodb::LogLevel::TRACE,
     .info_log = nullptr,
     
     // This can be used to inject a custom storage implementation. (see the DynamicMemory class in
@@ -84,14 +84,13 @@ const Calico::Options options {
 };
 
 // Create or open a database at "/tmp/cats".
-Calico::Database *db;
-auto s = Calico::Database::open("/tmp/cats", options, &db);
+calicodb::DB *db;
+const calicodb::Status s = calicodb::DB::open("/tmp/cats", options, &db);
 
-// Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is 
-// null-terminated, so it can be printed like in the following block.
+// Handle failure. s.to_string() provides a string representation of the status.
 if (!s.is_ok()) {
-    std::fprintf(stderr, "error: %s\n", s.what().data());
-    return 1;
+    std::cerr << "error: " << s.to_string() << '\n';
+    std::abort();
 }
 ```
 
@@ -101,27 +100,22 @@ The next time that the database is opened, recovery will be run to undo any unco
 
 ```C++
 // Insert some key-value pairs.
-if (const Calico::Status s = db->put("a", "1"); s.is_system_error()) {
+if (const calicodb::Status s = db->put("lilly", "calico"); s.is_system_error()) {
     // Handle a system-level or I/O error.
-} else if (s.is_invalid_argument()) {
-    // Key was too long. This can be prevented by querying the maximum key size after database creation.
 }
 
-if (const auto s = db->put("b", "2"); s.is_ok()) {
+if (const auto s = db->put("freya", "orange tabby"); s.is_ok()) {
     // Record was inserted.
-}
-if (const auto s = db->put("c", "3"); s.is_ok()) {
-
 }
 
 // Keys are unique within the entire database instance, so inserting a record with a key already in the database will 
 // cause the old record to be overwritten.
-if (const auto s = db->put("c", "123"); s.is_ok()) {
+if (const auto s = db->put("lilly", "sweet calico"); s.is_ok()) {
 
 }
 
 // Erase a record by key.
-if (const auto s = db->erase("c"); s.is_ok()) {
+if (const auto s = db->erase("42"); s.is_ok()) {
     // Record was erased.
 } else if (s.is_not_found()) {
     // Key does not exist.
@@ -133,24 +127,24 @@ if (const auto s = db->erase("c"); s.is_ok()) {
 ```C++
 // Query a value by key.
 std::string value;
-if (const auto s = db->get("a", value); s.is_ok()) {
+if (const auto s = db->get("lilly", value); s.is_ok()) {
     // value is populated with the record's value.
 } else if (s.is_not_found()) {
     // Key does not exist.
 } else {
-    // Actual error.
+    // An error occurred.
 }
 
 // Allocate a cursor.
-Calico::Cursor *cursor = db->new_cursor();
+calicodb::Cursor *cursor = db->new_cursor();
 
 // Seek to the first record greater than or equal to the given key.
-cursor->seek("a");
+cursor->seek("freya");
 
 if (cursor->is_valid()) {
     // If the cursor is valid, these calls can be made:
-    const Calico::Slice k = cursor->key();
-    const Calico::Slice v = cursor->value();
+    const calicodb::Slice k = cursor->key();
+    const calicodb::Slice v = cursor->value();
 } else if (cursor->status().is_not_found()) {
     // Key was greater than any key in the database.
 } else {
@@ -169,9 +163,9 @@ for (; cursor->is_valid(); cursor->previous()) {
 
 }
 
-// Iterate through a half-open range of keys [a, f).
-cursor->seek("a");
-for (; cursor->is_valid() && cursor->key() < "f"; cursor->next()) {
+// Iterate through a half-open range of keys ["freya", "lilly").
+cursor->seek("freya");
+for (; cursor->is_valid() && cursor->key() < "lilly"; cursor->next()) {
 
 }
 
@@ -183,28 +177,28 @@ delete cursor;
 
 ```C++
 if (const auto s = db->vacuum(); s.is_ok()) {
-    // Unused database pages have been reclaimed and the file truncated. Note that calls to vacuum() must occur first
-    // in a transaction, i.e. vacuum() must follow a successful call to commit(), or open().
+    // Unused database pages have been reclaimed and the file truncated. At present, vacuum is considered part of a
+    // transaction, even though it doesn't change the logical contents of the database. This may change in the future.
 }
 ```
 
 ### Transactions
 A transaction represents a unit of work in CalicoDB.
 The first transaction is started when the database is opened. 
-Otherwise, transaction boundaries are defined by calls to `Database::commit()`.
+Otherwise, transaction boundaries are defined by calls to `DB::commit()`.
 All updates that haven't been committed when the database is closed will be reverted.
 
 ```C++
-if (const auto s = db->put("c", "3"); !s.is_ok()) {
+if (const auto s = db->put("fanny", "persian"); !s.is_ok()) {
     
 }
-if (const auto s = db->put("d", "4"); !s.is_ok()) {
+if (const auto s = db->put("myla", "brown-tabby"); !s.is_ok()) {
     
 }
 
 if (const auto s = db->commit(); s.is_ok()) {
-    // Changes are safely on disk (in the WAL). If we crash from here on out, the changes will be reapplied
-    // during recovery.
+    // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from here on out, the 
+    // changes will be reapplied during recovery.
 }
 ```
 
@@ -215,11 +209,15 @@ std::string prop;
 bool exists;
 
 // Database properties are made available as strings.
-exists = db->get_property("calico.counts", prop);
-exists = db->get_property("calico.stats", prop);
+exists = db->get_property("calicodb.counts", prop);
+exists = db->get_property("calicodb.stats", prop);
 ```
 
 ### Closing a database 
+To close the database, just `delete` the handle.
+During close, the database is made consistent and the whole WAL is removed.
+If an instance leaves any WAL segments behind after closing, then something has gone wrong.
+CalicoDB will attempt recovery on the next startup.
 
 ```C++
 delete db;
@@ -228,7 +226,7 @@ delete db;
 ### Destroying a database
 
 ```C++
-if (const auto s = Calico::Database::destroy("/tmp/cats", options); s.is_ok()) {
+if (const auto s = calicodb::DB::destroy("/tmp/cats", options); s.is_ok()) {
     // Database has been destroyed.
 } else if (s.is_not_found()) {
     // The database does not exist.

@@ -1,13 +1,15 @@
-#ifndef CALICO_FUZZERS_MAP_FUZZER_H
-#define CALICO_FUZZERS_MAP_FUZZER_H
+#ifndef CALICODB_FUZZERS_MAP_FUZZER_H
+#define CALICODB_FUZZERS_MAP_FUZZER_H
 
+#include "fuzzer.h"
 #include <map>
 #include <set>
-#include "fuzzer.h"
 
-namespace Calico {
+namespace calicodb
+{
 
-class MapFuzzer : public DbFuzzer {
+class MapFuzzer : public DbFuzzer
+{
 public:
     ~MapFuzzer() override = default;
     explicit MapFuzzer(std::string path, Options *options = nullptr);
@@ -19,6 +21,6 @@ private:
     std::set<std::string> m_erased;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
-#endif // CALICO_FUZZERS_MAP_FUZZER_H
+#endif // CALICODB_FUZZERS_MAP_FUZZER_H

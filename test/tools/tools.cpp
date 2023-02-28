@@ -1,11 +1,12 @@
 
 #include "tools.h"
-#include "utils/types.h"
+#include "types.h"
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
 
-namespace Calico::Tools {
+namespace calicodb::Tools
+{
 
 auto DynamicMemory::add_interceptor(Interceptor interceptor) -> void
 {
@@ -17,7 +18,7 @@ auto DynamicMemory::clear_interceptors() -> void
     m_interceptors.clear();
 }
 
-#define Try_Intercept_From(source, type, path)                                                     \
+#define TRY_INTERCEPT_FROM(source, type, path)                                                     \
     do {                                                                                           \
         if (auto intercept_s = (source).try_intercept_syscall(type, path); !intercept_s.is_ok()) { \
             return intercept_s;                                                                    \
@@ -26,9 +27,9 @@ auto DynamicMemory::clear_interceptors() -> void
 
 namespace fs = std::filesystem;
 
-auto DynamicMemory::read_file_at(const Memory &memory, Byte *data_out, Size &size_out, Size offset) -> Status
+auto DynamicMemory::read_file_at(const Memory &memory, char *data_out, std::size_t &size_out, std::size_t offset) -> Status
 {
-    Size read_size {};
+    std::size_t read_size {};
     if (Slice buffer {memory.buffer}; offset < memory.buffer.size()) {
         read_size = std::min(size_out, buffer.size() - offset);
         std::memcpy(data_out, buffer.advance(offset).data(), read_size);
@@ -37,7 +38,7 @@ auto DynamicMemory::read_file_at(const Memory &memory, Byte *data_out, Size &siz
     return Status::ok();
 }
 
-auto DynamicMemory::write_file_at(Memory &memory, Slice in, Size offset) -> Status
+auto DynamicMemory::write_file_at(Memory &memory, Slice in, std::size_t offset) -> Status
 {
     if (const auto write_end = offset + in.size(); memory.buffer.size() < write_end) {
         memory.buffer.resize(write_end);
@@ -46,41 +47,41 @@ auto DynamicMemory::write_file_at(Memory &memory, Slice in, Size offset) -> Stat
     return Status::ok();
 }
 
-auto MemoryReader::read(Byte *out, Size &size, Size offset) -> Status
+auto MemoryReader::read(char *out, std::size_t &size, std::size_t offset) -> Status
 {
     {
-        Try_Intercept_From(*m_parent, Interceptor::READ, m_path);
+        TRY_INTERCEPT_FROM(*m_parent, Interceptor::READ, m_path);
     }
     return m_parent->read_file_at(*m_mem, out, size, offset);
 }
 
-auto MemoryEditor::read(Byte *out, Size &size, Size offset) -> Status
+auto MemoryEditor::read(char *out, std::size_t &size, std::size_t offset) -> Status
 {
-    Try_Intercept_From(*m_parent, Interceptor::READ, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::READ, m_path);
     return m_parent->read_file_at(*m_mem, out, size, offset);
 }
 
-auto MemoryEditor::write(Slice in, Size offset) -> Status
+auto MemoryEditor::write(Slice in, std::size_t offset) -> Status
 {
-    Try_Intercept_From(*m_parent, Interceptor::WRITE, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::WRITE, m_path);
     return m_parent->write_file_at(*m_mem, in, offset);
 }
 
 auto MemoryEditor::sync() -> Status
 {
-    Try_Intercept_From(*m_parent, Interceptor::SYNC, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::SYNC, m_path);
     return Status::ok();
 }
 
 auto MemoryLogger::write(Slice in) -> Status
 {
-    Try_Intercept_From(*m_parent, Interceptor::WRITE, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::WRITE, m_path);
     return m_parent->write_file_at(*m_mem, in, m_mem->buffer.size());
 }
 
 auto MemoryLogger::sync() -> Status
 {
-    Try_Intercept_From(*m_parent, Interceptor::SYNC, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::SYNC, m_path);
     return Status::ok();
 }
 
@@ -106,7 +107,7 @@ auto DynamicMemory::remove_directory(const std::string &) -> Status
 auto DynamicMemory::new_reader(const std::string &path, Reader **out) -> Status
 {
     auto &mem = get_memory(path);
-    Try_Intercept_From(*this, Interceptor::OPEN, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::OPEN, path);
 
     if (mem.created) {
         *out = new MemoryReader {path, *this, mem};
@@ -118,7 +119,7 @@ auto DynamicMemory::new_reader(const std::string &path, Reader **out) -> Status
 auto DynamicMemory::new_editor(const std::string &path, Editor **out) -> Status
 {
     auto &mem = get_memory(path);
-    Try_Intercept_From(*this, Interceptor::OPEN, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::OPEN, path);
 
     if (!mem.created) {
         mem.buffer.clear();
@@ -131,7 +132,7 @@ auto DynamicMemory::new_editor(const std::string &path, Editor **out) -> Status
 auto DynamicMemory::new_logger(const std::string &path, Logger **out) -> Status
 {
     auto &mem = get_memory(path);
-    Try_Intercept_From(*this, Interceptor::OPEN, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::OPEN, path);
 
     if (!mem.created) {
         mem.buffer.clear();
@@ -150,7 +151,7 @@ auto DynamicMemory::new_info_logger(const std::string &, InfoLogger **out) -> St
 auto DynamicMemory::remove_file(const std::string &path) -> Status
 {
     auto &mem = get_memory(path);
-    Try_Intercept_From(*this, Interceptor::UNLINK, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::UNLINK, path);
 
     auto itr = m_memory.find(path);
     if (itr == end(m_memory)) {
@@ -163,7 +164,7 @@ auto DynamicMemory::remove_file(const std::string &path) -> Status
     return Status::ok();
 }
 
-auto DynamicMemory::resize_file(const std::string &path, Size size) -> Status
+auto DynamicMemory::resize_file(const std::string &path, std::size_t size) -> Status
 {
     auto itr = m_memory.find(path);
     if (itr == end(m_memory)) {
@@ -189,7 +190,7 @@ auto DynamicMemory::rename_file(const std::string &old_path, const std::string &
     return Status::ok();
 }
 
-auto DynamicMemory::file_size(const std::string &path, Size &out) const -> Status
+auto DynamicMemory::file_size(const std::string &path, std::size_t &out) const -> Status
 {
     auto itr = m_memory.find(path);
     if (itr == cend(m_memory)) {
@@ -215,7 +216,7 @@ auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::s
     if (prefix.back() != '/') {
         prefix.append("/");
     }
-    for (const auto &[path, mem]: m_memory) {
+    for (const auto &[path, mem] : m_memory) {
         if (mem.created && Slice {path}.starts_with(prefix)) {
             out.emplace_back(path.substr(prefix.size()));
         }
@@ -223,19 +224,19 @@ auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::s
     return Status::ok();
 }
 
-auto DynamicMemory::clone() const -> Storage *
+auto DynamicMemory::clone() const -> Env *
 {
-    auto *storage = new DynamicMemory;
-    storage->m_memory = m_memory;
-    return storage;
+    auto *env = new DynamicMemory;
+    env->m_memory = m_memory;
+    return env;
 }
 
 auto DynamicMemory::try_intercept_syscall(Interceptor::Type type, const std::string &path) -> Status
 {
     Slice filename {path};
-    for (const auto &interceptor: m_interceptors) {
+    for (const auto &interceptor : m_interceptors) {
         if (interceptor.type == type && filename.starts_with(interceptor.prefix)) {
-            Calico_Try(interceptor());
+            CDB_TRY(interceptor());
         }
     }
     return Status::ok();
@@ -243,7 +244,7 @@ auto DynamicMemory::try_intercept_syscall(Interceptor::Type type, const std::str
 
 #undef Try_Intercept_Syscall
 
-RandomGenerator::RandomGenerator(Size size)
+RandomGenerator::RandomGenerator(std::size_t size)
     : m_data(size, '\0'),
       m_rng {42}
 {
@@ -251,14 +252,14 @@ RandomGenerator::RandomGenerator(Size size)
     std::generate(begin(m_data), end(m_data), std::ref(engine));
 }
 
-auto RandomGenerator::Generate(Size len) const -> Slice
+auto RandomGenerator::Generate(std::size_t len) const -> Slice
 {
     if (m_pos + len > m_data.size()) {
         m_pos = 0;
-        CALICO_EXPECT_LT(len, m_data.size());
+        CDB_EXPECT_LT(len, m_data.size());
     }
     m_pos += len;
-    return {m_data.data() + m_pos - len, static_cast<Size>(len)};
+    return {m_data.data() + m_pos - len, static_cast<std::size_t>(len)};
 }
 
 auto print_references(Pager &pager, PointerMap &pointers) -> void
@@ -276,21 +277,21 @@ auto print_references(Pager &pager, PointerMap &pointers) -> void
         PointerMap::Entry entry;
         CHECK_OK(pointers.read_entry(pid, entry));
         switch (entry.type) {
-            case PointerMap::NODE:
-                std::cerr << "node";
-                break;
-            case PointerMap::FREELIST_LINK:
-                std::cerr << "freelist link";
-                break;
-            case PointerMap::OVERFLOW_HEAD:
-                std::cerr << "overflow head";
-                break;
-            case PointerMap::OVERFLOW_LINK:
-                std::cerr << "overflow link";
-                break;
+        case PointerMap::NODE:
+            std::cerr << "node";
+            break;
+        case PointerMap::FREELIST_LINK:
+            std::cerr << "freelist link";
+            break;
+        case PointerMap::OVERFLOW_HEAD:
+            std::cerr << "overflow head";
+            break;
+        case PointerMap::OVERFLOW_LINK:
+            std::cerr << "overflow link";
+            break;
         }
         std::cerr << " -> " << entry.back_ptr.value << '\n';
     }
 }
 
-} // namespace Calico::Tools
+} // namespace calicodb::Tools

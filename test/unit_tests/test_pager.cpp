@@ -1,25 +1,27 @@
 
-#include "pager/frames.h"
-#include "pager/page.h"
-#include "pager/page_cache.h"
-#include "pager/pager.h"
-#include "tree/header.h"
-#include "tree/node.h"
+#include "frames.h"
+#include "header.h"
+#include "logging.h"
+#include "node.h"
+#include "page.h"
+#include "page_cache.h"
+#include "pager.h"
 #include "unit_tests.h"
-#include "utils/logging.h"
 #include <gtest/gtest.h>
 #include <numeric>
 
-namespace Calico {
+namespace calicodb
+{
 
-class DeltaCompressionTest : public testing::Test {
+class DeltaCompressionTest : public testing::Test
+{
 public:
-    static constexpr Size PAGE_SIZE {0x200};
+    static constexpr std::size_t PAGE_SIZE {0x200};
 
     [[nodiscard]] auto build_deltas(const ChangeBuffer &unordered) const
     {
         ChangeBuffer deltas;
-        for (const auto &delta: unordered)
+        for (const auto &delta : unordered)
             insert_delta(deltas, delta);
         compress_deltas(deltas);
         return deltas;
@@ -27,9 +29,9 @@ public:
 
     [[nodiscard]] auto insert_random_delta(ChangeBuffer &deltas) const
     {
-        static constexpr Size MIN_DELTA_SIZE {1};
-        const auto offset = random.Next<Size>(PAGE_SIZE - MIN_DELTA_SIZE);
-        const auto size = random.Next<Size>(PAGE_SIZE - offset);
+        static constexpr std::size_t MIN_DELTA_SIZE {1};
+        const auto offset = random.Next<std::size_t>(PAGE_SIZE - MIN_DELTA_SIZE);
+        const auto size = random.Next<std::size_t>(PAGE_SIZE - offset);
         insert_delta(deltas, {offset, size});
     }
 
@@ -71,7 +73,7 @@ TEST_F(DeltaCompressionTest, DeltasAreOrdered)
         {30, 3},
     });
 
-    Size i {1};
+    std::size_t i {1};
     ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
         const auto j = std::exchange(i, i + 1);
         return delta.offset == 10 * j && delta.size == j;
@@ -94,7 +96,7 @@ TEST_F(DeltaCompressionTest, DeltasAreNotRepeated)
         {10, 1},
     });
 
-    Size i {1};
+    std::size_t i {1};
     ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
         const auto j = std::exchange(i, i + 1);
         return delta.offset == 10 * j && delta.size == j;
@@ -123,33 +125,34 @@ TEST_F(DeltaCompressionTest, OverlappingDeltasAreMerged)
 
 TEST_F(DeltaCompressionTest, SanityCheck)
 {
-    static constexpr Size NUM_INSERTS {100};
-    static constexpr Size MAX_DELTA_SIZE {10};
+    static constexpr std::size_t NUM_INSERTS {100};
+    static constexpr std::size_t MAX_DELTA_SIZE {10};
     ChangeBuffer deltas;
-    for (Size i {}; i < NUM_INSERTS; ++i) {
-        const auto offset = random.Next<Size>(PAGE_SIZE - MAX_DELTA_SIZE);
-        const auto size = random.Next<Size>(1, MAX_DELTA_SIZE);
+    for (std::size_t i {}; i < NUM_INSERTS; ++i) {
+        const auto offset = random.Next<std::size_t>(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto size = random.Next<std::size_t>(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);
 
     std::vector<int> covering(PAGE_SIZE);
-    for (const auto &[offset, size]: deltas) {
-        for (Size i {}; i < size; ++i) {
+    for (const auto &[offset, size] : deltas) {
+        for (std::size_t i {}; i < size; ++i) {
             ASSERT_EQ(covering.at(offset + i), 0);
             covering[offset + i]++;
         }
     }
 }
 
-class CacheTests : public testing::Test {
+class CacheTests : public testing::Test
+{
 public:
     Cache<int, int> target;
 };
 
 TEST_F(CacheTests, EmptyCacheBehavior)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
@@ -160,7 +163,7 @@ TEST_F(CacheTests, EmptyCacheBehavior)
 
 TEST_F(CacheTests, NonEmptyCacheBehavior)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     cache.put(1, 1);
     ASSERT_FALSE(cache.is_empty());
@@ -172,7 +175,7 @@ TEST_F(CacheTests, NonEmptyCacheBehavior)
 
 TEST_F(CacheTests, ElementsArePromotedAfterUse)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 1*, 2, 3, 4, END
     cache.put(4, 4);
@@ -235,7 +238,7 @@ TEST_F(CacheTests, IterationRespectsReplacementPolicy)
 
 TEST_F(CacheTests, QueryDoesNotPromoteElements)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 1*, 2, 3, END
     cache.put(3, 3);
@@ -258,7 +261,7 @@ TEST_F(CacheTests, QueryDoesNotPromoteElements)
 
 TEST_F(CacheTests, ModifyValue)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     cache.put(1, 1);
     cache.put(1, 2);
@@ -269,7 +272,7 @@ TEST_F(CacheTests, ModifyValue)
 
 TEST_F(CacheTests, WarmElementsAreFifoOrdered)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 1*, 2, 3, END
     cache.put(3, 3);
@@ -289,7 +292,7 @@ TEST_F(CacheTests, WarmElementsAreFifoOrdered)
 
 TEST_F(CacheTests, HotElementsAreLruOrdered)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 1*, 2, 3
     cache.put(3, 3);
@@ -314,7 +317,7 @@ TEST_F(CacheTests, HotElementsAreLruOrdered)
 
 TEST_F(CacheTests, HotElementsAreEncounteredFirst)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -346,7 +349,7 @@ TEST_F(CacheTests, HotElementsAreEncounteredFirst)
 
 TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -379,7 +382,7 @@ TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 
 TEST_F(CacheTests, AddWarmElements)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -415,7 +418,7 @@ TEST_F(CacheTests, AddWarmElements)
 
 TEST_F(CacheTests, InsertAfterWarmElementsDepleted)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -495,13 +498,14 @@ TEST(CacheOrderTests, CheckOrder)
 
 TEST(MoveOnlyCacheTests, WorksWithMoveOnlyValue)
 {
-    Calico::Cache<int, std::unique_ptr<int>> cache;
+    calicodb::Cache<int, std::unique_ptr<int>> cache;
     cache.put(1, std::make_unique<int>(1));
     ASSERT_EQ(*cache.get(1)->value, 1);
     ASSERT_EQ(*cache.evict()->value, 1);
 }
 
-class PageRegistryTests : public testing::Test {
+class PageRegistryTests : public testing::Test
+{
 public:
     ~PageRegistryTests() override = default;
 
@@ -510,24 +514,24 @@ public:
 
 TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 {
-    registry.put(Id {11UL}, {Size {11UL}});
-    registry.put(Id {12UL}, {Size {12UL}});
-    registry.put(Id {13UL}, {Size {13UL}});
-    registry.put(Id {1UL}, {Size {1UL}});
-    registry.put(Id {2UL}, {Size {2UL}});
-    registry.put(Id {3UL}, {Size {3UL}});
+    registry.put(Id {11UL}, {std::size_t {11UL}});
+    registry.put(Id {12UL}, {std::size_t {12UL}});
+    registry.put(Id {13UL}, {std::size_t {13UL}});
+    registry.put(Id {1UL}, {std::size_t {1UL}});
+    registry.put(Id {2UL}, {std::size_t {2UL}});
+    registry.put(Id {3UL}, {std::size_t {3UL}});
     ASSERT_EQ(registry.size(), 6);
 
     ASSERT_EQ(registry.get(Id {11UL})->value.index, 11UL);
     ASSERT_EQ(registry.get(Id {12UL})->value.index, 12UL);
     ASSERT_EQ(registry.get(Id {13UL})->value.index, 13UL);
 
-    Size i {}, j {};
+    std::size_t i {}, j {};
 
     const auto callback = [&i, &j](auto page_id, auto entry) {
         EXPECT_EQ(page_id.value, entry.index);
         EXPECT_EQ(page_id.value, i + (j >= 3) * 10 + 1) << "The cache entries should have been visited in order {1, 2, 3, 11, 12, 13}";
-        j++;
+        ++j;
         i = j % 3;
         return false;
     };
@@ -537,17 +541,17 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 
 class FramerTests
     : public InMemoryTest,
-      public testing::Test {
+      public testing::Test
+{
 public:
     explicit FramerTests()
     {
-
-        Editor *file {};
-        EXPECT_OK(storage->new_editor("test/data", &file));
+        Editor *file;
+        EXPECT_OK(env->new_editor("test/data", &file));
 
         AlignedBuffer buffer {0x200 * 8, 0x200};
 
-        frames = std::make_unique<FrameManager>(file, std::move(buffer), 0x200, 8);
+        frames = std::make_unique<FrameManager>(*file, std::move(buffer), 0x200, 8);
     }
 
     ~FramerTests() override = default;
@@ -563,27 +567,27 @@ TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
 
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
-    Size fid;
-    for (Size i {1}; i <= 8; i++) {
+    std::size_t fid;
+    for (std::size_t i {1}; i <= 8; i++) {
         ASSERT_OK(frames->pin(Id {i}, fid));
     }
     ASSERT_TRUE(frames->pin(Id {9UL}, fid).is_not_found());
 
-    frames->unpin(Size {1UL});
+    frames->unpin(std::size_t {1UL});
     ASSERT_OK(frames->pin(Id {9UL}, fid));
 }
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
-    CALICO_EXPECT_LE(offset + message.size(), page.size());
+    EXPECT_LE(offset + message.size(), page.size());
     mem_copy(page.span(offset, message.size()), message);
 }
 
-[[nodiscard]] auto read_from_page(const Page &page, Size size) -> std::string
+[[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
-    CALICO_EXPECT_LE(offset + size, page.size());
+    EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
     mem_copy(message, page.view(offset, message.size()));
     return message;
@@ -591,7 +595,8 @@ auto write_to_page(Page &page, const std::string &message) -> void
 
 class PagerTests
     : public TestWithPager,
-      public testing::Test {
+      public testing::Test
+{
 public:
     std::string test_message {"Hello, world!"};
 
@@ -630,7 +635,7 @@ public:
         EXPECT_OK(status);
     }
 
-    [[nodiscard]] auto acquire_read_release(Id id, Size size) const
+    [[nodiscard]] auto acquire_read_release(Id id, std::size_t size) const
     {
         Page page;
         EXPECT_OK(pager->acquire(id, page));
@@ -644,6 +649,7 @@ public:
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
+    ASSERT_EQ(pager->bytes_written(), 0);
     ASSERT_EQ(pager->recovery_lsn(), Id::null());
     EXPECT_OK(status);
 }
@@ -684,8 +690,8 @@ TEST_F(PagerTests, MultipleReaders)
     pager->release(std::move(page_b));
 }
 
-template<class T>
-static auto run_root_persistence_test(T &test, Size n)
+template <class T>
+static auto run_root_persistence_test(T &test, std::size_t n)
 {
     const auto id = test.allocate_write_release(test.test_message);
 
@@ -703,20 +709,20 @@ TEST_F(PagerTests, RootDataPersistsInFrame)
     run_root_persistence_test(*this, FRAME_COUNT);
 }
 
-TEST_F(PagerTests, RootDataPersistsInStorage)
+TEST_F(PagerTests, RootDataPersistsInEnv)
 {
     run_root_persistence_test(*this, FRAME_COUNT * 2);
 }
 
-[[nodiscard]] auto generate_id_strings(Size n)
+[[nodiscard]] auto generate_id_strings(std::size_t n)
 {
-    std::vector<Size> id_ints(n);
+    std::vector<std::size_t> id_ints(n);
     std::iota(begin(id_ints), end(id_ints), 1);
 
     std::vector<std::string> id_strs;
     std::transform(cbegin(id_ints), cend(id_ints), back_inserter(id_strs), [](auto id) {
         auto result = std::to_string(id);
-        CALICO_EXPECT_LE(result.size(), 6);
+        CDB_EXPECT_LE(result.size(), 6);
         return std::string(6 - result.size(), '0') + result;
     });
     return id_strs;
@@ -726,12 +732,12 @@ TEST_F(PagerTests, SanityCheck)
 {
     const auto ids = generate_id_strings(500);
 
-    for (const auto &id: ids)
+    for (const auto &id : ids)
         [[maybe_unused]] const auto unused = allocate_write_release(id);
 
-    for (const auto &id: ids) { // NOTE: gtest assertion macros sometimes complain if braces are omitted.
+    for (const auto &id : ids) { // NOTE: gtest assertion macros sometimes complain if braces are omitted.
         ASSERT_EQ(id, acquire_read_release(Id {std::stoull(id)}, id.size()));
     }
 }
 
-} // namespace Calico
+} // namespace calicodb

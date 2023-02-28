@@ -1,9 +1,9 @@
 
-#ifndef CALICO_TOOLS_H
-#define CALICO_TOOLS_H
+#ifndef CALICODB_TOOLS_H
+#define CALICODB_TOOLS_H
 
-#include "database/database_impl.h"
-#include <calico/calico.h>
+#include "calicodb/calicodb.h"
+#include "db_impl.h"
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
@@ -24,12 +24,12 @@
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                   \
-    do {                                                 \
-        if (auto assert_s = (expr); !assert_s.is_ok()) { \
-            std::fputs(assert_s.what().data(), stderr);  \
-            std::abort();                                \
-        }                                                \
+#define CHECK_OK(expr)                                        \
+    do {                                                      \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {      \
+            std::fputs(assert_s.to_string().c_str(), stderr); \
+            std::abort();                                     \
+        }                                                     \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                        \
@@ -40,7 +40,8 @@
         }                                         \
     } while (0)
 
-namespace Calico::Tools {
+namespace calicodb::Tools
+{
 
 struct Interceptor {
     enum Type {
@@ -61,7 +62,8 @@ struct Interceptor {
         : prefix {std::move(prefix_)},
           callback {std::move(callback_)},
           type {type_}
-    {}
+    {
+    }
 
     [[nodiscard]] auto operator()() const -> Status
     {
@@ -73,7 +75,8 @@ struct Interceptor {
     Type type {};
 };
 
-class DynamicMemory : public Storage {
+class DynamicMemory : public Env
+{
 
     struct Memory {
         std::string buffer;
@@ -90,8 +93,8 @@ class DynamicMemory : public Storage {
 
     [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &path) -> Status;
     [[nodiscard]] auto get_memory(const std::string &path) const -> Memory &;
-    [[nodiscard]] auto read_file_at(const Memory &mem, Byte *data_out, Size &size_out, Size offset) -> Status;
-    [[nodiscard]] auto write_file_at(Memory &mem, Slice in, Size offset) -> Status;
+    [[nodiscard]] auto read_file_at(const Memory &mem, char *data_out, std::size_t &size_out, std::size_t offset) -> Status;
+    [[nodiscard]] auto write_file_at(Memory &mem, Slice in, std::size_t offset) -> Status;
 
 public:
     [[nodiscard]] auto memory() -> std::unordered_map<std::string, Memory> &
@@ -102,7 +105,7 @@ public:
     {
         return m_memory;
     }
-    [[nodiscard]] auto clone() const -> Storage *;
+    [[nodiscard]] auto clone() const -> Env *;
     auto add_interceptor(Interceptor interceptor) -> void;
     auto clear_interceptors() -> void;
 
@@ -116,12 +119,13 @@ public:
     [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
-    [[nodiscard]] auto resize_file(const std::string &path, Size size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, Size &out) const -> Status override;
+    [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
+    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
 };
 
-class MemoryReader : public Reader {
+class MemoryReader : public Reader
+{
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
@@ -130,16 +134,18 @@ class MemoryReader : public Reader {
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
-    {}
+    {
+    }
 
     friend class DynamicMemory;
 
 public:
     ~MemoryReader() override = default;
-    [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
 };
 
-class MemoryEditor : public Editor {
+class MemoryEditor : public Editor
+{
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
@@ -148,18 +154,20 @@ class MemoryEditor : public Editor {
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
-    {}
+    {
+    }
 
     friend class DynamicMemory;
 
 public:
     ~MemoryEditor() override = default;
-    [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
-    [[nodiscard]] auto write(Slice in, Size offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto write(Slice in, std::size_t offset) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class MemoryLogger : public Logger {
+class MemoryLogger : public Logger
+{
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
@@ -168,7 +176,8 @@ class MemoryLogger : public Logger {
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
-    {}
+    {
+    }
 
     friend class DynamicMemory;
 
@@ -178,13 +187,15 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class MemoryInfoLogger : public InfoLogger {
+class MemoryInfoLogger : public InfoLogger
+{
 public:
     ~MemoryInfoLogger() override = default;
     auto logv(const char *, ...) -> void override {}
 };
 
-class StderrLogger : public InfoLogger {
+class StderrLogger : public InfoLogger
+{
 public:
     ~StderrLogger() override = default;
 
@@ -198,8 +209,8 @@ public:
     }
 };
 
-template<std::size_t Length = 12>
-static auto integral_key(Size key) -> std::string
+template <std::size_t Length = 12>
+static auto integral_key(std::size_t key) -> std::string
 {
     auto key_string = std::to_string(key);
     if (key_string.size() == Length) {
@@ -214,31 +225,32 @@ static auto integral_key(Size key) -> std::string
 inline auto expect_non_error(const Status &s)
 {
     if (!s.is_ok() && !s.is_not_found()) {
-        std::fprintf(stderr, "error: %s\n", s.what().data());
+        std::fprintf(stderr, "error: %s\n", s.to_string().data());
         std::abort();
     }
 }
 
-inline auto validate_db(const Database &db)
+inline auto validate_db(const DB &db)
 {
-    reinterpret_cast<const DatabaseImpl &>(db).TEST_validate();
+    reinterpret_cast<const DBImpl &>(db).TEST_validate();
 }
 
 // Modified from LevelDB.
-class RandomGenerator {
+class RandomGenerator
+{
 private:
     using Engine = std::default_random_engine;
 
     std::string m_data;
-    mutable Size m_pos {};
+    mutable std::size_t m_pos {};
     mutable Engine m_rng; // Not in LevelDB.
 
 public:
-    explicit RandomGenerator(Size size = 4 /* KiB */ * 1'024);
-    auto Generate(Size len) const -> Slice;
+    explicit RandomGenerator(std::size_t size = 4 /* KiB */ * 1'024);
+    auto Generate(std::size_t len) const -> Slice;
 
     // Not in LevelDB.
-    template<class T>
+    template <class T>
     auto Next(T t_max) const -> T
     {
         std::uniform_int_distribution<T> dist {std::numeric_limits<T>::min(), t_max};
@@ -246,7 +258,7 @@ public:
     }
 
     // Not in LevelDB.
-    template<class T>
+    template <class T>
     auto Next(T t_min, T t_max) const -> T
     {
         std::uniform_int_distribution<T> dist {t_min, t_max};
@@ -255,9 +267,9 @@ public:
 };
 
 struct DatabaseCounts {
-    Size records {};
-    Size pages {};
-    Size updates {};
+    std::size_t records {};
+    std::size_t pages {};
+    std::size_t updates {};
 };
 
 [[nodiscard]] inline auto parse_db_counts(std::string prop) -> DatabaseCounts
@@ -289,9 +301,9 @@ struct DatabaseCounts {
 
 struct DatabaseStats {
     double cache_hit_ratio {};
-    Size data_throughput {};
-    Size pager_throughput {};
-    Size wal_throughput {};
+    std::size_t data_throughput {};
+    std::size_t pager_throughput {};
+    std::size_t wal_throughput {};
 };
 
 [[nodiscard]] inline auto parse_db_stats(std::string prop) -> DatabaseStats
@@ -330,6 +342,6 @@ struct DatabaseStats {
 
 auto print_references(Pager &pager, PointerMap &pointers) -> void;
 
-} // namespace Calico::Tools
+} // namespace calicodb::Tools
 
-#endif // CALICO_TOOLS_H
+#endif // CALICODB_TOOLS_H

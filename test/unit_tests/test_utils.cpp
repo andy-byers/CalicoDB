@@ -2,20 +2,21 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-#include "calico/slice.h"
-#include "utils/crc.h"
-#include "utils/encoding.h"
-#include "utils/logging.h"
-#include "utils/types.h"
-#include "utils/utils.h"
+#include "calicodb/slice.h"
+#include "crc.h"
+#include "encoding.h"
+#include "logging.h"
+#include "types.h"
 #include "unit_tests.h"
+#include "utils.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 #if not NDEBUG
 TEST(TestUtils, ExpectationDeathTest)
 {
-    ASSERT_DEATH(CALICO_EXPECT_TRUE(false), EXPECTATION_MATCHER);
+    ASSERT_DEATH(CDB_EXPECT_TRUE(false), EXPECTATION_MATCHER);
 }
 #endif // not NDEBUG
 
@@ -39,7 +40,8 @@ TEST(TestUtils, EncodingIsConsistent)
     ASSERT_EQ(buffer.back(), 0) << "buffer overflow";
 }
 
-class SliceTests : public testing::Test {
+class SliceTests : public testing::Test
+{
 protected:
     std::string test_string {"Hello, world!"};
     Slice slice {test_string};
@@ -71,7 +73,7 @@ TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
     ASSERT_TRUE(shorter < slice);
 }
 
-TEST_F(SliceTests, FirstByteIsMostSignificant)
+TEST_F(SliceTests, FirstcharIsMostSignificant)
 {
     ASSERT_TRUE(Slice {"10"} > Slice {"01"});
     ASSERT_TRUE(Slice {"01"} < Slice {"10"});
@@ -187,8 +189,8 @@ TEST_F(SliceTests, Conversions)
 
 static constexpr auto constexpr_test_write(Span b, Slice answer)
 {
-    CALICO_EXPECT_EQ(b.size(), answer.size());
-    for (Size i {}; i < b.size(); ++i)
+    CDB_EXPECT_EQ(b.size(), answer.size());
+    for (std::size_t i {}; i < b.size(); ++i)
         b[i] = answer[i];
 
     (void)b.starts_with(answer);
@@ -201,8 +203,8 @@ static constexpr auto constexpr_test_write(Span b, Slice answer)
 
 static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 {
-    for (Size i {}; i < bv.size(); ++i)
-        CALICO_EXPECT_EQ(bv[i], answer[i]);
+    for (std::size_t i {}; i < bv.size(); ++i)
+        CDB_EXPECT_EQ(bv[i], answer[i]);
 
     (void)bv.starts_with(answer);
     (void)bv.data();
@@ -255,21 +257,21 @@ TEST(NonPrintableSliceTests, UsesStringSize)
     ASSERT_EQ(Slice {u}.size(), 2);
 }
 
-TEST(NonPrintableSliceTests, NullBytesAreEqual)
+TEST(NonPrintableSliceTests, NullcharsAreEqual)
 {
     const std::string u {"\x00", 1};
     const std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), ThreeWayComparison::EQ);
+    ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), Comparison::Equal);
 }
 
-TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
+TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullchars)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_EQ(compare_three_way(Slice {u}, v), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::Less);
 }
 
-TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
+TEST(NonPrintableSliceTests, charsAreUnsignedWhenCompared)
 {
     std::string u {"\x0F", 1};
     std::string v {"\x00", 1};
@@ -279,7 +281,7 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_EQ(compare_three_way(Slice {u}, v), ThreeWayComparison::LT);
+    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::Less);
 }
 
 TEST(NonPrintableSliceTests, Conversions)
@@ -321,7 +323,7 @@ TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
     ASSERT_EQ(Slice {b}.size(), 1);
 }
 
-template<class T>
+template <class T>
 auto run_nullability_check()
 {
     const auto x = T::null();
@@ -331,28 +333,28 @@ auto run_nullability_check()
     ASSERT_FALSE(y.is_null());
 }
 
-template<class T>
+template <class T>
 auto run_equality_comparisons()
 {
     T x {1};
     T y {2};
 
-    CALICO_EXPECT_TRUE(x == x);
-    CALICO_EXPECT_TRUE(x != y);
+    CDB_EXPECT_TRUE(x == x);
+    CDB_EXPECT_TRUE(x != y);
     ASSERT_EQ(x, x);
     ASSERT_NE(x, y);
 }
 
-template<class T>
+template <class T>
 auto run_ordering_comparisons()
 {
     T x {1};
     T y {2};
 
-    CALICO_EXPECT_TRUE(x < y);
-    CALICO_EXPECT_TRUE(x <= x and x <= y);
-    CALICO_EXPECT_TRUE(y > x);
-    CALICO_EXPECT_TRUE(y >= y and y >= x);
+    CDB_EXPECT_TRUE(x < y);
+    CDB_EXPECT_TRUE(x <= x and x <= y);
+    CDB_EXPECT_TRUE(y > x);
+    CDB_EXPECT_TRUE(y >= y and y >= x);
     ASSERT_LT(x, y);
     ASSERT_LE(x, x);
     ASSERT_LE(x, y);
@@ -395,17 +397,17 @@ TEST(TestUniqueNullable, ResourceIsMoved)
     ASSERT_TRUE(moved_into.is_valid());
 }
 
-TEST(StatusTests, OkStatusHasNoMessage)
+TEST(StatusTests, OkStatusMessage)
 {
     auto s = Status::ok();
-    ASSERT_TRUE(s.what().is_empty());
+    ASSERT_EQ(s.to_string(), "ok");
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
 {
     static constexpr auto message = "status message";
     auto s = Status::invalid_argument(message);
-    ASSERT_EQ(s.what().to_string(), message);
+    ASSERT_EQ(s.to_string(), message);
     ASSERT_TRUE(s.is_invalid_argument());
 }
 
@@ -414,10 +416,10 @@ TEST(StatusTests, StatusCanBeCopied)
     const auto s = Status::invalid_argument("invalid argument");
     const auto t = s;
     ASSERT_TRUE(t.is_invalid_argument());
-    ASSERT_EQ(t.what().to_string(), "invalid argument");
+    ASSERT_EQ(t.to_string(), "invalid argument");
 
     ASSERT_TRUE(s.is_invalid_argument());
-    ASSERT_EQ(s.what().to_string(), "invalid argument");
+    ASSERT_EQ(s.to_string(), "invalid argument");
 }
 
 TEST(StatusTests, StatusCanBeReassigned)
@@ -427,11 +429,11 @@ TEST(StatusTests, StatusCanBeReassigned)
 
     s = Status::invalid_argument("invalid argument");
     ASSERT_TRUE(s.is_invalid_argument());
-    ASSERT_EQ(s.what().to_string(), "invalid argument");
+    ASSERT_EQ(s.to_string(), "invalid argument");
 
     s = Status::logic_error("logic error");
     ASSERT_TRUE(s.is_logic_error());
-    ASSERT_EQ(s.what().to_string(), "logic error");
+    ASSERT_EQ(s.to_string(), "logic error");
 
     s = Status::ok();
     ASSERT_TRUE(s.is_ok());
@@ -453,8 +455,8 @@ TEST(StatusTests, OkStatusCanBeCopied)
     const auto dst = src;
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
-    ASSERT_TRUE(src.what().is_empty());
-    ASSERT_TRUE(dst.what().is_empty());
+    ASSERT_EQ(src.to_string(), "ok");
+    ASSERT_EQ(dst.to_string(), "ok");
 }
 
 TEST(StatusTests, NonOkStatusCanBeCopied)
@@ -463,8 +465,8 @@ TEST(StatusTests, NonOkStatusCanBeCopied)
     const auto dst = src;
     ASSERT_TRUE(src.is_invalid_argument());
     ASSERT_TRUE(dst.is_invalid_argument());
-    ASSERT_EQ(src.what().to_string(), "status message");
-    ASSERT_EQ(dst.what().to_string(), "status message");
+    ASSERT_EQ(src.to_string(), "status message");
+    ASSERT_EQ(dst.to_string(), "status message");
 }
 
 TEST(StatusTests, OkStatusCanBeMoved)
@@ -473,8 +475,8 @@ TEST(StatusTests, OkStatusCanBeMoved)
     const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
-    ASSERT_TRUE(src.what().is_empty());
-    ASSERT_TRUE(dst.what().is_empty());
+    ASSERT_EQ(src.to_string(), "ok");
+    ASSERT_EQ(dst.to_string(), "ok");
 }
 
 TEST(StatusTests, NonOkStatusCanBeMoved)
@@ -483,14 +485,14 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_invalid_argument());
-    ASSERT_TRUE(src.what().is_empty());
-    ASSERT_EQ(dst.what().to_string(), "status message");
+    ASSERT_EQ(src.to_string(), "ok");
+    ASSERT_EQ(dst.to_string(), "status message");
 }
 
 TEST(StatusTests, MessageIsNullTerminated)
 {
     auto s = Status::system_error("hello");
-    const auto msg = s.what();
+    const auto msg = s.to_string();
     ASSERT_EQ(msg, "hello");
     ASSERT_EQ(msg.size(), 5);
 
@@ -498,7 +500,17 @@ TEST(StatusTests, MessageIsNullTerminated)
     ASSERT_EQ(msg.data()[5], '\0');
 }
 
-TEST(MiscTests, StringsUseSizeParameterForComparisons)
+TEST(StatusTests, ExpectedStatusNames)
+{
+    ASSERT_EQ(get_status_name(Status::ok()), "ok");
+    ASSERT_EQ(get_status_name(Status::not_found("")), "not found");
+    ASSERT_EQ(get_status_name(Status::invalid_argument("")), "invalid argument");
+    ASSERT_EQ(get_status_name(Status::corruption("")), "corruption");
+    ASSERT_EQ(get_status_name(Status::logic_error("")), "logic error");
+    ASSERT_EQ(get_status_name(Status::system_error("")), "system error");
+}
+
+TEST(MiscTests, StringsUsesSizeParameterForComparisons)
 {
     std::vector<std::string> v {
         std::string {"\x11\x00\x33", 3},
@@ -512,106 +524,107 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
 }
 
 // CRC tests from LevelDB.
-namespace crc32c {
+namespace crc32c
+{
 
-    TEST(LevelDB_CRC, StandardResults)
-    {
-        // From rfc3720 section B.4.
-        char buf[32];
+TEST(LevelDB_CRC, StandardResults)
+{
+    // From rfc3720 section B.4.
+    char buf[32];
 
-        memset(buf, 0, sizeof(buf));
-        ASSERT_EQ(0x8a9136aa, Value(buf, sizeof(buf)));
+    memset(buf, 0, sizeof(buf));
+    ASSERT_EQ(0x8a9136aa, Value(buf, sizeof(buf)));
 
-        memset(buf, 0xff, sizeof(buf));
-        ASSERT_EQ(0x62a8ab43, Value(buf, sizeof(buf)));
+    memset(buf, 0xff, sizeof(buf));
+    ASSERT_EQ(0x62a8ab43, Value(buf, sizeof(buf)));
 
-        for (int i = 0; i < 32; i++) {
-            buf[i] = i;
-        }
-        ASSERT_EQ(0x46dd794e, Value(buf, sizeof(buf)));
-
-        for (int i = 0; i < 32; i++) {
-            buf[i] = 31 - i;
-        }
-        ASSERT_EQ(0x113fdb5c, Value(buf, sizeof(buf)));
-
-        uint8_t data[48] = {
-            0x01,
-            0xc0,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x14,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x04,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x14,
-            0x00,
-            0x00,
-            0x00,
-            0x18,
-            0x28,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x02,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-        };
-        ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char *>(data), sizeof(data)));
+    for (int i = 0; i < 32; i++) {
+        buf[i] = i;
     }
+    ASSERT_EQ(0x46dd794e, Value(buf, sizeof(buf)));
 
-    TEST(LevelDB_CRC, Values)
-    {
-        ASSERT_NE(Value("a", 1), Value("foo", 3));
+    for (int i = 0; i < 32; i++) {
+        buf[i] = 31 - i;
     }
+    ASSERT_EQ(0x113fdb5c, Value(buf, sizeof(buf)));
 
-    TEST(LevelDB_CRC, Extend)
-    {
-        ASSERT_EQ(Value("hello world", 11), Extend(Value("hello ", 6), "world", 5));
-    }
+    uint8_t data[48] = {
+        0x01,
+        0xc0,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x14,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x04,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x14,
+        0x00,
+        0x00,
+        0x00,
+        0x18,
+        0x28,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    };
+    ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char *>(data), sizeof(data)));
+}
 
-    TEST(LevelDB_CRC, Mask)
-    {
-        uint32_t crc = Value("foo", 3);
-        ASSERT_NE(crc, Mask(crc));
-        ASSERT_NE(crc, Mask(Mask(crc)));
-        ASSERT_EQ(crc, Unmask(Mask(crc)));
-        ASSERT_EQ(crc, Unmask(Unmask(Mask(Mask(crc)))));
-    }
+TEST(LevelDB_CRC, Values)
+{
+    ASSERT_NE(Value("a", 1), Value("foo", 3));
+}
+
+TEST(LevelDB_CRC, Extend)
+{
+    ASSERT_EQ(Value("hello world", 11), Extend(Value("hello ", 6), "world", 5));
+}
+
+TEST(LevelDB_CRC, Mask)
+{
+    uint32_t crc = Value("foo", 3);
+    ASSERT_NE(crc, Mask(crc));
+    ASSERT_NE(crc, Mask(Mask(crc)));
+    ASSERT_EQ(crc, Unmask(Mask(crc)));
+    ASSERT_EQ(crc, Unmask(Unmask(Mask(Mask(crc)))));
+}
 
 } // namespace crc32c
 
-[[nodiscard]] auto describe_size(Size size, int precision = 4) -> std::string
+[[nodiscard]] auto describe_size(std::size_t size, int precision = 4) -> std::string
 {
-    static constexpr Size KiB {1'024};
+    static constexpr std::size_t KiB {1'024};
     static constexpr auto MiB = KiB * KiB;
     static constexpr auto GiB = MiB * KiB;
 
@@ -649,25 +662,26 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
 
 class InterceptorTests
     : public InMemoryTest,
-      public testing::Test {
+      public testing::Test
+{
 };
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
-    Quick_Interceptor("test/data", Tools::Interceptor::OPEN);
+    QUICK_INTERCEPTOR("test/data", Tools::Interceptor::OPEN);
 
     Editor *editor;
-    assert_special_error(storage_handle().new_editor("test/data", &editor));
-    expect_ok(storage_handle().new_editor("test/wal", &editor));
+    assert_special_error(get_env().new_editor("test/data", &editor));
+    expect_ok(get_env().new_editor("test/wal", &editor));
     delete editor;
 }
 
 TEST_F(InterceptorTests, RespectsSyscallType)
 {
-    Quick_Interceptor("test/data", Tools::Interceptor::WRITE);
+    QUICK_INTERCEPTOR("test/data", Tools::Interceptor::WRITE);
 
     Editor *editor;
-    expect_ok(storage_handle().new_editor("test/data", &editor));
+    expect_ok(get_env().new_editor("test/data", &editor));
     assert_special_error(editor->write({}, 0));
     delete editor;
 }
@@ -682,7 +696,7 @@ TEST(LoggingTests, StringifiesNumbers)
 
 TEST(LoggingTests, StringifiesMaximumNumber)
 {
-    auto n = std::numeric_limits<Size>::max();
+    auto n = std::numeric_limits<std::size_t>::max();
     auto s = number_to_string(n);
     while (!s.empty()) {
         ASSERT_EQ(s.back(), n % 10 + '0');
@@ -701,7 +715,7 @@ TEST(LoggingTests, EscapesStrings)
 
 TEST(LoggingTests, OnlyEscapesUnprintableCharacters)
 {
-    for (Size i {}; i < 256; ++i) {
+    for (std::size_t i {}; i < 256; ++i) {
         char data[] {static_cast<char>(i)};
         const auto str = escape_string({data, 1});
         if (std::isprint(*data)) {
@@ -728,8 +742,8 @@ TEST(LevelDB_Coding, Varint64)
         values.push_back(power - 1);
         values.push_back(power + 1);
     }
-    Size total_size {};
-    for (auto v: values) {
+    std::size_t total_size {};
+    for (auto v : values) {
         total_size += varint_length(v);
     }
 
@@ -770,4 +784,4 @@ TEST(Encoding, MaxVarintValue)
     ASSERT_EQ(result, max_value);
 }
 
-} // namespace Calico
+} // namespace calicodb

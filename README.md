@@ -14,6 +14,7 @@ It exposes a small API that allows storage and retrieval of arbitrary byte seque
 
 + [Features](#features)
 + [Caveats](#caveats)
++ [Goals](#goals)
 + [Documentation](#documentation)
 + [Dependencies](#dependencies)
 + [Performance](#performance)
@@ -72,7 +73,7 @@ For this reason, the SQLite3 benchmarks actually list the results for the batche
 
 ## TODO
 1. Get everything code reviewed!
-2. Need to implement repair (`Status Database::repair()`)
+2. Need to implement repair (`Status DB::repair()`)
     + Run when a database cannot be opened due to corruption (not the same as recovery)
 3. Support Windows (write a `Storage` implementation)
 4. When we roll back a transaction, we shouldn't undo any vacuum operations that have occurred
