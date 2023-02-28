@@ -1,13 +1,13 @@
 
-option(CALICO_BuildFuzzers "Build the fuzz targets" Off)
-option(CALICO_BuildUnitTests "Build the unit tests" On)
+option(CALICODB_BuildFuzzers "Build the fuzz targets" Off)
+option(CALICODB_BuildUnitTests "Build the unit tests" On)
 
 add_subdirectory(tools)
 
-if(CALICO_BuildFuzzers)
+if(CALICODB_BuildFuzzers)
     add_subdirectory(fuzzers)
 endif()
 
-if(CALICO_BuildUnitTests)
+if(CALICODB_BuildUnitTests)
     add_subdirectory(unit_tests)
 endif()

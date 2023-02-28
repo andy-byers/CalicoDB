@@ -16,7 +16,7 @@ public:
     {
         db_options.page_size = MINIMUM_PAGE_SIZE;
         db_options.cache_size = MINIMUM_PAGE_SIZE * 16;
-        db_options.storage = storage.get();
+        db_options.env = env.get();
         open();
     }
 
@@ -43,8 +43,8 @@ public:
         if (options != nullptr) {
             opts = *options;
         }
-        if (opts.storage == nullptr) {
-            opts.storage = storage.get();
+        if (opts.env == nullptr) {
+            opts.env = env.get();
         }
         tail.resize(wal_block_size(opts.page_size));
         return DB::open(db_prefix, opts, &db);
@@ -84,7 +84,7 @@ public:
         close();
         std::vector<Id> logs = get_logs();
         for (const auto &log : logs) {
-            EXPECT_OK(storage->remove_file(encode_segment_name(db_prefix + "wal-", log)));
+            EXPECT_OK(env->remove_file(encode_segment_name(db_prefix + "wal-", log)));
         }
         return logs.size();
     }
@@ -92,7 +92,7 @@ public:
     auto get_logs() -> std::vector<Id>
     {
         std::vector<std::string> filenames;
-        EXPECT_OK(storage->get_children(db_prefix, filenames));
+        EXPECT_OK(env->get_children(db_prefix, filenames));
         std::vector<Id> result;
         for (const auto &name : filenames) {
             if (name.find("wal-") != std::string::npos) {
@@ -102,15 +102,15 @@ public:
         return result;
     }
 
-    auto num_logs() -> Size
+    auto num_logs() -> std::size_t
     {
         return get_logs().size();
     }
 
-    auto file_size(const std::string &fname) -> Size
+    auto file_size(const std::string &fname) -> std::size_t
     {
-        Size result;
-        EXPECT_OK(storage->file_size(fname, result));
+        std::size_t result;
+        EXPECT_OK(env->file_size(fname, result));
         return result;
     }
 
@@ -191,19 +191,19 @@ TEST_F(RecoveryTests, RevertsNthTransaction)
 TEST_F(RecoveryTests, SanityCheck)
 {
     std::map<std::string, std::string> map;
-    const Size N {100};
+    const std::size_t N {100};
 
-    for (Size i {}; i < N; ++i) {
+    for (std::size_t i {}; i < N; ++i) {
         const auto k = random.Generate(db_options.page_size * 2);
         const auto v = random.Generate(db_options.page_size * 4);
         map[k.to_string()] = v.to_string();
     }
 
-    for (Size commit {}; commit < map.size(); ++commit) {
+    for (std::size_t commit {}; commit < map.size(); ++commit) {
         open();
 
         auto record = begin(map);
-        for (Size index {}; record != end(map); ++index, ++record) {
+        for (std::size_t index {}; record != end(map); ++index, ++record) {
             if (index == commit) {
                 ASSERT_OK(db->commit());
             } else {
@@ -213,7 +213,7 @@ TEST_F(RecoveryTests, SanityCheck)
         open();
 
         record = begin(map);
-        for (Size index {}; record != end(map); ++index, ++record) {
+        for (std::size_t index {}; record != end(map); ++index, ++record) {
             std::string value;
             if (index < commit) {
                 ASSERT_OK(db->get(record->first, value));
@@ -239,9 +239,9 @@ public:
         open();
 
         Tools::RandomGenerator random {1'024 * 1'024 * 8};
-        const Size N {5'000};
+        const std::size_t N {5'000};
 
-        for (Size i {}; i < N; ++i) {
+        for (std::size_t i {}; i < N; ++i) {
             const auto k = random.Generate(db_options.page_size * 2);
             const auto v = random.Generate(db_options.page_size * 4);
             map[k.to_string()] = v.to_string();
@@ -253,7 +253,7 @@ public:
     auto SetUp() -> void override
     {
         auto record = begin(map);
-        for (Size index {}; record != end(map); ++index, ++record) {
+        for (std::size_t index {}; record != end(map); ++index, ++record) {
             ASSERT_OK(db->put(record->first, record->second));
             if (record->first.front() % 10 == 1) {
                 ASSERT_OK(db->commit());
@@ -261,12 +261,12 @@ public:
         }
         ASSERT_OK(db->commit());
 
-        Counting_Interceptor(interceptor_prefix, interceptor_type, interceptor_count);
+        COUNTING_INTERCEPTOR(interceptor_prefix, interceptor_type, interceptor_count);
     }
 
     auto validate() -> void
     {
-        Clear_Interceptors();
+        CLEAR_INTERCEPTORS();
         open();
 
         for (const auto &[k, v] : map) {

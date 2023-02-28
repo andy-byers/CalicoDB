@@ -22,8 +22,8 @@
 
 #define CDB_TRY(expr)                                             \
     do {                                                             \
-        if (auto __calico_try_s = (expr); !__calico_try_s.is_ok()) { \
-            return __calico_try_s;                                   \
+        if (auto __cdb_try_s = (expr); !__cdb_try_s.is_ok()) { \
+            return __cdb_try_s;                                   \
         }                                                            \
     } while (0)
 
@@ -43,8 +43,8 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
 
 } // namespace Impl
 
-static constexpr Size MINIMUM_PAGE_SIZE {0x200};
-static constexpr Size MAXIMUM_PAGE_SIZE {0x8000};
+static constexpr std::size_t MINIMUM_PAGE_SIZE {0x200};
+static constexpr std::size_t MAXIMUM_PAGE_SIZE {0x8000};
 
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 template <class T>

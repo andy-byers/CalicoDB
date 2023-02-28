@@ -6,7 +6,7 @@
 namespace calicodb
 {
 
-static auto write_file_header(Byte *data, const FileHeader &header) -> void
+static auto write_file_header(char *data, const FileHeader &header) -> void
 {
     put_u32(data, header.magic_code);
     data += sizeof(std::uint32_t);
@@ -34,7 +34,7 @@ FileHeader::FileHeader(const Page &page)
 {
 }
 
-FileHeader::FileHeader(const Byte *data)
+FileHeader::FileHeader(const char *data)
 {
     magic_code = get_u32(data);
     data += sizeof(std::uint32_t);
@@ -59,7 +59,7 @@ FileHeader::FileHeader(const Byte *data)
 
 auto FileHeader::compute_crc() const -> std::uint32_t
 {
-    Byte data[FileHeader::SIZE];
+    char data[FileHeader::SIZE];
     write_file_header(data, *this);
     return crc32c::Value(data + 8, FileHeader::SIZE - 8);
 }
@@ -103,7 +103,7 @@ auto NodeHeader::write(Page &page) const -> void
 {
     auto *data = page.data() + page_offset(page) + sizeof(Lsn);
 
-    *data++ = static_cast<Byte>(is_external);
+    *data++ = static_cast<char>(is_external);
 
     put_u64(data, next_id.value);
     data += sizeof(Id);
@@ -123,7 +123,7 @@ auto NodeHeader::write(Page &page) const -> void
     put_u16(data, free_total);
     data += sizeof(PageSize);
 
-    *data = static_cast<Byte>(frag_count);
+    *data = static_cast<char>(frag_count);
     insert_delta(page.m_deltas, {page_offset(page), SIZE});
 }
 

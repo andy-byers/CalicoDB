@@ -5,7 +5,6 @@
 #ifndef CALICODB_SLICE_H
 #define CALICODB_SLICE_H
 
-#include "common.h"
 #include <cassert>
 #include <cstring>
 #include <string>
@@ -24,18 +23,18 @@ class Slice
 public:
     constexpr Slice() noexcept = default;
 
-    constexpr Slice(const Byte *data, Size size) noexcept
+    constexpr Slice(const char *data, std::size_t size) noexcept
         : m_data {data},
           m_size {size}
     {
         assert(m_data != nullptr);
     }
 
-    constexpr Slice(const Byte *data) noexcept
+    constexpr Slice(const char *data) noexcept
         : m_data {data}
     {
         assert(m_data != nullptr);
-        m_size = std::char_traits<Byte>::length(m_data);
+        m_size = std::char_traits<char>::length(m_data);
     }
 
     constexpr Slice(const std::string_view &rhs) noexcept
@@ -53,23 +52,23 @@ public:
         return m_size == 0;
     }
 
-    [[nodiscard]] constexpr auto data() const noexcept -> const Byte *
+    [[nodiscard]] constexpr auto data() const noexcept -> const char *
     {
         return m_data;
     }
 
-    [[nodiscard]] constexpr auto size() const noexcept -> Size
+    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
     {
         return m_size;
     }
 
-    constexpr auto operator[](Size index) const noexcept -> const Byte &
+    constexpr auto operator[](std::size_t index) const noexcept -> const char &
     {
         assert(index < m_size);
         return m_data[index];
     }
 
-    [[nodiscard]] constexpr auto range(Size offset, Size size) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(std::size_t offset, std::size_t size) const noexcept -> Slice
     {
         assert(size <= m_size);
         assert(offset <= m_size);
@@ -77,7 +76,7 @@ public:
         return {m_data + offset, size};
     }
 
-    [[nodiscard]] constexpr auto range(Size offset) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(std::size_t offset) const noexcept -> Slice
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
@@ -89,7 +88,7 @@ public:
         m_size = 0;
     }
 
-    constexpr auto advance(Size n = 1) noexcept -> Slice
+    constexpr auto advance(std::size_t n = 1) noexcept -> Slice
     {
         assert(n <= m_size);
         m_data += n;
@@ -97,7 +96,7 @@ public:
         return *this;
     }
 
-    constexpr auto truncate(Size size) noexcept -> Slice
+    constexpr auto truncate(std::size_t size) noexcept -> Slice
     {
         assert(size <= m_size);
         m_size = size;
@@ -118,8 +117,8 @@ public:
     }
 
 private:
-    const Byte *m_data {""};
-    Size m_size {};
+    const char *m_data {""};
+    std::size_t m_size {};
 };
 
 /*

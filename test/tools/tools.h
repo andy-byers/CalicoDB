@@ -93,8 +93,8 @@ class DynamicMemory : public Env
 
     [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &path) -> Status;
     [[nodiscard]] auto get_memory(const std::string &path) const -> Memory &;
-    [[nodiscard]] auto read_file_at(const Memory &mem, Byte *data_out, Size &size_out, Size offset) -> Status;
-    [[nodiscard]] auto write_file_at(Memory &mem, Slice in, Size offset) -> Status;
+    [[nodiscard]] auto read_file_at(const Memory &mem, char *data_out, std::size_t &size_out, std::size_t offset) -> Status;
+    [[nodiscard]] auto write_file_at(Memory &mem, Slice in, std::size_t offset) -> Status;
 
 public:
     [[nodiscard]] auto memory() -> std::unordered_map<std::string, Memory> &
@@ -119,8 +119,8 @@ public:
     [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
-    [[nodiscard]] auto resize_file(const std::string &path, Size size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, Size &out) const -> Status override;
+    [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
+    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
 };
 
@@ -141,7 +141,7 @@ class MemoryReader : public Reader
 
 public:
     ~MemoryReader() override = default;
-    [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
 };
 
 class MemoryEditor : public Editor
@@ -161,8 +161,8 @@ class MemoryEditor : public Editor
 
 public:
     ~MemoryEditor() override = default;
-    [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
-    [[nodiscard]] auto write(Slice in, Size offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto write(Slice in, std::size_t offset) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
 
@@ -210,7 +210,7 @@ public:
 };
 
 template <std::size_t Length = 12>
-static auto integral_key(Size key) -> std::string
+static auto integral_key(std::size_t key) -> std::string
 {
     auto key_string = std::to_string(key);
     if (key_string.size() == Length) {
@@ -242,12 +242,12 @@ private:
     using Engine = std::default_random_engine;
 
     std::string m_data;
-    mutable Size m_pos {};
+    mutable std::size_t m_pos {};
     mutable Engine m_rng; // Not in LevelDB.
 
 public:
-    explicit RandomGenerator(Size size = 4 /* KiB */ * 1'024);
-    auto Generate(Size len) const -> Slice;
+    explicit RandomGenerator(std::size_t size = 4 /* KiB */ * 1'024);
+    auto Generate(std::size_t len) const -> Slice;
 
     // Not in LevelDB.
     template <class T>
@@ -267,9 +267,9 @@ public:
 };
 
 struct DatabaseCounts {
-    Size records {};
-    Size pages {};
-    Size updates {};
+    std::size_t records {};
+    std::size_t pages {};
+    std::size_t updates {};
 };
 
 [[nodiscard]] inline auto parse_db_counts(std::string prop) -> DatabaseCounts
@@ -301,9 +301,9 @@ struct DatabaseCounts {
 
 struct DatabaseStats {
     double cache_hit_ratio {};
-    Size data_throughput {};
-    Size pager_throughput {};
-    Size wal_throughput {};
+    std::size_t data_throughput {};
+    std::size_t pager_throughput {};
+    std::size_t wal_throughput {};
 };
 
 [[nodiscard]] inline auto parse_db_stats(std::string prop) -> DatabaseStats

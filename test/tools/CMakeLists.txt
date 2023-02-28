@@ -1,11 +1,11 @@
 
-add_library(calico_tools
+add_library(calicodb_tools
         tools.cpp
         tools.h)
-target_link_libraries(calico_tools
-        PUBLIC calico)
-target_include_directories(calico_tools
-        PRIVATE "${CALICO_SOURCE_DIR}"
+target_link_libraries(calicodb_tools
+        PUBLIC calicodb)
+target_include_directories(calicodb_tools
+        PRIVATE "${PROJECT_SOURCE_DIR}/src"
         PUBLIC .)
-target_compile_options(calico_tools
-        PRIVATE "${CALICO_WARNINGS}")
+target_compile_options(calicodb_tools
+        PRIVATE "${CALICODB_WARNINGS}")

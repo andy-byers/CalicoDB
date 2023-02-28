@@ -1,7 +1,6 @@
 #ifndef CALICODB_CALICODB_H
 #define CALICODB_CALICODB_H
 
-#include "common.h"
 #include "cursor.h"
 #include "db.h"
 #include "env.h"

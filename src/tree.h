@@ -13,7 +13,7 @@ class BPlusTree;
 
 struct SearchResult {
     Node node;
-    Size index {};
+    std::size_t index {};
     bool exact {};
 };
 
@@ -26,7 +26,7 @@ class NodeIterator
     std::string *m_lhs_key {};
     std::string *m_rhs_key {};
     Node *m_node {};
-    Size m_index {};
+    std::size_t m_index {};
 
     [[nodiscard]] auto fetch_key(std::string &buffer, const Cell &cell, Slice &out) const -> Status;
 
@@ -37,7 +37,7 @@ public:
         std::string *rhs_key {};
     };
     explicit NodeIterator(Node &node, const Parameters &param);
-    [[nodiscard]] auto index() const -> Size;
+    [[nodiscard]] auto index() const -> std::size_t;
     [[nodiscard]] auto seek(const Slice &key, bool *found = nullptr) -> Status;
     [[nodiscard]] auto seek(const Cell &cell, bool *found = nullptr) -> Status;
 };
@@ -54,12 +54,12 @@ public:
      * memory and set as the node's overflow cell. May allocate an overflow chain with its back pointer
      * pointing to "node".
      */
-    [[nodiscard]] auto emplace(Byte *scratch, Node &node, const Slice &key, const Slice &value, Size index) -> Status;
+    [[nodiscard]] auto emplace(char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
 
     /* Prepare a cell read from an external node to be posted into its parent as a separator. Will
      * allocate a new overflow chain for overflowing keys, pointing back to "parent_id".
      */
-    [[nodiscard]] auto promote(Byte *scratch, Cell &cell, Id parent_id) -> Status;
+    [[nodiscard]] auto promote(char *scratch, Cell &cell, Id parent_id) -> Status;
 
     [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
     [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
@@ -88,7 +88,7 @@ class BPlusTree
     Pager *m_pager {};
 
     [[nodiscard]] auto vacuum_step(Page &head, Id last_id) -> Status;
-    [[nodiscard]] auto cell_scratch() -> Byte *;
+    [[nodiscard]] auto cell_scratch() -> char *;
     [[nodiscard]] auto lowest(Node &out) -> Status;
     [[nodiscard]] auto highest(Node &out) -> Status;
 
@@ -142,8 +142,8 @@ public:
     [[nodiscard]] auto find_parent_id(Id pid, Id &out) const -> Status;
     [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type = PointerMap::NODE) -> Status;
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
-    [[nodiscard]] auto insert_cell(Node &node, Size index, const Cell &cell) -> Status;
-    [[nodiscard]] auto remove_cell(Node &node, Size index) -> Status;
+    [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
+    [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;
     [[nodiscard]] auto fix_links(Node &node) -> Status;
 
     auto make_existing_node(Node &out) const -> void;
@@ -161,24 +161,24 @@ public:
     [[nodiscard]] auto split_non_root(Node node, Node &out) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto fix_root(Node root) -> Status;
-    [[nodiscard]] auto fix_non_root(Node node, Node &parent, Size index) -> Status;
-    [[nodiscard]] auto merge_left(Node &left, Node right, Node &parent, Size index) -> Status;
-    [[nodiscard]] auto merge_right(Node &left, Node right, Node &parent, Size index) -> Status;
-    [[nodiscard]] auto rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status;
-    [[nodiscard]] auto rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status;
+    [[nodiscard]] auto fix_non_root(Node node, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
+    [[nodiscard]] auto rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
 
 private:
     [[nodiscard]] auto split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status;
     [[nodiscard]] auto find_external_slot(const Slice &key, Node node, SearchResult &out) const -> Status;
     [[nodiscard]] auto transfer_left(Node &left, Node &right) -> Status;
-    [[nodiscard]] auto internal_merge_left(Node &left, Node &right, Node &parent, Size index) -> Status;
-    [[nodiscard]] auto external_merge_left(Node &left, Node &right, Node &parent, Size index) -> Status;
-    [[nodiscard]] auto internal_merge_right(Node &left, Node &right, Node &parent, Size index) -> Status;
-    [[nodiscard]] auto external_merge_right(Node &left, Node &right, Node &parent, Size index) -> Status;
-    [[nodiscard]] auto external_rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status;
-    [[nodiscard]] auto internal_rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status;
-    [[nodiscard]] auto external_rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status;
-    [[nodiscard]] auto internal_rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status;
+    [[nodiscard]] auto internal_merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto external_merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto internal_merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto external_merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto external_rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
+    [[nodiscard]] auto internal_rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
+    [[nodiscard]] auto external_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
+    [[nodiscard]] auto internal_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
 
     BPlusTree *m_tree {};
     PointerMap *m_pointers {};

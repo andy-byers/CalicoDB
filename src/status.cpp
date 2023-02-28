@@ -4,7 +4,7 @@
 namespace calicodb
 {
 
-enum Code : Byte {
+enum Code : char {
     C_InvalidArgument = 1,
     C_SystemError = 2,
     C_LogicError = 3,
@@ -12,30 +12,30 @@ enum Code : Byte {
     C_NotFound = 5,
 };
 
-static auto maybe_copy_data(const Byte *data) -> std::unique_ptr<Byte[]>
+static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
 {
     // Status is OK, so there isn't anything to copy.
     if (data == nullptr) {
         return nullptr;
     }
     // Allocate memory for the copied message/status code.
-    const auto total_size = std::char_traits<Byte>::length(data) + sizeof(Byte);
-    auto copy = std::make_unique<Byte[]>(total_size);
+    const auto total_size = std::char_traits<char>::length(data) + sizeof(char);
+    auto copy = std::make_unique<char[]>(total_size);
 
-    // Copy the status, std::make_unique<Byte[]>() will zero initialize, so we already have the null byte.
-    std::memcpy(copy.get(), data, total_size - sizeof(Byte));
+    // Copy the status, std::make_unique<char[]>() will zero initialize, so we already have the null byte.
+    std::memcpy(copy.get(), data, total_size - sizeof(char));
     return copy;
 }
 
-Status::Status(Byte code, const Slice &what)
-    : m_data {std::make_unique<Byte[]>(what.size() + 2 * sizeof(Byte))}
+Status::Status(char code, const Slice &what)
+    : m_data {std::make_unique<char[]>(what.size() + 2 * sizeof(char))}
 {
     auto *ptr = m_data.get();
 
     // The first byte holds the status type.
     *ptr++ = code;
 
-    // The rest holds the message, plus a '\0'. std::make_unique<Byte[]>() performs value initialization, so the byte is already
+    // The rest holds the message, plus a '\0'. std::make_unique<char[]>() performs value initialization, so the byte is already
     // zeroed out. See https://en.cppreference.com/w/cpp/memory/unique_ptr/make_unique, overload (2).
     std::memcpy(ptr, what.data(), what.size());
 }

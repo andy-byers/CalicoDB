@@ -9,17 +9,17 @@ namespace calicodb
 {
 
 struct Id {
-    static constexpr Size null_value {0};
-    static constexpr Size root_value {1};
+    static constexpr std::size_t null_value {0};
+    static constexpr std::size_t root_value {1};
 
     struct Hash {
-        auto operator()(const Id &id) const -> Size
+        auto operator()(const Id &id) const -> std::size_t
         {
             return id.value;
         }
     };
 
-    [[nodiscard]] static constexpr auto from_index(Size index) noexcept -> Id
+    [[nodiscard]] static constexpr auto from_index(std::size_t index) noexcept -> Id
     {
         return {index + 1};
     }
@@ -44,13 +44,13 @@ struct Id {
         return value == root_value;
     }
 
-    [[nodiscard]] constexpr auto as_index() const noexcept -> Size
+    [[nodiscard]] constexpr auto as_index() const noexcept -> std::size_t
     {
         CDB_EXPECT_NE(value, null().value);
         return value - 1;
     }
 
-    Size value {};
+    std::size_t value {};
 };
 
 inline auto operator<(Id lhs, Id rhs) -> bool
@@ -88,9 +88,9 @@ using Lsn = Id;
 class AlignedBuffer
 {
 public:
-    AlignedBuffer(Size size, Size alignment)
+    AlignedBuffer(std::size_t size, std::size_t alignment)
         : m_data {
-              new (std::align_val_t {alignment}, std::nothrow) Byte[size](),
+              new (std::align_val_t {alignment}, std::nothrow) char[size](),
               Deleter {std::align_val_t {alignment}},
           }
     {
@@ -98,19 +98,19 @@ public:
         CDB_EXPECT_EQ(size % alignment, 0);
     }
 
-    [[nodiscard]] auto get() -> Byte *
+    [[nodiscard]] auto get() -> char *
     {
         return m_data.get();
     }
 
-    [[nodiscard]] auto get() const -> const Byte *
+    [[nodiscard]] auto get() const -> const char *
     {
         return m_data.get();
     }
 
 private:
     struct Deleter {
-        auto operator()(Byte *ptr) const -> void
+        auto operator()(char *ptr) const -> void
         {
             operator delete[](ptr, alignment);
         }
@@ -118,7 +118,7 @@ private:
         std::align_val_t alignment;
     };
 
-    std::unique_ptr<Byte[], Deleter> m_data;
+    std::unique_ptr<char[], Deleter> m_data;
 };
 
 template <class T>
@@ -188,18 +188,18 @@ class Span
 public:
     constexpr Span() noexcept = default;
 
-    constexpr Span(Byte *data, Size size) noexcept
+    constexpr Span(char *data, std::size_t size) noexcept
         : m_data {data},
           m_size {size}
     {
         CDB_EXPECT_NE(m_data, nullptr);
     }
 
-    constexpr Span(Byte *data) noexcept
+    constexpr Span(char *data) noexcept
         : m_data {data}
     {
         CDB_EXPECT_NE(m_data, nullptr);
-        m_size = std::char_traits<Byte>::length(m_data);
+        m_size = std::char_traits<char>::length(m_data);
     }
 
     Span(std::string &rhs) noexcept
@@ -212,17 +212,17 @@ public:
         return m_size == 0;
     }
 
-    [[nodiscard]] constexpr auto data() noexcept -> Byte *
+    [[nodiscard]] constexpr auto data() noexcept -> char *
     {
         return m_data;
     }
 
-    [[nodiscard]] constexpr auto data() const noexcept -> const Byte *
+    [[nodiscard]] constexpr auto data() const noexcept -> const char *
     {
         return m_data;
     }
 
-    [[nodiscard]] constexpr auto size() const noexcept -> Size
+    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
     {
         return m_size;
     }
@@ -232,19 +232,19 @@ public:
         return {m_data, m_size};
     }
 
-    constexpr auto operator[](Size index) const noexcept -> const Byte &
+    constexpr auto operator[](std::size_t index) const noexcept -> const char &
     {
         assert(index < m_size);
         return m_data[index];
     }
 
-    constexpr auto operator[](Size index) noexcept -> Byte &
+    constexpr auto operator[](std::size_t index) noexcept -> char &
     {
         assert(index < m_size);
         return m_data[index];
     }
 
-    [[nodiscard]] constexpr auto range(Size offset, Size size) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(std::size_t offset, std::size_t size) const noexcept -> Slice
     {
         assert(size <= m_size);
         assert(offset <= m_size);
@@ -253,7 +253,7 @@ public:
         return Slice {m_data + offset, size};
     }
 
-    [[nodiscard]] constexpr auto range(Size offset, Size size) noexcept -> Span
+    [[nodiscard]] constexpr auto range(std::size_t offset, std::size_t size) noexcept -> Span
     {
         assert(size <= m_size);
         assert(offset <= m_size);
@@ -262,13 +262,13 @@ public:
         return Span {m_data + offset, size};
     }
 
-    [[nodiscard]] constexpr auto range(Size offset) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(std::size_t offset) const noexcept -> Slice
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
     }
 
-    [[nodiscard]] constexpr auto range(Size offset) noexcept -> Span
+    [[nodiscard]] constexpr auto range(std::size_t offset) noexcept -> Span
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
@@ -285,7 +285,7 @@ public:
         m_size = 0;
     }
 
-    constexpr auto advance(Size n = 1) noexcept -> Span
+    constexpr auto advance(std::size_t n = 1) noexcept -> Span
     {
         assert(n <= m_size);
         m_data += n;
@@ -293,17 +293,17 @@ public:
         return *this;
     }
 
-    constexpr auto truncate(Size size) noexcept -> Span
+    constexpr auto truncate(std::size_t size) noexcept -> Span
     {
         assert(size <= m_size);
         m_size = size;
         return *this;
     }
 
-    [[nodiscard]] constexpr auto starts_with(const Byte *rhs) const noexcept -> bool
+    [[nodiscard]] constexpr auto starts_with(const char *rhs) const noexcept -> bool
     {
         // NOTE: rhs must be null-terminated.
-        const auto size = std::char_traits<Byte>::length(rhs);
+        const auto size = std::char_traits<char>::length(rhs);
         if (size > m_size)
             return false;
         return std::memcmp(m_data, rhs, size) == 0;
@@ -322,8 +322,8 @@ public:
     }
 
 private:
-    Byte *m_data {};
-    Size m_size {};
+    char *m_data {};
+    std::size_t m_size {};
 };
 
 inline auto mem_copy(Span dst, const Slice &src, size_t n) noexcept -> void *
@@ -350,7 +350,7 @@ inline auto mem_clear(Span mem) noexcept -> void *
     return mem_clear(mem, mem.size());
 }
 
-inline auto mem_move(Span dst, const Slice &src, Size n) noexcept -> void *
+inline auto mem_move(Span dst, const Slice &src, std::size_t n) noexcept -> void *
 {
     CDB_EXPECT_LE(n, src.size());
     CDB_EXPECT_LE(n, dst.size());

@@ -10,7 +10,7 @@ RecordGenerator::RecordGenerator(Parameters param)
 {
 }
 
-auto RecordGenerator::generate(Tools::RandomGenerator &random, Size num_records) const -> std::vector<Record>
+auto RecordGenerator::generate(Tools::RandomGenerator &random, std::size_t num_records) const -> std::vector<Record>
 {
     const auto [mks, mvs, spread, is_sequential, is_unique] = m_param;
     std::vector<Record> records(num_records);
@@ -21,20 +21,20 @@ auto RecordGenerator::generate(Tools::RandomGenerator &random, Size num_records)
     const auto max_vs = mvs + spread;
     auto itr = records.begin();
     std::unordered_set<std::string> set;
-    Size num_collisions {};
+    std::size_t num_collisions {};
 
     while (itr != records.end()) {
-        const auto ks = random.Next<Size>(min_ks, max_ks);
+        const auto ks = random.Next<std::size_t>(min_ks, max_ks);
         auto key = random.Generate(ks).to_string();
         if (is_sequential) {
             if (set.find(key) != end(set)) {
-                CALICO_EXPECT_LT(num_collisions, num_records);
+                CDB_EXPECT_LT(num_collisions, num_records);
                 num_collisions++;
                 continue;
             }
             set.emplace(key);
         }
-        const auto vs = random.Next<Size>(min_vs, max_vs);
+        const auto vs = random.Next<std::size_t>(min_vs, max_vs);
         itr->key = std::move(key);
         itr->value = random.Generate(vs).to_string();
         itr++;

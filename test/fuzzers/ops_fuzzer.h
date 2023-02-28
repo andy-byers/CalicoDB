@@ -1,5 +1,5 @@
-#ifndef CALICO_FUZZERS_OPS_FUZZER_H
-#define CALICO_FUZZERS_OPS_FUZZER_H
+#ifndef CALICODB_FUZZERS_OPS_FUZZER_H
+#define CALICODB_FUZZERS_OPS_FUZZER_H
 
 #include "fuzzer.h"
 
@@ -16,4 +16,4 @@ public:
 
 } // namespace calicodb
 
-#endif // CALICO_FUZZERS_OPS_FUZZER_H
+#endif // CALICODB_FUZZERS_OPS_FUZZER_H

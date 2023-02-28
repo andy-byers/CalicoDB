@@ -70,15 +70,15 @@ class WalRecordGenerator
 public:
     [[nodiscard]] auto setup_deltas(Span image) -> std::vector<PageDelta>
     {
-        static constexpr Size MAX_WIDTH {30};
-        static constexpr Size MAX_SPREAD {20};
+        static constexpr std::size_t MAX_WIDTH {30};
+        static constexpr std::size_t MAX_SPREAD {20};
         std::vector<PageDelta> deltas;
 
-        for (auto offset = random.Next<Size>(image.size() / 10); offset < image.size();) {
+        for (auto offset = random.Next<std::size_t>(image.size() / 10); offset < image.size();) {
             const auto rest = image.size() - offset;
-            const auto size = random.Next<Size>(1, std::min(rest, MAX_WIDTH));
+            const auto size = random.Next<std::size_t>(1, std::min(rest, MAX_WIDTH));
             deltas.emplace_back(PageDelta {offset, size});
-            offset += size + random.Next<Size>(1, MAX_SPREAD);
+            offset += size + random.Next<std::size_t>(1, MAX_SPREAD);
         }
         for (const auto &[offset, size] : deltas) {
             const auto replacement = random.Generate(size);
@@ -94,7 +94,7 @@ private:
 class WalPayloadTests : public testing::Test
 {
 public:
-    static constexpr Size PAGE_SIZE {0x80};
+    static constexpr std::size_t PAGE_SIZE {0x80};
 
     WalPayloadTests()
         : image {random.Generate(PAGE_SIZE).to_string()},
@@ -149,9 +149,9 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 class WalSetTests : public testing::Test
 {
 public:
-    auto add_segments(Size n)
+    auto add_segments(std::size_t n)
     {
-        for (Size i {}; i < n; ++i) {
+        for (std::size_t i {}; i < n; ++i) {
             auto id = Id::from_index(i);
             set.add_segment(id);
         }
@@ -185,7 +185,7 @@ TEST_F(WalSetTests, RecordsMostRecentId)
 }
 
 template <class Itr>
-[[nodiscard]] auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, Id id, Size n)
+[[nodiscard]] auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, Id id, std::size_t n)
 {
     return std::distance(begin, end) == std::ptrdiff_t(n) && std::all_of(begin, end, [&id](auto current) {
                return current.value == id.value++;
@@ -246,7 +246,7 @@ class WalComponentTests
       public testing::Test
 {
 public:
-    static constexpr Size PAGE_SIZE {0x200};
+    static constexpr std::size_t PAGE_SIZE {0x200};
     const std::string WAL_PREFIX {"test/wal-"};
 
     WalComponentTests()
@@ -271,13 +271,13 @@ public:
 
     [[nodiscard]] auto make_reader(Id id) -> WalReader
     {
-        EXPECT_OK(storage->new_reader(encode_segment_name(WAL_PREFIX, id), &m_reader_file));
+        EXPECT_OK(env->new_reader(encode_segment_name(WAL_PREFIX, id), &m_reader_file));
         return WalReader {*m_reader_file, m_reader_tail};
     }
 
     [[nodiscard]] auto make_writer(Id id) -> WalWriter
     {
-        EXPECT_OK(storage->new_logger(encode_segment_name(WAL_PREFIX, id), &m_writer_file));
+        EXPECT_OK(env->new_logger(encode_segment_name(WAL_PREFIX, id), &m_writer_file));
         return WalWriter {*m_writer_file, m_writer_tail};
     }
 
@@ -294,7 +294,7 @@ public:
         out.resize(wal_scratch_size(PAGE_SIZE));
         Span buffer {out};
 
-        CALICO_TRY(reader.read(buffer));
+        CDB_TRY(reader.read(buffer));
         WalPayloadOut payload {buffer};
         if (lsn != nullptr) {
             *lsn = payload.lsn();
@@ -357,12 +357,12 @@ TEST_F(WalComponentTests, HandlesRecordsWithinBlock)
 TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
 {
     auto writer = make_writer(Id::root());
-    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
-    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
         ASSERT_EQ(wal_read(reader), Tools::integral_key(i));
     }
     assert_reader_is_done(reader);
@@ -375,7 +375,7 @@ TEST_F(WalComponentTests, ReaderReportsMismatchedCrc)
     ASSERT_OK(writer.flush());
 
     Editor *editor;
-    ASSERT_OK(storage->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(env->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
     ASSERT_OK(editor->write("TEST", WalRecordHeader::SIZE + sizeof(Lsn)));
     delete editor;
 
@@ -387,7 +387,7 @@ TEST_F(WalComponentTests, ReaderReportsMismatchedCrc)
 TEST_F(WalComponentTests, ReaderReportsEmptyFile)
 {
     Editor *editor;
-    ASSERT_OK(storage->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(env->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
     delete editor;
 
     std::string buffer;
@@ -398,7 +398,7 @@ TEST_F(WalComponentTests, ReaderReportsEmptyFile)
 TEST_F(WalComponentTests, ReaderReportsIncompleteBlock)
 {
     Editor *editor;
-    ASSERT_OK(storage->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(env->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
     ASSERT_OK(editor->write("\x01\x02\x03", 0));
     delete editor;
 
@@ -420,7 +420,7 @@ TEST_F(WalComponentTests, ReaderReportsInvalidSize)
     write_wal_record_header(buffer, header);
 
     Editor *editor;
-    ASSERT_OK(storage->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(env->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
     ASSERT_OK(editor->write(buffer, 0));
     delete editor;
 
@@ -438,7 +438,7 @@ TEST_F(WalComponentTests, ReadsFirstLsn)
     set.add_segment(Id::root());
 
     Lsn first_lsn;
-    ASSERT_OK(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn));
+    ASSERT_OK(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn));
     ASSERT_EQ(first_lsn, Lsn {42});
     ASSERT_EQ(set.first_lsn(Id::root()), Lsn {42});
 }
@@ -448,24 +448,24 @@ TEST_F(WalComponentTests, FailureToReadFirstLsn)
     WalSet set;
     set.add_segment(Id::root());
 
-    // File does not exist in storage, so the reader can't be opened.
+    // File does not exist in env, so the reader can't be opened.
     Lsn first_lsn;
-    ASSERT_TRUE(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn).is_not_found());
+    ASSERT_TRUE(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn).is_not_found());
 
     // File exists, but is empty.
     Logger *logger;
-    ASSERT_OK(storage->new_logger(encode_segment_name(WAL_PREFIX, Id::root()), &logger));
-    ASSERT_TRUE(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_OK(env->new_logger(encode_segment_name(WAL_PREFIX, Id::root()), &logger));
+    ASSERT_TRUE(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
 
     // File is too small to read the LSN.
     std::string buffer(WalRecordHeader::SIZE + 3, '\0');
     ASSERT_OK(logger->write(buffer));
-    ASSERT_TRUE(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_TRUE(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
 
     // LSN is NULL.
     buffer.resize(wal_block_size(PAGE_SIZE) - buffer.size());
     ASSERT_OK(logger->write(buffer));
-    ASSERT_TRUE(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_TRUE(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
 
     delete logger;
 }
@@ -478,14 +478,14 @@ TEST_F(WalComponentTests, PrefersToGetLsnFromCache)
 
     // File doesn't exist, but the LSN is cached.
     Lsn first_lsn;
-    ASSERT_OK(read_first_lsn(*storage, WAL_PREFIX, Id::root(), set, first_lsn));
+    ASSERT_OK(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn));
     ASSERT_EQ(first_lsn, Lsn {42});
 }
 
 TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
 {
     auto writer = make_writer(Id::root());
-    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
         if (rand() % 8 == 0) {
             ASSERT_OK(writer.flush());
@@ -493,7 +493,7 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
-    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
         ASSERT_EQ(wal_read(reader), Tools::integral_key(i));
     }
     assert_reader_is_done(reader);
@@ -503,13 +503,13 @@ TEST_F(WalComponentTests, Corruption)
 {
     // Don't flush the writer, so it leaves a partial record in the WAL.
     auto writer = make_writer(Id::root());
-    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
     }
     ASSERT_LT(writer.flushed_lsn(), Lsn {PAGE_SIZE * 2 - 1});
 
     auto reader = make_reader(Id::root());
-    for (Size i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
         std::string data;
         auto s = wal_read_with_status(reader, data);
         if (s.is_corruption()) {
@@ -535,7 +535,7 @@ public:
         WriteAheadLog *temp;
         WriteAheadLog::Parameters param {
             WAL_PREFIX,
-            storage.get(),
+            env.get(),
             PAGE_SIZE,
             SEGMENT_CUTOFF};
         ASSERT_OK(WriteAheadLog::open(param, &temp));

@@ -12,21 +12,12 @@ class InfoLogger;
 class Status;
 class Env;
 
-enum class LogLevel {
-    Trace,
-    Info,
-    Warn,
-    Error,
-    Off,
-};
-
 struct Options {
     std::size_t page_size {0x2000};
     std::size_t cache_size {};
     Slice wal_prefix;
-    LogLevel log_level {LogLevel::Off};
     InfoLogger *info_log {};
-    Env *storage {};
+    Env *env {};
     bool create_if_missing {true};
     bool error_if_exists {};
 };

@@ -8,8 +8,8 @@ namespace calicodb
 {
 
 struct PageDelta {
-    Size offset {};
-    Size size {};
+    std::size_t offset {};
+    std::size_t size {};
 };
 
 using ChangeBuffer = std::vector<PageDelta>;
@@ -17,7 +17,7 @@ using ChangeBuffer = std::vector<PageDelta>;
 /*
  * Join overlapping deltas in a sorted (by offset) vector. Makes sure that delta WAL records are minimally sized.
  */
-auto compress_deltas(ChangeBuffer &deltas) -> Size;
+auto compress_deltas(ChangeBuffer &deltas) -> std::size_t;
 
 /*
  * Insert a delta into a sorted vector, possibly joining it with the first overlapping delta. Only resolves

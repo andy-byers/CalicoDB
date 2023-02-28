@@ -11,17 +11,17 @@ namespace calicodb
 {
 
 template <class Base, class Store>
-[[nodiscard]] auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
+[[nodiscard]] auto open_blob(Store &env, const std::string &name) -> std::unique_ptr<Base>
 {
     auto s = Status::ok();
     Base *temp {};
 
     if constexpr (std::is_same_v<Reader, Base>) {
-        s = storage.new_reader(name, &temp);
+        s = env.new_reader(name, &temp);
     } else if constexpr (std::is_same_v<Editor, Base>) {
-        s = storage.new_editor(name, &temp);
+        s = env.new_editor(name, &temp);
     } else if constexpr (std::is_same_v<Logger, Base>) {
-        s = storage.new_logger(name, &temp);
+        s = env.new_logger(name, &temp);
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
@@ -49,13 +49,13 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
 template <class Writer>
 constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer, const Slice &message) -> void
 {
-    constexpr Size num_chunks {20};
+    constexpr std::size_t num_chunks {20};
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
     Slice in {message};
-    Size counter {};
+    std::size_t counter {};
 
     while (!in.is_empty()) {
-        const auto chunk_size = std::min(in.size(), random.Next<Size>(message.size() / num_chunks));
+        const auto chunk_size = std::min(in.size(), random.Next<std::size_t>(message.size() / num_chunks));
         auto chunk = in.range(0, chunk_size);
 
         if constexpr (std::is_base_of_v<Logger, Writer>) {
@@ -70,18 +70,18 @@ constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer
 }
 
 template <class Reader>
-[[nodiscard]] auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, Size size) -> std::string
+[[nodiscard]] auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, std::size_t size) -> std::string
 {
-    static constexpr Size num_chunks {20};
+    static constexpr std::size_t num_chunks {20};
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
     std::string backing(size, '\x00');
     Span out {backing};
-    Size counter {};
+    std::size_t counter {};
 
     while (!out.is_empty()) {
-        const auto chunk_size = std::min(out.size(), random.Next<Size>(size / num_chunks));
+        const auto chunk_size = std::min(out.size(), random.Next<std::size_t>(size / num_chunks));
         auto chunk = out.range(0, chunk_size);
-        Size read_size = chunk.size();
+        std::size_t read_size = chunk.size();
         const auto s = reader.read(chunk.data(), read_size, counter);
 
         if (read_size != chunk_size) {
@@ -121,7 +121,7 @@ public:
         std::filesystem::remove_all(filename);
 
         InfoLogger *temp;
-        EXPECT_OK(storage->new_info_logger(filename, &temp));
+        EXPECT_OK(env->new_info_logger(filename, &temp));
         file.reset(temp);
     }
 
@@ -154,7 +154,7 @@ public:
     PosixReaderTests()
     {
         write_whole_file(filename, "");
-        file = open_blob<Reader>(*storage, filename);
+        file = open_blob<Reader>(*env, filename);
     }
 
     std::unique_ptr<Reader> file;
@@ -180,7 +180,7 @@ class PosixEditorTests : public FileTests
 {
 public:
     PosixEditorTests()
-        : file {open_blob<Editor>(*storage, filename)}
+        : file {open_blob<Editor>(*env, filename)}
     {
     }
 
@@ -207,7 +207,7 @@ class PosixLoggerTests : public FileTests
 {
 public:
     PosixLoggerTests()
-        : file {open_blob<Logger>(*storage, filename)}
+        : file {open_blob<Logger>(*env, filename)}
     {
     }
 
@@ -254,15 +254,15 @@ public:
 TEST_F(DynamicEnvTests, ReaderCannotCreateFile)
 {
     Reader *temp;
-    const auto s = storage->new_reader("nonexistent", &temp);
+    const auto s = env->new_reader("nonexistent", &temp);
     ASSERT_TRUE(s.is_not_found()) << "Error: " << s.to_string().data();
 }
 
 TEST_F(DynamicEnvTests, ReadsAndWrites)
 {
-    auto ra_editor = open_blob<Editor>(*storage, filename);
-    auto ra_reader = open_blob<Reader>(*storage, filename);
-    auto ap_writer = open_blob<Logger>(*storage, filename);
+    auto ra_editor = open_blob<Editor>(*env, filename);
+    auto ra_reader = open_blob<Reader>(*env, filename);
+    auto ap_writer = open_blob<Logger>(*env, filename);
 
     const auto first_input = random.Generate(500);
     const auto second_input = random.Generate(500);
@@ -276,8 +276,8 @@ TEST_F(DynamicEnvTests, ReadsAndWrites)
 
 TEST_F(DynamicEnvTests, ReaderStopsAtEOF)
 {
-    auto ra_editor = open_blob<Editor>(*storage, filename);
-    auto ra_reader = open_blob<Reader>(*storage, filename);
+    auto ra_editor = open_blob<Editor>(*env, filename);
+    auto ra_reader = open_blob<Reader>(*env, filename);
 
     const auto data = random.Generate(500);
     write_out_randomly(random, *ra_editor, data);

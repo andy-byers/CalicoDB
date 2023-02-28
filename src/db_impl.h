@@ -62,14 +62,14 @@ private:
     std::string m_db_prefix;
     std::string m_wal_prefix;
     std::string m_scratch;
-    Env *m_storage {};
+    Env *m_env {};
     InfoLogger *m_info_log {};
     std::size_t m_txn_size {};
     std::size_t m_record_count {};
     std::size_t m_bytes_written {};
     Lsn m_commit_lsn;
     bool m_in_txn {true};
-    bool m_owns_storage {};
+    bool m_owns_env {};
     bool m_owns_info_log {};
     bool m_is_setup {};
 };

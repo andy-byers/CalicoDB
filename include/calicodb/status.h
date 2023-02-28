@@ -1,7 +1,6 @@
 #ifndef CALICODB_STATUS_H
 #define CALICODB_STATUS_H
 
-#include "common.h"
 #include <memory>
 
 namespace calicodb
@@ -58,10 +57,10 @@ public:
 
 private:
     // Construct a non-OK status.
-    explicit Status(Byte code, const Slice &what);
+    explicit Status(char code, const Slice &what);
 
     // Storage for a status code and a null-terminated message.
-    std::unique_ptr<Byte[]> m_data;
+    std::unique_ptr<char[]> m_data;
 };
 
 // Status object should be the size of a pointer.

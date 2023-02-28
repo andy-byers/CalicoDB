@@ -19,16 +19,7 @@ class SetupTests
     : public InMemoryTest,
       public testing::Test
 {
-public:
-    //    auto write_header(const FileHeader &header) -> void
-    //    {
-    //        Editor *editor;
-    //        ASSERT_OK(storage->new_editor("test/data", &editor));
-    //        Byte buffer[FileHeader::SIZE];
-    //        header.write(buffer);
-    //        editor->write()
-    //        delete editor;
-    //    }
+
 };
 
 TEST_F(SetupTests, ReportsInvalidPageSizes)
@@ -37,13 +28,13 @@ TEST_F(SetupTests, ReportsInvalidPageSizes)
     Options options;
 
     options.page_size = MINIMUM_PAGE_SIZE / 2;
-    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+    ASSERT_TRUE(setup("test", *env, options, header).is_invalid_argument());
 
     options.page_size = MAXIMUM_PAGE_SIZE * 2;
-    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+    ASSERT_TRUE(setup("test", *env, options, header).is_invalid_argument());
 
     options.page_size = MINIMUM_PAGE_SIZE + 1;
-    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+    ASSERT_TRUE(setup("test", *env, options, header).is_invalid_argument());
 }
 
 TEST_F(SetupTests, ReportsInvalidCacheSize)
@@ -52,7 +43,7 @@ TEST_F(SetupTests, ReportsInvalidCacheSize)
     Options options;
 
     options.cache_size = 1;
-    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+    ASSERT_TRUE(setup("test", *env, options, header).is_invalid_argument());
 }
 
 TEST_F(SetupTests, ReportsInvalidFileHeader)
@@ -60,29 +51,29 @@ TEST_F(SetupTests, ReportsInvalidFileHeader)
     FileHeader header;
     Options options;
 
-    ASSERT_TRUE(setup("test", *storage, options, header).is_invalid_argument());
+    ASSERT_TRUE(setup("test", *env, options, header).is_invalid_argument());
 }
 
 TEST(LeakTests, DestroysOwnObjects)
 {
     DB *db;
-    ASSERT_OK(DB::open("__calico_test", {}, &db));
+    ASSERT_OK(DB::open("__calicodb_test", {}, &db));
     delete db;
-    ASSERT_OK(DB::destroy("__calico_test", {}));
+    ASSERT_OK(DB::destroy("__calicodb_test", {}));
 }
 
 TEST(LeakTests, LeavesUserObjects)
 {
     Options options;
-    options.storage = new Tools::DynamicMemory;
+    options.env = new Tools::DynamicMemory;
     options.info_log = new Tools::StderrLogger;
 
     DB *db;
-    ASSERT_OK(DB::open("__calico_test", options, &db));
+    ASSERT_OK(DB::open("__calicodb_test", options, &db));
     delete db;
 
     delete options.info_log;
-    delete options.storage;
+    delete options.env;
 }
 
 class BasicDatabaseTests
@@ -94,8 +85,7 @@ public:
     {
         options.page_size = 0x200;
         options.cache_size = options.page_size * frame_count;
-        options.log_level = LogLevel::Off;
-        options.storage = storage.get();
+        options.env = env.get();
     }
 
     ~BasicDatabaseTests() override
@@ -109,18 +99,18 @@ public:
     }
 
     std::string prefix {PREFIX};
-    Size frame_count {64};
+    std::size_t frame_count {64};
     Options options;
 };
 
 TEST_F(BasicDatabaseTests, OpensAndCloses)
 {
     DB *db;
-    for (Size i {}; i < 3; ++i) {
+    for (std::size_t i {}; i < 3; ++i) {
         ASSERT_OK(DB::open(ROOT, options, &db));
         delete db;
     }
-    ASSERT_TRUE(storage->file_exists(prefix + "data").is_ok());
+    ASSERT_TRUE(env->file_exists(prefix + "data").is_ok());
 }
 
 TEST_F(BasicDatabaseTests, RecordCountIsTracked)
@@ -144,33 +134,33 @@ TEST_F(BasicDatabaseTests, RecordCountIsTracked)
 TEST_F(BasicDatabaseTests, IsDestroyed)
 {
     std::error_code code;
-    fs::remove_all("/tmp/calico_test_wal", code);
-    ASSERT_OK(storage->create_directory("/tmp/calico_test_wal"));
-    options.wal_prefix = "/tmp/calico_test_wal/wal_file_";
+    fs::remove_all("/tmp/calicodb_test_wal", code);
+    ASSERT_OK(env->create_directory("/tmp/calicodb_test_wal"));
+    options.wal_prefix = "/tmp/calicodb_test_wal/wal_file_";
 
     DB *db;
     ASSERT_OK(DB::open(ROOT, options, &db));
-    ASSERT_TRUE(storage->file_exists(prefix + "data").is_ok());
-    ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_ok());
+    ASSERT_TRUE(env->file_exists(prefix + "data").is_ok());
+    ASSERT_TRUE(env->file_exists(options.wal_prefix.to_string() + "1").is_ok());
     delete db;
 
     // TODO: Ensure that WAL files stored in a separate location are deleted as well.
     ASSERT_OK(DB::destroy(ROOT, options));
-    ASSERT_TRUE(storage->file_exists(prefix + "data").is_not_found());
-    ASSERT_TRUE(storage->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
+    ASSERT_TRUE(env->file_exists(prefix + "data").is_not_found());
+    ASSERT_TRUE(env->file_exists(options.wal_prefix.to_string() + "1").is_not_found());
 }
 
-static auto insert_random_groups(DB &db, Size num_groups, Size group_size)
+static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
 {
     RecordGenerator generator;
     Tools::RandomGenerator random {4 * 1'024 * 1'024};
 
-    for (Size iteration {}; iteration < num_groups; ++iteration) {
+    for (std::size_t iteration {}; iteration < num_groups; ++iteration) {
         const auto records = generator.generate(random, group_size);
         auto itr = cbegin(records);
         ASSERT_OK(db.status());
 
-        for (Size i {}; i < group_size; ++i) {
+        for (std::size_t i {}; i < group_size; ++i) {
             ASSERT_OK(db.put(itr->key, itr->value));
             ++itr;
         }
@@ -197,8 +187,8 @@ TEST_F(BasicDatabaseTests, InsertMultipleGroups)
 
 TEST_F(BasicDatabaseTests, DataPersists)
 {
-    static constexpr Size NUM_ITERATIONS {5};
-    static constexpr Size GROUP_SIZE {10};
+    static constexpr std::size_t NUM_ITERATIONS {5};
+    static constexpr std::size_t GROUP_SIZE {10};
 
     auto s = Status::ok();
     RecordGenerator generator;
@@ -208,11 +198,11 @@ TEST_F(BasicDatabaseTests, DataPersists)
     auto itr = cbegin(records);
     DB *db;
 
-    for (Size iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
+    for (std::size_t iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         ASSERT_OK(DB::open(ROOT, options, &db));
         ASSERT_OK(db->status());
 
-        for (Size i {}; i < GROUP_SIZE; ++i) {
+        for (std::size_t i {}; i < GROUP_SIZE; ++i) {
             ASSERT_OK(db->put(itr->key, itr->value));
             ++itr;
         }
@@ -231,16 +221,16 @@ TEST_F(BasicDatabaseTests, DataPersists)
 
 TEST_F(BasicDatabaseTests, TwoDatabases)
 {
-    fs::remove_all("/tmp/calico_test_1");
-    fs::remove_all("/tmp/calico_test_2");
+    fs::remove_all("/tmp/calicodb_test_1");
+    fs::remove_all("/tmp/calicodb_test_2");
 
     DB *lhs;
-    expect_ok(DB::open("/tmp/calico_test_1", options, &lhs));
+    expect_ok(DB::open("/tmp/calicodb_test_1", options, &lhs));
 
     DB *rhs;
-    expect_ok(DB::open("/tmp/calico_test_2", options, &rhs));
+    expect_ok(DB::open("/tmp/calicodb_test_2", options, &rhs));
 
-    for (Size i {}; i < 10; ++i) {
+    for (std::size_t i {}; i < 10; ++i) {
         expect_ok(lhs->put(Tools::integral_key(i), "value"));
     }
     expect_ok(lhs->commit());
@@ -257,7 +247,7 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
 
     expect_ok(rhs->commit());
 
-    Size i {};
+    std::size_t i {};
     cursor = rhs->new_cursor();
     cursor->seek_first();
     while (cursor->is_valid()) {
@@ -272,13 +262,13 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
     delete lhs;
     delete rhs;
 
-    expect_ok(DB::destroy("/tmp/calico_test_1", options));
-    expect_ok(DB::destroy("/tmp/calico_test_2", options));
+    expect_ok(DB::destroy("/tmp/calicodb_test_1", options));
+    expect_ok(DB::destroy("/tmp/calicodb_test_2", options));
 }
 
 class DbVacuumTests
     : public InMemoryTest,
-      public testing::TestWithParam<std::tuple<Size, Size, bool>>
+      public testing::TestWithParam<std::tuple<std::size_t, std::size_t, bool>>
 {
 public:
     DbVacuumTests()
@@ -288,15 +278,15 @@ public:
     {
         options.page_size = 0x200;
         options.cache_size = 0x200 * 16;
-        options.storage = storage.get();
+        options.env = env.get();
     }
 
     std::unordered_map<std::string, std::string> map;
     Tools::RandomGenerator random {1'024 * 1'024 * 8};
     DB *db {};
     Options options;
-    Size lower_bounds {};
-    Size upper_bounds {};
+    std::size_t lower_bounds {};
+    std::size_t upper_bounds {};
     bool reopen {};
 };
 
@@ -304,7 +294,7 @@ TEST_P(DbVacuumTests, SanityCheck)
 {
     ASSERT_OK(DB::open(ROOT, options, &db));
 
-    for (Size iteration {}; iteration < 4; ++iteration) {
+    for (std::size_t iteration {}; iteration < 4; ++iteration) {
         if (reopen) {
             delete db;
             ASSERT_OK(DB::open(ROOT, options, &db));
@@ -324,7 +314,7 @@ TEST_P(DbVacuumTests, SanityCheck)
         dynamic_cast<DBImpl &>(*db).TEST_validate();
         ASSERT_OK(db->commit());
 
-        Size i {};
+        std::size_t i {};
         for (const auto &[key, value] : map) {
             ++i;
             std::string result;
@@ -351,11 +341,11 @@ INSTANTIATE_TEST_SUITE_P(
 class TestDatabase
 {
 public:
-    explicit TestDatabase(Env &storage)
+    explicit TestDatabase(Env &env)
     {
         options.page_size = 0x200;
         options.cache_size = 32 * options.page_size;
-        options.storage = &storage;
+        options.env = &env;
 
         EXPECT_OK(reopen());
     }
@@ -381,20 +371,20 @@ class DbRevertTests
 protected:
     DbRevertTests()
     {
-        db = std::make_unique<TestDatabase>(*storage);
+        db = std::make_unique<TestDatabase>(*env);
     }
     ~DbRevertTests() override = default;
 
     std::unique_ptr<TestDatabase> db;
 };
 
-static auto add_records(TestDatabase &test, Size n)
+static auto add_records(TestDatabase &test, std::size_t n)
 {
     std::map<std::string, std::string> records;
 
-    for (Size i {}; i < n; ++i) {
-        const auto key_size = test.random.Next<Size>(16);
-        const auto value_size = test.random.Next<Size>(100);
+    for (std::size_t i {}; i < n; ++i) {
+        const auto key_size = test.random.Next<std::size_t>(16);
+        const auto value_size = test.random.Next<std::size_t>(100);
         const auto key = test.random.Generate(key_size).to_string();
         const auto value = test.random.Generate(value_size).to_string();
         EXPECT_OK(test.impl->put(key, value));
@@ -454,12 +444,12 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
 
 TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 {
-    for (Size i {}; i < 100; ++i) {
+    for (std::size_t i {}; i < 100; ++i) {
         add_records(*db, 100);
         ASSERT_OK(db->impl->commit());
     }
     run_revert_test(*db);
-    for (Size i {}; i < 100; ++i) {
+    for (std::size_t i {}; i < 100; ++i) {
         add_records(*db, 100);
     }
 }
@@ -478,12 +468,12 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
     std::map<std::string, std::string> snapshot;
 
     {
-        TestDatabase db {*storage};
+        TestDatabase db {*env};
         snapshot = add_records(db, 5);
         ASSERT_OK(db.impl->commit());
 
         // Simulate a crash by cloning the database before cleanup has occurred.
-        clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*storage).clone());
+        clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*env).clone());
 
         (void)db.impl->pager->flush({});
     }
@@ -500,16 +490,16 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
     std::map<std::string, std::string> snapshot;
 
     {
-        TestDatabase db {*storage};
+        TestDatabase db {*env};
 
-        for (Size i {}; i < 10; ++i) {
+        for (std::size_t i {}; i < 10; ++i) {
             for (const auto &[k, v] : add_records(db, 100)) {
                 snapshot[k] = v;
             }
             ASSERT_OK(db.impl->commit());
         }
 
-        clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*storage).clone());
+        clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*env).clone());
 
         (void)db.impl->pager->flush({});
     }
@@ -526,19 +516,19 @@ enum class ErrorTarget {
 
 class DbErrorTests
     : public InMemoryTest,
-      public testing::TestWithParam<Size>
+      public testing::TestWithParam<std::size_t>
 {
 protected:
     DbErrorTests()
     {
-        storage = std::make_unique<Tools::DynamicMemory>();
-        EXPECT_OK(storage->create_directory("test"));
-        db = std::make_unique<TestDatabase>(*storage);
+        env = std::make_unique<Tools::DynamicMemory>();
+        EXPECT_OK(env->create_directory("test"));
+        db = std::make_unique<TestDatabase>(*env);
 
         committed = add_records(*db, 5'000);
         EXPECT_OK(db->impl->commit());
 
-        storage_handle().add_interceptor(
+        get_env().add_interceptor(
             Tools::Interceptor {
                 "test/data",
                 Tools::Interceptor::READ,
@@ -553,12 +543,12 @@ protected:
 
     std::unique_ptr<TestDatabase> db;
     std::map<std::string, std::string> committed;
-    Size counter {};
+    std::size_t counter {};
 };
 
 TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
 {
-    for (Size iteration {}; iteration < 2; ++iteration) {
+    for (std::size_t iteration {}; iteration < 2; ++iteration) {
         for (const auto &[k, v] : committed) {
             std::string value;
             const auto s = db->impl->get(k, value);
@@ -621,7 +611,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 struct ErrorWrapper {
     ErrorTarget target {};
-    Size successes {};
+    std::size_t successes {};
 };
 
 class DbFatalErrorTests
@@ -631,11 +621,11 @@ class DbFatalErrorTests
 protected:
     DbFatalErrorTests()
     {
-        db = std::make_unique<TestDatabase>(*storage);
+        db = std::make_unique<TestDatabase>(*env);
 
         // Make sure all page types are represented in the database.
         committed = add_records(*db, 5'000);
-        for (Size i {}; i < 500; ++i) {
+        for (std::size_t i {}; i < 500; ++i) {
             const auto itr = begin(committed);
             EXPECT_OK(db->impl->erase(itr->first));
             committed.erase(itr);
@@ -654,16 +644,16 @@ protected:
 
         switch (GetParam().target) {
         case ErrorTarget::DataRead:
-            storage_handle().add_interceptor(make_interceptor("test/data", Tools::Interceptor::READ));
+            get_env().add_interceptor(make_interceptor("test/data", Tools::Interceptor::READ));
             break;
         case ErrorTarget::DataWrite:
-            storage_handle().add_interceptor(make_interceptor("test/data", Tools::Interceptor::WRITE));
+            get_env().add_interceptor(make_interceptor("test/data", Tools::Interceptor::WRITE));
             break;
         case ErrorTarget::WalRead:
-            storage_handle().add_interceptor(make_interceptor("test/wal", Tools::Interceptor::READ));
+            get_env().add_interceptor(make_interceptor("test/wal", Tools::Interceptor::READ));
             break;
         case ErrorTarget::WalWrite:
-            storage_handle().add_interceptor(make_interceptor("test/wal", Tools::Interceptor::WRITE));
+            get_env().add_interceptor(make_interceptor("test/wal", Tools::Interceptor::WRITE));
             break;
         }
     }
@@ -672,16 +662,16 @@ protected:
 
     std::unique_ptr<TestDatabase> db;
     std::map<std::string, std::string> committed;
-    Size counter {};
+    std::size_t counter {};
 };
 
 TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
 {
     while (db->impl->status().is_ok()) {
         auto itr = begin(committed);
-        for (Size i {}; i < committed.size() && db->impl->erase((itr++)->first).is_ok(); ++i)
+        for (std::size_t i {}; i < committed.size() && db->impl->erase((itr++)->first).is_ok(); ++i)
             ;
-        for (Size i {}; i < committed.size() && db->impl->put((itr++)->first, "value").is_ok(); ++i)
+        for (std::size_t i {}; i < committed.size() && db->impl->put((itr++)->first, "value").is_ok(); ++i)
             ;
     }
     assert_special_error(db->impl->status());
@@ -717,7 +707,7 @@ TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
     }
     db->impl.reset();
 
-    storage_handle().clear_interceptors();
+    get_env().clear_interceptors();
     db->impl = std::make_unique<DBImpl>();
     ASSERT_OK(db->impl->open("test", db->options));
 
@@ -740,7 +730,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
     assert_special_error(db->impl->vacuum());
     db->impl.reset();
 
-    storage_handle().clear_interceptors();
+    get_env().clear_interceptors();
     db->impl = std::make_unique<DBImpl>();
     ASSERT_OK(db->impl->open("test", db->options));
 
@@ -749,10 +739,10 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
     }
     Tools::validate_db(*db->impl);
 
-    Size file_size;
-    ASSERT_OK(storage->file_size("test/data", file_size));
+    std::size_t file_size;
+    ASSERT_OK(env->file_size("test/data", file_size));
     std::string property;
-    ASSERT_TRUE(db->impl->get_property("calico.counts", property));
+    ASSERT_TRUE(db->impl->get_property("calicodb.counts", property));
     const auto counts = Tools::parse_db_counts(property);
     ASSERT_EQ(file_size, counts.pages * db->options.page_size);
 }
@@ -836,7 +826,7 @@ public:
 
 class ExtendedDatabase : public DB
 {
-    std::unique_ptr<Tools::DynamicMemory> m_storage;
+    std::unique_ptr<Tools::DynamicMemory> m_env;
     std::unique_ptr<DB> m_base;
 
 public:
@@ -847,14 +837,14 @@ public:
         if (ext == nullptr) {
             return Status::system_error("cannot allocate extension database: out of memory");
         }
-        auto storage = std::make_unique<Tools::DynamicMemory>();
-        options.storage = storage.get();
+        auto env = std::make_unique<Tools::DynamicMemory>();
+        options.env = env.get();
 
         DB *db;
-        CALICO_TRY(DB::open(base, options, &db));
+        CDB_TRY(DB::open(base, options, &db));
 
         ext->m_base.reset(db);
-        ext->m_storage = std::move(storage);
+        ext->m_env = std::move(env);
         *out = ext;
         return Status::ok();
     }
@@ -938,7 +928,7 @@ class DbOpenTests
 protected:
     DbOpenTests()
     {
-        options.storage = storage.get();
+        options.env = env.get();
         (void)DB::destroy(PREFIX, options);
     }
 
@@ -984,7 +974,7 @@ class ApiTests
 protected:
     ApiTests()
     {
-        options.storage = storage.get();
+        options.env = env.get();
     }
 
     ~ApiTests() override
@@ -1009,7 +999,7 @@ TEST_F(ApiTests, IsConstCorrect)
     const auto *const_db = db;
     ASSERT_OK(const_db->get("key", value));
     std::string property;
-    ASSERT_TRUE(const_db->get_property("calico.counts", property));
+    ASSERT_TRUE(const_db->get_property("calicodb.counts", property));
     ASSERT_EQ(property, "records:1,pages:1,updates:1");
     ASSERT_OK(const_db->status());
 
@@ -1063,7 +1053,7 @@ TEST_F(ApiTests, EmptyTransactionsAreOk)
     ASSERT_OK(db->commit());
 }
 
-TEST_F(ApiTests, KeysCanBeArbitraryBytes)
+TEST_F(ApiTests, KeysCanBeArbitrarychars)
 {
     const std::string key_1 {"\x00\x00", 2};
     const std::string key_2 {"\x00\x01", 2};
@@ -1130,15 +1120,15 @@ TEST_F(ApiTests, HandlesLargeKeys)
 class LargePayloadTests : public ApiTests
 {
 public:
-    [[nodiscard]] auto random_string(Size max_size) const -> std::string
+    [[nodiscard]] auto random_string(std::size_t max_size) const -> std::string
     {
-        return random.Generate(random.Next<Size>(1, max_size)).to_string();
+        return random.Generate(random.Next<std::size_t>(1, max_size)).to_string();
     }
 
-    auto run_test(Size max_key_size, Size max_value_size)
+    auto run_test(std::size_t max_key_size, std::size_t max_value_size)
     {
         std::unordered_map<std::string, std::string> map;
-        for (Size i {}; i < 100; ++i) {
+        for (std::size_t i {}; i < 100; ++i) {
             const auto key = random_string(max_key_size);
             const auto value = random_string(max_value_size);
             ASSERT_OK(db->put(key, value));
@@ -1209,7 +1199,7 @@ protected:
 
         delete db;
 
-        storage_handle().clear_interceptors();
+        get_env().clear_interceptors();
         ASSERT_OK(DB::open("test", options, &db));
 
         assert_contains_exactly({"A", "B", "C", "a", "b", "c"});
@@ -1222,7 +1212,7 @@ protected:
 
         delete db;
 
-        storage_handle().clear_interceptors();
+        get_env().clear_interceptors();
         ASSERT_OK(DB::open("test", options, &db));
 
         assert_contains_exactly({"A", "B", "C"});
@@ -1231,7 +1221,7 @@ protected:
 
 TEST_F(CommitFailureTests, WalFlushFailure)
 {
-    Quick_Interceptor("test/wal", Tools::Interceptor::WRITE);
+    QUICK_INTERCEPTOR("test/wal", Tools::Interceptor::WRITE);
     run_failure_path();
 }
 
@@ -1242,7 +1232,7 @@ class WalPrefixTests
 public:
     WalPrefixTests()
     {
-        options.storage = storage.get();
+        options.env = env.get();
     }
 
     Options options;

@@ -6,7 +6,7 @@ namespace calicodb
 
 auto Env::default_env() -> Env *
 {
-    return new PosixEnv;
+    return new EnvPosix;
 }
 
 } // namespace calicodb

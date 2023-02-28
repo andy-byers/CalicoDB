@@ -6,24 +6,24 @@ set(CMAKE_C_FLAGS_RELWITHASSERTIONS "-O3"
         CACHE STRING "C compiler flags for a RelWithAssertions build" FORCE)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
-project(CalicoDB
+project(calicodb
         LANGUAGES CXX
         VERSION 0.0.1)
 set(CMAKE_CXX_STANDARD 17)
 
-set(CALICO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set(CALICODB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 set(MAIN_PROJECT Off)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     set(MAIN_PROJECT On)
 endif()
 
-option(CALICO_BuildTests "Build the tests when BUILD_TESTING is set" ${MAIN_PROJECT})
-option(CALICO_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
+option(CALICODB_BuildTests "Build the tests" ${MAIN_PROJECT})
+option(CALICODB_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
 
 add_subdirectory(src)
 
-if(CALICO_BuildTests)
+if(CALICODB_BuildTests)
     include(FetchContent)
     include(CTest)
     enable_testing()
@@ -45,13 +45,13 @@ configure_package_config_file(
 write_basic_package_version_file("${VERSION_FILE}"
         COMPATIBILITY SameMajorVersion)
 
-if(CALICO_Install)
+if(CALICODB_Install)
     install(TARGETS calicodb
             EXPORT "${TARGETS_NAME}"
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
             LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
             ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-    install(DIRECTORY "${CALICO_INCLUDE_DIR}/calico"
+    install(DIRECTORY "${CALICODB_INCLUDE_DIR}/calico"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
     install(EXPORT "${TARGETS_NAME}"

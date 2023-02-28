@@ -21,14 +21,14 @@ class Env;
 class Frame final
 {
 public:
-    Frame(Byte *buffer, Size id, Size size);
+    Frame(char *buffer, std::size_t id, std::size_t size);
 
     [[nodiscard]] auto pid() const -> Id
     {
         return m_page_id;
     }
 
-    [[nodiscard]] auto ref_count() const -> Size
+    [[nodiscard]] auto ref_count() const -> std::size_t
     {
         return m_ref_count;
     }
@@ -57,7 +57,7 @@ public:
 private:
     Span m_bytes;
     Id m_page_id;
-    Size m_ref_count {};
+    std::size_t m_ref_count {};
     bool m_is_writable {};
 };
 
@@ -67,45 +67,45 @@ public:
     friend class DBImpl;
     friend class Pager;
 
-    explicit FrameManager(Editor &file, AlignedBuffer buffer, Size page_size, Size frame_count);
+    explicit FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count);
     ~FrameManager() = default;
-    [[nodiscard]] auto write_back(Size index) -> Status;
+    [[nodiscard]] auto write_back(std::size_t index) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto pin(Id pid, Size &fid) -> Status;
-    auto unpin(Size) -> void;
-    auto ref(Size index, Page &out) -> void;
-    auto unref(Size index, Page page) -> void;
-    auto upgrade(Size index, Page &page) -> void;
+    [[nodiscard]] auto pin(Id pid, std::size_t &fid) -> Status;
+    auto unpin(std::size_t) -> void;
+    auto ref(std::size_t index, Page &out) -> void;
+    auto unref(std::size_t index, Page page) -> void;
+    auto upgrade(std::size_t index, Page &page) -> void;
     auto load_state(const FileHeader &header) -> void;
     auto save_state(FileHeader &header) const -> void;
 
-    [[nodiscard]] auto page_count() const -> Size
+    [[nodiscard]] auto page_count() const -> std::size_t
     {
         return m_page_count;
     }
 
-    [[nodiscard]] auto page_size() const -> Size
+    [[nodiscard]] auto page_size() const -> std::size_t
     {
         return m_page_size;
     }
 
-    [[nodiscard]] auto available() const -> Size
+    [[nodiscard]] auto available() const -> std::size_t
     {
         return m_available.size();
     }
 
-    [[nodiscard]] auto ref_sum() const -> Size
+    [[nodiscard]] auto ref_sum() const -> std::size_t
     {
         return m_ref_sum;
     }
 
-    [[nodiscard]] auto get_frame(Size index) const -> const Frame &
+    [[nodiscard]] auto get_frame(std::size_t index) const -> const Frame &
     {
         CDB_EXPECT_LT(index, m_frames.size());
         return m_frames[index];
     }
 
-    [[nodiscard]] auto bytes_written() const -> Size
+    [[nodiscard]] auto bytes_written() const -> std::size_t
     {
         return m_bytes_written;
     }
@@ -119,12 +119,12 @@ private:
 
     AlignedBuffer m_buffer;
     std::vector<Frame> m_frames;
-    std::list<Size> m_available;
+    std::list<std::size_t> m_available;
     std::unique_ptr<Editor> m_file;
-    Size m_page_count {};
-    Size m_page_size {};
-    Size m_ref_sum {};
-    Size m_bytes_written {};
+    std::size_t m_page_count {};
+    std::size_t m_page_size {};
+    std::size_t m_ref_sum {};
+    std::size_t m_bytes_written {};
 };
 
 } // namespace calicodb

@@ -1,5 +1,5 @@
-#ifndef CALICO_FUZZERS_MAP_FUZZER_H
-#define CALICO_FUZZERS_MAP_FUZZER_H
+#ifndef CALICODB_FUZZERS_MAP_FUZZER_H
+#define CALICODB_FUZZERS_MAP_FUZZER_H
 
 #include "fuzzer.h"
 #include <map>
@@ -23,4 +23,4 @@ private:
 
 } // namespace calicodb
 
-#endif // CALICO_FUZZERS_MAP_FUZZER_H
+#endif // CALICODB_FUZZERS_MAP_FUZZER_H

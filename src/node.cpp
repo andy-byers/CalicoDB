@@ -22,33 +22,33 @@ static auto cell_area_offset(const Node &node)
     return cell_slots_offset(node) + node.header.cell_count * sizeof(PageSize);
 }
 
-auto internal_cell_size(const NodeMeta &meta, const Byte *data) -> Size
+auto internal_cell_size(const NodeMeta &meta, const char *data) -> std::size_t
 {
-    Size key_size;
+    std::size_t key_size;
     const auto *ptr = decode_varint(data + sizeof(Id), key_size);
     const auto local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
     const auto extra_size = (local_size < key_size) * sizeof(Id);
-    const auto header_size = static_cast<Size>(ptr - data);
+    const auto header_size = static_cast<std::size_t>(ptr - data);
     return header_size + local_size + extra_size;
 }
 
-auto external_cell_size(const NodeMeta &meta, const Byte *data) -> Size
+auto external_cell_size(const NodeMeta &meta, const char *data) -> std::size_t
 {
-    Size key_size, value_size;
+    std::size_t key_size, value_size;
     const auto *ptr = decode_varint(data, value_size);
     ptr = decode_varint(ptr, key_size);
     const auto local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
     const auto extra_size = (local_size < key_size + value_size) * sizeof(Id);
-    const auto header_size = static_cast<Size>(ptr - data);
+    const auto header_size = static_cast<std::size_t>(ptr - data);
     return header_size + local_size + extra_size;
 }
 
-auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell
+auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
 {
-    Size key_size, value_size;
+    std::size_t key_size, value_size;
     const auto *ptr = decode_varint(data, value_size);
     ptr = decode_varint(ptr, key_size);
-    const auto header_size = static_cast<Size>(ptr - data);
+    const auto header_size = static_cast<std::size_t>(ptr - data);
 
     Cell cell;
     cell.ptr = data;
@@ -61,12 +61,12 @@ auto parse_external_cell(const NodeMeta &meta, Byte *data) -> Cell
     return cell;
 }
 
-auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell
+auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
 {
-    Size key_size;
+    std::size_t key_size;
     const auto *ptr = data + sizeof(Id);
     ptr = decode_varint(ptr, key_size);
-    const auto header_size = static_cast<Size>(ptr - data);
+    const auto header_size = static_cast<std::size_t>(ptr - data);
 
     Cell cell;
     cell.ptr = data;
@@ -79,7 +79,7 @@ auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell
     return cell;
 }
 
-[[nodiscard]] static auto cell_size_direct(const Node &node, Size offset) -> Size
+[[nodiscard]] static auto cell_size_direct(const Node &node, std::size_t offset) -> std::size_t
 {
     return node.meta->cell_size(*node.meta, node.page.data() + offset);
 }
@@ -88,23 +88,23 @@ class BlockAllocator
 {
     Node *m_node {};
 
-    [[nodiscard]] auto get_next_pointer(Size offset) -> PageSize
+    [[nodiscard]] auto get_next_pointer(std::size_t offset) -> PageSize
     {
         return get_u16(m_node->page.data() + offset);
     }
 
-    [[nodiscard]] auto get_block_size(Size offset) -> PageSize
+    [[nodiscard]] auto get_block_size(std::size_t offset) -> PageSize
     {
         return get_u16(m_node->page.data() + offset + sizeof(PageSize));
     }
 
-    auto set_next_pointer(Size offset, PageSize value) -> void
+    auto set_next_pointer(std::size_t offset, PageSize value) -> void
     {
         CDB_EXPECT_LT(value, m_node->page.size());
         return put_u16(m_node->page.span(offset, sizeof(PageSize)), value);
     }
 
-    auto set_block_size(Size offset, PageSize value) -> void
+    auto set_block_size(std::size_t offset, PageSize value) -> void
     {
         CDB_EXPECT_GE(value, 4);
         CDB_EXPECT_LT(value, m_node->page.size());
@@ -219,7 +219,7 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
     auto ptr = m_node->page.data();
     std::vector<PageSize> ptrs(n);
 
-    for (Size index {}; index < n; ++index) {
+    for (std::size_t index {}; index < n; ++index) {
         if (index == to_skip) {
             continue;
         }
@@ -230,7 +230,7 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
         std::memcpy(m_node->scratch + end, ptr + offset, size);
         ptrs[index] = end;
     }
-    for (Size index {}; index < n; ++index) {
+    for (std::size_t index {}; index < n; ++index) {
         if (index == to_skip) {
             continue;
         }
@@ -264,19 +264,19 @@ auto Node::initialize() -> void
     gap_size = static_cast<PageSize>(top - bottom);
 }
 
-auto Node::get_slot(Size index) const -> Size
+auto Node::get_slot(std::size_t index) const -> std::size_t
 {
     CDB_EXPECT_LT(index, header.cell_count);
     return get_u16(page.data() + slots_offset + index * sizeof(PageSize));
 }
 
-auto Node::set_slot(Size index, Size pointer) -> void
+auto Node::set_slot(std::size_t index, std::size_t pointer) -> void
 {
     CDB_EXPECT_LT(index, header.cell_count);
     return put_u16(page.span(slots_offset + index * sizeof(PageSize), sizeof(PageSize)), static_cast<PageSize>(pointer));
 }
 
-auto Node::insert_slot(Size index, Size pointer) -> void
+auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
 {
     CDB_EXPECT_LE(index, header.cell_count);
     CDB_EXPECT_GE(gap_size, sizeof(PageSize));
@@ -292,7 +292,7 @@ auto Node::insert_slot(Size index, Size pointer) -> void
     ++header.cell_count;
 }
 
-auto Node::remove_slot(Size index) -> void
+auto Node::remove_slot(std::size_t index) -> void
 {
     CDB_EXPECT_LT(index, header.cell_count);
     const auto offset = slots_offset + index * sizeof(PageSize);
@@ -318,7 +318,7 @@ auto Node::TEST_validate() -> void
 {
 #if not NDEBUG
     CDB_EXPECT_LE(header.frag_count + 3, 0xFF);
-    std::vector<Byte> used(page.size());
+    std::vector<char> used(page.size());
     const auto account = [&x = used](auto from, auto size) {
         auto lower = begin(x) + long(from);
         auto upper = begin(x) + long(from) + long(size);
@@ -338,8 +338,8 @@ auto Node::TEST_validate() -> void
     // Free list blocks.
     {
         PageSize i {header.free_start};
-        const Byte *data = page.data();
-        Size free_total {};
+        const char *data = page.data();
+        std::size_t free_total {};
         while (i) {
             const auto size = get_u16(data + i + sizeof(PageSize));
             account(i, size);
@@ -349,7 +349,7 @@ auto Node::TEST_validate() -> void
         CDB_EXPECT_EQ(free_total + header.frag_count, header.free_total);
     }
     // Cell bodies. Also makes sure the cells are in order.
-    for (Size n {}; n < header.cell_count; ++n) {
+    for (std::size_t n {}; n < header.cell_count; ++n) {
         const auto lhs_ptr = get_slot(n);
         const auto lhs_cell = read_cell_at(*this, lhs_ptr);
         account(lhs_ptr, lhs_cell.size);
@@ -373,16 +373,16 @@ auto Node::TEST_validate() -> void
         [](auto accum, auto next) {
             return accum + next;
         });
-    CDB_EXPECT_EQ(page.size(), Size(total_bytes));
+    CDB_EXPECT_EQ(page.size(), std::size_t(total_bytes));
 #endif // not NDEBUG
 }
 
-auto usable_space(const Node &node) -> Size
+auto usable_space(const Node &node) -> std::size_t
 {
     return node.header.free_total + node.gap_size;
 }
 
-auto allocate_block(Node &node, PageSize index, PageSize size) -> Size
+auto allocate_block(Node &node, PageSize index, PageSize size) -> std::size_t
 {
     CDB_EXPECT_LE(index, node.header.cell_count);
 
@@ -422,17 +422,17 @@ static auto free_block(Node &node, PageSize index, PageSize size) -> void
     node.remove_slot(index);
 }
 
-auto read_cell_at(Node &node, Size offset) -> Cell
+auto read_cell_at(Node &node, std::size_t offset) -> Cell
 {
     return node.meta->parse_cell(*node.meta, node.page.data() + offset);
 }
 
-auto read_cell(Node &node, Size index) -> Cell
+auto read_cell(Node &node, std::size_t index) -> Cell
 {
     return read_cell_at(node, node.get_slot(index));
 }
 
-auto write_cell(Node &node, Size index, const Cell &cell) -> Size
+auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
 {
     if (const auto offset = allocate_block(node, static_cast<PageSize>(index), static_cast<PageSize>(cell.size))) {
         auto memory = node.page.span(offset, cell.size);
@@ -444,18 +444,18 @@ auto write_cell(Node &node, Size index, const Cell &cell) -> Size
     return 0;
 }
 
-auto erase_cell(Node &node, Size index) -> void
+auto erase_cell(Node &node, std::size_t index) -> void
 {
     erase_cell(node, index, cell_size_direct(node, node.get_slot(index)));
 }
 
-auto erase_cell(Node &node, Size index, Size size_hint) -> void
+auto erase_cell(Node &node, std::size_t index, std::size_t size_hint) -> void
 {
     CDB_EXPECT_LT(index, node.header.cell_count);
     free_block(node, PageSize(index), PageSize(size_hint));
 }
 
-auto emplace_cell(Byte *out, Size key_size, Size value_size, const Slice &local_key, const Slice &local_value, Id overflow_id) -> Byte *
+auto emplace_cell(char *out, std::size_t key_size, std::size_t value_size, const Slice &local_key, const Slice &local_value, Id overflow_id) -> char *
 {
     out = encode_varint(out, value_size);
     out = encode_varint(out, key_size);
@@ -479,7 +479,7 @@ auto manual_defragment(Node &node) -> void
     alloc.defragment();
 }
 
-auto detach_cell(Cell &cell, Byte *backing) -> void
+auto detach_cell(Cell &cell, char *backing) -> void
 {
     if (cell.is_free) {
         return;
@@ -491,17 +491,17 @@ auto detach_cell(Cell &cell, Byte *backing) -> void
     cell.is_free = true;
 }
 
-auto read_child_id_at(const Node &node, Size offset) -> Id
+auto read_child_id_at(const Node &node, std::size_t offset) -> Id
 {
     return {get_u64(node.page.data() + offset)};
 }
 
-auto write_child_id_at(Node &node, Size offset, Id child_id) -> void
+auto write_child_id_at(Node &node, std::size_t offset, Id child_id) -> void
 {
     put_u64(node.page.span(offset, sizeof(Id)), child_id.value);
 }
 
-auto read_child_id(const Node &node, Size index) -> Id
+auto read_child_id(const Node &node, std::size_t index) -> Id
 {
     const auto &header = node.header;
     CDB_EXPECT_LE(index, header.cell_count);
@@ -527,7 +527,7 @@ auto write_overflow_id(Cell &cell, Id overflow_id) -> void
     put_u64(cell.key + cell.local_size, overflow_id.value);
 }
 
-auto write_child_id(Node &node, Size index, Id child_id) -> void
+auto write_child_id(Node &node, std::size_t index, Id child_id) -> void
 {
     auto &header = node.header;
     CDB_EXPECT_LE(index, header.cell_count);

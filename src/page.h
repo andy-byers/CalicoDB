@@ -36,34 +36,34 @@ public:
         return m_id;
     }
 
-    [[nodiscard]] auto view(Size offset) const -> Slice
+    [[nodiscard]] auto view(std::size_t offset) const -> Slice
     {
         return m_span.range(offset);
     }
 
-    [[nodiscard]] auto view(Size offset, Size size) const -> Slice
+    [[nodiscard]] auto view(std::size_t offset, std::size_t size) const -> Slice
     {
         return m_span.range(offset, size);
     }
 
-    [[nodiscard]] auto span(Size offset, Size size) -> Span
+    [[nodiscard]] auto span(std::size_t offset, std::size_t size) -> Span
     {
         CDB_EXPECT_TRUE(m_write);
         insert_delta(m_deltas, PageDelta {offset, size});
         return m_span.range(offset, size);
     }
 
-    [[nodiscard]] auto data() const -> const Byte *
+    [[nodiscard]] auto data() const -> const char *
     {
         return m_span.data();
     }
 
-    [[nodiscard]] auto data() -> Byte *
+    [[nodiscard]] auto data() -> char *
     {
         return m_span.data();
     }
 
-    [[nodiscard]] auto size() const -> Size
+    [[nodiscard]] auto size() const -> std::size_t
     {
         return m_span.size();
     }
@@ -82,7 +82,7 @@ public:
     auto operator=(Page &&) noexcept -> Page & = default;
 };
 
-[[nodiscard]] inline auto page_offset(const Page &page) -> Size
+[[nodiscard]] inline auto page_offset(const Page &page) -> std::size_t
 {
     return FileHeader::SIZE * page.id().is_root();
 }

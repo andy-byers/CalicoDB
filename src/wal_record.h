@@ -12,16 +12,16 @@
 namespace calicodb
 {
 
-static constexpr Size WAL_BLOCK_SCALE {4};
+static constexpr std::size_t WAL_BLOCK_SCALE {4};
 
-[[nodiscard]] inline constexpr auto wal_block_size(Size page_size) -> Size
+[[nodiscard]] inline constexpr auto wal_block_size(std::size_t page_size) -> std::size_t
 {
     return std::min(MAXIMUM_PAGE_SIZE, page_size * WAL_BLOCK_SCALE);
 }
 
-[[nodiscard]] inline constexpr auto wal_scratch_size(Size page_size) -> Size
+[[nodiscard]] inline constexpr auto wal_scratch_size(std::size_t page_size) -> std::size_t
 {
-    const Size DELTA_PAYLOAD_HEADER_SIZE {11};
+    const std::size_t DELTA_PAYLOAD_HEADER_SIZE {11};
     return page_size + DELTA_PAYLOAD_HEADER_SIZE + sizeof(PageDelta);
 }
 
@@ -49,12 +49,12 @@ static constexpr Size WAL_BLOCK_SCALE {4};
     return prefix.to_string() + std::to_string(id.value);
 }
 
-enum WalPayloadType : Byte {
+enum WalPayloadType : char {
     WPT_Delta = '\xD0',
     WPT_FullImage = '\xF0',
 };
 
-enum WalRecordType : Byte {
+enum WalRecordType : char {
     WRT_Empty = '\x00',
     WRT_Full = '\xA4',
     WRT_First = '\xB3',
@@ -66,7 +66,7 @@ enum WalRecordType : Byte {
  * Header fields associated with each WAL record. Based off of the WAL protocol found in RocksDB.
  */
 struct WalRecordHeader {
-    static constexpr Size SIZE {7};
+    static constexpr std::size_t SIZE {7};
 
     [[nodiscard]] static auto contains_record(const Slice &data) -> bool
     {
@@ -82,7 +82,7 @@ struct WalRecordHeader {
  * Header fields associated with each payload.
  */
 struct WalPayloadHeader {
-    static constexpr Size SIZE {8};
+    static constexpr std::size_t SIZE {8};
 
     Lsn lsn;
 };
@@ -90,12 +90,12 @@ struct WalPayloadHeader {
 // Routines for working with WAL records.
 auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto read_wal_record_header(Slice in) -> WalRecordHeader;
-[[nodiscard]] auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_size) -> WalRecordHeader;
+[[nodiscard]] auto split_record(WalRecordHeader &lhs, const Slice &payload, std::size_t available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 
 struct DeltaDescriptor {
     struct Delta {
-        Size offset {};
+        std::size_t offset {};
         Slice data {};
     };
 
@@ -253,7 +253,7 @@ private:
     std::map<Id, Lsn> m_segments;
 };
 
-[[nodiscard]] inline auto read_first_lsn(Env &storage, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
+[[nodiscard]] inline auto read_first_lsn(Env &env, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
 {
     if (auto lsn = set.first_lsn(id); !lsn.is_null()) {
         out = lsn;
@@ -261,7 +261,7 @@ private:
     }
 
     Reader *temp;
-    CDB_TRY(storage.new_reader(encode_segment_name(prefix, id), &temp));
+    CDB_TRY(env.new_reader(encode_segment_name(prefix, id), &temp));
 
     char buffer[sizeof(Lsn)];
     Span bytes {buffer, sizeof(buffer)};

@@ -12,7 +12,7 @@ class Page;
  * page is also a node page, so it will have additional headers following the file header.
  *
  * File Header Format:
- *     Offset  Size  Name
+ *     Offset  std::size_t  Name
  *    ----------------------------
  *     0       4     magic_code
  *     4       4     header_crc
@@ -24,10 +24,10 @@ class Page;
  */
 struct FileHeader {
     static constexpr std::uint32_t MAGIC_CODE {0xB11924E1};
-    static constexpr Size SIZE {42};
+    static constexpr std::size_t SIZE {42};
     explicit FileHeader() = default;
     explicit FileHeader(const Page &page);
-    explicit FileHeader(const Byte *data);
+    explicit FileHeader(const char *data);
     auto write(Page &page) const -> void;
 
     [[nodiscard]] auto compute_crc() const -> std::uint32_t;
@@ -67,7 +67,7 @@ struct FileHeader {
  *       refers to the rightmost child ID.
  */
 struct NodeHeader {
-    static constexpr Size SIZE {34};
+    static constexpr std::size_t SIZE {34};
     explicit NodeHeader() = default;
     auto read(const Page &page) -> void;
     auto write(Page &page) const -> void;

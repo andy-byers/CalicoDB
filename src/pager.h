@@ -23,26 +23,26 @@ public:
 
     struct Parameters {
         std::string prefix;
-        Env *storage {};
+        Env *env {};
         std::string *scratch {};
         WriteAheadLog *wal {};
         InfoLogger *info_log {};
         Status *status {};
         Lsn *commit_lsn {};
         bool *in_txn {};
-        Size frame_count {};
-        Size page_size {};
+        std::size_t frame_count {};
+        std::size_t page_size {};
     };
 
     ~Pager() = default;
 
     [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
-    [[nodiscard]] auto page_count() const -> Size;
-    [[nodiscard]] auto page_size() const -> Size;
+    [[nodiscard]] auto page_count() const -> std::size_t;
+    [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto hit_ratio() const -> double;
     [[nodiscard]] auto recovery_lsn() -> Id;
-    [[nodiscard]] auto bytes_written() const -> Size;
-    [[nodiscard]] auto truncate(Size page_count) -> Status;
+    [[nodiscard]] auto bytes_written() const -> std::size_t;
+    [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
     [[nodiscard]] auto flush(Lsn target_lsn = Lsn::null()) -> Status;
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
@@ -70,7 +70,7 @@ private:
     Status *m_status {};
     std::string *m_scratch {};
     WriteAheadLog *m_wal {};
-    Env *m_storage {};
+    Env *m_env {};
     InfoLogger *m_info_log {};
 };
 

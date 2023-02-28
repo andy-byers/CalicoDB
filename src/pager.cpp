@@ -17,7 +17,7 @@ namespace calicodb
         }                        \
     } while (0)
 
-static constexpr Id MAX_ID {std::numeric_limits<Size>::max()};
+static constexpr Id MAX_ID {std::numeric_limits<std::size_t>::max()};
 
 auto Pager::open(const Parameters &param, Pager **out) -> Status
 {
@@ -26,7 +26,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
     CDB_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
 
     Editor *file;
-    CDB_TRY(param.storage->new_editor(param.prefix + "data", &file));
+    CDB_TRY(param.env->new_editor(param.prefix + "data", &file));
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
@@ -50,7 +50,7 @@ Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
       m_status {param.status},
       m_scratch {param.scratch},
       m_wal {param.wal},
-      m_storage {param.storage},
+      m_env {param.env},
       m_info_log {param.info_log}
 {
     CDB_EXPECT_NE(m_wal, nullptr);
@@ -58,17 +58,17 @@ Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
     CDB_EXPECT_NE(m_scratch, nullptr);
 }
 
-auto Pager::bytes_written() const -> Size
+auto Pager::bytes_written() const -> std::size_t
 {
     return m_frames.bytes_written();
 }
 
-auto Pager::page_count() const -> Size
+auto Pager::page_count() const -> std::size_t
 {
     return m_frames.page_count();
 }
 
-auto Pager::page_size() const -> Size
+auto Pager::page_size() const -> std::size_t
 {
     return m_frames.page_size();
 }
@@ -102,7 +102,7 @@ auto Pager::do_pin_frame(Id pid) -> Status
         }
     }
 
-    Size fid;
+    std::size_t fid;
     CDB_TRY(m_frames.pin(pid, fid));
 
     // Associate the page ID with the frame index we got from the framer.
@@ -231,11 +231,11 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
     // The "important" parameter should be used when we don't need to track the before contents of the whole
     // page. For example, when allocating a page from the freelist, we only care about the page LSN stored in
     // the first 8 bytes; the rest is junk.
-    Size watch_size;
+    std::size_t watch_size;
     if (important < 0) {
         watch_size = page.size();
     } else {
-        watch_size = static_cast<Size>(important);
+        watch_size = static_cast<std::size_t>(important);
     }
 
     // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
@@ -333,10 +333,10 @@ auto Pager::release(Page page) -> void
     m_frames.unref(index, std::move(page));
 }
 
-auto Pager::truncate(Size page_count) -> Status
+auto Pager::truncate(std::size_t page_count) -> Status
 {
     CDB_EXPECT_GT(page_count, 0);
-    CDB_TRY(m_storage->resize_file(m_path, page_count * m_frames.page_size()));
+    CDB_TRY(m_env->resize_file(m_path, page_count * m_frames.page_size()));
     m_frames.m_page_count = page_count;
 
     const auto predicate = [this](auto pid, auto) {

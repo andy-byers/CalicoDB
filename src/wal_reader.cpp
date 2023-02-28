@@ -4,7 +4,7 @@
 namespace calicodb
 {
 
-[[nodiscard]] static auto read_tail(Reader &file, Size number, Span tail) -> Status
+[[nodiscard]] static auto read_tail(Reader &file, std::size_t number, Span tail) -> Status
 {
     auto temp = tail;
     auto read_size = tail.size();

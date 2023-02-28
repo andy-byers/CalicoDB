@@ -16,7 +16,7 @@ namespace calicodb
 #if not NDEBUG
 TEST(TestUtils, ExpectationDeathTest)
 {
-    ASSERT_DEATH(CALICO_EXPECT_TRUE(false), EXPECTATION_MATCHER);
+    ASSERT_DEATH(CDB_EXPECT_TRUE(false), EXPECTATION_MATCHER);
 }
 #endif // not NDEBUG
 
@@ -73,7 +73,7 @@ TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
     ASSERT_TRUE(shorter < slice);
 }
 
-TEST_F(SliceTests, FirstByteIsMostSignificant)
+TEST_F(SliceTests, FirstcharIsMostSignificant)
 {
     ASSERT_TRUE(Slice {"10"} > Slice {"01"});
     ASSERT_TRUE(Slice {"01"} < Slice {"10"});
@@ -189,8 +189,8 @@ TEST_F(SliceTests, Conversions)
 
 static constexpr auto constexpr_test_write(Span b, Slice answer)
 {
-    CALICO_EXPECT_EQ(b.size(), answer.size());
-    for (Size i {}; i < b.size(); ++i)
+    CDB_EXPECT_EQ(b.size(), answer.size());
+    for (std::size_t i {}; i < b.size(); ++i)
         b[i] = answer[i];
 
     (void)b.starts_with(answer);
@@ -203,8 +203,8 @@ static constexpr auto constexpr_test_write(Span b, Slice answer)
 
 static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 {
-    for (Size i {}; i < bv.size(); ++i)
-        CALICO_EXPECT_EQ(bv[i], answer[i]);
+    for (std::size_t i {}; i < bv.size(); ++i)
+        CDB_EXPECT_EQ(bv[i], answer[i]);
 
     (void)bv.starts_with(answer);
     (void)bv.data();
@@ -257,21 +257,21 @@ TEST(NonPrintableSliceTests, UsesStringSize)
     ASSERT_EQ(Slice {u}.size(), 2);
 }
 
-TEST(NonPrintableSliceTests, NullBytesAreEqual)
+TEST(NonPrintableSliceTests, NullcharsAreEqual)
 {
     const std::string u {"\x00", 1};
     const std::string v {"\x00", 1};
     ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), Comparison::Equal);
 }
 
-TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
+TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullchars)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
     ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::Less);
 }
 
-TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
+TEST(NonPrintableSliceTests, charsAreUnsignedWhenCompared)
 {
     std::string u {"\x0F", 1};
     std::string v {"\x00", 1};
@@ -339,8 +339,8 @@ auto run_equality_comparisons()
     T x {1};
     T y {2};
 
-    CALICO_EXPECT_TRUE(x == x);
-    CALICO_EXPECT_TRUE(x != y);
+    CDB_EXPECT_TRUE(x == x);
+    CDB_EXPECT_TRUE(x != y);
     ASSERT_EQ(x, x);
     ASSERT_NE(x, y);
 }
@@ -351,10 +351,10 @@ auto run_ordering_comparisons()
     T x {1};
     T y {2};
 
-    CALICO_EXPECT_TRUE(x < y);
-    CALICO_EXPECT_TRUE(x <= x and x <= y);
-    CALICO_EXPECT_TRUE(y > x);
-    CALICO_EXPECT_TRUE(y >= y and y >= x);
+    CDB_EXPECT_TRUE(x < y);
+    CDB_EXPECT_TRUE(x <= x and x <= y);
+    CDB_EXPECT_TRUE(y > x);
+    CDB_EXPECT_TRUE(y >= y and y >= x);
     ASSERT_LT(x, y);
     ASSERT_LE(x, x);
     ASSERT_LE(x, y);
@@ -510,7 +510,7 @@ TEST(StatusTests, ExpectedStatusNames)
     ASSERT_EQ(get_status_name(Status::system_error("")), "system error");
 }
 
-TEST(MiscTests, StringsUseSizeParameterForComparisons)
+TEST(MiscTests, StringsUsesSizeParameterForComparisons)
 {
     std::vector<std::string> v {
         std::string {"\x11\x00\x33", 3},
@@ -622,9 +622,9 @@ TEST(LevelDB_CRC, Mask)
 
 } // namespace crc32c
 
-[[nodiscard]] auto describe_size(Size size, int precision = 4) -> std::string
+[[nodiscard]] auto describe_size(std::size_t size, int precision = 4) -> std::string
 {
-    static constexpr Size KiB {1'024};
+    static constexpr std::size_t KiB {1'024};
     static constexpr auto MiB = KiB * KiB;
     static constexpr auto GiB = MiB * KiB;
 
@@ -668,20 +668,20 @@ class InterceptorTests
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
-    Quick_Interceptor("test/data", Tools::Interceptor::OPEN);
+    QUICK_INTERCEPTOR("test/data", Tools::Interceptor::OPEN);
 
     Editor *editor;
-    assert_special_error(storage_handle().new_editor("test/data", &editor));
-    expect_ok(storage_handle().new_editor("test/wal", &editor));
+    assert_special_error(get_env().new_editor("test/data", &editor));
+    expect_ok(get_env().new_editor("test/wal", &editor));
     delete editor;
 }
 
 TEST_F(InterceptorTests, RespectsSyscallType)
 {
-    Quick_Interceptor("test/data", Tools::Interceptor::WRITE);
+    QUICK_INTERCEPTOR("test/data", Tools::Interceptor::WRITE);
 
     Editor *editor;
-    expect_ok(storage_handle().new_editor("test/data", &editor));
+    expect_ok(get_env().new_editor("test/data", &editor));
     assert_special_error(editor->write({}, 0));
     delete editor;
 }
@@ -696,7 +696,7 @@ TEST(LoggingTests, StringifiesNumbers)
 
 TEST(LoggingTests, StringifiesMaximumNumber)
 {
-    auto n = std::numeric_limits<Size>::max();
+    auto n = std::numeric_limits<std::size_t>::max();
     auto s = number_to_string(n);
     while (!s.empty()) {
         ASSERT_EQ(s.back(), n % 10 + '0');
@@ -715,7 +715,7 @@ TEST(LoggingTests, EscapesStrings)
 
 TEST(LoggingTests, OnlyEscapesUnprintableCharacters)
 {
-    for (Size i {}; i < 256; ++i) {
+    for (std::size_t i {}; i < 256; ++i) {
         char data[] {static_cast<char>(i)};
         const auto str = escape_string({data, 1});
         if (std::isprint(*data)) {
@@ -742,7 +742,7 @@ TEST(LevelDB_Coding, Varint64)
         values.push_back(power - 1);
         values.push_back(power + 1);
     }
-    Size total_size {};
+    std::size_t total_size {};
     for (auto v : values) {
         total_size += varint_length(v);
     }

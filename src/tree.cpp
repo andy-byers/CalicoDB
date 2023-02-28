@@ -12,7 +12,7 @@ struct SeekResult {
     bool exact {};
 };
 
-using FetchKey = std::function<Slice(Size)>;
+using FetchKey = std::function<Slice(std::size_t)>;
 
 static auto seek_binary(unsigned n, const Slice &key, const FetchKey &fetch) -> SeekResult
 {
@@ -68,7 +68,7 @@ auto NodeIterator::fetch_key(std::string &buffer, const Cell &cell, Slice &out) 
     return Status::ok();
 }
 
-auto NodeIterator::index() const -> Size
+auto NodeIterator::index() const -> std::size_t
 {
     return m_index;
 }
@@ -279,7 +279,7 @@ auto BPlusTreeInternal::destroy(Node node) -> Status
     return m_freelist->push(std::move(node.page));
 }
 
-auto BPlusTreeInternal::insert_cell(Node &node, Size index, const Cell &cell) -> Status
+auto BPlusTreeInternal::insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status
 {
     write_cell(node, index, cell);
     if (!node.header.is_external) {
@@ -288,7 +288,7 @@ auto BPlusTreeInternal::insert_cell(Node &node, Size index, const Cell &cell) ->
     return maybe_fix_overflow_chain(cell, node.page.id());
 }
 
-auto BPlusTreeInternal::remove_cell(Node &node, Size index) -> Status
+auto BPlusTreeInternal::remove_cell(Node &node, std::size_t index) -> Status
 {
     const auto cell = read_cell(node, index);
     if (cell.has_remote) {
@@ -300,7 +300,7 @@ auto BPlusTreeInternal::remove_cell(Node &node, Size index) -> Status
 
 auto BPlusTreeInternal::fix_links(Node &node) -> Status
 {
-    for (Size index {}; index < node.header.cell_count; ++index) {
+    for (std::size_t index {}; index < node.header.cell_count; ++index) {
         const auto cell = read_cell(node, index);
         CDB_TRY(maybe_fix_overflow_chain(cell, node.page.id()));
         if (!node.header.is_external) {
@@ -406,7 +406,7 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
     }
 
     // Fix the overflow. "left" is empty, so this should always be possible.
-    for (Size i {}, n = header.cell_count; i < n; ++i) {
+    for (std::size_t i {}, n = header.cell_count; i < n; ++i) {
         CDB_TRY(transfer_left(left, right));
 
         if (i == overflow_index) {
@@ -535,7 +535,7 @@ auto BPlusTreeInternal::resolve_underflow(Node node, const Slice &anchor) -> Sta
     return Status::ok();
 }
 
-auto BPlusTreeInternal::internal_merge_left(Node &left, Node &right, Node &parent, Size index) -> Status
+auto BPlusTreeInternal::internal_merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status
 {
     CDB_EXPECT_TRUE(is_underflowing(left));
     CDB_EXPECT_FALSE(left.header.is_external);
@@ -557,7 +557,7 @@ auto BPlusTreeInternal::internal_merge_left(Node &left, Node &right, Node &paren
     return Status::ok();
 }
 
-auto BPlusTreeInternal::external_merge_left(Node &left, Node &right, Node &parent, Size index) -> Status
+auto BPlusTreeInternal::external_merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status
 {
     CDB_EXPECT_TRUE(is_underflowing(left));
     CDB_EXPECT_TRUE(left.header.is_external);
@@ -583,7 +583,7 @@ auto BPlusTreeInternal::external_merge_left(Node &left, Node &right, Node &paren
     return Status::ok();
 }
 
-auto BPlusTreeInternal::merge_left(Node &left, Node right, Node &parent, Size index) -> Status
+auto BPlusTreeInternal::merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status
 {
     if (left.header.is_external) {
         CDB_TRY(external_merge_left(left, right, parent, index));
@@ -594,7 +594,7 @@ auto BPlusTreeInternal::merge_left(Node &left, Node right, Node &parent, Size in
     return destroy(std::move(right));
 }
 
-auto BPlusTreeInternal::internal_merge_right(Node &left, Node &right, Node &parent, Size index) -> Status
+auto BPlusTreeInternal::internal_merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status
 {
     CDB_EXPECT_TRUE(is_underflowing(right));
     CDB_EXPECT_FALSE(left.header.is_external);
@@ -619,7 +619,7 @@ auto BPlusTreeInternal::internal_merge_right(Node &left, Node &right, Node &pare
     return Status::ok();
 }
 
-auto BPlusTreeInternal::external_merge_right(Node &left, Node &right, Node &parent, Size index) -> Status
+auto BPlusTreeInternal::external_merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status
 {
     CDB_EXPECT_TRUE(is_underflowing(right));
     CDB_EXPECT_TRUE(left.header.is_external);
@@ -644,7 +644,7 @@ auto BPlusTreeInternal::external_merge_right(Node &left, Node &right, Node &pare
     return Status::ok();
 }
 
-auto BPlusTreeInternal::merge_right(Node &left, Node right, Node &parent, Size index) -> Status
+auto BPlusTreeInternal::merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status
 {
     if (left.header.is_external) {
         CDB_TRY(external_merge_right(left, right, parent, index));
@@ -655,7 +655,7 @@ auto BPlusTreeInternal::merge_right(Node &left, Node right, Node &parent, Size i
     return destroy(std::move(right));
 }
 
-auto BPlusTreeInternal::fix_non_root(Node node, Node &parent, Size index) -> Status
+auto BPlusTreeInternal::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
 {
     CDB_EXPECT_FALSE(node.page.id().is_root());
     CDB_EXPECT_TRUE(is_underflowing(node));
@@ -729,7 +729,7 @@ auto BPlusTreeInternal::fix_root(Node root) -> Status
     return Status::ok();
 }
 
-auto BPlusTreeInternal::rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status
+auto BPlusTreeInternal::rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
     if (left.header.is_external) {
         return external_rotate_left(parent, left, right, index);
@@ -738,7 +738,7 @@ auto BPlusTreeInternal::rotate_left(Node &parent, Node &left, Node &right, Size 
     }
 }
 
-auto BPlusTreeInternal::external_rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status
+auto BPlusTreeInternal::external_rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
     CDB_EXPECT_TRUE(left.header.is_external);
     CDB_EXPECT_TRUE(right.header.is_external);
@@ -759,7 +759,7 @@ auto BPlusTreeInternal::external_rotate_left(Node &parent, Node &left, Node &rig
     return insert_cell(parent, index, separator);
 }
 
-auto BPlusTreeInternal::internal_rotate_left(Node &parent, Node &left, Node &right, Size index) -> Status
+auto BPlusTreeInternal::internal_rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
     CDB_EXPECT_FALSE(parent.header.is_external);
     CDB_EXPECT_FALSE(left.header.is_external);
@@ -787,7 +787,7 @@ auto BPlusTreeInternal::internal_rotate_left(Node &parent, Node &left, Node &rig
     return insert_cell(parent, index, lowest);
 }
 
-auto BPlusTreeInternal::rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status
+auto BPlusTreeInternal::rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
     if (left.header.is_external) {
         return external_rotate_right(parent, left, right, index);
@@ -796,7 +796,7 @@ auto BPlusTreeInternal::rotate_right(Node &parent, Node &left, Node &right, Size
     }
 }
 
-auto BPlusTreeInternal::external_rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status
+auto BPlusTreeInternal::external_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
     CDB_EXPECT_TRUE(left.header.is_external);
     CDB_EXPECT_TRUE(right.header.is_external);
@@ -820,7 +820,7 @@ auto BPlusTreeInternal::external_rotate_right(Node &parent, Node &left, Node &ri
     return Status::ok();
 }
 
-auto BPlusTreeInternal::internal_rotate_right(Node &parent, Node &left, Node &right, Size index) -> Status
+auto BPlusTreeInternal::internal_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
     CDB_EXPECT_FALSE(parent.header.is_external);
     CDB_EXPECT_FALSE(left.header.is_external);
@@ -855,7 +855,7 @@ PayloadManager::PayloadManager(const NodeMeta &meta, OverflowList &overflow)
 {
 }
 
-auto PayloadManager::emplace(Byte *scratch, Node &node, const Slice &key, const Slice &value, Size index) -> Status
+auto PayloadManager::emplace(char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status
 {
     CDB_EXPECT_TRUE(node.header.is_external);
 
@@ -896,7 +896,7 @@ auto PayloadManager::emplace(Byte *scratch, Node &node, const Slice &key, const 
     return Status::ok();
 }
 
-auto PayloadManager::promote(Byte *scratch, Cell &cell, Id parent_id) -> Status
+auto PayloadManager::promote(char *scratch, Cell &cell, Id parent_id) -> Status
 {
     detach_cell(cell, scratch);
 
@@ -939,7 +939,7 @@ auto PayloadManager::collect_key(std::string &scratch, const Cell &cell, Slice &
 
 auto PayloadManager::collect_value(std::string &scratch, const Cell &cell, Slice &out) const -> Status
 {
-    Size value_size;
+    std::size_t value_size;
     decode_varint(cell.ptr, value_size);
     if (scratch.size() < value_size) {
         scratch.resize(value_size);
@@ -949,7 +949,7 @@ auto PayloadManager::collect_value(std::string &scratch, const Cell &cell, Slice
         out = Slice {scratch.data(), value_size};
         return Status::ok();
     }
-    Size remote_key_size {};
+    std::size_t remote_key_size {};
     if (cell.key_size > cell.local_size) {
         remote_key_size = cell.key_size - cell.local_size;
     }
@@ -987,7 +987,7 @@ BPlusTree::BPlusTree(Pager &pager)
 {
 }
 
-auto BPlusTree::cell_scratch() -> Byte *
+auto BPlusTree::cell_scratch() -> char *
 {
     // Leave space for a child ID (maximum difference between the size of a varint and an Id).
     return m_cell_scratch.data() + sizeof(Id) - 1;
@@ -1117,7 +1117,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
         Node parent;
         CDB_TRY(internal.acquire(parent, entry.back_ptr, true));
         bool found {};
-        for (Size i {}; i < parent.header.cell_count; ++i) {
+        for (std::size_t i {}; i < parent.header.cell_count; ++i) {
             auto cell = read_cell(parent, i);
             found = cell.has_remote && read_overflow_id(cell) == last_id;
             if (found) {
@@ -1135,7 +1135,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
         CDB_TRY(internal.acquire(parent, entry.back_ptr, true));
         CDB_EXPECT_FALSE(parent.header.is_external);
         bool found {};
-        for (Size i {}; !found && i <= parent.header.cell_count; ++i) {
+        for (std::size_t i {}; !found && i <= parent.header.cell_count; ++i) {
             const auto child_id = read_child_id(parent, i);
             found = child_id == last_id;
             if (found) {
@@ -1147,7 +1147,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
         // Update references.
         Node last;
         CDB_TRY(internal.acquire(last, last_id, true));
-        for (Size i {}; i < last.header.cell_count; ++i) {
+        for (std::size_t i {}; i < last.header.cell_count; ++i) {
             const auto cell = read_cell(last, i);
             CDB_TRY(internal.maybe_fix_overflow_chain(cell, free.id()));
             if (!last.header.is_external) {
@@ -1248,7 +1248,7 @@ auto BPlusTree::load_state(const FileHeader &header) -> void
 class BPlusTreeValidator
 {
 public:
-    using Callback = std::function<void(Node &, Size)>;
+    using Callback = std::function<void(Node &, std::size_t)>;
 
     explicit BPlusTreeValidator(BPlusTree &tree)
         : m_tree {&tree}
@@ -1257,15 +1257,15 @@ public:
 
     struct PrintData {
         std::vector<std::string> levels;
-        std::vector<Size> spaces;
+        std::vector<std::size_t> spaces;
     };
 
-    auto collect_levels(PrintData &data, Node node, Size level) -> void
+    auto collect_levels(PrintData &data, Node node, std::size_t level) -> void
     {
         BPlusTreeInternal internal {*m_tree};
         const auto &header = node.header;
         ensure_level_exists(data, level);
-        for (Size cid {}; cid < header.cell_count; ++cid) {
+        for (std::size_t cid {}; cid < header.cell_count; ++cid) {
             const auto is_first = cid == 0;
             const auto not_last = cid + 1 < header.cell_count;
             auto cell = read_cell(node, cid);
@@ -1280,7 +1280,7 @@ public:
                 add_to_level(data, std::to_string(node.page.id().value) + ":[", level);
             }
 
-            const auto key = Slice {cell.key, std::min<Size>(3, cell.key_size)}.to_string();
+            const auto key = Slice {cell.key, std::min<std::size_t>(3, cell.key_size)}.to_string();
             add_to_level(data, escape_string(key), level);
 
             if (not_last) {
@@ -1335,7 +1335,7 @@ public:
         pager.release(std::move(page));
     }
 
-    auto validate_overflow(Id overflow_id, Id parent_id, Size overflow_size) -> void
+    auto validate_overflow(Id overflow_id, Id parent_id, std::size_t overflow_size) -> void
     {
         BPlusTreeInternal internal {*m_tree};
         auto &pager = *m_tree->m_pager;
@@ -1347,7 +1347,7 @@ public:
         Page page;
         CHECK_OK(pager.acquire(overflow_id, page));
 
-        for (Size n {}; n < overflow_size;) {
+        for (std::size_t n {}; n < overflow_size;) {
             const Id next_id {get_u64(page.data() + sizeof(Lsn))};
             n += pager.page_size() - sizeof(Lsn) - sizeof(Id);
             if (n >= overflow_size) {
@@ -1368,10 +1368,10 @@ public:
         BPlusTreeInternal internal {*m_tree};
 
         const auto validate_possible_overflows = [this](auto &node) {
-            for (Size i {}; i < node.header.cell_count; ++i) {
+            for (std::size_t i {}; i < node.header.cell_count; ++i) {
                 const auto cell = read_cell(node, i);
                 if (cell.has_remote) {
-                    Size value_size;
+                    std::size_t value_size;
                     decode_varint(cell.ptr, value_size);
                     const auto remote_size = cell.key_size + value_size - cell.local_size;
                     validate_overflow(read_overflow_id(cell), node.page.id(), remote_size);
@@ -1387,7 +1387,7 @@ public:
             internal.release(std::move(node));
             CHECK_OK(internal.acquire(node, id, false));
         }
-        Size i {}; // Traverse across the sibling chain to the right.
+        std::size_t i {}; // Traverse across the sibling chain to the right.
         while (!node.header.next_id.is_null()) {
             ++i;
             validate_possible_overflows(node);
@@ -1420,7 +1420,7 @@ public:
 
             internal.release(std::move(child));
         };
-        traverse_inorder([f = std::move(check)](Node &node, Size index) -> void {
+        traverse_inorder([f = std::move(check)](Node &node, std::size_t index) -> void {
             const auto count = node.header.cell_count;
             CHECK_TRUE(index < count);
 
@@ -1438,7 +1438,7 @@ private:
     auto traverse_inorder_helper(Node node, const Callback &callback) -> void
     {
         BPlusTreeInternal internal {*m_tree};
-        for (Size index {}; index <= node.header.cell_count; ++index) {
+        for (std::size_t index {}; index <= node.header.cell_count; ++index) {
             if (!node.header.is_external) {
                 const auto saved_id = node.page.id();
                 const auto next_id = read_child_id(node, index);
@@ -1460,11 +1460,11 @@ private:
         internal.release(std::move(node));
     }
 
-    auto add_to_level(PrintData &data, const std::string &message, Size target) -> void
+    auto add_to_level(PrintData &data, const std::string &message, std::size_t target) -> void
     {
         // If target is equal to levels.size(), add spaces to all levels.
         CHECK_TRUE(target <= data.levels.size());
-        Size i {};
+        std::size_t i {};
 
         auto s_itr = begin(data.spaces);
         auto L_itr = begin(data.levels);
@@ -1483,7 +1483,7 @@ private:
         }
     }
 
-    auto ensure_level_exists(PrintData &data, Size level) -> void
+    auto ensure_level_exists(PrintData &data, std::size_t level) -> void
     {
         while (level >= data.levels.size()) {
             data.levels.emplace_back();

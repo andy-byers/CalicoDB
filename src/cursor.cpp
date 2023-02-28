@@ -159,7 +159,7 @@ auto CursorImpl::previous() -> void
     seek_to(std::move(node), count - 1);
 }
 
-auto CursorImpl::seek_to(Node node, Size index) -> void
+auto CursorImpl::seek_to(Node node, std::size_t index) -> void
 {
     const auto &header = node.header;
     CDB_EXPECT_TRUE(header.is_external);

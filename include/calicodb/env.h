@@ -4,7 +4,6 @@
 #ifndef CALICODB_ENV_H
 #define CALICODB_ENV_H
 
-#include "common.h"
 #include <string>
 #include <vector>
 
@@ -18,14 +17,14 @@ class Reader
 {
 public:
     virtual ~Reader() = default;
-    [[nodiscard]] virtual auto read(Byte *out, std::size_t &size, std::size_t offset) -> Status = 0;
+    [[nodiscard]] virtual auto read(char *out, std::size_t &size, std::size_t offset) -> Status = 0;
 };
 
 class Editor
 {
 public:
     virtual ~Editor() = default;
-    [[nodiscard]] virtual auto read(Byte *out, std::size_t &size, std::size_t offset) -> Status = 0;
+    [[nodiscard]] virtual auto read(char *out, std::size_t &size, std::size_t offset) -> Status = 0;
     [[nodiscard]] virtual auto write(Slice in, std::size_t offset) -> Status = 0;
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };

@@ -15,9 +15,9 @@ public:
 
     struct Parameters {
         std::string prefix;
-        Env *store {};
-        Size page_size {};
-        Size segment_cutoff {};
+        Env *env {};
+        std::size_t page_size {};
+        std::size_t segment_cutoff {};
     };
 
     WriteAheadLog() = default;
@@ -31,7 +31,7 @@ public:
     [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
     [[nodiscard]] virtual auto log(WalPayloadIn payload) -> Status;
 
-    [[nodiscard]] virtual auto bytes_written() const -> Size
+    [[nodiscard]] virtual auto bytes_written() const -> std::size_t
     {
         return m_bytes_written;
     }
@@ -46,10 +46,10 @@ private:
     WalSet m_set;
     std::string m_prefix;
 
-    Env *m_storage {};
+    Env *m_env {};
     std::string m_tail;
-    Size m_segment_cutoff {};
-    Size m_bytes_written {};
+    std::size_t m_segment_cutoff {};
+    std::size_t m_bytes_written {};
 
     WalWriter *m_writer {};
     Logger *m_file {};

@@ -1,16 +1,14 @@
 set(CALICODB_HEADERS
         "${CALICODB_INCLUDE_DIR}/calicodb/calicodb.h"
-        "${CALICODB_INCLUDE_DIR}/calicodb/common.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/cursor.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/db.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/env.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/slice.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/status.h")
-file(GLOB_RECURSE CALICODB_SOURCES "*/*.cpp" "*/*.h")
+file(GLOB_RECURSE CALICODB_SOURCES "*.cpp" "*.h")
 list(APPEND CALICODB_SOURCES "${CALICODB_HEADERS}")
 
 set(CALICODB_OPTIONS -fno-exceptions)
-string(TOLOWER ${CMAKE_BUILD_TYPE} BUILD_TYPE)
 if(NOT CALICODB_BuildTests)
     list(APPEND CALICODB_OPTIONS -fno-rtti)
 endif()
@@ -30,7 +28,7 @@ else()
     list(APPEND CALICODB_OPTIONS -Wcast-align)
     list(APPEND CALICODB_OPTIONS -Wunused)
     list(APPEND CALICODB_OPTIONS -Woverloaded-virtual)
-#    list(APPEND CALICODB_OPTIONS -Wformat=2) TODO: Attribute to suppress warning from posix_storage.cpp.
+#    list(APPEND CALICODB_OPTIONS -Wformat=2) TODO: Attribute to suppress warning from posix_env.cpp.
     list(APPEND CALICODB_OPTIONS -Wdouble-promotion)
 
     if(COMPILER_VENDOR STREQUAL GNU)
@@ -48,8 +46,6 @@ endif()
 
 add_library(calicodb
         STATIC "${CALICODB_SOURCES}")
-add_library(calicodb::calicodb
-        ALIAS calicodb)
 target_include_directories(calicodb
         PUBLIC  $<BUILD_INTERFACE:${CALICODB_INCLUDE_DIR}>
                 $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -61,3 +57,5 @@ target_compile_definitions(calicodb
                CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}
                CALICODB_VERSION_PATCH=${PROJECT_VERSION_PATCH}
                CALICODB_BUILD_TESTS=${CALICODB_BuildTests})
+set_target_properties(calicodb
+        PROPERTIES LINKER_LANGUAGE CXX)

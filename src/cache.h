@@ -1,7 +1,6 @@
 #ifndef CALICODB_CACHE_H
 #define CALICODB_CACHE_H
 
-#include "calicodb/common.h"
 #include <list>
 #include <optional>
 #include <unordered_map>

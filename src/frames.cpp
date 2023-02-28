@@ -7,7 +7,7 @@
 namespace calicodb
 {
 
-Frame::Frame(Byte *buffer, Size id, Size size)
+Frame::Frame(char *buffer, std::size_t id, std::size_t size)
     : m_bytes {buffer + id * size, size}
 {
     CDB_EXPECT_TRUE(is_power_of_two(size));
@@ -51,7 +51,7 @@ auto Frame::unref(Page &page) -> void
     --m_ref_count;
 }
 
-FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, Size page_size, Size frame_count)
+FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count)
     : m_buffer {std::move(buffer)},
       m_file {&file},
       m_page_size {page_size}
@@ -68,28 +68,28 @@ FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, Size page_size, S
     }
 }
 
-auto FrameManager::ref(Size index, Page &out) -> void
+auto FrameManager::ref(std::size_t index, Page &out) -> void
 {
     ++m_ref_sum;
     CDB_EXPECT_LT(index, m_frames.size());
     m_frames[index].ref(out);
 }
 
-auto FrameManager::unref(Size index, Page page) -> void
+auto FrameManager::unref(std::size_t index, Page page) -> void
 {
     CDB_EXPECT_LT(index, m_frames.size());
     m_frames[index].unref(page);
     --m_ref_sum;
 }
 
-auto FrameManager::upgrade(Size index, Page &page) -> void
+auto FrameManager::upgrade(std::size_t index, Page &page) -> void
 {
     CDB_EXPECT_FALSE(page.is_writable());
     CDB_EXPECT_LT(index, m_frames.size());
     m_frames[index].upgrade(page);
 }
 
-auto FrameManager::pin(Id pid, Size &fid) -> Status
+auto FrameManager::pin(Id pid, std::size_t &fid) -> Status
 {
     CDB_EXPECT_FALSE(pid.is_null());
 
@@ -115,7 +115,7 @@ auto FrameManager::pin(Id pid, Size &fid) -> Status
     return Status::ok();
 }
 
-auto FrameManager::unpin(Size id) -> void
+auto FrameManager::unpin(std::size_t id) -> void
 {
     CDB_EXPECT_LT(id, m_frames.size());
     auto &frame = m_frames[id];
@@ -124,7 +124,7 @@ auto FrameManager::unpin(Size id) -> void
     m_available.emplace_back(id);
 }
 
-auto FrameManager::write_back(Size id) -> Status
+auto FrameManager::write_back(std::size_t id) -> Status
 {
     auto &frame = get_frame(id);
     CDB_EXPECT_LE(frame.ref_count(), 1);

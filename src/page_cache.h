@@ -28,7 +28,7 @@ public:
     PageList() = default;
     ~PageList() = default;
 
-    [[nodiscard]] auto size() const -> Size
+    [[nodiscard]] auto size() const -> std::size_t
     {
         return m_list.size();
     }
@@ -77,7 +77,7 @@ public:
     using Token = std::optional<PageList::Iterator>;
 
     struct Entry {
-        Size index;
+        std::size_t index;
         Token token {};
     };
 
@@ -87,12 +87,12 @@ public:
     PageCache() = default;
     ~PageCache() = default;
 
-    [[nodiscard]] auto is_empty() const -> Size
+    [[nodiscard]] auto is_empty() const -> std::size_t
     {
         return m_cache.is_empty();
     }
 
-    [[nodiscard]] auto size() const -> Size
+    [[nodiscard]] auto size() const -> std::size_t
     {
         return m_cache.size();
     }
@@ -155,8 +155,8 @@ public:
 
 private:
     Base m_cache;
-    Size m_hits {};
-    Size m_misses {};
+    std::size_t m_hits {};
+    std::size_t m_misses {};
 };
 
 } // namespace calicodb

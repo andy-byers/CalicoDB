@@ -3,23 +3,23 @@
 namespace calicodb
 {
 
-auto append_number(std::string &out, Size value) -> void
+auto append_number(std::string &out, std::size_t value) -> void
 {
-    Byte buffer[30];
+    char buffer[30];
     std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(value));
     out.append(buffer);
 }
 
 auto append_double(std::string &out, double value) -> void
 {
-    Byte buffer[30];
+    char buffer[30];
     std::snprintf(buffer, sizeof(buffer), "%g", value);
     out.append(buffer);
 }
 
 auto append_escaped_string(std::string &out, const Slice &value) -> void
 {
-    for (Size i {}; i < value.size(); ++i) {
+    for (std::size_t i {}; i < value.size(); ++i) {
         const auto chr = value[i];
         if (chr >= ' ' && chr <= '~') {
             out.push_back(chr);
@@ -31,7 +31,7 @@ auto append_escaped_string(std::string &out, const Slice &value) -> void
     }
 }
 
-auto number_to_string(Size value) -> std::string
+auto number_to_string(std::size_t value) -> std::string
 {
     std::string out;
     append_number(out, value);

@@ -15,7 +15,7 @@ public:
     {
     }
 
-    [[nodiscard]] auto block_count() const -> Size
+    [[nodiscard]] auto block_count() const -> std::size_t
     {
         return m_block;
     }

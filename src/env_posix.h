@@ -20,7 +20,7 @@ public:
     }
 
     ~PosixReader() override;
-    [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
 
 private:
     std::string m_path;
@@ -38,8 +38,8 @@ public:
     }
 
     ~PosixEditor() override;
-    [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
-    [[nodiscard]] auto write(Slice in, Size size) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto write(Slice in, std::size_t size) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
 private:
@@ -81,17 +81,17 @@ public:
     auto logv(const char *fmt, ...) -> void override;
 
 private:
-    static constexpr Size BUFFER_SIZE {512};
+    static constexpr std::size_t BUFFER_SIZE {512};
     std::string m_buffer;
     std::string m_path;
     int m_file {};
 };
 
-class PosixEnv : public Env
+class EnvPosix : public Env
 {
 public:
-    PosixEnv() = default;
-    ~PosixEnv() override = default;
+    EnvPosix() = default;
+    ~EnvPosix() override = default;
     [[nodiscard]] auto create_directory(const std::string &path) -> Status override;
     [[nodiscard]] auto remove_directory(const std::string &path) -> Status override;
     [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
@@ -101,9 +101,9 @@ public:
     [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger **out) -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
-    [[nodiscard]] auto resize_file(const std::string &path, Size size) -> Status override;
+    [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, Size &out) const -> Status override;
+    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
 };
 
 } // namespace calicodb

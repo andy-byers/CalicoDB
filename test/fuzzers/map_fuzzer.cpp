@@ -10,7 +10,7 @@
 #include <map>
 #include <set>
 
-#include "calicodb/calico.h"
+#include "calicodb/calicodb.h"
 
 namespace calicodb
 {
@@ -26,7 +26,7 @@ enum OperationType {
     TYPE_COUNT
 };
 
-constexpr Size DB_MAX_RECORDS {5'000};
+constexpr std::size_t DB_MAX_RECORDS {5'000};
 
 MapFuzzer::MapFuzzer(std::string path, Options *options)
     : DbFuzzer {std::move(path), options}
@@ -125,7 +125,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     Options options;
-    options.storage = new Tools::DynamicMemory;
+    options.env = new Tools::DynamicMemory;
 
     {
         MapFuzzer fuzzer {"map_fuzzer", &options};
@@ -136,7 +136,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         }
     }
 
-    delete options.storage;
+    delete options.env;
     return 0;
 }
 

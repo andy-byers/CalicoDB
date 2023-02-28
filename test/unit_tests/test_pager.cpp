@@ -16,7 +16,7 @@ namespace calicodb
 class DeltaCompressionTest : public testing::Test
 {
 public:
-    static constexpr Size PAGE_SIZE {0x200};
+    static constexpr std::size_t PAGE_SIZE {0x200};
 
     [[nodiscard]] auto build_deltas(const ChangeBuffer &unordered) const
     {
@@ -29,9 +29,9 @@ public:
 
     [[nodiscard]] auto insert_random_delta(ChangeBuffer &deltas) const
     {
-        static constexpr Size MIN_DELTA_SIZE {1};
-        const auto offset = random.Next<Size>(PAGE_SIZE - MIN_DELTA_SIZE);
-        const auto size = random.Next<Size>(PAGE_SIZE - offset);
+        static constexpr std::size_t MIN_DELTA_SIZE {1};
+        const auto offset = random.Next<std::size_t>(PAGE_SIZE - MIN_DELTA_SIZE);
+        const auto size = random.Next<std::size_t>(PAGE_SIZE - offset);
         insert_delta(deltas, {offset, size});
     }
 
@@ -73,7 +73,7 @@ TEST_F(DeltaCompressionTest, DeltasAreOrdered)
         {30, 3},
     });
 
-    Size i {1};
+    std::size_t i {1};
     ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
         const auto j = std::exchange(i, i + 1);
         return delta.offset == 10 * j && delta.size == j;
@@ -96,7 +96,7 @@ TEST_F(DeltaCompressionTest, DeltasAreNotRepeated)
         {10, 1},
     });
 
-    Size i {1};
+    std::size_t i {1};
     ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
         const auto j = std::exchange(i, i + 1);
         return delta.offset == 10 * j && delta.size == j;
@@ -125,19 +125,19 @@ TEST_F(DeltaCompressionTest, OverlappingDeltasAreMerged)
 
 TEST_F(DeltaCompressionTest, SanityCheck)
 {
-    static constexpr Size NUM_INSERTS {100};
-    static constexpr Size MAX_DELTA_SIZE {10};
+    static constexpr std::size_t NUM_INSERTS {100};
+    static constexpr std::size_t MAX_DELTA_SIZE {10};
     ChangeBuffer deltas;
-    for (Size i {}; i < NUM_INSERTS; ++i) {
-        const auto offset = random.Next<Size>(PAGE_SIZE - MAX_DELTA_SIZE);
-        const auto size = random.Next<Size>(1, MAX_DELTA_SIZE);
+    for (std::size_t i {}; i < NUM_INSERTS; ++i) {
+        const auto offset = random.Next<std::size_t>(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto size = random.Next<std::size_t>(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);
 
     std::vector<int> covering(PAGE_SIZE);
     for (const auto &[offset, size] : deltas) {
-        for (Size i {}; i < size; ++i) {
+        for (std::size_t i {}; i < size; ++i) {
             ASSERT_EQ(covering.at(offset + i), 0);
             covering[offset + i]++;
         }
@@ -514,19 +514,19 @@ public:
 
 TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 {
-    registry.put(Id {11UL}, {Size {11UL}});
-    registry.put(Id {12UL}, {Size {12UL}});
-    registry.put(Id {13UL}, {Size {13UL}});
-    registry.put(Id {1UL}, {Size {1UL}});
-    registry.put(Id {2UL}, {Size {2UL}});
-    registry.put(Id {3UL}, {Size {3UL}});
+    registry.put(Id {11UL}, {std::size_t {11UL}});
+    registry.put(Id {12UL}, {std::size_t {12UL}});
+    registry.put(Id {13UL}, {std::size_t {13UL}});
+    registry.put(Id {1UL}, {std::size_t {1UL}});
+    registry.put(Id {2UL}, {std::size_t {2UL}});
+    registry.put(Id {3UL}, {std::size_t {3UL}});
     ASSERT_EQ(registry.size(), 6);
 
     ASSERT_EQ(registry.get(Id {11UL})->value.index, 11UL);
     ASSERT_EQ(registry.get(Id {12UL})->value.index, 12UL);
     ASSERT_EQ(registry.get(Id {13UL})->value.index, 13UL);
 
-    Size i {}, j {};
+    std::size_t i {}, j {};
 
     const auto callback = [&i, &j](auto page_id, auto entry) {
         EXPECT_EQ(page_id.value, entry.index);
@@ -547,7 +547,7 @@ public:
     explicit FramerTests()
     {
         Editor *file;
-        EXPECT_OK(storage->new_editor("test/data", &file));
+        EXPECT_OK(env->new_editor("test/data", &file));
 
         AlignedBuffer buffer {0x200 * 8, 0x200};
 
@@ -567,13 +567,13 @@ TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
 
 TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
 {
-    Size fid;
-    for (Size i {1}; i <= 8; i++) {
+    std::size_t fid;
+    for (std::size_t i {1}; i <= 8; i++) {
         ASSERT_OK(frames->pin(Id {i}, fid));
     }
     ASSERT_TRUE(frames->pin(Id {9UL}, fid).is_not_found());
 
-    frames->unpin(Size {1UL});
+    frames->unpin(std::size_t {1UL});
     ASSERT_OK(frames->pin(Id {9UL}, fid));
 }
 
@@ -584,7 +584,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
     mem_copy(page.span(offset, message.size()), message);
 }
 
-[[nodiscard]] auto read_from_page(const Page &page, Size size) -> std::string
+[[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
     EXPECT_LE(offset + size, page.size());
@@ -635,7 +635,7 @@ public:
         EXPECT_OK(status);
     }
 
-    [[nodiscard]] auto acquire_read_release(Id id, Size size) const
+    [[nodiscard]] auto acquire_read_release(Id id, std::size_t size) const
     {
         Page page;
         EXPECT_OK(pager->acquire(id, page));
@@ -691,7 +691,7 @@ TEST_F(PagerTests, MultipleReaders)
 }
 
 template <class T>
-static auto run_root_persistence_test(T &test, Size n)
+static auto run_root_persistence_test(T &test, std::size_t n)
 {
     const auto id = test.allocate_write_release(test.test_message);
 
@@ -714,15 +714,15 @@ TEST_F(PagerTests, RootDataPersistsInEnv)
     run_root_persistence_test(*this, FRAME_COUNT * 2);
 }
 
-[[nodiscard]] auto generate_id_strings(Size n)
+[[nodiscard]] auto generate_id_strings(std::size_t n)
 {
-    std::vector<Size> id_ints(n);
+    std::vector<std::size_t> id_ints(n);
     std::iota(begin(id_ints), end(id_ints), 1);
 
     std::vector<std::string> id_strs;
     std::transform(cbegin(id_ints), cend(id_ints), back_inserter(id_strs), [](auto id) {
         auto result = std::to_string(id);
-        CALICO_EXPECT_LE(result.size(), 6);
+        CDB_EXPECT_LE(result.size(), 6);
         return std::string(6 - result.size(), '0') + result;
     });
     return id_strs;

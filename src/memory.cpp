@@ -5,22 +5,22 @@
 namespace calicodb
 {
 
-[[nodiscard]] static constexpr auto header_offset() -> Size
+[[nodiscard]] static constexpr auto header_offset() -> std::size_t
 {
     return sizeof(Lsn);
 }
 
-[[nodiscard]] static constexpr auto content_offset() -> Size
+[[nodiscard]] static constexpr auto content_offset() -> std::size_t
 {
     return header_offset() + sizeof(Id);
 }
 
-[[nodiscard]] static auto get_readable_content(const Page &page, Size size_limit) -> Slice
+[[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
 {
     return page.view(content_offset(), std::min(size_limit, page.size() - content_offset()));
 }
 
-[[nodiscard]] static auto get_writable_content(Page &page, Size size_limit) -> Span
+[[nodiscard]] static auto get_writable_content(Page &page, std::size_t size_limit) -> Span
 {
     return page.span(content_offset(), std::min(size_limit, page.size() - content_offset()));
 }
@@ -63,7 +63,7 @@ auto FreeList::push(Page page) -> Status
     return Status::ok();
 }
 
-auto OverflowList::read_chain(Span out, Id pid, Size offset) const -> Status
+auto OverflowList::read_chain(Span out, Id pid, std::size_t offset) const -> Status
 {
     while (!out.is_empty()) {
         Page page;
@@ -145,7 +145,7 @@ auto OverflowList::write_chain(Id &out, Id pid, Slice first, Slice second) -> St
     return Status::ok();
 }
 
-auto OverflowList::copy_chain(Id &out, Id pid, Id overflow_id, Size size) -> Status
+auto OverflowList::copy_chain(Id &out, Id pid, Id overflow_id, std::size_t size) -> Status
 {
     if (m_scratch.size() < size) {
         m_scratch.resize(size);
@@ -170,10 +170,10 @@ auto OverflowList::erase_chain(Id pid) -> Status
 }
 
 static constexpr auto ENTRY_SIZE =
-    sizeof(Byte) + // Type
+    sizeof(char) + // Type
     sizeof(Id);    // Back pointer
 
-static auto entry_offset(Id map_id, Id pid) -> Size
+static auto entry_offset(Id map_id, Id pid) -> std::size_t
 {
     CDB_EXPECT_GT(pid, map_id);
 
@@ -181,7 +181,7 @@ static auto entry_offset(Id map_id, Id pid) -> Size
     return sizeof(Lsn) + (pid.value - map_id.value - 1) * ENTRY_SIZE;
 }
 
-static auto decode_entry(const Byte *data) -> PointerMap::Entry
+static auto decode_entry(const char *data) -> PointerMap::Entry
 {
     PointerMap::Entry entry;
     entry.type = PointerMap::Type {*data++};

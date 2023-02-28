@@ -28,7 +28,7 @@ auto read_wal_record_header(Slice in) -> WalRecordHeader
     return header;
 }
 
-auto split_record(WalRecordHeader &lhs, const Slice &payload, Size available_size) -> WalRecordHeader
+auto split_record(WalRecordHeader &lhs, const Slice &payload, std::size_t available_size) -> WalRecordHeader
 {
     CDB_EXPECT_NE(lhs.type, WRT_First);
     CDB_EXPECT_EQ(lhs.size, payload.size());

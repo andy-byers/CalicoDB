@@ -36,7 +36,7 @@ auto compress_deltas(ChangeBuffer &deltas) -> std::size_t
         }
     }
     deltas.erase(next(lhs), end(deltas));
-    return std::accumulate(begin(deltas), end(deltas), Size {}, [](auto accum, auto delta) {
+    return std::accumulate(begin(deltas), end(deltas), std::size_t {}, [](auto accum, auto delta) {
         return accum + delta.size + sizeof(delta);
     });
 }

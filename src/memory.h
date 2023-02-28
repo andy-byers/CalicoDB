@@ -31,7 +31,7 @@ class PointerMap
     Pager *m_pager {};
 
 public:
-    enum Type : Byte {
+    enum Type : char {
         NODE = 1,
         OVERFLOW_HEAD,
         OVERFLOW_LINK,
@@ -109,9 +109,9 @@ public:
     {
     }
 
-    [[nodiscard]] auto read_chain(Span out, Id pid, Size offset = 0) const -> Status;
+    [[nodiscard]] auto read_chain(Span out, Id pid, std::size_t offset = 0) const -> Status;
     [[nodiscard]] auto write_chain(Id &out, Id pid, Slice first, Slice second = {}) -> Status;
-    [[nodiscard]] auto copy_chain(Id &out, Id pid, Id overflow_id, Size size) -> Status;
+    [[nodiscard]] auto copy_chain(Id &out, Id pid, Id overflow_id, std::size_t size) -> Status;
     [[nodiscard]] auto erase_chain(Id pid) -> Status;
 };
 

@@ -16,22 +16,22 @@
 namespace calicodb
 {
 
-#define Clear_Interceptors()                                                 \
+#define CLEAR_INTERCEPTORS()                                                 \
     do {                                                                     \
-        dynamic_cast<Tools::DynamicMemory &>(*storage).clear_interceptors(); \
+        dynamic_cast<Tools::DynamicMemory &>(*env).clear_interceptors(); \
     } while (0)
 
-#define Quick_Interceptor(prefix__, type__)                                  \
+#define QUICK_INTERCEPTOR(prefix__, type__)                                  \
     do {                                                                     \
-        dynamic_cast<Tools::DynamicMemory &>(*storage)                       \
+        dynamic_cast<Tools::DynamicMemory &>(*env)                       \
             .add_interceptor(Tools::Interceptor {(prefix__), (type__), [] {  \
                                                      return special_error(); \
                                                  }});                        \
     } while (0)
 
-#define Counting_Interceptor(prefix__, type__, n__)                                   \
+#define COUNTING_INTERCEPTOR(prefix__, type__, n__)                                   \
     do {                                                                              \
-        dynamic_cast<Tools::DynamicMemory &>(*storage)                                \
+        dynamic_cast<Tools::DynamicMemory &>(*env)                                \
             .add_interceptor(Tools::Interceptor {(prefix__), (type__), [&n = (n__)] { \
                                                      if (n-- <= 0) {                  \
                                                          return special_error();      \
@@ -79,33 +79,33 @@ public:
     static constexpr auto PREFIX = "test/";
 
     InMemoryTest()
-        : storage {std::make_unique<Tools::DynamicMemory>()}
+        : env {std::make_unique<Tools::DynamicMemory>()}
     {
-        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
+        EXPECT_TRUE(expose_message(env->create_directory(ROOT)));
     }
 
     virtual ~InMemoryTest() = default;
 
-    [[nodiscard]] auto storage_handle() -> Tools::DynamicMemory &
+    [[nodiscard]] auto get_env() -> Tools::DynamicMemory &
     {
-        return dynamic_cast<Tools::DynamicMemory &>(*storage);
+        return dynamic_cast<Tools::DynamicMemory &>(*env);
     }
 
-    std::unique_ptr<Env> storage;
+    std::unique_ptr<Env> env;
 };
 
 class OnDiskTest
 {
 public:
-    static constexpr auto ROOT = "/tmp/__calico_test__";
-    static constexpr auto PREFIX = "/tmp/__calico_test__/";
+    static constexpr auto ROOT = "/tmp/__calicodb_test__";
+    static constexpr auto PREFIX = "/tmp/__calicodb_test__/";
 
     OnDiskTest()
-        : storage {std::make_unique<EnvPosix>()}
+        : env {Env::default_env()}
     {
         std::error_code ignore;
         std::filesystem::remove_all(ROOT, ignore);
-        EXPECT_TRUE(expose_message(storage->create_directory(ROOT)));
+        EXPECT_TRUE(expose_message(env->create_directory(ROOT)));
     }
 
     virtual ~OnDiskTest()
@@ -114,7 +114,7 @@ public:
         std::filesystem::remove_all(ROOT, ignore);
     }
 
-    std::unique_ptr<Env> storage;
+    std::unique_ptr<Env> env;
 };
 
 class DisabledWriteAheadLog : public WriteAheadLog
@@ -125,7 +125,7 @@ public:
 
     [[nodiscard]] auto flushed_lsn() const -> Id override
     {
-        return {std::numeric_limits<Size>::max()};
+        return {std::numeric_limits<std::size_t>::max()};
     }
 
     [[nodiscard]] auto current_lsn() const -> Id override
@@ -133,7 +133,7 @@ public:
         return Id::null();
     }
 
-    [[nodiscard]] auto bytes_written() const -> Size override
+    [[nodiscard]] auto bytes_written() const -> std::size_t override
     {
         return 0;
     }
@@ -157,8 +157,8 @@ public:
 class TestWithPager : public InMemoryTest
 {
 public:
-    const Size PAGE_SIZE {0x200};
-    const Size FRAME_COUNT {16};
+    const std::size_t PAGE_SIZE {0x200};
+    const std::size_t FRAME_COUNT {16};
 
     TestWithPager()
         : scratch(PAGE_SIZE, '\x00'),
@@ -167,7 +167,7 @@ public:
         Pager *temp;
         EXPECT_OK(Pager::open({
                                   PREFIX,
-                                  storage.get(),
+                                  env.get(),
                                   &log_scratch,
                                   &wal,
                                   nullptr,
@@ -301,30 +301,30 @@ auto erase_one(T &t, const std::string &key) -> bool
     return true;
 }
 
-inline auto write_file(Env &storage, const std::string &path, Slice in) -> void
+inline auto write_file(Env &env, const std::string &path, Slice in) -> void
 {
     Editor *file;
-    ASSERT_TRUE(storage.new_editor(path, &file).is_ok());
+    ASSERT_TRUE(env.new_editor(path, &file).is_ok());
     ASSERT_TRUE(file->write(in, 0).is_ok());
     delete file;
 }
 
-inline auto append_file(Env &storage, const std::string &path, Slice in) -> void
+inline auto append_file(Env &env, const std::string &path, Slice in) -> void
 {
     Logger *file;
-    ASSERT_TRUE(storage.new_logger(path, &file).is_ok());
+    ASSERT_TRUE(env.new_logger(path, &file).is_ok());
     ASSERT_TRUE(file->write(in).is_ok());
     delete file;
 }
 
-inline auto read_file(Env &storage, const std::string &path) -> std::string
+inline auto read_file(Env &env, const std::string &path) -> std::string
 {
     Reader *file;
     std::string out;
-    Size size;
+    std::size_t size;
 
-    EXPECT_TRUE(storage.file_size(path, size).is_ok());
-    EXPECT_TRUE(storage.new_reader(path, &file).is_ok());
+    EXPECT_TRUE(env.file_size(path, size).is_ok());
+    EXPECT_TRUE(env.new_reader(path, &file).is_ok());
     out.resize(size);
 
     Span temp {out};
@@ -358,16 +358,16 @@ public:
     static unsigned default_seed;
 
     struct Parameters {
-        Size mean_key_size {12};
-        Size mean_value_size {18};
-        Size spread {4};
+        std::size_t mean_key_size {12};
+        std::size_t mean_value_size {18};
+        std::size_t spread {4};
         bool is_sequential {};
         bool is_unique {};
     };
 
     RecordGenerator() = default;
     explicit RecordGenerator(Parameters);
-    auto generate(Tools::RandomGenerator &, Size) const -> std::vector<Record>;
+    auto generate(Tools::RandomGenerator &, std::size_t) const -> std::vector<Record>;
 
 private:
     Parameters m_param;

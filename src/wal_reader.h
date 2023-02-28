@@ -10,8 +10,8 @@ class WalReader
 {
     Span m_tail;
     Reader *m_file {};
-    Size m_offset {};
-    Size m_block {};
+    std::size_t m_offset {};
+    std::size_t m_block {};
 
 public:
     explicit WalReader(Reader &file, Span tail);

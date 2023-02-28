@@ -1,6 +1,6 @@
 
 #include "db_impl.h"
-#include "calicodb/calico.h"
+#include "calicodb/calicodb.h"
 #include "calicodb/env.h"
 #include "crc.h"
 #include "cursor_impl.h"
@@ -46,15 +46,15 @@ auto DBImpl::open(const Slice &path, const Options &options) -> Status
 
 auto DBImpl::do_open(Options sanitized) -> Status
 {
-    m_storage = sanitized.storage;
-    if (m_storage == nullptr) {
-        m_storage = Env::default_storage();
-        m_owns_storage = true;
+    m_env = sanitized.env;
+    if (m_env == nullptr) {
+        m_env = Env::default_env();
+        m_owns_env = true;
     }
 
-    if (auto s = m_storage->file_exists(m_db_prefix); s.is_not_found()) {
+    if (auto s = m_env->file_exists(m_db_prefix); s.is_not_found()) {
         if (sanitized.create_if_missing) {
-            CALICODB_TRY(m_storage->create_directory(m_db_prefix));
+            CDB_TRY(m_env->create_directory(m_db_prefix));
         } else {
             return Status::invalid_argument("database does not exist");
         }
@@ -68,13 +68,13 @@ auto DBImpl::do_open(Options sanitized) -> Status
 
     m_info_log = sanitized.info_log;
     if (m_info_log == nullptr) {
-        CALICODB_TRY(m_storage->new_info_logger(m_db_prefix + "log", &m_info_log));
+        CDB_TRY(m_env->new_info_logger(m_db_prefix + "log", &m_info_log));
         sanitized.info_log = m_info_log;
         m_owns_info_log = true;
     }
 
     FileHeader state;
-    CALICODB_TRY(setup(m_db_prefix, *m_storage, sanitized, state));
+    CDB_TRY(setup(m_db_prefix, *m_env, sanitized, state));
     m_commit_lsn = state.commit_lsn;
     m_record_count = state.record_count;
     if (!m_commit_lsn.is_null()) {
@@ -82,19 +82,19 @@ auto DBImpl::do_open(Options sanitized) -> Status
     }
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
-    CALICODB_TRY(WriteAheadLog::open(
+    CDB_TRY(WriteAheadLog::open(
         {
             m_wal_prefix,
-            m_storage,
+            m_env,
             sanitized.page_size,
             256,
         },
         &wal));
 
-    CALICODB_TRY(Pager::open(
+    CDB_TRY(Pager::open(
         {
             m_db_prefix,
-            m_storage,
+            m_env,
             &m_scratch,
             wal,
             m_info_log,
@@ -113,28 +113,28 @@ auto DBImpl::do_open(Options sanitized) -> Status
     Status s;
     if (m_commit_lsn.is_null()) {
         m_info_log->logv("setting up a new database");
-        CALICODB_TRY(wal->start_writing());
+        CDB_TRY(wal->start_writing());
 
         Node root;
         BPlusTreeInternal internal {*tree};
-        CALICODB_TRY(internal.allocate_root(root));
+        CDB_TRY(internal.allocate_root(root));
         internal.release(std::move(root));
 
-        CALICODB_TRY(do_commit());
-        CALICODB_TRY(pager->flush());
+        CDB_TRY(do_commit());
+        CDB_TRY(pager->flush());
 
     } else {
         m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
-        CALICODB_TRY(ensure_consistency());
-        CALICODB_TRY(load_state());
-        CALICODB_TRY(wal->start_writing());
+        CDB_TRY(ensure_consistency());
+        CDB_TRY(load_state());
+        CDB_TRY(wal->start_writing());
     }
     m_info_log->logv("pager recovery lsn is %llu", pager->recovery_lsn().value);
     m_info_log->logv("wal flushed lsn is %llu", wal->flushed_lsn().value);
     m_info_log->logv("commit lsn is %llu", m_commit_lsn.value);
 
-    CALICODB_TRY(m_status);
+    CDB_TRY(m_status);
     m_is_setup = true;
     return Status::ok();
 }
@@ -159,8 +159,8 @@ DBImpl::~DBImpl()
     if (m_owns_info_log) {
         delete m_info_log;
     }
-    if (m_owns_storage) {
-        delete m_storage;
+    if (m_owns_env) {
+        delete m_env;
     }
 
     delete pager;
@@ -180,14 +180,14 @@ auto DBImpl::repair(const std::string &path, const Options &options) -> Status
 
 auto DBImpl::destroy(const std::string &path, const Options &options) -> Status
 {
-    bool owns_storage {};
-    Env *storage;
+    bool owns_env {};
+    Env *env;
 
-    if (options.storage) {
-        storage = options.storage;
+    if (options.env) {
+        env = options.env;
     } else {
-        storage = new PosixEnv;
-        owns_storage = true;
+        env = new EnvPosix;
+        owns_env = true;
     }
 
     auto prefix = path;
@@ -196,9 +196,9 @@ auto DBImpl::destroy(const std::string &path, const Options &options) -> Status
     }
 
     std::vector<std::string> children;
-    if (const auto s = storage->get_children(path, children); s.is_ok()) {
+    if (const auto s = env->get_children(path, children); s.is_ok()) {
         for (const auto &name : children) {
-            (void)storage->remove_file(prefix + name);
+            (void)env->remove_file(prefix + name);
         }
     }
 
@@ -210,19 +210,19 @@ auto DBImpl::destroy(const std::string &path, const Options &options) -> Status
             dir_path.erase(pos + 1);
         }
 
-        if (const auto s = storage->get_children(dir_path, children); s.is_ok()) {
+        if (const auto s = env->get_children(dir_path, children); s.is_ok()) {
             for (const auto &name : children) {
                 const auto filename = dir_path + name;
                 if (Slice {filename}.starts_with(options.wal_prefix)) {
-                    (void)storage->remove_file(filename);
+                    (void)env->remove_file(filename);
                 }
             }
         }
     }
-    auto s = storage->remove_directory(path);
+    auto s = env->remove_directory(path);
 
-    if (owns_storage) {
-        delete storage;
+    if (owns_env) {
+        delete env;
     }
     return s;
 }
@@ -234,8 +234,8 @@ auto DBImpl::status() const -> Status
 
 auto DBImpl::get_property(const Slice &name, std::string &out) const -> bool
 {
-    if (Slice prop {name}; prop.starts_with("calico.")) {
-        prop.advance(7);
+    if (Slice prop {name}; prop.starts_with("calicodb.")) {
+        prop.advance(std::strlen("calicodb."));
 
         if (prop == "counts") {
             out.append("records:");
@@ -263,11 +263,11 @@ auto DBImpl::get_property(const Slice &name, std::string &out) const -> bool
 
 auto DBImpl::get(const Slice &key, std::string &value) const -> Status
 {
-    CALICODB_TRY(m_status);
+    CDB_TRY(m_status);
     value.clear();
 
     SearchResult slot;
-    CALICODB_TRY(tree->search(key, slot));
+    CDB_TRY(tree->search(key, slot));
     auto [node, index, exact] = std::move(slot);
 
     if (!exact) {
@@ -277,7 +277,7 @@ auto DBImpl::get(const Slice &key, std::string &value) const -> Status
 
     Slice _;
     const auto cell = read_cell(node, index);
-    CALICODB_TRY(tree->collect_value(value, cell, _));
+    CDB_TRY(tree->collect_value(value, cell, _));
     pager->release(std::move(node.page));
     return Status::ok();
 }
@@ -293,7 +293,7 @@ auto DBImpl::new_cursor() const -> Cursor *
 
 auto DBImpl::put(const Slice &key, const Slice &value) -> Status
 {
-    CALICODB_TRY(m_status);
+    CDB_TRY(m_status);
 
     bool exists {};
     if (auto s = tree->insert(key, value, exists); !s.is_ok()) {
@@ -309,7 +309,7 @@ auto DBImpl::put(const Slice &key, const Slice &value) -> Status
 
 auto DBImpl::erase(const Slice &key) -> Status
 {
-    CALICODB_TRY(m_status);
+    CDB_TRY(m_status);
 
     auto s = tree->erase(key);
     if (s.is_ok()) {
@@ -323,7 +323,7 @@ auto DBImpl::erase(const Slice &key) -> Status
 
 auto DBImpl::vacuum() -> Status
 {
-    CALICODB_TRY(m_status);
+    CDB_TRY(m_status);
     if (auto s = do_vacuum(); !s.is_ok()) {
         SET_STATUS(s);
     }
@@ -338,7 +338,7 @@ auto DBImpl::do_vacuum() -> Status
     }
     for (;; target.value--) {
         bool vacuumed {};
-        CALICODB_TRY(tree->vacuum_one(target, vacuumed));
+        CDB_TRY(tree->vacuum_one(target, vacuumed));
         if (!vacuumed) {
             break;
         }
@@ -351,13 +351,13 @@ auto DBImpl::do_vacuum() -> Status
     // be able to reapply the whole vacuum operation if the truncation fails.
     // The recovery routine should truncate the file to match the header page
     // count if necessary.
-    CALICODB_TRY(wal->flush());
+    CDB_TRY(wal->flush());
     return pager->truncate(target.value);
 }
 
 auto DBImpl::commit() -> Status
 {
-    CALICODB_TRY(m_status);
+    CDB_TRY(m_status);
     if (m_txn_size != 0) {
         if (auto s = do_commit(); !s.is_ok()) {
             SET_STATUS(s);
@@ -372,7 +372,7 @@ auto DBImpl::do_commit() -> Status
     m_txn_size = 0;
 
     Page root;
-    CALICODB_TRY(pager->acquire(Id::root(), root));
+    CDB_TRY(pager->acquire(Id::root(), root));
     pager->upgrade(root);
 
     // The root page is guaranteed to have a full image in the WAL. The current
@@ -380,8 +380,8 @@ auto DBImpl::do_commit() -> Status
     auto commit_lsn = wal->current_lsn();
     m_info_log->logv("commit requested at lsn %llu", commit_lsn.value);
 
-    CALICODB_TRY(save_state(std::move(root), commit_lsn));
-    CALICODB_TRY(wal->flush());
+    CDB_TRY(save_state(std::move(root), commit_lsn));
+    CDB_TRY(wal->flush());
 
     m_info_log->logv("commit successful");
     m_commit_lsn = commit_lsn;
@@ -393,7 +393,7 @@ auto DBImpl::ensure_consistency() -> Status
     Recovery recovery {*pager, *wal, m_commit_lsn};
 
     m_in_txn = false;
-    CALICODB_TRY(recovery.recover());
+    CDB_TRY(recovery.recover());
     m_in_txn = true;
     return load_state();
 }
@@ -418,7 +418,7 @@ auto DBImpl::save_state(Page root, Lsn commit_lsn) const -> Status
 auto DBImpl::load_state() -> Status
 {
     Page root;
-    CALICODB_TRY(pager->acquire(Id::root(), root));
+    CDB_TRY(pager->acquire(Id::root(), root));
 
     FileHeader header {root};
     const auto expected_crc = crc32c::Unmask(header.header_crc);
@@ -444,9 +444,9 @@ auto DBImpl::TEST_validate() const -> void
     tree->TEST_check_nodes();
 }
 
-auto setup(const std::string &prefix, Env &storage, const Options &options, FileHeader &header) -> Status
+auto setup(const std::string &prefix, Env &env, const Options &options, FileHeader &header) -> Status
 {
-    static constexpr Size MINIMUM_FRAME_COUNT {16};
+    static constexpr std::size_t MINIMUM_FRAME_COUNT {16};
 
     if (options.page_size < MINIMUM_PAGE_SIZE) {
         return Status::invalid_argument("page size is too small");
@@ -468,18 +468,18 @@ auto setup(const std::string &prefix, Env &storage, const Options &options, File
     std::unique_ptr<Reader> reader;
     Reader *reader_temp {};
 
-    if (auto s = storage.new_reader(path, &reader_temp); s.is_ok()) {
+    if (auto s = env.new_reader(path, &reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
-        Size file_size {};
-        CALICODB_TRY(storage.file_size(path, file_size));
+        std::size_t file_size {};
+        CDB_TRY(env.file_size(path, file_size));
 
         if (file_size < FileHeader::SIZE) {
             return Status::invalid_argument("file is not a database");
         }
 
-        Byte buffer[FileHeader::SIZE];
-        Size read_size = sizeof(buffer);
-        CALICODB_TRY(reader->read(buffer, read_size, 0));
+        char buffer[FileHeader::SIZE];
+        std::size_t read_size = sizeof(buffer);
+        CDB_TRY(reader->read(buffer, read_size, 0));
         if (read_size != sizeof(buffer)) {
             return Status::system_error("incomplete read of file header");
         }

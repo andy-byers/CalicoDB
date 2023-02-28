@@ -45,7 +45,7 @@ with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
 }
 
 Recovery::Recovery(Pager &pager, WriteAheadLog &wal, Lsn &commit_lsn)
-    : m_reader_data(wal_scratch_size(pager.page_size()), '\x00'), m_reader_tail(wal_block_size(pager.page_size()), '\x00'), m_pager {&pager}, m_storage {wal.m_storage}, m_set {&wal.m_set}, m_wal {&wal}, m_commit_lsn {&commit_lsn}
+    : m_reader_data(wal_scratch_size(pager.page_size()), '\x00'), m_reader_tail(wal_block_size(pager.page_size()), '\x00'), m_pager {&pager}, m_env {wal.m_env}, m_set {&wal.m_set}, m_wal {&wal}, m_commit_lsn {&commit_lsn}
 {
 }
 
@@ -53,7 +53,7 @@ auto Recovery::open_reader(Id segment, std::unique_ptr<Reader> &out) -> Status
 {
     Reader *file;
     const auto name = encode_segment_name(m_wal->m_prefix, segment);
-    CDB_TRY(m_storage->new_reader(name, &file));
+    CDB_TRY(m_env->new_reader(name, &file));
     out.reset(file);
     return Status::ok();
 }
@@ -236,7 +236,7 @@ auto Recovery::recover_phase_2() -> Status
      */
     CDB_TRY(m_pager->flush());
     for (auto id = m_set->last(); !id.is_null(); id = m_set->id_before(id)) {
-        CDB_TRY(m_storage->remove_file(encode_segment_name(m_wal->m_prefix, id)));
+        CDB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, id)));
     }
     m_set->remove_after(Id::null());
 

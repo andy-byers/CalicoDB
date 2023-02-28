@@ -20,7 +20,7 @@ enum OperationType {
     TYPE_COUNT
 };
 
-constexpr Size DB_MAX_RECORDS {5'000};
+constexpr std::size_t DB_MAX_RECORDS {5'000};
 
 OpsFuzzer::OpsFuzzer(std::string path, Options *options)
     : DbFuzzer {std::move(path), options}
@@ -49,18 +49,18 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         if (s.is_not_found()) {
             s = Status::ok();
         }
-        CALICO_TRY(s);
+        CDB_TRY(s);
         break;
     case PUT:
         key = extract_key(data, size).to_string();
-        CALICO_TRY(m_db->put(key, extract_value(data, size)));
+        CDB_TRY(m_db->put(key, extract_value(data, size)));
         break;
     case ERASE:
         s = m_db->erase(extract_key(data, size));
         if (s.is_not_found()) {
             s = Status::ok();
         }
-        CALICO_TRY(s);
+        CDB_TRY(s);
         break;
     case SEEK_ITER:
         key = extract_key(data, size).to_string();
@@ -89,13 +89,13 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         }
         break;
     case VACUUM:
-        CALICO_TRY(m_db->vacuum());
+        CDB_TRY(m_db->vacuum());
         break;
     case COMMIT:
-        CALICO_TRY(m_db->commit());
+        CDB_TRY(m_db->commit());
         break;
     default: // REOPEN
-        CALICO_TRY(reopen());
+        CDB_TRY(reopen());
     }
     delete cursor;
     return m_db->status();
@@ -104,7 +104,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     Options options;
-    options.storage = new Tools::DynamicMemory;
+    options.env = new Tools::DynamicMemory;
     {
         OpsFuzzer fuzzer {"ops_fuzzer", &options};
 
@@ -113,7 +113,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
             fuzzer.validate();
         }
     }
-    delete options.storage;
+    delete options.env;
     return 0;
 }
 
