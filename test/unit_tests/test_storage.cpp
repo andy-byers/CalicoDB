@@ -1,8 +1,8 @@
-#include "calico/storage.h"
+#include "calicodb/env.h"
 #include "tools.h"
+#include "types.h"
 #include "unit_tests.h"
-#include "utils/types.h"
-#include "utils/utils.h"
+#include "utils.h"
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -221,44 +221,44 @@ TEST_F(PosixLoggerTests, WritesOutData)
     ASSERT_EQ(read_whole_file(filename), data.to_string());
 }
 
-class PosixStorageTests : public OnDiskTest
+class EnvPosixTests : public OnDiskTest
 {
 public:
-    PosixStorageTests()
+    EnvPosixTests()
         : filename {PREFIX + std::string {"file"}}
     {
     }
 
-    ~PosixStorageTests() override = default;
+    ~EnvPosixTests() override = default;
 
     std::string filename;
     Tools::RandomGenerator random;
 };
 
-class DynamicStorageTests
+class DynamicEnvTests
     : public InMemoryTest,
       public testing::Test
 {
 public:
-    DynamicStorageTests()
+    DynamicEnvTests()
         : filename {PREFIX + std::string {"file"}}
     {
     }
 
-    ~DynamicStorageTests() override = default;
+    ~DynamicEnvTests() override = default;
 
     std::string filename;
     Tools::RandomGenerator random;
 };
 
-TEST_F(DynamicStorageTests, ReaderCannotCreateFile)
+TEST_F(DynamicEnvTests, ReaderCannotCreateFile)
 {
     Reader *temp;
     const auto s = storage->new_reader("nonexistent", &temp);
     ASSERT_TRUE(s.is_not_found()) << "Error: " << s.to_string().data();
 }
 
-TEST_F(DynamicStorageTests, ReadsAndWrites)
+TEST_F(DynamicEnvTests, ReadsAndWrites)
 {
     auto ra_editor = open_blob<Editor>(*storage, filename);
     auto ra_reader = open_blob<Reader>(*storage, filename);
@@ -274,7 +274,7 @@ TEST_F(DynamicStorageTests, ReadsAndWrites)
     ASSERT_EQ(output_1, first_input.to_string() + second_input.to_string());
 }
 
-TEST_F(DynamicStorageTests, ReaderStopsAtEOF)
+TEST_F(DynamicEnvTests, ReaderStopsAtEOF)
 {
     auto ra_editor = open_blob<Editor>(*storage, filename);
     auto ra_reader = open_blob<Reader>(*storage, filename);

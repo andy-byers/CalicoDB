@@ -2,13 +2,13 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-#include "calico/slice.h"
+#include "calicodb/slice.h"
+#include "crc.h"
+#include "encoding.h"
+#include "logging.h"
+#include "types.h"
 #include "unit_tests.h"
-#include "utils/crc.h"
-#include "utils/encoding.h"
-#include "utils/logging.h"
-#include "utils/types.h"
-#include "utils/utils.h"
+#include "utils.h"
 
 namespace calicodb
 {

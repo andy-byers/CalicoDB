@@ -1,7 +1,7 @@
-#include "tree/cursor_impl.h"
-#include "tree/memory.h"
-#include "tree/node.h"
-#include "tree/tree.h"
+#include "cursor_impl.h"
+#include "memory.h"
+#include "node.h"
+#include "tree.h"
 #include "unit_tests.h"
 #include <gtest/gtest.h>
 
@@ -1152,7 +1152,7 @@ protected:
     }
 };
 
-TEST_P(CursorTests, KeyAndValueUseSeparateStorage)
+TEST_P(CursorTests, KeyAndValueUseSeparateEnv)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     cursor->seek_first();

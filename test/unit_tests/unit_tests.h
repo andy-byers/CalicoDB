@@ -1,13 +1,13 @@
-#ifndef CALICO_TEST_UNIT_TESTS_H
-#define CALICO_TEST_UNIT_TESTS_H
+#ifndef CALICODB_TEST_UNIT_TESTS_H
+#define CALICODB_TEST_UNIT_TESTS_H
 
-#include "calico/status.h"
-#include "pager/page.h"
-#include "storage/posix_storage.h"
+#include "calicodb/status.h"
+#include "env_posix.h"
+#include "page.h"
 #include "tools.h"
-#include "utils/utils.h"
-#include "wal/wal.h"
-#include "wal/writer.h"
+#include "utils.h"
+#include "wal.h"
+#include "wal_writer.h"
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>
@@ -91,7 +91,7 @@ public:
         return dynamic_cast<Tools::DynamicMemory &>(*storage);
     }
 
-    std::unique_ptr<Storage> storage;
+    std::unique_ptr<Env> storage;
 };
 
 class OnDiskTest
@@ -101,7 +101,7 @@ public:
     static constexpr auto PREFIX = "/tmp/__calico_test__/";
 
     OnDiskTest()
-        : storage {std::make_unique<PosixStorage>()}
+        : storage {std::make_unique<EnvPosix>()}
     {
         std::error_code ignore;
         std::filesystem::remove_all(ROOT, ignore);
@@ -114,7 +114,7 @@ public:
         std::filesystem::remove_all(ROOT, ignore);
     }
 
-    std::unique_ptr<Storage> storage;
+    std::unique_ptr<Env> storage;
 };
 
 class DisabledWriteAheadLog : public WriteAheadLog
@@ -301,7 +301,7 @@ auto erase_one(T &t, const std::string &key) -> bool
     return true;
 }
 
-inline auto write_file(Storage &storage, const std::string &path, Slice in) -> void
+inline auto write_file(Env &storage, const std::string &path, Slice in) -> void
 {
     Editor *file;
     ASSERT_TRUE(storage.new_editor(path, &file).is_ok());
@@ -309,7 +309,7 @@ inline auto write_file(Storage &storage, const std::string &path, Slice in) -> v
     delete file;
 }
 
-inline auto append_file(Storage &storage, const std::string &path, Slice in) -> void
+inline auto append_file(Env &storage, const std::string &path, Slice in) -> void
 {
     Logger *file;
     ASSERT_TRUE(storage.new_logger(path, &file).is_ok());
@@ -317,7 +317,7 @@ inline auto append_file(Storage &storage, const std::string &path, Slice in) -> 
     delete file;
 }
 
-inline auto read_file(Storage &storage, const std::string &path) -> std::string
+inline auto read_file(Env &storage, const std::string &path) -> std::string
 {
     Reader *file;
     std::string out;
@@ -375,4 +375,4 @@ private:
 
 } // namespace calicodb
 
-#endif // CALICO_TEST_UNIT_TESTS_H
+#endif // CALICODB_TEST_UNIT_TESTS_H

@@ -11,10 +11,7 @@ project(CalicoDB
         VERSION 0.0.1)
 set(CMAKE_CXX_STANDARD 17)
 
-set(CALICO_NAME calico)
 set(CALICO_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-set(CALICO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
-set(CALICO_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/test")
 
 set(MAIN_PROJECT Off)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -49,7 +46,7 @@ write_basic_package_version_file("${VERSION_FILE}"
         COMPATIBILITY SameMajorVersion)
 
 if(CALICO_Install)
-    install(TARGETS calico
+    install(TARGETS calicodb
             EXPORT "${TARGETS_NAME}"
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
             LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"

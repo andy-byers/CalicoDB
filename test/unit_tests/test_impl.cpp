@@ -1,10 +1,10 @@
 
-#include "database/db_impl.h"
+#include "cursor_impl.h"
+#include "db_impl.h"
+#include "header.h"
 #include "tools.h"
-#include "tree/cursor_impl.h"
-#include "tree/header.h"
 #include "unit_tests.h"
-#include "wal/wal.h"
+#include "wal.h"
 #include <array>
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -351,7 +351,7 @@ INSTANTIATE_TEST_SUITE_P(
 class TestDatabase
 {
 public:
-    explicit TestDatabase(Storage &storage)
+    explicit TestDatabase(Env &storage)
     {
         options.page_size = 0x200;
         options.cache_size = 32 * options.page_size;
@@ -474,7 +474,7 @@ protected:
 
 TEST_F(DbRecoveryTests, RecoversFirstBatch)
 {
-    std::unique_ptr<Storage> clone;
+    std::unique_ptr<Env> clone;
     std::map<std::string, std::string> snapshot;
 
     {
@@ -496,7 +496,7 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
 
 TEST_F(DbRecoveryTests, RecoversNthBatch)
 {
-    std::unique_ptr<Storage> clone;
+    std::unique_ptr<Env> clone;
     std::map<std::string, std::string> snapshot;
 
     {

@@ -1,9 +1,9 @@
 
-#ifndef CALICO_TOOLS_H
-#define CALICO_TOOLS_H
+#ifndef CALICODB_TOOLS_H
+#define CALICODB_TOOLS_H
 
-#include "database/db_impl.h"
-#include <calico/calico.h>
+#include "calicodb/calicodb.h"
+#include "db_impl.h"
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
@@ -75,7 +75,7 @@ struct Interceptor {
     Type type {};
 };
 
-class DynamicMemory : public Storage
+class DynamicMemory : public Env
 {
 
     struct Memory {
@@ -105,7 +105,7 @@ public:
     {
         return m_memory;
     }
-    [[nodiscard]] auto clone() const -> Storage *;
+    [[nodiscard]] auto clone() const -> Env *;
     auto add_interceptor(Interceptor interceptor) -> void;
     auto clear_interceptors() -> void;
 
@@ -344,4 +344,4 @@ auto print_references(Pager &pager, PointerMap &pointers) -> void;
 
 } // namespace calicodb::Tools
 
-#endif // CALICO_TOOLS_H
+#endif // CALICODB_TOOLS_H

@@ -1,9 +1,9 @@
 #ifndef CALICO_FUZZERS_FUZZER_H
 #define CALICO_FUZZERS_FUZZER_H
 
-#include "calico/calico.h"
+#include "calicodb/calico.h"
+#include "encoding.h"
 #include "tools.h"
-#include "utils/encoding.h"
 #include <iostream>
 
 namespace calicodb

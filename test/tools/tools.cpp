@@ -1,6 +1,6 @@
 
 #include "tools.h"
-#include "utils/types.h"
+#include "types.h"
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
@@ -224,7 +224,7 @@ auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::s
     return Status::ok();
 }
 
-auto DynamicMemory::clone() const -> Storage *
+auto DynamicMemory::clone() const -> Env *
 {
     auto *storage = new DynamicMemory;
     storage->m_memory = m_memory;

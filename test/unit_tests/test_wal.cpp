@@ -1,10 +1,10 @@
-#include "calico/slice.h"
-#include "calico/storage.h"
+#include "calicodb/env.h"
+#include "calicodb/slice.h"
+#include "crc.h"
 #include "tools.h"
 #include "unit_tests.h"
-#include "utils/crc.h"
-#include "wal/reader.h"
-#include "wal/writer.h"
+#include "wal_reader.h"
+#include "wal_writer.h"
 #include <array>
 #include <gtest/gtest.h>
 

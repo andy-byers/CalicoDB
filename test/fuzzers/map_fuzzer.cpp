@@ -10,7 +10,7 @@
 #include <map>
 #include <set>
 
-#include "calico/calico.h"
+#include "calicodb/calico.h"
 
 namespace calicodb
 {

@@ -1,7 +1,7 @@
 /*
  * Recovery tests (harness is modified from LevelDB).
  */
-#include "calico/calico.h"
+#include "calicodb/calicodb.h"
 #include "tools.h"
 #include "unit_tests.h"
 

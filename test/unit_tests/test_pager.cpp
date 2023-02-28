@@ -1,12 +1,12 @@
 
-#include "pager/frames.h"
-#include "pager/page.h"
-#include "pager/page_cache.h"
-#include "pager/pager.h"
-#include "tree/header.h"
-#include "tree/node.h"
+#include "frames.h"
+#include "header.h"
+#include "logging.h"
+#include "node.h"
+#include "page.h"
+#include "page_cache.h"
+#include "pager.h"
 #include "unit_tests.h"
-#include "utils/logging.h"
 #include <gtest/gtest.h>
 #include <numeric>
 
@@ -709,7 +709,7 @@ TEST_F(PagerTests, RootDataPersistsInFrame)
     run_root_persistence_test(*this, FRAME_COUNT);
 }
 
-TEST_F(PagerTests, RootDataPersistsInStorage)
+TEST_F(PagerTests, RootDataPersistsInEnv)
 {
     run_root_persistence_test(*this, FRAME_COUNT * 2);
 }
