@@ -39,9 +39,9 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCALICO_BuildTests=Off .. && cmake --build .
 std::string str {"abc"};
 
 // We can create slices from C-style strings, standard library strings, or directly from a pointer and a length.
-Calico::Slice s1 {str.c_str()};
-Calico::Slice s2 {str};
-Calico::Slice s3 {str.data(), str.size()};
+calicodb::Slice s1 {str.c_str()};
+calicodb::Slice s2 {str};
+calicodb::Slice s3 {str.data(), str.size()};
 
 // Slices can be converted back to owned strings using Slice::to_string().
 printf("%s\n", s1.to_string().c_str());
@@ -63,7 +63,7 @@ assert(s2.starts_with("ab"));
 ### Opening a database
 ```C++
 // Set some initialization options.
-const Calico::Options options {
+const calicodb::Options options {
     // Use pages of size 2 KiB, a 2 MiB page cache, and a 1 MiB WAL write buffer.
     .page_size = 0x2000,
     .cache_size = 0x200000,
@@ -75,7 +75,7 @@ const Calico::Options options {
     
     // The database instance will write info log messages at the specified log level, to the object
     // passed in the "info_log" member.
-    .log_level = Calico::LogLevel::TRACE,
+    .log_level = calicodb::LogLevel::TRACE,
     .info_log = nullptr,
     
     // This can be used to inject a custom storage implementation. (see the DynamicMemory class in
@@ -84,8 +84,8 @@ const Calico::Options options {
 };
 
 // Create or open a database at "/tmp/cats".
-Calico::Database *db;
-auto s = Calico::Database::open("/tmp/cats", options, &db);
+calicodb::DB *db;
+auto s = calicodb::DB::open("/tmp/cats", options, &db);
 
 // Handle failure. s.what() provides information about what went wrong in the form of a Slice. Its "data" member is 
 // null-terminated, so it can be printed like in the following block.
@@ -101,7 +101,7 @@ The next time that the database is opened, recovery will be run to undo any unco
 
 ```C++
 // Insert some key-value pairs.
-if (const Calico::Status s = db->put("a", "1"); s.is_system_error()) {
+if (const calicodb::Status s = db->put("a", "1"); s.is_system_error()) {
     // Handle a system-level or I/O error.
 } else if (s.is_invalid_argument()) {
     // Key was too long. This can be prevented by querying the maximum key size after database creation.
@@ -142,15 +142,15 @@ if (const auto s = db->get("a", value); s.is_ok()) {
 }
 
 // Allocate a cursor.
-Calico::Cursor *cursor = db->new_cursor();
+calicodb::Cursor *cursor = db->new_cursor();
 
 // Seek to the first record greater than or equal to the given key.
 cursor->seek("a");
 
 if (cursor->is_valid()) {
     // If the cursor is valid, these calls can be made:
-    const Calico::Slice k = cursor->key();
-    const Calico::Slice v = cursor->value();
+    const calicodb::Slice k = cursor->key();
+    const calicodb::Slice v = cursor->value();
 } else if (cursor->status().is_not_found()) {
     // Key was greater than any key in the database.
 } else {
@@ -183,15 +183,15 @@ delete cursor;
 
 ```C++
 if (const auto s = db->vacuum(); s.is_ok()) {
-    // Unused database pages have been reclaimed and the file truncated. Note that calls to vacuum() must occur first
-    // in a transaction, i.e. vacuum() must follow a successful call to commit(), or open().
+    // Unused database pages have been reclaimed and the file truncated. At present, vacuum is considered part of a
+    // transaction, even though it doesn't change the logical contents of the database. This may change in the future.
 }
 ```
 
 ### Transactions
 A transaction represents a unit of work in CalicoDB.
 The first transaction is started when the database is opened. 
-Otherwise, transaction boundaries are defined by calls to `Database::commit()`.
+Otherwise, transaction boundaries are defined by calls to `DB::commit()`.
 All updates that haven't been committed when the database is closed will be reverted.
 
 ```C++
@@ -228,7 +228,7 @@ delete db;
 ### Destroying a database
 
 ```C++
-if (const auto s = Calico::Database::destroy("/tmp/cats", options); s.is_ok()) {
+if (const auto s = calicodb::DB::destroy("/tmp/cats", options); s.is_ok()) {
     // Database has been destroyed.
 } else if (s.is_not_found()) {
     // The database does not exist.

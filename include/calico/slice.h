@@ -10,15 +10,17 @@
 #include <cstring>
 #include <string>
 
-namespace Calico {
+namespace calicodb
+{
 
 enum class Comparison {
-    LT = -1,
-    EQ = 0,
-    GT = 1,
+    Less = -1,
+    Equal = 0,
+    Greater = 1,
 };
 
-class Slice {
+class Slice
+{
 public:
     constexpr Slice() noexcept = default;
 
@@ -38,11 +40,13 @@ public:
 
     constexpr Slice(const std::string_view &rhs) noexcept
         : Slice {rhs.data(), rhs.size()}
-    {}
+    {
+    }
 
     Slice(const std::string &rhs) noexcept
         : Slice {rhs.data(), rhs.size()}
-    {}
+    {
+    }
 
     [[nodiscard]] constexpr auto is_empty() const noexcept -> bool
     {
@@ -131,42 +135,42 @@ inline auto compare_three_way(Slice lhs, Slice rhs) noexcept -> Comparison
         } else if (lhs.size() > rhs.size()) {
             r = 1;
         } else {
-            return Comparison::EQ;
+            return Comparison::Equal;
         }
     }
-    return r < 0 ? Comparison::LT : Comparison::GT;
+    return r < 0 ? Comparison::Less : Comparison::Greater;
 }
 
 inline auto operator<(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == Comparison::LT;
+    return compare_three_way(lhs, rhs) == Comparison::Less;
 }
 
 inline auto operator<=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) != Comparison::GT;
+    return compare_three_way(lhs, rhs) != Comparison::Greater;
 }
 
 inline auto operator>(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == Comparison::GT;
+    return compare_three_way(lhs, rhs) == Comparison::Greater;
 }
 
 inline auto operator>=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) != Comparison::LT;
+    return compare_three_way(lhs, rhs) != Comparison::Less;
 }
 
 inline auto operator==(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == Comparison::EQ;
+    return compare_three_way(lhs, rhs) == Comparison::Equal;
 }
 
 inline auto operator!=(Slice lhs, Slice rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) != Comparison::EQ;
+    return compare_three_way(lhs, rhs) != Comparison::Equal;
 }
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_SLICE_H

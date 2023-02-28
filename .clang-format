@@ -1,66 +1,10 @@
-# Generated from CLion C/C++ Code Style settings
+# CalicoDB style differences from LLVM coding standards:
+#     (1) snake_case variable, function, and method names
+#
+
 BasedOnStyle: LLVM
-AccessModifierOffset: -4
-AlignAfterOpenBracket: Align
-AlignConsecutiveAssignments: None
-AlignOperands: Align
-AllowAllArgumentsOnNextLine: false
-AllowAllConstructorInitializersOnNextLine: false
-AllowAllParametersOfDeclarationOnNextLine: false
-AllowShortBlocksOnASingleLine: Empty
-AllowShortCaseLabelsOnASingleLine: false
-AllowShortFunctionsOnASingleLine: Empty
-AllowShortIfStatementsOnASingleLine: Never
-AllowShortLambdasOnASingleLine: Empty
-AllowShortLoopsOnASingleLine: false
-AlwaysBreakAfterReturnType: None
-AlwaysBreakTemplateDeclarations: Yes
-BreakBeforeBraces: Custom
-BraceWrapping:
-  AfterCaseLabel: false
-  AfterClass: false
-  AfterControlStatement: Never
-  AfterEnum: false
-  AfterFunction: true
-  AfterNamespace: false
-  AfterUnion: false
-  BeforeCatch: false
-  BeforeElse: false
-  IndentBraces: false
-  SplitEmptyFunction: false
-  SplitEmptyRecord: true
-BreakBeforeBinaryOperators: None
-BreakBeforeTernaryOperators: true
-BreakConstructorInitializers: BeforeColon
-BreakInheritanceList: BeforeColon
+BreakBeforeBraces: Linux
 ColumnLimit: 0
-CompactNamespaces: false
-ContinuationIndentWidth: 4
-IndentCaseLabels: true
-IndentPPDirectives: None
-IndentWidth: 4
-KeepEmptyLinesAtTheStartOfBlocks: true
-MaxEmptyLinesToKeep: 1
-NamespaceIndentation: Inner
-PointerAlignment: Right
-ReflowComments: false
-SpaceAfterCStyleCast: false
-SpaceAfterLogicalNot: false
-SpaceAfterTemplateKeyword: false
-SpaceBeforeAssignmentOperators: true
 SpaceBeforeCpp11BracedList: true
-SpaceBeforeCtorInitializerColon: false
-SpaceBeforeInheritanceColon: true
-SpaceBeforeParens: ControlStatements
-SpaceBeforeRangeBasedForLoopColon: false
-SpaceInEmptyParentheses: false
-SpacesBeforeTrailingComments: 1
-SpacesInAngles: false
-SpacesInCStyleCastParentheses: false
-SpacesInContainerLiterals: false
-SpacesInParentheses: false
-SpacesInSquareBrackets: false
-TabWidth: 4
-UseTab: Never
-PackConstructorInitializers: Never
-ConstructorInitializerIndentWidth: 4
+IndentWidth: 4
+AccessModifierOffset: -4

@@ -4,7 +4,8 @@
 #include "tree/header.h"
 #include "utils/encoding.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 Frame::Frame(Byte *buffer, Size id, Size size)
     : m_bytes {buffer + id * size, size}
@@ -50,9 +51,9 @@ auto Frame::unref(Page &page) -> void
     --m_ref_count;
 }
 
-FrameManager::FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, Size frame_count)
+FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, Size page_size, Size frame_count)
     : m_buffer {std::move(buffer)},
-      m_file {file},
+      m_file {&file},
       m_page_size {page_size}
 {
     // The buffer should be aligned to the page size.
@@ -149,7 +150,7 @@ auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
     }
 
     auto read_size = out.size();
-    Calico_Try(m_file->read(out.data(), read_size, offset));
+    CALICO_TRY(m_file->read(out.data(), read_size, offset));
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
     if (read_size == m_page_size) {
@@ -182,4 +183,4 @@ auto FrameManager::save_state(FileHeader &header) const -> void
     header.page_size = static_cast<PageSize>(m_page_size);
 }
 
-} // namespace Calico
+} // namespace calicodb

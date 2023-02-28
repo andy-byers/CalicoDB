@@ -7,9 +7,11 @@
 #include <functional>
 #include <utils/types.h>
 
-namespace Calico {
+namespace calicodb
+{
 
-class CursorImpl : public Cursor {
+class CursorImpl : public Cursor
+{
     struct Location {
         Id pid;
         PageSize index {};
@@ -31,7 +33,8 @@ public:
 
     explicit CursorImpl(BPlusTree &tree)
         : m_tree {&tree}
-    {}
+    {
+    }
 
     ~CursorImpl() override = default;
 
@@ -47,12 +50,13 @@ public:
     auto previous() -> void override;
 };
 
-class CursorInternal {
+class CursorInternal
+{
 public:
     [[nodiscard]] static auto make_cursor(BPlusTree &tree) -> Cursor *;
     static auto invalidate(const Cursor &cursor, Status error) -> void;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_TREE_CURSOR_INTERNAL_H

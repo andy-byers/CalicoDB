@@ -1,11 +1,12 @@
 #include "calico/storage.h"
 #include "posix_storage.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 auto Storage::default_storage() -> Storage *
 {
     return new PosixStorage;
 }
 
-} // namespace Calico
+} // namespace calicodb

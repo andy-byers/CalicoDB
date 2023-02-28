@@ -3,15 +3,17 @@
 
 #include "fuzzer.h"
 
-namespace Calico {
+namespace calicodb
+{
 
-class OpsFuzzer : public DbFuzzer {
+class OpsFuzzer : public DbFuzzer
+{
 public:
     ~OpsFuzzer() override = default;
     explicit OpsFuzzer(std::string path, Options *options = nullptr);
     [[nodiscard]] auto step(const std::uint8_t *&data, std::size_t &size) -> Status override;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_FUZZERS_OPS_FUZZER_H

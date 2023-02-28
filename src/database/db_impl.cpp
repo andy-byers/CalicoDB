@@ -1,22 +1,24 @@
 
-#include "database_impl.h"
 #include "calico/calico.h"
 #include "calico/storage.h"
+#include "db_impl.h"
 #include "storage/posix_storage.h"
 #include "tree/cursor_impl.h"
 #include "utils/crc.h"
 #include "utils/logging.h"
 
-namespace Calico {
+namespace calicodb
+{
 
-#define Set_Status(s)           \
+#define SET_STATUS(s)           \
     do {                        \
         if (m_status.is_ok()) { \
             m_status = s;       \
         }                       \
     } while (0)
 
-[[nodiscard]] static auto sanitize_options(const Options &options) -> Options
+[[nodiscard]] static auto
+sanitize_options(const Options &options) -> Options
 {
     auto sanitized = options;
     if (sanitized.cache_size == 0) {
@@ -25,7 +27,7 @@ namespace Calico {
     return sanitized;
 }
 
-auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
+auto DBImpl::open(const Slice &path, const Options &options) -> Status
 {
     auto sanitized = sanitize_options(options);
 
@@ -42,7 +44,7 @@ auto DatabaseImpl::open(const Slice &path, const Options &options) -> Status
     return do_open(sanitized);
 }
 
-auto DatabaseImpl::do_open(Options sanitized) -> Status
+auto DBImpl::do_open(Options sanitized) -> Status
 {
     m_storage = sanitized.storage;
     if (m_storage == nullptr) {
@@ -52,7 +54,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     if (auto s = m_storage->file_exists(m_db_prefix); s.is_not_found()) {
         if (sanitized.create_if_missing) {
-            Calico_Try(m_storage->create_directory(m_db_prefix));
+            CALICO_TRY(m_storage->create_directory(m_db_prefix));
         } else {
             return Status::invalid_argument("database does not exist");
         }
@@ -66,13 +68,13 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
 
     m_info_log = sanitized.info_log;
     if (m_info_log == nullptr) {
-        Calico_Try(m_storage->new_info_logger(m_db_prefix + "log", &m_info_log));
+        CALICO_TRY(m_storage->new_info_logger(m_db_prefix + "log", &m_info_log));
         sanitized.info_log = m_info_log;
         m_owns_info_log = true;
     }
 
     FileHeader state;
-    Calico_Try(setup(m_db_prefix, *m_storage, sanitized, state));
+    CALICO_TRY(setup(m_db_prefix, *m_storage, sanitized, state));
     m_commit_lsn = state.commit_lsn;
     m_record_count = state.record_count;
     if (!m_commit_lsn.is_null()) {
@@ -80,7 +82,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     }
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
-    Calico_Try(WriteAheadLog::open(
+    CALICO_TRY(WriteAheadLog::open(
         {
             m_wal_prefix,
             m_storage,
@@ -89,7 +91,7 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
         },
         &wal));
 
-    Calico_Try(Pager::open(
+    CALICO_TRY(Pager::open(
         {
             m_db_prefix,
             m_storage,
@@ -111,33 +113,33 @@ auto DatabaseImpl::do_open(Options sanitized) -> Status
     Status s;
     if (m_commit_lsn.is_null()) {
         m_info_log->logv("setting up a new database");
-        Calico_Try(wal->start_writing());
+        CALICO_TRY(wal->start_writing());
 
         Node root;
         BPlusTreeInternal internal {*tree};
-        Calico_Try(internal.allocate_root(root));
+        CALICO_TRY(internal.allocate_root(root));
         internal.release(std::move(root));
 
-        Calico_Try(do_commit());
-        Calico_Try(pager->flush());
+        CALICO_TRY(do_commit());
+        CALICO_TRY(pager->flush());
 
     } else {
         m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
-        Calico_Try(ensure_consistency());
-        Calico_Try(load_state());
-        Calico_Try(wal->start_writing());
+        CALICO_TRY(ensure_consistency());
+        CALICO_TRY(load_state());
+        CALICO_TRY(wal->start_writing());
     }
     m_info_log->logv("pager recovery lsn is %llu", pager->recovery_lsn().value);
     m_info_log->logv("wal flushed lsn is %llu", wal->flushed_lsn().value);
     m_info_log->logv("commit lsn is %llu", m_commit_lsn.value);
 
-    Calico_Try(m_status);
+    CALICO_TRY(m_status);
     m_is_setup = true;
     return Status::ok();
 }
 
-DatabaseImpl::~DatabaseImpl()
+DBImpl::~DBImpl()
 {
     if (m_is_setup && m_status.is_ok()) {
         if (const auto s = wal->flush(); !s.is_ok()) {
@@ -166,14 +168,17 @@ DatabaseImpl::~DatabaseImpl()
     delete wal;
 }
 
-auto DatabaseImpl::repair(const std::string &path, const Options &options) -> Status
+auto DBImpl::repair(const std::string &path, const Options &options) -> Status
 {
     (void)path;
     (void)options;
-    return Status::logic_error("<NOT IMPLEMENTED>"); // TODO: repair() operation attempts to fix a database that could not be opened due to corruption that couldn't/shouldn't be rolled back.
+    return Status::logic_error("<NOT IMPLEMENTED>"); // TODO: repair() operation attempts to fix a
+                                                     // database that could not be opened due to
+                                                     // corruption that couldn't/shouldn't be rolled
+                                                     // back.
 }
 
-auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> Status
+auto DBImpl::destroy(const std::string &path, const Options &options) -> Status
 {
     bool owns_storage {};
     Storage *storage;
@@ -192,7 +197,7 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
 
     std::vector<std::string> children;
     if (const auto s = storage->get_children(path, children); s.is_ok()) {
-        for (const auto &name: children) {
+        for (const auto &name : children) {
             (void)storage->remove_file(prefix + name);
         }
     }
@@ -206,7 +211,7 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
         }
 
         if (const auto s = storage->get_children(dir_path, children); s.is_ok()) {
-            for (const auto &name: children) {
+            for (const auto &name : children) {
                 const auto filename = dir_path + name;
                 if (Slice {filename}.starts_with(options.wal_prefix)) {
                     (void)storage->remove_file(filename);
@@ -222,12 +227,12 @@ auto DatabaseImpl::destroy(const std::string &path, const Options &options) -> S
     return s;
 }
 
-auto DatabaseImpl::status() const -> Status
+auto DBImpl::status() const -> Status
 {
     return m_status;
 }
 
-auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bool
+auto DBImpl::get_property(const Slice &name, std::string &out) const -> bool
 {
     if (Slice prop {name}; prop.starts_with("calico.")) {
         prop.advance(7);
@@ -256,13 +261,13 @@ auto DatabaseImpl::get_property(const Slice &name, std::string &out) const -> bo
     return false;
 }
 
-auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
+auto DBImpl::get(const Slice &key, std::string &value) const -> Status
 {
-    Calico_Try(m_status);
+    CALICO_TRY(m_status);
     value.clear();
 
     SearchResult slot;
-    Calico_Try(tree->search(key, slot));
+    CALICO_TRY(tree->search(key, slot));
     auto [node, index, exact] = std::move(slot);
 
     if (!exact) {
@@ -272,12 +277,12 @@ auto DatabaseImpl::get(const Slice &key, std::string &value) const -> Status
 
     Slice _;
     const auto cell = read_cell(node, index);
-    Calico_Try(tree->collect_value(value, cell, _));
+    CALICO_TRY(tree->collect_value(value, cell, _));
     pager->release(std::move(node.page));
     return Status::ok();
 }
 
-auto DatabaseImpl::new_cursor() const -> Cursor *
+auto DBImpl::new_cursor() const -> Cursor *
 {
     auto *cursor = CursorInternal::make_cursor(*tree);
     if (!m_status.is_ok()) {
@@ -286,13 +291,13 @@ auto DatabaseImpl::new_cursor() const -> Cursor *
     return cursor;
 }
 
-auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
+auto DBImpl::put(const Slice &key, const Slice &value) -> Status
 {
-    Calico_Try(m_status);
+    CALICO_TRY(m_status);
 
     bool exists {};
     if (auto s = tree->insert(key, value, exists); !s.is_ok()) {
-        Set_Status(s);
+        SET_STATUS(s);
         return s;
     }
     const auto inserted = !exists;
@@ -302,30 +307,30 @@ auto DatabaseImpl::put(const Slice &key, const Slice &value) -> Status
     return Status::ok();
 }
 
-auto DatabaseImpl::erase(const Slice &key) -> Status
+auto DBImpl::erase(const Slice &key) -> Status
 {
-    Calico_Try(m_status);
+    CALICO_TRY(m_status);
 
     auto s = tree->erase(key);
     if (s.is_ok()) {
         m_record_count--;
         m_txn_size++;
     } else if (!s.is_not_found()) {
-        Set_Status(s);
+        SET_STATUS(s);
     }
     return s;
 }
 
-auto DatabaseImpl::vacuum() -> Status
+auto DBImpl::vacuum() -> Status
 {
-    Calico_Try(m_status);
+    CALICO_TRY(m_status);
     if (auto s = do_vacuum(); !s.is_ok()) {
-        Set_Status(s);
+        SET_STATUS(s);
     }
     return m_status;
 }
 
-auto DatabaseImpl::do_vacuum() -> Status
+auto DBImpl::do_vacuum() -> Status
 {
     Id target {pager->page_count()};
     if (target.is_root()) {
@@ -333,7 +338,7 @@ auto DatabaseImpl::do_vacuum() -> Status
     }
     for (;; target.value--) {
         bool vacuumed {};
-        Calico_Try(tree->vacuum_one(target, vacuumed));
+        CALICO_TRY(tree->vacuum_one(target, vacuumed));
         if (!vacuumed) {
             break;
         }
@@ -342,57 +347,58 @@ auto DatabaseImpl::do_vacuum() -> Status
         // No pages available to vacuum: database is minimally sized.
         return Status::ok();
     }
-    // Make sure the vacuum updates are in the WAL. If this succeeds, we should be able to reapply the
-    // whole vacuum operation if the truncation fails. The recovery routine should truncate the file
-    // to match the header page count if necessary.
-    Calico_Try(wal->flush());
+    // Make sure the vacuum updates are in the WAL. If this succeeds, we should
+    // be able to reapply the whole vacuum operation if the truncation fails.
+    // The recovery routine should truncate the file to match the header page
+    // count if necessary.
+    CALICO_TRY(wal->flush());
     return pager->truncate(target.value);
 }
 
-auto DatabaseImpl::commit() -> Status
+auto DBImpl::commit() -> Status
 {
-    Calico_Try(m_status);
+    CALICO_TRY(m_status);
     if (m_txn_size != 0) {
         if (auto s = do_commit(); !s.is_ok()) {
-            Set_Status(s);
+            SET_STATUS(s);
             return s;
         }
     }
     return Status::ok();
 }
 
-auto DatabaseImpl::do_commit() -> Status
+auto DBImpl::do_commit() -> Status
 {
     m_txn_size = 0;
 
     Page root;
-    Calico_Try(pager->acquire(Id::root(), root));
+    CALICO_TRY(pager->acquire(Id::root(), root));
     pager->upgrade(root);
 
-    // The root page is guaranteed to have a full image in the WAL. The current LSN
-    // is now the same as the commit LSN.
+    // The root page is guaranteed to have a full image in the WAL. The current
+    // LSN is now the same as the commit LSN.
     auto commit_lsn = wal->current_lsn();
     m_info_log->logv("commit requested at lsn %llu", commit_lsn.value);
 
-    Calico_Try(save_state(std::move(root), commit_lsn));
-    Calico_Try(wal->flush());
+    CALICO_TRY(save_state(std::move(root), commit_lsn));
+    CALICO_TRY(wal->flush());
 
     m_info_log->logv("commit successful");
     m_commit_lsn = commit_lsn;
     return Status::ok();
 }
 
-auto DatabaseImpl::ensure_consistency() -> Status
+auto DBImpl::ensure_consistency() -> Status
 {
     Recovery recovery {*pager, *wal, m_commit_lsn};
 
     m_in_txn = false;
-    Calico_Try(recovery.recover());
+    CALICO_TRY(recovery.recover());
     m_in_txn = true;
     return load_state();
 }
 
-auto DatabaseImpl::save_state(Page root, Lsn commit_lsn) const -> Status
+auto DBImpl::save_state(Page root, Lsn commit_lsn) const -> Status
 {
     CALICO_EXPECT_TRUE(root.id().is_root());
     CALICO_EXPECT_FALSE(commit_lsn.is_null());
@@ -409,18 +415,16 @@ auto DatabaseImpl::save_state(Page root, Lsn commit_lsn) const -> Status
     return Status::ok();
 }
 
-auto DatabaseImpl::load_state() -> Status
+auto DBImpl::load_state() -> Status
 {
     Page root;
-    Calico_Try(pager->acquire(Id::root(), root));
+    CALICO_TRY(pager->acquire(Id::root(), root));
 
     FileHeader header {root};
     const auto expected_crc = crc32c::Unmask(header.header_crc);
     const auto computed_crc = header.compute_crc();
     if (expected_crc != computed_crc) {
-        m_info_log->logv(
-            "file header crc mismatch (expected %u but computed %u)",
-            expected_crc, computed_crc);
+        m_info_log->logv("file header crc mismatch (expected %u but computed %u)", expected_crc, computed_crc);
         return Status::corruption("crc mismatch");
     }
 
@@ -433,7 +437,7 @@ auto DatabaseImpl::load_state() -> Status
     return Status::ok();
 }
 
-auto DatabaseImpl::TEST_validate() const -> void
+auto DBImpl::TEST_validate() const -> void
 {
     tree->TEST_check_links();
     tree->TEST_check_order();
@@ -467,7 +471,7 @@ auto setup(const std::string &prefix, Storage &storage, const Options &options, 
     if (auto s = storage.new_reader(path, &reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
         Size file_size {};
-        Calico_Try(storage.file_size(path, file_size));
+        CALICO_TRY(storage.file_size(path, file_size));
 
         if (file_size < FileHeader::SIZE) {
             return Status::invalid_argument("file is not a database");
@@ -475,7 +479,7 @@ auto setup(const std::string &prefix, Storage &storage, const Options &options, 
 
         Byte buffer[FileHeader::SIZE];
         Size read_size = sizeof(buffer);
-        Calico_Try(reader->read(buffer, read_size, 0));
+        CALICO_TRY(reader->read(buffer, read_size, 0));
         if (read_size != sizeof(buffer)) {
             return Status::system_error("incomplete read of file header");
         }
@@ -514,6 +518,6 @@ auto setup(const std::string &prefix, Storage &storage, const Options &options, 
     return Status::ok();
 }
 
-#undef Set_Status
+#undef SET_STATUS
 
-} // namespace Calico
+} // namespace calicodb

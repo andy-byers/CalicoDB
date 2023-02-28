@@ -6,9 +6,11 @@
 #include "calico/storage.h"
 #include "utils/utils.h"
 
-namespace Calico {
+namespace calicodb
+{
 
-class PosixReader : public Reader {
+class PosixReader : public Reader
+{
 public:
     explicit PosixReader(std::string path, int file)
         : m_path {std::move(path)},
@@ -25,7 +27,8 @@ private:
     int m_file {};
 };
 
-class PosixEditor : public Editor {
+class PosixEditor : public Editor
+{
 public:
     explicit PosixEditor(std::string path, int file)
         : m_path {std::move(path)},
@@ -44,7 +47,8 @@ private:
     int m_file {};
 };
 
-class PosixLogger : public Logger {
+class PosixLogger : public Logger
+{
 public:
     explicit PosixLogger(std::string path, int file)
         : m_path {std::move(path)},
@@ -62,7 +66,8 @@ private:
     int m_file {};
 };
 
-class PosixInfoLogger : public InfoLogger {
+class PosixInfoLogger : public InfoLogger
+{
 public:
     explicit PosixInfoLogger(std::string path, int file)
         : m_buffer(BUFFER_SIZE, '\0'),
@@ -82,7 +87,8 @@ private:
     int m_file {};
 };
 
-class PosixStorage : public Storage {
+class PosixStorage : public Storage
+{
 public:
     PosixStorage() = default;
     ~PosixStorage() override = default;
@@ -100,6 +106,6 @@ public:
     [[nodiscard]] auto file_size(const std::string &path, Size &out) const -> Status override;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_STORAGE_POSIX_STORAGE_H

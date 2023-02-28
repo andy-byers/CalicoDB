@@ -3,7 +3,8 @@
 #include "utils/crc.h"
 #include "utils/encoding.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 static auto write_file_header(Byte *data, const FileHeader &header) -> void
 {
@@ -30,7 +31,8 @@ static auto write_file_header(Byte *data, const FileHeader &header) -> void
 
 FileHeader::FileHeader(const Page &page)
     : FileHeader {page.data()}
-{}
+{
+}
 
 FileHeader::FileHeader(const Byte *data)
 {
@@ -125,4 +127,4 @@ auto NodeHeader::write(Page &page) const -> void
     insert_delta(page.m_deltas, {page_offset(page), SIZE});
 }
 
-} // namespace Calico
+} // namespace calicodb

@@ -5,7 +5,8 @@
 #include "pager/page.h"
 #include <optional>
 
-namespace Calico {
+namespace calicodb
+{
 
 struct Node;
 
@@ -161,6 +162,6 @@ auto write_overflow_id(Cell &cell, Id overflow_id) -> void;
 
 auto merge_root(Node &root, Node &child) -> void;
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_TREE_NODE_H

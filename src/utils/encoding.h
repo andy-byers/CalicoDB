@@ -7,7 +7,8 @@
 #include "calico/slice.h"
 #include "types.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 inline auto get_u16(const Byte *in) noexcept -> std::uint16_t
 {
@@ -133,6 +134,6 @@ inline auto decode_varint(const Byte *in, std::uint64_t &value) -> const Byte *
     return nullptr;
 }
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_UTILS_ENCODING_H

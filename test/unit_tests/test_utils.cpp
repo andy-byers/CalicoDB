@@ -3,14 +3,15 @@
 #include <vector>
 
 #include "calico/slice.h"
+#include "unit_tests.h"
 #include "utils/crc.h"
 #include "utils/encoding.h"
 #include "utils/logging.h"
 #include "utils/types.h"
 #include "utils/utils.h"
-#include "unit_tests.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 #if not NDEBUG
 TEST(TestUtils, ExpectationDeathTest)
@@ -39,7 +40,8 @@ TEST(TestUtils, EncodingIsConsistent)
     ASSERT_EQ(buffer.back(), 0) << "buffer overflow";
 }
 
-class SliceTests : public testing::Test {
+class SliceTests : public testing::Test
+{
 protected:
     std::string test_string {"Hello, world!"};
     Slice slice {test_string};
@@ -259,14 +261,14 @@ TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
     const std::string u {"\x00", 1};
     const std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), Comparison::EQ);
+    ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), Comparison::Equal);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullBytes)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::LT);
+    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::Less);
 }
 
 TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
@@ -279,7 +281,7 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::LT);
+    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::Less);
 }
 
 TEST(NonPrintableSliceTests, Conversions)
@@ -321,7 +323,7 @@ TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
     ASSERT_EQ(Slice {b}.size(), 1);
 }
 
-template<class T>
+template <class T>
 auto run_nullability_check()
 {
     const auto x = T::null();
@@ -331,7 +333,7 @@ auto run_nullability_check()
     ASSERT_FALSE(y.is_null());
 }
 
-template<class T>
+template <class T>
 auto run_equality_comparisons()
 {
     T x {1};
@@ -343,7 +345,7 @@ auto run_equality_comparisons()
     ASSERT_NE(x, y);
 }
 
-template<class T>
+template <class T>
 auto run_ordering_comparisons()
 {
     T x {1};
@@ -522,100 +524,101 @@ TEST(MiscTests, StringsUseSizeParameterForComparisons)
 }
 
 // CRC tests from LevelDB.
-namespace crc32c {
+namespace crc32c
+{
 
-    TEST(LevelDB_CRC, StandardResults)
-    {
-        // From rfc3720 section B.4.
-        char buf[32];
+TEST(LevelDB_CRC, StandardResults)
+{
+    // From rfc3720 section B.4.
+    char buf[32];
 
-        memset(buf, 0, sizeof(buf));
-        ASSERT_EQ(0x8a9136aa, Value(buf, sizeof(buf)));
+    memset(buf, 0, sizeof(buf));
+    ASSERT_EQ(0x8a9136aa, Value(buf, sizeof(buf)));
 
-        memset(buf, 0xff, sizeof(buf));
-        ASSERT_EQ(0x62a8ab43, Value(buf, sizeof(buf)));
+    memset(buf, 0xff, sizeof(buf));
+    ASSERT_EQ(0x62a8ab43, Value(buf, sizeof(buf)));
 
-        for (int i = 0; i < 32; i++) {
-            buf[i] = i;
-        }
-        ASSERT_EQ(0x46dd794e, Value(buf, sizeof(buf)));
-
-        for (int i = 0; i < 32; i++) {
-            buf[i] = 31 - i;
-        }
-        ASSERT_EQ(0x113fdb5c, Value(buf, sizeof(buf)));
-
-        uint8_t data[48] = {
-            0x01,
-            0xc0,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x14,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x04,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x14,
-            0x00,
-            0x00,
-            0x00,
-            0x18,
-            0x28,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x02,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-        };
-        ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char *>(data), sizeof(data)));
+    for (int i = 0; i < 32; i++) {
+        buf[i] = i;
     }
+    ASSERT_EQ(0x46dd794e, Value(buf, sizeof(buf)));
 
-    TEST(LevelDB_CRC, Values)
-    {
-        ASSERT_NE(Value("a", 1), Value("foo", 3));
+    for (int i = 0; i < 32; i++) {
+        buf[i] = 31 - i;
     }
+    ASSERT_EQ(0x113fdb5c, Value(buf, sizeof(buf)));
 
-    TEST(LevelDB_CRC, Extend)
-    {
-        ASSERT_EQ(Value("hello world", 11), Extend(Value("hello ", 6), "world", 5));
-    }
+    uint8_t data[48] = {
+        0x01,
+        0xc0,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x14,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x04,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x14,
+        0x00,
+        0x00,
+        0x00,
+        0x18,
+        0x28,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    };
+    ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char *>(data), sizeof(data)));
+}
 
-    TEST(LevelDB_CRC, Mask)
-    {
-        uint32_t crc = Value("foo", 3);
-        ASSERT_NE(crc, Mask(crc));
-        ASSERT_NE(crc, Mask(Mask(crc)));
-        ASSERT_EQ(crc, Unmask(Mask(crc)));
-        ASSERT_EQ(crc, Unmask(Unmask(Mask(Mask(crc)))));
-    }
+TEST(LevelDB_CRC, Values)
+{
+    ASSERT_NE(Value("a", 1), Value("foo", 3));
+}
+
+TEST(LevelDB_CRC, Extend)
+{
+    ASSERT_EQ(Value("hello world", 11), Extend(Value("hello ", 6), "world", 5));
+}
+
+TEST(LevelDB_CRC, Mask)
+{
+    uint32_t crc = Value("foo", 3);
+    ASSERT_NE(crc, Mask(crc));
+    ASSERT_NE(crc, Mask(Mask(crc)));
+    ASSERT_EQ(crc, Unmask(Mask(crc)));
+    ASSERT_EQ(crc, Unmask(Unmask(Mask(Mask(crc)))));
+}
 
 } // namespace crc32c
 
@@ -659,7 +662,8 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
 
 class InterceptorTests
     : public InMemoryTest,
-      public testing::Test {
+      public testing::Test
+{
 };
 
 TEST_F(InterceptorTests, RespectsPrefix)
@@ -739,7 +743,7 @@ TEST(LevelDB_Coding, Varint64)
         values.push_back(power + 1);
     }
     Size total_size {};
-    for (auto v: values) {
+    for (auto v : values) {
         total_size += varint_length(v);
     }
 
@@ -780,4 +784,4 @@ TEST(Encoding, MaxVarintValue)
     ASSERT_EQ(result, max_value);
 }
 
-} // namespace Calico
+} // namespace calicodb

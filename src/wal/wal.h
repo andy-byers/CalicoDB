@@ -3,11 +3,13 @@
 
 #include "record.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 class WalWriter;
 
-class WriteAheadLog {
+class WriteAheadLog
+{
 public:
     friend class Recovery;
 
@@ -53,6 +55,6 @@ private:
     Logger *m_file {};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_WAL_H

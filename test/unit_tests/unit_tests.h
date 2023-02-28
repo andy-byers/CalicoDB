@@ -13,7 +13,8 @@
 #include <iomanip>
 #include <sstream>
 
-namespace Calico {
+namespace calicodb
+{
 
 #define Clear_Interceptors()                                                 \
     do {                                                                     \
@@ -41,27 +42,27 @@ namespace Calico {
 
 static constexpr auto EXPECTATION_MATCHER = "^expectation";
 
-#define EXPECT_OK(expr)                                                                                                       \
-    do {                                                                                                                      \
-        const auto &expect_ok_status = (expr);                                                                                \
+#define EXPECT_OK(expr)                                                                                                     \
+    do {                                                                                                                    \
+        const auto &expect_ok_status = (expr);                                                                              \
         EXPECT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.to_string(); \
     } while (0)
 
-#define ASSERT_OK(expr)                                                                                                       \
-    do {                                                                                                                      \
-        const auto &expect_ok_status = (expr);                                                                                \
+#define ASSERT_OK(expr)                                                                                                     \
+    do {                                                                                                                    \
+        const auto &expect_ok_status = (expr);                                                                              \
         ASSERT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.to_string(); \
     } while (0)
 
-#define EXPECT_HAS_VALUE(expr)                                                                                                                                         \
-    do {                                                                                                                                                               \
-        const auto &expect_has_value_status = (expr);                                                                                                                  \
+#define EXPECT_HAS_VALUE(expr)                                                                                                                                       \
+    do {                                                                                                                                                             \
+        const auto &expect_has_value_status = (expr);                                                                                                                \
         EXPECT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().to_string(); \
     } while (0)
 
-#define ASSERT_HAS_VALUE(expr)                                                                                                                                         \
-    do {                                                                                                                                                               \
-        const auto &expect_has_value_status = (expr);                                                                                                                  \
+#define ASSERT_HAS_VALUE(expr)                                                                                                                                       \
+    do {                                                                                                                                                             \
+        const auto &expect_has_value_status = (expr);                                                                                                                \
         ASSERT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().to_string(); \
     } while (0)
 
@@ -71,7 +72,8 @@ static constexpr auto EXPECTATION_MATCHER = "^expectation";
     return s.is_ok();
 }
 
-class InMemoryTest {
+class InMemoryTest
+{
 public:
     static constexpr auto ROOT = "test";
     static constexpr auto PREFIX = "test/";
@@ -92,7 +94,8 @@ public:
     std::unique_ptr<Storage> storage;
 };
 
-class OnDiskTest {
+class OnDiskTest
+{
 public:
     static constexpr auto ROOT = "/tmp/__calico_test__";
     static constexpr auto PREFIX = "/tmp/__calico_test__/";
@@ -114,7 +117,8 @@ public:
     std::unique_ptr<Storage> storage;
 };
 
-class DisabledWriteAheadLog : public WriteAheadLog {
+class DisabledWriteAheadLog : public WriteAheadLog
+{
 public:
     DisabledWriteAheadLog() = default;
     ~DisabledWriteAheadLog() override = default;
@@ -150,7 +154,8 @@ public:
     }
 };
 
-class TestWithPager : public InMemoryTest {
+class TestWithPager : public InMemoryTest
+{
 public:
     const Size PAGE_SIZE {0x200};
     const Size FRAME_COUNT {16};
@@ -208,126 +213,127 @@ inline auto assert_special_error(const Status &s)
     }
 }
 
-namespace TestTools {
+namespace TestTools
+{
 
-    template<class T>
-    auto get(T &t, const std::string &key, std::string &value) -> Status
-    {
-        return t.get(key, value);
+template <class T>
+auto get(T &t, const std::string &key, std::string &value) -> Status
+{
+    return t.get(key, value);
+}
+
+template <class T>
+auto find(T &t, const std::string &key) -> Cursor *
+{
+    auto *cursor = t.new_cursor();
+    if (cursor) {
+        cursor->seek(key);
     }
+    return cursor;
+}
 
-    template<class T>
-    auto find(T &t, const std::string &key) -> Cursor *
-    {
-        auto *cursor = t.new_cursor();
-        if (cursor) {
-            cursor->seek(key);
-        }
-        return cursor;
+template <class T>
+auto contains(T &t, const std::string &key) -> bool
+{
+    std::string value;
+    return get(t, key, value).is_ok();
+}
+
+template <class T>
+auto contains(T &t, const std::string &key, const std::string &value) -> bool
+{
+    std::string val;
+    if (auto s = get(t, key, val); s.is_ok()) {
+        return val == value;
     }
+    return false;
+}
 
-    template<class T>
-    auto contains(T &t, const std::string &key) -> bool
-    {
-        std::string value;
-        return get(t, key, value).is_ok();
-    }
-
-    template<class T>
-    auto contains(T &t, const std::string &key, const std::string &value) -> bool
-    {
-        std::string val;
-        if (auto s = get(t, key, val); s.is_ok()) {
-            return val == value;
-        }
-        return false;
-    }
-
-    template<class T>
-    auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
-    {
-        std::string val;
-        if (auto s = get(t, key, val); s.is_ok()) {
-            if (val != value) {
-                std::cerr << "value does not match (\"" << value << "\" != \"" << val << "\")\n";
-                std::abort();
-            }
-        } else {
-            std::cerr << "could not find key " << key << '\n';
+template <class T>
+auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
+{
+    std::string val;
+    if (auto s = get(t, key, val); s.is_ok()) {
+        if (val != value) {
+            std::cerr << "value does not match (\"" << value << "\" != \"" << val << "\")\n";
             std::abort();
         }
+    } else {
+        std::cerr << "could not find key " << key << '\n';
+        std::abort();
     }
+}
 
-    template<class T>
-    auto insert(T &t, const std::string &key, const std::string &value) -> void
-    {
-        auto s = t.put(key, value);
-        if (!s.is_ok()) {
-            std::fputs(s.to_string().data(), stderr);
-            std::abort();
-        }
+template <class T>
+auto insert(T &t, const std::string &key, const std::string &value) -> void
+{
+    auto s = t.put(key, value);
+    if (!s.is_ok()) {
+        std::fputs(s.to_string().data(), stderr);
+        std::abort();
     }
+}
 
-    template<class T>
-    auto erase(T &t, const std::string &key) -> bool
-    {
-        auto s = t.erase(get(t, key));
-        if (!s.is_ok() && !s.is_not_found()) {
-            std::fputs(s.to_string().data(), stderr);
-            std::abort();
-        }
-        return !s.is_not_found();
+template <class T>
+auto erase(T &t, const std::string &key) -> bool
+{
+    auto s = t.erase(get(t, key));
+    if (!s.is_ok() && !s.is_not_found()) {
+        std::fputs(s.to_string().data(), stderr);
+        std::abort();
     }
+    return !s.is_not_found();
+}
 
-    template<class T>
-    auto erase_one(T &t, const std::string &key) -> bool
-    {
-        auto was_erased = t.erase(get(t, key));
-        EXPECT_TRUE(was_erased.has_value());
-        if (was_erased.value())
-            return true;
-        auto cursor = t.first();
-        EXPECT_EQ(cursor.error(), std::nullopt);
-        if (!cursor.is_valid())
-            return false;
-        was_erased = t.erase(cursor);
-        EXPECT_TRUE(was_erased.value());
+template <class T>
+auto erase_one(T &t, const std::string &key) -> bool
+{
+    auto was_erased = t.erase(get(t, key));
+    EXPECT_TRUE(was_erased.has_value());
+    if (was_erased.value())
         return true;
-    }
+    auto cursor = t.first();
+    EXPECT_EQ(cursor.error(), std::nullopt);
+    if (!cursor.is_valid())
+        return false;
+    was_erased = t.erase(cursor);
+    EXPECT_TRUE(was_erased.value());
+    return true;
+}
 
-    inline auto write_file(Storage &storage, const std::string &path, Slice in) -> void
-    {
-        Editor *file;
-        ASSERT_TRUE(storage.new_editor(path, &file).is_ok());
-        ASSERT_TRUE(file->write(in, 0).is_ok());
-        delete file;
-    }
+inline auto write_file(Storage &storage, const std::string &path, Slice in) -> void
+{
+    Editor *file;
+    ASSERT_TRUE(storage.new_editor(path, &file).is_ok());
+    ASSERT_TRUE(file->write(in, 0).is_ok());
+    delete file;
+}
 
-    inline auto append_file(Storage &storage, const std::string &path, Slice in) -> void
-    {
-        Logger *file;
-        ASSERT_TRUE(storage.new_logger(path, &file).is_ok());
-        ASSERT_TRUE(file->write(in).is_ok());
-        delete file;
-    }
+inline auto append_file(Storage &storage, const std::string &path, Slice in) -> void
+{
+    Logger *file;
+    ASSERT_TRUE(storage.new_logger(path, &file).is_ok());
+    ASSERT_TRUE(file->write(in).is_ok());
+    delete file;
+}
 
-    inline auto read_file(Storage &storage, const std::string &path) -> std::string
-    {
-        Reader *file;
-        std::string out;
-        Size size;
+inline auto read_file(Storage &storage, const std::string &path) -> std::string
+{
+    Reader *file;
+    std::string out;
+    Size size;
 
-        EXPECT_TRUE(storage.file_size(path, size).is_ok());
-        EXPECT_TRUE(storage.new_reader(path, &file).is_ok());
-        out.resize(size);
+    EXPECT_TRUE(storage.file_size(path, size).is_ok());
+    EXPECT_TRUE(storage.new_reader(path, &file).is_ok());
+    out.resize(size);
 
-        Span temp {out};
-        auto read_size = temp.size();
-        EXPECT_TRUE(file->read(temp.data(), read_size, 0).is_ok());
-        EXPECT_EQ(read_size, size);
-        delete file;
-        return out;
-    }
+    Span temp {out};
+    auto read_size = temp.size();
+    EXPECT_TRUE(file->read(temp.data(), read_size, 0).is_ok());
+    EXPECT_EQ(read_size, size);
+    delete file;
+    return out;
+}
 } // namespace TestTools
 
 struct Record {
@@ -346,7 +352,8 @@ auto operator>=(const Record &, const Record &) -> bool;
 auto operator==(const Record &, const Record &) -> bool;
 auto operator!=(const Record &, const Record &) -> bool;
 
-class RecordGenerator {
+class RecordGenerator
+{
 public:
     static unsigned default_seed;
 
@@ -366,6 +373,6 @@ private:
     Parameters m_param;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_TEST_UNIT_TESTS_H

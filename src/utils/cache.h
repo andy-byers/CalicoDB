@@ -7,7 +7,8 @@
 #include <unordered_map>
 #include <utility>
 
-namespace Calico {
+namespace calicodb
+{
 
 /*
  * Implements the simplified 2Q replacement policy described in
@@ -27,11 +28,12 @@ namespace Calico {
  * Note that put() has the ability to change the value of an element. This shouldn't
  * ever happen when using this cache as a page cache.
  */
-template<
+template <
     class K,
     class V,
     class F = std::hash<K>>
-class Cache {
+class Cache
+{
 public:
     using Key = K;
     using Value = V;
@@ -89,7 +91,7 @@ public:
         return end(m_list);
     }
 
-    template<class T>
+    template <class T>
     auto put(const Key &key, T &&value) -> std::optional<Value>
     {
         using std::end;
@@ -239,6 +241,6 @@ private:
     Iterator m_sep {std::end(m_list)};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_UTILS_CACHE_H

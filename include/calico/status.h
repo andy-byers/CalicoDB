@@ -4,20 +4,22 @@
 #include "common.h"
 #include <memory>
 
-namespace Calico {
+namespace calicodb
+{
 
 class Slice;
 
-class Status final {
+class Status final
+{
 public:
-    Status() = default;
+    explicit Status() = default;
 
     /*
      * Create/check for an OK status.
      */
     static auto ok() -> Status
     {
-        return {};
+        return Status {};
     }
 
     [[nodiscard]] auto is_ok() const -> bool
@@ -55,16 +57,8 @@ public:
     auto operator=(Status &&rhs) noexcept -> Status &;
 
 private:
-    enum class Code : Byte {
-        INVALID_ARGUMENT = 1,
-        SYSTEM_ERROR = 2,
-        LOGIC_ERROR = 3,
-        CORRUPTION = 4,
-        NOT_FOUND = 5,
-    };
-
     // Construct a non-OK status.
-    explicit Status(Code code, const Slice &what);
+    explicit Status(Byte code, const Slice &what);
 
     // Storage for a status code and a null-terminated message.
     std::unique_ptr<Byte[]> m_data;
@@ -73,6 +67,6 @@ private:
 // Status object should be the size of a pointer.
 static_assert(sizeof(Status) == sizeof(void *));
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_STATUS_H

@@ -5,9 +5,11 @@
 #include "tools.h"
 #include "unit_tests.h"
 
-namespace Calico {
+namespace calicodb
+{
 
-class RecoveryTestHarness : public InMemoryTest {
+class RecoveryTestHarness : public InMemoryTest
+{
 public:
     RecoveryTestHarness()
         : db_prefix {PREFIX}
@@ -23,9 +25,9 @@ public:
         close();
     }
 
-    auto impl() const -> DatabaseImpl *
+    auto impl() const -> DBImpl *
     {
-        return reinterpret_cast<DatabaseImpl *>(db);
+        return reinterpret_cast<DBImpl *>(db);
     }
 
     void close()
@@ -45,7 +47,7 @@ public:
             opts.storage = storage.get();
         }
         tail.resize(wal_block_size(opts.page_size));
-        return Database::open(db_prefix, opts, &db);
+        return DB::open(db_prefix, opts, &db);
     }
 
     auto open(Options *options = nullptr) -> void
@@ -81,7 +83,7 @@ public:
         // Closing the db allows for file deletion.
         close();
         std::vector<Id> logs = get_logs();
-        for (const auto &log: logs) {
+        for (const auto &log : logs) {
             EXPECT_OK(storage->remove_file(encode_segment_name(db_prefix + "wal-", log)));
         }
         return logs.size();
@@ -92,7 +94,7 @@ public:
         std::vector<std::string> filenames;
         EXPECT_OK(storage->get_children(db_prefix, filenames));
         std::vector<Id> result;
-        for (const auto &name: filenames) {
+        for (const auto &name : filenames) {
             if (name.find("wal-") != std::string::npos) {
                 result.push_back(decode_segment_name("wal-", name));
             }
@@ -116,12 +118,13 @@ public:
     Options db_options;
     std::string db_prefix;
     std::string tail;
-    Database *db {};
+    DB *db {};
 };
 
 class RecoveryTests
     : public RecoveryTestHarness,
-      public testing::Test {
+      public testing::Test
+{
 };
 
 TEST_F(RecoveryTests, NormalShutdown)
@@ -221,13 +224,14 @@ TEST_F(RecoveryTests, SanityCheck)
         }
         close();
 
-        ASSERT_OK(Database::destroy(db_prefix, db_options));
+        ASSERT_OK(DB::destroy(db_prefix, db_options));
     }
 }
 
 class RecoverySanityCheck
     : public RecoveryTestHarness,
-      public testing::TestWithParam<std::tuple<std::string, Tools::Interceptor::Type, int>> {
+      public testing::TestWithParam<std::tuple<std::string, Tools::Interceptor::Type, int>>
+{
 public:
     RecoverySanityCheck()
         : interceptor_prefix {db_prefix + std::get<0>(GetParam())}
@@ -265,7 +269,7 @@ public:
         Clear_Interceptors();
         open();
 
-        for (const auto &[k, v]: map) {
+        for (const auto &[k, v] : map) {
             std::string value;
             ASSERT_OK(db->get(k, value));
             ASSERT_EQ(value, v);
@@ -280,7 +284,7 @@ public:
 
 TEST_P(RecoverySanityCheck, FailureWhileRunning)
 {
-    for (const auto &[k, v]: map) {
+    for (const auto &[k, v] : map) {
         auto s = db->erase(k);
         if (!s.is_ok()) {
             assert_special_error(s);
@@ -329,12 +333,13 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple("wal-", Tools::Interceptor::WRITE, 0),
         std::make_tuple("wal-", Tools::Interceptor::WRITE, 1),
         std::make_tuple("wal-", Tools::Interceptor::WRITE, 5),
-//        std::make_tuple("wal-", Tools::Interceptor::SYNC, 0), TODO: May need separate testing
+        //        std::make_tuple("wal-", Tools::Interceptor::SYNC, 0), TODO: May need separate testing
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 0),
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 5)));
 
-class OpenErrorTests: public RecoverySanityCheck {
+class OpenErrorTests : public RecoverySanityCheck
+{
 public:
     ~OpenErrorTests() override = default;
 
@@ -371,4 +376,4 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
         std::make_tuple("wal-", Tools::Interceptor::OPEN, 5)));
 
-} // namespace Calico
+} // namespace calicodb

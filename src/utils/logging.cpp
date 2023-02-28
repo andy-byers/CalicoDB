@@ -1,6 +1,7 @@
 #include "logging.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 auto append_number(std::string &out, Size value) -> void
 {
@@ -51,4 +52,4 @@ auto escape_string(const Slice &value) -> std::string
     return out;
 }
 
-} // namespace Calico
+} // namespace calicodb

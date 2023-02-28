@@ -3,7 +3,8 @@
 
 #include "utils/types.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 class Page;
 
@@ -81,6 +82,6 @@ struct NodeHeader {
     bool is_external {true};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_TREE_HEADER_H

@@ -1,12 +1,14 @@
 #ifndef CALICO_CURSOR_H
 #define CALICO_CURSOR_H
 
-namespace Calico {
+namespace calicodb
+{
 
 class Slice;
 class Status;
 
-class Cursor {
+class Cursor
+{
 public:
     Cursor() = default;
     virtual ~Cursor() = default;
@@ -23,6 +25,6 @@ public:
     virtual auto previous() -> void = 0;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_CURSOR_H

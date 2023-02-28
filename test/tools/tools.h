@@ -2,7 +2,7 @@
 #ifndef CALICO_TOOLS_H
 #define CALICO_TOOLS_H
 
-#include "database/database_impl.h"
+#include "database/db_impl.h"
 #include <calico/calico.h>
 #include <climits>
 #include <cstdarg>
@@ -24,12 +24,12 @@
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                         \
-    do {                                                       \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {       \
-            std::fputs(assert_s.to_string().c_str(), stderr);  \
-            std::abort();                                      \
-        }                                                      \
+#define CHECK_OK(expr)                                        \
+    do {                                                      \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {      \
+            std::fputs(assert_s.to_string().c_str(), stderr); \
+            std::abort();                                     \
+        }                                                     \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                        \
@@ -40,7 +40,8 @@
         }                                         \
     } while (0)
 
-namespace Calico::Tools {
+namespace calicodb::Tools
+{
 
 struct Interceptor {
     enum Type {
@@ -61,7 +62,8 @@ struct Interceptor {
         : prefix {std::move(prefix_)},
           callback {std::move(callback_)},
           type {type_}
-    {}
+    {
+    }
 
     [[nodiscard]] auto operator()() const -> Status
     {
@@ -73,7 +75,8 @@ struct Interceptor {
     Type type {};
 };
 
-class DynamicMemory : public Storage {
+class DynamicMemory : public Storage
+{
 
     struct Memory {
         std::string buffer;
@@ -121,7 +124,8 @@ public:
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
 };
 
-class MemoryReader : public Reader {
+class MemoryReader : public Reader
+{
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
@@ -130,7 +134,8 @@ class MemoryReader : public Reader {
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
-    {}
+    {
+    }
 
     friend class DynamicMemory;
 
@@ -139,7 +144,8 @@ public:
     [[nodiscard]] auto read(Byte *out, Size &size, Size offset) -> Status override;
 };
 
-class MemoryEditor : public Editor {
+class MemoryEditor : public Editor
+{
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
@@ -148,7 +154,8 @@ class MemoryEditor : public Editor {
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
-    {}
+    {
+    }
 
     friend class DynamicMemory;
 
@@ -159,7 +166,8 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class MemoryLogger : public Logger {
+class MemoryLogger : public Logger
+{
     DynamicMemory::Memory *m_mem {};
     DynamicMemory *m_parent {};
     std::string m_path;
@@ -168,7 +176,8 @@ class MemoryLogger : public Logger {
         : m_mem {&mem},
           m_parent {&parent},
           m_path {std::move(path)}
-    {}
+    {
+    }
 
     friend class DynamicMemory;
 
@@ -178,13 +187,15 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class MemoryInfoLogger : public InfoLogger {
+class MemoryInfoLogger : public InfoLogger
+{
 public:
     ~MemoryInfoLogger() override = default;
     auto logv(const char *, ...) -> void override {}
 };
 
-class StderrLogger : public InfoLogger {
+class StderrLogger : public InfoLogger
+{
 public:
     ~StderrLogger() override = default;
 
@@ -198,7 +209,7 @@ public:
     }
 };
 
-template<std::size_t Length = 12>
+template <std::size_t Length = 12>
 static auto integral_key(Size key) -> std::string
 {
     auto key_string = std::to_string(key);
@@ -219,13 +230,14 @@ inline auto expect_non_error(const Status &s)
     }
 }
 
-inline auto validate_db(const Database &db)
+inline auto validate_db(const DB &db)
 {
-    reinterpret_cast<const DatabaseImpl &>(db).TEST_validate();
+    reinterpret_cast<const DBImpl &>(db).TEST_validate();
 }
 
 // Modified from LevelDB.
-class RandomGenerator {
+class RandomGenerator
+{
 private:
     using Engine = std::default_random_engine;
 
@@ -238,7 +250,7 @@ public:
     auto Generate(Size len) const -> Slice;
 
     // Not in LevelDB.
-    template<class T>
+    template <class T>
     auto Next(T t_max) const -> T
     {
         std::uniform_int_distribution<T> dist {std::numeric_limits<T>::min(), t_max};
@@ -246,7 +258,7 @@ public:
     }
 
     // Not in LevelDB.
-    template<class T>
+    template <class T>
     auto Next(T t_min, T t_max) const -> T
     {
         std::uniform_int_distribution<T> dist {t_min, t_max};
@@ -330,6 +342,6 @@ struct DatabaseStats {
 
 auto print_references(Pager &pager, PointerMap &pointers) -> void;
 
-} // namespace Calico::Tools
+} // namespace calicodb::Tools
 
 #endif // CALICO_TOOLS_H

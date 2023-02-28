@@ -1,6 +1,6 @@
 /*
-* CalicoDB storage environment. The interface is based off of https://github.com/google/leveldb/blob/main/include/leveldb/env.h.
-*/
+ * CalicoDB storage environment. The interface is based off of https://github.com/google/leveldb/blob/main/include/leveldb/env.h.
+ */
 #ifndef CALICO_STORAGE_H
 #define CALICO_STORAGE_H
 
@@ -8,18 +8,21 @@
 #include <string>
 #include <vector>
 
-namespace Calico {
+namespace calicodb
+{
 
 class Slice;
 class Status;
 
-class Reader {
+class Reader
+{
 public:
     virtual ~Reader() = default;
     [[nodiscard]] virtual auto read(Byte *out, Size &size, Size offset) -> Status = 0;
 };
 
-class Editor {
+class Editor
+{
 public:
     virtual ~Editor() = default;
     [[nodiscard]] virtual auto read(Byte *out, Size &size, Size offset) -> Status = 0;
@@ -27,20 +30,23 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
-class Logger {
+class Logger
+{
 public:
     virtual ~Logger() = default;
     [[nodiscard]] virtual auto write(Slice in) -> Status = 0;
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
-class InfoLogger {
+class InfoLogger
+{
 public:
     virtual ~InfoLogger() = default;
     virtual auto logv(const char *fmt, ...) -> void = 0;
 };
 
-class Storage {
+class Storage
+{
 public:
     static auto default_storage() -> Storage *;
 
@@ -59,6 +65,6 @@ public:
     [[nodiscard]] virtual auto remove_file(const std::string &path) -> Status = 0;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_STORAGE_H

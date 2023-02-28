@@ -4,7 +4,8 @@
 #include "utils/utils.h"
 #include <vector>
 
-namespace Calico {
+namespace calicodb
+{
 
 struct PageDelta {
     Size offset {};
@@ -26,6 +27,6 @@ auto compress_deltas(ChangeBuffer &deltas) -> Size;
  */
 auto insert_delta(ChangeBuffer &deltas, PageDelta delta) -> void;
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_PAGE_DELTA_H

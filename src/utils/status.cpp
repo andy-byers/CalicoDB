@@ -1,7 +1,16 @@
 #include "calico/status.h"
 #include "calico/slice.h"
 
-namespace Calico {
+namespace calicodb
+{
+
+enum Code : Byte {
+    C_InvalidArgument = 1,
+    C_SystemError = 2,
+    C_LogicError = 3,
+    C_Corruption = 4,
+    C_NotFound = 5,
+};
 
 static auto maybe_copy_data(const Byte *data) -> std::unique_ptr<Byte[]>
 {
@@ -18,13 +27,13 @@ static auto maybe_copy_data(const Byte *data) -> std::unique_ptr<Byte[]>
     return copy;
 }
 
-Status::Status(Code code, const Slice &what)
-    : m_data {std::make_unique<Byte[]>(sizeof(code) + what.size() + sizeof(Byte))}
+Status::Status(Byte code, const Slice &what)
+    : m_data {std::make_unique<Byte[]>(what.size() + 2 * sizeof(Byte))}
 {
     auto *ptr = m_data.get();
 
     // The first byte holds the status type.
-    *ptr++ = static_cast<Byte>(code);
+    *ptr++ = code;
 
     // The rest holds the message, plus a '\0'. std::make_unique<Byte[]>() performs value initialization, so the byte is already
     // zeroed out. See https://en.cppreference.com/w/cpp/memory/unique_ptr/make_unique, overload (2).
@@ -33,11 +42,13 @@ Status::Status(Code code, const Slice &what)
 
 Status::Status(const Status &rhs)
     : m_data {maybe_copy_data(rhs.m_data.get())}
-{}
+{
+}
 
 Status::Status(Status &&rhs) noexcept
     : m_data {std::move(rhs.m_data)}
-{}
+{
+}
 
 auto Status::operator=(const Status &rhs) -> Status &
 {
@@ -57,52 +68,52 @@ auto Status::operator=(Status &&rhs) noexcept -> Status &
 
 auto Status::not_found(const Slice &what) -> Status
 {
-    return Status {Code::NOT_FOUND, what};
+    return Status {C_NotFound, what};
 }
 
 auto Status::invalid_argument(const Slice &what) -> Status
 {
-    return Status {Code::INVALID_ARGUMENT, what};
+    return Status {C_InvalidArgument, what};
 }
 
 auto Status::system_error(const Slice &what) -> Status
 {
-    return Status {Code::SYSTEM_ERROR, what};
+    return Status {C_SystemError, what};
 }
 
 auto Status::logic_error(const Slice &what) -> Status
 {
-    return Status {Code::LOGIC_ERROR, what};
+    return Status {C_LogicError, what};
 }
 
 auto Status::corruption(const Slice &what) -> Status
 {
-    return Status {Code::CORRUPTION, what};
+    return Status {C_Corruption, what};
 }
 
 auto Status::is_invalid_argument() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == Code::INVALID_ARGUMENT;
+    return !is_ok() && Code {m_data[0]} == C_InvalidArgument;
 }
 
 auto Status::is_system_error() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == Code::SYSTEM_ERROR;
+    return !is_ok() && Code {m_data[0]} == C_SystemError;
 }
 
 auto Status::is_logic_error() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == Code::LOGIC_ERROR;
+    return !is_ok() && Code {m_data[0]} == C_LogicError;
 }
 
 auto Status::is_corruption() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == Code::CORRUPTION;
+    return !is_ok() && Code {m_data[0]} == C_Corruption;
 }
 
 auto Status::is_not_found() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == Code::NOT_FOUND;
+    return !is_ok() && Code {m_data[0]} == C_NotFound;
 }
 
 auto Status::to_string() const -> std::string
@@ -110,4 +121,4 @@ auto Status::to_string() const -> std::string
     return {m_data ? m_data.get() + sizeof(Code) : "ok"};
 }
 
-} // namespace Calico
+} // namespace calicodb

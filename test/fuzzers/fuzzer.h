@@ -6,11 +6,12 @@
 #include "utils/encoding.h"
 #include <iostream>
 
-namespace Calico {
+namespace calicodb
+{
 
 inline auto extract_key(const std::uint8_t *&data, Size &size)
 {
-    assert(size != 0);
+    CHECK_TRUE(size != 0);
     if (size == 1) {
         return Slice {reinterpret_cast<const Byte *>(data), size};
     }
@@ -52,7 +53,8 @@ inline auto extract_value(const std::uint8_t *&data, Size &size)
     return result;
 }
 
-class DbFuzzer {
+class DbFuzzer
+{
 public:
     virtual ~DbFuzzer();
     explicit DbFuzzer(std::string path, Options *options = nullptr);
@@ -63,9 +65,9 @@ public:
 protected:
     std::string m_path;
     Options m_options;
-    Database *m_db {};
+    DB *m_db {};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_FUZZERS_FUZZER_H

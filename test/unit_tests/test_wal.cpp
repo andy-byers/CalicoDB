@@ -8,13 +8,15 @@
 #include <array>
 #include <gtest/gtest.h>
 
-namespace Calico {
+namespace calicodb
+{
 
 namespace fs = std::filesystem;
 
-class WalRecordMergeTests : public testing::Test {
+class WalRecordMergeTests : public testing::Test
+{
 public:
-    auto setup(const std::array<WalRecordHeader::Type, 3> &types) -> void
+    auto setup(const std::array<WalRecordType, 3> &types) -> void
     {
         lhs.type = types[0];
         rhs.type = types[1];
@@ -22,16 +24,16 @@ public:
         rhs.size = 2;
     }
 
-    auto check(const WalRecordHeader &header, WalRecordHeader::Type type) -> bool
+    auto check(const WalRecordHeader &header, WalRecordType type) -> bool
     {
         return header.type == type && header.size == 3;
     }
 
-    std::vector<std::array<WalRecordHeader::Type, 3>> valid_left_merges {
-        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type {}, WalRecordHeader::Type::FIRST, WalRecordHeader::Type::FIRST},
-        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type {}, WalRecordHeader::Type::FULL, WalRecordHeader::Type::FULL},
-        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::FIRST},
-        std::array<WalRecordHeader::Type, 3> {WalRecordHeader::Type::FIRST, WalRecordHeader::Type::LAST, WalRecordHeader::Type::FULL},
+    std::vector<std::array<WalRecordType, 3>> valid_left_merges {
+        std::array<WalRecordType, 3> {WalRecordType {}, WRT_First, WRT_First},
+        std::array<WalRecordType, 3> {WalRecordType {}, WRT_Full, WRT_Full},
+        std::array<WalRecordType, 3> {WRT_First, WRT_Middle, WRT_First},
+        std::array<WalRecordType, 3> {WRT_First, WRT_Last, WRT_Full},
     };
     WalRecordHeader lhs {};
     WalRecordHeader rhs {};
@@ -53,17 +55,18 @@ TEST_F(WalRecordMergeTests, ValidLeftMerges)
 
 TEST_F(WalRecordMergeTests, MergingInvalidTypesIndicatesCorruption)
 {
-    setup({WalRecordHeader::Type::FIRST, WalRecordHeader::Type::FIRST});
+    setup({WRT_First, WRT_First});
     ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
 
-    setup({WalRecordHeader::Type {}, WalRecordHeader::Type::MIDDLE});
+    setup({WalRecordType {}, WRT_Middle});
     ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
 
-    setup({WalRecordHeader::Type::MIDDLE, WalRecordHeader::Type::FIRST});
+    setup({WRT_Middle, WRT_First});
     ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
 }
 
-class WalRecordGenerator {
+class WalRecordGenerator
+{
 public:
     [[nodiscard]] auto setup_deltas(Span image) -> std::vector<PageDelta>
     {
@@ -77,7 +80,7 @@ public:
             deltas.emplace_back(PageDelta {offset, size});
             offset += size + random.Next<Size>(1, MAX_SPREAD);
         }
-        for (const auto &[offset, size]: deltas) {
+        for (const auto &[offset, size] : deltas) {
             const auto replacement = random.Generate(size);
             mem_copy(image.range(offset, size), replacement);
         }
@@ -88,14 +91,16 @@ private:
     Tools::RandomGenerator random;
 };
 
-class WalPayloadTests : public testing::Test {
+class WalPayloadTests : public testing::Test
+{
 public:
     static constexpr Size PAGE_SIZE {0x80};
 
     WalPayloadTests()
         : image {random.Generate(PAGE_SIZE).to_string()},
           scratch(wal_scratch_size(PAGE_SIZE), '\x00')
-    {}
+    {
+    }
 
     Tools::RandomGenerator random;
     std::string image;
@@ -141,7 +146,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
     return ids;
 }
 
-class WalSetTests : public testing::Test {
+class WalSetTests : public testing::Test
+{
 public:
     auto add_segments(Size n)
     {
@@ -178,7 +184,7 @@ TEST_F(WalSetTests, RecordsMostRecentId)
     ASSERT_EQ(set.last(), Id::from_index(19));
 }
 
-template<class Itr>
+template <class Itr>
 [[nodiscard]] auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, Id id, Size n)
 {
     return std::distance(begin, end) == std::ptrdiff_t(n) && std::all_of(begin, end, [&id](auto current) {
@@ -237,7 +243,8 @@ TEST_F(WalSetTests, RemovesSomeSegmentsFromRight)
 
 class WalComponentTests
     : public InMemoryTest,
-      public testing::Test {
+      public testing::Test
+{
 public:
     static constexpr Size PAGE_SIZE {0x200};
     const std::string WAL_PREFIX {"test/wal-"};
@@ -246,7 +253,8 @@ public:
         : m_writer_tail(wal_block_size(PAGE_SIZE), '\0'),
           m_reader_tail(wal_block_size(PAGE_SIZE), '\0'),
           m_reader_data(wal_block_size(PAGE_SIZE), '\0')
-    {}
+    {
+    }
 
     ~WalComponentTests() override
     {
@@ -286,7 +294,7 @@ public:
         out.resize(wal_scratch_size(PAGE_SIZE));
         Span buffer {out};
 
-        Calico_Try(reader.read(buffer));
+        CALICO_TRY(reader.read(buffer));
         WalPayloadOut payload {buffer};
         if (lsn != nullptr) {
             *lsn = payload.lsn();
@@ -406,7 +414,7 @@ TEST_F(WalComponentTests, ReaderReportsInvalidSize)
     ASSERT_OK(writer.flush());
 
     WalRecordHeader header;
-    header.type = WalRecordHeader::FULL;
+    header.type = WRT_Full;
     header.size = -1;
     std::string buffer(WalRecordHeader::SIZE, '\0');
     write_wal_record_header(buffer, header);
@@ -529,8 +537,7 @@ public:
             WAL_PREFIX,
             storage.get(),
             PAGE_SIZE,
-            SEGMENT_CUTOFF
-        };
+            SEGMENT_CUTOFF};
         ASSERT_OK(WriteAheadLog::open(param, &temp));
         wal.reset(temp);
     }
@@ -555,4 +562,4 @@ TEST_F(WalTests, KeepsTrackOfBytesWritten)
     ASSERT_EQ(wal->bytes_written(), sizeof(Lsn) + payload.data().size());
 }
 
-} // namespace Calico
+} // namespace calicodb

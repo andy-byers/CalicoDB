@@ -3,9 +3,11 @@
 
 #include "record.h"
 
-namespace Calico {
+namespace calicodb
+{
 
-class WalReader {
+class WalReader
+{
     Span m_tail;
     Reader *m_file {};
     Size m_offset {};
@@ -16,6 +18,6 @@ public:
     [[nodiscard]] auto read(Span &payload) -> Status;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_WAL_READER_H

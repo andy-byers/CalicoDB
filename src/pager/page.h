@@ -6,11 +6,13 @@
 #include "utils/encoding.h"
 #include "utils/types.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 using PageSize = std::uint16_t;
 
-class Page {
+class Page
+{
     ChangeBuffer m_deltas;
     Span m_span;
     Id m_id;
@@ -95,6 +97,6 @@ inline auto write_page_lsn(Page &page, Lsn lsn) -> void
     put_u64(page.span(page_offset(page), sizeof(Lsn)), lsn.value);
 }
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_PAGER_PAGE_H

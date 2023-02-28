@@ -3,14 +3,17 @@
 
 #include "record.h"
 
-namespace Calico {
+namespace calicodb
+{
 
-class WalWriter {
+class WalWriter
+{
 public:
     WalWriter(Logger &file, Span tail)
         : m_tail {tail},
           m_file {&file}
-    {}
+    {
+    }
 
     [[nodiscard]] auto block_count() const -> Size
     {
@@ -34,6 +37,6 @@ private:
     Size m_offset {};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_WAL_WAL_WRITER_H

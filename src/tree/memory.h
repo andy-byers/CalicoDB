@@ -5,7 +5,8 @@
 #include "pager/page.h"
 #include "utils/types.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 class Pager;
 
@@ -25,7 +26,8 @@ class Pager;
  *       and easily update the pages that reference them. This lets us swap freelist pages with pages from the end
  *       of the file, after which the file can be truncated.
  */
-class PointerMap {
+class PointerMap
+{
     Pager *m_pager {};
 
 public:
@@ -43,7 +45,8 @@ public:
 
     explicit PointerMap(Pager &pager)
         : m_pager {&pager}
-    {}
+    {
+    }
 
     // Find the page ID of the pointer map that holds the back pointer for page "pid".
     [[nodiscard]] auto lookup(Id pid) const -> Id;
@@ -60,7 +63,8 @@ public:
  * no longer needed by the tree are placed at the front of the freelist. When more pages are needed, the freelist is
  * checked first. Only if it is empty do we allocate a page from the end of the file.
  */
-class FreeList {
+class FreeList
+{
     friend class BPlusTree;
 
     Pager *m_pager {};
@@ -71,7 +75,8 @@ public:
     explicit FreeList(Pager &pager, PointerMap &pointers)
         : m_pager {&pager},
           m_pointers {&pointers}
-    {}
+    {
+    }
 
     [[nodiscard]] auto is_empty() const -> bool
     {
@@ -88,7 +93,8 @@ public:
  * each overflow chain page contains both a pointer and payload data, while each freelist page only contains a
  * "next" pointer.
  */
-class OverflowList {
+class OverflowList
+{
     Pager *m_pager {};
     FreeList *m_freelist {};
     PointerMap *m_pointers {};
@@ -100,7 +106,8 @@ public:
         : m_pager {&pager},
           m_freelist {&freelist},
           m_pointers {&pointers}
-    {}
+    {
+    }
 
     [[nodiscard]] auto read_chain(Span out, Id pid, Size offset = 0) const -> Status;
     [[nodiscard]] auto write_chain(Id &out, Id pid, Slice first, Slice second = {}) -> Status;
@@ -111,6 +118,6 @@ public:
 [[nodiscard]] auto read_next_id(const Page &page) -> Id;
 auto write_next_id(Page &page, Id) -> void;
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_TREE_MEMORY_H

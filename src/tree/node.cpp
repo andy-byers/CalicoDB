@@ -4,7 +4,8 @@
 #include <algorithm>
 #include <numeric>
 
-namespace Calico {
+namespace calicodb
+{
 
 static auto header_offset(const Node &node)
 {
@@ -83,7 +84,8 @@ auto parse_internal_cell(const NodeMeta &meta, Byte *data) -> Cell
     return node.meta->cell_size(*node.meta, node.page.data() + offset);
 }
 
-class BlockAllocator {
+class BlockAllocator
+{
     Node *m_node {};
 
     [[nodiscard]] auto get_next_pointer(Size offset) -> PageSize
@@ -116,7 +118,8 @@ class BlockAllocator {
 public:
     explicit BlockAllocator(Node &node)
         : m_node {&node}
-    {}
+    {
+    }
 
     [[nodiscard]] auto allocate(PageSize needed_size) -> PageSize;
     auto free(PageSize ptr, PageSize size) -> void;
@@ -561,4 +564,4 @@ auto merge_root(Node &root, Node &child) -> void
     root.meta = child.meta;
 }
 
-} // namespace Calico
+} // namespace calicodb

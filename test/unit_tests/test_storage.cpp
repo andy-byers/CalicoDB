@@ -7,9 +7,10 @@
 #include <fstream>
 #include <gtest/gtest.h>
 
-namespace Calico {
+namespace calicodb
+{
 
-template<class Base, class Store>
+template <class Base, class Store>
 [[nodiscard]] auto open_blob(Store &storage, const std::string &name) -> std::unique_ptr<Base>
 {
     auto s = Status::ok();
@@ -45,7 +46,7 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
     return message;
 }
 
-template<class Writer>
+template <class Writer>
 constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer, const Slice &message) -> void
 {
     constexpr Size num_chunks {20};
@@ -68,7 +69,7 @@ constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer
     ASSERT_TRUE(in.is_empty());
 }
 
-template<class Reader>
+template <class Reader>
 [[nodiscard]] auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, Size size) -> std::string
 {
     static constexpr Size num_chunks {20};
@@ -98,11 +99,13 @@ template<class Reader>
 
 class FileTests
     : public OnDiskTest,
-      public testing::Test {
+      public testing::Test
+{
 public:
     FileTests()
         : filename {PREFIX + std::string {"file"}}
-    {}
+    {
+    }
 
     ~FileTests() override = default;
 
@@ -110,7 +113,8 @@ public:
     Tools::RandomGenerator random;
 };
 
-class PosixInfoLoggerTests : public FileTests {
+class PosixInfoLoggerTests : public FileTests
+{
 public:
     PosixInfoLoggerTests()
     {
@@ -144,7 +148,8 @@ TEST_F(PosixInfoLoggerTests, ResizesBuffer)
     ASSERT_EQ(message + '\n', read_whole_file(filename));
 }
 
-class PosixReaderTests : public FileTests {
+class PosixReaderTests : public FileTests
+{
 public:
     PosixReaderTests()
     {
@@ -171,11 +176,13 @@ TEST_F(PosixReaderTests, ReadsBackContents)
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-class PosixEditorTests : public FileTests {
+class PosixEditorTests : public FileTests
+{
 public:
     PosixEditorTests()
         : file {open_blob<Editor>(*storage, filename)}
-    {}
+    {
+    }
 
     std::unique_ptr<Editor> file;
 };
@@ -196,11 +203,13 @@ TEST_F(PosixEditorTests, WritesOutAndReadsBackData)
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-class PosixLoggerTests : public FileTests {
+class PosixLoggerTests : public FileTests
+{
 public:
     PosixLoggerTests()
         : file {open_blob<Logger>(*storage, filename)}
-    {}
+    {
+    }
 
     std::unique_ptr<Logger> file;
 };
@@ -212,11 +221,13 @@ TEST_F(PosixLoggerTests, WritesOutData)
     ASSERT_EQ(read_whole_file(filename), data.to_string());
 }
 
-class PosixStorageTests : public OnDiskTest {
+class PosixStorageTests : public OnDiskTest
+{
 public:
     PosixStorageTests()
         : filename {PREFIX + std::string {"file"}}
-    {}
+    {
+    }
 
     ~PosixStorageTests() override = default;
 
@@ -226,11 +237,13 @@ public:
 
 class DynamicStorageTests
     : public InMemoryTest,
-      public testing::Test {
+      public testing::Test
+{
 public:
     DynamicStorageTests()
         : filename {PREFIX + std::string {"file"}}
-    {}
+    {
+    }
 
     ~DynamicStorageTests() override = default;
 
@@ -276,4 +289,4 @@ TEST_F(DynamicStorageTests, ReaderStopsAtEOF)
     ASSERT_EQ(bytes.truncate(read_size), data);
 }
 
-} // namespace Calico
+} // namespace calicodb

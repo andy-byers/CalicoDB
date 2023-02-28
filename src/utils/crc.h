@@ -8,7 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace Calico::crc32c {
+namespace calicodb::crc32c
+{
 
 // Return the crc32c of concat(A, data[0,n-1]) where init_crc is the
 // crc32c of some string A.  Extend() is often used to maintain the
@@ -41,6 +42,6 @@ inline uint32_t Unmask(uint32_t masked_crc)
     return ((rot >> 17) | (rot << 15));
 }
 
-} // namespace Calico::crc32c
+} // namespace calicodb::crc32c
 
 #endif // CALICO_UTILS_CRC_H

@@ -5,21 +5,22 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace Calico {
+namespace calicodb
+{
 
 static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
 
 [[nodiscard]] static auto to_status(int code) -> Status
 {
     switch (code) {
-        case ENOENT:
-            return Status::not_found(strerror(code));
-        case EINVAL:
-            return Status::invalid_argument(strerror(code));
-        case EEXIST:
-            return Status::logic_error(strerror(code));
-        default:
-            return Status::system_error(strerror(code));
+    case ENOENT:
+        return Status::not_found(strerror(code));
+    case EINVAL:
+        return Status::invalid_argument(strerror(code));
+    case EEXIST:
+        return Status::logic_error(strerror(code));
+    default:
+        return Status::system_error(strerror(code));
     }
 }
 
@@ -134,7 +135,7 @@ PosixReader::~PosixReader()
 
 auto PosixReader::read(Byte *out, Size &size, Size offset) -> Status
 {
-    Calico_Try(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    CALICO_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, out, size);
 }
 
@@ -145,13 +146,13 @@ PosixEditor::~PosixEditor()
 
 auto PosixEditor::read(Byte *out, Size &size, Size offset) -> Status
 {
-    Calico_Try(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    CALICO_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, out, size);
 }
 
 auto PosixEditor::write(Slice in, Size offset) -> Status
 {
-    Calico_Try(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    CALICO_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_write(m_file, in);
 }
 
@@ -275,7 +276,7 @@ auto PosixStorage::get_children(const std::string &path, std::vector<std::string
 auto PosixStorage::new_reader(const std::string &path, Reader **out) -> Status
 {
     int file;
-    Calico_Try(file_open(path, O_RDONLY, FILE_PERMISSIONS, file));
+    CALICO_TRY(file_open(path, O_RDONLY, FILE_PERMISSIONS, file));
     *out = new PosixReader {path, file};
     return Status::ok();
 }
@@ -283,7 +284,7 @@ auto PosixStorage::new_reader(const std::string &path, Reader **out) -> Status
 auto PosixStorage::new_editor(const std::string &path, Editor **out) -> Status
 {
     int file;
-    Calico_Try(file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS, file));
+    CALICO_TRY(file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS, file));
     *out = new PosixEditor {path, file};
     return Status::ok();
 }
@@ -291,7 +292,7 @@ auto PosixStorage::new_editor(const std::string &path, Editor **out) -> Status
 auto PosixStorage::new_logger(const std::string &path, Logger **out) -> Status
 {
     int file;
-    Calico_Try(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
+    CALICO_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
     *out = new PosixLogger {path, file};
     return Status::ok();
 }
@@ -299,7 +300,7 @@ auto PosixStorage::new_logger(const std::string &path, Logger **out) -> Status
 auto PosixStorage::new_info_logger(const std::string &path, InfoLogger **out) -> Status
 {
     int file;
-    Calico_Try(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
+    CALICO_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
     *out = new PosixInfoLogger {path, file};
     return Status::ok();
 }
@@ -314,4 +315,4 @@ auto PosixStorage::remove_directory(const std::string &path) -> Status
     return dir_remove(path);
 }
 
-} // namespace Calico
+} // namespace calicodb

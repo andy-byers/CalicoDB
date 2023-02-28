@@ -1,13 +1,14 @@
 #include "reader.h"
 #include "utils/crc.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 [[nodiscard]] static auto read_tail(Reader &file, Size number, Span tail) -> Status
 {
     auto temp = tail;
     auto read_size = tail.size();
-    Calico_Try(file.read(temp.data(), read_size, number * tail.size()));
+    CALICO_TRY(file.read(temp.data(), read_size, number * tail.size()));
 
     if (read_size == 0) {
         return Status::not_found("end of file");
@@ -20,12 +21,13 @@ namespace Calico {
 WalReader::WalReader(Reader &file, Span tail)
     : m_tail {tail},
       m_file {&file}
-{}
+{
+}
 
 auto WalReader::read(Span &payload) -> Status
 {
     if (m_offset + m_block == 0) {
-        Calico_Try(read_tail(*m_file, 0, m_tail));
+        CALICO_TRY(read_tail(*m_file, 0, m_tail));
     }
     auto out = payload;
     WalRecordHeader header;
@@ -38,7 +40,7 @@ auto WalReader::read(Span &payload) -> Status
             const auto temp = read_wal_record_header(rest);
             rest.advance(WalRecordHeader::SIZE);
 
-            Calico_Try(merge_records_left(header, temp));
+            CALICO_TRY(merge_records_left(header, temp));
             if (temp.size == 0 || temp.size > rest.size()) {
                 return Status::corruption("fragment size is invalid");
             }
@@ -46,7 +48,7 @@ auto WalReader::read(Span &payload) -> Status
             m_offset += WalRecordHeader::SIZE + temp.size;
             out.advance(temp.size);
 
-            if (header.type == WalRecordHeader::Type::FULL) {
+            if (header.type == WRT_Full) {
                 payload.truncate(header.size);
                 const auto expected_crc = crc32c::Unmask(header.crc);
                 const auto computed_crc = crc32c::Value(payload.data(), header.size);
@@ -62,7 +64,7 @@ auto WalReader::read(Span &payload) -> Status
         // Read the next block into the tail buffer.
         auto s = read_tail(*m_file, ++m_block, m_tail);
         if (!s.is_ok()) {
-            if (s.is_not_found() && header.type != WalRecordHeader::EMPTY) {
+            if (s.is_not_found() && header.type != WRT_Empty) {
                 return Status::corruption("encountered a partial record");
             }
             return s;
@@ -72,4 +74,4 @@ auto WalReader::read(Span &payload) -> Status
     return Status::ok();
 }
 
-} // namespace Calico
+} // namespace calicodb

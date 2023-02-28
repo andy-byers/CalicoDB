@@ -3,7 +3,7 @@
 
 #include "common.h"
 #include "cursor.h"
-#include "database.h"
+#include "db.h"
 #include "slice.h"
 #include "status.h"
 #include "storage.h"

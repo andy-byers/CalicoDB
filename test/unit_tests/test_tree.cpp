@@ -5,9 +5,11 @@
 #include "unit_tests.h"
 #include <gtest/gtest.h>
 
-namespace Calico {
+namespace calicodb
+{
 
-class NodeMetaManager {
+class NodeMetaManager
+{
     NodeMeta m_external_meta;
     NodeMeta m_internal_meta;
 
@@ -34,7 +36,8 @@ public:
 
 class NodeSlotTests
     : public TestWithPager,
-      public testing::Test {
+      public testing::Test
+{
 };
 
 TEST_F(NodeSlotTests, SlotsAreConsistent)
@@ -80,7 +83,8 @@ TEST_F(NodeSlotTests, SlotsAreConsistent)
 
 class ComponentTests
     : public TestWithPager,
-      public testing::Test {
+      public testing::Test
+{
 public:
     ~ComponentTests() override = default;
 
@@ -392,7 +396,7 @@ TEST_F(ComponentTests, NodeIterator)
                                 &rhs_key,
                             }};
     bool exact;
-    for (Size i: {1, 6, 3, 2, 8, 4, 5, 7}) {
+    for (Size i : {1, 6, 3, 2, 8, 4, 5, 7}) {
         ASSERT_OK(itr.seek(Tools::integral_key<2>(i), &exact));
         ASSERT_EQ(exact, i % 2 == 0);
     }
@@ -422,7 +426,7 @@ TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
                                 &rhs_key,
                             }};
     Size i {};
-    for (const auto &key: keys) {
+    for (const auto &key : keys) {
         ASSERT_OK(itr.seek(key));
         ASSERT_EQ(itr.index(), i++);
     }
@@ -438,7 +442,8 @@ public:
 
     NodeTests()
         : collect_scratch(PAGE_SIZE, '\x00')
-    {}
+    {
+    }
 
     auto SetUp() -> void override
     {
@@ -468,7 +473,8 @@ public:
     std::unique_ptr<BPlusTree> tree;
 };
 
-class ExternalRootSplitTests : public NodeTests {
+class ExternalRootSplitTests : public NodeTests
+{
 public:
     ExternalRootSplitTests() = default;
 
@@ -494,7 +500,7 @@ public:
         }
 
         // Create the worst case for splitting.
-        for (const auto &key: keys) {
+        for (const auto &key : keys) {
             ASSERT_OK(tree->insert(key, "", exists));
             ASSERT_FALSE(exists);
         }
@@ -512,7 +518,7 @@ public:
         ASSERT_FALSE(root.header.is_external);
         internal.release(std::move(root));
 
-        for (const auto &key: keys) {
+        for (const auto &key : keys) {
             assert_contains({key, ""});
         }
 
@@ -575,7 +581,8 @@ TEST_F(ExternalRootSplitTests, SplitRightOfMiddle)
     assert_contains(record);
 }
 
-class InternalRootSplitTests: public ExternalRootSplitTests {
+class InternalRootSplitTests : public ExternalRootSplitTests
+{
 public:
     auto SetUp() -> void override
     {
@@ -595,7 +602,7 @@ public:
         bool done {};
         Node root;
 
-        for (auto i = key_range_start; ; i += 2) {
+        for (auto i = key_range_start;; i += 2) {
             ASSERT_OK(internal.acquire(root, Id::root()));
             base_usable_space = usable_space(root);
             internal.release(std::move(root));
@@ -613,7 +620,7 @@ public:
     auto TearDown() -> void override
     {
         ASSERT_TRUE(is_finished());
-        for (const auto &key: keys_2) {
+        for (const auto &key : keys_2) {
             assert_contains({key, ""});
         }
         ExternalRootSplitTests::TearDown();
@@ -621,10 +628,10 @@ public:
 
     static auto base_key(Size index) -> std::string
     {
-       std::string key(2, '\0');
-       key[0] = static_cast<Byte>(index >> 8);
-       key[1] = static_cast<Byte>(index);
-       return key;
+        std::string key(2, '\0');
+        key[0] = static_cast<Byte>(index >> 8);
+        key[1] = static_cast<Byte>(index);
+        return key;
     }
 
     [[nodiscard]] auto is_finished() -> bool
@@ -666,12 +673,14 @@ struct BPlusTreeTestParameters {
 
 class BPlusTreeTests
     : public TestWithPager,
-      public testing::TestWithParam<BPlusTreeTestParameters> {
+      public testing::TestWithParam<BPlusTreeTestParameters>
+{
 public:
     BPlusTreeTests()
         : param {GetParam()},
           collect_scratch(param.page_size, '\x00')
-    {}
+    {
+    }
 
     auto SetUp() -> void override
     {
@@ -1041,7 +1050,8 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
 
-class BPlusTreeSanityChecks : public BPlusTreeTests {
+class BPlusTreeSanityChecks : public BPlusTreeTests
+{
 public:
     auto random_chunk(bool overflow, bool nonzero = true)
     {
@@ -1080,7 +1090,7 @@ TEST_P(BPlusTreeSanityChecks, Search)
     }
     validate();
 
-    for (const auto &[key, value]: records) {
+    for (const auto &[key, value] : records) {
         SearchResult slot;
         ASSERT_OK(tree->search(key, slot));
         ASSERT_TRUE(slot.exact);
@@ -1104,7 +1114,7 @@ TEST_P(BPlusTreeSanityChecks, Erase)
         }
 
         Size i {};
-        for (const auto &[key, value]: records) {
+        for (const auto &[key, value] : records) {
             ASSERT_OK(tree->erase(key));
             if (i % 100 == 99) {
                 validate();
@@ -1130,7 +1140,8 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b10},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b11}));
 
-class CursorTests : public BPlusTreeTests {
+class CursorTests : public BPlusTreeTests
+{
 protected:
     static constexpr Size RECORD_COUNT {1'000};
 
@@ -1325,7 +1336,8 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
 
-class PointerMapTests : public BPlusTreeTests {
+class PointerMapTests : public BPlusTreeTests
+{
 public:
     [[nodiscard]] auto map_size() -> Size
     {
@@ -1344,7 +1356,7 @@ TEST_P(PointerMapTests, FirstPointerMapIsPage2)
     ASSERT_EQ(pointers.lookup(Id {5}), Id {2});
 }
 //
-//TEST_P(PointerMapTests, ReadsAndWritesEntries)
+// TEST_P(PointerMapTests, ReadsAndWritesEntries)
 //{
 //    std::string buffer(pager->page_size(), '\0');
 //    Page map_page {Id {2}, buffer, true};
@@ -1439,13 +1451,15 @@ INSTANTIATE_TEST_SUITE_P(
 
 class VacuumTests
     : public TestWithPager,
-      public testing::Test {
+      public testing::Test
+{
 public:
     static constexpr Size FRAME_COUNT {8};
 
     VacuumTests()
         : meta {PAGE_SIZE}
-    {}
+    {
+    }
 
     auto SetUp() -> void override
     {
@@ -1534,7 +1548,7 @@ public:
             ASSERT_OK(pager->truncate(target.value));
 
             auto *cursor = CursorInternal::make_cursor(*tree);
-            for (const auto &[key, value]: map) {
+            for (const auto &[key, value] : map) {
                 cursor->seek(key);
                 ASSERT_TRUE(cursor->is_valid());
                 ASSERT_EQ(cursor->key(), key);
@@ -1758,7 +1772,7 @@ TEST_F(VacuumTests, VacuumFreelistSanityCheck)
 
         std::shuffle(begin(nodes), end(nodes), rng);
 
-        for (auto &node: nodes) {
+        for (auto &node : nodes) {
             ASSERT_OK(freelist->push(std::move(node.page)));
         }
 
@@ -2025,4 +2039,4 @@ TEST_F(VacuumTests, SanityCheck_Nodes_Overflow_2)
     sanity_check(200, 50, PAGE_SIZE * 2);
 }
 
-} // namespace Calico
+} // namespace calicodb

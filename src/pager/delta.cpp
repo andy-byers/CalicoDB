@@ -2,7 +2,8 @@
 #include <algorithm>
 #include <numeric>
 
-namespace Calico {
+namespace calicodb
+{
 
 static auto can_merge_ordered_deltas(const PageDelta &lhs, const PageDelta &rhs) -> bool
 {
@@ -59,17 +60,17 @@ auto insert_delta(ChangeBuffer &deltas, PageDelta delta) -> void
         }
         return false;
     };
-    if (itr != end(deltas)) {
-        if (try_merge(delta, *itr))
-            return;
+    if (itr != end(deltas) && try_merge(delta, *itr)) {
+        return;
     }
     if (itr != begin(deltas)) {
         --itr;
-        if (try_merge(*itr, delta))
+        if (try_merge(*itr, delta)) {
             return;
+        }
         ++itr;
     }
     deltas.insert(itr, delta);
 }
 
-} // namespace Calico
+} // namespace calicodb

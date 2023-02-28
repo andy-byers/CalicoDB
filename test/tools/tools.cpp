@@ -5,7 +5,8 @@
 #include <iomanip>
 #include <iostream>
 
-namespace Calico::Tools {
+namespace calicodb::Tools
+{
 
 auto DynamicMemory::add_interceptor(Interceptor interceptor) -> void
 {
@@ -215,7 +216,7 @@ auto DynamicMemory::get_children(const std::string &dir_path, std::vector<std::s
     if (prefix.back() != '/') {
         prefix.append("/");
     }
-    for (const auto &[path, mem]: m_memory) {
+    for (const auto &[path, mem] : m_memory) {
         if (mem.created && Slice {path}.starts_with(prefix)) {
             out.emplace_back(path.substr(prefix.size()));
         }
@@ -233,9 +234,9 @@ auto DynamicMemory::clone() const -> Storage *
 auto DynamicMemory::try_intercept_syscall(Interceptor::Type type, const std::string &path) -> Status
 {
     Slice filename {path};
-    for (const auto &interceptor: m_interceptors) {
+    for (const auto &interceptor : m_interceptors) {
         if (interceptor.type == type && filename.starts_with(interceptor.prefix)) {
-            Calico_Try(interceptor());
+            CALICO_TRY(interceptor());
         }
     }
     return Status::ok();
@@ -276,21 +277,21 @@ auto print_references(Pager &pager, PointerMap &pointers) -> void
         PointerMap::Entry entry;
         CHECK_OK(pointers.read_entry(pid, entry));
         switch (entry.type) {
-            case PointerMap::NODE:
-                std::cerr << "node";
-                break;
-            case PointerMap::FREELIST_LINK:
-                std::cerr << "freelist link";
-                break;
-            case PointerMap::OVERFLOW_HEAD:
-                std::cerr << "overflow head";
-                break;
-            case PointerMap::OVERFLOW_LINK:
-                std::cerr << "overflow link";
-                break;
+        case PointerMap::NODE:
+            std::cerr << "node";
+            break;
+        case PointerMap::FREELIST_LINK:
+            std::cerr << "freelist link";
+            break;
+        case PointerMap::OVERFLOW_HEAD:
+            std::cerr << "overflow head";
+            break;
+        case PointerMap::OVERFLOW_LINK:
+            std::cerr << "overflow link";
+            break;
         }
         std::cerr << " -> " << entry.back_ptr.value << '\n';
     }
 }
 
-} // namespace Calico::Tools
+} // namespace calicodb::Tools

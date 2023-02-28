@@ -9,11 +9,13 @@
 #include "utils/cache.h"
 #include "utils/types.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 class Frame;
 
-class PageList final {
+class PageList final
+{
 public:
     struct Entry {
         Id pid;
@@ -69,7 +71,8 @@ private:
     std::list<Entry> m_list;
 };
 
-class PageCache final {
+class PageCache final
+{
 public:
     using Token = std::optional<PageList::Iterator>;
 
@@ -113,7 +116,7 @@ public:
         return end(m_cache);
     }
 
-    template<class Predicate>
+    template <class Predicate>
     auto evict(const Predicate &predicate) -> std::optional<Entry>
     {
         using std::rbegin, std::rend;
@@ -156,6 +159,6 @@ private:
     Size m_misses {};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_PAGER_CACHE_H

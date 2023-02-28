@@ -8,15 +8,17 @@
 
 #include "wal/record.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 class Storage;
 class FrameManager;
 class WriteAheadLog;
 
-class Pager {
+class Pager
+{
 public:
-    friend class DatabaseImpl;
+    friend class DBImpl;
     friend class Recovery;
 
     struct Parameters {
@@ -51,7 +53,7 @@ public:
     auto load_state(const FileHeader &header) -> void;
 
 private:
-    explicit Pager(const Parameters &param, Editor *file, AlignedBuffer buffer);
+    explicit Pager(const Parameters &param, Editor &file, AlignedBuffer buffer);
     [[nodiscard]] auto pin_frame(Id pid) -> Status;
     [[nodiscard]] auto do_pin_frame(Id pid) -> Status;
     [[nodiscard]] auto make_frame_available() -> bool;
@@ -72,6 +74,6 @@ private:
     InfoLogger *m_info_log {};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_PAGER_H

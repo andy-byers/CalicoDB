@@ -9,7 +9,8 @@
 #include <utility>
 #include <vector>
 
-namespace Calico {
+namespace calicodb
+{
 
 struct FileHeader;
 class Page;
@@ -17,7 +18,8 @@ class Pager;
 class Editor;
 class Storage;
 
-class Frame final {
+class Frame final
+{
 public:
     Frame(Byte *buffer, Size id, Size size);
 
@@ -59,12 +61,13 @@ private:
     bool m_is_writable {};
 };
 
-class FrameManager final {
+class FrameManager final
+{
 public:
-    friend class DatabaseImpl;
+    friend class DBImpl;
     friend class Pager;
 
-    explicit FrameManager(Editor *file, AlignedBuffer buffer, Size page_size, Size frame_count);
+    explicit FrameManager(Editor &file, AlignedBuffer buffer, Size page_size, Size frame_count);
     ~FrameManager() = default;
     [[nodiscard]] auto write_back(Size index) -> Status;
     [[nodiscard]] auto sync() -> Status;
@@ -124,6 +127,6 @@ private:
     Size m_bytes_written {};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_PAGER_FRAMER_H

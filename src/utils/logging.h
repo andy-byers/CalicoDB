@@ -3,7 +3,8 @@
 
 #include "calico/slice.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 auto append_number(std::string &out, Size value) -> void;
 auto append_double(std::string &out, double value) -> void;
@@ -12,6 +13,6 @@ auto number_to_string(Size value) -> std::string;
 auto double_to_string(double value) -> std::string;
 auto escape_string(const Slice &value) -> std::string;
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_UTILS_LOGGING_H

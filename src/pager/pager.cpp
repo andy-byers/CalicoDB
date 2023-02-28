@@ -7,9 +7,10 @@
 #include "wal/wal.h"
 #include <limits>
 
-namespace Calico {
+namespace calicodb
+{
 
-#define Set_Status(s)            \
+#define SET_STATUS(s)            \
     do {                         \
         if (m_status->is_ok()) { \
             *m_status = s;       \
@@ -25,7 +26,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
     CALICO_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
 
     Editor *file;
-    Calico_Try(param.storage->new_editor(param.prefix + "data", &file));
+    CALICO_TRY(param.storage->new_editor(param.prefix + "data", &file));
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
@@ -36,12 +37,12 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
         return Status::system_error("out of memory");
     }
 
-    auto *ptr = new Pager {param, file, std::move(buffer)};
+    auto *ptr = new Pager {param, *file, std::move(buffer)};
     *out = ptr;
     return Status::ok();
 }
 
-Pager::Pager(const Parameters &param, Editor *file, AlignedBuffer buffer)
+Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
     : m_path {param.prefix + "data"},
       m_frames {file, std::move(buffer), param.page_size, param.frame_count},
       m_commit_lsn {param.commit_lsn},
@@ -81,7 +82,7 @@ auto Pager::pin_frame(Id pid) -> Status
 {
     if (auto s = do_pin_frame(pid); s.is_not_found()) {
         m_info_log->logv("failed to pin frame: %s", s.to_string().data());
-        Calico_Try(m_wal->flush());
+        CALICO_TRY(m_wal->flush());
         return do_pin_frame(pid);
     } else {
         return s;
@@ -94,15 +95,15 @@ auto Pager::do_pin_frame(Id pid) -> Status
 
     if (!m_frames.available()) {
         if (!make_frame_available()) {
-            Calico_Try(*m_status);
+            CALICO_TRY(*m_status);
             m_info_log->logv("out of frames: flushing wal");
-            Calico_Try(m_wal->flush());
+            CALICO_TRY(m_wal->flush());
             return Status::not_found("out of frames");
         }
     }
 
     Size fid;
-    Calico_Try(m_frames.pin(pid, fid));
+    CALICO_TRY(m_frames.pin(pid, fid));
 
     // Associate the page ID with the frame index we got from the framer.
     m_cache.put(pid, {fid});
@@ -157,7 +158,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
 
             // Advance to the next dirty list entry.
             itr = clean_page(entry);
-            Calico_Try(s);
+            CALICO_TRY(s);
         } else {
             itr = next(itr);
         }
@@ -201,7 +202,7 @@ auto Pager::make_frame_available() -> bool
 
     if (!evicted.has_value()) {
         if (auto s = m_wal->flush(); !s.is_ok()) {
-            Set_Status(s);
+            SET_STATUS(s);
         }
         return false;
     }
@@ -216,7 +217,7 @@ auto Pager::make_frame_available() -> bool
     }
     m_frames.unpin(frame_index);
     if (!s.is_ok()) {
-        Set_Status(s);
+        SET_STATUS(s);
         return false;
     }
     return true;
@@ -254,14 +255,14 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
             s = m_wal->cleanup(m_recovery_lsn);
         }
         if (!s.is_ok()) {
-            Set_Status(s);
+            SET_STATUS(s);
         }
     }
 }
 
 auto Pager::allocate(Page &page) -> Status
 {
-    Calico_Try(acquire(Id::from_index(m_frames.page_count()), page));
+    CALICO_TRY(acquire(Id::from_index(m_frames.page_count()), page));
     upgrade(page, 0);
     return Status::ok();
 }
@@ -285,7 +286,7 @@ auto Pager::acquire(Id pid, Page &page) -> Status
                 if (s.is_ok()) {
                     clean_page(entry);
                 } else {
-                    Set_Status(s);
+                    SET_STATUS(s);
                     return s;
                 }
             }
@@ -297,7 +298,7 @@ auto Pager::acquire(Id pid, Page &page) -> Status
         return do_acquire(itr->value);
     }
 
-    Calico_Try(pin_frame(pid));
+    CALICO_TRY(pin_frame(pid));
 
     const auto itr = m_cache.get(pid);
     CALICO_EXPECT_NE(itr, m_cache.end());
@@ -326,7 +327,7 @@ auto Pager::release(Page page) -> void
             next_lsn, page.id(), page.view(0),
             page.deltas(), *m_scratch));
         if (!s.is_ok()) {
-            Set_Status(s);
+            SET_STATUS(s);
         }
     }
     m_frames.unref(index, std::move(page));
@@ -335,7 +336,7 @@ auto Pager::release(Page page) -> void
 auto Pager::truncate(Size page_count) -> Status
 {
     CALICO_EXPECT_GT(page_count, 0);
-    Calico_Try(m_storage->resize_file(m_path, page_count * m_frames.page_size()));
+    CALICO_TRY(m_storage->resize_file(m_path, page_count * m_frames.page_size()));
     m_frames.m_page_count = page_count;
 
     const auto predicate = [this](auto pid, auto) {
@@ -361,4 +362,4 @@ auto Pager::load_state(const FileHeader &header) -> void
     m_frames.load_state(header);
 }
 
-} // namespace Calico
+} // namespace calicodb

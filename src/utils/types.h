@@ -5,7 +5,8 @@
 #include "utils.h"
 #include <utility>
 
-namespace Calico {
+namespace calicodb
+{
 
 struct Id {
     static constexpr Size null_value {0};
@@ -84,7 +85,8 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 
 using Lsn = Id;
 
-class AlignedBuffer {
+class AlignedBuffer
+{
 public:
     AlignedBuffer(Size size, Size alignment)
         : m_data {
@@ -119,8 +121,9 @@ private:
     std::unique_ptr<Byte[], Deleter> m_data;
 };
 
-template<class T>
-class UniqueNullable final {
+template <class T>
+class UniqueNullable final
+{
 public:
     using Type = T;
 
@@ -129,10 +132,11 @@ public:
     UniqueNullable(const UniqueNullable &) = delete;
     auto operator=(const UniqueNullable &) -> UniqueNullable & = delete;
 
-    template<class Resource>
+    template <class Resource>
     explicit UniqueNullable(Resource resource)
         : m_resource {resource}
-    {}
+    {
+    }
 
     UniqueNullable(UniqueNullable &&rhs) noexcept
     {
@@ -179,7 +183,8 @@ private:
     T m_resource {};
 };
 
-class Span {
+class Span
+{
 public:
     constexpr Span() noexcept = default;
 
@@ -199,7 +204,8 @@ public:
 
     Span(std::string &rhs) noexcept
         : Span {rhs.data(), rhs.size()}
-    {}
+    {
+    }
 
     [[nodiscard]] constexpr auto is_empty() const noexcept -> bool
     {
@@ -357,6 +363,6 @@ inline auto mem_move(Span dst, const Slice &src) noexcept -> void *
     return mem_move(dst, src, src.size());
 }
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_UTILS_TYPES_H

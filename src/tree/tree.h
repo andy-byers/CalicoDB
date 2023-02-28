@@ -5,7 +5,8 @@
 #include "node.h"
 #include <array>
 
-namespace Calico {
+namespace calicodb
+{
 
 struct FileHeader;
 class BPlusTree;
@@ -19,7 +20,8 @@ struct SearchResult {
 // TODO: This implementation takes a shortcut and reads fragmented keys into a temporary buffer.
 //       This isn't necessary: we could iterate through, page by page, and compare bytes as we encounter
 //       them. It's just a bit more complicated.
-class NodeIterator {
+class NodeIterator
+{
     OverflowList *m_overflow {};
     std::string *m_lhs_key {};
     std::string *m_rhs_key {};
@@ -40,7 +42,8 @@ public:
     [[nodiscard]] auto seek(const Cell &cell, bool *found = nullptr) -> Status;
 };
 
-class PayloadManager {
+class PayloadManager
+{
     const NodeMeta *m_meta {};
     OverflowList *m_overflow {};
 
@@ -62,7 +65,8 @@ public:
     [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
 };
 
-class BPlusTree {
+class BPlusTree
+{
     friend class BPlusTreeInternal;
     friend class BPlusTreeValidator;
     friend class CursorInternal;
@@ -107,7 +111,8 @@ public:
     auto TEST_check_nodes() -> void;
 };
 
-class BPlusTreeInternal {
+class BPlusTreeInternal
+{
 public:
     explicit BPlusTreeInternal(BPlusTree &tree);
 
@@ -183,6 +188,6 @@ private:
     Pager *m_pager {};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_TREE_H

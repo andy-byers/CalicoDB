@@ -20,24 +20,26 @@
 #define CALICO_EXPECT_GT(lhs, rhs) CALICO_EXPECT_TRUE((lhs) > (rhs))
 #define CALICO_EXPECT_GE(lhs, rhs) CALICO_EXPECT_TRUE((lhs) >= (rhs))
 
-#define Calico_Try(expr)                                             \
+#define CALICO_TRY(expr)                                             \
     do {                                                             \
         if (auto __calico_try_s = (expr); !__calico_try_s.is_ok()) { \
             return __calico_try_s;                                   \
         }                                                            \
     } while (0)
 
-namespace Calico {
+namespace calicodb
+{
 
-namespace Impl {
+namespace Impl
+{
 
-    inline constexpr auto expect(bool cond, const char *repr, const char *file, int line) noexcept -> void
-    {
-        if (!cond) {
-            std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
-            std::abort();
-        }
+inline constexpr auto expect(bool cond, const char *repr, const char *file, int line) noexcept -> void
+{
+    if (!cond) {
+        std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
+        std::abort();
     }
+}
 
 } // namespace Impl
 
@@ -45,7 +47,7 @@ static constexpr Size MINIMUM_PAGE_SIZE {0x200};
 static constexpr Size MAXIMUM_PAGE_SIZE {0x8000};
 
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
-template<class T>
+template <class T>
 constexpr auto is_power_of_two(T v) noexcept -> bool
 {
     return v && !(v & (v - 1));
@@ -68,6 +70,6 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
     return "ok";
 }
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_UTILS_H

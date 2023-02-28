@@ -4,13 +4,15 @@
 #include "calico/storage.h"
 #include "utils/types.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 class Pager;
 class WriteAheadLog;
 class WalSet;
 
-class Recovery {
+class Recovery
+{
 public:
     explicit Recovery(Pager &pager, WriteAheadLog &wal, Lsn &commit_lsn);
     [[nodiscard]] auto recover() -> Status;
@@ -29,6 +31,6 @@ private:
     Lsn *m_commit_lsn {};
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_DATABASE_RECOVERY_H

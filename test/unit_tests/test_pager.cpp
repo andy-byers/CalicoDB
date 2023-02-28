@@ -10,16 +10,18 @@
 #include <gtest/gtest.h>
 #include <numeric>
 
-namespace Calico {
+namespace calicodb
+{
 
-class DeltaCompressionTest : public testing::Test {
+class DeltaCompressionTest : public testing::Test
+{
 public:
     static constexpr Size PAGE_SIZE {0x200};
 
     [[nodiscard]] auto build_deltas(const ChangeBuffer &unordered) const
     {
         ChangeBuffer deltas;
-        for (const auto &delta: unordered)
+        for (const auto &delta : unordered)
             insert_delta(deltas, delta);
         compress_deltas(deltas);
         return deltas;
@@ -134,7 +136,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     compress_deltas(deltas);
 
     std::vector<int> covering(PAGE_SIZE);
-    for (const auto &[offset, size]: deltas) {
+    for (const auto &[offset, size] : deltas) {
         for (Size i {}; i < size; ++i) {
             ASSERT_EQ(covering.at(offset + i), 0);
             covering[offset + i]++;
@@ -142,14 +144,15 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     }
 }
 
-class CacheTests : public testing::Test {
+class CacheTests : public testing::Test
+{
 public:
     Cache<int, int> target;
 };
 
 TEST_F(CacheTests, EmptyCacheBehavior)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
@@ -160,7 +163,7 @@ TEST_F(CacheTests, EmptyCacheBehavior)
 
 TEST_F(CacheTests, NonEmptyCacheBehavior)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     cache.put(1, 1);
     ASSERT_FALSE(cache.is_empty());
@@ -172,7 +175,7 @@ TEST_F(CacheTests, NonEmptyCacheBehavior)
 
 TEST_F(CacheTests, ElementsArePromotedAfterUse)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 1*, 2, 3, 4, END
     cache.put(4, 4);
@@ -235,7 +238,7 @@ TEST_F(CacheTests, IterationRespectsReplacementPolicy)
 
 TEST_F(CacheTests, QueryDoesNotPromoteElements)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 1*, 2, 3, END
     cache.put(3, 3);
@@ -258,7 +261,7 @@ TEST_F(CacheTests, QueryDoesNotPromoteElements)
 
 TEST_F(CacheTests, ModifyValue)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     cache.put(1, 1);
     cache.put(1, 2);
@@ -269,7 +272,7 @@ TEST_F(CacheTests, ModifyValue)
 
 TEST_F(CacheTests, WarmElementsAreFifoOrdered)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 1*, 2, 3, END
     cache.put(3, 3);
@@ -289,7 +292,7 @@ TEST_F(CacheTests, WarmElementsAreFifoOrdered)
 
 TEST_F(CacheTests, HotElementsAreLruOrdered)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 1*, 2, 3
     cache.put(3, 3);
@@ -314,7 +317,7 @@ TEST_F(CacheTests, HotElementsAreLruOrdered)
 
 TEST_F(CacheTests, HotElementsAreEncounteredFirst)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -346,7 +349,7 @@ TEST_F(CacheTests, HotElementsAreEncounteredFirst)
 
 TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -379,7 +382,7 @@ TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 
 TEST_F(CacheTests, AddWarmElements)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -415,7 +418,7 @@ TEST_F(CacheTests, AddWarmElements)
 
 TEST_F(CacheTests, InsertAfterWarmElementsDepleted)
 {
-    Calico::Cache<int, int> cache;
+    calicodb::Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -495,13 +498,14 @@ TEST(CacheOrderTests, CheckOrder)
 
 TEST(MoveOnlyCacheTests, WorksWithMoveOnlyValue)
 {
-    Calico::Cache<int, std::unique_ptr<int>> cache;
+    calicodb::Cache<int, std::unique_ptr<int>> cache;
     cache.put(1, std::make_unique<int>(1));
     ASSERT_EQ(*cache.get(1)->value, 1);
     ASSERT_EQ(*cache.evict()->value, 1);
 }
 
-class PageRegistryTests : public testing::Test {
+class PageRegistryTests : public testing::Test
+{
 public:
     ~PageRegistryTests() override = default;
 
@@ -537,17 +541,17 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
 
 class FramerTests
     : public InMemoryTest,
-      public testing::Test {
+      public testing::Test
+{
 public:
     explicit FramerTests()
     {
-
-        Editor *file {};
+        Editor *file;
         EXPECT_OK(storage->new_editor("test/data", &file));
 
         AlignedBuffer buffer {0x200 * 8, 0x200};
 
-        frames = std::make_unique<FrameManager>(file, std::move(buffer), 0x200, 8);
+        frames = std::make_unique<FrameManager>(*file, std::move(buffer), 0x200, 8);
     }
 
     ~FramerTests() override = default;
@@ -591,7 +595,8 @@ auto write_to_page(Page &page, const std::string &message) -> void
 
 class PagerTests
     : public TestWithPager,
-      public testing::Test {
+      public testing::Test
+{
 public:
     std::string test_message {"Hello, world!"};
 
@@ -685,7 +690,7 @@ TEST_F(PagerTests, MultipleReaders)
     pager->release(std::move(page_b));
 }
 
-template<class T>
+template <class T>
 static auto run_root_persistence_test(T &test, Size n)
 {
     const auto id = test.allocate_write_release(test.test_message);
@@ -727,12 +732,12 @@ TEST_F(PagerTests, SanityCheck)
 {
     const auto ids = generate_id_strings(500);
 
-    for (const auto &id: ids)
+    for (const auto &id : ids)
         [[maybe_unused]] const auto unused = allocate_write_release(id);
 
-    for (const auto &id: ids) { // NOTE: gtest assertion macros sometimes complain if braces are omitted.
+    for (const auto &id : ids) { // NOTE: gtest assertion macros sometimes complain if braces are omitted.
         ASSERT_EQ(id, acquire_read_release(Id {std::stoull(id)}, id.size()));
     }
 }
 
-} // namespace Calico
+} // namespace calicodb

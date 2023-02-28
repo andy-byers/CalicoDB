@@ -1,12 +1,14 @@
 #include "unit_tests.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 unsigned RecordGenerator::default_seed = 0;
 
 RecordGenerator::RecordGenerator(Parameters param)
     : m_param {param}
-{}
+{
+}
 
 auto RecordGenerator::generate(Tools::RandomGenerator &random, Size num_records) const -> std::vector<Record>
 {
@@ -43,7 +45,7 @@ auto RecordGenerator::generate(Tools::RandomGenerator &random, Size num_records)
     return records;
 }
 
-} // namespace Calico
+} // namespace calicodb
 
 int main(int argc, char **argv)
 {

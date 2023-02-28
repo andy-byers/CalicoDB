@@ -1,7 +1,7 @@
 #ifndef CALICO_DATABASE_IMPL_H
 #define CALICO_DATABASE_IMPL_H
 
-#include "calico/database.h"
+#include "calico/db.h"
 
 #include "pager/pager.h"
 #include "recovery.h"
@@ -10,19 +10,21 @@
 #include "wal/wal.h"
 #include "wal/writer.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 class Cursor;
 class Recovery;
 class Storage;
 class WriteAheadLog;
 
-class DatabaseImpl : public Database {
+class DBImpl : public DB
+{
 public:
-    friend class Database;
+    friend class DB;
 
-    DatabaseImpl() = default;
-    ~DatabaseImpl() override;
+    DBImpl() = default;
+    ~DBImpl() override;
 
     [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
     [[nodiscard]] static auto repair(const std::string &path, const Options &options) -> Status;
@@ -74,6 +76,6 @@ private:
 
 auto setup(const std::string &, Storage &, const Options &, FileHeader &state) -> Status;
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_DATABASE_IMPL_H

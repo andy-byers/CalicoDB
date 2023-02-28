@@ -4,7 +4,8 @@
 #include "slice.h"
 #include <string>
 
-namespace Calico {
+namespace calicodb
+{
 
 class Cursor;
 class InfoLogger;
@@ -12,31 +13,32 @@ class Status;
 class Storage;
 
 enum class LogLevel {
-    TRACE,
-    INFO,
-    WARN,
-    ERROR,
-    OFF,
+    Trace,
+    Info,
+    Warn,
+    Error,
+    Off,
 };
 
 struct Options {
     Size page_size {0x2000};
     Size cache_size {};
     Slice wal_prefix;
-    LogLevel log_level {LogLevel::OFF};
+    LogLevel log_level {LogLevel::Off};
     InfoLogger *info_log {};
     Storage *storage {};
     bool create_if_missing {true};
     bool error_if_exists {};
 };
 
-class Database {
+class DB
+{
 public:
-    [[nodiscard]] static auto open(const Slice &path, const Options &options, Database **db) -> Status;
+    [[nodiscard]] static auto open(const Slice &path, const Options &options, DB **db) -> Status;
     [[nodiscard]] static auto repair(const Slice &path, const Options &options) -> Status;
     [[nodiscard]] static auto destroy(const Slice &path, const Options &options) -> Status;
 
-    virtual ~Database() = default;
+    virtual ~DB() = default;
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string &out) const -> bool = 0;
     [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
@@ -47,6 +49,6 @@ public:
     [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
 };
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_DATABASE_H

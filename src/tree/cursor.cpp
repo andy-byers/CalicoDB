@@ -3,7 +3,8 @@
 #include "pager/pager.h"
 #include "tree.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 [[nodiscard]] static auto default_error_status() -> Status
 {
@@ -27,7 +28,7 @@ auto CursorImpl::fetch_payload() -> Status
     BPlusTreeInternal internal {*m_tree};
 
     Node node;
-    Calico_Try(internal.acquire(node, m_loc.pid));
+    CALICO_TRY(internal.acquire(node, m_loc.pid));
 
     Slice key, value;
     auto cell = read_cell(node, m_loc.index);
@@ -202,4 +203,4 @@ auto CursorInternal::invalidate(const Cursor &cursor, Status status) -> void
     reinterpret_cast<const CursorImpl &>(cursor).m_status = std::move(status);
 }
 
-} // namespace Calico
+} // namespace calicodb

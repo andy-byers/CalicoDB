@@ -9,7 +9,8 @@
 #include <map>
 #include <variant>
 
-namespace Calico {
+namespace calicodb
+{
 
 static constexpr Size WAL_BLOCK_SCALE {4};
 
@@ -48,18 +49,23 @@ static constexpr Size WAL_BLOCK_SCALE {4};
     return prefix.to_string() + std::to_string(id.value);
 }
 
+enum WalPayloadType : Byte {
+    WPT_Delta = '\xD0',
+    WPT_FullImage = '\xF0',
+};
+
+enum WalRecordType : Byte {
+    WRT_Empty = '\x00',
+    WRT_Full = '\xA4',
+    WRT_First = '\xB3',
+    WRT_Middle = '\xC2',
+    WRT_Last = '\xD1',
+};
+
 /*
  * Header fields associated with each WAL record. Based off of the WAL protocol found in RocksDB.
  */
 struct WalRecordHeader {
-    enum Type : Byte {
-        EMPTY = '\x00',
-        FULL = '\xA4',
-        FIRST = '\xB3',
-        MIDDLE = '\xC2',
-        LAST = '\xD1',
-    };
-
     static constexpr Size SIZE {7};
 
     [[nodiscard]] static auto contains_record(const Slice &data) -> bool
@@ -67,7 +73,7 @@ struct WalRecordHeader {
         return data.size() > WalRecordHeader::SIZE && data[0] != '\x00';
     }
 
-    Type type {};
+    WalRecordType type {};
     std::uint16_t size {};
     std::uint32_t crc {};
 };
@@ -106,7 +112,8 @@ struct FullImageDescriptor {
 
 using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor>;
 
-class WalPayloadIn {
+class WalPayloadIn
+{
 public:
     friend class WalWriter;
 
@@ -118,7 +125,7 @@ public:
 
     [[nodiscard]] auto lsn() const -> Lsn
     {
-        return Lsn {get_u64(m_buffer)};
+        return {get_u64(m_buffer)};
     }
 
     [[nodiscard]] auto data() const -> Slice
@@ -130,13 +137,15 @@ private:
     Slice m_buffer;
 };
 
-class WalPayloadOut {
+class WalPayloadOut
+{
 public:
     WalPayloadOut() = default;
 
     explicit WalPayloadOut(const Slice &payload)
         : m_payload {payload}
-    {}
+    {
+    }
 
     [[nodiscard]] auto lsn() const -> Lsn
     {
@@ -156,15 +165,11 @@ private:
 [[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, Span buffer) -> WalPayloadIn;
 [[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, const Slice &image, Span buffer) -> WalPayloadIn;
 
-enum XactPayloadType : Byte {
-    DELTA = '\xD0',
-    FULL_IMAGE = '\xF0',
-};
-
 /*
  * Stores a collection of WAL segment descriptors and caches their first LSNs.
  */
-class WalSet final {
+class WalSet final
+{
 public:
     WalSet() = default;
     ~WalSet() = default;
@@ -256,7 +261,7 @@ private:
     }
 
     Reader *temp;
-    Calico_Try(storage.new_reader(encode_segment_name(prefix, id), &temp));
+    CALICO_TRY(storage.new_reader(encode_segment_name(prefix, id), &temp));
 
     char buffer[sizeof(Lsn)];
     Span bytes {buffer, sizeof(buffer)};
@@ -265,7 +270,7 @@ private:
     // Read the first LSN. If it exists, it will always be at the same location: right after the first
     // record header, which is written at offset 0.
     auto read_size = bytes.size();
-    Calico_Try(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
+    CALICO_TRY(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
 
     bytes.truncate(read_size);
 
@@ -285,6 +290,6 @@ private:
     return Status::ok();
 }
 
-} // namespace Calico
+} // namespace calicodb
 
 #endif // CALICO_WAL_RECORD_H

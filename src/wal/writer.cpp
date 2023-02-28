@@ -2,7 +2,8 @@
 #include "utils/crc.h"
 #include "utils/types.h"
 
-namespace Calico {
+namespace calicodb
+{
 
 auto WalWriter::write(WalPayloadIn payload) -> Status
 {
@@ -12,7 +13,7 @@ auto WalWriter::write(WalPayloadIn payload) -> Status
     CALICO_EXPECT_FALSE(data.is_empty());
 
     WalRecordHeader lhs;
-    lhs.type = WalRecordHeader::Type::FULL;
+    lhs.type = WRT_Full;
     lhs.size = static_cast<std::uint16_t>(data.size());
     lhs.crc = crc32c::Value(data.data(), data.size());
     lhs.crc = crc32c::Mask(lhs.crc);
@@ -25,7 +26,7 @@ auto WalWriter::write(WalPayloadIn payload) -> Status
 
         if (space_remaining <= WalRecordHeader::SIZE) {
             CALICO_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::SIZE);
-            Calico_Try(flush());
+            CALICO_TRY(flush());
             continue;
         }
         WalRecordHeader rhs;
@@ -79,4 +80,4 @@ auto WalWriter::flushed_lsn() const -> Lsn
     return m_flushed_lsn;
 }
 
-} // namespace Calico
+} // namespace calicodb
