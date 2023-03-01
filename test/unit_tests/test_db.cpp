@@ -65,8 +65,8 @@ TEST(LeakTests, DestroysOwnObjects)
 TEST(LeakTests, LeavesUserObjects)
 {
     Options options;
-    options.env = new Tools::DynamicMemory;
-    options.info_log = new Tools::StderrLogger;
+    options.env = new tools::DynamicMemory;
+    options.info_log = new tools::StderrLogger;
 
     DB *db;
     ASSERT_OK(DB::open("__calicodb_test", options, &db));
@@ -153,7 +153,7 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
 static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
 {
     RecordGenerator generator;
-    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+    tools::RandomGenerator random {4 * 1'024 * 1'024};
 
     for (std::size_t iteration {}; iteration < num_groups; ++iteration) {
         const auto records = generator.generate(random, group_size);
@@ -192,7 +192,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
 
     auto s = Status::ok();
     RecordGenerator generator;
-    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+    tools::RandomGenerator random {4 * 1'024 * 1'024};
 
     const auto records = generator.generate(random, GROUP_SIZE * NUM_ITERATIONS);
     auto itr = cbegin(records);
@@ -231,7 +231,7 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
     expect_ok(DB::open("/tmp/calicodb_test_2", options, &rhs));
 
     for (std::size_t i {}; i < 10; ++i) {
-        expect_ok(lhs->put(Tools::integral_key(i), "value"));
+        expect_ok(lhs->put(tools::integral_key(i), "value"));
     }
     expect_ok(lhs->commit());
 
@@ -253,7 +253,7 @@ TEST_F(BasicDatabaseTests, TwoDatabases)
     while (cursor->is_valid()) {
         const auto k = cursor->key();
         const auto v = cursor->value();
-        ASSERT_EQ(k, Tools::integral_key(i++));
+        ASSERT_EQ(k, tools::integral_key(i++));
         ASSERT_EQ(v, "value");
         cursor->next();
     }
@@ -282,7 +282,7 @@ public:
     }
 
     std::unordered_map<std::string, std::string> map;
-    Tools::RandomGenerator random {1'024 * 1'024 * 8};
+    tools::RandomGenerator random {1'024 * 1'024 * 8};
     DB *db {};
     Options options;
     std::size_t lower_bounds {};
@@ -359,7 +359,7 @@ public:
     }
 
     Options options;
-    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+    tools::RandomGenerator random {4 * 1'024 * 1'024};
     std::vector<Record> records;
     std::unique_ptr<DBImpl> impl;
 };
@@ -383,7 +383,7 @@ static auto add_records(TestDatabase &test, std::size_t n)
     std::map<std::string, std::string> records;
 
     for (std::size_t i {}; i < n; ++i) {
-        const auto key_size = test.random.Next<std::size_t>(16);
+        const auto key_size = test.random.Next<std::size_t>(1, 16);
         const auto value_size = test.random.Next<std::size_t>(100);
         const auto key = test.random.Generate(key_size).to_string();
         const auto value = test.random.Generate(value_size).to_string();
@@ -473,7 +473,7 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
         ASSERT_OK(db.impl->commit());
 
         // Simulate a crash by cloning the database before cleanup has occurred.
-        clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*env).clone());
+        clone.reset(dynamic_cast<const tools::DynamicMemory &>(*env).clone());
 
         (void)db.impl->pager->flush({});
     }
@@ -499,7 +499,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
             ASSERT_OK(db.impl->commit());
         }
 
-        clone.reset(dynamic_cast<const Tools::DynamicMemory &>(*env).clone());
+        clone.reset(dynamic_cast<const tools::DynamicMemory &>(*env).clone());
 
         (void)db.impl->pager->flush({});
     }
@@ -521,7 +521,7 @@ class DbErrorTests
 protected:
     DbErrorTests()
     {
-        env = std::make_unique<Tools::DynamicMemory>();
+        env = std::make_unique<tools::DynamicMemory>();
         EXPECT_OK(env->create_directory("test"));
         db = std::make_unique<TestDatabase>(*env);
 
@@ -529,9 +529,9 @@ protected:
         EXPECT_OK(db->impl->commit());
 
         get_env().add_interceptor(
-            Tools::Interceptor {
+            tools::Interceptor {
                 "test/data",
-                Tools::Interceptor::READ,
+                tools::Interceptor::READ,
                 [this] {
                     if (counter++ >= GetParam()) {
                         return special_error();
@@ -634,7 +634,7 @@ protected:
         EXPECT_OK(db->impl->commit());
 
         const auto make_interceptor = [this](const auto &prefix, auto type) {
-            return Tools::Interceptor {prefix, type, [this] {
+            return tools::Interceptor {prefix, type, [this] {
                                            if (counter++ >= GetParam().successes) {
                                                return special_error();
                                            }
@@ -644,16 +644,16 @@ protected:
 
         switch (GetParam().target) {
         case ErrorTarget::DataRead:
-            get_env().add_interceptor(make_interceptor("test/data", Tools::Interceptor::READ));
+            get_env().add_interceptor(make_interceptor("test/data", tools::Interceptor::READ));
             break;
         case ErrorTarget::DataWrite:
-            get_env().add_interceptor(make_interceptor("test/data", Tools::Interceptor::WRITE));
+            get_env().add_interceptor(make_interceptor("test/data", tools::Interceptor::WRITE));
             break;
         case ErrorTarget::WalRead:
-            get_env().add_interceptor(make_interceptor("test/wal", Tools::Interceptor::READ));
+            get_env().add_interceptor(make_interceptor("test/wal", tools::Interceptor::READ));
             break;
         case ErrorTarget::WalWrite:
-            get_env().add_interceptor(make_interceptor("test/wal", Tools::Interceptor::WRITE));
+            get_env().add_interceptor(make_interceptor("test/wal", tools::Interceptor::WRITE));
             break;
         }
     }
@@ -714,7 +714,7 @@ TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
     for (const auto &[key, value] : committed) {
         TestTools::expect_contains(*db->impl, key, value);
     }
-    Tools::validate_db(*db->impl);
+    tools::validate_db(*db->impl);
 }
 
 TEST_P(DbFatalErrorTests, VacuumReportsErrors)
@@ -737,13 +737,13 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
     for (const auto &[key, value] : committed) {
         TestTools::expect_contains(*db->impl, key, value);
     }
-    Tools::validate_db(*db->impl);
+    tools::validate_db(*db->impl);
 
     std::size_t file_size;
     ASSERT_OK(env->file_size("test/data", file_size));
     std::string property;
     ASSERT_TRUE(db->impl->get_property("calicodb.counts", property));
-    const auto counts = Tools::parse_db_counts(property);
+    const auto counts = tools::parse_db_counts(property);
     ASSERT_EQ(file_size, counts.pages * db->options.page_size);
 }
 
@@ -826,7 +826,7 @@ public:
 
 class ExtendedDatabase : public DB
 {
-    std::unique_ptr<Tools::DynamicMemory> m_env;
+    std::unique_ptr<tools::DynamicMemory> m_env;
     std::unique_ptr<DB> m_base;
 
 public:
@@ -837,7 +837,7 @@ public:
         if (ext == nullptr) {
             return Status::system_error("cannot allocate extension database: out of memory");
         }
-        auto env = std::make_unique<Tools::DynamicMemory>();
+        auto env = std::make_unique<tools::DynamicMemory>();
         options.env = env.get();
 
         DB *db;
@@ -1086,7 +1086,7 @@ TEST_F(ApiTests, KeysCanBeArbitrarychars)
 
 TEST_F(ApiTests, HandlesLargeKeys)
 {
-    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+    tools::RandomGenerator random {4 * 1'024 * 1'024};
 
     const auto key_1 = '\x01' + random.Generate(options.page_size * 100).to_string();
     const auto key_2 = '\x02' + random.Generate(options.page_size * 100).to_string();
@@ -1144,7 +1144,7 @@ public:
         ASSERT_OK(db->commit());
     }
 
-    Tools::RandomGenerator random {4 * 1'024 * 1'024};
+    tools::RandomGenerator random {4 * 1'024 * 1'024};
 };
 
 TEST_F(LargePayloadTests, LargeKeys)
@@ -1221,7 +1221,7 @@ protected:
 
 TEST_F(CommitFailureTests, WalFlushFailure)
 {
-    QUICK_INTERCEPTOR("test/wal", Tools::Interceptor::WRITE);
+    QUICK_INTERCEPTOR("test/wal", tools::Interceptor::WRITE);
     run_failure_path();
 }
 
@@ -1242,7 +1242,7 @@ public:
 TEST_F(WalPrefixTests, WalDirectoryMustExist)
 {
     options.wal_prefix = "nonexistent";
-    ASSERT_TRUE(calicodb::DB::open(ROOT, options, &db).is_not_found());
+    ASSERT_TRUE(DB::open(ROOT, options, &db).is_not_found());
 }
 
 } // namespace calicodb

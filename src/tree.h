@@ -81,7 +81,7 @@ class BPlusTree
     NodeMeta m_external_meta;
     NodeMeta m_internal_meta;
     PointerMap m_pointers;
-    FreeList m_freelist;
+    Freelist m_freelist;
     OverflowList m_overflow;
     PayloadManager m_payloads;
 
@@ -98,7 +98,7 @@ public:
     [[nodiscard]] auto collect_key(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
     [[nodiscard]] auto collect_value(std::string &scratch, const Cell &cell, Slice &out) const -> Status;
     [[nodiscard]] auto search(const Slice &key, SearchResult &out) -> Status;
-    [[nodiscard]] auto insert(const Slice &key, const Slice &value, bool &exists) -> Status;
+    [[nodiscard]] auto insert(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, bool &vacuumed) -> Status;
 
@@ -131,7 +131,7 @@ public:
         return m_payloads;
     }
 
-    [[nodiscard]] auto freelist() -> FreeList *
+    [[nodiscard]] auto freelist() -> Freelist *
     {
         return m_freelist;
     }
@@ -140,7 +140,7 @@ public:
     [[nodiscard]] auto is_pointer_map(Id pid) const -> bool;
     [[nodiscard]] auto find_external_slot(const Slice &key, SearchResult &out) const -> Status;
     [[nodiscard]] auto find_parent_id(Id pid, Id &out) const -> Status;
-    [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type = PointerMap::NODE) -> Status;
+    [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type = PointerMap::Node) -> Status;
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;
@@ -184,7 +184,7 @@ private:
     PointerMap *m_pointers {};
     OverflowList *m_overflow {};
     PayloadManager *m_payloads {};
-    FreeList *m_freelist {};
+    Freelist *m_freelist {};
     Pager *m_pager {};
 };
 

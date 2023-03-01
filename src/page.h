@@ -75,6 +75,14 @@ public:
         return m_deltas;
     }
 
+    auto TEST_populate(Id id, Span buffer, bool write, const ChangeBuffer &deltas = {}) -> void
+    {
+        m_id = id;
+        m_span = buffer;
+        m_write = write;
+        m_deltas = deltas;
+    }
+
     // Disable copies but allow moves.
     Page(const Page &) = delete;
     auto operator=(const Page &) -> Page & = delete;

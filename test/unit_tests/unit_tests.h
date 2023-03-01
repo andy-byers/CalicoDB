@@ -18,21 +18,21 @@ namespace calicodb
 
 #define CLEAR_INTERCEPTORS()                                                 \
     do {                                                                     \
-        dynamic_cast<Tools::DynamicMemory &>(*env).clear_interceptors(); \
+        dynamic_cast<tools::DynamicMemory &>(*env).clear_interceptors(); \
     } while (0)
 
 #define QUICK_INTERCEPTOR(prefix__, type__)                                  \
     do {                                                                     \
-        dynamic_cast<Tools::DynamicMemory &>(*env)                       \
-            .add_interceptor(Tools::Interceptor {(prefix__), (type__), [] {  \
+        dynamic_cast<tools::DynamicMemory &>(*env)                       \
+            .add_interceptor(tools::Interceptor {(prefix__), (type__), [] {  \
                                                      return special_error(); \
                                                  }});                        \
     } while (0)
 
 #define COUNTING_INTERCEPTOR(prefix__, type__, n__)                                   \
     do {                                                                              \
-        dynamic_cast<Tools::DynamicMemory &>(*env)                                \
-            .add_interceptor(Tools::Interceptor {(prefix__), (type__), [&n = (n__)] { \
+        dynamic_cast<tools::DynamicMemory &>(*env)                                \
+            .add_interceptor(tools::Interceptor {(prefix__), (type__), [&n = (n__)] { \
                                                      if (n-- <= 0) {                  \
                                                          return special_error();      \
                                                      }                                \
@@ -79,16 +79,16 @@ public:
     static constexpr auto PREFIX = "test/";
 
     InMemoryTest()
-        : env {std::make_unique<Tools::DynamicMemory>()}
+        : env {std::make_unique<tools::DynamicMemory>()}
     {
         EXPECT_TRUE(expose_message(env->create_directory(ROOT)));
     }
 
     virtual ~InMemoryTest() = default;
 
-    [[nodiscard]] auto get_env() -> Tools::DynamicMemory &
+    [[nodiscard]] auto get_env() -> tools::DynamicMemory &
     {
-        return dynamic_cast<Tools::DynamicMemory &>(*env);
+        return dynamic_cast<tools::DynamicMemory &>(*env);
     }
 
     std::unique_ptr<Env> env;
@@ -189,7 +189,7 @@ public:
     std::string scratch;
     std::string collect_scratch;
     std::unique_ptr<Pager> pager;
-    Tools::RandomGenerator random {1'024 * 1'024 * 8};
+    tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
 
 inline auto expect_ok(const Status &s) -> void
@@ -367,7 +367,7 @@ public:
 
     RecordGenerator() = default;
     explicit RecordGenerator(Parameters);
-    auto generate(Tools::RandomGenerator &, std::size_t) const -> std::vector<Record>;
+    auto generate(tools::RandomGenerator &, std::size_t) const -> std::vector<Record>;
 
 private:
     Parameters m_param;

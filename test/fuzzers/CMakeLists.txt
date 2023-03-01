@@ -8,7 +8,7 @@ function(build_fuzzer NAME)
         target_sources(${NAME} PRIVATE main.cpp)
     endif()
     target_link_libraries(${NAME} PRIVATE calicodb_tools)
-    target_include_directories(${NAME} PRIVATE "${CALICODB_SOURCE_DIR}")
+    target_include_directories(${NAME} PRIVATE "${PROJECT_SOURCE_DIR}/src")
 endfunction()
 
 build_fuzzer(ops_fuzzer)

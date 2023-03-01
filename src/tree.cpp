@@ -22,15 +22,11 @@ static auto seek_binary(unsigned n, const Slice &key, const FetchKey &fetch) -> 
     while (lower < upper) {
         const auto mid = (lower + upper) / 2;
         const auto rhs = fetch(mid);
-
-        switch (compare_three_way(key, rhs)) {
-        case Comparison::Less:
+        if (const auto cmp = key.compare(rhs); cmp < 0) {
             upper = mid;
-            break;
-        case Comparison::Greater:
+        } else if (cmp > 0) {
             lower = mid + 1;
-            break;
-        case Comparison::Equal:
+        } else {
             return {mid, true};
         }
     }
@@ -183,7 +179,7 @@ auto BPlusTreeInternal::fix_parent_id(Id pid, Id parent_id, PointerMap::Type typ
 auto BPlusTreeInternal::maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status
 {
     if (cell.has_remote) {
-        return fix_parent_id(read_overflow_id(cell), parent_id, PointerMap::OVERFLOW_HEAD);
+        return fix_parent_id(read_overflow_id(cell), parent_id, PointerMap::OverflowHead);
     }
     return Status::ok();
 }
@@ -481,8 +477,7 @@ auto BPlusTreeInternal::split_non_root_fast(Node parent, Node left, Node right, 
         left.header.next_id = right.page.id();
 
         separator = read_cell(right, 0);
-        detach_cell(separator, m_tree->cell_scratch());
-        CDB_TRY(m_payloads->promote(nullptr, separator, parent.page.id()));
+        CDB_TRY(m_payloads->promote(m_tree->cell_scratch(), separator, parent.page.id()));
     } else {
         separator = read_cell(left, header.cell_count - 1);
         detach_cell(separator, m_tree->cell_scratch());
@@ -566,8 +561,9 @@ auto BPlusTreeInternal::external_merge_left(Node &left, Node &right, Node &paren
 
     left.header.next_id = right.header.next_id;
 
-    const auto separator = read_cell(parent, index);
-    erase_cell(parent, index, separator.size);
+//    const auto separator = read_cell(parent, index);
+//    erase_cell(parent, index, separator.size);
+    CDB_TRY(remove_cell(parent, index));
 
     while (right.header.cell_count) {
         CDB_TRY(transfer_left(left, right));
@@ -627,10 +623,11 @@ auto BPlusTreeInternal::external_merge_right(Node &left, Node &right, Node &pare
     CDB_EXPECT_FALSE(parent.header.is_external);
 
     left.header.next_id = right.header.next_id;
-    const auto separator = read_cell(parent, index);
+//    const auto separator = read_cell(parent, index);
     CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
     write_child_id(parent, index + 1, left.page.id());
-    erase_cell(parent, index, separator.size);
+//    erase_cell(parent, index, separator.size);
+    CDB_TRY(remove_cell(parent, index));
 
     while (right.header.cell_count) {
         CDB_TRY(transfer_left(left, right));
@@ -755,7 +752,7 @@ auto BPlusTreeInternal::external_rotate_left(Node &parent, Node &left, Node &rig
     CDB_TRY(m_payloads->promote(m_tree->cell_scratch(), separator, parent.page.id()));
     write_child_id(separator, left.page.id());
 
-    erase_cell(parent, index, read_cell(parent, index).size);
+    CDB_TRY(remove_cell(parent, index));
     return insert_cell(parent, index, separator);
 }
 
@@ -815,7 +812,7 @@ auto BPlusTreeInternal::external_rotate_right(Node &parent, Node &left, Node &ri
     // Don't erase the cell until it has been detached.
     erase_cell(left, left.header.cell_count - 1);
 
-    erase_cell(parent, index, read_cell(parent, index).size);
+    CDB_TRY(remove_cell(parent, index));
     CDB_TRY(insert_cell(parent, index, separator));
     return Status::ok();
 }
@@ -993,10 +990,10 @@ auto BPlusTree::cell_scratch() -> char *
     return m_cell_scratch.data() + sizeof(Id) - 1;
 }
 
-auto BPlusTree::insert(const Slice &key, const Slice &value, bool &exists) -> Status
+auto BPlusTree::insert(const Slice &key, const Slice &value, bool *exists) -> Status
 {
+    CDB_EXPECT_FALSE(key.is_empty());
     BPlusTreeInternal internal {*this};
-    exists = false;
 
     SearchResult slot;
     CDB_TRY(internal.find_external_slot(key, slot));
@@ -1009,7 +1006,9 @@ auto BPlusTree::insert(const Slice &key, const Slice &value, bool &exists) -> St
 
     CDB_TRY(m_payloads.emplace(cell_scratch(), node, key, value, index));
     CDB_TRY(internal.resolve_overflow(std::move(node)));
-    exists = exact;
+    if (exists != nullptr) {
+        *exists = exact;
+    }
     return Status::ok();
 }
 
@@ -1090,8 +1089,10 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
     };
 
     switch (entry.type) {
-    case PointerMap::FREELIST_LINK: {
-        if (last_id == m_freelist.m_head) {
+    case PointerMap::FreelistLink: {
+        if (last_id == free.id()) {
+
+        } else if (last_id == m_freelist.m_head) {
             m_freelist.m_head = free.id();
         } else {
             // Back pointer points to another freelist page.
@@ -1100,18 +1101,18 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
             Page last;
             CDB_TRY(m_pager->acquire(last_id, last));
             if (const auto next_id = read_next_id(last); !next_id.is_null()) {
-                CDB_TRY(internal.fix_parent_id(next_id, free.id(), PointerMap::FREELIST_LINK));
+                CDB_TRY(internal.fix_parent_id(next_id, free.id(), PointerMap::FreelistLink));
             }
             m_pager->release(std::move(last));
         }
         break;
     }
-    case PointerMap::OVERFLOW_LINK: {
+    case PointerMap::OverflowLink: {
         // Back pointer points to another overflow chain link, or the head of the chain.
         CDB_TRY(fix_basic_link());
         break;
     }
-    case PointerMap::OVERFLOW_HEAD: {
+    case PointerMap::OverflowHead: {
         // Back pointer points to the node that the overflow chain is rooted in. Search through that nodes cells
         // for the target overflowing cell.
         Node parent;
@@ -1129,7 +1130,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
         internal.release(std::move(parent));
         break;
     }
-    case PointerMap::NODE: {
+    case PointerMap::Node: {
         // Back pointer points to another node. Search through that node for the target child pointer.
         Node parent;
         CDB_TRY(internal.acquire(parent, entry.back_ptr, true));
@@ -1180,7 +1181,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
     // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
     // which we will need if we crash during vacuum and need to roll back.
     m_pager->upgrade(last);
-    if (entry.type != PointerMap::NODE) {
+    if (entry.type != PointerMap::Node) {
         if (const auto next_id = read_next_id(last); !next_id.is_null()) {
             PointerMap::Entry next_entry;
             CDB_TRY(m_pointers.read_entry(next_id, next_entry));
@@ -1213,6 +1214,9 @@ auto BPlusTree::vacuum_one(Id target, bool &success) -> Status
     if (target != head.id()) {
         // Swap the last page with the freelist head.
         CDB_TRY(vacuum_step(head, target));
+    } else {
+        // TODO: May not really be necessary...
+        CDB_TRY(internal.fix_parent_id(target, Id::null(), {}));
     }
     m_pager->release(std::move(head));
     success = true;
@@ -1281,7 +1285,11 @@ public:
             }
 
             const auto key = Slice {cell.key, std::min<std::size_t>(3, cell.key_size)}.to_string();
+            CHECK_TRUE(!key.empty());
             add_to_level(data, escape_string(key), level);
+            if (cell.has_remote) {
+                add_to_level(data, "(" + number_to_string(read_overflow_id(cell).value) + ")", level);
+            }
 
             if (not_last) {
                 add_to_level(data, ",", level);
@@ -1507,7 +1515,8 @@ auto BPlusTree::TEST_to_string() -> std::string
     CHECK_OK(internal.acquire(root, Id::root()));
     validator.collect_levels(data, std::move(root), 0);
     for (const auto &level : data.levels) {
-        repr.append(level.substr(0, 200) + '\n');
+        repr.append(level + '\n');
+//        repr.append(level.substr(0, 200) + '\n');
     }
 
     return repr;

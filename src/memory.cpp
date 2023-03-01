@@ -25,7 +25,7 @@ namespace calicodb
     return page.span(content_offset(), std::min(size_limit, page.size() - content_offset()));
 }
 
-auto FreeList::pop(Page &page) -> Status
+auto Freelist::pop(Page &page) -> Status
 {
     if (!m_head.is_null()) {
         CDB_TRY(m_pager->acquire(m_head, page));
@@ -35,7 +35,7 @@ auto FreeList::pop(Page &page) -> Status
         if (!m_head.is_null()) {
             // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
             // node's back pointer at some point.
-            const PointerMap::Entry entry {Id::null(), PointerMap::FREELIST_LINK};
+            const PointerMap::Entry entry {Id::null(), PointerMap::FreelistLink};
             CDB_TRY(m_pointers->write_entry(m_head, entry));
         }
         return Status::ok();
@@ -44,13 +44,13 @@ auto FreeList::pop(Page &page) -> Status
     return Status::logic_error("free list is empty");
 }
 
-auto FreeList::push(Page page) -> Status
+auto Freelist::push(Page page) -> Status
 {
     CDB_EXPECT_FALSE(page.id().is_root());
     write_next_id(page, m_head);
 
     // Write the parent of the old head, if it exists.
-    PointerMap::Entry entry {page.id(), PointerMap::FREELIST_LINK};
+    PointerMap::Entry entry {page.id(), PointerMap::FreelistLink};
     if (!m_head.is_null()) {
         CDB_TRY(m_pointers->write_entry(m_head, entry));
     }
@@ -124,12 +124,12 @@ auto OverflowList::write_chain(Id &out, Id pid, Slice first, Slice second) -> St
                 first.advance(limit);
             }
         }
-        PointerMap::Entry entry {pid, PointerMap::OVERFLOW_HEAD};
+        PointerMap::Entry entry {pid, PointerMap::OverflowHead};
         if (prev) {
             write_next_id(*prev, page.id());
             m_pager->release(std::move(*prev));
             entry.back_ptr = prev->id();
-            entry.type = PointerMap::OVERFLOW_LINK;
+            entry.type = PointerMap::OverflowLink;
         } else {
             head = page.id();
         }

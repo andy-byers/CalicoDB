@@ -293,10 +293,13 @@ auto DBImpl::new_cursor() const -> Cursor *
 
 auto DBImpl::put(const Slice &key, const Slice &value) -> Status
 {
+    if (key.is_empty()) {
+        return Status::invalid_argument("key is empty");
+    }
     CDB_TRY(m_status);
 
-    bool exists {};
-    if (auto s = tree->insert(key, value, exists); !s.is_ok()) {
+    bool exists;
+    if (auto s = tree->insert(key, value, &exists); !s.is_ok()) {
         SET_STATUS(s);
         return s;
     }

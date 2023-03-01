@@ -40,7 +40,7 @@
         }                                         \
     } while (0)
 
-namespace calicodb::Tools
+namespace calicodb::tools
 {
 
 struct Interceptor {

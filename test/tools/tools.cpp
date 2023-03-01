@@ -5,7 +5,7 @@
 #include <iomanip>
 #include <iostream>
 
-namespace calicodb::Tools
+namespace calicodb::tools
 {
 
 auto DynamicMemory::add_interceptor(Interceptor interceptor) -> void
@@ -277,16 +277,16 @@ auto print_references(Pager &pager, PointerMap &pointers) -> void
         PointerMap::Entry entry;
         CHECK_OK(pointers.read_entry(pid, entry));
         switch (entry.type) {
-        case PointerMap::NODE:
+        case PointerMap::Node:
             std::cerr << "node";
             break;
-        case PointerMap::FREELIST_LINK:
+        case PointerMap::FreelistLink:
             std::cerr << "freelist link";
             break;
-        case PointerMap::OVERFLOW_HEAD:
+        case PointerMap::OverflowHead:
             std::cerr << "overflow head";
             break;
-        case PointerMap::OVERFLOW_LINK:
+        case PointerMap::OverflowLink:
             std::cerr << "overflow link";
             break;
         }

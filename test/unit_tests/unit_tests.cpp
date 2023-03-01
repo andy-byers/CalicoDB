@@ -10,7 +10,7 @@ RecordGenerator::RecordGenerator(Parameters param)
 {
 }
 
-auto RecordGenerator::generate(Tools::RandomGenerator &random, std::size_t num_records) const -> std::vector<Record>
+auto RecordGenerator::generate(tools::RandomGenerator &random, std::size_t num_records) const -> std::vector<Record>
 {
     const auto [mks, mvs, spread, is_sequential, is_unique] = m_param;
     std::vector<Record> records(num_records);
