@@ -35,9 +35,9 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     auto operation_type = static_cast<OperationType>(*data++ % OperationType::OT_OpCount);
     --size;
 
-    std::string key;
+    std::unique_ptr<Cursor> cursor;
     std::string value;
-    Cursor *cursor {};
+    std::string key;
     Status s;
 
     if (record_count > DB_MAX_RECORDS) {
@@ -45,26 +45,31 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     }
     switch (operation_type) {
     case OT_Get:
-        s = m_db->get(extract_key(data, size), value);
+        s = m_db->get(extract_fuzzer_key(data, size), value);
         if (s.is_not_found()) {
             s = Status::ok();
         }
         CDB_TRY(s);
         break;
     case OT_Put:
-        key = extract_key(data, size).to_string();
-        CDB_TRY(m_db->put(key, extract_value(data, size)));
+        key = extract_fuzzer_key(data, size);
+        CDB_TRY(m_db->put(key, extract_fuzzer_value(data, size)));
         break;
     case OT_Erase:
-        s = m_db->erase(extract_key(data, size));
-        if (s.is_not_found()) {
-            s = Status::ok();
+        key = extract_fuzzer_key(data, size);
+        cursor.reset(m_db->new_cursor());
+        cursor->seek(key);
+        if (cursor->is_valid()) {
+            s = m_db->erase(cursor->key());
+            if (s.is_not_found()) {
+                s = Status::ok();
+            }
         }
         CDB_TRY(s);
         break;
     case OT_SeekIter:
-        key = extract_key(data, size).to_string();
-        cursor = m_db->new_cursor();
+        key = extract_fuzzer_key(data, size);
+        cursor.reset(m_db->new_cursor());
         cursor->seek(key);
         while (cursor->is_valid()) {
             if (key.front() & 1) {
@@ -75,14 +80,14 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         }
         break;
     case OT_IterForward:
-        cursor = m_db->new_cursor();
+        cursor.reset(m_db->new_cursor());
         cursor->seek_first();
         while (cursor->is_valid()) {
             cursor->next();
         }
         break;
     case OT_IterReverse:
-        cursor = m_db->new_cursor();
+        cursor.reset(m_db->new_cursor());
         cursor->seek_last();
         while (cursor->is_valid()) {
             cursor->previous();
@@ -97,7 +102,6 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     default: // OT_Reopen
         CDB_TRY(reopen());
     }
-    delete cursor;
     return m_db->status();
 }
 

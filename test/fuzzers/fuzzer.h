@@ -3,54 +3,49 @@
 
 #include "calicodb/calicodb.h"
 #include "encoding.h"
+#include "logging.h"
 #include "tools.h"
 #include <iostream>
 
 namespace calicodb
 {
 
-inline auto extract_key(const std::uint8_t *&data, std::size_t &size)
+inline auto extract_fuzzer_value(const std::uint8_t *&data, std::size_t &size) -> std::string
 {
-    CHECK_TRUE(size != 0);
-    if (size == 1) {
-        return Slice {reinterpret_cast<const char *>(data), size};
-    }
-    std::size_t actual {2};
-    if (size > 2) {
-        const auto requested = std::min<std::size_t>(data[0] << 8 | data[1], MAXIMUM_PAGE_SIZE);
-        actual = std::min(requested + !requested, size - 2);
-        data += 2;
-        size -= 2;
-    }
-    const Slice payload {reinterpret_cast<const char *>(data), actual};
-    data += actual;
-    size -= actual;
-    return payload;
-}
+    const auto extract = [&data, &size] {
+        std::size_t result {};
+        if (size == 1) {
+            result = data[0];
+            ++data;
+            --size;
+        } else if (size >= 2) {
+            result = data[0] << 8 | data[1];
+            data += 2;
+            size -= 2;
+        }
+        result %= MAXIMUM_PAGE_SIZE;
+        return result + !result;
+    };
 
-inline auto extract_value(const std::uint8_t *&data, std::size_t &size)
-{
-    // Allow zero-length values.
     if (size == 0) {
-        return std::string {};
+        return "";
     }
-    const auto needed_size = std::min<std::size_t>(size, 2);
-    std::size_t result_size;
+    const auto result_size = extract();
+    const auto result_data = extract();
 
-    if (needed_size == 1) {
-        result_size = data[0];
-    } else {
-        result_size = data[0] << 8 | data[1];
-    }
-    result_size %= MAXIMUM_PAGE_SIZE;
-    data += needed_size;
-    size -= needed_size;
-
-    std::string result(result_size, '_');
+    std::string result(result_size, '0');
     if (result_size) {
-        result.append(std::to_string(result_size));
+        append_number(result, result_data);
     }
     return result;
+}
+
+inline auto extract_fuzzer_key(const std::uint8_t *&data, std::size_t &size) -> std::string
+{
+    if (size == 0) {
+        return "0";
+    }
+    return extract_fuzzer_value(data, size);
 }
 
 class DbFuzzer

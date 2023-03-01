@@ -67,8 +67,8 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
 
     switch (operation_type) {
     case OT_Put:
-        key = extract_key(data, size).to_string();
-        value = extract_value(data, size);
+        key = extract_fuzzer_key(data, size);
+        value = extract_fuzzer_value(data, size);
         s = m_db->put(key, value);
         if (s.is_ok()) {
             if (const auto itr = m_erased.find(key); itr != end(m_erased)) {
@@ -77,18 +77,25 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             m_added[key] = value;
         }
         break;
-    case OT_Erase:
-        key = extract_key(data, size).to_string();
-        s = m_db->erase(key);
-        if (s.is_ok()) {
-            if (const auto itr = m_added.find(key); itr != end(m_added)) {
-                m_added.erase(itr);
+    case OT_Erase: {
+        key = extract_fuzzer_key(data, size);
+        auto *cursor = m_db->new_cursor();
+        cursor->seek(key);
+        if (cursor->is_valid()) {
+            s = m_db->erase(cursor->key());
+            if (s.is_ok()) {
+                key = cursor->key().to_string();
+                if (const auto itr = m_added.find(key); itr != end(m_added)) {
+                    m_added.erase(itr);
+                }
+                m_erased.insert(key);
+            } else if (s.is_not_found()) {
+                s = Status::ok();
             }
-            m_erased.insert(key);
-        } else if (s.is_not_found()) {
-            s = Status::ok();
         }
+        delete cursor;
         break;
+    }
     case OT_Vacuum:
         s = m_db->vacuum();
         break;
