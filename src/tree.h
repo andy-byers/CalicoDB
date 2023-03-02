@@ -116,6 +116,11 @@ class BPlusTreeInternal
 public:
     explicit BPlusTreeInternal(BPlusTree &tree);
 
+    [[nodiscard]] auto pager() -> Pager *
+    {
+        return m_pager;
+    }
+
     [[nodiscard]] auto pointers() -> PointerMap *
     {
         return m_pointers;

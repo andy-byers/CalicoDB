@@ -111,9 +111,8 @@ auto Recovery::recover_phase_1() -> Status
                 commit_lsn = deltas.lsn;
                 commit_segment = segment;
             }
-            // WARNING: Applying these updates can cause the in-memory file
-            // header variables to be incorrect. This
-            //          must be fixed by the caller after this method returns.
+            // WARNING: Applying these updates can cause the in-memory file header variables to be incorrect. This
+            // must be fixed by the caller after this method returns.
             return with_page(*m_pager, deltas, [this, &deltas](auto &page) {
                 if (read_page_lsn(page) < deltas.lsn) {
                     m_pager->upgrade(page);
@@ -132,7 +131,11 @@ auto Recovery::recover_phase_1() -> Status
         if (std::holds_alternative<FullImageDescriptor>(decoded)) {
             const auto image = std::get<FullImageDescriptor>(decoded);
             return with_page(*m_pager, image, [this, &image](auto &page) {
-                if (read_page_lsn(page) > image.lsn && image.lsn > *m_commit_lsn) {
+                if (image.lsn < *m_commit_lsn) {
+                    return;
+                }
+                const auto page_lsn = read_page_lsn(page);
+                if (page_lsn.is_null() || page_lsn > image.lsn) {
                     m_pager->upgrade(page);
                     apply_undo(page, image);
                 }
@@ -197,10 +200,9 @@ auto Recovery::recover_phase_1() -> Status
     }
     *m_commit_lsn = commit_lsn;
 
-    /* Roll backward, reverting misapplied updates until we reach the
-     * most-recent commit. We are able to read the log forward, since the full
-     * images are disjoint. Again, the last segment we read may contain a
-     * partial/corrupted record.
+    /* Roll backward, reverting updates until we reach the most-recent commit. We
+     * are able to read the log forward, since the full images are disjoint.
+     * Again, the last segment we read may contain a partial/corrupted record.
      */
     segment = commit_segment;
     for (; !segment.is_null(); segment = m_set->id_after(segment)) {

@@ -383,8 +383,8 @@ static auto add_records(TestDatabase &test, std::size_t n)
     std::map<std::string, std::string> records;
 
     for (std::size_t i {}; i < n; ++i) {
-        const auto key_size = test.random.Next<std::size_t>(1, 16);
-        const auto value_size = test.random.Next<std::size_t>(100);
+        const auto key_size = test.random.Next<std::size_t>(1, test.options.page_size * 2);
+        const auto value_size = test.random.Next<std::size_t>(test.options.page_size * 2);
         const auto key = test.random.Generate(key_size).to_string();
         const auto value = test.random.Generate(value_size).to_string();
         EXPECT_OK(test.impl->put(key, value));
@@ -452,6 +452,67 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
     for (std::size_t i {}; i < 100; ++i) {
         add_records(*db, 100);
     }
+}
+
+TEST_F(DbRevertTests, RevertsVacuum_1)
+{
+    const auto committed = add_records(*db, 1'000);
+    ASSERT_OK(db->impl->commit());
+
+    // Hack to make sure the database file is up-to-date.
+    (void)db->impl->pager->flush({});
+
+    auto uncommitted = add_records(*db, 1'000);
+    for (std::size_t i {}; i < 500; ++i) {
+        const auto itr = begin(uncommitted);
+        ASSERT_OK(db->impl->erase(itr->first));
+        uncommitted.erase(itr);
+    }
+    ASSERT_OK(db->impl->vacuum());
+    ASSERT_OK(db->reopen());
+
+    expect_contains_records(*db->impl, committed);
+}
+
+TEST_F(DbRevertTests, RevertsVacuum_2)
+{
+    auto committed = add_records(*db, 1'000);
+    for (std::size_t i {}; i < 500; ++i) {
+        const auto itr = begin(committed);
+        ASSERT_OK(db->impl->erase(itr->first));
+        committed.erase(itr);
+    }
+    ASSERT_OK(db->impl->commit());
+
+    (void)db->impl->pager->flush({});
+
+    add_records(*db, 1'000);
+    ASSERT_OK(db->reopen());
+
+    expect_contains_records(*db->impl, committed);
+}
+
+TEST_F(DbRevertTests, RevertsVacuum_3)
+{
+    auto committed = add_records(*db, 1'000);
+    for (std::size_t i {}; i < 900; ++i) {
+        const auto itr = begin(committed);
+        ASSERT_OK(db->impl->erase(itr->first));
+        committed.erase(itr);
+    }
+    ASSERT_OK(db->impl->commit());
+
+    (void)db->impl->pager->flush({});
+
+    auto uncommitted = add_records(*db, 1'000);
+    for (std::size_t i {}; i < 500; ++i) {
+        const auto itr = begin(uncommitted);
+        ASSERT_OK(db->impl->erase(itr->first));
+        uncommitted.erase(itr);
+    }
+    ASSERT_OK(db->reopen());
+
+    expect_contains_records(*db->impl, committed);
 }
 
 class DbRecoveryTests
@@ -531,7 +592,7 @@ protected:
         get_env().add_interceptor(
             tools::Interceptor {
                 "test/data",
-                tools::Interceptor::READ,
+                tools::Interceptor::Read,
                 [this] {
                     if (counter++ >= GetParam()) {
                         return special_error();
@@ -644,16 +705,16 @@ protected:
 
         switch (GetParam().target) {
         case ErrorTarget::DataRead:
-            get_env().add_interceptor(make_interceptor("test/data", tools::Interceptor::READ));
+            get_env().add_interceptor(make_interceptor("test/data", tools::Interceptor::Read));
             break;
         case ErrorTarget::DataWrite:
-            get_env().add_interceptor(make_interceptor("test/data", tools::Interceptor::WRITE));
+            get_env().add_interceptor(make_interceptor("test/data", tools::Interceptor::Write));
             break;
         case ErrorTarget::WalRead:
-            get_env().add_interceptor(make_interceptor("test/wal", tools::Interceptor::READ));
+            get_env().add_interceptor(make_interceptor("test/wal", tools::Interceptor::Read));
             break;
         case ErrorTarget::WalWrite:
-            get_env().add_interceptor(make_interceptor("test/wal", tools::Interceptor::WRITE));
+            get_env().add_interceptor(make_interceptor("test/wal", tools::Interceptor::Write));
             break;
         }
     }
@@ -1221,7 +1282,7 @@ protected:
 
 TEST_F(CommitFailureTests, WalFlushFailure)
 {
-    QUICK_INTERCEPTOR("test/wal", tools::Interceptor::WRITE);
+    QUICK_INTERCEPTOR("test/wal", tools::Interceptor::Write);
     run_failure_path();
 }
 

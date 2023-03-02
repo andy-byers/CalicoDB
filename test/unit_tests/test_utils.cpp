@@ -668,7 +668,7 @@ class InterceptorTests
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
-    QUICK_INTERCEPTOR("test/data", tools::Interceptor::OPEN);
+    QUICK_INTERCEPTOR("test/data", tools::Interceptor::Open);
 
     Editor *editor;
     assert_special_error(get_env().new_editor("test/data", &editor));
@@ -678,7 +678,7 @@ TEST_F(InterceptorTests, RespectsPrefix)
 
 TEST_F(InterceptorTests, RespectsSyscallType)
 {
-    QUICK_INTERCEPTOR("test/data", tools::Interceptor::WRITE);
+    QUICK_INTERCEPTOR("test/data", tools::Interceptor::Write);
 
     Editor *editor;
     expect_ok(get_env().new_editor("test/data", &editor));

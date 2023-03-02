@@ -339,6 +339,7 @@ auto DBImpl::do_vacuum() -> Status
     if (target.is_root()) {
         return Status::ok();
     }
+    const auto original = target;
     for (;; target.value--) {
         bool vacuumed {};
         CDB_TRY(tree->vacuum_one(target, vacuumed));
@@ -355,7 +356,10 @@ auto DBImpl::do_vacuum() -> Status
     // The recovery routine should truncate the file to match the header page
     // count if necessary.
     CDB_TRY(wal->flush());
-    return pager->truncate(target.value);
+    CDB_TRY(pager->truncate(target.value));
+
+    m_info_log->logv("vacuumed %llu pages", original.value - target.value);
+    return pager->flush();
 }
 
 auto DBImpl::commit() -> Status

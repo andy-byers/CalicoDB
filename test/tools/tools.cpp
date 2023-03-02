@@ -50,38 +50,38 @@ auto DynamicMemory::write_file_at(Memory &memory, Slice in, std::size_t offset) 
 auto MemoryReader::read(char *out, std::size_t &size, std::size_t offset) -> Status
 {
     {
-        TRY_INTERCEPT_FROM(*m_parent, Interceptor::READ, m_path);
+        TRY_INTERCEPT_FROM(*m_parent, Interceptor::Read, m_path);
     }
     return m_parent->read_file_at(*m_mem, out, size, offset);
 }
 
 auto MemoryEditor::read(char *out, std::size_t &size, std::size_t offset) -> Status
 {
-    TRY_INTERCEPT_FROM(*m_parent, Interceptor::READ, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::Read, m_path);
     return m_parent->read_file_at(*m_mem, out, size, offset);
 }
 
 auto MemoryEditor::write(Slice in, std::size_t offset) -> Status
 {
-    TRY_INTERCEPT_FROM(*m_parent, Interceptor::WRITE, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::Write, m_path);
     return m_parent->write_file_at(*m_mem, in, offset);
 }
 
 auto MemoryEditor::sync() -> Status
 {
-    TRY_INTERCEPT_FROM(*m_parent, Interceptor::SYNC, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::Sync, m_path);
     return Status::ok();
 }
 
 auto MemoryLogger::write(Slice in) -> Status
 {
-    TRY_INTERCEPT_FROM(*m_parent, Interceptor::WRITE, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::Write, m_path);
     return m_parent->write_file_at(*m_mem, in, m_mem->buffer.size());
 }
 
 auto MemoryLogger::sync() -> Status
 {
-    TRY_INTERCEPT_FROM(*m_parent, Interceptor::SYNC, m_path);
+    TRY_INTERCEPT_FROM(*m_parent, Interceptor::Sync, m_path);
     return Status::ok();
 }
 
@@ -107,7 +107,7 @@ auto DynamicMemory::remove_directory(const std::string &) -> Status
 auto DynamicMemory::new_reader(const std::string &path, Reader **out) -> Status
 {
     auto &mem = get_memory(path);
-    TRY_INTERCEPT_FROM(*this, Interceptor::OPEN, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::Open, path);
 
     if (mem.created) {
         *out = new MemoryReader {path, *this, mem};
@@ -119,7 +119,7 @@ auto DynamicMemory::new_reader(const std::string &path, Reader **out) -> Status
 auto DynamicMemory::new_editor(const std::string &path, Editor **out) -> Status
 {
     auto &mem = get_memory(path);
-    TRY_INTERCEPT_FROM(*this, Interceptor::OPEN, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::Open, path);
 
     if (!mem.created) {
         mem.buffer.clear();
@@ -132,7 +132,7 @@ auto DynamicMemory::new_editor(const std::string &path, Editor **out) -> Status
 auto DynamicMemory::new_logger(const std::string &path, Logger **out) -> Status
 {
     auto &mem = get_memory(path);
-    TRY_INTERCEPT_FROM(*this, Interceptor::OPEN, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::Open, path);
 
     if (!mem.created) {
         mem.buffer.clear();
@@ -151,7 +151,7 @@ auto DynamicMemory::new_info_logger(const std::string &, InfoLogger **out) -> St
 auto DynamicMemory::remove_file(const std::string &path) -> Status
 {
     auto &mem = get_memory(path);
-    TRY_INTERCEPT_FROM(*this, Interceptor::UNLINK, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::Unlink, path);
 
     auto itr = m_memory.find(path);
     if (itr == end(m_memory)) {

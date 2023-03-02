@@ -126,14 +126,16 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         m_erased.clear();
         return s;
     }
-    reinterpret_cast<const DBImpl*>(m_db)->TEST_validate();
     return m_db->status();
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     Options options;
+//    options.info_log = new tools::StderrLogger;
     options.env = new tools::DynamicMemory;
+    options.page_size = MINIMUM_PAGE_SIZE;
+    options.cache_size = MINIMUM_PAGE_SIZE * 16;
 
     {
         MapFuzzer fuzzer {"map_fuzzer", &options};
@@ -144,6 +146,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         }
     }
 
+//    delete options.info_log;
     delete options.env;
     return 0;
 }

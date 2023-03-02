@@ -401,20 +401,23 @@ auto BPlusTreeInternal::split_non_root(Node right, Node &out) -> Status
             out);
     }
 
-    // Fix the overflow. "left" is empty, so this should always be possible.
+    /* Fix the overflow. The overflow cell should fit in either "left" or "right". This routine
+     * works by transferring cells, one-by-one, from "right" to "left", and trying to insert the
+     * overflow cell. Where the overflow cell is written depends on how many cells we have already
+     * transferred. If "overflow_index" is 0, we definitely have enough room in "left". Otherwise,
+     * we transfer a cell and try to write the overflow cell to "right". If this isn't possible,
+     * then the left node must have enough room, since the maximum cell size is limited to roughly
+     * 1/4 of a page. If "right" is more than 3/4 full, then "left" must be less than 1/4 full, so
+     * it must be able to accept the overflow cell without overflowing.
+     */
     for (std::size_t i {}, n = header.cell_count; i < n; ++i) {
+        if (i == overflow_index) {
+            CDB_TRY(insert_cell(left, left.header.cell_count, overflow));
+            break;
+        }
         CDB_TRY(transfer_left(left, right));
 
-        if (i == overflow_index) {
-            // We must decide where to put the overflow cell.
-            if (usable_space(right) < usable_space(left)) {
-                CDB_TRY(insert_cell(left, left.header.cell_count - 1, overflow));
-            } else {
-                CDB_TRY(insert_cell(right, 0, overflow));
-            }
-            break;
-        } else if (usable_space(right) >= overflow.size + 2) {
-            // Overflow cell goes in the right node.
+        if (usable_space(right) >= overflow.size + 2) {
             CDB_TRY(insert_cell(right, overflow_index - i - 1, overflow));
             break;
         }
@@ -1253,6 +1256,7 @@ class BPlusTreeValidator
 {
 public:
     using Callback = std::function<void(Node &, std::size_t)>;
+    using PageCallback = std::function<void(const Page &)>;
 
     explicit BPlusTreeValidator(BPlusTree &tree)
         : m_tree {&tree}
@@ -1325,22 +1329,14 @@ public:
         CHECK_TRUE(!head.is_null());
         Page page;
         CHECK_OK(pager.acquire(head, page));
-        Id parent_id;
-        CHECK_OK(internal.find_parent_id(page.id(), parent_id));
-        CHECK_TRUE(parent_id == Id::null());
 
-        for (;;) {
-            const auto next_id = read_next_id(page);
-            if (next_id.is_null()) {
-                break;
-            }
+        Id parent_id;
+        traverse_chain(std::move(page), [&](const auto &link) {
             Id found_id;
-            CHECK_OK(internal.find_parent_id(next_id, found_id));
-            CHECK_TRUE(found_id == page.id());
-            pager.release(std::move(page));
-            CHECK_OK(pager.acquire(next_id, page));
-        }
-        pager.release(std::move(page));
+            CHECK_OK(internal.find_parent_id(link.id(), found_id));
+            CHECK_TRUE(found_id == parent_id);
+            parent_id = link.id();
+        });
     }
 
     auto validate_overflow(Id overflow_id, Id parent_id, std::size_t overflow_size) -> void
@@ -1348,27 +1344,19 @@ public:
         BPlusTreeInternal internal {*m_tree};
         auto &pager = *m_tree->m_pager;
 
-        Id found_id;
-        CHECK_OK(internal.find_parent_id(overflow_id, found_id));
-        CHECK_TRUE(found_id == parent_id);
-
         Page page;
         CHECK_OK(pager.acquire(overflow_id, page));
 
-        for (std::size_t n {}; n < overflow_size;) {
-            const Id next_id {get_u64(page.data() + sizeof(Lsn))};
+        Id last_id;
+        std::size_t n {};
+        traverse_chain(std::move(page), [&](const auto &link) {
+            Id found_id;
+            CHECK_OK(internal.find_parent_id(link.id(), found_id));
+            CHECK_TRUE(found_id == (n ? last_id : parent_id));
             n += pager.page_size() - sizeof(Lsn) - sizeof(Id);
-            if (n >= overflow_size) {
-                CHECK_TRUE(next_id.is_null());
-                break;
-            }
-            CHECK_OK(internal.find_parent_id(next_id, found_id));
-            CHECK_TRUE(found_id == page.id());
-
-            pager.release(std::move(page));
-            CHECK_OK(pager.acquire(next_id, page));
-        }
-        pager.release(std::move(page));
+            last_id = link.id();
+        });
+        CHECK_TRUE(n >= overflow_size);
     }
 
     auto validate_siblings() -> void
@@ -1428,7 +1416,7 @@ public:
 
             internal.release(std::move(child));
         };
-        traverse_inorder([f = std::move(check)](Node &node, std::size_t index) -> void {
+        traverse_inorder([f = std::move(check)](const auto &node, auto index) -> void {
             const auto count = node.header.cell_count;
             CHECK_TRUE(index < count);
 
@@ -1466,6 +1454,20 @@ private:
             }
         }
         internal.release(std::move(node));
+    }
+
+    auto traverse_chain(Page page, const PageCallback &callback) -> void
+    {
+        for (; ; ) {
+            callback(page);
+
+            const auto next_id = read_next_id(page);
+            m_tree->m_pager->release(std::move(page));
+            if (next_id.is_null()) {
+                break;
+            }
+            CHECK_OK(m_tree->m_pager->acquire(next_id, page));
+        }
     }
 
     auto add_to_level(PrintData &data, const std::string &message, std::size_t target) -> void

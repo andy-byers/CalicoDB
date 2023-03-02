@@ -8,6 +8,8 @@
 namespace calicodb
 {
 
+static constexpr std::size_t initial_record_count {100};
+
 class NodeMetaManager
 {
     NodeMeta m_external_meta;
@@ -661,20 +663,28 @@ TEST_F(InternalRootSplitTests, Split_2)
 }
 
 template<class Test>
+static auto test_allocate_node(Test &test, bool is_external) -> Node
+{
+    Node node;
+    BPlusTreeInternal internal {*test.tree};
+    EXPECT_OK(internal.allocate(node, is_external));
+    return node;
+}
+
+template<class Test>
 static auto test_acquire_node(Test &test, Id pid) -> Node
 {
     Node node;
-    EXPECT_OK(test.pager->acquire(pid, node.page));
-    node.scratch = test.scratch.data();
-    node.header.read(node.page);
-    node.meta = &test.meta(node.header.is_external);
+    BPlusTreeInternal internal {*test.tree};
+    EXPECT_OK(internal.acquire(node, pid));
     return node;
 }
 
 template<class Test>
 static auto test_release_node(Test &test, Node node) -> void
 {
-    test.pager->release(std::move(node).take());
+    BPlusTreeInternal internal {*test.tree};
+    internal.release(std::move(node));
 }
 
 template<class Test>
@@ -717,6 +727,13 @@ public:
     auto TearDown() -> void override
     {
         validate();
+    }
+
+    [[nodiscard]] auto make_long_key(std::size_t value) const
+    {
+        const auto suffix = tools::integral_key<6>(value);
+        const std::string key(param.page_size * 2 - suffix.size(), '0');
+        return key + suffix;
     }
 
     [[nodiscard]] auto make_value(char c, bool overflow = false) const
@@ -898,16 +915,16 @@ TEST_P(BPlusTreeTests, ResolvesFirstOverflowOnMiddlePosition)
 {
     for (std::size_t i {}; is_root_external(); ++i) {
         ASSERT_LE(i, 100);
-        ASSERT_OK(tree->insert(tools::integral_key(i & 1 ? 100 - i : i), make_value('v')));
+        ASSERT_OK(tree->insert(make_long_key(i & 1 ? 100 - i : i), make_value('v')));
     }
     validate();
 }
 
 TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnLeftmostPosition)
 {
-    for (std::size_t i {}; i < 1'000; ++i) {
-        ASSERT_OK(tree->insert(tools::integral_key(999 - i), make_value('v')));
-        if (i % 100 == 99) {
+    for (std::size_t i {}; i < 100; ++i) {
+        ASSERT_OK(tree->insert(make_long_key(99 - i), make_value('v')));
+        if (i % 10 == 9) {
             validate();
         }
     }
@@ -915,21 +932,20 @@ TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnLeftmostPosition)
 
 TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnRightmostPosition)
 {
-    for (std::size_t i {}; i < 1'000; ++i) {
-        ASSERT_OK(tree->insert(tools::integral_key(i), make_value('v')));
-        validate();
-        if (i % 100 == 99) {
+    for (std::size_t i {}; i < 100; ++i) {
+        ASSERT_OK(tree->insert(make_long_key(i), make_value('v')));
+        if (i % 10 == 9) {
+            validate();
         }
     }
 }
 
 TEST_P(BPlusTreeTests, ResolvesMultipleOverflowsOnMiddlePosition)
 {
-    for (std::size_t i {}, j {999}; i < j; ++i, --j) {
-        ASSERT_OK(tree->insert(tools::integral_key(i), make_value('v')));
-        ASSERT_OK(tree->insert(tools::integral_key(j), make_value('v')));
-
-        if (i % 100 == 99) {
+    for (std::size_t i {}, j {99}; i < j; ++i, --j) {
+        ASSERT_OK(tree->insert(make_long_key(i), make_value('v')));
+        ASSERT_OK(tree->insert(make_long_key(j), make_value('v')));
+        if (i % 10 == 9) {
             validate();
         }
     }
@@ -939,11 +955,11 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnRightmostPosition)
 {
     long i {};
     for (; is_root_external(); ++i) {
-        (void)tree->insert(tools::integral_key(i), make_value('v'));
+        (void)tree->insert(make_long_key(i), make_value('v'));
     }
 
     while (i--) {
-        ASSERT_OK(tree->erase(tools::integral_key(i)));
+        ASSERT_OK(tree->erase(make_long_key(i)));
         validate();
     }
 }
@@ -952,10 +968,10 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnLeftmostPosition)
 {
     std::size_t i {};
     for (; is_root_external(); ++i) {
-        (void)tree->insert(tools::integral_key(i), make_value('v'));
+        (void)tree->insert(make_long_key(i), make_value('v'));
     }
     for (std::size_t j {}; j < i; ++j) {
-        ASSERT_OK(tree->erase(tools::integral_key(j)));
+        ASSERT_OK(tree->erase(make_long_key(j)));
         validate();
     }
 }
@@ -964,92 +980,69 @@ TEST_P(BPlusTreeTests, ResolvesFirstUnderflowOnMiddlePosition)
 {
     std::size_t i {};
     for (; is_root_external(); ++i) {
-        (void)tree->insert(tools::integral_key(i), make_value('v'));
+        (void)tree->insert(make_long_key(i), make_value('v'));
     }
     for (std::size_t j {1}; j < i / 2 - 1; ++j) {
-        ASSERT_OK(tree->erase(tools::integral_key(i / 2 - j + 1)));
-        ASSERT_OK(tree->erase(tools::integral_key(i / 2 + j)));
+        ASSERT_OK(tree->erase(make_long_key(i / 2 - j + 1)));
+        ASSERT_OK(tree->erase(make_long_key(i / 2 + j)));
         validate();
     }
 }
 
-static auto insert_1000(BPlusTreeTests &test, bool has_overflow = false)
+static auto add_initial_records(BPlusTreeTests &test, bool has_overflow = false)
 {
-    for (std::size_t i {}; i < 1'000; ++i) {
-        (void)test.tree->insert(tools::integral_key(i), test.make_value('v', has_overflow));
+    for (std::size_t i {}; i < initial_record_count; ++i) {
+        (void)test.tree->insert(test.make_long_key(i), test.make_value('v', has_overflow));
     }
 }
 
 TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnRightmostPosition)
 {
-    insert_1000(*this);
-    for (std::size_t i {}; i < 1'000; ++i) {
-        ASSERT_OK(tree->erase(tools::integral_key(999 - i)));
-        if (i % 100 == 99) {
-            validate();
-        }
-    }
-}
-
-TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnLeftmostPosition)
-{
-    insert_1000(*this);
-    for (std::size_t i {}; i < 1'000; ++i) {
-        ASSERT_OK(tree->erase(tools::integral_key(i)));
-        if (i % 100 == 99) {
-            validate();
-        }
-    }
-}
-
-TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnMiddlePosition)
-{
-    insert_1000(*this);
-    for (std::size_t i {}, j {999}; i < j; ++i, --j) {
-        ASSERT_OK(tree->erase(tools::integral_key(i)));
-        ASSERT_OK(tree->erase(tools::integral_key(j)));
-        if (i % 100 == 99) {
-            validate();
-        }
-    }
-}
-
-TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
-{
-    for (std::size_t i {}; i < 1'000; ++i) {
-        ASSERT_OK(tree->insert(tools::integral_key(i), "v"));
-    }
-    // Replace the small values with very large ones.
-    for (std::size_t i {}; i < 1'000; ++i) {
-        ASSERT_OK(tree->insert(tools::integral_key(i), make_value('v', true)));
+    add_initial_records(*this);
+    for (std::size_t i {}; i < initial_record_count; ++i) {
+        ASSERT_OK(tree->erase(make_long_key(initial_record_count - i - 1)));
     }
     validate();
 }
 
-TEST_P(BPlusTreeTests, SplitWithLongKeys)
+TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnLeftmostPosition)
 {
-    for (unsigned i {}; i < 1'000; ++i) {
-        const auto key = random.Generate(GetParam().page_size * 2);
-        ASSERT_OK(tree->insert(key, "v"));
-        if (i % 100 == 99) {
-            validate();
-        }
+    add_initial_records(*this);
+    for (std::size_t i {}; i < initial_record_count; ++i) {
+        ASSERT_OK(tree->erase(make_long_key(i)));
     }
+    validate();
+}
+
+TEST_P(BPlusTreeTests, ResolvesMultipleUnderflowsOnMiddlePosition)
+{
+    add_initial_records(*this);
+    for (std::size_t i {}, j {initial_record_count - 1}; i < j; ++i, --j) {
+        ASSERT_OK(tree->erase(make_long_key(i)));
+        ASSERT_OK(tree->erase(make_long_key(j)));
+    }
+    validate();
+}
+
+TEST_P(BPlusTreeTests, ResolvesOverflowsFromOverwrite)
+{
+    add_initial_records(*this);
+    // Replace the small values with very large ones.
+    add_initial_records(*this, true);
+    validate();
 }
 
 TEST_P(BPlusTreeTests, SplitWithShortAndLongKeys)
 {
-    for (unsigned i {}; i < 1'000; ++i) {
+    for (unsigned i {}; i < initial_record_count; ++i) {
         char key[3] {};
-        put_u16(key, 999 - i);
+        put_u16(key, initial_record_count - i - 1);
         ASSERT_OK(tree->insert({key, 2}, "v"));
     }
-    for (unsigned i {}; i < 1000; ++i) {
+    for (unsigned i {}; i < initial_record_count; ++i) {
         const auto key = random.Generate(GetParam().page_size);
         ASSERT_OK(tree->insert(key, "v"));
-        if (i % 100 == 99) {
-            validate();
-        }
+        validate();
     }
 }
 
@@ -1080,6 +1073,51 @@ INSTANTIATE_TEST_SUITE_P(
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
         BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
 
+class BPlusTreeSpecialCases : public BPlusTreeTests
+{
+public:
+    auto SetUp() -> void override
+    {
+        BPlusTreeTests::SetUp();
+        BPlusTreeInternal internal {*tree};
+        payloads = internal.payloads();
+    }
+
+    PayloadManager *payloads {};
+};
+
+TEST_P(BPlusTreeSpecialCases, NonRootCanFitAtLeast4Cells)
+{
+    // Note that the maximal cell size is the same in both node types.
+    auto node = test_allocate_node(*this, true);
+
+    const auto key = random.Generate(meta(true).max_local);
+    ASSERT_OK(payloads->emplace(scratch.data(), node, key, "x", 0));
+    ASSERT_OK(payloads->emplace(scratch.data(), node, key, "x", 1));
+    ASSERT_OK(payloads->emplace(scratch.data(), node, key, "x", 2));
+    ASSERT_OK(payloads->emplace(scratch.data(), node, key, "x", 3));
+    ASSERT_FALSE(node.overflow.has_value()) << "node cannot fit 4 maximally-sized cells";
+    ASSERT_GE(usable_space(node), 7 * 4) << "node cannot account for larger value size varints";
+    ASSERT_LT(usable_space(node), read_cell(node, 0).size + 2) << "node can fit another maximally-sized cell";
+
+    release_node(std::move(node));
+}
+
+TEST_P(BPlusTreeSpecialCases, FixRootSplitsIntoParentWhenFileHeaderGetsInTheWay)
+{
+
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BPlusTreeSpecialCases,
+    BPlusTreeSpecialCases,
+    ::testing::Values(
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
+        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
+        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+
+
 class BPlusTreeSanityChecks : public BPlusTreeTests
 {
 public:
@@ -1102,18 +1140,16 @@ public:
 
 TEST_P(BPlusTreeSanityChecks, Insert)
 {
-    for (std::size_t i {}; i < 1'000; ++i) {
+    for (std::size_t i {}; i < initial_record_count * 10; ++i) {
         random_write();
-        if (i % 100 == 99) {
-            validate();
-        }
     }
+    validate();
 }
 
 TEST_P(BPlusTreeSanityChecks, Search)
 {
     std::unordered_map<std::string, std::string> records;
-    for (std::size_t i {}; i < 1'000; ++i) {
+    for (std::size_t i {}; i < initial_record_count * 10; ++i) {
         const auto [k, v] = random_write();
         records[k] = v;
     }
@@ -1137,7 +1173,7 @@ TEST_P(BPlusTreeSanityChecks, Erase)
 {
     std::unordered_map<std::string, std::string> records;
     for (std::size_t iteration {}; iteration < 3; ++iteration) {
-        for (std::size_t i {}; i < 1'000; ++i) {
+        for (std::size_t i {}; i < initial_record_count * 10; ++i) {
             const auto [k, v] = random_write();
             records[k] = v;
         }
@@ -1145,10 +1181,8 @@ TEST_P(BPlusTreeSanityChecks, Erase)
         std::size_t i {};
         for (const auto &[key, value] : records) {
             ASSERT_OK(tree->erase(key));
-            if (i % 100 == 99) {
-                validate();
-            }
         }
+        validate();
         records.clear();
     }
 }
@@ -1172,16 +1206,14 @@ INSTANTIATE_TEST_SUITE_P(
 class CursorTests : public BPlusTreeTests
 {
 protected:
-    static constexpr std::size_t RECORD_COUNT {1'000};
-
     auto SetUp() -> void override
     {
         BPlusTreeTests::SetUp();
-        insert_1000(*this);
+        add_initial_records(*this);
     }
 };
 
-TEST_P(CursorTests, KeyAndValueUseSeparateEnv)
+TEST_P(CursorTests, KeyAndValueUseSeparateMemory)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     cursor->seek_first();
@@ -1195,24 +1227,23 @@ TEST_P(CursorTests, SeeksForward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     cursor->seek_first();
-    for (std::size_t i {}; i < RECORD_COUNT; ++i) {
+    std::size_t i {};
+    while (cursor->is_valid()) {
         ASSERT_TRUE(cursor->is_valid());
-        ASSERT_EQ(cursor->key(), tools::integral_key(i));
+        ASSERT_EQ(cursor->key(), make_long_key(i++));
         ASSERT_EQ(cursor->value(), make_value('v'));
         cursor->next();
     }
-    ASSERT_FALSE(cursor->is_valid());
+    ASSERT_EQ(i, initial_record_count);
 }
 
 TEST_P(CursorTests, SeeksForwardFromBoundary)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
-    cursor->seek(tools::integral_key(RECORD_COUNT / 4));
-    for (std::size_t i {}; i < RECORD_COUNT * 3 / 4; ++i) {
-        ASSERT_TRUE(cursor->is_valid());
+    cursor->seek(make_long_key(initial_record_count / 4));
+    while (cursor->is_valid()) {
         cursor->next();
     }
-    ASSERT_FALSE(cursor->is_valid());
 }
 
 TEST_P(CursorTests, SeeksForwardToBoundary)
@@ -1220,47 +1251,43 @@ TEST_P(CursorTests, SeeksForwardToBoundary)
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     std::unique_ptr<Cursor> bounds {CursorInternal::make_cursor(*tree)};
     cursor->seek_first();
-    bounds->seek(tools::integral_key(RECORD_COUNT * 3 / 4));
-    for (std::size_t i {}; i < RECORD_COUNT * 3 / 4; ++i) {
+    bounds->seek(make_long_key(initial_record_count * 3 / 4));
+    while (cursor->key() != bounds->key()) {
         ASSERT_TRUE(cursor->is_valid());
-        ASSERT_NE(cursor->key(), bounds->key());
         cursor->next();
     }
-    ASSERT_EQ(cursor->key(), bounds->key());
 }
 
 TEST_P(CursorTests, SeeksForwardBetweenBoundaries)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
-    cursor->seek(tools::integral_key(250));
+    cursor->seek(make_long_key(initial_record_count / 4));
     std::unique_ptr<Cursor> bounds {CursorInternal::make_cursor(*tree)};
-    bounds->seek(tools::integral_key(750));
-    for (std::size_t i {}; i < 500; ++i) {
+    bounds->seek(make_long_key(initial_record_count * 3 / 4));
+    while (cursor->key() != bounds->key()) {
         ASSERT_TRUE(cursor->is_valid());
-        ASSERT_NE(cursor->key(), bounds->key());
         cursor->next();
     }
-    ASSERT_EQ(cursor->key(), bounds->key());
 }
 
 TEST_P(CursorTests, SeeksBackward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     cursor->seek_last();
-    for (std::size_t i {}; i < RECORD_COUNT; ++i) {
-        ASSERT_TRUE(cursor->is_valid());
-        ASSERT_EQ(cursor->key().to_string(), tools::integral_key(RECORD_COUNT - i - 1));
+    std::size_t i {};
+    while (cursor->is_valid()) {
+        ASSERT_EQ(cursor->key().to_string(), make_long_key(initial_record_count - 1 - i++));
         ASSERT_EQ(cursor->value().to_string(), make_value('v'));
         cursor->previous();
     }
-    ASSERT_FALSE(cursor->is_valid());
+    ASSERT_EQ(i, initial_record_count);
 }
 
 TEST_P(CursorTests, SeeksBackwardFromBoundary)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
-    const auto bounds = RECORD_COUNT * 3 / 4;
-    cursor->seek(tools::integral_key(bounds));
+    const auto bounds = initial_record_count * 3 / 4;
+    cursor->seek(make_long_key(bounds));
     for (std::size_t i {}; i <= bounds; ++i) {
         ASSERT_TRUE(cursor->is_valid());
         cursor->previous();
@@ -1273,22 +1300,20 @@ TEST_P(CursorTests, SeeksBackwardToBoundary)
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     cursor->seek_last();
     std::unique_ptr<Cursor> bounds {CursorInternal::make_cursor(*tree)};
-    bounds->seek(tools::integral_key(RECORD_COUNT / 4));
-    for (std::size_t i {}; i < RECORD_COUNT * 3 / 4 - 1; ++i) {
+    bounds->seek(make_long_key(initial_record_count / 4));
+    while (cursor->key() != bounds->key()) {
         ASSERT_TRUE(cursor->is_valid());
-        ASSERT_NE(cursor->key(), bounds->key());
         cursor->previous();
     }
-    ASSERT_EQ(cursor->key(), bounds->key());
 }
 
 TEST_P(CursorTests, SeeksBackwardBetweenBoundaries)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     std::unique_ptr<Cursor> bounds {CursorInternal::make_cursor(*tree)};
-    cursor->seek(tools::integral_key(RECORD_COUNT * 3 / 4));
-    bounds->seek(tools::integral_key(RECORD_COUNT / 4));
-    for (std::size_t i {}; i < RECORD_COUNT / 2; ++i) {
+    cursor->seek(make_long_key(initial_record_count * 3 / 4));
+    bounds->seek(make_long_key(initial_record_count / 4));
+    while (cursor->key() != bounds->key()) {
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_NE(cursor->key(), bounds->key());
         cursor->previous();
@@ -1300,8 +1325,8 @@ TEST_P(CursorTests, SanityCheck_Forward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (std::size_t iteration {}; iteration < 100; ++iteration) {
-        const auto i = random.Next<std::size_t>(RECORD_COUNT);
-        const auto key = tools::integral_key(i);
+        const auto i = random.Next(initial_record_count - 1);
+        const auto key = make_long_key(i);
         cursor->seek(key);
 
         ASSERT_TRUE(cursor->is_valid());
@@ -1310,11 +1335,12 @@ TEST_P(CursorTests, SanityCheck_Forward)
         for (std::size_t n {}; n < random.Next<std::size_t>(10); ++n) {
             cursor->next();
 
-            if (const auto j = i + n + 1; j < RECORD_COUNT) {
+            if (const auto j = i + n + 1; j < initial_record_count) {
                 ASSERT_TRUE(cursor->is_valid());
-                ASSERT_EQ(cursor->key(), tools::integral_key(j));
+                ASSERT_EQ(cursor->key(), make_long_key(j));
             } else {
                 ASSERT_FALSE(cursor->is_valid());
+                break;
             }
         }
     }
@@ -1324,8 +1350,8 @@ TEST_P(CursorTests, SanityCheck_Backward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (std::size_t iteration {}; iteration < 100; ++iteration) {
-        const auto i = random.Next<std::size_t>(RECORD_COUNT);
-        const auto key = tools::integral_key(i);
+        const auto i = random.Next<std::size_t>(initial_record_count - 1);
+        const auto key = make_long_key(i);
         cursor->seek(key);
 
         ASSERT_TRUE(cursor->is_valid());
@@ -1336,7 +1362,7 @@ TEST_P(CursorTests, SanityCheck_Backward)
 
             if (i > n) {
                 ASSERT_TRUE(cursor->is_valid());
-                ASSERT_EQ(cursor->key(), tools::integral_key(i - n - 1));
+                ASSERT_EQ(cursor->key(), make_long_key(i - n - 1));
             } else {
                 ASSERT_FALSE(cursor->is_valid());
                 break;

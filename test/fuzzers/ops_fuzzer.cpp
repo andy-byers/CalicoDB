@@ -109,6 +109,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
 {
     Options options;
     options.env = new tools::DynamicMemory;
+    options.page_size = MINIMUM_PAGE_SIZE;
+    options.cache_size = MINIMUM_PAGE_SIZE * 16;
+
     {
         OpsFuzzer fuzzer {"ops_fuzzer", &options};
 
