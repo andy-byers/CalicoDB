@@ -47,7 +47,7 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
 }
 
 template <class Writer>
-constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer, const Slice &message) -> void
+constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer, const Slice &message) -> void
 {
     constexpr std::size_t num_chunks {20};
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
@@ -70,7 +70,7 @@ constexpr auto write_out_randomly(Tools::RandomGenerator &random, Writer &writer
 }
 
 template <class Reader>
-[[nodiscard]] auto read_back_randomly(Tools::RandomGenerator &random, Reader &reader, std::size_t size) -> std::string
+[[nodiscard]] auto read_back_randomly(tools::RandomGenerator &random, Reader &reader, std::size_t size) -> std::string
 {
     static constexpr std::size_t num_chunks {20};
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
@@ -110,7 +110,7 @@ public:
     ~FileTests() override = default;
 
     std::string filename;
-    Tools::RandomGenerator random;
+    tools::RandomGenerator random;
 };
 
 class PosixInfoLoggerTests : public FileTests
@@ -232,7 +232,7 @@ public:
     ~EnvPosixTests() override = default;
 
     std::string filename;
-    Tools::RandomGenerator random;
+    tools::RandomGenerator random;
 };
 
 class DynamicEnvTests
@@ -248,7 +248,7 @@ public:
     ~DynamicEnvTests() override = default;
 
     std::string filename;
-    Tools::RandomGenerator random;
+    tools::RandomGenerator random;
 };
 
 TEST_F(DynamicEnvTests, ReaderCannotCreateFile)

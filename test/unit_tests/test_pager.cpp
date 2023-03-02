@@ -35,7 +35,7 @@ public:
         insert_delta(deltas, {offset, size});
     }
 
-    Tools::RandomGenerator random;
+    tools::RandomGenerator random;
 };
 
 TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)

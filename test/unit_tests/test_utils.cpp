@@ -22,7 +22,7 @@ TEST(TestUtils, ExpectationDeathTest)
 
 TEST(TestUtils, EncodingIsConsistent)
 {
-    Tools::RandomGenerator random;
+    tools::RandomGenerator random;
     const auto u16 = random.Next<std::uint16_t>(std::uint16_t(-1));
     const auto u32 = random.Next<std::uint32_t>(std::uint32_t(-1));
     const auto u64 = random.Next<std::uint64_t>(std::uint64_t(-1));
@@ -261,14 +261,14 @@ TEST(NonPrintableSliceTests, NullcharsAreEqual)
 {
     const std::string u {"\x00", 1};
     const std::string v {"\x00", 1};
-    ASSERT_EQ(compare_three_way(Slice {u}, Slice {v}), Comparison::Equal);
+    ASSERT_EQ(Slice {u}.compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullchars)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::Less);
+    ASSERT_LT(Slice {u}.compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, charsAreUnsignedWhenCompared)
@@ -281,7 +281,7 @@ TEST(NonPrintableSliceTests, charsAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_EQ(compare_three_way(Slice {u}, v), Comparison::Less);
+    ASSERT_LT(Slice {u}.compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, Conversions)
@@ -502,12 +502,12 @@ TEST(StatusTests, MessageIsNullTerminated)
 
 TEST(StatusTests, ExpectedStatusNames)
 {
-    ASSERT_EQ(get_status_name(Status::ok()), "ok");
-    ASSERT_EQ(get_status_name(Status::not_found("")), "not found");
-    ASSERT_EQ(get_status_name(Status::invalid_argument("")), "invalid argument");
-    ASSERT_EQ(get_status_name(Status::corruption("")), "corruption");
-    ASSERT_EQ(get_status_name(Status::logic_error("")), "logic error");
-    ASSERT_EQ(get_status_name(Status::system_error("")), "system error");
+    ASSERT_EQ(get_status_name(Status::ok()), std::string {"ok"});
+    ASSERT_EQ(get_status_name(Status::not_found("")), std::string {"not found"});
+    ASSERT_EQ(get_status_name(Status::invalid_argument("")), std::string {"invalid argument"});
+    ASSERT_EQ(get_status_name(Status::corruption("")), std::string {"corruption"});
+    ASSERT_EQ(get_status_name(Status::logic_error("")), std::string {"logic error"});
+    ASSERT_EQ(get_status_name(Status::system_error("")), std::string {"system error"});
 }
 
 TEST(MiscTests, StringsUsesSizeParameterForComparisons)
@@ -668,7 +668,7 @@ class InterceptorTests
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
-    QUICK_INTERCEPTOR("test/data", Tools::Interceptor::OPEN);
+    QUICK_INTERCEPTOR("test/data", tools::Interceptor::Open);
 
     Editor *editor;
     assert_special_error(get_env().new_editor("test/data", &editor));
@@ -678,7 +678,7 @@ TEST_F(InterceptorTests, RespectsPrefix)
 
 TEST_F(InterceptorTests, RespectsSyscallType)
 {
-    QUICK_INTERCEPTOR("test/data", Tools::Interceptor::WRITE);
+    QUICK_INTERCEPTOR("test/data", tools::Interceptor::Write);
 
     Editor *editor;
     expect_ok(get_env().new_editor("test/data", &editor));

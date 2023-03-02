@@ -114,7 +114,7 @@ public:
         return result;
     }
 
-    Tools::RandomGenerator random {1024 * 1024 * 4};
+    tools::RandomGenerator random {1024 * 1024 * 4};
     Options db_options;
     std::string db_prefix;
     std::string tail;
@@ -230,7 +230,7 @@ TEST_F(RecoveryTests, SanityCheck)
 
 class RecoverySanityCheck
     : public RecoveryTestHarness,
-      public testing::TestWithParam<std::tuple<std::string, Tools::Interceptor::Type, int>>
+      public testing::TestWithParam<std::tuple<std::string, tools::Interceptor::Type, int>>
 {
 public:
     RecoverySanityCheck()
@@ -238,7 +238,7 @@ public:
     {
         open();
 
-        Tools::RandomGenerator random {1'024 * 1'024 * 8};
+        tools::RandomGenerator random {1'024 * 1'024 * 8};
         const std::size_t N {5'000};
 
         for (std::size_t i {}; i < N; ++i) {
@@ -277,7 +277,7 @@ public:
     }
 
     std::string interceptor_prefix;
-    Tools::Interceptor::Type interceptor_type {std::get<1>(GetParam())};
+    tools::Interceptor::Type interceptor_type {std::get<1>(GetParam())};
     int interceptor_count {std::get<2>(GetParam())};
     std::map<std::string, std::string> map;
 };
@@ -324,19 +324,19 @@ INSTANTIATE_TEST_SUITE_P(
     RecoverySanityCheck,
     RecoverySanityCheck,
     ::testing::Values(
-        std::make_tuple("data", Tools::Interceptor::READ, 0),
-        std::make_tuple("data", Tools::Interceptor::READ, 1),
-        std::make_tuple("data", Tools::Interceptor::READ, 5),
-        std::make_tuple("data", Tools::Interceptor::WRITE, 0),
-        std::make_tuple("data", Tools::Interceptor::WRITE, 1),
-        std::make_tuple("data", Tools::Interceptor::WRITE, 5),
-        std::make_tuple("wal-", Tools::Interceptor::WRITE, 0),
-        std::make_tuple("wal-", Tools::Interceptor::WRITE, 1),
-        std::make_tuple("wal-", Tools::Interceptor::WRITE, 5),
+        std::make_tuple("data", tools::Interceptor::Read, 0),
+        std::make_tuple("data", tools::Interceptor::Read, 1),
+        std::make_tuple("data", tools::Interceptor::Read, 5),
+        std::make_tuple("data", tools::Interceptor::Write, 0),
+        std::make_tuple("data", tools::Interceptor::Write, 1),
+        std::make_tuple("data", tools::Interceptor::Write, 5),
+        std::make_tuple("wal-", tools::Interceptor::Write, 0),
+        std::make_tuple("wal-", tools::Interceptor::Write, 1),
+        std::make_tuple("wal-", tools::Interceptor::Write, 5),
         //        std::make_tuple("wal-", Tools::Interceptor::SYNC, 0), TODO: May need separate testing
-        std::make_tuple("wal-", Tools::Interceptor::OPEN, 0),
-        std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
-        std::make_tuple("wal-", Tools::Interceptor::OPEN, 5)));
+        std::make_tuple("wal-", tools::Interceptor::Open, 0),
+        std::make_tuple("wal-", tools::Interceptor::Open, 1),
+        std::make_tuple("wal-", tools::Interceptor::Open, 5)));
 
 class OpenErrorTests : public RecoverySanityCheck
 {
@@ -366,14 +366,14 @@ INSTANTIATE_TEST_SUITE_P(
     OpenErrorTests,
     OpenErrorTests,
     ::testing::Values(
-        std::make_tuple("data", Tools::Interceptor::READ, 0),
-        std::make_tuple("data", Tools::Interceptor::READ, 1),
-        std::make_tuple("data", Tools::Interceptor::READ, 5),
-        std::make_tuple("data", Tools::Interceptor::WRITE, 0),
-        std::make_tuple("data", Tools::Interceptor::WRITE, 1),
-        std::make_tuple("data", Tools::Interceptor::WRITE, 5),
-        std::make_tuple("wal-", Tools::Interceptor::OPEN, 0),
-        std::make_tuple("wal-", Tools::Interceptor::OPEN, 1),
-        std::make_tuple("wal-", Tools::Interceptor::OPEN, 5)));
+        std::make_tuple("data", tools::Interceptor::Read, 0),
+        std::make_tuple("data", tools::Interceptor::Read, 1),
+        std::make_tuple("data", tools::Interceptor::Read, 5),
+        std::make_tuple("data", tools::Interceptor::Write, 0),
+        std::make_tuple("data", tools::Interceptor::Write, 1),
+        std::make_tuple("data", tools::Interceptor::Write, 5),
+        std::make_tuple("wal-", tools::Interceptor::Open, 0),
+        std::make_tuple("wal-", tools::Interceptor::Open, 1),
+        std::make_tuple("wal-", tools::Interceptor::Open, 5)));
 
 } // namespace calicodb

@@ -32,10 +32,10 @@ class PointerMap
 
 public:
     enum Type : char {
-        NODE = 1,
-        OVERFLOW_HEAD,
-        OVERFLOW_LINK,
-        FREELIST_LINK,
+        Node = 1,
+        OverflowHead,
+        OverflowLink,
+        FreelistLink,
     };
 
     struct Entry {
@@ -63,7 +63,7 @@ public:
  * no longer needed by the tree are placed at the front of the freelist. When more pages are needed, the freelist is
  * checked first. Only if it is empty do we allocate a page from the end of the file.
  */
-class FreeList
+class Freelist
 {
     friend class BPlusTree;
 
@@ -72,7 +72,7 @@ class FreeList
     Id m_head;
 
 public:
-    explicit FreeList(Pager &pager, PointerMap &pointers)
+    explicit Freelist(Pager &pager, PointerMap &pointers)
         : m_pager {&pager},
           m_pointers {&pointers}
     {
@@ -96,13 +96,13 @@ public:
 class OverflowList
 {
     Pager *m_pager {};
-    FreeList *m_freelist {};
+    Freelist *m_freelist {};
     PointerMap *m_pointers {};
 
     std::string m_scratch; // TODO: Only needed for copy_chain(). Not actually necessary, it just makes it easier. Should fix that at some point.
 
 public:
-    explicit OverflowList(Pager &pager, FreeList &freelist, PointerMap &pointers)
+    explicit OverflowList(Pager &pager, Freelist &freelist, PointerMap &pointers)
         : m_pager {&pager},
           m_freelist {&freelist},
           m_pointers {&pointers}

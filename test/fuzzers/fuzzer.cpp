@@ -14,7 +14,7 @@ DbFuzzer::DbFuzzer(std::string path, Options *options)
 
 DbFuzzer::~DbFuzzer()
 {
-    Tools::validate_db(*m_db);
+    tools::validate_db(*m_db);
 
     delete m_db;
 
@@ -28,14 +28,14 @@ auto DbFuzzer::reopen() -> Status
 
     auto s = DB::open(m_path, m_options, &m_db);
     if (s.is_ok()) {
-        Tools::validate_db(*m_db);
+        tools::validate_db(*m_db);
     }
     return s;
 }
 
 auto DbFuzzer::validate() -> void
 {
-    Tools::validate_db(*m_db);
+    tools::validate_db(*m_db);
 }
 
 } // namespace calicodb

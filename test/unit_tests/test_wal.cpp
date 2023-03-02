@@ -88,7 +88,7 @@ public:
     }
 
 private:
-    Tools::RandomGenerator random;
+    tools::RandomGenerator random;
 };
 
 class WalPayloadTests : public testing::Test
@@ -102,7 +102,7 @@ public:
     {
     }
 
-    Tools::RandomGenerator random;
+    tools::RandomGenerator random;
     std::string image;
     std::string scratch;
 };
@@ -358,12 +358,12 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
 {
     auto writer = make_writer(Id::root());
     for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
-        ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
+        ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
     for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
-        ASSERT_EQ(wal_read(reader), Tools::integral_key(i));
+        ASSERT_EQ(wal_read(reader), tools::integral_key(i));
     }
     assert_reader_is_done(reader);
 }
@@ -486,7 +486,7 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
 {
     auto writer = make_writer(Id::root());
     for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
-        ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
+        ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
         if (rand() % 8 == 0) {
             ASSERT_OK(writer.flush());
         }
@@ -494,7 +494,7 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
     for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
-        ASSERT_EQ(wal_read(reader), Tools::integral_key(i));
+        ASSERT_EQ(wal_read(reader), tools::integral_key(i));
     }
     assert_reader_is_done(reader);
 }
@@ -504,7 +504,7 @@ TEST_F(WalComponentTests, Corruption)
     // Don't flush the writer, so it leaves a partial record in the WAL.
     auto writer = make_writer(Id::root());
     for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
-        ASSERT_OK(wal_write(writer, Lsn {i}, Tools::integral_key(i)));
+        ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
     }
     ASSERT_LT(writer.flushed_lsn(), Lsn {PAGE_SIZE * 2 - 1});
 
@@ -516,7 +516,7 @@ TEST_F(WalComponentTests, Corruption)
             break;
         }
         ASSERT_OK(s);
-        ASSERT_EQ(data, Tools::integral_key(i));
+        ASSERT_EQ(data, tools::integral_key(i));
     }
     assert_reader_is_done(reader);
 }

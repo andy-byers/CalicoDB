@@ -40,20 +40,20 @@
         }                                         \
     } while (0)
 
-namespace calicodb::Tools
+namespace calicodb::tools
 {
 
 struct Interceptor {
     enum Type {
-        READ,
-        WRITE,
-        OPEN,
-        SYNC,
-        UNLINK,
-        SIZE,
-        RENAME,
-        EXISTS,
-        TYPE_COUNT
+        Read,
+        Write,
+        Open,
+        Sync,
+        Unlink,
+        FileSize,
+        Rename,
+        Exists,
+        TypeCount
     };
 
     using Callback = std::function<Status()>;
@@ -204,6 +204,7 @@ public:
         std::va_list args;
         va_start(args, fmt);
         std::vfprintf(stderr, fmt, args);
+        std::fputs("\n", stderr);
         va_end(args);
         std::fflush(stderr);
     }

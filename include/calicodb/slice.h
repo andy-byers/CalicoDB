@@ -12,12 +12,6 @@
 namespace calicodb
 {
 
-enum class Comparison {
-    Less = -1,
-    Equal = 0,
-    Greater = 1,
-};
-
 class Slice
 {
 public:
@@ -103,12 +97,26 @@ public:
         return *this;
     }
 
-    [[nodiscard]] constexpr auto starts_with(Slice rhs) const noexcept -> bool
+    [[nodiscard]] constexpr auto starts_with(const Slice &rhs) const noexcept -> bool
     {
         if (rhs.size() > m_size) {
             return false;
         }
         return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
+    }
+
+    [[nodiscard]] auto compare(const Slice &rhs) const noexcept -> int
+    {
+        const auto min_length = m_size < rhs.size() ? m_size : rhs.size();
+        const auto r = std::memcmp(m_data, rhs.data(), min_length);
+        if (r == 0) {
+            if (m_size < rhs.size()) {
+                return -1;
+            } else if (m_size > rhs.size()) {
+                return 1;
+            }
+        }
+        return r;
     }
 
     [[nodiscard]] auto to_string() const noexcept -> std::string
@@ -121,53 +129,34 @@ private:
     std::size_t m_size {};
 };
 
-/*
- * Three-way comparison based off the one in LevelDB's slice.h.
- */
-inline auto compare_three_way(Slice lhs, Slice rhs) noexcept -> Comparison
+inline auto operator<(const Slice &lhs, const Slice &rhs) noexcept -> bool
 {
-    const auto min_length = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
-    auto r = std::memcmp(lhs.data(), rhs.data(), min_length);
-    if (r == 0) {
-        if (lhs.size() < rhs.size()) {
-            r = -1;
-        } else if (lhs.size() > rhs.size()) {
-            r = 1;
-        } else {
-            return Comparison::Equal;
-        }
-    }
-    return r < 0 ? Comparison::Less : Comparison::Greater;
+    return lhs.compare(rhs) < 0;
 }
 
-inline auto operator<(Slice lhs, Slice rhs) noexcept -> bool
+inline auto operator<=(const Slice &lhs, const Slice &rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == Comparison::Less;
+    return lhs.compare(rhs) <= 0;
 }
 
-inline auto operator<=(Slice lhs, Slice rhs) noexcept -> bool
+inline auto operator>(const Slice &lhs, const Slice &rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) != Comparison::Greater;
+    return lhs.compare(rhs) > 0;
 }
 
-inline auto operator>(Slice lhs, Slice rhs) noexcept -> bool
+inline auto operator>=(const Slice &lhs, const Slice &rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == Comparison::Greater;
+    return lhs.compare(rhs) >= 0;
 }
 
-inline auto operator>=(Slice lhs, Slice rhs) noexcept -> bool
+inline auto operator==(const Slice &lhs, const Slice &rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) != Comparison::Less;
+    return lhs.compare(rhs) == 0;
 }
 
-inline auto operator==(Slice lhs, Slice rhs) noexcept -> bool
+inline auto operator!=(const Slice &lhs, const Slice &rhs) noexcept -> bool
 {
-    return compare_three_way(lhs, rhs) == Comparison::Equal;
-}
-
-inline auto operator!=(Slice lhs, Slice rhs) noexcept -> bool
-{
-    return compare_three_way(lhs, rhs) != Comparison::Equal;
+    return lhs.compare(rhs) != 0;
 }
 
 } // namespace calicodb

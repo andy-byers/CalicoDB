@@ -8,16 +8,16 @@ namespace calicodb
 {
 
 enum OperationType {
-    PUT,
-    GET,
-    ERASE,
-    SEEK_ITER,
-    ITER_FORWARD,
-    ITER_REVERSE,
-    COMMIT,
-    VACUUM,
-    REOPEN,
-    TYPE_COUNT
+    OT_Put,
+    OT_Get,
+    OT_Erase,
+    OT_SeekIter,
+    OT_IterForward,
+    OT_IterReverse,
+    OT_Commit,
+    OT_Vacuum,
+    OT_Reopen,
+    OT_OpCount
 };
 
 constexpr std::size_t DB_MAX_RECORDS {5'000};
@@ -32,39 +32,44 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     CHECK_TRUE(size >= 2);
 
     const auto record_count = reinterpret_cast<const DBImpl *>(m_db)->record_count();
-    auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
+    auto operation_type = static_cast<OperationType>(*data++ % OperationType::OT_OpCount);
     --size;
 
-    std::string key;
+    std::unique_ptr<Cursor> cursor;
     std::string value;
-    Cursor *cursor {};
+    std::string key;
     Status s;
 
     if (record_count > DB_MAX_RECORDS) {
-        operation_type = ERASE;
+        operation_type = OT_Erase;
     }
     switch (operation_type) {
-    case GET:
-        s = m_db->get(extract_key(data, size), value);
+    case OT_Get:
+        s = m_db->get(extract_fuzzer_key(data, size), value);
         if (s.is_not_found()) {
             s = Status::ok();
         }
         CDB_TRY(s);
         break;
-    case PUT:
-        key = extract_key(data, size).to_string();
-        CDB_TRY(m_db->put(key, extract_value(data, size)));
+    case OT_Put:
+        key = extract_fuzzer_key(data, size);
+        CDB_TRY(m_db->put(key, extract_fuzzer_value(data, size)));
         break;
-    case ERASE:
-        s = m_db->erase(extract_key(data, size));
-        if (s.is_not_found()) {
-            s = Status::ok();
+    case OT_Erase:
+        key = extract_fuzzer_key(data, size);
+        cursor.reset(m_db->new_cursor());
+        cursor->seek(key);
+        if (cursor->is_valid()) {
+            s = m_db->erase(cursor->key());
+            if (s.is_not_found()) {
+                s = Status::ok();
+            }
         }
         CDB_TRY(s);
         break;
-    case SEEK_ITER:
-        key = extract_key(data, size).to_string();
-        cursor = m_db->new_cursor();
+    case OT_SeekIter:
+        key = extract_fuzzer_key(data, size);
+        cursor.reset(m_db->new_cursor());
         cursor->seek(key);
         while (cursor->is_valid()) {
             if (key.front() & 1) {
@@ -74,37 +79,39 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             }
         }
         break;
-    case ITER_FORWARD:
-        cursor = m_db->new_cursor();
+    case OT_IterForward:
+        cursor.reset(m_db->new_cursor());
         cursor->seek_first();
         while (cursor->is_valid()) {
             cursor->next();
         }
         break;
-    case ITER_REVERSE:
-        cursor = m_db->new_cursor();
+    case OT_IterReverse:
+        cursor.reset(m_db->new_cursor());
         cursor->seek_last();
         while (cursor->is_valid()) {
             cursor->previous();
         }
         break;
-    case VACUUM:
+    case OT_Vacuum:
         CDB_TRY(m_db->vacuum());
         break;
-    case COMMIT:
+    case OT_Commit:
         CDB_TRY(m_db->commit());
         break;
-    default: // REOPEN
+    default: // OT_Reopen
         CDB_TRY(reopen());
     }
-    delete cursor;
     return m_db->status();
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     Options options;
-    options.env = new Tools::DynamicMemory;
+    options.env = new tools::DynamicMemory;
+    options.page_size = MINIMUM_PAGE_SIZE;
+    options.cache_size = MINIMUM_PAGE_SIZE * 16;
+
     {
         OpsFuzzer fuzzer {"ops_fuzzer", &options};
 

@@ -15,15 +15,15 @@
 namespace calicodb
 {
 
-using namespace calicodb::Tools;
+using namespace calicodb::tools;
 
 enum OperationType {
-    PUT,
-    ERASE,
-    COMMIT,
-    REOPEN,
-    VACUUM,
-    TYPE_COUNT
+    OT_Put,
+    OT_Erase,
+    OT_Commit,
+    OT_Reopen,
+    OT_Vacuum,
+    OT_OpCount
 };
 
 constexpr std::size_t DB_MAX_RECORDS {5'000};
@@ -53,7 +53,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         delete cursor;
     };
 
-    auto operation_type = static_cast<OperationType>(*data++ % OperationType::TYPE_COUNT);
+    auto operation_type = static_cast<OperationType>(*data++ % OperationType::OT_OpCount);
     --size;
 
     std::string key;
@@ -61,14 +61,14 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     Status s;
 
     // Limit memory used by the fuzzer.
-    if (operation_type == PUT && m_map.size() + m_added.size() > m_erased.size() + DB_MAX_RECORDS) {
-        operation_type = ERASE;
+    if (operation_type == OT_Put && m_map.size() + m_added.size() > m_erased.size() + DB_MAX_RECORDS) {
+        operation_type = OT_Erase;
     }
 
     switch (operation_type) {
-    case PUT:
-        key = extract_key(data, size).to_string();
-        value = extract_value(data, size);
+    case OT_Put:
+        key = extract_fuzzer_key(data, size);
+        value = extract_fuzzer_value(data, size);
         s = m_db->put(key, value);
         if (s.is_ok()) {
             if (const auto itr = m_erased.find(key); itr != end(m_erased)) {
@@ -77,22 +77,29 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             m_added[key] = value;
         }
         break;
-    case ERASE:
-        key = extract_key(data, size).to_string();
-        s = m_db->erase(key);
-        if (s.is_ok()) {
-            if (const auto itr = m_added.find(key); itr != end(m_added)) {
-                m_added.erase(itr);
+    case OT_Erase: {
+        key = extract_fuzzer_key(data, size);
+        auto *cursor = m_db->new_cursor();
+        cursor->seek(key);
+        if (cursor->is_valid()) {
+            s = m_db->erase(cursor->key());
+            if (s.is_ok()) {
+                key = cursor->key().to_string();
+                if (const auto itr = m_added.find(key); itr != end(m_added)) {
+                    m_added.erase(itr);
+                }
+                m_erased.insert(key);
+            } else if (s.is_not_found()) {
+                s = Status::ok();
             }
-            m_erased.insert(key);
-        } else if (s.is_not_found()) {
-            s = Status::ok();
         }
+        delete cursor;
         break;
-    case VACUUM:
+    }
+    case OT_Vacuum:
         s = m_db->vacuum();
         break;
-    case COMMIT:
+    case OT_Commit:
         s = m_db->commit();
         if (s.is_ok()) {
             for (const auto &[k, v] : m_added) {
@@ -106,7 +113,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             expect_equal_contents();
         }
         break;
-    default: // REOPEN
+    default: // OT_Reopen
         m_added.clear();
         m_erased.clear();
         s = reopen();
@@ -125,7 +132,10 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     Options options;
-    options.env = new Tools::DynamicMemory;
+//    options.info_log = new tools::StderrLogger;
+    options.env = new tools::DynamicMemory;
+    options.page_size = MINIMUM_PAGE_SIZE;
+    options.cache_size = MINIMUM_PAGE_SIZE * 16;
 
     {
         MapFuzzer fuzzer {"map_fuzzer", &options};
@@ -136,6 +146,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         }
     }
 
+//    delete options.info_log;
     delete options.env;
     return 0;
 }

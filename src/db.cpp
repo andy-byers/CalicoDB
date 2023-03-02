@@ -1,6 +1,5 @@
 
 #include "calicodb/calicodb.h"
-#include "calicodb/env.h"
 #include "db_impl.h"
 #include "utils.h"
 
