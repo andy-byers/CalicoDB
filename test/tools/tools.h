@@ -43,17 +43,134 @@
 namespace calicodb::tools
 {
 
+class FakeEnv : public Env
+{
+public:
+    struct Memory {
+        std::string buffer;
+        bool created {};
+    };
+
+    [[nodiscard]] virtual auto memory() -> std::unordered_map<std::string, Memory> &
+    {
+        return m_memory;
+    }
+
+    [[nodiscard]] virtual auto memory() const -> const std::unordered_map<std::string, Memory> &
+    {
+        return m_memory;
+    }
+
+    [[nodiscard]] virtual auto clone() const -> Env *;
+
+    ~FakeEnv() override = default;
+    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger **out) -> Status override;
+    [[nodiscard]] auto new_reader(const std::string &path, Reader **out) -> Status override;
+    [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &path, Logger **out) -> Status override;
+    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
+    [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
+    [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
+    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
+
+protected:
+    friend class FakeEditor;
+    friend class FakeReader;
+    friend class FakeLogger;
+
+    [[nodiscard]] auto get_memory(const std::string &path) const -> Memory &;
+    [[nodiscard]] auto read_file_at(const Memory &mem, char *data_out, std::size_t &size_out, std::size_t offset) -> Status;
+    [[nodiscard]] auto write_file_at(Memory &mem, Slice in, std::size_t offset) -> Status;
+
+    mutable std::unordered_map<std::string, Memory> m_memory;
+};
+
+class FakeReader : public Reader
+{
+public:
+    FakeReader(std::string path, FakeEnv &parent, FakeEnv::Memory &mem)
+        : m_mem {&mem},
+          m_parent {&parent},
+          m_path {std::move(path)}
+    {
+    }
+
+    ~FakeReader() override = default;
+    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+
+protected:
+    friend class FakeEnv;
+
+    FakeEnv::Memory *m_mem {};
+    FakeEnv *m_parent {};
+    std::string m_path;
+};
+
+class FakeEditor : public Editor
+{
+public:
+    FakeEditor(std::string path, FakeEnv &parent, FakeEnv::Memory &mem)
+        : m_mem {&mem},
+          m_parent {&parent},
+          m_path {std::move(path)}
+    {
+    }
+
+    ~FakeEditor() override = default;
+    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto write(Slice in, std::size_t offset) -> Status override;
+    [[nodiscard]] auto sync() -> Status override;
+
+protected:
+    friend class FakeEnv;
+
+    FakeEnv::Memory *m_mem {};
+    FakeEnv *m_parent {};
+    std::string m_path;
+};
+
+class FakeLogger : public Logger
+{
+public:
+    FakeLogger(std::string path, FakeEnv &parent, FakeEnv::Memory &mem)
+        : m_mem {&mem},
+          m_parent {&parent},
+          m_path {std::move(path)}
+    {
+    }
+
+    ~FakeLogger() override = default;
+    [[nodiscard]] auto write(Slice in) -> Status override;
+    [[nodiscard]] auto sync() -> Status override;
+
+protected:
+    friend class FakeEnv;
+
+    FakeEnv::Memory *m_mem {};
+    FakeEnv *m_parent {};
+    std::string m_path;
+};
+
+class FakeInfoLogger : public InfoLogger
+{
+public:
+    ~FakeInfoLogger() override = default;
+    auto logv(const char *, ...) -> void override {}
+};
+
 struct Interceptor {
     enum Type {
-        Read,
-        Write,
-        Open,
-        Sync,
-        Unlink,
-        FileSize,
-        Rename,
-        Exists,
-        TypeCount
+        kRead,
+        kWrite,
+        kOpen,
+        kSync,
+        kUnlink,
+        kFileSize,
+        kRename,
+        kExists,
+        kTypeCount
     };
 
     using Callback = std::function<Status()>;
@@ -75,43 +192,22 @@ struct Interceptor {
     Type type {};
 };
 
-class DynamicMemory : public Env
+class FaultInjectionEnv : public FakeEnv
 {
-
-    struct Memory {
-        std::string buffer;
-        bool created {};
-    };
-
     std::vector<Interceptor> m_interceptors;
-    mutable std::unordered_map<std::string, Memory> m_memory;
 
-    friend class MemoryEditor;
-    friend class MemoryReader;
-    friend class SequentialMemoryReader;
-    friend class MemoryLogger;
+    friend class FaultInjectionEditor;
+    friend class FaultInjectionReader;
+    friend class FaultInjectionLogger;
 
     [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &path) -> Status;
-    [[nodiscard]] auto get_memory(const std::string &path) const -> Memory &;
-    [[nodiscard]] auto read_file_at(const Memory &mem, char *data_out, std::size_t &size_out, std::size_t offset) -> Status;
-    [[nodiscard]] auto write_file_at(Memory &mem, Slice in, std::size_t offset) -> Status;
 
 public:
-    [[nodiscard]] auto memory() -> std::unordered_map<std::string, Memory> &
-    {
-        return m_memory;
-    }
-    [[nodiscard]] auto memory() const -> const std::unordered_map<std::string, Memory> &
-    {
-        return m_memory;
-    }
-    [[nodiscard]] auto clone() const -> Env *;
-    auto add_interceptor(Interceptor interceptor) -> void;
-    auto clear_interceptors() -> void;
+    [[nodiscard]] auto clone() const -> Env * override;
+    virtual auto add_interceptor(Interceptor interceptor) -> void;
+    virtual auto clear_interceptors() -> void;
 
-    ~DynamicMemory() override = default;
-    [[nodiscard]] auto create_directory(const std::string &path) -> Status override;
-    [[nodiscard]] auto remove_directory(const std::string &path) -> Status override;
+    ~FaultInjectionEnv() override = default;
     [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger **out) -> Status override;
     [[nodiscard]] auto new_reader(const std::string &path, Reader **out) -> Status override;
     [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;
@@ -124,73 +220,47 @@ public:
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
 };
 
-class MemoryReader : public Reader
+class FaultInjectionReader : public FakeReader
 {
-    DynamicMemory::Memory *m_mem {};
-    DynamicMemory *m_parent {};
-    std::string m_path;
-
-    MemoryReader(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
-        : m_mem {&mem},
-          m_parent {&parent},
-          m_path {std::move(path)}
+public:
+    explicit FaultInjectionReader(Reader &reader)
+        : FakeReader {reinterpret_cast<FakeReader &>(reader)}
     {
     }
 
-    friend class DynamicMemory;
-
-public:
-    ~MemoryReader() override = default;
+    ~FaultInjectionReader() override = default;
     [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
 };
 
-class MemoryEditor : public Editor
+class FaultInjectionEditor : public FakeEditor
 {
-    DynamicMemory::Memory *m_mem {};
-    DynamicMemory *m_parent {};
-    std::string m_path;
-
-    MemoryEditor(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
-        : m_mem {&mem},
-          m_parent {&parent},
-          m_path {std::move(path)}
+public:
+    explicit FaultInjectionEditor(Editor &editor)
+        : FakeEditor {reinterpret_cast<FakeEditor &>(editor)}
     {
     }
-
-    friend class DynamicMemory;
-
-public:
-    ~MemoryEditor() override = default;
+    ~FaultInjectionEditor() override = default;
     [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
     [[nodiscard]] auto write(Slice in, std::size_t offset) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class MemoryLogger : public Logger
+class FaultInjectionLogger : public FakeLogger
 {
-    DynamicMemory::Memory *m_mem {};
-    DynamicMemory *m_parent {};
-    std::string m_path;
-
-    MemoryLogger(std::string path, DynamicMemory &parent, DynamicMemory::Memory &mem)
-        : m_mem {&mem},
-          m_parent {&parent},
-          m_path {std::move(path)}
+public:
+    explicit FaultInjectionLogger(Logger &logger)
+        : FakeLogger {reinterpret_cast<FakeLogger &>(logger)}
     {
     }
-
-    friend class DynamicMemory;
-
-public:
-    ~MemoryLogger() override = default;
+    ~FaultInjectionLogger() override = default;
     [[nodiscard]] auto write(Slice in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class MemoryInfoLogger : public InfoLogger
+class FaultInjectionInfoLogger : public InfoLogger
 {
 public:
-    ~MemoryInfoLogger() override = default;
+    ~FaultInjectionInfoLogger() override = default;
     auto logv(const char *, ...) -> void override {}
 };
 

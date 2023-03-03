@@ -32,10 +32,10 @@ class PointerMap
 
 public:
     enum Type : char {
-        Node = 1,
-        OverflowHead,
-        OverflowLink,
-        FreelistLink,
+        kNode = 1,
+        kOverflowHead,
+        kOverflowLink,
+        kFreelistLink,
     };
 
     struct Entry {

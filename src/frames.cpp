@@ -11,13 +11,13 @@ Frame::Frame(char *buffer, std::size_t id, std::size_t size)
     : m_bytes {buffer + id * size, size}
 {
     CDB_EXPECT_TRUE(is_power_of_two(size));
-    CDB_EXPECT_GE(size, MINIMUM_PAGE_SIZE);
-    CDB_EXPECT_LE(size, MAXIMUM_PAGE_SIZE);
+    CDB_EXPECT_GE(size, kMinPageSize);
+    CDB_EXPECT_LE(size, kMaxPageSize);
 }
 
 auto Frame::lsn() const -> Id
 {
-    return {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::SIZE))};
+    return {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::kSize))};
 }
 
 auto Frame::ref(Page &page) -> void

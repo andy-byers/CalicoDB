@@ -17,16 +17,16 @@ namespace calicodb
         }                        \
     } while (0)
 
-static constexpr Id MAX_ID {std::numeric_limits<std::size_t>::max()};
+static constexpr Id kMaxId {std::numeric_limits<std::size_t>::max()};
 
 auto Pager::open(const Parameters &param, Pager **out) -> Status
 {
     CDB_EXPECT_TRUE(is_power_of_two(param.page_size));
-    CDB_EXPECT_GE(param.page_size, MINIMUM_PAGE_SIZE);
-    CDB_EXPECT_LE(param.page_size, MAXIMUM_PAGE_SIZE);
+    CDB_EXPECT_GE(param.page_size, kMinPageSize);
+    CDB_EXPECT_LE(param.page_size, kMaxPageSize);
 
     Editor *file;
-    CDB_TRY(param.env->new_editor(param.prefix + "data", &file));
+    CDB_TRY(param.env->new_editor(param.path, &file));
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
@@ -43,7 +43,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
 }
 
 Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
-    : m_path {param.prefix + "data"},
+    : m_path {param.path},
       m_frames {file, std::move(buffer), param.page_size, param.frame_count},
       m_commit_lsn {param.commit_lsn},
       m_in_txn {param.in_txn},
@@ -127,7 +127,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
 {
     // An LSN of NULL causes all pages to be flushed.
     if (target_lsn.is_null()) {
-        target_lsn = MAX_ID;
+        target_lsn = kMaxId;
     }
 
     auto largest = Id::null();
@@ -165,7 +165,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
     }
 
     // We have flushed the entire cache.
-    if (target_lsn == MAX_ID) {
+    if (target_lsn == kMaxId) {
         target_lsn = largest;
     }
 

@@ -18,12 +18,12 @@ namespace calicodb
 
 #define CLEAR_INTERCEPTORS()                                                 \
     do {                                                                     \
-        dynamic_cast<tools::DynamicMemory &>(*env).clear_interceptors(); \
+        dynamic_cast<tools::FaultInjectionEnv &>(*env).clear_interceptors(); \
     } while (0)
 
 #define QUICK_INTERCEPTOR(prefix__, type__)                                  \
     do {                                                                     \
-        dynamic_cast<tools::DynamicMemory &>(*env)                       \
+        dynamic_cast<tools::FaultInjectionEnv &>(*env)                       \
             .add_interceptor(tools::Interceptor {(prefix__), (type__), [] {  \
                                                      return special_error(); \
                                                  }});                        \
@@ -31,7 +31,7 @@ namespace calicodb
 
 #define COUNTING_INTERCEPTOR(prefix__, type__, n__)                                   \
     do {                                                                              \
-        dynamic_cast<tools::DynamicMemory &>(*env)                                \
+        dynamic_cast<tools::FaultInjectionEnv &>(*env)                                \
             .add_interceptor(tools::Interceptor {(prefix__), (type__), [&n = (n__)] { \
                                                      if (n-- <= 0) {                  \
                                                          return special_error();      \
@@ -40,7 +40,7 @@ namespace calicodb
                                                  }});                                 \
     } while (0)
 
-static constexpr auto EXPECTATION_MATCHER = "^expectation";
+static constexpr auto kExpectationMatcher = "^expectation";
 
 #define EXPECT_OK(expr)                                                                                                     \
     do {                                                                                                                    \
@@ -54,18 +54,6 @@ static constexpr auto EXPECTATION_MATCHER = "^expectation";
         ASSERT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.to_string(); \
     } while (0)
 
-#define EXPECT_HAS_VALUE(expr)                                                                                                                                       \
-    do {                                                                                                                                                             \
-        const auto &expect_has_value_status = (expr);                                                                                                                \
-        EXPECT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().to_string(); \
-    } while (0)
-
-#define ASSERT_HAS_VALUE(expr)                                                                                                                                       \
-    do {                                                                                                                                                             \
-        const auto &expect_has_value_status = (expr);                                                                                                                \
-        ASSERT_TRUE(expect_has_value_status.has_value()) << get_status_name(expect_has_value_status.error()) << ": " << expect_has_value_status.error().to_string(); \
-    } while (0)
-
 [[nodiscard]] inline auto expose_message(const Status &s)
 {
     EXPECT_TRUE(s.is_ok()) << "Unexpected " << get_status_name(s) << " status: " << s.to_string().data();
@@ -75,20 +63,18 @@ static constexpr auto EXPECTATION_MATCHER = "^expectation";
 class InMemoryTest
 {
 public:
-    static constexpr auto ROOT = "test";
-    static constexpr auto PREFIX = "test/";
+    const std::string kFilename {"./test"};
 
     InMemoryTest()
-        : env {std::make_unique<tools::DynamicMemory>()}
+        : env {std::make_unique<tools::FakeEnv>()}
     {
-        EXPECT_TRUE(expose_message(env->create_directory(ROOT)));
     }
 
     virtual ~InMemoryTest() = default;
 
-    [[nodiscard]] auto get_env() -> tools::DynamicMemory &
+    [[nodiscard]] auto get_env() -> tools::FakeEnv &
     {
-        return dynamic_cast<tools::DynamicMemory &>(*env);
+        return dynamic_cast<tools::FakeEnv &>(*env);
     }
 
     std::unique_ptr<Env> env;
@@ -97,21 +83,19 @@ public:
 class OnDiskTest
 {
 public:
-    static constexpr auto ROOT = "/tmp/__calicodb_test__";
-    static constexpr auto PREFIX = "/tmp/__calicodb_test__/";
+    const std::string kTestDir {"./test_dir"};
+    const std::string kFilename {join_paths(kTestDir, "test")};
 
     OnDiskTest()
         : env {Env::default_env()}
     {
-        std::error_code ignore;
-        std::filesystem::remove_all(ROOT, ignore);
-        EXPECT_TRUE(expose_message(env->create_directory(ROOT)));
+        std::filesystem::remove_all(kTestDir);
+        std::filesystem::create_directory(kTestDir);
     }
 
     virtual ~OnDiskTest()
     {
-        std::error_code ignore;
-        std::filesystem::remove_all(ROOT, ignore);
+        std::filesystem::remove_all(kTestDir);
     }
 
     std::unique_ptr<Env> env;
@@ -157,16 +141,16 @@ public:
 class TestWithPager : public InMemoryTest
 {
 public:
-    const std::size_t PAGE_SIZE {0x200};
-    const std::size_t FRAME_COUNT {16};
+    const std::size_t kPageSize {0x200};
+    const std::size_t kFrameCount {16};
 
     TestWithPager()
-        : scratch(PAGE_SIZE, '\x00'),
-          log_scratch(wal_scratch_size(PAGE_SIZE), '\x00')
+        : scratch(kPageSize, '\x00'),
+          log_scratch(wal_scratch_size(kPageSize), '\x00')
     {
         Pager *temp;
         EXPECT_OK(Pager::open({
-                                  PREFIX,
+                                  kFilename,
                                   env.get(),
                                   &log_scratch,
                                   &wal,
@@ -174,8 +158,8 @@ public:
                                   &status,
                                   &commit_lsn,
                                   &in_txn,
-                                  FRAME_COUNT,
-                                  PAGE_SIZE,
+                                  kFrameCount,
+                                  kPageSize,
                               },
                               &temp));
         pager.reset(temp);

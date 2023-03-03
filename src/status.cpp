@@ -5,11 +5,11 @@ namespace calicodb
 {
 
 enum Code : char {
-    C_InvalidArgument = 1,
-    C_SystemError = 2,
-    C_LogicError = 3,
-    C_Corruption = 4,
-    C_NotFound = 5,
+    kInvalidArgument = 1,
+    kSystemError = 2,
+    kLogicError = 3,
+    kCorruption = 4,
+    kNotFound = 5,
 };
 
 static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
@@ -68,52 +68,52 @@ auto Status::operator=(Status &&rhs) noexcept -> Status &
 
 auto Status::not_found(const Slice &what) -> Status
 {
-    return Status {C_NotFound, what};
+    return Status {kNotFound, what};
 }
 
 auto Status::invalid_argument(const Slice &what) -> Status
 {
-    return Status {C_InvalidArgument, what};
+    return Status {kInvalidArgument, what};
 }
 
 auto Status::system_error(const Slice &what) -> Status
 {
-    return Status {C_SystemError, what};
+    return Status {kSystemError, what};
 }
 
 auto Status::logic_error(const Slice &what) -> Status
 {
-    return Status {C_LogicError, what};
+    return Status {kLogicError, what};
 }
 
 auto Status::corruption(const Slice &what) -> Status
 {
-    return Status {C_Corruption, what};
+    return Status {kCorruption, what};
 }
 
 auto Status::is_invalid_argument() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == C_InvalidArgument;
+    return !is_ok() && Code {m_data[0]} == kInvalidArgument;
 }
 
 auto Status::is_system_error() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == C_SystemError;
+    return !is_ok() && Code {m_data[0]} == kSystemError;
 }
 
 auto Status::is_logic_error() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == C_LogicError;
+    return !is_ok() && Code {m_data[0]} == kLogicError;
 }
 
 auto Status::is_corruption() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == C_Corruption;
+    return !is_ok() && Code {m_data[0]} == kCorruption;
 }
 
 auto Status::is_not_found() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == C_NotFound;
+    return !is_ok() && Code {m_data[0]} == kNotFound;
 }
 
 auto Status::to_string() const -> std::string

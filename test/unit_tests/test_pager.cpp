@@ -16,7 +16,7 @@ namespace calicodb
 class DeltaCompressionTest : public testing::Test
 {
 public:
-    static constexpr std::size_t PAGE_SIZE {0x200};
+    static constexpr std::size_t kPageSize {0x200};
 
     [[nodiscard]] auto build_deltas(const ChangeBuffer &unordered) const
     {
@@ -30,8 +30,8 @@ public:
     [[nodiscard]] auto insert_random_delta(ChangeBuffer &deltas) const
     {
         static constexpr std::size_t MIN_DELTA_SIZE {1};
-        const auto offset = random.Next<std::size_t>(PAGE_SIZE - MIN_DELTA_SIZE);
-        const auto size = random.Next<std::size_t>(PAGE_SIZE - offset);
+        const auto offset = random.Next<std::size_t>(kPageSize - MIN_DELTA_SIZE);
+        const auto size = random.Next<std::size_t>(kPageSize - offset);
         insert_delta(deltas, {offset, size});
     }
 
@@ -129,13 +129,13 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     static constexpr std::size_t MAX_DELTA_SIZE {10};
     ChangeBuffer deltas;
     for (std::size_t i {}; i < NUM_INSERTS; ++i) {
-        const auto offset = random.Next<std::size_t>(PAGE_SIZE - MAX_DELTA_SIZE);
+        const auto offset = random.Next<std::size_t>(kPageSize - MAX_DELTA_SIZE);
         const auto size = random.Next<std::size_t>(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);
 
-    std::vector<int> covering(PAGE_SIZE);
+    std::vector<int> covering(kPageSize);
     for (const auto &[offset, size] : deltas) {
         for (std::size_t i {}; i < size; ++i) {
             ASSERT_EQ(covering.at(offset + i), 0);
@@ -547,7 +547,7 @@ public:
     explicit FramerTests()
     {
         Editor *file;
-        EXPECT_OK(env->new_editor("test/data", &file));
+        EXPECT_OK(env->new_editor("./test", &file));
 
         AlignedBuffer buffer {0x200 * 8, 0x200};
 
@@ -706,12 +706,12 @@ static auto run_root_persistence_test(T &test, std::size_t n)
 
 TEST_F(PagerTests, RootDataPersistsInFrame)
 {
-    run_root_persistence_test(*this, FRAME_COUNT);
+    run_root_persistence_test(*this, kFrameCount);
 }
 
 TEST_F(PagerTests, RootDataPersistsInEnv)
 {
-    run_root_persistence_test(*this, FRAME_COUNT * 2);
+    run_root_persistence_test(*this, kFrameCount * 2);
 }
 
 [[nodiscard]] auto generate_id_strings(std::size_t n)

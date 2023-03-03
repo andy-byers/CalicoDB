@@ -179,7 +179,7 @@ auto BPlusTreeInternal::fix_parent_id(Id pid, Id parent_id, PointerMap::Type typ
 auto BPlusTreeInternal::maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status
 {
     if (cell.has_remote) {
-        return fix_parent_id(read_overflow_id(cell), parent_id, PointerMap::OverflowHead);
+        return fix_parent_id(read_overflow_id(cell), parent_id, PointerMap::kOverflowHead);
     }
     return Status::ok();
 }
@@ -336,19 +336,19 @@ auto BPlusTreeInternal::split_root(Node root, Node &out) -> Status
     CDB_TRY(allocate(child, root.header.is_external));
 
     // Copy the cells.
-    static constexpr auto after_root_headers = FileHeader::SIZE + NodeHeader::SIZE;
-    auto data = child.page.span(after_root_headers, root.page.size() - after_root_headers);
-    mem_copy(data, root.page.view(after_root_headers, data.size()));
+    static constexpr auto kAfterRootHeaders = FileHeader::kSize + NodeHeader::kSize;
+    auto data = child.page.span(kAfterRootHeaders, root.page.size() - kAfterRootHeaders);
+    mem_copy(data, root.page.view(kAfterRootHeaders, data.size()));
 
     // Copy the header and cell pointers. Doesn't copy the page LSN.
     child.header = root.header;
-    data = child.page.span(NodeHeader::SIZE, root.header.cell_count * sizeof(PageSize));
-    mem_copy(data, root.page.view(after_root_headers, data.size()));
+    data = child.page.span(NodeHeader::kSize, root.header.cell_count * sizeof(PageSize));
+    mem_copy(data, root.page.view(kAfterRootHeaders, data.size()));
 
     CDB_EXPECT_TRUE(is_overflowing(root));
     std::swap(child.overflow, root.overflow);
     child.overflow_index = root.overflow_index;
-    child.gap_size = root.gap_size + FileHeader::SIZE;
+    child.gap_size = root.gap_size + FileHeader::kSize;
 
     root.header = NodeHeader {};
     root.header.is_external = false;
@@ -564,8 +564,8 @@ auto BPlusTreeInternal::external_merge_left(Node &left, Node &right, Node &paren
 
     left.header.next_id = right.header.next_id;
 
-//    const auto separator = read_cell(parent, index);
-//    erase_cell(parent, index, separator.size);
+    //    const auto separator = read_cell(parent, index);
+    //    erase_cell(parent, index, separator.size);
     CDB_TRY(remove_cell(parent, index));
 
     while (right.header.cell_count) {
@@ -626,10 +626,10 @@ auto BPlusTreeInternal::external_merge_right(Node &left, Node &right, Node &pare
     CDB_EXPECT_FALSE(parent.header.is_external);
 
     left.header.next_id = right.header.next_id;
-//    const auto separator = read_cell(parent, index);
+    //    const auto separator = read_cell(parent, index);
     CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
     write_child_id(parent, index + 1, left.page.id());
-//    erase_cell(parent, index, separator.size);
+    //    erase_cell(parent, index, separator.size);
     CDB_TRY(remove_cell(parent, index));
 
     while (right.header.cell_count) {
@@ -709,7 +709,7 @@ auto BPlusTreeInternal::fix_root(Node root) -> Status
         // the file header. In this case, we'll just split the child and insert the median cell into the root.
         // Note that the child needs an overflow cell for the split routine to work. We'll just fake it by
         // extracting an arbitrary cell and making it the overflow cell.
-        if (usable_space(child) < FileHeader::SIZE) {
+        if (usable_space(child) < FileHeader::kSize) {
             child.overflow_index = child.header.cell_count / 2;
             child.overflow = read_cell(child, child.overflow_index);
             detach_cell(*child.overflow, m_tree->cell_scratch());
@@ -1077,6 +1077,7 @@ auto BPlusTree::search(const Slice &key, SearchResult &out) -> Status
 
 auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
 {
+    CDB_EXPECT_NE(free.id(), last_id);
     BPlusTreeInternal internal {*this};
 
     PointerMap::Entry entry;
@@ -1092,7 +1093,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
     };
 
     switch (entry.type) {
-    case PointerMap::FreelistLink: {
+    case PointerMap::kFreelistLink: {
         if (last_id == free.id()) {
 
         } else if (last_id == m_freelist.m_head) {
@@ -1104,18 +1105,18 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
             Page last;
             CDB_TRY(m_pager->acquire(last_id, last));
             if (const auto next_id = read_next_id(last); !next_id.is_null()) {
-                CDB_TRY(internal.fix_parent_id(next_id, free.id(), PointerMap::FreelistLink));
+                CDB_TRY(internal.fix_parent_id(next_id, free.id(), PointerMap::kFreelistLink));
             }
             m_pager->release(std::move(last));
         }
         break;
     }
-    case PointerMap::OverflowLink: {
+    case PointerMap::kOverflowLink: {
         // Back pointer points to another overflow chain link, or the head of the chain.
         CDB_TRY(fix_basic_link());
         break;
     }
-    case PointerMap::OverflowHead: {
+    case PointerMap::kOverflowHead: {
         // Back pointer points to the node that the overflow chain is rooted in. Search through that nodes cells
         // for the target overflowing cell.
         Node parent;
@@ -1133,7 +1134,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
         internal.release(std::move(parent));
         break;
     }
-    case PointerMap::Node: {
+    case PointerMap::kNode: {
         // Back pointer points to another node. Search through that node for the target child pointer.
         Node parent;
         CDB_TRY(internal.acquire(parent, entry.back_ptr, true));
@@ -1184,7 +1185,7 @@ auto BPlusTree::vacuum_step(Page &free, Id last_id) -> Status
     // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
     // which we will need if we crash during vacuum and need to roll back.
     m_pager->upgrade(last);
-    if (entry.type != PointerMap::Node) {
+    if (entry.type != PointerMap::kNode) {
         if (const auto next_id = read_next_id(last); !next_id.is_null()) {
             PointerMap::Entry next_entry;
             CDB_TRY(m_pointers.read_entry(next_id, next_entry));
@@ -1458,7 +1459,7 @@ private:
 
     auto traverse_chain(Page page, const PageCallback &callback) -> void
     {
-        for (; ; ) {
+        for (;;) {
             callback(page);
 
             const auto next_id = read_next_id(page);
@@ -1518,7 +1519,7 @@ auto BPlusTree::TEST_to_string() -> std::string
     validator.collect_levels(data, std::move(root), 0);
     for (const auto &level : data.levels) {
         repr.append(level + '\n');
-//        repr.append(level.substr(0, 200) + '\n');
+        //        repr.append(level.substr(0, 200) + '\n');
     }
 
     return repr;

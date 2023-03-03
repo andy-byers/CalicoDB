@@ -50,8 +50,6 @@ public:
     static auto default_env() -> Env *;
 
     virtual ~Env() = default;
-    [[nodiscard]] virtual auto create_directory(const std::string &path) -> Status = 0;
-    [[nodiscard]] virtual auto remove_directory(const std::string &path) -> Status = 0;
     [[nodiscard]] virtual auto new_reader(const std::string &path, Reader **out) -> Status = 0;
     [[nodiscard]] virtual auto new_editor(const std::string &path, Editor **out) -> Status = 0;
     [[nodiscard]] virtual auto new_logger(const std::string &path, Logger **out) -> Status = 0;

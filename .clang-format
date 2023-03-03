@@ -1,10 +1,12 @@
-# CalicoDB style differences from LLVM coding standards:
-#     (1) snake_case variable, function, and method names
-#
+# CalicoDB style differences from LLVM coding standard:
+#     (1) "snake_case" variable and function/method names
+#     (2) "kCamelCase" constant and enumerator names
+#     (3) "MACRO_CASE" macro names
 
 BasedOnStyle: LLVM
+
+AccessModifierOffset: -4
 BreakBeforeBraces: Linux
 ColumnLimit: 0
 SpaceBeforeCpp11BracedList: true
 IndentWidth: 4
-AccessModifierOffset: -4

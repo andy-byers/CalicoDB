@@ -145,7 +145,7 @@ public:
     [[nodiscard]] auto is_pointer_map(Id pid) const -> bool;
     [[nodiscard]] auto find_external_slot(const Slice &key, SearchResult &out) const -> Status;
     [[nodiscard]] auto find_parent_id(Id pid, Id &out) const -> Status;
-    [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type = PointerMap::Node) -> Status;
+    [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type = PointerMap::kNode) -> Status;
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;

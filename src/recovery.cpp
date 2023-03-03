@@ -29,7 +29,7 @@ static auto
 is_commit(const DeltaDescriptor &deltas)
 {
     return deltas.pid.is_root() && deltas.deltas.size() == 1 && deltas.deltas.front().offset == 0 &&
-           deltas.deltas.front().data.size() == FileHeader::SIZE + sizeof(Lsn);
+           deltas.deltas.front().data.size() == FileHeader::kSize + sizeof(Lsn);
 }
 
 template <class Descriptor, class Callback>

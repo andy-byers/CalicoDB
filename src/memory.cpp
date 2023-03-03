@@ -35,7 +35,7 @@ auto Freelist::pop(Page &page) -> Status
         if (!m_head.is_null()) {
             // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
             // node's back pointer at some point.
-            const PointerMap::Entry entry {Id::null(), PointerMap::FreelistLink};
+            const PointerMap::Entry entry {Id::null(), PointerMap::kFreelistLink};
             CDB_TRY(m_pointers->write_entry(m_head, entry));
         }
         return Status::ok();
@@ -50,7 +50,7 @@ auto Freelist::push(Page page) -> Status
     write_next_id(page, m_head);
 
     // Write the parent of the old head, if it exists.
-    PointerMap::Entry entry {page.id(), PointerMap::FreelistLink};
+    PointerMap::Entry entry {page.id(), PointerMap::kFreelistLink};
     if (!m_head.is_null()) {
         CDB_TRY(m_pointers->write_entry(m_head, entry));
     }
@@ -124,12 +124,12 @@ auto OverflowList::write_chain(Id &out, Id pid, Slice first, Slice second) -> St
                 first.advance(limit);
             }
         }
-        PointerMap::Entry entry {pid, PointerMap::OverflowHead};
+        PointerMap::Entry entry {pid, PointerMap::kOverflowHead};
         if (prev) {
             write_next_id(*prev, page.id());
             m_pager->release(std::move(*prev));
             entry.back_ptr = prev->id();
-            entry.type = PointerMap::OverflowLink;
+            entry.type = PointerMap::kOverflowLink;
         } else {
             head = page.id();
         }
@@ -169,7 +169,7 @@ auto OverflowList::erase_chain(Id pid) -> Status
     return Status::ok();
 }
 
-static constexpr auto ENTRY_SIZE =
+static constexpr auto kEntrySize =
     sizeof(char) + // Type
     sizeof(Id);    // Back pointer
 
@@ -178,7 +178,7 @@ static auto entry_offset(Id map_id, Id pid) -> std::size_t
     CDB_EXPECT_GT(pid, map_id);
 
     // Account for the page LSN.
-    return sizeof(Lsn) + (pid.value - map_id.value - 1) * ENTRY_SIZE;
+    return sizeof(Lsn) + (pid.value - map_id.value - 1) * kEntrySize;
 }
 
 static auto decode_entry(const char *data) -> PointerMap::Entry
@@ -195,7 +195,7 @@ auto PointerMap::read_entry(Id pid, Entry &out) const -> Status
     CDB_EXPECT_GE(mid.value, 2);
     CDB_EXPECT_NE(mid, pid);
     const auto offset = entry_offset(mid, pid);
-    CDB_EXPECT_LE(offset + ENTRY_SIZE, m_pager->page_size());
+    CDB_EXPECT_LE(offset + kEntrySize, m_pager->page_size());
     Page map;
     CDB_TRY(m_pager->acquire(mid, map));
     out = decode_entry(map.data() + offset);
@@ -209,7 +209,7 @@ auto PointerMap::write_entry(Id pid, Entry entry) -> Status
     CDB_EXPECT_GE(mid.value, 2);
     CDB_EXPECT_NE(mid, pid);
     const auto offset = entry_offset(mid, pid);
-    CDB_EXPECT_LE(offset + ENTRY_SIZE, m_pager->page_size());
+    CDB_EXPECT_LE(offset + kEntrySize, m_pager->page_size());
     Page map;
     CDB_TRY(m_pager->acquire(mid, map));
     const auto [back_ptr, type] = decode_entry(map.data() + offset);
@@ -217,7 +217,7 @@ auto PointerMap::write_entry(Id pid, Entry entry) -> Status
         if (!map.is_writable()) {
             m_pager->upgrade(map);
         }
-        auto data = map.span(offset, ENTRY_SIZE).data();
+        auto data = map.span(offset, kEntrySize).data();
         *data++ = entry.type;
         put_u64(data, entry.back_ptr.value);
     }
@@ -233,7 +233,7 @@ auto PointerMap::lookup(Id pid) const -> Id
         return Id::null();
     }
     const auto usable_size = m_pager->page_size() - sizeof(Lsn);
-    const auto inc = usable_size / ENTRY_SIZE + 1;
+    const auto inc = usable_size / kEntrySize + 1;
     const auto idx = (pid.value - 2) / inc;
     return {idx * inc + 2};
 }

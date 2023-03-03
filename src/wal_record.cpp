@@ -30,20 +30,20 @@ auto read_wal_record_header(Slice in) -> WalRecordHeader
 
 auto split_record(WalRecordHeader &lhs, const Slice &payload, std::size_t available_size) -> WalRecordHeader
 {
-    CDB_EXPECT_NE(lhs.type, WRT_First);
+    CDB_EXPECT_NE(lhs.type, kFirstRecord);
     CDB_EXPECT_EQ(lhs.size, payload.size());
-    CDB_EXPECT_LT(available_size, WalRecordHeader::SIZE + payload.size()); // Only call this if we actually need a split.
+    CDB_EXPECT_LT(available_size, WalRecordHeader::kSize + payload.size()); // Only call this if we actually need a split.
     auto rhs = lhs;
 
-    lhs.size = static_cast<std::uint16_t>(available_size - WalRecordHeader::SIZE);
+    lhs.size = static_cast<std::uint16_t>(available_size - WalRecordHeader::kSize);
     rhs.size = static_cast<std::uint16_t>(payload.size() - lhs.size);
-    rhs.type = WRT_Last;
+    rhs.type = kLastRecord;
 
-    if (lhs.type == WRT_Full) {
-        lhs.type = WRT_First;
+    if (lhs.type == kFullRecord) {
+        lhs.type = kFirstRecord;
     } else {
-        CDB_EXPECT_EQ(lhs.type, WRT_Last);
-        lhs.type = WRT_Middle;
+        CDB_EXPECT_EQ(lhs.type, kLastRecord);
+        lhs.type = kMiddleRecord;
     }
     return rhs;
 }
@@ -55,8 +55,8 @@ auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Sta
     }
 
     // First merge in the logical record.
-    if (lhs.type == WRT_Empty) {
-        if (rhs.type == WRT_Middle || rhs.type == WRT_Last) {
+    if (lhs.type == kNoRecord) {
+        if (rhs.type == kMiddleRecord || rhs.type == kLastRecord) {
             return Status::corruption("right record has invalid type");
         }
 
@@ -64,14 +64,14 @@ auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Sta
         lhs.crc = rhs.crc;
 
     } else {
-        if (lhs.type != WRT_First) {
+        if (lhs.type != kFirstRecord) {
             return Status::corruption("left record has invalid type");
         }
         if (lhs.crc != rhs.crc) {
             return Status::corruption("fragment crc mismatch");
         }
-        if (rhs.type == WRT_Last) {
-            lhs.type = WRT_Full;
+        if (rhs.type == kLastRecord) {
+            lhs.type = kFullRecord;
         }
     }
     lhs.size = static_cast<std::uint16_t>(lhs.size + rhs.size);
@@ -90,7 +90,7 @@ auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::v
     buffer.advance(sizeof(lsn));
 
     // Payload type (1 B)
-    encode_payload_type(buffer, WalPayloadType::WPT_Delta);
+    encode_payload_type(buffer, WalPayloadType::kDeltaPayload);
     buffer.advance();
 
     // Page ID (8 B)
@@ -122,7 +122,7 @@ auto encode_full_image_payload(Lsn lsn, Id pid, const Slice &image, Span buffer)
     buffer.advance(sizeof(lsn));
 
     // Payload type (1 B)
-    encode_payload_type(buffer, WalPayloadType::WPT_FullImage);
+    encode_payload_type(buffer, WalPayloadType::kFullImagePayload);
     buffer.advance();
 
     // Page ID (8 B)
@@ -144,7 +144,7 @@ static auto decode_deltas_payload(WalPayloadOut in) -> DeltaDescriptor
     info.lsn = in.lsn();
 
     // Payload type (1 B)
-    CDB_EXPECT_EQ(WalPayloadType {data[0]}, WalPayloadType::WPT_Delta);
+    CDB_EXPECT_EQ(WalPayloadType {data[0]}, WalPayloadType::kDeltaPayload);
     data.advance();
 
     // Page ID (8 B)
@@ -178,7 +178,7 @@ static auto decode_full_image_payload(WalPayloadOut in) -> FullImageDescriptor
     info.lsn = in.lsn();
 
     // Payload type (1 B)
-    CDB_EXPECT_EQ(WalPayloadType {data[0]}, WalPayloadType::WPT_FullImage);
+    CDB_EXPECT_EQ(WalPayloadType {data[0]}, WalPayloadType::kFullImagePayload);
     data.advance();
 
     // Page ID (8 B)
@@ -193,9 +193,9 @@ static auto decode_full_image_payload(WalPayloadOut in) -> FullImageDescriptor
 auto decode_payload(WalPayloadOut in) -> PayloadDescriptor
 {
     switch (WalPayloadType {in.data()[0]}) {
-    case WalPayloadType::WPT_Delta:
+    case WalPayloadType::kDeltaPayload:
         return decode_deltas_payload(in);
-    case WalPayloadType::WPT_FullImage:
+    case WalPayloadType::kFullImagePayload:
         return decode_full_image_payload(in);
     default:
         return std::monostate {};

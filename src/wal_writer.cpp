@@ -13,7 +13,7 @@ auto WalWriter::write(WalPayloadIn payload) -> Status
     CDB_EXPECT_FALSE(data.is_empty());
 
     WalRecordHeader lhs;
-    lhs.type = WRT_Full;
+    lhs.type = kFullRecord;
     lhs.size = static_cast<std::uint16_t>(data.size());
     lhs.crc = crc32c::Value(data.data(), data.size());
     lhs.crc = crc32c::Mask(lhs.crc);
@@ -22,10 +22,10 @@ auto WalWriter::write(WalPayloadIn payload) -> Status
         auto rest = m_tail;
         // Note that this modifies rest to point to [<m_offset>, <end>) in the tail buffer.
         const auto space_remaining = rest.advance(m_offset).size();
-        const auto needs_split = space_remaining < WalRecordHeader::SIZE + data.size();
+        const auto needs_split = space_remaining < WalRecordHeader::kSize + data.size();
 
-        if (space_remaining <= WalRecordHeader::SIZE) {
-            CDB_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::SIZE);
+        if (space_remaining <= WalRecordHeader::kSize) {
+            CDB_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::kSize);
             CDB_TRY(flush());
             continue;
         }
@@ -37,10 +37,10 @@ auto WalWriter::write(WalPayloadIn payload) -> Status
 
         // We must have room for the whole header and at least 1 payload byte.
         write_wal_record_header(rest, lhs);
-        rest.advance(WalRecordHeader::SIZE);
+        rest.advance(WalRecordHeader::kSize);
         mem_copy(rest, data.range(0, lhs.size));
 
-        m_offset += WalRecordHeader::SIZE + lhs.size;
+        m_offset += WalRecordHeader::kSize + lhs.size;
         data.advance(lhs.size);
         rest.advance(lhs.size);
 

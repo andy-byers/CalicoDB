@@ -23,8 +23,8 @@ class Page;
  *     40      2     page_size
  */
 struct FileHeader {
-    static constexpr std::uint32_t MAGIC_CODE {0xB11924E1};
-    static constexpr std::size_t SIZE {42};
+    static constexpr std::uint32_t kMagicCode {0xB11924E1};
+    static constexpr std::size_t kSize {42};
     explicit FileHeader() = default;
     explicit FileHeader(const Page &page);
     explicit FileHeader(const char *data);
@@ -32,7 +32,7 @@ struct FileHeader {
 
     [[nodiscard]] auto compute_crc() const -> std::uint32_t;
 
-    std::uint32_t magic_code {MAGIC_CODE};
+    std::uint32_t magic_code {kMagicCode};
     std::uint32_t header_crc {};
     std::uint64_t page_count {};
     std::uint64_t record_count {};
@@ -67,7 +67,7 @@ struct FileHeader {
  *       refers to the rightmost child ID.
  */
 struct NodeHeader {
-    static constexpr std::size_t SIZE {34};
+    static constexpr std::size_t kSize {34};
     explicit NodeHeader() = default;
     auto read(const Page &page) -> void;
     auto write(Page &page) const -> void;

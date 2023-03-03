@@ -1,10 +1,10 @@
-#ifndef CALICODB_CURSOR_INTERNAL_H
-#define CALICODB_CURSOR_INTERNAL_H
+#ifndef CALICODB_CURSOR_IMPL_H
+#define CALICODB_CURSOR_IMPL_H
 
+#include "calicodb/cursor.h"
 #include "node.h"
 #include "tree.h"
 #include "types.h"
-#include "calicodb/cursor.h"
 #include <functional>
 
 namespace calicodb
@@ -59,4 +59,4 @@ public:
 
 } // namespace calicodb
 
-#endif // CALICODB_CURSOR_INTERNAL_H
+#endif // CALICODB_CURSOR_IMPL_H

@@ -92,7 +92,7 @@ public:
 
     auto SetUp() -> void override
     {
-        collect_scratch.resize(PAGE_SIZE);
+        collect_scratch.resize(kPageSize);
 
         pointers = std::make_unique<PointerMap>(*pager);
         freelist = std::make_unique<Freelist>(*pager, *pointers);
@@ -127,7 +127,7 @@ public:
         pager->release(std::move(node).take());
     }
 
-    NodeMetaManager meta {PAGE_SIZE};
+    NodeMetaManager meta {kPageSize};
     std::unique_ptr<PointerMap> pointers;
     std::unique_ptr<Freelist> freelist;
     std::unique_ptr<OverflowList> overflow;
@@ -155,7 +155,7 @@ TEST_F(ComponentTests, EmplacesCell)
 TEST_F(ComponentTests, EmplacesCellWithOverflowValue)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto value = random.Generate(PAGE_SIZE).to_string();
+    const auto value = random.Generate(kPageSize).to_string();
     const auto local = Slice {value}.truncate(root.meta->min_local - 1);
     auto *start = root.page.data() + 0x100;
     const auto *end = emplace_cell(start, 1, value.size(), "a", local, Id {123});
@@ -176,7 +176,7 @@ TEST_F(ComponentTests, EmplacesCellWithOverflowValue)
 TEST_F(ComponentTests, EmplacesCellWithOverflowKey)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto long_key = random.Generate(PAGE_SIZE).to_string();
+    const auto long_key = random.Generate(kPageSize).to_string();
     const auto local = Slice {long_key}.truncate(root.meta->max_local);
     auto *start = root.page.data() + 0x100;
     auto *end = emplace_cell(start, long_key.size(), 1, local, "", Id {123});
@@ -209,7 +209,7 @@ TEST_F(ComponentTests, CollectsPayload)
 TEST_F(ComponentTests, CollectsPayloadWithOverflowValue)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
+    const auto value = random.Generate(kPageSize * 100).to_string();
     ASSERT_OK(payloads->emplace(collect_scratch.data(), root, "hello", value, 0));
     const auto cell = read_cell(root, 0);
     Slice slice;
@@ -224,7 +224,7 @@ TEST_F(ComponentTests, CollectsPayloadWithOverflowValue)
 TEST_F(ComponentTests, CollectsPayloadWithOverflowKey)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
+    const auto key = random.Generate(kPageSize * 100).to_string();
     ASSERT_OK(payloads->emplace(collect_scratch.data(), root, key, "world", 0));
     const auto cell = read_cell(root, 0);
     Slice slice;
@@ -239,8 +239,8 @@ TEST_F(ComponentTests, CollectsPayloadWithOverflowKey)
 TEST_F(ComponentTests, CollectsPayloadWithOverflowKeyValue)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
-    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
+    const auto key = random.Generate(kPageSize * 100).to_string();
+    const auto value = random.Generate(kPageSize * 100).to_string();
     ASSERT_OK(payloads->emplace(collect_scratch.data(), root, key, value, 0));
     const auto cell = read_cell(root, 0);
     Slice slice;
@@ -257,8 +257,8 @@ TEST_F(ComponentTests, CollectsMultiple)
     std::vector<std::string> data;
     auto root = acquire_node(Id::root(), true);
     for (std::size_t i {}; i < 3; ++i) {
-        const auto key = random.Generate(PAGE_SIZE * 10);
-        const auto value = random.Generate(PAGE_SIZE * 10);
+        const auto key = random.Generate(kPageSize * 10);
+        const auto value = random.Generate(kPageSize * 10);
         ASSERT_OK(payloads->emplace(collect_scratch.data(), root, key, value, i));
         data.emplace_back(key.to_string());
         data.emplace_back(value.to_string());
@@ -280,9 +280,9 @@ TEST_F(ComponentTests, CollectsMultiple)
 TEST_F(ComponentTests, PromotesCell)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
-    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
-    std::string emplace_scratch(PAGE_SIZE, '\0');
+    const auto key = random.Generate(kPageSize * 100).to_string();
+    const auto value = random.Generate(kPageSize * 100).to_string();
+    std::string emplace_scratch(kPageSize, '\0');
     ASSERT_OK(payloads->emplace(emplace_scratch.data() + 10, root, key, value, 0));
     auto cell = read_cell(root, 0);
     ASSERT_OK(payloads->promote(emplace_scratch.data() + 10, cell, Id::root()));
@@ -297,9 +297,9 @@ TEST_F(ComponentTests, PromotesCell)
 TEST_F(ComponentTests, PromotedCellSize)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto key = random.Generate(PAGE_SIZE * 100).to_string();
-    const auto value = random.Generate(PAGE_SIZE * 100).to_string();
-    std::string emplace_scratch(PAGE_SIZE, '\0');
+    const auto key = random.Generate(kPageSize * 100).to_string();
+    const auto value = random.Generate(kPageSize * 100).to_string();
+    std::string emplace_scratch(kPageSize, '\0');
     ASSERT_OK(payloads->emplace(nullptr, root, key, value, 0));
     auto cell = read_cell(root, 0);
     ASSERT_OK(payloads->promote(emplace_scratch.data() + 20, cell, Id::root()));
@@ -323,7 +323,7 @@ static auto run_promotion_test(ComponentTests &test, std::size_t key_size, std::
     auto root = test.acquire_node(Id::root(), true);
     const auto key = test.random.Generate(key_size).to_string();
     const auto value = test.random.Generate(value_size).to_string();
-    std::string emplace_scratch(test.PAGE_SIZE, '\0');
+    std::string emplace_scratch(test.kPageSize, '\0');
     ASSERT_OK(test.payloads->emplace(emplace_scratch.data() + 10, root, key, value, 0));
     auto external_cell = read_cell(root, 0);
     ASSERT_EQ(external_cell.size, varint_length(key.size()) + varint_length(value.size()) + external_cell.local_size + external_cell.has_remote * 8);
@@ -340,25 +340,25 @@ TEST_F(ComponentTests, CellIsPromoted)
 
 TEST_F(ComponentTests, PromotionCopiesOverflowKey)
 {
-    run_promotion_test(*this, PAGE_SIZE, 10);
+    run_promotion_test(*this, kPageSize, 10);
     PointerMap::Entry old_head;
     ASSERT_OK(pointers->read_entry(Id {3}, old_head));
-    ASSERT_EQ(old_head.type, PointerMap::OverflowHead);
+    ASSERT_EQ(old_head.type, PointerMap::kOverflowHead);
     ASSERT_EQ(old_head.back_ptr, Id::root());
 
     // Copy of the overflow key.
     PointerMap::Entry new_head;
     ASSERT_OK(pointers->read_entry(Id {4}, new_head));
-    ASSERT_EQ(new_head.type, PointerMap::OverflowHead);
+    ASSERT_EQ(new_head.type, PointerMap::kOverflowHead);
     ASSERT_EQ(new_head.back_ptr, Id::root());
 }
 
 TEST_F(ComponentTests, PromotionIgnoresOverflowValue)
 {
-    run_promotion_test(*this, 10, PAGE_SIZE);
+    run_promotion_test(*this, 10, kPageSize);
     PointerMap::Entry old_head;
     ASSERT_OK(pointers->read_entry(Id {3}, old_head));
-    ASSERT_EQ(old_head.type, PointerMap::OverflowHead);
+    ASSERT_EQ(old_head.type, PointerMap::kOverflowHead);
     ASSERT_EQ(old_head.back_ptr, Id::root());
 
     // No overflow key, so the chain didn't need to be copied.
@@ -369,16 +369,16 @@ TEST_F(ComponentTests, PromotionIgnoresOverflowValue)
 
 TEST_F(ComponentTests, PromotionCopiesOverflowKeyButIgnoresOverflowValue)
 {
-    run_promotion_test(*this, PAGE_SIZE, PAGE_SIZE);
+    run_promotion_test(*this, kPageSize, kPageSize);
     PointerMap::Entry old_head;
     ASSERT_OK(pointers->read_entry(Id {3}, old_head));
-    ASSERT_EQ(old_head.type, PointerMap::OverflowHead);
+    ASSERT_EQ(old_head.type, PointerMap::kOverflowHead);
     ASSERT_EQ(old_head.back_ptr, Id::root());
 
     // 1 overflow page needed for the key, and 1 for the value.
     PointerMap::Entry new_head;
     ASSERT_OK(pointers->read_entry(Id {5}, new_head));
-    ASSERT_EQ(new_head.type, PointerMap::OverflowHead);
+    ASSERT_EQ(new_head.type, PointerMap::kOverflowHead);
     ASSERT_EQ(new_head.back_ptr, Id::root());
 }
 
@@ -412,8 +412,8 @@ TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
     std::vector<std::string> keys;
     for (std::size_t i {}; i < 3; ++i) {
         auto root = acquire_node(Id::root(), true);
-        auto key = random.Generate(PAGE_SIZE).to_string();
-        const auto value = random.Generate(PAGE_SIZE).to_string();
+        auto key = random.Generate(kPageSize).to_string();
+        const auto value = random.Generate(kPageSize).to_string();
         key[0] = static_cast<char>(i);
         ASSERT_OK(payloads->emplace(nullptr, root, key, value, i));
         ASSERT_FALSE(root.overflow.has_value());
@@ -440,10 +440,10 @@ class NodeTests
       public testing::Test
 {
 public:
-    static constexpr auto PAGE_SIZE = MINIMUM_PAGE_SIZE;
+    static constexpr auto kPageSize = kMinPageSize;
 
     NodeTests()
-        : collect_scratch(PAGE_SIZE, '\x00')
+        : collect_scratch(kPageSize, '\x00')
     {
     }
 
@@ -527,7 +527,7 @@ public:
 
     virtual auto large_payload(const std::string &base_key) -> Record
     {
-        std::string key(PAGE_SIZE * 2, '\0');
+        std::string key(kPageSize * 2, '\0');
         mem_copy(key, base_key);
         return {key, key};
     }
@@ -1060,7 +1060,7 @@ TEST_P(BPlusTreeTests, AllowsNonInsertOperationsOnEmptyKeys)
 #if not NDEBUG
 TEST_P(BPlusTreeTests, InsertEmptyKeyDeathTest)
 {
-    ASSERT_DEATH((void)tree->insert("", "value"), EXPECTATION_MATCHER);
+    ASSERT_DEATH((void)tree->insert("", "value"), kExpectationMatcher);
 }
 #endif // NDEBUG
 
@@ -1068,10 +1068,10 @@ INSTANTIATE_TEST_SUITE_P(
     BPlusTreeTests,
     BPlusTreeTests,
     ::testing::Values(
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+        BPlusTreeTestParameters {kMinPageSize},
+        BPlusTreeTestParameters {kMinPageSize * 2},
+        BPlusTreeTestParameters {kMaxPageSize / 2},
+        BPlusTreeTestParameters {kMaxPageSize}));
 
 class BPlusTreeSpecialCases : public BPlusTreeTests
 {
@@ -1112,10 +1112,10 @@ INSTANTIATE_TEST_SUITE_P(
     BPlusTreeSpecialCases,
     BPlusTreeSpecialCases,
     ::testing::Values(
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+        BPlusTreeTestParameters {kMinPageSize},
+        BPlusTreeTestParameters {kMinPageSize * 2},
+        BPlusTreeTestParameters {kMaxPageSize / 2},
+        BPlusTreeTestParameters {kMaxPageSize}));
 
 
 class BPlusTreeSanityChecks : public BPlusTreeTests
@@ -1194,14 +1194,14 @@ INSTANTIATE_TEST_SUITE_P(
     BPlusTreeSanityChecks,
     BPlusTreeSanityChecks,
     ::testing::Values(
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b00},
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b01},
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b10},
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE, 0b11},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b00},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b01},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b10},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE, 0b11}));
+        BPlusTreeTestParameters {kMinPageSize, 0b00},
+        BPlusTreeTestParameters {kMinPageSize, 0b01},
+        BPlusTreeTestParameters {kMinPageSize, 0b10},
+        BPlusTreeTestParameters {kMinPageSize, 0b11},
+        BPlusTreeTestParameters {kMaxPageSize, 0b00},
+        BPlusTreeTestParameters {kMaxPageSize, 0b01},
+        BPlusTreeTestParameters {kMaxPageSize, 0b10},
+        BPlusTreeTestParameters {kMaxPageSize, 0b11}));
 
 class CursorTests : public BPlusTreeTests
 {
@@ -1375,10 +1375,10 @@ TEST_P(CursorTests, SanityCheck_Backward)
 TEST_P(CursorTests, InvalidCursorDeathTest)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
-    ASSERT_DEATH((void)cursor->key(), EXPECTATION_MATCHER);
-    ASSERT_DEATH((void)cursor->value(), EXPECTATION_MATCHER);
-    ASSERT_DEATH((void)cursor->next(), EXPECTATION_MATCHER);
-    ASSERT_DEATH((void)cursor->previous(), EXPECTATION_MATCHER);
+    ASSERT_DEATH((void)cursor->key(), kExpectationMatcher);
+    ASSERT_DEATH((void)cursor->value(), kExpectationMatcher);
+    ASSERT_DEATH((void)cursor->next(), kExpectationMatcher);
+    ASSERT_DEATH((void)cursor->previous(), kExpectationMatcher);
 }
 #endif // NDEBUG
 
@@ -1386,10 +1386,10 @@ INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,
     ::testing::Values(
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+        BPlusTreeTestParameters {kMinPageSize},
+        BPlusTreeTestParameters {kMinPageSize * 2},
+        BPlusTreeTestParameters {kMaxPageSize / 2},
+        BPlusTreeTestParameters {kMaxPageSize}));
 
 class PointerMapTests : public BPlusTreeTests
 {
@@ -1418,9 +1418,9 @@ TEST_P(PointerMapTests, FirstPointerMapIsPage2)
     map_page.TEST_populate(Id {2}, buffer, true);
     PointerMap map {*pager};
 
-    ASSERT_OK(map.write_entry(Id {3}, PointerMap::Entry {Id {33}, PointerMap::Node}));
-    ASSERT_OK(map.write_entry(Id {4}, PointerMap::Entry {Id {44}, PointerMap::FreelistLink}));
-    ASSERT_OK(map.write_entry(Id {5}, PointerMap::Entry {Id {55}, PointerMap::OverflowLink}));
+    ASSERT_OK(map.write_entry(Id {3}, PointerMap::Entry {Id {33}, PointerMap::kNode}));
+    ASSERT_OK(map.write_entry(Id {4}, PointerMap::Entry {Id {44}, PointerMap::kFreelistLink}));
+    ASSERT_OK(map.write_entry(Id {5}, PointerMap::Entry {Id {55}, PointerMap::kOverflowLink}));
 
     PointerMap::Entry entry_1, entry_2, entry_3;
     ASSERT_OK(map.read_entry(Id {3}, entry_1));
@@ -1430,9 +1430,9 @@ TEST_P(PointerMapTests, FirstPointerMapIsPage2)
     ASSERT_EQ(entry_1.back_ptr.value, 33);
     ASSERT_EQ(entry_2.back_ptr.value, 44);
     ASSERT_EQ(entry_3.back_ptr.value, 55);
-    ASSERT_EQ(entry_1.type, PointerMap::Node);
-    ASSERT_EQ(entry_2.type, PointerMap::FreelistLink);
-    ASSERT_EQ(entry_3.type, PointerMap::OverflowLink);
+    ASSERT_EQ(entry_1.type, PointerMap::kNode);
+    ASSERT_EQ(entry_2.type, PointerMap::kFreelistLink);
+    ASSERT_EQ(entry_3.type, PointerMap::kOverflowLink);
 }
 
 TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
@@ -1449,7 +1449,7 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
     for (std::size_t i {}; i < map_size() + 10; ++i) {
         if (i != map_size()) {
             const Id id {i + 3};
-            const PointerMap::Entry entry {id, PointerMap::Node};
+            const PointerMap::Entry entry {id, PointerMap::kNode};
             ASSERT_OK(pointers.write_entry(id, entry));
         }
     }
@@ -1459,7 +1459,7 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
             PointerMap::Entry entry;
             ASSERT_OK(pointers.read_entry(id, entry));
             ASSERT_EQ(entry.back_ptr.value, id.value);
-            ASSERT_EQ(entry.type, PointerMap::Node);
+            ASSERT_EQ(entry.type, PointerMap::kNode);
         }
     }
 }
@@ -1500,20 +1500,20 @@ INSTANTIATE_TEST_SUITE_P(
     PointerMapTests,
     PointerMapTests,
     ::testing::Values(
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE},
-        BPlusTreeTestParameters {MINIMUM_PAGE_SIZE * 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE / 2},
-        BPlusTreeTestParameters {MAXIMUM_PAGE_SIZE}));
+        BPlusTreeTestParameters {kMinPageSize},
+        BPlusTreeTestParameters {kMinPageSize * 2},
+        BPlusTreeTestParameters {kMaxPageSize / 2},
+        BPlusTreeTestParameters {kMaxPageSize}));
 
 class VacuumTests
     : public TestWithPager,
       public testing::Test
 {
 public:
-    static constexpr std::size_t FRAME_COUNT {8};
+    static constexpr std::size_t kFrameCount {8};
 
     VacuumTests()
-        : meta {PAGE_SIZE}
+        : meta {kPageSize}
     {
     }
 
@@ -1661,22 +1661,22 @@ TEST_F(VacuumTests, FreelistRegistersBackPointers)
 
     PointerMap::Entry entry;
     ASSERT_OK(pointers->read_entry(Id {5}, entry));
-    ASSERT_EQ(entry.type, PointerMap::FreelistLink);
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id {4});
 
     ASSERT_OK(pointers->read_entry(Id {4}, entry));
-    ASSERT_EQ(entry.type, PointerMap::FreelistLink);
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id {3});
 
     ASSERT_OK(pointers->read_entry(Id {3}, entry));
-    ASSERT_EQ(entry.type, PointerMap::FreelistLink);
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id::null());
 }
 
 TEST_F(VacuumTests, OverflowChainRegistersBackPointers)
 {
     // Creates an overflow chain of length 2, rooted at the second cell on the root page.
-    std::string overflow_data(PAGE_SIZE * 2, 'x');
+    std::string overflow_data(kPageSize * 2, 'x');
     ASSERT_OK(tree->insert("a", "value"));
     ASSERT_OK(tree->insert("b", overflow_data));
 
@@ -1686,8 +1686,8 @@ TEST_F(VacuumTests, OverflowChainRegistersBackPointers)
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {3});
-    ASSERT_EQ(head_entry.type, PointerMap::OverflowHead);
-    ASSERT_EQ(tail_entry.type, PointerMap::OverflowLink);
+    ASSERT_EQ(head_entry.type, PointerMap::kOverflowHead);
+    ASSERT_EQ(tail_entry.type, PointerMap::kOverflowLink);
 }
 
 TEST_F(VacuumTests, OverflowChainIsNullTerminated)
@@ -1705,7 +1705,7 @@ TEST_F(VacuumTests, OverflowChainIsNullTerminated)
     }
 
     ASSERT_OK(tree->insert("a", "value"));
-    ASSERT_OK(tree->insert("b", std::string(PAGE_SIZE * 2, 'x')));
+    ASSERT_OK(tree->insert("b", std::string(kPageSize * 2, 'x')));
 
     Page page_3, page_4;
     ASSERT_OK(pager->acquire(Id {3}, page_3));
@@ -1739,7 +1739,7 @@ TEST_F(VacuumTests, VacuumsFreelistInOrder)
 
     PointerMap::Entry entry;
     ASSERT_OK(pointers->read_entry(Id {4}, entry));
-    ASSERT_EQ(entry.type, PointerMap::FreelistLink);
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
     // Page Types:     N   P   1
@@ -1748,7 +1748,7 @@ TEST_F(VacuumTests, VacuumsFreelistInOrder)
     ASSERT_OK(tree->vacuum_one(Id {4}, vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_OK(pointers->read_entry(Id {3}, entry));
-    ASSERT_EQ(entry.type, PointerMap::FreelistLink);
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
     // Page Types:     N   P
@@ -1799,7 +1799,7 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
     PointerMap::Entry entry;
     ASSERT_OK(pointers->read_entry(Id {4}, entry));
     ASSERT_EQ(entry.back_ptr, Id::null());
-    ASSERT_EQ(entry.type, PointerMap::FreelistLink);
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     {
         Page page;
         ASSERT_OK(pager->acquire(Id {4}, page));
@@ -1813,7 +1813,7 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
     ASSERT_OK(tree->vacuum_one(Id {4}, vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_OK(pointers->read_entry(Id {3}, entry));
-    ASSERT_EQ(entry.type, PointerMap::FreelistLink);
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
     // Page Types:     N   P
@@ -1838,19 +1838,19 @@ TEST_F(VacuumTests, VacuumsFreelistInReverseOrder)
 
 TEST_F(VacuumTests, CleansUpOverflowValues)
 {
-    clean_up_test(16, PAGE_SIZE * 2);
+    clean_up_test(16, kPageSize * 2);
 }
 
 // When external nodes are merged, the separator is removed. If the separator key was overflowing, we
 // must not forget to move its overflow pages to the freelist.
 TEST_F(VacuumTests, CleansUpOverflowKeys)
 {
-    clean_up_test(PAGE_SIZE * 2, 16);
+    clean_up_test(kPageSize * 2, 16);
 }
 
 TEST_F(VacuumTests, CleansUpOverflowPayloads)
 {
-    clean_up_test(PAGE_SIZE * 2, PAGE_SIZE * 2);
+    clean_up_test(kPageSize * 2, kPageSize * 2);
 }
 
 TEST_F(VacuumTests, VacuumFreelistSanityCheck)
@@ -1859,7 +1859,7 @@ TEST_F(VacuumTests, VacuumFreelistSanityCheck)
 
     for (std::size_t iteration {}; iteration < 1'000; ++iteration) {
         std::vector<Node> nodes;
-        for (std::size_t i {}; i < FRAME_COUNT - 1; ++i) {
+        for (std::size_t i {}; i < kFrameCount - 1; ++i) {
             nodes.emplace_back(allocate_node(true));
         }
 
@@ -1872,7 +1872,7 @@ TEST_F(VacuumTests, VacuumFreelistSanityCheck)
         // This will vacuum the whole freelist, as well as the pointer map page on page 2.
         Id target {pager->page_count()};
         bool vacuumed {};
-        for (std::size_t i {}; i < FRAME_COUNT; ++i) {
+        for (std::size_t i {}; i < kFrameCount; ++i) {
             ASSERT_OK(tree->vacuum_one(target, vacuumed));
             ASSERT_TRUE(vacuumed);
             --target.value;
@@ -1919,7 +1919,7 @@ TEST_F(VacuumTests, VacuumsOverflowChain_A)
     ASSERT_EQ(node_4.page.id().value, 4);
 
     // Creates an overflow chain of length 2, rooted at the second cell on the root page.
-    std::string overflow_data(PAGE_SIZE * 2, 'x');
+    std::string overflow_data(kPageSize * 2, 'x');
     ASSERT_OK(tree->insert("a", "value"));
     ASSERT_OK(tree->insert("b", overflow_data));
 
@@ -1949,8 +1949,8 @@ TEST_F(VacuumTests, VacuumsOverflowChain_A)
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {3});
-    ASSERT_EQ(head_entry.type, PointerMap::OverflowHead);
-    ASSERT_EQ(tail_entry.type, PointerMap::OverflowLink);
+    ASSERT_EQ(head_entry.type, PointerMap::kOverflowHead);
+    ASSERT_EQ(tail_entry.type, PointerMap::kOverflowLink);
 }
 
 TEST_F(VacuumTests, VacuumsOverflowChain_B)
@@ -1964,7 +1964,7 @@ TEST_F(VacuumTests, VacuumsOverflowChain_B)
     ASSERT_OK(freelist->push(std::move(node_5.page)));
     ASSERT_OK(freelist->push(std::move(node_6.page)));
 
-    std::string overflow_data(PAGE_SIZE * 2, 'x');
+    std::string overflow_data(kPageSize * 2, 'x');
     ASSERT_OK(tree->insert("a", "value"));
     ASSERT_OK(tree->insert("b", overflow_data));
 
@@ -1993,8 +1993,8 @@ TEST_F(VacuumTests, VacuumsOverflowChain_B)
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {4});
-    ASSERT_EQ(head_entry.type, PointerMap::OverflowHead);
-    ASSERT_EQ(tail_entry.type, PointerMap::OverflowLink);
+    ASSERT_EQ(head_entry.type, PointerMap::kOverflowHead);
+    ASSERT_EQ(tail_entry.type, PointerMap::kOverflowLink);
 }
 
 TEST_F(VacuumTests, VacuumOverflowChainSanityCheck)
@@ -2010,7 +2010,7 @@ TEST_F(VacuumTests, VacuumOverflowChainSanityCheck)
     // Create overflow chains, but don't overflow the root node. Should create 3 chains, 1 of length 1, and 2 of length 2.
     std::vector<std::string> values;
     for (std::size_t i {}; i < 3; ++i) {
-        const auto value = random.Generate(PAGE_SIZE * std::min<std::size_t>(i + 1, 2));
+        const auto value = random.Generate(kPageSize * std::min<std::size_t>(i + 1, 2));
         ASSERT_OK(tree->insert(tools::integral_key<1>(i), value));
         values.emplace_back(value.to_string());
     }
@@ -2100,12 +2100,12 @@ TEST_F(VacuumTests, SanityCheck_Freelist)
 
 TEST_F(VacuumTests, SanityCheck_Freelist_OverflowHead)
 {
-    sanity_check(0, 50, 16, PAGE_SIZE / 2);
+    sanity_check(0, 50, 16, kPageSize / 2);
 }
 
 TEST_F(VacuumTests, SanityCheck_Freelist_OverflowLink)
 {
-    sanity_check(0, 50, 16, PAGE_SIZE * 2);
+    sanity_check(0, 50, 16, kPageSize * 2);
 }
 
 TEST_F(VacuumTests, SanityCheck_Nodes_1)
@@ -2120,17 +2120,17 @@ TEST_F(VacuumTests, SanityCheck_Nodes_2)
 
 TEST_F(VacuumTests, SanityCheck_NodesWithOverflowValues)
 {
-    sanity_check(50, 50, 16, PAGE_SIZE * 2);
+    sanity_check(50, 50, 16, kPageSize * 2);
 }
 
 TEST_F(VacuumTests, SanityCheck_NodesWithOverflowKeys)
 {
-    sanity_check(50, 50, PAGE_SIZE * 2, 16);
+    sanity_check(50, 50, kPageSize * 2, 16);
 }
 
 TEST_F(VacuumTests, SanityCheck_NodesWithOverflowPayloads)
 {
-    sanity_check(50, 50, PAGE_SIZE * 2, PAGE_SIZE * 2);
+    sanity_check(50, 50, kPageSize * 2, kPageSize * 2);
 }
 
 } // namespace calicodb
