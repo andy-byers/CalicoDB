@@ -16,7 +16,7 @@ namespace calicodb
 #if not NDEBUG
 TEST(TestUtils, ExpectationDeathTest)
 {
-    ASSERT_DEATH(CDB_EXPECT_TRUE(false), EXPECTATION_MATCHER);
+    ASSERT_DEATH(CDB_EXPECT_TRUE(false), kExpectationMatcher);
 }
 #endif // not NDEBUG
 
@@ -660,28 +660,33 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
     ASSERT_EQ(describe_size(10'000ULL, 3), "9.77 KiB");
 }
 
-class InterceptorTests
-    : public InMemoryTest,
-      public testing::Test
+class InterceptorTests : public testing::Test
 {
+public:
+    InterceptorTests()
+        : env {std::make_unique<tools::FaultInjectionEnv>()}
+    {
+    }
+
+    std::unique_ptr<tools::FaultInjectionEnv> env;
 };
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
-    QUICK_INTERCEPTOR("test/data", tools::Interceptor::Open);
+    QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
 
     Editor *editor;
-    assert_special_error(get_env().new_editor("test/data", &editor));
-    expect_ok(get_env().new_editor("test/wal", &editor));
+    assert_special_error(env->new_editor("./test", &editor));
+    expect_ok(env->new_editor("./wal-", &editor));
     delete editor;
 }
 
 TEST_F(InterceptorTests, RespectsSyscallType)
 {
-    QUICK_INTERCEPTOR("test/data", tools::Interceptor::Write);
+    QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
 
     Editor *editor;
-    expect_ok(get_env().new_editor("test/data", &editor));
+    expect_ok(env->new_editor("./test", &editor));
     assert_special_error(editor->write({}, 0));
     delete editor;
 }

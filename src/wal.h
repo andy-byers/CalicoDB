@@ -13,11 +13,12 @@ class WriteAheadLog
 public:
     friend class Recovery;
 
+    static constexpr std::size_t kSegmentCutoff {32};
+
     struct Parameters {
         std::string prefix;
         Env *env {};
         std::size_t page_size {};
-        std::size_t segment_cutoff {};
     };
 
     WriteAheadLog() = default;
@@ -48,7 +49,6 @@ private:
 
     Env *m_env {};
     std::string m_tail;
-    std::size_t m_segment_cutoff {};
     std::size_t m_bytes_written {};
 
     WalWriter *m_writer {};

@@ -2,6 +2,7 @@
 #include <cstdarg>
 #include <dirent.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -258,7 +259,8 @@ auto EnvPosix::get_children(const std::string &path, std::vector<std::string> &o
         return !std::strcmp(s, ".") || !std::strcmp(s, "..");
     };
 
-    auto *dir = opendir(path.c_str());
+    const auto [dir_path, base_path] = split_path(path);
+    auto *dir = opendir(dir_path.c_str());
     if (dir == nullptr) {
         return errno_to_status();
     }
@@ -305,14 +307,24 @@ auto EnvPosix::new_info_logger(const std::string &path, InfoLogger **out) -> Sta
     return Status::ok();
 }
 
-auto EnvPosix::create_directory(const std::string &path) -> Status
+auto split_path(const std::string &filename) -> std::pair<std::string, std::string>
 {
-    return dir_create(path, 0755);
+    auto *buffer = new char[filename.size() + 1]();
+
+    std::strcpy(buffer, filename.c_str());
+    std::string base {basename(buffer)};
+
+    std::strcpy(buffer, filename.c_str());
+    std::string dir {dirname(buffer)};
+
+    delete[] buffer;
+
+    return {dir, base};
 }
 
-auto EnvPosix::remove_directory(const std::string &path) -> Status
+auto join_paths(const std::string &lhs, const std::string &rhs) -> std::string
 {
-    return dir_remove(path);
+    return lhs + '/' + rhs;
 }
 
 } // namespace calicodb

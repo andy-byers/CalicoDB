@@ -59,16 +59,16 @@ FileHeader::FileHeader(const char *data)
 
 auto FileHeader::compute_crc() const -> std::uint32_t
 {
-    char data[FileHeader::SIZE];
+    char data[FileHeader::kSize];
     write_file_header(data, *this);
-    return crc32c::Value(data + 8, FileHeader::SIZE - 8);
+    return crc32c::Value(data + 8, FileHeader::kSize - 8);
 }
 
 auto FileHeader::write(Page &page) const -> void
 {
     CDB_EXPECT_TRUE(page.id().is_root());
     write_file_header(page.data(), *this);
-    insert_delta(page.m_deltas, {0, SIZE});
+    insert_delta(page.m_deltas, {0, kSize});
 }
 
 auto NodeHeader::read(const Page &page) -> void
@@ -124,7 +124,7 @@ auto NodeHeader::write(Page &page) const -> void
     data += sizeof(PageSize);
 
     *data = static_cast<char>(frag_count);
-    insert_delta(page.m_deltas, {page_offset(page), SIZE});
+    insert_delta(page.m_deltas, {page_offset(page), kSize});
 }
 
 } // namespace calicodb

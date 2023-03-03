@@ -29,15 +29,18 @@ sanitize_options(const Options &options) -> Options
 
 auto DBImpl::open(const Slice &path, const Options &options) -> Status
 {
+    if (path.is_empty()) {
+        return Status::invalid_argument("path is empty");
+    }
     auto sanitized = sanitize_options(options);
 
-    m_db_prefix = path.to_string();
-    if (m_db_prefix.back() != '/') {
-        m_db_prefix += '/';
-    }
+    m_filename = path.to_string();
+    const auto [dir, base] = split_path(m_filename);
+    m_filename = join_paths(dir, base);
+
     m_wal_prefix = sanitized.wal_prefix.to_string();
     if (m_wal_prefix.empty()) {
-        m_wal_prefix = m_db_prefix + "wal-";
+        m_wal_prefix = m_filename + kDefaultWalSuffix;
     }
 
     // Any error during initialization is fatal.
@@ -52,10 +55,8 @@ auto DBImpl::do_open(Options sanitized) -> Status
         m_owns_env = true;
     }
 
-    if (auto s = m_env->file_exists(m_db_prefix); s.is_not_found()) {
-        if (sanitized.create_if_missing) {
-            CDB_TRY(m_env->create_directory(m_db_prefix));
-        } else {
+    if (auto s = m_env->file_exists(m_filename); s.is_not_found()) {
+        if (!sanitized.create_if_missing) {
             return Status::invalid_argument("database does not exist");
         }
     } else if (s.is_ok()) {
@@ -68,13 +69,13 @@ auto DBImpl::do_open(Options sanitized) -> Status
 
     m_info_log = sanitized.info_log;
     if (m_info_log == nullptr) {
-        CDB_TRY(m_env->new_info_logger(m_db_prefix + "log", &m_info_log));
+        CDB_TRY(m_env->new_info_logger(m_filename + kDefaultLogSuffix, &m_info_log));
         sanitized.info_log = m_info_log;
         m_owns_info_log = true;
     }
 
     FileHeader state;
-    CDB_TRY(setup(m_db_prefix, *m_env, sanitized, state));
+    CDB_TRY(setup(m_filename, *m_env, sanitized, state));
     m_commit_lsn = state.commit_lsn;
     m_record_count = state.record_count;
     if (!m_commit_lsn.is_null()) {
@@ -87,13 +88,12 @@ auto DBImpl::do_open(Options sanitized) -> Status
             m_wal_prefix,
             m_env,
             sanitized.page_size,
-            256,
         },
         &wal));
 
     CDB_TRY(Pager::open(
         {
-            m_db_prefix,
+            m_filename,
             m_env,
             &m_scratch,
             wal,
@@ -190,36 +190,34 @@ auto DBImpl::destroy(const std::string &path, const Options &options) -> Status
         owns_env = true;
     }
 
-    auto prefix = path;
-    if (prefix.back() != '/') {
-        prefix += '/';
+    const auto [dir, base] = split_path(path);
+    const auto filename = join_paths(dir, base);
+    auto wal_prefix = options.wal_prefix.to_string();
+    if (wal_prefix.empty()) {
+        wal_prefix = filename + kDefaultWalSuffix;
     }
+    if (options.info_log == nullptr) {
+        (void)env->remove_file(filename + kDefaultLogSuffix);
+    }
+    // TODO: Make sure this file is a CalicoDB database.
+    auto s = env->remove_file(filename);
 
     std::vector<std::string> children;
-    if (const auto s = env->get_children(path, children); s.is_ok()) {
-        for (const auto &name : children) {
-            (void)env->remove_file(prefix + name);
-        }
+    auto t = env->get_children(dir, children);
+    if (s.is_ok()) {
+        s = t;
     }
-
-    if (!options.wal_prefix.is_empty()) {
-        children.clear();
-
-        auto dir_path = options.wal_prefix.to_string();
-        if (const auto pos = dir_path.rfind('/'); pos != std::string::npos) {
-            dir_path.erase(pos + 1);
-        }
-
-        if (const auto s = env->get_children(dir_path, children); s.is_ok()) {
-            for (const auto &name : children) {
-                const auto filename = dir_path + name;
-                if (Slice {filename}.starts_with(options.wal_prefix)) {
-                    (void)env->remove_file(filename);
+    if (t.is_ok()) {
+        for (const auto &name : children) {
+            const auto sibling_filename = join_paths(dir, name);
+            if (sibling_filename.find(wal_prefix) == 0) {
+                t = env->remove_file(sibling_filename);
+                if (s.is_ok()) {
+                    s = t;
                 }
             }
         }
     }
-    auto s = env->remove_directory(path);
 
     if (owns_env) {
         delete env;
@@ -413,7 +411,7 @@ auto DBImpl::save_state(Page root, Lsn commit_lsn) const -> Status
     FileHeader header {root};
     pager->save_state(header);
     tree->save_state(header);
-    header.magic_code = FileHeader::MAGIC_CODE;
+    header.magic_code = FileHeader::kMagicCode;
     header.commit_lsn = commit_lsn;
     header.record_count = m_record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
@@ -451,15 +449,15 @@ auto DBImpl::TEST_validate() const -> void
     tree->TEST_check_nodes();
 }
 
-auto setup(const std::string &prefix, Env &env, const Options &options, FileHeader &header) -> Status
+auto setup(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
 {
-    static constexpr std::size_t MINIMUM_FRAME_COUNT {16};
+    static constexpr std::size_t kMinFrameCount {16};
 
-    if (options.page_size < MINIMUM_PAGE_SIZE) {
+    if (options.page_size < kMinPageSize) {
         return Status::invalid_argument("page size is too small");
     }
 
-    if (options.page_size > MAXIMUM_PAGE_SIZE) {
+    if (options.page_size > kMaxPageSize) {
         return Status::invalid_argument("page size is too large");
     }
 
@@ -467,32 +465,31 @@ auto setup(const std::string &prefix, Env &env, const Options &options, FileHead
         return Status::invalid_argument("page size is not a power of 2");
     }
 
-    if (options.cache_size < options.page_size * MINIMUM_FRAME_COUNT) {
+    if (options.cache_size < options.page_size * kMinFrameCount) {
         return Status::invalid_argument("page cache is too small");
     }
 
-    const auto path = prefix + "data";
     std::unique_ptr<Reader> reader;
-    Reader *reader_temp {};
+    Reader *reader_temp;
 
     if (auto s = env.new_reader(path, &reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
         std::size_t file_size {};
         CDB_TRY(env.file_size(path, file_size));
 
-        if (file_size < FileHeader::SIZE) {
+        if (file_size < FileHeader::kSize) {
             return Status::invalid_argument("file is not a database");
         }
 
-        char buffer[FileHeader::SIZE];
-        std::size_t read_size = sizeof(buffer);
+        char buffer[FileHeader::kSize];
+        auto read_size = sizeof(buffer);
         CDB_TRY(reader->read(buffer, read_size, 0));
         if (read_size != sizeof(buffer)) {
             return Status::system_error("incomplete read of file header");
         }
         header = FileHeader(buffer);
 
-        if (header.magic_code != FileHeader::MAGIC_CODE) {
+        if (header.magic_code != FileHeader::kMagicCode) {
             return Status::invalid_argument("file is not a database");
         }
         if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
@@ -513,10 +510,10 @@ auto setup(const std::string &prefix, Env &env, const Options &options, FileHead
         return s;
     }
 
-    if (header.page_size < MINIMUM_PAGE_SIZE) {
+    if (header.page_size < kMinPageSize) {
         return Status::corruption("header page size is too small");
     }
-    if (header.page_size > MAXIMUM_PAGE_SIZE) {
+    if (header.page_size > kMaxPageSize) {
         return Status::corruption("header page size is too large");
     }
     if (!is_power_of_two(header.page_size)) {

@@ -59,7 +59,7 @@ private:
     [[nodiscard]] auto do_vacuum() -> Status;
 
     mutable Status m_status;
-    std::string m_db_prefix;
+    std::string m_filename;
     std::string m_wal_prefix;
     std::string m_scratch;
     Env *m_env {};

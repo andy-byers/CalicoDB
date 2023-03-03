@@ -14,7 +14,7 @@ static auto header_offset(const Node &node)
 
 static auto cell_slots_offset(const Node &node)
 {
-    return header_offset(node) + NodeHeader::SIZE;
+    return header_offset(node) + NodeHeader::kSize;
 }
 
 static auto cell_area_offset(const Node &node)
@@ -250,13 +250,13 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
 auto Node::initialize() -> void
 {
 
-    slots_offset = static_cast<PageSize>(page_offset(page) + NodeHeader::SIZE);
+    slots_offset = static_cast<PageSize>(page_offset(page) + NodeHeader::kSize);
 
     if (header.cell_start == 0) {
         header.cell_start = static_cast<PageSize>(page.size());
     }
 
-    const auto after_header = page_offset(page) + NodeHeader::SIZE;
+    const auto after_header = page_offset(page) + NodeHeader::kSize;
     const auto bottom = after_header + header.cell_count * sizeof(PageSize);
     const auto top = header.cell_start;
 
@@ -553,12 +553,12 @@ auto merge_root(Node &root, Node &child) -> void
     }
 
     // Copy the cell content area.
-    CDB_EXPECT_GE(header.cell_start, FileHeader::SIZE + NodeHeader::SIZE);
+    CDB_EXPECT_GE(header.cell_start, FileHeader::kSize + NodeHeader::kSize);
     auto memory = root.page.span(header.cell_start, child.page.size() - header.cell_start);
     std::memcpy(memory.data(), child.page.data() + header.cell_start, memory.size());
 
     // Copy the header and cell pointers.
-    memory = root.page.span(FileHeader::SIZE + NodeHeader::SIZE, header.cell_count * sizeof(PageSize));
+    memory = root.page.span(FileHeader::kSize + NodeHeader::kSize, header.cell_count * sizeof(PageSize));
     std::memcpy(memory.data(), child.page.data() + cell_slots_offset(child), memory.size());
     root.header = header;
     root.meta = child.meta;

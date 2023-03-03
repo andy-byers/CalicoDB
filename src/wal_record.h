@@ -12,17 +12,17 @@
 namespace calicodb
 {
 
-static constexpr std::size_t WAL_BLOCK_SCALE {4};
+static constexpr std::size_t kWalBlockScale {4};
 
 [[nodiscard]] inline constexpr auto wal_block_size(std::size_t page_size) -> std::size_t
 {
-    return std::min(MAXIMUM_PAGE_SIZE, page_size * WAL_BLOCK_SCALE);
+    return std::min(kMaxPageSize, page_size * kWalBlockScale);
 }
 
 [[nodiscard]] inline constexpr auto wal_scratch_size(std::size_t page_size) -> std::size_t
 {
-    const std::size_t DELTA_PAYLOAD_HEADER_SIZE {11};
-    return page_size + DELTA_PAYLOAD_HEADER_SIZE + sizeof(PageDelta);
+    const std::size_t kDeltaPayloadHeaderSize {11};
+    return page_size + kDeltaPayloadHeaderSize + sizeof(PageDelta);
 }
 
 [[nodiscard]] inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
@@ -50,27 +50,27 @@ static constexpr std::size_t WAL_BLOCK_SCALE {4};
 }
 
 enum WalPayloadType : char {
-    WPT_Delta = '\xD0',
-    WPT_FullImage = '\xF0',
+    kDeltaPayload = '\xD0',
+    kFullImagePayload = '\xF0',
 };
 
 enum WalRecordType : char {
-    WRT_Empty = '\x00',
-    WRT_Full = '\xA4',
-    WRT_First = '\xB3',
-    WRT_Middle = '\xC2',
-    WRT_Last = '\xD1',
+    kNoRecord = '\x00',
+    kFullRecord = '\xA4',
+    kFirstRecord = '\xB3',
+    kMiddleRecord = '\xC2',
+    kLastRecord = '\xD1',
 };
 
 /*
  * Header fields associated with each WAL record. Based off of the WAL protocol found in RocksDB.
  */
 struct WalRecordHeader {
-    static constexpr std::size_t SIZE {7};
+    static constexpr std::size_t kSize {7};
 
     [[nodiscard]] static auto contains_record(const Slice &data) -> bool
     {
-        return data.size() > WalRecordHeader::SIZE && data[0] != '\x00';
+        return data.size() > WalRecordHeader::kSize && data[0] != '\x00';
     }
 
     WalRecordType type {};
@@ -82,7 +82,7 @@ struct WalRecordHeader {
  * Header fields associated with each payload.
  */
 struct WalPayloadHeader {
-    static constexpr std::size_t SIZE {8};
+    static constexpr std::size_t kSize {8};
 
     Lsn lsn;
 };
@@ -201,6 +201,11 @@ public:
         return m_segments.empty();
     }
 
+    [[nodiscard]] auto size() const -> std::size_t
+    {
+        return m_segments.size();
+    }
+
     [[nodiscard]] auto first() const -> Id
     {
         return m_segments.empty() ? Id::null() : cbegin(m_segments)->first;
@@ -244,11 +249,6 @@ public:
         m_segments.erase(itr, cend(m_segments));
     }
 
-    [[nodiscard]] auto segments() const -> const std::map<Id, Lsn> &
-    {
-        return m_segments;
-    }
-
 private:
     std::map<Id, Lsn> m_segments;
 };
@@ -270,14 +270,14 @@ private:
     // Read the first LSN. If it exists, it will always be at the same location: right after the first
     // record header, which is written at offset 0.
     auto read_size = bytes.size();
-    CDB_TRY(file->read(bytes.data(), read_size, WalRecordHeader::SIZE));
+    CDB_TRY(file->read(bytes.data(), read_size, WalRecordHeader::kSize));
 
     bytes.truncate(read_size);
 
     if (bytes.is_empty()) {
         return Status::corruption("segment is empty");
     }
-    if (bytes.size() != WalPayloadHeader::SIZE) {
+    if (bytes.size() != WalPayloadHeader::kSize) {
         return Status::corruption("incomplete block");
     }
     const Lsn lsn {get_u64(bytes)};

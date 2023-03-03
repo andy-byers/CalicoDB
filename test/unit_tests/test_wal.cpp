@@ -30,10 +30,10 @@ public:
     }
 
     std::vector<std::array<WalRecordType, 3>> valid_left_merges {
-        std::array<WalRecordType, 3> {WalRecordType {}, WRT_First, WRT_First},
-        std::array<WalRecordType, 3> {WalRecordType {}, WRT_Full, WRT_Full},
-        std::array<WalRecordType, 3> {WRT_First, WRT_Middle, WRT_First},
-        std::array<WalRecordType, 3> {WRT_First, WRT_Last, WRT_Full},
+        std::array<WalRecordType, 3> {WalRecordType {}, kFirstRecord, kFirstRecord},
+        std::array<WalRecordType, 3> {WalRecordType {}, kFullRecord, kFullRecord},
+        std::array<WalRecordType, 3> {kFirstRecord, kMiddleRecord, kFirstRecord},
+        std::array<WalRecordType, 3> {kFirstRecord, kLastRecord, kFullRecord},
     };
     WalRecordHeader lhs {};
     WalRecordHeader rhs {};
@@ -55,13 +55,13 @@ TEST_F(WalRecordMergeTests, ValidLeftMerges)
 
 TEST_F(WalRecordMergeTests, MergingInvalidTypesIndicatesCorruption)
 {
-    setup({WRT_First, WRT_First});
+    setup({kFirstRecord, kFirstRecord});
     ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
 
-    setup({WalRecordType {}, WRT_Middle});
+    setup({WalRecordType {}, kMiddleRecord});
     ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
 
-    setup({WRT_Middle, WRT_First});
+    setup({kMiddleRecord, kFirstRecord});
     ASSERT_TRUE(merge_records_left(lhs, rhs).is_corruption());
 }
 
@@ -94,11 +94,11 @@ private:
 class WalPayloadTests : public testing::Test
 {
 public:
-    static constexpr std::size_t PAGE_SIZE {0x80};
+    static constexpr std::size_t kPageSize {0x80};
 
     WalPayloadTests()
-        : image {random.Generate(PAGE_SIZE).to_string()},
-          scratch(wal_scratch_size(PAGE_SIZE), '\x00')
+        : image {random.Generate(kPageSize).to_string()},
+          scratch(wal_scratch_size(kPageSize), '\x00')
     {
     }
 
@@ -140,9 +140,13 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
 [[nodiscard]] auto get_ids(const WalSet &c)
 {
     std::vector<Id> ids;
-    std::transform(cbegin(c.segments()), cend(c.segments()), back_inserter(ids), [](const auto &entry) {
-        return entry.first;
-    });
+    for (Id id; ; ) {
+        id = c.id_after(id);
+        if (id.is_null()) {
+            break;
+        }
+        ids.emplace_back(id);
+    }
     return ids;
 }
 
@@ -246,13 +250,13 @@ class WalComponentTests
       public testing::Test
 {
 public:
-    static constexpr std::size_t PAGE_SIZE {0x200};
-    const std::string WAL_PREFIX {"test/wal-"};
+    static constexpr std::size_t kPageSize {0x200};
+    const std::string kWalPrefix {"test-wal-"};
 
     WalComponentTests()
-        : m_writer_tail(wal_block_size(PAGE_SIZE), '\0'),
-          m_reader_tail(wal_block_size(PAGE_SIZE), '\0'),
-          m_reader_data(wal_block_size(PAGE_SIZE), '\0')
+        : m_writer_tail(wal_block_size(kPageSize), '\0'),
+          m_reader_tail(wal_block_size(kPageSize), '\0'),
+          m_reader_data(wal_block_size(kPageSize), '\0')
     {
     }
 
@@ -271,13 +275,13 @@ public:
 
     [[nodiscard]] auto make_reader(Id id) -> WalReader
     {
-        EXPECT_OK(env->new_reader(encode_segment_name(WAL_PREFIX, id), &m_reader_file));
+        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, id), &m_reader_file));
         return WalReader {*m_reader_file, m_reader_tail};
     }
 
     [[nodiscard]] auto make_writer(Id id) -> WalWriter
     {
-        EXPECT_OK(env->new_logger(encode_segment_name(WAL_PREFIX, id), &m_writer_file));
+        EXPECT_OK(env->new_logger(encode_segment_name(kWalPrefix, id), &m_writer_file));
         return WalWriter {*m_writer_file, m_writer_tail};
     }
 
@@ -291,7 +295,7 @@ public:
 
     [[nodiscard]] static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
     {
-        out.resize(wal_scratch_size(PAGE_SIZE));
+        out.resize(wal_scratch_size(kPageSize));
         Span buffer {out};
 
         CDB_TRY(reader.read(buffer));
@@ -334,7 +338,7 @@ TEST_F(WalComponentTests, AutomaticFlush)
     auto writer = make_writer(Id::root());
 
     auto lsn = Lsn::root();
-    for (; lsn.value < PAGE_SIZE * 5; ++lsn.value) {
+    for (; lsn.value < kPageSize * 5; ++lsn.value) {
         ASSERT_OK(wal_write(writer, lsn, "=^.^="));
     }
     ASSERT_GT(writer.flushed_lsn(), Lsn::null());
@@ -357,12 +361,12 @@ TEST_F(WalComponentTests, HandlesRecordsWithinBlock)
 TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
 {
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         ASSERT_EQ(wal_read(reader), tools::integral_key(i));
     }
     assert_reader_is_done(reader);
@@ -371,12 +375,12 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
 TEST_F(WalComponentTests, ReaderReportsMismatchedCrc)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, "test"));
+    ASSERT_OK(wal_write(writer, Lsn {1}, "./test"));
     ASSERT_OK(writer.flush());
 
     Editor *editor;
-    ASSERT_OK(env->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
-    ASSERT_OK(editor->write("TEST", WalRecordHeader::SIZE + sizeof(Lsn)));
+    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
+    ASSERT_OK(editor->write("TEST", WalRecordHeader::kSize + sizeof(Lsn)));
     delete editor;
 
     std::string buffer;
@@ -387,7 +391,7 @@ TEST_F(WalComponentTests, ReaderReportsMismatchedCrc)
 TEST_F(WalComponentTests, ReaderReportsEmptyFile)
 {
     Editor *editor;
-    ASSERT_OK(env->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
     delete editor;
 
     std::string buffer;
@@ -398,11 +402,11 @@ TEST_F(WalComponentTests, ReaderReportsEmptyFile)
 TEST_F(WalComponentTests, ReaderReportsIncompleteBlock)
 {
     Editor *editor;
-    ASSERT_OK(env->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
     ASSERT_OK(editor->write("\x01\x02\x03", 0));
     delete editor;
 
-    std::string buffer(wal_scratch_size(PAGE_SIZE), '\0');
+    std::string buffer(wal_scratch_size(kPageSize), '\0');
     auto reader = make_reader(Id::root());
     ASSERT_TRUE(wal_read_with_status(reader, buffer).is_corruption());
 }
@@ -410,17 +414,17 @@ TEST_F(WalComponentTests, ReaderReportsIncompleteBlock)
 TEST_F(WalComponentTests, ReaderReportsInvalidSize)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, "test"));
+    ASSERT_OK(wal_write(writer, Lsn {1}, "./test"));
     ASSERT_OK(writer.flush());
 
     WalRecordHeader header;
-    header.type = WRT_Full;
+    header.type = kFullRecord;
     header.size = -1;
-    std::string buffer(WalRecordHeader::SIZE, '\0');
+    std::string buffer(WalRecordHeader::kSize, '\0');
     write_wal_record_header(buffer, header);
 
     Editor *editor;
-    ASSERT_OK(env->new_editor(encode_segment_name(WAL_PREFIX, Id::root()), &editor));
+    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
     ASSERT_OK(editor->write(buffer, 0));
     delete editor;
 
@@ -431,14 +435,14 @@ TEST_F(WalComponentTests, ReaderReportsInvalidSize)
 TEST_F(WalComponentTests, ReadsFirstLsn)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {42}, "test"));
+    ASSERT_OK(wal_write(writer, Lsn {42}, "./test"));
     ASSERT_OK(writer.flush());
 
     WalSet set;
     set.add_segment(Id::root());
 
     Lsn first_lsn;
-    ASSERT_OK(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn));
+    ASSERT_OK(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn));
     ASSERT_EQ(first_lsn, Lsn {42});
     ASSERT_EQ(set.first_lsn(Id::root()), Lsn {42});
 }
@@ -450,22 +454,22 @@ TEST_F(WalComponentTests, FailureToReadFirstLsn)
 
     // File does not exist in env, so the reader can't be opened.
     Lsn first_lsn;
-    ASSERT_TRUE(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn).is_not_found());
+    ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_not_found());
 
     // File exists, but is empty.
     Logger *logger;
-    ASSERT_OK(env->new_logger(encode_segment_name(WAL_PREFIX, Id::root()), &logger));
-    ASSERT_TRUE(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_OK(env->new_logger(encode_segment_name(kWalPrefix, Id::root()), &logger));
+    ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_corruption());
 
     // File is too small to read the LSN.
-    std::string buffer(WalRecordHeader::SIZE + 3, '\0');
+    std::string buffer(WalRecordHeader::kSize + 3, '\0');
     ASSERT_OK(logger->write(buffer));
-    ASSERT_TRUE(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_corruption());
 
     // LSN is NULL.
-    buffer.resize(wal_block_size(PAGE_SIZE) - buffer.size());
+    buffer.resize(wal_block_size(kPageSize) - buffer.size());
     ASSERT_OK(logger->write(buffer));
-    ASSERT_TRUE(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_corruption());
 
     delete logger;
 }
@@ -478,14 +482,14 @@ TEST_F(WalComponentTests, PrefersToGetLsnFromCache)
 
     // File doesn't exist, but the LSN is cached.
     Lsn first_lsn;
-    ASSERT_OK(read_first_lsn(*env, WAL_PREFIX, Id::root(), set, first_lsn));
+    ASSERT_OK(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn));
     ASSERT_EQ(first_lsn, Lsn {42});
 }
 
 TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
 {
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
         if (rand() % 8 == 0) {
             ASSERT_OK(writer.flush());
@@ -493,7 +497,7 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         ASSERT_EQ(wal_read(reader), tools::integral_key(i));
     }
     assert_reader_is_done(reader);
@@ -503,13 +507,13 @@ TEST_F(WalComponentTests, Corruption)
 {
     // Don't flush the writer, so it leaves a partial record in the WAL.
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
     }
-    ASSERT_LT(writer.flushed_lsn(), Lsn {PAGE_SIZE * 2 - 1});
+    ASSERT_LT(writer.flushed_lsn(), Lsn {kPageSize * 2 - 1});
 
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < PAGE_SIZE * 2; ++i) {
+    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         std::string data;
         auto s = wal_read_with_status(reader, data);
         if (s.is_corruption()) {
@@ -526,18 +530,16 @@ class WalTests
       public testing::Test
 {
 public:
-    static constexpr auto WAL_PREFIX = "test/wal-";
-    static constexpr auto PAGE_SIZE = MINIMUM_PAGE_SIZE;
-    static constexpr auto SEGMENT_CUTOFF {4};
+    static constexpr auto kWalPrefix = "./wal-";
+    static constexpr auto kPageSize = kMinPageSize;
 
     auto SetUp() -> void override
     {
         WriteAheadLog *temp;
         WriteAheadLog::Parameters param {
-            WAL_PREFIX,
+            kWalPrefix,
             env.get(),
-            PAGE_SIZE,
-            SEGMENT_CUTOFF};
+            kPageSize};
         ASSERT_OK(WriteAheadLog::open(param, &temp));
         wal.reset(temp);
     }
@@ -557,7 +559,7 @@ TEST_F(WalTests, KeepsTrackOfBytesWritten)
 {
     ASSERT_OK(wal->start_writing());
     ASSERT_EQ(wal->bytes_written(), 0);
-    const auto payload = make_payload(Lsn {1}, "test");
+    const auto payload = make_payload(Lsn {1}, "./test");
     ASSERT_OK(wal->log(payload));
     ASSERT_EQ(wal->bytes_written(), sizeof(Lsn) + payload.data().size());
 }

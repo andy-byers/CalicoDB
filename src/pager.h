@@ -22,7 +22,7 @@ public:
     friend class Recovery;
 
     struct Parameters {
-        std::string prefix;
+        std::string path;
         Env *env {};
         std::string *scratch {};
         WriteAheadLog *wal {};

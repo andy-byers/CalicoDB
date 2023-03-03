@@ -33,22 +33,22 @@ auto WalReader::read(Span &payload) -> Status
     WalRecordHeader header;
 
     for (;;) {
-        const auto has_enough_space = m_tail.size() > m_offset + WalRecordHeader::SIZE;
+        const auto has_enough_space = m_tail.size() > m_offset + WalRecordHeader::kSize;
         auto rest = m_tail.range(m_offset);
 
         if (has_enough_space && WalRecordHeader::contains_record(rest)) {
             const auto temp = read_wal_record_header(rest);
-            rest.advance(WalRecordHeader::SIZE);
+            rest.advance(WalRecordHeader::kSize);
 
             CDB_TRY(merge_records_left(header, temp));
             if (temp.size == 0 || temp.size > rest.size()) {
                 return Status::corruption("fragment size is invalid");
             }
             mem_copy(out, rest.truncate(temp.size));
-            m_offset += WalRecordHeader::SIZE + temp.size;
+            m_offset += WalRecordHeader::kSize + temp.size;
             out.advance(temp.size);
 
-            if (header.type == WRT_Full) {
+            if (header.type == kFullRecord) {
                 payload.truncate(header.size);
                 const auto expected_crc = crc32c::Unmask(header.crc);
                 const auto computed_crc = crc32c::Value(payload.data(), header.size);
@@ -64,7 +64,7 @@ auto WalReader::read(Span &payload) -> Status
         // Read the next block into the tail buffer.
         auto s = read_tail(*m_file, ++m_block, m_tail);
         if (!s.is_ok()) {
-            if (s.is_not_found() && header.type != WRT_Empty) {
+            if (s.is_not_found() && header.type != kNoRecord) {
                 return Status::corruption("encountered a partial record");
             }
             return s;

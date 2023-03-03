@@ -10,7 +10,7 @@ namespace calicodb
 
 struct Node;
 
-static constexpr std::size_t MAX_CELL_HEADER_SIZE =
+static constexpr std::size_t kMaxCellHeaderSize =
     sizeof(std::uint64_t) + // Value size  (varint)
     sizeof(std::uint64_t) + // Key size    (varint)
     sizeof(Id);             // Overflow ID (8 B)
@@ -19,16 +19,16 @@ inline constexpr auto compute_min_local(std::size_t page_size) -> std::size_t
 {
     CDB_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
-    return (page_size - NodeHeader::SIZE) * 32 / 256 -
-           MAX_CELL_HEADER_SIZE - sizeof(PageSize);
+    return (page_size - NodeHeader::kSize) * 32 / 256 -
+           kMaxCellHeaderSize - sizeof(PageSize);
 }
 
 inline constexpr auto compute_max_local(std::size_t page_size) -> std::size_t
 {
     CDB_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
-    return (page_size - NodeHeader::SIZE) * 64 / 256 -
-           MAX_CELL_HEADER_SIZE - sizeof(PageSize);
+    return (page_size - NodeHeader::kSize) * 64 / 256 -
+           kMaxCellHeaderSize - sizeof(PageSize);
 }
 
 inline constexpr auto compute_local_size(std::size_t key_size, std::size_t value_size, std::size_t min_local, std::size_t max_local) -> std::size_t

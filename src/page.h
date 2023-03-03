@@ -92,7 +92,7 @@ public:
 
 [[nodiscard]] inline auto page_offset(const Page &page) -> std::size_t
 {
-    return FileHeader::SIZE * page.id().is_root();
+    return FileHeader::kSize * page.id().is_root();
 }
 
 [[nodiscard]] inline auto read_page_lsn(const Page &page) -> Lsn

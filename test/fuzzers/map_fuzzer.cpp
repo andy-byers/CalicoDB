@@ -18,12 +18,12 @@ namespace calicodb
 using namespace calicodb::tools;
 
 enum OperationType {
-    OT_Put,
-    OT_Erase,
-    OT_Commit,
-    OT_Reopen,
-    OT_Vacuum,
-    OT_OpCount
+    kPut,
+    kErase,
+    kCommit,
+    kReopen,
+    kVacuum,
+    kOpCount
 };
 
 constexpr std::size_t DB_MAX_RECORDS {5'000};
@@ -53,7 +53,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         delete cursor;
     };
 
-    auto operation_type = static_cast<OperationType>(*data++ % OperationType::OT_OpCount);
+    auto operation_type = static_cast<OperationType>(*data++ % OperationType::kOpCount);
     --size;
 
     std::string key;
@@ -61,12 +61,12 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     Status s;
 
     // Limit memory used by the fuzzer.
-    if (operation_type == OT_Put && m_map.size() + m_added.size() > m_erased.size() + DB_MAX_RECORDS) {
-        operation_type = OT_Erase;
+    if (operation_type == kPut && m_map.size() + m_added.size() > m_erased.size() + DB_MAX_RECORDS) {
+        operation_type = kErase;
     }
 
     switch (operation_type) {
-    case OT_Put:
+    case kPut:
         key = extract_fuzzer_key(data, size);
         value = extract_fuzzer_value(data, size);
         s = m_db->put(key, value);
@@ -77,7 +77,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             m_added[key] = value;
         }
         break;
-    case OT_Erase: {
+    case kErase: {
         key = extract_fuzzer_key(data, size);
         auto *cursor = m_db->new_cursor();
         cursor->seek(key);
@@ -96,10 +96,10 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         delete cursor;
         break;
     }
-    case OT_Vacuum:
+    case kVacuum:
         s = m_db->vacuum();
         break;
-    case OT_Commit:
+    case kCommit:
         s = m_db->commit();
         if (s.is_ok()) {
             for (const auto &[k, v] : m_added) {
@@ -113,7 +113,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             expect_equal_contents();
         }
         break;
-    default: // OT_Reopen
+    default: // kReopen
         m_added.clear();
         m_erased.clear();
         s = reopen();
@@ -133,12 +133,12 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
 {
     Options options;
 //    options.info_log = new tools::StderrLogger;
-    options.env = new tools::DynamicMemory;
-    options.page_size = MINIMUM_PAGE_SIZE;
-    options.cache_size = MINIMUM_PAGE_SIZE * 16;
+    options.env = new tools::FakeEnv;
+    options.page_size = kMinPageSize;
+    options.cache_size = kMinPageSize * 16;
 
     {
-        MapFuzzer fuzzer {"map_fuzzer", &options};
+        MapFuzzer fuzzer {"map_db", &options};
 
         while (size > 1) {
             CHECK_OK(fuzzer.step(data, size));

@@ -9,6 +9,9 @@
 namespace calicodb
 {
 
+[[nodiscard]] auto split_path(const std::string &filename) -> std::pair<std::string, std::string>;
+[[nodiscard]] auto join_paths(const std::string &lhs, const std::string &rhs) -> std::string;
+
 class PosixReader : public Reader
 {
 public:
@@ -92,8 +95,6 @@ class EnvPosix : public Env
 public:
     EnvPosix() = default;
     ~EnvPosix() override = default;
-    [[nodiscard]] auto create_directory(const std::string &path) -> Status override;
-    [[nodiscard]] auto remove_directory(const std::string &path) -> Status override;
     [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto new_reader(const std::string &path, Reader **out) -> Status override;
     [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;

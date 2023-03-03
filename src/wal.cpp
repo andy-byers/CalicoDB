@@ -1,4 +1,5 @@
 #include "wal.h"
+#include "env_posix.h"
 #include "logging.h"
 #include "wal_writer.h"
 
@@ -8,11 +9,9 @@ namespace calicodb
 WriteAheadLog::WriteAheadLog(const Parameters &param)
     : m_prefix {param.prefix},
       m_env {param.env},
-      m_tail(wal_block_size(param.page_size), '\x00'),
-      m_segment_cutoff {param.segment_cutoff}
+      m_tail(wal_block_size(param.page_size), '\x00')
 {
     CDB_EXPECT_NE(m_env, nullptr);
-    CDB_EXPECT_NE(m_segment_cutoff, 0);
 }
 
 WriteAheadLog::~WriteAheadLog()
@@ -23,27 +22,23 @@ WriteAheadLog::~WriteAheadLog()
 
 auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
-    auto path = param.prefix;
-    if (auto pos = path.rfind('/'); pos != std::string::npos) {
-        path.erase(pos + 1);
-    }
+    const auto [dir, base] = split_path(param.prefix);
+    std::vector<std::string> possible_segments;
+    CDB_TRY(param.env->get_children(dir, possible_segments));
 
-    std::vector<std::string> child_names;
-    CDB_TRY(param.env->get_children(path, child_names));
-
-    std::vector<Id> segment_ids;
-    for (auto &name : child_names) {
-        name.insert(0, path);
+    std::vector<Id> segments;
+    for (auto &name : possible_segments) {
+        name = join_paths(dir, name);
         if (Slice {name}.starts_with(param.prefix)) {
-            segment_ids.emplace_back(decode_segment_name(param.prefix, name));
+            segments.emplace_back(decode_segment_name(param.prefix, name));
         }
     }
-    std::sort(begin(segment_ids), end(segment_ids));
+    std::sort(begin(segments), end(segments));
 
     auto *wal = new WriteAheadLog {param};
 
     // Keep track of the segment files.
-    for (const auto &id : segment_ids) {
+    for (const auto &id : segments) {
         wal->m_set.add_segment(id);
     }
     *out = wal;
@@ -88,7 +83,7 @@ auto WriteAheadLog::log(WalPayloadIn payload) -> Status
     CDB_EXPECT_EQ(payload.lsn(), m_last_lsn);
 
     CDB_TRY(m_writer->write(payload));
-    if (m_writer->block_count() >= m_segment_cutoff) {
+    if (m_writer->block_count() >= kSegmentCutoff << m_set.size()) {
         CDB_TRY(close_writer());
         return open_writer();
     }
@@ -106,7 +101,7 @@ auto WriteAheadLog::flush() -> Status
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
 {
-    if (m_set.segments().size() <= 1) {
+    if (m_set.size() <= 1) {
         return Status::ok();
     }
     for (;;) {
@@ -137,6 +132,7 @@ auto WriteAheadLog::close_writer() -> Status
 {
     CDB_TRY(m_writer->flush());
     CDB_TRY(m_file->sync());
+    m_flushed_lsn = m_writer->flushed_lsn();
     const auto written = m_writer->block_count() != 0;
 
     delete m_file;

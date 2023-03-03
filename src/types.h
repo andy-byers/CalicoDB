@@ -9,8 +9,8 @@ namespace calicodb
 {
 
 struct Id {
-    static constexpr std::size_t null_value {0};
-    static constexpr std::size_t root_value {1};
+    static constexpr std::size_t kNull {0};
+    static constexpr std::size_t kRoot {1};
 
     struct Hash {
         auto operator()(const Id &id) const -> std::size_t
@@ -26,22 +26,22 @@ struct Id {
 
     [[nodiscard]] static constexpr auto null() noexcept -> Id
     {
-        return {null_value};
+        return {kNull};
     }
 
     [[nodiscard]] static constexpr auto root() noexcept -> Id
     {
-        return {root_value};
+        return {kRoot};
     }
 
     [[nodiscard]] constexpr auto is_null() const noexcept -> bool
     {
-        return value == null_value;
+        return value == kNull;
     }
 
     [[nodiscard]] constexpr auto is_root() const noexcept -> bool
     {
-        return value == root_value;
+        return value == kRoot;
     }
 
     [[nodiscard]] constexpr auto as_index() const noexcept -> std::size_t

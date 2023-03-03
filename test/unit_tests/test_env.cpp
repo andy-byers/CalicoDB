@@ -10,6 +10,38 @@
 namespace calicodb
 {
 
+TEST(PathParserTests, ExtractsDirnames)
+{
+    ASSERT_EQ(split_path("dirname/basename").first, "dirname");
+    ASSERT_EQ(split_path("/dirname/basename").first, "/dirname");
+    ASSERT_EQ(split_path("/dirname/extra/basename").first, "/dirname/extra");
+    ASSERT_EQ(split_path("basename").first, ".");
+    ASSERT_EQ(split_path("basename/").first, ".");
+    ASSERT_EQ(split_path("/basename").first, "/");
+    ASSERT_EQ(split_path("/basename/").first, "/"); // basename() strips trailing '/'.
+    ASSERT_EQ(split_path("").first, ".");
+    ASSERT_EQ(split_path("/").first, "/");
+}
+
+TEST(PathParserTests, ExtractsBasenames)
+{
+    ASSERT_EQ(split_path("dirname/basename").second, "basename");
+    ASSERT_EQ(split_path("/dirname/basename").second, "basename");
+    ASSERT_EQ(split_path("/dirname/extra/basename").second, "basename");
+    ASSERT_EQ(split_path("basename").second, "basename");
+    ASSERT_EQ(split_path("basename/").second, "basename");
+    ASSERT_EQ(split_path("/basename").second, "basename");
+    ASSERT_EQ(split_path("/basename/").second, "basename");
+    ASSERT_EQ(split_path("").second, ".");
+    // basename == dirname in this case. We can still join the components to get a valid path.
+    ASSERT_EQ(split_path("/").second, "/");
+}
+
+TEST(PathParserTests, JoinsComponents)
+{
+    ASSERT_EQ(join_paths("dirname", "basename"), "dirname/basename");
+}
+
 template <class Base, class Store>
 [[nodiscard]] auto open_blob(Store &env, const std::string &name) -> std::unique_ptr<Base>
 {
@@ -102,14 +134,8 @@ class FileTests
       public testing::Test
 {
 public:
-    FileTests()
-        : filename {PREFIX + std::string {"file"}}
-    {
-    }
-
     ~FileTests() override = default;
 
-    std::string filename;
     tools::RandomGenerator random;
 };
 
@@ -153,8 +179,8 @@ class PosixReaderTests : public FileTests
 public:
     PosixReaderTests()
     {
-        write_whole_file(filename, "");
-        file = open_blob<Reader>(*env, filename);
+        write_whole_file(kFilename, "");
+        file = open_blob<Reader>(*env, kFilename);
     }
 
     std::unique_ptr<Reader> file;
@@ -172,7 +198,7 @@ TEST_F(PosixReaderTests, NewFileIsEmpty)
 TEST_F(PosixReaderTests, ReadsBackContents)
 {
     auto data = random.Generate(500);
-    write_whole_file(filename, data);
+    write_whole_file(kFilename, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
@@ -180,7 +206,7 @@ class PosixEditorTests : public FileTests
 {
 public:
     PosixEditorTests()
-        : file {open_blob<Editor>(*env, filename)}
+        : file {open_blob<Editor>(*env, kFilename)}
     {
     }
 
@@ -207,7 +233,7 @@ class PosixLoggerTests : public FileTests
 {
 public:
     PosixLoggerTests()
-        : file {open_blob<Logger>(*env, filename)}
+        : file {open_blob<Logger>(*env, kFilename)}
     {
     }
 
@@ -218,20 +244,18 @@ TEST_F(PosixLoggerTests, WritesOutData)
 {
     auto data = random.Generate(500);
     write_out_randomly<Logger>(random, *file, data);
-    ASSERT_EQ(read_whole_file(filename), data.to_string());
+    ASSERT_EQ(read_whole_file(kFilename), data.to_string());
 }
 
 class EnvPosixTests : public OnDiskTest
 {
 public:
     EnvPosixTests()
-        : filename {PREFIX + std::string {"file"}}
     {
     }
 
     ~EnvPosixTests() override = default;
 
-    std::string filename;
     tools::RandomGenerator random;
 };
 
@@ -240,14 +264,8 @@ class DynamicEnvTests
       public testing::Test
 {
 public:
-    DynamicEnvTests()
-        : filename {PREFIX + std::string {"file"}}
-    {
-    }
-
     ~DynamicEnvTests() override = default;
 
-    std::string filename;
     tools::RandomGenerator random;
 };
 
@@ -260,9 +278,9 @@ TEST_F(DynamicEnvTests, ReaderCannotCreateFile)
 
 TEST_F(DynamicEnvTests, ReadsAndWrites)
 {
-    auto ra_editor = open_blob<Editor>(*env, filename);
-    auto ra_reader = open_blob<Reader>(*env, filename);
-    auto ap_writer = open_blob<Logger>(*env, filename);
+    auto ra_editor = open_blob<Editor>(*env, kFilename);
+    auto ra_reader = open_blob<Reader>(*env, kFilename);
+    auto ap_writer = open_blob<Logger>(*env, kFilename);
 
     const auto first_input = random.Generate(500);
     const auto second_input = random.Generate(500);
@@ -276,8 +294,8 @@ TEST_F(DynamicEnvTests, ReadsAndWrites)
 
 TEST_F(DynamicEnvTests, ReaderStopsAtEOF)
 {
-    auto ra_editor = open_blob<Editor>(*env, filename);
-    auto ra_reader = open_blob<Reader>(*env, filename);
+    auto ra_editor = open_blob<Editor>(*env, kFilename);
+    auto ra_reader = open_blob<Reader>(*env, kFilename);
 
     const auto data = random.Generate(500);
     write_out_randomly(random, *ra_editor, data);

@@ -8,19 +8,23 @@
 namespace calicodb
 {
 
-class RecoveryTestHarness : public InMemoryTest
+class RecoveryTestHarness
 {
 public:
+    static constexpr auto kFilename = "./test";
+
     RecoveryTestHarness()
-        : db_prefix {PREFIX}
+        : db_prefix {kFilename}
     {
-        db_options.page_size = MINIMUM_PAGE_SIZE;
-        db_options.cache_size = MINIMUM_PAGE_SIZE * 16;
+        env = std::make_unique<tools::FaultInjectionEnv>();
+        db_options.wal_prefix = "./wal-";
+        db_options.page_size = kMinPageSize;
+        db_options.cache_size = kMinPageSize * 16;
         db_options.env = env.get();
         open();
     }
 
-    ~RecoveryTestHarness() override
+    virtual ~RecoveryTestHarness()
     {
         close();
     }
@@ -74,7 +78,7 @@ public:
 
     auto log_name(Id id) const -> std::string
     {
-        return encode_segment_name(db_prefix + "wal-", id);
+        return encode_segment_name("./wal-", id);
     }
 
     auto remove_log_files() -> size_t
@@ -84,7 +88,7 @@ public:
         close();
         std::vector<Id> logs = get_logs();
         for (const auto &log : logs) {
-            EXPECT_OK(env->remove_file(encode_segment_name(db_prefix + "wal-", log)));
+            EXPECT_OK(env->remove_file(encode_segment_name("./wal-", log)));
         }
         return logs.size();
     }
@@ -92,10 +96,10 @@ public:
     auto get_logs() -> std::vector<Id>
     {
         std::vector<std::string> filenames;
-        EXPECT_OK(env->get_children(db_prefix, filenames));
+        EXPECT_OK(env->get_children(".", filenames));
         std::vector<Id> result;
         for (const auto &name : filenames) {
-            if (name.find("wal-") != std::string::npos) {
+            if (name.find("wal-") == 0) {
                 result.push_back(decode_segment_name("wal-", name));
             }
         }
@@ -115,6 +119,7 @@ public:
     }
 
     tools::RandomGenerator random {1024 * 1024 * 4};
+    std::unique_ptr<tools::FaultInjectionEnv> env;
     Options db_options;
     std::string db_prefix;
     std::string tail;
@@ -234,7 +239,7 @@ class RecoverySanityCheck
 {
 public:
     RecoverySanityCheck()
-        : interceptor_prefix {db_prefix + std::get<0>(GetParam())}
+        : interceptor_prefix {std::get<0>(GetParam())}
     {
         open();
 
@@ -291,6 +296,9 @@ TEST_P(RecoverySanityCheck, FailureWhileRunning)
             break;
         }
     }
+    if (db->status().is_ok()) {
+        (void)db->vacuum();
+    }
     assert_special_error(db->status());
 
     validate();
@@ -324,19 +332,17 @@ INSTANTIATE_TEST_SUITE_P(
     RecoverySanityCheck,
     RecoverySanityCheck,
     ::testing::Values(
-        std::make_tuple("data", tools::Interceptor::Read, 0),
-        std::make_tuple("data", tools::Interceptor::Read, 1),
-        std::make_tuple("data", tools::Interceptor::Read, 5),
-        std::make_tuple("data", tools::Interceptor::Write, 0),
-        std::make_tuple("data", tools::Interceptor::Write, 1),
-        std::make_tuple("data", tools::Interceptor::Write, 5),
-        std::make_tuple("wal-", tools::Interceptor::Write, 0),
-        std::make_tuple("wal-", tools::Interceptor::Write, 1),
-        std::make_tuple("wal-", tools::Interceptor::Write, 5),
-        //        std::make_tuple("wal-", Tools::Interceptor::SYNC, 0), TODO: May need separate testing
-        std::make_tuple("wal-", tools::Interceptor::Open, 0),
-        std::make_tuple("wal-", tools::Interceptor::Open, 1),
-        std::make_tuple("wal-", tools::Interceptor::Open, 5)));
+        std::make_tuple("./test", tools::Interceptor::kRead, 0),
+        std::make_tuple("./test", tools::Interceptor::kRead, 1),
+        std::make_tuple("./test", tools::Interceptor::kRead, 5),
+        std::make_tuple("./test", tools::Interceptor::kWrite, 0),
+        std::make_tuple("./test", tools::Interceptor::kWrite, 1),
+        std::make_tuple("./test", tools::Interceptor::kWrite, 5),
+        std::make_tuple("./wal-", tools::Interceptor::kWrite, 0),
+        std::make_tuple("./wal-", tools::Interceptor::kWrite, 1),
+        std::make_tuple("./wal-", tools::Interceptor::kWrite, 5),
+        std::make_tuple("./wal-", tools::Interceptor::kOpen, 0),
+        std::make_tuple("./wal-", tools::Interceptor::kOpen, 1)));
 
 class OpenErrorTests : public RecoverySanityCheck
 {
@@ -366,14 +372,14 @@ INSTANTIATE_TEST_SUITE_P(
     OpenErrorTests,
     OpenErrorTests,
     ::testing::Values(
-        std::make_tuple("data", tools::Interceptor::Read, 0),
-        std::make_tuple("data", tools::Interceptor::Read, 1),
-        std::make_tuple("data", tools::Interceptor::Read, 5),
-        std::make_tuple("data", tools::Interceptor::Write, 0),
-        std::make_tuple("data", tools::Interceptor::Write, 1),
-        std::make_tuple("data", tools::Interceptor::Write, 5),
-        std::make_tuple("wal-", tools::Interceptor::Open, 0),
-        std::make_tuple("wal-", tools::Interceptor::Open, 1),
-        std::make_tuple("wal-", tools::Interceptor::Open, 5)));
+        std::make_tuple("./test", tools::Interceptor::kRead, 0),
+        std::make_tuple("./test", tools::Interceptor::kRead, 1),
+        std::make_tuple("./test", tools::Interceptor::kRead, 5),
+        std::make_tuple("./test", tools::Interceptor::kWrite, 0),
+        std::make_tuple("./test", tools::Interceptor::kWrite, 1),
+        std::make_tuple("./test", tools::Interceptor::kWrite, 5),
+        std::make_tuple("./wal-", tools::Interceptor::kOpen, 0),
+        std::make_tuple("./wal-", tools::Interceptor::kOpen, 1),
+        std::make_tuple("./wal-", tools::Interceptor::kOpen, 5)));
 
 } // namespace calicodb

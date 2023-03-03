@@ -20,11 +20,11 @@
 #define CDB_EXPECT_GT(lhs, rhs) CDB_EXPECT_TRUE((lhs) > (rhs))
 #define CDB_EXPECT_GE(lhs, rhs) CDB_EXPECT_TRUE((lhs) >= (rhs))
 
-#define CDB_TRY(expr)                                             \
-    do {                                                             \
+#define CDB_TRY(expr)                                          \
+    do {                                                       \
         if (auto __cdb_try_s = (expr); !__cdb_try_s.is_ok()) { \
-            return __cdb_try_s;                                   \
-        }                                                            \
+            return __cdb_try_s;                                \
+        }                                                      \
     } while (0)
 
 namespace calicodb
@@ -43,8 +43,10 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
 
 } // namespace Impl
 
-static constexpr std::size_t MINIMUM_PAGE_SIZE {0x200};
-static constexpr std::size_t MAXIMUM_PAGE_SIZE {0x8000};
+static constexpr std::size_t kMinPageSize {0x200};
+static constexpr std::size_t kMaxPageSize {0x8000};
+static constexpr auto kDefaultWalSuffix = "-wal-";
+static constexpr auto kDefaultLogSuffix = "-log";
 
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 template <class T>
