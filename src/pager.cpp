@@ -252,7 +252,11 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
             next_lsn, page.id(), image, *m_scratch));
 
         if (s.is_ok()) {
-            s = m_wal->cleanup(m_recovery_lsn);
+            auto limit = m_recovery_lsn;
+            if (limit > *m_commit_lsn) {
+                limit = *m_commit_lsn;
+            }
+            s = m_wal->cleanup(limit);
         }
         if (!s.is_ok()) {
             SET_STATUS(s);
