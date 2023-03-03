@@ -26,9 +26,9 @@ public:
     DBImpl() = default;
     ~DBImpl() override;
 
-    [[nodiscard]] static auto destroy(const std::string &path, const Options &options) -> Status;
-    [[nodiscard]] static auto repair(const std::string &path, const Options &options) -> Status;
-    [[nodiscard]] auto open(const Slice &path, const Options &options) -> Status;
+    [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
+    [[nodiscard]] static auto repair(const Options &options, const std::string &filename) -> Status;
+    [[nodiscard]] auto open(const Options &options, const Slice &filename) -> Status;
 
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get_property(const Slice &name, std::string &out) const -> bool override;
