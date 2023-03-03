@@ -6,10 +6,10 @@
 namespace calicodb
 {
 
-auto DB::open(const Slice &path, const Options &options, DB **db) -> Status
+auto DB::open(const Options &options, const Slice &filename, DB **db) -> Status
 {
     auto *ptr = new DBImpl;
-    auto s = ptr->open(path, options);
+    auto s = ptr->open(options, filename);
     if (!s.is_ok()) {
         delete ptr;
         return s;
@@ -19,14 +19,14 @@ auto DB::open(const Slice &path, const Options &options, DB **db) -> Status
     return Status::ok();
 }
 
-auto DB::repair(const Slice &path, const Options &options) -> Status
+auto DB::repair(const Options &options, const Slice &filename) -> Status
 {
-    return DBImpl::repair(path.to_string(), options);
+    return DBImpl::repair(options, filename.to_string());
 }
 
-auto DB::destroy(const Slice &path, const Options &options) -> Status
+auto DB::destroy(const Options &options, const Slice &filename) -> Status
 {
-    return DBImpl::destroy(path.to_string(), options);
+    return DBImpl::destroy(options, filename.to_string());
 }
 
 } // namespace calicodb

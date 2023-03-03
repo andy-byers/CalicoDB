@@ -73,9 +73,6 @@ const calicodb::Options options {
     // WAL segments will look like "/location/calicodb_wal_#", where # is the segment ID.
     .wal_prefix = "/location/calicodb_wal_",
     
-    // The database instance will write info log messages at the specified log level, to the object
-    // passed in the "info_log" member.
-    .log_level = calicodb::LogLevel::TRACE,
     .info_log = nullptr,
     
     // This can be used to inject a custom storage implementation. (see the DynamicMemory class in
@@ -85,7 +82,7 @@ const calicodb::Options options {
 
 // Create or open a database at "/tmp/cats".
 calicodb::DB *db;
-const calicodb::Status s = calicodb::DB::open("/tmp/cats", options, &db);
+const calicodb::Status s = calicodb::DB::open(options, "/tmp/cats", &db);
 
 // Handle failure. s.to_string() provides a string representation of the status.
 if (!s.is_ok()) {
@@ -226,7 +223,7 @@ delete db;
 ### Destroying a database
 
 ```C++
-if (const auto s = calicodb::DB::destroy("/tmp/cats", options); s.is_ok()) {
+if (const auto s = calicodb::DB::destroy(options, "/tmp/cats"); s.is_ok()) {
     // Database has been destroyed.
 } else if (s.is_not_found()) {
     // The database does not exist.

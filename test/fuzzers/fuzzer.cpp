@@ -9,7 +9,7 @@ DbFuzzer::DbFuzzer(std::string path, Options *options)
     if (options != nullptr) {
         m_options = *options;
     }
-    CHECK_OK(DB::open(m_path, m_options, &m_db));
+    CHECK_OK(DB::open(m_options, m_path, &m_db));
 }
 
 DbFuzzer::~DbFuzzer()
@@ -18,7 +18,7 @@ DbFuzzer::~DbFuzzer()
 
     delete m_db;
 
-    CHECK_OK(DB::destroy(m_path, m_options));
+    CHECK_OK(DB::destroy(m_options, m_path));
 }
 
 auto DbFuzzer::reopen() -> Status
@@ -26,7 +26,7 @@ auto DbFuzzer::reopen() -> Status
     delete m_db;
     m_db = nullptr;
 
-    auto s = DB::open(m_path, m_options, &m_db);
+    auto s = DB::open(m_options, m_path, &m_db);
     if (s.is_ok()) {
         tools::validate_db(*m_db);
     }

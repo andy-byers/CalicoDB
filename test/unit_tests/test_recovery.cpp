@@ -51,7 +51,7 @@ public:
             opts.env = env.get();
         }
         tail.resize(wal_block_size(opts.page_size));
-        return DB::open(db_prefix, opts, &db);
+        return DB::open(opts, db_prefix, &db);
     }
 
     auto open(Options *options = nullptr) -> void
@@ -229,7 +229,7 @@ TEST_F(RecoveryTests, SanityCheck)
         }
         close();
 
-        ASSERT_OK(DB::destroy(db_prefix, db_options));
+        ASSERT_OK(DB::destroy(db_options, db_prefix));
     }
 }
 

@@ -25,9 +25,9 @@ struct Options {
 class DB
 {
 public:
-    [[nodiscard]] static auto open(const Slice &path, const Options &options, DB **db) -> Status;
-    [[nodiscard]] static auto repair(const Slice &path, const Options &options) -> Status;
-    [[nodiscard]] static auto destroy(const Slice &path, const Options &options) -> Status;
+    [[nodiscard]] static auto open(const Options &options, const Slice &filename, DB **db) -> Status;
+    [[nodiscard]] static auto repair(const Options &options, const Slice &filename) -> Status;
+    [[nodiscard]] static auto destroy(const Options &options, const Slice &filename) -> Status;
 
     virtual ~DB() = default;
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string &out) const -> bool = 0;

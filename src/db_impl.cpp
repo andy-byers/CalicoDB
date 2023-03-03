@@ -27,14 +27,14 @@ sanitize_options(const Options &options) -> Options
     return sanitized;
 }
 
-auto DBImpl::open(const Slice &path, const Options &options) -> Status
+auto DBImpl::open(const Options &options, const Slice &filename) -> Status
 {
-    if (path.is_empty()) {
+    if (filename.is_empty()) {
         return Status::invalid_argument("path is empty");
     }
     auto sanitized = sanitize_options(options);
 
-    m_filename = path.to_string();
+    m_filename = filename.to_string();
     const auto [dir, base] = split_path(m_filename);
     m_filename = join_paths(dir, base);
 
@@ -168,9 +168,9 @@ DBImpl::~DBImpl()
     delete wal;
 }
 
-auto DBImpl::repair(const std::string &path, const Options &options) -> Status
+auto DBImpl::repair(const Options &options, const std::string &filename) -> Status
 {
-    (void)path;
+    (void)filename;
     (void)options;
     return Status::logic_error("<NOT IMPLEMENTED>"); // TODO: repair() operation attempts to fix a
                                                      // database that could not be opened due to
@@ -178,7 +178,7 @@ auto DBImpl::repair(const std::string &path, const Options &options) -> Status
                                                      // back.
 }
 
-auto DBImpl::destroy(const std::string &path, const Options &options) -> Status
+auto DBImpl::destroy(const Options &options, const std::string &filename) -> Status
 {
     bool owns_env {};
     Env *env;
@@ -190,17 +190,17 @@ auto DBImpl::destroy(const std::string &path, const Options &options) -> Status
         owns_env = true;
     }
 
-    const auto [dir, base] = split_path(path);
-    const auto filename = join_paths(dir, base);
+    const auto [dir, base] = split_path(filename);
+    const auto path = join_paths(dir, base);
     auto wal_prefix = options.wal_prefix.to_string();
     if (wal_prefix.empty()) {
-        wal_prefix = filename + kDefaultWalSuffix;
+        wal_prefix = path + kDefaultWalSuffix;
     }
     if (options.info_log == nullptr) {
-        (void)env->remove_file(filename + kDefaultLogSuffix);
+        (void)env->remove_file(path + kDefaultLogSuffix);
     }
     // TODO: Make sure this file is a CalicoDB database.
-    auto s = env->remove_file(filename);
+    auto s = env->remove_file(path);
 
     std::vector<std::string> children;
     auto t = env->get_children(dir, children);
