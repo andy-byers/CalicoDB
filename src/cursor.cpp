@@ -1,5 +1,4 @@
 #include "cursor_impl.h"
-#include "node.h"
 #include "pager.h"
 #include "tree.h"
 

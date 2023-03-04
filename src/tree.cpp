@@ -2,10 +2,864 @@
 #include "logging.h"
 #include "pager.h"
 #include "utils.h"
+#include <array>
 #include <functional>
+#include <numeric>
 
 namespace calicodb
 {
+
+static auto header_offset(const Node &node)
+{
+    return page_offset(node.page);
+}
+
+static auto cell_slots_offset(const Node &node)
+{
+    return header_offset(node) + NodeHeader::kSize;
+}
+
+static auto cell_area_offset(const Node &node)
+{
+    return cell_slots_offset(node) + node.header.cell_count * sizeof(PageSize);
+}
+
+auto internal_cell_size(const NodeMeta &meta, const char *data) -> std::size_t
+{
+    std::size_t key_size;
+    const auto *ptr = decode_varint(data + sizeof(Id), key_size);
+    const auto local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
+    const auto extra_size = (local_size < key_size) * sizeof(Id);
+    const auto header_size = static_cast<std::size_t>(ptr - data);
+    return header_size + local_size + extra_size;
+}
+
+auto external_cell_size(const NodeMeta &meta, const char *data) -> std::size_t
+{
+    std::size_t key_size, value_size;
+    const auto *ptr = decode_varint(data, value_size);
+    ptr = decode_varint(ptr, key_size);
+    const auto local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
+    const auto extra_size = (local_size < key_size + value_size) * sizeof(Id);
+    const auto header_size = static_cast<std::size_t>(ptr - data);
+    return header_size + local_size + extra_size;
+}
+
+auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
+{
+    std::size_t key_size, value_size;
+    const auto *ptr = decode_varint(data, value_size);
+    ptr = decode_varint(ptr, key_size);
+    const auto header_size = static_cast<std::size_t>(ptr - data);
+
+    Cell cell;
+    cell.ptr = data;
+    cell.key = data + header_size;
+
+    cell.key_size = key_size;
+    cell.local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
+    cell.has_remote = cell.local_size < key_size + value_size;
+    cell.size = header_size + cell.local_size + cell.has_remote * sizeof(Id);
+    return cell;
+}
+
+auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
+{
+    std::size_t key_size;
+    const auto *ptr = data + sizeof(Id);
+    ptr = decode_varint(ptr, key_size);
+    const auto header_size = static_cast<std::size_t>(ptr - data);
+
+    Cell cell;
+    cell.ptr = data;
+    cell.key = data + header_size;
+
+    cell.key_size = key_size;
+    cell.local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
+    cell.has_remote = cell.local_size < key_size;
+    cell.size = header_size + cell.local_size + cell.has_remote * sizeof(Id);
+    return cell;
+}
+
+constexpr auto sizeof_meta_lookup() -> std::size_t
+{
+    std::size_t i {};
+    for (std::size_t n {kMinPageSize}; n <= kMaxPageSize; n *= 2) {
+        ++i;
+    }
+    return i;
+}
+
+static constexpr auto kMetaLookupSize = sizeof_meta_lookup();
+
+constexpr auto create_meta_lookup() -> std::array<NodeMeta[2], kMetaLookupSize>
+{
+    std::array<NodeMeta[2], kMetaLookupSize> lookup;
+    for (std::size_t i {}; i < lookup.size(); ++i) {
+        const auto page_size = kMinPageSize << i;
+        lookup[i][0].min_local = compute_min_local(page_size);
+        lookup[i][0].max_local = compute_max_local(page_size);
+        lookup[i][0].cell_size = internal_cell_size;
+        lookup[i][0].parse_cell = parse_internal_cell;
+        lookup[i][1].min_local = compute_min_local(page_size);
+        lookup[i][1].max_local = compute_max_local(page_size);
+        lookup[i][1].cell_size = internal_cell_size;
+        lookup[i][1].parse_cell = parse_internal_cell;
+    }
+    return lookup;
+}
+
+// Stores node-type-specific function pointer lookup tables for every possible page size.
+static constexpr auto kMetaLookup = create_meta_lookup();
+
+[[nodiscard]] static auto cell_size_direct(const Node &node, std::size_t offset) -> std::size_t
+{
+    return node.meta->cell_size(*node.meta, node.page.data() + offset);
+}
+
+class BlockAllocator
+{
+    Node *m_node {};
+
+    [[nodiscard]] auto get_next_pointer(std::size_t offset) -> PageSize
+    {
+        return get_u16(m_node->page.data() + offset);
+    }
+
+    [[nodiscard]] auto get_block_size(std::size_t offset) -> PageSize
+    {
+        return get_u16(m_node->page.data() + offset + sizeof(PageSize));
+    }
+
+    auto set_next_pointer(std::size_t offset, PageSize value) -> void
+    {
+        CDB_EXPECT_LT(value, m_node->page.size());
+        return put_u16(m_node->page.span(offset, sizeof(PageSize)), value);
+    }
+
+    auto set_block_size(std::size_t offset, PageSize value) -> void
+    {
+        CDB_EXPECT_GE(value, 4);
+        CDB_EXPECT_LT(value, m_node->page.size());
+        return put_u16(m_node->page.span(offset + sizeof(PageSize), sizeof(PageSize)), value);
+    }
+
+    [[nodiscard]] auto allocate_from_free_list(PageSize needed_size) -> PageSize;
+    [[nodiscard]] auto allocate_from_gap(PageSize needed_size) -> PageSize;
+    [[nodiscard]] auto take_free_space(PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize;
+
+public:
+    explicit BlockAllocator(Node &node)
+        : m_node {&node}
+    {
+    }
+
+    [[nodiscard]] auto allocate(PageSize needed_size) -> PageSize;
+    auto free(PageSize ptr, PageSize size) -> void;
+    auto defragment(std::optional<PageSize> skip = std::nullopt) -> void;
+};
+
+auto BlockAllocator::allocate_from_free_list(PageSize needed_size) -> PageSize
+{
+    PageSize prev_ptr {};
+    PageSize curr_ptr {m_node->header.free_start};
+
+    while (curr_ptr) {
+        if (needed_size <= get_block_size(curr_ptr)) {
+            return take_free_space(prev_ptr, curr_ptr, needed_size);
+        }
+        prev_ptr = curr_ptr;
+        curr_ptr = get_next_pointer(curr_ptr);
+    }
+    return 0;
+}
+
+auto BlockAllocator::allocate_from_gap(PageSize needed_size) -> PageSize
+{
+    if (needed_size <= m_node->gap_size) {
+        m_node->gap_size -= needed_size;
+        return m_node->header.cell_start -= needed_size;
+    }
+    return 0;
+}
+
+auto BlockAllocator::take_free_space(PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize
+{
+    CDB_EXPECT_LT(ptr0, m_node->page.size());
+    CDB_EXPECT_LT(ptr1, m_node->page.size());
+    CDB_EXPECT_LT(needed_size, m_node->page.size());
+
+    const auto is_first = !ptr0;
+    const auto ptr2 = get_next_pointer(ptr1);
+    const auto free_size = get_block_size(ptr1);
+    auto &header = m_node->header;
+
+    // Caller should make sure it isn't possible to overflow this byte.
+    CDB_EXPECT_LE(header.frag_count + 3, 0xFF);
+
+    CDB_EXPECT_GE(free_size, needed_size);
+    const auto diff = static_cast<PageSize>(free_size - needed_size);
+
+    if (diff < 4) {
+        header.frag_count = static_cast<std::uint8_t>(header.frag_count + diff);
+
+        if (is_first) {
+            header.free_start = static_cast<PageSize>(ptr2);
+        } else {
+            set_next_pointer(ptr0, ptr2);
+        }
+    } else {
+        set_block_size(ptr1, diff);
+    }
+    CDB_EXPECT_GE(header.free_total, needed_size);
+    header.free_total -= needed_size;
+    return ptr1 + diff;
+}
+
+auto BlockAllocator::allocate(PageSize needed_size) -> PageSize
+{
+    CDB_EXPECT_LT(needed_size, m_node->page.size());
+
+    if (const auto offset = allocate_from_gap(needed_size)) {
+        return offset;
+    }
+    return allocate_from_free_list(needed_size);
+}
+
+auto BlockAllocator::free(PageSize ptr, PageSize size) -> void
+{
+    CDB_EXPECT_GE(ptr, cell_area_offset(*m_node));
+    CDB_EXPECT_LE(ptr + size, m_node->page.size());
+    auto &header = m_node->header;
+    CDB_EXPECT_LE(header.frag_count + 3, 0xFF);
+
+    if (size < 4) {
+        header.frag_count = static_cast<std::uint8_t>(header.frag_count + size);
+    } else {
+        set_next_pointer(ptr, header.free_start);
+        set_block_size(ptr, size);
+        header.free_start = ptr;
+    }
+    header.free_total += size;
+}
+
+auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
+{
+    auto &header = m_node->header;
+    const auto n = header.cell_count;
+    const auto to_skip = skip.has_value() ? *skip : n;
+    auto end = static_cast<PageSize>(m_node->page.size());
+    auto ptr = m_node->page.data();
+    std::vector<PageSize> ptrs(n);
+
+    for (std::size_t index {}; index < n; ++index) {
+        if (index == to_skip) {
+            continue;
+        }
+        const auto offset = m_node->get_slot(index);
+        const auto size = cell_size_direct(*m_node, offset);
+
+        end -= PageSize(size);
+        std::memcpy(m_node->scratch + end, ptr + offset, size);
+        ptrs[index] = end;
+    }
+    for (std::size_t index {}; index < n; ++index) {
+        if (index == to_skip) {
+            continue;
+        }
+        m_node->set_slot(index, ptrs[index]);
+    }
+    const auto offset = cell_area_offset(*m_node);
+    const auto size = m_node->page.size() - offset;
+    mem_copy(m_node->page.span(offset, size), {m_node->scratch + offset, size});
+
+    header.cell_start = end;
+    header.frag_count = 0;
+    header.free_start = 0;
+    header.free_total = 0;
+    m_node->gap_size = static_cast<PageSize>(end - cell_area_offset(*m_node));
+}
+
+auto Node::get_slot(std::size_t index) const -> std::size_t
+{
+    CDB_EXPECT_LT(index, header.cell_count);
+    return get_u16(page.data() + slots_offset + index * sizeof(PageSize));
+}
+
+auto Node::set_slot(std::size_t index, std::size_t pointer) -> void
+{
+    CDB_EXPECT_LT(index, header.cell_count);
+    return put_u16(page.span(slots_offset + index * sizeof(PageSize), sizeof(PageSize)), static_cast<PageSize>(pointer));
+}
+
+auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
+{
+    CDB_EXPECT_LE(index, header.cell_count);
+    CDB_EXPECT_GE(gap_size, sizeof(PageSize));
+    const auto offset = slots_offset + index * sizeof(PageSize);
+    const auto size = (header.cell_count - index) * sizeof(PageSize);
+    auto *data = page.data() + offset;
+
+    std::memmove(data + sizeof(PageSize), data, size);
+    put_u16(data, static_cast<PageSize>(pointer));
+
+    insert_delta(page.m_deltas, {offset, size + sizeof(PageSize)});
+    gap_size -= static_cast<PageSize>(sizeof(PageSize));
+    ++header.cell_count;
+}
+
+auto Node::remove_slot(std::size_t index) -> void
+{
+    CDB_EXPECT_LT(index, header.cell_count);
+    const auto offset = slots_offset + index * sizeof(PageSize);
+    const auto size = (header.cell_count - index) * sizeof(PageSize);
+    auto *data = page.data() + offset;
+
+    std::memmove(data, data + sizeof(PageSize), size);
+
+    insert_delta(page.m_deltas, {offset, size + sizeof(PageSize)});
+    gap_size += sizeof(PageSize);
+    --header.cell_count;
+}
+
+auto Node::take() && -> Page
+{
+    if (page.is_writable()) {
+        header.write(page);
+    }
+    return std::move(page);
+}
+
+auto Node::TEST_validate() -> void
+{
+#if not NDEBUG
+    CDB_EXPECT_LE(header.frag_count + 3, 0xFF);
+    std::vector<char> used(page.size());
+    const auto account = [&x = used](auto from, auto size) {
+        auto lower = begin(x) + long(from);
+        auto upper = begin(x) + long(from) + long(size);
+        CDB_EXPECT_FALSE(std::any_of(lower, upper, [](auto byte) {
+            return byte != '\x00';
+        }));
+        std::fill(lower, upper, 1);
+    };
+    // Header(s) and cell pointers.
+    {
+        account(0, cell_area_offset(*this));
+    }
+    // Gap space.
+    {
+        account(cell_area_offset(*this), gap_size);
+    }
+    // Free list blocks.
+    {
+        PageSize i {header.free_start};
+        const char *data = page.data();
+        std::size_t free_total {};
+        while (i) {
+            const auto size = get_u16(data + i + sizeof(PageSize));
+            account(i, size);
+            i = get_u16(data + i);
+            free_total += size;
+        }
+        CDB_EXPECT_EQ(free_total + header.frag_count, header.free_total);
+    }
+    // Cell bodies. Also makes sure the cells are in order.
+    for (std::size_t n {}; n < header.cell_count; ++n) {
+        const auto lhs_ptr = get_slot(n);
+        const auto lhs_cell = read_cell_at(*this, lhs_ptr);
+        account(lhs_ptr, lhs_cell.size);
+
+        if (n + 1 < header.cell_count) {
+            const auto rhs_ptr = get_slot(n + 1);
+            const auto rhs_cell = read_cell_at(*this, rhs_ptr);
+            if (!lhs_cell.has_remote && !rhs_cell.has_remote) {
+                Slice lhs_key {lhs_cell.key, lhs_cell.key_size};
+                Slice rhs_key {rhs_cell.key, rhs_cell.key_size};
+                CDB_EXPECT_LT(lhs_key, rhs_key);
+            }
+        }
+    }
+
+    // Every byte should be accounted for, except for fragments.
+    const auto total_bytes = std::accumulate(
+        begin(used),
+        end(used),
+        int(header.frag_count),
+        [](auto accum, auto next) {
+            return accum + next;
+        });
+    CDB_EXPECT_EQ(page.size(), std::size_t(total_bytes));
+#endif // not NDEBUG
+}
+
+static auto setup_node(Node &node) -> void
+{
+    node.slots_offset = static_cast<PageSize>(cell_slots_offset(node));
+
+    if (node.header.cell_start == 0) {
+        node.header.cell_start = static_cast<PageSize>(node.page.size());
+    }
+
+    const auto after_header = page_offset(node.page) + NodeHeader::kSize;
+    const auto bottom = after_header + node.header.cell_count * sizeof(PageSize);
+    const auto top = node.header.cell_start;
+
+    CDB_EXPECT_GE(top, bottom);
+    node.gap_size = static_cast<PageSize>(top - bottom);
+}
+
+auto NodeFactory::make_new(Page page, char *scratch, bool is_external) -> Node
+{
+    Node node;
+    node.header.is_external = is_external;
+    node.scratch = scratch;
+    node.meta = &kMetaLookup[page.size() >> 8][is_external];
+    node.page = std::move(page);
+    setup_node(node);
+    return node;
+}
+
+auto NodeFactory::make_existing(Page page, char *scratch) -> Node
+{
+    Node node;
+    node.scratch = scratch;
+    node.header.read(page);
+    node.meta = &kMetaLookup[page.size() >> 8][node.header.is_external];
+    setup_node(node);
+    return node;
+}
+
+auto usable_space(const Node &node) -> std::size_t
+{
+    return node.header.free_total + node.gap_size;
+}
+
+auto allocate_block(Node &node, PageSize index, PageSize size) -> std::size_t
+{
+    CDB_EXPECT_LE(index, node.header.cell_count);
+
+    if (size + sizeof(PageSize) > usable_space(node)) {
+        node.overflow_index = index;
+        return 0;
+    }
+
+    BlockAllocator alloc {node};
+
+    // We don't have room to insert the cell pointer.
+    if (node.gap_size < sizeof(PageSize)) {
+        alloc.defragment(std::nullopt);
+    }
+    // insert a dummy cell pointer to save the slot.
+    node.insert_slot(index, node.page.size() - 1);
+
+    auto offset = alloc.allocate(size);
+    if (offset == 0) {
+        alloc.defragment(index);
+        offset = alloc.allocate(size);
+    }
+    // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
+    // to allocate() following defragmentation should succeed.
+    CDB_EXPECT_NE(offset, 0);
+    node.set_slot(index, offset);
+
+    // Signal that there will be a change here, but don't write anything yet.
+    (void)node.page.span(offset, size);
+    return offset;
+}
+
+static auto free_block(Node &node, PageSize index, PageSize size) -> void
+{
+    BlockAllocator alloc {node};
+    alloc.free(static_cast<PageSize>(node.get_slot(index)), size);
+    node.remove_slot(index);
+}
+
+auto read_cell_at(Node &node, std::size_t offset) -> Cell
+{
+    return node.meta->parse_cell(*node.meta, node.page.data() + offset);
+}
+
+auto read_cell(Node &node, std::size_t index) -> Cell
+{
+    return read_cell_at(node, node.get_slot(index));
+}
+
+auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
+{
+    if (const auto offset = allocate_block(node, static_cast<PageSize>(index), static_cast<PageSize>(cell.size))) {
+        auto memory = node.page.span(offset, cell.size);
+        std::memcpy(memory.data(), cell.ptr, cell.size);
+        return offset;
+    }
+    node.overflow_index = PageSize(index);
+    node.overflow = cell;
+    return 0;
+}
+
+auto erase_cell(Node &node, std::size_t index) -> void
+{
+    erase_cell(node, index, cell_size_direct(node, node.get_slot(index)));
+}
+
+auto erase_cell(Node &node, std::size_t index, std::size_t size_hint) -> void
+{
+    CDB_EXPECT_LT(index, node.header.cell_count);
+    free_block(node, PageSize(index), PageSize(size_hint));
+}
+
+auto emplace_cell(char *out, std::size_t key_size, std::size_t value_size, const Slice &local_key, const Slice &local_value, Id overflow_id) -> char *
+{
+    out = encode_varint(out, value_size);
+    out = encode_varint(out, key_size);
+
+    std::memcpy(out, local_key.data(), local_key.size());
+    out += local_key.size();
+
+    std::memcpy(out, local_value.data(), local_value.size());
+    out += local_value.size();
+
+    if (!overflow_id.is_null()) {
+        put_u64(out, overflow_id.value);
+        out += sizeof(overflow_id);
+    }
+    return out;
+}
+
+auto manual_defragment(Node &node) -> void
+{
+    BlockAllocator alloc {node};
+    alloc.defragment();
+}
+
+auto detach_cell(Cell &cell, char *backing) -> void
+{
+    if (cell.is_free) {
+        return;
+    }
+    std::memcpy(backing, cell.ptr, cell.size);
+    const auto diff = cell.key - cell.ptr;
+    cell.ptr = backing;
+    cell.key = backing + diff;
+    cell.is_free = true;
+}
+
+auto read_child_id_at(const Node &node, std::size_t offset) -> Id
+{
+    return {get_u64(node.page.data() + offset)};
+}
+
+auto write_child_id_at(Node &node, std::size_t offset, Id child_id) -> void
+{
+    put_u64(node.page.span(offset, sizeof(Id)), child_id.value);
+}
+
+auto read_child_id(const Node &node, std::size_t index) -> Id
+{
+    const auto &header = node.header;
+    CDB_EXPECT_LE(index, header.cell_count);
+    CDB_EXPECT_FALSE(header.is_external);
+    if (index == header.cell_count) {
+        return header.next_id;
+    }
+    return read_child_id_at(node, node.get_slot(index));
+}
+
+auto read_child_id(const Cell &cell) -> Id
+{
+    return {get_u64(cell.ptr)};
+}
+
+auto read_overflow_id(const Cell &cell) -> Id
+{
+    return {get_u64(cell.key + cell.local_size)};
+}
+
+auto write_overflow_id(Cell &cell, Id overflow_id) -> void
+{
+    put_u64(cell.key + cell.local_size, overflow_id.value);
+}
+
+auto write_child_id(Node &node, std::size_t index, Id child_id) -> void
+{
+    auto &header = node.header;
+    CDB_EXPECT_LE(index, header.cell_count);
+    CDB_EXPECT_FALSE(header.is_external);
+    if (index == header.cell_count) {
+        header.next_id = child_id;
+    } else {
+        write_child_id_at(node, node.get_slot(index), child_id);
+    }
+}
+
+auto write_child_id(Cell &cell, Id child_id) -> void
+{
+    put_u64(cell.ptr, child_id.value);
+}
+
+auto merge_root(Node &root, Node &child) -> void
+{
+    CDB_EXPECT_EQ(root.header.next_id, child.page.id());
+    const auto &header = child.header;
+    if (header.free_total) {
+        manual_defragment(child);
+    }
+
+    // Copy the cell content area.
+    CDB_EXPECT_GE(header.cell_start, FileHeader::kSize + NodeHeader::kSize);
+    auto memory = root.page.span(header.cell_start, child.page.size() - header.cell_start);
+    std::memcpy(memory.data(), child.page.data() + header.cell_start, memory.size());
+
+    // Copy the header and cell pointers.
+    memory = root.page.span(FileHeader::kSize + NodeHeader::kSize, header.cell_count * sizeof(PageSize));
+    std::memcpy(memory.data(), child.page.data() + cell_slots_offset(child), memory.size());
+    root.header = header;
+    root.meta = child.meta;
+}
+
+
+[[nodiscard]] static constexpr auto header_offset() -> std::size_t
+{
+    return sizeof(Lsn);
+}
+
+[[nodiscard]] static constexpr auto content_offset() -> std::size_t
+{
+    return header_offset() + sizeof(Id);
+}
+
+[[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
+{
+    return page.view(content_offset(), std::min(size_limit, page.size() - content_offset()));
+}
+
+[[nodiscard]] static auto get_writable_content(Page &page, std::size_t size_limit) -> Span
+{
+    return page.span(content_offset(), std::min(size_limit, page.size() - content_offset()));
+}
+
+auto Freelist::pop(Page &page) -> Status
+{
+    if (!m_head.is_null()) {
+        CDB_TRY(m_pager->acquire(m_head, page));
+        m_pager->upgrade(page, content_offset());
+        m_head = read_next_id(page);
+
+        if (!m_head.is_null()) {
+            // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
+            // node's back pointer at some point.
+            const PointerMap::Entry entry {Id::null(), PointerMap::kFreelistLink};
+            CDB_TRY(m_pointers->write_entry(m_head, entry));
+        }
+        return Status::ok();
+    }
+    CDB_EXPECT_TRUE(m_head.is_null());
+    return Status::logic_error("free list is empty");
+}
+
+auto Freelist::push(Page page) -> Status
+{
+    CDB_EXPECT_FALSE(page.id().is_root());
+    write_next_id(page, m_head);
+
+    // Write the parent of the old head, if it exists.
+    PointerMap::Entry entry {page.id(), PointerMap::kFreelistLink};
+    if (!m_head.is_null()) {
+        CDB_TRY(m_pointers->write_entry(m_head, entry));
+    }
+    // Clear the parent of the new head.
+    entry.back_ptr = Id::null();
+    CDB_TRY(m_pointers->write_entry(page.id(), entry));
+
+    m_head = page.id();
+    m_pager->release(std::move(page));
+    return Status::ok();
+}
+
+auto OverflowList::read_chain(Span out, Id pid, std::size_t offset) const -> Status
+{
+    while (!out.is_empty()) {
+        Page page;
+        CDB_TRY(m_pager->acquire(pid, page));
+        auto content = get_readable_content(page, page.size());
+
+        if (offset) {
+            const auto max = std::min(offset, content.size());
+            content.advance(max);
+            offset -= max;
+        }
+        if (!content.is_empty()) {
+            const auto size = std::min(out.size(), content.size());
+            mem_copy(out, content, size);
+            out.advance(size);
+        }
+        pid = read_next_id(page);
+        m_pager->release(std::move(page));
+    }
+    return Status::ok();
+}
+
+auto OverflowList::write_chain(Id &out, Id pid, Slice first, Slice second) -> Status
+{
+    std::optional<Page> prev;
+    auto head = Id::null();
+
+    if (first.is_empty()) {
+        first = second;
+        second.clear();
+    }
+
+    while (!first.is_empty()) {
+        Page page;
+        auto s = m_freelist->pop(page);
+        if (s.is_logic_error()) {
+            s = m_pager->allocate(page);
+            if (s.is_ok() && m_pointers->lookup(page.id()) == page.id()) {
+                m_pager->release(std::move(page));
+                s = m_pager->allocate(page);
+            }
+        }
+        CDB_TRY(s);
+
+        auto content = get_writable_content(page, first.size() + second.size());
+        auto limit = std::min(first.size(), content.size());
+        mem_copy(content, first, limit);
+        first.advance(limit);
+
+        if (first.is_empty()) {
+            first = second;
+            second.clear();
+
+            if (!first.is_empty()) {
+                content.advance(limit);
+                limit = std::min(first.size(), content.size());
+                mem_copy(content, first, limit);
+                first.advance(limit);
+            }
+        }
+        PointerMap::Entry entry {pid, PointerMap::kOverflowHead};
+        if (prev) {
+            write_next_id(*prev, page.id());
+            m_pager->release(std::move(*prev));
+            entry.back_ptr = prev->id();
+            entry.type = PointerMap::kOverflowLink;
+        } else {
+            head = page.id();
+        }
+        CDB_TRY(m_pointers->write_entry(page.id(), entry));
+        prev.emplace(std::move(page));
+    }
+    if (prev) {
+        // "prev" contains the last page in the chain.
+        write_next_id(*prev, Id::null());
+        m_pager->release(std::move(*prev));
+    }
+    out = head;
+    return Status::ok();
+}
+
+auto OverflowList::copy_chain(Id &out, Id pid, Id overflow_id, std::size_t size) -> Status
+{
+    if (m_scratch.size() < size) {
+        m_scratch.resize(size);
+    }
+    Span buffer {m_scratch};
+    buffer.truncate(size);
+
+    CDB_TRY(read_chain(buffer, overflow_id));
+    return write_chain(out, pid, buffer);
+}
+
+auto OverflowList::erase_chain(Id pid) -> Status
+{
+    while (!pid.is_null()) {
+        Page page;
+        CDB_TRY(m_pager->acquire(pid, page));
+        pid = read_next_id(page);
+        m_pager->upgrade(page);
+        CDB_TRY(m_freelist->push(std::move(page)));
+    }
+    return Status::ok();
+}
+
+static constexpr auto kEntrySize =
+    sizeof(char) + // Type
+    sizeof(Id);    // Back pointer
+
+static auto entry_offset(Id map_id, Id pid) -> std::size_t
+{
+    CDB_EXPECT_GT(pid, map_id);
+
+    // Account for the page LSN.
+    return sizeof(Lsn) + (pid.value - map_id.value - 1) * kEntrySize;
+}
+
+static auto decode_entry(const char *data) -> PointerMap::Entry
+{
+    PointerMap::Entry entry;
+    entry.type = PointerMap::Type {*data++};
+    entry.back_ptr.value = get_u64(data);
+    return entry;
+}
+
+auto PointerMap::read_entry(Id pid, Entry &out) const -> Status
+{
+    const auto mid = lookup(pid);
+    CDB_EXPECT_GE(mid.value, 2);
+    CDB_EXPECT_NE(mid, pid);
+    const auto offset = entry_offset(mid, pid);
+    CDB_EXPECT_LE(offset + kEntrySize, m_pager->page_size());
+    Page map;
+    CDB_TRY(m_pager->acquire(mid, map));
+    out = decode_entry(map.data() + offset);
+    m_pager->release(std::move(map));
+    return Status::ok();
+}
+
+auto PointerMap::write_entry(Id pid, Entry entry) -> Status
+{
+    const auto mid = lookup(pid);
+    CDB_EXPECT_GE(mid.value, 2);
+    CDB_EXPECT_NE(mid, pid);
+    const auto offset = entry_offset(mid, pid);
+    CDB_EXPECT_LE(offset + kEntrySize, m_pager->page_size());
+    Page map;
+    CDB_TRY(m_pager->acquire(mid, map));
+    const auto [back_ptr, type] = decode_entry(map.data() + offset);
+    if (entry.back_ptr != back_ptr || entry.type != type) {
+        if (!map.is_writable()) {
+            m_pager->upgrade(map);
+        }
+        auto data = map.span(offset, kEntrySize).data();
+        *data++ = entry.type;
+        put_u64(data, entry.back_ptr.value);
+    }
+    m_pager->release(std::move(map));
+    return Status::ok();
+}
+
+auto PointerMap::lookup(Id pid) const -> Id
+{
+    // Root page (1) has no parents, and page 2 is the first pointer map page. If "pid" is a pointer map
+    // page, "pid" will be returned.
+    if (pid.value < 2) {
+        return Id::null();
+    }
+    const auto usable_size = m_pager->page_size() - sizeof(Lsn);
+    const auto inc = usable_size / kEntrySize + 1;
+    const auto idx = (pid.value - 2) / inc;
+    return {idx * inc + 2};
+}
+
+[[nodiscard]] auto read_next_id(const Page &page) -> Id
+{
+    return {get_u64(page.view(header_offset()))};
+}
+
+auto write_next_id(Page &page, Id next_id) -> void
+{
+    put_u64(page.span(header_offset(), sizeof(Id)), next_id.value);
+}
 
 struct SeekResult {
     unsigned index {};
@@ -202,7 +1056,7 @@ auto BPlusTreeInternal::make_fresh_node(Node &out, bool is_external) const -> vo
     } else {
         out.meta = &m_tree->m_internal_meta;
     }
-    out.initialize();
+    setup_node(out);
 }
 
 auto BPlusTreeInternal::make_existing_node(Node &out) const -> void
@@ -214,7 +1068,7 @@ auto BPlusTreeInternal::make_existing_node(Node &out) const -> void
     } else {
         out.meta = &m_tree->m_internal_meta;
     }
-    out.initialize();
+    setup_node(out);
 }
 
 auto BPlusTreeInternal::allocate(Node &out, bool is_external) -> Status
@@ -353,7 +1207,7 @@ auto BPlusTreeInternal::split_root(Node root, Node &out) -> Status
     root.header = NodeHeader {};
     root.header.is_external = false;
     root.header.next_id = child.page.id();
-    root.initialize();
+    setup_node(root);
 
     CDB_TRY(fix_parent_id(child.page.id(), root.page.id()));
     release(std::move(root));
@@ -626,10 +1480,8 @@ auto BPlusTreeInternal::external_merge_right(Node &left, Node &right, Node &pare
     CDB_EXPECT_FALSE(parent.header.is_external);
 
     left.header.next_id = right.header.next_id;
-    //    const auto separator = read_cell(parent, index);
     CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
     write_child_id(parent, index + 1, left.page.id());
-    //    erase_cell(parent, index, separator.size);
     CDB_TRY(remove_cell(parent, index));
 
     while (right.header.cell_count) {
@@ -1564,7 +2416,32 @@ auto BPlusTree::TEST_check_nodes() -> void
     });
 }
 
+
+
+
+
+
+
+
+
+
+
+//namespace calicodb
+//{
+//
+//auto OverflowList::read_chain(Pager &pager, std::string *result, Id head_id, std::size_t offset = 0) -> Status;
+//auto OverflowList::write_chain(Pager &pager, Id *head_id, Id parent_id, const Slice &first, const Slice &second = {}) -> Status;
+//auto OverflowList::copy_chain(Pager &pager, Id *head_id, Id parent_id, Id overflow_id, std::size_t size) -> Status;
+//auto OverflowList::erase_chain(Pager &pager, Id head_id) -> Status;
+//auto PayloadManager::emplace(Pager &pager, std::string &scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
+//auto PayloadManager::promote(Pager &pager, std::string &scratch, Cell &cell, Id parent_id) -> Status;
+//auto PayloadManager::collect_key(Pager &pager, std::string &result, const Cell &cell, const Slice *key) -> Status;
+//auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell &cell, const Slice *value) -> Status;
+//};
+
+} // namespace calicodb
+
 #undef CHECK_TRUE
 #undef CHECK_OK
 
-} // namespace calicodb
+//} // namespace calicodb

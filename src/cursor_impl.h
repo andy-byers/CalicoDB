@@ -2,7 +2,6 @@
 #define CALICODB_CURSOR_IMPL_H
 
 #include "calicodb/cursor.h"
-#include "node.h"
 #include "tree.h"
 #include "types.h"
 #include <functional>

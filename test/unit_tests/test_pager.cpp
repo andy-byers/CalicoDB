@@ -2,7 +2,6 @@
 #include "frames.h"
 #include "header.h"
 #include "logging.h"
-#include "node.h"
 #include "page.h"
 #include "page_cache.h"
 #include "pager.h"
