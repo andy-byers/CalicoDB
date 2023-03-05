@@ -68,3 +68,23 @@ The `recovery_lsn` represents the oldest WAL record that we still need.
 It is reported back to the WAL intermittently so that obsolete segment files can be removed.
 Finally, the `commit_lsn` is the LSN of the most-recent commit record (the special delta record mentioned in [WAL](#wal)).
 This value is saved in the database file header and is used to determine how the logical contents of the database should look.
+
+### Notes for tables support
+Here are the main things that need to change:
+1. Each tree is rooted on some database page. The root tree, rooted on the first page, stores a mapping from table names to tree roots.
+2. Each tree needs a tree header, which will store its commit LSN, and possibly a record count
+    + Tree header is located after the page header but before the node header 
+3. Vacuum needs a special case for swapping a tree root. We can also get rid of empty unopened tables in vacuum.
+4. Commit and recovery need to be modified
+    + There is still 1 WAL, and records don't know what tree they came from
+    + A commit record is the delta record that updates the tree/file header and page LSN, that never happens outside of commit
+    + Recovery reads the WAL and determines the last LSN written for each table, as well as the commit LSN for each table
+    + Then, it reverts all uncommitted changes in another pass
+    + Like before, the WAL is removed once the database is consistent and all dirty pages have been flushed
+6. When a table is closed with uncommitted changes, we will need to roll them back right away
+    + We will have to update the table's commit LSN (maybe it should be called a checkpoint LSN) to match the last LSN for that table (get that from reading the WAL)
+    + The updated LSN needs to be written to disk immediately, otherwise, the recovery routine could get confused if we cleaned up WAL segments later. 
+It will apply delta records thinking they are needed, fail to find a commit record, then try to roll back.
+It won't be able to undo all the changes if it is missing any full images from the left.
+If the commit LSN is higher than any of these records, none of them will be considered during recovery, so that seems to solve the problem.
+This is the one change that isn't recorded in the WAL.

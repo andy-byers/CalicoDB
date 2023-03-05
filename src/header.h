@@ -39,24 +39,6 @@ struct FileHeader {
     std::uint16_t page_size {};
 };
 
-/* Every tree has a table header on its root page. The table header comes after the page header, but before the node
- * header.
- *
- * Table Header Format:
- *     Offset  Size  Name
- *    --------------------------
- *     0       8     commit_lsn
- *     0       8     record_count
- */
-struct TableHeader {
-    static constexpr std::size_t kSize {16};
-    auto read(const char *data) -> void;
-    auto write(char *data) const -> void;
-
-    Lsn commit_lsn;
-    std::uint64_t record_count {};
-};
-
 /* Every page has a page header, after the file header, but before the tree header, if they are on this page.
  *
  * Page Header Format:
@@ -64,13 +46,7 @@ struct TableHeader {
  *    --------------------------
  *     0       8     page_lsn
  */
-struct PageHeader {
-    static constexpr std::size_t kSize {8};
-    auto read(const char *data) -> void;
-    auto write(char *data) const -> void;
-
-    Lsn page_lsn;
-};
+static constexpr auto kPageHeaderSize = sizeof(Lsn);
 
 /* Node Header Format:
  *     Offset  Size  Name

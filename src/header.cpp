@@ -64,28 +64,6 @@ auto FileHeader::write(char *data) const -> void
     write_file_header(data, *this);
 }
 
-auto TableHeader::write(char *data) const -> void
-{
-    put_u64(data, commit_lsn.value);
-    put_u64(data + sizeof(Lsn), record_count);
-}
-
-auto TableHeader::read(const char *data) -> void
-{
-    commit_lsn.value = get_u64(data);
-    record_count = get_u64(data + sizeof(Lsn));
-}
-
-auto PageHeader::write(char *data) const -> void
-{
-    put_u64(data, page_lsn.value);
-}
-
-auto PageHeader::read(const char *data) -> void
-{
-    page_lsn.value = get_u64(data);
-}
-
 auto NodeHeader::read(const char *data) -> void
 {
     // Flags byte.

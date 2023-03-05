@@ -132,7 +132,6 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     Options options;
-//    options.info_log = new tools::StderrLogger;
     options.env = new tools::FakeEnv;
     options.page_size = kMinPageSize;
     options.cache_size = kMinPageSize * 16;
@@ -146,7 +145,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         }
     }
 
-//    delete options.info_log;
     delete options.env;
     return 0;
 }

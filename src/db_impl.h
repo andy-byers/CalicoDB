@@ -2,6 +2,7 @@
 #define CALICODB_DB_IMPL_H
 
 #include "calicodb/db.h"
+#include "calicodb/options.h"
 
 #include "header.h"
 #include "pager.h"
@@ -30,12 +31,12 @@ public:
     [[nodiscard]] static auto repair(const Options &options, const std::string &filename) -> Status;
     [[nodiscard]] auto open(const Options &options, const Slice &filename) -> Status;
 
+    [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
-    [[nodiscard]] auto get_property(const Slice &name, std::string &out) const -> bool override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
-    [[nodiscard]] auto get(const Slice &key, std::string &out) const -> Status override;
+    [[nodiscard]] auto get(const Slice &key, std::string *out) const -> Status override;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
@@ -47,7 +48,7 @@ public:
     auto TEST_validate() const -> void;
 
     WriteAheadLog *wal {};
-    BPlusTree *tree {};
+    Tree *tree {};
     Pager *pager {};
 
 private:
@@ -67,6 +68,7 @@ private:
     std::size_t m_txn_size {};
     std::size_t m_record_count {};
     std::size_t m_bytes_written {};
+    Id m_freelist_head;
     Lsn m_commit_lsn;
     bool m_in_txn {true};
     bool m_owns_env {};

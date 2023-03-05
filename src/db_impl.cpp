@@ -3,7 +3,6 @@
 #include "calicodb/calicodb.h"
 #include "calicodb/env.h"
 #include "crc.h"
-#include "cursor_impl.h"
 #include "env_posix.h"
 #include "logging.h"
 
@@ -17,8 +16,7 @@ namespace calicodb
         }                       \
     } while (0)
 
-[[nodiscard]] static auto
-sanitize_options(const Options &options) -> Options
+[[nodiscard]] static auto sanitize_options(const Options &options) -> Options
 {
     auto sanitized = options;
     if (sanitized.cache_size == 0) {
@@ -38,7 +36,7 @@ auto DBImpl::open(const Options &options, const Slice &filename) -> Status
     const auto [dir, base] = split_path(m_filename);
     m_filename = join_paths(dir, base);
 
-    m_wal_prefix = sanitized.wal_prefix.to_string();
+    m_wal_prefix = sanitized.wal_prefix;
     if (m_wal_prefix.empty()) {
         m_wal_prefix = m_filename + kDefaultWalSuffix;
     }
@@ -107,19 +105,14 @@ auto DBImpl::do_open(Options sanitized) -> Status
         &pager));
     pager->load_state(state);
 
-    tree = new BPlusTree {*pager};
+    tree = new Tree {*pager, &m_freelist_head};
     tree->load_state(state);
 
     Status s;
     if (m_commit_lsn.is_null()) {
         m_info_log->logv("setting up a new database");
         CDB_TRY(wal->start_writing());
-
-        Node root;
-        BPlusTreeInternal internal {*tree};
-        CDB_TRY(internal.allocate_root(root));
-        internal.release(std::move(root));
-
+        CDB_TRY(Tree::create(*pager, &m_freelist_head));
         CDB_TRY(do_commit());
         CDB_TRY(pager->flush());
 
@@ -192,7 +185,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
 
     const auto [dir, base] = split_path(filename);
     const auto path = join_paths(dir, base);
-    auto wal_prefix = options.wal_prefix.to_string();
+    auto wal_prefix = options.wal_prefix;
     if (wal_prefix.empty()) {
         wal_prefix = path + kDefaultWalSuffix;
     }
@@ -203,7 +196,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     auto s = env->remove_file(path);
 
     std::vector<std::string> children;
-    auto t = env->get_children(dir, children);
+    auto t = env->get_children(dir, &children);
     if (s.is_ok()) {
         s = t;
     }
@@ -230,54 +223,39 @@ auto DBImpl::status() const -> Status
     return m_status;
 }
 
-auto DBImpl::get_property(const Slice &name, std::string &out) const -> bool
+auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 {
     if (Slice prop {name}; prop.starts_with("calicodb.")) {
         prop.advance(std::strlen("calicodb."));
 
         if (prop == "counts") {
-            out.append("records:");
-            append_number(out, m_record_count);
-            out.append(",pages:");
-            append_number(out, pager->page_count());
-            out.append(",updates:");
-            append_number(out, m_txn_size);
+            out->append("records:");
+            append_number(*out, m_record_count);
+            out->append(",pages:");
+            append_number(*out, pager->page_count());
+            out->append(",updates:");
+            append_number(*out, m_txn_size);
             return true;
 
         } else if (prop == "stats") {
-            out.append("cache_hit_ratio:");
-            append_double(out, pager->hit_ratio());
-            out.append(",data_throughput:");
-            append_number(out, m_bytes_written);
-            out.append(",pager_throughput:");
-            append_number(out, pager->bytes_written());
-            out.append(",wal_throughput:");
-            append_number(out, wal->bytes_written());
+            out->append("cache_hit_ratio:");
+            append_double(*out, pager->hit_ratio());
+            out->append(",data_throughput:");
+            append_number(*out, m_bytes_written);
+            out->append(",pager_throughput:");
+            append_number(*out, pager->bytes_written());
+            out->append(",wal_throughput:");
+            append_number(*out, wal->bytes_written());
             return true;
         }
     }
     return false;
 }
 
-auto DBImpl::get(const Slice &key, std::string &value) const -> Status
+auto DBImpl::get(const Slice &key, std::string *value) const -> Status
 {
     CDB_TRY(m_status);
-    value.clear();
-
-    SearchResult slot;
-    CDB_TRY(tree->search(key, slot));
-    auto [node, index, exact] = std::move(slot);
-
-    if (!exact) {
-        pager->release(std::move(node.page));
-        return Status::not_found("not found");
-    }
-
-    Slice _;
-    const auto cell = read_cell(node, index);
-    CDB_TRY(tree->collect_value(value, cell, _));
-    pager->release(std::move(node.page));
-    return Status::ok();
+    return tree->get(key, value);
 }
 
 auto DBImpl::new_cursor() const -> Cursor *
@@ -297,7 +275,7 @@ auto DBImpl::put(const Slice &key, const Slice &value) -> Status
     CDB_TRY(m_status);
 
     bool exists;
-    if (auto s = tree->insert(key, value, &exists); !s.is_ok()) {
+    if (auto s = tree->put(key, value, &exists); !s.is_ok()) {
         SET_STATUS(s);
         return s;
     }
@@ -339,8 +317,8 @@ auto DBImpl::do_vacuum() -> Status
     }
     const auto original = target;
     for (;; target.value--) {
-        bool vacuumed {};
-        CDB_TRY(tree->vacuum_one(target, vacuumed));
+        bool vacuumed;
+        CDB_TRY(tree->vacuum_one(target, &vacuumed));
         if (!vacuumed) {
             break;
         }
@@ -408,15 +386,18 @@ auto DBImpl::save_state(Page root, Lsn commit_lsn) const -> Status
     CDB_EXPECT_TRUE(root.id().is_root());
     CDB_EXPECT_FALSE(commit_lsn.is_null());
 
-    FileHeader header {root};
+    FileHeader header;
+    header.read(root.data());
+
     pager->save_state(header);
-    tree->save_state(header);
+    header.freelist_head = m_freelist_head;
     header.magic_code = FileHeader::kMagicCode;
     header.commit_lsn = commit_lsn;
     header.record_count = m_record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
-    header.write(root);
+    header.write(root.span(0, FileHeader::kSize).data());
     pager->release(std::move(root));
+
     return Status::ok();
 }
 
@@ -425,7 +406,8 @@ auto DBImpl::load_state() -> Status
     Page root;
     CDB_TRY(pager->acquire(Id::root(), root));
 
-    FileHeader header {root};
+    FileHeader header;
+    header.read(root.data());
     const auto expected_crc = crc32c::Unmask(header.header_crc);
     const auto computed_crc = header.compute_crc();
     if (expected_crc != computed_crc) {
@@ -444,9 +426,7 @@ auto DBImpl::load_state() -> Status
 
 auto DBImpl::TEST_validate() const -> void
 {
-    tree->TEST_check_links();
-    tree->TEST_check_order();
-    tree->TEST_check_nodes();
+    tree->TEST_validate();
 }
 
 auto setup(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
@@ -475,7 +455,7 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
     if (auto s = env.new_reader(path, &reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
         std::size_t file_size {};
-        CDB_TRY(env.file_size(path, file_size));
+        CDB_TRY(env.file_size(path, &file_size));
 
         if (file_size < FileHeader::kSize) {
             return Status::invalid_argument("file is not a database");
@@ -483,11 +463,11 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
 
         char buffer[FileHeader::kSize];
         auto read_size = sizeof(buffer);
-        CDB_TRY(reader->read(buffer, read_size, 0));
+        CDB_TRY(reader->read(buffer, &read_size, 0));
         if (read_size != sizeof(buffer)) {
             return Status::system_error("incomplete read of file header");
         }
-        header = FileHeader(buffer);
+        header.read(buffer);
 
         if (header.magic_code != FileHeader::kMagicCode) {
             return Status::invalid_argument("file is not a database");

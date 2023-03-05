@@ -197,11 +197,11 @@ inline auto assert_special_error(const Status &s)
     }
 }
 
-namespace TestTools
+namespace test_tools
 {
 
 template <class T>
-auto get(T &t, const std::string &key, std::string &value) -> Status
+auto get(T &t, const std::string &key, std::string *value) -> Status
 {
     return t.get(key, value);
 }
@@ -237,7 +237,7 @@ template <class T>
 auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
 {
     std::string val;
-    if (auto s = get(t, key, val); s.is_ok()) {
+    if (auto s = get(t, key, &val); s.is_ok()) {
         if (val != value) {
             std::cerr << "value does not match (\"" << value << "\" != \"" << val << "\")\n";
             std::abort();
@@ -307,18 +307,18 @@ inline auto read_file(Env &env, const std::string &path) -> std::string
     std::string out;
     std::size_t size;
 
-    EXPECT_TRUE(env.file_size(path, size).is_ok());
+    EXPECT_TRUE(env.file_size(path, &size).is_ok());
     EXPECT_TRUE(env.new_reader(path, &file).is_ok());
     out.resize(size);
 
     Span temp {out};
     auto read_size = temp.size();
-    EXPECT_TRUE(file->read(temp.data(), read_size, 0).is_ok());
+    EXPECT_TRUE(file->read(temp.data(), &read_size, 0).is_ok());
     EXPECT_EQ(read_size, size);
     delete file;
     return out;
 }
-} // namespace TestTools
+} // namespace test_tools
 
 struct Record {
     inline auto operator<(const Record &rhs) const -> bool

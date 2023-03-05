@@ -45,7 +45,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     }
     switch (operation_type) {
     case kGet:
-        s = m_db->get(extract_fuzzer_key(data, size), value);
+        s = m_db->get(extract_fuzzer_key(data, size), &value);
         if (s.is_not_found()) {
             s = Status::ok();
         }

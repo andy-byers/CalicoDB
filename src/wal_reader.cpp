@@ -8,7 +8,7 @@ namespace calicodb
 {
     auto temp = tail;
     auto read_size = tail.size();
-    CDB_TRY(file.read(temp.data(), read_size, number * tail.size()));
+    CDB_TRY(file.read(temp.data(), &read_size, number * tail.size()));
 
     if (read_size == 0) {
         return Status::not_found("end of file");

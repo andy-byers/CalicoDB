@@ -24,7 +24,7 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
     const auto [dir, base] = split_path(param.prefix);
     std::vector<std::string> possible_segments;
-    CDB_TRY(param.env->get_children(dir, possible_segments));
+    CDB_TRY(param.env->get_children(dir, &possible_segments));
 
     std::vector<Id> segments;
     for (auto &name : possible_segments) {

@@ -270,7 +270,7 @@ private:
     // Read the first LSN. If it exists, it will always be at the same location: right after the first
     // record header, which is written at offset 0.
     auto read_size = bytes.size();
-    CDB_TRY(file->read(bytes.data(), read_size, WalRecordHeader::kSize));
+    CDB_TRY(file->read(bytes.data(), &read_size, WalRecordHeader::kSize));
 
     bytes.truncate(read_size);
 

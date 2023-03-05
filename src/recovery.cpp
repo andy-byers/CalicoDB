@@ -216,7 +216,8 @@ auto Recovery::recover_phase_2() -> Status
     // Pager needs the updated state to determine the page count.
     Page page;
     CDB_TRY(m_pager->acquire(Id::root(), page));
-    FileHeader header {page};
+    FileHeader header;
+    header.read(page.data());
     m_pager->load_state(header);
     m_pager->release(std::move(page));
 

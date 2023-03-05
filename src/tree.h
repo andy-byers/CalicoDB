@@ -1,6 +1,7 @@
 #ifndef CALICODB_TREE_H
 #define CALICODB_TREE_H
 
+#include "calicodb/cursor.h"
 #include "page.h"
 #include <optional>
 
@@ -68,8 +69,9 @@ struct Node {
     PageSize overflow_index {};
     PageSize slots_offset {};
     PageSize gap_size {};
-    bool is_root {};
 };
+
+auto manual_defragment(Node &node) -> void;
 
 /*
  * Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
@@ -100,20 +102,14 @@ class Freelist
     Id *m_head {};
 
 public:
-    explicit Freelist(Pager &pager, Id *head)
-        : m_pager {&pager},
-          m_head {head}
-    {
-    }
-
-    [[nodiscard]] auto is_empty() const -> bool
-    {
-        return m_head->is_null();
-    }
-
+    explicit Freelist(Pager &pager, Id *head);
+    [[nodiscard]] auto is_empty() const -> bool;
     [[nodiscard]] auto pop(Page &page) -> Status;
     [[nodiscard]] auto push(Page page) -> Status;
 };
+
+[[nodiscard]] auto read_next_id(const Page &page) -> Id;
+auto write_next_id(Page &page, Id next_id) -> void;
 
 // TODO: This implementation takes a shortcut and reads fragmented keys into a temporary buffer.
 //       This isn't necessary: we could iterate through, page by page, and compare bytes as we encounter
@@ -182,30 +178,33 @@ struct OverflowList
 
 struct PayloadManager
 {
-    [[nodiscard]] static auto emplace(Pager &pager, Freelist &freelist, std::string &scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
+    [[nodiscard]] static auto emplace(Pager &pager, Freelist &freelist, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
     [[nodiscard]] static auto promote(Pager &pager, Freelist &freelist, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
 };
 
-struct SearchResult {
-    Node node;
-    std::size_t index {};
-    bool exact {};
-};
-
 class Tree {
 public:
-    [[nodiscard]] static auto allocate_tree(Pager &pager, Id *root) -> Status;
-    explicit Tree(Pager &pager, Id root, Id *freelist_head);
-    [[nodiscard]] auto find(const Slice &key, SearchResult *out) const -> Status;
-    [[nodiscard]] auto put_back(Node node) -> Status;
+    explicit Tree(Pager &pager, Id *freelist_head);
+    [[nodiscard]] static auto create(Pager &pager, Id *freelist_head) -> Status;
+    [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
+    [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
+    [[nodiscard]] auto erase(const Slice &key) -> Status;
+    [[nodiscard]] auto vacuum_one(Id target, bool *success) -> Status;
     auto load_state(const FileHeader &header) -> void;
 
-    auto TEST_to_string() -> void;
+    [[nodiscard]] auto TEST_to_string() -> std::string;
     auto TEST_validate() -> void;
 
 private:
+    struct SearchResult {
+        Node node;
+        std::size_t index {};
+        bool exact {};
+    };
+
+    [[nodiscard]] auto vacuum_step(Page &free, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
@@ -227,11 +226,13 @@ private:
     [[nodiscard]] auto external_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
     [[nodiscard]] auto internal_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
 
-    [[nodiscard]] auto find(const Slice &key, Node node, SearchResult *out) const -> Status;
+    [[nodiscard]] auto find_highest(Node *node) const -> Status;
+    [[nodiscard]] auto find_lowest(Node *node) const -> Status;
+    [[nodiscard]] auto find_external(const Slice &key, Node node, SearchResult *out) const -> Status;
+    [[nodiscard]] auto find_external(const Slice &key, SearchResult *out) const -> Status;
     [[nodiscard]] auto node_iterator(Node &node) const -> NodeIterator;
     [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;
-    [[nodiscard]] auto is_pointer_map(Id pid) const -> bool;
     [[nodiscard]] auto find_parent_id(Id pid, Id *out) const -> Status;
     [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type) -> Status;
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
@@ -244,12 +245,62 @@ private:
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
 
+    friend class CursorImpl;
+    friend class TreeValidator;
+
     mutable std::string m_key_scratch[2];
     mutable std::string m_node_scratch;
     mutable std::string m_cell_scratch;
+    mutable std::string m_anchor;
     Freelist m_freelist;
     Pager *m_pager {};
-    Id m_root;
+};
+
+class CursorImpl : public Cursor
+{
+    struct Location {
+        Id pid;
+        PageSize index {};
+        PageSize count {};
+    };
+    mutable Status m_status;
+    std::string m_key;
+    std::string m_value;
+    std::size_t m_key_size {};
+    std::size_t m_value_size {};
+    Tree *m_tree {};
+    Location m_loc;
+
+    auto seek_to(Node node, std::size_t index) -> void;
+    auto fetch_payload() -> Status;
+
+public:
+    friend class CursorInternal;
+
+    explicit CursorImpl(Tree &tree)
+        : m_tree {&tree}
+    {
+    }
+
+    ~CursorImpl() override = default;
+
+    [[nodiscard]] auto is_valid() const -> bool override;
+    [[nodiscard]] auto status() const -> Status override;
+    [[nodiscard]] auto key() const -> Slice override;
+    [[nodiscard]] auto value() const -> Slice override;
+
+    auto seek(const Slice &key) -> void override;
+    auto seek_first() -> void override;
+    auto seek_last() -> void override;
+    auto next() -> void override;
+    auto previous() -> void override;
+};
+
+class CursorInternal
+{
+public:
+    [[nodiscard]] static auto make_cursor(Tree &tree) -> Cursor *;
+    static auto invalidate(const Cursor &cursor, Status error) -> void;
 };
 
 } // namespace calicodb

@@ -150,7 +150,7 @@ auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
     }
 
     auto read_size = out.size();
-    CDB_TRY(m_file->read(out.data(), read_size, offset));
+    CDB_TRY(m_file->read(out.data(), &read_size, offset));
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
     if (read_size == m_page_size) {

@@ -9,17 +9,17 @@ namespace calicodb
 {
 
 struct Id {
-    static constexpr std::size_t kNull {0};
-    static constexpr std::size_t kRoot {1};
+    static constexpr std::uint64_t kNull {0};
+    static constexpr std::uint64_t kRoot {1};
 
     struct Hash {
-        auto operator()(const Id &id) const -> std::size_t
+        auto operator()(const Id &id) const -> std::uint64_t
         {
             return id.value;
         }
     };
 
-    [[nodiscard]] static constexpr auto from_index(std::size_t index) noexcept -> Id
+    [[nodiscard]] static constexpr auto from_index(std::uint64_t index) noexcept -> Id
     {
         return {index + 1};
     }
@@ -44,13 +44,13 @@ struct Id {
         return value == kRoot;
     }
 
-    [[nodiscard]] constexpr auto as_index() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto as_index() const noexcept -> std::uint64_t
     {
         CDB_EXPECT_NE(value, null().value);
         return value - 1;
     }
 
-    std::size_t value {};
+    std::uint64_t value {};
 };
 
 inline auto operator<(Id lhs, Id rhs) -> bool

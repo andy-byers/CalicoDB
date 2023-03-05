@@ -1,7 +1,7 @@
 
-#include "cursor_impl.h"
 #include "db_impl.h"
 #include "header.h"
+#include "tree.h"
 #include "tools.h"
 #include "unit_tests.h"
 #include "wal.h"
@@ -56,6 +56,8 @@ TEST_F(SetupTests, ReportsInvalidFileHeader)
 
 TEST(LeakTests, DestroysOwnObjects)
 {
+    fs::remove_all("__calicodb_test");
+
     DB *db;
     ASSERT_OK(DB::open({}, "__calicodb_test", &db));
     delete db;
@@ -204,7 +206,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     ASSERT_OK(DB::open(options, kFilename, &db));
     for (const auto &[key, value] : records) {
         std::string value_out;
-        ASSERT_OK(TestTools::get(*db, key, value_out));
+        ASSERT_OK(test_tools::get(*db, key, &value_out));
         ASSERT_EQ(value_out, value);
     }
     delete db;
@@ -309,7 +311,7 @@ TEST_P(DbVacuumTests, SanityCheck)
         for (const auto &[key, value] : map) {
             ++i;
             std::string result;
-            ASSERT_OK(db->get(key, result));
+            ASSERT_OK(db->get(key, &result));
             ASSERT_EQ(result, value);
         }
     }
@@ -389,7 +391,7 @@ static auto expect_contains_records(const DB &db, const std::map<std::string, st
 {
     for (const auto &[key, value] : committed) {
         std::string result;
-        ASSERT_OK(db.get(key, result));
+        ASSERT_OK(db.get(key, &result));
         ASSERT_EQ(result, value);
     }
 }
@@ -602,7 +604,7 @@ TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
     for (std::size_t iteration {}; iteration < 2; ++iteration) {
         for (const auto &[k, v] : committed) {
             std::string value;
-            const auto s = db->impl->get(k, value);
+            const auto s = db->impl->get(k, &value);
 
             if (!s.is_ok()) {
                 assert_special_error(s);
@@ -739,7 +741,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
     assert_special_error(db->impl->commit());
     assert_special_error(db->impl->put("key", "value"));
     std::string value;
-    assert_special_error(db->impl->get("key", value));
+    assert_special_error(db->impl->get("key", &value));
     auto *cursor = db->impl->new_cursor();
     assert_special_error(cursor->status());
     delete cursor;
@@ -763,7 +765,7 @@ TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
     ASSERT_OK(db->impl->open(db->options, "./test"));
 
     for (const auto &[key, value] : committed) {
-        TestTools::expect_contains(*db->impl, key, value);
+        test_tools::expect_contains(*db->impl, key, value);
     }
     tools::validate_db(*db->impl);
 }
@@ -786,14 +788,14 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
     ASSERT_OK(db->impl->open(db->options, "./test"));
 
     for (const auto &[key, value] : committed) {
-        TestTools::expect_contains(*db->impl, key, value);
+        test_tools::expect_contains(*db->impl, key, value);
     }
     tools::validate_db(*db->impl);
 
     std::size_t file_size;
-    ASSERT_OK(env->file_size("./test", file_size));
+    ASSERT_OK(env->file_size("./test", &file_size));
     std::string property;
-    ASSERT_TRUE(db->impl->get_property("calicodb.counts", property));
+    ASSERT_TRUE(db->impl->get_property("calicodb.counts", &property));
     const auto counts = tools::parse_db_counts(property);
     ASSERT_EQ(file_size, counts.pages * db->options.page_size);
 }
@@ -884,10 +886,7 @@ public:
     [[nodiscard]] static auto open(const Slice &base, Options options, ExtendedDatabase **out) -> Status
     {
         const auto prefix = base.to_string() + "_";
-        auto *ext = new (std::nothrow) ExtendedDatabase;
-        if (ext == nullptr) {
-            return Status::system_error("cannot allocate extension database: out of memory");
-        }
+        auto *ext = new ExtendedDatabase;
         auto env = std::make_unique<tools::FakeEnv>();
         options.env = env.get();
 
@@ -902,7 +901,7 @@ public:
 
     ~ExtendedDatabase() override = default;
 
-    [[nodiscard]] auto get_property(const Slice &name, std::string &out) const -> bool override
+    [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override
     {
         return m_base->get_property(name, out);
     }
@@ -927,7 +926,7 @@ public:
         return m_base->commit();
     }
 
-    [[nodiscard]] auto get(const Slice &key, std::string &value) const -> Status override
+    [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override
     {
         return m_base->get(key, value);
     }
@@ -1052,9 +1051,9 @@ TEST_F(ApiTests, IsConstCorrect)
 
     std::string value;
     const auto *const_db = db;
-    ASSERT_OK(const_db->get("key", value));
+    ASSERT_OK(const_db->get("key", &value));
     std::string property;
-    ASSERT_TRUE(const_db->get_property("calicodb.counts", property));
+    ASSERT_TRUE(const_db->get_property("calicodb.counts", &property));
     ASSERT_EQ(property, "records:1,pages:1,updates:1");
     ASSERT_OK(const_db->status());
 
@@ -1192,7 +1191,7 @@ public:
 
         for (const auto &[key, value] : map) {
             std::string result;
-            ASSERT_OK(db->get(key, result));
+            ASSERT_OK(db->get(key, &result));
             ASSERT_EQ(result, value);
             ASSERT_OK(db->erase(key));
         }
@@ -1239,7 +1238,7 @@ protected:
     {
         for (const auto &key : keys) {
             std::string value;
-            ASSERT_OK(db->get(key, value));
+            ASSERT_OK(db->get(key, &value));
         }
         ASSERT_EQ(reinterpret_cast<const DBImpl *>(db)->record_count(), keys.size());
     }

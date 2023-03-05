@@ -67,7 +67,7 @@ public:
     auto get(const std::string &k) const -> std::string
     {
         std::string result;
-        Status s = db->get(k, result);
+        Status s = db->get(k, &result);
         if (s.is_not_found()) {
             result = "NOT_FOUND";
         } else if (!s.is_ok()) {
@@ -96,7 +96,7 @@ public:
     auto get_logs() -> std::vector<Id>
     {
         std::vector<std::string> filenames;
-        EXPECT_OK(env->get_children(".", filenames));
+        EXPECT_OK(env->get_children(".", &filenames));
         std::vector<Id> result;
         for (const auto &name : filenames) {
             if (name.find("wal-") == 0) {
@@ -114,7 +114,7 @@ public:
     auto file_size(const std::string &fname) -> std::size_t
     {
         std::size_t result;
-        EXPECT_OK(env->file_size(fname, result));
+        EXPECT_OK(env->file_size(fname, &result));
         return result;
     }
 
@@ -221,10 +221,10 @@ TEST_F(RecoveryTests, SanityCheck)
         for (std::size_t index {}; record != end(map); ++index, ++record) {
             std::string value;
             if (index < commit) {
-                ASSERT_OK(db->get(record->first, value));
+                ASSERT_OK(db->get(record->first, &value));
                 ASSERT_EQ(value, record->second);
             } else {
-                ASSERT_TRUE(db->get(record->first, value).is_not_found());
+                ASSERT_TRUE(db->get(record->first, &value).is_not_found());
             }
         }
         close();
@@ -276,7 +276,7 @@ public:
 
         for (const auto &[k, v] : map) {
             std::string value;
-            ASSERT_OK(db->get(k, value));
+            ASSERT_OK(db->get(k, &value));
             ASSERT_EQ(value, v);
         }
     }

@@ -114,7 +114,7 @@ template <class Reader>
         const auto chunk_size = std::min(out.size(), random.Next<std::size_t>(size / num_chunks));
         auto chunk = out.range(0, chunk_size);
         std::size_t read_size = chunk.size();
-        const auto s = reader.read(chunk.data(), read_size, counter);
+        const auto s = reader.read(chunk.data(), &read_size, counter);
 
         if (read_size != chunk_size) {
             return backing;
@@ -191,7 +191,7 @@ TEST_F(PosixReaderTests, NewFileIsEmpty)
     std::string backing(8, '\x00');
     Span bytes {backing};
     auto read_size = bytes.size();
-    ASSERT_TRUE(file->read(bytes.data(), read_size, 0).is_ok());
+    ASSERT_TRUE(file->read(bytes.data(), &read_size, 0).is_ok());
     ASSERT_EQ(read_size, 0);
 }
 
@@ -218,7 +218,7 @@ TEST_F(PosixEditorTests, NewFileIsEmpty)
     std::string backing(8, '\x00');
     Span bytes {backing};
     auto read_size = bytes.size();
-    ASSERT_TRUE(file->read(bytes.data(), read_size, 0).is_ok());
+    ASSERT_TRUE(file->read(bytes.data(), &read_size, 0).is_ok());
     ASSERT_EQ(read_size, 0);
 }
 
@@ -303,7 +303,7 @@ TEST_F(DynamicEnvTests, ReaderStopsAtEOF)
     std::string buffer(data.size() * 2, '\x00');
     Span bytes {buffer};
     auto read_size = bytes.size();
-    ASSERT_OK(ra_reader->read(bytes.data(), read_size, 0));
+    ASSERT_OK(ra_reader->read(bytes.data(), &read_size, 0));
     ASSERT_EQ(bytes.truncate(read_size), data);
 }
 

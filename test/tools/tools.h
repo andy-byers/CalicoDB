@@ -68,11 +68,11 @@ public:
     [[nodiscard]] auto new_reader(const std::string &path, Reader **out) -> Status override;
     [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;
     [[nodiscard]] auto new_logger(const std::string &path, Logger **out) -> Status override;
-    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> *out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
     [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto file_size(const std::string &path, std::size_t *out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
 
 protected:
@@ -98,7 +98,7 @@ public:
     }
 
     ~FakeReader() override = default;
-    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t *size, std::size_t offset) -> Status override;
 
 protected:
     friend class FakeEnv;
@@ -119,7 +119,7 @@ public:
     }
 
     ~FakeEditor() override = default;
-    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t *size, std::size_t offset) -> Status override;
     [[nodiscard]] auto write(Slice in, std::size_t offset) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
@@ -212,11 +212,11 @@ public:
     [[nodiscard]] auto new_reader(const std::string &path, Reader **out) -> Status override;
     [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;
     [[nodiscard]] auto new_logger(const std::string &path, Logger **out) -> Status override;
-    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> *out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
     [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto file_size(const std::string &path, std::size_t *out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
 };
 
@@ -229,7 +229,7 @@ public:
     }
 
     ~FaultInjectionReader() override = default;
-    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t *size, std::size_t offset) -> Status override;
 };
 
 class FaultInjectionEditor : public FakeEditor
@@ -240,7 +240,7 @@ public:
     {
     }
     ~FaultInjectionEditor() override = default;
-    [[nodiscard]] auto read(char *out, std::size_t &size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto read(char *out, std::size_t *size, std::size_t offset) -> Status override;
     [[nodiscard]] auto write(Slice in, std::size_t offset) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
