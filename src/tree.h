@@ -69,6 +69,7 @@ struct Node {
     PageSize overflow_index {};
     PageSize slots_offset {};
     PageSize gap_size {};
+    bool is_root {};
 };
 
 auto manual_defragment(Node &node) -> void;

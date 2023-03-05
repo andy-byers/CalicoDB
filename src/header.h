@@ -39,6 +39,15 @@ struct FileHeader {
     std::uint16_t page_size {};
 };
 
+/* Every tree has a tree header on its root page, after the page header, but before the node header.
+ *
+ * Tree Header Format:
+ *     Offset  Size  Name
+ *    --------------------------
+ *     0       8     commit_lsn
+ */
+static constexpr auto kTreeHeaderSize = sizeof(Lsn);
+
 /* Every page has a page header, after the file header, but before the tree header, if they are on this page.
  *
  * Page Header Format:

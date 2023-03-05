@@ -43,7 +43,7 @@ inline constexpr auto compute_local_size(std::size_t key_size, std::size_t value
 
 static auto node_header_offset(const Node &node)
 {
-    return page_offset(node.page) + kPageHeaderSize;
+    return page_offset(node.page) + kPageHeaderSize + kTreeHeaderSize * node.is_root;
 }
 
 static auto cell_slots_offset(const Node &node)
@@ -573,12 +573,12 @@ static auto merge_root(Node &root, Node &child) -> void
     }
 
     // Copy the cell content area.
-    CDB_EXPECT_GE(header.cell_start, FileHeader::kSize + kPageHeaderSize + NodeHeader::kSize);
+    CDB_EXPECT_GE(header.cell_start, cell_slots_offset(root));
     auto memory = root.page.span(header.cell_start, child.page.size() - header.cell_start);
     std::memcpy(memory.data(), child.page.data() + header.cell_start, memory.size());
 
     // Copy the header and cell pointers.
-    memory = root.page.span(FileHeader::kSize + kPageHeaderSize + NodeHeader::kSize, header.cell_count * sizeof(PageSize));
+    memory = root.page.span(cell_slots_offset(root), header.cell_count * sizeof(PageSize));
     std::memcpy(memory.data(), child.page.data() + cell_slots_offset(child), memory.size());
     root.header = header;
     root.meta = child.meta;
@@ -690,6 +690,7 @@ auto NodeIterator::seek(const Cell &cell, bool *found) -> Status
 auto Tree::create(Pager &pager, Id *freelist_head) -> Status
 {
     Node node;
+    node.is_root = true;
     
     Freelist freelist {pager, freelist_head};
     CDB_TRY(NodeManager::allocate(pager, freelist, &node, nullptr, true));
@@ -804,6 +805,7 @@ auto Tree::allocate(Node *out, bool is_external) -> Status
 
 auto Tree::acquire(Node *out, Id pid, bool upgrade) const -> Status
 {
+    out->is_root = pid == Id::root();
     return NodeManager::acquire(*m_pager, pid, out, m_node_scratch.data(), upgrade);
 }
 
