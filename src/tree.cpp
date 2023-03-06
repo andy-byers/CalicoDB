@@ -513,6 +513,11 @@ auto manual_defragment(Node &node) -> void
     alloc.defragment();
 }
 
+Node::Node(LogicalPageId id)
+    : page {id}
+{
+}
+
 auto Node::get_slot(std::size_t index) const -> std::size_t
 {
     CDB_EXPECT_LT(index, header.cell_count);
@@ -566,7 +571,7 @@ auto Node::take() && -> Page
 
 static auto merge_root(Node &root, Node &child) -> void
 {
-    CDB_EXPECT_EQ(root.header.next_id, child.page.id());
+    CDB_EXPECT_EQ(root.header.next_id, child.page.id().page_id);
     const auto &header = child.header;
     if (header.free_total) {
         manual_defragment(child);
@@ -687,15 +692,15 @@ auto NodeIterator::seek(const Cell &cell, bool *found) -> Status
     return node.header.cell_count == 0;
 }
 
-auto Tree::create(Pager &pager, Id &freelist_head, Id *root) -> Status
+auto Tree::create(Pager &pager, Id table_id, Id &freelist_head, Id *root) -> Status
 {
-    Node node;
+    Node node {LogicalPageId::unknown_page(table_id)};
     node.is_root = true;
     
     Freelist freelist {pager, freelist_head};
     CDB_TRY(NodeManager::allocate(pager, freelist, &node, nullptr, true));
     if (root != nullptr) {
-        *root = node.page.id();
+        *root = node.page.id().page_id;
     }
     NodeManager::release(pager, std::move(node));
     
@@ -714,8 +719,8 @@ auto Tree::node_iterator(Node &node) const -> NodeIterator
 
 auto Tree::find_external(const Slice &key, SearchResult *out) const -> Status
 {
-    Node root;
-    CDB_TRY(acquire(&root, m_root, false));
+    Node root {LogicalPageId {m_table_id, m_root_id}};
+    CDB_TRY(acquire(&root, m_root_id, false));
     return find_external(key, std::move(root), out);
 }
 
@@ -733,9 +738,12 @@ auto Tree::find_external(const Slice &key, Node node, SearchResult *out) const -
             return Status::ok();
         }
         const auto next_id = read_child_id(node, itr.index() + exact);
-        CDB_EXPECT_NE(next_id, node.page.id()); // Infinite loop.
+        CDB_EXPECT_NE(next_id, node.page.id().page_id); // Infinite loop.
         release(std::move(node));
-        CDB_TRY(acquire(&node, next_id, false));
+
+        Node next {LogicalPageId {m_table_id, next_id}};
+        CDB_TRY(acquire(&next, next_id, false));
+        node = std::move(next);
     }
 }
 
@@ -765,16 +773,16 @@ auto Tree::insert_cell(Node &node, std::size_t index, const Cell &cell) -> Statu
 {
     write_cell(node, index, cell);
     if (!node.header.is_external) {
-        CDB_TRY(fix_parent_id(read_child_id(cell), node.page.id(), PointerMap::kNode));
+        CDB_TRY(fix_parent_id(read_child_id(cell), node.page.id().page_id, PointerMap::kNode));
     }
-    return maybe_fix_overflow_chain(cell, node.page.id());
+    return maybe_fix_overflow_chain(cell, node.page.id().page_id);
 }
 
 auto Tree::remove_cell(Node &node, std::size_t index) -> Status
 {
     const auto cell = read_cell(node, index);
     if (cell.has_remote) {
-        CDB_TRY(OverflowList::erase(*m_pager, m_freelist, read_overflow_id(cell)));
+        CDB_TRY(OverflowList::erase(*m_pager, m_freelist, m_table_id, read_overflow_id(cell)));
     }
     erase_cell(node, index, cell.size);
     return Status::ok();
@@ -784,18 +792,18 @@ auto Tree::fix_links(Node &node) -> Status
 {
     for (std::size_t index {}; index < node.header.cell_count; ++index) {
         const auto cell = read_cell(node, index);
-        CDB_TRY(maybe_fix_overflow_chain(cell, node.page.id()));
+        CDB_TRY(maybe_fix_overflow_chain(cell, node.page.id().page_id));
         if (!node.header.is_external) {
-            CDB_TRY(fix_parent_id(read_child_id(cell), node.page.id(), PointerMap::kNode));
+            CDB_TRY(fix_parent_id(read_child_id(cell), node.page.id().page_id, PointerMap::kNode));
         }
     }
     if (!node.header.is_external) {
-        CDB_TRY(fix_parent_id(node.header.next_id, node.page.id(), PointerMap::kNode));
+        CDB_TRY(fix_parent_id(node.header.next_id, node.page.id().page_id, PointerMap::kNode));
     }
     if (node.overflow) {
-        CDB_TRY(maybe_fix_overflow_chain(*node.overflow, node.page.id()));
+        CDB_TRY(maybe_fix_overflow_chain(*node.overflow, node.page.id().page_id));
         if (!node.header.is_external) {
-            CDB_TRY(fix_parent_id(read_child_id(*node.overflow), node.page.id(), PointerMap::kNode));
+            CDB_TRY(fix_parent_id(read_child_id(*node.overflow), node.page.id().page_id, PointerMap::kNode));
         }
     }
     return Status::ok();
@@ -806,10 +814,10 @@ auto Tree::allocate(Node *out, bool is_external) -> Status
     return NodeManager::allocate(*m_pager, m_freelist, out, m_node_scratch.data(), is_external);
 }
 
-auto Tree::acquire(Node *out, Id pid, bool upgrade) const -> Status
+auto Tree::acquire(Node *out, Id page_id, bool upgrade) const -> Status
 {
-    out->is_root = pid == m_root;
-    return NodeManager::acquire(*m_pager, pid, out, m_node_scratch.data(), upgrade);
+    out->is_root = page_id == m_root_id;
+    return NodeManager::acquire(*m_pager, out, m_node_scratch.data(), upgrade);
 }
 
 auto Tree::destroy(Node node) -> Status
@@ -829,9 +837,9 @@ auto Tree::release(Node node) const -> void
 
 auto Tree::resolve_overflow(Node node) -> Status
 {
-    Node next;
+    Node next {LogicalPageId::unknown_page(m_table_id)};
     while (is_overflowing(node)) {
-        if (node.page.id() == m_root) {
+        if (node.page.id().page_id == m_root_id) {
             CDB_TRY(split_root(std::move(node), next));
         } else {
             CDB_TRY(split_non_root(std::move(node), next));
@@ -844,7 +852,7 @@ auto Tree::resolve_overflow(Node node) -> Status
 
 auto Tree::split_root(Node root, Node &out) -> Status
 {
-    Node child;
+    Node child {LogicalPageId::unknown_page(m_table_id)};
     CDB_TRY(allocate(&child, root.header.is_external));
 
     // Copy the cell content area.
@@ -864,10 +872,10 @@ auto Tree::split_root(Node root, Node &out) -> Status
 
     root.header = NodeHeader {};
     root.header.is_external = false;
-    root.header.next_id = child.page.id();
+    root.header.next_id = child.page.id().page_id;
     setup_node(root);
 
-    CDB_TRY(fix_parent_id(child.page.id(), root.page.id(), PointerMap::kNode));
+    CDB_TRY(fix_parent_id(child.page.id().page_id, root.page.id().page_id, PointerMap::kNode));
     release(std::move(root));
 
     CDB_TRY(fix_links(child));
@@ -887,15 +895,16 @@ auto Tree::transfer_left(Node &left, Node &right) -> Status
 
 auto Tree::split_non_root(Node right, Node &out) -> Status
 {
-    CDB_EXPECT_NE(right.page.id(), m_root);
+    CDB_EXPECT_NE(right.page.id().page_id, m_root_id);
     CDB_EXPECT_TRUE(is_overflowing(right));
     const auto &header = right.header;
 
     Id parent_id;
-    CDB_TRY(find_parent_id(right.page.id(), &parent_id));
+    CDB_TRY(find_parent_id(right.page.id().page_id, &parent_id));
     CDB_EXPECT_FALSE(parent_id.is_null());
 
-    Node parent, left;
+    Node parent {LogicalPageId {m_table_id, parent_id}};
+    Node left {LogicalPageId::unknown_page(m_table_id)};
     CDB_TRY(acquire(&parent, parent_id, true));
     CDB_TRY(allocate(&left, header.is_external));
 
@@ -943,18 +952,18 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
 
     if (header.is_external) {
         if (!header.prev_id.is_null()) {
-            Node left_sibling;
+            Node left_sibling {LogicalPageId {m_table_id, header.prev_id}};
             CDB_TRY(acquire(&left_sibling, header.prev_id, true));
-            left_sibling.header.next_id = left.page.id();
-            left.header.prev_id = left_sibling.page.id();
+            left_sibling.header.next_id = left.page.id().page_id;
+            left.header.prev_id = left_sibling.page.id().page_id;
             release(std::move(left_sibling));
         }
-        right.header.prev_id = left.page.id();
-        left.header.next_id = right.page.id();
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, nullptr, separator, parent_id));
+        right.header.prev_id = left.page.id().page_id;
+        left.header.next_id = right.page.id().page_id;
+        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, m_table_id, nullptr, separator, parent_id));
     } else {
         left.header.next_id = read_child_id(separator);
-        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kNode));
+        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id().page_id, PointerMap::kNode));
         erase_cell(right, 0);
     }
 
@@ -962,7 +971,7 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     CDB_TRY(itr.seek(separator));
 
     // Post the separator into the parent node. This call will fix the sibling's parent pointer.
-    write_child_id(separator, left.page.id());
+    write_child_id(separator, left.page.id().page_id);
     CDB_TRY(insert_cell(parent, itr.index(), separator));
 
     release(std::move(left));
@@ -982,17 +991,17 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
     Cell separator;
     if (header.is_external) {
         if (!header.next_id.is_null()) {
-            Node right_sibling;
+            Node right_sibling {LogicalPageId {m_table_id, header.next_id}};
             CDB_TRY(acquire(&right_sibling, header.next_id, true));
-            right_sibling.header.prev_id = right.page.id();
-            right.header.next_id = right_sibling.page.id();
+            right_sibling.header.prev_id = right.page.id().page_id;
+            right.header.next_id = right_sibling.page.id().page_id;
             release(std::move(right_sibling));
         }
-        right.header.prev_id = left.page.id();
-        left.header.next_id = right.page.id();
+        right.header.prev_id = left.page.id().page_id;
+        left.header.next_id = right.page.id().page_id;
 
         separator = read_cell(right, 0);
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, m_table_id, cell_scratch(), separator, parent.page.id().page_id));
     } else {
         separator = read_cell(left, header.cell_count - 1);
         detach_cell(separator, cell_scratch());
@@ -1000,20 +1009,20 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
 
         right.header.next_id = left.header.next_id;
         left.header.next_id = read_child_id(separator);
-        CDB_TRY(fix_parent_id(right.header.next_id, right.page.id(), PointerMap::kNode));
-        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kNode));
+        CDB_TRY(fix_parent_id(right.header.next_id, right.page.id().page_id, PointerMap::kNode));
+        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id().page_id, PointerMap::kNode));
     }
 
     auto itr = node_iterator(parent);
     CDB_TRY(itr.seek(separator));
 
     // Post the separator into the parent node. This call will fix the sibling's parent pointer.
-    write_child_id(separator, left.page.id());
+    write_child_id(separator, left.page.id().page_id);
     CDB_TRY(insert_cell(parent, itr.index(), separator));
 
     const auto offset = !is_overflowing(parent);
-    write_child_id(parent, itr.index() + offset, right.page.id());
-    CDB_TRY(fix_parent_id(right.page.id(), parent.page.id(), PointerMap::kNode));
+    write_child_id(parent, itr.index() + offset, right.page.id().page_id);
+    CDB_TRY(fix_parent_id(right.page.id().page_id, parent.page.id().page_id, PointerMap::kNode));
 
     release(std::move(left));
     release(std::move(right));
@@ -1024,14 +1033,14 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
 auto Tree::resolve_underflow(Node node, const Slice &anchor) -> Status
 {
     while (is_underflowing(node)) {
-        if (node.page.id() == m_root) {
+        if (node.page.id().page_id == m_root_id) {
             return fix_root(std::move(node));
         }
         Id parent_id;
-        CDB_TRY(find_parent_id(node.page.id(), &parent_id));
+        CDB_TRY(find_parent_id(node.page.id().page_id, &parent_id));
         CDB_EXPECT_FALSE(parent_id.is_null());
 
-        Node parent;
+        Node parent {LogicalPageId {m_table_id, parent_id}};
         CDB_TRY(acquire(&parent, parent_id, true));
         // NOTE: Searching for the anchor key from the node we took from should always give us the correct index
         //       due to the B+-tree ordering rules.
@@ -1055,15 +1064,15 @@ auto Tree::internal_merge_left(Node &left, Node &right, Node &parent, std::size_
     auto separator = read_cell(parent, index);
     write_cell(left, left.header.cell_count, separator);
     write_child_id(left, left.header.cell_count - 1, left.header.next_id);
-    CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kNode));
-    CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
+    CDB_TRY(fix_parent_id(left.header.next_id, left.page.id().page_id, PointerMap::kNode));
+    CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id().page_id));
     erase_cell(parent, index, separator.size);
 
     while (right.header.cell_count) {
         CDB_TRY(transfer_left(left, right));
     }
     left.header.next_id = right.header.next_id;
-    write_child_id(parent, index, left.page.id());
+    write_child_id(parent, index, left.page.id().page_id);
     return Status::ok();
 }
 
@@ -1080,12 +1089,12 @@ auto Tree::external_merge_left(Node &left, Node &right, Node &parent, std::size_
     while (right.header.cell_count) {
         CDB_TRY(transfer_left(left, right));
     }
-    write_child_id(parent, index, left.page.id());
+    write_child_id(parent, index, left.page.id().page_id);
 
     if (!right.header.next_id.is_null()) {
-        Node right_sibling;
+        Node right_sibling {LogicalPageId {m_table_id, right.header.next_id}};
         CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
-        right_sibling.header.prev_id = left.page.id();
+        right_sibling.header.prev_id = left.page.id().page_id;
         release(std::move(right_sibling));
     }
     return Status::ok();
@@ -1112,12 +1121,12 @@ auto Tree::internal_merge_right(Node &left, Node &right, Node &parent, std::size
     auto separator = read_cell(parent, index);
     write_cell(left, left.header.cell_count, separator);
     write_child_id(left, left.header.cell_count - 1, left.header.next_id);
-    CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kNode));
-    CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
+    CDB_TRY(fix_parent_id(left.header.next_id, left.page.id().page_id, PointerMap::kNode));
+    CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id().page_id));
     left.header.next_id = right.header.next_id;
 
-    CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
-    write_child_id(parent, index + 1, left.page.id());
+    CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id().page_id);
+    write_child_id(parent, index + 1, left.page.id().page_id);
     erase_cell(parent, index, separator.size);
 
     // Transfer the rest of the cells. left shouldn't overflow.
@@ -1135,17 +1144,17 @@ auto Tree::external_merge_right(Node &left, Node &right, Node &parent, std::size
     CDB_EXPECT_FALSE(parent.header.is_external);
 
     left.header.next_id = right.header.next_id;
-    CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
-    write_child_id(parent, index + 1, left.page.id());
+    CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id().page_id);
+    write_child_id(parent, index + 1, left.page.id().page_id);
     CDB_TRY(remove_cell(parent, index));
 
     while (right.header.cell_count) {
         CDB_TRY(transfer_left(left, right));
     }
     if (!right.header.next_id.is_null()) {
-        Node right_sibling;
+        Node right_sibling {LogicalPageId {m_table_id, right.header.next_id}};
         CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
-        right_sibling.header.prev_id = left.page.id();
+        right_sibling.header.prev_id = left.page.id().page_id;
         release(std::move(right_sibling));
     }
     return Status::ok();
@@ -1164,12 +1173,12 @@ auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) 
 
 auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
 {
-    CDB_EXPECT_NE(node.page.id(), m_root);
+    CDB_EXPECT_NE(node.page.id().page_id, m_root_id);
     CDB_EXPECT_TRUE(is_underflowing(node));
     CDB_EXPECT_FALSE(is_overflowing(parent));
 
     if (index > 0) {
-        Node left;
+        Node left {LogicalPageId {m_table_id, read_child_id(parent, index - 1)}};
         CDB_TRY(acquire(&left, read_child_id(parent, index - 1), true));
         if (left.header.cell_count == 1) {
             CDB_TRY(merge_right(left, std::move(node), parent, index - 1));
@@ -1180,7 +1189,7 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
         CDB_TRY(rotate_right(parent, left, node, index - 1));
         release(std::move(left));
     } else {
-        Node right;
+        Node right {LogicalPageId {m_table_id, read_child_id(parent, index + 1)}};
         CDB_TRY(acquire(&right, read_child_id(parent, index + 1), true));
         if (right.header.cell_count == 1) {
             CDB_TRY(merge_left(node, std::move(right), parent, index));
@@ -1196,7 +1205,7 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
     release(std::move(node));
 
     if (is_overflowing(parent)) {
-        const auto saved_id = parent.page.id();
+        const auto saved_id = parent.page.id().page_id;
         CDB_TRY(resolve_overflow(std::move(parent)));
         CDB_TRY(acquire(&parent, saved_id, true));
     }
@@ -1205,11 +1214,11 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
 
 auto Tree::fix_root(Node root) -> Status
 {
-    CDB_EXPECT_EQ(root.page.id(), m_root);
+    CDB_EXPECT_EQ(root.page.id().page_id, m_root_id);
 
     // If the root is external here, the whole tree must be empty.
     if (!root.header.is_external) {
-        Node child;
+        Node child {LogicalPageId {m_table_id, root.header.next_id}};
         CDB_TRY(acquire(&child, root.header.next_id, true));
 
         // We don't have enough room to transfer the child contents into the root, due to the space occupied by
@@ -1222,10 +1231,10 @@ auto Tree::fix_root(Node root) -> Status
             detach_cell(*child.overflow, cell_scratch());
             erase_cell(child, child.overflow_index);
             release(std::move(root));
-            Node parent;
+            Node parent {LogicalPageId::unknown_page(m_table_id)};
             CDB_TRY(split_non_root(std::move(child), parent));
             release(std::move(parent));
-            CDB_TRY(acquire(&root, m_root, true));
+            CDB_TRY(acquire(&root, m_root_id, true));
         } else {
             merge_root(root, child);
             CDB_TRY(destroy(std::move(child)));
@@ -1259,8 +1268,8 @@ auto Tree::external_rotate_left(Node &parent, Node &left, Node &right, std::size
     erase_cell(right, 0);
 
     auto separator = read_cell(right, 0);
-    CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
-    write_child_id(separator, left.page.id());
+    CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, m_table_id, cell_scratch(), separator, parent.page.id().page_id));
+    write_child_id(separator, left.page.id().page_id);
 
     CDB_TRY(remove_cell(parent, index));
     return insert_cell(parent, index, separator);
@@ -1274,11 +1283,11 @@ auto Tree::internal_rotate_left(Node &parent, Node &left, Node &right, std::size
     CDB_EXPECT_GT(parent.header.cell_count, 0);
     CDB_EXPECT_GT(right.header.cell_count, 1);
 
-    Node child;
+    Node child {LogicalPageId {m_table_id, read_child_id(right, 0)}};
     CDB_TRY(acquire(&child, read_child_id(right, 0), true));
     const auto saved_id = left.header.next_id;
-    left.header.next_id = child.page.id();
-    CDB_TRY(fix_parent_id(child.page.id(), left.page.id(), PointerMap::kNode));
+    left.header.next_id = child.page.id().page_id;
+    CDB_TRY(fix_parent_id(child.page.id().page_id, left.page.id().page_id, PointerMap::kNode));
     release(std::move(child));
 
     const auto separator = read_cell(parent, index);
@@ -1290,7 +1299,7 @@ auto Tree::internal_rotate_left(Node &parent, Node &left, Node &right, std::size
     auto lowest = read_cell(right, 0);
     detach_cell(lowest, cell_scratch());
     erase_cell(right, 0);
-    write_child_id(lowest, left.page.id());
+    write_child_id(lowest, left.page.id().page_id);
     return insert_cell(parent, index, lowest);
 }
 
@@ -1316,8 +1325,8 @@ auto Tree::external_rotate_right(Node &parent, Node &left, Node &right, std::siz
     CDB_EXPECT_FALSE(is_overflowing(right));
 
     auto separator = highest;
-    CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
-    write_child_id(separator, left.page.id());
+    CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, m_table_id, cell_scratch(), separator, parent.page.id().page_id));
+    write_child_id(separator, left.page.id().page_id);
 
     // Don't erase the cell until it has been detached.
     erase_cell(left, left.header.cell_count - 1);
@@ -1335,10 +1344,10 @@ auto Tree::internal_rotate_right(Node &parent, Node &left, Node &right, std::siz
     CDB_EXPECT_GT(parent.header.cell_count, 0);
     CDB_EXPECT_GT(left.header.cell_count, 1);
 
-    Node child;
+    Node child {LogicalPageId {m_table_id, left.header.next_id}};
     CDB_TRY(acquire(&child, left.header.next_id, true));
-    const auto child_id = child.page.id();
-    CDB_TRY(fix_parent_id(child.page.id(), right.page.id(), PointerMap::kNode));
+    const auto child_id = child.page.id().page_id;
+    CDB_TRY(fix_parent_id(child.page.id().page_id, right.page.id().page_id, PointerMap::kNode));
     left.header.next_id = read_child_id(left, left.header.cell_count - 1);
     release(std::move(child));
 
@@ -1350,18 +1359,19 @@ auto Tree::internal_rotate_right(Node &parent, Node &left, Node &right, std::siz
 
     auto highest = read_cell(left, left.header.cell_count - 1);
     detach_cell(highest, cell_scratch());
-    write_child_id(highest, left.page.id());
+    write_child_id(highest, left.page.id().page_id);
     erase_cell(left, left.header.cell_count - 1, highest.size);
     CDB_TRY(insert_cell(parent, index, highest));
     return Status::ok();
 }
 
-Tree::Tree(Pager &pager, Id root, Id &freelist_head)
+Tree::Tree(Pager &pager, Id table_id, Id root_id, Id &freelist_head)
     : m_node_scratch(pager.page_size(), '\0'),
       m_cell_scratch(pager.page_size(), '\0'),
       m_freelist {pager, freelist_head},
       m_pager {&pager},
-      m_root {root}
+      m_table_id {table_id},
+      m_root_id {root_id}
 {
 }
 
@@ -1435,10 +1445,11 @@ auto Tree::erase(const Slice &key) -> Status
 
 auto Tree::find_lowest(Node *out) const -> Status
 {
-    CDB_TRY(acquire(out, m_root, false));
+    CDB_TRY(acquire(out, m_root_id, false));
     while (!out->header.is_external) {
         const auto next_id = read_child_id(*out, 0);
         release(std::move(*out));
+        *out = Node {LogicalPageId {m_table_id, next_id}};
         CDB_TRY(acquire(out, next_id, false));
     }
     return Status::ok();
@@ -1446,10 +1457,11 @@ auto Tree::find_lowest(Node *out) const -> Status
 
 auto Tree::find_highest(Node *out) const -> Status
 {
-    CDB_TRY(acquire(out, m_root, false));
+    CDB_TRY(acquire(out, m_root_id, false));
     while (!out->header.is_external) {
         const auto next_id = out->header.next_id;
         release(std::move(*out));
+        *out = Node {LogicalPageId {m_table_id, next_id}};
         CDB_TRY(acquire(out, next_id, false));
     }
     return Status::ok();
@@ -1457,34 +1469,34 @@ auto Tree::find_highest(Node *out) const -> Status
 
 auto Tree::vacuum_step(Page &free, Id last_id) -> Status
 {
-    CDB_EXPECT_NE(free.id(), last_id);
+    CDB_EXPECT_NE(free.id().page_id, last_id);
 
     PointerMap::Entry entry;
     CDB_TRY(PointerMap::read_entry(*m_pager, last_id, &entry));
 
     const auto fix_basic_link = [&entry, &free, this]() -> Status {
-        Page parent;
-        CDB_TRY(m_pager->acquire(entry.back_ptr, parent));
+        Page parent {LogicalPageId {m_table_id, entry.back_ptr}};
+        CDB_TRY(m_pager->acquire(parent));
         m_pager->upgrade(parent);
-        write_next_id(parent, free.id());
+        write_next_id(parent, free.id().page_id);
         m_pager->release(std::move(parent));
         return Status::ok();
     };
 
     switch (entry.type) {
     case PointerMap::kFreelistLink: {
-        if (last_id == free.id()) {
+        if (last_id == free.id().page_id) {
 
         } else if (last_id == *m_freelist.m_head) {
-            *m_freelist.m_head = free.id();
+            *m_freelist.m_head = free.id().page_id;
         } else {
             // Back pointer points to another freelist page.
             CDB_EXPECT_FALSE(entry.back_ptr.is_null());
             CDB_TRY(fix_basic_link());
-            Page last;
-            CDB_TRY(m_pager->acquire(last_id, last));
+            Page last {LogicalPageId {m_table_id, last_id}};
+            CDB_TRY(m_pager->acquire(last));
             if (const auto next_id = read_next_id(last); !next_id.is_null()) {
-                CDB_TRY(fix_parent_id(next_id, free.id(), PointerMap::kFreelistLink));
+                CDB_TRY(fix_parent_id(next_id, free.id().page_id, PointerMap::kFreelistLink));
             }
             m_pager->release(std::move(last));
         }
@@ -1498,14 +1510,14 @@ auto Tree::vacuum_step(Page &free, Id last_id) -> Status
     case PointerMap::kOverflowHead: {
         // Back pointer points to the node that the overflow chain is rooted in. Search through that nodes cells
         // for the target overflowing cell.
-        Node parent;
+        Node parent {LogicalPageId {m_table_id, entry.back_ptr}};
         CDB_TRY(acquire(&parent, entry.back_ptr, true));
         bool found {};
         for (std::size_t i {}; i < parent.header.cell_count; ++i) {
             auto cell = read_cell(parent, i);
             found = cell.has_remote && read_overflow_id(cell) == last_id;
             if (found) {
-                write_overflow_id(cell, free.id());
+                write_overflow_id(cell, free.id().page_id);
                 break;
             }
         }
@@ -1515,7 +1527,7 @@ auto Tree::vacuum_step(Page &free, Id last_id) -> Status
     }
     case PointerMap::kNode: {
         // Back pointer points to another node. Search through that node for the target child pointer.
-        Node parent;
+        Node parent {LogicalPageId {m_table_id, entry.back_ptr}};
         CDB_TRY(acquire(&parent, entry.back_ptr, true));
         CDB_EXPECT_FALSE(parent.header.is_external);
         bool found {};
@@ -1523,34 +1535,34 @@ auto Tree::vacuum_step(Page &free, Id last_id) -> Status
             const auto child_id = read_child_id(parent, i);
             found = child_id == last_id;
             if (found) {
-                write_child_id(parent, i, free.id());
+                write_child_id(parent, i, free.id().page_id);
             }
         }
         CDB_EXPECT_TRUE(found);
         release(std::move(parent));
         // Update references.
-        Node last;
+        Node last {LogicalPageId {m_table_id, last_id}};
         CDB_TRY(acquire(&last, last_id, true));
         for (std::size_t i {}; i < last.header.cell_count; ++i) {
             const auto cell = read_cell(last, i);
-            CDB_TRY(maybe_fix_overflow_chain(cell, free.id()));
+            CDB_TRY(maybe_fix_overflow_chain(cell, free.id().page_id));
             if (!last.header.is_external) {
-                CDB_TRY(fix_parent_id(read_child_id(last, i), free.id(), PointerMap::kNode));
+                CDB_TRY(fix_parent_id(read_child_id(last, i), free.id().page_id, PointerMap::kNode));
             }
         }
         if (!last.header.is_external) {
-            CDB_TRY(fix_parent_id(last.header.next_id, free.id(), PointerMap::kNode));
+            CDB_TRY(fix_parent_id(last.header.next_id, free.id().page_id, PointerMap::kNode));
         } else {
             if (!last.header.prev_id.is_null()) {
-                Node prev;
+                Node prev {LogicalPageId {m_table_id, last.header.prev_id}};
                 CDB_TRY(acquire(&prev, last.header.prev_id, true));
-                prev.header.next_id = free.id();
+                prev.header.next_id = free.id().page_id;
                 release(std::move(prev));
             }
             if (!last.header.next_id.is_null()) {
-                Node next;
+                Node next {LogicalPageId {m_table_id, last.header.next_id}};
                 CDB_TRY(acquire(&next, last.header.next_id, true));
-                next.header.prev_id = free.id();
+                next.header.prev_id = free.id().page_id;
                 release(std::move(next));
             }
         }
@@ -1558,9 +1570,9 @@ auto Tree::vacuum_step(Page &free, Id last_id) -> Status
     }
     }
     CDB_TRY(PointerMap::write_entry(*m_pager, last_id, {}));
-    CDB_TRY(PointerMap::write_entry(*m_pager, free.id(), entry));
-    Page last;
-    CDB_TRY(m_pager->acquire(last_id, last));
+    CDB_TRY(PointerMap::write_entry(*m_pager, free.id().page_id, entry));
+    Page last {LogicalPageId {m_table_id, last_id}};
+    CDB_TRY(m_pager->acquire(last));
     // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
     // which we will need if we crash during vacuum and need to roll back.
     m_pager->upgrade(last);
@@ -1568,7 +1580,7 @@ auto Tree::vacuum_step(Page &free, Id last_id) -> Status
         if (const auto next_id = read_next_id(last); !next_id.is_null()) {
             PointerMap::Entry next_entry;
             CDB_TRY(PointerMap::read_entry(*m_pager, next_id, &next_entry));
-            next_entry.back_ptr = free.id();
+            next_entry.back_ptr = free.id().page_id;
             CDB_TRY(PointerMap::write_entry(*m_pager, next_id, next_entry));
         }
     }
@@ -1590,9 +1602,9 @@ auto Tree::vacuum_one(Id target, bool *success) -> Status
     }
 
     // Swap the head of the freelist with the last page in the file.
-    Page head;
+    Page head {LogicalPageId::unknown_page(m_table_id)};
     CDB_TRY(m_freelist.pop(head));
-    if (target != head.id()) {
+    if (target != head.id().page_id) {
         // Swap the last page with the freelist head.
         CDB_TRY(vacuum_step(head, target));
     } else {
@@ -1630,7 +1642,8 @@ Freelist::Freelist(Pager &pager, Id &head)
 auto Freelist::pop(Page &page) -> Status
 {
     if (!m_head->is_null()) {
-        CDB_TRY(m_pager->acquire(*m_head, page));
+        page = Page {LogicalPageId {page.id().table_id, *m_head}};
+        CDB_TRY(m_pager->acquire(page));
         m_pager->upgrade(page, kLinkContentOffset);
         *m_head = read_next_id(page);
 
@@ -1647,19 +1660,19 @@ auto Freelist::pop(Page &page) -> Status
 
 auto Freelist::push(Page page) -> Status
 {
-    CDB_EXPECT_FALSE(page.id().is_root());
+    CDB_EXPECT_FALSE(page.id().page_id.is_root());
     write_next_id(page, *m_head);
 
     // Write the parent of the old head, if it exists.
-    PointerMap::Entry entry {page.id(), PointerMap::kFreelistLink};
+    PointerMap::Entry entry {page.id().page_id, PointerMap::kFreelistLink};
     if (!m_head->is_null()) {
         CDB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
     }
     // Clear the parent of the new head.
     entry.back_ptr = Id::null();
-    CDB_TRY(PointerMap::write_entry(*m_pager, page.id(), entry));
+    CDB_TRY(PointerMap::write_entry(*m_pager, page.id().page_id, entry));
 
-    *m_head = page.id();
+    *m_head = page.id().page_id;
     m_pager->release(std::move(page));
     return Status::ok();
 }
@@ -1696,8 +1709,8 @@ auto PointerMap::read_entry(Pager &pager, Id pid, Entry *out) -> Status
     const auto offset = entry_offset(mid, pid);
     CDB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
-    Page map;
-    CDB_TRY(pager.acquire(mid, map));
+    Page map {LogicalPageId::unknown_table(mid)};
+    CDB_TRY(pager.acquire(map));
     *out = decode_entry(map.data() + offset);
     pager.release(std::move(map));
     return Status::ok();
@@ -1712,8 +1725,8 @@ auto PointerMap::write_entry(Pager &pager, Id pid, Entry entry) -> Status
     const auto offset = entry_offset(mid, pid);
     CDB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
-    Page map;
-    CDB_TRY(pager.acquire(mid, map));
+    Page map {LogicalPageId::unknown_table(mid)};
+    CDB_TRY(pager.acquire(map));
     const auto [back_ptr, type] = decode_entry(map.data() + offset);
     if (entry.back_ptr != back_ptr || entry.type != type) {
         if (!map.is_writable()) {
@@ -1729,8 +1742,8 @@ auto PointerMap::write_entry(Pager &pager, Id pid, Entry entry) -> Status
 
 auto PointerMap::lookup(const Pager &pager, Id pid) -> Id
 {
-    // Root page (1) has no parents, and page 2 is the first pointer map page. If "pid" is a pointer map
-    // page, "pid" will be returned.
+    // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a pointer map
+    // page, "page_id" will be returned.
     if (pid < kFirstMapId) {
         return Id::null();
     }
@@ -1748,7 +1761,7 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node *out, char *sc
             // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
             // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
             // following it are used.
-            if (PointerMap::lookup(pager, page.id()) == page.id()) {
+            if (PointerMap::lookup(pager, page.id().page_id) == page.id().page_id) {
                 pager.release(std::move(page));
                 CDB_TRY(pager.allocate(page));
             }
@@ -1758,7 +1771,7 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node *out, char *sc
         }
     };
     CDB_TRY(fetch_unused_page(out->page));
-    CDB_EXPECT_NE(PointerMap::lookup(pager, out->page.id()), out->page.id());
+    CDB_EXPECT_NE(PointerMap::lookup(pager, out->page.id().page_id), out->page.id().page_id);
 
     out->header.is_external = is_external;
     out->scratch = scratch;
@@ -1766,9 +1779,9 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node *out, char *sc
     return Status::ok();
 }
 
-auto NodeManager::acquire(Pager &pager, Id pid, Node *out, char *scratch, bool upgrade) -> Status
+auto NodeManager::acquire(Pager &pager, Node *out, char *scratch, bool upgrade) -> Status
 {
-    CDB_TRY(pager.acquire(pid, out->page));
+    CDB_TRY(pager.acquire(out->page));
     out->scratch = scratch;
     out->header.read(out->page.data() + node_header_offset(*out));
     setup_node(*out);
@@ -1802,8 +1815,8 @@ auto NodeManager::destroy(Freelist &freelist, Node node) -> Status
 auto OverflowList::read(Pager &pager, Span out, Id head_id, std::size_t offset) -> Status
 {
     while (!out.is_empty()) {
-        Page page;
-        CDB_TRY(pager.acquire(head_id, page));
+        Page page {LogicalPageId::unknown_table(head_id)};
+        CDB_TRY(pager.acquire(page));
         auto content = get_readable_content(page, page.size());
 
         if (offset) {
@@ -1822,7 +1835,7 @@ auto OverflowList::read(Pager &pager, Span out, Id head_id, std::size_t offset) 
     return Status::ok();
 }
 
-auto OverflowList::write(Pager &pager, Freelist &freelist, Id *out, const Slice &first, const Slice &second) -> Status
+auto OverflowList::write(Pager &pager, Freelist &freelist, Id table_id, Id *out, const Slice &first, const Slice &second) -> Status
 {
     std::optional<Page> prev;
     auto head = Id::null();
@@ -1835,11 +1848,11 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id *out, const Slice 
     }
 
     while (!a.is_empty()) {
-        Page page;
+        Page page {LogicalPageId::unknown_page(table_id)};
         auto s = freelist.pop(page);
         if (s.is_logic_error()) {
             s = pager.allocate(page);
-            if (s.is_ok() && PointerMap::lookup(pager, page.id()) == page.id()) {
+            if (s.is_ok() && PointerMap::lookup(pager, page.id().page_id) == page.id().page_id) {
                 pager.release(std::move(page));
                 s = pager.allocate(page);
             }
@@ -1863,12 +1876,12 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id *out, const Slice 
             }
         }
         if (prev) {
-            write_next_id(*prev, page.id());
-            const PointerMap::Entry entry {prev->id(), PointerMap::kOverflowLink};
-            CDB_TRY(PointerMap::write_entry(pager, page.id(), entry));
+            write_next_id(*prev, page.id().page_id);
+            const PointerMap::Entry entry {prev->id().page_id, PointerMap::kOverflowLink};
+            CDB_TRY(PointerMap::write_entry(pager, page.id().page_id, entry));
             pager.release(std::move(*prev));
         } else {
-            head = page.id();
+            head = page.id().page_id;
         }
         prev.emplace(std::move(page));
     }
@@ -1881,20 +1894,20 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id *out, const Slice 
     return Status::ok();
 }
 
-auto OverflowList::copy(Pager &pager, Freelist &freelist, Id *out, Id overflow_id, std::size_t size) -> Status
+auto OverflowList::copy(Pager &pager, Freelist &freelist, Id table_id, Id *out, Id overflow_id, std::size_t size) -> Status
 {
     std::string scratch; // TODO: Copy page-by-page: no scratch is necessary.
     scratch.resize(size);
 
     CDB_TRY(read(pager, scratch, overflow_id));
-    return write(pager, freelist, out, scratch);
+    return write(pager, freelist, table_id, out, scratch);
 }
 
-auto OverflowList::erase(Pager &pager, Freelist &freelist, Id head_id) -> Status
+auto OverflowList::erase(Pager &pager, Freelist &freelist, Id table_id, Id head_id) -> Status
 {
     while (!head_id.is_null()) {
-        Page page;
-        CDB_TRY(pager.acquire(head_id, page));
+        Page page {LogicalPageId {table_id, head_id}};
+        CDB_TRY(pager.acquire(page));
         head_id = read_next_id(page);
         pager.upgrade(page);
         CDB_TRY(freelist.push(std::move(page)));
@@ -1923,8 +1936,8 @@ auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, No
 
     Id overflow_id;
     if (has_remote) {
-        CDB_TRY(OverflowList::write(pager, freelist, &overflow_id, key.range(k), value.range(v)));
-        PointerMap::Entry entry {node.page.id(), PointerMap::kOverflowHead};
+        CDB_TRY(OverflowList::write(pager, freelist, node.page.id().table_id, &overflow_id, key.range(k), value.range(v)));
+        PointerMap::Entry entry {node.page.id().page_id, PointerMap::kOverflowHead};
         CDB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         total_size += sizeof(overflow_id);
     }
@@ -1945,7 +1958,7 @@ auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, No
     return Status::ok();
 }
 
-auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Cell &cell, Id parent_id) -> Status
+auto PayloadManager::promote(Pager &pager, Freelist &freelist, Id table_id, char *scratch, Cell &cell, Id parent_id) -> Status
 {
     detach_cell(cell, scratch);
 
@@ -1960,7 +1973,7 @@ auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Ce
     if (cell.key_size > cell.local_size) {
         // Part of the key is on an overflow page. No value is stored locally in this case, so the local size computation is still correct.
         Id overflow_id;
-        CDB_TRY(OverflowList::copy(pager, freelist, &overflow_id, read_overflow_id(cell), cell.key_size - cell.local_size));
+        CDB_TRY(OverflowList::copy(pager, freelist, table_id, &overflow_id, read_overflow_id(cell), cell.key_size - cell.local_size));
         PointerMap::Entry entry {parent_id, PointerMap::kOverflowHead};
         CDB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         write_overflow_id(cell, overflow_id);
@@ -2122,14 +2135,14 @@ class TreeValidator {
     {
         for (std::size_t index {}; index <= node.header.cell_count; ++index) {
             if (!node.header.is_external) {
-                const auto saved_id = node.page.id();
+                const auto saved_id = node.page.id().page_id;
                 const auto next_id = read_child_id(node, index);
                 
                 // "node" must be released while we traverse, otherwise we are limited in how long of a traversal we can
                 // perform by the number of pager frames.
                 tree.release(std::move(node));
 
-                Node next;
+                Node next {LogicalPageId {tree.m_table_id, next_id}};
                 CHECK_OK(tree.acquire(&next, next_id, false));
                 traverse_inorder_helper(tree, std::move(next), callback);
 
@@ -2144,12 +2157,12 @@ class TreeValidator {
     
     static auto traverse_inorder(const Tree &tree, const NodeCallback &callback) -> void
     {
-        Node root;
-        CHECK_OK(tree.acquire(&root, tree.m_root, false));
+        Node root {LogicalPageId {tree.m_table_id, tree.m_root_id}};
+        CHECK_OK(tree.acquire(&root, tree.m_root_id, false));
         traverse_inorder_helper(tree, std::move(root), callback);
     }
     
-    static auto traverse_chain(Pager &pager, Page page, const PageCallback &callback) -> void
+    static auto traverse_chain(const Tree &tree, Pager &pager, Page page, const PageCallback &callback) -> void
     {
         for (;;) {
             callback(page);
@@ -2159,7 +2172,8 @@ class TreeValidator {
             if (next_id.is_null()) {
                 break;
             }
-            CHECK_OK(pager.acquire(next_id, page));
+            page = Page {LogicalPageId {tree.m_table_id, next_id}};
+            CHECK_OK(pager.acquire(page));
         }
     }
 
@@ -2208,13 +2222,13 @@ class TreeValidator {
             auto cell = read_cell(node, cid);
 
             if (!header.is_external) {
-                Node next;
+                Node next {LogicalPageId {tree.m_table_id, read_child_id(cell)}};
                 CHECK_OK(tree.acquire(&next, read_child_id(cell), false));
                 collect_levels(tree, data, std::move(next), level + 1);
             }
 
             if (is_first) {
-                add_to_level(data, std::to_string(node.page.id().value) + ":[", level);
+                add_to_level(data, std::to_string(node.page.id().page_id.value) + ":[", level);
             }
 
             const auto key = Slice {cell.key, std::min<std::size_t>(3, cell.key_size)}.to_string();
@@ -2230,7 +2244,7 @@ class TreeValidator {
             }
         }
         if (!node.header.is_external) {
-            Node next;
+            Node next {LogicalPageId {tree.m_table_id, node.header.next_id}};
             CHECK_OK(tree.acquire(&next, node.header.next_id, false));
             collect_levels(tree, data, std::move(next), level + 1);
         }
@@ -2247,15 +2261,15 @@ public:
             return;
         }
         CHECK_TRUE(!head.is_null());
-        Page page;
-        CHECK_OK(pager.acquire(head, page));
+        Page page {LogicalPageId {tree.m_table_id, head}};
+        CHECK_OK(pager.acquire(page));
         
         Id parent_id;
-        traverse_chain(pager, std::move(page), [&](const auto &link) {
+        traverse_chain(tree, pager, std::move(page), [&](const auto &link) {
             Id found_id;
-            CHECK_OK(tree.find_parent_id(link.id(), &found_id));
+            CHECK_OK(tree.find_parent_id(link.id().page_id, &found_id));
             CHECK_TRUE(found_id == parent_id);
-            parent_id = link.id();
+            parent_id = link.id().page_id;
         });
     }
     
@@ -2265,12 +2279,12 @@ public:
         CHECK_EQ(lookup_meta(tree.m_pager->page_size(), true)->max_local, compute_max_local(tree.m_pager->page_size()));
 
         auto check_parent_child = [&tree](auto &node, auto index) -> void {
-            Node child;
+            Node child {LogicalPageId {tree.m_table_id, read_child_id(node, index)}};
             CHECK_OK(tree.acquire(&child, read_child_id(node, index), false));
             
             Id parent_id;
-            CHECK_OK(tree.find_parent_id(child.page.id(), &parent_id));
-            CHECK_TRUE(parent_id == node.page.id());
+            CHECK_OK(tree.find_parent_id(child.page.id().page_id, &parent_id));
+            CHECK_TRUE(parent_id == node.page.id().page_id);
 
             tree.release(std::move(child));
         };
@@ -2300,9 +2314,9 @@ public:
 
             if (cell.has_remote) {
                 const auto overflow_id = read_overflow_id(cell);
-                Page head;
-                CHECK_OK(tree.m_pager->acquire(overflow_id, head));
-                traverse_chain(*tree.m_pager, std::move(head), [&](auto &page) {
+                Page head {LogicalPageId {tree.m_table_id, overflow_id}};
+                CHECK_OK(tree.m_pager->acquire(head));
+                traverse_chain(tree, *tree.m_pager, std::move(head), [&](auto &page) {
                     CHECK_TRUE(requested > accumulated);
                     const auto size_limit = std::min(page.size(), requested - accumulated);
                     accumulated += get_readable_content(page, size_limit).size();
@@ -2314,7 +2328,7 @@ public:
                 node.TEST_validate();
                 
                 if (node.header.is_external && !node.header.next_id.is_null()) {
-                    Node next;
+                    Node next {LogicalPageId {tree.m_table_id, node.header.next_id}};
                     CHECK_OK(tree.acquire(&next, node.header.next_id, false));
                     
                     tree.release(std::move(next));
@@ -2323,15 +2337,16 @@ public:
         });
         
         // Find the leftmost external node.
-        Node node;
-        CHECK_OK(tree.acquire(&node, tree.m_root, false));
+        Node node {LogicalPageId {tree.m_table_id, tree.m_root_id}};
+        CHECK_OK(tree.acquire(&node, tree.m_root_id, false));
         while (!node.header.is_external) {
             const auto id = read_child_id(node, 0);
             tree.release(std::move(node));
+            node = Node {LogicalPageId {tree.m_table_id, id}};
             CHECK_OK(tree.acquire(&node, id, false));
         }
         while (!node.header.next_id.is_null()) {
-            Node right;
+            Node right {LogicalPageId {tree.m_table_id, node.header.next_id}};
             CHECK_OK(tree.acquire(&right, node.header.next_id, false));
             std::string lhs_buffer, rhs_buffer;
             Slice lhs_key;
@@ -2339,7 +2354,7 @@ public:
             Slice rhs_key;
             CHECK_OK(PayloadManager::collect_key(*tree.m_pager, rhs_buffer, read_cell(right, 0), &rhs_key));
             CHECK_TRUE(lhs_key < rhs_key);
-            CHECK_TRUE(right.header.prev_id == node.page.id());
+            CHECK_TRUE(right.header.prev_id == node.page.id().page_id);
             tree.release(std::move(node));
             node = std::move(right);
         }
@@ -2351,8 +2366,8 @@ public:
         std::string repr;
         PrinterData data;
 
-        Node root;
-        CHECK_OK(tree.acquire(&root, tree.m_root, false));
+        Node root {LogicalPageId {tree.m_table_id, tree.m_root_id}};
+        CHECK_OK(tree.acquire(&root, tree.m_root_id, false));
         collect_levels(tree, data, std::move(root), 0);
         for (const auto &level : data.levels) {
             repr.append(level + '\n');
@@ -2413,7 +2428,7 @@ auto CursorImpl::fetch_payload() -> Status
     CDB_EXPECT_EQ(m_key_size, 0);
     CDB_EXPECT_EQ(m_value_size, 0);
 
-    Node node;
+    Node node {LogicalPageId {m_tree->m_table_id, m_loc.pid}};
     CDB_TRY(m_tree->acquire(&node, m_loc.pid, false));
 
     Slice key, value;
@@ -2445,7 +2460,7 @@ auto CursorImpl::seek_first() -> void
     m_key_size = 0;
     m_value_size = 0;
 
-    Node lowest;
+    Node lowest {LogicalPageId {m_tree->m_table_id, m_tree->m_root_id}};
     auto s = m_tree->find_lowest(&lowest);
     if (!s.is_ok()) {
         m_status = s;
@@ -2464,7 +2479,7 @@ auto CursorImpl::seek_last() -> void
     m_key_size = 0;
     m_value_size = 0;
 
-    Node highest;
+    Node highest {LogicalPageId {m_tree->m_table_id, m_tree->m_root_id}};
     auto s = m_tree->find_highest(&highest);
     if (!s.is_ok()) {
         m_status = s;
@@ -2484,8 +2499,8 @@ auto CursorImpl::next() -> void
     m_key_size = 0;
     m_value_size = 0;
 
-    Node node;
-    auto s = m_tree->acquire(&node, Id {m_loc.pid}, false);
+    Node node {LogicalPageId {m_tree->m_table_id, m_loc.pid}};
+    auto s = m_tree->acquire(&node, m_loc.pid, false);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2501,12 +2516,13 @@ auto CursorImpl::next() -> void
         m_status = default_cursor_status();
         return;
     }
-    s = m_tree->acquire(&node, next_id, false);
+    Node next {LogicalPageId {m_tree->m_table_id, next_id}};
+    s = m_tree->acquire(&next, next_id, false);
     if (!s.is_ok()) {
         m_status = s;
         return;
     }
-    seek_to(std::move(node), 0);
+    seek_to(std::move(next), 0);
 }
 
 auto CursorImpl::previous() -> void
@@ -2515,7 +2531,7 @@ auto CursorImpl::previous() -> void
     m_key_size = 0;
     m_value_size = 0;
 
-    Node node;
+    Node node {LogicalPageId {m_tree->m_table_id, m_loc.pid}};
     auto s = m_tree->acquire(&node, m_loc.pid, false);
     if (!s.is_ok()) {
         m_status = s;
@@ -2532,13 +2548,14 @@ auto CursorImpl::previous() -> void
         m_status = default_cursor_status();
         return;
     }
-    s = m_tree->acquire(&node, prev_id, false);
+    Node next {LogicalPageId {m_tree->m_table_id, prev_id}};
+    s = m_tree->acquire(&next, prev_id, false);
     if (!s.is_ok()) {
         m_status = s;
         return;
     }
-    const auto count = node.header.cell_count;
-    seek_to(std::move(node), count - 1);
+    const auto count = next.header.cell_count;
+    seek_to(std::move(next), count - 1);
 }
 
 auto CursorImpl::seek_to(Node node, std::size_t index) -> void
@@ -2549,7 +2566,7 @@ auto CursorImpl::seek_to(Node node, std::size_t index) -> void
     if (header.cell_count && index < header.cell_count) {
         m_loc.index = static_cast<PageSize>(index);
         m_loc.count = header.cell_count;
-        m_loc.pid = node.page.id();
+        m_loc.pid = node.page.id().page_id;
         m_status = fetch_payload();
     } else {
         m_status = default_cursor_status();

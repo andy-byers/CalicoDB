@@ -48,7 +48,7 @@ struct NodeMeta {
 };
 
 struct Node {
-    Node() = default;
+    explicit Node(LogicalPageId id);
     [[nodiscard]] auto take() && -> Page;
 
     Node(Node &&rhs) noexcept = default;
@@ -150,7 +150,7 @@ struct PointerMap {
         Type type {};
     };
 
-    // Find the page ID of the pointer map that holds the back pointer for page "pid".
+    // Find the page ID of the pointer map that holds the back pointer for page "page_id".
     [[nodiscard]] static auto lookup(const Pager &pager, Id pid) -> Id;
 
     // Read an entry from a pointer map.
@@ -163,7 +163,7 @@ struct PointerMap {
 struct NodeManager
 {
     [[nodiscard]] static auto allocate(Pager &pager, Freelist &freelist, Node *out, char *scratch, bool is_external) -> Status;
-    [[nodiscard]] static auto acquire(Pager &pager, Id pid, Node *out, char *scratch, bool upgrade) -> Status;
+    [[nodiscard]] static auto acquire(Pager &pager, Node *out, char *scratch, bool upgrade) -> Status;
     [[nodiscard]] static auto destroy(Freelist &freelist, Node node) -> Status;
     static auto upgrade(Pager &pager, Node &node) -> void;
     static auto release(Pager &pager, Node node) -> void;
@@ -172,23 +172,23 @@ struct NodeManager
 struct OverflowList
 {
     [[nodiscard]] static auto read(Pager &pager, Span out, Id head_id, std::size_t offset = 0) -> Status;
-    [[nodiscard]] static auto write(Pager &pager, Freelist &freelist, Id *out, const Slice &first, const Slice &second = {}) -> Status;
-    [[nodiscard]] static auto copy(Pager &pager, Freelist &freelist, Id *out, Id overflow_id, std::size_t size) -> Status;
-    [[nodiscard]] static auto erase(Pager &pager, Freelist &freelist, Id head_id) -> Status;
+    [[nodiscard]] static auto write(Pager &pager, Freelist &freelist, Id table_id, Id *out, const Slice &first, const Slice &second = {}) -> Status;
+    [[nodiscard]] static auto copy(Pager &pager, Freelist &freelist, Id table_id, Id *out, Id overflow_id, std::size_t size) -> Status;
+    [[nodiscard]] static auto erase(Pager &pager, Freelist &freelist, Id table_id, Id head_id) -> Status;
 };
 
 struct PayloadManager
 {
     [[nodiscard]] static auto emplace(Pager &pager, Freelist &freelist, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
-    [[nodiscard]] static auto promote(Pager &pager, Freelist &freelist, char *scratch, Cell &cell, Id parent_id) -> Status;
+    [[nodiscard]] static auto promote(Pager &pager, Freelist &freelist, Id table_id, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
 };
 
 class Tree {
 public:
-    explicit Tree(Pager &pager, Id root, Id &freelist_head);
-    [[nodiscard]] static auto create(Pager &pager, Id &freelist_head, Id *root = nullptr) -> Status;
+    explicit Tree(Pager &pager, Id table_id, Id root, Id &freelist_head);
+    [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *root = nullptr) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
@@ -198,7 +198,7 @@ public:
 
 private:
     struct SearchResult {
-        Node node;
+        Node node {LogicalPageId::unknown_page(Id::null())};
         std::size_t index {};
         bool exact {};
     };
@@ -254,7 +254,8 @@ private:
     mutable std::string m_anchor;
     Freelist m_freelist;
     Pager *m_pager {};
-    Id m_root;
+    Id m_table_id;
+    Id m_root_id;
 };
 
 class CursorImpl : public Cursor

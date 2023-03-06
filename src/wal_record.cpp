@@ -92,11 +92,11 @@ static auto decode_deltas_payload(const Slice &in) -> DeltaDescriptor
     data += sizeof(Lsn);
 
     // Table ID (8 B)
-    info.tid.value = get_u64(data);
+    info.table_id.value = get_u64(data);
     data += sizeof(Id);
 
     // Page ID (8 B)
-    info.pid.value = get_u64(data);
+    info.page_id.value = get_u64(data);
     data += sizeof(Id);
 
     // Delta count (2 B)
@@ -133,11 +133,11 @@ static auto decode_full_image_payload(const Slice &in) -> ImageDescriptor
     data += sizeof(Lsn);
 
     // Table ID (8 B)
-    info.tid.value = get_u64(data);
+    info.table_id.value = get_u64(data);
     data += sizeof(Id);
 
     // Page ID (8 B)
-    info.pid.value = get_u64(data);
+    info.page_id.value = get_u64(data);
 
     // Image (n B)
     info.image = in.range(ImageDescriptor::kHeaderSize);

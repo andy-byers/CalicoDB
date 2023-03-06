@@ -23,7 +23,9 @@ auto Frame::lsn() const -> Id
 auto Frame::ref(Page &page) -> void
 {
     CDB_EXPECT_FALSE(m_is_writable);
-    page.m_id = m_page_id;
+    CDB_EXPECT_EQ(page.id().page_id, m_page_id);
+//    page.m_id.page_id = m_page_id;
+//    page.m_page_id = m_page_id;
     page.m_span = m_bytes;
     page.m_write = false;
     ++m_ref_count;
@@ -39,7 +41,7 @@ auto Frame::upgrade(Page &page) -> void
 
 auto Frame::unref(Page &page) -> void
 {
-    CDB_EXPECT_EQ(m_page_id, page.id());
+    CDB_EXPECT_EQ(m_page_id, page.id().page_id);
     CDB_EXPECT_GT(m_ref_count, 0);
 
     if (page.is_writable()) {

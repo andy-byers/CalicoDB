@@ -114,8 +114,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload_out));
     const auto descriptor = std::get<ImageDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
-    ASSERT_EQ(descriptor.tid.value, 456);
-    ASSERT_EQ(descriptor.pid.value, 789);
+    ASSERT_EQ(descriptor.table_id.value, 456);
+    ASSERT_EQ(descriptor.page_id.value, 789);
     ASSERT_EQ(descriptor.image.to_string(), image);
 }
 
@@ -128,8 +128,8 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload_out));
     const auto descriptor = std::get<DeltaDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
-    ASSERT_EQ(descriptor.tid.value, 456);
-    ASSERT_EQ(descriptor.pid.value, 789);
+    ASSERT_EQ(descriptor.table_id.value, 456);
+    ASSERT_EQ(descriptor.page_id.value, 789);
     ASSERT_EQ(descriptor.deltas.size(), deltas.size());
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const auto &delta) {
         return delta.data == Slice {image}.range(delta.offset, delta.data.size());
@@ -603,16 +603,16 @@ TEST_F(WalTests, UnderstandsImageRecords)
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload));
     auto descriptor = std::get<ImageDescriptor>(payload);
     ASSERT_EQ(descriptor.lsn, Lsn {1});
-    ASSERT_EQ(descriptor.tid, Id {10});
-    ASSERT_EQ(descriptor.pid, Id {11});
+    ASSERT_EQ(descriptor.table_id, Id {10});
+    ASSERT_EQ(descriptor.page_id, Id {11});
     ASSERT_EQ(descriptor.image, "");
 
     payload = decode_payload(payloads[1]);
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload));
     descriptor = std::get<ImageDescriptor>(payload);
     ASSERT_EQ(descriptor.lsn, Lsn {2});
-    ASSERT_EQ(descriptor.tid, Id {20});
-    ASSERT_EQ(descriptor.pid, Id {21});
+    ASSERT_EQ(descriptor.table_id, Id {20});
+    ASSERT_EQ(descriptor.page_id, Id {21});
     ASSERT_EQ(descriptor.image, image);
 }
 
@@ -638,8 +638,8 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload));
     auto descriptor = std::get<DeltaDescriptor>(payload);
     ASSERT_EQ(descriptor.lsn, Lsn {1});
-    ASSERT_EQ(descriptor.tid, Id {10});
-    ASSERT_EQ(descriptor.pid, Id {11});
+    ASSERT_EQ(descriptor.table_id, Id {10});
+    ASSERT_EQ(descriptor.page_id, Id {11});
     ASSERT_EQ(descriptor.deltas.size(), 1);
     ASSERT_EQ(descriptor.deltas.front().offset, 0);
     ASSERT_EQ(descriptor.deltas.front().data.to_string(), image.range(0, FileHeader::kSize).to_string());
@@ -648,8 +648,8 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload));
     descriptor = std::get<DeltaDescriptor>(payload);
     ASSERT_EQ(descriptor.lsn, Lsn {2});
-    ASSERT_EQ(descriptor.tid, Id {20});
-    ASSERT_EQ(descriptor.pid, Id {21});
+    ASSERT_EQ(descriptor.table_id, Id {20});
+    ASSERT_EQ(descriptor.page_id, Id {21});
     ASSERT_EQ(descriptor.deltas.size(), 3);
     for (std::size_t i {}; i < 3; ++i) {
         ASSERT_EQ(descriptor.deltas[i].offset, delta[i].offset);

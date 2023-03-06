@@ -23,8 +23,11 @@ static auto write_file_header(char *data, const FileHeader &header) -> void
     put_u64(data, header.freelist_head.value);
     data += sizeof(Id);
 
-    put_u64(data, header.commit_lsn.value);
-    data += sizeof(Lsn);
+    put_u64(data, header.last_table_id.value);
+    data += sizeof(Id);
+
+    put_u64(data, header.commit_lsn.value);// TODO: remove
+    data += sizeof(Lsn);// TODO: remove
 
     put_u16(data, header.page_size);
 }
@@ -46,8 +49,11 @@ auto FileHeader::read(const char *data) -> void
     freelist_head.value = get_u64(data);
     data += sizeof(Id);
 
-    commit_lsn.value = get_u64(data);
-    data += sizeof(Lsn);
+    last_table_id.value = get_u64(data);
+    data += sizeof(Id);
+
+    commit_lsn.value = get_u64(data);// TODO: remove
+    data += sizeof(Lsn);// TODO: remove
 
     page_size = get_u16(data);
 }

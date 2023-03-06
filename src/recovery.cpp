@@ -28,7 +28,7 @@ apply_redo(Page &page, const DeltaDescriptor &deltas)
 static auto
 is_commit(const DeltaDescriptor &deltas)
 {
-    return deltas.pid.is_root() && deltas.deltas.size() == 1 && deltas.deltas.front().offset == 0 &&
+    return deltas.page_id.is_root() && deltas.deltas.size() == 1 && deltas.deltas.front().offset == 0 &&
            deltas.deltas.front().data.size() == FileHeader::kSize + sizeof(Lsn);
 }
 
@@ -36,8 +36,8 @@ template <class Descriptor, class Callback>
 static auto
 with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
 {
-    Page page;
-    CDB_TRY(pager.acquire(descriptor.pid, page));
+    Page page {LogicalPageId {descriptor.table_id, descriptor.page_id}};
+    CDB_TRY(pager.acquire(page));
 
     callback(page);
     pager.release(std::move(page));
@@ -213,8 +213,8 @@ auto Recovery::recover_phase_1() -> Status
 auto Recovery::recover_phase_2() -> Status
 {
     // Pager needs the updated state to determine the page count.
-    Page page;
-    CDB_TRY(m_pager->acquire(Id::root(), page));
+    Page page {LogicalPageId::root()};
+    CDB_TRY(m_pager->acquire(page));
     FileHeader header;
     header.read(page.data());
     m_pager->load_state(header);
@@ -222,7 +222,7 @@ auto Recovery::recover_phase_2() -> Status
 
     // TODO: This is too expensive for large databases. Look into a WAL index?
     // Make sure we aren't missing any WAL records.
-    // for (auto id = Id::root(); id.value <= m_pager->page_count(); id.value++)
+    // for (auto id = Id::root(); id.value <= m_pager->page_count(); page_id.value++)
     // {
     //    Calico_Try(m_pager->acquire(Id::root(), page));
     //    const auto lsn = read_page_lsn(page);

@@ -16,7 +16,7 @@ class TableImpl : public Table
 {
 public:
     ~TableImpl();
-    explicit TableImpl(DBImpl &db, TableState &state, Status &status);
+    explicit TableImpl(Id table_id, DBImpl &db, TableState &state, Status &status);
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
@@ -28,6 +28,7 @@ private:
     TableState *m_state {};
     mutable Status *m_status {};
     std::size_t m_batch_size {};
+    Id m_table_id;
 };
 
 } // namespace calicodb

@@ -19,12 +19,12 @@ class Page;
  *     8       8     page_count
  *     16      8     record_count
  *     24      8     free_list_id
- *     32      8     commit_lsn
+ *     32      8     last_table_id
  *     40      2     page_size
  */
 struct FileHeader {
     static constexpr std::uint32_t kMagicCode {0xB11924E1};
-    static constexpr std::size_t kSize {42};
+    static constexpr std::size_t kSize {50}; // TODO: 42};
     auto read(const char *data) -> void;
     auto write(char *data) const -> void;
 
@@ -35,7 +35,8 @@ struct FileHeader {
     std::uint64_t page_count {};
     std::uint64_t record_count {};
     Id freelist_head;
-    Lsn commit_lsn;
+    Id last_table_id;
+    Id commit_lsn; // TODO: remove
     std::uint16_t page_size {};
 };
 

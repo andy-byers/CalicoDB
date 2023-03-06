@@ -45,9 +45,9 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
-    [[nodiscard]] auto create_table(const Slice &name, Id *root) -> Status;
-    [[nodiscard]] auto open_table(Id root, TableState **out) -> Status;
-    [[nodiscard]] auto commit_table(Id root, TableState &state) -> Status;
+    [[nodiscard]] auto create_table(const Slice &name, Id *table_id, Id *root_id) -> Status;
+    [[nodiscard]] auto open_table(Id table_id, Id root_id, TableState **out) -> Status;
+    [[nodiscard]] auto commit_table(Id table_id, Id root_id, TableState &state) -> Status;
     auto close_table(Id root) -> void;
 
     [[nodiscard]] auto record_count() const -> std::size_t;
@@ -111,6 +111,7 @@ private:
     std::size_t m_record_count {};
     std::size_t m_bytes_written {};
     Id m_freelist_head;
+    Id m_last_table_id;
     Lsn m_commit_lsn; // TODO: Stored in the root table header
     bool m_owns_env {};
     bool m_owns_info_log {};

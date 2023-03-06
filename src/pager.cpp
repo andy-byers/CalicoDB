@@ -240,14 +240,14 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
 
     // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
     if (!entry.token.has_value()) {
-        entry.token = m_dirty.insert(page.id(), lsn);
+        entry.token = m_dirty.insert(page.id().page_id, lsn);
     }
 
     // We only write a full image if the WAL does not already contain one for this page. If the page was modified
     // during this transaction, then we already have one written.
     if (*m_is_running && lsn <= *m_commit_lsn) {
         const auto image = page.view(0, watch_size);
-        auto s = m_wal->log_image(Id::null(), page.id(), image, nullptr);
+        auto s = m_wal->log_image(Id::null(), page.id().page_id, image, nullptr);
 
         if (s.is_ok()) {
             auto limit = m_recovery_lsn;
@@ -264,14 +264,17 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
 
 auto Pager::allocate(Page &page) -> Status
 {
-    CDB_TRY(acquire(Id::from_index(m_frames.page_count()), page));
+    page.m_id.page_id = Id::from_index(m_frames.page_count());
+    page.m_page_id = Id::from_index(m_frames.page_count());
+    CDB_TRY(acquire(page));
     upgrade(page, 0);
     return Status::ok();
 }
 
-auto Pager::acquire(Id pid, Page &page) -> Status
+auto Pager::acquire(Page &page) -> Status
 {
-    CDB_EXPECT_FALSE(pid.is_null());
+    auto page_id = page.id().page_id;
+    CDB_EXPECT_FALSE(page_id.is_null());
 
     const auto do_acquire = [this, &page](auto &entry) {
         m_frames.ref(entry.index, page);
@@ -296,13 +299,13 @@ auto Pager::acquire(Id pid, Page &page) -> Status
         return Status::ok();
     };
 
-    if (auto itr = m_cache.get(pid); itr != m_cache.end()) {
+    if (auto itr = m_cache.get(page_id); itr != m_cache.end()) {
         return do_acquire(itr->value);
     }
 
-    CDB_TRY(pin_frame(pid));
+    CDB_TRY(pin_frame(page_id));
 
-    const auto itr = m_cache.get(pid);
+    const auto itr = m_cache.get(page_id);
     CDB_EXPECT_NE(itr, m_cache.end());
     return do_acquire(itr->value);
 }
@@ -310,7 +313,7 @@ auto Pager::acquire(Id pid, Page &page) -> Status
 auto Pager::upgrade(Page &page, int important) -> void
 {
     CDB_EXPECT_LE(important, static_cast<int>(page.size()));
-    auto itr = m_cache.get(page.id());
+    auto itr = m_cache.get(page.id().page_id);
     CDB_EXPECT_NE(itr, m_cache.end());
     m_frames.upgrade(itr->value.index, page);
     watch_page(page, itr->value, important);
@@ -319,12 +322,12 @@ auto Pager::upgrade(Page &page, int important) -> void
 auto Pager::release(Page page) -> void
 {
     CDB_EXPECT_GT(m_frames.ref_sum(), 0);
-    CDB_EXPECT_TRUE(m_cache.contains(page.id()));
-    auto [index, token] = m_cache.get(page.id())->value;
+    CDB_EXPECT_TRUE(m_cache.contains(page.id().page_id));
+    auto [index, token] = m_cache.get(page.id().page_id)->value;
 
     if (page.is_writable() && *m_is_running) {
         write_page_lsn(page, m_wal->current_lsn());
-        auto s = m_wal->log_delta(Id::null(), page.id(), page.view(0), page.deltas(), nullptr);
+        auto s = m_wal->log_delta(Id::null(), page.id().page_id, page.view(0), page.deltas(), nullptr);
         if (!s.is_ok()) {
             SET_STATUS(s);
         }

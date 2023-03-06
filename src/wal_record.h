@@ -84,8 +84,8 @@ struct DeltaDescriptor {
         Slice data {};
     };
 
-    Id tid;
-    Id pid;
+    Id table_id;
+    Id page_id;
     Lsn lsn;
     std::vector<Delta> deltas;
 };
@@ -107,8 +107,8 @@ struct DeltaDescriptor {
 struct ImageDescriptor {
     static constexpr std::size_t kHeaderSize {25};
 
-    Id tid;
-    Id pid;
+    Id table_id;
+    Id page_id;
     Lsn lsn;
     Slice image;
 };
@@ -192,14 +192,14 @@ public:
 
     auto remove_before(Id id) -> void
     {
-        // Removes segments in [<begin>, id).
+        // Removes segments in [<begin>, page_id).
         auto itr = m_segments.lower_bound(id);
         m_segments.erase(cbegin(m_segments), itr);
     }
 
     auto remove_after(Id id) -> void
     {
-        // Removes segments in (id, <end>).
+        // Removes segments in (page_id, <end>).
         auto itr = m_segments.upper_bound(id);
         m_segments.erase(itr, cend(m_segments));
     }

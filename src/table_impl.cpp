@@ -3,16 +3,17 @@
 
 namespace calicodb {
 
-TableImpl::TableImpl(DBImpl &db, TableState &state, Status &status)
+TableImpl::TableImpl(Id table_id, DBImpl &db, TableState &state, Status &status)
     : m_db {&db},
       m_state {&state},
-      m_status {&status}
+      m_status {&status},
+      m_table_id {table_id}
 {
 }
 
 TableImpl::~TableImpl()
 {
-    m_db->close_table(m_state->tree->m_root);
+    m_db->close_table(m_state->tree->m_root_id);
 }
 
 auto TableImpl::new_cursor() const -> Cursor *
@@ -66,7 +67,7 @@ auto TableImpl::commit() -> Status
 {
     CDB_TRY(*m_status);
     if (m_batch_size != 0) {
-        if (auto s = m_db->commit_table(m_state->tree->m_root, *m_state); !s.is_ok()) {
+        if (auto s = m_db->commit_table(m_table_id, m_state->tree->m_root_id, *m_state); !s.is_ok()) {
             if (m_status->is_ok()) {
                 *m_status = s;
             }

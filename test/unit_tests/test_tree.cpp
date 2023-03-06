@@ -68,10 +68,10 @@ static constexpr std::size_t kInitialRecordCount {100};
 //        NodeManager::release(*pager, std::move(root));
 //    }
 //
-//    auto acquire_node(Id pid, bool writable = false)
+//    auto acquire_node(Id page_id, bool writable = false)
 //    {
 //        Node node;
-//        EXPECT_OK(NodeManager::acquire(*pager, pid, &node, node_scratch.data(), writable));
+//        EXPECT_OK(NodeManager::acquire(*pager, page_id, &node, node_scratch.data(), writable));
 //        return node;
 //    }
 //
@@ -342,7 +342,7 @@ public:
 
     [[nodiscard]] auto get_node(bool is_external) -> Node
     {
-        Node node;
+        Node node {LogicalPageId::unknown_page(Id::null())};
         EXPECT_OK(NodeManager::allocate(*pager, freelist, &node, node_scratch.data(), is_external));
         return node;
     }
@@ -398,7 +398,7 @@ public:
 TEST_F(NodeTests, AllocatorSkipsPointerMapPage)
 {
     (void)get_node(true);
-    ASSERT_EQ(get_node(true).page.id(), Id {3});
+    ASSERT_EQ(get_node(true).page.id().page_id, Id {3});
 }
 
 TEST_F(NodeTests, NonRootFits4Records)
@@ -491,12 +491,12 @@ TEST_F(NodeTests, CellPromote)
     write_record(node_1, b, "2", 1);
 
     auto cell_a = read_cell(node_1, 0);
-    ASSERT_OK(PayloadManager::promote(*pager, freelist, cell_scratch.data(), cell_a, node_2.page.id()));
+    ASSERT_OK(PayloadManager::promote(*pager, freelist, Id::root(), cell_scratch.data(), cell_a, node_2.page.id().page_id));
     ASSERT_FALSE(cell_a.has_remote) << "overflow value was copied for promoted cell";
     write_cell(node_2, 0, cell_a);
 
     auto cell_b = read_cell(node_1, 1);
-    ASSERT_OK(PayloadManager::promote(*pager, freelist, cell_scratch.data(), cell_b, node_2.page.id()));
+    ASSERT_OK(PayloadManager::promote(*pager, freelist, Id::root(), cell_scratch.data(), cell_b, node_2.page.id().page_id));
     ASSERT_TRUE(cell_b.has_remote) << "overflow key was not copied for promoted cell";
     write_cell(node_2, 1, cell_b);
 
@@ -552,8 +552,8 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(Tree::create(*pager, freelist_head));
-        tree = std::make_unique<Tree>(*pager, Id::root(), freelist_head);
+        ASSERT_OK(Tree::create(*pager, Id::root(), freelist_head));
+        tree = std::make_unique<Tree>(*pager, Id::root(), Id::root(), freelist_head);
     }
 
     [[nodiscard]] auto make_long_key(std::size_t value) const
@@ -1026,8 +1026,8 @@ TEST_P(PointerMapTests, FirstPointerMapIsPage2)
  TEST_P(PointerMapTests, ReadsAndWritesEntries)
 {
     std::string buffer(pager->page_size(), '\0');
-    Page map_page;
-    map_page.TEST_populate(Id {2}, buffer, true);
+    Page map_page {LogicalPageId::unknown_table(Id {2})};
+    map_page.TEST_populate(buffer, true);
 
     ASSERT_OK(PointerMap::write_entry(*pager, Id {3}, PointerMap::Entry {Id {33}, PointerMap::kNode}));
     ASSERT_OK(PointerMap::write_entry(*pager, Id {4}, PointerMap::Entry {Id {44}, PointerMap::kFreelistLink}));
@@ -1050,7 +1050,7 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
 {
     // PointerMap::find_map() expects the given pointer map page to be allocated already.
     for (std::size_t i {}; i < map_size() * 2; ++i) {
-        Page page;
+        Page page {LogicalPageId::unknown_table(Id::root())};
         ASSERT_OK(pager->allocate(page));
         pager->release(std::move(page));
     }
@@ -1126,14 +1126,14 @@ public:
 
     auto acquire_node(Id pid, bool is_writable = false)
     {
-        Node node;
-        EXPECT_OK(NodeManager::acquire(*pager, pid, &node, node_scratch.data(), is_writable));
+        Node node {LogicalPageId {Id::root(), pid}};
+        EXPECT_OK(NodeManager::acquire(*pager, &node, node_scratch.data(), is_writable));
         return node;
     }
 
     auto allocate_node(bool is_external)
     {
-        Node node;
+        Node node {LogicalPageId::unknown_page(Id::root())};
         EXPECT_OK(NodeManager::allocate(*pager, *freelist, &node, node_scratch.data(), is_external));
         return node;
     }
@@ -1230,7 +1230,7 @@ TEST_P(VacuumTests, FreelistRegistersBackPointers)
     auto node_3 = allocate_node(true);
     auto node_4 = allocate_node(true);
     auto node_5 = allocate_node(true);
-    ASSERT_EQ(node_5.page.id().value, 5);
+    ASSERT_EQ(node_5.page.id().page_id.value, 5);
     
     ASSERT_OK(freelist->push(std::move(node_5.page)));
     ASSERT_OK(freelist->push(std::move(node_4.page)));
@@ -1271,9 +1271,9 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
     {
         // NodeManager::allocate() accounts for the first pointer map page on page 2.
         auto node_3 = allocate_node(true);
-        Page page_4;
+        Page page_4 {LogicalPageId::unknown_page(Id::root())};
         ASSERT_OK(pager->allocate(page_4));
-        ASSERT_EQ(page_4.id().value, 4);
+        ASSERT_EQ(page_4.id().page_id.value, 4);
         write_next_id(node_3.page, Id {123});
         write_next_id(page_4, Id {123});
         ASSERT_OK(freelist->push(std::move(page_4)));
@@ -1282,9 +1282,10 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
 
     ASSERT_OK(tree->put("a", std::string(kPageSize * 2, 'x')));
 
-    Page page_3, page_4;
-    ASSERT_OK(pager->acquire(Id {3}, page_3));
-    ASSERT_OK(pager->acquire(Id {4}, page_4));
+    Page page_3 {LogicalPageId {Id::root(), Id {3}}};
+    Page page_4 {LogicalPageId {Id::root(), Id {4}}};
+    ASSERT_OK(pager->acquire(page_3));
+    ASSERT_OK(pager->acquire(page_4));
     ASSERT_EQ(read_next_id(page_3), Id {4});
     ASSERT_EQ(read_next_id(page_4), Id::null());
     pager->release(std::move(page_3));
@@ -1296,7 +1297,7 @@ TEST_P(VacuumTests, VacuumsFreelistInOrder)
     auto node_3 = allocate_node(true);
     auto node_4 = allocate_node(true);
     auto node_5 = allocate_node(true);
-    ASSERT_EQ(node_5.page.id().value, 5);
+    ASSERT_EQ(node_5.page.id().page_id.value, 5);
 
     // Page Types:     N   P   3   2   1
     // Page Contents: [1] [2] [3] [4] [5]
@@ -1376,8 +1377,8 @@ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
     ASSERT_EQ(entry.back_ptr, Id::null());
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     {
-        Page page;
-        ASSERT_OK(pager->acquire(Id {4}, page));
+        Page page {LogicalPageId {Id::root(), Id {4}}};
+        ASSERT_OK(pager->acquire(page));
         ASSERT_EQ(read_next_id(page), Id {3});
         pager->release(std::move(page));
     }
@@ -1491,7 +1492,7 @@ TEST_P(VacuumTests, VacuumsOverflowChain_A)
     // Save these pages until the overflow chain is created, otherwise they will be used for it.
     auto node_3 = allocate_node(true);
     auto node_4 = allocate_node(true);
-    ASSERT_EQ(node_4.page.id().value, 4);
+    ASSERT_EQ(node_4.page.id().page_id.value, 4);
 
     // Creates an overflow chain of length 2, rooted at the second cell on the root page.
     std::string overflow_data(kPageSize * 2, 'x');
@@ -1535,7 +1536,7 @@ TEST_P(VacuumTests, VacuumsOverflowChain_B)
     auto node_4 = allocate_node(true);
     auto node_5 = allocate_node(true);
     auto node_6 = allocate_node(true);
-    ASSERT_EQ(node_6.page.id().value, 6);
+    ASSERT_EQ(node_6.page.id().page_id.value, 6);
     ASSERT_OK(freelist->push(std::move(node_5.page)));
     ASSERT_OK(freelist->push(std::move(node_6.page)));
 
@@ -1580,7 +1581,7 @@ TEST_P(VacuumTests, VacuumOverflowChainSanityCheck)
     reserved.emplace_back(allocate_node(true));
     reserved.emplace_back(allocate_node(true));
     reserved.emplace_back(allocate_node(true));
-    ASSERT_EQ(reserved.back().page.id().value, 7);
+    ASSERT_EQ(reserved.back().page.id().page_id.value, 7);
 
     // Create overflow chains, but don't overflow the root node. Should create 3 chains, 1 of length 1, and 2 of length 2.
     std::vector<std::string> values;
@@ -1621,7 +1622,7 @@ TEST_P(VacuumTests, VacuumsNodes)
 {
     auto node_3 = allocate_node(true);
     auto node_4 = allocate_node(true);
-    ASSERT_EQ(node_4.page.id().value, 4);
+    ASSERT_EQ(node_4.page.id().page_id.value, 4);
 
     std::vector<std::string> values;
     for (std::size_t i {}; i < 5; ++i) {
@@ -1736,8 +1737,8 @@ public:
     auto create_tree()
     {
         Id root;
-        EXPECT_OK(Tree::create(*pager, freelist_head, &root));
-        multi_tree.emplace_back(std::make_unique<Tree>(*pager, root, freelist_head));
+        EXPECT_OK(Tree::create(*pager, Id::root(), freelist_head, &root));
+        multi_tree.emplace_back(std::make_unique<Tree>(*pager, Id::root(), root, freelist_head));
         return multi_tree.size() - 1;
     }
 
