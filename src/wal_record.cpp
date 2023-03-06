@@ -1,5 +1,6 @@
 #include "wal_record.h"
 #include "encoding.h"
+#include "page.h"
 
 namespace calicodb
 {
@@ -228,7 +229,7 @@ auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice
     return Slice {saved, VacuumDescriptor::kFixedSize};
 }
 
-auto encode_commit_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const PageDelta &delta, char *buffer) -> Slice
+auto encode_commit_payload(Lsn lsn, const LogicalPageId &root_id, const Slice &image, const PageDelta &delta, char *buffer) -> Slice
 {
     auto saved = buffer;
 
@@ -240,11 +241,11 @@ auto encode_commit_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image,
     buffer += sizeof(Lsn);
 
     // Table ID (8 B)
-    put_u64(buffer, table_id.value);
+    put_u64(buffer, root_id.table_id.value);
     buffer += sizeof(Id);
 
     // Page ID (8 B)
-    put_u64(buffer, page_id.value);
+    put_u64(buffer, root_id.page_id.value);
     buffer += sizeof(Id);
 
     // Delta offset (2 B)
@@ -260,7 +261,7 @@ auto encode_commit_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image,
     return Slice {saved, CommitDescriptor::kFixedSize + delta.size};
 }
 
-auto encode_deltas_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice
+auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice
 {
     auto saved = buffer;
 
@@ -272,11 +273,11 @@ auto encode_deltas_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image,
     buffer += sizeof(Lsn);
 
     // Table ID (8 B)
-    put_u64(buffer, table_id.value);
+    put_u64(buffer, page_id.table_id.value);
     buffer += sizeof(Id);
 
     // Page ID (8 B)
-    put_u64(buffer, page_id.value);
+    put_u64(buffer, page_id.page_id.value);
     buffer += sizeof(Id);
 
     // Deltas count (2 B)
@@ -298,7 +299,7 @@ auto encode_deltas_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image,
     return Slice {saved, DeltaDescriptor::kFixedSize + n};
 }
 
-auto encode_image_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, char *buffer) -> Slice
+auto encode_image_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, char *buffer) -> Slice
 {
     auto saved = buffer;
 
@@ -310,11 +311,11 @@ auto encode_image_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, 
     buffer += sizeof(lsn);
 
     // Table ID (8 B)
-    put_u64(buffer, table_id.value);
+    put_u64(buffer, page_id.table_id.value);
     buffer += sizeof(Id);
 
     // Page ID (8 B)
-    put_u64(buffer, page_id.value);
+    put_u64(buffer, page_id.page_id.value);
     buffer += sizeof(Id);
 
     // Image (N B)

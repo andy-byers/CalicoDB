@@ -22,6 +22,11 @@ struct LogicalPageId {
         return LogicalPageId {tid, Id::null()};
     }
 
+    [[nodiscard]] static auto unknown() -> LogicalPageId
+    {
+        return LogicalPageId {Id::null(), Id::null()};
+    }
+
     [[nodiscard]] static auto root() -> LogicalPageId
     {
         return LogicalPageId {Id::root(), Id::root()};

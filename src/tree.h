@@ -187,7 +187,7 @@ struct PayloadManager
 
 class Tree {
 public:
-    explicit Tree(Pager &pager, Id table_id, Id root, Id &freelist_head);
+    explicit Tree(Pager &pager, const LogicalPageId &root_id, Id &freelist_head);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *root = nullptr) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;

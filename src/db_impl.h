@@ -45,10 +45,10 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
-    [[nodiscard]] auto create_table(const Slice &name, Id *table_id, Id *root_id) -> Status;
-    [[nodiscard]] auto open_table(Id table_id, Id root_id, TableState **out) -> Status;
-    [[nodiscard]] auto commit_table(Id table_id, Id root_id, TableState &state) -> Status;
-    auto close_table(Id root) -> void;
+    [[nodiscard]] auto create_table(const Slice &name, LogicalPageId *root_id) -> Status;
+    [[nodiscard]] auto open_table(const LogicalPageId &root_id, TableState **out) -> Status;
+    [[nodiscard]] auto commit_table(const LogicalPageId &root_id, TableState &state) -> Status;
+    auto close_table(const LogicalPageId &root_id) -> void;
 
     [[nodiscard]] auto record_count() const -> std::size_t;
     auto TEST_validate() const -> void;
@@ -99,12 +99,19 @@ private:
     std::string m_reader_data;
     std::string m_reader_tail;
 
-    // State for open tables. Tables are keyed by their root page ID so that the vacuum routine
-    // can easily locate open tables.
+    // State for open tables. Tables are keyed by their table ID.
     std::unordered_map<Id, TableState, Id::Hash> m_tables;
+
+    // Mapping from root page IDs to table IDs for open tables. This is necessary for vacuum.
+    std::unordered_map<Id, Id, Id::Hash> m_root_map;
 
     // Pointer to the root table state, which is kept in m_tables.
     TableState *m_root {};
+
+    // TODO: Create a table (after the root table) and store it here. Redirect put(), get(),
+    //       new_cursor(), and commit() calls through here. Eventually, get rid of this thing and
+    //       use new_table() to open tables.
+    Table *m_temp {};
 
     mutable Status m_status;
     std::string m_filename;

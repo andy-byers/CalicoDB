@@ -11,6 +11,7 @@ class DBImpl;
 class Env;
 class Tree;
 class WriteAheadLog;
+struct LogicalPageId;
 
 class TableImpl : public Table
 {
@@ -21,9 +22,11 @@ public:
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
-    [[nodiscard]] auto commit() -> Status override;
+    [[nodiscard]] auto checkpoint() -> Status override;
 
 private:
+    [[nodiscard]] auto root_id() const -> LogicalPageId;
+
     DBImpl *m_db {};
     TableState *m_state {};
     mutable Status *m_status {};

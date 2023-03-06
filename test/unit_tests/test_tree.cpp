@@ -553,7 +553,7 @@ public:
     auto SetUp() -> void override
     {
         ASSERT_OK(Tree::create(*pager, Id::root(), freelist_head));
-        tree = std::make_unique<Tree>(*pager, Id::root(), Id::root(), freelist_head);
+        tree = std::make_unique<Tree>(*pager, LogicalPageId::root(), freelist_head);
     }
 
     [[nodiscard]] auto make_long_key(std::size_t value) const
@@ -1738,7 +1738,7 @@ public:
     {
         Id root;
         EXPECT_OK(Tree::create(*pager, Id::root(), freelist_head, &root));
-        multi_tree.emplace_back(std::make_unique<Tree>(*pager, Id::root(), root, freelist_head));
+        multi_tree.emplace_back(std::make_unique<Tree>(*pager, LogicalPageId {Id::root(), root}, freelist_head));
         return multi_tree.size() - 1;
     }
 

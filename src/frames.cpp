@@ -24,8 +24,6 @@ auto Frame::ref(Page &page) -> void
 {
     CDB_EXPECT_FALSE(m_is_writable);
     CDB_EXPECT_EQ(page.id().page_id, m_page_id);
-//    page.m_id.page_id = m_page_id;
-//    page.m_page_id = m_page_id;
     page.m_span = m_bytes;
     page.m_write = false;
     ++m_ref_count;
@@ -47,10 +45,12 @@ auto Frame::unref(Page &page) -> void
     if (page.is_writable()) {
         CDB_EXPECT_TRUE(m_is_writable);
         CDB_EXPECT_EQ(m_ref_count, 1);
-        m_is_writable = false;
         page.m_write = false;
     }
     --m_ref_count;
+    if (m_ref_count == 0) {
+        m_is_writable = false;
+    }
 }
 
 FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count)

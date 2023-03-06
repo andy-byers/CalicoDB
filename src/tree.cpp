@@ -1365,13 +1365,13 @@ auto Tree::internal_rotate_right(Node &parent, Node &left, Node &right, std::siz
     return Status::ok();
 }
 
-Tree::Tree(Pager &pager, Id table_id, Id root_id, Id &freelist_head)
+Tree::Tree(Pager &pager, const LogicalPageId &root_id, Id &freelist_head)
     : m_node_scratch(pager.page_size(), '\0'),
       m_cell_scratch(pager.page_size(), '\0'),
       m_freelist {pager, freelist_head},
       m_pager {&pager},
-      m_table_id {table_id},
-      m_root_id {root_id}
+      m_table_id {root_id.table_id},
+      m_root_id {root_id.page_id}
 {
 }
 

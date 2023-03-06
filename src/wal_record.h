@@ -12,6 +12,8 @@
 namespace calicodb
 {
 
+struct LogicalPageId;
+
 enum WalPayloadType : char {
     kCommitPayload = '\xC0',
     kDeltaPayload = '\xD0',
@@ -162,9 +164,9 @@ using PayloadDescriptor = std::variant<
 
 [[nodiscard]] auto extract_payload_lsn(const Slice &in) -> Lsn;
 [[nodiscard]] auto decode_payload(const Slice &in) -> PayloadDescriptor;
-[[nodiscard]] auto encode_commit_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const PageDelta &delta, char *buffer) -> Slice;
-[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice;
-[[nodiscard]] auto encode_image_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, char *buffer) -> Slice;
+[[nodiscard]] auto encode_commit_payload(Lsn lsn, const LogicalPageId &root_id, const Slice &image, const PageDelta &delta, char *buffer) -> Slice;
+[[nodiscard]] auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice;
+[[nodiscard]] auto encode_image_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, char *buffer) -> Slice;
 [[nodiscard]] auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice;
 
 /*

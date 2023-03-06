@@ -99,34 +99,34 @@ auto WriteAheadLog::log_vacuum(bool is_start, Lsn *out) -> Status
         m_last_lsn, is_start, m_data_buffer.data()));
 }
 
-auto WriteAheadLog::log_commit(Id tid, Id pid, const Slice &image, const PageDelta &delta, Lsn *out) -> Status
+auto WriteAheadLog::log_commit(const LogicalPageId &root_id, const Slice &image, const PageDelta &delta, Lsn *out) -> Status
 {
     ++m_last_lsn.value;
     if (out != nullptr) {
         *out = m_last_lsn;
     }
     return log(encode_commit_payload(
-        m_last_lsn, tid, pid, image, delta, m_data_buffer.data()));
+        m_last_lsn, root_id, image, delta, m_data_buffer.data()));
 }
 
-auto WriteAheadLog::log_delta(Id tid, Id pid, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status
+auto WriteAheadLog::log_delta(const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status
 {
     ++m_last_lsn.value;
     if (out != nullptr) {
         *out = m_last_lsn;
     }
     return log(encode_deltas_payload(
-        m_last_lsn, tid, pid, image, delta, m_data_buffer.data()));
+        m_last_lsn, page_id, image, delta, m_data_buffer.data()));
 }
 
-auto WriteAheadLog::log_image(Id tid, Id pid, const Slice &image, Lsn *out) -> Status
+auto WriteAheadLog::log_image(const LogicalPageId &page_id, const Slice &image, Lsn *out) -> Status
 {
     ++m_last_lsn.value;
     if (out != nullptr) {
         *out = m_last_lsn;
     }
     return log(encode_image_payload(
-        m_last_lsn, tid, pid, image, m_data_buffer.data()));
+        m_last_lsn, page_id, image, m_data_buffer.data()));
 }
 
 auto WriteAheadLog::flush() -> Status

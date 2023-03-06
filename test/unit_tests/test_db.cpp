@@ -1045,33 +1045,33 @@ protected:
     DB *db;
 };
 
-//TEST_F(ApiTests, IsConstCorrect)
-//{
-//    Table *table;
-//    TableOptions table_options;
-//    ASSERT_OK(db->new_table(table_options, "table", &table));
-//    ASSERT_OK(table->put("key", "value"));
-//
-//    const auto *const_table = table;
-//    std::string value;
-//    ASSERT_OK(const_table->get("key", &value));
-//
-//    auto *cursor = const_table->new_cursor();
-//    cursor->seek_first();
-//
-//    const auto *const_cursor = cursor;
-//    ASSERT_TRUE(const_cursor->is_valid());
-//    ASSERT_OK(const_cursor->status());
-//    ASSERT_EQ(const_cursor->key(), "key");
-//    ASSERT_EQ(const_cursor->value(), "value");
-//    delete const_cursor;
-//
-//    const auto *const_db = db;
-//    std::string property;
-//    ASSERT_TRUE(const_db->get_property("calicodb.counts", &property));
+TEST_F(ApiTests, IsConstCorrect)
+{
+    Table *table;
+    TableOptions table_options;
+    ASSERT_OK(db->new_table(table_options, "table", &table));
+    ASSERT_OK(table->put("key", "value"));
+
+    const auto *const_table = table;
+    std::string value;
+    ASSERT_OK(const_table->get("key", &value));
+
+    auto *cursor = const_table->new_cursor();
+    cursor->seek_first();
+
+    const auto *const_cursor = cursor;
+    ASSERT_TRUE(const_cursor->is_valid());
+    ASSERT_OK(const_cursor->status());
+    ASSERT_EQ(const_cursor->key(), "key");
+    ASSERT_EQ(const_cursor->value(), "value");
+    delete const_cursor;
+
+    const auto *const_db = db;
+    std::string property;
+    ASSERT_TRUE(const_db->get_property("calicodb.counts", &property));
 //    ASSERT_EQ(property, "records:1,pages:3,updates:1");
-//    ASSERT_OK(const_db->status());
-//}
+    ASSERT_OK(const_db->status());
+}
 
 TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 {
@@ -1175,6 +1175,101 @@ TEST_F(ApiTests, HandlesLargeKeys)
     ASSERT_EQ(cursor->value(), "3");
     cursor->next();
     delete cursor;
+}
+
+class TableTests : public ApiTests
+{
+public:
+    ~TableTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        ApiTests::SetUp();
+        ASSERT_OK(db->new_table({}, "table", &table));
+    }
+
+    auto TearDown() -> void override
+    {
+        delete table;
+        ASSERT_OK(db->status());
+        ApiTests::TearDown();
+    }
+
+    Table *table {};
+};
+
+TEST_F(TableTests, UncommittedUpdatesAreDiscardedOnClose)
+{
+    ASSERT_OK(table->put("key", "value"));
+    ASSERT_OK(table->checkpoint());
+    ASSERT_OK(table->put("1", "a"));
+    ASSERT_OK(table->put("2", "b"));
+    ASSERT_OK(table->put("3", "c"));
+
+    delete table;
+    table = nullptr;
+    ASSERT_OK(db->new_table({}, "table", &table));
+
+    std::string value;
+    ASSERT_OK(table->get("key", &value));
+    ASSERT_EQ(value, "value");
+    ASSERT_TRUE(table->get("1", &value).is_not_found());
+    ASSERT_TRUE(table->get("2", &value).is_not_found());
+    ASSERT_TRUE(table->get("3", &value).is_not_found());
+}
+
+class TwoTableTests : public TableTests
+{
+public:
+    ~TwoTableTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        TableTests::SetUp();
+        table_1 = table;
+        ASSERT_OK(db->new_table({}, "table_2", &table_2));
+    }
+
+    auto TearDown() -> void override
+    {
+        TableTests::TearDown();
+        delete table_2;
+        ASSERT_OK(db->status());
+    }
+
+    Table *table_1 {};
+    Table *table_2 {};
+};
+
+TEST_F(TwoTableTests, TablesAreIndependent)
+{
+    ASSERT_OK(table_1->put("key", "1"));
+    ASSERT_OK(table_2->put("key", "2"));
+
+    std::string value;
+    ASSERT_OK(table_1->get("key", &value));
+    ASSERT_EQ(value, "1");
+    ASSERT_OK(table_2->get("key", &value));
+    ASSERT_EQ(value, "2");
+}
+
+TEST_F(TwoTableTests, CheckpointsAreIndependent)
+{
+    ASSERT_OK(table_1->put("a", "1"));
+    ASSERT_OK(table_2->put("b", "2"));
+    ASSERT_OK(table_1->checkpoint());
+
+    delete table_1;
+    delete table_2;
+    table_1 = nullptr;
+    table_2 = nullptr;
+    ASSERT_OK(db->new_table({}, "table_1", &table_1));
+    ASSERT_OK(db->new_table({}, "table_2", &table_2));
+
+    std::string value;
+    ASSERT_OK(table_1->get("a", &value));
+    ASSERT_EQ(value, "1");
+    ASSERT_TRUE(table_2->get("b", &value).is_not_found());
 }
 
 class LargePayloadTests : public ApiTests

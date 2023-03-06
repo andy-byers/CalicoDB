@@ -109,7 +109,7 @@ public:
 
 TEST_F(WalPayloadTests, ImagePayloadEncoding)
 {
-    const auto payload_in = encode_image_payload(Lsn {123}, Id {456}, Id {789}, image, scratch.data());
+    const auto payload_in = encode_image_payload(Lsn {123}, LogicalPageId {Id {456}, Id {789}}, image, scratch.data());
     const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload_out));
     const auto descriptor = std::get<ImageDescriptor>(payload_out);
@@ -123,7 +123,7 @@ TEST_F(WalPayloadTests, DeltaPayloadEncoding)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(image);
-    const auto payload_in = encode_deltas_payload(Lsn {123}, Id {456}, Id {789}, image, deltas, scratch.data());
+    const auto payload_in = encode_deltas_payload(Lsn {123}, LogicalPageId {Id {456}, Id {789}}, image, deltas, scratch.data());
     const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload_out));
     const auto descriptor = std::get<DeltaDescriptor>(payload_out);
@@ -139,7 +139,7 @@ TEST_F(WalPayloadTests, DeltaPayloadEncoding)
 TEST_F(WalPayloadTests, CommitPayloadEncoding)
 {
     WalRecordGenerator generator;
-    const auto payload_in = encode_commit_payload(Lsn {123}, Id {456}, Id {789}, image, {5, 10}, scratch.data());
+    const auto payload_in = encode_commit_payload(Lsn {123}, LogicalPageId {Id {456}, Id {789}}, image, {5, 10}, scratch.data());
     const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<CommitDescriptor>(payload_out));
     const auto descriptor = std::get<CommitDescriptor>(payload_out);
@@ -603,11 +603,11 @@ TEST_F(WalTests, SequenceNumbersAreMonotonicallyIncreasing)
 {
     ASSERT_OK(wal->start_writing());
     Lsn lsn;
-    ASSERT_OK(wal->log_image(Id::null(), Id::root(), "a", &lsn));
+    ASSERT_OK(wal->log_image(LogicalPageId::unknown_table(Id::root()), "a", &lsn));
     ASSERT_EQ(lsn, Lsn {1});
-    ASSERT_OK(wal->log_image(Id::null(), Id::root(), "b", &lsn));
+    ASSERT_OK(wal->log_image(LogicalPageId::unknown_table(Id::root()), "b", &lsn));
     ASSERT_EQ(lsn, Lsn {2});
-    ASSERT_OK(wal->log_image(Id::null(), Id::root(), "c", &lsn));
+    ASSERT_OK(wal->log_image(LogicalPageId::unknown_table(Id::root()), "c", &lsn));
     ASSERT_EQ(lsn, Lsn {3});
 }
 
@@ -616,8 +616,8 @@ TEST_F(WalTests, UnderstandsImageRecords)
     ASSERT_OK(wal->start_writing());
     ASSERT_EQ(wal->bytes_written(), 0);
     const auto image = random.Generate(kPageSize);
-    ASSERT_OK(wal->log_image(Id {10}, Id {11}, "", nullptr));
-    ASSERT_OK(wal->log_image(Id {20}, Id {21}, image, nullptr));
+    ASSERT_OK(wal->log_image(LogicalPageId {Id {10}, Id {11}}, "", nullptr));
+    ASSERT_OK(wal->log_image(LogicalPageId {Id {20}, Id {21}}, image, nullptr));
     ASSERT_OK(wal->flush());
 
     std::vector<std::string> payloads;
@@ -651,7 +651,7 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
         {200, 20},
         {300, 30},
     };
-    ASSERT_OK(wal->log_delta(Id {12}, Id {34}, image, delta, nullptr));
+    ASSERT_OK(wal->log_delta(LogicalPageId {Id {12}, Id {34}}, image, delta, nullptr));
     ASSERT_OK(wal->flush());
 
     std::vector<std::string> payloads;
@@ -681,7 +681,7 @@ TEST_F(WalTests, UnderstandsCommitRecords)
         {200, 20},
         {300, 30},
     };
-    ASSERT_OK(wal->log_commit(Id {12}, Id {34}, image, {5, FileHeader::kSize}, nullptr));
+    ASSERT_OK(wal->log_commit(LogicalPageId {Id {12}, Id {34}}, image, {5, FileHeader::kSize}, nullptr));
     ASSERT_OK(wal->flush());
 
     std::vector<std::string> payloads;

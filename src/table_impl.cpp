@@ -13,7 +13,7 @@ TableImpl::TableImpl(Id table_id, DBImpl &db, TableState &state, Status &status)
 
 TableImpl::~TableImpl()
 {
-    m_db->close_table(m_state->tree->m_root_id);
+    m_db->close_table(root_id());
 }
 
 auto TableImpl::new_cursor() const -> Cursor *
@@ -63,11 +63,11 @@ auto TableImpl::erase(const Slice &key) -> Status
     return s;
 }
 
-auto TableImpl::commit() -> Status
+auto TableImpl::checkpoint() -> Status
 {
     CDB_TRY(*m_status);
     if (m_batch_size != 0) {
-        if (auto s = m_db->commit_table(m_table_id, m_state->tree->m_root_id, *m_state); !s.is_ok()) {
+        if (auto s = m_db->commit_table(root_id(), *m_state); !s.is_ok()) {
             if (m_status->is_ok()) {
                 *m_status = s;
             }
@@ -75,6 +75,11 @@ auto TableImpl::commit() -> Status
         }
     }
     return Status::ok();
+}
+
+auto TableImpl::root_id() const -> LogicalPageId
+{
+    return LogicalPageId {m_table_id, m_state->tree->m_root_id};
 }
 
 } // namespace calicodb

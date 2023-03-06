@@ -138,6 +138,7 @@ auto DBImpl::do_open(Options sanitized) -> Status
 
         // Create the root tree.
         CDB_TRY(Tree::create(*pager, Id::root(), m_freelist_head));
+        m_last_table_id = Id::root();
 
         // Write the initial file header.
         Page page {LogicalPageId::unknown_table(Id::root())};
@@ -150,7 +151,7 @@ auto DBImpl::do_open(Options sanitized) -> Status
     pager->load_state(state);
 
     // Open the root table.
-    auto *root = new Tree {*pager, Id::root(), Id::root(), m_freelist_head};
+    auto *root = new Tree {*pager, LogicalPageId::root(), m_freelist_head};
     m_tables.emplace(Id::root(), TableState {root, Lsn::null()});
     m_root = &m_tables[Id::root()];
 
@@ -170,6 +171,13 @@ auto DBImpl::do_open(Options sanitized) -> Status
 
     CDB_TRY(m_status);
     m_is_running = true;
+
+    // TODO: Remove eventually.
+    auto root_id = LogicalPageId::unknown();
+    if (!db_exists){
+        CDB_TRY(create_table("temp_table", &root_id));
+    }
+    CDB_TRY(new_table({}, "temp_table", &m_temp));
     return Status::ok();
 }
 
@@ -201,6 +209,8 @@ DBImpl::~DBImpl()
     delete pager;
     delete tree;
     delete wal;
+
+    delete m_temp; // TODO: remove
 }
 
 auto DBImpl::record_count() const -> std::size_t
@@ -549,63 +559,61 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
 
 auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> Status
 {
-    Id table_id, root_id;
+    auto root_id = LogicalPageId::unknown();
     std::string value;
 
-    auto s = tree->get(name, &value);
+    auto s = m_root->tree->get(name, &value);
     if (s.is_ok()) {
-        LogicalPageId logical_id {Id::null(), Id::null()};
-        CDB_TRY(decode_logical_id(value, &logical_id));
-        table_id = logical_id.table_id;
-        root_id = logical_id.page_id;
+        CDB_TRY(decode_logical_id(value, &root_id));
     } else if (s.is_not_found()) {
-        s = create_table(name, &table_id, &root_id);
+        s = create_table(name, &root_id);
     } else {
         SET_STATUS(s);
         return s;
     }
 
     TableState *state;
-    s = open_table(table_id, root_id, &state);
+    s = open_table(root_id, &state);
     if (s.is_ok()) {
-        *out = new TableImpl {table_id, *this, *state, m_status};
+        *out = new TableImpl {root_id.table_id, *this, *state, m_status};
     } else {
         SET_STATUS(s);
     }
     return s;
 }
 
-auto DBImpl::create_table(const Slice &name, Id *table_id, Id *root_id) -> Status
+auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
 {
     ++m_last_table_id.value;
-    *table_id = m_last_table_id;
-    CDB_TRY(Tree::create(*pager, m_last_table_id, m_freelist_head, root_id));
-    CDB_TRY(tree->put(name, encode_logical_id(LogicalPageId {*table_id, *root_id})));
-    return commit_table(Id::root(), Id::root(), *m_root);
+    root_id->table_id = m_last_table_id;
+    CDB_TRY(Tree::create(*pager, m_last_table_id, m_freelist_head, &root_id->page_id));
+    CDB_TRY(tree->put(name, encode_logical_id(*root_id)));
+    return commit_table(LogicalPageId::root(), *m_root);
 }
 
-auto DBImpl::open_table(Id table_id, Id root_id, TableState **out) -> Status
+auto DBImpl::open_table(const LogicalPageId &root_id, TableState **out) -> Status
 {
-    auto itr = m_tables.find(root_id);
+    auto itr = m_tables.find(root_id.table_id);
     if (itr != end(m_tables)) {
         return Status::logic_error("table is already open");
     }
 
-    Page page {LogicalPageId {table_id, root_id}};
+    Page page {root_id};
     CDB_TRY(pager->acquire(page));
     const Lsn commit_lsn {get_u64(page.data() + page_offset(page) + kPageHeaderSize)};
     pager->release(std::move(page));
 
-    itr = m_tables.insert(itr, {root_id, {}});
-    itr->second.tree = new Tree {*pager, table_id, root_id, m_freelist_head};
+    m_root_map.insert({root_id.page_id, root_id.table_id});
+    itr = m_tables.insert(itr, {root_id.table_id, {}});
+    itr->second.tree = new Tree {*pager, root_id, m_freelist_head};
     itr->second.commit_lsn = commit_lsn;
     *out = &itr->second;
     return Status::ok();
 }
 
-auto DBImpl::commit_table(Id table_id, Id root_id, TableState &state) -> Status
+auto DBImpl::commit_table(const LogicalPageId &root_id, TableState &state) -> Status
 {
-    Page page {LogicalPageId {table_id, root_id}};
+    Page page {root_id};
     CDB_TRY(pager->acquire(page));
     pager->upgrade(page);
 
@@ -615,7 +623,8 @@ auto DBImpl::commit_table(Id table_id, Id root_id, TableState &state) -> Status
 
     auto tree_header = page.span(page_offset(page) + kPageHeaderSize, kTreeHeaderSize);
     put_u64(tree_header.data(), state.commit_lsn.value);
-    if (root_id.is_root()) {
+    if (root_id.table_id.is_root()) {
+        CDB_EXPECT_TRUE(root_id.page_id.is_root());
         save_state(page, state.commit_lsn);
     }
 
@@ -624,15 +633,15 @@ auto DBImpl::commit_table(Id table_id, Id root_id, TableState &state) -> Status
     CDB_EXPECT_EQ(deltas.size(), 1);
 
     CDB_TRY(wal->log_commit(
-        table_id, root_id, page.view(0), deltas.front(), nullptr));
+        root_id, page.view(0), deltas.front(), nullptr));
 
     pager->discard(std::move(page));
     return wal->flush();
 }
 
-auto DBImpl::close_table(Id root) -> void
+auto DBImpl::close_table(const LogicalPageId &root_id) -> void
 {
-    const auto itr = m_tables.find(root);
+    const auto itr = m_tables.find(root_id.table_id);
     if (itr == end(m_tables)) {
         return;
     }
@@ -640,6 +649,7 @@ auto DBImpl::close_table(Id root) -> void
 //    recovery();
     // TODO: Make this table consistent.
     delete itr->second.tree;
+    m_root_map.erase(root_id.page_id);
     m_tables.erase(itr);
 }
 //

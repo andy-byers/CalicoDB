@@ -122,12 +122,23 @@ public:
         return 0;
     }
 
-    [[nodiscard]] auto log_delta(Id, Id, const Slice &, const ChangeBuffer &, Lsn *) -> Status override
+    [[nodiscard]] auto log_commit(const LogicalPageId &, const Slice &, const PageDelta &, Lsn *) -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto log_image(Id, Id, const Slice &, Lsn *) -> Status override
+    [[nodiscard]] auto log_delta(const LogicalPageId &, const Slice &, const ChangeBuffer &, Lsn *) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto log_image(const LogicalPageId &, const Slice &, Lsn *) -> Status override
+    {
+        return Status::ok();
+    }
+
+
+    [[nodiscard]] auto log_vacuum(bool, Lsn *) -> Status override
     {
         return Status::ok();
     }
