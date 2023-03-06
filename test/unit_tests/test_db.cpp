@@ -1045,28 +1045,33 @@ protected:
     DB *db;
 };
 
-TEST_F(ApiTests, IsConstCorrect)
-{
-    ASSERT_OK(db->put("key", "value"));
-
-    std::string value;
-    const auto *const_db = db;
-    ASSERT_OK(const_db->get("key", &value));
-    std::string property;
-    ASSERT_TRUE(const_db->get_property("calicodb.counts", &property));
-    ASSERT_EQ(property, "records:1,pages:1,updates:1");
-    ASSERT_OK(const_db->status());
-
-    auto *cursor = const_db->new_cursor();
-    cursor->seek_first();
-
-    const auto *const_cursor = cursor;
-    ASSERT_TRUE(const_cursor->is_valid());
-    ASSERT_OK(const_cursor->status());
-    ASSERT_EQ(const_cursor->key(), "key");
-    ASSERT_EQ(const_cursor->value(), "value");
-    delete const_cursor;
-}
+//TEST_F(ApiTests, IsConstCorrect)
+//{
+//    Table *table;
+//    TableOptions table_options;
+//    ASSERT_OK(db->new_table(table_options, "table", &table));
+//    ASSERT_OK(table->put("key", "value"));
+//
+//    const auto *const_table = table;
+//    std::string value;
+//    ASSERT_OK(const_table->get("key", &value));
+//
+//    auto *cursor = const_table->new_cursor();
+//    cursor->seek_first();
+//
+//    const auto *const_cursor = cursor;
+//    ASSERT_TRUE(const_cursor->is_valid());
+//    ASSERT_OK(const_cursor->status());
+//    ASSERT_EQ(const_cursor->key(), "key");
+//    ASSERT_EQ(const_cursor->value(), "value");
+//    delete const_cursor;
+//
+//    const auto *const_db = db;
+//    std::string property;
+//    ASSERT_TRUE(const_db->get_property("calicodb.counts", &property));
+//    ASSERT_EQ(property, "records:1,pages:3,updates:1");
+//    ASSERT_OK(const_db->status());
+//}
 
 TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 {

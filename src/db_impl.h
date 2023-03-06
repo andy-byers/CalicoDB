@@ -63,9 +63,14 @@ private:
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
-    auto save_state(Page root, Lsn commit_lsn = Lsn::null() /* TODO: remove */) const -> void;
+    auto save_state(Page &root, Lsn commit_lsn = Lsn::null() /* TODO: remove */) const -> void;
 
     [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> *out) -> Status;
+
+    /* Determine the header checkpoint LSN for every table in the database. This amounts to iterating
+     * over the root table's records and finding the table root pages, from which the checkpoint LSNs
+     * are read.
+     */
     [[nodiscard]] auto find_checkpoints(std::unordered_map<Id, Lsn, Id::Hash> *checkpoints) -> Status;
 
     struct LogRange {
@@ -81,7 +86,7 @@ private:
      * Update each table's header LSN to match the most-recent LSN created for that table. This prevents
      * the WAL records we just reverted from being considered again if we crash while cleaning up.
      */
-    [[nodiscard]] auto recovery_phase_1() -> Status;
+    [[nodiscard]] auto recovery_phase_1(std::unordered_map<Id, LogRange, Id::Hash> ranges) -> Status;
 
     /* Phase 2: Flush the page cache, resize the database file to match the header page count, then remove
      * all WAL segments. This part is only run when the database is closed, otherwise, we just flush the

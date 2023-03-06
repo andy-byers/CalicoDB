@@ -107,7 +107,7 @@ public:
     std::string scratch;
 };
 
-TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
+TEST_F(WalPayloadTests, ImagePayloadEncoding)
 {
     const auto payload_in = encode_image_payload(Lsn {123}, Id {456}, Id {789}, image, scratch.data());
     const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
@@ -119,7 +119,7 @@ TEST_F(WalPayloadTests, EncodeAndDecodeFullImage)
     ASSERT_EQ(descriptor.image.to_string(), image);
 }
 
-TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
+TEST_F(WalPayloadTests, DeltaPayloadEncoding)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(image);
@@ -134,6 +134,31 @@ TEST_F(WalPayloadTests, EncodeAndDecodeDeltas)
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const auto &delta) {
         return delta.data == Slice {image}.range(delta.offset, delta.data.size());
     }));
+}
+
+TEST_F(WalPayloadTests, CommitPayloadEncoding)
+{
+    WalRecordGenerator generator;
+    const auto payload_in = encode_commit_payload(Lsn {123}, Id {456}, Id {789}, image, {5, 10}, scratch.data());
+    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
+    ASSERT_TRUE(std::holds_alternative<CommitDescriptor>(payload_out));
+    const auto descriptor = std::get<CommitDescriptor>(payload_out);
+    ASSERT_EQ(descriptor.lsn.value, 123);
+    ASSERT_EQ(descriptor.table_id.value, 456);
+    ASSERT_EQ(descriptor.page_id.value, 789);
+    ASSERT_EQ(descriptor.delta.offset, 5);
+    ASSERT_EQ(descriptor.delta.data, Slice {image}.range(5, 10));
+}
+
+TEST_F(WalPayloadTests, VacuumPayloadEncoding)
+{
+    WalRecordGenerator generator;
+    const auto payload_in = encode_vacuum_payload(Lsn {123}, true, scratch.data());
+    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
+    ASSERT_TRUE(std::holds_alternative<VacuumDescriptor>(payload_out));
+    const auto descriptor = std::get<VacuumDescriptor>(payload_out);
+    ASSERT_EQ(descriptor.lsn.value, 123);
+    ASSERT_TRUE(descriptor.is_start);
 }
 
 [[nodiscard]] auto get_ids(const WalSet &c)
@@ -626,8 +651,59 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
         {200, 20},
         {300, 30},
     };
-    ASSERT_OK(wal->log_delta(Id {10}, Id {11}, image, {{0, FileHeader::kSize}}, nullptr));
-    ASSERT_OK(wal->log_delta(Id {20}, Id {21}, image, delta, nullptr));
+    ASSERT_OK(wal->log_delta(Id {12}, Id {34}, image, delta, nullptr));
+    ASSERT_OK(wal->flush());
+
+    std::vector<std::string> payloads;
+    ASSERT_OK(read_segment(Id {1}, &payloads));
+    ASSERT_EQ(payloads.size(), 1);
+
+    const auto payload = decode_payload(payloads[0]);
+    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload));
+    const auto descriptor = std::get<DeltaDescriptor>(payload);
+    ASSERT_EQ(descriptor.lsn, Lsn {1});
+    ASSERT_EQ(descriptor.table_id, Id {12});
+    ASSERT_EQ(descriptor.page_id, Id {34});
+    ASSERT_EQ(descriptor.deltas.size(), 3);
+    for (std::size_t i {}; i < 3; ++i) {
+        ASSERT_EQ(descriptor.deltas[i].offset, delta[i].offset);
+        ASSERT_EQ(descriptor.deltas[i].data, image.range(delta[i].offset, delta[i].size));
+    }
+}
+
+TEST_F(WalTests, UnderstandsCommitRecords)
+{
+    ASSERT_OK(wal->start_writing());
+    ASSERT_EQ(wal->bytes_written(), 0);
+    const auto image = random.Generate(kPageSize);
+    ChangeBuffer delta {
+        {100, 10},
+        {200, 20},
+        {300, 30},
+    };
+    ASSERT_OK(wal->log_commit(Id {12}, Id {34}, image, {5, FileHeader::kSize}, nullptr));
+    ASSERT_OK(wal->flush());
+
+    std::vector<std::string> payloads;
+    ASSERT_OK(read_segment(Id {1}, &payloads));
+    ASSERT_EQ(payloads.size(), 1);
+
+    auto payload = decode_payload(payloads[0]);
+    ASSERT_TRUE(std::holds_alternative<CommitDescriptor>(payload));
+    auto descriptor = std::get<CommitDescriptor>(payload);
+    ASSERT_EQ(descriptor.lsn, Lsn {1});
+    ASSERT_EQ(descriptor.table_id, Id {12});
+    ASSERT_EQ(descriptor.page_id, Id {34});
+    ASSERT_EQ(descriptor.delta.offset, 5);
+    ASSERT_EQ(descriptor.delta.data.to_string(), image.range(5, FileHeader::kSize).to_string());
+}
+
+TEST_F(WalTests, UnderstandsVacuumRecords)
+{
+    ASSERT_OK(wal->start_writing());
+    ASSERT_EQ(wal->bytes_written(), 0);
+    ASSERT_OK(wal->log_vacuum(true, nullptr));
+    ASSERT_OK(wal->log_vacuum(false, nullptr));
     ASSERT_OK(wal->flush());
 
     std::vector<std::string> payloads;
@@ -635,26 +711,16 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
     ASSERT_EQ(payloads.size(), 2);
 
     auto payload = decode_payload(payloads[0]);
-    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload));
-    auto descriptor = std::get<DeltaDescriptor>(payload);
+    ASSERT_TRUE(std::holds_alternative<VacuumDescriptor>(payload));
+    auto descriptor = std::get<VacuumDescriptor>(payload);
     ASSERT_EQ(descriptor.lsn, Lsn {1});
-    ASSERT_EQ(descriptor.table_id, Id {10});
-    ASSERT_EQ(descriptor.page_id, Id {11});
-    ASSERT_EQ(descriptor.deltas.size(), 1);
-    ASSERT_EQ(descriptor.deltas.front().offset, 0);
-    ASSERT_EQ(descriptor.deltas.front().data.to_string(), image.range(0, FileHeader::kSize).to_string());
+    ASSERT_TRUE(descriptor.is_start);
 
     payload = decode_payload(payloads[1]);
-    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload));
-    descriptor = std::get<DeltaDescriptor>(payload);
+    ASSERT_TRUE(std::holds_alternative<VacuumDescriptor>(payload));
+    descriptor = std::get<VacuumDescriptor>(payload);
     ASSERT_EQ(descriptor.lsn, Lsn {2});
-    ASSERT_EQ(descriptor.table_id, Id {20});
-    ASSERT_EQ(descriptor.page_id, Id {21});
-    ASSERT_EQ(descriptor.deltas.size(), 3);
-    for (std::size_t i {}; i < 3; ++i) {
-        ASSERT_EQ(descriptor.deltas[i].offset, delta[i].offset);
-        ASSERT_EQ(descriptor.deltas[i].data, image.range(delta[i].offset, delta[i].size));
-    }
+    ASSERT_FALSE(descriptor.is_start);
 }
 
 } // namespace calicodb

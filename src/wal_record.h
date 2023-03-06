@@ -13,8 +13,10 @@ namespace calicodb
 {
 
 enum WalPayloadType : char {
+    kCommitPayload = '\xC0',
     kDeltaPayload = '\xD0',
-    kImagePayload = '\xF0',
+    kImagePayload = '\xE0',
+    kVacuumPayload = '\xF0',
 };
 
 enum WalRecordType : char {
@@ -77,7 +79,7 @@ auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
  * "offset" and "size" are 16-bit unsigned integers.
  */
 struct DeltaDescriptor {
-    static constexpr std::size_t kHeaderSize {27};
+    static constexpr std::size_t kFixedSize {27};
 
     struct Delta {
         std::size_t offset {};
@@ -88,6 +90,44 @@ struct DeltaDescriptor {
     Id page_id;
     Lsn lsn;
     std::vector<Delta> deltas;
+};
+
+/* Commit payloads are more-or-less just delta payloads with a single delta describing changes to the header
+ * fields on the root page of a table.
+ *
+ *      Offset  Size  Field
+ *     ---------------------------
+ *      0       1     Flags
+ *      1       8     LSN
+ *      9       8     Table ID
+ *      17      8     Page ID
+*       25      2     Header offset
+*       27      2     Header size
+*       29      n     Header data
+ */
+struct CommitDescriptor {
+    static constexpr std::size_t kFixedSize {29};
+    using Delta = DeltaDescriptor::Delta;
+
+    Id table_id;
+    Id page_id;
+    Lsn lsn;
+    Delta delta;
+};
+
+/* Vacuum records signify the start or end of a vacuum operation.
+ *
+ *      Offset  Size  Field
+ *     ---------------------------
+ *      0       1     Flags
+ *      1       8     LSN
+ *      9       1     Start
+ */
+struct VacuumDescriptor {
+    static constexpr std::size_t kFixedSize {10};
+
+    Lsn lsn;
+    bool is_start {};
 };
 
 /* Image payload header:
@@ -105,7 +145,7 @@ struct DeltaDescriptor {
  * it is composed from.
  */
 struct ImageDescriptor {
-    static constexpr std::size_t kHeaderSize {25};
+    static constexpr std::size_t kFixedSize {25};
 
     Id table_id;
     Id page_id;
@@ -113,12 +153,19 @@ struct ImageDescriptor {
     Slice image;
 };
 
-using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, ImageDescriptor>;
+using PayloadDescriptor = std::variant<
+    std::monostate,
+    CommitDescriptor,
+    DeltaDescriptor,
+    ImageDescriptor,
+    VacuumDescriptor>;
 
 [[nodiscard]] auto extract_payload_lsn(const Slice &in) -> Lsn;
 [[nodiscard]] auto decode_payload(const Slice &in) -> PayloadDescriptor;
+[[nodiscard]] auto encode_commit_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const PageDelta &delta, char *buffer) -> Slice;
 [[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice;
 [[nodiscard]] auto encode_image_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, char *buffer) -> Slice;
+[[nodiscard]] auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice;
 
 /*
  * Stores a collection of WAL segment descriptors and caches their first LSNs.
@@ -217,7 +264,7 @@ static constexpr std::size_t kWalBlockScale {4};
 
 [[nodiscard]] inline constexpr auto wal_scratch_size(std::size_t page_size) -> std::size_t
 {
-    return page_size + DeltaDescriptor::kHeaderSize + sizeof(PageDelta);
+    return page_size + DeltaDescriptor::kFixedSize + sizeof(PageDelta);
 }
 
 [[nodiscard]] inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id

@@ -27,6 +27,31 @@ namespace calicodb
     return sanitized;
 }
 
+[[nodiscard]] static auto encode_logical_id(LogicalPageId id) -> std::string
+{
+    std::string out;
+    append_number(&out, id.table_id.value);
+    out += ',';
+    append_number(&out, id.page_id.value);
+    return out;
+}
+
+[[nodiscard]] static auto decode_logical_id(const Slice &in, LogicalPageId *out) -> Status
+{
+    Slice value {in};
+    if (!consume_decimal_number(&value, &out->table_id.value)) {
+        return Status::corruption("table id is corrupted");
+    }
+    if (value[0] != ',') {
+        return Status::corruption("logical id is missing separator");
+    }
+    value.advance();
+    if (!consume_decimal_number(&value, &out->page_id.value)) {
+        return Status::corruption("page id is corrupted");
+    }
+    return Status::ok();
+}
+
 auto DBImpl::open(const Options &options, const Slice &filename) -> Status
 {
     if (filename.is_empty()) {
@@ -385,7 +410,8 @@ auto DBImpl::do_commit() -> Status
     auto commit_lsn = wal->current_lsn();
     m_info_log->logv("commit requested at lsn %llu", commit_lsn.value);
 
-    save_state(std::move(root), commit_lsn);
+    save_state(root, commit_lsn);
+    pager->release(std::move(root));
     CDB_TRY(wal->flush());
 
     m_info_log->logv("commit successful");
@@ -400,7 +426,7 @@ auto DBImpl::ensure_consistency() -> Status
     return load_state();
 }
 
-auto DBImpl::save_state(Page root, Lsn commit_lsn) const -> void
+auto DBImpl::save_state(Page &root, Lsn commit_lsn) const -> void
 {
     CDB_EXPECT_TRUE(root.id().page_id.is_root());
     CDB_EXPECT_FALSE(commit_lsn.is_null());
@@ -416,7 +442,6 @@ auto DBImpl::save_state(Page root, Lsn commit_lsn) const -> void
     header.record_count = m_record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
     header.write(root.span(0, FileHeader::kSize).data());
-    pager->release(std::move(root));
 }
 
 auto DBImpl::load_state() -> Status
@@ -529,26 +554,25 @@ auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> 
 
     auto s = tree->get(name, &value);
     if (s.is_ok()) {
-        Slice slice {value};
-        if (!consume_decimal_number(&slice, &table_id.value)) {
-            return Status::corruption("root mapping is missing table identifier");
-        }
-        if (slice[0] != ',') {
-            return Status::corruption("root mapping is missing separator");
-        }
-        if (!consume_decimal_number(&slice, &root_id.value)) {
-            return Status::corruption("root mapping is missing root identifier");
-        }
+        LogicalPageId logical_id {Id::null(), Id::null()};
+        CDB_TRY(decode_logical_id(value, &logical_id));
+        table_id = logical_id.table_id;
+        root_id = logical_id.page_id;
     } else if (s.is_not_found()) {
         s = create_table(name, &table_id, &root_id);
     } else {
+        SET_STATUS(s);
         return s;
     }
 
     TableState *state;
-    CDB_TRY(open_table(table_id, root_id, &state));
-    *out = new TableImpl {table_id, *this, *state, m_status};
-    return Status::ok();
+    s = open_table(table_id, root_id, &state);
+    if (s.is_ok()) {
+        *out = new TableImpl {table_id, *this, *state, m_status};
+    } else {
+        SET_STATUS(s);
+    }
+    return s;
 }
 
 auto DBImpl::create_table(const Slice &name, Id *table_id, Id *root_id) -> Status
@@ -556,12 +580,7 @@ auto DBImpl::create_table(const Slice &name, Id *table_id, Id *root_id) -> Statu
     ++m_last_table_id.value;
     *table_id = m_last_table_id;
     CDB_TRY(Tree::create(*pager, m_last_table_id, m_freelist_head, root_id));
-
-    std::string value;
-    append_number(&value, table_id->value);
-    value += ',';
-    append_number(&value, root_id->value);
-    CDB_TRY(tree->put(name, number_to_string(root_id->value)));
+    CDB_TRY(tree->put(name, encode_logical_id(LogicalPageId {*table_id, *root_id})));
     return commit_table(Id::root(), Id::root(), *m_root);
 }
 
@@ -597,11 +616,17 @@ auto DBImpl::commit_table(Id table_id, Id root_id, TableState &state) -> Status
     auto tree_header = page.span(page_offset(page) + kPageHeaderSize, kTreeHeaderSize);
     put_u64(tree_header.data(), state.commit_lsn.value);
     if (root_id.is_root()) {
-        save_state(std::move(page), state.commit_lsn);
-    } else {
-        pager->release(std::move(page));
+        save_state(page, state.commit_lsn);
     }
 
+    write_page_lsn(page, wal->current_lsn());
+    const auto deltas = page.deltas();
+    CDB_EXPECT_EQ(deltas.size(), 1);
+
+    CDB_TRY(wal->log_commit(
+        table_id, root_id, page.view(0), deltas.front(), nullptr));
+
+    pager->discard(std::move(page));
     return wal->flush();
 }
 
@@ -617,31 +642,27 @@ auto DBImpl::close_table(Id root) -> void
     delete itr->second.tree;
     m_tables.erase(itr);
 }
-
+//
 //auto DBImpl::find_checkpoints(std::unordered_map<Id, Lsn, Id::Hash> *checkpoints) -> Status
 //{
-//    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*m_root_id->tree)};
+//    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*m_root->tree)};
 //    cursor->seek_first();
 //
 //    while (cursor->is_valid()) {
-//        Id root;
-//        Slice value {cursor->value()};
-//        if (!consume_decimal_number(&value, &root.value)) {
-//            return Status::corruption("root mapping is corrupted");
-//        }
-//        auto itr = checkpoints->find(root);
+//        auto logical_id = LogicalPageId::unknown_page(Id::root());
+//        CDB_TRY(decode_logical_id(cursor->value(), &logical_id));
+//        auto itr = checkpoints->find(logical_id.page_id);
 //        if (itr != end(*checkpoints)) {
 //            return Status::corruption("encountered duplicate root");
 //        }
-//        Page page;
-//        CDB_TRY(pager->acquire(root, page));
-//        const Lsn last_table_id {get_u64(page.data() + page_offset(page) + kPageHeaderSize)};
-//        checkpoints->insert(itr, {root, last_table_id});
+//
+//        Page page {logical_id};
+//        CDB_TRY(pager->acquire(page));
+//        const Lsn commit_lsn {get_u64(page.data() + page_offset(page) + kPageHeaderSize)};
+//        checkpoints->insert(itr, {logical_id.table_id, commit_lsn});
 //        cursor->next();
 //    }
-//    delete cursor;
 //}
-//
 //
 //static auto apply_undo(Page &page, const ImageDescriptor &image)
 //{
@@ -668,15 +689,15 @@ auto DBImpl::close_table(Id root) -> void
 //template <class Descriptor, class Callback>
 //static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
 //{
-//    Page page;
-//    CDB_TRY(pager.acquire(descriptor.page_id, page));
+//    Page page {LogicalPageId {descriptor.table_id, descriptor.page_id}};
+//    CDB_TRY(pager.acquire(page));
 //
 //    callback(page);
 //    pager.release(std::move(page));
 //    return Status::ok();
 //}
 //
-//auto DBImpl::recovery_phase_1() -> Status
+//auto DBImpl::recovery_phase_1(std::unordered_map<Id, LogRange, Id::Hash> ranges) -> Status
 //{
 //    auto &set = wal->m_set;
 //
@@ -686,8 +707,6 @@ auto DBImpl::close_table(Id root) -> void
 //
 //    std::unique_ptr<Reader> file;
 //    auto segment = set.first();
-//    auto last_table_id = *m_commit_lsn;
-//    auto commit_segment = segment;
 //    Lsn last_lsn;
 //
 //    const auto translate_status = [&segment, &set](auto s) {
@@ -705,20 +724,26 @@ auto DBImpl::close_table(Id root) -> void
 //        const auto decoded = decode_payload(payload);
 //        if (std::holds_alternative<DeltaDescriptor>(decoded)) {
 //            const auto deltas = std::get<DeltaDescriptor>(decoded);
+//            auto itr = ranges.find(deltas.table_id);
+//            if (itr == end(ranges)) {
+//                // We are not recovering this table right now.
+//                return Status::ok();
+//            }
 //            if (is_commit(deltas)) {
-//                last_table_id = deltas.lsn;
-//                commit_segment = segment;
+//                itr->second.commit_lsn = deltas.lsn;
+//            } else {
+//                itr->second.recent_lsn = deltas.lsn;
 //            }
 //            // WARNING: Applying these updates can cause the in-memory file header variables to be incorrect. This
 //            // must be fixed by the caller after this method returns.
-//            return with_page(*pager, deltas, [this, &deltas](auto &page) {
+//            return with_page(*m_pager, deltas, [this, &deltas](auto &page) {
 //                if (read_page_lsn(page) < deltas.lsn) {
-//                    pager->upgrade(page);
+//                    m_pager->upgrade(page);
 //                    apply_redo(page, deltas);
 //                }
 //            });
 //        } else if (std::holds_alternative<std::monostate>(decoded)) {
-//            CDB_TRY(translate_status(Status::corruption("wal is corrupted")));
+//            CDB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
 //            return Status::not_found("finished");
 //        }
 //        return Status::ok();
@@ -728,9 +753,10 @@ auto DBImpl::close_table(Id root) -> void
 //        const auto decoded = decode_payload(payload);
 //        if (std::holds_alternative<ImageDescriptor>(decoded)) {
 //            const auto image = std::get<ImageDescriptor>(decoded);
+//            if (const auto itr = ranges.find(image.table_id); itr == end(ranges)) {
+//                return Status::ok();
+//            }
 //            return with_page(*pager, image, [this, &image](auto &page) {
-//                // TODO: Lookup the table using the table ID in the record payload. Apply the full image if its
-//                //       LSN is greater than the commit LSN for the table.
 //                if (image.lsn < *m_commit_lsn) {
 //                    return;
 //                }
@@ -741,7 +767,7 @@ auto DBImpl::close_table(Id root) -> void
 //                }
 //            });
 //        } else if (std::holds_alternative<std::monostate>(decoded)) {
-//            CDB_TRY(translate_status(Status::corruption("wal is corrupted")));
+//            CDB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
 //            return Status::not_found("finished");
 //        }
 //        return Status::ok();
@@ -758,14 +784,13 @@ auto DBImpl::close_table(Id root) -> void
 //            if (s.is_not_found()) {
 //                break;
 //            } else if (!s.is_ok()) {
-//                CDB_TRY(translate_status(s));
+//                CDB_TRY(translate_status(s, last_lsn));
 //                return Status::ok();
 //            }
 //
-//            WalPayloadOut payload {buffer};
-//            last_lsn = payload.lsn();
+//            last_lsn = extract_payload_lsn(buffer);
 //
-//            s = action(payload);
+//            s = action(buffer);
 //            if (s.is_not_found()) {
 //                break;
 //            } else if (!s.is_ok()) {
@@ -774,6 +799,16 @@ auto DBImpl::close_table(Id root) -> void
 //        }
 //        return Status::ok();
 //    };
+//
+//    std::unordered_map<Id, Lsn, Id::Hash> checkpoints;
+//    CDB_TRY(find_checkpoints(&checkpoints));
+//
+//    // If ranges is empty, run recovery for all tables.
+//    if (ranges.empty()) {
+//        for (const auto &checkpoint: checkpoints) {
+//            ranges.insert({checkpoint.first, {}});
+//        }
+//    }
 //
 //    /* Roll forward, applying missing updates until we reach the end. The final
 //     * segment may contain a partial/corrupted record.

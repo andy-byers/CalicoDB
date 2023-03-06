@@ -247,7 +247,8 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
     // during this transaction, then we already have one written.
     if (*m_is_running && lsn <= *m_commit_lsn) {
         const auto image = page.view(0, watch_size);
-        auto s = m_wal->log_image(Id::null(), page.id().page_id, image, nullptr);
+        const auto [table_id, page_id] = page.id();
+        auto s = m_wal->log_image(table_id, page_id, image, nullptr);
 
         if (s.is_ok()) {
             auto limit = m_recovery_lsn;
@@ -319,6 +320,12 @@ auto Pager::upgrade(Page &page, int important) -> void
     watch_page(page, itr->value, important);
 }
 
+auto Pager::discard(Page page) -> void
+{
+    page.m_write = false;
+    release(std::move(page));
+}
+
 auto Pager::release(Page page) -> void
 {
     CDB_EXPECT_GT(m_frames.ref_sum(), 0);
@@ -327,7 +334,9 @@ auto Pager::release(Page page) -> void
 
     if (page.is_writable() && *m_is_running) {
         write_page_lsn(page, m_wal->current_lsn());
-        auto s = m_wal->log_delta(Id::null(), page.id().page_id, page.view(0), page.deltas(), nullptr);
+        const auto [table_id, page_id] = page.id();
+        auto s = m_wal->log_delta(
+            table_id, page_id, page.view(0), page.deltas(), nullptr);
         if (!s.is_ok()) {
             SET_STATUS(s);
         }

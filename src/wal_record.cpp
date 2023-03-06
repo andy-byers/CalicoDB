@@ -78,6 +78,58 @@ auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Sta
     return Status::ok();
 }
 
+static auto decode_vacuum_payload(const Slice &in) -> VacuumDescriptor
+{
+    VacuumDescriptor info;
+    auto data = in.data();
+
+    // Payload type (1 B)
+    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kVacuumPayload);
+    ++data;
+
+    // LSN (8 B)
+    info.lsn.value = get_u64(data);
+    data += sizeof(Lsn);
+
+    // Start flag (1 B)
+    info.is_start = *data;
+    return info;
+}
+
+static auto decode_commit_payload(const Slice &in) -> CommitDescriptor
+{
+    CommitDescriptor info;
+    auto data = in.data();
+
+    // Payload type (1 B)
+    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kCommitPayload);
+    ++data;
+
+    // LSN (8 B)
+    info.lsn.value = get_u64(data);
+    data += sizeof(Lsn);
+
+    // Table ID (8 B)
+    info.table_id.value = get_u64(data);
+    data += sizeof(Id);
+
+    // Page ID (8 B)
+    info.page_id.value = get_u64(data);
+    data += sizeof(Id);
+
+    // Delta offset (2 B)
+    info.delta.offset = get_u16(data);
+    data += sizeof(std::uint16_t);
+
+    // Delta size (2 B)
+    const auto size = get_u16(data);
+    data += sizeof(std::uint16_t);
+
+    // Delta (N B)
+    info.delta.data = Slice {data, size};
+    return info;
+}
+
 static auto decode_deltas_payload(const Slice &in) -> DeltaDescriptor
 {
     DeltaDescriptor info;
@@ -140,7 +192,7 @@ static auto decode_full_image_payload(const Slice &in) -> ImageDescriptor
     info.page_id.value = get_u64(data);
 
     // Image (n B)
-    info.image = in.range(ImageDescriptor::kHeaderSize);
+    info.image = in.range(ImageDescriptor::kFixedSize);
     return info;
 }
 
@@ -151,9 +203,61 @@ auto decode_payload(const Slice &in) -> PayloadDescriptor
         return decode_deltas_payload(in);
     case WalPayloadType::kImagePayload:
         return decode_full_image_payload(in);
+    case WalPayloadType::kCommitPayload:
+        return decode_commit_payload(in);
+    case WalPayloadType::kVacuumPayload:
+        return decode_vacuum_payload(in);
     default:
         return std::monostate {};
     }
+}
+
+auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice
+{
+    auto saved = buffer;
+
+    // Payload type (1 B)
+    *buffer++ = WalPayloadType::kVacuumPayload;
+
+    // LSN (8 B)
+    put_u64(buffer, lsn.value);
+    buffer += sizeof(Lsn);
+
+    // Start flag (1 B)
+    *buffer = static_cast<char>(is_start);
+    return Slice {saved, VacuumDescriptor::kFixedSize};
+}
+
+auto encode_commit_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const PageDelta &delta, char *buffer) -> Slice
+{
+    auto saved = buffer;
+
+    // Payload type (1 B)
+    *buffer++ = WalPayloadType::kCommitPayload;
+
+    // LSN (8 B)
+    put_u64(buffer, lsn.value);
+    buffer += sizeof(Lsn);
+
+    // Table ID (8 B)
+    put_u64(buffer, table_id.value);
+    buffer += sizeof(Id);
+
+    // Page ID (8 B)
+    put_u64(buffer, page_id.value);
+    buffer += sizeof(Id);
+
+    // Delta offset (2 B)
+    put_u16(buffer, static_cast<std::uint16_t>(delta.offset));
+    buffer += sizeof(std::uint16_t);
+
+    // Delta size (2 B)
+    put_u16(buffer, static_cast<std::uint16_t>(delta.size));
+    buffer += sizeof(std::uint16_t);
+
+    // Delta (N B)
+    std::memcpy(buffer, image.data() + delta.offset, delta.size);
+    return Slice {saved, CommitDescriptor::kFixedSize + delta.size};
 }
 
 auto encode_deltas_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice
@@ -191,7 +295,7 @@ auto encode_deltas_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image,
         std::memcpy(buffer + n, image.data() + offset, size);
         n += size;
     }
-    return Slice {saved, DeltaDescriptor::kHeaderSize + n};
+    return Slice {saved, DeltaDescriptor::kFixedSize + n};
 }
 
 auto encode_image_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, char *buffer) -> Slice
@@ -215,7 +319,7 @@ auto encode_image_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, 
 
     // Image (N B)
     std::memcpy(buffer, image.data(), image.size());
-    return Slice {saved, ImageDescriptor::kHeaderSize + image.size()};
+    return Slice {saved, ImageDescriptor::kFixedSize + image.size()};
 }
 
 auto extract_payload_lsn(const Slice &in) -> Lsn

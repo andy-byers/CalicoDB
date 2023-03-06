@@ -4,9 +4,123 @@
 #include "calicodb/calicodb.h"
 #include "tools.h"
 #include "unit_tests.h"
+#include "wal_reader.h"
 
 namespace calicodb
 {
+
+class WalPagerInteractionTests
+    : public InMemoryTest,
+      public testing::Test
+{
+public:
+    static constexpr auto kFilename = "./test";
+    static constexpr auto kWalPrefix = "./wal-";
+    static constexpr auto kPageSize = kMinPageSize;
+    static constexpr  std::size_t kFrameCount {16};
+
+    WalPagerInteractionTests()
+        : scratch(kPageSize, '\x00'),
+          log_scratch(wal_scratch_size(kPageSize), '\x00')
+    {
+    }
+
+    ~WalPagerInteractionTests() override
+    {
+        delete wal;
+    }
+
+    auto SetUp() -> void override
+    {
+        const WriteAheadLog::Parameters wal_param {
+            kWalPrefix,
+            env.get(),
+            kPageSize};
+        ASSERT_OK(WriteAheadLog::open(wal_param, &wal));
+
+        const Pager::Parameters pager_param {
+            kFilename,
+            env.get(),
+            &log_scratch,
+            wal,
+            nullptr,
+            &status,
+            &commit_lsn,
+            &is_running,
+            kFrameCount,
+            kPageSize,
+        };
+        ASSERT_OK(Pager::open(pager_param, &pager));
+        ASSERT_OK(wal->start_writing());
+
+        tail_buffer.resize(wal_block_size(kPageSize));
+        payload_buffer.resize(wal_scratch_size(kPageSize));
+    }
+
+    auto read_segment(Id segment_id, std::vector<PayloadDescriptor> *out) -> Status
+    {
+        Reader *temp;
+        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), &temp));
+
+        std::unique_ptr<Reader> file {temp};
+        WalReader reader {*file, tail_buffer};
+
+        for (; ; ) {
+            Span payload {payload_buffer};
+            auto s = reader.read(payload);
+
+            if (s.is_ok()) {
+                out->emplace_back(decode_payload(payload));
+            } else if (s.is_not_found()) {
+                break;
+            } else {
+                return s;
+            }
+        }
+        return Status::ok();
+    }
+
+    std::string log_scratch;
+    Status status;
+    bool is_running {true};
+    Lsn commit_lsn;
+    std::string scratch;
+    std::string collect_scratch;
+    std::string payload_buffer;
+    std::string tail_buffer;
+    Pager *pager;
+    WriteAheadLog *wal;
+    tools::RandomGenerator random {1'024 * 1'024 * 8};
+};
+
+TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
+{
+    Page page_1 {LogicalPageId {Id {12345}, Id {1}}};
+    ASSERT_OK(pager->allocate(page_1));
+    std::memcpy(page_1.span(0, 13).data(), "Hello, world!", 13);
+    pager->release(std::move(page_1));
+
+    Page page_2 {LogicalPageId {Id {67890}, Id {2}}};
+    ASSERT_OK(pager->allocate(page_2));
+    std::memcpy(page_2.span(0, 13).data(), "Hello, world!", 13);
+    pager->release(std::move(page_2));
+
+    ASSERT_OK(wal->flush());
+
+    std::vector<PayloadDescriptor> payloads;
+    ASSERT_OK(read_segment(Id {1}, &payloads));
+    ASSERT_EQ(payloads.size(), 4);
+
+    ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payloads[0]));
+    ASSERT_EQ(std::get<ImageDescriptor>(payloads[0]).table_id, Id {12345});
+    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payloads[1]));
+    ASSERT_EQ(std::get<ImageDescriptor>(payloads[1]).table_id, Id {12345});
+
+    ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payloads[2]));
+    ASSERT_EQ(std::get<ImageDescriptor>(payloads[2]).table_id, Id {67890});
+    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payloads[3]));
+    ASSERT_EQ(std::get<ImageDescriptor>(payloads[3]).table_id, Id {67890});
+}
 
 class RecoveryTestHarness
 {
