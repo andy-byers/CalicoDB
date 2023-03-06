@@ -12,6 +12,7 @@ class WriteAheadLog
 {
 public:
     friend class Recovery;
+    friend class DBImpl;
 
     static constexpr std::size_t kSegmentCutoff {32};
 
@@ -30,7 +31,8 @@ public:
     [[nodiscard]] virtual auto start_writing() -> Status;
     [[nodiscard]] virtual auto flush() -> Status;
     [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
-    [[nodiscard]] virtual auto log(WalPayloadIn payload) -> Status;
+    [[nodiscard]] virtual auto log_delta(Id tid, Id pid, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status;
+    [[nodiscard]] virtual auto log_image(Id tid, Id pid, const Slice &image, Lsn *out) -> Status;
 
     [[nodiscard]] virtual auto bytes_written() const -> std::size_t
     {
@@ -41,6 +43,7 @@ private:
     explicit WriteAheadLog(const Parameters &param);
     [[nodiscard]] auto close_writer() -> Status;
     [[nodiscard]] auto open_writer() -> Status;
+    [[nodiscard]] auto log(const Slice &payload) -> Status;
 
     mutable Lsn m_flushed_lsn;
     Lsn m_last_lsn;
@@ -48,7 +51,8 @@ private:
     std::string m_prefix;
 
     Env *m_env {};
-    std::string m_tail;
+    std::string m_data_buffer;
+    std::string m_tail_buffer;
     std::size_t m_bytes_written {};
 
     WalWriter *m_writer {};

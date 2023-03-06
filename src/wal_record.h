@@ -12,46 +12,9 @@
 namespace calicodb
 {
 
-static constexpr std::size_t kWalBlockScale {4};
-
-[[nodiscard]] inline constexpr auto wal_block_size(std::size_t page_size) -> std::size_t
-{
-    return std::min(kMaxPageSize, page_size * kWalBlockScale);
-}
-
-[[nodiscard]] inline constexpr auto wal_scratch_size(std::size_t page_size) -> std::size_t
-{
-    const std::size_t kDeltaPayloadHeaderSize {11};
-    return page_size + kDeltaPayloadHeaderSize + sizeof(PageDelta);
-}
-
-[[nodiscard]] inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
-{
-    if (path.size() <= prefix.size()) {
-        return Id::null();
-    }
-    auto name = path.range(prefix.size());
-
-    // Don't call std::stoul() if it's going to fail.
-    const auto is_valid = std::all_of(name.data(), name.data() + name.size(), [](auto c) {
-        return std::isdigit(c);
-    });
-
-    if (!is_valid) {
-        return Id::null();
-    }
-
-    return {std::stoull(name.to_string())};
-}
-
-[[nodiscard]] inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
-{
-    return prefix.to_string() + std::to_string(id.value);
-}
-
 enum WalPayloadType : char {
     kDeltaPayload = '\xD0',
-    kFullImagePayload = '\xF0',
+    kImagePayload = '\xF0',
 };
 
 enum WalRecordType : char {
@@ -62,8 +25,13 @@ enum WalRecordType : char {
     kLastRecord = '\xD1',
 };
 
-/*
- * Header fields associated with each WAL record. Based off of the WAL protocol found in RocksDB.
+/* WAL record format (based off RocksDB):
+ *
+ *      Offset  Size  Field
+ *     ---------------------------
+ *      0       1     Type
+ *      1       2     Size
+ *      3       4     CRC
  */
 struct WalRecordHeader {
     static constexpr std::size_t kSize {7};
@@ -93,77 +61,64 @@ auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto split_record(WalRecordHeader &lhs, const Slice &payload, std::size_t available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 
+/* Delta payload format:
+ *
+ *      Offset  Size  Field
+ *     ---------------------------
+ *      0       1     Flags
+ *      1       8     LSN
+ *      9       8     Table ID
+ *      17      8     Page ID
+ *      25      2     Delta count
+ *      27      n     Delta content
+ *
+ * Each delta in the delta content area is an (offset, size, data) triplet. "offset" describes
+ * where on the page the change took place, and "size" is the number of bytes in "data". Both
+ * "offset" and "size" are 16-bit unsigned integers.
+ */
 struct DeltaDescriptor {
+    static constexpr std::size_t kHeaderSize {27};
+
     struct Delta {
         std::size_t offset {};
         Slice data {};
     };
 
+    Id tid;
     Id pid;
     Lsn lsn;
     std::vector<Delta> deltas;
 };
 
-struct FullImageDescriptor {
+/* Image payload header:
+ *
+ *      Offset  Size  Field
+ *     ---------------------------
+ *      0       1     Flags
+ *      1       8     LSN
+ *      9       8     Table ID
+ *      17      8     Page ID
+ *      25      n     Image
+ *
+ * The image can be any size less than or equal to the database page size. Its size is not
+ * stored explicitly in the payload: it is known from the total size of the record fragments
+ * it is composed from.
+ */
+struct ImageDescriptor {
+    static constexpr std::size_t kHeaderSize {25};
+
+    Id tid;
     Id pid;
     Lsn lsn;
     Slice image;
 };
 
-using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, FullImageDescriptor>;
+using PayloadDescriptor = std::variant<std::monostate, DeltaDescriptor, ImageDescriptor>;
 
-class WalPayloadIn
-{
-public:
-    friend class WalWriter;
-
-    WalPayloadIn(Lsn lsn, Span buffer)
-        : m_buffer {buffer}
-    {
-        put_u64(buffer, lsn.value);
-    }
-
-    [[nodiscard]] auto lsn() const -> Lsn
-    {
-        return {get_u64(m_buffer)};
-    }
-
-    [[nodiscard]] auto data() const -> Slice
-    {
-        return m_buffer.range(sizeof(Id));
-    }
-
-private:
-    Slice m_buffer;
-};
-
-class WalPayloadOut
-{
-public:
-    WalPayloadOut() = default;
-
-    explicit WalPayloadOut(const Slice &payload)
-        : m_payload {payload}
-    {
-    }
-
-    [[nodiscard]] auto lsn() const -> Lsn
-    {
-        return {get_u64(m_payload)};
-    }
-
-    [[nodiscard]] auto data() -> Slice
-    {
-        return m_payload.range(sizeof(Lsn));
-    }
-
-private:
-    Slice m_payload;
-};
-
-[[nodiscard]] auto decode_payload(WalPayloadOut in) -> PayloadDescriptor;
-[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, Span buffer) -> WalPayloadIn;
-[[nodiscard]] auto encode_full_image_payload(Lsn lsn, Id page_id, const Slice &image, Span buffer) -> WalPayloadIn;
+[[nodiscard]] auto extract_payload_lsn(const Slice &in) -> Lsn;
+[[nodiscard]] auto decode_payload(const Slice &in) -> PayloadDescriptor;
+[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice;
+[[nodiscard]] auto encode_image_payload(Lsn lsn, Id table_id, Id page_id, const Slice &image, char *buffer) -> Slice;
 
 /*
  * Stores a collection of WAL segment descriptors and caches their first LSNs.
@@ -252,6 +207,42 @@ public:
 private:
     std::map<Id, Lsn> m_segments;
 };
+
+static constexpr std::size_t kWalBlockScale {4};
+
+[[nodiscard]] inline constexpr auto wal_block_size(std::size_t page_size) -> std::size_t
+{
+    return std::min(kMaxPageSize, page_size * kWalBlockScale);
+}
+
+[[nodiscard]] inline constexpr auto wal_scratch_size(std::size_t page_size) -> std::size_t
+{
+    return page_size + DeltaDescriptor::kHeaderSize + sizeof(PageDelta);
+}
+
+[[nodiscard]] inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
+{
+    if (path.size() <= prefix.size()) {
+        return Id::null();
+    }
+    auto name = path.range(prefix.size());
+
+    // Don't call std::stoul() if it's going to fail.
+    const auto is_valid = std::all_of(name.data(), name.data() + name.size(), [](auto c) {
+        return std::isdigit(c);
+    });
+
+    if (!is_valid) {
+        return Id::null();
+    }
+
+    return {std::stoull(name.to_string())};
+}
+
+[[nodiscard]] inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
+{
+    return prefix.to_string() + std::to_string(id.value);
+}
 
 [[nodiscard]] inline auto read_first_lsn(Env &env, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
 {

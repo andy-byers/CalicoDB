@@ -11,7 +11,9 @@ class Cursor;
 class Env;
 class InfoLogger;
 class Status;
+class Table;
 struct Options;
+struct TableOptions;
 
 class DB
 {
@@ -22,9 +24,12 @@ public:
 
     virtual ~DB() = default;
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
-    [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
+    [[nodiscard]] virtual auto new_table(const TableOptions &options, const Slice &name, Table **out) -> Status = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
+
+    // TODO: Everything below here gets moved to the table API.
+    [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
     [[nodiscard]] virtual auto commit() -> Status = 0;
     [[nodiscard]] virtual auto get(const Slice &key, std::string *value) const -> Status = 0;
     [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;

@@ -337,7 +337,7 @@ public:
     NodeTests()
         : node_scratch(kPageSize, '\0'),
           cell_scratch(kPageSize, '\0'),
-          freelist {*pager, &freelist_head}
+          freelist {*pager, freelist_head}
     {}
 
     [[nodiscard]] auto get_node(bool is_external) -> Node
@@ -552,8 +552,8 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(Tree::create(*pager, &freelist_head));
-        tree = std::make_unique<Tree>(*pager, &freelist_head);
+        ASSERT_OK(Tree::create(*pager, freelist_head));
+        tree = std::make_unique<Tree>(*pager, Id::root(), freelist_head);
     }
 
     [[nodiscard]] auto make_long_key(std::size_t value) const
@@ -1119,7 +1119,7 @@ public:
     auto SetUp() -> void override
     {
         TreeTests::SetUp();
-        freelist = std::make_unique<Freelist>(*pager, &freelist_head);
+        freelist = std::make_unique<Freelist>(*pager, freelist_head);
         cell_scratch.resize(kPageSize);
         node_scratch.resize(kPageSize);
     }
@@ -1716,5 +1716,117 @@ INSTANTIATE_TEST_SUITE_P(
         TreeTestParameters {kMinPageSize * 2},
         TreeTestParameters {kMaxPageSize / 2},
         TreeTestParameters {kMaxPageSize}));
+
+class MultiTreeTests : public TreeTests
+{
+public:
+    MultiTreeTests()
+        : payload_values(kInitialRecordCount)
+    {
+        for (auto &value: payload_values) {
+            value = random.Generate(kPageSize * 2).to_string();
+        }
+    }
+
+    auto SetUp() -> void override
+    {
+        TreeTests::SetUp();
+    }
+
+    auto create_tree()
+    {
+        Id root;
+        EXPECT_OK(Tree::create(*pager, freelist_head, &root));
+        multi_tree.emplace_back(std::make_unique<Tree>(*pager, root, freelist_head));
+        return multi_tree.size() - 1;
+    }
+
+    auto fill_tree(std::size_t tid)
+    {
+        for (std::size_t i {}; i < kInitialRecordCount; ++i) {
+            const auto value = payload_values[(i + tid) % payload_values.size()];
+            ASSERT_OK(multi_tree[tid]->put(make_long_key(i), value));
+        }
+    }
+
+    auto check_tree(std::size_t tid)
+    {
+        std::string value;
+        for (std::size_t i {}; i < kInitialRecordCount; ++i) {
+            ASSERT_OK(multi_tree[tid]->get(make_long_key(i), &value));
+            ASSERT_EQ(value, payload_values[(i + tid) % payload_values.size()]);
+        }
+    }
+
+    auto clear_tree(std::size_t tid)
+    {
+        for (std::size_t i {}; i < kInitialRecordCount; ++i) {
+            ASSERT_OK(multi_tree[tid]->erase(make_long_key(i)));
+        }
+    }
+
+    std::vector<std::unique_ptr<Tree>> multi_tree;
+    std::vector<std::string> payload_values;
+};
+
+TEST_P(MultiTreeTests, CreateAdditionalTrees)
+{
+    create_tree();
+    create_tree();
+    create_tree();
+}
+
+TEST_P(MultiTreeTests, DuplicateKeysAreAllowedBetweenTrees)
+{
+    const auto tid_1 = create_tree();
+    const auto tid_2 = create_tree();
+
+    auto &hello_tree = multi_tree[tid_1];
+    auto &world_tree = multi_tree[tid_2];
+    ASSERT_OK(hello_tree->put("same_key", "hello"));
+    ASSERT_OK(world_tree->put("same_key", "world"));
+
+    std::string value;
+    ASSERT_OK(hello_tree->get("same_key", &value));
+    ASSERT_EQ(value, "hello");
+    ASSERT_OK(world_tree->get("same_key", &value));
+    ASSERT_EQ(value, "world");
+}
+
+TEST_P(MultiTreeTests, NonRootTreeSplitsAndMerges)
+{
+    const auto tid = create_tree();
+    fill_tree(tid);
+    clear_tree(tid);
+}
+
+TEST_P(MultiTreeTests, MultipleSplitsAndMerges_1)
+{
+    std::vector<std::size_t> tids(10);
+    for (auto &tid: tids) {
+        tid = create_tree();
+    }
+    for (const auto &tid: tids) {
+        fill_tree(tid);
+    }
+    for (const auto &tid: tids) {
+        check_tree(tid);
+    }
+    for (const auto &tid: tids) {
+        clear_tree(tid);
+    }
+}
+
+TEST_P(MultiTreeTests, MultipleSplitsAndMerges_2)
+{
+    for (std::size_t i {}; i < 10; ++i) {
+        const auto tid = create_tree();
+        fill_tree(tid);
+        check_tree(tid);
+        clear_tree(tid);
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(MultiTreeTests, MultiTreeTests, ::testing::Values(TreeTestParameters {kMinPageSize}));
 
 } // namespace calicodb

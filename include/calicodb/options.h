@@ -18,6 +18,10 @@ struct Options {
     bool error_if_exists {};
 };
 
+struct TableOptions {
+
+};
+
 } // namespace calicodb
 
 #endif // CALICODB_OPTIONS_H

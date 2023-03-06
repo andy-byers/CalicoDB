@@ -5,30 +5,30 @@
 namespace calicodb
 {
 
-auto append_number(std::string &out, std::size_t value) -> void
+auto append_number(std::string *out, std::size_t value) -> void
 {
     char buffer[30];
     std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(value));
-    out.append(buffer);
+    out->append(buffer);
 }
 
-auto append_double(std::string &out, double value) -> void
+auto append_double(std::string *out, double value) -> void
 {
     char buffer[30];
     std::snprintf(buffer, sizeof(buffer), "%g", value);
-    out.append(buffer);
+    out->append(buffer);
 }
 
-auto append_escaped_string(std::string &out, const Slice &value) -> void
+auto append_escaped_string(std::string *out, const Slice &value) -> void
 {
     for (std::size_t i {}; i < value.size(); ++i) {
         const auto chr = value[i];
         if (chr >= ' ' && chr <= '~') {
-            out.push_back(chr);
+            out->push_back(chr);
         } else {
             char buffer[10];
             std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
-            out.append(buffer);
+            out->append(buffer);
         }
     }
 }
@@ -36,26 +36,26 @@ auto append_escaped_string(std::string &out, const Slice &value) -> void
 auto number_to_string(std::size_t value) -> std::string
 {
     std::string out;
-    append_number(out, value);
+    append_number(&out, value);
     return out;
 }
 
 auto double_to_string(double value) -> std::string
 {
     std::string out;
-    append_double(out, value);
+    append_double(&out, value);
     return out;
 }
 
 auto escape_string(const Slice &value) -> std::string
 {
     std::string out;
-    append_escaped_string(out, value);
+    append_escaped_string(&out, value);
     return out;
 }
 
 // Modified from LevelDB.
-auto consume_decimal_number(Slice &in, std::uint64_t &val) -> bool
+auto consume_decimal_number(Slice *in, std::uint64_t *val) -> bool
 {
     // Constants that will be optimized away.
     static constexpr const std::uint64_t kMaxUint64 = std::numeric_limits<std::uint64_t>::max();
@@ -64,9 +64,9 @@ auto consume_decimal_number(Slice &in, std::uint64_t &val) -> bool
     std::uint64_t value {};
 
     // reinterpret_cast-ing from char* to uint8_t* to avoid signedness.
-    const auto *start = reinterpret_cast<const std::uint8_t*>(in.data());
+    const auto *start = reinterpret_cast<const std::uint8_t*>(in->data());
 
-    const auto *end = start + in.size();
+    const auto *end = start + in->size();
     const auto *current = start;
     for (; current != end; ++current) {
         const auto ch = *current;
@@ -81,10 +81,10 @@ auto consume_decimal_number(Slice &in, std::uint64_t &val) -> bool
         value = (value * 10) + (ch - '0');
     }
 
-    val = value;
+    *val = value;
     CDB_EXPECT_GE(current, start);
     const auto digits_consumed = static_cast<std::size_t>(current - start);
-    in.advance(digits_consumed);
+    in->advance(digits_consumed);
     return digits_consumed != 0;
 }
 

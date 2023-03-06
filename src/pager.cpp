@@ -46,7 +46,7 @@ Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
     : m_path {param.path},
       m_frames {file, std::move(buffer), param.page_size, param.frame_count},
       m_commit_lsn {param.commit_lsn},
-      m_in_txn {param.in_txn},
+      m_is_running {param.is_running},
       m_status {param.status},
       m_scratch {param.scratch},
       m_wal {param.wal},
@@ -194,7 +194,7 @@ auto Pager::make_frame_available() -> bool
         if (!entry.token) {
             return true;
         }
-        if (*m_in_txn) {
+        if (*m_is_running) {
             return frame.lsn() <= m_wal->flushed_lsn();
         }
         return true;
@@ -245,11 +245,9 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
 
     // We only write a full image if the WAL does not already contain one for this page. If the page was modified
     // during this transaction, then we already have one written.
-    if (*m_in_txn && lsn <= *m_commit_lsn) {
-        const auto next_lsn = m_wal->current_lsn();
+    if (*m_is_running && lsn <= *m_commit_lsn) {
         const auto image = page.view(0, watch_size);
-        auto s = m_wal->log(encode_full_image_payload(
-            next_lsn, page.id(), image, *m_scratch));
+        auto s = m_wal->log_image(Id::null(), page.id(), image, nullptr);
 
         if (s.is_ok()) {
             auto limit = m_recovery_lsn;
@@ -324,12 +322,9 @@ auto Pager::release(Page page) -> void
     CDB_EXPECT_TRUE(m_cache.contains(page.id()));
     auto [index, token] = m_cache.get(page.id())->value;
 
-    if (page.is_writable() && *m_in_txn) {
-        const auto next_lsn = m_wal->current_lsn();
-        write_page_lsn(page, next_lsn);
-        auto s = m_wal->log(encode_deltas_payload(
-            next_lsn, page.id(), page.view(0),
-            page.deltas(), *m_scratch));
+    if (page.is_writable() && *m_is_running) {
+        write_page_lsn(page, m_wal->current_lsn());
+        auto s = m_wal->log_delta(Id::null(), page.id(), page.view(0), page.deltas(), nullptr);
         if (!s.is_ok()) {
             SET_STATUS(s);
         }

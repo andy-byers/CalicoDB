@@ -694,8 +694,8 @@ TEST_F(InterceptorTests, RespectsSyscallType)
 TEST(LoggingTests, StringifiesNumbers)
 {
     auto message = number_to_string(123);
-    append_number(message, 4);
-    append_number(message, 56);
+    append_number(&message, 4);
+    append_number(&message, 56);
     ASSERT_EQ(message, "123456");
 }
 
@@ -713,8 +713,8 @@ TEST(LoggingTests, StringifiesMaximumNumber)
 TEST(LoggingTests, EscapesStrings)
 {
     auto message = escape_string("\x01\x02\x03");
-    append_escaped_string(message, "\x04");
-    append_escaped_string(message, "\x05\x06");
+    append_escaped_string(&message, "\x04");
+    append_escaped_string(&message, "\x05\x06");
     ASSERT_EQ(message, "\\x01\\x02\\x03\\x04\\x05\\x06");
 }
 

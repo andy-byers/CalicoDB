@@ -29,7 +29,7 @@ public:
         InfoLogger *info_log {};
         Status *status {};
         Lsn *commit_lsn {};
-        bool *in_txn {};
+        bool *is_running {};
         std::size_t frame_count {};
         std::size_t page_size {};
     };
@@ -66,7 +66,7 @@ private:
     PageCache m_cache;
     Lsn m_recovery_lsn;
     Lsn *m_commit_lsn {};
-    bool *m_in_txn {};
+    bool *m_is_running {};
     Status *m_status {};
     std::string *m_scratch {};
     WriteAheadLog *m_wal {};

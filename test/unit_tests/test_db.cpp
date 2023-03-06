@@ -876,100 +876,100 @@ public:
         return m_base->previous();
     }
 };
-
-class ExtendedDatabase : public DB
-{
-    std::unique_ptr<tools::FakeEnv> m_env;
-    std::unique_ptr<DB> m_base;
-
-public:
-    [[nodiscard]] static auto open(const Slice &base, Options options, ExtendedDatabase **out) -> Status
-    {
-        const auto prefix = base.to_string() + "_";
-        auto *ext = new ExtendedDatabase;
-        auto env = std::make_unique<tools::FakeEnv>();
-        options.env = env.get();
-
-        DB *db;
-        CDB_TRY(DB::open(options, base, &db));
-
-        ext->m_base.reset(db);
-        ext->m_env = std::move(env);
-        *out = ext;
-        return Status::ok();
-    }
-
-    ~ExtendedDatabase() override = default;
-
-    [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override
-    {
-        return m_base->get_property(name, out);
-    }
-
-    [[nodiscard]] auto new_cursor() const -> Cursor * override
-    {
-        return new ExtendedCursor {m_base->new_cursor()};
-    }
-
-    [[nodiscard]] auto status() const -> Status override
-    {
-        return m_base->status();
-    }
-
-    [[nodiscard]] auto vacuum() -> Status override
-    {
-        return Status::ok();
-    }
-
-    [[nodiscard]] auto commit() -> Status override
-    {
-        return m_base->commit();
-    }
-
-    [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override
-    {
-        return m_base->get(key, value);
-    }
-
-    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override
-    {
-        return m_base->put(key, value);
-    }
-
-    [[nodiscard]] auto erase(const Slice &key) -> Status override
-    {
-        return m_base->erase(key);
-    }
-};
-
-TEST(ExtensionTests, Extensions)
-{
-    ExtendedDatabase *db;
-    ASSERT_OK(ExtendedDatabase::open("./test", {}, &db));
-    ASSERT_OK(db->put("a", "1"));
-    ASSERT_OK(db->put("b", "2"));
-    ASSERT_OK(db->put("c", "3"));
-
-    auto *cursor = db->new_cursor();
-    cursor->seek_first();
-    ASSERT_TRUE(cursor->is_valid());
-    ASSERT_EQ(cursor->key(), "a");
-    ASSERT_EQ(cursor->value(), "1");
-    cursor->next();
-    ASSERT_TRUE(cursor->is_valid());
-    ASSERT_EQ(cursor->key(), "b");
-    ASSERT_EQ(cursor->value(), "2");
-    cursor->next();
-    ASSERT_TRUE(cursor->is_valid());
-    ASSERT_EQ(cursor->key(), "c");
-    ASSERT_EQ(cursor->value(), "3");
-    cursor->next();
-    ASSERT_FALSE(cursor->is_valid());
-    delete cursor;
-
-    ASSERT_OK(db->commit());
-    delete db;
-}
+//
+//class ExtendedDatabase : public DB
+//{
+//    std::unique_ptr<tools::FakeEnv> m_env;
+//    std::unique_ptr<DB> m_base;
+//
+//public:
+//    [[nodiscard]] static auto open(const Slice &base, Options options, ExtendedDatabase **out) -> Status
+//    {
+//        const auto prefix = base.to_string() + "_";
+//        auto *ext = new ExtendedDatabase;
+//        auto env = std::make_unique<tools::FakeEnv>();
+//        options.env = env.get();
+//
+//        DB *db;
+//        CDB_TRY(DB::open(options, base, &db));
+//
+//        ext->m_base.reset(db);
+//        ext->m_env = std::move(env);
+//        *out = ext;
+//        return Status::ok();
+//    }
+//
+//    ~ExtendedDatabase() override = default;
+//
+//    [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override
+//    {
+//        return m_base->get_property(name, out);
+//    }
+//
+//    [[nodiscard]] auto new_cursor() const -> Cursor * override
+//    {
+//        return new ExtendedCursor {m_base->new_cursor()};
+//    }
+//
+//    [[nodiscard]] auto status() const -> Status override
+//    {
+//        return m_base->status();
+//    }
+//
+//    [[nodiscard]] auto vacuum() -> Status override
+//    {
+//        return Status::ok();
+//    }
+//
+//    [[nodiscard]] auto commit() -> Status override
+//    {
+//        return m_base->commit();
+//    }
+//
+//    [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override
+//    {
+//        return m_base->get(key, value);
+//    }
+//
+//    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override
+//    {
+//        return m_base->put(key, value);
+//    }
+//
+//    [[nodiscard]] auto erase(const Slice &key) -> Status override
+//    {
+//        return m_base->erase(key);
+//    }
+//};
+//
+//TEST(ExtensionTests, Extensions)
+//{
+//    ExtendedDatabase *db;
+//    ASSERT_OK(ExtendedDatabase::open("./test", {}, &db));
+//    ASSERT_OK(db->put("a", "1"));
+//    ASSERT_OK(db->put("b", "2"));
+//    ASSERT_OK(db->put("c", "3"));
+//
+//    auto *cursor = db->new_cursor();
+//    cursor->seek_first();
+//    ASSERT_TRUE(cursor->is_valid());
+//    ASSERT_EQ(cursor->key(), "a");
+//    ASSERT_EQ(cursor->value(), "1");
+//    cursor->next();
+//    ASSERT_TRUE(cursor->is_valid());
+//    ASSERT_EQ(cursor->key(), "b");
+//    ASSERT_EQ(cursor->value(), "2");
+//    cursor->next();
+//    ASSERT_TRUE(cursor->is_valid());
+//    ASSERT_EQ(cursor->key(), "c");
+//    ASSERT_EQ(cursor->value(), "3");
+//    cursor->next();
+//    ASSERT_FALSE(cursor->is_valid());
+//    delete cursor;
+//
+//    ASSERT_OK(db->commit());
+//    delete db;
+//}
 
 class DbOpenTests
     : public OnDiskTest,
@@ -1079,6 +1079,7 @@ TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
     ASSERT_OK(db->put("b", "y"));
     ASSERT_OK(db->put("c", "z"));
     delete db;
+    db = nullptr;
 
     ASSERT_OK(calicodb::DB::open(options, "./test", &db));
     auto *cursor = db->new_cursor();

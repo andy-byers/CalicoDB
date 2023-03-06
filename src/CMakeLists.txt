@@ -43,7 +43,8 @@ add_library(calicodb
                "${CALICODB_INCLUDE_DIR}/calicodb/env.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/slice.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/status.h"
-               "${CALICODB_SOURCES}")
+               "${CALICODB_INCLUDE_DIR}/calicodb/table.h"
+               "${CALICODB_SOURCES}" table_impl.h table_impl.cpp)
 target_include_directories(calicodb
         PUBLIC  $<BUILD_INTERFACE:${CALICODB_INCLUDE_DIR}>
                 $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

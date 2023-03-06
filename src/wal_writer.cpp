@@ -5,12 +5,11 @@
 namespace calicodb
 {
 
-auto WalWriter::write(WalPayloadIn payload) -> Status
+auto WalWriter::write(Lsn lsn, const Slice &payload) -> Status
 {
-    const auto lsn = payload.lsn();
+    CDB_EXPECT_FALSE(payload.is_empty());
     CDB_EXPECT_FALSE(lsn.is_null());
-    auto data = payload.m_buffer;
-    CDB_EXPECT_FALSE(data.is_empty());
+    auto data = payload;
 
     WalRecordHeader lhs;
     lhs.type = kFullRecord;

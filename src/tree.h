@@ -103,7 +103,7 @@ class Freelist
     Id *m_head {};
 
 public:
-    explicit Freelist(Pager &pager, Id *head);
+    explicit Freelist(Pager &pager, Id &head);
     [[nodiscard]] auto is_empty() const -> bool;
     [[nodiscard]] auto pop(Page &page) -> Status;
     [[nodiscard]] auto push(Page page) -> Status;
@@ -187,14 +187,12 @@ struct PayloadManager
 
 class Tree {
 public:
-    explicit Tree(Pager &pager, Id *freelist_head);
-    [[nodiscard]] static auto create(Pager &pager, Id *freelist_head) -> Status;
+    explicit Tree(Pager &pager, Id root, Id &freelist_head);
+    [[nodiscard]] static auto create(Pager &pager, Id &freelist_head, Id *root = nullptr) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, bool *success) -> Status;
-    auto load_state(const FileHeader &header) -> void;
-
     [[nodiscard]] auto TEST_to_string() -> std::string;
     auto TEST_validate() -> void;
 
@@ -247,6 +245,7 @@ private:
     auto release(Node node) const -> void;
 
     friend class CursorImpl;
+    friend class TableImpl;
     friend class TreeValidator;
 
     mutable std::string m_key_scratch[2];
@@ -255,6 +254,7 @@ private:
     mutable std::string m_anchor;
     Freelist m_freelist;
     Pager *m_pager {};
+    Id m_root;
 };
 
 class CursorImpl : public Cursor

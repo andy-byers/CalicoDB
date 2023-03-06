@@ -122,7 +122,12 @@ public:
         return 0;
     }
 
-    auto log(WalPayloadIn) -> Status override
+    [[nodiscard]] auto log_delta(Id, Id, const Slice &, const ChangeBuffer &, Lsn *) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto log_image(Id, Id, const Slice &, Lsn *) -> Status override
     {
         return Status::ok();
     }

@@ -8,7 +8,7 @@ namespace calicodb
 {
 
 static auto
-apply_undo(Page &page, const FullImageDescriptor &image)
+apply_undo(Page &page, const ImageDescriptor &image)
 {
     const auto data = image.image;
     mem_copy(page.span(0, data.size()), data);
@@ -79,7 +79,7 @@ auto Recovery::recover_phase_1() -> Status
     // We are starting up the database, so these should be set now. They may be
     // updated if we find a commit record in the WAL past what was applied to
     // the database.
-    if (m_wal->current_lsn().is_null()) {
+    if (m_wal->m_last_lsn.is_null()) {
         m_wal->m_last_lsn = *m_commit_lsn;
         m_wal->m_flushed_lsn = *m_commit_lsn;
         m_pager->m_recovery_lsn = *m_commit_lsn;
@@ -128,8 +128,8 @@ auto Recovery::recover_phase_1() -> Status
 
     const auto undo = [&](const auto &payload) {
         const auto decoded = decode_payload(payload);
-        if (std::holds_alternative<FullImageDescriptor>(decoded)) {
-            const auto image = std::get<FullImageDescriptor>(decoded);
+        if (std::holds_alternative<ImageDescriptor>(decoded)) {
+            const auto image = std::get<ImageDescriptor>(decoded);
             return with_page(*m_pager, image, [this, &image](auto &page) {
                 if (image.lsn < *m_commit_lsn) {
                     return;
@@ -162,10 +162,9 @@ auto Recovery::recover_phase_1() -> Status
                 return Status::ok();
             }
 
-            WalPayloadOut payload {buffer};
-            last_lsn = payload.lsn();
+            last_lsn = extract_payload_lsn(buffer);
 
-            s = action(payload);
+            s = action(buffer);
             if (s.is_not_found()) {
                 break;
             } else if (!s.is_ok()) {

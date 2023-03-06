@@ -8,6 +8,8 @@
 namespace calicodb
 {
 
+class Tree;
+
 struct Id {
     static constexpr std::uint64_t kNull {0};
     static constexpr std::uint64_t kRoot {1};
@@ -84,6 +86,11 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 }
 
 using Lsn = Id;
+
+struct TableState {
+    Tree *tree {};
+    Lsn commit_lsn;
+};
 
 class AlignedBuffer
 {

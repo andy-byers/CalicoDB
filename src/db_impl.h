@@ -3,6 +3,7 @@
 
 #include "calicodb/db.h"
 #include "calicodb/options.h"
+#include "calicodb/table.h"
 
 #include "header.h"
 #include "pager.h"
@@ -15,8 +16,10 @@ namespace calicodb
 {
 
 class Cursor;
-class Recovery;
+class DBImpl;
 class Env;
+class Recovery;
+class TableImpl;
 class WriteAheadLog;
 
 class DBImpl : public DB
@@ -32,19 +35,22 @@ public:
     [[nodiscard]] auto open(const Options &options, const Slice &filename) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    [[nodiscard]] auto new_cursor() const -> Cursor * override;
+    [[nodiscard]] auto new_table(const TableOptions &options, const Slice &name, Table **out) -> Status override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
+
+    [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto commit() -> Status override;
     [[nodiscard]] auto get(const Slice &key, std::string *out) const -> Status override;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
-    [[nodiscard]] auto record_count() const -> std::size_t
-    {
-        return m_record_count;
-    }
+    [[nodiscard]] auto create_table(const Slice &name, Id *root) -> Status;
+    [[nodiscard]] auto open_table(Id root, TableState **out) -> Status;
+    [[nodiscard]] auto commit_table(Id root, TableState &state) -> Status;
+    auto close_table(Id root) -> void;
 
+    [[nodiscard]] auto record_count() const -> std::size_t;
     auto TEST_validate() const -> void;
 
     WriteAheadLog *wal {};
@@ -54,10 +60,46 @@ public:
 private:
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency() -> Status;
-    [[nodiscard]] auto save_state(Page root, Lsn commit_lsn) const -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
+    auto save_state(Page root, Lsn commit_lsn = Lsn::null() /* TODO: remove */) const -> void;
+
+    [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> *out) -> Status;
+    [[nodiscard]] auto find_checkpoints(std::unordered_map<Id, Lsn, Id::Hash> *checkpoints) -> Status;
+
+    struct LogRange {
+        Lsn commit_lsn;
+        Lsn recent_lsn;
+    };
+
+    /* Phase 1: Read the WAL and apply missing updates until we reach the end. Maintain a commit LSN
+     * and a most-recent LSN for each table we encounter. Then, read the WAL again, this time reverting
+     * changes for tables that had a commit LSN less than their most-recent LSN. If, for a given table,
+     * we find a most-recent LSN, but not a commit LSN, we assume the commit LSN to be what is written
+     * in the table header. Once finished, we will have some updates in-memory that are not yet on disk.
+     * Update each table's header LSN to match the most-recent LSN created for that table. This prevents
+     * the WAL records we just reverted from being considered again if we crash while cleaning up.
+     */
+    [[nodiscard]] auto recovery_phase_1() -> Status;
+
+    /* Phase 2: Flush the page cache, resize the database file to match the header page count, then remove
+     * all WAL segments. This part is only run when the database is closed, otherwise, we just flush the
+     * page cache.
+     */
+    [[nodiscard]] auto recovery_phase_2(Lsn recent_lsn) -> Status;
+
+    std::unordered_map<Id, LogRange, Id::Hash> m_live;
+
+    std::string m_reader_data;
+    std::string m_reader_tail;
+
+    // State for open tables. Tables are keyed by their root page ID so that the vacuum routine
+    // can easily locate open tables.
+    std::unordered_map<Id, TableState, Id::Hash> m_tables;
+
+    // Pointer to the root table state, which is kept in m_tables.
+    TableState *m_root {};
 
     mutable Status m_status;
     std::string m_filename;
@@ -69,11 +111,10 @@ private:
     std::size_t m_record_count {};
     std::size_t m_bytes_written {};
     Id m_freelist_head;
-    Lsn m_commit_lsn;
-    bool m_in_txn {true};
+    Lsn m_commit_lsn; // TODO: Stored in the root table header
     bool m_owns_env {};
     bool m_owns_info_log {};
-    bool m_is_setup {};
+    bool m_is_running {};
 };
 
 auto setup(const std::string &, Env &, const Options &, FileHeader &state) -> Status;
