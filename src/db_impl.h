@@ -7,7 +7,6 @@
 
 #include "header.h"
 #include "pager.h"
-#include "recovery.h"
 #include "tree.h"
 #include "wal.h"
 #include "wal_writer.h"
@@ -18,7 +17,6 @@ namespace calicodb
 class Cursor;
 class DBImpl;
 class Env;
-class Recovery;
 class TableImpl;
 class WriteAheadLog;
 
@@ -39,12 +37,6 @@ public:
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
 
-    [[nodiscard]] auto new_cursor() const -> Cursor * override;
-    [[nodiscard]] auto commit() -> Status override;
-    [[nodiscard]] auto get(const Slice &key, std::string *out) const -> Status override;
-    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
-    [[nodiscard]] auto erase(const Slice &key) -> Status override;
-
     [[nodiscard]] auto create_table(const Slice &name, LogicalPageId *root_id) -> Status;
     [[nodiscard]] auto open_table(const LogicalPageId &root_id, TableState **out) -> Status;
     [[nodiscard]] auto commit_table(const LogicalPageId &root_id, TableState &state) -> Status;
@@ -54,16 +46,14 @@ public:
     auto TEST_validate() const -> void;
 
     WriteAheadLog *wal {};
-    Tree *tree {};
     Pager *pager {};
 
 private:
     [[nodiscard]] auto do_open(Options sanitized) -> Status;
     [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto load_state() -> Status;
-    [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
-    auto save_state(Page &root, Lsn commit_lsn = Lsn::null() /* TODO: remove */) const -> void;
+    auto save_state(Page &root, Lsn checkpoint_lsn) const -> void;
 
     [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> *out) -> Status;
 
@@ -94,8 +84,6 @@ private:
      */
     [[nodiscard]] auto recovery_phase_2(Lsn recent_lsn) -> Status;
 
-    std::unordered_map<Id, LogRange, Id::Hash> m_live;
-
     std::string m_reader_data;
     std::string m_reader_tail;
 
@@ -108,11 +96,6 @@ private:
     // Pointer to the root table state, which is kept in m_tables.
     TableState *m_root {};
 
-    // TODO: Create a table (after the root table) and store it here. Redirect put(), get(),
-    //       new_cursor(), and commit() calls through here. Eventually, get rid of this thing and
-    //       use new_table() to open tables.
-    Table *m_temp {};
-
     mutable Status m_status;
     std::string m_filename;
     std::string m_wal_prefix;
@@ -124,7 +107,6 @@ private:
     std::size_t m_bytes_written {};
     Id m_freelist_head;
     Id m_last_table_id;
-    Lsn m_commit_lsn; // TODO: Stored in the root table header
     bool m_owns_env {};
     bool m_owns_info_log {};
     bool m_is_running {};

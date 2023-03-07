@@ -22,13 +22,12 @@ public:
     friend class Recovery;
 
     struct Parameters {
-        std::string path;
+        std::string filename;
         Env *env {};
-        std::string *scratch {};
         WriteAheadLog *wal {};
         InfoLogger *info_log {};
+        std::unordered_map<Id, TableState, Id::Hash> *tables;
         Status *status {};
-        Lsn *commit_lsn {};
         bool *is_running {};
         std::size_t frame_count {};
         std::size_t page_size {};
@@ -47,7 +46,6 @@ public:
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Page &page) -> Status;
-    [[nodiscard]] auto commit_root(Page page) -> Status;
     auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
     auto discard(Page page) -> void;
@@ -62,18 +60,17 @@ private:
     auto watch_page(Page &page, PageCache::Entry &entry, int important) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
 
-    std::string m_path;
+    std::string m_filename;
     FrameManager m_frames;
     PageList m_dirty;
     PageCache m_cache;
     Lsn m_recovery_lsn;
-    Lsn *m_commit_lsn {};
     bool *m_is_running {};
     Status *m_status {};
-    std::string *m_scratch {};
     WriteAheadLog *m_wal {};
     Env *m_env {};
     InfoLogger *m_info_log {};
+    std::unordered_map<Id, TableState, Id::Hash> *m_tables {};
 };
 
 } // namespace calicodb

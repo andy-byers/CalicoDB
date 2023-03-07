@@ -24,7 +24,7 @@ class Page;
  */
 struct FileHeader {
     static constexpr std::uint32_t kMagicCode {0xB11924E1};
-    static constexpr std::size_t kSize {50}; // TODO: 42};
+    static constexpr std::size_t kSize {42};
     auto read(const char *data) -> void;
     auto write(char *data) const -> void;
 
@@ -36,7 +36,6 @@ struct FileHeader {
     std::uint64_t record_count {};
     Id freelist_head;
     Id last_table_id;
-    Id commit_lsn; // TODO: remove
     std::uint16_t page_size {};
 };
 
@@ -45,7 +44,7 @@ struct FileHeader {
  * Tree Header Format:
  *     Offset  Size  Name
  *    --------------------------
- *     0       8     commit_lsn
+ *     0       8     checkpoint_lsn
  */
 static constexpr auto kTreeHeaderSize = sizeof(Lsn);
 

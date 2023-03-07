@@ -26,7 +26,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
     CDB_EXPECT_LE(param.page_size, kMaxPageSize);
 
     Editor *file;
-    CDB_TRY(param.env->new_editor(param.path, &file));
+    CDB_TRY(param.env->new_editor(param.filename, &file));
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
@@ -43,19 +43,17 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
 }
 
 Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
-    : m_path {param.path},
+    : m_filename {param.filename},
       m_frames {file, std::move(buffer), param.page_size, param.frame_count},
-      m_commit_lsn {param.commit_lsn},
       m_is_running {param.is_running},
       m_status {param.status},
-      m_scratch {param.scratch},
       m_wal {param.wal},
       m_env {param.env},
-      m_info_log {param.info_log}
+      m_info_log {param.info_log},
+      m_tables {param.tables}
 {
     CDB_EXPECT_NE(m_wal, nullptr);
     CDB_EXPECT_NE(m_status, nullptr);
-    CDB_EXPECT_NE(m_scratch, nullptr);
 }
 
 auto Pager::bytes_written() const -> std::size_t
@@ -245,19 +243,26 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
 
     // We only write a full image if the WAL does not already contain one for this page. If the page was modified
     // during this transaction, then we already have one written.
-    if (*m_is_running && lsn <= *m_commit_lsn) {
-        const auto image = page.view(0, watch_size);
-        auto s = m_wal->log_image(page.id(), image, nullptr);
-
-        if (s.is_ok()) {
-            auto limit = m_recovery_lsn;
-            if (limit > *m_commit_lsn) {
-                limit = *m_commit_lsn;
-            }
-            s = m_wal->cleanup(limit);
+    if (*m_is_running) {
+        const auto itr = m_tables->find(page.id().table_id);
+        if (itr == end(*m_tables)) {
+            return;
         }
-        if (!s.is_ok()) {
-            SET_STATUS(s);
+        const auto &state = itr->second;
+        if (state.checkpoint_lsn.is_null() || lsn <= state.checkpoint_lsn) {
+            const auto image = page.view(0, watch_size);
+            auto s = m_wal->log_image(page.id(), image, nullptr);
+
+            if (s.is_ok()) {
+                auto limit = m_recovery_lsn;
+                if (limit > state.checkpoint_lsn) { // TODO: Prevent the recovery LSN from getting larger than any of these values.
+                    limit = state.checkpoint_lsn;
+                }
+                s = m_wal->cleanup(limit);
+            }
+            if (!s.is_ok()) {
+                SET_STATUS(s);
+            }
         }
     }
 }
@@ -273,19 +278,23 @@ auto Pager::allocate(Page &page) -> Status
 
 auto Pager::acquire(Page &page) -> Status
 {
-    auto page_id = page.id().page_id;
+    const auto [table_id, page_id] = page.id();
     CDB_EXPECT_FALSE(page_id.is_null());
 
-    const auto do_acquire = [this, &page](auto &entry) {
+    const auto do_acquire = [&](auto &entry) {
         m_frames.ref(entry.index, page);
 
         // Write back pages that are too old. This is so that old WAL segments can be removed.
-        if (entry.token) {
-            const auto lsn = read_page_lsn(page);
-            const auto checkpoint = (*entry.token)->record_lsn;
-            const auto cutoff = *m_commit_lsn;
-
-            if (checkpoint <= cutoff && lsn <= m_wal->flushed_lsn()) {
+        if (*m_is_running && entry.token) {
+            const auto itr = m_tables->find(table_id);
+            if (itr == end(*m_tables)) {
+                // This table rooted at this page is just now being opened.
+                return Status::ok();
+            }
+            const auto &state = itr->second;
+            const auto should_write = (*entry.token)->record_lsn <= state.checkpoint_lsn &&
+                                      read_page_lsn(page) <= m_wal->flushed_lsn();
+            if (should_write) {
                 auto s = m_frames.write_back(entry.index);
 
                 if (s.is_ok()) {
@@ -345,7 +354,7 @@ auto Pager::release(Page page) -> void
 auto Pager::truncate(std::size_t page_count) -> Status
 {
     CDB_EXPECT_GT(page_count, 0);
-    CDB_TRY(m_env->resize_file(m_path, page_count * m_frames.page_size()));
+    CDB_TRY(m_env->resize_file(m_filename, page_count * m_frames.page_size()));
     m_frames.m_page_count = page_count;
 
     const auto predicate = [this](auto pid, auto) {

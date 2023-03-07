@@ -89,7 +89,7 @@ using Lsn = Id;
 
 struct TableState {
     Tree *tree {};
-    Lsn commit_lsn;
+    Lsn checkpoint_lsn;
 };
 
 class AlignedBuffer

@@ -58,7 +58,7 @@ CalicoDB must enforce certain rules to maintain consistency between the WAL and 
 First, we need to make sure that all updates are written to the WAL before affected pages are written back to the database file.
 The WAL keeps track of the last LSN it flushed to disk (the `flushed_lsn`).
 This value is queried by the pager to make sure that unprotected pages are never written back.
-The pager keeps track of a few more variables to ensure consistency: the `page_lsn`, the `record_lsn`, the `commit_lsn`, and the `recovery_lsn`.
+The pager keeps track of a few more variables to ensure consistency: the `page_lsn`, the `record_lsn`, the `checkpoint_lsn`, and the `recovery_lsn`.
 The `page_lsn` (per page) is the LSN of the last WAL record generated for a given page.
 This is the value that is compared with the WAL's `flushed_lsn` to make sure the page is safe to write out.
 The `record_lsn` (also per page) is the last `page_lsn` value that we already have on disk.
@@ -66,7 +66,7 @@ It is saved (in-memory only) when the page is first read into memory, and each t
 Then, the lowest `record_lsn` is tracked in the pager's `recovery_lsn`.
 The `recovery_lsn` represents the oldest WAL record that we still need.
 It is reported back to the WAL intermittently so that obsolete segment files can be removed.
-Finally, the `commit_lsn` is the LSN of the most-recent commit record (the special delta record mentioned in [WAL](#wal)).
+Finally, the `checkpoint_lsn` is the LSN of the most-recent commit record (the special delta record mentioned in [WAL](#wal)).
 This value is saved in the database file header and is used to determine how the logical contents of the database should look.
 
 ### Notes for tables support

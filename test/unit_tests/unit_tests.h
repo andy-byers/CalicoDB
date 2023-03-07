@@ -161,18 +161,20 @@ public:
     const std::size_t kFrameCount {16};
 
     TestWithPager()
-        : scratch(kPageSize, '\x00'),
-          log_scratch(wal_scratch_size(kPageSize), '\x00')
+        : scratch(kPageSize, '\x00')
     {
+        tables[Id::root()] = TableState {
+            nullptr,
+            Lsn {static_cast<std::uint64_t>(-1)},
+        };
         Pager *temp;
         EXPECT_OK(Pager::open({
                                   kFilename,
                                   env.get(),
-                                  &log_scratch,
                                   &wal,
                                   nullptr,
+                                  &tables,
                                   &status,
-                                  &commit_lsn,
                                   &in_txn,
                                   kFrameCount,
                                   kPageSize,
@@ -181,7 +183,7 @@ public:
         pager.reset(temp);
     }
 
-    std::string log_scratch;
+    std::unordered_map<Id, TableState, Id::Hash> tables;
     Status status;
     bool in_txn {};
     Lsn commit_lsn;

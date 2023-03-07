@@ -27,28 +27,19 @@ namespace calicodb
     return sanitized;
 }
 
-[[nodiscard]] static auto encode_logical_id(LogicalPageId id) -> std::string
+static auto encode_logical_id(LogicalPageId id, char *out) -> void
 {
-    std::string out;
-    append_number(&out, id.table_id.value);
-    out += ',';
-    append_number(&out, id.page_id.value);
-    return out;
+    put_u64(out, id.table_id.value);
+    put_u64(out + sizeof(Id), id.page_id.value);
 }
 
 [[nodiscard]] static auto decode_logical_id(const Slice &in, LogicalPageId *out) -> Status
 {
-    Slice value {in};
-    if (!consume_decimal_number(&value, &out->table_id.value)) {
-        return Status::corruption("table id is corrupted");
+    if (in.size() != LogicalPageId::kSize) {
+        return Status::corruption("logical id is corrupted");
     }
-    if (value[0] != ',') {
-        return Status::corruption("logical id is missing separator");
-    }
-    value.advance();
-    if (!consume_decimal_number(&value, &out->page_id.value)) {
-        return Status::corruption("page id is corrupted");
-    }
+    out->table_id.value = get_u64(in.data());
+    out->page_id.value = get_u64(in.data() + sizeof(Id));
     return Status::ok();
 }
 
@@ -103,11 +94,11 @@ auto DBImpl::do_open(Options sanitized) -> Status
 
     FileHeader state;
     CDB_TRY(setup(m_filename, *m_env, sanitized, state));
-    m_commit_lsn = state.last_table_id;
-    m_record_count = state.record_count;
-    if (!m_commit_lsn.is_null()) {
-        sanitized.page_size = state.page_size;
-    }
+//    m_commit_lsn = state.last_table_id;
+//    m_record_count = state.record_count;
+//    if (!m_commit_lsn.is_null()) {
+//        sanitized.page_size = state.page_size;
+//    }
     m_scratch.resize(wal_scratch_size(sanitized.page_size));
 
     CDB_TRY(WriteAheadLog::open(
@@ -122,11 +113,10 @@ auto DBImpl::do_open(Options sanitized) -> Status
         {
             m_filename,
             m_env,
-            &m_scratch,
             wal,
             m_info_log,
+            &m_tables,
             &m_status,
-            &m_commit_lsn,
             &m_is_running,
             sanitized.cache_size / sanitized.page_size,
             sanitized.page_size,
@@ -155,8 +145,6 @@ auto DBImpl::do_open(Options sanitized) -> Status
     m_tables.emplace(Id::root(), TableState {root, Lsn::null()});
     m_root = &m_tables[Id::root()];
 
-    tree = m_root->tree; // TODO: remove
-
     if (db_exists) {
         m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
@@ -167,17 +155,9 @@ auto DBImpl::do_open(Options sanitized) -> Status
 
     m_info_log->logv("pager recovery lsn is %llu", pager->recovery_lsn().value);
     m_info_log->logv("wal flushed lsn is %llu", wal->flushed_lsn().value);
-    m_info_log->logv("commit lsn is %llu", m_commit_lsn.value);
 
     CDB_TRY(m_status);
     m_is_running = true;
-
-    // TODO: Remove eventually.
-    auto root_id = LogicalPageId::unknown();
-    if (!db_exists){
-        CDB_TRY(create_table("temp_table", &root_id));
-    }
-    CDB_TRY(new_table({}, "temp_table", &m_temp));
     return Status::ok();
 }
 
@@ -187,7 +167,7 @@ DBImpl::~DBImpl()
         if (const auto s = wal->flush(); !s.is_ok()) {
             m_info_log->logv("failed to flush wal: %s", s.to_string().data());
         }
-        if (const auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
+        if (const auto s = pager->flush(); !s.is_ok()) {
             m_info_log->logv("failed to flush pager: %s", s.to_string().data());
         }
         if (const auto s = wal->close(); !s.is_ok()) {
@@ -207,10 +187,7 @@ DBImpl::~DBImpl()
     }
 
     delete pager;
-    delete tree;
     delete wal;
-
-    delete m_temp; // TODO: remove
 }
 
 auto DBImpl::record_count() const -> std::size_t
@@ -309,54 +286,6 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     return false;
 }
 
-auto DBImpl::get(const Slice &key, std::string *value) const -> Status
-{
-    CDB_TRY(m_status);
-    return tree->get(key, value);
-}
-
-auto DBImpl::new_cursor() const -> Cursor *
-{
-    auto *cursor = CursorInternal::make_cursor(*tree);
-    if (!m_status.is_ok()) {
-        CursorInternal::invalidate(*cursor, m_status);
-    }
-    return cursor;
-}
-
-auto DBImpl::put(const Slice &key, const Slice &value) -> Status
-{
-    if (key.is_empty()) {
-        return Status::invalid_argument("key is empty");
-    }
-    CDB_TRY(m_status);
-
-    bool exists;
-    if (auto s = tree->put(key, value, &exists); !s.is_ok()) {
-        SET_STATUS(s);
-        return s;
-    }
-    const auto inserted = !exists;
-    m_bytes_written += key.size() * inserted + value.size();
-    m_record_count += inserted;
-    m_txn_size++;
-    return Status::ok();
-}
-
-auto DBImpl::erase(const Slice &key) -> Status
-{
-    CDB_TRY(m_status);
-
-    auto s = tree->erase(key);
-    if (s.is_ok()) {
-        m_record_count--;
-        m_txn_size++;
-    } else if (!s.is_not_found()) {
-        SET_STATUS(s);
-    }
-    return s;
-}
-
 auto DBImpl::vacuum() -> Status
 {
     CDB_TRY(m_status);
@@ -374,11 +303,12 @@ auto DBImpl::do_vacuum() -> Status
     }
     const auto original = target;
     for (;; target.value--) {
-        bool vacuumed;
-        CDB_TRY(tree->vacuum_one(target, &vacuumed));
-        if (!vacuumed) {
-            break;
-        }
+//        bool vacuumed;
+        CDB_EXPECT_TRUE(false); // TODO
+//        CDB_TRY(tree->vacuum_one(target, &vacuumed));
+//        if (!vacuumed) {
+//            break;
+//        }
     }
     if (target.value == pager->page_count()) {
         // No pages available to vacuum: database is minimally sized.
@@ -394,64 +324,68 @@ auto DBImpl::do_vacuum() -> Status
     m_info_log->logv("vacuumed %llu pages", original.value - target.value);
     return pager->flush();
 }
-
-auto DBImpl::commit() -> Status
-{
-    CDB_TRY(m_status);
-    if (m_txn_size != 0) {
-        if (auto s = do_commit(); !s.is_ok()) {
-            SET_STATUS(s);
-            return s;
-        }
-    }
-    return Status::ok();
-}
-
-auto DBImpl::do_commit() -> Status
-{
-    m_txn_size = 0;
-
-    Page root {LogicalPageId::root()};
-    CDB_TRY(pager->acquire(root));
-    pager->upgrade(root);
-
-    // The root page is guaranteed to have a full image in the WAL. The current
-    // LSN is now the same as the commit LSN.
-    auto commit_lsn = wal->current_lsn();
-    m_info_log->logv("commit requested at lsn %llu", commit_lsn.value);
-
-    save_state(root, commit_lsn);
-    pager->release(std::move(root));
-    CDB_TRY(wal->flush());
-
-    m_info_log->logv("commit successful");
-    m_commit_lsn = commit_lsn;
-    return Status::ok();
-}
+//
+//auto DBImpl::commit() -> Status
+//{
+//    CDB_TRY(m_status);
+//    if (m_txn_size != 0) {
+//        if (auto s = do_commit(); !s.is_ok()) {
+//            SET_STATUS(s);
+//            return s;
+//        }
+//    }
+//    return Status::ok();
+//}
+//
+//auto DBImpl::do_commit() -> Status
+//{
+//    m_txn_size = 0;
+//
+//    Page root {LogicalPageId::root()};
+//    CDB_TRY(pager->acquire(root));
+//    pager->upgrade(root);
+//
+//    // The root page is guaranteed to have a full image in the WAL. The current
+//    // LSN is now the same as the commit LSN.
+//    auto checkpoint_lsn = wal->current_lsn();
+//    m_info_log->logv("commit requested at lsn %llu", checkpoint_lsn.value);
+//
+//    save_state(root, checkpoint_lsn);
+//    pager->release(std::move(root));
+//    CDB_TRY(wal->flush());
+//
+//    m_info_log->logv("commit successful");
+//    m_commit_lsn = checkpoint_lsn;
+//    return Status::ok();
+//}
 
 auto DBImpl::ensure_consistency() -> Status
 {
-    Recovery recovery {*pager, *wal, m_commit_lsn};
-    CDB_TRY(recovery.recover());
-    return load_state();
+//    Recovery recovery {*pager, *wal, m_commit_lsn};
+//    CDB_TRY(recovery.recover());
+//    return load_state();
+    return Status::logic_error("FIXME");
 }
 
-auto DBImpl::save_state(Page &root, Lsn commit_lsn) const -> void
+auto DBImpl::save_state(Page &root, Lsn checkpoint_lsn) const -> void
 {
-    CDB_EXPECT_TRUE(root.id().page_id.is_root());
-    CDB_EXPECT_FALSE(commit_lsn.is_null());
+    auto span = root.span(page_offset(root) + kPageHeaderSize, kTreeHeaderSize);
+    put_u64(span.data(), checkpoint_lsn.value);
 
-    FileHeader header;
-    header.read(root.data());
+    if (root.id().table_id.is_root()) {
+        FileHeader header;
+        header.read(root.data());
+        pager->save_state(header);
+        header.freelist_head = m_freelist_head;
+        header.magic_code = FileHeader::kMagicCode;
+        header.last_table_id = m_last_table_id;
+        header.record_count = m_record_count;
+        header.header_crc = crc32c::Mask(header.compute_crc());
 
-    pager->save_state(header);
-    header.freelist_head = m_freelist_head;
-    header.magic_code = FileHeader::kMagicCode;
-    header.last_table_id = m_last_table_id;
-    header.commit_lsn = m_commit_lsn; // TODO: remove
-    header.record_count = m_record_count;
-    header.header_crc = crc32c::Mask(header.compute_crc());
-    header.write(root.span(0, FileHeader::kSize).data());
+        span = root.span(0, FileHeader::kSize);
+        header.write(span.data());
+    }
+
 }
 
 auto DBImpl::load_state() -> Status
@@ -468,7 +402,6 @@ auto DBImpl::load_state() -> Status
         return Status::corruption("crc mismatch");
     }
 
-    m_commit_lsn = header.commit_lsn; // TODO: remove
     m_last_table_id = header.last_table_id;
     m_record_count = header.record_count;
     m_freelist_head = header.freelist_head;
@@ -480,7 +413,7 @@ auto DBImpl::load_state() -> Status
 
 auto DBImpl::TEST_validate() const -> void
 {
-    tree->TEST_validate();
+
 }
 
 auto setup(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
@@ -567,9 +500,15 @@ auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> 
         CDB_TRY(decode_logical_id(value, &root_id));
     } else if (s.is_not_found()) {
         s = create_table(name, &root_id);
-    } else {
+    }
+
+    if (!s.is_ok()) {
         SET_STATUS(s);
         return s;
+    }
+
+    for (const auto &a: m_tables){
+        std::fprintf(stderr,"%llu %llu\n", a.first.value, a.second.checkpoint_lsn.value);
     }
 
     TableState *state;
@@ -587,7 +526,11 @@ auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
     ++m_last_table_id.value;
     root_id->table_id = m_last_table_id;
     CDB_TRY(Tree::create(*pager, m_last_table_id, m_freelist_head, &root_id->page_id));
-    CDB_TRY(tree->put(name, encode_logical_id(*root_id)));
+
+    char payload[LogicalPageId::kSize];
+    encode_logical_id(*root_id, payload);
+
+    CDB_TRY(m_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
     return commit_table(LogicalPageId::root(), *m_root);
 }
 
@@ -600,13 +543,13 @@ auto DBImpl::open_table(const LogicalPageId &root_id, TableState **out) -> Statu
 
     Page page {root_id};
     CDB_TRY(pager->acquire(page));
-    const Lsn commit_lsn {get_u64(page.data() + page_offset(page) + kPageHeaderSize)};
+    const Lsn checkpoint_lsn {get_u64(page.data() + page_offset(page) + kPageHeaderSize)};
     pager->release(std::move(page));
 
     m_root_map.insert({root_id.page_id, root_id.table_id});
     itr = m_tables.insert(itr, {root_id.table_id, {}});
     itr->second.tree = new Tree {*pager, root_id, m_freelist_head};
-    itr->second.commit_lsn = commit_lsn;
+    itr->second.checkpoint_lsn = checkpoint_lsn;
     *out = &itr->second;
     return Status::ok();
 }
@@ -617,16 +560,11 @@ auto DBImpl::commit_table(const LogicalPageId &root_id, TableState &state) -> St
     CDB_TRY(pager->acquire(page));
     pager->upgrade(page);
 
-    // The root page is guaranteed to have a full image in the WAL. The current
-    // LSN is now the same as the commit LSN.
-    state.commit_lsn = wal->current_lsn();
-
-    auto tree_header = page.span(page_offset(page) + kPageHeaderSize, kTreeHeaderSize);
-    put_u64(tree_header.data(), state.commit_lsn.value);
-    if (root_id.table_id.is_root()) {
-        CDB_EXPECT_TRUE(root_id.page_id.is_root());
-        save_state(page, state.commit_lsn);
-    }
+    // The table's root page is guaranteed to have a full image in the WAL. The current
+    // LSN is now the same as the checkpoint LSN. Save the checkpoint LSN in memory and
+    // on the root page.
+    state.checkpoint_lsn = wal->current_lsn();
+    save_state(page, state.checkpoint_lsn);
 
     write_page_lsn(page, wal->current_lsn());
     const auto deltas = page.deltas();
@@ -635,6 +573,8 @@ auto DBImpl::commit_table(const LogicalPageId &root_id, TableState &state) -> St
     CDB_TRY(wal->log_commit(
         root_id, page.view(0), deltas.front(), nullptr));
 
+    // Don't generate a delta record for this page. Its purpose is served by the commit
+    // record.
     pager->discard(std::move(page));
     return wal->flush();
 }
@@ -668,8 +608,8 @@ auto DBImpl::close_table(const LogicalPageId &root_id) -> void
 //
 //        Page page {logical_id};
 //        CDB_TRY(pager->acquire(page));
-//        const Lsn commit_lsn {get_u64(page.data() + page_offset(page) + kPageHeaderSize)};
-//        checkpoints->insert(itr, {logical_id.table_id, commit_lsn});
+//        const Lsn checkpoint_lsn {get_u64(page.data() + page_offset(page) + kPageHeaderSize)};
+//        checkpoints->insert(itr, {logical_id.table_id, checkpoint_lsn});
 //        cursor->next();
 //    }
 //}
@@ -740,7 +680,7 @@ auto DBImpl::close_table(const LogicalPageId &root_id) -> void
 //                return Status::ok();
 //            }
 //            if (is_commit(deltas)) {
-//                itr->second.commit_lsn = deltas.lsn;
+//                itr->second.checkpoint_lsn = deltas.lsn;
 //            } else {
 //                itr->second.recent_lsn = deltas.lsn;
 //            }

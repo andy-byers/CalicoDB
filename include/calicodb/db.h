@@ -27,13 +27,6 @@ public:
     [[nodiscard]] virtual auto new_table(const TableOptions &options, const Slice &name, Table **out) -> Status = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
-
-    // TODO: Everything below here gets moved to the table API.
-    [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
-    [[nodiscard]] virtual auto commit() -> Status = 0;
-    [[nodiscard]] virtual auto get(const Slice &key, std::string *value) const -> Status = 0;
-    [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
-    [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
 };
 
 } // namespace calicodb
