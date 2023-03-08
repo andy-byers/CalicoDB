@@ -27,7 +27,7 @@ public:
         Env *env {};
         WriteAheadLog *wal {};
         InfoLogger *info_log {};
-        TableSet *tables {};
+        Lsn *commit_lsn {};
         Status *status {};
         bool *is_running {};
         std::size_t frame_count {};
@@ -71,7 +71,7 @@ private:
     WriteAheadLog *m_wal {};
     Env *m_env {};
     InfoLogger *m_info_log {};
-    TableSet *m_tables {};
+    Lsn *m_commit_lsn {};
 };
 
 } // namespace calicodb

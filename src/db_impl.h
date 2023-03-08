@@ -69,7 +69,7 @@ public:
     Pager *pager {};
 
 private:
-    [[nodiscard]] auto ensure_consistency(IdMap<LogRange> ranges) -> Status;
+    [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto do_checkpoint() -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
@@ -84,13 +84,13 @@ private:
      * Update each table's header LSN to match the most-recent LSN created for that table. This prevents
      * the WAL records we just reverted from being considered again if we crash while cleaning up.
      */
-    [[nodiscard]] auto recovery_phase_1(Lsn *final_lsn) -> Status;
+    [[nodiscard]] auto recovery_phase_1() -> Status;
 
     /* Phase 2: Flush the page cache, resize the database file to match the header page count, then remove
      * all WAL segments. This part is only run when the database is closed, otherwise, we just flush the
      * page cache.
      */
-    [[nodiscard]] auto recovery_phase_2(Lsn recent_lsn) -> Status;
+    [[nodiscard]] auto recovery_phase_2() -> Status;
 
     std::string m_reader_data;
     std::string m_reader_tail;
@@ -101,15 +101,13 @@ private:
     // Pointer to the root table state, which is kept in m_tables.
     TableState *m_root {};
 
-    mutable Status m_status;
+    mutable DBState m_state;
+
     std::string m_filename;
     std::string m_wal_prefix;
     Env *m_env {};
     InfoLogger *m_info_log {};
-    std::size_t m_txn_size {};
-    std::size_t m_record_count {};
-    std::size_t m_bytes_written {};
-    std::size_t m_batch_size {};
+    Lsn m_commit_lsn;
     Id m_freelist_head;
     Id m_last_table_id;
     bool m_owns_env {};

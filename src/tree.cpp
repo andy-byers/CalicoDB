@@ -45,7 +45,7 @@ inline constexpr auto compute_local_size(std::size_t key_size, std::size_t value
 
 static auto node_header_offset(const Node &node)
 {
-    return page_offset(node.page) + kPageHeaderSize + kTreeHeaderSize * node.is_root;
+    return page_offset(node.page) + kPageHeaderSize;
 }
 
 static auto cell_slots_offset(const Node &node)
@@ -700,18 +700,17 @@ auto Tree::create(Pager &pager, Id table_id, Id &freelist_head, Id *root_id) -> 
     // Use the root tree ID when allocating this page. This causes the WAL records we write while
     // initializing it to look like they came from the root tree.
     Node node {LogicalPageId::unknown_page(Id::root())};
-    node.is_root = true;
 
     Freelist freelist {pager, freelist_head};
     CDB_TRY(NodeManager::allocate(pager, freelist, &node, nullptr, true));
     const auto page_id = node.page.id().page_id;
-    // Clear the table header.
-    auto header = node.page.span(page_offset(node.page) + kPageHeaderSize, kTreeHeaderSize);
-    std::memset(header.data(), 0, kTreeHeaderSize);
     NodeManager::release(pager, std::move(node));
 
     if (!table_id.is_root()) {
-        PointerMap::Entry entry {Id::null(), PointerMap::kTreeRoot};
+        // If the page is a root page other than the database root, the back pointer field is used
+        // to store the table ID. This lets the vacuum routine quickly locate open tables so their
+        // in-memory root variables can be updated.
+        PointerMap::Entry entry {table_id, PointerMap::kTreeRoot};
         CDB_TRY(PointerMap::write_entry(pager, page_id, entry));
     }
 
@@ -734,7 +733,7 @@ auto Tree::node_iterator(Node &node) const -> NodeIterator
 auto Tree::find_external(const Slice &key, SearchResult *out) const -> Status
 {
     Node root {*m_root_id};
-    CDB_TRY(acquire(&root, m_root_id->page_id, false));
+    CDB_TRY(acquire(&root, false));
     return find_external(key, std::move(root), out);
 }
 
@@ -756,7 +755,7 @@ auto Tree::find_external(const Slice &key, Node node, SearchResult *out) const -
         release(std::move(node));
 
         Node next {LogicalPageId {m_root_id->table_id, next_id}};
-        CDB_TRY(acquire(&next, next_id, false));
+        CDB_TRY(acquire(&next, false));
         node = std::move(next);
     }
 }
@@ -828,9 +827,8 @@ auto Tree::allocate(Node *out, bool is_external) -> Status
     return NodeManager::allocate(*m_pager, m_freelist, out, m_node_scratch.data(), is_external);
 }
 
-auto Tree::acquire(Node *out, Id page_id, bool upgrade) const -> Status
+auto Tree::acquire(Node *out, bool upgrade) const -> Status
 {
-    out->is_root = page_id == m_root_id->page_id;
     return NodeManager::acquire(*m_pager, out, m_node_scratch.data(), upgrade);
 }
 
@@ -919,7 +917,7 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
 
     Node parent {LogicalPageId {m_root_id->table_id, parent_id}};
     Node left {LogicalPageId::unknown_page(m_root_id->table_id)};
-    CDB_TRY(acquire(&parent, parent_id, true));
+    CDB_TRY(acquire(&parent, true));
     CDB_TRY(allocate(&left, header.is_external));
 
     const auto overflow_index = right.overflow_index;
@@ -967,7 +965,7 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     if (header.is_external) {
         if (!header.prev_id.is_null()) {
             Node left_sibling {LogicalPageId {m_root_id->table_id, header.prev_id}};
-            CDB_TRY(acquire(&left_sibling, header.prev_id, true));
+            CDB_TRY(acquire(&left_sibling, true));
             left_sibling.header.next_id = left.page.id().page_id;
             left.header.prev_id = left_sibling.page.id().page_id;
             release(std::move(left_sibling));
@@ -1006,7 +1004,7 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
     if (header.is_external) {
         if (!header.next_id.is_null()) {
             Node right_sibling {LogicalPageId {m_root_id->table_id, header.next_id}};
-            CDB_TRY(acquire(&right_sibling, header.next_id, true));
+            CDB_TRY(acquire(&right_sibling, true));
             right_sibling.header.prev_id = right.page.id().page_id;
             right.header.next_id = right_sibling.page.id().page_id;
             release(std::move(right_sibling));
@@ -1055,7 +1053,7 @@ auto Tree::resolve_underflow(Node node, const Slice &anchor) -> Status
         CDB_EXPECT_FALSE(parent_id.is_null());
 
         Node parent {LogicalPageId {m_root_id->table_id, parent_id}};
-        CDB_TRY(acquire(&parent, parent_id, true));
+        CDB_TRY(acquire(&parent, true));
         // NOTE: Searching for the anchor key from the node we took from should always give us the correct index
         //       due to the B+-tree ordering rules.
         bool exact;
@@ -1107,7 +1105,7 @@ auto Tree::external_merge_left(Node &left, Node &right, Node &parent, std::size_
 
     if (!right.header.next_id.is_null()) {
         Node right_sibling {LogicalPageId {m_root_id->table_id, right.header.next_id}};
-        CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
+        CDB_TRY(acquire(&right_sibling, true));
         right_sibling.header.prev_id = left.page.id().page_id;
         release(std::move(right_sibling));
     }
@@ -1167,7 +1165,7 @@ auto Tree::external_merge_right(Node &left, Node &right, Node &parent, std::size
     }
     if (!right.header.next_id.is_null()) {
         Node right_sibling {LogicalPageId {m_root_id->table_id, right.header.next_id}};
-        CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
+        CDB_TRY(acquire(&right_sibling, true));
         right_sibling.header.prev_id = left.page.id().page_id;
         release(std::move(right_sibling));
     }
@@ -1193,7 +1191,7 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
 
     if (index > 0) {
         Node left {LogicalPageId {m_root_id->table_id, read_child_id(parent, index - 1)}};
-        CDB_TRY(acquire(&left, read_child_id(parent, index - 1), true));
+        CDB_TRY(acquire(&left, true));
         if (left.header.cell_count == 1) {
             CDB_TRY(merge_right(left, std::move(node), parent, index - 1));
             release(std::move(left));
@@ -1204,7 +1202,7 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
         release(std::move(left));
     } else {
         Node right {LogicalPageId {m_root_id->table_id, read_child_id(parent, index + 1)}};
-        CDB_TRY(acquire(&right, read_child_id(parent, index + 1), true));
+        CDB_TRY(acquire(&right, true));
         if (right.header.cell_count == 1) {
             CDB_TRY(merge_left(node, std::move(right), parent, index));
             release(std::move(node));
@@ -1481,7 +1479,7 @@ auto Tree::find_highest(Node *out) const -> Status
     return Status::ok();
 }
 
-auto Tree::vacuum_step(Page &free, TableSet &, Id last_id) -> Status
+auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
 {
     CDB_EXPECT_NE(free.id().page_id, last_id);
 
@@ -1539,17 +1537,16 @@ auto Tree::vacuum_step(Page &free, TableSet &, Id last_id) -> Status
             release(std::move(parent));
             break;
         }
-        case PointerMap::kTreeRoot:
-            // TODO: Need that reverse mapping from table root page ID to table ID! Vacuum won't work
-            //       properly for open tables until that happens (they won't know their root changed).
-//            if (auto *state = tables.reverse_get(last_id)) {
-//                state->root_id.page_id = free.id().page_id;
-//            }
+        case PointerMap::kTreeRoot: {
+            if (auto *state = tables.get(entry.back_ptr)) {
+                state->root_id.page_id = free.id().page_id;
+            }
             // Tree root pages are also node pages (with no parent page). Handle them the same, but
             // note the guard against updating the parent page's child pointers below.
             [[fallthrough]];
+        }
         case PointerMap::kTreeNode: {
-            if (!entry.back_ptr.is_null()) {
+            if (entry.type != PointerMap::kTreeRoot) {
                 // Back pointer points to another node, i.e. this is not a root. Search through the
                 // parent for the target child pointer and overwrite it with the new page ID.
                 Node parent {LogicalPageId {m_root_id->table_id, entry.back_ptr}};

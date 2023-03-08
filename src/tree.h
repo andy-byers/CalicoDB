@@ -70,7 +70,6 @@ struct Node {
     PageSize overflow_index {};
     PageSize slots_offset {};
     PageSize gap_size {};
-    bool is_root {};
 };
 
 auto manual_defragment(Node &node) -> void;
@@ -250,7 +249,7 @@ private:
     [[nodiscard]] auto cell_scratch() -> char *;
 
     [[nodiscard]] auto allocate(Node *out, bool is_external) -> Status;
-    [[nodiscard]] auto acquire(Node *out, Id pid, bool upgrade) const -> Status;
+    [[nodiscard]] auto acquire(Node *out, bool upgrade) const -> Status;
     [[nodiscard]] auto destroy(Node node) -> Status;
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;

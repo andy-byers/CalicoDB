@@ -124,11 +124,6 @@ public:
         return 0;
     }
 
-    [[nodiscard]] auto log_commit(const LogicalPageId &, const FileHeader &, Lsn *) -> Status override
-    {
-        return Status::ok();
-    }
-
     [[nodiscard]] auto log_delta(const LogicalPageId &, const Slice &, const ChangeBuffer &, Lsn *) -> Status override
     {
         return Status::ok();
@@ -166,14 +161,13 @@ public:
         : scratch(kPageSize, '\x00')
     {
         tables.add(LogicalPageId::unknown_page(Id::root()));
-        tables.get(Id::root())->checkpoint_lsn.value = static_cast<std::uint64_t>(-1);
         Pager *temp;
         EXPECT_OK(Pager::open({
                                   kFilename,
                                   env.get(),
                                   &wal,
                                   nullptr,
-                                  &tables,
+                                  &commit_lsn,
                                   &status,
                                   &in_txn,
                                   kFrameCount,
@@ -191,6 +185,7 @@ public:
     std::string collect_scratch;
     std::unique_ptr<Pager> pager;
     tools::RandomGenerator random {1'024 * 1'024 * 8};
+    Lsn commit_lsn;
 };
 
 inline auto expect_ok(const Status &s) -> void

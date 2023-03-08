@@ -3,11 +3,11 @@
 
 namespace calicodb {
 
-TableImpl::TableImpl(DBImpl &db, TableState &state, Status &status, std::size_t &batch_size)
-    : m_db {&db},
+TableImpl::TableImpl(DBImpl &db, TableState &state, DBState &db_state)
+    : m_db_state {&db_state},
       m_state {&state},
-      m_status {&status},
-      m_batch_size {&batch_size}
+      m_db {&db}
+
 {
 }
 
@@ -36,28 +36,32 @@ auto TableImpl::put(const Slice &key, const Slice &value) -> Status
     if (key.is_empty()) {
         return Status::invalid_argument("key is empty");
     }
-    CDB_TRY(*m_status);
+    CDB_TRY(m_db_state->status);
 
-    if (auto s = m_state->tree->put(key, value); !s.is_ok()) {
-        if (m_status->is_ok()) {
-            *m_status = s;
+    bool record_exists;
+    if (auto s = m_state->tree->put(key, value, &record_exists); !s.is_ok()) {
+        if (m_db_state->status.is_ok()) {
+            m_db_state->status = s;
         }
         return s;
     }
-    ++*m_batch_size;
+    m_db_state->record_count += !record_exists;
+    m_db_state->bytes_written += key.size() + value.size();
+    ++m_db_state->batch_size;
     return Status::ok();
 }
 
 auto TableImpl::erase(const Slice &key) -> Status
 {
-    CDB_TRY(*m_status);
+    CDB_TRY(m_db_state->status);
 
     auto s = m_state->tree->erase(key);
     if (s.is_ok()) {
-        --*m_batch_size;
+        ++m_db_state->batch_size;
+        --m_db_state->record_count;
     } else if (!s.is_not_found()) {
-        if (m_status->is_ok()) {
-            *m_status = s;
+        if (m_db_state->status.is_ok()) {
+            m_db_state->status = s;
         }
     }
     return s;

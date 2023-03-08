@@ -10,6 +10,13 @@ namespace calicodb
 
 class Tree;
 
+struct DBState {
+    Status status;
+    std::size_t batch_size {};
+    std::size_t record_count {};
+    std::size_t bytes_written {};
+};
+
 class AlignedBuffer
 {
 public:

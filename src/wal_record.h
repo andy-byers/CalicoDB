@@ -95,29 +95,6 @@ struct DeltaDescriptor {
     std::vector<Delta> deltas;
 };
 
-/* Commit payload format:
- *
- *      Offset  Size  Field
- *     ---------------------------
- *      0       1     Flags
- *      1       8     LSN
- *      9       8     Table ID
- *      17      50    Header
- *
- * A commit payload contains the entire root page header, as well as the table ID of the table
- * being committed. The page LSN of the database root page should equal the LSN of this record
- * after a commit is replayed (there won't be a delta containing the updated page LSN: this
- * record holds all changes made to the root during a commit, except for the updated page LSN,
- * which is implied).
- */
-struct CommitDescriptor {
-    static constexpr auto kFixedSize = 17 + FileHeader::kSize;
-
-    Id table_id;
-    Lsn lsn;
-    FileHeader header {};
-};
-
 /* Vacuum records signify the start or end of a vacuum operation.
  *
  *      Offset  Size  Field
@@ -158,7 +135,6 @@ struct ImageDescriptor {
 
 using PayloadDescriptor = std::variant<
     std::monostate,
-    CommitDescriptor,
     DeltaDescriptor,
     ImageDescriptor,
     VacuumDescriptor>;

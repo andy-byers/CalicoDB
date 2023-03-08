@@ -136,35 +136,6 @@ TEST_F(WalPayloadTests, DeltaPayloadEncoding)
     }));
 }
 
-TEST_F(WalPayloadTests, CommitPayloadEncoding)
-{
-    WalRecordGenerator generator;
-    FileHeader header;
-    header.magic_code = 1;
-    header.header_crc = 2;
-    header.page_count = 3;
-    header.record_count = 4;
-    header.freelist_head = Id {5};
-    header.last_table_id = Id {6};
-    header.commit_lsn = Lsn {7};
-    header.page_size = 8;
-    const auto payload_in = encode_commit_payload(Lsn {123}, LogicalPageId {Id {456}, Id {789}}, header, scratch.data());
-    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
-    ASSERT_TRUE(std::holds_alternative<CommitDescriptor>(payload_out));
-    const auto descriptor = std::get<CommitDescriptor>(payload_out);
-    ASSERT_EQ(descriptor.lsn.value, 123);
-    ASSERT_EQ(descriptor.table_id.value, 456);
-    ASSERT_EQ(header.magic_code, 1);
-    ASSERT_EQ(header.header_crc, 2);
-    ASSERT_EQ(header.page_count, 3);
-    ASSERT_EQ(header.record_count, 4);
-    ASSERT_EQ(header.freelist_head, Id {5});
-    ASSERT_EQ(header.last_table_id, Id {6});
-    ASSERT_EQ(header.commit_lsn, Lsn {7});
-    ASSERT_EQ(header.page_size, 8);
-
-}
-
 TEST_F(WalPayloadTests, VacuumPayloadEncoding)
 {
     WalRecordGenerator generator;
@@ -684,48 +655,6 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
         ASSERT_EQ(descriptor.deltas[i].offset, delta[i].offset);
         ASSERT_EQ(descriptor.deltas[i].data, image.range(delta[i].offset, delta[i].size));
     }
-}
-
-TEST_F(WalTests, UnderstandsCommitRecords)
-{
-    ASSERT_OK(wal->start_writing());
-    ASSERT_EQ(wal->bytes_written(), 0);
-    const auto image = random.Generate(kPageSize);
-    ChangeBuffer delta {
-        {100, 10},
-        {200, 20},
-        {300, 30},
-    };
-    FileHeader header;
-    header.magic_code = 1;
-    header.header_crc = 2;
-    header.page_count = 3;
-    header.record_count = 4;
-    header.freelist_head = Id {5};
-    header.last_table_id = Id {6};
-    header.commit_lsn = Lsn {7};
-    header.page_size = 8;
-
-    ASSERT_OK(wal->log_commit(LogicalPageId {Id {12}, Id {34}}, header, nullptr));
-    ASSERT_OK(wal->flush());
-
-    std::vector<std::string> payloads;
-    ASSERT_OK(read_segment(Id {1}, &payloads));
-    ASSERT_EQ(payloads.size(), 1);
-
-    auto payload = decode_payload(payloads[0]);
-    ASSERT_TRUE(std::holds_alternative<CommitDescriptor>(payload));
-    auto descriptor = std::get<CommitDescriptor>(payload);
-    ASSERT_EQ(descriptor.lsn, Lsn {1});
-    ASSERT_EQ(descriptor.table_id, Id {12});
-    ASSERT_EQ(header.magic_code, 1);
-    ASSERT_EQ(header.header_crc, 2);
-    ASSERT_EQ(header.page_count, 3);
-    ASSERT_EQ(header.record_count, 4);
-    ASSERT_EQ(header.freelist_head, Id {5});
-    ASSERT_EQ(header.last_table_id, Id {6});
-    ASSERT_EQ(header.commit_lsn, Lsn {7});
-    ASSERT_EQ(header.page_size, 8);
 }
 
 TEST_F(WalTests, UnderstandsVacuumRecords)

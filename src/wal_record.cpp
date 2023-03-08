@@ -97,28 +97,6 @@ static auto decode_vacuum_payload(const Slice &in) -> VacuumDescriptor
     return info;
 }
 
-static auto decode_commit_payload(const Slice &in) -> CommitDescriptor
-{
-    CommitDescriptor info;
-    auto data = in.data();
-
-    // Payload type (1 B)
-    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kCommitPayload);
-    ++data;
-
-    // LSN (8 B)
-    info.lsn.value = get_u64(data);
-    data += sizeof(Lsn);
-
-    // Table ID (8 B)
-    info.table_id.value = get_u64(data);
-    data += sizeof(Id);
-
-    // Header (50 B)
-    info.header.read(data);
-    return info;
-}
-
 static auto decode_deltas_payload(const Slice &in) -> DeltaDescriptor
 {
     DeltaDescriptor info;
@@ -192,8 +170,6 @@ auto decode_payload(const Slice &in) -> PayloadDescriptor
         return decode_deltas_payload(in);
     case WalPayloadType::kImagePayload:
         return decode_full_image_payload(in);
-    case WalPayloadType::kCommitPayload:
-        return decode_commit_payload(in);
     case WalPayloadType::kVacuumPayload:
         return decode_vacuum_payload(in);
     default:
@@ -215,26 +191,6 @@ auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice
     // Start flag (1 B)
     *buffer = static_cast<char>(is_start);
     return Slice {saved, VacuumDescriptor::kFixedSize};
-}
-
-auto encode_commit_payload(Lsn lsn, const LogicalPageId &root_id, const FileHeader &header, char *buffer) -> Slice
-{
-    auto saved = buffer;
-
-    // Payload type (1 B)
-    *buffer++ = WalPayloadType::kCommitPayload;
-
-    // LSN (8 B)
-    put_u64(buffer, lsn.value);
-    buffer += sizeof(Lsn);
-
-    // Table ID (8 B)
-    put_u64(buffer, root_id.table_id.value);
-    buffer += sizeof(Id);
-
-    // Header (50 B)
-    header.write(buffer);
-    return Slice {saved, CommitDescriptor::kFixedSize};
 }
 
 auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice
