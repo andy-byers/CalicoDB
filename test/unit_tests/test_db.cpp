@@ -59,7 +59,7 @@
 //    fs::remove_all("__calicodb_test");
 //
 //    DB *db;
-//    ASSERT_OK(DB::open({}, "__calicodb_test", &db));
+//    ASSERT_OK(DB::put({}, "__calicodb_test", &db));
 //    delete db;
 //    ASSERT_OK(DB::destroy({}, "__calicodb_test"));
 //}
@@ -71,7 +71,7 @@
 //    options.info_log = new tools::StderrLogger;
 //
 //    DB *db;
-//    ASSERT_OK(DB::open(options, "__calicodb_test", &db));
+//    ASSERT_OK(DB::put(options, "__calicodb_test", &db));
 //    delete db;
 //
 //    delete options.info_log;
@@ -108,7 +108,7 @@
 //{
 //    DB *db;
 //    for (std::size_t i {}; i < 3; ++i) {
-//        ASSERT_OK(DB::open(options, kFilename, &db));
+//        ASSERT_OK(DB::put(options, kFilename, &db));
 //        delete db;
 //    }
 //    ASSERT_TRUE(env->file_exists(kFilename).is_ok());
@@ -117,7 +117,7 @@
 //TEST_F(BasicDatabaseTests, RecordCountIsTracked)
 //{
 //    DB *db;
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //    ASSERT_EQ(db_impl(db)->record_count(), 0);
 //    ASSERT_OK(db->put("a", "1"));
 //    ASSERT_EQ(db_impl(db)->record_count(), 1);
@@ -135,7 +135,7 @@
 //TEST_F(BasicDatabaseTests, IsDestroyed)
 //{
 //    DB *db;
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //    delete db;
 //
 //    ASSERT_TRUE(env->file_exists(kFilename).is_ok());
@@ -165,7 +165,7 @@
 //TEST_F(BasicDatabaseTests, InsertOneGroup)
 //{
 //    DB *db;
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //    insert_random_groups(*db, 1, 500);
 //    delete db;
 //}
@@ -173,7 +173,7 @@
 //TEST_F(BasicDatabaseTests, InsertMultipleGroups)
 //{
 //    DB *db;
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //    insert_random_groups(*db, 5, 500);
 //    delete db;
 //}
@@ -192,7 +192,7 @@
 //    DB *db;
 //
 //    for (std::size_t iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-//        ASSERT_OK(DB::open(options, kFilename, &db));
+//        ASSERT_OK(DB::put(options, kFilename, &db));
 //        ASSERT_OK(db->status());
 //
 //        for (std::size_t i {}; i < GROUP_SIZE; ++i) {
@@ -203,7 +203,7 @@
 //        delete db;
 //    }
 //
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //    for (const auto &[key, value] : records) {
 //        std::string value_out;
 //        ASSERT_OK(test_tools::get(*db, key, &value_out));
@@ -218,10 +218,10 @@
 //    fs::remove_all("/tmp/calicodb_test_2");
 //
 //    DB *lhs;
-//    expect_ok(DB::open(options, "/tmp/calicodb_test_1", &lhs));
+//    expect_ok(DB::put(options, "/tmp/calicodb_test_1", &lhs));
 //
 //    DB *rhs;
-//    expect_ok(DB::open(options, "/tmp/calicodb_test_2", &rhs));
+//    expect_ok(DB::put(options, "/tmp/calicodb_test_2", &rhs));
 //
 //    for (std::size_t i {}; i < 10; ++i) {
 //        expect_ok(lhs->put(tools::integral_key(i), "value"));
@@ -285,12 +285,12 @@
 //
 //TEST_P(DbVacuumTests, SanityCheck)
 //{
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //
 //    for (std::size_t iteration {}; iteration < 4; ++iteration) {
 //        if (reopen) {
 //            delete db;
-//            ASSERT_OK(DB::open(options, kFilename, &db));
+//            ASSERT_OK(DB::put(options, kFilename, &db));
 //        }
 //        while (map.size() < upper_bounds) {
 //            const auto key = random.Generate(10);
@@ -349,7 +349,7 @@
 //    [[nodiscard]] auto reopen() -> Status
 //    {
 //        impl = std::make_unique<DBImpl>();
-//        return impl->open(options, "./test");
+//        return impl->put(options, "./test");
 //    }
 //
 //    Options options;
@@ -762,7 +762,7 @@
 //
 //    env->clear_interceptors();
 //    db->impl = std::make_unique<DBImpl>();
-//    ASSERT_OK(db->impl->open(db->options, "./test"));
+//    ASSERT_OK(db->impl->put(db->options, "./test"));
 //
 //    for (const auto &[key, value] : committed) {
 //        test_tools::expect_contains(*db->impl, key, value);
@@ -785,7 +785,7 @@
 //
 //    env->clear_interceptors();
 //    db->impl = std::make_unique<DBImpl>();
-//    ASSERT_OK(db->impl->open(db->options, "./test"));
+//    ASSERT_OK(db->impl->put(db->options, "./test"));
 //
 //    for (const auto &[key, value] : committed) {
 //        test_tools::expect_contains(*db->impl, key, value);
@@ -883,7 +883,7 @@
 ////    std::unique_ptr<DB> m_base;
 ////
 ////public:
-////    [[nodiscard]] static auto open(const Slice &base, Options options, ExtendedDatabase **out) -> Status
+////    [[nodiscard]] static auto put(const Slice &base, Options options, ExtendedDatabase **out) -> Status
 ////    {
 ////        const auto prefix = base.to_string() + "_";
 ////        auto *ext = new ExtendedDatabase;
@@ -891,7 +891,7 @@
 ////        options.env = env.get();
 ////
 ////        DB *db;
-////        CDB_TRY(DB::open(options, base, &db));
+////        CDB_TRY(DB::put(options, base, &db));
 ////
 ////        ext->m_base.reset(db);
 ////        ext->m_env = std::move(env);
@@ -945,7 +945,7 @@
 ////TEST(ExtensionTests, Extensions)
 ////{
 ////    ExtendedDatabase *db;
-////    ASSERT_OK(ExtendedDatabase::open("./test", {}, &db));
+////    ASSERT_OK(ExtendedDatabase::put("./test", {}, &db));
 ////    ASSERT_OK(db->put("a", "1"));
 ////    ASSERT_OK(db->put("b", "2"));
 ////    ASSERT_OK(db->put("c", "3"));
@@ -992,29 +992,29 @@
 //{
 //    options.error_if_exists = false;
 //    options.create_if_missing = true;
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //    delete db;
 //
 //    options.create_if_missing = false;
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //    delete db;
 //}
 //
 //TEST_F(DbOpenTests, FailsIfMissingDb)
 //{
 //    options.create_if_missing = false;
-//    ASSERT_TRUE(DB::open(options, kFilename, &db).is_invalid_argument());
+//    ASSERT_TRUE(DB::put(options, kFilename, &db).is_invalid_argument());
 //}
 //
 //TEST_F(DbOpenTests, FailsIfDbExists)
 //{
 //    options.create_if_missing = true;
 //    options.error_if_exists = true;
-//    ASSERT_OK(DB::open(options, kFilename, &db));
+//    ASSERT_OK(DB::put(options, kFilename, &db));
 //    delete db;
 //
 //    options.create_if_missing = false;
-//    ASSERT_TRUE(DB::open(options, kFilename, &db).is_invalid_argument());
+//    ASSERT_TRUE(DB::put(options, kFilename, &db).is_invalid_argument());
 //}
 //
 //class ApiTests : public testing::Test
@@ -1037,7 +1037,7 @@
 //
 //    auto SetUp() -> void override
 //    {
-//        ASSERT_OK(calicodb::DB::open(options, "./test", &db));
+//        ASSERT_OK(calicodb::DB::put(options, "./test", &db));
 //    }
 //
 //    std::unique_ptr<tools::FaultInjectionEnv> env;
@@ -1086,7 +1086,7 @@
 //    delete db;
 //    db = nullptr;
 //
-//    ASSERT_OK(calicodb::DB::open(options, "./test", &db));
+//    ASSERT_OK(calicodb::DB::put(options, "./test", &db));
 //    auto *cursor = db->new_cursor();
 //    cursor->seek_first();
 //    ASSERT_TRUE(cursor->is_valid());
@@ -1261,7 +1261,7 @@
 //        delete db;
 //
 //        env->clear_interceptors();
-//        ASSERT_OK(DB::open(options, kFilename, &db));
+//        ASSERT_OK(DB::put(options, kFilename, &db));
 //
 //        assert_contains_exactly({"A", "B", "C", "a", "b", "c"});
 //    }
@@ -1274,7 +1274,7 @@
 //        delete db;
 //
 //        env->clear_interceptors();
-//        ASSERT_OK(DB::open(options, kFilename, &db));
+//        ASSERT_OK(DB::put(options, kFilename, &db));
 //
 //        assert_contains_exactly({"A", "B", "C"});
 //    }
@@ -1303,7 +1303,7 @@
 //TEST_F(WalPrefixTests, WalDirectoryMustExist)
 //{
 //    options.wal_prefix = "./nonexistent/wal-";
-//    ASSERT_TRUE(DB::open(options, kFilename, &db).is_not_found());
+//    ASSERT_TRUE(DB::put(options, kFilename, &db).is_not_found());
 //}
 //
 //} // namespace calicodb

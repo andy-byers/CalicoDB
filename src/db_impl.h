@@ -19,54 +19,62 @@ class DBImpl;
 class Env;
 class TableImpl;
 class WriteAheadLog;
+struct TableState;
+
+template<class T>
+using IdMap = std::unordered_map<Id, T, Id::Hash>;
+
+class TableSet {
+public:
+    using Iterator = IdMap<TableState>::const_iterator;
+
+    [[nodiscard]] auto get(Id table_id) const -> const TableState *;
+    [[nodiscard]] auto get(Id table_id) -> TableState *;
+    [[nodiscard]] auto begin() const -> Iterator;
+    [[nodiscard]] auto end() const -> Iterator;
+    auto add(const LogicalPageId &root_id) -> void;
+    auto erase(Id table_id) -> void;
+
+private:
+    IdMap<TableState> m_tables;
+};
 
 class DBImpl : public DB
 {
 public:
     friend class DB;
 
-    DBImpl() = default;
+    explicit DBImpl(const Options &options, const Options &sanitized, std::string filename);
     ~DBImpl() override;
 
     [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
     [[nodiscard]] static auto repair(const Options &options, const std::string &filename) -> Status;
-    [[nodiscard]] auto open(const Options &options, const Slice &filename) -> Status;
+    [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
     [[nodiscard]] auto new_table(const TableOptions &options, const Slice &name, Table **out) -> Status override;
+    [[nodiscard]] auto checkpoint() -> Status override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
 
     [[nodiscard]] auto create_table(const Slice &name, LogicalPageId *root_id) -> Status;
-    [[nodiscard]] auto open_table(const LogicalPageId &root_id, TableState **out) -> Status;
-    [[nodiscard]] auto commit_table(const LogicalPageId &root_id, TableState &state) -> Status;
+    [[nodiscard]] auto open_table(TableState &out) -> Status;
     auto close_table(const LogicalPageId &root_id) -> void;
 
     [[nodiscard]] auto record_count() const -> std::size_t;
+    [[nodiscard]] auto TEST_tables() const -> const TableSet &;
     auto TEST_validate() const -> void;
 
     WriteAheadLog *wal {};
     Pager *pager {};
 
 private:
-    [[nodiscard]] auto do_open(Options sanitized) -> Status;
-    [[nodiscard]] auto ensure_consistency() -> Status;
+    [[nodiscard]] auto ensure_consistency(IdMap<LogRange> ranges) -> Status;
+    [[nodiscard]] auto do_checkpoint() -> Status;
     [[nodiscard]] auto load_state() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
-    auto save_state(Page &root, Lsn checkpoint_lsn) const -> void;
 
     [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> *out) -> Status;
-
-    /* Determine the header checkpoint LSN for every table in the database. This amounts to iterating
-     * over the root table's records and finding the table root pages, from which the checkpoint LSNs
-     * are read.
-     */
-    [[nodiscard]] auto find_checkpoints(std::unordered_map<Id, Lsn, Id::Hash> *checkpoints) -> Status;
-
-    struct LogRange {
-        Lsn commit_lsn;
-        Lsn recent_lsn;
-    };
 
     /* Phase 1: Read the WAL and apply missing updates until we reach the end. Maintain a commit LSN
      * and a most-recent LSN for each table we encounter. Then, read the WAL again, this time reverting
@@ -76,7 +84,7 @@ private:
      * Update each table's header LSN to match the most-recent LSN created for that table. This prevents
      * the WAL records we just reverted from being considered again if we crash while cleaning up.
      */
-    [[nodiscard]] auto recovery_phase_1(std::unordered_map<Id, LogRange, Id::Hash> ranges) -> Status;
+    [[nodiscard]] auto recovery_phase_1(Lsn *final_lsn) -> Status;
 
     /* Phase 2: Flush the page cache, resize the database file to match the header page count, then remove
      * all WAL segments. This part is only run when the database is closed, otherwise, we just flush the
@@ -87,11 +95,8 @@ private:
     std::string m_reader_data;
     std::string m_reader_tail;
 
-    // State for open tables. Tables are keyed by their table ID.
-    std::unordered_map<Id, TableState, Id::Hash> m_tables;
-
-    // Mapping from root page IDs to table IDs for open tables. This is necessary for vacuum.
-    std::unordered_map<Id, Id, Id::Hash> m_root_map;
+    // State for put tables. Tables are keyed by their table ID.
+    TableSet m_tables;
 
     // Pointer to the root table state, which is kept in m_tables.
     TableState *m_root {};
@@ -99,12 +104,12 @@ private:
     mutable Status m_status;
     std::string m_filename;
     std::string m_wal_prefix;
-    std::string m_scratch;
     Env *m_env {};
     InfoLogger *m_info_log {};
     std::size_t m_txn_size {};
     std::size_t m_record_count {};
     std::size_t m_bytes_written {};
+    std::size_t m_batch_size {};
     Id m_freelist_head;
     Id m_last_table_id;
     bool m_owns_env {};
@@ -112,7 +117,7 @@ private:
     bool m_is_running {};
 };
 
-auto setup(const std::string &, Env &, const Options &, FileHeader &state) -> Status;
+auto setup(const std::string &, Env &, const Options &, FileHeader *state) -> Status;
 
 } // namespace calicodb
 

@@ -76,8 +76,10 @@ auto WriteAheadLog::current_lsn() const -> Lsn
 
 auto WriteAheadLog::log(const Slice &payload) -> Status
 {
+    std::fprintf(stderr, "LSN = %llu\n", get_u64(payload.data() + 1));
+
     if (m_writer == nullptr) {
-        return Status::logic_error("segment file is not open");
+        return Status::logic_error("segment file is not put");
     }
     m_bytes_written += payload.size();
 
@@ -99,14 +101,14 @@ auto WriteAheadLog::log_vacuum(bool is_start, Lsn *out) -> Status
         m_last_lsn, is_start, m_data_buffer.data()));
 }
 
-auto WriteAheadLog::log_commit(const LogicalPageId &root_id, const Slice &image, const PageDelta &delta, Lsn *out) -> Status
+auto WriteAheadLog::log_commit(const LogicalPageId &root_id, const FileHeader &header, Lsn *out) -> Status
 {
     ++m_last_lsn.value;
     if (out != nullptr) {
         *out = m_last_lsn;
     }
     return log(encode_commit_payload(
-        m_last_lsn, root_id, image, delta, m_data_buffer.data()));
+        m_last_lsn, root_id, header, m_data_buffer.data()));
 }
 
 auto WriteAheadLog::log_delta(const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status
@@ -132,7 +134,7 @@ auto WriteAheadLog::log_image(const LogicalPageId &page_id, const Slice &image, 
 auto WriteAheadLog::flush() -> Status
 {
     if (m_writer == nullptr) {
-        return Status::logic_error("segment file is not open");
+        return Status::logic_error("segment file is not put");
     }
     CDB_TRY(m_writer->flush());
     return m_file->sync();
@@ -180,23 +182,22 @@ auto WriteAheadLog::close_writer() -> Status
     m_writer = nullptr;
 
     auto id = m_set.last();
-    ++id.value;
-
-    if (written) {
-        m_set.add_segment(id);
-    } else {
+    if (!written) {
         CDB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
+        m_set.remove_after(m_set.id_before(id));
     }
     return Status::ok();
 }
 
 auto WriteAheadLog::open_writer() -> Status
 {
+    // Writer is always opened on a new segment file.
     auto id = m_set.last();
     ++id.value;
 
     CDB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), &m_file));
     m_writer = new WalWriter {*m_file, m_tail_buffer};
+    m_set.add_segment(id);
     return Status::ok();
 }
 

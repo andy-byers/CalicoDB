@@ -546,14 +546,15 @@ class TreeTests
 public:
     TreeTests()
         : param {GetParam()},
-          collect_scratch(param.page_size, '\x00')
+          collect_scratch(param.page_size, '\x00'),
+          root_id {LogicalPageId::root()}
     {
     }
 
     auto SetUp() -> void override
     {
         ASSERT_OK(Tree::create(*pager, Id::root(), freelist_head));
-        tree = std::make_unique<Tree>(*pager, LogicalPageId::root(), freelist_head);
+        tree = std::make_unique<Tree>(*pager, &root_id, freelist_head);
     }
 
     [[nodiscard]] auto make_long_key(std::size_t value) const
@@ -578,6 +579,7 @@ public:
     TreeTestParameters param;
     std::string collect_scratch;
     std::unique_ptr<Tree> tree;
+    LogicalPageId root_id;
 };
 
 TEST_P(TreeTests, ConstructsAndDestructs)
@@ -1029,7 +1031,7 @@ TEST_P(PointerMapTests, FirstPointerMapIsPage2)
     Page map_page {LogicalPageId::unknown_table(Id {2})};
     map_page.TEST_populate(buffer, true);
 
-    ASSERT_OK(PointerMap::write_entry(*pager, Id {3}, PointerMap::Entry {Id {33}, PointerMap::kNode}));
+    ASSERT_OK(PointerMap::write_entry(*pager, Id {3}, PointerMap::Entry {Id {33}, PointerMap::kTreeNode}));
     ASSERT_OK(PointerMap::write_entry(*pager, Id {4}, PointerMap::Entry {Id {44}, PointerMap::kFreelistLink}));
     ASSERT_OK(PointerMap::write_entry(*pager, Id {5}, PointerMap::Entry {Id {55}, PointerMap::kOverflowLink}));
 
@@ -1041,7 +1043,7 @@ TEST_P(PointerMapTests, FirstPointerMapIsPage2)
     ASSERT_EQ(entry_1.back_ptr.value, 33);
     ASSERT_EQ(entry_2.back_ptr.value, 44);
     ASSERT_EQ(entry_3.back_ptr.value, 55);
-    ASSERT_EQ(entry_1.type, PointerMap::kNode);
+    ASSERT_EQ(entry_1.type, PointerMap::kTreeNode);
     ASSERT_EQ(entry_2.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry_3.type, PointerMap::kOverflowLink);
 }
@@ -1058,7 +1060,7 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
     for (std::size_t i {}; i < map_size() + 10; ++i) {
         if (i != map_size()) {
             const Id id {i + 3};
-            const PointerMap::Entry entry {id, PointerMap::kNode};
+            const PointerMap::Entry entry {id, PointerMap::kTreeNode};
             ASSERT_OK(PointerMap::write_entry(*pager, id, entry));
         }
     }
@@ -1068,7 +1070,7 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
             PointerMap::Entry entry;
             ASSERT_OK(PointerMap::read_entry(*pager, id, &entry));
             ASSERT_EQ(entry.back_ptr.value, id.value);
-            ASSERT_EQ(entry.type, PointerMap::kNode);
+            ASSERT_EQ(entry.type, PointerMap::kTreeNode);
         }
     }
 }
@@ -1165,8 +1167,9 @@ public:
 
         bool vacuumed;
         Id target {pager->page_count()};
+        TableSet table_set;
         do {
-            ASSERT_OK(tree->vacuum_one(target, &vacuumed));
+            ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
             --target.value;
         } while (vacuumed);
         ASSERT_TRUE(target.is_null());
@@ -1192,10 +1195,11 @@ public:
                 itr = map.erase(itr);
             }
 
+            TableSet table_set;
             Id target {pager->page_count()};
             for (;;) {
                 bool vacuumed {};
-                ASSERT_OK(tree->vacuum_one(target, &vacuumed));
+                ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
                 if (!vacuumed) {
                     break;
                 }
@@ -1294,6 +1298,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
 
 TEST_P(VacuumTests, VacuumsFreelistInOrder)
 {
+    TableSet table_set;
     auto node_3 = allocate_node(true);
     auto node_4 = allocate_node(true);
     auto node_5 = allocate_node(true);
@@ -1310,7 +1315,7 @@ TEST_P(VacuumTests, VacuumsFreelistInOrder)
     // Page Contents: [1] [2] [3] [4] [X]
     // Page IDs:       1   2   3   4   5
     bool vacuumed {};
-    ASSERT_OK(tree->vacuum_one(Id {5}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {5}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
 
     PointerMap::Entry entry;
@@ -1321,7 +1326,7 @@ TEST_P(VacuumTests, VacuumsFreelistInOrder)
     // Page Types:     N   P   1
     // Page Contents: [1] [2] [3] [X] [X]
     // Page IDs:       1   2   3   4   5
-    ASSERT_OK(tree->vacuum_one(Id {4}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {4}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &entry));
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
@@ -1330,14 +1335,14 @@ TEST_P(VacuumTests, VacuumsFreelistInOrder)
     // Page Types:     N   P
     // Page Contents: [1] [2] [X] [X] [X]
     // Page IDs:       1   2   3   4   5
-    ASSERT_OK(tree->vacuum_one(Id {3}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {3}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_TRUE(freelist->is_empty());
 
     // Page Types:     N
     // Page Contents: [1] [X] [X] [X] [X]
     // Page IDs:       1   2   3   4   5
-    ASSERT_OK(tree->vacuum_one(Id {2}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {2}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
 
     // Page Types:     N
@@ -1349,6 +1354,7 @@ TEST_P(VacuumTests, VacuumsFreelistInOrder)
 
 TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
 {
+    TableSet table_set;
     auto node_3 = allocate_node(true);
     auto node_4 = allocate_node(true);
     auto node_5 = allocate_node(true);
@@ -1370,7 +1376,7 @@ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
     //     Page Contents: [a] [b] [e] [d] [ ]
     //     Page IDs:       1   2   3   4   5
     bool vacuumed {};
-    ASSERT_OK(tree->vacuum_one(Id {5}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {5}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     PointerMap::Entry entry;
     ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, &entry));
@@ -1386,7 +1392,7 @@ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
     // Page Types:     N   P   1
     // Page Contents: [a] [b] [e] [ ] [ ]
     // Page IDs:       1   2   3   4   5
-    ASSERT_OK(tree->vacuum_one(Id {4}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {4}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &entry));
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
@@ -1395,14 +1401,14 @@ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
     // Page Types:     N   P
     // Page Contents: [a] [b] [ ] [ ] [ ]
     // Page IDs:       1   2   3   4   5
-    ASSERT_OK(tree->vacuum_one(Id {3}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {3}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_TRUE(freelist->is_empty());
 
     // Page Types:     N
     // Page Contents: [a] [ ] [ ] [ ] [ ]
     // Page IDs:       1   2   3   4   5
-    ASSERT_OK(tree->vacuum_one(Id {2}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {2}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
 
     // Page Types:     N
@@ -1432,6 +1438,7 @@ TEST_P(VacuumTests, CleansUpOverflowPayloads)
 TEST_P(VacuumTests, VacuumFreelistSanityCheck)
 {
     std::default_random_engine rng {42};
+    TableSet table_set;
 
     for (std::size_t iteration {}; iteration < 1'000; ++iteration) {
         std::vector<Node> nodes;
@@ -1449,11 +1456,11 @@ TEST_P(VacuumTests, VacuumFreelistSanityCheck)
         Id target {pager->page_count()};
         bool vacuumed {};
         for (std::size_t i {}; i < kFrameCount; ++i) {
-            ASSERT_OK(tree->vacuum_one(target, &vacuumed));
+            ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
             ASSERT_TRUE(vacuumed);
             --target.value;
         }
-        ASSERT_OK(tree->vacuum_one(target, &vacuumed));
+        ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
         ASSERT_FALSE(vacuumed);
         ASSERT_OK(pager->truncate(1));
         ASSERT_EQ(pager->page_count(), 1);
@@ -1462,11 +1469,12 @@ TEST_P(VacuumTests, VacuumFreelistSanityCheck)
 
 static auto vacuum_and_validate(VacuumTests &test, const std::string &value)
 {
+    TableSet table_set;
     bool vacuumed;
     ASSERT_EQ(test.pager->page_count(), 6);
-    ASSERT_OK(test.tree->vacuum_one(Id {6}, &vacuumed));
+    ASSERT_OK(test.tree->vacuum_one(Id {6}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
-    ASSERT_OK(test.tree->vacuum_one(Id {5}, &vacuumed));
+    ASSERT_OK(test.tree->vacuum_one(Id {5}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_OK(test.pager->truncate(4));
     ASSERT_EQ(test.pager->page_count(), 4);
@@ -1596,13 +1604,14 @@ TEST_P(VacuumTests, VacuumOverflowChainSanityCheck)
         reserved.pop_back();
     }
 
+    TableSet table_set;
     bool vacuumed;
     ASSERT_EQ(pager->page_count(), 12);
-    ASSERT_OK(tree->vacuum_one(Id {12}, &vacuumed));
-    ASSERT_OK(tree->vacuum_one(Id {11}, &vacuumed));
-    ASSERT_OK(tree->vacuum_one(Id {10}, &vacuumed));
-    ASSERT_OK(tree->vacuum_one(Id {9}, &vacuumed));
-    ASSERT_OK(tree->vacuum_one(Id {8}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {12}, table_set, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {11}, table_set, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {10}, table_set, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {9}, table_set, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {8}, table_set, &vacuumed));
     ASSERT_OK(pager->truncate(7));
     ASSERT_EQ(pager->page_count(), 7);
 
@@ -1651,9 +1660,10 @@ TEST_P(VacuumTests, VacuumsNodes)
     // Page IDs:       1   2   3   4
     ASSERT_EQ(pager->page_count(), 6);
     bool vacuumed {};
-    ASSERT_OK(tree->vacuum_one(Id {6}, &vacuumed));
+    TableSet table_set;
+    ASSERT_OK(tree->vacuum_one(Id {6}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
-    ASSERT_OK(tree->vacuum_one(Id {5}, &vacuumed));
+    ASSERT_OK(tree->vacuum_one(Id {5}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_OK(pager->truncate(4));
 
@@ -1738,7 +1748,8 @@ public:
     {
         Id root;
         EXPECT_OK(Tree::create(*pager, Id::root(), freelist_head, &root));
-        multi_tree.emplace_back(std::make_unique<Tree>(*pager, LogicalPageId {Id::root(), root}, freelist_head));
+        root_ids.emplace_back(LogicalPageId {Id::root(), root});
+        multi_tree.emplace_back(std::make_unique<Tree>(*pager, &root_ids.back(), freelist_head));
         return multi_tree.size() - 1;
     }
 
@@ -1768,6 +1779,7 @@ public:
 
     std::vector<std::unique_ptr<Tree>> multi_tree;
     std::vector<std::string> payload_values;
+    std::list<LogicalPageId> root_ids;
 };
 
 TEST_P(MultiTreeTests, CreateAdditionalTrees)

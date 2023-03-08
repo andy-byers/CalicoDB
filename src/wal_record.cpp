@@ -114,20 +114,8 @@ static auto decode_commit_payload(const Slice &in) -> CommitDescriptor
     info.table_id.value = get_u64(data);
     data += sizeof(Id);
 
-    // Page ID (8 B)
-    info.page_id.value = get_u64(data);
-    data += sizeof(Id);
-
-    // Delta offset (2 B)
-    info.delta.offset = get_u16(data);
-    data += sizeof(std::uint16_t);
-
-    // Delta size (2 B)
-    const auto size = get_u16(data);
-    data += sizeof(std::uint16_t);
-
-    // Delta (N B)
-    info.delta.data = Slice {data, size};
+    // Header (50 B)
+    info.header.read(data);
     return info;
 }
 
@@ -229,7 +217,7 @@ auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice
     return Slice {saved, VacuumDescriptor::kFixedSize};
 }
 
-auto encode_commit_payload(Lsn lsn, const LogicalPageId &root_id, const Slice &image, const PageDelta &delta, char *buffer) -> Slice
+auto encode_commit_payload(Lsn lsn, const LogicalPageId &root_id, const FileHeader &header, char *buffer) -> Slice
 {
     auto saved = buffer;
 
@@ -244,21 +232,9 @@ auto encode_commit_payload(Lsn lsn, const LogicalPageId &root_id, const Slice &i
     put_u64(buffer, root_id.table_id.value);
     buffer += sizeof(Id);
 
-    // Page ID (8 B)
-    put_u64(buffer, root_id.page_id.value);
-    buffer += sizeof(Id);
-
-    // Delta offset (2 B)
-    put_u16(buffer, static_cast<std::uint16_t>(delta.offset));
-    buffer += sizeof(std::uint16_t);
-
-    // Delta size (2 B)
-    put_u16(buffer, static_cast<std::uint16_t>(delta.size));
-    buffer += sizeof(std::uint16_t);
-
-    // Delta (N B)
-    std::memcpy(buffer, image.data() + delta.offset, delta.size);
-    return Slice {saved, CommitDescriptor::kFixedSize + delta.size};
+    // Header (50 B)
+    header.write(buffer);
+    return Slice {saved, CommitDescriptor::kFixedSize};
 }
 
 auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice

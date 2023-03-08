@@ -32,10 +32,8 @@ public:
 
     auto SetUp() -> void override
     {
-        tables[Id::root()] = TableState {
-            nullptr,
-            Lsn {static_cast<std::uint64_t>(-1)},
-        };
+        tables.add(LogicalPageId::root());
+        tables.get(Id::root())->checkpoint_lsn.value = static_cast<std::uint64_t>(-1);
 
         const WriteAheadLog::Parameters wal_param {
             kWalPrefix,
@@ -94,7 +92,7 @@ public:
     std::string tail_buffer;
     Pager *pager;
     WriteAheadLog *wal;
-    std::unordered_map<Id, TableState, Id::Hash> tables;
+    TableSet tables;
     tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
 
@@ -140,12 +138,12 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //        db_options.page_size = kMinPageSize;
 //        db_options.cache_size = kMinPageSize * 16;
 //        db_options.env = env.get();
-//        open();
+//        put();
 //    }
 //
 //    virtual ~RecoveryTestHarness()
 //    {
-//        close();
+//        erase();
 //    }
 //
 //    auto impl() const -> DBImpl *
@@ -153,7 +151,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //        return reinterpret_cast<DBImpl *>(db);
 //    }
 //
-//    void close()
+//    void erase()
 //    {
 //        delete db;
 //        db = nullptr;
@@ -161,7 +159,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //
 //    auto open_with_status(Options *options = nullptr) -> Status
 //    {
-//        close();
+//        erase();
 //        Options opts = db_options;
 //        if (options != nullptr) {
 //            opts = *options;
@@ -170,10 +168,10 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //            opts.env = env.get();
 //        }
 //        tail.resize(wal_block_size(opts.page_size));
-//        return DB::open(opts, db_prefix, &db);
+//        return DB::put(opts, db_prefix, &db);
 //    }
 //
-//    auto open(Options *options = nullptr) -> void
+//    auto put(Options *options = nullptr) -> void
 //    {
 //        ASSERT_OK(open_with_status(options));
 //    }
@@ -202,9 +200,9 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //
 //    auto remove_log_files() -> size_t
 //    {
-//        // Linux allows unlinking open files, but Windows does not.
+//        // Linux allows unlinking put files, but Windows does not.
 //        // Closing the db allows for file deletion.
-//        close();
+//        erase();
 //        std::vector<Id> logs = get_logs();
 //        for (const auto &log : logs) {
 //            EXPECT_OK(env->remove_file(encode_segment_name("./wal-", log)));
@@ -259,7 +257,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //    ASSERT_OK(put("b", "2"));
 //    ASSERT_OK(put("c", "3"));
 //    ASSERT_OK(db->commit());
-//    close();
+//    erase();
 //
 //    ASSERT_EQ(num_logs(), 0);
 //}
@@ -273,7 +271,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //
 //    ASSERT_OK(put("c", "X"));
 //    ASSERT_OK(put("d", "4"));
-//    open();
+//    put();
 //
 //    ASSERT_EQ(get("a"), "1");
 //    ASSERT_EQ(get("b"), "2");
@@ -291,7 +289,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //    ASSERT_OK(db->commit());
 //
 //    ASSERT_EQ(num_logs(), 1);
-//    open();
+//    put();
 //
 //    ASSERT_EQ(get("a"), "1");
 //    ASSERT_EQ(get("b"), "2");
@@ -305,7 +303,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //    ASSERT_OK(put("b", "2"));
 //    ASSERT_OK(db->commit());
 //    ASSERT_OK(put("c", "3"));
-//    open();
+//    put();
 //
 //    ASSERT_EQ(get("a"), "1");
 //    ASSERT_EQ(get("b"), "2");
@@ -324,7 +322,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //    }
 //
 //    for (std::size_t commit {}; commit < map.size(); ++commit) {
-//        open();
+//        put();
 //
 //        auto record = begin(map);
 //        for (std::size_t index {}; record != end(map); ++index, ++record) {
@@ -334,7 +332,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //                ASSERT_OK(db->put(record->first, record->second));
 //            }
 //        }
-//        open();
+//        put();
 //
 //        record = begin(map);
 //        for (std::size_t index {}; record != end(map); ++index, ++record) {
@@ -346,7 +344,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //                ASSERT_TRUE(db->get(record->first, &value).is_not_found());
 //            }
 //        }
-//        close();
+//        erase();
 //
 //        ASSERT_OK(DB::destroy(db_options, db_prefix));
 //    }
@@ -360,7 +358,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //    RecoverySanityCheck()
 //        : interceptor_prefix {std::get<0>(GetParam())}
 //    {
-//        open();
+//        put();
 //
 //        tools::RandomGenerator random {1'024 * 1'024 * 8};
 //        const std::size_t N {5'000};
@@ -391,7 +389,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //    auto validate() -> void
 //    {
 //        CLEAR_INTERCEPTORS();
-//        open();
+//        put();
 //
 //        for (const auto &[k, v] : map) {
 //            std::string value;
@@ -425,7 +423,7 @@ TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
 //
 //// TODO: Find some way to determine if an error occurred during the destructor. It happens in each
 ////       instance except for when we attempt to fail due to a WAL write error, since the WAL is not
-////       written during the close/recovery routine.
+////       written during the erase/recovery routine.
 //TEST_P(RecoverySanityCheck, FailureDuringClose)
 //{
 //    // The final transaction committed successfully, so the data we added should persist.

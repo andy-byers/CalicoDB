@@ -2,6 +2,8 @@
 #define CALICODB_TEST_UNIT_TESTS_H
 
 #include "calicodb/status.h"
+#include "db_impl.h"
+#include "table_impl.h"
 #include "env_posix.h"
 #include "page.h"
 #include "tools.h"
@@ -122,7 +124,7 @@ public:
         return 0;
     }
 
-    [[nodiscard]] auto log_commit(const LogicalPageId &, const Slice &, const PageDelta &, Lsn *) -> Status override
+    [[nodiscard]] auto log_commit(const LogicalPageId &, const FileHeader &, Lsn *) -> Status override
     {
         return Status::ok();
     }
@@ -163,10 +165,8 @@ public:
     TestWithPager()
         : scratch(kPageSize, '\x00')
     {
-        tables[Id::root()] = TableState {
-            nullptr,
-            Lsn {static_cast<std::uint64_t>(-1)},
-        };
+        tables.add(LogicalPageId::unknown_page(Id::root()));
+        tables.get(Id::root())->checkpoint_lsn.value = static_cast<std::uint64_t>(-1);
         Pager *temp;
         EXPECT_OK(Pager::open({
                                   kFilename,
@@ -183,10 +183,9 @@ public:
         pager.reset(temp);
     }
 
-    std::unordered_map<Id, TableState, Id::Hash> tables;
+    TableSet tables;
     Status status;
     bool in_txn {};
-    Lsn commit_lsn;
     DisabledWriteAheadLog wal;
     std::string scratch;
     std::string collect_scratch;
@@ -269,7 +268,7 @@ auto expect_contains(T &t, const std::string &key, const std::string &value) -> 
 template <class T>
 auto insert(T &t, const std::string &key, const std::string &value) -> void
 {
-    auto s = t.put(key, value);
+    auto s = t.add(key, value);
     if (!s.is_ok()) {
         std::fputs(s.to_string().data(), stderr);
         std::abort();

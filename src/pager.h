@@ -14,6 +14,7 @@ namespace calicodb
 class Env;
 class FrameManager;
 class WriteAheadLog;
+class TableSet;
 
 class Pager
 {
@@ -26,7 +27,7 @@ public:
         Env *env {};
         WriteAheadLog *wal {};
         InfoLogger *info_log {};
-        std::unordered_map<Id, TableState, Id::Hash> *tables;
+        TableSet *tables {};
         Status *status {};
         bool *is_running {};
         std::size_t frame_count {};
@@ -70,7 +71,7 @@ private:
     WriteAheadLog *m_wal {};
     Env *m_env {};
     InfoLogger *m_info_log {};
-    std::unordered_map<Id, TableState, Id::Hash> *m_tables {};
+    TableSet *m_tables {};
 };
 
 } // namespace calicodb

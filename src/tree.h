@@ -9,6 +9,7 @@ namespace calicodb
 {
 
 class Pager;
+class TableSet;
 
 /* Internal Cell Format:
  *     std::size_t    Name
@@ -139,7 +140,8 @@ public:
 
 struct PointerMap {
     enum Type : char {
-        kNode = 1,
+        kTreeNode = 1,
+        kTreeRoot,
         kOverflowHead,
         kOverflowLink,
         kFreelistLink,
@@ -187,12 +189,21 @@ struct PayloadManager
 
 class Tree {
 public:
-    explicit Tree(Pager &pager, const LogicalPageId &root_id, Id &freelist_head);
+    explicit Tree(Pager &pager, const LogicalPageId *root_id, Id &freelist_head);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *root = nullptr) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto vacuum_one(Id target, bool *success) -> Status;
+
+    /* Perform a vacuum step, that is, swap the freelist head page with the target page, which
+     * should be the last occupied page in the file. Once the pages are swapped, the page at
+     * "target" is considered unoccupied. This continues until the freelist is empty.
+     *
+     * NOTE: This method should only be called on the root tree. It will re-key "root_map" if
+     * any root pages are moved.
+     */
+    [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success) -> Status;
+
     [[nodiscard]] auto TEST_to_string() -> std::string;
     auto TEST_validate() -> void;
 
@@ -203,7 +214,7 @@ private:
         bool exact {};
     };
 
-    [[nodiscard]] auto vacuum_step(Page &free, Id last_id) -> Status;
+    [[nodiscard]] auto vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
@@ -245,6 +256,7 @@ private:
     auto release(Node node) const -> void;
 
     friend class CursorImpl;
+    friend class DBImpl;
     friend class TableImpl;
     friend class TreeValidator;
 
@@ -254,8 +266,7 @@ private:
     mutable std::string m_anchor;
     Freelist m_freelist;
     Pager *m_pager {};
-    Id m_table_id;
-    Id m_root_id;
+    const LogicalPageId *m_root_id {};
 };
 
 class CursorImpl : public Cursor

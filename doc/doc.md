@@ -75,19 +75,18 @@ const calicodb::Options options {
     
     .info_log = nullptr,
     
-    // This can be used to inject a custom storage implementation. (see the DynamicMemory class in
-    // tools/tools.h for an example that stores its files in-memory)
-    .storage = nullptr,
+    // This can be used to inject a custom Env implementation. (see the tools::FakeEnv class in
+    // tools/tools.h for an example that stores its files in-memory).
+    .env = nullptr,
 };
 
-// Create or open a database at "/tmp/cats".
+// Create or put a database at "/tmp/cats".
 calicodb::DB *db;
-const calicodb::Status s = calicodb::DB::open(options, "/tmp/cats", &db);
+const calicodb::Status s = calicodb::DB::put(options, "/tmp/cats", &db);
 
 // Handle failure. s.to_string() provides a string representation of the status.
 if (!s.is_ok()) {
-    std::cerr << "error: " << s.to_string() << '\n';
-    std::abort();
+
 }
 ```
 
@@ -96,23 +95,30 @@ Errors returned by methods that modify the database are fatal and the database w
 The next time that the database is opened, recovery will be run to undo any uncommitted changes.
 
 ```C++
+// Open a table.
+calicodb::Table *table;
+calicodb::TableOptions table_options;
+calicodb::Status s = db->new_table(table_options, "personal-cats", &table);
+
 // Insert some key-value pairs.
-if (const calicodb::Status s = db->put("lilly", "calico"); s.is_system_error()) {
+s = table->put("lilly", "calico");
+if (s.is_system_error()) {
     // Handle a system-level or I/O error.
 }
 
-if (const auto s = db->put("freya", "orange tabby"); s.is_ok()) {
+s = table->put("freya", "orange tabby");
+if (s.is_ok()) {
     // Record was inserted.
 }
 
-// Keys are unique within the entire database instance, so inserting a record with a key already in the database will 
+// Keys are unique within each table, so inserting a record with a key that already exists will 
 // cause the old record to be overwritten.
-if (const auto s = db->put("lilly", "sweet calico"); s.is_ok()) {
+if (const auto s = table->put("lilly", "sweet calico"); s.is_ok()) {
 
 }
 
-// Erase a record by key.
-if (const auto s = db->erase("42"); s.is_ok()) {
+// Erase a record.
+if (const auto s = table->erase("42"); s.is_ok()) {
     // Record was erased.
 } else if (s.is_not_found()) {
     // Key does not exist.
@@ -122,9 +128,9 @@ if (const auto s = db->erase("42"); s.is_ok()) {
 ### Querying a database
 
 ```C++
-// Query a value by key.
+// Query a value by key. This example uses the same table from the last section.
 std::string value;
-if (const auto s = db->get("lilly", value); s.is_ok()) {
+if (const auto s = table->get("lilly", value); s.is_ok()) {
     // value is populated with the record's value.
 } else if (s.is_not_found()) {
     // Key does not exist.
@@ -132,8 +138,10 @@ if (const auto s = db->get("lilly", value); s.is_ok()) {
     // An error occurred.
 }
 
-// Allocate a cursor.
-calicodb::Cursor *cursor = db->new_cursor();
+// Allocate a cursor. The cursor will only view records from the table it was
+// created by. Modifications to the table will invalidate the cursor, including
+// calls to DB::vacuum().
+calicodb::Cursor *cursor = table->new_cursor();
 
 // Seek to the first record greater than or equal to the given key.
 cursor->seek("freya");
@@ -160,7 +168,7 @@ for (; cursor->is_valid(); cursor->previous()) {
 
 }
 
-// Iterate through a half-open range of keys ["freya", "lilly").
+// Iterate through a half-put range of keys ["freya", "lilly").
 cursor->seek("freya");
 for (; cursor->is_valid() && cursor->key() < "lilly"; cursor->next()) {
 
@@ -182,21 +190,25 @@ if (const auto s = db->vacuum(); s.is_ok()) {
 ### Transactions
 A transaction represents a unit of work in CalicoDB.
 The first transaction is started when the database is opened. 
-Otherwise, transaction boundaries are defined by calls to `DB::commit()`.
-All updates that haven't been committed when the database is closed will be reverted.
+Otherwise, transaction boundaries are defined by calls to `Table::checkpoint()`.
+All updates that haven't been committed when a table is closed will be reverted.
 
 ```C++
-if (const auto s = db->put("fanny", "persian"); !s.is_ok()) {
+if (const auto s = table->put("fanny", "persian"); !s.is_ok()) {
     
 }
-if (const auto s = db->put("myla", "brown-tabby"); !s.is_ok()) {
+if (const auto s = table->put("myla", "brown-tabby"); !s.is_ok()) {
     
 }
 
-if (const auto s = db->commit(); s.is_ok()) {
-    // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from here on out, the 
-    // changes will be reapplied during recovery.
+if (const auto s = table->checkpoint(); s.is_ok()) {
+    // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from 
+    // here on out, the changes will be reapplied next time the database is opened.
 }
+
+// Free the table object. If there were pending changes, they will be undone here. If that process 
+// fails, the error status will be available in DB::status().
+delete table;
 ```
 
 ### Database properties
@@ -211,10 +223,11 @@ exists = db->get_property("calicodb.stats", prop);
 ```
 
 ### Closing a database 
-To close the database, just `delete` the handle.
-During close, the database is made consistent and the whole WAL is removed.
+To erase the database, just `delete` the handle.
+During erase, the database is made consistent and the whole WAL is removed.
 If an instance leaves any WAL segments behind after closing, then something has gone wrong.
 CalicoDB will attempt recovery on the next startup.
+It should be noted that all tables opened by the database must be closed before the database itself is closed.
 
 ```C++
 delete db;

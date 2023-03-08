@@ -25,6 +25,7 @@ public:
     virtual ~DB() = default;
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
     [[nodiscard]] virtual auto new_table(const TableOptions &options, const Slice &name, Table **out) -> Status = 0;
+    [[nodiscard]] virtual auto checkpoint() -> Status = 0;
     [[nodiscard]] virtual auto status() const -> Status = 0;
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
 };

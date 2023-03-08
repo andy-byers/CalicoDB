@@ -4,6 +4,7 @@
 #include "calicodb/env.h"
 #include "delta.h"
 #include "encoding.h"
+#include "header.h"
 #include "types.h"
 #include <algorithm>
 #include <map>
@@ -94,27 +95,27 @@ struct DeltaDescriptor {
     std::vector<Delta> deltas;
 };
 
-/* Commit payloads are more-or-less just delta payloads with a single delta describing changes to the header
- * fields on the root page of a table.
+/* Commit payload format:
  *
  *      Offset  Size  Field
  *     ---------------------------
  *      0       1     Flags
  *      1       8     LSN
  *      9       8     Table ID
- *      17      8     Page ID
-*       25      2     Header offset
-*       27      2     Header size
-*       29      n     Header data
+ *      17      50    Header
+ *
+ * A commit payload contains the entire root page header, as well as the table ID of the table
+ * being committed. The page LSN of the database root page should equal the LSN of this record
+ * after a commit is replayed (there won't be a delta containing the updated page LSN: this
+ * record holds all changes made to the root during a commit, except for the updated page LSN,
+ * which is implied).
  */
 struct CommitDescriptor {
-    static constexpr std::size_t kFixedSize {29};
-    using Delta = DeltaDescriptor::Delta;
+    static constexpr auto kFixedSize = 17 + FileHeader::kSize;
 
     Id table_id;
-    Id page_id;
     Lsn lsn;
-    Delta delta;
+    FileHeader header {};
 };
 
 /* Vacuum records signify the start or end of a vacuum operation.
@@ -164,7 +165,6 @@ using PayloadDescriptor = std::variant<
 
 [[nodiscard]] auto extract_payload_lsn(const Slice &in) -> Lsn;
 [[nodiscard]] auto decode_payload(const Slice &in) -> PayloadDescriptor;
-[[nodiscard]] auto encode_commit_payload(Lsn lsn, const LogicalPageId &root_id, const Slice &image, const PageDelta &delta, char *buffer) -> Slice;
 [[nodiscard]] auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice;
 [[nodiscard]] auto encode_image_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, char *buffer) -> Slice;
 [[nodiscard]] auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice;
@@ -175,9 +175,6 @@ using PayloadDescriptor = std::variant<
 class WalSet final
 {
 public:
-    WalSet() = default;
-    ~WalSet() = default;
-
     auto add_segment(Id id) -> void
     {
         m_segments.emplace(id, Lsn::null());

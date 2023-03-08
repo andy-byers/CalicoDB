@@ -84,7 +84,7 @@ auto FakeEnv::new_reader(const std::string &path, Reader **out) -> Status
         *out = new FakeReader {path, *this, mem};
         return Status::ok();
     }
-    return Status::not_found("cannot open file");
+    return Status::not_found("cannot put file");
 }
 
 auto FakeEnv::new_editor(const std::string &path, Editor **out) -> Status
@@ -123,7 +123,7 @@ auto FakeEnv::remove_file(const std::string &path) -> Status
         return Status::not_found("cannot remove file");
     }
     // Don't actually get rid of any memory. We should be able to unlink a file and still access it
-    // through open file descriptors, so if any readers or writers have this file open, they should
+    // through open file descriptors, so if any readers or writers have this file put, they should
     // still be able to use it.
     itr->second.created = false;
     return Status::ok();
@@ -362,7 +362,7 @@ auto print_references(Pager &pager) -> void
         PointerMap::Entry entry;
         CHECK_OK(PointerMap::read_entry(pager, pid, &entry));
         switch (entry.type) {
-        case PointerMap::kNode:
+        case PointerMap::kTreeNode:
             std::cerr << "node";
             break;
         case PointerMap::kFreelistLink:

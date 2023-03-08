@@ -3,11 +3,11 @@
 
 namespace calicodb {
 
-TableImpl::TableImpl(Id table_id, DBImpl &db, TableState &state, Status &status)
+TableImpl::TableImpl(DBImpl &db, TableState &state, Status &status, std::size_t &batch_size)
     : m_db {&db},
       m_state {&state},
       m_status {&status},
-      m_table_id {table_id}
+      m_batch_size {&batch_size}
 {
 }
 
@@ -44,7 +44,7 @@ auto TableImpl::put(const Slice &key, const Slice &value) -> Status
         }
         return s;
     }
-    m_batch_size++;
+    ++*m_batch_size;
     return Status::ok();
 }
 
@@ -54,7 +54,7 @@ auto TableImpl::erase(const Slice &key) -> Status
 
     auto s = m_state->tree->erase(key);
     if (s.is_ok()) {
-        m_batch_size++;
+        --*m_batch_size;
     } else if (!s.is_not_found()) {
         if (m_status->is_ok()) {
             *m_status = s;
@@ -63,23 +63,9 @@ auto TableImpl::erase(const Slice &key) -> Status
     return s;
 }
 
-auto TableImpl::checkpoint() -> Status
-{
-    CDB_TRY(*m_status);
-    if (m_batch_size != 0) {
-        if (auto s = m_db->commit_table(root_id(), *m_state); !s.is_ok()) {
-            if (m_status->is_ok()) {
-                *m_status = s;
-            }
-            return s;
-        }
-    }
-    return Status::ok();
-}
-
 auto TableImpl::root_id() const -> LogicalPageId
 {
-    return LogicalPageId {m_table_id, m_state->tree->m_root_id};
+    return m_state->root_id;
 }
 
 } // namespace calicodb

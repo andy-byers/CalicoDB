@@ -1,8 +1,10 @@
 #include "pager.h"
+#include "db_impl.h"
 #include "frames.h"
 #include "header.h"
 #include "logging.h"
 #include "page.h"
+#include "table_impl.h"
 #include "types.h"
 #include "wal.h"
 #include <limits>
@@ -244,19 +246,18 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
     // We only write a full image if the WAL does not already contain one for this page. If the page was modified
     // during this transaction, then we already have one written.
     if (*m_is_running) {
-        const auto itr = m_tables->find(page.id().table_id);
-        if (itr == end(*m_tables)) {
+        const auto *state = m_tables->get(page.id().table_id);
+        if (state == nullptr) {
             return;
         }
-        const auto &state = itr->second;
-        if (state.checkpoint_lsn.is_null() || lsn <= state.checkpoint_lsn) {
+        if (state->checkpoint_lsn.is_null() || lsn <= state->checkpoint_lsn) {
             const auto image = page.view(0, watch_size);
             auto s = m_wal->log_image(page.id(), image, nullptr);
 
             if (s.is_ok()) {
                 auto limit = m_recovery_lsn;
-                if (limit > state.checkpoint_lsn) { // TODO: Prevent the recovery LSN from getting larger than any of these values.
-                    limit = state.checkpoint_lsn;
+                if (limit > state->checkpoint_lsn) { // TODO: Prevent the recovery LSN from getting larger than any of these values.
+                    limit = state->checkpoint_lsn;
                 }
                 s = m_wal->cleanup(limit);
             }
@@ -286,13 +287,12 @@ auto Pager::acquire(Page &page) -> Status
 
         // Write back pages that are too old. This is so that old WAL segments can be removed.
         if (*m_is_running && entry.token) {
-            const auto itr = m_tables->find(table_id);
-            if (itr == end(*m_tables)) {
+            const auto *state = m_tables->get(table_id);
+            if (state == nullptr) {
                 // This table rooted at this page is just now being opened.
                 return Status::ok();
             }
-            const auto &state = itr->second;
-            const auto should_write = (*entry.token)->record_lsn <= state.checkpoint_lsn &&
+            const auto should_write = (*entry.token)->record_lsn <= state->checkpoint_lsn &&
                                       read_page_lsn(page) <= m_wal->flushed_lsn();
             if (should_write) {
                 auto s = m_frames.write_back(entry.index);
@@ -330,8 +330,10 @@ auto Pager::upgrade(Page &page, int important) -> void
 
 auto Pager::discard(Page page) -> void
 {
-    page.m_write = false;
-    release(std::move(page));
+    CDB_EXPECT_GT(m_frames.ref_sum(), 0);
+    CDB_EXPECT_TRUE(m_cache.contains(page.id().page_id));
+    auto [index, token] = m_cache.get(page.id().page_id)->value;
+    m_frames.unref(index, std::move(page));
 }
 
 auto Pager::release(Page page) -> void

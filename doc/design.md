@@ -3,29 +3,31 @@ CalicoDB is designed to be very simple to use.
 The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
 
 ## Architecture
-CalicoDB uses a B<sup>+</sup>-tree backend and a write-ahead log (WAL).
-Other core modules are located in the `src` directory.
-The database is generally represented on disk by a single directory.
-The B<sup>+</sup>-tree containing the record store is located in a file called `data` in the main directory.
-The WAL segment files can either be located in the main directory, or in a different location, depending on the `wal_prefix` initialization option.
-The info log will be created in the main directory as well, unless a custom `Logger *` is passed to the database.
+CalicoDB uses a B<sup>+</sup>-tree with a write-ahead log (WAL).
+The B<sup>+</sup>-tree containing the record store is located in a file with the same name as the database.
+By default, the WAL segment files are named the same as the database, but with a suffix of `-wal-N`, where `N` is some integer.
+The info log file is similarly named, with a suffix of `-log`, unless a custom `InfoLogger *` is passed to the database during creation.
 CalicoDB runs in a single thread.
 
-### Storage
-The storage module handles platform-specific filesystem operations and I/O.
-Users can override classes in [`calico/storage.h`](../include/calico/storage.h).
-Then, a pointer to the custom `Storage` object can be passed to the database during when it is opened.
-See [`test/tools`](../test/tools) for an example that stores the database in memory.
+### Env
+The env construct handles platform-specific filesystem operations and I/O.
+Users can override classes in [`calico/env.h`](../include/calico/env.h).
+Then, a pointer to the custom `Env` object can be passed to the database when it is opened.
+See [`test/tools`](../test/tools) for an example that stores the database files in memory.
 
 ### Pager
-The pager module provides in-memory caching for database pages read by the `storage` module.
+The pager module provides in-memory caching for database pages read by the `Env`.
 It is the pager's job to maintain consistency between database pages on disk and in memory, and to coordinate with the WAL.
 The pager contains logic to make sure that updates hit the WAL before the database file, ensuring that we can always recover from a crash.
+In an effort to reduce the impact of sequential scans on the cache, the pager uses a 2Q-like page replacement policy.
 
 ### Tree
-The B<sup>+</sup>-tree logic can be found in the tree module.
-The tree works similarly to an index B-tree in SQLite3.
-It is of variable order, so splits are performed when nodes have run out of physical space.
+CalicoDB trees are similar to index B-trees in SQLite3.
+Every tree is rooted on some database page, called its root page.
+The root tree is the tree that is rooted on the first database page.
+It is used to store a name-to-root mapping for the other trees, if any exist.
+Additional trees will be rooted on pages after the second database page, which is always a pointer map page (see [Pointer Map](#pointer-map)).
+Trees are of variable order, so splits are performed when nodes (pages that are part of a tree) have run out of physical space.
 The implementation is pretty straightforward: we basically do as little as possible to make sure that the tree ordering remains correct.
 This results in a less-balanced tree, but seems to be good for write performance.
 
@@ -38,6 +40,18 @@ Once a node overflows, we will work to resolve it immediately.
 We merge 2 nodes together when one of them has become empty.
 Since a merge involves addition of the separator cell, this may not be possible if the second node is very full.
 In this case, we will perform a single rotation.
+
+#### Pointer map
+[//]: # (TODO)
+
+#### Overflow chains
+CalicoDB supports very large keys and/or values.
+When a key or value is too large to fit on a page, some of it is transferred to an overflow chain.
+
+[//]: # (TODO)
+
+#### Freelist
+[//]: # (TODO)
 
 ### WAL
 The WAL record format is similar to that of `RocksDB`.
@@ -76,7 +90,7 @@ Here are the main things that need to change:
     + Tree header is located after the page header but before the node header 
 3. Vacuum needs a special case for swapping a tree root. We can also get rid of empty unopened tables in vacuum.
 4. Commit and recovery need to be modified
-    + There is still 1 WAL, and records don't know what tree they came from
+    + There is still 1 WAL, and records must know what tree they came from
     + A commit record is the delta record that updates the tree/file header and page LSN, that never happens outside of commit
     + Recovery reads the WAL and determines the last LSN written for each table, as well as the commit LSN for each table
     + Then, it reverts all uncommitted changes in another pass
@@ -88,3 +102,27 @@ It will apply delta records thinking they are needed, fail to find a commit reco
 It won't be able to undo all the changes if it is missing any full images from the left.
 If the commit LSN is higher than any of these records, none of them will be considered during recovery, so that seems to solve the problem.
 This is the one change that isn't recorded in the WAL.
+
+**Checkpoints:** I'd like to provide per-table checkpoints, but this presents some difficulties:
+1. Will have problems if we crash while creating or destroying a table: I think this can be handled as follows
+   + Store the checkpoint LSN for each table in the root table, so the table's name maps to its current root page ID and table ID.
+   + To create a table: allocate a root page, determine the table ID, write this info to the root tree. 
+   When writing WAL records for the new root page, use the root table ID rather than the new table ID.
+   This makes it easier to let these updates get applied during recovery, since they belong to the root table and occur before its most-recent commit record
+   + Having a "commit record" payload type is not really necessary anymore: we just consider the delta record that updates the root page's headers to be the commit record.
+   This is also good, because it forces us to update the root header on each table checkpoint.
+   + Deleting a table is similar to table creation.
+   First, run a commit on the table being deleted, then put all pages belonging to it in the freelist.
+   Then, erase the table record from the root page, and commit the root table.
+   For now, we can remove empty tables during vacuum
+2. Speaking of vacuum...
+   + Vacuum needs to know the root page of every put table
+   + Each table keeps its current root ID in memory to avoid having to look through the root table on each operation
+   + When a root page is swapped with a freelist page, the table it belongs to must have its in-memory root ID updated
+   + It may be useful to keep an in-memory mapping from table IDs to root page IDs while the database is running
+   + The vacuum operation can use this mapping to find what table a root page belongs to
+3. We can also run into problems if the user has a table with pending changes, and leaves it put for a long time while updating other tables.
+This would cause the WAL to grow indefinitely, since we can't remove records we still need.
+This should never cause incorrect results, but will eat up disk space if left unchecked, and could cause a delay when the database is closed.
+I don't really see a way around this without editing the WAL or rewriting WAL records somewhere else temporarily.
+If tables are closed after they are no longer needed, this problem should never happen.
