@@ -103,26 +103,4 @@ It won't be able to undo all the changes if it is missing any full images from t
 If the commit LSN is higher than any of these records, none of them will be considered during recovery, so that seems to solve the problem.
 This is the one change that isn't recorded in the WAL.
 
-**Checkpoints:** I'd like to provide per-table checkpoints, but this presents some difficulties:
-1. Will have problems if we crash while creating or destroying a table: I think this can be handled as follows
-   + Store the checkpoint LSN for each table in the root table, so the table's name maps to its current root page ID and table ID.
-   + To create a table: allocate a root page, determine the table ID, write this info to the root tree. 
-   When writing WAL records for the new root page, use the root table ID rather than the new table ID.
-   This makes it easier to let these updates get applied during recovery, since they belong to the root table and occur before its most-recent commit record
-   + Having a "commit record" payload type is not really necessary anymore: we just consider the delta record that updates the root page's headers to be the commit record.
-   This is also good, because it forces us to update the root header on each table checkpoint.
-   + Deleting a table is similar to table creation.
-   First, run a commit on the table being deleted, then put all pages belonging to it in the freelist.
-   Then, erase the table record from the root page, and commit the root table.
-   For now, we can remove empty tables during vacuum
-2. Speaking of vacuum...
-   + Vacuum needs to know the root page of every put table
-   + Each table keeps its current root ID in memory to avoid having to look through the root table on each operation
-   + When a root page is swapped with a freelist page, the table it belongs to must have its in-memory root ID updated
-   + It may be useful to keep an in-memory mapping from table IDs to root page IDs while the database is running
-   + The vacuum operation can use this mapping to find what table a root page belongs to
-3. We can also run into problems if the user has a table with pending changes, and leaves it put for a long time while updating other tables.
-This would cause the WAL to grow indefinitely, since we can't remove records we still need.
-This should never cause incorrect results, but will eat up disk space if left unchecked, and could cause a delay when the database is closed.
-I don't really see a way around this without editing the WAL or rewriting WAL records somewhere else temporarily.
-If tables are closed after they are no longer needed, this problem should never happen.
+**NOTE: Waiting on implementing per-table checkpoints**

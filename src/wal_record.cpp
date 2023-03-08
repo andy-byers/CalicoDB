@@ -110,10 +110,6 @@ static auto decode_deltas_payload(const Slice &in) -> DeltaDescriptor
     info.lsn.value = get_u64(data);
     data += sizeof(Lsn);
 
-    // Table ID (8 B)
-    info.table_id.value = get_u64(data);
-    data += sizeof(Id);
-
     // Page ID (8 B)
     info.page_id.value = get_u64(data);
     data += sizeof(Id);
@@ -150,10 +146,6 @@ static auto decode_full_image_payload(const Slice &in) -> ImageDescriptor
     // LSN (8 B)
     info.lsn.value = get_u64(data);
     data += sizeof(Lsn);
-
-    // Table ID (8 B)
-    info.table_id.value = get_u64(data);
-    data += sizeof(Id);
 
     // Page ID (8 B)
     info.page_id.value = get_u64(data);
@@ -193,7 +185,7 @@ auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice
     return Slice {saved, VacuumDescriptor::kFixedSize};
 }
 
-auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice
+auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice
 {
     auto saved = buffer;
 
@@ -204,12 +196,8 @@ auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &i
     put_u64(buffer, lsn.value);
     buffer += sizeof(Lsn);
 
-    // Table ID (8 B)
-    put_u64(buffer, page_id.table_id.value);
-    buffer += sizeof(Id);
-
     // Page ID (8 B)
-    put_u64(buffer, page_id.page_id.value);
+    put_u64(buffer, page_id.value);
     buffer += sizeof(Id);
 
     // Deltas count (2 B)
@@ -231,7 +219,7 @@ auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &i
     return Slice {saved, DeltaDescriptor::kFixedSize + n};
 }
 
-auto encode_image_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, char *buffer) -> Slice
+auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer) -> Slice
 {
     auto saved = buffer;
 
@@ -242,12 +230,8 @@ auto encode_image_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &im
     put_u64(buffer, lsn.value);
     buffer += sizeof(lsn);
 
-    // Table ID (8 B)
-    put_u64(buffer, page_id.table_id.value);
-    buffer += sizeof(Id);
-
     // Page ID (8 B)
-    put_u64(buffer, page_id.page_id.value);
+    put_u64(buffer, page_id.value);
     buffer += sizeof(Id);
 
     // Image (N B)

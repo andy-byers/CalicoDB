@@ -365,6 +365,8 @@ auto print_references(Pager &pager) -> void
         case PointerMap::kTreeNode:
             std::cerr << "node";
             break;
+        case PointerMap::kTreeRoot:
+            break;
         case PointerMap::kFreelistLink:
             std::cerr << "freelist link";
             break;
@@ -375,7 +377,11 @@ auto print_references(Pager &pager) -> void
             std::cerr << "overflow link";
             break;
         }
-        std::cerr << " -> " << entry.back_ptr.value << '\n';
+        if (entry.type == PointerMap::kTreeRoot) {
+            std::cerr << "root for table " << entry.back_ptr.value << '\n';
+        } else {
+            std::cerr << " -> " << entry.back_ptr.value << '\n';
+        }
     }
 }
 

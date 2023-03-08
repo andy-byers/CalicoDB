@@ -32,8 +32,8 @@ public:
     [[nodiscard]] virtual auto flush() -> Status;
     [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
     [[nodiscard]] virtual auto log_vacuum(bool is_start, Lsn *out) -> Status;
-    [[nodiscard]] virtual auto log_delta(const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status;
-    [[nodiscard]] virtual auto log_image(const LogicalPageId &page_id, const Slice &image, Lsn *out) -> Status;
+    [[nodiscard]] virtual auto log_delta(Id page_id, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status;
+    [[nodiscard]] virtual auto log_image(Id page_id, const Slice &image, Lsn *out) -> Status;
 
     [[nodiscard]] virtual auto bytes_written() const -> std::size_t
     {

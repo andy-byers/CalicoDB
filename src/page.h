@@ -47,10 +47,8 @@ struct LogicalPageId {
 class Page
 {
     ChangeBuffer m_deltas;
-    LogicalPageId m_id;
+    Id m_id;
     Span m_span;
-    Id m_table_id;
-    Id m_page_id;
     bool m_write {};
 
 public:
@@ -58,17 +56,14 @@ public:
     friend class Pager;
     friend struct Node;
 
-    explicit Page(LogicalPageId id)
-        : m_id {id}
-    {
-    }
+    explicit Page() = default;
 
     [[nodiscard]] auto is_writable() const -> bool
     {
         return m_write;
     }
 
-    [[nodiscard]] auto id() const -> LogicalPageId
+    [[nodiscard]] auto id() const -> Id
     {
         return m_id;
     }
@@ -112,8 +107,9 @@ public:
         return m_deltas;
     }
 
-    auto TEST_populate(Span buffer, bool write, const ChangeBuffer &deltas = {}) -> void
+    auto TEST_populate(Id page_id, Span buffer, bool write, const ChangeBuffer &deltas = {}) -> void
     {
+        m_id = page_id;
         m_span = buffer;
         m_write = write;
         m_deltas = deltas;
@@ -128,7 +124,7 @@ public:
 
 [[nodiscard]] inline auto page_offset(const Page &page) -> std::size_t
 {
-    return FileHeader::kSize * page.id().page_id.is_root();
+    return FileHeader::kSize * page.id().is_root();
 }
 
 [[nodiscard]] inline auto read_page_lsn(const Page &page) -> Lsn

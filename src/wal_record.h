@@ -72,27 +72,46 @@ auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
  *     ---------------------------
  *      0       1     Flags
  *      1       8     LSN
- *      9       8     Table ID
- *      17      8     Page ID
- *      25      2     Delta count
- *      27      n     Delta content
+ *      9       8     Page ID
+ *      17      2     Delta count
+ *      19      n     Delta content
  *
  * Each delta in the delta content area is an (offset, size, data) triplet. "offset" describes
  * where on the page the change took place, and "size" is the number of bytes in "data". Both
  * "offset" and "size" are 16-bit unsigned integers.
  */
 struct DeltaDescriptor {
-    static constexpr std::size_t kFixedSize {27};
+    static constexpr std::size_t kFixedSize {19};
 
     struct Delta {
         std::size_t offset {};
         Slice data {};
     };
 
-    Id table_id;
     Id page_id;
     Lsn lsn;
     std::vector<Delta> deltas;
+};
+
+/* Image payload header:
+ *
+ *      Offset  Size  Field
+ *     ---------------------------
+ *      0       1     Flags
+ *      1       8     LSN
+ *      9       8     Page ID
+ *      17      n     Image
+ *
+ * The image can be any size less than or equal to the database page size. Its size is not
+ * stored explicitly in the payload: it is known from the total size of the record fragments
+ * it is composed from.
+ */
+struct ImageDescriptor {
+    static constexpr std::size_t kFixedSize {17};
+
+    Id page_id;
+    Lsn lsn;
+    Slice image;
 };
 
 /* Vacuum records signify the start or end of a vacuum operation.
@@ -110,29 +129,6 @@ struct VacuumDescriptor {
     bool is_start {};
 };
 
-/* Image payload header:
- *
- *      Offset  Size  Field
- *     ---------------------------
- *      0       1     Flags
- *      1       8     LSN
- *      9       8     Table ID
- *      17      8     Page ID
- *      25      n     Image
- *
- * The image can be any size less than or equal to the database page size. Its size is not
- * stored explicitly in the payload: it is known from the total size of the record fragments
- * it is composed from.
- */
-struct ImageDescriptor {
-    static constexpr std::size_t kFixedSize {25};
-
-    Id table_id;
-    Id page_id;
-    Lsn lsn;
-    Slice image;
-};
-
 using PayloadDescriptor = std::variant<
     std::monostate,
     DeltaDescriptor,
@@ -141,8 +137,8 @@ using PayloadDescriptor = std::variant<
 
 [[nodiscard]] auto extract_payload_lsn(const Slice &in) -> Lsn;
 [[nodiscard]] auto decode_payload(const Slice &in) -> PayloadDescriptor;
-[[nodiscard]] auto encode_deltas_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice;
-[[nodiscard]] auto encode_image_payload(Lsn lsn, const LogicalPageId &page_id, const Slice &image, char *buffer) -> Slice;
+[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice;
+[[nodiscard]] auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer) -> Slice;
 [[nodiscard]] auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice;
 
 /*

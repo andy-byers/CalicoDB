@@ -95,35 +95,6 @@ public:
     tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
 
-TEST_F(WalPagerInteractionTests, PagerWritesTableIDs)
-{
-    Page page_1 {LogicalPageId {Id {1}, Id {1}}};
-    ASSERT_OK(pager->allocate(page_1));
-    std::memcpy(page_1.span(0, 13).data(), "Hello, world!", 13);
-    pager->release(std::move(page_1));
-
-    Page page_2 {LogicalPageId {Id {1}, Id {2}}};
-    ASSERT_OK(pager->allocate(page_2));
-    std::memcpy(page_2.span(0, 13).data(), "Hello, world!", 13);
-    pager->release(std::move(page_2));
-
-    ASSERT_OK(wal->flush());
-
-    std::vector<PayloadDescriptor> payloads;
-    ASSERT_OK(read_segment(Id {1}, &payloads));
-    ASSERT_EQ(payloads.size(), 4);
-
-    ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payloads[0]));
-    ASSERT_EQ(std::get<ImageDescriptor>(payloads[0]).table_id, Id {1});
-    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payloads[1]));
-    ASSERT_EQ(std::get<ImageDescriptor>(payloads[1]).table_id, Id {1});
-
-    ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payloads[2]));
-    ASSERT_EQ(std::get<ImageDescriptor>(payloads[2]).table_id, Id {1});
-    ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payloads[3]));
-    ASSERT_EQ(std::get<ImageDescriptor>(payloads[3]).table_id, Id {1});
-}
-
 class RecoveryTestHarness
 {
 public:

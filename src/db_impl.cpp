@@ -123,12 +123,14 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_info_log->logv("setting up a new database");
 
         // Create the root tree.
-        CDB_TRY(Tree::create(*pager, Id::root(), m_freelist_head));
+        Id root_id;
+        CDB_TRY(Tree::create(*pager, Id::root(), m_freelist_head, &root_id));
+        CDB_EXPECT_TRUE(root_id.is_root());
         ++m_last_table_id.value;
 
         // Write the initial file header.
-        Page db_root {LogicalPageId::unknown_table(Id::root())};
-        CDB_TRY(pager->acquire(db_root));
+        Page db_root;
+        CDB_TRY(pager->acquire(root_id, &db_root));
         pager->upgrade(db_root);
         state.header_crc = crc32c::Mask(state.compute_crc());
         state.write(db_root.span(0, FileHeader::kSize).data());
@@ -140,9 +142,9 @@ auto DBImpl::open(const Options &sanitized) -> Status
     // Open the root table manually.
     m_tables.add(LogicalPageId::root());
     auto *root_state = m_tables.get(Id::root());
-    Page db_root {LogicalPageId::root()};
-    CDB_TRY(pager->acquire(db_root));
-    root_state->tree = new Tree {*pager, &root_state->root_id, m_freelist_head};
+    Page db_root;
+    CDB_TRY(pager->acquire(Id::root(), &db_root));
+    root_state->tree = new Tree {*pager, root_state->root_id.page_id, m_freelist_head};
     root_state->is_open = true;
     pager->release(std::move(db_root));
     m_root = m_tables.get(Id::root());
@@ -161,7 +163,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CDB_TRY(ensure_consistency());
-        CDB_TRY(load_state());
     }
     CDB_TRY(wal->start_writing());
 
@@ -195,7 +196,7 @@ DBImpl::~DBImpl()
             m_info_log->logv("failed to flush pager: %s", s.to_string().data());
         }
         if (const auto s = wal->close(); !s.is_ok()) {
-            m_info_log->logv("failed to erase wal: %s", s.to_string().data());
+            m_info_log->logv("failed to close wal: %s", s.to_string().data());
         }
         if (const auto s = ensure_consistency(); !s.is_ok()) {
             m_info_log->logv("failed to ensure consistency: %s", s.to_string().data());
@@ -358,8 +359,8 @@ auto DBImpl::ensure_consistency() -> Status
 
 auto DBImpl::load_state() -> Status
 {
-    Page root {LogicalPageId::root()};
-    CDB_TRY(pager->acquire(root));
+    Page root;
+    CDB_TRY(pager->acquire(Id::root(), &root));
 
     FileHeader header;
     header.read(root.data());
@@ -499,6 +500,7 @@ auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> 
 
 auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
 {
+    // Set the table ID manually, let the tree fill in the root page ID.
     ++m_last_table_id.value;
     root_id->table_id = m_last_table_id;
     CDB_TRY(Tree::create(*pager, m_last_table_id, m_freelist_head, &root_id->page_id));
@@ -514,7 +516,7 @@ auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
 
 auto DBImpl::open_table(TableState &state) -> Status
 {
-    state.tree = new Tree {*pager, &state.root_id, m_freelist_head};
+    state.tree = new Tree {*pager, state.root_id.page_id, m_freelist_head};
     state.is_open = true;
     return Status::ok();
 }
@@ -526,7 +528,6 @@ auto DBImpl::checkpoint() -> Status
             SET_STATUS(s);
             return s;
         }
-        m_commit_lsn = wal->current_lsn();
     }
     return Status::ok();
 }
@@ -534,8 +535,8 @@ auto DBImpl::checkpoint() -> Status
 auto DBImpl::do_checkpoint() -> Status
 {
     CDB_TRY(m_state.status);
-    Page db_root {LogicalPageId::root()};
-    CDB_TRY(pager->acquire(db_root));
+    Page db_root;
+    CDB_TRY(pager->acquire(Id::root(), &db_root));
     pager->upgrade(db_root);
 
     FileHeader header;
@@ -544,7 +545,8 @@ auto DBImpl::do_checkpoint() -> Status
     header.freelist_head = m_freelist_head;
     header.magic_code = FileHeader::kMagicCode;
     header.last_table_id = m_last_table_id;
-    header.commit_lsn = m_commit_lsn;
+    header.commit_lsn = wal->current_lsn();
+    m_commit_lsn = wal->current_lsn();
     header.record_count = m_state.record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
     header.write(db_root.span(0, FileHeader::kSize).data());
@@ -584,8 +586,8 @@ static auto apply_redo(Page &page, const DeltaDescriptor &delta)
 template <class Descriptor, class Callback>
 static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
 {
-    Page page {LogicalPageId {descriptor.table_id, descriptor.page_id}};
-    CDB_TRY(pager.acquire(page));
+    Page page;
+    CDB_TRY(pager.acquire(descriptor.page_id, &page));
 
     callback(page);
     pager.release(std::move(page));
@@ -744,8 +746,8 @@ auto DBImpl::recovery_phase_2() -> Status
 {
     auto &set = wal->m_set;
     // Pager needs the updated state to determine the page count.
-    Page page {LogicalPageId::root()};
-    CDB_TRY(pager->acquire(page));
+    Page page;
+    CDB_TRY(pager->acquire(Id::root(), &page));
     FileHeader header;
     header.read(page.data());
     pager->load_state(header);

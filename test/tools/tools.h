@@ -411,7 +411,7 @@ struct DatabaseStats {
     return stats;
 }
 
-auto print_references(Pager &pager, PointerMap &pointers) -> void;
+auto print_references(Pager &pager) -> void;
 
 } // namespace calicodb::Tools
 

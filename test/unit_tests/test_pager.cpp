@@ -603,8 +603,8 @@ public:
 
     [[nodiscard]] auto allocate_write(const std::string &message) const
     {
-        Page page {LogicalPageId::unknown_page(Id::null())};
-        EXPECT_OK(pager->allocate(page));
+        Page page;
+        EXPECT_OK(pager->allocate(&page));
         write_to_page(page, message);
         return page;
     }
@@ -612,7 +612,7 @@ public:
     [[nodiscard]] auto allocate_write_release(const std::string &message) const
     {
         auto page = allocate_write(message);
-        const auto id = page.id().page_id;
+        const auto id = page.id();
         pager->release(std::move(page));
         EXPECT_OK(status);
         return id;
@@ -620,8 +620,8 @@ public:
 
     [[nodiscard]] auto acquire_write(Id id, const std::string &message) const
     {
-        Page page {LogicalPageId::unknown_table(id)};
-        EXPECT_OK(pager->acquire(page));
+        Page page;
+        EXPECT_OK(pager->acquire(id, &page));
         pager->upgrade(page);
         write_to_page(page, message);
         return page;
@@ -636,8 +636,8 @@ public:
 
     [[nodiscard]] auto acquire_read_release(Id id, std::size_t size) const
     {
-        Page page {LogicalPageId::unknown_table(id)};
-        EXPECT_OK(pager->acquire(page));
+        Page page;
+        EXPECT_OK(pager->acquire(id, &page));
         auto message = read_from_page(page, size);
         pager->release(std::move(page));
         EXPECT_OK(status);
@@ -672,9 +672,9 @@ TEST_F(PagerTests, FirstAllocationCreatesRootPage)
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
 {
     const auto id = allocate_write_release(test_message);
-    Page page {LogicalPageId::unknown_table(id)};
-    ASSERT_OK(pager->acquire(page));
-    ASSERT_EQ(id, page.id().page_id);
+    Page page;
+    ASSERT_OK(pager->acquire(id, &page));
+    ASSERT_EQ(id, page.id());
     ASSERT_EQ(id, Id::root());
     pager->release(std::move(page));
 }
@@ -682,10 +682,10 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
 TEST_F(PagerTests, MultipleReaders)
 {
     const auto id = allocate_write_release(test_message);
-    Page page_a {LogicalPageId::unknown_table(id)};
-    Page page_b {LogicalPageId::unknown_table(id)};
-    ASSERT_OK(pager->acquire(page_a));
-    ASSERT_OK(pager->acquire(page_b));
+    Page page_a;
+    Page page_b;
+    ASSERT_OK(pager->acquire(id, &page_a));
+    ASSERT_OK(pager->acquire(id, &page_b));
     pager->release(std::move(page_a));
     pager->release(std::move(page_b));
 }

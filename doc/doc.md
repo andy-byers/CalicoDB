@@ -190,8 +190,10 @@ if (const auto s = db->vacuum(); s.is_ok()) {
 ### Transactions
 A transaction represents a unit of work in CalicoDB.
 The first transaction is started when the database is opened. 
-Otherwise, transaction boundaries are defined by calls to `Table::checkpoint()`.
-All updates that haven't been committed when a table is closed will be reverted.
+Otherwise, transaction boundaries are defined by calls to `DB::checkpoint()`.
+All updates that haven't been committed when the database is closed will be reverted, including creation of tables.
+The checkpoint operation affects all tables, at present.
+Additional work may go toward implementation of per-table checkpoints.
 
 ```C++
 if (const auto s = table->put("fanny", "persian"); !s.is_ok()) {
@@ -201,13 +203,12 @@ if (const auto s = table->put("myla", "brown-tabby"); !s.is_ok()) {
     
 }
 
-if (const auto s = table->checkpoint(); s.is_ok()) {
+if (const auto s = db->checkpoint(); s.is_ok()) {
     // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from 
     // here on out, the changes will be reapplied next time the database is opened.
 }
 
-// Free the table object. If there were pending changes, they will be undone here. If that process 
-// fails, the error status will be available in DB::status().
+// Free the table object.
 delete table;
 ```
 

@@ -240,7 +240,7 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
 
     // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
     if (!entry.token.has_value()) {
-        entry.token = m_dirty.insert(page.id().page_id, lsn);
+        entry.token = m_dirty.insert(page.id(), lsn);
     }
 
     // We only write a full image if the WAL does not already contain one for this page. If the page was modified
@@ -264,27 +264,24 @@ auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> vo
     }
 }
 
-auto Pager::allocate(Page &page) -> Status
+auto Pager::allocate(Page *page) -> Status
 {
-    page.m_id.page_id = Id::from_index(m_frames.page_count());
-    page.m_page_id = Id::from_index(m_frames.page_count());
-    CDB_TRY(acquire(page));
-    upgrade(page, 0);
+    CDB_TRY(acquire(Id::from_index(m_frames.page_count()), page));
+    upgrade(*page, 0);
     return Status::ok();
 }
 
-auto Pager::acquire(Page &page) -> Status
+auto Pager::acquire(Id page_id, Page *page) -> Status
 {
-    const auto [table_id, page_id] = page.id();
     CDB_EXPECT_FALSE(page_id.is_null());
 
     const auto do_acquire = [&](auto &entry) {
-        m_frames.ref(entry.index, page);
+        m_frames.ref(entry.index, *page);
 
         // Write back pages that are too old. This is so that old WAL segments can be removed.
         if (*m_is_running && entry.token) {
             const auto should_write = (*entry.token)->record_lsn <= *m_commit_lsn &&
-                                      read_page_lsn(page) <= m_wal->flushed_lsn();
+                                      read_page_lsn(*page) <= m_wal->flushed_lsn();
             if (should_write) {
                 auto s = m_frames.write_back(entry.index);
 
@@ -313,7 +310,7 @@ auto Pager::acquire(Page &page) -> Status
 auto Pager::upgrade(Page &page, int important) -> void
 {
     CDB_EXPECT_LE(important, static_cast<int>(page.size()));
-    auto itr = m_cache.get(page.id().page_id);
+    auto itr = m_cache.get(page.id());
     CDB_EXPECT_NE(itr, m_cache.end());
     m_frames.upgrade(itr->value.index, page);
     watch_page(page, itr->value, important);
@@ -322,16 +319,16 @@ auto Pager::upgrade(Page &page, int important) -> void
 auto Pager::discard(Page page) -> void
 {
     CDB_EXPECT_GT(m_frames.ref_sum(), 0);
-    CDB_EXPECT_TRUE(m_cache.contains(page.id().page_id));
-    auto [index, token] = m_cache.get(page.id().page_id)->value;
+    CDB_EXPECT_TRUE(m_cache.contains(page.id()));
+    auto [index, token] = m_cache.get(page.id())->value;
     m_frames.unref(index, std::move(page));
 }
 
 auto Pager::release(Page page) -> void
 {
     CDB_EXPECT_GT(m_frames.ref_sum(), 0);
-    CDB_EXPECT_TRUE(m_cache.contains(page.id().page_id));
-    auto [index, token] = m_cache.get(page.id().page_id)->value;
+    CDB_EXPECT_TRUE(m_cache.contains(page.id()));
+    auto [index, token] = m_cache.get(page.id())->value;
 
     if (page.is_writable() && *m_is_running) {
         write_page_lsn(page, m_wal->current_lsn());

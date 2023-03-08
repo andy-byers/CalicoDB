@@ -101,7 +101,7 @@ auto WriteAheadLog::log_vacuum(bool is_start, Lsn *out) -> Status
         m_last_lsn, is_start, m_data_buffer.data()));
 }
 
-auto WriteAheadLog::log_delta(const LogicalPageId &page_id, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status
+auto WriteAheadLog::log_delta(Id page_id, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status
 {
     ++m_last_lsn.value;
     if (out != nullptr) {
@@ -111,7 +111,7 @@ auto WriteAheadLog::log_delta(const LogicalPageId &page_id, const Slice &image, 
         m_last_lsn, page_id, image, delta, m_data_buffer.data()));
 }
 
-auto WriteAheadLog::log_image(const LogicalPageId &page_id, const Slice &image, Lsn *out) -> Status
+auto WriteAheadLog::log_image(Id page_id, const Slice &image, Lsn *out) -> Status
 {
     ++m_last_lsn.value;
     if (out != nullptr) {
@@ -172,9 +172,12 @@ auto WriteAheadLog::close_writer() -> Status
     m_writer = nullptr;
 
     auto id = m_set.last();
-    if (!written) {
+    ++id.value;
+
+    if (written) {
+        m_set.add_segment(id);
+    } else {
         CDB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
-        m_set.remove_after(m_set.id_before(id));
     }
     return Status::ok();
 }
@@ -187,7 +190,6 @@ auto WriteAheadLog::open_writer() -> Status
 
     CDB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), &m_file));
     m_writer = new WalWriter {*m_file, m_tail_buffer};
-    m_set.add_segment(id);
     return Status::ok();
 }
 
