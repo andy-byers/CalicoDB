@@ -1,7 +1,7 @@
 #ifndef CALICODB_OPTIONS_H
 #define CALICODB_OPTIONS_H
 
-#include "slice.h"
+#include <string>
 
 namespace calicodb {
 

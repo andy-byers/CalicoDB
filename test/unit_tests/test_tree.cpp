@@ -1284,7 +1284,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
         ASSERT_OK(freelist->push(std::move(node_3.page)));
     }
 
-    ASSERT_OK(tree->put("a", std::string(kPageSize * 2, 'x')));
+    ASSERT_OK(tree->put("a", std::string(3 * kPageSize / 2, 'x')));
 
     Page page_3;
     Page page_4;
@@ -1503,7 +1503,7 @@ TEST_P(VacuumTests, VacuumsOverflowChain_A)
     ASSERT_EQ(node_4.page.id().value, 4);
 
     // Creates an overflow chain of length 2, rooted at the second cell on the root page.
-    std::string overflow_data(kPageSize * 2, 'x');
+    std::string overflow_data(3 * kPageSize / 2, 'x');
     ASSERT_OK(tree->put("a", "value"));
     ASSERT_OK(tree->put("b", overflow_data));
 
@@ -1548,7 +1548,7 @@ TEST_P(VacuumTests, VacuumsOverflowChain_B)
     ASSERT_OK(freelist->push(std::move(node_5.page)));
     ASSERT_OK(freelist->push(std::move(node_6.page)));
 
-    std::string overflow_data(kPageSize * 2, 'x');
+    std::string overflow_data(3 * kPageSize / 2, 'x');
     ASSERT_OK(tree->put("a", "value"));
     ASSERT_OK(tree->put("b", overflow_data));
 
@@ -1594,7 +1594,7 @@ TEST_P(VacuumTests, VacuumOverflowChainSanityCheck)
     // Create overflow chains, but don't overflow the root node. Should create 3 chains, 1 of length 1, and 2 of length 2.
     std::vector<std::string> values;
     for (std::size_t i {}; i < 3; ++i) {
-        const auto value = random.Generate(kPageSize * std::min<std::size_t>(i + 1, 2));
+        const auto value = random.Generate(kPageSize * std::min<std::size_t>(i + 1, 2) * 2 / 3);
         ASSERT_OK(tree->put(tools::integral_key<1>(i), value));
         values.emplace_back(value.to_string());
     }

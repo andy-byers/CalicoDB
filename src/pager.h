@@ -20,7 +20,6 @@ class Pager
 {
 public:
     friend class DBImpl;
-    friend class Recovery;
 
     struct Parameters {
         std::string filename;
@@ -39,7 +38,6 @@ public:
     [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
-    [[nodiscard]] auto hit_ratio() const -> double;
     [[nodiscard]] auto recovery_lsn() -> Id;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
@@ -49,7 +47,6 @@ public:
     [[nodiscard]] auto acquire(Id page_id, Page *page) -> Status;
     auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
-    auto discard(Page page) -> void;
     auto save_state(FileHeader &header) -> void;
     auto load_state(const FileHeader &header) -> void;
 

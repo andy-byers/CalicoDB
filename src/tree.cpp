@@ -1,7 +1,7 @@
 #include "tree.h"
+#include "db_impl.h"
 #include "logging.h"
 #include "pager.h"
-#include "db_impl.h"
 #include "table_impl.h"
 #include "utils.h"
 #include <array>
@@ -12,9 +12,9 @@ namespace calicodb
 {
 
 static constexpr auto kMaxCellHeaderSize =
-    sizeof(std::uint64_t) + // Value size  (varint)
-    sizeof(std::uint64_t) + // Key size    (varint)
-    sizeof(Id);             // Overflow ID (8 B)
+    kVarintMaxLength + // Value size  (10 B)
+    kVarintMaxLength + // Key size    (10 B)
+    sizeof(Id);        // Overflow ID (8 B)
 
 inline constexpr auto compute_min_local(std::size_t page_size) -> std::size_t
 {
@@ -2146,7 +2146,8 @@ auto Node::TEST_validate() -> void
     CHECK_EQ(page.size(), std::size_t(total_bytes));
 }
 
-class TreeValidator {
+class TreeValidator
+{
     using NodeCallback = std::function<void(Node &, std::size_t)>;
     using PageCallback = std::function<void(const Page &)>;
 
@@ -2200,7 +2201,6 @@ class TreeValidator {
         }
     }
 
-
     static auto add_to_level(PrinterData &data, const std::string &message, std::size_t target) -> void
     {
         // If target is equal to levels.size(), add spaces to all levels.
@@ -2233,7 +2233,6 @@ class TreeValidator {
         CHECK_TRUE(data.levels.size() > level);
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
-
 
     static auto collect_levels(Tree &tree, PrinterData &data, Node node, std::size_t level) -> void
     {
@@ -2417,7 +2416,6 @@ auto Tree::TEST_to_string() -> std::string
 
 auto Node::TEST_validate() -> void
 {
-
 }
 
 auto Tree::TEST_to_string() -> void
@@ -2622,4 +2620,3 @@ auto CursorInternal::invalidate(const Cursor &cursor, Status status) -> void
 }
 
 } // namespace calicodb
-

@@ -64,13 +64,14 @@ auto consume_decimal_number(Slice *in, std::uint64_t *val) -> bool
     std::uint64_t value {};
 
     // reinterpret_cast-ing from char* to uint8_t* to avoid signedness.
-    const auto *start = reinterpret_cast<const std::uint8_t*>(in->data());
+    const auto *start = reinterpret_cast<const std::uint8_t *>(in->data());
 
     const auto *end = start + in->size();
     const auto *current = start;
     for (; current != end; ++current) {
         const auto ch = *current;
-        if (ch < '0' || ch > '9') break;
+        if (ch < '0' || ch > '9')
+            break;
 
         // Overflow check.
         // kMaxUint64 / 10 is also constant and will be optimized away.

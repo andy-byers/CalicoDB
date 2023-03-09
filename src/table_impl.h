@@ -5,7 +5,8 @@
 #include "page.h"
 #include "types.h"
 
-namespace calicodb {
+namespace calicodb
+{
 
 class Cursor;
 class DBImpl;
@@ -15,7 +16,7 @@ class WriteAheadLog;
 struct LogicalPageId;
 
 struct TableState {
-    LogicalPageId root_id {LogicalPageId::unknown()};
+    LogicalPageId root_id;
     Tree *tree {};
     bool is_open {};
 };

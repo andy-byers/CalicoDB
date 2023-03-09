@@ -1,7 +1,6 @@
 #ifndef CALICODB_DB_H
 #define CALICODB_DB_H
 
-#include "slice.h"
 #include <string>
 
 namespace calicodb
@@ -10,6 +9,7 @@ namespace calicodb
 class Cursor;
 class Env;
 class InfoLogger;
+class Slice;
 class Status;
 class Table;
 struct Options;

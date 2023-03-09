@@ -49,11 +49,11 @@ auto TableSet::erase(Id table_id) -> void
     m_tables.erase(table_id);
 }
 
-#define SET_STATUS(s)           \
-    do {                        \
+#define SET_STATUS(s)                 \
+    do {                              \
         if (m_state.status.is_ok()) { \
             m_state.status = s;       \
-        }                       \
+        }                             \
     } while (0)
 
 static auto encode_logical_id(LogicalPageId id, char *out) -> void
@@ -151,7 +151,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     auto *cursor = CursorInternal::make_cursor(*m_root->tree);
     cursor->seek_first();
     while (cursor->is_valid()) {
-        auto root_id = LogicalPageId::unknown();
+        LogicalPageId root_id;
         CDB_TRY(decode_logical_id(cursor->value(), &root_id));
         m_tables.add(root_id);
         cursor->next();
@@ -182,7 +182,8 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
       m_info_log {sanitized.info_log},
       m_owns_env {options.env == nullptr},
       m_owns_info_log {options.info_log == nullptr}
-{}
+{
+}
 
 DBImpl::~DBImpl()
 {
@@ -210,6 +211,12 @@ DBImpl::~DBImpl()
 
     delete pager;
     delete wal;
+
+    for (const auto &[_, state] : m_tables) {
+        if (state.is_open) {
+            delete state.tree;
+        }
+    }
 }
 
 auto DBImpl::record_count() const -> std::size_t
@@ -248,26 +255,48 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     if (options.info_log == nullptr) {
         (void)env->remove_file(path + kDefaultLogSuffix);
     }
-    // TODO: Make sure this file is a CalicoDB database.
-    auto s = env->remove_file(path);
+    Reader *reader {};
+    auto s = env->new_reader(path, &reader);
 
-    std::vector<std::string> children;
-    auto t = env->get_children(dir, &children);
     if (s.is_ok()) {
-        s = t;
-    }
-    if (t.is_ok()) {
-        for (const auto &name : children) {
-            const auto sibling_filename = join_paths(dir, name);
-            if (sibling_filename.find(wal_prefix) == 0) {
-                t = env->remove_file(sibling_filename);
-                if (s.is_ok()) {
-                    s = t;
-                }
+        char read_buffer[FileHeader::kSize];
+        auto read_size = sizeof(read_buffer);
+        s = reader->read(read_buffer, &read_size, 0);
+        if (s.is_ok() && read_size != sizeof(read_buffer)) {
+            s = Status::invalid_argument(path + " is too small to be a calicodb database");
+        }
+        if (s.is_ok()) {
+            FileHeader header;
+            header.read(read_buffer);
+            if (header.magic_code != FileHeader::kMagicCode) {
+                s = Status::invalid_argument(path + " is not a calicodb database");
             }
         }
     }
 
+    if (s.is_ok()) {
+        s = env->remove_file(path);
+
+        std::vector<std::string> children;
+        auto t = env->get_children(dir, &children);
+        if (t.is_ok()) {
+            for (const auto &name : children) {
+                const auto sibling_filename = join_paths(dir, name);
+                const auto possible_id = decode_segment_name(wal_prefix, sibling_filename);
+                if (!possible_id.is_null()) {
+                    auto u = env->remove_file(sibling_filename);
+                    if (t.is_ok()) {
+                        t = u;
+                    }
+                }
+            }
+        }
+        if (s.is_ok()) {
+            s = t;
+        }
+    }
+
+    delete reader;
     if (owns_env) {
         delete env;
     }
@@ -281,27 +310,18 @@ auto DBImpl::status() const -> Status
 
 auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 {
-    if (Slice prop {name}; prop.starts_with("calicodb.")) {
-        prop.advance(std::strlen("calicodb."));
+    if (name.starts_with("calicodb.")) {
+        const auto prop = name.range(std::strlen("calicodb."));
 
-        if (prop == "counts") {
-            out->append("records:");
-            append_number(out, m_state.record_count);
-            out->append(",pages:");
-            append_number(out, pager->page_count());
-            out->append(",updates:");
-            append_number(out, m_state.batch_size);
+        if (prop == "tables") {
+            // TODO: This should provide information about open tables, or maybe all tables.
+            out->append("<NOT IMPLEMENTED>");
             return true;
 
         } else if (prop == "stats") {
-            out->append("cache_hit_ratio:");
-            append_double(out, pager->hit_ratio());
-            out->append(",data_throughput:");
-            append_number(out, m_state.bytes_written);
-            out->append(",pager_throughput:");
-            append_number(out, pager->bytes_written());
-            out->append(",wal_throughput:");
-            append_number(out, wal->bytes_written());
+            // TODO: This should provide information about how much data was written to/read from different files,
+            //       number of cache hits and misses, and maybe other things.
+            out->append("<NOT IMPLEMENTED>");
             return true;
         }
     }
@@ -500,7 +520,7 @@ auto DBImpl::save_file_header() -> Status
 
 auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> Status
 {
-    auto root_id = LogicalPageId::unknown();
+    LogicalPageId root_id;
     std::string value;
 
     auto s = m_root->tree->get(name, &value);
@@ -534,7 +554,7 @@ auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
 {
     // Find the first available table ID.
     auto table_id = Id::root();
-    for (const auto &[current_id, _]: m_tables) {
+    for (const auto &[current_id, _] : m_tables) {
         if (current_id != table_id) {
             break;
         }
@@ -641,15 +661,6 @@ auto DBImpl::recovery_phase_1() -> Status
 
     if (set.is_empty()) {
         return Status::ok();
-    }
-
-    // We are starting up the database, so these should be set now. They may be
-    // updated if we find a commit record in the WAL past what was applied to
-    // the database.
-    if (wal->current_lsn().is_null()) {
-        wal->m_last_lsn = m_commit_lsn;
-        wal->m_flushed_lsn = m_commit_lsn;
-        pager->m_recovery_lsn = m_commit_lsn;
     }
 
     std::unique_ptr<Reader> file;
@@ -787,7 +798,7 @@ auto DBImpl::recovery_phase_2() -> Status
     header.read(page.data());
     pager->load_state(header);
     pager->release(std::move(page));
-    
+
     // TODO: This is too expensive for large databases. Look into a WAL index?
     // Make sure we aren't missing any WAL records.
     // for (auto id = Id::root(); id.value <= pager->page_count(); id.value++)

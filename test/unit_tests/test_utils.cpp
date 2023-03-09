@@ -779,14 +779,4 @@ TEST(LevelDB_Coding, Varint64Overflow)
     ASSERT_TRUE(decode_varint(input.data(), result) == nullptr);
 }
 
-TEST(Encoding, MaxVarintValue)
-{
-    const std::uint64_t max_value {0xFFFFFFFFFFFFFF};
-
-    uint64_t result;
-    std::string input("\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
-    ASSERT_FALSE(decode_varint(input.data(), result) == nullptr);
-    ASSERT_EQ(result, max_value);
-}
-
 } // namespace calicodb

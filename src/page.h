@@ -12,25 +12,23 @@ namespace calicodb
 using PageSize = std::uint16_t;
 
 struct LogicalPageId {
-    [[nodiscard]] static auto unknown_table(Id pid) -> LogicalPageId
+    [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
     {
         return LogicalPageId {Id::null(), pid};
     }
 
-    [[nodiscard]] static auto unknown_page(Id tid) -> LogicalPageId
+    [[nodiscard]] static auto with_table(Id tid) -> LogicalPageId
     {
         return LogicalPageId {tid, Id::null()};
-    }
-
-    [[nodiscard]] static auto unknown() -> LogicalPageId
-    {
-        return LogicalPageId {Id::null(), Id::null()};
     }
 
     [[nodiscard]] static auto root() -> LogicalPageId
     {
         return LogicalPageId {Id::root(), Id::root()};
     }
+
+    // Results in "LogicalPageId(Id::null, Id::null())".
+    explicit LogicalPageId() = default;
 
     explicit LogicalPageId(Id tid, Id pid)
         : table_id {tid},

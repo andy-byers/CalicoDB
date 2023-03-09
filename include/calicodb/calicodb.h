@@ -4,7 +4,9 @@
 #include "cursor.h"
 #include "db.h"
 #include "env.h"
+#include "options.h"
 #include "slice.h"
 #include "status.h"
+#include "table.h"
 
 #endif // CALICODB_CALICODB_H

@@ -151,7 +151,7 @@ public:
 
 TEST_F(CacheTests, EmptyCacheBehavior)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     ASSERT_TRUE(cache.is_empty());
     ASSERT_EQ(cache.size(), 0);
@@ -162,7 +162,7 @@ TEST_F(CacheTests, EmptyCacheBehavior)
 
 TEST_F(CacheTests, NonEmptyCacheBehavior)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     cache.put(1, 1);
     ASSERT_FALSE(cache.is_empty());
@@ -174,7 +174,7 @@ TEST_F(CacheTests, NonEmptyCacheBehavior)
 
 TEST_F(CacheTests, ElementsArePromotedAfterUse)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     // 1*, 2, 3, 4, END
     cache.put(4, 4);
@@ -237,7 +237,7 @@ TEST_F(CacheTests, IterationRespectsReplacementPolicy)
 
 TEST_F(CacheTests, QueryDoesNotPromoteElements)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     // 1*, 2, 3, END
     cache.put(3, 3);
@@ -247,7 +247,6 @@ TEST_F(CacheTests, QueryDoesNotPromoteElements)
     ASSERT_EQ(cache.query(1)->value, 1);
     ASSERT_EQ(cache.query(2)->value, 2);
 
-    // Method is const.
     const auto &ref = cache;
     ASSERT_EQ(ref.query(3)->value, 3);
 
@@ -260,7 +259,7 @@ TEST_F(CacheTests, QueryDoesNotPromoteElements)
 
 TEST_F(CacheTests, ModifyValue)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     cache.put(1, 1);
     cache.put(1, 2);
@@ -271,7 +270,7 @@ TEST_F(CacheTests, ModifyValue)
 
 TEST_F(CacheTests, WarmElementsAreFifoOrdered)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     // 1*, 2, 3, END
     cache.put(3, 3);
@@ -291,7 +290,7 @@ TEST_F(CacheTests, WarmElementsAreFifoOrdered)
 
 TEST_F(CacheTests, HotElementsAreLruOrdered)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     // 1*, 2, 3
     cache.put(3, 3);
@@ -316,7 +315,7 @@ TEST_F(CacheTests, HotElementsAreLruOrdered)
 
 TEST_F(CacheTests, HotElementsAreEncounteredFirst)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -348,7 +347,7 @@ TEST_F(CacheTests, HotElementsAreEncounteredFirst)
 
 TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -381,7 +380,7 @@ TEST_F(CacheTests, SeparatorIsMovedOnInsert)
 
 TEST_F(CacheTests, AddWarmElements)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -417,7 +416,7 @@ TEST_F(CacheTests, AddWarmElements)
 
 TEST_F(CacheTests, InsertAfterWarmElementsDepleted)
 {
-    calicodb::Cache<int, int> cache;
+    Cache<int, int> cache;
 
     // 4*, 3, 2, 1, END
     cache.put(1, 1);
@@ -458,10 +457,12 @@ static auto check_cache_order(int hot_count, int warm_count)
 {
     Cache<int, int> c;
 
-    for (int i {1}; i <= hot_count + warm_count; ++i)
+    for (int i {1}; i <= hot_count + warm_count; ++i) {
         c.put(i, i);
-    for (int i {1}; i <= hot_count; ++i)
+    }
+    for (int i {1}; i <= hot_count; ++i) {
         c.put(i, i);
+    }
 
     // Iteration: Hot elements should be encountered first. In particular, the most-recently-
     // used hot element (if present) should be first.
@@ -497,7 +498,7 @@ TEST(CacheOrderTests, CheckOrder)
 
 TEST(MoveOnlyCacheTests, WorksWithMoveOnlyValue)
 {
-    calicodb::Cache<int, std::unique_ptr<int>> cache;
+    Cache<int, std::unique_ptr<int>> cache;
     cache.put(1, std::make_unique<int>(1));
     ASSERT_EQ(*cache.get(1)->value, 1);
     ASSERT_EQ(*cache.evict()->value, 1);
@@ -538,12 +539,12 @@ TEST_F(PageRegistryTests, HotEntriesAreFoundLast)
     ASSERT_FALSE(registry.evict(callback));
 }
 
-class FramerTests
+class FrameManagerTests
     : public InMemoryTest,
       public testing::Test
 {
 public:
-    explicit FramerTests()
+    explicit FrameManagerTests()
     {
         Editor *file;
         EXPECT_OK(env->new_editor("./test", &file));
@@ -553,18 +554,18 @@ public:
         frames = std::make_unique<FrameManager>(*file, std::move(buffer), 0x200, 8);
     }
 
-    ~FramerTests() override = default;
+    ~FrameManagerTests() override = default;
 
     std::unique_ptr<FrameManager> frames;
 };
 
-TEST_F(FramerTests, NewFramerIsSetUpCorrectly)
+TEST_F(FrameManagerTests, NewFrameManagerIsSetUpCorrectly)
 {
     ASSERT_EQ(frames->available(), 8);
     ASSERT_EQ(frames->page_count(), 0);
 }
 
-TEST_F(FramerTests, PinFailsWhenNoFramesAreAvailable)
+TEST_F(FrameManagerTests, PinFailsWhenNoFramesAreAvailable)
 {
     std::size_t fid;
     for (std::size_t i {1}; i <= 8; i++) {

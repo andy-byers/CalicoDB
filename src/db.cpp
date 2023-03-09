@@ -1,7 +1,7 @@
 
 #include "calicodb/calicodb.h"
-#include "env_posix.h"
 #include "db_impl.h"
+#include "env_posix.h"
 #include "utils.h"
 
 namespace calicodb

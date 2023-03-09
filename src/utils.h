@@ -2,14 +2,14 @@
 #define CALICODB_UTILS_H
 
 #include "calicodb/status.h"
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <cstdint>
 
 #if NDEBUG
 #define CDB_EXPECT_(expr, file, line)
 #else
-#define CDB_EXPECT_(expr, file, line) Impl::expect(expr, #expr, file, line)
+#define CDB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
 #endif // NDEBUG
 
 #define CDB_EXPECT_TRUE(expr) CDB_EXPECT_(expr, __FILE__, __LINE__)
@@ -31,7 +31,7 @@
 namespace calicodb
 {
 
-namespace Impl
+namespace impl
 {
 
 inline constexpr auto expect(bool cond, const char *repr, const char *file, int line) noexcept -> void
@@ -42,7 +42,7 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
     }
 }
 
-} // namespace Impl
+} // namespace impl
 
 static constexpr std::size_t kMinPageSize {0x200};
 static constexpr std::size_t kMaxPageSize {0x8000};

@@ -158,14 +158,14 @@ static auto decode_full_image_payload(const Slice &in) -> ImageDescriptor
 auto decode_payload(const Slice &in) -> PayloadDescriptor
 {
     switch (WalPayloadType {in.data()[0]}) {
-    case WalPayloadType::kDeltaPayload:
-        return decode_deltas_payload(in);
-    case WalPayloadType::kImagePayload:
-        return decode_full_image_payload(in);
-    case WalPayloadType::kVacuumPayload:
-        return decode_vacuum_payload(in);
-    default:
-        return std::monostate {};
+        case WalPayloadType::kDeltaPayload:
+            return decode_deltas_payload(in);
+        case WalPayloadType::kImagePayload:
+            return decode_full_image_payload(in);
+        case WalPayloadType::kVacuumPayload:
+            return decode_vacuum_payload(in);
+        default:
+            return std::monostate {};
     }
 }
 

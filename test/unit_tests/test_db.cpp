@@ -85,6 +85,64 @@ TEST(LeakTests, LeavesUserObjects)
     delete options.env;
 }
 
+TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
+{
+    Options options;
+    options.env = new tools::FakeEnv;
+
+    // "./test" does not exist.
+    ASSERT_TRUE(DB::destroy(options, "./test").is_not_found());
+    ASSERT_TRUE(options.env->file_exists("./test").is_not_found());
+
+    // File is too small to read the header.
+    Editor *editor;
+    ASSERT_OK(options.env->new_editor("./test", &editor));
+    ASSERT_TRUE(DB::destroy(options, "./test").is_invalid_argument());
+    ASSERT_OK(options.env->file_exists("./test"));
+
+    // Header magic code is incorrect.
+    char buffer[FileHeader::kSize];
+    FileHeader header;
+    header.magic_code = 42;
+    header.write(buffer);
+    ASSERT_OK(editor->write(Slice {buffer, sizeof(buffer)}, 0));
+    ASSERT_TRUE(DB::destroy(options, "./test").is_invalid_argument());
+
+    // Should work, since we just check the magic code.
+    header.magic_code = FileHeader::kMagicCode;
+    header.write(buffer);
+    ASSERT_OK(editor->write(Slice {buffer, sizeof(buffer)}, 0));
+    ASSERT_OK(DB::destroy(options, "./test"));
+
+    delete editor;
+    delete options.env;
+}
+
+TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
+{
+    Options options;
+    options.env = new tools::FakeEnv;
+    options.wal_prefix = "./wal-";
+
+    DB *db;
+    ASSERT_OK(DB::open(options, "./test", &db));
+    delete db;
+
+    // Starts with the WAL prefix of "./wal-", so it is considered a WAL file.
+    Editor *editor;
+    ASSERT_OK(options.env->new_editor("./wal-1", &editor));
+    delete editor;
+
+    ASSERT_OK(options.env->new_editor("./wal_1", &editor));
+    delete editor;
+
+    ASSERT_OK(DB::destroy(options, "./test"));
+    ASSERT_OK(options.env->file_exists("./wal_1"));
+    ASSERT_TRUE(options.env->file_exists("./wal-1").is_not_found());
+
+    delete options.env;
+}
+
 class BasicDatabaseTests
     : public OnDiskTest,
       public testing::Test
@@ -121,13 +179,17 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
     ASSERT_TRUE(env->file_exists(kFilename).is_ok());
 }
 
-TEST_F(BasicDatabaseTests, RecordCountIsTracked)
+TEST_F(BasicDatabaseTests, StatsAreTracked)
 {
     DB *db;
     ASSERT_OK(DB::open(options, kFilename, &db));
 
     Table *table;
     ASSERT_OK(db->new_table({}, "test", &table));
+
+    std::string property;
+    ASSERT_TRUE(db->get_property("calicodb.stats", &property));
+    ASSERT_TRUE(db->get_property("calicodb.tables", &property));
 
     ASSERT_EQ(db_impl(db)->record_count(), 0);
     ASSERT_OK(table->put("a", "1"));
@@ -790,10 +852,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
 
     std::size_t file_size;
     ASSERT_OK(env->file_size("./test", &file_size));
-    std::string property;
-    ASSERT_TRUE(db->db->get_property("calicodb.counts", &property));
-    const auto counts = tools::parse_db_counts(property);
-    ASSERT_EQ(file_size, counts.pages * db->options.page_size);
+    ASSERT_EQ(file_size, reinterpret_cast<const DBImpl *>(db->db)->pager->page_count() * db->options.page_size);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -812,160 +871,6 @@ INSTANTIATE_TEST_SUITE_P(
         ErrorWrapper {ErrorTarget::kWalWrite, 1},
         ErrorWrapper {ErrorTarget::kWalWrite, 10},
         ErrorWrapper {ErrorTarget::kWalWrite, 100}));
-
-class ExtendedCursor : public Cursor
-{
-    friend class ExtendedDatabase;
-
-    explicit ExtendedCursor(Cursor *base)
-        : m_base {base}
-    {
-    }
-
-    std::unique_ptr<Cursor> m_base;
-
-public:
-    ~ExtendedCursor() override = default;
-
-    [[nodiscard]] auto is_valid() const -> bool override
-    {
-        return m_base->is_valid();
-    }
-
-    [[nodiscard]] auto status() const -> Status override
-    {
-        return m_base->status();
-    }
-
-    [[nodiscard]] auto key() const -> Slice override
-    {
-        return m_base->key();
-    }
-
-    [[nodiscard]] auto value() const -> Slice override
-    {
-        return m_base->value();
-    }
-
-    auto seek(const Slice &key) -> void override
-    {
-        return m_base->seek(key);
-    }
-
-    auto seek_first() -> void override
-    {
-        return m_base->seek_first();
-    }
-
-    auto seek_last() -> void override
-    {
-        return m_base->seek_last();
-    }
-
-    auto next() -> void override
-    {
-        return m_base->next();
-    }
-
-    auto previous() -> void override
-    {
-        return m_base->previous();
-    }
-};
-//
-//class ExtendedDatabase : public DB
-//{
-//    std::unique_ptr<tools::FakeEnv> m_env;
-//    std::unique_ptr<DB> m_base;
-//
-//public:
-//    [[nodiscard]] static auto put(const Slice &base, Options options, ExtendedDatabase **out) -> Status
-//    {
-//        const auto prefix = base.to_string() + "_";
-//        auto *ext = new ExtendedDatabase;
-//        auto env = std::make_unique<tools::FakeEnv>();
-//        options.env = env.get();
-//
-//        DB *db;
-//        CDB_TRY(DB::open(options, base, &db));
-//
-//        ext->m_base.reset(db);
-//        ext->m_env = std::move(env);
-//        *out = ext;
-//        return Status::ok();
-//    }
-//
-//    ~ExtendedDatabase() override = default;
-//
-//    [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override
-//    {
-//        return m_base->get_property(name, out);
-//    }
-//
-//    [[nodiscard]] auto new_cursor() const -> Cursor * override
-//    {
-//        return new ExtendedCursor {m_base->new_cursor()};
-//    }
-//
-//    [[nodiscard]] auto status() const -> Status override
-//    {
-//        return m_base->status();
-//    }
-//
-//    [[nodiscard]] auto vacuum() -> Status override
-//    {
-//        return Status::ok();
-//    }
-//
-//    [[nodiscard]] auto commit() -> Status override
-//    {
-//        return m_base->commit();
-//    }
-//
-//    [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override
-//    {
-//        return m_base->get(key, value);
-//    }
-//
-//    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override
-//    {
-//        return m_base->put(key, value);
-//    }
-//
-//    [[nodiscard]] auto erase(const Slice &key) -> Status override
-//    {
-//        return m_base->erase(key);
-//    }
-//};
-//
-//TEST(ExtensionTests, Extensions)
-//{
-//    ExtendedDatabase *db;
-//    ASSERT_OK(ExtendedDatabase::put("./test", {}, &db));
-//    ASSERT_OK(table->put("a", "1"));
-//    ASSERT_OK(table->put("b", "2"));
-//    ASSERT_OK(table->put("c", "3"));
-//
-//    auto *cursor = table->new_cursor();
-//    cursor->seek_first();
-//    ASSERT_TRUE(cursor->is_valid());
-//    ASSERT_EQ(cursor->key(), "a");
-//    ASSERT_EQ(cursor->value(), "1");
-//    cursor->next();
-//    ASSERT_TRUE(cursor->is_valid());
-//    ASSERT_EQ(cursor->key(), "b");
-//    ASSERT_EQ(cursor->value(), "2");
-//    cursor->next();
-//    ASSERT_TRUE(cursor->is_valid());
-//    ASSERT_EQ(cursor->key(), "c");
-//    ASSERT_EQ(cursor->value(), "3");
-//    cursor->next();
-//    ASSERT_FALSE(cursor->is_valid());
-//    delete cursor;
-//
-//    ASSERT_OK(db->checkpoint());
-//    delete db;
-//}
 
 class DbOpenTests
     : public OnDiskTest,
@@ -1055,11 +960,20 @@ protected:
     DB *db {};
 };
 
+TEST_F(ApiTests, OnlyReturnsValidProperties)
+{
+    std::string stats, tables, scratch;
+    ASSERT_TRUE(db->get_property("calicodb.stats", &stats));
+    ASSERT_TRUE(db->get_property("calicodb.tables", &tables));
+    ASSERT_FALSE(db->get_property("Calicodb.tables", &scratch));
+    ASSERT_FALSE(db->get_property("calicodb.nonexistent", &scratch));
+    ASSERT_FALSE(stats.empty());
+    ASSERT_FALSE(tables.empty());
+    ASSERT_TRUE(scratch.empty());
+}
+
 TEST_F(ApiTests, IsConstCorrect)
 {
-    Table *table;
-    TableOptions table_options;
-    ASSERT_OK(db->new_table(table_options, "table", &table));
     ASSERT_OK(table->put("key", "value"));
 
     const auto *const_table = table;
@@ -1078,9 +992,13 @@ TEST_F(ApiTests, IsConstCorrect)
 
     const auto *const_db = db;
     std::string property;
-    ASSERT_TRUE(const_db->get_property("calicodb.counts", &property));
-//    ASSERT_EQ(property, "records:1,pages:3,updates:1");
+    ASSERT_TRUE(const_db->get_property("calicodb.tables", &property));
     ASSERT_OK(const_db->status());
+}
+
+TEST_F(ApiTests, EmptyKeysAreNotAllowed)
+{
+    ASSERT_TRUE(table->put("", "value").is_invalid_argument());
 }
 
 TEST_F(ApiTests, UncommittedTransactionIsRolledBack)

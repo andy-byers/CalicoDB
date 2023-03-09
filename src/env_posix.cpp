@@ -14,14 +14,14 @@ static constexpr int kFilePermissions {0644}; // -rw-r--r--
 [[nodiscard]] static auto to_status(int code) -> Status
 {
     switch (code) {
-    case ENOENT:
-        return Status::not_found(strerror(code));
-    case EINVAL:
-        return Status::invalid_argument(strerror(code));
-    case EEXIST:
-        return Status::logic_error(strerror(code));
-    default:
-        return Status::system_error(strerror(code));
+        case ENOENT:
+            return Status::not_found(strerror(code));
+        case EINVAL:
+            return Status::invalid_argument(strerror(code));
+        case EEXIST:
+            return Status::logic_error(strerror(code));
+        default:
+            return Status::system_error(strerror(code));
     }
 }
 
@@ -52,7 +52,7 @@ static auto file_close(int fd) -> Status
 
 static auto file_read(int file, char *out, std::size_t *size) -> Status
 {
-    for (; ; ) {
+    for (;;) {
         const auto n = read(file, out, *size);
         if (n < 0) {
             if (errno == EINTR) {

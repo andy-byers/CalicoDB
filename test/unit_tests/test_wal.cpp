@@ -11,6 +11,19 @@
 namespace calicodb
 {
 
+TEST(SegmentNameParserTests, MatchesOnPrefix)
+{
+    ASSERT_EQ(decode_segment_name("./prefix-", "./prefix-1"), Id {1});
+    ASSERT_TRUE(decode_segment_name("./prefix_", "./prefix-1").is_null());
+}
+
+TEST(SegmentNameParserTests, SegmentIdMustBeADecimalNumber)
+{
+    ASSERT_TRUE(decode_segment_name("./prefix-", "./prefix-a").is_null());
+    ASSERT_TRUE(decode_segment_name("./prefix-", "./prefix-z").is_null());
+    ASSERT_TRUE(decode_segment_name("./prefix-", "./prefix-").is_null());
+}
+
 namespace fs = std::filesystem;
 
 class WalRecordMergeTests : public testing::Test

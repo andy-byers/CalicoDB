@@ -161,8 +161,7 @@ struct PointerMap {
     [[nodiscard]] static auto write_entry(Pager &pager, Id pid, Entry entry) -> Status;
 };
 
-struct NodeManager
-{
+struct NodeManager {
     [[nodiscard]] static auto allocate(Pager &pager, Freelist &freelist, Node *out, char *scratch, bool is_external) -> Status;
     [[nodiscard]] static auto acquire(Pager &pager, Id pid, Node *out, char *scratch, bool upgrade) -> Status;
     [[nodiscard]] static auto destroy(Freelist &freelist, Node node) -> Status;
@@ -170,23 +169,22 @@ struct NodeManager
     static auto release(Pager &pager, Node node) -> void;
 };
 
-struct OverflowList
-{
+struct OverflowList {
     [[nodiscard]] static auto read(Pager &pager, Span out, Id head_id, std::size_t offset = 0) -> Status;
     [[nodiscard]] static auto write(Pager &pager, Freelist &freelist, Id *out, const Slice &first, const Slice &second = {}) -> Status;
     [[nodiscard]] static auto copy(Pager &pager, Freelist &freelist, Id *out, Id overflow_id, std::size_t size) -> Status;
     [[nodiscard]] static auto erase(Pager &pager, Freelist &freelist, Id head_id) -> Status;
 };
 
-struct PayloadManager
-{
+struct PayloadManager {
     [[nodiscard]] static auto emplace(Pager &pager, Freelist &freelist, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
     [[nodiscard]] static auto promote(Pager &pager, Freelist &freelist, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
 };
 
-class Tree {
+class Tree
+{
 public:
     explicit Tree(Pager &pager, Id &root_id, Id &freelist_head);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status;

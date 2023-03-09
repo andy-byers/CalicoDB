@@ -160,7 +160,7 @@ public:
     TestWithPager()
         : scratch(kPageSize, '\x00')
     {
-        tables.add(LogicalPageId::unknown_page(Id::root()));
+        tables.add(LogicalPageId::with_table(Id::root()));
         Pager *temp;
         EXPECT_OK(Pager::open({
                                   kFilename,

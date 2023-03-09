@@ -73,11 +73,6 @@ auto Pager::page_size() const -> std::size_t
     return m_frames.page_size();
 }
 
-auto Pager::hit_ratio() const -> double
-{
-    return m_cache.hit_ratio();
-}
-
 auto Pager::pin_frame(Id pid) -> Status
 {
     if (auto s = do_pin_frame(pid); s.is_not_found()) {
@@ -314,14 +309,6 @@ auto Pager::upgrade(Page &page, int important) -> void
     CDB_EXPECT_NE(itr, m_cache.end());
     m_frames.upgrade(itr->value.index, page);
     watch_page(page, itr->value, important);
-}
-
-auto Pager::discard(Page page) -> void
-{
-    CDB_EXPECT_GT(m_frames.ref_sum(), 0);
-    CDB_EXPECT_TRUE(m_cache.contains(page.id()));
-    auto [index, token] = m_cache.get(page.id())->value;
-    m_frames.unref(index, std::move(page));
 }
 
 auto Pager::release(Page page) -> void

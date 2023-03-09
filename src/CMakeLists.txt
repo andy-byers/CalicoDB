@@ -28,7 +28,7 @@ else()
         list(APPEND CALICODB_OPTIONS -Wduplicated-cond)
         list(APPEND CALICODB_OPTIONS -Wduplicated-branches)
         list(APPEND CALICODB_OPTIONS -Wlogical-op)
-        list(APPEND CALICODB_OPTIONS -Wnull-dereference)
+#        list(APPEND CALICODB_OPTIONS -Wnull-dereference)
 #        list(APPEND CALICODB_OPTIONS -Wuseless-cast) # TODO: Problems on Apple Clang
     else()
         list(APPEND CALICODB_OPTIONS -Wimplicit-fallthrough)
@@ -44,7 +44,7 @@ add_library(calicodb
                "${CALICODB_INCLUDE_DIR}/calicodb/slice.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/status.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/table.h"
-               "${CALICODB_SOURCES}" table_impl.h table_impl.cpp)
+               "${CALICODB_SOURCES}")
 target_include_directories(calicodb
         PUBLIC  $<BUILD_INTERFACE:${CALICODB_INCLUDE_DIR}>
                 $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

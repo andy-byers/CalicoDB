@@ -30,8 +30,8 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
     std::vector<Id> segments;
     for (auto &name : possible_segments) {
         name = join_paths(dir, name);
-        if (Slice {name}.starts_with(param.prefix)) {
-            segments.emplace_back(decode_segment_name(param.prefix, name));
+        if (const auto id = decode_segment_name(param.prefix, name); !id.is_null()) {
+            segments.emplace_back(id);
         }
     }
     std::sort(begin(segments), end(segments));

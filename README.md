@@ -30,7 +30,7 @@ It exposes a small API that allows storage and retrieval of arbitrary byte seque
 
 ## Caveats
 + Concurrency control must be provided externally
-+ Multiple simultaneous transactions are not supported
++ Checkpoint routine affects all tables
 
 ## Documentation
 Check out the [docs](doc/doc.md).
@@ -57,15 +57,15 @@ Only benchmarks relevant to CalicoDB are included.
 
 | Benchmark name             | CalicoDB result (ops/second) | SQLite3 result (ops/second) | TreeDB result (ops/second) |
 |:---------------------------|-----------------------------:|----------------------------:|---------------------------:|
-| `fillseq`<sup>*</sup>      |                      632,511 |                   1,326,260 |                  1,191,895 |
-| `fillrandom`<sup>*</sup>   |                      193,686 |                     189,681 |                    326,691 |
-| `overwrite`<sup>*</sup>    |                      195,963 |                     173,461 |                    288,684 |
-| `readrandom`               |                      523,013 |                     515,198 |                    413,907 |
-| `readseq`                  |                    3,389,831 |                  10,526,316 |                  3,690,037 |
-| `fillrand100k`<sup>*</sup> |                        2,167 |                       5,215 |                     11,387 |
-| `fillseq100k`<sup>*</sup>  |                        1,865 |                       6,731 |                      9,560 |
-| `readseq100k`              |                       22,130 |                      49,232 |                     65,557 |
-| `readrand100k`             |                       21,519 |                      10,894 |                     66,028 |
+| `fillseq`<sup>*</sup>      |                      736,920 |                   1,326,260 |                  1,191,895 |
+| `fillrandom`<sup>*</sup>   |                      180,897 |                     189,681 |                    326,691 |
+| `overwrite`<sup>*</sup>    |                      180,799 |                     173,461 |                    288,684 |
+| `readrandom`               |                      385,356 |                     515,198 |                    413,907 |
+| `readseq`                  |                    3,030,303 |                  10,526,316 |                  3,690,037 |
+| `fillrand100k`<sup>*</sup> |                        3,563 |                       5,215 |                     11,387 |
+| `fillseq100k`<sup>*</sup>  |                        4,443 |                       6,731 |                      9,560 |
+| `readseq100k`              |                       20,393 |                      49,232 |                     65,557 |
+| `readrand100k`             |                       21,196 |                      10,894 |                     66,028 |
 
 <sup>*</sup> These benchmarks are affected by the fact that we use a batch size of 1,000.
 CalicoDB batches database updates together into transactions, based on use of the `Database::commit()` method.
@@ -76,11 +76,10 @@ For this reason, the SQLite3 benchmarks actually list the results for the batche
 1. Get everything code reviewed!
 2. Need to implement repair (`Status DB::repair()`)
     + Run when a database cannot be opened due to corruption (not the same as recovery)
-3. Support Windows (write a `Storage` implementation)
+3. Support Windows (write an `Env` implementation)
 4. When we roll back a transaction, we shouldn't undo any vacuum operations that have occurred
-   + Add a new WAL record type: a "meta" record that signals some operation and maybe a payload specific to the operation type
-   + This record type can signal vacuum start, vacuum end, or even other things as needed
-   + We should still roll vacuum operations forward during recovery
+   + Added a "vacuum record" that marks the start or end of a vacuum
+   + Just need to get the recovery routine to understand them
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).

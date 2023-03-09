@@ -102,12 +102,14 @@ public:
         return m_cache.contains(pid);
     }
 
-    [[nodiscard]] auto hit_ratio() const -> double
+    [[nodiscard]] auto hits() const -> std::uint64_t
     {
-        if (const auto total = static_cast<double>(m_hits + m_misses); total != 0.0) {
-            return static_cast<double>(m_hits) / total;
-        }
-        return 0.0;
+        return m_hits;
+    }
+
+    [[nodiscard]] auto misses() const -> std::uint64_t
+    {
+        return m_misses;
     }
 
     [[nodiscard]] auto end() -> Iterator
@@ -155,8 +157,8 @@ public:
 
 private:
     Base m_cache;
-    std::size_t m_hits {};
-    std::size_t m_misses {};
+    std::uint64_t m_hits {};
+    std::uint64_t m_misses {};
 };
 
 } // namespace calicodb

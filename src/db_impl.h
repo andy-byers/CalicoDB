@@ -23,7 +23,8 @@ class TableImpl;
 class WriteAheadLog;
 struct TableState;
 
-class TableSet {
+class TableSet
+{
 public:
     using Iterator = std::map<Id, TableState>::const_iterator;
 

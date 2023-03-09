@@ -240,7 +240,7 @@ static constexpr std::size_t kWalBlockScale {4};
 
 [[nodiscard]] inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id
 {
-    if (path.size() <= prefix.size()) {
+    if (path.size() <= prefix.size() || !path.starts_with(prefix)) {
         return Id::null();
     }
     auto name = path.range(prefix.size());

@@ -1,7 +1,8 @@
 #include "table_impl.h"
 #include "db_impl.h"
 
-namespace calicodb {
+namespace calicodb
+{
 
 TableImpl::TableImpl(std::string name, DBImpl &db, TableState &state, DBState &db_state)
     : m_name {std::move(name)},
