@@ -76,10 +76,8 @@ auto WriteAheadLog::current_lsn() const -> Lsn
 
 auto WriteAheadLog::log(const Slice &payload) -> Status
 {
-    std::fprintf(stderr, "LSN = %llu\n", get_u64(payload.data() + 1));
-
     if (m_writer == nullptr) {
-        return Status::logic_error("segment file is not put");
+        return Status::logic_error("segment file is not open");
     }
     m_bytes_written += payload.size();
 
@@ -124,7 +122,7 @@ auto WriteAheadLog::log_image(Id page_id, const Slice &image, Lsn *out) -> Statu
 auto WriteAheadLog::flush() -> Status
 {
     if (m_writer == nullptr) {
-        return Status::logic_error("segment file is not put");
+        return Status::logic_error("segment file is not open");
     }
     CDB_TRY(m_writer->flush());
     return m_file->sync();

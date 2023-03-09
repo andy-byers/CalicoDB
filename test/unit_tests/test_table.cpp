@@ -44,8 +44,8 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(DB::open(options, kFilename, &db));
-        ASSERT_OK(TableTests::reopen());
+        ASSERT_OK(TableTests::reopen_db());
+        ASSERT_OK(TableTests::reopen_tables());
     }
 
     auto TearDown() -> void override
@@ -54,12 +54,23 @@ public:
         ASSERT_OK(db->status());
     }
 
-    virtual auto reopen() -> Status
+    virtual auto reopen_tables() -> Status
     {
         delete table;
         table = nullptr;
 
         return db->new_table({}, "table", &table);
+    }
+
+    virtual auto reopen_db() -> Status
+    {
+        delete table;
+        table = nullptr;
+
+        delete db;
+        db = nullptr;
+
+        return DB::open(options, kFilename, &db);
     }
 
     Options options;
@@ -90,14 +101,7 @@ TEST_F(TableTests, EmptyTableGetsRemovedDuringVacuum)
 
 TEST_F(TableTests, TableCreationIsPartOfTransaction)
 {
-    delete table;
-    table = nullptr;
-
-    delete db;
-    db = nullptr;
-
-    ASSERT_OK(DB::open(options, kFilename, &db));
-    reopen();
+    reopen_db();
 
     ASSERT_NE(db_impl(db)->TEST_tables().get(Id {1}), nullptr);
     ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
@@ -124,15 +128,23 @@ public:
         ASSERT_OK(db->status());
     }
 
-    auto reopen() -> Status override
+    auto reopen_tables() -> Status override
     {
-        if (auto s = TableTests::reopen(); !s.is_ok()) {
+        if (auto s = TableTests::reopen_tables(); !s.is_ok()) {
             return s;
         }
         delete table_2;
         table_2 = nullptr;
 
         return db->new_table({}, "table_2", &table);
+    }
+
+    auto reopen_db() -> Status override
+    {
+        delete table_2;
+        table_2 = nullptr;
+
+        return TableTests::reopen_db();
     }
 
     Table *table_1 {};
@@ -160,6 +172,27 @@ TEST_F(TwoTableTests, EmptyTableGetsRemovedDuringVacuum)
     ASSERT_EQ(db_impl(db)->pager->page_count(), 4);
     ASSERT_OK(db->vacuum());
     ASSERT_EQ(db_impl(db)->pager->page_count(), 3);
+}
+
+TEST_F(TwoTableTests, CheckpointedTablesAreRemembered)
+{
+    ASSERT_OK(db->checkpoint());
+    reopen_db();
+
+    const auto &tables = db_impl(db)->TEST_tables();
+    ASSERT_NE(tables.get(Id {1}), nullptr) << "cannot locate root table";
+    ASSERT_NE(tables.get(Id {2}), nullptr) << "cannot locate first non-root table";
+    ASSERT_NE(tables.get(Id {3}), nullptr) << "cannot locate second non-root table";
+}
+
+TEST_F(TwoTableTests, UncheckpointedTablesAreForgotten)
+{
+    reopen_db();
+
+    const auto &tables = db_impl(db)->TEST_tables();
+    ASSERT_NE(tables.get(Id {1}), nullptr) << "cannot locate root table";
+    ASSERT_EQ(tables.get(Id {2}), nullptr) << "first non-root table was not removed";
+    ASSERT_EQ(tables.get(Id {3}), nullptr) << "second non-root table was not removed";
 }
 
 } // namespace calicodb

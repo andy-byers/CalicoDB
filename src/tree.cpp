@@ -869,7 +869,10 @@ auto Tree::split_root(Node root, Node &out) -> Status
     CDB_EXPECT_TRUE(is_overflowing(root));
     std::swap(child.overflow, root.overflow);
     child.overflow_index = root.overflow_index;
-    child.gap_size = root.gap_size + FileHeader::kSize;
+    child.gap_size = root.gap_size;
+    if (root.page.id().is_root()) {
+        child.gap_size += FileHeader::kSize;
+    }
 
     root.header = NodeHeader {};
     root.header.is_external = false;
@@ -1225,7 +1228,7 @@ auto Tree::fix_root(Node root) -> Status
         // the file header. In this case, we'll just split the child and insert the median cell into the root.
         // Note that the child needs an overflow cell for the split routine to work. We'll just fake it by
         // extracting an arbitrary cell and making it the overflow cell.
-        if (usable_space(child) < FileHeader::kSize) {
+        if (root.page.id().is_root() && usable_space(child) < FileHeader::kSize) {
             child.overflow_index = child.header.cell_count / 2;
             child.overflow = read_cell(child, child.overflow_index);
             detach_cell(*child.overflow, cell_scratch());

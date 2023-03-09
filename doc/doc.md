@@ -82,7 +82,7 @@ const calicodb::Options options {
 
 // Create or put a database at "/tmp/cats".
 calicodb::DB *db;
-const calicodb::Status s = calicodb::DB::put(options, "/tmp/cats", &db);
+const calicodb::Status s = calicodb::DB::open(options, "/tmp/cats", &db);
 
 // Handle failure. s.to_string() provides a string representation of the status.
 if (!s.is_ok()) {

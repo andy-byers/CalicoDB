@@ -126,7 +126,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
         Id root_id;
         CDB_TRY(Tree::create(*pager, Id::root(), m_freelist_head, &root_id));
         CDB_EXPECT_TRUE(root_id.is_root());
-        ++m_last_table_id.value;
 
         // Write the initial file header.
         Page db_root;
@@ -151,6 +150,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     CDB_EXPECT_NE(m_root, nullptr);
 
     auto *cursor = CursorInternal::make_cursor(*m_root->tree);
+    cursor->seek_first();
     while (cursor->is_valid()) {
         auto root_id = LogicalPageId::unknown();
         CDB_TRY(decode_logical_id(cursor->value(), &root_id));
@@ -192,7 +192,7 @@ DBImpl::~DBImpl()
         if (const auto s = wal->flush(); !s.is_ok()) {
             m_info_log->logv("failed to flush wal: %s", s.to_string().data());
         }
-        if (const auto s = pager->flush(); !s.is_ok()) {
+        if (const auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
             m_info_log->logv("failed to flush pager: %s", s.to_string().data());
         }
         if (const auto s = wal->close(); !s.is_ok()) {
@@ -388,7 +388,9 @@ auto DBImpl::TEST_tables() const -> const TableSet &
 auto DBImpl::TEST_validate() const -> void
 {
     for (const auto &[table_id, state] : m_tables) {
-        state.tree->TEST_validate();
+        if (state.is_open) {
+            state.tree->TEST_validate();
+        }
     }
 }
 
@@ -449,6 +451,7 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
         header->page_count = 1;
         header->page_size = static_cast<std::uint16_t>(options.page_size);
         header->header_crc = crc32c::Mask(header->compute_crc());
+        header->last_table_id = Id::root();
 
     } else {
         return s;
@@ -500,6 +503,8 @@ auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> 
 
 auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
 {
+    CDB_EXPECT_GE(m_last_table_id, Id::root());
+
     // Set the table ID manually, let the tree fill in the root page ID.
     ++m_last_table_id.value;
     root_id->table_id = m_last_table_id;
@@ -510,6 +515,7 @@ auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
 
     // Write an entry for the new table in the root table.
     CDB_TRY(m_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
+    ++m_state.batch_size;
     m_tables.add(*root_id);
     return Status::ok();
 }
