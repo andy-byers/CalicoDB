@@ -11,7 +11,7 @@ CalicoDB runs in a single thread.
 
 ### Env
 The env construct handles platform-specific filesystem operations and I/O.
-Users can override classes in [`calico/env.h`](../include/calico/env.h).
+Users can override classes in [`calicodb/env.h`](../include/calicodb/env.h).
 Then, a pointer to the custom `Env` object can be passed to the database when it is opened.
 See [`test/tools`](../test/tools) for an example that stores the database files in memory.
 

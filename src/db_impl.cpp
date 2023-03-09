@@ -94,7 +94,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
 
     m_commit_lsn = state.commit_lsn;
     m_state.record_count = state.record_count;
-    m_last_table_id = state.last_table_id;
     m_freelist_head = state.freelist_head;
 
     CDB_TRY(WriteAheadLog::open(
@@ -181,7 +180,6 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
       m_wal_prefix {sanitized.wal_prefix},
       m_env {sanitized.env},
       m_info_log {sanitized.info_log},
-      m_last_table_id {Id::root()},
       m_owns_env {options.env == nullptr},
       m_owns_info_log {options.info_log == nullptr}
 {}
@@ -354,10 +352,10 @@ auto DBImpl::ensure_consistency() -> Status
     CDB_TRY(recovery_phase_1());
     CDB_TRY(recovery_phase_2());
     m_is_running = true;
-    return load_state();
+    return load_file_header();
 }
 
-auto DBImpl::load_state() -> Status
+auto DBImpl::load_file_header() -> Status
 {
     Page root;
     CDB_TRY(pager->acquire(Id::root(), &root));
@@ -371,7 +369,6 @@ auto DBImpl::load_state() -> Status
         return Status::corruption("crc mismatch");
     }
 
-    m_last_table_id = header.last_table_id;
     m_state.record_count = header.record_count;
     m_freelist_head = header.freelist_head;
     pager->load_state(header);
@@ -451,7 +448,6 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
         header->page_count = 1;
         header->page_size = static_cast<std::uint16_t>(options.page_size);
         header->header_crc = crc32c::Mask(header->compute_crc());
-        header->last_table_id = Id::root();
 
     } else {
         return s;
@@ -467,6 +463,39 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
         return Status::corruption("header page size is not a power of 2");
     }
     return Status::ok();
+}
+
+auto DBImpl::checkpoint() -> Status
+{
+    if (m_state.batch_size != 0) {
+        if (auto s = save_file_header(); !s.is_ok()) {
+            SET_STATUS(s);
+            return s;
+        }
+    }
+    return Status::ok();
+}
+
+auto DBImpl::save_file_header() -> Status
+{
+    CDB_TRY(m_state.status);
+    Page db_root;
+    CDB_TRY(pager->acquire(Id::root(), &db_root));
+    pager->upgrade(db_root);
+
+    FileHeader header;
+    header.read(db_root.data());
+    pager->save_state(header);
+    header.freelist_head = m_freelist_head;
+    header.magic_code = FileHeader::kMagicCode;
+    header.commit_lsn = wal->current_lsn();
+    m_commit_lsn = wal->current_lsn();
+    header.record_count = m_state.record_count;
+    header.header_crc = crc32c::Mask(header.compute_crc());
+    header.write(db_root.span(0, FileHeader::kSize).data());
+    pager->release(std::move(db_root));
+
+    return wal->flush();
 }
 
 auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> Status
@@ -494,7 +523,7 @@ auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> 
     }
     s = open_table(*state);
     if (s.is_ok()) {
-        *out = new TableImpl {*this, *state, m_state};
+        *out = new TableImpl {name.to_string(), *this, *state, m_state};
     } else {
         SET_STATUS(s);
     }
@@ -503,12 +532,19 @@ auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> 
 
 auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
 {
-    CDB_EXPECT_GE(m_last_table_id, Id::root());
+    // Find the first available table ID.
+    auto table_id = Id::root();
+    for (const auto &[current_id, _]: m_tables) {
+        if (current_id != table_id) {
+            break;
+        }
+        ++table_id.value;
+    }
+    CDB_EXPECT_FALSE(table_id.is_root());
 
     // Set the table ID manually, let the tree fill in the root page ID.
-    ++m_last_table_id.value;
-    root_id->table_id = m_last_table_id;
-    CDB_TRY(Tree::create(*pager, m_last_table_id, m_freelist_head, &root_id->page_id));
+    root_id->table_id = table_id;
+    CDB_TRY(Tree::create(*pager, table_id, m_freelist_head, &root_id->page_id));
 
     char payload[LogicalPageId::kSize];
     encode_logical_id(*root_id, payload);
@@ -527,50 +563,43 @@ auto DBImpl::open_table(TableState &state) -> Status
     return Status::ok();
 }
 
-auto DBImpl::checkpoint() -> Status
-{
-    if (m_state.batch_size != 0) {
-        if (auto s = do_checkpoint(); !s.is_ok()) {
-            SET_STATUS(s);
-            return s;
-        }
-    }
-    return Status::ok();
-}
-
-auto DBImpl::do_checkpoint() -> Status
-{
-    CDB_TRY(m_state.status);
-    Page db_root;
-    CDB_TRY(pager->acquire(Id::root(), &db_root));
-    pager->upgrade(db_root);
-
-    FileHeader header;
-    header.read(db_root.data());
-    pager->save_state(header);
-    header.freelist_head = m_freelist_head;
-    header.magic_code = FileHeader::kMagicCode;
-    header.last_table_id = m_last_table_id;
-    header.commit_lsn = wal->current_lsn();
-    m_commit_lsn = wal->current_lsn();
-    header.record_count = m_state.record_count;
-    header.header_crc = crc32c::Mask(header.compute_crc());
-    header.write(db_root.span(0, FileHeader::kSize).data());
-    pager->release(std::move(db_root));
-
-    return wal->flush();
-}
-
-auto DBImpl::close_table(const LogicalPageId &root_id) -> void
+auto DBImpl::close_table(const std::string &name, const LogicalPageId &root_id) -> void
 {
     auto *state = m_tables.get(root_id.table_id);
     if (state == nullptr) {
         return;
     }
 
+    bool removed {};
+    Node root;
+
+    auto s = state->tree->acquire(&root, state->root_id.page_id, false);
+    if (s.is_ok()) {
+        if (root.header.cell_count == 0) {
+            s = m_root->tree->erase(name);
+            if (s.is_ok()) {
+                state->tree->upgrade(root);
+                s = state->tree->destroy(std::move(root));
+                removed = s.is_ok();
+            } else {
+                state->tree->release(std::move(root));
+            }
+        } else {
+            state->tree->release(std::move(root));
+        }
+    }
+
+    if (!s.is_ok()) {
+        SET_STATUS(s);
+    }
+
     delete state->tree;
     state->tree = nullptr;
     state->is_open = false;
+
+    if (removed) {
+        m_tables.erase(state->root_id.table_id);
+    }
 }
 
 static auto apply_undo(Page &page, const ImageDescriptor &image)

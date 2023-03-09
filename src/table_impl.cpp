@@ -3,8 +3,9 @@
 
 namespace calicodb {
 
-TableImpl::TableImpl(DBImpl &db, TableState &state, DBState &db_state)
-    : m_db_state {&db_state},
+TableImpl::TableImpl(std::string name, DBImpl &db, TableState &state, DBState &db_state)
+    : m_name {std::move(name)},
+      m_db_state {&db_state},
       m_state {&state},
       m_db {&db}
 
@@ -13,7 +14,7 @@ TableImpl::TableImpl(DBImpl &db, TableState &state, DBState &db_state)
 
 TableImpl::~TableImpl()
 {
-    m_db->close_table(root_id());
+    m_db->close_table(m_name, root_id());
 }
 
 auto TableImpl::new_cursor() const -> Cursor *

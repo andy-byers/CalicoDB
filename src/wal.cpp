@@ -186,6 +186,7 @@ auto WriteAheadLog::open_writer() -> Status
     auto id = m_set.last();
     ++id.value;
 
+    // TODO: Should we fsync() the containing directory here? This is a new file.
     CDB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), &m_file));
     m_writer = new WalWriter {*m_file, m_tail_buffer};
     return Status::ok();

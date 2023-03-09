@@ -228,7 +228,8 @@ static constexpr auto kMetaLookup = create_meta_lookup();
 static constexpr auto lookup_meta(std::size_t page_size, bool is_external) -> const NodeMeta *
 {
     std::size_t index {};
-    for (auto size = kMinPageSize; size != page_size; size <<= 1, ++index);
+    for (auto size = kMinPageSize; size != page_size; size <<= 1, ++index)
+        ;
     return &kMetaLookup[index][is_external];
 }
 
@@ -1383,6 +1384,11 @@ auto Tree::cell_scratch() -> char *
     return m_cell_scratch.data() + sizeof(Id) - 1;
 }
 
+auto Tree::root(Node *out) const -> Status
+{
+    return acquire(out, *m_root_id, false);
+}
+
 auto Tree::get(const Slice &key, std::string *value) const -> Status
 {
     value->clear();
@@ -1587,7 +1593,10 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
     // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
     // which we will need if we crash during vacuum and need to roll back.
     m_pager->upgrade(last);
-    if (entry.type != PointerMap::kTreeNode) {
+    const auto is_link =
+        entry.type != PointerMap::kTreeNode &&
+        entry.type != PointerMap::kTreeRoot;
+    if (is_link) {
         if (const auto next_id = read_next_id(last); !next_id.is_null()) {
             PointerMap::Entry next_entry;
             CDB_TRY(PointerMap::read_entry(*m_pager, next_id, &next_entry));

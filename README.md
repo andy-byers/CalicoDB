@@ -22,7 +22,8 @@ It exposes a small API that allows storage and retrieval of arbitrary byte seque
 + [Contributions](#contributions)
 
 ## Features
-+ Bidirectional iteration using cursors
++ Records are stored in tables, each with an independent range of keys
++ Bidirectional iteration using cursors (per-table)
 + Crash protection via write-ahead logging
 + Vacuum operation to reclaim unused memory while running
 + Various parameters can be tuned (page size, cache size, etc.)

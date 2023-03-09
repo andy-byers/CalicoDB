@@ -7,7 +7,7 @@
   + [Updating a database](#updating-a-database)
   + [Querying a database](#querying-a-database)
   + [Vacuuming a database](#vacuuming-a-database)
-  + [Transactions](#transactions)
+  + [Checkpoints](#checkpoints)
   + [Database properties](#database-properties)
   + [Closing a database](#closing-a-database)
   + [Destroying a database](#destroying-a-database)
@@ -91,8 +91,10 @@ if (!s.is_ok()) {
 ```
 
 ### Updating a database
-Errors returned by methods that modify the database are fatal and the database will refuse to perform any more work.
-The next time that the database is opened, recovery will be run to undo any uncommitted changes.
+In CalicoDB, records are stored in tables, which are on-disk mapping from keys to values.
+Keys within each table are unique, however, tables may have overlapping key ranges.
+Errors returned by methods that modify tables are fatal and the database will refuse to perform any more work.
+The next time that the database is opened, recovery will be run to undo any changes that occurred after the last checkpoint (see [Checkpoints](#checkpoints)).
 
 ```C++
 // Open a table.
@@ -123,6 +125,9 @@ if (const auto s = table->erase("42"); s.is_ok()) {
 } else if (s.is_not_found()) {
     // Key does not exist.
 }
+
+// Close the table. If the table is empty, it will be removed from the registry.
+delete table;
 ```
 
 ### Querying a database
@@ -187,13 +192,12 @@ if (const auto s = db->vacuum(); s.is_ok()) {
 }
 ```
 
-### Transactions
-A transaction represents a unit of work in CalicoDB.
-The first transaction is started when the database is opened. 
-Otherwise, transaction boundaries are defined by calls to `DB::checkpoint()`.
-All updates that haven't been committed when the database is closed will be reverted, including creation of tables.
-The checkpoint operation affects all tables, at present.
-Additional work may go toward implementation of per-table checkpoints.
+### Checkpoints
+CalicoDB uses the concept of a checkpoint to provide guarantees about the logical contents of a database.
+Any work that took place before a successful checkpoint will persist, even if the program crashes shortly after.
+It should also be noted that this also applies to creation and removal of tables.
+At this point, checkpoints are global: they affect every table with pending updates.
+Further work may go toward implementing per-table checkpoints.
 
 ```C++
 if (const auto s = table->put("fanny", "persian"); !s.is_ok()) {
@@ -205,11 +209,8 @@ if (const auto s = table->put("myla", "brown-tabby"); !s.is_ok()) {
 
 if (const auto s = db->checkpoint(); s.is_ok()) {
     // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from 
-    // here on out, the changes will be reapplied next time the database is opened.
+    // here on out, the changes will be reapplied from the WAL the next time the database is opened.
 }
-
-// Free the table object.
-delete table;
 ```
 
 ### Database properties

@@ -190,11 +190,18 @@ class Tree {
 public:
     explicit Tree(Pager &pager, Id &root_id, Id &freelist_head);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status;
+    [[nodiscard]] auto root(Node *out) const -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success) -> Status;
     auto load_state(const FileHeader &header) -> void;
+
+    [[nodiscard]] auto allocate(Node *out, bool is_external) -> Status;
+    [[nodiscard]] auto acquire(Node *out, Id pid, bool upgrade) const -> Status;
+    [[nodiscard]] auto destroy(Node node) -> Status;
+    auto upgrade(Node &node) const -> void;
+    auto release(Node node) const -> void;
 
     [[nodiscard]] auto TEST_to_string() -> std::string;
     auto TEST_validate() -> void;
@@ -240,12 +247,6 @@ private:
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] auto fix_links(Node &node) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
-
-    [[nodiscard]] auto allocate(Node *out, bool is_external) -> Status;
-    [[nodiscard]] auto acquire(Node *out, Id pid, bool upgrade) const -> Status;
-    [[nodiscard]] auto destroy(Node node) -> Status;
-    auto upgrade(Node &node) const -> void;
-    auto release(Node node) const -> void;
 
     friend class CursorImpl;
     friend class TreeValidator;

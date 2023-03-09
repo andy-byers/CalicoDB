@@ -20,7 +20,7 @@ using namespace calicodb::tools;
 enum OperationType {
     kPut,
     kErase,
-    kCommit,
+    kCheckpoint,
     kReopen,
     kVacuum,
     kOpCount
@@ -40,7 +40,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     const auto expect_equal_contents = [this] {
         CHECK_EQ(m_map.size(), reinterpret_cast<const DBImpl *>(m_db)->record_count());
 
-        auto *cursor = m_db->new_cursor();
+        auto *cursor = m_table->new_cursor();
         cursor->seek_first();
         for (const auto &[key, value] : m_map) {
             CHECK_TRUE(cursor->is_valid());
@@ -69,7 +69,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     case kPut:
         key = extract_fuzzer_key(data, size);
         value = extract_fuzzer_value(data, size);
-        s = m_db->put(key, value);
+        s = m_table->put(key, value);
         if (s.is_ok()) {
             if (const auto itr = m_erased.find(key); itr != end(m_erased)) {
                 m_erased.erase(itr);
@@ -79,10 +79,10 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         break;
     case kErase: {
         key = extract_fuzzer_key(data, size);
-        auto *cursor = m_db->new_cursor();
+        auto *cursor = m_table->new_cursor();
         cursor->seek(key);
         if (cursor->is_valid()) {
-            s = m_db->erase(cursor->key());
+            s = m_table->erase(cursor->key());
             if (s.is_ok()) {
                 key = cursor->key().to_string();
                 if (const auto itr = m_added.find(key); itr != end(m_added)) {
@@ -99,8 +99,8 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     case kVacuum:
         s = m_db->vacuum();
         break;
-    case kCommit:
-        s = m_db->commit();
+    case kCheckpoint:
+        s = m_db->checkpoint();
         if (s.is_ok()) {
             for (const auto &[k, v] : m_added) {
                 m_map[k] = v;
