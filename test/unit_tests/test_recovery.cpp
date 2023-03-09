@@ -402,8 +402,7 @@ TEST_P(RecoverySanityCheck, FailureWhileRunning)
 TEST_P(RecoverySanityCheck, FailureDuringClose)
 {
     // The final transaction committed successfully, so the data we added should persist.
-    delete db;
-    db = nullptr;
+    close();
 
     validate();
 }
@@ -414,9 +413,7 @@ TEST_P(RecoverySanityCheck, FailureDuringCloseWithUncommittedUpdates)
         (void)table->put(random.Generate(16), random.Generate(100));
     }
 
-    delete db;
-    db = nullptr;
-
+    close();
     validate();
 }
 
@@ -447,8 +444,7 @@ public:
         const auto saved_count = interceptor_count;
         interceptor_count = 0;
 
-        delete db;
-        db = nullptr;
+        close();
 
         interceptor_count = saved_count;
     }

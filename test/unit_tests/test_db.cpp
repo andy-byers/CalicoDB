@@ -1051,8 +1051,8 @@ protected:
 
     std::unique_ptr<tools::FaultInjectionEnv> env;
     Options options;
-    Table *table;
-    DB *db;
+    Table *table {};
+    DB *db {};
 };
 
 TEST_F(ApiTests, IsConstCorrect)
