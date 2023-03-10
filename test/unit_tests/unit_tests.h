@@ -3,7 +3,6 @@
 
 #include "calicodb/status.h"
 #include "db_impl.h"
-#include "table_impl.h"
 #include "env_posix.h"
 #include "page.h"
 #include "tools.h"

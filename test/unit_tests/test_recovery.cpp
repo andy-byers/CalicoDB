@@ -152,13 +152,13 @@ public:
 
     auto put(const std::string &k, const std::string &v) const -> Status
     {
-        return table->put(k, v);
+        return db->put(table, k, v);
     }
 
     auto get(const std::string &k) const -> std::string
     {
         std::string result;
-        Status s = table->get(k, &result);
+        Status s = db->get(table, k, &result);
         if (s.is_not_found()) {
             result = "NOT_FOUND";
         } else if (!s.is_ok()) {
@@ -304,7 +304,7 @@ TEST_F(RecoveryTests, SanityCheck)
             if (index == commit) {
                 ASSERT_OK(db->checkpoint());
             } else {
-                ASSERT_OK(table->put(record->first, record->second));
+                ASSERT_OK(db->put(table, record->first, record->second));
             }
         }
         open();
@@ -313,10 +313,10 @@ TEST_F(RecoveryTests, SanityCheck)
         for (std::size_t index {}; record != end(map); ++index, ++record) {
             std::string value;
             if (index < commit) {
-                ASSERT_OK(table->get(record->first, &value));
+                ASSERT_OK(db->get(table, record->first, &value));
                 ASSERT_EQ(value, record->second);
             } else {
-                ASSERT_TRUE(table->get(record->first, &value).is_not_found());
+                ASSERT_TRUE(db->get(table, record->first, &value).is_not_found());
             }
         }
         close();
@@ -351,7 +351,7 @@ public:
     {
         auto record = begin(map);
         for (std::size_t index {}; record != end(map); ++index, ++record) {
-            ASSERT_OK(table->put(record->first, record->second));
+            ASSERT_OK(db->put(table, record->first, record->second));
             if (record->first.front() % 10 == 1) {
                 ASSERT_OK(db->checkpoint());
             }
@@ -368,7 +368,7 @@ public:
 
         for (const auto &[k, v] : map) {
             std::string value;
-            ASSERT_OK(table->get(k, &value));
+            ASSERT_OK(db->get(table, k, &value));
             ASSERT_EQ(value, v);
         }
     }
@@ -382,7 +382,7 @@ public:
 TEST_P(RecoverySanityCheck, FailureWhileRunning)
 {
     for (const auto &[k, v] : map) {
-        auto s = table->erase(k);
+        auto s = db->erase(table, k);
         if (!s.is_ok()) {
             assert_special_error(s);
             break;
@@ -410,7 +410,7 @@ TEST_P(RecoverySanityCheck, FailureDuringClose)
 TEST_P(RecoverySanityCheck, FailureDuringCloseWithUncommittedUpdates)
 {
     while (db->status().is_ok()) {
-        (void)table->put(random.Generate(16), random.Generate(100));
+        (void)db->put(table, random.Generate(16), random.Generate(100));
     }
 
     close();

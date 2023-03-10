@@ -4,11 +4,116 @@
 #include "crc.h"
 #include "env_posix.h"
 #include "logging.h"
-#include "table_impl.h"
 #include "wal_reader.h"
 
 namespace calicodb
 {
+
+#define SET_STATUS(s)                 \
+    do {                              \
+        if (m_state.status.is_ok()) { \
+            m_state.status = s;       \
+        }                             \
+    } while (0)
+
+static auto get_table_id(const Table *table) -> Id
+{
+    if (table != DB::kDefaultTable) {
+        return reinterpret_cast<const TableImpl *>(table)->id();
+    }
+    return kDefaultTableId;
+}
+
+TableImpl::TableImpl(const TableOptions &options, std::string name, Id table_id)
+    : m_options {options},
+      m_name {std::move(name)},
+      m_id {table_id}
+{
+}
+
+auto DBImpl::close_table(Table *handle) -> void
+{
+    if (handle == kDefaultTable) {
+        return;
+    }
+    auto *state = m_tables.get(get_table_id(handle));
+    CDB_EXPECT_NE(state, nullptr);
+
+    delete state->tree;
+    state->tree = nullptr;
+    state->write = false;
+    state->open = false;
+    delete handle;
+}
+
+auto DBImpl::new_cursor(const Table *table) const -> Cursor *
+{
+    const auto *state = m_tables.get(get_table_id(table));
+    auto *cursor = CursorInternal::make_cursor(*state->tree);
+    if (!m_state.status.is_ok()) {
+        CursorInternal::invalidate(*cursor, m_state.status);
+    }
+    return cursor;
+}
+
+auto DBImpl::get(const Table *table, const Slice &key, std::string *value) const -> Status
+{
+    CDB_TRY(m_state.status);
+    const auto *state = m_tables.get(get_table_id(table));
+    return state->tree->get(key, value);
+}
+
+auto DBImpl::put(Table *table, const Slice &key, const Slice &value) -> Status
+{
+    if (key.is_empty()) {
+        return Status::invalid_argument("key is empty");
+    }
+    auto *state = m_tables.get(get_table_id(table));
+
+    if (!state->write) {
+        return Status::logic_error("table is not writable");
+    }
+    CDB_TRY(m_state.status);
+
+    bool record_exists;
+    if (auto s = state->tree->put(key, value, &record_exists); !s.is_ok()) {
+        SET_STATUS(s);
+        return s;
+    }
+    m_state.record_count += !record_exists;
+    m_state.bytes_written += key.size() + value.size();
+    ++m_state.batch_size;
+    return Status::ok();
+}
+
+auto DBImpl::erase(Table *table, const Slice &key) -> Status
+{
+    CDB_TRY(m_state.status);
+    auto *state = m_tables.get(get_table_id(table));
+
+    if (!state->write) {
+        return Status::logic_error("table is not writable");
+    }
+
+    auto s = state->tree->erase(key);
+    if (s.is_ok()) {
+        ++m_state.batch_size;
+        --m_state.record_count;
+    } else if (!s.is_not_found()) {
+        SET_STATUS(s);
+    }
+    return s;
+}
+
+TableSet::~TableSet()
+{
+    for (const auto &itr: m_tables) {
+        if (itr) {
+            delete itr->tree;
+            delete itr;
+        }
+    }
+}
 
 auto TableSet::begin() const -> Iterator
 {
@@ -22,39 +127,41 @@ auto TableSet::end() const -> Iterator
 
 auto TableSet::get(Id table_id) const -> const TableState *
 {
-    auto itr = m_tables.find(table_id);
-    if (itr == m_tables.end()) {
+    if (table_id.as_index() >= m_tables.size()) {
         return nullptr;
     }
-    return &itr->second;
+    return m_tables[table_id.as_index()];
 }
 
 auto TableSet::get(Id table_id) -> TableState *
 {
-    auto itr = m_tables.find(table_id);
-    if (itr == m_tables.end()) {
+    if (table_id.as_index() >= m_tables.size()) {
         return nullptr;
     }
-    return &itr->second;
+    return m_tables[table_id.as_index()];
 }
 
 auto TableSet::add(const LogicalPageId &root_id) -> void
 {
-    CDB_EXPECT_EQ(get(root_id.table_id), nullptr);
-    m_tables.emplace(root_id.table_id, TableState {root_id, nullptr});
+    const auto index = root_id.table_id.as_index();
+    while (index >= m_tables.size()) {
+        m_tables.emplace_back(nullptr);
+    }
+    if (m_tables[index] == nullptr) {
+        m_tables[index] = new TableState;
+        m_tables[index]->root_id = root_id;
+    }
 }
 
 auto TableSet::erase(Id table_id) -> void
 {
-    m_tables.erase(table_id);
+    const auto index = table_id.as_index();
+    if (m_tables[index] != nullptr) {
+        delete m_tables[index]->tree;
+        delete m_tables[index];
+    }
+    m_tables[index] = nullptr;
 }
-
-#define SET_STATUS(s)                 \
-    do {                              \
-        if (m_state.status.is_ok()) { \
-            m_state.status = s;       \
-        }                             \
-    } while (0)
 
 static auto encode_logical_id(LogicalPageId id, char *out) -> void
 {
@@ -133,22 +240,14 @@ auto DBImpl::open(const Options &sanitized) -> Status
         state.header_crc = crc32c::Mask(state.compute_crc());
         state.write(db_root.span(0, FileHeader::kSize).data());
         pager->release(std::move(db_root));
-        CDB_TRY(pager->flush());
     }
     pager->load_state(state);
 
-    // Open the root table manually.
-    m_tables.add(LogicalPageId::root());
-    auto *root_state = m_tables.get(Id::root());
-    Page db_root;
-    CDB_TRY(pager->acquire(Id::root(), &db_root));
-    root_state->tree = new Tree {*pager, root_state->root_id.page_id, m_freelist_head};
-    root_state->ref_count = 1;
-    pager->release(std::move(db_root));
-    m_root = m_tables.get(Id::root());
-    CDB_EXPECT_NE(m_root, nullptr);
+    // Create the root and default table handles.
+    CDB_TRY(create_table({}, kRootTableName, &m_root));
+    CDB_TRY(create_table({}, kDefaultTableName, &m_default));
 
-    auto *cursor = CursorInternal::make_cursor(*m_root->tree);
+    auto *cursor = new_cursor(m_root);
     cursor->seek_first();
     while (cursor->is_valid()) {
         LogicalPageId root_id;
@@ -162,6 +261,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CDB_TRY(ensure_consistency());
+    } else {
+        CDB_TRY(pager->flush());
     }
     CDB_TRY(wal->start_writing());
 
@@ -209,12 +310,10 @@ DBImpl::~DBImpl()
         delete m_env;
     }
 
+    delete m_default;
+    delete m_root;
     delete pager;
     delete wal;
-
-    for (const auto &[_, state] : m_tables) {
-        delete state.tree;
-    }
 }
 
 auto DBImpl::record_count() const -> std::size_t
@@ -326,6 +425,23 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     return false;
 }
 
+auto DBImpl::list_tables(std::vector<std::string> *out) const -> Status
+{
+    CDB_TRY(m_state.status);
+    out->clear();
+
+    auto *cursor = new_cursor(m_root);
+    cursor->seek_first();
+    while (cursor->is_valid()) {
+        out->emplace_back(cursor->key().to_string());
+        cursor->next();
+    }
+    auto s = cursor->status();
+    delete cursor;
+
+    return s.is_not_found() ? Status::ok() : s;
+}
+
 auto DBImpl::vacuum() -> Status
 {
     CDB_TRY(m_state.status);
@@ -341,10 +457,13 @@ auto DBImpl::do_vacuum() -> Status
     if (target.is_root()) {
         return Status::ok();
     }
+    auto *state = m_tables.get(Id::root());
+    auto *tree = state->tree;
+
     const auto original = target;
     for (;; target.value--) {
         bool vacuumed;
-        CDB_TRY(m_root->tree->vacuum_one(target, m_tables, &vacuumed));
+        CDB_TRY(tree->vacuum_one(target, m_tables, &vacuumed));
         if (!vacuumed) {
             break;
         }
@@ -402,9 +521,9 @@ auto DBImpl::TEST_tables() const -> const TableSet &
 
 auto DBImpl::TEST_validate() const -> void
 {
-    for (const auto &[table_id, state] : m_tables) {
-        if (state.ref_count) {
-            state.tree->TEST_validate();
+    for (const auto &state : m_tables) {
+        if (state && state->open) {
+            state->tree->TEST_validate();
         }
     }
 }
@@ -520,22 +639,17 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
 {
     LogicalPageId root_id;
     std::string value;
+    Status s;
 
-    auto s = m_root->tree->get(name, &value);
-    if (s.is_ok()) {
-        CDB_TRY(decode_logical_id(value, &root_id));
-    } else if (s.is_not_found()) {
-        if (name == kRootTableName) {
-            if (options.mode == AccessMode::kReadWrite) {
-                return Status::invalid_argument("root table is read-only");
-            }
-            root_id = LogicalPageId::root();
-            s = Status::ok();
-        } else {
+    if (name == kRootTableName) {
+        root_id = LogicalPageId::root();
+    } else {
+        auto *state = m_tables.get(Id::root());
+        s = state->tree->get(name, &value);
+        if (s.is_ok()) {
+            CDB_TRY(decode_logical_id(value, &root_id));
+        } else if (s.is_not_found()) {
             s = construct_new_table(name, &root_id);
-            if (s.is_ok()) {
-                m_tables.add(root_id);
-            }
         }
     }
 
@@ -544,51 +658,41 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
         return s;
     }
 
-    auto state = m_tables.get(root_id.table_id);
+    m_tables.add(root_id);
+    auto *state = m_tables.get(root_id.table_id);
     CDB_EXPECT_NE(state, nullptr);
 
-    if (state->write) {
-        return Status::invalid_argument("table is already open in read-write mode");
+    if (state->open) {
+        return Status::invalid_argument("table is already open");
     }
-    // NOTE: The address of the root page ID in the TableState struct is stored in the tree.
-    state->tree = new Tree {*pager, state->root_id.page_id, m_freelist_head};
+    state->tree = new Tree {*pager, root_id.page_id, m_freelist_head};
     state->write = options.mode == AccessMode::kReadWrite;
-    ++state->ref_count;
-    *out = new TableImpl {name, state->write, *this, *state, m_state};
+    state->open = true;
+    *out = new TableImpl {options, name, root_id.table_id};
 
     return s;
 }
 
-auto DBImpl::drop_table(const std::string &name) -> Status
+auto DBImpl::drop_table(Table *table) -> Status
 {
-    if (name == "calicodb_root") {
-        return Status::invalid_argument("cannot drop root table");
+    if (table == kDefaultTable) {
+        return Status::invalid_argument("cannot drop default table");
     }
-    Table *table;
-    TableOptions options;
-    options.mode = AccessMode::kReadWrite;
-    auto s = create_table(options, name, &table);
-    if (s.is_invalid_argument()) {
-        return Status::logic_error("table must be closed");
-    } else if (!s.is_ok()) {
-        SET_STATUS(s);
-        return s;
-    }
-    const auto table_id =
-        reinterpret_cast<const TableImpl *>(table)->m_state->root_id.table_id;
+    const auto table_id = get_table_id(table);
+    auto *cursor = new_cursor(table);
+    Status s;
 
-    auto *cursor = table->new_cursor();
     while (s.is_ok()) {
         cursor->seek_first();
         if (!cursor->is_valid()) {
             break;
         }
-        s = table->erase(cursor->key());
+        s = erase(table, cursor->key());
     }
     delete cursor;
 
     auto *state = m_tables.get(table_id);
-    s = remove_empty_table(name, *state);
+    s = remove_empty_table(table->name(), *state);
     if (!s.is_ok()) {
         SET_STATUS(s);
     }
@@ -601,13 +705,12 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId *root_id) -> S
 {
     // Find the first available table ID.
     auto table_id = Id::root();
-    for (const auto &[current_id, _] : m_tables) {
-        if (current_id != table_id) {
+    for (const auto &itr : m_tables) {
+        if (itr == nullptr) {
             break;
         }
         ++table_id.value;
     }
-    CDB_EXPECT_FALSE(table_id.is_root());
 
     // Set the table ID manually, let the tree fill in the root page ID.
     root_id->table_id = table_id;
@@ -617,14 +720,15 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId *root_id) -> S
     encode_logical_id(*root_id, payload);
 
     // Write an entry for the new table in the root table.
-    CDB_TRY(m_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
+    auto *db_root = m_tables.get(Id::root());
+    CDB_TRY(db_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
     ++m_state.batch_size;
     return Status::ok();
 }
 
 auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> Status
 {
-    auto &[root_id, tree, ref_count, write_flag] = state;
+    auto &[root_id, tree, write_flag, open_flag] = state;
     if (root_id.table_id.is_root()) {
         return Status::ok();
     }
@@ -634,23 +738,11 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     if (root.header.cell_count != 0) {
         return Status::logic_error("table is not empty");
     }
-    CDB_TRY(m_root->tree->erase(name));
+    auto *root_state = m_tables.get(Id::root());
+    CDB_TRY(root_state->tree->erase(name));
     tree->upgrade(root);
     CDB_TRY(tree->destroy(std::move(root)));
     return Status::ok();
-}
-
-auto DBImpl::close_table(const LogicalPageId &root_id) -> void
-{
-    auto *state = m_tables.get(root_id.table_id);
-    if (state == nullptr) {
-        return;
-    }
-
-    delete state->tree;
-    state->tree = nullptr;
-    state->write = false;
-    --state->ref_count;
 }
 
 static auto apply_undo(Page &page, const ImageDescriptor &image)

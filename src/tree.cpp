@@ -2,7 +2,6 @@
 #include "db_impl.h"
 #include "logging.h"
 #include "pager.h"
-#include "table_impl.h"
 #include "utils.h"
 #include <array>
 #include <functional>
@@ -726,7 +725,7 @@ auto Tree::node_iterator(Node &node) const -> NodeIterator
 auto Tree::find_external(const Slice &key, SearchResult *out) const -> Status
 {
     Node root;
-    CDB_TRY(acquire(&root, *m_root_id, false));
+    CDB_TRY(acquire(&root, m_root_id, false));
     return find_external(key, std::move(root), out);
 }
 
@@ -841,7 +840,7 @@ auto Tree::resolve_overflow(Node node) -> Status
 {
     Node next;
     while (is_overflowing(node)) {
-        if (node.page.id() == *m_root_id) {
+        if (node.page.id() == m_root_id) {
             CDB_TRY(split_root(std::move(node), next));
         } else {
             CDB_TRY(split_non_root(std::move(node), next));
@@ -900,7 +899,7 @@ auto Tree::transfer_left(Node &left, Node &right) -> Status
 
 auto Tree::split_non_root(Node right, Node &out) -> Status
 {
-    CDB_EXPECT_NE(right.page.id(), *m_root_id);
+    CDB_EXPECT_NE(right.page.id(), m_root_id);
     CDB_EXPECT_TRUE(is_overflowing(right));
     const auto &header = right.header;
 
@@ -1037,7 +1036,7 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
 auto Tree::resolve_underflow(Node node, const Slice &anchor) -> Status
 {
     while (is_underflowing(node)) {
-        if (node.page.id() == *m_root_id) {
+        if (node.page.id() == m_root_id) {
             return fix_root(std::move(node));
         }
         Id parent_id;
@@ -1177,7 +1176,7 @@ auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) 
 
 auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
 {
-    CDB_EXPECT_NE(node.page.id(), *m_root_id);
+    CDB_EXPECT_NE(node.page.id(), m_root_id);
     CDB_EXPECT_TRUE(is_underflowing(node));
     CDB_EXPECT_FALSE(is_overflowing(parent));
 
@@ -1218,7 +1217,7 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
 
 auto Tree::fix_root(Node root) -> Status
 {
-    CDB_EXPECT_EQ(root.page.id(), *m_root_id);
+    CDB_EXPECT_EQ(root.page.id(), m_root_id);
 
     // If the root is external here, the whole tree must be empty.
     if (!root.header.is_external) {
@@ -1238,7 +1237,7 @@ auto Tree::fix_root(Node root) -> Status
             Node parent;
             CDB_TRY(split_non_root(std::move(child), parent));
             release(std::move(parent));
-            CDB_TRY(acquire(&root, *m_root_id, true));
+            CDB_TRY(acquire(&root, m_root_id, true));
         } else {
             merge_root(root, child);
             CDB_TRY(destroy(std::move(child)));
@@ -1369,12 +1368,12 @@ auto Tree::internal_rotate_right(Node &parent, Node &left, Node &right, std::siz
     return Status::ok();
 }
 
-Tree::Tree(Pager &pager, Id &root_id, Id &freelist_head)
+Tree::Tree(Pager &pager, Id root_id, Id &freelist_head)
     : m_node_scratch(pager.page_size(), '\0'),
       m_cell_scratch(pager.page_size(), '\0'),
       m_freelist {pager, freelist_head},
       m_pager {&pager},
-      m_root_id {&root_id}
+      m_root_id {root_id}
 {
 }
 
@@ -1386,7 +1385,7 @@ auto Tree::cell_scratch() -> char *
 
 auto Tree::root(Node *out) const -> Status
 {
-    return acquire(out, *m_root_id, false);
+    return acquire(out, m_root_id, false);
 }
 
 auto Tree::get(const Slice &key, std::string *value) const -> Status
@@ -1453,7 +1452,7 @@ auto Tree::erase(const Slice &key) -> Status
 
 auto Tree::find_lowest(Node *out) const -> Status
 {
-    CDB_TRY(acquire(out, *m_root_id, false));
+    CDB_TRY(acquire(out, m_root_id, false));
     while (!out->header.is_external) {
         const auto next_id = read_child_id(*out, 0);
         release(std::move(*out));
@@ -1464,7 +1463,7 @@ auto Tree::find_lowest(Node *out) const -> Status
 
 auto Tree::find_highest(Node *out) const -> Status
 {
-    CDB_TRY(acquire(out, *m_root_id, false));
+    CDB_TRY(acquire(out, m_root_id, false));
     while (!out->header.is_external) {
         const auto next_id = out->header.next_id;
         release(std::move(*out));
@@ -1533,7 +1532,10 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
         }
         case PointerMap::kTreeRoot: {
             if (auto *state = tables.get(entry.back_ptr)) {
-                state->root_id.page_id = free.id();
+                if (state->tree != nullptr) {
+                    state->root_id.page_id = free.id();
+                    state->tree->m_root_id = free.id();
+                }
             }
             // Tree root pages are also node pages (with no parent page). Handle them the same, but
             // note the guard against updating the parent page's child pointers below.
@@ -2183,7 +2185,7 @@ class TreeValidator
     static auto traverse_inorder(const Tree &tree, const NodeCallback &callback) -> void
     {
         Node root;
-        CHECK_OK(tree.acquire(&root, *tree.m_root_id, false));
+        CHECK_OK(tree.acquire(&root, tree.m_root_id, false));
         traverse_inorder_helper(tree, std::move(root), callback);
     }
 
@@ -2360,7 +2362,7 @@ public:
 
         // Find the leftmost external node.
         Node node;
-        CHECK_OK(tree.acquire(&node, *tree.m_root_id, false));
+        CHECK_OK(tree.acquire(&node, tree.m_root_id, false));
         while (!node.header.is_external) {
             const auto id = read_child_id(node, 0);
             tree.release(std::move(node));
@@ -2388,7 +2390,7 @@ public:
         PrinterData data;
 
         Node root;
-        CHECK_OK(tree.acquire(&root, *tree.m_root_id, false));
+        CHECK_OK(tree.acquire(&root, tree.m_root_id, false));
         collect_levels(tree, data, std::move(root), 0);
         for (const auto &level : data.levels) {
             repr.append(level + '\n');

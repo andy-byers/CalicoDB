@@ -3,7 +3,6 @@
 
 #include "calicodb/db.h"
 #include "calicodb/options.h"
-#include "calicodb/table.h"
 
 #include "header.h"
 #include "pager.h"
@@ -23,13 +22,47 @@ class TableImpl;
 class WriteAheadLog;
 struct TableState;
 
+static constexpr Id kDefaultTableId {2};
 static constexpr auto kRootTableName = "calicodb_root";
+static constexpr auto kDefaultTableName = "default";
 
-class TableSet
+struct TableState {
+    LogicalPageId root_id;
+    Tree *tree {};
+    bool write {};
+    bool open {};
+};
+
+class TableImpl : public Table
 {
 public:
-    using Iterator = std::map<Id, TableState>::const_iterator;
+    friend class DBImpl;
 
+    ~TableImpl() override = default;
+    explicit TableImpl(const TableOptions &options, std::string name, Id table_id);
+
+    [[nodiscard]] auto name() const -> const std::string & override
+    {
+        return m_name;
+    }
+
+    [[nodiscard]] auto id() const -> Id
+    {
+        return m_id;
+    }
+
+private:
+    TableOptions m_options;
+    std::string m_name;
+    Id m_id;
+};
+
+class TableSet final
+{
+public:
+    using Iterator = std::vector<TableState *>::const_iterator;
+
+    ~TableSet();
     [[nodiscard]] auto get(Id table_id) const -> const TableState *;
     [[nodiscard]] auto get(Id table_id) -> TableState *;
     [[nodiscard]] auto begin() const -> Iterator;
@@ -38,7 +71,7 @@ public:
     auto erase(Id table_id) -> void;
 
 private:
-    std::map<Id, TableState> m_tables;
+    std::vector<TableState *> m_tables;
 };
 
 class DBImpl : public DB
@@ -55,10 +88,18 @@ public:
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
     [[nodiscard]] auto create_table(const TableOptions &options, const std::string &name, Table **out) -> Status override;
-    [[nodiscard]] auto drop_table(const std::string &name) -> Status override;
+    [[nodiscard]] auto drop_table(Table *table) -> Status override;
+    [[nodiscard]] auto list_tables(std::vector<std::string> *out) const -> Status override;
+    auto close_table(Table *table) -> void override;
+
     [[nodiscard]] auto checkpoint() -> Status override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
+
+    [[nodiscard]] auto new_cursor(const Table *table) const -> Cursor * override;
+    [[nodiscard]] auto get(const Table *table, const Slice &key, std::string *value) const -> Status override;
+    [[nodiscard]] auto put(Table *table, const Slice &key, const Slice &value) -> Status override;
+    [[nodiscard]] auto erase(Table *table, const Slice &key) -> Status override;
 
     [[nodiscard]] auto record_count() const -> std::size_t;
     [[nodiscard]] auto TEST_tables() const -> const TableSet &;
@@ -77,18 +118,16 @@ private:
     [[nodiscard]] auto recovery_phase_1() -> Status;
     [[nodiscard]] auto recovery_phase_2() -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId *root_id) -> Status;
-    auto close_table(const LogicalPageId &root_id) -> void;
+    auto destroy_table_state(Id table_id) -> void;
 
     friend class TableImpl;
 
     std::string m_reader_data;
     std::string m_reader_tail;
 
-    // State for put tables. Tables are keyed by their table ID.
     TableSet m_tables;
-
-    // Pointer to the root table state, which is kept in m_tables.
-    TableState *m_root {};
+    Table *m_default {};
+    Table *m_root {};
 
     mutable DBState m_state;
 

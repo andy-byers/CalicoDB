@@ -186,7 +186,7 @@ struct PayloadManager {
 class Tree
 {
 public:
-    explicit Tree(Pager &pager, Id &root_id, Id &freelist_head);
+    explicit Tree(Pager &pager, Id root_id, Id &freelist_head);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status;
     [[nodiscard]] auto root(Node *out) const -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
@@ -255,7 +255,7 @@ private:
     mutable std::string m_anchor;
     Freelist m_freelist;
     Pager *m_pager {};
-    Id *m_root_id {};
+    Id m_root_id {};
 };
 
 class CursorImpl : public Cursor

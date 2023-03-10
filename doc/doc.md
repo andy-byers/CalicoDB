@@ -103,31 +103,31 @@ calicodb::TableOptions table_options;
 calicodb::Status s = db->create_table(table_options, "personal-cats", &table);
 
 // Insert some key-value pairs.
-s = table->put("lilly", "calico");
+s = db->put(calicodb::kDefaultTable, "lilly", "calico");
 if (s.is_system_error()) {
     // Handle a system-level or I/O error.
 }
 
-s = table->put("freya", "orange tabby");
+s = table->put(calicodb::kDefaultTable, "freya", "orange tabby");
 if (s.is_ok()) {
     // Record was inserted.
 }
 
 // Keys are unique within each table, so inserting a record with a key that already exists will 
 // cause the old record to be overwritten.
-if (const auto s = table->put("lilly", "sweet calico"); s.is_ok()) {
+if (const auto s = table->put(calicodb::kDefaultTable, "lilly", "sweet calico"); s.is_ok()) {
 
 }
 
 // Erase a record.
-if (const auto s = table->erase("42"); s.is_ok()) {
+if (const auto s = table->erase(calicodb::kDefaultTable, "42"); s.is_ok()) {
     // Record was erased.
 } else if (s.is_not_found()) {
     // Key does not exist.
 }
 
 // Close the table. If the table is empty, it will be removed from the registry.
-delete table;
+db->close_table(table);
 ```
 
 ### Querying a database

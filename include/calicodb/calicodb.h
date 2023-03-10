@@ -7,6 +7,5 @@
 #include "options.h"
 #include "slice.h"
 #include "status.h"
-#include "table.h"
 
 #endif // CALICODB_CALICODB_H

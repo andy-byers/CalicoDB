@@ -4,7 +4,6 @@
 #include "header.h"
 #include "logging.h"
 #include "page.h"
-#include "table_impl.h"
 #include "types.h"
 #include "wal.h"
 #include <limits>
@@ -137,16 +136,8 @@ auto Pager::flush(Lsn target_lsn) -> Status
             largest = page_lsn;
         }
 
-        if (page_id.as_index() >= m_frames.page_count()) {
-            m_info_log->logv(
-                "removing page %llu, which is out of range (page count is %llu)",
-                page_id.value, m_frames.page_count());
-            m_cache.erase(page_id);
-            m_frames.unpin(frame_id);
-            itr = m_dirty.remove(itr);
-        } else if (page_lsn > m_wal->flushed_lsn()) {
+        if (page_lsn > m_wal->flushed_lsn()) {
             // WAL record referencing this page has not been flushed yet.
-            itr = next(itr);
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
             auto s = m_frames.write_back(frame_id);
@@ -154,9 +145,9 @@ auto Pager::flush(Lsn target_lsn) -> Status
             // Advance to the next dirty list entry.
             itr = clean_page(entry);
             CDB_TRY(s);
-        } else {
-            itr = next(itr);
+            continue;
         }
+        itr = next(itr);
     }
 
     // We have flushed the entire cache.
