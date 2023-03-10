@@ -11,20 +11,50 @@ namespace calicodb
 
 using PageSize = std::uint16_t;
 
+struct LogicalPageId {
+    [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
+    {
+        return LogicalPageId {Id::null(), pid};
+    }
+
+    [[nodiscard]] static auto with_table(Id tid) -> LogicalPageId
+    {
+        return LogicalPageId {tid, Id::null()};
+    }
+
+    [[nodiscard]] static auto root() -> LogicalPageId
+    {
+        return LogicalPageId {Id::root(), Id::root()};
+    }
+
+    // Results in "LogicalPageId(Id::null, Id::null())".
+    explicit LogicalPageId() = default;
+
+    explicit LogicalPageId(Id tid, Id pid)
+        : table_id {tid},
+          page_id {pid}
+    {
+    }
+
+    static constexpr std::size_t kSize {16};
+
+    Id table_id;
+    Id page_id;
+};
+
 class Page
 {
     ChangeBuffer m_deltas;
-    Span m_span;
     Id m_id;
+    Span m_span;
     bool m_write {};
 
 public:
-    friend struct FileHeader;
-    friend struct NodeHeader;
-    friend struct Node;
     friend class Frame;
+    friend class Pager;
+    friend struct Node;
 
-    Page() = default;
+    explicit Page() = default;
 
     [[nodiscard]] auto is_writable() const -> bool
     {
@@ -75,9 +105,9 @@ public:
         return m_deltas;
     }
 
-    auto TEST_populate(Id id, Span buffer, bool write, const ChangeBuffer &deltas = {}) -> void
+    auto TEST_populate(Id page_id, Span buffer, bool write, const ChangeBuffer &deltas = {}) -> void
     {
-        m_id = id;
+        m_id = page_id;
         m_span = buffer;
         m_write = write;
         m_deltas = deltas;

@@ -8,82 +8,14 @@
 namespace calicodb
 {
 
-struct Id {
-    static constexpr std::size_t kNull {0};
-    static constexpr std::size_t kRoot {1};
+class Tree;
 
-    struct Hash {
-        auto operator()(const Id &id) const -> std::size_t
-        {
-            return id.value;
-        }
-    };
-
-    [[nodiscard]] static constexpr auto from_index(std::size_t index) noexcept -> Id
-    {
-        return {index + 1};
-    }
-
-    [[nodiscard]] static constexpr auto null() noexcept -> Id
-    {
-        return {kNull};
-    }
-
-    [[nodiscard]] static constexpr auto root() noexcept -> Id
-    {
-        return {kRoot};
-    }
-
-    [[nodiscard]] constexpr auto is_null() const noexcept -> bool
-    {
-        return value == kNull;
-    }
-
-    [[nodiscard]] constexpr auto is_root() const noexcept -> bool
-    {
-        return value == kRoot;
-    }
-
-    [[nodiscard]] constexpr auto as_index() const noexcept -> std::size_t
-    {
-        CDB_EXPECT_NE(value, null().value);
-        return value - 1;
-    }
-
-    std::size_t value {};
+struct DBState {
+    Status status;
+    std::size_t batch_size {};
+    std::size_t record_count {};
+    std::size_t bytes_written {};
 };
-
-inline auto operator<(Id lhs, Id rhs) -> bool
-{
-    return lhs.value < rhs.value;
-}
-
-inline auto operator>(Id lhs, Id rhs) -> bool
-{
-    return lhs.value > rhs.value;
-}
-
-inline auto operator<=(Id lhs, Id rhs) -> bool
-{
-    return lhs.value <= rhs.value;
-}
-
-inline auto operator>=(Id lhs, Id rhs) -> bool
-{
-    return lhs.value >= rhs.value;
-}
-
-inline auto operator==(Id lhs, Id rhs) -> bool
-{
-    return lhs.value == rhs.value;
-}
-
-inline auto operator!=(Id lhs, Id rhs) -> bool
-{
-    return lhs.value != rhs.value;
-}
-
-using Lsn = Id;
 
 class AlignedBuffer
 {

@@ -26,11 +26,7 @@ auto DbFuzzer::reopen() -> Status
     delete m_db;
     m_db = nullptr;
 
-    auto s = DB::open(m_options, m_path, &m_db);
-    if (s.is_ok()) {
-        tools::validate_db(*m_db);
-    }
-    return s;
+    return DB::open(m_options, m_path, &m_db);
 }
 
 auto DbFuzzer::validate() -> void

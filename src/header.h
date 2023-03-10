@@ -12,7 +12,7 @@ class Page;
  * page is also a node page, so it will have additional headers following the file header.
  *
  * File Header Format:
- *     Offset  std::size_t  Name
+ *     Offset  Size  Name
  *    ----------------------------
  *     0       4     magic_code
  *     4       4     header_crc
@@ -25,10 +25,8 @@ class Page;
 struct FileHeader {
     static constexpr std::uint32_t kMagicCode {0xB11924E1};
     static constexpr std::size_t kSize {42};
-    explicit FileHeader() = default;
-    explicit FileHeader(const Page &page);
-    explicit FileHeader(const char *data);
-    auto write(Page &page) const -> void;
+    auto read(const char *data) -> void;
+    auto write(char *data) const -> void;
 
     [[nodiscard]] auto compute_crc() const -> std::uint32_t;
 
@@ -41,13 +39,14 @@ struct FileHeader {
     std::uint16_t page_size {};
 };
 
-/* Every page has a page header, which consists of just the page LSN.
+/* Every page has a page header, after the file header, but before the tree header, if they are on this page.
  *
  * Page Header Format:
  *     Offset  Size  Name
  *    --------------------------
  *     0       8     page_lsn
  */
+static constexpr auto kPageHeaderSize = sizeof(Lsn);
 
 /* Node Header Format:
  *     Offset  Size  Name
@@ -60,17 +59,11 @@ struct FileHeader {
  *     21      2     free_start
  *     23      2     free_total
  *     25      1     frag_count
- *
- * NOTE: The page_lsn from the page header is included in the node header size for convenience. Also, it should
- *       be noted that internal nodes do not use the prev_id field. In external nodes, the prev_id and next_id
- *       are used to refer to the left and right siblings, respectively. In internal nodes, the next_id field
- *       refers to the rightmost child ID.
  */
 struct NodeHeader {
-    static constexpr std::size_t kSize {34};
-    explicit NodeHeader() = default;
-    auto read(const Page &page) -> void;
-    auto write(Page &page) const -> void;
+    static constexpr std::size_t kSize {26};
+    auto read(const char *data) -> void;
+    auto write(char *data) const -> void;
 
     Id next_id;
     Id prev_id;

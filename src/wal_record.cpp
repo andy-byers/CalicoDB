@@ -1,5 +1,6 @@
 #include "wal_record.h"
 #include "encoding.h"
+#include "page.h"
 
 namespace calicodb
 {
@@ -78,128 +79,169 @@ auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Sta
     return Status::ok();
 }
 
-static auto encode_payload_type(Span out, WalPayloadType type)
+static auto decode_vacuum_payload(const Slice &in) -> VacuumDescriptor
 {
-    CDB_EXPECT_FALSE(out.is_empty());
-    out[0] = type;
-}
-
-auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::vector<PageDelta> &deltas, Span buffer) -> WalPayloadIn
-{
-    auto saved = buffer;
-    buffer.advance(sizeof(lsn));
+    VacuumDescriptor info;
+    auto data = in.data();
 
     // Payload type (1 B)
-    encode_payload_type(buffer, WalPayloadType::kDeltaPayload);
-    buffer.advance();
+    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kVacuumPayload);
+    ++data;
 
-    // Page ID (8 B)
-    put_u64(buffer, page_id.value);
-    buffer.advance(sizeof(page_id));
+    // LSN (8 B)
+    info.lsn.value = get_u64(data);
+    data += sizeof(Lsn);
 
-    // Deltas count (2 B)
-    put_u16(buffer, static_cast<std::uint16_t>(deltas.size()));
-    buffer.advance(sizeof(std::uint16_t));
-
-    // Deltas (N B)
-    for (const auto &[offset, size] : deltas) {
-        put_u16(buffer, static_cast<std::uint16_t>(offset));
-        buffer.advance(sizeof(std::uint16_t));
-
-        put_u16(buffer, static_cast<std::uint16_t>(size));
-        buffer.advance(sizeof(std::uint16_t));
-
-        mem_copy(buffer, image.range(offset, size));
-        buffer.advance(size);
-    }
-    saved.truncate(saved.size() - buffer.size());
-    return WalPayloadIn {lsn, saved};
+    // Start flag (1 B)
+    info.is_start = *data;
+    return info;
 }
 
-auto encode_full_image_payload(Lsn lsn, Id pid, const Slice &image, Span buffer) -> WalPayloadIn
-{
-    auto saved = buffer;
-    buffer.advance(sizeof(lsn));
-
-    // Payload type (1 B)
-    encode_payload_type(buffer, WalPayloadType::kFullImagePayload);
-    buffer.advance();
-
-    // Page ID (8 B)
-    put_u64(buffer, pid.value);
-    buffer.advance(sizeof(pid));
-
-    // Image (N B)
-    mem_copy(buffer, image);
-    buffer.advance(image.size());
-
-    saved.truncate(saved.size() - buffer.size());
-    return WalPayloadIn {lsn, saved};
-}
-
-static auto decode_deltas_payload(WalPayloadOut in) -> DeltaDescriptor
+static auto decode_deltas_payload(const Slice &in) -> DeltaDescriptor
 {
     DeltaDescriptor info;
     auto data = in.data();
-    info.lsn = in.lsn();
 
     // Payload type (1 B)
-    CDB_EXPECT_EQ(WalPayloadType {data[0]}, WalPayloadType::kDeltaPayload);
-    data.advance();
+    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kDeltaPayload);
+    ++data;
+
+    // LSN (8 B)
+    info.lsn.value = get_u64(data);
+    data += sizeof(Lsn);
 
     // Page ID (8 B)
-    info.pid.value = get_u64(data);
-    data.advance(sizeof(info.pid));
+    info.page_id.value = get_u64(data);
+    data += sizeof(Id);
 
     // Delta count (2 B)
     info.deltas.resize(get_u16(data));
-    data.advance(sizeof(std::uint16_t));
+    data += sizeof(std::uint16_t);
 
     // Deltas (N B)
     std::generate(begin(info.deltas), end(info.deltas), [&data] {
         DeltaDescriptor::Delta delta;
         delta.offset = get_u16(data);
-        data.advance(sizeof(std::uint16_t));
+        data += sizeof(std::uint16_t);
 
         const auto size = get_u16(data);
-        data.advance(sizeof(std::uint16_t));
+        data += sizeof(std::uint16_t);
 
-        delta.data = data.range(0, size);
-        data.advance(size);
+        delta.data = Slice {data, size};
+        data += size;
         return delta;
     });
     return info;
 }
 
-static auto decode_full_image_payload(WalPayloadOut in) -> FullImageDescriptor
+static auto decode_full_image_payload(const Slice &in) -> ImageDescriptor
 {
-    FullImageDescriptor info;
+    ImageDescriptor info;
     auto data = in.data();
-    info.lsn = in.lsn();
 
     // Payload type (1 B)
-    CDB_EXPECT_EQ(WalPayloadType {data[0]}, WalPayloadType::kFullImagePayload);
-    data.advance();
+    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kImagePayload);
+    ++data;
+
+    // LSN (8 B)
+    info.lsn.value = get_u64(data);
+    data += sizeof(Lsn);
 
     // Page ID (8 B)
-    info.pid.value = get_u64(data);
-    data.advance(sizeof(Id));
+    info.page_id.value = get_u64(data);
 
     // Image (n B)
-    info.image = data;
+    info.image = in.range(ImageDescriptor::kFixedSize);
     return info;
 }
 
-auto decode_payload(WalPayloadOut in) -> PayloadDescriptor
+auto decode_payload(const Slice &in) -> PayloadDescriptor
 {
     switch (WalPayloadType {in.data()[0]}) {
-    case WalPayloadType::kDeltaPayload:
-        return decode_deltas_payload(in);
-    case WalPayloadType::kFullImagePayload:
-        return decode_full_image_payload(in);
-    default:
-        return std::monostate {};
+        case WalPayloadType::kDeltaPayload:
+            return decode_deltas_payload(in);
+        case WalPayloadType::kImagePayload:
+            return decode_full_image_payload(in);
+        case WalPayloadType::kVacuumPayload:
+            return decode_vacuum_payload(in);
+        default:
+            return std::monostate {};
     }
+}
+
+auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice
+{
+    auto saved = buffer;
+
+    // Payload type (1 B)
+    *buffer++ = WalPayloadType::kVacuumPayload;
+
+    // LSN (8 B)
+    put_u64(buffer, lsn.value);
+    buffer += sizeof(Lsn);
+
+    // Start flag (1 B)
+    *buffer = static_cast<char>(is_start);
+    return Slice {saved, VacuumDescriptor::kFixedSize};
+}
+
+auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice
+{
+    auto saved = buffer;
+
+    // Payload type (1 B)
+    *buffer++ = WalPayloadType::kDeltaPayload;
+
+    // LSN (8 B)
+    put_u64(buffer, lsn.value);
+    buffer += sizeof(Lsn);
+
+    // Page ID (8 B)
+    put_u64(buffer, page_id.value);
+    buffer += sizeof(Id);
+
+    // Deltas count (2 B)
+    put_u16(buffer, static_cast<std::uint16_t>(deltas.size()));
+    buffer += sizeof(std::uint16_t);
+
+    // Deltas (N B)
+    std::size_t n {};
+    for (const auto &[offset, size] : deltas) {
+        put_u16(buffer + n, static_cast<std::uint16_t>(offset));
+        n += sizeof(std::uint16_t);
+
+        put_u16(buffer + n, static_cast<std::uint16_t>(size));
+        n += sizeof(std::uint16_t);
+
+        std::memcpy(buffer + n, image.data() + offset, size);
+        n += size;
+    }
+    return Slice {saved, DeltaDescriptor::kFixedSize + n};
+}
+
+auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer) -> Slice
+{
+    auto saved = buffer;
+
+    // Payload type (1 B)
+    *buffer++ = WalPayloadType::kImagePayload;
+
+    // LSN (8 B)
+    put_u64(buffer, lsn.value);
+    buffer += sizeof(lsn);
+
+    // Page ID (8 B)
+    put_u64(buffer, page_id.value);
+    buffer += sizeof(Id);
+
+    // Image (N B)
+    std::memcpy(buffer, image.data(), image.size());
+    return Slice {saved, ImageDescriptor::kFixedSize + image.size()};
+}
+
+auto extract_payload_lsn(const Slice &in) -> Lsn
+{
+    return {get_u64(in.data() + sizeof(WalPayloadType))};
 }
 
 } // namespace calicodb

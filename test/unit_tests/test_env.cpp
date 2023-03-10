@@ -12,9 +12,14 @@ namespace calicodb
 
 TEST(PathParserTests, ExtractsDirnames)
 {
+    // NOTE: Expects the POSIX version of dirname().
     ASSERT_EQ(split_path("dirname/basename").first, "dirname");
+    ASSERT_EQ(split_path(".dirname/basename").first, ".dirname");
+    ASSERT_EQ(split_path(".dirname.ext/basename").first, ".dirname.ext");
     ASSERT_EQ(split_path("/dirname/basename").first, "/dirname");
     ASSERT_EQ(split_path("/dirname/extra/basename").first, "/dirname/extra");
+    ASSERT_EQ(split_path("/dirname/extra.ext/basename").first, "/dirname/extra.ext");
+    ASSERT_EQ(split_path("/dirname///basename//").first, "/dirname");
     ASSERT_EQ(split_path("basename").first, ".");
     ASSERT_EQ(split_path("basename/").first, ".");
     ASSERT_EQ(split_path("/basename").first, "/");
@@ -26,8 +31,12 @@ TEST(PathParserTests, ExtractsDirnames)
 TEST(PathParserTests, ExtractsBasenames)
 {
     ASSERT_EQ(split_path("dirname/basename").second, "basename");
+    ASSERT_EQ(split_path("dirname/.basename").second, ".basename");
+    ASSERT_EQ(split_path(".dirname/basename").second, "basename");
     ASSERT_EQ(split_path("/dirname/basename").second, "basename");
+    ASSERT_EQ(split_path("/dirname/basename.ext").second, "basename.ext");
     ASSERT_EQ(split_path("/dirname/extra/basename").second, "basename");
+    ASSERT_EQ(split_path("/dirname/extra.ext/basename").second, "basename");
     ASSERT_EQ(split_path("basename").second, "basename");
     ASSERT_EQ(split_path("basename/").second, "basename");
     ASSERT_EQ(split_path("/basename").second, "basename");
@@ -114,7 +123,7 @@ template <class Reader>
         const auto chunk_size = std::min(out.size(), random.Next<std::size_t>(size / num_chunks));
         auto chunk = out.range(0, chunk_size);
         std::size_t read_size = chunk.size();
-        const auto s = reader.read(chunk.data(), read_size, counter);
+        const auto s = reader.read(chunk.data(), &read_size, counter);
 
         if (read_size != chunk_size) {
             return backing;
@@ -191,7 +200,7 @@ TEST_F(PosixReaderTests, NewFileIsEmpty)
     std::string backing(8, '\x00');
     Span bytes {backing};
     auto read_size = bytes.size();
-    ASSERT_TRUE(file->read(bytes.data(), read_size, 0).is_ok());
+    ASSERT_TRUE(file->read(bytes.data(), &read_size, 0).is_ok());
     ASSERT_EQ(read_size, 0);
 }
 
@@ -218,7 +227,7 @@ TEST_F(PosixEditorTests, NewFileIsEmpty)
     std::string backing(8, '\x00');
     Span bytes {backing};
     auto read_size = bytes.size();
-    ASSERT_TRUE(file->read(bytes.data(), read_size, 0).is_ok());
+    ASSERT_TRUE(file->read(bytes.data(), &read_size, 0).is_ok());
     ASSERT_EQ(read_size, 0);
 }
 
@@ -259,24 +268,24 @@ public:
     tools::RandomGenerator random;
 };
 
-class DynamicEnvTests
+class FakeEnvTests
     : public InMemoryTest,
       public testing::Test
 {
 public:
-    ~DynamicEnvTests() override = default;
+    ~FakeEnvTests() override = default;
 
     tools::RandomGenerator random;
 };
 
-TEST_F(DynamicEnvTests, ReaderCannotCreateFile)
+TEST_F(FakeEnvTests, ReaderCannotCreateFile)
 {
     Reader *temp;
     const auto s = env->new_reader("nonexistent", &temp);
     ASSERT_TRUE(s.is_not_found()) << "Error: " << s.to_string().data();
 }
 
-TEST_F(DynamicEnvTests, ReadsAndWrites)
+TEST_F(FakeEnvTests, ReadsAndWrites)
 {
     auto ra_editor = open_blob<Editor>(*env, kFilename);
     auto ra_reader = open_blob<Reader>(*env, kFilename);
@@ -292,7 +301,7 @@ TEST_F(DynamicEnvTests, ReadsAndWrites)
     ASSERT_EQ(output_1, first_input.to_string() + second_input.to_string());
 }
 
-TEST_F(DynamicEnvTests, ReaderStopsAtEOF)
+TEST_F(FakeEnvTests, ReaderStopsAtEOF)
 {
     auto ra_editor = open_blob<Editor>(*env, kFilename);
     auto ra_reader = open_blob<Reader>(*env, kFilename);
@@ -303,7 +312,7 @@ TEST_F(DynamicEnvTests, ReaderStopsAtEOF)
     std::string buffer(data.size() * 2, '\x00');
     Span bytes {buffer};
     auto read_size = bytes.size();
-    ASSERT_OK(ra_reader->read(bytes.data(), read_size, 0));
+    ASSERT_OK(ra_reader->read(bytes.data(), &read_size, 0));
     ASSERT_EQ(bytes.truncate(read_size), data);
 }
 

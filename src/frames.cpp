@@ -45,10 +45,12 @@ auto Frame::unref(Page &page) -> void
     if (page.is_writable()) {
         CDB_EXPECT_TRUE(m_is_writable);
         CDB_EXPECT_EQ(m_ref_count, 1);
-        m_is_writable = false;
         page.m_write = false;
     }
     --m_ref_count;
+    if (m_ref_count == 0) {
+        m_is_writable = false;
+    }
 }
 
 FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count)
@@ -150,7 +152,7 @@ auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
     }
 
     auto read_size = out.size();
-    CDB_TRY(m_file->read(out.data(), read_size, offset));
+    CDB_TRY(m_file->read(out.data(), &read_size, offset));
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
     if (read_size == m_page_size) {

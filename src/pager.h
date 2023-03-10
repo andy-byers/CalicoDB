@@ -14,22 +14,21 @@ namespace calicodb
 class Env;
 class FrameManager;
 class WriteAheadLog;
+class TableSet;
 
 class Pager
 {
 public:
     friend class DBImpl;
-    friend class Recovery;
 
     struct Parameters {
-        std::string path;
+        std::string filename;
         Env *env {};
-        std::string *scratch {};
         WriteAheadLog *wal {};
         InfoLogger *info_log {};
-        Status *status {};
         Lsn *commit_lsn {};
-        bool *in_txn {};
+        Status *status {};
+        bool *is_running {};
         std::size_t frame_count {};
         std::size_t page_size {};
     };
@@ -39,14 +38,13 @@ public:
     [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
-    [[nodiscard]] auto hit_ratio() const -> double;
     [[nodiscard]] auto recovery_lsn() -> Id;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
     [[nodiscard]] auto flush(Lsn target_lsn = Lsn::null()) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto allocate(Page &page) -> Status;
-    [[nodiscard]] auto acquire(Id pid, Page &page) -> Status;
+    [[nodiscard]] auto allocate(Page *page) -> Status;
+    [[nodiscard]] auto acquire(Id page_id, Page *page) -> Status;
     auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
     auto save_state(FileHeader &header) -> void;
@@ -60,18 +58,17 @@ private:
     auto watch_page(Page &page, PageCache::Entry &entry, int important) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
 
-    std::string m_path;
+    std::string m_filename;
     FrameManager m_frames;
     PageList m_dirty;
     PageCache m_cache;
     Lsn m_recovery_lsn;
-    Lsn *m_commit_lsn {};
-    bool *m_in_txn {};
+    bool *m_is_running {};
     Status *m_status {};
-    std::string *m_scratch {};
     WriteAheadLog *m_wal {};
     Env *m_env {};
     InfoLogger *m_info_log {};
+    Lsn *m_commit_lsn {};
 };
 
 } // namespace calicodb

@@ -29,12 +29,7 @@ static auto write_file_header(char *data, const FileHeader &header) -> void
     put_u16(data, header.page_size);
 }
 
-FileHeader::FileHeader(const Page &page)
-    : FileHeader {page.data()}
-{
-}
-
-FileHeader::FileHeader(const char *data)
+auto FileHeader::read(const char *data) -> void
 {
     magic_code = get_u32(data);
     data += sizeof(std::uint32_t);
@@ -64,17 +59,13 @@ auto FileHeader::compute_crc() const -> std::uint32_t
     return crc32c::Value(data + 8, FileHeader::kSize - 8);
 }
 
-auto FileHeader::write(Page &page) const -> void
+auto FileHeader::write(char *data) const -> void
 {
-    CDB_EXPECT_TRUE(page.id().is_root());
-    write_file_header(page.data(), *this);
-    insert_delta(page.m_deltas, {0, kSize});
+    write_file_header(data, *this);
 }
 
-auto NodeHeader::read(const Page &page) -> void
+auto NodeHeader::read(const char *data) -> void
 {
-    auto data = page.data() + page_offset(page) + sizeof(Lsn);
-
     // Flags byte.
     is_external = *data++;
 
@@ -99,10 +90,8 @@ auto NodeHeader::read(const Page &page) -> void
     frag_count = static_cast<std::uint8_t>(*data);
 }
 
-auto NodeHeader::write(Page &page) const -> void
+auto NodeHeader::write(char *data) const -> void
 {
-    auto *data = page.data() + page_offset(page) + sizeof(Lsn);
-
     *data++ = static_cast<char>(is_external);
 
     put_u64(data, next_id.value);
@@ -124,7 +113,6 @@ auto NodeHeader::write(Page &page) const -> void
     data += sizeof(PageSize);
 
     *data = static_cast<char>(frag_count);
-    insert_delta(page.m_deltas, {page_offset(page), kSize});
 }
 
 } // namespace calicodb

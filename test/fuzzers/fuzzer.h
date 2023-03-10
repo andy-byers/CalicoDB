@@ -37,7 +37,7 @@ inline auto extract_fuzzer_value(const std::uint8_t *&data, std::size_t &size) -
 
     std::string result;
     if (result_size) {
-        append_number(result, result_data);
+        append_number(&result, result_data);
         result.append(std::string(result_size, '0'));
     }
     return result;

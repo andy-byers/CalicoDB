@@ -28,7 +28,7 @@ else()
         list(APPEND CALICODB_OPTIONS -Wduplicated-cond)
         list(APPEND CALICODB_OPTIONS -Wduplicated-branches)
         list(APPEND CALICODB_OPTIONS -Wlogical-op)
-        list(APPEND CALICODB_OPTIONS -Wnull-dereference)
+#        list(APPEND CALICODB_OPTIONS -Wnull-dereference)
 #        list(APPEND CALICODB_OPTIONS -Wuseless-cast) # TODO: Problems on Apple Clang
     else()
         list(APPEND CALICODB_OPTIONS -Wimplicit-fallthrough)
@@ -51,9 +51,10 @@ target_include_directories(calicodb
 target_compile_options(calicodb
         PRIVATE "${CALICODB_OPTIONS}")
 target_compile_definitions(calicodb
-        PUBLIC CALICODB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-               CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-               CALICODB_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-               CALICODB_BUILD_TESTS=${CALICODB_BuildTests})
-set_target_properties(calicodb
-        PROPERTIES LINKER_LANGUAGE CXX)
+        PUBLIC  CALICODB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+                CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+                CALICODB_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+if(${CALICODB_BuildTests})
+    target_compile_definitions(calicodb
+            PRIVATE CALICODB_BUILD_TESTS)
+endif()

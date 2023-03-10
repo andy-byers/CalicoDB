@@ -97,6 +97,8 @@ inline auto put_u64(Span out, std::uint64_t value) noexcept -> void
     put_u64(out.data(), value);
 }
 
+static constexpr std::size_t kVarintMaxLength {10};
+
 [[nodiscard]] inline auto varint_length(std::uint64_t value) -> std::size_t
 {
     std::size_t length {1};
@@ -118,6 +120,8 @@ inline auto encode_varint(char *out, std::uint64_t value) -> char *
     return reinterpret_cast<char *>(ptr);
 }
 
+// TODO: We should pass an "end" variable to mark the end of possible input. This will help
+//       catch corruption in data pages, and prevent out-of-bounds reads.
 inline auto decode_varint(const char *in, std::uint64_t &value) -> const char *
 {
     value = 0;

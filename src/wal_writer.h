@@ -22,7 +22,7 @@ public:
 
     // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified, except for the block
     //       count, which remains valid.
-    [[nodiscard]] auto write(WalPayloadIn payload) -> Status;
+    [[nodiscard]] auto write(Lsn lsn, const Slice &payload) -> Status;
     [[nodiscard]] auto flush() -> Status;
 
     // NOTE: Only valid if the writer has flushed.

@@ -14,7 +14,7 @@ enum OperationType {
     kSeekIter,
     kIterForward,
     kIterReverse,
-    kCommit,
+    kCheckpoint,
     kVacuum,
     kReopen,
     kOpCount
@@ -45,7 +45,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     }
     switch (operation_type) {
     case kGet:
-        s = m_db->get(extract_fuzzer_key(data, size), value);
+        s = m_db->get(extract_fuzzer_key(data, size), &value);
         if (s.is_not_found()) {
             s = Status::ok();
         }
@@ -96,8 +96,8 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     case kVacuum:
         CDB_TRY(m_db->vacuum());
         break;
-    case kCommit:
-        CDB_TRY(m_db->commit());
+    case kCheckpoint:
+        CDB_TRY(m_db->checkpoint());
         break;
     default: // kReopen
         CDB_TRY(reopen());

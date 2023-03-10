@@ -2,6 +2,7 @@
 #define CALICODB_TEST_UNIT_TESTS_H
 
 #include "calicodb/status.h"
+#include "db_impl.h"
 #include "env_posix.h"
 #include "page.h"
 #include "tools.h"
@@ -122,7 +123,18 @@ public:
         return 0;
     }
 
-    auto log(WalPayloadIn) -> Status override
+    [[nodiscard]] auto log_delta(Id, const Slice &, const ChangeBuffer &, Lsn *) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto log_image(Id, const Slice &, Lsn *) -> Status override
+    {
+        return Status::ok();
+    }
+
+
+    [[nodiscard]] auto log_vacuum(bool, Lsn *) -> Status override
     {
         return Status::ok();
     }
@@ -145,18 +157,17 @@ public:
     const std::size_t kFrameCount {16};
 
     TestWithPager()
-        : scratch(kPageSize, '\x00'),
-          log_scratch(wal_scratch_size(kPageSize), '\x00')
+        : scratch(kPageSize, '\x00')
     {
+        tables.add(LogicalPageId::with_table(Id::root()));
         Pager *temp;
         EXPECT_OK(Pager::open({
                                   kFilename,
                                   env.get(),
-                                  &log_scratch,
                                   &wal,
                                   nullptr,
-                                  &status,
                                   &commit_lsn,
+                                  &status,
                                   &in_txn,
                                   kFrameCount,
                                   kPageSize,
@@ -165,15 +176,15 @@ public:
         pager.reset(temp);
     }
 
-    std::string log_scratch;
+    TableSet tables;
     Status status;
     bool in_txn {};
-    Lsn commit_lsn;
     DisabledWriteAheadLog wal;
     std::string scratch;
     std::string collect_scratch;
     std::unique_ptr<Pager> pager;
     tools::RandomGenerator random {1'024 * 1'024 * 8};
+    Lsn commit_lsn;
 };
 
 inline auto expect_ok(const Status &s) -> void
@@ -197,11 +208,11 @@ inline auto assert_special_error(const Status &s)
     }
 }
 
-namespace TestTools
+namespace test_tools
 {
 
 template <class T>
-auto get(T &t, const std::string &key, std::string &value) -> Status
+auto get(T &t, const std::string &key, std::string *value) -> Status
 {
     return t.get(key, value);
 }
@@ -237,7 +248,7 @@ template <class T>
 auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
 {
     std::string val;
-    if (auto s = get(t, key, val); s.is_ok()) {
+    if (auto s = get(t, key, &val); s.is_ok()) {
         if (val != value) {
             std::cerr << "value does not match (\"" << value << "\" != \"" << val << "\")\n";
             std::abort();
@@ -251,7 +262,7 @@ auto expect_contains(T &t, const std::string &key, const std::string &value) -> 
 template <class T>
 auto insert(T &t, const std::string &key, const std::string &value) -> void
 {
-    auto s = t.put(key, value);
+    auto s = t.add(key, value);
     if (!s.is_ok()) {
         std::fputs(s.to_string().data(), stderr);
         std::abort();
@@ -307,18 +318,18 @@ inline auto read_file(Env &env, const std::string &path) -> std::string
     std::string out;
     std::size_t size;
 
-    EXPECT_TRUE(env.file_size(path, size).is_ok());
+    EXPECT_TRUE(env.file_size(path, &size).is_ok());
     EXPECT_TRUE(env.new_reader(path, &file).is_ok());
     out.resize(size);
 
     Span temp {out};
     auto read_size = temp.size();
-    EXPECT_TRUE(file->read(temp.data(), read_size, 0).is_ok());
+    EXPECT_TRUE(file->read(temp.data(), &read_size, 0).is_ok());
     EXPECT_EQ(read_size, size);
     delete file;
     return out;
 }
-} // namespace TestTools
+} // namespace test_tools
 
 struct Record {
     inline auto operator<(const Record &rhs) const -> bool

@@ -8,5 +8,6 @@ BasedOnStyle: LLVM
 AccessModifierOffset: -4
 BreakBeforeBraces: Linux
 ColumnLimit: 0
+IndentCaseLabels: true
 SpaceBeforeCpp11BracedList: true
 IndentWidth: 4

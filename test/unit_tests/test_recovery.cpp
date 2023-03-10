@@ -4,9 +4,96 @@
 #include "calicodb/calicodb.h"
 #include "tools.h"
 #include "unit_tests.h"
+#include "wal_reader.h"
 
 namespace calicodb
 {
+
+class WalPagerInteractionTests
+    : public InMemoryTest,
+      public testing::Test
+{
+public:
+    static constexpr auto kFilename = "./test";
+    static constexpr auto kWalPrefix = "./wal-";
+    static constexpr auto kPageSize = kMinPageSize;
+    static constexpr  std::size_t kFrameCount {16};
+
+    WalPagerInteractionTests()
+        : scratch(kPageSize, '\x00'),
+          log_scratch(wal_scratch_size(kPageSize), '\x00')
+    {
+    }
+
+    ~WalPagerInteractionTests() override
+    {
+        delete wal;
+    }
+
+    auto SetUp() -> void override
+    {
+        tables.add(LogicalPageId::root());
+
+        const WriteAheadLog::Parameters wal_param {
+            kWalPrefix,
+            env.get(),
+            kPageSize};
+        ASSERT_OK(WriteAheadLog::open(wal_param, &wal));
+
+        const Pager::Parameters pager_param {
+            kFilename,
+            env.get(),
+            wal,
+            nullptr,
+            &commit_lsn,
+            &status,
+            &is_running,
+            kFrameCount,
+            kPageSize,
+        };
+        ASSERT_OK(Pager::open(pager_param, &pager));
+        ASSERT_OK(wal->start_writing());
+
+        tail_buffer.resize(wal_block_size(kPageSize));
+        payload_buffer.resize(wal_scratch_size(kPageSize));
+    }
+
+    auto read_segment(Id segment_id, std::vector<PayloadDescriptor> *out) -> Status
+    {
+        Reader *temp;
+        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), &temp));
+
+        std::unique_ptr<Reader> file {temp};
+        WalReader reader {*file, tail_buffer};
+
+        for (; ; ) {
+            Span payload {payload_buffer};
+            auto s = reader.read(payload);
+
+            if (s.is_ok()) {
+                out->emplace_back(decode_payload(payload));
+            } else if (s.is_not_found()) {
+                break;
+            } else {
+                return s;
+            }
+        }
+        return Status::ok();
+    }
+
+    std::string log_scratch;
+    Status status;
+    bool is_running {true};
+    Lsn commit_lsn;
+    std::string scratch;
+    std::string collect_scratch;
+    std::string payload_buffer;
+    std::string tail_buffer;
+    Pager *pager;
+    WriteAheadLog *wal;
+    TableSet tables;
+    tools::RandomGenerator random {1'024 * 1'024 * 8};
+};
 
 class RecoveryTestHarness
 {
@@ -36,6 +123,9 @@ public:
 
     void close()
     {
+        delete table;
+        table = nullptr;
+        
         delete db;
         db = nullptr;
     }
@@ -51,7 +141,8 @@ public:
             opts.env = env.get();
         }
         tail.resize(wal_block_size(opts.page_size));
-        return DB::open(opts, db_prefix, &db);
+        CDB_TRY(DB::open(opts, db_prefix, &db));
+        return db->create_table({}, "test", &table);
     }
 
     auto open(Options *options = nullptr) -> void
@@ -61,13 +152,13 @@ public:
 
     auto put(const std::string &k, const std::string &v) const -> Status
     {
-        return db->put(k, v);
+        return db->put(table, k, v);
     }
 
     auto get(const std::string &k) const -> std::string
     {
         std::string result;
-        Status s = db->get(k, result);
+        Status s = db->get(table, k, &result);
         if (s.is_not_found()) {
             result = "NOT_FOUND";
         } else if (!s.is_ok()) {
@@ -83,7 +174,7 @@ public:
 
     auto remove_log_files() -> size_t
     {
-        // Linux allows unlinking open files, but Windows does not.
+        // Linux allows unlinking put files, but Windows does not.
         // Closing the db allows for file deletion.
         close();
         std::vector<Id> logs = get_logs();
@@ -96,7 +187,7 @@ public:
     auto get_logs() -> std::vector<Id>
     {
         std::vector<std::string> filenames;
-        EXPECT_OK(env->get_children(".", filenames));
+        EXPECT_OK(env->get_children(".", &filenames));
         std::vector<Id> result;
         for (const auto &name : filenames) {
             if (name.find("wal-") == 0) {
@@ -114,7 +205,7 @@ public:
     auto file_size(const std::string &fname) -> std::size_t
     {
         std::size_t result;
-        EXPECT_OK(env->file_size(fname, result));
+        EXPECT_OK(env->file_size(fname, &result));
         return result;
     }
 
@@ -124,6 +215,7 @@ public:
     std::string db_prefix;
     std::string tail;
     DB *db {};
+    Table *table {};
 };
 
 class RecoveryTests
@@ -139,7 +231,7 @@ TEST_F(RecoveryTests, NormalShutdown)
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->checkpoint());
     close();
 
     ASSERT_EQ(num_logs(), 0);
@@ -150,7 +242,7 @@ TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->checkpoint());
 
     ASSERT_OK(put("c", "X"));
     ASSERT_OK(put("d", "4"));
@@ -165,11 +257,11 @@ TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
 TEST_F(RecoveryTests, PacksMultipleTransactionsIntoSegment)
 {
     ASSERT_OK(put("a", "1"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->checkpoint());
     ASSERT_OK(put("b", "2"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->checkpoint());
     ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->checkpoint());
 
     ASSERT_EQ(num_logs(), 1);
     open();
@@ -182,9 +274,9 @@ TEST_F(RecoveryTests, PacksMultipleTransactionsIntoSegment)
 TEST_F(RecoveryTests, RevertsNthTransaction)
 {
     ASSERT_OK(put("a", "1"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->checkpoint());
     ASSERT_OK(put("b", "2"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->checkpoint());
     ASSERT_OK(put("c", "3"));
     open();
 
@@ -210,9 +302,9 @@ TEST_F(RecoveryTests, SanityCheck)
         auto record = begin(map);
         for (std::size_t index {}; record != end(map); ++index, ++record) {
             if (index == commit) {
-                ASSERT_OK(db->commit());
+                ASSERT_OK(db->checkpoint());
             } else {
-                ASSERT_OK(db->put(record->first, record->second));
+                ASSERT_OK(db->put(table, record->first, record->second));
             }
         }
         open();
@@ -221,10 +313,10 @@ TEST_F(RecoveryTests, SanityCheck)
         for (std::size_t index {}; record != end(map); ++index, ++record) {
             std::string value;
             if (index < commit) {
-                ASSERT_OK(db->get(record->first, value));
+                ASSERT_OK(db->get(table, record->first, &value));
                 ASSERT_EQ(value, record->second);
             } else {
-                ASSERT_TRUE(db->get(record->first, value).is_not_found());
+                ASSERT_TRUE(db->get(table, record->first, &value).is_not_found());
             }
         }
         close();
@@ -259,12 +351,12 @@ public:
     {
         auto record = begin(map);
         for (std::size_t index {}; record != end(map); ++index, ++record) {
-            ASSERT_OK(db->put(record->first, record->second));
+            ASSERT_OK(db->put(table, record->first, record->second));
             if (record->first.front() % 10 == 1) {
-                ASSERT_OK(db->commit());
+                ASSERT_OK(db->checkpoint());
             }
         }
-        ASSERT_OK(db->commit());
+        ASSERT_OK(db->checkpoint());
 
         COUNTING_INTERCEPTOR(interceptor_prefix, interceptor_type, interceptor_count);
     }
@@ -276,7 +368,7 @@ public:
 
         for (const auto &[k, v] : map) {
             std::string value;
-            ASSERT_OK(db->get(k, value));
+            ASSERT_OK(db->get(table, k, &value));
             ASSERT_EQ(value, v);
         }
     }
@@ -290,7 +382,7 @@ public:
 TEST_P(RecoverySanityCheck, FailureWhileRunning)
 {
     for (const auto &[k, v] : map) {
-        auto s = db->erase(k);
+        auto s = db->erase(table, k);
         if (!s.is_ok()) {
             assert_special_error(s);
             break;
@@ -306,12 +398,11 @@ TEST_P(RecoverySanityCheck, FailureWhileRunning)
 
 // TODO: Find some way to determine if an error occurred during the destructor. It happens in each
 //       instance except for when we attempt to fail due to a WAL write error, since the WAL is not
-//       written during the close/recovery routine.
+//       written during the erase/recovery routine.
 TEST_P(RecoverySanityCheck, FailureDuringClose)
 {
     // The final transaction committed successfully, so the data we added should persist.
-    delete db;
-    db = nullptr;
+    close();
 
     validate();
 }
@@ -319,12 +410,10 @@ TEST_P(RecoverySanityCheck, FailureDuringClose)
 TEST_P(RecoverySanityCheck, FailureDuringCloseWithUncommittedUpdates)
 {
     while (db->status().is_ok()) {
-        (void)db->put(random.Generate(16), random.Generate(100));
+        (void)db->put(table, random.Generate(16), random.Generate(100));
     }
 
-    delete db;
-    db = nullptr;
-
+    close();
     validate();
 }
 
@@ -355,8 +444,7 @@ public:
         const auto saved_count = interceptor_count;
         interceptor_count = 0;
 
-        delete db;
-        db = nullptr;
+        close();
 
         interceptor_count = saved_count;
     }

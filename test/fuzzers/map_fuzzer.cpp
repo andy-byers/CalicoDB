@@ -20,7 +20,7 @@ using namespace calicodb::tools;
 enum OperationType {
     kPut,
     kErase,
-    kCommit,
+    kCheckpoint,
     kReopen,
     kVacuum,
     kOpCount
@@ -99,8 +99,8 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     case kVacuum:
         s = m_db->vacuum();
         break;
-    case kCommit:
-        s = m_db->commit();
+    case kCheckpoint:
+        s = m_db->checkpoint();
         if (s.is_ok()) {
             for (const auto &[k, v] : m_added) {
                 m_map[k] = v;
@@ -132,7 +132,6 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
 {
     Options options;
-//    options.info_log = new tools::StderrLogger;
     options.env = new tools::FakeEnv;
     options.page_size = kMinPageSize;
     options.cache_size = kMinPageSize * 16;
@@ -146,7 +145,6 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size
         }
     }
 
-//    delete options.info_log;
     delete options.env;
     return 0;
 }

@@ -9,7 +9,8 @@ namespace calicodb
 WriteAheadLog::WriteAheadLog(const Parameters &param)
     : m_prefix {param.prefix},
       m_env {param.env},
-      m_tail(wal_block_size(param.page_size), '\x00')
+      m_data_buffer(wal_scratch_size(param.page_size), '\x00'),
+      m_tail_buffer(wal_block_size(param.page_size), '\x00')
 {
     CDB_EXPECT_NE(m_env, nullptr);
 }
@@ -24,13 +25,13 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
     const auto [dir, base] = split_path(param.prefix);
     std::vector<std::string> possible_segments;
-    CDB_TRY(param.env->get_children(dir, possible_segments));
+    CDB_TRY(param.env->get_children(dir, &possible_segments));
 
     std::vector<Id> segments;
     for (auto &name : possible_segments) {
         name = join_paths(dir, name);
-        if (Slice {name}.starts_with(param.prefix)) {
-            segments.emplace_back(decode_segment_name(param.prefix, name));
+        if (const auto id = decode_segment_name(param.prefix, name); !id.is_null()) {
+            segments.emplace_back(id);
         }
     }
     std::sort(begin(segments), end(segments));
@@ -73,21 +74,49 @@ auto WriteAheadLog::current_lsn() const -> Lsn
     return {m_last_lsn.value + 1};
 }
 
-auto WriteAheadLog::log(WalPayloadIn payload) -> Status
+auto WriteAheadLog::log(const Slice &payload) -> Status
 {
     if (m_writer == nullptr) {
         return Status::logic_error("segment file is not open");
     }
-    ++m_last_lsn.value;
-    m_bytes_written += sizeof(Lsn) + payload.data().size();
-    CDB_EXPECT_EQ(payload.lsn(), m_last_lsn);
+    m_bytes_written += payload.size();
 
-    CDB_TRY(m_writer->write(payload));
+    CDB_TRY(m_writer->write(m_last_lsn, payload));
     if (m_writer->block_count() >= kSegmentCutoff << m_set.size()) {
         CDB_TRY(close_writer());
         return open_writer();
     }
     return Status::ok();
+}
+
+auto WriteAheadLog::log_vacuum(bool is_start, Lsn *out) -> Status
+{
+    ++m_last_lsn.value;
+    if (out != nullptr) {
+        *out = m_last_lsn;
+    }
+    return log(encode_vacuum_payload(
+        m_last_lsn, is_start, m_data_buffer.data()));
+}
+
+auto WriteAheadLog::log_delta(Id page_id, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status
+{
+    ++m_last_lsn.value;
+    if (out != nullptr) {
+        *out = m_last_lsn;
+    }
+    return log(encode_deltas_payload(
+        m_last_lsn, page_id, image, delta, m_data_buffer.data()));
+}
+
+auto WriteAheadLog::log_image(Id page_id, const Slice &image, Lsn *out) -> Status
+{
+    ++m_last_lsn.value;
+    if (out != nullptr) {
+        *out = m_last_lsn;
+    }
+    return log(encode_image_payload(
+        m_last_lsn, page_id, image, m_data_buffer.data()));
 }
 
 auto WriteAheadLog::flush() -> Status
@@ -153,11 +182,13 @@ auto WriteAheadLog::close_writer() -> Status
 
 auto WriteAheadLog::open_writer() -> Status
 {
+    // Writer is always opened on a new segment file.
     auto id = m_set.last();
     ++id.value;
 
+    // TODO: Should we fsync() the containing directory here? This is a new file.
     CDB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), &m_file));
-    m_writer = new WalWriter {*m_file, m_tail};
+    m_writer = new WalWriter {*m_file, m_tail_buffer};
     return Status::ok();
 }
 

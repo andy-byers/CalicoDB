@@ -18,7 +18,7 @@ add_executable(unit_tests
         test_utils.cpp
         test_wal.cpp
         unit_tests.cpp
-        unit_tests.h)
+        unit_tests.h test_table.cpp)
 target_include_directories(unit_tests
         PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(unit_tests

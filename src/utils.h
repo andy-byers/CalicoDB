@@ -2,13 +2,14 @@
 #define CALICODB_UTILS_H
 
 #include "calicodb/status.h"
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
 #if NDEBUG
 #define CDB_EXPECT_(expr, file, line)
 #else
-#define CDB_EXPECT_(expr, file, line) Impl::expect(expr, #expr, file, line)
+#define CDB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
 #endif // NDEBUG
 
 #define CDB_EXPECT_TRUE(expr) CDB_EXPECT_(expr, __FILE__, __LINE__)
@@ -30,7 +31,7 @@
 namespace calicodb
 {
 
-namespace Impl
+namespace impl
 {
 
 inline constexpr auto expect(bool cond, const char *repr, const char *file, int line) noexcept -> void
@@ -41,7 +42,7 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
     }
 }
 
-} // namespace Impl
+} // namespace impl
 
 static constexpr std::size_t kMinPageSize {0x200};
 static constexpr std::size_t kMaxPageSize {0x8000};
@@ -71,6 +72,83 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
     CDB_EXPECT_TRUE(s.is_ok());
     return "ok";
 }
+
+struct Id {
+    static constexpr std::uint64_t kNull {0};
+    static constexpr std::uint64_t kRoot {1};
+
+    struct Hash {
+        auto operator()(const Id &id) const -> std::uint64_t
+        {
+            return id.value;
+        }
+    };
+
+    [[nodiscard]] static constexpr auto from_index(std::uint64_t index) noexcept -> Id
+    {
+        return {index + 1};
+    }
+
+    [[nodiscard]] static constexpr auto null() noexcept -> Id
+    {
+        return {kNull};
+    }
+
+    [[nodiscard]] static constexpr auto root() noexcept -> Id
+    {
+        return {kRoot};
+    }
+
+    [[nodiscard]] constexpr auto is_null() const noexcept -> bool
+    {
+        return value == kNull;
+    }
+
+    [[nodiscard]] constexpr auto is_root() const noexcept -> bool
+    {
+        return value == kRoot;
+    }
+
+    [[nodiscard]] constexpr auto as_index() const noexcept -> std::uint64_t
+    {
+        CDB_EXPECT_NE(value, null().value);
+        return value - 1;
+    }
+
+    std::uint64_t value {};
+};
+
+inline auto operator<(Id lhs, Id rhs) -> bool
+{
+    return lhs.value < rhs.value;
+}
+
+inline auto operator>(Id lhs, Id rhs) -> bool
+{
+    return lhs.value > rhs.value;
+}
+
+inline auto operator<=(Id lhs, Id rhs) -> bool
+{
+    return lhs.value <= rhs.value;
+}
+
+inline auto operator>=(Id lhs, Id rhs) -> bool
+{
+    return lhs.value >= rhs.value;
+}
+
+inline auto operator==(Id lhs, Id rhs) -> bool
+{
+    return lhs.value == rhs.value;
+}
+
+inline auto operator!=(Id lhs, Id rhs) -> bool
+{
+    return lhs.value != rhs.value;
+}
+
+using Lsn = Id;
 
 } // namespace calicodb
 

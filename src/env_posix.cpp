@@ -9,19 +9,19 @@
 namespace calicodb
 {
 
-static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
+static constexpr int kFilePermissions {0644}; // -rw-r--r--
 
 [[nodiscard]] static auto to_status(int code) -> Status
 {
     switch (code) {
-    case ENOENT:
-        return Status::not_found(strerror(code));
-    case EINVAL:
-        return Status::invalid_argument(strerror(code));
-    case EEXIST:
-        return Status::logic_error(strerror(code));
-    default:
-        return Status::system_error(strerror(code));
+        case ENOENT:
+            return Status::not_found(strerror(code));
+        case EINVAL:
+            return Status::invalid_argument(strerror(code));
+        case EEXIST:
+            return Status::logic_error(strerror(code));
+        default:
+            return Status::system_error(strerror(code));
     }
 }
 
@@ -32,13 +32,13 @@ static constexpr int FILE_PERMISSIONS {0644}; // -rw-r--r--
     return to_status(code);
 }
 
-static auto file_open(const std::string &name, int mode, int permissions, int &out) -> Status
+static auto file_open(const std::string &name, int mode, int permissions, int *out) -> Status
 {
     if (const auto fd = open(name.c_str(), mode, permissions); fd >= 0) {
-        out = fd;
+        *out = fd;
         return Status::ok();
     }
-    out = -1;
+    *out = -1;
     return errno_to_status();
 }
 
@@ -50,17 +50,17 @@ static auto file_close(int fd) -> Status
     return Status::ok();
 }
 
-static auto file_read(int file, char *out, std::size_t &size) -> Status
+static auto file_read(int file, char *out, std::size_t *size) -> Status
 {
-    while (size) {
-        const auto n = read(file, out, size);
+    for (;;) {
+        const auto n = read(file, out, *size);
         if (n < 0) {
             if (errno == EINTR) {
                 continue;
             }
             return errno_to_status();
         }
-        size = static_cast<std::size_t>(n);
+        *size = static_cast<std::size_t>(n);
         break;
     }
     return Status::ok();
@@ -134,7 +134,7 @@ PosixReader::~PosixReader()
     (void)file_close(m_file);
 }
 
-auto PosixReader::read(char *out, std::size_t &size, std::size_t offset) -> Status
+auto PosixReader::read(char *out, std::size_t *size, std::size_t offset) -> Status
 {
     CDB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, out, size);
@@ -145,7 +145,7 @@ PosixEditor::~PosixEditor()
     (void)file_close(m_file);
 }
 
-auto PosixEditor::read(char *out, std::size_t &size, std::size_t offset) -> Status
+auto PosixEditor::read(char *out, std::size_t *size, std::size_t offset) -> Status
 {
     CDB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, out, size);
@@ -214,7 +214,7 @@ auto PosixInfoLogger::logv(const char *fmt, ...) -> void
         file_write(m_file, Slice {m_buffer.data(), length});
         break;
     }
-    m_buffer.resize(BUFFER_SIZE);
+    m_buffer.resize(kBufferSize);
 }
 
 auto EnvPosix::resize_file(const std::string &path, std::size_t size) -> Status
@@ -243,17 +243,17 @@ auto EnvPosix::file_exists(const std::string &path) const -> Status
     return Status::ok();
 }
 
-auto EnvPosix::file_size(const std::string &path, std::size_t &out) const -> Status
+auto EnvPosix::file_size(const std::string &path, std::size_t *out) const -> Status
 {
     struct stat st;
     if (stat(path.c_str(), &st)) {
         return errno_to_status();
     }
-    out = static_cast<std::size_t>(st.st_size);
+    *out = static_cast<std::size_t>(st.st_size);
     return Status::ok();
 }
 
-auto EnvPosix::get_children(const std::string &path, std::vector<std::string> &out) const -> Status
+auto EnvPosix::get_children(const std::string &path, std::vector<std::string> *out) const -> Status
 {
     const auto skip = [](const auto *s) {
         return !std::strcmp(s, ".") || !std::strcmp(s, "..");
@@ -269,7 +269,7 @@ auto EnvPosix::get_children(const std::string &path, std::vector<std::string> &o
         if (skip(ent->d_name)) {
             continue;
         }
-        out.emplace_back(ent->d_name);
+        out->emplace_back(ent->d_name);
     }
     closedir(dir);
     return Status::ok();
@@ -278,7 +278,7 @@ auto EnvPosix::get_children(const std::string &path, std::vector<std::string> &o
 auto EnvPosix::new_reader(const std::string &path, Reader **out) -> Status
 {
     int file;
-    CDB_TRY(file_open(path, O_RDONLY, FILE_PERMISSIONS, file));
+    CDB_TRY(file_open(path, O_RDONLY, kFilePermissions, &file));
     *out = new PosixReader {path, file};
     return Status::ok();
 }
@@ -286,7 +286,7 @@ auto EnvPosix::new_reader(const std::string &path, Reader **out) -> Status
 auto EnvPosix::new_editor(const std::string &path, Editor **out) -> Status
 {
     int file;
-    CDB_TRY(file_open(path, O_CREAT | O_RDWR, FILE_PERMISSIONS, file));
+    CDB_TRY(file_open(path, O_CREAT | O_RDWR, kFilePermissions, &file));
     *out = new PosixEditor {path, file};
     return Status::ok();
 }
@@ -294,7 +294,7 @@ auto EnvPosix::new_editor(const std::string &path, Editor **out) -> Status
 auto EnvPosix::new_logger(const std::string &path, Logger **out) -> Status
 {
     int file;
-    CDB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
+    CDB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, &file));
     *out = new PosixLogger {path, file};
     return Status::ok();
 }
@@ -302,7 +302,7 @@ auto EnvPosix::new_logger(const std::string &path, Logger **out) -> Status
 auto EnvPosix::new_info_logger(const std::string &path, InfoLogger **out) -> Status
 {
     int file;
-    CDB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, FILE_PERMISSIONS, file));
+    CDB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, &file));
     *out = new PosixInfoLogger {path, file};
     return Status::ok();
 }

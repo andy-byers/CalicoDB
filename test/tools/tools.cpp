@@ -38,14 +38,14 @@ auto FakeEnv::write_file_at(Memory &memory, Slice in, std::size_t offset) -> Sta
     return Status::ok();
 }
 
-auto FakeReader::read(char *out, std::size_t &size, std::size_t offset) -> Status
+auto FakeReader::read(char *out, std::size_t *size, std::size_t offset) -> Status
 {
-    return m_parent->read_file_at(*m_mem, out, size, offset);
+    return m_parent->read_file_at(*m_mem, out, *size, offset);
 }
 
-auto FakeEditor::read(char *out, std::size_t &size, std::size_t offset) -> Status
+auto FakeEditor::read(char *out, std::size_t *size, std::size_t offset) -> Status
 {
-    return m_parent->read_file_at(*m_mem, out, size, offset);
+    return m_parent->read_file_at(*m_mem, out, *size, offset);
 }
 
 auto FakeEditor::write(Slice in, std::size_t offset) -> Status
@@ -84,7 +84,7 @@ auto FakeEnv::new_reader(const std::string &path, Reader **out) -> Status
         *out = new FakeReader {path, *this, mem};
         return Status::ok();
     }
-    return Status::not_found("cannot open file");
+    return Status::not_found("cannot put file");
 }
 
 auto FakeEnv::new_editor(const std::string &path, Editor **out) -> Status
@@ -123,7 +123,7 @@ auto FakeEnv::remove_file(const std::string &path) -> Status
         return Status::not_found("cannot remove file");
     }
     // Don't actually get rid of any memory. We should be able to unlink a file and still access it
-    // through open file descriptors, so if any readers or writers have this file open, they should
+    // through open file descriptors, so if any readers or writers have this file put, they should
     // still be able to use it.
     itr->second.created = false;
     return Status::ok();
@@ -155,13 +155,13 @@ auto FakeEnv::rename_file(const std::string &old_path, const std::string &new_pa
     return Status::ok();
 }
 
-auto FakeEnv::file_size(const std::string &path, std::size_t &out) const -> Status
+auto FakeEnv::file_size(const std::string &path, std::size_t *out) const -> Status
 {
     auto itr = m_memory.find(path);
     if (itr == cend(m_memory)) {
         return Status::not_found("file does not exist");
     }
-    out = itr->second.buffer.size();
+    *out = itr->second.buffer.size();
     return Status::ok();
 }
 
@@ -175,12 +175,12 @@ auto FakeEnv::file_exists(const std::string &path) const -> Status
     return Status::not_found("file does not exist");
 }
 
-auto FakeEnv::get_children(const std::string &path, std::vector<std::string> &out) const -> Status
+auto FakeEnv::get_children(const std::string &path, std::vector<std::string> *out) const -> Status
 {
     auto prefix = path.back() == '/' ? path : path + '/';
     for (const auto &[filename, mem] : m_memory) {
         if (mem.created && Slice {filename}.starts_with(prefix)) {
-            out.emplace_back(filename.substr(prefix.size()));
+            out->emplace_back(filename.substr(prefix.size()));
         }
     }
     return Status::ok();
@@ -213,7 +213,7 @@ auto FaultInjectionEnv::clear_interceptors() -> void
     m_interceptors.clear();
 }
 
-auto FaultInjectionReader::read(char *out, std::size_t &size, std::size_t offset) -> Status
+auto FaultInjectionReader::read(char *out, std::size_t *size, std::size_t offset) -> Status
 {
     {
         TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_path);
@@ -221,7 +221,7 @@ auto FaultInjectionReader::read(char *out, std::size_t &size, std::size_t offset
     return FakeReader::read(out, size, offset);
 }
 
-auto FaultInjectionEditor::read(char *out, std::size_t &size, std::size_t offset) -> Status
+auto FaultInjectionEditor::read(char *out, std::size_t *size, std::size_t offset) -> Status
 {
     TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_path);
     return FakeEditor::read(out, size, offset);
@@ -304,7 +304,7 @@ auto FaultInjectionEnv::rename_file(const std::string &old_path, const std::stri
     return FakeEnv::rename_file(old_path, new_path);
 }
 
-auto FaultInjectionEnv::file_size(const std::string &path, std::size_t &out) const -> Status
+auto FaultInjectionEnv::file_size(const std::string &path, std::size_t *out) const -> Status
 {
 //    TRY_INTERCEPT_FROM(*this, Interceptor::FileSize, path);
     return FakeEnv::file_size(path, out);
@@ -316,7 +316,7 @@ auto FaultInjectionEnv::file_exists(const std::string &path) const -> Status
     return FakeEnv::file_exists(path);
 }
 
-auto FaultInjectionEnv::get_children(const std::string &dir_path, std::vector<std::string> &out) const -> Status
+auto FaultInjectionEnv::get_children(const std::string &dir_path, std::vector<std::string> *out) const -> Status
 {
     return FakeEnv::get_children(dir_path, out);
 }
@@ -347,11 +347,11 @@ auto RandomGenerator::Generate(std::size_t len) const -> Slice
     return {m_data.data() + m_pos - len, static_cast<std::size_t>(len)};
 }
 
-auto print_references(Pager &pager, PointerMap &pointers) -> void
+auto print_references(Pager &pager) -> void
 {
     for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
         std::cerr << std::setw(6) << pid.value << ": ";
-        if (pointers.lookup(pid) == pid) {
+        if (PointerMap::lookup(pager, pid) == pid) {
             std::cerr << "pointer map\n";
             continue;
         }
@@ -360,10 +360,12 @@ auto print_references(Pager &pager, PointerMap &pointers) -> void
             continue;
         }
         PointerMap::Entry entry;
-        CHECK_OK(pointers.read_entry(pid, entry));
+        CHECK_OK(PointerMap::read_entry(pager, pid, &entry));
         switch (entry.type) {
-        case PointerMap::kNode:
+        case PointerMap::kTreeNode:
             std::cerr << "node";
+            break;
+        case PointerMap::kTreeRoot:
             break;
         case PointerMap::kFreelistLink:
             std::cerr << "freelist link";
@@ -375,7 +377,11 @@ auto print_references(Pager &pager, PointerMap &pointers) -> void
             std::cerr << "overflow link";
             break;
         }
-        std::cerr << " -> " << entry.back_ptr.value << '\n';
+        if (entry.type == PointerMap::kTreeRoot) {
+            std::cerr << "root for table " << entry.back_ptr.value << '\n';
+        } else {
+            std::cerr << " -> " << entry.back_ptr.value << '\n';
+        }
     }
 }
 
