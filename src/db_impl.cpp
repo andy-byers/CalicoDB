@@ -213,9 +213,7 @@ DBImpl::~DBImpl()
     delete wal;
 
     for (const auto &[_, state] : m_tables) {
-        if (state.ref_count) {
-            delete state.tree;
-        }
+        delete state.tree;
     }
 }
 
@@ -518,7 +516,7 @@ auto DBImpl::save_file_header() -> Status
     return wal->flush();
 }
 
-auto DBImpl::new_table(const TableOptions &options, const Slice &name, Table **out) -> Status
+auto DBImpl::create_table(const TableOptions &options, const std::string &name, Table **out) -> Status
 {
     LogicalPageId root_id;
     std::string value;
@@ -534,7 +532,7 @@ auto DBImpl::new_table(const TableOptions &options, const Slice &name, Table **o
             root_id = LogicalPageId::root();
             s = Status::ok();
         } else {
-            s = create_table(name, &root_id);
+            s = construct_new_table(name, &root_id);
             if (s.is_ok()) {
                 m_tables.add(root_id);
             }
@@ -556,12 +554,50 @@ auto DBImpl::new_table(const TableOptions &options, const Slice &name, Table **o
     state->tree = new Tree {*pager, state->root_id.page_id, m_freelist_head};
     state->write = options.mode == AccessMode::kReadWrite;
     ++state->ref_count;
-    *out = new TableImpl {name.to_string(), state->write, *this, *state, m_state};
+    *out = new TableImpl {name, state->write, *this, *state, m_state};
 
     return s;
 }
 
-auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
+auto DBImpl::drop_table(const std::string &name) -> Status
+{
+    if (name == "calicodb_root") {
+        return Status::invalid_argument("cannot drop root table");
+    }
+    Table *table;
+    TableOptions options;
+    options.mode = AccessMode::kReadWrite;
+    auto s = create_table(options, name, &table);
+    if (s.is_invalid_argument()) {
+        return Status::logic_error("table must be closed");
+    } else if (!s.is_ok()) {
+        SET_STATUS(s);
+        return s;
+    }
+    const auto table_id =
+        reinterpret_cast<const TableImpl *>(table)->m_state->root_id.table_id;
+
+    auto *cursor = table->new_cursor();
+    while (s.is_ok()) {
+        cursor->seek_first();
+        if (!cursor->is_valid()) {
+            break;
+        }
+        s = table->erase(cursor->key());
+    }
+    delete cursor;
+
+    auto *state = m_tables.get(table_id);
+    s = remove_empty_table(name, *state);
+    if (!s.is_ok()) {
+        SET_STATUS(s);
+    }
+    delete table;
+    m_tables.erase(table_id);
+    return s;
+}
+
+auto DBImpl::construct_new_table(const Slice &name, LogicalPageId *root_id) -> Status
 {
     // Find the first available table ID.
     auto table_id = Id::root();
@@ -586,7 +622,7 @@ auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
     return Status::ok();
 }
 
-auto DBImpl::remove_table_if_empty(const std::string &name, TableState &state, bool *removed) -> Status
+auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> Status
 {
     auto &[root_id, tree, ref_count, write_flag] = state;
     if (root_id.table_id.is_root()) {
@@ -595,39 +631,26 @@ auto DBImpl::remove_table_if_empty(const std::string &name, TableState &state, b
 
     Node root;
     CDB_TRY(tree->acquire(&root, root_id.page_id, false));
-    if (root.header.cell_count == 0) {
-        CDB_TRY(m_root->tree->erase(name));
-        tree->upgrade(root);
-        CDB_TRY(tree->destroy(std::move(root)));
-        *removed = true;
-    } else {
-        tree->release(std::move(root));
-        *removed = false;
+    if (root.header.cell_count != 0) {
+        return Status::logic_error("table is not empty");
     }
+    CDB_TRY(m_root->tree->erase(name));
+    tree->upgrade(root);
+    CDB_TRY(tree->destroy(std::move(root)));
     return Status::ok();
 }
 
-auto DBImpl::close_table(const std::string &name, const LogicalPageId &root_id) -> void
+auto DBImpl::close_table(const LogicalPageId &root_id) -> void
 {
     auto *state = m_tables.get(root_id.table_id);
     if (state == nullptr) {
         return;
     }
 
-    bool removed;
-    auto s = remove_table_if_empty(name, *state, &removed);
-    if (!s.is_ok()) {
-        SET_STATUS(s);
-    }
-
     delete state->tree;
     state->tree = nullptr;
     state->write = false;
     --state->ref_count;
-
-    if (removed) {
-        m_tables.erase(state->root_id.table_id);
-    }
 }
 
 static auto apply_undo(Page &page, const ImageDescriptor &image)

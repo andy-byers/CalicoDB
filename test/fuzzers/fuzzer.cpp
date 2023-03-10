@@ -10,7 +10,7 @@ DbFuzzer::DbFuzzer(std::string path, Options *options)
         m_options = *options;
     }
     CHECK_OK(DB::open(m_options, m_path, &m_db));
-    CHECK_OK(m_db->new_table({}, "fuzz", &m_table));
+    CHECK_OK(m_db->create_table({}, "fuzz", &m_table));
 }
 
 DbFuzzer::~DbFuzzer()
@@ -33,7 +33,7 @@ auto DbFuzzer::reopen() -> Status
 
     auto s = DB::open(m_options, m_path, &m_db);
     if (s.is_ok()) {
-        s = m_db->new_table({}, "fuzz", &m_table);
+        s = m_db->create_table({}, "fuzz", &m_table);
         if (s.is_ok()) {
             validate();
         }

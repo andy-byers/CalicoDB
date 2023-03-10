@@ -142,7 +142,7 @@ public:
         }
         tail.resize(wal_block_size(opts.page_size));
         CDB_TRY(DB::open(opts, db_prefix, &db));
-        return db->new_table({}, "test", &table);
+        return db->create_table({}, "test", &table);
     }
 
     auto open(Options *options = nullptr) -> void

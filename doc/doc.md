@@ -100,7 +100,7 @@ The next time that the database is opened, recovery will be run to undo any chan
 // Open a table.
 calicodb::Table *table;
 calicodb::TableOptions table_options;
-calicodb::Status s = db->new_table(table_options, "personal-cats", &table);
+calicodb::Status s = db->create_table(table_options, "personal-cats", &table);
 
 // Insert some key-value pairs.
 s = table->put("lilly", "calico");

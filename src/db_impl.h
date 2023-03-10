@@ -54,13 +54,11 @@ public:
     [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    [[nodiscard]] auto new_table(const TableOptions &options, const Slice &name, Table **out) -> Status override;
+    [[nodiscard]] auto create_table(const TableOptions &options, const std::string &name, Table **out) -> Status override;
+    [[nodiscard]] auto drop_table(const std::string &name) -> Status override;
     [[nodiscard]] auto checkpoint() -> Status override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
-
-    [[nodiscard]] auto create_table(const Slice &name, LogicalPageId *root_id) -> Status;
-    auto close_table(const std::string &name, const LogicalPageId &root_id) -> void;
 
     [[nodiscard]] auto record_count() const -> std::size_t;
     [[nodiscard]] auto TEST_tables() const -> const TableSet &;
@@ -70,7 +68,7 @@ public:
     Pager *pager {};
 
 private:
-    [[nodiscard]] auto remove_table_if_empty(const std::string &name, TableState &state, bool *removed) -> Status;
+    [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
     [[nodiscard]] auto save_file_header() -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
@@ -78,6 +76,10 @@ private:
     [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto recovery_phase_1() -> Status;
     [[nodiscard]] auto recovery_phase_2() -> Status;
+    [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId *root_id) -> Status;
+    auto close_table(const LogicalPageId &root_id) -> void;
+
+    friend class TableImpl;
 
     std::string m_reader_data;
     std::string m_reader_tail;

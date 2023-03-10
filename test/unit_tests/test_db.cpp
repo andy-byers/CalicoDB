@@ -61,7 +61,7 @@ TEST(LeakTests, DestroysOwnObjects)
     Table *table;
 
     ASSERT_OK(DB::open({}, "__calicodb_test", &db));
-    ASSERT_OK(db->new_table({}, "test", &table));
+    ASSERT_OK(db->create_table({}, "test", &table));
     auto *cursor = table->new_cursor();
 
     delete cursor;
@@ -185,7 +185,7 @@ TEST_F(BasicDatabaseTests, StatsAreTracked)
     ASSERT_OK(DB::open(options, kFilename, &db));
 
     Table *table;
-    ASSERT_OK(db->new_table({}, "test", &table));
+    ASSERT_OK(db->create_table({}, "test", &table));
 
     std::string property;
     ASSERT_TRUE(db->get_property("calicodb.stats", &property));
@@ -224,7 +224,7 @@ static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t gro
     tools::RandomGenerator random {4 * 1'024 * 1'024};
 
     Table *table;
-    ASSERT_OK(db.new_table({}, "test", &table));
+    ASSERT_OK(db.create_table({}, "test", &table));
 
     for (std::size_t iteration {}; iteration < num_groups; ++iteration) {
         const auto records = generator.generate(random, group_size);
@@ -274,7 +274,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
 
     for (std::size_t iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
         ASSERT_OK(DB::open(options, kFilename, &db));
-        ASSERT_OK(db->new_table({}, "test", &table));
+        ASSERT_OK(db->create_table({}, "test", &table));
         ASSERT_OK(db->status());
 
         for (std::size_t i {}; i < GROUP_SIZE; ++i) {
@@ -287,7 +287,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     }
 
     ASSERT_OK(DB::open(options, kFilename, &db));
-    ASSERT_OK(db->new_table({}, "test", &table));
+    ASSERT_OK(db->create_table({}, "test", &table));
     for (const auto &[key, value] : records) {
         std::string value_out;
         ASSERT_OK(table->get(key, &value_out));
@@ -324,14 +324,14 @@ TEST_P(DbVacuumTests, SanityCheck)
 {
     Table *table;
     ASSERT_OK(DB::open(options, kFilename, &db));
-    ASSERT_OK(db->new_table({}, "test", &table));
+    ASSERT_OK(db->create_table({}, "test", &table));
 
     for (std::size_t iteration {}; iteration < 4; ++iteration) {
         if (reopen) {
             delete table;
             delete db;
             ASSERT_OK(DB::open(options, kFilename, &db));
-            ASSERT_OK(db->new_table({}, "test", &table));
+            ASSERT_OK(db->create_table({}, "test", &table));
         }
         while (map.size() < upper_bounds) {
             const auto key = random.Generate(10);
@@ -400,7 +400,7 @@ public:
         db = nullptr;
         
         CDB_TRY(DB::open(options, "./test", &db));
-        return db->new_table({}, "test", &table);
+        return db->create_table({}, "test", &table);
     }
 
     Options options;
@@ -841,7 +841,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
 
     env->clear_interceptors();
     ASSERT_OK(DB::open(db->options, "./test", &db->db));
-    ASSERT_OK(db->db->new_table({}, "test", &db->table));
+    ASSERT_OK(db->db->create_table({}, "test", &db->table));
 
     for (const auto &[key, value] : committed) {
         std::string result;
@@ -951,7 +951,7 @@ protected:
         db = nullptr;
 
         ASSERT_OK(DB::open(options, "./test", &db));
-        ASSERT_OK(db->new_table({}, "test", &table));
+        ASSERT_OK(db->create_table({}, "test", &table));
     }
 
     std::unique_ptr<tools::FaultInjectionEnv> env;

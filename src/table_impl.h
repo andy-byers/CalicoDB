@@ -26,6 +26,8 @@ struct TableState {
 class TableImpl : public Table
 {
 public:
+    friend class DBImpl;
+
     ~TableImpl() override;
     explicit TableImpl(std::string name, bool is_writable, DBImpl &db, TableState &state, DBState &batch_size);
     [[nodiscard]] auto new_cursor() const -> Cursor * override;

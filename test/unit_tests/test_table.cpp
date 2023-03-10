@@ -29,7 +29,10 @@ public:
         options.env = env.get();
     }
 
-    ~TableTests() override = default;
+    ~TableTests() override
+    {
+        delete db;
+    }
 
     auto SetUp() -> void override
     {
@@ -48,7 +51,7 @@ public:
         delete table;
         table = nullptr;
 
-        return db->new_table({}, "table", &table);
+        return db->create_table({}, "table", &table);
     }
 
     virtual auto reopen_db() -> Status
@@ -77,13 +80,14 @@ TEST_F(TableTests, TablesAreRegistered)
 TEST_F(TableTests, TablesMustBeUnique)
 {
     Table *same;
-    ASSERT_TRUE(db->new_table({}, "table", &same).is_invalid_argument());
+    ASSERT_TRUE(db->create_table({}, "table", &same).is_invalid_argument());
 }
 
 TEST_F(TableTests, EmptyTableGetsRemovedOnClose)
 {
     delete table;
     table = nullptr;
+    ASSERT_OK(db->drop_table("table"));
 
     ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
 }
@@ -95,6 +99,7 @@ TEST_F(TableTests, EmptyTableRootIsVacuumed)
 
     delete table;
     table = nullptr;
+    ASSERT_OK(db->drop_table("table"));
 
     // Vacuum gets rid of freelist pages. Root should have been moved to the freelist in
     // the destructor.
@@ -114,8 +119,8 @@ TEST_F(TableTests, MultipleReadOnlyInstancesAreAllowed)
 {
     Table *table_1, *table_2;
     TableOptions table_options {AccessMode::kReadOnly};
-    ASSERT_OK(db->new_table(table_options, "t", &table_1));
-    ASSERT_OK(db->new_table(table_options, "t", &table_2));
+    ASSERT_OK(db->create_table(table_options, "t", &table_1));
+    ASSERT_OK(db->create_table(table_options, "t", &table_2));
     delete table_1;
     delete table_2;
 }
@@ -124,8 +129,8 @@ TEST_F(TableTests, OnlyOneWritableInstanceIsAllowed)
 {
     Table *table_1, *table_2;
     TableOptions table_options {AccessMode::kReadWrite};
-    ASSERT_OK(db->new_table(table_options, "t", &table_1));
-    ASSERT_FALSE(db->new_table(table_options, "t", &table_2).is_ok());
+    ASSERT_OK(db->create_table(table_options, "t", &table_1));
+    ASSERT_FALSE(db->create_table(table_options, "t", &table_2).is_ok());
     delete table_1;
 }
 
@@ -139,7 +144,7 @@ public:
         TableTests::SetUp();
         table_1 = table;
 
-        ASSERT_OK(db->new_table({}, "table_2", &table_2));
+        ASSERT_OK(db->create_table({}, "table_2", &table_2));
     }
 
     auto TearDown() -> void override
@@ -157,7 +162,7 @@ public:
         delete table_2;
         table_2 = nullptr;
 
-        return db->new_table({}, "table_2", &table);
+        return db->create_table({}, "table_2", &table);
     }
 
     auto reopen_db() -> Status override
@@ -184,36 +189,25 @@ TEST_F(TwoTableTests, TablesHaveIndependentKeys)
     ASSERT_EQ(value, "2");
 }
 
-TEST_F(TwoTableTests, EmptyTableGetsRemovedOnClose)
+TEST_F(TwoTableTests, DropTable)
 {
-    ASSERT_OK(table_2->put("k", "v"));
+    ASSERT_OK(table_2->put(
+        std::string(10'000, 'A'),
+        std::string(10'000, 'Z')));
 
     delete table_1;
     table_1 = table = nullptr;
+    ASSERT_OK(db->drop_table("table"));
 
     delete table_2;
     table_2 = nullptr;
+    ASSERT_OK(db->drop_table("table_2"));
 
-    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {2}), nullptr) << "table_1 was empty, but was not removed";
-    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {3}), nullptr) << "table_2 was not empty, but was removed";
-}
+    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {2}), nullptr) << "table_1 (1 page) was not removed";
+    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {3}), nullptr) << "table_2 (> 1 page) was not removed";
 
-TEST_F(TwoTableTests, EmptyTableRootIsVacuumed)
-{
-    ASSERT_EQ(db_impl(db)->pager->page_count(), 4);
-    ASSERT_OK(table_2->put("k", "v"));
-
-    delete table_1;
-    table = nullptr;
-    table_1 = nullptr;
-
-    delete table_2;
-    table_2 = nullptr;
-
-    // Root page of "table_1" should be removed, leaving the database root page, the
-    // pointer map page on page 2, and the root page of "table_2".
     ASSERT_OK(db->vacuum());
-    ASSERT_EQ(db_impl(db)->pager->page_count(), 3);
+    ASSERT_EQ(db_impl(db)->pager->page_count(), 1);
 }
 
 TEST_F(TwoTableTests, TablesCreatedBeforeCheckpointAreRemembered)
@@ -243,9 +237,10 @@ TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
 
     delete table_1;
     table = table_1 = nullptr;
+    ASSERT_OK(db->drop_table("table"));
 
     ASSERT_EQ(tables.get(Id {2}), nullptr);
-    ASSERT_OK(db->new_table({}, "\xAB\xCD\xEF", &table_1));
+    ASSERT_OK(db->create_table({}, "\xAB\xCD\xEF", &table_1));
 
     ASSERT_NE(tables.get(Id {2}), nullptr) << "first table ID was not reused";
 }
@@ -254,7 +249,7 @@ TEST_F(TwoTableTests, FindExistingTables)
 {
     Table *root_table;
     TableOptions root_options {AccessMode::kReadOnly};
-    ASSERT_OK(db->new_table(root_options, "calicodb_root", &root_table));
+    ASSERT_OK(db->create_table(root_options, "calicodb_root", &root_table));
 
     auto *cursor = root_table->new_cursor();
     cursor->seek_first();
@@ -266,6 +261,7 @@ TEST_F(TwoTableTests, FindExistingTables)
 
     delete table_1;
     table = table_1 = nullptr;
+    ASSERT_OK(db->drop_table("table"));
 
     cursor->seek_first();
     ASSERT_TRUE(cursor->is_valid());
@@ -273,6 +269,7 @@ TEST_F(TwoTableTests, FindExistingTables)
 
     delete table_2;
     table_2 = nullptr;
+    ASSERT_OK(db->drop_table("table_2"));
 
     cursor->seek_first();
     ASSERT_FALSE(cursor->is_valid());

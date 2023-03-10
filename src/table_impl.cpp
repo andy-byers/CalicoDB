@@ -16,7 +16,7 @@ TableImpl::TableImpl(std::string name, bool is_writable, DBImpl &db, TableState 
 
 TableImpl::~TableImpl()
 {
-    m_db->close_table(m_name, root_id());
+    m_db->close_table(root_id());
 }
 
 auto TableImpl::new_cursor() const -> Cursor *

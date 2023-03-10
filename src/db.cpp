@@ -7,9 +7,9 @@
 namespace calicodb
 {
 
-auto DB::open(const Options &options, const Slice &filename, DB **db) -> Status
+auto DB::open(const Options &options, const std::string &filename, DB **db) -> Status
 {
-    if (filename.is_empty()) {
+    if (filename.empty()) {
         return Status::invalid_argument("path is empty");
     }
     auto sanitized = options;
@@ -17,9 +17,8 @@ auto DB::open(const Options &options, const Slice &filename, DB **db) -> Status
         sanitized.cache_size = options.page_size * 64;
     }
 
-    auto clean_filename = filename.to_string();
-    const auto [dir, base] = split_path(clean_filename);
-    clean_filename = join_paths(dir, base);
+    const auto [dir, base] = split_path(filename);
+    const auto clean_filename = join_paths(dir, base);
 
     if (sanitized.wal_prefix.empty()) {
         sanitized.wal_prefix = clean_filename + kDefaultWalSuffix;
@@ -43,14 +42,14 @@ auto DB::open(const Options &options, const Slice &filename, DB **db) -> Status
     return Status::ok();
 }
 
-auto DB::repair(const Options &options, const Slice &filename) -> Status
+auto DB::repair(const Options &options, const std::string &filename) -> Status
 {
-    return DBImpl::repair(options, filename.to_string());
+    return DBImpl::repair(options, filename);
 }
 
-auto DB::destroy(const Options &options, const Slice &filename) -> Status
+auto DB::destroy(const Options &options, const std::string &filename) -> Status
 {
-    return DBImpl::destroy(options, filename.to_string());
+    return DBImpl::destroy(options, filename);
 }
 
 } // namespace calicodb
