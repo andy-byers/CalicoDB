@@ -229,7 +229,7 @@ static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t gro
         ASSERT_OK(db.status());
 
         for (std::size_t i {}; i < group_size; ++i) {
-            ASSERT_OK(db.put(DB::kDefaultTable, itr->key, itr->value));
+            ASSERT_OK(db.put(itr->key, itr->value));
             ++itr;
         }
         ASSERT_OK(db.checkpoint());
@@ -271,7 +271,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
         ASSERT_OK(db->status());
 
         for (std::size_t i {}; i < GROUP_SIZE; ++i) {
-            ASSERT_OK(db->put(DB::kDefaultTable, itr->key, itr->value));
+            ASSERT_OK(db->put(itr->key, itr->value));
             ++itr;
         }
         ASSERT_OK(db->checkpoint());
@@ -281,7 +281,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     ASSERT_OK(DB::open(options, kFilename, &db));
     for (const auto &[key, value] : records) {
         std::string value_out;
-        ASSERT_OK(db->get(DB::kDefaultTable, key, &value_out));
+        ASSERT_OK(db->get(key, &value_out));
         ASSERT_EQ(value_out, value);
     }
     delete db;
@@ -323,13 +323,13 @@ TEST_P(DbVacuumTests, SanityCheck)
         while (map.size() < upper_bounds) {
             const auto key = random.Generate(10);
             const auto value = random.Generate(options.page_size * 2);
-            ASSERT_OK(db->put(DB::kDefaultTable, key, value));
+            ASSERT_OK(db->put(key, value));
             map[key.to_string()] = value.to_string();
         }
         while (map.size() > lower_bounds) {
             const auto key = begin(map)->first;
             map.erase(key);
-            ASSERT_OK(db->erase(DB::kDefaultTable, key));
+            ASSERT_OK(db->erase(key));
         }
         ASSERT_OK(db->vacuum());
         dynamic_cast<DBImpl &>(*db).TEST_validate();
@@ -339,7 +339,7 @@ TEST_P(DbVacuumTests, SanityCheck)
         for (const auto &[key, value] : map) {
             ++i;
             std::string result;
-            ASSERT_OK(db->get(DB::kDefaultTable, key, &result));
+            ASSERT_OK(db->get(key, &result));
             ASSERT_EQ(result, value);
         }
     }
@@ -415,7 +415,7 @@ static auto add_records(TestDatabase &test, std::size_t n)
         const auto value_size = test.random.Next<std::size_t>(test.options.page_size * 2);
         const auto key = test.random.Generate(key_size).to_string();
         const auto value = test.random.Generate(value_size).to_string();
-        EXPECT_OK(test.db->put(DB::kDefaultTable, key, value));
+        EXPECT_OK(test.db->put(key, value));
         records[key] = value;
     }
     return records;
@@ -425,7 +425,7 @@ static auto expect_contains_records(const DB &db, const std::map<std::string, st
 {
     for (const auto &[key, value] : committed) {
         std::string result;
-        ASSERT_OK(db.get(DB::kDefaultTable, key, &result));
+        ASSERT_OK(db.get(key, &result));
         ASSERT_EQ(result, value);
     }
 }
@@ -493,7 +493,7 @@ TEST_F(DbRevertTests, RevertsVacuum_1)
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i {}; i < 500; ++i) {
         const auto itr = begin(uncommitted);
-        ASSERT_OK(db->db->erase(DB::kDefaultTable, itr->first));
+        ASSERT_OK(db->db->erase(itr->first));
         uncommitted.erase(itr);
     }
     ASSERT_OK(db->db->vacuum());
@@ -507,7 +507,7 @@ TEST_F(DbRevertTests, RevertsVacuum_2)
     auto committed = add_records(*db, 1'000);
     for (std::size_t i {}; i < 500; ++i) {
         const auto itr = begin(committed);
-        ASSERT_OK(db->db->erase(DB::kDefaultTable, itr->first));
+        ASSERT_OK(db->db->erase(itr->first));
         committed.erase(itr);
     }
     ASSERT_OK(db->db->checkpoint());
@@ -525,7 +525,7 @@ TEST_F(DbRevertTests, RevertsVacuum_3)
     auto committed = add_records(*db, 1'000);
     for (std::size_t i {}; i < 900; ++i) {
         const auto itr = begin(committed);
-        ASSERT_OK(db->db->erase(DB::kDefaultTable, itr->first));
+        ASSERT_OK(db->db->erase(itr->first));
         committed.erase(itr);
     }
     ASSERT_OK(db->db->checkpoint());
@@ -535,7 +535,7 @@ TEST_F(DbRevertTests, RevertsVacuum_3)
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i {}; i < 500; ++i) {
         const auto itr = begin(uncommitted);
-        ASSERT_OK(db->db->erase(DB::kDefaultTable, itr->first));
+        ASSERT_OK(db->db->erase(itr->first));
         uncommitted.erase(itr);
     }
     ASSERT_OK(db->reopen());
@@ -638,7 +638,7 @@ TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
     for (std::size_t iteration {}; iteration < 2; ++iteration) {
         for (const auto &[k, v] : committed) {
             std::string value;
-            const auto s = db->db->get(DB::kDefaultTable, k, &value);
+            const auto s = db->db->get(k, &value);
 
             if (!s.is_ok()) {
                 assert_special_error(s);
@@ -652,7 +652,7 @@ TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
 
 TEST_P(DbErrorTests, HandlesReadErrorDuringIteration)
 {
-    std::unique_ptr<Cursor> cursor {db->db->new_cursor(DB::kDefaultTable)};
+    std::unique_ptr<Cursor> cursor {db->db->new_cursor()};
     cursor->seek_first();
     while (cursor->is_valid()) {
         (void)cursor->key();
@@ -675,7 +675,7 @@ TEST_P(DbErrorTests, HandlesReadErrorDuringIteration)
 
 TEST_P(DbErrorTests, HandlesReadErrorDuringSeek)
 {
-    std::unique_ptr<Cursor> cursor {db->db->new_cursor(DB::kDefaultTable)};
+    std::unique_ptr<Cursor> cursor {db->db->new_cursor()};
 
     for (const auto &[k, v] : committed) {
         cursor->seek(k);
@@ -713,7 +713,7 @@ protected:
         committed = add_records(*db, 5'000);
         for (std::size_t i {}; i < 500; ++i) {
             const auto itr = begin(committed);
-            EXPECT_OK(db->db->erase(DB::kDefaultTable, itr->first));
+            EXPECT_OK(db->db->erase(itr->first));
             committed.erase(itr);
         }
 
@@ -756,27 +756,27 @@ TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
 {
     while (db->db->status().is_ok()) {
         auto itr = begin(committed);
-        for (std::size_t i {}; i < committed.size() && db->db->erase(DB::kDefaultTable, (itr++)->first).is_ok(); ++i)
+        for (std::size_t i {}; i < committed.size() && db->db->erase((itr++)->first).is_ok(); ++i)
             ;
-        for (std::size_t i {}; i < committed.size() && db->db->put(DB::kDefaultTable, (itr++)->first, "value").is_ok(); ++i)
+        for (std::size_t i {}; i < committed.size() && db->db->put((itr++)->first, "value").is_ok(); ++i)
             ;
     }
     assert_special_error(db->db->status());
-    assert_special_error(db->db->put(DB::kDefaultTable, "key", "value"));
+    assert_special_error(db->db->put("key", "value"));
 }
 
 TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 {
     auto itr = begin(committed);
-    while (db->db->erase(DB::kDefaultTable, itr++->first).is_ok()) {
+    while (db->db->erase(itr++->first).is_ok()) {
         ASSERT_NE(itr, end(committed));
     }
     assert_special_error(db->db->status());
     assert_special_error(db->db->checkpoint());
-    assert_special_error(db->db->put(DB::kDefaultTable, "key", "value"));
+    assert_special_error(db->db->put("key", "value"));
     std::string value;
-    assert_special_error(db->db->get(DB::kDefaultTable, "key", &value));
-    auto *cursor = db->db->new_cursor(DB::kDefaultTable);
+    assert_special_error(db->db->get("key", &value));
+    auto *cursor = db->db->new_cursor();
     assert_special_error(cursor->status());
     delete cursor;
 }
@@ -785,7 +785,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 //{
 //    auto itr = begin(committed);
 //    for (;;) {
-//        auto s = db->db->erase(DB::kDefaultTable, itr++->first);
+//        auto s = db->db->erase(itr++->first);
 //        if (!s.is_ok()) {
 //            assert_special_error(s);
 //            break;
@@ -797,7 +797,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 //
 //    env->clear_interceptors();
 //    db->db = std::make_unique<DBImpl>();
-//    ASSERT_OK(db->db->put(DB::kDefaultTable, db->options, "./test"));
+//    ASSERT_OK(db->db->put(db->options, "./test"));
 //
 //    for (const auto &[key, value] : committed) {
 //        test_tools::expect_contains(*db->db, key, value);
@@ -824,7 +824,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
 
     for (const auto &[key, value] : committed) {
         std::string result;
-        ASSERT_OK(db->db->get(DB::kDefaultTable, key, &result));
+        ASSERT_OK(db->db->get(key, &result));
         ASSERT_EQ(result, value);
     }
     tools::validate_db(*db->db);
@@ -947,9 +947,9 @@ TEST_F(ApiTests, OnlyReturnsValidProperties)
 
 TEST_F(ApiTests, IsConstCorrect)
 {
-    ASSERT_OK(db->put(DB::kDefaultTable, "key", "value"));
+    ASSERT_OK(db->put("key", "value"));
 
-    auto *cursor = db->new_cursor(DB::kDefaultTable);
+    auto *cursor = db->new_cursor();
     cursor->seek_first();
 
     const auto *const_cursor = cursor;
@@ -967,24 +967,24 @@ TEST_F(ApiTests, IsConstCorrect)
 
 TEST_F(ApiTests, EmptyKeysAreNotAllowed)
 {
-    ASSERT_TRUE(db->put(DB::kDefaultTable, "", "value").is_invalid_argument());
+    ASSERT_TRUE(db->put("", "value").is_invalid_argument());
 }
 
 TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 {
-    ASSERT_OK(db->put(DB::kDefaultTable, "a", "1"));
-    ASSERT_OK(db->put(DB::kDefaultTable, "b", "2"));
-    ASSERT_OK(db->put(DB::kDefaultTable, "c", "3"));
+    ASSERT_OK(db->put("a", "1"));
+    ASSERT_OK(db->put("b", "2"));
+    ASSERT_OK(db->put("c", "3"));
     ASSERT_OK(db->checkpoint());
 
-    ASSERT_OK(db->put(DB::kDefaultTable, "a", "x"));
-    ASSERT_OK(db->put(DB::kDefaultTable, "b", "y"));
-    ASSERT_OK(db->put(DB::kDefaultTable, "c", "z"));
+    ASSERT_OK(db->put("a", "x"));
+    ASSERT_OK(db->put("b", "y"));
+    ASSERT_OK(db->put("c", "z"));
 
     reopen();
 
     ASSERT_OK(calicodb::DB::open(options, "./test", &db));
-    auto *cursor = db->new_cursor(DB::kDefaultTable);
+    auto *cursor = db->new_cursor();
     cursor->seek_first();
     ASSERT_TRUE(cursor->is_valid());
     ASSERT_EQ(cursor->key(), "a");
@@ -1016,12 +1016,12 @@ TEST_F(ApiTests, KeysCanBeArbitrarychars)
     const std::string key_2 {"\x00\x01", 2};
     const std::string key_3 {"\x01\x00", 2};
 
-    ASSERT_OK(db->put(DB::kDefaultTable, key_1, "1"));
-    ASSERT_OK(db->put(DB::kDefaultTable, key_2, "2"));
-    ASSERT_OK(db->put(DB::kDefaultTable, key_3, "3"));
+    ASSERT_OK(db->put(key_1, "1"));
+    ASSERT_OK(db->put(key_2, "2"));
+    ASSERT_OK(db->put(key_3, "3"));
     ASSERT_OK(db->checkpoint());
 
-    auto *cursor = db->new_cursor(DB::kDefaultTable);
+    auto *cursor = db->new_cursor();
     cursor->seek_first();
 
     ASSERT_OK(cursor->status());
@@ -1049,12 +1049,12 @@ TEST_F(ApiTests, HandlesLargeKeys)
     const auto key_2 = '\x02' + random.Generate(options.page_size * 100).to_string();
     const auto key_3 = '\x03' + random.Generate(options.page_size * 100).to_string();
 
-    ASSERT_OK(db->put(DB::kDefaultTable, key_1, "1"));
-    ASSERT_OK(db->put(DB::kDefaultTable, key_2, "2"));
-    ASSERT_OK(db->put(DB::kDefaultTable, key_3, "3"));
+    ASSERT_OK(db->put(key_1, "1"));
+    ASSERT_OK(db->put(key_2, "2"));
+    ASSERT_OK(db->put(key_3, "3"));
     ASSERT_OK(db->checkpoint());
 
-    auto *cursor = db->new_cursor(DB::kDefaultTable);
+    auto *cursor = db->new_cursor();
     cursor->seek_first();
 
     ASSERT_OK(cursor->status());
@@ -1088,15 +1088,15 @@ public:
         for (std::size_t i {}; i < 100; ++i) {
             const auto key = random_string(max_key_size);
             const auto value = random_string(max_value_size);
-            ASSERT_OK(db->put(DB::kDefaultTable, key, value));
+            ASSERT_OK(db->put(key, value));
         }
         ASSERT_OK(db->checkpoint());
 
         for (const auto &[key, value] : map) {
             std::string result;
-            ASSERT_OK(db->get(DB::kDefaultTable, key, &result));
+            ASSERT_OK(db->get(key, &result));
             ASSERT_EQ(result, value);
-            ASSERT_OK(db->erase(DB::kDefaultTable, key));
+            ASSERT_OK(db->erase(key));
         }
         ASSERT_OK(db->checkpoint());
     }
@@ -1127,14 +1127,14 @@ protected:
     auto SetUp() -> void override
     {
         ApiTests::SetUp();
-        ASSERT_OK(db->put(DB::kDefaultTable, "A", "x"));
-        ASSERT_OK(db->put(DB::kDefaultTable, "B", "y"));
-        ASSERT_OK(db->put(DB::kDefaultTable, "C", "z"));
+        ASSERT_OK(db->put("A", "x"));
+        ASSERT_OK(db->put("B", "y"));
+        ASSERT_OK(db->put("C", "z"));
         ASSERT_OK(db->checkpoint());
 
-        ASSERT_OK(db->put(DB::kDefaultTable, "a", "1"));
-        ASSERT_OK(db->put(DB::kDefaultTable, "b", "2"));
-        ASSERT_OK(db->put(DB::kDefaultTable, "c", "3"));
+        ASSERT_OK(db->put("a", "1"));
+        ASSERT_OK(db->put("b", "2"));
+        ASSERT_OK(db->put("c", "3"));
     }
 
     auto reopen() -> void override
@@ -1147,7 +1147,7 @@ protected:
     {
         for (const auto &key : keys) {
             std::string value;
-            ASSERT_OK(db->get(DB::kDefaultTable, key, &value));
+            ASSERT_OK(db->get(key, &value));
         }
         ASSERT_EQ(reinterpret_cast<const DBImpl *>(db)->record_count(), keys.size());
     }

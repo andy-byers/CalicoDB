@@ -45,7 +45,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     }
     switch (operation_type) {
     case kGet:
-        s = m_table->get(extract_fuzzer_key(data, size), &value);
+        s = m_db->get(extract_fuzzer_key(data, size), &value);
         if (s.is_not_found()) {
             s = Status::ok();
         }
@@ -53,14 +53,14 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         break;
     case kPut:
         key = extract_fuzzer_key(data, size);
-        CDB_TRY(m_table->put(key, extract_fuzzer_value(data, size)));
+        CDB_TRY(m_db->put(key, extract_fuzzer_value(data, size)));
         break;
     case kErase:
         key = extract_fuzzer_key(data, size);
-        cursor.reset(m_table->new_cursor());
+        cursor.reset(m_db->new_cursor());
         cursor->seek(key);
         if (cursor->is_valid()) {
-            s = m_table->erase(cursor->key());
+            s = m_db->erase(cursor->key());
             if (s.is_not_found()) {
                 s = Status::ok();
             }
@@ -69,7 +69,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         break;
     case kSeekIter:
         key = extract_fuzzer_key(data, size);
-        cursor.reset(m_table->new_cursor());
+        cursor.reset(m_db->new_cursor());
         cursor->seek(key);
         while (cursor->is_valid()) {
             if (key.front() & 1) {
@@ -80,14 +80,14 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         }
         break;
     case kIterForward:
-        cursor.reset(m_table->new_cursor());
+        cursor.reset(m_db->new_cursor());
         cursor->seek_first();
         while (cursor->is_valid()) {
             cursor->next();
         }
         break;
     case kIterReverse:
-        cursor.reset(m_table->new_cursor());
+        cursor.reset(m_db->new_cursor());
         cursor->seek_last();
         while (cursor->is_valid()) {
             cursor->previous();

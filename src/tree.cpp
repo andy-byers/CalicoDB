@@ -1805,9 +1805,9 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node *out, char *sc
     return Status::ok();
 }
 
-auto NodeManager::acquire(Pager &pager, Id pid, Node *out, char *scratch, bool upgrade) -> Status
+auto NodeManager::acquire(Pager &pager, Id page_id, Node *out, char *scratch, bool upgrade) -> Status
 {
-    CDB_TRY(pager.acquire(pid, &out->page));
+    CDB_TRY(pager.acquire(page_id, &out->page));
     out->scratch = scratch;
     out->header.read(out->page.data() + node_header_offset(*out));
     setup_node(*out);

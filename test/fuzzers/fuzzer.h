@@ -63,7 +63,6 @@ public:
 protected:
     std::string m_path;
     Options m_options;
-    Table *m_table {};
     DB *m_db {};
 };
 

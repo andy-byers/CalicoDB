@@ -1,6 +1,7 @@
 
 #include "calicodb/db.h"
 #include "db_impl.h"
+#include "logging.h"
 #include "unit_tests.h"
 
 namespace calicodb {
@@ -53,7 +54,7 @@ TEST_F(DefaultTableTests, SpecialTableBehavior)
 {
     Table *table;
     ASSERT_TRUE(db->create_table({}, "calicodb_root", &table).is_invalid_argument()) << "not allowed to create root table";
-    ASSERT_TRUE(db->drop_table(DB::kDefaultTable).is_invalid_argument()) << "not allowed to drop default table";
+    ASSERT_TRUE(db->drop_table(db->default_table()).is_invalid_argument()) << "not allowed to drop default table";
 }
 
 TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
@@ -67,8 +68,8 @@ TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
     ASSERT_EQ(names[0], "default");
 
     std::string v;
-    ASSERT_OK(db->put(DB::kDefaultTable, "k", "v"));
-    ASSERT_OK(db->get(DB::kDefaultTable, "k", &v));
+    ASSERT_OK(db->put("k", "v"));
+    ASSERT_OK(db->get("k", &v));
     ASSERT_EQ(v, "v");
 }
 
@@ -77,16 +78,16 @@ TEST_F(DefaultTableTests, DefaultTablePersists)
     reopen_db();
 
     // May cause problems if the default table wasn't registered properly when it was first constructed.
-    ASSERT_OK(db->put(DB::kDefaultTable, "k", "v"));
+    ASSERT_OK(db->put("k", "v"));
 }
 
 TEST_F(DefaultTableTests, RecordInDefaultTablePersists)
 {
-    ASSERT_OK(db->put(DB::kDefaultTable, "k", "v"));
+    ASSERT_OK(db->put("k", "v"));
     ASSERT_OK(db->checkpoint());
 
     std::string v;
-    ASSERT_OK(db->get(DB::kDefaultTable, "k", &v));
+    ASSERT_OK(db->get("k", &v));
     ASSERT_EQ(v, "v");
 }
 
@@ -266,22 +267,22 @@ TEST_F(TwoTableTests, TablesCreatedBeforeCheckpointAreRemembered)
     ASSERT_OK(db->checkpoint());
     reopen_db();
 
-    const auto &tables = db_impl(db)->TEST_tables();
-    ASSERT_NE(tables.get(Id {1}), nullptr) << "cannot locate root table";
-    ASSERT_NE(tables.get(Id {2}), nullptr) << "cannot locate default table";
-    ASSERT_NE(tables.get(Id {3}), nullptr) << "cannot locate first non-root table";
-    ASSERT_NE(tables.get(Id {4}), nullptr) << "cannot locate second non-root table";
+    std::vector<std::string> tables;
+    ASSERT_OK(db->list_tables(&tables));
+    ASSERT_EQ(tables.size(), 3);
+    ASSERT_EQ(tables[0], "default");
+    ASSERT_EQ(tables[1], "table");
+    ASSERT_EQ(tables[2], "table_2");
 }
 
 TEST_F(TwoTableTests, TablesCreatedAfterCheckpointAreForgotten)
 {
     reopen_db();
 
-    const auto &tables = db_impl(db)->TEST_tables();
-    ASSERT_NE(tables.get(Id {1}), nullptr) << "root table was removed";
-    ASSERT_NE(tables.get(Id {2}), nullptr) << "default table was removed";
-    ASSERT_EQ(tables.get(Id {3}), nullptr) << "first non-root table was not removed";
-    ASSERT_EQ(tables.get(Id {4}), nullptr) << "second non-root table was not removed";
+    std::vector<std::string> tables;
+    ASSERT_OK(db->list_tables(&tables));
+    ASSERT_EQ(tables.size(), 1);
+    ASSERT_EQ(tables.front(), "default");
 }
 
 TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)

@@ -52,4 +52,24 @@ auto DB::destroy(const Options &options, const std::string &filename) -> Status
     return DBImpl::destroy(options, filename);
 }
 
+auto DB::new_cursor() const -> Cursor *
+{
+    return new_cursor(default_table());
+}
+
+auto DB::get(const Slice &key, std::string *value) const -> Status
+{
+    return get(default_table(), key, value);
+}
+
+auto DB::put(const Slice &key, const Slice &value) -> Status
+{
+    return put(default_table(), key, value);
+}
+
+auto DB::erase(const Slice &key) -> Status
+{
+    return erase(default_table(), key);
+}
+
 } // namespace calicodb

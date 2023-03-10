@@ -87,6 +87,7 @@ public:
     [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
+    [[nodiscard]] auto default_table() const -> Table * override;
     [[nodiscard]] auto create_table(const TableOptions &options, const std::string &name, Table **out) -> Status override;
     [[nodiscard]] auto drop_table(Table *table) -> Status override;
     [[nodiscard]] auto list_tables(std::vector<std::string> *out) const -> Status override;
@@ -96,9 +97,16 @@ public:
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
 
+    using DB::new_cursor;
     [[nodiscard]] auto new_cursor(const Table *table) const -> Cursor * override;
+
+    using DB::get;
     [[nodiscard]] auto get(const Table *table, const Slice &key, std::string *value) const -> Status override;
+
+    using DB::put;
     [[nodiscard]] auto put(Table *table, const Slice &key, const Slice &value) -> Status override;
+
+    using DB::erase;
     [[nodiscard]] auto erase(Table *table, const Slice &key) -> Status override;
 
     [[nodiscard]] auto record_count() const -> std::size_t;
