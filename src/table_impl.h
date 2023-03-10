@@ -1,6 +1,7 @@
 #ifndef CALICODB_TABLE_IMPL_H
 #define CALICODB_TABLE_IMPL_H
 
+#include "calicodb/options.h"
 #include "calicodb/table.h"
 #include "page.h"
 #include "types.h"
@@ -18,14 +19,15 @@ struct LogicalPageId;
 struct TableState {
     LogicalPageId root_id;
     Tree *tree {};
-    bool is_open {};
+    unsigned ref_count {};
+    bool write {};
 };
 
 class TableImpl : public Table
 {
 public:
     ~TableImpl() override;
-    explicit TableImpl(std::string name, DBImpl &db, TableState &state, DBState &batch_size);
+    explicit TableImpl(std::string name, bool is_writable, DBImpl &db, TableState &state, DBState &batch_size);
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
@@ -38,6 +40,7 @@ private:
     mutable DBState *m_db_state {};
     TableState *m_state {};
     DBImpl *m_db {};
+    bool m_write {};
 };
 
 } // namespace calicodb

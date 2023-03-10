@@ -4,11 +4,12 @@
 namespace calicodb
 {
 
-TableImpl::TableImpl(std::string name, DBImpl &db, TableState &state, DBState &db_state)
+TableImpl::TableImpl(std::string name, bool is_writable, DBImpl &db, TableState &state, DBState &db_state)
     : m_name {std::move(name)},
       m_db_state {&db_state},
       m_state {&state},
-      m_db {&db}
+      m_db {&db},
+      m_write {is_writable}
 
 {
 }
@@ -38,6 +39,9 @@ auto TableImpl::put(const Slice &key, const Slice &value) -> Status
     if (key.is_empty()) {
         return Status::invalid_argument("key is empty");
     }
+    if (!m_write) {
+        return Status::logic_error("table is not writable");
+    }
     CDB_TRY(m_db_state->status);
 
     bool record_exists;
@@ -56,6 +60,9 @@ auto TableImpl::put(const Slice &key, const Slice &value) -> Status
 auto TableImpl::erase(const Slice &key) -> Status
 {
     CDB_TRY(m_db_state->status);
+    if (!m_write) {
+        return Status::logic_error("table is not writable");
+    }
 
     auto s = m_state->tree->erase(key);
     if (s.is_ok()) {

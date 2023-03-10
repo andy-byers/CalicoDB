@@ -110,6 +110,25 @@ TEST_F(TableTests, TableCreationIsPartOfTransaction)
     ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
 }
 
+TEST_F(TableTests, MultipleReadOnlyInstancesAreAllowed)
+{
+    Table *table_1, *table_2;
+    TableOptions table_options {AccessMode::kReadOnly};
+    ASSERT_OK(db->new_table(table_options, "t", &table_1));
+    ASSERT_OK(db->new_table(table_options, "t", &table_2));
+    delete table_1;
+    delete table_2;
+}
+
+TEST_F(TableTests, OnlyOneWritableInstanceIsAllowed)
+{
+    Table *table_1, *table_2;
+    TableOptions table_options {AccessMode::kReadWrite};
+    ASSERT_OK(db->new_table(table_options, "t", &table_1));
+    ASSERT_FALSE(db->new_table(table_options, "t", &table_2).is_ok());
+    delete table_1;
+}
+
 class TwoTableTests : public TableTests
 {
 public:
@@ -229,6 +248,36 @@ TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
     ASSERT_OK(db->new_table({}, "\xAB\xCD\xEF", &table_1));
 
     ASSERT_NE(tables.get(Id {2}), nullptr) << "first table ID was not reused";
+}
+
+TEST_F(TwoTableTests, FindExistingTables)
+{
+    Table *root_table;
+    TableOptions root_options {AccessMode::kReadOnly};
+    ASSERT_OK(db->new_table(root_options, "calicodb_root", &root_table));
+
+    auto *cursor = root_table->new_cursor();
+    cursor->seek_first();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "table");
+    cursor->next();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "table_2");
+
+    delete table_1;
+    table = table_1 = nullptr;
+
+    cursor->seek_first();
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), "table_2");
+
+    delete table_2;
+    table_2 = nullptr;
+
+    cursor->seek_first();
+    ASSERT_FALSE(cursor->is_valid());
+
+    delete cursor;
 }
 
 } // namespace calicodb

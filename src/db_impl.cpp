@@ -143,7 +143,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     Page db_root;
     CDB_TRY(pager->acquire(Id::root(), &db_root));
     root_state->tree = new Tree {*pager, root_state->root_id.page_id, m_freelist_head};
-    root_state->is_open = true;
+    root_state->ref_count = 1;
     pager->release(std::move(db_root));
     m_root = m_tables.get(Id::root());
     CDB_EXPECT_NE(m_root, nullptr);
@@ -213,7 +213,7 @@ DBImpl::~DBImpl()
     delete wal;
 
     for (const auto &[_, state] : m_tables) {
-        if (state.is_open) {
+        if (state.ref_count) {
             delete state.tree;
         }
     }
@@ -405,7 +405,7 @@ auto DBImpl::TEST_tables() const -> const TableSet &
 auto DBImpl::TEST_validate() const -> void
 {
     for (const auto &[table_id, state] : m_tables) {
-        if (state.is_open) {
+        if (state.ref_count) {
             state.tree->TEST_validate();
         }
     }
@@ -518,7 +518,7 @@ auto DBImpl::save_file_header() -> Status
     return wal->flush();
 }
 
-auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> Status
+auto DBImpl::new_table(const TableOptions &options, const Slice &name, Table **out) -> Status
 {
     LogicalPageId root_id;
     std::string value;
@@ -527,7 +527,18 @@ auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> 
     if (s.is_ok()) {
         CDB_TRY(decode_logical_id(value, &root_id));
     } else if (s.is_not_found()) {
-        s = create_table(name, &root_id);
+        if (name == kRootTableName) {
+            if (options.mode == AccessMode::kReadWrite) {
+                return Status::invalid_argument("root table is read-only");
+            }
+            root_id = LogicalPageId::root();
+            s = Status::ok();
+        } else {
+            s = create_table(name, &root_id);
+            if (s.is_ok()) {
+                m_tables.add(root_id);
+            }
+        }
     }
 
     if (!s.is_ok()) {
@@ -538,15 +549,15 @@ auto DBImpl::new_table(const TableOptions &, const Slice &name, Table **out) -> 
     auto state = m_tables.get(root_id.table_id);
     CDB_EXPECT_NE(state, nullptr);
 
-    if (state->is_open) {
-        return Status::invalid_argument("table is already open");
+    if (state->write) {
+        return Status::invalid_argument("table is already open in read-write mode");
     }
-    s = open_table(*state);
-    if (s.is_ok()) {
-        *out = new TableImpl {name.to_string(), *this, *state, m_state};
-    } else {
-        SET_STATUS(s);
-    }
+    // NOTE: The address of the root page ID in the TableState struct is stored in the tree.
+    state->tree = new Tree {*pager, state->root_id.page_id, m_freelist_head};
+    state->write = options.mode == AccessMode::kReadWrite;
+    ++state->ref_count;
+    *out = new TableImpl {name.to_string(), state->write, *this, *state, m_state};
+
     return s;
 }
 
@@ -572,14 +583,27 @@ auto DBImpl::create_table(const Slice &name, LogicalPageId *root_id) -> Status
     // Write an entry for the new table in the root table.
     CDB_TRY(m_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
     ++m_state.batch_size;
-    m_tables.add(*root_id);
     return Status::ok();
 }
 
-auto DBImpl::open_table(TableState &state) -> Status
+auto DBImpl::remove_table_if_empty(const std::string &name, TableState &state, bool *removed) -> Status
 {
-    state.tree = new Tree {*pager, state.root_id.page_id, m_freelist_head};
-    state.is_open = true;
+    auto &[root_id, tree, ref_count, write_flag] = state;
+    if (root_id.table_id.is_root()) {
+        return Status::ok();
+    }
+
+    Node root;
+    CDB_TRY(tree->acquire(&root, root_id.page_id, false));
+    if (root.header.cell_count == 0) {
+        CDB_TRY(m_root->tree->erase(name));
+        tree->upgrade(root);
+        CDB_TRY(tree->destroy(std::move(root)));
+        *removed = true;
+    } else {
+        tree->release(std::move(root));
+        *removed = false;
+    }
     return Status::ok();
 }
 
@@ -590,32 +614,16 @@ auto DBImpl::close_table(const std::string &name, const LogicalPageId &root_id) 
         return;
     }
 
-    bool removed {};
-    Node root;
-
-    auto s = state->tree->acquire(&root, state->root_id.page_id, false);
-    if (s.is_ok()) {
-        if (root.header.cell_count == 0) {
-            s = m_root->tree->erase(name);
-            if (s.is_ok()) {
-                state->tree->upgrade(root);
-                s = state->tree->destroy(std::move(root));
-                removed = s.is_ok();
-            } else {
-                state->tree->release(std::move(root));
-            }
-        } else {
-            state->tree->release(std::move(root));
-        }
-    }
-
+    bool removed;
+    auto s = remove_table_if_empty(name, *state, &removed);
     if (!s.is_ok()) {
         SET_STATUS(s);
     }
 
     delete state->tree;
     state->tree = nullptr;
-    state->is_open = false;
+    state->write = false;
+    --state->ref_count;
 
     if (removed) {
         m_tables.erase(state->root_id.table_id);

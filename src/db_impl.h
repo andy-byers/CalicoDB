@@ -23,6 +23,8 @@ class TableImpl;
 class WriteAheadLog;
 struct TableState;
 
+static constexpr auto kRootTableName = "calicodb_root";
+
 class TableSet
 {
 public:
@@ -58,7 +60,6 @@ public:
     [[nodiscard]] auto vacuum() -> Status override;
 
     [[nodiscard]] auto create_table(const Slice &name, LogicalPageId *root_id) -> Status;
-    [[nodiscard]] auto open_table(TableState &out) -> Status;
     auto close_table(const std::string &name, const LogicalPageId &root_id) -> void;
 
     [[nodiscard]] auto record_count() const -> std::size_t;
@@ -69,6 +70,7 @@ public:
     Pager *pager {};
 
 private:
+    [[nodiscard]] auto remove_table_if_empty(const std::string &name, TableState &state, bool *removed) -> Status;
     [[nodiscard]] auto save_file_header() -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;

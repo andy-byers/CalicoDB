@@ -18,8 +18,13 @@ struct Options {
     bool error_if_exists {};
 };
 
-struct TableOptions {
+enum class AccessMode {
+    kReadOnly,
+    kReadWrite,
+};
 
+struct TableOptions {
+    AccessMode mode {AccessMode::kReadWrite};
 };
 
 } // namespace calicodb
