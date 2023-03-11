@@ -2355,7 +2355,7 @@ auto Node::TEST_validate() -> void
 {
 }
 
-auto Tree::TEST_to_string() -> void
+auto Tree::TEST_to_string() -> std::string
 {
 }
 
