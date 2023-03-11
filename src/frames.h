@@ -46,7 +46,7 @@ public:
     [[nodiscard]] auto pin(Id page_id, std::size_t &index) -> Status;
     auto unpin(std::size_t index) -> void;
     auto ref(std::size_t index, Page &out) -> void;
-    auto unref(std::size_t index, Page page) -> void;
+    auto unref(std::size_t index, Page) -> void;
     auto upgrade(std::size_t index, Page &page) -> void;
     auto load_state(const FileHeader &header) -> void;
     auto save_state(FileHeader &header) const -> void;
