@@ -392,7 +392,7 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
     }
     const auto offset = cell_area_offset(*m_node);
     const auto size = m_node->page.size() - offset;
-    mem_copy(m_node->page.span(offset, size), {m_node->scratch + offset, size});
+    std::memcpy(m_node->page.span(offset, size).data(), m_node->scratch + offset, size);
 
     header.cell_start = end;
     header.frag_count = 0;
@@ -635,7 +635,7 @@ auto NodeIterator::fetch_key(std::string &buffer, const Cell &cell, Slice &out) 
         buffer.resize(cell.key_size);
     }
     Span key {buffer.data(), cell.key_size};
-    mem_copy(key, {cell.key, cell.local_size});
+    std::memcpy(key.data(), cell.key, cell.local_size);
     key.advance(cell.local_size);
 
     CDB_TRY(OverflowList::read(*m_pager, key, read_overflow_id(cell)));
@@ -816,9 +816,9 @@ auto Tree::allocate(Node *out, bool is_external) -> Status
     return NodeManager::allocate(*m_pager, m_freelist, out, m_node_scratch.data(), is_external);
 }
 
-auto Tree::acquire(Node *out, Id pid, bool upgrade) const -> Status
+auto Tree::acquire(Node *out, Id page_id, bool upgrade) const -> Status
 {
-    return NodeManager::acquire(*m_pager, pid, out, m_node_scratch.data(), upgrade);
+    return NodeManager::acquire(*m_pager, page_id, out, m_node_scratch.data(), upgrade);
 }
 
 auto Tree::destroy(Node node) -> Status
@@ -859,11 +859,11 @@ auto Tree::split_root(Node root, Node &out) -> Status
     // Copy the cell content area.
     const auto after_root_headers = cell_area_offset(root);
     auto data = child.page.span(after_root_headers, root.page.size() - after_root_headers);
-    mem_copy(data, root.page.view(after_root_headers, data.size()));
+    std::memcpy(data.data(), root.page.data() + after_root_headers, data.size());
 
     // Copy the header and cell pointers. Doesn't copy the page LSN.
     data = child.page.span(cell_slots_offset(child), root.header.cell_count * sizeof(PageSize));
-    mem_copy(data, root.page.view(cell_slots_offset(root), data.size()));
+    std::memcpy(data.data(), root.page.data() + cell_slots_offset(root), data.size());
     child.header = root.header;
 
     CDB_EXPECT_TRUE(is_overflowing(root));
@@ -914,16 +914,6 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     const auto overflow_index = right.overflow_index;
     auto overflow = *right.overflow;
     right.overflow.reset();
-
-    if (overflow_index == header.cell_count) {
-        // Note the reversal of the "left" and "right" parameters. We are splitting the other way.
-        return split_non_root_fast(
-            std::move(parent),
-            std::move(right),
-            std::move(left),
-            overflow,
-            out);
-    }
 
     /* Fix the overflow. The overflow cell should fit in either "left" or "right". This routine
      * works by transferring cells, one-by-one, from "right" to "left", and trying to insert the
@@ -976,56 +966,6 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     // Post the separator into the parent node. This call will fix the sibling's parent pointer.
     write_child_id(separator, left.page.id());
     CDB_TRY(insert_cell(parent, itr.index(), separator));
-
-    release(std::move(left));
-    release(std::move(right));
-    out = std::move(parent);
-    return Status::ok();
-}
-
-auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status
-{
-    const auto &header = left.header;
-    CDB_TRY(insert_cell(right, 0, overflow));
-
-    CDB_EXPECT_FALSE(is_overflowing(left));
-    CDB_EXPECT_FALSE(is_overflowing(right));
-
-    Cell separator;
-    if (header.is_external) {
-        if (!header.next_id.is_null()) {
-            Node right_sibling;
-            CDB_TRY(acquire(&right_sibling, header.next_id, true));
-            right_sibling.header.prev_id = right.page.id();
-            right.header.next_id = right_sibling.page.id();
-            release(std::move(right_sibling));
-        }
-        right.header.prev_id = left.page.id();
-        left.header.next_id = right.page.id();
-
-        separator = read_cell(right, 0);
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
-    } else {
-        separator = read_cell(left, header.cell_count - 1);
-        detach_cell(separator, cell_scratch());
-        erase_cell(left, header.cell_count - 1);
-
-        right.header.next_id = left.header.next_id;
-        left.header.next_id = read_child_id(separator);
-        CDB_TRY(fix_parent_id(right.header.next_id, right.page.id(), PointerMap::kTreeNode));
-        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
-    }
-
-    auto itr = node_iterator(parent);
-    CDB_TRY(itr.seek(separator));
-
-    // Post the separator into the parent node. This call will fix the sibling's parent pointer.
-    write_child_id(separator, left.page.id());
-    CDB_TRY(insert_cell(parent, itr.index(), separator));
-
-    const auto offset = !is_overflowing(parent);
-    write_child_id(parent, itr.index() + offset, right.page.id());
-    CDB_TRY(fix_parent_id(right.page.id(), parent.page.id(), PointerMap::kTreeNode));
 
     release(std::move(left));
     release(std::move(right));
@@ -1606,8 +1546,8 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             CDB_TRY(PointerMap::write_entry(*m_pager, next_id, next_entry));
         }
     }
-    mem_copy(free.span(sizeof(Lsn), free.size() - sizeof(Lsn)),
-             last.view(sizeof(Lsn), last.size() - sizeof(Lsn)));
+    std::memcpy(free.span(sizeof(Lsn), free.size() - sizeof(Lsn)).data(),
+                last.data() + sizeof(Lsn), last.size() - sizeof(Lsn));
     m_pager->release(std::move(last));
     return Status::ok();
 }
@@ -1635,11 +1575,6 @@ auto Tree::vacuum_one(Id target, TableSet &tables, bool *success) -> Status
     m_pager->release(std::move(head));
     *success = true;
     return Status::ok();
-}
-
-auto Tree::load_state(const FileHeader &header) -> void
-{
-    *m_freelist.m_head = header.freelist_head;
 }
 
 static constexpr auto kLinkHeaderOffset = sizeof(Lsn);
@@ -1887,7 +1822,7 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id *out, const Slice 
 
         auto content = get_writable_content(page, a.size() + second.size());
         auto limit = std::min(a.size(), content.size());
-        mem_copy(content, a, limit);
+        std::memcpy(content.data(), a.data(), limit);
         a.advance(limit);
 
         if (a.is_empty()) {
@@ -1897,7 +1832,7 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id *out, const Slice 
             if (!a.is_empty()) {
                 content.advance(limit);
                 limit = std::min(a.size(), content.size());
-                mem_copy(content, a, limit);
+                std::memcpy(content.data(), a.data(), limit);
                 a.advance(limit);
             }
         }
@@ -2015,13 +1950,13 @@ auto PayloadManager::collect_key(Pager &pager, std::string &result, const Cell &
         result.resize(cell.key_size);
     }
     if (!cell.has_remote || cell.key_size <= cell.local_size) {
-        mem_copy(result, {cell.key, cell.key_size});
+        std::memcpy(result.data(), cell.key, cell.key_size);
         *key = Slice {result.data(), cell.key_size};
         return Status::ok();
     }
     Span span {result};
     span.truncate(cell.key_size);
-    mem_copy(span, {cell.key, cell.local_size});
+    std::memcpy(span.data(), cell.key, cell.local_size);
 
     CDB_TRY(OverflowList::read(pager, span.range(cell.local_size), read_overflow_id(cell)));
     *key = span.range(0, cell.key_size);
@@ -2036,7 +1971,7 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
         result.resize(value_size);
     }
     if (!cell.has_remote) {
-        mem_copy(result, {cell.key + cell.key_size, value_size});
+        std::memcpy(result.data(), cell.key + cell.key_size, value_size);
         *value = Slice {result.data(), value_size};
         return Status::ok();
     }
@@ -2049,7 +1984,7 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
 
     if (remote_key_size == 0) {
         const auto local_value_size = cell.local_size - cell.key_size;
-        mem_copy(span, {cell.key + cell.key_size, local_value_size});
+        std::memcpy(span.data(), cell.key + cell.key_size, local_value_size);
         span.advance(local_value_size);
     }
 

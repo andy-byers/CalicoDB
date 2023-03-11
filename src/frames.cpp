@@ -7,50 +7,33 @@
 namespace calicodb
 {
 
-Frame::Frame(char *buffer, std::size_t id, std::size_t size)
-    : m_bytes {buffer + id * size, size}
+Frame::Frame(char *ptr)
+    : data {ptr}
 {
-    CDB_EXPECT_TRUE(is_power_of_two(size));
-    CDB_EXPECT_GE(size, kMinPageSize);
-    CDB_EXPECT_LE(size, kMaxPageSize);
 }
 
 auto Frame::lsn() const -> Id
 {
-    return {get_u64(m_bytes.range(m_page_id.is_root() * FileHeader::kSize))};
+    return {get_u64(data + page_id.is_root() * FileHeader::kSize)};
 }
 
-auto Frame::ref(Page &page) -> void
+auto Frame::ref() -> void
 {
-    CDB_EXPECT_FALSE(m_is_writable);
-    page.m_id = m_page_id;
-    page.m_span = m_bytes;
-    page.m_write = false;
-    ++m_ref_count;
+    CDB_EXPECT_FALSE(write);
+    ++ref_count;
 }
 
-auto Frame::upgrade(Page &page) -> void
+auto Frame::upgrade() -> void
 {
-    CDB_EXPECT_FALSE(page.is_writable());
-    CDB_EXPECT_FALSE(m_is_writable);
-    m_is_writable = true;
-    page.m_write = true;
+    CDB_EXPECT_FALSE(write);
+    write = true;
 }
 
-auto Frame::unref(Page &page) -> void
+auto Frame::unref() -> void
 {
-    CDB_EXPECT_EQ(m_page_id, page.id());
-    CDB_EXPECT_GT(m_ref_count, 0);
-
-    if (page.is_writable()) {
-        CDB_EXPECT_TRUE(m_is_writable);
-        CDB_EXPECT_EQ(m_ref_count, 1);
-        page.m_write = false;
-    }
-    --m_ref_count;
-    if (m_ref_count == 0) {
-        m_is_writable = false;
-    }
+    CDB_EXPECT_GT(ref_count, 0);
+    write = false;
+    --ref_count;
 }
 
 FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count)
@@ -62,7 +45,7 @@ FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_
     CDB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
 
     while (m_frames.size() < frame_count) {
-        m_frames.emplace_back(m_buffer.get(), m_frames.size(), page_size);
+        m_frames.emplace_back(m_buffer.get() + m_frames.size() * page_size);
     }
 
     while (m_available.size() < m_frames.size()) {
@@ -74,65 +57,70 @@ auto FrameManager::ref(std::size_t index, Page &out) -> void
 {
     ++m_ref_sum;
     CDB_EXPECT_LT(index, m_frames.size());
-    m_frames[index].ref(out);
+    m_frames[index].ref();
+    out.m_id = m_frames[index].page_id;
+    out.m_span = Span {m_frames[index].data, m_page_size};
+    out.m_write = false;
 }
 
 auto FrameManager::unref(std::size_t index, Page page) -> void
 {
     CDB_EXPECT_LT(index, m_frames.size());
-    m_frames[index].unref(page);
+    CDB_EXPECT_EQ(page.m_write, m_frames[index].write);
+    m_frames[index].unref();
     --m_ref_sum;
 }
 
 auto FrameManager::upgrade(std::size_t index, Page &page) -> void
 {
-    CDB_EXPECT_FALSE(page.is_writable());
     CDB_EXPECT_LT(index, m_frames.size());
-    m_frames[index].upgrade(page);
+    CDB_EXPECT_FALSE(m_frames[index].write);
+    CDB_EXPECT_FALSE(page.is_writable());
+    m_frames[index].upgrade();
+    page.m_write = true;
 }
 
-auto FrameManager::pin(Id pid, std::size_t &fid) -> Status
+auto FrameManager::pin(Id page_id, std::size_t &index) -> Status
 {
-    CDB_EXPECT_FALSE(pid.is_null());
+    CDB_EXPECT_FALSE(page_id.is_null());
 
     if (m_available.empty()) {
         return Status::not_found("out of frames");
     }
 
-    fid = m_available.back();
-    CDB_EXPECT_LT(fid, m_frames.size());
-    auto &frame = m_frames[fid];
-    CDB_EXPECT_EQ(frame.ref_count(), 0);
+    index = m_available.back();
+    CDB_EXPECT_LT(index, m_frames.size());
+    auto &frame = m_frames[index];
+    CDB_EXPECT_EQ(frame.ref_count, 0);
 
-    auto s = read_page_from_file(pid, frame.data());
+    auto s = read_page_from_file(page_id, frame.data);
     if (s.is_not_found()) {
         // We just tried to read at or past EOF. This happens when we allocate a new page or roll the WAL forward.
-        mem_clear(frame.data());
+        std::memset(frame.data, 0, m_page_size);
         ++m_page_count;
     } else if (!s.is_ok()) {
         return s;
     }
     m_available.pop_back();
-    frame.reset(pid);
+    frame.page_id = page_id;
     return Status::ok();
 }
 
-auto FrameManager::unpin(std::size_t id) -> void
+auto FrameManager::unpin(std::size_t index) -> void
 {
-    CDB_EXPECT_LT(id, m_frames.size());
-    auto &frame = m_frames[id];
-    CDB_EXPECT_EQ(frame.ref_count(), 0);
-    frame.reset(Id::null());
-    m_available.emplace_back(id);
+    CDB_EXPECT_LT(index, m_frames.size());
+    CDB_EXPECT_EQ(m_frames[index].ref_count, 0);
+    m_frames[index].page_id = Id::null();
+    m_available.emplace_back(index);
 }
 
-auto FrameManager::write_back(std::size_t id) -> Status
+auto FrameManager::write_back(std::size_t index) -> Status
 {
-    auto &frame = get_frame(id);
-    CDB_EXPECT_LE(frame.ref_count(), 1);
+    auto &frame = get_frame(index);
+    CDB_EXPECT_LE(frame.ref_count, 1);
 
     m_bytes_written += m_page_size;
-    return write_page_to_file(frame.pid(), frame.data());
+    return write_page_to_file(frame.page_id, frame.data);
 }
 
 auto FrameManager::sync() -> Status
@@ -140,10 +128,9 @@ auto FrameManager::sync() -> Status
     return m_file->sync();
 }
 
-auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
+auto FrameManager::read_page_from_file(Id page_id, char *out) const -> Status
 {
-    CDB_EXPECT_EQ(m_page_size, out.size());
-    const auto offset = id.as_index() * out.size();
+    const auto offset = page_id.as_index() * m_page_size;
 
     // Don't even try to call read() if the file isn't large enough. The system call can be pretty slow even if it doesn't read anything.
     // This happens when we are allocating a page from the end of the file.
@@ -151,8 +138,8 @@ auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
         return Status::not_found("end of file");
     }
 
-    auto read_size = out.size();
-    CDB_TRY(m_file->read(out.data(), &read_size, offset));
+    auto read_size = m_page_size;
+    CDB_TRY(m_file->read(out, &read_size, offset));
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
     if (read_size == m_page_size) {
@@ -167,10 +154,9 @@ auto FrameManager::read_page_from_file(Id id, Span out) const -> Status
     return Status::system_error("incomplete read");
 }
 
-auto FrameManager::write_page_to_file(Id pid, const Slice &page) const -> Status
+auto FrameManager::write_page_to_file(Id pid, const char *in) const -> Status
 {
-    CDB_EXPECT_EQ(m_page_size, page.size());
-    return m_file->write(page, pid.as_index() * page.size());
+    return m_file->write({in, m_page_size}, pid.as_index() * m_page_size);
 }
 
 auto FrameManager::load_state(const FileHeader &header) -> void

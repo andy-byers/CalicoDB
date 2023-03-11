@@ -349,18 +349,18 @@ auto RandomGenerator::Generate(std::size_t len) const -> Slice
 
 auto print_references(Pager &pager) -> void
 {
-    for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
-        std::cerr << std::setw(6) << pid.value << ": ";
-        if (PointerMap::lookup(pager, pid) == pid) {
+    for (auto page_id = Id::root(); page_id.value <= pager.page_count(); ++page_id.value) {
+        std::cerr << std::setw(6) << page_id.value << ": ";
+        if (PointerMap::lookup(pager, page_id) == page_id) {
             std::cerr << "pointer map\n";
             continue;
         }
-        if (pid.is_root()) {
+        if (page_id.is_root()) {
             std::cerr << "node -> NULL\n";
             continue;
         }
         PointerMap::Entry entry;
-        CHECK_OK(PointerMap::read_entry(pager, pid, &entry));
+        CHECK_OK(PointerMap::read_entry(pager, page_id, &entry));
         switch (entry.type) {
         case PointerMap::kTreeNode:
             std::cerr << "node";

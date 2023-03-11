@@ -336,7 +336,7 @@ public:
         open();
 
         tools::RandomGenerator random {1'024 * 1'024 * 8};
-        const std::size_t N {5'000};
+        const std::size_t N {10'000};
 
         for (std::size_t i {}; i < N; ++i) {
             const auto k = random.Generate(db_options.page_size * 2);

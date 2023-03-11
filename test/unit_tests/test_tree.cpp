@@ -1093,14 +1093,14 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
     std::size_t counter {};
     Id map_id {2};
 
-    for (Id pid {3}; pid.value <= 100 * map_size(); ++pid.value) {
+    for (Id page_id {3}; page_id.value <= 100 * map_size(); ++page_id.value) {
         if (counter++ == map_size()) {
             // Found a map page. Calls to find() with a page ID between this page and the next map page
             // should map to this page ID.
             map_id.value += map_size() + 1;
             counter = 0;
         } else {
-            ASSERT_EQ(PointerMap::lookup(*pager, pid), map_id);
+            ASSERT_EQ(PointerMap::lookup(*pager, page_id), map_id);
         }
     }
 }

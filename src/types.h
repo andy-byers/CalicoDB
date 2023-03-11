@@ -53,68 +53,6 @@ private:
     std::unique_ptr<char[], Deleter> m_data;
 };
 
-template <class T>
-class UniqueNullable final
-{
-public:
-    using Type = T;
-
-    ~UniqueNullable() = default;
-    UniqueNullable() = delete;
-    UniqueNullable(const UniqueNullable &) = delete;
-    auto operator=(const UniqueNullable &) -> UniqueNullable & = delete;
-
-    template <class Resource>
-    explicit UniqueNullable(Resource resource)
-        : m_resource {resource}
-    {
-    }
-
-    UniqueNullable(UniqueNullable &&rhs) noexcept
-    {
-        m_resource = std::exchange(rhs.m_resource, T {});
-    }
-
-    auto operator=(UniqueNullable &&rhs) noexcept -> UniqueNullable &
-    {
-        m_resource = rhs.reset();
-        return *this;
-    }
-
-    [[nodiscard]] auto is_valid() const -> bool
-    {
-        return m_resource;
-    }
-
-    auto reset() -> T
-    {
-        return std::exchange(m_resource, T {});
-    }
-
-    auto operator->() noexcept -> T &
-    {
-        return m_resource;
-    }
-
-    auto operator->() const noexcept -> const T &
-    {
-        return m_resource;
-    }
-
-    auto operator*() noexcept -> T &
-    {
-        return m_resource;
-    }
-
-    auto operator*() const noexcept -> const T &
-    {
-        return m_resource;
-    }
-
-private:
-    T m_resource {};
-};
-
 class Span
 {
 public:
@@ -257,43 +195,6 @@ private:
     char *m_data {};
     std::size_t m_size {};
 };
-
-inline auto mem_copy(Span dst, const Slice &src, size_t n) noexcept -> void *
-{
-    CDB_EXPECT_LE(n, src.size());
-    CDB_EXPECT_LE(n, dst.size());
-    return std::memcpy(dst.data(), src.data(), n);
-}
-
-inline auto mem_copy(Span dst, const Slice &src) noexcept -> void *
-{
-    CDB_EXPECT_LE(src.size(), dst.size());
-    return mem_copy(dst, src, src.size());
-}
-
-inline auto mem_clear(Span mem, size_t n) noexcept -> void *
-{
-    CDB_EXPECT_LE(n, mem.size());
-    return std::memset(mem.data(), 0, n);
-}
-
-inline auto mem_clear(Span mem) noexcept -> void *
-{
-    return mem_clear(mem, mem.size());
-}
-
-inline auto mem_move(Span dst, const Slice &src, std::size_t n) noexcept -> void *
-{
-    CDB_EXPECT_LE(n, src.size());
-    CDB_EXPECT_LE(n, dst.size());
-    return std::memmove(dst.data(), src.data(), n);
-}
-
-inline auto mem_move(Span dst, const Slice &src) noexcept -> void *
-{
-    CDB_EXPECT_LE(src.size(), dst.size());
-    return mem_move(dst, src, src.size());
-}
 
 } // namespace calicodb
 

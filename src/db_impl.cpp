@@ -30,10 +30,10 @@ TableImpl::TableImpl(const TableOptions &options, std::string name, Id table_id)
 
 TableSet::~TableSet()
 {
-    for (const auto &itr: m_tables) {
-        if (itr) {
-            delete itr->tree;
-            delete itr;
+    for (const auto *state : m_tables) {
+        if (state != nullptr) {
+            delete state->tree;
+            delete state;
         }
     }
 }
@@ -759,16 +759,16 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
 static auto apply_undo(Page &page, const ImageDescriptor &image)
 {
     const auto data = image.image;
-    mem_copy(page.span(0, data.size()), data);
+    std::memcpy(page.data(), data.data(), data.size());
     if (page.size() > data.size()) {
-        mem_clear(page.span(data.size(), page.size() - data.size()));
+        std::memset(page.data() + data.size(), 0, page.size() - data.size());
     }
 }
 
 static auto apply_redo(Page &page, const DeltaDescriptor &delta)
 {
     for (auto [offset, data] : delta.deltas) {
-        mem_copy(page.span(offset, data.size()), data);
+        std::memcpy(page.data() + offset, data.data(), data.size());
     }
 }
 

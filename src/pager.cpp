@@ -174,7 +174,7 @@ auto Pager::make_frame_available() -> bool
         const auto &frame = m_frames.get_frame(entry.index);
         page_id = pid;
 
-        if (frame.ref_count() != 0) {
+        if (frame.ref_count != 0) {
             return false;
         }
         if (!entry.token) {

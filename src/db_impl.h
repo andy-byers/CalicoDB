@@ -126,9 +126,6 @@ private:
     [[nodiscard]] auto recovery_phase_1() -> Status;
     [[nodiscard]] auto recovery_phase_2() -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId *root_id) -> Status;
-    auto destroy_table_state(Id table_id) -> void;
-
-    friend class TableImpl;
 
     std::string m_reader_data;
     std::string m_reader_tail;
