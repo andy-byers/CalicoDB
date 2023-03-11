@@ -915,6 +915,16 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     auto overflow = *right.overflow;
     right.overflow.reset();
 
+    if (overflow_index == header.cell_count) {
+        // Note the reversal of the "left" and "right" parameters. We are splitting the other way.
+        return split_non_root_fast(
+            std::move(parent),
+            std::move(right),
+            std::move(left),
+            overflow,
+            out);
+    }
+
     /* Fix the overflow. The overflow cell should fit in either "left" or "right". This routine
      * works by transferring cells, one-by-one, from "right" to "left", and trying to insert the
      * overflow cell. Where the overflow cell is written depends on how many cells we have already
@@ -966,6 +976,56 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     // Post the separator into the parent node. This call will fix the sibling's parent pointer.
     write_child_id(separator, left.page.id());
     CDB_TRY(insert_cell(parent, itr.index(), separator));
+
+    release(std::move(left));
+    release(std::move(right));
+    out = std::move(parent);
+    return Status::ok();
+}
+
+auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status
+{
+    const auto &header = left.header;
+    CDB_TRY(insert_cell(right, 0, overflow));
+
+    CDB_EXPECT_FALSE(is_overflowing(left));
+    CDB_EXPECT_FALSE(is_overflowing(right));
+
+    Cell separator;
+    if (header.is_external) {
+        if (!header.next_id.is_null()) {
+            Node right_sibling;
+            CDB_TRY(acquire(&right_sibling, header.next_id, true));
+            right_sibling.header.prev_id = right.page.id();
+            right.header.next_id = right_sibling.page.id();
+            release(std::move(right_sibling));
+        }
+        right.header.prev_id = left.page.id();
+        left.header.next_id = right.page.id();
+
+        separator = read_cell(right, 0);
+        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+    } else {
+        separator = read_cell(left, header.cell_count - 1);
+        detach_cell(separator, cell_scratch());
+        erase_cell(left, header.cell_count - 1);
+
+        right.header.next_id = left.header.next_id;
+        left.header.next_id = read_child_id(separator);
+        CDB_TRY(fix_parent_id(right.header.next_id, right.page.id(), PointerMap::kTreeNode));
+        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
+    }
+
+    auto itr = node_iterator(parent);
+    CDB_TRY(itr.seek(separator));
+
+    // Post the separator into the parent node. This call will fix the sibling's parent pointer.
+    write_child_id(separator, left.page.id());
+    CDB_TRY(insert_cell(parent, itr.index(), separator));
+
+    const auto offset = !is_overflowing(parent);
+    write_child_id(parent, itr.index() + offset, right.page.id());
+    CDB_TRY(fix_parent_id(right.page.id(), parent.page.id(), PointerMap::kTreeNode));
 
     release(std::move(left));
     release(std::move(right));

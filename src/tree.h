@@ -214,6 +214,7 @@ private:
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
     [[nodiscard]] auto split_non_root(Node node, Node &out) -> Status;
+    [[nodiscard]] auto split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status;
     [[nodiscard]] auto fix_root(Node root) -> Status;
     [[nodiscard]] auto fix_non_root(Node node, Node &parent, std::size_t index) -> Status;
     [[nodiscard]] auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
